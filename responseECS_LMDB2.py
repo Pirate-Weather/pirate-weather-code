@@ -2549,7 +2549,7 @@ def PW_Forecast(
 
                 alertDict = {
                     "title": alertDetails[0],
-                    "regions": alertDetails[2].split(";"),
+                    "regions": alertDetails[2].split(";").strip(),
                     "severity": alertDetails[5],
                     "time": int(
                         (
