@@ -1949,19 +1949,10 @@ def PW_Forecast(
 
     # Apparent Temperature, Radiative temperature formula
     # https: // github.com / breezy - weather / breezy - weather / discussions / 1085
-    # AT = Ta + 0.33 × rh / 100 × 6.105 × exp(17.27 × Ta / (237.7 + Ta)) − 0.70 × ws − 4.00
-
-    InterPcurrent[5] = (
-        (InterPhour[:, 5] - 273.15)
-        + 0.33
-        * InterPhour[:, 8]
-        * 6.105
-        * np.exp(
-            17.27 * (InterPhour[:, 5] - 273.15) / (237.7 + (InterPhour[:, 5] - 273.15))
-        )
-        - 0.70 * (InterPhour[:, 10] / windUnit)
-        - 4.00
-    ) + 273.15
+    # AT = Ta + 0.33 × (rh / 100 × 6.105 × exp(17.27 × Ta / (237.7 + Ta))) − 0.70 × ws − 4.00
+    
+    e = InterPhour[:, 8] * 6.105 * np.exp(17.27 * (InterPhour[:, 5] - 273.15) / (237.7 + (InterPhour[:, 5] - 273.15)))
+    InterPcurrent[5] = ((InterPhour[:, 5] - 273.15) + 0.33 * e - 0.70 * (InterPhour[:, 10] / windUnit) - 4.00 ) + 273.15
 
     ### Feels Like Temperature
     AppTemperatureHour = np.full((len(hour_array_grib), 2), np.nan)
