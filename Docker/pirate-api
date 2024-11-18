@@ -1,0 +1,11 @@
+FROM python:3.12-slim
+
+RUN apt update && \
+    apt -y install build-essential \
+                    libffi-dev
+
+RUN pip install astral timezonefinder pytz zarr s3fs ujson starlette uvicorn fastapi fastapi-utils boto3 scipy orjson psutil typing-inspect watchfiles dask xarray pandas fastparquet
+
+run apt -y install unzip rsync
+
+ENTRYPOINT ["python3"]
