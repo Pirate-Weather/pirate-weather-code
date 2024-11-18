@@ -45,7 +45,7 @@ Running a weather API for the entire planet isn't a trivial task, and accordingl
 
 
 ## Next steps
-The immediate next steps for this project are getting everything setup to make it easy for people host this locally and contribute to the project! This centres on significantly improving the documentation on what each script is doing, how it is doing it, and how to add additional sources. Code quality needs to be improved throughout, particularly in the [response script](https://github.com/Pirate-Weather/pirate-weather-code/blob/main/responseLocal.py). Finally, some additional work needs to be done on the docker setup, focusing on building the containers for x64 machines and activating Ofelia's logging tools!  
+The immediate next steps for this project are getting everything setup to make it easy for people host this locally and contribute to the project! This centres on significantly improving the documentation on what each script is doing, how it is doing it, and how to add additional sources. Code quality needs to be improved throughout, particularly in the [response script](https://github.com/Pirate-Weather/pirate-weather-code/blob/main/responseLocal.py). Some additional work needs to be done on the docker setup, focusing on building the containers for x64 machines and activating Ofelia's logging tools! Finally, some work needs to be done on getting the historic data side of things sorted out- most of the data is already on AWS, so the basic building blocks are there.
 
 
 ## License
