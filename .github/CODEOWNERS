@@ -4,7 +4,7 @@
 # GitHub Actions/Templates
 /.github/dependabot.yml @cloneofghosts
 /.github/workflows/* @cloneofghosts
-/.github/ISSUE_TEMPLATE/* @cloneofghosts
+/.github/ISSUE_TEMPLATE/* @cloneofghosts	
 
 # Remove CODEOWNER for requirements file
 /requirements.txt
