@@ -1,0 +1,61 @@
+# ======================================================================
+# Dockerfile to compile wgrib2 based on Ubuntu linux for AMR
+#
+#           Homepage: http://www.cpc.ncep.noaa.gov/products/wesley/wgrib2/
+# Available versions: ftp://ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/
+# ======================================================================
+
+FROM python:3.11
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CC=gcc
+ENV FC=gfortran
+
+
+# Update package lists and install dependencies
+RUN apt update && \
+    apt -y install curl \
+                       build-essential \
+                       libgeos-dev \
+                       proj-bin \
+                       libproj-dev \
+                       libeccodes-dev \
+                       wget \
+                       gfortran \
+                       file \
+                       pip \
+                       cmake \
+                       m4 \
+                       python3.11-venv \
+                       git \ 
+                       libnetcdf-dev \
+                       libhdf5-dev \
+					   libgdal-dev					   
+
+# Get wgrib2
+RUN wget -q -O /tmp/wgrib2.tgz https://ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz
+
+RUN mkdir /wgrib2
+
+RUN tar -xf /tmp/wgrib2.tgz -C /wgrib2
+
+WORKDIR /wgrib2/grib2
+
+# Jasper and Pyproj4 do not seem to be compatible with ARM
+RUN sed -i "s|USE_JASPER=1|USE_JASPER=0|g" makefile
+RUN sed -i "s|USE_NETCDF4=0|USE_NETCDF4=system|g" makefile
+RUN sed -i "s|USE_HDF5=compile|USE_HDF5=/usr/include/hdf5/serial:/usr/lib/aarch64-linux-gnu/hdf5/serial|g" makefile
+RUN sed -i "s|USE_NETCDF3=1|USE_NETCDF3=0|g" makefile
+RUN sed -i "s|USE_PROJ4=1|USE_PROJ4=0|g" makefile
+
+RUN make
+
+# Create a venv for python 
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install python libs
+RUN python3 -m pip install numpy boto3 netCDF4 xarray cartopy cfgrib "eccodes>=1.6.1" zarr dask "s3fs>=2023.10.0" bottleneck rioxarray dask[distributed] xarray-spatial redis rechunker geopandas nwswx git+https://github.com/blaylockbk/Herbie.git
+
+ENTRYPOINT ["python3"]

@@ -1,0 +1,293 @@
+services:
+  # Ofelia for scheduling tasks
+  ofelia:
+    image: mcuadros/ofelia:latest
+    container_name: ofelia
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: daemon --docker 
+    labels:
+      ofelia.job-run.gfs-ingest.schedule: "0 10 5,11,17,23 * * *"
+      ofelia.job-run.gfs-ingest.image: "public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm:latest" 
+      ofelia.job-run.gfs-ingest.volume: '["/mnt/efs/scripts:/mnt:ro","/mnt/nvme:/tmp:rw"]'
+      ofelia.job-run.gfs-ingest.environment: '["wgrib2_path=/wgrib2/grib2/wgrib2/wgrib2", "forecast_process_path=/tmp/Process/GFS/GFS_forecast", "hist_process_path=/tmp/Process/GFS/GFS_hist", "merge_process_dir=/tmp/Process/GFS", "tmp_dir=/tmp/Download", "save_type=Download", "save_path=/tmp/Data"]'
+      ofelia.job-run.gfs-ingest.command: "/mnt/GFS_Local_Ingest.py" 
+      ofelia.job-run.gfs-ingest.no-overlap: "true"             
+      ofelia.job-run.nbm-ingest.schedule: "0 30 0,2,4,6,8,10,12,14,16,18,20,22 * * *"
+      ofelia.job-run.nbm-ingest.image: "public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm:latest" 
+      ofelia.job-run.nbm-ingest.volume: '["/mnt/efs/scripts:/mnt:ro","/mnt/nvme:/tmp:rw"]'
+      ofelia.job-run.nbm-ingest.environment: '["wgrib2_path=/wgrib2/grib2/wgrib2/wgrib2", "forecast_process_path=/tmp/Process/NBM/NBM_forecast", "hist_process_path=/tmp/Process/NBM/NBM_hist", "merge_process_dir=/tmp/Process/NBM", "tmp_dir=/tmp/Download", "save_type=Download", "save_path=/tmp/Data"]'
+      ofelia.job-run.nbm-ingest.command: "/mnt/NBM_Local_Ingest.py" 
+      ofelia.job-run.nbm-ingest.no-overlap: "true"
+      ofelia.job-run.nbm-fire-ingest.schedule: "0 40 5,11,17,23 * * *"
+      ofelia.job-run.nbm-fire-ingest.image: "public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm:latest" 
+      ofelia.job-run.nbm-fire-ingest.volume: '["/mnt/efs/scripts:/mnt:ro","/mnt/nvme:/tmp:rw"]'
+      ofelia.job-run.nbm-fire-ingest.environment: '["wgrib2_path=/wgrib2/grib2/wgrib2/wgrib2", "forecast_process_path=/tmp/Process/NBM_Fire/NBM_Fire_forecast", "hist_process_path=/tmp/Process/NBM_Fire/NBM_Fire_hist", "merge_process_dir=/tmp/Process/NBM_Fire", "tmp_dir=/tmp/Download", "save_type=Download", "save_path=/tmp/Data"]'
+      ofelia.job-run.nbm-fire-ingest.command: "/mnt/NBM_Fire_Local_Ingest.py" 
+      ofelia.job-run.nbm-fire-ingest.no-overlap: "true"
+      ofelia.job-run.subh-ingest.schedule: "0 45 * * * *"
+      ofelia.job-run.subh-ingest.image: "public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm:latest" 
+      ofelia.job-run.subh-ingest.volume: '["/mnt/efs/scripts:/mnt:ro","/mnt/nvme:/tmp:rw"]'
+      ofelia.job-run.subh-ingest.environment: '["wgrib2_path=/wgrib2/grib2/wgrib2/wgrib2", "forecast_process_path=/tmp/Process/SubH/SubH_forecast", "hist_process_path=/tmp/Process/SubH/SubH_hist", "merge_process_dir=/tmp/Process/SubH", "tmp_dir=/tmp/Download", "save_type=Download", "save_path=/tmp/Data"]'
+      ofelia.job-run.subh-ingest.command: "/mnt/SubH_Local_Ingest.py" 
+      ofelia.job-run.subh-ingest.no-overlap: "true"
+      ofelia.job-run.gefs-ingest.schedule: "0 0 1,7,13,19 * * *"
+      ofelia.job-run.gefs-ingest.image: "public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm:latest" 
+      ofelia.job-run.gefs-ingest.volume: '["/mnt/efs/scripts:/mnt:ro","/mnt/nvme:/tmp:rw"]'
+      ofelia.job-run.gefs-ingest.environment: '["wgrib2_path=/wgrib2/grib2/wgrib2/wgrib2", "forecast_process_path=/tmp/Process/GEFS/GEFS_forecast", "hist_process_path=/tmp/Process/GEFS/GEFS_hist", "merge_process_dir=/tmp/Process/GEFS", "tmp_dir=/tmp/Download", "save_type=Download", "save_path=/tmp/Data"]'
+      ofelia.job-run.gefs-ingest.command: "/mnt/GEFS_Local_Ingest.py" 
+      ofelia.job-run.gefs-ingest.no-overlap: "true"
+      ofelia.job-run.hrrr-ingest.schedule: "0 40 1,3,5,7,9,11,13,15,17,19,21,23 * * *"
+      ofelia.job-run.hrrr-ingest.image: "public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm:latest" 
+      ofelia.job-run.hrrr-ingest.volume: '["/mnt/efs/scripts:/mnt:ro","/mnt/nvme:/tmp:rw"]'
+      ofelia.job-run.hrrr-ingest.environment: '["wgrib2_path=/wgrib2/grib2/wgrib2/wgrib2", "forecast_process_path=/tmp/Process/HRRR/HRRR_forecast", "hist_process_path=/tmp/Process/HRRR/HRRR_hist", "merge_process_dir=/tmp/Process/HRRR", "tmp_dir=/tmp/Download", "save_type=Download", "save_path=/tmp/Data"]'
+      ofelia.job-run.hrrr-ingest.command: "/mnt/HRRR_Local_Ingest.py" 
+      ofelia.job-run.hrrr-ingest.no-overlap: "true"
+      ofelia.job-run.hrrr6h-ingest.schedule: "0 10 3,9,15,21 * * *"
+      ofelia.job-run.hrrr6h-ingest.image: "public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm:latest" 
+      ofelia.job-run.hrrr6h-ingest.volume: '["/mnt/efs/scripts:/mnt:ro","/mnt/nvme:/tmp:rw"]'
+      ofelia.job-run.hrrr6h-ingest.environment: '["wgrib2_path=/wgrib2/grib2/wgrib2/wgrib2", "forecast_process_path=/tmp/Process/HRRR_6H/HRRR_6H_forecast", "hist_process_path=/tmp/Process/HRRR_6H/HRRR_6H_hist", "merge_process_dir=/tmp/Process/HRRR_6H", "tmp_dir=/tmp/Download", "save_type=Download", "save_path=/tmp/Data"]'
+      ofelia.job-run.hrrr6h-ingest.command: "/mnt/HRRR_6H_Local_Ingest.py" 
+      ofelia.job-run.hrrr6h-ingest.no-overlap: "true"
+      ofelia.job-run.nws-alerts-ingest.schedule: "0 0,30 * * * *"
+      ofelia.job-run.nws-alerts-ingest.image: "public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm:latest" 
+      ofelia.job-run.nws-alerts-ingest.volume: '["/mnt/efs/scripts:/mnt:ro","/mnt/nvme:/tmp:rw"]'
+      ofelia.job-run.nws-alerts-ingest.environment: '["wgrib2_path=/wgrib2/grib2/wgrib2/wgrib2", "merge_process_dir=/tmp/Process/NWS_Alerts", "save_type=Download", "save_path=/tmp/Data"]'
+      ofelia.job-run.nws-alerts-ingest.command: "/mnt/NWS_Alerts_Local.py" 
+      ofelia.job-run.nws-alerts-ingest.no-overlap: "true"
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully
+      nbm_fire_ingest:
+        condition: service_completed_successfully
+      subh_ingest:
+        condition: service_completed_successfully
+      gefs_ingest:
+        condition: service_completed_successfully
+      hrrr_ingest:
+        condition: service_completed_successfully
+      hrrr_6h_ingest:
+        condition: service_completed_successfully
+      nws_alerts_ingest:
+        condition: service_completed_successfully         
+                                                        
+
+  # GFS Ingest
+  gfs_ingest:
+    image: public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm:latest
+    volumes:
+      - /mnt/efs/scripts:/mnt
+      - /mnt/nvme:/tmp
+    environment:
+      wgrib2_path: "/wgrib2/grib2/wgrib2/wgrib2"
+      forecast_process_path: "/tmp/Process/GFS/GFS_forecast"
+      hist_process_path: "/tmp/Process/GFS/GFS_hist"
+      merge_process_dir: "/tmp/Process/GFS"
+      tmp_dir: "/tmp/Download"
+      save_type: "Download"
+      save_path: "/tmp/Data"
+    command: ["/mnt/GFS_Local_Ingest.py"]
+
+  # NBM Ingest
+  nbm_ingest:
+    image: public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm:latest
+    volumes:
+      - /mnt/efs/scripts:/mnt
+      - /mnt/nvme:/tmp
+    environment:
+      wgrib2_path: "/wgrib2/grib2/wgrib2/wgrib2"
+      forecast_process_path: "/tmp/Process/NBM/NBM_forecast"
+      hist_process_path: "/tmp/Process/NBM/NBM_hist"
+      merge_process_dir: "/tmp/Process/NBM"
+      tmp_dir: "/tmp/Download"
+      save_type: "Download"
+      save_path: "/tmp/Data"
+    command: ["/mnt/NBM_Local_Ingest.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully    
+
+  # NBM Fire Ingest
+  nbm_fire_ingest:
+    image: public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm:latest
+    volumes:
+      - /mnt/efs/scripts:/mnt
+      - /mnt/nvme:/tmp
+    environment:
+      wgrib2_path: "/wgrib2/grib2/wgrib2/wgrib2"
+      forecast_process_path: "/tmp/Process/NBM_Fire/NBM_Fire_forecast"
+      hist_process_path: "/tmp/Process/NBM_Fire/NBM_Fire_hist"
+      merge_process_dir: "/tmp/Process/NBM_Fire"
+      tmp_dir: "/tmp/Download"
+      save_type: "Download"
+      save_path: "/tmp/Data"
+    command: ["/mnt/NBM_Fire_Local_Ingest.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully  
+
+  # SubH Ingest
+  subh_ingest:
+    image: public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm:latest
+    volumes:
+      - /mnt/efs/scripts:/mnt
+      - /mnt/nvme:/tmp
+    environment:
+      wgrib2_path: "/wgrib2/grib2/wgrib2/wgrib2"
+      forecast_process_path: "/tmp/Process/SubH/SubH_forecast"
+      hist_process_path: "/tmp/Process/SubH/SubH_hist"
+      merge_process_dir: "/tmp/Process/SubH"
+      tmp_dir: "/tmp/Download"
+      save_type: "Download"
+      save_path: "/tmp/Data"
+    command: ["/mnt/SubH_Local_Ingest.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully      
+
+  # GEFS Ingest
+  gefs_ingest:
+    image: public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm:latest
+    volumes:
+      - /mnt/efs/scripts:/mnt
+      - /mnt/nvme:/tmp
+    environment:
+      wgrib2_path: "/wgrib2/grib2/wgrib2/wgrib2"
+      forecast_process_path: "/tmp/Process/GEFS/GEFS_forecast"
+      hist_process_path: "/tmp/Process/GEFS/GEFS_hist"
+      merge_process_dir: "/tmp/Process/GEFS"
+      tmp_dir: "/tmp/Download"
+      save_type: "Download"
+      save_path: "/tmp/Data"
+    command: ["/mnt/GEFS_Local_Ingest.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully      
+      subh_ingest:
+        condition: service_completed_successfully
+      nbm_fire_ingest:
+        condition: service_completed_successfully        
+
+  # HRRR Ingest
+  hrrr_ingest:
+    image: public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm:latest
+    volumes:
+      - /mnt/efs/scripts:/mnt
+      - /mnt/nvme:/tmp
+    environment:
+      wgrib2_path: "/wgrib2/grib2/wgrib2/wgrib2"
+      forecast_process_path: "/tmp/Process/HRRR/HRRR_forecast"
+      hist_process_path: "/tmp/Process/HRRR/HRRR_hist"
+      merge_process_dir: "/tmp/Process/HRRR"
+      tmp_dir: "/tmp/Download"
+      save_type: "Download"
+      save_path: "/tmp/Data"
+    command: ["/mnt/HRRR_Local_Ingest.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully      
+      subh_ingest:
+        condition: service_completed_successfully
+      nbm_fire_ingest:
+        condition: service_completed_successfully 
+      gefs_ingest:
+        condition: service_completed_successfully                  
+      
+  # HRRR 6H Ingest
+  hrrr_6h_ingest:
+    image: public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm:latest
+    volumes:
+      - /mnt/efs/scripts:/mnt
+      - /mnt/nvme:/tmp
+    environment:
+      wgrib2_path: "/wgrib2/grib2/wgrib2/wgrib2"
+      forecast_process_path: "/tmp/Process/HRRR_6H/HRRR_6H_forecast"
+      hist_process_path: "/tmp/Process/HRRR_6H/HRRR_6H_hist"
+      merge_process_dir: "/tmp/Process/HRRR_6H"
+      tmp_dir: "/tmp/Download"
+      save_type: "Download"
+      save_path: "/tmp/Data"
+    command: ["/mnt/HRRR_6H_Local_Ingest.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully      
+      subh_ingest:
+        condition: service_completed_successfully
+      nbm_fire_ingest:
+        condition: service_completed_successfully 
+      gefs_ingest:
+        condition: service_completed_successfully       
+
+  # NWS Alerts Ingest
+  nws_alerts_ingest:
+    image: public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm:latest
+    volumes:
+      - /mnt/efs/scripts:/mnt
+      - /mnt/nvme:/tmp
+    environment:
+      wgrib2_path: "/wgrib2/grib2/wgrib2/wgrib2"
+      merge_process_dir: "/tmp/Process/NWS_Alerts"
+      save_type: "Download"
+      save_path: "/tmp/Data"
+    command: ["/mnt/NWS_Alerts_Local.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully      
+      subh_ingest:
+        condition: service_completed_successfully
+      nbm_fire_ingest:
+        condition: service_completed_successfully 
+      gefs_ingest:
+        condition: service_completed_successfully       
+
+
+  # Consistently running API server
+  api_server:
+    image: public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:latest
+    ports:
+      - "8083:8083"
+    volumes:
+      - /mnt/efs/scripts:/efs:ro
+      - /mnt/nvme/Prod:/tmp
+      - /mnt/nvme/Temp:/ebs
+      - /mnt/nvme/Data:/data:ro
+    environment:
+      STAGE: "PROD"
+      useETOPO: "False"
+      s3_bucket: "/data"
+      TIMING: "TRUE"
+      save_type: "Download"
+    entrypoint: "uvicorn"  
+    working_dir: "/efs"
+    command: ["responseLocal:app", "--host", "0.0.0.0", "--port", "8083"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully
+      nbm_fire_ingest:
+        condition: service_completed_successfully
+      subh_ingest:
+        condition: service_completed_successfully
+      gefs_ingest:
+        condition: service_completed_successfully
+      hrrr_ingest:
+        condition: service_completed_successfully
+      hrrr_6h_ingest:
+        condition: service_completed_successfully
+      nws_alerts_ingest:
+        condition: service_completed_successfully    
