@@ -41,12 +41,13 @@ import asyncio
 
 from timemachine import TimeMachine
 
+import re
 
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 save_type = os.getenv("save_type", default="S3")
 s3_bucket = os.getenv("s3_bucket", default="piratezarr2")
-useETOPO = os.getenv("s3_bucket", default=False)
+useETOPO = os.getenv("useETOPO", default=False)
 print(os.environ.get("TIMING", False))
 TIMING = os.environ.get("TIMING", False)
 
@@ -2557,9 +2558,9 @@ async def PW_Forecast(
         WindBearingHour[:, 2] = np.rad2deg(
             np.mod(np.arctan2(GFS_Merged[:, 8], GFS_Merged[:, 9]) + np.pi, 2 * np.pi)
         )
-    InterPhour[:, 12] = np.choose(
+    InterPhour[:, 12] = np.mod(np.choose(
         np.argmin(np.isnan(WindBearingHour), axis=1), WindBearingHour.T
-    )
+        ),360)
 
     ### Cloud Cover
     CloudCoverHour = np.full((len(hour_array_grib), 3), np.nan)
@@ -3282,6 +3283,14 @@ async def PW_Forecast(
                         alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
                     ).astimezone(utc)
 
+                    # Format description newlines
+                    alertDescript = alertDetails[1]
+                    # Step 1: Replace double newlines with a single newline
+                    formatted_text  = re.sub(r'(?<!\n)\n(?!\n)', ' ', alertDescript)
+                    
+                    # Step 2: Replace remaining single newlines with a space
+                    formatted_text  = re.sub(r'\n\n', '\n', formatted_text )
+                    
                     alertDict = {
                         "title": alertDetails[0],
                         "regions": [s.lstrip() for s in alertDetails[2].split(";")],
@@ -3298,7 +3307,7 @@ async def PW_Forecast(
                                 - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(utc)
                             ).total_seconds()
                         ),
-                        "description": alertDetails[1],  # .replace("\n", "NNN"),
+                        "description": formatted_text,
                         "uri": alertDetails[6],
                     }
 
@@ -3308,8 +3317,9 @@ async def PW_Forecast(
 
         else:
             alertList = []
-    except:
-        print("ALERT ERROR")
+            
+    except Exception as error:
+        print("An Alert error occurred:", error)
 
     # Timing Check
     if TIMING:
@@ -3319,18 +3329,16 @@ async def PW_Forecast(
     # Currently data, find points for linear averaging
     # Use GFS, since should also be there and the should cover all times... this could be an issue at some point
 
-    # If exact match
-    if np.min(np.abs(GFS_Merged[:, 0] - minute_array_grib[0])) == 0:
+    # If within 2 minutes of a hour, do not using rounding
+    if np.min(np.abs(GFS_Merged[:, 0] - minute_array_grib[0])) < 120:
         currentIDX_hrrrh = np.argmin(np.abs(GFS_Merged[:, 0] - minute_array_grib[0]))
         interpFac1 = 0
         interpFac2 = 1
     else:
-        print("CurrentIDX_Find")
         currentIDX_hrrrh = np.searchsorted(
             GFS_Merged[:, 0], minute_array_grib[0], side="left"
         )
 
-        print(currentIDX_hrrrh)
 
         # Find weighting factors for hourly data
         # Weighting factors for linear interpolation
@@ -3576,7 +3584,7 @@ async def PW_Forecast(
     InterPcurrent[5] = (
         (InterPcurrent[4] - 273.15)
         + 0.33 * eCurrent
-        - 0.70 * (InterPcurrent[10] / windUnit)
+        - 0.70 * (InterPcurrent[9] / windUnit)
         - 4.00
     ) + 273.15
 
@@ -3718,7 +3726,7 @@ async def PW_Forecast(
         returnOBJ["currently"]["pressure"] = InterPcurrent[8]
         returnOBJ["currently"]["windSpeed"] = InterPcurrent[9]
         returnOBJ["currently"]["windGust"] = InterPcurrent[10]
-        returnOBJ["currently"]["windBearing"] = InterPcurrent[11].round()
+        returnOBJ["currently"]["windBearing"] = np.mod(InterPcurrent[11],360).round()
         returnOBJ["currently"]["cloudCover"] = InterPcurrent[12]
 
         if (not timeMachine) or (tmExtra):
