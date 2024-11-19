@@ -2558,9 +2558,9 @@ async def PW_Forecast(
         WindBearingHour[:, 2] = np.rad2deg(
             np.mod(np.arctan2(GFS_Merged[:, 8], GFS_Merged[:, 9]) + np.pi, 2 * np.pi)
         )
-    InterPhour[:, 12] = np.mod(np.choose(
-        np.argmin(np.isnan(WindBearingHour), axis=1), WindBearingHour.T
-        ),360)
+    InterPhour[:, 12] = np.mod(
+        np.choose(np.argmin(np.isnan(WindBearingHour), axis=1), WindBearingHour.T), 360
+    )
 
     ### Cloud Cover
     CloudCoverHour = np.full((len(hour_array_grib), 3), np.nan)
@@ -3286,11 +3286,11 @@ async def PW_Forecast(
                     # Format description newlines
                     alertDescript = alertDetails[1]
                     # Step 1: Replace double newlines with a single newline
-                    formatted_text  = re.sub(r'(?<!\n)\n(?!\n)', ' ', alertDescript)
-                    
+                    formatted_text = re.sub(r"(?<!\n)\n(?!\n)", " ", alertDescript)
+
                     # Step 2: Replace remaining single newlines with a space
-                    formatted_text  = re.sub(r'\n\n', '\n', formatted_text )
-                    
+                    formatted_text = re.sub(r"\n\n", "\n", formatted_text)
+
                     alertDict = {
                         "title": alertDetails[0],
                         "regions": [s.lstrip() for s in alertDetails[2].split(";")],
@@ -3317,7 +3317,7 @@ async def PW_Forecast(
 
         else:
             alertList = []
-            
+
     except Exception as error:
         print("An Alert error occurred:", error)
 
@@ -3338,7 +3338,6 @@ async def PW_Forecast(
         currentIDX_hrrrh = np.searchsorted(
             GFS_Merged[:, 0], minute_array_grib[0], side="left"
         )
-
 
         # Find weighting factors for hourly data
         # Weighting factors for linear interpolation
@@ -3726,7 +3725,7 @@ async def PW_Forecast(
         returnOBJ["currently"]["pressure"] = InterPcurrent[8]
         returnOBJ["currently"]["windSpeed"] = InterPcurrent[9]
         returnOBJ["currently"]["windGust"] = InterPcurrent[10]
-        returnOBJ["currently"]["windBearing"] = np.mod(InterPcurrent[11],360).round()
+        returnOBJ["currently"]["windBearing"] = np.mod(InterPcurrent[11], 360).round()
         returnOBJ["currently"]["cloudCover"] = InterPcurrent[12]
 
         if (not timeMachine) or (tmExtra):
