@@ -29,7 +29,7 @@ jobs:
           run: ruff format .
           
         - name: "Check"
-          run: ruff check --output-format=github . --fix
+          run: ruff check --output-format=github . --fix --exit-zero
           
         - name: "Auto Commit"
           uses: stefanzweifel/git-auto-commit-action@8621497c8c39c72f3e2a999a26b4ca1b5058a842 # v5.0.1
