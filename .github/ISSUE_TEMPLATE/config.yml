@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions
+    url: https://github.com/Pirate-Weather/pirate-weather-code/discussions
+    about: Please ask and answer questions here.
+  - name: API Repository
+    url: https://github.com/Pirate-Weather/pirateweather/
+    about: Report issues with and request features to the API here.
+  - name: Home Assistant Repository
+    url: https://github.com/Pirate-Weather/pirate-weather-ha
+    about: Please report any issues with the Home Assistant integration here.
+  - name: Translations Repository
+    url: https://github.com/Pirate-Weather/translations
+    about: Please report any issues with the translations used in the API here.

@@ -1,0 +1,64 @@
+name: Bug Report
+description: Report an issue with the code.
+labels: ["bug" , "Needs Review"]
+body:
+
+  - type: textarea
+    id: describe-the-bug
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is and how to repoduce it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: A clear and concise description of what you expected to happen.
+      placeholder: |
+        Example:
+          "This happened..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual behavior
+      description: Explain what actually happens.
+      placeholder: |
+        Example:
+          "This happened instead..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: os-details
+    attributes:
+      label: Operating System Information
+    validations:
+      required: true
+
+  - type: textarea
+    id: log-info
+    attributes:
+      label: Log Output
+      description: Include any log output within the code blocks.
+      value: |
+        ```
+
+        ```
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Troubleshooting steps
+      description: Before reporting an issue follow these troubleshooting steps to see if it solves the issue.
+      options:
+        - label: This issue is related to the self-hosting code and not an API issue.
+          required: true
+        - label: I have read through the [README](https://github.com/Pirate-Weather/pirate-weather-code/blob/main/README.md) before opening this issue.
+          required: true
+        - label: I have written an informative title.
+          required: true
