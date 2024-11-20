@@ -1,0 +1,23 @@
+name: Documentation
+description: Report an issue with the self-hosting documentation.
+labels: ["documentation", "Needs Review"]
+body:
+
+  - type: textarea
+    id: describe-the-issue
+    attributes:
+      label: Describe the issue
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Acknowledgements
+      options:
+        - label: This issue is related to the self-hosting code and not an API issue.
+          required: true
+        - label: I have read through the [README](https://github.com/Pirate-Weather/pirate-weather-code/blob/main/README.md) before opening this issue.
+          required: true
+        - label: I have written an informative title.
+          required: true
