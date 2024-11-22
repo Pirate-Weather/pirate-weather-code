@@ -56,6 +56,6 @@ RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install python libs
-RUN python3 -m pip install numpy boto3 netCDF4 xarray cartopy cfgrib "eccodes>=1.6.1" zarr dask "s3fs>=2023.10.0" bottleneck rioxarray dask[distributed] xarray-spatial redis rechunker geopandas nwswx git+https://github.com/blaylockbk/Herbie.git
+RUN python3 -m pip install -r requirements-ingest.txt
 
 ENTRYPOINT ["python3"]
