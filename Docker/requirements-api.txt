@@ -1,14 +1,14 @@
 astral==3.2
-timezonefinder==6.5.4
+timezonefinder==6.5.5
 pytz==2024.2
 zarr==2.18.3
 s3fs==2024.10.0
 ujson==5.10.0
 starlette==0.41.3
-uvicorn==0.32.0
+uvicorn==0.32.1
 fastapi==0.115.5
 fastapi-utils==0.8.0
-boto3==1.35.65
+boto3==1.35.68
 scipy==1.14.1
 orjson==3.10.11
 psutil==6.1.0
