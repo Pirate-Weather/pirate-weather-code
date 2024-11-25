@@ -2459,7 +2459,7 @@ async def PW_Forecast(
         np.argmin(np.isnan(prcipProbabilityHour), axis=1), prcipProbabilityHour.T
     )
     # Cap at 1
-    InterPhour[:, 3] = np.minimum(np.maximum(InterPhour[:, 3], 0), 1)
+    InterPhour[:, 3] = np.clip(InterPhour[:, 3], 0, 1)
 
     # Less than 5% set to 0
     InterPhour[InterPhour[:, 3] < 0.05, 3] = 0
@@ -2485,6 +2485,9 @@ async def PW_Forecast(
         np.argmin(np.isnan(TemperatureHour), axis=1), TemperatureHour.T
     )
 
+    # Clip between -90 and 60
+    InterPhour[:, 5] = np.clip(InterPhour[:, 5], -90, 60)
+
     ### Dew Point
     DewPointHour = np.full((len(hour_array_grib), 3), np.nan)
     if "nbm" in sourceList:
@@ -2497,6 +2500,9 @@ async def PW_Forecast(
         np.argmin(np.isnan(DewPointHour), axis=1), DewPointHour.T
     )
 
+    # Clip between -90 and 60
+    InterPhour[:, 7] = np.clip(InterPhour[:, 7], -90, 60)
+
     ### Humidity
     HumidityHour = np.full((len(hour_array_grib), 3), np.nan)
     if "nbm" in sourceList:
@@ -2506,8 +2512,11 @@ async def PW_Forecast(
     if "gfs" in sourceList:
         HumidityHour[:, 2] = GFS_Merged[:, 6]
     InterPhour[:, 8] = (
-        np.choose(np.argmin(np.isnan(HumidityHour), axis=1), HumidityHour.T) * humidUnit
+            np.choose(np.argmin(np.isnan(HumidityHour), axis=1), HumidityHour.T) * humidUnit
     )
+
+    # Clip between 0 and 1
+    InterPhour[:, 8] = np.clip(InterPhour[:, 8], 0, 1)
 
     ### Pressure
     PressureHour = np.full((len(hour_array_grib), 2), np.nan)
@@ -2516,9 +2525,13 @@ async def PW_Forecast(
     if "gfs" in sourceList:
         PressureHour[:, 1] = GFS_Merged[:, 3]
     InterPhour[:, 9] = (
-        np.choose(np.argmin(np.isnan(PressureHour), axis=1), PressureHour.T)
-        * pressUnits
+            np.choose(np.argmin(np.isnan(PressureHour), axis=1), PressureHour.T)
+            * pressUnits
     )
+
+    # Clip between 800 and 1100
+    InterPhour[:, 9] = np.clip(InterPhour[:, 9], 800, 1100)
+
 
     ### Wind Speed
     WindSpeedHour = np.full((len(hour_array_grib), 3), np.nan)
@@ -2530,9 +2543,12 @@ async def PW_Forecast(
         WindSpeedHour[:, 2] = np.sqrt(GFS_Merged[:, 8] ** 2 + GFS_Merged[:, 9] ** 2)
 
     InterPhour[:, 10] = (
-        np.choose(np.argmin(np.isnan(WindSpeedHour), axis=1), WindSpeedHour.T)
-        * windUnit
+            np.choose(np.argmin(np.isnan(WindSpeedHour), axis=1), WindSpeedHour.T)
+            * windUnit
     )
+
+    # Clip between 0 and 400
+    InterPhour[:, 10] = np.clip(InterPhour[:, 10], 0, 400)
 
     ### Wind Gust
     WindGustHour = np.full((len(hour_array_grib), 3), np.nan)
@@ -2543,8 +2559,11 @@ async def PW_Forecast(
     if "gfs" in sourceList:
         WindGustHour[:, 2] = GFS_Merged[:, 2]
     InterPhour[:, 11] = (
-        np.choose(np.argmin(np.isnan(WindGustHour), axis=1), WindGustHour.T) * windUnit
+            np.choose(np.argmin(np.isnan(WindGustHour), axis=1), WindGustHour.T) * windUnit
     )
+    # Clip between 0 and 400
+    InterPhour[:, 11] = np.clip(InterPhour[:, 11], 0, 400)
+
 
     ### Wind Bearing
     WindBearingHour = np.full((len(hour_array_grib), 3), np.nan)
@@ -2558,9 +2577,9 @@ async def PW_Forecast(
         WindBearingHour[:, 2] = np.rad2deg(
             np.mod(np.arctan2(GFS_Merged[:, 8], GFS_Merged[:, 9]) + np.pi, 2 * np.pi)
         )
-    InterPhour[:, 12] = np.mod(
-        np.choose(np.argmin(np.isnan(WindBearingHour), axis=1), WindBearingHour.T), 360
-    )
+    InterPhour[:, 12] = np.mod(np.choose(
+        np.argmin(np.isnan(WindBearingHour), axis=1), WindBearingHour.T
+    ), 360)
 
     ### Cloud Cover
     CloudCoverHour = np.full((len(hour_array_grib), 3), np.nan)
@@ -2574,13 +2593,16 @@ async def PW_Forecast(
         np.choose(np.argmin(np.isnan(CloudCoverHour), axis=1), CloudCoverHour.T) * 0.01,
         0,
     )
+    # Clip between 0 and 1
+    InterPhour[:, 13] = np.clip(InterPhour[:, 13], 0, 1)
 
     ### UV Index
     if "gfs" in sourceList:
-        InterPhour[:, 14] = np.maximum(GFS_Merged[:, 18] * 18.9 * 0.025, 0)
+        InterPhour[:, 14] = np.clip(GFS_Merged[:, 18] * 18.9 * 0.025, 0, 15)
 
         # Fix small negative zero
         # InterPhour[InterPhour[:, 14]<0, 14] = 0
+
 
     ### Visibility
     VisibilityHour = np.full((len(hour_array_grib), 3), np.nan)
@@ -2596,16 +2618,15 @@ async def PW_Forecast(
         VisibilityHour[:, 2] = GFS_Merged[:, 1]
 
     InterPhour[:, 15] = (
-        np.minimum(
-            np.choose(np.argmin(np.isnan(VisibilityHour), axis=1), VisibilityHour.T),
-            16090,
-        )
-        * visUnits
+            np.clip(np.choose(np.argmin(np.isnan(VisibilityHour), axis=1), VisibilityHour.T),
+                0, 16090)
+            * visUnits
     )
+
 
     ### Ozone Index
     if "gfs" in sourceList:
-        InterPhour[:, 16] = GFS_Merged[:, 16]
+        InterPhour[:, 16] = np.clip(GFS_Merged[:, 16], 0, 500)
 
     ### Precipitation Accumulation
     PrecpAccumHour = np.full((len(hour_array_grib), 4), np.nan)
@@ -2630,7 +2651,7 @@ async def PW_Forecast(
 
     ### Near Storm Distance
     if "gfs" in sourceList:
-        InterPhour[:, 18] = GFS_Merged[:, 19] * visUnits
+        InterPhour[:, 18] = np.maximum(GFS_Merged[:, 19] * visUnits, 0)
 
     ### Near Storm Direction
     if "gfs" in sourceList:
@@ -2639,30 +2660,30 @@ async def PW_Forecast(
     # Air quality
     if version >= 2:
         if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-            InterPhour[:, 20] = HRRR_Merged[:, 16] * 1e9  # Change from kg/m3 to ug/m3
+            InterPhour[:, 20] = np.clip(HRRR_Merged[:, 16] * 1e9, 0, 200)  # Change from kg/m3 to ug/m3
         else:
             InterPhour[:, 20] = -999
 
     # Fire Index
     if "nbm_fire" in sourceList:
-        InterPhour[:, 24] = NBM_Fire_Merged[:, 1]
+        InterPhour[:, 24] = np.clip(NBM_Fire_Merged[:, 1], 0, 15)
 
     # Apparent Temperature, Radiative temperature formula
     # https: // github.com / breezy - weather / breezy - weather / discussions / 1085
     # AT = Ta + 0.33 × rh / 100 × 6.105 × exp(17.27 × Ta / (237.7 + Ta)) − 0.70 × ws − 4.00
     e = (
-        InterPhour[:, 8]
-        * 6.105
-        * np.exp(
-            17.27 * (InterPhour[:, 5] - 273.15) / (237.7 + (InterPhour[:, 5] - 273.15))
-        )
+            InterPhour[:, 8]
+            * 6.105
+            * np.exp(
+        17.27 * (InterPhour[:, 5] - 273.15) / (237.7 + (InterPhour[:, 5] - 273.15))
+    )
     )
     InterPhour[:, 6] = (
-        (InterPhour[:, 5] - 273.15)
-        + 0.33 * e
-        - 0.70 * (InterPhour[:, 10] / windUnit)
-        - 4.00
-    ) + 273.15
+                               (InterPhour[:, 5] - 273.15)
+                               + 0.33 * e
+                               - 0.70 * (InterPhour[:, 10] / windUnit)
+                               - 4.00
+                       ) + 273.15
 
     ### Feels Like Temperature
     AppTemperatureHour = np.full((len(hour_array_grib), 2), np.nan)
@@ -2676,6 +2697,9 @@ async def PW_Forecast(
     InterPhour[:, 25] = np.choose(
         np.argmin(np.isnan(AppTemperatureHour), axis=1), AppTemperatureHour.T
     )
+
+    # Clip between -90 and 60
+    InterPhour[:, 25] = np.clip(InterPhour[:, 25], -90, 60)
 
     # Set temperature units
     if tempUnits == 0:
