@@ -1,11 +1,20 @@
-FROM python:3.12-slim
+FROM nikolaik/python-nodejs:python3.12-nodejs22-slim
 
 RUN apt update && \
     apt -y install build-essential \
-                    libffi-dev
-
+                    libffi-dev \
+                    unzip \
+                    rsync \
+					git
+                    
 RUN pip install -r requirements-api.txt
 
-run apt -y install unzip rsync
+WORKDIR /app
+
+COPY package-api.json package.json
+
+RUN apt install -y git
+
+RUN npm install
 
 ENTRYPOINT ["python3"]
