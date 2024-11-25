@@ -2486,7 +2486,7 @@ async def PW_Forecast(
     )
 
     # Clip between -90 and 60
-    InterPhour[:, 5] = np.clip(InterPhour[:, 5], -90, 60)
+    InterPhour[:, 5] = np.clip(InterPhour[:, 5], -183, 333)
 
     ### Dew Point
     DewPointHour = np.full((len(hour_array_grib), 3), np.nan)
@@ -2500,8 +2500,8 @@ async def PW_Forecast(
         np.argmin(np.isnan(DewPointHour), axis=1), DewPointHour.T
     )
 
-    # Clip between -90 and 60
-    InterPhour[:, 7] = np.clip(InterPhour[:, 7], -90, 60)
+    # Clip between -90 and 60 C
+    InterPhour[:, 7] = np.clip(InterPhour[:, 7], -183, 333)
 
     ### Humidity
     HumidityHour = np.full((len(hour_array_grib), 3), np.nan)
@@ -2543,11 +2543,10 @@ async def PW_Forecast(
 
     InterPhour[:, 10] = (
         np.choose(np.argmin(np.isnan(WindSpeedHour), axis=1), WindSpeedHour.T)
-        * windUnit
     )
 
     # Clip between 0 and 400
-    InterPhour[:, 10] = np.clip(InterPhour[:, 10], 0, 400)
+    InterPhour[:, 10] = np.clip(InterPhour[:, 10], 0, 120) * windUnit
 
     ### Wind Gust
     WindGustHour = np.full((len(hour_array_grib), 3), np.nan)
@@ -2558,10 +2557,10 @@ async def PW_Forecast(
     if "gfs" in sourceList:
         WindGustHour[:, 2] = GFS_Merged[:, 2]
     InterPhour[:, 11] = (
-        np.choose(np.argmin(np.isnan(WindGustHour), axis=1), WindGustHour.T) * windUnit
+        np.choose(np.argmin(np.isnan(WindGustHour), axis=1), WindGustHour.T) 
     )
     # Clip between 0 and 400
-    InterPhour[:, 11] = np.clip(InterPhour[:, 11], 0, 400)
+    InterPhour[:, 11] = np.clip(InterPhour[:, 11], 0, 120)* windUnit
 
     ### Wind Bearing
     WindBearingHour = np.full((len(hour_array_grib), 3), np.nan)
@@ -2700,7 +2699,7 @@ async def PW_Forecast(
     )
 
     # Clip between -90 and 60
-    InterPhour[:, 25] = np.clip(InterPhour[:, 25], -90, 60)
+    InterPhour[:, 25] = np.clip(InterPhour[:, 25], -183, 333)
 
     # Set temperature units
     if tempUnits == 0:
@@ -3398,7 +3397,10 @@ async def PW_Forecast(
             + GFS_Merged[currentIDX_hrrrh, 4] * interpFac2
         )
 
-    # Deupoint from subH, then NBM, the GFS
+    # Clip between -90 and 60
+    InterPcurrent[4] = np.clip(InterPcurrent[4], -183, 333)
+
+    # Dewpoint from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
         InterPcurrent[6] = hrrrSubHInterpolation[0, 4]
     elif "nbm" in sourceList:
@@ -3411,6 +3413,9 @@ async def PW_Forecast(
             GFS_Merged[currentIDX_hrrrh - 1, 5] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, 5] * interpFac2
         )
+
+    # Clip between -90 and 60
+    InterPcurrent[6] = np.clip(InterPcurrent[6], -183, 333)
 
     # humidity, NBM then HRRR, then GFS
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
@@ -3429,17 +3434,26 @@ async def PW_Forecast(
             + GFS_Merged[currentIDX_hrrrh, 6] * interpFac2
         ) * humidUnit
 
+    # Clip between 0 and 1
+    InterPcurrent[7] = np.clip(InterPcurrent[7], 0, 1)
+
+
+
     # Pressure from HRRR, then GFS
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[8] = (
             HRRR_Merged[currentIDX_hrrrh - 1, 3] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, 3] * interpFac2
-        ) * pressUnits
+        )
     else:
         InterPcurrent[8] = (
             GFS_Merged[currentIDX_hrrrh - 1, 3] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, 3] * interpFac2
-        ) * pressUnits
+        )
+
+    # Clip between 800 and 1100
+    InterPcurrent[8] = np.clip(InterPcurrent[8], 800, 1100) * pressUnits
+        
 
     # WindSpeed from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
@@ -3447,13 +3461,12 @@ async def PW_Forecast(
             math.sqrt(
                 hrrrSubHInterpolation[0, 5] ** 2 + hrrrSubHInterpolation[0, 6] ** 2
             )
-            * windUnit
         )
     elif "nbm" in sourceList:
         InterPcurrent[9] = (
             NBM_Merged[currentIDX_hrrrh - 1, 6] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, 6] * interpFac2
-        ) * windUnit
+        )
     else:
         InterPcurrent[9] = (
             math.sqrt(
@@ -3468,8 +3481,8 @@ async def PW_Forecast(
                 )
                 ** 2
             )
-            * windUnit
         )
+    InterPcurrent[9] = np.clip(InterPcurrent[9], 0, 120)* windUnit
 
     # Guest from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
@@ -3478,12 +3491,15 @@ async def PW_Forecast(
         InterPcurrent[10] = (
             NBM_Merged[currentIDX_hrrrh - 1, 1] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, 1] * interpFac2
-        ) * windUnit
+        )
     else:
         InterPcurrent[10] = (
             GFS_Merged[currentIDX_hrrrh - 1, 2] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, 2] * interpFac2
-        ) * windUnit
+        )
+
+    # Clip between 0 and 400
+    InterPcurrent[10] = np.clip(InterPcurrent[10], 0, 120)* windUnit
 
     # WindDir from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
@@ -3524,8 +3540,11 @@ async def PW_Forecast(
             + GFS_Merged[currentIDX_hrrrh, 17] * interpFac2
         ) * 0.01
 
+    # Clip 
+    InterPcurrent[12] = np.clip(InterPcurrent[12], 0 ,15)
+
     # UV Index from subH, then NBM, the GFS
-    InterPcurrent[13] = (
+    InterPcurrent[13] = np.clip(
         (
             GFS_Merged[currentIDX_hrrrh - 1, 18] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, 18] * interpFac2
@@ -3537,59 +3556,49 @@ async def PW_Forecast(
     # VIS, NBM then HRRR, then GFS
     if "nbm" in sourceList:
         InterPcurrent[14] = (
-            np.minimum(
                 (
                     NBM_Merged[currentIDX_hrrrh - 1, 10] * interpFac1
                     + NBM_Merged[currentIDX_hrrrh, 10] * interpFac2
-                ),
-                16090,
-            )
-            * visUnits
+                )
         )
     elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[14] = (
-            np.minimum(
                 (
                     HRRR_Merged[currentIDX_hrrrh - 1, 1] * interpFac1
                     + HRRR_Merged[currentIDX_hrrrh, 1] * interpFac2
-                ),
-                16090,
-            )
-            * visUnits
+                )
         )
     else:
         InterPcurrent[14] = (
-            np.minimum(
                 (
                     GFS_Merged[currentIDX_hrrrh - 1, 1] * interpFac1
                     + GFS_Merged[currentIDX_hrrrh, 1] * interpFac2
-                ),
-                16090,
-            )
-            * visUnits
+                )
         )
 
+    InterPcurrent[14] = np.clip(InterPcurrent[14], 0, 16090) * visUnits
+
     # Ozone from GFS
-    InterPcurrent[15] = (
+    InterPcurrent[15] = np.clip(
         GFS_Merged[currentIDX_hrrrh - 1, 16] * interpFac1
         + GFS_Merged[currentIDX_hrrrh, 16] * interpFac2
-    )  # "   "ozone"
+    , 0, 500)  # "   "ozone"
 
     # Storm Distance from GFS
-    InterPcurrent[16] = (
+    InterPcurrent[16] = np.maximum((
         GFS_Merged[currentIDX_hrrrh - 1, 19] * interpFac1
         + GFS_Merged[currentIDX_hrrrh, 19] * interpFac2
-    ) * visUnits
+    ) * visUnits, 0)
 
     # Storm Bearing from GFS
     InterPcurrent[17] = GFS_Merged[currentIDX_hrrrh, 20]
 
     # Smoke from HRRR
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-        InterPcurrent[18] = (
+        InterPcurrent[18] = np.clip(((
             HRRR_Merged[currentIDX_hrrrh - 1, 16] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, 16] * interpFac2
-        ) * 1e9
+        ) * 1e9), 0, 200)
     else:
         InterPcurrent[18] = -999
 
@@ -3605,36 +3614,35 @@ async def PW_Forecast(
         )
     )
 
-    InterPcurrent[5] = (
+    InterPcurrent[5] = np.clip(((
         (InterPcurrent[4] - 273.15)
         + 0.33 * eCurrent
         - 0.70 * (InterPcurrent[9] / windUnit)
         - 4.00
-    ) + 273.15
+    ) + 273.15), -183, 333)
 
     # Where Ta is the ambient temperature in °C
     # e is the water vapor pressure in hPa
     # ws is the wind speed in m/s
     # Q is the solar radiation per unit area of body surface in w/m²
     if "nbm" in sourceList:
-        InterPcurrent[20] = (
-            NBM_Merged[currentIDX_hrrrh - 1, 3] * interpFac1
-            + NBM_Merged[currentIDX_hrrrh, 3] * interpFac2
-        )
+        InterPcurrent[20] = (NBM_Merged[currentIDX_hrrrh - 1, 3] * interpFac1
+            + NBM_Merged[currentIDX_hrrrh, 3] * interpFac2)
     else:
-        InterPcurrent[20] = (
-            GFS_Merged[currentIDX_hrrrh - 1, 7] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, 7] * interpFac2
-        )
+        InterPcurrent[20] =  (GFS_Merged[currentIDX_hrrrh - 1, 7] * interpFac1
+            + GFS_Merged[currentIDX_hrrrh, 7] * interpFac2)
+        
+    # Clip
+    InterPcurrent[20] = np.clip(InterPcurrent[20], -183, 333)
 
     # Fire index from NBM Fire
     if "nbm_fire" in sourceList:
-        InterPcurrent[19] = np.maximum(
+        InterPcurrent[19] = np.clip(
             (
                 NBM_Fire_Merged[currentIDX_hrrrh - 1, 1] * interpFac1
                 + NBM_Fire_Merged[currentIDX_hrrrh, 1] * interpFac2
             ),
-            0,
+            0, 15
         )
     else:
         InterPcurrent[19] = -999
