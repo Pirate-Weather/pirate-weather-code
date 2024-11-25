@@ -9,6 +9,8 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "weekly"
+    assignees:
+      - "alexander0042"
     groups:
       non-major-versions: # the name of the group
         update-types:     # the key used to specify the semver level to include in the group
