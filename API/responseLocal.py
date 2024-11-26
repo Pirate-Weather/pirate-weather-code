@@ -926,11 +926,11 @@ async def PW_Forecast(
 
     if not lang:
         lang = "en"
-        
+
     # Set up translations
     translation = Translations[lang]
     if translation is None:
-      translation = Translations["en"]
+        translation = Translations["en"]
 
     # Check if extra information should be included with time machine
     if not tmextra:
@@ -2961,7 +2961,7 @@ async def PW_Forecast(
             isDay,
             mode="title",
         )
-        
+
         hourItem["summary"] = translation.translate(hourText)
         hourItem["icon"] = hourIcon
 
@@ -4102,28 +4102,18 @@ def dataSync() -> None:
             update_zarr_store(False)
 
     logger.info("Sync End!")
-import shutil
+
+
 import os
 
-import platform
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi_utils.tasks import repeat_every
 from fastapi.responses import ORJSONResponse
 
 import zarr
-import time
-import datetime
 import numpy as np
-import math
-import pickle
 from timezonefinder import TimezoneFinder
-from pytz import timezone, utc
-from astral import LocationInfo, moon
-from astral.sun import sun
-import subprocess
-import boto3
-from boto3.s3.transfer import TransferConfig
 from fsspec import FSMap
 from fsspec.implementations.zip import ZipFileSystem
 
@@ -4133,20 +4123,13 @@ import threading
 
 lock = threading.Lock()
 
-from collections import Counter
 
 
 import logging
 
-import pandas as pd
-import xarray as xr
 import s3fs
-import asyncio
 
-from timemachine import TimeMachine
-from PirateText import calculate_text
 
-import re
 
 from javascript import require
 
@@ -5030,11 +5013,11 @@ async def PW_Forecast(
 
     if not lang:
         lang = "en"
-        
+
     # Set up translations
     translation = Translations[lang]
     if translation is None:
-      translation = Translations["en"]
+        translation = Translations["en"]
 
     # Check if extra information should be included with time machine
     if not tmextra:
@@ -7065,7 +7048,7 @@ async def PW_Forecast(
             isDay,
             mode="title",
         )
-        
+
         hourItem["summary"] = translation.translate(hourText)
         hourItem["icon"] = hourIcon
 
