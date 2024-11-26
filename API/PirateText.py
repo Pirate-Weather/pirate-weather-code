@@ -11,7 +11,7 @@ def calculate_sky_icon(cloudCover, isDayTime):
 
     if cloudCover > cloudThreshold:
         sky_icon = "cloudy"
-    elif cloudCover > mostlyCloudyThreshold:
+    elif cloudCover > partlyCloudyThreshold:
         if isDayTime:
             sky_icon = "partly-cloudy-day"
         else:
