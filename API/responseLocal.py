@@ -45,6 +45,7 @@ from PirateText import calculate_text
 import re
 
 from javascript import require
+
 Translations = require("/app/node_modules/translations/index.js")
 
 aws_access_key_id = os.environ.get("AWS_KEY", "")
@@ -922,10 +923,10 @@ async def PW_Forecast(
         version = 1
 
     version = float(version)
-    
+
     if not lang:
-        lang = 'en'
-        
+        lang = "en"
+
     # Check if extra information should be included with time machine
     if not tmextra:
         tmExtra = False
@@ -2802,16 +2803,17 @@ async def PW_Forecast(
         print(datetime.datetime.utcnow() - T_Start)
 
     for idx in range(int(baseTimeOffset), hourly_hours + int(baseTimeOffset)):
-    
         # Check if day or night
         if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], 17]:
             isDay = False
-        elif (hour_array_grib[idx] >= InterSday[hourlyDayIndex[idx], 17]
-                and hour_array_grib[idx] <= InterSday[hourlyDayIndex[idx], 18]):
+        elif (
+            hour_array_grib[idx] >= InterSday[hourlyDayIndex[idx], 17]
+            and hour_array_grib[idx] <= InterSday[hourlyDayIndex[idx], 18]
+        ):
             isDay = True
         elif hour_array_grib[idx] > InterSday[hourlyDayIndex[idx], 18]:
             isDay = False
-    
+
         # Set text
         if InterPhour[idx, 3] >= 0.3 and (
             ((InterPhour[idx, 21] + InterPhour[idx, 23]) > (0.02 * prepAccumUnit))
@@ -2865,87 +2867,95 @@ async def PW_Forecast(
                 hourIcon = "clear-night"
 
         if timeMachine and not tmExtra:
-              hourItem = {
-                    "time": int(hour_array_grib[idx]),
-                    "icon": hourIcon,
-                    "summary": hourText,
-                    "precipIntensity": InterPhour[idx, 2],
-                    "precipAccumulation": InterPhour[idx, 21]
-                    + InterPhour[idx, 22]
-                    + InterPhour[idx, 23],
-                    "precipType": PTypeHour[idx],
-                    "temperature": InterPhour[idx, 5],
-                    "apparentTemperature": InterPhour[idx, 6],
-                    "dewPoint": InterPhour[idx, 7],
-                    "pressure": InterPhour[idx, 9],
-                    "windSpeed": InterPhour[idx, 10],
-                    "windGust": InterPhour[idx, 11],
-                    "windBearing": InterPhour[idx, 12],
-                    "cloudCover": InterPhour[idx, 13],
-                    "snowAccumulation": InterPhour[idx, 22],
-                }
+            hourItem = {
+                "time": int(hour_array_grib[idx]),
+                "icon": hourIcon,
+                "summary": hourText,
+                "precipIntensity": InterPhour[idx, 2],
+                "precipAccumulation": InterPhour[idx, 21]
+                + InterPhour[idx, 22]
+                + InterPhour[idx, 23],
+                "precipType": PTypeHour[idx],
+                "temperature": InterPhour[idx, 5],
+                "apparentTemperature": InterPhour[idx, 6],
+                "dewPoint": InterPhour[idx, 7],
+                "pressure": InterPhour[idx, 9],
+                "windSpeed": InterPhour[idx, 10],
+                "windGust": InterPhour[idx, 11],
+                "windBearing": InterPhour[idx, 12],
+                "cloudCover": InterPhour[idx, 13],
+                "snowAccumulation": InterPhour[idx, 22],
+            }
 
         elif version >= 2:
-              hourItem = {
-                    "time": int(hour_array_grib[idx]),
-                    "icon": hourIcon,
-                    "summary": hourText,
-                    "precipIntensity": InterPhour[idx, 2],
-                    "precipProbability": InterPhour[idx, 3],
-                    "precipIntensityError": InterPhour[idx, 4],
-                    "precipAccumulation": InterPhour[idx, 21]
-                    + InterPhour[idx, 22]
-                    + InterPhour[idx, 23],
-                    "precipType": PTypeHour[idx],
-                    "temperature": InterPhour[idx, 5],
-                    "apparentTemperature": InterPhour[idx, 6],
-                    "dewPoint": InterPhour[idx, 7],
-                    "humidity": InterPhour[idx, 8],
-                    "pressure": InterPhour[idx, 9],
-                    "windSpeed": InterPhour[idx, 10],
-                    "windGust": InterPhour[idx, 11],
-                    "windBearing": InterPhour[idx, 12],
-                    "cloudCover": InterPhour[idx, 13],
-                    "uvIndex": InterPhour[idx, 14],
-                    "visibility": InterPhour[idx, 15],
-                    "ozone": InterPhour[idx, 16],
-                    "smoke": InterPhour[idx, 20],
-                    "liquidAccumulation": InterPhour[idx, 21],
-                    "snowAccumulation": InterPhour[idx, 22],
-                    "iceAccumulation": InterPhour[idx, 23],
-                    "nearestStormDistance": InterPhour[idx, 18],
-                    "nearestStormBearing": InterPhour[idx, 19],
-                    "fireIndex": InterPhour[idx, 24],
-                    "feelsLike": InterPhour[idx, 25],
-                }
-                
+            hourItem = {
+                "time": int(hour_array_grib[idx]),
+                "icon": hourIcon,
+                "summary": hourText,
+                "precipIntensity": InterPhour[idx, 2],
+                "precipProbability": InterPhour[idx, 3],
+                "precipIntensityError": InterPhour[idx, 4],
+                "precipAccumulation": InterPhour[idx, 21]
+                + InterPhour[idx, 22]
+                + InterPhour[idx, 23],
+                "precipType": PTypeHour[idx],
+                "temperature": InterPhour[idx, 5],
+                "apparentTemperature": InterPhour[idx, 6],
+                "dewPoint": InterPhour[idx, 7],
+                "humidity": InterPhour[idx, 8],
+                "pressure": InterPhour[idx, 9],
+                "windSpeed": InterPhour[idx, 10],
+                "windGust": InterPhour[idx, 11],
+                "windBearing": InterPhour[idx, 12],
+                "cloudCover": InterPhour[idx, 13],
+                "uvIndex": InterPhour[idx, 14],
+                "visibility": InterPhour[idx, 15],
+                "ozone": InterPhour[idx, 16],
+                "smoke": InterPhour[idx, 20],
+                "liquidAccumulation": InterPhour[idx, 21],
+                "snowAccumulation": InterPhour[idx, 22],
+                "iceAccumulation": InterPhour[idx, 23],
+                "nearestStormDistance": InterPhour[idx, 18],
+                "nearestStormBearing": InterPhour[idx, 19],
+                "fireIndex": InterPhour[idx, 24],
+                "feelsLike": InterPhour[idx, 25],
+            }
+
         else:
-              hourItem = {
-                    "time": int(hour_array_grib[idx]),
-                    "icon": hourIcon,
-                    "summary": hourText,
-                    "precipIntensity": InterPhour[idx, 2],
-                    "precipProbability": InterPhour[idx, 3],
-                    "precipIntensityError": InterPhour[idx, 4],
-                    "precipAccumulation": InterPhour[idx, 21]
-                    + InterPhour[idx, 22]
-                    + InterPhour[idx, 23],
-                    "precipType": PTypeHour[idx],
-                    "temperature": InterPhour[idx, 5],
-                    "apparentTemperature": InterPhour[idx, 6],
-                    "dewPoint": InterPhour[idx, 7],
-                    "humidity": InterPhour[idx, 8],
-                    "pressure": InterPhour[idx, 9],
-                    "windSpeed": InterPhour[idx, 10],
-                    "windGust": InterPhour[idx, 11],
-                    "windBearing": InterPhour[idx, 12],
-                    "cloudCover": InterPhour[idx, 13],
-                    "uvIndex": InterPhour[idx, 14],
-                    "visibility": InterPhour[idx, 15],
-                    "ozone": InterPhour[idx, 16],
-                }
-        
-        hourText, hourIcon = calculate_text(hourItem, prepIntensityUnit, visUnits, windUnit, tempUnits, isDay, mode="title")
+            hourItem = {
+                "time": int(hour_array_grib[idx]),
+                "icon": hourIcon,
+                "summary": hourText,
+                "precipIntensity": InterPhour[idx, 2],
+                "precipProbability": InterPhour[idx, 3],
+                "precipIntensityError": InterPhour[idx, 4],
+                "precipAccumulation": InterPhour[idx, 21]
+                + InterPhour[idx, 22]
+                + InterPhour[idx, 23],
+                "precipType": PTypeHour[idx],
+                "temperature": InterPhour[idx, 5],
+                "apparentTemperature": InterPhour[idx, 6],
+                "dewPoint": InterPhour[idx, 7],
+                "humidity": InterPhour[idx, 8],
+                "pressure": InterPhour[idx, 9],
+                "windSpeed": InterPhour[idx, 10],
+                "windGust": InterPhour[idx, 11],
+                "windBearing": InterPhour[idx, 12],
+                "cloudCover": InterPhour[idx, 13],
+                "uvIndex": InterPhour[idx, 14],
+                "visibility": InterPhour[idx, 15],
+                "ozone": InterPhour[idx, 16],
+            }
+
+        hourText, hourIcon = calculate_text(
+            hourItem,
+            prepIntensityUnit,
+            visUnits,
+            windUnit,
+            tempUnits,
+            isDay,
+            mode="title",
+        )
         translation = Translations[lang]
         hourItem["summary"] = translation.translate(hourText)
         hourItem["icon"] = hourIcon
@@ -3334,7 +3344,7 @@ async def PW_Forecast(
 
                     # Step 2: Replace remaining single newlines with a space
                     formatted_text = re.sub(r"\n\n", "\n", formatted_text)
-                      
+
                     alertDict = {
                         "title": alertDetails[0],
                         "regions": [s.lstrip() for s in alertDetails[2].split(";")],
@@ -3805,26 +3815,33 @@ async def PW_Forecast(
             returnOBJ["currently"]["currentDayIce"] = dayZeroIce
             returnOBJ["currently"]["currentDayLiquid"] = dayZeroRain
             returnOBJ["currently"]["currentDaySnow"] = dayZeroSnow
-            
+
             # Update the text
             if InterPcurrent[0] < InterSday[0, 17]:
-            # Before sunrise
-              currentDay = False
+                # Before sunrise
+                currentDay = False
             elif (
-              InterPcurrent[0] > InterSday[0, 17] and InterPcurrent[0] < InterSday[0, 18]
+                InterPcurrent[0] > InterSday[0, 17]
+                and InterPcurrent[0] < InterSday[0, 18]
             ):
-              # After sunrise before sunset
-              currentDay = True
+                # After sunrise before sunset
+                currentDay = True
             elif InterPcurrent[0] > InterSday[0, 18]:
-              # After sunset
-              currentDay = False
-              
-            currentText, currentIcon = calculate_text(returnOBJ["currently"], prepIntensityUnit, visUnits, windUnit, tempUnits, currentDay,
-                                            mode="title")
+                # After sunset
+                currentDay = False
+
+            currentText, currentIcon = calculate_text(
+                returnOBJ["currently"],
+                prepIntensityUnit,
+                visUnits,
+                windUnit,
+                tempUnits,
+                currentDay,
+                mode="title",
+            )
             translation = Translations[lang]
             returnOBJ["currently"]["summary"] = translation.translate(currentText)
             returnOBJ["currently"]["icon"] = currentIcon
-
 
     if exMinutely != 1:
         returnOBJ["minutely"] = dict()
