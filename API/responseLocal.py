@@ -7908,31 +7908,31 @@ async def PW_Forecast(
             returnOBJ["currently"]["currentDayLiquid"] = dayZeroRain
             returnOBJ["currently"]["currentDaySnow"] = dayZeroSnow
 
-            # Update the text
-            if InterPcurrent[0] < InterSday[0, 17]:
-                # Before sunrise
-                currentDay = False
-            elif (
-                InterPcurrent[0] > InterSday[0, 17]
-                and InterPcurrent[0] < InterSday[0, 18]
-            ):
-                # After sunrise before sunset
-                currentDay = True
-            elif InterPcurrent[0] > InterSday[0, 18]:
-                # After sunset
-                currentDay = False
+        # Update the text
+        if InterPcurrent[0] < InterSday[0, 17]:
+            # Before sunrise
+            currentDay = False
+        elif (
+            InterPcurrent[0] > InterSday[0, 17]
+            and InterPcurrent[0] < InterSday[0, 18]
+        ):
+            # After sunrise before sunset
+            currentDay = True
+        elif InterPcurrent[0] > InterSday[0, 18]:
+            # After sunset
+            currentDay = False
 
-            currentText, currentIcon = calculate_text(
-                returnOBJ["currently"],
-                prepIntensityUnit,
-                visUnits,
-                windUnit,
-                tempUnits,
-                currentDay,
-                mode="title",
-            )
-            returnOBJ["currently"]["summary"] = translation.translate(currentText)
-            returnOBJ["currently"]["icon"] = currentIcon
+        currentText, currentIcon = calculate_text(
+            returnOBJ["currently"],
+            prepIntensityUnit,
+            visUnits,
+            windUnit,
+            tempUnits,
+            currentDay,
+            mode="title",
+        )
+        returnOBJ["currently"]["summary"] = translation.translate(currentText)
+        returnOBJ["currently"]["icon"] = currentIcon
 
     if exMinutely != 1:
         returnOBJ["minutely"] = dict()
@@ -7974,7 +7974,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.5.0a"
+        returnOBJ["flags"]["version"] = "V2.5.0b"
 
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
@@ -8189,3 +8189,4 @@ def dataSync() -> None:
             update_zarr_store(False)
 
     logger.info("Sync End!")
+
