@@ -40,8 +40,12 @@ import s3fs
 import asyncio
 
 from timemachine import TimeMachine
+from PirateText import calculate_text
 
 import re
+
+from javascript import require
+Translations = require("/app/node_modules/translations/index.js")
 
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
@@ -918,7 +922,10 @@ async def PW_Forecast(
         version = 1
 
     version = float(version)
-
+    
+    if not lang:
+        lang = 'en'
+        
     # Check if extra information should be included with time machine
     if not tmextra:
         tmExtra = False
@@ -2795,6 +2802,16 @@ async def PW_Forecast(
         print(datetime.datetime.utcnow() - T_Start)
 
     for idx in range(int(baseTimeOffset), hourly_hours + int(baseTimeOffset)):
+    
+        # Check if day or night
+        if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], 17]:
+            isDay = False
+        elif (hour_array_grib[idx] >= InterSday[hourlyDayIndex[idx], 17]
+                and hour_array_grib[idx] <= InterSday[hourlyDayIndex[idx], 18]):
+            isDay = True
+        elif hour_array_grib[idx] > InterSday[hourlyDayIndex[idx], 18]:
+            isDay = False
+    
         # Set text
         if InterPhour[idx, 3] >= 0.3 and (
             ((InterPhour[idx, 21] + InterPhour[idx, 23]) > (0.02 * prepAccumUnit))
@@ -2848,8 +2865,7 @@ async def PW_Forecast(
                 hourIcon = "clear-night"
 
         if timeMachine and not tmExtra:
-            hourList.append(
-                {
+              hourItem = {
                     "time": int(hour_array_grib[idx]),
                     "icon": hourIcon,
                     "summary": hourText,
@@ -2868,10 +2884,9 @@ async def PW_Forecast(
                     "cloudCover": InterPhour[idx, 13],
                     "snowAccumulation": InterPhour[idx, 22],
                 }
-            )
+
         elif version >= 2:
-            hourList.append(
-                {
+              hourItem = {
                     "time": int(hour_array_grib[idx]),
                     "icon": hourIcon,
                     "summary": hourText,
@@ -2903,10 +2918,9 @@ async def PW_Forecast(
                     "fireIndex": InterPhour[idx, 24],
                     "feelsLike": InterPhour[idx, 25],
                 }
-            )
+                
         else:
-            hourList.append(
-                {
+              hourItem = {
                     "time": int(hour_array_grib[idx]),
                     "icon": hourIcon,
                     "summary": hourText,
@@ -2930,10 +2944,16 @@ async def PW_Forecast(
                     "visibility": InterPhour[idx, 15],
                     "ozone": InterPhour[idx, 16],
                 }
-            )
+        
+        hourText, hourIcon = calculate_text(hourItem, prepIntensityUnit, visUnits, windUnit, tempUnits, isDay, mode="title")
+        translation = Translations[lang]
+        hourItem["summary"] = translation.translate(hourText)
+        hourItem["icon"] = hourIcon
+
+        hourList.append(hourItem)
 
         hourIconList.append(hourIcon)
-        hourTextList.append(hourText)
+        hourTextList.append(hourItem["summary"])
 
     # Daily calculations #################################################
     # Timing Check
@@ -3314,7 +3334,7 @@ async def PW_Forecast(
 
                     # Step 2: Replace remaining single newlines with a space
                     formatted_text = re.sub(r"\n\n", "\n", formatted_text)
-
+                      
                     alertDict = {
                         "title": alertDetails[0],
                         "regions": [s.lstrip() for s in alertDetails[2].split(";")],
@@ -3785,6 +3805,26 @@ async def PW_Forecast(
             returnOBJ["currently"]["currentDayIce"] = dayZeroIce
             returnOBJ["currently"]["currentDayLiquid"] = dayZeroRain
             returnOBJ["currently"]["currentDaySnow"] = dayZeroSnow
+            
+            # Update the text
+            if InterPcurrent[0] < InterSday[0, 17]:
+            # Before sunrise
+              currentDay = False
+            elif (
+              InterPcurrent[0] > InterSday[0, 17] and InterPcurrent[0] < InterSday[0, 18]
+            ):
+              # After sunrise before sunset
+              currentDay = True
+            elif InterPcurrent[0] > InterSday[0, 18]:
+              # After sunset
+              currentDay = False
+              
+            currentText, currentIcon = calculate_text(returnOBJ["currently"], prepIntensityUnit, visUnits, windUnit, tempUnits, currentDay,
+                                            mode="title")
+            translation = Translations[lang]
+            returnOBJ["currently"]["summary"] = translation.translate(currentText)
+            returnOBJ["currently"]["icon"] = currentIcon
+
 
     if exMinutely != 1:
         returnOBJ["minutely"] = dict()
@@ -3826,7 +3866,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.4.1"
+        returnOBJ["flags"]["version"] = "V2.5.0"
 
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
