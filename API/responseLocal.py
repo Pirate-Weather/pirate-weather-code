@@ -47,7 +47,7 @@ aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 save_type = os.getenv("save_type", default="S3")
 s3_bucket = os.getenv("s3_bucket", default="piratezarr2")
-useETOPO = os.getenv("useETOPO", default=False)
+useETOPO = os.getenv("useETOPO", default=True)
 print(os.environ.get("TIMING", False))
 TIMING = os.environ.get("TIMING", False)
 
@@ -3450,7 +3450,7 @@ async def PW_Forecast(
         )
 
     # Clip between 800 and 1100
-    InterPcurrent[8] = np.clip(InterPcurrent[8], 800, 1100) * pressUnits
+    InterPcurrent[8] = np.clip(InterPcurrent[8], 80000, 110000) * pressUnits
 
     # WindSpeed from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
@@ -3479,7 +3479,7 @@ async def PW_Forecast(
 
     # Guest from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
-        InterPcurrent[10] = hrrrSubHInterpolation[0, 1] * windUnit
+        InterPcurrent[10] = hrrrSubHInterpolation[0, 1]
     elif "nbm" in sourceList:
         InterPcurrent[10] = (
             NBM_Merged[currentIDX_hrrrh - 1, 1] * interpFac1
@@ -3826,7 +3826,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.3.3"
+        returnOBJ["flags"]["version"] = "V2.4.1"
 
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
