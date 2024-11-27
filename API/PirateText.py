@@ -69,15 +69,14 @@ def calculate_text(
     cCond = None
     # Add the possible precipitation text if pop is less than 30% or if pop is greater than 0 but precipIntensity is between 0-0.02 mm/h
     if (pop < 0.3) or (
-        precipIntensity > 0
-        and precipIntensity < (0.02 * prepIntensityUnit)
+        precipIntensity > 0 and precipIntensity < (0.02 * prepIntensityUnit)
     ):
         possiblePrecip = "possible-"
     else:
         cIcon = precipType
 
     # If precipIntensity is greater than 0 and no type fallback to rain icon
-    if precipType == "none" and precipIntensity > 0 :
+    if precipType == "none" and precipIntensity > 0:
         cIcon = "rain"
 
     if (precipIntensity > 0) & (precipType != None):
