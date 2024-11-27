@@ -203,7 +203,7 @@ def calculate_text(
         if tempUnits == 0:
             tempThresh = 68
         else:
-            tempThresh = 10
+            tempThresh = 20
         if temp > tempThresh:
             # Do not change the icon
             if cCond == None:
