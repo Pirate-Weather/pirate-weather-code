@@ -67,18 +67,17 @@ def calculate_text(
     cIcon = None
     cText = None
     cCond = None
-    # Add the possible precipitation text if pop is between 10-30% or if pop is greater than 10% but precipIntensity is between 0-0.02 mm/h
-    if (pop >= 0.1 and pop < 0.3) or (
-        pop >= 0.1
-        and precipIntensity > 0
+    # Add the possible precipitation text if pop is less than 30% or if pop is greater than 0 but precipIntensity is between 0-0.02 mm/h
+    if (pop < 0.3) or (
+        precipIntensity > 0
         and precipIntensity < (0.02 * prepIntensityUnit)
     ):
         possiblePrecip = "possible-"
     else:
         cIcon = precipType
 
-    # If precipIntensity is greater than 0.02 mm/h and no type fallback to rain icon
-    if precipType == "none" and precipIntensity >= (0.02 * prepIntensityUnit):
+    # If precipIntensity is greater than 0 and no type fallback to rain icon
+    if precipType == "none" and precipIntensity > 0 :
         cIcon = "rain"
 
     if (precipIntensity > 0) & (precipType != None):
@@ -90,8 +89,8 @@ def calculate_text(
                 cText = [mode, possiblePrecip + "light-rain"]
                 cCond = possiblePrecip + "light-rain"
             elif precipIntensity >= midRainThresh and precipIntensity < heavyRainThresh:
-                cText = [mode, "medium-rain"]
-                cCond = "medium-rain"
+                cText = [mode, possiblePrecip + "medium-rain"]
+                cCond = possiblePrecip + "medium-rain"
             else:
                 cText = [mode, "heavy-rain"]
                 cCond = "heavy-rain"
@@ -103,11 +102,11 @@ def calculate_text(
                 cText = [mode, possiblePrecip + "light-snow"]
                 cCond = possiblePrecip + "light-snow"
             elif precipIntensity >= midSnowThresh and precipIntensity < heavySnowThresh:
-                cText = [mode, "medium-snow"]
-                cCond = "medium-snow"
+                cText = [mode, possiblePrecip + "medium-snow"]
+                cCond = possiblePrecip + "medium-snow"
             else:
-                cText = [mode, "heavy-snow"]
-                cCond = "heavy-snow"
+                cText = [mode, possiblePrecip + "heavy-snow"]
+                cCond = possiblePrecip + "heavy-snow"
         elif precipType == "sleet":
             if precipIntensity < lightSleetThresh:
                 cText = [mode, possiblePrecip + "very-light-sleet"]
@@ -120,13 +119,13 @@ def calculate_text(
             elif (
                 precipIntensity >= midSleetThresh and precipIntensity < heavySleetThresh
             ):
-                cText = [mode, "medium-sleet"]
-                cCond = "medium-sleet"
+                cText = [mode, possiblePrecip + "medium-sleet"]
+                cCond = possiblePrecip + "medium-sleet"
             else:
-                cText = [mode, "heavy-sleet"]
-                cCond = "heavy-sleet"
+                cText = [mode, possiblePrecip + "heavy-sleet"]
+                cCond = possiblePrecip + "heavy-sleet"
         else:
-            # Because soemtimes there's precipitation not no type use a generic precipitation summary
+            # Because sometimes there's precipitation not no type use a generic precipitation summary
             if precipIntensity < lightRainThresh:
                 cText = [mode, possiblePrecip + "very-light-precipitation"]
                 cCond = possiblePrecip + "very-light-precipitation"
@@ -134,11 +133,11 @@ def calculate_text(
                 cText = [mode, possiblePrecip + "light-precipitation"]
                 cCond = possiblePrecip + "light-precipitation"
             elif precipIntensity >= midRainThresh and precipIntensity < heavyRainThresh:
-                cText = [mode, "medium-precipitation"]
-                cCond = "medium-precipitation"
+                cText = [mode, possiblePrecip + "medium-precipitation"]
+                cCond = possiblePrecip + "medium-precipitation"
             else:
-                cText = [mode, "heavy-precipitation"]
-                cCond = "heavy-precipitation"
+                cText = [mode, possiblePrecip + "heavy-precipitation"]
+                cCond = possiblePrecip + "heavy-precipitation"
 
     # If visibility < 1000m, show fog
     elif vis < visThresh:
@@ -213,7 +212,7 @@ def calculate_text(
             else:
                 cText = [mode, ["and", "high-humidity", cCond]]
 
-    # If we have a condition text but no icon then use the sky cover icon
+    # If we have a condition text but no icon then use the sky cover or fog icon
     if cIcon is None and cText is not None:
         if vis < visThresh:
             cIcon = "fog"
