@@ -56,12 +56,16 @@ def calculate_text(
     # Get key values from the hourObject
     precipIntensity = hourObject["precipIntensity"]
     precipType = hourObject["precipType"]
-    vis = hourObject["visibility"]
     cloudCover = hourObject["cloudCover"]
     wind = hourObject["windSpeed"]
     pop = hourObject["precipProbability"]
     humidity = hourObject["humidity"]
     temp = hourObject["temperature"]
+
+    if "visibility" in hourObject:
+      vis = hourObject["visibility"]
+    else:
+      vis = 10000
 
     possiblePrecip = ""
     cIcon = None
