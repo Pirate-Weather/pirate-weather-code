@@ -63,9 +63,9 @@ def calculate_text(
     temp = hourObject["temperature"]
 
     if "visibility" in hourObject:
-      vis = hourObject["visibility"]
+        vis = hourObject["visibility"]
     else:
-      vis = 10000
+        vis = 10000
 
     possiblePrecip = ""
     cIcon = None

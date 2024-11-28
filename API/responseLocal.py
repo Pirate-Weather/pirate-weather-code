@@ -47,7 +47,6 @@ import re
 from javascript import require
 
 
-
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 save_type = os.getenv("save_type", default="S3")
@@ -60,6 +59,7 @@ node_dir = os.environ.get("node_dir", "/app/node_modules/translations/index.js")
 Translations = require(node_dir)
 
 force_now = os.getenv("force_now", default=False)
+
 
 def download_if_newer(
     s3_bucket, s3_object_key, local_file_path, local_lmdb_path, initialDownload
@@ -773,23 +773,22 @@ async def PW_Forecast(
 
     # Current time
     if force_now == False:
-      nowTime = datetime.datetime.utcnow()
+        nowTime = datetime.datetime.utcnow()
     else:
-      # Force now for testing with static inputs
-      nowTime = datetime.datetime.utcfromtimestamp(int(force_now))
-      print('Forced Current Time to:')
-      print(nowTime)
-      
-    ### If developing in REPL, uncomment to provide static variables  
-    #location = "47.1756,27.594,1730869200"
-    #units = "ca" 
-    #extend = None
-    #exclude = None
-    #lang = "en"
-    #version = "2"
-    #tmextra: None
-    #apikey: None
+        # Force now for testing with static inputs
+        nowTime = datetime.datetime.utcfromtimestamp(int(force_now))
+        print("Forced Current Time to:")
+        print(nowTime)
 
+    ### If developing in REPL, uncomment to provide static variables
+    # location = "47.1756,27.594,1730869200"
+    # units = "ca"
+    # extend = None
+    # exclude = None
+    # lang = "en"
+    # version = "2"
+    # tmextra: None
+    # apikey: None
 
     locationReq = location.split(",")
 
@@ -3855,8 +3854,7 @@ async def PW_Forecast(
             # Before sunrise
             currentDay = False
         elif (
-            InterPcurrent[0] > InterSday[0, 17]
-            and InterPcurrent[0] < InterSday[0, 18]
+            InterPcurrent[0] > InterSday[0, 17] and InterPcurrent[0] < InterSday[0, 18]
         ):
             # After sunrise before sunset
             currentDay = True
