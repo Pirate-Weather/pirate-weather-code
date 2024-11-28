@@ -4124,11 +4124,9 @@ import threading
 lock = threading.Lock()
 
 
-
 import logging
 
 import s3fs
-
 
 
 from javascript import require
@@ -7913,8 +7911,7 @@ async def PW_Forecast(
             # Before sunrise
             currentDay = False
         elif (
-            InterPcurrent[0] > InterSday[0, 17]
-            and InterPcurrent[0] < InterSday[0, 18]
+            InterPcurrent[0] > InterSday[0, 17] and InterPcurrent[0] < InterSday[0, 18]
         ):
             # After sunrise before sunset
             currentDay = True
