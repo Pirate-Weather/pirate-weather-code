@@ -76,14 +76,12 @@ def calculate_text(
         precipIntensity > 0 and precipIntensity < (0.02 * prepIntensityUnit)
     ):
         possiblePrecip = "possible-"
-        
 
     # If precipIntensity is greater than 0.02 mm/h and no type fallback to rain icon
     if precipType == "none" and precipIntensity >= (0.02 * prepIntensityUnit):
         cIcon = "rain"
     elif precipIntensity >= (0.02 * prepIntensityUnit):
-        cIcon = precipType    
-        
+        cIcon = precipType
 
     if (precipIntensity > 0) & (precipType != None):
         if precipType == "rain":
@@ -130,21 +128,21 @@ def calculate_text(
                 cText = [mode, possiblePrecip + "heavy-sleet"]
                 cCond = possiblePrecip + "heavy-sleet"
     elif (precipIntensity > 0) & (precipType == None):
-            # Because sometimes there's precipitation not no type use a generic precipitation summary
-            # Not sure if this is possibile
-            cIcon = "rain"
-            if precipIntensity < lightRainThresh:
-                cText = [mode, possiblePrecip + "very-light-precipitation"]
-                cCond = possiblePrecip + "very-light-precipitation"
-            elif precipIntensity >= lightRainThresh and precipIntensity < midRainThresh:
-                cText = [mode, possiblePrecip + "light-precipitation"]
-                cCond = possiblePrecip + "light-precipitation"
-            elif precipIntensity >= midRainThresh and precipIntensity < heavyRainThresh:
-                cText = [mode, possiblePrecip + "medium-precipitation"]
-                cCond = possiblePrecip + "medium-precipitation"
-            else:
-                cText = [mode, possiblePrecip + "heavy-precipitation"]
-                cCond = possiblePrecip + "heavy-precipitation"
+        # Because sometimes there's precipitation not no type use a generic precipitation summary
+        # Not sure if this is possibile
+        cIcon = "rain"
+        if precipIntensity < lightRainThresh:
+            cText = [mode, possiblePrecip + "very-light-precipitation"]
+            cCond = possiblePrecip + "very-light-precipitation"
+        elif precipIntensity >= lightRainThresh and precipIntensity < midRainThresh:
+            cText = [mode, possiblePrecip + "light-precipitation"]
+            cCond = possiblePrecip + "light-precipitation"
+        elif precipIntensity >= midRainThresh and precipIntensity < heavyRainThresh:
+            cText = [mode, possiblePrecip + "medium-precipitation"]
+            cCond = possiblePrecip + "medium-precipitation"
+        else:
+            cText = [mode, possiblePrecip + "heavy-precipitation"]
+            cCond = possiblePrecip + "heavy-precipitation"
 
     # If visibility < 1000m, show fog
     elif vis < visThresh:
