@@ -3179,8 +3179,8 @@ async def PW_Forecast(
             dayList.append(
                 {
                     "time": int(day_array_grib[idx]),
-                    "icon": dayIcon,
                     "summary": dayText,
+                    "icon": dayIcon,
                     "sunriseTime": int(InterSday[idx, 17]),
                     "sunsetTime": int(InterSday[idx, 18]),
                     "moonPhase": InterSday[idx, 19].round(2),
@@ -3222,8 +3222,8 @@ async def PW_Forecast(
                 dayList.append(
                     {
                         "time": int(day_array_grib[idx]),
-                        "icon": dayIcon,
                         "summary": dayText,
+                        "icon": dayIcon,
                         "dawnTime": int(InterSday[idx, 15]),
                         "sunriseTime": int(InterSday[idx, 17]),
                         "sunsetTime": int(InterSday[idx, 18]),
@@ -3277,8 +3277,8 @@ async def PW_Forecast(
                 dayList.append(
                     {
                         "time": int(day_array_grib[idx]),
-                        "icon": dayIcon,
                         "summary": dayText,
+                        "icon": dayIcon,
                         "sunriseTime": int(InterSday[idx, 17]),
                         "sunsetTime": int(InterSday[idx, 18]),
                         "moonPhase": InterSday[idx, 19].round(2),

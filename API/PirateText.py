@@ -76,12 +76,14 @@ def calculate_text(
         precipIntensity > 0 and precipIntensity < (0.02 * prepIntensityUnit)
     ):
         possiblePrecip = "possible-"
-    else:
-        cIcon = precipType
+        
 
     # If precipIntensity is greater than 0.02 mm/h and no type fallback to rain icon
     if precipType == "none" and precipIntensity >= (0.02 * prepIntensityUnit):
         cIcon = "rain"
+    elif precipIntensity >= (0.02 * prepIntensityUnit):
+        cIcon = precipType    
+        
 
     if (precipIntensity > 0) & (precipType != None):
         if precipType == "rain":
@@ -127,8 +129,10 @@ def calculate_text(
             else:
                 cText = [mode, possiblePrecip + "heavy-sleet"]
                 cCond = possiblePrecip + "heavy-sleet"
-        else:
+    elif (precipIntensity > 0) & (precipType == None):
             # Because sometimes there's precipitation not no type use a generic precipitation summary
+            # Not sure if this is possibile
+            cIcon = "rain"
             if precipIntensity < lightRainThresh:
                 cText = [mode, possiblePrecip + "very-light-precipitation"]
                 cCond = possiblePrecip + "very-light-precipitation"
