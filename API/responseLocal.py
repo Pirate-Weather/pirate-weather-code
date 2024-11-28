@@ -4124,9 +4124,11 @@ import threading
 lock = threading.Lock()
 
 
+
 import logging
 
 import s3fs
+
 
 
 from javascript import require
@@ -6959,8 +6961,8 @@ async def PW_Forecast(
         if timeMachine and not tmExtra:
             hourItem = {
                 "time": int(hour_array_grib[idx]),
-                "icon": hourIcon,
                 "summary": hourText,
+                "icon": hourIcon,
                 "precipIntensity": InterPhour[idx, 2],
                 "precipAccumulation": InterPhour[idx, 21]
                 + InterPhour[idx, 22]
@@ -6980,8 +6982,8 @@ async def PW_Forecast(
         elif version >= 2:
             hourItem = {
                 "time": int(hour_array_grib[idx]),
-                "icon": hourIcon,
                 "summary": hourText,
+                "icon": hourIcon,
                 "precipIntensity": InterPhour[idx, 2],
                 "precipProbability": InterPhour[idx, 3],
                 "precipIntensityError": InterPhour[idx, 4],
@@ -7014,8 +7016,8 @@ async def PW_Forecast(
         else:
             hourItem = {
                 "time": int(hour_array_grib[idx]),
-                "icon": hourIcon,
                 "summary": hourText,
+                "icon": hourIcon,
                 "precipIntensity": InterPhour[idx, 2],
                 "precipProbability": InterPhour[idx, 3],
                 "precipIntensityError": InterPhour[idx, 4],
@@ -7911,7 +7913,8 @@ async def PW_Forecast(
             # Before sunrise
             currentDay = False
         elif (
-            InterPcurrent[0] > InterSday[0, 17] and InterPcurrent[0] < InterSday[0, 18]
+            InterPcurrent[0] > InterSday[0, 17]
+            and InterPcurrent[0] < InterSday[0, 18]
         ):
             # After sunrise before sunset
             currentDay = True
@@ -7971,7 +7974,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.5.0b"
+        returnOBJ["flags"]["version"] = "V2.5.0c"
 
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
