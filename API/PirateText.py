@@ -50,8 +50,8 @@ def calculate_text(
     midWindThresh = 10 * windUnit
     heavyWindThresh = 17.8816 * windUnit
 
-    lowHumidityThresh = 0.1
-    highHumidityThresh = 0.97
+    lowHumidityThresh = 0.15
+    highHumidityThresh = 0.95
 
     # Get key values from the hourObject
     precipIntensity = hourObject["precipIntensity"]
@@ -170,21 +170,21 @@ def calculate_text(
     # Add wind or humidity text
     if wind >= lightWindThresh:
         if cCond == None:
-            if wind >= lightWindThresh:
+            if wind >= lightWindThresh and wind < midWindThresh:
                 cIcon = "wind"
                 cText = [mode, "light-wind"]
-            elif wind >= midWindThresh:
+            elif wind >= midWindThresh and wind < heavyWindThresh:
                 cIcon = "wind"
                 cText = [mode, "medium-wind"]
             elif wind >= heavyWindThresh:
                 cIcon = "wind"
                 cText = [mode, "heavy-wind"]
-        elif precipIntensity < 0.02:
+        elif precipIntensity == 0:
             # Show the wind text before the sky text
-            if wind >= lightWindThresh:
+            if wind >= lightWindThresh and wind < midWindThresh:
                 cIcon = "wind"
                 cText = [mode, ["and", "light-wind", cCond]]
-            elif wind >= midWindThresh:
+            elif wind >= midWindThresh and wind < heavyWindThresh:
                 cIcon = "wind"
                 cText = [mode, ["and", "medium-wind", cCond]]
             elif wind >= heavyWindThresh:
@@ -192,19 +192,19 @@ def calculate_text(
                 cText = [mode, ["and", "heavy-wind", cCond]]
         else:
             # Show the precipitation text before the wind text
-            if wind >= heavyWindThresh:
+            if wind >= heavyWindThresh and wind < midWindThresh:
                 cText = [mode, ["and", cCond, "heavy-wind"]]
-            elif wind >= midWindThresh:
+            elif wind >= midWindThresh and wind < heavyWindThresh:
                 cText = [mode, ["and", cCond, "medium-wind"]]
             elif wind >= lightWindThresh:
                 cText = [mode, ["and", cCond, "light-wind"]]
-    elif humidity < lowHumidityThresh:
+    elif humidity <= lowHumidityThresh:
         # Do not change the icon
         if cCond == None:
             cText = [mode, "low-humidity"]
         else:
-            cText = [mode, ["and", "low-humidity", cCond]]
-    elif humidity > highHumidityThresh:
+            cText = [mode, ["and", cCond, "low-humidity"]]
+    elif humidity >= highHumidityThresh:
         # Only use humid if also warm (>20C)
         if tempUnits == 0:
             tempThresh = 68
@@ -215,7 +215,7 @@ def calculate_text(
             if cCond == None:
                 cText = [mode, "high-humidity"]
             else:
-                cText = [mode, ["and", "high-humidity", cCond]]
+                cText = [mode, ["and", cCond, "high-humidity"]]
 
     # If we have a condition text but no icon then use the sky cover or fog icon
     if cIcon is None and cText is not None:
