@@ -3717,7 +3717,7 @@ async def PW_Forecast(
                 + NBM_Fire_Merged[currentIDX_hrrrh, 1] * interpFac2
             ),
             0,
-            15,
+            100,
         )
     else:
         InterPcurrent[19] = -999
