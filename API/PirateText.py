@@ -83,7 +83,7 @@ def calculate_text(
     elif precipIntensity >= (0.02 * prepIntensityUnit):
         cIcon = precipType
 
-    if (precipIntensity > 0) and (precipType != None or precipType != "none")):
+    if (precipIntensity > 0) and (precipType != None or precipType != "none"):
         if precipType == "rain":
             if precipIntensity < lightRainThresh:
                 cText = [mode, possiblePrecip + "very-light-rain"]
@@ -179,13 +179,22 @@ def calculate_text(
             # If precipitation intensity is below 0.02 mm/h then set the icon to be the wind icon otherwise use the already set icon
             if precipIntensity < (0.02 * prepIntensityUnit):
                 cIcon = "wind"
-            # Show the wind text before the sky and precipiation text text
-            if wind >= lightWindThresh and wind < midWindThresh:
-                cText = [mode, ["and", "light-wind", cCond]]
-            elif wind >= midWindThresh and wind < heavyWindThresh:
-                cText = [mode, ["and", "medium-wind", cCond]]
-            elif wind >= heavyWindThresh:
-                cText = [mode, ["and", "heavy-wind", cCond]]
+            if precipIntensity == 0:
+                # Show the wind text before the sky text
+                if wind >= lightWindThresh and wind < midWindThresh:
+                    cText = [mode, ["and", "light-wind", cCond]]
+                elif wind >= midWindThresh and wind < heavyWindThresh:
+                    cText = [mode, ["and", "medium-wind", cCond]]
+                elif wind >= heavyWindThresh:
+                    cText = [mode, ["and", "heavy-wind", cCond]]
+            else: 
+                # Show the wind textb after the precipitation text
+                if wind >= lightWindThresh and wind < midWindThresh:
+                    cText = [mode, ["and", cCond, "light-wind"]]
+                elif wind >= midWindThresh and wind < heavyWindThresh:
+                    cText = [mode, ["and", cCond, "medium-wind"]]
+                elif wind >= heavyWindThresh:
+                    cText = [mode, ["and", cCond, "heavy-wind"]]
     elif humidity <= lowHumidityThresh:
         # Do not change the icon
         if cCond == None:
