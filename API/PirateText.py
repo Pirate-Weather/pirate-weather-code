@@ -78,12 +78,12 @@ def calculate_text(
         possiblePrecip = "possible-"
 
     # If precipIntensity is greater than 0.02 mm/h and no type fallback to rain icon
-    if precipType == "none" and precipIntensity >= (0.02 * prepIntensityUnit):
+    if precipType == "none" and precipIntensity > 0:
         cIcon = "rain"
     elif precipIntensity >= (0.02 * prepIntensityUnit):
         cIcon = precipType
 
-    if (precipIntensity > 0) & (precipType != None):
+    if (precipIntensity > 0) and (precipType != None or precipType != "none")):
         if precipType == "rain":
             if precipIntensity < lightRainThresh:
                 cText = [mode, possiblePrecip + "very-light-rain"]
@@ -127,10 +127,8 @@ def calculate_text(
             else:
                 cText = [mode, possiblePrecip + "heavy-sleet"]
                 cCond = possiblePrecip + "heavy-sleet"
-    elif (precipIntensity > 0) & (precipType == None):
+    elif (precipIntensity > 0) and (precipType == None or precipType == "none"):
         # Because sometimes there's precipitation not no type use a generic precipitation summary
-        # Not sure if this is possibile
-        cIcon = "rain"
         if precipIntensity < lightRainThresh:
             cText = [mode, possiblePrecip + "very-light-precipitation"]
             cCond = possiblePrecip + "very-light-precipitation"
@@ -170,34 +168,24 @@ def calculate_text(
     # Add wind or humidity text
     if wind >= lightWindThresh:
         if cCond == None:
+            cIcon = "wind"
             if wind >= lightWindThresh and wind < midWindThresh:
-                cIcon = "wind"
                 cText = [mode, "light-wind"]
             elif wind >= midWindThresh and wind < heavyWindThresh:
-                cIcon = "wind"
                 cText = [mode, "medium-wind"]
             elif wind >= heavyWindThresh:
-                cIcon = "wind"
                 cText = [mode, "heavy-wind"]
-        elif precipIntensity == 0:
-            # Show the wind text before the sky text
-            if wind >= lightWindThresh and wind < midWindThresh:
+        else:
+            # If precipitation intensity is below 0.02 mm/h then set the icon to be the wind icon otherwise use the already set icon
+            if precipIntensity < (0.02 * prepIntensityUnit):
                 cIcon = "wind"
+            # Show the wind text before the sky and precipiation text text
+            if wind >= lightWindThresh and wind < midWindThresh:
                 cText = [mode, ["and", "light-wind", cCond]]
             elif wind >= midWindThresh and wind < heavyWindThresh:
-                cIcon = "wind"
                 cText = [mode, ["and", "medium-wind", cCond]]
             elif wind >= heavyWindThresh:
-                cIcon = "wind"
                 cText = [mode, ["and", "heavy-wind", cCond]]
-        else:
-            # Show the precipitation text before the wind text
-            if wind >= heavyWindThresh and wind < midWindThresh:
-                cText = [mode, ["and", cCond, "heavy-wind"]]
-            elif wind >= midWindThresh and wind < heavyWindThresh:
-                cText = [mode, ["and", cCond, "medium-wind"]]
-            elif wind >= lightWindThresh:
-                cText = [mode, ["and", cCond, "light-wind"]]
     elif humidity <= lowHumidityThresh:
         # Do not change the icon
         if cCond == None:
