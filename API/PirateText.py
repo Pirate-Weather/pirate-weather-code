@@ -187,7 +187,7 @@ def calculate_text(
                     cText = [mode, ["and", "medium-wind", cCond]]
                 elif wind >= heavyWindThresh:
                     cText = [mode, ["and", "heavy-wind", cCond]]
-            else: 
+            else:
                 # Show the wind textb after the precipitation text
                 if wind >= lightWindThresh and wind < midWindThresh:
                     cText = [mode, ["and", cCond, "light-wind"]]
