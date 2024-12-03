@@ -78,7 +78,7 @@ def calculate_text(
         possiblePrecip = "possible-"
 
     # If precipIntensity is greater than 0.02 mm/h and no type fallback to rain icon
-    if precipType == "none" and precipIntensity > 0:
+    if precipType == "none" and precipIntensity >= (0.02 * prepIntensityUnit):
         cIcon = "rain"
     elif precipIntensity >= (0.02 * prepIntensityUnit):
         cIcon = precipType
