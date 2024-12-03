@@ -63,9 +63,7 @@ s3_bucket = os.getenv("save_path", default="s3://piratezarr2")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
-s3 = s3fs.S3FileSystem(
-    key=aws_access_key_id, secret=aws_secret_access_key
-)
+s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
 
 latestRun = HerbieLatest(

@@ -87,9 +87,7 @@ s3_save_path = "/ForecastProd/NBM_Fire/NBM_Fire_"
 
 hisPeriod = 36
 
-s3 = s3fs.S3FileSystem(
-    key=aws_access_key_id, secret=aws_secret_access_key
-)
+s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
 
 # %% Define base time from the most recent run
