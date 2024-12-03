@@ -3717,7 +3717,7 @@ async def PW_Forecast(
                 + NBM_Fire_Merged[currentIDX_hrrrh, 1] * interpFac2
             ),
             0,
-            15,
+            100,
         )
     else:
         InterPcurrent[19] = -999
@@ -3914,7 +3914,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.5.0d"
+        returnOBJ["flags"]["version"] = "V2.5.0e"
 
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
