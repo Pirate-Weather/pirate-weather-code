@@ -18,4 +18,4 @@ dask==2024.11.2
 xarray==2024.11.0
 pandas==2.2.3
 fastparquet==2024.11.0
-javascript==1.2.1
+javascript==1!1.2.1
