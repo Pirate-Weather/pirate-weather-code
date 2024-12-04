@@ -1373,6 +1373,8 @@ async def PW_Forecast(
             else:
                 readNBM = True
 
+    
+
     # Timing Check
     if TIMING:
         print("### GFS/GEFS Start ###")
@@ -1927,6 +1929,7 @@ async def PW_Forecast(
         print("Array start")
         print(datetime.datetime.utcnow() - T_Start)
 
+
     InterPhour[:, 0] = hour_array_grib
 
     # Daily array, 12 to 12
@@ -2355,6 +2358,8 @@ async def PW_Forecast(
     else:
         maxPchance = np.argmax(InterTminute, axis=1)
 
+    
+
     # Create list of icons based off of maxPchance
     minuteKeys = [
         "time",
@@ -2367,11 +2372,20 @@ async def PW_Forecast(
     pTypesText = ["Clear", "Snow", "Sleet", "Sleet", "Rain", -999]
     pTypesIcon = ["clear", "snow", "sleet", "sleet", "rain", -999]
 
+    minuteType = [pTypes[maxPchance[idx]] for idx in range(61)]  
+
+    # Assign pfactors for rain and snow for intensity
+    pFacMinute = np.zeros((len(minute_array_grib)))
+    pFacMinute[
+        ((maxPchance == 4) | (maxPchance == 2) | (maxPchance == 3))
+    ] = 1  # Rain, Ice
+    pFacMinute[(maxPchance == 1)] = 10  # Snow
+
     minuteTimes = InterPminute[:, 0]
-    minuteIntensity = np.maximum(np.round(InterPminute[:, 1], 4), 0)
+    minuteIntensity = np.maximum(np.round(InterPminute[:, 1] * pFacMinute, 4), 0)
     minuteProbability = np.minimum(np.maximum(np.round(InterPminute[:, 2], 2), 0), 1)
     minuteIntensityError = np.maximum(np.round(InterPminute[:, 3], 2), 0)
-    minuteType = [pTypes[maxPchance[idx]] for idx in range(61)]
+    
 
     # Convert nan to -999 for json
     minuteIntensity[np.isnan(minuteIntensity)] = -999
@@ -2504,6 +2518,10 @@ async def PW_Forecast(
 
     # Less than 5% set to 0
     InterPhour[InterPhour[:, 3] < 0.05, 3] = 0
+
+    
+    # Set intensity to zero if POP == 0
+    InterPhour[InterPhour[:, 3] == 0, 2] = 0
 
     # Intensity Error
     # GEFS
@@ -2761,24 +2779,6 @@ async def PW_Forecast(
     hourIconList = []
     hourTextList = []
 
-    # Calculate prep accumilation for current day before zeroing
-    dayZeroPrep = InterPhour[:, 17].copy()
-    # Everything that isn't the current day
-    dayZeroPrep[hourlyDayIndex != 0] = 0
-    # Everything after the request time
-    dayZeroPrep[int(baseTimeOffset) :] = 0
-
-    # Accumilations in liquid equivilient
-    dayZeroRain = dayZeroPrep[InterPhour[:, 1] == 4].sum().round(4)  # rain
-    dayZeroSnow = (dayZeroPrep[InterPhour[:, 1] == 1].sum() * 10).round(4)  # Snow
-    dayZeroIce = (
-        dayZeroPrep[((InterPhour[:, 1] == 2) | (InterPhour[:, 1] == 3))].sum().round(4)
-    )  # Ice
-
-    # Zero prep accumilation before forecast time
-    InterPhour[0 : int(baseTimeOffset), 17] = 0
-    # Zero prep prob before forecast time
-    InterPhour[0 : int(baseTimeOffset), 3] = 0
 
     # Find snow and liqiud precip
     # Set to zero as baseline
@@ -2790,20 +2790,64 @@ async def PW_Forecast(
     InterPhour[InterPhour[:, 1] == 4, 21] = InterPhour[
         InterPhour[:, 1] == 4, 17
     ]  # rain
+    
+    # 10:1 Snow factor applied here!
     InterPhour[InterPhour[:, 1] == 1, 22] = (
         InterPhour[InterPhour[:, 1] == 1, 17] * 10
     )  # Snow
+    
     InterPhour[((InterPhour[:, 1] == 2) | (InterPhour[:, 1] == 3)), 23] = (
         InterPhour[((InterPhour[:, 1] == 2) | (InterPhour[:, 1] == 3)), 17] * 1
     )  # Ice
 
-    # Assign pfactors for rain and snow
+    # Rain
+    # Calculate prep accumilation for current day before zeroing
+    dayZeroPrepRain = InterPhour[:, 21].copy()
+    # Everything that isn't the current day
+    dayZeroPrepRain[hourlyDayIndex != 0] = 0
+    # Everything after the request time
+    dayZeroPrepRain[int(baseTimeOffset) :] = 0
+
+    # Snow
+    # Calculate prep accumilation for current day before zeroing
+    dayZeroPrepSnow = InterPhour[:, 22].copy()
+    # Everything that isn't the current day
+    dayZeroPrepSnow[hourlyDayIndex != 0] = 0
+    # Everything after the request time
+    dayZeroPrepSnow[int(baseTimeOffset) :] = 0 
+    
+    
+    # Sleet
+    # Calculate prep accumilation for current day before zeroing
+    dayZeroPrepSleet = InterPhour[:, 21].copy()
+    # Everything that isn't the current day
+    dayZeroPrepSleet[hourlyDayIndex != 0] = 0
+    # Everything after the request time
+    dayZeroPrepSleet[int(baseTimeOffset) :] = 0
+
+    # Accumilations in liquid equivilient
+    dayZeroRain = dayZeroPrepRain.sum().round(4)  # rain
+    dayZeroSnow = dayZeroPrepSnow.sum().round(4)  # Snow
+    dayZeroIce = dayZeroPrepSleet.sum().round(4) # Ice
+
+    # Zero prep accumilation before forecast time
+    InterPhour[0 : int(baseTimeOffset), 17] = 0
+    InterPhour[0 : int(baseTimeOffset), 21] = 0
+    InterPhour[0 : int(baseTimeOffset), 22] = 0
+    InterPhour[0 : int(baseTimeOffset), 23] = 0
+    
+    
+    # Zero prep prob before forecast time
+    InterPhour[0 : int(baseTimeOffset), 3] = 0
+
+
+    # Assign pfactors for rain and snow for intensity
     pFacHour = np.zeros((len(hour_array)))
     pFacHour[
         ((InterPhour[:, 1] == 4) | (InterPhour[:, 1] == 2) | (InterPhour[:, 1] == 3))
     ] = 1  # Rain, Ice
-    pFacHour[(InterPhour[:, 1] == 1)] = 1  # Snow
-
+    pFacHour[(InterPhour[:, 1] == 1)] = 10  # Snow
+    
     InterPhour[:, 2] = InterPhour[:, 2] * pFacHour
 
     # pTypeMap = {0: 'none', 1: 'snow', 2: 'sleet', 3: 'sleet', 4: 'rain'}
@@ -2825,11 +2869,13 @@ async def PW_Forecast(
     InterPhour[:, 21:24] = InterPhour[:, 21:24].round(4)
 
     # Fix very small neg from interp to solve -0
-    InterPhour[((InterPhour > -0.01) & (InterPhour < 0.01))] = 0
+    InterPhour[((InterPhour > -0.001) & (InterPhour < 0.001))] = 0
 
     # Replace NaN with -999 for json
     InterPhour[np.isnan(InterPhour)] = -999
-
+    
+    print(InterPhour[:,5])
+    
     # Timing Check
     if TIMING:
         print("Hourly Loop start")
@@ -2979,7 +3025,8 @@ async def PW_Forecast(
                 "visibility": InterPhour[idx, 15],
                 "ozone": InterPhour[idx, 16],
             }
-
+        
+        
         hourText, hourIcon = calculate_text(
             hourItem,
             prepIntensityUnit,
@@ -3914,7 +3961,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.5.0e"
+        returnOBJ["flags"]["version"] = "V2.5.0"
 
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
