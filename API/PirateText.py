@@ -61,7 +61,11 @@ def calculate_text(
     wind = hourObject["windSpeed"]
     pop = hourObject["precipProbability"]
     humidity = hourObject["humidity"]
-    temp = hourObject["temperature"]
+    
+    if "temperature" in hourObject:
+      temp = hourObject["temperature"]
+    else:
+      temp = hourObject["temperatureHigh"]
 
     if "visibility" in hourObject:
         vis = hourObject["visibility"]
