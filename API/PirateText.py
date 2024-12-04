@@ -36,12 +36,13 @@ def calculate_text(
 ):
     visThresh = 1000 * visUnits
 
+    # In mm/h    
     lightRainThresh = 0.4 * prepIntensityUnit
     midRainThresh = 2.5 * prepIntensityUnit
     heavyRainThresh = 10 * prepIntensityUnit
-    lightSnowThresh = 0.13 * prepIntensityUnit
-    midSnowThresh = 0.83 * prepIntensityUnit
-    heavySnowThresh = 3.33 * prepIntensityUnit
+    lightSnowThresh = 1.33 * prepIntensityUnit
+    midSnowThresh = 8.33 * prepIntensityUnit
+    heavySnowThresh = 33.33 * prepIntensityUnit
     lightSleetThresh = 0.4 * prepIntensityUnit
     midSleetThresh = 2.5 * prepIntensityUnit
     heavySleetThresh = 10 * prepIntensityUnit
