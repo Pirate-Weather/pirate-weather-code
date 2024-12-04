@@ -2863,8 +2863,6 @@ async def PW_Forecast(
     # Replace NaN with -999 for json
     InterPhour[np.isnan(InterPhour)] = -999
 
-    print(InterPhour[:, 5])
-
     # Timing Check
     if TIMING:
         print("Hourly Loop start")
