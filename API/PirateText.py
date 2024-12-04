@@ -36,7 +36,7 @@ def calculate_text(
 ):
     visThresh = 1000 * visUnits
 
-    # In mm/h    
+    # In mm/h
     lightRainThresh = 0.4 * prepIntensityUnit
     midRainThresh = 2.5 * prepIntensityUnit
     heavyRainThresh = 10 * prepIntensityUnit
