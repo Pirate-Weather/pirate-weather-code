@@ -26,26 +26,30 @@ def calculate_sky_icon(cloudCover, isDayTime):
 
 
 def calculate_text(
-    hourObject,
-    prepIntensityUnit,
-    visUnits,
-    windUnit,
-    tempUnits,
-    isDayTime,
-    mode="title",
+        hourObject,
+        prepAccumUnit,
+        visUnits,
+        windUnit,
+        tempUnits,
+        isDayTime,
+        rainPrep,
+        snowPrep,
+        icePrep,
+        type,
+        mode="title",
 ):
     visThresh = 1000 * visUnits
 
     # In mm/h
-    lightRainThresh = 0.4 * prepIntensityUnit
-    midRainThresh = 2.5 * prepIntensityUnit
-    heavyRainThresh = 10 * prepIntensityUnit
-    lightSnowThresh = 1.33 * prepIntensityUnit
-    midSnowThresh = 8.33 * prepIntensityUnit
-    heavySnowThresh = 33.33 * prepIntensityUnit
-    lightSleetThresh = 0.4 * prepIntensityUnit
-    midSleetThresh = 2.5 * prepIntensityUnit
-    heavySleetThresh = 10 * prepIntensityUnit
+    lightRainThresh = 0.4 * prepAccumUnit
+    midRainThresh = 2.5 * prepAccumUnit
+    heavyRainThresh = 10 * prepAccumUnit
+    lightSnowThresh = 1.33 * prepAccumUnit
+    midSnowThresh = 8.33 * prepAccumUnit
+    heavySnowThresh = 33.33 * prepAccumUnit
+    lightSleetThresh = 0.4 * prepAccumUnit
+    midSleetThresh = 2.5 * prepAccumUnit
+    heavySleetThresh = 10.0 * prepAccumUnit
 
     lightWindThresh = 6.7056 * windUnit
     midWindThresh = 10 * windUnit
@@ -54,13 +58,44 @@ def calculate_text(
     lowHumidityThresh = 0.15
     highHumidityThresh = 0.95
 
-    # Get key values from the hourObject
-    precipIntensity = hourObject["precipIntensity"]
+    snowIconThresholdHour = 0.20 * prepAccumUnit
+    rainIconThresholdHour = 0.02 * prepAccumUnit
+    iceIconThresholdHour = 0.02 * prepAccumUnit
+
+    snowIconThresholdDay = 10.0 * prepAccumUnit
+    rainIconThresholdDay = 1.0 * prepAccumUnit
+    iceIconThresholdDay = 1.0 * prepAccumUnit
+
+    # Use daily or hourly thresholds depending on the situation
+    if ((type == "hour") or (type == "current")):
+        snowIconThreshold = snowIconThresholdHour
+        rainIconThreshold = rainIconThresholdHour
+        iceIconThreshold = iceIconThresholdHour
+    elif type == "day":
+        snowIconThreshold = snowIconThresholdDay
+        rainIconThreshold = rainIconThresholdDay
+        iceIconThreshold = iceIconThresholdDay
+        lightRainThresh  = lightRainThresh * 24
+        midRainThresh = midRainThresh * 24
+        heavyRainThresh = heavyRainThresh * 24
+        lightSnowThresh = lightSnowThresh * 24
+        midSnowThresh = midSnowThresh * 24
+        heavySnowThresh = heavySnowThresh * 24
+        lightSleetThresh = lightSleetThresh * 24
+        midSleetThresh = midSleetThresh * 24
+        heavySleetThresh = heavySleetThresh * 24
+
+
+        # Get key values from the hourObject
     precipType = hourObject["precipType"]
     cloudCover = hourObject["cloudCover"]
     wind = hourObject["windSpeed"]
-    pop = hourObject["precipProbability"]
     humidity = hourObject["humidity"]
+
+    if "precipProbability" in hourObject:
+        pop = hourObject["precipProbability"]
+    else:
+        pop = 1
 
     if "temperature" in hourObject:
         temp = hourObject["temperature"]
@@ -77,75 +112,67 @@ def calculate_text(
     cText = None
     cCond = None
     # Add the possible precipitation text if pop is less than 30% or if pop is greater than 0 but precipIntensity is between 0-0.02 mm/h
-    if (pop < 0.3) or (
-        precipIntensity > 0 and precipIntensity < (0.02 * prepIntensityUnit)
-    ):
+    if (pop < 0.25) or (((rainPrep> 0) and (rainPrep < rainIconThreshold)) or
+                        ((snowPrep> 0) and (snowPrep < snowIconThreshold)) or
+                        ((icePrep > 0) and (icePrep < iceIconThreshold))):
         possiblePrecip = "possible-"
 
-    # If precipIntensity is greater than 0.02 mm/h and no type fallback to rain icon
-    if precipType == "none" and precipIntensity >= (0.02 * prepIntensityUnit):
-        cIcon = "rain"
-    elif precipIntensity >= (0.02 * prepIntensityUnit):
-        cIcon = precipType
+    # Find the largest percentage difference compared to the thresholds
+    rainPrepPercent = rainPrep / rainIconThreshold
+    snowPrepPercent = snowPrep / snowIconThreshold
+    icePrepPercent = icePrep / iceIconThreshold
 
-    if (precipIntensity > 0) and (precipType != None or precipType != "none"):
-        if precipType == "rain":
-            if precipIntensity < lightRainThresh:
-                cText = [mode, possiblePrecip + "very-light-rain"]
-                cCond = possiblePrecip + "very-light-rain"
-            elif precipIntensity >= lightRainThresh and precipIntensity < midRainThresh:
-                cText = [mode, possiblePrecip + "light-rain"]
-                cCond = possiblePrecip + "light-rain"
-            elif precipIntensity >= midRainThresh and precipIntensity < heavyRainThresh:
-                cText = [mode, "medium-rain"]
-                cCond = "medium-rain"
-            else:
-                cText = [mode, "heavy-rain"]
-                cCond = "heavy-rain"
-        elif precipType == "snow":
-            if precipIntensity < lightSnowThresh:
-                cText = [mode, possiblePrecip + "very-light-snow"]
-                cCond = possiblePrecip + "very-light-snow"
-            elif precipIntensity >= lightSnowThresh and precipIntensity < midSnowThresh:
-                cText = [mode, possiblePrecip + "light-snow"]
-                cCond = possiblePrecip + "light-snow"
-            elif precipIntensity >= midSnowThresh and precipIntensity < heavySnowThresh:
-                cText = [mode, "medium-snow"]
-                cCond = "medium-snow"
-            else:
-                cText = [mode, "heavy-snow"]
-                cCond = "heavy-snow"
-        elif precipType == "sleet":
-            if precipIntensity < lightSleetThresh:
-                cText = [mode, possiblePrecip + "very-light-sleet"]
-                cCond = possiblePrecip + "very-light-sleet"
-            elif (
-                precipIntensity >= lightSleetThresh and precipIntensity < midSleetThresh
-            ):
-                cText = [mode, possiblePrecip + "light-sleet"]
-                cCond = possiblePrecip + "light-sleet"
-            elif (
-                precipIntensity >= midSleetThresh and precipIntensity < heavySleetThresh
-            ):
-                cText = [mode, "medium-sleet"]
-                cCond = "medium-sleet"
-            else:
-                cText = [mode, "heavy-sleet"]
-                cCond = "heavy-sleet"
-    elif (precipIntensity > 0) and (precipType == None or precipType == "none"):
-        # Because sometimes there's precipitation not no type use a generic precipitation summary
-        if precipIntensity < lightRainThresh:
-            cText = [mode, possiblePrecip + "very-light-precipitation"]
-            cCond = possiblePrecip + "very-light-precipitation"
-        elif precipIntensity >= lightRainThresh and precipIntensity < midRainThresh:
-            cText = [mode, possiblePrecip + "light-precipitation"]
-            cCond = possiblePrecip + "light-precipitation"
-        elif precipIntensity >= midRainThresh and precipIntensity < heavyRainThresh:
-            cText = [mode, "medium-precipitation"]
-            cCond = "medium-precipitation"
+    # Find the largest percentage difference to determine the icon
+    if pop>0.25 and ((rainPrep > rainIconThreshold) or (snowPrep > snowIconThreshold) or (icePrep > iceIconThreshold)):
+        if precipType == 'rain':
+            cIcon = "rain" # Fallback icon
         else:
-            cText = [mode, "heavy-precipitation"]
-            cCond = "heavy-precipitation"
+            cIcon = precipType
+
+    if precipType == 'rain':
+        if rainPrep < lightRainThresh:
+            cText = [mode, possiblePrecip + "very-light-rain"]
+            cCond = possiblePrecip + "very-light-rain"
+        elif rainPrep >= lightRainThresh and rainPrep < midRainThresh:
+            cText = [mode, possiblePrecip + "light-rain"]
+            cCond = possiblePrecip + "light-rain"
+        elif rainPrep >= midRainThresh and rainPrep < heavyRainThresh:
+            cText = [mode, "medium-rain"]
+            cCond = "medium-rain"
+        else:
+            cText = [mode, "heavy-rain"]
+            cCond = "heavy-rain"
+    elif precipType == "snow":
+        if snowPrep < lightSnowThresh:
+            cText = [mode, possiblePrecip + "very-light-snow"]
+            cCond = possiblePrecip + "very-light-snow"
+        elif snowPrep >= lightSnowThresh and snowPrep < midSnowThresh:
+            cText = [mode, possiblePrecip + "light-snow"]
+            cCond = possiblePrecip + "light-snow"
+        elif snowPrep >= midSnowThresh and snowPrep < heavySnowThresh:
+            cText = [mode, "medium-snow"]
+            cCond = "medium-snow"
+        else:
+            cText = [mode, "heavy-snow"]
+            cCond = "heavy-snow"
+    elif precipType == "sleet":
+        if icePrep < lightSleetThresh:
+            cText = [mode, possiblePrecip + "very-light-sleet"]
+            cCond = possiblePrecip + "very-light-sleet"
+        elif (
+                icePrep >= lightSleetThresh and icePrep < midSleetThresh
+        ):
+            cText = [mode, possiblePrecip + "light-sleet"]
+            cCond = possiblePrecip + "light-sleet"
+        elif (
+                icePrep >= midSleetThresh and icePrep < heavySleetThresh
+        ):
+            cText = [mode, "medium-sleet"]
+            cCond = "medium-sleet"
+        else:
+            cText = [mode, "heavy-sleet"]
+            cCond = "heavy-sleet"
+
 
     # If visibility < 1000m, show fog
     elif vis < visThresh:
@@ -154,6 +181,7 @@ def calculate_text(
         cText = [mode, "heavy-clouds"]
         cCond = "heavy-clouds"
         cIcon = calculate_sky_icon(cloudCover, isDayTime)
+
     elif cloudCover > partlyCloudyThreshold:
         cIcon = calculate_sky_icon(cloudCover, isDayTime)
         if cloudCover > mostlyCloudyThreshold:
@@ -181,10 +209,12 @@ def calculate_text(
             elif wind >= heavyWindThresh:
                 cText = [mode, "heavy-wind"]
         else:
+
             # If precipitation intensity is below 0.02 mm/h then set the icon to be the wind icon otherwise use the already set icon
-            if precipIntensity < (0.02 * prepIntensityUnit):
+            if  ((rainPrep < rainIconThreshold) and (snowPrep < snowIconThreshold) and (icePrep < iceIconThreshold)):
                 cIcon = "wind"
-            if precipIntensity == 0:
+
+            if (rainPrep +  snowPrep + icePrep) == 0:
                 # Show the wind text before the sky text
                 if wind >= lightWindThresh and wind < midWindThresh:
                     cText = [mode, ["and", "light-wind", cCond]]
@@ -193,13 +223,14 @@ def calculate_text(
                 elif wind >= heavyWindThresh:
                     cText = [mode, ["and", "heavy-wind", cCond]]
             else:
-                # Show the wind textb after the precipitation text
+                # Show the wind text after the precipitation text
                 if wind >= lightWindThresh and wind < midWindThresh:
                     cText = [mode, ["and", cCond, "light-wind"]]
                 elif wind >= midWindThresh and wind < heavyWindThresh:
                     cText = [mode, ["and", cCond, "medium-wind"]]
                 elif wind >= heavyWindThresh:
                     cText = [mode, ["and", cCond, "heavy-wind"]]
+
     elif humidity <= lowHumidityThresh:
         # Do not change the icon
         if cCond == None:
