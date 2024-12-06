@@ -6,6 +6,8 @@ RUN apt update && \
                     unzip \
                     rsync \
 					git
+         
+COPY requirements-api.txt requirements-api.txt
                     
 RUN pip install -r requirements-api.txt
 
