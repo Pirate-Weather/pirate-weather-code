@@ -134,7 +134,7 @@ def calculate_text(
         else:
             cIcon = precipType
 
-    if rainPrep > 0 and recipType == "rain":
+    if rainPrep > 0 and precipType == "rain":
         if rainPrep < lightRainThresh:
             cText = [mode, possiblePrecip + "very-light-rain"]
             cCond = possiblePrecip + "very-light-rain"
