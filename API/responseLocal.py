@@ -2716,7 +2716,7 @@ async def PW_Forecast(
 
     # Fire Index
     if "nbm_fire" in sourceList:
-        InterPhour[:, 24] = np.clip(NBM_Fire_Merged[:, 1], 0, 15)
+        InterPhour[:, 24] = np.clip(NBM_Fire_Merged[:, 1], 0, 100)
 
     # Apparent Temperature, Radiative temperature formula
     # https: // github.com / breezy - weather / breezy - weather / discussions / 1085
