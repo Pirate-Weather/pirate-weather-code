@@ -134,7 +134,7 @@ def calculate_text(
         else:
             cIcon = precipType
 
-    if precipType == "rain":
+    if rainPrepp > 0 and recipType == "rain":
         if rainPrep < lightRainThresh:
             cText = [mode, possiblePrecip + "very-light-rain"]
             cCond = possiblePrecip + "very-light-rain"
@@ -147,7 +147,7 @@ def calculate_text(
         else:
             cText = [mode, "heavy-rain"]
             cCond = "heavy-rain"
-    elif precipType == "snow":
+    elif snowPrep > 0 and precipType == "snow":
         if snowPrep < lightSnowThresh:
             cText = [mode, possiblePrecip + "very-light-snow"]
             cCond = possiblePrecip + "very-light-snow"
@@ -160,7 +160,7 @@ def calculate_text(
         else:
             cText = [mode, "heavy-snow"]
             cCond = "heavy-snow"
-    elif precipType == "sleet":
+    elif icePrep > 0 and precipType == "sleet":
         if icePrep < lightSleetThresh:
             cText = [mode, possiblePrecip + "very-light-sleet"]
             cCond = possiblePrecip + "very-light-sleet"
