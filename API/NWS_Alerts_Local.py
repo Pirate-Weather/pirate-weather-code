@@ -158,13 +158,14 @@ points_in_polygons = gp.sjoin(
     gridPointsSeries, nws_alert_merged_gdf, predicate="within", how="inner"
 )
 
-points_in_polygons["string"] = str(points_in_polygons["event"]) + "}" "{" + str(
-    points_in_polygons["description"]
-) + "}" + "{" + str(points_in_polygons["areaDesc"]) + "}" + "{" + str(
-    points_in_polygons["effective"]
-) + "}" + "{" + str(points_in_polygons["EXPIRATION"]) + "}" + "{" + str(
-    points_in_polygons["severity"]
-) + "}" + "{" + str(points_in_polygons["URL"])
+# Create a formatted string ton save all the relevant in the zarr array
+points_in_polygons['string'] =  points_in_polygons['event'].astype(str) + '}' \
+                       '{' + points_in_polygons['description'].astype(str) + '}' + \
+                      '{' + points_in_polygons['areaDesc'].astype(str) + '}' + \
+                      '{' + points_in_polygons['effective'].astype(str) + '}' + \
+                      '{' + points_in_polygons['EXPIRATION'].astype(str) + '}' + \
+                      '{' + points_in_polygons['severity'].astype(str) + '}' + \
+                      '{' + points_in_polygons['URL'].astype(str)
 
 
 float_rows = points_in_polygons[
@@ -174,6 +175,7 @@ float_rows = points_in_polygons[
 # Print the filtered rows
 print(float_rows)
 
+# Combine the formatted strings using "|" as a spacer
 df = points_in_polygons.groupby("INDEX").agg({"string": "|".join}).reset_index()
 
 
