@@ -93,6 +93,8 @@ def calculate_text(
 
     if "precipProbability" in hourObject:
         pop = hourObject["precipProbability"]
+    elif type == "current":
+        pop = 1
     else:
         pop = 1
 
