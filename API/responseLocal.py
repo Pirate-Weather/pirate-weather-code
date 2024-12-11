@@ -1,49 +1,39 @@
-import shutil
-import os
-
-import platform
-
-from fastapi import FastAPI, HTTPException, Request
-from fastapi_utils.tasks import repeat_every
-from fastapi.responses import ORJSONResponse
-
-import zarr
-import time
+import asyncio
 import datetime
-import numpy as np
+import logging
 import math
+import os
 import pickle
-from timezonefinder import TimezoneFinder
-from pytz import timezone, utc
-from astral import LocationInfo, moon
-from astral.sun import sun
+import platform
+import re
+import shutil
 import subprocess
-import boto3
-from boto3.s3.transfer import TransferConfig
-from fsspec import FSMap
-from fsspec.implementations.zip import ZipFileSystem
-
+import threading
+import time
+from collections import Counter
 from typing import Union
 
-import threading
+import boto3
+import numpy as np
+import pandas as pd
+import s3fs
+import xarray as xr
+import zarr
+from astral import LocationInfo, moon
+from astral.sun import sun
+from boto3.s3.transfer import TransferConfig
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import ORJSONResponse
+from fastapi_utils.tasks import repeat_every
+from fsspec import FSMap
+from fsspec.implementations.zip import ZipFileSystem
+from javascript import require
+from PirateText import calculate_text
+from pytz import timezone, utc
+from timemachine import TimeMachine
+from timezonefinder import TimezoneFinder
 
 lock = threading.Lock()
-
-from collections import Counter
-
-import logging
-
-import pandas as pd
-import xarray as xr
-import s3fs
-import asyncio
-
-from timemachine import TimeMachine
-from PirateText import calculate_text
-
-import re
-
-from javascript import require
 
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
@@ -129,7 +119,7 @@ def download_if_newer(
         # Untar the file
         # shutil.unpack_archive(local_file_path, extract_path, 'tar')
 
-    if newFile == True:
+    if newFile:
         # Write a file to show an update is in progress, do not reload
         with open(local_lmdb_path + ".lock", "w") as fp:
             pass
@@ -186,7 +176,7 @@ def find_largest_integer_directory(parent_dir, key_string, initialRun):
     if STAGE == "PROD":
         old_dirs.remove(largest_dir)
 
-    if (initialRun == False) & (len(old_dirs) == 0):
+    if (not initialRun) & (len(old_dirs) == 0):
         largest_dir = None
 
     return largest_dir, old_dirs
@@ -323,7 +313,7 @@ def update_zarr_store(initialRun):
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
-    if (initialRun == True) and (useETOPO == True):
+    if (initialRun) and (useETOPO):
         latest_ETOPO, old_ETOPO = find_largest_integer_directory(
             "/tmp", "ETOPO_DA_C.zarr", initialRun
         )
@@ -445,7 +435,7 @@ if STAGE == "TESTING":
     HRRR_Zarr = zarr.open(store, mode="r")
     print("HRRR Read")
 
-    if useETOPO == True:
+    if useETOPO:
         if save_type == "S3":
             f = s3.open("s3://" + s3_bucket + "/ForecastTar/ETOPO_DA_C.zarr.zip")
         else:
@@ -770,7 +760,7 @@ async def PW_Forecast(
     T_Start = datetime.datetime.utcnow()
 
     # Current time
-    if force_now == False:
+    if force_now is False:
         nowTime = datetime.datetime.utcnow()
     else:
         # Force now for testing with static inputs
@@ -937,7 +927,7 @@ async def PW_Forecast(
         print(datetime.datetime.utcnow() - T_Start)
 
     # Set defaults
-    if not extend:
+    if extend is False:
         extendFlag = 0
     else:
         if extend == "hourly":
@@ -945,12 +935,12 @@ async def PW_Forecast(
         else:
             extendFlag = 0
 
-    if not version:
+    if version is False:
         version = 1
 
     version = float(version)
 
-    if not lang:
+    if lang is False:
         lang = "en"
 
     # Set up translations
@@ -959,12 +949,12 @@ async def PW_Forecast(
         translation = Translations["en"]
 
     # Check if extra information should be included with time machine
-    if not tmextra:
+    if tmextra is False:
         tmExtra = False
     else:
         tmExtra = True
 
-    if not exclude:
+    if exclude is False:
         excludeParams = ""
     else:
         excludeParams = exclude
@@ -1673,8 +1663,8 @@ async def PW_Forecast(
         gefsRunTime = dataOut_gefs[33, 0]
 
     sourceTimes = dict()
-    if timeMachine == False:
-        if useETOPO == True:
+    if timeMachine is False:
+        if useETOPO:
             sourceList = ["ETOPO1", "gfs", "gefs"]
         else:
             sourceList = ["gfs", "gefs"]
@@ -1693,23 +1683,23 @@ async def PW_Forecast(
             datetime.datetime.utcfromtimestamp(subhRunTime.astype(int))
         ).strftime("%Y-%m-%d %HZ")
 
-    if (isinstance(dataOut_hrrrh, np.ndarray)) & (timeMachine == False):
+    if (isinstance(dataOut_hrrrh, np.ndarray)) & (not timeMachine):
         sourceList.append("hrrr_0-18")
         sourceTimes["hrrr_0-18"] = rounder(
             datetime.datetime.utcfromtimestamp(hrrrhRunTime.astype(int))
         ).strftime("%Y-%m-%d %HZ")
-    elif (isinstance(dataOut_hrrrh, np.ndarray)) & (timeMachine == True):
+    elif (isinstance(dataOut_hrrrh, np.ndarray)) & (timeMachine):
         sourceList.append("hrrr")
 
-    if (isinstance(dataOut_nbm, np.ndarray)) & (timeMachine == False):
+    if (isinstance(dataOut_nbm, np.ndarray)) & (not timeMachine):
         sourceList.append("nbm")
         sourceTimes["nbm"] = rounder(
             datetime.datetime.utcfromtimestamp(nbmRunTime.astype(int))
         ).strftime("%Y-%m-%d %HZ")
-    elif (isinstance(dataOut_nbm, np.ndarray)) & (timeMachine == True):
+    elif (isinstance(dataOut_nbm, np.ndarray)) & (timeMachine):
         sourceList.append("nbm")
 
-    if (isinstance(dataOut_nbmFire, np.ndarray)) & (timeMachine == False):
+    if (isinstance(dataOut_nbmFire, np.ndarray)) & (not timeMachine):
         sourceList.append("nbm_fire")
         sourceTimes["nbm_fire"] = rounder(
             datetime.datetime.utcfromtimestamp(nbmFireRunTime.astype(int))
@@ -1725,7 +1715,7 @@ async def PW_Forecast(
         ).strftime("%Y-%m-%d %HZ")
 
     # Always include GFS and GEFS
-    if timeMachine == False:
+    if timeMachine is False:
         sourceTimes["gfs"] = rounder(
             datetime.datetime.utcfromtimestamp(gfsRunTime.astype(int))
         ).strftime("%Y-%m-%d %HZ")
@@ -1744,7 +1734,7 @@ async def PW_Forecast(
     y_p = np.argmin(abslat)
     x_p = np.argmin(abslon)
 
-    if (useETOPO == True) and ((STAGE == "PROD") or (STAGE == "DEV")):
+    if (useETOPO) and ((STAGE == "PROD") or (STAGE == "DEV")):
         ETOPO = int(ETOPO_f[y_p, x_p])
     else:
         ETOPO = 0
@@ -1752,7 +1742,7 @@ async def PW_Forecast(
     if ETOPO < 0:
         ETOPO = 0
 
-    if useETOPO == True:
+    if useETOPO:
         sourceIDX["etopo"] = dict()
         sourceIDX["etopo"]["x"] = int(x_p)
         sourceIDX["etopo"]["y"] = int(y_p)
@@ -1823,7 +1813,7 @@ async def PW_Forecast(
         print(datetime.datetime.utcnow() - T_Start)
 
     # HRRR
-    if timeMachine == False:
+    if timeMachine is False:
         # Since the forecast files are pre-processed, they'll always be hourly and the same lenght. This avoids interpolation
         try:  # Add a fallback to GFS if these don't work
             # HRRR
@@ -2035,7 +2025,7 @@ async def PW_Forecast(
             )
         ] = d
 
-    if timeMachine == False:
+    if not timeMachine:
         hourlyDayIndex = hourlyDayIndex.astype(int)
         hourlyDay4amIndex = hourlyDay4amIndex.astype(int)
         hourlyHighIndex = hourlyHighIndex.astype(int)
@@ -3411,7 +3401,7 @@ async def PW_Forecast(
     # If alerts are requested and in the US
     try:
         if (
-            (timeMachine == False)
+            (not timeMachine)
             and (exAlerts == 0)
             and (az_Lon > -127)
             and (az_Lon < -65)
@@ -3817,7 +3807,7 @@ async def PW_Forecast(
         InterPcurrent[20] = InterPcurrent[20] - tempUnits  # "FeelsLike"
 
     if ((minuteDict[0]["precipIntensity"]) > (0.02 * prepIntensityUnit)) & (
-        minuteDict[0]["precipType"] != None
+        minuteDict[0]["precipType"] is not None
     ):
         # If more than 25% chance of precip, then the icon for whatever is happening, so long as the icon exists
         cIcon = minuteDict[0]["precipType"]
@@ -4128,7 +4118,7 @@ def initialDataSync() -> None:
         )
         print("Alerts Download!")
 
-        if useETOPO == True:
+        if useETOPO:
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/ETOPO_DA_C.zarr.zip",
@@ -4157,7 +4147,7 @@ def dataSync() -> None:
 
     print(STAGE)
 
-    if zarrReady == True:
+    if zarrReady:
         if STAGE == "PROD":
             time.sleep(20)
             logger.info("Starting Update")
@@ -4227,7 +4217,7 @@ def dataSync() -> None:
             )
             logger.info("Alerts Download!")
 
-            if useETOPO == True:
+            if useETOPO:
                 download_if_newer(
                     s3_bucket,
                     "ForecastTar/ETOPO_DA_C.zarr.zip",
