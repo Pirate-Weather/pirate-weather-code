@@ -159,13 +159,19 @@ points_in_polygons = gp.sjoin(
 )
 
 # Create a formatted string ton save all the relevant in the zarr array
-points_in_polygons['string'] =  points_in_polygons['event'].astype(str) + '}' \
-                       '{' + points_in_polygons['description'].astype(str) + '}' + \
-                      '{' + points_in_polygons['areaDesc'].astype(str) + '}' + \
-                      '{' + points_in_polygons['effective'].astype(str) + '}' + \
-                      '{' + points_in_polygons['EXPIRATION'].astype(str) + '}' + \
-                      '{' + points_in_polygons['severity'].astype(str) + '}' + \
-                      '{' + points_in_polygons['URL'].astype(str)
+points_in_polygons["string"] = points_in_polygons["event"].astype(
+    str
+) + "}" "{" + points_in_polygons["description"].astype(
+    str
+) + "}" + "{" + points_in_polygons["areaDesc"].astype(
+    str
+) + "}" + "{" + points_in_polygons["effective"].astype(
+    str
+) + "}" + "{" + points_in_polygons["EXPIRATION"].astype(
+    str
+) + "}" + "{" + points_in_polygons["severity"].astype(
+    str
+) + "}" + "{" + points_in_polygons["URL"].astype(str)
 
 
 float_rows = points_in_polygons[
