@@ -1,6 +1,7 @@
+
 # Pirate Weather Code
 
-This repository is the source for the code that runs the Pirate Weather API, a free, fast (~10 ms), Open-Source (AGPL), minimalist Weather API. If you're interested in using the API, the primary documentation on the weather variables and data usage is contained in the [main repository](https://github.com/Pirate-Weather/pirateweather), with this repository focused on the code that ingests the source weather data and produces the forecast!
+This repository is the source for the code that runs the Pirate Weather API, a free, fast (~10 ms), Open-Source (AGPL), and minimalist Weather API. If you're interested in using the API, the primary documentation on the weather variables and data usage is contained in the [main repository](https://github.com/Pirate-Weather/pirateweather), with this repository focused on the code that ingests the source weather data and produces the forecast!
 
 ## Status
 While the production API service is stable and well tested, running the API on your own hardware is still very beta. There are a number of structural changes between the production service and this version, which could result in instabilities or data errors when running on your own hardware. This should improve in the coming months, and PRs are **eagerly welcomed** to speed up this process! Historic data is also not currently functioning, although should be possible in the future!
@@ -42,13 +43,81 @@ Two docker containers are used for this service, and are both saved in the "[Doc
 
 ### Requirements
 Running a weather API for the entire planet isn't a trivial task, and accordingly, this service requires a pretty hefty set of resources, although I hope to reduce this in the future! At least 32 GB of free (not total) memory are required for the ingest processing, as well as at least 200 GB of working disk space. The docker images are also ARM only at the moment, but there's no technical reason why they shouldn't generate on x64 machines as well. 
+However, the response script/container is significantly lighter, requiring only a vanilla Python/ Node environment, minimal memory, and ~50 GB of space.
 
+### Response Dev Tooling Setup
+The most interesting part of this project is the response script, which takes the raw model data and generates the API response. While spinning up the entire API is one way to work on this, it's much easier to simply run either the docker container or a virtual Python environment and use static example data! A static copy of the example data can be downloaded from here: <https://files.alexanderrey.ca/share/9jMgSLpi>
+
+##### Docker
+To do this via Docker, a run command can be used:
+
+```
+git clone https://github.com/Pirate-Weather/pirate-weather-code.git
+
+wget https://files.alexanderrey.ca/api/public/dl/9jMgSLpi
+unzip 9jMgSLpi-d ~/pw-data
+
+docker run -d -p 8083:8083 -v ~/pirate-weather-code/API:/efs:ro -v ~/pw-data:/tmp -e "STAGE=TESTING" -e "useETOPO=FALSE" -e "TIMING=TRUE" -e "save_type=Download" -e "force_now=1730869200" --entrypoint uvicorn --workdir=/efs public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:latest responseLocal:app --host 0.0.0.0 --port 8083
+
+curl 127.0.0.1:8083/forecast/123456/47.1756,27.594,1730869200
+```
+**Note:** 
+- Because the model files are a static snapshot, the time parameter (around Wed Nov 06 2024) must be used!
+- The container will initially not do anything, since FastAPI doesn't appear to pass along the logs until it's initialized. It should be up and running within ~5 minutes 
+
+This setup disables all the file updating processes within the response script and reads the data directly from the Zarr zip stores, focusing on the response. 
+
+#### VirtualEnv
+The other alternative is to setup a Python environment following the same process the dockerfile does. On Amazon Linux, this involves installing Node.js (I used the [nvm approach](https://nodejs.org/en/download/package-manager)), then following these steps for Pirate Weather:
+```
+git clone https://github.com/Pirate-Weather/pirate-weather-code.git
+
+wget https://files.alexanderrey.ca/api/public/dl/9jMgSLpi
+unzip 9jMgSLpi-d ~/pw-data
+
+sudo yum groupinstall 'Development Tools'
+sudo yum install gcc gcc-c++ make
+sudo yum install libffi-devel unzip rsync
+sudo yum install python3.12 python3.12-devel
+
+python3.12 -m venv "PirateWeather"
+source ~/.virtualenvs/PirateWeather/bin/activate
+
+pip install -r  ~/pirate-weather-code/Docker/requirements-api.txt
+
+mkdir ~/PirateWeatherNode
+cp ~/pirate-weather-code/Docker/package-api.json ~/PirateWeatherNode/package.json 
+cd ~/PirateWeatherNode
+npm install
+
+export node_dir=~/PirateWeatherNode/node_modules/translations/index.js
+export save_type=Download
+export TIMING=True
+export STAGE=TESTING
+export force_now=1730869200
+
+python3.12 ~/pirate-weather-code/responseLocal.py
+```
+
+**Notes:**
+- The `force_now` environmental variable tells the script to pretend that it is currently this time in order to avoid switching to historic mode;
+- The `TIMING=True` environmental variable enables detailed timing outputs;
+- The `node_dir` environmental variable is required for the node bridge.
+- Eagle eyed observes will note that the script has the capacity to read the zip files directly from S3. This is used internally for testing, since it's too slow for the production API. If there was a way I could safety share my live processed zip files I'd love to release that some day, as it would greatly simplify some use cases!
+
+Then, a curl query can be made from a new terminal window:
+```
+curl 127.0.0.1:8080/forecast/123456/47.1756,27.594,1730869200
+```
+
+This approach can also be used in an interactive (REPL) environment (i.e. Pycharm), which is what I use for development.
 
 ## Next steps
 The immediate next steps for this project are getting everything setup to make it easy for people host this locally and contribute to the project! In priority order:
 
 
 1. Significantly improving the documentation on what each script is doing, how it is doing it, and how to add additional sources. 
+	1. This also includes a refactor of the monolithic responseLocal.py script into a collection of more manageable scripts.
 2. Code quality needs to be improved throughout, particularly in the [response script](https://github.com/Pirate-Weather/pirate-weather-code/blob/main/responseLocal.py). 
 3. Tests need to be added, with the goal of checking:
 	1. If this specific model run is ingested, what does the result look like?
