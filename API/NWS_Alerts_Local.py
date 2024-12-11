@@ -4,38 +4,31 @@
 # Import Modules
 import os
 import shutil
-
-import geopandas as gp
-import zarr
-import pandas as pd
-import numpy as np
-
-import nwswx
-import requests
+import tarfile
 import xml.etree.ElementTree as ET
 
 import dask
-
-import numcodecs
-from numcodecs import Blosc
-
-
 import dask.array as da
-
-
-import tarfile
+import geopandas as gp
+import numcodecs
+import numpy as np
+import nwswx
+import pandas as pd
+import requests
 import s3fs
+import zarr
+from numcodecs import Blosc
 
 s3_bucket = "s3://piratezarr2"
 s3_save_path = "/ForecastProd/Alerts/NWS_"
 merge_process_dir = os.getenv("merge_process_dir", default="/home/ubuntu/data/")
 saveType = os.getenv("save_type", default="S3")
 s3_bucket = os.getenv("save_path", default="s3://piratezarr2")
+aws_access_key_id = os.environ.get("AWS_KEY", "")
+aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
+s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
-s3 = s3fs.S3FileSystem(
-    key="AKIA2HTALZ5LWRCTHC5F", secret="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"
-)
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(merge_process_dir):
@@ -158,13 +151,20 @@ points_in_polygons = gp.sjoin(
     gridPointsSeries, nws_alert_merged_gdf, predicate="within", how="inner"
 )
 
-points_in_polygons["string"] = str(points_in_polygons["event"]) + "}" "{" + str(
-    points_in_polygons["description"]
-) + "}" + "{" + str(points_in_polygons["areaDesc"]) + "}" + "{" + str(
-    points_in_polygons["effective"]
-) + "}" + "{" + str(points_in_polygons["EXPIRATION"]) + "}" + "{" + str(
-    points_in_polygons["severity"]
-) + "}" + "{" + str(points_in_polygons["URL"])
+# Create a formatted string ton save all the relevant in the zarr array
+points_in_polygons["string"] = points_in_polygons["event"].astype(
+    str
+) + "}" "{" + points_in_polygons["description"].astype(
+    str
+) + "}" + "{" + points_in_polygons["areaDesc"].astype(
+    str
+) + "}" + "{" + points_in_polygons["effective"].astype(
+    str
+) + "}" + "{" + points_in_polygons["EXPIRATION"].astype(
+    str
+) + "}" + "{" + points_in_polygons["severity"].astype(
+    str
+) + "}" + "{" + points_in_polygons["URL"].astype(str)
 
 
 float_rows = points_in_polygons[
@@ -174,6 +174,7 @@ float_rows = points_in_polygons[
 # Print the filtered rows
 print(float_rows)
 
+# Combine the formatted strings using "|" as a spacer
 df = points_in_polygons.groupby("INDEX").agg({"string": "|".join}).reset_index()
 
 

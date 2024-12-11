@@ -2,35 +2,26 @@
 # Alexander Rey, September 2023
 
 # %% Import modules
-from herbie import FastHerbie, Path
-from herbie.fast import Herbie_latest
-
-import pandas as pd
-import s3fs
-
-from numcodecs import Blosc, BitRound
+import os
+import pickle
+import shutil
+import subprocess
+import sys
+import time
+import warnings
 
 import dask.array as da
-from rechunker import rechunk
-
-
-import numpy as np
-import xarray as xr
-import time
-
-import subprocess
-
-import os
-import shutil
-import sys
-import pickle
-
-from scipy.interpolate import make_interp_spline
-
-import zarr
 import netCDF4 as nc
-
-import warnings
+import numpy as np
+import pandas as pd
+import s3fs
+import xarray as xr
+import zarr
+from herbie import FastHerbie, Path
+from herbie.fast import Herbie_latest
+from numcodecs import BitRound, Blosc
+from rechunker import rechunk
+from scipy.interpolate import make_interp_spline
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -62,7 +53,10 @@ ncForecastWorking_path = forecast_process_path + "_proc_"
 tmpDIR = os.getenv("tmp_dir", default="~/data")
 saveType = os.getenv("save_type", default="S3")
 s3_bucket = os.getenv("save_path", default="s3://piratezarr2")
+aws_access_key_id = os.environ.get("AWS_KEY", "")
+aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
+s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 latestRun = Herbie_latest(
     model="gefs",
     n=3,
@@ -126,10 +120,6 @@ probVars = (
 
 hisPeriod = 36
 s3_save_path = "/ForecastProd/GEFS/GEFS_Prob_"
-
-s3 = s3fs.S3FileSystem(
-    key="AKIA2HTALZ5LWRCTHC5F", secret="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"
-)
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(merge_process_dir):
@@ -589,8 +579,8 @@ for daskVarIDX, dask_var in enumerate(probVars):
                     component=dask_var,
                     inline_array=True,
                     storage_options={
-                        "key": "AKIA2HTALZ5LWRCTHC5F",
-                        "secret": "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",
+                        "key": aws_access_key_id,
+                        "secret": aws_secret_access_key,
                     },
                 )
             )

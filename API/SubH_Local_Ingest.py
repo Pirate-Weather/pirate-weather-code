@@ -4,30 +4,24 @@
 
 
 # %% Import modules
-from herbie import FastHerbie, Path
-from herbie.fast import Herbie_latest
-
-import pandas as pd
-import s3fs
-
-import zarr
-from numcodecs import Blosc, BitRound
+import os
+import pickle
+import shutil
+import subprocess
+import sys
+import time
+import warnings
 
 import dask as dask
 import dask.array as da
-
 import numpy as np
+import pandas as pd
+import s3fs
 import xarray as xr
-import time
-
-import subprocess
-import os
-import sys
-import shutil
-import pickle
-
-
-import warnings
+import zarr
+from herbie import FastHerbie, Path
+from herbie.fast import Herbie_latest
+from numcodecs import BitRound, Blosc
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 # %% Setup paths and parameters
@@ -43,15 +37,15 @@ merge_process_dir = os.getenv("merge_process_dir", default="/home/ubuntu/data/")
 tmpDIR = os.getenv("tmp_dir", default="~/data")
 saveType = os.getenv("save_type", default="S3")
 s3_bucket = os.getenv("save_path", default="s3://piratezarr2")
+aws_access_key_id = os.environ.get("AWS_KEY", "")
+aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+
+s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
 s3_save_path = "/ForecastProd/SubH/SubH_"
 
 
 hisPeriod = 36
-
-s3 = s3fs.S3FileSystem(
-    key="AKIA2HTALZ5LWRCTHC5F", secret="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"
-)
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(merge_process_dir):

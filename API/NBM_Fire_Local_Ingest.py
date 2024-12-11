@@ -3,36 +3,27 @@
 # Alexander Rey, April 2024
 
 # %% Import modules
-from herbie import Herbie, Path, FastHerbie
+import os
+import pickle
+import shutil
+import subprocess
+import sys
+import time
+import warnings
+from datetime import datetime, timedelta
+
+import dask
+import dask.array as da
+import netCDF4 as nc
+import numpy as np
 import pandas as pd
 import s3fs
-
-import zarr
-import dask
-
-from numcodecs import Blosc, BitRound
-
-import dask.array as da
-from rechunker import rechunk
-
-import numpy as np
 import xarray as xr
-import time
-from datetime import datetime, timedelta
-import subprocess
-
-import os
-import shutil
-import sys
-import pickle
-
-
-import netCDF4 as nc
-
-
+import zarr
+from herbie import FastHerbie, Herbie, Path
+from numcodecs import BitRound, Blosc
+from rechunker import rechunk
 from scipy.interpolate import make_interp_spline
-
-import warnings
 
 
 # Scipy Interp Function
@@ -80,14 +71,14 @@ merge_process_dir = os.getenv("merge_process_dir", default="/home/ubuntu/data/")
 tmpDIR = os.getenv("tmp_dir", default="~/data")
 saveType = os.getenv("save_type", default="S3")
 s3_bucket = os.getenv("save_path", default="s3://piratezarr2")
+aws_access_key_id = os.environ.get("AWS_KEY", "")
+aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 s3_save_path = "/ForecastProd/NBM_Fire/NBM_Fire_"
 
 hisPeriod = 36
 
-s3 = s3fs.S3FileSystem(
-    key="AKIA2HTALZ5LWRCTHC5F", secret="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"
-)
+s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
 
 # %% Define base time from the most recent run
@@ -116,7 +107,7 @@ most_recent_time = datetime(
 # Select the most recent 0,6,12,18 run
 base_time = False
 failCount = 0
-while base_time == False:
+while base_time is False:
     latestRuns = Herbie(
         most_recent_time,
         model="nbm",
@@ -559,8 +550,8 @@ with dask.config.set(**{"array.slicing.split_large_chunks": True}):
                         component=dask_var,
                         inline_array=True,
                         storage_options={
-                            "key": "AKIA2HTALZ5LWRCTHC5F",
-                            "secret": "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",
+                            "key": aws_access_key_id,
+                            "secret": aws_secret_access_key,
                         },
                     )
                 )

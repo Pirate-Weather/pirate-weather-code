@@ -121,9 +121,9 @@ def calculate_text(
         possiblePrecip = "possible-"
 
     # Find the largest percentage difference compared to the thresholds
-    rainPrepPercent = rainPrep / rainIconThreshold
-    snowPrepPercent = snowPrep / snowIconThreshold
-    icePrepPercent = icePrep / iceIconThreshold
+    # rainPrepPercent = rainPrep / rainIconThreshold
+    # snowPrepPercent = snowPrep / snowIconThreshold
+    # icePrepPercent = icePrep / iceIconThreshold
 
     # Find the largest percentage difference to determine the icon
     if pop > 0.25 and (
@@ -131,7 +131,7 @@ def calculate_text(
         or (snowPrep > snowIconThreshold)
         or (icePrep > iceIconThreshold)
     ):
-        if precipType == "rain":
+        if precipType == "none":
             cIcon = "rain"  # Fallback icon
         else:
             cIcon = precipType
@@ -240,7 +240,7 @@ def calculate_text(
 
     elif humidity <= lowHumidityThresh:
         # Do not change the icon
-        if cCond == None:
+        if cCond is None:
             cText = [mode, "low-humidity"]
         else:
             cText = [mode, ["and", cCond, "low-humidity"]]
@@ -252,7 +252,7 @@ def calculate_text(
             tempThresh = 20
         if temp > tempThresh:
             # Do not change the icon
-            if cCond == None:
+            if cCond is None:
                 cText = [mode, "high-humidity"]
             else:
                 cText = [mode, ["and", cCond, "high-humidity"]]

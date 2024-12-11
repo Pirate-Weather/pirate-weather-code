@@ -2,38 +2,28 @@
 # Alexander Rey, November 2023
 
 # %% Import modules
-from herbie import FastHerbie, Path
-from herbie.fast import Herbie_latest
-import pandas as pd
-import s3fs
-
-import zarr
-import dask
-
-from numcodecs import Blosc, BitRound
-
-import dask.array as da
-from rechunker import rechunk
-
-import numpy as np
-import xarray as xr
-import time
-
-import subprocess
-
 import os
-import shutil
-import sys
 import pickle
-
-
-import netCDF4 as nc
-
+import shutil
+import subprocess
+import sys
+import time
+import warnings
 from itertools import chain
 
+import dask
+import dask.array as da
+import netCDF4 as nc
+import numpy as np
+import pandas as pd
+import s3fs
+import xarray as xr
+import zarr
+from herbie import FastHerbie, Path
+from herbie.fast import Herbie_latest
+from numcodecs import BitRound, Blosc
+from rechunker import rechunk
 from scipy.interpolate import make_interp_spline
-
-import warnings
 
 
 # Scipy Interp Function
@@ -126,16 +116,15 @@ merge_process_dir = os.getenv("merge_process_dir", default="/home/ubuntu/data/")
 tmpDIR = os.getenv("tmp_dir", default="~/data")
 saveType = os.getenv("save_type", default="S3")
 s3_bucket = os.getenv("save_path", default="s3://piratezarr2")
+aws_access_key_id = os.environ.get("AWS_KEY", "")
+aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
+s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
 # s3_bucket = 's3://pirate-s3-azb--use1-az4--x-s3'
 s3_save_path = "/ForecastProd/NBM/NBM_"
 
 hisPeriod = 36
-
-s3 = s3fs.S3FileSystem(
-    key="AKIA2HTALZ5LWRCTHC5F", secret="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"
-)
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(merge_process_dir):
@@ -449,13 +438,13 @@ FH_forecastsub = FastHerbie(
     model="nbm",
     fxx=nbm_range1,
     product="co",
-    verbose=True,
+    verbose=False,
     priority=["aws"],
 )
 
 matchstring_pa = "(:APCP:surface:(0-1|1-2|2-3|3-4|4-5|5-6|6-7|7-8|8-9|9-10|\d*0-\d{1,2}1|\d*1-\d{1,2}2|\d*2-\d{1,2}3|\d*3-\d{1,2}4|\d*4-\d{1,2}5|\d*5-\d{1,2}6|\d*6-\d{1,2}7|\d*7-\d{1,2}8|\d*8-\d{1,2}9|\d*9-\d{1,2}0).*fcst:nan)"
 # Download the subsets
-FH_forecastsub.download(matchstring_pa, verbose=True)
+FH_forecastsub.download(matchstring_pa, verbose=False)
 
 # Create list of downloaded grib files
 gribList1 = getGribList(FH_forecastsub, matchstring_pa)
@@ -469,14 +458,14 @@ FH_forecastsub2 = FastHerbie(
     model="nbm",
     fxx=nbm_range2,
     product="co",
-    verbose=True,
+    verbose=False,
     priority=["aws"],
 )
 
 # Match 6-hour probs
 matchstring_pa2 = "(:APCP:surface:(0-6|\d*0-\d{1,2}6|\d*1-\d{1,2}7|\d*2-\d{1,2}8|\d*3-\d{1,2}9|\d*4-\d{1,2}0|\d*5-\d{1,2}1|\d*6-\d{1,2}2|\d*7-\d{1,2}3|\d*8-\d{1,2}4|\d*9-\d{1,2}5).*fcst:nan)"
 # Download the subsets
-FH_forecastsub2.download(matchstring_pa2, verbose=True)
+FH_forecastsub2.download(matchstring_pa2, verbose=False)
 
 # Create list of downloaded grib files
 gribList2 = getGribList(FH_forecastsub2, matchstring_pa2)
@@ -840,8 +829,8 @@ with dask.config.set(**{"array.slicing.split_large_chunks": True}):
                         component=dask_var,
                         inline_array=True,
                         storage_options={
-                            "key": "AKIA2HTALZ5LWRCTHC5F",
-                            "secret": "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",
+                            "key": aws_access_key_id,
+                            "secret": aws_secret_access_key,
                         },
                     )
                 )
