@@ -204,7 +204,7 @@ def calculate_text(
     if wind >= lightWindThresh:
         if cIcon not in ["rain", "snow", "sleet", "fog"]:
             cIcon = "wind"
-            
+
         if cCond == None:
             if wind >= lightWindThresh and wind < midWindThresh:
                 cText = [mode, "light-wind"]
