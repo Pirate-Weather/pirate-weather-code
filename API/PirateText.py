@@ -202,8 +202,10 @@ def calculate_text(
 
     # Add wind or humidity text
     if wind >= lightWindThresh:
-        if cCond == None:
+        if cIcon not in ["rain", "snow", "sleet", "fog"]:
             cIcon = "wind"
+            
+        if cCond == None:
             if wind >= lightWindThresh and wind < midWindThresh:
                 cText = [mode, "light-wind"]
             elif wind >= midWindThresh and wind < heavyWindThresh:
