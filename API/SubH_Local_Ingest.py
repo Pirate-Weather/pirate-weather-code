@@ -37,15 +37,15 @@ merge_process_dir = os.getenv("merge_process_dir", default="/home/ubuntu/data/")
 tmpDIR = os.getenv("tmp_dir", default="~/data")
 saveType = os.getenv("save_type", default="S3")
 s3_bucket = os.getenv("save_path", default="s3://piratezarr2")
+aws_access_key_id = os.environ.get("AWS_KEY", "")
+aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+
+s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
 s3_save_path = "/ForecastProd/SubH/SubH_"
 
 
 hisPeriod = 36
-
-s3 = s3fs.S3FileSystem(
-    key="AKIA2HTALZ5LWRCTHC5F", secret="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"
-)
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(merge_process_dir):
