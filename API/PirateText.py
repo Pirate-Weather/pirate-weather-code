@@ -93,6 +93,8 @@ def calculate_text(
 
     if "precipProbability" in hourObject:
         pop = hourObject["precipProbability"]
+    elif type == "current":
+        pop = 1
     else:
         pop = 1
 
@@ -124,7 +126,7 @@ def calculate_text(
     # icePrepPercent = icePrep / iceIconThreshold
 
     # Find the largest percentage difference to determine the icon
-    if pop > 0.25 and (
+    if pop >= 0.25 and (
         (rainPrep > rainIconThreshold)
         or (snowPrep > snowIconThreshold)
         or (icePrep > iceIconThreshold)
@@ -200,8 +202,10 @@ def calculate_text(
 
     # Add wind or humidity text
     if wind >= lightWindThresh:
-        if cCond is None:
+        if cIcon not in ["rain", "snow", "sleet", "fog"]:
             cIcon = "wind"
+
+        if cCond == None:
             if wind >= lightWindThresh and wind < midWindThresh:
                 cText = [mode, "light-wind"]
             elif wind >= midWindThresh and wind < heavyWindThresh:
