@@ -126,7 +126,7 @@ def calculate_text(
     # icePrepPercent = icePrep / iceIconThreshold
 
     # Find the largest percentage difference to determine the icon
-    if pop > 0.25 and (
+    if pop >= 0.25 and (
         (rainPrep > rainIconThreshold)
         or (snowPrep > snowIconThreshold)
         or (icePrep > iceIconThreshold)
