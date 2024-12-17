@@ -2,37 +2,28 @@
 # Alexander Rey, November 2023
 
 # %% Import modules
-from herbie import FastHerbie, Path
-from herbie.fast import Herbie_latest
-import pandas as pd
-import s3fs
-
-import zarr
-import dask
-
-from numcodecs import Blosc, BitRound
-
-import dask.array as da
-from rechunker import rechunk
-
-import numpy as np
-import xarray as xr
-import time
-
-import subprocess
-
 import os
-import shutil
-import sys
 import pickle
-
-import netCDF4 as nc
-
+import shutil
+import subprocess
+import sys
+import time
+import warnings
 from itertools import chain
 
+import dask
+import dask.array as da
+import netCDF4 as nc
+import numpy as np
+import pandas as pd
+import s3fs
+import xarray as xr
+import zarr
+from herbie import FastHerbie, Path
+from herbie.fast import Herbie_latest
+from numcodecs import BitRound, Blosc
+from rechunker import rechunk
 from scipy.interpolate import make_interp_spline
-
-import warnings
 
 
 # Scipy Interp Function
