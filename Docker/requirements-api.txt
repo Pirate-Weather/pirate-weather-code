@@ -8,7 +8,7 @@ starlette==0.42.0
 uvicorn==0.34.0
 fastapi==0.115.6
 fastapi-utils==0.8.0
-boto3==1.35.81
+boto3==1.35.82
 scipy==1.14.1
 orjson==3.10.12
 psutil==6.1.0
