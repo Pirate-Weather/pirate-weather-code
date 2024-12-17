@@ -91,10 +91,10 @@ def calculate_text(
     wind = hourObject["windSpeed"]
     humidity = hourObject["humidity"]
 
-    if "precipProbability" in hourObject:
-        pop = hourObject["precipProbability"]
-    elif type == "current":
+    if type == "current":
         pop = 1
+    elif "precipProbability" in hourObject:
+        pop = hourObject["precipProbability"]
     else:
         pop = 1
 
