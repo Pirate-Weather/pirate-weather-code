@@ -175,7 +175,7 @@ def calculate_text(
         else:
             cText = [mode, "heavy-sleet"]
             cCond = "heavy-sleet"
-    elif rainPrep > 0 and precipType == "none":
+    elif (rainPrep > 0 or snowPrep > 0 or icePrep > 0) and precipType == "none":
         if rainPrep < lightRainThresh:
             cText = [mode, possiblePrecip + "very-light-precipitation"]
             cCond = possiblePrecip + "very-light-precipitation"
