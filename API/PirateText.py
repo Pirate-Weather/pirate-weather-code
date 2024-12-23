@@ -274,10 +274,7 @@ def calculate_text(
     if cIcon is None and cText is not None:
         if vis < visThresh:
             cIcon = "fog"
-        elif cloudCover > cloudThreshold:
-            cIcon = calculate_sky_icon(cloudCover, isDayTime)
-        elif cloudCover > partlyCloudyThreshold:
-            cIcon = calculate_sky_icon(cloudCover, isDayTime)
         else:
             cIcon = calculate_sky_icon(cloudCover, isDayTime)
+
     return cText, cIcon
