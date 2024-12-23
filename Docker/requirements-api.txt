@@ -11,7 +11,7 @@ fastapi-utils==0.8.0
 boto3==1.35.82
 scipy==1.14.1
 orjson==3.10.12
-psutil==5.9.0
+psutil==6.1.1
 typing-inspect==0.9.0
 watchfiles==1.0.3
 dask==2024.12.0
