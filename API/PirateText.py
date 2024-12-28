@@ -175,9 +175,22 @@ def calculate_text(
         else:
             cText = [mode, "heavy-sleet"]
             cCond = "heavy-sleet"
+    elif (rainPrep > 0 or snowPrep > 0 or icePrep > 0) and precipType == "none":
+        if rainPrep < lightRainThresh:
+            cText = [mode, possiblePrecip + "very-light-precipitation"]
+            cCond = possiblePrecip + "very-light-precipitation"
+        elif rainPrep >= lightRainThresh and rainPrep < midRainThresh:
+            cText = [mode, possiblePrecip + "light-precipitation"]
+            cCond = possiblePrecip + "light-precipitation"
+        elif rainPrep >= midRainThresh and rainPrep < heavyRainThresh:
+            cText = [mode, "medium-precipitation"]
+            cCond = "medium-precipitation"
+        else:
+            cText = [mode, "heavy-precipitation"]
+            cCond = "heavy-precipitation"
 
     # If visibility < 1000m, show fog
-    elif vis < visThresh:
+    elif vis < visThresh and wind < lightWindThresh:
         return [mode, "fog"], "fog"
     elif cloudCover > cloudThreshold:
         cText = [mode, "heavy-clouds"]
@@ -261,10 +274,7 @@ def calculate_text(
     if cIcon is None and cText is not None:
         if vis < visThresh:
             cIcon = "fog"
-        elif cloudCover > cloudThreshold:
-            cIcon = calculate_sky_icon(cloudCover, isDayTime)
-        elif cloudCover > partlyCloudyThreshold:
-            cIcon = calculate_sky_icon(cloudCover, isDayTime)
         else:
             cIcon = calculate_sky_icon(cloudCover, isDayTime)
+
     return cText, cIcon
