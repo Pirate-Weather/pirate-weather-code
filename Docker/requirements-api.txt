@@ -4,13 +4,13 @@ pytz==2024.2
 zarr==2.18.4
 s3fs==2024.12.0
 ujson==5.10.0
-starlette==0.42.0
+starlette==0.45.0
 uvicorn==0.34.0
 fastapi==0.115.6
 fastapi-utils==0.8.0
-boto3==1.35.86
+boto3==1.35.90
 scipy==1.14.1
-orjson==3.10.12
+orjson==3.10.13
 psutil==5.9.0
 typing-inspect==0.9.0
 watchfiles==1.0.3
