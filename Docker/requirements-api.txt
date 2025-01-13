@@ -19,3 +19,4 @@ xarray==2025.1.0
 pandas==2.2.3
 fastparquet==2024.11.0
 javascript==1!1.2.1
+pirateweather-translations==0.0.2
