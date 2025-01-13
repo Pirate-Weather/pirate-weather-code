@@ -602,9 +602,9 @@ with dask.config.set(**{"array.slicing.split_large_chunks": True}):
             print(len(daskArray))
             print(len(nbm_range))
             print(dask_var)
-            assert len(daskArray) == len(
-                nbm_range
-            ), "Incorrect number of timesteps! Exiting"
+            assert len(daskArray) == len(nbm_range), (
+                "Incorrect number of timesteps! Exiting"
+            )
 
         # Rechunk
         daskArray = daskArray.rechunk(chunks=(len(nbm_range), chunkx, chunky))

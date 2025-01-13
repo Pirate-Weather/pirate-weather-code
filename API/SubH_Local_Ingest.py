@@ -228,9 +228,9 @@ if len(xarray_forecast_merged.time) != len(hrrr_range1) * 4:
     print(len(xarray_forecast_merged.time))
     print(len(hrrr_range1) * 4)
 
-    assert (
-        len(xarray_forecast_merged.time) == len(hrrr_range1) * 4
-    ), "Incorrect number of timesteps! Exiting"
+    assert len(xarray_forecast_merged.time) == len(hrrr_range1) * 4, (
+        "Incorrect number of timesteps! Exiting"
+    )
 
 # Save the dataset with compression and filters for all variables
 compressor = Blosc(cname="lz4", clevel=1)

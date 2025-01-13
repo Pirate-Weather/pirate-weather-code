@@ -307,9 +307,9 @@ chunky = 100
 xarray_forecast_base = xr.open_mfdataset(forecast_process_path + "_wgrib2_merged.nc")
 
 # Check length for errors
-assert len(xarray_forecast_base.time) == len(
-    nbm_range
-), "Incorrect number of timesteps! Exiting"
+assert len(xarray_forecast_base.time) == len(nbm_range), (
+    "Incorrect number of timesteps! Exiting"
+)
 
 # Create a new time series
 start = xarray_forecast_base.time.min().values

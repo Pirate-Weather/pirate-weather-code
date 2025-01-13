@@ -250,9 +250,9 @@ encoding = {
     vname: {"compressor": compressor, "filters": filters} for vname in zarrVars[1:]
 }
 
-assert len(xarray_forecast_merged.time) == len(
-    hrrr_range1
-), "Incorrect number of timesteps! Exiting"
+assert len(xarray_forecast_merged.time) == len(hrrr_range1), (
+    "Incorrect number of timesteps! Exiting"
+)
 
 # with ProgressBar():
 # xarray_forecast_merged.to_netcdf(forecast_process_path + 'merged_netcdf.nc', encoding=encoding)
