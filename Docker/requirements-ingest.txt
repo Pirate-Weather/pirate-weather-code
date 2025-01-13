@@ -1,7 +1,7 @@
 numpy==2.2.1
-boto3==1.35.92
+boto3==1.35.98
 netCDF4==1.7.2
-xarray==2025.1.0
+xarray==2025.1.1
 cartopy==0.24.1
 cfgrib==0.9.15.0
 eccodes==2.39.1
