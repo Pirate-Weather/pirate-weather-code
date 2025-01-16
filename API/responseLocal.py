@@ -927,7 +927,7 @@ async def PW_Forecast(
         print(datetime.datetime.utcnow() - T_Start)
 
     # Set defaults
-    if extend is False:
+    if not extend:
         extendFlag = 0
     else:
         if extend == "hourly":
@@ -935,26 +935,26 @@ async def PW_Forecast(
         else:
             extendFlag = 0
 
-    if version is False:
+    if not version:
         version = 1
 
     version = float(version)
 
-    if lang is False:
+    if not lang:
         lang = "en"
 
     # Set up translations
     translation = Translations[lang]
-    if translation is None:
+    if not translation:
         translation = Translations["en"]
 
     # Check if extra information should be included with time machine
-    if tmextra is False:
+    if not tmextra:
         tmExtra = False
     else:
         tmExtra = True
 
-    if exclude is False:
+    if not exclude:
         excludeParams = ""
     else:
         excludeParams = exclude
