@@ -1,7 +1,7 @@
 astral==3.2
 timezonefinder==6.5.7
 pytz==2024.2
-zarr==2.18.4
+zarr==3.0.1
 s3fs==2024.12.0
 ujson==5.10.0
 starlette==0.45.2
