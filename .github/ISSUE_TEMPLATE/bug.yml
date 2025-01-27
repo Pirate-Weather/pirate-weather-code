@@ -56,7 +56,7 @@ body:
       label: Troubleshooting steps
       description: Before reporting an issue follow these troubleshooting steps to see if it solves the issue.
       options:
-        - label: This issue is related to the self-hosting code and not an API issue.
+        - label: This issue is related to the self-hosting code and not an API or Home Assistant issue.
           required: true
         - label: I have read through the [README](https://github.com/Pirate-Weather/pirate-weather-code/blob/main/README.md) before opening this issue.
           required: true
