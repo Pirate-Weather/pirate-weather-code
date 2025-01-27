@@ -1,5 +1,5 @@
 numpy==2.2.2
-boto3==1.36.2
+boto3==1.36.6
 netCDF4==1.7.2
 xarray==2025.1.1
 cartopy==0.24.1
