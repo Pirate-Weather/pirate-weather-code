@@ -6,16 +6,26 @@ partlyCloudyThreshold = 0.375
 mostlyClearThreshold = 0.125
 
 
-def calculate_sky_icon(cloudCover, isDayTime):
+def calculate_sky_icon(cloudCover, isDayTime, icon="darksky"):
     sky_icon = None
 
-    if cloudCover > cloudThreshold:
+    if cloudCover > cloudy:
         sky_icon = "cloudy"
-    elif cloudCover > partlyCloudyThreshold:
+    elif cloudCover > mostly_cloudy and icon == "pirate":
+        if isDayTime:
+            sky_icon = "mostly-cloudy-day"
+        else:
+            sky_icon = "mostly-cloudy-night"
+    elif cloudCover > partly_cloudy:
         if isDayTime:
             sky_icon = "partly-cloudy-day"
         else:
             sky_icon = "partly-cloudy-night"
+    elif cloudCover > mostly_clear and icon == "pirate":
+        if isDayTime:
+            sky_icon = "mostly-clear-day"
+        else:
+            sky_icon = "mostly-clear-night"
     else:
         if isDayTime:
             sky_icon = "clear-day"
@@ -37,6 +47,8 @@ def calculate_text(
     icePrep,
     type,
     mode="title",
+    prepInensity,
+    icon="darksky"
 ):
     visThresh = 1000 * visUnits
 
@@ -117,6 +129,7 @@ def calculate_text(
         ((rainPrep > 0) and (rainPrep < rainIconThreshold))
         or ((snowPrep > 0) and (snowPrep < snowIconThreshold))
         or ((icePrep > 0) and (icePrep < iceIconThreshold))
+        or ((prepInensity > 0) and (prepInensity < rainIconThreshold))
     ):
         possiblePrecip = "possible-"
 
@@ -136,58 +149,166 @@ def calculate_text(
         else:
             cIcon = precipType
 
-    if rainPrep > 0 and precipType == "rain":
-        if rainPrep < lightRainThresh:
+
+    if mode == "daily" and prepInensity > rainIconThreshold:
+        if rainPrep > 0 and snowPrep > 0:
+            cText = [mode, ["and", "medium-rain", "medium-snow"]]
+        elif rainPrep > 0 and icePrep > 0:
+            cText = [mode, ["and", "medium-rain", "medium-sleet"]]
+        elif snowPrep > 0 and icePrep > 0:
+            cText = [mode, ["and", "medium-snow", "medium-sleet"]]
+        elif snowPrep > 0 and icePrep > 0 and rainPrep > 0:
+            cText = [mode, ["mixed-precipitation"]]
+            cIcon = "mixed"
+    elif rainPrep > 0 and prepInensity > 0 and precipType == "rain":
+        if prepInensity < lightRainThresh:
             cText = [mode, possiblePrecip + "very-light-rain"]
             cCond = possiblePrecip + "very-light-rain"
-        elif rainPrep >= lightRainThresh and rainPrep < midRainThresh:
+                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                    cIcon = "possible-rain-day"
+                elif (
+                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+                ):
+                    cIcon = "possible-rain-night"
+                elif icon == "pirate":
+                    cIcon = "drizzle"
+        elif prepInensity >= lightRainThresh and prepInensity < midRainThresh:
             cText = [mode, possiblePrecip + "light-rain"]
             cCond = possiblePrecip + "light-rain"
-        elif rainPrep >= midRainThresh and rainPrep < heavyRainThresh:
+                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                    cIcon = "possible-rain-day"
+                elif (
+                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+                ):
+                    cIcon = "possible-rain-night"
+                elif icon == "pirate":
+                    cIcon = "light-rain"
+        elif prepInensity >= midRainThresh and prepInensity < heavyRainThresh:
             cText = [mode, "medium-rain"]
-            cCond = "medium-rain"
+            cCond = possiblePrecip + "medium-rain"
+                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                    cIcon = "possible-rain-day"
+                elif (
+                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+                ):
+                    cIcon = "possible-rain-night"
         else:
             cText = [mode, "heavy-rain"]
-            cCond = "heavy-rain"
-    elif snowPrep > 0 and precipType == "snow":
-        if snowPrep < lightSnowThresh:
+            cCond = possiblePrecip + "heavy-rain"
+                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                    cIcon = "possible-rain-day"
+                elif (
+                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+                ):
+                    cIcon = "possible-rain-night"
+                elif icon == "pirate":
+                    cIcon = "heavy-rain"
+    elif snowPrep > 0 and prepInensity > 0 and precipType == "snow":
+        if prepInensity < lightSnowThresh:
             cText = [mode, possiblePrecip + "very-light-snow"]
             cCond = possiblePrecip + "very-light-snow"
-        elif snowPrep >= lightSnowThresh and snowPrep < midSnowThresh:
+                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                    cIcon = "possible-snow-day"
+                elif (
+                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+                ):
+                    cIcon = "possible-snow-night"
+                elif icon == "pirate":
+                    cIcon = "flurries"
+        elif prepInensity >= lightSnowThresh and prepInensity < midSnowThresh:
             cText = [mode, possiblePrecip + "light-snow"]
             cCond = possiblePrecip + "light-snow"
-        elif snowPrep >= midSnowThresh and snowPrep < heavySnowThresh:
+                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                    cIcon = "possible-snow-day"
+                elif (
+                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+                ):
+                    cIcon = "possible-snow-night"
+                elif icon == "pirate":
+                    cIcon = "light-snow"
+        elif prepInensity >= midSnowThresh and prepInensity < heavySnowThresh:
             cText = [mode, "medium-snow"]
-            cCond = "medium-snow"
+            cCond = possiblePrecip + "medium-snow"
+                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                    cIcon = "possible-snow-day"
+                elif (
+                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+                ):
+                    cIcon = "possible-snow-night"
         else:
             cText = [mode, "heavy-snow"]
-            cCond = "heavy-snow"
-    elif icePrep > 0 and precipType == "sleet":
-        if icePrep < lightSleetThresh:
+            cCond = possiblePrecip + "heavy-snow"
+                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                    cIcon = "possible-snow-day"
+                elif (
+                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+                ):
+                    cIcon = "possible-snow-night"
+                elif icon == "pirate":
+                    cIcon = "heavy-snow"
+    elif icePrep > 0 and prepInensity > 0 and precipType == "sleet":
+        if prepInensity < lightSleetThresh:
             cText = [mode, possiblePrecip + "very-light-sleet"]
             cCond = possiblePrecip + "very-light-sleet"
-        elif icePrep >= lightSleetThresh and icePrep < midSleetThresh:
+                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                    cIcon = "possible-sleet-day"
+                elif (
+                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+                ):
+                    cIcon = "possible-sleet-night"
+                elif icon == "pirate":
+                    cIcon = "very-light-sleet"
+        elif prepInensity >= lightSleetThresh and prepInensity < midSleetThresh:
             cText = [mode, possiblePrecip + "light-sleet"]
             cCond = possiblePrecip + "light-sleet"
-        elif icePrep >= midSleetThresh and icePrep < heavySleetThresh:
+                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                    cIcon = "possible-sleet-day"
+                elif (
+                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+                ):
+                    cIcon = "possible-sleet-night"
+                elif icon == "pirate":
+                    cIcon = "light-sleet"
+        elif prepInensity >= midSleetThresh and prepInensity < heavySleetThresh:
             cText = [mode, "medium-sleet"]
-            cCond = "medium-sleet"
+            cCond = possiblePrecip + "medium-sleet"
+                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                    cIcon = "possible-sleet-day"
+                elif (
+                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+                ):
+                    cIcon = "possible-sleet-night"
         else:
             cText = [mode, "heavy-sleet"]
-            cCond = "heavy-sleet"
-    elif (rainPrep > 0 or snowPrep > 0 or icePrep > 0) and precipType == "none":
-        if rainPrep < lightRainThresh:
+            cCond = possiblePrecip + "heavy-sleet"
+                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                    cIcon = "possible-sleet-day"
+                elif (
+                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+                ):
+                    cIcon = "possible-sleet-night"
+                elif icon == "pirate":
+                    cIcon = "heavy-sleet"
+    elif (rainPrep > 0 or snowPrep > 0 or icePrep > 0 or prepInensity > 0) and precipType == "none":
+        if prepInensity < lightRainThresh:
             cText = [mode, possiblePrecip + "very-light-precipitation"]
             cCond = possiblePrecip + "very-light-precipitation"
-        elif rainPrep >= lightRainThresh and rainPrep < midRainThresh:
+        elif prepInensity >= lightRainThresh and prepInensity < midRainThresh:
             cText = [mode, possiblePrecip + "light-precipitation"]
             cCond = possiblePrecip + "light-precipitation"
-        elif rainPrep >= midRainThresh and rainPrep < heavyRainThresh:
+        elif prepInensity >= midRainThresh and prepInensity < heavyRainThresh:
             cText = [mode, "medium-precipitation"]
-            cCond = "medium-precipitation"
+            cCond = possiblePrecip + "medium-precipitation"
         else:
             cText = [mode, "heavy-precipitation"]
-            cCond = "heavy-precipitation"
+            cCond = possiblePrecip + "heavy-precipitation"
+
+        if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+            cIcon = "possible-precipitation-day"
+        elif icon == "pirate" and possiblePrecip == "possible-" and not isDayTime:
+            cIcon = "possible-precipitation-night"
+        elif icon == "pirate":
+            cIcon = "precipitation"
 
     # If visibility < 1000m, show fog
     elif vis < visThresh and wind < lightWindThresh:
@@ -231,6 +352,7 @@ def calculate_text(
                 (rainPrep < rainIconThreshold)
                 and (snowPrep < snowIconThreshold)
                 and (icePrep < iceIconThreshold)
+                and (prepInensity < rainIconThreshold)
             ):
                 cIcon = "wind"
 
@@ -238,10 +360,14 @@ def calculate_text(
                 # Show the wind text before the sky text
                 if wind >= lightWindThresh and wind < midWindThresh:
                     cText = [mode, ["and", "light-wind", cCond]]
+                    if icon == "pirate":
+                        cIcon = "breezy"
                 elif wind >= midWindThresh and wind < heavyWindThresh:
                     cText = [mode, ["and", "medium-wind", cCond]]
                 elif wind >= heavyWindThresh:
                     cText = [mode, ["and", "heavy-wind", cCond]]
+                    if icon == "pirate":
+                        cIcon = "dangerously-windy"
             else:
                 # Show the wind text after the precipitation text
                 if wind >= lightWindThresh and wind < midWindThresh:
