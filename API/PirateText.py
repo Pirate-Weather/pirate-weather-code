@@ -46,8 +46,8 @@ def calculate_text(
     snowPrep,
     icePrep,
     type,
-    mode="title",
     prepInensity,
+    mode="title",
     icon="darksky"
 ):
     visThresh = 1000 * visUnits
@@ -150,17 +150,7 @@ def calculate_text(
             cIcon = precipType
 
 
-    if mode == "daily" and prepInensity > rainIconThreshold:
-        if rainPrep > 0 and snowPrep > 0:
-            cText = [mode, ["and", "medium-rain", "medium-snow"]]
-        elif rainPrep > 0 and icePrep > 0:
-            cText = [mode, ["and", "medium-rain", "medium-sleet"]]
-        elif snowPrep > 0 and icePrep > 0:
-            cText = [mode, ["and", "medium-snow", "medium-sleet"]]
-        elif snowPrep > 0 and icePrep > 0 and rainPrep > 0:
-            cText = [mode, ["mixed-precipitation"]]
-            cIcon = "mixed"
-    elif rainPrep > 0 and prepInensity > 0 and precipType == "rain":
+    if rainPrep > 0 and prepInensity > 0 and precipType == "rain":
         if prepInensity < lightRainThresh:
             cText = [mode, possiblePrecip + "very-light-rain"]
             cCond = possiblePrecip + "very-light-rain"
