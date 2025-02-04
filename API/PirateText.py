@@ -9,7 +9,7 @@ mostlyClearThreshold = 0.125
 def calculate_sky_icon(cloudCover, isDayTime, icon="darksky"):
     sky_icon = None
 
-    if cloudCover > cloudy:
+    if cloudCover > cloudThreshold:
         sky_icon = "cloudy"
     elif cloudCover > mostlyCloudyThreshold and icon == "pirate":
         if isDayTime:
