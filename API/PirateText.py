@@ -154,131 +154,131 @@ def calculate_text(
         if prepInensity < lightRainThresh:
             cText = [mode, possiblePrecip + "very-light-rain"]
             cCond = possiblePrecip + "very-light-rain"
-                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
-                    cIcon = "possible-rain-day"
-                elif (
-                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
-                ):
-                    cIcon = "possible-rain-night"
-                elif icon == "pirate":
-                    cIcon = "drizzle"
+            if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                cIcon = "possible-rain-day"
+            elif (
+                icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+            ):
+                cIcon = "possible-rain-night"
+            elif icon == "pirate":
+                cIcon = "drizzle"
         elif prepInensity >= lightRainThresh and prepInensity < midRainThresh:
             cText = [mode, possiblePrecip + "light-rain"]
             cCond = possiblePrecip + "light-rain"
-                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
-                    cIcon = "possible-rain-day"
-                elif (
-                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
-                ):
-                    cIcon = "possible-rain-night"
-                elif icon == "pirate":
-                    cIcon = "light-rain"
+            if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                cIcon = "possible-rain-day"
+            elif (
+                icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+            ):
+                cIcon = "possible-rain-night"
+            elif icon == "pirate":
+                cIcon = "light-rain"
         elif prepInensity >= midRainThresh and prepInensity < heavyRainThresh:
             cText = [mode, "medium-rain"]
             cCond = possiblePrecip + "medium-rain"
-                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
-                    cIcon = "possible-rain-day"
-                elif (
-                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
-                ):
-                    cIcon = "possible-rain-night"
+            if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                cIcon = "possible-rain-day"
+            elif (
+                icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+            ):
+                cIcon = "possible-rain-night"
         else:
             cText = [mode, "heavy-rain"]
             cCond = possiblePrecip + "heavy-rain"
-                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
-                    cIcon = "possible-rain-day"
-                elif (
-                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
-                ):
-                    cIcon = "possible-rain-night"
-                elif icon == "pirate":
-                    cIcon = "heavy-rain"
+            if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                cIcon = "possible-rain-day"
+            elif (
+                icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+            ):
+                cIcon = "possible-rain-night"
+            elif icon == "pirate":
+                cIcon = "heavy-rain"
     elif snowPrep > 0 and prepInensity > 0 and precipType == "snow":
         if prepInensity < lightSnowThresh:
             cText = [mode, possiblePrecip + "very-light-snow"]
             cCond = possiblePrecip + "very-light-snow"
-                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
-                    cIcon = "possible-snow-day"
-                elif (
-                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
-                ):
-                    cIcon = "possible-snow-night"
-                elif icon == "pirate":
-                    cIcon = "flurries"
+            if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                cIcon = "possible-snow-day"
+            elif (
+                icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+            ):
+                cIcon = "possible-snow-night"
+            elif icon == "pirate":
+                cIcon = "flurries"
         elif prepInensity >= lightSnowThresh and prepInensity < midSnowThresh:
             cText = [mode, possiblePrecip + "light-snow"]
             cCond = possiblePrecip + "light-snow"
-                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
-                    cIcon = "possible-snow-day"
-                elif (
-                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
-                ):
-                    cIcon = "possible-snow-night"
-                elif icon == "pirate":
-                    cIcon = "light-snow"
+            if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                cIcon = "possible-snow-day"
+            elif (
+                icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+            ):
+                cIcon = "possible-snow-night"
+            elif icon == "pirate":
+                cIcon = "light-snow"
         elif prepInensity >= midSnowThresh and prepInensity < heavySnowThresh:
             cText = [mode, "medium-snow"]
             cCond = possiblePrecip + "medium-snow"
-                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
-                    cIcon = "possible-snow-day"
-                elif (
-                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
-                ):
+            if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                cIcon = "possible-snow-day"
+            elif (
+                icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+            ):
                     cIcon = "possible-snow-night"
         else:
             cText = [mode, "heavy-snow"]
             cCond = possiblePrecip + "heavy-snow"
-                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
-                    cIcon = "possible-snow-day"
-                elif (
-                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
-                ):
-                    cIcon = "possible-snow-night"
-                elif icon == "pirate":
-                    cIcon = "heavy-snow"
+            if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                cIcon = "possible-snow-day"
+            elif (
+                icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+            ):
+                cIcon = "possible-snow-night"
+            elif icon == "pirate":
+                cIcon = "heavy-snow"
     elif icePrep > 0 and prepInensity > 0 and precipType == "sleet":
         if prepInensity < lightSleetThresh:
             cText = [mode, possiblePrecip + "very-light-sleet"]
             cCond = possiblePrecip + "very-light-sleet"
-                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
-                    cIcon = "possible-sleet-day"
-                elif (
-                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
-                ):
-                    cIcon = "possible-sleet-night"
-                elif icon == "pirate":
-                    cIcon = "very-light-sleet"
+            if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                cIcon = "possible-sleet-day"
+            elif (
+                icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+            ):
+                cIcon = "possible-sleet-night"
+            elif icon == "pirate":
+                cIcon = "very-light-sleet"
         elif prepInensity >= lightSleetThresh and prepInensity < midSleetThresh:
             cText = [mode, possiblePrecip + "light-sleet"]
             cCond = possiblePrecip + "light-sleet"
-                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
-                    cIcon = "possible-sleet-day"
-                elif (
-                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
-                ):
-                    cIcon = "possible-sleet-night"
-                elif icon == "pirate":
-                    cIcon = "light-sleet"
+            if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                cIcon = "possible-sleet-day"
+            elif (
+                icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+            ):
+                cIcon = "possible-sleet-night"
+            elif icon == "pirate":
+                cIcon = "light-sleet"
         elif prepInensity >= midSleetThresh and prepInensity < heavySleetThresh:
             cText = [mode, "medium-sleet"]
             cCond = possiblePrecip + "medium-sleet"
-                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
-                    cIcon = "possible-sleet-day"
-                elif (
-                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
-                ):
-                    cIcon = "possible-sleet-night"
+            if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                cIcon = "possible-sleet-day"
+            elif (
+                icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+            ):
+                cIcon = "possible-sleet-night"
         else:
             cText = [mode, "heavy-sleet"]
             cCond = possiblePrecip + "heavy-sleet"
-                if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
-                    cIcon = "possible-sleet-day"
-                elif (
-                    icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
-                ):
-                    cIcon = "possible-sleet-night"
-                elif icon == "pirate":
-                    cIcon = "heavy-sleet"
+            if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                cIcon = "possible-sleet-day"
+            elif (
+                icon == "pirate" and possiblePrecip == "possible-" and not isDayTime
+            ):
+                cIcon = "possible-sleet-night"
+            elif icon == "pirate":
+                cIcon = "heavy-sleet"
     elif (rainPrep > 0 or snowPrep > 0 or icePrep > 0 or prepInensity > 0) and precipType == "none":
         if prepInensity < lightRainThresh:
             cText = [mode, possiblePrecip + "very-light-precipitation"]
