@@ -11,17 +11,17 @@ def calculate_sky_icon(cloudCover, isDayTime, icon="darksky"):
 
     if cloudCover > cloudy:
         sky_icon = "cloudy"
-    elif cloudCover > mostly_cloudy and icon == "pirate":
+    elif cloudCover > mostlyCloudyThreshold and icon == "pirate":
         if isDayTime:
             sky_icon = "mostly-cloudy-day"
         else:
             sky_icon = "mostly-cloudy-night"
-    elif cloudCover > partly_cloudy:
+    elif cloudCover > partlyCloudyThreshold:
         if isDayTime:
             sky_icon = "partly-cloudy-day"
         else:
             sky_icon = "partly-cloudy-night"
-    elif cloudCover > mostly_clear and icon == "pirate":
+    elif cloudCover > mostlyClearThreshold and icon == "pirate":
         if isDayTime:
             sky_icon = "mostly-clear-day"
         else:
