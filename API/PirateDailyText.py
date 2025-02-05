@@ -885,7 +885,7 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
     windPrecip = False
     cloudLevel = -1
 
-    if(cloudLevels[mostCommonLevels[0]] != max(cloudLevels)):
+    if cloudLevels[mostCommonLevels[0]] != max(cloudLevels):
         cloudLevel = cloudLevels[mostCommonLevels[0]]
     else:
         cloudLevel = max(cloudLevels)

@@ -1,6 +1,6 @@
 # %% Script to contain the functions that can be used to generate the minutely text summary of the forecast data for Pirate Weather
 
-from javascript import require
+
 
 def calculate_text(precipIntensity, prepIntensityUnit, precipType):
     """

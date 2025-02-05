@@ -3,7 +3,6 @@
 from collections import Counter
 from itertools import groupby
 from operator import itemgetter
-from javascript import require
 
 
 def Most_Common(lst):
