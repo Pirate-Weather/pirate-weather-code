@@ -3014,6 +3014,7 @@ async def PW_Forecast(
                 InterPhour[idx, 22],
                 InterPhour[idx, 23],
                 "hour",
+                InterPhour[idx, 2],
                 mode="title",
             )
             hourItem["summary"] = translation.translate(hourText)
@@ -3379,7 +3380,8 @@ async def PW_Forecast(
                 InterPdaySum[idx, 22],
                 InterPdaySum[idx, 23],
                 "day",
-                mode="title",
+                InterPdayMax[idx, 2],
+                mode="sentence",
             )
             dayObject["summary"] = translation.translate(dayText)
             dayObject["icon"] = dayIcon
@@ -3961,6 +3963,7 @@ async def PW_Forecast(
                 currnetSnowAccum,
                 currnetIceAccum,
                 "current",
+                minuteDict[0]["precipIntensity"],
                 mode="title",
             )
             returnOBJ["currently"]["summary"] = translation.translate(currentText)
