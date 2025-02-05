@@ -326,7 +326,7 @@ def calculate_precip_summary(
     return precipSummary, cIcon
 
 
-def calculate_temp_summary(highTemp, lowTemp):
+def calculate_temp_summary(highTemp, lowTemp, weekArr):
     """
     Calculates the temperature summary for the week
 
@@ -458,7 +458,7 @@ def calculate_weeky_text(weekArr):
         precipitation, precipitationDays, icons, avgIntensity, intensityUnit
     )
 
-    tempSummary = calculate_temp_summary(highTemp, lowTemp)
+    tempSummary = calculate_temp_summary(highTemp, lowTemp, weekArr)
 
     # Combine the two texts together using with
     cText = ["sentence", ["with", precipSummary, tempSummary]]
