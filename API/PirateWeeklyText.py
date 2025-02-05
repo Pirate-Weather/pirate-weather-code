@@ -314,7 +314,10 @@ def calculate_precip_summary(
             # If all days have precipitation then if they all have the same type then use that icon
             cIcon = precipitationDays[0][2]
             # Since precipitation is occuring everyday use the for week text instead of through
-            precipSummary = ["for-week", calculate_text(avgIntensity, intensityUnit, precipitationDays[0][2])]
+            precipSummary = [
+                "for-week",
+                calculate_text(avgIntensity, intensityUnit, precipitationDays[0][2]),
+            ]
         else:
             # If the types are not the same then set the icon to sleet and use the mixed precipitation text (as is how Dark Sky did it)
             cIcon = "sleet"
