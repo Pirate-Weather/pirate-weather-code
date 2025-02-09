@@ -23,7 +23,6 @@ def calculate_text(
     precipIntensity,
     icon="darksky",
 ):
-    
     """
     Calculates the textual summary and icon with the given parameters
 
@@ -77,7 +76,14 @@ def calculate_text(
         vis = 10000
 
     # If we missing or incomplete data then return clear icon/text instead of calculating
-    if temp == -999 or wind == -999 or vis == -999 or cloudCover == -999 or humidity == -999 or pop == -999:
+    if (
+        temp == -999
+        or wind == -999
+        or vis == -999
+        or cloudCover == -999
+        or humidity == -999
+        or pop == -999
+    ):
         if isDayTime:
             return "clear", "clear-day"
         else:
@@ -147,7 +153,7 @@ def calculate_text(
     # If we somehow have no text
     if cText is None:
         cText = "clear"
-    
+
     # If we somehow have no icon
     if cIcon is None:
         if isDayTime:

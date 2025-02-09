@@ -57,7 +57,9 @@ def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
     return cText
 
 
-def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, precipIntensityUnit):
+def calculate_minutely_text(
+    minuteArr, currentText, currentIcon, icon, precipIntensityUnit
+):
     """
     Calculates the minutely summary given an array of minutes
 

@@ -3979,7 +3979,9 @@ async def PW_Forecast(
     if exMinutely != 1:
         returnOBJ["minutely"] = dict()
         try:
-            minuteText, minuteIcon = calculate_minutely_text(minuteDict, currentText, currentIcon, icon, prepAccumUnit)
+            minuteText, minuteIcon = calculate_minutely_text(
+                minuteDict, currentText, currentIcon, icon, prepAccumUnit
+            )
             returnOBJ["minutely"]["summary"] = translation.translate(
                 ["sentence", minuteText]
             )
