@@ -29,6 +29,7 @@ from fsspec import FSMap
 from fsspec.implementations.zip import ZipFileSystem
 from javascript import require
 from PirateText import calculate_text
+from PirateMinutelyText import calculate_minutely_text
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
@@ -121,7 +122,7 @@ def download_if_newer(
 
     if newFile:
         # Write a file to show an update is in progress, do not reload
-        with open(local_lmdb_path + ".lock", "w") as fp:
+        with open(local_lmdb_path + ".lock", "w"):
             pass
 
         local_lmdb_path_tmp = local_lmdb_path + "_TMP"
@@ -499,7 +500,7 @@ class WeatherParallel(object):
                     print(datetime.datetime.utcnow())
                 return dataOut
 
-            except:
+            except Exception:
                 errCount = errCount + 1
 
         print("### " + model + " Failure!")
@@ -736,6 +737,7 @@ async def PW_Forecast(
     version: Union[str, None] = None,
     tmextra: Union[str, None] = None,
     apikey: Union[str, None] = None,
+    icon: Union[str, None] = None,
 ) -> dict:
     global ETOPO_f
     global SubH_Zarr
@@ -750,7 +752,6 @@ async def PW_Forecast(
     readHRRR = False
     readGFS = False
     readNBM = False
-    readNBM_Fire = False
     readGEFS = False
 
     print(os.environ.get("STAGE", "PROD"))
@@ -784,7 +785,7 @@ async def PW_Forecast(
     try:
         lat = float(locationReq[0])
         lon_IN = float(locationReq[1])
-    except:
+    except Exception:
         raise HTTPException(status_code=400, detail="Invalid Location Specification")
         # return {
         #     'statusCode': 400,
@@ -827,14 +828,14 @@ async def PW_Forecast(
                 )
                 # Since it is in UTC time already
                 utcTime = utcTime.replace(tzinfo=None)
-            except:
+            except Exception:
                 try:
                     utcTime = datetime.datetime.strptime(
                         locationReq[2], "%Y-%m-%dT%H:%M:%S%Z"
                     )
                     # Since it is in UTC time already
                     utcTime = utcTime.replace(tzinfo=None)
-                except:
+                except Exception:
                     try:
                         localTime = datetime.datetime.strptime(
                             locationReq[2], "%Y-%m-%dT%H:%M:%S"
@@ -851,7 +852,7 @@ async def PW_Forecast(
                         tz_offsetIN, tz_name = get_offset(**tz_offsetLocIN)
                         utcTime = localTime - datetime.timedelta(minutes=tz_offsetIN)
 
-                    except:
+                    except Exception:
                         # print('ERROR')
                         raise HTTPException(
                             status_code=400, detail="Invalid Time Specification"
@@ -942,6 +943,9 @@ async def PW_Forecast(
 
     if not lang:
         lang = "en"
+
+    if icon != "pirate":
+        icon = "darksky"
 
     # Set up translations
     translation = Translations[lang]
@@ -1844,7 +1848,7 @@ async def PW_Forecast(
                 NBM_Fire_Merged[0 : (217 - NBM_Fire_StartIDX), :] = dataOut_nbmFire[
                     NBM_Fire_StartIDX : (numHours + NBM_Fire_StartIDX), :
                 ]
-        except:
+        except Exception:
             sourceTimes.pop("hrrr_18-48")
             sourceTimes.pop("nbm_fire")
             sourceTimes.pop("nbm")
@@ -2044,13 +2048,13 @@ async def PW_Forecast(
         print("Sunrise start")
         print(datetime.datetime.utcnow() - T_Start)
 
-    l = LocationInfo("name", "region", tz_name, lat, az_Lon)
+    loc = LocationInfo("name", "region", tz_name, lat, az_Lon)
 
     # Calculate Sunrise, Sunset, Moon Phase
     for i in range(0, daily_days):
         try:
             s = sun(
-                l.observer, date=baseDay + datetime.timedelta(days=i)
+                loc.observer, date=baseDay + datetime.timedelta(days=i)
             )  # Use local to get the correct date
 
             InterSday[i, 17] = (
@@ -3015,9 +3019,9 @@ async def PW_Forecast(
                 InterPhour[idx, 23],
                 "hour",
                 InterPhour[idx, 2],
-                mode="title",
+                icon,
             )
-            hourItem["summary"] = translation.translate(hourText)
+            hourItem["summary"] = translation.translate(["title", hourText])
             hourItem["icon"] = hourIcon
         except Exception as e:
             print("TEXT GEN ERROR:")
@@ -3381,9 +3385,9 @@ async def PW_Forecast(
                 InterPdaySum[idx, 23],
                 "day",
                 InterPdayMax[idx, 2],
-                mode="sentence",
+                icon,
             )
-            dayObject["summary"] = translation.translate(dayText)
+            dayObject["summary"] = translation.translate(["sentence", dayText])
             dayObject["icon"] = dayIcon
         except Exception as e:
             print("TEXT GEN ERROR:")
@@ -3470,8 +3474,6 @@ async def PW_Forecast(
                     }
 
                     alertList.append(dict(alertDict))
-
-            alertSuccess = 1
 
         else:
             alertList = []
@@ -3964,9 +3966,11 @@ async def PW_Forecast(
                 currnetIceAccum,
                 "current",
                 minuteDict[0]["precipIntensity"],
-                mode="title",
+                icon,
             )
-            returnOBJ["currently"]["summary"] = translation.translate(currentText)
+            returnOBJ["currently"]["summary"] = translation.translate(
+                ["title", currentText]
+            )
             returnOBJ["currently"]["icon"] = currentIcon
         except Exception as e:
             print("TEXT GEN ERROR:")
@@ -3975,8 +3979,11 @@ async def PW_Forecast(
     if exMinutely != 1:
         returnOBJ["minutely"] = dict()
         try:
-            returnOBJ["minutely"]["summary"] = translation.translate(currentText)
-            returnOBJ["minutely"]["icon"] = currentIcon
+            minuteText, minuteIcon = calculate_minutely_text(minuteDict, currentText, currentIcon, icon, prepAccumUnit)
+            returnOBJ["minutely"]["summary"] = translation.translate(
+                ["sentence", minuteText]
+            )
+            returnOBJ["minutely"]["icon"] = minuteIcon
         except Exception as e:
             print("TEXT GEN ERROR:")
             print(e)

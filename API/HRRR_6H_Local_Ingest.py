@@ -224,9 +224,9 @@ xarray_forecast_merged = xr.open_mfdataset(forecast_process_path + "_wgrib2_merg
 
 # print(xarray_forecast_merged.variables)
 
-assert len(xarray_forecast_merged.time) == len(hrrr_range1), (
-    "Incorrect number of timesteps! Exiting"
-)
+assert len(xarray_forecast_merged.time) == len(
+    hrrr_range1
+), "Incorrect number of timesteps! Exiting"
 
 # %% Fix things
 # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time

@@ -228,9 +228,9 @@ xarray_forecast_merged = xr.merge(
     [xarray_wgrib_merged, xarray_wgribUV_merged], compat="override"
 )
 
-assert len(xarray_forecast_merged.time) == len(gfsFileRange), (
-    "Incorrect number of timesteps! Exiting"
-)
+assert len(xarray_forecast_merged.time) == len(
+    gfsFileRange
+), "Incorrect number of timesteps! Exiting"
 
 # Create a new time series
 start = xarray_forecast_merged.time.min().values  # Adjust as necessary
