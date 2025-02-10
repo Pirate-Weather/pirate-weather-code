@@ -6,7 +6,9 @@ from operator import itemgetter
 from PirateTextHelper import calculate_precip_text
 
 
-def calculate_summary_text(precipitation, avgIntensity, intensityUnit, icon):
+def calculate_summary_text(
+    precipitation, avgIntensity, intensityUnit, icon, maxIntensity
+):
     """
     Calculates the precipitation summary if there are between 1 and 8 days of precipitation
 
@@ -14,6 +16,8 @@ def calculate_summary_text(precipitation, avgIntensity, intensityUnit, icon):
     - precipitation (arr): An array of arrays that contain the days with precipitation if there are any. The inner array contains: The index in the week array, the day of the week and the precipitation type
     - avgIntensity (float): The average precipitation intensity for the week
     - intensityUnit (int): The conversion factor for the precipitation intensity
+    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
+    - maxIntensity (float): The maximum precipitation intensity for the week
 
     Returns:
     - precipSummary (arr): A summary of the precipitation for the week.
@@ -51,10 +55,10 @@ def calculate_summary_text(precipitation, avgIntensity, intensityUnit, icon):
             avgIntensity,
             intensityUnit,
             wIcon,
-            "current",
-            avgIntensity,
-            avgIntensity,
-            avgIntensity,
+            "week",
+            maxIntensity,
+            maxIntensity,
+            maxIntensity,
             1,
             icon,
             "summary",
@@ -186,6 +190,7 @@ def calculate_precip_summary(
     avgIntensity,
     intensityUnit,
     avgPop,
+    maxIntensity,
     icon="darksky",
 ):
     """
@@ -196,7 +201,9 @@ def calculate_precip_summary(
     - precipitationDays (arr): An array of arrays that contain the days with precipitation if there are any. The inner array contains: The index in the week array, the day of the week and the precipitation type
     - icons (arr): An array of the daily icons
     - avgIntensity (float): The average precipitation intensity for the week
+    - maxIntensity (float): The maximum precipitation intensity for the week
     - intensityUnit (int): The conversion factor for the precipitation intensity
+    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
 
     Returns:
     - precipSummary (arr): A summary of the precipitation for the week.
@@ -221,10 +228,10 @@ def calculate_precip_summary(
             avgIntensity,
             intensityUnit,
             precipitationDays[0][2],
-            "current",
-            avgIntensity,
-            avgIntensity,
-            avgIntensity,
+            "week",
+            maxIntensity,
+            maxIntensity,
+            maxIntensity,
             avgPop,
             icon,
             "both",
@@ -237,7 +244,7 @@ def calculate_precip_summary(
     elif 1 < len(precipitationDays) < 8:
         # If between 1 and 8 days have precipitation call the function to calculate the summary text using the precipitation array.
         wIcon, wSummary, wWeekend, cIcon = calculate_summary_text(
-            precipitationDays, avgIntensity, intensityUnit, icon
+            precipitationDays, avgIntensity, intensityUnit, icon, maxIntensity
         )
 
         # Check if the summary has the over-weekend text
@@ -261,10 +268,10 @@ def calculate_precip_summary(
                 avgIntensity,
                 intensityUnit,
                 precipitationDays[0][2],
-                "daily",
-                avgIntensity,
-                avgIntensity,
-                avgIntensity,
+                "week",
+                maxIntensity,
+                maxIntensity,
+                maxIntensity,
                 avgPop,
                 icon,
                 "both",
@@ -366,7 +373,7 @@ def calculate_weeky_text(weekArr):
     lowTemp = []
     icons = []
     tempSummary = ""
-    avgIntensity = intensityUnit = avgPop = 0
+    avgIntensity = intensityUnit = avgPop = maxIntensity = 0
 
     # Loop through the week array
     for idx, day in enumerate(weekArr):
@@ -383,6 +390,10 @@ def calculate_weeky_text(weekArr):
             avgIntensity += day[2] * day[1]["precipIntensityMax"]
             intensityUnit = day[2]
             avgPop += day[1]["precipProbability"]
+            if maxIntensity == 0:
+                maxIntensity = day[1]["precipIntensityMax"]
+            elif day[1]["precipIntensityMax"] > maxIntensity:
+                maxIntensity = day[1]["precipIntensityMax"]
         elif day[1]["precipType"] == "rain" and (
             day[1]["precipAccumulation"] * day[2]
         ) >= (0.02 * day[2]):
@@ -392,6 +403,10 @@ def calculate_weeky_text(weekArr):
             avgIntensity += day[2] * day[1]["precipIntensityMax"]
             intensityUnit = day[2]
             avgPop += day[1]["precipProbability"]
+            if maxIntensity == 0:
+                maxIntensity = day[1]["precipIntensityMax"]
+            elif day[1]["precipIntensityMax"] > maxIntensity:
+                maxIntensity = day[1]["precipIntensityMax"]
         elif day[1]["precipType"] == "sleet" and (
             day[1]["precipAccumulation"] * day[2]
         ) >= (0.02 * day[2]):
@@ -401,6 +416,10 @@ def calculate_weeky_text(weekArr):
             avgIntensity += day[2] * day[1]["precipIntensityMax"]
             intensityUnit = day[2]
             avgPop += day[1]["precipProbability"]
+            if maxIntensity == 0:
+                maxIntensity = day[1]["precipIntensityMax"]
+            elif day[1]["precipIntensityMax"] > maxIntensity:
+                maxIntensity = day[1]["precipIntensityMax"]
         elif day[1]["precipType"] == "none" and (
             day[1]["precipAccumulation"] * day[2]
         ) >= (0.02 * day[3]):
@@ -410,6 +429,10 @@ def calculate_weeky_text(weekArr):
             avgIntensity += day[2] * day[1]["precipIntensityMax"]
             intensityUnit = day[2]
             avgPop += day[1]["precipProbability"]
+            if maxIntensity == 0:
+                maxIntensity = day[1]["precipIntensityMax"]
+            elif day[1]["precipIntensityMax"] > maxIntensity:
+                maxIntensity = day[1]["precipIntensityMax"]
 
         # Determine the highest temperature of the week and record the index in the array, the day it occured on, the temperature and the temperature units
         if not highTemp:
@@ -428,7 +451,13 @@ def calculate_weeky_text(weekArr):
         avgPop = avgPop / len(precipitationDays)
 
     precipSummary, cIcon = calculate_precip_summary(
-        precipitation, precipitationDays, icons, avgIntensity, intensityUnit, avgPop
+        precipitation,
+        precipitationDays,
+        icons,
+        avgIntensity,
+        intensityUnit,
+        avgPop,
+        maxIntensity,
     )
 
     tempSummary = calculate_temp_summary(highTemp, lowTemp, weekArr)

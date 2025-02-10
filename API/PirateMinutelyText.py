@@ -68,6 +68,7 @@ def calculate_minutely_text(
     - currentText (str/arr): The current conditions in translations format
     - currentIcon (str): The icon representing the current conditions
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
+    - prepAccumUnit (float): The precipitation accumulation/intensity unit
 
     Returns:
     - cText (arr): The precipitation summary for the hour.
@@ -302,20 +303,16 @@ def calculate_minutely_text(
         cIcon = "sleet"
     # If there is two precipitation types for the hour
     elif len(starts) == 2:
-        # Calculate the maximum intensity based on the precipitation types
-        maxIntensity = max(
-            rainMaxIntensity, snowMaxIntensity, sleetMaxIntensity, noneMaxIntensity
-        )
         # If the first type is sleet show that as the minutely summary text and set the icon to sleet
         if first_precip == "sleet":
             text, cIcon = calculate_precip_text(
-                maxIntensity,
+                avgIntensity,
                 precipIntensityUnit,
                 "sleet",
-                "current",
-                maxIntensity,
-                maxIntensity,
-                maxIntensity,
+                "minute",
+                rainMaxIntensity,
+                snowMaxIntensity,
+                sleetMaxIntensity,
                 1,
                 icon,
                 "both",
@@ -323,13 +320,13 @@ def calculate_minutely_text(
         # If the first type is snow show that as the minutely summary text and set the icon to snow
         elif first_precip == "snow":
             text, cIcon = calculate_precip_text(
-                maxIntensity,
+                avgIntensity,
                 precipIntensityUnit,
                 "snow",
-                "current",
-                maxIntensity,
-                maxIntensity,
-                maxIntensity,
+                "minute",
+                rainMaxIntensity,
+                snowMaxIntensity,
+                sleetMaxIntensity,
                 1,
                 icon,
                 "both",
@@ -337,13 +334,13 @@ def calculate_minutely_text(
         # If the first type is rain show that as the minutely summary text and set the icon to rain
         elif first_precip == "rain":
             text, cIcon = calculate_precip_text(
-                maxIntensity,
+                avgIntensity,
                 precipIntensityUnit,
                 "rain",
-                "current",
-                maxIntensity,
-                maxIntensity,
-                maxIntensity,
+                "minute",
+                rainMaxIntensity,
+                snowMaxIntensity,
+                sleetMaxIntensity,
                 1,
                 icon,
                 "both",
@@ -351,13 +348,13 @@ def calculate_minutely_text(
         # If the first type has no type that as the minutely summary text and set the icon to rain
         else:
             text, cIcon = calculate_precip_text(
-                maxIntensity,
+                avgIntensity,
                 precipIntensityUnit,
                 "none",
-                "current",
-                maxIntensity,
-                maxIntensity,
-                maxIntensity,
+                "minute",
+                noneMaxIntensity,
+                snowMaxIntensity,
+                sleetMaxIntensity,
                 1,
                 icon,
                 "both",
@@ -393,12 +390,12 @@ def calculate_minutely_text(
     # If there if the only one precipitation is sleet
     elif sleetStart1 != -1:
         text, cIcon = calculate_precip_text(
-            sleetMaxIntensity,
+            avgIntensity,
             precipIntensityUnit,
             "sleet",
-            "current",
-            sleetMaxIntensity,
-            sleetMaxIntensity,
+            "minute",
+            rainMaxIntensity,
+            snowMaxIntensity,
             sleetMaxIntensity,
             1,
             icon,
@@ -413,13 +410,13 @@ def calculate_minutely_text(
     # If there if the only one precipitation is snow
     elif snowStart1 != -1:
         text, cIcon = calculate_precip_text(
-            snowMaxIntensity,
+            avgIntensity,
             precipIntensityUnit,
             "snow",
-            "current",
+            "minute",
+            rainMaxIntensity,
             snowMaxIntensity,
-            snowMaxIntensity,
-            snowMaxIntensity,
+            sleetMaxIntensity,
             1,
             icon,
             "both",
@@ -433,13 +430,13 @@ def calculate_minutely_text(
     # If there if the only one precipitation is rain
     elif rainStart1 != -1:
         text, cIcon = calculate_precip_text(
-            rainMaxIntensity,
+            avgIntensity,
             precipIntensityUnit,
             "rain",
-            "current",
+            "minute",
             rainMaxIntensity,
-            rainMaxIntensity,
-            rainMaxIntensity,
+            snowMaxIntensity,
+            sleetMaxIntensity,
             1,
             icon,
             "both",
@@ -453,13 +450,13 @@ def calculate_minutely_text(
     # If there if the only one precipitation has any other type
     else:
         text, cIcon = calculate_precip_text(
-            noneMaxIntensity,
+            avgIntensity,
             precipIntensityUnit,
             "none",
-            "current",
+            "minute",
             noneMaxIntensity,
-            noneMaxIntensity,
-            noneMaxIntensity,
+            snowMaxIntensity,
+            sleetMaxIntensity,
             1,
             icon,
             "both",
