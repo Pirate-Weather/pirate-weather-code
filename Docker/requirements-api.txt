@@ -18,5 +18,4 @@ dask==2025.1.0
 xarray==2025.1.2
 pandas==2.2.3
 fastparquet==2024.11.0
-javascript==1!1.2.2
 pirateweather-translations==0.0.8
