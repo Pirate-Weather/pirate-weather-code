@@ -112,9 +112,7 @@ def calculate_minutely_text(
             # Set the maxiumum rain intensity
             if rainMaxIntensity == 0:
                 rainMaxIntensity = minute["precipIntensity"]
-            elif (
-                rainMaxIntensity > 0 and minute["precipIntensity"] > rainMaxIntensity
-            ):
+            elif rainMaxIntensity > 0 and minute["precipIntensity"] > rainMaxIntensity:
                 rainMaxIntensity = minute["precipIntensity"]
 
             # Set the first precip first index if not set to the current index
@@ -147,9 +145,7 @@ def calculate_minutely_text(
             # Set the maxiumum snow intensity
             if snowMaxIntensity == 0:
                 snowMaxIntensity = minute["precipIntensity"]
-            elif (
-                snowMaxIntensity > 0 and minute["precipIntensity"] > snowMaxIntensity
-            ):
+            elif snowMaxIntensity > 0 and minute["precipIntensity"] > snowMaxIntensity:
                 snowMaxIntensity = minute["precipIntensity"]
 
             # Set the first precip first index if not set to the current index
@@ -183,8 +179,7 @@ def calculate_minutely_text(
             if sleetMaxIntensity == 0:
                 sleetMaxIntensity = minute["precipIntensity"]
             elif (
-                sleetMaxIntensity > 0
-                and minute["precipIntensity"] > sleetMaxIntensity
+                sleetMaxIntensity > 0 and minute["precipIntensity"] > sleetMaxIntensity
             ):
                 sleetMaxIntensity = minute["precipIntensity"]
 
@@ -217,9 +212,7 @@ def calculate_minutely_text(
             # Set the none maxiumum precipitation intensity
             if noneMaxIntensity == 0:
                 noneMaxIntensity = minute["precipIntensity"]
-            elif (
-                noneMaxIntensity > 0 and minute["precipIntensity"] > noneMaxIntensity
-            ):
+            elif noneMaxIntensity > 0 and minute["precipIntensity"] > noneMaxIntensity:
                 noneMaxIntensity = minute["precipIntensity"]
 
             # Set the first precip first index if not set to the current index
