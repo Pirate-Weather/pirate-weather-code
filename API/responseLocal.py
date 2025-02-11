@@ -30,6 +30,7 @@ from fsspec.implementations.zip import ZipFileSystem
 from javascript import require
 from PirateText import calculate_text
 from PirateMinutelyText import calculate_minutely_text
+from PirateWeeklyText import calculate_weeky_text
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
@@ -4010,8 +4011,9 @@ async def PW_Forecast(
     if exDaily != 1:
         returnOBJ["daily"] = dict()
         if (not timeMachine) or (tmExtra):
-            returnOBJ["daily"]["summary"] = max(set(dayTextList), key=dayTextList.count)
-            returnOBJ["daily"]["icon"] = max(set(dayIconList), key=dayIconList.count)
+            weekText, weekIcon = = calculate_weekly_text(dayList, prepAccumUnit, tempUnits)
+            returnOBJ["daily"]["summary"] = translation.translate(["sentence", weekText])
+            returnOBJ["daily"]["icon"] = weekIcon
         returnOBJ["daily"]["data"] = dayList
 
     if exAlerts != 1:

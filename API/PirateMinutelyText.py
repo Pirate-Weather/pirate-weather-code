@@ -104,18 +104,18 @@ def calculate_minutely_text(
     # Loop through the minute array
     for idx, minute in enumerate(minuteArr):
         # If there is rain for the current minute in the array
-        if minute[0]["precipType"] == "rain" and minute[0]["precipIntensity"] > 0:
+        if minute["precipType"] == "rain" and minute["precipIntensity"] > 0:
             # Increase the minutes of precipitation, the precipitation unit and average intensity
-            avgIntensity += minute[0]["precipIntensity"]
+            avgIntensity += minute["precipIntensity"]
             precipMinutes += 1
 
             # Set the maxiumum rain intensity
             if rainMaxIntensity == 0:
-                rainMaxIntensity = minute[0]["precipIntensity"]
+                rainMaxIntensity = minute["precipIntensity"]
             elif (
-                rainMaxIntensity > 0 and minute[0]["precipIntensity"] > rainMaxIntensity
+                rainMaxIntensity > 0 and minute["precipIntensity"] > rainMaxIntensity
             ):
-                rainMaxIntensity = minute[0]["precipIntensity"]
+                rainMaxIntensity = minute["precipIntensity"]
 
             # Set the first precip first index if not set to the current index
             if precipStart1 == -1:
@@ -139,18 +139,18 @@ def calculate_minutely_text(
             if noneStart1 != -1 and noneStart2 == -1 and noneEnd1 == -1:
                 noneEnd1 = idx
         # If there is snow for the current minute in the array
-        elif minute[0]["precipType"] == "snow" and minute[0]["precipIntensity"] > 0:
+        elif minute["precipType"] == "snow" and minute["precipIntensity"] > 0:
             # Increase the minutes of precipitation, the precipitation unit and average intensity
-            avgIntensity += minute[0]["precipIntensity"]
+            avgIntensity += minute["precipIntensity"]
             precipMinutes += 1
 
             # Set the maxiumum snow intensity
             if snowMaxIntensity == 0:
-                snowMaxIntensity = minute[0]["precipIntensity"]
+                snowMaxIntensity = minute["precipIntensity"]
             elif (
-                snowMaxIntensity > 0 and minute[0]["precipIntensity"] > snowMaxIntensity
+                snowMaxIntensity > 0 and minute["precipIntensity"] > snowMaxIntensity
             ):
-                snowMaxIntensity = minute[0]["precipIntensity"]
+                snowMaxIntensity = minute["precipIntensity"]
 
             # Set the first precip first index if not set to the current index
             if precipStart1 == -1:
@@ -174,19 +174,19 @@ def calculate_minutely_text(
             if noneStart1 != -1 and noneStart2 == -1 and noneEnd1 == -1:
                 noneEnd1 = idx
         # If there is sleet for the current minute in the array
-        elif minute[0]["precipType"] == "sleet" and minute[0]["precipIntensity"] > 0:
+        elif minute["precipType"] == "sleet" and minute["precipIntensity"] > 0:
             # Increase the minutes of precipitation, the precipitation unit and average intensity
-            avgIntensity += minute[0]["precipIntensity"]
+            avgIntensity += minute["precipIntensity"]
             precipMinutes += 1
 
             # Set the maxiumum sleet intensity
             if sleetMaxIntensity == 0:
-                sleetMaxIntensity = minute[0]["precipIntensity"]
+                sleetMaxIntensity = minute["precipIntensity"]
             elif (
                 sleetMaxIntensity > 0
-                and minute[0]["precipIntensity"] > sleetMaxIntensity
+                and minute["precipIntensity"] > sleetMaxIntensity
             ):
-                sleetMaxIntensity = minute[0]["precipIntensity"]
+                sleetMaxIntensity = minute["precipIntensity"]
 
             # Set the first precip first index if not set to the current index
             if precipStart1 == -1:
@@ -209,18 +209,18 @@ def calculate_minutely_text(
             # If there is a first none starting index but no ending index then set that to the current index
             if noneStart1 != -1 and noneStart2 == -1 and noneEnd1 == -1:
                 noneEnd1 = idx
-        elif minute[0]["precipType"] == "none" and minute[0]["precipIntensity"] > 0:
+        elif minute["precipType"] == "none" and minute["precipIntensity"] > 0:
             # Increase the minutes of precipitation, the precipitation unit and average intensity
-            avgIntensity += minute[0]["precipIntensity"]
+            avgIntensity += minute["precipIntensity"]
             precipMinutes += 1
 
             # Set the none maxiumum precipitation intensity
             if noneMaxIntensity == 0:
-                noneMaxIntensity = minute[0]["precipIntensity"]
+                noneMaxIntensity = minute["precipIntensity"]
             elif (
-                noneMaxIntensity > 0 and minute[0]["precipIntensity"] > noneMaxIntensity
+                noneMaxIntensity > 0 and minute["precipIntensity"] > noneMaxIntensity
             ):
-                noneMaxIntensity = minute[0]["precipIntensity"]
+                noneMaxIntensity = minute["precipIntensity"]
 
             # Set the first precip first index if not set to the current index
             if precipStart1 == -1:

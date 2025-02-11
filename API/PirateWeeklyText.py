@@ -1,5 +1,6 @@
 # %% Script to contain the functions that can be used to generate the weekly text summary of the forecast data for Pirate Weather
 
+import datetime
 from PirateTextHelper import Most_Common
 from itertools import groupby
 from operator import itemgetter
@@ -302,24 +303,24 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
     """
 
     # Change C to celsius otherwise change it to fahrenheit
-    if highTemp[3] == 1:
+    if highTemp[3] != 0:
         highTemp[3] = "celsius"
     else:
         highTemp[3] = "fahrenheit"
 
-    if lowTemp[3] == 1:
+    if lowTemp[3] != 0:
         lowTemp[3] = "celsius"
     else:
         lowTemp[3] = "fahrenheit"
 
     # If the temperature is increasing everyday or if the lowest temperatue is at the start of the week and the highest temperature is at the end of the week use the rising text
-    if weekArr[0][1]["temperatureHigh"] < weekArr[1][1]["temperatureHigh"] < weekArr[2][
-        1
-    ]["temperatureHigh"] < weekArr[3][1]["temperatureHigh"] < weekArr[4][5] < weekArr[
-        5
-    ][1]["temperatureHigh"] < weekArr[6][1]["temperatureHigh"] < weekArr[7][1][
+    if weekArr[0]["temperatureHigh"] < weekArr[1]["temperatureHigh"] < weekArr[2][
         "temperatureHigh"
-    ] or (highTemp[0] >= 6 and lowTemp[0] <= 1):
+    ] < weekArr[3]["temperatureHigh"] < weekArr[4] < weekArr[5][
+        "temperatureHigh"
+    ] < weekArr[6]["temperatureHigh"] < weekArr[7]["temperatureHigh"] or (
+        highTemp[0] >= 6 and lowTemp[0] <= 1
+    ):
         # Set the temperature summary
         return [
             "temperatures-rising",
@@ -327,13 +328,13 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
             highTemp[1],
         ]
     # If the temperature is decreasing everyday or if the lowest temperatue is at the end of the week and the highest temperature is at the start of the week use the rising text
-    elif weekArr[0][1]["temperatureHigh"] > weekArr[1][1]["temperatureHigh"] > weekArr[
-        2
-    ][1]["temperatureHigh"] > weekArr[3][1]["temperatureHigh"] > weekArr[4][
-        5
-    ] > weekArr[5][1]["temperatureHigh"] > weekArr[6][1]["temperatureHigh"] > weekArr[
-        7
-    ][1]["temperatureHigh"] or (highTemp[0] <= 1 and lowTemp[0] >= 6):
+    elif weekArr[0]["temperatureHigh"] > weekArr[1]["temperatureHigh"] > weekArr[2][
+        "temperatureHigh"
+    ] > weekArr[3]["temperatureHigh"] > weekArr[4][0] > weekArr[5][
+        "temperatureHigh"
+    ] > weekArr[6]["temperatureHigh"] > weekArr[7]["temperatureHigh"] or (
+        highTemp[0] <= 1 and lowTemp[0] >= 6
+    ):
         return ["temperatures-falling", [lowTemp[3], round(lowTemp[2], 0)], lowTemp[1]]
     # If the lowest temperatue is in the middle of the week and the highest temperature is at the start or end of the week use the valleying text
     elif (highTemp[0] <= 1 or highTemp[0] >= 6) and 0 < lowTemp[0] < 7:
@@ -351,7 +352,7 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
         ]
 
 
-def calculate_weeky_text(weekArr):
+def calculate_weeky_text(weekArr, intensityUnit, tempUnit):
     """
     Calculates the weekly summary given an array of weekdays
 
@@ -373,78 +374,85 @@ def calculate_weeky_text(weekArr):
     lowTemp = []
     icons = []
     tempSummary = ""
-    avgIntensity = intensityUnit = avgPop = maxIntensity = 0
+    avgIntensity = avgPop = maxIntensity = 0
 
     # Loop through the week array
     for idx, day in enumerate(weekArr):
         # Add the daily icon to the list of weekly icons
-        icons.append(day[1]["icon"])
+        icons.append(day["icon"])
+        # Determine the day of the week based on the epoch timestamp
+        dayDate = datetime.datetime.fromtimestamp(day["time"], datetime.timezone.utc)
+        weekday = dayDate.strftime("%A").lower()
+
+        # First index is always today, second index is always tomorrow and the last index has the next- text at the start
+        if idx == 0:
+            weekday = "today"
+        elif idx == 1:
+            weekday = "tomorrow"
+        elif idx == 7:
+            weekday = "next-" + weekday
 
         # Check if the day has enough precipitation to reach the threshold and record the index in the array, the day it occured on and the type
-        if day[1]["precipType"] == "snow" and (
-            (day[1]["precipAccumulation"] * day[2]) >= (0.2 * day[2])
+        if day["precipType"] == "snow" and (
+            (day["precipAccumulation"] * intensityUnit) >= (0.2 * intensityUnit)
         ):
             # Sets that there has been precipitation during the week
             precipitation = True
-            precipitationDays.append([idx, day[0], day[1]["precipType"]])
-            avgIntensity += day[2] * day[1]["precipIntensityMax"]
-            intensityUnit = day[2]
-            avgPop += day[1]["precipProbability"]
+            precipitationDays.append([idx, weekday, day["precipType"]])
+            avgIntensity += intensityUnit * day["precipIntensityMax"]
+            avgPop += day["precipProbability"]
             if maxIntensity == 0:
-                maxIntensity = day[1]["precipIntensityMax"]
-            elif day[1]["precipIntensityMax"] > maxIntensity:
-                maxIntensity = day[1]["precipIntensityMax"]
-        elif day[1]["precipType"] == "rain" and (
-            day[1]["precipAccumulation"] * day[2]
-        ) >= (0.02 * day[2]):
+                maxIntensity = day["precipIntensityMax"]
+            elif day["precipIntensityMax"] > maxIntensity:
+                maxIntensity = day["precipIntensityMax"]
+        elif day["precipType"] == "rain" and (
+            day["precipAccumulation"] * intensityUnit
+        ) >= (0.02 * intensityUnit):
             # Sets that there has been precipitation during the week
             precipitation = True
-            precipitationDays.append([idx, day[0], day[1]["precipType"]])
-            avgIntensity += day[2] * day[1]["precipIntensityMax"]
-            intensityUnit = day[2]
-            avgPop += day[1]["precipProbability"]
+            precipitationDays.append([idx, weekday, day["precipType"]])
+            avgIntensity += intensityUnit * day["precipIntensityMax"]
+            avgPop += day["precipProbability"]
             if maxIntensity == 0:
-                maxIntensity = day[1]["precipIntensityMax"]
-            elif day[1]["precipIntensityMax"] > maxIntensity:
-                maxIntensity = day[1]["precipIntensityMax"]
-        elif day[1]["precipType"] == "sleet" and (
-            day[1]["precipAccumulation"] * day[2]
-        ) >= (0.02 * day[2]):
+                maxIntensity = day["precipIntensityMax"]
+            elif day["precipIntensityMax"] > maxIntensity:
+                maxIntensity = day["precipIntensityMax"]
+        elif day["precipType"] == "sleet" and (
+            day["precipAccumulation"] * intensityUnit
+        ) >= (0.02 * intensityUnit):
             # Sets that there has been precipitation during the week
             precipitation = True
-            precipitationDays.append([idx, day[0], day[1]["precipType"]])
-            avgIntensity += day[2] * day[1]["precipIntensityMax"]
-            intensityUnit = day[2]
-            avgPop += day[1]["precipProbability"]
+            precipitationDays.append([idx, weekday, day["precipType"]])
+            avgIntensity += intensityUnit * day["precipIntensityMax"]
+            avgPop += day["precipProbability"]
             if maxIntensity == 0:
-                maxIntensity = day[1]["precipIntensityMax"]
-            elif day[1]["precipIntensityMax"] > maxIntensity:
-                maxIntensity = day[1]["precipIntensityMax"]
-        elif day[1]["precipType"] == "none" and (
-            day[1]["precipAccumulation"] * day[2]
-        ) >= (0.02 * day[3]):
+                maxIntensity = day["precipIntensityMax"]
+            elif day["precipIntensityMax"] > maxIntensity:
+                maxIntensity = day["precipIntensityMax"]
+        elif day["precipType"] == "none" and (
+            day["precipAccumulation"] * intensityUnit
+        ) >= (0.02 * intensityUnit):
             # Sets that there has been precipitation during the week
             precipitation = True
-            precipitationDays.append([idx, day[0], "precipitation"])
-            avgIntensity += day[2] * day[1]["precipIntensityMax"]
-            intensityUnit = day[2]
-            avgPop += day[1]["precipProbability"]
+            precipitationDays.append([idx, weekday, "precipitation"])
+            avgIntensity += intensityUnit * day["precipIntensityMax"]
+            avgPop += day["precipProbability"]
             if maxIntensity == 0:
-                maxIntensity = day[1]["precipIntensityMax"]
-            elif day[1]["precipIntensityMax"] > maxIntensity:
-                maxIntensity = day[1]["precipIntensityMax"]
+                maxIntensity = day["precipIntensityMax"]
+            elif day["precipIntensityMax"] > maxIntensity:
+                maxIntensity = day["precipIntensityMax"]
 
         # Determine the highest temperature of the week and record the index in the array, the day it occured on, the temperature and the temperature units
         if not highTemp:
-            highTemp = [idx, day[0], day[1]["temperatureHigh"], day[3]]
-        elif day[1]["temperatureHigh"] > highTemp[2]:
-            highTemp = [idx, day[0], day[1]["temperatureHigh"], day[3]]
+            highTemp = [idx, weekday, day["temperatureHigh"], tempUnit]
+        elif day["temperatureHigh"] > highTemp[2]:
+            highTemp = [idx, weekday, day["temperatureHigh"], tempUnit]
 
         # Determine the lowest temperature of the week and record the index in the array, the day it occured on, the temperature and the temperature units
         if not lowTemp:
-            lowTemp = [idx, day[0], day[1]["temperatureHigh"], day[3]]
-        elif day[1]["temperatureHigh"] < lowTemp[2]:
-            lowTemp = [idx, day[0], day[1]["temperatureHigh"], day[3]]
+            lowTemp = [idx, weekday, day["temperatureHigh"], tempUnit]
+        elif day["temperatureHigh"] < lowTemp[2]:
+            lowTemp = [idx, weekday, day["temperatureHigh"], tempUnit]
 
     if len(precipitationDays) > 0:
         avgIntensity = avgIntensity / len(precipitationDays)
