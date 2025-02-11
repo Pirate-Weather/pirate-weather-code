@@ -4011,7 +4011,7 @@ async def PW_Forecast(
     if exDaily != 1:
         returnOBJ["daily"] = dict()
         if (not timeMachine) or (tmExtra):
-            weekText, weekIcon = = calculate_weekly_text(dayList, prepAccumUnit, tempUnits)
+            weekText, weekIcon = calculate_weekly_text(dayList, prepAccumUnit, tempUnits)
             returnOBJ["daily"]["summary"] = translation.translate(["sentence", weekText])
             returnOBJ["daily"]["icon"] = weekIcon
         returnOBJ["daily"]["data"] = dayList
