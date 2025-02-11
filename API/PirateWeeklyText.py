@@ -352,7 +352,7 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
         ]
 
 
-def calculate_weeky_text(weekArr, intensityUnit, tempUnit):
+def calculate_weekly_text(weekArr, intensityUnit, tempUnit):
     """
     Calculates the weekly summary given an array of weekdays
 

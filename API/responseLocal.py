@@ -30,7 +30,7 @@ from fsspec.implementations.zip import ZipFileSystem
 from javascript import require
 from PirateText import calculate_text
 from PirateMinutelyText import calculate_minutely_text
-from PirateWeeklyText import calculate_weeky_text
+from PirateWeeklyText import calculate_weekly_text
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
