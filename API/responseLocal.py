@@ -3182,6 +3182,7 @@ async def PW_Forecast(
     InterPdayMax[:, 4:5] = InterPdayMax[:, 4:5].round(4)
     InterPdaySum[:, 21:24] = InterPdaySum[:, 21:24].round(4)
     InterPdayMax[:, 21:24] = InterPdayMax[:, 21:24].round(4)
+    dayAccum = InterPdaySum[idx, 21] + InterPdaySum[idx, 22] + InterPdaySum[idx, 23]
 
     if TIMING:
         print("Daily Loop start")
@@ -3244,9 +3245,7 @@ async def PW_Forecast(
                 "precipIntensity": InterPday[idx, 2],
                 "precipIntensityMax": InterPdayMax[idx, 2],
                 "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 1]),
-                "precipAccumulation": InterPdaySum[idx, 21]
-                + InterPdaySum[idx, 22]
-                + InterPdaySum[idx, 23],
+                "precipAccumulation": dayAccum.round(4),
                 "precipType": PTypeDay[idx],
                 "temperatureHigh": InterPdayHigh[idx, 5],
                 "temperatureHighTime": int(InterPdayHighTime[idx, 5]),
