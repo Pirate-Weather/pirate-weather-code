@@ -219,8 +219,12 @@ def calculate_precip_summary(
         # If there has been any fog forecast during the week show that icon, then the wind icon otherwise use the most common icon during the week
         if "fog" in icons:
             cIcon = "fog"
+        elif "dangerous-wind" in icons:
+            cIcon = "dangerous-wind"
         elif "wind" in icons:
             cIcon = "wind"
+        elif "breezy" in icons:
+            cIcon = "breezy"
         else:
             cIcon = Most_Common(icons)
     elif len(precipitationDays) == 1:
@@ -352,12 +356,13 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
         ]
 
 
-def calculate_weekly_text(weekArr, intensityUnit, tempUnit):
+def calculate_weekly_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
     """
     Calculates the weekly summary given an array of weekdays
 
     Parameters:
     - weekArr (arr): An array of the weekdays
+    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
 
     Returns:
     - cText (arr): The precipitation and temperature summary for the week.
@@ -466,6 +471,7 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit):
         intensityUnit,
         avgPop,
         maxIntensity,
+        icon,
     )
 
     tempSummary = calculate_temp_summary(highTemp, lowTemp, weekArr)
