@@ -68,7 +68,7 @@ def calculate_summary_text(
         cIcon = "sleet"
 
     if len(precipitation) == 2:
-        if precipitation[0][1] == "saturday" and precipitation[1][1] == "sunday":
+        if (precipitation[0][1] == "saturday" and precipitation[1][1] == "sunday") or (precipitation[0][1] == "tomorrow" and precipitation[1][1] == "sunday"):
             # If the precipitation occurs on the weekend then use the over weekend text
             wText = "over-weekend"
             wWeekend = True
