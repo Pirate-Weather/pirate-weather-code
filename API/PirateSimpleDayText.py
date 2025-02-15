@@ -158,7 +158,6 @@ def calculate_day_text(
                     ],
                 ]
 
-
     # If precipitation is only show then generate the parenthetical text
     if precipType == "snow":
         precipText = [
