@@ -31,6 +31,7 @@ from javascript import require
 from PirateText import calculate_text
 from PirateMinutelyText import calculate_minutely_text
 from PirateWeeklyText import calculate_weekly_text
+from PirateSimpleDayText import calculate_day_text
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
@@ -3373,7 +3374,7 @@ async def PW_Forecast(
 
         try:
             # Update the text
-            dayText, dayIcon = calculate_text(
+            dayText, dayIcon = calculate_day_text(
                 dayObject,
                 prepAccumUnit,
                 visUnits,

@@ -36,7 +36,7 @@ def calculate_text(
     - snowPrep (float): The snow accumulation
     - icePrep (float): The ice accumulation
     - type (str): What type of summary is being generated.
-    - precipIntensity (floay): The precipitation intensity
+    - precipIntensity (float): The precipitation intensity
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
 
     Returns:

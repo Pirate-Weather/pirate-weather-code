@@ -130,17 +130,17 @@ def calculate_precip_text(
         (
             (rainPrep > 0)
             and (rainPrep < precipIconThreshold)
-            and ((prepIntensity > 0) and (prepIntensity < precipIconThreshold))
+            or ((prepIntensity > 0) and (prepIntensity < precipIconThreshold))
         )
         or (
             (snowPrep > 0)
             and (snowPrep < snowIconThreshold)
-            and ((prepIntensity > 0) and (prepIntensity < snowIconThreshold))
+            or ((prepIntensity > 0) and (prepIntensity < snowIconThreshold))
         )
         or (
             (icePrep > 0)
             and (icePrep < precipIconThreshold)
-            and ((prepIntensity > 0) and (prepIntensity < precipIconThreshold))
+            or ((prepIntensity > 0) and (prepIntensity < precipIconThreshold))
         )
     ):
         possiblePrecip = "possible-"
