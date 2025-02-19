@@ -222,7 +222,7 @@ def calculate_precip_summary(
         if "fog" in icons:
             cIcon = "fog"
         elif "dangerous-wind" in icons:
-            cIcon = "dangerous-wind"
+            cIcon = "dangerous-windy"
         elif "wind" in icons:
             cIcon = "wind"
         elif "breezy" in icons:
@@ -358,13 +358,12 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
         ]
 
 
-def calculate_weekly_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
+def calculate_weeky_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
     """
     Calculates the weekly summary given an array of weekdays
 
     Parameters:
     - weekArr (arr): An array of the weekdays
-    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
 
     Returns:
     - cText (arr): The precipitation and temperature summary for the week.
@@ -400,8 +399,8 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
             weekday = "next-" + weekday
 
         # Check if the day has enough precipitation to reach the threshold and record the index in the array, the day it occured on and the type
-        if day["precipType"] == "snow" and (
-            (day["precipAccumulation"] * intensityUnit) >= (0.2 * intensityUnit)
+        if day["precipType"] == "snow" and day["precipAccumulation"] >= (
+            10.0 * intensityUnit
         ):
             # Sets that there has been precipitation during the week
             precipitation = True
@@ -412,9 +411,9 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
                 maxIntensity = day["precipIntensityMax"]
             elif day["precipIntensityMax"] > maxIntensity:
                 maxIntensity = day["precipIntensityMax"]
-        elif day["precipType"] == "rain" and (
-            day["precipAccumulation"] * intensityUnit
-        ) >= (0.02 * intensityUnit):
+        elif day["precipType"] == "rain" and day["precipAccumulation"] >= (
+            1.0 * intensityUnit
+        ):
             # Sets that there has been precipitation during the week
             precipitation = True
             precipitationDays.append([idx, weekday, day["precipType"]])
@@ -424,9 +423,9 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
                 maxIntensity = day["precipIntensityMax"]
             elif day["precipIntensityMax"] > maxIntensity:
                 maxIntensity = day["precipIntensityMax"]
-        elif day["precipType"] == "sleet" and (
-            day["precipAccumulation"] * intensityUnit
-        ) >= (0.02 * intensityUnit):
+        elif day["precipType"] == "sleet" and day["precipAccumulation"] >= (
+            1.0 * intensityUnit
+        ):
             # Sets that there has been precipitation during the week
             precipitation = True
             precipitationDays.append([idx, weekday, day["precipType"]])
@@ -436,9 +435,9 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
                 maxIntensity = day["precipIntensityMax"]
             elif day["precipIntensityMax"] > maxIntensity:
                 maxIntensity = day["precipIntensityMax"]
-        elif day["precipType"] == "none" and (
-            day["precipAccumulation"] * intensityUnit
-        ) >= (0.02 * intensityUnit):
+        elif day["precipType"] == "none" and day["precipAccumulation"] >= (
+            1.0 * intensityUnit
+        ):
             # Sets that there has been precipitation during the week
             precipitation = True
             precipitationDays.append([idx, weekday, "precipitation"])

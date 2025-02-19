@@ -44,7 +44,7 @@ def calculate_day_text(
     """
     cText = cIcon = precipText = precipIcon = windText = windIcon = skyText = (
         skyIcon
-    ) = visText = visIcon = secondary = snowText = None
+    ) = visText = visIcon = secondary = snowText = snowSentence = None
 
     # Get key values from the hourObject
     precipType = hourObject["precipType"]
@@ -121,7 +121,7 @@ def calculate_day_text(
         )
 
     # If we have only snow or if snow is the secondary condition then calculate the accumulation range
-    if snowPrep > 0 or secondary == "medium-snow":
+    if snowPrep > (5 * prepAccumUnit) or secondary == "medium-snow":
         # GEFS accumulation error seems to always be equal to the accumulation so use half of the accumulation as the range
         snowLowAccum = math.floor(snowPrep - (snowPrep / 2))
         snowMaxAccum = math.ceil(snowPrep + (snowPrep / 2))
@@ -136,21 +136,21 @@ def calculate_day_text(
             if snowPrep == 0:
                 snowSentence = [
                     "less-than",
-                    ["centimeters" if prepAccumUnit == 1 else "inches", 1],
+                    ["centimeters" if prepAccumUnit == 0.1 else "inches", 1],
                 ]
             # If the lower accumulation range is 0 then show accumulation as < max range cm/in
             elif snowLowAccum == 0:
                 snowSentence = [
                     "less-than",
                     [
-                        "centimeters" if prepAccumUnit == 1 else "inches",
+                        "centimeters" if prepAccumUnit == 0.1 else "inches",
                         snowMaxAccum,
                     ],
                 ]
             # Otherwise show the range
             else:
                 snowSentence = [
-                    "centimeters" if prepAccumUnit == 1 else "inches",
+                    "centimeters" if prepAccumUnit == 0.1 else "inches",
                     [
                         "range",
                         snowLowAccum,
@@ -158,20 +158,22 @@ def calculate_day_text(
                     ],
                 ]
 
-    # If precipitation is only show then generate the parenthetical text
-    if precipType == "snow":
-        precipText = [
-            "parenthetical",
-            precipText,
-            snowSentence,
-        ]
-    # Otherwise if its a secondary condition then generate the text using the main condition
-    elif secondary == "medium-snow":
-        snowText = [
-            "parenthetical",
-            precipText,
-            snowSentence,
-        ]
+    # If we have more than 0.5 cm of snow show the parenthetical
+    if snowSentence is not None:
+        # If precipitation is only show then generate the parenthetical text
+        if precipType == "snow":
+            precipText = [
+                "parenthetical",
+                precipText,
+                snowSentence,
+            ]
+        # Otherwise if its a secondary condition then generate the text using the main condition
+        elif secondary == "medium-snow":
+            snowText = [
+                "parenthetical",
+                precipText,
+                snowSentence,
+            ]
 
     # If we have a secondary condition join them with an and if not snow otherwise use the snow text
     if secondary is not None:
