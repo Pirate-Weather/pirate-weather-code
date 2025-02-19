@@ -122,7 +122,6 @@ def calculate_precip_text(
     elif type == "day" or type == "week":
         snowIconThreshold = snowIconThresholdDay
         precipIconThreshold = precipIconThresholdDay
-        prepIntensity = prepIntensity * 10
 
     possiblePrecip = ""
     cIcon = None
