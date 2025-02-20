@@ -1,3 +1,5 @@
+# %% Script to contain the functions that can be used to generate a simple daily text summary of the forecast data for Pirate Weather
+
 from PirateTextHelper import (
     calculate_precip_text,
     calculate_wind_text,
@@ -67,58 +69,71 @@ def calculate_day_text(
     else:
         vis = 10000
 
-    # Check if there is rain, snow and ice accumulation for the day
-    if snowPrep > 0 and rainPrep > 0 and icePrep > 0:
-        # If there is then used the mixed precipitation text and set the icon/type to sleet. Set the secondary condition to snow so the totals can be in the summary
-        precipText = "mixed-precipitation"
-        precipIcon = "sleet"
-        precipType = "sleet"
-        secondary = "medium-snow"
-    else:
-        # Otherwise check if we have any snow accumulation
-        if snowPrep > 0:
-            # If we do check if we have rain. If there is more snow than rain then set rain as the secondary condition
-            if rainPrep > 0 and snowPrep > rainPrep:
-                precipType = "snow"
-                secondary = "medium-rain"
-            # If we do check if we have rain. If there is more rain than snow then set snow as the secondary condition
-            elif rainPrep > 0 and snowPrep < rainPrep:
-                precipIntensityMax = rainPrep / 24
-                precipType = "rain"
-                secondary = "medium-snow"
-            # If we do check if we have ice. If there is more snow than ice then set ice as the secondary condition
-            elif icePrep > 0 and snowPrep > icePrep:
-                precipType = "snow"
-                secondary = "medium-sleet"
-            # If we do check if we have ice. If there is more ice than snow then set snow as the secondary condition
-            elif icePrep > 0 and snowPrep < icePrep:
-                precipIntensityMax = icePrep / 24
-                precipType = "sleet"
-                secondary = "medium-snow"
-        # Otherwise check if we have any ice accumulation
-        elif icePrep > 0:
-            # If we do check if we have rain. If there is more rain than ice then set ice as the secondary condition
-            if icePrep > 0 and rainPrep > icePrep:
-                precipType = "rain"
-                secondary = "medium-sleet"
-            # If we do check if we have ice. If there is more ice than rain then set rain as the secondary condition
-            elif icePrep > 0 and rainPrep < icePrep:
-                precipType = "rain"
-                secondary = "medium-sleet"
+    # Only calculate the precipitation text if there is any possibility of precipitation > 0
+    if pop > 0:
+        # Check if there is rain, snow and ice accumulation for the day
+        if snowPrep > 0 and rainPrep > 0 and icePrep > 0:
+            # If there is then used the mixed precipitation text and set the icon/type to sleet. Set the secondary condition to snow so the totals can be in the summary
+            precipText = "mixed-precipitation"
+            precipType = "sleet"
+            precipIcon = calculate_precip_text(
+                precipIntensityMax,
+                prepAccumUnit,
+                precipType,
+                "day",
+                rainPrep,
+                snowPrep,
+                icePrep,
+                pop,
+                icon,
+                "icon",
+            )
+            secondary = "medium-snow"
+        else:
+            # Otherwise check if we have any snow accumulation
+            if snowPrep > 0:
+                # If we do check if we have rain. If there is more snow than rain then set rain as the secondary condition
+                if rainPrep > 0 and snowPrep > rainPrep:
+                    precipType = "snow"
+                    secondary = "medium-rain"
+                # If we do check if we have rain. If there is more rain than snow then set snow as the secondary condition
+                elif rainPrep > 0 and snowPrep < rainPrep:
+                    precipIntensityMax = rainPrep / 24
+                    precipType = "rain"
+                    secondary = "medium-snow"
+                # If we do check if we have ice. If there is more snow than ice then set ice as the secondary condition
+                elif icePrep > 0 and snowPrep > icePrep:
+                    precipType = "snow"
+                    secondary = "medium-sleet"
+                # If we do check if we have ice. If there is more ice than snow then set snow as the secondary condition
+                elif icePrep > 0 and snowPrep < icePrep:
+                    precipIntensityMax = icePrep / 24
+                    precipType = "sleet"
+                    secondary = "medium-snow"
+            # Otherwise check if we have any ice accumulation
+            elif icePrep > 0:
+                # If we do check if we have rain. If there is more rain than ice then set ice as the secondary condition
+                if icePrep > 0 and rainPrep > icePrep:
+                    precipType = "rain"
+                    secondary = "medium-sleet"
+                # If we do check if we have ice. If there is more ice than rain then set rain as the secondary condition
+                elif icePrep > 0 and rainPrep < icePrep:
+                    precipType = "rain"
+                    secondary = "medium-sleet"
 
-        # Calculate the precipitation text and summary
-        precipText, precipIcon = calculate_precip_text(
-            precipIntensityMax,
-            prepAccumUnit,
-            precipType,
-            "day",
-            rainPrep,
-            snowPrep,
-            icePrep,
-            pop,
-            icon,
-            "both",
-        )
+            # Calculate the precipitation text and summary
+            precipText, precipIcon = calculate_precip_text(
+                precipIntensityMax,
+                prepAccumUnit,
+                precipType,
+                "day",
+                rainPrep,
+                snowPrep,
+                icePrep,
+                pop,
+                icon,
+                "both",
+            )
 
     # If we have only snow or if snow is the secondary condition then calculate the accumulation range
     if snowPrep > (5 * prepAccumUnit) or secondary == "medium-snow":
