@@ -222,7 +222,7 @@ def calculate_precip_summary(
         if "fog" in icons:
             cIcon = "fog"
         elif "dangerous-wind" in icons:
-            cIcon = "dangerous-windy"
+            cIcon = "dangerous-wind"
         elif "wind" in icons:
             cIcon = "wind"
         elif "breezy" in icons:
@@ -358,7 +358,7 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
         ]
 
 
-def calculate_weeky_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
+def calculate_weekly_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
     """
     Calculates the weekly summary given an array of weekdays
 

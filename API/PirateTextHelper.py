@@ -339,7 +339,7 @@ def calculate_wind_text(wind, windUnit, icon="darksky", mode="both"):
     elif wind >= heavyWindThresh:
         windText = "heavy-wind"
         if icon == "pirate":
-            windIcon = "dangerously-windy"
+            windIcon = "dangerous-wind"
         else:
             windIcon = "wind"
 
