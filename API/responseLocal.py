@@ -27,7 +27,6 @@ from fastapi.responses import ORJSONResponse
 from fastapi_utils.tasks import repeat_every
 from fsspec import FSMap
 from fsspec.implementations.zip import ZipFileSystem
-from javascript import require
 from pirateweather_translations.dynamic_loader import load_all_translations
 from PirateText import calculate_text
 from PirateMinutelyText import calculate_minutely_text
