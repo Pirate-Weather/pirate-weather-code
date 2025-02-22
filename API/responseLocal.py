@@ -28,6 +28,7 @@ from fastapi_utils.tasks import repeat_every
 from fsspec import FSMap
 from fsspec.implementations.zip import ZipFileSystem
 from javascript import require
+from pirateweather_translations.dynamic_loader import load_all_translations
 from PirateText import calculate_text
 from PirateMinutelyText import calculate_minutely_text
 from PirateWeeklyText import calculate_weekly_text
@@ -45,9 +46,7 @@ s3_bucket = os.getenv("s3_bucket", default="piratezarr2")
 useETOPO = os.getenv("useETOPO", default=True)
 print(os.environ.get("TIMING", False))
 TIMING = os.environ.get("TIMING", False)
-
-node_dir = os.environ.get("node_dir", "/app/node_modules/translations/index.js")
-Translations = require(node_dir)
+translations = load_all_translations()
 
 force_now = os.getenv("force_now", default=False)
 
@@ -950,9 +949,9 @@ async def PW_Forecast(
         icon = "darksky"
 
     # Set up translations
-    translation = Translations[lang]
+    translation = translations[lang]
     if not translation:
-        translation = Translations["en"]
+        translation = translations["en"]
 
     # Check if extra information should be included with time machine
     if not tmextra:
