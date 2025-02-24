@@ -4,30 +4,24 @@
 
 
 # %% Import modules
-from herbie import FastHerbie, Path
-from herbie.fast import Herbie_latest
-
-import pandas as pd
-import s3fs
-
-import zarr
-from numcodecs import Blosc, BitRound
+import os
+import pickle
+import shutil
+import subprocess
+import sys
+import time
+import warnings
 
 import dask as dask
 import dask.array as da
-
 import numpy as np
+import pandas as pd
+import s3fs
 import xarray as xr
-import time
-
-import subprocess
-import os
-import sys
-import shutil
-import pickle
-
-
-import warnings
+import zarr
+from herbie import FastHerbie, Path
+from herbie.fast import Herbie_latest
+from numcodecs import BitRound, Blosc
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 # %% Setup paths and parameters
@@ -234,9 +228,9 @@ if len(xarray_forecast_merged.time) != len(hrrr_range1) * 4:
     print(len(xarray_forecast_merged.time))
     print(len(hrrr_range1) * 4)
 
-    assert (
-        len(xarray_forecast_merged.time) == len(hrrr_range1) * 4
-    ), "Incorrect number of timesteps! Exiting"
+    assert len(xarray_forecast_merged.time) == len(hrrr_range1) * 4, (
+        "Incorrect number of timesteps! Exiting"
+    )
 
 # Save the dataset with compression and filters for all variables
 compressor = Blosc(cname="lz4", clevel=1)

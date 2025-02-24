@@ -3,36 +3,27 @@
 # Alexander Rey, April 2024
 
 # %% Import modules
-from herbie import Herbie, Path, FastHerbie
+import os
+import pickle
+import shutil
+import subprocess
+import sys
+import time
+import warnings
+from datetime import datetime, timedelta
+
+import dask
+import dask.array as da
+import netCDF4 as nc
+import numpy as np
 import pandas as pd
 import s3fs
-
-import zarr
-import dask
-
-from numcodecs import Blosc, BitRound
-
-import dask.array as da
-from rechunker import rechunk
-
-import numpy as np
 import xarray as xr
-import time
-from datetime import datetime, timedelta
-import subprocess
-
-import os
-import shutil
-import sys
-import pickle
-
-
-import netCDF4 as nc
-
-
+import zarr
+from herbie import FastHerbie, Herbie, Path
+from numcodecs import BitRound, Blosc
+from rechunker import rechunk
 from scipy.interpolate import make_interp_spline
-
-import warnings
 
 
 # Scipy Interp Function
@@ -116,7 +107,7 @@ most_recent_time = datetime(
 # Select the most recent 0,6,12,18 run
 base_time = False
 failCount = 0
-while base_time == False:
+while base_time is False:
     latestRuns = Herbie(
         most_recent_time,
         model="nbm",
@@ -316,9 +307,9 @@ chunky = 100
 xarray_forecast_base = xr.open_mfdataset(forecast_process_path + "_wgrib2_merged.nc")
 
 # Check length for errors
-assert len(xarray_forecast_base.time) == len(
-    nbm_range
-), "Incorrect number of timesteps! Exiting"
+assert len(xarray_forecast_base.time) == len(nbm_range), (
+    "Incorrect number of timesteps! Exiting"
+)
 
 # Create a new time series
 start = xarray_forecast_base.time.min().values

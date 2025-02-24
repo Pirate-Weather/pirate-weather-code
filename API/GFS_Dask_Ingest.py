@@ -2,29 +2,23 @@
 # Alexander Rey, September 2023
 
 # %% Import modules
-from herbie import HerbieLatest, FastHerbie, Path
+import os
+import subprocess
+import time
+import warnings
+
+import dask
+import dask.array as da
+import numpy as np
 import pandas as pd
 import s3fs
-import zarr
-from numcodecs import Blosc, BitRound
-
-import dask.array as da
-
-import numpy as np
 import xarray as xr
-import time
-from scipy.interpolate import make_interp_spline
-
-
-import subprocess
-
-import os
-
-from xrspatial import proximity, direction
-import dask
-
-
+import zarr
+from herbie import FastHerbie, HerbieLatest, Path
+from numcodecs import BitRound, Blosc
 from rechunker import rechunk
+from scipy.interpolate import make_interp_spline
+from xrspatial import direction, proximity
 
 
 # Scipy Interp Function
@@ -33,8 +27,6 @@ def linInterp(block, T_in, T_out):
     interpOut = interp(T_out)
     return interpOut
 
-
-import warnings
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -236,9 +228,9 @@ xarray_forecast_merged = xr.merge(
     [xarray_wgrib_merged, xarray_wgribUV_merged], compat="override"
 )
 
-assert len(xarray_forecast_merged.time) == len(
-    gfsFileRange
-), "Incorrect number of timesteps! Exiting"
+assert len(xarray_forecast_merged.time) == len(gfsFileRange), (
+    "Incorrect number of timesteps! Exiting"
+)
 
 # Create a new time series
 start = xarray_forecast_merged.time.min().values  # Adjust as necessary

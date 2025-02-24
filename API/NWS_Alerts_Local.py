@@ -4,27 +4,20 @@
 # Import Modules
 import os
 import shutil
-
-import geopandas as gp
-import zarr
-import pandas as pd
-import numpy as np
-
-import nwswx
-import requests
+import tarfile
 import xml.etree.ElementTree as ET
 
 import dask
-
-import numcodecs
-from numcodecs import Blosc
-
-
 import dask.array as da
-
-
-import tarfile
+import geopandas as gp
+import numcodecs
+import numpy as np
+import nwswx
+import pandas as pd
+import requests
 import s3fs
+import zarr
+from numcodecs import Blosc
 
 s3_bucket = "s3://piratezarr2"
 s3_save_path = "/ForecastProd/Alerts/NWS_"
@@ -159,19 +152,26 @@ points_in_polygons = gp.sjoin(
 )
 
 # Create a formatted string ton save all the relevant in the zarr array
-points_in_polygons["string"] = points_in_polygons["event"].astype(
-    str
-) + "}" "{" + points_in_polygons["description"].astype(
-    str
-) + "}" + "{" + points_in_polygons["areaDesc"].astype(
-    str
-) + "}" + "{" + points_in_polygons["effective"].astype(
-    str
-) + "}" + "{" + points_in_polygons["EXPIRATION"].astype(
-    str
-) + "}" + "{" + points_in_polygons["severity"].astype(
-    str
-) + "}" + "{" + points_in_polygons["URL"].astype(str)
+points_in_polygons["string"] = (
+    points_in_polygons["event"].astype(str) + "}"
+    "{"
+    + points_in_polygons["description"].astype(str)
+    + "}"
+    + "{"
+    + points_in_polygons["areaDesc"].astype(str)
+    + "}"
+    + "{"
+    + points_in_polygons["effective"].astype(str)
+    + "}"
+    + "{"
+    + points_in_polygons["EXPIRATION"].astype(str)
+    + "}"
+    + "{"
+    + points_in_polygons["severity"].astype(str)
+    + "}"
+    + "{"
+    + points_in_polygons["URL"].astype(str)
+)
 
 
 float_rows = points_in_polygons[

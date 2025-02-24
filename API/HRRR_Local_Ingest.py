@@ -2,31 +2,24 @@
 # Alexander Rey, November 2023
 
 # %% Import modules
-from herbie import FastHerbie, Path
-from herbie.fast import Herbie_latest
-
-import pandas as pd
-import s3fs
-
-import zarr
-from numcodecs import Blosc, BitRound
-
-import dask.array as da
-
-import numpy as np
-import xarray as xr
-import time
-
-import subprocess
-
 import os
-import shutil
-import sys
 import pickle
+import shutil
+import subprocess
+import sys
+import time
+import warnings
 
 import dask
-
-import warnings
+import dask.array as da
+import numpy as np
+import pandas as pd
+import s3fs
+import xarray as xr
+import zarr
+from herbie import FastHerbie, Path
+from herbie.fast import Herbie_latest
+from numcodecs import BitRound, Blosc
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -257,9 +250,9 @@ encoding = {
     vname: {"compressor": compressor, "filters": filters} for vname in zarrVars[1:]
 }
 
-assert len(xarray_forecast_merged.time) == len(
-    hrrr_range1
-), "Incorrect number of timesteps! Exiting"
+assert len(xarray_forecast_merged.time) == len(hrrr_range1), (
+    "Incorrect number of timesteps! Exiting"
+)
 
 # with ProgressBar():
 # xarray_forecast_merged.to_netcdf(forecast_process_path + 'merged_netcdf.nc', encoding=encoding)
