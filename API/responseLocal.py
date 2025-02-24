@@ -2354,7 +2354,8 @@ async def PW_Forecast(
     pFacMinute[((maxPchance == 4) | (maxPchance == 2) | (maxPchance == 3))] = (
         1  # Rain, Ice
     )
-    pFacMinute[(maxPchance == 1)] = 10  # Snow
+    # Note, this means that intensity is always in liquid water equivalent
+    pFacMinute[(maxPchance == 1)] = 1  # Snow
 
     minuteTimes = InterPminute[:, 0]
     minuteIntensity = np.maximum(np.round(InterPminute[:, 1] * pFacMinute, 4), 0)
@@ -2758,7 +2759,7 @@ async def PW_Forecast(
     InterPhour[:, 22] = 0
     InterPhour[:, 23] = 0
 
-    # Accumilations in liquid equivilient
+    # Accumulations in liquid equivalent
     InterPhour[InterPhour[:, 1] == 4, 21] = InterPhour[
         InterPhour[:, 1] == 4, 17
     ]  # rain
@@ -2773,7 +2774,7 @@ async def PW_Forecast(
     )  # Ice
 
     # Rain
-    # Calculate prep accumilation for current day before zeroing
+    # Calculate prep accumulation for current day before zeroing
     dayZeroPrepRain = InterPhour[:, 21].copy()
     # Everything that isn't the current day
     dayZeroPrepRain[hourlyDayIndex != 0] = 0
@@ -2781,7 +2782,7 @@ async def PW_Forecast(
     dayZeroPrepRain[int(baseTimeOffset) :] = 0
 
     # Snow
-    # Calculate prep accumilation for current day before zeroing
+    # Calculate prep accumulation for current day before zeroing
     dayZeroPrepSnow = InterPhour[:, 22].copy()
     # Everything that isn't the current day
     dayZeroPrepSnow[hourlyDayIndex != 0] = 0
@@ -2796,7 +2797,7 @@ async def PW_Forecast(
     # Everything after the request time
     dayZeroPrepSleet[int(baseTimeOffset) :] = 0
 
-    # Accumulations in liquid equivilient
+    # Accumulations in liquid equivalent
     dayZeroRain = dayZeroPrepRain.sum().round(4)  # rain
     dayZeroSnow = dayZeroPrepSnow.sum().round(4)  # Snow
     dayZeroIce = dayZeroPrepSleet.sum().round(4)  # Ice
@@ -2816,7 +2817,8 @@ async def PW_Forecast(
     pFacHour[
         ((InterPhour[:, 1] == 4) | (InterPhour[:, 1] == 2) | (InterPhour[:, 1] == 3))
     ] = 1  # Rain, Ice
-    pFacHour[(InterPhour[:, 1] == 1)] = 10  # Snow
+    # NOTE, this means that intensity is always liquid water equivalent.
+    pFacHour[(InterPhour[:, 1] == 1)] = 1  # Snow
 
     InterPhour[:, 2] = InterPhour[:, 2] * pFacHour
 
@@ -3935,7 +3937,7 @@ async def PW_Forecast(
         elif minuteDict[0]["precipType"] == "snow":
             currnetSnowAccum = (
                 minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
-            )
+            ) * 10 # 1:10 since intensity is in liquid water equivalent
         elif minuteDict[0]["precipType"] == "sleet":
             currnetIceAccum = (
                 minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
