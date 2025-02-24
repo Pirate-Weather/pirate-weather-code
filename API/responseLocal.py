@@ -3937,7 +3937,7 @@ async def PW_Forecast(
         elif minuteDict[0]["precipType"] == "snow":
             currnetSnowAccum = (
                 minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
-            ) * 10 # 1:10 since intensity is in liquid water equivalent
+            ) * 10  # 1:10 since intensity is in liquid water equivalent
         elif minuteDict[0]["precipType"] == "sleet":
             currnetIceAccum = (
                 minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
