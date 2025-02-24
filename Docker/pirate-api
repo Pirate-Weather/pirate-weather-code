@@ -1,4 +1,4 @@
-FROM nikolaik/python-nodejs:python3.12-nodejs22-slim
+FROM python:3.12-slim
 
 RUN apt update && \
     apt -y install build-essential \
@@ -10,13 +10,5 @@ RUN apt update && \
 COPY requirements-api.txt requirements-api.txt
                     
 RUN pip install -r requirements-api.txt
-
-WORKDIR /app
-
-COPY package-api.json package.json
-
-RUN apt install -y git
-
-RUN npm install
 
 ENTRYPOINT ["python3"]

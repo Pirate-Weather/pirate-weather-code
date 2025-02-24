@@ -16,7 +16,6 @@ from typing import Union
 import boto3
 import numpy as np
 import pandas as pd
-import s3fs
 import xarray as xr
 import zarr
 from astral import LocationInfo, moon
@@ -350,95 +349,95 @@ def toTimestamp(d):
 
 # If testing, read zarrs directly from S3
 # This should be implemented as a fallback at some point
-STAGE = os.environ.get("STAGE", "PROD")
-if STAGE == "TESTING":
-    print("Setting up S3 zarrs")
-
-    # If S3, use that, otherwise use local
-    if save_type == "S3":
-        s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-        f = s3.open("s3://" + s3_bucket + "/ForecastTar/NWS_Alerts.zarr.zip")
-    else:
-        f = "/tmp/NWS_Alerts.zarr.zip"
-
-    fs = ZipFileSystem(f, mode="r")
-    store = FSMap("", fs, check=False)
-    NWS_Alerts_Zarr = zarr.open(store, mode="r")
-    print("Alerts Read")
-
-    if save_type == "S3":
-        f = s3.open("s3://" + s3_bucket + "/ForecastTar/SubH.zarr.zip")
-    else:
-        f = "/tmp/SubH.zarr.zip"
-
-    fs = ZipFileSystem(f, mode="r")
-    store = FSMap("", fs, check=False)
-    SubH_Zarr = zarr.open(store, mode="r")
-    print("SubH Read")
-
-    if save_type == "S3":
-        f = s3.open("s3://" + s3_bucket + "/ForecastTar/HRRR_6H.zarr.zip")
-    else:
-        f = "/tmp/HRRR_6H.zarr.zip"
-    fs = ZipFileSystem(f, mode="r")
-    store = FSMap("", fs, check=False)
-    HRRR_6H_Zarr = zarr.open(store, mode="r")
-    print("HRRR_6H Read")
-
-    if save_type == "S3":
-        f = s3.open("s3://" + s3_bucket + "/ForecastTar/GFS.zarr.zip")
-    else:
-        f = "/tmp/GFS.zarr.zip"
-    fs = ZipFileSystem(f, mode="r")
-    store = FSMap("", fs, check=False)
-    GFS_Zarr = zarr.open(store, mode="r")
-    print("GFS Read")
-
-    if save_type == "S3":
-        f = s3.open("s3://" + s3_bucket + "/ForecastTar/GEFS.zarr.zip")
-    else:
-        f = "/tmp/GEFS.zarr.zip"
-    fs = ZipFileSystem(f, mode="r")
-    store = FSMap("", fs, check=False)
-    GEFS_Zarr = zarr.open(store, mode="r")
-    print("GEFS Read")
-
-    if save_type == "S3":
-        f = s3.open("s3://" + s3_bucket + "/ForecastTar/NBM.zarr.zip")
-    else:
-        f = "/tmp/NBM.zarr.zip"
-    fs = ZipFileSystem(f, mode="r")
-    store = FSMap("", fs, check=False)
-    NBM_Zarr = zarr.open(store, mode="r")
-    print("NBM Read")
-
-    if save_type == "S3":
-        f = s3.open("s3://" + s3_bucket + "/ForecastTar/NBM_Fire.zarr.zip")
-    else:
-        f = "/tmp/NBM_Fire.zarr.zip"
-    fs = ZipFileSystem(f, mode="r")
-    store = FSMap("", fs, check=False)
-    NBM_Fire_Zarr = zarr.open(store, mode="r")
-    print("NBM Fire Read")
-
-    if save_type == "S3":
-        f = s3.open("s3://" + s3_bucket + "/ForecastTar/HRRR.zarr.zip")
-    else:
-        f = "/tmp/HRRR.zarr.zip"
-    fs = ZipFileSystem(f, mode="r")
-    store = FSMap("", fs, check=False)
-    HRRR_Zarr = zarr.open(store, mode="r")
-    print("HRRR Read")
-
-    if useETOPO:
-        if save_type == "S3":
-            f = s3.open("s3://" + s3_bucket + "/ForecastTar/ETOPO_DA_C.zarr.zip")
-        else:
-            f = "/tmp/ETOPO_DA_C.zarr.zip"
-        fs = ZipFileSystem(f, mode="r")
-        store = FSMap("", fs, check=False)
-        ETOPO_f = zarr.open(store, mode="r")
-    print("ETOPO Read")
+# STAGE = os.environ.get("STAGE", "PROD")
+# if STAGE == "TESTING":
+#     print("Setting up S3 zarrs")
+#
+#     # If S3, use that, otherwise use local
+#     if save_type == "S3":
+#         s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+#         f = s3.open("s3://" + s3_bucket + "/ForecastTar/NWS_Alerts.zarr.zip")
+#     else:
+#         f = "/tmp/NWS_Alerts.zarr.zip"
+#
+#     fs = ZipFileSystem(f, mode="r")
+#     store = FSMap("", fs, check=False)
+#     NWS_Alerts_Zarr = zarr.open(store, mode="r")
+#     print("Alerts Read")
+#
+#     if save_type == "S3":
+#         f = s3.open("s3://" + s3_bucket + "/ForecastTar/SubH.zarr.zip")
+#     else:
+#         f = "/tmp/SubH.zarr.zip"
+#
+#     fs = ZipFileSystem(f, mode="r")
+#     store = FSMap("", fs, check=False)
+#     SubH_Zarr = zarr.open(store, mode="r")
+#     print("SubH Read")
+#
+#     if save_type == "S3":
+#         f = s3.open("s3://" + s3_bucket + "/ForecastTar/HRRR_6H.zarr.zip")
+#     else:
+#         f = "/tmp/HRRR_6H.zarr.zip"
+#     fs = ZipFileSystem(f, mode="r")
+#     store = FSMap("", fs, check=False)
+#     HRRR_6H_Zarr = zarr.open(store, mode="r")
+#     print("HRRR_6H Read")
+#
+#     if save_type == "S3":
+#         f = s3.open("s3://" + s3_bucket + "/ForecastTar/GFS.zarr.zip")
+#     else:
+#         f = "/tmp/GFS.zarr.zip"
+#     fs = ZipFileSystem(f, mode="r")
+#     store = FSMap("", fs, check=False)
+#     GFS_Zarr = zarr.open(store, mode="r")
+#     print("GFS Read")
+#
+#     if save_type == "S3":
+#         f = s3.open("s3://" + s3_bucket + "/ForecastTar/GEFS.zarr.zip")
+#     else:
+#         f = "/tmp/GEFS.zarr.zip"
+#     fs = ZipFileSystem(f, mode="r")
+#     store = FSMap("", fs, check=False)
+#     GEFS_Zarr = zarr.open(store, mode="r")
+#     print("GEFS Read")
+#
+#     if save_type == "S3":
+#         f = s3.open("s3://" + s3_bucket + "/ForecastTar/NBM.zarr.zip")
+#     else:
+#         f = "/tmp/NBM.zarr.zip"
+#     fs = ZipFileSystem(f, mode="r")
+#     store = FSMap("", fs, check=False)
+#     NBM_Zarr = zarr.open(store, mode="r")
+#     print("NBM Read")
+#
+#     if save_type == "S3":
+#         f = s3.open("s3://" + s3_bucket + "/ForecastTar/NBM_Fire.zarr.zip")
+#     else:
+#         f = "/tmp/NBM_Fire.zarr.zip"
+#     fs = ZipFileSystem(f, mode="r")
+#     store = FSMap("", fs, check=False)
+#     NBM_Fire_Zarr = zarr.open(store, mode="r")
+#     print("NBM Fire Read")
+#
+#     if save_type == "S3":
+#         f = s3.open("s3://" + s3_bucket + "/ForecastTar/HRRR.zarr.zip")
+#     else:
+#         f = "/tmp/HRRR.zarr.zip"
+#     fs = ZipFileSystem(f, mode="r")
+#     store = FSMap("", fs, check=False)
+#     HRRR_Zarr = zarr.open(store, mode="r")
+#     print("HRRR Read")
+#
+#     if useETOPO:
+#         if save_type == "S3":
+#             f = s3.open("s3://" + s3_bucket + "/ForecastTar/ETOPO_DA_C.zarr.zip")
+#         else:
+#             f = "/tmp/ETOPO_DA_C.zarr.zip"
+#         fs = ZipFileSystem(f, mode="r")
+#         store = FSMap("", fs, check=False)
+#         ETOPO_f = zarr.open(store, mode="r")
+#     print("ETOPO Read")
 
 
 async def get_zarr(store, X, Y):
