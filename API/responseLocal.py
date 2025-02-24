@@ -24,8 +24,6 @@ from boto3.s3.transfer import TransferConfig
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import ORJSONResponse
 from fastapi_utils.tasks import repeat_every
-from fsspec import FSMap
-from fsspec.implementations.zip import ZipFileSystem
 from PirateText import calculate_text
 from pytz import timezone, utc
 from timemachine import TimeMachine
