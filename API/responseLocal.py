@@ -204,8 +204,7 @@ def update_zarr_store(initialRun):
         "/tmp", "NWS_Alerts.zarr", initialRun
     )
     if latest_Alert is not None:
-        NWS_Alerts_Zarr = zarr.open("/tmp/" + latest_Alert, mode="r"
-        )
+        NWS_Alerts_Zarr = zarr.open("/tmp/" + latest_Alert, mode="r")
         logger.info("Loading new: " + latest_Alert)
     for old_dir in old_Alert:
         if STAGE == "PROD":
@@ -233,9 +232,7 @@ def update_zarr_store(initialRun):
         "/tmp", "HRRR_6H.zarr", initialRun
     )
     if latest_HRRR_6H is not None:
-        HRRR_6H_Zarr = zarr.open(
-            "/tmp/" + latest_HRRR_6H, mode="r"
-        )
+        HRRR_6H_Zarr = zarr.open("/tmp/" + latest_HRRR_6H, mode="r")
         logger.info("Loading new: " + latest_HRRR_6H)
     for old_dir in old_HRRR_6H:
         if STAGE == "PROD":
@@ -273,9 +270,7 @@ def update_zarr_store(initialRun):
         "/tmp", "NBM_Fire.zarr", initialRun
     )
     if latest_NBM_Fire is not None:
-        NBM_Fire_Zarr = zarr.open(
-            "/tmp/" + latest_NBM_Fire, mode="r"
-        )
+        NBM_Fire_Zarr = zarr.open("/tmp/" + latest_NBM_Fire, mode="r")
         logger.info("Loading new: " + latest_NBM_Fire)
     for old_dir in old_NBM_Fire:
         if STAGE == "PROD":
