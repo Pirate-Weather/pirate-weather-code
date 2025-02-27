@@ -2280,6 +2280,9 @@ async def PW_Forecast(
     else:
         InterPminute[:, 2] = gefsMinuteInterpolation[:, 1]
 
+    # Less than 5% set to 0
+    InterPhour[InterPhour[:, 2] < 0.05, 2] = 0
+
     # Prep Intensity
     # Kind of complex, process:
     # 1. If probability >0:
@@ -2310,6 +2313,9 @@ async def PW_Forecast(
         InterPminute[:, 1] = nbmMinuteInterpolation[:, 8] * prepIntensityUnit
     else:
         InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * 1 * prepIntensityUnit
+        
+        # Set intensity to zero if POP == 0
+        InterPminute[InterPminute[:, 2] == 0, 1] = 0
 
     # "precipIntensityError"
     if "gefs" in sourceList:
@@ -2679,6 +2685,9 @@ async def PW_Forecast(
         * prepAccumUnit,
         0,
     )
+    
+    # Set intensity to zero if POP == 0
+    InterPhour[InterPhour[:, 3] == 0, 17] = 0
 
     ### Near Storm Distance
     if "gfs" in sourceList:
