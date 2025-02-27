@@ -2281,7 +2281,7 @@ async def PW_Forecast(
         InterPminute[:, 2] = gefsMinuteInterpolation[:, 1]
 
     # Less than 5% set to 0
-    InterPhour[InterPhour[:, 2] < 0.05, 2] = 0
+    InterPminute[InterPminute[:, 2] < 0.05, 2] = 0
 
     # Prep Intensity
     # Kind of complex, process:
