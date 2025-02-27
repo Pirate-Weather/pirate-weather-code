@@ -2313,7 +2313,7 @@ async def PW_Forecast(
         InterPminute[:, 1] = nbmMinuteInterpolation[:, 8] * prepIntensityUnit
     else:
         InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * 1 * prepIntensityUnit
-        
+
         # Set intensity to zero if POP == 0
         InterPminute[InterPminute[:, 2] == 0, 1] = 0
 
@@ -2685,7 +2685,7 @@ async def PW_Forecast(
         * prepAccumUnit,
         0,
     )
-    
+
     # Set intensity to zero if POP == 0
     InterPhour[InterPhour[:, 3] == 0, 17] = 0
 
