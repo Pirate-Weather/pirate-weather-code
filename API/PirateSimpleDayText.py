@@ -98,7 +98,6 @@ def calculate_day_text(
                     secondary = "medium-rain"
                 # If we do check if we have rain. If there is more rain than snow then set snow as the secondary condition
                 elif rainPrep > 0 and snowPrep < rainPrep:
-                    precipIntensityMax = rainPrep / 24
                     precipType = "rain"
                     secondary = "medium-snow"
                 # If we do check if we have ice. If there is more snow than ice then set ice as the secondary condition
@@ -107,7 +106,6 @@ def calculate_day_text(
                     secondary = "medium-sleet"
                 # If we do check if we have ice. If there is more ice than snow then set snow as the secondary condition
                 elif icePrep > 0 and snowPrep < icePrep:
-                    precipIntensityMax = icePrep / 24
                     precipType = "sleet"
                     secondary = "medium-snow"
             # Otherwise check if we have any ice accumulation
