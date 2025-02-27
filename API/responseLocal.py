@@ -2686,7 +2686,7 @@ async def PW_Forecast(
         0,
     )
 
-    # Set intensity to zero if POP == 0
+    # Set accumulation to zero if POP == 0
     InterPhour[InterPhour[:, 3] == 0, 17] = 0
 
     ### Near Storm Distance
@@ -4019,7 +4019,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.5.1"
+        returnOBJ["flags"]["version"] = "V2.5.3"
 
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
