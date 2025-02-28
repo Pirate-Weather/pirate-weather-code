@@ -2314,6 +2314,7 @@ async def PW_Forecast(
     else:
         InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * 1 * prepIntensityUnit
 
+    if "hrrrsubh" not in sourceList:
         # Set intensity to zero if POP == 0
         InterPminute[InterPminute[:, 2] == 0, 1] = 0
 
