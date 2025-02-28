@@ -1512,7 +1512,7 @@ async def PW_Forecast(
     if TIMING:
         print("### GEFS Detail Start ###")
         print(datetime.datetime.utcnow() - T_Start)
-    if exGEFS==1:
+    if exGEFS == 1:
         dataOut_gefs = False
     else:
         if timeMachine:
@@ -1527,7 +1527,9 @@ async def PW_Forecast(
             )
 
             date_range = pd.date_range(
-                start=rounded_time, end=rounded_time + datetime.timedelta(days=1), freq="6h"
+                start=rounded_time,
+                end=rounded_time + datetime.timedelta(days=1),
+                freq="6h",
             ).to_list()
             zarrList = [
                 "s3://"
@@ -1544,7 +1546,10 @@ async def PW_Forecast(
                 consolidated=True,
                 decode_cf=False,
                 parallel=True,
-                storage_options={"key": aws_access_key_id, "secret": aws_secret_access_key},
+                storage_options={
+                    "key": aws_access_key_id,
+                    "secret": aws_secret_access_key,
+                },
                 cache=False,
             ) as xr_mf:
                 GEFSzarrVars = (
@@ -2176,9 +2181,7 @@ async def PW_Forecast(
             (len(minute_array_grib), len(dataOut_gefs[0, :]))
         )
 
-
-    gfsMinuteInterpolation = np.zeros(
-        (len(minute_array_grib), len(dataOut_gfs[0, :])))
+    gfsMinuteInterpolation = np.zeros((len(minute_array_grib), len(dataOut_gfs[0, :])))
 
     nbmMinuteInterpolation = np.zeros((len(minute_array_grib), 18))
 
@@ -2293,7 +2296,7 @@ async def PW_Forecast(
                     right=np.nan,
                 )
 
-        else: # GFS Fallback
+        else:  # GFS Fallback
             # This could be optimized by only interpolating the necessary columns
             for i in range(len(dataOut_gfs[0, :]) - 1):
                 gfsMinuteInterpolation[:, i + 1] = np.interp(
@@ -2371,7 +2374,6 @@ async def PW_Forecast(
         InterPminute[:, 3] = gefsMinuteInterpolation[:, 3] * prepIntensityUnit
     else:  # Missing
         InterPminute[:, 3] = np.ones(len(minute_array_grib)) * -999
-
 
     # Precipitation Type
     # IF HRRR, use that, otherwise GEFS
@@ -2509,7 +2511,7 @@ async def PW_Forecast(
 
         # Put Nan's where they exist in the original data
         maxPchanceHour[np.isnan(InterThour[:, 1]), 2] = -999
-    else: #GFS Fallback
+    else:  # GFS Fallback
         InterThour = np.zeros(shape=(len(hour_array), 5))  # Type
         for i in [12, 13, 14, 15]:
             InterThour[:, i - 11] = GFS_Merged[:, i]
@@ -2535,7 +2537,7 @@ async def PW_Forecast(
     # GEFS
     if "gefs" in sourceList:
         prcipIntensityHour[:, 2] = GEFS_Merged[:, 2]
-    else: # GFS Fallback
+    else:  # GFS Fallback
         prcipIntensityHour[:, 2] = GFS_Merged[:, 10] * 3600
     # Take first non-NaN value
     InterPhour[:, 2] = (
