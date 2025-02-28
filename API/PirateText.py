@@ -114,9 +114,9 @@ def calculate_text(
     cCond = None
     # Add the possible precipitation text if pop is less than 30% or if pop is greater than 0 but precipIntensity is between 0-0.02 mm/h
     if (pop < 0.25) or (
-        ((rainPrep > 0) and (rainPrep < rainIconThreshold))
-        or ((snowPrep > 0) and (snowPrep < snowIconThreshold))
-        or ((icePrep > 0) and (icePrep < iceIconThreshold))
+        ((rainPrep > 0) and (rainPrep < rainIconThreshold) and (precipType == "rain" or precipType == "none"))
+        or ((snowPrep > 0) and (snowPrep < snowIconThreshold) and precipType == "snow")
+        or ((icePrep > 0) and (icePrep < iceIconThreshold) and precipType == "sleet")
     ):
         possiblePrecip = "possible-"
 
