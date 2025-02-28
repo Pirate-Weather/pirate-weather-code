@@ -59,7 +59,7 @@ def toTimestamp(d):
 
 
 def round_time(dt=None, round_to=60):
-    if dt == None:
+    if dt is None:
         dt = datetime.datetime.now()
     seconds = (dt - dt.min).seconds
     rounding = (seconds + round_to / 2) // round_to * round_to
@@ -655,8 +655,8 @@ async def TimeMachine(
 
     ## Sunrise sunset
     loc = LocationInfo("name", "region", tz_name, lat, lon - 360)
-    sun = sun(l.observer, date=baseDay, tzinfo=tz_name)
-    moon = moon.phase(baseDay)
+    s = sun(loc.observer, date=baseDay, tzinfo=tz_name)
+    m = moon.phase(baseDay)
 
     InterPday[16, 0] = (
         (
