@@ -50,7 +50,7 @@ def getGribList(FH_forecastsub, matchStrings):
             str(Path(x.get_localFilePath(matchStrings)).expand())
             for x in FH_forecastsub.file_exists
         ]
-    except:
+    except Exception:
         print("Download Failure 1, wait 20 seconds and retry")
         time.sleep(20)
         FH_forecastsub.download(matchStrings, verbose=False)
@@ -59,7 +59,7 @@ def getGribList(FH_forecastsub, matchStrings):
                 str(Path(x.get_localFilePath(matchStrings)).expand())
                 for x in FH_forecastsub.file_exists
             ]
-        except:
+        except Exception:
             print("Download Failure 2, wait 20 seconds and retry")
             time.sleep(20)
             FH_forecastsub.download(matchStrings, verbose=False)
@@ -68,7 +68,7 @@ def getGribList(FH_forecastsub, matchStrings):
                     str(Path(x.get_localFilePath(matchStrings)).expand())
                     for x in FH_forecastsub.file_exists
                 ]
-            except:
+            except Exception:
                 print("Download Failure 3, wait 20 seconds and retry")
                 time.sleep(20)
                 FH_forecastsub.download(matchStrings, verbose=False)
@@ -77,7 +77,7 @@ def getGribList(FH_forecastsub, matchStrings):
                         str(Path(x.get_localFilePath(matchStrings)).expand())
                         for x in FH_forecastsub.file_exists
                     ]
-                except:
+                except Exception:
                     print("Download Failure 4, wait 20 seconds and retry")
                     time.sleep(20)
                     FH_forecastsub.download(matchStrings, verbose=False)
@@ -86,7 +86,7 @@ def getGribList(FH_forecastsub, matchStrings):
                             str(Path(x.get_localFilePath(matchStrings)).expand())
                             for x in FH_forecastsub.file_exists
                         ]
-                    except:
+                    except Exception:
                         print("Download Failure 5, wait 20 seconds and retry")
                         time.sleep(20)
                         FH_forecastsub.download(matchStrings, verbose=False)
@@ -95,7 +95,7 @@ def getGribList(FH_forecastsub, matchStrings):
                                 str(Path(x.get_localFilePath(matchStrings)).expand())
                                 for x in FH_forecastsub.file_exists
                             ]
-                        except:
+                        except Exception:
                             print("Download Failure 6, Fail")
                             exit(1)
     return gribList

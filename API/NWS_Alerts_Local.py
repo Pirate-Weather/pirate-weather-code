@@ -121,7 +121,7 @@ for row in range(0, len(nws_alert_merged)):
                 ".//ns:info/ns:severity", namespaces=ns
             ).text
 
-        except:
+        except Exception:
             nws_alert_merged.loc[row, "headline"] = nws_alert_merged.loc[
                 row, "PROD_TYPE"
             ]

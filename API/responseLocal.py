@@ -119,24 +119,25 @@ def download_if_newer(
 
     if newFile:
         # Write a file to show an update is in progress, do not reload
-        with open(local_lmdb_path + ".lock", "w") as fp:
+        with open(local_lmdb_path + ".lock", "w"):
             pass
 
-        local_lmdb_path_tmp = local_lmdb_path + "_TMP"
+        # local_lmdb_path_tmp = local_lmdb_path + "_TMP"
 
-        if initialDownload:
-            command = f"unzip -q -o {local_file_path} -d {local_lmdb_path_tmp}"
-        else:
-            command = f"nice -n 20 ionice -c 3 unzip -q -o {local_file_path} -d {local_lmdb_path_tmp}"
+        # if initialDownload:
+        #     command = f"unzip -q -o {local_file_path} -d {local_lmdb_path_tmp}"
+        # else:
+        #     command = f"nice -n 20 ionice -c 3 unzip -q -o {local_file_path} -d {local_lmdb_path_tmp}"
+
         # process = subprocess.Popen(command, shell=True)
         # subprocess.run(["ionice", "-c", "3", "unzip", "-q", "-o", local_file_path, "-d", local_lmdb_path_tmp], shell=True, check=True)
-        subprocess.run(command, shell=True)
+        # subprocess.run(command, shell=True)
 
         # Rename
-        shutil.move(local_lmdb_path_tmp, local_lmdb_path + "_" + str(s3_last_modified))
+        shutil.move(local_file_path, local_lmdb_path + "_" + str(s3_last_modified))
 
         # ZipZarr.close()
-        os.remove(local_file_path)
+        # os.remove(local_file_path)
         os.remove(local_lmdb_path + ".lock")
 
 
@@ -157,7 +158,8 @@ def find_largest_integer_directory(parent_dir, key_string, initialRun):
 
     for entry in os.listdir(parent_dir):
         entry_path = os.path.join(parent_dir, entry)
-        if (os.path.isdir(entry_path)) & (key_string in entry) & ("TMP" not in entry):
+        print(entry_path)
+        if (key_string in entry) & ("TMP" not in entry):
             old_dirs.append(entry)
             try:
                 # Extract the integer value from the directory name
@@ -201,13 +203,15 @@ def update_zarr_store(initialRun):
         "/tmp", "NWS_Alerts.zarr", initialRun
     )
     if latest_Alert is not None:
-        NWS_Alerts_Zarr = zarr.open("/tmp/" + latest_Alert, mode="r")
+        NWS_Alerts_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_Alert, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_Alert)
     for old_dir in old_Alert:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            subprocess.run(command, shell=True)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
@@ -215,13 +219,15 @@ def update_zarr_store(initialRun):
         "/tmp", "SubH.zarr", initialRun
     )
     if latest_SubH is not None:
-        SubH_Zarr = zarr.open("/tmp/" + latest_SubH, mode="r")
+        SubH_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_SubH, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_SubH)
     for old_dir in old_SubH:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            subprocess.run(command, shell=True)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
@@ -229,37 +235,43 @@ def update_zarr_store(initialRun):
         "/tmp", "HRRR_6H.zarr", initialRun
     )
     if latest_HRRR_6H is not None:
-        HRRR_6H_Zarr = zarr.open("/tmp/" + latest_HRRR_6H, mode="r")
+        HRRR_6H_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_HRRR_6H, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_HRRR_6H)
     for old_dir in old_HRRR_6H:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            subprocess.run(command, shell=True)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
     latest_GFS, old_GFS = find_largest_integer_directory("/tmp", "GFS.zarr", initialRun)
     if latest_GFS is not None:
-        GFS_Zarr = zarr.open("/tmp/" + latest_GFS, mode="r")
+        GFS_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_GFS, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_GFS)
     for old_dir in old_GFS:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            subprocess.run(command, shell=True)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
     latest_NBM, old_NBM = find_largest_integer_directory("/tmp", "NBM.zarr", initialRun)
     if latest_NBM is not None:
-        NBM_Zarr = zarr.open("/tmp/" + latest_NBM, mode="r")
+        NBM_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_NBM, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_NBM)
     for old_dir in old_NBM:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            subprocess.run(command, shell=True)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
@@ -267,13 +279,15 @@ def update_zarr_store(initialRun):
         "/tmp", "NBM_Fire.zarr", initialRun
     )
     if latest_NBM_Fire is not None:
-        NBM_Fire_Zarr = zarr.open("/tmp/" + latest_NBM_Fire, mode="r")
+        NBM_Fire_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_NBM_Fire, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_NBM_Fire)
     for old_dir in old_NBM_Fire:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            subprocess.run(command, shell=True)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
@@ -281,13 +295,15 @@ def update_zarr_store(initialRun):
         "/tmp", "GEFS.zarr", initialRun
     )
     if latest_GEFS is not None:
-        GEFS_Zarr = zarr.open("/tmp/" + latest_GEFS, mode="r")
+        GEFS_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_GEFS, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_GEFS)
     for old_dir in old_GEFS:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            subprocess.run(command, shell=True)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
@@ -295,13 +311,15 @@ def update_zarr_store(initialRun):
         "/tmp", "HRRR.zarr", initialRun
     )
     if latest_HRRR is not None:
-        HRRR_Zarr = zarr.open("/tmp/" + latest_HRRR, mode="r")
+        HRRR_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_HRRR, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_HRRR)
     for old_dir in old_HRRR:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            subprocess.run(command, shell=True)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
@@ -309,7 +327,9 @@ def update_zarr_store(initialRun):
         latest_ETOPO, old_ETOPO = find_largest_integer_directory(
             "/tmp", "ETOPO_DA_C.zarr", initialRun
         )
-        ETOPO_f = zarr.open("/tmp/" + latest_ETOPO, mode="r")
+        ETOPO_f = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_ETOPO, mode="r"), mode="r"
+        )
         logger.info("ETOPO Setup")
 
     print("Refreshed Zarrs")
@@ -491,7 +511,7 @@ class WeatherParallel(object):
                     print(datetime.datetime.utcnow())
                 return dataOut
 
-            except:
+            except Exception:
                 errCount = errCount + 1
 
         print("### " + model + " Failure!")
@@ -742,7 +762,6 @@ async def PW_Forecast(
     readHRRR = False
     readGFS = False
     readNBM = False
-    readNBM_Fire = False
     readGEFS = False
 
     print(os.environ.get("STAGE", "PROD"))
@@ -776,7 +795,7 @@ async def PW_Forecast(
     try:
         lat = float(locationReq[0])
         lon_IN = float(locationReq[1])
-    except:
+    except Exception:
         raise HTTPException(status_code=400, detail="Invalid Location Specification")
         # return {
         #     'statusCode': 400,
@@ -819,14 +838,14 @@ async def PW_Forecast(
                 )
                 # Since it is in UTC time already
                 utcTime = utcTime.replace(tzinfo=None)
-            except:
+            except Exception:
                 try:
                     utcTime = datetime.datetime.strptime(
                         locationReq[2], "%Y-%m-%dT%H:%M:%S%Z"
                     )
                     # Since it is in UTC time already
                     utcTime = utcTime.replace(tzinfo=None)
-                except:
+                except Exception:
                     try:
                         localTime = datetime.datetime.strptime(
                             locationReq[2], "%Y-%m-%dT%H:%M:%S"
@@ -843,7 +862,7 @@ async def PW_Forecast(
                         tz_offsetIN, tz_name = get_offset(**tz_offsetLocIN)
                         utcTime = localTime - datetime.timedelta(minutes=tz_offsetIN)
 
-                    except:
+                    except Exception:
                         # print('ERROR')
                         raise HTTPException(
                             status_code=400, detail="Invalid Time Specification"
@@ -1706,7 +1725,7 @@ async def PW_Forecast(
             - datetime.timedelta(hours=18)
         ).strftime("%Y-%m-%d %HZ")
 
-    # Always include GFS and GEFS
+    # Always include GFS
     if timeMachine is False:
         sourceTimes["gfs"] = rounder(
             datetime.datetime.utcfromtimestamp(gfsRunTime.astype(int))
@@ -1836,7 +1855,7 @@ async def PW_Forecast(
                 NBM_Fire_Merged[0 : (217 - NBM_Fire_StartIDX), :] = dataOut_nbmFire[
                     NBM_Fire_StartIDX : (numHours + NBM_Fire_StartIDX), :
                 ]
-        except:
+        except Exception:
             sourceTimes.pop("hrrr_18-48")
             sourceTimes.pop("nbm_fire")
             sourceTimes.pop("nbm")
@@ -2036,13 +2055,13 @@ async def PW_Forecast(
         print("Sunrise start")
         print(datetime.datetime.utcnow() - T_Start)
 
-    l = LocationInfo("name", "region", tz_name, lat, az_Lon)
+    loc = LocationInfo("name", "region", tz_name, lat, az_Lon)
 
     # Calculate Sunrise, Sunset, Moon Phase
     for i in range(0, daily_days):
         try:
             s = sun(
-                l.observer, date=baseDay + datetime.timedelta(days=i)
+                loc.observer, date=baseDay + datetime.timedelta(days=i)
             )  # Use local to get the correct date
 
             InterSday[i, 17] = (
@@ -2280,6 +2299,9 @@ async def PW_Forecast(
     else:
         InterPminute[:, 2] = gefsMinuteInterpolation[:, 1]
 
+    # Less than 5% set to 0
+    InterPminute[InterPminute[:, 2] < 0.05, 2] = 0
+
     # Prep Intensity
     # Kind of complex, process:
     # 1. If probability >0:
@@ -2310,6 +2332,10 @@ async def PW_Forecast(
         InterPminute[:, 1] = nbmMinuteInterpolation[:, 8] * prepIntensityUnit
     else:
         InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * 1 * prepIntensityUnit
+
+    if "hrrrsubh" not in sourceList:
+        # Set intensity to zero if POP == 0
+        InterPminute[InterPminute[:, 2] == 0, 1] = 0
 
     # "precipIntensityError"
     if "gefs" in sourceList:
@@ -2680,6 +2706,9 @@ async def PW_Forecast(
         0,
     )
 
+    # Set accumulation to zero if POP == 0
+    InterPhour[InterPhour[:, 3] == 0, 17] = 0
+
     ### Near Storm Distance
     if "gfs" in sourceList:
         InterPhour[:, 18] = np.maximum(GFS_Merged[:, 19] * visUnits, 0)
@@ -2791,7 +2820,7 @@ async def PW_Forecast(
 
     # Sleet
     # Calculate prep accumilation for current day before zeroing
-    dayZeroPrepSleet = InterPhour[:, 21].copy()
+    dayZeroPrepSleet = InterPhour[:, 23].copy()
     # Everything that isn't the current day
     dayZeroPrepSleet[hourlyDayIndex != 0] = 0
     # Everything after the request time
@@ -3463,8 +3492,6 @@ async def PW_Forecast(
 
                     alertList.append(dict(alertDict))
 
-            alertSuccess = 1
-
         else:
             alertList = []
 
@@ -4010,7 +4037,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.5.1"
+        returnOBJ["flags"]["version"] = "V2.5.3"
 
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
@@ -4051,7 +4078,7 @@ def initialDataSync() -> None:
             s3_bucket,
             "ForecastTar/SubH.zarr.zip",
             "/ebs/SubH_TMP.zarr.zip",
-            "/tmp/SubH.zarr.dir",
+            "/tmp/SubH.zarr.prod.zip",
             True,
         )
         print("SubH Download!")
@@ -4059,7 +4086,7 @@ def initialDataSync() -> None:
             s3_bucket,
             "ForecastTar/HRRR_6H.zarr.zip",
             "/ebs/HRRR_6H_TMP.zarr.zip",
-            "/tmp/HRRR_6H.zarr.dir",
+            "/tmp/HRRR_6H.zarr.prod.zip",
             True,
         )
         print("HRRR_6H Download!")
@@ -4067,7 +4094,7 @@ def initialDataSync() -> None:
             s3_bucket,
             "ForecastTar/GFS.zarr.zip",
             "/ebs/GFS.zarr_TMP.zip",
-            "/tmp/GFS.zarr.dir",
+            "/tmp/GFS.zarr.prod.zip",
             True,
         )
         print("GFS Download!")
@@ -4075,7 +4102,7 @@ def initialDataSync() -> None:
             s3_bucket,
             "ForecastTar/NBM.zarr.zip",
             "/ebs/NBM.zarr_TMP.zip",
-            "/tmp/NBM.zarr.dir",
+            "/tmp/NBM.zarr.prod.zip",
             True,
         )
         print("NBM Download!")
@@ -4083,7 +4110,7 @@ def initialDataSync() -> None:
             s3_bucket,
             "ForecastTar/NBM_Fire.zarr.zip",
             "/ebs/NBM_Fire_TMP.zarr.zip",
-            "/tmp/NBM_Fire.zarr.dir",
+            "/tmp/NBM_Fire.zarr.prod.zip",
             True,
         )
         print("NBM_Fire Download!")
@@ -4091,7 +4118,7 @@ def initialDataSync() -> None:
             s3_bucket,
             "ForecastTar/GEFS.zarr.zip",
             "/ebs/GEFS_TMP.zarr.zip",
-            "/tmp/GEFS.zarr.dir",
+            "/tmp/GEFS.zarr.prod.zip",
             True,
         )
         print("GEFS  Download!")
@@ -4099,7 +4126,7 @@ def initialDataSync() -> None:
             s3_bucket,
             "ForecastTar/HRRR.zarr.zip",
             "/ebs/HRRR_TMP.zarr.zip",
-            "/tmp/HRRR.zarr.dir",
+            "/tmp/HRRR.zarr.prod.zip",
             True,
         )
         print("HRRR  Download!")
@@ -4107,7 +4134,7 @@ def initialDataSync() -> None:
             s3_bucket,
             "ForecastTar/NWS_Alerts.zarr.zip",
             "/ebs/NWS_Alerts_TMP.zarr.zip",
-            "/tmp/NWS_Alerts.zarr.dir",
+            "/tmp/NWS_Alerts.zarr.prod.zip",
             True,
         )
         print("Alerts Download!")
@@ -4117,7 +4144,7 @@ def initialDataSync() -> None:
                 s3_bucket,
                 "ForecastTar/ETOPO_DA_C.zarr.zip",
                 "/ebs/ETOPO_DA_C_TMP.zarr.zip",
-                "/tmp/ETOPO_DA_C.zarr.dir",
+                "/tmp/ETOPO_DA_C.zarr.prod.zip",
                 True,
             )
             print("ETOPO Download!")
@@ -4150,7 +4177,7 @@ def dataSync() -> None:
                 s3_bucket,
                 "ForecastTar/SubH.zarr.zip",
                 "/ebs/SubH_TMP.zarr.zip",
-                "/tmp/SubH.zarr.dir",
+                "/tmp/SubH.zarr.prod.zip",
                 False,
             )
             logger.info("SubH Download!")
@@ -4158,7 +4185,7 @@ def dataSync() -> None:
                 s3_bucket,
                 "ForecastTar/HRRR_6H.zarr.zip",
                 "/ebs/HRRR_6H_TMP.zarr.zip",
-                "/tmp/HRRR_6H.zarr.dir",
+                "/tmp/HRRR_6H.zarr.prod.zip",
                 False,
             )
             logger.info("HRRR_6H Download!")
@@ -4166,7 +4193,7 @@ def dataSync() -> None:
                 s3_bucket,
                 "ForecastTar/GFS.zarr.zip",
                 "/ebs/GFS.zarr_TMP.zip",
-                "/tmp/GFS.zarr.dir",
+                "/tmp/GFS.zarr.prod.zip",
                 False,
             )
             logger.info("GFS Download!")
@@ -4174,7 +4201,7 @@ def dataSync() -> None:
                 s3_bucket,
                 "ForecastTar/NBM.zarr.zip",
                 "/ebs/NBM.zarr_TMP.zip",
-                "/tmp/NBM.zarr.dir",
+                "/tmp/NBM.zarr.prod.zip",
                 False,
             )
             logger.info("NBM Download!")
@@ -4182,7 +4209,7 @@ def dataSync() -> None:
                 s3_bucket,
                 "ForecastTar/NBM_Fire.zarr.zip",
                 "/ebs/NBM_Fire_TMP.zarr.zip",
-                "/tmp/NBM_Fire.zarr.dir",
+                "/tmp/NBM_Fire.zarr.prod.zip",
                 False,
             )
             logger.info("NBM_Fire Download!")
@@ -4190,7 +4217,7 @@ def dataSync() -> None:
                 s3_bucket,
                 "ForecastTar/GEFS.zarr.zip",
                 "/ebs/GEFS_TMP.zarr.zip",
-                "/tmp/GEFS.zarr.dir",
+                "/tmp/GEFS.zarr.prod.zip",
                 False,
             )
             logger.info("GEFS  Download!")
@@ -4198,7 +4225,7 @@ def dataSync() -> None:
                 s3_bucket,
                 "ForecastTar/HRRR.zarr.zip",
                 "/ebs/HRRR_TMP.zarr.zip",
-                "/tmp/HRRR.zarr.dir",
+                "/tmp/HRRR.zarr.prod.zip",
                 False,
             )
             logger.info("HRRR  Download!")
@@ -4206,7 +4233,7 @@ def dataSync() -> None:
                 s3_bucket,
                 "ForecastTar/NWS_Alerts.zarr.zip",
                 "/ebs/NWS_Alerts_TMP.zarr.zip",
-                "/tmp/NWS_Alerts.zarr.dir",
+                "/tmp/NWS_Alerts.zarr.prod.zip",
                 False,
             )
             logger.info("Alerts Download!")
@@ -4216,7 +4243,7 @@ def dataSync() -> None:
                     s3_bucket,
                     "ForecastTar/ETOPO_DA_C.zarr.zip",
                     "/ebs/ETOPO_DA_C_TMP.zarr.zip",
-                    "/tmp/ETOPO_DA_C.zarr.dir",
+                    "/tmp/ETOPO_DA_C.zarr.prod.zip",
                     False,
                 )
                 logger.info("ETOPO Download!")

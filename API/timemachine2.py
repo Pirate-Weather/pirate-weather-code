@@ -59,7 +59,7 @@ def toTimestamp(d):
 
 
 def round_time(dt=None, round_to=60):
-    if dt == None:
+    if dt is None:
         dt = datetime.datetime.now()
     seconds = (dt - dt.min).seconds
     rounding = (seconds + round_to / 2) // round_to * round_to
@@ -118,9 +118,9 @@ async def TimeMachine(
     prepAccumUnit = 0.0394  # inches
     tempUnits = 0  # F. This is harder
     pressUnits = 0.01  # Hectopascals
-    visUnits = 0.00062137  # miles
-    humidUnit = 0.01  # %
-    elevUnit = 3.28084  # ft
+    # visUnits = 0.00062137  # miles
+    # humidUnit = 0.01  # %
+    # elevUnit = 3.28084  # ft
 
     if units:
         unitSystem = units[0:2]
@@ -131,36 +131,36 @@ async def TimeMachine(
             prepAccumUnit = 0.1  # cm
             tempUnits = 273.15  # Celsius
             pressUnits = 0.01  # Hectopascals
-            visUnits = 0.001  # km
-            humidUnit = 0.01  # %
-            elevUnit = 1  # m
+            # visUnits = 0.001  # km
+            # humidUnit = 0.01  # %
+            # elevUnit = 1  # m
         elif unitSystem == "uk":
             windUnit = 2.234  # mph
             prepIntensityUnit = 1  # mm/h
             prepAccumUnit = 0.1  # cm
             tempUnits = 273.15  # Celsius
             pressUnits = 0.01  # Hectopascals
-            visUnits = 0.00062137  # miles
-            humidUnit = 0.01  # %
-            elevUnit = 1  # m
+            # visUnits = 0.00062137  # miles
+            # humidUnit = 0.01  # %
+            # elevUnit = 1  # m
         elif unitSystem == "us":
             windUnit = 2.234  # mph
             prepIntensityUnit = 0.0394  # inches/hour
             prepAccumUnit = 0.0394  # inches
             tempUnits = 0  # F. This is harder
             pressUnits = 0.01  # Hectopascals
-            visUnits = 0.00062137  # miles
-            humidUnit = 0.01  # %
-            elevUnit = 3.28084  # ft
+            # visUnits = 0.00062137  # miles
+            # humidUnit = 0.01  # %
+            # elevUnit = 3.28084  # ft
         elif unitSystem == "si":
             windUnit = 1  # m/s
             prepIntensityUnit = 1  # mm/h
             prepAccumUnit = 0.1  # cm
             tempUnits = 273.15  # Celsius
             pressUnits = 0.01  # Hectopascals
-            visUnits = 0.001  # km
-            humidUnit = 0.01  # %
-            elevUnit = 1  # m
+            # visUnits = 0.001  # km
+            # humidUnit = 0.01  # %
+            # elevUnit = 1  # m
         else:
             unitSystem = "us"
             windUnit = 2.234  # mph
@@ -168,9 +168,9 @@ async def TimeMachine(
             prepAccumUnit = 0.0394  # inches
             tempUnits = 0  # F. This is harder
             pressUnits = 0.01  # Hectopascals
-            visUnits = 0.00062137  # miles
-            humidUnit = 0.01  # %
-            elevUnit = 3.28084  # ft
+            # visUnits = 0.00062137  # miles
+            # humidUnit = 0.01  # %
+            # elevUnit = 3.28084  # ft
 
     if not exclude:
         excludeParams = ""
@@ -196,10 +196,10 @@ async def TimeMachine(
     varList_rate = [
         "i10fg"
     ]  # Large scale instant rate, convective instant rate, wing guest
-    weatherVars = varList_inst + varList_accum + varList_rate
+    # weatherVars = varList_inst + varList_accum + varList_rate
 
-    dataOut = np.zeros(shape=(24, 8))
-    weatherVarCount = 1
+    # dataOut = np.zeros(shape=(24, 8))
+    # weatherVarCount = 1
 
     baseTimeLocal = utcTime + datetime.timedelta(minutes=tz_offset)
 
@@ -229,8 +229,8 @@ async def TimeMachine(
     x = np.argmin(abslat)
     y = np.argmin(abslon)
 
-    era_lat = lats_era[x]
-    era_lon = lons_era[y]
+    # era_lat = lats_era[x]
+    # era_lon = lons_era[y]
 
     dataDict = dict()
 
@@ -654,8 +654,8 @@ async def TimeMachine(
     InterPdaySum = np.zeros(shape=(16, 1))
 
     ## Sunrise sunset
-    l = LocationInfo("name", "region", tz_name, lat, lon - 360)
-    s = sun(l.observer, date=baseDay, tzinfo=tz_name)
+    loc = LocationInfo("name", "region", tz_name, lat, lon - 360)
+    s = sun(loc.observer, date=baseDay, tzinfo=tz_name)
     m = moon.phase(baseDay)
 
     InterPday[16, 0] = (
@@ -900,7 +900,7 @@ async def TimeMachine(
         returnOBJ["flags"]["sources"] = "ERA5"
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.3.1"
+        returnOBJ["flags"]["version"] = "V2.5.3"
         returnOBJ["flags"]["sourceIDX"] = {"x": y, "y": x}
         returnOBJ["flags"]["processTime"] = (
             datetime.datetime.utcnow() - T_Start
