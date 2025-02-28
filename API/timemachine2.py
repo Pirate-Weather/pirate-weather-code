@@ -362,7 +362,7 @@ async def TimeMachine(
                 kerchunkERA5Dir, instantFile_b, v, x, y, 0, tIDX_b_end
             )
 
-        results = await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks.values())
         resultsDict = {key: result for key, result in zip(tasks.keys(), results)}
 
         for v in varList_inst:

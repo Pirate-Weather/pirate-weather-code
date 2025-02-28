@@ -1741,11 +1741,11 @@ async def PW_Forecast(
             datetime.datetime.utcfromtimestamp(gfsRunTime.astype(int))
         ).strftime("%Y-%m-%d %HZ")
 
-    if isinstance(dataOut_gefs, np.ndarray):
-        sourceList.append("gefs")
-        sourceTimes["gefs"] = rounder(
-            datetime.datetime.utcfromtimestamp(gefsRunTime.astype(int))
-        ).strftime("%Y-%m-%d %HZ")
+        if isinstance(dataOut_gefs, np.ndarray):
+            sourceList.append("gefs")
+            sourceTimes["gefs"] = rounder(
+                datetime.datetime.utcfromtimestamp(gefsRunTime.astype(int))
+            ).strftime("%Y-%m-%d %HZ")
 
     # Timing Check
     if TIMING:
@@ -4132,7 +4132,7 @@ def initialDataSync() -> None:
         download_if_newer(
             s3_bucket,
             "ForecastTar/SubH.zarr.zip",
-            "/ebs/SubH_TMP.zarr.zip",
+            "/tmp/SubH_TMP.zarr.zip",
             "/tmp/SubH.zarr.prod.zip",
             True,
         )
@@ -4140,7 +4140,7 @@ def initialDataSync() -> None:
         download_if_newer(
             s3_bucket,
             "ForecastTar/HRRR_6H.zarr.zip",
-            "/ebs/HRRR_6H_TMP.zarr.zip",
+            "/tmp/HRRR_6H_TMP.zarr.zip",
             "/tmp/HRRR_6H.zarr.prod.zip",
             True,
         )
@@ -4148,7 +4148,7 @@ def initialDataSync() -> None:
         download_if_newer(
             s3_bucket,
             "ForecastTar/GFS.zarr.zip",
-            "/ebs/GFS.zarr_TMP.zip",
+            "/tmp/GFS.zarr_TMP.zip",
             "/tmp/GFS.zarr.prod.zip",
             True,
         )
@@ -4156,7 +4156,7 @@ def initialDataSync() -> None:
         download_if_newer(
             s3_bucket,
             "ForecastTar/NBM.zarr.zip",
-            "/ebs/NBM.zarr_TMP.zip",
+            "/tmp/NBM.zarr_TMP.zip",
             "/tmp/NBM.zarr.prod.zip",
             True,
         )
@@ -4164,7 +4164,7 @@ def initialDataSync() -> None:
         download_if_newer(
             s3_bucket,
             "ForecastTar/NBM_Fire.zarr.zip",
-            "/ebs/NBM_Fire_TMP.zarr.zip",
+            "/tmp/NBM_Fire_TMP.zarr.zip",
             "/tmp/NBM_Fire.zarr.prod.zip",
             True,
         )
@@ -4172,7 +4172,7 @@ def initialDataSync() -> None:
         download_if_newer(
             s3_bucket,
             "ForecastTar/GEFS.zarr.zip",
-            "/ebs/GEFS_TMP.zarr.zip",
+            "/tmp/GEFS_TMP.zarr.zip",
             "/tmp/GEFS.zarr.prod.zip",
             True,
         )
@@ -4180,7 +4180,7 @@ def initialDataSync() -> None:
         download_if_newer(
             s3_bucket,
             "ForecastTar/HRRR.zarr.zip",
-            "/ebs/HRRR_TMP.zarr.zip",
+            "/tmp/HRRR_TMP.zarr.zip",
             "/tmp/HRRR.zarr.prod.zip",
             True,
         )
@@ -4188,7 +4188,7 @@ def initialDataSync() -> None:
         download_if_newer(
             s3_bucket,
             "ForecastTar/NWS_Alerts.zarr.zip",
-            "/ebs/NWS_Alerts_TMP.zarr.zip",
+            "/tmp/NWS_Alerts_TMP.zarr.zip",
             "/tmp/NWS_Alerts.zarr.prod.zip",
             True,
         )
@@ -4198,7 +4198,7 @@ def initialDataSync() -> None:
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/ETOPO_DA_C.zarr.zip",
-                "/ebs/ETOPO_DA_C_TMP.zarr.zip",
+                "/tmp/ETOPO_DA_C_TMP.zarr.zip",
                 "/tmp/ETOPO_DA_C.zarr.prod.zip",
                 True,
             )
@@ -4231,7 +4231,7 @@ def dataSync() -> None:
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/SubH.zarr.zip",
-                "/ebs/SubH_TMP.zarr.zip",
+                "/tmp/SubH_TMP.zarr.zip",
                 "/tmp/SubH.zarr.prod.zip",
                 False,
             )
@@ -4239,7 +4239,7 @@ def dataSync() -> None:
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/HRRR_6H.zarr.zip",
-                "/ebs/HRRR_6H_TMP.zarr.zip",
+                "/tmp/HRRR_6H_TMP.zarr.zip",
                 "/tmp/HRRR_6H.zarr.prod.zip",
                 False,
             )
@@ -4247,7 +4247,7 @@ def dataSync() -> None:
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/GFS.zarr.zip",
-                "/ebs/GFS.zarr_TMP.zip",
+                "/tmp/GFS.zarr_TMP.zip",
                 "/tmp/GFS.zarr.prod.zip",
                 False,
             )
@@ -4255,7 +4255,7 @@ def dataSync() -> None:
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/NBM.zarr.zip",
-                "/ebs/NBM.zarr_TMP.zip",
+                "/tmp/NBM.zarr_TMP.zip",
                 "/tmp/NBM.zarr.prod.zip",
                 False,
             )
@@ -4263,7 +4263,7 @@ def dataSync() -> None:
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/NBM_Fire.zarr.zip",
-                "/ebs/NBM_Fire_TMP.zarr.zip",
+                "/tmp/NBM_Fire_TMP.zarr.zip",
                 "/tmp/NBM_Fire.zarr.prod.zip",
                 False,
             )
@@ -4271,7 +4271,7 @@ def dataSync() -> None:
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/GEFS.zarr.zip",
-                "/ebs/GEFS_TMP.zarr.zip",
+                "/tmp/GEFS_TMP.zarr.zip",
                 "/tmp/GEFS.zarr.prod.zip",
                 False,
             )
@@ -4279,7 +4279,7 @@ def dataSync() -> None:
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/HRRR.zarr.zip",
-                "/ebs/HRRR_TMP.zarr.zip",
+                "/tmp/HRRR_TMP.zarr.zip",
                 "/tmp/HRRR.zarr.prod.zip",
                 False,
             )
@@ -4287,7 +4287,7 @@ def dataSync() -> None:
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/NWS_Alerts.zarr.zip",
-                "/ebs/NWS_Alerts_TMP.zarr.zip",
+                "/tmp/NWS_Alerts_TMP.zarr.zip",
                 "/tmp/NWS_Alerts.zarr.prod.zip",
                 False,
             )
@@ -4297,7 +4297,7 @@ def dataSync() -> None:
                 download_if_newer(
                     s3_bucket,
                     "ForecastTar/ETOPO_DA_C.zarr.zip",
-                    "/ebs/ETOPO_DA_C_TMP.zarr.zip",
+                    "/tmp/ETOPO_DA_C_TMP.zarr.zip",
                     "/tmp/ETOPO_DA_C.zarr.prod.zip",
                     False,
                 )
