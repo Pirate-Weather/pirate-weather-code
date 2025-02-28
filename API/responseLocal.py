@@ -122,7 +122,7 @@ def download_if_newer(
         with open(local_lmdb_path + ".lock", "w"):
             pass
 
-        local_lmdb_path_tmp = local_lmdb_path + "_TMP"
+        # local_lmdb_path_tmp = local_lmdb_path + "_TMP"
 
         # if initialDownload:
         #     command = f"unzip -q -o {local_file_path} -d {local_lmdb_path_tmp}"
