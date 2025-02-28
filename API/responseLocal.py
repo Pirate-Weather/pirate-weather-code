@@ -978,6 +978,7 @@ async def PW_Forecast(
     exAlerts = 0
     exNBM = 0
     exHRRR = 0
+    exGEFS = 0
 
     if "currently" in excludeParams:
         exCurrently = 1
@@ -995,6 +996,8 @@ async def PW_Forecast(
         exNBM = 1
     if "hrrr" in excludeParams:
         exHRRR = 1
+    if "gefs" in excludeParams:
+        exGEFS = 1
 
     # Set up timemache params
     if timeMachine and not tmExtra:
@@ -1509,66 +1512,68 @@ async def PW_Forecast(
     if TIMING:
         print("### GEFS Detail Start ###")
         print(datetime.datetime.utcnow() - T_Start)
-
-    if timeMachine:
-        now = time.time()
-        # Create list of zarrs
-        hours_to_subtract = baseDayUTC.hour % 6
-        rounded_time = baseDayUTC - datetime.timedelta(
-            hours=hours_to_subtract,
-            minutes=baseDayUTC.minute,
-            seconds=baseDayUTC.second,
-            microseconds=baseDayUTC.microsecond,
-        )
-
-        date_range = pd.date_range(
-            start=rounded_time, end=rounded_time + datetime.timedelta(days=1), freq="6h"
-        ).to_list()
-        zarrList = [
-            "s3://"
-            + s3_bucket
-            + "/GEFS/GEFS_HistProb_"
-            + t.strftime("%Y%m%dT%H0000Z")
-            + ".zarr/"
-            for t in date_range
-        ]
-
-        with xr.open_mfdataset(
-            zarrList,
-            engine="zarr",
-            consolidated=True,
-            decode_cf=False,
-            parallel=True,
-            storage_options={"key": aws_access_key_id, "secret": aws_secret_access_key},
-            cache=False,
-        ) as xr_mf:
-            GEFSzarrVars = (
-                "time",
-                "Precipitation_Prob",
-                "APCP_Mean",
-                "APCP_StdDev",
-                "CSNOW_Prob",
-                "CICEP_Prob",
-                "CFRZR_Prob",
-                "CRAIN_Prob",
+    if exGEFS==1:
+        dataOut_gefs = False
+    else:
+        if timeMachine:
+            now = time.time()
+            # Create list of zarrs
+            hours_to_subtract = baseDayUTC.hour % 6
+            rounded_time = baseDayUTC - datetime.timedelta(
+                hours=hours_to_subtract,
+                minutes=baseDayUTC.minute,
+                seconds=baseDayUTC.second,
+                microseconds=baseDayUTC.microsecond,
             )
 
-            dataOut_gefs = np.zeros((len(xr_mf.time), len(GEFSzarrVars)))
-            # Add time
-            dataOut_gefs[:, 0] = xr_mf.time.compute().data
-            for vIDX, v in enumerate(GEFSzarrVars[1:]):
-                dataOut_gefs[:, vIDX + 1] = xr_mf[v][:, y_p, x_p].compute().data
-            now2 = time.time()
+            date_range = pd.date_range(
+                start=rounded_time, end=rounded_time + datetime.timedelta(days=1), freq="6h"
+            ).to_list()
+            zarrList = [
+                "s3://"
+                + s3_bucket
+                + "/GEFS/GEFS_HistProb_"
+                + t.strftime("%Y%m%dT%H0000Z")
+                + ".zarr/"
+                for t in date_range
+            ]
 
-        if TIMING:
-            print("GEFS Hist Time")
-            print(now2 - now)
+            with xr.open_mfdataset(
+                zarrList,
+                engine="zarr",
+                consolidated=True,
+                decode_cf=False,
+                parallel=True,
+                storage_options={"key": aws_access_key_id, "secret": aws_secret_access_key},
+                cache=False,
+            ) as xr_mf:
+                GEFSzarrVars = (
+                    "time",
+                    "Precipitation_Prob",
+                    "APCP_Mean",
+                    "APCP_StdDev",
+                    "CSNOW_Prob",
+                    "CICEP_Prob",
+                    "CFRZR_Prob",
+                    "CRAIN_Prob",
+                )
 
-        gefsRunTime = 0
+                dataOut_gefs = np.zeros((len(xr_mf.time), len(GEFSzarrVars)))
+                # Add time
+                dataOut_gefs[:, 0] = xr_mf.time.compute().data
+                for vIDX, v in enumerate(GEFSzarrVars[1:]):
+                    dataOut_gefs[:, vIDX + 1] = xr_mf[v][:, y_p, x_p].compute().data
+                now2 = time.time()
 
-        readGEFS = False
-    else:
-        readGEFS = True
+            if TIMING:
+                print("GEFS Hist Time")
+                print(now2 - now)
+
+            gefsRunTime = 0
+
+            readGEFS = False
+        else:
+            readGEFS = True
 
     # Timing Check
     if TIMING:
@@ -1676,11 +1681,11 @@ async def PW_Forecast(
     sourceTimes = dict()
     if timeMachine is False:
         if useETOPO:
-            sourceList = ["ETOPO1", "gfs", "gefs"]
+            sourceList = ["ETOPO1", "gfs"]
         else:
-            sourceList = ["gfs", "gefs"]
+            sourceList = ["gfs"]
     else:
-        sourceList = ["gfs", "gefs"]
+        sourceList = ["gfs"]
 
     # Timing Check
     if TIMING:
@@ -1730,6 +1735,9 @@ async def PW_Forecast(
         sourceTimes["gfs"] = rounder(
             datetime.datetime.utcfromtimestamp(gfsRunTime.astype(int))
         ).strftime("%Y-%m-%d %HZ")
+
+    if isinstance(dataOut_gefs, np.ndarray):
+        sourceList.append("gefs")
         sourceTimes["gefs"] = rounder(
             datetime.datetime.utcfromtimestamp(gefsRunTime.astype(int))
         ).strftime("%Y-%m-%d %HZ")
@@ -1876,8 +1884,9 @@ async def PW_Forecast(
         ]
 
         # GEFS
-        GEFS_StartIDX = find_nearest(dataOut_gefs[:, 0], baseDayUTC_Grib)
-        GEFS_Merged = dataOut_gefs[GEFS_StartIDX : (numHours + GEFS_StartIDX), :]
+        if "gefs" in sourceList:
+            GEFS_StartIDX = find_nearest(dataOut_gefs[:, 0], baseDayUTC_Grib)
+            GEFS_Merged = dataOut_gefs[GEFS_StartIDX : (numHours + GEFS_StartIDX), :]
 
     # Interpolate if Time Machine
     else:
@@ -1890,16 +1899,16 @@ async def PW_Forecast(
                 left=np.nan,
                 right=np.nan,
             )
-
-        GEFS_Merged = np.zeros((len(hour_array_grib), dataOut_gefs.shape[1]))
-        for i in range(0, len(dataOut_gefs[0, :])):
-            GEFS_Merged[:, i] = np.interp(
-                hour_array_grib,
-                dataOut_gefs[:, 0].squeeze(),
-                dataOut_gefs[:, i],
-                left=np.nan,
-                right=np.nan,
-            )
+        if "gefs" in sourceList:
+            GEFS_Merged = np.zeros((len(hour_array_grib), dataOut_gefs.shape[1]))
+            for i in range(0, len(dataOut_gefs[0, :])):
+                GEFS_Merged[:, i] = np.interp(
+                    hour_array_grib,
+                    dataOut_gefs[:, 0].squeeze(),
+                    dataOut_gefs[:, i],
+                    left=np.nan,
+                    right=np.nan,
+                )
         if "nbm" in sourceList:
             NBM_Merged = np.zeros((len(hour_array_grib), dataOut_nbm.shape[1]))
             for i in range(0, len(dataOut_nbm[0, :])):
@@ -2162,9 +2171,15 @@ async def PW_Forecast(
 
     # Interpolate for minutely
     # Concatenate HRRR and HRRR2
-    gefsMinuteInterpolation = np.zeros(
-        (len(minute_array_grib), len(dataOut_gefs[0, :]))
-    )
+    if "gefs" in sourceList:
+        gefsMinuteInterpolation = np.zeros(
+            (len(minute_array_grib), len(dataOut_gefs[0, :]))
+        )
+
+
+    gfsMinuteInterpolation = np.zeros(
+        (len(minute_array_grib), len(dataOut_gfs[0, :])))
+
     nbmMinuteInterpolation = np.zeros((len(minute_array_grib), 18))
 
     if "hrrrsubh" in sourceList:
@@ -2257,23 +2272,37 @@ async def PW_Forecast(
                 left=np.nan,
                 right=np.nan,
             )
-        gefsMinuteInterpolation[:, 3] = np.interp(
-            minute_array_grib,
-            dataOut_gefs[:, 0].squeeze(),
-            dataOut_gefs[:, 3],
-            left=np.nan,
-            right=np.nan,
-        )
 
-    else:  # Use GEFS
-        for i in range(len(dataOut_gefs[0, :]) - 1):
-            gefsMinuteInterpolation[:, i + 1] = np.interp(
+        if "gefs" in sourceList:
+            gefsMinuteInterpolation[:, 3] = np.interp(
                 minute_array_grib,
                 dataOut_gefs[:, 0].squeeze(),
-                dataOut_gefs[:, i + 1],
+                dataOut_gefs[:, 3],
                 left=np.nan,
                 right=np.nan,
             )
+
+    else:  # Use GEFS
+        if "gefs" in sourceList:
+            for i in range(len(dataOut_gefs[0, :]) - 1):
+                gefsMinuteInterpolation[:, i + 1] = np.interp(
+                    minute_array_grib,
+                    dataOut_gefs[:, 0].squeeze(),
+                    dataOut_gefs[:, i + 1],
+                    left=np.nan,
+                    right=np.nan,
+                )
+
+        else: # GFS Fallback
+            # This could be optimized by only interpolating the necessary columns
+            for i in range(len(dataOut_gfs[0, :]) - 1):
+                gfsMinuteInterpolation[:, i + 1] = np.interp(
+                    minute_array_grib,
+                    dataOut_gfs[:, 0].squeeze(),
+                    dataOut_gfs[:, i + 1],
+                    left=np.nan,
+                    right=np.nan,
+                )
 
     if "nbm" in sourceList:
         for i in [8, 12, 14, 15, 16, 17]:
@@ -2296,8 +2325,10 @@ async def PW_Forecast(
     # Use NBM where available
     if "nbm" in sourceList:
         InterPminute[:, 2] = nbmMinuteInterpolation[:, 12] * 0.01
-    else:
+    elif "gefs" in sourceList:
         InterPminute[:, 2] = gefsMinuteInterpolation[:, 1]
+    else:  # Missing (-999) fallback
+        InterPminute[:, 2] = np.ones(len(minute_array_grib)) * -999
 
     # Less than 5% set to 0
     InterPminute[InterPminute[:, 2] < 0.05, 2] = 0
@@ -2330,16 +2361,17 @@ async def PW_Forecast(
         InterPminute[:, 1] = hrrrSubHInterpolation[:, 7] * 3600 * prepIntensityUnit
     elif "nbm" in sourceList:
         InterPminute[:, 1] = nbmMinuteInterpolation[:, 8] * prepIntensityUnit
-    else:
+    elif "gefs" in sourceList:
         InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * 1 * prepIntensityUnit
-
-    if "hrrrsubh" not in sourceList:
-        # Set intensity to zero if POP == 0
-        InterPminute[InterPminute[:, 2] == 0, 1] = 0
+    else:  # GFS fallback
+        InterPminute[:, 1] = gfsMinuteInterpolation[:, 10] * 3600 * prepIntensityUnit
 
     # "precipIntensityError"
     if "gefs" in sourceList:
         InterPminute[:, 3] = gefsMinuteInterpolation[:, 3] * prepIntensityUnit
+    else:  # Missing
+        InterPminute[:, 3] = np.ones(len(minute_array_grib)) * -999
+
 
     # Precipitation Type
     # IF HRRR, use that, otherwise GEFS
@@ -2351,9 +2383,12 @@ async def PW_Forecast(
         InterTminute[:, 2] = nbmMinuteInterpolation[:, 17]
         InterTminute[:, 3] = nbmMinuteInterpolation[:, 15]
         InterTminute[:, 4] = nbmMinuteInterpolation[:, 14]
-    else:
+    elif "gefs" in sourceList:
         for i in [4, 5, 6, 7]:
             InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
+    else:  # GFS Fallback
+        for i in [12, 13, 14, 15]:
+            InterTminute[:, i - 11] = gfsMinuteInterpolation[:, i]
 
     # If all nan, set pchance to -999
     if np.any(np.isnan(InterTminute)):
@@ -2474,6 +2509,20 @@ async def PW_Forecast(
 
         # Put Nan's where they exist in the original data
         maxPchanceHour[np.isnan(InterThour[:, 1]), 2] = -999
+    else: #GFS Fallback
+        InterThour = np.zeros(shape=(len(hour_array), 5))  # Type
+        for i in [12, 13, 14, 15]:
+            InterThour[:, i - 11] = GFS_Merged[:, i]
+
+        # 12 = Snow, 13 = Sleet, 14 = Freezing Rain, 15 = Rain
+
+        # Fix rounding issues
+        InterThour[InterThour < 0.01] = 0
+
+        maxPchanceHour[:, 2] = np.argmax(InterThour, axis=1)
+
+        # Put Nan's where they exist in the original data
+        maxPchanceHour[np.isnan(InterThour[:, 1]), 2] = -999
 
     # Intensity
     # NBM
@@ -2482,11 +2531,12 @@ async def PW_Forecast(
         prcipIntensityHour[:, 0] = NBM_Merged[:, 13]
     # HRRR
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-        prcipIntensityHour[:, 1] = HRRR_Merged[:, 9]
+        prcipIntensityHour[:, 1] = HRRR_Merged[:, 9] * 3600
     # GEFS
     if "gefs" in sourceList:
         prcipIntensityHour[:, 2] = GEFS_Merged[:, 2]
-
+    else: # GFS Fallback
+        prcipIntensityHour[:, 2] = GFS_Merged[:, 10] * 3600
     # Take first non-NaN value
     InterPhour[:, 2] = (
         np.choose(np.argmin(np.isnan(prcipIntensityHour), axis=1), prcipIntensityHour.T)
@@ -3260,7 +3310,7 @@ async def PW_Forecast(
                 "moonPhase": InterSday[idx, 19].round(2),
                 "precipIntensity": InterPday[idx, 2],
                 "precipIntensityMax": InterPdayMax[idx, 2],
-                "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 1]),
+                "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
                 "precipAccumulation": InterPdaySum[idx, 21]
                 + InterPdaySum[idx, 22]
                 + InterPdaySum[idx, 23],
@@ -3303,7 +3353,7 @@ async def PW_Forecast(
                     "moonPhase": InterSday[idx, 19].round(2),
                     "precipIntensity": InterPday[idx, 2],
                     "precipIntensityMax": InterPdayMax[idx, 2],
-                    "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 1]),
+                    "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
                     "precipProbability": InterPdayMax[idx, 3],
                     "precipAccumulation": InterPdaySum[idx, 21]
                     + InterPdaySum[idx, 22]
@@ -3354,7 +3404,7 @@ async def PW_Forecast(
                     "moonPhase": InterSday[idx, 19].round(2),
                     "precipIntensity": InterPday[idx, 2],
                     "precipIntensityMax": InterPdayMax[idx, 2],
-                    "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 1]),
+                    "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
                     "precipProbability": InterPdayMax[idx, 3],
                     "precipAccumulation": InterPdaySum[idx, 21]
                     + InterPdaySum[idx, 22]
@@ -3491,7 +3541,6 @@ async def PW_Forecast(
                     }
 
                     alertList.append(dict(alertDict))
-
         else:
             alertList = []
 
