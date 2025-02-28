@@ -48,7 +48,7 @@ force_now = os.getenv("force_now", default=False)
 
 
 def download_if_newer(
-        s3_bucket, s3_object_key, local_file_path, local_lmdb_path, initialDownload
+    s3_bucket, s3_object_key, local_file_path, local_lmdb_path, initialDownload
 ):
     if initialDownload:
         config = TransferConfig(use_threads=True, max_bandwidth=None)
@@ -203,7 +203,9 @@ def update_zarr_store(initialRun):
         "/tmp", "NWS_Alerts.zarr", initialRun
     )
     if latest_Alert is not None:
-        NWS_Alerts_Zarr = zarr.open(zarr.storage.ZipStore("/tmp/" + latest_Alert, mode="r"), mode="r")
+        NWS_Alerts_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_Alert, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_Alert)
     for old_dir in old_Alert:
         if STAGE == "PROD":
@@ -217,7 +219,9 @@ def update_zarr_store(initialRun):
         "/tmp", "SubH.zarr", initialRun
     )
     if latest_SubH is not None:
-        SubH_Zarr = zarr.open(zarr.storage.ZipStore("/tmp/" + latest_SubH, mode="r"), mode="r")
+        SubH_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_SubH, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_SubH)
     for old_dir in old_SubH:
         if STAGE == "PROD":
@@ -231,7 +235,9 @@ def update_zarr_store(initialRun):
         "/tmp", "HRRR_6H.zarr", initialRun
     )
     if latest_HRRR_6H is not None:
-        HRRR_6H_Zarr = zarr.open(zarr.storage.ZipStore("/tmp/" + latest_HRRR_6H, mode="r"), mode="r")
+        HRRR_6H_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_HRRR_6H, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_HRRR_6H)
     for old_dir in old_HRRR_6H:
         if STAGE == "PROD":
@@ -243,7 +249,9 @@ def update_zarr_store(initialRun):
 
     latest_GFS, old_GFS = find_largest_integer_directory("/tmp", "GFS.zarr", initialRun)
     if latest_GFS is not None:
-        GFS_Zarr = zarr.open(zarr.storage.ZipStore("/tmp/" + latest_GFS, mode="r"), mode="r")
+        GFS_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_GFS, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_GFS)
     for old_dir in old_GFS:
         if STAGE == "PROD":
@@ -255,7 +263,9 @@ def update_zarr_store(initialRun):
 
     latest_NBM, old_NBM = find_largest_integer_directory("/tmp", "NBM.zarr", initialRun)
     if latest_NBM is not None:
-        NBM_Zarr = zarr.open(zarr.storage.ZipStore("/tmp/" + latest_NBM, mode="r"), mode="r")
+        NBM_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_NBM, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_NBM)
     for old_dir in old_NBM:
         if STAGE == "PROD":
@@ -269,7 +279,9 @@ def update_zarr_store(initialRun):
         "/tmp", "NBM_Fire.zarr", initialRun
     )
     if latest_NBM_Fire is not None:
-        NBM_Fire_Zarr = zarr.open(zarr.storage.ZipStore("/tmp/" + latest_NBM_Fire, mode="r"), mode="r")
+        NBM_Fire_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_NBM_Fire, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_NBM_Fire)
     for old_dir in old_NBM_Fire:
         if STAGE == "PROD":
@@ -283,7 +295,9 @@ def update_zarr_store(initialRun):
         "/tmp", "GEFS.zarr", initialRun
     )
     if latest_GEFS is not None:
-        GEFS_Zarr = zarr.open(zarr.storage.ZipStore("/tmp/" + latest_GEFS, mode="r"), mode="r")
+        GEFS_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_GEFS, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_GEFS)
     for old_dir in old_GEFS:
         if STAGE == "PROD":
@@ -297,7 +311,9 @@ def update_zarr_store(initialRun):
         "/tmp", "HRRR.zarr", initialRun
     )
     if latest_HRRR is not None:
-        HRRR_Zarr = zarr.open(zarr.storage.ZipStore("/tmp/" + latest_HRRR, mode="r"), mode="r")
+        HRRR_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_HRRR, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_HRRR)
     for old_dir in old_HRRR:
         if STAGE == "PROD":
@@ -311,10 +327,13 @@ def update_zarr_store(initialRun):
         latest_ETOPO, old_ETOPO = find_largest_integer_directory(
             "/tmp", "ETOPO_DA_C.zarr", initialRun
         )
-        ETOPO_f = zarr.open(zarr.storage.ZipStore("/tmp/" + latest_ETOPO, mode="r"), mode="r")
+        ETOPO_f = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_ETOPO, mode="r"), mode="r"
+        )
         logger.info("ETOPO Setup")
 
     print("Refreshed Zarrs")
+
 
 app = FastAPI()
 
@@ -4043,6 +4062,7 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8080, log_level="info")
+
 
 @app.on_event("startup")
 def initialDataSync() -> None:
