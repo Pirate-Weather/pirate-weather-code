@@ -2369,6 +2369,10 @@ async def PW_Forecast(
     else:  # GFS fallback
         InterPminute[:, 1] = gfsMinuteInterpolation[:, 10] * 3600 * prepIntensityUnit
 
+    if "hrrrsubh" not in sourceList:
+        # Set intensity to zero if POP == 0
+        InterPminute[InterPminute[:, 2] == 0, 1] = 0
+
     # "precipIntensityError"
     if "gefs" in sourceList:
         InterPminute[:, 3] = gefsMinuteInterpolation[:, 3] * prepIntensityUnit
