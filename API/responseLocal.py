@@ -119,24 +119,25 @@ def download_if_newer(
 
     if newFile:
         # Write a file to show an update is in progress, do not reload
-        with open(local_lmdb_path + ".lock", "w") as fp:
+        with open(local_lmdb_path + ".lock", "w"):
             pass
 
-        local_lmdb_path_tmp = local_lmdb_path + "_TMP"
+        # local_lmdb_path_tmp = local_lmdb_path + "_TMP"
 
-        if initialDownload:
-            command = f"unzip -q -o {local_file_path} -d {local_lmdb_path_tmp}"
-        else:
-            command = f"nice -n 20 ionice -c 3 unzip -q -o {local_file_path} -d {local_lmdb_path_tmp}"
+        # if initialDownload:
+        #     command = f"unzip -q -o {local_file_path} -d {local_lmdb_path_tmp}"
+        # else:
+        #     command = f"nice -n 20 ionice -c 3 unzip -q -o {local_file_path} -d {local_lmdb_path_tmp}"
+
         # process = subprocess.Popen(command, shell=True)
         # subprocess.run(["ionice", "-c", "3", "unzip", "-q", "-o", local_file_path, "-d", local_lmdb_path_tmp], shell=True, check=True)
-        subprocess.run(command, shell=True)
+        # subprocess.run(command, shell=True)
 
         # Rename
-        shutil.move(local_lmdb_path_tmp, local_lmdb_path + "_" + str(s3_last_modified))
+        shutil.move(local_file_path, local_lmdb_path + "_" + str(s3_last_modified))
 
         # ZipZarr.close()
-        os.remove(local_file_path)
+        # os.remove(local_file_path)
         os.remove(local_lmdb_path + ".lock")
 
 
@@ -157,7 +158,8 @@ def find_largest_integer_directory(parent_dir, key_string, initialRun):
 
     for entry in os.listdir(parent_dir):
         entry_path = os.path.join(parent_dir, entry)
-        if (os.path.isdir(entry_path)) & (key_string in entry) & ("TMP" not in entry):
+        print(entry_path)
+        if (key_string in entry) & ("TMP" not in entry):
             old_dirs.append(entry)
             try:
                 # Extract the integer value from the directory name
@@ -201,13 +203,15 @@ def update_zarr_store(initialRun):
         "/tmp", "NWS_Alerts.zarr", initialRun
     )
     if latest_Alert is not None:
-        NWS_Alerts_Zarr = zarr.open("/tmp/" + latest_Alert, mode="r")
+        NWS_Alerts_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_Alert, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_Alert)
     for old_dir in old_Alert:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            subprocess.run(command, shell=True)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
@@ -215,13 +219,15 @@ def update_zarr_store(initialRun):
         "/tmp", "SubH.zarr", initialRun
     )
     if latest_SubH is not None:
-        SubH_Zarr = zarr.open("/tmp/" + latest_SubH, mode="r")
+        SubH_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_SubH, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_SubH)
     for old_dir in old_SubH:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            subprocess.run(command, shell=True)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
@@ -229,37 +235,43 @@ def update_zarr_store(initialRun):
         "/tmp", "HRRR_6H.zarr", initialRun
     )
     if latest_HRRR_6H is not None:
-        HRRR_6H_Zarr = zarr.open("/tmp/" + latest_HRRR_6H, mode="r")
+        HRRR_6H_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_HRRR_6H, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_HRRR_6H)
     for old_dir in old_HRRR_6H:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            subprocess.run(command, shell=True)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
     latest_GFS, old_GFS = find_largest_integer_directory("/tmp", "GFS.zarr", initialRun)
     if latest_GFS is not None:
-        GFS_Zarr = zarr.open("/tmp/" + latest_GFS, mode="r")
+        GFS_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_GFS, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_GFS)
     for old_dir in old_GFS:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            subprocess.run(command, shell=True)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
     latest_NBM, old_NBM = find_largest_integer_directory("/tmp", "NBM.zarr", initialRun)
     if latest_NBM is not None:
-        NBM_Zarr = zarr.open("/tmp/" + latest_NBM, mode="r")
+        NBM_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_NBM, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_NBM)
     for old_dir in old_NBM:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            subprocess.run(command, shell=True)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
@@ -267,13 +279,15 @@ def update_zarr_store(initialRun):
         "/tmp", "NBM_Fire.zarr", initialRun
     )
     if latest_NBM_Fire is not None:
-        NBM_Fire_Zarr = zarr.open("/tmp/" + latest_NBM_Fire, mode="r")
+        NBM_Fire_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_NBM_Fire, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_NBM_Fire)
     for old_dir in old_NBM_Fire:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            subprocess.run(command, shell=True)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
@@ -281,13 +295,15 @@ def update_zarr_store(initialRun):
         "/tmp", "GEFS.zarr", initialRun
     )
     if latest_GEFS is not None:
-        GEFS_Zarr = zarr.open("/tmp/" + latest_GEFS, mode="r")
+        GEFS_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_GEFS, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_GEFS)
     for old_dir in old_GEFS:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            subprocess.run(command, shell=True)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
@@ -295,13 +311,15 @@ def update_zarr_store(initialRun):
         "/tmp", "HRRR.zarr", initialRun
     )
     if latest_HRRR is not None:
-        HRRR_Zarr = zarr.open("/tmp/" + latest_HRRR, mode="r")
+        HRRR_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_HRRR, mode="r"), mode="r"
+        )
         logger.info("Loading new: " + latest_HRRR)
     for old_dir in old_HRRR:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            subprocess.run(command, shell=True)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
@@ -309,7 +327,9 @@ def update_zarr_store(initialRun):
         latest_ETOPO, old_ETOPO = find_largest_integer_directory(
             "/tmp", "ETOPO_DA_C.zarr", initialRun
         )
-        ETOPO_f = zarr.open("/tmp/" + latest_ETOPO, mode="r")
+        ETOPO_f = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_ETOPO, mode="r"), mode="r"
+        )
         logger.info("ETOPO Setup")
 
     print("Refreshed Zarrs")
@@ -491,7 +511,7 @@ class WeatherParallel(object):
                     print(datetime.datetime.utcnow())
                 return dataOut
 
-            except:
+            except Exception:
                 errCount = errCount + 1
 
         print("### " + model + " Failure!")
@@ -742,7 +762,6 @@ async def PW_Forecast(
     readHRRR = False
     readGFS = False
     readNBM = False
-    readNBM_Fire = False
     readGEFS = False
 
     print(os.environ.get("STAGE", "PROD"))
@@ -776,7 +795,7 @@ async def PW_Forecast(
     try:
         lat = float(locationReq[0])
         lon_IN = float(locationReq[1])
-    except:
+    except Exception:
         raise HTTPException(status_code=400, detail="Invalid Location Specification")
         # return {
         #     'statusCode': 400,
@@ -819,14 +838,14 @@ async def PW_Forecast(
                 )
                 # Since it is in UTC time already
                 utcTime = utcTime.replace(tzinfo=None)
-            except:
+            except Exception:
                 try:
                     utcTime = datetime.datetime.strptime(
                         locationReq[2], "%Y-%m-%dT%H:%M:%S%Z"
                     )
                     # Since it is in UTC time already
                     utcTime = utcTime.replace(tzinfo=None)
-                except:
+                except Exception:
                     try:
                         localTime = datetime.datetime.strptime(
                             locationReq[2], "%Y-%m-%dT%H:%M:%S"
@@ -843,7 +862,7 @@ async def PW_Forecast(
                         tz_offsetIN, tz_name = get_offset(**tz_offsetLocIN)
                         utcTime = localTime - datetime.timedelta(minutes=tz_offsetIN)
 
-                    except:
+                    except Exception:
                         # print('ERROR')
                         raise HTTPException(
                             status_code=400, detail="Invalid Time Specification"
@@ -959,6 +978,7 @@ async def PW_Forecast(
     exAlerts = 0
     exNBM = 0
     exHRRR = 0
+    exGEFS = 0
 
     if "currently" in excludeParams:
         exCurrently = 1
@@ -976,6 +996,8 @@ async def PW_Forecast(
         exNBM = 1
     if "hrrr" in excludeParams:
         exHRRR = 1
+    if "gefs" in excludeParams:
+        exGEFS = 1
 
     # Set up timemache params
     if timeMachine and not tmExtra:
@@ -1490,66 +1512,73 @@ async def PW_Forecast(
     if TIMING:
         print("### GEFS Detail Start ###")
         print(datetime.datetime.utcnow() - T_Start)
-
-    if timeMachine:
-        now = time.time()
-        # Create list of zarrs
-        hours_to_subtract = baseDayUTC.hour % 6
-        rounded_time = baseDayUTC - datetime.timedelta(
-            hours=hours_to_subtract,
-            minutes=baseDayUTC.minute,
-            seconds=baseDayUTC.second,
-            microseconds=baseDayUTC.microsecond,
-        )
-
-        date_range = pd.date_range(
-            start=rounded_time, end=rounded_time + datetime.timedelta(days=1), freq="6h"
-        ).to_list()
-        zarrList = [
-            "s3://"
-            + s3_bucket
-            + "/GEFS/GEFS_HistProb_"
-            + t.strftime("%Y%m%dT%H0000Z")
-            + ".zarr/"
-            for t in date_range
-        ]
-
-        with xr.open_mfdataset(
-            zarrList,
-            engine="zarr",
-            consolidated=True,
-            decode_cf=False,
-            parallel=True,
-            storage_options={"key": aws_access_key_id, "secret": aws_secret_access_key},
-            cache=False,
-        ) as xr_mf:
-            GEFSzarrVars = (
-                "time",
-                "Precipitation_Prob",
-                "APCP_Mean",
-                "APCP_StdDev",
-                "CSNOW_Prob",
-                "CICEP_Prob",
-                "CFRZR_Prob",
-                "CRAIN_Prob",
+    if exGEFS == 1:
+        dataOut_gefs = False
+    else:
+        if timeMachine:
+            now = time.time()
+            # Create list of zarrs
+            hours_to_subtract = baseDayUTC.hour % 6
+            rounded_time = baseDayUTC - datetime.timedelta(
+                hours=hours_to_subtract,
+                minutes=baseDayUTC.minute,
+                seconds=baseDayUTC.second,
+                microseconds=baseDayUTC.microsecond,
             )
 
-            dataOut_gefs = np.zeros((len(xr_mf.time), len(GEFSzarrVars)))
-            # Add time
-            dataOut_gefs[:, 0] = xr_mf.time.compute().data
-            for vIDX, v in enumerate(GEFSzarrVars[1:]):
-                dataOut_gefs[:, vIDX + 1] = xr_mf[v][:, y_p, x_p].compute().data
-            now2 = time.time()
+            date_range = pd.date_range(
+                start=rounded_time,
+                end=rounded_time + datetime.timedelta(days=1),
+                freq="6h",
+            ).to_list()
+            zarrList = [
+                "s3://"
+                + s3_bucket
+                + "/GEFS/GEFS_HistProb_"
+                + t.strftime("%Y%m%dT%H0000Z")
+                + ".zarr/"
+                for t in date_range
+            ]
 
-        if TIMING:
-            print("GEFS Hist Time")
-            print(now2 - now)
+            with xr.open_mfdataset(
+                zarrList,
+                engine="zarr",
+                consolidated=True,
+                decode_cf=False,
+                parallel=True,
+                storage_options={
+                    "key": aws_access_key_id,
+                    "secret": aws_secret_access_key,
+                },
+                cache=False,
+            ) as xr_mf:
+                GEFSzarrVars = (
+                    "time",
+                    "Precipitation_Prob",
+                    "APCP_Mean",
+                    "APCP_StdDev",
+                    "CSNOW_Prob",
+                    "CICEP_Prob",
+                    "CFRZR_Prob",
+                    "CRAIN_Prob",
+                )
 
-        gefsRunTime = 0
+                dataOut_gefs = np.zeros((len(xr_mf.time), len(GEFSzarrVars)))
+                # Add time
+                dataOut_gefs[:, 0] = xr_mf.time.compute().data
+                for vIDX, v in enumerate(GEFSzarrVars[1:]):
+                    dataOut_gefs[:, vIDX + 1] = xr_mf[v][:, y_p, x_p].compute().data
+                now2 = time.time()
 
-        readGEFS = False
-    else:
-        readGEFS = True
+            if TIMING:
+                print("GEFS Hist Time")
+                print(now2 - now)
+
+            gefsRunTime = 0
+
+            readGEFS = False
+        else:
+            readGEFS = True
 
     # Timing Check
     if TIMING:
@@ -1657,11 +1686,11 @@ async def PW_Forecast(
     sourceTimes = dict()
     if timeMachine is False:
         if useETOPO:
-            sourceList = ["ETOPO1", "gfs", "gefs"]
+            sourceList = ["ETOPO1", "gfs"]
         else:
-            sourceList = ["gfs", "gefs"]
+            sourceList = ["gfs"]
     else:
-        sourceList = ["gfs", "gefs"]
+        sourceList = ["gfs"]
 
     # Timing Check
     if TIMING:
@@ -1706,14 +1735,17 @@ async def PW_Forecast(
             - datetime.timedelta(hours=18)
         ).strftime("%Y-%m-%d %HZ")
 
-    # Always include GFS and GEFS
+    # Always include GFS
     if timeMachine is False:
         sourceTimes["gfs"] = rounder(
             datetime.datetime.utcfromtimestamp(gfsRunTime.astype(int))
         ).strftime("%Y-%m-%d %HZ")
-        sourceTimes["gefs"] = rounder(
-            datetime.datetime.utcfromtimestamp(gefsRunTime.astype(int))
-        ).strftime("%Y-%m-%d %HZ")
+
+        if isinstance(dataOut_gefs, np.ndarray):
+            sourceList.append("gefs")
+            sourceTimes["gefs"] = rounder(
+                datetime.datetime.utcfromtimestamp(gefsRunTime.astype(int))
+            ).strftime("%Y-%m-%d %HZ")
 
     # Timing Check
     if TIMING:
@@ -1836,7 +1868,7 @@ async def PW_Forecast(
                 NBM_Fire_Merged[0 : (217 - NBM_Fire_StartIDX), :] = dataOut_nbmFire[
                     NBM_Fire_StartIDX : (numHours + NBM_Fire_StartIDX), :
                 ]
-        except:
+        except Exception:
             sourceTimes.pop("hrrr_18-48")
             sourceTimes.pop("nbm_fire")
             sourceTimes.pop("nbm")
@@ -1857,8 +1889,9 @@ async def PW_Forecast(
         ]
 
         # GEFS
-        GEFS_StartIDX = find_nearest(dataOut_gefs[:, 0], baseDayUTC_Grib)
-        GEFS_Merged = dataOut_gefs[GEFS_StartIDX : (numHours + GEFS_StartIDX), :]
+        if "gefs" in sourceList:
+            GEFS_StartIDX = find_nearest(dataOut_gefs[:, 0], baseDayUTC_Grib)
+            GEFS_Merged = dataOut_gefs[GEFS_StartIDX : (numHours + GEFS_StartIDX), :]
 
     # Interpolate if Time Machine
     else:
@@ -1871,16 +1904,16 @@ async def PW_Forecast(
                 left=np.nan,
                 right=np.nan,
             )
-
-        GEFS_Merged = np.zeros((len(hour_array_grib), dataOut_gefs.shape[1]))
-        for i in range(0, len(dataOut_gefs[0, :])):
-            GEFS_Merged[:, i] = np.interp(
-                hour_array_grib,
-                dataOut_gefs[:, 0].squeeze(),
-                dataOut_gefs[:, i],
-                left=np.nan,
-                right=np.nan,
-            )
+        if "gefs" in sourceList:
+            GEFS_Merged = np.zeros((len(hour_array_grib), dataOut_gefs.shape[1]))
+            for i in range(0, len(dataOut_gefs[0, :])):
+                GEFS_Merged[:, i] = np.interp(
+                    hour_array_grib,
+                    dataOut_gefs[:, 0].squeeze(),
+                    dataOut_gefs[:, i],
+                    left=np.nan,
+                    right=np.nan,
+                )
         if "nbm" in sourceList:
             NBM_Merged = np.zeros((len(hour_array_grib), dataOut_nbm.shape[1]))
             for i in range(0, len(dataOut_nbm[0, :])):
@@ -2036,13 +2069,13 @@ async def PW_Forecast(
         print("Sunrise start")
         print(datetime.datetime.utcnow() - T_Start)
 
-    l = LocationInfo("name", "region", tz_name, lat, az_Lon)
+    loc = LocationInfo("name", "region", tz_name, lat, az_Lon)
 
     # Calculate Sunrise, Sunset, Moon Phase
     for i in range(0, daily_days):
         try:
             s = sun(
-                l.observer, date=baseDay + datetime.timedelta(days=i)
+                loc.observer, date=baseDay + datetime.timedelta(days=i)
             )  # Use local to get the correct date
 
             InterSday[i, 17] = (
@@ -2143,9 +2176,13 @@ async def PW_Forecast(
 
     # Interpolate for minutely
     # Concatenate HRRR and HRRR2
-    gefsMinuteInterpolation = np.zeros(
-        (len(minute_array_grib), len(dataOut_gefs[0, :]))
-    )
+    if "gefs" in sourceList:
+        gefsMinuteInterpolation = np.zeros(
+            (len(minute_array_grib), len(dataOut_gefs[0, :]))
+        )
+
+    gfsMinuteInterpolation = np.zeros((len(minute_array_grib), len(dataOut_gfs[0, :])))
+
     nbmMinuteInterpolation = np.zeros((len(minute_array_grib), 18))
 
     if "hrrrsubh" in sourceList:
@@ -2238,23 +2275,37 @@ async def PW_Forecast(
                 left=np.nan,
                 right=np.nan,
             )
-        gefsMinuteInterpolation[:, 3] = np.interp(
-            minute_array_grib,
-            dataOut_gefs[:, 0].squeeze(),
-            dataOut_gefs[:, 3],
-            left=np.nan,
-            right=np.nan,
-        )
 
-    else:  # Use GEFS
-        for i in range(len(dataOut_gefs[0, :]) - 1):
-            gefsMinuteInterpolation[:, i + 1] = np.interp(
+        if "gefs" in sourceList:
+            gefsMinuteInterpolation[:, 3] = np.interp(
                 minute_array_grib,
                 dataOut_gefs[:, 0].squeeze(),
-                dataOut_gefs[:, i + 1],
+                dataOut_gefs[:, 3],
                 left=np.nan,
                 right=np.nan,
             )
+
+    else:  # Use GEFS
+        if "gefs" in sourceList:
+            for i in range(len(dataOut_gefs[0, :]) - 1):
+                gefsMinuteInterpolation[:, i + 1] = np.interp(
+                    minute_array_grib,
+                    dataOut_gefs[:, 0].squeeze(),
+                    dataOut_gefs[:, i + 1],
+                    left=np.nan,
+                    right=np.nan,
+                )
+
+        else:  # GFS Fallback
+            # This could be optimized by only interpolating the necessary columns
+            for i in range(len(dataOut_gfs[0, :]) - 1):
+                gfsMinuteInterpolation[:, i + 1] = np.interp(
+                    minute_array_grib,
+                    dataOut_gfs[:, 0].squeeze(),
+                    dataOut_gfs[:, i + 1],
+                    left=np.nan,
+                    right=np.nan,
+                )
 
     if "nbm" in sourceList:
         for i in [8, 12, 14, 15, 16, 17]:
@@ -2277,8 +2328,13 @@ async def PW_Forecast(
     # Use NBM where available
     if "nbm" in sourceList:
         InterPminute[:, 2] = nbmMinuteInterpolation[:, 12] * 0.01
-    else:
+    elif "gefs" in sourceList:
         InterPminute[:, 2] = gefsMinuteInterpolation[:, 1]
+    else:  # Missing (-999) fallback
+        InterPminute[:, 2] = np.ones(len(minute_array_grib)) * -999
+
+    # Less than 5% set to 0
+    InterPminute[InterPminute[:, 2] < 0.05, 2] = 0
 
     # Prep Intensity
     # Kind of complex, process:
@@ -2308,12 +2364,20 @@ async def PW_Forecast(
         InterPminute[:, 1] = hrrrSubHInterpolation[:, 7] * 3600 * prepIntensityUnit
     elif "nbm" in sourceList:
         InterPminute[:, 1] = nbmMinuteInterpolation[:, 8] * prepIntensityUnit
-    else:
+    elif "gefs" in sourceList:
         InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * 1 * prepIntensityUnit
+    else:  # GFS fallback
+        InterPminute[:, 1] = gfsMinuteInterpolation[:, 10] * 3600 * prepIntensityUnit
+
+    if "hrrrsubh" not in sourceList:
+        # Set intensity to zero if POP == 0
+        InterPminute[InterPminute[:, 2] == 0, 1] = 0
 
     # "precipIntensityError"
     if "gefs" in sourceList:
         InterPminute[:, 3] = gefsMinuteInterpolation[:, 3] * prepIntensityUnit
+    else:  # Missing
+        InterPminute[:, 3] = np.ones(len(minute_array_grib)) * -999
 
     # Precipitation Type
     # IF HRRR, use that, otherwise GEFS
@@ -2325,9 +2389,12 @@ async def PW_Forecast(
         InterTminute[:, 2] = nbmMinuteInterpolation[:, 17]
         InterTminute[:, 3] = nbmMinuteInterpolation[:, 15]
         InterTminute[:, 4] = nbmMinuteInterpolation[:, 14]
-    else:
+    elif "gefs" in sourceList:
         for i in [4, 5, 6, 7]:
             InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
+    else:  # GFS Fallback
+        for i in [12, 13, 14, 15]:
+            InterTminute[:, i - 11] = gfsMinuteInterpolation[:, i]
 
     # If all nan, set pchance to -999
     if np.any(np.isnan(InterTminute)):
@@ -2448,6 +2515,20 @@ async def PW_Forecast(
 
         # Put Nan's where they exist in the original data
         maxPchanceHour[np.isnan(InterThour[:, 1]), 2] = -999
+    else:  # GFS Fallback
+        InterThour = np.zeros(shape=(len(hour_array), 5))  # Type
+        for i in [12, 13, 14, 15]:
+            InterThour[:, i - 11] = GFS_Merged[:, i]
+
+        # 12 = Snow, 13 = Sleet, 14 = Freezing Rain, 15 = Rain
+
+        # Fix rounding issues
+        InterThour[InterThour < 0.01] = 0
+
+        maxPchanceHour[:, 2] = np.argmax(InterThour, axis=1)
+
+        # Put Nan's where they exist in the original data
+        maxPchanceHour[np.isnan(InterThour[:, 1]), 2] = -999
 
     # Intensity
     # NBM
@@ -2456,11 +2537,12 @@ async def PW_Forecast(
         prcipIntensityHour[:, 0] = NBM_Merged[:, 13]
     # HRRR
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-        prcipIntensityHour[:, 1] = HRRR_Merged[:, 9]
+        prcipIntensityHour[:, 1] = HRRR_Merged[:, 9] * 3600
     # GEFS
     if "gefs" in sourceList:
         prcipIntensityHour[:, 2] = GEFS_Merged[:, 2]
-
+    else:  # GFS Fallback
+        prcipIntensityHour[:, 2] = GFS_Merged[:, 10] * 3600
     # Take first non-NaN value
     InterPhour[:, 2] = (
         np.choose(np.argmin(np.isnan(prcipIntensityHour), axis=1), prcipIntensityHour.T)
@@ -2680,6 +2762,9 @@ async def PW_Forecast(
         0,
     )
 
+    # Set accumulation to zero if POP == 0
+    InterPhour[InterPhour[:, 3] == 0, 17] = 0
+
     ### Near Storm Distance
     if "gfs" in sourceList:
         InterPhour[:, 18] = np.maximum(GFS_Merged[:, 19] * visUnits, 0)
@@ -2791,7 +2876,7 @@ async def PW_Forecast(
 
     # Sleet
     # Calculate prep accumilation for current day before zeroing
-    dayZeroPrepSleet = InterPhour[:, 21].copy()
+    dayZeroPrepSleet = InterPhour[:, 23].copy()
     # Everything that isn't the current day
     dayZeroPrepSleet[hourlyDayIndex != 0] = 0
     # Everything after the request time
@@ -3231,7 +3316,7 @@ async def PW_Forecast(
                 "moonPhase": InterSday[idx, 19].round(2),
                 "precipIntensity": InterPday[idx, 2],
                 "precipIntensityMax": InterPdayMax[idx, 2],
-                "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 1]),
+                "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
                 "precipAccumulation": InterPdaySum[idx, 21]
                 + InterPdaySum[idx, 22]
                 + InterPdaySum[idx, 23],
@@ -3274,7 +3359,7 @@ async def PW_Forecast(
                     "moonPhase": InterSday[idx, 19].round(2),
                     "precipIntensity": InterPday[idx, 2],
                     "precipIntensityMax": InterPdayMax[idx, 2],
-                    "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 1]),
+                    "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
                     "precipProbability": InterPdayMax[idx, 3],
                     "precipAccumulation": InterPdaySum[idx, 21]
                     + InterPdaySum[idx, 22]
@@ -3325,7 +3410,7 @@ async def PW_Forecast(
                     "moonPhase": InterSday[idx, 19].round(2),
                     "precipIntensity": InterPday[idx, 2],
                     "precipIntensityMax": InterPdayMax[idx, 2],
-                    "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 1]),
+                    "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
                     "precipProbability": InterPdayMax[idx, 3],
                     "precipAccumulation": InterPdaySum[idx, 21]
                     + InterPdaySum[idx, 22]
@@ -3462,9 +3547,6 @@ async def PW_Forecast(
                     }
 
                     alertList.append(dict(alertDict))
-
-            alertSuccess = 1
-
         else:
             alertList = []
 
@@ -4010,7 +4092,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.5.1"
+        returnOBJ["flags"]["version"] = "V2.5.3"
 
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
@@ -4050,64 +4132,64 @@ def initialDataSync() -> None:
         download_if_newer(
             s3_bucket,
             "ForecastTar/SubH.zarr.zip",
-            "/ebs/SubH_TMP.zarr.zip",
-            "/tmp/SubH.zarr.dir",
+            "/tmp/SubH_TMP.zarr.zip",
+            "/tmp/SubH.zarr.prod.zip",
             True,
         )
         print("SubH Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar/HRRR_6H.zarr.zip",
-            "/ebs/HRRR_6H_TMP.zarr.zip",
-            "/tmp/HRRR_6H.zarr.dir",
+            "/tmp/HRRR_6H_TMP.zarr.zip",
+            "/tmp/HRRR_6H.zarr.prod.zip",
             True,
         )
         print("HRRR_6H Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar/GFS.zarr.zip",
-            "/ebs/GFS.zarr_TMP.zip",
-            "/tmp/GFS.zarr.dir",
+            "/tmp/GFS.zarr_TMP.zip",
+            "/tmp/GFS.zarr.prod.zip",
             True,
         )
         print("GFS Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar/NBM.zarr.zip",
-            "/ebs/NBM.zarr_TMP.zip",
-            "/tmp/NBM.zarr.dir",
+            "/tmp/NBM.zarr_TMP.zip",
+            "/tmp/NBM.zarr.prod.zip",
             True,
         )
         print("NBM Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar/NBM_Fire.zarr.zip",
-            "/ebs/NBM_Fire_TMP.zarr.zip",
-            "/tmp/NBM_Fire.zarr.dir",
+            "/tmp/NBM_Fire_TMP.zarr.zip",
+            "/tmp/NBM_Fire.zarr.prod.zip",
             True,
         )
         print("NBM_Fire Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar/GEFS.zarr.zip",
-            "/ebs/GEFS_TMP.zarr.zip",
-            "/tmp/GEFS.zarr.dir",
+            "/tmp/GEFS_TMP.zarr.zip",
+            "/tmp/GEFS.zarr.prod.zip",
             True,
         )
         print("GEFS  Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar/HRRR.zarr.zip",
-            "/ebs/HRRR_TMP.zarr.zip",
-            "/tmp/HRRR.zarr.dir",
+            "/tmp/HRRR_TMP.zarr.zip",
+            "/tmp/HRRR.zarr.prod.zip",
             True,
         )
         print("HRRR  Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar/NWS_Alerts.zarr.zip",
-            "/ebs/NWS_Alerts_TMP.zarr.zip",
-            "/tmp/NWS_Alerts.zarr.dir",
+            "/tmp/NWS_Alerts_TMP.zarr.zip",
+            "/tmp/NWS_Alerts.zarr.prod.zip",
             True,
         )
         print("Alerts Download!")
@@ -4116,8 +4198,8 @@ def initialDataSync() -> None:
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/ETOPO_DA_C.zarr.zip",
-                "/ebs/ETOPO_DA_C_TMP.zarr.zip",
-                "/tmp/ETOPO_DA_C.zarr.dir",
+                "/tmp/ETOPO_DA_C_TMP.zarr.zip",
+                "/tmp/ETOPO_DA_C.zarr.prod.zip",
                 True,
             )
             print("ETOPO Download!")
@@ -4149,64 +4231,64 @@ def dataSync() -> None:
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/SubH.zarr.zip",
-                "/ebs/SubH_TMP.zarr.zip",
-                "/tmp/SubH.zarr.dir",
+                "/tmp/SubH_TMP.zarr.zip",
+                "/tmp/SubH.zarr.prod.zip",
                 False,
             )
             logger.info("SubH Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/HRRR_6H.zarr.zip",
-                "/ebs/HRRR_6H_TMP.zarr.zip",
-                "/tmp/HRRR_6H.zarr.dir",
+                "/tmp/HRRR_6H_TMP.zarr.zip",
+                "/tmp/HRRR_6H.zarr.prod.zip",
                 False,
             )
             logger.info("HRRR_6H Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/GFS.zarr.zip",
-                "/ebs/GFS.zarr_TMP.zip",
-                "/tmp/GFS.zarr.dir",
+                "/tmp/GFS.zarr_TMP.zip",
+                "/tmp/GFS.zarr.prod.zip",
                 False,
             )
             logger.info("GFS Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/NBM.zarr.zip",
-                "/ebs/NBM.zarr_TMP.zip",
-                "/tmp/NBM.zarr.dir",
+                "/tmp/NBM.zarr_TMP.zip",
+                "/tmp/NBM.zarr.prod.zip",
                 False,
             )
             logger.info("NBM Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/NBM_Fire.zarr.zip",
-                "/ebs/NBM_Fire_TMP.zarr.zip",
-                "/tmp/NBM_Fire.zarr.dir",
+                "/tmp/NBM_Fire_TMP.zarr.zip",
+                "/tmp/NBM_Fire.zarr.prod.zip",
                 False,
             )
             logger.info("NBM_Fire Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/GEFS.zarr.zip",
-                "/ebs/GEFS_TMP.zarr.zip",
-                "/tmp/GEFS.zarr.dir",
+                "/tmp/GEFS_TMP.zarr.zip",
+                "/tmp/GEFS.zarr.prod.zip",
                 False,
             )
             logger.info("GEFS  Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/HRRR.zarr.zip",
-                "/ebs/HRRR_TMP.zarr.zip",
-                "/tmp/HRRR.zarr.dir",
+                "/tmp/HRRR_TMP.zarr.zip",
+                "/tmp/HRRR.zarr.prod.zip",
                 False,
             )
             logger.info("HRRR  Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar/NWS_Alerts.zarr.zip",
-                "/ebs/NWS_Alerts_TMP.zarr.zip",
-                "/tmp/NWS_Alerts.zarr.dir",
+                "/tmp/NWS_Alerts_TMP.zarr.zip",
+                "/tmp/NWS_Alerts.zarr.prod.zip",
                 False,
             )
             logger.info("Alerts Download!")
@@ -4215,8 +4297,8 @@ def dataSync() -> None:
                 download_if_newer(
                     s3_bucket,
                     "ForecastTar/ETOPO_DA_C.zarr.zip",
-                    "/ebs/ETOPO_DA_C_TMP.zarr.zip",
-                    "/tmp/ETOPO_DA_C.zarr.dir",
+                    "/tmp/ETOPO_DA_C_TMP.zarr.zip",
+                    "/tmp/ETOPO_DA_C.zarr.prod.zip",
                     False,
                 )
                 logger.info("ETOPO Download!")
