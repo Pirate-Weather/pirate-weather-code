@@ -27,8 +27,7 @@ RUN apt update && \
                        pip \
                        cmake \
                        m4 \
-                       python3.11-venv \
-                       git \ 
+                       git \
                        libnetcdf-dev \
                        libhdf5-dev \
 					   libgdal-dev					   
