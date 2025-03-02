@@ -55,6 +55,9 @@ RUN make
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
+# Copy the requirements file
+COPY requirements-ingest.txt requirements-ingest.txt
+
 # Install python libs
 RUN python3 -m pip install -r requirements-ingest.txt
 
