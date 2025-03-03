@@ -1,0 +1,50 @@
+name: Sanity Build
+
+on:
+  pull_request:
+    branches: ['dev']
+  push:
+    branches-ignore: ['dev']
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  ingest:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5.7.0
+        with:
+          images: ghcr.io/complianceascode/pirate-ingest
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: Docker
+          file: ./Docker/pirate-ingest-dockerfile
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  api:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5.7.0
+        with:
+          images: ghcr.io/complianceascode/pirate-api
+      - name: Build
+        uses: docker/build-push-action@v6.15.0
+        with:
+          context: Docker
+          file: ./Docker/pirate-api-dockerfile
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

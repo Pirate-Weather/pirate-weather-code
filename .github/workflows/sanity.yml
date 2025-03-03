@@ -1,9 +1,8 @@
-name: Sanity Build
+name: Build and push to AWS
 
 on:
-  pull_request:
   push:
-    branches: ['*']
+    branches: ['dev']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.run_id }}
@@ -63,5 +62,5 @@ jobs:
           REPOSITORY: pirate-alpine-zarr
           IMAGE_TAG: dev
         run: |
-          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-api-dockerfile .     
+          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-api-dockerfile .
           docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
