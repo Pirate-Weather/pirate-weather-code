@@ -6,14 +6,14 @@ RUN apt update && \
                     unzip \
                     rsync \
 					git
-         
-COPY requirements-api.txt requirements-api.txt
-                    
+                            
 # Set the working directory inside the container
 WORKDIR /app
 
-# Copy and install Python dependencies
-COPY requirements-api.txt ./
+# Copy the requirements file from the Docker directory into the image
+COPY Docker/requirements-api.txt ./
+
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements-api.txt
 
 # Copy the run scripts from the API directory (relative to the build context)
