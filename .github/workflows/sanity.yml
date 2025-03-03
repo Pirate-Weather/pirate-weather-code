@@ -35,7 +35,7 @@ jobs:
           REPOSITORY: pirate-wgrib-python-arm
           IMAGE_TAG: dev
         run: |
-          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f ./Docker/pirate-ingest-dockerfile Docker
+          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-api-dockerfile .          
           docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
 
   api:
@@ -63,5 +63,5 @@ jobs:
           REPOSITORY: pirate-alpine-zarr
           IMAGE_TAG: dev
         run: |
-          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f ./Docker/pirate-api-dockerfile Docker
+          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-api-dockerfile .     
           docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
