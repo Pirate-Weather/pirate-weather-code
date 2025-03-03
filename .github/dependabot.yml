@@ -38,7 +38,7 @@ updates:
         - "patch"
     open-pull-requests-limit: 100
   - package-ecosystem: "github-actions"
-    directory: "/
+    directory: "/"
     schedule:
       interval: "weekly"
     groups:
