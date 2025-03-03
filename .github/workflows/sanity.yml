@@ -1,9 +1,8 @@
-name: Sanity Build
+name: Build and push to AWS
 
 on:
-  pull_request:
   push:
-    branches: ['*']
+    branches: ['dev']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.run_id }}
