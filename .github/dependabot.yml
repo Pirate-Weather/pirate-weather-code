@@ -6,7 +6,7 @@
 version: 2
 updates:
   - package-ecosystem: "pip" # See documentation for possible values
-    directory: "/" # Location of package manifests
+    directory: "/requirements-lint.txt" # Location of package manifests
     schedule:
       interval: "weekly"
     assignees:
@@ -17,7 +17,7 @@ updates:
         - "minor"         # an array, possible values being minor, patch and major
         - "patch"
     open-pull-requests-limit: 100
-  - package-ecosystem: "github-actions"
+  - package-ecosystem: "pip"
     directory: "/Docker/requirements-api.txt"
     schedule:
       interval: "weekly"
@@ -27,8 +27,8 @@ updates:
         - "minor"         # an array, possible values being minor, patch and major
         - "patch"
     open-pull-requests-limit: 100
-  - package-ecosystem: "github-actions"
-    directory: "Docker/requirements-ingest.txt"
+  - package-ecosystem: "pip"
+    directory: "/Docker/requirements-ingest.txt"
     schedule:
       interval: "weekly"
     groups:
@@ -38,7 +38,7 @@ updates:
         - "patch"
     open-pull-requests-limit: 100
   - package-ecosystem: "github-actions"
-    directory: "/requirements-lint.txt"
+    directory: "/
     schedule:
       interval: "weekly"
     groups:
