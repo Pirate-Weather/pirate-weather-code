@@ -2,8 +2,9 @@ name: Sanity Build
 
 on:
   pull_request:
+    branches: ['dev']
   push:
-    branches: ['*']
+    branches: ['main']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.run_id }}
@@ -15,53 +16,35 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4 # More information on this action can be found below in the 'AWS Credentials' section
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5.7.0
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}          
-          aws-region: us-east-1
-
-      - name: Login to Amazon ECR Public
-        id: login-ecr-public
-        uses: aws-actions/amazon-ecr-login@v2
+          images: ghcr.io/complianceascode/pirate-ingest
+      - name: Build and push
+        uses: docker/build-push-action@v6
         with:
-          registry-type: public
-      - name: Build, tag, and push docker image to Amazon ECR Public
-        env:
-          REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
-          REGISTRY_ALIAS: j9v4j3c7  # Replace with your registry alias
-          REPOSITORY: pirate-wgrib-python-arm
-          IMAGE_TAG: dev
-        run: |
-          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f ./Docker/pirate-ingest-dockerfile Docker
-          docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+          context: Docker
+          file: ./Docker/pirate-ingest-dockerfile
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
   api:
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4 # More information on this action can be found below in the 'AWS Credentials' section
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5.7.0
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}          
-          aws-region: us-east-1
-
-      - name: Login to Amazon ECR Public
-        id: login-ecr-public
-        uses: aws-actions/amazon-ecr-login@v2
+          images: ghcr.io/complianceascode/pirate-api
+      - name: Build
+        uses: docker/build-push-action@v6.15.0
         with:
-          registry-type: public
-      - name: Build, tag, and push docker image to Amazon ECR Public
-        env:
-          REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
-          REGISTRY_ALIAS: j9v4j3c7  # Replace with your registry alias
-          REPOSITORY: pirate-alpine-zarr
-          IMAGE_TAG: dev
-        run: |
-          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f ./Docker/pirate-api-dockerfile Docker
-          docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+          context: Docker
+          file: ./Docker/pirate-api-dockerfile
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
