@@ -6,31 +6,11 @@
 version: 2
 updates:
   - package-ecosystem: "pip" # See documentation for possible values
-    directory: "/requirements-lint.txt" # Location of package manifests
+    directory: "/" # Location of package manifests
     schedule:
       interval: "weekly"
     assignees:
       - "alexander0042"
-    groups:
-      non-major-versions: # the name of the group
-        update-types:     # the key used to specify the semver level to include in the group
-        - "minor"         # an array, possible values being minor, patch and major
-        - "patch"
-    open-pull-requests-limit: 100
-  - package-ecosystem: "pip"
-    directory: "/Docker/requirements-api.txt"
-    schedule:
-      interval: "weekly"
-    groups:
-      non-major-versions: # the name of the group
-        update-types:     # the key used to specify the semver level to include in the group
-        - "minor"         # an array, possible values being minor, patch and major
-        - "patch"
-    open-pull-requests-limit: 100
-  - package-ecosystem: "pip"
-    directory: "/Docker/requirements-ingest.txt"
-    schedule:
-      interval: "weekly"
     groups:
       non-major-versions: # the name of the group
         update-types:     # the key used to specify the semver level to include in the group
