@@ -15,35 +15,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5.7.0
-        with:
-          images: ghcr.io/complianceascode/pirate-ingest
+      - name: AWS ECR Login
+        uses: aws-actions/amazon-ecr-login@v1
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: Docker
           file: ./Docker/pirate-ingest-dockerfile
           push: false
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/pirate-ingest:dev
 
   api:
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5.7.0
-        with:
-          images: ghcr.io/complianceascode/pirate-api
-      - name: Build
+      - name: AWS ECR Login
+        uses: aws-actions/amazon-ecr-login@v1
+      - name: Build and push
         uses: docker/build-push-action@v6.15.0
         with:
           context: Docker
           file: ./Docker/pirate-api-dockerfile
-          push: false
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: true
+          tags: public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:dev
