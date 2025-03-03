@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: ['dev']
   push:
-    branches: ['!dev']
+    branches-ignore: ['dev']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.run_id }}
