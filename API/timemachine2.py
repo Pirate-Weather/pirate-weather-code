@@ -371,7 +371,7 @@ async def TimeMachine(
 
         for v in varList_inst:
             dataDict["VAR_" + v] = np.hstack(
-                (resultsDict["A_" + v], resultsDict["B_" + v])
+                (resultsDict["A_VAR_" + v], resultsDict["B_VAR_" + v])
             )
 
     #### Accum/ Flux

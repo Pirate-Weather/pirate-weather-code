@@ -83,13 +83,18 @@ def calculate_text(
         heavySnowThresh = heavySnowThresh * 24
         lightSleetThresh = lightSleetThresh * 24
         midSleetThresh = midSleetThresh * 24
-        heavySleetThresh = heavySleetThresh * 24
+        heavyaSleetThresh = heavySleetThresh * 24
 
         # Get key values from the hourObject
     precipType = hourObject["precipType"]
     cloudCover = hourObject["cloudCover"]
     wind = hourObject["windSpeed"]
-    humidity = hourObject["humidity"]
+
+    # If time machine, no humidity data, so set to 0
+    if "humidity" not in hourObject:
+        humidity = 0
+    else:
+        humidity = hourObject["humidity"]
 
     if type == "current":
         pop = 1
