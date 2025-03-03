@@ -158,7 +158,6 @@ def find_largest_integer_directory(parent_dir, key_string, initialRun):
 
     for entry in os.listdir(parent_dir):
         entry_path = os.path.join(parent_dir, entry)
-        print(entry_path)
         if (key_string in entry) & ("TMP" not in entry):
             old_dirs.append(entry)
             try:

@@ -254,6 +254,7 @@ async def TimeMachine(
                         + ".parq",
                         "remote_protocol": "s3",
                         "remote_options": {"anon": True},
+                        "asynchronous": False
                     },
                 )[varName][tIDX_start:, x, y]
             )
@@ -271,6 +272,7 @@ async def TimeMachine(
                         + ".parq",
                         "remote_protocol": "s3",
                         "remote_options": {"anon": True},
+                        "asynchronous": False
                     },
                 )[varName][tIDX_start:tIDX_end, x, y]
             )
@@ -298,6 +300,7 @@ async def TimeMachine(
                         + ".parq",
                         "remote_protocol": "s3",
                         "remote_options": {"anon": True},
+                        "asynchronous": False
                     },
                 )[varName][tIDX_start:, :, x, y]
             )
@@ -315,6 +318,7 @@ async def TimeMachine(
                         + ".parq",
                         "remote_protocol": "s3",
                         "remote_options": {"anon": True},
+                        "asynchronous": False
                     },
                 )[varName][tIDX_start:tIDX_end, :, x, y]
             )
@@ -446,6 +450,7 @@ async def TimeMachine(
                     "fo": f,
                     "remote_protocol": "s3",
                     "remote_options": {"anon": True},
+                    "asynchronous": False,
                 },
             )
 
