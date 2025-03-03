@@ -83,7 +83,7 @@ def calculate_text(
         heavySnowThresh = heavySnowThresh * 24
         lightSleetThresh = lightSleetThresh * 24
         midSleetThresh = midSleetThresh * 24
-        heavyaSleetThresh = heavySleetThresh * 24
+        heavySleetThresh = heavySleetThresh * 24
 
         # Get key values from the hourObject
     precipType = hourObject["precipType"]
