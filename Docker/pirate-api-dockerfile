@@ -17,7 +17,9 @@ COPY Docker/requirements-api.txt ./
 RUN pip install --no-cache-dir -r requirements-api.txt
 
 # Copy the run scripts from the API directory (relative to the build context)
-COPY API/ ./API/
+COPY API/ ./
 
+ENTRYPOINT ["uvicorn"]
 
-ENTRYPOINT ["python3"]
+# Set the default command
+CMD ["responseLocal:app", "--host", "0.0.0.0"]
