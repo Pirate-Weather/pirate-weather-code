@@ -143,7 +143,9 @@ def calculate_simple_day_text(
     icePrep,
     type,
 ):
-    cText = cIcon = precipText = precipIcon = windText = secondary = snowText = snowSentence = None
+    cText = cIcon = precipText = precipIcon = windText = secondary = snowText = (
+        snowSentence
+    ) = None
     precipType = hourObject["precipType"]
 
     if "precipProbability" in hourObject:
