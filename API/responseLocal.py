@@ -950,10 +950,19 @@ async def PW_Forecast(
 
     version = float(version)
 
+
+
+    # Set up translations
     if not lang:
         lang = "en"
 
-    # Set up translations
+    # Check if langugage is supported
+    if lang not in Translations:
+        # Throw an error
+        raise HTTPException(
+            status_code=400, detail="Language Not Supported"
+        )
+
     translation = Translations[lang]
     if not translation:
         translation = Translations["en"]
@@ -4091,7 +4100,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.5.4c"
+        returnOBJ["flags"]["version"] = "V2.5.4d"
 
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
