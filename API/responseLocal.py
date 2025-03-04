@@ -25,6 +25,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import ORJSONResponse
 from fastapi_utils.tasks import repeat_every
 from PirateText import calculate_text
+from PirateSimpleDaily import calculate_simple_day_text
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
@@ -3451,7 +3452,7 @@ async def PW_Forecast(
 
         try:
             # Update the text
-            dayText, dayIcon = calculate_text(
+            dayText, dayIcon = calculate_simple_day_text(
                 dayObject,
                 prepAccumUnit,
                 visUnits,
@@ -3462,7 +3463,6 @@ async def PW_Forecast(
                 InterPdaySum[idx, 22],
                 InterPdaySum[idx, 23],
                 "day",
-                mode="title",
             )
             dayObject["summary"] = translation.translate(dayText)
             dayObject["icon"] = dayIcon
