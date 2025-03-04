@@ -950,8 +950,6 @@ async def PW_Forecast(
 
     version = float(version)
 
-
-
     # Set up translations
     if not lang:
         lang = "en"
@@ -959,9 +957,7 @@ async def PW_Forecast(
     # Check if langugage is supported
     if lang not in Translations:
         # Throw an error
-        raise HTTPException(
-            status_code=400, detail="Language Not Supported"
-        )
+        raise HTTPException(status_code=400, detail="Language Not Supported")
 
     translation = Translations[lang]
     if not translation:
