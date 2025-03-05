@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
-import zarr
+import zarr.storage
 from herbie import FastHerbie, HerbieLatest, Path
 from numcodecs import BitRound, Blosc
 from rechunker import rechunk
@@ -668,7 +668,7 @@ for i in range(hisPeriod, 0, -6):
 # %% Map Blocks Approach
 
 # Create a zarr backed dask array
-zarr_store = zarr.DirectoryStore("/tmp/GFS_UnChunk.zarr")
+zarr_store = zarr.storage.LocalStore("/tmp/GFS_UnChunk.zarr")
 
 compressor = Blosc(cname="lz4", clevel=1)
 filters = [BitRound(keepbits=12)]

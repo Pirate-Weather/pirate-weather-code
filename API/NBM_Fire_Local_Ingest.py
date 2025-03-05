@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
-import zarr
+import zarr.storage
 from herbie import FastHerbie, Herbie, Path
 from numcodecs import BitRound, Blosc
 from rechunker import rechunk
@@ -490,7 +490,7 @@ for i in range(hisPeriod, 1, -6):
         zarrStore = s3fs.S3Map(root=s3_path, s3=s3, create=True)
     else:
         # Create local Zarr store
-        zarrStore = zarr.DirectoryStore(local_path)
+        zarrStore = zarr.storage.LocalStore(local_path)
 
     xarray_his_wgrib.to_zarr(
         store=zarrStore, mode="w", consolidated=True, encoding=encoding
@@ -512,7 +512,7 @@ for i in range(hisPeriod, 1, -6):
 # %% Merge the historic and forecast datasets and then squash using dask
 
 # Create a zarr backed dask array
-zarr_store = zarr.DirectoryStore(merge_process_dir + "/NBM_Fire_UnChunk.zarr")
+zarr_store = zarr.storage.LocalStore(merge_process_dir + "/NBM_Fire_UnChunk.zarr")
 
 compressor = Blosc(cname="zstd", clevel=3)
 filters = [BitRound(keepbits=12)]
