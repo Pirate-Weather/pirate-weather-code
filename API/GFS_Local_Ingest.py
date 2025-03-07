@@ -17,6 +17,7 @@ import pandas as pd
 import s3fs
 import xarray as xr
 import zarr
+import zarr.storage
 from herbie import FastHerbie, HerbieLatest, Path
 from numcodecs import BitRound, Blosc
 from rechunker import rechunk
@@ -696,7 +697,7 @@ for i in range(hisPeriod, 0, -6):
         zarrStore = s3fs.S3Map(root=s3_path, s3=s3, create=True)
     else:
         # Create local Zarr store
-        zarrStore = zarr.DirectoryStore(local_path)
+        zarrStore = zarr.storage.LocalStore(local_path)
 
     # Save the dataset with compression and filters for all variables
     # Use the same encoding as last time but with larger chuncks to speed up read times
@@ -727,7 +728,7 @@ for i in range(hisPeriod, 0, -6):
 # %% Map Blocks Approach
 
 # Create a zarr backed dask array
-zarr_store = zarr.DirectoryStore(merge_process_dir + "/GFS_UnChunk.zarr")
+zarr_store = zarr.storage.LocalStore(merge_process_dir + "/GFS_UnChunk.zarr")
 
 compressor = Blosc(cname="lz4", clevel=1)
 filters = [BitRound(keepbits=12)]
