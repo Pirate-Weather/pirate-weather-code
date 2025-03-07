@@ -3,7 +3,7 @@ timezonefinder==6.5.8
 pytz==2025.1
 zarr[remote]==3.0.4
 ujson==5.10.0
-fastapi[standard]==0.115.8
+fastapi[standard]==0.115.11
 fastapi-utils==0.8.0
 scipy==1.15.2
 orjson==3.10.15
@@ -16,4 +16,4 @@ pandas==2.2.3
 fastparquet==2024.11.0
 pirateweather-translations==1.0.0
 s3fs==2025.2.0
-aiobotocore[boto3]==2.20.0
+aiobotocore[boto3]==2.21.0

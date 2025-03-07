@@ -254,6 +254,7 @@ async def TimeMachine(
                         + ".parq",
                         "remote_protocol": "s3",
                         "remote_options": {"anon": True},
+                        "asynchronous": False,
                     },
                 )[varName][tIDX_start:, x, y]
             )
@@ -271,6 +272,7 @@ async def TimeMachine(
                         + ".parq",
                         "remote_protocol": "s3",
                         "remote_options": {"anon": True},
+                        "asynchronous": False,
                     },
                 )[varName][tIDX_start:tIDX_end, x, y]
             )
@@ -298,6 +300,7 @@ async def TimeMachine(
                         + ".parq",
                         "remote_protocol": "s3",
                         "remote_options": {"anon": True},
+                        "asynchronous": False,
                     },
                 )[varName][tIDX_start:, :, x, y]
             )
@@ -315,6 +318,7 @@ async def TimeMachine(
                         + ".parq",
                         "remote_protocol": "s3",
                         "remote_options": {"anon": True},
+                        "asynchronous": False,
                     },
                 )[varName][tIDX_start:tIDX_end, :, x, y]
             )
@@ -367,7 +371,7 @@ async def TimeMachine(
 
         for v in varList_inst:
             dataDict["VAR_" + v] = np.hstack(
-                (resultsDict["A_" + v], resultsDict["B_" + v])
+                (resultsDict["A_VAR_" + v], resultsDict["B_VAR_" + v])
             )
 
     #### Accum/ Flux
@@ -446,6 +450,7 @@ async def TimeMachine(
                     "fo": f,
                     "remote_protocol": "s3",
                     "remote_options": {"anon": True},
+                    "asynchronous": False,
                 },
             )
 
@@ -900,7 +905,7 @@ async def TimeMachine(
         returnOBJ["flags"]["sources"] = "ERA5"
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.5.3"
+        returnOBJ["flags"]["version"] = "V2.5.4"
         returnOBJ["flags"]["sourceIDX"] = {"x": y, "y": x}
         returnOBJ["flags"]["processTime"] = (
             datetime.datetime.utcnow() - T_Start

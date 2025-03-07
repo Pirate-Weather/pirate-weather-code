@@ -89,7 +89,12 @@ def calculate_text(
     precipType = hourObject["precipType"]
     cloudCover = hourObject["cloudCover"]
     wind = hourObject["windSpeed"]
-    humidity = hourObject["humidity"]
+
+    # If time machine, no humidity data, so set to 0
+    if "humidity" not in hourObject:
+        humidity = 0
+    else:
+        humidity = hourObject["humidity"]
 
     if type == "current":
         pop = 1

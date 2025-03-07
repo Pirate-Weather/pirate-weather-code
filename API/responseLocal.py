@@ -157,8 +157,7 @@ def find_largest_integer_directory(parent_dir, key_string, initialRun):
     STAGE = os.environ.get("STAGE", "PROD")
 
     for entry in os.listdir(parent_dir):
-        entry_path = os.path.join(parent_dir, entry)
-        print(entry_path)
+        # entry_path = os.path.join(parent_dir, entry)
         if (key_string in entry) & ("TMP" not in entry):
             old_dirs.append(entry)
             try:
@@ -951,10 +950,15 @@ async def PW_Forecast(
 
     version = float(version)
 
+    # Set up translations
     if not lang:
         lang = "en"
 
-    # Set up translations
+    # Check if langugage is supported
+    if lang not in Translations:
+        # Throw an error
+        raise HTTPException(status_code=400, detail="Language Not Supported")
+
     translation = Translations[lang]
     if not translation:
         translation = Translations["en"]
@@ -4092,7 +4096,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.5.3"
+        returnOBJ["flags"]["version"] = "V2.5.4"
 
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
