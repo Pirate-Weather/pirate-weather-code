@@ -4,7 +4,7 @@ import datetime
 from PirateTextHelper import Most_Common
 from itertools import groupby
 from operator import itemgetter
-from PirateTextHelper import calculate_precip_text
+from PirateTextHelper import calculate_precip_text, calculate_thunderstorm_text
 
 
 def calculate_summary_text(
@@ -27,12 +27,12 @@ def calculate_summary_text(
     - cIcon (str): The icon representing the conditions for the week.
     """
 
-    wIcon = None
-    wText = None
+    wIcon = wText = cIcon = thuText = None
     wWeekend = False
     dayIndexes = []
     days = []
-    cIcon = None
+    maxCape = maxLiftedIndex = -999
+    numThunderstormDays = 0
 
     # Loop through each index in the precipitation array
     for day in precipitation:
@@ -41,9 +41,25 @@ def calculate_summary_text(
 
         # If an icon does not exist then set it. Otherwise if already set, check if the icons are the same and if not use the mixed-precipitation text
         if not wIcon:
-            wIcon = day[2]
-        elif wIcon != day[2] and wIcon != "mixed-precipitation":
+            wIcon = day[2]["precipType"]
+        elif wIcon != day[2]["precipType"] and wIcon != "mixed-precipitation":
             wIcon = "mixed-precipitation"
+
+        # Calculate the maximum cape for the week
+        if maxCape == -999 and day[2]["cape"] != -999:
+            maxCape = day[2]["cape"]
+        elif maxCape != -999 and day[2]["cape"] > maxCape:
+            maxCape = day[2]["cape"]
+
+        # Calculate the maximum lifted index for the week
+        if maxLiftedIndex == -999 and day[2]["liftedIndex"] != -999:
+            maxLiftedIndex = day[2]["liftedIndex"]
+        elif maxLiftedIndex != -999 and day[2]["liftedIndex"] > maxLiftedIndex:
+            maxLiftedIndex = day[2]["liftedIndex"]
+
+        # Calculate the number of days with thunderstorms forecasted
+        if day[2]["icon"] == "thunderstorm":
+            numThunderstormDays += 1
 
     # Create a list of consecutive days so we can use the through text instead of multiple ands
     for k, g in groupby(enumerate(dayIndexes), lambda ix: ix[0] - ix[1]):
@@ -65,7 +81,19 @@ def calculate_summary_text(
             "summary",
         )
     else:
-        cIcon = "sleet"
+        cIcon = "mixed"
+
+    # If there are any days with thunderstorms occurring then calculate the text
+    if numThunderstormDays > 0:
+        thuText = calculate_thunderstorm_text(maxLiftedIndex, maxCape, "summary")
+
+    # If more than half the days with precipitation show thurnderstorms then set the icon to thunderstorm and add it in front of the precipitation text
+    if thuText is not None and numThunderstormDays >= (len(precipitation) / 2):
+        cIcon = "thunderstorm"
+        wIcon = ["and", thuText, wIcon]
+    # Otherwise show it after the text and use the possible text instead
+    elif thuText is not None:
+        wIcon = ["and", wIcon, "possible-thunderstorm"]
 
     if len(precipitation) == 2:
         if (precipitation[0][1] == "saturday" and precipitation[1][1] == "sunday") or (
@@ -219,10 +247,11 @@ def calculate_precip_summary(
         # If there has been no precipitation use the no precipitation text.
         precipSummary = ["for-week", "no-precipitation"]
         # If there has been any fog forecast during the week show that icon, then the wind icon otherwise use the most common icon during the week
+
         if "fog" in icons:
             cIcon = "fog"
         elif "dangerous-wind" in icons:
-            cIcon = "dangerous-wind"
+            cIcon = "dangerous-windy"
         elif "wind" in icons:
             cIcon = "wind"
         elif "breezy" in icons:
@@ -234,7 +263,7 @@ def calculate_precip_summary(
         text, cIcon = calculate_precip_text(
             avgIntensity,
             intensityUnit,
-            precipitationDays[0][2],
+            precipitationDays[0][2]["precipType"],
             "week",
             maxIntensity,
             maxIntensity,
@@ -290,7 +319,7 @@ def calculate_precip_summary(
             ]
         else:
             # If the types are not the same then set the icon to sleet and use the mixed precipitation text (as is how Dark Sky did it)
-            cIcon = "sleet"
+            cIcon = "mixed"
             precipSummary = ["for-week", "mixed-precipitation"]
 
     return precipSummary, cIcon
@@ -358,7 +387,7 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
         ]
 
 
-def calculate_weekly_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
+def calculate_weeky_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
     """
     Calculates the weekly summary given an array of weekdays
 
@@ -404,43 +433,19 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
         ):
             # Sets that there has been precipitation during the week
             precipitation = True
-            precipitationDays.append([idx, weekday, day["precipType"]])
+            precipitationDays.append([idx, weekday, day])
             avgIntensity += intensityUnit * day["precipIntensityMax"]
             avgPop += day["precipProbability"]
             if maxIntensity == 0:
                 maxIntensity = day["precipIntensityMax"]
             elif day["precipIntensityMax"] > maxIntensity:
                 maxIntensity = day["precipIntensityMax"]
-        elif day["precipType"] == "rain" and day["precipAccumulation"] >= (
+        elif day["precipType"] != "snow" and day["precipAccumulation"] >= (
             1.0 * intensityUnit
         ):
             # Sets that there has been precipitation during the week
             precipitation = True
-            precipitationDays.append([idx, weekday, day["precipType"]])
-            avgIntensity += intensityUnit * day["precipIntensityMax"]
-            avgPop += day["precipProbability"]
-            if maxIntensity == 0:
-                maxIntensity = day["precipIntensityMax"]
-            elif day["precipIntensityMax"] > maxIntensity:
-                maxIntensity = day["precipIntensityMax"]
-        elif day["precipType"] == "sleet" and day["precipAccumulation"] >= (
-            1.0 * intensityUnit
-        ):
-            # Sets that there has been precipitation during the week
-            precipitation = True
-            precipitationDays.append([idx, weekday, day["precipType"]])
-            avgIntensity += intensityUnit * day["precipIntensityMax"]
-            avgPop += day["precipProbability"]
-            if maxIntensity == 0:
-                maxIntensity = day["precipIntensityMax"]
-            elif day["precipIntensityMax"] > maxIntensity:
-                maxIntensity = day["precipIntensityMax"]
-        elif day["precipType"] == "none" and day["precipAccumulation"] >= (
-            1.0 * intensityUnit
-        ):
-            # Sets that there has been precipitation during the week
-            precipitation = True
-            precipitationDays.append([idx, weekday, "precipitation"])
+            precipitationDays.append([idx, weekday, day])
             avgIntensity += intensityUnit * day["precipIntensityMax"]
             avgPop += day["precipProbability"]
             if maxIntensity == 0:

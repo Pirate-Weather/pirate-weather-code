@@ -140,7 +140,7 @@ def calculate_precip_text(
             or (prepIntensity > 0 and prepIntensity < snowIconThresholdHour)
         )
         or (
-            prepType == "sleet"
+            (prepType == "sleet" or prepType == "ice" or prepType == "hail")
             and icePrep > 0
             and icePrep < precipIconThreshold
             or (prepIntensity > 0 and prepIntensity < precipIconThresholdHour)
@@ -161,6 +161,8 @@ def calculate_precip_text(
     ):
         if prepType == "none":
             cIcon = "rain"  # Fallback icon
+        elif prepType == "ice":
+            cIcon = "freezing-rain"
         else:
             cIcon = prepType
 
@@ -275,6 +277,46 @@ def calculate_precip_text(
             and icePrep >= heavyPrecipThresh
         ):
             cText = ["and", "medium-sleet", "possible-heavy-sleet"]
+
+    elif icePrep > 0 and prepIntensity > 0 and prepType == "ice":
+        if prepIntensity < lightPrecipThresh:
+            cText = possiblePrecip + "very-light-freezing-rain"
+            if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                cIcon = "possible-freezing-rain-day"
+            elif icon == "pirate" and possiblePrecip == "possible-" and not isDayTime:
+                cIcon = "possible-freezing-rain-night"
+            elif icon == "pirate":
+                cIcon = "freezing-drizzle"
+        elif prepIntensity >= lightPrecipThresh and prepIntensity < midPrecipThresh:
+            cText = possiblePrecip + "light-freezing-rain"
+            if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                cIcon = "possible-freezing-rain-day"
+            elif icon == "pirate" and possiblePrecip == "possible-" and not isDayTime:
+                cIcon = "possible-freezing-rain-night"
+            elif icon == "pirate":
+                cIcon = "light-freezing-rain"
+        elif prepIntensity >= midPrecipThresh and prepIntensity < heavyPrecipThresh:
+            cText = possiblePrecip + "medium-freezing-rain"
+            if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                cIcon = "possible-freezing-rain-day"
+            elif icon == "pirate" and possiblePrecip == "possible-" and not isDayTime:
+                cIcon = "possible-freezing-rain-night"
+        else:
+            cText = possiblePrecip + "heavy-rain"
+            if icon == "pirate" and possiblePrecip == "possible-" and isDayTime:
+                cIcon = "possible-freezing-rain-day"
+            elif icon == "pirate" and possiblePrecip == "possible-" and not isDayTime:
+                cIcon = "possible-freezing-rain-night"
+            elif icon == "pirate":
+                cIcon = "heavy-freezing-rain"
+        if (
+            (type == "minute" or type == "week")
+            and prepIntensity < heavyPrecipThresh
+            and rainPrep >= heavyPrecipThresh
+        ):
+            cText = ["and", "medium-freezing-rain", "possible-heavy-freezing-rain"]
+    elif icePrep > 0 and prepIntensity > 0 and prepType == "hail":
+        cText = possiblePrecip + "hail"
     elif (
         rainPrep > 0 or snowPrep > 0 or icePrep > 0 or prepIntensity > 0
     ) and prepType == "none":
@@ -315,12 +357,12 @@ def calculate_wind_text(wind, windUnit, icon="darksky", mode="both"):
     Parameters:
     - wind (float) -  The wind speed
     - windUnit (float) -  The unit of the wind speed
+    - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the wind will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
 
     Returns:
     - windText (str) - The textual representation of the wind
     - windIcon (str) - The icon representation of the wind
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
-    - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the precipitation will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
     """
     windText = None
     windIcon = None
@@ -360,11 +402,11 @@ def calculate_vis_text(vis, visUnits, mode="both"):
     Parameters:
     - vis (float) -  The visibility
     - visUnit (float) -  The unit of the visibility
+    - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the visibility will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
 
     Returns:
     - visText (str) - The textual representation of the visibility
     - visIcon (str) - The icon representation of the visibility
-    - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the precipitation will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
     """
     visText = None
     visIcon = None
@@ -390,7 +432,7 @@ def calculate_sky_text(cloudCover, isDayTime, icon="darksky", mode="both"):
     - cloudCover (int): The cloud cover for the period
     - isDayTime (bool): Whether its currently day or night
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
-    - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the precipitation will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
+    - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the cloud cover will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
 
     Returns:
     - str: The icon representing the current cloud cover
@@ -455,6 +497,43 @@ def humidity_sky_text(temp, tempUnits, humidity):
             humidityText = "high-humidity"
 
     return humidityText
+
+
+def calculate_thunderstorm_text(liftedIndex, cape, mode="both"):
+    """
+    Calculates the thunderstorm text
+
+    Parameters:
+    - liftedIndex (float) -  The lifted index
+    - cape (float) -  The CAPE (Convective available potential energy)
+    - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the thunderstorm will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
+
+    Returns:
+    - thuText (str) - The textual representation of the thunderstorm
+    - thuIcon (str) - The icon representation of the thunderstorm
+    """
+    thuText = None
+    thuIcon = None
+
+    if 1000 <= cape < 2500:
+        thuText = "possible-thunderstorm"
+    elif cape >= 2500:
+        thuText = "thunderstorm"
+        thuIcon = "thunderstorm"
+
+    if liftedIndex != -999 and thuText is None:
+        if 0 > liftedIndex > -4:
+            thuText = "possible-thunderstorm"
+        elif liftedIndex <= -4:
+            thuText = "thunderstorm"
+            thuIcon = "thunderstorm"
+
+    if mode == "summary":
+        return thuText
+    elif mode == "icon":
+        return thuIcon
+    else:
+        return thuText, thuIcon
 
 
 def kelvinFromCelsius(celsius):

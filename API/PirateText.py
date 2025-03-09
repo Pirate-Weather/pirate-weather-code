@@ -6,6 +6,7 @@ from PirateTextHelper import (
     calculate_vis_text,
     calculate_sky_text,
     humidity_sky_text,
+    calculate_thunderstorm_text,
 )
 
 
@@ -47,13 +48,14 @@ def calculate_text(
     cText = cIcon = precipText = precipIcon = windText = windIcon = skyText = (
         skyIcon
     ) = visText = visIcon = None
-    precipIntensity = 0
 
     # Get key values from the hourObject
     precipType = hourObject["precipType"]
     cloudCover = hourObject["cloudCover"]
     wind = hourObject["windSpeed"]
     humidity = hourObject["humidity"]
+    liftedIndex = hourObject["liftedIndex"]
+    cape = hourObject["cape"]
 
     # If type is current precipitation probability should always be 1 otherwise if it exists in the hourObject use it otherwise use 1
     if type == "current":
@@ -89,7 +91,7 @@ def calculate_text(
         else:
             return "clear", "clear-night"
 
-    # Calculate the text/icon for precipitation, wind, visibility, sky cover and humidity
+    # Calculate the text/icon for precipitation, wind, visibility, sky cover, humidity and thunderstorms
     precipText, precipIcon = calculate_precip_text(
         precipIntensity,
         prepAccumUnit,
@@ -99,17 +101,20 @@ def calculate_text(
         snowPrep,
         icePrep,
         pop,
-        "both",
         icon,
+        "both",
     )
     windText, windIcon = calculate_wind_text(wind, windUnit, icon, "both")
     visText, visIcon = calculate_vis_text(vis, visUnits, "both")
+    thuText, thuIcon = calculate_thunderstorm_text(liftedIndex, cape, "both")
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
     humidityText = humidity_sky_text(temp, tempUnits, humidity)
 
-    # If there is precipitation text use that and join with humidity or wind texts if they exist
+    # If there is precipitation text use that and join with thunderstorm or humidity or wind texts if they exist
     if precipText is not None:
-        if windText is not None:
+        if thuText is not None:
+            cText = ["and", thuText, precipText]
+        elif windText is not None:
             cText = ["and", precipText, windText]
         else:
             if humidityText is not None:
@@ -137,9 +142,12 @@ def calculate_text(
     else:
         cText = skyText
 
-    # If precipitation icon use that
+    # If precipitation icon use that unless there are thunderstorms occurring
     if precipIcon is not None:
-        cIcon = precipIcon
+        if thuIcon is not None:
+            cIcon = thuIcon
+        else:
+            cIcon = precipIcon
     # If visibility icon use that
     elif visIcon is not None:
         cIcon = visIcon
