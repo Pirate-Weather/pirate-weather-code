@@ -1,78 +1,8 @@
 # %% Script to contain the functions that can be used to generate the minutely text summary of the forecast data for Pirate Weather
 
-
-def calculate_text(precipIntensity, prepIntensityUnit, precipType):
-    """
-    Calculates the textual precipitation text for the week.
-
-    Parameters:
-    - avgIntensity (float): The average precipitation intensity for the week
-    - intensityUnit (int): The conversion factor for the precipitation intensity
-    - precipType (str): The type of precipitation for the week
-
-    Returns:
-    - cSummary (str): The textual summary of conditions (very-light-rain, medium-sleet, etc.).
-    """
-    possibleText = ""
-
-    if precipIntensity < (0.02 * prepIntensityUnit):
-        possibleText = "possible-"
-
-    if precipType == "rain":
-        if precipIntensity < (0.4 * prepIntensityUnit):
-            cSummary = possibleText + "very-light-rain"
-        elif precipIntensity >= (0.4 * prepIntensityUnit) and precipIntensity < (
-            2.5 * prepIntensityUnit
-        ):
-            cSummary = "light-rain"
-        elif precipIntensity >= (2.5 * prepIntensityUnit) and precipIntensity < (
-            10 * prepIntensityUnit
-        ):
-            cSummary = "medium-rain"
-        else:
-            cSummary = "heavy-rain"
-    elif precipType == "snow":
-        if precipIntensity < (0.13 * prepIntensityUnit):
-            cSummary = possibleText + "very-light-snow"
-        elif precipIntensity >= (0.13 * prepIntensityUnit) and precipIntensity < (
-            0.83 * prepIntensityUnit
-        ):
-            cSummary = "light-snow"
-        elif precipIntensity >= (0.83 * prepIntensityUnit) and precipIntensity < (
-            3.33 * prepIntensityUnit
-        ):
-            cSummary = "medium-snow"
-        else:
-            cSummary = "heavy-snow"
-    elif precipType == "sleet":
-        if precipIntensity < (0.4 * prepIntensityUnit):
-            cSummary = possibleText + "very-light-sleet"
-        elif precipIntensity >= (0.4 * prepIntensityUnit) and precipIntensity < (
-            2.5 * prepIntensityUnit
-        ):
-            cSummary = "light-sleet"
-        elif precipIntensity >= (2.5 * prepIntensityUnit) and precipIntensity < (
-            10 * prepIntensityUnit
-        ):
-            cSummary = "medium-sleet"
-        else:
-            cSummary = "heavy-sleet"
-    else:
-        # Because soemtimes there's precipitation not no type use a generic precipitation summary
-        if precipIntensity < (0.4 * prepIntensityUnit):
-            cSummary = possibleText + "very-light-precipitation"
-        elif precipIntensity >= (0.4 * prepIntensityUnit) and precipIntensity < (
-            2.5 * prepIntensityUnit
-        ):
-            cSummary = "light-precipitation"
-        elif precipIntensity >= (2.5 * prepIntensityUnit) and precipIntensity < (
-            10 * prepIntensityUnit
-        ):
-            cSummary = "medium-precipitation"
-        else:
-            cSummary = "heavy-precipitation"
-
-    return cSummary
+from PirateTextHelper import calculate_precip_text
+from itertools import groupby
+from operator import itemgetter
 
 
 def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
@@ -92,59 +22,63 @@ def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
     # If the current precipitation stops before the end of the hour
     if precipStart1 == 0 and precipEnd1 < 60 and precipStart2 == -1:
         cText = [
-            "sentence",
-            [
-                "stopping-in",
-                text,
-                ["minutes", precipEnd1],
-            ],
+            "stopping-in",
+            text,
+            ["minutes", precipEnd1],
         ]
     # If the current precipitation doesn't stop before the end of the hour
     elif precipStart1 == 0 and precipEnd1 == 60:
         cText = [
-            "sentence",
-            [
-                "for-hour",
-                text,
-            ],
+            "for-hour",
+            text,
         ]
 
     # If the current precipitation stops before the hour but starts again
     elif precipStart1 == 0 and precipEnd1 < 60 and precipStart2 != -1:
         cText = [
-            "sentence",
-            [
-                "stopping-then-starting-later",
-                text,
-                ["minutes", precipEnd1],
-                ["minutes", precipStart2 - precipEnd1 + 1],
-            ],
+            "stopping-then-starting-later",
+            text,
+            ["minutes", precipEnd1],
+            ["minutes", precipStart2 - precipEnd1],
         ]
     # If precip starts during the hour and lasts until the end of the hour
     elif precipStart1 > 0 and precipEnd1 == 60:
         cText = [
-            "sentence",
-            [
-                "starting-in",
-                text,
-                ["minutes", precipStart1],
-            ],
+            "starting-in",
+            text,
+            ["minutes", precipStart1],
         ]
     # If precip starts during the hour and ends before the end of the hour
     elif precipStart1 > 0 and precipEnd1 < 60:
         cText = [
-            "sentence",
-            [
-                "starting-then-stopping-later",
-                text,
-                ["minutes", precipStart1],
-                ["minutes", precipEnd1 - precipStart1],
-            ],
+            "starting-then-stopping-later",
+            text,
+            ["minutes", precipStart1],
+            ["minutes", precipEnd1 - precipStart1],
         ]
     return cText
 
 
-def calculate_minutely_text(minuteArr, currentText, currentIcon):
+def calcaulate_consecutive_indexes(prepIndex):
+    """
+    Calculates the consecutive indexes for the minutely precipitation arrays
+
+    Parameters:
+    - prepIndex (arr): An array of the precipitaion index
+
+    Returns:
+    - consecutiveIndex (arr): The array of consecutive index arrays
+    """
+
+    consecutiveIndex = []
+    for k, g in groupby(enumerate(prepIndex), lambda ix: ix[0] - ix[1]):
+        consecutiveIndex.append(list(map(itemgetter(1), g)))
+    return consecutiveIndex
+
+
+def calculate_minutely_text(
+    minuteArr, currentText, currentIcon, icon, precipIntensityUnit
+):
     """
     Calculates the minutely summary given an array of minutes
 
@@ -152,6 +86,8 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon):
     - minuteArr (arr): An array of the minutes
     - currentText (str/arr): The current conditions in translations format
     - currentIcon (str): The icon representing the current conditions
+    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
+    - prepAccumUnit (float): The precipitation accumulation/intensity unit
 
     Returns:
     - cText (arr): The precipitation summary for the hour.
@@ -159,195 +95,104 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon):
     """
 
     # Variables to use in calculating the minutely summary
-    cIcon = None
-    cText = None
-    rainStart1 = -1
-    rainEnd1 = -1
-    rainStart2 = -1
-    snowStart1 = -1
-    snowEnd1 = -1
-    snowStart2 = -1
-    sleetStart1 = -1
-    sleetEnd1 = -1
-    sleetStart2 = -1
-    noneStart1 = -1
-    noneEnd1 = -1
-    noneStart2 = -1
-    precipStart1 = -1
-    precipEnd1 = -1
-    precipStart2 = -1
-    avgIntensity = 0
-    precipMinutes = 0
-    rainMaxIntensity = 0
-    snowMaxIntensity = 0
-    sleetMaxIntensity = 0
-    noneMaxIntensity = 0
-    precipIntensityUnit = 1
+    cIcon = cText = None
+    avgIntensity = precipMinutes = rainMaxIntensity = snowMaxIntensity = (
+        sleetMaxIntensity
+    ) = noneMaxIntensity = hailMaxIntensity = iceMaxIntensity = 0
     first_precip = "none"
+    rainIndex = []
+    snowIndex = []
+    sleetIndex = []
+    iceIndex = []
+    hailIndex = []
+    noneIndex = []
+    precipIndex = []
 
     # Loop through the minute array
     for idx, minute in enumerate(minuteArr):
         # If there is rain for the current minute in the array
-        if minute[1] == "rain" and minute[0] > 0:
+        if minute["precipType"] == "rain" and minute["precipIntensity"] > 0:
             # Increase the minutes of precipitation, the precipitation unit and average intensity
-            avgIntensity += minute[0]
+            avgIntensity += minute["precipIntensity"]
             precipMinutes += 1
-            precipIntensityUnit = minute[2]
 
             # Set the maxiumum rain intensity
             if rainMaxIntensity == 0:
-                rainMaxIntensity = minute[0]
-            elif rainMaxIntensity > 0 and minute[0] > rainMaxIntensity:
-                rainMaxIntensity = minute[0]
+                rainMaxIntensity = minute["precipIntensity"]
+            elif rainMaxIntensity > 0 and minute["precipIntensity"] > rainMaxIntensity:
+                rainMaxIntensity = minute["precipIntensity"]
 
-            # Set the first precip first index if not set to the current index
-            if precipStart1 == -1:
-                precipStart1 = idx
-            # If the first precip starting and ending index is already set then set the second starting index
-            elif precipStart1 != -1 and precipEnd1 != -1 and precipStart2 == -1:
-                precipStart2 = idx
-            # Set the first rain first index if not set to the current index
-            if rainStart1 == -1:
-                rainStart1 = idx
-            # If the first rain starting and ending index is already set then set the second starting index
-            elif rainStart1 != -1 and rainEnd1 != -1 and rainStart2 == -1:
-                rainStart2 = idx
-            # If there is a first snow starting index but no ending index then set that to the current index
-            if snowStart1 != -1 and snowStart2 == -1 and snowEnd1 == -1:
-                snowEnd1 = idx
-            # If there is a first sleet starting index but no ending index then set that to the current index
-            if sleetStart1 != -1 and sleetStart2 == -1 and sleetEnd1 == -1:
-                sleetEnd1 = idx
-            # If there is a first none starting index but no ending index then set that to the current index
-            if noneStart1 != -1 and noneStart2 == -1 and noneEnd1 == -1:
-                noneEnd1 = idx
+            rainIndex.append(idx)
+            precipIndex.append(idx)
         # If there is snow for the current minute in the array
-        elif minute[1] == "snow" and minute[0] > 0:
+        elif minute["precipType"] == "snow" and minute["precipIntensity"] > 0:
             # Increase the minutes of precipitation, the precipitation unit and average intensity
-            avgIntensity += minute[0]
+            avgIntensity += minute["precipIntensity"]
             precipMinutes += 1
-            precipIntensityUnit = minute[2]
 
             # Set the maxiumum snow intensity
             if snowMaxIntensity == 0:
-                snowMaxIntensity = minute[0]
-            elif snowMaxIntensity > 0 and minute[0] > snowMaxIntensity:
-                snowMaxIntensity = minute[0]
+                snowMaxIntensity = minute["precipIntensity"]
+            elif snowMaxIntensity > 0 and minute["precipIntensity"] > snowMaxIntensity:
+                snowMaxIntensity = minute["precipIntensity"]
 
-            # Set the first precip first index if not set to the current index
-            if precipStart1 == -1:
-                precipStart1 = idx
-            # If the first precip starting and ending index is already set then set the second starting index
-            elif precipStart1 != -1 and precipEnd1 != -1 and precipStart2 == -1:
-                precipStart2 = idx
-            # Set the first snow first index if not set to the current index
-            if snowStart1 == -1:
-                snowStart1 = idx
-            # If the first snow starting and ending index is already set then set the second starting index
-            elif snowStart1 != -1 and snowEnd1 != -1 and snowStart2 == -1:
-                snowStart2 = idx
-            # If there is a first rain starting index but no ending index then set that to the current index
-            if rainStart1 != -1 and rainStart2 == -1 and rainEnd1 == -1:
-                rainEnd1 = idx
-            # If there is a first sleet starting index but no ending index then set that to the current index
-            if sleetStart1 != -1 and sleetStart2 == -1 and sleetEnd1 == -1:
-                sleetEnd1 = idx
-            # If there is a first none starting index but no ending index then set that to the current index
-            if noneStart1 != -1 and noneStart2 == -1 and noneEnd1 == -1:
-                noneEnd1 = idx
+            snowIndex.append(idx)
+            precipIndex.append(idx)
         # If there is sleet for the current minute in the array
-        elif minute[1] == "sleet" and minute[0] > 0:
+        elif minute["precipType"] == "sleet" and minute["precipIntensity"] > 0:
             # Increase the minutes of precipitation, the precipitation unit and average intensity
-            avgIntensity += minute[0]
+            avgIntensity += minute["precipIntensity"]
             precipMinutes += 1
-            precipIntensityUnit = minute[2]
 
             # Set the maxiumum sleet intensity
             if sleetMaxIntensity == 0:
-                sleetMaxIntensity = minute[0]
-            elif sleetMaxIntensity > 0 and minute[0] > sleetMaxIntensity:
-                sleetMaxIntensity = minute[0]
+                sleetMaxIntensity = minute["precipIntensity"]
+            elif (
+                sleetMaxIntensity > 0 and minute["precipIntensity"] > sleetMaxIntensity
+            ):
+                sleetMaxIntensity = minute["precipIntensity"]
 
-            # Set the first precip first index if not set to the current index
-            if precipStart1 == -1:
-                precipStart1 = idx
-            # If the first precip starting and ending index is already set then set the second starting index
-            elif precipStart1 != -1 and precipEnd1 != -1 and precipStart2 == -1:
-                precipStart2 = idx
-            # Set the first sleet first index if not set to the current index
-            if sleetStart1 == -1:
-                sleetStart1 = idx
-            # If the first sleet starting and ending index is already set then set the second starting index
-            elif sleetStart1 != -1 and sleetEnd1 != -1 and sleetStart2 == -1:
-                sleetStart2 = idx
-            # If there is a first rain starting index but no ending index then set that to the current index
-            if rainStart1 != -1 and rainStart2 == -1 and rainEnd1 == -1:
-                rainEnd1 = idx
-            # If there is a first snow starting index but no ending index then set that to the current index
-            if snowStart1 != -1 and snowStart2 == -1 and snowEnd1 == -1:
-                sleetEnd1 = idx
-            # If there is a first none starting index but no ending index then set that to the current index
-            if noneStart1 != -1 and noneStart2 == -1 and noneEnd1 == -1:
-                noneEnd1 = idx
-        elif minute[1] == "none" and minute[0] > 0:
+            sleetIndex.append(idx)
+            precipIndex.append(idx)
+        elif minute["precipType"] == "none" and minute["precipIntensity"] > 0:
             # Increase the minutes of precipitation, the precipitation unit and average intensity
-            avgIntensity += minute[0]
+            avgIntensity += minute["precipIntensity"]
             precipMinutes += 1
-            precipIntensityUnit = minute[2]
 
             # Set the none maxiumum precipitation intensity
             if noneMaxIntensity == 0:
-                noneMaxIntensity = minute[0]
-            elif noneMaxIntensity > 0 and minute[0] > noneMaxIntensity:
-                noneMaxIntensity = minute[0]
+                noneMaxIntensity = minute["precipIntensity"]
+            elif noneMaxIntensity > 0 and minute["precipIntensity"] > noneMaxIntensity:
+                noneMaxIntensity = minute["precipIntensity"]
 
-            # Set the first precip first index if not set to the current index
-            if precipStart1 == -1:
-                precipStart1 = idx
-            # If the first precip starting and ending index is already set then set the second starting index
-            elif precipStart1 != -1 and precipEnd1 != -1 and precipStart2 == -1:
-                precipStart2 = idx
-            # Set the first none first index if not set to the current index
-            if noneStart1 == -1:
-                noneStart1 = idx
-            # If the first none starting and ending index is already set then set the second starting index
-            elif noneStart1 != -1 and noneEnd1 != -1 and noneStart2 == -1:
-                noneStart2 = idx
-            # If there is a first rain starting index but no ending index then set that to the current index
-            if rainStart1 != -1 and rainStart2 == -1 and rainEnd1 == -1:
-                rainEnd1 = idx
-            # If there is a first snow starting index but no ending index then set that to the current index
-            if snowStart1 != -1 and snowStart2 == -1 and snowEnd1 == -1:
-                snowEnd1 = idx
-        # If there is no precipitation for the current minute
-        else:
-            # If there is a first precip starting index but no ending index then set that to the current index
-            if precipStart1 != -1 and precipStart2 == -1 and precipEnd1 == -1:
-                precipEnd1 = idx
-            # If there is a first rain starting index but no ending index then set that to the current index
-            if rainStart1 != -1 and rainStart2 == -1 and rainEnd1 == -1:
-                rainEnd1 = idx
-            # If there is a first snow starting index but no ending index then set that to the current index
-            if snowStart1 != -1 and snowStart2 == -1 and snowEnd1 == -1:
-                snowEnd1 = idx
-            # If there is a first sleet starting index but no ending index then set that to the current index
-            if sleetStart1 != -1 and snowStart2 == -1 and snowEnd1 == -1:
-                sleetEnd1 = idx
-            # If there is a first none starting index but no ending index then set that to the current index
-            if noneStart1 != -1 and noneStart2 == -1 and noneEnd1 == -1:
-                noneEnd1 = idx
+            noneIndex.append(idx)
+            precipIndex.append(idx)
+        elif minute["precipType"] == "ice" and minute["precipIntensity"] > 0:
+            # Increase the minutes of precipitation, the precipitation unit and average intensity
+            avgIntensity += minute["precipIntensity"]
+            precipMinutes += 1
 
-    # If there is a first starting index for rain/snow/sleet but no ending index then set it to 60
-    if precipStart1 != -1 and precipEnd1 == -1:
-        precipEnd1 = 60
-    if rainStart1 != -1 and rainEnd1 == -1:
-        rainEnd1 = 60
-    if snowStart1 != -1 and snowEnd1 == -1:
-        snowEnd1 = 60
-    if sleetStart1 != -1 and sleetEnd1 == -1:
-        sleetEnd1 = 60
-    if noneStart1 != -1 and noneEnd1 == -1:
-        noneEnd1 = 60
+            # Set the none maxiumum precipitation intensity
+            if iceMaxIntensity == 0:
+                iceMaxIntensity = minute["precipIntensity"]
+            elif iceMaxIntensity > 0 and minute["precipIntensity"] > iceMaxIntensity:
+                iceMaxIntensity = minute["precipIntensity"]
+
+            iceIndex.append(idx)
+            precipIndex.append(idx)
+        elif minute["precipType"] == "hail" and minute["precipIntensity"] > 0:
+            # Increase the minutes of precipitation, the precipitation unit and average intensity
+            avgIntensity += minute["precipIntensity"]
+            precipMinutes += 1
+
+            # Set the none maxiumum precipitation intensity
+            if hailMaxIntensity == 0:
+                hailMaxIntensity = minute["precipIntensity"]
+            elif hailMaxIntensity > 0 and minute["precipIntensity"] > hailMaxIntensity:
+                hailMaxIntensity = minute["precipIntensity"]
+
+            hailIndex.append(idx)
+            precipIndex.append(idx)
 
     # Calculate the average precipitaiton intensity
     if precipMinutes > 0:
@@ -356,115 +201,222 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon):
     # Create an array of the starting times for the precipitation
     starts = []
 
-    if sleetStart1 >= 0:
-        starts.append(sleetStart1)
-    if snowStart1 >= 0:
-        starts.append(snowStart1)
-    if rainStart1 >= 0:
-        starts.append(rainStart1)
-    if noneStart1 >= 0:
-        starts.append(noneStart1)
+    # Create a list of consecutive minutes for each of the types to use in the summary text
+    consecutiveSleet = calcaulate_consecutive_indexes(sleetIndex)
+    consecutiveRain = calcaulate_consecutive_indexes(rainIndex)
+    consecutiveSnow = calcaulate_consecutive_indexes(snowIndex)
+    consecutiveIce = calcaulate_consecutive_indexes(iceIndex)
+    consecutiveHail = calcaulate_consecutive_indexes(hailIndex)
+    consecutiveNone = calcaulate_consecutive_indexes(noneIndex)
+    consecutivePrep = calcaulate_consecutive_indexes(precipIndex)
+
+    if sleetIndex:
+        starts.append(sleetIndex[0])
+    if snowIndex:
+        starts.append(snowIndex[0])
+    if rainIndex:
+        starts.append(rainIndex[0])
+    if noneIndex:
+        starts.append(noneIndex[0])
+    if iceIndex:
+        starts.append(iceIndex[0])
+        sleetMaxIntensity = iceMaxIntensity
+    if hailIndex:
+        starts.append(hailIndex[0])
+        sleetMaxIntensity = hailMaxIntensity
 
     # If the array has any values check the minimum against the different precipitation start times and set that as the first precipitaion
     if starts:
-        if sleetStart1 == min(starts):
+        if hailIndex:
+            first_precip = "hail"
+        elif sleetIndex and sleetIndex[0] == min(starts):
             first_precip = "sleet"
-        elif snowStart1 == min(starts):
+        elif snowIndex and snowIndex[0] == min(starts):
             first_precip = "snow"
-        elif rainStart1 == min(starts):
+        elif rainIndex and rainIndex[0] == min(starts):
             first_precip = "rain"
-        elif noneStart1 == min(starts):
+        elif noneIndex and noneIndex[0] == min(starts):
             first_precip = "none"
+        elif iceIndex and iceIndex[0] == min(starts):
+            first_precip = "ice"
 
     # If there are more than two precipitation types used the mixed text
     if len(starts) > 2:
         text = "mixed-precipitation"
-        cIcon = "sleet"
+        cIcon = "mixed"
     # If there is two precipitation types for the hour
     elif len(starts) == 2:
-        # Calculate the maximum intensity based on the precipitation types
-        maxIntensity = max(
-            rainMaxIntensity, snowMaxIntensity, sleetMaxIntensity, noneMaxIntensity
+        # Calculate the precipitation text and icon
+        text, cIcon = calculate_precip_text(
+            avgIntensity,
+            precipIntensityUnit,
+            first_precip,
+            "minute",
+            rainMaxIntensity,
+            snowMaxIntensity,
+            sleetMaxIntensity,
+            1,
+            icon,
+            "both",
         )
-        # If the first type is sleet show that as the minutely summary text and set the icon to sleet
-        if first_precip == "sleet":
-            text = calculate_text(maxIntensity, precipIntensityUnit, "sleet")
-            cIcon = "sleet"
-        # If the first type is snow show that as the minutely summary text and set the icon to snow
-        elif first_precip == "snow":
-            text = calculate_text(maxIntensity, precipIntensityUnit, "snow")
-            cIcon = "snow"
-        # If the first type is rain show that as the minutely summary text and set the icon to rain
-        elif first_precip == "rain":
-            text = calculate_text(maxIntensity, precipIntensityUnit, "rain")
-            cIcon = "rain"
-        # If the first type has no type that as the minutely summary text and set the icon to rain
-        else:
-            text = calculate_text(maxIntensity, precipIntensityUnit, "none")
-            cIcon = "rain"
+
+        if first_precip == "hail" and rainIndex:
+            text = [
+                "and",
+                calculate_precip_text(
+                    avgIntensity,
+                    precipIntensityUnit,
+                    "rain",
+                    "minute",
+                    rainMaxIntensity,
+                    snowMaxIntensity,
+                    sleetMaxIntensity,
+                    1,
+                    icon,
+                    "summary",
+                ),
+                "hail",
+            ]
 
     # If there is no precipitation then set the minutely summary/icon to the current icon/summary
     if (
-        rainStart1
-        == rainEnd1
-        == rainStart2
-        == snowStart1
-        == snowEnd1
-        == snowStart2
-        == sleetStart1
-        == sleetEnd1
-        == sleetStart2
-        == noneStart1
-        == noneEnd1
-        == noneStart2
-        == -1
+        not snowIndex
+        and not rainIndex
+        and not sleetIndex
+        and not iceIndex
+        and not hailIndex
+        and not noneIndex
     ):
-        cText = ["sentence", ["for-hour", currentText]]
+        cText = ["for-hour", currentText]
         cIcon = currentIcon
     # If there is more than one precipitation for the hour
     elif len(starts) > 1:
         # Calculate the text using the start/end times for precipitation as a whole instead of the individual precipitation
         cText = minutely_summary(
-            precipStart1,
-            precipEnd1,
-            precipStart2,
+            consecutivePrep[0][0],
+            consecutivePrep[0][len(consecutivePrep[0]) - 1],
+            consecutivePrep[1][0] if len(consecutivePrep) > 1 else -1,
             text,
         )
     # If there if the only one precipitation is sleet
-    elif sleetStart1 != -1:
-        cText = minutely_summary(
-            sleetStart1,
-            sleetEnd1,
-            sleetStart2,
-            calculate_text(sleetMaxIntensity, precipIntensityUnit, "sleet"),
+    elif sleetIndex:
+        text, cIcon = calculate_precip_text(
+            avgIntensity,
+            precipIntensityUnit,
+            "sleet",
+            "minute",
+            rainMaxIntensity,
+            snowMaxIntensity,
+            sleetMaxIntensity,
+            1,
+            icon,
+            "both",
         )
-        cIcon = "sleet"
+        cText = minutely_summary(
+            consecutiveSleet[0][0],
+            consecutiveSleet[0][len(consecutiveSleet[0]) - 1],
+            consecutiveSleet[1][0] if len(consecutiveSleet) > 1 else -1,
+            text,
+        )
     # If there if the only one precipitation is snow
-    elif snowStart1 != -1:
-        cText = minutely_summary(
-            snowStart1,
-            snowEnd1,
-            snowStart2,
-            calculate_text(snowMaxIntensity, precipIntensityUnit, "snow"),
+    elif snowIndex:
+        text, cIcon = calculate_precip_text(
+            avgIntensity,
+            precipIntensityUnit,
+            "snow",
+            "minute",
+            rainMaxIntensity,
+            snowMaxIntensity,
+            sleetMaxIntensity,
+            1,
+            icon,
+            "both",
         )
-        cIcon = "snow"
+        cText = minutely_summary(
+            consecutiveSnow[0][0],
+            consecutiveSnow[0][len(consecutiveSnow[0]) - 1],
+            consecutiveSnow[1][0] if len(consecutiveSnow) > 1 else -1,
+            text,
+        )
     # If there if the only one precipitation is rain
-    elif rainStart1 != -1:
-        cText = minutely_summary(
-            rainStart1,
-            rainEnd1,
-            rainStart2,
-            calculate_text(rainMaxIntensity, precipIntensityUnit, "rain"),
+    elif rainIndex:
+        text, cIcon = calculate_precip_text(
+            avgIntensity,
+            precipIntensityUnit,
+            "rain",
+            "minute",
+            rainMaxIntensity,
+            snowMaxIntensity,
+            sleetMaxIntensity,
+            1,
+            icon,
+            "both",
         )
-        cIcon = "rain"
+        cText = minutely_summary(
+            consecutiveRain[0][0],
+            consecutiveRain[0][len(consecutiveRain[0]) - 1],
+            consecutiveRain[1][0] if len(consecutiveRain) > 1 else -1,
+            text,
+        )
+    # If there if the only one precipitation is ice
+    elif iceIndex:
+        text, cIcon = calculate_precip_text(
+            avgIntensity,
+            precipIntensityUnit,
+            "ice",
+            "minute",
+            rainMaxIntensity,
+            snowMaxIntensity,
+            sleetMaxIntensity,
+            1,
+            icon,
+            "both",
+        )
+        cText = minutely_summary(
+            consecutiveIce[0][0],
+            consecutiveIce[0][len(consecutiveIce[0]) - 1],
+            consecutiveIce[1][0] if len(consecutiveIce) > 1 else -1,
+            text,
+        )
+    # If there if the only one precipitation is hail
+    elif iceIndex:
+        text, cIcon = calculate_precip_text(
+            avgIntensity,
+            precipIntensityUnit,
+            "hail",
+            "minute",
+            rainMaxIntensity,
+            snowMaxIntensity,
+            sleetMaxIntensity,
+            1,
+            icon,
+            "both",
+        )
+        cText = minutely_summary(
+            consecutiveHail[0][0],
+            consecutiveHail[0][len(consecutiveHail[0]) - 1],
+            consecutiveHail[1][0] if len(consecutiveHail) > 1 else -1,
+            text,
+        )
     # If there if the only one precipitation has any other type
     else:
-        cText = minutely_summary(
-            noneStart1,
-            noneEnd1,
-            noneStart2,
-            calculate_text(noneMaxIntensity, precipIntensityUnit, "none"),
+        text, cIcon = calculate_precip_text(
+            avgIntensity,
+            precipIntensityUnit,
+            "none",
+            "minute",
+            noneMaxIntensity,
+            snowMaxIntensity,
+            sleetMaxIntensity,
+            1,
+            icon,
+            "both",
         )
-        cIcon = "rain"
+        cText = minutely_summary(
+            consecutiveNone[0][0],
+            consecutiveNone[0][len(consecutiveNone[0]) - 1],
+            consecutiveNone[1][0] if len(consecutiveNone) > 1 else -1,
+            text,
+        )
 
     return cText, cIcon
