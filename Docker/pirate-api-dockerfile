@@ -1,4 +1,4 @@
-FROM python:3.13
+FROM python:3.13-slim
 
 RUN apt update && \
     apt -y install build-essential \
@@ -6,15 +6,20 @@ RUN apt update && \
                     unzip \
                     rsync \
 					git
-         
-COPY requirements-api.txt requirements-api.txt
-                    
-RUN pip install -r requirements-api.txt
-
+                            
+# Set the working directory inside the container
 WORKDIR /app
 
-RUN apt install -y git
+# Copy the requirements file from the Docker directory into the image
+COPY Docker/requirements-api.txt ./
 
-RUN npm install
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements-api.txt
 
-ENTRYPOINT ["python3"]
+# Copy the run scripts from the API directory (relative to the build context)
+COPY API/ ./
+
+ENTRYPOINT ["uvicorn"]
+
+# Set the default command
+CMD ["responseLocal:app", "--host", "0.0.0.0"]

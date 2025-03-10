@@ -57,6 +57,12 @@ def calculate_text(
     liftedIndex = hourObject["liftedIndex"]
     cape = hourObject["cape"]
 
+    # If time machine, no humidity data, so set to 0
+    if "humidity" not in hourObject:
+        humidity = 0
+    else:
+        humidity = hourObject["humidity"]
+
     # If type is current precipitation probability should always be 1 otherwise if it exists in the hourObject use it otherwise use 1
     if type == "current":
         pop = 1

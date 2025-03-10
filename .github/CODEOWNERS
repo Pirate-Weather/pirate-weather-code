@@ -6,5 +6,9 @@
 /.github/workflows/* @cloneofghosts
 /.github/ISSUE_TEMPLATE/* @cloneofghosts	
 
+# Build Scripts
+/.github/workflows/sanity.yml @alexander0042
+/.github/workflows/build.yml @alexander0042
+
 # Remove CODEOWNER for requirements file
 /requirements.txt
