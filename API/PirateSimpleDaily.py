@@ -10,6 +10,7 @@ def calculate_precip_text(
     rainPrep,
     snowPrep,
     icePrep,
+    precipType,
 ):
     # In mm/h
     lightRainThresh = 0.4 * prepAccumUnit * 24
@@ -25,8 +26,8 @@ def calculate_precip_text(
     snowIconThreshold = 10.0 * prepAccumUnit
     rainIconThreshold = 1.0 * prepAccumUnit
     iceIconThreshold = 1.0 * prepAccumUnit
+    numTypes = 0
 
-    precipType = hourObject["precipType"]
     if "precipProbability" in hourObject:
         pop = hourObject["precipProbability"]
     else:
@@ -35,6 +36,7 @@ def calculate_precip_text(
     possiblePrecip = ""
     cIcon = None
     cText = None
+    totalPrep = rainPrep + snowPrep + icePrep
     # Add the possible precipitation text if pop is less than 30% or if pop is greater than 0 but precipIntensity is between 0-0.02 mm/h
     if (pop < 0.25) or (
         (
@@ -47,6 +49,23 @@ def calculate_precip_text(
     ):
         possiblePrecip = "possible-"
 
+    # Determine the number of precipitation types for the day
+    if snowPrep > 0:
+        numTypes += 1
+    if rainPrep > 0:
+        numTypes += 1
+    if icePrep > 0:
+        numTypes += 1
+
+    # If there are more than one type of precipitation, pop is 25% and higher do not use the possible text
+    if (
+        totalPrep >= rainIconThreshold
+        and possiblePrecip == "possible-"
+        and pop >= 0.25
+        and numTypes > 1
+    ):
+        possiblePrecip = ""
+
     # Find the largest percentage difference compared to the thresholds
     # rainPrepPercent = rainPrep / rainIconThreshold
     # snowPrepPercent = snowPrep / snowIconThreshold
@@ -54,9 +73,10 @@ def calculate_precip_text(
 
     # Find the largest percentage difference to determine the icon
     if pop >= 0.25 and (
-        (rainPrep > rainIconThreshold)
-        or (snowPrep > snowIconThreshold)
-        or (icePrep > iceIconThreshold)
+        (rainPrep >= rainIconThreshold)
+        or (snowPrep >= snowIconThreshold)
+        or (icePrep >= iceIconThreshold)
+        or (totalPrep >= rainIconThreshold)
     ):
         if precipType == "none":
             cIcon = "rain"  # Fallback icon
@@ -144,29 +164,31 @@ def calculate_simple_day_text(
     type,
 ):
     cText = cIcon = precipText = precipIcon = windText = secondary = snowText = (
-        snowSentence
-    ) = None
+        mixedText
+    ) = snowSentence = None
     precipType = hourObject["precipType"]
 
     if "precipProbability" in hourObject:
         pop = hourObject["precipProbability"]
     else:
         pop = 1
+    totalPrep = rainPrep + snowPrep + icePrep
 
     # Only calculate the precipitation text if there is any possibility of precipitation > 0
-    if pop > 0:
+    if pop > 0 and totalPrep >= 0.01 * prepAccumUnit:
         # Check if there is rain, snow and ice accumulation for the day
         if snowPrep > 0 and rainPrep > 0 and icePrep > 0:
             # If there is then used the mixed precipitation text and set the icon/type to sleet. Set the secondary condition to snow so the totals can be in the summary
             precipText = "mixed-precipitation"
             precipType = "sleet"
-            precipIcon = calculate_precip_text(
+            mixedText, precipIcon = calculate_precip_text(
                 hourObject,
-                True,
+                prepAccumUnit,
                 "day",
                 rainPrep,
                 snowPrep,
                 icePrep,
+                precipType,
             )
             secondary = "medium-snow"
         else:
@@ -207,8 +229,10 @@ def calculate_simple_day_text(
                 rainPrep,
                 snowPrep,
                 icePrep,
+                precipType,
             )
 
+    print(precipIcon)
     # If we have only snow or if snow is the secondary condition then calculate the accumulation range
     if snowPrep > (5 * prepAccumUnit) or secondary == "medium-snow":
         # GEFS accumulation error seems to always be equal to the accumulation so use half of the accumulation as the range
