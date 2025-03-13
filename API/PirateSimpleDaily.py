@@ -175,7 +175,7 @@ def calculate_simple_day_text(
     totalPrep = rainPrep + snowPrep + icePrep
 
     # Only calculate the precipitation text if there is any possibility of precipitation > 0
-    if pop > 0 and totalPrep >= 0.01 * prepAccumUnit:
+    if pop > 0 and totalPrep >= 0.1 * prepAccumUnit:
         # Check if there is rain, snow and ice accumulation for the day
         if snowPrep > 0 and rainPrep > 0 and icePrep > 0:
             # If there is then used the mixed precipitation text and set the icon/type to sleet. Set the secondary condition to snow so the totals can be in the summary
