@@ -4096,7 +4096,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.5.5a"
+        returnOBJ["flags"]["version"] = "V2.5.5b"
 
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX

@@ -295,6 +295,7 @@ def calculate_simple_day_text(
         else:
             precipText = snowText
 
+    # Calculate day text with no precipitation as is already calculated above
     dayText, dayIcon = calculate_text(
         hourObject,
         prepAccumUnit,
@@ -302,9 +303,9 @@ def calculate_simple_day_text(
         windUnit,
         tempUnits,
         isDayTime,
-        rainPrep,
-        snowPrep,
-        icePrep,
+        0,
+        0,
+        0,
         "day",
         "sentence",
     )
