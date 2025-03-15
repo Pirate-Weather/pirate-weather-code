@@ -48,6 +48,27 @@ def calculate_precip_text(
     cIcon = None
     cText = None
 
+    # If the precipType is snow with no snow check if the other types have any precipitation and if they do then change the type of precipiation
+    if snowPrep == 0 and precipType == "snow":
+        if rainPrep > 0:
+            precipType = "rain"
+        elif icePrep > 0:
+            precipType = "sleet"
+
+    # If the precipType is rain with no rain check if the other types have any precipitation and if they do then change the type of precipiation
+    if rainPrep == 0 and precipType == "rain":
+        if snowPrep > 0:
+            precipType = "snow"
+        elif icePrep > 0:
+            precipType = "sleet"
+
+    # If the precipType is sleet with no sleet check if the other types have any precipitation and if they do then change the type of precipiation
+    if icePrep == 0 and precipType == "sleet":
+        if snowPrep > 0:
+            precipType = "snow"
+        elif rainPrep > 0:
+            precipType = "rain"
+
     # Add the possible precipitation text if pop is less than 30% or if pop is greater than 0 but precipIntensity is between 0-0.02 mm/h
     if (pop < 0.25) or (
         (
