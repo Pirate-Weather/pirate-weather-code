@@ -16,14 +16,12 @@ import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
-import zarr
 import zarr.storage
 from herbie import FastHerbie, HerbieLatest, Path
 from numcodecs import BitRound, Blosc
 from rechunker import rechunk
 from scipy.interpolate import make_interp_spline
 from xrspatial import direction, proximity
-
 
 # Scipy Interp Function
 def linInterp(block, T_in, T_out):
@@ -714,12 +712,10 @@ for i in range(hisPeriod, 0, -6):
 
     # Save the dataset with compression and filters for all variables
     # Use the same encoding as last time but with larger chuncks to speed up read times
-    compressor = Blosc(cname="lz4", clevel=3)
-    filters = [BitRound(keepbits=9)]
 
     # No chunking since only one time step
     encoding = {
-        vname: {"compressor": compressor, "filters": filters, "chunks": (6, 100, 100)}
+        vname: { "chunks": (6, 100, 100)}
         for vname in zarrVars[1:-2]
     }
 
@@ -743,7 +739,6 @@ for i in range(hisPeriod, 0, -6):
 # Create a zarr backed dask array
 zarr_store = zarr.storage.LocalStore(merge_process_dir + "/GFS_UnChunk.zarr")
 
-compressor = Blosc(cname="lz4", clevel=1)
 filters = [BitRound(keepbits=12)]
 
 # Create a Zarr array in the store with zstd compression
@@ -751,7 +746,6 @@ zarr_array = zarr.zeros(
     (21, 276, 721, 1440),
     chunks=(1, 276, 20, 20),
     store=zarr_store,
-    compressor=compressor,
     dtype="float32",
 )
 
