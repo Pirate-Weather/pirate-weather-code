@@ -66,7 +66,7 @@ latestRun = HerbieLatest(
     fxx=240,
     product="pgrb2.0p25",
     verbose=False,
-    priority="aws",
+    priority=["aws"],
 )
 
 base_time = latestRun.date
@@ -197,7 +197,7 @@ FH_forecastsub = FastHerbie(
     fxx=gfsFileRange,
     product="pgrb2.0p25",
     verbose=False,
-    priority="aws",
+    priority=["aws"],
     save_dir=tmpDIR,
 )
 
