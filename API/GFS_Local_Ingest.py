@@ -224,6 +224,13 @@ cmd = (
 
 # Run wgrib2
 spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+if spOUT.returncode != 0:
+    print(spOUT.stderr)
+    sys.exit()
+
+if spOUT.returncode != 0:
+    print(spOUT.stderr)
+    sys.exit()
 
 # %% Download and add UV data from the pgrib2b product
 FH_forecastUV = FastHerbie(
@@ -259,6 +266,9 @@ cmd = (
 
 # Run wgrib2
 spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+if spOUT.returncode != 0:
+    print(spOUT.stderr)
+    sys.exit()
 
 # %% Merge the UV data and xarrays
 # Read the netcdf file using xarray
@@ -548,6 +558,9 @@ for i in range(hisPeriod, 0, -6):
 
     # Run wgrib2
     spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    if spOUT.returncode != 0:
+        print(spOUT.stderr)
+        sys.exit()
 
     # %% Download and add UV data from the pgrib2b product
     FH_histsubUV = FastHerbie(
