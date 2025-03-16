@@ -3322,7 +3322,12 @@ async def PW_Forecast(
                 "precipIntensity": InterPday[idx, 2],
                 "precipIntensityMax": InterPdayMax[idx, 2],
                 "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
-                "precipAccumulation": round(InterPdaySum[idx, 21] + InterPdaySum[idx, 22] + InterPdaySum[idx, 23], 4),
+                "precipAccumulation": round(
+                    InterPdaySum[idx, 21]
+                    + InterPdaySum[idx, 22]
+                    + InterPdaySum[idx, 23],
+                    4,
+                ),
                 "precipType": PTypeDay[idx],
                 "temperatureHigh": InterPdayHigh[idx, 5],
                 "temperatureHighTime": int(InterPdayHighTime[idx, 5]),
@@ -3364,7 +3369,12 @@ async def PW_Forecast(
                     "precipIntensityMax": InterPdayMax[idx, 2],
                     "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
                     "precipProbability": InterPdayMax[idx, 3],
-                    "precipAccumulation": round(InterPdaySum[idx, 21] + InterPdaySum[idx, 22] + InterPdaySum[idx, 23], 4),
+                    "precipAccumulation": round(
+                        InterPdaySum[idx, 21]
+                        + InterPdaySum[idx, 22]
+                        + InterPdaySum[idx, 23],
+                        4,
+                    ),
                     "precipType": PTypeDay[idx],
                     "temperatureHigh": InterPdayHigh[idx, 5],
                     "temperatureHighTime": int(InterPdayHighTime[idx, 5]),
@@ -3413,7 +3423,12 @@ async def PW_Forecast(
                     "precipIntensityMax": InterPdayMax[idx, 2],
                     "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
                     "precipProbability": InterPdayMax[idx, 3],
-                    "precipAccumulation": round(InterPdaySum[idx, 21] + InterPdaySum[idx, 22] + InterPdaySum[idx, 23], 4),
+                    "precipAccumulation": round(
+                        InterPdaySum[idx, 21]
+                        + InterPdaySum[idx, 22]
+                        + InterPdaySum[idx, 23],
+                        4,
+                    ),
                     "precipType": PTypeDay[idx],
                     "temperatureHigh": InterPdayHigh[idx, 5],
                     "temperatureHighTime": int(InterPdayHighTime[idx, 5]),
