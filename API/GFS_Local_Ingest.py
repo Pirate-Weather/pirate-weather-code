@@ -870,7 +870,7 @@ encoding = {"compressor": Blosc(cname="lz4", clevel=1)}
 
 source = zarr.open(merge_process_dir + "/GFS_UnChunk.zarr")
 intermediate = merge_process_dir + "/GFS_Mid.zarr"
-target = zarr.ZipStore(merge_process_dir + "/GFS.zarr.zip", compression=0)
+target = zarr.storage.ZipStore(merge_process_dir + "/GFS.zarr.zip", compression=0)
 rechunked = rechunk(
     source,
     target_chunks=(21, 276, 1, 1),
