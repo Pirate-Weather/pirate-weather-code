@@ -62,7 +62,7 @@ s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 latestRun = HerbieLatest(
     model="gfs",
     n=3,
-    freq="6H",
+    freq="6h",
     fxx=240,
     product="pgrb2.0p25",
     verbose=False,
@@ -192,7 +192,7 @@ gfsFileRange = [*gfs_range1, *gfs_range2]
 
 # Create FastHerbie object
 FH_forecastsub = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="6H"),
+    pd.date_range(start=base_time, periods=1, freq="6h"),
     model="gfs",
     fxx=gfsFileRange,
     product="pgrb2.0p25",
@@ -227,7 +227,7 @@ spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
 # %% Download and add UV data from the pgrib2b product
 FH_forecastUV = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="6H"),
+    pd.date_range(start=base_time, periods=1, freq="6h"),
     model="gfs",
     fxx=gfsFileRange,
     product="pgrb2b.0p25",
@@ -278,15 +278,15 @@ assert len(xarray_forecast_merged.time) == len(gfsFileRange), (
 start = xarray_forecast_merged.time.min().values  # Adjust as necessary
 end = xarray_forecast_merged.time.max().values  # Adjust as necessary
 new_hourly_time = pd.date_range(
-    start=start - pd.Timedelta(hisPeriod, "H"), end=end, freq="H"
+    start=start - pd.Timedelta(hisPeriod, "h"), end=end, freq="h"
 )
 
 stacked_times = np.concatenate(
     (
         pd.date_range(
-            start=start - pd.Timedelta(hisPeriod, "H"),
-            end=start - pd.Timedelta(1, "H"),
-            freq="H",
+            start=start - pd.Timedelta(hisPeriod, "h"),
+            end=start - pd.Timedelta(1, "h"),
+            freq="h",
         ),
         xarray_forecast_merged.time.values,
     )
@@ -514,7 +514,7 @@ for i in range(hisPeriod, 0, -6):
     DATES = pd.date_range(
         start=base_time - pd.Timedelta(str(i) + "h"),
         periods=1,
-        freq="6H",
+        freq="6h",
     )
     # Create a range of forecast lead times
     # Go from 1 to 7 to account for the weird prate approach
