@@ -23,6 +23,7 @@ from rechunker import rechunk
 from scipy.interpolate import make_interp_spline
 from xrspatial import direction, proximity
 
+
 # Scipy Interp Function
 def linInterp(block, T_in, T_out):
     interp = make_interp_spline(T_in, block, 3, axis=0)
@@ -714,10 +715,7 @@ for i in range(hisPeriod, 0, -6):
     # Use the same encoding as last time but with larger chuncks to speed up read times
 
     # No chunking since only one time step
-    encoding = {
-        vname: { "chunks": (6, 100, 100)}
-        for vname in zarrVars[1:-2]
-    }
+    encoding = {vname: {"chunks": (6, 100, 100)} for vname in zarrVars[1:-2]}
 
     # with ProgressBar():
     xarray_hist_merged.to_zarr(
