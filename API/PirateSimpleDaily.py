@@ -253,6 +253,19 @@ def calculate_simple_day_text(
                     precipType = "rain"
                     secondary = "medium-sleet"
 
+            # If more than 10 mm of rain is forecast, then rain
+            if rainPrep > (10 * prepAccumUnit) and precipType != "rain":
+                secondary = precipType
+                precipType = "rain"
+            # If more than 5 mm of snow is forecast, then snow
+            if snowPrep > (5 * prepAccumUnit) and precipType != "snow":
+                secondary = precipType
+                precipType = "snow"
+            # Else, if more than 1 mm of ice is forecast, then ice
+            if icePrep > (1 * prepAccumUnit) and precipType != "sleet":
+                secondary = precipType
+                precipType = "sleet"
+
             # Calculate the precipitation text and summary
             precipText, precipIcon = calculate_precip_text(
                 hourObject,
