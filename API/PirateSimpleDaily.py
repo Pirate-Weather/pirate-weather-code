@@ -259,8 +259,8 @@ def calculate_simple_day_text(
                 precipType = "rain"
             # If more than 5 mm of snow is forecast, then snow
             if snowPrep > (5 * prepAccumUnit) and precipType != "snow":
-                secondary = precipType
-                precipType = "medium-" + "snow"
+                secondary = "medium-" + precipType
+                precipType = "snow"
             # Else, if more than 1 mm of ice is forecast, then ice
             if icePrep > (1 * prepAccumUnit) and precipType != "sleet":
                 secondary = "medium-" + precipType
