@@ -1,5 +1,5 @@
 numpy==2.2.4
-boto3==1.37.13
+boto3==1.37.18
 netCDF4==1.7.2
 xarray==2025.1.2
 cartopy==0.24.1
@@ -13,7 +13,7 @@ rioxarray==0.18.2
 distributed==2025.2.0
 xarray-spatial==0.4.0
 redis==5.2.1
-rechunker==0.5.2
+rechunker==0.5.3
 geopandas==1.0.1
 nwswx==0.1.2
 git+https://github.com/blaylockbk/Herbie.git
