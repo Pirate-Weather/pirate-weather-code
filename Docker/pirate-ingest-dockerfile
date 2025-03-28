@@ -32,27 +32,34 @@ RUN apt update && \
                        libhdf5-dev \
 					   libgdal-dev					   
 
+# Start with NCEPLIBS
+
+RUN mkdir /build
+WORKDIR /build
+
+# Get NCEPLIBS  
+RUN git clone https://github.com/NOAA-EMC/NCEPLIBS-ip
+RUN cmake -DCMAKE_INSTALL_PREFIX=/build/NCEPLIBS_build -S NCEPLIBS-ip -B NCEPLIBS-ip/build -DOPENMP=ON
+RUN cmake --build NCEPLIBS-ip/build --parallel 4
+RUN cmake --install NCEPLIBS-ip/build
+
+
 # Get wgrib2
-RUN wget -q -O /tmp/wgrib2.tgz https://ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz
+RUN wget -q -O /build/wgrib2.tgz https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v3.6.0.tar.gz
 
-RUN mkdir /wgrib2
+RUN mkdir /build/wgrib2
 
-RUN tar -xf /tmp/wgrib2.tgz -C /wgrib2
+RUN tar -xf /build/wgrib2.tgz -C /build/wgrib2
 
-WORKDIR /wgrib2/grib2
+WORKDIR /build/wgrib2/wgrib2-3.6.0
 
-# Jasper and Pyproj4 do not seem to be compatible with ARM
-RUN sed -i "s|USE_JASPER=1|USE_JASPER=0|g" makefile
-RUN sed -i "s|USE_NETCDF4=0|USE_NETCDF4=system|g" makefile
-RUN sed -i "s|USE_HDF5=compile|USE_HDF5=/usr/include/hdf5/serial:/usr/lib/aarch64-linux-gnu/hdf5/serial|g" makefile
-RUN sed -i "s|USE_NETCDF3=1|USE_NETCDF3=0|g" makefile
-RUN sed -i "s|USE_PROJ4=1|USE_PROJ4=0|g" makefile
+RUN  cmake --fresh -DCMAKE_INSTALL_PREFIX="/build/wgrib2_build/" -DCMAKE_PREFIX_PATH="/build/NCEPLIBS_build/" -DUSE_NETCDF=ON -DUSE_OPENMP=ON -DUSE_IPOLATES=ON -DUSE_AEC=ON
+RUN cmake --build . --parallel 4
+RUN cmake --install .
 
-RUN make
+WORKDIR /app
 
-# Create a venv for python 
-RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+COPY SubH_Local_Ingest.py SubH_Local_Ingest.py
 
 # Copy the requirements file
 COPY requirements-ingest.txt requirements-ingest.txt

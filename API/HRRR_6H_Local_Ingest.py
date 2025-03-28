@@ -12,7 +12,6 @@ import sys
 import time
 import warnings
 
-import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -26,26 +25,45 @@ from numcodecs import BitRound, Blosc
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-# To be changed in the Docker version
 wgrib2_path = os.getenv(
-    "wgrib2_path", default="/home/ubuntu/wgrib2/grib2/wgrib2/wgrib2 "
+    "wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 "
 )
-forecast_process_path = os.getenv(
-    "forecast_process_path", default="/home/ubuntu/data/HRRR_forecast"
-)
-merge_process_dir = os.getenv("merge_process_dir", default="/home/ubuntu/data/")
-tmpDIR = os.getenv("tmp_dir", default="~/data")
-saveType = os.getenv("save_type", default="S3")
-s3_bucket = os.getenv("save_path", default="s3://piratezarr2")
+
+forecast_process_dir = os.getenv("forecast_process_dir", default="/home/ubuntu/Weather/HRRR_6H")
+forecast_process_path = forecast_process_dir + "/HRRR_6H_Process"
+tmpDIR = forecast_process_dir + "/Downloads"
+
+forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/HRRR_6H")
+
+saveType = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
+# Define the processing and history chunk size
+processChunk = 100
 
-# s3_bucket = 's3://pirate-s3-azb--use1-az4--x-s3'
-s3_save_path = "/ForecastProd/HRRR/HRRR_"
+# Define the final x/y chunksize
+finalChunk = 100
+
+
 hisPeriod = 36
+
+# Create new directory for processing if it does not exist
+if not os.path.exists(forecast_process_dir):
+    os.makedirs(forecast_process_dir)
+else:
+    # If it does exist, remove it
+    shutil.rmtree(forecast_process_dir)
+    os.makedirs(forecast_process_dir)
+
+if not os.path.exists(tmpDIR):
+    os.makedirs(tmpDIR)
+
+if saveType == "Download":
+    if not os.path.exists(forecast_path):
+        os.makedirs(forecast_path)
 
 
 # %% Define base time from the most recent run
@@ -53,7 +71,7 @@ hisPeriod = 36
 T0 = time.time()
 
 latestRun = Herbie_latest(
-    model="hrrr", n=3, freq="6H", fxx=[48], product="sfc", verbose=False, priority="aws"
+    model="hrrr", n=3, freq="6h", fxx=[48], product="sfc", verbose=False, priority="aws"
 )
 
 base_time = latestRun.date
@@ -62,8 +80,8 @@ print(base_time)
 # Check if this is newer than the current file
 if saveType == "S3":
     # Check if the file exists and load it
-    if s3.exists(s3_bucket + "/ForecastTar/HRRR_6H.time.pickle"):
-        with s3.open(s3_bucket + "/ForecastTar/HRRR_6H.time.pickle", "rb") as f:
+    if s3.exists(forecast_path + "/HRRR_6H.time.pickle"):
+        with s3.open(forecast_path + "/HRRR_6H.time.pickle", "rb") as f:
             previous_base_time = pickle.load(f)
 
         # Compare timestamps and download if the S3 object is more recent
@@ -72,9 +90,9 @@ if saveType == "S3":
             sys.exit()
 
 else:
-    if os.path.exists(s3_bucket + "/ForecastTar/HRRR_6H.time.pickle"):
+    if os.path.exists(forecast_path + "/HRRR_6H.time.pickle"):
         # Open the file in binary mode
-        with open(s3_bucket + "/ForecastTar/HRRR_6H.time.pickle", "rb") as file:
+        with open(forecast_path + "/HRRR_6H.time.pickle", "rb") as file:
             # Deserialize and retrieve the variable from the file
             previous_base_time = pickle.load(file)
 
@@ -105,20 +123,9 @@ zarrVars = (
 )
 
 
-# Create new directory for processing if it does not exist
-if not os.path.exists(merge_process_dir):
-    os.makedirs(merge_process_dir)
-if not os.path.exists(tmpDIR):
-    os.makedirs(tmpDIR)
-if saveType == "Download":
-    if not os.path.exists(s3_bucket):
-        os.makedirs(s3_bucket)
-    if not os.path.exists(s3_bucket + "/ForecastTar"):
-        os.makedirs(s3_bucket + "/ForecastTar")
-
 #####################################################################################################
 # %% Download forecast data using Herbie Latest
-# %% Find the latest run with 240 hours
+# Find the latest run with 240 hours
 
 
 # Define the subset of variables to download as a list of strings
@@ -152,7 +159,7 @@ matchStrings = (
 hrrr_range1 = range(18, 49)
 # Create FastHerbie object
 FH_forecastsub = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="1H"),
+    pd.date_range(start=base_time, periods=1, freq="1h"),
     model="hrrr",
     fxx=hrrr_range1,
     product="sfc",
@@ -243,17 +250,14 @@ compressor = Blosc(cname="lz4", clevel=1)
 filters = [BitRound(keepbits=12)]
 
 # No chunking since only one time step
-encoding = {
-    vname: {"compressor": compressor, "filters": filters} for vname in zarrVars[1:]
-}
 
 # with ProgressBar():
 # xarray_forecast_merged.to_netcdf(forecast_process_path + 'merged_netcdf.nc', encoding=encoding)
 xarray_forecast_merged = xarray_forecast_merged.chunk(
-    chunks={"time": 31, "x": 90, "y": 90}
+    chunks={"time": 31, "x": processChunk, "y": processChunk}
 )
 xarray_forecast_merged.to_zarr(
-    forecast_process_path + "_xr_merged.zarr", encoding=encoding, mode="w"
+    forecast_process_path + "_xr_merged.zarr", mode="w", consolidated=False
 )
 
 # Remove wgrib2 temp files
@@ -262,100 +266,121 @@ os.remove(forecast_process_path + "_wgrib2_merged.regrid")
 os.remove(forecast_process_path + "_wgrib2_merged.nc")
 
 # %% Format as dask and save as zarr
-#####################################################################################################
-# Convert from xarray to dask dataframe
-daskArrays = []
+#####################################################################################################\
 
-for dask_var in zarrVars:
-    # Concatenate the dask arrays through time
+# Dask Setup
+daskInterpArrays = []
+daskVarArrays = []
+daskVarArrayList = []
+
+# This is quite a bit simplier since there's no historic data being ingested
+
+for daskVarIDX, dask_var in enumerate(zarrVars[:]):
+    daskForecastArray = da.from_zarr(
+        forecast_process_path + "_xr_merged.zarr", component=dask_var, inline_array=True
+    )
+
     if dask_var == "time":
-        daskArrays.append(
-            da.from_array(
-                np.tile(
-                    np.expand_dims(
-                        np.expand_dims(
-                            dask.delayed(da.from_zarr)(
-                                forecast_process_path + "_xr_merged.zarr",
-                                component=dask_var,
-                                inline_array=True,
-                            )
-                            .compute()
-                            .astype("float32")
-                            .compute(),
-                            axis=1,
-                        ),
-                        axis=1,
-                    ),
-                    (1, 1059, 1799),
-                )
-            )
+        # Create a time array with the same shape
+        daskCatTimes =  daskForecastArray.astype("float32")
+
+        # Get times as numpy
+        npCatTimes = daskCatTimes.compute()
+
+        daskArrayOut = da.from_array(np.tile(
+            np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1), (1, 1059, 1799)
+        )).rechunk((len(npCatTimes), processChunk, processChunk))
+
+        daskVarArrayList.append(daskArrayOut)
+
+    else:
+
+        daskVarArrayList.append(daskForecastArray.rechunk((len(npCatTimes), processChunk, processChunk)).astype("float32"))
+
+    daskVarArrays = []
+
+    print(dask_var)
+
+
+# Merge the arrays into a single 4D array
+daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
+
+# Write out to disk
+# This intermediate step is necessary to avoid memory overflow
+# with ProgressBar():
+daskVarArrayListMerge.to_zarr(forecast_process_path + '_stack.zarr', overwrite=True, compute=True)
+
+# Read in stacked 4D array back in
+daskVarArrayStackDisk = da.from_zarr(forecast_process_path + '_stack.zarr')
+
+# Create a zarr backed dask array
+if saveType == "S3":
+    zarr_store = zarr.storage.ZipStore(forecast_process_dir + '/HRRR_6H.zarr.zip', mode='a')
+    zarr_array = zarr.open_array(
+        store=zarr_store,
+        shape=(len(zarrVars), len(npCatTimes), daskVarArrayStackDisk.shape[2], daskVarArrayStackDisk.shape[3]),
+        chunks=(len(zarrVars), len(npCatTimes), finalChunk, finalChunk),
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32"
+    )
+else:
+    zarr_store = zarr.storage.LocalStore(forecast_path + '/HRRRH_6H.zarr')
+
+    # Check if the store exists, if so, open itm otherwise create it
+    if os.path.isfile(str(zarr_store.root) + '/c/0/0/0/0'):
+        # Create a Zarr array in the store with zstd compression
+        zarr_array = zarr.open_array(
+            store=zarr_store
         )
     else:
-        # Concatenate the dask arrays through time
-        daskArrays.append(
-            dask.delayed(da.from_zarr)(
-                forecast_process_path + "_xr_merged.zarr",
-                component=dask_var,
-                inline_array=True,
-            )
+        zarr_array = zarr.create_array(
+            store=zarr_store,
+            shape=(len(zarrVars), len(npCatTimes), daskVarArrayStackDisk.shape[2], daskVarArrayStackDisk.shape[3]),
+            chunks=(len(zarrVars), len(npCatTimes), finalChunk, finalChunk),
+            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+            dtype="float32"
         )
 
-# Stack the DataArrays into a Dask array
-stacked_dask_array = dask.delayed(da.stack)(daskArrays, axis=0)
+from dask.diagnostics import ProgressBar
+# with ProgressBar():
+da.rechunk(daskVarArrayStackDisk,
+    (len(zarrVars), len(npCatTimes), finalChunk, finalChunk)).to_zarr(
+                zarr_array,
+                 compute=True)
 
-# Chunk the Dask for fast reads at one point
-# Variable, time, lat, lon
-chunked_dask_array = stacked_dask_array.rechunk((17, 31, 3, 3)).astype("float32")
+if saveType == "S3":
+    zarr_store.close()
 
-# Setup S3 for dask array save
-# s3_path = s3_bucket + s3_save_path + base_time.strftime('%Y%m%dT%H%M%SZ') + '_TEST'
-# s3store = s3fs.S3Map(root=s3_path, s3=s3, create=True)
-
-# Define the compressor
-# filters = [BitRound(keepbits=9)] # Only keep ~ 3 significant digits
-compressor = Blosc(cname="zstd", clevel=3)  # Use zstd compression
-
-
-# Save to Zip
-zip_store = zarr.ZipStore(merge_process_dir + "/HRRR_6H.zarr.zip", compression=0)
-chunked_dask_array.to_zarr(zip_store, compressor=compressor, overwrite=True).compute()
-zip_store.close()
-
-# Upload to S3
+#%% Upload to S3
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        merge_process_dir + "/HRRR_6H.zarr.zip",
-        s3_bucket + "/ForecastTar/HRRR_6H.zarr.zip",
+        forecast_process_dir + "/HRRRH_6H.zarr.zip", forecast_path + "/HRRRH_6H.zarr.zip"
     )
 
     # Write most recent forecast time
-    with open(merge_process_dir + "/HRRR_6H.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/HRRRH_6H.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     s3.put_file(
-        merge_process_dir + "/HRRR_6H.time.pickle",
-        s3_bucket + "/ForecastTar/HRRR_6H.time.pickle",
+        forecast_process_dir + "/HRRRH_6H.time.pickle",
+        forecast_path + "/HRRRH_6H.time.pickle",
     )
-
 else:
-    # Move to local
-    shutil.move(
-        merge_process_dir + "/HRRR_6H.zarr.zip",
-        s3_bucket + "/ForecastTar/HRRR_6H.zarr.zip",
-    )
     # Write most recent forecast time
-    with open(merge_process_dir + "/HRRR_6H.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/HRRRH_6H.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     shutil.move(
-        merge_process_dir + "/HRRR_6H.time.pickle",
-        s3_bucket + "/ForecastTar/HRRR_6H.time.pickle",
+        forecast_process_dir + "/HRRRH_6H.time.pickle",
+        forecast_path + "/HRRRH_6H.time.pickle",
     )
-    # Clean up
-    shutil.rmtree(merge_process_dir)
+# Clean up
+shutil.rmtree(forecast_process_dir)
 
+# Test Read
 T1 = time.time()
 print(T1 - T0)
+
