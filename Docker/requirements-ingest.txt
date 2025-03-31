@@ -1,5 +1,5 @@
 numpy==2.2.4
-boto3==1.37.18
+boto3==1.37.23
 netCDF4==1.7.2
 xarray==2025.1.2
 cartopy==0.24.1
@@ -7,7 +7,7 @@ cfgrib==0.9.15.0
 eccodes==2.40.1
 zarr==3.0.5
 dask==2025.2.0
-s3fs==2025.3.0
+s3fs==2025.3.2
 bottleneck==1.4.2
 rioxarray==0.18.2
 distributed==2025.2.0
