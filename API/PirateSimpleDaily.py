@@ -278,7 +278,7 @@ def calculate_simple_day_text(
             )
 
     # If we have only snow or if snow is the secondary condition then calculate the accumulation range
-    if snowPrep > (5 * prepAccumUnit) or secondary == "medium-snow":
+    if snowPrep > (10 * prepAccumUnit) or secondary == "medium-snow":
         # GEFS accumulation error seems to always be equal to the accumulation so use half of the accumulation as the range
         snowLowAccum = math.floor(snowPrep - (snowPrep / 2))
         snowMaxAccum = math.ceil(snowPrep + (snowPrep / 2))
