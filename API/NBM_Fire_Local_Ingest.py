@@ -45,17 +45,19 @@ def rounder(t):
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-wgrib2_path = os.getenv(
-    "wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 "
-)
+wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
 
-forecast_process_dir = os.getenv("forecast_process_dir", default="/home/ubuntu/Weather/NBM_Fire")
+forecast_process_dir = os.getenv(
+    "forecast_process_dir", default="/home/ubuntu/Weather/NBM_Fire"
+)
 forecast_process_path = forecast_process_dir + "/NBM_Fire_Process"
 hist_process_path = forecast_process_dir + "/NBM_Fire_Historic"
 tmpDIR = forecast_process_dir + "/Downloads"
 
 forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/NBM_Fire")
-historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/History/NBM_Fire")
+historic_path = os.getenv(
+    "historic_path", default="/home/ubuntu/Weather/History/NBM_Fire"
+)
 
 
 saveType = os.getenv("save_type", default="Download")
@@ -344,7 +346,9 @@ with dask.config.set(**{"array.slicing.split_large_chunks": True}):
         )
 
         # Rechunk
-        daskArray = daskArray.rechunk(chunks=(len(nbm_range), processChunk, processChunk))
+        daskArray = daskArray.rechunk(
+            chunks=(len(nbm_range), processChunk, processChunk)
+        )
 
         # Save merged and processed xarray dataset to disk using zarr with compression
         # Define the path to save the zarr dataset
@@ -474,8 +478,7 @@ for i in range(hisPeriod, 1, -6):
         # Create local Zarr store
         zarrStore = zarr.storage.LocalStore(local_path)
 
-    xarray_his_wgrib.to_zarr(
-        store=zarrStore, mode="w", consolidated=False)
+    xarray_his_wgrib.to_zarr(store=zarrStore, mode="w", consolidated=False)
 
     # Clear the xarray dataset from memory
     del xarray_his_wgrib
@@ -522,10 +525,12 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
                 da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
             )
 
-    daskVarArraysStack = da.stack(daskVarArrays, allow_unknown_chunksizes=True).squeeze()
+    daskVarArraysStack = da.stack(
+        daskVarArrays, allow_unknown_chunksizes=True
+    ).squeeze()
 
     daskForecastArray = da.from_zarr(
-        forecast_process_path + "_zarrs" + '/' + dask_var + '.zarr', inline_array=True
+        forecast_process_path + "_zarrs" + "/" + dask_var + ".zarr", inline_array=True
     )
 
     if dask_var == "time":
@@ -537,71 +542,87 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
         # Get times as numpy
         npCatTimes = daskCatTimes.compute()
 
-        daskArrayOut = da.from_array(np.tile(
-            np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1), (1, 1597, 2345)
-        )).rechunk((len(stacked_timesUnix), processChunk, processChunk))
+        daskArrayOut = da.from_array(
+            np.tile(
+                np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
+                (1, 1597, 2345),
+            )
+        ).rechunk((len(stacked_timesUnix), processChunk, processChunk))
 
         daskVarArrayList.append(daskArrayOut)
 
     else:
         daskArrayOut = da.concatenate((daskVarArraysStack, daskForecastArray), axis=0)
 
-        daskVarArrayList.append(daskArrayOut[:, :, :].rechunk((len(stacked_timesUnix), processChunk, processChunk)).astype("float32"))
+        daskVarArrayList.append(
+            daskArrayOut[:, :, :]
+            .rechunk((len(stacked_timesUnix), processChunk, processChunk))
+            .astype("float32")
+        )
 
     daskVarArrays = []
 
     print(dask_var)
 
-from dask.diagnostics import ProgressBar
+
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
-daskVarArrayListMerge.to_zarr(forecast_process_path + '_stack.zarr', overwrite=True, compute=True)
+daskVarArrayListMerge.to_zarr(
+    forecast_process_path + "_stack.zarr", overwrite=True, compute=True
+)
 
 # Read in stacked 4D array back in
-daskVarArrayStackDisk = da.from_zarr(forecast_process_path + '_stack.zarr')
+daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
 # Create a zarr backed dask array
 if saveType == "S3":
-    zarr_store = zarr.storage.ZipStore(forecast_process_dir + '/NBM_Fire.zarr.zip', mode='w')
+    zarr_store = zarr.storage.ZipStore(
+        forecast_process_dir + "/NBM_Fire.zarr.zip", mode="w"
+    )
     zarr_array = zarr.open_array(
         store=zarr_store,
-        shape=(len(zarrVars), len(npCatTimes), daskVarArrayStackDisk.shape[2], daskVarArrayStackDisk.shape[3]),
+        shape=(
+            len(zarrVars),
+            len(npCatTimes),
+            daskVarArrayStackDisk.shape[2],
+            daskVarArrayStackDisk.shape[3],
+        ),
         chunks=(len(zarrVars), len(npCatTimes), finalChunk, finalChunk),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32"
+        dtype="float32",
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_path + '/NBM_Fire.zarr')
+    zarr_store = zarr.storage.LocalStore(forecast_path + "/NBM_Fire.zarr")
 
     # Check if the store exists, if so, open itm otherwise create it
-    if os.path.isfile(str(zarr_store.root) + '/c/0/0/0/0'):
+    if os.path.isfile(str(zarr_store.root) + "/c/0/0/0/0"):
         # Create a Zarr array in the store with zstd compression
-        zarr_array = zarr.open_array(
-            store=zarr_store
-        )
+        zarr_array = zarr.open_array(store=zarr_store)
     else:
         zarr_array = zarr.create_array(
             store=zarr_store,
             shape=daskVarArrayStackDisk.shape,
             chunks=(len(zarrVars), len(npCatTimes), finalChunk, finalChunk),
             compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32"
+            dtype="float32",
         )
 
 # with ProgressBar():
-stackInterp = da.rechunk(da.map_blocks(
-                linInterp1D,
-                daskVarArrayStackDisk,
-                stacked_timesUnix,
-                hourly_timesUnix,
-                dtype="float32",
-                chunks=(1, len(stacked_timesUnix), processChunk, processChunk)
-            ), (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)).to_zarr(
-                zarr_array, overwrite=True, compute=True)
+stackInterp = da.rechunk(
+    da.map_blocks(
+        linInterp1D,
+        daskVarArrayStackDisk,
+        stacked_timesUnix,
+        hourly_timesUnix,
+        dtype="float32",
+        chunks=(1, len(stacked_timesUnix), processChunk, processChunk),
+    ),
+    (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
+).to_zarr(zarr_array, overwrite=True, compute=True)
 
 if saveType == "S3":
     zarr_store.close()

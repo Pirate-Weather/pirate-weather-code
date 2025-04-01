@@ -25,11 +25,11 @@ from numcodecs import BitRound, Blosc
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-wgrib2_path = os.getenv(
-    "wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 "
-)
+wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
 
-forecast_process_dir = os.getenv("forecast_process_dir", default="/home/ubuntu/Weather/HRRR_6H")
+forecast_process_dir = os.getenv(
+    "forecast_process_dir", default="/home/ubuntu/Weather/HRRR_6H"
+)
 forecast_process_path = forecast_process_dir + "/HRRR_6H_Process"
 tmpDIR = forecast_process_dir + "/Downloads"
 
@@ -282,20 +282,26 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 
     if dask_var == "time":
         # Create a time array with the same shape
-        daskCatTimes =  daskForecastArray.astype("float32")
+        daskCatTimes = daskForecastArray.astype("float32")
 
         # Get times as numpy
         npCatTimes = daskCatTimes.compute()
 
-        daskArrayOut = da.from_array(np.tile(
-            np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1), (1, 1059, 1799)
-        )).rechunk((len(npCatTimes), processChunk, processChunk))
+        daskArrayOut = da.from_array(
+            np.tile(
+                np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
+                (1, 1059, 1799),
+            )
+        ).rechunk((len(npCatTimes), processChunk, processChunk))
 
         daskVarArrayList.append(daskArrayOut)
 
     else:
-
-        daskVarArrayList.append(daskForecastArray.rechunk((len(npCatTimes), processChunk, processChunk)).astype("float32"))
+        daskVarArrayList.append(
+            daskForecastArray.rechunk(
+                (len(npCatTimes), processChunk, processChunk)
+            ).astype("float32")
+        )
 
     daskVarArrays = []
 
@@ -308,54 +314,66 @@ daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
-daskVarArrayListMerge.to_zarr(forecast_process_path + '_stack.zarr', overwrite=True, compute=True)
+daskVarArrayListMerge.to_zarr(
+    forecast_process_path + "_stack.zarr", overwrite=True, compute=True
+)
 
 # Read in stacked 4D array back in
-daskVarArrayStackDisk = da.from_zarr(forecast_process_path + '_stack.zarr')
+daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
 # Create a zarr backed dask array
 if saveType == "S3":
-    zarr_store = zarr.storage.ZipStore(forecast_process_dir + '/HRRR_6H.zarr.zip', mode='a')
+    zarr_store = zarr.storage.ZipStore(
+        forecast_process_dir + "/HRRR_6H.zarr.zip", mode="a"
+    )
     zarr_array = zarr.open_array(
         store=zarr_store,
-        shape=(len(zarrVars), len(npCatTimes), daskVarArrayStackDisk.shape[2], daskVarArrayStackDisk.shape[3]),
+        shape=(
+            len(zarrVars),
+            len(npCatTimes),
+            daskVarArrayStackDisk.shape[2],
+            daskVarArrayStackDisk.shape[3],
+        ),
         chunks=(len(zarrVars), len(npCatTimes), finalChunk, finalChunk),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32"
+        dtype="float32",
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_path + '/HRRRH_6H.zarr')
+    zarr_store = zarr.storage.LocalStore(forecast_path + "/HRRRH_6H.zarr")
 
     # Check if the store exists, if so, open itm otherwise create it
-    if os.path.isfile(str(zarr_store.root) + '/c/0/0/0/0'):
+    if os.path.isfile(str(zarr_store.root) + "/c/0/0/0/0"):
         # Create a Zarr array in the store with zstd compression
-        zarr_array = zarr.open_array(
-            store=zarr_store
-        )
+        zarr_array = zarr.open_array(store=zarr_store)
     else:
         zarr_array = zarr.create_array(
             store=zarr_store,
-            shape=(len(zarrVars), len(npCatTimes), daskVarArrayStackDisk.shape[2], daskVarArrayStackDisk.shape[3]),
+            shape=(
+                len(zarrVars),
+                len(npCatTimes),
+                daskVarArrayStackDisk.shape[2],
+                daskVarArrayStackDisk.shape[3],
+            ),
             chunks=(len(zarrVars), len(npCatTimes), finalChunk, finalChunk),
             compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32"
+            dtype="float32",
         )
 
-from dask.diagnostics import ProgressBar
+
 # with ProgressBar():
-da.rechunk(daskVarArrayStackDisk,
-    (len(zarrVars), len(npCatTimes), finalChunk, finalChunk)).to_zarr(
-                zarr_array,
-                 compute=True)
+da.rechunk(
+    daskVarArrayStackDisk, (len(zarrVars), len(npCatTimes), finalChunk, finalChunk)
+).to_zarr(zarr_array, compute=True)
 
 if saveType == "S3":
     zarr_store.close()
 
-#%% Upload to S3
+# %% Upload to S3
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/HRRRH_6H.zarr.zip", forecast_path + "/HRRRH_6H.zarr.zip"
+        forecast_process_dir + "/HRRRH_6H.zarr.zip",
+        forecast_path + "/HRRRH_6H.zarr.zip",
     )
 
     # Write most recent forecast time
@@ -383,4 +401,3 @@ shutil.rmtree(forecast_process_dir)
 # Test Read
 T1 = time.time()
 print(T1 - T0)
-

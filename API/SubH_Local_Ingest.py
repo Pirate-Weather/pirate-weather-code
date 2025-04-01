@@ -24,11 +24,11 @@ from herbie.fast import Herbie_latest
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 # %% Setup paths and parameters
-wgrib2_path = os.getenv(
-    "wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 "
-)
+wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
 
-forecast_process_dir = os.getenv("forecast_process_dir", default="/home/ubuntu/Weather/SubH")
+forecast_process_dir = os.getenv(
+    "forecast_process_dir", default="/home/ubuntu/Weather/SubH"
+)
 forecast_process_path = forecast_process_dir + "/SubH_Process"
 tmpDIR = forecast_process_dir + "/Downloads"
 
@@ -120,7 +120,7 @@ zarrVars = (
     "CICEP_surface",
     "CFRZR_surface",
     "CRAIN_surface",
-    "REFC_entireatmosphere"
+    "REFC_entireatmosphere",
 )
 #
 
@@ -138,7 +138,9 @@ matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*min fcst)"
 matchstring_sl = "(:(REFC):)"
 
 # Merge matchstrings for download
-matchStrings = matchstring_2m + "|" + matchstring_su + "|" + matchstring_10m + "|" + matchstring_sl
+matchStrings = (
+    matchstring_2m + "|" + matchstring_su + "|" + matchstring_10m + "|" + matchstring_sl
+)
 
 # Create a range of forecast lead times
 # Go from 1 to 7 to account for the weird prate approach
@@ -267,20 +269,26 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 
     if dask_var == "time":
         # Create a time array with the same shape
-        daskCatTimes =  daskForecastArray.astype("float32")
+        daskCatTimes = daskForecastArray.astype("float32")
 
         # Get times as numpy
         npCatTimes = daskCatTimes.compute()
 
-        daskArrayOut = da.from_array(np.tile(
-            np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1), (1, 1059, 1799)
-        )).rechunk((len(npCatTimes), 20, 20))
+        daskArrayOut = da.from_array(
+            np.tile(
+                np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
+                (1, 1059, 1799),
+            )
+        ).rechunk((len(npCatTimes), 20, 20))
 
         daskVarArrayList.append(daskArrayOut)
 
     else:
-
-        daskVarArrayList.append(daskForecastArray.rechunk((len(npCatTimes), processChunk, processChunk)).astype("float32"))
+        daskVarArrayList.append(
+            daskForecastArray.rechunk(
+                (len(npCatTimes), processChunk, processChunk)
+            ).astype("float32")
+        )
 
     daskVarArrays = []
 
@@ -293,50 +301,57 @@ daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
-daskVarArrayListMerge.to_zarr(forecast_process_path + '_stack.zarr', overwrite=True, compute=True)
+daskVarArrayListMerge.to_zarr(
+    forecast_process_path + "_stack.zarr", overwrite=True, compute=True
+)
 
 # Read in stacked 4D array back in
-daskVarArrayStackDisk = da.from_zarr(forecast_process_path + '_stack.zarr')
+daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
 # Create a zarr backed dask array
 if saveType == "S3":
-    zarr_store = zarr.storage.ZipStore(forecast_process_dir + '/SubH.zarr.zip', mode='w')
+    zarr_store = zarr.storage.ZipStore(
+        forecast_process_dir + "/SubH.zarr.zip", mode="w"
+    )
     zarr_array = zarr.open_array(
         store=zarr_store,
         shape=(len(zarrVars), 20, 1059, 1799),
         chunks=(len(zarrVars), 20, 5, 5),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32"
+        dtype="float32",
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_path + '/SubH.zarr')
+    zarr_store = zarr.storage.LocalStore(forecast_path + "/SubH.zarr")
 
     # Check if the store exists, if so, open itm otherwise create it
-    if os.path.isfile(str(zarr_store.root) + '/c/0/0/0/0'):
+    if os.path.isfile(str(zarr_store.root) + "/c/0/0/0/0"):
         # Create a Zarr array in the store with zstd compression
-        zarr_array = zarr.open_array(
-            store=zarr_store
-        )
+        zarr_array = zarr.open_array(store=zarr_store)
     else:
         zarr_array = zarr.open_array(
             store=zarr_store,
             shape=daskVarArrayStackDisk.shape,
-            chunks=(len(zarrVars), daskVarArrayStackDisk.shape[1], finalChunk, finalChunk),
+            chunks=(
+                len(zarrVars),
+                daskVarArrayStackDisk.shape[1],
+                finalChunk,
+                finalChunk,
+            ),
             compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32"
+            dtype="float32",
         )
 
-from dask.diagnostics import ProgressBar
+
 # with ProgressBar():
-da.rechunk(daskVarArrayStackDisk,
-    (len(zarrVars), daskVarArrayStackDisk.shape[1], finalChunk, finalChunk)).to_zarr(
-                zarr_array,
-                 compute=True)
+da.rechunk(
+    daskVarArrayStackDisk,
+    (len(zarrVars), daskVarArrayStackDisk.shape[1], finalChunk, finalChunk),
+).to_zarr(zarr_array, compute=True)
 
 if saveType == "S3":
     zarr_store.close()
 
-#%% Upload to S3
+# %% Upload to S3
 if saveType == "S3":
     # Upload to S3
     s3.put_file(

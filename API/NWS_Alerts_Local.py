@@ -16,20 +16,23 @@ import requests
 import s3fs
 import zarr
 from numpy.dtypes import StringDType
-from dask.diagnostics import ProgressBar
 
 # %% Setup paths and parameters
-wgrib2_path = os.getenv(
-    "wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 "
-)
+wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
 
-forecast_process_dir = os.getenv("forecast_process_dir", default="/home/ubuntu/Weather/NWS_Alerts")
+forecast_process_dir = os.getenv(
+    "forecast_process_dir", default="/home/ubuntu/Weather/NWS_Alerts"
+)
 forecast_process_path = forecast_process_dir + "/NWS_Alerts_Process"
 hist_process_path = forecast_process_dir + "/NWS_Alerts_Historic"
 tmpDIR = forecast_process_dir + "/Downloads"
 
-forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/NWS_Alerts")
-historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/History/NWS_Alerts")
+forecast_path = os.getenv(
+    "forecast_path", default="/home/ubuntu/Weather/Prod/NWS_Alerts"
+)
+historic_path = os.getenv(
+    "historic_path", default="/home/ubuntu/Weather/History/NWS_Alerts"
+)
 
 
 saveType = os.getenv("save_type", default="Download")
@@ -212,7 +215,7 @@ gridPointsSeries.loc[gridPointsSeries["string"].isna(), ["string"]] = ""
 # Concert to string
 gridPointsSeries["string"] = gridPointsSeries["string"].astype(str)
 
-#%% XR approach
+# %% XR approach
 gridPoints_XR = gridPointsSeries["string"].to_xarray()
 
 # Reshape to 2D
@@ -221,9 +224,11 @@ gridPoints_XR2 = gridPoints_XR.values.astype(StringDType()).reshape(lons.shape)
 # Write to zarr
 # Save as zarr
 if saveType == "S3":
-    zarr_store = zarr.storage.ZipStore(forecast_process_dir + '/NWS_Alerts.zarr.zip', mode='a')
+    zarr_store = zarr.storage.ZipStore(
+        forecast_process_dir + "/NWS_Alerts.zarr.zip", mode="a"
+    )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_path + '/NWS_Alerts.zarr')
+    zarr_store = zarr.storage.LocalStore(forecast_path + "/NWS_Alerts.zarr")
 
 
 # Create a Zarr array in the store with zstd compression
@@ -243,7 +248,6 @@ if saveType == "S3":
 # )
 # alertsReadTest = zarr.open_array(zip_store_read)
 # print(alertsReadTest[600, 1500:])
-
 
 
 # Upload to S3
