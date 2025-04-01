@@ -9,6 +9,8 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "weekly"
+      time: "13:00"
+      timezone: "America/Toronto"
     assignees:
       - "alexander0042"
     groups:
@@ -21,6 +23,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+      time: "13:00"
+      timezone: "America/Toronto"
     groups:
       non-major-versions: # the name of the group
         update-types:     # the key used to specify the semver level to include in the group
@@ -31,4 +35,8 @@ updates:
     directory: "/Docker"
     schedule:
       interval: "weekly"
+      time: "13:00"
+      timezone: "America/Toronto"
+    assignees:
+      - "alexander0042"
     open-pull-requests-limit: 100
