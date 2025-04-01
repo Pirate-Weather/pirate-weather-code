@@ -176,7 +176,7 @@ def calculate_precip_text(
         (rainPrep > precipIconThreshold and prepIntensity > precipIconThreshold)
         or (snowPrep >= snowIconThreshold and prepIntensity > snowIconThreshold)
         or (icePrep >= precipIconThreshold and prepIntensity > precipIconThreshold)
-        or (totalPrep >= rainIconThreshold and numTypes > 1)
+        or (totalPrep >= precipIconThreshold and numTypes > 1)
     ):
         if prepType == "none":
             cIcon = "rain"  # Fallback icon
