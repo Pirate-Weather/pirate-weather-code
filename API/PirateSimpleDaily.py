@@ -12,31 +12,63 @@ def calculate_precip_text(
     icePrep,
     precipType,
 ):
+    if prepAccumUnit == 0.1:
+        prepIntensityUnit = 1
+    else:
+        prepIntensityUnit = prepAccumUnit
+
     # In mm/h
-    lightRainThresh = 0.4 * prepAccumUnit * 24
-    midRainThresh = 2.5 * prepAccumUnit * 24
-    heavyRainThresh = 10 * prepAccumUnit * 24
-    lightSnowThresh = 1.33 * prepAccumUnit * 24
-    midSnowThresh = 8.33 * prepAccumUnit * 24
-    heavySnowThresh = 33.33 * prepAccumUnit * 24
-    lightSleetThresh = 0.4 * prepAccumUnit * 24
-    midSleetThresh = 2.5 * prepAccumUnit * 24
-    heavySleetThresh = 10.0 * prepAccumUnit * 24
+    lightRainThresh = 0.4 * prepIntensityUnit
+    midRainThresh = 2.5 * prepIntensityUnit
+    heavyRainThresh = 10 * prepIntensityUnit
+    lightSnowThresh = 0.13 * prepIntensityUnit
+    midSnowThresh = 0.83 * prepIntensityUnit
+    heavySnowThresh = 3.33 * prepIntensityUnit
+    lightSleetThresh = 0.4 * prepIntensityUnit
+    midSleetThresh = 2.5 * prepIntensityUnit
+    heavySleetThresh = 10.0 * prepIntensityUnit
 
     snowIconThreshold = 10.0 * prepAccumUnit
     rainIconThreshold = 1.0 * prepAccumUnit
     iceIconThreshold = 1.0 * prepAccumUnit
     numTypes = 0
+    totalPrep = rainPrep + snowPrep + icePrep
 
     if "precipProbability" in hourObject:
         pop = hourObject["precipProbability"]
     else:
         pop = 1
 
+    if "precipIntensityMax" in hourObject:
+        prepIntensity = hourObject["precipIntensityMax"]
+    else:
+        prepIntensity = totalPrep / 24
+
     possiblePrecip = ""
     cIcon = None
     cText = None
-    totalPrep = rainPrep + snowPrep + icePrep
+
+    # If the precipType is snow with no snow check if the other types have any precipitation and if they do then change the type of precipiation
+    if snowPrep == 0 and precipType == "snow":
+        if rainPrep > 0:
+            precipType = "rain"
+        elif icePrep > 0:
+            precipType = "sleet"
+
+    # If the precipType is rain with no rain check if the other types have any precipitation and if they do then change the type of precipiation
+    if rainPrep == 0 and precipType == "rain":
+        if snowPrep > 0:
+            precipType = "snow"
+        elif icePrep > 0:
+            precipType = "sleet"
+
+    # If the precipType is sleet with no sleet check if the other types have any precipitation and if they do then change the type of precipiation
+    if icePrep == 0 and precipType == "sleet":
+        if snowPrep > 0:
+            precipType = "snow"
+        elif rainPrep > 0:
+            precipType = "rain"
+
     # Add the possible precipitation text if pop is less than 30% or if pop is greater than 0 but precipIntensity is between 0-0.02 mm/h
     if (pop < 0.25) or (
         (
@@ -76,46 +108,46 @@ def calculate_precip_text(
         (rainPrep >= rainIconThreshold)
         or (snowPrep >= snowIconThreshold)
         or (icePrep >= iceIconThreshold)
-        or (totalPrep >= rainIconThreshold)
+        or (totalPrep >= rainIconThreshold and numTypes > 1)
     ):
         if precipType == "none":
             cIcon = "rain"  # Fallback icon
         else:
             cIcon = precipType
 
-    if rainPrep > 0 and precipType == "rain":
-        if rainPrep < lightRainThresh:
+    if prepIntensity > 0 and precipType == "rain":
+        if prepIntensity < lightRainThresh:
             cText = possiblePrecip + "very-light-rain"
-        elif rainPrep >= lightRainThresh and rainPrep < midRainThresh:
+        elif prepIntensity >= lightRainThresh and prepIntensity < midRainThresh:
             cText = possiblePrecip + "light-rain"
-        elif rainPrep >= midRainThresh and rainPrep < heavyRainThresh:
+        elif prepIntensity >= midRainThresh and prepIntensity < heavyRainThresh:
             cText = "medium-rain"
         else:
             cText = "heavy-rain"
-    elif snowPrep > 0 and precipType == "snow":
-        if snowPrep < lightSnowThresh:
+    elif prepIntensity > 0 and precipType == "snow":
+        if prepIntensity < lightSnowThresh:
             cText = possiblePrecip + "very-light-snow"
-        elif snowPrep >= lightSnowThresh and snowPrep < midSnowThresh:
+        elif prepIntensity >= lightSnowThresh and prepIntensity < midSnowThresh:
             cText = possiblePrecip + "light-snow"
-        elif snowPrep >= midSnowThresh and snowPrep < heavySnowThresh:
+        elif prepIntensity >= midSnowThresh and prepIntensity < heavySnowThresh:
             cText = "medium-snow"
         else:
             cText = "heavy-snow"
-    elif icePrep > 0 and precipType == "sleet":
-        if icePrep < lightSleetThresh:
+    elif prepIntensity > 0 and precipType == "sleet":
+        if prepIntensity < lightSleetThresh:
             cText = possiblePrecip + "very-light-sleet"
-        elif icePrep >= lightSleetThresh and icePrep < midSleetThresh:
+        elif prepIntensity >= lightSleetThresh and prepIntensity < midSleetThresh:
             cText = possiblePrecip + "light-sleet"
-        elif icePrep >= midSleetThresh and icePrep < heavySleetThresh:
+        elif prepIntensity >= midSleetThresh and prepIntensity < heavySleetThresh:
             cText = "medium-sleet"
         else:
             cText = "heavy-sleet"
-    elif (rainPrep > 0 or snowPrep > 0 or icePrep > 0) and precipType == "none":
-        if rainPrep < lightRainThresh:
+    elif prepIntensity > 0 and precipType == "none":
+        if prepIntensity < lightRainThresh:
             cText = possiblePrecip + "very-light-precipitation"
-        elif rainPrep >= lightRainThresh and rainPrep < midRainThresh:
+        elif prepIntensity >= lightRainThresh and prepIntensity < midRainThresh:
             cText = possiblePrecip + "light-precipitation"
-        elif rainPrep >= midRainThresh and rainPrep < heavyRainThresh:
+        elif prepIntensity >= midRainThresh and prepIntensity < heavyRainThresh:
             cText = "medium-precipitation"
         else:
             cText = "heavy-precipitation"
@@ -175,7 +207,7 @@ def calculate_simple_day_text(
     totalPrep = rainPrep + snowPrep + icePrep
 
     # Only calculate the precipitation text if there is any possibility of precipitation > 0
-    if pop > 0 and totalPrep >= 0.1 * prepAccumUnit:
+    if pop > 0 and totalPrep >= (0.01 * prepAccumUnit):
         # Check if there is rain, snow and ice accumulation for the day
         if snowPrep > 0 and rainPrep > 0 and icePrep > 0:
             # If there is then used the mixed precipitation text and set the icon/type to sleet. Set the secondary condition to snow so the totals can be in the summary
@@ -221,6 +253,19 @@ def calculate_simple_day_text(
                     precipType = "rain"
                     secondary = "medium-sleet"
 
+            # If more than 10 mm of rain is forecast, then rain
+            if rainPrep > (10 * prepAccumUnit) and precipType != "rain":
+                secondary = "medium-" + precipType
+                precipType = "rain"
+            # If more than 5 mm of snow is forecast, then snow
+            if snowPrep > (5 * prepAccumUnit) and precipType != "snow":
+                secondary = "medium-" + precipType
+                precipType = "snow"
+            # Else, if more than 1 mm of ice is forecast, then ice
+            if icePrep > (1 * prepAccumUnit) and precipType != "sleet":
+                secondary = "medium-" + precipType
+                precipType = "sleet"
+
             # Calculate the precipitation text and summary
             precipText, precipIcon = calculate_precip_text(
                 hourObject,
@@ -232,7 +277,6 @@ def calculate_simple_day_text(
                 precipType,
             )
 
-    print(precipIcon)
     # If we have only snow or if snow is the secondary condition then calculate the accumulation range
     if snowPrep > (5 * prepAccumUnit) or secondary == "medium-snow":
         # GEFS accumulation error seems to always be equal to the accumulation so use half of the accumulation as the range
@@ -295,6 +339,7 @@ def calculate_simple_day_text(
         else:
             precipText = snowText
 
+    # Calculate day text with no precipitation as is already calculated above
     dayText, dayIcon = calculate_text(
         hourObject,
         prepAccumUnit,
@@ -302,9 +347,9 @@ def calculate_simple_day_text(
         windUnit,
         tempUnits,
         isDayTime,
-        rainPrep,
-        snowPrep,
-        icePrep,
+        0,
+        0,
+        0,
         "day",
         "sentence",
     )
