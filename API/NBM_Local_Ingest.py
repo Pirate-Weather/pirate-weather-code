@@ -23,7 +23,6 @@ from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 from scipy.interpolate import make_interp_spline
 
-
 # Scipy Interp Function
 def linInterp1D(block, T_in, T_out):
     interp = make_interp_spline(T_in, block, 3, axis=1)
@@ -841,7 +840,6 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 
     print(dask_var)
 
-from dask.diagnostics import ProgressBar
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
@@ -947,10 +945,10 @@ for z in [0, 2, 6, 7, 8, 13, 14, 15, 16, 17]:
                 dtype="float32"
             )
 
-    with ProgressBar():
-        da.rechunk(daskVarArrayStackDisk[z, 24:60, :, :], (36, 100, 100)).to_zarr(
-            zarr_array, overwrite=True, compute=True
-        )
+    # with ProgressBar():
+    da.rechunk(daskVarArrayStackDisk[z, 24:60, :, :], (36, 100, 100)).to_zarr(
+        zarr_array, overwrite=True, compute=True
+    )
 
     print(zarrVars[z])
 

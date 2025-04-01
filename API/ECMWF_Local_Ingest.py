@@ -1,5 +1,5 @@
 # %% Script to test FastHerbie.py to download GFS data
-# Alexander Rey, September 2023
+# Alexander Rey, March 2025
 
 # %% Import modules
 import os
@@ -35,13 +35,13 @@ wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 "
 )
 
-forecast_process_dir = os.getenv("forecast_process_dir", default="/home/ubuntu/Weather/ECMRWF")
-forecast_process_path = forecast_process_dir + "/ECMRWF_Process"
-hist_process_path = forecast_process_dir + "/ECMRWF_Historic"
+forecast_process_dir = os.getenv("forecast_process_dir", default="/home/ubuntu/Weather/ECMWF")
+forecast_process_path = forecast_process_dir + "/ECMWF_Process"
+hist_process_path = forecast_process_dir + "/ECMWF_Historic"
 tmpDIR = forecast_process_dir + "/Downloads"
 
-forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/ECMRWF")
-historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/History/ECMRWF")
+forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/ECMWF")
+historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/History/ECMWF")
 
 
 saveType = os.getenv("save_type", default="Download")
@@ -98,19 +98,19 @@ print(base_time)
 # Check if this is newer than the current file
 if saveType == "S3":
     # Check if the file exists and load it
-    if s3.exists(forecast_path + "/ECMRWF.time.pickle"):
-        with s3.open(forecast_path + "/ECMRWF.time.pickle", "rb") as f:
+    if s3.exists(forecast_path + "/ECMWF.time.pickle"):
+        with s3.open(forecast_path + "/ECMWF.time.pickle", "rb") as f:
             previous_base_time = pickle.load(f)
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to ECMRWF, ending")
+            print("No Update to ECMWF, ending")
             sys.exit()
 
 else:
-    if os.path.exists(forecast_path + "/ECMRWF.time.pickle"):
+    if os.path.exists(forecast_path + "/ECMWF.time.pickle"):
         # Open the file in binary mode
-        with open(forecast_path + "/ECMRWF.time.pickle", "rb") as file:
+        with open(forecast_path + "/ECMWF.time.pickle", "rb") as file:
             # Deserialize and retrieve the variable from the file
             previous_base_time = pickle.load(file)
 
@@ -478,7 +478,7 @@ for i in range(hisPeriod, 0, -12):
         # S3 Path Setup
         s3_path = (
             historic_path
-            + "/ECMRWF_Hist"
+            + "/ECMWF_Hist"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -491,7 +491,7 @@ for i in range(hisPeriod, 0, -12):
         # Local Path Setup
         local_path = (
             historic_path
-            + "/ECMRWF_Hist"
+            + "/ECMRF_Hist"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -752,7 +752,7 @@ for i in range(hisPeriod, 0, -12):
 # Get the s3 paths to the historic data
 ncLocalWorking_paths = [
     historic_path
-    + "/ECMRWF_Hist"
+    + "/ECMWF_Hist"
     + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
     + ".zarr"
     for i in range(hisPeriod, 1, -12)
@@ -785,7 +785,7 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
     daskVarArraysStack = da.stack(daskVarArrays, allow_unknown_chunksizes=True)
 
     daskForecastArray = da.from_zarr(
-        ncForecastWorking_path + "_merged.zarr", component=dask_var, inline_array=True
+        forecast_process_path + "_merged.zarr", component=dask_var, inline_array=True
     )
 
     if dask_var == "time":
@@ -829,7 +829,7 @@ daskVarArrayStackDisk = da.from_zarr(forecast_process_path + '_stack.zarr')
 
 # Create a zarr backed dask array
 if saveType == "S3":
-    zarr_store = zarr.storage.ZipStore(forecast_process_dir + '/ECMRWF.zarr.zip', mode='a')
+    zarr_store = zarr.storage.ZipStore(forecast_process_dir + '/ECMWF.zarr.zip', mode='a')
     zarr_array = zarr.open_array(
         store=zarr_store,
         shape=(len(zarrVars), len(npCatTimes), daskVarArrayStackDisk.shape[2], daskVarArrayStackDisk.shape[3]),
@@ -838,7 +838,7 @@ if saveType == "S3":
         dtype="float32"
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_path + '/ECMRWF.zarr')
+    zarr_store = zarr.storage.LocalStore(forecast_path + '/ECMWF.zarr')
 
     # Check if the store exists, if so, open itm otherwise create it
     if os.path.isfile(str(zarr_store.root) + '/c/0/0/0/0'):
@@ -887,9 +887,9 @@ if saveType == "S3":
 # Save -12:24 hours, aka steps 24:60
 # Create a Zarr array in the store with zstd compression
 if saveType == "S3":
-    zarr_store_maps = zarr.storage.ZipStore(forecast_process_dir + '/ECMRWF_maps.zarr.zip', mode='a')
+    zarr_store_maps = zarr.storage.ZipStore(forecast_process_dir + '/ECMWF_maps.zarr.zip', mode='a')
 else:
-    zarr_store_maps = zarr.storage.LocalStore(forecast_path + '/ECMRWF_maps.zarr')
+    zarr_store_maps = zarr.storage.LocalStore(forecast_path + '/ECMWF_maps.zarr')
 
 for z in [0, 3, 5, 6, 7, 8, 9]:
     # Create a zarr backed dask array
@@ -904,11 +904,11 @@ for z in [0, 3, 5, 6, 7, 8, 9]:
             )
         else:
             # Check if the store exists, if so, open itm otherwise create it
-            if os.path.isfile(str(zarr_store_maps.root) + '/' + zarrVars[z] + '/0/0/0'):
+            if os.path.isfile(str(zarr_store_maps.root) + '/' + zarrVars[z] + '/c/0/0/0'):
                 # Create a Zarr array in the store with zstd compression
-                zarr_array = zarr.open_array(
-                    store=zarr_store_maps
-                )
+                zarr_group = zarr.open(
+                    store=zarr_store_maps)
+                zarr_array = zarr_group[zarrVars[z]]
             else:
                 zarr_array = zarr.create_array(
                     store=zarr_store_maps,
@@ -933,32 +933,33 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/ECMRWF.zarr.zip", forecast_path + "/ECMRWF.zarr.zip"
+        forecast_process_dir + "/ECMWF.zarr.zip", forecast_path + "/ECMWF.zarr.zip"
     )
     s3.put_file(
-        forecast_process_dir + "/ECMRWF_Maps.zarr.zip", forecast_path + "/ECMRWF_Maps.zarr.zip"
+        forecast_process_dir + "/ECMWF_Maps.zarr.zip", forecast_path + "/ECMWF_Maps.zarr.zip"
     )
 
     # Write most recent forecast time
-    with open(forecast_process_dir + "/ECMRWF.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/ECMWF.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     s3.put_file(
-        forecast_process_dir + "/ECMRWF.time.pickle",
-        forecast_path + "/ECMRWF.time.pickle",
+        forecast_process_dir + "/ECMWF.time.pickle",
+        forecast_path + "/ECMWF.time.pickle",
     )
 else:
     # Write most recent forecast time
-    with open(forecast_process_dir + "/ECMRWF.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/ECMWF.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     shutil.move(
-        forecast_process_dir + "/ECMRWF.time.pickle",
-        forecast_path + "/ECMRWF.time.pickle",
+        forecast_process_dir + "/ECMWF.time.pickle",
+        forecast_path + "/ECMWF.time.pickle",
     )
 # Clean up
 shutil.rmtree(forecast_process_dir)
 
+T2 = time.time()
 print(T2 - T0)

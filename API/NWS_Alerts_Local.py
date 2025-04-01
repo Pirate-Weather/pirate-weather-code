@@ -15,6 +15,8 @@ import pandas as pd
 import requests
 import s3fs
 import zarr
+from numpy.dtypes import StringDType
+from dask.diagnostics import ProgressBar
 
 # %% Setup paths and parameters
 wgrib2_path = os.getenv(
@@ -214,8 +216,6 @@ gridPointsSeries["string"] = gridPointsSeries["string"].astype(str)
 gridPoints_XR = gridPointsSeries["string"].to_xarray()
 
 # Reshape to 2D
-from numpy.dtypes import StringDType
-from dask.diagnostics import ProgressBar
 gridPoints_XR2 = gridPoints_XR.values.astype(StringDType()).reshape(lons.shape)
 
 # Write to zarr
@@ -227,12 +227,12 @@ else:
 
 
 # Create a Zarr array in the store with zstd compression
-with ProgressBar():
-    zarr_array = zarr.create_array(
-        data=gridPoints_XR2,
-        store=zarr_store,
-        chunks=(4, 4),
-    )
+# with ProgressBar():
+zarr_array = zarr.create_array(
+    data=gridPoints_XR2,
+    store=zarr_store,
+    chunks=(4, 4),
+)
 
 if saveType == "S3":
     zarr_store.close()
