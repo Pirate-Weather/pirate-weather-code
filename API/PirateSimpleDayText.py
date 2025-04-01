@@ -20,8 +20,6 @@ def calculate_day_text(
     rainPrep,
     snowPrep,
     icePrep,
-    precipIntensity,
-    precipIntensityMax,
     icon="darksky",
 ):
     """
@@ -36,8 +34,6 @@ def calculate_day_text(
     - rainPrep (float): The rain accumulation
     - snowPrep (float): The snow accumulation
     - icePrep (float): The ice accumulation
-    - precipIntensity (float): The precipitation intensity
-    - precipIntensityMax (float): The maximum precipitation intensity
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
 
     Returns:
@@ -47,6 +43,7 @@ def calculate_day_text(
     cText = cIcon = precipText = precipIcon = windText = windIcon = skyText = (
         skyIcon
     ) = visText = visIcon = secondary = snowText = snowSentence = None
+    totalPrep = rainPrep + snowPrep + icePrep
 
     # Get key values from the hourObject
     precipType = hourObject["precipType"]
@@ -69,15 +66,26 @@ def calculate_day_text(
     else:
         vis = 10000
 
+    # If time machine, no humidity data, so set to 50
+    if "humidity" not in hourObject:
+        humidity = 50
+    else:
+        humidity = hourObject["humidity"]
+
+    if "precipIntensityMax" in hourObject:
+        prepIntensityMax = hourObject["precipIntensityMax"]
+    else:
+        prepIntensityMax = totalPrep / 24
+
     # Only calculate the precipitation text if there is any possibility of precipitation > 0
-    if pop > 0:
+    if pop > 0 and totalPrep >= (0.01 * prepAccumUnit):
         # Check if there is rain, snow and ice accumulation for the day
         if snowPrep > 0 and rainPrep > 0 and icePrep > 0:
             # If there is then used the mixed precipitation text and set the icon/type to sleet. Set the secondary condition to snow so the totals can be in the summary
             precipText = "mixed-precipitation"
             precipType = "sleet"
             precipIcon = calculate_precip_text(
-                precipIntensityMax,
+                prepIntensityMax,
                 prepAccumUnit,
                 precipType,
                 "day",
@@ -119,9 +127,22 @@ def calculate_day_text(
                     precipType = "rain"
                     secondary = "medium-sleet"
 
+            # If more than 10 mm of rain is forecast, then rain
+            if rainPrep > (10 * prepAccumUnit) and precipType != "rain":
+                secondary = "medium-" + precipType
+                precipType = "rain"
+            # If more than 5 mm of snow is forecast, then snow
+            if snowPrep > (5 * prepAccumUnit) and precipType != "snow":
+                secondary = "medium-" + precipType
+                precipType = "snow"
+            # Else, if more than 1 mm of ice is forecast, then ice
+            if icePrep > (1 * prepAccumUnit) and precipType != "sleet":
+                secondary = "medium-" + precipType
+                precipType = "sleet"
+
             # Calculate the precipitation text and summary
             precipText, precipIcon = calculate_precip_text(
-                precipIntensityMax,
+                prepIntensityMax,
                 prepAccumUnit,
                 precipType,
                 "day",
@@ -134,7 +155,7 @@ def calculate_day_text(
             )
 
     # If we have only snow or if snow is the secondary condition then calculate the accumulation range
-    if snowPrep > (5 * prepAccumUnit) or secondary == "medium-snow":
+    if snowPrep > (10 * prepAccumUnit) or secondary == "medium-snow":
         # GEFS accumulation error seems to always be equal to the accumulation so use half of the accumulation as the range
         snowLowAccum = math.floor(snowPrep - (snowPrep / 2))
         snowMaxAccum = math.ceil(snowPrep + (snowPrep / 2))
@@ -171,7 +192,7 @@ def calculate_day_text(
                     ],
                 ]
 
-    # If we have more than 0.5 cm of snow show the parenthetical
+    # If we have more than 1 cm of snow show the parenthetical or snow is the secondary condition
     if snowSentence is not None:
         # If precipitation is only show then generate the parenthetical text
         if precipType == "snow":

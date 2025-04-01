@@ -99,7 +99,7 @@ def calculate_precip_text(
     if prepAccumUnit == 0.1:
         prepIntensityUnit = 1
     else:
-        prepIntensityUnit = 0.03937008
+        prepIntensityUnit = prepAccumUnit
 
     # In mm/h
     lightPrecipThresh = 0.4 * prepIntensityUnit
@@ -114,6 +114,7 @@ def calculate_precip_text(
 
     snowIconThresholdDay = 10.0 * prepAccumUnit
     precipIconThresholdDay = 1.0 * prepAccumUnit
+    numTypes = 0
 
     # Use daily or hourly thresholds depending on the situation
     if type == "hour" or type == "current" or type == "minute":
@@ -126,6 +127,7 @@ def calculate_precip_text(
     possiblePrecip = ""
     cIcon = None
     cText = None
+    totalPrep = rainPrep + snowPrep + icePrep
     # Add the possible precipitation text if pop is less than 25% or if pop is greater than 0 but precipIntensity is between 0-0.02 mm/h
     if (pop < 0.25) or (
         (
@@ -148,6 +150,22 @@ def calculate_precip_text(
     ):
         possiblePrecip = "possible-"
 
+    # Determine the number of precipitation types for the day
+    if snowPrep > 0:
+        numTypes += 1
+    if rainPrep > 0:
+        numTypes += 1
+    if icePrep > 0:
+        numTypes += 1
+
+    if (
+        totalPrep >= precipIconThreshold
+        and possiblePrecip == "possible-"
+        and pop >= 0.25
+        and numTypes > 1
+    ):
+        possiblePrecip = ""
+
     # Find the largest percentage difference compared to the thresholds
     # rainPrepPercent = rainPrep / rainIconThreshold
     # snowPrepPercent = snowPrep / snowIconThreshold
@@ -156,8 +174,9 @@ def calculate_precip_text(
     # Find the largest percentage difference to determine the icon
     if pop >= 0.25 and (
         (rainPrep > precipIconThreshold and prepIntensity > precipIconThreshold)
-        or (snowPrep > snowIconThreshold and prepIntensity > snowIconThreshold)
-        or (icePrep > precipIconThreshold and prepIntensity > precipIconThreshold)
+        or (snowPrep >= snowIconThreshold and prepIntensity > snowIconThreshold)
+        or (icePrep >= precipIconThreshold and prepIntensity > precipIconThreshold)
+        or (totalPrep >= rainIconThreshold and numTypes > 1)
     ):
         if prepType == "none":
             cIcon = "rain"  # Fallback icon

@@ -3465,7 +3465,6 @@ async def PW_Forecast(
                 InterPdaySum[idx, 22],
                 InterPdaySum[idx, 23],
                 "day",
-                InterPdayMax[idx, 2],
                 icon,
             )
             dayObject["summary"] = translation.translate(["sentence", dayText])
