@@ -54,8 +54,6 @@ def calculate_text(
     cloudCover = hourObject["cloudCover"]
     wind = hourObject["windSpeed"]
     humidity = hourObject["humidity"]
-    liftedIndex = hourObject["liftedIndex"]
-    cape = hourObject["cape"]
 
     # If time machine, no humidity data, so set to 0
     if "humidity" not in hourObject:
@@ -82,6 +80,18 @@ def calculate_text(
         vis = hourObject["visibility"]
     else:
         vis = 10000
+
+    # If liftedIndex exists in the hourObject then use it otherwise -999
+    if "liftedIndex" in hourObject:
+        liftedIndex = hourObject["liftedIndex"]
+    else:
+        liftedIndex = -999
+
+    # If cape exists in the hourObject then use it otherwise -999
+    if "cape" in hourObject:
+        cape = hourObject["cape"]
+    else:
+        cape = -999
 
     # If we missing or incomplete data then return clear icon/text instead of calculating
     if (

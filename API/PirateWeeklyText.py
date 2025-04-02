@@ -45,17 +45,19 @@ def calculate_summary_text(
         elif wIcon != day[2]["precipType"] and wIcon != "mixed-precipitation":
             wIcon = "mixed-precipitation"
 
-        # Calculate the maximum cape for the week
-        if maxCape == -999 and day[2]["cape"] != -999:
-            maxCape = day[2]["cape"]
-        elif maxCape != -999 and day[2]["cape"] > maxCape:
-            maxCape = day[2]["cape"]
+        if "cape" in day[2]:
+            # Calculate the maximum cape for the week
+            if maxCape == -999 and day[2]["cape"] != -999:
+                maxCape = day[2]["cape"]
+            elif maxCape != -999 and day[2]["cape"] > maxCape:
+                maxCape = day[2]["cape"]
 
-        # Calculate the maximum lifted index for the week
-        if maxLiftedIndex == -999 and day[2]["liftedIndex"] != -999:
-            maxLiftedIndex = day[2]["liftedIndex"]
-        elif maxLiftedIndex != -999 and day[2]["liftedIndex"] > maxLiftedIndex:
-            maxLiftedIndex = day[2]["liftedIndex"]
+        if "liftedIndex" in day[2]:
+            # Calculate the maximum lifted index for the week
+            if maxLiftedIndex == -999 and day[2]["liftedIndex"] != -999:
+                maxLiftedIndex = day[2]["liftedIndex"]
+            elif maxLiftedIndex != -999 and day[2]["liftedIndex"] > maxLiftedIndex:
+                maxLiftedIndex = day[2]["liftedIndex"]
 
         # Calculate the number of days with thunderstorms forecasted
         if day[2]["icon"] == "thunderstorm":
