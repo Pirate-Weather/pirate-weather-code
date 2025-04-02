@@ -31,7 +31,6 @@ updates:
         - "minor"         # an array, possible values being minor, patch and major
         - "patch"
     open-pull-requests-limit: 100
-
   - package-ecosystem: "docker"
     directory: "/Docker"
     schedule:

@@ -24,14 +24,14 @@ from boto3.s3.transfer import TransferConfig
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import ORJSONResponse
 from fastapi_utils.tasks import repeat_every
+from pirateweather_translations.dynamic_loader import load_all_translations
 from PirateText import calculate_text
-from PirateSimpleDaily import calculate_simple_day_text
+from PirateMinutelyText import calculate_minutely_text
+from PirateWeeklyText import calculate_weekly_text
+from PirateSimpleDayText import calculate_day_text
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
-
-
-from pirateweather_translations.dynamic_loader import load_all_translations
 
 Translations = load_all_translations()
 
@@ -748,6 +748,7 @@ async def PW_Forecast(
     version: Union[str, None] = None,
     tmextra: Union[str, None] = None,
     apikey: Union[str, None] = None,
+    icon: Union[str, None] = None,
 ) -> dict:
     global ETOPO_f
     global SubH_Zarr
@@ -955,14 +956,15 @@ async def PW_Forecast(
     if not lang:
         lang = "en"
 
+    if icon != "pirate":
+        icon = "darksky"
+
     # Check if langugage is supported
     if lang not in Translations:
         # Throw an error
         raise HTTPException(status_code=400, detail="Language Not Supported")
 
     translation = Translations[lang]
-    if not translation:
-        translation = Translations["en"]
 
     # Check if extra information should be included with time machine
     if not tmextra:
@@ -3098,9 +3100,10 @@ async def PW_Forecast(
                 InterPhour[idx, 22],
                 InterPhour[idx, 23],
                 "hour",
-                mode="title",
+                InterPhour[idx, 2],
+                icon,
             )
-            hourItem["summary"] = translation.translate(hourText)
+            hourItem["summary"] = translation.translate(["title", hourText])
             hourItem["icon"] = hourIcon
         except Exception as e:
             print("TEXT GEN ERROR:")
@@ -3461,7 +3464,7 @@ async def PW_Forecast(
 
         try:
             # Update the text
-            dayText, dayIcon = calculate_simple_day_text(
+            dayText, dayIcon = calculate_day_text(
                 dayObject,
                 prepAccumUnit,
                 visUnits,
@@ -3472,8 +3475,9 @@ async def PW_Forecast(
                 InterPdaySum[idx, 22],
                 InterPdaySum[idx, 23],
                 "day",
+                icon,
             )
-            dayObject["summary"] = translation.translate(dayText)
+            dayObject["summary"] = translation.translate(["sentence", dayText])
             dayObject["icon"] = dayIcon
         except Exception as e:
             print("TEXT GEN ERROR:")
@@ -4050,9 +4054,12 @@ async def PW_Forecast(
                 currnetSnowAccum,
                 currnetIceAccum,
                 "current",
-                mode="title",
+                minuteDict[0]["precipIntensity"],
+                icon,
             )
-            returnOBJ["currently"]["summary"] = translation.translate(currentText)
+            returnOBJ["currently"]["summary"] = translation.translate(
+                ["title", currentText]
+            )
             returnOBJ["currently"]["icon"] = currentIcon
         except Exception as e:
             print("TEXT GEN ERROR:")
@@ -4061,8 +4068,13 @@ async def PW_Forecast(
     if exMinutely != 1:
         returnOBJ["minutely"] = dict()
         try:
-            returnOBJ["minutely"]["summary"] = translation.translate(currentText)
-            returnOBJ["minutely"]["icon"] = currentIcon
+            minuteText, minuteIcon = calculate_minutely_text(
+                minuteDict, currentText, currentIcon, icon, prepAccumUnit
+            )
+            returnOBJ["minutely"]["summary"] = translation.translate(
+                ["sentence", minuteText]
+            )
+            returnOBJ["minutely"]["icon"] = minuteIcon
         except Exception as e:
             print("TEXT GEN ERROR:")
             print(e)
@@ -4087,8 +4099,23 @@ async def PW_Forecast(
     if exDaily != 1:
         returnOBJ["daily"] = dict()
         if (not timeMachine) or (tmExtra):
-            returnOBJ["daily"]["summary"] = max(set(dayTextList), key=dayTextList.count)
-            returnOBJ["daily"]["icon"] = max(set(dayIconList), key=dayIconList.count)
+            try:
+                weekText, weekIcon = calculate_weekly_text(
+                    dayList, prepAccumUnit, tempUnits, icon
+                )
+                returnOBJ["daily"]["summary"] = translation.translate(
+                    ["sentence", weekText]
+                )
+                returnOBJ["daily"]["icon"] = weekIcon
+            except Exception as e:
+                print("TEXT GEN ERROR:")
+                print(e)
+                returnOBJ["daily"]["summary"] = max(
+                    set(dayTextList), key=dayTextList.count
+                )
+                returnOBJ["daily"]["icon"] = max(
+                    set(dayIconList), key=dayIconList.count
+                )
         returnOBJ["daily"]["data"] = dayList
 
     if exAlerts != 1:
@@ -4105,8 +4132,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.5.5"
-
+        returnOBJ["flags"]["version"] = "V2.6.0a"
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
             returnOBJ["flags"]["processTime"] = (
