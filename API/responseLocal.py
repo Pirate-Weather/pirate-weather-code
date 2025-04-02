@@ -4099,13 +4099,23 @@ async def PW_Forecast(
     if exDaily != 1:
         returnOBJ["daily"] = dict()
         if (not timeMachine) or (tmExtra):
-            weekText, weekIcon = calculate_weekly_text(
-                dayList, prepAccumUnit, tempUnits, icon
-            )
-            returnOBJ["daily"]["summary"] = translation.translate(
-                ["sentence", weekText]
-            )
-            returnOBJ["daily"]["icon"] = weekIcon
+            try:
+                weekText, weekIcon = calculate_weekly_text(
+                    dayList, prepAccumUnit, tempUnits, icon
+                )
+                returnOBJ["daily"]["summary"] = translation.translate(
+                    ["sentence", weekText]
+                )
+                returnOBJ["daily"]["icon"] = weekIcon
+            except Exception as e:
+                print("TEXT GEN ERROR:")
+                print(e)
+                returnOBJ["daily"]["summary"] = max(
+                    set(dayTextList), key=dayTextList.count
+                )
+                returnOBJ["daily"]["icon"] = max(
+                    set(dayIconList), key=dayIconList.count
+                )
         returnOBJ["daily"]["data"] = dayList
 
     if exAlerts != 1:
