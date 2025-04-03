@@ -126,6 +126,24 @@ def calculate_day_text(
                 elif icePrep > 0 and rainPrep < icePrep:
                     precipType = "rain"
                     secondary = "medium-sleet"
+            # If the type is snow but there is no snow accumulation check if there is rain/sleet
+            elif snowPrep == 0 and precipType == "snow":
+                if rainPrep > 0:
+                    precipType = "rain"
+                elif icePrep > 0:
+                    precipType = "sleet"
+            # If the type is rain but there is no rain accumulation check if there is snow/sleet
+            elif rainPrep == 0 and precipType == "rain":
+                if snowPrep > 0:
+                    precipType = "snow"
+                elif icePrep > 0:
+                    precipType = "sleet"
+            # If the type is sleet but there is no sleet accumulation check if there is rain/snow
+            elif icePrep == 0 and precipType == "sleet":
+                if snowPrep > 0:
+                    precipType = "snow"
+                elif rainPrep > 0:
+                    precipType = "rain"
 
             # If more than 10 mm of rain is forecast, then rain
             if rainPrep > (10 * prepAccumUnit) and precipType != "rain":
