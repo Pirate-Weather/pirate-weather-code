@@ -353,7 +353,7 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
     # If the temperature is increasing everyday or if the lowest temperatue is at the start of the week and the highest temperature is at the end of the week use the rising text
     if weekArr[0]["temperatureHigh"] < weekArr[1]["temperatureHigh"] < weekArr[2][
         "temperatureHigh"
-    ] < weekArr[3]["temperatureHigh"] < weekArr[4] < weekArr[5][
+    ] < weekArr[3]["temperatureHigh"] < weekArr[4]["temperatureHigh"] < weekArr[5][
         "temperatureHigh"
     ] < weekArr[6]["temperatureHigh"] < weekArr[7]["temperatureHigh"] or (
         highTemp[0] >= 6 and lowTemp[0] <= 1
@@ -367,7 +367,7 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
     # If the temperature is decreasing everyday or if the lowest temperatue is at the end of the week and the highest temperature is at the start of the week use the rising text
     elif weekArr[0]["temperatureHigh"] > weekArr[1]["temperatureHigh"] > weekArr[2][
         "temperatureHigh"
-    ] > weekArr[3]["temperatureHigh"] > weekArr[4][0] > weekArr[5][
+    ] > weekArr[3]["temperatureHigh"] > weekArr[4]["temperatureHigh"] > weekArr[5][
         "temperatureHigh"
     ] > weekArr[6]["temperatureHigh"] > weekArr[7]["temperatureHigh"] or (
         highTemp[0] <= 1 and lowTemp[0] >= 6
