@@ -151,7 +151,7 @@ def calculate_text(
             else:
                 cText = windText
         else:
-            cText = ["and", humidityText, skyText]
+            cText = ["and", windText, skyText]
     # If there is the humidity text then join with the sky text
     elif humidityText is not None:
         cText = ["and", humidityText, skyText]
