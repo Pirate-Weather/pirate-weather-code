@@ -256,7 +256,7 @@ def calculate_day_text(
         if skyText == "clear":
             cText = windText
         else:
-            cText = ["and", humidityText, skyText]
+            cText = ["and", windText, skyText]
     elif humidityText is not None:
         cText = ["and", humidityText, skyText]
     else:
