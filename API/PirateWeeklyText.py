@@ -292,20 +292,20 @@ def calculate_precip_summary(
             precipSummary = [wSummary, wIcon]
     elif len(precipitationDays) == 8:
         if (
-            precipitationDays[0][2]
-            == precipitationDays[1][2]
-            == precipitationDays[2][2]
-            == precipitationDays[3][2]
-            == precipitationDays[4][2]
-            == precipitationDays[5][2]
-            == precipitationDays[6][2]
-            == precipitationDays[7][2]
+            precipitationDays[0][2]["precipType"]
+            == precipitationDays[1][2]["precipType"]
+            == precipitationDays[2][2]["precipType"]
+            == precipitationDays[3][2]["precipType"]
+            == precipitationDays[4][2]["precipType"]
+            == precipitationDays[5][2]["precipType"]
+            == precipitationDays[6][2]["precipType"]
+            == precipitationDays[7][2]["precipType"]
         ):
             # If all days have precipitation then if they all have the same type then use that icon
             text, cIcon = calculate_precip_text(
                 avgIntensity,
                 intensityUnit,
-                precipitationDays[0][2],
+                precipitationDays[0][2]["precipType"],
                 "week",
                 maxIntensity,
                 maxIntensity,
@@ -389,7 +389,7 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
         ]
 
 
-def calculate_weekly_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
+def calculate_weeky_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
     """
     Calculates the weekly summary given an array of weekdays
 
