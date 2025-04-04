@@ -372,7 +372,11 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
     ] > weekArr[6]["temperatureHigh"] > weekArr[7]["temperatureHigh"] or (
         highTemp[0] <= 1 and lowTemp[0] >= 6
     ):
-        return ["temperatures-falling", [lowTemp[3], int(round(lowTemp[2], 0))], lowTemp[1]]
+        return [
+            "temperatures-falling",
+            [lowTemp[3], int(round(lowTemp[2], 0))],
+            lowTemp[1],
+        ]
     # If the lowest temperatue is in the middle of the week and the highest temperature is at the start or end of the week use the valleying text
     elif (highTemp[0] <= 1 or highTemp[0] >= 6) and 0 < lowTemp[0] < 7:
         return [
