@@ -105,9 +105,9 @@ def calculate_precip_text(
     lightPrecipThresh = 0.4 * prepIntensityUnit
     midPrecipThresh = 2.5 * prepIntensityUnit
     heavyPrecipThresh = 10 * prepIntensityUnit
-    lightSnowThresh = 1.33 * prepIntensityUnit
-    midSnowThresh = 8.33 * prepIntensityUnit
-    heavySnowThresh = 33.33 * prepIntensityUnit
+    lightSnowThresh = 0.13 * prepIntensityUnit
+    midSnowThresh = 0.83 * prepIntensityUnit
+    heavySnowThresh = 3.33 * prepIntensityUnit
 
     snowIconThresholdHour = 0.20 * prepAccumUnit
     precipIconThresholdHour = 0.02 * prepAccumUnit
@@ -173,9 +173,9 @@ def calculate_precip_text(
 
     # Find the largest percentage difference to determine the icon
     if pop >= 0.25 and (
-        (rainPrep > precipIconThreshold and prepIntensity > precipIconThreshold)
-        or (snowPrep >= snowIconThreshold and prepIntensity > snowIconThreshold)
-        or (icePrep >= precipIconThreshold and prepIntensity > precipIconThreshold)
+        (rainPrep > precipIconThreshold and prepIntensity > precipIconThresholdHour)
+        or (snowPrep >= snowIconThreshold and prepIntensity > snowIconThresholdHour)
+        or (icePrep >= precipIconThreshold and prepIntensity > precipIconThresholdHour)
         or (totalPrep >= precipIconThreshold and numTypes > 1)
     ):
         if prepType == "none":
