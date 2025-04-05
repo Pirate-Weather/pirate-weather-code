@@ -1,6 +1,7 @@
 # %% Script to contain the functions that can be used to generate the weekly text summary of the forecast data for Pirate Weather
 
 import datetime
+from dateutil import tz
 from PirateTextHelper import Most_Common
 from itertools import groupby
 from operator import itemgetter
@@ -393,12 +394,16 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
         ]
 
 
-def calculate_weekly_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
+def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="darksky"):
     """
     Calculates the weekly summary given an array of weekdays
 
     Parameters:
     - weekArr (arr): An array of the weekdays
+    - intensityUnit (float): The conversion factor for the precipitation intensity
+    - tempUnit (float): The conversion factor for the temperature
+    - timeZone (string): The timezone for the current location
+    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
 
     Returns:
     - cText (arr): The precipitation and temperature summary for the week.
@@ -416,13 +421,14 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
     icons = []
     tempSummary = ""
     avgIntensity = avgPop = maxIntensity = 0
+    zone = tz.gettz(timeZone)
 
     # Loop through the week array
     for idx, day in enumerate(weekArr):
         # Add the daily icon to the list of weekly icons
         icons.append(day["icon"])
-        # Determine the day of the week based on the epoch timestamp
-        dayDate = datetime.datetime.fromtimestamp(day["time"], datetime.timezone.utc)
+        # Determine the day of the week based on the epoch timestamp and the locations timezone
+        dayDate = datetime.datetime.fromtimestamp(day["time"], zone)
         weekday = dayDate.strftime("%A").lower()
 
         # First index is always today, second index is always tomorrow and the last index has the next- text at the start

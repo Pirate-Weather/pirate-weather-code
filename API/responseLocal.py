@@ -4100,7 +4100,7 @@ async def PW_Forecast(
         if (not timeMachine) or (tmExtra):
             try:
                 weekText, weekIcon = calculate_weekly_text(
-                    dayList, prepAccumUnit, tempUnits, icon
+                    dayList, prepAccumUnit, tempUnits, str(tz_name), icon
                 )
                 returnOBJ["daily"]["summary"] = translation.translate(
                     ["sentence", weekText]
