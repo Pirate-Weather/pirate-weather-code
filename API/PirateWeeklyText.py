@@ -434,8 +434,10 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
             weekday = "next-" + weekday
 
         # Check if the day has enough precipitation to reach the threshold and record the index in the array, the day it occured on and the type
-        if day["precipType"] == "snow" and day["precipAccumulation"] >= (
-            10.0 * intensityUnit
+        if (
+            day["precipType"] == "snow"
+            and day["precipAccumulation"] >= (10.0 * intensityUnit)
+            and day["precipProbability"] >= 0.25
         ):
             # Sets that there has been precipitation during the week
             precipitation = True
@@ -446,8 +448,10 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, icon="darksky"):
                 maxIntensity = day["precipIntensityMax"]
             elif day["precipIntensityMax"] > maxIntensity:
                 maxIntensity = day["precipIntensityMax"]
-        elif day["precipType"] != "snow" and day["precipAccumulation"] >= (
-            1.0 * intensityUnit
+        elif (
+            day["precipType"] != "snow"
+            and day["precipAccumulation"] >= (1.0 * intensityUnit)
+            and day["precipProbability"] >= 0.25
         ):
             # Sets that there has been precipitation during the week
             precipitation = True
