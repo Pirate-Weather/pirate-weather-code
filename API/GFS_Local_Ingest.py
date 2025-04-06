@@ -838,38 +838,21 @@ daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 # Create a zarr backed dask array
 if saveType == "S3":
     zarr_store = zarr.storage.ZipStore(forecast_process_dir + "/GFS.zarr.zip", mode="a")
-    zarr_array = zarr.open_array(
-        store=zarr_store,
-        shape=(
-            len(zarrVars),
-            len(npCatTimes),
-            daskVarArrayStackDisk.shape[2],
-            daskVarArrayStackDisk.shape[3],
-        ),
-        chunks=(len(zarrVars), len(npCatTimes), finalChunk, finalChunk),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
-    )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_path + "/GFS.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/GFS.zarr")
 
-    # Check if the store exists, if so, open itm otherwise create it
-    if os.path.isfile(str(zarr_store.root) + "/c/0/0/0/0"):
-        # Create a Zarr array in the store with zstd compression
-        zarr_array = zarr.open_array(store=zarr_store)
-    else:
-        zarr_array = zarr.create_array(
-            store=zarr_store,
-            shape=(
-                len(zarrVars),
-                len(hourly_timesUnix),
-                daskVarArrayStackDisk.shape[2],
-                daskVarArrayStackDisk.shape[3],
-            ),
-            chunks=(len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
+zarr_array = zarr.create_array(
+    store=zarr_store,
+    shape=(
+        len(zarrVars),
+        len(hourly_timesUnix),
+        daskVarArrayStackDisk.shape[2],
+        daskVarArrayStackDisk.shape[3],
+    ),
+    chunks=(len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
+    compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+    dtype="float32",
+)
 
 #
 # 1. Interpolate the stacked array to be hourly along the time axis
@@ -911,37 +894,22 @@ if saveType == "S3":
         forecast_process_dir + "/GFS_maps.zarr.zip", mode="a"
     )
 else:
-    zarr_store_maps = zarr.storage.LocalStore(forecast_path + "/GFS_maps.zarr")
+    zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/GFS_maps.zarr")
 
 for z in [0, 4, 8, 9, 10, 11, 12, 13, 14, 15, 21]:
     # Create a zarr backed dask array
-    if saveType == "S3":
-        zarr_array = zarr.open_array(
-            store=zarr_store_maps,
-            name=zarrVars[z],
-            shape=(36, daskVarArrayStackDisk.shape[2], daskVarArrayStackDisk.shape[3]),
-            chunks=(36, 100, 100),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
-    else:
-        # Check if the store exists, if so, open itm otherwise create it
-        if os.path.isfile(str(zarr_store_maps.root) + "/" + zarrVars[z] + "/0/0/0"):
-            # Create a Zarr array in the store with zstd compression
-            zarr_array = zarr.open_array(store=zarr_store_maps)
-        else:
-            zarr_array = zarr.create_array(
-                store=zarr_store_maps,
-                name=zarrVars[z],
-                shape=(
-                    36,
-                    daskVarArrayStackDisk.shape[2],
-                    daskVarArrayStackDisk.shape[3],
-                ),
-                chunks=(36, 100, 100),
-                compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-                dtype="float32",
-            )
+    zarr_array = zarr.create_array(
+        store=zarr_store_maps,
+        name=zarrVars[z],
+        shape=(
+            36,
+            daskVarArrayStackDisk.shape[2],
+            daskVarArrayStackDisk.shape[3],
+        ),
+        chunks=(36, 100, 100),
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32",
+    )
 
     with ProgressBar():
         da.rechunk(daskVarArrayStackDisk[z, 24:60, :, :], (36, 100, 100)).to_zarr(
@@ -959,8 +927,8 @@ if saveType == "S3":
     # Upload to S3
     s3.put_file(forecast_process_dir + "/GFS.zarr.zip", forecast_path + "/GFS.zarr.zip")
     s3.put_file(
-        forecast_process_dir + "/GFS_Maps.zarr.zip",
-        forecast_path + "/GFS_Maps.zarr.zip",
+        forecast_process_dir + "/GFS_maps.zarr.zip",
+        forecast_path + "/GFS_maps.zarr.zip",
     )
 
     # Write most recent forecast time
@@ -982,6 +950,16 @@ else:
         forecast_process_dir + "/GFS.time.pickle",
         forecast_path + "/GFS.time.pickle",
     )
+
+    # Copy the zarr file to the final location
+    shutil.copytree(forecast_process_dir + "/GFS.zarr",
+    forecast_path + "/GFS.zarr",
+                    dirs_exist_ok=True)
+
+    # Copy the zarr file to the final location
+    shutil.copytree(forecast_process_dir + "/GFS_maps.zarr",
+        forecast_path + "/GFS_maps.zarr",
+                    dirs_exist_ok=True)
 # Clean up
 shutil.rmtree(forecast_process_dir)
 

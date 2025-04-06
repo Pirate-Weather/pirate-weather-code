@@ -136,10 +136,6 @@ zarrVars = (
     "APCP_Mean",
     "APCP_StdDev",
 )
-
-
-hisPeriod = 36
-
 #####################################################################################################
 # %% Download AIFS data using Herbie Latest
 # Needed for tcc
@@ -476,7 +472,7 @@ print(T1 - T0)
 # Loop through the runs and check if they have already been processed to s3
 
 # 6 hour runs
-for i in range(hisPeriod, 0, -12):
+for i in range(hisPeriod, 1, -12):
     if saveType == "S3":
         # S3 Path Setup
         s3_path = (
@@ -494,7 +490,7 @@ for i in range(hisPeriod, 0, -12):
         # Local Path Setup
         local_path = (
             historic_path
-            + "/ECMRF_Hist"
+            + "/ECMWF_Hist"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -859,38 +855,21 @@ if saveType == "S3":
     zarr_store = zarr.storage.ZipStore(
         forecast_process_dir + "/ECMWF.zarr.zip", mode="a"
     )
-    zarr_array = zarr.open_array(
-        store=zarr_store,
-        shape=(
-            len(zarrVars),
-            len(npCatTimes),
-            daskVarArrayStackDisk.shape[2],
-            daskVarArrayStackDisk.shape[3],
-        ),
-        chunks=(len(zarrVars), len(npCatTimes), finalChunk, finalChunk),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
-    )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_path + "/ECMWF.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/ECMWF.zarr")
 
-    # Check if the store exists, if so, open itm otherwise create it
-    if os.path.isfile(str(zarr_store.root) + "/c/0/0/0/0"):
-        # Create a Zarr array in the store with zstd compression
-        zarr_array = zarr.open_array(store=zarr_store)
-    else:
-        zarr_array = zarr.create_array(
-            store=zarr_store,
-            shape=(
-                len(zarrVars),
-                len(hourly_timesUnix),
-                daskVarArrayStackDisk.shape[2],
-                daskVarArrayStackDisk.shape[3],
-            ),
-            chunks=(len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
+zarr_array = zarr.create_array(
+    store=zarr_store,
+    shape=(
+        len(zarrVars),
+        len(hourly_timesUnix),
+        daskVarArrayStackDisk.shape[2],
+        daskVarArrayStackDisk.shape[3],
+    ),
+    chunks=(len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
+    compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+    dtype="float32",
+)
 
 #
 # 1. Interpolate the stacked array to be hourly along the time axis
@@ -930,38 +909,18 @@ if saveType == "S3":
         forecast_process_dir + "/ECMWF_maps.zarr.zip", mode="a"
     )
 else:
-    zarr_store_maps = zarr.storage.LocalStore(forecast_path + "/ECMWF_maps.zarr")
+    zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/ECMWF_maps.zarr")
 
 for z in [0, 3, 5, 6, 7, 8, 9]:
     # Create a zarr backed dask array
-    if saveType == "S3":
-        zarr_array = zarr.open_array(
-            store=zarr_store_maps,
-            name=zarrVars[z],
-            shape=(36, daskVarArrayStackDisk.shape[2], daskVarArrayStackDisk.shape[3]),
-            chunks=(36, 100, 100),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
-    else:
-        # Check if the store exists, if so, open itm otherwise create it
-        if os.path.isfile(str(zarr_store_maps.root) + "/" + zarrVars[z] + "/c/0/0/0"):
-            # Create a Zarr array in the store with zstd compression
-            zarr_group = zarr.open(store=zarr_store_maps)
-            zarr_array = zarr_group[zarrVars[z]]
-        else:
-            zarr_array = zarr.create_array(
-                store=zarr_store_maps,
-                name=zarrVars[z],
-                shape=(
-                    36,
-                    daskVarArrayStackDisk.shape[2],
-                    daskVarArrayStackDisk.shape[3],
-                ),
-                chunks=(36, 100, 100),
-                compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-                dtype="float32",
-            )
+    zarr_array = zarr.create_array(
+        store=zarr_store_maps,
+        name=zarrVars[z],
+        shape=(36, daskVarArrayStackDisk.shape[2], daskVarArrayStackDisk.shape[3]),
+        chunks=(36, 100, 100),
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32",
+    )
 
     da.rechunk(daskVarArrayStackDisk[z, 24:60, :, :], (36, 100, 100)).to_zarr(
         zarr_array, overwrite=True, compute=True
@@ -971,7 +930,6 @@ for z in [0, 3, 5, 6, 7, 8, 9]:
 
 if saveType == "S3":
     zarr_store_maps.close()
-
 
 # %% Upload to S3
 if saveType == "S3":
@@ -1003,6 +961,17 @@ else:
         forecast_process_dir + "/ECMWF.time.pickle",
         forecast_path + "/ECMWF.time.pickle",
     )
+
+    # Copy the zarr file to the final location
+    shutil.copytree(forecast_process_dir + "/ECMWF.zarr",
+    forecast_path + "/ECMWF.zarr",
+                    dirs_exist_ok=True)
+
+    # Copy the zarr file to the final location
+    shutil.copytree(forecast_process_dir + "/ECMWF_maps.zarr",
+        forecast_path + "/ECMWF_maps.zarr",
+                    dirs_exist_ok=True)
+
 # Clean up
 shutil.rmtree(forecast_process_dir)
 

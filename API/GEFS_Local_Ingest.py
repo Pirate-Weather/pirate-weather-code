@@ -686,38 +686,21 @@ if saveType == "S3":
     zarr_store = zarr.storage.ZipStore(
         forecast_process_dir + "/GEFS.zarr.zip", mode="a"
     )
-    zarr_array = zarr.open_array(
-        store=zarr_store,
-        shape=(
-            len(zarrVars),
-            len(npCatTimes),
-            daskVarArrayStackDisk.shape[2],
-            daskVarArrayStackDisk.shape[3],
-        ),
-        chunks=(len(zarrVars), len(npCatTimes), finalChunk, finalChunk),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
-    )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_path + "/GEFS.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/GEFS.zarr")
 
-    # Check if the store exists, if so, open itm otherwise create it
-    if os.path.isfile(str(zarr_store.root) + "/c/0/0/0/0"):
-        # Create a Zarr array in the store with zstd compression
-        zarr_array = zarr.open_array(store=zarr_store)
-    else:
-        zarr_array = zarr.create_array(
-            store=zarr_store,
-            shape=(
-                len(zarrVars),
-                len(hourly_timesUnix),
-                daskVarArrayStackDisk.shape[2],
-                daskVarArrayStackDisk.shape[3],
-            ),
-            chunks=(len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
+zarr_array = zarr.create_array(
+    store=zarr_store,
+    shape=(
+        len(zarrVars),
+        len(hourly_timesUnix),
+        daskVarArrayStackDisk.shape[2],
+        daskVarArrayStackDisk.shape[3],
+    ),
+    chunks=(len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
+    compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+    dtype="float32",
+)
 
 #
 # 1. Interpolate the stacked array to be hourly along the time axis
@@ -767,6 +750,13 @@ else:
         forecast_process_dir + "/GEFS.time.pickle",
         forecast_path + "/GEFS.time.pickle",
     )
+
+    # Copy the zarr file to the final location
+    shutil.copytree(forecast_process_dir + "/GEFS.zarr",
+    forecast_path + "/GEFS.zarr",
+                    dirs_exist_ok=True)
+
+
 # Clean up
 shutil.rmtree(forecast_process_dir)
 

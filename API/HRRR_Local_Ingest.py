@@ -524,33 +524,21 @@ if saveType == "S3":
     zarr_store = zarr.storage.ZipStore(
         forecast_process_dir + "/HRRRH.zarr.zip", mode="w"
     )
-    zarr_array = zarr.open_array(
-        store=zarr_store,
-        shape=(len(zarrVars), 20, 1059, 1799),
-        chunks=(len(zarrVars), 20, 5, 5),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
-    )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_path + "/HRRRH.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/HRRRH.zarr")
 
-    # Check if the store exists, if so, open itm otherwise create it
-    if os.path.isfile(str(zarr_store.root) + "/c/0/0/0/0"):
-        # Create a Zarr array in the store with zstd compression
-        zarr_array = zarr.open_array(store=zarr_store)
-    else:
-        zarr_array = zarr.create_array(
-            store=zarr_store,
-            shape=daskVarArrayStackDisk.shape,
-            chunks=(
-                len(zarrVars),
-                daskVarArrayStackDisk.shape[1],
-                finalChunk,
-                finalChunk,
-            ),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
+zarr_array = zarr.create_array(
+    store=zarr_store,
+    shape=daskVarArrayStackDisk.shape,
+    chunks=(
+        len(zarrVars),
+        daskVarArrayStackDisk.shape[1],
+        finalChunk,
+        finalChunk,
+    ),
+    compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+    dtype="float32",
+)
 
 
 # with ProgressBar():
@@ -580,40 +568,25 @@ if saveType == "S3":
 # Create a Zarr array in the store with zstd compression
 if saveType == "S3":
     zarr_store_maps = zarr.storage.ZipStore(
-        forecast_process_dir + "/HRRR_maps.zarr.zip", mode="a"
+        forecast_process_dir + "/HRRRH_maps.zarr.zip", mode="a"
     )
 else:
-    zarr_store_maps = zarr.storage.LocalStore(forecast_path + "/HRRR_maps.zarr")
+    zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/HRRRH_maps.zarr")
 
 for z in (0, 4, 7, 8, 9, 11, 12, 13, 14, 16, 17):
     # Create a zarr backed dask array
-    if saveType == "S3":
-        zarr_array = zarr.open_array(
-            store=zarr_store_maps,
-            name=zarrVars[z],
-            shape=(36, daskVarArrayStackDisk.shape[2], daskVarArrayStackDisk.shape[3]),
-            chunks=(36, 100, 100),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
-    else:
-        # Check if the store exists, if so, open itm otherwise create it
-        if os.path.isfile(str(zarr_store_maps.root) + "/" + zarrVars[z] + "/0/0/0"):
-            # Create a Zarr array in the store with zstd compression
-            zarr_array = zarr.open_array(store=zarr_store_maps)
-        else:
-            zarr_array = zarr.create_array(
-                store=zarr_store_maps,
-                name=zarrVars[z],
-                shape=(
-                    36,
-                    daskVarArrayStackDisk.shape[2],
-                    daskVarArrayStackDisk.shape[3],
-                ),
-                chunks=(36, 100, 100),
-                compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-                dtype="float32",
-            )
+    zarr_array = zarr.create_array(
+        store=zarr_store_maps,
+        name=zarrVars[z],
+        shape=(
+            36,
+            daskVarArrayStackDisk.shape[2],
+            daskVarArrayStackDisk.shape[3],
+        ),
+        chunks=(36, 100, 100),
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32",
+    )
 
     da.rechunk(daskVarArrayStackDisk[z, 24:60, :, :], (36, 100, 100)).to_zarr(
         zarr_array, overwrite=True, compute=True
@@ -655,6 +628,17 @@ else:
         forecast_process_dir + "/HRRRH.time.pickle",
         forecast_path + "/HRRRH.time.pickle",
     )
+
+    # Copy the zarr file to the final location
+    shutil.copytree(forecast_process_dir + "/HRRRH.zarr",
+    forecast_path + "/HRRRH.zarr",
+                    dirs_exist_ok=True)
+
+    # Copy the zarr file to the final location
+    shutil.copytree(forecast_process_dir + "/HRRRH_maps.zarr",
+        forecast_path + "/HRRRH_maps.zarr",
+                    dirs_exist_ok=True)
+
 # Clean up
 shutil.rmtree(forecast_process_dir)
 

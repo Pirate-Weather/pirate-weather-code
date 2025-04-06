@@ -228,7 +228,7 @@ if saveType == "S3":
         forecast_process_dir + "/NWS_Alerts.zarr.zip", mode="a"
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_path + "/NWS_Alerts.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/NWS_Alerts.zarr")
 
 
 # Create a Zarr array in the store with zstd compression
@@ -257,6 +257,11 @@ if saveType == "S3":
         forecast_process_dir + "/NWS_Alerts.zarr.zip",
         forecast_path + "/ForecastTar/NWS_Alerts.zarr.zip",
     )
+else:
+    # Copy the zarr file to the final location
+    shutil.copytree(forecast_process_dir + "/NWS_Alerts.zarr",
+    forecast_path + "/NWS_Alerts.zarr",
+                    dirs_exist_ok=True)
 
 # Clean up
 shutil.rmtree(forecast_process_dir)

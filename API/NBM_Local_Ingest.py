@@ -94,14 +94,14 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
 
 forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/home/ubuntu/Weather/NBM"
+    "forecast_process_dir", default="/home/ubuntu/Weather/Process/NBM"
 )
 forecast_process_path = forecast_process_dir + "/NBM_Process"
 hist_process_path = forecast_process_dir + "/NBM_Historic"
 tmpDIR = forecast_process_dir + "/Downloads"
 
 forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/NBM")
-historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/History/NBM")
+historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/Hist/NBM")
 
 
 saveType = os.getenv("save_type", default="Download")
@@ -770,7 +770,7 @@ for i in range(hisPeriod, -1, -1):
         zarrStore = zarr.storage.LocalStore(local_path)
 
     # with ProgressBar():
-    xarray_his_wgrib.to_zarr(store=zarrStore, mode="w", consolidated=False)
+    xarray_his_wgrib.chunk(chunks={"time": 1, "x": processChunk, "y": processChunk}).to_zarr(store=zarrStore, mode="w", consolidated=False)
 
     # Clear the xarray dataset from memory
     del xarray_his_wgrib
@@ -791,8 +791,9 @@ ncLocalWorking_paths = [
     + "/NBM_Hist"
     + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
     + ".zarr"
-    for i in range(hisPeriod, 1, -1)
+    for i in range(hisPeriod, -1, -1)
 ]
+
 # Dask Setup
 daskInterpArrays = []
 daskVarArrays = []
@@ -839,7 +840,7 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
                 np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
                 (1, 1597, 2345),
             )
-        ).rechunk((len(stacked_timesUnix), 20, 20))
+        ).rechunk((len(stacked_timesUnix), processChunk, processChunk))
 
         daskVarArrayList.append(daskArrayOut)
 
@@ -848,7 +849,7 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 
         daskVarArrayList.append(
             daskArrayOut[:, :, :]
-            .rechunk((len(stacked_timesUnix), 20, 20))
+            .rechunk((len(stacked_timesUnix), processChunk, processChunk))
             .astype("float32")
         )
 
@@ -872,38 +873,22 @@ daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 # Create a zarr backed dask array
 if saveType == "S3":
     zarr_store = zarr.storage.ZipStore(forecast_process_dir + "/NBM.zarr.zip", mode="a")
-    zarr_array = zarr.open_array(
-        store=zarr_store,
-        shape=(
-            len(zarrVars),
-            len(npCatTimes),
-            daskVarArrayStackDisk.shape[2],
-            daskVarArrayStackDisk.shape[3],
-        ),
-        chunks=(len(zarrVars), len(npCatTimes), finalChunk, finalChunk),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
-    )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_path + "/NBM.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/NBM.zarr")
 
     # Check if the store exists, if so, open itm otherwise create it
-    if os.path.isfile(str(zarr_store.root) + "/c/0/0/0/0"):
-        # Create a Zarr array in the store with zstd compression
-        zarr_array = zarr.open_array(store=zarr_store)
-    else:
-        zarr_array = zarr.create_array(
-            store=zarr_store,
-            shape=(
-                len(zarrVars),
-                len(hourly_timesUnix),
-                daskVarArrayStackDisk.shape[2],
-                daskVarArrayStackDisk.shape[3],
-            ),
-            chunks=(len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
+zarr_array = zarr.create_array(
+    store=zarr_store,
+    shape=(
+        len(zarrVars),
+        len(hourly_timesUnix),
+        daskVarArrayStackDisk.shape[2],
+        daskVarArrayStackDisk.shape[3],
+    ),
+    chunks=(len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
+    compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+    dtype="float32",
+)
 
 #
 # 1. Interpolate the stacked array to be hourly along the time axis
@@ -919,7 +904,7 @@ stackInterp = da.rechunk(
         chunks=(1, len(stacked_timesUnix), processChunk, processChunk),
     ),
     (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
-).to_zarr(zarr_array, overwrite=True, compute=True)
+    ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
 if saveType == "S3":
@@ -944,37 +929,22 @@ if saveType == "S3":
         forecast_process_dir + "/NBM_maps.zarr.zip", mode="a"
     )
 else:
-    zarr_store_maps = zarr.storage.LocalStore(forecast_path + "/NBM_maps.zarr")
+    zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/NBM_maps.zarr")
 
 for z in [0, 2, 6, 7, 8, 13, 14, 15, 16, 17]:
     # Create a zarr backed dask array
-    if saveType == "S3":
-        zarr_array = zarr.open_array(
-            store=zarr_store_maps,
-            name=zarrVars[z],
-            shape=(36, daskVarArrayStackDisk.shape[2], daskVarArrayStackDisk.shape[3]),
-            chunks=(36, 100, 100),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
-    else:
-        # Check if the store exists, if so, open itm otherwise create it
-        if os.path.isfile(str(zarr_store_maps.root) + "/" + zarrVars[z] + "/0/0/0"):
-            # Create a Zarr array in the store with zstd compression
-            zarr_array = zarr.open_array(store=zarr_store_maps)
-        else:
-            zarr_array = zarr.create_array(
-                store=zarr_store_maps,
-                name=zarrVars[z],
-                shape=(
-                    36,
-                    daskVarArrayStackDisk.shape[2],
-                    daskVarArrayStackDisk.shape[3],
-                ),
-                chunks=(36, 100, 100),
-                compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-                dtype="float32",
-            )
+    zarr_array = zarr.create_array(
+        store=zarr_store_maps,
+        name=zarrVars[z],
+        shape=(
+            36,
+            daskVarArrayStackDisk.shape[2],
+            daskVarArrayStackDisk.shape[3],
+        ),
+        chunks=(36, 100, 100),
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32",
+    )
 
     # with ProgressBar():
     da.rechunk(daskVarArrayStackDisk[z, 24:60, :, :], (36, 100, 100)).to_zarr(
@@ -1014,6 +984,17 @@ else:
         forecast_process_dir + "/NBM.time.pickle",
         forecast_path + "/NBM.time.pickle",
     )
+
+    # Copy the zarr file to the final location
+    shutil.copytree(forecast_process_dir + "/NBM.zarr",
+    forecast_path + "/NBM.zarr",
+                    dirs_exist_ok=True)
+
+    # Copy the zarr file to the final location
+    shutil.copytree(forecast_process_dir + "/NBM_maps.zarr",
+        forecast_path + "/NBM_maps.zarr",
+                    dirs_exist_ok=True)
+
 # Clean up
 shutil.rmtree(forecast_process_dir)
 
