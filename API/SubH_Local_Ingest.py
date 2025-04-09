@@ -110,6 +110,7 @@ else:
 
 zarrVars = (
     "time",
+    "VIS_surface",
     "GUST_surface",
     "PRES_surface",
     "TMP_2maboveground",
@@ -133,7 +134,7 @@ zarrVars = (
 
 # Define the subset of variables to download as a list of strings
 matchstring_2m = ":((DPT|TMP):2 m above ground:)"
-matchstring_su = ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|GUST):surface:.*min fcst)"
+matchstring_su = ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST):surface:.*min fcst)"
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*min fcst)"
 
 # Merge matchstrings for download

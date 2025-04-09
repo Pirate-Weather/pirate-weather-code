@@ -29,6 +29,7 @@ from PirateText import calculate_text
 from PirateMinutelyText import calculate_minutely_text
 from PirateWeeklyText import calculate_weekly_text
 from PirateSimpleDayText import calculate_day_text
+from PirateHelper import estimateSnowHeight
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
@@ -2955,6 +2956,20 @@ async def PW_Forecast(
         elif hour_array_grib[idx] > InterSday[hourlyDayIndex[idx], 18]:
             isDay = False
 
+        if PTypeHour[idx] == "snow":
+            snowIntensity = InterPhour[:, 2] * 10
+            if tempUnits == 0:
+                snowTemp = (InterPhour[idx, 5] - 32) * 5 / 9
+            else:
+                snowTemp = InterPhour[idx, 5]
+
+            snowWind = InterPhour[idx, 10] / windUnit
+            InterPhour[idx, 2] = estimateSnowHeight(
+                InterPhour[idx, 2] * 10, snowTemp, snowWind
+            )
+        else:
+            snowIntensity = 0
+
         # Set text
         if InterPhour[idx, 3] >= 0.3 and (
             ((InterPhour[idx, 21] + InterPhour[idx, 23]) > (0.02 * prepAccumUnit))
@@ -3060,6 +3075,7 @@ async def PW_Forecast(
                 "nearestStormBearing": InterPhour[idx, 19],
                 "fireIndex": InterPhour[idx, 24],
                 "feelsLike": InterPhour[idx, 25],
+                "snowIntensity": snowIntensity,
             }
 
         else:
@@ -3957,6 +3973,20 @@ async def PW_Forecast(
     # Fix small neg zero
     InterPcurrent[((InterPcurrent > -0.01) & (InterPcurrent < 0.01))] = 0
 
+    if PTypeHour[idx] == "snow":
+        snowIntensity = minuteDict[0]["precipIntensity"] * 10
+        if tempUnits == 0:
+            snowTemp = (InterPcurrent[4] - 32) * 5 / 9
+        else:
+            snowTemp = InterPcurrent[4]
+
+        snowWind = InterPcurrent[9] / windUnit
+        InterPhour[idx, 2] = estimateSnowHeight(
+            minuteDict[0]["precipIntensity"] * 10, snowTemp, snowWind
+        )
+    else:
+        snowIntensity = 0
+
     ### RETURN ###
     returnOBJ = dict()
 
@@ -4009,6 +4039,7 @@ async def PW_Forecast(
             returnOBJ["currently"]["currentDayIce"] = dayZeroIce
             returnOBJ["currently"]["currentDayLiquid"] = dayZeroRain
             returnOBJ["currently"]["currentDaySnow"] = dayZeroSnow
+            returnOBJ["currently"]["snowIntensity"] = snowIntensity
 
         # Update the text
         if InterPcurrent[0] < InterSday[0, 17]:
