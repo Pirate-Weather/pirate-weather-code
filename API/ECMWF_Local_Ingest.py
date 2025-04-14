@@ -963,18 +963,14 @@ else:
     )
 
     # Copy the zarr file to the final location
-    shutil.copytree(
-        forecast_process_dir + "/ECMWF.zarr",
-        forecast_path + "/ECMWF.zarr",
-        dirs_exist_ok=True,
-    )
+    shutil.copytree(forecast_process_dir + "/ECMWF.zarr",
+    forecast_path + "/ECMWF.zarr",
+                    dirs_exist_ok=True)
 
     # Copy the zarr file to the final location
-    shutil.copytree(
-        forecast_process_dir + "/ECMWF_maps.zarr",
+    shutil.copytree(forecast_process_dir + "/ECMWF_maps.zarr",
         forecast_path + "/ECMWF_maps.zarr",
-        dirs_exist_ok=True,
-    )
+                    dirs_exist_ok=True)
 
 # Clean up
 shutil.rmtree(forecast_process_dir)

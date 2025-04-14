@@ -952,18 +952,14 @@ else:
     )
 
     # Copy the zarr file to the final location
-    shutil.copytree(
-        forecast_process_dir + "/GFS.zarr",
-        forecast_path + "/GFS.zarr",
-        dirs_exist_ok=True,
-    )
+    shutil.copytree(forecast_process_dir + "/GFS.zarr",
+    forecast_path + "/GFS.zarr",
+                    dirs_exist_ok=True)
 
     # Copy the zarr file to the final location
-    shutil.copytree(
-        forecast_process_dir + "/GFS_maps.zarr",
+    shutil.copytree(forecast_process_dir + "/GFS_maps.zarr",
         forecast_path + "/GFS_maps.zarr",
-        dirs_exist_ok=True,
-    )
+                    dirs_exist_ok=True)
 # Clean up
 shutil.rmtree(forecast_process_dir)
 
