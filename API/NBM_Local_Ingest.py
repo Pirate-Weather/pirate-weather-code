@@ -770,7 +770,9 @@ for i in range(hisPeriod, -1, -1):
         zarrStore = zarr.storage.LocalStore(local_path)
 
     # with ProgressBar():
-    xarray_his_wgrib.chunk(chunks={"time": 1, "x": processChunk, "y": processChunk}).to_zarr(store=zarrStore, mode="w", consolidated=False)
+    xarray_his_wgrib.chunk(
+        chunks={"time": 1, "x": processChunk, "y": processChunk}
+    ).to_zarr(store=zarrStore, mode="w", consolidated=False)
 
     # Clear the xarray dataset from memory
     del xarray_his_wgrib
@@ -986,14 +988,18 @@ else:
     )
 
     # Copy the zarr file to the final location
-    shutil.copytree(forecast_process_dir + "/NBM.zarr",
-    forecast_path + "/NBM.zarr",
-                    dirs_exist_ok=True)
+    shutil.copytree(
+        forecast_process_dir + "/NBM.zarr",
+        forecast_path + "/NBM.zarr",
+        dirs_exist_ok=True,
+    )
 
     # Copy the zarr file to the final location
-    shutil.copytree(forecast_process_dir + "/NBM_maps.zarr",
+    shutil.copytree(
+        forecast_process_dir + "/NBM_maps.zarr",
         forecast_path + "/NBM_maps.zarr",
-                    dirs_exist_ok=True)
+        dirs_exist_ok=True,
+    )
 
 # Clean up
 shutil.rmtree(forecast_process_dir)
