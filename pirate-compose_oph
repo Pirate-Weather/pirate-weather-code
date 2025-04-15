@@ -8,57 +8,57 @@ services:
     command: daemon --docker 
     labels:
       ofelia.job-run.gfs-ingest.schedule: "0 10 5,11,17,23 * * *"
-      ofelia.job-run.gfs-ingest.image: "ingestimage" 
-      ofelia.job-run.gfs-ingest.volume: '["/home/ubuntu/Weather:/data:rw"]'
-      ofelia.job-run.gfs-ingest.environment: '["wgrib2_path=/home/ubuntu/wgrib2_build/bin/wgrib2", "forecast_process_path=/data/Process/GFS/GFS_forecast", "forecast_path=/data/Prod/GFS", "historic_path=/data/Hist/GFS", "save_type=Download"]'
+      ofelia.job-run.gfs-ingest.image: "pirateingest:latest" 
+      ofelia.job-run.gfs-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
+      ofelia.job-run.gfs-ingest.environment: '["wgrib2_path=/home/ubuntu/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/GFS", "forecast_path=/data/Prod/GFS", "historic_path=/data/Hist/GFS", "save_type=Download"]'
       ofelia.job-run.gfs-ingest.command: "GFS_Local_Ingest.py" 
       ofelia.job-run.gfs-ingest.no-overlap: "true"             
       ofelia.job-run.nbm-ingest.schedule: "0 30 0,2,4,6,8,10,12,14,16,18,20,22 * * *"
-      ofelia.job-run.nbm-ingest.image: "ingestimage" 
-      ofelia.job-run.nbm-ingest.volume: '["/home/ubuntu/Weather:/data:rw"]'
-      ofelia.job-run.nbm-ingest.environment: '["wgrib2_path=/home/ubuntu/wgrib2_build/bin/wgrib2", "forecast_process_path=/data/Process/NBM/NBM_forecast", "forecast_path=/data/Prod/NBM", "historic_path=/data/Hist/NBM", "save_type=Download"]'
+      ofelia.job-run.nbm-ingest.image: "pirateingest:latest" 
+      ofelia.job-run.nbm-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
+      ofelia.job-run.nbm-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/NBM", "forecast_path=/data/Prod/NBM", "historic_path=/data/Hist/NBM", "save_type=Download"]'
       ofelia.job-run.nbm-ingest.command: "NBM_Local_Ingest.py" 
       ofelia.job-run.nbm-ingest.no-overlap: "true"
       ofelia.job-run.nbm-fire-ingest.schedule: "0 40 5,11,17,23 * * *"
-      ofelia.job-run.nbm-fire-ingest.image: "ingestimage" 
-      ofelia.job-run.nbm-fire-ingest.volume: '["/home/ubuntu/Weather:/data:rw"]'
-      ofelia.job-run.nbm-fire-ingest.environment: '["wgrib2_path=/home/ubuntu/wgrib2_build/bin/wgrib2", "forecast_process_path=/data/Process/NBM_Fire/NBM_Fire_forecast", "forecast_path=/data/Prod/NBM_Fire", "historic_path=/data/Hist/NBM_Fire", "save_type=Download"]'
+      ofelia.job-run.nbm-fire-ingest.image: "pirateingest:latest" 
+      ofelia.job-run.nbm-fire-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
+      ofelia.job-run.nbm-fire-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/NBM_Fire", "forecast_path=/data/Prod/NBM_Fire", "historic_path=/data/Hist/NBM_Fire", "save_type=Download"]'
       ofelia.job-run.nbm-fire-ingest.command: "NBM_Fire_Local_Ingest.py" 
       ofelia.job-run.nbm-fire-ingest.no-overlap: "true"
       ofelia.job-run.subh-ingest.schedule: "0 45 * * * *"
-      ofelia.job-run.subh-ingest.image: "ingestimage" 
-      ofelia.job-run.subh-ingest.volume: '["/home/ubuntu/Weather:/data:rw"]'
-      ofelia.job-run.subh-ingest.environment: '["wgrib2_path=/home/ubuntu/wgrib2_build/bin/wgrib2", "forecast_process_path=/data/Process/SubH/SubH_forecast", "forecast_path=/data/Prod/SubH", "historic_path=/data/Hist/SubH", "save_type=Download"]'
+      ofelia.job-run.subh-ingest.image: "pirateingest:latest" 
+      ofelia.job-run.subh-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
+      ofelia.job-run.subh-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/SubH", "forecast_path=/data/Prod/SubH", "historic_path=/data/Hist/SubH", "save_type=Download"]'
       ofelia.job-run.subh-ingest.command: "SubH_Local_Ingest.py" 
       ofelia.job-run.subh-ingest.no-overlap: "true"
       ofelia.job-run.gefs-ingest.schedule: "0 0 1,7,13,19 * * *"
-      ofelia.job-run.gefs-ingest.image: "ingestimage" 
-      ofelia.job-run.gefs-ingest.volume: '["/home/ubuntu/Weather:/data:rw"]'
-      ofelia.job-run.gefs-ingest.environment: '["wgrib2_path=/home/ubuntu/wgrib2_build/bin/wgrib2", "forecast_process_path=/data/Process/GEFS/GEFS_forecast", "forecast_path=/data/Prod/GEFS", "historic_path=/data/Hist/GEFS", "save_type=Download"]'
+      ofelia.job-run.gefs-ingest.image: "pirateingest:latest" 
+      ofelia.job-run.gefs-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
+      ofelia.job-run.gefs-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/GEFS", "forecast_path=/data/Prod/GEFS", "historic_path=/data/Hist/GEFS", "save_type=Download"]'
       ofelia.job-run.gefs-ingest.command: "GEFS_Local_Ingest.py" 
       ofelia.job-run.gefs-ingest.no-overlap: "true"
       ofelia.job-run.hrrr-ingest.schedule: "0 40 1,3,5,7,9,11,13,15,17,19,21,23 * * *"
-      ofelia.job-run.hrrr-ingest.image: "ingestimage" 
-      ofelia.job-run.hrrr-ingest.volume: '["/home/ubuntu/Weather:/data:rw"]'
-      ofelia.job-run.hrrr-ingest.environment: '["wgrib2_path=/home/ubuntu/wgrib2_build/bin/wgrib2", "forecast_process_path=/data/Process/HRRR/HRRR_forecast", "forecast_path=/data/Prod/HRRR "historic_path=/data/Hist/HRRR", "save_type=Download"]'
+      ofelia.job-run.hrrr-ingest.image: "pirateingest:latest" 
+      ofelia.job-run.hrrr-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
+      ofelia.job-run.hrrr-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/HRRR", "forecast_path=/data/Prod/HRRR "historic_path=/data/Hist/HRRR", "save_type=Download"]'
       ofelia.job-run.hrrr-ingest.command: "HRRR_Local_Ingest.py" 
       ofelia.job-run.hrrr-ingest.no-overlap: "true"
       ofelia.job-run.hrrr6h-ingest.schedule: "0 10 3,9,15,21 * * *"
-      ofelia.job-run.hrrr6h-ingest.image: "ingestimage" 
-      ofelia.job-run.hrrr6h-ingest.volume: '["/home/ubuntu/Weather:/data:rw"]'
-      ofelia.job-run.hrrr6h-ingest.environment: '["wgrib2_path=/home/ubuntu/wgrib2_build/bin/wgrib2", "forecast_process_path=/data/Process/HRRR_6H/HRRR_6H_forecast", "forecast_path=/data/Prod/HRRR_6H", "historic_path=/data/Hist/HRRR_6H", "save_type=Download"]'
+      ofelia.job-run.hrrr6h-ingest.image: "pirateingest:latest" 
+      ofelia.job-run.hrrr6h-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
+      ofelia.job-run.hrrr6h-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/HRRR_6H", "forecast_path=/data/Prod/HRRR_6H", "historic_path=/data/Hist/HRRR_6H", "save_type=Download"]'
       ofelia.job-run.hrrr6h-ingest.command: "HRRR_6H_Local_Ingest.py" 
       ofelia.job-run.hrrr6h-ingest.no-overlap: "true"
       ofelia.job-run.nws-alerts-ingest.schedule: "0 0,30 * * * *"
-      ofelia.job-run.nws-alerts-ingest.image: "ingestimage" 
-      ofelia.job-run.nws-alerts-ingest.volume: '["/home/ubuntu/Weather:/data:rw"]'
-      ofelia.job-run.nws-alerts-ingest.environment: '["wgrib2_path=/home/ubuntu/wgrib2_build/bin/wgrib2", "forecast_process_path=/data/Process/NWS_Alerts/NWS_Alerts_forecast", "forecast_path=/data/Prod/NWS_Alerts", "historic_path=/data/Hist/NWS_Alerts", "save_type=Download"]'
+      ofelia.job-run.nws-alerts-ingest.image: "pirateingest:latest" 
+      ofelia.job-run.nws-alerts-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
+      ofelia.job-run.nws-alerts-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/NWS_Alerts", "forecast_path=/data/Prod/NWS_Alerts", "historic_path=/data/Hist/NWS_Alerts", "save_type=Download"]'
       ofelia.job-run.nws-alerts-ingest.command: "NWS_Alerts_Local.py" 
       ofelia.job-run.nws-alerts-ingest.no-overlap: "true"
       ofelia.job-run.ecmwf-ingest.schedule: "0 0 8,20 * * *"
-      ofelia.job-run.ecmwf-ingest.image: "ingestimage" 
-      ofelia.job-run.ecmwf-ingest.volume: '["/home/ubuntu/Weather:/data:rw"]'
-      ofelia.job-run.ecmwf-ingest.environment: '["wgrib2_path=/home/ubuntu/wgrib2_build/bin/wgrib2", "forecast_process_path=/data/Process/ECMWF/ECMWF_forecast", "forecast_path=/data/Prod/ECMWF", "historic_path=/data/Hist/ECMWF", "save_type=Download"]'
+      ofelia.job-run.ecmwf-ingest.image: "pirateingest:latest" 
+      ofelia.job-run.ecmwf-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
+      ofelia.job-run.ecmwf-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/ECMWF", "forecast_path=/data/Prod/ECMWF", "historic_path=/data/Hist/ECMWF", "save_type=Download"]'
       ofelia.job-run.ecmwf-ingest.command: "ECMWF_Local_Ingest.py" 
       ofelia.job-run.ecmwf-ingest.no-overlap: "true"
     depends_on:
@@ -78,31 +78,35 @@ services:
         condition: service_completed_successfully
       nws_alerts_ingest:
         condition: service_completed_successfully         
-                                                        
+      ecmwf_ingest:
+        condition: service_completed_successfully         
+                                                                                                            
 
   # GFS Ingest
   gfs_ingest:
-    image: ingestimage
+    image: pirateingest:latest
     volumes:
       - /home/ubuntu/Weather:/data
+      - /mnt/block:/tmp
     environment:
-      wgrib2_path: "/home/ubuntu/wgrib2_build/bin/wgrib2"
-      forecast_process_path: "/data/Process/NWS_Alerts/NWS_Alerts_forecast"
-      forecast_path: "/data/Prod/NWS_Alerts"
-      historic_path: "/data/Hist/NWS_Alerts"
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/GFS"
+      forecast_path: "/data/Prod/GFS"
+      historic_path: "/data/Hist/GFS"
       save_type: "Download"
-    command: ["GFS_Local_Ingest.py"]
+    command: GFS_Local_Ingest.py
 
   # NBM Ingest
   nbm_ingest:
-    image: ingestimage
+    image: pirateingest:latest
     volumes:
       - /home/ubuntu/Weather:/data
+      - /mnt/block:/tmp
     environment:
-      wgrib2_path: "/home/ubuntu/wgrib2_build/bin/wgrib2"
-      forecast_process_path: "/data/Process/NWS_Alerts/NWS_Alerts_forecast"
-      forecast_path: "/data/Prod/NWS_Alerts"
-      historic_path: "/data/Hist/NWS_Alerts"
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/NBM"
+      forecast_path: "/data/Prod/NBM"
+      historic_path: "/data/Hist/NBM"
       save_type: "Download"
     command: ["NBM_Local_Ingest.py"]
     depends_on:
@@ -111,12 +115,13 @@ services:
 
   # NBM Fire Ingest
   nbm_fire_ingest:
-    image: ingestimage
+    image: pirateingest:latest
     volumes:
       - /home/ubuntu/Weather:/data
+      - /mnt/block:/tmp
     environment:
-      wgrib2_path: "/home/ubuntu/wgrib2_build/bin/wgrib2"
-      forecast_process_path: "/data/Process/NBM_Fire/NBM_Fire_forecast"
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/NBM_Fire"
       forecast_path: "/data/Prod/NBM_Fire"
       historic_path: "/data/Hist/NBM_Fire"
       save_type: "Download"
@@ -129,12 +134,13 @@ services:
 
   # SubH Ingest
   subh_ingest:
-    image: ingestimage
+    image: pirateingest:latest
     volumes:
       - /home/ubuntu/Weather:/data
+      - /mnt/block:/tmp
     environment:
-      wgrib2_path: "/home/ubuntu/wgrib2_build/bin/wgrib2"
-      forecast_process_path: "/data/Process/SubH/SubH_forecast"
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/SubH"
       forecast_path: "/data/Prod/SubH"
       historic_path: "/data/Hist/SubH"
       save_type: "Download"
@@ -147,12 +153,13 @@ services:
 
   # GEFS Ingest
   gefs_ingest:
-    image: ingestimage
+    image: pirateingest:latest
     volumes:
       - /home/ubuntu/Weather:/data
+      - /mnt/block:/tmp
     environment:
-      wgrib2_path: "/home/ubuntu/wgrib2_build/bin/wgrib2"
-      forecast_process_path: "/data/Process/GEFS/GEFS_forecast"
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/GEFS"
       forecast_path: "/data/Prod/GEFS"
       historic_path: "/data/Hist/GEFS"
       save_type: "Download"
@@ -169,12 +176,13 @@ services:
 
   # HRRR Ingest
   hrrr_ingest:
-    image: ingestimage
+    image: pirateingest:latest
     volumes:
       - /home/ubuntu/Weather:/data
+      - /mnt/block:/tmp
     environment:
-      wgrib2_path: "/home/ubuntu/wgrib2_build/bin/wgrib2"
-      forecast_process_path: "/data/Process/HRRR/HRRR_forecast"
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/HRRR"
       forecast_path: "/data/Prod/HRRR"
       historic_path: "/data/Hist/HRRR"
       save_type: "Download"
@@ -193,12 +201,13 @@ services:
       
   # HRRR 6H Ingest
   hrrr_6h_ingest:
-    image: ingestimage
+    image: pirateingest:latest
     volumes:
       - /home/ubuntu/Weather:/data
+      - /mnt/block:/tmp
     environment:
-      wgrib2_path: "/home/ubuntu/wgrib2_build/bin/wgrib2"
-      forecast_process_path: "/data/Process/HRRR_6H/HRRR_6H_forecast"
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/HRRR_6H"
       forecast_path: "/data/Prod/HRRR_6H"
       historic_path: "/data/Hist/HRRR_6H"
       save_type: "Download"
@@ -217,12 +226,13 @@ services:
 
   # NWS Alerts Ingest
   nws_alerts_ingest:
-    image: ingestimage
+    image: pirateingest:latest
     volumes:
       - /home/ubuntu/Weather:/data
+      - /mnt/block:/tmp
     environment:
-      wgrib2_path: "/home/ubuntu/wgrib2_build/bin/wgrib2"
-      forecast_process_path: "/data/Process/NWS_Alerts/NWS_Alerts_forecast"
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/NWS_Alerts"
       forecast_path: "/data/Prod/NWS_Alerts"
       historic_path: "/data/Hist/NWS_Alerts"
       save_type: "Download"
@@ -241,16 +251,17 @@ services:
 
   # ECMWF Ingest
   ecmwf_ingest:
-    image: ingestimage
+    image: pirateingest:latest
     volumes:
       - /home/ubuntu/Weather:/data
+      - /mnt/block:/tmp
     environment:
-      wgrib2_path: "/home/ubuntu/wgrib2_build/bin/wgrib2"
-      forecast_process_path: "/data/Process/ECMWF/ECMWF_forecast"
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/ECMWF"
       forecast_path: "/data/Prod/ECMWF"
       historic_path: "/data/Hist/ECMWF"
       save_type: "Download"
-    command: ["ECMWF_Local.py"]
+    command: ["ECMWF_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
