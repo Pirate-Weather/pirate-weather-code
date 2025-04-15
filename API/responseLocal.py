@@ -2589,7 +2589,7 @@ async def PW_Forecast(
     # Intensity Error
     # GEFS
     if "gefs" in sourceList:
-        InterPhour[:, 4] = np.maximum(GEFS_Merged[:, 2] * prepIntensityUnit, 0)
+        InterPhour[:, 4] = np.maximum(GEFS_Merged[:, 3] * prepIntensityUnit, 0)
 
     ### Temperature
     TemperatureHour = np.full((len(hour_array_grib), 3), np.nan)
@@ -4131,7 +4131,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.5.5"
+        returnOBJ["flags"]["version"] = "V2.6.0"
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
             returnOBJ["flags"]["processTime"] = (
