@@ -60,7 +60,7 @@ RUN cmake --install .
 WORKDIR /app
 
 # Copy the requirements file
-COPY requirements-ingest.txt requirements-ingest.txt
+COPY Docker/requirements-ingest.txt requirements-ingest.txt
 
 # Install python libs
 RUN python3 -m pip install -r requirements-ingest.txt
