@@ -23,10 +23,10 @@ jobs:
         with:
           images: ghcr.io/complianceascode/pirate-ingest
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@6.15.0
         with:
           context: .
-          file: Docker/pirate-api-dockerfile
+          file: Docker/pirate-ingest-dockerfile
           push: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

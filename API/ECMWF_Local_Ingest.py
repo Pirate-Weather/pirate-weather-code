@@ -1,4 +1,4 @@
-# %% Script to test FastHerbie.py to download GFS data
+# %% Script to test FastHerbie.py to download ECMWF data
 # Alexander Rey, March 2025
 
 # %% Import modules
