@@ -19,26 +19,14 @@ import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
-import zarr
+import zarr.storage
 from herbie import FastHerbie, Herbie, Path
-from numcodecs import BitRound, Blosc
-from rechunker import rechunk
 from scipy.interpolate import make_interp_spline
 
 
 # Scipy Interp Function
 def linInterp1D(block, T_in, T_out):
-    interp = make_interp_spline(T_in, block, 3, axis=0)
-    interp.extrapolate = False
-    interpOut = interp(T_out)
-    return interpOut
-
-
-def linInterp3D(block, T_in, T_out):
-    # Filter large values
-    bMask = block[:, 1, 1] < 1e10
-
-    interp = make_interp_spline(T_in[bMask], block[bMask, :, :], 3, axis=0)
+    interp = make_interp_spline(T_in, block, 3, axis=1)
     interp.extrapolate = False
     interpOut = interp(T_out)
     return interpOut
@@ -57,29 +45,51 @@ def rounder(t):
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-# To be changed in the Docker version
-wgrib2_path = os.getenv(
-    "wgrib2_path", default="/home/ubuntu/wgrib2/grib2/wgrib2/wgrib2 "
+wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
+
+forecast_process_dir = os.getenv(
+    "forecast_process_dir", default="/home/ubuntu/Weather/NBM_Fire"
 )
-forecast_process_path = os.getenv(
-    "forecast_process_path", default="/home/ubuntu/data/NBM_Fire_forecast"
+forecast_process_path = forecast_process_dir + "/NBM_Fire_Process"
+hist_process_path = forecast_process_dir + "/NBM_Fire_Historic"
+tmpDIR = forecast_process_dir + "/Downloads"
+
+forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/NBM_Fire")
+historic_path = os.getenv(
+    "historic_path", default="/home/ubuntu/Weather/History/NBM_Fire"
 )
-hist_process_path = os.getenv(
-    "hist_process_path", default="/home/ubuntu/data/NBM_Fire_hist"
-)
-merge_process_dir = os.getenv("merge_process_dir", default="/home/ubuntu/data/")
-tmpDIR = os.getenv("tmp_dir", default="~/data")
-saveType = os.getenv("save_type", default="S3")
-s3_bucket = os.getenv("save_path", default="s3://piratezarr2")
+
+
+saveType = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
-s3_save_path = "/ForecastProd/NBM_Fire/NBM_Fire_"
+s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+
+# Define the processing and history chunk size
+processChunk = 100
+
+# Define the final x/y chunksize
+finalChunk = 5
 
 hisPeriod = 36
 
-s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+# Create new directory for processing if it does not exist
+if not os.path.exists(forecast_process_dir):
+    os.makedirs(forecast_process_dir)
+else:
+    # If it does exist, remove it
+    shutil.rmtree(forecast_process_dir)
+    os.makedirs(forecast_process_dir)
 
+if not os.path.exists(tmpDIR):
+    os.makedirs(tmpDIR)
+
+if saveType == "Download":
+    if not os.path.exists(forecast_path):
+        os.makedirs(forecast_path)
+    if not os.path.exists(historic_path):
+        os.makedirs(historic_path)
 
 # %% Define base time from the most recent run
 T0 = time.time()
@@ -87,7 +97,7 @@ T0 = time.time()
 # Find latest 6-hourly run
 
 # Start from now and work backwards in 6 hour increments
-current_time = datetime.utcnow()
+current_time = datetime.now()
 hour = current_time.hour
 # Calculate the most recent hour from 0, 6, 12, or 18 hours ago
 if hour < 6:
@@ -136,8 +146,8 @@ print(base_time)
 # Check if this is newer than the current file
 if saveType == "S3":
     # Check if the file exists and load it
-    if s3.exists(s3_bucket + "/ForecastTar/NBM_Fire.time.pickle"):
-        with s3.open(s3_bucket + "/ForecastTar/NBM_Fire.time.pickle", "rb") as f:
+    if s3.exists(forecast_path + "/NBM_Fire.time.pickle"):
+        with s3.open(forecast_path + "/NBM_Fire.time.pickle", "rb") as f:
             previous_base_time = pickle.load(f)
 
         # Compare timestamps and download if the S3 object is more recent
@@ -146,9 +156,9 @@ if saveType == "S3":
             sys.exit()
 
 else:
-    if os.path.exists(s3_bucket + "/ForecastTar/NBM_Fire.time.pickle"):
+    if os.path.exists(forecast_path + "/NBM_Fire.time.pickle"):
         # Open the file in binary mode
-        with open(s3_bucket + "/ForecastTar/NBM_Fire.time.pickle", "rb") as file:
+        with open(forecast_path + "/NBM_Fire.time.pickle", "rb") as file:
             # Deserialize and retrieve the variable from the file
             previous_base_time = pickle.load(file)
 
@@ -159,16 +169,6 @@ else:
 
 zarrVars = ("time", "FOSINDX_surface")
 
-# Create new directory for processing if it does not exist
-if not os.path.exists(merge_process_dir):
-    os.makedirs(merge_process_dir)
-if not os.path.exists(tmpDIR):
-    os.makedirs(tmpDIR)
-if saveType == "Download":
-    if not os.path.exists(s3_bucket):
-        os.makedirs(s3_bucket)
-    if not os.path.exists(s3_bucket + "/ForecastTar"):
-        os.makedirs(s3_bucket + "/ForecastTar")
 #####################################################################################################
 # %% Download forecast data using Herbie Latest
 # Set download rannges
@@ -299,9 +299,6 @@ os.remove(forecast_process_path + "_wgrib2_merged_order.grib")
 
 #######
 # Use Dask to create a merged array (too large for xarray)
-# Dask
-chunkx = 100
-chunky = 100
 
 # Create base xarray for time interpolation
 xarray_forecast_base = xr.open_mfdataset(forecast_process_path + "_wgrib2_merged.nc")
@@ -315,15 +312,15 @@ assert len(xarray_forecast_base.time) == len(nbm_range), (
 start = xarray_forecast_base.time.min().values
 end = xarray_forecast_base.time.max().values
 new_hourly_time = pd.date_range(
-    start=start - pd.Timedelta(hisPeriod, "H"), end=end, freq="H"
+    start=start - pd.Timedelta(hisPeriod, "h"), end=end, freq="h"
 )
 
 stacked_times = np.concatenate(
     (
         pd.date_range(
-            start=start - pd.Timedelta(hisPeriod, "H"),
-            end=start - pd.Timedelta(1, "H"),
-            freq="6H",
+            start=start - pd.Timedelta(hisPeriod, "h"),
+            end=start - pd.Timedelta(1, "h"),
+            freq="6h",
         ),
         xarray_forecast_base.time.values,
     )
@@ -349,9 +346,11 @@ with dask.config.set(**{"array.slicing.split_large_chunks": True}):
         )
 
         # Rechunk
-        daskArray = daskArray.rechunk(chunks=(len(nbm_range), chunkx, chunky))
+        daskArray = daskArray.rechunk(
+            chunks=(len(nbm_range), processChunk, processChunk)
+        )
 
-        # %% Save merged and processed xarray dataset to disk using zarr with compression
+        # Save merged and processed xarray dataset to disk using zarr with compression
         # Define the path to save the zarr dataset
         # Save the dataset with compression and filters for all variables
         if dask_var == "time":
@@ -360,13 +359,9 @@ with dask.config.set(**{"array.slicing.split_large_chunks": True}):
                 forecast_process_path + "_zarrs/" + dask_var + ".zarr", overwrite=True
             )
         else:
-            filters = [BitRound(keepbits=12)]  # Only keep ~ 3 significant digits
-            compressor = Blosc(cname="zstd", clevel=1)  # Use zstd compression
             # Save the dataset with compression and filters for all variable
             daskArray.to_zarr(
                 forecast_process_path + "_zarrs/" + dask_var + ".zarr",
-                filters=filters,
-                compression=compressor,
                 overwrite=True,
             )
 
@@ -381,9 +376,9 @@ T1 = time.time()
 print(T0 - T1)
 
 ################################################################################################
-# Historic data
-# %% Create a range of dates for historic data going back 48 hours, which should be enough for the daily forecast
-# %% Loop through the runs and check if they have already been processed to s3
+# %%Historic data
+# Create a range of dates for historic data going back 48 hours, which should be enough for the daily forecast
+# Loop through the runs and check if they have already been processed to s3
 
 # Hourly Runs- hisperiod to 1, since the 0th hour run is needed (ends up being basetime -1H since using the 1h forecast)
 for i in range(hisPeriod, 1, -6):
@@ -392,8 +387,8 @@ for i in range(hisPeriod, 1, -6):
 
     if saveType == "S3":
         s3_path = (
-            s3_bucket
-            + "/NBM/NBM_Fire_Hist"
+            historic_path
+            + "/NBM_Fire_Hist"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -405,8 +400,8 @@ for i in range(hisPeriod, 1, -6):
     else:
         # Local Path Setup
         local_path = (
-            s3_bucket
-            + "/NBM/NBM_Fire_Hist"
+            historic_path
+            + "/NBM_Fire_Hist"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -424,7 +419,7 @@ for i in range(hisPeriod, 1, -6):
     DATES = pd.date_range(
         start=base_time - pd.Timedelta(str(i) + "h"),
         periods=1,
-        freq="1H",
+        freq="1h",
     )
 
     # Create a range of forecast lead times
@@ -470,31 +465,20 @@ for i in range(hisPeriod, 1, -6):
     )
     spOUT3 = subprocess.run(cmd3, shell=True, capture_output=True, encoding="utf-8")
 
-    # %% Merge the  xarrays
+    # Merge the  xarrays
     # Read the netcdf file using xarray
     xarray_his_wgrib = xr.open_dataset(hist_process_path + "_wgrib_merge.nc")
 
-    # %% Save merged and processed xarray dataset to disk using zarr with compression
-    # Save the dataset with compression and filters for all variables
-    # Use the same encoding as last time but with larger chuncks to speed up read times
-    compressor = Blosc(cname="lz4", clevel=1)
-    filters = [BitRound(keepbits=12)]
-
+    # Save merged and processed xarray dataset to disk using zarr
     # No chunking since only one time step
-    encoding = {
-        vname: {"compressor": compressor, "filters": filters} for vname in zarrVars[1:]
-    }
-
     # Save as Zarr to s3 for Time Machine
     if saveType == "S3":
         zarrStore = s3fs.S3Map(root=s3_path, s3=s3, create=True)
     else:
         # Create local Zarr store
-        zarrStore = zarr.DirectoryStore(local_path)
+        zarrStore = zarr.storage.LocalStore(local_path)
 
-    xarray_his_wgrib.to_zarr(
-        store=zarrStore, mode="w", consolidated=True, encoding=encoding
-    )
+    xarray_his_wgrib.to_zarr(store=zarrStore, mode="w", consolidated=False)
 
     # Clear the xarray dataset from memory
     del xarray_his_wgrib
@@ -509,186 +493,162 @@ for i in range(hisPeriod, 1, -6):
 
 # %% Merge the historic and forecast datasets and then squash using dask
 #####################################################################################################
-# %% Merge the historic and forecast datasets and then squash using dask
-
-# Create a zarr backed dask array
-zarr_store = zarr.DirectoryStore(merge_process_dir + "/NBM_Fire_UnChunk.zarr")
-
-compressor = Blosc(cname="zstd", clevel=3)
-filters = [BitRound(keepbits=12)]
-
-# Create a Zarr array in the store with zstd compression. Max length is 195 Forecast Hours  37
-zarr_array = zarr.zeros(
-    (len(zarrVars), 217, 1597, 2345),
-    chunks=(1, 217, 100, 100),
-    store=zarr_store,
-    compressor=compressor,
-    dtype="float32",
-    overwrite=True,
-)
-
-# Get the s3 paths to the historic data
 ncLocalWorking_paths = [
-    s3_bucket
-    + "/NBM/NBM_Fire_Hist"
+    historic_path
+    + "/NBM_Fire_Hist"
     + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
     + ".zarr"
     for i in range(hisPeriod, 1, -6)
 ]
 
-# Dask
-daskArrays = []
+# Dask Setup
+daskInterpArrays = []
 daskVarArrays = []
+daskVarArrayList = []
 
-with dask.config.set(**{"array.slicing.split_large_chunks": True}):
-    for daskVarIDX, dask_var in enumerate(zarrVars):
-        for local_ncpath in ncLocalWorking_paths:
-            if saveType == "S3":
-                daskVarArrays.append(
-                    da.from_zarr(
-                        local_ncpath,
-                        component=dask_var,
-                        inline_array=True,
-                        storage_options={
-                            "key": aws_access_key_id,
-                            "secret": aws_secret_access_key,
-                        },
-                    )
+for daskVarIDX, dask_var in enumerate(zarrVars[:]):
+    for local_ncpath in ncLocalWorking_paths:
+        if saveType == "S3":
+            daskVarArrays.append(
+                da.from_zarr(
+                    local_ncpath,
+                    component=dask_var,
+                    inline_array=True,
+                    storage_options={
+                        "key": aws_access_key_id,
+                        "secret": aws_secret_access_key,
+                    },
                 )
-            else:
-                daskVarArrays.append(
-                    da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
-                )
-        # Add NC Forecast
-        daskForecastArray = da.from_zarr(
-            forecast_process_path + "_zarrs/" + dask_var + ".zarr", inline_array=True
-        )
-
-        if dask_var == "time":
-            daskVarArraysStack = da.stack(daskVarArrays)
-
-            # Also doesn't like being delayed?
-
-            daskCatTimes = da.concatenate(
-                (da.squeeze(daskVarArraysStack), daskForecastArray), axis=0
-            ).astype("float32")
-
-            # with ProgressBar():
-            interpTimes = da.map_blocks(
-                linInterp1D,
-                daskCatTimes.rechunk(len(daskCatTimes)),
-                stacked_timesUnix,
-                hourly_timesUnix,
-                dtype="float32",
-            ).compute()
-
-            daskArrayOut = np.tile(
-                np.expand_dims(np.expand_dims(interpTimes, axis=1), axis=1),
-                (1, 1597, 2345),
             )
-
-            da.to_zarr(
-                da.from_array(np.expand_dims(daskArrayOut, axis=0)),
-                zarr_array,
-                region=(
-                    slice(daskVarIDX, daskVarIDX + 1),
-                    slice(0, 217),
-                    slice(0, 1597),
-                    slice(0, 2345),
-                ),
-            )
-
         else:
-            daskVarArraysAppend = daskVarArrays.append(daskForecastArray)
-            varMerged = da.concatenate(daskVarArrays, axis=0)
-
-            # with ProgressBar():
-            da.to_zarr(
-                da.from_array(
-                    da.expand_dims(
-                        da.map_blocks(
-                            linInterp3D,
-                            varMerged.rechunk(
-                                (len(stacked_timesUnix), 100, 100)
-                            ).astype("float32"),
-                            stacked_timesUnix,
-                            hourly_timesUnix,
-                            dtype="float32",
-                        ).compute(),
-                        axis=0,
-                    )
-                ),
-                zarr_array,
-                region=(
-                    slice(daskVarIDX, daskVarIDX + 1),
-                    slice(0, 217),
-                    slice(0, 1597),
-                    slice(0, 2345),
-                ),
+            daskVarArrays.append(
+                da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
             )
 
-        daskVarArrays = []
-        varMerged = []
+    daskVarArraysStack = da.stack(
+        daskVarArrays, allow_unknown_chunksizes=True
+    ).squeeze()
 
-        print(dask_var)
-
-    zarr_store.close()
-
-    shutil.rmtree(forecast_process_path + "_zarrs")
-
-    # Rechunk the zarr array
-    encoding = {"compressor": Blosc(cname="zstd", clevel=3)}
-
-    source = zarr.open(merge_process_dir + "/NBM_Fire_UnChunk.zarr")
-    intermediate = merge_process_dir + "/NBM_Fire_Mid.zarr"
-    target = zarr.ZipStore(merge_process_dir + "/NBM_Fire.zarr.zip", compression=0)
-    rechunked = rechunk(
-        source,
-        target_chunks=(len(zarrVars), 217, 2, 2),
-        target_store=target,
-        max_mem="1G",
-        temp_store=intermediate,
-        target_options=encoding,
+    daskForecastArray = da.from_zarr(
+        forecast_process_path + "_zarrs" + "/" + dask_var + ".zarr", inline_array=True
     )
 
-    # with ProgressBar():
-    result = rechunked.execute()
+    if dask_var == "time":
+        # Create a time array with the same shape
+        daskCatTimes = da.concatenate(
+            (da.squeeze(daskVarArraysStack), daskForecastArray), axis=0
+        ).astype("float32")
 
-    target.close()
+        # Get times as numpy
+        npCatTimes = daskCatTimes.compute()
 
+        daskArrayOut = da.from_array(
+            np.tile(
+                np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
+                (1, 1597, 2345),
+            )
+        ).rechunk((len(stacked_timesUnix), processChunk, processChunk))
+
+        daskVarArrayList.append(daskArrayOut)
+
+    else:
+        daskArrayOut = da.concatenate((daskVarArraysStack, daskForecastArray), axis=0)
+
+        daskVarArrayList.append(
+            daskArrayOut[:, :, :]
+            .rechunk((len(stacked_timesUnix), processChunk, processChunk))
+            .astype("float32")
+        )
+
+    daskVarArrays = []
+
+    print(dask_var)
+
+
+# Merge the arrays into a single 4D array
+daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
+
+# Write out to disk
+# This intermediate step is necessary to avoid memory overflow
+# with ProgressBar():
+daskVarArrayListMerge.to_zarr(
+    forecast_process_path + "_stack.zarr", overwrite=True, compute=True
+)
+
+# Read in stacked 4D array back in
+daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
+
+# Create a zarr backed dask array
+if saveType == "S3":
+    zarr_store = zarr.storage.ZipStore(
+        forecast_process_dir + "/NBM_Fire.zarr.zip", mode="w"
+    )
+
+else:
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/NBM_Fire.zarr")
+
+zarr_array = zarr.create_array(
+    store=zarr_store,
+    shape=daskVarArrayStackDisk.shape,
+    chunks=(len(zarrVars), len(npCatTimes), finalChunk, finalChunk),
+    compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+    dtype="float32",
+)
+
+# with ProgressBar():
+stackInterp = da.rechunk(
+    da.map_blocks(
+        linInterp1D,
+        daskVarArrayStackDisk,
+        stacked_timesUnix,
+        hourly_timesUnix,
+        dtype="float32",
+        chunks=(1, len(stacked_timesUnix), processChunk, processChunk),
+    ),
+    (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
+).to_zarr(zarr_array, overwrite=True, compute=True)
+
+if saveType == "S3":
+    zarr_store.close()
+
+# Test Read
+# zarr_store_test = zarr.storage.ZipStore(merge_process_dir + '/NBM_Fire.zarr.zip', mode='r')
+# testZarr = zarr.open_array(zarr_store_test)
+# print(testZarr[:,:,100,100])
 
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        merge_process_dir + "/NBM_Fire.zarr.zip",
-        s3_bucket + "/ForecastTar/NBM_Fire.zarr.zip",
+        forecast_process_dir + "/NBM_Fire.zarr.zip",
+        forecast_path + "/NBM_Fire.zarr.zip",
     )
 
     # Write most recent forecast time
-    with open(merge_process_dir + "/NBM_Fire.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/NBM_Fire.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     s3.put_file(
-        merge_process_dir + "/NBM_Fire.time.pickle",
-        s3_bucket + "/ForecastTar/NBM_Fire.time.pickle",
+        forecast_process_dir + "/NBM_Fire.time.pickle",
+        forecast_path + "/NBM_Fire.time.pickle",
     )
 else:
-    # Move to local
-    shutil.move(
-        merge_process_dir + "/NBM_Fire.zarr.zip",
-        s3_bucket + "/ForecastTar/NBM_Fire.zarr.zip",
-    )
-
     # Write most recent forecast time
-    with open(merge_process_dir + "/NBM_Fire.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/NBM_Fire.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     shutil.move(
-        merge_process_dir + "/NBM_Fire.time.pickle",
-        s3_bucket + "/ForecastTar/NBM_Fire.time.pickle",
+        forecast_process_dir + "/NBM_Fire.time.pickle",
+        forecast_path + "/NBM_Fire.time.pickle",
     )
 
-    # Clean up
-    shutil.rmtree(merge_process_dir)
+    # Copy the zarr file to the final location
+    shutil.copytree(
+        forecast_process_dir + "/NBM_Fire.zarr",
+        forecast_path + "/NBM_Fire.zarr",
+        dirs_exist_ok=True,
+    )
+
+# Clean up
+shutil.rmtree(forecast_process_dir)
