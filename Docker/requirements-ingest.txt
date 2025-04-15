@@ -4,7 +4,7 @@ netCDF4==1.7.2
 xarray==2025.1.2
 cartopy==0.24.1
 cfgrib==0.9.15.0
-eccodes==2.40.1
+eccodes==2.41.0
 zarr==3.0.5
 dask==2025.2.0
 s3fs==2025.3.2

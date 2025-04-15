@@ -1,5 +1,11 @@
 # %% Script to contain the functions that can be used to generate the daily text summary of the forecast data for Pirate Weather
-from collections import Counter
+from PirateTextHelper import (
+    calculate_precip_text,
+    calculate_wind_text,
+    calculate_vis_text,
+    calculate_sky_icon,
+    Most_Common,
+)
 import math
 
 cloudy = 0.875
@@ -7,203 +13,6 @@ mostly_cloudy = 0.625
 partly_cloudy = 0.375
 mostly_clear = 0.125
 visibility = 1000
-
-
-def Most_Common(lst):
-    """
-    Finds the most common icon to use as the weekly icon
-
-    Parameters:
-    - lst (arr): An array of weekly icons
-
-    Returns:
-    - str: The most common icon in the lst.
-    """
-    data = Counter(lst)
-    return data.most_common(1)[0][0]
-
-
-def calculate_sky_icon(cloudCover, isDayTime):
-    """
-    Calculates the sky icon
-
-    Parameters:
-    - cloudCover (float) -  The cloudCover in percentage
-    - isDayTime (bool) - Whether its daytime or nighttime
-
-    Returns:
-    - cIcon (float) - The icon representing the sky cover
-    """
-    sky_icon = None
-
-    if cloudCover > cloudy:
-        sky_icon = "cloudy"
-    elif cloudCover > partly_cloudy:
-        if isDayTime:
-            sky_icon = "partly-cloudy-day"
-        else:
-            sky_icon = "partly-cloudy-night"
-    else:
-        if isDayTime:
-            sky_icon = "clear-day"
-        else:
-            sky_icon = "clear-night"
-
-    return sky_icon
-
-
-def calculate_precip_icon(
-    precipIntensity,
-    prepIntensityUnit,
-    precipType,
-    pop=1,
-):
-    """
-    Calculates the precipitation icon
-
-    Parameters:
-    - precipIntensity (float) -  The precipitation intensity
-    - precipIntensityUnit (float) -  The unit of precipitation intensity
-    - precipType (str) - The type of precipitation
-    - pop (float) - The probablility of precipitation
-
-    Returns:
-    - cIcon (float) - The icon representing the precipitation
-    """
-
-    cIcon = None
-
-    if (
-        precipIntensity > (0.02 * prepIntensityUnit)
-        and pop >= 0.3
-        and precipType is not None
-    ):
-        if precipType != "none":
-            cIcon = precipType
-        else:
-            cIcon = "rain"
-    return cIcon
-
-
-def calculate_precip_text(precipIntensity, prepIntensityUnit, precipType, pop):
-    """
-    Calculates the precipitation text
-
-    Parameters:
-    - precipIntensity (float) -  The precipitation intensity
-    - precipIntensityUnit (float) -  The unit of precipitation intensity
-    - precipType (str) - The type of precipitation
-    - pop (float) - The probablility of precipitation
-
-    Returns:
-    - precipText (str) - The textual representation of the precipitation
-    """
-    precipText = None
-    possiblePrecip = ""
-
-    # Add the possible precipitation text if pop is between 10-30% or if pop is greater than 10% but precipIntensity is between 0-0.02 mm/h
-    if pop < 0.3 or (
-        precipIntensity > 0 and precipIntensity < (0.02 * prepIntensityUnit)
-    ):
-        possiblePrecip = "possible-"
-
-    if (precipIntensity > 0) and precipType is not None:
-        if precipType == "rain":
-            if precipIntensity < (0.4 * prepIntensityUnit):
-                precipText = possiblePrecip + "very-light-rain"
-            elif precipIntensity >= (0.4 * prepIntensityUnit) and precipIntensity < (
-                2.5 * prepIntensityUnit
-            ):
-                precipText = possiblePrecip + "light-rain"
-            elif precipIntensity >= (2.5 * prepIntensityUnit) and precipIntensity < (
-                10 * prepIntensityUnit
-            ):
-                precipText = "medium-rain"
-            else:
-                precipText = "heavy-rain"
-        elif precipType == "snow":
-            if precipIntensity < (0.13 * prepIntensityUnit):
-                precipText = possiblePrecip + "very-light-snow"
-            elif precipIntensity >= (0.13 * prepIntensityUnit) and precipIntensity < (
-                0.83 * prepIntensityUnit
-            ):
-                precipText = possiblePrecip + "light-snow"
-            elif precipIntensity >= (0.83 * prepIntensityUnit) and precipIntensity < (
-                3.33 * prepIntensityUnit
-            ):
-                precipText = "medium-snow"
-            else:
-                precipText = "heavy-snow"
-        elif precipType == "sleet":
-            if precipIntensity < (0.4 * prepIntensityUnit):
-                precipText = possiblePrecip + "very-light-sleet"
-            elif precipIntensity >= (0.4 * prepIntensityUnit) and precipIntensity < (
-                2.5 * prepIntensityUnit
-            ):
-                precipText = possiblePrecip + "light-sleet"
-            elif precipIntensity >= (2.5 * prepIntensityUnit) and precipIntensity < (
-                10 * prepIntensityUnit
-            ):
-                precipText = "medium-sleet"
-            else:
-                precipText = "heavy-sleet"
-        else:
-            # Because soemtimes there's precipitation not no type use a generic precipitation summary
-            if precipIntensity < (0.4 * prepIntensityUnit):
-                precipText = possiblePrecip + "very-light-precipitation"
-            elif precipIntensity >= (0.4 * prepIntensityUnit) and precipIntensity < (
-                2.5 * prepIntensityUnit
-            ):
-                precipText = possiblePrecip + "light-precipitation"
-            elif precipIntensity >= (2.5 * prepIntensityUnit) and precipIntensity < (
-                10 * prepIntensityUnit
-            ):
-                precipText = "medium-precipitation"
-            else:
-                precipText = "heavy-precipitation"
-
-    return precipText
-
-
-def calculate_wind_text(wind, windUnit):
-    """
-    Calculates the wind text
-
-    Parameters:
-    - wind (float) -  The wind speed
-    - windUnit (float) -  The unit of the wind speed
-
-    Returns:
-    - windText (str) - The textual representation of the wind
-    """
-    windText = None
-    if wind >= (6.7056 * windUnit) and wind < (10 * windUnit):
-        windText = "light-wind"
-    elif wind >= (10 * windUnit) and wind < (17.8816 * windUnit):
-        windText = "medium-wind"
-    elif wind >= (17.8816 * windUnit):
-        windText = "heavy-wind"
-
-    return windText
-
-
-def calculate_vis_text(vis, visUnits):
-    """
-    Calculates the visibility text
-
-    Parameters:
-    - vis (float) -  The visibility
-    - visUnit (float) -  The unit of the visibility
-
-    Returns:
-    - visText (str) - The textual representation of the visibility
-    """
-    visText = None
-
-    if vis < (visibility * visUnits):
-        visText = "fog"
-
-    return visText
 
 
 def calculate_cloud_text(cloudCover):
@@ -242,7 +51,17 @@ def calculate_cloud_text(cloudCover):
 
 
 def calculate_period_text(
-    periods, typePeriods, text, type, wind, morn, maxWind, windPrecip, checkPeriod, mode
+    periods,
+    typePeriods,
+    text,
+    type,
+    wind,
+    morn,
+    maxWind,
+    windPrecip,
+    checkPeriod,
+    mode,
+    icon,
 ):
     """
     Calculates the period text
@@ -274,7 +93,11 @@ def calculate_period_text(
             # If they both occur at the same time then join with an and. Set windPrecip to true to skip checking the wind
             if wind[0] == typePeriods[0]:
                 windPrecip = True
-                periodText = ["and", periodText, calculate_wind_text(maxWind, morn[3])]
+                periodText = [
+                    "and",
+                    periodText,
+                    calculate_wind_text(maxWind, morn[3], icon, "summary"),
+                ]
         summary_text = ["during", periodText, periods[typePeriods[0]]]
     # If the type has two periods
     elif len(typePeriods) == 2:
@@ -283,7 +106,11 @@ def calculate_period_text(
             # If they both occur at the same time then join with an and. Set windPrecip to true to skip checking the wind
             if wind[0] == typePeriods[0] and wind[1] == typePeriods[1]:
                 windPrecip = True
-                periodText = ["and", periodText, calculate_wind_text(maxWind, morn[3])]
+                periodText = [
+                    "and",
+                    periodText,
+                    calculate_wind_text(maxWind, morn[3], icon, "summary"),
+                ]
         # If the type starts in the third period
         if typePeriods[0] == checkPeriod + 2 and typePeriods[1] == 3:
             summary_text = ["starting", periodText, periods[typePeriods[0]]]
@@ -333,7 +160,11 @@ def calculate_period_text(
                 and wind[2] == typePeriods[2]
             ):
                 windPrecip = True
-                periodText = ["and", periodText, calculate_wind_text(maxWind, morn[3])]
+                periodText = [
+                    "and",
+                    periodText,
+                    calculate_wind_text(maxWind, morn[3], icon, "summary"),
+                ]
         # If the type starts in the second period
         if typePeriods[0] == checkPeriod + 1 and typePeriods[2] == 3:
             summary_text = ["starting", periodText, periods[typePeriods[0]]]
@@ -381,12 +212,20 @@ def calculate_period_text(
             if mode == "daily":
                 summary_text = [
                     "for-day",
-                    ["and", periodText, calculate_wind_text(maxWind, morn[3])],
+                    [
+                        "and",
+                        periodText,
+                        calculate_wind_text(maxWind, morn[3], icon, "summary"),
+                    ],
                 ]
             else:
                 summary_text = [
                     "starting",
-                    ["and", periodText, calculate_wind_text(maxWind, morn[3])],
+                    [
+                        "and",
+                        periodText,
+                        calculate_wind_text(maxWind, morn[3], icon, "summary"),
+                    ],
                     periods[typePeriods[0]],
                 ]
         else:
@@ -402,7 +241,7 @@ def calculate_period_text(
     return summary_text, windPrecip
 
 
-def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
+def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily", icon="darksky"):
     """
     Calculates the current day/next 24h text
 
@@ -412,6 +251,7 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
     - eve (arr) - The third period.
     - night (arr) - The fourth period.
     - checkPeriod (float) - The current period
+    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
 
     Returns:
     - summary_text (str) - The textual representation of the current day/next 24 hours
@@ -463,10 +303,10 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
         else:
             period1.append(None)
         # Calculate the wind text
-        period1.append(calculate_wind_text(morn[2], morn[3]))
+        period1.append(calculate_wind_text(morn[2], morn[3], icon, "summary"))
         # Check if there is no precipitation and the wind is less than the light wind threshold
         if morn[4] * morn[5] < 0.02 and morn[2] / morn[3] < 6.7056:
-            period1.append(calculate_vis_text(morn[0], morn[1]))
+            period1.append(calculate_vis_text(morn[0], morn[1], "summary"))
         else:
             period1.append(None)
         # Add the current period cloud cover
@@ -483,10 +323,10 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
         else:
             period2.append(None)
         # Calculate the wind text
-        period2.append(calculate_wind_text(aft[2], aft[3]))
+        period2.append(calculate_wind_text(aft[2], aft[3], icon, "summary"))
         # Check if there is no precipitation and the wind is less than the light wind threshold
         if aft[4] * aft[5] < 0.02 and aft[2] / aft[3] < 6.7056:
-            period2.append(calculate_vis_text(aft[0], aft[1]))
+            period2.append(calculate_vis_text(aft[0], aft[1], "summary"))
         else:
             period2.append(None)
         # Add the current period cloud cover
@@ -502,10 +342,10 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
             avgPop += eve[9]
         else:
             period3.append(None)
-        period3.append(calculate_wind_text(eve[2], eve[3]))
+        period3.append(calculate_wind_text(eve[2], eve[3], icon, "summary"))
         # Check if there is no precipitation and the wind is less than the light wind threshold
         if eve[4] * eve[5] < 0.02 and eve[2] / eve[3] < 6.7056:
-            period3.append(calculate_vis_text(eve[0], eve[1]))
+            period3.append(calculate_vis_text(eve[0], eve[1], "summary"))
         else:
             period3.append(None)
         # Add the current period cloud cover
@@ -521,9 +361,9 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
     else:
         period4.append(None)
     # Check if there is no precipitation and the wind is less than the light wind threshold
-    period4.append(calculate_wind_text(night[2], night[3]))
+    period4.append(calculate_wind_text(night[2], night[3], icon, "summary"))
     if night[4] * night[5] < 0.02 and night[2] / night[3] < 6.7056:
-        period4.append(calculate_vis_text(night[0], night[1]))
+        period4.append(calculate_vis_text(night[0], night[1], "summary"))
     else:
         period4.append(None)
     # Add the current period cloud cover
@@ -688,17 +528,37 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
             precipType = "mixed-precipitation"
     # If there are two types of precipitation
     elif len(precipTypes) == 2:
-        cIcon = calculate_precip_icon(
-            maxIntensity, morn[5], Most_Common(mostCommonPrecip), avgPop
+        cIcon = calculate_precip_text(
+            maxIntensity,
+            morn[5],
+            Most_Common(mostCommonPrecip),
+            avgPop,
+            "hourly",
+            maxIntensity,
+            maxIntensity,
+            maxIntensity,
+            icon,
+            "icon",
         )
         # If there is any rain precipitation
         if "rain" in precipTypes:
             # If there is any snow precipitation; set the icon to snow
             if "snow" in precipTypes:
-                cIcon = "snow"
+                text, cIcon = calculate_precip_text(
+                    maxIntensity,
+                    night[5],
+                    "rain",
+                    avgPop,
+                    "hourly",
+                    maxIntensity,
+                    maxIntensity,
+                    maxIntensity,
+                    icon,
+                    "both",
+                )
                 precipType = [
                     "parenthetical",
-                    calculate_precip_text(maxIntensity, night[5], "rain", avgPop),
+                    text,
                     snowSentence,
                 ]
             # If there is any snow accumulation but not enough to show the snow icon in a block
@@ -708,7 +568,16 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
                     [
                         "and",
                         calculate_precip_text(
-                            maxIntensity, night[5], precipTypes[0], avgPop
+                            maxIntensity,
+                            night[5],
+                            precipTypes[0],
+                            avgPop,
+                            "hourly",
+                            maxIntensity,
+                            maxIntensity,
+                            maxIntensity,
+                            icon,
+                            "summary",
                         ),
                         "medium-" + precipTypes[1],
                     ],
@@ -719,7 +588,16 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
                 precipType = [
                     "and",
                     calculate_precip_text(
-                        maxIntensity, night[5], precipTypes[0], avgPop
+                        maxIntensity,
+                        night[5],
+                        precipTypes[0],
+                        avgPop,
+                        "hourly",
+                        maxIntensity,
+                        maxIntensity,
+                        maxIntensity,
+                        icon,
+                        "summary",
                     ),
                     "medium-" + precipTypes[1],
                 ]
@@ -727,10 +605,21 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
         elif "sleet" in precipTypes:
             # If there is any snow precipitation; set the icon to snow
             if "snow" in precipTypes:
-                cIcon = "snow"
+                text, cIcon = calculate_precip_text(
+                    maxIntensity,
+                    night[5],
+                    "sleet",
+                    avgPop,
+                    "hourly",
+                    maxIntensity,
+                    maxIntensity,
+                    maxIntensity,
+                    icon,
+                    "both",
+                )
                 precipType = [
                     "parenthetical",
-                    calculate_precip_text(maxIntensity, night[5], "sleet", avgPop),
+                    text,
                     snowSentence,
                 ]
             # If there is any snow accumulation but not enough to show the snow icon in a block
@@ -740,7 +629,16 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
                     [
                         "and",
                         calculate_precip_text(
-                            maxIntensity, night[5], precipTypes[0], avgPop
+                            maxIntensity,
+                            night[5],
+                            precipTypes[0],
+                            avgPop,
+                            "hourly",
+                            maxIntensity,
+                            maxIntensity,
+                            maxIntensity,
+                            icon,
+                            "summary",
                         ),
                         "medium-" + precipTypes[1],
                     ],
@@ -751,7 +649,16 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
                 precipType = [
                     "and",
                     calculate_precip_text(
-                        maxIntensity, night[5], precipTypes[0], avgPop
+                        maxIntensity,
+                        night[5],
+                        precipTypes[0],
+                        avgPop,
+                        "hourly",
+                        maxIntensity,
+                        maxIntensity,
+                        maxIntensity,
+                        icon,
+                        "summary",
                     ),
                     "medium-" + precipTypes[1],
                 ]
@@ -759,11 +666,22 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
         else:
             # If there is any snow precipitation; set the icon to snow
             if "snow" in precipTypes:
-                cIcon = "snow"
+                text, cIcon = calculate_precip_text(
+                    maxIntensity,
+                    night[5],
+                    "none",
+                    avgPop,
+                    "hourly",
+                    maxIntensity,
+                    maxIntensity,
+                    maxIntensity,
+                    icon,
+                    "both",
+                )
                 # If there is no accumulation then show the accumulation as < 1 cm/in
                 precipType = [
                     "parenthetical",
-                    calculate_precip_text(maxIntensity, night[5], "none", avgPop),
+                    text,
                     snowSentence,
                 ]
             # If there is any snow accumulation but not enough to show the snow icon in a block
@@ -773,7 +691,16 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
                     [
                         "and",
                         calculate_precip_text(
-                            maxIntensity, night[5], precipTypes[0], avgPop
+                            maxIntensity,
+                            night[5],
+                            precipTypes[0],
+                            avgPop,
+                            "hourly",
+                            maxIntensity,
+                            maxIntensity,
+                            maxIntensity,
+                            icon,
+                            "summary",
                         ),
                         "medium-" + precipTypes[1],
                     ],
@@ -784,20 +711,49 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
                 precipType = [
                     "and",
                     calculate_precip_text(
-                        maxIntensity, night[5], precipTypes[0], avgPop
+                        maxIntensity,
+                        night[5],
+                        precipTypes[0],
+                        avgPop,
+                        "hourly",
+                        maxIntensity,
+                        maxIntensity,
+                        maxIntensity,
+                        icon,
+                        "summary",
                     ),
                     "medium-" + precipTypes[1],
                 ]
     # If there is just one type of precipitation
     elif len(precipTypes) == 1:
         # Set the icon to the type
-        cIcon = calculate_precip_icon(
-            maxIntensity, morn[5], Most_Common(mostCommonPrecip), avgPop
+        cIcon = calculate_precip_text(
+            maxIntensity,
+            morn[5],
+            Most_Common(mostCommonPrecip),
+            avgPop,
+            "hourly",
+            maxIntensity,
+            maxIntensity,
+            maxIntensity,
+            icon,
+            "icon",
         )
         if "snow" in precipTypes:
             precipType = [
                 "parenthetical",
-                calculate_precip_text(maxIntensity, night[5], "snow", avgPop),
+                calculate_precip_text(
+                    maxIntensity,
+                    night[5],
+                    "snow",
+                    avgPop,
+                    "hourly",
+                    maxIntensity,
+                    maxIntensity,
+                    maxIntensity,
+                    icon,
+                    "summary",
+                ),
                 snowSentence,
             ]
         # If there is any snow accumulation but not enough to show the snow icon in a block
@@ -805,7 +761,16 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
             precipType = [
                 "parenthetical",
                 calculate_precip_text(
-                    maxIntensity, night[5], Most_Common(mostCommonPrecip), avgPop
+                    maxIntensity,
+                    night[5],
+                    Most_Common(mostCommonPrecip),
+                    avgPop,
+                    "hourly",
+                    maxIntensity,
+                    maxIntensity,
+                    maxIntensity,
+                    icon,
+                    "summary",
                 ),
                 snowSentence,
             ]
@@ -813,7 +778,16 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
         # Otherwise just calculate the text normally
         else:
             precipType = calculate_precip_text(
-                maxIntensity, night[5], precipTypes[0], avgPop
+                maxIntensity,
+                night[5],
+                precipTypes[0],
+                avgPop,
+                "hourly",
+                maxIntensity,
+                maxIntensity,
+                maxIntensity,
+                icon,
+                "summary",
             )
 
     # Check the cloud levels and determine the most common one
@@ -929,6 +903,7 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
         windPrecip,
         checkPeriod,
         mode,
+        icon,
     )
 
     # If there is only one period
@@ -979,6 +954,7 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
                 windPrecip,
                 checkPeriod,
                 mode,
+                icon,
             )
 
         # If there is any visibility then calcaulate the text
@@ -995,6 +971,7 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
                 windPrecip,
                 checkPeriod,
                 mode,
+                icon,
             )
 
         # If there is any wind then calcaulate the text if its not joined with precip/cloud
@@ -1003,7 +980,7 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
             windText, windPrecip = calculate_period_text(
                 periods,
                 wind,
-                calculate_wind_text(maxWind, morn[3]),
+                calculate_wind_text(maxWind, morn[3], icon, "summary"),
                 "vis",
                 wind,
                 morn,
@@ -1059,6 +1036,6 @@ def calculate_day_text(morn, aft, eve, night, currPeriod, mode="daily"):
 
     # If there is no icon then calculate it based on the average cloud cover for the periods
     if cIcon is None:
-        cIcon = calculate_sky_icon(avgCloud, True)
+        cIcon = calculate_sky_icon(avgCloud, True, icon)
 
     return summary_text, cIcon

@@ -12,6 +12,7 @@ concurrency:
 
 jobs:
   ingest:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
@@ -31,6 +32,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
   api:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
