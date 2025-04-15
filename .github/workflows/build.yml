@@ -17,11 +17,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5.7.0
         with:
           images: ghcr.io/complianceascode/pirate-ingest
+
       - name: Build and push
         uses: docker/build-push-action@v6.15.0
         with:
@@ -38,11 +43,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5.7.0
         with:
           images: ghcr.io/complianceascode/pirate-api
+
       - name: Build
         uses: docker/build-push-action@v6.15.0
         with:
