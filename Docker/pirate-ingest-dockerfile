@@ -66,14 +66,6 @@ COPY requirements-ingest.txt requirements-ingest.txt
 RUN python3 -m pip install -r requirements-ingest.txt
 
 # Copy Files
-COPY SubH_Local_Ingest.py SubH_Local_Ingest.py
-COPY GFS_Local_Ingest.py GFS_Local_Ingest.py
-COPY GEFS_Local_Ingest.py GEFS_Local_Ingest.py
-COPY NBM_Local_Ingest.py NBM_Local_Ingest.py
-COPY NBM_Fire_Local_Ingest.py NBM_Fire_Local_Ingest.py
-COPY HRRR_Local_Ingest.py HRRR_Local_Ingest.py
-COPY HRRR_6H_Local_Ingest.py HRRR_6H_Local_Ingest.py
-COPY ECMWF_Local_Ingest.py ECMWF_Local_Ingest.py
-COPY NWS_Alerts_Local.py NWS_Alerts_Local.py
+COPY API/ ./
 
 ENTRYPOINT ["python3"]
