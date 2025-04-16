@@ -1,64 +1,218 @@
-name: Sanity Build
+name: Build and push to AWS
 
 on:
-  pull_request:
-    branches: ['dev']
   push:
-    branches-ignore: ['dev']
+    branches: ['dev']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.run_id }}
   cancel-in-progress: true
 
+#################################################################
+# INGEST IMAGE BUILD (Native Builds on ARM and x64 nodes)
+#################################################################
+
 jobs:
-  ingest:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+  ingest_arm:
+    name: Build Ingest Image (ARM)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR Public (ARM)
+        id: login-ingest-arm
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+
+      - name: Build and push Ingest ARM image
+        env:
+          REGISTRY: ${{ steps.login-ingest-arm.outputs.registry }}
+          REGISTRY_ALIAS: j9v4j3c7  # Replace with your registry alias
+          REPOSITORY: pirate-wgrib-python   # Use a base name without an arch suffix
+          IMAGE_TAG: dev-arm64
+        run: |
+          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-ingest-dockerfile .
+          docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+
+  ingest_x64:
+    name: Build Ingest Image (x64)
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5.7.0
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          images: ghcr.io/complianceascode/pirate-ingest
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
 
-      - name: Build and push
-        uses: docker/build-push-action@v6.15.0
+      - name: Login to Amazon ECR Public (x64)
+        id: login-ingest-x64
+        uses: aws-actions/amazon-ecr-login@v2
         with:
-          context: .
-          file: Docker/pirate-ingest-dockerfile
-          push: false
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
+          registry-type: public
 
-  api:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+      - name: Build and push Ingest x64 image
+        env:
+          REGISTRY: ${{ steps.login-ingest-x64.outputs.registry }}
+          REGISTRY_ALIAS: j9v4j3c7
+          REPOSITORY: pirate-wgrib-python
+          IMAGE_TAG: dev-amd64
+        run: |
+          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-ingest-dockerfile .
+          docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+
+  manifest_ingest:
+    name: Create Ingest MultiArch Manifest
+    needs: [ingest_arm, ingest_x64]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR Public (Manifest Ingest)
+        id: login-manifest-ingest
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+
+      - name: Create and push manifest for Ingest image
+        env:
+          REGISTRY: ${{ steps.login-manifest-ingest.outputs.registry }}
+          REGISTRY_ALIAS: j9v4j3c7
+          REPOSITORY: pirate-wgrib-python
+          IMAGE_TAG: dev
+        run: |
+          docker manifest create $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
+            --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:dev-amd64 \
+            --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:dev-arm64
+          docker manifest push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+
+#################################################################
+# API IMAGE BUILD (Native Builds on ARM and x64 nodes)
+#################################################################
+
+  api_arm:
+    name: Build API Image (ARM)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR Public (ARM)
+        id: login-api-arm
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+
+      - name: Build and push API ARM image
+        env:
+          REGISTRY: ${{ steps.login-api-arm.outputs.registry }}
+          REGISTRY_ALIAS: j9v4j3c7
+          REPOSITORY: pirate-alpine-zarr
+          IMAGE_TAG: dev-arm64
+        run: |
+          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-api-dockerfile .
+          docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+
+  api_x64:
+    name: Build API Image (x64)
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5.7.0
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          images: ghcr.io/complianceascode/pirate-api
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
 
-      - name: Build
-        uses: docker/build-push-action@v6.15.0
+      - name: Login to Amazon ECR Public (x64)
+        id: login-api-x64
+        uses: aws-actions/amazon-ecr-login@v2
         with:
-          context: .
-          file: Docker/pirate-api-dockerfile
-          push: false
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
+          registry-type: public
+
+      - name: Build and push API x64 image
+        env:
+          REGISTRY: ${{ steps.login-api-x64.outputs.registry }}
+          REGISTRY_ALIAS: j9v4j3c7
+          REPOSITORY: pirate-alpine-zarr
+          IMAGE_TAG: dev-amd64
+        run: |
+          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-api-dockerfile .
+          docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+
+  manifest_api:
+    name: Create API MultiArch Manifest
+    needs: [api_arm, api_x64]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR Public (Manifest API)
+        id: login-manifest-api
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+
+      - name: Create and push manifest for API image
+        env:
+          REGISTRY: ${{ steps.login-manifest-api.outputs.registry }}
+          REGISTRY_ALIAS: j9v4j3c7
+          REPOSITORY: pirate-alpine-zarr
+          IMAGE_TAG: dev
+        run: |
+          docker manifest create $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
+            --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:dev-amd64 \
+            --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:dev-arm64
+          docker manifest push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+
+#################################################################
+# DEPLOYMENT JOB
+#################################################################
+
+  deploy:
+    name: Deploy
+    needs: [manifest_ingest, manifest_api]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Force new ECS deployment for pirate-api service
+        run: |
+          aws ecs update-service --cluster PirateBackEc2 --service PirateDev --force-new-deployment
