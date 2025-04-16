@@ -4,6 +4,8 @@
 
 - [ ] Bugfixes to existing code
 - [ ] Breaking change
+- [ ] New API Version
+- [ ] General Improvement
 - [ ] Code quality improvements to existing code or addition of tests
 - [ ] Documentation Updates
 

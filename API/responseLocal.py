@@ -24,13 +24,14 @@ from boto3.s3.transfer import TransferConfig
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import ORJSONResponse
 from fastapi_utils.tasks import repeat_every
+from pirateweather_translations.dynamic_loader import load_all_translations
 from PirateText import calculate_text
+from PirateMinutelyText import calculate_minutely_text
+from PirateWeeklyText import calculate_weekly_text
+from PirateSimpleDayText import calculate_day_text
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
-
-
-from pirateweather_translations.dynamic_loader import load_all_translations
 
 Translations = load_all_translations()
 
@@ -747,6 +748,7 @@ async def PW_Forecast(
     version: Union[str, None] = None,
     tmextra: Union[str, None] = None,
     apikey: Union[str, None] = None,
+    icon: Union[str, None] = None,
 ) -> dict:
     global ETOPO_f
     global SubH_Zarr
@@ -954,14 +956,15 @@ async def PW_Forecast(
     if not lang:
         lang = "en"
 
+    if icon != "pirate":
+        icon = "darksky"
+
     # Check if langugage is supported
     if lang not in Translations:
         # Throw an error
         raise HTTPException(status_code=400, detail="Language Not Supported")
 
     translation = Translations[lang]
-    if not translation:
-        translation = Translations["en"]
 
     # Check if extra information should be included with time machine
     if not tmextra:
@@ -2586,7 +2589,7 @@ async def PW_Forecast(
     # Intensity Error
     # GEFS
     if "gefs" in sourceList:
-        InterPhour[:, 4] = np.maximum(GEFS_Merged[:, 2] * prepIntensityUnit, 0)
+        InterPhour[:, 4] = np.maximum(GEFS_Merged[:, 3] * prepIntensityUnit, 0)
 
     ### Temperature
     TemperatureHour = np.full((len(hour_array_grib), 3), np.nan)
@@ -3097,9 +3100,10 @@ async def PW_Forecast(
                 InterPhour[idx, 22],
                 InterPhour[idx, 23],
                 "hour",
-                mode="title",
+                InterPhour[idx, 2],
+                icon,
             )
-            hourItem["summary"] = translation.translate(hourText)
+            hourItem["summary"] = translation.translate(["title", hourText])
             hourItem["icon"] = hourIcon
         except Exception as e:
             print("TEXT GEN ERROR:")
@@ -3219,18 +3223,18 @@ async def PW_Forecast(
     # Finally, if there is much ice at all, that takes priority over rain or snow.
 
     # First, add a fallback if any precipitation is expected
-    maxPchanceDay[((maxPchanceDay == 0) & (InterPdaySum4am[:, 21] > 0))] = 4
-    maxPchanceDay[((maxPchanceDay == 0) & (InterPdaySum4am[:, 22] > 0))] = 1
-    maxPchanceDay[((maxPchanceDay == 0) & (InterPdaySum4am[:, 23] > 0))] = 2
+    maxPchanceDay[((maxPchanceDay == 0) & (InterPdaySum[:, 21] > 0))] = 4
+    maxPchanceDay[((maxPchanceDay == 0) & (InterPdaySum[:, 22] > 0))] = 1
+    maxPchanceDay[((maxPchanceDay == 0) & (InterPdaySum[:, 23] > 0))] = 2
 
     # Then, if more than 10 mm of rain is forecast, then rain
-    maxPchanceDay[InterPdaySum4am[:, 21] > (10 * prepAccumUnit)] = 4
+    maxPchanceDay[InterPdaySum[:, 21] > (10 * prepAccumUnit)] = 4
 
     # If more than 5 mm of snow is forecast, then snow
-    maxPchanceDay[InterPdaySum4am[:, 22] > (5 * prepAccumUnit)] = 1
+    maxPchanceDay[InterPdaySum[:, 22] > (5 * prepAccumUnit)] = 1
 
     # Else, if more than 1 mm of ice is forecast, then ice
-    maxPchanceDay[InterPdaySum4am[:, 23] > (1 * prepAccumUnit)] = 2
+    maxPchanceDay[InterPdaySum[:, 23] > (1 * prepAccumUnit)] = 2
 
     # Process Daily Data for ouput
     dayList = []
@@ -3321,9 +3325,12 @@ async def PW_Forecast(
                 "precipIntensity": InterPday[idx, 2],
                 "precipIntensityMax": InterPdayMax[idx, 2],
                 "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
-                "precipAccumulation": InterPdaySum[idx, 21]
-                + InterPdaySum[idx, 22]
-                + InterPdaySum[idx, 23],
+                "precipAccumulation": round(
+                    InterPdaySum[idx, 21]
+                    + InterPdaySum[idx, 22]
+                    + InterPdaySum[idx, 23],
+                    4,
+                ),
                 "precipType": PTypeDay[idx],
                 "temperatureHigh": InterPdayHigh[idx, 5],
                 "temperatureHighTime": int(InterPdayHighTime[idx, 5]),
@@ -3365,9 +3372,12 @@ async def PW_Forecast(
                     "precipIntensityMax": InterPdayMax[idx, 2],
                     "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
                     "precipProbability": InterPdayMax[idx, 3],
-                    "precipAccumulation": InterPdaySum[idx, 21]
-                    + InterPdaySum[idx, 22]
-                    + InterPdaySum[idx, 23],
+                    "precipAccumulation": round(
+                        InterPdaySum[idx, 21]
+                        + InterPdaySum[idx, 22]
+                        + InterPdaySum[idx, 23],
+                        4,
+                    ),
                     "precipType": PTypeDay[idx],
                     "temperatureHigh": InterPdayHigh[idx, 5],
                     "temperatureHighTime": int(InterPdayHighTime[idx, 5]),
@@ -3416,9 +3426,12 @@ async def PW_Forecast(
                     "precipIntensityMax": InterPdayMax[idx, 2],
                     "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
                     "precipProbability": InterPdayMax[idx, 3],
-                    "precipAccumulation": InterPdaySum[idx, 21]
-                    + InterPdaySum[idx, 22]
-                    + InterPdaySum[idx, 23],
+                    "precipAccumulation": round(
+                        InterPdaySum[idx, 21]
+                        + InterPdaySum[idx, 22]
+                        + InterPdaySum[idx, 23],
+                        4,
+                    ),
                     "precipType": PTypeDay[idx],
                     "temperatureHigh": InterPdayHigh[idx, 5],
                     "temperatureHighTime": int(InterPdayHighTime[idx, 5]),
@@ -3451,7 +3464,7 @@ async def PW_Forecast(
 
         try:
             # Update the text
-            dayText, dayIcon = calculate_text(
+            dayText, dayIcon = calculate_day_text(
                 dayObject,
                 prepAccumUnit,
                 visUnits,
@@ -3461,10 +3474,9 @@ async def PW_Forecast(
                 InterPdaySum[idx, 21],
                 InterPdaySum[idx, 22],
                 InterPdaySum[idx, 23],
-                "day",
-                mode="title",
+                icon,
             )
-            dayObject["summary"] = translation.translate(dayText)
+            dayObject["summary"] = translation.translate(["sentence", dayText])
             dayObject["icon"] = dayIcon
         except Exception as e:
             print("TEXT GEN ERROR:")
@@ -3948,8 +3960,8 @@ async def PW_Forecast(
     ### RETURN ###
     returnOBJ = dict()
 
-    returnOBJ["latitude"] = float(lat)
-    returnOBJ["longitude"] = float(lon_IN)
+    returnOBJ["latitude"] = round(float(lat), 4)
+    returnOBJ["longitude"] = round(float(lon_IN), 4)
     returnOBJ["timezone"] = str(tz_name)
     returnOBJ["offset"] = float(tz_offset / 60)
     returnOBJ["elevation"] = round(float(ETOPO * elevUnit))
@@ -4041,9 +4053,12 @@ async def PW_Forecast(
                 currnetSnowAccum,
                 currnetIceAccum,
                 "current",
-                mode="title",
+                minuteDict[0]["precipIntensity"],
+                icon,
             )
-            returnOBJ["currently"]["summary"] = translation.translate(currentText)
+            returnOBJ["currently"]["summary"] = translation.translate(
+                ["title", currentText]
+            )
             returnOBJ["currently"]["icon"] = currentIcon
         except Exception as e:
             print("TEXT GEN ERROR:")
@@ -4052,8 +4067,13 @@ async def PW_Forecast(
     if exMinutely != 1:
         returnOBJ["minutely"] = dict()
         try:
-            returnOBJ["minutely"]["summary"] = translation.translate(currentText)
-            returnOBJ["minutely"]["icon"] = currentIcon
+            minuteText, minuteIcon = calculate_minutely_text(
+                minuteDict, currentText, currentIcon, icon, prepAccumUnit
+            )
+            returnOBJ["minutely"]["summary"] = translation.translate(
+                ["sentence", minuteText]
+            )
+            returnOBJ["minutely"]["icon"] = minuteIcon
         except Exception as e:
             print("TEXT GEN ERROR:")
             print(e)
@@ -4078,8 +4098,23 @@ async def PW_Forecast(
     if exDaily != 1:
         returnOBJ["daily"] = dict()
         if (not timeMachine) or (tmExtra):
-            returnOBJ["daily"]["summary"] = max(set(dayTextList), key=dayTextList.count)
-            returnOBJ["daily"]["icon"] = max(set(dayIconList), key=dayIconList.count)
+            try:
+                weekText, weekIcon = calculate_weekly_text(
+                    dayList, prepAccumUnit, tempUnits, str(tz_name), icon
+                )
+                returnOBJ["daily"]["summary"] = translation.translate(
+                    ["sentence", weekText]
+                )
+                returnOBJ["daily"]["icon"] = weekIcon
+            except Exception as e:
+                print("TEXT GEN ERROR:")
+                print(e)
+                returnOBJ["daily"]["summary"] = max(
+                    set(dayTextList), key=dayTextList.count
+                )
+                returnOBJ["daily"]["icon"] = max(
+                    set(dayIconList), key=dayIconList.count
+                )
         returnOBJ["daily"]["data"] = dayList
 
     if exAlerts != 1:
@@ -4096,8 +4131,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.5.4"
-
+        returnOBJ["flags"]["version"] = "V2.6.0"
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
             returnOBJ["flags"]["processTime"] = (
