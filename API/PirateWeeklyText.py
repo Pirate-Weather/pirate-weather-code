@@ -70,8 +70,7 @@ def calculate_summary_text(
 
     # If the icon is not mixed precipitation change it to translations format
     if wIcon != "mixed-precipitation":
-        cIcon = wIcon
-        wIcon = calculate_precip_text(
+        wIcon, cIcon = calculate_precip_text(
             avgIntensity,
             intensityUnit,
             wIcon,
@@ -81,7 +80,7 @@ def calculate_summary_text(
             maxIntensity,
             1,
             icon,
-            "summary",
+            "both",
         )
     else:
         cIcon = "sleet"
@@ -322,7 +321,7 @@ def calculate_precip_summary(
             ]
         else:
             # If the types are not the same then set the icon to sleet and use the mixed precipitation text (as is how Dark Sky did it)
-            cIcon = "mixed"
+            cIcon = "sleet"
             precipSummary = ["for-week", "mixed-precipitation"]
 
     return precipSummary, cIcon
