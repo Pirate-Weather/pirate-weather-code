@@ -11,148 +11,94 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ingest_arm:
-    name: Build Ingest Image (ARM)
+  ingest_amd64:
+    name: Ingest (x64)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5.7.0
+        with:
+          images: ghcr.io/complianceascode/pirate-ingest
+
+      - name: Build Ingest for x64
+        uses: docker/build-push-action@v6.15.0
+        with:
+          context: .
+          file: Docker/pirate-ingest-dockerfile
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/amd64
+
+  ingest_arm64:
+    name: Ingest (ARM64)
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
 
-      - name: Docker meta for Ingest
+      - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5.7.0
         with:
           images: ghcr.io/complianceascode/pirate-ingest
 
-      - name: Build and push Ingest ARM image
+      - name: Build Ingest for ARM
         uses: docker/build-push-action@v6.15.0
         with:
           context: .
           file: Docker/pirate-ingest-dockerfile
-          push: true
-          # Append -arm64 to the computed tag so it’s unique to ARM builds
-          tags: ${{ steps.meta.outputs.tags }}-arm64
-          labels: ${{ steps.meta.outputs.labels }}
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/arm64
 
-  ingest_x64:
-    name: Build Ingest Image (x64)
+  api_amd64:
+    name: API (x64)
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
 
-      - name: Docker meta for Ingest
+      - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5.7.0
         with:
-          images: ghcr.io/complianceascode/pirate-ingest
+          images: ghcr.io/complianceascode/pirate-api
 
-      - name: Build and push Ingest x64 image
+      - name: Build API for x64
         uses: docker/build-push-action@v6.15.0
         with:
           context: .
-          file: Docker/pirate-ingest-dockerfile
-          push: true
-          # Append -amd64 to the computed tag so it’s unique to x64 builds
-          tags: ${{ steps.meta.outputs.tags }}-amd64
-          labels: ${{ steps.meta.outputs.labels }}
+          file: Docker/pirate-api-dockerfile
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/amd64
 
-  manifest_ingest:
-    name: Create Ingest Multi‑Arch Manifest
-    needs: [ingest_arm, ingest_x64]
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Docker meta for Ingest Manifest
-        id: meta
-        uses: docker/metadata-action@v5.7.0
-        with:
-          images: ghcr.io/complianceascode/pirate-ingest
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create and push manifest for Ingest image
-        run: |
-          IMAGE="${{ steps.meta.outputs.tags }}"
-          docker manifest create $IMAGE \
-            --amend $IMAGE-arm64 \
-            --amend $IMAGE-amd64
-          docker manifest push $IMAGE
-
-  api_arm:
-    name: Build API Image (ARM)
+  api_arm64:
+    name: API (ARM64)
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
 
-      - name: Docker meta for API
+      - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5.7.0
         with:
           images: ghcr.io/complianceascode/pirate-api
 
-      - name: Build and push API ARM image
+      - name: Build API for ARM
         uses: docker/build-push-action@v6.15.0
         with:
           context: .
           file: Docker/pirate-api-dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}-arm64
-          labels: ${{ steps.meta.outputs.labels }}
-
-  api_x64:
-    name: Build API Image (x64)
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4.2.2
-
-      - name: Docker meta for API
-        id: meta
-        uses: docker/metadata-action@v5.7.0
-        with:
-          images: ghcr.io/complianceascode/pirate-api
-
-      - name: Build and push API x64 image
-        uses: docker/build-push-action@v6.15.0
-        with:
-          context: .
-          file: Docker/pirate-api-dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}-amd64
-          labels: ${{ steps.meta.outputs.labels }}
-
-  manifest_api:
-    name: Create API Multi‑Arch Manifest
-    needs: [api_arm, api_x64]
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Docker meta for API Manifest
-        id: meta
-        uses: docker/metadata-action@v5.7.0
-        with:
-          images: ghcr.io/complianceascode/pirate-api
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create and push manifest for API image
-        run: |
-          IMAGE="${{ steps.meta.outputs.tags }}"
-          docker manifest create $IMAGE \
-            --amend $IMAGE-arm64 \
-            --amend $IMAGE-amd64
-          docker manifest push $IMAGE
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/arm64
