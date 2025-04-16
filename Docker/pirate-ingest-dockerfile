@@ -30,12 +30,10 @@ RUN apt update && \
                        git \
                        libnetcdf-dev \
                        libhdf5-dev \
-					             libgdal-dev \ 
+		       libgdal-dev \ 
                        libaec-dev 					   
 
 # Manual ECCodes
-
-
 RUN wget https://confluence.ecmwf.int/download/attachments/45757960/eccodes-2.41.0-Source.tar.gz
 RUN tar xzf eccodes-2.41.0-Source.tar.gz && rm eccodes-2.41.0-Source.tar.gz
 
@@ -44,7 +42,7 @@ WORKDIR /build
 
 RUN cmake -DCMAKE_INSTALL_PREFIX=/usr/local ../eccodes-2.41.0-Source
 RUN make -j4
-RUN ctest
+RUN ctest -j4
 RUN make install
 
 # Get NCEPLIBS  
@@ -73,7 +71,7 @@ WORKDIR /app
 COPY Docker/requirements-ingest.txt requirements-ingest.txt
  
 # Install python libs
-RUN python3 -m pip install -r requirements-ingest.txt
+RUN python3 -m pip install -r requirements-ingest.txt  --no-binary eccodes
  
 # Copy Files
 COPY API/ ./
