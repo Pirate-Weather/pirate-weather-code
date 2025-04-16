@@ -30,12 +30,22 @@ RUN apt update && \
                        git \
                        libnetcdf-dev \
                        libhdf5-dev \
-					   libgdal-dev					   
+					             libgdal-dev \ 
+                       libaec-dev 					   
 
-# Start with NCEPLIBS
+# Manual ECCodes
+
+
+RUN wget https://confluence.ecmwf.int/download/attachments/45757960/eccodes-2.41.0-Source.tar.gz
+RUN tar xzf eccodes-2.41.0-Source.tar.gz && rm eccodes-2.41.0-Source.tar.gz
 
 RUN mkdir /build
 WORKDIR /build
+
+RUN cmake -DCMAKE_INSTALL_PREFIX=/usr/local ../eccodes-2.41.0-Source
+RUN make -j4
+RUN ctest
+RUN make install
 
 # Get NCEPLIBS  
 RUN git clone https://github.com/NOAA-EMC/NCEPLIBS-ip
@@ -60,12 +70,20 @@ RUN cmake --install .
 WORKDIR /app
 
 # Copy the requirements file
-COPY Docker/requirements-ingest.txt requirements-ingest.txt
+COPY requirements-ingest.txt requirements-ingest.txt
 
 # Install python libs
 RUN python3 -m pip install -r requirements-ingest.txt
 
 # Copy Files
-COPY API/ ./
+COPY SubH_Local_Ingest.py SubH_Local_Ingest.py
+COPY GFS_Local_Ingest.py GFS_Local_Ingest.py
+COPY GEFS_Local_Ingest.py GEFS_Local_Ingest.py
+COPY NBM_Local_Ingest.py NBM_Local_Ingest.py
+COPY NBM_Fire_Local_Ingest.py NBM_Fire_Local_Ingest.py
+COPY HRRR_Local_Ingest.py HRRR_Local_Ingest.py
+COPY HRRR_6H_Local_Ingest.py HRRR_6H_Local_Ingest.py
+COPY ECMWF_Local_Ingest.py ECMWF_Local_Ingest.py
+COPY NWS_Alerts_Local.py NWS_Alerts_Local.py
 
 ENTRYPOINT ["python3"]
