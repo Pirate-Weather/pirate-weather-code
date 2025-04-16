@@ -39,7 +39,7 @@ jobs:
         env:
           REGISTRY: ${{ steps.login-ingest-arm.outputs.registry }}
           REGISTRY_ALIAS: j9v4j3c7  # Replace with your registry alias
-          REPOSITORY: pirate-wgrib-python   # Use a base name without an arch suffix
+          REPOSITORY: pirate-wgrib-python-arm   # Use a base name without an arch suffix
           IMAGE_TAG: dev-arm64
         run: |
           docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-ingest-dockerfile .
@@ -69,7 +69,7 @@ jobs:
         env:
           REGISTRY: ${{ steps.login-ingest-x64.outputs.registry }}
           REGISTRY_ALIAS: j9v4j3c7
-          REPOSITORY: pirate-wgrib-python
+          REPOSITORY: pirate-wgrib-python-arm
           IMAGE_TAG: dev-amd64
         run: |
           docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-ingest-dockerfile .
@@ -97,7 +97,7 @@ jobs:
         env:
           REGISTRY: ${{ steps.login-manifest-ingest.outputs.registry }}
           REGISTRY_ALIAS: j9v4j3c7
-          REPOSITORY: pirate-wgrib-python
+          REPOSITORY: pirate-wgrib-python-arm
           IMAGE_TAG: dev
         run: |
           docker manifest create $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
