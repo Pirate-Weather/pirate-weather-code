@@ -84,7 +84,7 @@ def calculate_summary_text(
             "summary",
         )
     else:
-        cIcon = "mixed"
+        cIcon = "sleet"
 
     # If there are any days with thunderstorms occurring then calculate the text
     if numThunderstormDays > 0:
