@@ -2,7 +2,6 @@
 # Alexander Rey, November 2023
 # Note that because the hourly script saves the 1-h forecast to S3, this script doesn't have to do this
 
-
 # %% Import modules
 import os
 import pickle
@@ -12,7 +11,6 @@ import sys
 import time
 import warnings
 
-import dask as dask
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -23,6 +21,7 @@ from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
+
 # %% Setup paths and parameters
 wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
 
@@ -121,8 +120,12 @@ zarrVars = (
     "CFRZR_surface",
     "CRAIN_surface",
     "REFC_entireatmosphere",
+    "APCP_surface",
+    "VIS_surface",
+    "SPFH_2maboveground",
+    "DSWRF_surface",
 )
-#
+
 
 #####################################################################################################
 # %% Download forecast data using Herbie Latest
@@ -132,14 +135,15 @@ zarrVars = (
 # Also no humidity, cloud cover, or vis data for some reason
 
 # Define the subset of variables to download as a list of strings
-matchstring_2m = ":((DPT|TMP):2 m above ground:)"
-matchstring_su = ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|GUST):surface:.*min fcst)"
+matchstring_2m = ":((DPT|TMP|SPFH):2 m above ground:)"
+matchstring_su = ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST|DSWRF):surface:.*min fcst)"
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*min fcst)"
 matchstring_sl = "(:(REFC):)"
+matchstring_ap = "(:APCP:surface:)"
 
 # Merge matchstrings for download
 matchStrings = (
-    matchstring_2m + "|" + matchstring_su + "|" + matchstring_10m + "|" + matchstring_sl
+    matchstring_2m + "|" + matchstring_su + "|" + matchstring_10m + "|" + matchstring_sl + "|" + matchstring_ap
 )
 
 # Create a range of forecast lead times
@@ -344,7 +348,7 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/SubH.zarr.zip", forecast_path + "/SubH.zarr.zip"
+        forecast_process_dir + "/SubH.zarr.zip", forecast_path + "/SubH_v2.zarr.zip"
     )
 
     # Write most recent forecast time
@@ -354,7 +358,7 @@ if saveType == "S3":
 
     s3.put_file(
         forecast_process_dir + "/SubH.time.pickle",
-        forecast_path + "/SubH.time.pickle",
+        forecast_path + "/SubH_v2.time.pickle",
     )
 else:
     # Write most recent forecast time
@@ -364,13 +368,13 @@ else:
 
     shutil.move(
         forecast_process_dir + "/SubH.time.pickle",
-        forecast_path + "/SubH.time.pickle",
+        forecast_path + "/SubH_v2.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/SubH.zarr",
-        forecast_path + "/SubH.zarr",
+        forecast_path + "/SubH_v2.zarr",
         dirs_exist_ok=True,
     )
 
