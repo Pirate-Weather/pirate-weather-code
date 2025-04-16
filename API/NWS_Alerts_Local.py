@@ -7,43 +7,64 @@ import shutil
 import tarfile
 import xml.etree.ElementTree as ET
 
-import dask
-import dask.array as da
+
 import geopandas as gp
-import numcodecs
 import numpy as np
 import nwswx
 import pandas as pd
 import requests
 import s3fs
 import zarr
-from numcodecs import Blosc
+from numpy.dtypes import StringDType
 
-s3_bucket = "s3://piratezarr2"
-s3_save_path = "/ForecastProd/Alerts/NWS_"
-merge_process_dir = os.getenv("merge_process_dir", default="/home/ubuntu/data/")
-saveType = os.getenv("save_type", default="S3")
-s3_bucket = os.getenv("save_path", default="s3://piratezarr2")
+# %% Setup paths and parameters
+wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
+
+forecast_process_dir = os.getenv(
+    "forecast_process_dir", default="/home/ubuntu/Weather/NWS_Alerts"
+)
+forecast_process_path = forecast_process_dir + "/NWS_Alerts_Process"
+hist_process_path = forecast_process_dir + "/NWS_Alerts_Historic"
+tmpDIR = forecast_process_dir + "/Downloads"
+
+forecast_path = os.getenv(
+    "forecast_path", default="/home/ubuntu/Weather/Prod/NWS_Alerts"
+)
+historic_path = os.getenv(
+    "historic_path", default="/home/ubuntu/Weather/History/NWS_Alerts"
+)
+
+
+saveType = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
+# Define the processing and history chunk size
+processChunk = 100
+
+# Define the final x/y chunksize
+finalChunk = 3
+
+hisPeriod = 36
 
 # Create new directory for processing if it does not exist
-if not os.path.exists(merge_process_dir):
-    os.makedirs(merge_process_dir)
+if not os.path.exists(forecast_process_dir):
+    os.makedirs(forecast_process_dir)
 else:
     # If it does exist, remove it
-    shutil.rmtree(merge_process_dir)
-    os.makedirs(merge_process_dir)
+    shutil.rmtree(forecast_process_dir)
+    os.makedirs(forecast_process_dir)
 
+if not os.path.exists(tmpDIR):
+    os.makedirs(tmpDIR)
 
 if saveType == "Download":
-    if not os.path.exists(s3_bucket):
-        os.makedirs(s3_bucket)
-    if not os.path.exists(s3_bucket + "/ForecastTar"):
-        os.makedirs(s3_bucket + "/ForecastTar")
+    if not os.path.exists(forecast_path):
+        os.makedirs(forecast_path)
+    if not os.path.exists(historic_path):
+        os.makedirs(historic_path)
 
 # %% Download watch warning kml
 warningURL = (
@@ -53,15 +74,15 @@ warningURL = (
 r = requests.get(warningURL, allow_redirects=True)
 
 # Save to file in tmpDIR
-savePath = os.path.join(merge_process_dir, "current_all.tar.gz")
+savePath = os.path.join(forecast_process_dir, "current_all.tar.gz")
 open(savePath, "wb").write(r.content)
 
 tar = tarfile.open(savePath, "r:gz")
-tar.extractall(path=merge_process_dir)
+tar.extractall(path=forecast_process_dir)
 tar.close()
 
 # %% Read in KMZ using geopandas
-nws_alert_gdf = gp.read_file(os.path.join(merge_process_dir, "current_all.shp"))
+nws_alert_gdf = gp.read_file(os.path.join(forecast_process_dir, "current_all.shp"))
 
 # %% Setup NWS ID
 nws = nwswx.WxAPI("api@alexanderrey.ca")
@@ -191,40 +212,58 @@ gridPointsSeries = gridPointsSeries.merge(df, on="INDEX", how="left")
 # Set empty data as blank
 gridPointsSeries.loc[gridPointsSeries["string"].isna(), ["string"]] = ""
 
-# %% Create Dask Array of Strings
-dask.config.set({"dataframe.convert-string": True})
-grid_alerts_dask = da.from_array(gridPointsSeries["string"], chunks=4)
-grid_alerts_square = da.reshape(grid_alerts_dask, lons.shape)
-grid_alerts_chunk = grid_alerts_square.rechunk(4)
+# Concert to string
+gridPointsSeries["string"] = gridPointsSeries["string"].astype(str)
 
-compressor = Blosc(cname="zstd", clevel=1)  # Use zstd compression
+# %% XR approach
+gridPoints_XR = gridPointsSeries["string"].to_xarray()
 
+# Reshape to 2D
+gridPoints_XR2 = gridPoints_XR.values.astype(StringDType()).reshape(lons.shape)
+
+# Write to zarr
 # Save as zarr
-zip_store = zarr.ZipStore(
-    merge_process_dir + "/NWS_Alerts.zarr.zip", compression=0, mode="w"
+if saveType == "S3":
+    zarr_store = zarr.storage.ZipStore(
+        forecast_process_dir + "/NWS_Alerts.zarr.zip", mode="a"
+    )
+else:
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/NWS_Alerts.zarr")
+
+
+# Create a Zarr array in the store with zstd compression
+# with ProgressBar():
+zarr_array = zarr.create_array(
+    data=gridPoints_XR2,
+    store=zarr_store,
+    chunks=(4, 4),
 )
-grid_alerts_chunk.to_zarr(
-    zip_store,
-    overwrite=True,
-    compressor=compressor,
-    object_codec=numcodecs.vlen.VLenUTF8(),
-)
-zip_store.close()
+
+if saveType == "S3":
+    zarr_store.close()
+
+# Test Read
+# zip_store_read = zarr.storage.ZipStore(
+#     merge_process_dir + "/NWS_Alerts.zarr.zip", compression=0, mode="r"
+# )
+# alertsReadTest = zarr.open_array(zip_store_read)
+# print(alertsReadTest[600, 1500:])
 
 
 # Upload to S3
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        merge_process_dir + "/NWS_Alerts.zarr.zip",
-        s3_bucket + "/ForecastTar/NWS_Alerts.zarr.zip",
+        forecast_process_dir + "/NWS_Alerts.zarr.zip",
+        forecast_path + "/ForecastTar/NWS_Alerts.zarr.zip",
     )
 else:
-    # Move to local
-    shutil.move(
-        merge_process_dir + "/NWS_Alerts.zarr.zip",
-        s3_bucket + "/ForecastTar/NWS_Alerts.zarr.zip",
+    # Copy the zarr file to the final location
+    shutil.copytree(
+        forecast_process_dir + "/NWS_Alerts.zarr",
+        forecast_path + "/NWS_Alerts.zarr",
+        dirs_exist_ok=True,
     )
 
-    # Clean up
-    shutil.rmtree(merge_process_dir)
+# Clean up
+shutil.rmtree(forecast_process_dir)
