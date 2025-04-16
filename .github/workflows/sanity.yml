@@ -1,109 +1,104 @@
-name: Build and push to AWS
+name: Sanity Build
 
 on:
-  push:
+  pull_request:
     branches: ['dev']
+  push:
+    branches-ignore: ['dev']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
-  ingest:
+  ingest_amd64:
+    name: Ingest (x64)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5.7.0
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}          
-          aws-region: us-east-1
+          images: ghcr.io/complianceascode/pirate-ingest
 
-      - name: Login to Amazon ECR Public
-        id: login-ecr-public
-        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build Ingest for x64
+        uses: docker/build-push-action@v6.15.0
         with:
-          registry-type: public
+          context: .
+          file: Docker/pirate-ingest-dockerfile
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/amd64
 
-      - name: Build, tag, and push ingest docker image to Amazon ECR Public
-        env:
-          REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
-          REGISTRY_ALIAS: j9v4j3c7  # Replace with your registry alias
-          REPOSITORY: pirate-wgrib-python-arm
-          IMAGE_TAG: dev
-        run: |
-          docker buildx build --platform linux/amd64,linux/arm64 \
-            -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
-            -f Docker/pirate-ingest-dockerfile . --push
+  ingest_arm64:
+    name: Ingest (ARM64)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
 
-  api:
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5.7.0
+        with:
+          images: ghcr.io/complianceascode/pirate-ingest
+
+      - name: Build Ingest for ARM
+        uses: docker/build-push-action@v6.15.0
+        with:
+          context: .
+          file: Docker/pirate-ingest-dockerfile
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/arm64
+
+  api_amd64:
+    name: API (x64)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5.7.0
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}          
-          aws-region: us-east-1
+          images: ghcr.io/complianceascode/pirate-api
 
-      - name: Login to Amazon ECR Public
-        id: login-ecr-public
-        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build API for x64
+        uses: docker/build-push-action@v6.15.0
         with:
-          registry-type: public
+          context: .
+          file: Docker/pirate-api-dockerfile
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/amd64
 
-      - name: Build, tag, and push api docker image to Amazon ECR Public
-        env:
-          REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
-          REGISTRY_ALIAS: j9v4j3c7  # Replace with your registry alias
-          REPOSITORY: pirate-alpine-zarr
-          IMAGE_TAG: dev
-        run: |
-          docker buildx build --platform linux/amd64,linux/arm64 \
-            -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
-            -f Docker/pirate-api-dockerfile . --push
-
-      - name: Build, tag, and push ingest docker image to Amazon ECR Public (api job)
-        env:
-          REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
-          REGISTRY_ALIAS: j9v4j3c7  # Replace with your registry alias
-          REPOSITORY: pirate-wgrib-python-arm
-          IMAGE_TAG: dev
-        run: |
-          docker buildx build --platform linux/amd64,linux/arm64 \
-            -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
-            -f Docker/pirate-ingest-dockerfile . --push
-
-  deploy:
-    runs-on: ubuntu-24.04
-    needs:
-      - api
+  api_arm64:
+    name: API (ARM64)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    runs-on: ubuntu-24.04-arm
     steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
 
-      - name: Force new ECS deployment for pirate-api service
-        run: |
-          aws ecs update-service --cluster PirateBackEc2 --service PirateDev --force-new-deployment
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5.7.0
+        with:
+          images: ghcr.io/complianceascode/pirate-api
+
+      - name: Build API for ARM
+        uses: docker/build-push-action@v6.15.0
+        with:
+          context: .
+          file: Docker/pirate-api-dockerfile
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/arm64
