@@ -2190,8 +2190,8 @@ async def PW_Forecast(
         )
 
     gfsMinuteInterpolation = np.zeros((len(minute_array_grib), len(dataOut_gfs[0, :])))
-
     nbmMinuteInterpolation = np.zeros((len(minute_array_grib), 18))
+    hrrrMinuteInterpolation = np.zeros((len(minute_array_grib), len(HRRR_Merged[0, :])))
 
     if "hrrrsubh" in sourceList:
         hrrrSubHInterpolation = np.zeros((len(minute_array_grib), len(dataOut[0, :])))
@@ -2325,6 +2325,16 @@ async def PW_Forecast(
                 right=np.nan,
             )
 
+    # HRRR for snow accumulation
+    if "hrrr" in sourceList:
+        hrrrMinuteInterpolation[:, 10] = np.interp(
+                minute_array_grib,
+                HRRR_Merged[:, 0].squeeze(),
+                HRRR_Merged[:, 10],
+                left=np.nan,
+                right=np.nan,
+            )
+
     # Timing Check
     if TIMING:
         print("Minutely Start")
@@ -2367,20 +2377,6 @@ async def PW_Forecast(
     # else:
     #     InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * 1 * prepIntensityUnit
 
-    # Keep it simple for now
-    if "hrrrsubh" in sourceList:
-        InterPminute[:, 1] = hrrrSubHInterpolation[:, 7] * 3600 * prepIntensityUnit
-    elif "nbm" in sourceList:
-        InterPminute[:, 1] = nbmMinuteInterpolation[:, 8] * prepIntensityUnit
-    elif "gefs" in sourceList:
-        InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * 1 * prepIntensityUnit
-    else:  # GFS fallback
-        InterPminute[:, 1] = gfsMinuteInterpolation[:, 10] * 3600 * prepIntensityUnit
-
-    if "hrrrsubh" not in sourceList:
-        # Set intensity to zero if POP == 0
-        InterPminute[InterPminute[:, 2] == 0, 1] = 0
-
     # "precipIntensityError"
     if "gefs" in sourceList:
         InterPminute[:, 3] = gefsMinuteInterpolation[:, 3] * prepIntensityUnit
@@ -2409,6 +2405,25 @@ async def PW_Forecast(
         maxPchance = np.full(len(minute_array_grib), 5)
     else:
         maxPchance = np.argmax(InterTminute, axis=1)
+
+    # If the type is rain or sleeet, use intensity, otherwise use accumulation hrrrMinuteInterpolation
+    # re: https://github.com/Pirate-Weather/pirateweather/issues/390
+    if "hrrrsubh" in sourceList:
+        # Where maxPchance is snow (1), use accumulation from HRRR, otherwise
+
+        InterPminute[:, 1] = hrrrSubHInterpolation[:, 7] * 3600 * prepIntensityUnit
+    elif "nbm" in sourceList:
+        InterPminute[:, 1] = nbmMinuteInterpolation[:, 8] * prepIntensityUnit
+    elif "gefs" in sourceList:
+        InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * 1 * prepIntensityUnit
+    else:  # GFS fallback
+        InterPminute[:, 1] = gfsMinuteInterpolation[:, 10] * 3600 * prepIntensityUnit
+
+    if "hrrrsubh" not in sourceList:
+        # Set intensity to zero if POP == 0
+        InterPminute[InterPminute[:, 2] == 0, 1] = 0
+
+
 
     # Create list of icons based off of maxPchance
     minuteKeys = [
@@ -3252,7 +3267,7 @@ async def PW_Forecast(
     # Else, if more than 1 mm of ice is forecast, then ice
     maxPchanceDay[InterPdaySum[:, 23] > (1 * prepAccumUnit)] = 2
 
-    # Process Daily Data for ouput
+    # Process Daily Data for output
     dayList = []
     dayIconList = []
     dayTextList = []

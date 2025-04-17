@@ -11,7 +11,7 @@ import math
 
 
 def calculate_day_text(
-    hourObject,
+    dayObject,
     prepAccumUnit,
     visUnits,
     windUnit,
@@ -26,7 +26,7 @@ def calculate_day_text(
     Calculates the textual summary and icon with the given parameters
 
     Parameters:
-    - hourObject (dict): A dictionary of the object used to generate the summary
+    - dayObject (dict): A dictionary of the object used to generate the summary
     - prepAccumUnit (float): The precipitation unit used
     - visUnits (float): The visibility unit used
     - tempUnits (float): The temperature unit used
@@ -39,41 +39,42 @@ def calculate_day_text(
     Returns:
     - cText (str): A summary representing the conditions for the period.
     - cIcon (str): The icon representing the conditions for the period.
+    - precipType (str): The type of precipitation for the period.
     """
     cText = cIcon = precipText = precipIcon = windText = windIcon = skyText = (
         skyIcon
     ) = visText = visIcon = secondary = snowText = snowSentence = None
     totalPrep = rainPrep + snowPrep + icePrep
 
-    # Get key values from the hourObject
-    precipType = hourObject["precipType"]
-    cloudCover = hourObject["cloudCover"]
-    wind = hourObject["windSpeed"]
-    humidity = hourObject["humidity"]
+    # Get key values from the dayObject
+    precipType = dayObject["precipType"]
+    cloudCover = dayObject["cloudCover"]
+    wind = dayObject["windSpeed"]
+    humidity = dayObject["humidity"]
 
-    if "precipProbability" in hourObject:
-        pop = hourObject["precipProbability"]
+    if "precipProbability" in dayObject:
+        pop = dayObject["precipProbability"]
     else:
         pop = 1
 
-    if "temperature" in hourObject:
-        temp = hourObject["temperature"]
+    if "temperature" in dayObject:
+        temp = dayObject["temperature"]
     else:
-        temp = hourObject["temperatureHigh"]
+        temp = dayObject["temperatureHigh"]
 
-    if "visibility" in hourObject:
-        vis = hourObject["visibility"]
+    if "visibility" in dayObject:
+        vis = dayObject["visibility"]
     else:
         vis = 10000
 
     # If time machine, no humidity data, so set to 50
-    if "humidity" not in hourObject:
+    if "humidity" not in dayObject:
         humidity = 50
     else:
-        humidity = hourObject["humidity"]
+        humidity = dayObject["humidity"]
 
-    if "precipIntensityMax" in hourObject:
-        prepIntensityMax = hourObject["precipIntensityMax"]
+    if "precipIntensityMax" in dayObject:
+        prepIntensityMax = dayObject["precipIntensityMax"]
     else:
         prepIntensityMax = totalPrep / 24
 
@@ -272,4 +273,4 @@ def calculate_day_text(
     else:
         cIcon = skyIcon
 
-    return cText, cIcon
+    return cText, cIcon, precipType
