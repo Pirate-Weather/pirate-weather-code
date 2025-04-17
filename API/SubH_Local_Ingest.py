@@ -136,14 +136,24 @@ zarrVars = (
 
 # Define the subset of variables to download as a list of strings
 matchstring_2m = ":((DPT|TMP|SPFH):2 m above ground:)"
-matchstring_su = ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST|DSWRF):surface:.*min fcst)"
+matchstring_su = (
+    ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST|DSWRF):surface:.*min fcst)"
+)
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*min fcst)"
 matchstring_sl = "(:(REFC):)"
 matchstring_ap = "(:APCP:surface:)"
 
 # Merge matchstrings for download
 matchStrings = (
-    matchstring_2m + "|" + matchstring_su + "|" + matchstring_10m + "|" + matchstring_sl + "|" + matchstring_ap
+    matchstring_2m
+    + "|"
+    + matchstring_su
+    + "|"
+    + matchstring_10m
+    + "|"
+    + matchstring_sl
+    + "|"
+    + matchstring_ap
 )
 
 # Create a range of forecast lead times

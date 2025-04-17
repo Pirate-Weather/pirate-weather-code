@@ -2328,12 +2328,12 @@ async def PW_Forecast(
     # HRRR for snow accumulation
     if "hrrr" in sourceList:
         hrrrMinuteInterpolation[:, 10] = np.interp(
-                minute_array_grib,
-                HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, 10],
-                left=np.nan,
-                right=np.nan,
-            )
+            minute_array_grib,
+            HRRR_Merged[:, 0].squeeze(),
+            HRRR_Merged[:, 10],
+            left=np.nan,
+            right=np.nan,
+        )
 
     # Timing Check
     if TIMING:
@@ -2422,8 +2422,6 @@ async def PW_Forecast(
     if "hrrrsubh" not in sourceList:
         # Set intensity to zero if POP == 0
         InterPminute[InterPminute[:, 2] == 0, 1] = 0
-
-
 
     # Create list of icons based off of maxPchance
     minuteKeys = [
