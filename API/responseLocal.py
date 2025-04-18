@@ -3464,7 +3464,7 @@ async def PW_Forecast(
 
         try:
             # Update the text
-            dayText, dayIcon = calculate_day_text(
+            dayText, dayIcon = calculate_simple_day_text(
                 dayObject,
                 prepAccumUnit,
                 visUnits,

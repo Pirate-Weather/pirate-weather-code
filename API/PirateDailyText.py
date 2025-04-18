@@ -1,6 +1,14 @@
 # %% Script to contain the functions that can be used to generate the daily text summary of the forecast data for Pirate Weather
-from PirateTextHelper import *
+from PirateTextHelper import (
+    calculate_precip_text,
+    calculate_wind_text,
+    calculate_vis_text,
+    calculate_sky_icon,
+    humidity_sky_text,
+    Most_Common,
+)
 import datetime
+import math
 from dateutil import tz
 
 cloudy = 0.875
@@ -998,11 +1006,11 @@ def calculate_day_text(
             if period4Calc[1] is not None:
                 summary_text = [
                     "sentence",
-                    ["during", ["and", precipText, period4Calc[1]], "night"],
+                    ["during", ["and", prepText, period4Calc[1]], "night"],
                 ]
             # Otherwise just use the precipitation
             else:
-                return ["sentence", ["during", precipText, "night"]]
+                return ["sentence", ["during", prepText, "night"]]
         # If there is fog then show that text
         elif period4Calc[2] is not None:
             cIcon = "fog"
@@ -1123,7 +1131,6 @@ def calculate_day_text(
                         summary_text = ["sentence", ["and", precipText, windText]]
                 else:
                     summary_text = ["sentence", precipText]
-
 
     # If there is no icon then calculate it based on the average cloud cover for the periods if we don't have any precipitation
     if cIcon is None:
