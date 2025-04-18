@@ -10,7 +10,7 @@ from PirateTextHelper import (
 import math
 
 
-def calculate_day_text(
+def calculate_simple_day_text(
     hourObject,
     prepAccumUnit,
     visUnits,
@@ -172,6 +172,9 @@ def calculate_day_text(
                 icon,
                 "both",
             )
+
+    if secondary == "medium-none":
+        secondary = "medium-precipitation"
 
     # If we have only snow or if snow is the secondary condition then calculate the accumulation range
     if snowPrep > (10 * prepAccumUnit) or secondary == "medium-snow":

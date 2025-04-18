@@ -28,7 +28,7 @@ from pirateweather_translations.dynamic_loader import load_all_translations
 from PirateText import calculate_text
 from PirateMinutelyText import calculate_minutely_text
 from PirateWeeklyText import calculate_weekly_text
-from PirateSimpleDayText import calculate_day_text
+from PirateSimpleDayText import calculate_simple_day_text
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
