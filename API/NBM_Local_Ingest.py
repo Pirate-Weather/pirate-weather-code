@@ -291,9 +291,9 @@ cmd = (
 )
 # Run wgrib2
 spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-
-# Check output from wgrib2
-# print(spOUT.stdout)
+if spOUT.returncode != 0:
+    print(spOUT.stderr)
+    sys.exit()
 
 # Use wgrib2 to change the order
 cmd2 = (
@@ -307,6 +307,9 @@ cmd2 = (
     + "_wgrib2_merged_order.grib"
 )
 spOUT2 = subprocess.run(cmd2, shell=True, capture_output=True, encoding="utf-8")
+if spOUT2.returncode != 0:
+    print(spOUT2.stderr)
+    sys.exit()
 os.remove(forecast_process_path + "_wgrib2_merged.grib2")
 
 # Convert to NetCDF
@@ -322,6 +325,9 @@ cmd4 = (
 
 # Run wgrib2 to rotate winds and save as NetCDF
 spOUT4 = subprocess.run(cmd4, shell=True, capture_output=True, encoding="utf-8")
+if spOUT4.returncode != 0:
+    print(spOUT4.stderr)
+    sys.exit()
 os.remove(forecast_process_path + "_wgrib2_merged_order.grib")
 
 
@@ -401,6 +407,9 @@ cmd = (
 )
 # Run wgrib2
 spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+if spOUT.returncode != 0:
+    print(spOUT.stderr)
+    sys.exit()
 
 # Use wgrib2 to change the order
 cmd2 = (
@@ -414,6 +423,9 @@ cmd2 = (
     + "_prob_wgrib2_merged_order.grib"
 )
 spOUT2 = subprocess.run(cmd2, shell=True, capture_output=True, encoding="utf-8")
+if spOUT2.returncode != 0:
+    print(spOUT2.stderr)
+    sys.exit()
 os.remove(forecast_process_path + "_prob_wgrib2_merged.grib2")
 
 # Convert to NetCDF
@@ -429,6 +441,9 @@ cmd4 = (
 
 # Run wgrib2 to save as  NetCDF
 spOUT4 = subprocess.run(cmd4, shell=True, capture_output=True, encoding="utf-8")
+if spOUT4.returncode != 0:
+    print(spOUT4.stderr)
+    sys.exit()
 os.remove(forecast_process_path + "_prob_wgrib2_merged_order.grib")
 
 
@@ -488,6 +503,9 @@ cmd = (
 )
 # Run wgrib2
 spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+if spOUT.returncode != 0:
+    print(spOUT.stderr)
+    sys.exit()
 
 # Use wgrib2 to change the order
 cmd2 = (
@@ -501,6 +519,9 @@ cmd2 = (
     + "_accum_wgrib2_merged_order.grib"
 )
 spOUT2 = subprocess.run(cmd2, shell=True, capture_output=True, encoding="utf-8")
+if spOUT2.returncode != 0:
+    print(spOUT2.stderr)
+    sys.exit()
 os.remove(forecast_process_path + "_accum_wgrib2_merged.grib2")
 
 # Convert to NetCDF
@@ -516,6 +537,9 @@ cmd4 = (
 
 # Run wgrib2 to save as NetCDF
 spOUT4 = subprocess.run(cmd4, shell=True, capture_output=True, encoding="utf-8")
+if spOUT4.returncode != 0:
+    print(spOUT4.stderr)
+    sys.exit()
 os.remove(forecast_process_path + "_accum_wgrib2_merged_order.grib")
 
 
@@ -731,6 +755,9 @@ for i in range(hisPeriod, -1, -1):
         + "_wgrib2_merged_order.grib"
     )
     spOUT1 = subprocess.run(cmd1, shell=True, capture_output=True, encoding="utf-8")
+    if spOUT1.returncode != 0:
+        print(spOUT1.stderr)
+        sys.exit()
 
     # Convert to NetCDF
     cmd3 = (
@@ -743,6 +770,9 @@ for i in range(hisPeriod, -1, -1):
         + "_wgrib_merge.nc"
     )
     spOUT3 = subprocess.run(cmd3, shell=True, capture_output=True, encoding="utf-8")
+    if spOUT3.returncode != 0:
+        print(spOUT3.stderr)
+        sys.exit()
 
     # Merge the  xarrays
     # Read the netcdf file using xarray
