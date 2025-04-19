@@ -1130,7 +1130,7 @@ def calculate_day_text(
                 periods[0] = "later-" + periods[0]
         elif vis and vis[0] == 0:
             if (
-                calculate_vis_text(hours[0]["visibility"], visUnit) is None
+                calculate_vis_text(hours[0]["visibility"], visUnits) is None
                 and "later" not in periods[0]
             ):
                 periods[0] = "later-" + periods[0]
