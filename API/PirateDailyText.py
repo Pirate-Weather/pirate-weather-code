@@ -327,6 +327,7 @@ def calculate_day_text(
     - cIcon (str) - The icon representing the current day/next 24 hours
     """
 
+    # Variables to calculate the periods from the hours array
     period1 = []
     period2 = []
     period3 = []
@@ -343,7 +344,9 @@ def calculate_day_text(
     periodIncrease = False
     today = ""
 
+    # Get the current time zone from the function parameters
     zone = tz.gettz(timeZone)
+    # Calculate the current hour/weekday from the first hour
     currDate = datetime.datetime.fromtimestamp(hours[0]["time"], zone)
     currHour = int(currDate.strftime("%H"))
     currWeekday = currDate.strftime("%A").lower()
@@ -354,6 +357,7 @@ def calculate_day_text(
     # evening 17:00 to 22:00
     # night: 22:00 to 4:00
 
+    # Calculate the current period and set the end and when to skip the block for the hour block summaries
     if 4 <= currHour < 12:
         currPeriod = "morning"
         periodCutOff = 10
@@ -371,28 +375,37 @@ def calculate_day_text(
         periodCutOff = 26
         periodEnd = 27
 
+    # Set the hour period to the current period
     hourPeriod = currPeriod
 
+    # For the hour block summaries add the today text
     if mode == "hour":
         today = "today-"
 
+    # Loop through the hours to calculate the conditions for each period
     for idx, hour in enumerate(hours):
+        # If we are in hour mode skip the first hour as the first hour is always the current hour
         if idx == 0 and mode == "hour":
             continue
 
+        # Calculate the time and weekday for the current hour in the loop
         hourDate = datetime.datetime.fromtimestamp(hour["time"], zone)
         hourHour = int(hourDate.strftime("%H"))
         hourWeekday = hourDate.strftime("%A").lower()
 
+        # Since the summaries are calculated from 4am to 4am add 24 hours to hours 0 to 3 so its seen as the current day
         if 0 <= hourHour < 4:
             hourHour = hourHour + 24
 
+        # If we are in hour mode check if the current hour is past the cut off hour so skip calculating it
         if (
             hourHour >= periodCutOff
             and hourHour <= periodEnd
             and currWeekday == hourWeekday
+            and mode == "hour"
         ):
             continue
+        # Otherwise set the current period index to 1 if its set to 0
         elif (
             hourHour < periodCutOff
             and hourHour <= periodEnd
@@ -401,64 +414,80 @@ def calculate_day_text(
             if periodIndex == 0:
                 periodIndex = 1
 
+        # If there is no data in the first period and the index is 0 set it to 1 and calculate the next period
         if not period1 and periodIndex == 0:
             periodIndex = periodIndex + 1
             hourPeriod = nextPeriod(hourPeriod)
+        # If we are at hour 12 and the first period has data increase the period index and set the increase flag to true
         if hourHour == 12 and period1:
             periodIndex = periodIndex + 1
             periodIncrease = True
+        # If we are at hour 17 and the first period has data increase the period index and set the increase flag to true
         if hourHour == 17 and period1:
             periodIndex = periodIndex + 1
             periodIncrease = True
+        # If we are at hour 22 and the first period has data increase the period index and set the increase flag to true
         if hourHour == 22 and period1:
             periodIndex = periodIndex + 1
             periodIncrease = True
+        # If we are at hour 12 and the first period has data increase the period index and set the increase flag to true
         if hourHour == 4 and period1:
             periodIndex = periodIndex + 1
             periodIncrease = True
 
+        # If the current hour has any precipitation calculate the rain, snow and sleet precipitation
         if hour["precipType"] == "rain" or hour["precipType"] == "none":
             rainPrep = rainPrep + hour["precipAccumulation"]
         elif hour["precipType"] == "snow":
             snowPrep = snowPrep + hour["precipAccumulation"]
+            # Increase the snow error to show the precipitation range
             snowError = snowError + hour["precipIntensityError"]
         elif hour["precipType"] == "sleet":
             sleetPrep = sleetPrep + hour["precipAccumulation"]
 
+        # If the hour is humid increase the number of humid hours
         if (
             humidity_sky_text(hour["temperature"], tempUnits, hour["humidity"])
             == "high-humidity"
         ):
             numHoursHumid += 1
+        # If the hour is dry increase the number of dry hours
         if (
             humidity_sky_text(hour["temperature"], tempUnits, hour["humidity"])
             == "low-humidity"
         ):
             numHoursDry += 1
+        # If the hour is foggy increase the number of fog hours
         if calculate_vis_text(hour["visibility"], visUnits, "icon") == "fog":
             numHoursFog += 1
+        # If the hour is windy increase the number of windy hours
         if (
             calculate_wind_text(hour["windSpeed"], windUnit, "darksky", "icon")
             == "wind"
         ):
             numHoursWind += 1
 
+        # Add the hour cloud cover and pop to the variables to calculate the average
         cloudCover += hour["cloudCover"]
         pop += hour["precipProbability"]
 
+        # Calculate the maxiumum intensity for the period
         if maxIntensity == 0:
             maxIntensity = hour["precipIntensity"]
         elif maxIntensity > 0 and hour["precipIntensity"] > maxIntensity:
             maxIntensity = hour["precipIntensity"]
 
+        # Calculate the maximum wind speed for the period
         if maxWind == 0:
             maxWind = hour["windSpeed"]
         elif maxWind > 0 and hour["windSpeed"] > maxWind:
             maxWind = hour["windSpeed"]
 
+        # Add the percipitation type to an array to calculate the most common precipitation to use as a baseline
         if hour["precipIntensity"] > 0.02 * prepAccumUnit:
             mostCommonPrecip.append(hour["precipType"])
 
+        # Add the percipitation type to an array of precipitation types if it doesn;t already exist
         if not prepTypes and hour["precipIntensity"] > 0.02 * prepAccumUnit:
             prepTypes.append(hour["precipType"])
         elif (
@@ -467,6 +496,7 @@ def calculate_day_text(
         ):
             prepTypes.append(hour["precipType"])
 
+        # Add the hour to the period array depending on the index
         if periodIndex == 1:
             period1.append(hour)
         elif periodIndex == 2:
@@ -476,7 +506,9 @@ def calculate_day_text(
         elif periodIndex == 4:
             period4.append(hour)
 
+        # If the period changed and the index is 5 or below or we are at the end of the loop
         if (periodIncrease and periodIndex <= 5) or (idx == 25 and periodIndex <= 5):
+            # Calculate the average cloud cover and pop for the period and calculate the length of the period
             if periodIndex - 1 == 1:
                 cloudCover = cloudCover / len(period1)
                 pop = pop / len(period1)
@@ -494,10 +526,12 @@ def calculate_day_text(
                 pop = pop / len(period4)
                 length = len(period4)
 
+            # If we are at the end of the loop increase the index and calculate the length of the last period
             if idx == 25 and periodIndex < 5:
                 periodIndex += 1
                 length = len(period4)
 
+            # Add the data to an array of period arrays to use to calculate the summaries
             periodStats[periodIndex - 2].append(numHoursFog)
             periodStats[periodIndex - 2].append(numHoursDry)
             periodStats[periodIndex - 2].append(numHoursWind)
@@ -512,14 +546,18 @@ def calculate_day_text(
             periodStats[periodIndex - 2].append(length)
             periodStats[periodIndex - 2].append(today + hourPeriod)
             periodStats[periodIndex - 2].append(numHoursHumid)
+
+            # Reset the varaibles back to zero
             numHoursFog = numHoursWind = numHoursDry = numHoursHumid = rainPrep = (
                 snowPrep
             ) = sleetPrep = snowError = cloudCover = pop = maxIntensity = maxWind = 0
             periodIncrease = False
 
+            # Calculate the next period text
             hourPeriod = nextPeriod(hourPeriod)
 
-            if hourHour == 4 and period1:
+            # If we are in hourly mode and hit hour 4 use tomorrow as the text unless we are in hours 0, 1, 2 or 3
+            if hourHour == 4 and period1 and mode == "hour" and currHour > 3:
                 today = "tomorrow-"
 
     # Variables used to calculate the summary
@@ -551,19 +589,25 @@ def calculate_day_text(
     precipIntensity = []
     period1Level = period2Level = period3Level = period4Level = avgCloud = -1
     secondary = snowText = snowSentence = None
+    # Calculate the total ice precipitation
     icePrep = (
         periodStats[0][6] + periodStats[1][6] + periodStats[2][6] + periodStats[3][6]
     )
+    # Calculate the total rain precipitation
     rainPrep = (
         periodStats[0][3] / 10
         + periodStats[1][3] / 10
         + periodStats[2][3] / 10
         + periodStats[3][3] / 10
     )
+    # Calculate the total snow precipitation
     snowPrep = (
         periodStats[0][4] + periodStats[1][4] + periodStats[2][4] + periodStats[3][4]
     )
+    # Calculate the total precipitaion
     totalPrep = rainPrep + snowPrep + sleetPrep
+
+    # If we are in day mode calculate the current period number to exclude parts of the day from being calculated
     if mode == "day":
         if currPeriod == "morning":
             currPeriodNum = 1 + ((8 - (12 - currHour)) / 8)
@@ -834,7 +878,7 @@ def calculate_day_text(
     if period4Calc[4] is not None:
         dry.append(3)
 
-    # Add the wind, wind and visibility starts to the starts array if they exist
+    # Add the wind, wind, visibility, dry and humid starts to the starts array if they exist
     if precip:
         starts.append(precip[0])
     if wind:
@@ -951,6 +995,7 @@ def calculate_day_text(
                 "both",
             )
 
+    # if secondary is medium none change it to medium-precipitaiton to avoid errors
     if secondary == "medium-none":
         secondary = "medium-precipitation"
 
@@ -1111,49 +1156,57 @@ def calculate_day_text(
             avgCloud = 1
         cloudConvertedText = "heavy-clouds"
 
+    # Calculate the current precipitation for the first hour in the block
     currPrecip = calculate_precip_text(
-        hours[0]["precipIntensity"],
+        hours[1]["precipIntensity"],
         prepAccumUnit,
-        hours[0]["precipType"],
+        hours[1]["precipType"],
         "hour",
-        hours[0]["precipAccumulation"],
-        hours[0]["precipAccumulation"],
-        hours[0]["precipAccumulation"],
-        hours[0]["precipProbability"],
+        hours[1]["precipAccumulation"],
+        hours[1]["precipAccumulation"],
+        hours[1]["precipAccumulation"],
+        hours[1]["precipProbability"],
         icon,
         "summary",
     )
 
+    # If we are in the currne period
     if periods[min(starts)] == "today-" + currPeriod:
+        # If we have precipitation and it starts in the first block
         if precip and precip[0] == 0:
+            # If the first hour has no precipitation add the later text
             if currPrecip is None:
                 periods[0] = "later-" + periods[0]
         elif vis and vis[0] == 0:
+            # If we have fog and it starts in the first block and the first hour has no fog
             if (
-                calculate_vis_text(hours[0]["visibility"], visUnits) is None
+                calculate_vis_text(hours[1]["visibility"], visUnits) is None
                 and "later" not in periods[0]
             ):
                 periods[0] = "later-" + periods[0]
+        # If we have wind and it starts in the first block and the first hour is not windy
         elif wind and wind[0] == 0:
             if (
-                calculate_wind_text(hours[0]["windSpeed"], windUnit, icon, "summary")
+                calculate_wind_text(hours[1]["windSpeed"], windUnit, icon, "summary")
                 is None
                 and "later" not in periods[0]
             ):
                 periods[0] = "later-" + periods[0]
+        # If we have dry conditions and it starts in the first block and the first hour is not dry
         elif dry and dry[0] == 0:
             if (
                 humidity_sky_text(
-                    hours[0]["temperature"], tempUnits, hours[0]["humidity"]
+                    hours[1]["temperature"], tempUnits, hours[1]["humidity"]
                 )
                 is None
                 and "later" not in periods[0]
             ):
-                periods[0] = "later-" + periods[0]
+                periods[1] = "later-" + periods[0]
+        # If we have humid conditions and it starts in the first block and the first hour is not humid
         elif humid and humid[0] == 0:
             if (
                 humidity_sky_text(
-                    hours[0]["temperature"], tempUnits, hours[0]["humidity"]
+                    hours[1]["temperature"], tempUnits, hours[1]["humidity"]
                 )
                 is None
                 and "later" not in periods[0]
@@ -1285,7 +1338,7 @@ def calculate_day_text(
                 dryPrecip,
                 humidPrecip,
             )
-        # If there is any low humidity then calcaulate the text if its not joined with precip/cloud
+        # If there is any low humidity then calcaulate the text if its not joined with any conditions
         if not dryPrecip and len(dry) > 0:
             dryText, windPrecip, dryPrecip, humidPrecip = calculate_period_text(
                 periods,
@@ -1308,7 +1361,7 @@ def calculate_day_text(
                 humidPrecip,
             )
 
-        # If there is any low humidity then calcaulate the text if its not joined with precip/cloud
+        # If there is any low humidity then calcaulate the text if its not joined with any conditions
         if not humidPrecip and len(humid) > 0:
             humidText, windPrecip, dryPrecip, humidPrecip = calculate_period_text(
                 periods,
@@ -1343,13 +1396,17 @@ def calculate_day_text(
                         summary_text = ["sentence", visText]
                     # Otherwise use the cloud text
                     else:
+                        # If there is any dry text then join with an and and show whichever one comes fist at the start
                         if dryText is not None:
-                            if dry[0] == min(starts):
+                            if dry[0] == min(starts) or len(dry) == (5 - currPeriodNum):
                                 summary_text = ["sentence", ["and", dryText, cloudText]]
                             else:
                                 summary_text = ["sentence", ["and", cloudText, dryText]]
+                        # If there is any humid text then join with an and and show whichever one comes fist at the start
                         elif humidText is not None:
-                            if humid[0] == min(starts):
+                            if humid[0] == min(starts) or len(humid) == (
+                                5 - currPeriodNum
+                            ):
                                 summary_text = [
                                     "sentence",
                                     ["and", humidText, cloudText],
@@ -1363,22 +1420,24 @@ def calculate_day_text(
                             summary_text = ["sentence", cloudText]
                 # If there is wind text and visbility text then join with an and and show whichever one comes first at the start
                 elif visText is not None:
-                    if vis[0] == min(starts):
+                    if vis[0] == min(starts) or len(vis) == (5 - currPeriodNum):
                         cIcon = "fog"
                         summary_text = ["sentence", ["and", visText, windText]]
                     else:
-                        cIcon = "wind"
+                        cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
                         summary_text = ["sentence", ["and", windText, visText]]
                 # If there is wind text
                 else:
-                    cIcon = "wind"
+                    cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
+                    # If there is any dry text then join with an and and show whichever one comes fist at the start
                     if dryText is not None:
-                        if dry[0] == min(starts):
+                        if dry[0] == min(starts) or len(dry) == (5 - currPeriodNum):
                             summary_text = ["sentence", ["and", dryText, windText]]
                         else:
                             summary_text = ["sentence", ["and", windText, dryText]]
+                    # If there is any humid text then join with an and and show whichever one comes fist at the start
                     elif humidText is not None:
-                        if humid[0] == min(starts):
+                        if humid[0] == min(starts) or len(humid) == (5 - currPeriodNum):
                             summary_text = ["sentence", ["and", humidText, windText]]
                         else:
                             summary_text = ["sentence", ["and", windText, humidText]]
@@ -1388,21 +1447,22 @@ def calculate_day_text(
             else:
                 # If there is any visibility text then join with an and and show whichever one comes fist at the start
                 if visText is not None:
-                    if vis[0] == min(starts):
+                    if vis[0] == min(starts) or len(vis) == (5 - currPeriodNum):
                         cIcon = "fog"
                         summary_text = ["sentence", ["and", visText, precipText]]
                     else:
                         summary_text = ["sentence", ["and", precipText, visText]]
                 # If there is any wind text then join with an and and show whichever one comes fist at the start
                 elif windText is not None:
-                    if wind[0] == min(starts):
-                        cIcon = "wind"
+                    if wind[0] == min(starts) or len(wind) == (5 - currPeriodNum):
+                        cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
                         summary_text = ["sentence", ["and", windText, precipText]]
                     else:
                         summary_text = ["sentence", ["and", precipText, windText]]
                 else:
+                    # If there is any humid text then join with an and and show whichever one comes fist at the start
                     if humidText is not None:
-                        if humid[0] == min(starts):
+                        if humid[0] == min(starts) or len(humid) == (5 - currPeriodNum):
                             summary_text = ["sentence", ["and", humidText, precipText]]
                         else:
                             summary_text = ["sentence", ["and", precipText, humidText]]
