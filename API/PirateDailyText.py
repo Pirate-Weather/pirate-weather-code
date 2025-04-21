@@ -1584,7 +1584,7 @@ def calculate_day_text(
                             if (
                                 dry[0] == min(starts)
                                 or len(dry) == ((len(periods) + 1) - currPeriodNum)
-                                and len(cloud) != len(periods)
+                                and len(cloudLevels) != len(periods)
                             ):
                                 summary_text = ["sentence", ["and", dryText, cloudText]]
                             else:
@@ -1594,7 +1594,7 @@ def calculate_day_text(
                             if (
                                 humid[0] == min(starts)
                                 or len(humid) == ((len(periods) + 1) - currPeriodNum)
-                                and len(cloud) != len(periods)
+                                and len(cloudLevels) != len(periods)
                             ):
                                 summary_text = [
                                     "sentence",
