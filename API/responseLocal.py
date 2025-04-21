@@ -29,6 +29,7 @@ from PirateText import calculate_text
 from PirateMinutelyText import calculate_minutely_text
 from PirateWeeklyText import calculate_weekly_text
 from PirateSimpleDayText import calculate_simple_day_text
+from PirateDailyText import calculate_day_text
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
@@ -2938,6 +2939,9 @@ async def PW_Forecast(
     # Replace NaN with -999 for json
     InterPhour[np.isnan(InterPhour)] = -999
 
+    # Get next 24 hours of data for hour block summaries
+    nextHours = []
+
     # Timing Check
     if TIMING:
         print("Hourly Loop start")
@@ -3109,6 +3113,8 @@ async def PW_Forecast(
             print("TEXT GEN ERROR:")
             print(e)
 
+        if 0 < idx <= 25:
+            nextHours.append(hourItem)
         hourList.append(hourItem)
 
         hourIconList.append(hourIcon)
@@ -4089,10 +4095,32 @@ async def PW_Forecast(
     if exHourly != 1:
         returnOBJ["hourly"] = dict()
         if (not timeMachine) or (tmExtra):
-            returnOBJ["hourly"]["summary"] = max(
-                set(hourTextList), key=hourTextList.count
-            )
-            returnOBJ["hourly"]["icon"] = max(set(hourIconList), key=hourIconList.count)
+            try:
+                hourText, hourIcon = calculate_day_text(
+                    nextHours,
+                    prepAccumUnit,
+                    visUnits,
+                    windUnit,
+                    tempUnits,
+                    True,
+                    str(tz_name),
+                    int(minute_array_grib[0]),
+                    "hour",
+                    icon,
+                )
+                returnOBJ["daily"]["summary"] = translation.translate(
+                    ["sentence", hourText]
+                )
+                returnOBJ["daily"]["icon"] = hourIcon
+            except Exception as e:
+                print("TEXT GEN ERROR:")
+                print(e)
+                returnOBJ["hourly"]["summary"] = max(
+                    set(hourTextList), key=hourTextList.count
+                )
+                returnOBJ["hourly"]["icon"] = max(
+                    set(hourIconList), key=hourIconList.count
+                )
         returnOBJ["hourly"]["data"] = hourList
 
     if exDaily != 1:
@@ -4131,7 +4159,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.6.0"
+        returnOBJ["flags"]["version"] = "V2.6.1a"
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
             returnOBJ["flags"]["processTime"] = (

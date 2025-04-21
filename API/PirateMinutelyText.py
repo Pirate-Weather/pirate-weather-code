@@ -43,7 +43,7 @@ def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
             ["minutes", precipEnd1 + 1]
             if precipEnd1 > 0
             else ["less-than", ["minutes", 1]],
-            ["minutes", precipStart2 - precipEnd1 - 1],
+            ["minutes", precipStart2 - precipEnd1],
         ]
     # If precip starts during the hour and lasts until the end of the hour
     elif precipStart1 > 0 and precipEnd1 == 60:
@@ -60,7 +60,7 @@ def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
             ["minutes", precipStart1]
             if precipEnd1 > 0
             else ["less-than", ["minutes", 1]],
-            ["minutes", precipEnd1 - precipStart1 - 1],
+            ["minutes", precipEnd1 - precipStart1],
         ]
     return cText
 
