@@ -4108,10 +4108,10 @@ async def PW_Forecast(
                     "hour",
                     icon,
                 )
-                returnOBJ["daily"]["summary"] = translation.translate(
+                returnOBJ["hourly"]["summary"] = translation.translate(
                     ["sentence", hourText]
                 )
-                returnOBJ["daily"]["icon"] = hourIcon
+                returnOBJ["hourly"]["icon"] = hourIcon
             except Exception as e:
                 print("TEXT GEN ERROR:")
                 print(e)
