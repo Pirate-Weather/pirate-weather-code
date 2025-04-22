@@ -472,6 +472,10 @@ def calculate_day_text(
     - cIcon (str) - The icon representing the current day/next 24 hours
     """
 
+    # If we don't have 24 hours of data bail as we need 24 hours to calculate the text
+    if len(hours) != 24:
+        return "clear-day", ["for-day", "clear"]
+
     # Variables to calculate the periods from the hours array
     period1 = []
     period2 = []
@@ -489,11 +493,15 @@ def calculate_day_text(
     periodIndex = 1
     today = ""
 
-    # Get the current time zone from the function parameters
+    # Get the current time zone from the function parameters or use the first hours time field as the current time
     zone = tz.gettz(timeZone)
-    # Calculate the current hour/weekday from the first hour
-    currDate = datetime.datetime.fromtimestamp(currTime, zone)
-    currHour = int(currDate.strftime("%H"))
+    if mode == "hour":
+        currDate = datetime.datetime.fromtimestamp(hours[0]["time"], zone)
+        currHour = int(currDate.strftime("%H"))
+    else:
+        # Calculate the current hour/weekday from the first hour
+        currDate = datetime.datetime.fromtimestamp(currTime, zone)
+        currHour = int(currDate.strftime("%H"))
 
     # Time periods are as follows:
     # morning 4:00 to 12:00
