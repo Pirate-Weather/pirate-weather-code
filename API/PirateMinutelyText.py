@@ -24,7 +24,7 @@ def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
         cText = [
             "stopping-in",
             text,
-            ["minutes", precipEnd1]
+            ["minutes", precipEnd1 + 1]
             if precipEnd1 > 0
             else ["less-than", ["minutes", 1]],
         ]
@@ -40,7 +40,7 @@ def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
         cText = [
             "stopping-then-starting-later",
             text,
-            ["minutes", precipEnd1]
+            ["minutes", precipEnd1 + 1]
             if precipEnd1 > 0
             else ["less-than", ["minutes", 1]],
             ["minutes", precipStart2 - precipEnd1],
