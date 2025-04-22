@@ -3113,7 +3113,7 @@ async def PW_Forecast(
             print("TEXT GEN ERROR:")
             print(e)
 
-        if 0 < idx <= 25:
+        if 0 < idx <= 24:
             nextHours.append(hourItem)
         hourList.append(hourItem)
 

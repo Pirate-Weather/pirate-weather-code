@@ -618,7 +618,7 @@ def calculate_day_text(
             period5.append(hour)
 
         # If the period changed and the index is 6 or below or we are at the end of the loop
-        if (periodIncrease and periodIndex <= 6) or (idx == 24 and periodIndex <= 6):
+        if (periodIncrease and periodIndex <= 6) or (idx == 23 and periodIndex <= 6):
             # Calculate the average cloud cover and pop for the period and calculate the length of the period
             if periodIndex - 1 == 1:
                 cloudCover = cloudCover / len(period1)
@@ -642,7 +642,7 @@ def calculate_day_text(
                 length = len(period5)
 
             # If we are at the end of the loop increase the index and calculate the length of the last period
-            if idx == 24:
+            if idx == 23:
                 periodIndex += 1
                 if periodIndex == 5:
                     length = len(period4)
