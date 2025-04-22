@@ -4104,7 +4104,7 @@ async def PW_Forecast(
                     tempUnits,
                     True,
                     str(tz_name),
-                    int(minute_array_grib[0]),
+                    int(minuteDict[0]["time"]),
                     "hour",
                     icon,
                 )
