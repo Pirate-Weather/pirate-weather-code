@@ -4096,7 +4096,7 @@ async def PW_Forecast(
         returnOBJ["hourly"] = dict()
         if (not timeMachine) or (tmExtra):
             try:
-                hourText, hourIcon = calculate_day_text(
+                hourIcon, hourText = calculate_day_text(
                     nextHours,
                     prepAccumUnit,
                     visUnits,
