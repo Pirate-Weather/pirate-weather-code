@@ -748,7 +748,7 @@ def calculate_day_text(
     checkPeriod = math.floor(currPeriodNum) - 1
 
     # If the current period is 3/4 the way through the first period then exclude it.
-    if currPeriodNum < 1.75:
+    if currPeriodNum < 1.75 and period1:
         # Check if there is enough precipitation to trigger the precipitation icon
         if (periodStats[0][8] * prepAccumUnit) > (0.02 * prepAccumUnit):
             period1Calc.append(True)
@@ -811,7 +811,7 @@ def calculate_day_text(
         if period1Calc[4] is not None:
             dry.append(0)
     # If the current period is 3/4 the way through the second period then exclude it.
-    if currPeriodNum < 2.75:
+    if currPeriodNum < 2.75 and period2:
         # Check if there is enough precipitation to trigger the precipitation icon
         if (periodStats[1][8] * prepAccumUnit) > (0.02 * prepAccumUnit):
             period2Calc.append(True)
@@ -875,7 +875,7 @@ def calculate_day_text(
         if period2Calc[4] is not None:
             dry.append(1)
     # If the current period is 3/4 the way through the third period then exclude it.
-    if currPeriodNum < 3.75:
+    if currPeriodNum < 3.75 and period3:
         # Check if there is enough precipitation to trigger the precipitation icon
         if (periodStats[2][8] * prepAccumUnit) > (0.02 * prepAccumUnit):
             period3Calc.append(True)
@@ -938,68 +938,70 @@ def calculate_day_text(
         # Add to the visibility array if the dry text exists
         if period3Calc[4] is not None:
             dry.append(2)
-    # Check if there is enough precipitation to trigger the precipitation icon
-    if (periodStats[3][8] * prepAccumUnit) > (0.02 * prepAccumUnit):
-        period4Calc.append(True)
-        if avgPop == 0:
-            avgPop = periodStats[3][7]
-        elif periodStats[3][7] > avgPop:
-            avgPop = periodStats[3][7]
-    else:
-        period4Calc.append(None)
-    # Calculate the wind text
-    if periodStats[3][2] >= (periodStats[3][11] / 2):
-        period4Calc.append(
-            calculate_wind_text(periodStats[3][10], windUnit, icon, "summary")
-        )
-    else:
-        period4Calc.append(None)
-    # Check if there is no precipitation and the wind is less than the light wind threshold
-    if (
-        periodStats[3][8] * prepAccumUnit < 0.02
-        and periodStats[3][10] / windUnit < 6.7056
-        and periodStats[3][0] >= (periodStats[3][11] / 2)
-    ):
-        period4Calc.append(calculate_vis_text(0, visUnits, "summary"))
-    else:
-        period4Calc.append(None)
-    # Add the current period cloud cover
-    period4Calc.append(periodStats[3][9])
-    avgCloud += periodStats[3][9]
-    # Calculate the periods cloud text and level and add it to the cloud levels array
-    period4Text, period4Level = calculate_cloud_text(periodStats[3][9])
-    cloudLevels.append(period4Level)
-    # Calculate the dry text
-    if periodStats[3][1] >= (periodStats[3][11] / 2):
-        period4Calc.append(humidity_sky_text(20 * tempUnits, tempUnits, 0))
-    else:
-        period4Calc.append(None)
-    # Calculate the humid text
-    if periodStats[3][13] >= (periodStats[3][11] / 2):
-        period4Calc.append(humidity_sky_text(20 * tempUnits, tempUnits, 1))
-    else:
-        period4Calc.append(None)
 
-    # Add the wind speed to the wind array
-    winds.append(periodStats[2][10])
-    # If there is any precipitation
-    if period4Calc[0] is not None:
-        precipIntensity.append(periodStats[3][8] * prepAccumUnit)
-        precip.append(3)
-        if periodStats[3][4] > 0:
-            snowError += periodStats[3][5]
-    # Add the wind to the wind array if the wind text exists
-    if period4Calc[1] is not None:
-        wind.append(3)
-    # Add the wind to the visibility array if the fog text exists
-    if period4Calc[2] is not None:
-        vis.append(3)
-    # Add to the humid array if the humid text exists
-    if period4Calc[5] is not None:
-        humid.append(3)
-    # Add to the visibility array if the dry text exists
-    if period4Calc[4] is not None:
-        dry.append(3)
+    if period4:
+        # Check if there is enough precipitation to trigger the precipitation icon
+        if (periodStats[3][8] * prepAccumUnit) > (0.02 * prepAccumUnit):
+            period4Calc.append(True)
+            if avgPop == 0:
+                avgPop = periodStats[3][7]
+            elif periodStats[3][7] > avgPop:
+                avgPop = periodStats[3][7]
+        else:
+            period4Calc.append(None)
+        # Calculate the wind text
+        if periodStats[3][2] >= (periodStats[3][11] / 2):
+            period4Calc.append(
+                calculate_wind_text(periodStats[3][10], windUnit, icon, "summary")
+            )
+        else:
+            period4Calc.append(None)
+        # Check if there is no precipitation and the wind is less than the light wind threshold
+        if (
+            periodStats[3][8] * prepAccumUnit < 0.02
+            and periodStats[3][10] / windUnit < 6.7056
+            and periodStats[3][0] >= (periodStats[3][11] / 2)
+        ):
+            period4Calc.append(calculate_vis_text(0, visUnits, "summary"))
+        else:
+            period4Calc.append(None)
+        # Add the current period cloud cover
+        period4Calc.append(periodStats[3][9])
+        avgCloud += periodStats[3][9]
+        # Calculate the periods cloud text and level and add it to the cloud levels array
+        period4Text, period4Level = calculate_cloud_text(periodStats[3][9])
+        cloudLevels.append(period4Level)
+        # Calculate the dry text
+        if periodStats[3][1] >= (periodStats[3][11] / 2):
+            period4Calc.append(humidity_sky_text(20 * tempUnits, tempUnits, 0))
+        else:
+            period4Calc.append(None)
+        # Calculate the humid text
+        if periodStats[3][13] >= (periodStats[3][11] / 2):
+            period4Calc.append(humidity_sky_text(20 * tempUnits, tempUnits, 1))
+        else:
+            period4Calc.append(None)
+
+        # Add the wind speed to the wind array
+        winds.append(periodStats[2][10])
+        # If there is any precipitation
+        if period4Calc[0] is not None:
+            precipIntensity.append(periodStats[3][8] * prepAccumUnit)
+            precip.append(3)
+            if periodStats[3][4] > 0:
+                snowError += periodStats[3][5]
+        # Add the wind to the wind array if the wind text exists
+        if period4Calc[1] is not None:
+            wind.append(3)
+        # Add the wind to the visibility array if the fog text exists
+        if period4Calc[2] is not None:
+            vis.append(3)
+        # Add to the humid array if the humid text exists
+        if period4Calc[5] is not None:
+            humid.append(3)
+        # Add to the visibility array if the dry text exists
+        if period4Calc[4] is not None:
+            dry.append(3)
 
     if period5:
         # Check if there is enough precipitation to trigger the precipitation icon
