@@ -548,19 +548,19 @@ def calculate_day_text(
         if 0 <= hourHour < 4:
             hourHour = hourHour + 24
         # If we are at hour 12 and the first period has data increase the period index and set the increase flag to true
-        if hourHour == 12:
+        if hourHour == 12 and period1:
             periodIndex = periodIndex + 1
             periodIncrease = True
         # If we are at hour 17 and the first period has data increase the period index and set the increase flag to true
-        if hourHour == 17:
+        if hourHour == 17 and period1:
             periodIndex = periodIndex + 1
             periodIncrease = True
         # If we are at hour 22 and the first period has data increase the period index and set the increase flag to true
-        if hourHour == 22:
+        if hourHour == 22 and period1:
             periodIndex = periodIndex + 1
             periodIncrease = True
         # If we are at hour 12 and the first period has data increase the period index and set the increase flag to true
-        if hourHour == 4:
+        if hourHour == 4 and period1:
             periodIndex = periodIndex + 1
             periodIncrease = True
 
