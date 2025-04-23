@@ -777,7 +777,7 @@ def calculate_day_text(
         periodStats[4].append(round(maxIntensity, 4))
         periodStats[4].append(round(cloudCover, 2))
         periodStats[4].append(maxWind)
-        periodStats[4].append(length)
+        periodStats[4].append(len(period5))
         periodStats[4].append(today + hourPeriod)
         periodStats[4].append(numHoursHumid)
 
@@ -804,7 +804,7 @@ def calculate_day_text(
     period3Calc = []
     period4Calc = []
     period5Calc = []
-    snowLowAccum = snowMaxAccum = snowError = avgPop = maxIntensity = maxWind = (
+    snowLowAccum = snowMaxAccum = snowError = avgPop = maxWind = (
         numItems
     ) = 0
     starts = []
