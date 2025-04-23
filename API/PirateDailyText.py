@@ -170,7 +170,11 @@ def calculate_period_text(
             summary_text = [
                 "until",
                 periodText,
-                periods[3 if typePeriods[1] + 1 > 3 else typePeriods[1] + 1],
+                periods[
+                    len(periods) - 1
+                    if typePeriods[1] + 1 > len(typePeriods) - 1
+                    else typePeriods[1] + 1
+                ],
             ]
         # If the type starts after the first period but doesn't continue to the end
         elif typePeriods[0] > checkPeriod and (typePeriods[1] - typePeriods[0]) == 1:
@@ -178,7 +182,11 @@ def calculate_period_text(
                 "starting-continuing-until",
                 periodText,
                 periods[typePeriods[0]],
-                periods[typePeriods[1] + 1],
+                periods[
+                    len(periods) - 1
+                    if typePeriods[1] + 1 > len(typePeriods) - 1
+                    else typePeriods[1] + 1
+                ],
             ]
         # If the type occurs at the start but then starts again in the last period
         elif (
@@ -255,7 +263,11 @@ def calculate_period_text(
             summary_text = [
                 "until",
                 periodText,
-                periods[3 if typePeriods[2] + 1 > 3 else typePeriods[2] + 1],
+                periods[
+                    len(periods) - 1
+                    if typePeriods[2] + 1 > len(typePeriods) - 1
+                    else typePeriods[2] + 1
+                ],
             ]
         # If the type starts after the first period but doesn't continue to the end and the first and second periods are connected
         elif (
