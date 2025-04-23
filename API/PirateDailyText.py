@@ -1170,7 +1170,9 @@ def calculate_day_text(
     if humid:
         starts.append(humid[0])
 
-    precipType = Most_Common(mostCommonPrecip)
+    # If there's any precipitation find the most common one to use as the precipitation type
+    if mostCommonPrecip:
+        precipType = Most_Common(mostCommonPrecip)
 
     # Only calculate the precipitation text if there is any possibility of precipitation > 0
     if avgPop > 0 and totalPrep >= (0.01 * prepAccumUnit):
