@@ -1360,8 +1360,8 @@ def calculate_day_text(
         "summary",
     )
 
-    # If we are in the currne period
-    if periods[min(starts)] == "today-" + currPeriod:
+    # If we are in the current period
+    if starts and periods[min(starts)] == "today-" + currPeriod:
         # If we have precipitation and it starts in the first block
         if precip and precip[0] == 0:
             # If the first hour has no precipitation add the later text
@@ -1458,7 +1458,7 @@ def calculate_day_text(
         precipText = None
 
         # If there is any precipitation then calcaulate the text
-        if len(precip) > 0:
+        if len(precip) > 0 and prepText is not None:
             numItems += 1
             precipText, windPrecip, dryPrecip, humidPrecip = calculate_period_text(
                 periods,
