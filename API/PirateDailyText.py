@@ -252,7 +252,18 @@ def calculate_period_text(
                     "high-humidity",
                 ]
         # If the type starts in the second period
-        if typePeriods[0] == checkPeriod + 1 and typePeriods[2] == 3:
+        if (
+            typePeriods[0] == checkPeriod + 1
+            and typePeriods[2] == 3
+            and len(periods) == 4
+        ):
+            summary_text = ["starting", periodText, periods[typePeriods[0]]]
+        # If the type starts in the second period
+        elif (
+            typePeriods[0] == checkPeriod + 2
+            and typePeriods[2] == 4
+            and len(periods) == 5
+        ):
             summary_text = ["starting", periodText, periods[typePeriods[0]]]
         elif (
             typePeriods[0] == checkPeriod
