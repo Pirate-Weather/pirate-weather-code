@@ -657,7 +657,10 @@ def calculate_day_text(
         ):
             numHoursDry += 1
         # If the hour is foggy increase the number of fog hours
-        if calculate_vis_text(hour["visibility"], visUnits, "icon") == "fog" and hour["precipIntensity"] <= 0.02 * prepAccumUnit:
+        if (
+            calculate_vis_text(hour["visibility"], visUnits, "icon") == "fog"
+            and hour["precipIntensity"] <= 0.02 * prepAccumUnit
+        ):
             numHoursFog += 1
         # If the hour is windy increase the number of windy hours
         if (
@@ -797,7 +800,10 @@ def calculate_day_text(
         ):
             numHoursDry += 1
         # If the hour is foggy increase the number of fog hours
-        if calculate_vis_text(period5[0]["visibility"], visUnits, "icon") == "fog" and period5[0]["precipIntensity"] <= 0.02 * prepAccumUnit:
+        if (
+            calculate_vis_text(period5[0]["visibility"], visUnits, "icon") == "fog"
+            and period5[0]["precipIntensity"] <= 0.02 * prepAccumUnit
+        ):
             numHoursFog += 1
         # If the hour is windy increase the number of windy hours
         if (
@@ -1617,128 +1623,138 @@ def calculate_day_text(
         # If there is any precipitation then calcaulate the text
         if len(precip) > 0 and prepText is not None:
             numItems += 1
-            precipText, windPrecip, dryPrecip, humidPrecip, visPrecip = calculate_period_text(
-                periods,
-                precip,
-                prepText,
-                "precip",
-                wind,
-                prepAccumUnit,
-                visUnits,
-                windUnit,
-                maxWind,
-                windPrecip,
-                checkPeriod,
-                mode,
-                icon,
-                dry,
-                humid,
-                tempUnits,
-                dryPrecip,
-                humidPrecip,
-                visPrecip,
-                vis,
+            precipText, windPrecip, dryPrecip, humidPrecip, visPrecip = (
+                calculate_period_text(
+                    periods,
+                    precip,
+                    prepText,
+                    "precip",
+                    wind,
+                    prepAccumUnit,
+                    visUnits,
+                    windUnit,
+                    maxWind,
+                    windPrecip,
+                    checkPeriod,
+                    mode,
+                    icon,
+                    dry,
+                    humid,
+                    tempUnits,
+                    dryPrecip,
+                    humidPrecip,
+                    visPrecip,
+                    vis,
+                )
             )
 
         # If there is any visibility then calcaulate the text
         if len(vis) > 0 and numItems <= 1 and not visPrecip:
             numItems += 1
-            visText, windPrecip, dryPrecip, humidPrecip, visPrecip = calculate_period_text(
-                periods,
-                vis,
-                "fog",
-                "vis",
-                wind,
-                prepAccumUnit,
-                visUnits,
-                windUnit,
-                maxWind,
-                windPrecip,
-                checkPeriod,
-                mode,
-                icon,
-                dry,
-                humid,
-                tempUnits,
-                dryPrecip,
-                humidPrecip,
-                visPrecip,
-                vis,
+            visText, windPrecip, dryPrecip, humidPrecip, visPrecip = (
+                calculate_period_text(
+                    periods,
+                    vis,
+                    "fog",
+                    "vis",
+                    wind,
+                    prepAccumUnit,
+                    visUnits,
+                    windUnit,
+                    maxWind,
+                    windPrecip,
+                    checkPeriod,
+                    mode,
+                    icon,
+                    dry,
+                    humid,
+                    tempUnits,
+                    dryPrecip,
+                    humidPrecip,
+                    visPrecip,
+                    vis,
+                )
             )
 
         # If there is any wind then calcaulate the text if its not joined with precip/cloud
         if not windPrecip and numItems <= 1 and len(wind) > 0:
             numItems += 1
-            windText, windPrecip, dryPrecip, humidPrecip, visPrecip = calculate_period_text(
-                periods,
-                wind,
-                calculate_wind_text(maxWind, windUnit, icon, "summary"),
-                "wind",
-                wind,
-                prepAccumUnit,
-                visUnits,
-                windUnit,
-                maxWind,
-                windPrecip,
-                checkPeriod,
-                mode,
-                icon,
-                dry,
-                humid,
-                tempUnits,
-                dryPrecip,
-                humidPrecip,
-                visPrecip,
-                vis,
+            windText, windPrecip, dryPrecip, humidPrecip, visPrecip = (
+                calculate_period_text(
+                    periods,
+                    wind,
+                    calculate_wind_text(maxWind, windUnit, icon, "summary"),
+                    "wind",
+                    wind,
+                    prepAccumUnit,
+                    visUnits,
+                    windUnit,
+                    maxWind,
+                    windPrecip,
+                    checkPeriod,
+                    mode,
+                    icon,
+                    dry,
+                    humid,
+                    tempUnits,
+                    dryPrecip,
+                    humidPrecip,
+                    visPrecip,
+                    vis,
+                )
             )
         # If there is any low humidity then calcaulate the text if its not joined with any conditions
         if not dryPrecip and len(dry) > 0:
-            dryText, windPrecip, dryPrecip, humidPrecip, visPrecip = calculate_period_text(
-                periods,
-                dry,
-                "low-humidity",
-                "dry",
-                wind,
-                prepAccumUnit,
-                visUnits,
-                windUnit,
-                maxWind,
-                windPrecip,
-                checkPeriod,
-                mode,
-                icon,
-                dry,
-                humid,
-                tempUnits,
-                dryPrecip,
-                humidPrecip,
-                visPrecip,
-                vis,
+            dryText, windPrecip, dryPrecip, humidPrecip, visPrecip = (
+                calculate_period_text(
+                    periods,
+                    dry,
+                    "low-humidity",
+                    "dry",
+                    wind,
+                    prepAccumUnit,
+                    visUnits,
+                    windUnit,
+                    maxWind,
+                    windPrecip,
+                    checkPeriod,
+                    mode,
+                    icon,
+                    dry,
+                    humid,
+                    tempUnits,
+                    dryPrecip,
+                    humidPrecip,
+                    visPrecip,
+                    vis,
+                )
             )
 
         # If there is any low humidity then calcaulate the text if its not joined with any conditions
         if not humidPrecip and len(humid) > 0:
-            humidText, windPrecip, dryPrecip, humidPrecip, visPrecip = calculate_period_text(
-                periods,
-                humid,
-                "high-humidity",
-                "humid",
-                wind,
-                prepAccumUnit,
-                visUnits,
-                windUnit,
-                maxWind,
-                windPrecip,
-                checkPeriod,
-                mode,
-                icon,
-                dry,
-                humid,
-                tempUnits,
-                dryPrecip,
-                humidPrecip,
-                visPrecip,
-                vis,
+            humidText, windPrecip, dryPrecip, humidPrecip, visPrecip = (
+                calculate_period_text(
+                    periods,
+                    humid,
+                    "high-humidity",
+                    "humid",
+                    wind,
+                    prepAccumUnit,
+                    visUnits,
+                    windUnit,
+                    maxWind,
+                    windPrecip,
+                    checkPeriod,
+                    mode,
+                    icon,
+                    dry,
+                    humid,
+                    tempUnits,
+                    dryPrecip,
+                    humidPrecip,
+                    visPrecip,
+                    vis,
+                )
             )
 
         # If the summary text is not already set
