@@ -662,7 +662,7 @@ def calculate_day_text(
                 length = len(period5)
 
             # If we are at the end of the loop increase the index and calculate the length of the last period
-            if idx == 23:
+            if idx == 23 and not periodIncrease:
                 periodIndex += 1
                 if periodIndex == 5:
                     length = len(period4)
@@ -688,7 +688,7 @@ def calculate_day_text(
             # Reset the varaibles back to zero
             numHoursFog = numHoursWind = numHoursDry = numHoursHumid = rainPrep = (
                 snowPrep
-            ) = sleetPrep = snowError = cloudCover = pop = maxIntensity = maxWind = 0
+            ) = sleetPrep = snowError = cloudCover = pop = maxWind = 0
             periodIncrease = False
 
             # Calculate the next period text
@@ -698,6 +698,89 @@ def calculate_day_text(
             if hourHour == 4 and period1 and mode == "hour" and currHour > 3:
                 today = "tomorrow-"
 
+    # If the second to last value in hour array is an increase hour we will have data in the fifth period but no stats so calculate them
+    if period5 and not periodStats[4]:
+        # If the current hour has any precipitation calculate the rain, snow and sleet precipitation
+        if period5[0]["precipType"] == "rain" or period5[0]["precipType"] == "none":
+            rainPrep = rainPrep + period5[0]["precipAccumulation"]
+        elif period5[0]["precipType"] == "snow":
+            snowPrep = snowPrep + period5[0]["precipAccumulation"]
+            # Increase the snow error to show the precipitation range
+            snowError = snowError + period5[0]["precipIntensityError"]
+        elif period5[0]["precipType"] == "sleet":
+            sleetPrep = sleetPrep + period5[0]["precipAccumulation"]
+
+        # If the hour is humid increase the number of humid hours
+        if (
+            humidity_sky_text(
+                period5[0]["temperature"], tempUnits, period5[0]["humidity"]
+            )
+            == "high-humidity"
+        ):
+            numHoursHumid += 1
+        # If the hour is dry increase the number of dry hours
+        if (
+            humidity_sky_text(
+                period5[0]["temperature"], tempUnits, period5[0]["humidity"]
+            )
+            == "low-humidity"
+        ):
+            numHoursDry += 1
+        # If the hour is foggy increase the number of fog hours
+        if calculate_vis_text(period5[0]["visibility"], visUnits, "icon") == "fog":
+            numHoursFog += 1
+        # If the hour is windy increase the number of windy hours
+        if (
+            calculate_wind_text(period5[0]["windSpeed"], windUnit, "darksky", "icon")
+            == "wind"
+        ):
+            numHoursWind += 1
+
+        # Add the hour cloud cover and pop to the variables to calculate the average
+        cloudCover += period5[0]["cloudCover"]
+        pop += period5[0]["precipProbability"]
+
+        # Calculate the maxiumum intensity for the period
+        if maxIntensity == 0:
+            maxIntensity = period5[0]["precipIntensity"]
+        elif maxIntensity > 0 and period5[0]["precipIntensity"] > maxIntensity:
+            maxIntensity = period5[0]["precipIntensity"]
+
+        # Calculate the maximum wind speed for the period
+        if maxWind == 0:
+            maxWind = period5[0]["windSpeed"]
+        elif maxWind > 0 and period5[0]["windSpeed"] > maxWind:
+            maxWind = period5[0]["windSpeed"]
+
+        # Add the percipitation type to an array to calculate the most common precipitation to use as a baseline
+        if period5[0]["precipIntensity"] > 0.02 * prepAccumUnit:
+            mostCommonPrecip.append(period5[0]["precipType"])
+
+        # Add the percipitation type to an array of precipitation types if it doesn;t already exist
+        if not prepTypes and period5[0]["precipIntensity"] > 0.02 * prepAccumUnit:
+            prepTypes.append(period5[0]["precipType"])
+        elif (
+            period5[0]["precipType"] not in prepTypes
+            and period5[0]["precipIntensity"] > 0.02 * prepAccumUnit
+        ):
+            prepTypes.append(period5[0]["precipType"])
+
+        # Add the data to an array of period arrays to use to calculate the summaries
+        periodStats[4].append(numHoursFog)
+        periodStats[4].append(numHoursDry)
+        periodStats[4].append(numHoursWind)
+        periodStats[4].append(round(rainPrep, 4))
+        periodStats[4].append(round(snowPrep, 4))
+        periodStats[4].append(round(snowError, 4))
+        periodStats[4].append(round(sleetPrep, 4))
+        periodStats[4].append(round(pop, 2))
+        periodStats[4].append(round(maxIntensity, 4))
+        periodStats[4].append(round(cloudCover, 2))
+        periodStats[4].append(maxWind)
+        periodStats[4].append(length)
+        periodStats[4].append(today + hourPeriod)
+        periodStats[4].append(numHoursHumid)
+
     # Variables used to calculate the summary
     precip = []
     vis = []
@@ -706,7 +789,6 @@ def calculate_day_text(
     humid = []
     dry = []
     cloudLevels = []
-    precipIntensity = []
     periods = [
         periodStats[0][12],
         periodStats[1][12],
@@ -726,7 +808,6 @@ def calculate_day_text(
         numItems
     ) = 0
     starts = []
-    precipIntensity = []
     period1Level = period2Level = period3Level = period4Level = avgCloud = -1
     secondary = snowText = snowSentence = None
     # Calculate the total ice precipitation
@@ -810,7 +891,6 @@ def calculate_day_text(
         # If there is any precipitation
         if period1Calc[0] is not None:
             # Calcaulte the intensity and add it to the precipitation array
-            precipIntensity.append(periodStats[0][8] * prepAccumUnit)
             precip.append(0)
             # If the precipitation is snow then add the accumulation and error
             if periodStats[0][4] > 0:
@@ -874,7 +954,6 @@ def calculate_day_text(
         winds.append(periodStats[1][10])
         # If there is any precipitation
         if period2Calc[0] is not None:
-            precipIntensity.append(periodStats[1][8] * prepAccumUnit)
             precip.append(1)
             # If the precipitation is snow then add the accumulation and error
             if periodStats[1][4] > 0:
@@ -938,7 +1017,6 @@ def calculate_day_text(
         winds.append(periodStats[2][10])
         # If there is any precipitation
         if period3Calc[0] is not None:
-            precipIntensity.append(periodStats[2][8] * prepAccumUnit)
             precip.append(2)
             # If the precipitation is snow then add the accumulation and error
             if periodStats[2][4] > 0:
@@ -1003,7 +1081,6 @@ def calculate_day_text(
         winds.append(periodStats[2][10])
         # If there is any precipitation
         if period4Calc[0] is not None:
-            precipIntensity.append(periodStats[3][8] * prepAccumUnit)
             precip.append(3)
             if periodStats[3][4] > 0:
                 snowError += periodStats[3][5]
@@ -1066,7 +1143,6 @@ def calculate_day_text(
         winds.append(periodStats[4][10])
         # If there is any precipitation
         if period5Calc[0] is not None:
-            precipIntensity.append(periodStats[4][8] * prepAccumUnit)
             precip.append(4)
             # If the precipitation is snow then add the accumulation and error
             if periodStats[2][4] > 0:
@@ -1096,10 +1172,7 @@ def calculate_day_text(
     if humid:
         starts.append(humid[0])
 
-    # If the precipIntensity array has any values then get the maxiumum
-    if precipIntensity:
-        maxIntensity = max(precipIntensity)
-        precipType = Most_Common(mostCommonPrecip)
+    precipType = Most_Common(mostCommonPrecip)
 
     # Only calculate the precipitation text if there is any possibility of precipitation > 0
     if avgPop > 0 and totalPrep >= (0.01 * prepAccumUnit):
