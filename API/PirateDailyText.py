@@ -723,10 +723,10 @@ def calculate_day_text(
     )
     # Calculate the total rain precipitation
     rainPrep = (
-        periodStats[0][3] / 10
-        + periodStats[1][3] / 10
-        + periodStats[2][3] / 10
-        + periodStats[3][3] / 10
+        periodStats[0][3]
+        + periodStats[1][3]
+        + periodStats[2][3]
+        + periodStats[3][3]
     )
     # Calculate the total snow precipitation
     snowPrep = (
@@ -735,8 +735,8 @@ def calculate_day_text(
     if periodStats[4]:
         periods.append(periodStats[4][12])
         snowPrep += periodStats[4][4]
-        rainPrep += periodStats[4][4]
-        sleetPrep += periodStats[4][4]
+        rainPrep += periodStats[4][3]
+        sleetPrep += periodStats[4][6]
     # Calculate the total precipitaion
     totalPrep = rainPrep + snowPrep + sleetPrep
 

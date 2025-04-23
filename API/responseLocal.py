@@ -2939,9 +2939,6 @@ async def PW_Forecast(
     # Replace NaN with -999 for json
     InterPhour[np.isnan(InterPhour)] = -999
 
-    # Get next 24 hours of data for hour block summaries
-    nextHours = []
-
     # Timing Check
     if TIMING:
         print("Hourly Loop start")
@@ -3113,8 +3110,6 @@ async def PW_Forecast(
             print("TEXT GEN ERROR:")
             print(e)
 
-        if 0 < idx <= 24:
-            nextHours.append(hourItem)
         hourList.append(hourItem)
 
         hourIconList.append(hourIcon)
@@ -3126,6 +3121,7 @@ async def PW_Forecast(
         print("Daily start")
         print(datetime.datetime.utcnow() - T_Start)
 
+    nextHours = hourList[1:25]
     mean_results = []
     sum_results = []
     max_results = []
@@ -4159,7 +4155,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.6.1a"
+        returnOBJ["flags"]["version"] = "V2.6.1b"
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
             returnOBJ["flags"]["processTime"] = (
