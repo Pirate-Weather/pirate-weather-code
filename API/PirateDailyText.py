@@ -804,9 +804,7 @@ def calculate_day_text(
     period3Calc = []
     period4Calc = []
     period5Calc = []
-    snowLowAccum = snowMaxAccum = snowError = avgPop = maxWind = (
-        numItems
-    ) = 0
+    snowLowAccum = snowMaxAccum = snowError = avgPop = maxWind = numItems = 0
     starts = []
     period1Level = period2Level = period3Level = period4Level = avgCloud = -1
     secondary = snowText = snowSentence = None
