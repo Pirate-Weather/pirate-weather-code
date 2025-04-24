@@ -952,7 +952,11 @@ def calculate_day_text(
     # If the current period is 3/4 the way through the first period then exclude it.
     if currPeriodNum < 1.75 and period1:
         # Check if there is enough precipitation to trigger the precipitation icon
-        if (periodStats[0][8] * prepAccumUnit) > (0.25 * prepAccumUnit):
+        if (
+            (periodStats[0][4] * prepAccumUnit) > (0.25 * prepAccumUnit)
+            or (periodStats[0][3] * prepAccumUnit) > (0.025 * prepAccumUnit)
+            or (periodStats[0][6] * prepAccumUnit) > (0.025 * prepAccumUnit)
+        ):
             period1Calc.append(True)
             if avgPop == 0:
                 avgPop = periodStats[0][7]
@@ -1016,7 +1020,11 @@ def calculate_day_text(
     # If the current period is 3/4 the way through the second period then exclude it.
     if currPeriodNum < 2.75 and period2:
         # Check if there is enough precipitation to trigger the precipitation icon
-        if (periodStats[1][8] * prepAccumUnit) > (0.25 * prepAccumUnit):
+        if (
+            (periodStats[1][4] * prepAccumUnit) > (0.25 * prepAccumUnit)
+            or (periodStats[1][3] * prepAccumUnit) > (0.025 * prepAccumUnit)
+            or (periodStats[1][6] * prepAccumUnit) > (0.025 * prepAccumUnit)
+        ):
             period2Calc.append(True)
             if avgPop == 0:
                 avgPop = periodStats[1][7]
@@ -1079,7 +1087,11 @@ def calculate_day_text(
     # If the current period is 3/4 the way through the third period then exclude it.
     if currPeriodNum < 3.75 and period3:
         # Check if there is enough precipitation to trigger the precipitation icon
-        if (periodStats[2][8] * prepAccumUnit) > (0.25 * prepAccumUnit):
+        if (
+            (periodStats[2][4] * prepAccumUnit) > (0.25 * prepAccumUnit)
+            or (periodStats[2][3] * prepAccumUnit) > (0.025 * prepAccumUnit)
+            or (periodStats[2][6] * prepAccumUnit) > (0.025 * prepAccumUnit)
+        ):
             period3Calc.append(True)
             if avgPop == 0:
                 avgPop = periodStats[2][7]
@@ -1142,7 +1154,11 @@ def calculate_day_text(
 
     if period4:
         # Check if there is enough precipitation to trigger the precipitation icon
-        if (periodStats[3][8] * prepAccumUnit) > (0.25 * prepAccumUnit):
+        if (
+            (periodStats[3][4] * prepAccumUnit) > (0.25 * prepAccumUnit)
+            or (periodStats[3][3] * prepAccumUnit) > (0.025 * prepAccumUnit)
+            or (periodStats[3][6] * prepAccumUnit) > (0.025 * prepAccumUnit)
+        ):
             period4Calc.append(True)
             if avgPop == 0:
                 avgPop = periodStats[3][7]
@@ -1205,7 +1221,11 @@ def calculate_day_text(
 
     if period5:
         # Check if there is enough precipitation to trigger the precipitation icon
-        if (periodStats[4][8] * prepAccumUnit) > (0.25 * prepAccumUnit):
+        if (
+            (periodStats[4][4] * prepAccumUnit) > (0.25 * prepAccumUnit)
+            or (periodStats[4][3] * prepAccumUnit) > (0.025 * prepAccumUnit)
+            or (periodStats[4][6] * prepAccumUnit) > (0.025 * prepAccumUnit)
+        ):
             period5Calc.append(True)
             if avgPop == 0:
                 avgPop = periodStats[4][7]
@@ -1396,8 +1416,14 @@ def calculate_day_text(
         if snowLowAccum < 0:
             snowLowAccum = 0
 
+        # If we have 0 error or error is below 0 then use the ceiling of the current precipitation in the summary
+        if snowError <= 0:
+            snowSentence = [
+                "centimeters" if prepAccumUnit == 0.1 else "inches",
+                int(math.ceil(snowPrep)),
+            ]
         # Check to see if there is any snow accumulation and if so calculate the sentence to use when creating the precipitation summaries
-        if snowMaxAccum > 0:
+        elif snowMaxAccum > 0:
             # If there is no accumulation then show the accumulation as < 1 cm/in
             if snowPrep == 0:
                 snowSentence = [
