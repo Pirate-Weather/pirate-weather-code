@@ -101,6 +101,10 @@ def calculate_precip_text(
     else:
         prepIntensityUnit = prepAccumUnit
 
+    # If pop is -999 set it to 1 so we can calculate the precipitation text
+    if pop == -999:
+        pop = 1
+
     # In mm/h
     lightPrecipThresh = 0.4 * prepIntensityUnit
     midPrecipThresh = 2.5 * prepIntensityUnit

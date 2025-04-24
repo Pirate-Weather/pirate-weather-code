@@ -340,6 +340,23 @@ def calculate_period_text(
                 periods[typePeriods[0] + 1],
                 periods[typePeriods[1]],
             ]
+        # If the type starts after the first period but doesn't continue to the end
+        elif (
+            typePeriods[0] > checkPeriod
+            and (typePeriods[1] - typePeriods[0]) == 1
+            and (typePeriods[2] - typePeriods[1]) == 1
+            and len(periods) == 5
+        ):
+            summary_text = [
+                "starting-continuing-until",
+                periodText,
+                periods[typePeriods[0]],
+                periods[
+                    len(periods) - 1
+                    if typePeriods[2] + 1 > len(typePeriods) - 1
+                    else typePeriods[2] + 1
+                ],
+            ]
     # If the type occurs during four perionds and we have five periods
     elif len(typePeriods) == 4 and len(periods) == 5:
         # If the type is precipitation/cloud cover then check the wind if the wind is occuring in four periods
@@ -1250,6 +1267,10 @@ def calculate_day_text(
     # If there's any precipitation find the most common one to use as the precipitation type
     if mostCommonPrecip:
         precipType = Most_Common(mostCommonPrecip)
+
+    # If pop is -999 set it to 1 so we can calculate the precipitation text
+    if avgPop == -999:
+        avgPop = 1
 
     # Only calculate the precipitation text if there is any possibility of precipitation > 0
     if avgPop > 0 and totalPrep >= (0.01 * prepAccumUnit):
