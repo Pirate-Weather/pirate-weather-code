@@ -669,9 +669,13 @@ def calculate_day_text(
         ):
             numHoursWind += 1
 
-        # Add the hour cloud cover and pop to the variables to calculate the average
+        # Add the hour cloud cover to calculate the average
         cloudCover += hour["cloudCover"]
-        pop += hour["precipProbability"]
+        # Calculate the maximum pop for the period
+        if pop == 0:
+            pop = hour["precipProbability"]
+        elif hour["precipProbability"] > pop:
+            pop = hour["precipProbability"]
 
         # Calculate the maxiumum intensity for the period
         if maxIntensity == 0:
@@ -715,23 +719,18 @@ def calculate_day_text(
             # Calculate the average cloud cover and pop for the period and calculate the length of the period
             if periodIndex - 1 == 1:
                 cloudCover = cloudCover / len(period1)
-                pop = pop / len(period1)
                 length = len(period1)
             elif periodIndex - 1 == 2:
                 cloudCover = cloudCover / len(period2)
-                pop = pop / len(period2)
                 length = len(period2)
             elif periodIndex - 1 == 3:
                 cloudCover = cloudCover / len(period3)
-                pop = pop / len(period3)
                 length = len(period3)
             elif periodIndex - 1 == 4:
                 cloudCover = cloudCover / len(period4)
-                pop = pop / len(period4)
                 length = len(period4)
             elif periodIndex - 1 == 5:
                 cloudCover = cloudCover / len(period5)
-                pop = pop / len(period5)
                 length = len(period5)
 
             # If we are at the end of the loop increase the index and calculate the length of the last period
@@ -925,6 +924,8 @@ def calculate_day_text(
         if (periodStats[0][8] * prepAccumUnit) > (0.02 * prepAccumUnit):
             period1Calc.append(True)
             if avgPop == 0:
+                avgPop = periodStats[0][7]
+            elif periodStats[0][7] > avgPop:
                 avgPop = periodStats[0][7]
         else:
             period1Calc.append(None)
