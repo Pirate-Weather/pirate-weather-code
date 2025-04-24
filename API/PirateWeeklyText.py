@@ -442,7 +442,7 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
         if (
             day["precipType"] == "snow"
             and day["precipAccumulation"] >= (10.0 * intensityUnit)
-            and day["precipProbability"] >= 0.25
+            and (day["precipProbability"] >= 0.25 or day["precipProbability"] == -999)
         ):
             # Sets that there has been precipitation during the week
             precipitation = True

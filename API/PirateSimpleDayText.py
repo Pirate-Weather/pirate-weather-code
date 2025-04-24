@@ -51,7 +51,7 @@ def calculate_simple_day_text(
     wind = hourObject["windSpeed"]
     humidity = hourObject["humidity"]
 
-    if "precipProbability" in hourObject:
+    if "precipProbability" in hourObject or hourObject["precipProbability"] != -999:
         pop = hourObject["precipProbability"]
     else:
         pop = 1

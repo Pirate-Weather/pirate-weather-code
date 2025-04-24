@@ -316,6 +316,20 @@ def calculate_period_text(
                     else typePeriods[2] + 1
                 ],
             ]
+        # If the two types are not joined and do not occur during the first or last period
+        elif (
+            typePeriods[1] - typePeriods[0] != 1
+            and typePeriods[2] - typePeriods[1] != 1
+        ):
+            summary_text = [
+                "during",
+                periodText,
+                [
+                    "and",
+                    periods[typePeriods[0]],
+                    ["and", periods[typePeriods[1]], periods[typePeriods[2]]],
+                ],
+            ]
         # If the type starts after the first period but doesn't continue to the end and the first and second periods are connected
         elif (
             typePeriods[0] == checkPeriod
@@ -938,7 +952,7 @@ def calculate_day_text(
     # If the current period is 3/4 the way through the first period then exclude it.
     if currPeriodNum < 1.75 and period1:
         # Check if there is enough precipitation to trigger the precipitation icon
-        if (periodStats[0][8] * prepAccumUnit) > (0.02 * prepAccumUnit):
+        if (periodStats[0][8] * prepAccumUnit) > (0.25 * prepAccumUnit):
             period1Calc.append(True)
             if avgPop == 0:
                 avgPop = periodStats[0][7]
@@ -1002,7 +1016,7 @@ def calculate_day_text(
     # If the current period is 3/4 the way through the second period then exclude it.
     if currPeriodNum < 2.75 and period2:
         # Check if there is enough precipitation to trigger the precipitation icon
-        if (periodStats[1][8] * prepAccumUnit) > (0.02 * prepAccumUnit):
+        if (periodStats[1][8] * prepAccumUnit) > (0.25 * prepAccumUnit):
             period2Calc.append(True)
             if avgPop == 0:
                 avgPop = periodStats[1][7]
@@ -1065,7 +1079,7 @@ def calculate_day_text(
     # If the current period is 3/4 the way through the third period then exclude it.
     if currPeriodNum < 3.75 and period3:
         # Check if there is enough precipitation to trigger the precipitation icon
-        if (periodStats[2][8] * prepAccumUnit) > (0.02 * prepAccumUnit):
+        if (periodStats[2][8] * prepAccumUnit) > (0.25 * prepAccumUnit):
             period3Calc.append(True)
             if avgPop == 0:
                 avgPop = periodStats[2][7]
@@ -1128,7 +1142,7 @@ def calculate_day_text(
 
     if period4:
         # Check if there is enough precipitation to trigger the precipitation icon
-        if (periodStats[3][8] * prepAccumUnit) > (0.02 * prepAccumUnit):
+        if (periodStats[3][8] * prepAccumUnit) > (0.25 * prepAccumUnit):
             period4Calc.append(True)
             if avgPop == 0:
                 avgPop = periodStats[3][7]
@@ -1191,7 +1205,7 @@ def calculate_day_text(
 
     if period5:
         # Check if there is enough precipitation to trigger the precipitation icon
-        if (periodStats[4][8] * prepAccumUnit) > (0.02 * prepAccumUnit):
+        if (periodStats[4][8] * prepAccumUnit) > (0.25 * prepAccumUnit):
             period5Calc.append(True)
             if avgPop == 0:
                 avgPop = periodStats[4][7]
@@ -1273,7 +1287,7 @@ def calculate_day_text(
         avgPop = 1
 
     # Only calculate the precipitation text if there is any possibility of precipitation > 0
-    if avgPop > 0 and totalPrep >= (0.01 * prepAccumUnit):
+    if avgPop > 0 and totalPrep >= (0.1 * prepAccumUnit):
         # Check if there is rain, snow and ice accumulation for the day
         if snowPrep > 0 and rainPrep > 0 and icePrep > 0:
             # If there is then used the mixed precipitation text and set the icon/type to sleet. Set the secondary condition to snow so the totals can be in the summary

@@ -64,7 +64,7 @@ def calculate_text(
     # If type is current precipitation probability should always be 1 otherwise if it exists in the hourObject use it otherwise use 1
     if type == "current":
         pop = 1
-    elif "precipProbability" in hourObject:
+    elif "precipProbability" in hourObject or  hourObject["precipProbability"] != -999:
         pop = hourObject["precipProbability"]
     else:
         pop = 1
@@ -100,7 +100,6 @@ def calculate_text(
         or vis == -999
         or cloudCover == -999
         or humidity == -999
-        or pop == -999
     ):
         if isDayTime:
             return "clear", "clear-day"
