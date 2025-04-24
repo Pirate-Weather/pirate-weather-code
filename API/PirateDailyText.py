@@ -953,9 +953,9 @@ def calculate_day_text(
     if currPeriodNum < 1.75 and period1:
         # Check if there is enough precipitation to trigger the precipitation icon
         if (
-            (periodStats[0][4] * prepAccumUnit) > (0.25 * prepAccumUnit)
-            or (periodStats[0][3] * prepAccumUnit) > (0.025 * prepAccumUnit)
-            or (periodStats[0][6] * prepAccumUnit) > (0.025 * prepAccumUnit)
+            periodStats[0][4] > (2.5 * prepAccumUnit)
+            or periodStats[0][3] > (0.25 * prepAccumUnit)
+            or periodStats[0][6] > (0.25 * prepAccumUnit)
         ):
             period1Calc.append(True)
             if avgPop == 0:
@@ -1021,9 +1021,9 @@ def calculate_day_text(
     if currPeriodNum < 2.75 and period2:
         # Check if there is enough precipitation to trigger the precipitation icon
         if (
-            (periodStats[1][4] * prepAccumUnit) > (0.25 * prepAccumUnit)
-            or (periodStats[1][3] * prepAccumUnit) > (0.025 * prepAccumUnit)
-            or (periodStats[1][6] * prepAccumUnit) > (0.025 * prepAccumUnit)
+            periodStats[1][4] > (2.5 * prepAccumUnit)
+            or periodStats[1][3] > (0.25 * prepAccumUnit)
+            or periodStats[1][6] > (0.25 * prepAccumUnit)
         ):
             period2Calc.append(True)
             if avgPop == 0:
@@ -1088,9 +1088,9 @@ def calculate_day_text(
     if currPeriodNum < 3.75 and period3:
         # Check if there is enough precipitation to trigger the precipitation icon
         if (
-            (periodStats[2][4] * prepAccumUnit) > (0.25 * prepAccumUnit)
-            or (periodStats[2][3] * prepAccumUnit) > (0.025 * prepAccumUnit)
-            or (periodStats[2][6] * prepAccumUnit) > (0.025 * prepAccumUnit)
+            periodStats[2][4] > (2.5 * prepAccumUnit)
+            or periodStats[2][3] > (0.25 * prepAccumUnit)
+            or periodStats[2][6] > (0.25 * prepAccumUnit)
         ):
             period3Calc.append(True)
             if avgPop == 0:
@@ -1155,9 +1155,9 @@ def calculate_day_text(
     if period4:
         # Check if there is enough precipitation to trigger the precipitation icon
         if (
-            (periodStats[3][4] * prepAccumUnit) > (0.25 * prepAccumUnit)
-            or (periodStats[3][3] * prepAccumUnit) > (0.025 * prepAccumUnit)
-            or (periodStats[3][6] * prepAccumUnit) > (0.025 * prepAccumUnit)
+            periodStats[3][4] > (2.5 * prepAccumUnit)
+            or periodStats[3][3] > (0.25 * prepAccumUnit)
+            or periodStats[3][6] > (0.25 * prepAccumUnit)
         ):
             period4Calc.append(True)
             if avgPop == 0:
@@ -1222,9 +1222,9 @@ def calculate_day_text(
     if period5:
         # Check if there is enough precipitation to trigger the precipitation icon
         if (
-            (periodStats[4][4] * prepAccumUnit) > (0.25 * prepAccumUnit)
-            or (periodStats[4][3] * prepAccumUnit) > (0.025 * prepAccumUnit)
-            or (periodStats[4][6] * prepAccumUnit) > (0.025 * prepAccumUnit)
+            periodStats[4][4] > (2.5 * prepAccumUnit)
+            or periodStats[4][3] > (0.25 * prepAccumUnit)
+            or periodStats[4][6] > (0.25 * prepAccumUnit)
         ):
             period5Calc.append(True)
             if avgPop == 0:
@@ -1833,20 +1833,18 @@ def calculate_day_text(
                     else:
                         # If there is any dry text then join with an and and show whichever one comes fist at the start
                         if dryText is not None:
-                            if (
-                                dry[0] == min(starts)
-                                or len(dry) == ((len(periods) + 1) - currPeriodNum)
-                                and len(cloudLevels) != len(periods)
+                            if dry[0] == min(starts) or (
+                                len(dry) == len(periods)
+                                and len(mostCommonLevels) != len(periods)
                             ):
                                 summary_text = ["sentence", ["and", dryText, cloudText]]
                             else:
                                 summary_text = ["sentence", ["and", cloudText, dryText]]
                         # If there is any humid text then join with an and and show whichever one comes fist at the start
                         elif humidText is not None:
-                            if (
-                                humid[0] == min(starts)
-                                or len(humid) == ((len(periods) + 1) - currPeriodNum)
-                                and len(cloudLevels) != len(periods)
+                            if humid[0] == min(starts) or (
+                                len(humid) == len(periods)
+                                and len(mostCommonLevels) != len(periods)
                             ):
                                 summary_text = [
                                     "sentence",
@@ -1861,10 +1859,8 @@ def calculate_day_text(
                             summary_text = ["sentence", cloudText]
                 # If there is wind text and visbility text then join with an and and show whichever one comes first at the start
                 elif visText is not None:
-                    if (
-                        vis[0] == min(starts)
-                        or len(vis) == ((len(periods) + 1) - currPeriodNum)
-                        and len(wind) != len(periods)
+                    if vis[0] == min(starts) or (
+                        len(vis) == len(periods) and len(wind) != len(periods)
                     ):
                         cIcon = "fog"
                         summary_text = ["sentence", ["and", visText, windText]]
@@ -1876,19 +1872,16 @@ def calculate_day_text(
                     cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
                     # If there is any dry text then join with an and and show whichever one comes fist at the start
                     if dryText is not None:
-                        if dry[0] == min(starts) or len(dry) == (
-                            (len(periods) + 1) - currPeriodNum
-                            and len(wind) != len(periods)
+                        if dry[0] == min(starts) or (
+                            len(dry) == len(periods) and len(wind) != len(periods)
                         ):
                             summary_text = ["sentence", ["and", dryText, windText]]
                         else:
                             summary_text = ["sentence", ["and", windText, dryText]]
                     # If there is any humid text then join with an and and show whichever one comes fist at the start
                     elif humidText is not None:
-                        if (
-                            humid[0] == min(starts)
-                            or len(humid) == ((len(periods) + 1) - currPeriodNum)
-                            and len(wind) != len(periods)
+                        if humid[0] == min(starts) or (
+                            len(humid) == len(periods) and len(wind) != len(periods)
                         ):
                             summary_text = ["sentence", ["and", humidText, windText]]
                         else:
@@ -1899,8 +1892,8 @@ def calculate_day_text(
             else:
                 # If there is any visibility text then join with an and and show whichever one comes fist at the start
                 if visText is not None:
-                    if vis[0] == min(starts) or len(vis) == (
-                        (len(periods) + 1) - currPeriodNum
+                    if vis[0] == min(starts) or (
+                        len(vis) == len(periods) and len(precip) != len(periods)
                     ):
                         cIcon = "fog"
                         summary_text = ["sentence", ["and", visText, precipText]]
@@ -1908,10 +1901,8 @@ def calculate_day_text(
                         summary_text = ["sentence", ["and", precipText, visText]]
                 # If there is any wind text then join with an and and show whichever one comes fist at the start
                 elif windText is not None:
-                    if (
-                        wind[0] == min(starts)
-                        or len(wind) == ((len(periods) + 1) - currPeriodNum)
-                        and len(precip) != len(periods)
+                    if wind[0] == min(starts) or (
+                        len(wind) == len(periods) and len(precip) != len(periods)
                     ):
                         cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
                         summary_text = ["sentence", ["and", windText, precipText]]
@@ -1920,10 +1911,8 @@ def calculate_day_text(
                 else:
                     # If there is any humid text then join with an and and show whichever one comes fist at the start
                     if humidText is not None:
-                        if (
-                            humid[0] == min(starts)
-                            or len(humid) == ((len(periods) + 1) - currPeriodNum)
-                            and len(precip) != len(periods)
+                        if humid[0] == min(starts) or (
+                            len(humid) == len(periods) and len(precip) != len(periods)
                         ):
                             summary_text = ["sentence", ["and", humidText, precipText]]
                         else:
