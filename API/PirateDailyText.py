@@ -346,7 +346,7 @@ def calculate_period_text(
         elif (
             typePeriods[0] == checkPeriod
             and (typePeriods[1] - typePeriods[0]) != 1
-            and typePeriods[1] == 2
+            and typePeriods[1] >= 2
         ):
             summary_text = [
                 "until-starting-again",
@@ -611,6 +611,9 @@ def calculate_day_text(
     if mode == "hour":
         currDate = datetime.datetime.fromtimestamp(hours[0]["time"], zone)
         currHour = int(currDate.strftime("%H"))
+        # If the first forecasted hour is midnight local change it to correct the summaries assuming the forecast is for the same day
+        if currHour == 0:
+            currHour = 23
     else:
         # Calculate the current hour/weekday from the first hour
         currDate = datetime.datetime.fromtimestamp(currTime, zone)
@@ -933,6 +936,10 @@ def calculate_day_text(
         sleetPrep += periodStats[4][6]
     # Calculate the total precipitaion
     totalPrep = rainPrep + snowPrep + sleetPrep
+
+    # If we have two today-night in the periods change the last one to tomorrow-night to prevent weird summaries
+    if "today-night" in periods[0] and "today-night" in periods[len(periods) - 1]:
+        periods[len(periods) - 1] = "tomorrow-night"
 
     # If we are in day mode calculate the current period number to exclude parts of the day from being calculated
     if mode == "day":
