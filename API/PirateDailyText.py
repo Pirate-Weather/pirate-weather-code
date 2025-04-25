@@ -586,7 +586,7 @@ def calculate_day_text(
     """
 
     # If we don't have 24 hours of data bail as we need 24 hours to calculate the text
-    if len(hours) != 24:
+    if len(hours) > 24:
         return "clear-day", ["for-day", "clear"]
 
     # Variables to calculate the periods from the hours array
