@@ -1676,10 +1676,22 @@ def calculate_day_text(
         else:
             # If there is wind during the last period then join the wind with the cloud text
             if period4Calc[1] is not None:
-                cIcon = "wind"
+                cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
                 summary_text = [
                     "sentence",
                     ["during", ["and", period4Calc[1], period4Calc[3]], "night"],
+                ]
+            # If there is low humidity during the last period then join it with the cloud text
+            elif period4Calc[4] is not None:
+                summary_text = [
+                    "sentence",
+                    ["during", ["and", period4Calc[3], period4Calc[4]], "night"],
+                ]
+            # If there is high humidity during the last period then join it with the cloud text
+            elif period4Calc[5] is not None:
+                summary_text = [
+                    "sentence",
+                    ["during", ["and", period4Calc[3], period4Calc[5]], "night"],
                 ]
             # Otherwise just show the cloud text
             else:
