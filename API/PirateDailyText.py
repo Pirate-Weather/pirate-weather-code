@@ -929,13 +929,14 @@ def calculate_day_text(
     period3Calc = []
     period4Calc = []
     period5Calc = []
-    snowLowAccum = snowMaxAccum = snowError = avgPop = maxWind = numItems = rainPrep = snowPrep = icePrep = 0
+    snowLowAccum = snowMaxAccum = snowError = avgPop = maxWind = numItems = rainPrep = (
+        snowPrep
+    ) = icePrep = 0
     starts = []
     period1Level = period2Level = period3Level = period4Level = avgCloud = -1
     secondary = snowText = snowSentence = None
 
     # If we are in day mode calculate the current period number to exclude parts of the day from being calculated
-    currPeriodNum = 1
     checkPeriod = 0
 
     # If period1 has any data
