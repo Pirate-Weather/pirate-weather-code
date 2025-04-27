@@ -194,7 +194,7 @@ def calculate_period_text(
                 periodText,
                 periods[
                     len(periods) - 1
-                    if typePeriods[1] + 1 > len(typePeriods) - 1
+                    if typePeriods[1] + 1 > len(periods) - 1
                     else typePeriods[1] + 1
                 ],
             ]
@@ -206,7 +206,7 @@ def calculate_period_text(
                 periods[typePeriods[0]],
                 periods[
                     len(periods) - 1
-                    if typePeriods[1] + 1 > len(typePeriods) - 1
+                    if typePeriods[1] + 1 > len(periods) - 1
                     else typePeriods[1] + 1
                 ],
             ]
@@ -229,6 +229,13 @@ def calculate_period_text(
                 periodText,
                 ["and", periods[typePeriods[0]], periods[typePeriods[1]]],
             ]
+        # If the first period has the later text and the summary is until change it to starting
+        if (
+            "later" in periods[0]
+            and "until" in summary_text
+            and "starting" not in summary_text
+        ):
+            summary_text = ["starting", periodText, periods[typePeriods[0]]]
     # If the type occurs during three perionds
     elif len(typePeriods) == 3:
         # If the type is precipitation/cloud cover then check the wind if the wind is occuring in three periods
@@ -312,7 +319,7 @@ def calculate_period_text(
                 periodText,
                 periods[
                     len(periods) - 1
-                    if typePeriods[2] + 1 > len(typePeriods) - 1
+                    if typePeriods[2] + 1 > len(periods) - 1
                     else typePeriods[2] + 1
                 ],
             ]
@@ -367,10 +374,17 @@ def calculate_period_text(
                 periods[typePeriods[0]],
                 periods[
                     len(periods) - 1
-                    if typePeriods[2] + 1 > len(typePeriods) - 1
+                    if typePeriods[2] + 1 > len(periods) - 1
                     else typePeriods[2] + 1
                 ],
             ]
+        # If the first period has the later text and the summary is until change it to starting
+        if (
+            "later" in periods[0]
+            and "until" in summary_text
+            and "starting" not in summary_text
+        ):
+            summary_text = ["starting", periodText, periods[typePeriods[0]]]
     # If the type occurs during four perionds and we have five periods
     elif len(typePeriods) == 4 and len(periods) == 5:
         # If the type is precipitation/cloud cover then check the wind if the wind is occuring in four periods
@@ -481,6 +495,13 @@ def calculate_period_text(
                 periods[typePeriods[2] + 1],
                 periods[typePeriods[3]],
             ]
+        # If the first period has the later text and the summary is until change it to starting
+        if (
+            "later" in periods[0]
+            and "until" in summary_text
+            and "starting" not in summary_text
+        ):
+            summary_text = ["starting", periodText, periods[typePeriods[0]]]
     # If the type occurs all day then use the for-day text and we have four periods
     elif len(typePeriods) == 4 and len(periods) == 4:
         # If they both occur at the same time and the type is precip/cloud then join with an and. Set windPrecip to true to skip checking the wind
@@ -1911,18 +1932,26 @@ def calculate_day_text(
             else:
                 # If there is any visibility text then join with an and and show whichever one comes fist at the start
                 if visText is not None:
-                    if vis[0] == min(starts) or (
-                        len(vis) == len(periods) and len(precip) != len(periods)
-                    ):
+                    if (
+                        vis[0] == min(starts)
+                        and (
+                            precip[0] != min(starts)
+                            or (totalPrep * len(precip)) < 0.25 * prepAccumUnit
+                        )
+                    ) or (len(vis) == len(periods) and len(precip) != len(periods)):
                         cIcon = "fog"
                         summary_text = ["sentence", ["and", visText, precipText]]
                     else:
                         summary_text = ["sentence", ["and", precipText, visText]]
                 # If there is any wind text then join with an and and show whichever one comes fist at the start
                 elif windText is not None:
-                    if wind[0] == min(starts) or (
-                        len(wind) == len(periods) and len(precip) != len(periods)
-                    ):
+                    if (
+                        wind[0] == min(starts)
+                        and (
+                            precip[0] != min(starts)
+                            or (totalPrep * len(precip)) < 0.25 * prepAccumUnit
+                        )
+                    ) or (len(wind) == len(periods) and len(precip) != len(periods)):
                         cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
                         summary_text = ["sentence", ["and", windText, precipText]]
                     else:
