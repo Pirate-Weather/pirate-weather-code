@@ -1969,7 +1969,7 @@ def calculate_day_text(
                         summary_text = ["sentence", precipText]
 
     # If there is no icon then calculate it based on the average cloud cover for the periods if we don't have any precipitation
-    if cIcon is None:type == "precip" or type == "cloud"
+    if cIcon is None:
         if precipIcon is not None:
             cIcon = precipIcon
         else:
