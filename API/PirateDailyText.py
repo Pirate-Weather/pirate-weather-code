@@ -239,7 +239,7 @@ def calculate_period_text(
     # If the type occurs during three perionds
     elif len(typePeriods) == 3:
         # If the type is precipitation/cloud cover then check the wind if the wind is occuring in three periods
-        if len(wind) == 3 and (type == "precip" and type == "cloud"):
+        if len(wind) == 3 and (type == "precip" or type == "cloud"):
             # If they both occur at the same time then join with an and. Set windPrecip to true to skip checking the wind
             if (
                 wind[0] == typePeriods[0]
@@ -388,7 +388,7 @@ def calculate_period_text(
     # If the type occurs during four perionds and we have five periods
     elif len(typePeriods) == 4 and len(periods) == 5:
         # If the type is precipitation/cloud cover then check the wind if the wind is occuring in four periods
-        if len(wind) == 4 and (type == "precip" and type == "cloud"):
+        if len(wind) == 4 and (type == "precip" or type == "cloud"):
             # If they both occur at the same time then join with an and. Set windPrecip to true to skip checking the wind
             if (
                 wind[0] == typePeriods[0]
@@ -1969,7 +1969,7 @@ def calculate_day_text(
                         summary_text = ["sentence", precipText]
 
     # If there is no icon then calculate it based on the average cloud cover for the periods if we don't have any precipitation
-    if cIcon is None:
+    if cIcon is None:type == "precip" or type == "cloud"
         if precipIcon is not None:
             cIcon = precipIcon
         else:
