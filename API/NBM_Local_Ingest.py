@@ -764,7 +764,13 @@ for i in range(hisPeriod, -1, -1):
     # Save merged and processed xarray dataset to disk using zarr
     # Save as Zarr to s3 for Time Machine
     if saveType == "S3":
-        zarrStore = s3fs.S3Map(root=s3_path, s3=s3, create=True)
+        zarrStore = zarr.storage.FsspecStore.from_url(
+            s3_path,
+            storage_options={
+                "key": aws_access_key_id,
+                "secret": aws_secret_access_key,
+            },
+        )
     else:
         # Create local Zarr store
         zarrStore = zarr.storage.LocalStore(local_path)
