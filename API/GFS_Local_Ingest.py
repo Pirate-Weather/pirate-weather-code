@@ -492,7 +492,7 @@ for i in range(hisPeriod, 0, -6):
     if saveType == "S3":
         s3_path = (
             historic_path
-            + "/GFS_Hist"
+            + "/GFS_Hist_v2"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -505,7 +505,7 @@ for i in range(hisPeriod, 0, -6):
         # Local Path Setup
         local_path = (
             historic_path
-            + "/GFS_Hist"
+            + "/GFS_Hist_v2"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -752,7 +752,7 @@ for i in range(hisPeriod, 0, -6):
 # Get the s3 paths to the historic data
 ncLocalWorking_paths = [
     historic_path
-    + "/GFS_Hist"
+    + "/GFS_Hist_v2"
     + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
     + ".zarr"
     for i in range(hisPeriod, 1, -6)
@@ -897,10 +897,10 @@ if saveType == "S3":
 
 if saveType == "S3":
     zarr_store_maps = zarr.storage.ZipStore(
-        forecast_process_dir + "/GFS_maps.zarr.zip", mode="a"
+        forecast_process_dir + "/GFS_Maps.zarr.zip", mode="a"
     )
 else:
-    zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/GFS_maps.zarr")
+    zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/GFS_Maps.zarr")
 
 for z in [0, 4, 8, 9, 10, 11, 12, 13, 14, 15, 21]:
     # Create a zarr backed dask array
@@ -933,8 +933,8 @@ if saveType == "S3":
     # Upload to S3
     s3.put_file(forecast_process_dir + "/GFS.zarr.zip", forecast_path + "/GFS.zarr.zip")
     s3.put_file(
-        forecast_process_dir + "/GFS_maps.zarr.zip",
-        forecast_path + "/GFS_maps.zarr.zip",
+        forecast_process_dir + "/GFS_Maps.zarr.zip",
+        forecast_path + "/GFS_Maps.zarr.zip",
     )
 
     # Write most recent forecast time
@@ -966,8 +966,8 @@ else:
 
     # Copy the zarr file to the final location
     shutil.copytree(
-        forecast_process_dir + "/GFS_maps.zarr",
-        forecast_path + "/GFS_maps.zarr",
+        forecast_process_dir + "/GFS_Maps.zarr",
+        forecast_path + "/GFS_Maps.zarr",
         dirs_exist_ok=True,
     )
 # Clean up
