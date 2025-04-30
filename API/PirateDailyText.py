@@ -488,7 +488,7 @@ def calculate_period_text(
                         if typePeriods[2] + 1 > len(periods) - 1
                         else typePeriods[2] + 1
                     ],
-                ]
+                ],
             ]
     # If the type occurs during four perionds and we have five periods
     elif len(typePeriods) == 4 and len(periods) == 5:
