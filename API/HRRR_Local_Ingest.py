@@ -307,12 +307,12 @@ for i in range(hisPeriod, -1, -1):
         if s3.exists(s3_path):
             # Check that all the data is there and that the data is the right shape
             zarrCheckStore = zarr.storage.FsspecStore.from_url(
-                    s3_path,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                    )
+                s3_path,
+                storage_options={
+                    "key": aws_access_key_id,
+                    "secret": aws_secret_access_key,
+                },
+            )
 
             zarrCheck = zarr.open(zarrCheckStore, "r")
 
