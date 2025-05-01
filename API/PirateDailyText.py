@@ -629,17 +629,13 @@ def calculate_day_text(
 
     # Get the current time zone from the function parameters or use the first hours time field as the current time
     zone = tz.gettz(timeZone)
+    currDate = datetime.datetime.fromtimestamp(hours[0]["time"], zone)
+    currHour = int(currDate.strftime("%H"))
     if mode == "hour":
-        currDate = datetime.datetime.fromtimestamp(hours[0]["time"], zone)
-        currHour = int(currDate.strftime("%H"))
+        today = "today-"
         # If the first forecasted hour is midnight local change it to correct the summaries assuming the forecast is for the same day
         if currHour == 0:
             currHour = 23
-    else:
-        # Calculate the current hour/weekday from the first hour
-        currDate = datetime.datetime.fromtimestamp(currTime, zone)
-        currHour = int(currDate.strftime("%H"))
-
     # Time periods are as follows:
     # morning 4:00 to 12:00
     # afternoon 12:00 to 17:00
@@ -658,10 +654,6 @@ def calculate_day_text(
 
     # Set the hour period to the current period
     hourPeriod = currPeriod
-
-    # For the hour block summaries add the today text
-    if mode == "hour":
-        today = "today-"
 
     # Loop through the hours to calculate the conditions for each period
     for idx, hour in enumerate(hours):
@@ -770,7 +762,7 @@ def calculate_day_text(
             period5.append(hour)
 
         # If the period changed and the index is 6 or below or we are at the end of the loop
-        if (periodIncrease and periodIndex <= 6) or (idx == 23 and periodIndex <= 6):
+        if (periodIncrease and periodIndex <= 6) or (idx == len(hours) - 1 and periodIndex <= 6):
             # Calculate the average cloud cover and pop for the period and calculate the length of the period
             if periodIndex - 1 == 1:
                 cloudCover = cloudCover / len(period1)
@@ -789,10 +781,14 @@ def calculate_day_text(
                 length = len(period5)
 
             # If we are at the end of the loop increase the index and calculate the length of the last period
-            if idx == 23 and not periodIncrease:
+            if idx == len(hours) - 1 and not periodIncrease:
                 periodIndex += 1
                 if periodIndex == 5:
                     length = len(period4)
+                elif periodIndex == 3:
+                    length = len(period2)
+                elif periodIndex == 4:
+                    length = len(period3)
                 else:
                     length = len(period5)
 
