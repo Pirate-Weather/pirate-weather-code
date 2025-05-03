@@ -1032,7 +1032,7 @@ def calculate_day_text(
             # Reset the varaibles back to zero
             numHoursFog = numHoursWind = numHoursDry = numHoursHumid = rainPrep = (
                 snowPrep
-            ) = sleetPrep = snowError = cloudCover = pop = maxWind = 0
+            ) = sleetPrep = snowError = cloudCover = 0
             periodIncrease = False
 
             # Calculate the next period text
