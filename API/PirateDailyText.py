@@ -234,9 +234,12 @@ def calculate_period_text(
             "later" in periods[0]
             and "until" in summary_text
             and "starting" not in summary_text
+            and type in later
+        ) or (
+            "later" in periods[0]
+            and "until-starting-again" in summary_text
+            and type in later
         ):
-            summary_text = ["starting", periodText, periods[typePeriods[0]]]
-        if "later" in periods[0] and "until-starting-again" in summary_text:
             summary_text = [
                 "and",
                 [
@@ -397,7 +400,7 @@ def calculate_period_text(
             "later" in periods[0]
             and "until" in summary_text
             and "starting" not in summary_text
-            and (later and type in later)
+            and type in later
         ):
             summary_text = ["starting", periodText, periods[typePeriods[0]]]
         # If the first period has the later text and the summary is until starting again change it to be during and add the second period
@@ -406,6 +409,7 @@ def calculate_period_text(
             and "until-starting-again" in summary_text
             and (typePeriods[1] - typePeriods[0]) == 1
             and typePeriods[2] >= 3
+            and type in later
         ):
             summary_text = [
                 "and",
@@ -561,7 +565,7 @@ def calculate_period_text(
             "later" in periods[0]
             and "until" in summary_text
             and "starting" not in summary_text
-            and (later and type in later)
+            and type in later
         ):
             summary_text = ["starting", periodText, periods[typePeriods[0]]]
         # If the first period has the later text and the summary is until starting again change it to be during and add the second period
@@ -571,6 +575,7 @@ def calculate_period_text(
             and (typePeriods[2] - typePeriods[1]) == 1
             and (typePeriods[3] - typePeriods[2]) == 1
             and typePeriods[3] == 4
+            and type in later
         ):
             summary_text = [
                 "and",
@@ -591,6 +596,7 @@ def calculate_period_text(
             and "until-starting-again" in summary_text
             and (typePeriods[3] - typePeriods[2]) != 1
             and typePeriods[3] == 4
+            and type in later
         ):
             summary_text = [
                 "and",
@@ -680,7 +686,7 @@ def calculate_period_text(
             ]
 
         # If the first period has the later text use the starting text instead of for day text
-        if "later" in periods[0] and (later and type in later):
+        if "later" in periods[0] and type in later:
             summary_text = ["starting", periodText, periods[typePeriods[0]]]
         else:
             summary_text = ["for-day", periodText]
