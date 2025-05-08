@@ -1099,7 +1099,9 @@ def calculate_day_text(
     period5Calc = []
     snowLowAccum = snowMaxAccum = snowError = avgPop = maxWind = numItems = 0
     starts = []
-    period1Level = period2Level = period3Level = period4Level = period5Level = avgCloud = -1
+    period1Level = period2Level = period3Level = period4Level = period5Level = (
+        avgCloud
+    ) = -1
     secondary = snowText = snowSentence = None
     # Calculate the total ice precipitation
     icePrep = (
