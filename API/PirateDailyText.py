@@ -593,6 +593,20 @@ def calculate_period_text(
                 periods[typePeriods[0] + 1],
                 periods[typePeriods[1]],
             ]
+        # If the type occurs in the first period but starts again after the first period
+        elif (
+            typePeriods[0] == checkPeriod
+            and (typePeriods[1] - typePeriods[0]) == 1
+            and (typePeriods[2] - typePeriods[1]) != 1
+            and (typePeriods[3] - typePeriods[2]) == 1
+            and typePeriods[3] == 4
+        ):
+            summary_text = [
+                "until-starting-again",
+                periodText,
+                periods[typePeriods[1] + 1],
+                periods[typePeriods[2]],
+            ]
         # If the type in the first period but doesn't continue to the end and the last period isn't connected to the others
         elif (
             typePeriods[0] == checkPeriod
@@ -832,26 +846,6 @@ def calculate_day_text(
         hourDate = datetime.datetime.fromtimestamp(hour["time"], zone)
         hourHour = int(hourDate.strftime("%H"))
 
-        # Since the summaries are calculated from 4am to 4am add 24 hours to hours 0 to 3 so its seen as the current day
-        if 0 <= hourHour < 4:
-            hourHour = hourHour + 24
-        # If we are at hour 12 and the first period has data increase the period index and set the increase flag to true
-        if hourHour == 12 and period1:
-            periodIndex = periodIndex + 1
-            periodIncrease = True
-        # If we are at hour 17 and the first period has data increase the period index and set the increase flag to true
-        if hourHour == 17 and period1:
-            periodIndex = periodIndex + 1
-            periodIncrease = True
-        # If we are at hour 22 and the first period has data increase the period index and set the increase flag to true
-        if hourHour == 22 and period1:
-            periodIndex = periodIndex + 1
-            periodIncrease = True
-        # If we are at hour 12 and the first period has data increase the period index and set the increase flag to true
-        if hourHour == 4 and period1:
-            periodIndex = periodIndex + 1
-            periodIncrease = True
-
         # If the current hour has any precipitation calculate the rain, snow and sleet precipitation
         if hour["precipType"] == "rain" or hour["precipType"] == "none":
             rainPrep = rainPrep + hour["precipAccumulation"]
@@ -932,8 +926,36 @@ def calculate_day_text(
         elif periodIndex == 5:
             period5.append(hour)
 
+        # Since the summaries are calculated from 4am to 4am add 24 hours to hours 0 to 3 so its seen as the current day
+        if 0 <= hourHour < 4:
+            hourHour = hourHour + 24
+        # If we are at hour 12 and the first period has data increase the period index and set the increase flag to true
+        if hourHour == 11 and period1:
+            periodIndex = periodIndex + 1
+            periodIncrease = True
+        # If we are at hour 17 and the first period has data increase the period index and set the increase flag to true
+        if hourHour == 16 and period1:
+            periodIndex = periodIndex + 1
+            periodIncrease = True
+        # If we are at hour 22 and the first period has data increase the period index and set the increase flag to true
+        if hourHour == 21 and period1:
+            periodIndex = periodIndex + 1
+            periodIncrease = True
+        # If we are at hour 12 and the first period has data increase the period index and set the increase flag to true
+        if hourHour == 27 and period1:
+            periodIndex = periodIndex + 1
+            periodIncrease = True
+
         # If the period changed and the index is 6 or below or we are at the end of the loop
         if (periodIncrease and periodIndex <= 6) or (idx == 23 and periodIndex <= 6):
+            # If we are at the end of the loop increase the index and calculate the length of the last period
+            if idx == 23 and not periodIncrease:
+                periodIndex += 1
+                if periodIndex == 5:
+                    length = len(period4)
+                else:
+                    length = len(period5)
+
             # Calculate the average cloud cover and pop for the period and calculate the length of the period
             if periodIndex - 1 == 1:
                 cloudCover = cloudCover / len(period1)
@@ -950,14 +972,6 @@ def calculate_day_text(
             elif periodIndex - 1 == 5:
                 cloudCover = cloudCover / len(period5)
                 length = len(period5)
-
-            # If we are at the end of the loop increase the index and calculate the length of the last period
-            if idx == 23 and not periodIncrease:
-                periodIndex += 1
-                if periodIndex == 5:
-                    length = len(period4)
-                else:
-                    length = len(period5)
 
             # Add the data to an array of period arrays to use to calculate the summaries
             periodStats[periodIndex - 2].append(numHoursFog)
@@ -985,7 +999,7 @@ def calculate_day_text(
             hourPeriod = nextPeriod(hourPeriod)
 
             # If we are in hourly mode and hit hour 4 use tomorrow as the text unless we are in hours 0, 1, 2 or 3
-            if hourHour == 4 and period1 and mode == "hour" and currHour > 3:
+            if hourHour == 23 and period1 and mode == "hour" and currHour > 3:
                 today = "tomorrow-"
 
     # If the second to last value in hour array is an increase hour we will have data in the fifth period but no stats so calculate them
@@ -1598,6 +1612,10 @@ def calculate_day_text(
     # if secondary is medium none change it to medium-precipitaiton to avoid errors
     if secondary == "medium-none":
         secondary = "medium-precipitation"
+
+    # Convert snow error from mm to cm
+    if prepAccumUnit == 0.1:
+        snowError = snowError / 10
 
     # If we have only snow or if snow is the secondary condition then calculate the accumulation range
     if snowPrep > (10 * prepAccumUnit) or secondary == "medium-snow":
