@@ -395,6 +395,51 @@ def calculate_period_text(
                     else typePeriods[2] + 1
                 ],
             ]
+        # If the type starts after the first period and the last two periods are connected
+        elif (
+            typePeriods[0] > checkPeriod
+            and (typePeriods[1] - typePeriods[0]) != 1
+            and (typePeriods[2] - typePeriods[1]) == 1
+            and len(periods) == 5
+        ):
+            summary_text = [
+                "and",
+                [
+                    "during",
+                    periodText,
+                    periods[typePeriods[0]],
+                ],
+                [
+                    "starting",
+                    periodText,
+                    periods[typePeriods[1]],
+                ],
+            ]
+        # If the type starts after the first period and the last two periods are connected
+        elif (
+            typePeriods[0] > checkPeriod
+            and (typePeriods[1] - typePeriods[0]) == 1
+            and (typePeriods[2] - typePeriods[1]) != 1
+            and len(periods) == 5
+        ):
+            summary_text = [
+                "and",
+                [
+                    "starting-continuing-until",
+                    periodText,
+                    periods[typePeriods[0]],
+                    periods[
+                        len(periods) - 1
+                        if typePeriods[1] + 1 > len(periods) - 1
+                        else typePeriods[1] + 1
+                    ],
+                ],
+                [
+                    "during",
+                    periodText,
+                    periods[typePeriods[2]],
+                ],
+            ]
         # If the first period has the later text and the summary is until change it to starting
         if (
             "later" in periods[0]
@@ -1054,7 +1099,7 @@ def calculate_day_text(
     period5Calc = []
     snowLowAccum = snowMaxAccum = snowError = avgPop = maxWind = numItems = 0
     starts = []
-    period1Level = period2Level = period3Level = period4Level = avgCloud = -1
+    period1Level = period2Level = period3Level = period4Level = period5Level = avgCloud = -1
     secondary = snowText = snowSentence = None
     # Calculate the total ice precipitation
     icePrep = (
@@ -1399,7 +1444,7 @@ def calculate_day_text(
         period5Calc.append(periodStats[4][9])
         avgCloud += periodStats[4][9]
         # Calculate the periods cloud text and level and add it to the cloud levels array
-        period3Text, period5Level = calculate_cloud_text(periodStats[4][9])
+        period5Text, period5Level = calculate_cloud_text(periodStats[4][9])
         cloudLevels.append(period3Level)
         # Calculate the dry text
         if periodStats[4][1] >= (min(periodStats[4][11] / 2, 3)):
@@ -1633,6 +1678,8 @@ def calculate_day_text(
         mostCommonLevels.append(2)
     if period4Level == mostCommonCloud:
         mostCommonLevels.append(3)
+    if period5Level == mostCommonCloud:
+        mostCommonLevels.append(4)
 
     # Determine the average cloud for the icon
     avgCloud = avgCloud / len(cloudLevels)
@@ -1677,6 +1724,11 @@ def calculate_day_text(
             cloudLevels[0] = cloudLevels[3]
             mostCommonLevels.pop()
             mostCommonLevels.append(3)
+        # If the fifth period has the maxiumum cloud level then use that period
+        elif period5Level == maxCloudLevel:
+            cloudLevels[0] = cloudLevels[4]
+            mostCommonLevels.pop()
+            mostCommonLevels.append(4)
 
     maxWind = max(winds)
     cloudConvertedText = None
