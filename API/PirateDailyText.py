@@ -999,7 +999,7 @@ def calculate_day_text(
             hourPeriod = nextPeriod(hourPeriod)
 
             # If we are in hourly mode and hit hour 4 use tomorrow as the text unless we are in hours 0, 1, 2 or 3
-            if hourHour == 23 and period1 and mode == "hour" and currHour > 3:
+            if hourHour == 27 and period1 and mode == "hour" and currHour > 3:
                 today = "tomorrow-"
 
     # If the second to last value in hour array is an increase hour we will have data in the fifth period but no stats so calculate them
