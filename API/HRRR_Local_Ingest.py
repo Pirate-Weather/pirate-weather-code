@@ -289,7 +289,7 @@ for i in range(hisPeriod, -1, -1):
     # format the time following iso8601
     s3_path = (
         historic_path
-        + "/HRRRH_Hist"
+        + "/HRRRH_Hist_v2"
         + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
         + ".zarr"
     )
@@ -299,14 +299,22 @@ for i in range(hisPeriod, -1, -1):
         # Create the S3 filesystem
         s3_path = (
             historic_path
-            + "/HRRRH_Hist"
+            + "/HRRRH_Hist_v2"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
 
         if s3.exists(s3_path):
             # Check that all the data is there and that the data is the right shape
-            zarrCheck = zarr.open(s3fs.S3Map(root=s3_path, s3=s3, create=True), "r")
+            zarrCheckStore = zarr.storage.FsspecStore.from_url(
+                s3_path,
+                storage_options={
+                    "key": aws_access_key_id,
+                    "secret": aws_secret_access_key,
+                },
+            )
+
+            zarrCheck = zarr.open(zarrCheckStore, "r")
 
             # # Try to open the zarr file to check if it has already been saved
             if (len(zarrCheck) - 4) == len(
@@ -321,7 +329,7 @@ for i in range(hisPeriod, -1, -1):
         # Local Path Setup
         local_path = (
             historic_path
-            + "/HRRRH_Hist"
+            + "/HRRRH_Hist_v2"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -412,7 +420,13 @@ for i in range(hisPeriod, -1, -1):
     # Save the dataset with compression and filters for all variables
     # Save as Zarr to s3 for Time Machine
     if saveType == "S3":
-        zarrStore = s3fs.S3Map(root=s3_path, s3=s3, create=True)
+        zarrStore = zarr.storage.FsspecStore.from_url(
+            s3_path,
+            storage_options={
+                "key": aws_access_key_id,
+                "secret": aws_secret_access_key,
+            },
+        )
     else:
         # Create local Zarr store
         zarrStore = zarr.storage.LocalStore(local_path)
@@ -433,7 +447,7 @@ for i in range(hisPeriod, -1, -1):
 # Get the s3 paths to the historic data
 ncHistWorking_paths = [
     historic_path
-    + "/HRRRH_Hist"
+    + "/HRRRH_Hist_v2"
     + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
     + ".zarr"
     for i in range(hisPeriod, -1, -1)
