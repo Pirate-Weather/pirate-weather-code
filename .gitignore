@@ -1,10 +1,7 @@
-
 API/.idea/
-
 API/ZipBenchmark.py
-
 API/GFS_Dask_Ingest.py
-
 API/SubH_Local_Ingest_RemoteTest.py
-
 API/testDask.py
+*.pyc
+__pycache__

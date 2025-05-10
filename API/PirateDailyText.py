@@ -210,6 +210,21 @@ def calculate_period_text(
                     else typePeriods[1] + 1
                 ],
             ]
+        # If the type starts after the first period but doesn't continue to the end
+        elif (
+            typePeriods[0] > checkPeriod
+            and (typePeriods[1] - typePeriods[0]) == 1
+        ):
+            summary_text = [
+                "starting-continuing-until",
+                periodText,
+                periods[typePeriods[0]],
+                periods[
+                    len(periods) - 1
+                    if typePeriods[1] + 1 > len(periods) - 1
+                    else typePeriods[1] + 1
+                ],
+            ]
         # If the type occurs at the start but then starts again in the last period
         elif (
             typePeriods[0] == checkPeriod
@@ -796,7 +811,7 @@ def calculate_day_text(
     prepTypes = []
     mostCommonPrecip = []
     periodStats = [[], [], [], [], []]
-    currPeriod = None
+    currPeriod = todayPeriod = None
     numHoursFog = numHoursWind = numHoursDry = numHoursHumid = rainPrep = snowPrep = (
         sleetPrep
     ) = snowError = cloudCover = pop = maxIntensity = maxWind = length = 0
@@ -828,6 +843,16 @@ def calculate_day_text(
         currPeriod = "evening"
     else:
         currPeriod = "night"
+
+    # Calculate the period for the current hour to use in the later text checks
+    if 4 <= currHour - 1 < 12:
+        todayPeriod = "morning"
+    elif 12 <= currHour - 1 < 17:
+        todayPeriod = "afternoon"
+    elif 17 <= currHour - 1 < 22:
+        todayPeriod = "evening"
+    else:
+        todayPeriod = "night"
 
     # Set the hour period to the current period
     hourPeriod = currPeriod
@@ -875,11 +900,6 @@ def calculate_day_text(
 
         # Add the hour cloud cover to calculate the average
         cloudCover += hour["cloudCover"]
-        # Calculate the maximum pop for the period
-        if pop == 0:
-            pop = hour["precipProbability"]
-        elif hour["precipProbability"] > pop:
-            pop = hour["precipProbability"]
 
         # Calculate the maxiumum intensity for the period
         if maxIntensity == 0:
@@ -896,6 +916,11 @@ def calculate_day_text(
         # Add the percipitation type to an array to calculate the most common precipitation to use as a baseline
         if hour["precipIntensity"] > 0.02 * prepAccumUnit:
             mostCommonPrecip.append(hour["precipType"])
+            # Calculate the maximum pop for the period
+            if pop == 0:
+                pop = hour["precipProbability"]
+            elif hour["precipProbability"] > pop:
+                pop = hour["precipProbability"]
 
         # Add the percipitation type to an array of precipitation types if it doesn;t already exist
         if not prepTypes and hour["precipIntensity"] > 0.02 * prepAccumUnit:
@@ -967,13 +992,14 @@ def calculate_day_text(
 
             # If we are at the end of the loop increase the index and calculate the length of the last period
             if idx == len(hours) - 1 and not periodIncrease:
-                periodIndex += 1
-                if periodIndex == 5:
-                    length = len(period4)
+                if periodIndex == 2:
+                    length = len(period1)
                 elif periodIndex == 3:
                     length = len(period2)
                 elif periodIndex == 4:
                     length = len(period3)
+                elif periodIndex == 5:
+                    length = len(period4)
                 else:
                     length = len(period5)
 
@@ -1803,7 +1829,7 @@ def calculate_day_text(
     later = []
 
     # If we are in the current period
-    if starts and periods[min(starts)] == "today-" + currPeriod:
+    if starts and periods[min(starts)] == "today-" + todayPeriod:
         # If we have precipitation and it starts in the first block
         if precip and precip[0] == 0:
             # If the first hour has no precipitation add the later text
