@@ -71,7 +71,7 @@ def calculate_summary_text(
     # If the icon is not mixed precipitation change it to translations format
     if wIcon != "mixed-precipitation":
         wIcon, cIcon = calculate_precip_text(
-            avgIntensity,
+            maxIntensity,
             intensityUnit,
             wIcon,
             "week",
@@ -81,6 +81,7 @@ def calculate_summary_text(
             1,
             icon,
             "both",
+            avgIntensity,
         )
     else:
         cIcon = "sleet"

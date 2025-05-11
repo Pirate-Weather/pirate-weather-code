@@ -211,10 +211,7 @@ def calculate_period_text(
                 ],
             ]
         # If the type starts after the first period but doesn't continue to the end
-        elif (
-            typePeriods[0] > checkPeriod
-            and (typePeriods[1] - typePeriods[0]) == 1
-        ):
+        elif typePeriods[0] > checkPeriod and (typePeriods[1] - typePeriods[0]) == 1:
             summary_text = [
                 "starting-continuing-until",
                 periodText,
@@ -814,7 +811,9 @@ def calculate_day_text(
     currPeriod = todayPeriod = None
     numHoursFog = numHoursWind = numHoursDry = numHoursHumid = rainPrep = snowPrep = (
         sleetPrep
-    ) = snowError = cloudCover = pop = maxIntensity = maxWind = length = 0
+    ) = snowError = cloudCover = pop = maxIntensity = maxWind = length = precipHours = (
+        avgPrep
+    ) = 0
     periodIncrease = False
     periodIndex = 1
     today = ""
@@ -914,21 +913,20 @@ def calculate_day_text(
             maxWind = hour["windSpeed"]
 
         # Add the percipitation type to an array to calculate the most common precipitation to use as a baseline
-        if hour["precipIntensity"] > 0.02 * prepAccumUnit:
+        if hour["precipIntensity"] > 0:
             mostCommonPrecip.append(hour["precipType"])
             # Calculate the maximum pop for the period
             if pop == 0:
                 pop = hour["precipProbability"]
             elif hour["precipProbability"] > pop:
                 pop = hour["precipProbability"]
+            precipHours += 1
+            avgPrep += hour["precipIntensity"]
 
-        # Add the percipitation type to an array of precipitation types if it doesn;t already exist
-        if not prepTypes and hour["precipIntensity"] > 0.02 * prepAccumUnit:
+        # Add the percipitation type to an array of precipitation types if it doesn't already exist
+        if not prepTypes and hour["precipIntensity"] > 0:
             prepTypes.append(hour["precipType"])
-        elif (
-            hour["precipType"] not in prepTypes
-            and hour["precipIntensity"] > 0.02 * prepAccumUnit
-        ):
+        elif hour["precipType"] not in prepTypes and hour["precipIntensity"] > 0:
             prepTypes.append(hour["precipType"])
 
         # Add the hour to the period array depending on the index
@@ -1147,6 +1145,10 @@ def calculate_day_text(
 
     # If we are in day mode calculate the current period number to exclude parts of the day from being calculated
     checkPeriod = 0
+
+    # Calculate the average precipitation intensity for the periods
+    if precipHours > 0:
+        avgPrep = avgPrep / precipHours
 
     # If period1 has any data
     if period1:
@@ -1550,13 +1552,14 @@ def calculate_day_text(
                 maxIntensity,
                 prepAccumUnit,
                 precipType,
-                "hour",
+                "hourly",
                 rainPrep,
                 snowPrep,
                 icePrep,
                 avgPop,
                 icon,
                 "icon",
+                avgPrep,
             )
             secondary = "medium-snow"
         else:
@@ -1626,13 +1629,14 @@ def calculate_day_text(
                 maxIntensity,
                 prepAccumUnit,
                 precipType,
-                "hour",
+                "hourly",
                 rainPrep,
                 snowPrep,
                 icePrep,
                 avgPop,
                 icon,
                 "both",
+                avgPrep,
             )
 
     # if secondary is medium none change it to medium-precipitaiton to avoid errors
@@ -1818,13 +1822,14 @@ def calculate_day_text(
         hours[0]["precipIntensity"],
         prepAccumUnit,
         hours[0]["precipType"],
-        "hour",
+        "hourly",
         hours[0]["precipAccumulation"],
         hours[0]["precipAccumulation"],
         hours[0]["precipAccumulation"],
         hours[0]["precipProbability"],
         icon,
         "summary",
+        avgPrep,
     )
     later = []
 
