@@ -14,6 +14,6 @@ dask==2025.2.0
 xarray==2025.1.2
 pandas==2.2.3
 fastparquet==2024.11.0
-pirateweather-translations==1.0.0
+pirateweather-translations==1.0.1
 s3fs==2025.3.2
 aiobotocore[boto3]==2.22.0
