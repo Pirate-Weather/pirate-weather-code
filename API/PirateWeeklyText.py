@@ -506,7 +506,6 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
         if len(precipitationDays) == 0:
             precipSummary = ["no-precipitation"]
         cText = precipSummary
-            
 
     # If we somehow have a generic precipitation icon we use rain instead
     if cIcon == "precipitation":
