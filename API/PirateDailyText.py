@@ -927,7 +927,6 @@ def calculate_day_text(
         if not prepTypes and hour["precipIntensity"] > 0:
             prepTypes.append(hour["precipType"])
         elif hour["precipType"] not in prepTypes and hour["precipIntensity"] > 0:
-        elif hour["precipType"] not in prepTypes and hour["precipIntensity"] > 0:
             prepTypes.append(hour["precipType"])
 
         # Add the hour to the period array depending on the index

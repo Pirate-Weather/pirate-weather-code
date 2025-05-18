@@ -496,10 +496,17 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
         icon,
     )
 
-    tempSummary = calculate_temp_summary(highTemp, lowTemp, weekArr)
-
-    # Combine the two texts together using with
-    cText = ["with", precipSummary, tempSummary]
+    # Only calcaulte the temperature summary if we have eight days to prevent issues with the time machine
+    if len(weekArr) == 8:
+        tempSummary = calculate_temp_summary(highTemp, lowTemp, weekArr)
+        # Combine the two texts together using with
+        cText = ["with", precipSummary, tempSummary]
+    else:
+        # If there is no precipitation show the no precipitation text instead of no precipitation for the week.
+        if len(precipitationDays) == 0:
+            precipSummary = ["no-precipitation"]
+        cText = precipSummary
+            
 
     # If we somehow have a generic precipitation icon we use rain instead
     if cIcon == "precipitation":
