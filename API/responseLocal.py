@@ -3024,7 +3024,7 @@ async def PW_Forecast(
                 "pressure": InterPhour[idx, 9],
                 "windSpeed": InterPhour[idx, 10],
                 "windGust": InterPhour[idx, 11],
-                "windBearing": InterPhour[idx, 12],
+                "windBearing": int(InterPhour[idx, 12]),
                 "cloudCover": InterPhour[idx, 13],
                 "snowAccumulation": InterPhour[idx, 22],
             }
@@ -3048,7 +3048,7 @@ async def PW_Forecast(
                 "pressure": InterPhour[idx, 9],
                 "windSpeed": InterPhour[idx, 10],
                 "windGust": InterPhour[idx, 11],
-                "windBearing": InterPhour[idx, 12],
+                "windBearing": int(InterPhour[idx, 12]),
                 "cloudCover": InterPhour[idx, 13],
                 "uvIndex": InterPhour[idx, 14],
                 "visibility": InterPhour[idx, 15],
@@ -3058,7 +3058,7 @@ async def PW_Forecast(
                 "snowAccumulation": InterPhour[idx, 22],
                 "iceAccumulation": InterPhour[idx, 23],
                 "nearestStormDistance": InterPhour[idx, 18],
-                "nearestStormBearing": InterPhour[idx, 19],
+                "nearestStormBearing": int(InterPhour[idx, 19]),
                 "fireIndex": InterPhour[idx, 24],
                 "feelsLike": InterPhour[idx, 25],
             }
@@ -3082,7 +3082,7 @@ async def PW_Forecast(
                 "pressure": InterPhour[idx, 9],
                 "windSpeed": InterPhour[idx, 10],
                 "windGust": InterPhour[idx, 11],
-                "windBearing": InterPhour[idx, 12],
+                "windBearing": int(InterPhour[idx, 12]),
                 "cloudCover": InterPhour[idx, 13],
                 "uvIndex": InterPhour[idx, 14],
                 "visibility": InterPhour[idx, 15],
@@ -3347,7 +3347,7 @@ async def PW_Forecast(
                 "windSpeed": InterPday[idx, 10],
                 "windGust": InterPday[idx, 11],
                 "windGustTime": int(InterPdayMaxTime[idx, 11]),
-                "windBearing": InterPday[idx, 12],
+                "windBearing": int(InterPday[idx, 12]),
                 "cloudCover": InterPday[idx, 13],
                 "temperatureMin": InterPdayMin[idx, 5],
                 "temperatureMinTime": int(InterPdayMinTime[idx, 5]),
@@ -3395,7 +3395,7 @@ async def PW_Forecast(
                     "windSpeed": InterPday[idx, 10],
                     "windGust": InterPday[idx, 11],
                     "windGustTime": int(InterPdayMaxTime[idx, 11]),
-                    "windBearing": InterPday[idx, 12],
+                    "windBearing": int(InterPday[idx, 12]),
                     "cloudCover": InterPday[idx, 13],
                     "uvIndex": InterPdayMax[idx, 14],
                     "uvIndexTime": int(InterPdayMaxTime[idx, 14]),
@@ -3414,7 +3414,7 @@ async def PW_Forecast(
                     "snowAccumulation": InterPdaySum[idx, 22],
                     "iceAccumulation": InterPdaySum[idx, 23],
                     "fireIndexMax": InterPdayMax[idx, 24],
-                    "fireIndexMaxTime": InterPdayMaxTime[idx, 24],
+                    "fireIndexMaxTime": int(InterPdayMaxTime[idx, 24]),
                 }
             else:
                 dayObject = {
@@ -3449,7 +3449,7 @@ async def PW_Forecast(
                     "windSpeed": InterPday[idx, 10],
                     "windGust": InterPday[idx, 11],
                     "windGustTime": int(InterPdayMaxTime[idx, 11]),
-                    "windBearing": InterPday[idx, 12],
+                    "windBearing": int(InterPday[idx, 12]),
                     "cloudCover": InterPday[idx, 13],
                     "uvIndex": InterPdayMax[idx, 14],
                     "uvIndexTime": int(InterPdayMaxTime[idx, 14]),
@@ -3976,7 +3976,9 @@ async def PW_Forecast(
 
         if (not timeMachine) or (tmExtra):
             returnOBJ["currently"]["nearestStormDistance"] = InterPcurrent[16]
-            returnOBJ["currently"]["nearestStormBearing"] = InterPcurrent[17].round()
+            returnOBJ["currently"]["nearestStormBearing"] = int(
+                InterPcurrent[17].round()
+            )
         returnOBJ["currently"]["precipIntensity"] = minuteDict[0]["precipIntensity"]
 
         if (not timeMachine) or (tmExtra):
@@ -3996,7 +3998,9 @@ async def PW_Forecast(
         returnOBJ["currently"]["pressure"] = InterPcurrent[8]
         returnOBJ["currently"]["windSpeed"] = InterPcurrent[9]
         returnOBJ["currently"]["windGust"] = InterPcurrent[10]
-        returnOBJ["currently"]["windBearing"] = np.mod(InterPcurrent[11], 360).round()
+        returnOBJ["currently"]["windBearing"] = int(
+            np.mod(InterPcurrent[11], 360).round()
+        )
         returnOBJ["currently"]["cloudCover"] = InterPcurrent[12]
 
         if (not timeMachine) or (tmExtra):
@@ -4155,7 +4159,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.6.1e"
+        returnOBJ["flags"]["version"] = "V2.6.1f"
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
             returnOBJ["flags"]["processTime"] = (

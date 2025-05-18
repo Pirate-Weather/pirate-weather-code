@@ -913,7 +913,7 @@ def calculate_day_text(
             maxWind = hour["windSpeed"]
 
         # Add the percipitation type to an array to calculate the most common precipitation to use as a baseline
-        if hour["precipIntensity"] > 0:
+        if hour["precipIntensity"] > 0 or hour["precipAccumulation"] > 0:
             mostCommonPrecip.append(hour["precipType"])
             # Calculate the maximum pop for the period
             if pop == 0:
@@ -926,6 +926,7 @@ def calculate_day_text(
         # Add the percipitation type to an array of precipitation types if it doesn't already exist
         if not prepTypes and hour["precipIntensity"] > 0:
             prepTypes.append(hour["precipType"])
+        elif hour["precipType"] not in prepTypes and hour["precipIntensity"] > 0:
         elif hour["precipType"] not in prepTypes and hour["precipIntensity"] > 0:
             prepTypes.append(hour["precipType"])
 
@@ -1088,15 +1089,15 @@ def calculate_day_text(
             maxWind = period5[0]["windSpeed"]
 
         # Add the percipitation type to an array to calculate the most common precipitation to use as a baseline
-        if period5[0]["precipIntensity"] > 0.02 * prepAccumUnit:
+        if period5[0]["precipIntensity"] > 0 or period5[0]["precipAccumulation"] > 0:
             mostCommonPrecip.append(period5[0]["precipType"])
 
         # Add the percipitation type to an array of precipitation types if it doesn;t already exist
-        if not prepTypes and period5[0]["precipIntensity"] > 0.02 * prepAccumUnit:
+        if not prepTypes and period5[0]["precipIntensity"] > 0:
             prepTypes.append(period5[0]["precipType"])
         elif (
             period5[0]["precipType"] not in prepTypes
-            and period5[0]["precipIntensity"] > 0.02 * prepAccumUnit
+            and period5[0]["precipIntensity"] > 0
         ):
             prepTypes.append(period5[0]["precipType"])
 
@@ -1125,6 +1126,7 @@ def calculate_day_text(
     dry = []
     cloudLevels = []
     periods = []
+    precipType = "none"
     # If we have 5 periods append it to the list of periods
     summary_text = cIcon = snowSentence = prepText = dryText = humidText = (
         precipIcon
@@ -1134,7 +1136,7 @@ def calculate_day_text(
     period3Calc = []
     period4Calc = []
     period5Calc = []
-    snowLowAccum = snowMaxAccum = snowError = avgPop = maxWind = numItems = rainPrep = (
+    snowLowAccum = snowMaxAccum = snowError = avgPop = numItems = rainPrep = (
         snowPrep
     ) = icePrep = 0
     starts = []
@@ -1780,7 +1782,6 @@ def calculate_day_text(
             mostCommonLevels.pop()
             mostCommonLevels.append(4)
 
-    maxWind = max(winds)
     cloudConvertedText = None
     windPrecip = dryPrecip = humidPrecip = visPrecip = False
     cloudLevel = -1
