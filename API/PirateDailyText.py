@@ -1109,7 +1109,7 @@ def calculate_day_text(
     period3Calc = []
     period4Calc = []
     period5Calc = []
-    snowLowAccum = snowMaxAccum = snowError = avgPop = maxWind = numItems = 0
+    snowLowAccum = snowMaxAccum = snowError = avgPop = numItems = 0
     starts = []
     period1Level = period2Level = period3Level = period4Level = period5Level = (
         avgCloud
@@ -1748,7 +1748,6 @@ def calculate_day_text(
             mostCommonLevels.pop()
             mostCommonLevels.append(4)
 
-    maxWind = max(winds)
     cloudConvertedText = None
     windPrecip = dryPrecip = humidPrecip = visPrecip = False
     cloudLevel = -1
