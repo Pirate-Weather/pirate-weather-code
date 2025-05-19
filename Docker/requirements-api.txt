@@ -1,7 +1,7 @@
 astral==3.2
 timezonefinder==6.5.9
 pytz==2025.2
-zarr[remote]==3.0.7
+zarr[remote]==3.0.8
 ujson==5.10.0
 fastapi[standard]==0.115.12
 fastapi-utils==0.8.0
@@ -10,7 +10,7 @@ orjson==3.10.18
 psutil==5.9.0
 typing-inspect==0.9.0
 watchfiles==1.0.5
-dask==2025.4.1
+dask==2025.5.0
 xarray==2025.4.0
 pandas==2.2.3
 fastparquet==2024.11.0
