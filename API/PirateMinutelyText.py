@@ -116,6 +116,12 @@ def calculate_minutely_text(
 
     # Loop through the minute array
     for idx, minute in enumerate(minuteArr):
+        if minute["precipIntensity"] == -999 or minute["precipType"] == -999:
+            return [
+                "next-hour-forecast-status",
+                "temporarily-unavailable",
+                "station-offline",
+            ], "not-available"
         # If there is rain for the current minute in the array
         if minute["precipType"] == "rain" and minute["precipIntensity"] > 0:
             # Increase the minutes of precipitation, the precipitation unit and average intensity

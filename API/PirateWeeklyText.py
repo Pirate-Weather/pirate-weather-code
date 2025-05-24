@@ -496,8 +496,22 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
         icon,
     )
 
+    # If the none text exists in the precipitation summary then change it to not available and set the icon
+    if None in precipSummary:
+        if "fog" in icons:
+            cIcon = "fog"
+        elif "dangerous-wind" in icons:
+            cIcon = "dangerous-windy"
+        elif "wind" in icons:
+            cIcon = "wind"
+        elif "breezy" in icons:
+            cIcon = "breezy"
+        else:
+            cIcon = Most_Common(icons)
+        precipSummary = ["for-week", "unavailable"]
+
     # Only calcaulte the temperature summary if we have eight days to prevent issues with the time machine
-    if len(weekArr) == 8:
+    if len(weekArr) == 8 or highTemp == -999 or lowTemp == -999:
         tempSummary = calculate_temp_summary(highTemp, lowTemp, weekArr)
         # Combine the two texts together using with
         cText = ["with", precipSummary, tempSummary]

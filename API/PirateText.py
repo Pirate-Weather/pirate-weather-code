@@ -101,10 +101,7 @@ def calculate_text(
         or cloudCover == -999
         or humidity == -999
     ):
-        if isDayTime:
-            return "clear", "clear-day"
-        else:
-            return "clear", "clear-night"
+        return "unavailable", "not-available"
 
     # Calculate the text/icon for precipitation, wind, visibility, sky cover, humidity and thunderstorms
     precipText, precipIcon = calculate_precip_text(
