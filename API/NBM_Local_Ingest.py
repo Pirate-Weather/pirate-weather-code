@@ -113,7 +113,7 @@ s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 # Define the processing and history chunk size
 processChunk = 100
 
-# Define the final x/y chunksize
+# Define the final x/y chunk size
 finalChunk = 3
 
 hisPeriod = 36
