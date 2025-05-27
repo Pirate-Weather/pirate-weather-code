@@ -91,7 +91,9 @@ def getGribList(FH_forecastsub, matchStrings):
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
+wgrib2_path = os.getenv(
+    "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
+)
 
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/home/ubuntu/Weather/Process/NBM"
@@ -113,7 +115,7 @@ s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 # Define the processing and history chunk size
 processChunk = 100
 
-# Define the final x/y chunksize
+# Define the final x/y chunk size
 finalChunk = 3
 
 hisPeriod = 36
@@ -401,6 +403,7 @@ cmd = (
 )
 # Run wgrib2
 spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
 
 # Use wgrib2 to change the order
 cmd2 = (
@@ -701,20 +704,22 @@ for i in range(hisPeriod, -1, -1):
     # Only want forecast at hour 1- SLightly less accurate than initializing at hour 0 but much avoids precipitation accumulation issues
     fxx = range(1, 2)
 
+    print(DATES)
+
     # Create FastHerbie Object.
     FH_histsub = FastHerbie(
         DATES,
         model="nbm",
         fxx=fxx,
         product="co",
-        verbose=False,
+        verbose=True,
         priority=["aws"],
         save_dir=tmpDIR,
     )
 
     # Main Vars + Accum
     # Download the subsets
-    FH_histsub.download(matchStrings + "|" + matchstring_po, verbose=False)
+    FH_histsub.download(matchStrings + "|" + matchstring_po, verbose=True)
 
     # Use wgrib2 to change the order
     cmd1 = (
