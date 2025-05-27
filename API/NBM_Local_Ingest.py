@@ -115,7 +115,7 @@ s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 # Define the processing and history chunk size
 processChunk = 100
 
-# Define the final x/y chunksize
+# Define the final x/y chunk size
 finalChunk = 3
 
 hisPeriod = 36
@@ -703,6 +703,8 @@ for i in range(hisPeriod, -1, -1):
     # Create a range of forecast lead times
     # Only want forecast at hour 1- SLightly less accurate than initializing at hour 0 but much avoids precipitation accumulation issues
     fxx = range(1, 2)
+
+    print(DATES)
 
     # Create FastHerbie Object.
     FH_histsub = FastHerbie(
