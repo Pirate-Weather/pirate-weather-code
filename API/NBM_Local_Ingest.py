@@ -704,6 +704,8 @@ for i in range(hisPeriod, -1, -1):
     # Only want forecast at hour 1- SLightly less accurate than initializing at hour 0 but much avoids precipitation accumulation issues
     fxx = range(1, 2)
 
+    print(DATES)
+
     # Create FastHerbie Object.
     FH_histsub = FastHerbie(
         DATES,
