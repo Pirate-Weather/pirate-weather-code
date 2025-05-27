@@ -91,7 +91,7 @@ def getGribList(FH_forecastsub, matchStrings):
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
+wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 ")
 
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/home/ubuntu/Weather/Process/NBM"
@@ -402,6 +402,7 @@ cmd = (
 # Run wgrib2
 spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
+
 # Use wgrib2 to change the order
 cmd2 = (
     f"{wgrib2_path}"
@@ -707,14 +708,14 @@ for i in range(hisPeriod, -1, -1):
         model="nbm",
         fxx=fxx,
         product="co",
-        verbose=False,
+        verbose=True,
         priority=["aws"],
         save_dir=tmpDIR,
     )
 
     # Main Vars + Accum
     # Download the subsets
-    FH_histsub.download(matchStrings + "|" + matchstring_po, verbose=False)
+    FH_histsub.download(matchStrings + "|" + matchstring_po, verbose=True)
 
     # Use wgrib2 to change the order
     cmd1 = (
