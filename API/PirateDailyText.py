@@ -797,7 +797,7 @@ def calculate_day_text(
 
     # If we have more than 24 hours of data then bail
     if len(hours) > 24:
-        return "not-available", ["for-day", "unavailable"]
+        return "none", ["for-day", "unavailable"]
 
     # Variables to calculate the periods from the hours array
     period1 = []
@@ -866,7 +866,7 @@ def calculate_day_text(
             or hour["cloudCover"] == -999
             or hour["humidity"] == -999
         ):
-            return "not-available", ["for-day", "unavailable"]
+            return "none", ["for-day", "unavailable"]
         # Calculate the time and weekday for the current hour in the loop
         hourDate = datetime.datetime.fromtimestamp(hour["time"], zone)
         hourHour = int(hourDate.strftime("%H"))

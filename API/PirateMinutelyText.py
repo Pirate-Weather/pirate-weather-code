@@ -121,7 +121,7 @@ def calculate_minutely_text(
                 "next-hour-forecast-status",
                 "temporarily-unavailable",
                 "station-offline",
-            ], "not-available"
+            ], "none"
         # If there is rain for the current minute in the array
         if minute["precipType"] == "rain" and minute["precipIntensity"] > 0:
             # Increase the minutes of precipitation, the precipitation unit and average intensity
