@@ -8,3 +8,5 @@ API/GFS_Dask_Ingest.py
 API/SubH_Local_Ingest_RemoteTest.py
 
 API/testDask.py
+
+API/s3fsTest.py

@@ -14,6 +14,7 @@ from collections import Counter
 from typing import Union
 
 import boto3
+import s3fs
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -40,6 +41,7 @@ lock = threading.Lock()
 
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+pw_api_key = os.environ.get("PW_API", "")
 save_type = os.getenv("save_type", default="S3")
 s3_bucket = os.getenv("s3_bucket", default="piratezarr2")
 useETOPO = os.getenv("useETOPO", default=True)
@@ -47,6 +49,13 @@ print(os.environ.get("TIMING", False))
 TIMING = os.environ.get("TIMING", False)
 
 force_now = os.getenv("force_now", default=False)
+
+class S3ZipStore(zarr.storage.ZipStore):
+    def __init__(self, path: s3fs.S3File) -> None:
+        super().__init__(path="", mode="r")
+        self.path = path
+def _add_custom_header(request, **kwargs):
+    request.headers['apikey'] = pw_api_key
 
 
 def download_if_newer(
@@ -195,7 +204,6 @@ def update_zarr_store(initialRun):
     global NWS_Alerts_Zarr
 
     STAGE = os.environ.get("STAGE", "PROD")
-
     # Create empty dir
     os.makedirs("/tmp/empty", exist_ok=True)
 
@@ -368,95 +376,92 @@ def toTimestamp(d):
 
 # If testing, read zarrs directly from S3
 # This should be implemented as a fallback at some point
-# STAGE = os.environ.get("STAGE", "PROD")
-# if STAGE == "TESTING":
-#     print("Setting up S3 zarrs")
-#
-#     # If S3, use that, otherwise use local
-#     if save_type == "S3":
-#         s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-#         f = s3.open("s3://" + s3_bucket + "/ForecastTar/NWS_Alerts.zarr.zip")
-#     else:
-#         f = "/tmp/NWS_Alerts.zarr.zip"
-#
-#     fs = ZipFileSystem(f, mode="r")
-#     store = FSMap("", fs, check=False)
-#     NWS_Alerts_Zarr = zarr.open(store, mode="r")
-#     print("Alerts Read")
-#
-#     if save_type == "S3":
-#         f = s3.open("s3://" + s3_bucket + "/ForecastTar/SubH.zarr.zip")
-#     else:
-#         f = "/tmp/SubH.zarr.zip"
-#
-#     fs = ZipFileSystem(f, mode="r")
-#     store = FSMap("", fs, check=False)
-#     SubH_Zarr = zarr.open(store, mode="r")
-#     print("SubH Read")
-#
-#     if save_type == "S3":
-#         f = s3.open("s3://" + s3_bucket + "/ForecastTar/HRRR_6H.zarr.zip")
-#     else:
-#         f = "/tmp/HRRR_6H.zarr.zip"
-#     fs = ZipFileSystem(f, mode="r")
-#     store = FSMap("", fs, check=False)
-#     HRRR_6H_Zarr = zarr.open(store, mode="r")
-#     print("HRRR_6H Read")
-#
-#     if save_type == "S3":
-#         f = s3.open("s3://" + s3_bucket + "/ForecastTar/GFS.zarr.zip")
-#     else:
-#         f = "/tmp/GFS.zarr.zip"
-#     fs = ZipFileSystem(f, mode="r")
-#     store = FSMap("", fs, check=False)
-#     GFS_Zarr = zarr.open(store, mode="r")
-#     print("GFS Read")
-#
-#     if save_type == "S3":
-#         f = s3.open("s3://" + s3_bucket + "/ForecastTar/GEFS.zarr.zip")
-#     else:
-#         f = "/tmp/GEFS.zarr.zip"
-#     fs = ZipFileSystem(f, mode="r")
-#     store = FSMap("", fs, check=False)
-#     GEFS_Zarr = zarr.open(store, mode="r")
-#     print("GEFS Read")
-#
-#     if save_type == "S3":
-#         f = s3.open("s3://" + s3_bucket + "/ForecastTar/NBM.zarr.zip")
-#     else:
-#         f = "/tmp/NBM.zarr.zip"
-#     fs = ZipFileSystem(f, mode="r")
-#     store = FSMap("", fs, check=False)
-#     NBM_Zarr = zarr.open(store, mode="r")
-#     print("NBM Read")
-#
-#     if save_type == "S3":
-#         f = s3.open("s3://" + s3_bucket + "/ForecastTar/NBM_Fire.zarr.zip")
-#     else:
-#         f = "/tmp/NBM_Fire.zarr.zip"
-#     fs = ZipFileSystem(f, mode="r")
-#     store = FSMap("", fs, check=False)
-#     NBM_Fire_Zarr = zarr.open(store, mode="r")
-#     print("NBM Fire Read")
-#
-#     if save_type == "S3":
-#         f = s3.open("s3://" + s3_bucket + "/ForecastTar/HRRR.zarr.zip")
-#     else:
-#         f = "/tmp/HRRR.zarr.zip"
-#     fs = ZipFileSystem(f, mode="r")
-#     store = FSMap("", fs, check=False)
-#     HRRR_Zarr = zarr.open(store, mode="r")
-#     print("HRRR Read")
-#
-#     if useETOPO:
-#         if save_type == "S3":
-#             f = s3.open("s3://" + s3_bucket + "/ForecastTar/ETOPO_DA_C.zarr.zip")
-#         else:
-#             f = "/tmp/ETOPO_DA_C.zarr.zip"
-#         fs = ZipFileSystem(f, mode="r")
-#         store = FSMap("", fs, check=False)
-#         ETOPO_f = zarr.open(store, mode="r")
-#     print("ETOPO Read")
+STAGE = os.environ.get("STAGE", "PROD")
+if STAGE == "TESTING":
+    print("Setting up S3 zarrs")
+
+
+    # If S3, use that, otherwise use local
+    if save_type == "S3":
+        # s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key, asynchronous=False)
+        s3 = s3fs.S3FileSystem(anon=True, asynchronous=False, endpoint_url='https://api.pirateweather.net/files/')
+        s3.s3.meta.events.register("before-sign.s3.*", _add_custom_header)
+
+        f = s3.open("s3://ForecastTar/NWS_Alerts.zarr.zip")
+    else:
+        f = "/tmp/NWS_Alerts.zarr.zip"
+
+    store = S3ZipStore(f)
+    NWS_Alerts_Zarr = zarr.open(store, mode="r")
+    print("Alerts Read")
+
+    if save_type == "S3":
+        f = s3.open("s3://ForecastTar/SubH.zarr.zip")
+    else:
+        f = "/tmp/SubH.zarr.zip"
+
+    store = S3ZipStore(f)
+    SubH_Zarr = zarr.open(store, mode="r")
+    print("SubH Read")
+
+    if save_type == "S3":
+        f = s3.open("s3://ForecastTar/HRRR_6H.zarr.zip")
+    else:
+        f = "/tmp/HRRR_6H.zarr.zip"
+    store = S3ZipStore(f)
+    HRRR_6H_Zarr = zarr.open(store, mode="r")
+    print("HRRR_6H Read")
+
+    if save_type == "S3":
+        f = s3.open("s3://ForecastTar/GFS.zarr.zip")
+    else:
+        f = "/tmp/GFS.zarr.zip"
+    store = S3ZipStore(f)
+    GFS_Zarr = zarr.open(store, mode="r")
+    print("GFS Read")
+
+    if save_type == "S3":
+        f = s3.open("s3://ForecastTar/GEFS.zarr.zip")
+    else:
+        f = "/tmp/GEFS.zarr.zip"
+    store = S3ZipStore(f)
+    GEFS_Zarr = zarr.open(store, mode="r")
+    print("GEFS Read")
+
+    if save_type == "S3":
+        f = s3.open("s3://ForecastTar/NBM.zarr.zip")
+    else:
+        f = "/tmp/NBM.zarr.zip"
+    store = S3ZipStore(f)
+    NBM_Zarr = zarr.open(store, mode="r")
+    print("NBM Read")
+
+    if save_type == "S3":
+        f = s3.open("s3://ForecastTar/NBM_Fire.zarr.zip")
+    else:
+        f = "/tmp/NBM_Fire.zarr.zip"
+    store = S3ZipStore(f)
+    NBM_Fire_Zarr = zarr.open(store, mode="r")
+    print("NBM Fire Read")
+
+    if save_type == "S3":
+        f = s3.open("s3://ForecastTar/HRRR.zarr.zip")
+    else:
+        f = "/tmp/HRRR.zarr.zip"
+    store = S3ZipStore(f)
+    HRRR_Zarr = zarr.open(store, mode="r")
+    print("HRRR Read")
+
+    if useETOPO:
+        if save_type == "S3":
+            f = s3.open("s3://ForecastTar/ETOPO_DA_C.zarr.zip")
+        else:
+            f = "/tmp/ETOPO_DA_C.zarr.zip"
+        store = S3ZipStore(f)
+        ETOPO_f = zarr.open(store, mode="r")
+    print("ETOPO Read")
+
+
 
 
 async def get_zarr(store, X, Y):
@@ -539,23 +544,6 @@ def cull(lng, lat):
         inside_box = 1
 
     return inside_box
-
-
-def find_nearest(array, value):
-    idx_sorted = np.argsort(array)
-    sorted_array = np.array(array[idx_sorted])
-    idx = np.searchsorted(sorted_array, value, side="left")
-    if idx >= len(array):
-        idx_nearest = idx_sorted[len(array) - 1]
-    elif idx == 0:
-        idx_nearest = idx_sorted[0]
-    else:
-        if abs(value - sorted_array[idx - 1]) < abs(value - sorted_array[idx]):
-            idx_nearest = idx_sorted[idx - 1]
-        else:
-            idx_nearest = idx_sorted[idx]
-    return idx_nearest
-
 
 def lambertGridMatch(
     central_longitude,
@@ -782,7 +770,7 @@ async def PW_Forecast(
         print(nowTime)
 
     ### If developing in REPL, uncomment to provide static variables
-    # location = "47.1756,27.594,1730869200"
+    # location = "47.1756,27.594,1741126460"
     # units = "ca"
     # extend = None
     # exclude = None
@@ -1119,6 +1107,8 @@ async def PW_Forecast(
         .astype("timedelta64[s]")
         .astype(np.int32)
     )
+
+
 
     # Timing Check
     if TIMING:
@@ -1795,6 +1785,7 @@ async def PW_Forecast(
     # Merge hourly models onto a consistent time grid, starting from midnight on the requested day
     numHours = 193  # Number of hours to merge
 
+
     ### Minutely
     minute_array = np.arange(
         baseTime.astimezone(utc),
@@ -1846,12 +1837,12 @@ async def PW_Forecast(
 
     # HRRR
     if timeMachine is False:
-        # Since the forecast files are pre-processed, they'll always be hourly and the same lenght. This avoids interpolation
+        # Since the forecast files are pre-processed, they'll always be hourly and the same length. This avoids interpolation
         try:  # Add a fallback to GFS if these don't work
             # HRRR
             if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-                HRRR_StartIDX = find_nearest(dataOut_hrrrh[:, 0], baseDayUTC_Grib)
-                H2_StartIDX = find_nearest(dataOut_h2[:, 0], dataOut_hrrrh[-1, 0])
+                HRRR_StartIDX = max((dataOut_hrrrh[:, 0].searchsorted(baseDayUTC_Grib, side='right') - 1, 0))
+                H2_StartIDX = max((dataOut_h2[:, 0].searchsorted(dataOut_hrrrh[-1, 0], side='right') - 1, 0))
 
                 HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), np.nan)
                 HRRR_Merged[0 : (55 - HRRR_StartIDX) + (31 - H2_StartIDX), :] = (
@@ -1863,7 +1854,7 @@ async def PW_Forecast(
 
             # NBM
             if "nbm" in sourceList:
-                NBM_StartIDX = find_nearest(dataOut_nbm[:, 0], baseDayUTC_Grib)
+                NBM_StartIDX = dataOut_nbm[:, 0].searchsorted(baseDayUTC_Grib, side='right') - 1
                 NBM_Merged = np.full((numHours, dataOut_nbm.shape[1]), np.nan)
                 NBM_Merged[0 : (230 - NBM_StartIDX), :] = dataOut_nbm[
                     NBM_StartIDX : (numHours + NBM_StartIDX), :
@@ -1871,7 +1862,7 @@ async def PW_Forecast(
 
             # NBM FIre
             if "nbm_fire" in sourceList:
-                NBM_Fire_StartIDX = find_nearest(dataOut_nbmFire[:, 0], baseDayUTC_Grib)
+                NBM_Fire_StartIDX = dataOut_nbmFire[:, 0].searchsorted(baseDayUTC_Grib, side='right') - 1
                 NBM_Fire_Merged = np.full((numHours, dataOut_nbmFire.shape[1]), np.nan)
                 NBM_Fire_Merged[0 : (217 - NBM_Fire_StartIDX), :] = dataOut_nbmFire[
                     NBM_Fire_StartIDX : (numHours + NBM_Fire_StartIDX), :
@@ -1889,7 +1880,7 @@ async def PW_Forecast(
             sourceList.remove("hrrr_18-48")
 
         # GFS
-        GFS_StartIDX = find_nearest(dataOut_gfs[:, 0], baseDayUTC_Grib)
+        GFS_StartIDX = dataOut_gfs[:, 0].searchsorted(baseDayUTC_Grib, side='right') - 1
         GFS_EndIDX = min((len(dataOut_gfs), (numHours + GFS_StartIDX)))
         GFS_Merged = np.zeros((numHours, dataOut_gfs.shape[1]))
         GFS_Merged[0 : (GFS_EndIDX - GFS_StartIDX), :] = dataOut_gfs[
@@ -1898,7 +1889,7 @@ async def PW_Forecast(
 
         # GEFS
         if "gefs" in sourceList:
-            GEFS_StartIDX = find_nearest(dataOut_gefs[:, 0], baseDayUTC_Grib)
+            GEFS_StartIDX = dataOut_gefs[:, 0].searchsorted(baseDayUTC_Grib, side='right') - 1
             GEFS_Merged = dataOut_gefs[GEFS_StartIDX : (numHours + GEFS_StartIDX), :]
 
     # Interpolate if Time Machine
@@ -3609,6 +3600,7 @@ async def PW_Forecast(
     InterPcurrent[2] = InterPminute[0, 2]  # "precipProbability"
     InterPcurrent[3] = InterPminute[0, 3]  # "precipIntensityError"
 
+
     # Temperature from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
         InterPcurrent[4] = hrrrSubHInterpolation[0, 3]
@@ -4159,7 +4151,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.6.1f"
+        returnOBJ["flags"]["version"] = "V2.6.1g"
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
             returnOBJ["flags"]["processTime"] = (
@@ -4371,5 +4363,7 @@ def dataSync() -> None:
 
         if (STAGE == "PROD") or (STAGE == "DEV"):
             update_zarr_store(False)
+
+
 
     logger.info("Sync End!")
