@@ -75,6 +75,7 @@ def calculate_precip_text(
     icon="darksky",
     mode="both",
     isDayTime=True,
+    avgPrep=0,
 ):
     """
     Calculates the precipitation
@@ -90,6 +91,7 @@ def calculate_precip_text(
     - pop (float): The current probability of precipitation defaulting to 1
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
     - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the precipitation will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
+    - avgPrep (float): The average precipitation intensity
 
     Returns:
     - str: The icon representing the current precipitation
@@ -121,7 +123,7 @@ def calculate_precip_text(
     numTypes = 0
 
     # Use daily or hourly thresholds depending on the situation
-    if type == "hour" or type == "current" or type == "minute":
+    if type == "hour" or type == "current" or type == "minute" or type == "hourly":
         snowIconThreshold = snowIconThresholdHour
         precipIconThreshold = precipIconThresholdHour
     elif type == "day" or type == "week":
@@ -258,9 +260,9 @@ def calculate_precip_text(
             elif icon == "pirate":
                 cIcon = "heavy-snow"
         if (
-            (type == "minute" or type == "week")
-            and prepIntensity < heavySnowThresh
-            and snowPrep >= heavySnowThresh
+            (type == "week" or type == "hourly")
+            and avgPrep < (heavySnowThresh - (0.66 * prepAccumUnit))
+            and prepIntensity >= heavySnowThresh
         ):
             cText = ["and", "medium-snow", "possible-heavy-snow"]
     elif icePrep > 0 and prepIntensity > 0 and prepType == "sleet":
@@ -295,9 +297,9 @@ def calculate_precip_text(
             elif icon == "pirate":
                 cIcon = "heavy-sleet"
         if (
-            (type == "minute" or type == "week")
-            and prepIntensity < heavyPrecipThresh
-            and icePrep >= heavyPrecipThresh
+            (type == "week" or type == "hourly")
+            and avgPrep < (heavyPrecipThresh - (2 * prepAccumUnit))
+            and prepIntensity >= heavyPrecipThresh
         ):
             cText = ["and", "medium-sleet", "possible-heavy-sleet"]
 
@@ -333,9 +335,9 @@ def calculate_precip_text(
             elif icon == "pirate":
                 cIcon = "heavy-freezing-rain"
         if (
-            (type == "minute" or type == "week")
-            and prepIntensity < heavyPrecipThresh
-            and rainPrep >= heavyPrecipThresh
+            (type == "week" or type == "hourly")
+            and avgPrep < (heavyPrecipThresh - (2 * prepAccumUnit))
+            and prepIntensity >= heavyPrecipThresh
         ):
             cText = ["and", "medium-freezing-rain", "possible-heavy-freezing-rain"]
     elif icePrep > 0 and prepIntensity > 0 and prepType == "hail":
@@ -352,9 +354,9 @@ def calculate_precip_text(
         else:
             cText = possiblePrecip + "heavy-precipitation"
         if (
-            (type == "minute" or type == "week")
-            and prepIntensity < heavyPrecipThresh
-            and rainPrep >= heavyPrecipThresh
+            (type == "week" or type == "hourly")
+            and avgPrep < (heavyPrecipThresh - (2 * prepAccumUnit))
+            and prepIntensity >= heavyPrecipThresh
         ):
             cText = ["and", "medium-precipitation", "possible-heavy-precipitation"]
 

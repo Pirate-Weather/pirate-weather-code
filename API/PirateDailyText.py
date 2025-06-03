@@ -210,6 +210,18 @@ def calculate_period_text(
                     else typePeriods[1] + 1
                 ],
             ]
+        # If the type starts after the first period but doesn't continue to the end
+        elif typePeriods[0] > checkPeriod and (typePeriods[1] - typePeriods[0]) == 1:
+            summary_text = [
+                "starting-continuing-until",
+                periodText,
+                periods[typePeriods[0]],
+                periods[
+                    len(periods) - 1
+                    if typePeriods[1] + 1 > len(periods) - 1
+                    else typePeriods[1] + 1
+                ],
+            ]
         # If the type occurs at the start but then starts again in the last period
         elif (
             typePeriods[0] == checkPeriod
@@ -783,9 +795,9 @@ def calculate_day_text(
     - cIcon (str) - The icon representing the current day/next 24 hours
     """
 
-    # If we don't have 24 hours of data bail as we need 24 hours to calculate the text
-    if len(hours) != 24:
-        return "clear-day", ["for-day", "clear"]
+    # If we have more than 24 hours of data then bail
+    if len(hours) > 24:
+        return "none", ["for-day", "unavailable"]
 
     # Variables to calculate the periods from the hours array
     period1 = []
@@ -796,27 +808,25 @@ def calculate_day_text(
     prepTypes = []
     mostCommonPrecip = []
     periodStats = [[], [], [], [], []]
-    currPeriod = None
+    currPeriod = todayPeriod = None
     numHoursFog = numHoursWind = numHoursDry = numHoursHumid = rainPrep = snowPrep = (
         sleetPrep
-    ) = snowError = cloudCover = pop = maxIntensity = maxWind = length = 0
+    ) = snowError = cloudCover = pop = maxIntensity = maxWind = length = precipHours = (
+        avgPrep
+    ) = 0
     periodIncrease = False
     periodIndex = 1
     today = ""
 
     # Get the current time zone from the function parameters or use the first hours time field as the current time
     zone = tz.gettz(timeZone)
+    currDate = datetime.datetime.fromtimestamp(hours[0]["time"], zone)
+    currHour = int(currDate.strftime("%H"))
     if mode == "hour":
-        currDate = datetime.datetime.fromtimestamp(hours[0]["time"], zone)
-        currHour = int(currDate.strftime("%H"))
+        today = "today-"
         # If the first forecasted hour is midnight local change it to correct the summaries assuming the forecast is for the same day
         if currHour == 0:
             currHour = 23
-    else:
-        # Calculate the current hour/weekday from the first hour
-        currDate = datetime.datetime.fromtimestamp(currTime, zone)
-        currHour = int(currDate.strftime("%H"))
-
     # Time periods are as follows:
     # morning 4:00 to 12:00
     # afternoon 12:00 to 17:00
@@ -833,15 +843,30 @@ def calculate_day_text(
     else:
         currPeriod = "night"
 
+    # Calculate the period for the current hour to use in the later text checks
+    if 4 <= currHour - 1 < 12:
+        todayPeriod = "morning"
+    elif 12 <= currHour - 1 < 17:
+        todayPeriod = "afternoon"
+    elif 17 <= currHour - 1 < 22:
+        todayPeriod = "evening"
+    else:
+        todayPeriod = "night"
+
     # Set the hour period to the current period
     hourPeriod = currPeriod
 
-    # For the hour block summaries add the today text
-    if mode == "hour":
-        today = "today-"
-
     # Loop through the hours to calculate the conditions for each period
     for idx, hour in enumerate(hours):
+        # If we have bad data then return not avaliable instead of trying to calculate the summary
+        if (
+            hour["temperature"] == -999
+            or hour["windSpeed"] == -999
+            or hour["visibility"] == -999
+            or hour["cloudCover"] == -999
+            or hour["humidity"] == -999
+        ):
+            return "none", ["for-day", "unavailable"]
         # Calculate the time and weekday for the current hour in the loop
         hourDate = datetime.datetime.fromtimestamp(hour["time"], zone)
         hourHour = int(hourDate.strftime("%H"))
@@ -883,11 +908,6 @@ def calculate_day_text(
 
         # Add the hour cloud cover to calculate the average
         cloudCover += hour["cloudCover"]
-        # Calculate the maximum pop for the period
-        if pop == 0:
-            pop = hour["precipProbability"]
-        elif hour["precipProbability"] > pop:
-            pop = hour["precipProbability"]
 
         # Calculate the maxiumum intensity for the period
         if maxIntensity == 0:
@@ -904,8 +924,15 @@ def calculate_day_text(
         # Add the percipitation type to an array to calculate the most common precipitation to use as a baseline
         if hour["precipIntensity"] > 0 or hour["precipAccumulation"] > 0:
             mostCommonPrecip.append(hour["precipType"])
+            # Calculate the maximum pop for the period
+            if pop == 0:
+                pop = hour["precipProbability"]
+            elif hour["precipProbability"] > pop:
+                pop = hour["precipProbability"]
+            precipHours += 1
+            avgPrep += hour["precipIntensity"]
 
-        # Add the percipitation type to an array of precipitation types if it doesn;t already exist
+        # Add the percipitation type to an array of precipitation types if it doesn't already exist
         if not prepTypes and hour["precipIntensity"] > 0:
             prepTypes.append(hour["precipType"])
         elif hour["precipType"] not in prepTypes and hour["precipIntensity"] > 0:
@@ -969,6 +996,19 @@ def calculate_day_text(
             elif periodIndex - 1 == 5:
                 cloudCover = cloudCover / len(period5)
                 length = len(period5)
+
+            # If we are at the end of the loop increase the index and calculate the length of the last period
+            if idx == len(hours) - 1 and not periodIncrease:
+                if periodIndex == 2:
+                    length = len(period1)
+                elif periodIndex == 3:
+                    length = len(period2)
+                elif periodIndex == 4:
+                    length = len(period3)
+                elif periodIndex == 5:
+                    length = len(period4)
+                else:
+                    length = len(period5)
 
             # Add the data to an array of period arrays to use to calculate the summaries
             periodStats[periodIndex - 2].append(numHoursFog)
@@ -1093,12 +1133,7 @@ def calculate_day_text(
     humid = []
     dry = []
     cloudLevels = []
-    periods = [
-        periodStats[0][12],
-        periodStats[1][12],
-        periodStats[2][12],
-        periodStats[3][12],
-    ]
+    periods = []
     precipType = "none"
     # If we have 5 periods append it to the list of periods
     summary_text = cIcon = snowSentence = prepText = dryText = humidText = (
@@ -1109,53 +1144,29 @@ def calculate_day_text(
     period3Calc = []
     period4Calc = []
     period5Calc = []
-    snowLowAccum = snowMaxAccum = snowError = avgPop = numItems = 0
+    snowLowAccum = snowMaxAccum = snowError = avgPop = numItems = rainPrep = (
+        snowPrep
+    ) = icePrep = 0
     starts = []
     period1Level = period2Level = period3Level = period4Level = period5Level = (
         avgCloud
     ) = -1
     secondary = snowText = snowSentence = None
-    # Calculate the total ice precipitation
-    icePrep = (
-        periodStats[0][6] + periodStats[1][6] + periodStats[2][6] + periodStats[3][6]
-    )
-    # Calculate the total rain precipitation
-    rainPrep = (
-        periodStats[0][3] + periodStats[1][3] + periodStats[2][3] + periodStats[3][3]
-    )
-    # Calculate the total snow precipitation
-    snowPrep = (
-        periodStats[0][4] + periodStats[1][4] + periodStats[2][4] + periodStats[3][4]
-    )
-    if periodStats[4]:
-        periods.append(periodStats[4][12])
-        snowPrep += periodStats[4][4]
-        rainPrep += periodStats[4][3]
-        sleetPrep += periodStats[4][6]
-    # Calculate the total precipitaion
-    totalPrep = rainPrep + snowPrep + sleetPrep
-
-    # If we have two today-night in the periods change the last one to tomorrow-night to prevent weird summaries
-    if "today-night" in periods[0] and "today-night" in periods[len(periods) - 1]:
-        periods[len(periods) - 1] = "tomorrow-night"
 
     # If we are in day mode calculate the current period number to exclude parts of the day from being calculated
-    if mode == "day":
-        if currPeriod == "morning":
-            currPeriodNum = 1 + ((8 - (12 - currHour)) / 8)
-        elif currPeriod == "afternoon":
-            currPeriodNum = 2 + ((5 - (17 - currHour)) / 5)
-        elif currPeriod == "evening":
-            currPeriodNum = 3 + ((5 - (22 - currHour)) / 5)
-        elif currPeriod == "night":
-            currPeriodNum = 4
-    else:
-        currPeriodNum = 1
+    checkPeriod = 0
 
-    checkPeriod = math.floor(currPeriodNum) - 1
+    # Calculate the average precipitation intensity for the periods
+    if precipHours > 0:
+        avgPrep = avgPrep / precipHours
 
-    # If the current period is 3/4 the way through the first period then exclude it.
-    if currPeriodNum < 1.75 and period1:
+    # If period1 has any data
+    if period1:
+        # Add the period to the array of periods and add the precipitation
+        periods.append(periodStats[0][12])
+        snowPrep += periodStats[0][4]
+        rainPrep += periodStats[0][3]
+        sleetPrep += periodStats[0][6]
         # Check if there is enough precipitation to trigger the precipitation icon
         if (
             periodStats[0][4] > (2.5 * prepAccumUnit)
@@ -1222,8 +1233,13 @@ def calculate_day_text(
         # Add to the visibility array if the dry text exists
         if period1Calc[4] is not None:
             dry.append(0)
-    # If the current period is 3/4 the way through the second period then exclude it.
-    if currPeriodNum < 2.75 and period2:
+    # If period2 has any data
+    if period2:
+        # Add the period to the array of periods and add the precipitation
+        periods.append(periodStats[1][12])
+        snowPrep += periodStats[1][4]
+        rainPrep += periodStats[1][3]
+        sleetPrep += periodStats[1][6]
         # Check if there is enough precipitation to trigger the precipitation icon
         if (
             periodStats[1][4] > (2.5 * prepAccumUnit)
@@ -1289,8 +1305,13 @@ def calculate_day_text(
         # Add to the visibility array if the dry text exists
         if period2Calc[4] is not None:
             dry.append(1)
-    # If the current period is 3/4 the way through the third period then exclude it.
-    if currPeriodNum < 3.75 and period3:
+    # If period3 has any data
+    if period3:
+        # Add the period to the array of periods and add the precipitation
+        periods.append(periodStats[2][12])
+        snowPrep += periodStats[2][4]
+        rainPrep += periodStats[2][3]
+        sleetPrep += periodStats[2][6]
         # Check if there is enough precipitation to trigger the precipitation icon
         if (
             periodStats[2][4] > (2.5 * prepAccumUnit)
@@ -1357,7 +1378,13 @@ def calculate_day_text(
         if period3Calc[4] is not None:
             dry.append(2)
 
+    # If period4 has any data
     if period4:
+        # Add the period to the array of periods and add the precipitation
+        periods.append(periodStats[3][12])
+        snowPrep += periodStats[3][4]
+        rainPrep += periodStats[3][3]
+        sleetPrep += periodStats[3][6]
         # Check if there is enough precipitation to trigger the precipitation icon
         if (
             periodStats[3][4] > (2.5 * prepAccumUnit)
@@ -1424,7 +1451,13 @@ def calculate_day_text(
         if period4Calc[4] is not None:
             dry.append(3)
 
+    # If period5 has any data
     if period5:
+        # Add the period to the array of periods and add the precipitation
+        periods.append(periodStats[4][12])
+        snowPrep += periodStats[4][4]
+        rainPrep += periodStats[4][3]
+        sleetPrep += periodStats[4][6]
         # Check if there is enough precipitation to trigger the precipitation icon
         if (
             periodStats[4][4] > (2.5 * prepAccumUnit)
@@ -1491,6 +1524,13 @@ def calculate_day_text(
         if period5Calc[4] is not None:
             dry.append(4)
 
+    # Calculate the total precipitation
+    totalPrep = rainPrep + snowPrep + icePrep
+
+    # If we have two today-night in the periods change the last one to tomorrow-night to prevent weird summaries
+    if "today-night" in periods[0] and "today-night" in periods[len(periods) - 1]:
+        periods[len(periods) - 1] = "tomorrow-night"
+
     # Add the wind, wind, visibility, dry and humid starts to the starts array if they exist
     if precip:
         starts.append(precip[0])
@@ -1522,13 +1562,14 @@ def calculate_day_text(
                 maxIntensity,
                 prepAccumUnit,
                 precipType,
-                "hour",
+                "hourly",
                 rainPrep,
                 snowPrep,
                 icePrep,
                 avgPop,
                 icon,
                 "icon",
+                avgPrep,
             )
             secondary = "medium-snow"
         else:
@@ -1598,13 +1639,14 @@ def calculate_day_text(
                 maxIntensity,
                 prepAccumUnit,
                 precipType,
-                "hour",
+                "hourly",
                 rainPrep,
                 snowPrep,
                 icePrep,
                 avgPop,
                 icon,
                 "both",
+                avgPrep,
             )
 
     # if secondary is medium none change it to medium-precipitaiton to avoid errors
@@ -1789,18 +1831,19 @@ def calculate_day_text(
         hours[0]["precipIntensity"],
         prepAccumUnit,
         hours[0]["precipType"],
-        "hour",
+        "hourly",
         hours[0]["precipAccumulation"],
         hours[0]["precipAccumulation"],
         hours[0]["precipAccumulation"],
         hours[0]["precipProbability"],
         icon,
         "summary",
+        avgPrep,
     )
     later = []
 
     # If we are in the current period
-    if starts and periods[min(starts)] == "today-" + currPeriod:
+    if starts and periods[min(starts)] == "today-" + todayPeriod:
         # If we have precipitation and it starts in the first block
         if precip and precip[0] == 0:
             # If the first hour has no precipitation add the later text
@@ -1873,44 +1916,44 @@ def calculate_day_text(
     )
 
     # If there is only one period
-    if not period1Calc and not period2Calc and not period3Calc:
+    if not period2Calc and not period3Calc and not period4Calc:
         # If there is precipitation and wind then join with an and
-        if period4Calc[0] is not None:
-            if period4Calc[1] is not None:
+        if period1Calc[0] is not None:
+            if period1Calc[1] is not None:
                 summary_text = [
                     "sentence",
-                    ["during", ["and", prepText, period4Calc[1]], "night"],
+                    ["during", ["and", prepText, period1Calc[1]], "night"],
                 ]
             # Otherwise just use the precipitation
             else:
                 return ["sentence", ["during", prepText, "night"]]
         # If there is fog then show that text
-        elif period4Calc[2] is not None:
+        elif period1Calc[2] is not None:
             cIcon = "fog"
-            summary_text = ["sentence", ["during", period4Calc[2], "night"]]
+            summary_text = ["sentence", ["during", period1Calc[2], "night"]]
         else:
             # If there is wind during the last period then join the wind with the cloud text
-            if period4Calc[1] is not None:
+            if period1Calc[1] is not None:
                 cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
                 summary_text = [
                     "sentence",
-                    ["during", ["and", period4Calc[1], period4Calc[3]], "night"],
+                    ["during", ["and", period1Calc[1], period1Calc[3]], "night"],
                 ]
             # If there is low humidity during the last period then join it with the cloud text
-            elif period4Calc[4] is not None:
+            elif period1Calc[4] is not None:
                 summary_text = [
                     "sentence",
-                    ["during", ["and", period4Calc[3], period4Calc[4]], "night"],
+                    ["during", ["and", period1Calc[3], period1Calc[4]], "night"],
                 ]
             # If there is high humidity during the last period then join it with the cloud text
-            elif period4Calc[5] is not None:
+            elif period1Calc[5] is not None:
                 summary_text = [
                     "sentence",
-                    ["during", ["and", period4Calc[3], period4Calc[5]], "night"],
+                    ["during", ["and", period1Calc[3], period1Calc[5]], "night"],
                 ]
             # Otherwise just show the cloud text
             else:
-                summary_text = ["sentence", ["during", period4Calc[3], "night"]]
+                summary_text = ["sentence", ["during", period1Calc[3], "night"]]
     else:
         windText = None
         visText = None
