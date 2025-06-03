@@ -5,3 +5,4 @@ API/SubH_Local_Ingest_RemoteTest.py
 API/testDask.py
 *.pyc
 __pycache__
+API/s3fsTest.py
