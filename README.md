@@ -49,7 +49,25 @@ However, the response script/container is significantly lighter, requiring only 
 The most interesting part of this project is the response script, which takes the raw model data and generates the API response. While spinning up the entire API is one way to work on this, it's much easier to simply run either the docker container or a virtual Python environment and use static example data! A static copy of the example data can be downloaded from here: <https://files.alexanderrey.ca/share/9jMgSLpi>
 
 ##### Docker
-To do this via Docker, a run command can be used:
+Two options are available to do this via Docker- either download a static copy of the forecast files and reference those, or access the live Zarr files directly. Live access is much easier, but does require an API key since the files are hosted on Pirate Weather's AWS instance.
+
+For Option 1:
+
+```
+docker run -e STAGE=TESTING -e PW_API=<APIKEY> -p 8000:8000 public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:dev responseLocal:app --host 0.0.0.0 --port 8000 
+
+curl 127.0.0.1:8083/forecast/123456/45.4215,-75.6972
+```
+That's it! Responses will be somewhat slow, and use several API calls, but everything just works out of the box. 
+
+To make changes to the underlying code, a docker volume can be mounted over of the built in Python script and adjusted as needed. For example:
+```
+git clone https://github.com/Pirate-Weather/pirate-weather-code.git
+
+docker run -e STAGE=TESTING -e PW_API=<APIKEY> -p 8000:8000 -v ~/pirate-weather-code/API:/app public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:dev responseLocal:app --host 0.0.0.0 --port 8000 
+```
+  
+For Option 2:
 
 ```
 git clone https://github.com/Pirate-Weather/pirate-weather-code.git
@@ -57,10 +75,13 @@ git clone https://github.com/Pirate-Weather/pirate-weather-code.git
 wget https://files.alexanderrey.ca/api/public/dl/9jMgSLpi
 unzip 9jMgSLpi-d ~/pw-data
 
-docker run -d -p 8083:8083 -v ~/pirate-weather-code/API:/efs:ro -v ~/pw-data:/tmp -e "STAGE=TESTING" -e "useETOPO=FALSE" -e "TIMING=TRUE" -e "save_type=Download" -e "force_now=1730869200" --entrypoint uvicorn --workdir=/efs public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:latest responseLocal:app --host 0.0.0.0 --port 8083
+docker run -d -p 8083:8083 -v ~/pirate-weather-code/API:/app -v ~/pw-data:/tmp -e "STAGE=TESTING" -e "useETOPO=FALSE" -e "TIMING=TRUE" -e "save_type=Download" -e "force_now=1730869200" --workdir=/efs public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:dev responseLocal:app --host 0.0.0.0 --port 8083
 
 curl 127.0.0.1:8083/forecast/123456/47.1756,27.594,1730869200
 ```
+
+In either case, the dockerfiles to build the underlying images are [available](https://github.com/Pirate-Weather/pirate-weather-code/tree/dev/Docker), allowing the image to be rebuilt as well. This is helpful for adding additional Python packages or updating versions. 
+
 **Note:** 
 - Because the model files are a static snapshot, the time parameter (around Wed Nov 06 2024) must be used!
 - The container will initially not do anything, since FastAPI doesn't appear to pass along the logs until it's initialized. It should be up and running within ~5 minutes 
