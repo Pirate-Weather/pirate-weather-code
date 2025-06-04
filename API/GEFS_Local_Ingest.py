@@ -212,7 +212,9 @@ while mem < 30:
 
     # Run wgrib2 to megre all the grib files
     spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-    # print(spOUT.stdout)
+    if spOUT.returncode != 0:
+        print(spOUT.stderr)
+        sys.exit()
 
     # Fix precip and chunk each member
     xarray_wgrib = xr.open_dataset(
@@ -461,7 +463,9 @@ for i in range(hisPeriod, 0, -6):
 
         # Run wgrib2 to merge all the grib files
         spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-        # print(spOUT.stdout)
+        if spOUT.returncode != 0:
+            print(spOUT.stderr)
+            sys.exit()
 
         # Open the NetCDF file with xarray to process and compress
         xarray_hist_wgrib = xr.open_dataset(
