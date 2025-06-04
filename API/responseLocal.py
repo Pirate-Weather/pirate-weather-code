@@ -394,76 +394,92 @@ if STAGE == "TESTING":
         s3.s3.meta.events.register("before-sign.s3.*", _add_custom_header)
 
         f = s3.open("s3://ForecastTar/NWS_Alerts.zarr.zip")
+        store = S3ZipStore(f)
     else:
-        f = "/tmp/NWS_Alerts.zarr.zip"
+        f = "/mnt/nvme/data/NWS_Alerts.zarr.zip"
+        store = zarr.storage.ZipStore(f, mode="r")
 
-    store = S3ZipStore(f)
     NWS_Alerts_Zarr = zarr.open(store, mode="r")
     print("Alerts Read")
 
     if save_type == "S3":
         f = s3.open("s3://ForecastTar/SubH.zarr.zip")
+        store = S3ZipStore(f)
     else:
-        f = "/tmp/SubH.zarr.zip"
+        f = "/mnt/nvme/data/SubH.zarr.zip"
+        store = zarr.storage.ZipStore(f, mode="r")
 
-    store = S3ZipStore(f)
-    SubH_Zarr = zarr.open(store, mode="r")
-    print("SubH Read")
+        SubH_Zarr = zarr.open(store, mode="r")
+        print("SubH Read")
 
     if save_type == "S3":
         f = s3.open("s3://ForecastTar/HRRR_6H.zarr.zip")
+        store = S3ZipStore(f)
     else:
-        f = "/tmp/HRRR_6H.zarr.zip"
-    store = S3ZipStore(f)
+        f = "/mnt/nvme/data/HRRR_6H.zarr.zip"
+        store = zarr.storage.ZipStore(f, mode="r")
+
     HRRR_6H_Zarr = zarr.open(store, mode="r")
     print("HRRR_6H Read")
 
     if save_type == "S3":
         f = s3.open("s3://ForecastTar/GFS.zarr.zip")
+        store = S3ZipStore(f)
     else:
-        f = "/tmp/GFS.zarr.zip"
-    store = S3ZipStore(f)
+        f = "/mnt/nvme/data/GFS.zarr.zip"
+        store = zarr.storage.ZipStore(f, mode="r")
+
     GFS_Zarr = zarr.open(store, mode="r")
     print("GFS Read")
 
     if save_type == "S3":
         f = s3.open("s3://ForecastTar/GEFS.zarr.zip")
+        store = S3ZipStore(f)
     else:
-        f = "/tmp/GEFS.zarr.zip"
-    store = S3ZipStore(f)
+        f = "/mnt/nvme/data/GEFS.zarr.zip"
+        store = zarr.storage.ZipStore(f, mode="r")
+
     GEFS_Zarr = zarr.open(store, mode="r")
     print("GEFS Read")
 
     if save_type == "S3":
         f = s3.open("s3://ForecastTar/NBM.zarr.zip")
+        store = S3ZipStore(f)
     else:
-        f = "/tmp/NBM.zarr.zip"
-    store = S3ZipStore(f)
+        f = "/mnt/nvme/data/NBM.zarr.zip"
+        store = zarr.storage.ZipStore(f, mode="r")
+
     NBM_Zarr = zarr.open(store, mode="r")
     print("NBM Read")
 
     if save_type == "S3":
         f = s3.open("s3://ForecastTar/NBM_Fire.zarr.zip")
+        store = S3ZipStore(f)
     else:
-        f = "/tmp/NBM_Fire.zarr.zip"
-    store = S3ZipStore(f)
+        f = "/mnt/nvme/data/NBM_Fire.zarr.zip"
+        store = zarr.storage.ZipStore(f, mode="r")
+
     NBM_Fire_Zarr = zarr.open(store, mode="r")
     print("NBM Fire Read")
 
     if save_type == "S3":
         f = s3.open("s3://ForecastTar/HRRR.zarr.zip")
+        store = S3ZipStore(f)
     else:
-        f = "/tmp/HRRR.zarr.zip"
-    store = S3ZipStore(f)
+        f = "/mnt/nvme/data/HRRR.zarr.zip"
+        store = zarr.storage.ZipStore(f, mode="r")
+
     HRRR_Zarr = zarr.open(store, mode="r")
     print("HRRR Read")
 
     if useETOPO:
         if save_type == "S3":
             f = s3.open("s3://ForecastTar/ETOPO_DA_C.zarr.zip")
+            store = S3ZipStore(f)
         else:
-            f = "/tmp/ETOPO_DA_C.zarr.zip"
-        store = S3ZipStore(f)
+            f = "/mnt/nvme/data/ETOPO_DA_C.zarr.zip"
+            store = zarr.storage.ZipStore(f, mode="r")
+
         ETOPO_f = zarr.open(store, mode="r")
     print("ETOPO Read")
 
@@ -523,6 +539,7 @@ class WeatherParallel(object):
 
             except Exception:
                 errCount = errCount + 1
+                print(Exception)
 
         print("### " + model + " Failure!")
         dataOut = False
@@ -1812,7 +1829,8 @@ async def PW_Forecast(
         daily_days = 8
         daily_day_hours = 1
     else:
-        hourly_hours = 48
+        # Calculate full range of hours for text summary, then only display 48
+        hourly_hours = 169
         daily_days = 8
         daily_day_hours = 1
 
@@ -2958,6 +2976,7 @@ async def PW_Forecast(
         print("Hourly Loop start")
         print(datetime.datetime.utcnow() - T_Start)
 
+
     for idx in range(int(baseTimeOffset), hourly_hours + int(baseTimeOffset)):
         # Check if day or night
         if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], 17]:
@@ -3135,7 +3154,7 @@ async def PW_Forecast(
         print("Daily start")
         print(datetime.datetime.utcnow() - T_Start)
 
-    nextHours = hourList[1:25]
+
     mean_results = []
     sum_results = []
     max_results = []
@@ -3480,18 +3499,20 @@ async def PW_Forecast(
 
         try:
             # Update the text
-            dayText, dayIcon = calculate_simple_day_text(
-                dayObject,
+            dayIcon, dayText = calculate_day_text(
+                hourList[(idx)*24:(idx+1)*24],
                 prepAccumUnit,
                 visUnits,
                 windUnit,
                 tempUnits,
                 True,
-                InterPdaySum[idx, 21],
-                InterPdaySum[idx, 22],
-                InterPdaySum[idx, 23],
+                str(tz_name),
+                int(time.time()),
+                "day",
                 icon,
             )
+
+            # Translate the text
             dayObject["summary"] = translation.translate(["sentence", dayText])
             dayObject["icon"] = dayIcon
         except Exception as e:
@@ -4111,7 +4132,7 @@ async def PW_Forecast(
         if (not timeMachine) or (tmExtra):
             try:
                 hourIcon, hourText = calculate_day_text(
-                    nextHours,
+                    hourList[1:25],
                     prepAccumUnit,
                     visUnits,
                     windUnit,
@@ -4135,7 +4156,11 @@ async def PW_Forecast(
                 returnOBJ["hourly"]["icon"] = max(
                     set(hourIconList), key=hourIconList.count
                 )
-        returnOBJ["hourly"]["data"] = hourList
+
+        if extendFlag == 1:
+            returnOBJ["hourly"]["data"] = hourList
+        else:
+            returnOBJ["hourly"]["data"] = hourList[0:48]
 
     if exDaily != 1:
         returnOBJ["daily"] = dict()
@@ -4173,7 +4198,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.6.1g"
+        returnOBJ["flags"]["version"] = "V2.7.0"
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
             returnOBJ["flags"]["processTime"] = (
