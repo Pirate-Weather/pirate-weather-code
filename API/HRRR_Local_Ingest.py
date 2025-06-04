@@ -192,6 +192,9 @@ cmd = (
 
 # Run wgrib2
 spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+if spOUT.returncode != 0:
+    print(spOUT.stderr)
+    sys.exit()
 
 # Check output from wgrib2
 # print(spOUT.stdout)
@@ -214,6 +217,9 @@ cmd2 = (
 
 # Run wgrib2 to rotate winds and save as NetCDF
 spOUT2 = subprocess.run(cmd2, shell=True, capture_output=True, encoding="utf-8")
+if spOUT2.returncode != 0:
+    print(spOUT2.stderr)
+    sys.exit()
 
 # Check output from wgrib2
 # print(spOUT2.stdout)
@@ -231,6 +237,9 @@ cmd3 = (
 
 # Run wgrib2 to rotate winds and save as NetCDF
 spOUT3 = subprocess.run(cmd3, shell=True, capture_output=True, encoding="utf-8")
+if spOUT3.returncode != 0:
+    print(spOUT3.stderr)
+    sys.exit()
 
 # Check output from wgrib2
 # print(spOUT3.stdout)
@@ -397,6 +406,9 @@ for i in range(hisPeriod, -1, -1):
 
     # Run wgrib2 to rotate winds and save as NetCDF
     spOUT2 = subprocess.run(cmd2, shell=True, capture_output=True, encoding="utf-8")
+    if spOUT2.returncode != 0:
+        print(spOUT2.stderr)
+        sys.exit()
 
     # Convert to NetCDF
     cmd3 = (
@@ -411,6 +423,9 @@ for i in range(hisPeriod, -1, -1):
 
     # Run wgrib2 to rotate winds and save as NetCDF
     spOUT3 = subprocess.run(cmd3, shell=True, capture_output=True, encoding="utf-8")
+    if spOUT3.returncode != 0:
+        print(spOUT3.stderr)
+        sys.exit()
 
     # Merge the  xarrays
     # Read the netcdf file using xarray
