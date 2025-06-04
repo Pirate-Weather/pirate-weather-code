@@ -912,10 +912,10 @@ if saveType == "S3":
 # Create a Zarr array in the store with zstd compression
 if saveType == "S3":
     zarr_store_maps = zarr.storage.ZipStore(
-        forecast_process_dir + "/ECMWF_maps.zarr.zip", mode="a"
+        forecast_process_dir + "/ECMWF_Maps.zarr.zip", mode="a"
     )
 else:
-    zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/ECMWF_maps.zarr")
+    zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/ECMWF_Maps.zarr")
 
 for z in [0, 3, 5, 6, 7, 8, 9]:
     # Create a zarr backed dask array
@@ -977,8 +977,8 @@ else:
 
     # Copy the zarr file to the final location
     shutil.copytree(
-        forecast_process_dir + "/ECMWF_maps.zarr",
-        forecast_path + "/ECMWF_maps.zarr",
+        forecast_process_dir + "/ECMWF_Maps.zarr",
+        forecast_path + "/ECMWF_Maps.zarr",
         dirs_exist_ok=True,
     )
 
