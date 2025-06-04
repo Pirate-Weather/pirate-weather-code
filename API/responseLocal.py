@@ -2103,7 +2103,7 @@ async def PW_Forecast(
         hourlyLowIndex = np.full(len(hour_array_grib), int(0))
 
     # +1 to account for the extra 4 hours of summary
-    InterSday = np.zeros(shape=(daily_days+1, 21))
+    InterSday = np.zeros(shape=(daily_days + 1, 21))
 
     # Timing Check
     if TIMING:
@@ -2113,7 +2113,7 @@ async def PW_Forecast(
     loc = LocationInfo("name", "region", tz_name, lat, az_Lon)
 
     # Calculate Sunrise, Sunset, Moon Phase
-    for i in range(0, daily_days+1):
+    for i in range(0, daily_days + 1):
         try:
             s = sun(
                 loc.observer, date=baseDay + datetime.timedelta(days=i)
@@ -3506,10 +3506,9 @@ async def PW_Forecast(
             # print(((idx + 1) * 24) +4)
             # print(hourList[((idx) * 24)+4 : min((192, ((idx + 1) * 24) +5))])
 
-
             # Calculate the day summary from 4 to 4
             dayIcon, dayText = calculate_day_text(
-                hourList[((idx) * 24)+4 : ((idx + 1) * 24) +4],
+                hourList[((idx) * 24) + 4 : ((idx + 1) * 24) + 4],
                 prepAccumUnit,
                 visUnits,
                 windUnit,
@@ -4141,7 +4140,7 @@ async def PW_Forecast(
         if (not timeMachine) or (tmExtra):
             try:
                 hourIcon, hourText = calculate_day_text(
-                    hourList[int(baseTimeOffset):int(baseTimeOffset)+24],
+                    hourList[int(baseTimeOffset) : int(baseTimeOffset) + 24],
                     prepAccumUnit,
                     visUnits,
                     windUnit,
@@ -4167,9 +4166,13 @@ async def PW_Forecast(
                 )
 
         if extendFlag == 1:
-            returnOBJ["hourly"]["data"] = hourList[int(baseTimeOffset):int(baseTimeOffset)+169]
+            returnOBJ["hourly"]["data"] = hourList[
+                int(baseTimeOffset) : int(baseTimeOffset) + 169
+            ]
         else:
-            returnOBJ["hourly"]["data"] = hourList[int(baseTimeOffset):int(baseTimeOffset)+48]
+            returnOBJ["hourly"]["data"] = hourList[
+                int(baseTimeOffset) : int(baseTimeOffset) + 48
+            ]
 
     if exDaily != 1:
         returnOBJ["daily"] = dict()
