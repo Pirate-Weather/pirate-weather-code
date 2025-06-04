@@ -507,7 +507,7 @@ def calculate_period_text(
                     ],
                 ],
             ]
-    # If the type occurs during four perionds and we have five periods
+    # If the type occurs during four periods and we have five periods
     elif len(typePeriods) == 4 and len(periods) == 5:
         # If the type is precipitation/cloud cover then check the wind if the wind is occuring in four periods
         if len(wind) == 4 and (type == "precip" or type == "cloud"):
@@ -858,7 +858,7 @@ def calculate_day_text(
 
     # Loop through the hours to calculate the conditions for each period
     for idx, hour in enumerate(hours):
-        # If we have bad data then return not avaliable instead of trying to calculate the summary
+        # If we have bad data then return not available instead of trying to calculate the summary
         if (
             hour["temperature"] == -999
             or hour["windSpeed"] == -999

@@ -1802,7 +1802,6 @@ async def PW_Forecast(
         baseTimeOffset = (baseHour - baseDay).seconds / 3600
 
     # Merge hourly models onto a consistent time grid, starting from midnight on the requested day
-    numHours = 193  # Number of hours to merge
 
     ### Minutely
     minute_array = np.arange(
@@ -1820,18 +1819,17 @@ async def PW_Forecast(
     InterPminute = np.full((61, 4), np.nan)  # Time, Intensity,Probability
 
     if timeMachine:
-        hourly_hours = 24
         daily_days = 1
         daily_day_hours = 1
     elif extendFlag == 1:
-        hourly_hours = 169
         daily_days = 8
-        daily_day_hours = 1
+        daily_day_hours = 5
+        numHours = daily_days * 24 + daily_day_hours
     else:
         # Calculate full range of hours for text summary, then only display 48
-        hourly_hours = 169
         daily_days = 8
-        daily_day_hours = 1
+        daily_day_hours = 5
+        numHours = daily_days * 24 + daily_day_hours
 
     hour_array = np.arange(
         baseDay.astimezone(utc),
@@ -1848,6 +1846,8 @@ async def PW_Forecast(
         .astype("timedelta64[s]")
         .astype(np.int32)
     )
+
+    print(len(hour_array))
 
     # Timing Check
     if TIMING:
@@ -1993,7 +1993,7 @@ async def PW_Forecast(
             )
             .astimezone(utc)
             .timestamp()
-            for i in range(9)
+            for i in range(10)
         ]
     ).astype(np.int32)
 
@@ -2007,7 +2007,7 @@ async def PW_Forecast(
             )
             .astimezone(utc)
             .timestamp()
-            for i in range(9)
+            for i in range(10)
         ]
     ).astype(np.int32)
 
@@ -2021,7 +2021,7 @@ async def PW_Forecast(
             )
             .astimezone(utc)
             .timestamp()
-            for i in range(9)
+            for i in range(10)
         ]
     ).astype(np.int32)
 
@@ -2035,7 +2035,7 @@ async def PW_Forecast(
             )
             .astimezone(utc)
             .timestamp()
-            for i in range(9)
+            for i in range(10)
         ]
     ).astype(np.int32)
 
@@ -2063,7 +2063,8 @@ async def PW_Forecast(
     hourlyHighIndex = np.full(len(hour_array_grib), int(-999))
     hourlyLowIndex = np.full(len(hour_array_grib), int(-999))
 
-    for d in range(0, 8):
+    # Zero to 9 to account for the four horus in day 8
+    for d in range(0, 9):
         hourlyDayIndex[
             np.where(
                 (hour_array_grib >= day_array_grib[d])
@@ -2101,7 +2102,8 @@ async def PW_Forecast(
         hourlyHighIndex = np.full(len(hour_array_grib), int(0))
         hourlyLowIndex = np.full(len(hour_array_grib), int(0))
 
-    InterSday = np.zeros(shape=(daily_days, 21))
+    # +1 to account for the extra 4 hours of summary
+    InterSday = np.zeros(shape=(daily_days+1, 21))
 
     # Timing Check
     if TIMING:
@@ -2111,7 +2113,7 @@ async def PW_Forecast(
     loc = LocationInfo("name", "region", tz_name, lat, az_Lon)
 
     # Calculate Sunrise, Sunset, Moon Phase
-    for i in range(0, daily_days):
+    for i in range(0, daily_days+1):
         try:
             s = sun(
                 loc.observer, date=baseDay + datetime.timedelta(days=i)
@@ -2975,7 +2977,9 @@ async def PW_Forecast(
         print("Hourly Loop start")
         print(datetime.datetime.utcnow() - T_Start)
 
-    for idx in range(int(baseTimeOffset), hourly_hours + int(baseTimeOffset)):
+    # for idx in range(int(baseTimeOffset), hourly_hours + int(baseTimeOffset)):
+    # For day 0 summary, need to calculate hourly data from midnight local
+    for idx in range(0, numHours):
         # Check if day or night
         if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], 17]:
             isDay = False
@@ -3494,10 +3498,18 @@ async def PW_Forecast(
                     "apparentTemperatureMaxTime": int(InterPdayMaxTime[idx, 6]),
                 }
 
-        try:
-            # Update the text
+        # try:
+        if idx < 8:
+            # print(len(hourList))
+            # print(idx)
+            # print(((idx) * 24)+4)
+            # print(((idx + 1) * 24) +4)
+            # print(hourList[((idx) * 24)+4 : min((192, ((idx + 1) * 24) +5))])
+
+
+            # Calculate the day summary from 4 to 4
             dayIcon, dayText = calculate_day_text(
-                hourList[(idx) * 24 : (idx + 1) * 24],
+                hourList[((idx) * 24)+4 : ((idx + 1) * 24) +4],
                 prepAccumUnit,
                 visUnits,
                 windUnit,
@@ -3512,9 +3524,9 @@ async def PW_Forecast(
             # Translate the text
             dayObject["summary"] = translation.translate(["sentence", dayText])
             dayObject["icon"] = dayIcon
-        except Exception as e:
-            print("TEXT GEN ERROR:")
-            print(e)
+        # except Exception as e:
+        #     print("TEXT GEN ERROR:")
+        #     print(e)
 
         dayList.append(dayObject)
 
@@ -4129,7 +4141,7 @@ async def PW_Forecast(
         if (not timeMachine) or (tmExtra):
             try:
                 hourIcon, hourText = calculate_day_text(
-                    hourList[1:25],
+                    hourList[int(baseTimeOffset):int(baseTimeOffset)+24],
                     prepAccumUnit,
                     visUnits,
                     windUnit,
@@ -4155,9 +4167,9 @@ async def PW_Forecast(
                 )
 
         if extendFlag == 1:
-            returnOBJ["hourly"]["data"] = hourList
+            returnOBJ["hourly"]["data"] = hourList[int(baseTimeOffset):int(baseTimeOffset)+169]
         else:
-            returnOBJ["hourly"]["data"] = hourList[0:48]
+            returnOBJ["hourly"]["data"] = hourList[int(baseTimeOffset):int(baseTimeOffset)+48]
 
     if exDaily != 1:
         returnOBJ["daily"] = dict()
