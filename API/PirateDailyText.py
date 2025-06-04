@@ -265,7 +265,7 @@ def calculate_period_text(
                     periods[typePeriods[1]],
                 ],
             ]
-    # If the type occurs during three perionds
+    # If the type occurs during three periods
     elif len(typePeriods) == 3:
         # If the type is precipitation/cloud cover then check the wind if the wind is occuring in three periods
         if len(wind) == 3 and (type == "precip" or type == "cloud"):
@@ -796,7 +796,7 @@ def calculate_day_text(
     """
 
     # If we have more than 24 hours of data then bail
-    if len(hours) > 24:
+    if len(hours) > 25:
         return "none", ["for-day", "unavailable"]
 
     # Variables to calculate the periods from the hours array
@@ -1029,7 +1029,7 @@ def calculate_day_text(
             # Reset the varaibles back to zero
             numHoursFog = numHoursWind = numHoursDry = numHoursHumid = rainPrep = (
                 snowPrep
-            ) = sleetPrep = snowError = cloudCover = 0
+            ) = sleetPrep = snowError = cloudCover = maxWind = maxIntensity = 0
             periodIncrease = False
 
             # Calculate the next period text
@@ -1233,6 +1233,16 @@ def calculate_day_text(
         # Add to the visibility array if the dry text exists
         if period1Calc[4] is not None:
             dry.append(0)
+        # Calculate the maximum wind speed
+        if maxWind == 0:
+            maxWind = periodStats[0][10]
+        elif maxWind > 0 and periodStats[0][10] > maxWind:
+            maxWind = periodStats[0][10]
+        # Calculate the maximum precipitation intensity
+        if maxIntensity == 0:
+            maxIntensity = periodStats[0][8]
+        elif maxIntensity > 0 and periodStats[0][8] > maxIntensity:
+            maxIntensity = periodStats[0][8]
     # If period2 has any data
     if period2:
         # Add the period to the array of periods and add the precipitation
@@ -1305,6 +1315,16 @@ def calculate_day_text(
         # Add to the visibility array if the dry text exists
         if period2Calc[4] is not None:
             dry.append(1)
+        # Calculate the maximum wind speed
+        if maxWind == 0:
+            maxWind = periodStats[1][10]
+        elif maxWind > 0 and periodStats[0][10] > maxWind:
+            maxWind = periodStats[1][10]
+        # Calculate the maximum precipitation intensity
+        if maxIntensity == 0:
+            maxIntensity = periodStats[1][8]
+        elif maxIntensity > 0 and periodStats[1][8] > maxIntensity:
+            maxIntensity = periodStats[1][8]
     # If period3 has any data
     if period3:
         # Add the period to the array of periods and add the precipitation
@@ -1377,6 +1397,16 @@ def calculate_day_text(
         # Add to the visibility array if the dry text exists
         if period3Calc[4] is not None:
             dry.append(2)
+        # Calculate the maximum wind speed
+        if maxWind == 0:
+            maxWind = periodStats[2][10]
+        elif maxWind > 0 and periodStats[0][10] > maxWind:
+            maxWind = periodStats[2][10]
+        # Calculate the maximum precipitation intensity
+        if maxIntensity == 0:
+            maxIntensity = periodStats[2][8]
+        elif maxIntensity > 0 and periodStats[2][8] > maxIntensity:
+            maxIntensity = periodStats[2][8]
 
     # If period4 has any data
     if period4:
@@ -1450,6 +1480,16 @@ def calculate_day_text(
         # Add to the visibility array if the dry text exists
         if period4Calc[4] is not None:
             dry.append(3)
+        # Calculate the maximum wind speed
+        if maxWind == 0:
+            maxWind = periodStats[3][10]
+        elif maxWind > 0 and periodStats[0][10] > maxWind:
+            maxWind = periodStats[3][10]
+        # Calculate the maximum precipitation intensity
+        if maxIntensity == 0:
+            maxIntensity = periodStats[3][8]
+        elif maxIntensity > 0 and periodStats[3][8] > maxIntensity:
+            maxIntensity = periodStats[3][8]
 
     # If period5 has any data
     if period5:
@@ -1523,6 +1563,16 @@ def calculate_day_text(
         # Add to the visibility array if the dry text exists
         if period5Calc[4] is not None:
             dry.append(4)
+        # Calculate the maximum wind speed
+        if maxWind == 0:
+            maxWind = periodStats[4][10]
+        elif maxWind > 0 and periodStats[0][10] > maxWind:
+            maxWind = periodStats[4][10]
+        # Calculate the maximum precipitation intensity
+        if maxIntensity == 0:
+            maxIntensity = periodStats[4][8]
+        elif maxIntensity > 0 and periodStats[4][8] > maxIntensity:
+            maxIntensity = periodStats[4][8]
 
     # Calculate the total precipitation
     totalPrep = rainPrep + snowPrep + icePrep
@@ -2194,6 +2244,22 @@ def calculate_day_text(
                         summary_text = ["sentence", ["and", visText, precipText]]
                     else:
                         summary_text = ["sentence", ["and", precipText, visText]]
+                # If the wind is combined with cloud cover then join with an and and show whichever one comes fist at the start
+                elif cloudText is not None and windPrecip:
+                    if (
+                        mostCommonLevels[0] == min(starts)
+                        and (
+                            precip[0] != min(starts)
+                            or (totalPrep * len(precip)) < 0.25 * prepAccumUnit
+                        )
+                    ) or (
+                        len(mostCommonLevels) == len(periods)
+                        and len(precip) != len(periods)
+                    ):
+                        cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
+                        summary_text = ["sentence", ["and", cloudText, precipText]]
+                    else:
+                        summary_text = ["sentence", ["and", precipText, cloudText]]
                 # If there is any wind text then join with an and and show whichever one comes fist at the start
                 elif windText is not None:
                     if (
