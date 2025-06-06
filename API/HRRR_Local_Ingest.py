@@ -572,7 +572,7 @@ zarr_array = zarr.create_array(
 
 # with ProgressBar():
 da.rechunk(
-    daskVarArrayStackDisk,
+    daskVarArrayStackDisk.round(3),
     (len(zarrVars), daskVarArrayStackDisk.shape[1], finalChunk, finalChunk),
 ).to_zarr(zarr_array, compute=True)
 
