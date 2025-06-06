@@ -1,0 +1,1 @@
+"""Pirate Weather API package."""

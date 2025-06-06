@@ -1,0 +1,31 @@
+"""Indices used for hourly forecast arrays."""
+from enum import IntEnum
+
+
+class HourlyIndex(IntEnum):
+    TIME = 0
+    PRECIP_TYPE = 1
+    PRECIP_INTENSITY = 2
+    PRECIP_PROBABILITY = 3
+    PRECIP_INTENSITY_ERROR = 4
+    TEMPERATURE = 5
+    APPARENT_TEMP_RADIATIVE = 6
+    DEW_POINT = 7
+    HUMIDITY = 8
+    PRESSURE = 9
+    WIND_SPEED = 10
+    WIND_GUST = 11
+    WIND_BEARING = 12
+    CLOUD_COVER = 13
+    UV_INDEX = 14
+    VISIBILITY = 15
+    OZONE = 16
+    PRECIP_ACCUMULATION = 17
+    NEAR_STORM_DISTANCE = 18
+    NEAR_STORM_BEARING = 19
+    SMOKE = 20
+    LIQUID_ACCUM = 21
+    SNOW_ACCUM = 22
+    ICE_ACCUM = 23
+    FIRE_INDEX = 24
+    FEELS_LIKE = 25
