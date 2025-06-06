@@ -395,7 +395,7 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar/NWS_Alerts.zarr.zip")
         store = S3ZipStore(f)
     else:
-        f = "/mnt/nvme/data/NWS_Alerts.zarr.zip"
+        f = s3_bucket + "NWS_Alerts.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
 
     NWS_Alerts_Zarr = zarr.open(store, mode="r")
@@ -405,7 +405,7 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar/SubH.zarr.zip")
         store = S3ZipStore(f)
     else:
-        f = "/mnt/nvme/data/SubH.zarr.zip"
+        f = s3_bucket + "SubH_v2.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
 
         SubH_Zarr = zarr.open(store, mode="r")
@@ -415,7 +415,7 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar/HRRR_6H.zarr.zip")
         store = S3ZipStore(f)
     else:
-        f = "/mnt/nvme/data/HRRR_6H.zarr.zip"
+        f = s3_bucket + "HRRR_6H.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
 
     HRRR_6H_Zarr = zarr.open(store, mode="r")
@@ -425,7 +425,7 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar/GFS.zarr.zip")
         store = S3ZipStore(f)
     else:
-        f = "/mnt/nvme/data/GFS.zarr.zip"
+        f = s3_bucket + "GFS.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
 
     GFS_Zarr = zarr.open(store, mode="r")
@@ -435,7 +435,7 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar/GEFS.zarr.zip")
         store = S3ZipStore(f)
     else:
-        f = "/mnt/nvme/data/GEFS.zarr.zip"
+        f = s3_bucket + "GEFS.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
 
     GEFS_Zarr = zarr.open(store, mode="r")
@@ -445,7 +445,7 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar/NBM.zarr.zip")
         store = S3ZipStore(f)
     else:
-        f = "/mnt/nvme/data/NBM.zarr.zip"
+        f = s3_bucket + "NBM.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
 
     NBM_Zarr = zarr.open(store, mode="r")
@@ -455,7 +455,7 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar/NBM_Fire.zarr.zip")
         store = S3ZipStore(f)
     else:
-        f = "/mnt/nvme/data/NBM_Fire.zarr.zip"
+        f = s3_bucket + "NBM_Fire.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
 
     NBM_Fire_Zarr = zarr.open(store, mode="r")
@@ -465,7 +465,7 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar/HRRR.zarr.zip")
         store = S3ZipStore(f)
     else:
-        f = "/mnt/nvme/data/HRRR.zarr.zip"
+        f = s3_bucket + "HRRR.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
 
     HRRR_Zarr = zarr.open(store, mode="r")
@@ -476,7 +476,7 @@ if STAGE == "TESTING":
             f = s3.open("s3://ForecastTar/ETOPO_DA_C.zarr.zip")
             store = S3ZipStore(f)
         else:
-            f = "/mnt/nvme/data/ETOPO_DA_C.zarr.zip"
+            f = s3_bucket + "ETOPO_DA_C.zarr.zip"
             store = zarr.storage.ZipStore(f, mode="r")
 
         ETOPO_f = zarr.open(store, mode="r")
