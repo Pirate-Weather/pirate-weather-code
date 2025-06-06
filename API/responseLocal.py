@@ -408,8 +408,8 @@ if STAGE == "TESTING":
         f = s3_bucket + "SubH_v2.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
 
-        SubH_Zarr = zarr.open(store, mode="r")
-        print("SubH Read")
+    SubH_Zarr = zarr.open(store, mode="r")
+    print("SubH Read")
 
     if save_type == "S3":
         f = s3.open("s3://ForecastTar/HRRR_6H.zarr.zip")
@@ -3498,34 +3498,29 @@ async def PW_Forecast(
                     "apparentTemperatureMaxTime": int(InterPdayMaxTime[idx, 6]),
                 }
 
-        # try:
-        if idx < 8:
-            # print(len(hourList))
-            # print(idx)
-            # print(((idx) * 24)+4)
-            # print(((idx + 1) * 24) +4)
-            # print(hourList[((idx) * 24)+4 : min((192, ((idx + 1) * 24) +5))])
+        try:
+            if idx < 8:
+                # Calculate the day summary from 4 to 4
+                dayIcon, dayText = calculate_day_text(
+                    hourList[((idx) * 24) + 4 : ((idx + 1) * 24) + 4],
+                    prepAccumUnit,
+                    visUnits,
+                    windUnit,
+                    tempUnits,
+                    True,
+                    str(tz_name),
+                    int(time.time()),
+                    "day",
+                    icon,
+                )
 
-            # Calculate the day summary from 4 to 4
-            dayIcon, dayText = calculate_day_text(
-                hourList[((idx) * 24) + 4 : ((idx + 1) * 24) + 4],
-                prepAccumUnit,
-                visUnits,
-                windUnit,
-                tempUnits,
-                True,
-                str(tz_name),
-                int(time.time()),
-                "day",
-                icon,
-            )
-
-            # Translate the text
-            dayObject["summary"] = translation.translate(["sentence", dayText])
-            dayObject["icon"] = dayIcon
-        # except Exception as e:
-        #     print("TEXT GEN ERROR:")
-        #     print(e)
+                # Translate the text
+                dayObject["summary"] = translation.translate(["sentence", dayText])
+                dayObject["icon"] = dayIcon
+        except Exception as e:
+            print("TEXT GEN ERROR:")
+            print(dayText)
+            print(e)
 
         dayList.append(dayObject)
 
@@ -4210,7 +4205,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.7.0"
+        returnOBJ["flags"]["version"] = "V2.7.0b"
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
             returnOBJ["flags"]["processTime"] = (
