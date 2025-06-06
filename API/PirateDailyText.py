@@ -1318,7 +1318,7 @@ def calculate_day_text(
         # Calculate the maximum wind speed
         if maxWind == 0:
             maxWind = periodStats[1][10]
-        elif maxWind > 0 and periodStats[0][10] > maxWind:
+        elif maxWind > 0 and periodStats[1][10] > maxWind:
             maxWind = periodStats[1][10]
         # Calculate the maximum precipitation intensity
         if maxIntensity == 0:
@@ -1400,7 +1400,7 @@ def calculate_day_text(
         # Calculate the maximum wind speed
         if maxWind == 0:
             maxWind = periodStats[2][10]
-        elif maxWind > 0 and periodStats[0][10] > maxWind:
+        elif maxWind > 0 and periodStats[2][10] > maxWind:
             maxWind = periodStats[2][10]
         # Calculate the maximum precipitation intensity
         if maxIntensity == 0:
@@ -1483,7 +1483,7 @@ def calculate_day_text(
         # Calculate the maximum wind speed
         if maxWind == 0:
             maxWind = periodStats[3][10]
-        elif maxWind > 0 and periodStats[0][10] > maxWind:
+        elif maxWind > 0 and periodStats[3][10] > maxWind:
             maxWind = periodStats[3][10]
         # Calculate the maximum precipitation intensity
         if maxIntensity == 0:
@@ -1566,7 +1566,7 @@ def calculate_day_text(
         # Calculate the maximum wind speed
         if maxWind == 0:
             maxWind = periodStats[4][10]
-        elif maxWind > 0 and periodStats[0][10] > maxWind:
+        elif maxWind > 0 and periodStats[4][10] > maxWind:
             maxWind = periodStats[4][10]
         # Calculate the maximum precipitation intensity
         if maxIntensity == 0:
