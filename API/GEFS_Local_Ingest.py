@@ -724,7 +724,7 @@ stackInterp = da.rechunk(
         hourly_timesUnix,
         dtype="float32",
         chunks=(1, len(stacked_timesUnix), processChunk, processChunk),
-    ).round(30),
+    ).round(3),
     (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
 ).to_zarr(zarr_array, overwrite=True, compute=True)
 
