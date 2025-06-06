@@ -34,7 +34,7 @@ from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
 
-from API.utils.indices import HourlyIndex as HIdx
+from API.utils.indices import DailyIndex as DIdx, HourlyIndex as HIdx, SunIndex as SIdx
 from API.utils.time_utils import (
     calculate_globe_temperature,
     calculate_wbgt,
@@ -1538,7 +1538,7 @@ async def PW_Forecast(
                 loc.observer, date=baseDay + datetime.timedelta(days=i)
             )  # Use local to get the correct date
 
-            InterSday[i, 17] = (
+            InterSday[i, SIdx.SUNRISE] = (
                 (
                     np.datetime64(s["sunrise"])
                     - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
@@ -1546,7 +1546,7 @@ async def PW_Forecast(
                 .astype("timedelta64[s]")
                 .astype(np.int32)
             )
-            InterSday[i, 18] = (
+            InterSday[i, SIdx.SUNSET] = (
                 (
                     np.datetime64(s["sunset"])
                     - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
@@ -1555,7 +1555,7 @@ async def PW_Forecast(
                 .astype(np.int32)
             )
 
-            InterSday[i, 15] = (
+            InterSday[i, SIdx.DAWN] = (
                 (
                     np.datetime64(s["dawn"])
                     - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
@@ -1563,7 +1563,7 @@ async def PW_Forecast(
                 .astype("timedelta64[s]")
                 .astype(np.int32)
             )
-            InterSday[i, 16] = (
+            InterSday[i, SIdx.DUSK] = (
                 (
                     np.datetime64(s["dusk"])
                     - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
@@ -1578,22 +1578,22 @@ async def PW_Forecast(
                 (lat < 0) & (baseDay.month <= 3) | (baseDay.month >= 10)
             ):
                 # Set sunrise to one second after midnight
-                InterSday[i, 17] = day_array_grib[i] + np.timedelta64(1, "s").astype(
+                InterSday[i, SIdx.SUNRISE] = day_array_grib[i] + np.timedelta64(1, "s").astype(
                     "timedelta64[s]"
                 ).astype(np.int32)
                 # Set sunset to one second before midnight the following day
-                InterSday[i, 18] = (
+                InterSday[i, SIdx.SUNSET] = (
                     day_array_grib[i]
                     + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
                     - np.timedelta64(1, "s").astype("timedelta64[s]").astype(np.int32)
                 )
 
                 # Set sunrise to one second after midnight
-                InterSday[i, 15] = day_array_grib[i] + np.timedelta64(1, "s").astype(
+                InterSday[i, SIdx.DAWN] = day_array_grib[i] + np.timedelta64(1, "s").astype(
                     "timedelta64[s]"
                 ).astype(np.int32)
                 # Set sunset to one second before midnight the following day
-                InterSday[i, 16] = (
+                InterSday[i, SIdx.DUSK] = (
                     day_array_grib[i]
                     + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
                     - np.timedelta64(1, "s").astype("timedelta64[s]").astype(np.int32)
@@ -1602,32 +1602,32 @@ async def PW_Forecast(
             # Else
             else:
                 # Set sunrise to two seconds before midnight
-                InterSday[i, 17] = (
+                InterSday[i, SIdx.SUNRISE] = (
                     day_array_grib[i]
                     + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
                     - np.timedelta64(2, "s").astype("timedelta64[s]").astype(np.int32)
                 )
                 # Set sunset to one seconds before midnight
-                InterSday[i, 18] = (
+                InterSday[i, SIdx.SUNSET] = (
                     day_array_grib[i]
                     + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
                     - np.timedelta64(1, "s").astype("timedelta64[s]").astype(np.int32)
                 )
 
-                InterSday[i, 15] = (
+                InterSday[i, SIdx.DAWN] = (
                     day_array_grib[i]
                     + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
                     - np.timedelta64(2, "s").astype("timedelta64[s]").astype(np.int32)
                 )
                 # Set sunset to one seconds before midnight
-                InterSday[i, 16] = (
+                InterSday[i, SIdx.DUSK] = (
                     day_array_grib[i]
                     + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
                     - np.timedelta64(1, "s").astype("timedelta64[s]").astype(np.int32)
                 )
 
         m = moon.phase(baseDay + datetime.timedelta(days=i))
-        InterSday[i, 19] = m / 27.99
+        InterSday[i, SIdx.MOON_PHASE] = m / 27.99
 
     # Timing Check
     if TIMING:
@@ -2458,14 +2458,14 @@ async def PW_Forecast(
 
     for idx in range(int(baseTimeOffset), hourly_hours + int(baseTimeOffset)):
         # Check if day or night
-        if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], 17]:
+        if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], SIdx.SUNRISE]:
             isDay = False
         elif (
-            hour_array_grib[idx] >= InterSday[hourlyDayIndex[idx], 17]
-            and hour_array_grib[idx] <= InterSday[hourlyDayIndex[idx], 18]
+            hour_array_grib[idx] >= InterSday[hourlyDayIndex[idx], SIdx.SUNRISE]
+            and hour_array_grib[idx] <= InterSday[hourlyDayIndex[idx], SIdx.SUNSET]
         ):
             isDay = True
-        elif hour_array_grib[idx] > InterSday[hourlyDayIndex[idx], 18]:
+        elif hour_array_grib[idx] > InterSday[hourlyDayIndex[idx], SIdx.SUNSET]:
             isDay = False
 
         # Set text
@@ -2498,31 +2498,31 @@ async def PW_Forecast(
         elif InterPhour[idx, HIdx.CLOUD_COVER] > 0.375:
             hourText = "Partly Cloudy"
 
-            if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], 17]:
+            if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], SIdx.SUNRISE]:
                 # Before sunrise
                 hourIcon = "partly-cloudy-night"
             elif (
-                hour_array_grib[idx] >= InterSday[hourlyDayIndex[idx], 17]
-                and hour_array_grib[idx] <= InterSday[hourlyDayIndex[idx], 18]
+                hour_array_grib[idx] >= InterSday[hourlyDayIndex[idx], SIdx.SUNRISE]
+                and hour_array_grib[idx] <= InterSday[hourlyDayIndex[idx], SIdx.SUNSET]
             ):
                 # After sunrise before sunset
                 hourIcon = "partly-cloudy-day"
-            elif hour_array_grib[idx] > InterSday[hourlyDayIndex[idx], 18]:
+            elif hour_array_grib[idx] > InterSday[hourlyDayIndex[idx], SIdx.SUNSET]:
                 # After sunset
                 hourIcon = "partly-cloudy-night"
         else:
             hourText = "Clear"
 
-            if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], 17]:
+            if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], SIdx.SUNRISE]:
                 # Before sunrise
                 hourIcon = "clear-night"
             elif (
-                hour_array_grib[idx] >= InterSday[hourlyDayIndex[idx], 17]
-                and hour_array_grib[idx] <= InterSday[hourlyDayIndex[idx], 18]
+                hour_array_grib[idx] >= InterSday[hourlyDayIndex[idx], SIdx.SUNRISE]
+                and hour_array_grib[idx] <= InterSday[hourlyDayIndex[idx], SIdx.SUNSET]
             ):
                 # After sunrise before sunset
                 hourIcon = "clear-day"
-            elif hour_array_grib[idx] > InterSday[hourlyDayIndex[idx], 18]:
+            elif hour_array_grib[idx] > InterSday[hourlyDayIndex[idx], SIdx.SUNSET]:
                 # After sunset
                 hourIcon = "clear-night"
 
@@ -2743,18 +2743,18 @@ async def PW_Forecast(
     # Finally, if there is much ice at all, that takes priority over rain or snow.
 
     # First, add a fallback if any precipitation is expected
-    maxPchanceDay[((maxPchanceDay == 0) & (InterPdaySum[:, 21] > 0))] = 4
-    maxPchanceDay[((maxPchanceDay == 0) & (InterPdaySum[:, 22] > 0))] = 1
-    maxPchanceDay[((maxPchanceDay == 0) & (InterPdaySum[:, 23] > 0))] = 2
+    maxPchanceDay[((maxPchanceDay == 0) & (InterPdaySum[:, DIdx.LIQUID_ACCUM] > 0))] = 4
+    maxPchanceDay[((maxPchanceDay == 0) & (InterPdaySum[:, DIdx.SNOW_ACCUM] > 0))] = 1
+    maxPchanceDay[((maxPchanceDay == 0) & (InterPdaySum[:, DIdx.ICE_ACCUM] > 0))] = 2
 
     # Then, if more than 10 mm of rain is forecast, then rain
-    maxPchanceDay[InterPdaySum[:, 21] > (10 * prepAccumUnit)] = 4
+    maxPchanceDay[InterPdaySum[:, DIdx.LIQUID_ACCUM] > (10 * prepAccumUnit)] = 4
 
     # If more than 5 mm of snow is forecast, then snow
-    maxPchanceDay[InterPdaySum[:, 22] > (5 * prepAccumUnit)] = 1
+    maxPchanceDay[InterPdaySum[:, DIdx.SNOW_ACCUM] > (5 * prepAccumUnit)] = 1
 
     # Else, if more than 1 mm of ice is forecast, then ice
-    maxPchanceDay[InterPdaySum[:, 23] > (1 * prepAccumUnit)] = 2
+    maxPchanceDay[InterPdaySum[:, DIdx.ICE_ACCUM] > (1 * prepAccumUnit)] = 2
 
     # Process Daily Data for ouput
     dayList = []
@@ -2767,34 +2767,63 @@ async def PW_Forecast(
 
     # Round
     # Round all to 2 except precipitations
-    InterPday[:, 5:18] = InterPday[:, 5:18].round(2)
-    InterPdayMax[:, 3] = InterPdayMax[:, 3].round(2)
-    InterPdayMax[:, 5:18] = InterPdayMax[:, 5:18].round(2)
-    InterPdayMax[:, 24] = InterPdayMax[:, 24].round(2)
+    InterPday[:, DIdx.TEMPERATURE : DIdx.PRECIP_ACCUMULATION + 1] = InterPday[
+        :, DIdx.TEMPERATURE : DIdx.PRECIP_ACCUMULATION + 1
+    ].round(2)
+    InterPdayMax[:, DIdx.PRECIP_PROBABILITY] = InterPdayMax[
+        :, DIdx.PRECIP_PROBABILITY
+    ].round(2)
+    InterPdayMax[:, DIdx.TEMPERATURE : DIdx.PRECIP_ACCUMULATION + 1] = (
+        InterPdayMax[:, DIdx.TEMPERATURE : DIdx.PRECIP_ACCUMULATION + 1].round(2)
+    )
+    InterPdayMax[:, DIdx.FIRE_INDEX] = InterPdayMax[:, DIdx.FIRE_INDEX].round(2)
 
-    InterPdayMin[:, 5:18] = InterPdayMin[:, 5:18].round(2)
-    InterPdaySum[:, 5:18] = InterPdaySum[:, 5:18].round(2)
-    InterPdayHigh[:, 5:18] = InterPdayHigh[:, 5:18].round(2)
-    InterPdayLow[:, 5:18] = InterPdayLow[:, 5:18].round(2)
+    InterPdayMin[:, DIdx.TEMPERATURE : DIdx.PRECIP_ACCUMULATION + 1] = (
+        InterPdayMin[:, DIdx.TEMPERATURE : DIdx.PRECIP_ACCUMULATION + 1].round(2)
+    )
+    InterPdaySum[:, DIdx.TEMPERATURE : DIdx.PRECIP_ACCUMULATION + 1] = (
+        InterPdaySum[:, DIdx.TEMPERATURE : DIdx.PRECIP_ACCUMULATION + 1].round(2)
+    )
+    InterPdayHigh[:, DIdx.TEMPERATURE : DIdx.PRECIP_ACCUMULATION + 1] = (
+        InterPdayHigh[:, DIdx.TEMPERATURE : DIdx.PRECIP_ACCUMULATION + 1].round(2)
+    )
+    InterPdayLow[:, DIdx.TEMPERATURE : DIdx.PRECIP_ACCUMULATION + 1] = (
+        InterPdayLow[:, DIdx.TEMPERATURE : DIdx.PRECIP_ACCUMULATION + 1].round(2)
+    )
 
-    InterPday[:, 1:5] = InterPday[:, 1:5].round(4)
-    InterPdaySum[:, 1:5] = InterPdaySum[:, 1:5].round(4)
-    InterPdayMax[:, 1:3] = InterPdayMax[:, 1:3].round(4)
-    InterPdayMax[:, 4:5] = InterPdayMax[:, 4:5].round(4)
-    InterPdaySum[:, 21:24] = InterPdaySum[:, 21:24].round(4)
-    InterPdayMax[:, 21:24] = InterPdayMax[:, 21:24].round(4)
+    InterPday[:, DIdx.PRECIP_TYPE : DIdx.PRECIP_INTENSITY_ERROR + 1] = (
+        InterPday[:, DIdx.PRECIP_TYPE : DIdx.PRECIP_INTENSITY_ERROR + 1].round(4)
+    )
+    InterPdaySum[:, DIdx.PRECIP_TYPE : DIdx.PRECIP_INTENSITY_ERROR + 1] = (
+        InterPdaySum[:, DIdx.PRECIP_TYPE : DIdx.PRECIP_INTENSITY_ERROR + 1].round(4)
+    )
+    InterPdayMax[:, DIdx.PRECIP_TYPE : DIdx.PRECIP_INTENSITY + 1] = (
+        InterPdayMax[:, DIdx.PRECIP_TYPE : DIdx.PRECIP_INTENSITY + 1].round(4)
+    )
+    InterPdayMax[:, DIdx.PRECIP_INTENSITY_ERROR : DIdx.PRECIP_INTENSITY_ERROR + 1] = (
+        InterPdayMax[:, DIdx.PRECIP_INTENSITY_ERROR : DIdx.PRECIP_INTENSITY_ERROR + 1].round(4)
+    )
+    InterPdaySum[:, DIdx.LIQUID_ACCUM : DIdx.ICE_ACCUM + 1] = (
+        InterPdaySum[:, DIdx.LIQUID_ACCUM : DIdx.ICE_ACCUM + 1].round(4)
+    )
+    InterPdayMax[:, DIdx.LIQUID_ACCUM : DIdx.ICE_ACCUM + 1] = (
+        InterPdayMax[:, DIdx.LIQUID_ACCUM : DIdx.ICE_ACCUM + 1].round(4)
+    )
 
     if TIMING:
         print("Daily Loop start")
         print(datetime.datetime.utcnow() - T_Start)
 
     for idx in range(0, daily_days):
-        if InterPdayMax4am[idx, 3] > 0.3 and (
+        if InterPdayMax4am[idx, DIdx.PRECIP_PROBABILITY] > 0.3 and (
             (
-                (InterPdaySum4am[idx, 21] + InterPdaySum4am[idx, 23])
+                (
+                    InterPdaySum4am[idx, DIdx.LIQUID_ACCUM]
+                    + InterPdaySum4am[idx, DIdx.ICE_ACCUM]
+                )
                 > (1 * prepAccumUnit)
             )
-            or (InterPdaySum4am[idx, 22] > (10 * prepAccumUnit))
+            or (InterPdaySum4am[idx, DIdx.SNOW_ACCUM] > (10 * prepAccumUnit))
         ):
             # If more than 30% chance of precip at any point throughout the day, and either more than 1 mm of rain or 5 mm of snow
             # Thresholds set in mm
@@ -2808,23 +2837,23 @@ async def PW_Forecast(
                 else:
                     tempThresh = 0
 
-                if InterPday[idx, 5] > tempThresh:
+                if InterPday[idx, DIdx.TEMPERATURE] > tempThresh:
                     dayIcon = "rain"
                     dayText = "Rain"
                 else:
                     dayIcon = "snow"
                     dayText = "Snow"
 
-        elif InterPday4am[idx, 15] < (1000 * visUnits):
+        elif InterPday4am[idx, DIdx.VISIBILITY] < (1000 * visUnits):
             dayIcon = "fog"
             dayText = "Fog"
-        elif InterPday4am[idx, 10] > (10 * windUnit):
+        elif InterPday4am[idx, DIdx.WIND_SPEED] > (10 * windUnit):
             dayIcon = "wind"
             dayText = "Windy"
-        elif InterPday4am[idx, 13] > 0.75:
+        elif InterPday4am[idx, DIdx.CLOUD_COVER] > 0.75:
             dayIcon = "cloudy"
             dayText = "Cloudy"
-        elif InterPday4am[idx, 13] > 0.375:
+        elif InterPday4am[idx, DIdx.CLOUD_COVER] > 0.375:
             dayIcon = "partly-cloudy-day"
             dayText = "Partly Cloudy"
         else:
@@ -2839,43 +2868,43 @@ async def PW_Forecast(
                 "time": int(day_array_grib[idx]),
                 "summary": dayText,
                 "icon": dayIcon,
-                "sunriseTime": int(InterSday[idx, 17]),
-                "sunsetTime": int(InterSday[idx, 18]),
-                "moonPhase": InterSday[idx, 19].round(2),
-                "precipIntensity": InterPday[idx, 2],
-                "precipIntensityMax": InterPdayMax[idx, 2],
-                "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
+                "sunriseTime": int(InterSday[idx, SIdx.SUNRISE]),
+                "sunsetTime": int(InterSday[idx, SIdx.SUNSET]),
+                "moonPhase": InterSday[idx, SIdx.MOON_PHASE].round(2),
+                "precipIntensity": InterPday[idx, DIdx.PRECIP_INTENSITY],
+                "precipIntensityMax": InterPdayMax[idx, DIdx.PRECIP_INTENSITY],
+                "precipIntensityMaxTime": int(InterPdayMaxTime[idx, DIdx.PRECIP_INTENSITY]),
                 "precipAccumulation": round(
-                    InterPdaySum[idx, 21]
-                    + InterPdaySum[idx, 22]
-                    + InterPdaySum[idx, 23],
+                    InterPdaySum[idx, DIdx.LIQUID_ACCUM]
+                    + InterPdaySum[idx, DIdx.SNOW_ACCUM]
+                    + InterPdaySum[idx, DIdx.ICE_ACCUM],
                     4,
                 ),
                 "precipType": PTypeDay[idx],
-                "temperatureHigh": InterPdayHigh[idx, 5],
-                "temperatureHighTime": int(InterPdayHighTime[idx, 5]),
-                "temperatureLow": InterPdayLow[idx, 5],
-                "temperatureLowTime": int(InterPdayLowTime[idx, 5]),
-                "apparentTemperatureHigh": InterPdayHigh[idx, 6],
-                "apparentTemperatureHighTime": int(InterPdayHighTime[idx, 6]),
-                "apparentTemperatureLow": InterPdayLow[idx, 6],
-                "apparentTemperatureLowTime": int(InterPdayLowTime[idx, 6]),
-                "dewPoint": InterPday[idx, 7],
-                "pressure": InterPday[idx, 9],
-                "windSpeed": InterPday[idx, 10],
-                "windGust": InterPday[idx, 11],
-                "windGustTime": int(InterPdayMaxTime[idx, 11]),
-                "windBearing": int(InterPday[idx, 12]),
-                "cloudCover": InterPday[idx, 13],
-                "temperatureMin": InterPdayMin[idx, 5],
-                "temperatureMinTime": int(InterPdayMinTime[idx, 5]),
-                "temperatureMax": InterPdayMax[idx, 5],
-                "temperatureMaxTime": int(InterPdayMaxTime[idx, 5]),
-                "apparentTemperatureMin": InterPdayMin[idx, 6],
-                "apparentTemperatureMinTime": int(InterPdayMinTime[idx, 6]),
-                "apparentTemperatureMax": InterPdayMax[idx, 6],
-                "apparentTemperatureMaxTime": int(InterPdayMaxTime[idx, 6]),
-                "snowAccumulation": InterPdaySum[idx, 22],
+                "temperatureHigh": InterPdayHigh[idx, DIdx.TEMPERATURE],
+                "temperatureHighTime": int(InterPdayHighTime[idx, DIdx.TEMPERATURE]),
+                "temperatureLow": InterPdayLow[idx, DIdx.TEMPERATURE],
+                "temperatureLowTime": int(InterPdayLowTime[idx, DIdx.TEMPERATURE]),
+                "apparentTemperatureHigh": InterPdayHigh[idx, DIdx.APPARENT_TEMP_RADIATIVE],
+                "apparentTemperatureHighTime": int(InterPdayHighTime[idx, DIdx.APPARENT_TEMP_RADIATIVE]),
+                "apparentTemperatureLow": InterPdayLow[idx, DIdx.APPARENT_TEMP_RADIATIVE],
+                "apparentTemperatureLowTime": int(InterPdayLowTime[idx, DIdx.APPARENT_TEMP_RADIATIVE]),
+                "dewPoint": InterPday[idx, DIdx.DEW_POINT],
+                "pressure": InterPday[idx, DIdx.PRESSURE],
+                "windSpeed": InterPday[idx, DIdx.WIND_SPEED],
+                "windGust": InterPday[idx, DIdx.WIND_GUST],
+                "windGustTime": int(InterPdayMaxTime[idx, DIdx.WIND_GUST]),
+                "windBearing": int(InterPday[idx, DIdx.WIND_BEARING]),
+                "cloudCover": InterPday[idx, DIdx.CLOUD_COVER],
+                "temperatureMin": InterPdayMin[idx, DIdx.TEMPERATURE],
+                "temperatureMinTime": int(InterPdayMinTime[idx, DIdx.TEMPERATURE]),
+                "temperatureMax": InterPdayMax[idx, DIdx.TEMPERATURE],
+                "temperatureMaxTime": int(InterPdayMaxTime[idx, DIdx.TEMPERATURE]),
+                "apparentTemperatureMin": InterPdayMin[idx, DIdx.APPARENT_TEMP_RADIATIVE],
+                "apparentTemperatureMinTime": int(InterPdayMinTime[idx, DIdx.APPARENT_TEMP_RADIATIVE]),
+                "apparentTemperatureMax": InterPdayMax[idx, DIdx.APPARENT_TEMP_RADIATIVE],
+                "apparentTemperatureMaxTime": int(InterPdayMaxTime[idx, DIdx.APPARENT_TEMP_RADIATIVE]),
+                "snowAccumulation": InterPdaySum[idx, DIdx.SNOW_ACCUM],
             }
         else:
             if version >= 2:
@@ -2883,103 +2912,103 @@ async def PW_Forecast(
                     "time": int(day_array_grib[idx]),
                     "summary": dayText,
                     "icon": dayIcon,
-                    "dawnTime": int(InterSday[idx, 15]),
-                    "sunriseTime": int(InterSday[idx, 17]),
-                    "sunsetTime": int(InterSday[idx, 18]),
-                    "duskTime": int(InterSday[idx, 16]),
-                    "moonPhase": InterSday[idx, 19].round(2),
-                    "precipIntensity": InterPday[idx, 2],
-                    "precipIntensityMax": InterPdayMax[idx, 2],
-                    "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
-                    "precipProbability": InterPdayMax[idx, 3],
+                    "dawnTime": int(InterSday[idx, SIdx.DAWN]),
+                    "sunriseTime": int(InterSday[idx, SIdx.SUNRISE]),
+                    "sunsetTime": int(InterSday[idx, SIdx.SUNSET]),
+                    "duskTime": int(InterSday[idx, SIdx.DUSK]),
+                    "moonPhase": InterSday[idx, SIdx.MOON_PHASE].round(2),
+                    "precipIntensity": InterPday[idx, DIdx.PRECIP_INTENSITY],
+                    "precipIntensityMax": InterPdayMax[idx, DIdx.PRECIP_INTENSITY],
+                    "precipIntensityMaxTime": int(InterPdayMaxTime[idx, DIdx.PRECIP_INTENSITY]),
+                    "precipProbability": InterPdayMax[idx, DIdx.PRECIP_PROBABILITY],
                     "precipAccumulation": round(
-                        InterPdaySum[idx, 21]
-                        + InterPdaySum[idx, 22]
-                        + InterPdaySum[idx, 23],
+                        InterPdaySum[idx, DIdx.LIQUID_ACCUM]
+                        + InterPdaySum[idx, DIdx.SNOW_ACCUM]
+                        + InterPdaySum[idx, DIdx.ICE_ACCUM],
                         4,
                     ),
                     "precipType": PTypeDay[idx],
-                    "temperatureHigh": InterPdayHigh[idx, 5],
-                    "temperatureHighTime": int(InterPdayHighTime[idx, 5]),
-                    "temperatureLow": InterPdayLow[idx, 5],
-                    "temperatureLowTime": int(InterPdayLowTime[idx, 5]),
-                    "apparentTemperatureHigh": InterPdayHigh[idx, 6],
-                    "apparentTemperatureHighTime": int(InterPdayHighTime[idx, 6]),
-                    "apparentTemperatureLow": InterPdayLow[idx, 6],
-                    "apparentTemperatureLowTime": int(InterPdayLowTime[idx, 6]),
-                    "dewPoint": InterPday[idx, 7],
-                    "humidity": InterPday[idx, 8],
-                    "pressure": InterPday[idx, 9],
-                    "windSpeed": InterPday[idx, 10],
-                    "windGust": InterPday[idx, 11],
-                    "windGustTime": int(InterPdayMaxTime[idx, 11]),
-                    "windBearing": int(InterPday[idx, 12]),
-                    "cloudCover": InterPday[idx, 13],
-                    "uvIndex": InterPdayMax[idx, 14],
-                    "uvIndexTime": int(InterPdayMaxTime[idx, 14]),
-                    "visibility": InterPday[idx, 15],
-                    "temperatureMin": InterPdayMin[idx, 5],
-                    "temperatureMinTime": int(InterPdayMinTime[idx, 5]),
-                    "temperatureMax": InterPdayMax[idx, 5],
-                    "temperatureMaxTime": int(InterPdayMaxTime[idx, 5]),
-                    "apparentTemperatureMin": InterPdayMin[idx, 6],
-                    "apparentTemperatureMinTime": int(InterPdayMinTime[idx, 6]),
-                    "apparentTemperatureMax": InterPdayMax[idx, 6],
-                    "apparentTemperatureMaxTime": int(InterPdayMaxTime[idx, 6]),
-                    "smokeMax": InterPdayMax[idx, 20],
-                    "smokeMaxTime": int(InterPdayMaxTime[idx, 20]),
-                    "liquidAccumulation": InterPdaySum[idx, 21],
-                    "snowAccumulation": InterPdaySum[idx, 22],
-                    "iceAccumulation": InterPdaySum[idx, 23],
-                    "fireIndexMax": InterPdayMax[idx, 24],
-                    "fireIndexMaxTime": int(InterPdayMaxTime[idx, 24]),
+                    "temperatureHigh": InterPdayHigh[idx, DIdx.TEMPERATURE],
+                    "temperatureHighTime": int(InterPdayHighTime[idx, DIdx.TEMPERATURE]),
+                    "temperatureLow": InterPdayLow[idx, DIdx.TEMPERATURE],
+                    "temperatureLowTime": int(InterPdayLowTime[idx, DIdx.TEMPERATURE]),
+                    "apparentTemperatureHigh": InterPdayHigh[idx, DIdx.APPARENT_TEMP_RADIATIVE],
+                    "apparentTemperatureHighTime": int(InterPdayHighTime[idx, DIdx.APPARENT_TEMP_RADIATIVE]),
+                    "apparentTemperatureLow": InterPdayLow[idx, DIdx.APPARENT_TEMP_RADIATIVE],
+                    "apparentTemperatureLowTime": int(InterPdayLowTime[idx, DIdx.APPARENT_TEMP_RADIATIVE]),
+                    "dewPoint": InterPday[idx, DIdx.DEW_POINT],
+                    "humidity": InterPday[idx, DIdx.HUMIDITY],
+                    "pressure": InterPday[idx, DIdx.PRESSURE],
+                    "windSpeed": InterPday[idx, DIdx.WIND_SPEED],
+                    "windGust": InterPday[idx, DIdx.WIND_GUST],
+                    "windGustTime": int(InterPdayMaxTime[idx, DIdx.WIND_GUST]),
+                    "windBearing": int(InterPday[idx, DIdx.WIND_BEARING]),
+                    "cloudCover": InterPday[idx, DIdx.CLOUD_COVER],
+                    "uvIndex": InterPdayMax[idx, DIdx.UV_INDEX],
+                    "uvIndexTime": int(InterPdayMaxTime[idx, DIdx.UV_INDEX]),
+                    "visibility": InterPday[idx, DIdx.VISIBILITY],
+                    "temperatureMin": InterPdayMin[idx, DIdx.TEMPERATURE],
+                    "temperatureMinTime": int(InterPdayMinTime[idx, DIdx.TEMPERATURE]),
+                    "temperatureMax": InterPdayMax[idx, DIdx.TEMPERATURE],
+                    "temperatureMaxTime": int(InterPdayMaxTime[idx, DIdx.TEMPERATURE]),
+                    "apparentTemperatureMin": InterPdayMin[idx, DIdx.APPARENT_TEMP_RADIATIVE],
+                    "apparentTemperatureMinTime": int(InterPdayMinTime[idx, DIdx.APPARENT_TEMP_RADIATIVE]),
+                    "apparentTemperatureMax": InterPdayMax[idx, DIdx.APPARENT_TEMP_RADIATIVE],
+                    "apparentTemperatureMaxTime": int(InterPdayMaxTime[idx, DIdx.APPARENT_TEMP_RADIATIVE]),
+                    "smokeMax": InterPdayMax[idx, DIdx.SMOKE],
+                    "smokeMaxTime": int(InterPdayMaxTime[idx, DIdx.SMOKE]),
+                    "liquidAccumulation": InterPdaySum[idx, DIdx.LIQUID_ACCUM],
+                    "snowAccumulation": InterPdaySum[idx, DIdx.SNOW_ACCUM],
+                    "iceAccumulation": InterPdaySum[idx, DIdx.ICE_ACCUM],
+                    "fireIndexMax": InterPdayMax[idx, DIdx.FIRE_INDEX],
+                    "fireIndexMaxTime": int(InterPdayMaxTime[idx, DIdx.FIRE_INDEX]),
                 }
             else:
                 dayObject = {
                     "time": int(day_array_grib[idx]),
                     "summary": dayText,
                     "icon": dayIcon,
-                    "sunriseTime": int(InterSday[idx, 17]),
-                    "sunsetTime": int(InterSday[idx, 18]),
-                    "moonPhase": InterSday[idx, 19].round(2),
-                    "precipIntensity": InterPday[idx, 2],
-                    "precipIntensityMax": InterPdayMax[idx, 2],
-                    "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
-                    "precipProbability": InterPdayMax[idx, 3],
+                    "sunriseTime": int(InterSday[idx, SIdx.SUNRISE]),
+                    "sunsetTime": int(InterSday[idx, SIdx.SUNSET]),
+                    "moonPhase": InterSday[idx, SIdx.MOON_PHASE].round(2),
+                    "precipIntensity": InterPday[idx, DIdx.PRECIP_INTENSITY],
+                    "precipIntensityMax": InterPdayMax[idx, DIdx.PRECIP_INTENSITY],
+                    "precipIntensityMaxTime": int(InterPdayMaxTime[idx, DIdx.PRECIP_INTENSITY]),
+                    "precipProbability": InterPdayMax[idx, DIdx.PRECIP_PROBABILITY],
                     "precipAccumulation": round(
-                        InterPdaySum[idx, 21]
-                        + InterPdaySum[idx, 22]
-                        + InterPdaySum[idx, 23],
+                        InterPdaySum[idx, DIdx.LIQUID_ACCUM]
+                        + InterPdaySum[idx, DIdx.SNOW_ACCUM]
+                        + InterPdaySum[idx, DIdx.ICE_ACCUM],
                         4,
                     ),
                     "precipType": PTypeDay[idx],
-                    "temperatureHigh": InterPdayHigh[idx, 5],
-                    "temperatureHighTime": int(InterPdayHighTime[idx, 5]),
-                    "temperatureLow": InterPdayLow[idx, 5],
-                    "temperatureLowTime": int(InterPdayLowTime[idx, 5]),
-                    "apparentTemperatureHigh": InterPdayHigh[idx, 6],
-                    "apparentTemperatureHighTime": int(InterPdayHighTime[idx, 6]),
-                    "apparentTemperatureLow": InterPdayLow[idx, 6],
-                    "apparentTemperatureLowTime": int(InterPdayLowTime[idx, 6]),
-                    "dewPoint": InterPday[idx, 7],
-                    "humidity": InterPday[idx, 8],
-                    "pressure": InterPday[idx, 9],
-                    "windSpeed": InterPday[idx, 10],
-                    "windGust": InterPday[idx, 11],
-                    "windGustTime": int(InterPdayMaxTime[idx, 11]),
-                    "windBearing": int(InterPday[idx, 12]),
-                    "cloudCover": InterPday[idx, 13],
-                    "uvIndex": InterPdayMax[idx, 14],
-                    "uvIndexTime": int(InterPdayMaxTime[idx, 14]),
-                    "visibility": InterPday[idx, 15],
-                    "temperatureMin": InterPdayMin[idx, 5],
-                    "temperatureMinTime": int(InterPdayMinTime[idx, 5]),
-                    "temperatureMax": InterPdayMax[idx, 5],
-                    "temperatureMaxTime": int(InterPdayMaxTime[idx, 5]),
-                    "apparentTemperatureMin": InterPdayMin[idx, 6],
-                    "apparentTemperatureMinTime": int(InterPdayMinTime[idx, 6]),
-                    "apparentTemperatureMax": InterPdayMax[idx, 6],
-                    "apparentTemperatureMaxTime": int(InterPdayMaxTime[idx, 6]),
+                    "temperatureHigh": InterPdayHigh[idx, DIdx.TEMPERATURE],
+                    "temperatureHighTime": int(InterPdayHighTime[idx, DIdx.TEMPERATURE]),
+                    "temperatureLow": InterPdayLow[idx, DIdx.TEMPERATURE],
+                    "temperatureLowTime": int(InterPdayLowTime[idx, DIdx.TEMPERATURE]),
+                    "apparentTemperatureHigh": InterPdayHigh[idx, DIdx.APPARENT_TEMP_RADIATIVE],
+                    "apparentTemperatureHighTime": int(InterPdayHighTime[idx, DIdx.APPARENT_TEMP_RADIATIVE]),
+                    "apparentTemperatureLow": InterPdayLow[idx, DIdx.APPARENT_TEMP_RADIATIVE],
+                    "apparentTemperatureLowTime": int(InterPdayLowTime[idx, DIdx.APPARENT_TEMP_RADIATIVE]),
+                    "dewPoint": InterPday[idx, DIdx.DEW_POINT],
+                    "humidity": InterPday[idx, DIdx.HUMIDITY],
+                    "pressure": InterPday[idx, DIdx.PRESSURE],
+                    "windSpeed": InterPday[idx, DIdx.WIND_SPEED],
+                    "windGust": InterPday[idx, DIdx.WIND_GUST],
+                    "windGustTime": int(InterPdayMaxTime[idx, DIdx.WIND_GUST]),
+                    "windBearing": int(InterPday[idx, DIdx.WIND_BEARING]),
+                    "cloudCover": InterPday[idx, DIdx.CLOUD_COVER],
+                    "uvIndex": InterPdayMax[idx, DIdx.UV_INDEX],
+                    "uvIndexTime": int(InterPdayMaxTime[idx, DIdx.UV_INDEX]),
+                    "visibility": InterPday[idx, DIdx.VISIBILITY],
+                    "temperatureMin": InterPdayMin[idx, DIdx.TEMPERATURE],
+                    "temperatureMinTime": int(InterPdayMinTime[idx, DIdx.TEMPERATURE]),
+                    "temperatureMax": InterPdayMax[idx, DIdx.TEMPERATURE],
+                    "temperatureMaxTime": int(InterPdayMaxTime[idx, DIdx.TEMPERATURE]),
+                    "apparentTemperatureMin": InterPdayMin[idx, DIdx.APPARENT_TEMP_RADIATIVE],
+                    "apparentTemperatureMinTime": int(InterPdayMinTime[idx, DIdx.APPARENT_TEMP_RADIATIVE]),
+                    "apparentTemperatureMax": InterPdayMax[idx, DIdx.APPARENT_TEMP_RADIATIVE],
+                    "apparentTemperatureMaxTime": int(InterPdayMaxTime[idx, DIdx.APPARENT_TEMP_RADIATIVE]),
                 }
 
         try:
@@ -3467,28 +3496,28 @@ async def PW_Forecast(
     elif InterPcurrent[HIdx.CLOUD_COVER] > 0.375:
         cText = "Partly Cloudy"
 
-        if InterPcurrent[HIdx.TIME] < InterSday[0, 17]:
+        if InterPcurrent[HIdx.TIME] < InterSday[0, SIdx.SUNRISE]:
             # Before sunrise
             cIcon = "partly-cloudy-night"
         elif (
-            InterPcurrent[HIdx.TIME] > InterSday[0, 17] and InterPcurrent[HIdx.TIME] < InterSday[0, 18]
+            InterPcurrent[HIdx.TIME] > InterSday[0, SIdx.SUNRISE] and InterPcurrent[HIdx.TIME] < InterSday[0, SIdx.SUNSET]
         ):
             # After sunrise before sunset
             cIcon = "partly-cloudy-day"
-        elif InterPcurrent[HIdx.TIME] > InterSday[0, 18]:
+        elif InterPcurrent[HIdx.TIME] > InterSday[0, SIdx.SUNSET]:
             # After sunset
             cIcon = "partly-cloudy-night"
     else:
         cText = "Clear"
-        if InterPcurrent[HIdx.TIME] < InterSday[0, 17]:
+        if InterPcurrent[HIdx.TIME] < InterSday[0, SIdx.SUNRISE]:
             # Before sunrise
             cIcon = "clear-night"
         elif (
-            InterPcurrent[HIdx.TIME] > InterSday[0, 17] and InterPcurrent[HIdx.TIME] < InterSday[0, 18]
+            InterPcurrent[HIdx.TIME] > InterSday[0, SIdx.SUNRISE] and InterPcurrent[HIdx.TIME] < InterSday[0, SIdx.SUNSET]
         ):
             # After sunrise before sunset
             cIcon = "clear-day"
-        elif InterPcurrent[HIdx.TIME] > InterSday[0, 18]:
+        elif InterPcurrent[HIdx.TIME] > InterSday[0, SIdx.SUNSET]:
             # After sunset
             cIcon = "clear-night"
 
@@ -3565,15 +3594,15 @@ async def PW_Forecast(
             returnOBJ["currently"]["currentDaySnow"] = dayZeroSnow
 
         # Update the text
-        if InterPcurrent[HIdx.TIME] < InterSday[0, 17]:
+        if InterPcurrent[HIdx.TIME] < InterSday[0, SIdx.SUNRISE]:
             # Before sunrise
             currentDay = False
         elif (
-            InterPcurrent[HIdx.TIME] > InterSday[0, 17] and InterPcurrent[HIdx.TIME] < InterSday[0, 18]
+            InterPcurrent[HIdx.TIME] > InterSday[0, SIdx.SUNRISE] and InterPcurrent[HIdx.TIME] < InterSday[0, SIdx.SUNSET]
         ):
             # After sunrise before sunset
             currentDay = True
-        elif InterPcurrent[HIdx.TIME] > InterSday[0, 18]:
+        elif InterPcurrent[HIdx.TIME] > InterSday[0, SIdx.SUNSET]:
             # After sunset
             currentDay = False
 
