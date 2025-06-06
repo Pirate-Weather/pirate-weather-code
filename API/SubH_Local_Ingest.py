@@ -325,7 +325,7 @@ daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 # Create a zarr backed dask array
 if saveType == "S3":
     zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/SubH.zarr.zip", mode="a"
+        forecast_process_dir + "/SubH.zarr.zip", mode="a", compression=0
     )
 else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/SubH.zarr")
