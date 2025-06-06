@@ -912,7 +912,7 @@ if saveType == "S3":
 # Create a Zarr array in the store with zstd compression
 if saveType == "S3":
     zarr_store_maps = zarr.storage.ZipStore(
-        forecast_process_dir + "/ECMWF_Maps.zarr.zip", mode="w", compression=0
+        forecast_process_dir + "/ECMWF_Maps.zarr.zip", mode="a", compression=0
     )
 else:
     zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/ECMWF_Maps.zarr")
