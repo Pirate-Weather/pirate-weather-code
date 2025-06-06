@@ -325,7 +325,7 @@ daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 # Create a zarr backed dask array
 if saveType == "S3":
     zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/SubH.zarr.zip", mode="w"
+        forecast_process_dir + "/SubH.zarr.zip", mode="w", compression=0
     )
 else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/SubH.zarr")
@@ -358,7 +358,7 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/SubH.zarr.zip", forecast_path + "/SubH_v2.zarr.zip"
+        forecast_process_dir + "/SubH.zarr.zip", forecast_path + "/SubH.zarr.zip"
     )
 
     # Write most recent forecast time
@@ -368,7 +368,7 @@ if saveType == "S3":
 
     s3.put_file(
         forecast_process_dir + "/SubH.time.pickle",
-        forecast_path + "/SubH_v2.time.pickle",
+        forecast_path + "/SubH.time.pickle",
     )
 else:
     # Write most recent forecast time
@@ -378,13 +378,13 @@ else:
 
     shutil.move(
         forecast_process_dir + "/SubH.time.pickle",
-        forecast_path + "/SubH_v2.time.pickle",
+        forecast_path + "/SubH.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/SubH.zarr",
-        forecast_path + "/SubH_v2.zarr",
+        forecast_path + "/SubH.zarr",
         dirs_exist_ok=True,
     )
 

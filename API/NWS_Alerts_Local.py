@@ -225,7 +225,7 @@ gridPoints_XR2 = gridPoints_XR.values.astype(StringDType()).reshape(lons.shape)
 # Save as zarr
 if saveType == "S3":
     zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/NWS_Alerts.zarr.zip", mode="a"
+        forecast_process_dir + "/NWS_Alerts.zarr.zip", mode="w", compression=0
     )
 else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/NWS_Alerts.zarr")
@@ -255,7 +255,7 @@ if saveType == "S3":
     # Upload to S3
     s3.put_file(
         forecast_process_dir + "/NWS_Alerts.zarr.zip",
-        forecast_path + "/ForecastTar/NWS_Alerts.zarr.zip",
+        forecast_path + "/NWS_Alerts.zarr.zip",
     )
 else:
     # Copy the zarr file to the final location
