@@ -319,7 +319,7 @@ def update_zarr_store(initialRun):
             subprocess.run(command, shell=True)
 
     latest_HRRR, old_HRRR = find_largest_integer_directory(
-        "/tmp", "HRRRH.zarr", initialRun
+        "/tmp", "HRRR.zarr", initialRun
     )
     if latest_HRRR is not None:
         HRRR_Zarr = zarr.open(
