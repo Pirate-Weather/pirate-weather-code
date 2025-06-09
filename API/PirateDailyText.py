@@ -2231,59 +2231,63 @@ def calculate_day_text(
                         summary_text = ["sentence", windText]
             # If there is precipitation
             else:
-                # If there is any visibility text then join with an and and show whichever one comes fist at the start
-                if visText is not None:
-                    if (
-                        vis[0] == min(starts)
-                        and (
-                            precip[0] != min(starts)
-                            or (totalPrep * len(precip)) < 0.25 * prepAccumUnit
-                        )
-                    ) or (len(vis) == len(periods) and len(precip) != len(periods)):
-                        cIcon = "fog"
-                        summary_text = ["sentence", ["and", visText, precipText]]
-                    else:
-                        summary_text = ["sentence", ["and", precipText, visText]]
-                # If the wind is combined with cloud cover then join with an and and show whichever one comes fist at the start
-                elif cloudText is not None and windPrecip:
-                    if (
-                        mostCommonLevels[0] == min(starts)
-                        and (
-                            precip[0] != min(starts)
-                            or (totalPrep * len(precip)) < 0.25 * prepAccumUnit
-                        )
-                    ) or (
-                        len(mostCommonLevels) == len(periods)
-                        and len(precip) != len(periods)
-                    ):
-                        cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
-                        summary_text = ["sentence", ["and", cloudText, precipText]]
-                    else:
-                        summary_text = ["sentence", ["and", precipText, cloudText]]
-                # If there is any wind text then join with an and and show whichever one comes fist at the start
-                elif windText is not None:
-                    if (
-                        wind[0] == min(starts)
-                        and (
-                            precip[0] != min(starts)
-                            or (totalPrep * len(precip)) < 0.25 * prepAccumUnit
-                        )
-                    ) or (len(wind) == len(periods) and len(precip) != len(periods)):
-                        cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
-                        summary_text = ["sentence", ["and", windText, precipText]]
-                    else:
-                        summary_text = ["sentence", ["and", precipText, windText]]
+                # Check for full day condition and use only precip
+                if len(precipText) == 2:
+                    summary_text = precipText
                 else:
-                    # If there is any humid text then join with an and and show whichever one comes fist at the start
-                    if humidText is not None:
-                        if humid[0] == min(starts) or (
-                            len(humid) == len(periods) and len(precip) != len(periods)
-                        ):
-                            summary_text = ["sentence", ["and", humidText, precipText]]
+                    # If there is any visibility text then join with an and and show whichever one comes fist at the start
+                    if visText is not None:
+                        if (
+                            vis[0] == min(starts)
+                            and (
+                                precip[0] != min(starts)
+                                or (totalPrep * len(precip)) < 0.25 * prepAccumUnit
+                            )
+                        ) or (len(vis) == len(periods) and len(precip) != len(periods)):
+                            cIcon = "fog"
+                            summary_text = ["sentence", ["and", visText, precipText]]
                         else:
-                            summary_text = ["sentence", ["and", precipText, humidText]]
+                            summary_text = ["sentence", ["and", precipText, visText]]
+                    # If the wind is combined with cloud cover then join with an and and show whichever one comes fist at the start
+                    elif cloudText is not None and windPrecip:
+                        if (
+                            mostCommonLevels[0] == min(starts)
+                            and (
+                                precip[0] != min(starts)
+                                or (totalPrep * len(precip)) < 0.25 * prepAccumUnit
+                            )
+                        ) or (
+                            len(mostCommonLevels) == len(periods)
+                            and len(precip) != len(periods)
+                        ):
+                            cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
+                            summary_text = ["sentence", ["and", cloudText, precipText]]
+                        else:
+                            summary_text = ["sentence", ["and", precipText, cloudText]]
+                    # If there is any wind text then join with an and and show whichever one comes fist at the start
+                    elif windText is not None:
+                        if (
+                            wind[0] == min(starts)
+                            and (
+                                precip[0] != min(starts)
+                                or (totalPrep * len(precip)) < 0.25 * prepAccumUnit
+                            )
+                        ) or (len(wind) == len(periods) and len(precip) != len(periods)):
+                            cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
+                            summary_text = ["sentence", ["and", windText, precipText]]
+                        else:
+                            summary_text = ["sentence", ["and", precipText, windText]]
                     else:
-                        summary_text = ["sentence", precipText]
+                        # If there is any humid text then join with an and and show whichever one comes fist at the start
+                        if humidText is not None:
+                            if humid[0] == min(starts) or (
+                                len(humid) == len(periods) and len(precip) != len(periods)
+                            ):
+                                summary_text = ["sentence", ["and", humidText, precipText]]
+                            else:
+                                summary_text = ["sentence", ["and", precipText, humidText]]
+                        else:
+                            summary_text = ["sentence", precipText]
 
     # If there is no icon then calculate it based on the average cloud cover for the periods if we don't have any precipitation
     if cIcon is None:
