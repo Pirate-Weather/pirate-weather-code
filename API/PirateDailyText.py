@@ -1189,7 +1189,7 @@ def calculate_day_text(
             period1Calc.append(None)
         # Check if there is no precipitation and the wind is less than the light wind threshold
         if (
-            periodStats[0][8] * prepAccumUnit < 0.02
+            periodStats[0][8] < 0.02 * prepAccumUnit
             and periodStats[0][10] / windUnit < 6.7056
             and periodStats[0][0] >= (min(periodStats[0][11] / 2, 3))
         ):
@@ -1272,7 +1272,7 @@ def calculate_day_text(
             period2Calc.append(None)
         # Check if there is no precipitation and the wind is less than the light wind threshold
         if (
-            periodStats[1][8] * prepAccumUnit < 0.02
+            periodStats[1][8] < 0.02 * prepAccumUnit
             and periodStats[1][10] / windUnit < 6.7056
             and periodStats[1][0] >= (min(periodStats[1][11] / 2, 3))
         ):
@@ -1354,7 +1354,7 @@ def calculate_day_text(
             period3Calc.append(None)
         # Check if there is no precipitation and the wind is less than the light wind threshold
         if (
-            periodStats[2][8] * prepAccumUnit < 0.02
+            periodStats[2][8] < 0.02 * prepAccumUnit
             and periodStats[2][10] / windUnit < 6.7056
             and periodStats[2][0] >= (min(periodStats[2][11] / 2, 3))
         ):
@@ -1437,7 +1437,7 @@ def calculate_day_text(
             period4Calc.append(None)
         # Check if there is no precipitation and the wind is less than the light wind threshold
         if (
-            periodStats[3][8] * prepAccumUnit < 0.02
+            periodStats[3][8] < 0.02 * prepAccumUnit
             and periodStats[3][10] / windUnit < 6.7056
             and periodStats[3][0] >= (min(periodStats[3][11] / 2, 3))
         ):
@@ -1520,7 +1520,7 @@ def calculate_day_text(
             period5Calc.append(None)
         # Check if there is no precipitation and the wind is less than the light wind threshold
         if (
-            periodStats[4][8] * prepAccumUnit < 0.02
+            periodStats[4][8] * prepAccumUnit < 0.02 * prepAccumUnit
             and periodStats[4][10] / windUnit < 6.7056
             and periodStats[4][0] >= (min(periodStats[4][11] / 2, 3))
         ):

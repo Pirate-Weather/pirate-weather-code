@@ -264,13 +264,13 @@ def calculate_precip_summary(
     elif len(precipitationDays) == 1:
         # If one day has any precipitation then set the icon to the precipitation type and use the medium precipitation text in the precipitation summary
         text, cIcon = calculate_precip_text(
-            avgIntensity,
+            maxIntensity,
             intensityUnit,
             precipitationDays[0][2]["precipType"],
             "week",
-            maxIntensity,
-            maxIntensity,
-            maxIntensity,
+            precipitationDays[0][2]["precipAccumulation"],
+            precipitationDays[0][2]["precipAccumulation"],
+            precipitationDays[0][2]["precipAccumulation"],
             avgPop,
             icon,
             "both",
@@ -496,8 +496,8 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
         icon,
     )
 
-    # If the none text exists in the precipitation summary then change it to not available and set the icon
-    if None in precipSummary:
+    # If the icon is None then set the icon
+    if cIcon is None:
         if "fog" in icons:
             cIcon = "fog"
         elif "dangerous-wind" in icons:
@@ -508,6 +508,9 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
             cIcon = "breezy"
         else:
             cIcon = Most_Common(icons)
+
+    # If the none text exists in the precipitation summary then change it to not available
+    if None in precipSummary:
         precipSummary = ["for-week", "unavailable"]
 
     # Only calcaulte the temperature summary if we have eight days to prevent issues with the time machine
