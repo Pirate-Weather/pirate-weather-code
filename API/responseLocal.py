@@ -243,7 +243,7 @@ def update_zarr_store(initialRun):
             subprocess.run(command, shell=True)
 
     latest_HRRR_6H, old_HRRR_6H = find_largest_integer_directory(
-        "/tmp", "HRRR_6H.zarr", initialRun
+        "/tmp", "HRRRH_6H.zarr", initialRun
     )
     if latest_HRRR_6H is not None:
         HRRR_6H_Zarr = zarr.open(
@@ -319,7 +319,7 @@ def update_zarr_store(initialRun):
             subprocess.run(command, shell=True)
 
     latest_HRRR, old_HRRR = find_largest_integer_directory(
-        "/tmp", "HRRR.zarr", initialRun
+        "/tmp", "HRRRH.zarr", initialRun
     )
     if latest_HRRR is not None:
         HRRR_Zarr = zarr.open(
@@ -412,10 +412,10 @@ if STAGE == "TESTING":
     print("SubH Read")
 
     if save_type == "S3":
-        f = s3.open("s3://ForecastTar_v2/HRRR_6H.zarr.zip")
+        f = s3.open("s3://ForecastTar_v2/HRRRH_6H.zarr.zip")
         store = S3ZipStore(f)
     else:
-        f = s3_bucket + "HRRR_6H.zarr.zip"
+        f = s3_bucket + "HRRRH_6H.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
 
     HRRR_6H_Zarr = zarr.open(store, mode="r")
@@ -462,10 +462,10 @@ if STAGE == "TESTING":
     print("NBM Fire Read")
 
     if save_type == "S3":
-        f = s3.open("s3://ForecastTar_v2/HRRR.zarr.zip")
+        f = s3.open("s3://ForecastTar_v2/HRRRH.zarr.zip")
         store = S3ZipStore(f)
     else:
-        f = s3_bucket + "HRRR.zarr.zip"
+        f = s3_bucket + "HRRRH.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
 
     HRRR_Zarr = zarr.open(store, mode="r")
@@ -4251,9 +4251,9 @@ def initialDataSync() -> None:
         print("SubH Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/HRRR_6H.zarr.zip",
-            "/tmp/HRRR_6H_TMP.zarr.zip",
-            "/tmp/HRRR_6H.zarr.prod.zip",
+            "ForecastTar_v2/HRRRH_6H.zarr.zip",
+            "/tmp/HRRRH_6H_TMP.zarr.zip",
+            "/tmp/HRRRH_6H.zarr.prod.zip",
             True,
         )
         print("HRRR_6H Download!")
@@ -4291,9 +4291,9 @@ def initialDataSync() -> None:
         print("GEFS  Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/HRRR.zarr.zip",
-            "/tmp/HRRR_TMP.zarr.zip",
-            "/tmp/HRRR.zarr.prod.zip",
+            "ForecastTar_v2/HRRRH.zarr.zip",
+            "/tmp/HRRRH_TMP.zarr.zip",
+            "/tmp/HRRRH.zarr.prod.zip",
             True,
         )
         print("HRRR  Download!")
@@ -4350,9 +4350,9 @@ def dataSync() -> None:
             logger.info("SubH Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/HRRR_6H.zarr.zip",
-                "/tmp/HRRR_6H_TMP.zarr.zip",
-                "/tmp/HRRR_6H.zarr.prod.zip",
+                "ForecastTar_v2/HRRRH_6H.zarr.zip",
+                "/tmp/HRRRH_6H_TMP.zarr.zip",
+                "/tmp/HRRRH_6H.zarr.prod.zip",
                 False,
             )
             logger.info("HRRR_6H Download!")
@@ -4390,9 +4390,9 @@ def dataSync() -> None:
             logger.info("GEFS  Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/HRRR.zarr.zip",
-                "/tmp/HRRR_TMP.zarr.zip",
-                "/tmp/HRRR.zarr.prod.zip",
+                "ForecastTar_v2/HRRRH.zarr.zip",
+                "/tmp/HRRRH_TMP.zarr.zip",
+                "/tmp/HRRRH.zarr.prod.zip",
                 False,
             )
             logger.info("HRRR  Download!")
