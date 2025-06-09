@@ -86,7 +86,7 @@ latestRun = Herbie_latest(
     freq="6h",
     fxx=[240],
     product="atmos.25",
-    verbose=False,
+    verbose=True,
     member="avg",
     priority="aws",
 )
@@ -702,12 +702,12 @@ else:
 zarr_array = zarr.create_array(
     store=zarr_store,
     shape=(
-        len(zarrVars),
+        len(probVars),
         len(hourly_timesUnix),
         daskVarArrayStackDisk.shape[2],
         daskVarArrayStackDisk.shape[3],
     ),
-    chunks=(len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
+    chunks=(len(probVars), len(hourly_timesUnix), finalChunk, finalChunk),
     compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
     dtype="float32",
 )
@@ -725,7 +725,7 @@ stackInterp = da.rechunk(
         dtype="float32",
         chunks=(1, len(stacked_timesUnix), processChunk, processChunk),
     ).round(3),
-    (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
+    (len(probVars), len(hourly_timesUnix), finalChunk, finalChunk),
 ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
