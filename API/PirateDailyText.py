@@ -2272,7 +2272,9 @@ def calculate_day_text(
                                 precip[0] != min(starts)
                                 or (totalPrep * len(precip)) < 0.25 * prepAccumUnit
                             )
-                        ) or (len(wind) == len(periods) and len(precip) != len(periods)):
+                        ) or (
+                            len(wind) == len(periods) and len(precip) != len(periods)
+                        ):
                             cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
                             summary_text = ["sentence", ["and", windText, precipText]]
                         else:
@@ -2281,11 +2283,18 @@ def calculate_day_text(
                         # If there is any humid text then join with an and and show whichever one comes fist at the start
                         if humidText is not None:
                             if humid[0] == min(starts) or (
-                                len(humid) == len(periods) and len(precip) != len(periods)
+                                len(humid) == len(periods)
+                                and len(precip) != len(periods)
                             ):
-                                summary_text = ["sentence", ["and", humidText, precipText]]
+                                summary_text = [
+                                    "sentence",
+                                    ["and", humidText, precipText],
+                                ]
                             else:
-                                summary_text = ["sentence", ["and", precipText, humidText]]
+                                summary_text = [
+                                    "sentence",
+                                    ["and", precipText, humidText],
+                                ]
                         else:
                             summary_text = ["sentence", precipText]
 
