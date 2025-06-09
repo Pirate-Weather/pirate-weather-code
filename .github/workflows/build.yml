@@ -3,10 +3,15 @@ name: Build and push to AWS
 on:
   push:
     branches: ['dev']
+  release:
+    types: [published]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.run_id }}
   cancel-in-progress: true
+
+env:
+  IMAGE_VERSION: ${{ github.event_name == 'release' && 'release' || 'dev' }}
 
 #################################################################
 # INGEST IMAGE BUILD (Native Builds on ARM and x64 nodes)
@@ -38,7 +43,7 @@ jobs:
           REGISTRY: ${{ steps.login-ingest-arm.outputs.registry }}
           REGISTRY_ALIAS: j9v4j3c7  # Replace with your registry alias
           REPOSITORY: pirate-wgrib-python-arm   # Use a base name without an arch suffix
-          IMAGE_TAG: dev-arm64
+          IMAGE_TAG: ${{ env.IMAGE_VERSION }}-arm64
         run: |
           docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-ingest-dockerfile .
           docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
@@ -68,7 +73,7 @@ jobs:
           REGISTRY: ${{ steps.login-ingest-x64.outputs.registry }}
           REGISTRY_ALIAS: j9v4j3c7
           REPOSITORY: pirate-wgrib-python-arm
-          IMAGE_TAG: dev-amd64
+          IMAGE_TAG: ${{ env.IMAGE_VERSION }}-amd64
         run: |
           docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-ingest-dockerfile .
           docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
@@ -96,11 +101,11 @@ jobs:
           REGISTRY: ${{ steps.login-manifest-ingest.outputs.registry }}
           REGISTRY_ALIAS: j9v4j3c7
           REPOSITORY: pirate-wgrib-python-arm
-          IMAGE_TAG: dev
+          IMAGE_TAG: ${{ env.IMAGE_VERSION }}
         run: |
           docker manifest create $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
-            --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:dev-amd64 \
-            --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:dev-arm64
+            --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-amd64 \
+            --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-arm64
           docker manifest push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
 
 #################################################################
@@ -132,7 +137,7 @@ jobs:
           REGISTRY: ${{ steps.login-api-arm.outputs.registry }}
           REGISTRY_ALIAS: j9v4j3c7
           REPOSITORY: pirate-alpine-zarr
-          IMAGE_TAG: dev-arm64
+          IMAGE_TAG: ${{ env.IMAGE_VERSION }}-arm64
         run: |
           docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-api-dockerfile .
           docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
@@ -162,7 +167,7 @@ jobs:
           REGISTRY: ${{ steps.login-api-x64.outputs.registry }}
           REGISTRY_ALIAS: j9v4j3c7
           REPOSITORY: pirate-alpine-zarr
-          IMAGE_TAG: dev-amd64
+          IMAGE_TAG: ${{ env.IMAGE_VERSION }}-amd64
         run: |
           docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-api-dockerfile .
           docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
@@ -190,11 +195,11 @@ jobs:
           REGISTRY: ${{ steps.login-manifest-api.outputs.registry }}
           REGISTRY_ALIAS: j9v4j3c7
           REPOSITORY: pirate-alpine-zarr
-          IMAGE_TAG: dev
+          IMAGE_TAG: ${{ env.IMAGE_VERSION }}
         run: |
           docker manifest create $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
-            --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:dev-amd64 \
-            --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:dev-arm64
+            --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-amd64 \
+            --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-arm64
           docker manifest push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
 
 #################################################################
