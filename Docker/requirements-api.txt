@@ -12,7 +12,7 @@ typing-inspect==0.9.0
 watchfiles==1.0.5
 dask==2025.5.1
 xarray==2025.4.0
-pandas==2.2.3
+pandas==2.3.0
 fastparquet==2024.11.0
 pirateweather-translations==1.1
 s3fs==2025.5.1
