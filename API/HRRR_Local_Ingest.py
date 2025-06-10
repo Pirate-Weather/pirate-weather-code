@@ -1,4 +1,4 @@
-# %% HRRRH Hourly Processing script using Dask, FastHerbie, and wgrib2
+# %% HRRR Hourly Processing script using Dask, FastHerbie, and wgrib2
 # Alexander Rey, November 2023
 
 # %% Import modules
@@ -25,14 +25,14 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
 
 forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/home/ubuntu/Weather/HRRRH"
+    "forecast_process_dir", default="/home/ubuntu/Weather/HRRR"
 )
-forecast_process_path = forecast_process_dir + "/HRRRH_Process"
-hist_process_path = forecast_process_dir + "/HRRRH_Historic"
+forecast_process_path = forecast_process_dir + "/HRRR_Process"
+hist_process_path = forecast_process_dir + "/HRRR_Historic"
 tmpDIR = forecast_process_dir + "/Downloads"
 
-forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/HRRRH")
-historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/History/HRRRH")
+forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/HRRR")
+historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/History/HRRR")
 
 
 saveType = os.getenv("save_type", default="Download")
@@ -298,7 +298,7 @@ for i in range(hisPeriod, -1, -1):
     # format the time following iso8601
     s3_path = (
         historic_path
-        + "/HRRRH_Hist_v2"
+        + "/HRRR_Hist_v2"
         + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
         + ".zarr"
     )
@@ -308,7 +308,7 @@ for i in range(hisPeriod, -1, -1):
         # Create the S3 filesystem
         s3_path = (
             historic_path
-            + "/HRRRH_Hist_v2"
+            + "/HRRR_Hist_v2"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -338,7 +338,7 @@ for i in range(hisPeriod, -1, -1):
         # Local Path Setup
         local_path = (
             historic_path
-            + "/HRRRH_Hist_v2"
+            + "/HRRR_Hist_v2"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -462,7 +462,7 @@ for i in range(hisPeriod, -1, -1):
 # Get the s3 paths to the historic data
 ncHistWorking_paths = [
     historic_path
-    + "/HRRRH_Hist_v2"
+    + "/HRRR_Hist_v2"
     + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
     + ".zarr"
     for i in range(hisPeriod, -1, -1)
@@ -551,10 +551,10 @@ daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 # Create a zarr backed dask array
 if saveType == "S3":
     zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/HRRRH.zarr.zip", mode="a", compression=0
+        forecast_process_dir + "/HRRR.zarr.zip", mode="a", compression=0
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/HRRRH.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/HRRR.zarr")
 
 zarr_array = zarr.create_array(
     store=zarr_store,
@@ -597,10 +597,10 @@ if saveType == "S3":
 # Create a Zarr array in the store with zstd compression
 if saveType == "S3":
     zarr_store_maps = zarr.storage.ZipStore(
-        forecast_process_dir + "/HRRRH_maps.zarr.zip", mode="a"
+        forecast_process_dir + "/HRRR_maps.zarr.zip", mode="a"
     )
 else:
-    zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/HRRRH_maps.zarr")
+    zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/HRRR_maps.zarr")
 
 for z in (0, 4, 7, 8, 9, 11, 12, 13, 14, 16, 17):
     # Create a zarr backed dask array
@@ -631,44 +631,44 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/HRRRH.zarr.zip", forecast_path + "/HRRRH.zarr.zip"
+        forecast_process_dir + "/HRRR.zarr.zip", forecast_path + "/HRRR.zarr.zip"
     )
     s3.put_file(
-        forecast_process_dir + "/HRRRH_maps.zarr.zip",
-        forecast_path + "/HRRRH_maps.zarr.zip",
+        forecast_process_dir + "/HRRR_maps.zarr.zip",
+        forecast_path + "/HRRR_maps.zarr.zip",
     )
 
     # Write most recent forecast time
-    with open(forecast_process_dir + "/HRRRH.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/HRRR.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     s3.put_file(
-        forecast_process_dir + "/HRRRH.time.pickle",
-        forecast_path + "/HRRRH.time.pickle",
+        forecast_process_dir + "/HRRR.time.pickle",
+        forecast_path + "/HRRR.time.pickle",
     )
 else:
     # Write most recent forecast time
-    with open(forecast_process_dir + "/HRRRH.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/HRRR.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     shutil.move(
-        forecast_process_dir + "/HRRRH.time.pickle",
-        forecast_path + "/HRRRH.time.pickle",
+        forecast_process_dir + "/HRRR.time.pickle",
+        forecast_path + "/HRRR.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
-        forecast_process_dir + "/HRRRH.zarr",
-        forecast_path + "/HRRRH.zarr",
+        forecast_process_dir + "/HRRR.zarr",
+        forecast_path + "/HRRR.zarr",
         dirs_exist_ok=True,
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
-        forecast_process_dir + "/HRRRH_maps.zarr",
-        forecast_path + "/HRRRH_maps.zarr",
+        forecast_process_dir + "/HRRR_maps.zarr",
+        forecast_path + "/HRRR_maps.zarr",
         dirs_exist_ok=True,
     )
 
