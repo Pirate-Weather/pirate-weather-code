@@ -25,16 +25,21 @@ from dask.diagnostics import ProgressBar
 
 
 # Scipy Interp Function
-def linInterp(block, T_in, T_out):
-    interp = make_interp_spline(T_in, block, 3, axis=1)
-    interpOut = interp(T_out)
-    return interpOut
+def interp_time_block(y_block, idx0, idx1, w):
+    # y_block is a NumPy array of shape (Vb, T_old, Yb, Xb)
+    # 1) fancy-index in NumPy only:
+    y0 = y_block[:, idx0, :, :]
+    y1 = y_block[:, idx1, :, :]
+    # 2) add back your time‐axis weights in NumPy:
+    w_r   = w[None, :, None, None]
+    omw_r = (1 - w)[None, :, None, None]
+    return omw_r * y0 + w_r * y1  # shape (Vb, T_new, Yb, Xb)
 
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
+wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 ")
 
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/home/ubuntu/Weather/GFS"
@@ -865,17 +870,25 @@ zarr_array = zarr.create_array(
 # 1. Interpolate the stacked array to be hourly along the time axis
 # 2. Rechunk it to match the final array
 # 3. Write it out to the zarr array
-stackInterp = da.rechunk(
-    da.map_blocks(
-        linInterp,
+
+# Precompute the two neighbor‐indices and the weights
+x_a = np.array(stacked_timesUnix)
+x_b = np.array(hourly_timesUnix)
+
+idx = np.searchsorted(x_a, x_b) - 1
+idx0 = np.clip(idx, 0, len(x_a)-2)
+idx1 = idx0 + 1
+w    = (x_b - x_a[idx0]) / (x_a[idx1] - x_a[idx0])  # float array, shape (T_new,)
+
+# with ProgressBar():
+da.map_blocks(
+        interp_time_block,
         daskVarArrayStackDisk,
-        stacked_timesUnix,
-        hourly_timesUnix,
+        idx0, idx1, w,
         dtype="float32",
-        chunks=(1, len(stacked_timesUnix), processChunk, processChunk),
-    ).round(3),
-    (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
-).to_zarr(zarr_array, overwrite=True, compute=True)
+        chunks=(1, len(hourly_timesUnix), processChunk, processChunk)).round(3).rechunk(
+    (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)).to_zarr(
+    zarr_array, overwrite=True, compute=True)
 
 
 if saveType == "S3":

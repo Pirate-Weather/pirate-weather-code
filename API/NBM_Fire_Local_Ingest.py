@@ -25,11 +25,30 @@ from scipy.interpolate import make_interp_spline
 
 
 # Scipy Interp Function
-def linInterp1D(block, T_in, T_out):
-    interp = make_interp_spline(T_in, block, 3, axis=1)
-    interp.extrapolate = False
-    interpOut = interp(T_out)
-    return interpOut
+def interp_time_block(y_block, idx0, idx1, w, valid):
+    """
+    y_block: np.ndarray of shape (Vb, T_old, Yb, Xb)
+    idx0, idx1, w, valid: 1D NumPy arrays of length T_new
+    """
+    # 1) pull out the two knot‐time slices
+    y0 = y_block[:, idx0, ...]   # → (Vb, T_new, Yb, Xb)
+    y1 = y_block[:, idx1, ...]
+
+    # 2) build the broadcastable weights
+    w_r   = w[None, :, None, None]
+    omw_r = (1 - w)[None, :, None, None]
+
+    # 3) linear blend
+    y_interp = omw_r * y0 + w_r * y1
+
+    # 4) zero‐out (or NaN‐out) anything outside the original time range
+    #    here we choose NaN so it’s clear these were out-of-range
+    if not np.all(valid):
+        # valid==False where x_b is outside [x_a[0], x_a[-1]]
+        inv = ~valid
+        y_interp[:, inv, :, :] = np.nan
+
+    return y_interp
 
 
 def rounder(t):
@@ -45,7 +64,7 @@ def rounder(t):
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
+wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 ")
 
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/home/ubuntu/Weather/NBM_Fire"
@@ -611,24 +630,41 @@ else:
 
 zarr_array = zarr.create_array(
     store=zarr_store,
-    shape=daskVarArrayStackDisk.shape,
-    chunks=(len(zarrVars), len(npCatTimes), finalChunk, finalChunk),
+    shape=(
+        len(zarrVars),
+        len(hourly_timesUnix),
+        daskVarArrayStackDisk.shape[2],
+        daskVarArrayStackDisk.shape[3],
+        ),
+    chunks=(len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
     compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
     dtype="float32",
 )
 
+
+# Precompute the two neighbor‐indices and the weights
+x_a = np.array(stacked_timesUnix)
+x_b = np.array(hourly_timesUnix)
+
+idx = np.searchsorted(x_a, x_b) - 1
+idx0 = np.clip(idx, 0, len(x_a)-2)
+idx1 = idx0 + 1
+w    = (x_b - x_a[idx0]) / (x_a[idx1] - x_a[idx0])  # float array, shape (T_new,)
+
+# boolean mask of “in‐range” points
+valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
+
 # with ProgressBar():
-stackInterp = da.rechunk(
-    da.map_blocks(
-        linInterp1D,
-        daskVarArrayStackDisk,
-        stacked_timesUnix,
-        hourly_timesUnix,
-        dtype="float32",
-        chunks=(1, len(stacked_timesUnix), processChunk, processChunk),
-    ).round(3),
-    (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
-).to_zarr(zarr_array, overwrite=True, compute=True)
+da.map_blocks(
+    interp_time_block,
+    daskVarArrayStackDisk,
+    idx0, idx1, w, valid,
+    dtype="float32",
+    chunks=(1, len(hourly_timesUnix), processChunk, processChunk)).round(3).rechunk(
+(len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)).to_zarr(
+zarr_array, overwrite=True, compute=True)
+
+
 
 if saveType == "S3":
     zarr_store.close()
