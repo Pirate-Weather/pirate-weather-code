@@ -1847,8 +1847,6 @@ async def PW_Forecast(
         .astype(np.int32)
     )
 
-    print(len(hour_array))
-
     # Timing Check
     if TIMING:
         print("Nearest IDX Start")
@@ -1878,9 +1876,11 @@ async def PW_Forecast(
                 )
 
                 HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), np.nan)
+                # TODO: The sizes of the 0-18 and 18-48 are differernt because of the REFC_entireatmosphere param
+                # Need to either add this to 18-48 or just keep it for the first 18 hours
                 HRRR_Merged[0 : (55 - HRRR_StartIDX) + (31 - H2_StartIDX), :] = (
                     np.concatenate(
-                        (dataOut_hrrrh[HRRR_StartIDX:, :], dataOut_h2[H2_StartIDX:, :]),
+                        (dataOut_hrrrh[HRRR_StartIDX:, 0:17], dataOut_h2[H2_StartIDX:, :]),
                         axis=0,
                     )
                 )
