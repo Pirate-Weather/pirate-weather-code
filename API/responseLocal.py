@@ -1880,7 +1880,10 @@ async def PW_Forecast(
                 # Need to either add this to 18-48 or just keep it for the first 18 hours
                 HRRR_Merged[0 : (55 - HRRR_StartIDX) + (31 - H2_StartIDX), :] = (
                     np.concatenate(
-                        (dataOut_hrrrh[HRRR_StartIDX:, 0:17], dataOut_h2[H2_StartIDX:, :]),
+                        (
+                            dataOut_hrrrh[HRRR_StartIDX:, 0:17],
+                            dataOut_h2[H2_StartIDX:, :],
+                        ),
                         axis=0,
                     )
                 )
