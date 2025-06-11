@@ -333,10 +333,10 @@ daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 # Create a zarr backed dask array
 if saveType == "S3":
     zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/HRRRH_6H.zarr.zip", mode="a", compression=0
+        forecast_process_dir + "/HRRR_6H.zarr.zip", mode="a", compression=0
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/HRRRH_6H.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/HRRR_6H.zarr")
 
 zarr_array = zarr.create_array(
     store=zarr_store,
@@ -365,34 +365,34 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/HRRRH_6H.zarr.zip",
-        forecast_path + "/HRRRH_6H.zarr.zip",
+        forecast_process_dir + "/HRRR_6H.zarr.zip",
+        forecast_path + "/HRRR_6H.zarr.zip",
     )
 
     # Write most recent forecast time
-    with open(forecast_process_dir + "/HRRRH_6H.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/HRRR_6H.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     s3.put_file(
-        forecast_process_dir + "/HRRRH_6H.time.pickle",
-        forecast_path + "/HRRRH_6H.time.pickle",
+        forecast_process_dir + "/HRRR_6H.time.pickle",
+        forecast_path + "/HRRR_6H.time.pickle",
     )
 else:
     # Write most recent forecast time
-    with open(forecast_process_dir + "/HRRRH_6H.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/HRRR_6H.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     shutil.move(
-        forecast_process_dir + "/HRRRH_6H.time.pickle",
-        forecast_path + "/HRRRH_6H.time.pickle",
+        forecast_process_dir + "/HRRR_6H.time.pickle",
+        forecast_path + "/HRRR_6H.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
-        forecast_process_dir + "/HRRRH_6H.zarr",
-        forecast_path + "/HRRRH_6H.zarr",
+        forecast_process_dir + "/HRRR_6H.zarr",
+        forecast_path + "/HRRR_6H.zarr",
         dirs_exist_ok=True,
     )
 

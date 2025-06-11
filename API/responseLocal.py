@@ -1180,7 +1180,7 @@ async def PW_Forecast(
                 zarrList = [
                     "s3://"
                     + s3_bucket
-                    + "/HRRRH/HRRRH_Hist"
+                    + "/HRRR/HRRR_Hist"
                     + t.strftime("%Y%m%dT%H0000Z")
                     + ".zarr/"
                     for t in date_range
