@@ -42,18 +42,23 @@ def calculate_cloud_text(cloud_cover):
         return "clear", 0
 
 
-def _get_period_name(hour_of_day, is_today=True):
+def _get_period_name(hour_of_day, is_today=True, mode="daily"):
     """
     Determines the textual name of a period based on the hour of the day.
+    Adds today-/tomorrow- prefix only if in 'hour' mode.
 
     Parameters:
     - hour_of_day (int): The hour (0-23).
-    - is_today (bool): True if the period is for the current day, False for the next.
+    - is_today (bool): True if the period is for the current calendar day, False for the next.
+    - mode (str): "daily" or "hour". Determines if prefixes are added.
 
     Returns:
-    - str: The textual representation of the period (e.g., "today-morning", "tomorrow-night").
+    - str: The textual representation of the period (e.g., "morning", "tomorrow-night").
     """
-    prefix = "today-" if is_today else "tomorrow-"
+    prefix = ""
+    if mode == "hour":
+        prefix = "today-" if is_today else "tomorrow-"
+
     if 4 <= hour_of_day < 12:
         return prefix + "morning"
     elif 12 <= hour_of_day < 17:
@@ -95,10 +100,7 @@ def _get_time_phrase(
     if num_periods == 0:
         return None
 
-    if num_periods == 1:
-        # Single period: "during [period_name]"
-        return ["during", all_periods[period_indices[0]]]
-    elif num_periods == total_periods_available:
+    if num_periods == total_periods_available:
         # Condition spans all available periods: "for-day" or "starting [first_period]" if 'later' applies
         # The 'later' text only applies if in hourly mode and the first period is marked as 'later'.
         if (
@@ -107,10 +109,23 @@ def _get_time_phrase(
             and condition_type in later_conditions
         ):
             return ["starting", all_periods[period_indices[0]]]
-        else:
+        elif condition_type == "cloud":
+            # Cloud "for-day" only if it spans a *standard* full day's worth of periods (4 or 5 periods for 24h).
+            # This prevents "for-day" for cloud if the forecast window is short (e.g., 2 periods).
+            if (
+                total_periods_available >= 4
+            ):  # If forecast covers at least 4 standard periods
+                return ["for-day"]
+            else:  # If shorter than 4 periods, be more specific like "during [period]"
+                return ["during", all_periods[period_indices[0]]]
+        else:  # For non-cloud conditions, "for-day" is generally fine if it covers all available periods
             return ["for-day"]
 
-    # Logic for multiple disjoint or continuous periods
+    if num_periods == 1:
+        # Single period: "during [period_name]"
+        return ["during", all_periods[period_indices[0]]]
+
+    # Logic for multiple disjoint or continuous periods (more than 1 period)
     if num_periods > 1:
         start_idx = period_indices[0]
         end_idx = period_indices[-1]
@@ -641,11 +656,12 @@ def calculate_day_text(
     final_constructed_summary = None
     current_c_icon = None
 
-    # Initialize combination flags to False at the top level
+    # Initialize combination flags to False at the top level, as they track which
+    # conditions have been "subsumed" by a higher-priority combined summary.
     combined_vis_flag = False
     combined_dry_flag = False
     combined_humid_flag = False
-    combined_wind_flag = False  # Added this for consistency
+    combined_wind_flag = False
 
     # Return "unavailable" if too much data is provided
     if len(hours) > 25:
@@ -658,7 +674,9 @@ def calculate_day_text(
 
     # This is used for the "later" check.
     # It correctly gets the period name for `curr_hour_local - 1` without redundant prefix.
-    today_period_for_later_check = _get_period_name(curr_hour_local - 1, is_today=True)
+    today_period_for_later_check = _get_period_name(
+        curr_hour_local - 1, is_today=True, mode=mode
+    )
 
     # This dictionary will store processed data for each logical standard period (Morning, Afternoon, Evening, Night)
     # The keys will be the unique period names encountered (e.g., 'today-morning', 'tomorrow-night').
@@ -682,12 +700,26 @@ def calculate_day_text(
         current_iter_hour_date = temp_date_for_period_scan + datetime.timedelta(hours=i)
         current_iter_hour_local = current_iter_hour_date.hour
 
-        # Determine `is_today` for naming periods.
-        # `_get_period_name` handles the actual period string. We just need to tell it if it's the current calendar day.
-        is_today_in_iter = current_iter_hour_date.date() == curr_date.date()
+        # Determine `is_today` for naming periods based on calendar day relative to initial forecast date.
+        is_today_in_iter = True
+        # If the current iteration's date is different from the forecast's starting date:
+        if current_iter_hour_date.date() > curr_date.date():
+            # If in hourly mode, and it's the next calendar day, and it's past 4 AM, then it's 'tomorrow'.
+            if current_iter_hour_local >= 4 and mode == "hour":
+                is_today_in_iter = False
+            # If it's a new calendar day, but before 4 AM (0-3 AM), it's *still logically part of the previous day's night period*.
+            # So, for period naming, it should *not* be marked as 'tomorrow-' if in hourly mode until after 4 AM.
+            # Only if it's the next calendar day AND it's after 4 AM, should it be 'tomorrow-'.
+            elif current_iter_hour_local < 4 and mode == "hour":
+                # Keep is_today_in_iter as True for 0-3 AM if `mode` is hour and it's part of the same logical day.
+                # If `mode` is daily, it's always just based on the day.
+                is_today_in_iter = True
+            else:  # For daily mode, or if hourly mode and it's simply a new calendar day after midnight
+                is_today_in_iter = False
 
+        # Pass the current `mode` to `_get_period_name`
         period_name_for_iter = _get_period_name(
-            current_iter_hour_local, is_today=is_today_in_iter
+            current_iter_hour_local, is_today=is_today_in_iter, mode=mode
         )
 
         if period_name_for_iter not in all_period_names_in_forecast_order:
@@ -724,10 +756,20 @@ def calculate_day_text(
         hour_in_loop = int(hour_date.strftime("%H"))
 
         # Determine `is_today` for naming the current hour's period.
-        is_today_for_hour_data = hour_date.date() == curr_date.date()
+        is_today_for_hour_data = True
+        if hour_date.date() > curr_date.date():
+            if hour_in_loop >= 4 and mode == "hour":
+                is_today_for_hour_data = False
+            elif hour_in_loop < 4 and mode == "hour":
+                is_today_for_hour_data = (
+                    True  # Still logically today's night if in hourly mode and 0-3 AM
+                )
+            else:  # For daily mode, or if hourly mode and it's simply a new calendar day after midnight
+                is_today_for_hour_data = False
 
+        # Pass the current `mode` to `_get_period_name`
         current_hour_period_name = _get_period_name(
-            hour_in_loop, is_today=is_today_for_hour_data
+            hour_in_loop, is_today=is_today_for_hour_data, mode=mode
         )
 
         # Accumulate data for the current hour into the correct standard period's data structure
@@ -802,8 +844,6 @@ def calculate_day_text(
     all_period_names = final_all_period_names_list
 
     # --- Rest of the function remains largely the same, but now operates on correctly segmented periods ---
-    # print("Final Period Stats:", period_stats) # For debugging period stats
-    # print("Final All Period Names:", all_period_names) # For debugging period names
 
     # Initialize lists for storing period indices of various conditions
     precip_periods = []
@@ -881,34 +921,68 @@ def calculate_day_text(
         overall_avg_cloud_cover_sum / len(period_stats) if period_stats else 0
     )
 
-    # Determine the most common cloud level across all periods for representative text
-    most_common_cloud_level = Most_Common(cloud_levels) if cloud_levels else 0
+    # --- Cloud Cover Text and Icon Logic ---
+    final_cloud_text = "clear"  # Default
+    derived_avg_cloud_for_icon = (
+        0.0  # Default for icon (used if specific period's avg is picked)
+    )
+    overall_cloud_idx = []
 
-    # Select a representative cloud level for final cloud text and icon calculation
-    representative_cloud_level = most_common_cloud_level
-    if most_common_cloud_level != max(cloud_levels):
-        representative_cloud_level = most_common_cloud_level
-    else:
-        representative_cloud_level = max(cloud_levels)
+    if cloud_levels:
+        # Step 1: Get the most common cloud level across all periods
+        most_common_cloud_level_value = Most_Common(
+            cloud_levels
+        )  # This is the numerical level (0-4)
+        for idx, level in enumerate(cloud_levels):
+            if level == most_common_cloud_level_value:
+                overall_cloud_idx.append(idx)
 
-    # Convert the representative cloud level back to textual form and a derived average for icon
-    if representative_cloud_level == 0:
-        final_cloud_text = "clear"
-        derived_avg_cloud_for_icon = 0.0
-    elif representative_cloud_level == 1:
-        final_cloud_text = "very-light-clouds"
-        derived_avg_cloud_for_icon = 0.25
-    elif representative_cloud_level == 2:
-        final_cloud_text = "light-clouds"
-        derived_avg_cloud_for_icon = 0.50
-    elif representative_cloud_level == 3:
-        final_cloud_text = "medium-clouds"
-        derived_avg_cloud_for_icon = 0.75
-    else:  # representative_cloud_level == 4
-        final_cloud_text = "heavy-clouds"
-        derived_avg_cloud_for_icon = 1.0
+        # Step 2: Determine which cloud level (from period_stats) corresponds to this value
+        # and also find the period with the highest average cloud cover if all levels are different.
 
-    # If there's only one period, use its actual average cloud cover for the icon directly
+        # Check if all elements in cloud_levels are unique (meaning they are all different)
+        if len(cloud_levels) > 1 and len(set(cloud_levels)) == len(cloud_levels):
+            # All cloud levels are different, find the period with the highest *average* cloud cover
+            highest_avg_cloud_period = None
+            max_avg_cloud_value = -1.0
+
+            for p_data in period_stats:
+                if p_data["avg_cloud_cover"] > max_avg_cloud_value:
+                    max_avg_cloud_value = p_data["avg_cloud_cover"]
+                    highest_avg_cloud_period = p_data
+
+            if highest_avg_cloud_period:
+                # Use the cloud text and level derived from this highest average period
+                final_cloud_text, _ = calculate_cloud_text(
+                    highest_avg_cloud_period["avg_cloud_cover"]
+                )
+                derived_avg_cloud_for_icon = highest_avg_cloud_period["avg_cloud_cover"]
+            else:  # Fallback if no period data (shouldn't happen with valid input)
+                final_cloud_text, _ = calculate_cloud_text(overall_avg_cloud_cover)
+                derived_avg_cloud_for_icon = overall_avg_cloud_cover
+        else:
+            # If not all different (i.e., there's a most common level or only one unique level),
+            # use the most common cloud level's properties.
+            # Convert the most common numerical level back to text and set `derived_avg_cloud_for_icon`
+            # to a representative value for icon calculation.
+            if most_common_cloud_level_value == 0:
+                final_cloud_text = "clear"
+                derived_avg_cloud_for_icon = 0.0
+            elif most_common_cloud_level_value == 1:
+                final_cloud_text = "very-light-clouds"
+                derived_avg_cloud_for_icon = 0.25
+            elif most_common_cloud_level_value == 2:
+                final_cloud_text = "light-clouds"
+                derived_avg_cloud_for_icon = 0.50
+            elif most_common_cloud_level_value == 3:
+                final_cloud_text = "medium-clouds"
+                derived_avg_cloud_for_icon = 0.75
+            else:  # most_common_cloud_level_value == 4
+                final_cloud_text = "heavy-clouds"
+                derived_avg_cloud_for_icon = 1.0
+
+    # If there's only one period in the forecast, use its actual average cloud cover for the icon directly
+    # This overrides the above logic if a single period is available.
     if len(period_stats) == 1:
         derived_avg_cloud_for_icon = period_stats[0]["avg_cloud_cover"]
 
@@ -1021,9 +1095,7 @@ def calculate_day_text(
         or secondary_precip_condition == "medium-snow"
     ):
         snow_low_accum = math.floor(total_snow_accum - (total_snow_error / 2))
-        snow_max_accum = math.ceil(
-            total_snow_accum + (total_snow_error / 2)
-        )  # Bug fix: used total_snow_accum instead of snow_accum
+        snow_max_accum = math.ceil(total_snow_accum + (total_snow_error / 2))
         snow_low_accum = max(0, snow_low_accum)  # Snow accumulation cannot be negative
 
         if total_snow_error <= 0:
@@ -1068,8 +1140,6 @@ def calculate_day_text(
     later_conditions_list = []
 
     # Apply "later" text only when in hourly mode and condition starts later in the first period
-    # The condition `all_period_names[0] == today_period_for_later_check` is the critical check
-    # to see if the forecast starts mid-period and the 'later' logic should apply.
     if (
         mode == "hour"
         and all_period_names
@@ -1160,6 +1230,7 @@ def calculate_day_text(
     # Calculate summary text for each condition type, passing all relevant periods for combination logic
     if has_precip:
         # Pass all period data lists to allow calculate_period_summary_text to determine internal combinations
+        # The combination flags (temp_...) are returned by this call.
         (
             precip_only_summary,
             temp_wind_combined,
@@ -1183,22 +1254,11 @@ def calculate_day_text(
             later_conditions_list,
             today_period_for_later_check,
         )
-        # Update combination flags based on whether wind/dry/humid/vis were actually combined *into* precipitation's summary
-        # This requires inspecting the structure of precip_only_summary
-        if (
-            isinstance(precip_only_summary, list)
-            and precip_only_summary
-            and precip_only_summary[0] == "and"
-        ):
-            combined_wind_flag = temp_wind_combined
-            combined_dry_flag = temp_dry_combined
-            combined_humid_flag = temp_humid_combined
-            combined_vis_flag = temp_vis_combined
-        else:  # If precip_only_summary is not an "and" statement, then no combination happened for these flags
-            combined_wind_flag = False
-            combined_dry_flag = False
-            combined_humid_flag = False
-            combined_vis_flag = False
+        # These flags indicate if the *higher priority* summary (precip) consumed these conditions.
+        combined_wind_flag = temp_wind_combined
+        combined_dry_flag = temp_dry_combined
+        combined_humid_flag = temp_humid_combined
+        combined_vis_flag = temp_vis_combined
 
     # Calculate summaries for other conditions. The combination flags for them are local to their calls.
     if has_wind:
@@ -1282,9 +1342,7 @@ def calculate_day_text(
         cloud_humid_combined_flag,
         cloud_vis_combined_flag,
     ) = calculate_period_summary_text(
-        [
-            i for i, _ in enumerate(period_stats)
-        ],  # Pass all period indices for cloud to find its pattern
+        overall_cloud_idx,  # Pass all period indices for cloud to find its pattern
         final_cloud_text,
         "cloud",
         all_period_names,
@@ -1300,14 +1358,13 @@ def calculate_day_text(
         later_conditions_list,
         today_period_for_later_check,
     )
-
     # --- Final Summary Construction Logic: Select top 2 conditions based on priority ---
 
     # Candidate summaries: list of dictionaries, each describing a potential main summary.
     # We will prioritize and select from these.
     # Properties: 'type', 'priority', 'all_day', 'start_idx', 'text', 'icon'
 
-    # Priority order: lower number is higher priority.
+    # Priority order (lower number = higher priority):
     # 0: Precipitation
     # 1: Visibility (Fog)
     # 2: Wind
@@ -1315,11 +1372,13 @@ def calculate_day_text(
     # 4: Cloud (fallback)
 
     candidate_summaries_for_final_assembly = []
-    total_periods_available = []
 
     # 1. Precipitation
-    if has_precip:
-        is_precip_all_day = len(precip_periods) == total_periods_available
+    # Only add if precip_only_summary is not None (i.e., has_precip is True)
+    if precip_only_summary:
+        is_precip_all_day = (
+            len(precip_periods) == len(period_stats) if period_stats else False
+        )
         candidate_summaries_for_final_assembly.append(
             {
                 "type": "precip",
@@ -1333,7 +1392,9 @@ def calculate_day_text(
 
     # 2. Visibility (Fog) - only if not already covered by precipitation
     if has_vis and not combined_vis_flag:
-        is_vis_all_day = len(vis_periods) == total_periods_available
+        is_vis_all_day = (
+            len(vis_periods) == len(period_stats) if period_stats else False
+        )
         candidate_summaries_for_final_assembly.append(
             {
                 "type": "vis",
@@ -1347,7 +1408,9 @@ def calculate_day_text(
 
     # 3. Wind - only if not already covered by precipitation or visibility
     if has_wind and not combined_wind_flag:
-        is_wind_all_day = len(wind_periods) == total_periods_available
+        is_wind_all_day = (
+            len(wind_periods) == len(period_stats) if period_stats else False
+        )
         candidate_summaries_for_final_assembly.append(
             {
                 "type": "wind",
@@ -1361,47 +1424,48 @@ def calculate_day_text(
             }
         )
 
-    # 4. Dry Humidity - only if not already covered AND (combined OR cloud is clear)
-    if (
-        has_dry
-        and not combined_dry_flag
-        and (cloud_dry_combined_flag or final_cloud_text == "clear")
-    ):
-        is_dry_all_day = len(dry_periods) == total_periods_available
-        candidate_summaries_for_final_assembly.append(
-            {
-                "type": "dry",
-                "priority": 3,
-                "all_day": is_dry_all_day,
-                "start_idx": dry_periods[0] if dry_periods else -1,
-                "text": dry_only_summary,
-                "icon": None,  # Dry/humid don't have dedicated icons, fallback to cloud
-            }
-        )
+    # 4. Dry Humidity - only if not already covered AND (combined by cloud OR cloud is clear)
+    # This ensures dry/humid don't appear as primary condition unless specifically linked or cloud is clear
+    if has_dry and not combined_dry_flag and not cloud_dry_combined_flag:
+        if final_cloud_text == "clear":
+            is_dry_all_day = (
+                len(dry_periods) == len(period_stats) if period_stats else False
+            )
+            candidate_summaries_for_final_assembly.append(
+                {
+                    "type": "dry",
+                    "priority": 3,
+                    "all_day": is_dry_all_day,
+                    "start_idx": dry_periods[0] if dry_periods else -1,
+                    "text": dry_only_summary,
+                    "icon": None,  # Dry/humid don't have dedicated icons, fallback to cloud
+                }
+            )
 
-    # 5. Humid Humidity - only if not already covered AND (combined OR cloud is clear)
-    if (
-        has_humid
-        and not combined_humid_flag
-        and (cloud_humid_combined_flag or final_cloud_text == "clear")
-    ):
-        is_humid_all_day = len(humid_periods) == total_periods_available
-        candidate_summaries_for_final_assembly.append(
-            {
-                "type": "humid",
-                "priority": 4,
-                "all_day": is_humid_all_day,
-                "start_idx": humid_periods[0] if humid_periods else -1,
-                "text": humid_only_summary,
-                "icon": None,  # Dry/humid don't have dedicated icons, fallback to cloud
-            }
-        )
+    # 5. Humid Humidity - only if not already covered AND (combined by cloud OR cloud is clear)
+    if has_humid and not combined_humid_flag and not cloud_humid_combined_flag:
+        if final_cloud_text == "clear":
+            is_humid_all_day = (
+                len(humid_periods) == len(period_stats) if period_stats else False
+            )
+            candidate_summaries_for_final_assembly.append(
+                {
+                    "type": "humid",
+                    "priority": 4,
+                    "all_day": is_humid_all_day,
+                    "start_idx": humid_periods[0] if humid_periods else -1,
+                    "text": humid_only_summary,
+                    "icon": None,  # Dry/humid donon't have dedicated icons, fallback to cloud
+                }
+            )
 
     # 6. Cloud Cover - as a fallback if no other primary condition is present
     if (
         not candidate_summaries_for_final_assembly
     ):  # If no higher-priority conditions are present
-        is_cloud_all_day = len(period_stats) == total_periods_available
+        is_cloud_all_day = (
+            len(period_stats) == len(period_stats) if period_stats else False
+        )  # True if any periods exist
         candidate_summaries_for_final_assembly.append(
             {
                 "type": "cloud",
@@ -1414,7 +1478,7 @@ def calculate_day_text(
         )
 
     # Sort candidates:
-    # 1. By 'all_day' (True comes before False, so `not x["all_day"]` makes all-day items sort first)
+    # 1. By 'all_day' (True comes before False: `not x["all_day"]` makes all-day items sort first)
     # 2. By 'priority' (lower number is higher priority)
     # 3. By 'start_idx' (earliest start comes first)
     sorted_summaries_candidates = sorted(
