@@ -1,4 +1,6 @@
-# %% Script to contain the functions that can be used to generate the daily text summary of the forecast data for Pirate Weather
+import datetime
+import math
+from dateutil import tz
 from PirateTextHelper import (
     calculate_precip_text,
     calculate_wind_text,
@@ -7,2324 +9,1467 @@ from PirateTextHelper import (
     humidity_sky_text,
     Most_Common,
 )
-import datetime
-import math
-from dateutil import tz
 
-cloudy = 0.875
-mostly_cloudy = 0.625
-partly_cloudy = 0.375
-mostly_clear = 0.125
-visibility = 1000
+# Constants for cloud cover thresholds
+CLOUDY_THRESHOLD = 0.875
+MOSTLY_CLOUDY_THRESHOLD = 0.625
+PARTLY_CLOUDY_THRESHOLD = 0.375
+MOSTLY_CLEAR_THRESHOLD = 0.125
+DEFAULT_VISIBILITY = 1000
 
 
-def calculate_cloud_text(cloudCover):
+def calculate_cloud_text(cloud_cover):
     """
-    Calculates the visibility text
+    Calculates the textual representation and level of cloud cover.
 
     Parameters:
-    - cloudCover (float) -  The cloud cover for the period
+    - cloud_cover (float): The cloud cover for the period (0.0 to 1.0).
 
     Returns:
-    - cloudText (str) - The textual representation of the cloud cover
-    - cloudLevel (int) - The level of the cloud cover
+    - tuple: A tuple containing:
+        - cloud_text (str): The textual representation of the cloud cover.
+        - cloud_level (int): The level of the cloud cover (0-4).
     """
-    cloudText = None
-    cloudLevel = None
-
-    if cloudCover > cloudy:
-        cloudText = "heavy-clouds"
-        cloudLevel = 4
-    elif cloudCover > partly_cloudy:
-        if cloudCover > mostly_cloudy:
-            cloudText = "medium-clouds"
-            cloudLevel = 3
-        else:
-            cloudText = "light-clouds"
-            cloudLevel = 2
+    if cloud_cover > CLOUDY_THRESHOLD:
+        return "heavy-clouds", 4
+    elif cloud_cover > MOSTLY_CLOUDY_THRESHOLD:
+        return "medium-clouds", 3
+    elif cloud_cover > PARTLY_CLOUDY_THRESHOLD:
+        return "light-clouds", 2
+    elif cloud_cover > MOSTLY_CLEAR_THRESHOLD:
+        return "very-light-clouds", 1
     else:
-        if cloudCover > mostly_clear:
-            cloudText = "very-light-clouds"
-            cloudLevel = 1
-        else:
-            cloudText = "clear"
-            cloudLevel = 0
-
-    return cloudText, cloudLevel
+        return "clear", 0
 
 
-def calculate_period_text(
-    periods,
-    typePeriods,
-    text,
-    type,
-    wind,
-    prepAccumUnit,
-    visUnits,
-    windUnit,
-    maxWind,
-    windPrecip,
-    checkPeriod,
+def _get_period_name(hour_of_day, is_today=True):
+    """
+    Determines the textual name of a period based on the hour of the day.
+
+    Parameters:
+    - hour_of_day (int): The hour (0-23).
+    - is_today (bool): True if the period is for the current day, False for the next.
+
+    Returns:
+    - str: The textual representation of the period (e.g., "today-morning", "tomorrow-night").
+    """
+    prefix = "today-" if is_today else "tomorrow-"
+    if 4 <= hour_of_day < 12:
+        return prefix + "morning"
+    elif 12 <= hour_of_day < 17:
+        return prefix + "afternoon"
+    elif 17 <= hour_of_day < 22:
+        return prefix + "evening"
+    else:  # 22:00 to 3:59
+        return prefix + "night"
+
+
+def _get_time_phrase(
+    period_indices,
+    condition_type,
+    all_periods,
+    check_period,
     mode,
-    icon,
-    dry,
-    humid,
-    tempUnits,
-    dryPrecip,
-    humidPrecip,
-    visPrecip,
-    vis,
-    later,
+    later_conditions,
+    today_period_for_later_check,
 ):
     """
-    Calculates the period text
+    Determines the appropriate time phrase (e.g., "during", "starting", "until")
+    for a given set of periods, considering continuity and specific patterns.
 
     Parameters:
-    - periods (arr) -  An array representing all the periods in the day/next 24h
-    - typePeriods (arr) - An array representing the type (wind/cloud/precip/vis)
-    - text (str) - A string representing the text for the type (light-rain, fog, etc.)
-    - type (str) - The current type we are checking (precip, cloud, etc.)
-    - wind (arr) - An array of the wind times
-    - prepAccumUnit (float): The precipitation unit used
-    - visUnits (float): The visibility unit used
-    - maxWind (float) - The maximum wind for all the periods
-    - windPrecip (bool) - Whether wind is occuring with cloud cover or precipitation.
-    - checkPeriod (float) - The current period
-    - mode (str) - Whether the summary is for the day or the next 24h
-    - dry (arr) - An array of the low humidity times
-    - humid (arr) - An array of the high humidity times
-    - tempUnits (float): The temperature unit used
-    - dryPrecip (bool) - Whether low humidity is occuring with other conditions.
-    - humidPrecip (bool) - Whether high humidity is occuring with other conditions.
-    - later (arr) - List of conditions that start later
+    - period_indices (list): List of indices where the condition is present.
+    - condition_type (str): The type of condition ("precip", "cloud", etc.).
+    - all_periods (list): List of all period names (e.g., ["today-morning"]).
+    - check_period (int): The starting index for checks (usually 0).
+    - mode (str): "daily" or "hour".
+    - later_conditions (list): List of conditions marked as "later".
+    - today_period_for_later_check (str): The name of the current period for 'later' comparison.
 
     Returns:
-    - summary_text (str) - The textual representation of the type for the current day/next 24 hours
-    - windPrecip (bool) - Returns if wind is occuring with precipitation or cloud cover
-    - dryPrecip (bool) - Whether low humidity is occuring with other conditions.
-    - humidPrecip (bool) - Whether high humidity is occuring with other conditions.
+    - list: The time phrase structure.
     """
-    # Set the period text to the current text
-    periodText = text
+    num_periods = len(period_indices)
+    total_periods_available = len(all_periods)
+
+    if num_periods == 0:
+        return None
+
+    if num_periods == 1:
+        # Single period: "during [period_name]"
+        return ["during", all_periods[period_indices[0]]]
+    elif num_periods == total_periods_available:
+        # Condition spans all available periods: "for-day" or "starting [first_period]" if 'later' applies
+        # The 'later' text only applies if in hourly mode and the first period is marked as 'later'.
+        if (
+            mode == "hour"
+            and "later" in all_periods[0]
+            and condition_type in later_conditions
+        ):
+            return ["starting", all_periods[period_indices[0]]]
+        else:
+            return ["for-day"]
+
+    # Logic for multiple disjoint or continuous periods
+    if num_periods > 1:
+        start_idx = period_indices[0]
+        end_idx = period_indices[-1]
+
+        # Check if the periods are continuous (e.g., [0, 1, 2])
+        is_continuous = all(
+            period_indices[i] == period_indices[i - 1] + 1
+            for i in range(1, num_periods)
+        )
+
+        # Handle specific patterns for 2 periods
+        if num_periods == 2:
+            # Starts in the 3rd period and continues to the 4th (total 4 periods)
+            if (
+                start_idx == check_period + 2
+                and end_idx == 3
+                and total_periods_available == 4
+            ):
+                summary_text_temp = ["starting", all_periods[start_idx]]
+            # Starts in the 4th period and continues to the 5th (total 5 periods)
+            elif (
+                start_idx == check_period + 3
+                and end_idx == 4
+                and total_periods_available == 5
+            ):
+                summary_text_temp = ["starting", all_periods[start_idx]]
+            # Starts at 'check_period' and is continuous for 2 periods
+            elif start_idx == check_period and is_continuous:
+                summary_text_temp = [  # Store temp to check later condition
+                    "until",
+                    all_periods[min(end_idx + 1, total_periods_available - 1)],
+                ]
+            # Starts after 'check_period' and is continuous for 2 periods
+            elif start_idx > check_period and is_continuous:
+                summary_text_temp = [  # Store temp to check later condition
+                    "starting-continuing-until",
+                    all_periods[start_idx],
+                    all_periods[min(end_idx + 1, total_periods_available - 1)],
+                ]
+            # Starts at 'check_period', not continuous, and ends in the 4th period (index 3)
+            # This covers patterns like [0, 3] in a 4-period day
+            elif start_idx == check_period and not is_continuous and end_idx == 3:
+                summary_text_temp = [  # Store temp to check later condition
+                    "until-starting-again",
+                    all_periods[start_idx + 1],  # The period after the first occurrence
+                    all_periods[end_idx],  # The last period of occurrence
+                ]
+            else:
+                # Two disjoint periods, e.g., ["during", ["and", period1, period2]]
+                summary_text_temp = [  # Store temp to check later condition
+                    "during",
+                    ["and", all_periods[start_idx], all_periods[end_idx]],
+                ]
+
+            # Specific "later" check for 2-period conditions
+            if (
+                mode == "hour"  # 'later' only applies in hourly mode
+                and "later"
+                in all_periods[0]  # Check if the first period is indeed "later-"
+                and condition_type in later_conditions
+            ):
+                # If the current summary_text_temp is an "until" pattern and not explicitly "starting"
+                # (which would be overridden by "later")
+                if "until" in summary_text_temp and "starting" not in summary_text_temp:
+                    return [
+                        "starting",
+                        all_periods[start_idx],
+                    ]  # Simplify to "starting"
+                # If it's an "until-starting-again" pattern
+                elif "until-starting-again" in summary_text_temp:
+                    # Original logic combined into "and" for the two parts if 'later' applied.
+                    return [
+                        "and",
+                        ["during", all_periods[start_idx]],
+                        ["during", all_periods[end_idx]],
+                    ]
+            return summary_text_temp  # Return the determined summary phrase if 'later' didn't apply
+
+        # Handle specific patterns for 3 periods
+        elif num_periods == 3:
+            mid_idx = period_indices[1]
+            # Starts in the 2nd period and continuous for 3 periods (total 4 periods)
+            if (
+                start_idx == check_period + 1
+                and end_idx == 3
+                and total_periods_available == 4
+            ):
+                summary_text_temp = ["starting", all_periods[start_idx]]
+            # Starts in the 3rd period and continuous for 3 periods (total 5 periods)
+            elif (
+                start_idx == check_period + 2
+                and end_idx == 4
+                and total_periods_available == 5
+            ):
+                summary_text_temp = ["starting", all_periods[start_idx]]
+            # Continuous block of 3 periods starting at 'check_period'
+            elif start_idx == check_period and is_continuous:
+                summary_text_temp = [
+                    "until",
+                    all_periods[min(end_idx + 1, total_periods_available - 1)],
+                ]
+            # Discontinuous 3 periods
+            elif not is_continuous:
+                # All three periods are disjoint (e.g., [0, 2, 4])
+                if (mid_idx - start_idx) != 1 and (end_idx - mid_idx) != 1:
+                    summary_text_temp = [
+                        "during",
+                        [
+                            "and",
+                            all_periods[start_idx],
+                            ["and", all_periods[mid_idx], all_periods[end_idx]],
+                        ],
+                    ]
+                # First two are continuous, third is disjoint (e.g., [0, 1, 3])
+                elif (
+                    start_idx == check_period
+                    and (mid_idx - start_idx) == 1
+                    and end_idx >= 3
+                ):
+                    summary_text_temp = [
+                        "until-starting-again",
+                        all_periods[mid_idx + 1],
+                        all_periods[end_idx],
+                    ]
+                # First is disjoint, last two are continuous (e.g., [0, 2, 3])
+                elif (
+                    start_idx == check_period
+                    and (mid_idx - start_idx) != 1
+                    and mid_idx >= 2
+                ):
+                    summary_text_temp = [
+                        "until-starting-again",
+                        all_periods[start_idx + 1],
+                        all_periods[mid_idx],
+                    ]
+                # Three continuous periods starting after 'check_period' (for 5 total periods)
+                elif (
+                    start_idx > check_period
+                    and is_continuous
+                    and total_periods_available == 5
+                ):
+                    summary_text_temp = [
+                        "starting-continuing-until",
+                        all_periods[start_idx],
+                        all_periods[min(end_idx + 1, total_periods_available - 1)],
+                    ]
+                # First is disjoint, next two are continuous (for 5 total periods)
+                elif (
+                    start_idx > check_period
+                    and (mid_idx - start_idx) != 1
+                    and (end_idx - mid_idx) == 1
+                    and total_periods_available == 5
+                ):
+                    summary_text_temp = [
+                        "and",
+                        ["during", all_periods[start_idx]],
+                        ["starting", all_periods[mid_idx]],
+                    ]
+                # First two are continuous, last is disjoint (for 5 total periods)
+                elif (
+                    start_idx > check_period
+                    and (mid_idx - start_idx) == 1
+                    and (end_idx - mid_idx) != 1
+                    and total_periods_available == 5
+                ):
+                    summary_text_temp = [
+                        "and",
+                        [
+                            "starting-continuing-until",
+                            all_periods[start_idx],
+                            all_periods[min(mid_idx + 1, total_periods_available - 1)],
+                        ],
+                        ["during", all_periods[end_idx]],
+                    ]
+
+            # Apply "later" re-structuring specific to 3-period patterns
+            if (
+                mode == "hour"  # 'later' only applies in hourly mode
+                and "later"
+                in all_periods[0]  # Check if the first period is indeed "later-"
+                and condition_type in later_conditions
+            ):
+                # Restructuring for "until-starting-again" (0,1 and 3) to "and" format
+                if (
+                    len(period_indices) == 3
+                    and start_idx == check_period
+                    and (mid_idx - start_idx) == 1
+                    and end_idx >= 3
+                ):
+                    return [
+                        "and",
+                        [
+                            "starting-continuing-until",
+                            all_periods[start_idx],
+                            all_periods[mid_idx + 1],
+                        ],
+                        ["during", all_periods[end_idx]],
+                    ]
+                # Restructuring for "until-starting-again" (0 and 2,3) to "and" format
+                elif (
+                    len(period_indices) == 3
+                    and start_idx == check_period
+                    and (mid_idx - start_idx) != 1
+                    and mid_idx >= 2
+                ):
+                    return [
+                        "and",
+                        ["during", all_periods[start_idx]],
+                        [
+                            "starting-continuing-until",
+                            all_periods[mid_idx],
+                            all_periods[min(end_idx + 1, total_periods_available - 1)],
+                        ],
+                    ]
+                # For a continuous block where "later" applies, just "starting"
+                elif is_continuous:
+                    return [
+                        "starting-continuing-until",
+                        all_periods[start_idx],
+                        all_periods[min(end_idx + 1, total_periods_available - 1)],
+                    ]
+            return summary_text_temp  # Return the determined summary phrase if 'later' didn't apply
+
+        # Handle specific patterns for 4 periods (assuming total_periods_available is 5)
+        elif num_periods == 4 and total_periods_available == 5:
+            # Starts in the 2nd period and continuous for 4 periods
+            if start_idx == check_period + 1 and end_idx == 4:
+                summary_text_temp = ["starting", all_periods[start_idx]]
+            # Continuous block of 4 periods starting at 'check_period'
+            elif start_idx == check_period and is_continuous:
+                summary_text_temp = ["until", all_periods[end_idx]]
+            # Continuous block of 4 periods starting after 'check_period'
+            elif start_idx > check_period and is_continuous:
+                summary_text_temp = [
+                    "starting-continuing-until",
+                    all_periods[start_idx],
+                    all_periods[end_idx],
+                ]
+            # Discontinuous 4 periods starting at 'check_period'
+            elif start_idx == check_period and not is_continuous:
+                # E.g., [0] and [2,3,4]
+                if (period_indices[2] - period_indices[1]) == 1 and (
+                    end_idx - period_indices[2]
+                ) == 1:
+                    summary_text_temp = [
+                        "until-starting-again",
+                        all_periods[start_idx + 1],
+                        all_periods[period_indices[1]],
+                    ]
+                # E.g., [0,1] and [3,4]
+                elif (
+                    (period_indices[1] - start_idx) == 1
+                    and (period_indices[2] - period_indices[1]) != 1
+                    and (end_idx - period_indices[2]) == 1
+                ):
+                    summary_text_temp = [
+                        "until-starting-again",
+                        all_periods[period_indices[1] + 1],
+                        all_periods[period_indices[2]],
+                    ]
+                # E.g., [0,1,2] and [4]
+                elif (end_idx - period_indices[2]) != 1:
+                    summary_text_temp = [
+                        "until-starting-again",
+                        all_periods[period_indices[2] + 1],
+                        all_periods[end_idx],
+                    ]
+
+            # Apply "later" re-structuring specific to 4-period patterns
+            if (
+                mode == "hour"  # 'later' only applies in hourly mode
+                and "later"
+                in all_periods[0]  # Check if the first period is indeed "later-"
+                and condition_type in later_conditions
+            ):
+                if is_continuous:
+                    return ["starting", all_periods[start_idx]]
+                # Restructuring for [0] and [2,3,4] to "and" format
+                elif (
+                    len(period_indices) == 4
+                    and (period_indices[2] - period_indices[1]) == 1
+                    and (end_idx - period_indices[2]) == 1
+                    and end_idx == 4
+                ):
+                    return [
+                        "and",
+                        ["during", all_periods[start_idx]],
+                        ["starting", all_periods[period_indices[1]]],
+                    ]
+                # Restructuring for [0,1,2] and [4] to "and" format
+                elif (
+                    len(period_indices) == 4
+                    and (end_idx - period_indices[2]) != 1
+                    and end_idx == 4
+                ):
+                    return [
+                        "and",
+                        [
+                            "starting-continuing-until",
+                            all_periods[start_idx],
+                            all_periods[period_indices[2]],
+                        ],
+                        ["starting", all_periods[end_idx]],
+                    ]
+            return summary_text_temp  # Return the determined summary phrase if 'later' didn't apply
+
+    # Default fallback: combine all individual periods with 'during' and 'and'
+    # This only triggers if `num_periods > 1` and `is_continuous` is False,
+    # and none of the specific 2, 3, or 4 period patterns matched.
+    if num_periods > 1 and not is_continuous:
+        combined_periods_text = []
+        for idx in period_indices:
+            combined_periods_text.append(all_periods[idx])
+        return ["during", combined_periods_text]
+
+    return None
+
+
+def calculate_period_summary_text(
+    period_indices,
+    condition_text,
+    condition_type,
+    all_periods,
+    all_wind_periods,
+    all_dry_periods,
+    all_humid_periods,
+    all_vis_periods,
+    max_wind_speed,
+    wind_unit,
+    icon_set,
+    check_period,
+    mode,
+    later_conditions,
+    today_period_for_later_check,
+):
+    """
+    Calculates the textual summary for a specific condition (precip, cloud, wind, vis, dry, humid)
+    across a set of periods.
+
+    Parameters:
+    - period_indices (list): List of indices where the condition is present.
+    - condition_text (str): The base text for the condition (e.g., "light-rain", "fog").
+    - condition_type (str): The type of condition ("precip", "cloud", "wind", "vis", "dry", "humid").
+    - all_periods (list): List of all period names (e.g., ["today-morning", "today-afternoon"]).
+    - all_wind_periods (list): Indices of periods with significant wind.
+    - all_dry_periods (list): Indices of periods with low humidity.
+    - all_humid_periods (list): Indices of periods with high humidity.
+    - all_vis_periods (list): Indices of periods with low visibility (fog).
+    - max_wind_speed (float): Maximum wind speed across all relevant periods.
+    - wind_unit (float): The unit conversion for wind speed.
+    - icon_set (str): Which icon set to use - Dark Sky or Pirate Weather.
+    - check_period (int): The current period index being checked (usually 0 for the start).
+    - mode (str): Whether the summary is for the day or the next 24h ("daily" or "hour").
+    - later_conditions (list): List of conditions that start later in the first period.
+    - today_period_for_later_check (str): The name of the current period for 'later' comparison.
+
+    Returns:
+    - tuple: A tuple containing:
+        - summary_text (list): The textual representation of the condition for the current day/next 24 hours.
+        - wind_condition_combined (bool): True if wind was combined with this condition.
+        - dry_condition_combined (bool): True if dry was combined with this condition.
+        - humid_condition_combined (bool): True if humid was combined with this condition.
+        - vis_condition_combined (bool): True if visibility was combined with this condition.
+    """
     summary_text = None
-    # If there is only one period then just use that period
-    if len(typePeriods) == 1:
-        # If the type is precipitation/cloud cover then check the wind if the wind is occuring in one period
-        if len(wind) == 1 and (type != "wind" and type != "cloud"):
-            # If they both occur at the same time then join with an and. Set windPrecip to true to skip checking the wind
-            if wind[0] == typePeriods[0]:
-                windPrecip = True
-                periodText = [
-                    "and",
-                    periodText,
-                    calculate_wind_text(maxWind, windUnit, icon, "summary"),
-                ]
-        # If the type is precipitation/cloud cover then check the vis if the vis is occuring in one period
-        if len(vis) == 1 and type != "vis" and type != "wind":
-            # If they both occur at the same time then join with an and. Set visPrecip to true to skip checking the wind
-            if vis[0] == typePeriods[0]:
-                visPrecip = True
-                periodText = [
-                    "and",
-                    periodText,
-                    "fog",
-                ]
-        if len(dry) == 1 and (type != "precip" and type != "dry" and type != "humid"):
-            if dry[0] == typePeriods[0]:
-                dryPrecip = True
-                periodText = [
-                    "and",
-                    periodText,
-                    "low-humidity",
-                ]
-        if len(humid) == 1 and (type != "dry" and type != "humid"):
-            if humid[0] == typePeriods[0]:
-                dryPrecip = True
-                periodText = [
-                    "and",
-                    periodText,
-                    "high-humidity",
-                ]
-        summary_text = ["during", periodText, periods[typePeriods[0]]]
-    # If the type has two periods
-    elif len(typePeriods) == 2:
-        # If the type is precipitation/cloud cover then check the wind if the wind is occuring in two periods
-        if len(wind) == 2 and (type == "precip" or type == "cloud"):
-            # If they both occur at the same time then join with an and. Set windPrecip to true to skip checking the wind
-            if wind[0] == typePeriods[0] and wind[1] == typePeriods[1]:
-                windPrecip = True
-                periodText = [
-                    "and",
-                    periodText,
-                    calculate_wind_text(maxWind, windUnit, icon, "summary"),
-                ]
-        # If the type is precipitation/cloud cover then check the vis if the vis is occuring in two periods
-        if len(vis) == 2 and type != "vis" and type != "wind":
-            # If they both occur at the same time then join with an and. Set visPrecip to true to skip checking the vis
-            if vis[0] == typePeriods[0] and vis[1] == typePeriods[1]:
-                visPrecip = True
-                periodText = [
-                    "and",
-                    periodText,
-                    "fog",
-                ]
-        if len(dry) == 2 and (type != "precip" and type != "dry" and type != "humid"):
-            if dry[0] == typePeriods[0] and dry[1] == typePeriods[1]:
-                dryPrecip = True
-                periodText = [
-                    "and",
-                    periodText,
-                    "low-humidity",
-                ]
-        if len(humid) == 2 and (type != "dry" and type != "humid"):
-            if humid[0] == typePeriods[0] and humid[1] == typePeriods[1]:
-                humidPrecip = True
-                periodText = [
-                    "and",
-                    periodText,
-                    "high-humidity",
-                ]
-        # If the type starts in the third period
-        if (
-            typePeriods[0] == checkPeriod + 2
-            and typePeriods[1] == 3
-            and len(periods) == 4
-        ):
-            summary_text = ["starting", periodText, periods[typePeriods[0]]]
-        # If the type starts in the fourth period and we have five total periods
-        elif (
-            typePeriods[0] == checkPeriod + 3
-            and typePeriods[1] == 4
-            and len(periods) == 5
-        ):
-            summary_text = ["starting", periodText, periods[typePeriods[0]]]
-        # If the type starts at the start but does not continue to the end
-        elif typePeriods[0] == checkPeriod and (typePeriods[1] - typePeriods[0]) == 1:
-            # We need to set the ending period to the next period. If the end occurs in the fourth period we set the period to 4 to prevent array out of bounds
-            summary_text = [
-                "until",
-                periodText,
-                periods[
-                    len(periods) - 1
-                    if typePeriods[1] + 1 > len(periods) - 1
-                    else typePeriods[1] + 1
-                ],
-            ]
-        # If the type starts after the first period but doesn't continue to the end
-        elif typePeriods[0] > checkPeriod and (typePeriods[1] - typePeriods[0]) == 1:
-            summary_text = [
-                "starting-continuing-until",
-                periodText,
-                periods[typePeriods[0]],
-                periods[
-                    len(periods) - 1
-                    if typePeriods[1] + 1 > len(periods) - 1
-                    else typePeriods[1] + 1
-                ],
-            ]
-        # If the type occurs at the start but then starts again in the last period
-        elif (
-            typePeriods[0] == checkPeriod
-            and (typePeriods[1] - typePeriods[0]) != 1
-            and typePeriods[1] == 3
-        ):
-            summary_text = [
-                "until-starting-again",
-                periodText,
-                periods[typePeriods[0] + 1],
-                periods[typePeriods[1]],
-            ]
-        # If the two types are not joined and do not occur during the first or last period
-        else:
-            summary_text = [
-                "during",
-                periodText,
-                ["and", periods[typePeriods[0]], periods[typePeriods[1]]],
-            ]
-        # If the first period has the later text and the summary is until change it to starting
-        if (
-            "later" in periods[0]
-            and "until" in summary_text
-            and "starting" not in summary_text
-            and type in later
-        ) or (
-            "later" in periods[0]
-            and "until-starting-again" in summary_text
-            and type in later
-        ):
-            summary_text = [
-                "and",
-                [
-                    "during",
-                    periodText,
-                    periods[typePeriods[0]],
-                ],
-                [
-                    "during",
-                    periodText,
-                    periods[typePeriods[1]],
-                ],
-            ]
-    # If the type occurs during three periods
-    elif len(typePeriods) == 3:
-        # If the type is precipitation/cloud cover then check the wind if the wind is occuring in three periods
-        if len(wind) == 3 and (type == "precip" or type == "cloud"):
-            # If they both occur at the same time then join with an and. Set windPrecip to true to skip checking the wind
-            if (
-                wind[0] == typePeriods[0]
-                and wind[1] == typePeriods[1]
-                and wind[2] == typePeriods[2]
-            ):
-                windPrecip = True
-                periodText = [
-                    "and",
-                    periodText,
-                    calculate_wind_text(maxWind, windUnit, icon, "summary"),
-                ]
-        # If the type is precipitation/cloud cover then check the vis if the vis is occuring in three periods
-        if len(vis) == 3 and type != "vis" and type != "wind":
-            # If they both occur at the same time then join with an and. Set visPrecip to true to skip checking the vis
-            if (
-                vis[0] == typePeriods[0]
-                and vis[1] == typePeriods[1]
-                and vis[2] == typePeriods[2]
-            ):
-                visPrecip = True
-                periodText = [
-                    "and",
-                    periodText,
-                    "fog",
-                ]
-        # If the type is not precip/dry/humid then check if low humidity is occuring in three periods
-        if len(dry) == 3 and (type != "precip" and type != "dry" and type != "humid"):
-            # If they both occur at the same time then join with an and. Set dryPrecip to true to skip checking the low humidity
-            if (
-                dry[0] == typePeriods[0]
-                and dry[1] == typePeriods[1]
-                and dry[2] == typePeriods[2]
-            ):
-                dryPrecip = True
-                periodText = [
-                    "and",
-                    periodText,
-                    "low-humidity",
-                ]
-        # If the type is not dry/humid then check if high humidity is occuring in three periods
-        if len(humid) == 3 and (type != "dry" and type != "humid"):
-            # If they both occur at the same time then join with an and. Set humidPrecip to true to skip checking the high humidity
-            if (
-                humid[0] == typePeriods[0]
-                and humid[1] == typePeriods[1]
-                and humid[2] == typePeriods[2]
-            ):
-                humidPrecip = True
-                periodText = [
-                    "and",
-                    periodText,
-                    "high-humidity",
-                ]
-        # If the type starts in the second period
-        if (
-            typePeriods[0] == checkPeriod + 1
-            and typePeriods[2] == 3
-            and len(periods) == 4
-        ):
-            summary_text = ["starting", periodText, periods[typePeriods[0]]]
-        # If the type starts in the second period
-        elif (
-            typePeriods[0] == checkPeriod + 2
-            and typePeriods[2] == 4
-            and len(periods) == 5
-        ):
-            summary_text = ["starting", periodText, periods[typePeriods[0]]]
-        elif (
-            typePeriods[0] == checkPeriod
-            and (typePeriods[1] - typePeriods[0]) == 1
-            and (typePeriods[2] - typePeriods[1]) == 1
-        ):
-            # We need to set the ending period to the next period. If the end occurs in the fourth period we set the period to 4 to prevent array out of bounds
-            summary_text = [
-                "until",
-                periodText,
-                periods[
-                    len(periods) - 1
-                    if typePeriods[2] + 1 > len(periods) - 1
-                    else typePeriods[2] + 1
-                ],
-            ]
-        # If the two types are not joined and do not occur during the first or last period
-        elif (
-            typePeriods[1] - typePeriods[0] != 1
-            and typePeriods[2] - typePeriods[1] != 1
-        ):
-            summary_text = [
-                "during",
-                periodText,
-                [
-                    "and",
-                    periods[typePeriods[0]],
-                    ["and", periods[typePeriods[1]], periods[typePeriods[2]]],
-                ],
-            ]
-        # If the type starts after the first period but doesn't continue to the end and the first and second periods are connected
-        elif (
-            typePeriods[0] == checkPeriod
-            and (typePeriods[1] - typePeriods[0]) == 1
-            and typePeriods[2] >= 3
-        ):
-            summary_text = [
-                "until-starting-again",
-                periodText,
-                periods[typePeriods[1] + 1],
-                periods[typePeriods[2]],
-            ]
-        # If the type starts after the first period but doesn't continue to the end and the second and third periods are connected
-        elif (
-            typePeriods[0] == checkPeriod
-            and (typePeriods[1] - typePeriods[0]) != 1
-            and typePeriods[1] >= 2
-        ):
-            summary_text = [
-                "until-starting-again",
-                periodText,
-                periods[typePeriods[0] + 1],
-                periods[typePeriods[1]],
-            ]
-        # If the type starts after the first period but doesn't continue to the end
-        elif (
-            typePeriods[0] > checkPeriod
-            and (typePeriods[1] - typePeriods[0]) == 1
-            and (typePeriods[2] - typePeriods[1]) == 1
-            and len(periods) == 5
-        ):
-            summary_text = [
-                "starting-continuing-until",
-                periodText,
-                periods[typePeriods[0]],
-                periods[
-                    len(periods) - 1
-                    if typePeriods[2] + 1 > len(periods) - 1
-                    else typePeriods[2] + 1
-                ],
-            ]
-        # If the type starts after the first period and the last two periods are connected
-        elif (
-            typePeriods[0] > checkPeriod
-            and (typePeriods[1] - typePeriods[0]) != 1
-            and (typePeriods[2] - typePeriods[1]) == 1
-            and len(periods) == 5
-        ):
-            summary_text = [
-                "and",
-                [
-                    "during",
-                    periodText,
-                    periods[typePeriods[0]],
-                ],
-                [
-                    "starting",
-                    periodText,
-                    periods[typePeriods[1]],
-                ],
-            ]
-        # If the type starts after the first period and the last two periods are connected
-        elif (
-            typePeriods[0] > checkPeriod
-            and (typePeriods[1] - typePeriods[0]) == 1
-            and (typePeriods[2] - typePeriods[1]) != 1
-            and len(periods) == 5
-        ):
-            summary_text = [
-                "and",
-                [
-                    "starting-continuing-until",
-                    periodText,
-                    periods[typePeriods[0]],
-                    periods[
-                        len(periods) - 1
-                        if typePeriods[1] + 1 > len(periods) - 1
-                        else typePeriods[1] + 1
-                    ],
-                ],
-                [
-                    "during",
-                    periodText,
-                    periods[typePeriods[2]],
-                ],
-            ]
-        # If the first period has the later text and the summary is until change it to starting
-        if (
-            "later" in periods[0]
-            and "until" in summary_text
-            and "starting" not in summary_text
-            and type in later
-        ):
-            summary_text = ["starting", periodText, periods[typePeriods[0]]]
-        # If the first period has the later text and the summary is until starting again change it to be during and add the second period
-        if (
-            "later" in periods[0]
-            and "until-starting-again" in summary_text
-            and (typePeriods[1] - typePeriods[0]) == 1
-            and typePeriods[2] >= 3
-            and type in later
-        ):
-            summary_text = [
-                "and",
-                [
-                    "starting-continuing-until",
-                    periodText,
-                    periods[typePeriods[0]],
-                    periods[typePeriods[1] + 1],
-                ],
-                [
-                    "during",
-                    periodText,
-                    periods[typePeriods[2]],
-                ],
-            ]
-        # If the first period has the later text and the summary is until starting again change it to be during and add the second period
-        if (
-            "later" in periods[0]
-            and "until-starting-again" in summary_text
-            and (typePeriods[1] - typePeriods[0]) != 1
-            and typePeriods[1] >= 2
-        ):
-            summary_text = [
-                "and",
-                [
-                    "during",
-                    periodText,
-                    periods[typePeriods[0]],
-                ],
-                [
-                    "starting-continuing-until",
-                    periodText,
-                    periods[typePeriods[1]],
-                    periods[
-                        len(periods) - 1
-                        if typePeriods[2] + 1 > len(periods) - 1
-                        else typePeriods[2] + 1
-                    ],
-                ],
-            ]
-    # If the type occurs during four periods and we have five periods
-    elif len(typePeriods) == 4 and len(periods) == 5:
-        # If the type is precipitation/cloud cover then check the wind if the wind is occuring in four periods
-        if len(wind) == 4 and (type == "precip" or type == "cloud"):
-            # If they both occur at the same time then join with an and. Set windPrecip to true to skip checking the wind
-            if (
-                wind[0] == typePeriods[0]
-                and wind[1] == typePeriods[1]
-                and wind[2] == typePeriods[2]
-                and wind[3] == typePeriods[3]
-            ):
-                windPrecip = True
-                periodText = [
-                    "and",
-                    periodText,
-                    calculate_wind_text(maxWind, windUnit, icon, "summary"),
-                ]
-        # If the type is precipitation/cloud cover then check the wind if the vis is occuring in four periods
-        if len(vis) == 4 and type != "vis" and type != "wind":
-            # If they both occur at the same time then join with an and. Set visPrecip to true to skip checking the vis
-            if (
-                vis[0] == typePeriods[0]
-                and vis[1] == typePeriods[1]
-                and vis[2] == typePeriods[2]
-                and vis[3] == typePeriods[3]
-            ):
-                visPrecip = True
-                periodText = [
-                    "and",
-                    periodText,
-                    calculate_wind_text(maxWind, windUnit, icon, "summary"),
-                ]
-        # If the type is not precip/dry/humid then check if low humidity is occuring in four periods
-        if len(dry) == 4 and (type != "precip" and type != "dry" and type != "humid"):
-            # If they both occur at the same time then join with an and. Set dryPrecip to true to skip checking the low humidity
-            if (
-                dry[0] == typePeriods[0]
-                and dry[1] == typePeriods[1]
-                and dry[2] == typePeriods[2]
-                and dry[3] == typePeriods[3]
-            ):
-                dryPrecip = True
-                periodText = [
-                    "and",
-                    periodText,
-                    "low-humidity",
-                ]
-        # If the type is not /ry/humid then check the dry if high humidity is occuring in four periods
-        if len(humid) == 4 and (type != "dry" and type != "humid"):
-            # If they both occur at the same time then join with an and. Set humidPrecip to true to skip checking the high humidity
-            if (
-                humid[0] == typePeriods[0]
-                and humid[1] == typePeriods[1]
-                and humid[2] == typePeriods[2]
-                and humid[3] == typePeriods[3]
-            ):
-                humidPrecip = True
-                periodText = [
-                    "and",
-                    periodText,
-                    "high-humidity",
-                ]
-        # If the type starts in the second period
-        if typePeriods[0] == checkPeriod + 1 and typePeriods[3] == 4:
-            summary_text = ["starting", periodText, periods[typePeriods[0]]]
-        elif (
-            typePeriods[0] == checkPeriod
-            and (typePeriods[1] - typePeriods[0]) == 1
-            and (typePeriods[2] - typePeriods[1]) == 1
-            and (typePeriods[3] - typePeriods[2]) == 1
-        ):
-            # We need to set the ending period to the next period. If the end occurs in the fourth period we set the period to 4 to prevent array out of bounds
-            summary_text = [
-                "until",
-                periodText,
-                periods[typePeriods[3]],
-            ]
-        # If the type starts after the first period but doesn't continue to the end
-        elif typePeriods[0] > checkPeriod and (typePeriods[1] - typePeriods[0]) == 1:
-            summary_text = [
-                "starting-continuing-until",
-                periodText,
-                periods[typePeriods[0]],
-                periods[typePeriods[3]],
-            ]
-        # If the type occurs in the first period but starts again after the first period
-        elif (
-            typePeriods[0] == checkPeriod
-            and (typePeriods[2] - typePeriods[1]) == 1
-            and (typePeriods[3] - typePeriods[2]) == 1
-            and typePeriods[3] == 4
-        ):
-            summary_text = [
-                "until-starting-again",
-                periodText,
-                periods[typePeriods[0] + 1],
-                periods[typePeriods[1]],
-            ]
-        # If the type occurs in the first period but starts again after the first period
-        elif (
-            typePeriods[0] == checkPeriod
-            and (typePeriods[1] - typePeriods[0]) == 1
-            and (typePeriods[2] - typePeriods[1]) != 1
-            and (typePeriods[3] - typePeriods[2]) == 1
-            and typePeriods[3] == 4
-        ):
-            summary_text = [
-                "until-starting-again",
-                periodText,
-                periods[typePeriods[1] + 1],
-                periods[typePeriods[2]],
-            ]
-        # If the type in the first period but doesn't continue to the end and the last period isn't connected to the others
-        elif (
-            typePeriods[0] == checkPeriod
-            and (typePeriods[3] - typePeriods[2]) != 1
-            and typePeriods[3] == 4
-        ):
-            summary_text = [
-                "until-starting-again",
-                periodText,
-                periods[typePeriods[2] + 1],
-                periods[typePeriods[3]],
-            ]
-        # If the first period has the later text and the summary is until change it to starting
-        if (
-            "later" in periods[0]
-            and "until" in summary_text
-            and "starting" not in summary_text
-            and type in later
-        ):
-            summary_text = ["starting", periodText, periods[typePeriods[0]]]
-        # If the first period has the later text and the summary is until starting again change it to be during and add the second period
-        if (
-            "later" in periods[0]
-            and "until-starting-again" in summary_text
-            and (typePeriods[2] - typePeriods[1]) == 1
-            and (typePeriods[3] - typePeriods[2]) == 1
-            and typePeriods[3] == 4
-            and type in later
-        ):
-            summary_text = [
-                "and",
-                [
-                    "during",
-                    periodText,
-                    periods[typePeriods[0]],
-                ],
-                [
-                    "starting",
-                    periodText,
-                    periods[typePeriods[1]],
-                ],
-            ]
-        # If the first period has the later text and the summary is until starting again change it to be during and add the second period
-        if (
-            "later" in periods[0]
-            and "until-starting-again" in summary_text
-            and (typePeriods[3] - typePeriods[2]) != 1
-            and typePeriods[3] == 4
-            and type in later
-        ):
-            summary_text = [
-                "and",
-                [
-                    "starting-continuing-until",
-                    periodText,
-                    periods[typePeriods[0]],
-                    periods[typePeriods[2]],
-                ],
-                [
-                    "starting",
-                    periodText,
-                    periods[typePeriods[3]],
-                ],
-            ]
-    # If the type occurs all day then use the for-day text and we have four periods
-    elif len(typePeriods) == 4 and len(periods) == 4:
-        # If they both occur at the same time and the type is precip/cloud then join with an and. Set windPrecip to true to skip checking the wind
-        if len(wind) == 4 and (type == "precip" or type == "cloud"):
-            windPrecip = True
-            summary_text = [
-                "and",
-                periodText,
-                calculate_wind_text(maxWind, windUnit, icon, "summary"),
-            ]
-        # If they both occur at the same time and the type is precip/cloud then join with an and. Set visPrecip to true to skip checking the vis
-        if len(vis) == 4 and type != "vis" and type != "wind":
-            visPrecip = True
-            summary_text = [
-                "and",
-                periodText,
-                "fog",
-            ]
-        if len(dry) == 4 and (type != "precip" and type != "dry" and type != "humid"):
-            dryPrecip = True
-            periodText = [
-                "and",
-                periodText,
-                "low-humidity",
-            ]
-        if len(humid) == 4 and (type != "dry" and type != "humid"):
-            humidPrecip = True
-            periodText = [
-                "and",
-                periodText,
-                "high-humidity",
-            ]
+    wind_condition_combined = False
+    dry_condition_combined = False
+    humid_condition_combined = False
+    vis_condition_combined = False
+    current_condition_text = condition_text
 
-        # If we're in hourly mode and the first period has the later text use the starting text instead of for day text
-        if mode == "hour" and "later" in periods[0]:
-            summary_text = ["starting", periodText, periods[typePeriods[0]]]
-        else:
-            summary_text = ["for-day", periodText]
-    # If the type occurs all day then use the for-day text and we have five periods
-    elif len(typePeriods) == 5 and len(periods) == 5:
-        # If they both occur at the same time and the type is precip/cloud then join with an and. Set windPrecip to true to skip checking the wind
-        if len(wind) == 5 and (type == "precip" or type == "cloud"):
-            windPrecip = True
-            summary_text = [
-                "and",
-                periodText,
-                calculate_wind_text(maxWind, windUnit, icon, "summary"),
-            ]
-        # If they both occur at the same time and the type is precip/cloud then join with an and. Set visPrecip to true to skip checking the vis
-        if len(vis) == 5 and type != "vis" and type != "wind":
-            visPrecip = True
-            summary_text = [
-                "and",
-                periodText,
-                "fog",
-            ]
-        # If they both occur at the same time and the type is not precip/dry/humid then join with an and. Set dryPrecip to true to skip checking the low humidity
-        if len(dry) == 5 and (type != "precip" and type != "dry" and type != "humid"):
-            dryPrecip = True
-            periodText = [
-                "and",
-                periodText,
-                "low-humidity",
-            ]
-        # If they both occur at the same time and the type is not dry/humid then join with an and. Set humidPrecip to true to skip checking the high humidity
-        if len(humid) == 5 and (type != "dry" and type != "humid"):
-            humidPrecip = True
-            periodText = [
-                "and",
-                periodText,
-                "high-humidity",
-            ]
+    # Helper to check if conditions occur in the same set of periods
+    def _are_periods_matching(cond_a, cond_b):
+        return sorted(cond_a) == sorted(cond_b)
 
-        # If the first period has the later text use the starting text instead of for day text
-        if "later" in periods[0] and type in later:
-            summary_text = ["starting", periodText, periods[typePeriods[0]]]
+    # Check for accompanying conditions that can be combined with the primary condition
+    # Dry and Humid should not combine with Fog (vis)
+    if condition_type == "precip" or condition_type == "cloud":
+        if all_wind_periods and _are_periods_matching(period_indices, all_wind_periods):
+            wind_condition_combined = True
+            current_condition_text = [
+                "and",
+                current_condition_text,
+                calculate_wind_text(max_wind_speed, wind_unit, icon_set, "summary"),
+            ]
+        if all_vis_periods and _are_periods_matching(period_indices, all_vis_periods):
+            vis_condition_combined = True
+            current_condition_text = ["and", current_condition_text, "fog"]
+        if all_dry_periods and _are_periods_matching(period_indices, all_dry_periods):
+            dry_condition_combined = True
+            current_condition_text = ["and", current_condition_text, "low-humidity"]
+        if all_humid_periods and _are_periods_matching(
+            period_indices, all_humid_periods
+        ):
+            humid_condition_combined = True
+            current_condition_text = ["and", current_condition_text, "high-humidity"]
+    elif condition_type == "wind":  # Wind can combine with dry/humid but not fog
+        if all_dry_periods and _are_periods_matching(period_indices, all_dry_periods):
+            dry_condition_combined = True
+            current_condition_text = ["and", current_condition_text, "low-humidity"]
+        if all_humid_periods and _are_periods_matching(
+            period_indices, all_humid_periods
+        ):
+            humid_condition_combined = True
+            current_condition_text = ["and", current_condition_text, "high-humidity"]
+
+    # Get the base time phrase template (e.g., "during", "starting", "for-day")
+    time_phrase_structure = _get_time_phrase(
+        period_indices,
+        condition_type,
+        all_periods,
+        check_period,
+        mode,
+        later_conditions,
+        today_period_for_later_check,
+    )
+
+    if time_phrase_structure is None:
+        return None, False, False, False, False
+
+    phrase_type = time_phrase_structure[0]
+    phrase_args = time_phrase_structure[1:]
+
+    # Construct the final summary text based on the phrase template
+    if phrase_type == "for-day":
+        summary_text = ["for-day", current_condition_text]
+    elif phrase_type == "during":
+        if len(phrase_args) == 1 and isinstance(phrase_args[0], list):
+            period_combination_text = phrase_args[0]
+            if len(period_combination_text) > 1:
+                formatted_periods = period_combination_text[0]
+                for i in range(1, len(period_combination_text)):
+                    formatted_periods = [
+                        "and",
+                        formatted_periods,
+                        period_combination_text[i],
+                    ]
+            else:
+                formatted_periods = period_combination_text[0]
+            summary_text = ["during", current_condition_text, formatted_periods]
         else:
-            summary_text = ["for-day", periodText]
-    return summary_text, windPrecip, dryPrecip, humidPrecip, visPrecip
+            summary_text = ["during", current_condition_text, phrase_args[0]]
+    elif phrase_type == "starting":
+        summary_text = ["starting", current_condition_text, phrase_args[0]]
+    elif phrase_type == "until":
+        summary_text = ["until", current_condition_text, phrase_args[0]]
+    elif phrase_type == "starting-continuing-until":
+        summary_text = [
+            "starting-continuing-until",
+            current_condition_text,
+            phrase_args[0],
+            phrase_args[1],
+        ]
+    elif phrase_type == "until-starting-again":
+        summary_text = [
+            "until-starting-again",
+            current_condition_text,
+            phrase_args[0],
+            phrase_args[1],
+        ]
+    elif phrase_type == "and":
+
+        def _inject_condition_text(phrase_part, condition_text_to_inject):
+            if isinstance(phrase_part, list):
+                if phrase_part[0] in [
+                    "during",
+                    "starting",
+                    "until",
+                    "starting-continuing-until",
+                    "until-starting-again",
+                ]:
+                    new_phrase = phrase_part[:]
+                    new_phrase.insert(1, condition_text_to_inject)
+                    return new_phrase
+                elif phrase_part[0] == "and":
+                    return [phrase_part[0]] + [
+                        _inject_condition_text(sub_part, condition_text_to_inject)
+                        for sub_part in phrase_part[1:]
+                    ]
+            return phrase_part
+
+        summary_text = _inject_condition_text(
+            time_phrase_structure, current_condition_text
+        )
+
+    return (
+        summary_text,
+        wind_condition_combined,
+        dry_condition_combined,
+        humid_condition_combined,
+        vis_condition_combined,
+    )
 
 
 def calculate_day_text(
     hours,
-    prepAccumUnit,
-    visUnits,
-    windUnit,
-    tempUnits,
-    isDayTime,
-    timeZone,
-    currTime,
+    precip_accum_unit,
+    vis_units,
+    wind_unit,
+    temp_units,
+    is_day_time,
+    time_zone,
+    curr_time,
     mode="daily",
-    icon="darksky",
+    icon_set="darksky",
 ):
     """
-    Calculates the current day/next 24h text
+    Calculates the daily or next 24-hour weather summary text.
 
     Parameters:
-    - hours (arr) - The array of hours for the day or next 24 hours.
-    - prepAccumUnit (float): The precipitation unit used
-    - visUnits (float): The visibility unit used
-    - tempUnits (float): The temperature unit used
-    - isDayTime (bool): Whether its currently day or night
-    - timeZone (string): The timezone for the current location
-    - currTime (int): The current epoch time
-    - mode (str): Which mode to run the function in
-    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
+    - hours (list): An array of hourly forecast data.
+    - precip_accum_unit (float): The precipitation accumulation unit (e.g., 0.1 for cm, 1 for inches).
+    - vis_units (float): The visibility unit used.
+    - wind_unit (float): The wind speed unit used.
+    - temp_units (float): The temperature unit used.
+    - is_day_time (bool): Whether it's currently daytime.
+    - time_zone (str): The timezone for the current location.
+    - curr_time (int): The current epoch time.
+    - mode (str, optional): Which mode to run the function in ("daily" or "hour"). Defaults to "daily".
 
     Returns:
-    - summary_text (str) - The textual representation of the current day/next 24 hours
-    - cIcon (str) - The icon representing the current day/next 24 hours
+    - tuple: A tuple containing:
+        - c_icon (str): The icon representing the current day/next 24 hours.
+        - summary_text (list): The textual representation of the current day/next 24 hours.
     """
 
-    # If we have more than 24 hours of data then bail
+    # Initialize return variables to prevent UnboundLocalError
+    final_constructed_summary = None
+    current_c_icon = None
+
+    # Initialize combination flags to False at the top level
+    combined_vis_flag = False
+    combined_dry_flag = False
+    combined_humid_flag = False
+    combined_wind_flag = False  # Added this for consistency
+
+    # Return "unavailable" if too much data is provided
     if len(hours) > 25:
         return "none", ["for-day", "unavailable"]
 
-    # Variables to calculate the periods from the hours array
-    period1 = []
-    period2 = []
-    period3 = []
-    period4 = []
-    period5 = []
-    prepTypes = []
-    mostCommonPrecip = []
-    periodStats = [[], [], [], [], []]
-    currPeriod = todayPeriod = None
-    numHoursFog = numHoursWind = numHoursDry = numHoursHumid = rainPrep = snowPrep = (
-        sleetPrep
-    ) = snowError = cloudCover = pop = maxIntensity = maxWind = length = precipHours = (
-        avgPrep
-    ) = 0
-    periodIncrease = False
-    periodIndex = 1
-    today = ""
+    # Get local time and current hour
+    zone = tz.gettz(time_zone)
+    curr_date = datetime.datetime.fromtimestamp(hours[0]["time"], zone)
+    curr_hour_local = int(curr_date.strftime("%H"))
 
-    # Get the current time zone from the function parameters or use the first hours time field as the current time
-    zone = tz.gettz(timeZone)
-    currDate = datetime.datetime.fromtimestamp(hours[0]["time"], zone)
-    currHour = int(currDate.strftime("%H"))
-    if mode == "hour":
-        today = "today-"
-        # If the first forecasted hour is midnight local change it to correct the summaries assuming the forecast is for the same day
-        if currHour == 0:
-            currHour = 23
-    # Time periods are as follows:
-    # morning 4:00 to 12:00
-    # afternoon 12:00 to 17:00
-    # evening 17:00 to 22:00
-    # night: 22:00 to 4:00
+    # This is used for the "later" check.
+    # It correctly gets the period name for `curr_hour_local - 1` without redundant prefix.
+    today_period_for_later_check = _get_period_name(curr_hour_local - 1, is_today=True)
 
-    # Calculate the current period and set the end and when to skip the block for the hour block summaries
-    if 4 <= currHour < 12:
-        currPeriod = "morning"
-    elif 12 <= currHour < 17:
-        currPeriod = "afternoon"
-    elif 17 <= currHour < 22:
-        currPeriod = "evening"
-    else:
-        currPeriod = "night"
+    # This dictionary will store processed data for each logical standard period (Morning, Afternoon, Evening, Night)
+    # The keys will be the unique period names encountered (e.g., 'today-morning', 'tomorrow-night').
+    standard_periods_data = {}
 
-    # Calculate the period for the current hour to use in the later text checks
-    if 4 <= currHour - 1 < 12:
-        todayPeriod = "morning"
-    elif 12 <= currHour - 1 < 17:
-        todayPeriod = "afternoon"
-    elif 17 <= currHour - 1 < 22:
-        todayPeriod = "evening"
-    else:
-        todayPeriod = "night"
+    # Generate a list of unique standard period names that will be covered by the 24-hour forecast window.
+    # This ensures `all_period_names` has a consistent structure regardless of `curr_hour_local`.
+    all_period_names_in_forecast_order = []
 
-    # Set the hour period to the current period
-    hourPeriod = currPeriod
+    # Start from the first hour of the forecast and determine the sequence of periods
+    temp_date_for_period_scan = datetime.datetime.fromtimestamp(hours[0]["time"], zone)
 
-    # Loop through the hours to calculate the conditions for each period
+    # Populate `all_period_names_in_forecast_order` and initialize `standard_periods_data`.
+    # This loop ensures that all 4-5 relevant periods are set up, even if some start with zero hours.
+    # Iterate for enough hours to guarantee covering at least 4 unique periods (24 hours + overlap).
+    max_hours_to_scan_for_periods = (
+        len(hours) + 8
+    )  # Scan a bit beyond forecast end to ensure next periods are captured
+
+    for i in range(max_hours_to_scan_for_periods):
+        current_iter_hour_date = temp_date_for_period_scan + datetime.timedelta(hours=i)
+        current_iter_hour_local = current_iter_hour_date.hour
+
+        # Determine `is_today` for naming periods.
+        # `_get_period_name` handles the actual period string. We just need to tell it if it's the current calendar day.
+        is_today_in_iter = current_iter_hour_date.date() == curr_date.date()
+
+        period_name_for_iter = _get_period_name(
+            current_iter_hour_local, is_today=is_today_in_iter
+        )
+
+        if period_name_for_iter not in all_period_names_in_forecast_order:
+            all_period_names_in_forecast_order.append(period_name_for_iter)
+            # Initialize an empty data structure for this new unique period name
+            standard_periods_data[period_name_for_iter] = {
+                "num_hours_fog": 0,
+                "num_hours_dry": 0,
+                "num_hours_wind": 0,
+                "rain_accum": 0.0,
+                "snow_accum": 0.0,
+                "snow_error": 0.0,
+                "sleet_accum": 0.0,
+                "max_pop": 0.0,
+                "max_intensity": 0.0,
+                "cloud_cover_sum": 0.0,
+                "max_wind_speed": 0.0,
+                "period_length": 0,
+                "num_hours_humid": 0,
+                "precip_types_in_period": [],
+                "precip_intensity_sum": 0.0,
+                "precip_hours_count": 0,
+                "avg_cloud_cover": 0.0,
+            }
+
+        # Stop generating period names if we have enough for a full 24-hour cycle (e.g., 5 periods)
+        # and we've processed at least 24 hours of potential period boundaries.
+        if len(all_period_names_in_forecast_order) >= 5 and i >= 23:
+            break
+
+    # Now iterate through the actual hourly forecast data and aggregate into the pre-defined standard periods
     for idx, hour in enumerate(hours):
-        # If we have bad data then return not available instead of trying to calculate the summary
-        if (
-            hour["temperature"] == -999
-            or hour["windSpeed"] == -999
-            or hour["visibility"] == -999
-            or hour["cloudCover"] == -999
-            or hour["humidity"] == -999
-        ):
-            return "none", ["for-day", "unavailable"]
-        # Calculate the time and weekday for the current hour in the loop
-        hourDate = datetime.datetime.fromtimestamp(hour["time"], zone)
-        hourHour = int(hourDate.strftime("%H"))
+        hour_date = datetime.datetime.fromtimestamp(hour["time"], zone)
+        hour_in_loop = int(hour_date.strftime("%H"))
 
-        # If the current hour has any precipitation calculate the rain, snow and sleet precipitation
-        if hour["precipType"] == "rain" or hour["precipType"] == "none":
-            rainPrep = rainPrep + hour["precipAccumulation"]
-        elif hour["precipType"] == "snow":
-            snowPrep = snowPrep + hour["precipAccumulation"]
-            # Increase the snow error to show the precipitation range
-            snowError = snowError + hour["precipIntensityError"]
-        elif hour["precipType"] == "sleet":
-            sleetPrep = sleetPrep + hour["precipAccumulation"]
+        # Determine `is_today` for naming the current hour's period.
+        is_today_for_hour_data = hour_date.date() == curr_date.date()
 
-        # If the hour is humid increase the number of humid hours
-        if (
-            humidity_sky_text(hour["temperature"], tempUnits, hour["humidity"])
-            == "high-humidity"
-        ):
-            numHoursHumid += 1
-        # If the hour is dry increase the number of dry hours
-        if (
-            humidity_sky_text(hour["temperature"], tempUnits, hour["humidity"])
-            == "low-humidity"
-        ):
-            numHoursDry += 1
-        # If the hour is foggy increase the number of fog hours
-        if (
-            calculate_vis_text(hour["visibility"], visUnits, "icon") == "fog"
-            and hour["precipIntensity"] <= 0.02 * prepAccumUnit
-        ):
-            numHoursFog += 1
-        # If the hour is windy increase the number of windy hours
-        if (
-            calculate_wind_text(hour["windSpeed"], windUnit, "darksky", "icon")
-            == "wind"
-        ):
-            numHoursWind += 1
+        current_hour_period_name = _get_period_name(
+            hour_in_loop, is_today=is_today_for_hour_data
+        )
 
-        # Add the hour cloud cover to calculate the average
-        cloudCover += hour["cloudCover"]
+        # Accumulate data for the current hour into the correct standard period's data structure
+        if current_hour_period_name in standard_periods_data:
+            period_data = standard_periods_data[current_hour_period_name]
 
-        # Calculate the maxiumum intensity for the period
-        if maxIntensity == 0:
-            maxIntensity = hour["precipIntensity"]
-        elif maxIntensity > 0 and hour["precipIntensity"] > maxIntensity:
-            maxIntensity = hour["precipIntensity"]
-
-        # Calculate the maximum wind speed for the period
-        if maxWind == 0:
-            maxWind = hour["windSpeed"]
-        elif maxWind > 0 and hour["windSpeed"] > maxWind:
-            maxWind = hour["windSpeed"]
-
-        # Add the percipitation type to an array to calculate the most common precipitation to use as a baseline
-        if hour["precipIntensity"] > 0 or hour["precipAccumulation"] > 0:
-            mostCommonPrecip.append(hour["precipType"])
-            # Calculate the maximum pop for the period
-            if pop == 0:
-                pop = hour["precipProbability"]
-            elif hour["precipProbability"] > pop:
-                pop = hour["precipProbability"]
-            precipHours += 1
-            avgPrep += hour["precipIntensity"]
-
-        # Add the percipitation type to an array of precipitation types if it doesn't already exist
-        if not prepTypes and hour["precipIntensity"] > 0:
-            prepTypes.append(hour["precipType"])
-        elif hour["precipType"] not in prepTypes and hour["precipIntensity"] > 0:
-            prepTypes.append(hour["precipType"])
-
-        # Add the hour to the period array depending on the index
-        if periodIndex == 1:
-            period1.append(hour)
-        elif periodIndex == 2:
-            period2.append(hour)
-        elif periodIndex == 3:
-            period3.append(hour)
-        elif periodIndex == 4:
-            period4.append(hour)
-        elif periodIndex == 5:
-            period5.append(hour)
-
-        # Since the summaries are calculated from 4am to 4am add 24 hours to hours 0 to 3 so its seen as the current day
-        if 0 <= hourHour < 4:
-            hourHour = hourHour + 24
-        # If we are at hour 12 and the first period has data increase the period index and set the increase flag to true
-        if hourHour == 11 and period1:
-            periodIndex = periodIndex + 1
-            periodIncrease = True
-        # If we are at hour 17 and the first period has data increase the period index and set the increase flag to true
-        if hourHour == 16 and period1:
-            periodIndex = periodIndex + 1
-            periodIncrease = True
-        # If we are at hour 22 and the first period has data increase the period index and set the increase flag to true
-        if hourHour == 21 and period1:
-            periodIndex = periodIndex + 1
-            periodIncrease = True
-        # If we are at hour 12 and the first period has data increase the period index and set the increase flag to true
-        if hourHour == 27 and period1:
-            periodIndex = periodIndex + 1
-            periodIncrease = True
-
-        # If the period changed and the index is 6 or below or we are at the end of the loop
-        if (periodIncrease and periodIndex <= 6) or (idx == 23 and periodIndex <= 6):
-            # If we are at the end of the loop increase the index and calculate the length of the last period
-            if idx == 23 and not periodIncrease:
-                periodIndex += 1
-                if periodIndex == 5:
-                    length = len(period4)
-                else:
-                    length = len(period5)
-
-            # Calculate the average cloud cover and pop for the period and calculate the length of the period
-            if periodIndex - 1 == 1:
-                cloudCover = cloudCover / len(period1)
-                length = len(period1)
-            elif periodIndex - 1 == 2:
-                cloudCover = cloudCover / len(period2)
-                length = len(period2)
-            elif periodIndex - 1 == 3:
-                cloudCover = cloudCover / len(period3)
-                length = len(period3)
-            elif periodIndex - 1 == 4:
-                cloudCover = cloudCover / len(period4)
-                length = len(period4)
-            elif periodIndex - 1 == 5:
-                cloudCover = cloudCover / len(period5)
-                length = len(period5)
-
-            # If we are at the end of the loop increase the index and calculate the length of the last period
-            if idx == len(hours) - 1 and not periodIncrease:
-                if periodIndex == 2:
-                    length = len(period1)
-                elif periodIndex == 3:
-                    length = len(period2)
-                elif periodIndex == 4:
-                    length = len(period3)
-                elif periodIndex == 5:
-                    length = len(period4)
-                else:
-                    length = len(period5)
-
-            # Add the data to an array of period arrays to use to calculate the summaries
-            periodStats[periodIndex - 2].append(numHoursFog)
-            periodStats[periodIndex - 2].append(numHoursDry)
-            periodStats[periodIndex - 2].append(numHoursWind)
-            periodStats[periodIndex - 2].append(round(rainPrep, 4))
-            periodStats[periodIndex - 2].append(round(snowPrep, 4))
-            periodStats[periodIndex - 2].append(round(snowError, 4))
-            periodStats[periodIndex - 2].append(round(sleetPrep, 4))
-            periodStats[periodIndex - 2].append(round(pop, 2))
-            periodStats[periodIndex - 2].append(round(maxIntensity, 4))
-            periodStats[periodIndex - 2].append(round(cloudCover, 2))
-            periodStats[periodIndex - 2].append(maxWind)
-            periodStats[periodIndex - 2].append(length)
-            periodStats[periodIndex - 2].append(today + hourPeriod)
-            periodStats[periodIndex - 2].append(numHoursHumid)
-
-            # Reset the varaibles back to zero
-            numHoursFog = numHoursWind = numHoursDry = numHoursHumid = rainPrep = (
-                snowPrep
-            ) = sleetPrep = snowError = cloudCover = maxWind = maxIntensity = 0
-            periodIncrease = False
-
-            # Calculate the next period text
-            hourPeriod = nextPeriod(hourPeriod)
-
-            # If we are in hourly mode and hit hour 4 use tomorrow as the text unless we are in hours 0, 1, 2 or 3
-            if hourHour == 27 and period1 and mode == "hour" and currHour > 3:
-                today = "tomorrow-"
-
-    # If the second to last value in hour array is an increase hour we will have data in the fifth period but no stats so calculate them
-    if period5 and not periodStats[4]:
-        # If the current hour has any precipitation calculate the rain, snow and sleet precipitation
-        if period5[0]["precipType"] == "rain" or period5[0]["precipType"] == "none":
-            rainPrep = rainPrep + period5[0]["precipAccumulation"]
-        elif period5[0]["precipType"] == "snow":
-            snowPrep = snowPrep + period5[0]["precipAccumulation"]
-            # Increase the snow error to show the precipitation range
-            snowError = snowError + period5[0]["precipIntensityError"]
-        elif period5[0]["precipType"] == "sleet":
-            sleetPrep = sleetPrep + period5[0]["precipAccumulation"]
-
-        # If the hour is humid increase the number of humid hours
-        if (
-            humidity_sky_text(
-                period5[0]["temperature"], tempUnits, period5[0]["humidity"]
+            period_data["period_length"] += 1
+            period_data["cloud_cover_sum"] += hour["cloudCover"]
+            period_data["max_wind_speed"] = max(
+                period_data["max_wind_speed"], hour["windSpeed"]
             )
-            == "high-humidity"
-        ):
-            numHoursHumid += 1
-        # If the hour is dry increase the number of dry hours
-        if (
-            humidity_sky_text(
-                period5[0]["temperature"], tempUnits, period5[0]["humidity"]
-            )
-            == "low-humidity"
-        ):
-            numHoursDry += 1
-        # If the hour is foggy increase the number of fog hours
-        if (
-            calculate_vis_text(period5[0]["visibility"], visUnits, "icon") == "fog"
-            and period5[0]["precipIntensity"] <= 0.02 * prepAccumUnit
-        ):
-            numHoursFog += 1
-        # If the hour is windy increase the number of windy hours
-        if (
-            calculate_wind_text(period5[0]["windSpeed"], windUnit, "darksky", "icon")
-            == "wind"
-        ):
-            numHoursWind += 1
-
-        # Add the hour cloud cover and pop to the variables to calculate the average
-        cloudCover += period5[0]["cloudCover"]
-        pop += period5[0]["precipProbability"]
-
-        # Calculate the maxiumum intensity for the period
-        if maxIntensity == 0:
-            maxIntensity = period5[0]["precipIntensity"]
-        elif maxIntensity > 0 and period5[0]["precipIntensity"] > maxIntensity:
-            maxIntensity = period5[0]["precipIntensity"]
-
-        # Calculate the maximum wind speed for the period
-        if maxWind == 0:
-            maxWind = period5[0]["windSpeed"]
-        elif maxWind > 0 and period5[0]["windSpeed"] > maxWind:
-            maxWind = period5[0]["windSpeed"]
-
-        # Add the percipitation type to an array to calculate the most common precipitation to use as a baseline
-        if period5[0]["precipIntensity"] > 0 or period5[0]["precipAccumulation"] > 0:
-            mostCommonPrecip.append(period5[0]["precipType"])
-
-        # Add the percipitation type to an array of precipitation types if it doesn;t already exist
-        if not prepTypes and period5[0]["precipIntensity"] > 0:
-            prepTypes.append(period5[0]["precipType"])
-        elif (
-            period5[0]["precipType"] not in prepTypes
-            and period5[0]["precipIntensity"] > 0
-        ):
-            prepTypes.append(period5[0]["precipType"])
-
-        # Add the data to an array of period arrays to use to calculate the summaries
-        periodStats[4].append(numHoursFog)
-        periodStats[4].append(numHoursDry)
-        periodStats[4].append(numHoursWind)
-        periodStats[4].append(round(rainPrep, 4))
-        periodStats[4].append(round(snowPrep, 4))
-        periodStats[4].append(round(snowError, 4))
-        periodStats[4].append(round(sleetPrep, 4))
-        periodStats[4].append(round(pop, 2))
-        periodStats[4].append(round(maxIntensity, 4))
-        periodStats[4].append(round(cloudCover, 2))
-        periodStats[4].append(maxWind)
-        periodStats[4].append(len(period5))
-        periodStats[4].append(today + hourPeriod)
-        periodStats[4].append(numHoursHumid)
-
-    # Variables used to calculate the summary
-    precip = []
-    vis = []
-    winds = []
-    wind = []
-    humid = []
-    dry = []
-    cloudLevels = []
-    periods = []
-    precipType = "none"
-    # If we have 5 periods append it to the list of periods
-    summary_text = cIcon = snowSentence = prepText = dryText = humidText = (
-        precipIcon
-    ) = None
-    period1Calc = []
-    period2Calc = []
-    period3Calc = []
-    period4Calc = []
-    period5Calc = []
-    snowLowAccum = snowMaxAccum = snowError = avgPop = numItems = rainPrep = (
-        snowPrep
-    ) = icePrep = 0
-    starts = []
-    period1Level = period2Level = period3Level = period4Level = period5Level = (
-        avgCloud
-    ) = -1
-    secondary = snowText = snowSentence = None
-
-    # If we are in day mode calculate the current period number to exclude parts of the day from being calculated
-    checkPeriod = 0
-
-    # Calculate the average precipitation intensity for the periods
-    if precipHours > 0:
-        avgPrep = avgPrep / precipHours
-
-    # If period1 has any data
-    if period1:
-        # Add the period to the array of periods and add the precipitation
-        periods.append(periodStats[0][12])
-        snowPrep += periodStats[0][4]
-        rainPrep += periodStats[0][3]
-        sleetPrep += periodStats[0][6]
-        # Check if there is enough precipitation to trigger the precipitation icon
-        if (
-            periodStats[0][4] > (2.5 * prepAccumUnit)
-            or periodStats[0][3] > (0.25 * prepAccumUnit)
-            or periodStats[0][6] > (0.25 * prepAccumUnit)
-        ):
-            period1Calc.append(True)
-            if avgPop == 0:
-                avgPop = periodStats[0][7]
-            elif periodStats[0][7] > avgPop:
-                avgPop = periodStats[0][7]
-        else:
-            period1Calc.append(None)
-        # Calculate the wind text
-        if periodStats[0][2] >= (min(periodStats[0][11] / 2, 3)):
-            period1Calc.append(
-                calculate_wind_text(periodStats[0][10], windUnit, icon, "summary")
-            )
-        else:
-            period1Calc.append(None)
-        # Check if there is no precipitation and the wind is less than the light wind threshold
-        if (
-            periodStats[0][8] < 0.02 * prepAccumUnit
-            and periodStats[0][10] / windUnit < 6.7056
-            and periodStats[0][0] >= (min(periodStats[0][11] / 2, 3))
-        ):
-            period1Calc.append(calculate_vis_text(0, visUnits, "summary"))
-        else:
-            period1Calc.append(None)
-        # Add the current period cloud cover
-        period1Calc.append(periodStats[0][9])
-        avgCloud += periodStats[0][9]
-        # Calculate the periods cloud text and level and add it to the cloud levels array
-        period1Text, period1Level = calculate_cloud_text(periodStats[0][9])
-        cloudLevels.append(period1Level)
-        # Calculate the dry text
-        if periodStats[0][1] >= (min(periodStats[0][11] / 2, 3)):
-            period1Calc.append(humidity_sky_text(20 * tempUnits, tempUnits, 0))
-        else:
-            period1Calc.append(None)
-        # Calculate the humid text
-        if periodStats[0][13] >= (min(periodStats[0][11] / 2, 3)):
-            period1Calc.append(humidity_sky_text(20 * tempUnits, tempUnits, 1))
-        else:
-            period1Calc.append(None)
-        # Add the wind speed to the wind array
-        winds.append(periodStats[0][10])
-        # If there is any precipitation
-        if period1Calc[0] is not None:
-            # Calcaulte the intensity and add it to the precipitation array
-            precip.append(0)
-            # If the precipitation is snow then add the accumulation and error
-            if periodStats[0][4] > 0:
-                snowError += periodStats[0][5]
-        # Add the wind to the wind array if the wind text exists
-        if period1Calc[1] is not None:
-            wind.append(0)
-        # Add the visibility to the visibility array if the fog text exists
-        if period1Calc[2] is not None:
-            vis.append(0)
-        # Add to the humid array if the humid text exists
-        if period1Calc[5] is not None:
-            humid.append(0)
-        # Add to the visibility array if the dry text exists
-        if period1Calc[4] is not None:
-            dry.append(0)
-        # Calculate the maximum wind speed
-        if maxWind == 0:
-            maxWind = periodStats[0][10]
-        elif maxWind > 0 and periodStats[0][10] > maxWind:
-            maxWind = periodStats[0][10]
-        # Calculate the maximum precipitation intensity
-        if maxIntensity == 0:
-            maxIntensity = periodStats[0][8]
-        elif maxIntensity > 0 and periodStats[0][8] > maxIntensity:
-            maxIntensity = periodStats[0][8]
-    # If period2 has any data
-    if period2:
-        # Add the period to the array of periods and add the precipitation
-        periods.append(periodStats[1][12])
-        snowPrep += periodStats[1][4]
-        rainPrep += periodStats[1][3]
-        sleetPrep += periodStats[1][6]
-        # Check if there is enough precipitation to trigger the precipitation icon
-        if (
-            periodStats[1][4] > (2.5 * prepAccumUnit)
-            or periodStats[1][3] > (0.25 * prepAccumUnit)
-            or periodStats[1][6] > (0.25 * prepAccumUnit)
-        ):
-            period2Calc.append(True)
-            if avgPop == 0:
-                avgPop = periodStats[1][7]
-            elif periodStats[1][7] > avgPop:
-                avgPop = periodStats[1][7]
-        else:
-            period2Calc.append(None)
-        # Calculate the wind text
-        if periodStats[1][2] >= (min(periodStats[1][11] / 2, 3)):
-            period2Calc.append(
-                calculate_wind_text(periodStats[1][10], windUnit, icon, "summary")
-            )
-        else:
-            period2Calc.append(None)
-        # Check if there is no precipitation and the wind is less than the light wind threshold
-        if (
-            periodStats[1][8] < 0.02 * prepAccumUnit
-            and periodStats[1][10] / windUnit < 6.7056
-            and periodStats[1][0] >= (min(periodStats[1][11] / 2, 3))
-        ):
-            period2Calc.append(calculate_vis_text(0, visUnits, "summary"))
-        else:
-            period2Calc.append(None)
-        # Add the current period cloud cover
-        period2Calc.append(periodStats[1][9])
-        avgCloud += periodStats[1][9]
-        # Calculate the periods cloud text and level and add it to the cloud levels array
-        period2Text, period2Level = calculate_cloud_text(periodStats[1][9])
-        cloudLevels.append(period2Level)
-        # Calculate the dry text
-        if periodStats[1][1] >= (min(periodStats[1][11] / 2, 3)):
-            period2Calc.append(humidity_sky_text(20 * tempUnits, tempUnits, 0))
-        else:
-            period2Calc.append(None)
-        # Calculate the humid text
-        if periodStats[1][13] >= (min(periodStats[1][11] / 2, 3)):
-            period2Calc.append(humidity_sky_text(20 * tempUnits, tempUnits, 1))
-        else:
-            period2Calc.append(None)
-        # Add the wind speed to the wind array
-        winds.append(periodStats[1][10])
-        # If there is any precipitation
-        if period2Calc[0] is not None:
-            precip.append(1)
-            # If the precipitation is snow then add the accumulation and error
-            if periodStats[1][4] > 0:
-                snowError += periodStats[1][5]
-        # Add the wind to the wind array if the wind text exists
-        if period2Calc[1] is not None:
-            wind.append(1)
-        # Add the wind to the visibility array if the fog text exists
-        if period2Calc[2] is not None:
-            vis.append(1)
-        # Add to the humid array if the humid text exists
-        if period2Calc[5] is not None:
-            humid.append(1)
-        # Add to the visibility array if the dry text exists
-        if period2Calc[4] is not None:
-            dry.append(1)
-        # Calculate the maximum wind speed
-        if maxWind == 0:
-            maxWind = periodStats[1][10]
-        elif maxWind > 0 and periodStats[1][10] > maxWind:
-            maxWind = periodStats[1][10]
-        # Calculate the maximum precipitation intensity
-        if maxIntensity == 0:
-            maxIntensity = periodStats[1][8]
-        elif maxIntensity > 0 and periodStats[1][8] > maxIntensity:
-            maxIntensity = periodStats[1][8]
-    # If period3 has any data
-    if period3:
-        # Add the period to the array of periods and add the precipitation
-        periods.append(periodStats[2][12])
-        snowPrep += periodStats[2][4]
-        rainPrep += periodStats[2][3]
-        sleetPrep += periodStats[2][6]
-        # Check if there is enough precipitation to trigger the precipitation icon
-        if (
-            periodStats[2][4] > (2.5 * prepAccumUnit)
-            or periodStats[2][3] > (0.25 * prepAccumUnit)
-            or periodStats[2][6] > (0.25 * prepAccumUnit)
-        ):
-            period3Calc.append(True)
-            if avgPop == 0:
-                avgPop = periodStats[2][7]
-            elif periodStats[2][7] > avgPop:
-                avgPop = periodStats[2][7]
-        else:
-            period3Calc.append(None)
-        # Calculate the wind text
-        if periodStats[2][2] >= (min(periodStats[2][11] / 2, 3)):
-            period3Calc.append(
-                calculate_wind_text(periodStats[2][10], windUnit, icon, "summary")
-            )
-        else:
-            period3Calc.append(None)
-        # Check if there is no precipitation and the wind is less than the light wind threshold
-        if (
-            periodStats[2][8] < 0.02 * prepAccumUnit
-            and periodStats[2][10] / windUnit < 6.7056
-            and periodStats[2][0] >= (min(periodStats[2][11] / 2, 3))
-        ):
-            period3Calc.append(calculate_vis_text(0, visUnits, "summary"))
-        else:
-            period3Calc.append(None)
-        # Add the current period cloud cover
-        period3Calc.append(periodStats[2][9])
-        avgCloud += periodStats[2][9]
-        # Calculate the periods cloud text and level and add it to the cloud levels array
-        period3Text, period3Level = calculate_cloud_text(periodStats[2][9])
-        cloudLevels.append(period3Level)
-        # Calculate the dry text
-        if periodStats[2][1] >= (min(periodStats[2][11] / 2, 3)):
-            period3Calc.append(humidity_sky_text(20 * tempUnits, tempUnits, 0))
-        else:
-            period3Calc.append(None)
-        # Calculate the humid text
-        if periodStats[2][13] >= (min(periodStats[2][11] / 2, 3)):
-            period3Calc.append(humidity_sky_text(20 * tempUnits, tempUnits, 1))
-        else:
-            period3Calc.append(None)
-        # Add the wind speed to the wind array
-        winds.append(periodStats[2][10])
-        # If there is any precipitation
-        if period3Calc[0] is not None:
-            precip.append(2)
-            # If the precipitation is snow then add the accumulation and error
-            if periodStats[2][4] > 0:
-                snowError += periodStats[2][5]
-        # Add the wind to the wind array if the wind text exists
-        if period3Calc[1] is not None:
-            wind.append(2)
-        # Add the wind to the visibility array if the fog text exists
-        if period3Calc[2] is not None:
-            vis.append(2)
-        # Add to the humid array if the humid text exists
-        if period3Calc[5] is not None:
-            humid.append(2)
-        # Add to the visibility array if the dry text exists
-        if period3Calc[4] is not None:
-            dry.append(2)
-        # Calculate the maximum wind speed
-        if maxWind == 0:
-            maxWind = periodStats[2][10]
-        elif maxWind > 0 and periodStats[2][10] > maxWind:
-            maxWind = periodStats[2][10]
-        # Calculate the maximum precipitation intensity
-        if maxIntensity == 0:
-            maxIntensity = periodStats[2][8]
-        elif maxIntensity > 0 and periodStats[2][8] > maxIntensity:
-            maxIntensity = periodStats[2][8]
-
-    # If period4 has any data
-    if period4:
-        # Add the period to the array of periods and add the precipitation
-        periods.append(periodStats[3][12])
-        snowPrep += periodStats[3][4]
-        rainPrep += periodStats[3][3]
-        sleetPrep += periodStats[3][6]
-        # Check if there is enough precipitation to trigger the precipitation icon
-        if (
-            periodStats[3][4] > (2.5 * prepAccumUnit)
-            or periodStats[3][3] > (0.25 * prepAccumUnit)
-            or periodStats[3][6] > (0.25 * prepAccumUnit)
-        ):
-            period4Calc.append(True)
-            if avgPop == 0:
-                avgPop = periodStats[3][7]
-            elif periodStats[3][7] > avgPop:
-                avgPop = periodStats[3][7]
-        else:
-            period4Calc.append(None)
-        # Calculate the wind text
-        if periodStats[3][2] >= (min(periodStats[3][11] / 2, 3)):
-            period4Calc.append(
-                calculate_wind_text(periodStats[3][10], windUnit, icon, "summary")
-            )
-        else:
-            period4Calc.append(None)
-        # Check if there is no precipitation and the wind is less than the light wind threshold
-        if (
-            periodStats[3][8] < 0.02 * prepAccumUnit
-            and periodStats[3][10] / windUnit < 6.7056
-            and periodStats[3][0] >= (min(periodStats[3][11] / 2, 3))
-        ):
-            period4Calc.append(calculate_vis_text(0, visUnits, "summary"))
-        else:
-            period4Calc.append(None)
-        # Add the current period cloud cover
-        period4Calc.append(periodStats[3][9])
-        avgCloud += periodStats[3][9]
-        # Calculate the periods cloud text and level and add it to the cloud levels array
-        period4Text, period4Level = calculate_cloud_text(periodStats[3][9])
-        cloudLevels.append(period4Level)
-        # Calculate the dry text
-        if periodStats[3][1] >= (min(periodStats[3][11] / 2, 3)):
-            period4Calc.append(humidity_sky_text(20 * tempUnits, tempUnits, 0))
-        else:
-            period4Calc.append(None)
-        # Calculate the humid text
-        if periodStats[3][13] >= (min(periodStats[3][11] / 2, 3)):
-            period4Calc.append(humidity_sky_text(20 * tempUnits, tempUnits, 1))
-        else:
-            period4Calc.append(None)
-
-        # Add the wind speed to the wind array
-        winds.append(periodStats[2][10])
-        # If there is any precipitation
-        if period4Calc[0] is not None:
-            precip.append(3)
-            if periodStats[3][4] > 0:
-                snowError += periodStats[3][5]
-        # Add the wind to the wind array if the wind text exists
-        if period4Calc[1] is not None:
-            wind.append(3)
-        # Add the wind to the visibility array if the fog text exists
-        if period4Calc[2] is not None:
-            vis.append(3)
-        # Add to the humid array if the humid text exists
-        if period4Calc[5] is not None:
-            humid.append(3)
-        # Add to the visibility array if the dry text exists
-        if period4Calc[4] is not None:
-            dry.append(3)
-        # Calculate the maximum wind speed
-        if maxWind == 0:
-            maxWind = periodStats[3][10]
-        elif maxWind > 0 and periodStats[3][10] > maxWind:
-            maxWind = periodStats[3][10]
-        # Calculate the maximum precipitation intensity
-        if maxIntensity == 0:
-            maxIntensity = periodStats[3][8]
-        elif maxIntensity > 0 and periodStats[3][8] > maxIntensity:
-            maxIntensity = periodStats[3][8]
-
-    # If period5 has any data
-    if period5:
-        # Add the period to the array of periods and add the precipitation
-        periods.append(periodStats[4][12])
-        snowPrep += periodStats[4][4]
-        rainPrep += periodStats[4][3]
-        sleetPrep += periodStats[4][6]
-        # Check if there is enough precipitation to trigger the precipitation icon
-        if (
-            periodStats[4][4] > (2.5 * prepAccumUnit)
-            or periodStats[4][3] > (0.25 * prepAccumUnit)
-            or periodStats[4][6] > (0.25 * prepAccumUnit)
-        ):
-            period5Calc.append(True)
-            if avgPop == 0:
-                avgPop = periodStats[4][7]
-            elif periodStats[4][7] > avgPop:
-                avgPop = periodStats[4][7]
-        else:
-            period5Calc.append(None)
-        # Calculate the wind text
-        if periodStats[4][2] >= (min(periodStats[4][11] / 2, 3)):
-            period5Calc.append(
-                calculate_wind_text(periodStats[4][10], windUnit, icon, "summary")
-            )
-        else:
-            period5Calc.append(None)
-        # Check if there is no precipitation and the wind is less than the light wind threshold
-        if (
-            periodStats[4][8] * prepAccumUnit < 0.02 * prepAccumUnit
-            and periodStats[4][10] / windUnit < 6.7056
-            and periodStats[4][0] >= (min(periodStats[4][11] / 2, 3))
-        ):
-            period5Calc.append(calculate_vis_text(0, visUnits, "summary"))
-        else:
-            period5Calc.append(None)
-        # Add the current period cloud cover
-        period5Calc.append(periodStats[4][9])
-        avgCloud += periodStats[4][9]
-        # Calculate the periods cloud text and level and add it to the cloud levels array
-        period5Text, period5Level = calculate_cloud_text(periodStats[4][9])
-        cloudLevels.append(period3Level)
-        # Calculate the dry text
-        if periodStats[4][1] >= (min(periodStats[4][11] / 2, 3)):
-            period5Calc.append(humidity_sky_text(20 * tempUnits, tempUnits, 0))
-        else:
-            period5Calc.append(None)
-        # Calculate the humid text
-        if periodStats[4][13] >= (min(periodStats[4][11] / 2, 3)):
-            period5Calc.append(humidity_sky_text(20 * tempUnits, tempUnits, 1))
-        else:
-            period5Calc.append(None)
-        # Add the wind speed to the wind array
-        winds.append(periodStats[4][10])
-        # If there is any precipitation
-        if period5Calc[0] is not None:
-            precip.append(4)
-            # If the precipitation is snow then add the accumulation and error
-            if periodStats[2][4] > 0:
-                snowError += periodStats[4][5]
-        # Add the wind to the wind array f the wind text exists
-        if period5Calc[1] is not None:
-            wind.append(4)
-        # Add the wind to the visibility array if the fog text exists
-        if period5Calc[2] is not None:
-            vis.append(2)
-        # Add to the humid array if the humid text exists
-        if period5Calc[5] is not None:
-            humid.append(4)
-        # Add to the visibility array if the dry text exists
-        if period5Calc[4] is not None:
-            dry.append(4)
-        # Calculate the maximum wind speed
-        if maxWind == 0:
-            maxWind = periodStats[4][10]
-        elif maxWind > 0 and periodStats[4][10] > maxWind:
-            maxWind = periodStats[4][10]
-        # Calculate the maximum precipitation intensity
-        if maxIntensity == 0:
-            maxIntensity = periodStats[4][8]
-        elif maxIntensity > 0 and periodStats[4][8] > maxIntensity:
-            maxIntensity = periodStats[4][8]
-
-    # Calculate the total precipitation
-    totalPrep = rainPrep + snowPrep + icePrep
-
-    # If we have two today-night in the periods change the last one to tomorrow-night to prevent weird summaries
-    if "today-night" in periods[0] and "today-night" in periods[len(periods) - 1]:
-        periods[len(periods) - 1] = "tomorrow-night"
-
-    # Add the wind, wind, visibility, dry and humid starts to the starts array if they exist
-    if precip:
-        starts.append(precip[0])
-    if wind:
-        starts.append(wind[0])
-    if vis:
-        starts.append(vis[0])
-    if dry:
-        starts.append(dry[0])
-    if humid:
-        starts.append(humid[0])
-
-    # If there's any precipitation find the most common one to use as the precipitation type
-    if mostCommonPrecip:
-        precipType = Most_Common(mostCommonPrecip)
-
-    # If pop is -999 set it to 1 so we can calculate the precipitation text
-    if avgPop == -999:
-        avgPop = 1
-
-    # Only calculate the precipitation text if there is any possibility of precipitation > 0
-    if avgPop > 0 and totalPrep >= (0.1 * prepAccumUnit):
-        # Check if there is rain, snow and ice accumulation for the day
-        if snowPrep > 0 and rainPrep > 0 and icePrep > 0:
-            # If there is then used the mixed precipitation text and set the icon/type to sleet. Set the secondary condition to snow so the totals can be in the summary
-            prepText = "mixed-precipitation"
-            precipType = "sleet"
-            precipIcon = calculate_precip_text(
-                maxIntensity,
-                prepAccumUnit,
-                precipType,
-                "hourly",
-                rainPrep,
-                snowPrep,
-                icePrep,
-                avgPop,
-                icon,
-                "icon",
-                avgPrep,
-            )
-            secondary = "medium-snow"
-        else:
-            # Otherwise check if we have any snow accumulation
-            if snowPrep > 0:
-                # If we do check if we have rain. If there is more snow than rain then set rain as the secondary condition
-                if rainPrep > 0 and snowPrep > rainPrep:
-                    precipType = "snow"
-                    secondary = "medium-rain"
-                # If we do check if we have rain. If there is more rain than snow then set snow as the secondary condition
-                elif rainPrep > 0 and snowPrep < rainPrep:
-                    precipType = "rain"
-                    secondary = "medium-snow"
-                # If we do check if we have ice. If there is more snow than ice then set ice as the secondary condition
-                elif icePrep > 0 and snowPrep > icePrep:
-                    precipType = "snow"
-                    secondary = "medium-sleet"
-                # If we do check if we have ice. If there is more ice than snow then set snow as the secondary condition
-                elif icePrep > 0 and snowPrep < icePrep:
-                    precipType = "sleet"
-                    secondary = "medium-snow"
-            # Otherwise check if we have any ice accumulation
-            elif icePrep > 0:
-                # If we do check if we have rain. If there is more rain than ice then set ice as the secondary condition
-                if rainPrep > 0 and rainPrep > icePrep:
-                    precipType = "rain"
-                    secondary = "medium-sleet"
-                # If we do check if we have ice. If there is more ice than rain then set rain as the secondary condition
-                elif rainPrep > 0 and rainPrep < icePrep:
-                    precipType = "rain"
-                    secondary = "medium-sleet"
-
-            # If the type is snow but there is no snow accumulation check if there is rain/sleet
-            if snowPrep == 0 and precipType == "snow":
-                if rainPrep > 0:
-                    precipType = "rain"
-                elif icePrep > 0:
-                    precipType = "sleet"
-            # If the type is rain but there is no rain accumulation check if there is snow/sleet
-            elif rainPrep == 0 and precipType == "rain":
-                if snowPrep > 0:
-                    precipType = "snow"
-                elif icePrep > 0:
-                    precipType = "sleet"
-            # If the type is sleet but there is no sleet accumulation check if there is rain/snow
-            elif icePrep == 0 and precipType == "sleet":
-                if snowPrep > 0:
-                    precipType = "snow"
-                elif rainPrep > 0:
-                    precipType = "rain"
-
-            # If more than 10 mm of rain is forecast, then rain
-            if rainPrep > (10 * prepAccumUnit) and precipType != "rain":
-                secondary = "medium-" + precipType
-                precipType = "rain"
-            # If more than 5 mm of snow is forecast, then snow
-            if snowPrep > (5 * prepAccumUnit) and precipType != "snow":
-                secondary = "medium-" + precipType
-                precipType = "snow"
-            # Else, if more than 1 mm of ice is forecast, then ice
-            if icePrep > (1 * prepAccumUnit) and precipType != "sleet":
-                secondary = "medium-" + precipType
-                precipType = "sleet"
-
-            # Calculate the precipitation text and summary
-            prepText, precipIcon = calculate_precip_text(
-                maxIntensity,
-                prepAccumUnit,
-                precipType,
-                "hourly",
-                rainPrep,
-                snowPrep,
-                icePrep,
-                avgPop,
-                icon,
-                "both",
-                avgPrep,
+            period_data["max_intensity"] = max(
+                period_data["max_intensity"], hour["precipIntensity"]
             )
 
-    # if secondary is medium none change it to medium-precipitaiton to avoid errors
-    if secondary == "medium-none":
-        secondary = "medium-precipitation"
+            if (
+                humidity_sky_text(hour["temperature"], temp_units, hour["humidity"])
+                == "high-humidity"
+            ):
+                period_data["num_hours_humid"] += 1
+            if (
+                humidity_sky_text(hour["temperature"], temp_units, hour["humidity"])
+                == "low-humidity"
+            ):
+                period_data["num_hours_dry"] += 1
+            if (
+                calculate_vis_text(hour["visibility"], vis_units, "icon") == "fog"
+                and hour["precipIntensity"] <= 0.02 * precip_accum_unit
+            ):
+                period_data["num_hours_fog"] += 1
+            if (
+                calculate_wind_text(hour["windSpeed"], wind_unit, "darksky", "icon")
+                == "wind"
+            ):
+                period_data["num_hours_wind"] += 1
 
-    # Convert snow error from mm to cm
-    if prepAccumUnit == 0.1:
-        snowError = snowError / 10
+            if hour["precipType"] == "rain" or hour["precipType"] == "none":
+                period_data["rain_accum"] += hour["precipAccumulation"]
+            elif hour["precipType"] == "snow":
+                period_data["snow_accum"] += hour["precipAccumulation"]
+                period_data["snow_error"] += hour["precipIntensityError"]
+            elif hour["precipType"] == "sleet":
+                period_data["sleet_accum"] += hour["precipAccumulation"]
 
-    # If we have only snow or if snow is the secondary condition then calculate the accumulation range
-    if snowPrep > (10 * prepAccumUnit) or secondary == "medium-snow":
-        # GEFS accumulation error seems to always be equal to the accumulation so use half of the accumulation as the range
-        snowLowAccum = math.floor(snowPrep - (snowError / 2))
-        snowMaxAccum = math.ceil(snowPrep + (snowError / 2))
+            if hour["precipIntensity"] > 0 or hour["precipAccumulation"] > 0:
+                period_data["precip_types_in_period"].append(hour["precipType"])
+                period_data["max_pop"] = max(
+                    period_data["max_pop"], hour["precipProbability"]
+                )
+                period_data["precip_hours_count"] += 1
+                period_data["precip_intensity_sum"] += hour["precipIntensity"]
 
-        # If the snow accumulation is below 0; set it to 0
-        if snowLowAccum < 0:
-            snowLowAccum = 0
+    # Finalize `period_stats` list by only including periods that actually have data,
+    # and in the correct order determined by `all_period_names_in_forecast_order`.
+    period_stats_list_final = []
+    final_all_period_names_list = []
 
-        # If we have 0 error or error is below 0 then use the ceiling of the current precipitation in the summary
-        if snowError <= 0:
-            snowSentence = [
-                "centimeters" if prepAccumUnit == 0.1 else "inches",
-                int(math.ceil(snowPrep)),
-            ]
-        # Check to see if there is any snow accumulation and if so calculate the sentence to use when creating the precipitation summaries
-        elif snowMaxAccum > 0:
-            # If there is no accumulation then show the accumulation as < 1 cm/in
-            if snowPrep == 0:
-                snowSentence = [
-                    "less-than",
-                    ["centimeters" if prepAccumUnit == 0.1 else "inches", 1],
-                ]
-            # If the lower accumulation range is 0 then show accumulation as < max range cm/in
-            elif snowLowAccum == 0:
-                snowSentence = [
-                    "less-than",
-                    [
-                        "centimeters" if prepAccumUnit == 0.1 else "inches",
-                        snowMaxAccum,
-                    ],
-                ]
-            # Otherwise show the range
-            else:
-                snowSentence = [
-                    "centimeters" if prepAccumUnit == 0.1 else "inches",
-                    [
-                        "range",
-                        snowLowAccum,
-                        snowMaxAccum,
-                    ],
-                ]
+    for period_name in all_period_names_in_forecast_order:
+        p_data = standard_periods_data.get(period_name)
+        if (
+            p_data and p_data["period_length"] > 0
+        ):  # Only add if the period actually received data
+            # Calculate final average cloud cover for this period
+            p_data["avg_cloud_cover"] = (
+                p_data["cloud_cover_sum"] / p_data["period_length"]
+            )
+            period_stats_list_final.append(p_data)
+            final_all_period_names_list.append(period_name)
 
-    # If we have more than 1 cm of snow show the parenthetical or snow is the secondary condition
-    if snowSentence is not None:
-        # If precipitation is only show then generate the parenthetical text
-        if precipType == "snow":
-            prepText = [
-                "parenthetical",
-                prepText,
-                snowSentence,
-            ]
-        # Otherwise if its a secondary condition then generate the text using the main condition
-        elif secondary == "medium-snow":
-            snowText = [
-                "parenthetical",
-                prepText,
-                snowSentence,
-            ]
+    # Use these finalized lists for subsequent calculations
+    period_stats = period_stats_list_final
+    all_period_names = final_all_period_names_list
 
-    # If we have a secondary condition join them with an and if not snow otherwise use the snow text
-    if secondary is not None:
-        if secondary != "medium-snow":
-            prepText = ["and", prepText, secondary]
-        else:
-            prepText = snowText
+    # --- Rest of the function remains largely the same, but now operates on correctly segmented periods ---
+    # print("Final Period Stats:", period_stats) # For debugging period stats
+    # print("Final All Period Names:", all_period_names) # For debugging period names
 
-    # Check the cloud levels and determine the most common one
-    mostCommonCloud = Most_Common(cloudLevels)
-    mostCommonLevels = []
+    # Initialize lists for storing period indices of various conditions
+    precip_periods = []
+    vis_periods = []
+    wind_periods = []
+    humid_periods = []
+    dry_periods = []
+    cloud_levels = []
 
-    # Check the individual period levels to see if they match the most common. If so then add them to the list of periods
-    if period1Level == mostCommonCloud:
-        mostCommonLevels.append(0)
-    if period2Level == mostCommonCloud:
-        mostCommonLevels.append(1)
-    if period3Level == mostCommonCloud:
-        mostCommonLevels.append(2)
-    if period4Level == mostCommonCloud:
-        mostCommonLevels.append(3)
-    if period5Level == mostCommonCloud:
-        mostCommonLevels.append(4)
+    # Initialize overall accumulation and max values for the entire forecast block
+    total_rain_accum = 0.0
+    total_snow_accum = 0.0
+    total_sleet_accum = 0.0
+    total_snow_error = 0.0
+    overall_max_intensity = 0.0
+    overall_max_wind = 0.0
+    overall_avg_cloud_cover_sum = 0.0  # Sum of average cloud cover for each period
+    overall_avg_pop = 0.0
+    overall_precip_hours_count = 0
+    overall_precip_intensity_sum = 0.0
 
-    # Determine the average cloud for the icon
-    avgCloud = avgCloud / len(cloudLevels)
+    overall_most_common_precip = []
 
-    # If all the periods are different
-    if len(mostCommonLevels) == 1:
-        avgCloud = 0
-        # Determine the max/min level
-        maxCloudLevel = max(cloudLevels)
-        minCloudLevel = min(cloudLevels)
+    # Process collected period statistics to determine condition presence and overall totals
+    for i, p_data in enumerate(period_stats):
+        # Accumulate overall totals
+        total_rain_accum += p_data["rain_accum"]
+        total_snow_accum += p_data["snow_accum"]
+        total_sleet_accum += p_data["sleet_accum"]
+        total_snow_error += p_data["snow_error"]
+        overall_max_intensity = max(overall_max_intensity, p_data["max_intensity"])
+        overall_max_wind = max(overall_max_wind, p_data["max_wind_speed"])
+        overall_avg_cloud_cover_sum += p_data[
+            "avg_cloud_cover"
+        ]  # Sum for calculating overall average
 
-        # Determine the average cloud for the icon
-        avgCloud = avgCloud / len(cloudLevels)
+        # Check if precipitation is significant enough in this period
+        is_precip_in_period = (
+            p_data["snow_accum"] > (2.5 * precip_accum_unit)
+            or p_data["rain_accum"] > (0.25 * precip_accum_unit)
+            or p_data["sleet_accum"] > (0.25 * precip_accum_unit)
+        )
+        if is_precip_in_period:
+            precip_periods.append(i)
+            overall_most_common_precip.extend(p_data["precip_types_in_period"])
+            overall_avg_pop = max(overall_avg_pop, p_data["max_pop"])
+            overall_precip_hours_count += p_data["precip_hours_count"]
+            overall_precip_intensity_sum += p_data["precip_intensity_sum"]
 
-        # If the first period has the maxiumum cloud level and the end has the lowest then use the lowest
-        if period1Level == maxCloudLevel and period4Level == minCloudLevel:
-            cloudLevels[0] = cloudLevels[3]
-            mostCommonLevels.pop()
-            mostCommonLevels.append(3)
-        # If the second period has the maxiumum cloud level and the end has the lowest then use the lowest
-        elif period2Level == maxCloudLevel and period4Level == minCloudLevel:
-            cloudLevels[0] = cloudLevels[3]
-            mostCommonLevels.pop()
-            mostCommonLevels.append(3)
-        # If the third period has the maxiumum cloud level and the end has the lowest then use the lowest
-        elif period3Level == maxCloudLevel and period4Level == minCloudLevel:
-            cloudLevels[0] = cloudLevels[3]
-            mostCommonLevels.pop()
-            mostCommonLevels.append(3)
-        # If the second period has the maxiumum cloud level then use that period
-        elif period2Level == maxCloudLevel:
-            cloudLevels[0] = cloudLevels[1]
-            mostCommonLevels.pop()
-            mostCommonLevels.append(1)
-        # If the third period has the maxiumum cloud level then use that period
-        elif period3Level == maxCloudLevel:
-            cloudLevels[0] = cloudLevels[2]
-            mostCommonLevels.pop()
-            mostCommonLevels.append(2)
-        # If the fourth period has the maxiumum cloud level then use that period
-        elif period4Level == maxCloudLevel:
-            cloudLevels[0] = cloudLevels[3]
-            mostCommonLevels.pop()
-            mostCommonLevels.append(3)
-        # If the fifth period has the maxiumum cloud level then use that period
-        elif period5Level == maxCloudLevel:
-            cloudLevels[0] = cloudLevels[4]
-            mostCommonLevels.pop()
-            mostCommonLevels.append(4)
+        # Determine if other conditions are significant in this period
+        # Note: These thresholds depend on `period_length` being correct now.
+        if p_data["num_hours_wind"] >= (min(p_data["period_length"] / 2, 3)):
+            wind_periods.append(i)
+        if (
+            p_data["max_intensity"] < 0.02 * precip_accum_unit
+            and p_data["max_wind_speed"] / wind_unit < 6.7056
+            and p_data["num_hours_fog"] >= (min(p_data["period_length"] / 2, 3))
+        ):
+            vis_periods.append(i)
+        if p_data["num_hours_dry"] >= (min(p_data["period_length"] / 2, 3)):
+            dry_periods.append(i)
+        if p_data["num_hours_humid"] >= (min(p_data["period_length"] / 2, 3)):
+            humid_periods.append(i)
 
-    cloudConvertedText = None
-    windPrecip = dryPrecip = humidPrecip = visPrecip = False
-    cloudLevel = -1
+        # Get cloud level for this period
+        _, cloud_level = calculate_cloud_text(p_data["avg_cloud_cover"])
+        cloud_levels.append(cloud_level)
 
-    if cloudLevels[mostCommonLevels[0]] != max(cloudLevels):
-        cloudLevel = cloudLevels[mostCommonLevels[0]]
-    else:
-        cloudLevel = max(cloudLevels)
+    # Convert total snow error if unit is cm (original had this conversion)
+    if precip_accum_unit == 0.1:
+        total_snow_error /= 10
 
-    # Convert the level back into the textual representation to use in the summaries.
-    if cloudLevel == 0:
-        cloudConvertedText = "clear"
-        # If the average cloud cover doesn't exist set it to 0 so the icon matches the text
-        if len(cloudLevels) > 1:
-            avgCloud = 0
-    elif cloudLevel == 1:
-        cloudConvertedText = "very-light-clouds"
-        # If the average cloud cover doesn't exist set it to 0.25 so the icon matches the text
-        if len(cloudLevels) > 1:
-            avgCloud = 0.25
-    elif cloudLevel == 2:
-        cloudConvertedText = "light-clouds"
-        # If the average cloud cover doesn't exist set it to 0.5 so the icon matches the text
-        if len(cloudLevels) > 1:
-            avgCloud = 0.50
-    elif cloudLevel == 3:
-        # If the average cloud cover doesn't exist set it to 0.75 so the icon matches the text
-        cloudConvertedText = "medium-clouds"
-        if len(cloudLevels) > 1:
-            avgCloud = 0.75
-    else:
-        # If the average cloud cover doesn't exist set it to 1 so the icon matches the text
-        if len(cloudLevels) > 1:
-            avgCloud = 1
-        cloudConvertedText = "heavy-clouds"
-
-    # Calculate the current precipitation for the first hour in the block
-    currPrecip = calculate_precip_text(
-        hours[0]["precipIntensity"],
-        prepAccumUnit,
-        hours[0]["precipType"],
-        "hourly",
-        hours[0]["precipAccumulation"],
-        hours[0]["precipAccumulation"],
-        hours[0]["precipAccumulation"],
-        hours[0]["precipProbability"],
-        icon,
-        "summary",
-        avgPrep,
+    # Calculate overall average cloud cover for the entire forecast block
+    overall_avg_cloud_cover = (
+        overall_avg_cloud_cover_sum / len(period_stats) if period_stats else 0
     )
-    later = []
 
-    # If we are in the current period
-    if starts and periods[min(starts)] == "today-" + todayPeriod:
-        # If we have precipitation and it starts in the first block
-        if precip and precip[0] == 0:
-            # If the first hour has no precipitation add the later text
-            if currPrecip is None:
-                periods[0] = "later-" + periods[0]
-                later.append("precip")
-        if vis and vis[0] == 0:
-            # If we have fog and it starts in the first block and the first hour has no fog
+    # Determine the most common cloud level across all periods for representative text
+    most_common_cloud_level = Most_Common(cloud_levels) if cloud_levels else 0
+
+    # Select a representative cloud level for final cloud text and icon calculation
+    representative_cloud_level = most_common_cloud_level
+    if most_common_cloud_level != max(cloud_levels):
+        representative_cloud_level = most_common_cloud_level
+    else:
+        representative_cloud_level = max(cloud_levels)
+
+    # Convert the representative cloud level back to textual form and a derived average for icon
+    if representative_cloud_level == 0:
+        final_cloud_text = "clear"
+        derived_avg_cloud_for_icon = 0.0
+    elif representative_cloud_level == 1:
+        final_cloud_text = "very-light-clouds"
+        derived_avg_cloud_for_icon = 0.25
+    elif representative_cloud_level == 2:
+        final_cloud_text = "light-clouds"
+        derived_avg_cloud_for_icon = 0.50
+    elif representative_cloud_level == 3:
+        final_cloud_text = "medium-clouds"
+        derived_avg_cloud_for_icon = 0.75
+    else:  # representative_cloud_level == 4
+        final_cloud_text = "heavy-clouds"
+        derived_avg_cloud_for_icon = 1.0
+
+    # If there's only one period, use its actual average cloud cover for the icon directly
+    if len(period_stats) == 1:
+        derived_avg_cloud_for_icon = period_stats[0]["avg_cloud_cover"]
+
+    # Determine the most common precipitation type for overall summary
+    most_common_overall_precip_type = (
+        Most_Common(overall_most_common_precip)
+        if overall_most_common_precip
+        else "none"
+    )
+
+    precip_summary_text = None
+    precip_icon = None
+    secondary_precip_condition = None
+
+    total_precip_accum = total_rain_accum + total_snow_accum + total_sleet_accum
+
+    # Calculate overall precipitation text and icon if significant precipitation occurs
+    if overall_avg_pop > 0 and total_precip_accum >= (0.1 * precip_accum_unit):
+        if total_snow_accum > 0 and total_rain_accum > 0 and total_sleet_accum > 0:
+            precip_summary_text = "mixed-precipitation"
+            most_common_overall_precip_type = "sleet"
+            secondary_precip_condition = (
+                "medium-snow"  # Indicate snow totals are relevant
+            )
+        else:
+            # Determine primary and secondary precipitation types based on accumulation
+            if total_snow_accum > 0:
+                if total_rain_accum > 0 and total_snow_accum > total_rain_accum:
+                    most_common_overall_precip_type = "snow"
+                    secondary_precip_condition = "medium-rain"
+                elif total_rain_accum > 0 and total_snow_accum < total_rain_accum:
+                    most_common_overall_precip_type = "rain"
+                    secondary_precip_condition = "medium-snow"
+                elif total_sleet_accum > 0 and total_snow_accum > total_sleet_accum:
+                    most_common_overall_precip_type = "snow"
+                    secondary_precip_condition = "medium-sleet"
+                elif total_sleet_accum > 0 and total_snow_accum < total_sleet_accum:
+                    most_common_overall_precip_type = "sleet"
+                    secondary_precip_condition = "medium-snow"
+            elif total_sleet_accum > 0:
+                if total_rain_accum > 0 and total_rain_accum > total_sleet_accum:
+                    most_common_overall_precip_type = "rain"
+                    secondary_precip_condition = "medium-sleet"
+                elif total_rain_accum > 0 and total_rain_accum < total_sleet_accum:
+                    most_common_overall_precip_type = "sleet"
+                    secondary_precip_condition = "medium-rain"
+
+            # Re-evaluate primary precipType if calculated type has zero accumulation
+            if total_snow_accum == 0 and most_common_overall_precip_type == "snow":
+                if total_rain_accum > 0:
+                    most_common_overall_precip_type = "rain"
+                elif total_sleet_accum > 0:
+                    most_common_overall_precip_type = "sleet"
+            elif total_rain_accum == 0 and most_common_overall_precip_type == "rain":
+                if total_snow_accum > 0:
+                    most_common_overall_precip_type = "snow"
+                elif total_sleet_accum > 0:
+                    most_common_overall_precip_type = "sleet"
+            elif total_sleet_accum == 0 and most_common_overall_precip_type == "sleet":
+                if total_snow_accum > 0:
+                    most_common_overall_precip_type = "snow"
+                elif total_rain_accum > 0:
+                    most_common_overall_precip_type = "rain"
+
+            # Promote to stronger precip if significant accumulation is forecast
             if (
-                calculate_vis_text(hours[0]["visibility"], visUnits) is None
-                and "later" not in periods[0]
+                total_rain_accum > (10 * precip_accum_unit)
+                and most_common_overall_precip_type != "rain"
             ):
-                periods[0] = "later-" + periods[0]
-                later.append("vis")
-        # If we have wind and it starts in the first block and the first hour is not windy
-        if wind and wind[0] == 0:
+                secondary_precip_condition = "medium-" + most_common_overall_precip_type
+                most_common_overall_precip_type = "rain"
             if (
-                calculate_wind_text(hours[0]["windSpeed"], windUnit, icon, "summary")
-                is None
-                and "later" not in periods[0]
+                total_snow_accum > (5 * precip_accum_unit)
+                and most_common_overall_precip_type != "snow"
             ):
-                periods[0] = "later-" + periods[0]
-                later.append("wind")
-        # If we have dry conditions and it starts in the first block and the first hour is not dry
-        if dry and dry[0] == 0:
+                secondary_precip_condition = "medium-" + most_common_overall_precip_type
+                most_common_overall_precip_type = "snow"
             if (
-                humidity_sky_text(
-                    hours[0]["temperature"], tempUnits, hours[0]["humidity"]
+                total_sleet_accum > (1 * precip_accum_unit)
+                and most_common_overall_precip_type != "sleet"
+            ):
+                secondary_precip_condition = "medium-" + most_common_overall_precip_type
+                most_common_overall_precip_type = "sleet"
+
+        # Calculate final precipitation text and icon
+        precip_summary_text, precip_icon = calculate_precip_text(
+            overall_max_intensity,
+            precip_accum_unit,
+            most_common_overall_precip_type,
+            "hourly",  # This is a fixed parameter as per original code
+            total_rain_accum,
+            total_snow_accum,
+            total_sleet_accum,
+            overall_avg_pop if overall_avg_pop != -999 else 1,
+            icon_set,
+            "both",
+            overall_precip_intensity_sum / overall_precip_hours_count
+            if overall_precip_hours_count > 0
+            else 0,
+        )
+
+    # Correct "medium-none" secondary condition to "medium-precipitation"
+    if secondary_precip_condition == "medium-none":
+        secondary_precip_condition = "medium-precipitation"
+
+    # Add snow accumulation range to precip text if applicable
+    snow_sentence = None
+    if (
+        total_snow_accum > (10 * precip_accum_unit)
+        or secondary_precip_condition == "medium-snow"
+    ):
+        snow_low_accum = math.floor(total_snow_accum - (total_snow_error / 2))
+        snow_max_accum = math.ceil(
+            total_snow_accum + (total_snow_error / 2)
+        )  # Bug fix: used total_snow_accum instead of snow_accum
+        snow_low_accum = max(0, snow_low_accum)  # Snow accumulation cannot be negative
+
+        if total_snow_error <= 0:
+            snow_sentence = [
+                "centimeters" if precip_accum_unit == 0.1 else "inches",
+                int(math.ceil(total_snow_accum)),
+            ]
+        elif snow_max_accum > 0:
+            if total_snow_accum == 0:
+                snow_sentence = [
+                    "less-than",
+                    ["centimeters" if precip_accum_unit == 0.1 else "inches", 1],
+                ]
+            elif snow_low_accum == 0:
+                snow_sentence = [
+                    "less-than",
+                    [
+                        "centimeters" if precip_accum_unit == 0.1 else "inches",
+                        snow_max_accum,
+                    ],
+                ]
+            else:
+                snow_sentence = [
+                    "centimeters" if precip_accum_unit == 0.1 else "inches",
+                    ["range", snow_low_accum, snow_max_accum],
+                ]
+
+    if snow_sentence is not None:
+        if most_common_overall_precip_type == "snow":
+            precip_summary_text = ["parenthetical", precip_summary_text, snow_sentence]
+        elif secondary_precip_condition == "medium-snow":
+            precip_summary_text = ["parenthetical", precip_summary_text, snow_sentence]
+
+    # Combine primary and secondary precipitation conditions with "and"
+    if (
+        secondary_precip_condition is not None
+        and secondary_precip_condition != "medium-snow"
+    ):
+        precip_summary_text = ["and", precip_summary_text, secondary_precip_condition]
+
+    # List to track conditions that start "later" in the first period (only for hourly mode)
+    later_conditions_list = []
+
+    # Apply "later" text only when in hourly mode and condition starts later in the first period
+    # The condition `all_period_names[0] == today_period_for_later_check` is the critical check
+    # to see if the forecast starts mid-period and the 'later' logic should apply.
+    if (
+        mode == "hour"
+        and all_period_names
+        and all_period_names[0] == today_period_for_later_check
+    ):
+        # Check precip
+        if (
+            precip_periods and precip_periods[0] == 0
+        ):  # If precip occurs in the first period
+            # But the very first hour forecast doesn't have it
+            curr_precip_text_for_first_hour = calculate_precip_text(
+                hours[0]["precipIntensity"],
+                precip_accum_unit,
+                hours[0]["precipType"],
+                "hourly",
+                hours[0]["precipAccumulation"],
+                hours[0]["precipAccumulation"],
+                hours[0]["precipAccumulation"],
+                hours[0]["precipProbability"],
+                icon_set,
+                "summary",
+                hours[0]["precipIntensity"],
+            )
+            if curr_precip_text_for_first_hour is None:
+                all_period_names[0] = "later-" + all_period_names[0]
+                later_conditions_list.append("precip")
+
+        # Check visibility (fog)
+        if vis_periods and vis_periods[0] == 0:
+            if (
+                calculate_vis_text(hours[0]["visibility"], vis_units, "summary") is None
+                and "later" not in all_period_names[0]
+            ):  # Avoid double "later"
+                all_period_names[0] = "later-" + all_period_names[0]
+                later_conditions_list.append("vis")
+
+        # Check wind
+        if wind_periods and wind_periods[0] == 0:
+            if (
+                calculate_wind_text(
+                    hours[0]["windSpeed"], wind_unit, icon_set, "summary"
                 )
                 is None
-                and "later" not in periods[0]
+                and "later" not in all_period_names[0]
             ):
-                periods[0] = "later-" + periods[0]
-                later.append("dry")
-        # If we have humid conditions and it starts in the first block and the first hour is not humid
-        if humid and humid[0] == 0:
+                all_period_names[0] = "later-" + all_period_names[0]
+                later_conditions_list.append("wind")
+
+        # Check dry humidity
+        if dry_periods and dry_periods[0] == 0:
             if (
                 humidity_sky_text(
-                    hours[0]["temperature"], tempUnits, hours[0]["humidity"]
+                    hours[0]["temperature"], temp_units, hours[0]["humidity"]
                 )
                 is None
-                and "later" not in periods[0]
+                and "later" not in all_period_names[0]
             ):
-                periods[0] = "later-" + periods[0]
-                later.append("humid")
+                all_period_names[0] = "later-" + all_period_names[0]
+                later_conditions_list.append("dry")
 
-    # Calculate the cloud period text
-    cloudText, windPrecip, dryPrecip, humidPrecip, visPrecip = calculate_period_text(
-        periods,
-        mostCommonLevels,
-        cloudConvertedText,
+        # Check humid humidity
+        if humid_periods and humid_periods[0] == 0:
+            if (
+                humidity_sky_text(
+                    hours[0]["temperature"], temp_units, hours[0]["humidity"]
+                )
+                is None
+                and "later" not in all_period_names[0]
+            ):
+                all_period_names[0] = "later-" + all_period_names[0]
+                later_conditions_list.append("humid")
+
+    # Flags to indicate if a condition is present at all in the forecast block
+    has_precip = bool(precip_periods) and precip_summary_text is not None
+    has_wind = bool(wind_periods)
+    has_vis = bool(vis_periods)
+    has_dry = bool(dry_periods)
+    has_humid = bool(humid_periods)
+
+    # Initialize variables for condition-specific summary texts
+    precip_only_summary = None
+    wind_only_summary = None
+    vis_only_summary = None
+    dry_only_summary = None
+    humid_only_summary = None
+    cloud_full_summary = None
+
+    # Calculate summary text for each condition type, passing all relevant periods for combination logic
+    if has_precip:
+        # Pass all period data lists to allow calculate_period_summary_text to determine internal combinations
+        (
+            precip_only_summary,
+            temp_wind_combined,
+            temp_dry_combined,
+            temp_humid_combined,
+            temp_vis_combined,
+        ) = calculate_period_summary_text(
+            precip_periods,
+            precip_summary_text,
+            "precip",
+            all_period_names,
+            wind_periods,
+            dry_periods,
+            humid_periods,
+            vis_periods,
+            overall_max_wind,
+            wind_unit,
+            icon_set,
+            0,
+            mode,
+            later_conditions_list,
+            today_period_for_later_check,
+        )
+        # Update combination flags based on whether wind/dry/humid/vis were actually combined *into* precipitation's summary
+        # This requires inspecting the structure of precip_only_summary
+        if (
+            isinstance(precip_only_summary, list)
+            and precip_only_summary
+            and precip_only_summary[0] == "and"
+        ):
+            combined_wind_flag = temp_wind_combined
+            combined_dry_flag = temp_dry_combined
+            combined_humid_flag = temp_humid_combined
+            combined_vis_flag = temp_vis_combined
+        else:  # If precip_only_summary is not an "and" statement, then no combination happened for these flags
+            combined_wind_flag = False
+            combined_dry_flag = False
+            combined_humid_flag = False
+            combined_vis_flag = False
+
+    # Calculate summaries for other conditions. The combination flags for them are local to their calls.
+    if has_wind:
+        wind_only_summary, _, _, _, _ = calculate_period_summary_text(
+            wind_periods,
+            calculate_wind_text(overall_max_wind, wind_unit, icon_set, "summary"),
+            "wind",
+            all_period_names,
+            [],
+            dry_periods,
+            humid_periods,
+            [],  # Wind can combine with dry/humid
+            overall_max_wind,
+            wind_unit,
+            icon_set,
+            0,
+            mode,
+            later_conditions_list,
+            today_period_for_later_check,
+        )
+    if has_vis:
+        vis_only_summary, _, _, _, _ = calculate_period_summary_text(
+            vis_periods,
+            "fog",
+            "vis",
+            all_period_names,
+            [],
+            [],
+            [],
+            [],
+            overall_max_wind,
+            wind_unit,
+            icon_set,
+            0,
+            mode,
+            later_conditions_list,
+            today_period_for_later_check,
+        )
+    if has_dry:
+        dry_only_summary, _, _, _, _ = calculate_period_summary_text(
+            dry_periods,
+            "low-humidity",
+            "dry",
+            all_period_names,
+            [],
+            [],
+            [],
+            [],
+            overall_max_wind,
+            wind_unit,
+            icon_set,
+            0,
+            mode,
+            later_conditions_list,
+            today_period_for_later_check,
+        )
+    if has_humid:
+        humid_only_summary, _, _, _, _ = calculate_period_summary_text(
+            humid_periods,
+            "high-humidity",
+            "humid",
+            all_period_names,
+            [],
+            [],
+            [],
+            [],
+            overall_max_wind,
+            wind_unit,
+            icon_set,
+            0,
+            mode,
+            later_conditions_list,
+            today_period_for_later_check,
+        )
+
+    # Cloud full summary, including potential combinations with wind/dry/humid/vis
+    (
+        cloud_full_summary,
+        cloud_wind_combined_flag,
+        cloud_dry_combined_flag,
+        cloud_humid_combined_flag,
+        cloud_vis_combined_flag,
+    ) = calculate_period_summary_text(
+        [
+            i for i, _ in enumerate(period_stats)
+        ],  # Pass all period indices for cloud to find its pattern
+        final_cloud_text,
         "cloud",
-        wind,
-        prepAccumUnit,
-        visUnits,
-        windUnit,
-        maxWind,
-        windPrecip,
-        checkPeriod,
+        all_period_names,
+        wind_periods,
+        dry_periods,
+        humid_periods,
+        vis_periods,
+        overall_max_wind,
+        wind_unit,
+        icon_set,
+        0,
         mode,
-        icon,
-        dry,
-        humid,
-        tempUnits,
-        dryPrecip,
-        humidPrecip,
-        visPrecip,
-        vis,
-        later,
+        later_conditions_list,
+        today_period_for_later_check,
     )
 
-    # If there is only one period
-    if not period2Calc and not period3Calc and not period4Calc:
-        # If there is precipitation and wind then join with an and
-        if period1Calc[0] is not None:
-            if period1Calc[1] is not None:
-                summary_text = [
-                    "sentence",
-                    ["during", ["and", prepText, period1Calc[1]], "night"],
-                ]
-            # Otherwise just use the precipitation
-            else:
-                return ["sentence", ["during", prepText, "night"]]
-        # If there is fog then show that text
-        elif period1Calc[2] is not None:
-            cIcon = "fog"
-            summary_text = ["sentence", ["during", period1Calc[2], "night"]]
-        else:
-            # If there is wind during the last period then join the wind with the cloud text
-            if period1Calc[1] is not None:
-                cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
-                summary_text = [
-                    "sentence",
-                    ["during", ["and", period1Calc[1], period1Calc[3]], "night"],
-                ]
-            # If there is low humidity during the last period then join it with the cloud text
-            elif period1Calc[4] is not None:
-                summary_text = [
-                    "sentence",
-                    ["during", ["and", period1Calc[3], period1Calc[4]], "night"],
-                ]
-            # If there is high humidity during the last period then join it with the cloud text
-            elif period1Calc[5] is not None:
-                summary_text = [
-                    "sentence",
-                    ["during", ["and", period1Calc[3], period1Calc[5]], "night"],
-                ]
-            # Otherwise just show the cloud text
-            else:
-                summary_text = ["sentence", ["during", period1Calc[3], "night"]]
-    else:
-        windText = None
-        visText = None
-        precipText = None
+    # --- Final Summary Construction Logic: Select top 2 conditions based on priority ---
 
-        # If there is any precipitation then calcaulate the text
-        if len(precip) > 0 and prepText is not None:
-            numItems += 1
-            precipText, windPrecip, dryPrecip, humidPrecip, visPrecip = (
-                calculate_period_text(
-                    periods,
-                    precip,
-                    prepText,
-                    "precip",
-                    wind,
-                    prepAccumUnit,
-                    visUnits,
-                    windUnit,
-                    maxWind,
-                    windPrecip,
-                    checkPeriod,
-                    mode,
-                    icon,
-                    dry,
-                    humid,
-                    tempUnits,
-                    dryPrecip,
-                    humidPrecip,
-                    visPrecip,
-                    vis,
-                    later,
-                )
-            )
-        # If there is any low humidity then calcaulate the text if its not joined with any conditions
-        if not dryPrecip and len(dry) > 0:
-            dryText, windPrecip, dryPrecip, humidPrecip, visPrecip = (
-                calculate_period_text(
-                    periods,
-                    dry,
-                    "low-humidity",
-                    "dry",
-                    wind,
-                    prepAccumUnit,
-                    visUnits,
-                    windUnit,
-                    maxWind,
-                    windPrecip,
-                    checkPeriod,
-                    mode,
-                    icon,
-                    dry,
-                    humid,
-                    tempUnits,
-                    dryPrecip,
-                    humidPrecip,
-                    visPrecip,
-                    vis,
-                    later,
-                )
-            )
+    # Candidate summaries: list of dictionaries, each describing a potential main summary.
+    # We will prioritize and select from these.
+    # Properties: 'type', 'priority', 'all_day', 'start_idx', 'text', 'icon'
 
-        # If there is any low humidity then calcaulate the text if its not joined with any conditions
-        if not humidPrecip and len(humid) > 0:
-            humidText, windPrecip, dryPrecip, humidPrecip, visPrecip = (
-                calculate_period_text(
-                    periods,
-                    humid,
-                    "high-humidity",
-                    "humid",
-                    wind,
-                    prepAccumUnit,
-                    visUnits,
-                    windUnit,
-                    maxWind,
-                    windPrecip,
-                    checkPeriod,
-                    mode,
-                    icon,
-                    dry,
-                    humid,
-                    tempUnits,
-                    dryPrecip,
-                    humidPrecip,
-                    visPrecip,
-                    vis,
-                    later,
-                )
-            )
-        # If there is any visibility then calcaulate the text
-        if len(vis) > 0 and numItems <= 1 and not visPrecip:
-            numItems += 1
-            visText, windPrecip, dryPrecip, humidPrecip, visPrecip = (
-                calculate_period_text(
-                    periods,
-                    vis,
-                    "fog",
-                    "vis",
-                    wind,
-                    prepAccumUnit,
-                    visUnits,
-                    windUnit,
-                    maxWind,
-                    windPrecip,
-                    checkPeriod,
-                    mode,
-                    icon,
-                    dry,
-                    humid,
-                    tempUnits,
-                    dryPrecip,
-                    humidPrecip,
-                    visPrecip,
-                    vis,
-                    later,
-                )
-            )
+    # Priority order: lower number is higher priority.
+    # 0: Precipitation
+    # 1: Visibility (Fog)
+    # 2: Wind
+    # 3: Dry/Humid (if combined, or if primary cloud is clear)
+    # 4: Cloud (fallback)
 
-        # If there is any wind then calcaulate the text if its not joined with precip/cloud
-        if not windPrecip and numItems <= 1 and len(wind) > 0:
-            numItems += 1
-            windText, windPrecip, dryPrecip, humidPrecip, visPrecip = (
-                calculate_period_text(
-                    periods,
-                    wind,
-                    calculate_wind_text(maxWind, windUnit, icon, "summary"),
-                    "wind",
-                    wind,
-                    prepAccumUnit,
-                    visUnits,
-                    windUnit,
-                    maxWind,
-                    windPrecip,
-                    checkPeriod,
-                    mode,
-                    icon,
-                    dry,
-                    humid,
-                    tempUnits,
-                    dryPrecip,
-                    humidPrecip,
-                    visPrecip,
-                    vis,
-                    later,
-                )
-            )
+    candidate_summaries_for_final_assembly = []
+    total_periods_available = []
 
-        # If the summary text is not already set
-        if summary_text is None:
-            # If there is no precipitation
-            if precipText is None:
-                # If there is no wind
-                if windText is None:
-                    # If there is visbility
-                    if visText is not None:
-                        cIcon = "fog"
-                        summary_text = ["sentence", visText]
-                    # Otherwise use the cloud text
-                    else:
-                        # If there is any dry text then join with an and and show whichever one comes fist at the start
-                        if dryText is not None:
-                            if windPrecip:
-                                cIcon = calculate_wind_text(
-                                    maxWind, windUnit, icon, "icon"
-                                )
-                                summary_text = ["sentence", dryText]
-                            elif dry[0] == min(starts) or (
-                                len(dry) == len(periods)
-                                and len(mostCommonLevels) != len(periods)
-                            ):
-                                summary_text = ["sentence", ["and", dryText, cloudText]]
-                            else:
-                                summary_text = ["sentence", ["and", cloudText, dryText]]
-                        # If there is any humid text then join with an and and show whichever one comes fist at the start
-                        elif humidText is not None:
-                            if windPrecip:
-                                cIcon = calculate_wind_text(
-                                    maxWind, windUnit, icon, "icon"
-                                )
-                                summary_text = ["sentence", humidText]
-                            elif humid[0] == min(starts) or (
-                                len(humid) == len(periods)
-                                and len(mostCommonLevels) != len(periods)
-                            ):
-                                summary_text = [
-                                    "sentence",
-                                    ["and", humidText, cloudText],
-                                ]
-                            else:
-                                summary_text = [
-                                    "sentence",
-                                    ["and", cloudText, humidText],
-                                ]
-                        else:
-                            summary_text = ["sentence", cloudText]
-                # If there is wind text and visbility text then join with an and and show whichever one comes first at the start
-                elif visText is not None:
-                    if vis[0] == min(starts) or (
-                        len(vis) == len(periods) and len(wind) != len(periods)
-                    ):
-                        cIcon = "fog"
-                        summary_text = ["sentence", ["and", visText, windText]]
-                    else:
-                        cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
-                        summary_text = ["sentence", ["and", windText, visText]]
-                # If there is wind text
-                else:
-                    cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
-                    # If there is any dry text then join with an and and show whichever one comes fist at the start
-                    if dryText is not None:
-                        if dry[0] == min(starts) or (
-                            len(dry) == len(periods) and len(wind) != len(periods)
-                        ):
-                            summary_text = ["sentence", ["and", dryText, windText]]
-                        else:
-                            summary_text = ["sentence", ["and", windText, dryText]]
-                    # If there is any humid text then join with an and and show whichever one comes fist at the start
-                    elif humidText is not None:
-                        if humid[0] == min(starts) or (
-                            len(humid) == len(periods) and len(wind) != len(periods)
-                        ):
-                            summary_text = ["sentence", ["and", humidText, windText]]
-                        else:
-                            summary_text = ["sentence", ["and", windText, humidText]]
-                    else:
-                        summary_text = ["sentence", windText]
-            # If there is precipitation
-            else:
-                # Check for full day condition and use only precip
-                if len(precipText) == 2:
-                    summary_text = precipText
-                else:
-                    # If there is any visibility text then join with an and and show whichever one comes fist at the start
-                    if visText is not None:
-                        if (
-                            vis[0] == min(starts)
-                            and (
-                                precip[0] != min(starts)
-                                or (totalPrep * len(precip)) < 0.25 * prepAccumUnit
-                            )
-                        ) or (len(vis) == len(periods) and len(precip) != len(periods)):
-                            cIcon = "fog"
-                            summary_text = ["sentence", ["and", visText, precipText]]
-                        else:
-                            summary_text = ["sentence", ["and", precipText, visText]]
-                    # If the wind is combined with cloud cover then join with an and and show whichever one comes fist at the start
-                    elif cloudText is not None and windPrecip:
-                        if (
-                            mostCommonLevels[0] == min(starts)
-                            and (
-                                precip[0] != min(starts)
-                                or (totalPrep * len(precip)) < 0.25 * prepAccumUnit
-                            )
-                        ) or (
-                            len(mostCommonLevels) == len(periods)
-                            and len(precip) != len(periods)
-                        ):
-                            cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
-                            summary_text = ["sentence", ["and", cloudText, precipText]]
-                        else:
-                            summary_text = ["sentence", ["and", precipText, cloudText]]
-                    # If there is any wind text then join with an and and show whichever one comes fist at the start
-                    elif windText is not None:
-                        if (
-                            wind[0] == min(starts)
-                            and (
-                                precip[0] != min(starts)
-                                or (totalPrep * len(precip)) < 0.25 * prepAccumUnit
-                            )
-                        ) or (
-                            len(wind) == len(periods) and len(precip) != len(periods)
-                        ):
-                            cIcon = calculate_wind_text(maxWind, windUnit, icon, "icon")
-                            summary_text = ["sentence", ["and", windText, precipText]]
-                        else:
-                            summary_text = ["sentence", ["and", precipText, windText]]
-                    else:
-                        # If there is any humid text then join with an and and show whichever one comes fist at the start
-                        if humidText is not None:
-                            if humid[0] == min(starts) or (
-                                len(humid) == len(periods)
-                                and len(precip) != len(periods)
-                            ):
-                                summary_text = [
-                                    "sentence",
-                                    ["and", humidText, precipText],
-                                ]
-                            else:
-                                summary_text = [
-                                    "sentence",
-                                    ["and", precipText, humidText],
-                                ]
-                        else:
-                            summary_text = ["sentence", precipText]
+    # 1. Precipitation
+    if has_precip:
+        is_precip_all_day = len(precip_periods) == total_periods_available
+        candidate_summaries_for_final_assembly.append(
+            {
+                "type": "precip",
+                "priority": 0,
+                "all_day": is_precip_all_day,
+                "start_idx": precip_periods[0] if precip_periods else -1,
+                "text": precip_only_summary,
+                "icon": precip_icon,
+            }
+        )
 
-    # If there is no icon then calculate it based on the average cloud cover for the periods if we don't have any precipitation
-    if cIcon is None:
-        if precipIcon is not None:
-            cIcon = precipIcon
-        else:
-            cIcon = calculate_sky_icon(avgCloud, True, icon)
+    # 2. Visibility (Fog) - only if not already covered by precipitation
+    if has_vis and not combined_vis_flag:
+        is_vis_all_day = len(vis_periods) == total_periods_available
+        candidate_summaries_for_final_assembly.append(
+            {
+                "type": "vis",
+                "priority": 1,
+                "all_day": is_vis_all_day,
+                "start_idx": vis_periods[0] if vis_periods else -1,
+                "text": vis_only_summary,
+                "icon": "fog",
+            }
+        )
 
-    return cIcon, summary_text
+    # 3. Wind - only if not already covered by precipitation or visibility
+    if has_wind and not combined_wind_flag:
+        is_wind_all_day = len(wind_periods) == total_periods_available
+        candidate_summaries_for_final_assembly.append(
+            {
+                "type": "wind",
+                "priority": 2,
+                "all_day": is_wind_all_day,
+                "start_idx": wind_periods[0] if wind_periods else -1,
+                "text": wind_only_summary,
+                "icon": calculate_wind_text(
+                    overall_max_wind, wind_unit, icon_set, "icon"
+                ),
+            }
+        )
+
+    # 4. Dry Humidity - only if not already covered AND (combined OR cloud is clear)
+    if (
+        has_dry
+        and not combined_dry_flag
+        and (cloud_dry_combined_flag or final_cloud_text == "clear")
+    ):
+        is_dry_all_day = len(dry_periods) == total_periods_available
+        candidate_summaries_for_final_assembly.append(
+            {
+                "type": "dry",
+                "priority": 3,
+                "all_day": is_dry_all_day,
+                "start_idx": dry_periods[0] if dry_periods else -1,
+                "text": dry_only_summary,
+                "icon": None,  # Dry/humid don't have dedicated icons, fallback to cloud
+            }
+        )
+
+    # 5. Humid Humidity - only if not already covered AND (combined OR cloud is clear)
+    if (
+        has_humid
+        and not combined_humid_flag
+        and (cloud_humid_combined_flag or final_cloud_text == "clear")
+    ):
+        is_humid_all_day = len(humid_periods) == total_periods_available
+        candidate_summaries_for_final_assembly.append(
+            {
+                "type": "humid",
+                "priority": 4,
+                "all_day": is_humid_all_day,
+                "start_idx": humid_periods[0] if humid_periods else -1,
+                "text": humid_only_summary,
+                "icon": None,  # Dry/humid don't have dedicated icons, fallback to cloud
+            }
+        )
+
+    # 6. Cloud Cover - as a fallback if no other primary condition is present
+    if (
+        not candidate_summaries_for_final_assembly
+    ):  # If no higher-priority conditions are present
+        is_cloud_all_day = len(period_stats) == total_periods_available
+        candidate_summaries_for_final_assembly.append(
+            {
+                "type": "cloud",
+                "priority": 5,
+                "all_day": is_cloud_all_day,
+                "start_idx": 0,  # Cloud is always "present" from the start of the forecast
+                "text": cloud_full_summary,
+                "icon": calculate_sky_icon(derived_avg_cloud_for_icon, True, icon_set),
+            }
+        )
+
+    # Sort candidates:
+    # 1. By 'all_day' (True comes before False, so `not x["all_day"]` makes all-day items sort first)
+    # 2. By 'priority' (lower number is higher priority)
+    # 3. By 'start_idx' (earliest start comes first)
+    sorted_summaries_candidates = sorted(
+        candidate_summaries_for_final_assembly,
+        key=lambda x: (not x["all_day"], x["priority"], x["start_idx"]),
+    )
+
+    # Select the top 1 or 2 summaries
+    selected_final_summary_texts = []
+
+    for summary_data in sorted_summaries_candidates:
+        # The icon logic needs to pick the icon of the highest priority summary *before* combining.
+        # If no icon has been set yet, and this summary has an icon, use it.
+        if summary_data["icon"] and current_c_icon is None:
+            current_c_icon = summary_data["icon"]
+
+        selected_final_summary_texts.append(summary_data["text"])
+
+        if len(selected_final_summary_texts) >= 2:
+            break  # Limit to top 2 conditions
+
+    # Final summary text construction
+    if len(selected_final_summary_texts) == 1:
+        final_constructed_summary = ["sentence", selected_final_summary_texts[0]]
+    elif len(selected_final_summary_texts) == 2:
+        final_constructed_summary = [
+            "sentence",
+            ["and", selected_final_summary_texts[0], selected_final_summary_texts[1]],
+        ]
+    else:  # Fallback if no summaries generated (shouldn't happen with cloud fallback)
+        final_constructed_summary = ["for-day", "unavailable"]
+
+    # Ensure an icon is always returned, defaulting to overall average cloud cover if none set.
+    if current_c_icon is None:
+        current_c_icon = calculate_sky_icon(overall_avg_cloud_cover, True, icon_set)
+
+    return current_c_icon, final_constructed_summary
 
 
-def nextPeriod(currPeriod):
+def nextPeriod(curr_period):
     """
-    Calculates the current day/next 24h text
+    Calculates the next textual representation of a period.
 
     Parameters:
-    - currPeriod (str) - The current textual representation of the period.
+    - curr_period (str): The current textual representation of the period.
 
     Returns:
-    - nextPeriod (str) - The next textual representation of the period.
+    - str: The next textual representation of the period.
     """
-    if currPeriod == "morning":
-        nextPeriod = "afternoon"
-    elif currPeriod == "afternoon":
-        nextPeriod = "evening"
-    elif currPeriod == "evening":
-        nextPeriod = "night"
-    elif currPeriod == "night":
-        nextPeriod = "morning"
-
-    return nextPeriod
+    if "morning" in curr_period:
+        return curr_period.replace("morning", "afternoon")
+    elif "afternoon" in curr_period:
+        return curr_period.replace("afternoon", "evening")
+    elif "evening" in curr_period:
+        return curr_period.replace("evening", "night")
+    elif "night" in curr_period:
+        return curr_period.replace("night", "morning").replace("today-", "tomorrow-")
+    return curr_period
