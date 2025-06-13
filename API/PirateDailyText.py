@@ -228,6 +228,17 @@ def _get_time_phrase(
                     "until",
                     all_periods[min(end_idx + 1, total_periods_available - 1)],
                 ]
+            # Three continuous periods starting after 'check_period' (for 5 total periods)
+            elif (
+                start_idx > check_period
+                and is_continuous
+                and total_periods_available == 5
+            ):
+                summary_text_temp = [
+                    "starting-continuing-until",
+                    all_periods[start_idx],
+                    all_periods[min(end_idx + 1, total_periods_available - 1)],
+                ]
             # Discontinuous 3 periods
             elif not is_continuous:
                 # All three periods are disjoint (e.g., [0, 2, 4])
@@ -240,67 +251,56 @@ def _get_time_phrase(
                             ["and", all_periods[mid_idx], all_periods[end_idx]],
                         ],
                     ]
-            # First two are continuous, third is disjoint (e.g., [0, 1, 3])
-            elif (
-                start_idx == check_period
-                and (mid_idx - start_idx) == 1
-                and end_idx >= 3
-            ):
-                summary_text_temp = [
-                    "until-starting-again",
-                    all_periods[mid_idx + 1],
-                    all_periods[end_idx],
-                ]
-            # First is disjoint, last two are continuous (e.g., [0, 2, 3])
-            elif (
-                start_idx == check_period
-                and (mid_idx - start_idx) != 1
-                and mid_idx >= 2
-            ):
-                summary_text_temp = [
-                    "until-starting-again",
-                    all_periods[start_idx + 1],
-                    all_periods[mid_idx],
-                ]
-            # Three continuous periods starting after 'check_period' (for 5 total periods)
-            elif (
-                start_idx > check_period
-                and is_continuous
-                and total_periods_available == 5
-            ):
-                summary_text_temp = [
-                    "starting-continuing-until",
-                    all_periods[start_idx],
-                    all_periods[min(end_idx + 1, total_periods_available - 1)],
-                ]
-            # First is disjoint, next two are continuous (for 5 total periods)
-            elif (
-                start_idx > check_period
-                and (mid_idx - start_idx) != 1
-                and (end_idx - mid_idx) == 1
-                and total_periods_available == 5
-            ):
-                summary_text_temp = [
-                    "and",
-                    ["during", all_periods[start_idx]],
-                    ["starting", all_periods[mid_idx]],
-                ]
-            # First two are continuous, last is disjoint (for 5 total periods)
-            elif (
-                start_idx > check_period
-                and (mid_idx - start_idx) == 1
-                and (end_idx - mid_idx) != 1
-                and total_periods_available == 5
-            ):
-                summary_text_temp = [
-                    "and",
-                    [
-                        "starting-continuing-until",
-                        all_periods[start_idx],
-                        all_periods[min(mid_idx + 1, total_periods_available - 1)],
-                    ],
-                    ["during", all_periods[end_idx]],
-                ]
+                # First two are continuous, third is disjoint (e.g., [0, 1, 3])
+                elif (
+                    start_idx == check_period
+                    and (mid_idx - start_idx) == 1
+                    and end_idx >= 3
+                ):
+                    summary_text_temp = [
+                        "until-starting-again",
+                        all_periods[mid_idx + 1],
+                        all_periods[end_idx],
+                    ]
+                # First is disjoint, last two are continuous (e.g., [0, 2, 3])
+                elif (
+                    start_idx == check_period
+                    and (mid_idx - start_idx) != 1
+                    and mid_idx >= 2
+                ):
+                    summary_text_temp = [
+                        "until-starting-again",
+                        all_periods[start_idx + 1],
+                        all_periods[mid_idx],
+                    ]
+                # First is disjoint, next two are continuous (for 5 total periods)
+                elif (
+                    start_idx > check_period
+                    and (mid_idx - start_idx) != 1
+                    and (end_idx - mid_idx) == 1
+                    and total_periods_available == 5
+                ):
+                    summary_text_temp = [
+                        "and",
+                        ["during", all_periods[start_idx]],
+                        ["starting", all_periods[mid_idx]],
+                    ]
+                # First two are continuous, last is disjoint (for 5 total periods)
+                elif (
+                    start_idx > check_period
+                    and (mid_idx - start_idx) == 1
+                    and (end_idx - mid_idx) != 1
+                    and total_periods_available == 5
+                ):
+                    summary_text_temp = [
+                        "and",
+                        [
+                            "starting-continuing-until",
+                            all_periods[start_idx],
+                            all_periods[min(mid_idx + 1, total_periods_available - 1)],
+                        ],
+                        ["during", all_periods[end_idx]],
+                    ]
 
             # Apply "later" re-structuring specific to 3-period patterns
             if (
