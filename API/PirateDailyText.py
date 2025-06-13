@@ -97,7 +97,6 @@ def _get_time_phrase(
     num_periods = len(period_indices)
     total_periods_available = len(all_periods)
     summary_text_temp = None
-    print(condition_type, num_periods, total_periods_available, check_period)
 
     if num_periods == 0:
         return None
@@ -208,7 +207,6 @@ def _get_time_phrase(
 
         # Handle specific patterns for 3 periods
         elif num_periods == 3:
-            print(period_indices)
             mid_idx = period_indices[1]
             # Starts in the 2nd period and continuous for 3 periods (total 4 periods)
             if (
