@@ -203,6 +203,7 @@ def _get_time_phrase(
                         ["during", all_periods[start_idx]],
                         ["during", all_periods[end_idx]],
                     ]
+
             return summary_text_temp  # Return the determined summary phrase if 'later' didn't apply
 
         # Handle specific patterns for 3 periods
@@ -554,7 +555,11 @@ def calculate_period_summary_text(
     if phrase_type == "for-day":
         summary_text = ["for-day", current_condition_text]
     elif phrase_type == "during":
-        if len(phrase_args) == 1 and isinstance(phrase_args[0], list):
+        if (
+            len(phrase_args) == 1
+            and isinstance(phrase_args[0], list)
+            and (phrase_args[0][0] != "and" and phrase_args[0][0])
+        ):
             period_combination_text = phrase_args[0]
             if len(period_combination_text) > 1:
                 formatted_periods = period_combination_text[0]
