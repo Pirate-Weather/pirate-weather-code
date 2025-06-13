@@ -96,6 +96,8 @@ def _get_time_phrase(
     """
     num_periods = len(period_indices)
     total_periods_available = len(all_periods)
+    summary_text_temp = None
+    print(condition_type, num_periods, total_periods_available, check_period)
 
     if num_periods == 0:
         return None
@@ -206,6 +208,7 @@ def _get_time_phrase(
 
         # Handle specific patterns for 3 periods
         elif num_periods == 3:
+            print(period_indices)
             mid_idx = period_indices[1]
             # Starts in the 2nd period and continuous for 3 periods (total 4 periods)
             if (
@@ -239,67 +242,67 @@ def _get_time_phrase(
                             ["and", all_periods[mid_idx], all_periods[end_idx]],
                         ],
                     ]
-                # First two are continuous, third is disjoint (e.g., [0, 1, 3])
-                elif (
-                    start_idx == check_period
-                    and (mid_idx - start_idx) == 1
-                    and end_idx >= 3
-                ):
-                    summary_text_temp = [
-                        "until-starting-again",
-                        all_periods[mid_idx + 1],
-                        all_periods[end_idx],
-                    ]
-                # First is disjoint, last two are continuous (e.g., [0, 2, 3])
-                elif (
-                    start_idx == check_period
-                    and (mid_idx - start_idx) != 1
-                    and mid_idx >= 2
-                ):
-                    summary_text_temp = [
-                        "until-starting-again",
-                        all_periods[start_idx + 1],
-                        all_periods[mid_idx],
-                    ]
-                # Three continuous periods starting after 'check_period' (for 5 total periods)
-                elif (
-                    start_idx > check_period
-                    and is_continuous
-                    and total_periods_available == 5
-                ):
-                    summary_text_temp = [
+            # First two are continuous, third is disjoint (e.g., [0, 1, 3])
+            elif (
+                start_idx == check_period
+                and (mid_idx - start_idx) == 1
+                and end_idx >= 3
+            ):
+                summary_text_temp = [
+                    "until-starting-again",
+                    all_periods[mid_idx + 1],
+                    all_periods[end_idx],
+                ]
+            # First is disjoint, last two are continuous (e.g., [0, 2, 3])
+            elif (
+                start_idx == check_period
+                and (mid_idx - start_idx) != 1
+                and mid_idx >= 2
+            ):
+                summary_text_temp = [
+                    "until-starting-again",
+                    all_periods[start_idx + 1],
+                    all_periods[mid_idx],
+                ]
+            # Three continuous periods starting after 'check_period' (for 5 total periods)
+            elif (
+                start_idx > check_period
+                and is_continuous
+                and total_periods_available == 5
+            ):
+                summary_text_temp = [
+                    "starting-continuing-until",
+                    all_periods[start_idx],
+                    all_periods[min(end_idx + 1, total_periods_available - 1)],
+                ]
+            # First is disjoint, next two are continuous (for 5 total periods)
+            elif (
+                start_idx > check_period
+                and (mid_idx - start_idx) != 1
+                and (end_idx - mid_idx) == 1
+                and total_periods_available == 5
+            ):
+                summary_text_temp = [
+                    "and",
+                    ["during", all_periods[start_idx]],
+                    ["starting", all_periods[mid_idx]],
+                ]
+            # First two are continuous, last is disjoint (for 5 total periods)
+            elif (
+                start_idx > check_period
+                and (mid_idx - start_idx) == 1
+                and (end_idx - mid_idx) != 1
+                and total_periods_available == 5
+            ):
+                summary_text_temp = [
+                    "and",
+                    [
                         "starting-continuing-until",
                         all_periods[start_idx],
-                        all_periods[min(end_idx + 1, total_periods_available - 1)],
-                    ]
-                # First is disjoint, next two are continuous (for 5 total periods)
-                elif (
-                    start_idx > check_period
-                    and (mid_idx - start_idx) != 1
-                    and (end_idx - mid_idx) == 1
-                    and total_periods_available == 5
-                ):
-                    summary_text_temp = [
-                        "and",
-                        ["during", all_periods[start_idx]],
-                        ["starting", all_periods[mid_idx]],
-                    ]
-                # First two are continuous, last is disjoint (for 5 total periods)
-                elif (
-                    start_idx > check_period
-                    and (mid_idx - start_idx) == 1
-                    and (end_idx - mid_idx) != 1
-                    and total_periods_available == 5
-                ):
-                    summary_text_temp = [
-                        "and",
-                        [
-                            "starting-continuing-until",
-                            all_periods[start_idx],
-                            all_periods[min(mid_idx + 1, total_periods_available - 1)],
-                        ],
-                        ["during", all_periods[end_idx]],
-                    ]
+                        all_periods[min(mid_idx + 1, total_periods_available - 1)],
+                    ],
+                    ["during", all_periods[end_idx]],
+                ]
 
             # Apply "later" re-structuring specific to 3-period patterns
             if (
@@ -703,6 +706,8 @@ def calculate_day_text(
         # Determine `is_today` for naming periods based on calendar day relative to initial forecast date.
         is_today_in_iter = True
         # If the current iteration's date is different from the forecast's starting date:
+        if curr_hour_local < 4 and current_iter_hour_local >= 22 and mode == "hour":
+            is_today_in_iter = False
         if current_iter_hour_date.date() > curr_date.date():
             # If in hourly mode, and it's the next calendar day, and it's past 4 AM, then it's 'tomorrow'.
             if current_iter_hour_local >= 4 and mode == "hour":
@@ -710,7 +715,9 @@ def calculate_day_text(
             # If it's a new calendar day, but before 4 AM (0-3 AM), it's *still logically part of the previous day's night period*.
             # So, for period naming, it should *not* be marked as 'tomorrow-' if in hourly mode until after 4 AM.
             # Only if it's the next calendar day AND it's after 4 AM, should it be 'tomorrow-'.
-            elif current_iter_hour_local < 4 and mode == "hour":
+            elif (
+                current_iter_hour_local < 4 and mode == "hour" and curr_hour_local >= 4
+            ):
                 # Keep is_today_in_iter as True for 0-3 AM if `mode` is hour and it's part of the same logical day.
                 # If `mode` is daily, it's always just based on the day.
                 is_today_in_iter = True
@@ -755,12 +762,13 @@ def calculate_day_text(
         hour_date = datetime.datetime.fromtimestamp(hour["time"], zone)
         hour_in_loop = int(hour_date.strftime("%H"))
 
-        # Determine `is_today` for naming the current hour's period.
         is_today_for_hour_data = True
+        if curr_hour_local < 4 and hour_in_loop >= 22 and mode == "hour":
+            is_today_for_hour_data = False
         if hour_date.date() > curr_date.date():
             if hour_in_loop >= 4 and mode == "hour":
                 is_today_for_hour_data = False
-            elif hour_in_loop < 4 and mode == "hour":
+            elif hour_in_loop < 4 and mode == "hour" and curr_hour_local >= 4:
                 is_today_for_hour_data = (
                     True  # Still logically today's night if in hourly mode and 0-3 AM
                 )
@@ -1514,6 +1522,8 @@ def calculate_day_text(
     # Ensure an icon is always returned, defaulting to overall average cloud cover if none set.
     if current_c_icon is None:
         current_c_icon = calculate_sky_icon(overall_avg_cloud_cover, True, icon_set)
+
+    # print(period_stats)
 
     return current_c_icon, final_constructed_summary
 
