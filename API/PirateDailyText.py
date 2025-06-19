@@ -9,15 +9,13 @@ from PirateTextHelper import (
     humidity_sky_text,
     Most_Common,
     # Import shared cloud cover constants
-    cloudyThreshold, # Use shared
-    mostlyCloudyThreshold, # Use shared
-    partlyCloudyThreshold, # Use shared
-    mostlyClearThreshold, # Use shared
+    cloudyThreshold,  # Use shared
+    mostlyCloudyThreshold,  # Use shared
+    partlyCloudyThreshold,  # Use shared
+    mostlyClearThreshold,  # Use shared
     # Import shared precipitation thresholds
     DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
-    # Import shared visbility thresholds
-    DEFAULT_VISIBILITY
 )
 
 
@@ -1063,13 +1061,15 @@ def calculate_day_text(
 
             # Promote to stronger precip if significant accumulation is forecast
             if (
-                total_rain_accum > ((DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * 10) * precip_accum_unit)
+                total_rain_accum
+                > ((DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * 10) * precip_accum_unit)
                 and most_common_overall_precip_type != "rain"
             ):
                 secondary_precip_condition = "medium-" + most_common_overall_precip_type
                 most_common_overall_precip_type = "rain"
             if (
-                total_snow_accum > ((DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * 0.5) * precip_accum_unit)
+                total_snow_accum
+                > ((DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * 0.5) * precip_accum_unit)
                 and most_common_overall_precip_type != "snow"
             ):
                 secondary_precip_condition = "medium-" + most_common_overall_precip_type
