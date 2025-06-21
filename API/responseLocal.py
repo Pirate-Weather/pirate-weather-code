@@ -3894,6 +3894,24 @@ async def PW_Forecast(
     # Fix small neg zero
     InterPcurrent[((InterPcurrent > -0.01) & (InterPcurrent < 0.01))] = 0
 
+    # Convert intensity to accumulation based on type
+    currnetRainAccum = 0
+    currnetSnowAccum = 0
+    currnetIceAccum = 0
+
+    if minuteDict[0]["precipType"] == "rain":
+        currnetRainAccum = (
+            minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
+        )
+    elif minuteDict[0]["precipType"] == "snow":
+        currnetSnowAccum = (
+            minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
+        ) * 10  # 1:10 since intensity is in liquid water equivalent
+    elif minuteDict[0]["precipType"] == "sleet":
+        currnetIceAccum = (
+            minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
+        )
+
     ### RETURN ###
     returnOBJ = dict()
 
@@ -3908,28 +3926,18 @@ async def PW_Forecast(
         returnOBJ["currently"]["time"] = int(minute_array_grib[0])
         returnOBJ["currently"]["summary"] = cText
         returnOBJ["currently"]["icon"] = cIcon
-
-        if (not timeMachine) or (tmExtra):
-            returnOBJ["currently"]["nearestStormDistance"] = InterPcurrent[16]
-            returnOBJ["currently"]["nearestStormBearing"] = int(
-                InterPcurrent[17].round()
-            )
+        returnOBJ["currently"]["nearestStormDistance"] = InterPcurrent[16]
+        returnOBJ["currently"]["nearestStormBearing"] = int(InterPcurrent[17].round())
         returnOBJ["currently"]["precipIntensity"] = minuteDict[0]["precipIntensity"]
-
-        if (not timeMachine) or (tmExtra):
-            returnOBJ["currently"]["precipProbability"] = minuteDict[0][
-                "precipProbability"
-            ]
-            returnOBJ["currently"]["precipIntensityError"] = minuteDict[0][
-                "precipIntensityError"
-            ]
+        returnOBJ["currently"]["precipProbability"] = minuteDict[0]["precipProbability"]
+        returnOBJ["currently"]["precipIntensityError"] = minuteDict[0][
+            "precipIntensityError"
+        ]
         returnOBJ["currently"]["precipType"] = minuteDict[0]["precipType"]
         returnOBJ["currently"]["temperature"] = InterPcurrent[4]
         returnOBJ["currently"]["apparentTemperature"] = InterPcurrent[5]
         returnOBJ["currently"]["dewPoint"] = InterPcurrent[6]
-
-        if (not timeMachine) or (tmExtra):
-            returnOBJ["currently"]["humidity"] = InterPcurrent[7]
+        returnOBJ["currently"]["humidity"] = InterPcurrent[7]
         returnOBJ["currently"]["pressure"] = InterPcurrent[8]
         returnOBJ["currently"]["windSpeed"] = InterPcurrent[9]
         returnOBJ["currently"]["windGust"] = InterPcurrent[10]
@@ -3937,19 +3945,15 @@ async def PW_Forecast(
             np.mod(InterPcurrent[11], 360).round()
         )
         returnOBJ["currently"]["cloudCover"] = InterPcurrent[12]
-
-        if (not timeMachine) or (tmExtra):
-            returnOBJ["currently"]["uvIndex"] = InterPcurrent[13]
-            returnOBJ["currently"]["visibility"] = InterPcurrent[14]
-            returnOBJ["currently"]["ozone"] = InterPcurrent[15]
-
-        if version >= 2:
-            returnOBJ["currently"]["smoke"] = InterPcurrent[18]  # kg/m3 to ug/m3
-            returnOBJ["currently"]["fireIndex"] = InterPcurrent[19]
-            returnOBJ["currently"]["feelsLike"] = InterPcurrent[20]
-            returnOBJ["currently"]["currentDayIce"] = dayZeroIce
-            returnOBJ["currently"]["currentDayLiquid"] = dayZeroRain
-            returnOBJ["currently"]["currentDaySnow"] = dayZeroSnow
+        returnOBJ["currently"]["uvIndex"] = InterPcurrent[13]
+        returnOBJ["currently"]["visibility"] = InterPcurrent[14]
+        returnOBJ["currently"]["ozone"] = InterPcurrent[15]
+        returnOBJ["currently"]["smoke"] = InterPcurrent[18]  # kg/m3 to ug/m3
+        returnOBJ["currently"]["fireIndex"] = InterPcurrent[19]
+        returnOBJ["currently"]["feelsLike"] = InterPcurrent[20]
+        returnOBJ["currently"]["currentDayIce"] = dayZeroIce
+        returnOBJ["currently"]["currentDayLiquid"] = dayZeroRain
+        returnOBJ["currently"]["currentDaySnow"] = dayZeroSnow
 
         # Update the text
         if InterPcurrent[0] < InterSday[0, 17]:
@@ -3963,24 +3967,6 @@ async def PW_Forecast(
         elif InterPcurrent[0] > InterSday[0, 18]:
             # After sunset
             currentDay = False
-
-        # Convert intensity to accumulation based on type
-        currnetRainAccum = 0
-        currnetSnowAccum = 0
-        currnetIceAccum = 0
-
-        if minuteDict[0]["precipType"] == "rain":
-            currnetRainAccum = (
-                minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
-            )
-        elif minuteDict[0]["precipType"] == "snow":
-            currnetSnowAccum = (
-                minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
-            ) * 10  # 1:10 since intensity is in liquid water equivalent
-        elif minuteDict[0]["precipType"] == "sleet":
-            currnetIceAccum = (
-                minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
-            )
 
         try:
             currentText, currentIcon = calculate_text(
@@ -4004,6 +3990,24 @@ async def PW_Forecast(
         except Exception as e:
             print("TEXT GEN ERROR:")
             print(e)
+
+        if version < 2:
+            returnOBJ.pop("smoke", None)
+            returnOBJ.pop("currentDayIce", None)
+            returnOBJ.pop("currentDayLiquid", None)
+            returnOBJ.pop("currentDaySnow", None)
+            returnOBJ.pop("fireIndex", None)
+            returnOBJ.pop("feelsLike", None)
+
+        if timeMachine and not tmExtra:
+            returnOBJ.pop("nearestStormDistance", None)
+            returnOBJ.pop("nearestStormBearing", None)
+            returnOBJ.pop("precipProbability", None)
+            returnOBJ.pop("precipIntensityError", None)
+            returnOBJ.pop("humidity", None)
+            returnOBJ.pop("uvIndex", None)
+            returnOBJ.pop("visibility", None)
+            returnOBJ.pop("ozone", None)
 
     if exMinutely != 1:
         returnOBJ["minutely"] = dict()
