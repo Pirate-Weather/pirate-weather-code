@@ -1494,7 +1494,7 @@ def calculate_day_text(
     # 3. By 'start_idx' (earliest start comes first)
     sorted_summaries_candidates = sorted(
         candidate_summaries_for_final_assembly,
-        key=lambda x: (not x["all_day"], x["priority"], x["start_idx"]),
+        key=lambda x: (not x["all_day"], x["start_idx"], x["priority"]),
     )
 
     # Select the top 1 or 2 summaries
