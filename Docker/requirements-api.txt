@@ -3,9 +3,9 @@ timezonefinder==6.5.9
 pytz==2025.2
 zarr[remote]==3.0.8
 ujson==5.10.0
-fastapi[standard]==0.115.12
+fastapi[standard]==0.115.13
 fastapi-utils==0.8.0
-scipy==1.15.3
+scipy==1.16.0
 orjson==3.10.18
 psutil==5.9.0
 typing-inspect==0.9.0
