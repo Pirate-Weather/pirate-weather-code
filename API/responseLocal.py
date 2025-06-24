@@ -2829,22 +2829,15 @@ async def PW_Forecast(
     if "nbm_fire" in sourceList:
         InterPhour[:, 24] = np.clip(NBM_Fire_Merged[:, 1], 0, 100)
 
-    # Apparent Temperature, Radiative temperature formula
-    # https: // github.com / breezy - weather / breezy - weather / discussions / 1085
-    # AT = Ta + 0.33 × rh / 100 × 6.105 × exp(17.27 × Ta / (237.7 + Ta)) − 0.70 × ws − 4.00
-    e = (
-        InterPhour[:, 8]
-        * 6.105
-        * np.exp(
-            17.27 * (InterPhour[:, 5] - 273.15) / (237.7 + (InterPhour[:, 5] - 273.15))
-        )
+    # Convert wind speed from its display unit to m/s for the apparent temperature
+    windSpeedMps = InterPhour[:, 10] / windUnit
+
+    # Calculate the apparent temperature
+    InterPhour[:, 6] = calculate_apparent_temperature(
+        InterPhour[:, 5],  # Air temperature in Kelvin
+        InterPhour[:, 8],  # Relative humidity (0.0 to 1.0)
+        windSpeedMps,  # Wind speed in meters per second
     )
-    InterPhour[:, 6] = (
-        (InterPhour[:, 5] - 273.15)
-        + 0.33 * e
-        - 0.70 * (InterPhour[:, 10] / windUnit)
-        - 4.00
-    ) + 273.15
 
     ### Feels Like Temperature
     AppTemperatureHour = np.full((len(hour_array_grib), 2), np.nan)
@@ -3763,36 +3756,16 @@ async def PW_Forecast(
     else:
         InterPcurrent[18] = -999
 
-    # Apparent Temperature, Radiative temperature formula
-    # https: // github.com / breezy - weather / breezy - weather / discussions / 1085
-    # AT = Ta + 0.33 × (rh / 100 × 6.105 × exp(17.27 × Ta / (237.7 + Ta))) − 0.70 × ws − 4.00
+    # Convert wind speed from its display unit to m/s for the apparent temperature function
+    currentWindSpeedMps = InterPcurrent[9] / windUnit
 
-    eCurrent = (
-        InterPcurrent[7]
-        * 6.105
-        * np.exp(
-            17.27 * (InterPcurrent[4] - 273.15) / (237.7 + (InterPcurrent[4] - 273.15))
-        )
+    # Calculate the apparent temperature
+    InterPcurrent[5] = calculate_apparent_temperature(
+        InterPcurrent[4],  # Air temperature in Kelvin
+        InterPcurrent[7],  # Relative humidity (0.0 to 1.0)
+        currentWindSpeedMps,  # Wind speed in meters per second
     )
 
-    InterPcurrent[5] = np.clip(
-        (
-            (
-                (InterPcurrent[4] - 273.15)
-                + 0.33 * eCurrent
-                - 0.70 * (InterPcurrent[9] / windUnit)
-                - 4.00
-            )
-            + 273.15
-        ),
-        -183,
-        333,
-    )
-
-    # Where Ta is the ambient temperature in °C
-    # e is the water vapor pressure in hPa
-    # ws is the wind speed in m/s
-    # Q is the solar radiation per unit area of body surface in w/m²
     if "nbm" in sourceList:
         InterPcurrent[20] = (
             NBM_Merged[currentIDX_hrrrh - 1, 3] * interpFac1
@@ -4320,3 +4293,36 @@ def dataSync() -> None:
             update_zarr_store(False)
 
     logger.info("Sync End!")
+
+
+def calculate_apparent_temperature(airTemp, humidity, wind):
+    """
+    Calculates the apparent temperature temperature based on air temperature, wind speed and humidity
+    Formula from: https://github.com/breezy-weather/breezy-weather/discussions/1085
+    AT = Ta + 0.33 * rh / 100 * 6.105 * exp(17.27 * Ta / (237.7 + Ta)) - 0.70 * ws - 4.00
+
+    Parameters:
+    - airTemperature (float): Air temperature
+    - humidity (float): Relative humidity
+    - windSpeed (float): Wind speed in meters per second
+
+    Returns:
+    - float: Apparent temperature
+    """
+
+    # Convert air_temp from Kelvin to Celsius for the formula parts that use Celsius
+    airTempC = airTemp - 273.15
+
+    # Calculate water vapor pressure 'e'
+    # Ensure humidity is not 0 for calculation, replace with a small non-zero value if needed
+    # The original equation does not guard for zero humidity. If relative_humidity_0_1 is 0, e will be 0.
+    e = humidity * 6.105 * np.exp(17.27 * airTempC / (237.7 + airTempC))
+
+    # Calculate apparent temperature in Celsius
+    apparentTempC = airTempC + 0.33 * e - 0.70 * airTempC - 4.00
+
+    # Convert back to Kelvin
+    apparentTempK = apparentTempC + 273.15
+
+    # Clip between -90 and 60
+    return np.clip(apparentTempK, -183, 333)
