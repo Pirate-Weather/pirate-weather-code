@@ -44,7 +44,6 @@ pw_api_key = os.environ.get("PW_API", "")
 save_type = os.getenv("save_type", default="S3")
 s3_bucket = os.getenv("s3_bucket", default="piratezarr2")
 useETOPO = os.getenv("useETOPO", default=True)
-print(os.environ.get("TIMING", False))
 TIMING = os.environ.get("TIMING", False)
 
 force_now = os.getenv("force_now", default=False)
@@ -394,16 +393,21 @@ if STAGE == "TESTING":
 
         f = s3.open("s3://ForecastTar_v2/NWS_Alerts.zarr.zip")
         store = S3ZipStore(f)
+    elif save_type == "S3Zarr":
+        store = zarr.storage.FsspecStore(s3, path=s3_bucket + '/NWS_Alerts.zarr', read_only=True)
+
     else:
         f = s3_bucket + "NWS_Alerts.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
 
     NWS_Alerts_Zarr = zarr.open(store, mode="r")
-    print("Alerts Read")
 
     if save_type == "S3":
         f = s3.open("s3://ForecastTar_v2/SubH.zarr.zip")
         store = S3ZipStore(f)
+    elif save_type == "S3Zarr":
+        store = zarr.storage.FsspecStore(s3, path=s3_bucket + '/SubH.zarr', read_only=True)
+
     else:
         f = s3_bucket + "SubH_v2.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
@@ -414,6 +418,8 @@ if STAGE == "TESTING":
     if save_type == "S3":
         f = s3.open("s3://ForecastTar_v2/HRRR_6H.zarr.zip")
         store = S3ZipStore(f)
+    elif save_type == "S3Zarr":
+        store = zarr.storage.FsspecStore(s3, path=s3_bucket + '/HRRR_6H.zarr', read_only=True)
     else:
         f = s3_bucket + "HRRR_6H.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
@@ -424,6 +430,8 @@ if STAGE == "TESTING":
     if save_type == "S3":
         f = s3.open("s3://ForecastTar_v2/GFS.zarr.zip")
         store = S3ZipStore(f)
+    elif save_type == "S3Zarr":
+        store = zarr.storage.FsspecStore(s3, path=s3_bucket + '/GFS.zarr', read_only=True)
     else:
         f = s3_bucket + "GFS.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
@@ -434,6 +442,8 @@ if STAGE == "TESTING":
     if save_type == "S3":
         f = s3.open("s3://ForecastTar_v2/GEFS.zarr.zip")
         store = S3ZipStore(f)
+    elif save_type == "S3Zarr":
+        store = zarr.storage.FsspecStore(s3, path=s3_bucket + '/GEFS.zarr', read_only=True)
     else:
         f = s3_bucket + "GEFS.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
@@ -444,6 +454,8 @@ if STAGE == "TESTING":
     if save_type == "S3":
         f = s3.open("s3://ForecastTar_v2/NBM.zarr.zip")
         store = S3ZipStore(f)
+    elif save_type == "S3Zarr":
+        store = zarr.storage.FsspecStore(s3, path=s3_bucket + '/NBM.zarr', read_only=True)
     else:
         f = s3_bucket + "NBM.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
@@ -454,6 +466,8 @@ if STAGE == "TESTING":
     if save_type == "S3":
         f = s3.open("s3://ForecastTar_v2/NBM_Fire.zarr.zip")
         store = S3ZipStore(f)
+    elif save_type == "S3Zarr":
+        store = zarr.storage.FsspecStore(s3, path=s3_bucket + '/NBM_Fire.zarr', read_only=True)
     else:
         f = s3_bucket + "NBM_Fire.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
@@ -464,6 +478,8 @@ if STAGE == "TESTING":
     if save_type == "S3":
         f = s3.open("s3://ForecastTar_v2/HRRR.zarr.zip")
         store = S3ZipStore(f)
+    elif save_type == "S3Zarr":
+        store = zarr.storage.FsspecStore(s3, path=s3_bucket + '/HRRR.zarr', read_only=True)
     else:
         f = s3_bucket + "HRRR.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
@@ -471,10 +487,12 @@ if STAGE == "TESTING":
     HRRR_Zarr = zarr.open(store, mode="r")
     print("HRRR Read")
 
-    if useETOPO:
+    if useETOPO == True:
         if save_type == "S3":
             f = s3.open("s3://ForecastTar_v2/ETOPO_DA_C.zarr.zip")
             store = S3ZipStore(f)
+        elif save_type == "S3Zarr":
+            store = zarr.storage.FsspecStore(s3, path=s3_bucket + 'ETOPO_DA_C.zarr', read_only=True)
         else:
             f = s3_bucket + "ETOPO_DA_C.zarr.zip"
             store = zarr.storage.ZipStore(f, mode="r")
@@ -826,7 +844,7 @@ async def PW_Forecast(
         raise HTTPException(status_code=400, detail="Invalid Latitude")
 
     if len(locationReq) == 2:
-        if STAGE == "TIMEMACHINE":
+        if ((STAGE == "TIMEMACHINE") or (STAGE == "TESTING")):
             raise HTTPException(status_code=400, detail="Missing Time Specification")
 
         else:
@@ -1177,20 +1195,32 @@ async def PW_Forecast(
                     end=baseDayUTC + datetime.timedelta(days=1),
                     freq="1h",
                 ).to_list()
-                zarrList = [
-                    "s3://"
-                    + s3_bucket
-                    + "/HRRR/HRRR_Hist"
-                    + t.strftime("%Y%m%dT%H0000Z")
-                    + ".zarr/"
-                    for t in date_range
-                ]
+                if utcTime<datetime.datetime(2025, 6, 10):
+                    zarrList = [
+                        "s3://"
+                        + s3_bucket
+                        + "/HRRR/HRRR_Hist"
+                        + t.strftime("%Y%m%dT%H0000Z")
+                        + ".zarr/"
+                        for t in date_range
+                    ]
+                    consolidateZarr = True
+                else:
+                    zarrList = [
+                        "s3://"
+                        + s3_bucket
+                        + "/Hist_v2/HRRR/HRRR_Hist_v2"
+                        + t.strftime("%Y%m%dT%H0000Z")
+                        + ".zarr/"
+                        for t in date_range
+                    ]
+                    consolidateZarr=False
 
                 now = time.time()
                 with xr.open_mfdataset(
                     zarrList,
                     engine="zarr",
-                    consolidated=True,
+                    consolidated=consolidateZarr,
                     decode_cf=False,
                     parallel=True,
                     storage_options={
@@ -1320,20 +1350,33 @@ async def PW_Forecast(
                     end=baseDayUTC + datetime.timedelta(days=1),
                     freq="1h",
                 ).to_list()
-                zarrList = [
-                    "s3://"
-                    + s3_bucket
-                    + "/NBM/NBM_Hist"
-                    + t.strftime("%Y%m%dT%H0000Z")
-                    + ".zarr/"
-                    for t in date_range
-                ]
 
+                if utcTime<datetime.datetime(2025, 6, 10):
+                    zarrList = [
+                        "s3://"
+                        + s3_bucket
+                        + "/NBM/NBM_Hist"
+                        + t.strftime("%Y%m%dT%H0000Z")
+                        + ".zarr/"
+                        for t in date_range
+                    ]
+                    consolidateZarr = True
+                else:
+                    zarrList = [
+                        "s3://"
+                        + s3_bucket
+                        + "/Hist_v2/NBM/NBM_Hist"
+                        + t.strftime("%Y%m%dT%H0000Z")
+                        + ".zarr/"
+                        for t in date_range
+                        ]
+                    consolidateZarr = False
+                    
                 now = time.time()
                 with xr.open_mfdataset(
                     zarrList,
                     engine="zarr",
-                    consolidated=True,
+                    consolidated=consolidateZarr,
                     decode_cf=False,
                     parallel=True,
                     storage_options={
@@ -1430,18 +1473,33 @@ async def PW_Forecast(
             start=rounded_time, end=rounded_time + datetime.timedelta(days=1), freq="6h"
         ).to_list()
 
-        zarrList = [
-            "s3://"
-            + s3_bucket
-            + "/GFS/GFS_Hist"
-            + t.strftime("%Y%m%dT%H0000Z")
-            + ".zarr/"
-            for t in date_range
-        ]
+
+        # Select either <v2.7 or >=v2.7 bucket
+        if utcTime<datetime.datetime(2025, 6, 10):
+            zarrList = [
+                "s3://"
+                + s3_bucket
+                + "/GFS/GFS_Hist"
+                + t.strftime("%Y%m%dT%H0000Z")
+                + ".zarr/"
+                for t in date_range
+            ]
+            consolidateZarr=True
+        else:
+            zarrList = [
+                "s3://"
+                + s3_bucket
+                + "/Hist_v2/GFS/GFS_Hist_v2"
+                + t.strftime("%Y%m%dT%H0000Z")
+                + ".zarr/"
+                for t in date_range
+            ]
+            consolidateZarr=False
+
         with xr.open_mfdataset(
             zarrList,
             engine="zarr",
-            consolidated=True,
+            consolidated=consolidateZarr,
             decode_cf=False,
             parallel=True,
             storage_options={"key": aws_access_key_id, "secret": aws_secret_access_key},
@@ -1548,19 +1606,31 @@ async def PW_Forecast(
                 end=rounded_time + datetime.timedelta(days=1),
                 freq="6h",
             ).to_list()
-            zarrList = [
+
+            if utcTime<datetime.datetime(2025, 6, 10):
+                zarrList = [
                 "s3://"
                 + s3_bucket
                 + "/GEFS/GEFS_HistProb_"
                 + t.strftime("%Y%m%dT%H0000Z")
                 + ".zarr/"
                 for t in date_range
-            ]
-
+                ]
+                consolidateZarr = True
+            else:
+                zarrList = [
+                    "s3://"
+                    + s3_bucket
+                    + "/Hist_v2/GEFS/GEFS_HistProb_"
+                    + t.strftime("%Y%m%dT%H0000Z")
+                    + ".zarr/"
+                    for t in date_range
+                ]
+                consolidateZarr = False
             with xr.open_mfdataset(
                 zarrList,
                 engine="zarr",
-                consolidated=True,
+                consolidated=consolidateZarr,
                 decode_cf=False,
                 parallel=True,
                 storage_options={
@@ -1821,6 +1891,7 @@ async def PW_Forecast(
     if timeMachine:
         daily_days = 1
         daily_day_hours = 1
+        numHours = 24
     elif extendFlag == 1:
         daily_days = 8
         daily_day_hours = 5
