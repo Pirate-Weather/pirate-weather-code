@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 from collections import Counter
+import traceback
 from typing import Union
 
 import boto3
@@ -555,8 +556,9 @@ class WeatherParallel(object):
                 return dataOut
 
             except Exception:
+                print("### " + model + " Failure!")
                 errCount = errCount + 1
-                print(Exception)
+                print(traceback.print_exc())
 
         print("### " + model + " Failure!")
         dataOut = False
@@ -844,7 +846,7 @@ async def PW_Forecast(
         raise HTTPException(status_code=400, detail="Invalid Latitude")
 
     if len(locationReq) == 2:
-        if ((STAGE == "TIMEMACHINE") or (STAGE == "TESTING")):
+        if (STAGE == "TIMEMACHINE"):
             raise HTTPException(status_code=400, detail="Missing Time Specification")
 
         else:
@@ -1199,7 +1201,7 @@ async def PW_Forecast(
                     zarrList = [
                         "s3://"
                         + s3_bucket
-                        + "/HRRR/HRRR_Hist"
+                        + "/HRRRH/HRRRH_Hist"
                         + t.strftime("%Y%m%dT%H0000Z")
                         + ".zarr/"
                         for t in date_range
@@ -1833,6 +1835,9 @@ async def PW_Forecast(
             sourceTimes["gefs"] = rounder(
                 datetime.datetime.utcfromtimestamp(gefsRunTime.astype(int))
             ).strftime("%Y-%m-%d %HZ")
+    elif (isinstance(dataOut_gefs, np.ndarray)) & (timeMachine):
+        sourceList.append("gefs")
+
 
     # Timing Check
     if TIMING:
@@ -1980,6 +1985,8 @@ async def PW_Forecast(
                     NBM_Fire_StartIDX : (numHours + NBM_Fire_StartIDX), :
                 ]
         except Exception:
+            print("HRRR or NBM data not available, falling back to GFS")
+            print(traceback.print_exc())
             sourceTimes.pop("hrrr_18-48")
             sourceTimes.pop("nbm_fire")
             sourceTimes.pop("nbm")
@@ -3215,9 +3222,9 @@ async def PW_Forecast(
             )
             hourItem["summary"] = translation.translate(["title", hourText])
             hourItem["icon"] = hourIcon
-        except Exception as e:
-            print("TEXT GEN ERROR:")
-            print(e)
+        except Exception:
+            print("HOURLY TEXT GEN ERROR:")
+            print(traceback.print_exc())
 
         hourList.append(hourItem)
 
@@ -3591,10 +3598,9 @@ async def PW_Forecast(
                 # Translate the text
                 dayObject["summary"] = translation.translate(["sentence", dayText])
                 dayObject["icon"] = dayIcon
-        except Exception as e:
-            print("TEXT GEN ERROR:")
-            print(dayText)
-            print(e)
+        except Exception:
+            print("DAILY TEXT GEN ERROR:")
+            print(traceback.print_exc())
 
         dayList.append(dayObject)
 
@@ -3680,8 +3686,9 @@ async def PW_Forecast(
         else:
             alertList = []
 
-    except Exception as error:
-        print("An Alert error occurred:", error)
+    except Exception:
+        print("An Alert error occurred:")
+        print(traceback.print_exc())
 
     # Timing Check
     if TIMING:
@@ -4178,9 +4185,9 @@ async def PW_Forecast(
                 ["title", currentText]
             )
             returnOBJ["currently"]["icon"] = currentIcon
-        except Exception as e:
-            print("TEXT GEN ERROR:")
-            print(e)
+        except Exception:
+            print("CURRENTLY TEXT GEN ERROR:")
+            print(traceback.print_exc())
 
     if exMinutely != 1:
         returnOBJ["minutely"] = dict()
@@ -4192,9 +4199,9 @@ async def PW_Forecast(
                 ["sentence", minuteText]
             )
             returnOBJ["minutely"]["icon"] = minuteIcon
-        except Exception as e:
-            print("TEXT GEN ERROR:")
-            print(e)
+        except Exception:
+            print("MINUTELY TEXT GEN ERROR:")
+            print(traceback.print_exc())
             returnOBJ["minutely"]["summary"] = pTypesText[
                 int(Counter(maxPchance).most_common(1)[0][0])
             ]
@@ -4224,9 +4231,9 @@ async def PW_Forecast(
                     ["sentence", hourText]
                 )
                 returnOBJ["hourly"]["icon"] = hourIcon
-            except Exception as e:
+            except Exception:
                 print("TEXT GEN ERROR:")
-                print(e)
+                print(traceback.print_exc())
                 returnOBJ["hourly"]["summary"] = max(
                     set(hourTextList), key=hourTextList.count
                 )
@@ -4254,9 +4261,9 @@ async def PW_Forecast(
                     ["sentence", weekText]
                 )
                 returnOBJ["daily"]["icon"] = weekIcon
-            except Exception as e:
-                print("TEXT GEN ERROR:")
-                print(e)
+            except Exception:
+                print("DAILY SUMMARY TEXT GEN ERROR:")
+                print(traceback.print_exc())
                 returnOBJ["daily"]["summary"] = max(
                     set(dayTextList), key=dayTextList.count
                 )

@@ -762,6 +762,24 @@ def calculate_day_text(
 
     # Now iterate through the actual hourly forecast data and aggregate into the pre-defined standard periods
     for idx, hour in enumerate(hours):
+
+        # If no humidity data, set to 0 to avoid an error(timemachine)
+        if "humidity" not in hour:
+            hour["humidity"] = 0.0
+
+        # If no visibility data, set to 10000 to avoid an error (timemachine)
+        if "visibility" not in hour:
+            hour["visibility"] = 10000
+
+        # If no precipIntensityError data, set to 0 to avoid an error (timemachine)
+        if "precipIntensityError" not in hour:
+            hour["precipIntensityError"] = 0
+
+        # If no precipProbability data, set to 1 to avoid an error (timemachine)
+        if "precipProbability" not in hour:
+            hour["precipProbability"] = 1
+
+
         hour_date = datetime.datetime.fromtimestamp(hour["time"], zone)
         hour_in_loop = int(hour_date.strftime("%H"))
 
