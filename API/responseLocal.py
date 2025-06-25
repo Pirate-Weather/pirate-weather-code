@@ -135,17 +135,6 @@ def download_if_newer(
         with open(local_lmdb_path + ".lock", "w"):
             pass
 
-        # local_lmdb_path_tmp = local_lmdb_path + "_TMP"
-
-        # if initialDownload:
-        #     command = f"unzip -q -o {local_file_path} -d {local_lmdb_path_tmp}"
-        # else:
-        #     command = f"nice -n 20 ionice -c 3 unzip -q -o {local_file_path} -d {local_lmdb_path_tmp}"
-
-        # process = subprocess.Popen(command, shell=True)
-        # subprocess.run(["ionice", "-c", "3", "unzip", "-q", "-o", local_file_path, "-d", local_lmdb_path_tmp], shell=True, check=True)
-        # subprocess.run(command, shell=True)
-
         # Rename
         shutil.move(local_file_path, local_lmdb_path + "_" + str(s3_last_modified))
 
