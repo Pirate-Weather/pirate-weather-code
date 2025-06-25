@@ -240,9 +240,7 @@ matchstring_2m = r":((DPT|TMP|APTMP|RH):2 m above ground:.*fcst:nan)"
 matchstring_su = r":((PTYPE):surface:.*)"
 matchstring_10m = r"(:(GUST|WIND|WDIR):10 m above ground:.*fcst:nan)"
 matchstring_pr = r"(:APCP:surface:(0-1|1-2|2-3|3-4|4-5|5-6|6-7|7-8|8-9|9-10|\d*0-\d{1,2}1|\d*1-\d{1,2}2|\d*2-\d{1,2}3|\d*3-\d{1,2}4|\d*4-\d{1,2}5|\d*5-\d{1,2}6|\d*6-\d{1,2}7|\d*7-\d{1,2}8|\d*8-\d{1,2}9|\d*9-\d{1,2}0).*fcst:nan)"
-matchstring_re = (
-    r":((TCDC|VIS|DSWRF|CAPE):surface:.*fcst:nan)"  # This gets the correct surface param
-)
+matchstring_re = r":((TCDC|VIS|DSWRF|CAPE):surface:.*fcst:nan)"  # This gets the correct surface param
 
 matchstring_pw = r":(PWTHER:)"  # This gets the correct surface param
 
