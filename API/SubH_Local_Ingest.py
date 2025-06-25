@@ -23,7 +23,9 @@ from herbie.fast import Herbie_latest
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
+wgrib2_path = os.getenv(
+    "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
+)
 
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/home/ubuntu/Weather/SubH"
@@ -124,6 +126,7 @@ zarrVars = (
     "VIS_surface",
     "SPFH_2maboveground",
     "DSWRF_surface",
+    "CAPE_surface",
 )
 
 
@@ -137,7 +140,7 @@ zarrVars = (
 # Define the subset of variables to download as a list of strings
 matchstring_2m = ":((DPT|TMP|SPFH):2 m above ground:)"
 matchstring_su = (
-    ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST|DSWRF):surface:.*min fcst)"
+    ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST|DSWRF|CAPE):surface:.*min fcst)"
 )
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*min fcst)"
 matchstring_sl = "(:(REFC):)"

@@ -763,6 +763,22 @@ def calculate_day_text(
 
     # Now iterate through the actual hourly forecast data and aggregate into the pre-defined standard periods
     for idx, hour in enumerate(hours):
+        # If no humidity data, set to 0 to avoid an error(timemachine)
+        if "humidity" not in hour:
+            hour["humidity"] = 0.0
+
+        # If no visibility data, set to 10000 to avoid an error (timemachine)
+        if "visibility" not in hour:
+            hour["visibility"] = 10000
+
+        # If no precipIntensityError data, set to 0 to avoid an error (timemachine)
+        if "precipIntensityError" not in hour:
+            hour["precipIntensityError"] = 0
+
+        # If no precipProbability data, set to 1 to avoid an error (timemachine)
+        if "precipProbability" not in hour:
+            hour["precipProbability"] = 1
+
         hour_date = datetime.datetime.fromtimestamp(hour["time"], zone)
         hour_in_loop = int(hour_date.strftime("%H"))
 
@@ -1497,7 +1513,7 @@ def calculate_day_text(
     # 3. By 'start_idx' (earliest start comes first)
     sorted_summaries_candidates = sorted(
         candidate_summaries_for_final_assembly,
-        key=lambda x: (not x["all_day"], x["priority"], x["start_idx"]),
+        key=lambda x: (not x["all_day"], x["start_idx"], x["priority"]),
     )
 
     # Select the top 1 or 2 summaries
