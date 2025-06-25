@@ -1013,7 +1013,6 @@ def get_nearest_station_forecast(
 
 # --- Example Usage ---
 if __name__ == "__main__":
-
     # --- Configuration ---
     # Set to True to download and process the actual DWD file
     # Set to False to generate and use a dummy KML file for testing
