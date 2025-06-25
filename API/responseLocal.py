@@ -3720,6 +3720,8 @@ async def PW_Forecast(
             / (GFS_Merged[currentIDX_hrrrh, 0] - GFS_Merged[currentIDX_hrrrh - 1, 0])
         )
 
+    currentIDX_hrrrh_A = np.max((currentIDX_hrrrh -1,0))
+
     InterPcurrent = np.zeros(shape=21)  # Time, Intensity,Probability
     InterPcurrent[0] = int(minute_array_grib[0])
 
@@ -3733,12 +3735,12 @@ async def PW_Forecast(
         InterPcurrent[4] = hrrrSubHInterpolation[0, 3]
     elif "nbm" in sourceList:
         InterPcurrent[4] = (
-            NBM_Merged[currentIDX_hrrrh - 1, 2] * interpFac1
+            NBM_Merged[currentIDX_hrrrh_A, 2] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, 2] * interpFac2
         )
     else:
         InterPcurrent[4] = (
-            GFS_Merged[currentIDX_hrrrh - 1, 4] * interpFac1
+            GFS_Merged[currentIDX_hrrrh_A, 4] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, 4] * interpFac2
         )
 
@@ -3750,12 +3752,12 @@ async def PW_Forecast(
         InterPcurrent[6] = hrrrSubHInterpolation[0, 4]
     elif "nbm" in sourceList:
         InterPcurrent[6] = (
-            NBM_Merged[currentIDX_hrrrh - 1, 4] * interpFac1
+            NBM_Merged[currentIDX_hrrrh_A, 4] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, 4] * interpFac2
         )
     else:
         InterPcurrent[6] = (
-            GFS_Merged[currentIDX_hrrrh - 1, 5] * interpFac1
+            GFS_Merged[currentIDX_hrrrh_A, 5] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, 5] * interpFac2
         )
 
@@ -3765,17 +3767,17 @@ async def PW_Forecast(
     # humidity, NBM then HRRR, then GFS
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[7] = (
-            HRRR_Merged[currentIDX_hrrrh - 1, 6] * interpFac1
+            HRRR_Merged[currentIDX_hrrrh_A, 6] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, 6] * interpFac2
         ) * humidUnit
     elif "nbm" in sourceList:
         InterPcurrent[7] = (
-            NBM_Merged[currentIDX_hrrrh - 1, 5] * interpFac1
+            NBM_Merged[currentIDX_hrrrh_A, 5] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, 5] * interpFac2
         ) * humidUnit
     else:
         InterPcurrent[7] = (
-            GFS_Merged[currentIDX_hrrrh - 1, 6] * interpFac1
+            GFS_Merged[currentIDX_hrrrh_A, 6] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, 6] * interpFac2
         ) * humidUnit
 
@@ -3785,12 +3787,12 @@ async def PW_Forecast(
     # Pressure from HRRR, then GFS
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[8] = (
-            HRRR_Merged[currentIDX_hrrrh - 1, 3] * interpFac1
+            HRRR_Merged[currentIDX_hrrrh_A, 3] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, 3] * interpFac2
         )
     else:
         InterPcurrent[8] = (
-            GFS_Merged[currentIDX_hrrrh - 1, 3] * interpFac1
+            GFS_Merged[currentIDX_hrrrh_A, 3] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, 3] * interpFac2
         )
 
@@ -3804,18 +3806,18 @@ async def PW_Forecast(
         )
     elif "nbm" in sourceList:
         InterPcurrent[9] = (
-            NBM_Merged[currentIDX_hrrrh - 1, 6] * interpFac1
+            NBM_Merged[currentIDX_hrrrh_A, 6] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, 6] * interpFac2
         )
     else:
         InterPcurrent[9] = math.sqrt(
             (
-                GFS_Merged[currentIDX_hrrrh - 1, 8] * interpFac1
+                GFS_Merged[currentIDX_hrrrh_A, 8] * interpFac1
                 + GFS_Merged[currentIDX_hrrrh, 8] * interpFac2
             )
             ** 2
             + (
-                GFS_Merged[currentIDX_hrrrh - 1, 9] * interpFac1
+                GFS_Merged[currentIDX_hrrrh_A, 9] * interpFac1
                 + GFS_Merged[currentIDX_hrrrh, 9] * interpFac2
             )
             ** 2
@@ -3827,12 +3829,12 @@ async def PW_Forecast(
         InterPcurrent[10] = hrrrSubHInterpolation[0, 1]
     elif "nbm" in sourceList:
         InterPcurrent[10] = (
-            NBM_Merged[currentIDX_hrrrh - 1, 1] * interpFac1
+            NBM_Merged[currentIDX_hrrrh_A, 1] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, 1] * interpFac2
         )
     else:
         InterPcurrent[10] = (
-            GFS_Merged[currentIDX_hrrrh - 1, 2] * interpFac1
+            GFS_Merged[currentIDX_hrrrh_A, 2] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, 2] * interpFac2
         )
 
@@ -3849,7 +3851,7 @@ async def PW_Forecast(
             )
         )
     elif "nbm" in sourceList:
-        InterPcurrent[11] = NBM_Merged[currentIDX_hrrrh - 1, 7]
+        InterPcurrent[11] = NBM_Merged[currentIDX_hrrrh, 7]
     else:
         InterPcurrent[11] = np.rad2deg(
             np.mod(
@@ -3864,17 +3866,17 @@ async def PW_Forecast(
     # Cloud, NBM then HRRR, then GFS
     if "nbm" in sourceList:
         InterPcurrent[12] = (
-            NBM_Merged[currentIDX_hrrrh - 1, 9] * interpFac1
+            NBM_Merged[currentIDX_hrrrh_A, 9] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, 9] * interpFac2
         ) * 0.01
     elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[12] = (
-            HRRR_Merged[currentIDX_hrrrh - 1, 15] * interpFac1
+            HRRR_Merged[currentIDX_hrrrh_A, 15] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, 15] * interpFac2
         ) * 0.01
     else:
         InterPcurrent[12] = (
-            GFS_Merged[currentIDX_hrrrh - 1, 17] * interpFac1
+            GFS_Merged[currentIDX_hrrrh_A, 17] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, 17] * interpFac2
         ) * 0.01
 
@@ -3884,7 +3886,7 @@ async def PW_Forecast(
     # UV Index from subH, then NBM, the GFS
     InterPcurrent[13] = np.clip(
         (
-            GFS_Merged[currentIDX_hrrrh - 1, 18] * interpFac1
+            GFS_Merged[currentIDX_hrrrh_A, 18] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, 18] * interpFac2
         )
         * 18.9
@@ -3894,17 +3896,17 @@ async def PW_Forecast(
     # VIS, NBM then HRRR, then GFS
     if "nbm" in sourceList:
         InterPcurrent[14] = (
-            NBM_Merged[currentIDX_hrrrh - 1, 10] * interpFac1
+            NBM_Merged[currentIDX_hrrrh_A, 10] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, 10] * interpFac2
         )
     elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[14] = (
-            HRRR_Merged[currentIDX_hrrrh - 1, 1] * interpFac1
+            HRRR_Merged[currentIDX_hrrrh_A, 1] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, 1] * interpFac2
         )
     else:
         InterPcurrent[14] = (
-            GFS_Merged[currentIDX_hrrrh - 1, 1] * interpFac1
+            GFS_Merged[currentIDX_hrrrh_A, 1] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, 1] * interpFac2
         )
 
@@ -3912,7 +3914,7 @@ async def PW_Forecast(
 
     # Ozone from GFS
     InterPcurrent[15] = np.clip(
-        GFS_Merged[currentIDX_hrrrh - 1, 16] * interpFac1
+        GFS_Merged[currentIDX_hrrrh_A, 16] * interpFac1
         + GFS_Merged[currentIDX_hrrrh, 16] * interpFac2,
         0,
         500,
@@ -3921,7 +3923,7 @@ async def PW_Forecast(
     # Storm Distance from GFS
     InterPcurrent[16] = np.maximum(
         (
-            GFS_Merged[currentIDX_hrrrh - 1, 19] * interpFac1
+            GFS_Merged[currentIDX_hrrrh_A, 19] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, 19] * interpFac2
         )
         * visUnits,
@@ -3936,7 +3938,7 @@ async def PW_Forecast(
         InterPcurrent[18] = np.clip(
             (
                 (
-                    HRRR_Merged[currentIDX_hrrrh - 1, 16] * interpFac1
+                    HRRR_Merged[currentIDX_hrrrh_A, 16] * interpFac1
                     + HRRR_Merged[currentIDX_hrrrh, 16] * interpFac2
                 )
                 * 1e9
@@ -3979,12 +3981,12 @@ async def PW_Forecast(
     # Q is the solar radiation per unit area of body surface in w/m²
     if "nbm" in sourceList:
         InterPcurrent[20] = (
-            NBM_Merged[currentIDX_hrrrh - 1, 3] * interpFac1
+            NBM_Merged[currentIDX_hrrrh_A, 3] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, 3] * interpFac2
         )
     else:
         InterPcurrent[20] = (
-            GFS_Merged[currentIDX_hrrrh - 1, 7] * interpFac1
+            GFS_Merged[currentIDX_hrrrh_A, 7] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, 7] * interpFac2
         )
 
@@ -3995,7 +3997,7 @@ async def PW_Forecast(
     if "nbm_fire" in sourceList:
         InterPcurrent[19] = np.clip(
             (
-                NBM_Fire_Merged[currentIDX_hrrrh - 1, 1] * interpFac1
+                NBM_Fire_Merged[currentIDX_hrrrh_A, 1] * interpFac1
                 + NBM_Fire_Merged[currentIDX_hrrrh, 1] * interpFac2
             ),
             0,
