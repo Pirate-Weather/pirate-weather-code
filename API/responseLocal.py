@@ -488,7 +488,7 @@ if STAGE == "TESTING":
     HRRR_Zarr = zarr.open(store, mode="r")
     print("HRRR Read")
 
-    if useETOPO == True:
+    if useETOPO:
         if save_type == "S3":
             f = s3.open("s3://ForecastTar_v2/ETOPO_DA_C.zarr.zip")
             store = S3ZipStore(f)
