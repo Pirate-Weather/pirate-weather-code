@@ -3171,16 +3171,9 @@ async def PW_Forecast(
             )
             hourItem["summary"] = translation.translate(["title", hourText])
             hourItem["icon"] = hourIcon
-<<<<<<< update-day-hour-dict
-        except Exception as e:
-            print(hourText)
-            print("TEXT GEN ERROR:")
-            print(e)
-=======
         except Exception:
             print("HOURLY TEXT GEN ERROR:")
             print(traceback.print_exc())
->>>>>>> dev
 
         if version < 2:
             hourItem.pop("smoke", None)
