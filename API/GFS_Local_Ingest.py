@@ -151,6 +151,8 @@ zarrVars = (
     "Storm_Distance",
     "Storm_Direction",
     "REFC_entireatmosphere",
+    "DSWRF_surface",
+    "CAPE_surface",
 )
 
 hisPeriod = 36
@@ -162,12 +164,12 @@ hisPeriod = 36
 
 # Define the subset of variables to download as a list of strings
 matchstring_2m = ":((DPT|TMP|APTMP|RH):2 m above ground:)"
-matchstring_su = ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|PRES|VIS|GUST):surface:.*hour fcst)"
+matchstring_su = ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|PRES|VIS|GUST|CAPE):surface:.*hour fcst)"
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
 matchstring_oz = "(:TOZNE:)"
 matchstring_cl = "(:(TCDC|REFC):entire atmosphere:.*hour fcst)"
 matchstring_ap = "(:APCP:surface:0-[1-9]*)"
-matchstring_sl = "(:PRMSL:)"
+matchstring_sl = "(:(PRMSL|DSWRF):)"
 
 
 # Merge matchstrings for download
@@ -211,7 +213,7 @@ FH_forecastsub = FastHerbie(
 )
 
 # Download the subsets
-FH_forecastsub.download(matchStrings, verbose=False)
+FH_forecastsub.download(matchStrings, verbose=True)
 
 # Create list of downloaded grib files
 gribList = [
@@ -396,63 +398,65 @@ directions_chunked.to_zarr(
 
 # UV is an average from zero to 6, repeating throughout the time series.
 # Correct this to 1-hour average
+# Solar rad follows the same pattern, so we can use the same appraoch.
+accumVars = ["DUVB_surface", "DSWRF_surface"]
+for accumVar in accumVars:
+    # Read out hours 1-120, reshape to 6 hour steps
+    uvProc = (
+        xarray_forecast_merged[accumVar]
+        .isel(time=slice(0, 120))
+        .values.reshape(20, 6, 721, 1440, order="C")
+    )
 
-# Read out hours 1-120, reshape to 6 hour steps
-uvProc = (
-    xarray_forecast_merged["DUVB_surface"]
-    .isel(time=slice(0, 120))
-    .values.reshape(20, 6, 721, 1440, order="C")
-)
+    n = np.arange(1, 7)
+    n = n[np.newaxis, :, np.newaxis, np.newaxis]
 
-n = np.arange(1, 7)
-n = n[np.newaxis, :, np.newaxis, np.newaxis]
+    # Save first step to concatonate later
+    first_step = uvProc[:, 0, :, :]
+    first_step = first_step[:, np.newaxis, :, :]
 
-# Save first step to concatonate later
-first_step = uvProc[:, 0, :, :]
-first_step = first_step[:, np.newaxis, :, :]
+    # Create numpy array of processed UV
+    uvProcHour = np.concatenate(
+        (first_step, np.diff(uvProc, axis=1) * n[:, 1:, :, :] + uvProc[:, 0:5, :, :]),
+        axis=1,
+    )
 
-# Create numpy array of processed UV
-uvProcHour = np.concatenate(
-    (first_step, np.diff(uvProc, axis=1) * n[:, 1:, :, :] + uvProc[:, 0:5, :, :]),
-    axis=1,
-)
+    # Reshape back to 3D
+    uvProcHour3D = uvProcHour.reshape(120, 721, 1440, order="C")
 
-# Reshape back to 3D
-uvProcHour3D = uvProcHour.reshape(120, 721, 1440, order="C")
+    # Read out hours 123, reshape to 6 hour steps
+    uvProc = (
+        xarray_forecast_merged[accumVar]
+        .isel(time=slice(120, 160))
+        .values.reshape(20, 2, 721, 1440, order="C")
+    )
 
-# Read out hours 123, reshape to 6 hour steps
-uvProc = (
-    xarray_forecast_merged["DUVB_surface"]
-    .isel(time=slice(120, 160))
-    .values.reshape(20, 2, 721, 1440, order="C")
-)
+    n = np.arange(1, 3)
+    n = n[np.newaxis, :, np.newaxis, np.newaxis]
 
-n = np.arange(1, 3)
-n = n[np.newaxis, :, np.newaxis, np.newaxis]
+    # Save first step to concatonate later
+    first_step = uvProc[:, 0, :, :]
+    first_step = first_step[:, np.newaxis, :, :]
 
-# Save first step to concatonate later
-first_step = uvProc[:, 0, :, :]
-first_step = first_step[:, np.newaxis, :, :]
+    # Create numpy array of processed UV
+    uvProcHour = np.concatenate(
+        (first_step, np.diff(uvProc, axis=1) * n[:, 1:, :, :] + uvProc[:, 0:1, :, :]),
+        axis=1,
+    )
 
-# Create numpy array of processed UV
-uvProcHour = np.concatenate(
-    (first_step, np.diff(uvProc, axis=1) * n[:, 1:, :, :] + uvProc[:, 0:1, :, :]),
-    axis=1,
-)
-
-# Reshape back to 3D
-uvProcHour3DB = uvProcHour.reshape(40, 721, 1440, order="C")
+    # Reshape back to 3D
+    uvProcHour3DB = uvProcHour.reshape(40, 721, 1440, order="C")
 
 
-### Note- to get index, do this:
-#             // UVB to etyhemally UV factor 18.9 https://link.springer.com/article/10.1039/b312985c
-#             // 0.025 m2/W to get the uv index
-# ['DUVB_surface'] * 0.025 * 18.9
+    ### Note- to get index, do this:
+    #             // UVB to etyhemally UV factor 18.9 https://link.springer.com/article/10.1039/b312985c
+    #             // 0.025 m2/W to get the uv index
+    # ['DUVB_surface'] * 0.025 * 18.9
 
-# Combine and merge back into xarray dataset
-xarray_forecast_merged["DUVB_surface"] = xarray_forecast_merged["DUVB_surface"].copy(
-    data=np.concatenate((uvProcHour3D, uvProcHour3DB), axis=0)
-)
+    # Combine and merge back into xarray dataset
+    xarray_forecast_merged[accumVar] = xarray_forecast_merged[accumVar].copy(
+        data=np.concatenate((uvProcHour3D, uvProcHour3DB), axis=0)
+    )
 
 
 # %% Delete to free memory
