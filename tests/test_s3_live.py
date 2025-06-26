@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 PW_API = os.environ.get("PW_API")
 
+
 @pytest.mark.skipif(not PW_API, reason="PW_API environment variable not set")
 def test_live_s3_forecast():
     os.environ["STAGE"] = "TESTING"
@@ -28,4 +29,3 @@ def test_live_s3_forecast():
     data = response.json()
     assert data["latitude"] == pytest.approx(45.0, abs=0.5)
     assert data["longitude"] == pytest.approx(-75.0, abs=0.5)
-
