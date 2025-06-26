@@ -3796,8 +3796,10 @@ async def PW_Forecast(
         * 0.025
     )
 
-    # VIS, NBM then HRRR, then GFS
-    if "nbm" in sourceList:
+    # VIS, SubH, NBM then HRRR, then GFS
+    if "hrrrsubh" in sourceList:
+        InterPcurrent[14] = hrrrSubHInterpolation[0, 14]
+    elif "nbm" in sourceList:
         InterPcurrent[14] = (
             NBM_Merged[currentIDX_hrrrh_A, 10] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, 10] * interpFac2
