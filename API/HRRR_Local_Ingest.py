@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 import warnings
 
 import dask.array as da
@@ -320,25 +321,25 @@ for i in range(hisPeriod, -1, -1):
         )
 
         if s3.exists(s3_path):
-            # Check that all the data is there and that the data is the right shape
-            zarrCheckStore = zarr.storage.FsspecStore.from_url(
-                s3_path,
-                storage_options={
-                    "key": aws_access_key_id,
-                    "secret": aws_secret_access_key,
-                },
-            )
+            # Try to open and read data from the last variable of the zarr file to check if it has already been saved
+            try:
+                hisCheckStore = zarr.storage.FsspecStore.from_url(
+                    s3_path,
+                    storage_options={
+                        "key": aws_access_key_id,
+                        "secret": aws_secret_access_key,
+                    },
+                )
+                zarr.open(hisCheckStore)[zarrVars[-1]][-1,-1,-1]
+                continue  # If it exists, skip to the next iteration
+            except Exception:
+                print("### Historic Data Failure!")
+                print(traceback.print_exc())
 
-            zarrCheck = zarr.open(zarrCheckStore, "r")
+                # Delete the file if it exists
+                if s3.exists(s3_path):
+                    s3.rm(s3_path)
 
-            # # Try to open the zarr file to check if it has already been saved
-            if (len(zarrCheck) - 4) == len(
-                zarrVars
-            ):  # Subtract 4 for lat, lon, x, and y
-                if zarrCheck[zarrVars[-1]].shape[1] == 1059:
-                    if zarrCheck[zarrVars[-1]].shape[2] == 1799:
-                        # print('Data is there and the right shape')
-                        continue
 
     else:
         # Local Path Setup
