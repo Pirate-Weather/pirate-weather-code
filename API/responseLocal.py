@@ -1473,7 +1473,7 @@ async def PW_Forecast(
         now = time.time()
         # Create list of zarrs
         # Negative 1 since the first timestep of a model run is used
-        hours_to_subtract = (baseDayUTC.hour -1) % 6
+        hours_to_subtract = (baseDayUTC.hour - 1) % 6
         rounded_time = baseDayUTC - datetime.timedelta(
             hours=hours_to_subtract + 1,
             minutes=baseDayUTC.minute,
@@ -1482,7 +1482,9 @@ async def PW_Forecast(
         )
 
         date_range = pd.date_range(
-            start=rounded_time, end=rounded_time + datetime.timedelta(days=1, hours=6), freq="6h"
+            start=rounded_time,
+            end=rounded_time + datetime.timedelta(days=1, hours=6),
+            freq="6h",
         ).to_list()
 
         # Select either <v2.7 or >=v2.7 bucket
