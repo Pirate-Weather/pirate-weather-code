@@ -1470,19 +1470,19 @@ async def PW_Forecast(
         print(datetime.datetime.utcnow() - T_Start)
 
     if timeMachine:
-        print("GFS")
         now = time.time()
         # Create list of zarrs
-        hours_to_subtract = baseDayUTC.hour % 6
+        # Negative 1 since the first timestep of a model run is used
+        hours_to_subtract = (baseDayUTC.hour -1) % 6
         rounded_time = baseDayUTC - datetime.timedelta(
-            hours=hours_to_subtract,
+            hours=hours_to_subtract + 1,
             minutes=baseDayUTC.minute,
             seconds=baseDayUTC.second,
             microseconds=baseDayUTC.microsecond,
         )
 
         date_range = pd.date_range(
-            start=rounded_time, end=rounded_time + datetime.timedelta(days=1), freq="6h"
+            start=rounded_time, end=rounded_time + datetime.timedelta(days=1, hours=6), freq="6h"
         ).to_list()
 
         # Select either <v2.7 or >=v2.7 bucket
@@ -1574,6 +1574,7 @@ async def PW_Forecast(
             dataOut_gfs = np.zeros((len(xr_mf.time), len(GFSzarrVars)))
             # Add time
             dataOut_gfs[:, 0] = xr_mf.time.compute().data
+
             for vIDX, v in enumerate(GFSzarrVars[1:]):
                 dataOut_gfs[:, vIDX + 1] = xr_mf[v][:, y_p, x_p].compute().data
             now3 = time.time()
@@ -1604,9 +1605,10 @@ async def PW_Forecast(
         if timeMachine:
             now = time.time()
             # Create list of zarrs
-            hours_to_subtract = baseDayUTC.hour % 6
+            # Negative 3 since the first timestep (hour 3) of a model run is used
+            hours_to_subtract = (baseDayUTC.hour - 3) % 6
             rounded_time = baseDayUTC - datetime.timedelta(
-                hours=hours_to_subtract,
+                hours=hours_to_subtract + 3,
                 minutes=baseDayUTC.minute,
                 seconds=baseDayUTC.second,
                 microseconds=baseDayUTC.microsecond,
@@ -1614,7 +1616,7 @@ async def PW_Forecast(
 
             date_range = pd.date_range(
                 start=rounded_time,
-                end=rounded_time + datetime.timedelta(days=1),
+                end=rounded_time + datetime.timedelta(days=1, hours=6),
                 freq="6h",
             ).to_list()
 
@@ -2032,6 +2034,7 @@ async def PW_Forecast(
                 left=np.nan,
                 right=np.nan,
             )
+
         if "gefs" in sourceList:
             GEFS_Merged = np.zeros((len(hour_array_grib), dataOut_gefs.shape[1]))
             for i in range(0, len(dataOut_gefs[0, :])):
@@ -2673,6 +2676,7 @@ async def PW_Forecast(
         prcipIntensityHour[:, 2] = GEFS_Merged[:, 2]
     else:  # GFS Fallback
         prcipIntensityHour[:, 2] = GFS_Merged[:, 10] * 3600
+
     # Take first non-NaN value
     InterPhour[:, 2] = (
         np.choose(np.argmin(np.isnan(prcipIntensityHour), axis=1), prcipIntensityHour.T)
