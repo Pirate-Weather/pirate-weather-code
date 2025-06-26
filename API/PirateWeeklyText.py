@@ -5,7 +5,12 @@ from dateutil import tz
 from PirateTextHelper import Most_Common
 from itertools import groupby
 from operator import itemgetter
-from PirateTextHelper import calculate_precip_text, calculate_thunderstorm_text
+from PirateTextHelper import (
+    calculate_precip_text,
+    calculate_thunderstorm_text,
+    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
+)
 
 
 def calculate_summary_text(
@@ -442,7 +447,8 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
         # Check if the day has enough precipitation to reach the threshold and record the index in the array, the day it occured on and the type
         if (
             day["precipType"] == "snow"
-            and day["precipAccumulation"] >= (10.0 * intensityUnit)
+            and day["precipAccumulation"]
+            >= (DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * intensityUnit)
             and (day["precipProbability"] >= 0.25 or day["precipProbability"] == -999)
         ):
             # Sets that there has been precipitation during the week
@@ -456,7 +462,8 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
                 maxIntensity = day["precipIntensityMax"]
         elif (
             day["precipType"] != "snow"
-            and day["precipAccumulation"] >= (1.0 * intensityUnit)
+            and day["precipAccumulation"]
+            >= (DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * intensityUnit)
             and day["precipProbability"] >= 0.25
         ):
             # Sets that there has been precipitation during the week

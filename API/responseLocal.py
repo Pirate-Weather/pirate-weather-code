@@ -1023,6 +1023,7 @@ async def PW_Forecast(
     exNBM = 0
     exHRRR = 0
     exGEFS = 0
+    summaryText = True
 
     if "currently" in excludeParams:
         exCurrently = 1
@@ -1042,6 +1043,8 @@ async def PW_Forecast(
         exHRRR = 1
     if "gefs" in excludeParams:
         exGEFS = 1
+    if "summary" in excludeParams:
+        summaryText = False
 
     # Set up timemache params
     if timeMachine and not tmExtra:
@@ -1200,8 +1203,8 @@ async def PW_Forecast(
             # Check if timemachine request, use different sources
             if timeMachine:
                 date_range = pd.date_range(
-                    start=baseDayUTC,
-                    end=baseDayUTC + datetime.timedelta(days=1),
+                    start=baseDayUTC - datetime.timedelta(hours=1),
+                    end=baseDayUTC + datetime.timedelta(days=1, hours=1),
                     freq="1h",
                 ).to_list()
                 if utcTime < datetime.datetime(2025, 6, 10):
@@ -1353,10 +1356,9 @@ async def PW_Forecast(
                 print(datetime.datetime.utcnow() - T_Start)
 
             if timeMachine:
-                print("NBM")
                 date_range = pd.date_range(
-                    start=baseDayUTC,
-                    end=baseDayUTC + datetime.timedelta(days=1),
+                    start=baseDayUTC - datetime.timedelta(hours=1),
+                    end=baseDayUTC + datetime.timedelta(days=1, hours=1),
                     freq="1h",
                 ).to_list()
 
@@ -1467,19 +1469,21 @@ async def PW_Forecast(
         print(datetime.datetime.utcnow() - T_Start)
 
     if timeMachine:
-        print("GFS")
         now = time.time()
         # Create list of zarrs
-        hours_to_subtract = baseDayUTC.hour % 6
+        # Negative 1 since the first timestep of a model run is used
+        hours_to_subtract = (baseDayUTC.hour - 1) % 6
         rounded_time = baseDayUTC - datetime.timedelta(
-            hours=hours_to_subtract,
+            hours=hours_to_subtract + 1,
             minutes=baseDayUTC.minute,
             seconds=baseDayUTC.second,
             microseconds=baseDayUTC.microsecond,
         )
 
         date_range = pd.date_range(
-            start=rounded_time, end=rounded_time + datetime.timedelta(days=1), freq="6h"
+            start=rounded_time,
+            end=rounded_time + datetime.timedelta(days=1, hours=6),
+            freq="6h",
         ).to_list()
 
         # Select either <v2.7 or >=v2.7 bucket
@@ -1571,6 +1575,7 @@ async def PW_Forecast(
             dataOut_gfs = np.zeros((len(xr_mf.time), len(GFSzarrVars)))
             # Add time
             dataOut_gfs[:, 0] = xr_mf.time.compute().data
+
             for vIDX, v in enumerate(GFSzarrVars[1:]):
                 dataOut_gfs[:, vIDX + 1] = xr_mf[v][:, y_p, x_p].compute().data
             now3 = time.time()
@@ -1601,9 +1606,10 @@ async def PW_Forecast(
         if timeMachine:
             now = time.time()
             # Create list of zarrs
-            hours_to_subtract = baseDayUTC.hour % 6
+            # Negative 3 since the first timestep (hour 3) of a model run is used
+            hours_to_subtract = (baseDayUTC.hour - 3) % 6
             rounded_time = baseDayUTC - datetime.timedelta(
-                hours=hours_to_subtract,
+                hours=hours_to_subtract + 3,
                 minutes=baseDayUTC.minute,
                 seconds=baseDayUTC.second,
                 microseconds=baseDayUTC.microsecond,
@@ -1611,7 +1617,7 @@ async def PW_Forecast(
 
             date_range = pd.date_range(
                 start=rounded_time,
-                end=rounded_time + datetime.timedelta(days=1),
+                end=rounded_time + datetime.timedelta(days=1, hours=6),
                 freq="6h",
             ).to_list()
 
@@ -1959,11 +1965,11 @@ async def PW_Forecast(
                 HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), np.nan)
                 # TODO: The sizes of the 0-18 and 18-48 are differernt because of the REFC_entireatmosphere param
                 # Need to either add this to 18-48 or just keep it for the first 18 hours
-                HRRR_Merged[0 : (55 - HRRR_StartIDX) + (31 - H2_StartIDX), :] = (
+                HRRR_Merged[0 : (55 - HRRR_StartIDX) + (31 - H2_StartIDX), 0:17] = (
                     np.concatenate(
                         (
                             dataOut_hrrrh[HRRR_StartIDX:, 0:17],
-                            dataOut_h2[H2_StartIDX:, :],
+                            dataOut_h2[H2_StartIDX:, 0:17],
                         ),
                         axis=0,
                     )
@@ -2029,6 +2035,7 @@ async def PW_Forecast(
                 left=np.nan,
                 right=np.nan,
             )
+
         if "gefs" in sourceList:
             GEFS_Merged = np.zeros((len(hour_array_grib), dataOut_gefs.shape[1]))
             for i in range(0, len(dataOut_gefs[0, :])):
@@ -2670,6 +2677,7 @@ async def PW_Forecast(
         prcipIntensityHour[:, 2] = GEFS_Merged[:, 2]
     else:  # GFS Fallback
         prcipIntensityHour[:, 2] = GFS_Merged[:, 10] * 3600
+
     # Take first non-NaN value
     InterPhour[:, 2] = (
         np.choose(np.argmin(np.isnan(prcipIntensityHour), axis=1), prcipIntensityHour.T)
@@ -2901,34 +2909,26 @@ async def PW_Forecast(
         InterPhour[:, 19] = GFS_Merged[:, 20]
 
     # Air quality
-    if version >= 2:
-        if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-            InterPhour[:, 20] = np.clip(
-                HRRR_Merged[:, 16] * 1e9, 0, 200
-            )  # Change from kg/m3 to ug/m3
-        else:
-            InterPhour[:, 20] = -999
+    if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+        InterPhour[:, 20] = np.clip(
+            HRRR_Merged[:, 16] * 1e9, 0, 200
+        )  # Change from kg/m3 to ug/m3
+    else:
+        InterPhour[:, 20] = -999
 
     # Fire Index
     if "nbm_fire" in sourceList:
         InterPhour[:, 24] = np.clip(NBM_Fire_Merged[:, 1], 0, 100)
 
-    # Apparent Temperature, Radiative temperature formula
-    # https: // github.com / breezy - weather / breezy - weather / discussions / 1085
-    # AT = Ta + 0.33 × rh / 100 × 6.105 × exp(17.27 × Ta / (237.7 + Ta)) − 0.70 × ws − 4.00
-    e = (
-        InterPhour[:, 8]
-        * 6.105
-        * np.exp(
-            17.27 * (InterPhour[:, 5] - 273.15) / (237.7 + (InterPhour[:, 5] - 273.15))
-        )
+    # Convert wind speed from its display unit to m/s for the apparent temperature
+    windSpeedMps = InterPhour[:, 10] / windUnit
+
+    # Calculate the apparent temperature
+    InterPhour[:, 6] = calculate_apparent_temperature(
+        InterPhour[:, 5],  # Air temperature in Kelvin
+        InterPhour[:, 8],  # Relative humidity (0.0 to 1.0)
+        windSpeedMps,  # Wind speed in meters per second
     )
-    InterPhour[:, 6] = (
-        (InterPhour[:, 5] - 273.15)
-        + 0.33 * e
-        - 0.70 * (InterPhour[:, 10] / windUnit)
-        - 4.00
-    ) + 273.15
 
     ### Feels Like Temperature
     AppTemperatureHour = np.full((len(hour_array_grib), 2), np.nan)
@@ -3129,86 +3129,38 @@ async def PW_Forecast(
                 # After sunset
                 hourIcon = "clear-night"
 
-        if timeMachine and not tmExtra:
-            hourItem = {
-                "time": int(hour_array_grib[idx]),
-                "summary": hourText,
-                "icon": hourIcon,
-                "precipIntensity": InterPhour[idx, 2],
-                "precipAccumulation": InterPhour[idx, 21]
-                + InterPhour[idx, 22]
-                + InterPhour[idx, 23],
-                "precipType": PTypeHour[idx],
-                "temperature": InterPhour[idx, 5],
-                "apparentTemperature": InterPhour[idx, 6],
-                "dewPoint": InterPhour[idx, 7],
-                "pressure": InterPhour[idx, 9],
-                "windSpeed": InterPhour[idx, 10],
-                "windGust": InterPhour[idx, 11],
-                "windBearing": int(InterPhour[idx, 12]),
-                "cloudCover": InterPhour[idx, 13],
-                "snowAccumulation": InterPhour[idx, 22],
-            }
-
-        elif version >= 2:
-            hourItem = {
-                "time": int(hour_array_grib[idx]),
-                "summary": hourText,
-                "icon": hourIcon,
-                "precipIntensity": InterPhour[idx, 2],
-                "precipProbability": InterPhour[idx, 3],
-                "precipIntensityError": InterPhour[idx, 4],
-                "precipAccumulation": InterPhour[idx, 21]
-                + InterPhour[idx, 22]
-                + InterPhour[idx, 23],
-                "precipType": PTypeHour[idx],
-                "temperature": InterPhour[idx, 5],
-                "apparentTemperature": InterPhour[idx, 6],
-                "dewPoint": InterPhour[idx, 7],
-                "humidity": InterPhour[idx, 8],
-                "pressure": InterPhour[idx, 9],
-                "windSpeed": InterPhour[idx, 10],
-                "windGust": InterPhour[idx, 11],
-                "windBearing": int(InterPhour[idx, 12]),
-                "cloudCover": InterPhour[idx, 13],
-                "uvIndex": InterPhour[idx, 14],
-                "visibility": InterPhour[idx, 15],
-                "ozone": InterPhour[idx, 16],
-                "smoke": InterPhour[idx, 20],
-                "liquidAccumulation": InterPhour[idx, 21],
-                "snowAccumulation": InterPhour[idx, 22],
-                "iceAccumulation": InterPhour[idx, 23],
-                "nearestStormDistance": InterPhour[idx, 18],
-                "nearestStormBearing": int(InterPhour[idx, 19]),
-                "fireIndex": InterPhour[idx, 24],
-                "feelsLike": InterPhour[idx, 25],
-            }
-
-        else:
-            hourItem = {
-                "time": int(hour_array_grib[idx]),
-                "summary": hourText,
-                "icon": hourIcon,
-                "precipIntensity": InterPhour[idx, 2],
-                "precipProbability": InterPhour[idx, 3],
-                "precipIntensityError": InterPhour[idx, 4],
-                "precipAccumulation": InterPhour[idx, 21]
-                + InterPhour[idx, 22]
-                + InterPhour[idx, 23],
-                "precipType": PTypeHour[idx],
-                "temperature": InterPhour[idx, 5],
-                "apparentTemperature": InterPhour[idx, 6],
-                "dewPoint": InterPhour[idx, 7],
-                "humidity": InterPhour[idx, 8],
-                "pressure": InterPhour[idx, 9],
-                "windSpeed": InterPhour[idx, 10],
-                "windGust": InterPhour[idx, 11],
-                "windBearing": int(InterPhour[idx, 12]),
-                "cloudCover": InterPhour[idx, 13],
-                "uvIndex": InterPhour[idx, 14],
-                "visibility": InterPhour[idx, 15],
-                "ozone": InterPhour[idx, 16],
-            }
+        hourItem = {
+            "time": int(hour_array_grib[idx]),
+            "summary": hourText,
+            "icon": hourIcon,
+            "precipIntensity": InterPhour[idx, 2],
+            "precipProbability": InterPhour[idx, 3],
+            "precipIntensityError": InterPhour[idx, 4],
+            "precipAccumulation": InterPhour[idx, 21]
+            + InterPhour[idx, 22]
+            + InterPhour[idx, 23],
+            "precipType": PTypeHour[idx],
+            "temperature": InterPhour[idx, 5],
+            "apparentTemperature": InterPhour[idx, 6],
+            "dewPoint": InterPhour[idx, 7],
+            "humidity": InterPhour[idx, 8],
+            "pressure": InterPhour[idx, 9],
+            "windSpeed": InterPhour[idx, 10],
+            "windGust": InterPhour[idx, 11],
+            "windBearing": int(InterPhour[idx, 12]),
+            "cloudCover": InterPhour[idx, 13],
+            "uvIndex": InterPhour[idx, 14],
+            "visibility": InterPhour[idx, 15],
+            "ozone": InterPhour[idx, 16],
+            "smoke": InterPhour[idx, 20],
+            "liquidAccumulation": InterPhour[idx, 21],
+            "snowAccumulation": InterPhour[idx, 22],
+            "iceAccumulation": InterPhour[idx, 23],
+            "nearestStormDistance": InterPhour[idx, 18],
+            "nearestStormBearing": int(InterPhour[idx, 19]),
+            "fireIndex": InterPhour[idx, 24],
+            "feelsLike": InterPhour[idx, 25],
+        }
 
         try:
             hourText, hourIcon = calculate_text(
@@ -3225,11 +3177,32 @@ async def PW_Forecast(
                 InterPhour[idx, 2],
                 icon,
             )
-            hourItem["summary"] = translation.translate(["title", hourText])
-            hourItem["icon"] = hourIcon
+
+            if summaryText:
+                hourItem["summary"] = translation.translate(["title", hourText])
+                hourItem["icon"] = hourIcon
+
         except Exception:
             print("HOURLY TEXT GEN ERROR:")
             print(traceback.print_exc())
+
+        if version < 2:
+            hourItem.pop("smoke", None)
+            hourItem.pop("liquidAccumulation", None)
+            hourItem.pop("snowAccumulation", None)
+            hourItem.pop("iceAccumulation", None)
+            hourItem.pop("nearestStormDistance", None)
+            hourItem.pop("nearestStormBearing", None)
+            hourItem.pop("fireIndex", None)
+            hourItem.pop("feelsLike", None)
+
+        if timeMachine and not tmExtra:
+            hourItem.pop("precipProbability", None)
+            hourItem.pop("precipIntensityError", None)
+            hourItem.pop("humidity", None)
+            hourItem.pop("uvIndex", None)
+            hourItem.pop("visibility", None)
+            hourItem.pop("ozone", None)
 
         hourList.append(hourItem)
 
@@ -3436,153 +3409,59 @@ async def PW_Forecast(
         # Temperature High is daytime high, so 6 am to 6 pm
         # First index is 6 am, then index 2
         # Nightime is index 1, 3, etc.
-        if timeMachine and not tmExtra:
-            dayObject = {
-                "time": int(day_array_grib[idx]),
-                "summary": dayText,
-                "icon": dayIcon,
-                "sunriseTime": int(InterSday[idx, 17]),
-                "sunsetTime": int(InterSday[idx, 18]),
-                "moonPhase": InterSday[idx, 19].round(2),
-                "precipIntensity": InterPday[idx, 2],
-                "precipIntensityMax": InterPdayMax[idx, 2],
-                "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
-                "precipAccumulation": round(
-                    InterPdaySum[idx, 21]
-                    + InterPdaySum[idx, 22]
-                    + InterPdaySum[idx, 23],
-                    4,
-                ),
-                "precipType": PTypeDay[idx],
-                "temperatureHigh": InterPdayHigh[idx, 5],
-                "temperatureHighTime": int(InterPdayHighTime[idx, 5]),
-                "temperatureLow": InterPdayLow[idx, 5],
-                "temperatureLowTime": int(InterPdayLowTime[idx, 5]),
-                "apparentTemperatureHigh": InterPdayHigh[idx, 6],
-                "apparentTemperatureHighTime": int(InterPdayHighTime[idx, 6]),
-                "apparentTemperatureLow": InterPdayLow[idx, 6],
-                "apparentTemperatureLowTime": int(InterPdayLowTime[idx, 6]),
-                "dewPoint": InterPday[idx, 7],
-                "pressure": InterPday[idx, 9],
-                "windSpeed": InterPday[idx, 10],
-                "windGust": InterPday[idx, 11],
-                "windGustTime": int(InterPdayMaxTime[idx, 11]),
-                "windBearing": int(InterPday[idx, 12]),
-                "cloudCover": InterPday[idx, 13],
-                "temperatureMin": InterPdayMin[idx, 5],
-                "temperatureMinTime": int(InterPdayMinTime[idx, 5]),
-                "temperatureMax": InterPdayMax[idx, 5],
-                "temperatureMaxTime": int(InterPdayMaxTime[idx, 5]),
-                "apparentTemperatureMin": InterPdayMin[idx, 6],
-                "apparentTemperatureMinTime": int(InterPdayMinTime[idx, 6]),
-                "apparentTemperatureMax": InterPdayMax[idx, 6],
-                "apparentTemperatureMaxTime": int(InterPdayMaxTime[idx, 6]),
-                "snowAccumulation": InterPdaySum[idx, 22],
-            }
-        else:
-            if version >= 2:
-                dayObject = {
-                    "time": int(day_array_grib[idx]),
-                    "summary": dayText,
-                    "icon": dayIcon,
-                    "dawnTime": int(InterSday[idx, 15]),
-                    "sunriseTime": int(InterSday[idx, 17]),
-                    "sunsetTime": int(InterSday[idx, 18]),
-                    "duskTime": int(InterSday[idx, 16]),
-                    "moonPhase": InterSday[idx, 19].round(2),
-                    "precipIntensity": InterPday[idx, 2],
-                    "precipIntensityMax": InterPdayMax[idx, 2],
-                    "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
-                    "precipProbability": InterPdayMax[idx, 3],
-                    "precipAccumulation": round(
-                        InterPdaySum[idx, 21]
-                        + InterPdaySum[idx, 22]
-                        + InterPdaySum[idx, 23],
-                        4,
-                    ),
-                    "precipType": PTypeDay[idx],
-                    "temperatureHigh": InterPdayHigh[idx, 5],
-                    "temperatureHighTime": int(InterPdayHighTime[idx, 5]),
-                    "temperatureLow": InterPdayLow[idx, 5],
-                    "temperatureLowTime": int(InterPdayLowTime[idx, 5]),
-                    "apparentTemperatureHigh": InterPdayHigh[idx, 6],
-                    "apparentTemperatureHighTime": int(InterPdayHighTime[idx, 6]),
-                    "apparentTemperatureLow": InterPdayLow[idx, 6],
-                    "apparentTemperatureLowTime": int(InterPdayLowTime[idx, 6]),
-                    "dewPoint": InterPday[idx, 7],
-                    "humidity": InterPday[idx, 8],
-                    "pressure": InterPday[idx, 9],
-                    "windSpeed": InterPday[idx, 10],
-                    "windGust": InterPday[idx, 11],
-                    "windGustTime": int(InterPdayMaxTime[idx, 11]),
-                    "windBearing": int(InterPday[idx, 12]),
-                    "cloudCover": InterPday[idx, 13],
-                    "uvIndex": InterPdayMax[idx, 14],
-                    "uvIndexTime": int(InterPdayMaxTime[idx, 14]),
-                    "visibility": InterPday[idx, 15],
-                    "temperatureMin": InterPdayMin[idx, 5],
-                    "temperatureMinTime": int(InterPdayMinTime[idx, 5]),
-                    "temperatureMax": InterPdayMax[idx, 5],
-                    "temperatureMaxTime": int(InterPdayMaxTime[idx, 5]),
-                    "apparentTemperatureMin": InterPdayMin[idx, 6],
-                    "apparentTemperatureMinTime": int(InterPdayMinTime[idx, 6]),
-                    "apparentTemperatureMax": InterPdayMax[idx, 6],
-                    "apparentTemperatureMaxTime": int(InterPdayMaxTime[idx, 6]),
-                    "smokeMax": InterPdayMax[idx, 20],
-                    "smokeMaxTime": int(InterPdayMaxTime[idx, 20]),
-                    "liquidAccumulation": InterPdaySum[idx, 21],
-                    "snowAccumulation": InterPdaySum[idx, 22],
-                    "iceAccumulation": InterPdaySum[idx, 23],
-                    "fireIndexMax": InterPdayMax[idx, 24],
-                    "fireIndexMaxTime": int(InterPdayMaxTime[idx, 24]),
-                }
-            else:
-                dayObject = {
-                    "time": int(day_array_grib[idx]),
-                    "summary": dayText,
-                    "icon": dayIcon,
-                    "sunriseTime": int(InterSday[idx, 17]),
-                    "sunsetTime": int(InterSday[idx, 18]),
-                    "moonPhase": InterSday[idx, 19].round(2),
-                    "precipIntensity": InterPday[idx, 2],
-                    "precipIntensityMax": InterPdayMax[idx, 2],
-                    "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
-                    "precipProbability": InterPdayMax[idx, 3],
-                    "precipAccumulation": round(
-                        InterPdaySum[idx, 21]
-                        + InterPdaySum[idx, 22]
-                        + InterPdaySum[idx, 23],
-                        4,
-                    ),
-                    "precipType": PTypeDay[idx],
-                    "temperatureHigh": InterPdayHigh[idx, 5],
-                    "temperatureHighTime": int(InterPdayHighTime[idx, 5]),
-                    "temperatureLow": InterPdayLow[idx, 5],
-                    "temperatureLowTime": int(InterPdayLowTime[idx, 5]),
-                    "apparentTemperatureHigh": InterPdayHigh[idx, 6],
-                    "apparentTemperatureHighTime": int(InterPdayHighTime[idx, 6]),
-                    "apparentTemperatureLow": InterPdayLow[idx, 6],
-                    "apparentTemperatureLowTime": int(InterPdayLowTime[idx, 6]),
-                    "dewPoint": InterPday[idx, 7],
-                    "humidity": InterPday[idx, 8],
-                    "pressure": InterPday[idx, 9],
-                    "windSpeed": InterPday[idx, 10],
-                    "windGust": InterPday[idx, 11],
-                    "windGustTime": int(InterPdayMaxTime[idx, 11]),
-                    "windBearing": int(InterPday[idx, 12]),
-                    "cloudCover": InterPday[idx, 13],
-                    "uvIndex": InterPdayMax[idx, 14],
-                    "uvIndexTime": int(InterPdayMaxTime[idx, 14]),
-                    "visibility": InterPday[idx, 15],
-                    "temperatureMin": InterPdayMin[idx, 5],
-                    "temperatureMinTime": int(InterPdayMinTime[idx, 5]),
-                    "temperatureMax": InterPdayMax[idx, 5],
-                    "temperatureMaxTime": int(InterPdayMaxTime[idx, 5]),
-                    "apparentTemperatureMin": InterPdayMin[idx, 6],
-                    "apparentTemperatureMinTime": int(InterPdayMinTime[idx, 6]),
-                    "apparentTemperatureMax": InterPdayMax[idx, 6],
-                    "apparentTemperatureMaxTime": int(InterPdayMaxTime[idx, 6]),
-                }
+        dayObject = {
+            "time": int(day_array_grib[idx]),
+            "summary": dayText,
+            "icon": dayIcon,
+            "dawnTime": int(InterSday[idx, 15]),
+            "sunriseTime": int(InterSday[idx, 17]),
+            "sunsetTime": int(InterSday[idx, 18]),
+            "duskTime": int(InterSday[idx, 16]),
+            "moonPhase": InterSday[idx, 19].round(2),
+            "precipIntensity": InterPday[idx, 2],
+            "precipIntensityMax": InterPdayMax[idx, 2],
+            "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
+            "precipProbability": InterPdayMax[idx, 3],
+            "precipAccumulation": round(
+                InterPdaySum[idx, 21] + InterPdaySum[idx, 22] + InterPdaySum[idx, 23],
+                4,
+            ),
+            "precipType": PTypeDay[idx],
+            "temperatureHigh": InterPdayHigh[idx, 5],
+            "temperatureHighTime": int(InterPdayHighTime[idx, 5]),
+            "temperatureLow": InterPdayLow[idx, 5],
+            "temperatureLowTime": int(InterPdayLowTime[idx, 5]),
+            "apparentTemperatureHigh": InterPdayHigh[idx, 6],
+            "apparentTemperatureHighTime": int(InterPdayHighTime[idx, 6]),
+            "apparentTemperatureLow": InterPdayLow[idx, 6],
+            "apparentTemperatureLowTime": int(InterPdayLowTime[idx, 6]),
+            "dewPoint": InterPday[idx, 7],
+            "humidity": InterPday[idx, 8],
+            "pressure": InterPday[idx, 9],
+            "windSpeed": InterPday[idx, 10],
+            "windGust": InterPday[idx, 11],
+            "windGustTime": int(InterPdayMaxTime[idx, 11]),
+            "windBearing": int(InterPday[idx, 12]),
+            "cloudCover": InterPday[idx, 13],
+            "uvIndex": InterPdayMax[idx, 14],
+            "uvIndexTime": int(InterPdayMaxTime[idx, 14]),
+            "visibility": InterPday[idx, 15],
+            "temperatureMin": InterPdayMin[idx, 5],
+            "temperatureMinTime": int(InterPdayMinTime[idx, 5]),
+            "temperatureMax": InterPdayMax[idx, 5],
+            "temperatureMaxTime": int(InterPdayMaxTime[idx, 5]),
+            "apparentTemperatureMin": InterPdayMin[idx, 6],
+            "apparentTemperatureMinTime": int(InterPdayMinTime[idx, 6]),
+            "apparentTemperatureMax": InterPdayMax[idx, 6],
+            "apparentTemperatureMaxTime": int(InterPdayMaxTime[idx, 6]),
+            "smokeMax": InterPdayMax[idx, 20],
+            "smokeMaxTime": int(InterPdayMaxTime[idx, 20]),
+            "liquidAccumulation": InterPdaySum[idx, 21],
+            "snowAccumulation": InterPdaySum[idx, 22],
+            "iceAccumulation": InterPdaySum[idx, 23],
+            "fireIndexMax": InterPdayMax[idx, 24],
+            "fireIndexMaxTime": int(InterPdayMaxTime[idx, 24]),
+        }
 
         try:
             if idx < 8:
@@ -3601,11 +3480,30 @@ async def PW_Forecast(
                 )
 
                 # Translate the text
-                dayObject["summary"] = translation.translate(["sentence", dayText])
-                dayObject["icon"] = dayIcon
+                if summaryText:
+                    dayObject["summary"] = translation.translate(["sentence", dayText])
+                    dayObject["icon"] = dayIcon
         except Exception:
             print("DAILY TEXT GEN ERROR:")
             print(traceback.print_exc())
+
+        if version < 2:
+            dayObject.pop("dawnTime", None)
+            dayObject.pop("duskTime", None)
+            dayObject.pop("smokeMax", None)
+            dayObject.pop("smokeMaxTime", None)
+            dayObject.pop("liquidAccumulation", None)
+            dayObject.pop("snowAccumulation", None)
+            dayObject.pop("iceAccumulation", None)
+            dayObject.pop("fireIndexMax", None)
+            dayObject.pop("fireIndexMaxTime", None)
+
+        if timeMachine and not tmExtra:
+            dayObject.pop("precipProbability", None)
+            dayObject.pop("humidity", None)
+            dayObject.pop("uvIndex", None)
+            dayObject.pop("uvIndexTime", None)
+            dayObject.pop("visibility", None)
 
         dayList.append(dayObject)
 
@@ -3898,8 +3796,10 @@ async def PW_Forecast(
         * 0.025
     )
 
-    # VIS, NBM then HRRR, then GFS
-    if "nbm" in sourceList:
+    # VIS, SubH, NBM then HRRR, then GFS
+    if "hrrrsubh" in sourceList:
+        InterPcurrent[14] = hrrrSubHInterpolation[0, 14]
+    elif "nbm" in sourceList:
         InterPcurrent[14] = (
             NBM_Merged[currentIDX_hrrrh_A, 10] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, 10] * interpFac2
@@ -3954,36 +3854,16 @@ async def PW_Forecast(
     else:
         InterPcurrent[18] = -999
 
-    # Apparent Temperature, Radiative temperature formula
-    # https: // github.com / breezy - weather / breezy - weather / discussions / 1085
-    # AT = Ta + 0.33 × (rh / 100 × 6.105 × exp(17.27 × Ta / (237.7 + Ta))) − 0.70 × ws − 4.00
+    # Convert wind speed from its display unit to m/s for the apparent temperature function
+    currentWindSpeedMps = InterPcurrent[9] / windUnit
 
-    eCurrent = (
-        InterPcurrent[7]
-        * 6.105
-        * np.exp(
-            17.27 * (InterPcurrent[4] - 273.15) / (237.7 + (InterPcurrent[4] - 273.15))
-        )
+    # Calculate the apparent temperature
+    InterPcurrent[5] = calculate_apparent_temperature(
+        InterPcurrent[4],  # Air temperature in Kelvin
+        InterPcurrent[7],  # Relative humidity (0.0 to 1.0)
+        currentWindSpeedMps,  # Wind speed in meters per second
     )
 
-    InterPcurrent[5] = np.clip(
-        (
-            (
-                (InterPcurrent[4] - 273.15)
-                + 0.33 * eCurrent
-                - 0.70 * (InterPcurrent[9] / windUnit)
-                - 4.00
-            )
-            + 273.15
-        ),
-        -183,
-        333,
-    )
-
-    # Where Ta is the ambient temperature in °C
-    # e is the water vapor pressure in hPa
-    # ws is the wind speed in m/s
-    # Q is the solar radiation per unit area of body surface in w/m²
     if "nbm" in sourceList:
         InterPcurrent[20] = (
             NBM_Merged[currentIDX_hrrrh_A, 3] * interpFac1
@@ -4085,6 +3965,24 @@ async def PW_Forecast(
     # Fix small neg zero
     InterPcurrent[((InterPcurrent > -0.01) & (InterPcurrent < 0.01))] = 0
 
+    # Convert intensity to accumulation based on type
+    currnetRainAccum = 0
+    currnetSnowAccum = 0
+    currnetIceAccum = 0
+
+    if minuteDict[0]["precipType"] == "rain":
+        currnetRainAccum = (
+            minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
+        )
+    elif minuteDict[0]["precipType"] == "snow":
+        currnetSnowAccum = (
+            minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
+        ) * 10  # 1:10 since intensity is in liquid water equivalent
+    elif minuteDict[0]["precipType"] == "sleet":
+        currnetIceAccum = (
+            minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
+        )
+
     ### RETURN ###
     returnOBJ = dict()
 
@@ -4099,28 +3997,18 @@ async def PW_Forecast(
         returnOBJ["currently"]["time"] = int(minute_array_grib[0])
         returnOBJ["currently"]["summary"] = cText
         returnOBJ["currently"]["icon"] = cIcon
-
-        if (not timeMachine) or (tmExtra):
-            returnOBJ["currently"]["nearestStormDistance"] = InterPcurrent[16]
-            returnOBJ["currently"]["nearestStormBearing"] = int(
-                InterPcurrent[17].round()
-            )
+        returnOBJ["currently"]["nearestStormDistance"] = InterPcurrent[16]
+        returnOBJ["currently"]["nearestStormBearing"] = int(InterPcurrent[17].round())
         returnOBJ["currently"]["precipIntensity"] = minuteDict[0]["precipIntensity"]
-
-        if (not timeMachine) or (tmExtra):
-            returnOBJ["currently"]["precipProbability"] = minuteDict[0][
-                "precipProbability"
-            ]
-            returnOBJ["currently"]["precipIntensityError"] = minuteDict[0][
-                "precipIntensityError"
-            ]
+        returnOBJ["currently"]["precipProbability"] = minuteDict[0]["precipProbability"]
+        returnOBJ["currently"]["precipIntensityError"] = minuteDict[0][
+            "precipIntensityError"
+        ]
         returnOBJ["currently"]["precipType"] = minuteDict[0]["precipType"]
         returnOBJ["currently"]["temperature"] = InterPcurrent[4]
         returnOBJ["currently"]["apparentTemperature"] = InterPcurrent[5]
         returnOBJ["currently"]["dewPoint"] = InterPcurrent[6]
-
-        if (not timeMachine) or (tmExtra):
-            returnOBJ["currently"]["humidity"] = InterPcurrent[7]
+        returnOBJ["currently"]["humidity"] = InterPcurrent[7]
         returnOBJ["currently"]["pressure"] = InterPcurrent[8]
         returnOBJ["currently"]["windSpeed"] = InterPcurrent[9]
         returnOBJ["currently"]["windGust"] = InterPcurrent[10]
@@ -4128,19 +4016,15 @@ async def PW_Forecast(
             np.mod(InterPcurrent[11], 360).round()
         )
         returnOBJ["currently"]["cloudCover"] = InterPcurrent[12]
-
-        if (not timeMachine) or (tmExtra):
-            returnOBJ["currently"]["uvIndex"] = InterPcurrent[13]
-            returnOBJ["currently"]["visibility"] = InterPcurrent[14]
-            returnOBJ["currently"]["ozone"] = InterPcurrent[15]
-
-        if version >= 2:
-            returnOBJ["currently"]["smoke"] = InterPcurrent[18]  # kg/m3 to ug/m3
-            returnOBJ["currently"]["fireIndex"] = InterPcurrent[19]
-            returnOBJ["currently"]["feelsLike"] = InterPcurrent[20]
-            returnOBJ["currently"]["currentDayIce"] = dayZeroIce
-            returnOBJ["currently"]["currentDayLiquid"] = dayZeroRain
-            returnOBJ["currently"]["currentDaySnow"] = dayZeroSnow
+        returnOBJ["currently"]["uvIndex"] = InterPcurrent[13]
+        returnOBJ["currently"]["visibility"] = InterPcurrent[14]
+        returnOBJ["currently"]["ozone"] = InterPcurrent[15]
+        returnOBJ["currently"]["smoke"] = InterPcurrent[18]  # kg/m3 to ug/m3
+        returnOBJ["currently"]["fireIndex"] = InterPcurrent[19]
+        returnOBJ["currently"]["feelsLike"] = InterPcurrent[20]
+        returnOBJ["currently"]["currentDayIce"] = dayZeroIce
+        returnOBJ["currently"]["currentDayLiquid"] = dayZeroRain
+        returnOBJ["currently"]["currentDaySnow"] = dayZeroSnow
 
         # Update the text
         if InterPcurrent[0] < InterSday[0, 17]:
@@ -4154,24 +4038,6 @@ async def PW_Forecast(
         elif InterPcurrent[0] > InterSday[0, 18]:
             # After sunset
             currentDay = False
-
-        # Convert intensity to accumulation based on type
-        currnetRainAccum = 0
-        currnetSnowAccum = 0
-        currnetIceAccum = 0
-
-        if minuteDict[0]["precipType"] == "rain":
-            currnetRainAccum = (
-                minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
-            )
-        elif minuteDict[0]["precipType"] == "snow":
-            currnetSnowAccum = (
-                minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
-            ) * 10  # 1:10 since intensity is in liquid water equivalent
-        elif minuteDict[0]["precipType"] == "sleet":
-            currnetIceAccum = (
-                minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
-            )
 
         try:
             currentText, currentIcon = calculate_text(
@@ -4188,24 +4054,52 @@ async def PW_Forecast(
                 minuteDict[0]["precipIntensity"],
                 icon,
             )
-            returnOBJ["currently"]["summary"] = translation.translate(
-                ["title", currentText]
-            )
-            returnOBJ["currently"]["icon"] = currentIcon
+            if summaryText:
+                returnOBJ["currently"]["summary"] = translation.translate(
+                    ["title", currentText]
+                )
+                returnOBJ["currently"]["icon"] = currentIcon
         except Exception:
             print("CURRENTLY TEXT GEN ERROR:")
             print(traceback.print_exc())
 
+        if version < 2:
+            returnOBJ.pop("smoke", None)
+            returnOBJ.pop("currentDayIce", None)
+            returnOBJ.pop("currentDayLiquid", None)
+            returnOBJ.pop("currentDaySnow", None)
+            returnOBJ.pop("fireIndex", None)
+            returnOBJ.pop("feelsLike", None)
+
+        if timeMachine and not tmExtra:
+            returnOBJ.pop("nearestStormDistance", None)
+            returnOBJ.pop("nearestStormBearing", None)
+            returnOBJ.pop("precipProbability", None)
+            returnOBJ.pop("precipIntensityError", None)
+            returnOBJ.pop("humidity", None)
+            returnOBJ.pop("uvIndex", None)
+            returnOBJ.pop("visibility", None)
+            returnOBJ.pop("ozone", None)
+
     if exMinutely != 1:
         returnOBJ["minutely"] = dict()
         try:
-            minuteText, minuteIcon = calculate_minutely_text(
-                minuteDict, currentText, currentIcon, icon, prepAccumUnit
-            )
-            returnOBJ["minutely"]["summary"] = translation.translate(
-                ["sentence", minuteText]
-            )
-            returnOBJ["minutely"]["icon"] = minuteIcon
+            if summaryText:
+                minuteText, minuteIcon = calculate_minutely_text(
+                    minuteDict, currentText, currentIcon, icon, prepAccumUnit
+                )
+                returnOBJ["minutely"]["summary"] = translation.translate(
+                    ["sentence", minuteText]
+                )
+                returnOBJ["minutely"]["icon"] = minuteIcon
+            else:
+                returnOBJ["minutely"]["summary"] = pTypesText[
+                    int(Counter(maxPchance).most_common(1)[0][0])
+                ]
+                returnOBJ["minutely"]["icon"] = pTypesIcon[
+                    int(Counter(maxPchance).most_common(1)[0][0])
+                ]
+
         except Exception:
             print("MINUTELY TEXT GEN ERROR:")
             print(traceback.print_exc())
@@ -4234,10 +4128,19 @@ async def PW_Forecast(
                     "hour",
                     icon,
                 )
-                returnOBJ["hourly"]["summary"] = translation.translate(
-                    ["sentence", hourText]
-                )
-                returnOBJ["hourly"]["icon"] = hourIcon
+                if summaryText:
+                    returnOBJ["hourly"]["summary"] = translation.translate(
+                        ["sentence", hourText]
+                    )
+                    returnOBJ["hourly"]["icon"] = hourIcon
+                else:
+                    returnOBJ["hourly"]["summary"] = max(
+                        set(hourTextList), key=hourTextList.count
+                    )
+                    returnOBJ["hourly"]["icon"] = max(
+                        set(hourIconList), key=hourIconList.count
+                    )
+
             except Exception:
                 print("TEXT GEN ERROR:")
                 print(traceback.print_exc())
@@ -4261,13 +4164,22 @@ async def PW_Forecast(
         returnOBJ["daily"] = dict()
         if (not timeMachine) or (tmExtra):
             try:
-                weekText, weekIcon = calculate_weekly_text(
-                    dayList, prepAccumUnit, tempUnits, str(tz_name), icon
-                )
-                returnOBJ["daily"]["summary"] = translation.translate(
-                    ["sentence", weekText]
-                )
-                returnOBJ["daily"]["icon"] = weekIcon
+                if summaryText:
+                    weekText, weekIcon = calculate_weekly_text(
+                        dayList, prepAccumUnit, tempUnits, str(tz_name), icon
+                    )
+                    returnOBJ["daily"]["summary"] = translation.translate(
+                        ["sentence", weekText]
+                    )
+                    returnOBJ["daily"]["icon"] = weekIcon
+                else:
+                    returnOBJ["daily"]["summary"] = max(
+                        set(dayTextList), key=dayTextList.count
+                    )
+                    returnOBJ["daily"]["icon"] = max(
+                        set(dayIconList), key=dayIconList.count
+                    )
+
             except Exception:
                 print("DAILY SUMMARY TEXT GEN ERROR:")
                 print(traceback.print_exc())
@@ -4507,3 +4419,36 @@ def dataSync() -> None:
             update_zarr_store(False)
 
     logger.info("Sync End!")
+
+
+def calculate_apparent_temperature(airTemp, humidity, wind):
+    """
+    Calculates the apparent temperature temperature based on air temperature, wind speed and humidity
+    Formula from: https://github.com/breezy-weather/breezy-weather/discussions/1085
+    AT = Ta + 0.33 * rh / 100 * 6.105 * exp(17.27 * Ta / (237.7 + Ta)) - 0.70 * ws - 4.00
+
+    Parameters:
+    - airTemperature (float): Air temperature
+    - humidity (float): Relative humidity
+    - windSpeed (float): Wind speed in meters per second
+
+    Returns:
+    - float: Apparent temperature
+    """
+
+    # Convert air_temp from Kelvin to Celsius for the formula parts that use Celsius
+    airTempC = airTemp - 273.15
+
+    # Calculate water vapor pressure 'e'
+    # Ensure humidity is not 0 for calculation, replace with a small non-zero value if needed
+    # The original equation does not guard for zero humidity. If relative_humidity_0_1 is 0, e will be 0.
+    e = humidity * 6.105 * np.exp(17.27 * airTempC / (237.7 + airTempC))
+
+    # Calculate apparent temperature in Celsius
+    apparentTempC = airTempC + 0.33 * e - 0.70 * airTempC - 4.00
+
+    # Convert back to Kelvin
+    apparentTempK = apparentTempC + 273.15
+
+    # Clip between -90 and 60
+    return np.clip(apparentTempK, -183, 333)
