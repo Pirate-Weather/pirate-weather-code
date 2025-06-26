@@ -1962,7 +1962,7 @@ async def PW_Forecast(
                     )
                 )
 
-                if ((H2_StartIDX < 0) or (HRRR_StartIDX < 0)):
+                if (H2_StartIDX < 0) or (HRRR_StartIDX < 0):
                     if "hrrr_18-48" in sourceTimes:
                         sourceTimes.pop("hrrr_18-48", None)
                     if "hrrr_18-48" in sourceTimes:
@@ -2016,7 +2016,9 @@ async def PW_Forecast(
                         sourceTimes.pop("nbm_fire", None)
 
                 else:
-                    NBM_Fire_Merged = np.full((numHours, dataOut_nbmFire.shape[1]), np.nan)
+                    NBM_Fire_Merged = np.full(
+                        (numHours, dataOut_nbmFire.shape[1]), np.nan
+                    )
                     NBM_Fire_Merged[0 : (217 - NBM_Fire_StartIDX), :] = dataOut_nbmFire[
                         NBM_Fire_StartIDX : (numHours + NBM_Fire_StartIDX), :
                     ]
