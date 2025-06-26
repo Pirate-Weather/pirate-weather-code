@@ -1203,8 +1203,8 @@ async def PW_Forecast(
             # Check if timemachine request, use different sources
             if timeMachine:
                 date_range = pd.date_range(
-                    start=baseDayUTC,
-                    end=baseDayUTC + datetime.timedelta(days=1),
+                    start=baseDayUTC - datetime.timedelta(hours=1),
+                    end=baseDayUTC + datetime.timedelta(days=1, hours=1),
                     freq="1h",
                 ).to_list()
                 if utcTime < datetime.datetime(2025, 6, 10):
@@ -1356,10 +1356,9 @@ async def PW_Forecast(
                 print(datetime.datetime.utcnow() - T_Start)
 
             if timeMachine:
-                print("NBM")
                 date_range = pd.date_range(
-                    start=baseDayUTC,
-                    end=baseDayUTC + datetime.timedelta(days=1),
+                    start=baseDayUTC - datetime.timedelta(hours=1),
+                    end=baseDayUTC + datetime.timedelta(days=1, hours=1),
                     freq="1h",
                 ).to_list()
 
