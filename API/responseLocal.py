@@ -4064,22 +4064,22 @@ async def PW_Forecast(
             print(traceback.print_exc())
 
         if version < 2:
-            returnOBJ.pop("smoke", None)
-            returnOBJ.pop("currentDayIce", None)
-            returnOBJ.pop("currentDayLiquid", None)
-            returnOBJ.pop("currentDaySnow", None)
-            returnOBJ.pop("fireIndex", None)
-            returnOBJ.pop("feelsLike", None)
+            returnOBJ["currently"].pop("smoke", None)
+            returnOBJ["currently"].pop("currentDayIce", None)
+            returnOBJ["currently"].pop("currentDayLiquid", None)
+            returnOBJ["currently"].pop("currentDaySnow", None)
+            returnOBJ["currently"].pop("fireIndex", None)
+            returnOBJ["currently"].pop("feelsLike", None)
 
         if timeMachine and not tmExtra:
-            returnOBJ.pop("nearestStormDistance", None)
-            returnOBJ.pop("nearestStormBearing", None)
-            returnOBJ.pop("precipProbability", None)
-            returnOBJ.pop("precipIntensityError", None)
-            returnOBJ.pop("humidity", None)
-            returnOBJ.pop("uvIndex", None)
-            returnOBJ.pop("visibility", None)
-            returnOBJ.pop("ozone", None)
+            returnOBJ["currently"].pop("nearestStormDistance", None)
+            returnOBJ["currently"].pop("nearestStormBearing", None)
+            returnOBJ["currently"].pop("precipProbability", None)
+            returnOBJ["currently"].pop("precipIntensityError", None)
+            returnOBJ["currently"].pop("humidity", None)
+            returnOBJ["currently"].pop("uvIndex", None)
+            returnOBJ["currently"].pop("visibility", None)
+            returnOBJ["currently"].pop("ozone", None)
 
     if exMinutely != 1:
         returnOBJ["minutely"] = dict()
