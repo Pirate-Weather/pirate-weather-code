@@ -996,6 +996,7 @@ async def PW_Forecast(
     if icon != "pirate":
         icon = "darksky"
 
+
     # Check if langugage is supported
     if lang not in Translations:
         # Throw an error
@@ -1023,6 +1024,7 @@ async def PW_Forecast(
     exNBM = 0
     exHRRR = 0
     exGEFS = 0
+    summaryText = True
 
     if "currently" in excludeParams:
         exCurrently = 1
@@ -1042,6 +1044,8 @@ async def PW_Forecast(
         exHRRR = 1
     if "gefs" in excludeParams:
         exGEFS = 1
+    if "summary" in excludeParams:
+        summaryText = False
 
     # Set up timemache params
     if timeMachine and not tmExtra:
@@ -1959,11 +1963,11 @@ async def PW_Forecast(
                 HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), np.nan)
                 # TODO: The sizes of the 0-18 and 18-48 are differernt because of the REFC_entireatmosphere param
                 # Need to either add this to 18-48 or just keep it for the first 18 hours
-                HRRR_Merged[0 : (55 - HRRR_StartIDX) + (31 - H2_StartIDX), :] = (
+                HRRR_Merged[0 : (55 - HRRR_StartIDX) + (31 - H2_StartIDX), 0:17] = (
                     np.concatenate(
                         (
                             dataOut_hrrrh[HRRR_StartIDX:, 0:17],
-                            dataOut_h2[H2_StartIDX:, :],
+                            dataOut_h2[H2_StartIDX:, 0:17],
                         ),
                         axis=0,
                     )
@@ -3169,8 +3173,11 @@ async def PW_Forecast(
                 InterPhour[idx, 2],
                 icon,
             )
-            hourItem["summary"] = translation.translate(["title", hourText])
-            hourItem["icon"] = hourIcon
+
+            if summaryText:
+                hourItem["summary"] = translation.translate(["title", hourText])
+                hourItem["icon"] = hourIcon
+
         except Exception:
             print("HOURLY TEXT GEN ERROR:")
             print(traceback.print_exc())
@@ -3469,8 +3476,9 @@ async def PW_Forecast(
                 )
 
                 # Translate the text
-                dayObject["summary"] = translation.translate(["sentence", dayText])
-                dayObject["icon"] = dayIcon
+                if summaryText:
+                    dayObject["summary"] = translation.translate(["sentence", dayText])
+                    dayObject["icon"] = dayIcon
         except Exception:
             print("DAILY TEXT GEN ERROR:")
             print(traceback.print_exc())
@@ -4040,10 +4048,11 @@ async def PW_Forecast(
                 minuteDict[0]["precipIntensity"],
                 icon,
             )
-            returnOBJ["currently"]["summary"] = translation.translate(
-                ["title", currentText]
-            )
-            returnOBJ["currently"]["icon"] = currentIcon
+            if summaryText:
+                returnOBJ["currently"]["summary"] = translation.translate(
+                    ["title", currentText]
+                )
+                returnOBJ["currently"]["icon"] = currentIcon
         except Exception:
             print("CURRENTLY TEXT GEN ERROR:")
             print(traceback.print_exc())
@@ -4069,13 +4078,22 @@ async def PW_Forecast(
     if exMinutely != 1:
         returnOBJ["minutely"] = dict()
         try:
-            minuteText, minuteIcon = calculate_minutely_text(
-                minuteDict, currentText, currentIcon, icon, prepAccumUnit
-            )
-            returnOBJ["minutely"]["summary"] = translation.translate(
-                ["sentence", minuteText]
-            )
-            returnOBJ["minutely"]["icon"] = minuteIcon
+            if summaryText:
+                minuteText, minuteIcon = calculate_minutely_text(
+                    minuteDict, currentText, currentIcon, icon, prepAccumUnit
+                )
+                returnOBJ["minutely"]["summary"] = translation.translate(
+                    ["sentence", minuteText]
+                )
+                returnOBJ["minutely"]["icon"] = minuteIcon
+            else:
+                returnOBJ["minutely"]["summary"] = pTypesText[
+                    int(Counter(maxPchance).most_common(1)[0][0])
+                ]
+                returnOBJ["minutely"]["icon"] = pTypesIcon[
+                    int(Counter(maxPchance).most_common(1)[0][0])
+                ]
+
         except Exception:
             print("MINUTELY TEXT GEN ERROR:")
             print(traceback.print_exc())
@@ -4104,10 +4122,19 @@ async def PW_Forecast(
                     "hour",
                     icon,
                 )
-                returnOBJ["hourly"]["summary"] = translation.translate(
-                    ["sentence", hourText]
-                )
-                returnOBJ["hourly"]["icon"] = hourIcon
+                if summaryText:
+                    returnOBJ["hourly"]["summary"] = translation.translate(
+                        ["sentence", hourText]
+                    )
+                    returnOBJ["hourly"]["icon"] = hourIcon
+                else:
+                    returnOBJ["hourly"]["summary"] = max(
+                        set(hourTextList), key=hourTextList.count
+                    )
+                    returnOBJ["hourly"]["icon"] = max(
+                        set(hourIconList), key=hourIconList.count
+                    )
+
             except Exception:
                 print("TEXT GEN ERROR:")
                 print(traceback.print_exc())
@@ -4131,13 +4158,22 @@ async def PW_Forecast(
         returnOBJ["daily"] = dict()
         if (not timeMachine) or (tmExtra):
             try:
-                weekText, weekIcon = calculate_weekly_text(
-                    dayList, prepAccumUnit, tempUnits, str(tz_name), icon
-                )
-                returnOBJ["daily"]["summary"] = translation.translate(
-                    ["sentence", weekText]
-                )
-                returnOBJ["daily"]["icon"] = weekIcon
+                if summaryText:
+                    weekText, weekIcon = calculate_weekly_text(
+                        dayList, prepAccumUnit, tempUnits, str(tz_name), icon
+                    )
+                    returnOBJ["daily"]["summary"] = translation.translate(
+                        ["sentence", weekText]
+                    )
+                    returnOBJ["daily"]["icon"] = weekIcon
+                else:
+                    returnOBJ["daily"]["summary"] = max(
+                        set(dayTextList), key=dayTextList.count
+                    )
+                    returnOBJ["daily"]["icon"] = max(
+                        set(dayIconList), key=dayIconList.count
+                    )
+
             except Exception:
                 print("DAILY SUMMARY TEXT GEN ERROR:")
                 print(traceback.print_exc())
