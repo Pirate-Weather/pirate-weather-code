@@ -709,7 +709,7 @@ for i in range(hisPeriod, -1, -1):
                     "secret": aws_secret_access_key,
                 },
             )
-            zarr.open(hisCheckStore)[zarrVars[-1]][-1,-1,-1]
+            zarr.open(hisCheckStore)[zarrVars[-1]][-1, -1, -1]
             continue  # If it exists, skip to the next iteration
         except Exception:
             print("### Historic Data Failure!")
