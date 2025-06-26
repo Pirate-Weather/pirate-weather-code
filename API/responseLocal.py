@@ -1962,28 +1962,46 @@ async def PW_Forecast(
                     )
                 )
 
-                HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), np.nan)
-                # TODO: The sizes of the 0-18 and 18-48 are differernt because of the REFC_entireatmosphere param
-                # Need to either add this to 18-48 or just keep it for the first 18 hours
-                HRRR_Merged[0 : (55 - HRRR_StartIDX) + (31 - H2_StartIDX), 0:17] = (
-                    np.concatenate(
-                        (
-                            dataOut_hrrrh[HRRR_StartIDX:, 0:17],
-                            dataOut_h2[H2_StartIDX:, 0:17],
-                        ),
-                        axis=0,
+                if ((H2_StartIDX < 0) or (HRRR_StartIDX < 0)):
+                    if "hrrr_18-48" in sourceTimes:
+                        sourceTimes.pop("hrrr_18-48", None)
+                    if "hrrr_18-48" in sourceTimes:
+                        sourceTimes.pop("hrrr_18-48", None)
+                    if "hrrr_0-18" in sourceTimes:
+                        sourceTimes.pop("hrrr_0-18", None)
+                    if "hrrr_0-18" in sourceTimes:
+                        sourceTimes.pop("hrrr_0-18", None)
+
+                else:
+                    HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), np.nan)
+                    # TODO: The sizes of the 0-18 and 18-48 are differernt because of the REFC_entireatmosphere param
+                    # Need to either add this to 18-48 or just keep it for the first 18 hours
+                    HRRR_Merged[0 : (55 - HRRR_StartIDX) + (31 - H2_StartIDX), 0:17] = (
+                        np.concatenate(
+                            (
+                                dataOut_hrrrh[HRRR_StartIDX:, 0:17],
+                                dataOut_h2[H2_StartIDX:, 0:17],
+                            ),
+                            axis=0,
+                        )
                     )
-                )
 
             # NBM
             if "nbm" in sourceList:
                 NBM_StartIDX = (
                     dataOut_nbm[:, 0].searchsorted(baseDayUTC_Grib, side="right") - 1
                 )
-                NBM_Merged = np.full((numHours, dataOut_nbm.shape[1]), np.nan)
-                NBM_Merged[0 : (230 - NBM_StartIDX), :] = dataOut_nbm[
-                    NBM_StartIDX : (numHours + NBM_StartIDX), :
-                ]
+                if NBM_StartIDX < 0:
+                    if "nbm" in sourceList:
+                        sourceList.remove("nbm")
+                    if "nbm" in sourceTimes:
+                        sourceTimes.pop("nbm", None)
+
+                else:
+                    NBM_Merged = np.full((numHours, dataOut_nbm.shape[1]), np.nan)
+                    NBM_Merged[0 : (230 - NBM_StartIDX), :] = dataOut_nbm[
+                        NBM_StartIDX : (numHours + NBM_StartIDX), :
+                    ]
 
             # NBM FIre
             if "nbm_fire" in sourceList:
@@ -1991,23 +2009,42 @@ async def PW_Forecast(
                     dataOut_nbmFire[:, 0].searchsorted(baseDayUTC_Grib, side="right")
                     - 1
                 )
-                NBM_Fire_Merged = np.full((numHours, dataOut_nbmFire.shape[1]), np.nan)
-                NBM_Fire_Merged[0 : (217 - NBM_Fire_StartIDX), :] = dataOut_nbmFire[
-                    NBM_Fire_StartIDX : (numHours + NBM_Fire_StartIDX), :
-                ]
+                if NBM_Fire_StartIDX < 0:
+                    if "nbm_fire" in sourceList:
+                        sourceList.remove("nbm_fire")
+                    if "nbm_fire" in sourceTimes:
+                        sourceTimes.pop("nbm_fire", None)
+
+                else:
+                    NBM_Fire_Merged = np.full((numHours, dataOut_nbmFire.shape[1]), np.nan)
+                    NBM_Fire_Merged[0 : (217 - NBM_Fire_StartIDX), :] = dataOut_nbmFire[
+                        NBM_Fire_StartIDX : (numHours + NBM_Fire_StartIDX), :
+                    ]
+
         except Exception:
             print("HRRR or NBM data not available, falling back to GFS")
             print(traceback.print_exc())
-            sourceTimes.pop("hrrr_18-48")
-            sourceTimes.pop("nbm_fire")
-            sourceTimes.pop("nbm")
-            sourceTimes.pop("hrrr_0-18")
-            sourceTimes.pop("hrrr_subh")
-            sourceList.remove("hrrrsubh")
-            sourceList.remove("hrrr_0-18")
-            sourceList.remove("nbm")
-            sourceList.remove("nbm_fire")
-            sourceList.remove("hrrr_18-48")
+            if "hrrr_18-48" in sourceTimes:
+                sourceTimes.pop("hrrr_18-48", None)
+            if "nbm_fire" in sourceTimes:
+                sourceTimes.pop("nbm_fire", None)
+            if "nbm" in sourceTimes:
+                sourceTimes.pop("nbm", None)
+            if "hrrr_0-18" in sourceTimes:
+                sourceTimes.pop("hrrr_0-18", None)
+            if "hrrr_subh" in sourceTimes:
+                sourceTimes.pop("hrrr_subh", None)
+
+            if "hrrrsubh" in sourceList:
+                sourceList.remove("hrrrsubh")
+            if "hrrr_0-18" in sourceList:
+                sourceList.remove("hrrr_0-18")
+            if "nbm" in sourceList:
+                sourceList.remove("nbm")
+            if "nbm_fire" in sourceList:
+                sourceList.remove("nbm_fire")
+            if "hrrr_18-48" in sourceList:
+                sourceList.remove("hrrr_18-48")
 
         # GFS
         GFS_StartIDX = dataOut_gfs[:, 0].searchsorted(baseDayUTC_Grib, side="right") - 1
@@ -4445,7 +4482,7 @@ def calculate_apparent_temperature(airTemp, humidity, wind):
     e = humidity * 6.105 * np.exp(17.27 * airTempC / (237.7 + airTempC))
 
     # Calculate apparent temperature in Celsius
-    apparentTempC = airTempC + 0.33 * e - 0.70 * airTempC - 4.00
+    apparentTempC = airTempC + 0.33 * e - 0.70 * wind - 4.00
 
     # Convert back to Kelvin
     apparentTempK = apparentTempC + 273.15
