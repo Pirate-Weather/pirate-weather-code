@@ -996,7 +996,6 @@ async def PW_Forecast(
     if icon != "pirate":
         icon = "darksky"
 
-
     # Check if langugage is supported
     if lang not in Translations:
         # Throw an error
