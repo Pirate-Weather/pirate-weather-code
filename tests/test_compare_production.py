@@ -1,5 +1,4 @@
 import os
-import warnings
 
 import httpx
 import pytest
@@ -51,8 +50,8 @@ def _diff_nested(a: object, b: object, path: str = "") -> dict:
 
 
 @pytest.mark.skipif(
-    not os.environ.get("RUN_PROD_COMPARE") or not PW_API,
-    reason="Comparison only runs on dev branch pushes",
+    not PW_API,
+    reason="PW_API environment variable not set",
 )
 def test_local_vs_production():
     client = _get_client()
@@ -73,4 +72,4 @@ def test_local_vs_production():
 
         diffs = _diff_nested(local_data, prod_data)
         if diffs:
-            warnings.warn(f"Differences for {lat},{lon}: {diffs}")
+            print(f"Differences for {lat},{lon}: {diffs}")
