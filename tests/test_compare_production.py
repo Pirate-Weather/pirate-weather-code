@@ -60,11 +60,11 @@ def test_local_vs_production():
     session = httpx.Client()
 
     for lat, lon in [(45.0, -75.0), (10.0, 10.0)]:
-        local_resp = client.get(f"/forecast/{PW_API}/{lat},{lon}")
+        local_resp = client.get(f"/forecast/{PW_API}/{lat},{lon}?version=2")
         assert local_resp.status_code == 200
         local_data = local_resp.json()
 
-        prod_url = f"{PROD_BASE}/{PW_API}/{lat},{lon}"
+        prod_url = f"{PROD_BASE}/{PW_API}/{lat},{lon}?version=2"
         try:
             prod_resp = session.get(prod_url, timeout=10)
         except Exception as exc:  # pragma: no cover - network failure
