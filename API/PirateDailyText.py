@@ -70,6 +70,21 @@ def _get_period_name(hour_of_day, is_today=True, mode="daily"):
         return prefix + "night"
 
 
+def _recursive_replace_period_name(phrase_part, old_name, new_name):
+    """
+    Recursively replaces an old period name with a new one within a list structure.
+    Used for correcting 'tomorrow-night' to 'today-night'.
+    """
+    if isinstance(phrase_part, list):
+        return [
+            _recursive_replace_period_name(item, old_name, new_name)
+            for item in phrase_part
+        ]
+    elif isinstance(phrase_part, str) and phrase_part == old_name:
+        return new_name
+    return phrase_part
+
+
 def _get_time_phrase(
     period_indices,
     condition_type,
@@ -463,6 +478,9 @@ def calculate_period_summary_text(
     mode,
     later_conditions,
     today_period_for_later_check,
+    # New parameters for cloud-wind/dry/humid combination
+    overall_cloud_text=None,  # Added for wind to combine with cloud
+    overall_cloud_idx_for_wind=None,  # Added for wind to combine with cloud
 ):
     """
     Calculates the textual summary for a specific condition (precip, cloud, wind, vis, dry, humid)
@@ -484,6 +502,8 @@ def calculate_period_summary_text(
     - mode (str): Whether the summary is for the day or the next 24h ("daily" or "hour").
     - later_conditions (list): List of conditions that start later in the first period.
     - today_period_for_later_check (str): The name of the current period for 'later' comparison.
+    - overall_cloud_text (str, optional): The determined overall cloud text (e.g., "clear", "light-clouds").
+    - overall_cloud_idx_for_wind (list, optional): The indices of periods where overall_cloud_text is present.
 
     Returns:
     - tuple: A tuple containing:
@@ -525,7 +545,20 @@ def calculate_period_summary_text(
         ):
             humid_condition_combined = True
             current_condition_text = ["and", current_condition_text, "high-humidity"]
-    elif condition_type == "wind":  # Wind can combine with dry/humid but not fog
+    elif condition_type == "wind":
+        # Check for combination with cloud cover based on passed in cloud data
+        if overall_cloud_idx_for_wind and _are_periods_matching(
+            period_indices, overall_cloud_idx_for_wind
+        ):
+            wind_condition_combined = (
+                True  # This flags that wind has combined with cloud
+            )
+            current_condition_text = [
+                "and",
+                overall_cloud_text,  # "clear"
+                current_condition_text,  # "windy" (e.g., calculate_wind_text result)
+            ]
+        # Rest of wind combinations (dry/humid)
         if all_dry_periods and _are_periods_matching(period_indices, all_dry_periods):
             dry_condition_combined = True
             current_condition_text = ["and", current_condition_text, "low-humidity"]
@@ -551,6 +584,20 @@ def calculate_period_summary_text(
 
     phrase_type = time_phrase_structure[0]
     phrase_args = time_phrase_structure[1:]
+
+    # Apply the tomorrow-night to today-night correction before generating summary text
+    # This check ensures we only correct if the forecast starts in the problematic 12am-4am window
+    # and if 'today-night' isn't natively present in the overall periods, but 'tomorrow-night' is.
+    if (
+        check_period == 0
+        and all_periods
+        and all_periods[0].endswith("night")
+        and "tomorrow-night" in all_periods[0]
+        and "today-night" not in all_periods
+    ):
+        phrase_args = _recursive_replace_period_name(
+            phrase_args, "tomorrow-night", "today-night"
+        )
 
     # Construct the final summary text based on the phrase template
     if phrase_type == "for-day":
@@ -1308,6 +1355,9 @@ def calculate_day_text(
             mode,
             later_conditions_list,
             today_period_for_later_check,
+            # Pass cloud info for wind to combine with clear cloud
+            overall_cloud_text=final_cloud_text,
+            overall_cloud_idx_for_wind=overall_cloud_idx,
         )
     if has_vis:
         vis_only_summary, _, _, _, _ = calculate_period_summary_text(
@@ -1367,7 +1417,7 @@ def calculate_day_text(
     # Cloud full summary, including potential combinations with wind/dry/humid/vis
     (
         cloud_full_summary,
-        cloud_wind_combined_flag,
+        _,
         cloud_dry_combined_flag,
         cloud_humid_combined_flag,
         cloud_vis_combined_flag,
