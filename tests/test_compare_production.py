@@ -77,6 +77,4 @@ def test_local_vs_production():
             import json
 
             diff_text = json.dumps(diffs, indent=2, sort_keys=True)
-            warnings.warn(
-                f"Differences for {lat},{lon}:\n{diff_text}", DiffWarning
-            )
+            warnings.warn(f"Differences for {lat},{lon}:\n{diff_text}", DiffWarning)
