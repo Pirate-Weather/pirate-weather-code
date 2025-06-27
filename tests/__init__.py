@@ -1,6 +1,7 @@
 """Test package initialization.
 
-Suppress noisy warnings during test runs."""
+Suppress noisy warnings during test runs.
+"""
 
 import warnings as _warnings
 
@@ -10,6 +11,5 @@ class DiffWarning(UserWarning):
 
 _warnings.filterwarnings("ignore")
 _warnings.filterwarnings("default", category=DiffWarning)
-import warnings
 
 warnings.filterwarnings("ignore")
