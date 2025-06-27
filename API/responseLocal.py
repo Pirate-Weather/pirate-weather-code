@@ -50,6 +50,7 @@ TIMING = os.environ.get("TIMING", False)
 
 force_now = os.getenv("force_now", default=False)
 
+
 def setup_logging():
     handler = logging.StreamHandler(sys.stdout)
     # include timestamp, level, logger name, module, line number, message
@@ -59,6 +60,7 @@ def setup_logging():
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     root.addHandler(handler)
+
 
 class S3ZipStore(zarr.storage.ZipStore):
     def __init__(self, path: s3fs.S3File) -> None:
@@ -343,6 +345,7 @@ def update_zarr_store(initialRun):
         logger.info("ETOPO Setup")
 
     print("Refreshed Zarrs")
+
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -2911,8 +2914,15 @@ async def PW_Forecast(
     if "gfs" in sourceList:
         VisibilityHour[:, 2] = GFS_Merged[:, 1]
 
-    InterPhour[:, 15] = clipLog(np.choose(np.argmin(np.isnan(VisibilityHour), axis=1), VisibilityHour.T),
-                                0, 25000, "Visibility Hour")* visUnits
+    InterPhour[:, 15] = (
+        clipLog(
+            np.choose(np.argmin(np.isnan(VisibilityHour), axis=1), VisibilityHour.T),
+            0,
+            25000,
+            "Visibility Hour",
+        )
+        * visUnits
+    )
 
     ### Ozone Index
     if "gfs" in sourceList:
@@ -2952,7 +2962,9 @@ async def PW_Forecast(
 
     # Air quality
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-        InterPhour[:, 20] = clipLog(HRRR_Merged[:, 16] * 1e9, 0, 200, "Air quality Hour") # Change from kg/m3 to ug/m3
+        InterPhour[:, 20] = clipLog(
+            HRRR_Merged[:, 16] * 1e9, 0, 200, "Air quality Hour"
+        )  # Change from kg/m3 to ug/m3
     else:
         InterPhour[:, 20] = -999
 
@@ -3688,7 +3700,7 @@ async def PW_Forecast(
         )
 
     # Clip between -90 and 60
-    InterPcurrent[4]  = clipLog(InterPcurrent[4], -183, 333, "Temperature Current")
+    InterPcurrent[4] = clipLog(InterPcurrent[4], -183, 333, "Temperature Current")
 
     # Dewpoint from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
@@ -3705,7 +3717,7 @@ async def PW_Forecast(
         )
 
     # Clip between -90 and 60
-    InterPcurrent[6]  = clipLog(InterPcurrent[6], -183, 333, "Dewpoint Current")
+    InterPcurrent[6] = clipLog(InterPcurrent[6], -183, 333, "Dewpoint Current")
 
     # humidity, NBM then HRRR, then GFS
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
@@ -3725,7 +3737,7 @@ async def PW_Forecast(
         ) * humidUnit
 
     # Clip between 0 and 1
-    InterPcurrent[7]  = clipLog(InterPcurrent[7], 0, 1, "Humidity Current")
+    InterPcurrent[7] = clipLog(InterPcurrent[7], 0, 1, "Humidity Current")
 
     # Pressure from HRRR, then GFS
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
@@ -3740,7 +3752,9 @@ async def PW_Forecast(
         )
 
     # Clip between 800 and 1100
-    InterPcurrent[8]  = clipLog(InterPcurrent[8], 80000, 110000, "Pressure Current") * pressUnits
+    InterPcurrent[8] = (
+        clipLog(InterPcurrent[8], 80000, 110000, "Pressure Current") * pressUnits
+    )
 
     # WindSpeed from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
@@ -3765,7 +3779,7 @@ async def PW_Forecast(
             )
             ** 2
         )
-    InterPcurrent[9]  = clipLog(InterPcurrent[9], 0, 120, "WindSpeed Current") * windUnit
+    InterPcurrent[9] = clipLog(InterPcurrent[9], 0, 120, "WindSpeed Current") * windUnit
 
     # Guest from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
@@ -3782,7 +3796,7 @@ async def PW_Forecast(
         )
 
     # Clip between 0 and 400
-    InterPcurrent[10]  = clipLog(InterPcurrent[10], 0, 120, "Guest Current") * windUnit
+    InterPcurrent[10] = clipLog(InterPcurrent[10], 0, 120, "Guest Current") * windUnit
 
     # WindDir from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
@@ -3824,14 +3838,20 @@ async def PW_Forecast(
         ) * 0.01
 
     # Clip
-    InterPcurrent[12]  = clipLog(InterPcurrent[12], 0, 1, "Cloud Current")
+    InterPcurrent[12] = clipLog(InterPcurrent[12], 0, 1, "Cloud Current")
 
     # UV Index from subH, then NBM, the GFS
-    InterPcurrent[13]  = clipLog((
+    InterPcurrent[13] = clipLog(
+        (
             GFS_Merged[currentIDX_hrrrh_A, 18] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, 18] * interpFac2)
+            + GFS_Merged[currentIDX_hrrrh, 18] * interpFac2
+        )
         * 18.9
-        * 0.025, 0, 15, "UV Current")
+        * 0.025,
+        0,
+        15,
+        "UV Current",
+    )
 
     # VIS, SubH, NBM then HRRR, then GFS
     if "hrrrsubh" in sourceList:
@@ -3852,12 +3872,17 @@ async def PW_Forecast(
             + GFS_Merged[currentIDX_hrrrh, 1] * interpFac2
         )
 
-    InterPcurrent[14]  = clipLog(InterPcurrent[14], 0, 25000, "Vis Current") * visUnits
+    InterPcurrent[14] = clipLog(InterPcurrent[14], 0, 25000, "Vis Current") * visUnits
 
     # Ozone from GFS
-  # "   "ozone"
-    InterPcurrent[15]  = clipLog(GFS_Merged[currentIDX_hrrrh_A, 16] * interpFac1
-        + GFS_Merged[currentIDX_hrrrh, 16] * interpFac2, 0, 500, "Ozone Current")
+    # "   "ozone"
+    InterPcurrent[15] = clipLog(
+        GFS_Merged[currentIDX_hrrrh_A, 16] * interpFac1
+        + GFS_Merged[currentIDX_hrrrh, 16] * interpFac2,
+        0,
+        500,
+        "Ozone Current",
+    )
 
     # Storm Distance from GFS
     InterPcurrent[16] = np.maximum(
@@ -3874,13 +3899,18 @@ async def PW_Forecast(
 
     # Smoke from HRRR
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-        InterPcurrent[18]  = clipLog((
+        InterPcurrent[18] = clipLog(
+            (
                 (
                     HRRR_Merged[currentIDX_hrrrh_A, 16] * interpFac1
                     + HRRR_Merged[currentIDX_hrrrh, 16] * interpFac2
                 )
                 * 1e9
-            ), 0, 200, "Smoke Current")
+            ),
+            0,
+            200,
+            "Smoke Current",
+        )
 
     else:
         InterPcurrent[18] = -999
@@ -3907,14 +3937,21 @@ async def PW_Forecast(
         )
 
     # Clip
-    InterPcurrent[20]  = clipLog(InterPcurrent[20],  -183, 333, "Apparent Temperature Current")
+    InterPcurrent[20] = clipLog(
+        InterPcurrent[20], -183, 333, "Apparent Temperature Current"
+    )
 
     # Fire index from NBM Fire
     if "nbm_fire" in sourceList:
-        InterPcurrent[19]  = clipLog((
+        InterPcurrent[19] = clipLog(
+            (
                 NBM_Fire_Merged[currentIDX_hrrrh_A, 1] * interpFac1
                 + NBM_Fire_Merged[currentIDX_hrrrh, 1] * interpFac2
-            ),  0, 100, "Fire index Current")
+            ),
+            0,
+            100,
+            "Fire index Current",
+        )
 
     else:
         InterPcurrent[19] = -999
@@ -4479,7 +4516,8 @@ def calculate_apparent_temperature(airTemp, humidity, wind):
     apparentTempK = apparentTempC + 273.15
 
     # Clip between -90 and 60
-    return  clipLog(apparentTempK,  -183, 333, "Apparent Temperature Current")
+    return clipLog(apparentTempK, -183, 333, "Apparent Temperature Current")
+
 
 def clipLog(data, min, max, name):
     """
