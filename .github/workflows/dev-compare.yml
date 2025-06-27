@@ -20,4 +20,4 @@ jobs:
       - name: Run production comparison
         env:
           PW_API: ${{ secrets.PW_API }}
-        run: pytest -q tests/test_compare_production.py
+        run: pytest -s -q tests/test_compare_production.py
