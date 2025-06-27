@@ -1,8 +1,10 @@
 import os
+import warnings
 
 import httpx
 import pytest
 
+from tests import DiffWarning
 from tests.test_s3_live import _get_client
 
 PW_API = os.environ.get("PW_API")
@@ -75,4 +77,6 @@ def test_local_vs_production():
             import json
 
             diff_text = json.dumps(diffs, indent=2, sort_keys=True)
-            print(f"Differences for {lat},{lon}:\n{diff_text}")
+            warnings.warn(
+                f"Differences for {lat},{lon}:\n{diff_text}", DiffWarning
+            )
