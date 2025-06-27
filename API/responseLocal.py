@@ -4524,15 +4524,15 @@ def clipLog(data, min, max, name):
     Clip the data between min and max. Log if there is an error
     """
     if data.min() < min:
-        print("ERROR: Min clipping required for " + name)
+        logger.error("Min clipping required for " + name)
         # Print the data and the index it occurs
-        print("Min Value: " + str(data.min()))
-        print("Min Index: " + str(np.where(data == data.min())))
+        logger.error("Min Value: " + str(data.min()))
+        logger.error("Min Index: " + str(np.where(data == data.min())))
     # Same for max
     if data.max() > max:
-        print("ERROR: Max clipping required for " + name)
+        logger.error("Max clipping required for " + name)
         # Print the data and the index it occurs
-        print("Max Value: " + str(data.max()))
-        print("Max Index: " + str(np.where(data == data.max())))
+        logger.error("Max Value: " + str(data.max()))
+        logger.error("Max Index: " + str(np.where(data == data.max())))
 
     return np.clip(data, min, max)
