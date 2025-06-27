@@ -11,5 +11,3 @@ class DiffWarning(UserWarning):
 
 _warnings.filterwarnings("ignore")
 _warnings.filterwarnings("default", category=DiffWarning)
-
-warnings.filterwarnings("ignore")
