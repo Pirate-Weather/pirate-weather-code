@@ -3,6 +3,7 @@
 Suppress noisy warnings during test runs."""
 
 
+
 class DiffWarning(UserWarning):
     """Warning emitted when forecast differences are detected."""
 
