@@ -105,13 +105,6 @@ python3.12 -m venv "PirateWeather"
 source ~/.virtualenvs/PirateWeather/bin/activate
 
 pip install -r  ~/pirate-weather-code/Docker/requirements-api.txt
-
-mkdir ~/PirateWeatherNode
-cp ~/pirate-weather-code/Docker/package-api.json ~/PirateWeatherNode/package.json 
-cd ~/PirateWeatherNode
-npm install
-
-export node_dir=~/PirateWeatherNode/node_modules/translations/index.js
 export save_type=Download
 export TIMING=True
 export STAGE=TESTING
