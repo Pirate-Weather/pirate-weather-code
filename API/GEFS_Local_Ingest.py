@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 import warnings
 
 import dask.array as da
@@ -401,8 +402,24 @@ for i in range(hisPeriod, 0, -6):
             + ".zarr"
         )
 
-        if s3.exists(s3_path):
-            continue
+        # Try to open and read data from the last variable of the zarr file to check if it has already been saved
+        try:
+            hisCheckStore = zarr.storage.FsspecStore.from_url(
+                s3_path,
+                storage_options={
+                    "key": aws_access_key_id,
+                    "secret": aws_secret_access_key,
+                },
+            )
+            zarr.open(hisCheckStore)[probVars[-1]][-1, -1, -1]
+            continue  # If it exists, skip to the next iteration
+        except Exception:
+            print("### Historic Data Failure!")
+            print(traceback.print_exc())
+
+            # Delete the file if it exists
+            if s3.exists(s3_path):
+                s3.rm(s3_path)
     else:
         # Local Path Setup
         local_path = (
