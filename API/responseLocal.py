@@ -2915,14 +2915,12 @@ async def PW_Forecast(
         VisibilityHour[:, 2] = GFS_Merged[:, 1]
 
     InterPhour[:, 15] = (
-        clipLog(
+        np.clip(
             np.choose(np.argmin(np.isnan(VisibilityHour), axis=1), VisibilityHour.T),
             0,
-            25000,
-            "Visibility Hour",
+            16090,
         )
         * visUnits
-    )
 
     ### Ozone Index
     if "gfs" in sourceList:
@@ -3872,7 +3870,7 @@ async def PW_Forecast(
             + GFS_Merged[currentIDX_hrrrh, 1] * interpFac2
         )
 
-    InterPcurrent[14] = clipLog(InterPcurrent[14], 0, 25000, "Vis Current") * visUnits
+    InterPcurrent[14] = np.clip(InterPcurrent[14], 0, 16090) * visUnits
 
     # Ozone from GFS
     # "   "ozone"
@@ -4526,13 +4524,15 @@ def clipLog(data, min, max, name):
     if data.min() < min:
         logger.error("Min clipping required for " + name)
         # Print the data and the index it occurs
-        logger.error("Min Value: " + str(data.min()))
-        logger.error("Min Index: " + str(np.where(data == data.min())))
+        if len(data) > 1:
+            logger.error("Min Value: " + str(data.min()))
+            logger.error("Min Index: " + str(np.where(data == data.min())))
     # Same for max
     if data.max() > max:
         logger.error("Max clipping required for " + name)
         # Print the data and the index it occurs
-        logger.error("Max Value: " + str(data.max()))
-        logger.error("Max Index: " + str(np.where(data == data.max())))
+        if len(data) > 1:
+            logger.error("Max Value: " + str(data.max()))
+            logger.error("Max Index: " + str(np.where(data == data.max())))
 
     return np.clip(data, min, max)
