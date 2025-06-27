@@ -2,14 +2,14 @@
 
 Suppress noisy warnings during test runs."""
 
-
+import warnings as _warnings
 
 class DiffWarning(UserWarning):
     """Warning emitted when forecast differences are detected."""
 
 
-warnings.filterwarnings("default", category=DiffWarning)
-
+_warnings.filterwarnings("ignore")
+_warnings.filterwarnings("default", category=DiffWarning)
 import warnings
 
 warnings.filterwarnings("ignore")
