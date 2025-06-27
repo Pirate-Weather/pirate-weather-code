@@ -29,7 +29,6 @@ from pirateweather_translations.dynamic_loader import load_all_translations
 from PirateText import calculate_text
 from PirateMinutelyText import calculate_minutely_text
 from PirateWeeklyText import calculate_weekly_text
-from PirateSimpleDayText import calculate_simple_day_text
 from PirateDailyText import calculate_day_text
 from pytz import timezone, utc
 from timemachine import TimeMachine
@@ -2976,7 +2975,6 @@ async def PW_Forecast(
         print("Hourly Loop start")
         print(datetime.datetime.utcnow() - T_Start)
 
-
     for idx in range(int(baseTimeOffset), hourly_hours + int(baseTimeOffset)):
         # Check if day or night
         if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], 17]:
@@ -3153,7 +3151,6 @@ async def PW_Forecast(
     if TIMING:
         print("Daily start")
         print(datetime.datetime.utcnow() - T_Start)
-
 
     mean_results = []
     sum_results = []
@@ -3500,7 +3497,7 @@ async def PW_Forecast(
         try:
             # Update the text
             dayIcon, dayText = calculate_day_text(
-                hourList[(idx)*24:(idx+1)*24],
+                hourList[(idx) * 24 : (idx + 1) * 24],
                 prepAccumUnit,
                 visUnits,
                 windUnit,
