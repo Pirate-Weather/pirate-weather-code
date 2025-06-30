@@ -1,10 +1,10 @@
-numpy==2.2.6
+numpy==2.3.1
 aiobotocore[boto3]==2.23.0
 netCDF4==1.7.2
 xarray==2025.6.1
 cartopy==0.24.1
 cfgrib==0.9.15.0
-eccodes==2.41.0
+eccodes==2.42.0
 zarr==3.0.8
 dask==2025.5.1
 s3fs==2025.5.1
@@ -12,7 +12,7 @@ bottleneck==1.5.0
 rioxarray==0.19.0
 distributed==2025.5.1
 xarray-spatial==0.4.0
-geopandas==1.1.0
+geopandas==1.1.1
 nwswx==0.1.2
 git+https://github.com/blaylockbk/Herbie.git
 pyarrow==20.0.0
