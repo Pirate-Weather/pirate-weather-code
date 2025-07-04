@@ -385,7 +385,6 @@ def toTimestamp(d):
 STAGE = os.environ.get("STAGE", "PROD")
 if STAGE == "TESTING":
     print("Setting up S3 zarrs")
-
     # If S3, use that, otherwise use local
     if save_type == "S3":
         # s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key, asynchronous=False)
@@ -399,9 +398,13 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar_v2/NWS_Alerts.zarr.zip")
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        store = zarr.storage.FsspecStore(
-            s3, path=s3_bucket + "/NWS_Alerts.zarr", read_only=True
-        )
+        s3 = s3fs.S3FileSystem(
+            key=aws_access_key_id,
+            secret=aws_secret_access_key,
+            version_aware = True)
+
+        f = s3.open("s3://" + s3_bucket + "/NWS_Alerts.zarr.zip")
+        store = S3ZipStore(f)
 
     else:
         f = s3_bucket + "NWS_Alerts.zarr.zip"
@@ -413,10 +416,8 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar_v2/SubH.zarr.zip")
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        store = zarr.storage.FsspecStore(
-            s3, path=s3_bucket + "/SubH.zarr", read_only=True
-        )
-
+        f = s3.open("s3://" + s3_bucket + "/SubH.zarr.zip")
+        store = S3ZipStore(f)
     else:
         f = s3_bucket + "SubH_v2.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
@@ -428,9 +429,8 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar_v2/HRRR_6H.zarr.zip")
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        store = zarr.storage.FsspecStore(
-            s3, path=s3_bucket + "/HRRR_6H.zarr", read_only=True
-        )
+        f = s3.open("s3://" + s3_bucket + "/HRRR_6H.zarr.zip")
+        store = S3ZipStore(f)
     else:
         f = s3_bucket + "HRRR_6H.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
@@ -442,9 +442,8 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar_v2/GFS.zarr.zip")
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        store = zarr.storage.FsspecStore(
-            s3, path=s3_bucket + "/GFS.zarr", read_only=True
-        )
+        f = s3.open("s3://" + s3_bucket + "/GFS.zarr.zip")
+        store = S3ZipStore(f)
     else:
         f = s3_bucket + "GFS.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
@@ -456,9 +455,8 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar_v2/GEFS.zarr.zip")
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        store = zarr.storage.FsspecStore(
-            s3, path=s3_bucket + "/GEFS.zarr", read_only=True
-        )
+        f = s3.open("s3://" + s3_bucket + "/GEFS.zarr.zip")
+        store = S3ZipStore(f)
     else:
         f = s3_bucket + "GEFS.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
@@ -470,9 +468,12 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar_v2/NBM.zarr.zip")
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        store = zarr.storage.FsspecStore(
-            s3, path=s3_bucket + "/NBM.zarr", read_only=True
-        )
+        # print('USE VERSION NBM')
+        # f = s3.open("s3://" + s3_bucket + "/NBM.zarr.zip",
+        #             version_id="sfWxulLYHDWCQTiM2u0v.x_Sg4pTwpG7")
+        f = s3.open("s3://" + s3_bucket + "/NBM.zarr.zip")
+
+        store = S3ZipStore(f)
     else:
         f = s3_bucket + "NBM.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
@@ -484,9 +485,8 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar_v2/NBM_Fire.zarr.zip")
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        store = zarr.storage.FsspecStore(
-            s3, path=s3_bucket + "/NBM_Fire.zarr", read_only=True
-        )
+        f = s3.open("s3://" + s3_bucket + "/NBM_Fire.zarr.zip")
+        store = S3ZipStore(f)
     else:
         f = s3_bucket + "NBM_Fire.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
@@ -498,9 +498,8 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar_v2/HRRR.zarr.zip")
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        store = zarr.storage.FsspecStore(
-            s3, path=s3_bucket + "/HRRR.zarr", read_only=True
-        )
+        f = s3.open("s3://" + s3_bucket + "/HRRR.zarr.zip")
+        store = S3ZipStore(f)
     else:
         f = s3_bucket + "HRRR.zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
@@ -513,9 +512,8 @@ if STAGE == "TESTING":
             f = s3.open("s3://ForecastTar_v2/ETOPO_DA_C.zarr.zip")
             store = S3ZipStore(f)
         elif save_type == "S3Zarr":
-            store = zarr.storage.FsspecStore(
-                s3, path=s3_bucket + "ETOPO_DA_C.zarr", read_only=True
-            )
+            f = s3.open("s3://" + s3_bucket + "/ETOPO_DA_C.zarr.zip")
+            store = S3ZipStore(f)
         else:
             f = s3_bucket + "ETOPO_DA_C.zarr.zip"
             store = zarr.storage.ZipStore(f, mode="r")
@@ -1164,7 +1162,7 @@ async def PW_Forecast(
     # Find UTC time for the base day
     baseDayUTC_Grib = (
         (
-            np.datetime64(baseDay.astimezone(utc))
+            np.datetime64(baseDay.astimezone(utc).replace(tzinfo=None))
             - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
         )
         .astype("timedelta64[s]")
@@ -1903,8 +1901,8 @@ async def PW_Forecast(
 
     ### Minutely
     minute_array = np.arange(
-        baseTime.astimezone(utc),
-        baseTime + datetime.timedelta(minutes=61),
+        baseTime.astimezone(utc).replace(tzinfo=None),
+        baseTime.replace(tzinfo=None) + datetime.timedelta(minutes=61),
         datetime.timedelta(minutes=1),
     )
     minute_array_grib = (
@@ -1931,8 +1929,8 @@ async def PW_Forecast(
         numHours = daily_days * 24 + daily_day_hours
 
     hour_array = np.arange(
-        baseDay.astimezone(utc),
-        baseDay.astimezone(utc)
+        baseDay.astimezone(utc).replace(tzinfo=None),
+        baseDay.astimezone(utc).replace(tzinfo=None)
         + datetime.timedelta(days=daily_days)
         + datetime.timedelta(hours=daily_day_hours),
         datetime.timedelta(hours=1),
@@ -1957,24 +1955,10 @@ async def PW_Forecast(
         try:  # Add a fallback to GFS if these don't work
             # HRRR
             if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-                HRRR_StartIDX = max(
-                    (
-                        dataOut_hrrrh[:, 0].searchsorted(baseDayUTC_Grib, side="right")
-                        - 1,
-                        0,
-                    )
-                )
-                H2_StartIDX = max(
-                    (
-                        dataOut_h2[:, 0].searchsorted(
-                            dataOut_hrrrh[-1, 0], side="right"
-                        )
-                        - 1,
-                        0,
-                    )
-                )
+                HRRR_StartIDX = nearest_index(dataOut_hrrrh[:, 0], baseDayUTC_Grib)
+                H2_StartIDX =  nearest_index(dataOut_h2[:, 0], dataOut_hrrrh[-1, 0])+1
 
-                if (H2_StartIDX < 0) or (HRRR_StartIDX < 0):
+                if (H2_StartIDX < 1) or (HRRR_StartIDX < 2):
                     if "hrrr_18-48" in sourceTimes:
                         sourceTimes.pop("hrrr_18-48", None)
                     if "hrrr_18-48" in sourceTimes:
@@ -1983,6 +1967,11 @@ async def PW_Forecast(
                         sourceTimes.pop("hrrr_0-18", None)
                     if "hrrr_0-18" in sourceTimes:
                         sourceTimes.pop("hrrr_0-18", None)
+
+                    # Log the error
+                    logger.error(
+                        "HRRR data not available for the requested time range."
+                    )
 
                 else:
                     HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), np.nan)
@@ -1998,17 +1987,19 @@ async def PW_Forecast(
                         )
                     )
 
+
             # NBM
             if "nbm" in sourceList:
-                NBM_StartIDX = (
-                    dataOut_nbm[:, 0].searchsorted(baseDayUTC_Grib, side="right") - 1
-                )
-                if NBM_StartIDX < 0:
+                NBM_StartIDX = nearest_index(dataOut_nbm[:, 0], baseDayUTC_Grib)
+
+                if NBM_StartIDX < 1:
                     if "nbm" in sourceList:
                         sourceList.remove("nbm")
                     if "nbm" in sourceTimes:
                         sourceTimes.pop("nbm", None)
-
+                    logger.error(
+                        "NBM data not available for the requested time range."
+                    )
                 else:
                     NBM_Merged = np.full((numHours, dataOut_nbm.shape[1]), np.nan)
                     NBM_Merged[0 : (230 - NBM_StartIDX), :] = dataOut_nbm[
@@ -2017,16 +2008,17 @@ async def PW_Forecast(
 
             # NBM FIre
             if "nbm_fire" in sourceList:
-                NBM_Fire_StartIDX = (
-                    dataOut_nbmFire[:, 0].searchsorted(baseDayUTC_Grib, side="right")
-                    - 1
-                )
-                if NBM_Fire_StartIDX < 0:
+                NBM_Fire_StartIDX = nearest_index(dataOut_nbmFire[:, 0], baseDayUTC_Grib)
+
+                if NBM_Fire_StartIDX < 1:
                     if "nbm_fire" in sourceList:
                         sourceList.remove("nbm_fire")
                     if "nbm_fire" in sourceTimes:
                         sourceTimes.pop("nbm_fire", None)
 
+                    logger.error(
+                        "NBM Fire data not available for the requested time range."
+                    )
                 else:
                     NBM_Fire_Merged = np.full(
                         (numHours, dataOut_nbmFire.shape[1]), np.nan
@@ -2061,7 +2053,7 @@ async def PW_Forecast(
                 sourceList.remove("hrrr_18-48")
 
         # GFS
-        GFS_StartIDX = dataOut_gfs[:, 0].searchsorted(baseDayUTC_Grib, side="right") - 1
+        GFS_StartIDX = nearest_index(dataOut_gfs[:, 0], baseDayUTC_Grib)
         GFS_EndIDX = min((len(dataOut_gfs), (numHours + GFS_StartIDX)))
         GFS_Merged = np.zeros((numHours, dataOut_gfs.shape[1]))
         GFS_Merged[0 : (GFS_EndIDX - GFS_StartIDX), :] = dataOut_gfs[
@@ -2070,9 +2062,8 @@ async def PW_Forecast(
 
         # GEFS
         if "gefs" in sourceList:
-            GEFS_StartIDX = (
-                dataOut_gefs[:, 0].searchsorted(baseDayUTC_Grib, side="right") - 1
-            )
+            GEFS_StartIDX = nearest_index(
+                dataOut_gefs[:, 0], baseDayUTC_Grib)
             GEFS_Merged = dataOut_gefs[GEFS_StartIDX : (numHours + GEFS_StartIDX), :]
 
     # Interpolate if Time Machine
@@ -2265,7 +2256,7 @@ async def PW_Forecast(
 
             InterSday[i, 17] = (
                 (
-                    np.datetime64(s["sunrise"])
+                    np.datetime64(s["sunrise"].replace(tzinfo=None))
                     - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
                 )
                 .astype("timedelta64[s]")
@@ -2273,7 +2264,7 @@ async def PW_Forecast(
             )
             InterSday[i, 18] = (
                 (
-                    np.datetime64(s["sunset"])
+                    np.datetime64(s["sunset"].replace(tzinfo=None))
                     - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
                 )
                 .astype("timedelta64[s]")
@@ -2282,7 +2273,7 @@ async def PW_Forecast(
 
             InterSday[i, 15] = (
                 (
-                    np.datetime64(s["dawn"])
+                    np.datetime64(s["dawn"].replace(tzinfo=None))
                     - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
                 )
                 .astype("timedelta64[s]")
@@ -2290,7 +2281,7 @@ async def PW_Forecast(
             )
             InterSday[i, 16] = (
                 (
-                    np.datetime64(s["dusk"])
+                    np.datetime64(s["dusk"].replace(tzinfo=None))
                     - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
                 )
                 .astype("timedelta64[s]")
@@ -2461,6 +2452,14 @@ async def PW_Forecast(
                 right=np.nan,
             )
 
+            # Visibility is at a weird index
+            hrrrSubHInterpolation[:, 14] = np.interp(
+                minute_array_grib,
+                HRRR_Merged[:, 0].squeeze(),
+                HRRR_Merged[:, 1],
+                left=np.nan,
+                right=np.nan,
+            )
         if "gefs" in sourceList:
             gefsMinuteInterpolation[:, 3] = np.interp(
                 minute_array_grib,
@@ -4522,18 +4521,30 @@ def clipLog(data, min, max, name):
     """
     Clip the data between min and max. Log if there is an error
     """
-    if data.min() < min:
+    # Only print if the clipping is larger than 10% of the min
+    if data.min() < (min -0.25):
+        # Print the data and the index it occurs
         logger.error("Min clipping required for " + name)
-        # Print the data and the index it occurs
-        if len(data) > 1:
-            logger.error("Min Value: " + str(data.min()))
+        logger.error("Min Value: " + str(data.min()))
+        if isinstance(data, np.ndarray):
             logger.error("Min Index: " + str(np.where(data == data.min())))
+
     # Same for max
-    if data.max() > max:
+    if data.max() > (max + 0.25):
         logger.error("Max clipping required for " + name)
+        logger.error("Max Value: " + str(data.max()))
+
         # Print the data and the index it occurs
-        if len(data) > 1:
-            logger.error("Max Value: " + str(data.max()))
+        if isinstance(data, np.ndarray):
             logger.error("Max Index: " + str(np.where(data == data.max())))
 
     return np.clip(data, min, max)
+
+def nearest_index(a, v):
+    # find insertion point
+    idx = np.searchsorted(a, v)
+    # clip so we don’t run off the ends
+    idx = np.clip(idx, 1, len(a)-1)
+    # look at neighbors, pick the closer one
+    left, right = a[idx-1], a[idx]
+    return idx if abs(right - v) < abs(v - left) else idx-1
