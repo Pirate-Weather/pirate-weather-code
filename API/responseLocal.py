@@ -4539,10 +4539,11 @@ def clipLog(data, min, max, name):
 
 
 def nearest_index(a, v):
-    # find insertion point
+    # Slightly faster than a simple linear search for large arrays
+    # Find insertion point
     idx = np.searchsorted(a, v)
-    # clip so we don’t run off the ends
+    # Clip so we don’t run off the ends
     idx = np.clip(idx, 1, len(a) - 1)
-    # look at neighbors, pick the closer one
+    # Look at neighbors, pick the closer one
     left, right = a[idx - 1], a[idx]
     return idx if abs(right - v) < abs(v - left) else idx - 1
