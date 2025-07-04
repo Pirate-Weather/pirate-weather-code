@@ -557,7 +557,6 @@ for i in range(hisPeriod, 1, -6):
         with open(done_file, "w") as f:
             f.write("Done")
 
-
     print((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
 
 

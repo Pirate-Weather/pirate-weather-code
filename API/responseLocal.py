@@ -399,9 +399,8 @@ if STAGE == "TESTING":
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
         s3 = s3fs.S3FileSystem(
-            key=aws_access_key_id,
-            secret=aws_secret_access_key,
-            version_aware = True)
+            key=aws_access_key_id, secret=aws_secret_access_key, version_aware=True
+        )
 
         f = s3.open("s3://" + s3_bucket + "/NWS_Alerts.zarr.zip")
         store = S3ZipStore(f)
@@ -1956,7 +1955,7 @@ async def PW_Forecast(
             # HRRR
             if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
                 HRRR_StartIDX = nearest_index(dataOut_hrrrh[:, 0], baseDayUTC_Grib)
-                H2_StartIDX =  nearest_index(dataOut_h2[:, 0], dataOut_hrrrh[-1, 0])+1
+                H2_StartIDX = nearest_index(dataOut_h2[:, 0], dataOut_hrrrh[-1, 0]) + 1
 
                 if (H2_StartIDX < 1) or (HRRR_StartIDX < 2):
                     if "hrrr_18-48" in sourceTimes:
@@ -1987,7 +1986,6 @@ async def PW_Forecast(
                         )
                     )
 
-
             # NBM
             if "nbm" in sourceList:
                 NBM_StartIDX = nearest_index(dataOut_nbm[:, 0], baseDayUTC_Grib)
@@ -1997,9 +1995,7 @@ async def PW_Forecast(
                         sourceList.remove("nbm")
                     if "nbm" in sourceTimes:
                         sourceTimes.pop("nbm", None)
-                    logger.error(
-                        "NBM data not available for the requested time range."
-                    )
+                    logger.error("NBM data not available for the requested time range.")
                 else:
                     NBM_Merged = np.full((numHours, dataOut_nbm.shape[1]), np.nan)
                     NBM_Merged[0 : (230 - NBM_StartIDX), :] = dataOut_nbm[
@@ -2008,7 +2004,9 @@ async def PW_Forecast(
 
             # NBM FIre
             if "nbm_fire" in sourceList:
-                NBM_Fire_StartIDX = nearest_index(dataOut_nbmFire[:, 0], baseDayUTC_Grib)
+                NBM_Fire_StartIDX = nearest_index(
+                    dataOut_nbmFire[:, 0], baseDayUTC_Grib
+                )
 
                 if NBM_Fire_StartIDX < 1:
                     if "nbm_fire" in sourceList:
@@ -2062,8 +2060,7 @@ async def PW_Forecast(
 
         # GEFS
         if "gefs" in sourceList:
-            GEFS_StartIDX = nearest_index(
-                dataOut_gefs[:, 0], baseDayUTC_Grib)
+            GEFS_StartIDX = nearest_index(dataOut_gefs[:, 0], baseDayUTC_Grib)
             GEFS_Merged = dataOut_gefs[GEFS_StartIDX : (numHours + GEFS_StartIDX), :]
 
     # Interpolate if Time Machine
@@ -4522,7 +4519,7 @@ def clipLog(data, min, max, name):
     Clip the data between min and max. Log if there is an error
     """
     # Only print if the clipping is larger than 10% of the min
-    if data.min() < (min -0.25):
+    if data.min() < (min - 0.25):
         # Print the data and the index it occurs
         logger.error("Min clipping required for " + name)
         logger.error("Min Value: " + str(data.min()))
@@ -4540,11 +4537,12 @@ def clipLog(data, min, max, name):
 
     return np.clip(data, min, max)
 
+
 def nearest_index(a, v):
     # find insertion point
     idx = np.searchsorted(a, v)
     # clip so we don’t run off the ends
-    idx = np.clip(idx, 1, len(a)-1)
+    idx = np.clip(idx, 1, len(a) - 1)
     # look at neighbors, pick the closer one
-    left, right = a[idx-1], a[idx]
-    return idx if abs(right - v) < abs(v - left) else idx-1
+    left, right = a[idx - 1], a[idx]
+    return idx if abs(right - v) < abs(v - left) else idx - 1
