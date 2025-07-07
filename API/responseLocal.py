@@ -2141,7 +2141,7 @@ async def PW_Forecast(
                 )
                 + datetime.timedelta(days=i)
             )
-            .astimezoneastimezone(utc)
+            .astimezone(utc)
             .timestamp()
             for i in range(10)
         ]
