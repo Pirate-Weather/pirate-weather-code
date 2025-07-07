@@ -1001,7 +1001,8 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/ECMWF.zarr.zip", forecast_path + "/" + ingestVersion + "/ECMWF.zarr.zip"
+        forecast_process_dir + "/ECMWF.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/ECMWF.zarr.zip",
     )
     s3.put_file(
         forecast_process_dir + "/ECMWF_Maps.zarr.zip",

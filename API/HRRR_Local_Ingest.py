@@ -642,7 +642,8 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/HRRR.zarr.zip", forecast_path + "/" + ingestVersion + "/HRRR.zarr.zip"
+        forecast_process_dir + "/HRRR.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/HRRR.zarr.zip",
     )
     s3.put_file(
         forecast_process_dir + "/HRRR_maps.zarr.zip",

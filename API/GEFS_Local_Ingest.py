@@ -803,7 +803,8 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/GEFS.zarr.zip", forecast_path + "/" + ingestVersion + "/GEFS.zarr.zip"
+        forecast_process_dir + "/GEFS.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/GEFS.zarr.zip",
     )
 
     # Write most recent forecast time

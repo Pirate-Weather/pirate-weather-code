@@ -363,7 +363,8 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/SubH.zarr.zip", forecast_path + "/" + ingestVersion + "/SubH.zarr.zip"
+        forecast_process_dir + "/SubH.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/SubH.zarr.zip",
     )
 
     # Write most recent forecast time

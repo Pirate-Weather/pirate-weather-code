@@ -1065,7 +1065,8 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/NBM.zarr.zip", forecast_path + "/" + ingestVersion + "/NBM.zarr.zip"
+        forecast_process_dir + "/NBM.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/NBM.zarr.zip",
     )
     s3.put_file(
         forecast_process_dir + "/NBM_Maps.zarr.zip",
@@ -1073,7 +1074,9 @@ if saveType == "S3":
     )
 
     # Write most recent forecast time
-    with open(forecast_process_dir + "/" + ingestVersion + "/NBM.time.pickle", "wb") as file:
+    with open(
+        forecast_process_dir + "/" + ingestVersion + "/NBM.time.pickle", "wb"
+    ) as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
