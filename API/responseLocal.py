@@ -52,6 +52,7 @@ force_now = os.getenv("force_now", default=False)
 
 ingestVersion = "v27"
 
+
 def setup_logging():
     handler = logging.StreamHandler(sys.stdout)
     # include timestamp, level, logger name, module, line number, message
