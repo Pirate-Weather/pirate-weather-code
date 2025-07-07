@@ -564,7 +564,7 @@ class WeatherParallel(object):
     async def zarr_read(self, model, opened_zarr, x, y):
         if TIMING:
             print("### " + model + " Reading!")
-            print(datetime.datetime.utcnow())
+            print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None))
 
         errCount = 0
         dataOut = False
@@ -574,7 +574,7 @@ class WeatherParallel(object):
                 dataOut = await asyncio.to_thread(lambda: opened_zarr[:, :, y, x].T)
                 if TIMING:
                     print("### " + model + " Done!")
-                    print(datetime.datetime.utcnow())
+                    print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None))
                 return dataOut
 
             except Exception:
@@ -821,14 +821,15 @@ async def PW_Forecast(
     STAGE = os.environ.get("STAGE", "PROD")
 
     # Timing Check
-    T_Start = datetime.datetime.utcnow()
+    T_Start = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
 
     # Current time
     if force_now is False:
-        nowTime = datetime.datetime.utcnow()
+        nowTime = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
     else:
         # Force now for testing with static inputs
-        nowTime = datetime.datetime.utcfromtimestamp(int(force_now))
+        nowTime = datetime.datetime.fromtimestamp(int(force_now), datetime.UTC).replace(tzinfo=None)
+
         print("Forced Current Time to:")
         print(nowTime)
 
@@ -974,7 +975,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("Request process time")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # Calculate the timezone offset
     tz_offsetLoc = {"lat": lat, "lng": az_Lon, "utcTime": utcTime, "tf": tf}
@@ -985,7 +986,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("Timezone offset time")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # Set defaults
     if not extend:
@@ -1174,7 +1175,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("### HRRR Start ###")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     sourceIDX = dict()
 
@@ -1331,7 +1332,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("### NBM Start ###")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
     # Ignore areas outside of NBM coverage
     if az_Lon < -138.3 or az_Lon > -59 or lat < 19.3 or lat > 57 or exNBM == 1:
         dataOut_nbm = False
@@ -1365,7 +1366,7 @@ async def PW_Forecast(
             # Timing Check
             if TIMING:
                 print("### NMB Detail Start ###")
-                print(datetime.datetime.utcnow() - T_Start)
+                print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
             if timeMachine:
                 date_range = pd.date_range(
@@ -1461,7 +1462,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("### GFS/GEFS Start ###")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # GFS
     lats_gfs = np.arange(-90, 90, 0.25)
@@ -1478,7 +1479,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("### GFS Detail Start ###")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     if timeMachine:
         now = time.time()
@@ -1605,13 +1606,13 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("### GFS Detail END ###")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # GEFS
     # Timing Check
     if TIMING:
         print("### GEFS Detail Start ###")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
     if exGEFS == 1:
         dataOut_gefs = False
     else:
@@ -1696,7 +1697,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("### GEFS Detail Start ###")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     sourceIDX["gfs"] = dict()
     sourceIDX["gfs"]["x"] = int(x_p)
@@ -1781,7 +1782,7 @@ async def PW_Forecast(
         # Timing Check
         if TIMING:
             print("### NMB Detail End ###")
-            print(datetime.datetime.utcnow() - T_Start)
+            print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
         if dataOut_nbmFire is not False:
             # for i in range(0,50):
@@ -1808,7 +1809,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("### Sources Start ###")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # If point is not in HRRR coverage or HRRR-subh is more than 4 hours old, the fallback to GFS
     if isinstance(dataOut, np.ndarray):
@@ -1865,7 +1866,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("### ETOPO Start ###")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     ## ELEVATION
     abslat = np.abs(lats_etopo - lat)
@@ -1891,7 +1892,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("Base Times")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # Number of hours to start at
     if timeMachine:
@@ -1950,7 +1951,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("Nearest IDX Start")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # HRRR
     if timeMachine is False:
@@ -2113,7 +2114,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("Array start")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     InterPhour[:, 0] = hour_array_grib
 
@@ -2244,7 +2245,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("Sunrise start")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     loc = LocationInfo("name", "region", tz_name, lat, az_Lon)
 
@@ -2349,7 +2350,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("Interpolation Start")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # Interpolate for minutely
     # Concatenate HRRR and HRRR2
@@ -2505,7 +2506,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("Minutely Start")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     InterPminute[:, 0] = minute_array_grib
 
@@ -2638,7 +2639,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("Hourly start")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     ## Approach
     # Use NBM where available
@@ -3112,7 +3113,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("Hourly Loop start")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # for idx in range(int(baseTimeOffset), hourly_hours + int(baseTimeOffset)):
     # For day 0 summary, need to calculate hourly data from midnight local
@@ -3264,7 +3265,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("Daily start")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     mean_results = []
     sum_results = []
@@ -3412,7 +3413,7 @@ async def PW_Forecast(
 
     if TIMING:
         print("Daily Loop start")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     for idx in range(0, daily_days):
         if InterPdayMax4am[idx, 3] > 0.3 and (
@@ -3564,7 +3565,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("Alert Start")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     alertDict = []
     # If alerts are requested and in the US
@@ -3647,7 +3648,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("Current Start")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # Currently data, find points for linear averaging
     # Use GFS, since should also be there and the should cover all times... this could be an issue at some point
@@ -4021,7 +4022,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("Object Start")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     InterPcurrent = InterPcurrent.round(2)
     InterPcurrent[np.isnan(InterPcurrent)] = -999
@@ -4261,7 +4262,7 @@ async def PW_Forecast(
     # Timing Check
     if TIMING:
         print("Final Time")
-        print(datetime.datetime.utcnow() - T_Start)
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     if exFlags != 1:
         returnOBJ["flags"] = dict()
@@ -4273,7 +4274,7 @@ async def PW_Forecast(
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
             returnOBJ["flags"]["processTime"] = (
-                datetime.datetime.utcnow() - T_Start
+                datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
             ).microseconds
 
         # if timeMachine:
@@ -4283,7 +4284,7 @@ async def PW_Forecast(
         content=returnOBJ,
         headers={
             "X-Node-ID": platform.node(),
-            "X-Response-Time": str((datetime.datetime.utcnow() - T_Start).microseconds),
+            "X-Response-Time": str((datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start).microseconds),
             "Cache-Control": "max-age=900, must-revalidate",
         },
     )
