@@ -106,6 +106,8 @@ def getGribList(FH_forecastsub, matchStrings):
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
+ingestVersion = "v27"
+
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
@@ -1063,21 +1065,21 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/NBM.zarr.zip", forecast_path + "/v27/NBM.zarr.zip"
+        forecast_process_dir + "/NBM.zarr.zip", forecast_path + "/" + ingestVersion + "/NBM.zarr.zip"
     )
     s3.put_file(
         forecast_process_dir + "/NBM_Maps.zarr.zip",
-        forecast_path + "/v27/NBM_Maps.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/NBM_Maps.zarr.zip",
     )
 
     # Write most recent forecast time
-    with open(forecast_process_dir + "/v27/NBM.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/" + ingestVersion + "/NBM.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     s3.put_file(
         forecast_process_dir + "/NBM.time.pickle",
-        forecast_path + "/v27/NBM.time.pickle",
+        forecast_path + "/" + ingestVersion + "/NBM.time.pickle",
     )
 else:
     # Write most recent forecast time
@@ -1087,20 +1089,20 @@ else:
 
     shutil.move(
         forecast_process_dir + "/NBM.time.pickle",
-        forecast_path + "/v27/NBM.time.pickle",
+        forecast_path + "/" + ingestVersion + "/NBM.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/NBM.zarr",
-        forecast_path + "/v27/NBM.zarr",
+        forecast_path + "/" + ingestVersion + "/NBM.zarr",
         dirs_exist_ok=True,
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/NBM_Maps.zarr",
-        forecast_path + "/v27/NBM_Maps.zarr",
+        forecast_path + "/" + ingestVersion + "/NBM_Maps.zarr",
         dirs_exist_ok=True,
     )
 

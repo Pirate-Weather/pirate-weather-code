@@ -47,6 +47,8 @@ def interp_time_block(y_block, idx0, idx1, w, valid):
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
+ingestVersion = "v27"
+
 wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
 
 forecast_process_dir = os.getenv(
@@ -999,11 +1001,11 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/ECMWF.zarr.zip", forecast_path + "/v27/ECMWF.zarr.zip"
+        forecast_process_dir + "/ECMWF.zarr.zip", forecast_path + "/" + ingestVersion + "/ECMWF.zarr.zip"
     )
     s3.put_file(
         forecast_process_dir + "/ECMWF_Maps.zarr.zip",
-        forecast_path + "/v27/ECMWF_Maps.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/ECMWF_Maps.zarr.zip",
     )
 
     # Write most recent forecast time
@@ -1013,7 +1015,7 @@ if saveType == "S3":
 
     s3.put_file(
         forecast_process_dir + "/ECMWF.time.pickle",
-        forecast_path + "/v27/ECMWF.time.pickle",
+        forecast_path + "/" + ingestVersion + "/ECMWF.time.pickle",
     )
 else:
     # Write most recent forecast time
@@ -1023,20 +1025,20 @@ else:
 
     shutil.move(
         forecast_process_dir + "/ECMWF.time.pickle",
-        forecast_path + "/v27/ECMWF.time.pickle",
+        forecast_path + "/" + ingestVersion + "/ECMWF.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/ECMWF.zarr",
-        forecast_path + "/v27/ECMWF.zarr",
+        forecast_path + "/" + ingestVersion + "/ECMWF.zarr",
         dirs_exist_ok=True,
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/ECMWF_Maps.zarr",
-        forecast_path + "/v27/ECMWF_Maps.zarr",
+        forecast_path + "/" + ingestVersion + "/ECMWF_Maps.zarr",
         dirs_exist_ok=True,
     )
 

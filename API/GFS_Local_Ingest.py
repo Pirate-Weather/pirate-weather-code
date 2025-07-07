@@ -49,6 +49,8 @@ def interp_time_block(y_block, idx0, idx1, w, valid):
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
+ingestVersion = "v27"
+
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
@@ -76,7 +78,7 @@ processChunk = 100
 # Define the final x/y chunksize
 finalChunk = 3
 
-hisPeriod = 36
+hisPeriod = 48
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -997,11 +999,11 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/GFS.zarr.zip", forecast_path + "/v27/GFS.zarr.zip"
+        forecast_process_dir + "/GFS.zarr.zip", forecast_path + "/" + ingestVersion + "/GFS.zarr.zip"
     )
     s3.put_file(
         forecast_process_dir + "/GFS_Maps.zarr.zip",
-        forecast_path + "/v27/GFS_Maps.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/GFS_Maps.zarr.zip",
     )
 
     # Write most recent forecast time
@@ -1011,7 +1013,7 @@ if saveType == "S3":
 
     s3.put_file(
         forecast_process_dir + "/GFS.time.pickle",
-        forecast_path + "/v27/GFS.time.pickle",
+        forecast_path + "/" + ingestVersion + "/GFS.time.pickle",
     )
 else:
     # Write most recent forecast time
@@ -1021,20 +1023,20 @@ else:
 
     shutil.move(
         forecast_process_dir + "/GFS.time.pickle",
-        forecast_path + "/v27/GFS.time.pickle",
+        forecast_path + "/" + ingestVersion + "/GFS.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/GFS.zarr",
-        forecast_path + "/v27/GFS.zarr",
+        forecast_path + "/" + ingestVersion + "/GFS.zarr",
         dirs_exist_ok=True,
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/GFS_Maps.zarr",
-        forecast_path + "/v27/GFS_Maps.zarr",
+        forecast_path + "/" + ingestVersion + "/GFS_Maps.zarr",
         dirs_exist_ok=True,
     )
 # Clean up

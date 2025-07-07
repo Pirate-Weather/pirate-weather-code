@@ -64,6 +64,8 @@ def rounder(t):
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
+ingestVersion = "v27"
+
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
@@ -709,7 +711,7 @@ if saveType == "S3":
     # Upload to S3
     s3.put_file(
         forecast_process_dir + "/NBM_Fire.zarr.zip",
-        forecast_path + "/v27/NBM_Fire.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/NBM_Fire.zarr.zip",
     )
 
     # Write most recent forecast time
@@ -719,7 +721,7 @@ if saveType == "S3":
 
     s3.put_file(
         forecast_process_dir + "/NBM_Fire.time.pickle",
-        forecast_path + "/v27/NBM_Fire.time.pickle",
+        forecast_path + "/" + ingestVersion + "/NBM_Fire.time.pickle",
     )
 else:
     # Write most recent forecast time
@@ -729,13 +731,13 @@ else:
 
     shutil.move(
         forecast_process_dir + "/NBM_Fire.time.pickle",
-        forecast_path + "/v27/NBM_Fire.time.pickle",
+        forecast_path + "/" + ingestVersion + "/NBM_Fire.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/NBM_Fire.zarr",
-        forecast_path + "/v27/NBM_Fire.zarr",
+        forecast_path + "/" + ingestVersion + "/NBM_Fire.zarr",
         dirs_exist_ok=True,
     )
 
