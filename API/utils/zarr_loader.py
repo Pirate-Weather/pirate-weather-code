@@ -3,7 +3,8 @@ import os
 import subprocess
 import zarr
 
-from .s3_utils import S3ZipStore
+from .s3_utils import S3ZipStore, DownloadSpec, download_if_newer, S3_BUCKET
+from .constants import ZARR_DOWNLOADS
 
 logger = logging.getLogger(__name__)
 
@@ -122,3 +123,38 @@ def update_zarr_store(initial_run: bool):
             logger.info("ETOPO Setup")
 
     logger.info("Refreshed Zarrs")
+
+
+def sync_zarr_datasets(initial_run: bool, use_etopo: bool = True) -> None:
+    """Download new zarr archives and refresh stores."""
+
+    stage = os.environ.get("STAGE", "PROD")
+    if stage == "PROD":
+        names = [
+            "SubH",
+            "HRRR_6H",
+            "GFS",
+            "NBM",
+            "NBM_Fire",
+            "GEFS",
+            "HRRR",
+            "NWS_Alerts",
+        ]
+        if use_etopo:
+            names.append("ETOPO")
+
+        for name in names:
+            object_key, tmp_file, local_store = ZARR_DOWNLOADS[name]
+            download_if_newer(
+                DownloadSpec(
+                    bucket=S3_BUCKET,
+                    object_key=object_key,
+                    local_file=tmp_file,
+                    local_store=local_store,
+                    initial_download=initial_run,
+                )
+            )
+            logger.info("%s Download!", name)
+
+    if stage in {"PROD", "DEV"}:
+        update_zarr_store(initial_run)

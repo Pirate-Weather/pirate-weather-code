@@ -37,8 +37,8 @@ from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
 
 from .utils.logging_config import setup_logging
-from .utils.s3_utils import S3ZipStore, add_custom_header, download_if_newer
-from .utils.zarr_loader import find_largest_integer_directory, update_zarr_store
+
+from .utils.zarr_loader import sync_zarr_datasets
 from .utils.model_fields import (
     GFSFields,
     NBMFields,
@@ -3738,86 +3738,7 @@ def initialDataSync() -> None:
     zarrReady = False
     print("Initial Download")
 
-    STAGE = os.environ.get("STAGE", "PROD")
-    print(STAGE)
-    if STAGE == "PROD":
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/SubH.zarr.zip",
-            "/tmp/SubH_TMP.zarr.zip",
-            "/tmp/SubH.zarr.prod.zip",
-            True,
-        )
-        print("SubH Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/HRRR_6H.zarr.zip",
-            "/tmp/HRRR_6H_TMP.zarr.zip",
-            "/tmp/HRRR_6H.zarr.prod.zip",
-            True,
-        )
-        print("HRRR_6H Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/GFS.zarr.zip",
-            "/tmp/GFS.zarr_TMP.zip",
-            "/tmp/GFS.zarr.prod.zip",
-            True,
-        )
-        print("GFS Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/NBM.zarr.zip",
-            "/tmp/NBM.zarr_TMP.zip",
-            "/tmp/NBM.zarr.prod.zip",
-            True,
-        )
-        print("NBM Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/NBM_Fire.zarr.zip",
-            "/tmp/NBM_Fire_TMP.zarr.zip",
-            "/tmp/NBM_Fire.zarr.prod.zip",
-            True,
-        )
-        print("NBM_Fire Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/GEFS.zarr.zip",
-            "/tmp/GEFS_TMP.zarr.zip",
-            "/tmp/GEFS.zarr.prod.zip",
-            True,
-        )
-        print("GEFS  Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/HRRR.zarr.zip",
-            "/tmp/HRRR_TMP.zarr.zip",
-            "/tmp/HRRR.zarr.prod.zip",
-            True,
-        )
-        print("HRRR  Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/NWS_Alerts.zarr.zip",
-            "/tmp/NWS_Alerts_TMP.zarr.zip",
-            "/tmp/NWS_Alerts.zarr.prod.zip",
-            True,
-        )
-        print("Alerts Download!")
-
-        if useETOPO:
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/ETOPO_DA_C.zarr.zip",
-                "/tmp/ETOPO_DA_C_TMP.zarr.zip",
-                "/tmp/ETOPO_DA_C.zarr.prod.zip",
-                True,
-            )
-            print("ETOPO Download!")
-
-    if (STAGE == "PROD") or (STAGE == "DEV"):
-        update_zarr_store(True)
+    sync_zarr_datasets(initial_run=True, use_etopo=useETOPO)
 
     zarrReady = True
 
@@ -3840,83 +3761,7 @@ def dataSync() -> None:
             time.sleep(20)
             logger.info("Starting Update")
 
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/SubH.zarr.zip",
-                "/tmp/SubH_TMP.zarr.zip",
-                "/tmp/SubH.zarr.prod.zip",
-                False,
-            )
-            logger.info("SubH Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/HRRR_6H.zarr.zip",
-                "/tmp/HRRR_6H_TMP.zarr.zip",
-                "/tmp/HRRR_6H.zarr.prod.zip",
-                False,
-            )
-            logger.info("HRRR_6H Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/GFS.zarr.zip",
-                "/tmp/GFS.zarr_TMP.zip",
-                "/tmp/GFS.zarr.prod.zip",
-                False,
-            )
-            logger.info("GFS Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/NBM.zarr.zip",
-                "/tmp/NBM.zarr_TMP.zip",
-                "/tmp/NBM.zarr.prod.zip",
-                False,
-            )
-            logger.info("NBM Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/NBM_Fire.zarr.zip",
-                "/tmp/NBM_Fire_TMP.zarr.zip",
-                "/tmp/NBM_Fire.zarr.prod.zip",
-                False,
-            )
-            logger.info("NBM_Fire Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/GEFS.zarr.zip",
-                "/tmp/GEFS_TMP.zarr.zip",
-                "/tmp/GEFS.zarr.prod.zip",
-                False,
-            )
-            logger.info("GEFS  Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/HRRR.zarr.zip",
-                "/tmp/HRRR_TMP.zarr.zip",
-                "/tmp/HRRR.zarr.prod.zip",
-                False,
-            )
-            logger.info("HRRR  Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/NWS_Alerts.zarr.zip",
-                "/tmp/NWS_Alerts_TMP.zarr.zip",
-                "/tmp/NWS_Alerts.zarr.prod.zip",
-                False,
-            )
-            logger.info("Alerts Download!")
-
-            if useETOPO:
-                download_if_newer(
-                    s3_bucket,
-                    "ForecastTar_v2/ETOPO_DA_C.zarr.zip",
-                    "/tmp/ETOPO_DA_C_TMP.zarr.zip",
-                    "/tmp/ETOPO_DA_C.zarr.prod.zip",
-                    False,
-                )
-                logger.info("ETOPO Download!")
-
-        if (STAGE == "PROD") or (STAGE == "DEV"):
-            update_zarr_store(False)
+        sync_zarr_datasets(initial_run=False, use_etopo=useETOPO)
 
     logger.info("Sync End!")
 
