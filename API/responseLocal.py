@@ -405,7 +405,13 @@ if STAGE == "TESTING":
             key=aws_access_key_id, secret=aws_secret_access_key, version_aware=True
         )
 
-        f = s3.open("s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/NWS_Alerts.zarr.zip")
+        f = s3.open(
+            "s3://"
+            + s3_bucket
+            + "/ForecastTar_v2/"
+            + ingestVersion
+            + "/NWS_Alerts.zarr.zip"
+        )
         store = S3ZipStore(f)
 
     else:
@@ -418,7 +424,9 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/SubH.zarr.zip")
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open("s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/SubH.zarr.zip")
+        f = s3.open(
+            "s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/SubH.zarr.zip"
+        )
         store = S3ZipStore(f)
     else:
         f = s3_bucket + "SubH_v2.zarr.zip"
@@ -431,7 +439,13 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/HRRR_6H.zarr.zip")
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open("s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/HRRR_6H.zarr.zip")
+        f = s3.open(
+            "s3://"
+            + s3_bucket
+            + "/ForecastTar_v2/"
+            + ingestVersion
+            + "/HRRR_6H.zarr.zip"
+        )
         store = S3ZipStore(f)
     else:
         f = s3_bucket + "HRRR_6H.zarr.zip"
@@ -444,7 +458,9 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/GFS.zarr.zip")
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open("s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/GFS.zarr.zip")
+        f = s3.open(
+            "s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/GFS.zarr.zip"
+        )
         store = S3ZipStore(f)
     else:
         f = s3_bucket + "GFS.zarr.zip"
@@ -457,7 +473,9 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/GEFS.zarr.zip")
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open("s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/GEFS.zarr.zip")
+        f = s3.open(
+            "s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/GEFS.zarr.zip"
+        )
         store = S3ZipStore(f)
     else:
         f = s3_bucket + "GEFS.zarr.zip"
@@ -473,7 +491,9 @@ if STAGE == "TESTING":
         # print('USE VERSION NBM')
         # f = s3.open("s3://" + s3_bucket + "/NBM.zarr.zip",
         #             version_id="sfWxulLYHDWCQTiM2u0v.x_Sg4pTwpG7")
-        f = s3.open("s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/NBM.zarr.zip")
+        f = s3.open(
+            "s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/NBM.zarr.zip"
+        )
 
         store = S3ZipStore(f)
     else:
@@ -487,7 +507,13 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/NBM_Fire.zarr.zip")
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open("s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/NBM_Fire.zarr.zip")
+        f = s3.open(
+            "s3://"
+            + s3_bucket
+            + "/ForecastTar_v2/"
+            + ingestVersion
+            + "/NBM_Fire.zarr.zip"
+        )
         store = S3ZipStore(f)
     else:
         f = s3_bucket + "NBM_Fire.zarr.zip"
@@ -500,7 +526,9 @@ if STAGE == "TESTING":
         f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/HRRR.zarr.zip")
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open("s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/HRRR.zarr.zip")
+        f = s3.open(
+            "s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/HRRR.zarr.zip"
+        )
         store = S3ZipStore(f)
     else:
         f = s3_bucket + "HRRR.zarr.zip"
@@ -514,7 +542,13 @@ if STAGE == "TESTING":
             f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/ETOPO_DA_C.zarr.zip")
             store = S3ZipStore(f)
         elif save_type == "S3Zarr":
-            f = s3.open("s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/ETOPO_DA_C.zarr.zip")
+            f = s3.open(
+                "s3://"
+                + s3_bucket
+                + "/ForecastTar_v2/"
+                + ingestVersion
+                + "/ETOPO_DA_C.zarr.zip"
+            )
             store = S3ZipStore(f)
         else:
             f = s3_bucket + "ETOPO_DA_C.zarr.zip"
