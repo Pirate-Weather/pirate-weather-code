@@ -828,7 +828,9 @@ async def PW_Forecast(
         nowTime = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
     else:
         # Force now for testing with static inputs
-        nowTime = datetime.datetime.fromtimestamp(int(force_now), datetime.UTC).replace(tzinfo=None)
+        nowTime = datetime.datetime.fromtimestamp(int(force_now), datetime.UTC).replace(
+            tzinfo=None
+        )
 
         print("Forced Current Time to:")
         print(nowTime)
@@ -1366,7 +1368,9 @@ async def PW_Forecast(
             # Timing Check
             if TIMING:
                 print("### NMB Detail Start ###")
-                print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+                print(
+                    datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
+                )
 
             if timeMachine:
                 date_range = pd.date_range(
@@ -4284,7 +4288,11 @@ async def PW_Forecast(
         content=returnOBJ,
         headers={
             "X-Node-ID": platform.node(),
-            "X-Response-Time": str((datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start).microseconds),
+            "X-Response-Time": str(
+                (
+                    datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
+                ).microseconds
+            ),
             "Cache-Control": "max-age=900, must-revalidate",
         },
     )
