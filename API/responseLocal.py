@@ -912,9 +912,9 @@ async def PW_Forecast(
         # If time is specified as a unix time
         if locationReq[2].lstrip("-+").isnumeric():
             if float(locationReq[2]) > 0:
-                utcTime = datetime.datetime.utcfromtimestamp(float(locationReq[2]))
+                utcTime = datetime.datetime.fromtimestamp(float(locationReq[2]), datetime.UTC).replace(tzinfo=None)
             elif float(locationReq[2]) < -100000:  # Very negatime time
-                utcTime = datetime.datetime.utcfromtimestamp(float(locationReq[2]))
+                utcTime = datetime.datetime.fromtimestamp(float(locationReq[2]), datetime.UTC).replace(tzinfo=None)
             elif float(locationReq[2]) < 0:  # Negatime time
                 utcTime = nowTime + datetime.timedelta(seconds=float(locationReq[2]))
 
@@ -1784,22 +1784,22 @@ async def PW_Forecast(
 
             # Check if the model times are valid for the request time
             if (
-                utcTime - datetime.datetime.utcfromtimestamp(subhRunTime.astype(int))
+                utcTime - datetime.datetime.fromtimestamp(subhRunTime.astype(int), datetime.UTC).replace(tzinfo=None)
             ) > datetime.timedelta(hours=4):
                 dataOut = False
                 print("OLD SubH")
 
             hrrrhRunTime = dataOut_hrrrh[48, 0]
-            # print( datetime.datetime.utcfromtimestamp(dataOut_hrrrh[35, 0].astype(int)))
+            # print( datetime.datetime.fromtimestamp(dataOut_hrrrh[35, 0].astype(int)))
             if (
-                utcTime - datetime.datetime.utcfromtimestamp(hrrrhRunTime.astype(int))
+                utcTime - datetime.datetime.fromtimestamp(hrrrhRunTime.astype(int), datetime.UTC).replace(tzinfo=None)
             ) > datetime.timedelta(hours=16):
                 dataOut_hrrrh = False
                 print("OLD HRRRH")
 
             h2RunTime = dataOut_h2[0, 0]
             if (
-                utcTime - datetime.datetime.utcfromtimestamp(h2RunTime.astype(int))
+                utcTime - datetime.datetime.fromtimestamp(h2RunTime.astype(int), datetime.UTC).replace(tzinfo=None)
             ) > datetime.timedelta(hours=46):
                 dataOut_h2 = False
                 print("OLD HRRR_6H")
@@ -1824,7 +1824,7 @@ async def PW_Forecast(
 
         if dataOut_nbmFire is not False:
             # for i in range(0,50):
-            # print( datetime.datetime.utcfromtimestamp(dataOut_nbmFire[i, 0].astype(int)))
+            # print( datetime.datetime.fromtimestamp(dataOut_nbmFire[i, 0].astype(int)))
             nbmFireRunTime = dataOut_nbmFire[42, 0]  # 48-6
 
     if readGFS:
@@ -1853,13 +1853,13 @@ async def PW_Forecast(
     if isinstance(dataOut, np.ndarray):
         sourceList.append("hrrrsubh")
         sourceTimes["hrrr_subh"] = rounder(
-            datetime.datetime.utcfromtimestamp(subhRunTime.astype(int))
+            datetime.datetime.fromtimestamp(subhRunTime.astype(int), datetime.UTC).replace(tzinfo=None)
         ).strftime("%Y-%m-%d %HZ")
 
     if (isinstance(dataOut_hrrrh, np.ndarray)) & (not timeMachine):
         sourceList.append("hrrr_0-18")
         sourceTimes["hrrr_0-18"] = rounder(
-            datetime.datetime.utcfromtimestamp(hrrrhRunTime.astype(int))
+            datetime.datetime.fromtimestamp(hrrrhRunTime.astype(int), datetime.UTC).replace(tzinfo=None)
         ).strftime("%Y-%m-%d %HZ")
     elif (isinstance(dataOut_hrrrh, np.ndarray)) & (timeMachine):
         sourceList.append("hrrr")
@@ -1867,7 +1867,7 @@ async def PW_Forecast(
     if (isinstance(dataOut_nbm, np.ndarray)) & (not timeMachine):
         sourceList.append("nbm")
         sourceTimes["nbm"] = rounder(
-            datetime.datetime.utcfromtimestamp(nbmRunTime.astype(int))
+            datetime.datetime.fromtimestamp(nbmRunTime.astype(int), datetime.UTC).replace(tzinfo=None)
         ).strftime("%Y-%m-%d %HZ")
     elif (isinstance(dataOut_nbm, np.ndarray)) & (timeMachine):
         sourceList.append("nbm")
@@ -1875,7 +1875,7 @@ async def PW_Forecast(
     if (isinstance(dataOut_nbmFire, np.ndarray)) & (not timeMachine):
         sourceList.append("nbm_fire")
         sourceTimes["nbm_fire"] = rounder(
-            datetime.datetime.utcfromtimestamp(nbmFireRunTime.astype(int))
+            datetime.datetime.fromtimestamp(nbmFireRunTime.astype(int), datetime.UTC).replace(tzinfo=None)
         ).strftime("%Y-%m-%d %HZ")
 
     # If point is not in HRRR coverage or HRRR-hrrrh is more than 16 hours old, the fallback to GFS
@@ -1883,20 +1883,20 @@ async def PW_Forecast(
         sourceList.append("hrrr_18-48")
         # Stbtract 18 hours since we're using the 18h time steo
         sourceTimes["hrrr_18-48"] = rounder(
-            datetime.datetime.utcfromtimestamp(h2RunTime.astype(int))
+            datetime.datetime.fromtimestamp(h2RunTime.astype(int), datetime.UTC).replace(tzinfo=None)
             - datetime.timedelta(hours=18)
         ).strftime("%Y-%m-%d %HZ")
 
     # Always include GFS
     if timeMachine is False:
         sourceTimes["gfs"] = rounder(
-            datetime.datetime.utcfromtimestamp(gfsRunTime.astype(int))
+            datetime.datetime.fromtimestamp(gfsRunTime.astype(int), datetime.UTC).replace(tzinfo=None)
         ).strftime("%Y-%m-%d %HZ")
 
         if isinstance(dataOut_gefs, np.ndarray):
             sourceList.append("gefs")
             sourceTimes["gefs"] = rounder(
-                datetime.datetime.utcfromtimestamp(gefsRunTime.astype(int))
+                datetime.datetime.fromtimestamp(gefsRunTime.astype(int), datetime.UTC).replace(tzinfo=None)
             ).strftime("%Y-%m-%d %HZ")
     elif (isinstance(dataOut_gefs, np.ndarray)) & (timeMachine):
         sourceList.append("gefs")
