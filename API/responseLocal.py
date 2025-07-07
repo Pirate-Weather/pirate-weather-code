@@ -2141,7 +2141,7 @@ async def PW_Forecast(
                 )
                 + datetime.timedelta(days=i)
             )
-            .astimezone(utc)
+            .astimezoneastimezone(utc)
             .timestamp()
             for i in range(10)
         ]
@@ -2257,7 +2257,7 @@ async def PW_Forecast(
 
             InterSday[i, 17] = (
                 (
-                    np.datetime64(s["sunrise"].replace(tzinfo=None))
+                    np.datetime64(s["sunrise"].astimezone(utc).replace(tzinfo=None))
                     - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
                 )
                 .astype("timedelta64[s]")
@@ -2265,7 +2265,7 @@ async def PW_Forecast(
             )
             InterSday[i, 18] = (
                 (
-                    np.datetime64(s["sunset"].replace(tzinfo=None))
+                    np.datetime64(s["sunset"].astimezone(utc).replace(tzinfo=None))
                     - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
                 )
                 .astype("timedelta64[s]")
@@ -2274,7 +2274,7 @@ async def PW_Forecast(
 
             InterSday[i, 15] = (
                 (
-                    np.datetime64(s["dawn"].replace(tzinfo=None))
+                    np.datetime64(s["dawn"].astimezone(utc).replace(tzinfo=None))
                     - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
                 )
                 .astype("timedelta64[s]")
@@ -2282,7 +2282,7 @@ async def PW_Forecast(
             )
             InterSday[i, 16] = (
                 (
-                    np.datetime64(s["dusk"].replace(tzinfo=None))
+                    np.datetime64(s["dusk"].astimezone(utc).replace(tzinfo=None))
                     - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
                 )
                 .astype("timedelta64[s]")
