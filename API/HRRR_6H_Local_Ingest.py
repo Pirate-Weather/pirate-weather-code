@@ -373,7 +373,7 @@ if saveType == "S3":
     # Upload to S3
     s3.put_file(
         forecast_process_dir + "/HRRR_6H.zarr.zip",
-        forecast_path + "/HRRR_6H.zarr.zip",
+        forecast_path + "/v27/HRRR_6H.zarr.zip",
     )
 
     # Write most recent forecast time
@@ -383,7 +383,7 @@ if saveType == "S3":
 
     s3.put_file(
         forecast_process_dir + "/HRRR_6H.time.pickle",
-        forecast_path + "/HRRR_6H.time.pickle",
+        forecast_path + "/v27/HRRR_6H.time.pickle",
     )
 else:
     # Write most recent forecast time
@@ -393,13 +393,13 @@ else:
 
     shutil.move(
         forecast_process_dir + "/HRRR_6H.time.pickle",
-        forecast_path + "/HRRR_6H.time.pickle",
+        forecast_path + "/v27/HRRR_6H.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/HRRR_6H.zarr",
-        forecast_path + "/HRRR_6H.zarr",
+        forecast_path + "/v27/HRRR_6H.zarr",
         dirs_exist_ok=True,
     )
 
