@@ -1062,7 +1062,9 @@ if saveType == "S3":
 # %% Upload to S3
 if saveType == "S3":
     # Upload to S3
-    s3.put_file(forecast_process_dir + "/NBM.zarr.zip", forecast_path + "/v27/NBM.zarr.zip")
+    s3.put_file(
+        forecast_process_dir + "/NBM.zarr.zip", forecast_path + "/v27/NBM.zarr.zip"
+    )
     s3.put_file(
         forecast_process_dir + "/NBM_Maps.zarr.zip",
         forecast_path + "/v27/NBM_Maps.zarr.zip",
