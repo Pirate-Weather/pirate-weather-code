@@ -96,7 +96,19 @@ def _check_forecast_structure(data: dict) -> None:
 
 
 @pytest.mark.skipif(not PW_API, reason="PW_API environment variable not set")
-@pytest.mark.parametrize("location", [(45.0, -75.0), (10.0, 10.0)])
+@pytest.mark.parametrize(
+    "location",
+    [
+        (45.0, -75.0),
+        (10.0, 10.0),
+        (47.28, -53.13),
+        (28.64, 77.09),
+        (-34.92, 138.60),
+        (32.73, -117.192),
+        (-15.83, -47.90),
+        (-33.91, 18.32),
+    ],
+)
 def test_live_s3_forecast_blocks(location):
     client = _get_client()
 
