@@ -26,6 +26,7 @@ This phase focuses on ensuring the new variable is retrieved and saved alongside
 3.  **Process and Save the New Variable**:
     * Ensure that after fetching, the new variable is correctly processed and included when the data is converted to Zarr format. The existing scripts typically handle this automatically if the variable is included in the initial `Herbie` request and the `xarray` dataset construction.
     * Verify that the new variable's data is consistent with the existing Zarr structure (e.g., same dimensions, appropriate chunking if explicitly controlled).
+    * Make sure it's not an accumulated or averaged variable, and if so, process accordingly.
 
 4.  **Update Ingestion Dependencies (If Necessary)**:
     * If adding this new variable requires any new Python libraries for its processing or handling that are not already in your ingestion Docker container, add them to `Docker/requirements-ingest.txt`.

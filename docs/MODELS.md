@@ -2,46 +2,55 @@
 
 To integrate a new weather model into the Pirate Weather code, you'll primarily work with the data ingestion scripts and the main API response logic. This process involves setting up data retrieval, processing the data into a usable format, and then integrating it into the API's forecasting logic.
 
+An important high level note: One of the key goals of this API is to be efficient and provide fast retrievals, which might explain some of the design choices here (ex. combining all the variables within one chunk, using Dask for many things). The goal is for processing to fit within 16 GB of RAM, and to keep response times under 50 ms.  
+
 Here's a general outline for integrating a new model:
 
-This document outlines the high-level steps required to integrate a new weather model into the Pirate Weather codebase. The process generally involves two main phases: data ingestion and API integration.
 
 ### Phase 1: Data Ingestion
 
-This phase focuses on retrieving the raw model data, processing it, and saving it in a format optimized for the API (Zarr).
+This phase focuses on retrieving the raw model data, processing it, and saving it in a format optimized for the API ([Zarr](https://zarr.readthedocs.io/en/stable/)).
 
 * **Identify Data Source and Retrieval Method**:
 
   * Determine where the new model's data is hosted (e.g., NOAA NCEP, ECMWF).
 
-  * Choose an appropriate data retrieval library. Existing ingest scripts heavily use `Herbie`. If Herbie supports your model, it's the preferred choice.
+  * Choose an appropriate data retrieval library. Existing ingest scripts heavily use [Herbie](https://github.com/blaylockbk/Herbie). If Herbie supports your model, it's the preferred choice, since it makes future maintenance easier.
 
-  * If Herbie isn't suitable, you might need to use `s3fs` for S3 buckets or `boto3` for AWS S3 interactions directly, or another method to fetch the GRIB files.
+  * If Herbie isn't suitable, the ingest containers do have internet access, so any download client should work.
 
 * **Create a New Ingestion Script**:
 
-  * Inspired by existing scripts like `API/GFS_Local_Ingest.py` or `API/HRRR_Local_Ingest.py`, create a new Python script (e.g., `API/YOUR_MODEL_Local_Ingest.py`).
+  * Working off existing scripts like `API/HRRR_Local_Ingest.py`, create a new Python script (e.g., `API/YOUR_MODEL_Local_Ingest.py`). Every model has its own quirks, but HRRR provides a good starting point with a minimum of weirdness.
 
-  * This script should:
-
+  * This script should, while staying within 16 GB of RAM:
+ 
     * Define the model name and relevant parameters (e.g., `model_name`, `product`, `model_type`).
+  
+    * Use `Herbie` (or your chosen method) to download GRIB2 (or other format) files for specific forecast hours and variables.
+  
+    * Select the necessary meteorological variables (e.g., temperature, precipitation, wind components) and map them to consistent internal names. Refer to `responseLocal.py` to see which variables are used in the API response. It isn't necessary for a model to cover everything, but ideally it should have enough to be consistent for a forecast.
+ 
+    * Process the GRIB2 data using tools like `cfgrib` (often used implicitly by `xarray` with GRIB engines) or `wgrib2` for specific operations if needed. CFGRIB is preferred, but most of the models use `wgrib2` at the moment since it is so efficient. The key processing steps are:
+    
+		1.  Merge all the time step files into a single NetCDF or Zarr file ([Example](https://github.com/Pirate-Weather/pirate-weather-code/blob/aeef857c7c6133ccef2f439efe5c718c75813caf/API/HRRR_Local_Ingest.py#L191)) 
+		2.  Ensure that winds are earth centred ([Example](https://github.com/Pirate-Weather/pirate-weather-code/blob/aeef857c7c6133ccef2f439efe5c718c75813caf/API/HRRR_Local_Ingest.py#L215)) 
+		3.  De-accumulate any variables that need it, notably precipitation ([Example](https://github.com/Pirate-Weather/pirate-weather-code/blob/aeef857c7c6133ccef2f439efe5c718c75813caf/API/HRRR_Local_Ingest.py#L262)). Notably, the API uses trailing precipitation accumulations, so precipitation between 0H and 1H is saved in the 1H slot. This might change someday, but will be on the response side, not the ingest.
+		4.  De-average any variables that need it (such as UV) ([Example](https://github.com/Pirate-Weather/pirate-weather-code/blob/aeef857c7c6133ccef2f439efe5c718c75813caf/API/GFS_Local_Ingest.py#L417)) 
+		5.  Save the Zarr archives locally in the `/mnt/nvme/` directory, which is typically mounted from a Docker volume. The `save_path` and `save_type` environment variables control this, compressed and chunked along the time dimension ([Example](https://github.com/Pirate-Weather/pirate-weather-code/blob/aeef857c7c6133ccef2f439efe5c718c75813caf/API/HRRR_Local_Ingest.py#L282)) 
 
-    * Use `Herbie` (or your chosen method) to download GRIB2 files for specific forecast hours and variables.
+    * Download 1-hourly forecasts to use as an approximation of observed data. Some day a better approach could be more accurate here, but it's a reasonably good proxy.
 
-    * Select the necessary meteorological variables (e.g., temperature, precipitation, wind components) and map them to consistent internal names. Refer to `responseLocal.py` to see which variables are used in the API response.
+    * Merge 48 hours worth of "observed" data with the forecast data to create a cohesive time series.  
 
-    * Process the GRIB2 data using tools like `cfgrib` (often used implicitly by `xarray` with GRIB engines) or `wgrib2` for specific operations if needed.
-
-    * Convert the processed data into a Zarr format. The existing scripts save multi-variable datasets into single Zarr archives (e.g., `GFS.zarr.zip`, `HRRR.zarr.zip`).
-
-    * Save the Zarr archives locally in the `/mnt/nvme/` directory, which is typically mounted from a Docker volume. The `save_path` and `save_type` environment variables control this.
-
-    * Implement a logic to determine the latest available model run and only download newer data to avoid redundant processing.
+    * Merge variables together along an axis to create a 4D array (parameter, time, X, Y), chunked so that all variables and all times are stored in the same chunk (-1, -1, 3, 3). This step might have to be done in Dask to reduce memory requirements.
+   
+    * Save the final Zarr array to disk and upload to S3! 
 
 * **Update Docker Configuration**:
 
-  * If your ingestion script requires new Python libraries, add them to `Docker/requirements-ingest.txt`.
-
+  * If your ingestion script requires new Python libraries, add them to `Docker/requirements-ingest.txt`
+ 
   * Ensure your Docker Compose setup (`docker-compose_oph`) includes the necessary volume mounts for the new model's data, similar to how existing models are handled.
 
 ### Phase 2: API Integration
@@ -66,7 +75,7 @@ This phase involves modifying the API's core logic to load the new model's data 
 
   * **Conditional Data Reading**: In the `PW_Forecast` function, add a flag (e.g., `readYOUR_MODEL = False`) and corresponding `exclude` parameter logic if you want to allow users to exclude your model's data.
 
-  * **Grid Matching**: If your model uses a different grid than existing ones (e.g., HRRR's Lambert Conformal vs. GFS's Lat/Lon), you'll need to define a new grid matching function (similar to `lambertGridMatch`) or adapt `y_p`, `x_p` logic for latitude/longitude lookup.
+  * **Grid Matching**: If your model uses a different grid than existing ones (e.g., HRRR's Lambert Conformal vs. GFS's Lat/Lon), you'll need to define a new grid matching function (similar to `lambertGridMatch`) or adapt `y_p`, `x_p` logic for latitude/longitude lookup. This should be fast and not rely on reading the entire grid file to use a KNN match.
 
   * **Asynchronous Zarr Read**: Add a new task to the `zarrTasks` dictionary within the `WeatherParallel` class instance to asynchronously read data from your new model's Zarr store.
 
