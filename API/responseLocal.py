@@ -1836,8 +1836,6 @@ async def PW_Forecast(
             print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
         if dataOut_nbmFire is not False:
-            # for i in range(0,50):
-            # print( datetime.datetime.fromtimestamp(dataOut_nbmFire[i, 0].astype(int)))
             nbmFireRunTime = dataOut_nbmFire[42, 0]  # 48-6
 
     if readGFS:
