@@ -1897,13 +1897,14 @@ async def PW_Forecast(
         baseTimeOffset = (baseHour - baseDay).seconds / 3600
 
     # Merge hourly models onto a consistent time grid, starting from midnight on the requested day
-
+    # Note that baseTime is the requested time, in TZ aware Datetime Formate
     ### Minutely
     minute_array = np.arange(
         baseTime.astimezone(utc).replace(tzinfo=None),
-        baseTime.replace(tzinfo=None) + datetime.timedelta(minutes=61),
+        baseTime.astimezone(utc).replace(tzinfo=None) + datetime.timedelta(minutes=61),
         datetime.timedelta(minutes=1),
     )
+
     minute_array_grib = (
         (minute_array - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0)))
         .astype("timedelta64[s]")
