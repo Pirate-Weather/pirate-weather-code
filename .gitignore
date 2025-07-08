@@ -6,3 +6,5 @@ API/testDask.py
 *.pyc
 __pycache__
 API/s3fsTest.py
+
+API/venv313/

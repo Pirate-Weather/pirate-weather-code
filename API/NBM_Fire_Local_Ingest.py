@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 import warnings
 from datetime import datetime, timedelta
 
@@ -63,6 +64,8 @@ def rounder(t):
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
+ingestVersion = "v27"
+
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
@@ -92,7 +95,7 @@ processChunk = 100
 # Define the final x/y chunksize
 finalChunk = 5
 
-hisPeriod = 36
+hisPeriod = 48
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -423,10 +426,26 @@ for i in range(hisPeriod, 1, -6):
             + ".zarr"
         )
 
-        # # Try to open the zarr file to check if it has already been saved
-        if s3.exists(s3_path):
-            continue
+        if s3.exists(s3_path.replace(".zarr", ".done")):
+            print("File already exists in S3, skipping download for: " + s3_path)
+            # If the file exists, check that it works
+            try:
+                hisCheckStore = zarr.storage.FsspecStore.from_url(
+                    s3_path,
+                    storage_options={
+                        "key": aws_access_key_id,
+                        "secret": aws_secret_access_key,
+                    },
+                )
+                zarr.open(hisCheckStore)[zarrVars[-1]][-1, -1, -1]
+                continue  # If it exists, skip to the next iteration
+            except Exception:
+                print("### Historic Data Failure!")
+                print(traceback.print_exc())
 
+                # Delete the file if it exists
+                if s3.exists(s3_path):
+                    s3.rm(s3_path)
     else:
         # Local Path Setup
         local_path = (
@@ -436,8 +455,9 @@ for i in range(hisPeriod, 1, -6):
             + ".zarr"
         )
 
-        # Check if local file exists
-        if os.path.exists(local_path):
+        # Check for a loca done file
+        if os.path.exists(local_path.replace(".zarr", ".done")):
+            print("File already exists in S3, skipping download for: " + local_path)
             continue
 
     print(
@@ -529,6 +549,15 @@ for i in range(hisPeriod, 1, -6):
     os.remove(hist_process_path + "_wgrib2_merged_order.grib")
     os.remove(hist_process_path + "_wgrib_merge.nc")
     # os.remove(hist_process_path + '_ncTemp.nc')
+
+    # Save a done file to s3 to indicate that the historic data has been processed
+    if saveType == "S3":
+        done_file = s3_path.replace(".zarr", ".done")
+        s3.touch(done_file)
+    else:
+        done_file = local_path.replace(".zarr", ".done")
+        with open(done_file, "w") as f:
+            f.write("Done")
 
     print((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
 
@@ -682,7 +711,7 @@ if saveType == "S3":
     # Upload to S3
     s3.put_file(
         forecast_process_dir + "/NBM_Fire.zarr.zip",
-        forecast_path + "/NBM_Fire.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/NBM_Fire.zarr.zip",
     )
 
     # Write most recent forecast time
@@ -692,7 +721,7 @@ if saveType == "S3":
 
     s3.put_file(
         forecast_process_dir + "/NBM_Fire.time.pickle",
-        forecast_path + "/NBM_Fire.time.pickle",
+        forecast_path + "/" + ingestVersion + "/NBM_Fire.time.pickle",
     )
 else:
     # Write most recent forecast time
@@ -702,13 +731,13 @@ else:
 
     shutil.move(
         forecast_process_dir + "/NBM_Fire.time.pickle",
-        forecast_path + "/NBM_Fire.time.pickle",
+        forecast_path + "/" + ingestVersion + "/NBM_Fire.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/NBM_Fire.zarr",
-        forecast_path + "/NBM_Fire.zarr",
+        forecast_path + "/" + ingestVersion + "/NBM_Fire.zarr",
         dirs_exist_ok=True,
     )
 

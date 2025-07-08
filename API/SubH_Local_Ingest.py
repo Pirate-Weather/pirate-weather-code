@@ -23,7 +23,11 @@ from herbie.fast import Herbie_latest
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
+ingestVersion = "v27"
+
+wgrib2_path = os.getenv(
+    "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
+)
 
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/home/ubuntu/Weather/SubH"
@@ -124,6 +128,7 @@ zarrVars = (
     "VIS_surface",
     "SPFH_2maboveground",
     "DSWRF_surface",
+    "CAPE_surface",
 )
 
 
@@ -137,7 +142,7 @@ zarrVars = (
 # Define the subset of variables to download as a list of strings
 matchstring_2m = ":((DPT|TMP|SPFH):2 m above ground:)"
 matchstring_su = (
-    ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST|DSWRF):surface:.*min fcst)"
+    ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST|DSWRF|CAPE):surface:.*min fcst)"
 )
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*min fcst)"
 matchstring_sl = "(:(REFC):)"
@@ -358,7 +363,8 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/SubH.zarr.zip", forecast_path + "/SubH.zarr.zip"
+        forecast_process_dir + "/SubH.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/SubH.zarr.zip",
     )
 
     # Write most recent forecast time
@@ -368,7 +374,7 @@ if saveType == "S3":
 
     s3.put_file(
         forecast_process_dir + "/SubH.time.pickle",
-        forecast_path + "/SubH.time.pickle",
+        forecast_path + "/" + ingestVersion + "/SubH.time.pickle",
     )
 else:
     # Write most recent forecast time
@@ -378,13 +384,13 @@ else:
 
     shutil.move(
         forecast_process_dir + "/SubH.time.pickle",
-        forecast_path + "/SubH.time.pickle",
+        forecast_path + "/" + ingestVersion + "/SubH.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/SubH.zarr",
-        forecast_path + "/SubH.zarr",
+        forecast_path + "/" + ingestVersion + "/SubH.zarr",
         dirs_exist_ok=True,
     )
 

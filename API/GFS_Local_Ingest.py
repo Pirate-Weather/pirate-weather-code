@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 import warnings
 
 import dask
@@ -24,7 +25,7 @@ from dask.diagnostics import ProgressBar
 
 
 # Scipy Interp Function
-def interp_time_block(y_block, idx0, idx1, w):
+def interp_time_block(y_block, idx0, idx1, w, valid):
     # y_block is a NumPy array of shape (Vb, T_old, Yb, Xb)
     # 1) fancy-index in NumPy only:
     y0 = y_block[:, idx0, :, :]
@@ -32,12 +33,24 @@ def interp_time_block(y_block, idx0, idx1, w):
     # 2) add back your time‐axis weights in NumPy:
     w_r = w[None, :, None, None]
     omw_r = (1 - w)[None, :, None, None]
-    return omw_r * y0 + w_r * y1  # shape (Vb, T_new, Yb, Xb)
+    # 3) linear blend
+    y_interp = omw_r * y0 + w_r * y1
+
+    # 4) zero‐out (or NaN‐out) anything outside the original time range
+    #    here we choose NaN so it’s clear these were out-of-range
+    if not np.all(valid):
+        # valid==False where x_b is outside [x_a[0], x_a[-1]]
+        inv = ~valid
+        y_interp[:, inv, :, :] = np.nan
+
+    return y_interp
 
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
+ingestVersion = "v27"
+
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
@@ -65,7 +78,7 @@ processChunk = 100
 # Define the final x/y chunksize
 finalChunk = 3
 
-hisPeriod = 36
+hisPeriod = 48
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -151,9 +164,11 @@ zarrVars = (
     "Storm_Distance",
     "Storm_Direction",
     "REFC_entireatmosphere",
+    "DSWRF_surface",
+    "CAPE_surface",
 )
 
-hisPeriod = 36
+hisPeriod = 48
 
 #####################################################################################################
 # %% Download forecast data using Herbie Latest
@@ -162,12 +177,14 @@ hisPeriod = 36
 
 # Define the subset of variables to download as a list of strings
 matchstring_2m = ":((DPT|TMP|APTMP|RH):2 m above ground:)"
-matchstring_su = ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|PRES|VIS|GUST):surface:.*hour fcst)"
+matchstring_su = (
+    ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|PRES|VIS|GUST|CAPE):surface:.*hour fcst)"
+)
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
 matchstring_oz = "(:TOZNE:)"
 matchstring_cl = "(:(TCDC|REFC):entire atmosphere:.*hour fcst)"
 matchstring_ap = "(:APCP:surface:0-[1-9]*)"
-matchstring_sl = "(:PRMSL:)"
+matchstring_sl = "(:(PRMSL|DSWRF):)"
 
 
 # Merge matchstrings for download
@@ -211,7 +228,7 @@ FH_forecastsub = FastHerbie(
 )
 
 # Download the subsets
-FH_forecastsub.download(matchStrings, verbose=False)
+FH_forecastsub.download(matchStrings, verbose=True)
 
 # Create list of downloaded grib files
 gribList = [
@@ -396,63 +413,64 @@ directions_chunked.to_zarr(
 
 # UV is an average from zero to 6, repeating throughout the time series.
 # Correct this to 1-hour average
+# Solar rad follows the same pattern, so we can use the same appraoch.
+accumVars = ["DUVB_surface", "DSWRF_surface"]
+for accumVar in accumVars:
+    # Read out hours 1-120, reshape to 6 hour steps
+    uvProc = (
+        xarray_forecast_merged[accumVar]
+        .isel(time=slice(0, 120))
+        .values.reshape(20, 6, 721, 1440, order="C")
+    )
 
-# Read out hours 1-120, reshape to 6 hour steps
-uvProc = (
-    xarray_forecast_merged["DUVB_surface"]
-    .isel(time=slice(0, 120))
-    .values.reshape(20, 6, 721, 1440, order="C")
-)
+    n = np.arange(1, 7)
+    n = n[np.newaxis, :, np.newaxis, np.newaxis]
 
-n = np.arange(1, 7)
-n = n[np.newaxis, :, np.newaxis, np.newaxis]
+    # Save first step to concatonate later
+    first_step = uvProc[:, 0, :, :]
+    first_step = first_step[:, np.newaxis, :, :]
 
-# Save first step to concatonate later
-first_step = uvProc[:, 0, :, :]
-first_step = first_step[:, np.newaxis, :, :]
+    # Create numpy array of processed UV
+    uvProcHour = np.concatenate(
+        (first_step, np.diff(uvProc, axis=1) * n[:, 1:, :, :] + uvProc[:, 0:5, :, :]),
+        axis=1,
+    )
 
-# Create numpy array of processed UV
-uvProcHour = np.concatenate(
-    (first_step, np.diff(uvProc, axis=1) * n[:, 1:, :, :] + uvProc[:, 0:5, :, :]),
-    axis=1,
-)
+    # Reshape back to 3D
+    uvProcHour3D = uvProcHour.reshape(120, 721, 1440, order="C")
 
-# Reshape back to 3D
-uvProcHour3D = uvProcHour.reshape(120, 721, 1440, order="C")
+    # Read out hours 123, reshape to 6 hour steps
+    uvProc = (
+        xarray_forecast_merged[accumVar]
+        .isel(time=slice(120, 160))
+        .values.reshape(20, 2, 721, 1440, order="C")
+    )
 
-# Read out hours 123, reshape to 6 hour steps
-uvProc = (
-    xarray_forecast_merged["DUVB_surface"]
-    .isel(time=slice(120, 160))
-    .values.reshape(20, 2, 721, 1440, order="C")
-)
+    n = np.arange(1, 3)
+    n = n[np.newaxis, :, np.newaxis, np.newaxis]
 
-n = np.arange(1, 3)
-n = n[np.newaxis, :, np.newaxis, np.newaxis]
+    # Save first step to concatonate later
+    first_step = uvProc[:, 0, :, :]
+    first_step = first_step[:, np.newaxis, :, :]
 
-# Save first step to concatonate later
-first_step = uvProc[:, 0, :, :]
-first_step = first_step[:, np.newaxis, :, :]
+    # Create numpy array of processed UV
+    uvProcHour = np.concatenate(
+        (first_step, np.diff(uvProc, axis=1) * n[:, 1:, :, :] + uvProc[:, 0:1, :, :]),
+        axis=1,
+    )
 
-# Create numpy array of processed UV
-uvProcHour = np.concatenate(
-    (first_step, np.diff(uvProc, axis=1) * n[:, 1:, :, :] + uvProc[:, 0:1, :, :]),
-    axis=1,
-)
+    # Reshape back to 3D
+    uvProcHour3DB = uvProcHour.reshape(40, 721, 1440, order="C")
 
-# Reshape back to 3D
-uvProcHour3DB = uvProcHour.reshape(40, 721, 1440, order="C")
+    ### Note- to get index, do this:
+    #             // UVB to etyhemally UV factor 18.9 https://link.springer.com/article/10.1039/b312985c
+    #             // 0.025 m2/W to get the uv index
+    # ['DUVB_surface'] * 0.025 * 18.9
 
-
-### Note- to get index, do this:
-#             // UVB to etyhemally UV factor 18.9 https://link.springer.com/article/10.1039/b312985c
-#             // 0.025 m2/W to get the uv index
-# ['DUVB_surface'] * 0.025 * 18.9
-
-# Combine and merge back into xarray dataset
-xarray_forecast_merged["DUVB_surface"] = xarray_forecast_merged["DUVB_surface"].copy(
-    data=np.concatenate((uvProcHour3D, uvProcHour3DB), axis=0)
-)
+    # Combine and merge back into xarray dataset
+    xarray_forecast_merged[accumVar] = xarray_forecast_merged[accumVar].copy(
+        data=np.concatenate((uvProcHour3D, uvProcHour3DB), axis=0)
+    )
 
 
 # %% Delete to free memory
@@ -499,10 +517,27 @@ for i in range(hisPeriod, 0, -6):
             + ".zarr"
         )
 
-        # # Try to open the zarr file to check if it has already been saved
-        if s3.exists(s3_path):
-            continue
+        # Check for a done file in S3
+        if s3.exists(s3_path.replace(".zarr", ".done")):
+            print("File already exists in S3, skipping download for: " + s3_path)
+            # If the file exists, check that it works
+            try:
+                hisCheckStore = zarr.storage.FsspecStore.from_url(
+                    s3_path,
+                    storage_options={
+                        "key": aws_access_key_id,
+                        "secret": aws_secret_access_key,
+                    },
+                )
+                zarr.open(hisCheckStore)[zarrVars[-1]][-1, -1, -1]
+                continue  # If it exists, skip to the next iteration
+            except Exception:
+                print("### Historic Data Failure!")
+                print(traceback.print_exc())
 
+                # Delete the file if it exists
+                if s3.exists(s3_path):
+                    s3.rm(s3_path)
     else:
         # Local Path Setup
         local_path = (
@@ -512,8 +547,9 @@ for i in range(hisPeriod, 0, -6):
             + ".zarr"
         )
 
-        # Check if local file exists
-        if os.path.exists(local_path):
+        # Check for a loca done file
+        if os.path.exists(local_path.replace(".zarr", ".done")):
+            print("File already exists in S3, skipping download for: " + local_path)
             continue
 
     print(
@@ -751,6 +787,15 @@ for i in range(hisPeriod, 0, -6):
     os.remove(hist_process_path + "_wgrib2_merged.nc")
     os.remove(hist_process_path + "_wgrib2_merged_UV.nc")
 
+    # Save a done file to s3 to indicate that the historic data has been processed
+    if saveType == "S3":
+        done_file = s3_path.replace(".zarr", ".done")
+        s3.touch(done_file)
+    else:
+        done_file = local_path.replace(".zarr", ".done")
+        with open(done_file, "w") as f:
+            f.write("Done")
+
     print((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
 
 # %% Merge the historic and forecast datasets and then squash using dask
@@ -881,6 +926,9 @@ idx0 = np.clip(idx, 0, len(x_a) - 2)
 idx1 = idx0 + 1
 w = (x_b - x_a[idx0]) / (x_a[idx1] - x_a[idx0])  # float array, shape (T_new,)
 
+# boolean mask of “in‐range” points
+valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
+
 # with ProgressBar():
 da.map_blocks(
     interp_time_block,
@@ -888,6 +936,7 @@ da.map_blocks(
     idx0,
     idx1,
     w,
+    valid,
     dtype="float32",
     chunks=(1, len(hourly_timesUnix), processChunk, processChunk),
 ).round(3).rechunk(
@@ -949,10 +998,13 @@ if saveType == "S3":
 # %% Upload to S3
 if saveType == "S3":
     # Upload to S3
-    s3.put_file(forecast_process_dir + "/GFS.zarr.zip", forecast_path + "/GFS.zarr.zip")
+    s3.put_file(
+        forecast_process_dir + "/GFS.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/GFS.zarr.zip",
+    )
     s3.put_file(
         forecast_process_dir + "/GFS_Maps.zarr.zip",
-        forecast_path + "/GFS_Maps.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/GFS_Maps.zarr.zip",
     )
 
     # Write most recent forecast time
@@ -962,7 +1014,7 @@ if saveType == "S3":
 
     s3.put_file(
         forecast_process_dir + "/GFS.time.pickle",
-        forecast_path + "/GFS.time.pickle",
+        forecast_path + "/" + ingestVersion + "/GFS.time.pickle",
     )
 else:
     # Write most recent forecast time
@@ -972,20 +1024,20 @@ else:
 
     shutil.move(
         forecast_process_dir + "/GFS.time.pickle",
-        forecast_path + "/GFS.time.pickle",
+        forecast_path + "/" + ingestVersion + "/GFS.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/GFS.zarr",
-        forecast_path + "/GFS.zarr",
+        forecast_path + "/" + ingestVersion + "/GFS.zarr",
         dirs_exist_ok=True,
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/GFS_Maps.zarr",
-        forecast_path + "/GFS_Maps.zarr",
+        forecast_path + "/" + ingestVersion + "/GFS_Maps.zarr",
         dirs_exist_ok=True,
     )
 # Clean up

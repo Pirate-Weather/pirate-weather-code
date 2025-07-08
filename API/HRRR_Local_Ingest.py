@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 import warnings
 
 import dask.array as da
@@ -22,7 +23,11 @@ from herbie.fast import Herbie_latest
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
+ingestVersion = "v27"
+
+wgrib2_path = os.getenv(
+    "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
+)
 
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/home/ubuntu/Weather/HRRR"
@@ -47,7 +52,7 @@ processChunk = 100
 # Define the final x/y chunksize
 finalChunk = 5
 
-hisPeriod = 36
+hisPeriod = 48
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -122,6 +127,8 @@ zarrVars = (
     "TCDC_entireatmosphere",
     "MASSDEN_8maboveground",
     "REFC_entireatmosphere",
+    "DSWRF_surface",
+    "CAPE_surface",
 )
 
 #####################################################################################################
@@ -132,7 +139,9 @@ zarrVars = (
 # Define the subset of variables to download as a list of strings
 matchstring_2m = ":((DPT|TMP|APTMP|RH):2 m above ground:)"
 matchstring_8m = ":(MASSDEN:8 m above ground:)"
-matchstring_su = ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|VIS|GUST):surface:.*hour fcst)"
+matchstring_su = (
+    ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|VIS|GUST|DSWRF|CAPE):surface:.*hour fcst)"
+)
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
 matchstring_cl = "(:TCDC:entire atmosphere:.*hour fcst)"
 matchstring_ap = "(:APCP:surface:0-[1-9]*)"
@@ -170,7 +179,7 @@ FH_forecastsub = FastHerbie(
 )
 
 # Download the subsets
-FH_forecastsub.download(matchStrings, verbose=False)
+FH_forecastsub.download(matchStrings, verbose=True)
 
 # Create list of downloaded grib files
 gribList = [
@@ -312,27 +321,29 @@ for i in range(hisPeriod, -1, -1):
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
+        if s3.exists(s3_path.replace(".zarr", ".done")):
+            print("File already exists in S3, skipping download for: " + s3_path)
+            # If the file exists, check that it works
 
-        if s3.exists(s3_path):
-            # Check that all the data is there and that the data is the right shape
-            zarrCheckStore = zarr.storage.FsspecStore.from_url(
-                s3_path,
-                storage_options={
-                    "key": aws_access_key_id,
-                    "secret": aws_secret_access_key,
-                },
-            )
+            if s3.exists(s3_path):
+                # Try to open and read data from the last variable of the zarr file to check if it has already been saved
+                try:
+                    hisCheckStore = zarr.storage.FsspecStore.from_url(
+                        s3_path,
+                        storage_options={
+                            "key": aws_access_key_id,
+                            "secret": aws_secret_access_key,
+                        },
+                    )
+                    zarr.open(hisCheckStore)[zarrVars[-1]][-1, -1, -1]
+                    continue  # If it exists, skip to the next iteration
+                except Exception:
+                    print("### Historic Data Failure!")
+                    print(traceback.print_exc())
 
-            zarrCheck = zarr.open(zarrCheckStore, "r")
-
-            # # Try to open the zarr file to check if it has already been saved
-            if (len(zarrCheck) - 4) == len(
-                zarrVars
-            ):  # Subtract 4 for lat, lon, x, and y
-                if zarrCheck[zarrVars[-1]].shape[1] == 1059:
-                    if zarrCheck[zarrVars[-1]].shape[2] == 1799:
-                        # print('Data is there and the right shape')
-                        continue
+                    # Delete the file if it exists
+                    if s3.exists(s3_path):
+                        s3.rm(s3_path)
 
     else:
         # Local Path Setup
@@ -343,19 +354,10 @@ for i in range(hisPeriod, -1, -1):
             + ".zarr"
         )
 
-        # Check if local file exists
-        if os.path.exists(local_path):
-            # Check that all the data is there and that the data is the right shape
-            zarrCheck = zarr.open(local_path, "r")
-
-            # # Try to open the zarr file to check if it has already been saved
-            if (len(zarrCheck) - 4) == len(
-                zarrVars
-            ):  # Subtract 4 for lat, lon, x, and y
-                if zarrCheck[zarrVars[-1]].shape[1] == 1059:
-                    if zarrCheck[zarrVars[-1]].shape[2] == 1799:
-                        # print('Data is there and the right shape')
-                        continue
+        # Check for a loca done file
+        if os.path.exists(local_path.replace(".zarr", ".done")):
+            print("File already exists in S3, skipping download for: " + local_path)
+            continue
 
     print(
         "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
@@ -454,6 +456,15 @@ for i in range(hisPeriod, -1, -1):
     # Remove temp file created by wgrib2
     os.remove(hist_process_path + "_wgrib_merge.regrid")
     os.remove(hist_process_path + "_wgrib_merge.nc")
+
+    # Save a done file to s3 to indicate that the historic data has been processed
+    if saveType == "S3":
+        done_file = s3_path.replace(".zarr", ".done")
+        s3.touch(done_file)
+    else:
+        done_file = local_path.replace(".zarr", ".done")
+        with open(done_file, "w") as f:
+            f.write("Done")
 
     print((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
 
@@ -631,11 +642,12 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/HRRR.zarr.zip", forecast_path + "/HRRR.zarr.zip"
+        forecast_process_dir + "/HRRR.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/HRRR.zarr.zip",
     )
     s3.put_file(
         forecast_process_dir + "/HRRR_maps.zarr.zip",
-        forecast_path + "/HRRR_maps.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/HRRR_maps.zarr.zip",
     )
 
     # Write most recent forecast time
@@ -645,7 +657,7 @@ if saveType == "S3":
 
     s3.put_file(
         forecast_process_dir + "/HRRR.time.pickle",
-        forecast_path + "/HRRR.time.pickle",
+        forecast_path + "/" + ingestVersion + "/HRRR.time.pickle",
     )
 else:
     # Write most recent forecast time
@@ -655,20 +667,20 @@ else:
 
     shutil.move(
         forecast_process_dir + "/HRRR.time.pickle",
-        forecast_path + "/HRRR.time.pickle",
+        forecast_path + "/" + ingestVersion + "/HRRR.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/HRRR.zarr",
-        forecast_path + "/HRRR.zarr",
+        forecast_path + "/" + ingestVersion + "/HRRR.zarr",
         dirs_exist_ok=True,
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/HRRR_maps.zarr",
-        forecast_path + "/HRRR_maps.zarr",
+        forecast_path + "/" + ingestVersion + "/HRRR_maps.zarr",
         dirs_exist_ok=True,
     )
 

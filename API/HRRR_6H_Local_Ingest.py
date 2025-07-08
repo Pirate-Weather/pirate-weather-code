@@ -25,7 +25,11 @@ from numcodecs import BitRound, Blosc
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
+ingestVersion = "v27"
+
+wgrib2_path = os.getenv(
+    "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
+)
 
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/home/ubuntu/Weather/HRRR_6H"
@@ -47,8 +51,7 @@ processChunk = 100
 # Define the final x/y chunksize
 finalChunk = 100
 
-
-hisPeriod = 36
+hisPeriod = 48
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -120,6 +123,9 @@ zarrVars = (
     "CRAIN_surface",
     "TCDC_entireatmosphere",
     "MASSDEN_8maboveground",
+    "REFC_entireatmosphere",
+    "DSWRF_surface",
+    "CAPE_surface",
 )
 
 
@@ -131,11 +137,13 @@ zarrVars = (
 # Define the subset of variables to download as a list of strings
 matchstring_2m = ":((DPT|TMP|APTMP|RH):2 m above ground:)"
 matchstring_8m = ":(MASSDEN:8 m above ground:)"
-matchstring_su = ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|VIS|GUST):surface:.*hour fcst)"
+matchstring_su = (
+    ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|VIS|GUST|DSWRF|CAPE):surface:.*hour fcst)"
+)
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
 matchstring_cl = "(:TCDC:entire atmosphere:.*hour fcst)"
 matchstring_ap = "(:APCP:surface:0-[1-9]*)"
-matchstring_sl = "(:MSLMA:)"
+matchstring_sl = "(:(MSLMA|REFC):)"
 
 # Merge matchstrings for download
 matchStrings = (
@@ -169,7 +177,7 @@ FH_forecastsub = FastHerbie(
 )
 
 # Download the subsets
-FH_forecastsub.download(matchStrings, verbose=False)
+FH_forecastsub.download(matchStrings, verbose=True)
 
 # Create list of downloaded grib files
 gribList = [
@@ -366,7 +374,7 @@ if saveType == "S3":
     # Upload to S3
     s3.put_file(
         forecast_process_dir + "/HRRR_6H.zarr.zip",
-        forecast_path + "/HRRR_6H.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/HRRR_6H.zarr.zip",
     )
 
     # Write most recent forecast time
@@ -376,7 +384,7 @@ if saveType == "S3":
 
     s3.put_file(
         forecast_process_dir + "/HRRR_6H.time.pickle",
-        forecast_path + "/HRRR_6H.time.pickle",
+        forecast_path + "/" + ingestVersion + "/HRRR_6H.time.pickle",
     )
 else:
     # Write most recent forecast time
@@ -386,13 +394,13 @@ else:
 
     shutil.move(
         forecast_process_dir + "/HRRR_6H.time.pickle",
-        forecast_path + "/HRRR_6H.time.pickle",
+        forecast_path + "/" + ingestVersion + "/HRRR_6H.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/HRRR_6H.zarr",
-        forecast_path + "/HRRR_6H.zarr",
+        forecast_path + "/" + ingestVersion + "/HRRR_6H.zarr",
         dirs_exist_ok=True,
     )
 

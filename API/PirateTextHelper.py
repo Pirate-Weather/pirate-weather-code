@@ -2,11 +2,31 @@
 from collections import Counter
 import math
 
-
+# Cloud Cover Thresholds (already existing)
 cloudyThreshold = 0.875
 mostlyCloudyThreshold = 0.625
 partlyCloudyThreshold = 0.375
 mostlyClearThreshold = 0.125
+
+# Precipitation Intensity Thresholds (mm/h liquid equivalent)
+LIGHT_PRECIP_MM_PER_HOUR = 0.4
+MID_PRECIP_MM_PER_HOUR = 2.5
+HEAVY_PRECIP_MM_PER_HOUR = 10.0
+
+# Snow Intensity Thresholds (mm/h liquid equivalent)
+LIGHT_SNOW_MM_PER_HOUR = 0.13
+MID_SNOW_MM_PER_HOUR = 0.83
+HEAVY_SNOW_MM_PER_HOUR = 3.33
+
+# Icon Thresholds for Precipitation Accumulation (mm liquid equivalent)
+HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM = 0.2
+HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 0.02
+
+DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM = 10.0
+DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0
+
+# Icon Thresholds for Visbility (meters)
+DEFAULT_VISIBILITY = 1000
 
 
 def Most_Common(lst):
@@ -108,18 +128,18 @@ def calculate_precip_text(
         pop = 1
 
     # In mm/h
-    lightPrecipThresh = 0.4 * prepIntensityUnit
-    midPrecipThresh = 2.5 * prepIntensityUnit
-    heavyPrecipThresh = 10 * prepIntensityUnit
-    lightSnowThresh = 0.13 * prepIntensityUnit
-    midSnowThresh = 0.83 * prepIntensityUnit
-    heavySnowThresh = 3.33 * prepIntensityUnit
+    lightPrecipThresh = LIGHT_PRECIP_MM_PER_HOUR * prepIntensityUnit
+    midPrecipThresh = MID_PRECIP_MM_PER_HOUR * prepIntensityUnit
+    heavyPrecipThresh = HEAVY_PRECIP_MM_PER_HOUR * prepIntensityUnit
+    lightSnowThresh = LIGHT_SNOW_MM_PER_HOUR * prepIntensityUnit
+    midSnowThresh = MID_SNOW_MM_PER_HOUR * prepIntensityUnit
+    heavySnowThresh = HEAVY_SNOW_MM_PER_HOUR * prepIntensityUnit
 
-    snowIconThresholdHour = 0.20 * prepAccumUnit
-    precipIconThresholdHour = 0.02 * prepAccumUnit
+    snowIconThresholdHour = HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
+    precipIconThresholdHour = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
 
-    snowIconThresholdDay = 10.0 * prepAccumUnit
-    precipIconThresholdDay = 1.0 * prepAccumUnit
+    snowIconThresholdDay = DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
+    precipIconThresholdDay = DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
     numTypes = 0
 
     # Use daily or hourly thresholds depending on the situation
@@ -435,7 +455,7 @@ def calculate_vis_text(vis, visUnits, mode="both"):
     """
     visText = None
     visIcon = None
-    visThresh = 1000 * visUnits
+    visThresh = DEFAULT_VISIBILITY * visUnits
 
     if vis < visThresh:
         visText = "fog"
