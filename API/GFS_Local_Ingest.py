@@ -849,6 +849,7 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 
     if dask_var == "time":
         # Create a time array with the same shape
+        # This is because multiple steps are stored in each file
         daskVarArraysShape = da.reshape(
             daskVarArraysStack,
             (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], 1),
