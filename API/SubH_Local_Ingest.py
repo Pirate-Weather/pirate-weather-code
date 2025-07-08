@@ -179,7 +179,7 @@ FH_forecastsub = FastHerbie(
 )
 
 # Download the subsets
-FH_forecastsub.download(matchStrings, verbose=True)
+FH_forecastsub.download(matchStrings, verbose=False)
 
 # Create list of downloaded grib files
 gribList = [
