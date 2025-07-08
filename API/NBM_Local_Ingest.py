@@ -14,6 +14,7 @@ from itertools import chain
 
 import dask
 import dask.array as da
+from dask.diagnostics import ProgressBar
 import netCDF4 as nc
 import numpy as np
 import pandas as pd
