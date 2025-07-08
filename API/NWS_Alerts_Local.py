@@ -18,6 +18,8 @@ import zarr
 from numpy.dtypes import StringDType
 
 # %% Setup paths and parameters
+ingestVersion = "v27"
+
 wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
 
 forecast_process_dir = os.getenv(
@@ -61,8 +63,8 @@ if not os.path.exists(tmpDIR):
     os.makedirs(tmpDIR)
 
 if saveType == "Download":
-    if not os.path.exists(forecast_path):
-        os.makedirs(forecast_path)
+    if not os.path.exists(forecast_path + "/" + ingestVersion):
+        os.makedirs(forecast_path + "/" + ingestVersion)
     if not os.path.exists(historic_path):
         os.makedirs(historic_path)
 
@@ -255,13 +257,13 @@ if saveType == "S3":
     # Upload to S3
     s3.put_file(
         forecast_process_dir + "/NWS_Alerts.zarr.zip",
-        forecast_path + "/NWS_Alerts.zarr.zip",
+        forecast_path +  "/" + ingestVersion +  "/NWS_Alerts.zarr.zip",
     )
 else:
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/NWS_Alerts.zarr",
-        forecast_path + "/NWS_Alerts.zarr",
+        forecast_path +  "/" + ingestVersion + "/NWS_Alerts.zarr",
         dirs_exist_ok=True,
     )
 
