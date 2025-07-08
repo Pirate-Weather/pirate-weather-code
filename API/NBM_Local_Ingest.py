@@ -1053,7 +1053,7 @@ for z in [0, 2, 6, 7, 8, 13, 14, 15, 16, 17]:
     )
 
     # with ProgressBar():
-    da.rechunk(daskVarArrayStackDisk[z, 24:60, :, :], (36, 100, 100)).to_zarr(
+    da.rechunk(daskVarArrayStackDisk[z, 36:72, :, :], (36, 100, 100)).to_zarr(
         zarr_array, overwrite=True, compute=True
     )
 

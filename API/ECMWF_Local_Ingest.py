@@ -998,7 +998,7 @@ for z in [0, 3, 5, 6, 7, 8, 9]:
         dtype="float32",
     )
 
-    da.rechunk(daskVarArrayStackDisk[z, 24:60, :, :], (36, 100, 100)).to_zarr(
+    da.rechunk(daskVarArrayStackDisk[z, 36:72, :, :], (36, 100, 100)).to_zarr(
         zarr_array, overwrite=True, compute=True
     )
 
