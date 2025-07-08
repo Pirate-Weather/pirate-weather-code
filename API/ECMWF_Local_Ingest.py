@@ -859,7 +859,11 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 
     if dask_var == "time":
         # Create a time array with the same shape
-        daskVarArraysShape = da.reshape(daskVarArraysStack, (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], 1), merge_chunks=False)
+        daskVarArraysShape = da.reshape(
+            daskVarArraysStack,
+            (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], 1),
+            merge_chunks=False,
+        )
         daskCatTimes = da.concatenate(
             (da.squeeze(daskVarArraysShape), daskForecastArray), axis=0
         ).astype("float32")
@@ -878,7 +882,9 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 
     else:
         daskVarArraysShape = da.reshape(
-            daskVarArraysStack, (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], 721, 1440), merge_chunks=False
+            daskVarArraysStack,
+            (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], 721, 1440),
+            merge_chunks=False,
         )
         daskArrayOut = da.concatenate((daskVarArraysShape, daskForecastArray), axis=0)
 
