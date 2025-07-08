@@ -257,13 +257,13 @@ if saveType == "S3":
     # Upload to S3
     s3.put_file(
         forecast_process_dir + "/NWS_Alerts.zarr.zip",
-        forecast_path +  "/" + ingestVersion +  "/NWS_Alerts.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/NWS_Alerts.zarr.zip",
     )
 else:
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/NWS_Alerts.zarr",
-        forecast_path +  "/" + ingestVersion + "/NWS_Alerts.zarr",
+        forecast_path + "/" + ingestVersion + "/NWS_Alerts.zarr",
         dirs_exist_ok=True,
     )
 
