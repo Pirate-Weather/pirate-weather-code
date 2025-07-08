@@ -867,7 +867,7 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
                 np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
                 (1, 721, 1440),
             )
-        ).rechunk((196, processChunk, processChunk))
+        ).rechunk((len(stacked_timesUnix), processChunk, processChunk))
 
         daskVarArrayList.append(daskArrayOut)
 
@@ -881,7 +881,7 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 
         daskVarArrayList.append(
             daskArrayOut[:, :, :]
-            .rechunk((196, processChunk, processChunk))
+            .rechunk((len(stacked_timesUnix), processChunk, processChunk))
             .astype("float32")
         )
 
@@ -935,6 +935,7 @@ x_b = np.array(hourly_timesUnix)
 idx = np.searchsorted(x_a, x_b) - 1
 idx0 = np.clip(idx, 0, len(x_a) - 2)
 idx1 = idx0 + 1
+
 w = (x_b - x_a[idx0]) / (x_a[idx1] - x_a[idx0])  # float array, shape (T_new,)
 
 # boolean mask of “in‐range” points
