@@ -63,8 +63,8 @@ if not os.path.exists(tmpDIR):
     os.makedirs(tmpDIR)
 
 if saveType == "Download":
-    if not os.path.exists(forecast_path):
-        os.makedirs(forecast_path)
+    if not os.path.exists(forecast_path + "/" + ingestVersion):
+        os.makedirs(forecast_path + "/" + ingestVersion)
 
 # %% Define base time from the most recent run
 # base_time = pd.Timestamp("2023-07-01 00:00")
@@ -88,8 +88,8 @@ print(base_time)
 # Check if this is newer than the current file
 if saveType == "S3":
     # Check if the file exists and load it
-    if s3.exists(forecast_path + "/SubH_v2.time.pickle"):
-        with s3.open(forecast_path + "/SubH_v2.time.pickle", "rb") as f:
+    if s3.exists(forecast_path + "/" + ingestVersion + "/SubH_v2.time.pickle"):
+        with s3.open(forecast_path + "/" + ingestVersion + "/SubH_v2.time.pickle", "rb") as f:
             previous_base_time = pickle.load(f)
 
         # Compare timestamps and download if the S3 object is more recent
@@ -98,9 +98,9 @@ if saveType == "S3":
             sys.exit()
 
 else:
-    if os.path.exists(forecast_path + "/SubH_v2.time.pickle"):
+    if os.path.exists(forecast_path + "/" + ingestVersion + "/SubH_v2.time.pickle"):
         # Open the file in binary mode
-        with open(forecast_path + "/SubH_v2.time.pickle", "rb") as file:
+        with open(forecast_path + "/" + ingestVersion + "/SubH_v2.time.pickle", "rb") as file:
             # Deserialize and retrieve the variable from the file
             previous_base_time = pickle.load(file)
 
@@ -128,7 +128,6 @@ zarrVars = (
     "VIS_surface",
     "SPFH_2maboveground",
     "DSWRF_surface",
-    "CAPE_surface",
 )
 
 
@@ -142,7 +141,7 @@ zarrVars = (
 # Define the subset of variables to download as a list of strings
 matchstring_2m = ":((DPT|TMP|SPFH):2 m above ground:)"
 matchstring_su = (
-    ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST|DSWRF|CAPE):surface:.*min fcst)"
+    ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST|DSWRF):surface:.*min fcst)"
 )
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*min fcst)"
 matchstring_sl = "(:(REFC):)"
@@ -176,7 +175,7 @@ FH_forecastsub = FastHerbie(
 )
 
 # Download the subsets
-FH_forecastsub.download(matchStrings, verbose=False)
+FH_forecastsub.download(matchStrings, verbose=True)
 
 # Create list of downloaded grib files
 gribList = [
