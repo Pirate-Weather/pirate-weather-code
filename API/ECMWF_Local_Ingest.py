@@ -88,8 +88,8 @@ if not os.path.exists(tmpDIR):
     os.makedirs(tmpDIR)
 
 if saveType == "Download":
-    if not os.path.exists(forecast_path):
-        os.makedirs(forecast_path)
+    if not os.path.exists(forecast_path + "/" + ingestVersion):
+        os.makedirs(forecast_path + "/" + ingestVersion)
     if not os.path.exists(historic_path):
         os.makedirs(historic_path)
 
@@ -116,8 +116,10 @@ print(base_time)
 # Check if this is newer than the current file
 if saveType == "S3":
     # Check if the file exists and load it
-    if s3.exists(forecast_path + "/ECMWF.time.pickle"):
-        with s3.open(forecast_path + "/ECMWF.time.pickle", "rb") as f:
+    if s3.exists(forecast_path + "/" + ingestVersion + "/ECMWF.time.pickle"):
+        with s3.open(
+            forecast_path + "/" + ingestVersion + "/ECMWF.time.pickle", "rb"
+        ) as f:
             previous_base_time = pickle.load(f)
 
         # Compare timestamps and download if the S3 object is more recent
@@ -126,9 +128,11 @@ if saveType == "S3":
             sys.exit()
 
 else:
-    if os.path.exists(forecast_path + "/ECMWF.time.pickle"):
+    if os.path.exists(forecast_path + "/" + ingestVersion + "/ECMWF.time.pickle"):
         # Open the file in binary mode
-        with open(forecast_path + "/ECMWF.time.pickle", "rb") as file:
+        with open(
+            forecast_path + "/" + ingestVersion + "/ECMWF.time.pickle", "rb"
+        ) as file:
             # Deserialize and retrieve the variable from the file
             previous_base_time = pickle.load(file)
 
@@ -855,7 +859,11 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 
     if dask_var == "time":
         # Create a time array with the same shape
-        daskVarArraysShape = da.reshape(daskVarArraysStack, (12, 1), merge_chunks=False)
+        daskVarArraysShape = da.reshape(
+            daskVarArraysStack,
+            (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], 1),
+            merge_chunks=False,
+        )
         daskCatTimes = da.concatenate(
             (da.squeeze(daskVarArraysShape), daskForecastArray), axis=0
         ).astype("float32")
@@ -874,7 +882,9 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 
     else:
         daskVarArraysShape = da.reshape(
-            daskVarArraysStack, (12, 721, 1440), merge_chunks=False
+            daskVarArraysStack,
+            (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], 721, 1440),
+            merge_chunks=False,
         )
         daskArrayOut = da.concatenate((daskVarArraysShape, daskForecastArray), axis=0)
 
