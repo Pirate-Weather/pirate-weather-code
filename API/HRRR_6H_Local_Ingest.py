@@ -84,7 +84,9 @@ print(base_time)
 if saveType == "S3":
     # Check if the file exists and load it
     if s3.exists(forecast_path + "/" + ingestVersion + "/HRRR_6H.time.pickle"):
-        with s3.open(forecast_path + "/" + ingestVersion + "/HRRR_6H.time.pickle", "rb") as f:
+        with s3.open(
+            forecast_path + "/" + ingestVersion + "/HRRR_6H.time.pickle", "rb"
+        ) as f:
             previous_base_time = pickle.load(f)
 
         # Compare timestamps and download if the S3 object is more recent
@@ -95,7 +97,9 @@ if saveType == "S3":
 else:
     if os.path.exists(forecast_path + "/" + ingestVersion + "/HRRR_6H.time.pickle"):
         # Open the file in binary mode
-        with open(forecast_path + "/" + ingestVersion + "/HRRR_6H.time.pickle", "rb") as file:
+        with open(
+            forecast_path + "/" + ingestVersion + "/HRRR_6H.time.pickle", "rb"
+        ) as file:
             # Deserialize and retrieve the variable from the file
             previous_base_time = pickle.load(file)
 
