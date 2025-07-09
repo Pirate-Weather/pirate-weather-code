@@ -293,7 +293,7 @@ FH_forecastsub = FastHerbie(
 )
 
 # Download the subsets
-FH_forecastsub.download(matchStrings, verbose=False)
+FH_forecastsub.download(matchStrings, verbose=True)
 
 # Create list of downloaded grib files
 gribList = getGribList(FH_forecastsub, matchStrings)
@@ -1082,7 +1082,9 @@ if saveType == "S3":
     )
 
     # Write most recent forecast time
-    with open(forecast_process_dir + "/NBM.time.pickle", "wb") as file:
+    with open(
+        forecast_process_dir + "/" + ingestVersion + "/NBM.time.pickle", "wb"
+    ) as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
