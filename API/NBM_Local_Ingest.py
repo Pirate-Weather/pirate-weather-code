@@ -14,6 +14,7 @@ from itertools import chain
 
 import dask
 import dask.array as da
+from dask.diagnostics import ProgressBar
 import netCDF4 as nc
 import numpy as np
 import pandas as pd
@@ -290,10 +291,6 @@ FH_forecastsub = FastHerbie(
     max_threads=1,
     save_dir=tmpDIR,
 )
-
-# for i in nbm_range:
-#     response = requests.get("https://nomads.ncep.noaa.gov/pub/data/nccf/com/blend/prod/blend.20240515/13/core/blend.t13z.core.f{:03d}.co.grib2.idx".format(i))
-#     print(response.status_code)
 
 # Download the subsets
 FH_forecastsub.download(matchStrings, verbose=True)
@@ -783,7 +780,7 @@ for i in range(hisPeriod, -1, -1):
 
     # Main Vars + Accum
     # Download the subsets
-    FH_histsub.download(matchStrings + "|" + matchstring_po, verbose=True)
+    FH_histsub.download(matchStrings + "|" + matchstring_po, verbose=False)
 
     # Use wgrib2 to change the order
     cmd1 = (
@@ -877,6 +874,8 @@ for i in range(hisPeriod, -1, -1):
 
 # %% Merge the historic and forecast datasets and then squash using dask
 #####################################################################################################
+
+print("Merge and interpolate arrays.")
 # Get the s3 paths to the historic data
 ncLocalWorking_paths = [
     historic_path
@@ -959,6 +958,8 @@ daskVarArrayListMerge.to_zarr(
     forecast_process_path + "_stack.zarr", overwrite=True, compute=True
 )
 
+print("Stacked 4D array saved to disk.")
+
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
@@ -970,7 +971,7 @@ if saveType == "S3":
 else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/NBM.zarr")
 
-    # Check if the store exists, if so, open itm otherwise create it
+# Check if the store exists, if so, open itm otherwise create it
 zarr_array = zarr.create_array(
     store=zarr_store,
     shape=(
@@ -1001,20 +1002,21 @@ w = (x_b - x_a[idx0]) / (x_a[idx1] - x_a[idx0])  # float array, shape (T_new,)
 # boolean mask of “in‐range” points
 valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
 
-# with ProgressBar():
-da.map_blocks(
-    interp_time_block,
-    daskVarArrayStackDisk,
-    idx0,
-    idx1,
-    w,
-    valid,
-    dtype="float32",
-    chunks=(1, len(hourly_timesUnix), processChunk, processChunk),
-).round(3).rechunk(
-    (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)
-).to_zarr(zarr_array, overwrite=True, compute=True)
+with ProgressBar():
+    da.map_blocks(
+        interp_time_block,
+        daskVarArrayStackDisk,
+        idx0,
+        idx1,
+        w,
+        valid,
+        dtype="float32",
+        chunks=(1, len(hourly_timesUnix), processChunk, processChunk),
+    ).round(3).rechunk(
+        (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)
+    ).to_zarr(zarr_array, overwrite=True, compute=True)
 
+print("Interpolate complete")
 
 if saveType == "S3":
     zarr_store.close()
@@ -1056,7 +1058,7 @@ for z in [0, 2, 6, 7, 8, 13, 14, 15, 16, 17]:
     )
 
     # with ProgressBar():
-    da.rechunk(daskVarArrayStackDisk[z, 24:60, :, :], (36, 100, 100)).to_zarr(
+    da.rechunk(daskVarArrayStackDisk[z, 36:72, :, :], (36, 100, 100)).to_zarr(
         zarr_array, overwrite=True, compute=True
     )
 
@@ -1064,6 +1066,8 @@ for z in [0, 2, 6, 7, 8, 13, 14, 15, 16, 17]:
 
 if saveType == "S3":
     zarr_store_maps.close()
+
+print("Map complete")
 
 # %% Upload to S3
 if saveType == "S3":
