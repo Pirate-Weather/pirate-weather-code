@@ -132,6 +132,7 @@ zarrVars = (
     "VIS_surface",
     "SPFH_2maboveground",
     "DSWRF_surface",
+    "CAPE_surface",
 )
 
 
@@ -145,7 +146,7 @@ zarrVars = (
 # Define the subset of variables to download as a list of strings
 matchstring_2m = ":((DPT|TMP|SPFH):2 m above ground:)"
 matchstring_su = (
-    ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST|DSWRF):surface:.*min fcst)"
+    ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST|DSWRF|CAPE):surface:.*min fcst)"
 )
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*min fcst)"
 matchstring_sl = "(:(REFC):)"

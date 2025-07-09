@@ -14,6 +14,7 @@ from itertools import chain
 
 import dask
 import dask.array as da
+from dask.diagnostics import ProgressBar
 import netCDF4 as nc
 import numpy as np
 import pandas as pd
@@ -873,6 +874,8 @@ for i in range(hisPeriod, -1, -1):
 
 # %% Merge the historic and forecast datasets and then squash using dask
 #####################################################################################################
+
+print("Merge and interpolate arrays.")
 # Get the s3 paths to the historic data
 ncLocalWorking_paths = [
     historic_path
@@ -955,6 +958,8 @@ daskVarArrayListMerge.to_zarr(
     forecast_process_path + "_stack.zarr", overwrite=True, compute=True
 )
 
+print("Stacked 4D array saved to disk.")
+
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
@@ -1011,6 +1016,7 @@ with ProgressBar():
         (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)
     ).to_zarr(zarr_array, overwrite=True, compute=True)
 
+print("Interpolate complete")
 
 if saveType == "S3":
     zarr_store.close()
@@ -1052,7 +1058,7 @@ for z in [0, 2, 6, 7, 8, 13, 14, 15, 16, 17]:
     )
 
     # with ProgressBar():
-    da.rechunk(daskVarArrayStackDisk[z, 24:60, :, :], (36, 100, 100)).to_zarr(
+    da.rechunk(daskVarArrayStackDisk[z, 36:72, :, :], (36, 100, 100)).to_zarr(
         zarr_array, overwrite=True, compute=True
     )
 
@@ -1060,6 +1066,8 @@ for z in [0, 2, 6, 7, 8, 13, 14, 15, 16, 17]:
 
 if saveType == "S3":
     zarr_store_maps.close()
+
+print("Map complete")
 
 # %% Upload to S3
 if saveType == "S3":
