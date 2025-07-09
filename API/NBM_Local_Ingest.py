@@ -773,7 +773,7 @@ for i in range(hisPeriod, -1, -1):
         model="nbm",
         fxx=fxx,
         product="co",
-        verbose=True,
+        verbose=False,
         priority=["aws"],
         save_dir=tmpDIR,
     )
@@ -1083,7 +1083,7 @@ if saveType == "S3":
 
     # Write most recent forecast time
     with open(
-        forecast_process_dir + "/" + ingestVersion + "/NBM.time.pickle", "wb"
+        forecast_process_dir + "/NBM.time.pickle", "wb"
     ) as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
