@@ -2044,11 +2044,11 @@ async def PW_Forecast(
                     HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), np.nan)
                     # TODO: The sizes of the 0-18 and 18-48 are differernt because of the REFC_entireatmosphere param
                     # Need to either add this to 18-48 or just keep it for the first 18 hours
-                    HRRR_Merged[0 : (55 - HRRR_StartIDX) + (31 - H2_StartIDX), 0:17] = (
+                    HRRR_Merged[0 : (67 - HRRR_StartIDX) + (31 - H2_StartIDX), 0:20] = (
                         np.concatenate(
                             (
-                                dataOut_hrrrh[HRRR_StartIDX:, 0:17],
-                                dataOut_h2[H2_StartIDX:, 0:17],
+                                dataOut_hrrrh[HRRR_StartIDX:, 0:20],
+                                dataOut_h2[H2_StartIDX:, 0:20],
                             ),
                             axis=0,
                         )
@@ -2066,7 +2066,7 @@ async def PW_Forecast(
                     logger.error("NBM data not available for the requested time range.")
                 else:
                     NBM_Merged = np.full((numHours, dataOut_nbm.shape[1]), np.nan)
-                    NBM_Merged[0 : (230 - NBM_StartIDX), :] = dataOut_nbm[
+                    NBM_Merged[0 : (242 - NBM_StartIDX), :] = dataOut_nbm[
                         NBM_StartIDX : (numHours + NBM_StartIDX), :
                     ]
 
@@ -2089,7 +2089,8 @@ async def PW_Forecast(
                     NBM_Fire_Merged = np.full(
                         (numHours, dataOut_nbmFire.shape[1]), np.nan
                     )
-                    NBM_Fire_Merged[0 : (217 - NBM_Fire_StartIDX), :] = dataOut_nbmFire[
+
+                    NBM_Fire_Merged[0 : (229 - NBM_Fire_StartIDX), :] = dataOut_nbmFire[
                         NBM_Fire_StartIDX : (numHours + NBM_Fire_StartIDX), :
                     ]
 
@@ -4371,7 +4372,6 @@ def initialDataSync() -> None:
     print("Initial Download")
 
     STAGE = os.environ.get("STAGE", "PROD")
-    print(STAGE)
     if STAGE == "PROD":
         download_if_newer(
             s3_bucket,
@@ -4447,7 +4447,8 @@ def initialDataSync() -> None:
                 True,
             )
             print("ETOPO Download!")
-
+    else:
+        print(STAGE)
     if (STAGE == "PROD") or (STAGE == "DEV"):
         update_zarr_store(True)
 
@@ -4464,8 +4465,6 @@ def dataSync() -> None:
     logger.info(zarrReady)
 
     STAGE = os.environ.get("STAGE", "PROD")
-
-    print(STAGE)
 
     if zarrReady:
         if STAGE == "PROD":
@@ -4546,6 +4545,8 @@ def dataSync() -> None:
                     False,
                 )
                 logger.info("ETOPO Download!")
+        else:
+            print(STAGE)
 
         if (STAGE == "PROD") or (STAGE == "DEV"):
             update_zarr_store(False)
