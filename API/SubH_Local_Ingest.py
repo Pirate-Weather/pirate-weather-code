@@ -131,7 +131,7 @@ zarrVars = (
     "APCP_surface",
     "VIS_surface",
     "SPFH_2maboveground",
-    "DSWRF_surface"
+    "DSWRF_surface",
 )
 
 
