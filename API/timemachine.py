@@ -715,8 +715,8 @@ async def TimeMachine(
         hTextList.append(hourText)
         hourDict = {
             "time": int(InterPhour[idx, 0]) + halfTZ,
-            "icon": pIconList[idx],
             "summary": hourText,
+            "icon": pIconList[idx],
             "precipIntensity": round(InterPhour[idx, 1] * prepIntensityUnit, 2),
             "precipAccumulation": round(InterPhour[idx, 1] * prepAccumUnit, 4),
             "precipType": pTypeList[idx],
@@ -789,8 +789,8 @@ async def TimeMachine(
 
     dayDict = {
         "time": int(InterPhour[0, 0]) + halfTZ,
-        "icon": pIcon,
         "summary": pText,
+        "icon": pIcon,
         "sunriseTime": int(InterPday[16, 0]),
         "sunsetTime": int(InterPday[17, 0]),
         "moonPhase": round(InterPday[18, 0], 2),
@@ -905,7 +905,7 @@ async def TimeMachine(
         returnOBJ["flags"]["sources"] = "ERA5"
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.5.4"
+        returnOBJ["flags"]["version"] = "V2.7.3"
         returnOBJ["flags"]["sourceIDX"] = {"x": y, "y": x}
         returnOBJ["flags"]["processTime"] = (
             datetime.datetime.utcnow() - T_Start
