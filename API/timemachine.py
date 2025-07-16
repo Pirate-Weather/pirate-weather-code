@@ -181,6 +181,9 @@ async def TimeMachine(
         excludeParams = exclude
 
     # Check if langugage is supported
+    if lang is None:  
+        lang = "en" # Default to English  
+
     if lang not in Translations:
         # Throw an error
         raise HTTPException(status_code=400, detail="Language Not Supported")
@@ -691,37 +694,25 @@ async def TimeMachine(
     )
     InterPday[18, 0] = m / 27.99
 
-    # Convert intensity to accumulation based on type
-    hourRainAccum = 0
-    hourSnowAccum = 0
-    hourIceAccum = 0
-    isDay = False
-
     for idx in range(0, len(dataDict["hours"]), 1):
         # Convert intensity to accumulation based on type
         hourRainAccum = 0
         hourSnowAccum = 0
         hourIceAccum = 0
 
-        if pTypeList[idx] == "rain":
-            hourRainAccum = InterPhour[1] / prepIntensityUnit * prepAccumUnit
-        elif pTypeList[idx] == "snow":
-            hourSnowAccum = (
-                InterPhour[1] / prepIntensityUnit * prepAccumUnit
-            ) * 10  # 1:10 since intensity is in liquid water equivalent
-        elif pTypeList[idx] == "sleet":
-            hourIceAccum = InterPhour[1] / prepIntensityUnit * prepAccumUnit
+        if pTypeList[idx] == "rain":  
+            hourRainAccum = InterPhour[idx, 1] / prepIntensityUnit * prepAccumUnit  
+        elif pTypeList[idx] == "snow":  
+            hourSnowAccum = (  
+                InterPhour[idx, 1] / prepIntensityUnit * prepAccumUnit  
+            ) * 10  # 1:10 since intensity is in liquid water equivalent  
+        elif pTypeList[idx] == "sleet":  
+            hourIceAccum = InterPhour[idx, 1] / prepIntensityUnit * prepAccumUnit  
 
-        # Check if day or night
-        if InterPhour[idx, 0] < InterPday[idx, 17]:
-            isDay = False
-        elif (
-            InterPhour[idx, 0] >= InterPday[idx, 17]
-            and InterPhour[idx, 0] <= InterPday[idx, 18]
-        ):
-            isDay = True
-        elif InterPhour[idx, 0] > InterPday[idx, 18]:
-            isDay = False
+        # Check if day or night  
+        sunrise_ts = InterPday[16, 0]  
+        sunset_ts = InterPday[17, 0]  
+        isDay = sunrise_ts <= InterPhour[idx, 0] <= sunset_ts  
 
         ## Icon
         if InterPhour[idx, 1] > 0.2:
@@ -773,6 +764,7 @@ async def TimeMachine(
         }
 
         try:
+            precip_intensity = InterPhour[idx, 1] * prepIntensityUnit 
             hourText, hourIcon = calculate_text(
                 hourDict,
                 prepAccumUnit,
@@ -784,7 +776,7 @@ async def TimeMachine(
                 hourSnowAccum,
                 hourIceAccum,
                 "hour",
-                InterPhour[idx, 2],
+                precip_intensity,
             )
 
             hourDict["summary"] = translation.translate(["title", hourText])
@@ -933,18 +925,18 @@ async def TimeMachine(
     pTypeCurrent = pTypeList[currentIDX]
 
     # Convert intensity to accumulation based on type
-    currnetRainAccum = 0
-    currnetSnowAccum = 0
-    currnetIceAccum = 0
+    currentRainAccum = 0
+    currentSnowAccum = 0
+    currentIceAccum = 0
 
     if pTypeCurrent == "rain":
-        currnetRainAccum = InterPcurrent[1] / prepIntensityUnit * prepAccumUnit
+        currentRainAccum = InterPcurrent[1] / prepIntensityUnit * prepAccumUnit
     elif pTypeCurrent == "snow":
-        currnetSnowAccum = (
+        currentSnowAccum = (
             InterPcurrent[1] / prepIntensityUnit * prepAccumUnit
         ) * 10  # 1:10 since intensity is in liquid water equivalent
     elif pTypeCurrent == "sleet":
-        currnetIceAccum = InterPcurrent[1] / prepIntensityUnit * prepAccumUnit
+        currentIceAccum = InterPcurrent[1] / prepIntensityUnit * prepAccumUnit
 
     returnOBJ = dict()
     returnOBJ["latitude"] = round(lat, 4)
@@ -991,9 +983,9 @@ async def TimeMachine(
                 windUnit,
                 tempUnits,
                 currentDay,
-                currnetRainAccum,
-                currnetSnowAccum,
-                currnetIceAccum,
+                currentRainAccum,
+                currentSnowAccum,
+                currentIceAccum,
                 "current",
                 InterPcurrent[1] * prepIntensityUnit,
             )
