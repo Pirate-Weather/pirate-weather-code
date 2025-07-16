@@ -181,8 +181,8 @@ async def TimeMachine(
         excludeParams = exclude
 
     # Check if langugage is supported
-    if lang is None:  
-        lang = "en" # Default to English  
+    if lang is None:
+        lang = "en"  # Default to English
 
     if lang not in Translations:
         # Throw an error
@@ -700,19 +700,19 @@ async def TimeMachine(
         hourSnowAccum = 0
         hourIceAccum = 0
 
-        if pTypeList[idx] == "rain":  
-            hourRainAccum = InterPhour[idx, 1] / prepIntensityUnit * prepAccumUnit  
-        elif pTypeList[idx] == "snow":  
-            hourSnowAccum = (  
-                InterPhour[idx, 1] / prepIntensityUnit * prepAccumUnit  
-            ) * 10  # 1:10 since intensity is in liquid water equivalent  
-        elif pTypeList[idx] == "sleet":  
-            hourIceAccum = InterPhour[idx, 1] / prepIntensityUnit * prepAccumUnit  
+        if pTypeList[idx] == "rain":
+            hourRainAccum = InterPhour[idx, 1] / prepIntensityUnit * prepAccumUnit
+        elif pTypeList[idx] == "snow":
+            hourSnowAccum = (
+                InterPhour[idx, 1] / prepIntensityUnit * prepAccumUnit
+            ) * 10  # 1:10 since intensity is in liquid water equivalent
+        elif pTypeList[idx] == "sleet":
+            hourIceAccum = InterPhour[idx, 1] / prepIntensityUnit * prepAccumUnit
 
-        # Check if day or night  
-        sunrise_ts = InterPday[16, 0]  
-        sunset_ts = InterPday[17, 0]  
-        isDay = sunrise_ts <= InterPhour[idx, 0] <= sunset_ts  
+        # Check if day or night
+        sunrise_ts = InterPday[16, 0]
+        sunset_ts = InterPday[17, 0]
+        isDay = sunrise_ts <= InterPhour[idx, 0] <= sunset_ts
 
         ## Icon
         if InterPhour[idx, 1] > 0.2:
@@ -764,7 +764,7 @@ async def TimeMachine(
         }
 
         try:
-            precip_intensity = InterPhour[idx, 1] * prepIntensityUnit 
+            precip_intensity = InterPhour[idx, 1] * prepIntensityUnit
             hourText, hourIcon = calculate_text(
                 hourDict,
                 prepAccumUnit,
