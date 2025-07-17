@@ -525,6 +525,10 @@ def humidity_sky_text(temp, tempUnits, humidity):
     - str: The text representing the humidity
     """
 
+    # If no humidity data, return None
+    if humidity is None or humidity == -999:
+        return None
+
     # Only use humid if also warm (>20C)
     if tempUnits == 0:
         tempThresh = 68

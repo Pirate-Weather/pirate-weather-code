@@ -701,8 +701,8 @@ async def TimeMachine(
         )
 
         # Check if day or night
-        sunrise_ts = InterPday[0, 16]
-        sunset_ts = InterPday[0, 17]
+        sunrise_ts = InterPday[16, 0]
+        sunset_ts = InterPday[17, 0]
         isDay = sunrise_ts <= InterPhour[idx, 0] <= sunset_ts
 
         ## Icon
@@ -714,26 +714,18 @@ async def TimeMachine(
             hourText = "Cloudy"
         elif InterPhour[idx, 12] > 0.375:
             hourText = "Partly Cloudy"
-            if InterPhour[idx, 0] < InterPday[16, 0]:
+            if isDay:
                 # Before sunrise
-                pIconList.append("partly-cloudy-night")
-            elif InterPhour[idx, 0] > InterPday[17, 0]:
-                # After sunset
-                pIconList.append("partly-cloudy-night")
-            else:
-                # After sunrise before sunset
                 pIconList.append("partly-cloudy-day")
+            else: # After sunset
+                pIconList.append("partly-cloudy-night")
         else:
             hourText = "Clear"
-            if InterPhour[idx, 0] < InterPday[16, 0]:
+            if isDay:
                 # Before sunrise
-                pIconList.append("clear-night")
-            elif InterPhour[idx, 0] > InterPday[17, 0]:
-                # After sunset
-                pIconList.append("clear-night")
-            else:
-                # After sunrise before sunset
                 pIconList.append("clear-day")
+            else: # After sunset
+                pIconList.append("clear-night")
 
         hTextList.append(hourText)
         hourDict = {
@@ -903,13 +895,6 @@ async def TimeMachine(
     InterPcurrent[12] = InterPhour[currentIDX, 12]  #
     InterPcurrent[13] = InterPhour[currentIDX, 15]  # Wind Gust
 
-    # print('##currentIDX##')
-    # print(currentIDX)
-    # print('##pIconList##')
-    # print(pIconList)
-    # print('##pTypeList##')
-    # print(pTypeList)
-
     cIcon = pIconList[currentIDX]
     cText = hTextList[currentIDX]
     pTypeCurrent = pTypeList[currentIDX]
@@ -944,7 +929,7 @@ async def TimeMachine(
         returnOBJ["currently"]["cloudCover"] = round(InterPcurrent[12], 2)
 
         # Update the text
-        currentDay = InterPday[0, 16] <= InterPcurrent[0] <= InterPday[0, 17]
+        currentDay = InterPday[16, 0] <= InterPcurrent[0] <= InterPday[17, 0]
 
         try:
             currentText, currentIcon = calculate_text(

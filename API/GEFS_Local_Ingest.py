@@ -743,12 +743,8 @@ daskVarArrayListMergeNaN = da.where(valid_mask, daskVarArrayListMerge, np.nan)
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
-daskVarArrayListMergeNaN.to_zarr(
-    forecast_process_path + "GEFS_stack.zarr", overwrite=True, compute=True
-)
-
 # Read in stacked 4D array back in
-daskVarArrayListMerge.to_zarr(
+daskVarArrayListMergeNaN.to_zarr(
     forecast_process_path + "_stack.zarr", overwrite=True, compute=True
 )
 

@@ -1293,6 +1293,9 @@ async def PW_Forecast(
                         "secret": aws_secret_access_key,
                     },
                     cache=False,
+                    drop_variables=["REFC_entireatmosphere",
+                        "DSWRF_surface",
+                        "CAPE_surface"]
                 ) as xr_mf:
                     # Correct for Pressure Switch
                     if "PRES_surface" in xr_mf.data_vars:
@@ -1405,7 +1408,7 @@ async def PW_Forecast(
         else:
             # Timing Check
             if TIMING:
-                print("### NMB Detail Start ###")
+                print("### NBM Detail Start ###")
                 print(
                     datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
                 )
@@ -1427,6 +1430,7 @@ async def PW_Forecast(
                         for t in date_range
                     ]
                     consolidateZarr = True
+
                 else:
                     zarrList = [
                         "s3://"
@@ -1439,6 +1443,7 @@ async def PW_Forecast(
                     consolidateZarr = False
 
                 now = time.time()
+
                 with xr.open_mfdataset(
                     zarrList,
                     engine="zarr",
@@ -1450,6 +1455,7 @@ async def PW_Forecast(
                         "secret": aws_secret_access_key,
                     },
                     cache=False,
+                    drop_variables=["DSWRF_surface", "CAPE_surface"],
                 ) as xr_mf:
                     now2 = time.time()
                     if TIMING:
@@ -1571,6 +1577,7 @@ async def PW_Forecast(
             parallel=True,
             storage_options={"key": aws_access_key_id, "secret": aws_secret_access_key},
             cache=False,
+            drop_variables=['REFC_entireatmosphere', "DSWRF_surface", "CAPE_surface"]
         ) as xr_mf:
             now2 = time.time()
             if TIMING:
