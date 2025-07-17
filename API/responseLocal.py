@@ -2720,9 +2720,6 @@ async def PW_Forecast(
     # Use HRRRH/ HRRRH2 if requested (?)
     # Use HRRR for some other variables
 
-    ###  probVars
-    ### ('time', 'Precipitation_Prob', 'APCP_Mean', 'APCP_StdDev', 'CSNOW_Prob', 'CICEP_Prob', 'CFRZR_Prob', 'CRAIN_Prob')
-
     # Precipitation Type
     # NBM
     maxPchanceHour = np.full((len(hour_array_grib), 3), -999)
