@@ -570,7 +570,7 @@ async def TimeMachine(
     InterPhour = np.zeros(shape=(len(dataDict["hours"]), 16))
     dayRainAccum = 0
     daySnowAccum = 0
-    daySleetAccum = 0
+    dayIceAccum = 0
 
     InterPhour[:, 0] = (
         (dataDict["hours"] - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0)))
@@ -696,7 +696,7 @@ async def TimeMachine(
         )
 
         dayRainAccum += hourRainAccum
-        dauSnowAccum += hourSnowAccum
+        daySnowAccum += hourSnowAccum
         dayIceAccum += hourIceAccum
 
         # Check if day or night
