@@ -9,6 +9,7 @@ from pathlib import Path
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
 
+
 def mask_invalid_data(dask_array):
     """Masks invalid data in a dask array, ignoring the time dimension."""
     # TODO: Update to mask for each variable according to reasonable values, as opposed to this global mask
@@ -16,6 +17,7 @@ def mask_invalid_data(dask_array):
     # Ignore times by setting first dimension to True
     valid_mask[0, :, :, :] = True
     return da.where(valid_mask, dask_array, np.nan)
+
 
 # Linear interpolation of time blocks in a dask array
 def interp_time_block(y_block, idx0, idx1, w, valid):

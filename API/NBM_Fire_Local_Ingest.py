@@ -26,7 +26,6 @@ from herbie import FastHerbie, Herbie, Path
 from ingest_utils import mask_invalid_data, interp_time_block
 
 
-
 def rounder(t):
     if t.minute >= 30:
         if t.hour == 23:

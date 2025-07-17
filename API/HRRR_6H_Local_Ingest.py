@@ -345,7 +345,6 @@ daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
 
 
-
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():

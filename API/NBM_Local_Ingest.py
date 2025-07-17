@@ -21,7 +21,7 @@ import pandas as pd
 import s3fs
 import xarray as xr
 import zarr.storage
-from herbie import FastHerbie, Path
+from herbie import FastHerbie
 from herbie.fast import Herbie_latest
 
 from ingest_utils import mask_invalid_data, interp_time_block, getGribList
