@@ -24,85 +24,7 @@ import zarr.storage
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
-
-# Scipy Interp Function
-def interp_time_block(y_block, idx0, idx1, w, valid):
-    # y_block is a NumPy array of shape (Vb, T_old, Yb, Xb)
-    # 1) fancy-index in NumPy only:
-    y0 = y_block[:, idx0, :, :]
-    y1 = y_block[:, idx1, :, :]
-    # 2) add back your time‐axis weights in NumPy:
-    w_r = w[None, :, None, None]
-    omw_r = (1 - w)[None, :, None, None]
-    # 3) linear blend
-    y_interp = omw_r * y0 + w_r * y1
-
-    # 4) zero‐out (or NaN‐out) anything outside the original time range
-    #    here we choose NaN so it’s clear these were out-of-range
-    if not np.all(valid):
-        # valid==False where x_b is outside [x_a[0], x_a[-1]]
-        inv = ~valid
-        y_interp[:, inv, :, :] = np.nan
-
-    return y_interp
-
-
-def getGribList(FH_forecastsub, matchStrings):
-    try:
-        gribList = [
-            str(Path(x.get_localFilePath(matchStrings)).expand())
-            for x in FH_forecastsub.file_exists
-        ]
-    except Exception:
-        print("Download Failure 1, wait 20 seconds and retry")
-        time.sleep(20)
-        FH_forecastsub.download(matchStrings, verbose=False)
-        try:
-            gribList = [
-                str(Path(x.get_localFilePath(matchStrings)).expand())
-                for x in FH_forecastsub.file_exists
-            ]
-        except Exception:
-            print("Download Failure 2, wait 20 seconds and retry")
-            time.sleep(20)
-            FH_forecastsub.download(matchStrings, verbose=False)
-            try:
-                gribList = [
-                    str(Path(x.get_localFilePath(matchStrings)).expand())
-                    for x in FH_forecastsub.file_exists
-                ]
-            except Exception:
-                print("Download Failure 3, wait 20 seconds and retry")
-                time.sleep(20)
-                FH_forecastsub.download(matchStrings, verbose=False)
-                try:
-                    gribList = [
-                        str(Path(x.get_localFilePath(matchStrings)).expand())
-                        for x in FH_forecastsub.file_exists
-                    ]
-                except Exception:
-                    print("Download Failure 4, wait 20 seconds and retry")
-                    time.sleep(20)
-                    FH_forecastsub.download(matchStrings, verbose=False)
-                    try:
-                        gribList = [
-                            str(Path(x.get_localFilePath(matchStrings)).expand())
-                            for x in FH_forecastsub.file_exists
-                        ]
-                    except Exception:
-                        print("Download Failure 5, wait 20 seconds and retry")
-                        time.sleep(20)
-                        FH_forecastsub.download(matchStrings, verbose=False)
-                        try:
-                            gribList = [
-                                str(Path(x.get_localFilePath(matchStrings)).expand())
-                                for x in FH_forecastsub.file_exists
-                            ]
-                        except Exception:
-                            print("Download Failure 6, Fail")
-                            exit(1)
-    return gribList
-
+from ingest_utils import mask_invalid_data, interp_time_block, getGribList
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -951,11 +873,8 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
 # Mask out invalid data
-# TODO: Update to mask for each variable according to reasonable values, as opposed to this global mask
-valid_mask = (daskVarArrayListMerge >= -100) & (daskVarArrayListMerge <= 120000)
-# Ignore times by setting first dimension to True
-valid_mask[0, :, :, :] = True
-daskVarArrayListMergeNaN = da.where(valid_mask, daskVarArrayListMerge, np.nan)
+daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
+
 
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow

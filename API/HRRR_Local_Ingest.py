@@ -20,6 +20,8 @@ import zarr.storage
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
+from ingest_utils import mask_invalid_data
+
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
@@ -559,11 +561,8 @@ for dask_var in zarrVars:
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
 # Mask out invalid data
-# TODO: Update to mask for each variable according to reasonable values, as opposed to this global mask
-valid_mask = (daskVarArrayListMerge >= -100) & (daskVarArrayListMerge <= 120000)
-# Ignore times by setting first dimension to True
-valid_mask[0, :, :, :] = True
-daskVarArrayListMergeNaN = da.where(valid_mask, daskVarArrayListMerge, np.nan)
+daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
+
 
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow

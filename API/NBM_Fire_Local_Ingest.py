@@ -23,32 +23,8 @@ import xarray as xr
 import zarr.storage
 from herbie import FastHerbie, Herbie, Path
 
+from ingest_utils import mask_invalid_data, interp_time_block
 
-# Scipy Interp Function
-def interp_time_block(y_block, idx0, idx1, w, valid):
-    """
-    y_block: np.ndarray of shape (Vb, T_old, Yb, Xb)
-    idx0, idx1, w, valid: 1D NumPy arrays of length T_new
-    """
-    # 1) pull out the two knot‐time slices
-    y0 = y_block[:, idx0, ...]  # → (Vb, T_new, Yb, Xb)
-    y1 = y_block[:, idx1, ...]
-
-    # 2) build the broadcastable weights
-    w_r = w[None, :, None, None]
-    omw_r = (1 - w)[None, :, None, None]
-
-    # 3) linear blend
-    y_interp = omw_r * y0 + w_r * y1
-
-    # 4) zero‐out (or NaN‐out) anything outside the original time range
-    #    here we choose NaN so it’s clear these were out-of-range
-    if not np.all(valid):
-        # valid==False where x_b is outside [x_a[0], x_a[-1]]
-        inv = ~valid
-        y_interp[:, inv, :, :] = np.nan
-
-    return y_interp
 
 
 def rounder(t):
@@ -644,11 +620,7 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
 # Mask out invalid data
-# TODO: Update to mask for each variable according to reasonable values, as opposed to this global mask
-valid_mask = (daskVarArrayListMerge >= -100) & (daskVarArrayListMerge <= 120000)
-# Ignore times by setting first dimension to True
-valid_mask[0, :, :, :] = True
-daskVarArrayListMergeNaN = da.where(valid_mask, daskVarArrayListMerge, np.nan)
+daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
 
 
 # Write out to disk
