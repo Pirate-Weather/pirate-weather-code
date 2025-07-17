@@ -152,18 +152,12 @@ async def TimeMachine(
             prepAccumUnit = 0.0394  # inches
             tempUnits = 0  # F. This is harder
             pressUnits = 0.01  # Hectopascals
-            # visUnits = 0.00062137  # miles
-            # humidUnit = 0.01  # %
-            # elevUnit = 3.28084  # ft
         elif unitSystem == "si":
             windUnit = 1  # m/s
             prepIntensityUnit = 1  # mm/h
             prepAccumUnit = 0.1  # cm
             tempUnits = 273.15  # Celsius
             pressUnits = 0.01  # Hectopascals
-            # visUnits = 0.001  # km
-            # humidUnit = 0.01  # %
-            # elevUnit = 1  # m
         else:
             unitSystem = "us"
             windUnit = 2.234  # mph
@@ -171,9 +165,6 @@ async def TimeMachine(
             prepAccumUnit = 0.0394  # inches
             tempUnits = 0  # F. This is harder
             pressUnits = 0.01  # Hectopascals
-            # visUnits = 0.00062137  # miles
-            # humidUnit = 0.01  # %
-            # elevUnit = 3.28084  # ft
 
     if not exclude:
         excludeParams = ""
