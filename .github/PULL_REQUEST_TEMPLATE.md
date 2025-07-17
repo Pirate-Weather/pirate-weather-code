@@ -14,3 +14,4 @@
 - This pull request fixes issue: fixes #
 - [ ] Code builds locally. **Your pull request won't be merged unless tests pass**
 - [ ] Code has been formatted using ruff
+- [ ] The TimeMachine version number matches the API version number
