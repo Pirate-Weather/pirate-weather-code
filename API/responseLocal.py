@@ -980,7 +980,6 @@ async def PW_Forecast(
 
     translation = Translations[lang]
 
-
     if utcTime < datetime.datetime(2024, 5, 1):
         timeMachine = True
 
@@ -990,14 +989,7 @@ async def PW_Forecast(
             or ("127.0.0.1" in str(request.url))
         ):
             TM_Response = await TimeMachine(
-                lat,
-                lon,
-                az_Lon,
-                utcTime,
-                tf,
-                units,
-                exclude,
-                lang
+                lat, lon, az_Lon, utcTime, tf, units, exclude, lang
             )
 
             return TM_Response
@@ -1057,7 +1049,6 @@ async def PW_Forecast(
         version = 1
 
     version = float(version)
-
 
     # Check if extra information should be included with time machine
     if not tmextra:
