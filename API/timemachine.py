@@ -5,7 +5,7 @@ import math
 import platform
 import asyncio
 import zarr
-import traceback
+import logging
 
 from astral import LocationInfo, moon
 from astral.sun import sun
@@ -180,7 +180,7 @@ async def TimeMachine(
     else:
         excludeParams = exclude
 
-    # Check if langugage is supported
+    # Check if language is supported
     if lang is None:
         lang = "en"  # Default to English
 
@@ -696,22 +696,12 @@ async def TimeMachine(
 
     for idx in range(0, len(dataDict["hours"]), 1):
         # Convert intensity to accumulation based on type
-        hourRainAccum = 0
-        hourSnowAccum = 0
-        hourIceAccum = 0
+        hourRainAccum, hourSnowAccum, hourIceAccum = calculate_precip_accumulation(pTypeList[idx], InterPhour[idx, 1], prepIntensityUnit, prepAccumUnit)
 
-        if pTypeList[idx] == "rain":
-            hourRainAccum = InterPhour[idx, 1] / prepIntensityUnit * prepAccumUnit
-        elif pTypeList[idx] == "snow":
-            hourSnowAccum = (
-                InterPhour[idx, 1] / prepIntensityUnit * prepAccumUnit
-            ) * 10  # 1:10 since intensity is in liquid water equivalent
-        elif pTypeList[idx] == "sleet":
-            hourIceAccum = InterPhour[idx, 1] / prepIntensityUnit * prepAccumUnit
 
         # Check if day or night
-        sunrise_ts = InterPday[16, 0]
-        sunset_ts = InterPday[17, 0]
+        sunrise_ts = InterPday[0, 16]
+        sunset_ts = InterPday[0, 17]
         isDay = sunrise_ts <= InterPhour[idx, 0] <= sunset_ts
 
         ## Icon
@@ -783,8 +773,7 @@ async def TimeMachine(
             hourDict["icon"] = hourIcon
 
         except Exception:
-            print("HOURLY TEXT GEN ERROR:")
-            print(traceback.print_exc())
+            logging.exception("HOURLY TEXT GEN ERROR:") 
 
         hourList.append(dict(hourDict))
 
@@ -850,8 +839,8 @@ async def TimeMachine(
         "sunriseTime": int(InterPday[16, 0]),
         "sunsetTime": int(InterPday[17, 0]),
         "moonPhase": round(InterPday[18, 0], 2),
-        "precipIntensity": round(InterPday[1, idx] * prepIntensityUnit, 2),
-        "precipIntensityMax": round(InterPdayMax[2, idx] * prepIntensityUnit, 2),
+        "precipIntensity": round(InterPday[1, idx] * prepIntensityUnit, 4),
+        "precipIntensityMax": round(InterPdayMax[2, idx] * prepIntensityUnit, 4),
         "precipIntensityMaxTime": int(InterPdayMaxTime[2, idx]),
         "precipAccumulation": round(InterPdaySum[1, idx] * prepAccumUnit, 4),
         "precipType": pTypeListDay[idx],
@@ -925,18 +914,7 @@ async def TimeMachine(
     pTypeCurrent = pTypeList[currentIDX]
 
     # Convert intensity to accumulation based on type
-    currentRainAccum = 0
-    currentSnowAccum = 0
-    currentIceAccum = 0
-
-    if pTypeCurrent == "rain":
-        currentRainAccum = InterPcurrent[1] / prepIntensityUnit * prepAccumUnit
-    elif pTypeCurrent == "snow":
-        currentSnowAccum = (
-            InterPcurrent[1] / prepIntensityUnit * prepAccumUnit
-        ) * 10  # 1:10 since intensity is in liquid water equivalent
-    elif pTypeCurrent == "sleet":
-        currentIceAccum = InterPcurrent[1] / prepIntensityUnit * prepAccumUnit
+    currentRainAccum, currentSnowAccum, currentIceAccum = calculate_precip_accumulation(pTypeCurrent, InterPcurrent[1], prepIntensityUnit, prepAccumUnit)
 
     returnOBJ = dict()
     returnOBJ["latitude"] = round(lat, 4)
@@ -963,17 +941,7 @@ async def TimeMachine(
         returnOBJ["currently"]["cloudCover"] = round(InterPcurrent[12], 2)
 
         # Update the text
-        if InterPcurrent[0] < InterPday[0, 17]:
-            # Before sunrise
-            currentDay = False
-        elif (
-            InterPcurrent[0] > InterPday[0, 17] and InterPcurrent[0] < InterPday[0, 18]
-        ):
-            # After sunrise before sunset
-            currentDay = True
-        elif InterPcurrent[0] > InterPday[0, 18]:
-            # After sunset
-            currentDay = False
+        currentDay = InterPday[0, 16] <= InterPcurrent[0] <= InterPday[0, 17] 
 
         try:
             currentText, currentIcon = calculate_text(
@@ -994,8 +962,7 @@ async def TimeMachine(
             )
             returnOBJ["currently"]["icon"] = currentIcon
         except Exception:
-            print("CURRENTLY TEXT GEN ERROR:")
-            print(traceback.print_exc())
+            logging.exception("CURRENTLY TEXT GEN ERROR:") 
 
     if exHourly == 0:
         returnOBJ["hourly"] = dict()
@@ -1019,3 +986,20 @@ async def TimeMachine(
     print("Complete ERA5 Request")
 
     return ORJSONResponse(content=returnOBJ, headers={"X-Node-ID": platform.node()})
+
+
+def calculate_precip_accumulation(precip_type, intensity, intensity_unit, accum_unit):  
+    rain_accum, snow_accum, ice_accum = 0, 0, 0  
+    
+    if intensity > 0:  
+        base_accum = intensity / intensity_unit * accum_unit  
+        
+        if precip_type == "rain":  
+            rain_accum = base_accum  
+        elif precip_type == "snow":  
+            # 1:10 since intensity is in liquid water equivalent  
+            snow_accum = base_accum * 10  
+        elif precip_type == "sleet":  
+            ice_accum = base_accum  
+            
+    return rain_accum, snow_accum, ice_accum 
