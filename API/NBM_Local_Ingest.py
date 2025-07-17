@@ -858,7 +858,6 @@ for i in range(hisPeriod, -1, -1):
     # Remove temp file created by wgrib2
     os.remove(hist_process_path + "_wgrib2_merged_order.grib")
     os.remove(hist_process_path + "_wgrib_merge.nc")
-    # os.remove(hist_process_path + '_ncTemp.nc')
 
     # Save a done file to s3 to indicate that the historic data has been processed
     if saveType == "S3":
@@ -951,10 +950,17 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
+# Mask out invalid data
+# TODO: Update to mask for each variable according to reasonable values, as opposed to this global mask
+valid_mask = (daskVarArrayListMerge >= -100) & (daskVarArrayListMerge <= 120000)
+# Ignore times by setting first dimension to True
+valid_mask[0, :, :, :] = True
+daskVarArrayListMergeNaN = da.where(valid_mask, daskVarArrayListMerge, np.nan)
+
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
-daskVarArrayListMerge.to_zarr(
+daskVarArrayListMergeNaN.to_zarr(
     forecast_process_path + "_stack.zarr", overwrite=True, compute=True
 )
 

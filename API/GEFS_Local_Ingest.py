@@ -733,10 +733,17 @@ for daskVarIDX, dask_var in enumerate(probVars[:]):
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
+# Mask out invalid data
+# TODO: Update to mask for each variable according to reasonable values, as opposed to this global mask
+valid_mask = (daskVarArrayListMerge >= -100) & (daskVarArrayListMerge <= 120000)
+# Ignore times by setting first dimension to True
+valid_mask[0, :, :, :] = True
+daskVarArrayListMergeNaN = da.where(valid_mask, daskVarArrayListMerge, np.nan)
+
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
-daskVarArrayListMerge.to_zarr(
+daskVarArrayListMergeNaN.to_zarr(
     forecast_process_path + "GEFS_stack.zarr", overwrite=True, compute=True
 )
 

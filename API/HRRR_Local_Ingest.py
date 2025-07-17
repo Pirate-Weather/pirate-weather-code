@@ -271,6 +271,11 @@ xarray_forecast_merged["APCP_surface"] = xarray_forecast_merged["APCP_surface"].
     )
 )
 
+# Adjust smoke units to avoid rounding issues
+xarray_forecast_merged["MASSDEN_8maboveground"] = (
+    xarray_forecast_merged["MASSDEN_8maboveground"] * 1e9
+)
+
 # %% Save merged and processed xarray dataset to disk using zarr with compression
 # Define the path to save the zarr dataset
 
@@ -553,15 +558,23 @@ for dask_var in zarrVars:
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
+# Mask out invalid data
+# TODO: Update to mask for each variable according to reasonable values, as opposed to this global mask
+valid_mask = (daskVarArrayListMerge >= -100) & (daskVarArrayListMerge <= 120000)
+# Ignore times by setting first dimension to True
+valid_mask[0, :, :, :] = True
+daskVarArrayListMergeNaN = da.where(valid_mask, daskVarArrayListMerge, np.nan)
+
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
-daskVarArrayListMerge.to_zarr(
+daskVarArrayListMergeNan.to_zarr(
     forecast_process_path + "_stack.zarr", overwrite=True, compute=True
 )
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
+
 
 # Create a zarr backed dask array
 if saveType == "S3":
