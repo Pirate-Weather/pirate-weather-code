@@ -152,18 +152,12 @@ async def TimeMachine(
             prepAccumUnit = 0.0394  # inches
             tempUnits = 0  # F. This is harder
             pressUnits = 0.01  # Hectopascals
-            # visUnits = 0.00062137  # miles
-            # humidUnit = 0.01  # %
-            # elevUnit = 3.28084  # ft
         elif unitSystem == "si":
             windUnit = 1  # m/s
             prepIntensityUnit = 1  # mm/h
             prepAccumUnit = 0.1  # cm
             tempUnits = 273.15  # Celsius
             pressUnits = 0.01  # Hectopascals
-            # visUnits = 0.001  # km
-            # humidUnit = 0.01  # %
-            # elevUnit = 1  # m
         else:
             unitSystem = "us"
             windUnit = 2.234  # mph
@@ -171,9 +165,6 @@ async def TimeMachine(
             prepAccumUnit = 0.0394  # inches
             tempUnits = 0  # F. This is harder
             pressUnits = 0.01  # Hectopascals
-            # visUnits = 0.00062137  # miles
-            # humidUnit = 0.01  # %
-            # elevUnit = 3.28084  # ft
 
     if not exclude:
         excludeParams = ""
@@ -701,8 +692,8 @@ async def TimeMachine(
         )
 
         # Check if day or night
-        sunrise_ts = InterPday[0, 16]
-        sunset_ts = InterPday[0, 17]
+        sunrise_ts = InterPday[16, 0]
+        sunset_ts = InterPday[17, 0]
         isDay = sunrise_ts <= InterPhour[idx, 0] <= sunset_ts
 
         ## Icon
@@ -714,26 +705,18 @@ async def TimeMachine(
             hourText = "Cloudy"
         elif InterPhour[idx, 12] > 0.375:
             hourText = "Partly Cloudy"
-            if InterPhour[idx, 0] < InterPday[16, 0]:
+            if isDay:
                 # Before sunrise
-                pIconList.append("partly-cloudy-night")
-            elif InterPhour[idx, 0] > InterPday[17, 0]:
-                # After sunset
-                pIconList.append("partly-cloudy-night")
-            else:
-                # After sunrise before sunset
                 pIconList.append("partly-cloudy-day")
+            else:  # After sunset
+                pIconList.append("partly-cloudy-night")
         else:
             hourText = "Clear"
-            if InterPhour[idx, 0] < InterPday[16, 0]:
+            if isDay:
                 # Before sunrise
-                pIconList.append("clear-night")
-            elif InterPhour[idx, 0] > InterPday[17, 0]:
-                # After sunset
-                pIconList.append("clear-night")
-            else:
-                # After sunrise before sunset
                 pIconList.append("clear-day")
+            else:  # After sunset
+                pIconList.append("clear-night")
 
         hTextList.append(hourText)
         hourDict = {
@@ -903,13 +886,6 @@ async def TimeMachine(
     InterPcurrent[12] = InterPhour[currentIDX, 12]  #
     InterPcurrent[13] = InterPhour[currentIDX, 15]  # Wind Gust
 
-    # print('##currentIDX##')
-    # print(currentIDX)
-    # print('##pIconList##')
-    # print(pIconList)
-    # print('##pTypeList##')
-    # print(pTypeList)
-
     cIcon = pIconList[currentIDX]
     cText = hTextList[currentIDX]
     pTypeCurrent = pTypeList[currentIDX]
@@ -944,7 +920,7 @@ async def TimeMachine(
         returnOBJ["currently"]["cloudCover"] = round(InterPcurrent[12], 2)
 
         # Update the text
-        currentDay = InterPday[0, 16] <= InterPcurrent[0] <= InterPday[0, 17]
+        currentDay = InterPday[16, 0] <= InterPcurrent[0] <= InterPday[17, 0]
 
         try:
             currentText, currentIcon = calculate_text(
@@ -980,7 +956,7 @@ async def TimeMachine(
         returnOBJ["flags"]["sources"] = "ERA5"
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.7.3"
+        returnOBJ["flags"]["version"] = "V2.7.4"
         returnOBJ["flags"]["sourceIDX"] = {"x": y, "y": x}
         returnOBJ["flags"]["processTime"] = (
             datetime.datetime.utcnow() - T_Start

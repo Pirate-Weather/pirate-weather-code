@@ -20,6 +20,8 @@ import zarr.storage
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
+from ingest_utils import mask_invalid_data
+
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
@@ -269,6 +271,11 @@ xarray_forecast_merged["APCP_surface"] = xarray_forecast_merged["APCP_surface"].
         axis=xarray_forecast_merged["APCP_surface"].get_axis_num("time"),
         prepend=0,
     )
+)
+
+# Adjust smoke units to avoid rounding issues
+xarray_forecast_merged["MASSDEN_8maboveground"] = (
+    xarray_forecast_merged["MASSDEN_8maboveground"] * 1e9
 )
 
 # %% Save merged and processed xarray dataset to disk using zarr with compression
@@ -553,15 +560,20 @@ for dask_var in zarrVars:
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
+# Mask out invalid data
+daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
+
+
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
-daskVarArrayListMerge.to_zarr(
+daskVarArrayListMergeNaN.to_zarr(
     forecast_process_path + "_stack.zarr", overwrite=True, compute=True
 )
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
+
 
 # Create a zarr backed dask array
 if saveType == "S3":

@@ -1293,6 +1293,11 @@ async def PW_Forecast(
                         "secret": aws_secret_access_key,
                     },
                     cache=False,
+                    drop_variables=[
+                        "REFC_entireatmosphere",
+                        "DSWRF_surface",
+                        "CAPE_surface",
+                    ],
                 ) as xr_mf:
                     # Correct for Pressure Switch
                     if "PRES_surface" in xr_mf.data_vars:
@@ -1405,7 +1410,7 @@ async def PW_Forecast(
         else:
             # Timing Check
             if TIMING:
-                print("### NMB Detail Start ###")
+                print("### NBM Detail Start ###")
                 print(
                     datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
                 )
@@ -1427,6 +1432,7 @@ async def PW_Forecast(
                         for t in date_range
                     ]
                     consolidateZarr = True
+
                 else:
                     zarrList = [
                         "s3://"
@@ -1439,6 +1445,7 @@ async def PW_Forecast(
                     consolidateZarr = False
 
                 now = time.time()
+
                 with xr.open_mfdataset(
                     zarrList,
                     engine="zarr",
@@ -1450,6 +1457,7 @@ async def PW_Forecast(
                         "secret": aws_secret_access_key,
                     },
                     cache=False,
+                    drop_variables=["DSWRF_surface", "CAPE_surface"],
                 ) as xr_mf:
                     now2 = time.time()
                     if TIMING:
@@ -1571,6 +1579,7 @@ async def PW_Forecast(
             parallel=True,
             storage_options={"key": aws_access_key_id, "secret": aws_secret_access_key},
             cache=False,
+            drop_variables=["REFC_entireatmosphere", "DSWRF_surface", "CAPE_surface"],
         ) as xr_mf:
             now2 = time.time()
             if TIMING:
@@ -2711,9 +2720,6 @@ async def PW_Forecast(
     # Use HRRRH/ HRRRH2 if requested (?)
     # Use HRRR for some other variables
 
-    ###  probVars
-    ### ('time', 'Precipitation_Prob', 'APCP_Mean', 'APCP_StdDev', 'CSNOW_Prob', 'CICEP_Prob', 'CFRZR_Prob', 'CRAIN_Prob')
-
     # Precipitation Type
     # NBM
     maxPchanceHour = np.full((len(hour_array_grib), 3), -999)
@@ -3024,11 +3030,14 @@ async def PW_Forecast(
     if "gfs" in sourceList:
         InterPhour[:, 19] = GFS_Merged[:, 20]
 
-    # Air quality
+    # Air quality/ smoke
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-        InterPhour[:, 20] = clipLog(
-            HRRR_Merged[:, 16] * 1e9, 0, 200, "Air quality Hour"
-        )  # Change from kg/m3 to ug/m3
+        smokeTemp = HRRR_Merged[:, 16]
+        # Check if using converted smoke values, adjust if not
+        if max(smokeTemp) < 0.01:
+            smokeTemp = smokeTemp * 1e9  # Change from kg/m3 to ug/m3
+
+        InterPhour[:, 20] = clipLog(smokeTemp, 0, 200, "Air quality Hour")
     else:
         InterPhour[:, 20] = -999
 
@@ -4334,7 +4343,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.7.3"
+        returnOBJ["flags"]["version"] = "V2.7.4"
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
             returnOBJ["flags"]["processTime"] = (

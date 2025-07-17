@@ -20,6 +20,8 @@ import zarr
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
+from ingest_utils import mask_invalid_data
+
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
@@ -320,10 +322,13 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
+# Mask out invalid data
+daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
+
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
-daskVarArrayListMerge.to_zarr(
+daskVarArrayListMergeNaN.to_zarr(
     forecast_process_path + "_stack.zarr", overwrite=True, compute=True
 )
 
