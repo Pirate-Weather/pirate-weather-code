@@ -3969,10 +3969,8 @@ async def PW_Forecast(
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[18] = clipLog(
             (
-                (
-                    HRRR_Merged[currentIDX_hrrrh_A, 16] * interpFac1
-                    + HRRR_Merged[currentIDX_hrrrh, 16] * interpFac2
-                )
+                HRRR_Merged[currentIDX_hrrrh_A, 16] * interpFac1
+                + HRRR_Merged[currentIDX_hrrrh, 16] * interpFac2
             ),
             0,
             200,
