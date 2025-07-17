@@ -22,6 +22,9 @@ from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 from numcodecs import BitRound, Blosc
 
+from ingest_utils import mask_invalid_data
+
+
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
@@ -49,7 +52,7 @@ s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 processChunk = 100
 
 # Define the final x/y chunksize
-finalChunk = 100
+finalChunk = 5
 
 hisPeriod = 48
 
@@ -70,7 +73,7 @@ if saveType == "Download":
 
 
 # %% Define base time from the most recent run
-# base_time = pd.Timestamp("2023-07-01 00:00")
+# base_time = pd.Timestamp("2025-07-16 18:00")
 T0 = time.time()
 
 latestRun = Herbie_latest(
@@ -266,6 +269,11 @@ xarray_forecast_merged["APCP_surface"] = xarray_forecast_merged["APCP_surface"].
     )
 )
 
+# Adjust smoke units to avoid rounding issues
+xarray_forecast_merged["MASSDEN_8maboveground"] = (
+    xarray_forecast_merged["MASSDEN_8maboveground"] * 1e9
+)
+
 # Save the dataset with compression and filters for all variables
 compressor = Blosc(cname="lz4", clevel=1)
 filters = [BitRound(keepbits=12)]
@@ -294,7 +302,7 @@ daskInterpArrays = []
 daskVarArrays = []
 daskVarArrayList = []
 
-# This is quite a bit simplier since there's no historic data being ingested
+# This is quite a bit simpler since there's no historic data being ingested
 
 for daskVarIDX, dask_var in enumerate(zarrVars[:]):
     daskForecastArray = da.from_zarr(
@@ -329,13 +337,18 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
     print(dask_var)
 
 
-# Merge the arrays into a single 4D array
+# Merge the arrays
+# into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
+
+# Mask out invalid data
+daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
+
 
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
-daskVarArrayListMerge.to_zarr(
+daskVarArrayListMergeNaN.to_zarr(
     forecast_process_path + "_stack.zarr", overwrite=True, compute=True
 )
 
@@ -369,6 +382,7 @@ da.rechunk(
     daskVarArrayStackDisk.round(3),
     (len(zarrVars), len(npCatTimes), finalChunk, finalChunk),
 ).to_zarr(zarr_array, compute=True)
+
 
 if saveType == "S3":
     zarr_store.close()

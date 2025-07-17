@@ -23,27 +23,7 @@ from xrspatial import direction, proximity
 
 from dask.diagnostics import ProgressBar
 
-
-# Scipy Interp Function
-def interp_time_block(y_block, idx0, idx1, w, valid):
-    # y_block is a NumPy array of shape (Vb, T_old, Yb, Xb)
-    # 1) fancy-index in NumPy only:
-    y0 = y_block[:, idx0, :, :]
-    y1 = y_block[:, idx1, :, :]
-    # 2) add back your time‐axis weights in NumPy:
-    w_r = w[None, :, None, None]
-    omw_r = (1 - w)[None, :, None, None]
-    # 3) linear blend
-    y_interp = omw_r * y0 + w_r * y1
-
-    # 4) zero‐out (or NaN‐out) anything outside the original time range
-    #    here we choose NaN so it’s clear these were out-of-range
-    if not np.all(valid):
-        # valid==False where x_b is outside [x_a[0], x_a[-1]]
-        inv = ~valid
-        y_interp[:, inv, :, :] = np.nan
-
-    return y_interp
+from ingest_utils import mask_invalid_data, interp_time_block
 
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -892,10 +872,13 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
+# Mask out invalid data
+daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
+
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
-daskVarArrayListMerge.to_zarr(
+daskVarArrayListMergeNaN.to_zarr(
     forecast_process_path + "_stack.zarr", overwrite=True, compute=True
 )
 
