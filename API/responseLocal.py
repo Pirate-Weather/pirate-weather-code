@@ -3027,13 +3027,11 @@ async def PW_Forecast(
     # Air quality/ smoke
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         smokeTemp = HRRR_Merged[:, 16]
-        #Check if using converted smoke values, adjust if not
+        # Check if using converted smoke values, adjust if not
         if max(smokeTemp) < 0.01:
-            smokeTemp = smokeTemp * 1e9 # Change from kg/m3 to ug/m3
+            smokeTemp = smokeTemp * 1e9  # Change from kg/m3 to ug/m3
 
-        InterPhour[:, 20] = clipLog(
-            smokeTemp , 0, 200, "Air quality Hour"
-        )
+        InterPhour[:, 20] = clipLog(smokeTemp, 0, 200, "Air quality Hour")
     else:
         InterPhour[:, 20] = -999
 

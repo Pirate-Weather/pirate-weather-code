@@ -323,9 +323,11 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
         daskVarArrayList.append(daskArrayOut)
 
     else:
-       daskVarArrayList.append(daskForecastArray.rechunk(
+        daskVarArrayList.append(
+            daskForecastArray.rechunk(
                 (len(npCatTimes), processChunk, processChunk)
-            ).astype("float32"))
+            ).astype("float32")
+        )
 
     daskVarArrays = []
 
