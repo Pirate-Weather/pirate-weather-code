@@ -717,14 +717,14 @@ async def TimeMachine(
             if isDay:
                 # Before sunrise
                 pIconList.append("partly-cloudy-day")
-            else: # After sunset
+            else:  # After sunset
                 pIconList.append("partly-cloudy-night")
         else:
             hourText = "Clear"
             if isDay:
                 # Before sunrise
                 pIconList.append("clear-day")
-            else: # After sunset
+            else:  # After sunset
                 pIconList.append("clear-night")
 
         hTextList.append(hourText)

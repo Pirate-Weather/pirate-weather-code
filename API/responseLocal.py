@@ -1293,9 +1293,11 @@ async def PW_Forecast(
                         "secret": aws_secret_access_key,
                     },
                     cache=False,
-                    drop_variables=["REFC_entireatmosphere",
+                    drop_variables=[
+                        "REFC_entireatmosphere",
                         "DSWRF_surface",
-                        "CAPE_surface"]
+                        "CAPE_surface",
+                    ],
                 ) as xr_mf:
                     # Correct for Pressure Switch
                     if "PRES_surface" in xr_mf.data_vars:
@@ -1577,7 +1579,7 @@ async def PW_Forecast(
             parallel=True,
             storage_options={"key": aws_access_key_id, "secret": aws_secret_access_key},
             cache=False,
-            drop_variables=['REFC_entireatmosphere', "DSWRF_surface", "CAPE_surface"]
+            drop_variables=["REFC_entireatmosphere", "DSWRF_surface", "CAPE_surface"],
         ) as xr_mf:
             now2 = time.time()
             if TIMING:
