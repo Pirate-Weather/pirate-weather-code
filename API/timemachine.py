@@ -866,7 +866,7 @@ async def TimeMachine(
 
     try:
         dayText, dayIcon = calculate_simple_day_text(
-            hourDict,
+            dayDict,
             prepAccumUnit,
             1,
             windUnit,
@@ -877,8 +877,8 @@ async def TimeMachine(
             dayIceAccum,
         )
 
-        dayList["summary"] = translation.translate(["sentence", dayText])
-        dayList["icon"] = dayIcon
+        dayDict["summary"] = translation.translate(["sentence", dayText])
+        dayDict["icon"] = dayIcon
 
     except Exception:
         logging.exception("DAILY TEXT GEN ERROR:")
