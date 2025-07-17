@@ -10,6 +10,7 @@ from PirateTextHelper import (
     humidity_sky_text,
 )
 
+
 def calculate_simple_day_text(
     hourObject,
     prepAccumUnit,
