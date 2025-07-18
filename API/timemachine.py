@@ -880,7 +880,7 @@ async def TimeMachine(
         dayDict["summary"] = translation.translate(["sentence", dayText])
         dayDict["icon"] = dayIcon
 
-    except Exception:
+    except (KeyError, TypeError, ValueError, IndexError):
         logging.exception("DAILY TEXT GEN ERROR:")
 
     dayList.append(dict(dayDict))
