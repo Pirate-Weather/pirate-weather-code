@@ -83,8 +83,8 @@ preferences within our organization.
 * **Use `try...except` blocks:**  Isolate code that might raise exceptions.
 
 # Tooling
-* **Code formatter:**  ruff - Enforces consistent formatting automatically.
-* **Linter:**  ruff - Identifies potential issues and style violations.
+* **Code formatter:**  Ruff - Enforces consistent formatting automatically.
+* **Linter:**  Ruff - Identifies potential issues and style violations.
 
 # Example
 ```python
