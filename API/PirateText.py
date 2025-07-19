@@ -8,7 +8,11 @@ from PirateTextHelper import (
     calculate_sky_text,
     humidity_sky_text,
     calculate_thunderstorm_text,
+    MISSING_DATA,
 )
+
+DEFAULT_POP = 1
+DEFAULT_VISIBILITY = 10000
 
 
 def calculate_text(
@@ -63,13 +67,16 @@ def calculate_text(
 
     # If type is current precipitation probability should always be 1 otherwise if it exists in the hourObject use it otherwise use 1
     if type == "current":
-        pop = 1
+        pop = DEFAULT_POP
     elif "precipProbability" not in hourObject:  # If not in hour object (time machine)
-        pop = 1
-    elif "precipProbability" in hourObject or hourObject["precipProbability"] != -999:
+        pop = DEFAULT_POP
+    elif (
+        "precipProbability" in hourObject
+        or hourObject["precipProbability"] != MISSING_DATA
+    ):
         pop = hourObject["precipProbability"]
     else:
-        pop = 1
+        pop = DEFAULT_POP
 
     # If temperature exists in the hourObject then use it otherwise use the high temperature
     if "temperature" in hourObject:
@@ -81,29 +88,42 @@ def calculate_text(
     if "visibility" in hourObject:
         vis = hourObject["visibility"]
     else:
-        vis = 10000
+        vis = DEFAULT_VISIBILITY
 
     # If liftedIndex exists in the hourObject then use it otherwise -999
     if "liftedIndex" in hourObject:
         liftedIndex = hourObject["liftedIndex"]
     else:
-        liftedIndex = -999
+        liftedIndex = MISSING_DATA
 
     # If cape exists in the hourObject then use it otherwise -999
     if "cape" in hourObject:
         cape = hourObject["cape"]
     else:
-        cape = -999
+        cape = MISSING_DATA
+
+    # If smoke exists in the hour object then use it otherwise -999
+    if "smoke" in hourObject:
+        smoke = hourObject["smoke"]
+    else:
+        smoke = MISSING_DATA
+
+    # If dewPoint exists in the hour object then use it otherwise -999
+    if "dewPoint" in hourObject:
+        dewPoint = hourObject["dewPoint"]
+    else:
+        dewPoint = MISSING_DATA
 
     # If we missing or incomplete data then return clear icon/text instead of calculating
     if (
-        temp == -999
-        or wind == -999
-        or vis == -999
-        or cloudCover == -999
-        or humidity == -999
+        temp == MISSING_DATA
+        or wind == MISSING_DATA
+        or vis == MISSING_DATA
+        or cloudCover == MISSING_DATA
+        or humidity == MISSING_DATA
+        or dewPoint == MISSING_DATA
     ):
-        return "unavailable", "not-available"
+        return "unavailable", "none"
 
     # Calculate the text/icon for precipitation, wind, visibility, sky cover, humidity and thunderstorms
     precipText, precipIcon = calculate_precip_text(
@@ -118,7 +138,9 @@ def calculate_text(
         icon,
         "both",
     )
-    windText, windIcon = calculate_wind_text(wind, windUnit, icon, "both")
+    windText, windIcon = calculate_wind_text(
+        wind, windUnit, tempUnits, temp, dewPoint, smoke, icon, "both"
+    )
     visText, visIcon = calculate_vis_text(vis, visUnits, "both")
     thuText, thuIcon = calculate_thunderstorm_text(liftedIndex, cape, "both")
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
