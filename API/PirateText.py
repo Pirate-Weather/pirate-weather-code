@@ -78,35 +78,20 @@ def calculate_text(
     else:
         temp = hourObject["temperatureHigh"]
 
-    # If visibility exists in the hourObject then use it otherwise 10000m (10km)
-    if "visibility" in hourObject:
-        vis = hourObject["visibility"]
-    else:
-        vis = DEFAULT_VISIBILITY
+    # If visibility exists in the hourObject then use it otherwise use the default
+    vis = hourObject.get("visibility", DEFAULT_VISIBILITY)
 
     # If liftedIndex exists in the hourObject then use it otherwise -999
-    if "liftedIndex" in hourObject:
-        liftedIndex = hourObject["liftedIndex"]
-    else:
-        liftedIndex = MISSING_DATA
+    liftedIndex = hourObject.get("liftedIndex", MISSING_DATA)
 
     # If cape exists in the hourObject then use it otherwise -999
-    if "cape" in hourObject:
-        cape = hourObject["cape"]
-    else:
-        cape = MISSING_DATA
+    cape = hourObject.get("cape", MISSING_DATA)
 
     # If smoke exists in the hour object then use it otherwise -999
-    if "smoke" in hourObject:
-        smoke = hourObject["smoke"]
-    else:
-        smoke = MISSING_DATA
+    smoke = hourObject.get("smoke", MISSING_DATA)
 
     # If dewPoint exists in the hour object then use it otherwise -999
-    if "dewPoint" in hourObject:
-        dewPoint = hourObject["dewPoint"]
-    else:
-        dewPoint = MISSING_DATA
+    dewPoint = hourObject.get("dewPoint", MISSING_DATA)
 
     # If we missing or incomplete data then return clear icon/text instead of calculating
     if (

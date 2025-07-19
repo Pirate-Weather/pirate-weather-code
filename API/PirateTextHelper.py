@@ -457,13 +457,13 @@ def calculate_vis_text(
 
     Parameters:
     - vis (float) -  The visibility
-    - visUnit (float) -  The unit of the visibility
-    - temperature (float): The ambient temperature in Celsius.
-    - dewpoint (float): The dew point temperature in Celsius.
-    - smoke_concentration (float): Surface smoke concentration in ug/m3.
-    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
-    - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the visibility will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
-
+    - visUnits (float) -  The unit of the visibility
+    - tempUnits (float) - The unit of the temperature
+    - temp (float) - The ambient temperature
+    - dewPoint (float) - The dew point temperature
+    - smoke (float) - Surface smoke concentration in ug/m3
+    - icon (str) - Which icon set to use - Dark Sky or Pirate Weather
+    - mode (str) - Determines what gets returned by the function. If set to both the summary and icon for the visibility will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
     Returns:
     - visText (str) - The textual representation of the visibility
     - visIcon (str) - The icon representation of the visibility
@@ -473,14 +473,9 @@ def calculate_vis_text(
     fogThresh = FOG_THRESHOLD_METERS * visUnits
     mistThresh = MIST_THRESHOLD_METERS * visUnits
 
-    # If temp or dewPoint are missing
+     # If temp or dewPoint are missing, return None appropriately for the mode.
     if temp == MISSING_DATA or dewPoint == MISSING_DATA:
-        if mode == "summary":
-            return visText
-        elif mode == "icon":
-            return visIcon
-        else:
-            return visText, visIcon
+        return (None, None) if mode == "both" else None
 
     # Convert Fahrenheit to Celsius for temperature spread comparisons
     if tempUnits == 0:
@@ -497,17 +492,11 @@ def calculate_vis_text(
     # Smoke
     elif smoke >= SMOKE_CONCENTRATION_THRESHOLD_UGM3 and vis <= mistThresh:
         visText = "smoke"
-        visIcon = "fog"
-
-        if icon == "pirate":
-            visIcon = "smoke"
+        visIcon = "smoke" if icon == "pirate" else "fog"
     # Mist
     elif vis < mistThresh and tempDewSpread <= TEMP_DEWPOINT_SPREAD_FOR_MIST:
         visText = "mist"
-        visIcon = "fog"
-
-        if icon == "pirate":
-            visIcon = "mist"
+        visIcon = "mist" if icon == "pirate" else "fog"
     # Haze
     elif (
         smoke < SMOKE_CONCENTRATION_THRESHOLD_UGM3
@@ -515,10 +504,7 @@ def calculate_vis_text(
         and tempDewSpread > TEMP_DEWPOINT_SPREAD_FOR_MIST
     ):
         visText = "haze"
-        visIcon = "fog"
-
-        if icon == "pirate":
-            visIcon = "haze"
+        visIcon = "haze" if icon == "pirate" else "fog"
 
     if mode == "summary":
         return visText

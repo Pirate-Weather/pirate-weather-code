@@ -819,29 +819,14 @@ def calculate_day_text(
 
     # Now iterate through the actual hourly forecast data and aggregate into the pre-defined standard periods
     for idx, hour in enumerate(hours):
-        # If no humidity data, set to 0 to avoid an error (timemachine)
-        if "humidity" not in hour:
-            hour["humidity"] = DEFAULT_HUMIDITY
-
-        # If no visibility data, set to 10000 to avoid an error (timemachine)
-        if "visibility" not in hour:
-            hour["visibility"] = DEFAULT_VISIBILITY
-
-        # If no precipIntensityError data, set to 0 to avoid an error (timemachine)
-        if "precipIntensityError" not in hour:
-            hour["precipIntensityError"] = 0
-
-        # If no precipProbability data, set to 1 to avoid an error (timemachine)
-        if "precipProbability" not in hour:
-            hour["precipProbability"] = DEFAULT_POP
-
-        # If no smoke data, set to 0 (timemachine)
-        if "smoke" not in hour:
-            hour["smoke"] = 0.0
-
-        # If no dewPoint data, set to temperature (no spread) (timemachine)
-        if "dewPoint" not in hour:
-            hour["dewPoint"] = hour["temperature"]
+        # Provide default values for missing data (timemachine)
+        hour.setdefault("humidity", DEFAULT_HUMIDITY)
+        hour.setdefault("visibility", DEFAULT_VISIBILITY)
+        hour.setdefault("precipIntensityError", 0)
+        hour.setdefault("precipProbability", DEFAULT_POP)
+        hour.setdefault("smoke", 0.0)
+        # Set dewPoint to temperature if missing, resulting in no spread
+        hour.setdefault("dewPoint", hour["temperature"])
 
         hour_date = datetime.datetime.fromtimestamp(hour["time"], zone)
         hour_in_loop = int(hour_date.strftime("%H"))
