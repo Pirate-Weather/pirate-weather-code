@@ -404,13 +404,13 @@ def calculate_precip_text(
         return cText, cIcon
 
 
-def calculate_wind_text(wind, windUnit, icon="darksky", mode="both"):
+def calculate_wind_text(wind, windUnits, icon="darksky", mode="both"):
     """
     Calculates the wind text
 
     Parameters:
     - wind (float) -  The wind speed
-    - windUnit (float) -  The unit of the wind speed
+    - windUnits (float) -  The unit of the wind speed
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
     - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the wind will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
 
@@ -421,9 +421,9 @@ def calculate_wind_text(wind, windUnit, icon="darksky", mode="both"):
     windText = None
     windIcon = None
 
-    lightWindThresh = 6.7056 * windUnit
-    midWindThresh = 10 * windUnit
-    heavyWindThresh = 17.8816 * windUnit
+    lightWindThresh = 6.7056 * windUnits
+    midWindThresh = 10 * windUnits
+    heavyWindThresh = 17.8816 * windUnits
 
     if wind >= lightWindThresh and wind < midWindThresh:
         windText = "light-wind"
