@@ -9,10 +9,9 @@ from PirateTextHelper import (
     humidity_sky_text,
     calculate_thunderstorm_text,
     MISSING_DATA,
+    DEFAULT_POP,
+    DEFAULT_VISIBILITY,
 )
-
-DEFAULT_POP = 1
-DEFAULT_VISIBILITY = 10000
 
 
 def calculate_text(
@@ -138,10 +137,10 @@ def calculate_text(
         icon,
         "both",
     )
-    windText, windIcon = calculate_wind_text(
-        wind, windUnit, tempUnits, temp, dewPoint, smoke, icon, "both"
+    windText, windIcon = calculate_wind_text(wind, windUnit, icon, "both")
+    visText, visIcon = calculate_vis_text(
+        vis, visUnits, tempUnits, temp, dewPoint, smoke, icon, "both"
     )
-    visText, visIcon = calculate_vis_text(vis, visUnits, "both")
     thuText, thuIcon = calculate_thunderstorm_text(liftedIndex, cape, "both")
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
     humidityText = humidity_sky_text(temp, tempUnits, humidity)

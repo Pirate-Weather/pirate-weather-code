@@ -31,6 +31,8 @@ MIST_THRESHOLD_METERS = 10000
 SMOKE_CONCENTRATION_THRESHOLD_UGM3 = 25
 TEMP_DEWPOINT_SPREAD_FOR_FOG = 2
 TEMP_DEWPOINT_SPREAD_FOR_MIST = 3
+DEFAULT_VISIBILITY = 10000
+DEFAULT_POP = 1
 
 # Invalid data
 MISSING_DATA = -999
@@ -470,16 +472,23 @@ def calculate_vis_text(
     visIcon = None
     fogThresh = FOG_THRESHOLD_METERS * visUnits
     mistThresh = MIST_THRESHOLD_METERS * visUnits
-    tempDewSpread = temp - dewPoint
 
     # If temp or dewPoint are missing
     if temp == MISSING_DATA or dewPoint == MISSING_DATA:
-        return None
+        if mode == "summary":
+            return visText
+        elif mode == "icon":
+            return visIcon
+        else:
+            return visText, visIcon
 
     # Convert Fahrenheit to Celsius for temperature spread comparisons
     if tempUnits == 0:
         temp = (temp - 32) * 5 / 9
         dewPoint = (dewPoint - 32) * 5 / 9
+
+    # Calculate the temperature dew point spread
+    tempDewSpread = temp - dewPoint
 
     # Fog
     if vis < fogThresh and tempDewSpread <= TEMP_DEWPOINT_SPREAD_FOR_FOG:
