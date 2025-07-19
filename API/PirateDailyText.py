@@ -20,7 +20,7 @@ from PirateTextHelper import (
     DEFAULT_POP,
 )
 
-DEFAIULT_HUMIDITY = 0.5
+DEFAULT_HUMIDITY = 0.5
 
 
 def calculate_cloud_text(cloud_cover):
@@ -821,7 +821,7 @@ def calculate_day_text(
     for idx, hour in enumerate(hours):
         # If no humidity data, set to 0 to avoid an error (timemachine)
         if "humidity" not in hour:
-            hour["humidity"] = DEFAIULT_HUMIDITY
+            hour["humidity"] = DEFAULT_HUMIDITY
 
         # If no visibility data, set to 10000 to avoid an error (timemachine)
         if "visibility" not in hour:

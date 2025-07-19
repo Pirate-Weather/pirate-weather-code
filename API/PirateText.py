@@ -67,15 +67,10 @@ def calculate_text(
     # If type is current precipitation probability should always be 1 otherwise if it exists in the hourObject use it otherwise use 1
     if type == "current":
         pop = DEFAULT_POP
-    elif "precipProbability" not in hourObject:  # If not in hour object (time machine)
-        pop = DEFAULT_POP
-    elif (
-        "precipProbability" in hourObject
-        or hourObject["precipProbability"] != MISSING_DATA
-    ):
-        pop = hourObject["precipProbability"]
     else:
-        pop = DEFAULT_POP
+        pop = hourObject.get("precipProbability", DEFAULT_POP)
+        if pop == MISSING_DATA:
+            pop = DEFAULT_POP
 
     # If temperature exists in the hourObject then use it otherwise use the high temperature
     if "temperature" in hourObject:
