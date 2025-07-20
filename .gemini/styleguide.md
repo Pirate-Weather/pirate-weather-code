@@ -32,7 +32,7 @@ preferences within our organization.
 
 ## Naming Conventions
 
-* **Variables:** Use CapWords (CamelCase): `userName`, `totalCount`
+* **Variables:** Use lower camel case (lowerCamelCase): `userName`, `totalCount`
 * **Constants:**  Use uppercase with underscores: `MAX_VALUE`, `DATABASE_NAME`
 * **Functions:** Use lowercase with underscores (snake_case): `calculate_total()`, `process_data()`
 * **Classes:** Use CapWords (CamelCase): `UserManager`, `PaymentProcessor`
