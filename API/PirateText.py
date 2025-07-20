@@ -69,8 +69,6 @@ def calculate_text(
         pop = DEFAULT_POP
     else:
         pop = hourObject.get("precipProbability", DEFAULT_POP)
-        if pop == MISSING_DATA:
-            pop = DEFAULT_POP
 
     # If temperature exists in the hourObject then use it otherwise use the high temperature
     if "temperature" in hourObject:
