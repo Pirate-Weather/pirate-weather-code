@@ -867,12 +867,12 @@ def calculate_day_text(
             )
             period_data["max_smoke"] = max(period_data["max_smoke"], hour["smoke"])
 
-            if "temperature" in hour and "dewPoint" in hour:  
-                current_spread = abs(hour["temperature"] - hour["dewPoint"])  
-                if current_spread < overall_min_temp_dewpoint_spread:  
-                    overall_min_temp_dewpoint_spread = current_spread  
-                    overall_temp_at_min_spread = hour["temperature"]  
-                    overall_dewpoint_at_min_spread = hour["dewPoint"]  
+            if "temperature" in hour and "dewPoint" in hour:
+                current_spread = abs(hour["temperature"] - hour["dewPoint"])
+                if current_spread < overall_min_temp_dewpoint_spread:
+                    overall_min_temp_dewpoint_spread = current_spread
+                    overall_temp_at_min_spread = hour["temperature"]
+                    overall_dewpoint_at_min_spread = hour["dewPoint"]
 
             if (
                 humidity_sky_text(hour["temperature"], temp_units, hour["humidity"])
