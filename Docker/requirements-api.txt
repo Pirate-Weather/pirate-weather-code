@@ -1,5 +1,5 @@
 astral==3.2
-timezonefinder==6.5.9
+timezonefinder==7.0.0
 pytz==2025.2
 zarr[remote]==3.1.0
 ujson==5.10.0
