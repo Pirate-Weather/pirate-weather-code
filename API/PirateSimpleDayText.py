@@ -1,4 +1,6 @@
 # %% Script to contain the functions that can be used to generate a simple daily text summary of the forecast data for Pirate Weather
+import math
+import numpy as np
 
 from PirateTextHelper import (
     calculate_precip_text,
@@ -7,7 +9,6 @@ from PirateTextHelper import (
     calculate_sky_text,
     humidity_sky_text,
 )
-import math
 
 
 def calculate_simple_day_text(
@@ -68,7 +69,7 @@ def calculate_simple_day_text(
 
     # If time machine, no humidity data, so set to 50
     if "humidity" not in hourObject:
-        humidity = 50
+        humidity = np.nan
     else:
         humidity = hourObject["humidity"]
 

@@ -966,6 +966,20 @@ async def PW_Forecast(
 
     timeMachine = False
 
+    # Set up translations
+    if not lang:
+        lang = "en"
+
+    if icon != "pirate":
+        icon = "darksky"
+
+    # Check if langugage is supported
+    if lang not in Translations:
+        # Throw an error
+        raise HTTPException(status_code=400, detail="Language Not Supported")
+
+    translation = Translations[lang]
+
     if utcTime < datetime.datetime(2024, 5, 1):
         timeMachine = True
 
@@ -975,13 +989,7 @@ async def PW_Forecast(
             or ("127.0.0.1" in str(request.url))
         ):
             TM_Response = await TimeMachine(
-                lat,
-                lon,
-                az_Lon,
-                utcTime,
-                tf,
-                units,
-                exclude,
+                lat, lon, az_Lon, utcTime, tf, units, exclude, lang
             )
 
             return TM_Response
@@ -1041,20 +1049,6 @@ async def PW_Forecast(
         version = 1
 
     version = float(version)
-
-    # Set up translations
-    if not lang:
-        lang = "en"
-
-    if icon != "pirate":
-        icon = "darksky"
-
-    # Check if langugage is supported
-    if lang not in Translations:
-        # Throw an error
-        raise HTTPException(status_code=400, detail="Language Not Supported")
-
-    translation = Translations[lang]
 
     # Check if extra information should be included with time machine
     if not tmextra:
