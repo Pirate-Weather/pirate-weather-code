@@ -507,6 +507,12 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
     if cIcon is None:
         if "fog" in icons:
             cIcon = "fog"
+        elif "smoke" in icons:
+            cIcon = "smoke"
+        elif "mist" in icons:
+            cIcon = "mist"
+        elif "haze" in icons:
+            cIcon = "haze"
         elif "dangerous-wind" in icons:
             cIcon = "dangerous-windy"
         elif "wind" in icons:

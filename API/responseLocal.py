@@ -3026,7 +3026,9 @@ async def PW_Forecast(
 
     # Air quality/ smoke
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-        InterPhour[:, 20] = clipLog(HRRR_Merged[:, 16], 0, 200, "Air quality Hour")
+        InterPhour[:, 20] = clipLog(
+            HRRR_Merged[:, 16], 0, 500, "Air quality Hour"
+        )  # Maximum US AQI value for PM2.5 (smoke) is 500 which corresponds to 500 PM2.5
     else:
         InterPhour[:, 20] = -999
 
@@ -4329,7 +4331,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.7.4"
+        returnOBJ["flags"]["version"] = "V2.7.5a"
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
             returnOBJ["flags"]["processTime"] = (

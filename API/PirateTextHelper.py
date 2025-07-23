@@ -2,7 +2,7 @@
 from collections import Counter
 import math
 
-# Cloud Cover Thresholds (already existing)
+# Cloud Cover Thresholds (%)
 cloudyThreshold = 0.875
 mostlyCloudyThreshold = 0.625
 partlyCloudyThreshold = 0.375
@@ -26,7 +26,16 @@ DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM = 10.0
 DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0
 
 # Icon Thresholds for Visbility (meters)
-DEFAULT_VISIBILITY = 1000
+FOG_THRESHOLD_METERS = 1000
+MIST_THRESHOLD_METERS = 10000
+SMOKE_CONCENTRATION_THRESHOLD_UGM3 = 25
+TEMP_DEWPOINT_SPREAD_FOR_FOG = 2
+TEMP_DEWPOINT_SPREAD_FOR_MIST = 3
+DEFAULT_VISIBILITY = 10000
+DEFAULT_POP = 1
+
+# Invalid data
+MISSING_DATA = -999
 
 
 def Most_Common(lst):
@@ -124,7 +133,7 @@ def calculate_precip_text(
         prepIntensityUnit = prepAccumUnit
 
     # If pop is -999 set it to 1 so we can calculate the precipitation text
-    if pop == -999:
+    if pop == MISSING_DATA:
         pop = 1
 
     # In mm/h
@@ -395,26 +404,26 @@ def calculate_precip_text(
         return cText, cIcon
 
 
-def calculate_wind_text(wind, windUnit, icon="darksky", mode="both"):
+def calculate_wind_text(wind, windUnits, icon="darksky", mode="both"):
     """
     Calculates the wind text
 
     Parameters:
     - wind (float) -  The wind speed
-    - windUnit (float) -  The unit of the wind speed
+    - windUnits (float) -  The unit of the wind speed
+    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
     - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the wind will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
 
     Returns:
     - windText (str) - The textual representation of the wind
     - windIcon (str) - The icon representation of the wind
-    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
     """
     windText = None
     windIcon = None
 
-    lightWindThresh = 6.7056 * windUnit
-    midWindThresh = 10 * windUnit
-    heavyWindThresh = 17.8816 * windUnit
+    lightWindThresh = 6.7056 * windUnits
+    midWindThresh = 10 * windUnits
+    heavyWindThresh = 17.8816 * windUnits
 
     if wind >= lightWindThresh and wind < midWindThresh:
         windText = "light-wind"
@@ -440,26 +449,62 @@ def calculate_wind_text(wind, windUnit, icon="darksky", mode="both"):
         return windText, windIcon
 
 
-def calculate_vis_text(vis, visUnits, mode="both"):
+def calculate_vis_text(
+    vis, visUnits, tempUnits, temp, dewPoint, smoke=0, icon="darksky", mode="both"
+):
     """
     Calculates the visibility text
 
     Parameters:
     - vis (float) -  The visibility
-    - visUnit (float) -  The unit of the visibility
-    - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the visibility will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
-
+    - visUnits (float) -  The unit of the visibility
+    - tempUnits (float) - The unit of the temperature
+    - temp (float) - The ambient temperature
+    - dewPoint (float) - The dew point temperature
+    - smoke (float) - Surface smoke concentration in ug/m3
+    - icon (str) - Which icon set to use - Dark Sky or Pirate Weather
+    - mode (str) - Determines what gets returned by the function. If set to both the summary and icon for the visibility will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
     Returns:
     - visText (str) - The textual representation of the visibility
     - visIcon (str) - The icon representation of the visibility
     """
     visText = None
     visIcon = None
-    visThresh = DEFAULT_VISIBILITY * visUnits
+    fogThresh = FOG_THRESHOLD_METERS * visUnits
+    mistThresh = MIST_THRESHOLD_METERS * visUnits
 
-    if vis < visThresh:
+    # If temp or dewPoint are missing, return None appropriately for the mode.
+    if temp == MISSING_DATA or dewPoint == MISSING_DATA:
+        return (None, None) if mode == "both" else None
+
+    # Convert Fahrenheit to Celsius for temperature spread comparisons
+    if tempUnits == 0:
+        temp = (temp - 32) * 5 / 9
+        dewPoint = (dewPoint - 32) * 5 / 9
+
+    # Calculate the temperature dew point spread
+    tempDewSpread = temp - dewPoint
+
+    # Fog
+    if vis < fogThresh and tempDewSpread <= TEMP_DEWPOINT_SPREAD_FOR_FOG:
         visText = "fog"
         visIcon = "fog"
+    # Smoke
+    elif smoke >= SMOKE_CONCENTRATION_THRESHOLD_UGM3 and vis <= mistThresh:
+        visText = "smoke"
+        visIcon = "smoke" if icon == "pirate" else "fog"
+    # Mist
+    elif vis < mistThresh and tempDewSpread <= TEMP_DEWPOINT_SPREAD_FOR_MIST:
+        visText = "mist"
+        visIcon = "mist" if icon == "pirate" else "fog"
+    # Haze
+    elif (
+        smoke < SMOKE_CONCENTRATION_THRESHOLD_UGM3
+        and vis <= mistThresh
+        and tempDewSpread > TEMP_DEWPOINT_SPREAD_FOR_MIST
+    ):
+        visText = "haze"
+        visIcon = "haze" if icon == "pirate" else "fog"
 
     if mode == "summary":
         return visText
@@ -526,7 +571,7 @@ def humidity_sky_text(temp, tempUnits, humidity):
     """
 
     # If no humidity data, return None
-    if humidity is None or math.isnan(humidity) or humidity == -999:
+    if humidity is None or math.isnan(humidity) or humidity == MISSING_DATA:
         return None
 
     # Only use humid if also warm (>20C)
@@ -570,7 +615,7 @@ def calculate_thunderstorm_text(liftedIndex, cape, mode="both"):
         thuText = "thunderstorm"
         thuIcon = "thunderstorm"
 
-    if liftedIndex != -999 and thuText is None:
+    if liftedIndex != MISSING_DATA and thuText is None:
         if 0 > liftedIndex > -4:
             thuText = "possible-thunderstorm"
         elif liftedIndex <= -4:
