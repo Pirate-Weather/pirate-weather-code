@@ -13,6 +13,7 @@ from dateutil.relativedelta import relativedelta
 from fastapi import HTTPException
 from fastapi.responses import ORJSONResponse
 from PirateText import calculate_text
+from PirateSimpleDayText import calculate_simple_day_text
 from pirateweather_translations.dynamic_loader import load_all_translations
 from pytz import timezone, utc
 from typing import Union
@@ -567,6 +568,9 @@ async def TimeMachine(
     hTextList = []
     pIconList = []
     InterPhour = np.zeros(shape=(len(dataDict["hours"]), 16))
+    dayRainAccum = 0
+    daySnowAccum = 0
+    dayIceAccum = 0
 
     InterPhour[:, 0] = (
         (dataDict["hours"] - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0)))
@@ -690,6 +694,10 @@ async def TimeMachine(
         hourRainAccum, hourSnowAccum, hourIceAccum = calculate_precip_accumulation(
             pTypeList[idx], InterPhour[idx, 1], prepIntensityUnit, prepAccumUnit
         )
+
+        dayRainAccum += hourRainAccum
+        daySnowAccum += hourSnowAccum
+        dayIceAccum += hourIceAccum
 
         # Check if day or night
         sunrise_ts = InterPday[16, 0]
@@ -853,8 +861,27 @@ async def TimeMachine(
         "apparentTemperatureMinTime": int(InterPhour[int(InterPdayMinTime[5, idx]), 0]),
         "apparentTemperatureMax": round(InterPdayMax[5, idx], 2),
         "apparentTemperatureMaxTime": int(InterPhour[int(InterPdayMaxTime[5, idx]), 0]),
-        "snowAccumulation": round(InterPdaySum[13, idx] * prepAccumUnit, 2),
+        "snowAccumulation": round(InterPdaySum[13, idx] * prepAccumUnit, 4),
     }
+
+    try:
+        dayText, dayIcon = calculate_simple_day_text(
+            dayDict,
+            prepAccumUnit,
+            visUnits=1,
+            windUnit=windUnit,
+            tempUnits=tempUnits,
+            isDayTime=True,
+            rainPrep=dayRainAccum,
+            snowPrep=daySnowAccum,
+            icePrep=dayIceAccum,
+        )
+
+        dayDict["summary"] = translation.translate(["sentence", dayText])
+        dayDict["icon"] = dayIcon
+
+    except (KeyError, TypeError, ValueError, IndexError):
+        logging.exception("DAILY TEXT GEN ERROR:")
 
     dayList.append(dict(dayDict))
 
