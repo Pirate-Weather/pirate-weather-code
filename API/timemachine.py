@@ -868,13 +868,13 @@ async def TimeMachine(
         dayText, dayIcon = calculate_simple_day_text(
             dayDict,
             prepAccumUnit,
-            1,
-            windUnit,
-            tempUnits,
-            True,
-            dayRainAccum,
-            daySnowAccum,
-            dayIceAccum,
+            visUnits=1,
+            windUnit=windUnit,
+            tempUnits=tempUnits,
+            isDayTime=True,
+            rainPrep=dayRainAccum,
+            snowPrep=daySnowAccum,
+            icePrep=dayIceAccum,
         )
 
         dayDict["summary"] = translation.translate(["sentence", dayText])
