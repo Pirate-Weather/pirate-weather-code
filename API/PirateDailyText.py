@@ -867,13 +867,6 @@ def calculate_day_text(
             )
             period_data["max_smoke"] = max(period_data["max_smoke"], hour["smoke"])
 
-            if "temperature" in hour and "dewPoint" in hour:
-                current_spread = abs(hour["temperature"] - hour["dewPoint"])
-                if current_spread < overall_min_temp_dewpoint_spread:
-                    overall_min_temp_dewpoint_spread = current_spread
-                    overall_temp_at_min_spread = hour["temperature"]
-                    overall_dewpoint_at_min_spread = hour["dewPoint"]
-
             if (
                 humidity_sky_text(hour["temperature"], temp_units, hour["humidity"])
                 == "high-humidity"
@@ -899,6 +892,12 @@ def calculate_day_text(
                 and hour["precipIntensity"] <= 0.02 * precip_accum_unit
             ):
                 period_data["num_hours_fog"] += 1
+                if "temperature" in hour and "dewPoint" in hour:
+                    current_spread = abs(hour["temperature"] - hour["dewPoint"])
+                    if current_spread < overall_min_temp_dewpoint_spread:
+                        overall_min_temp_dewpoint_spread = current_spread
+                        overall_temp_at_min_spread = hour["temperature"]
+                        overall_dewpoint_at_min_spread = hour["dewPoint"]
             if (
                 calculate_wind_text(hour["windSpeed"], wind_unit, "darksky", "icon")
                 == "wind"
