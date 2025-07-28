@@ -481,7 +481,7 @@ def calculate_vis_text(
     fogThresh = FOG_THRESHOLD_METERS * visUnits
     mistThresh = MIST_THRESHOLD_METERS * visUnits
 
-    # If temp or dewPoint are missing, return None appropriately for the mode.
+    # If temp, dewPoint or vis are missing, return None appropriately for the mode.
     if any(x == MISSING_DATA for x in (temp, dewPoint, vis)):
         return (None, None) if mode == "both" else None
 
