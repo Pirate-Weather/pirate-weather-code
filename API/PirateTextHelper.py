@@ -128,12 +128,7 @@ def calculate_precip_text(
     """
 
     # If any precipitation is missing, return None appropriately for the mode.
-    if (
-        rainPrep == MISSING_DATA
-        or snowPrep == MISSING_DATA
-        or icePrep == MISSING_DATA
-        or prepIntensity == MISSING_DATA
-    ):
+    if any(x == MISSING_DATA for x in (rainPrep, snowPrep, icePrep, prepIntensity)):
         return (None, None) if mode == "both" else None
 
     if prepAccumUnit == 0.1:
