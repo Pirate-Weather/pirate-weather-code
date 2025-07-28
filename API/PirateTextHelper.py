@@ -128,7 +128,12 @@ def calculate_precip_text(
     """
 
     # If any precipitation is missing, return None appropriately for the mode.
-    if rainPrep == MISSING_DATA or snowPrep == MISSING_DATA or icePrep == MISSING_DATA or prepIntensity == MISSING_DATA:
+    if (
+        rainPrep == MISSING_DATA
+        or snowPrep == MISSING_DATA
+        or icePrep == MISSING_DATA
+        or prepIntensity == MISSING_DATA
+    ):
         return (None, None) if mode == "both" else None
 
     if prepAccumUnit == 0.1:
@@ -583,7 +588,12 @@ def humidity_sky_text(temp, tempUnits, humidity):
     """
 
     # If no humidity data or temp data, return None
-    if humidity is None or math.isnan(humidity) or humidity == MISSING_DATA or temp == MISSING_DATA:
+    if (
+        humidity is None
+        or math.isnan(humidity)
+        or humidity == MISSING_DATA
+        or temp == MISSING_DATA
+    ):
         return None
 
     # Only use humid if also warm (>20C)
