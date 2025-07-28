@@ -3629,20 +3629,24 @@ async def PW_Forecast(
         fieldsToRemove.append("smoke")
 
     # Apply all identified removals to the final hourList
-    for hourItem in hourList: # Ensure 'hourList' is the list being sent in the API response
+    for (
+        hourItem
+    ) in hourList:  # Ensure 'hourList' is the list being sent in the API response
         for field in fieldsToRemove:
             hourItem.pop(field, None)
 
     # End of hourly cleanup.
 
     # Condition 2: Add fields for timeMachine and not tmExtra (if they might persist or be re-added)
-    if timeMachine and not tmExtra: # Assuming these flags are available here
-        fieldsToRemove.extend([
-            "precipProbability",
-            "precipIntensityError",
-            "humidity",
-            "visibility",
-        ])
+    if timeMachine and not tmExtra:  # Assuming these flags are available here
+        fieldsToRemove.extend(
+            [
+                "precipProbability",
+                "precipIntensityError",
+                "humidity",
+                "visibility",
+            ]
+        )
 
     # Timing Check
     if TIMING:
