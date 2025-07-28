@@ -94,11 +94,11 @@ def calculate_text(
     # If we missing or incomplete data then return clear icon/text instead of calculating
     if (
         temp == MISSING_DATA
-        or wind == MISSING_DATA
-        or vis == MISSING_DATA
-        or cloudCover == MISSING_DATA
-        or humidity == MISSING_DATA
-        or dewPoint == MISSING_DATA
+        and wind == MISSING_DATA
+        and vis == MISSING_DATA
+        and cloudCover == MISSING_DATA
+        and humidity == MISSING_DATA
+        and dewPoint == MISSING_DATA
     ):
         return "unavailable", "none"
 

@@ -127,6 +127,10 @@ def calculate_precip_text(
     - str: The summary text representing the current precipitation
     """
 
+    # If any precipitation is missing, return None appropriately for the mode.
+    if rainPrep == MISSING_DATA or snowPrep == MISSING_DATA or icePrep == MISSING_DATA or prepIntensity == MISSING_DATA
+        return (None, None) if mode == "both" else None
+
     if prepAccumUnit == 0.1:
         prepIntensityUnit = 1
     else:
@@ -421,6 +425,10 @@ def calculate_wind_text(wind, windUnits, icon="darksky", mode="both"):
     windText = None
     windIcon = None
 
+    # If wind is missing, return None appropriately for the mode.
+    if wind == MISSING_DATA:
+        return (None, None) if mode == "both" else None
+
     lightWindThresh = 6.7056 * windUnits
     midWindThresh = 10 * windUnits
     heavyWindThresh = 17.8816 * windUnits
@@ -531,6 +539,10 @@ def calculate_sky_text(cloudCover, isDayTime, icon="darksky", mode="both"):
     skyText = None
     skyIcon = None
 
+    # If cloud cover is missing, return None appropriately for the mode.
+    if cloudCover == MISSING_DATA:
+        return (None, None) if mode == "both" else None
+
     if cloudCover > cloudyThreshold:
         skyText = "heavy-clouds"
         skyIcon = calculate_sky_icon(cloudCover, isDayTime, icon)
@@ -570,8 +582,8 @@ def humidity_sky_text(temp, tempUnits, humidity):
     - str: The text representing the humidity
     """
 
-    # If no humidity data, return None
-    if humidity is None or math.isnan(humidity) or humidity == MISSING_DATA:
+    # If no humidity data or temp data, return None
+    if humidity is None or math.isnan(humidity) or humidity == MISSING_DATA or temp == MISSING_DATA:
         return None
 
     # Only use humid if also warm (>20C)
