@@ -482,7 +482,7 @@ def calculate_vis_text(
     mistThresh = MIST_THRESHOLD_METERS * visUnits
 
     # If temp or dewPoint are missing, return None appropriately for the mode.
-    if temp == MISSING_DATA or dewPoint == MISSING_DATA or vis == MISSING_DATA:
+    if any(x == MISSING_DATA for x in (temp, dewPoint, vis)):
         return (None, None) if mode == "both" else None
 
     # Convert Fahrenheit to Celsius for temperature spread comparisons
