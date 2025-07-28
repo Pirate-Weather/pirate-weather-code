@@ -582,7 +582,7 @@ def humidity_sky_text(temp, tempUnits, humidity):
     - str: The text representing the humidity
     """
 
-    # If no humidity data or temp data, return None
+    # Return None if humidity or temperature data is missing.
     if (
         humidity is None
         or math.isnan(humidity)
