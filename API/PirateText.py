@@ -92,13 +92,8 @@ def calculate_text(
     dewPoint = hourObject.get("dewPoint", MISSING_DATA)
 
     # If we missing or incomplete data then return clear icon/text instead of calculating
-    if (
-        temp == MISSING_DATA
-        or wind == MISSING_DATA
-        or vis == MISSING_DATA
-        or cloudCover == MISSING_DATA
-        or humidity == MISSING_DATA
-        or dewPoint == MISSING_DATA
+    if all(
+        v == MISSING_DATA for v in (temp, wind, vis, cloudCover, humidity, dewPoint)
     ):
         return "unavailable", "none"
 

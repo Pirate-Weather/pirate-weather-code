@@ -123,9 +123,13 @@ def calculate_precip_text(
     - avgPrep (float): The average precipitation intensity
 
     Returns:
-    - str: The icon representing the current precipitation
-    - str: The summary text representing the current precipitation
+    - str | None: The summary text representing the current precipitation
+    - str | None: The icon representing the current precipitation
     """
+
+    # If any precipitation is missing, return None appropriately for the mode.
+    if any(x == MISSING_DATA for x in (rainPrep, snowPrep, icePrep, prepIntensity)):
+        return (None, None) if mode == "both" else None
 
     if prepAccumUnit == 0.1:
         prepIntensityUnit = 1
@@ -415,11 +419,15 @@ def calculate_wind_text(wind, windUnits, icon="darksky", mode="both"):
     - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the wind will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
 
     Returns:
-    - windText (str) - The textual representation of the wind
-    - windIcon (str) - The icon representation of the wind
+    - str | None: The textual representation of the wind
+    - str | None: The icon representation of the wind
     """
     windText = None
     windIcon = None
+
+    # If wind is missing, return None appropriately for the mode.
+    if wind == MISSING_DATA:
+        return (None, None) if mode == "both" else None
 
     lightWindThresh = 6.7056 * windUnits
     midWindThresh = 10 * windUnits
@@ -465,8 +473,8 @@ def calculate_vis_text(
     - icon (str) - Which icon set to use - Dark Sky or Pirate Weather
     - mode (str) - Determines what gets returned by the function. If set to both the summary and icon for the visibility will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
     Returns:
-    - visText (str) - The textual representation of the visibility
-    - visIcon (str) - The icon representation of the visibility
+    - str | None: The textual representation of the visibility
+    - str | None: The icon representation of the visibility
     """
     visText = None
     visIcon = None
@@ -525,11 +533,15 @@ def calculate_sky_text(cloudCover, isDayTime, icon="darksky", mode="both"):
     - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the cloud cover will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
 
     Returns:
-    - str: The icon representing the current cloud cover
-    - str: The text representing the current cloud cover
+    - str | None: The text representing the current cloud cover
+    - str | None: The icon representing the current cloud cover
     """
     skyText = None
     skyIcon = None
+
+    # If cloud cover is missing, return None appropriately for the mode.
+    if cloudCover == MISSING_DATA:
+        return (None, None) if mode == "both" else None
 
     if cloudCover > cloudyThreshold:
         skyText = "heavy-clouds"
@@ -567,11 +579,16 @@ def humidity_sky_text(temp, tempUnits, humidity):
     - humidity (str): The humidity for the period
 
     Returns:
-    - str: The text representing the humidity
+    - str | None: The text representing the humidity
     """
 
-    # If no humidity data, return None
-    if humidity is None or math.isnan(humidity) or humidity == MISSING_DATA:
+    # Return None if humidity or temperature data is missing.
+    if (
+        humidity is None
+        or math.isnan(humidity)
+        or humidity == MISSING_DATA
+        or temp == MISSING_DATA
+    ):
         return None
 
     # Only use humid if also warm (>20C)
@@ -603,8 +620,8 @@ def calculate_thunderstorm_text(liftedIndex, cape, mode="both"):
     - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the thunderstorm will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
 
     Returns:
-    - thuText (str) - The textual representation of the thunderstorm
-    - thuIcon (str) - The icon representation of the thunderstorm
+    - str | None: The textual representation of the thunderstorm
+    - str | None: The icon representation of the thunderstorm
     """
     thuText = None
     thuIcon = None
