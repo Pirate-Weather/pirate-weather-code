@@ -865,7 +865,6 @@ def calculate_day_text(
             period_data["min_visibility"] = min(
                 period_data["min_visibility"], hour["visibility"]
             )
-            period_data["max_smoke"] = max(period_data["max_smoke"], hour["smoke"])
 
             if (
                 humidity_sky_text(hour["temperature"], temp_units, hour["humidity"])
@@ -891,6 +890,7 @@ def calculate_day_text(
                 is not None
                 and hour["precipIntensity"] <= 0.02 * precip_accum_unit
             ):
+                period_data["max_smoke"] = max(period_data["max_smoke"], hour["smoke"])
                 period_data["num_hours_fog"] += 1
                 if "temperature" in hour and "dewPoint" in hour:
                     current_spread = abs(hour["temperature"] - hour["dewPoint"])

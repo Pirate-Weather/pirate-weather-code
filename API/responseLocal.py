@@ -3303,7 +3303,6 @@ async def PW_Forecast(
             print(traceback.print_exc())
 
         if version < 2:
-            hourItem.pop("smoke", None)
             hourItem.pop("liquidAccumulation", None)
             hourItem.pop("snowAccumulation", None)
             hourItem.pop("iceAccumulation", None)
@@ -3313,11 +3312,7 @@ async def PW_Forecast(
             hourItem.pop("feelsLike", None)
 
         if timeMachine and not tmExtra:
-            hourItem.pop("precipProbability", None)
-            hourItem.pop("precipIntensityError", None)
-            hourItem.pop("humidity", None)
             hourItem.pop("uvIndex", None)
-            hourItem.pop("visibility", None)
             hourItem.pop("ozone", None)
 
         hourList.append(hourItem)
@@ -3625,6 +3620,30 @@ async def PW_Forecast(
 
         dayTextList.append(dayObject["summary"])
         dayIconList.append(dayIcon)
+
+    # Final hourly cleanup.
+    fieldsToRemove = []
+
+    # Remove 'smoke' if the version is less than 2.
+    if version < 2:
+        fieldsToRemove.append("smoke")
+
+    # Remove extra fields for basic Time Machine requests.
+    if timeMachine and not tmExtra:
+        fieldsToRemove.extend(
+            [
+                "precipProbability",
+                "precipIntensityError",
+                "humidity",
+                "visibility",
+            ]
+        )
+
+    # Apply all identified removals to the final hourList.
+    if fieldsToRemove:
+        for hourItem in hourList:
+            for field in fieldsToRemove:
+                hourItem.pop(field, None)
 
     # Timing Check
     if TIMING:
@@ -4331,7 +4350,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.7.5a"
+        returnOBJ["flags"]["version"] = "V2.7.5b"
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
             returnOBJ["flags"]["processTime"] = (
