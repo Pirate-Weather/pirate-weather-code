@@ -3624,21 +3624,12 @@ async def PW_Forecast(
     # Final hourly cleanup.
     fieldsToRemove = []
 
-    # Condition 1: Remove 'smoke' if the version is less than 2.
+    # Remove 'smoke' if the version is less than 2.
     if version < 2:
         fieldsToRemove.append("smoke")
 
-    # Apply all identified removals to the final hourList
-    for (
-        hourItem
-    ) in hourList:  # Ensure 'hourList' is the list being sent in the API response
-        for field in fieldsToRemove:
-            hourItem.pop(field, None)
-
-    # End of hourly cleanup.
-
-    # Condition 2: Add fields for timeMachine and not tmExtra (if they might persist or be re-added)
-    if timeMachine and not tmExtra:  # Assuming these flags are available here
+    # Remove extra fields for basic Time Machine requests.
+    if timeMachine and not tmExtra:
         fieldsToRemove.extend(
             [
                 "precipProbability",
@@ -3647,6 +3638,12 @@ async def PW_Forecast(
                 "visibility",
             ]
         )
+
+    # Apply all identified removals to the final hourList.
+    if fieldsToRemove:
+        for hourItem in hourList:
+            for field in fieldsToRemove:
+                hourItem.pop(field, None)
 
     # Timing Check
     if TIMING:
