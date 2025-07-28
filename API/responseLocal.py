@@ -3303,7 +3303,6 @@ async def PW_Forecast(
             print(traceback.print_exc())
 
         if version < 2:
-            hourItem.pop("smoke", None)
             hourItem.pop("liquidAccumulation", None)
             hourItem.pop("snowAccumulation", None)
             hourItem.pop("iceAccumulation", None)
@@ -3313,11 +3312,7 @@ async def PW_Forecast(
             hourItem.pop("feelsLike", None)
 
         if timeMachine and not tmExtra:
-            hourItem.pop("precipProbability", None)
-            hourItem.pop("precipIntensityError", None)
-            hourItem.pop("humidity", None)
             hourItem.pop("uvIndex", None)
-            hourItem.pop("visibility", None)
             hourItem.pop("ozone", None)
 
         hourList.append(hourItem)
@@ -3625,6 +3620,29 @@ async def PW_Forecast(
 
         dayTextList.append(dayObject["summary"])
         dayIconList.append(dayIcon)
+
+    # Final hourly cleanup.
+    fieldsToRemove = []
+
+    # Condition 1: Remove 'smoke' if the version is less than 2.
+    if version < 2:
+        fieldsToRemove.append("smoke")
+
+    # Apply all identified removals to the final hourList
+    for hourItem in hourList: # Ensure 'hourList' is the list being sent in the API response
+        for field in fieldsToRemove:
+            hourItem.pop(field, None)
+
+    # End of hourly cleanup.
+
+    # Condition 2: Add fields for timeMachine and not tmExtra (if they might persist or be re-added)
+    if timeMachine and not tmExtra: # Assuming these flags are available here
+        fieldsToRemove.extend([
+            "precipProbability",
+            "precipIntensityError",
+            "humidity",
+            "visibility",
+        ])
 
     # Timing Check
     if TIMING:
