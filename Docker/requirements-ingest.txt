@@ -1,10 +1,10 @@
 numpy==2.2.6
-aiobotocore[boto3]==2.23.1
+aiobotocore[boto3]==2.23.2
 netCDF4==1.7.2
 xarray==2025.7.1
 cartopy==0.24.1
 cfgrib==0.9.15.0
-eccodes==2.42.0
+eccodes==2.43.0
 zarr==3.1.0
 dask==2025.7.0
 s3fs==2025.7.0
