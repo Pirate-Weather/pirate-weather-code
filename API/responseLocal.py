@@ -4295,7 +4295,7 @@ async def PW_Forecast(
             for hourItem in hourList:
                 for field in fieldsToRemove:
                     hourItem.pop(field, None)
-        
+
         if extendFlag == 1:
             returnOBJ["hourly"]["data"] = hourList[
                 int(baseTimeOffset) : int(baseTimeOffset) + 169
