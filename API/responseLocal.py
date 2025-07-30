@@ -3621,30 +3621,6 @@ async def PW_Forecast(
         dayTextList.append(dayObject["summary"])
         dayIconList.append(dayIcon)
 
-    # Final hourly cleanup.
-    fieldsToRemove = []
-
-    # Remove 'smoke' if the version is less than 2.
-    if version < 2:
-        fieldsToRemove.append("smoke")
-
-    # Remove extra fields for basic Time Machine requests.
-    if timeMachine and not tmExtra:
-        fieldsToRemove.extend(
-            [
-                "precipProbability",
-                "precipIntensityError",
-                "humidity",
-                "visibility",
-            ]
-        )
-
-    # Apply all identified removals to the final hourList.
-    if fieldsToRemove:
-        for hourItem in hourList:
-            for field in fieldsToRemove:
-                hourItem.pop(field, None)
-
     # Timing Check
     if TIMING:
         print("Alert Start")
@@ -4296,6 +4272,30 @@ async def PW_Forecast(
                     set(hourIconList), key=hourIconList.count
                 )
 
+        # Final hourly cleanup.
+        fieldsToRemove = []
+
+        # Remove 'smoke' if the version is less than 2.
+        if version < 2:
+            fieldsToRemove.append("smoke")
+
+        # Remove extra fields for basic Time Machine requests.
+        if timeMachine and not tmExtra:
+            fieldsToRemove.extend(
+                [
+                    "precipProbability",
+                    "precipIntensityError",
+                    "humidity",
+                    "visibility",
+                ]
+            )
+
+        # Apply all identified removals to the final hourList.
+        if fieldsToRemove:
+            for hourItem in hourList:
+                for field in fieldsToRemove:
+                    hourItem.pop(field, None)
+
         if extendFlag == 1:
             returnOBJ["hourly"]["data"] = hourList[
                 int(baseTimeOffset) : int(baseTimeOffset) + 169
@@ -4350,7 +4350,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.7.5b"
+        returnOBJ["flags"]["version"] = "V2.7.5c"
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
             returnOBJ["flags"]["processTime"] = (
