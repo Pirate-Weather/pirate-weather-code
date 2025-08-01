@@ -165,7 +165,8 @@ FH_forecastsub.download("tcc", verbose=False)
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(aifs_range1):
     print(
-        "Download failed, expected " + str(len(aifs_range1))
+        "Download failed, expected "
+        + str(len(aifs_range1))
         + " files, but got "
         + str(len(FH_forecastsub.file_exists))
     )
@@ -174,17 +175,11 @@ if len(FH_forecastsub.file_exists) != len(aifs_range1):
 
 # Create list of downloaded grib files
 gribList = [
-    str(Path(x.get_localFilePath("tcc")).expand())
-    for x in FH_forecastsub.file_exists
+    str(Path(x.get_localFilePath("tcc")).expand()) for x in FH_forecastsub.file_exists
 ]
 
 # Perform a check if any data seems to be invalid
-cmd = (
-    "cat "
-    + " ".join(gribList)
-    + " | "
-    + f"{wgrib2_path}"
-    + "- -s -stats")
+cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
@@ -250,19 +245,15 @@ while ensNum < 51:
     # Check for download length
     if len(gribList[-1]) != len(ifsFileRange):
         print(
-            "Download failed, expected " + str(len(aifs_range1))
+            "Download failed, expected "
+            + str(len(aifs_range1))
             + " files, but got "
             + str(len(FH_forecastsub.file_exists))
         )
         sys.exit(1)
 
     # Perform a check if any data seems to be invalid
-    cmd = (
-            "cat "
-            + " ".join(gribList[-1])
-            + " | "
-            + f"{wgrib2_path}"
-            + "- -s -stats")
+    cmd = "cat " + " ".join(gribList[-1]) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
     gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
@@ -427,19 +418,15 @@ gribList = [
 # Check for download length
 if len(gribList) != len(ifsFileRange):
     print(
-        "Download failed, expected " + str(len(gribList))
+        "Download failed, expected "
+        + str(len(gribList))
         + " files, but got "
         + str(len(FH_forecastsub.file_exists))
     )
     sys.exit(1)
 
 # Perform a check if any data seems to be invalid
-cmd = (
-        "cat "
-        + " ".join(gribList)
-        + " | "
-        + f"{wgrib2_path}"
-        + "- -s -stats")
+cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
@@ -617,11 +604,12 @@ for i in range(hisPeriod, 1, -12):
     # Check for download length
     if len(FH_histsub.file_exists) != len(fxx):
         print(
-            "Download failed, expected " + str(len(fxx)) + " files but got "
+            "Download failed, expected "
+            + str(len(fxx))
+            + " files but got "
             + str(len(FH_histsub.file_exists))
         )
         sys.exit(1)
-
 
     # Create list of downloaded grib files
     gribList = [
@@ -630,13 +618,7 @@ for i in range(hisPeriod, 1, -12):
     ]
 
     # Perform a check if any data seems to be invalid
-    cmd = (
-        "cat "
-        + " ".join(gribList)
-        + " | "
-        + f"{wgrib2_path}"
-        + " - "
-        + " -s -stats")
+    cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
 
     gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
@@ -685,21 +667,26 @@ for i in range(hisPeriod, 1, -12):
         # Check for download length
         if len(gribList[-1]) != len(fxx):
             print(
-                "Download failed, expected " + str(len(fxx)) + " files but got "
+                "Download failed, expected "
+                + str(len(fxx))
+                + " files but got "
                 + str(len(FH_histsub.file_exists))
             )
             sys.exit(1)
 
         # Perform a check if any data seems to be invalid
         cmd = (
-                "cat "
-                + " ".join(gribList[-1])
-                + " | "
-                + f"{wgrib2_path}"
-                + " - "
-                + " -s -stats")
+            "cat "
+            + " ".join(gribList[-1])
+            + " | "
+            + f"{wgrib2_path}"
+            + " - "
+            + " -s -stats"
+        )
 
-        gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+        gribCheck = subprocess.run(
+            cmd, shell=True, capture_output=True, encoding="utf-8"
+        )
 
         validate_grib_stats(gribCheck)
         print("Grib files passed validation, proceeding with processing")
@@ -829,19 +816,15 @@ for i in range(hisPeriod, 1, -12):
     # Check for download length
     if len(gribList) != len(aifs_range):
         print(
-            "Download failed, expected " + str(len(fxx)) + " files but got "
+            "Download failed, expected "
+            + str(len(fxx))
+            + " files but got "
             + str(len(FH_histsub.file_exists))
         )
         sys.exit(1)
 
     # Perform a check if any data seems to be invalid
-    cmd = (
-            "cat "
-            + " ".join(gribList)
-            + " | "
-            + f"{wgrib2_path}"
-            + " - "
-            + " -s -stats")
+    cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
 
     gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 

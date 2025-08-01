@@ -230,12 +230,7 @@ gribList = [
 ]
 
 # Perform a check if any data seems to be invalid
-cmd = (
-    "cat "
-    + " ".join(gribList)
-    + " | "
-    + f"{wgrib2_path}"
-    + "- -s -stats")
+cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
@@ -294,13 +289,7 @@ gribListUV = [
 ]
 
 # Perform a check if any data seems to be invalid
-cmd = (
-        "cat "
-        + " ".join(gribListUV)
-        + " | "
-        + f"{wgrib2_path}"
-        + " - "
-        + " -s -stats")
+cmd = "cat " + " ".join(gribListUV) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
 
 gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
@@ -626,13 +615,7 @@ for i in range(hisPeriod, 0, -6):
     ]
 
     # Perform a check if any data seems to be invalid
-    cmd = (
-        "cat "
-        + " ".join(gribList)
-        + " | "
-        + f"{wgrib2_path}"
-        + " - "
-        + " -s -stats")
+    cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
 
     gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
@@ -686,18 +669,13 @@ for i in range(hisPeriod, 0, -6):
 
     # Perform a check if any data seems to be invalid
     cmd = (
-        "cat "
-        + " ".join(gribListUV)
-        + " | "
-        + f"{wgrib2_path}"
-        + " - "
-        + " -s -stats")
+        "cat " + " ".join(gribListUV) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
+    )
 
     gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
     validate_grib_stats(gribCheck)
     print("Grib files passed validation, proceeding with processing")
-
 
     # Create a string to pass to wgrib2 to merge all gribs into one netcdf
     cmd = (

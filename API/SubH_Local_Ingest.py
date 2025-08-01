@@ -199,12 +199,7 @@ gribList = [
 ]
 
 # Perform a check if any data seems to be invalid
-cmd = (
-    "cat "
-    + " ".join(gribList)
-    + " | "
-    + f"{wgrib2_path}"
-    + "- -s -stats")
+cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 

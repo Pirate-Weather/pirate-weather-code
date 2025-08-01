@@ -24,7 +24,12 @@ import zarr.storage
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
-from ingest_utils import mask_invalid_data, interp_time_block, getGribList, validate_grib_stats
+from ingest_utils import (
+    mask_invalid_data,
+    interp_time_block,
+    getGribList,
+    validate_grib_stats,
+)
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -221,7 +226,8 @@ FH_forecastsub.download(matchStrings, verbose=False)
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(nbm_range):
     print(
-        "Download failed, expected " + str(len(nbm_range))
+        "Download failed, expected "
+        + str(len(nbm_range))
         + " files, but got "
         + str(len(FH_forecastsub.file_exists))
     )
@@ -235,12 +241,7 @@ gribList = [
 ]
 
 # Perform a check if any data seems to be invalid
-cmd = (
-    "cat "
-    + " ".join(gribList)
-    + " | "
-    + f"{wgrib2_path}"
-    + "- -s -stats")
+cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
@@ -341,7 +342,8 @@ FH_forecastsub.download(matchstring_po, verbose=False)
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(nbm_range1):
     print(
-        "Download failed, expected " + str(len(nbm_range1))
+        "Download failed, expected "
+        + str(len(nbm_range1))
         + " files, but got "
         + str(len(FH_forecastsub.file_exists))
     )
@@ -373,7 +375,8 @@ FH_forecastsub2.download(matchstring_po2, verbose=False)
 # Check for download length
 if len(FH_forecastsub2.file_exists) != len(nbm_range2):
     print(
-        "Download failed, expected " + str(len(nbm_range2))
+        "Download failed, expected "
+        + str(len(nbm_range2))
         + " files, but got "
         + str(len(FH_forecastsub2.file_exists))
     )
@@ -385,12 +388,7 @@ gribList2 = getGribList(FH_forecastsub2, matchstring_po2)
 gribList = gribList1 + gribList2
 
 # Perform a check if any data seems to be invalid
-cmd = (
-    "cat "
-    + " ".join(gribList)
-    + " | "
-    + f"{wgrib2_path}"
-    + "- -s -stats")
+cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
@@ -471,7 +469,8 @@ FH_forecastsub.download(matchstring_pa, verbose=False)
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(nbm_range1):
     print(
-        "Download failed, expected " + str(len(nbm_range1))
+        "Download failed, expected "
+        + str(len(nbm_range1))
         + " files, but got "
         + str(len(FH_forecastsub.file_exists))
     )
@@ -502,7 +501,8 @@ FH_forecastsub2.download(matchstring_pa2, verbose=False)
 # Check for download length
 if len(FH_forecastsub2.file_exists) != len(nbm_range2):
     print(
-        "Download failed, expected " + str(len(nbm_range2))
+        "Download failed, expected "
+        + str(len(nbm_range2))
         + " files, but got "
         + str(len(FH_forecastsub2.file_exists))
     )
@@ -514,18 +514,12 @@ gribList = gribList1 + gribList2
 
 
 # Perform a check if any data seems to be invalid
-cmd = (
-    "cat "
-    + " ".join(gribList)
-    + " | "
-    + f"{wgrib2_path}"
-    + "- -s -stats")
+cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
 validate_grib_stats(gribCheck)
 print("Grib files passed validation, proceeding with processing")
-
 
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
@@ -808,13 +802,13 @@ for i in range(hisPeriod, -1, -1):
                 matchStrings + "|" + matchstring_po
             )
         )
-        + " -s -stats")
+        + " -s -stats"
+    )
 
     gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
     validate_grib_stats(gribCheck)
     print("Grib files passed validation, proceeding with processing")
-
 
     # Use wgrib2 to change the order
     cmd1 = (

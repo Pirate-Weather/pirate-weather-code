@@ -204,12 +204,7 @@ gribList = [
 ]
 
 # Perform a check if any data seems to be invalid
-cmd = (
-    "cat "
-    + " ".join(gribList)
-    + " | "
-    + f"{wgrib2_path}"
-    + "- -s -stats")
+cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
@@ -427,10 +422,11 @@ for i in range(hisPeriod, -1, -1):
 
     # Perform a check if any data seems to be invalid
     cmd = (
-            f"{wgrib2_path}"
-            + " "
-            + str(FH_histsub.file_exists[0].get_localFilePath(matchStrings))
-            + " -s -stats")
+        f"{wgrib2_path}"
+        + " "
+        + str(FH_histsub.file_exists[0].get_localFilePath(matchStrings))
+        + " -s -stats"
+    )
 
     gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 

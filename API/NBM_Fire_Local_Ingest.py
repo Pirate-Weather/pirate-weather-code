@@ -256,7 +256,8 @@ except Exception:
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(nbm_range):
     print(
-        "Download failed, expected " + str(len(nbm_range))
+        "Download failed, expected "
+        + str(len(nbm_range))
         + " files, but got "
         + str(len(FH_forecastsub.file_exists))
     )
@@ -270,12 +271,7 @@ gribList = [
 ]
 
 # Perform a check if any data seems to be invalid
-cmd = (
-    "cat "
-    + " ".join(gribList)
-    + " | "
-    + f"{wgrib2_path}"
-    + "- -s -stats")
+cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
@@ -502,16 +498,16 @@ for i in range(hisPeriod, 1, -6):
 
     # Perform a check if any data seems to be invalid
     cmd = (
-            f"{wgrib2_path}"
-            + " "
-            + str(FH_histsub.file_exists[0].get_localFilePath(matchStrings))
-            + " -s -stats")
+        f"{wgrib2_path}"
+        + " "
+        + str(FH_histsub.file_exists[0].get_localFilePath(matchStrings))
+        + " -s -stats"
+    )
 
     gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
     validate_grib_stats(gribCheck)
     print("Grib files passed validation, proceeding with processing")
-
 
     # Use wgrib2 to change the order
     cmd1 = (

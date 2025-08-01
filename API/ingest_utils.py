@@ -118,11 +118,11 @@ def validate_grib_stats(gribCheck):
       - globals: VALID_DATA_MIN, VALID_DATA_MAX
     """
     # extract all mins and maxs
-    mins     = [float(m) for m in re.findall(r"min=([-\d\.eE]+)", gribCheck.stdout)]
-    maxs     = [float(M) for M in re.findall(r"max=([-\d\.eE]+)", gribCheck.stdout)]
+    mins = [float(m) for m in re.findall(r"min=([-\d\.eE]+)", gribCheck.stdout)]
+    maxs = [float(M) for M in re.findall(r"max=([-\d\.eE]+)", gribCheck.stdout)]
 
     # extract variable names (4th field)
-    varnames = re.findall(r'(?m)^(?:[^:]+:){3}([^:]+):', gribCheck.stdout)
+    varnames = re.findall(r"(?m)^(?:[^:]+:){3}([^:]+):", gribCheck.stdout)
 
     # ensure we found at least one variable
     if not varnames:
@@ -130,12 +130,12 @@ def validate_grib_stats(gribCheck):
         sys.exit(10)
 
     # extract forecast lead times (6th field)
-    vartimes = re.findall(r'(?m)^(?:[^:]+:){5}([^:]+):', gribCheck.stdout)
-
+    vartimes = re.findall(r"(?m)^(?:[^:]+:){5}([^:]+):", gribCheck.stdout)
 
     # find any indices where data is out of range
     invalid_idxs = [
-        i for i, (mn, mx) in enumerate(zip(mins, maxs))
+        i
+        for i, (mn, mx) in enumerate(zip(mins, maxs))
         if mn < VALID_DATA_MIN or mx > VALID_DATA_MAX
     ]
 
