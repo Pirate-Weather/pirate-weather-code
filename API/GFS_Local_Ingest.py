@@ -11,7 +11,6 @@ import time
 import traceback
 import warnings
 
-import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -353,17 +352,16 @@ hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 # %% FIX THINGS
 
 # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time
-APCP_surface_tmp =  da.diff(
-        xarray_forecast_merged["APCP_surface"],
-        axis=xarray_forecast_merged["APCP_surface"].get_axis_num("time"),
-        prepend=0,
-    )
+APCP_surface_tmp = da.diff(
+    xarray_forecast_merged["APCP_surface"],
+    axis=xarray_forecast_merged["APCP_surface"].get_axis_num("time"),
+    prepend=0,
+)
 
 # Convert 3-hourly to 1-hourly
 APCP_surface_tmp[120:, :, :] = APCP_surface_tmp[120:, :, :] / 3
 
 xarray_forecast_merged["APCP_surface"].data = APCP_surface_tmp
-
 
 
 # Create a new xarray for storm distance processing using dask
@@ -424,7 +422,6 @@ with ProgressBar():
     directions_chunked.to_zarr(
         forecast_process_path + "_stormDir.zarr", overwrite=True, compute=True
     )
-
 
 
 # UV is an average from zero to 6, repeating throughout the time series.
@@ -489,8 +486,6 @@ for accumVar in accumVars:
     )
 
 
-
-
 # %% Save merged and processed xarray dataset to disk using zarr with compression
 # Save the dataset with compression and filters for all variables
 xarray_forecast_merged = xarray_forecast_merged.chunk(
@@ -518,7 +513,7 @@ del (
     directions_stacked,
     xarray_forecast_distance,
     APCP_surface_tmp,
-    xarray_forecast_merged
+    xarray_forecast_merged,
 )
 T1 = time.time()
 
