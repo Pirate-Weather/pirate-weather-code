@@ -980,7 +980,6 @@ async def PW_Forecast(
 
     translation = Translations[lang]
 
-
     if utcTime < datetime.datetime(2024, 5, 1):
         timeMachine = True
 
@@ -990,14 +989,7 @@ async def PW_Forecast(
             or ("127.0.0.1" in str(request.url))
         ):
             TM_Response = await TimeMachine(
-                lat,
-                lon,
-                az_Lon,
-                utcTime,
-                tf,
-                units,
-                exclude,
-                lang
+                lat, lon, az_Lon, utcTime, tf, units, exclude, lang
             )
 
             return TM_Response
@@ -1057,7 +1049,6 @@ async def PW_Forecast(
         version = 1
 
     version = float(version)
-
 
     # Check if extra information should be included with time machine
     if not tmextra:
@@ -3035,7 +3026,9 @@ async def PW_Forecast(
 
     # Air quality/ smoke
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-        InterPhour[:, 20] = clipLog(HRRR_Merged[:, 16], 0, 200, "Air quality Hour")
+        InterPhour[:, 20] = clipLog(
+            HRRR_Merged[:, 16], 0, 500, "Air quality Hour"
+        )  # Maximum US AQI value for PM2.5 (smoke) is 500 which corresponds to 500 PM2.5
     else:
         InterPhour[:, 20] = -999
 
@@ -3310,7 +3303,6 @@ async def PW_Forecast(
             print(traceback.print_exc())
 
         if version < 2:
-            hourItem.pop("smoke", None)
             hourItem.pop("liquidAccumulation", None)
             hourItem.pop("snowAccumulation", None)
             hourItem.pop("iceAccumulation", None)
@@ -3320,11 +3312,7 @@ async def PW_Forecast(
             hourItem.pop("feelsLike", None)
 
         if timeMachine and not tmExtra:
-            hourItem.pop("precipProbability", None)
-            hourItem.pop("precipIntensityError", None)
-            hourItem.pop("humidity", None)
             hourItem.pop("uvIndex", None)
-            hourItem.pop("visibility", None)
             hourItem.pop("ozone", None)
 
         hourList.append(hourItem)
@@ -4284,6 +4272,30 @@ async def PW_Forecast(
                     set(hourIconList), key=hourIconList.count
                 )
 
+        # Final hourly cleanup.
+        fieldsToRemove = []
+
+        # Remove 'smoke' if the version is less than 2.
+        if version < 2:
+            fieldsToRemove.append("smoke")
+
+        # Remove extra fields for basic Time Machine requests.
+        if timeMachine and not tmExtra:
+            fieldsToRemove.extend(
+                [
+                    "precipProbability",
+                    "precipIntensityError",
+                    "humidity",
+                    "visibility",
+                ]
+            )
+
+        # Apply all identified removals to the final hourList.
+        if fieldsToRemove:
+            for hourItem in hourList:
+                for field in fieldsToRemove:
+                    hourItem.pop(field, None)
+
         if extendFlag == 1:
             returnOBJ["hourly"]["data"] = hourList[
                 int(baseTimeOffset) : int(baseTimeOffset) + 169
@@ -4338,7 +4350,7 @@ async def PW_Forecast(
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.7.4"
+        returnOBJ["flags"]["version"] = "V2.7.5c"
         if version >= 2:
             returnOBJ["flags"]["sourceIDX"] = sourceIDX
             returnOBJ["flags"]["processTime"] = (
