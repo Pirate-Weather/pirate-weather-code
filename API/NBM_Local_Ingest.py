@@ -21,10 +21,10 @@ import pandas as pd
 import s3fs
 import xarray as xr
 import zarr.storage
-from herbie import FastHerbie
+from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
-from ingest_utils import mask_invalid_data, interp_time_block, getGribList
+from ingest_utils import mask_invalid_data, interp_time_block, getGribList, validate_grib_stats
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -217,8 +217,36 @@ FH_forecastsub = FastHerbie(
 # Download the subsets
 FH_forecastsub.download(matchStrings, verbose=False)
 
+
+# Check for download length
+if len(FH_forecastsub.file_exists) != len(nbm_range):
+    print(
+        "Download failed, expected " + str(len(nbm_range))
+        + " files, but got "
+        + str(len(FH_forecastsub.file_exists))
+    )
+    sys.exit(1)
+
+
 # Create list of downloaded grib files
-gribList = getGribList(FH_forecastsub, matchStrings)
+gribList = [
+    str(Path(x.get_localFilePath(matchStrings)).expand())
+    for x in FH_forecastsub.file_exists
+]
+
+# Perform a check if any data seems to be invalid
+cmd = (
+    "cat "
+    + " ".join(gribList)
+    + " | "
+    + f"{wgrib2_path}"
+    + "- -s -stats")
+
+gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+validate_grib_stats(gribCheck)
+print("Grib files passed validation, proceeding with processing")
+
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
 cmd = (
@@ -310,8 +338,19 @@ matchstring_po = r"(:APCP:surface:(0-1|1-2|2-3|3-4|4-5|5-6|6-7|7-8|8-9|9-10|[0-9
 # Download the subsets
 FH_forecastsub.download(matchstring_po, verbose=False)
 
+# Check for download length
+if len(FH_forecastsub.file_exists) != len(nbm_range1):
+    print(
+        "Download failed, expected " + str(len(nbm_range1))
+        + " files, but got "
+        + str(len(FH_forecastsub.file_exists))
+    )
+    sys.exit(1)
+
+
 # Create list of downloaded grib files
 gribList1 = getGribList(FH_forecastsub, matchstring_po)
+
 #####
 # Download PPROB as 6-Hour Accum for hours 036-190
 
@@ -331,10 +370,33 @@ matchstring_po2 = r":APCP:surface:(0-6|[0-9]*0-[0-9]{1,2}6|[0-9]*1-[0-9]{1,2}7|[
 # Download the subsets
 FH_forecastsub2.download(matchstring_po2, verbose=False)
 
+# Check for download length
+if len(FH_forecastsub2.file_exists) != len(nbm_range2):
+    print(
+        "Download failed, expected " + str(len(nbm_range2))
+        + " files, but got "
+        + str(len(FH_forecastsub2.file_exists))
+    )
+    sys.exit(1)
+
 # Create list of downloaded grib files
 gribList2 = getGribList(FH_forecastsub2, matchstring_po2)
 
 gribList = gribList1 + gribList2
+
+# Perform a check if any data seems to be invalid
+cmd = (
+    "cat "
+    + " ".join(gribList)
+    + " | "
+    + f"{wgrib2_path}"
+    + "- -s -stats")
+
+gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+validate_grib_stats(gribCheck)
+print("Grib files passed validation, proceeding with processing")
+
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
 cmd = (
@@ -406,6 +468,15 @@ matchstring_pa = r"(:APCP:surface:(0-1|1-2|2-3|3-4|4-5|5-6|6-7|7-8|8-9|9-10|\d*0
 # Download the subsets
 FH_forecastsub.download(matchstring_pa, verbose=False)
 
+# Check for download length
+if len(FH_forecastsub.file_exists) != len(nbm_range1):
+    print(
+        "Download failed, expected " + str(len(nbm_range1))
+        + " files, but got "
+        + str(len(FH_forecastsub.file_exists))
+    )
+    sys.exit(1)
+
 # Create list of downloaded grib files
 gribList1 = getGribList(FH_forecastsub, matchstring_pa)
 
@@ -428,9 +499,33 @@ matchstring_pa2 = r"(:APCP:surface:(0-6|\d*0-\d{1,2}6|\d*1-\d{1,2}7|\d*2-\d{1,2}
 # Download the subsets
 FH_forecastsub2.download(matchstring_pa2, verbose=False)
 
+# Check for download length
+if len(FH_forecastsub2.file_exists) != len(nbm_range2):
+    print(
+        "Download failed, expected " + str(len(nbm_range2))
+        + " files, but got "
+        + str(len(FH_forecastsub2.file_exists))
+    )
+    sys.exit(1)
+
 # Create list of downloaded grib files
 gribList2 = getGribList(FH_forecastsub2, matchstring_pa2)
 gribList = gribList1 + gribList2
+
+
+# Perform a check if any data seems to be invalid
+cmd = (
+    "cat "
+    + " ".join(gribList)
+    + " | "
+    + f"{wgrib2_path}"
+    + "- -s -stats")
+
+gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+validate_grib_stats(gribCheck)
+print("Grib files passed validation, proceeding with processing")
+
 
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
@@ -703,6 +798,23 @@ for i in range(hisPeriod, -1, -1):
     # Main Vars + Accum
     # Download the subsets
     FH_histsub.download(matchStrings + "|" + matchstring_po, verbose=False)
+
+    # Perform a check if any data seems to be invalid
+    cmd = (
+        f"{wgrib2_path}"
+        + "  "
+        + str(
+            FH_histsub.file_exists[0].get_localFilePath(
+                matchStrings + "|" + matchstring_po
+            )
+        )
+        + " -s -stats")
+
+    gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+    validate_grib_stats(gribCheck)
+    print("Grib files passed validation, proceeding with processing")
+
 
     # Use wgrib2 to change the order
     cmd1 = (
