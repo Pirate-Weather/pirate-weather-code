@@ -14,12 +14,17 @@ VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
 
 
-def mask_invalid_data(dask_array):
+def mask_invalid_data(dask_array, ignore_axis=None):
     """Masks invalid data in a dask array, ignoring the time dimension."""
     # TODO: Update to mask for each variable according to reasonable values, as opposed to this global mask
     valid_mask = (dask_array >= VALID_DATA_MIN) & (dask_array <= VALID_DATA_MAX)
     # Ignore times by setting first dimension to True
     valid_mask[0, :, :, :] = True
+
+    # Also ignore the specified axis if provided
+    if ignore_axis is not None:
+        for i in ignore_axis:
+            valid_mask[i, :, :, :] = True
     return da.where(valid_mask, dask_array, np.nan)
 
 
@@ -133,6 +138,7 @@ def validate_grib_stats(gribCheck):
     vartimes = re.findall(r"(?m)^(?:[^:]+:){5}([^:]+):", gribCheck.stdout)
 
     # find any indices where data is out of range
+    # TODO: This would be better if we checked against a dictionary of valid ranges defined per variable
     invalid_idxs = [
         i
         for i, (mn, mx) in enumerate(zip(mins, maxs))

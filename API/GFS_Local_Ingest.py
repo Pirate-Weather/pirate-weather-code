@@ -353,20 +353,17 @@ hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 # %% FIX THINGS
 
 # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time
-APCP_surface_tmp = xarray_forecast_merged["APCP_surface"].copy(
-    data=np.diff(
+APCP_surface_tmp =  da.diff(
         xarray_forecast_merged["APCP_surface"],
         axis=xarray_forecast_merged["APCP_surface"].get_axis_num("time"),
         prepend=0,
     )
-)
 
 # Convert 3-hourly to 1-hourly
 APCP_surface_tmp[120:, :, :] = APCP_surface_tmp[120:, :, :] / 3
 
-xarray_forecast_merged["APCP_surface"] = xarray_forecast_merged["APCP_surface"].copy(
-    data=APCP_surface_tmp
-)
+xarray_forecast_merged["APCP_surface"].data = APCP_surface_tmp
+
 
 
 # Create a new xarray for storm distance processing using dask
@@ -388,48 +385,46 @@ xarray_forecast_distance["APCP_surface"] = xarray_forecast_distance[
 
 distances = []
 directions = []
-# len(xarray_forecast_distance_interp.time)
 
 
 # Find nearest storm distance and direction for first 12 hours
 for t in range(0, 160):
     distances.append(
-        dask.delayed(proximity)(
+        proximity(
             xarray_forecast_distance["APCP_surface"].isel(time=t),
             distance_metric="GREAT_CIRCLE",
             x="longitude",
             y="latitude",
+            max_distance=None,
         )
     )
 
     directions.append(
-        dask.delayed(direction)(
+        direction(
             xarray_forecast_distance["APCP_surface"].isel(time=t),
             distance_metric="GREAT_CIRCLE",
             x="longitude",
             y="latitude",
+            max_distance=None,
         )
     )
 
-# Set to zero for rest of range
-# for t in range(12, 160):
-#     distances.append(np.zeros(xarray_forecast_distance['APCP_surface'].shape[1:]))
-#     directions.append(np.zeros(xarray_forecast_distance['APCP_surface'].shape[1:]))
 
-distanced_stacked = dask.delayed(da.stack)(distances)
-directions_stacked = dask.delayed(da.stack)(directions)
+distanced_stacked = da.stack(distances)
+directions_stacked = da.stack(directions)
 
 distanced_chunked = distanced_stacked.rechunk(160, processChunk, processChunk)
 directions_chunked = directions_stacked.rechunk(160, processChunk, processChunk)
 
 
-# with ProgressBar():
-distanced_chunked.to_zarr(
-    forecast_process_path + "_stormDist.zarr", overwrite=True
-).compute()
-directions_chunked.to_zarr(
-    forecast_process_path + "_stormDir.zarr", overwrite=True
-).compute()
+with ProgressBar():
+    distanced_chunked.to_zarr(
+        forecast_process_path + "_stormDist.zarr", overwrite=True, compute=True
+    )
+    directions_chunked.to_zarr(
+        forecast_process_path + "_stormDir.zarr", overwrite=True, compute=True
+    )
+
 
 
 # UV is an average from zero to 6, repeating throughout the time series.
@@ -494,17 +489,7 @@ for accumVar in accumVars:
     )
 
 
-# %% Delete to free memory
-del (
-    uvProc,
-    uvProcHour,
-    uvProcHour3D,
-    uvProcHour3DB,
-    n,
-    first_step,
-    xarray_wgrib_merged,
-    xarray_wgribUV_merged,
-)
+
 
 # %% Save merged and processed xarray dataset to disk using zarr with compression
 # Save the dataset with compression and filters for all variables
@@ -515,9 +500,26 @@ xarray_forecast_merged.to_zarr(
     forecast_process_path + "_.zarr", mode="w", consolidated=False, compute=True
 )
 
-# Clear the xaarray dataset from memory
-del xarray_forecast_merged
-
+# %% Delete to free memory
+del (
+    uvProc,
+    uvProcHour,
+    uvProcHour3D,
+    uvProcHour3DB,
+    n,
+    first_step,
+    xarray_wgrib_merged,
+    xarray_wgribUV_merged,
+    directions,
+    distances,
+    directions_chunked,
+    distanced_chunked,
+    distanced_stacked,
+    directions_stacked,
+    xarray_forecast_distance,
+    APCP_surface_tmp,
+    xarray_forecast_merged
+)
 T1 = time.time()
 
 print(T1 - T0)
@@ -739,20 +741,22 @@ for i in range(hisPeriod, 0, -6):
     # Find nearest storm distance and direction for first 12 hours
     for t in range(0, 6):
         distances.append(
-            dask.delayed(proximity)(
+            proximity(
                 xarray_hist_distance["APCP_surface"].isel(time=t),
                 distance_metric="GREAT_CIRCLE",
                 x="longitude",
                 y="latitude",
+                max_distance=None,
             )
         )
 
         directions.append(
-            dask.delayed(direction)(
+            direction(
                 xarray_hist_distance["APCP_surface"].isel(time=t),
                 distance_metric="GREAT_CIRCLE",
                 x="longitude",
                 y="latitude",
+                max_distance=None,
             )
         )
 
@@ -760,11 +764,11 @@ for i in range(hisPeriod, 0, -6):
     # with ProgressBar():
     xarray_hist_merged["Storm_Distance"] = (
         ("time", "latitude", "longitude"),
-        dask.delayed(da.stack)(distances).rechunk((6, 100, 100)).compute(),
+        da.stack(distances).rechunk((6, 100, 100)).compute(),
     )
     xarray_hist_merged["Storm_Direction"] = (
         ("time", "latitude", "longitude"),
-        dask.delayed(da.stack)(directions).rechunk((6, 100, 100)).compute(),
+        da.stack(directions).rechunk((6, 100, 100)).compute(),
     )
 
     # UV is an average from zero to 6, repeating throughout the time series.
@@ -944,7 +948,8 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
 # Mask out invalid data
-daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
+# Ignore storm distance, since it can reach very high values that are still correct
+daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge, ignore_axis=[19])
 
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
