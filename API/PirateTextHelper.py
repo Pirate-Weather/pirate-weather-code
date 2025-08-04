@@ -1,4 +1,4 @@
-"""Script to contain the helper functions that can be used to generate the text summary of the forecast data for Pirate Weather"""
+# %% Script to contain the helper functions that can be used to generate the text summary of the forecast data for Pirate Weather
 
 from collections import Counter
 from itertools import groupby
@@ -51,6 +51,44 @@ DEFAULT_VALUES = {
 MISSING_DATA = -999
 PRECIP_PROBABILITY_THRESHOLD = 0.25
 
+# New constants for refactoring
+HEAVY_SNOW_AVG_FACTOR = 0.66
+HEAVY_OTHER_PRECIP_AVG_FACTOR = 2
+SUMMARY_TYPE_MINUTE = "minute"
+SUMMARY_TYPE_WEEK = "week"
+SUMMARY_TYPE_HOURLY = "hourly"
+
+# Icon mapping for Pirate Weather specific icons
+PIRATE_ICON_MAP = {
+    "rain": {
+        "very-light": "drizzle",
+        "light": "light-rain",
+        "medium": "rain",
+        "heavy": "heavy-rain",
+    },
+    "snow": {
+        "very-light": "flurries",
+        "light": "light-snow",
+        "medium": "snow",
+        "heavy": "heavy-snow",
+    },
+    "sleet": {
+        "very-light": "very-light-sleet",
+        "light": "light-sleet",
+        "medium": "medium-sleet",
+        "heavy": "heavy-sleet",
+    },
+    "ice": {  # Corresponds to freezing-rain in text
+        "very-light": "freezing-drizzle",
+        "light": "light-freezing-rain",
+        "medium": "freezing-rain",
+        "heavy": "heavy-freezing-rain",
+    },
+    "precipitation": {  # For generic "none" type precipitation
+        "default": "precipitation"
+    },
+}
+
 
 def most_common(lst):
     """
@@ -88,6 +126,145 @@ def calculate_sky_icon(cloudCover, isDayTime, iconSet="darksky"):
         return "mostly-clear-day" if isDayTime else "mostly-clear-night"
     else:
         return "clear-day" if isDayTime else "clear-night"
+
+
+def _get_intensity_level(intensity, lightThresh, midThresh, heavyThresh):
+    """
+    Determines the intensity level (e.g., 'very-light', 'light') based on thresholds.
+
+    Parameters:
+    - intensity (float): The precipitation intensity value.
+    - lightThresh (float): The threshold for light intensity.
+    - midThresh (float): The threshold for medium intensity.
+    - heavyThresh (float): The threshold for heavy intensity.
+
+    Returns:
+    - str: The string representing the intensity level.
+    """
+    if intensity < lightThresh:
+        return "very-light"
+    elif intensity < midThresh:
+        return "light"
+    elif intensity < heavyThresh:
+        return "medium"
+    else:
+        return "heavy"
+
+
+def _get_precip_text_and_icon_for_type(
+    precipType,
+    precipitationIntensity,
+    intensityThresholds,
+    possiblePrecipitation,
+    iconSet,
+    isDayTime,
+    summaryType,
+    avgPrecipitation,
+    precipitationAccumUnit,
+    accumulation,
+):
+    """
+    Helper function to determine precipitation text and icon for a specific type.
+
+    Parameters:
+    - precipType (str): The type of precipitation (e.g., "rain", "snow", "sleet", "ice", "none").
+    - precipitationIntensity (float): The current precipitation intensity.
+    - intensityThresholds (dict): Dictionary containing light, mid, and heavy thresholds for the precipitation type.
+    - possiblePrecipitation (str): Prefix for "possible-" precipitation.
+    - iconSet (str): Which icon set to use - Dark Sky or Pirate Weather.
+    - isDayTime (bool): Whether it's currently day or night.
+    - summaryType (str): What type of summary is being generated (e.g., "minute", "week", "hourly").
+    - avgPrecipitation (float): The average precipitation intensity for the period.
+    - precipitationAccumUnit (float): The precipitation accumulation/intensity unit.
+    - accumulation (float): The total accumulation for the specific precipitation type.
+
+    Returns:
+    - tuple[str | None, str | None]: The textual representation and/or icon of the precipitation.
+    """
+    currentText = None
+    currentIcon = None
+
+    intensityLevel = _get_intensity_level(
+        precipitationIntensity,
+        intensityThresholds["light"],
+        intensityThresholds["mid"],
+        intensityThresholds["heavy"],
+    )
+
+    print(intensityLevel)
+
+    # Determine base text
+    if precipType == "ice":  # Special case for "freezing-rain" text
+        currentText = f"{possiblePrecipitation}{intensityLevel}-freezing-rain"
+    elif precipType == "none":
+        currentText = f"{possiblePrecipitation}{intensityLevel}-precipitation"
+    else:
+        currentText = f"{possiblePrecipitation}{intensityLevel}-{precipType}"
+
+    # Determine icon for Pirate Weather
+    if iconSet == "pirate":
+        if possiblePrecipitation == "":
+            if precipType == "none":
+                currentIcon = PIRATE_ICON_MAP["precipitation"]["default"]
+            else:
+                currentIcon = PIRATE_ICON_MAP[precipType][intensityLevel]
+        else:
+            if precipType == "none":
+                currentIcon = (
+                    f"possible-precipitation-{'day' if isDayTime else 'night'}"
+                )
+            else:
+                currentIcon = f"possible-{precipType}-{'day' if isDayTime else 'night'}"
+    else:
+        # Logic for non-pirate icon sets (e.g., Dark Sky)
+        if precipType == "none":
+            currentIcon = "rain"
+        elif precipType == "ice":
+            currentIcon = "freezing-rain"
+        else:
+            currentIcon = precipType
+
+    # Handle specific text adjustments for heavy precipitation in certain summary types
+    if summaryType in [SUMMARY_TYPE_MINUTE, SUMMARY_TYPE_WEEK, SUMMARY_TYPE_HOURLY]:
+        if precipType == "snow":
+            if (
+                avgPrecipitation
+                < (
+                    intensityThresholds["heavy"]
+                    - (HEAVY_SNOW_AVG_FACTOR * precipitationAccumUnit)
+                )
+                and precipitationIntensity >= intensityThresholds["heavy"]
+            ):
+                currentText = [
+                    "and",
+                    f"medium-{precipType}",
+                    f"possible-heavy-{precipType}",
+                ]
+        elif precipType in ["rain", "sleet", "ice", "none"]:
+            if (
+                avgPrecipitation
+                < (
+                    intensityThresholds["heavy"]
+                    - (HEAVY_OTHER_PRECIP_AVG_FACTOR * precipitationAccumUnit)
+                )
+                and precipitationIntensity >= intensityThresholds["heavy"]
+            ):
+                currentText = [
+                    "and",
+                    f"medium-{precipType}",
+                    f"possible-heavy-{precipType}",
+                ]
+
+        # Specific check for rain accumulation in minute/week summary
+        if (
+            precipType == "rain"
+            and summaryType in [SUMMARY_TYPE_MINUTE, SUMMARY_TYPE_WEEK]
+            and precipitationIntensity < intensityThresholds["heavy"]
+            and accumulation >= intensityThresholds["heavy"]
+        ):
+            currentText = ["and", "medium-rain", "possible-heavy-rain"]
+
+    return currentText, currentIcon
 
 
 def calculate_precipitation(
@@ -134,29 +311,10 @@ def calculate_precipitation(
     ):
         return (None, None) if mode == "both" else None
 
-    precipitationIntensityUnit = (
-        1 if precipitationAccumUnit == 0.1 else precipitationAccumUnit
-    )
-
     if pop == MISSING_DATA:
         pop = 1
 
-    # Apply intensity units to thresholds
-    lightPrecipThreshold = (
-        PRECIPITATION_INTENSITY_THRESHOLDS["light"] * precipitationIntensityUnit
-    )
-    midPrecipThreshold = (
-        PRECIPITATION_INTENSITY_THRESHOLDS["mid"] * precipitationIntensityUnit
-    )
-    heavyPrecipThreshold = (
-        PRECIPITATION_INTENSITY_THRESHOLDS["heavy"] * precipitationIntensityUnit
-    )
-    lightSnowThreshold = SNOW_INTENSITY_THRESHOLDS["light"] * precipitationIntensityUnit
-    midSnowThreshold = SNOW_INTENSITY_THRESHOLDS["mid"] * precipitationIntensityUnit
-    heavySnowThreshold = SNOW_INTENSITY_THRESHOLDS["heavy"] * precipitationIntensityUnit
-
-    # Determine accumulation thresholds based on summary type
-    if summaryType in ["hour", "current", "minute", "hourly"]:
+    if summaryType in ["hour", "current", SUMMARY_TYPE_MINUTE, SUMMARY_TYPE_HOURLY]:
         snowIconThreshold = (
             ICON_THRESHOLDS["hourly_snow_accumulation"] * precipitationAccumUnit
         )
@@ -164,7 +322,7 @@ def calculate_precipitation(
             ICON_THRESHOLDS["hourly_precipitation_accumulation"]
             * precipitationAccumUnit
         )
-    else:
+    else:  # "day", "week"
         snowIconThreshold = (
             ICON_THRESHOLDS["daily_snow_accumulation"] * precipitationAccumUnit
         )
@@ -177,35 +335,38 @@ def calculate_precipitation(
     currentText = None
     totalPrecipitation = rainAccumulation + snowAccumulation + iceAccumulation
 
-    # Determine if "possible" prefix should be used
-    if pop < PRECIP_PROBABILITY_THRESHOLD or (
-        (
-            precipitationType in ["rain", "none"]
-            and 0 < rainAccumulation < precipitationIconThreshold
-        )
+    # A flag to check for very light precipitation, which would be described as "possible"
+    isPossible = False
+    if precipitationType in ["rain", "none"] and (
+        (0 < rainAccumulation < precipitationIconThreshold)
         or (
-            precipitationIntensity > 0
-            and precipitationIntensity
-            < ICON_THRESHOLDS["hourly_precipitation_accumulation"]
-        )
-        or (precipitationType == "snow" and 0 < snowAccumulation < snowIconThreshold)
-        or (
-            precipitationIntensity > 0
-            and precipitationIntensity < ICON_THRESHOLDS["hourly_snow_accumulation"]
-        )
-        or (
-            precipitationType in ["sleet", "ice", "hail"]
-            and 0 < iceAccumulation < precipitationIconThreshold
-        )
-        or (
-            precipitationIntensity > 0
-            and precipitationIntensity
+            0
+            < precipitationIntensity
             < ICON_THRESHOLDS["hourly_precipitation_accumulation"]
         )
     ):
+        isPossible = True
+    elif precipitationType == "snow" and (
+        (0 < snowAccumulation < snowIconThreshold)
+        or (0 < precipitationIntensity < ICON_THRESHOLDS["hourly_snow_accumulation"])
+    ):
+        isPossible = True
+    elif precipitationType in ["sleet", "ice", "hail"] and (
+        (0 < iceAccumulation < precipitationIconThreshold)
+        or (
+            0
+            < precipitationIntensity
+            < ICON_THRESHOLDS["hourly_precipitation_accumulation"]
+        )
+    ):
+        isPossible = True
+
+    # Determine if "possible" prefix should be used based on low probability or very light precip
+    if pop < PRECIP_PROBABILITY_THRESHOLD or isPossible:
         possiblePrecipitation = "possible-"
 
     # Check for multiple precipitation types
+
     numTypes = sum(
         [
             1
@@ -222,22 +383,34 @@ def calculate_precipitation(
         possiblePrecipitation = ""
 
     # Set icon based on precipitation type and thresholds
+    isSignificantRain = (
+        rainAccumulation > precipitationIconThreshold
+        and precipitationIntensity
+        > ICON_THRESHOLDS["hourly_precipitation_accumulation"]
+    )
+    isSignificantSnow = (
+        snowAccumulation >= snowIconThreshold
+        and precipitationIntensity > ICON_THRESHOLDS["hourly_snow_accumulation"]
+    )
+    isSignificantIce = (
+        iceAccumulation >= precipitationIconThreshold
+        and precipitationIntensity
+        > ICON_THRESHOLDS["hourly_precipitation_accumulation"]
+    )
+    isMixedPrecipitation = (
+        totalPrecipitation >= precipitationIconThreshold and numTypes > 1
+    )
+
+    print(isSignificantRain)
+    print(isSignificantSnow)
+    print(isSignificantIce)
+    print(isMixedPrecipitation)
+
     if pop >= PRECIP_PROBABILITY_THRESHOLD and (
-        (
-            rainAccumulation > precipitationIconThreshold
-            and precipitationIntensity
-            > ICON_THRESHOLDS["hourly_precipitation_accumulation"]
-        )
-        or (
-            snowAccumulation >= snowIconThreshold
-            and precipitationIntensity > ICON_THRESHOLDS["hourly_snow_accumulation"]
-        )
-        or (
-            iceAccumulation >= precipitationIconThreshold
-            and precipitationIntensity
-            > ICON_THRESHOLDS["hourly_precipitation_accumulation"]
-        )
-        or (totalPrecipitation >= precipitationIconThreshold and numTypes > 1)
+        isSignificantRain
+        or isSignificantSnow
+        or isSignificantIce
+        or isMixedPrecipitation
     ):
         if precipitationType == "none":
             currentIcon = "rain"
@@ -246,212 +419,103 @@ def calculate_precipitation(
         else:
             currentIcon = precipitationType
 
+    print(rainAccumulation)
+
     # Determine summary text and specific icons
     if (
         rainAccumulation > 0
         and precipitationIntensity > 0
         and precipitationType == "rain"
     ):
-        if precipitationIntensity < lightPrecipThreshold:
-            currentText = possiblePrecipitation + "very-light-rain"
-            if iconSet == "pirate":
-                currentIcon = (
-                    "drizzle"
-                    if possiblePrecipitation == ""
-                    else f"possible-rain-{'day' if isDayTime else 'night'}"
-                )
-        elif lightPrecipThreshold <= precipitationIntensity < midPrecipThreshold:
-            currentText = possiblePrecipitation + "light-rain"
-            if iconSet == "pirate":
-                currentIcon = (
-                    "light-rain"
-                    if possiblePrecipitation == ""
-                    else f"possible-rain-{'day' if isDayTime else 'night'}"
-                )
-        elif midPrecipThreshold <= precipitationIntensity < heavyPrecipThreshold:
-            currentText = possiblePrecipitation + "medium-rain"
-            if iconSet == "pirate" and possiblePrecipitation != "":
-                currentIcon = f"possible-rain-{'day' if isDayTime else 'night'}"
-        else:
-            currentText = possiblePrecipitation + "heavy-rain"
-            if iconSet == "pirate":
-                currentIcon = (
-                    "heavy-rain"
-                    if possiblePrecipitation == ""
-                    else f"possible-rain-{'day' if isDayTime else 'night'}"
-                )
-        if (
-            summaryType in ["minute", "week"]
-            and precipitationIntensity < heavyPrecipThreshold
-            and rainAccumulation >= heavyPrecipThreshold
-        ):
-            currentText = ["and", "medium-rain", "possible-heavy-rain"]
-
+        currentText, currentIcon = _get_precip_text_and_icon_for_type(
+            "rain",
+            precipitationIntensity,
+            PRECIPITATION_INTENSITY_THRESHOLDS,
+            possiblePrecipitation,
+            iconSet,
+            isDayTime,
+            summaryType,
+            avgPrecipitation,
+            precipitationAccumUnit,
+            rainAccumulation,
+        )
     elif (
         snowAccumulation > 0
         and precipitationIntensity > 0
         and precipitationType == "snow"
     ):
-        if precipitationIntensity < lightSnowThreshold:
-            currentText = possiblePrecipitation + "very-light-snow"
-            if iconSet == "pirate":
-                currentIcon = (
-                    "flurries"
-                    if possiblePrecipitation == ""
-                    else f"possible-snow-{'day' if isDayTime else 'night'}"
-                )
-        elif lightSnowThreshold <= precipitationIntensity < midSnowThreshold:
-            currentText = possiblePrecipitation + "light-snow"
-            if iconSet == "pirate":
-                currentIcon = (
-                    "light-snow"
-                    if possiblePrecipitation == ""
-                    else f"possible-snow-{'day' if isDayTime else 'night'}"
-                )
-        elif midSnowThreshold <= precipitationIntensity < heavySnowThreshold:
-            currentText = possiblePrecipitation + "medium-snow"
-            if iconSet == "pirate" and possiblePrecipitation != "":
-                currentIcon = f"possible-snow-{'day' if isDayTime else 'night'}"
-        else:
-            currentText = possiblePrecipitation + "heavy-snow"
-            if iconSet == "pirate":
-                currentIcon = (
-                    "heavy-snow"
-                    if possiblePrecipitation == ""
-                    else f"possible-snow-{'day' if isDayTime else 'night'}"
-                )
-        if (
-            summaryType in ["week", "hourly"]
-            and avgPrecipitation
-            < (heavySnowThreshold - (0.66 * precipitationAccumUnit))
-            and precipitationIntensity >= heavySnowThreshold
-        ):
-            currentText = ["and", "medium-snow", "possible-heavy-snow"]
-
+        currentText, currentIcon = _get_precip_text_and_icon_for_type(
+            "snow",
+            precipitationIntensity,
+            SNOW_INTENSITY_THRESHOLDS,
+            possiblePrecipitation,
+            iconSet,
+            isDayTime,
+            summaryType,
+            avgPrecipitation,
+            precipitationAccumUnit,
+            snowAccumulation,
+        )
     elif (
         iceAccumulation > 0
         and precipitationIntensity > 0
         and precipitationType == "sleet"
     ):
-        if precipitationIntensity < lightPrecipThreshold:
-            currentText = possiblePrecipitation + "very-light-sleet"
-            if iconSet == "pirate":
-                currentIcon = (
-                    "very-light-sleet"
-                    if possiblePrecipitation == ""
-                    else f"possible-sleet-{'day' if isDayTime else 'night'}"
-                )
-        elif lightPrecipThreshold <= precipitationIntensity < midPrecipThreshold:
-            currentText = possiblePrecipitation + "light-sleet"
-            if iconSet == "pirate":
-                currentIcon = (
-                    "light-sleet"
-                    if possiblePrecipitation == ""
-                    else f"possible-sleet-{'day' if isDayTime else 'night'}"
-                )
-        elif midPrecipThreshold <= precipitationIntensity < heavyPrecipThreshold:
-            currentText = possiblePrecipitation + "medium-sleet"
-            if iconSet == "pirate" and possiblePrecipitation != "":
-                currentIcon = f"possible-sleet-{'day' if isDayTime else 'night'}"
-        else:
-            currentText = possiblePrecipitation + "heavy-sleet"
-            if iconSet == "pirate":
-                currentIcon = (
-                    "heavy-sleet"
-                    if possiblePrecipitation == ""
-                    else f"possible-sleet-{'day' if isDayTime else 'night'}"
-                )
-        if (
-            summaryType in ["week", "hourly"]
-            and avgPrecipitation < (heavyPrecipThreshold - (2 * precipitationAccumUnit))
-            and precipitationIntensity >= heavyPrecipThreshold
-        ):
-            currentText = ["and", "medium-sleet", "possible-heavy-sleet"]
-
+        currentText, currentIcon = _get_precip_text_and_icon_for_type(
+            "sleet",
+            precipitationIntensity,
+            PRECIPITATION_INTENSITY_THRESHOLDS,
+            possiblePrecipitation,
+            iconSet,
+            isDayTime,
+            summaryType,
+            avgPrecipitation,
+            precipitationAccumUnit,
+            iceAccumulation,
+        )
     elif (
         iceAccumulation > 0
         and precipitationIntensity > 0
         and precipitationType == "ice"
     ):
-        if precipitationIntensity < lightPrecipThreshold:
-            currentText = possiblePrecipitation + "very-light-freezing-rain"
-            if iconSet == "pirate":
-                currentIcon = (
-                    "freezing-drizzle"
-                    if possiblePrecipitation == ""
-                    else f"possible-freezing-rain-{'day' if isDayTime else 'night'}"
-                )
-        elif lightPrecipThreshold <= precipitationIntensity < midPrecipThreshold:
-            currentText = possiblePrecipitation + "light-freezing-rain"
-            if iconSet == "pirate":
-                currentIcon = (
-                    "light-freezing-rain"
-                    if possiblePrecipitation == ""
-                    else f"possible-freezing-rain-{'day' if isDayTime else 'night'}"
-                )
-        elif midPrecipThreshold <= precipitationIntensity < heavyPrecipThreshold:
-            currentText = possiblePrecipitation + "medium-freezing-rain"
-            if iconSet == "pirate" and possiblePrecipitation != "":
-                currentIcon = (
-                    f"possible-freezing-rain-{'day' if isDayTime else 'night'}"
-                )
-        else:
-            currentText = possiblePrecipitation + "heavy-rain"
-            if iconSet == "pirate":
-                currentIcon = (
-                    "heavy-freezing-rain"
-                    if possiblePrecipitation == ""
-                    else f"possible-freezing-rain-{'day' if isDayTime else 'night'}"
-                )
-        if (
-            summaryType in ["week", "hourly"]
-            and avgPrecipitation < (heavyPrecipThreshold - (2 * precipitationAccumUnit))
-            and precipitationIntensity >= heavyPrecipThreshold
-        ):
-            currentText = [
-                "and",
-                "medium-freezing-rain",
-                "possible-heavy-freezing-rain",
-            ]
-
+        currentText, currentIcon = _get_precip_text_and_icon_for_type(
+            "ice",  # Use "ice" as the internal type for freezing-rain
+            precipitationIntensity,
+            PRECIPITATION_INTENSITY_THRESHOLDS,
+            possiblePrecipitation,
+            iconSet,
+            isDayTime,
+            summaryType,
+            avgPrecipitation,
+            precipitationAccumUnit,
+            iceAccumulation,
+        )
     elif (
         iceAccumulation > 0
         and precipitationIntensity > 0
         and precipitationType == "hail"
     ):
         currentText = possiblePrecipitation + "hail"
-
+        # Original code did not set currentIcon for hail here, so leaving it as is.
+        # If a default icon is desired for hail, it should be set here.
     elif (
         rainAccumulation > 0
         or snowAccumulation > 0
         or iceAccumulation > 0
         or precipitationIntensity > 0
     ) and precipitationType == "none":
-        if precipitationIntensity < lightPrecipThreshold:
-            currentText = possiblePrecipitation + "very-light-precipitation"
-        elif lightPrecipThreshold <= precipitationIntensity < midPrecipThreshold:
-            currentText = possiblePrecipitation + "light-precipitation"
-        elif midPrecipThreshold <= precipitationIntensity < heavyPrecipThreshold:
-            currentText = possiblePrecipitation + "medium-precipitation"
-        else:
-            currentText = possiblePrecipitation + "heavy-precipitation"
-        if (
-            summaryType in ["week", "hourly"]
-            and avgPrecipitation < (heavyPrecipThreshold - (2 * precipitationAccumUnit))
-            and precipitationIntensity >= heavyPrecipThreshold
-        ):
-            currentText = [
-                "and",
-                "medium-precipitation",
-                "possible-heavy-precipitation",
-            ]
-
-        if iconSet == "pirate":
-            currentIcon = (
-                "precipitation"
-                if possiblePrecipitation == ""
-                else f"possible-precipitation-{'day' if isDayTime else 'night'}"
-            )
+        currentText, currentIcon = _get_precip_text_and_icon_for_type(
+            "none",
+            precipitationIntensity,
+            PRECIPITATION_INTENSITY_THRESHOLDS,
+            possiblePrecipitation,
+            iconSet,
+            isDayTime,
+            summaryType,
+            avgPrecipitation,
+            precipitationAccumUnit,
+            0,  # Accumulation is not directly used for 'none' type in this helper
+        )
 
     if mode == "summary":
         return currentText
