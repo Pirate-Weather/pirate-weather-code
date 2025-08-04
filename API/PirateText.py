@@ -2,14 +2,14 @@
 import numpy as np
 
 from PirateTextHelper import (
-    calculate_precipitation,
-    calculate_wind_text,
-    calculate_vis_text,
-    calculate_sky_text,
-    humidity_sky_text,
-    calculate_thunderstorm_text,
-    MISSING_DATA,
     DEFAULT_VALUES,
+    MISSING_DATA,
+    calculate_precipitation,
+    calculate_sky_text,
+    calculate_thunderstorm_text,
+    calculate_visibility_text,
+    calculate_wind_text,
+    humidity_sky_text,
 )
 
 
@@ -110,7 +110,7 @@ def calculate_text(
         "both",
     )
     windText, windIcon = calculate_wind_text(wind, windUnit, icon, "both")
-    visText, visIcon = calculate_vis_text(
+    visText, visIcon = calculate_visibility_text(
         vis, visUnits, tempUnits, temp, dewPoint, smoke, icon, "both"
     )
     thuText, thuIcon = calculate_thunderstorm_text(liftedIndex, cape, "both")

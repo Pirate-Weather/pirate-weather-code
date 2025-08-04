@@ -3,12 +3,12 @@ import math
 import numpy as np
 
 from PirateTextHelper import (
-    calculate_precipitation,
-    calculate_wind_text,
-    calculate_visibility_text,
-    calculate_sky_text,
-    humidity_sky_text,
     DEFAULT_VALUES,
+    calculate_precipitation,
+    calculate_sky_text,
+    calculate_visibility_text,
+    calculate_wind_text,
+    humidity_sky_text,
 )
 
 # Constants for thresholds

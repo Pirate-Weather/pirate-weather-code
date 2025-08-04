@@ -1,9 +1,9 @@
 """Script to contain the functions that can be used to generate the minutely text summary of the forecast data for Pirate Weather"""
 
 from PirateTextHelper import (
+    calculate_consecutive_indexes,
     calculate_precipitation,
     MISSING_DATA,
-    calculate_consecutive_indexes,
 )
 
 # Hour Constants
