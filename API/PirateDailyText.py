@@ -1094,8 +1094,8 @@ def calculate_day_text(
 
     total_precip_accum = total_rain_accum + total_snow_accum + total_sleet_accum
     # Constants for precipitation accumulation thresholds
-    MAJOR_RAIN_ACCUMULATION = (ICON_THRESHOLDS["daily_precipitation_accumulation"] * 10)
-    MAJOR_SNOW_ACCUMULATION = (ICON_THRESHOLDS["daily_snow_accumulation"] * 0.5)
+    MAJOR_RAIN_ACCUMULATION = ICON_THRESHOLDS["daily_precipitation_accumulation"] * 10
+    MAJOR_SNOW_ACCUMULATION = ICON_THRESHOLDS["daily_snow_accumulation"] * 0.5
     MAJOR_SLEET_ACCUMULATION = 1
 
     # Calculate overall precipitation text and icon if significant precipitation occurs
@@ -1119,7 +1119,9 @@ def calculate_day_text(
             secondary_precip_condition = "medium-snow"
         elif present_precip_types:
             # Sort by accumulation to find the primary and secondary types.
-            sorted_precip = sorted(present_precip_types.items(), key=lambda item: item[1], reverse=True)
+            sorted_precip = sorted(
+                present_precip_types.items(), key=lambda item: item[1], reverse=True
+            )
             most_common_overall_precip_type = sorted_precip[0][0]
 
             if len(sorted_precip) > 1:
@@ -1127,13 +1129,22 @@ def calculate_day_text(
 
         # Promote to stronger precipitation type if significant accumulation is forecast,
         # and update the secondary condition accordingly.
-        if total_rain_accum > (MAJOR_RAIN_ACCUMULATION * precip_accum_unit) and most_common_overall_precip_type != "rain":
+        if (
+            total_rain_accum > (MAJOR_RAIN_ACCUMULATION * precip_accum_unit)
+            and most_common_overall_precip_type != "rain"
+        ):
             secondary_precip_condition = f"medium-{most_common_overall_precip_type}"
             most_common_overall_precip_type = "rain"
-        elif total_snow_accum > (MAJOR_SNOW_ACCUMULATION * precip_accum_unit) and most_common_overall_precip_type != "snow":
+        elif (
+            total_snow_accum > (MAJOR_SNOW_ACCUMULATION * precip_accum_unit)
+            and most_common_overall_precip_type != "snow"
+        ):
             secondary_precip_condition = f"medium-{most_common_overall_precip_type}"
             most_common_overall_precip_type = "snow"
-        elif total_sleet_accum > (MAJOR_SLEET_ACCUMULATION * precip_accum_unit) and most_common_overall_precip_type != "sleet":
+        elif (
+            total_sleet_accum > (MAJOR_SLEET_ACCUMULATION * precip_accum_unit)
+            and most_common_overall_precip_type != "sleet"
+        ):
             secondary_precip_condition = f"medium-{most_common_overall_precip_type}"
             most_common_overall_precip_type = "sleet"
 
