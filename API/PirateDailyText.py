@@ -2,23 +2,16 @@ import datetime
 import math
 from dateutil import tz
 from PirateTextHelper import (
-    calculate_precip_text,
+    calculate_precipitation,
     calculate_wind_text,
-    calculate_vis_text,
     calculate_sky_icon,
+    calculate_visibility_text,
     humidity_sky_text,
-    Most_Common,
-    # Import shared cloud cover constants
-    cloudyThreshold,  # Use shared
-    mostlyCloudyThreshold,  # Use shared
-    partlyCloudyThreshold,  # Use shared
-    mostlyClearThreshold,  # Use shared
-    # Import shared precipitation thresholds
-    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
-    DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
-    DEFAULT_VISIBILITY,
-    DEFAULT_POP,
+    most_common,
+    ICON_THRESHOLDS,
+    DEFAULT_VALUES,
     MISSING_DATA,
+    CLOUD_COVER_THRESHOLDS,
 )
 
 DEFAULT_HUMIDITY = 0.5
@@ -36,13 +29,13 @@ def calculate_cloud_text(cloud_cover):
         - cloud_text (str): The textual representation of the cloud cover.
         - cloud_level (int): The level of the cloud cover (0-4).
     """
-    if cloud_cover > cloudyThreshold:
+    if cloud_cover > CLOUD_COVER_THRESHOLDS["cloudy"]:
         return "heavy-clouds", 4
-    elif cloud_cover > mostlyCloudyThreshold:
+    elif cloud_cover > CLOUD_COVER_THRESHOLDS["mostly_cloudy"]:
         return "medium-clouds", 3
-    elif cloud_cover > partlyCloudyThreshold:
+    elif cloud_cover > CLOUD_COVER_THRESHOLDS["partly_cloudy"]:
         return "light-clouds", 2
-    elif cloud_cover > mostlyClearThreshold:
+    elif cloud_cover > CLOUD_COVER_THRESHOLDS["mostly_clear"]:
         return "very-light-clouds", 1
     else:
         return "clear", 0
@@ -822,9 +815,9 @@ def calculate_day_text(
     for idx, hour in enumerate(hours):
         # Provide default values for missing data (timemachine)
         hour.setdefault("humidity", DEFAULT_HUMIDITY)
-        hour.setdefault("visibility", DEFAULT_VISIBILITY)
+        hour.setdefault("visibility", DEFAULT_VALUES["visibility"] * vis_units)
         hour.setdefault("precipIntensityError", 0)
-        hour.setdefault("precipProbability", DEFAULT_POP)
+        hour.setdefault("precipProbability", DEFAULT_VALUES["pop"])
         hour.setdefault("smoke", 0.0)
         # Set dewPoint to temperature if missing, resulting in no spread
         hour.setdefault("dewPoint", hour["temperature"])
@@ -877,7 +870,7 @@ def calculate_day_text(
             ):
                 period_data["num_hours_dry"] += 1
             if (
-                calculate_vis_text(
+                calculate_visibility_text(
                     hour["visibility"],
                     vis_units,
                     temp_units,
@@ -1032,7 +1025,7 @@ def calculate_day_text(
 
     if cloud_levels:
         # Step 1: Get the most common cloud level across all periods
-        most_common_cloud_level_value = Most_Common(
+        most_common_cloud_level_value = most_common(
             cloud_levels
         )  # This is the numerical level (0-4)
         for idx, level in enumerate(cloud_levels):
@@ -1090,7 +1083,7 @@ def calculate_day_text(
 
     # Determine the most common precipitation type for overall summary
     most_common_overall_precip_type = (
-        Most_Common(overall_most_common_precip)
+        most_common(overall_most_common_precip)
         if overall_most_common_precip
         else "none"
     )
@@ -1152,14 +1145,20 @@ def calculate_day_text(
             # Promote to stronger precip if significant accumulation is forecast
             if (
                 total_rain_accum
-                > ((DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * 10) * precip_accum_unit)
+                > (
+                    (ICON_THRESHOLDS["daily_precipitation_accumulation"] * 10)
+                    * precip_accum_unit
+                )
                 and most_common_overall_precip_type != "rain"
             ):
                 secondary_precip_condition = "medium-" + most_common_overall_precip_type
                 most_common_overall_precip_type = "rain"
             if (
                 total_snow_accum
-                > ((DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * 0.5) * precip_accum_unit)
+                > (
+                    (ICON_THRESHOLDS["daily_snow_accumulation"] * 0.5)
+                    * precip_accum_unit
+                )
                 and most_common_overall_precip_type != "snow"
             ):
                 secondary_precip_condition = "medium-" + most_common_overall_precip_type
@@ -1172,7 +1171,7 @@ def calculate_day_text(
                 most_common_overall_precip_type = "sleet"
 
         # Calculate final precipitation text and icon
-        precip_summary_text, precip_icon = calculate_precip_text(
+        precip_summary_text, precip_icon = calculate_precipitation(
             overall_max_intensity,
             precip_accum_unit,
             most_common_overall_precip_type,
@@ -1254,7 +1253,7 @@ def calculate_day_text(
             precip_periods and precip_periods[0] == 0
         ):  # If precip occurs in the first period
             # But the very first hour forecast doesn't have it
-            curr_precip_text_for_first_hour = calculate_precip_text(
+            curr_precip_text_for_first_hour = calculate_precipitation(
                 hours[0]["precipIntensity"],
                 precip_accum_unit,
                 hours[0]["precipType"],
@@ -1274,8 +1273,8 @@ def calculate_day_text(
         # Check visibility (fog)
         if vis_periods and vis_periods[0] == 0:
             if (
-                calculate_vis_text(
-                    hours[0].get("visibility", DEFAULT_VISIBILITY),
+                calculate_visibility_text(
+                    hours[0].get("visibility", DEFAULT_VALUES["visibility"]),
                     vis_units,
                     temp_units,
                     hours[0].get("temperature", MISSING_DATA),
@@ -1399,7 +1398,7 @@ def calculate_day_text(
     if has_vis:
         vis_only_summary, _, _, _, _ = calculate_period_summary_text(
             vis_periods,
-            calculate_vis_text(
+            calculate_visibility_text(
                 overall_min_visibility,
                 vis_units,
                 temp_units,
@@ -1528,7 +1527,7 @@ def calculate_day_text(
                 "all_day": is_vis_all_day,
                 "start_idx": vis_periods[0] if vis_periods else -1,
                 "text": vis_only_summary,
-                "icon": calculate_vis_text(
+                "icon": calculate_visibility_text(
                     overall_min_visibility,
                     vis_units,
                     temp_units,

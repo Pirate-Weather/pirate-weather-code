@@ -3,12 +3,27 @@ import math
 import numpy as np
 
 from PirateTextHelper import (
-    calculate_precip_text,
+    calculate_precipitation,
     calculate_wind_text,
-    calculate_vis_text,
+    calculate_visibility_text,
     calculate_sky_text,
     humidity_sky_text,
+    DEFAULT_VALUES,
 )
+
+# Constants for thresholds
+RAIN_THRESHOLD_MM = 10
+SNOW_ACCUMULATION_THRESHOLD = 10
+SNOW_THRESHOLD_MM = 5
+ICE_THRESHOLD_MM = 1
+PRECIP_ACCUMULATION_THRESHOLD = 0.01
+LIGHT_ACCUMULATION_THRESHOLD = 0
+SNOW_ERROR_DIVISOR = 2
+DAY_LENGTH = 24
+MEASUREMENT_CENTIMETERS = 0.1
+MIN_POP_THRESHOLD = 0
+MAX_PRECIP_TYPES = 3
+SNOW_LESS_THAN_ACCUM_MM = 1
 
 
 def calculate_simple_day_text(
@@ -50,118 +65,60 @@ def calculate_simple_day_text(
     precipType = hourObject["precipType"]
     cloudCover = hourObject["cloudCover"]
     wind = hourObject["windSpeed"]
-    humidity = hourObject["humidity"]
 
-    if "precipProbability" in hourObject or hourObject["precipProbability"] != -999:
-        pop = hourObject["precipProbability"]
-    else:
-        pop = 1
+    pop = hourObject.get("precipProbability", DEFAULT_VALUES["pop"])
+    temp = hourObject.get("temperature", hourObject.get("temperatureHigh"))
+    vis = hourObject.get("visibility", DEFAULT_VALUES["visibility"] * visUnits)
+    # If time machine, no humidity data, so set to nan
+    humidity = hourObject.get("humidity", np.nan)
+    prepIntensityMax = hourObject.get("precipIntensityMax", totalPrep / DAY_LENGTH)
 
-    if "temperature" in hourObject:
-        temp = hourObject["temperature"]
-    else:
-        temp = hourObject["temperatureHigh"]
+    if pop > MIN_POP_THRESHOLD and totalPrep >= (
+        PRECIP_ACCUMULATION_THRESHOLD * prepAccumUnit
+    ):
+        # Determine which precipitation types are present
+        presentPrecipTypes = {}
+        if rainPrep > LIGHT_ACCUMULATION_THRESHOLD:
+            presentPrecipTypes["rain"] = rainPrep
+        if snowPrep > LIGHT_ACCUMULATION_THRESHOLD:
+            presentPrecipTypes["snow"] = snowPrep
+        if icePrep > LIGHT_ACCUMULATION_THRESHOLD:
+            presentPrecipTypes["sleet"] = icePrep
 
-    if "visibility" in hourObject:
-        vis = hourObject["visibility"]
-    else:
-        vis = 10000
-
-    # If time machine, no humidity data, so set to 50
-    if "humidity" not in hourObject:
-        humidity = np.nan
-    else:
-        humidity = hourObject["humidity"]
-
-    if "precipIntensityMax" in hourObject:
-        prepIntensityMax = hourObject["precipIntensityMax"]
-    else:
-        prepIntensityMax = totalPrep / 24
-
-    # Only calculate the precipitation text if there is any possibility of precipitation > 0
-    if pop > 0 and totalPrep >= (0.01 * prepAccumUnit):
-        # Check if there is rain, snow and ice accumulation for the day
-        if snowPrep > 0 and rainPrep > 0 and icePrep > 0:
-            # If there is then used the mixed precipitation text and set the icon/type to sleet. Set the secondary condition to snow so the totals can be in the summary
+        # If all three major types are present, it's mixed precipitation
+        if len(presentPrecipTypes) == MAX_PRECIP_TYPES:
             precipText = "mixed-precipitation"
             precipType = "sleet"
-            precipIcon = calculate_precip_text(
-                prepIntensityMax,
-                prepAccumUnit,
-                precipType,
-                "day",
-                rainPrep,
-                snowPrep,
-                icePrep,
-                pop,
-                icon,
-                "icon",
-            )
             secondary = "medium-snow"
         else:
-            # Otherwise check if we have any snow accumulation
-            if snowPrep > 0:
-                # If we do check if we have rain. If there is more snow than rain then set rain as the secondary condition
-                if rainPrep > 0 and snowPrep > rainPrep:
-                    precipType = "snow"
-                    secondary = "medium-rain"
-                # If we do check if we have rain. If there is more rain than snow then set snow as the secondary condition
-                elif rainPrep > 0 and snowPrep < rainPrep:
-                    precipType = "rain"
-                    secondary = "medium-snow"
-                # If we do check if we have ice. If there is more snow than ice then set ice as the secondary condition
-                elif icePrep > 0 and snowPrep > icePrep:
-                    precipType = "snow"
-                    secondary = "medium-sleet"
-                # If we do check if we have ice. If there is more ice than snow then set snow as the secondary condition
-                elif icePrep > 0 and snowPrep < icePrep:
-                    precipType = "sleet"
-                    secondary = "medium-snow"
-            # Otherwise check if we have any ice accumulation
-            elif icePrep > 0:
-                # If we do check if we have rain. If there is more rain than ice then set ice as the secondary condition
-                if rainPrep > 0 and rainPrep > icePrep:
-                    precipType = "rain"
-                    secondary = "medium-sleet"
-                # If we do check if we have ice. If there is more ice than rain then set rain as the secondary condition
-                elif rainPrep > 0 and rainPrep < icePrep:
-                    precipType = "rain"
-                    secondary = "medium-sleet"
+            # Determine the primary precipitation type based on accumulation
+            # and set a secondary type if another is present
+            sortedPrecip = sorted(
+                presentPrecipTypes.items(), key=lambda item: item[1], reverse=True
+            )
 
-            # If the type is snow but there is no snow accumulation check if there is rain/sleet
-            if snowPrep == 0 and precipType == "snow":
-                if rainPrep > 0:
-                    precipType = "rain"
-                elif icePrep > 0:
-                    precipType = "sleet"
-            # If the type is rain but there is no rain accumulation check if there is snow/sleet
-            elif rainPrep == 0 and precipType == "rain":
-                if snowPrep > 0:
-                    precipType = "snow"
-                elif icePrep > 0:
-                    precipType = "sleet"
-            # If the type is sleet but there is no sleet accumulation check if there is rain/snow
-            elif icePrep == 0 and precipType == "sleet":
-                if snowPrep > 0:
-                    precipType = "snow"
-                elif rainPrep > 0:
-                    precipType = "rain"
+            if sortedPrecip:
+                precipType = sortedPrecip[0][0]
+                if len(sortedPrecip) > 1:
+                    secondaryType = sortedPrecip[1][0]
+                    secondary = f"medium-{secondaryType}"
 
-            # If more than 10 mm of rain is forecast, then rain
-            if rainPrep > (10 * prepAccumUnit) and precipType != "rain":
-                secondary = "medium-" + precipType
+            # Override primary precipType based on specific accumulation thresholds
+            if rainPrep > (RAIN_THRESHOLD_MM * prepAccumUnit) and precipType != "rain":
+                secondary = f"medium-{precipType}" if precipType else None
                 precipType = "rain"
-            # If more than 5 mm of snow is forecast, then snow
-            if snowPrep > (5 * prepAccumUnit) and precipType != "snow":
-                secondary = "medium-" + precipType
+            elif (
+                snowPrep > (SNOW_THRESHOLD_MM * prepAccumUnit) and precipType != "snow"
+            ):
+                secondary = f"medium-{precipType}" if precipType else None
                 precipType = "snow"
-            # Else, if more than 1 mm of ice is forecast, then ice
-            if icePrep > (1 * prepAccumUnit) and precipType != "sleet":
-                secondary = "medium-" + precipType
+            elif icePrep > (ICE_THRESHOLD_MM * prepAccumUnit) and precipType != "sleet":
+                secondary = f"medium-{precipType}" if precipType else None
                 precipType = "sleet"
 
-            # Calculate the precipitation text and summary
-            precipText, precipIcon = calculate_precip_text(
+        # Calculate the final precipitation text and summary
+        if precipType:
+            precipText, precipIcon = calculate_precipitation(
                 prepIntensityMax,
                 prepAccumUnit,
                 precipType,
@@ -177,62 +134,62 @@ def calculate_simple_day_text(
     if secondary == "medium-none":
         secondary = "medium-precipitation"
 
-    # If we have only snow or if snow is the secondary condition then calculate the accumulation range
-    if snowPrep > (10 * prepAccumUnit) or secondary == "medium-snow":
-        # GEFS accumulation error seems to always be equal to the accumulation so use half of the accumulation as the range
-        snowLowAccum = math.floor(snowPrep - (snowPrep / 2))
-        snowMaxAccum = math.ceil(snowPrep + (snowPrep / 2))
+    # Check if snow accumulation is significant or if it's the secondary condition
+    snowSentence = None
+    if (
+        snowPrep > (SNOW_ACCUMULATION_THRESHOLD * prepAccumUnit)
+        or secondary == "medium-snow"
+    ):
+        # Calculate the accumulation range
+        snowLowAccum = math.floor(snowPrep - (snowPrep / SNOW_ERROR_DIVISOR))
+        snowMaxAccum = math.ceil(snowPrep + (snowPrep / SNOW_ERROR_DIVISOR))
 
-        # If the snow accumulation is below 0; set it to 0
-        if snowLowAccum < 0:
-            snowLowAccum = 0
+        # Ensure the lower bound is not negative
+        snowLowAccum = max(LIGHT_ACCUMULATION_THRESHOLD, snowLowAccum)
 
-        # Check to see if there is any snow accumulation and if so calculate the sentence to use when creating the precipitation summaries
-        if snowMaxAccum > 0:
-            # If there is no accumulation then show the accumulation as < 1 cm/in
-            if snowPrep == 0:
+        # Determine the snow accumulation sentence based on the calculated range
+        if snowMaxAccum > LIGHT_ACCUMULATION_THRESHOLD:
+            if snowPrep == LIGHT_ACCUMULATION_THRESHOLD:
+                # If no accumulation, show as < 1
                 snowSentence = [
                     "less-than",
-                    ["centimeters" if prepAccumUnit == 0.1 else "inches", 1],
+                    [
+                        "centimeters"
+                        if prepAccumUnit == MEASUREMENT_CENTIMETERS
+                        else "inches",
+                        SNOW_LESS_THAN_ACCUM_MM,
+                    ],
                 ]
-            # If the lower accumulation range is 0 then show accumulation as < max range cm/in
             elif snowLowAccum == 0:
+                # If lower range is 0, show as < max
                 snowSentence = [
                     "less-than",
                     [
-                        "centimeters" if prepAccumUnit == 0.1 else "inches",
+                        "centimeters"
+                        if prepAccumUnit == MEASUREMENT_CENTIMETERS
+                        else "inches",
                         snowMaxAccum,
                     ],
                 ]
-            # Otherwise show the range
             else:
+                # Otherwise, show the full range
                 snowSentence = [
-                    "centimeters" if prepAccumUnit == 0.1 else "inches",
-                    [
-                        "range",
-                        snowLowAccum,
-                        snowMaxAccum,
-                    ],
+                    "centimeters"
+                    if prepAccumUnit == MEASUREMENT_CENTIMETERS
+                    else "inches",
+                    ["range", snowLowAccum, snowMaxAccum],
                 ]
 
-    # If we have more than 1 cm of snow show the parenthetical or snow is the secondary condition
+    # If a snow sentence was generated, apply it to the summary text
     if snowSentence is not None:
-        # If precipitation is only show then generate the parenthetical text
         if precipType == "snow":
-            precipText = [
-                "parenthetical",
-                precipText,
-                snowSentence,
-            ]
-        # Otherwise if its a secondary condition then generate the text using the main condition
+            # If snow is the primary precipitation type
+            precipText = ["parenthetical", precipText, snowSentence]
         elif secondary == "medium-snow":
-            snowText = [
-                "parenthetical",
-                precipText,
-                snowSentence,
-            ]
+            # If snow is a secondary condition, create a separate text for it
+            snowText = ["parenthetical", precipText, snowSentence]
 
-    # If we have a secondary condition join them with an and if not snow otherwise use the snow text
+    # Final check for a secondary condition to construct the final text
     if secondary is not None:
         if secondary != "medium-snow":
             precipText = ["and", precipText, secondary]
@@ -240,40 +197,36 @@ def calculate_simple_day_text(
             precipText = snowText
 
     windText, windIcon = calculate_wind_text(wind, windUnit, icon, "both")
-    visText, visIcon = calculate_vis_text(vis, visUnits, "both")
+    visText, visIcon = calculate_visibility_text(vis, visUnits, "both")
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
     humidityText = humidity_sky_text(temp, tempUnits, humidity)
 
-    if precipText is not None:
-        if windText is not None:
-            cText = ["and", precipText, windText]
-        else:
-            if humidityText is not None:
-                cText = ["and", precipText, humidityText]
-            else:
-                cText = precipText
-    elif visText is not None:
-        if humidityText is not None:
-            cText = ["and", visText, humidityText]
-        else:
-            cText = visText
-    elif windText is not None:
-        if skyText == "clear":
-            cText = windText
-        else:
-            cText = ["and", windText, skyText]
-    elif humidityText is not None:
-        cText = ["and", humidityText, skyText]
-    else:
-        cText = skyText
+    # Determine the primary and secondary text based on weather condition priority
+    primaryText = None
+    secondaryText = None
 
-    if precipIcon is not None:
-        cIcon = precipIcon
-    elif visIcon is not None:
-        cIcon = visIcon
-    elif windIcon is not None:
-        cIcon = windIcon
+    if precipText:
+        primaryText = precipText
+        # Wind text takes priority over humidity as a secondary condition
+        secondaryText = windText or humidityText
+    elif visText:
+        primaryText = visText
+        secondaryText = humidityText
+    elif windText:
+        primaryText = windText
+        # Combine with sky text unless it's clear
+        if skyText != "clear":
+            secondaryText = skyText
+    elif humidityText:
+        primaryText = humidityText
+        secondaryText = skyText
     else:
-        cIcon = skyIcon
+        primaryText = skyText
+
+    # Construct the final summary text
+    cText = ["and", primaryText, secondaryText] if secondaryText else primaryText
+
+    # Determine the icon based on priority
+    cIcon = precipIcon or visIcon or windIcon or skyIcon
 
     return cText, cIcon

@@ -2,15 +2,14 @@
 import numpy as np
 
 from PirateTextHelper import (
-    calculate_precip_text,
+    calculate_precipitation,
     calculate_wind_text,
     calculate_vis_text,
     calculate_sky_text,
     humidity_sky_text,
     calculate_thunderstorm_text,
     MISSING_DATA,
-    DEFAULT_POP,
-    DEFAULT_VISIBILITY,
+    DEFAULT_VALUES,
 )
 
 
@@ -66,9 +65,9 @@ def calculate_text(
 
     # If type is current precipitation probability should always be 1 otherwise if it exists in the hourObject use it otherwise use 1
     if type == "current":
-        pop = DEFAULT_POP
+        pop = DEFAULT_VALUES["pop"]
     else:
-        pop = hourObject.get("precipProbability", DEFAULT_POP)
+        pop = hourObject.get("precipProbability", DEFAULT_VALUES["pop"])
 
     # If temperature exists in the hourObject then use it otherwise use the high temperature
     if "temperature" in hourObject:
@@ -77,7 +76,7 @@ def calculate_text(
         temp = hourObject["temperatureHigh"]
 
     # If visibility exists in the hourObject then use it otherwise use the default
-    vis = hourObject.get("visibility", DEFAULT_VISIBILITY)
+    vis = hourObject.get("visibility", DEFAULT_VALUES["visibility"] * visUnits)
 
     # If liftedIndex exists in the hourObject then use it otherwise -999
     liftedIndex = hourObject.get("liftedIndex", MISSING_DATA)
@@ -98,7 +97,7 @@ def calculate_text(
         return "unavailable", "none"
 
     # Calculate the text/icon for precipitation, wind, visibility, sky cover, humidity and thunderstorms
-    precipText, precipIcon = calculate_precip_text(
+    precipText, precipIcon = calculate_precipitation(
         precipIntensity,
         prepAccumUnit,
         precipType,
