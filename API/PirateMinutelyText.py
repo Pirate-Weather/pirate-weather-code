@@ -380,7 +380,7 @@ def calculate_minutely_text(
             text,
         )
     # If there if the only one precipitation is hail
-    elif iceIndex:
+    elif hailIndex:
         text, cIcon = calculate_precipitation(
             maxIntensity,
             precipIntensityUnit,
