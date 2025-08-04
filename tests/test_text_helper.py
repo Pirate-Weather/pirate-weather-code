@@ -169,6 +169,7 @@ def test_rain_stopping_and_starting():
     assert c_text[3] == ["minutes", 30]  # Starts again 30 minutes later (41 - 11)
     assert c_icon == "rain"
 
+
 def test_no_precipitation_for_week():
     """Test for a weekly summary with no precipitation."""
     icons = ["clear-day"] * 8
@@ -191,7 +192,13 @@ def test_no_precipitation_for_week():
 
 def test_precipitation_one_day_during_week():
     """Test for a weekly summary with precipitation on one day."""
-    precipitationDays = [[0, "monday", {"precipType": "rain", "precipAccumulation": 5, "precipProbability": 0.8}]]
+    precipitationDays = [
+        [
+            0,
+            "monday",
+            {"precipType": "rain", "precipAccumulation": 5, "precipProbability": 0.8},
+        ]
+    ]
     icons = ["clear-day"] * 8
 
     precipSummary, currentIcon = calculate_precip_summary(
@@ -212,8 +219,30 @@ def test_precipitation_one_day_during_week():
 def test_precipitation_over_weekend():
     """Test for a weekly summary with precipitation over the weekend."""
     precipitationDays = [
-        [5, "saturday", {"precipType": "snow", "precipAccumulation": 7, "cape": 100, "liftedIndex": -2, "icon": "snow", "precipProbability": 0.9}],
-        [6, "sunday", {"precipType": "snow", "precipAccumulation": 7, "cape": 100, "liftedIndex": -2, "icon": "snow", "precipProbability": 0.9}],
+        [
+            5,
+            "saturday",
+            {
+                "precipType": "snow",
+                "precipAccumulation": 7,
+                "cape": 100,
+                "liftedIndex": -2,
+                "icon": "snow",
+                "precipProbability": 0.9,
+            },
+        ],
+        [
+            6,
+            "sunday",
+            {
+                "precipType": "snow",
+                "precipAccumulation": 7,
+                "cape": 100,
+                "liftedIndex": -2,
+                "icon": "snow",
+                "precipProbability": 0.9,
+            },
+        ],
     ]
     icons = ["clear-day"] * 8
 
@@ -228,21 +257,56 @@ def test_precipitation_over_weekend():
         icon="darksky",
     )
 
-    assert precipSummary == ['over-weekend', ['and', 'medium-snow', 'possible-heavy-snow']]
+    assert precipSummary == [
+        "over-weekend",
+        ["and", "medium-snow", "possible-heavy-snow"],
+    ]
     assert currentIcon == "snow"
 
 
 def test_precipitation_all_week_same_type():
     """Test for a weekly summary with precipitation every day, same type."""
     precipitationDays = [
-        [0, "monday", {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7}],
-        [1, "tuesday", {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7}],
-        [2, "wednesday", {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7}],
-        [3, "thursday", {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7}],
-        [4, "friday", {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7}],
-        [5, "saturday", {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7}],
-        [6, "sunday", {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7}],
-        [7, "next-monday", {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7}],
+        [
+            0,
+            "monday",
+            {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7},
+        ],
+        [
+            1,
+            "tuesday",
+            {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7},
+        ],
+        [
+            2,
+            "wednesday",
+            {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7},
+        ],
+        [
+            3,
+            "thursday",
+            {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7},
+        ],
+        [
+            4,
+            "friday",
+            {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7},
+        ],
+        [
+            5,
+            "saturday",
+            {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7},
+        ],
+        [
+            6,
+            "sunday",
+            {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7},
+        ],
+        [
+            7,
+            "next-monday",
+            {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7},
+        ],
     ]
     icons = ["clear-day"] * 8
 
@@ -264,14 +328,46 @@ def test_precipitation_all_week_same_type():
 def test_precipitation_all_week_mixed_type():
     """Test for a weekly summary with precipitation every day, mixed type."""
     precipitationDays = [
-        [0, "monday", {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7}],
-        [1, "tuesday", {"precipType": "snow", "precipAccumulation": 3, "precipProbability": 0.7}],
-        [2, "wednesday", {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7}],
-        [3, "thursday", {"precipType": "snow", "precipAccumulation": 3, "precipProbability": 0.7}],
-        [4, "friday", {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7}],
-        [5, "saturday", {"precipType": "snow", "precipAccumulation": 3, "precipProbability": 0.7}],
-        [6, "sunday", {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7}],
-        [7, "next-monday", {"precipType": "snow", "precipAccumulation": 3, "precipProbability": 0.7}],
+        [
+            0,
+            "monday",
+            {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7},
+        ],
+        [
+            1,
+            "tuesday",
+            {"precipType": "snow", "precipAccumulation": 3, "precipProbability": 0.7},
+        ],
+        [
+            2,
+            "wednesday",
+            {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7},
+        ],
+        [
+            3,
+            "thursday",
+            {"precipType": "snow", "precipAccumulation": 3, "precipProbability": 0.7},
+        ],
+        [
+            4,
+            "friday",
+            {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7},
+        ],
+        [
+            5,
+            "saturday",
+            {"precipType": "snow", "precipAccumulation": 3, "precipProbability": 0.7},
+        ],
+        [
+            6,
+            "sunday",
+            {"precipType": "rain", "precipAccumulation": 3, "precipProbability": 0.7},
+        ],
+        [
+            7,
+            "next-monday",
+            {"precipType": "snow", "precipAccumulation": 3, "precipProbability": 0.7},
+        ],
     ]
     icons = ["clear-day"] * 8
 
@@ -305,13 +401,16 @@ def test_calculate_temp_summary_rising():
     highTemp = [7, "next-monday", 24, 0]
     lowTemp = [0, "monday", 10, 0]
 
-    tempSummary = calculate_temp_summary(highTemp=highTemp, lowTemp=lowTemp, weekArray=weekArray)
+    tempSummary = calculate_temp_summary(
+        highTemp=highTemp, lowTemp=lowTemp, weekArray=weekArray
+    )
 
     assert tempSummary == [
         "temperatures-rising",
         ["fahrenheit", 24],
         "next-monday",
     ]
+
 
 def create_hourly_data(hours_config, start_time_epoch, timezone_str="UTC"):
     """
@@ -460,7 +559,10 @@ def test_windy_and_cloudy_all_day():
 
     assert c_icon == "wind"
     # Expected: "Overcast and windy throughout the day."
-    assert summary_text == ["sentence", ["for-day", ["and", "heavy-clouds", "medium-wind"]]]
+    assert summary_text == [
+        "sentence",
+        ["for-day", ["and", "heavy-clouds", "medium-wind"]],
+    ]
 
 
 def test_intermittent_rain():
