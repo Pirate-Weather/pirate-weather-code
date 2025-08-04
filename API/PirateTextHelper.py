@@ -191,8 +191,6 @@ def _get_precip_text_and_icon_for_type(
         intensityThresholds["heavy"],
     )
 
-    print(intensityLevel)
-
     # Determine base text
     if precipType == "ice":  # Special case for "freezing-rain" text
         currentText = f"{possiblePrecipitation}{intensityLevel}-freezing-rain"
@@ -401,11 +399,6 @@ def calculate_precipitation(
         totalPrecipitation >= precipitationIconThreshold and numTypes > 1
     )
 
-    print(isSignificantRain)
-    print(isSignificantSnow)
-    print(isSignificantIce)
-    print(isMixedPrecipitation)
-
     if pop >= PRECIP_PROBABILITY_THRESHOLD and (
         isSignificantRain
         or isSignificantSnow
@@ -418,8 +411,6 @@ def calculate_precipitation(
             currentIcon = "freezing-rain"
         else:
             currentIcon = precipitationType
-
-    print(rainAccumulation)
 
     # Determine summary text and specific icons
     if (
