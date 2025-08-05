@@ -737,7 +737,7 @@ def test_mixed_precip_day_snow_and_sleet():
         "sentence",
         [
             "during",
-            ['parenthetical', 'light-sleet', ['centimeters', 8]],
+            ["parenthetical", "light-sleet", ["centimeters", 8]],
             ["and", "morning", "evening"],
         ],
     ]
@@ -785,9 +785,20 @@ def test_rain_crosses_midnight_hourly_mode():
     [
         (
             50.0,
-            ["parenthetical", ['and', 'medium-snow', 'possible-heavy-snow'], ["centimeters", ["range", 130, 150]]],
+            [
+                "parenthetical",
+                ["and", "medium-snow", "possible-heavy-snow"],
+                ["centimeters", ["range", 130, 150]],
+            ],
         ),  # With range
-        (0.0, ["parenthetical", ['and', 'medium-snow', 'possible-heavy-snow'], ["centimeters", 140]]),  # Without range
+        (
+            0.0,
+            [
+                "parenthetical",
+                ["and", "medium-snow", "possible-heavy-snow"],
+                ["centimeters", 140],
+            ],
+        ),  # Without range
     ],
 )
 def test_daily_snow_with_parenthetical_accumulation(
