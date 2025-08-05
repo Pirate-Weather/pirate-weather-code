@@ -1,6 +1,7 @@
 import sys
 import datetime
 from pathlib import Path
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "API"))
 
@@ -683,10 +684,62 @@ def test_rain_starts_later_in_period_hourly_mode():
     )
 
     assert c_icon == "light-rain"
-    # Expected: "Light rain during later this morning."
+    # Expected: "Light rain later this morning."
     assert summary_text == [
         "sentence",
         ["during", "light-rain", "later-today-morning"],
+    ]
+
+
+def test_mixed_precip_day_snow_and_sleet():
+    """Test for a day with snow in the morning and sleet in the evening."""
+    start_time = datetime.datetime(2024, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+    hours_config = {}
+    # Snow from 8 AM to 11 AM
+    for i in range(8, 12):
+        hours_config[i] = {
+            "precipIntensity": 2.0,
+            "precipAccumulation": 2.0,  # 2cm > 0.25cm
+            "precipType": "snow",
+            "precipProbability": 0.9,
+            "temperature": -2,  # Celsius
+        }
+    # Sleet from 6 PM to 9 PM (18:00 to 21:00)
+    for i in range(18, 22):
+        hours_config[i] = {
+            "precipIntensity": 1.0,
+            "precipAccumulation": 1.0,  # 1cm > 0.025cm
+            "precipType": "sleet",
+            "precipProbability": 0.9,
+            "temperature": 0,  # Celsius
+        }
+
+    hours = create_hourly_data(hours_config, start_time.timestamp())
+
+    c_icon, summary_text = calculate_day_text(
+        hours=hours,
+        precip_accum_unit=0.1,  # cm
+        vis_units=0.001,
+        wind_unit=1.0,
+        temp_units=1,  # Celsius
+        is_day_time=True,
+        time_zone="UTC",
+        curr_time=start_time.timestamp(),
+        mode="daily",
+        icon_set="pirate",
+    )
+
+    # Sleet reaches the major accumulation threshold, so it should be the primary icon.
+    assert c_icon == "light-sleet"
+    # Expected: "Sleet (with a chance of 8 cm. of snow) during the morning and evening."
+    # The logic combines the precip types first, then the periods.
+    assert summary_text == [
+        "sentence",
+        [
+            "during",
+            ['parenthetical', 'light-sleet', ['centimeters', 8]],
+            ["and", "morning", "evening"],
+        ],
     ]
 
 
@@ -725,3 +778,53 @@ def test_rain_crosses_midnight_hourly_mode():
         "sentence",
         ["until", "light-rain", "tomorrow-morning"],
     ]
+
+
+@pytest.mark.parametrize(
+    "precip_intensity_error, expected_precip_text",
+    [
+        (
+            50.0,
+            ["parenthetical", ['and', 'medium-snow', 'possible-heavy-snow'], ["centimeters", ["range", 130, 150]]],
+        ),  # With range
+        (0.0, ["parenthetical", ['and', 'medium-snow', 'possible-heavy-snow'], ["centimeters", 140]]),  # Without range
+    ],
+)
+def test_daily_snow_with_parenthetical_accumulation(
+    precip_intensity_error, expected_precip_text
+):
+    """Test for a daily summary with heavy snow and a parenthetical accumulation range."""
+    start_time = datetime.datetime(2024, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+    hours_config = {}
+    # Heavy snow for 4 hours
+    for i in range(4):
+        hours_config[i] = {
+            "precipIntensity": 35.0,
+            "precipAccumulation": 35.0,
+            "precipType": "snow",
+            "precipProbability": 0.95,
+            "temperature": -5,
+            "precipIntensityError": precip_intensity_error,
+        }
+
+    hours = create_hourly_data(hours_config, start_time.timestamp())
+
+    c_icon, summary_text = calculate_day_text(
+        hours=hours,
+        precip_accum_unit=0.1,  # cm
+        vis_units=0.001,
+        wind_unit=1.0,
+        temp_units=1,  # Celsius
+        is_day_time=True,
+        time_zone="UTC",
+        curr_time=start_time.timestamp(),
+        mode="daily",
+        icon_set="darksky",
+    )
+
+    expected_summary = [
+        "sentence",
+        ["during", expected_precip_text, "night"],
+    ]
+    assert c_icon == "snow"
+    assert summary_text == expected_summary
