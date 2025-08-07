@@ -593,6 +593,7 @@ def arrayInterp(hour_array_grib, modelData, modelIndex):
 
     return modelInterp
 
+
 def has_interior_nan_holes(arr: np.ndarray) -> bool:
     """
     Return True if `arr` (2D: rows × cols) contains at least one
@@ -605,27 +606,28 @@ def has_interior_nan_holes(arr: np.ndarray) -> bool:
 
     # 2) pad left/right with False so that edges never count as run boundaries
     #    padded.shape == (rows, cols+2)
-    padded = np.pad(mask, ((0,0),(1,1)), constant_values=False)
+    padded = np.pad(mask, ((0, 0), (1, 1)), constant_values=False)
 
     # 3) compute a 1D diff along each row:
     #    diff == +1  → run *start* (False→True)
     #    diff == -1  → run *end*   (True→False)
     #    diff.shape == (rows, cols+1)
     diff = padded[:, 1:].astype(int) - padded[:, :-1].astype(int)
-    starts = (diff ==  1)   # potential run‐starts
-    ends   = (diff == -1)   # potential run‐ends
+    starts = diff == 1  # potential run‐starts
+    ends = diff == -1  # potential run‐ends
 
     # 4) ignore any that occur at the very first or last original column:
     #    we only want starts/ends in columns 1…(cols-2)
     interior_starts = starts[:, 1:-1]
-    interior_ends   = ends  [:, 1:-1]
+    interior_ends = ends[:, 1:-1]
 
     # 5) a row has an interior hole iff it has at least one interior start
     #    *and* at least one interior end.  If any row meets that, we’re done.
     row_has_start = interior_starts.any(axis=1)
-    row_has_end   = interior_ends  .any(axis=1)
+    row_has_end = interior_ends.any(axis=1)
 
     return bool(np.any(row_has_start & row_has_end))
+
 
 # Interpolation function to interpolate nans in a row, keeping nan's at the start and end
 def _interp_row(row: np.ndarray) -> np.ndarray:
@@ -639,15 +641,11 @@ def _interp_row(row: np.ndarray) -> np.ndarray:
     # mask of all NaNs
     mask = np.isnan(row)
 
-    if (mask.any() and not mask.all()):
+    if mask.any() and not mask.all():
         good = ~mask
 
         # interp only at mask positions, using the remaining points
-        row[mask] = np.interp(x[mask],
-                              x[good],
-                              row[good],
-                              left=np.nan,
-                              right=np.nan)
+        row[mask] = np.interp(x[mask], x[good], row[good], left=np.nan, right=np.nan)
 
     return row
 
@@ -667,7 +665,7 @@ class WeatherParallel(object):
 
                 # Fake some bad data for testing
                 # if model == "GFS":
-                    # dataOut[10:100, 4] = np.nan
+                # dataOut[10:100, 4] = np.nan
 
                 # Check for missing/ bad data and interpolate
                 # This should not occur, but good to have a fallback
