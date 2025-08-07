@@ -20,8 +20,9 @@ updates:
         - "patch"
     open-pull-requests-limit: 100
     ignore:
-      # Dependabot should not update numpy
+      # Dependabot should not update numpy and eccodes
       - dependency-name: "numpy"
+      - dependency-name: "eccodes"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
