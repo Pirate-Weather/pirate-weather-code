@@ -140,7 +140,7 @@ def validate_grib_stats(gribCheck):
     # TODO: This would be better if we checked against a dictionary of valid ranges defined per variable
     invalidIdxs = [
         i
-        for i, (mn, mx) in enumerate(zip(mins, maxs))
+        for i, (mn, mx) in enumerate(zip(minValues, maxValues))
         if mn < VALID_DATA_MIN or mx > VALID_DATA_MAX
     ]
 
@@ -149,7 +149,7 @@ def validate_grib_stats(gribCheck):
         for i in invalidIdxs:
             print(f"  Variable : {varNames[i]}")
             print(f"  Time     : {varTimes[i]}")
-            print(f"  Min/Max  : {mins[i]} / {maxs[i]}")
+            print(f"  Min/Max  : {minValues[i]} / {maxValues[i]}")
             print("---")
         print("Exiting due to invalid data in grib files.")
         sys.exit(10)
@@ -158,7 +158,7 @@ def validate_grib_stats(gribCheck):
         print("All grib files passed validation checks.")
         # compute overall min/max for each variable across all times
         varExtremes = {}
-        for var, mn, mx in zip(varNames, mins, maxs):
+        for var, mn, mx in zip(varNames, minValues, maxValues):
             lo, hi = varExtremes.setdefault(var, [mn, mx])
             varExtremes[var][0] = min(lo, mn)
             varExtremes[var][1] = max(hi, mx)
