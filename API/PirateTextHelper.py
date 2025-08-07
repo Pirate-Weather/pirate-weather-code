@@ -498,7 +498,7 @@ def calculate_vis_text(
         visText = "fog"
         visIcon = "fog"
     # Smoke
-    elif smoke >= SMOKE_CONCENTRATION_THRESHOLD_UGM3 and vis <= mistThresh:
+    elif smoke >= SMOKE_CONCENTRATION_THRESHOLD_UGM3 and vis < mistThresh:
         visText = "smoke"
         visIcon = "smoke" if icon == "pirate" else "fog"
     # Mist
@@ -508,7 +508,7 @@ def calculate_vis_text(
     # Haze
     elif (
         smoke < SMOKE_CONCENTRATION_THRESHOLD_UGM3
-        and vis <= mistThresh
+        and vis < mistThresh
         and tempDewSpread > TEMP_DEWPOINT_SPREAD_FOR_MIST
     ):
         visText = "haze"
