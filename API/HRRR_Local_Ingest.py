@@ -20,7 +20,7 @@ import zarr.storage
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
-from ingest_utils import mask_invalid_data
+from ingest_utils import mask_invalid_data, validate_grib_stats
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -185,13 +185,34 @@ FH_forecastsub = FastHerbie(
 )
 
 # Download the subsets
-FH_forecastsub.download(matchStrings, verbose=True)
+FH_forecastsub.download(matchStrings, verbose=False)
+
+
+# Check for download length
+if len(FH_forecastsub.file_exists) != len(hrrr_range1):
+    print(
+        "Download failed, expected "
+        + str(len(hrrr_range1))
+        + " files but got "
+        + str(len(FH_forecastsub.file_exists))
+    )
+    sys.exit(1)
+
 
 # Create list of downloaded grib files
 gribList = [
     str(Path(x.get_localFilePath(matchStrings)).expand())
     for x in FH_forecastsub.file_exists
 ]
+
+# Perform a check if any data seems to be invalid
+cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
+
+gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+validate_grib_stats(gribCheck)
+print("Grib files passed validation, proceeding with processing")
+
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
 cmd = (
@@ -400,6 +421,19 @@ for i in range(hisPeriod, -1, -1):
 
     # Download the subsets
     FH_histsub.download(matchStrings, verbose=False)
+
+    # Perform a check if any data seems to be invalid
+    cmd = (
+        f"{wgrib2_path}"
+        + " "
+        + str(FH_histsub.file_exists[0].get_localFilePath(matchStrings))
+        + " -s -stats"
+    )
+
+    gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+    validate_grib_stats(gribCheck)
+    print("Grib files passed validation, proceeding with processing")
 
     # Use wgrib2 to rotate the wind vectors
     # From https://github.com/blaylockbk/pyBKB_v2/blob/master/demos/HRRR_earthRelative_vs_gridRelative_winds.ipynb

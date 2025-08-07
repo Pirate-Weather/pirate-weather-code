@@ -1,12 +1,12 @@
 astral==3.2
-timezonefinder==6.5.9
+timezonefinder==7.0.2
 pytz==2025.2
-zarr[remote]==3.1.0
+zarr[remote]==3.1.1
 ujson==5.10.0
 fastapi[standard]==0.116.1
 fastapi-utils==0.8.0
-scipy==1.16.0
-orjson==3.11.0
+scipy==1.16.1
+orjson==3.11.1
 psutil==5.9.0
 typing-inspect==0.9.0
 watchfiles==1.1.0
@@ -16,4 +16,4 @@ pandas==2.3.1
 fastparquet==2024.11.0
 pirateweather-translations==1.2
 s3fs==2025.7.0
-aiobotocore[boto3]==2.23.1
+aiobotocore[boto3]==2.23.2

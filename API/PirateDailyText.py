@@ -16,7 +16,12 @@ from PirateTextHelper import (
     # Import shared precipitation thresholds
     DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
+    DEFAULT_VISIBILITY,
+    DEFAULT_POP,
+    MISSING_DATA,
 )
+
+DEFAULT_HUMIDITY = 0.5
 
 
 def calculate_cloud_text(cloud_cover):
@@ -716,6 +721,9 @@ def calculate_day_text(
     combined_dry_flag = False
     combined_humid_flag = False
     combined_wind_flag = False
+    overall_min_temp_dewpoint_spread = float("inf")
+    overall_temp_at_min_spread = 0.0
+    overall_dewpoint_at_min_spread = 0.0
 
     # Return "unavailable" if too much data is provided
     if len(hours) > 25:
@@ -801,6 +809,8 @@ def calculate_day_text(
                 "precip_intensity_sum": 0.0,
                 "precip_hours_count": 0,
                 "avg_cloud_cover": 0.0,
+                "min_visibility": float("inf"),  # Initialize for visibility
+                "max_smoke": 0.0,  # Initialize for smoke
             }
 
         # Stop generating period names if we have enough for a full 24-hour cycle (e.g., 5 periods)
@@ -810,21 +820,14 @@ def calculate_day_text(
 
     # Now iterate through the actual hourly forecast data and aggregate into the pre-defined standard periods
     for idx, hour in enumerate(hours):
-        # If no humidity data, set to 0 to avoid an error(timemachine)
-        if "humidity" not in hour:
-            hour["humidity"] = 0.0
-
-        # If no visibility data, set to 10000 to avoid an error (timemachine)
-        if "visibility" not in hour:
-            hour["visibility"] = 10000
-
-        # If no precipIntensityError data, set to 0 to avoid an error (timemachine)
-        if "precipIntensityError" not in hour:
-            hour["precipIntensityError"] = 0
-
-        # If no precipProbability data, set to 1 to avoid an error (timemachine)
-        if "precipProbability" not in hour:
-            hour["precipProbability"] = 1
+        # Provide default values for missing data (timemachine)
+        hour.setdefault("humidity", DEFAULT_HUMIDITY)
+        hour.setdefault("visibility", DEFAULT_VISIBILITY)
+        hour.setdefault("precipIntensityError", 0)
+        hour.setdefault("precipProbability", DEFAULT_POP)
+        hour.setdefault("smoke", 0.0)
+        # Set dewPoint to temperature if missing, resulting in no spread
+        hour.setdefault("dewPoint", hour["temperature"])
 
         hour_date = datetime.datetime.fromtimestamp(hour["time"], zone)
         hour_in_loop = int(hour_date.strftime("%H"))
@@ -859,6 +862,9 @@ def calculate_day_text(
             period_data["max_intensity"] = max(
                 period_data["max_intensity"], hour["precipIntensity"]
             )
+            period_data["min_visibility"] = min(
+                period_data["min_visibility"], hour["visibility"]
+            )
 
             if (
                 humidity_sky_text(hour["temperature"], temp_units, hour["humidity"])
@@ -871,10 +877,27 @@ def calculate_day_text(
             ):
                 period_data["num_hours_dry"] += 1
             if (
-                calculate_vis_text(hour["visibility"], vis_units, "icon") == "fog"
+                calculate_vis_text(
+                    hour["visibility"],
+                    vis_units,
+                    temp_units,
+                    hour["temperature"],
+                    hour["dewPoint"],
+                    hour["smoke"],
+                    icon_set,
+                    "icon",
+                )
+                is not None
                 and hour["precipIntensity"] <= 0.02 * precip_accum_unit
             ):
+                period_data["max_smoke"] = max(period_data["max_smoke"], hour["smoke"])
                 period_data["num_hours_fog"] += 1
+                if "temperature" in hour and "dewPoint" in hour:
+                    current_spread = abs(hour["temperature"] - hour["dewPoint"])
+                    if current_spread < overall_min_temp_dewpoint_spread:
+                        overall_min_temp_dewpoint_spread = current_spread
+                        overall_temp_at_min_spread = hour["temperature"]
+                        overall_dewpoint_at_min_spread = hour["dewPoint"]
             if (
                 calculate_wind_text(hour["windSpeed"], wind_unit, "darksky", "icon")
                 == "wind"
@@ -939,6 +962,8 @@ def calculate_day_text(
     overall_avg_pop = 0.0
     overall_precip_hours_count = 0
     overall_precip_intensity_sum = 0.0
+    overall_min_visibility = float("inf")  # Initialize for visibility
+    overall_max_smoke = 0.0
 
     overall_most_common_precip = []
 
@@ -954,6 +979,8 @@ def calculate_day_text(
         overall_avg_cloud_cover_sum += p_data[
             "avg_cloud_cover"
         ]  # Sum for calculating overall average
+        overall_min_visibility = min(overall_min_visibility, p_data["min_visibility"])
+        overall_max_smoke = max(overall_max_smoke, p_data["max_smoke"])
 
         # Check if precipitation is significant enough in this period
         is_precip_in_period = (
@@ -1247,7 +1274,17 @@ def calculate_day_text(
         # Check visibility (fog)
         if vis_periods and vis_periods[0] == 0:
             if (
-                calculate_vis_text(hours[0]["visibility"], vis_units, "summary") is None
+                calculate_vis_text(
+                    hours[0].get("visibility", DEFAULT_VISIBILITY),
+                    vis_units,
+                    temp_units,
+                    hours[0].get("temperature", MISSING_DATA),
+                    hours[0].get("dewPoint", MISSING_DATA),
+                    hours[0].get("smoke", 0.0),
+                    icon_set,
+                    "summary",
+                )
+                is None
                 and "later" not in all_period_names[0]
             ):  # Avoid double "later"
                 all_period_names[0] = "later-" + all_period_names[0]
@@ -1362,7 +1399,16 @@ def calculate_day_text(
     if has_vis:
         vis_only_summary, _, _, _, _ = calculate_period_summary_text(
             vis_periods,
-            "fog",
+            calculate_vis_text(
+                overall_min_visibility,
+                vis_units,
+                temp_units,
+                overall_temp_at_min_spread,
+                overall_dewpoint_at_min_spread,
+                overall_max_smoke,
+                icon_set,
+                "summary",
+            ),
             "vis",
             all_period_names,
             [],
@@ -1482,7 +1528,16 @@ def calculate_day_text(
                 "all_day": is_vis_all_day,
                 "start_idx": vis_periods[0] if vis_periods else -1,
                 "text": vis_only_summary,
-                "icon": "fog",
+                "icon": calculate_vis_text(
+                    overall_min_visibility,
+                    vis_units,
+                    temp_units,
+                    overall_temp_at_min_spread,
+                    overall_dewpoint_at_min_spread,
+                    overall_max_smoke,
+                    icon_set,
+                    "icon",
+                ),
             }
         )
 

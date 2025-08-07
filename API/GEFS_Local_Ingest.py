@@ -20,7 +20,7 @@ import zarr.storage
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
-from ingest_utils import mask_invalid_data, interp_time_block
+from ingest_utils import mask_invalid_data, interp_time_block, validate_grib_stats
 
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -197,6 +197,14 @@ while mem < 30:
         str(Path(x.get_localFilePath(matchStrings)).expand())
         for x in FH_forecastsubMembers[mem].file_exists
     ]
+
+    # Perform a check if any data seems to be invalid
+    cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
+
+    gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+    validate_grib_stats(gribCheck)
+    print("Grib files passed validation, proceeding with processing")
 
     # Create a string to pass to wgrib2 to merge all gribs into one grib
     cmd = (
@@ -469,6 +477,23 @@ for i in range(hisPeriod, 0, -6):
             str(Path(x.get_localFilePath(matchStrings)).expand())
             for x in FH_forecastsubMembers[mem].file_exists
         ]
+
+        # Perform a check if any data seems to be invalid
+        cmd = (
+            "cat "
+            + " ".join(gribList)
+            + " | "
+            + f"{wgrib2_path}"
+            + " - "
+            + " -s -stats"
+        )
+
+        gribCheck = subprocess.run(
+            cmd, shell=True, capture_output=True, encoding="utf-8"
+        )
+
+        validate_grib_stats(gribCheck)
+        print("Grib files passed validation, proceeding with processing")
 
         # Create a string to pass to wgrib2 to merge all gribs into one grib
         cmd = (
