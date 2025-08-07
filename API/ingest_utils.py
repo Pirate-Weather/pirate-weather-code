@@ -127,29 +127,28 @@ def validate_grib_stats(gribCheck):
     maxs = [float(M) for M in re.findall(r"max=([-\d\.eE]+)", gribCheck.stdout)]
 
     # extract variable names (4th field)
-    varnames = re.findall(r"(?m)^(?:[^:]+:){3}([^:]+):", gribCheck.stdout)
-
+    varNames = re.findall(r"(?m)^(?:[^:]+:){3}([^:]+):", gribCheck.stdout)
     # ensure we found at least one variable
-    if not varnames:
+    if not varNames:
         print("Error: no variables found in GRIB stats output.")
         sys.exit(10)
 
     # extract forecast lead times (6th field)
-    vartimes = re.findall(r"(?m)^(?:[^:]+:){5}([^:]+):", gribCheck.stdout)
+    varTimes = re.findall(r"(?m)^(?:[^:]+:){5}([^:]+):", gribCheck.stdout)
 
     # find any indices where data is out of range
     # TODO: This would be better if we checked against a dictionary of valid ranges defined per variable
-    invalid_idxs = [
+    invalidIdxs = [
         i
         for i, (mn, mx) in enumerate(zip(mins, maxs))
         if mn < VALID_DATA_MIN or mx > VALID_DATA_MAX
     ]
 
-    if invalid_idxs:
+    if invalidIdxs:
         print("Invalid data found in grib files:")
-        for i in invalid_idxs:
-            print(f"  Variable : {varnames[i]}")
-            print(f"  Time     : {vartimes[i]}")
+        for i in invalidIdxs:
+            print(f"  Variable : {varNames[i]}")
+            print(f"  Time     : {varTimes[i]}")
             print(f"  Min/Max  : {mins[i]} / {maxs[i]}")
             print("---")
         print("Exiting due to invalid data in grib files.")
@@ -158,15 +157,15 @@ def validate_grib_stats(gribCheck):
     else:
         print("All grib files passed validation checks.")
         # compute overall min/max for each variable across all times
-        var_extremes = {}
-        for var, mn, mx in zip(varnames, mins, maxs):
-            lo, hi = var_extremes.setdefault(var, [mn, mx])
-            var_extremes[var][0] = min(lo, mn)
-            var_extremes[var][1] = max(hi, mx)
+        varExtremes = {}
+        for var, mn, mx in zip(varNames, mins, maxs):
+            lo, hi = varExtremes.setdefault(var, [mn, mx])
+            varExtremes[var][0] = min(lo, mn)
+            varExtremes[var][1] = max(hi, mx)
 
         # print overall extremes
         print("Overall min/max for each variable across all times:")
-        for var, (mn, mx) in var_extremes.items():
+        for var, (mn, mx) in varExtremes.items():
             print(f"  {var}: min={mn}, max={mx}")
 
     # all good

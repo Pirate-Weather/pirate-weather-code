@@ -214,9 +214,9 @@ FH_forecastsub = FastHerbie(
 FH_forecastsub.download(matchStrings, verbose=False)
 
 # Check for download length
-if len(FH_forecastsub.file_exists) != 160:
+if len(FH_forecastsub.file_exists) != len(gfsFileRange):
     print(
-        "Download failed, expected 160 files but got "
+        "Download failed, expected " + str(len(gfsFileRange)) + " files but got "
         + str(len(FH_forecastsub.file_exists))
     )
     sys.exit(1)

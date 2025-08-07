@@ -203,6 +203,9 @@ while mem < 30:
 
     gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
+    validate_grib_stats(gribCheck)
+    print("Grib files passed validation, proceeding with processing")
+
     # Create a string to pass to wgrib2 to merge all gribs into one grib
     cmd = (
         "cat "

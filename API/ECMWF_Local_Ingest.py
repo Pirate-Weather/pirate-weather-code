@@ -246,7 +246,7 @@ while ensNum < 51:
     if len(gribList[-1]) != len(ifsFileRange):
         print(
             "Download failed, expected "
-            + str(len(aifs_range1))
+            + str(len(ifsFileRange))
             + " files, but got "
             + str(len(FH_forecastsub.file_exists))
         )
@@ -419,7 +419,7 @@ gribList = [
 if len(gribList) != len(ifsFileRange):
     print(
         "Download failed, expected "
-        + str(len(gribList))
+        + str(len(ifsFileRange))
         + " files, but got "
         + str(len(FH_forecastsub.file_exists))
     )
@@ -817,7 +817,7 @@ for i in range(hisPeriod, 1, -12):
     if len(gribList) != len(aifs_range):
         print(
             "Download failed, expected "
-            + str(len(fxx))
+            + str(len(aifs_range))
             + " files but got "
             + str(len(FH_histsub.file_exists))
         )
