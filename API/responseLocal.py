@@ -646,7 +646,7 @@ class WeatherParallel(object):
 
         errCount = 0
         dataOut = False
-        # Try to read HRRR Zarr
+        # Try to read Zarr file
         while errCount < 4:
             try:
                 dataOut = await asyncio.to_thread(lambda: opened_zarr[:, :, y, x].T)
