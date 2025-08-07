@@ -275,7 +275,7 @@ UVmatchString = ":DUVB:surface:"
 FH_forecastUV.download(UVmatchString, verbose=False)
 
 # Check for download length
-if len(FH_forecastUV.file_exists) != 160:
+if len(FH_forecastUV.file_exists) != len(gfsFileRange):
     print(
         "Download failed, expected 160 files but got "
         + str(len(FH_forecastUV.file_exists))
