@@ -582,16 +582,60 @@ def get_offset(*, lat, lng, utcTime, tf):
     return (today_utc - today_target).total_seconds() / 60, tz_target
 
 
-def arrayInterp(hour_array_grib, modelData, modelIndex):
-    modelInterp = np.interp(
-        hour_array_grib,
-        modelData[:, 0],
-        modelData[:, modelIndex],
-        left=np.nan,
-        right=np.nan,
-    )
+def has_interior_nan_holes(arr: np.ndarray) -> bool:
+    """
+    Return True if `arr` (2D: rows × cols) contains at least one
+    contiguous block of NaNs that:
+      - does *not* touch the first or last column
+      - has at least one NaN
+    """
+    # 1) make a mask of NaNs
+    mask = np.isnan(arr)
 
-    return modelInterp
+    # 2) pad left/right with False so that edges never count as run boundaries
+    #    padded.shape == (rows, cols+2)
+    padded = np.pad(mask, ((0, 0), (1, 1)), constant_values=False)
+
+    # 3) compute a 1D diff along each row:
+    #    diff == +1  → run *start* (False→True)
+    #    diff == -1  → run *end*   (True→False)
+    #    diff.shape == (rows, cols+1)
+    diff = padded[:, 1:].astype(int) - padded[:, :-1].astype(int)
+    starts = diff == 1  # potential run‐starts
+    ends = diff == -1  # potential run‐ends
+
+    # 4) ignore any that occur at the very first or last original column:
+    #    we only want starts/ends in columns 1…(cols-2)
+    interiorStarts = starts[:, 1:-1]
+    interiorEnds = ends[:, 1:-1]
+
+    # 5) a row has an interior hole iff it has at least one interior start
+    #    *and* at least one interior end.  If any row meets that, we’re done.
+    rowHasStart = interiorStarts.any(axis=1)
+    rowHasEnd = interiorEnds.any(axis=1)
+
+    return bool(np.any(rowHasStart & rowHasEnd))
+
+
+# Interpolation function to interpolate nans in a row, keeping nan's at the start and end
+def _interp_row(row: np.ndarray) -> np.ndarray:
+    """
+    Fill only strictly interior NaN‐runs in a 1D array
+    (i.e. ignore any NaNs at index 0 or -1) by linear interpolation.
+    """
+    n = row.size
+    x = np.arange(n)
+
+    # mask of all NaNs
+    mask = np.isnan(row)
+
+    if mask.any() and not mask.all():
+        good = ~mask
+
+        # interp only at mask positions, using the remaining points
+        row[mask] = np.interp(x[mask], x[good], row[good], left=np.nan, right=np.nan)
+
+    return row
 
 
 class WeatherParallel(object):
@@ -602,10 +646,21 @@ class WeatherParallel(object):
 
         errCount = 0
         dataOut = False
-        # Try to read HRRR Zarr
+        # Try to read Zarr file
         while errCount < 4:
             try:
                 dataOut = await asyncio.to_thread(lambda: opened_zarr[:, :, y, x].T)
+
+                # Fake some bad data for testing
+                # if model == "GFS":
+                # dataOut[10:100, 4] = np.nan
+
+                # Check for missing/ bad data and interpolate
+                # This should not occur, but good to have a fallback
+                if has_interior_nan_holes(dataOut):
+                    print("### " + model + " Interpolating missing data!")
+                    dataOut = np.apply_along_axis(_interp_row, 0, dataOut)
+
                 if TIMING:
                     print("### " + model + " Done!")
                     print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None))
@@ -1903,7 +1958,7 @@ async def PW_Forecast(
     # If point is not in HRRR coverage or HRRR-hrrrh is more than 16 hours old, the fallback to GFS
     if isinstance(dataOut_h2, np.ndarray):
         sourceList.append("hrrr_18-48")
-        # Stbtract 18 hours since we're using the 18h time steo
+        # Subtract 18 hours since we're using the 18h time steo
         sourceTimes["hrrr_18-48"] = rounder(
             datetime.datetime.fromtimestamp(
                 h2RunTime.astype(int), datetime.UTC

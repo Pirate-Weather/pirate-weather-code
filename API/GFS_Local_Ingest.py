@@ -11,7 +11,6 @@ import time
 import traceback
 import warnings
 
-import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -23,7 +22,7 @@ from xrspatial import direction, proximity
 
 from dask.diagnostics import ProgressBar
 
-from ingest_utils import mask_invalid_data, interp_time_block
+from ingest_utils import mask_invalid_data, interp_time_block, validate_grib_stats
 
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -212,13 +211,34 @@ FH_forecastsub = FastHerbie(
 )
 
 # Download the subsets
-FH_forecastsub.download(matchStrings, verbose=True)
+FH_forecastsub.download(matchStrings, verbose=False)
+
+# Check for download length
+if len(FH_forecastsub.file_exists) != len(gfsFileRange):
+    print(
+        "Download failed, expected "
+        + str(len(gfsFileRange))
+        + " files but got "
+        + str(len(FH_forecastsub.file_exists))
+    )
+    sys.exit(1)
+
 
 # Create list of downloaded grib files
 gribList = [
     str(Path(x.get_localFilePath(matchStrings)).expand())
     for x in FH_forecastsub.file_exists
 ]
+
+# Perform a check if any data seems to be invalid
+cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
+
+gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+# Validate the grib files
+validate_grib_stats(gribCheck)
+print("Grib validation complete, no errors found.")
+
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
 cmd = (
@@ -231,6 +251,7 @@ cmd = (
     + forecast_process_path
     + "_wgrib2_merged.nc"
 )
+
 
 # Run wgrib2
 spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
@@ -253,11 +274,28 @@ FH_forecastUV = FastHerbie(
 UVmatchString = ":DUVB:surface:"
 FH_forecastUV.download(UVmatchString, verbose=False)
 
+# Check for download length
+if len(FH_forecastUV.file_exists) != len(gfsFileRange):
+    print(
+        "Download failed, expected 160 files but got "
+        + str(len(FH_forecastUV.file_exists))
+    )
+    sys.exit(1)
+
+
 # Create list of downloaded grib files
 gribListUV = [
     str(Path(x.get_localFilePath(UVmatchString)).expand())
     for x in FH_forecastUV.file_exists
 ]
+
+# Perform a check if any data seems to be invalid
+cmd = "cat " + " ".join(gribListUV) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
+
+gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+validate_grib_stats(gribCheck)
+print("Grib files passed validation, proceeding with processing")
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
 cmd = (
@@ -316,20 +354,16 @@ hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 # %% FIX THINGS
 
 # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time
-APCP_surface_tmp = xarray_forecast_merged["APCP_surface"].copy(
-    data=np.diff(
-        xarray_forecast_merged["APCP_surface"],
-        axis=xarray_forecast_merged["APCP_surface"].get_axis_num("time"),
-        prepend=0,
-    )
+APCP_surface_tmp = da.diff(
+    xarray_forecast_merged["APCP_surface"],
+    axis=xarray_forecast_merged["APCP_surface"].get_axis_num("time"),
+    prepend=0,
 )
 
 # Convert 3-hourly to 1-hourly
 APCP_surface_tmp[120:, :, :] = APCP_surface_tmp[120:, :, :] / 3
 
-xarray_forecast_merged["APCP_surface"] = xarray_forecast_merged["APCP_surface"].copy(
-    data=APCP_surface_tmp
-)
+xarray_forecast_merged["APCP_surface"].data = APCP_surface_tmp
 
 
 # Create a new xarray for storm distance processing using dask
@@ -351,48 +385,45 @@ xarray_forecast_distance["APCP_surface"] = xarray_forecast_distance[
 
 distances = []
 directions = []
-# len(xarray_forecast_distance_interp.time)
 
 
 # Find nearest storm distance and direction for first 12 hours
 for t in range(0, 160):
     distances.append(
-        dask.delayed(proximity)(
+        proximity(
             xarray_forecast_distance["APCP_surface"].isel(time=t),
             distance_metric="GREAT_CIRCLE",
             x="longitude",
             y="latitude",
+            max_distance=None,
         )
     )
 
     directions.append(
-        dask.delayed(direction)(
+        direction(
             xarray_forecast_distance["APCP_surface"].isel(time=t),
             distance_metric="GREAT_CIRCLE",
             x="longitude",
             y="latitude",
+            max_distance=None,
         )
     )
 
-# Set to zero for rest of range
-# for t in range(12, 160):
-#     distances.append(np.zeros(xarray_forecast_distance['APCP_surface'].shape[1:]))
-#     directions.append(np.zeros(xarray_forecast_distance['APCP_surface'].shape[1:]))
 
-distanced_stacked = dask.delayed(da.stack)(distances)
-directions_stacked = dask.delayed(da.stack)(directions)
+distanced_stacked = da.stack(distances)
+directions_stacked = da.stack(directions)
 
 distanced_chunked = distanced_stacked.rechunk(160, processChunk, processChunk)
 directions_chunked = directions_stacked.rechunk(160, processChunk, processChunk)
 
 
-# with ProgressBar():
-distanced_chunked.to_zarr(
-    forecast_process_path + "_stormDist.zarr", overwrite=True
-).compute()
-directions_chunked.to_zarr(
-    forecast_process_path + "_stormDir.zarr", overwrite=True
-).compute()
+with ProgressBar():
+    distanced_chunked.to_zarr(
+        forecast_process_path + "_stormDist.zarr", overwrite=True, compute=True
+    )
+    directions_chunked.to_zarr(
+        forecast_process_path + "_stormDir.zarr", overwrite=True, compute=True
+    )
 
 
 # UV is an average from zero to 6, repeating throughout the time series.
@@ -457,6 +488,15 @@ for accumVar in accumVars:
     )
 
 
+# %% Save merged and processed xarray dataset to disk using zarr with compression
+# Save the dataset with compression and filters for all variables
+xarray_forecast_merged = xarray_forecast_merged.chunk(
+    chunks={"time": 240, "latitude": processChunk, "longitude": processChunk}
+)
+xarray_forecast_merged.to_zarr(
+    forecast_process_path + "_.zarr", mode="w", consolidated=False, compute=True
+)
+
 # %% Delete to free memory
 del (
     uvProc,
@@ -467,20 +507,16 @@ del (
     first_step,
     xarray_wgrib_merged,
     xarray_wgribUV_merged,
+    directions,
+    distances,
+    directions_chunked,
+    distanced_chunked,
+    distanced_stacked,
+    directions_stacked,
+    xarray_forecast_distance,
+    APCP_surface_tmp,
+    xarray_forecast_merged,
 )
-
-# %% Save merged and processed xarray dataset to disk using zarr with compression
-# Save the dataset with compression and filters for all variables
-xarray_forecast_merged = xarray_forecast_merged.chunk(
-    chunks={"time": 240, "latitude": processChunk, "longitude": processChunk}
-)
-xarray_forecast_merged.to_zarr(
-    forecast_process_path + "_.zarr", mode="w", consolidated=False, compute=True
-)
-
-# Clear the xaarray dataset from memory
-del xarray_forecast_merged
-
 T1 = time.time()
 
 print(T1 - T0)
@@ -563,11 +599,27 @@ for i in range(hisPeriod, 0, -6):
     # Download the subsets
     FH_histsub.download(matchStrings, verbose=False)
 
+    # Check for download length
+    if len(FH_histsub.file_exists) != len(fxx):
+        print(
+            "Download failed, expected 6 files but got "
+            + str(len(FH_histsub.file_exists))
+        )
+        sys.exit(1)
+
     # Create list of downloaded grib files
     gribList = [
         str(Path(x.get_localFilePath(matchStrings)).expand())
         for x in FH_histsub.file_exists
     ]
+
+    # Perform a check if any data seems to be invalid
+    cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
+
+    gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+    validate_grib_stats(gribCheck)
+    print("Grib files passed validation, proceeding with processing")
 
     # Create a string to pass to wgrib2 to merge all gribs into one netcdf
     cmd = (
@@ -600,11 +652,29 @@ for i in range(hisPeriod, 0, -6):
     # Download the subsets
     FH_histsubUV.download(UVmatchString, verbose=False)
 
+    # Check for download length
+    if len(FH_histsubUV.file_exists) != len(fxx):
+        print(
+            "Download failed, expected 6 files but got "
+            + str(len(FH_histsubUV.file_exists))
+        )
+        sys.exit(1)
+
     # Create list of downloaded grib files
     gribListUV = [
         str(Path(x.get_localFilePath(UVmatchString)).expand())
         for x in FH_histsubUV.file_exists
     ]
+
+    # Perform a check if any data seems to be invalid
+    cmd = (
+        "cat " + " ".join(gribListUV) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
+    )
+
+    gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+    validate_grib_stats(gribCheck)
+    print("Grib files passed validation, proceeding with processing")
 
     # Create a string to pass to wgrib2 to merge all gribs into one netcdf
     cmd = (
@@ -668,20 +738,22 @@ for i in range(hisPeriod, 0, -6):
     # Find nearest storm distance and direction for first 12 hours
     for t in range(0, 6):
         distances.append(
-            dask.delayed(proximity)(
+            proximity(
                 xarray_hist_distance["APCP_surface"].isel(time=t),
                 distance_metric="GREAT_CIRCLE",
                 x="longitude",
                 y="latitude",
+                max_distance=None,
             )
         )
 
         directions.append(
-            dask.delayed(direction)(
+            direction(
                 xarray_hist_distance["APCP_surface"].isel(time=t),
                 distance_metric="GREAT_CIRCLE",
                 x="longitude",
                 y="latitude",
+                max_distance=None,
             )
         )
 
@@ -689,11 +761,11 @@ for i in range(hisPeriod, 0, -6):
     # with ProgressBar():
     xarray_hist_merged["Storm_Distance"] = (
         ("time", "latitude", "longitude"),
-        dask.delayed(da.stack)(distances).rechunk((6, 100, 100)).compute(),
+        da.stack(distances).rechunk((6, 100, 100)).compute(),
     )
     xarray_hist_merged["Storm_Direction"] = (
         ("time", "latitude", "longitude"),
-        dask.delayed(da.stack)(directions).rechunk((6, 100, 100)).compute(),
+        da.stack(directions).rechunk((6, 100, 100)).compute(),
     )
 
     # UV is an average from zero to 6, repeating throughout the time series.
@@ -873,7 +945,8 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
 # Mask out invalid data
-daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
+# Ignore storm distance, since it can reach very high values that are still correct
+daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge, ignore_axis=[19])
 
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow

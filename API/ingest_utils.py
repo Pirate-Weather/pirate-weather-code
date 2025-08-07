@@ -1,6 +1,10 @@
 # %% Script to contain the helper functions as part of the data ingest for Pirate Weather
 # Alexander Rey. July 17 2025
 
+import re
+import sys
+
+
 import dask.array as da
 import numpy as np
 import time
@@ -10,13 +14,18 @@ VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
 
 
-def mask_invalid_data(dask_array):
+def mask_invalid_data(daskArray, ignoreAxis=None):
     """Masks invalid data in a dask array, ignoring the time dimension."""
     # TODO: Update to mask for each variable according to reasonable values, as opposed to this global mask
-    valid_mask = (dask_array >= VALID_DATA_MIN) & (dask_array <= VALID_DATA_MAX)
+    valid_mask = (daskArray >= VALID_DATA_MIN) & (daskArray <= VALID_DATA_MAX)
     # Ignore times by setting first dimension to True
     valid_mask[0, :, :, :] = True
-    return da.where(valid_mask, dask_array, np.nan)
+
+    # Also ignore the specified axis if provided
+    if ignoreAxis is not None:
+        for i in ignoreAxis:
+            valid_mask[i, :, :, :] = True
+    return da.where(valid_mask, daskArray, np.nan)
 
 
 # Linear interpolation of time blocks in a dask array
@@ -102,3 +111,62 @@ def getGribList(FH_forecastsub, matchStrings):
                             print("Download Failure 6, Fail")
                             exit(1)
     return gribList
+
+
+def validate_grib_stats(gribCheck):
+    """
+    Inspect gribCheck.stdout (from `wgrib2 … -stats`) for min/max values,
+    print any out-of-range records, and exit(10) if invalid data is found.
+
+    Expects:
+      - gribCheck.stdout: the full stdout string
+      - globals: VALID_DATA_MIN, VALID_DATA_MAX
+    """
+    # extract all mins and maxs
+    minValues = [float(m) for m in re.findall(r"min=([-\d\.eE]+)", gribCheck.stdout)]
+    maxValues = [float(M) for M in re.findall(r"max=([-\d\.eE]+)", gribCheck.stdout)]
+
+    # extract variable names (4th field)
+    varNames = re.findall(r"(?m)^(?:[^:]+:){3}([^:]+):", gribCheck.stdout)
+    # ensure we found at least one variable
+    if not varNames:
+        print("Error: no variables found in GRIB stats output.")
+        sys.exit(10)
+
+    # extract forecast lead times (6th field)
+    varTimes = re.findall(r"(?m)^(?:[^:]+:){5}([^:]+):", gribCheck.stdout)
+
+    # find any indices where data is out of range
+    # TODO: This would be better if we checked against a dictionary of valid ranges defined per variable
+    invalidIdxs = [
+        i
+        for i, (mn, mx) in enumerate(zip(minValues, maxValues))
+        if mn < VALID_DATA_MIN or mx > VALID_DATA_MAX
+    ]
+
+    if invalidIdxs:
+        print("Invalid data found in grib files:")
+        for i in invalidIdxs:
+            print(f"  Variable : {varNames[i]}")
+            print(f"  Time     : {varTimes[i]}")
+            print(f"  Min/Max  : {minValues[i]} / {maxValues[i]}")
+            print("---")
+        print("Exiting due to invalid data in grib files.")
+        sys.exit(10)
+
+    else:
+        print("All grib files passed validation checks.")
+        # compute overall min/max for each variable across all times
+        varExtremes = {}
+        for var, mn, mx in zip(varNames, minValues, maxValues):
+            lo, hi = varExtremes.setdefault(var, [mn, mx])
+            varExtremes[var][0] = min(lo, mn)
+            varExtremes[var][1] = max(hi, mx)
+
+        # print overall extremes
+        print("Overall min/max for each variable across all times:")
+        for var, (mn, mx) in varExtremes.items():
+            print(f"  {var}: min={mn}, max={mx}")
+
+    # all good
+    return True

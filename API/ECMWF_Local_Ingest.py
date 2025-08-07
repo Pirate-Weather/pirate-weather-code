@@ -21,7 +21,7 @@ from herbie import FastHerbie, HerbieLatest, Path
 
 from dask.diagnostics import ProgressBar
 
-from ingest_utils import mask_invalid_data, interp_time_block
+from ingest_utils import mask_invalid_data, interp_time_block, validate_grib_stats
 
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -29,7 +29,9 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 # %% Setup paths and parameters
 ingestVersion = "v27"
 
-wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
+wgrib2_path = os.getenv(
+    "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
+)
 
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/home/ubuntu/Weather/ECMWF"
@@ -159,10 +161,31 @@ FH_forecastsub = FastHerbie(
 # Download the subsets
 FH_forecastsub.download("tcc", verbose=False)
 
+
+# Check for download length
+if len(FH_forecastsub.file_exists) != len(aifs_range1):
+    print(
+        "Download failed, expected "
+        + str(len(aifs_range1))
+        + " files, but got "
+        + str(len(FH_forecastsub.file_exists))
+    )
+    sys.exit(1)
+
+
 # Create list of downloaded grib files
 gribList = [
     str(Path(x.get_localFilePath("tcc")).expand()) for x in FH_forecastsub.file_exists
 ]
+
+# Perform a check if any data seems to be invalid
+cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
+
+gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+validate_grib_stats(gribCheck)
+print("Grib files passed validation, proceeding with processing")
+
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
 cmd = (
@@ -209,7 +232,7 @@ ensNum = 1
 while ensNum < 51:
     # Download the subsets
     matchString = ":(tp:sfc:" + str(ensNum) + "):"
-    FH_forecastsub.download(matchString, verbose=False)
+    FH_forecastsub.download(matchString, verbose=True)
 
     # Create list of downloaded grib files
     gribList.append(
@@ -218,6 +241,24 @@ while ensNum < 51:
             for x in FH_forecastsub.file_exists
         ]
     )
+
+    # Check for download length
+    if len(gribList[-1]) != len(ifsFileRange):
+        print(
+            "Download failed, expected "
+            + str(len(ifsFileRange))
+            + " files, but got "
+            + str(len(FH_forecastsub.file_exists))
+        )
+        sys.exit(1)
+
+    # Perform a check if any data seems to be invalid
+    cmd = "cat " + " ".join(gribList[-1]) + " | " + f"{wgrib2_path}" + "- -s -stats"
+
+    gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+    validate_grib_stats(gribCheck)
+    print("Grib files passed validation, proceeding with processing")
 
     # Create a string to pass to wgrib2 to merge all gribs into one netcdf
     cmd = (
@@ -373,6 +414,24 @@ gribList = [
     str(Path(x.get_localFilePath(matchStrings)).expand())
     for x in FH_forecastsub.file_exists
 ]
+
+# Check for download length
+if len(gribList) != len(ifsFileRange):
+    print(
+        "Download failed, expected "
+        + str(len(ifsFileRange))
+        + " files, but got "
+        + str(len(FH_forecastsub.file_exists))
+    )
+    sys.exit(1)
+
+# Perform a check if any data seems to be invalid
+cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
+
+gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+validate_grib_stats(gribCheck)
+print("Grib files passed validation, proceeding with processing")
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
 cmd = (
@@ -542,11 +601,29 @@ for i in range(hisPeriod, 1, -12):
     # Start with oper
     FH_histsub.download(matchStrings, verbose=False)
 
+    # Check for download length
+    if len(FH_histsub.file_exists) != len(fxx):
+        print(
+            "Download failed, expected "
+            + str(len(fxx))
+            + " files but got "
+            + str(len(FH_histsub.file_exists))
+        )
+        sys.exit(1)
+
     # Create list of downloaded grib files
     gribList = [
         str(Path(x.get_localFilePath(matchStrings)).expand())
         for x in FH_histsub.file_exists
     ]
+
+    # Perform a check if any data seems to be invalid
+    cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
+
+    gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+    validate_grib_stats(gribCheck)
+    print("Grib files passed validation, proceeding with processing")
 
     # Create a string to pass to wgrib2 to merge all gribs into one netcdf
     cmd = (
@@ -577,7 +654,7 @@ for i in range(hisPeriod, 1, -12):
     for ensNum in range(1, 51):
         # Download the subsets
         matchString = ":(tp:sfc:" + str(ensNum) + "):"
-        FH_histsub.download(matchString, verbose=False)
+        FH_histsub.download(matchString, verbose=True)
 
         # Create list of downloaded grib files
         gribList.append(
@@ -586,6 +663,33 @@ for i in range(hisPeriod, 1, -12):
                 for x in FH_histsub.file_exists
             ]
         )
+
+        # Check for download length
+        if len(gribList[-1]) != len(fxx):
+            print(
+                "Download failed, expected "
+                + str(len(fxx))
+                + " files but got "
+                + str(len(FH_histsub.file_exists))
+            )
+            sys.exit(1)
+
+        # Perform a check if any data seems to be invalid
+        cmd = (
+            "cat "
+            + " ".join(gribList[-1])
+            + " | "
+            + f"{wgrib2_path}"
+            + " - "
+            + " -s -stats"
+        )
+
+        gribCheck = subprocess.run(
+            cmd, shell=True, capture_output=True, encoding="utf-8"
+        )
+
+        validate_grib_stats(gribCheck)
+        print("Grib files passed validation, proceeding with processing")
 
         # Create a string to pass to wgrib2 to merge all gribs into one netcdf
         cmd = (
@@ -708,6 +812,24 @@ for i in range(hisPeriod, 1, -12):
     gribList = [
         str(Path(x.get_localFilePath("tcc")).expand()) for x in FH_histsub.file_exists
     ]
+
+    # Check for download length
+    if len(gribList) != len(aifs_range):
+        print(
+            "Download failed, expected "
+            + str(len(aifs_range))
+            + " files but got "
+            + str(len(FH_histsub.file_exists))
+        )
+        sys.exit(1)
+
+    # Perform a check if any data seems to be invalid
+    cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
+
+    gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+    validate_grib_stats(gribCheck)
+    print("Grib files passed validation, proceeding with processing")
 
     # Create a string to pass to wgrib2 to merge all gribs into one netcdf
     cmd = (
