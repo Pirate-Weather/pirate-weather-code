@@ -582,18 +582,6 @@ def get_offset(*, lat, lng, utcTime, tf):
     return (today_utc - today_target).total_seconds() / 60, tz_target
 
 
-def arrayInterp(hour_array_grib, modelData, modelIndex):
-    modelInterp = np.interp(
-        hour_array_grib,
-        modelData[:, 0],
-        modelData[:, modelIndex],
-        left=np.nan,
-        right=np.nan,
-    )
-
-    return modelInterp
-
-
 def has_interior_nan_holes(arr: np.ndarray) -> bool:
     """
     Return True if `arr` (2D: rows × cols) contains at least one
