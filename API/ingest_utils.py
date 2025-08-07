@@ -14,18 +14,18 @@ VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
 
 
-def mask_invalid_data(dask_array, ignore_axis=None):
+def mask_invalid_data(daskArray, ignoreAxis=None):
     """Masks invalid data in a dask array, ignoring the time dimension."""
     # TODO: Update to mask for each variable according to reasonable values, as opposed to this global mask
-    valid_mask = (dask_array >= VALID_DATA_MIN) & (dask_array <= VALID_DATA_MAX)
+    valid_mask = (daskArray >= VALID_DATA_MIN) & (daskArray <= VALID_DATA_MAX)
     # Ignore times by setting first dimension to True
     valid_mask[0, :, :, :] = True
 
     # Also ignore the specified axis if provided
-    if ignore_axis is not None:
-        for i in ignore_axis:
+    if ignoreAxis is not None:
+        for i in ignoreAxis:
             valid_mask[i, :, :, :] = True
-    return da.where(valid_mask, dask_array, np.nan)
+    return da.where(valid_mask, daskArray, np.nan)
 
 
 # Linear interpolation of time blocks in a dask array

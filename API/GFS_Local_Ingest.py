@@ -600,7 +600,7 @@ for i in range(hisPeriod, 0, -6):
     FH_histsub.download(matchStrings, verbose=False)
 
     # Check for download length
-    if len(FH_histsub.file_exists) != 6:
+    if len(FH_histsub.file_exists) != len(fxx):
         print(
             "Download failed, expected 6 files but got "
             + str(len(FH_histsub.file_exists))
@@ -653,7 +653,7 @@ for i in range(hisPeriod, 0, -6):
     FH_histsubUV.download(UVmatchString, verbose=False)
 
     # Check for download length
-    if len(FH_histsubUV.file_exists) != 6:
+    if len(FH_histsubUV.file_exists) != len(fxx):
         print(
             "Download failed, expected 6 files but got "
             + str(len(FH_histsubUV.file_exists))

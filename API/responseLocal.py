@@ -606,15 +606,15 @@ def has_interior_nan_holes(arr: np.ndarray) -> bool:
 
     # 4) ignore any that occur at the very first or last original column:
     #    we only want starts/ends in columns 1…(cols-2)
-    interior_starts = starts[:, 1:-1]
-    interior_ends = ends[:, 1:-1]
+    interiorStarts = starts[:, 1:-1]
+    interiorEnds = ends[:, 1:-1]
 
     # 5) a row has an interior hole iff it has at least one interior start
     #    *and* at least one interior end.  If any row meets that, we’re done.
-    row_has_start = interior_starts.any(axis=1)
-    row_has_end = interior_ends.any(axis=1)
+    rowHasStart = interiorStarts.any(axis=1)
+    rowHasEnd = interiorEnds.any(axis=1)
 
-    return bool(np.any(row_has_start & row_has_end))
+    return bool(np.any(rowHasStart & rowHasEnd))
 
 
 # Interpolation function to interpolate nans in a row, keeping nan's at the start and end

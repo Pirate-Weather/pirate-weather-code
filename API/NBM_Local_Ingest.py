@@ -235,10 +235,7 @@ if len(FH_forecastsub.file_exists) != len(nbm_range):
 
 
 # Create list of downloaded grib files
-gribList = [
-    str(Path(x.get_localFilePath(matchStrings)).expand())
-    for x in FH_forecastsub.file_exists
-]
+gribList = getGribList(FH_forecastsub, matchStrings)
 
 # Perform a check if any data seems to be invalid
 cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
