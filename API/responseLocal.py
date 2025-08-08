@@ -52,7 +52,7 @@ force_now = os.getenv("force_now", default=False)
 
 # Version code for ingest files
 ingestVersion = "v27"
-API_VERSION = "2.7.6a"
+API_VERSION = "V2.7.6a"
 
 
 def setup_logging():
