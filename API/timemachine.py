@@ -984,7 +984,7 @@ async def TimeMachine(
         returnOBJ["flags"]["sources"] = "ERA5"
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = API_VERSION
+        returnOBJ["flags"]["version"] = apiVersion
         returnOBJ["flags"]["sourceIDX"] = {"x": y, "y": x}
         returnOBJ["flags"]["processTime"] = (
             datetime.datetime.utcnow() - T_Start
