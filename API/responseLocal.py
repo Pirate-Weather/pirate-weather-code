@@ -52,7 +52,7 @@ force_now = os.getenv("force_now", default=False)
 
 # Version code for ingest files
 ingestVersion = "v27"
-
+API_VERSION = "2.7.6a"
 
 def setup_logging():
     handler = logging.StreamHandler(sys.stdout)
@@ -1044,7 +1044,7 @@ async def PW_Forecast(
             or ("127.0.0.1" in str(request.url))
         ):
             TM_Response = await TimeMachine(
-                lat, lon, az_Lon, utcTime, tf, units, exclude, lang
+                lat, lon, az_Lon, utcTime, tf, units, exclude, lang, API_VERSION
             )
 
             return TM_Response
