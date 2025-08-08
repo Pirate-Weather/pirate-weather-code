@@ -102,7 +102,7 @@ async def TimeMachine(
     units: Union[str, None] = None,
     exclude: Union[str, None] = None,
     lang: Union[str, None] = None,
-    API_VERSION: Union[str, None] = None,
+    apiVersion: Union[str, None] = None,
 ) -> dict:
     kerchunkERA5Dir = os.environ.get("ERADIR", "/efs/kerchunk/ERA5_V4/")
 
