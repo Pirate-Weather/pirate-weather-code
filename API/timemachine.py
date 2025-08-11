@@ -102,6 +102,7 @@ async def TimeMachine(
     units: Union[str, None] = None,
     exclude: Union[str, None] = None,
     lang: Union[str, None] = None,
+    apiVersion: Union[str, None] = None,
 ) -> dict:
     kerchunkERA5Dir = os.environ.get("ERADIR", "/efs/kerchunk/ERA5_V4/")
 
@@ -983,7 +984,7 @@ async def TimeMachine(
         returnOBJ["flags"]["sources"] = "ERA5"
         returnOBJ["flags"]["nearest-station"] = int(0)
         returnOBJ["flags"]["units"] = unitSystem
-        returnOBJ["flags"]["version"] = "V2.7.5"
+        returnOBJ["flags"]["version"] = apiVersion
         returnOBJ["flags"]["sourceIDX"] = {"x": y, "y": x}
         returnOBJ["flags"]["processTime"] = (
             datetime.datetime.utcnow() - T_Start
