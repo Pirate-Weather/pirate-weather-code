@@ -660,6 +660,11 @@ class WeatherParallel(object):
                 # This should not occur, but good to have a fallback
                 if has_interior_nan_holes(dataOut):
                     print("### " + model + " Interpolating missing data!")
+
+                    # Print the location of the missing data
+                    if TIMING:
+                        print("### " + model + " Missing data at: ", np.argwhere(np.isnan(dataOut)))
+
                     dataOut = np.apply_along_axis(_interp_row, 0, dataOut)
 
                 if TIMING:
@@ -2907,8 +2912,8 @@ async def PW_Forecast(
         np.argmin(np.isnan(TemperatureHour), axis=1), TemperatureHour.T
     )
 
-    # Clip between -90 and 60
-    InterPhour[:, 5] = clipLog(InterPhour[:, 5], -183, 333, "Temperature Hour")
+    # Clip between -90 and 60 C (data in K)
+    InterPhour[:, 5] = clipLog(InterPhour[:, 5], 183, 333, "Temperature Hour")
 
     ### Dew Point
     DewPointHour = np.full((len(hour_array_grib), 3), np.nan)
@@ -2923,7 +2928,7 @@ async def PW_Forecast(
     )
 
     # Clip between -90 and 60 C
-    InterPhour[:, 7] = clipLog(InterPhour[:, 7], -183, 333, "Dew Point Hour")
+    InterPhour[:, 7] = clipLog(InterPhour[:, 7], 183, 333, "Dew Point Hour")
 
     ### Humidity
     HumidityHour = np.full((len(hour_array_grib), 3), np.nan)
@@ -3116,7 +3121,7 @@ async def PW_Forecast(
     )
 
     # Clip between -90 and 60
-    InterPhour[:, 25] = clipLog(InterPhour[:, 25], -183, 333, "Feels Like Hour")
+    InterPhour[:, 25] = clipLog(InterPhour[:, 25], 183, 333, "Feels Like Hour")
 
     # Set temperature units
     if tempUnits == 0:
@@ -3815,7 +3820,7 @@ async def PW_Forecast(
         )
 
     # Clip between -90 and 60
-    InterPcurrent[4] = clipLog(InterPcurrent[4], -183, 333, "Temperature Current")
+    InterPcurrent[4] = clipLog(InterPcurrent[4], 183, 333, "Temperature Current")
 
     # Dewpoint from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
@@ -3832,7 +3837,7 @@ async def PW_Forecast(
         )
 
     # Clip between -90 and 60
-    InterPcurrent[6] = clipLog(InterPcurrent[6], -183, 333, "Dewpoint Current")
+    InterPcurrent[6] = clipLog(InterPcurrent[6], 183, 333, "Dewpoint Current")
 
     # humidity, NBM then HRRR, then GFS
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
@@ -4050,7 +4055,7 @@ async def PW_Forecast(
 
     # Clip
     InterPcurrent[20] = clipLog(
-        InterPcurrent[20], -183, 333, "Apparent Temperature Current"
+        InterPcurrent[20], 183, 333, "Apparent Temperature Current"
     )
 
     # Fire index from NBM Fire
@@ -4656,20 +4661,28 @@ def calculate_apparent_temperature(airTemp, humidity, wind):
     apparentTempK = apparentTempC + 273.15
 
     # Clip between -90 and 60
-    return clipLog(apparentTempK, -183, 333, "Apparent Temperature Current")
+    return clipLog(apparentTempK, 183, 333, "Apparent Temperature Current")
 
 
 def clipLog(data, min, max, name):
     """
     Clip the data between min and max. Log if there is an error
     """
-    # Only print if the clipping is larger than 10% of the min
+
+    # Print if the clipping is larger than 25 of the min
     if data.min() < (min - 0.25):
         # Print the data and the index it occurs
         logger.error("Min clipping required for " + name)
         logger.error("Min Value: " + str(data.min()))
         if isinstance(data, np.ndarray):
             logger.error("Min Index: " + str(np.where(data == data.min())))
+
+        # Replace values below the threshold with np.nan
+        data[data < min] = np.nan
+
+    else:
+        data = np.clip(data, a_min = min, a_max = None)
+
 
     # Same for max
     if data.max() > (max + 0.25):
@@ -4680,7 +4693,14 @@ def clipLog(data, min, max, name):
         if isinstance(data, np.ndarray):
             logger.error("Max Index: " + str(np.where(data == data.max())))
 
-    return np.clip(data, min, max)
+        # Replace values above the threshold with np.nan
+        data[data > max] = np.nan
+
+    else:
+        data = np.clip(data, a_min = None, a_max = max)
+
+
+    return data
 
 
 def nearest_index(a, v):
