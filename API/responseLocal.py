@@ -663,7 +663,10 @@ class WeatherParallel(object):
 
                     # Print the location of the missing data
                     if TIMING:
-                        print("### " + model + " Missing data at: ", np.argwhere(np.isnan(dataOut)))
+                        print(
+                            "### " + model + " Missing data at: ",
+                            np.argwhere(np.isnan(dataOut)),
+                        )
 
                     dataOut = np.apply_along_axis(_interp_row, 0, dataOut)
 
@@ -4681,8 +4684,7 @@ def clipLog(data, min, max, name):
         data[data < min] = np.nan
 
     else:
-        data = np.clip(data, a_min = min, a_max = None)
-
+        data = np.clip(data, a_min=min, a_max=None)
 
     # Same for max
     if data.max() > (max + 0.25):
@@ -4697,8 +4699,7 @@ def clipLog(data, min, max, name):
         data[data > max] = np.nan
 
     else:
-        data = np.clip(data, a_min = None, a_max = max)
-
+        data = np.clip(data, a_min=None, a_max=max)
 
     return data
 
