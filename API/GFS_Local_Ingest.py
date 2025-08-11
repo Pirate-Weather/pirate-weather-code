@@ -946,7 +946,7 @@ daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
 # Mask out invalid data
 # Ignore storm distance, since it can reach very high values that are still correct
-daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge, ignoreAxis=[19])
+daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge, ignoreAxis=[zarrVars.index("Storm_Distance")])
 
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
