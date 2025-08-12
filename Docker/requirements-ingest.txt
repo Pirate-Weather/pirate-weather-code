@@ -1,5 +1,5 @@
 numpy==2.2.6
-aiobotocore[boto3]==2.23.2
+aiobotocore[boto3]==2.24.0
 netCDF4==1.7.2
 xarray==2025.7.1
 cartopy==0.25.0
