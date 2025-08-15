@@ -136,7 +136,7 @@ async def TimeMachine(
             prepAccumUnit = 0.1  # cm
             tempUnits = 273.15  # Celsius
             pressUnits = 0.01  # Hectopascals
-            # visUnits = 0.001  # km
+            visUnits = 0.001  # km
             # humidUnit = 0.01  # %
             # elevUnit = 1  # m
         elif unitSystem == "uk":
@@ -145,7 +145,7 @@ async def TimeMachine(
             prepAccumUnit = 0.1  # cm
             tempUnits = 273.15  # Celsius
             pressUnits = 0.01  # Hectopascals
-            # visUnits = 0.00062137  # miles
+            visUnits = 0.00062137  # miles
             # humidUnit = 0.01  # %
             # elevUnit = 1  # m
         elif unitSystem == "us":
@@ -154,12 +154,14 @@ async def TimeMachine(
             prepAccumUnit = 0.0394  # inches
             tempUnits = 0  # F. This is harder
             pressUnits = 0.01  # Hectopascals
+            visUnits = 0.00062137  # miles
         elif unitSystem == "si":
             windUnit = 1  # m/s
             prepIntensityUnit = 1  # mm/h
             prepAccumUnit = 0.1  # cm
             tempUnits = 273.15  # Celsius
             pressUnits = 0.01  # Hectopascals
+            visUnits = 0.001  # km
         else:
             unitSystem = "us"
             windUnit = 2.234  # mph
@@ -167,6 +169,7 @@ async def TimeMachine(
             prepAccumUnit = 0.0394  # inches
             tempUnits = 0  # F. This is harder
             pressUnits = 0.01  # Hectopascals
+            visUnits = 0.00062137  # miles
 
     if not exclude:
         excludeParams = ""
@@ -732,7 +735,7 @@ async def TimeMachine(
             "time": int(InterPhour[idx, 0]) + halfTZ,
             "summary": hourText,
             "icon": pIconList[idx],
-            "precipIntensity": round(InterPhour[idx, 1] * prepIntensityUnit, 2),
+            "precipIntensity": round(InterPhour[idx, 1] * prepIntensityUnit, 4),
             "precipAccumulation": round(InterPhour[idx, 1] * prepAccumUnit, 4),
             "precipType": pTypeList[idx],
             "temperature": round(InterPhour[idx, 4], 2),
@@ -741,7 +744,7 @@ async def TimeMachine(
             "pressure": round(InterPhour[idx, 8] * pressUnits, 2),
             "windSpeed": round(InterPhour[idx, 9] * windUnit, 2),
             "windGust": round(InterPhour[idx, 14] * windUnit, 2),
-            "windBearing": round(InterPhour[idx, 11], 2),
+            "windBearing": int(round(InterPhour[idx, 11], 0)),
             "cloudCover": round(InterPhour[idx, 12], 2),
             "snowAccumulation": round(InterPhour[idx, 13] * prepAccumUnit, 2),
         }
@@ -751,7 +754,7 @@ async def TimeMachine(
             hourText, hourIcon = calculate_text(
                 hourDict,
                 prepAccumUnit,
-                1,
+                visUnits,
                 windUnit,
                 tempUnits,
                 isDay,
@@ -833,8 +836,8 @@ async def TimeMachine(
         "sunsetTime": int(InterPday[17, 0]),
         "moonPhase": round(InterPday[18, 0], 2),
         "precipIntensity": round(InterPday[1, idx] * prepIntensityUnit, 4),
-        "precipIntensityMax": round(InterPdayMax[2, idx] * prepIntensityUnit, 4),
-        "precipIntensityMaxTime": int(InterPdayMaxTime[2, idx]),
+        "precipIntensityMax": round(InterPdayMax[1, idx] * prepIntensityUnit, 4),
+        "precipIntensityMaxTime": int(InterPhour[int(InterPdayMaxTime[1, idx]), 0]),
         "precipAccumulation": round(InterPdaySum[1, idx] * prepAccumUnit, 4),
         "precipType": pTypeListDay[idx],
         "temperatureHigh": round(InterPdayMax[4, idx], 2),
@@ -852,7 +855,7 @@ async def TimeMachine(
         "windSpeed": round(InterPday[9, idx] * windUnit, 2),
         "windGust": round(InterPday[14, idx] * windUnit, 2),
         "windGustTime": int(InterPhour[int(InterPdayMaxTime[14, idx]), 0]),
-        "windBearing": round(InterPday[11, idx], 2),
+        "windBearing": int(round(InterPday[11, idx], 0)),
         "cloudCover": round(InterPday[12, idx], 2),
         "temperatureMin": round(InterPdayMin[4, idx], 2),
         "temperatureMinTime": int(InterPhour[int(InterPdayMinTime[4, idx]), 0]),
@@ -869,7 +872,7 @@ async def TimeMachine(
         dayText, dayIcon = calculate_simple_day_text(
             dayDict,
             prepAccumUnit,
-            visUnits=1,
+            visUnits=visUnits,
             windUnit=windUnit,
             tempUnits=tempUnits,
             isDayTime=True,
@@ -944,7 +947,7 @@ async def TimeMachine(
         returnOBJ["currently"]["pressure"] = round(InterPcurrent[8] * pressUnits, 2)
         returnOBJ["currently"]["windSpeed"] = round(InterPcurrent[9] * windUnit, 2)
         returnOBJ["currently"]["windGust"] = round(InterPcurrent[9] * windUnit, 2)
-        returnOBJ["currently"]["windBearing"] = round(InterPcurrent[11], 2)
+        returnOBJ["currently"]["windBearing"] = int(round(InterPcurrent[11], 0))
         returnOBJ["currently"]["cloudCover"] = round(InterPcurrent[12], 2)
 
         # Update the text

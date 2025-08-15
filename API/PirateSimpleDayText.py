@@ -8,6 +8,9 @@ from PirateTextHelper import (
     calculate_vis_text,
     calculate_sky_text,
     humidity_sky_text,
+    DEFAULT_VISIBILITY,
+    DEFAULT_POP,
+    MISSING_DATA,
 )
 
 
@@ -41,42 +44,26 @@ def calculate_simple_day_text(
     - cText (str): A summary representing the conditions for the period.
     - cIcon (str): The icon representing the conditions for the period.
     """
+    # Get key values from the hourObject
+    precipType = hourObject.get("precipType", "none")
+    cloudCover = hourObject.get("cloudCover", 0)
+    wind = hourObject.get("windSpeed", 0)
+    pop = hourObject.get("pop", DEFAULT_POP)
+    if pop == MISSING_DATA:
+        pop = DEFAULT_POP
+    temp = hourObject.get("temperature", hourObject.get("temperatureHigh"))
+    vis = hourObject.get("visibility", DEFAULT_VISIBILITY * visUnits)
+    humidity = hourObject.get("humidity", np.nan)
+    prepIntensityMax = hourObject.get(
+        "precipIntensityMax", (rainPrep + snowPrep + icePrep) / 24
+    )
+    dewPoint = hourObject.get("dewPoint", temp)
+    smoke = hourObject.get("smoke", 0)
+
     cText = cIcon = precipText = precipIcon = windText = windIcon = skyText = (
         skyIcon
     ) = visText = visIcon = secondary = snowText = snowSentence = None
     totalPrep = rainPrep + snowPrep + icePrep
-
-    # Get key values from the hourObject
-    precipType = hourObject["precipType"]
-    cloudCover = hourObject["cloudCover"]
-    wind = hourObject["windSpeed"]
-    humidity = hourObject["humidity"]
-
-    if "precipProbability" in hourObject or hourObject["precipProbability"] != -999:
-        pop = hourObject["precipProbability"]
-    else:
-        pop = 1
-
-    if "temperature" in hourObject:
-        temp = hourObject["temperature"]
-    else:
-        temp = hourObject["temperatureHigh"]
-
-    if "visibility" in hourObject:
-        vis = hourObject["visibility"]
-    else:
-        vis = 10000
-
-    # If time machine, no humidity data, so set to 50
-    if "humidity" not in hourObject:
-        humidity = np.nan
-    else:
-        humidity = hourObject["humidity"]
-
-    if "precipIntensityMax" in hourObject:
-        prepIntensityMax = hourObject["precipIntensityMax"]
-    else:
-        prepIntensityMax = totalPrep / 24
 
     # Only calculate the precipitation text if there is any possibility of precipitation > 0
     if pop > 0 and totalPrep >= (0.01 * prepAccumUnit):
@@ -240,7 +227,9 @@ def calculate_simple_day_text(
             precipText = snowText
 
     windText, windIcon = calculate_wind_text(wind, windUnit, icon, "both")
-    visText, visIcon = calculate_vis_text(vis, visUnits, "both")
+    visText, visIcon = calculate_vis_text(
+        vis, visUnits, tempUnits, temp, dewPoint, smoke, icon, "both"
+    )
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
     humidityText = humidity_sky_text(temp, tempUnits, humidity)
 
