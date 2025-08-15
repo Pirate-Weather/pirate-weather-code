@@ -51,7 +51,9 @@ def calculate_simple_day_text(
     pop = hourObject.get("pop", DEFAULT_POP)
     if pop == MISSING_DATA:
         pop = DEFAULT_POP
-    temp = hourObject.get("temperature", hourObject.get("temperatureHigh", MISSING_DATA))
+    temp = hourObject.get(
+        "temperature", hourObject.get("temperatureHigh", MISSING_DATA)
+    )
     vis = hourObject.get("visibility", DEFAULT_VISIBILITY * visUnits)
     humidity = hourObject.get("humidity", np.nan)
     prepIntensityMax = hourObject.get(
