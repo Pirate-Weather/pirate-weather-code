@@ -19,6 +19,7 @@ from pytz import timezone, utc
 from typing import Union
 
 Translations = load_all_translations()
+ICE_ACCUMULATION = 0
 
 
 def solar_rad(D_t, lat, t_t):
@@ -106,7 +107,7 @@ async def TimeMachine(
 ) -> dict:
     kerchunkERA5Dir = os.environ.get("ERADIR", "/efs/kerchunk/ERA5_V4/")
 
-    print("Starting ERA5 Request")
+    logging.info("Starting ERA5 Request")
 
     T_Start = datetime.datetime.utcnow()
 
@@ -116,14 +117,14 @@ async def TimeMachine(
     tz_offsetLoc = {"lat": lat, "lng": az_Lon, "utcTime": utcTime, "tf": tf}
     tz_offset, tz_name = get_offset(**tz_offsetLoc)
 
-    # Default to US :(
+    # Default to US
     unitSystem = "us"
     windUnit = 2.234  # mph
     prepIntensityUnit = 0.0394  # inches/hour
     prepAccumUnit = 0.0394  # inches
     tempUnits = 0  # F. This is harder
     pressUnits = 0.01  # Hectopascals
-    # visUnits = 0.00062137  # miles
+    visUnits = 0.00062137  # miles
     # humidUnit = 0.01  # %
     # elevUnit = 3.28084  # ft
 
@@ -136,7 +137,7 @@ async def TimeMachine(
             prepAccumUnit = 0.1  # cm
             tempUnits = 273.15  # Celsius
             pressUnits = 0.01  # Hectopascals
-            # visUnits = 0.001  # km
+            visUnits = 0.001  # km
             # humidUnit = 0.01  # %
             # elevUnit = 1  # m
         elif unitSystem == "uk":
@@ -145,28 +146,16 @@ async def TimeMachine(
             prepAccumUnit = 0.1  # cm
             tempUnits = 273.15  # Celsius
             pressUnits = 0.01  # Hectopascals
-            # visUnits = 0.00062137  # miles
+            visUnits = 0.00062137  # miles
             # humidUnit = 0.01  # %
             # elevUnit = 1  # m
-        elif unitSystem == "us":
-            windUnit = 2.234  # mph
-            prepIntensityUnit = 0.0394  # inches/hour
-            prepAccumUnit = 0.0394  # inches
-            tempUnits = 0  # F. This is harder
-            pressUnits = 0.01  # Hectopascals
         elif unitSystem == "si":
             windUnit = 1  # m/s
             prepIntensityUnit = 1  # mm/h
             prepAccumUnit = 0.1  # cm
             tempUnits = 273.15  # Celsius
             pressUnits = 0.01  # Hectopascals
-        else:
-            unitSystem = "us"
-            windUnit = 2.234  # mph
-            prepIntensityUnit = 0.0394  # inches/hour
-            prepAccumUnit = 0.0394  # inches
-            tempUnits = 0  # F. This is harder
-            pressUnits = 0.01  # Hectopascals
+            visUnits = 0.001  # km
 
     if not exclude:
         excludeParams = ""
@@ -571,7 +560,6 @@ async def TimeMachine(
     InterPhour = np.zeros(shape=(len(dataDict["hours"]), 16))
     dayRainAccum = 0
     daySnowAccum = 0
-    dayIceAccum = 0
 
     InterPhour[:, 0] = (
         (dataDict["hours"] - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0)))
@@ -691,14 +679,16 @@ async def TimeMachine(
     InterPday[18, 0] = m / 27.99
 
     for idx in range(0, len(dataDict["hours"]), 1):
-        # Convert intensity to accumulation based on type
-        hourRainAccum, hourSnowAccum, hourIceAccum = calculate_precip_accumulation(
-            pTypeList[idx], InterPhour[idx, 1], prepIntensityUnit, prepAccumUnit
-        )
+        # Calculate type-based accumulation for text summaries
+        hourRainAccum = 0
+        hourSnowAccum = 0
+        if pTypeList[idx] == "snow":
+            hourSnowAccum += InterPhour[idx, 1] * prepAccumUnit
+        else:
+            hourRainAccum += InterPhour[idx, 1] * prepAccumUnit
 
         dayRainAccum += hourRainAccum
         daySnowAccum += hourSnowAccum
-        dayIceAccum += hourIceAccum
 
         # Check if day or night
         sunrise_ts = InterPday[16, 0]
@@ -732,7 +722,7 @@ async def TimeMachine(
             "time": int(InterPhour[idx, 0]) + halfTZ,
             "summary": hourText,
             "icon": pIconList[idx],
-            "precipIntensity": round(InterPhour[idx, 1] * prepIntensityUnit, 2),
+            "precipIntensity": round(InterPhour[idx, 1] * prepIntensityUnit, 4),
             "precipAccumulation": round(InterPhour[idx, 1] * prepAccumUnit, 4),
             "precipType": pTypeList[idx],
             "temperature": round(InterPhour[idx, 4], 2),
@@ -741,7 +731,7 @@ async def TimeMachine(
             "pressure": round(InterPhour[idx, 8] * pressUnits, 2),
             "windSpeed": round(InterPhour[idx, 9] * windUnit, 2),
             "windGust": round(InterPhour[idx, 14] * windUnit, 2),
-            "windBearing": round(InterPhour[idx, 11], 2),
+            "windBearing": int(round(InterPhour[idx, 11], 0)),
             "cloudCover": round(InterPhour[idx, 12], 2),
             "snowAccumulation": round(InterPhour[idx, 13] * prepAccumUnit, 2),
         }
@@ -751,13 +741,13 @@ async def TimeMachine(
             hourText, hourIcon = calculate_text(
                 hourDict,
                 prepAccumUnit,
-                1,
+                visUnits,
                 windUnit,
                 tempUnits,
                 isDay,
                 hourRainAccum,
                 hourSnowAccum,
-                hourIceAccum,
+                ICE_ACCUMULATION,
                 "hour",
                 precip_intensity,
             )
@@ -833,8 +823,8 @@ async def TimeMachine(
         "sunsetTime": int(InterPday[17, 0]),
         "moonPhase": round(InterPday[18, 0], 2),
         "precipIntensity": round(InterPday[1, idx] * prepIntensityUnit, 4),
-        "precipIntensityMax": round(InterPdayMax[2, idx] * prepIntensityUnit, 4),
-        "precipIntensityMaxTime": int(InterPdayMaxTime[2, idx]),
+        "precipIntensityMax": round(InterPdayMax[1, idx] * prepIntensityUnit, 4),
+        "precipIntensityMaxTime": int(InterPhour[int(InterPdayMaxTime[1, idx]), 0]),
         "precipAccumulation": round(InterPdaySum[1, idx] * prepAccumUnit, 4),
         "precipType": pTypeListDay[idx],
         "temperatureHigh": round(InterPdayMax[4, idx], 2),
@@ -852,7 +842,7 @@ async def TimeMachine(
         "windSpeed": round(InterPday[9, idx] * windUnit, 2),
         "windGust": round(InterPday[14, idx] * windUnit, 2),
         "windGustTime": int(InterPhour[int(InterPdayMaxTime[14, idx]), 0]),
-        "windBearing": round(InterPday[11, idx], 2),
+        "windBearing": int(round(InterPday[11, idx], 0)),
         "cloudCover": round(InterPday[12, idx], 2),
         "temperatureMin": round(InterPdayMin[4, idx], 2),
         "temperatureMinTime": int(InterPhour[int(InterPdayMinTime[4, idx]), 0]),
@@ -869,13 +859,13 @@ async def TimeMachine(
         dayText, dayIcon = calculate_simple_day_text(
             dayDict,
             prepAccumUnit,
-            visUnits=1,
+            visUnits=visUnits,
             windUnit=windUnit,
             tempUnits=tempUnits,
             isDayTime=True,
             rainPrep=dayRainAccum,
             snowPrep=daySnowAccum,
-            icePrep=dayIceAccum,
+            icePrep=ICE_ACCUMULATION,
         )
 
         dayDict["summary"] = translation.translate(["sentence", dayText])
@@ -918,10 +908,13 @@ async def TimeMachine(
     cText = hTextList[currentIDX]
     pTypeCurrent = pTypeList[currentIDX]
 
-    # Convert intensity to accumulation based on type
-    currentRainAccum, currentSnowAccum, currentIceAccum = calculate_precip_accumulation(
-        pTypeCurrent, InterPcurrent[1], prepIntensityUnit, prepAccumUnit
-    )
+    # Calculate type-based accumulation for text summaries
+    currentRainAccum = 0
+    currentSnowAccum = 0
+    if pTypeCurrent == "snow":
+        currentSnowAccum += InterPcurrent[1] * prepAccumUnit
+    else:
+        currentRainAccum += InterPcurrent[1] * prepAccumUnit
 
     returnOBJ = dict()
     returnOBJ["latitude"] = round(lat, 4)
@@ -944,7 +937,7 @@ async def TimeMachine(
         returnOBJ["currently"]["pressure"] = round(InterPcurrent[8] * pressUnits, 2)
         returnOBJ["currently"]["windSpeed"] = round(InterPcurrent[9] * windUnit, 2)
         returnOBJ["currently"]["windGust"] = round(InterPcurrent[9] * windUnit, 2)
-        returnOBJ["currently"]["windBearing"] = round(InterPcurrent[11], 2)
+        returnOBJ["currently"]["windBearing"] = int(round(InterPcurrent[11], 0))
         returnOBJ["currently"]["cloudCover"] = round(InterPcurrent[12], 2)
 
         # Update the text
@@ -960,7 +953,7 @@ async def TimeMachine(
                 currentDay,
                 currentRainAccum,
                 currentSnowAccum,
-                currentIceAccum,
+                ICE_ACCUMULATION,
                 "current",
                 InterPcurrent[1] * prepIntensityUnit,
             )
@@ -990,23 +983,6 @@ async def TimeMachine(
             datetime.datetime.utcnow() - T_Start
         ).microseconds
 
-    print("Complete ERA5 Request")
+    logging.info("Complete ERA5 Request")
 
     return ORJSONResponse(content=returnOBJ, headers={"X-Node-ID": platform.node()})
-
-
-def calculate_precip_accumulation(precip_type, intensity, intensity_unit, accum_unit):
-    rain_accum, snow_accum, ice_accum = 0, 0, 0
-
-    if intensity > 0:
-        base_accum = intensity / intensity_unit * accum_unit
-
-        if precip_type == "rain":
-            rain_accum = base_accum
-        elif precip_type == "snow":
-            # 1:10 since intensity is in liquid water equivalent
-            snow_accum = base_accum * 10
-        elif precip_type == "sleet":
-            ice_accum = base_accum
-
-    return rain_accum, snow_accum, ice_accum
