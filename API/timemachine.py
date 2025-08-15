@@ -912,9 +912,9 @@ async def TimeMachine(
     currentRainAccum = 0
     currentSnowAccum = 0
     if pTypeList[idx] == "snow":
-        currentRainAccum += InterPcurrent[1] * prepAccumUnit
-    else:
         currentSnowAccum += InterPcurrent[1] * prepAccumUnit
+    else:
+        currentRainAccum += InterPcurrent[1] * prepAccumUnit
 
     returnOBJ = dict()
     returnOBJ["latitude"] = round(lat, 4)
