@@ -911,7 +911,7 @@ async def TimeMachine(
     # Calculate type-based accumulation for text summaries
     currentRainAccum = 0
     currentSnowAccum = 0
-    if pTypeList[idx] == "snow":
+    if pTypeCurrent == "snow":
         currentSnowAccum += InterPcurrent[1] * prepAccumUnit
     else:
         currentRainAccum += InterPcurrent[1] * prepAccumUnit
