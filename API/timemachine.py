@@ -106,7 +106,7 @@ async def TimeMachine(
 ) -> dict:
     kerchunkERA5Dir = os.environ.get("ERADIR", "/efs/kerchunk/ERA5_V4/")
 
-    print("Starting ERA5 Request")
+    logging.info("Starting ERA5 Request")
 
     T_Start = datetime.datetime.utcnow()
 
@@ -993,7 +993,7 @@ async def TimeMachine(
             datetime.datetime.utcnow() - T_Start
         ).microseconds
 
-    print("Complete ERA5 Request")
+    logging.info("Complete ERA5 Request")
 
     return ORJSONResponse(content=returnOBJ, headers={"X-Node-ID": platform.node()})
 
