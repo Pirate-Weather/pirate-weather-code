@@ -6,14 +6,14 @@ ujson==5.10.0
 fastapi[standard]==0.116.1
 fastapi-utils==0.8.0
 scipy==1.16.1
-orjson==3.11.1
+orjson==3.11.2
 psutil==5.9.0
 typing-inspect==0.9.0
 watchfiles==1.1.0
 dask==2025.7.0
-xarray==2025.7.1
+xarray==2025.8.0
 pandas==2.3.1
 fastparquet==2024.11.0
 pirateweather-translations==1.2.1
 s3fs==2025.7.0
-aiobotocore[boto3]==2.24.0
+aiobotocore[boto3]==2.24.1
