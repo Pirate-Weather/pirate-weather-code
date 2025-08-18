@@ -16,6 +16,7 @@ import sys
 import time
 import warnings
 from datetime import datetime
+import logging
 
 import numpy as np
 import pandas as pd
@@ -23,18 +24,24 @@ import xarray as xr
 import requests
 import io
 import zipfile
-from pykml import parser  # For parsing KML/KMZ files
+from pykml import parser
 
-import dask.array as da  # For Dask array operations and parallelization
-from scipy.interpolate import griddata  # For numerical point-to-grid interpolation
+import dask.array as da
+from scipy.interpolate import griddata
 from scipy.spatial import (
     cKDTree,
-)  # For categorical (string) nearest-neighbor interpolation
+)
 
-import s3fs  # For S3 operations (uploading processed data)
+import s3fs
 
 # Suppress specific warnings that might arise from pandas/xarray operations with NaNs
 warnings.filterwarnings("ignore", "This pattern is interpreted")
+
+
+# Set up basic logging configuration
+logging.basicConfig(
+    level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 
 # Define KML and DWD namespaces for easier parsing of the XML structure.
@@ -221,6 +228,7 @@ def parse_mosmix_kml(kml_filepath):
                 None,
             )
             if kml_content is None:
+                logging.error(f"Error: No KML file found inside {kml_filepath}.")
                 raise ValueError(f"Error: No KML file found inside {kml_filepath}.")
             root = parser.parse(io.BytesIO(kml_content)).getroot()
     else:
@@ -247,6 +255,7 @@ def parse_mosmix_kml(kml_filepath):
         f"./{KML_NAMESPACE}Document/{KML_NAMESPACE}ExtendedData/{DWD_NAMESPACE}ProductDefinition/{DWD_NAMESPACE}ForecastTimeSteps/{DWD_NAMESPACE}TimeStep"
     )
     if not time_step_elements:
+        logging.error("Error: No global forecast time steps found in KML Document.")
         raise ValueError("Error: No global forecast time steps found in KML Document.")
 
     for ts_elem in time_step_elements:
@@ -259,7 +268,7 @@ def parse_mosmix_kml(kml_filepath):
         .sort_values()
         .tolist()
     )
-    print(f"Found {len(global_forecast_times)} global forecast time steps.")
+    logging.info(f"Found {len(global_forecast_times)} global forecast time steps.")
 
     # Iterate through Placemarks to extract station-specific data
     for placemark in root.findall(f".//{KML_NAMESPACE}Placemark"):
@@ -287,14 +296,14 @@ def parse_mosmix_kml(kml_filepath):
                 lat = float(coords[1])
                 alt = float(coords[2]) if len(coords) > 2 else 0.0
             except ValueError:
-                print(
+                logging.warning(
                     f"Warning: Could not parse coordinates for station ID {station_id}: {coordinates_elem.text}. Setting to NaN."
                 )
                 lon, lat, alt = np.nan, np.nan, np.nan
 
         extended_data_pm = placemark.find(f"{KML_NAMESPACE}ExtendedData")
         if extended_data_pm is None:
-            print(
+            logging.warning(
                 f"Warning: No ExtendedData found for station ID {station_id}. Skipping."
             )
             continue
@@ -316,7 +325,7 @@ def parse_mosmix_kml(kml_filepath):
                 if len(param_values) == len(global_forecast_times):
                     station_forecast_data[element_name] = param_values
                 else:
-                    print(
+                    logging.warning(
                         f"Warning: Mismatch in number of values for '{element_name}' for station {station_id}. Skipping parameter."
                     )
 
@@ -358,7 +367,7 @@ def convert_df_to_xarray(df, global_metadata=None):
         xr.Dataset: Point-based xarray Dataset with 'station_id' and 'time' dimensions.
     """
     if df.empty:
-        print("DataFrame is empty, cannot convert to xarray Dataset.")
+        logging.error("DataFrame is empty, cannot convert to xarray Dataset.")
         return xr.Dataset()
 
     # Create a base xarray Dataset with station_id and time as dimensions
@@ -425,7 +434,7 @@ def convert_df_to_xarray(df, global_metadata=None):
             output_dtypes=[np.float32],  # Specify output data type
         )
     else:
-        print(
+        logging.warning(
             "Warning: Cannot calculate Relative Humidity (RH_2maboveground) due to missing Temperature (TTT) or Dew Point (Td) data. Filling with NaN."
         )
         # Initialize RH with NaNs if calculation is not possible
@@ -535,9 +544,11 @@ def save_to_zarr(xarray_dataset, zarr_path):
     """
     if xarray_dataset.dims:  # Check if dataset is not empty
         xarray_dataset.to_zarr(zarr_path, mode="w", compute=True)
-        print(f"Data successfully saved to Zarr at: {zarr_path}")
+        logging.info(f"Data successfully saved to Zarr at: {zarr_path}")
     else:
-        print("Xarray Dataset is empty (no dimensions found), nothing to save to Zarr.")
+        logging.warning(
+            "Xarray Dataset is empty (no dimensions found), nothing to save to Zarr."
+        )
 
 
 # --- Functions for Gridding and Interpolation ---
@@ -560,12 +571,12 @@ def load_gfs_grid_coordinates(gfs_zarr_path):
         with xr.open_zarr(gfs_zarr_path, consolidated=False, chunks={}) as gfs_ds:
             gfs_lats = gfs_ds.latitude.values
             gfs_lons = gfs_ds.longitude.values
-            print(
+            logging.info(
                 f"Loaded GFS grid: {len(gfs_lats)} latitudes, {len(gfs_lons)} longitudes."
             )
             return gfs_lats, gfs_lons
     except Exception as e:
-        print(f"Error loading GFS grid from {gfs_zarr_path}: {e}")
+        logging.critical(f"Error loading GFS grid from {gfs_zarr_path}: {e}")
         sys.exit(1)
 
 
@@ -709,7 +720,7 @@ def interpolate_dwd_to_grid(
     # --- Interpolate Numerical Variables ---
     for var_name in numerical_variables_to_interpolate:
         if var_name in dwd_ds_point.data_vars:
-            print(f"Scheduling interpolation for numerical variable: {var_name}")
+            logging.info(f"Scheduling interpolation for numerical variable: {var_name}")
             # Use `xr.apply_ufunc` to apply the `_interpolate_single_time_slice_numerical` function
             # across each time slice of the input DWD point data in parallel using Dask.
             gridded_data_var_da = xr.apply_ufunc(
@@ -746,7 +757,7 @@ def interpolate_dwd_to_grid(
 
             gridded_dwd_ds[var_name] = gridded_data_var_da
         else:
-            print(
+            logging.warning(
                 f"Variable {var_name} not found in DWD data, adding as NaN placeholder to gridded dataset."
             )
             # If a numerical variable is missing, add it as a Dask array filled with NaNs
@@ -762,7 +773,7 @@ def interpolate_dwd_to_grid(
 
     # --- Interpolate Categorical (String) Variables like PTYPE_surface ---
     if "PTYPE_surface" in dwd_ds_point.data_vars:
-        print("Scheduling interpolation for PTYPE_surface (string type)...")
+        logging.info("Scheduling interpolation for PTYPE_surface (string type)...")
         # Use `xr.apply_ufunc` for categorical interpolation. Output dtype must be `object` for strings.
         gridded_ptype_var_da = xr.apply_ufunc(
             _interpolate_single_time_slice_categorical,
@@ -788,7 +799,7 @@ def interpolate_dwd_to_grid(
 
         gridded_dwd_ds["PTYPE_surface"] = gridded_ptype_var_da
     else:
-        print(
+        logging.warning(
             "PTYPE_surface not found in DWD data, adding as 'none' placeholder to gridded dataset."
         )
         # If PTYPE_surface is missing, add it as a Dask array filled with "none" strings.
@@ -807,7 +818,7 @@ def interpolate_dwd_to_grid(
     # filling with NaNs if they were not directly interpolated from MOSMIX-S data.
     for var_name in all_zarr_schema_vars:
         if var_name not in gridded_dwd_ds.data_vars and var_name != "time":
-            print(f"Adding placeholder NaN variable: {var_name}")
+            logging.info(f"Adding placeholder NaN variable: {var_name}")
             # Determine appropriate dtype for the placeholder (object for strings, float for numerical)
             dtype_for_placeholder = (
                 object if var_name == "PTYPE_surface" else np.float32
@@ -827,7 +838,11 @@ def interpolate_dwd_to_grid(
 
 
 # --- Main Ingest Execution Block ---
-if __name__ == "__main__":
+# All main logic has been removed from the __main__ block for direct importability.
+# The code below is for demonstration and would typically be called from another script.
+
+
+def main():
     # --- Configuration ---
     # URL for the DWD MOSMIX-S latest 240-hour forecast KMZ file
     dwd_mosmix_url = "https://opendata.dwd.de/weather/local_forecasts/mos/MOSMIX_S/all_stations/kml/MOSMIX_S_LATEST_240.kmz"
@@ -874,28 +889,30 @@ if __name__ == "__main__":
     T0 = time.time()  # Start timer for script execution
 
     # --- Step 1: Download and Parse DWD MOSMIX-S KML/KMZ Data ---
-    print(f"\n--- Attempting to download DWD MOSMIX data from: {dwd_mosmix_url} ---")
+    logging.info(
+        f"\n--- Attempting to download DWD MOSMIX data from: {dwd_mosmix_url} ---"
+    )
     try:
         response = requests.get(dwd_mosmix_url, stream=True)
         response.raise_for_status()  # Raises HTTPError for bad responses (4xx or 5xx)
         with open(os.path.join(tmpDIR, downloaded_kmz_file), "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-        print(
+        logging.info(
             f"File downloaded successfully to: {os.path.join(tmpDIR, downloaded_kmz_file)}"
         )
     except Exception as e:
-        print(f"Error downloading DWD data: {e}. Exiting.")
+        logging.critical(f"Error downloading DWD data: {e}. Exiting.")
         sys.exit(1)
 
-    print(
+    logging.info(
         f"\n--- Reading and Parsing KML from {os.path.join(tmpDIR, downloaded_kmz_file)} ---"
     )
     df_data, global_metadata = parse_mosmix_kml(
         os.path.join(tmpDIR, downloaded_kmz_file)
     )
     if df_data.empty:
-        print("No data extracted from KML/KMZ. Exiting.")
+        logging.critical("No data extracted from KML/KMZ. Exiting.")
         sys.exit(1)
 
     # --- Ensure unique stations based on latitude and longitude ---
@@ -908,14 +925,14 @@ if __name__ == "__main__":
     unique_station_count = df_data_unique_stations["station_id"].nunique()
 
     if initial_station_count > unique_station_count:
-        print(
+        logging.info(
             f"Removed {initial_station_count - unique_station_count} duplicate stations based on latitude/longitude."
         )
-        print(
+        logging.info(
             f"Proceeding with {unique_station_count} unique stations for interpolation."
         )
     else:
-        print(
+        logging.info(
             "No duplicate stations found based on latitude/longitude in the raw data."
         )
 
@@ -923,7 +940,7 @@ if __name__ == "__main__":
 
     # Extract the base time from the KML metadata (IssueTime) for update checks.
     base_time = global_metadata.get("IssueTime", datetime.utcnow())
-    print(f"Base time for this ingest run (from KML metadata): {base_time}")
+    logging.info(f"Base time for this ingest run (from KML metadata): {base_time}")
 
     # --- Check for Updates (Skip if no new data) ---
     # This prevents redundant processing if the latest downloaded data is not newer than the last ingested.
@@ -937,50 +954,58 @@ if __name__ == "__main__":
             with s3.open(f"{s3_bucket_name}/{s3_time_pickle_key}", "rb") as f:
                 previous_base_time = pickle.load(f)
             if previous_base_time >= base_time:
-                print("No new update to DWD found in S3, ending script.")
+                logging.info("No new update to DWD found in S3, ending script.")
                 sys.exit()
         except FileNotFoundError:
-            print("Previous DWD time pickle not found in S3, proceeding with ingest.")
+            logging.info(
+                "Previous DWD time pickle not found in S3, proceeding with ingest."
+            )
         except Exception as e:
-            print(f"Error checking previous DWD time in S3: {e}. Proceeding.")
+            logging.error(f"Error checking previous DWD time in S3: {e}. Proceeding.")
     else:  # saveType == "Download" (local check)
         if os.path.exists(final_time_pickle_path):
             with open(final_time_pickle_path, "rb") as file:
                 previous_base_time = pickle.load(file)
             if previous_base_time >= base_time:
-                print("No new update to DWD found locally, ending script.")
+                logging.info("No new update to DWD found locally, ending script.")
                 sys.exit()
 
     # --- Step 2: Convert Pandas DataFrame to xarray Dataset (Point-Based Format) ---
     # This step transforms the flat DataFrame into an xarray Dataset with station_id and time as dimensions.
-    print("\n--- Converting DataFrame to xarray Dataset (point-based) ---")
+    logging.info("\n--- Converting DataFrame to xarray Dataset (point-based) ---")
     dwd_ds_point = convert_df_to_xarray(df_data, global_metadata=global_metadata)
     if (
         not dwd_ds_point.dims
     ):  # Check if the resulting dataset has dimensions (i.e., is not empty)
-        print("Point-based xarray Dataset is empty after conversion. Exiting.")
+        logging.critical(
+            "Point-based xarray Dataset is empty after conversion. Exiting."
+        )
         sys.exit(1)
-    print("Point-based DWD Dataset preview:\n", dwd_ds_point)
+    logging.info("Point-based DWD Dataset preview:\n%s", dwd_ds_point)
 
     # --- Step 3: Load GFS Grid Coordinates for Target Interpolation Grid ---
     # This provides the target latitude and longitude arrays for the interpolation.
-    print(f"\n--- Loading GFS grid coordinates from: {gfs_zarr_reference_path} ---")
+    logging.info(
+        f"\n--- Loading GFS grid coordinates from: {gfs_zarr_reference_path} ---"
+    )
     gfs_lats, gfs_lons = load_gfs_grid_coordinates(gfs_zarr_reference_path)
     if gfs_lats is None or gfs_lons is None:
-        print("Failed to load GFS grid coordinates. Exiting.")
+        logging.critical("Failed to load GFS grid coordinates. Exiting.")
         sys.exit(1)
 
     # --- Step 4: Interpolate DWD Point Data to the GFS Grid ---
     # This is the core transformation where point data is converted to gridded data (4D array).
     # Dask is leveraged internally by `xr.apply_ufunc` for parallel processing.
-    print("\n--- Interpolating DWD point data to GFS grid ---")
+    logging.info("\n--- Interpolating DWD point data to GFS grid ---")
     gridded_dwd_ds = interpolate_dwd_to_grid(
         dwd_ds_point, gfs_lats, gfs_lons, api_target_numerical_variables, zarrVars
     )
 
-    print("\nGridded DWD Dataset preview (after interpolation):\n", gridded_dwd_ds)
-    print(f"\nGridded DWD Dataset dimensions: {gridded_dwd_ds.dims}")
-    print(
+    logging.info(
+        "\nGridded DWD Dataset preview (after interpolation):\n%s", gridded_dwd_ds
+    )
+    logging.info(f"\nGridded DWD Dataset dimensions: {gridded_dwd_ds.dims}")
+    logging.info(
         f"Gridded DWD Dataset data variables: {list(gridded_dwd_ds.data_vars.keys())}"
     )
 
@@ -989,7 +1014,7 @@ if __name__ == "__main__":
     gridded_zarr_output_full_path = os.path.join(
         forecast_process_dir, "DWD_Gridded.zarr"
     )
-    print(
+    logging.info(
         f"\n--- Saving Gridded xarray Dataset to Zarr: {gridded_zarr_output_full_path} ---"
     )
     save_to_zarr(gridded_dwd_ds, gridded_zarr_output_full_path)
@@ -1005,11 +1030,13 @@ if __name__ == "__main__":
     station_metadata_path = os.path.join(
         forecast_process_dir, "DWD_Station_Metadata.json"
     )
-    print(f"\n--- Saving original station metadata to: {station_metadata_path} ---")
+    logging.info(
+        f"\n--- Saving original station metadata to: {station_metadata_path} ---"
+    )
     station_metadata_df.to_json(
         station_metadata_path, orient="index"
     )  # Saves as a dictionary-like JSON (station_id as key)
-    print("Station metadata saved.")
+    logging.info("Station metadata saved.")
 
     # --- Step 7: Final Data Transfer (Upload to S3 or Copy Locally) ---
     # This step moves the processed Zarr file and associated metadata to their final destination.
@@ -1032,7 +1059,7 @@ if __name__ == "__main__":
             "ForecastTar_v2", "DWD_Station_Metadata.json"
         )  # S3 key for station metadata
 
-        print(
+        logging.info(
             f"Uploading gridded Zarr from {gridded_zarr_output_full_path} to S3://{s3_bucket_name}/{s3_gridded_zarr_key}"
         )
         s3.put(
@@ -1047,7 +1074,7 @@ if __name__ == "__main__":
         )
         with open(temp_time_pickle_source_path, "wb") as file:
             pickle.dump(base_time, file)
-        print(
+        logging.info(
             f"Uploading time pickle from {temp_time_pickle_source_path} to S3://{s3_bucket_name}/{s3_time_pickle_key_upload}"
         )
         s3.put_file(
@@ -1056,14 +1083,14 @@ if __name__ == "__main__":
         )
 
         # Upload station metadata JSON
-        print(
+        logging.info(
             f"Uploading station metadata from {station_metadata_path} to S3://{s3_bucket_name}/{s3_station_metadata_key}"
         )
         s3.put_file(
             station_metadata_path, f"{s3_bucket_name}/{s3_station_metadata_key}"
         )
 
-        print("All files uploaded to S3.")
+        logging.info("All files uploaded to S3.")
 
     else:  # saveType == "Download" (local copy operation)
         # Save and move time pickle to final local path
@@ -1086,16 +1113,16 @@ if __name__ == "__main__":
             station_metadata_path,
             os.path.join(forecast_path, "DWD_Station_Metadata.json"),
         )
-        print(f"All files copied locally to {forecast_path}.")
+        logging.info(f"All files copied locally to {forecast_path}.")
 
     # --- Final Cleanup ---
     # Remove temporary processing directories.
     if os.path.exists(forecast_process_dir):
         shutil.rmtree(forecast_process_dir)
-        print(f"\nCleaned up processing directory: {forecast_process_dir}")
+        logging.info(f"\nCleaned up processing directory: {forecast_process_dir}")
     if os.path.exists(tmpDIR):
         shutil.rmtree(tmpDIR)
-        print(f"Cleaned up downloads directory: {tmpDIR}")
+        logging.info(f"Cleaned up downloads directory: {tmpDIR}")
 
     T_end = time.time()  # End timer
-    print(f"\nTotal script execution time: {T_end - T0:.2f} seconds")
+    logging.info(f"\nTotal script execution time: {T_end - T0:.2f} seconds")
