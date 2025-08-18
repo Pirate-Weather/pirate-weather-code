@@ -40,8 +40,7 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # Set up basic logging configuration
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
 
@@ -547,7 +546,9 @@ def save_to_zarr(xarray_dataset, zarr_path):
         xarray_dataset.to_zarr(zarr_path, mode="w", compute=True)
         logging.info(f"Data successfully saved to Zarr at: {zarr_path}")
     else:
-        logging.warning("Xarray Dataset is empty (no dimensions found), nothing to save to Zarr.")
+        logging.warning(
+            "Xarray Dataset is empty (no dimensions found), nothing to save to Zarr."
+        )
 
 
 # --- Functions for Gridding and Interpolation ---
@@ -840,6 +841,7 @@ def interpolate_dwd_to_grid(
 # All main logic has been removed from the __main__ block for direct importability.
 # The code below is for demonstration and would typically be called from another script.
 
+
 def main():
     # --- Configuration ---
     # URL for the DWD MOSMIX-S latest 240-hour forecast KMZ file
@@ -887,7 +889,9 @@ def main():
     T0 = time.time()  # Start timer for script execution
 
     # --- Step 1: Download and Parse DWD MOSMIX-S KML/KMZ Data ---
-    logging.info(f"\n--- Attempting to download DWD MOSMIX data from: {dwd_mosmix_url} ---")
+    logging.info(
+        f"\n--- Attempting to download DWD MOSMIX data from: {dwd_mosmix_url} ---"
+    )
     try:
         response = requests.get(dwd_mosmix_url, stream=True)
         response.raise_for_status()  # Raises HTTPError for bad responses (4xx or 5xx)
@@ -953,7 +957,9 @@ def main():
                 logging.info("No new update to DWD found in S3, ending script.")
                 sys.exit()
         except FileNotFoundError:
-            logging.info("Previous DWD time pickle not found in S3, proceeding with ingest.")
+            logging.info(
+                "Previous DWD time pickle not found in S3, proceeding with ingest."
+            )
         except Exception as e:
             logging.error(f"Error checking previous DWD time in S3: {e}. Proceeding.")
     else:  # saveType == "Download" (local check)
@@ -971,13 +977,17 @@ def main():
     if (
         not dwd_ds_point.dims
     ):  # Check if the resulting dataset has dimensions (i.e., is not empty)
-        logging.critical("Point-based xarray Dataset is empty after conversion. Exiting.")
+        logging.critical(
+            "Point-based xarray Dataset is empty after conversion. Exiting."
+        )
         sys.exit(1)
     logging.info("Point-based DWD Dataset preview:\n%s", dwd_ds_point)
 
     # --- Step 3: Load GFS Grid Coordinates for Target Interpolation Grid ---
     # This provides the target latitude and longitude arrays for the interpolation.
-    logging.info(f"\n--- Loading GFS grid coordinates from: {gfs_zarr_reference_path} ---")
+    logging.info(
+        f"\n--- Loading GFS grid coordinates from: {gfs_zarr_reference_path} ---"
+    )
     gfs_lats, gfs_lons = load_gfs_grid_coordinates(gfs_zarr_reference_path)
     if gfs_lats is None or gfs_lons is None:
         logging.critical("Failed to load GFS grid coordinates. Exiting.")
@@ -991,7 +1001,9 @@ def main():
         dwd_ds_point, gfs_lats, gfs_lons, api_target_numerical_variables, zarrVars
     )
 
-    logging.info("\nGridded DWD Dataset preview (after interpolation):\n%s", gridded_dwd_ds)
+    logging.info(
+        "\nGridded DWD Dataset preview (after interpolation):\n%s", gridded_dwd_ds
+    )
     logging.info(f"\nGridded DWD Dataset dimensions: {gridded_dwd_ds.dims}")
     logging.info(
         f"Gridded DWD Dataset data variables: {list(gridded_dwd_ds.data_vars.keys())}"
@@ -1018,7 +1030,9 @@ def main():
     station_metadata_path = os.path.join(
         forecast_process_dir, "DWD_Station_Metadata.json"
     )
-    logging.info(f"\n--- Saving original station metadata to: {station_metadata_path} ---")
+    logging.info(
+        f"\n--- Saving original station metadata to: {station_metadata_path} ---"
+    )
     station_metadata_df.to_json(
         station_metadata_path, orient="index"
     )  # Saves as a dictionary-like JSON (station_id as key)
