@@ -2,21 +2,15 @@
 import os
 import pickle
 import shutil
-import subprocess
 import sys
 import time
 import warnings
 import requests
-import xml.etree.ElementTree as ET
 import logging
 from datetime import datetime, timedelta, timezone
 
-import dask.array as da
-import numpy as np
-import pandas as pd
 import s3fs
 import xarray as xr
-import zarr.storage
 
 from dask.diagnostics import ProgressBar
 
@@ -24,8 +18,7 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -80,18 +73,18 @@ hisPeriod = 48
 # This mapping is crucial and needs to be verified by inspecting the actual GRIB file.
 # The keys are placeholders and must be replaced with the actual short names from the FMI data.
 grib_to_zarr_map = {
-    'pressure': 'PRMSL_meansealevel',
-    'temperature': 'TMP_2maboveground',
-    'dewpoint': 'DPT_2maboveground',
-    'humidity': 'RH_2maboveground',
-    'windgust': 'GUST_surface',
-    'windums': 'UGRD_10maboveground',
-    'windvms': 'VGRD_10maboveground',
-    'precipitationamount': 'APCP_surface',
-    'cape': 'CAPE_surface',
-    'totalcloudcover': 'TCDC_entireatmosphere',
-    'visibility': 'VIS_surface',
-    'radiationnetsurfaceswaccumulation': 'DSWRF_surface',
+    "pressure": "PRMSL_meansealevel",
+    "temperature": "TMP_2maboveground",
+    "dewpoint": "DPT_2maboveground",
+    "humidity": "RH_2maboveground",
+    "windgust": "GUST_surface",
+    "windums": "UGRD_10maboveground",
+    "windvms": "VGRD_10maboveground",
+    "precipitationamount": "APCP_surface",
+    "cape": "CAPE_surface",
+    "totalcloudcover": "TCDC_entireatmosphere",
+    "visibility": "VIS_surface",
+    "radiationnetsurfaceswaccumulation": "DSWRF_surface",
 }
 
 
@@ -111,6 +104,7 @@ if saveType == "Download":
 
 T0 = time.time()
 
+
 # Function to get the latest model run time (origintime)
 def get_latest_origintime():
     """
@@ -123,7 +117,9 @@ def get_latest_origintime():
     latest_run_hour = (now_utc.hour // 3) * 3
 
     # The run time is the beginning of the 3-hour block
-    latest_origintime = now_utc.replace(hour=latest_run_hour, minute=0, second=0, microsecond=0)
+    latest_origintime = now_utc.replace(
+        hour=latest_run_hour, minute=0, second=0, microsecond=0
+    )
 
     # If the current time is too close to the latest run hour, the data might not be ready yet.
     # We'll subtract 3 hours to get the previous run, which should be available.
@@ -133,6 +129,7 @@ def get_latest_origintime():
 
     return latest_origintime
 
+
 # %% Construct the FMI download URL
 base_url = "https://opendata.fmi.fi/download"
 producer = "harmonie_scandinavia_surface"
@@ -141,13 +138,13 @@ parameters = "Pressure,Temperature,DewPoint,Humidity,WindUMS,WindVMS,Precipitati
 # Get the latest model run time
 origintime = get_latest_origintime()
 starttime = origintime
-endtime = origintime + timedelta(hours=72) # FMI Harmonie has a 72-hour forecast
+endtime = origintime + timedelta(hours=72)  # FMI Harmonie has a 72-hour forecast
 
 # A more robust solution for the bounding box might be needed, but this is a good start
 bbox = "-18.118179851154,49.765786639371,54.237,75.227023343491"
 projection = "EPSG:4326"
 file_format = "grib2"
-timestep = 60 # 60 minutes
+timestep = 60  # 60 minutes
 
 download_params = {
     "producer": producer,
@@ -159,7 +156,7 @@ download_params = {
     "format": file_format,
     "projection": projection,
     "levels": 0,
-    "timestep": timestep
+    "timestep": timestep,
 }
 
 # Construct the final URL
@@ -189,12 +186,14 @@ logger.info(f"Found latest GRIB file: {grib_url}")
 logger.info(f"Base time: {origintime}")
 
 # %% Download the GRIB file
-local_grib_file = os.path.join(tmpDIR, f"fmi_harmonie_surface_{origintime.strftime('%Y%m%d_%H%M')}.grib2")
+local_grib_file = os.path.join(
+    tmpDIR, f"fmi_harmonie_surface_{origintime.strftime('%Y%m%d_%H%M')}.grib2"
+)
 logger.info(f"Downloading to {local_grib_file}")
 try:
     with requests.get(grib_url, stream=True, timeout=120) as r:
         r.raise_for_status()
-        with open(local_grib_file, 'wb') as f:
+        with open(local_grib_file, "wb") as f:
             for chunk in r.iter_content(chunk_size=8192):
                 f.write(chunk)
     logger.info("Download complete.")
@@ -207,8 +206,8 @@ try:
     # Use cfgrib to open the GRIB file.
     xarray_fmi_data = xr.open_dataset(
         local_grib_file,
-        engine='cfgrib',
-        backend_kwargs={'filter_by_keys': {'shortName': list(grib_to_zarr_map.keys())}}
+        engine="cfgrib",
+        backend_kwargs={"filter_by_keys": {"shortName": list(grib_to_zarr_map.keys())}},
     )
 
     # Rename variables according to our map
@@ -221,9 +220,7 @@ try:
     )
 
     # Ensure a consistent time coordinate, as in the GFS script
-    xarray_fmi_data = xarray_fmi_data.assign_coords(
-        {'time': xarray_fmi_data.time.data}
-    )
+    xarray_fmi_data = xarray_fmi_data.assign_coords({"time": xarray_fmi_data.time.data})
 
     logger.info("Successfully opened and processed GRIB file with xarray.")
 
@@ -251,7 +248,7 @@ if saveType == "S3":
     s3.put(
         forecast_process_path + "_.zarr",
         forecast_path + "/" + ingestVersion + "/FMI.zarr",
-        recursive=True
+        recursive=True,
     )
 
     with open(forecast_process_dir + "/FMI.time.pickle", "wb") as file:
