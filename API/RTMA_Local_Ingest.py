@@ -1,5 +1,5 @@
 # %% RTMA Historical Ingest script
-# Alexander Rey, November 2023
+# Alexander Rey, August 2025
 #
 # This script is designed to download RTMA (Real-Time Mesoscale Analysis)
 # data from a specified historical period and append it to a Zarr archive.
@@ -8,20 +8,23 @@
 # %% Import modules
 import os
 import pickle
-import shutil
-import sys
-import time
 import traceback
 import warnings
+import numpy as np
+import logging
 
 import pandas as pd
 import s3fs
 import xarray as xr
 from herbie import Herbie
-from metpy.units import units
 from metpy.calc import relative_humidity_from_specific_humidity
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 # %% Setup paths and parameters
 ingestVersion = "v27"
@@ -29,9 +32,7 @@ ingestVersion = "v27"
 analysis_process_dir = os.getenv(
     "analysis_process_dir", default="/home/ubuntu/Weather/RTMA-Historic"
 )
-historic_path = os.getenv(
-    "historic_path", default="/home/ubuntu/Weather/History/RTMA"
-)
+historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/History/RTMA")
 tmpDIR = analysis_process_dir + "/Downloads"
 
 saveType = os.getenv("save_type", default="Download")
@@ -52,16 +53,16 @@ def convert_specific_to_relative_humidity(ds):
         p = ds["pressfc"].metpy.quantify()  # Surface pressure
 
         rh = relative_humidity_from_specific_humidity(p, T, q)
-        ds['rh'] = (('latitude', 'longitude'), rh.magnitude)
-        ds['rh'].attrs['units'] = '%'
-        ds['rh'].attrs['long_name'] = 'Relative Humidity'
+        ds["rh"] = (("latitude", "longitude"), rh.magnitude)
+        ds["rh"].attrs["units"] = "%"
+        ds["rh"].attrs["long_name"] = "Relative Humidity"
 
     except Exception as e:
-        print(f"Error converting specific humidity: {e}")
+        logging.error(f"Error converting specific humidity: {e}")
         traceback.print_exc()
-        ds['rh'] = xr.full_like(ds['tmp'], np.nan)
-        ds['rh'].attrs['units'] = '%'
-        ds['rh'].attrs['long_name'] = 'Relative Humidity (Calculation Failed)'
+        ds["rh"] = xr.full_like(ds["tmp"], np.nan)
+        ds["rh"].attrs["units"] = "%"
+        ds["rh"].attrs["long_name"] = "Relative Humidity (Calculation Failed)"
     return ds
 
 
@@ -71,13 +72,11 @@ def main():
     """
     # Create the date range to download. This example downloads the past 7 days.
     # The end time is set to 1 hour ago to ensure the most recent data is available.
-    start_time = pd.Timestamp.utcnow().floor('1H') - pd.Timedelta(days=7)
-    end_time = pd.Timestamp.utcnow().floor('1H') - pd.Timedelta(hours=1)
+    start_time = pd.Timestamp.utcnow().floor("1H") - pd.Timedelta(days=7)
+    end_time = pd.Timestamp.utcnow().floor("1H") - pd.Timedelta(hours=1)
 
     # Generate a list of dates/times for each hour
-    dates = pd.date_range(
-        start=start_time, end=end_time, freq='1H'
-    )
+    dates = pd.date_range(start=start_time, end=end_time, freq="1H")
 
     # Define variable mapping from GRIB short names to desired names
     variable_mapping = {
@@ -109,13 +108,13 @@ def main():
     ]
 
     for date in dates:
-        print(f"Processing data for: {date}")
+        logging.info(f"Processing data for: {date}")
         try:
             H = Herbie(date, model="rtma")
 
             # Check if the file exists
             if H.grib_path is None:
-                print(f"File not found for {date}, skipping...")
+                logging.warning(f"File not found for {date}, skipping...")
                 continue
 
             # Read the GRIB2 file using xarray and cfgrib
@@ -137,27 +136,27 @@ def main():
             else:
                 store = store_path
                 os.makedirs(os.path.dirname(store_path), exist_ok=True)
-            
+
             # Check if Zarr store exists to decide between 'w' and 'a' mode
             if saveType == "S3" and s3.exists(store_path):
-                mode = 'a'
+                mode = "a"
             elif saveType != "S3" and os.path.exists(store_path):
-                mode = 'a'
+                mode = "a"
             else:
-                mode = 'w'
-            
+                mode = "w"
+
             # Save or append the data to the Zarr store
-            ds.to_zarr(store=store, mode=mode, append_dim='time', consolidated=True)
-            
-            print(f"Successfully processed and saved data for {date}")
+            ds.to_zarr(store=store, mode=mode, append_dim="time", consolidated=True)
+
+            logging.info(f"Successfully processed and saved data for {date}")
 
         except Exception as e:
-            print(f"Failed to process RTMA data for {date}: {e}")
+            logging.error(f"Failed to process RTMA data for {date}: {e}")
             traceback.print_exc()
             continue
-    
+
     # After the loop, save the latest processed time
-    base_time = pd.Timestamp.utcnow().floor('1H') - pd.Timedelta(hours=1)
+    base_time = pd.Timestamp.utcnow().floor("1H") - pd.Timedelta(hours=1)
     time_file_path = f"{historic_path}/{ingestVersion}/RTMA.time.pickle"
     if saveType == "S3":
         with s3.open(time_file_path, "wb") as f:
@@ -166,7 +165,3 @@ def main():
         os.makedirs(os.path.dirname(time_file_path), exist_ok=True)
         with open(time_file_path, "wb") as f:
             pickle.dump(base_time, f)
-
-
-if __name__ == "__main__":
-    main()
