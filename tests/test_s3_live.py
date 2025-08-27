@@ -16,7 +16,7 @@ _cached_client = None
 def _get_client():
     """Load ``responseLocal`` and return a :class:`TestClient`."""
     global _cached_client
-    
+
     if _cached_client is not None:
         return _cached_client
 
