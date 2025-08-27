@@ -9,9 +9,16 @@ from fastapi.testclient import TestClient
 
 PW_API = os.environ.get("PW_API")
 
+# Cache the client to avoid reloading the module multiple times
+_cached_client = None
+
 
 def _get_client():
     """Load ``responseLocal`` and return a :class:`TestClient`."""
+    global _cached_client
+    
+    if _cached_client is not None:
+        return _cached_client
 
     os.environ["STAGE"] = "TESTING"
     os.environ["save_type"] = "S3"
@@ -23,7 +30,8 @@ def _get_client():
     spec = importlib.util.spec_from_file_location("responseLocal", response_path)
     response_local = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(response_local)
-    return TestClient(response_local.app)
+    _cached_client = TestClient(response_local.app)
+    return _cached_client
 
 
 def _check_forecast_structure(data: dict) -> None:

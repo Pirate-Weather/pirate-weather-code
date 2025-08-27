@@ -14,6 +14,7 @@ import time
 from collections import Counter
 import traceback
 from typing import Union
+import random
 
 import boto3
 import s3fs
@@ -76,6 +77,25 @@ def _add_custom_header(request, **kwargs):
     request.headers["apikey"] = pw_api_key
 
 
+def _retry_s3_operation(operation, max_retries=5, base_delay=1):
+    """Retry S3 operations with exponential backoff for rate limiting."""
+    for attempt in range(max_retries):
+        try:
+            return operation()
+        except Exception as e:
+            # Check if it's a rate limiting error
+            if "429" in str(e) or "Too Many Requests" in str(e):
+                if attempt < max_retries - 1:
+                    # Calculate delay with exponential backoff and jitter
+                    delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                    print(f"S3 rate limit hit (attempt {attempt + 1}/{max_retries}), retrying in {delay:.2f}s: {e}")
+                    time.sleep(delay)
+                    continue
+            # Re-raise the exception if it's not rate limiting or max retries reached
+            raise e
+    raise Exception(f"Failed after {max_retries} attempts")
+
+
 def download_if_newer(
     s3_bucket, s3_object_key, local_file_path, local_lmdb_path, initialDownload
 ):
@@ -93,7 +113,8 @@ def download_if_newer(
         )
 
         # Get the last modified timestamp of the S3 object
-        s3_response = s3_client.head_object(Bucket=s3_bucket, Key=s3_object_key)
+        # Use retry logic to handle rate limiting
+        s3_response = _retry_s3_operation(lambda: s3_client.head_object(Bucket=s3_bucket, Key=s3_object_key))
         s3_last_modified = s3_response["LastModified"].timestamp()
     else:
         # If saved locally, get the last modified timestamp of the local file
@@ -113,9 +134,9 @@ def download_if_newer(
         if s3_last_modified > local_last_modified:
             # Download the file
             if save_type == "S3":
-                s3_client.download_file(
+                _retry_s3_operation(lambda: s3_client.download_file(
                     s3_bucket, s3_object_key, local_file_path, Config=config
-                )
+                ))
             else:
                 # Copy the local file over
                 shutil.copy(s3_bucket + "/" + s3_object_key, local_file_path)
@@ -131,9 +152,9 @@ def download_if_newer(
     else:
         # Download the file
         if save_type == "S3":
-            s3_client.download_file(
+            _retry_s3_operation(lambda: s3_client.download_file(
                 s3_bucket, s3_object_key, local_file_path, Config=config
-            )
+            ))
         else:
             # Otherwise copy local file
             shutil.copy(s3_bucket + "/" + s3_object_key, local_file_path)
@@ -399,20 +420,20 @@ if STAGE == "TESTING":
         )
         s3.s3.meta.events.register("before-sign.s3.*", _add_custom_header)
 
-        f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/NWS_Alerts.zarr.zip")
+        f = _retry_s3_operation(lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/NWS_Alerts.zarr.zip"))
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
         s3 = s3fs.S3FileSystem(
             key=aws_access_key_id, secret=aws_secret_access_key, version_aware=True
         )
 
-        f = s3.open(
+        f = _retry_s3_operation(lambda: s3.open(
             "s3://"
             + s3_bucket
             + "/ForecastTar_v2/"
             + ingestVersion
             + "/NWS_Alerts.zarr.zip"
-        )
+        ))
         store = S3ZipStore(f)
 
     else:
@@ -422,12 +443,12 @@ if STAGE == "TESTING":
     NWS_Alerts_Zarr = zarr.open(store, mode="r")
 
     if save_type == "S3":
-        f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/SubH.zarr.zip")
+        f = _retry_s3_operation(lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/SubH.zarr.zip"))
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open(
+        f = _retry_s3_operation(lambda: s3.open(
             "s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/SubH.zarr.zip"
-        )
+        ))
         store = S3ZipStore(f)
     else:
         f = s3_bucket + "SubH_v2.zarr.zip"
@@ -437,16 +458,16 @@ if STAGE == "TESTING":
     print("SubH Read")
 
     if save_type == "S3":
-        f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/HRRR_6H.zarr.zip")
+        f = _retry_s3_operation(lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/HRRR_6H.zarr.zip"))
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open(
+        f = _retry_s3_operation(lambda: s3.open(
             "s3://"
             + s3_bucket
             + "/ForecastTar_v2/"
             + ingestVersion
             + "/HRRR_6H.zarr.zip"
-        )
+        ))
         store = S3ZipStore(f)
     else:
         f = s3_bucket + "HRRR_6H.zarr.zip"
@@ -456,12 +477,12 @@ if STAGE == "TESTING":
     print("HRRR_6H Read")
 
     if save_type == "S3":
-        f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/GFS.zarr.zip")
+        f = _retry_s3_operation(lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/GFS.zarr.zip"))
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open(
+        f = _retry_s3_operation(lambda: s3.open(
             "s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/GFS.zarr.zip"
-        )
+        ))
         store = S3ZipStore(f)
     else:
         f = s3_bucket + "GFS.zarr.zip"
@@ -471,12 +492,12 @@ if STAGE == "TESTING":
     print("GFS Read")
 
     if save_type == "S3":
-        f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/GEFS.zarr.zip")
+        f = _retry_s3_operation(lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/GEFS.zarr.zip"))
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open(
+        f = _retry_s3_operation(lambda: s3.open(
             "s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/GEFS.zarr.zip"
-        )
+        ))
         store = S3ZipStore(f)
     else:
         f = s3_bucket + "GEFS.zarr.zip"
@@ -486,15 +507,15 @@ if STAGE == "TESTING":
     print("GEFS Read")
 
     if save_type == "S3":
-        f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/NBM.zarr.zip")
+        f = _retry_s3_operation(lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/NBM.zarr.zip"))
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
         # print('USE VERSION NBM')
         # f = s3.open("s3://" + s3_bucket + "/NBM.zarr.zip",
         #             version_id="sfWxulLYHDWCQTiM2u0v.x_Sg4pTwpG7")
-        f = s3.open(
+        f = _retry_s3_operation(lambda: s3.open(
             "s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/NBM.zarr.zip"
-        )
+        ))
 
         store = S3ZipStore(f)
     else:
@@ -505,16 +526,16 @@ if STAGE == "TESTING":
     print("NBM Read")
 
     if save_type == "S3":
-        f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/NBM_Fire.zarr.zip")
+        f = _retry_s3_operation(lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/NBM_Fire.zarr.zip"))
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open(
+        f = _retry_s3_operation(lambda: s3.open(
             "s3://"
             + s3_bucket
             + "/ForecastTar_v2/"
             + ingestVersion
             + "/NBM_Fire.zarr.zip"
-        )
+        ))
         store = S3ZipStore(f)
     else:
         f = s3_bucket + "NBM_Fire.zarr.zip"
@@ -524,12 +545,12 @@ if STAGE == "TESTING":
     print("NBM Fire Read")
 
     if save_type == "S3":
-        f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/HRRR.zarr.zip")
+        f = _retry_s3_operation(lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/HRRR.zarr.zip"))
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open(
+        f = _retry_s3_operation(lambda: s3.open(
             "s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/HRRR.zarr.zip"
-        )
+        ))
         store = S3ZipStore(f)
     else:
         f = s3_bucket + "HRRR.zarr.zip"
@@ -540,16 +561,16 @@ if STAGE == "TESTING":
 
     if useETOPO:
         if save_type == "S3":
-            f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/ETOPO_DA_C.zarr.zip")
+            f = _retry_s3_operation(lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/ETOPO_DA_C.zarr.zip"))
             store = S3ZipStore(f)
         elif save_type == "S3Zarr":
-            f = s3.open(
+            f = _retry_s3_operation(lambda: s3.open(
                 "s3://"
                 + s3_bucket
                 + "/ForecastTar_v2/"
                 + ingestVersion
                 + "/ETOPO_DA_C.zarr.zip"
-            )
+            ))
             store = S3ZipStore(f)
         else:
             f = s3_bucket + "ETOPO_DA_C.zarr.zip"
