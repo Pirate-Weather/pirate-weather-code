@@ -294,6 +294,12 @@ xarray_forecast_merged["MASSDEN_8maboveground"] = (
     xarray_forecast_merged["MASSDEN_8maboveground"] * 1e9
 )
 
+# Set REFC values < 5 to 0
+xarray_forecast_merged["REFC_entireatmosphere"] = xarray_forecast_merged[
+    "REFC_entireatmosphere"
+].where(xarray_forecast_merged["REFC_entireatmosphere"] >= 5, 0)
+
+
 # Save the dataset with compression and filters for all variables
 compressor = Blosc(cname="lz4", clevel=1)
 filters = [BitRound(keepbits=12)]

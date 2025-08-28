@@ -299,6 +299,12 @@ xarray_forecast_merged["MASSDEN_8maboveground"] = (
     xarray_forecast_merged["MASSDEN_8maboveground"] * 1e9
 )
 
+# Set REFC values < 5 to 0
+xarray_forecast_merged["REFC_entireatmosphere"] = xarray_forecast_merged[
+    "REFC_entireatmosphere"
+].where(xarray_forecast_merged["REFC_entireatmosphere"] >= 5, 0)
+
+
 # %% Save merged and processed xarray dataset to disk using zarr with compression
 # Define the path to save the zarr dataset
 

@@ -1437,7 +1437,6 @@ async def PW_Forecast(
                     },
                     cache=False,
                     drop_variables=[
-                        "REFC_entireatmosphere",
                         "DSWRF_surface",
                         "CAPE_surface",
                     ],
@@ -1462,6 +1461,7 @@ async def PW_Forecast(
                             "CRAIN_surface",
                             "TCDC_entireatmosphere",
                             "MASSDEN_8maboveground",
+                            "REFC_entireatmosphere",
                         )
                     else:
                         HRRRHzarrVars = (
@@ -1482,6 +1482,7 @@ async def PW_Forecast(
                             "CRAIN_surface",
                             "TCDC_entireatmosphere",
                             "MASSDEN_8maboveground",
+                            "REFC_entireatmosphere",
                         )
 
                     dataOut_hrrrh = np.zeros((len(xr_mf.time), len(HRRRHzarrVars)))
@@ -1493,6 +1494,13 @@ async def PW_Forecast(
                         dataOut_hrrrh[:, vIDX + 1] = (
                             xr_mf[v][:, y_hrrr, x_hrrr].compute().data
                         )
+
+                    # Sanity check for REFC < 5 dBZ on HRRR
+                    # REFC_entireatmosphere is at index 17
+                    dataOut_hrrrh[:, 17] = np.where(
+                        dataOut_hrrrh[:, 17] < 5, 0, dataOut_hrrrh[:, 17]
+                    )
+
                     now2 = time.time()
 
                 # Timing Check
@@ -1722,7 +1730,7 @@ async def PW_Forecast(
             parallel=True,
             storage_options={"key": aws_access_key_id, "secret": aws_secret_access_key},
             cache=False,
-            drop_variables=["REFC_entireatmosphere", "DSWRF_surface", "CAPE_surface"],
+            drop_variables=["DSWRF_surface", "CAPE_surface"],
         ) as xr_mf:
             now2 = time.time()
             if TIMING:
@@ -1753,6 +1761,7 @@ async def PW_Forecast(
                     "DUVB_surface",
                     "Storm_Distance",
                     "Storm_Direction",
+                    "REFC_entireatmosphere",
                 )
             else:
                 GFSzarrVars = (
@@ -1777,6 +1786,7 @@ async def PW_Forecast(
                     "DUVB_surface",
                     "Storm_Distance",
                     "Storm_Direction",
+                    "REFC_entireatmosphere",
                 )
 
             dataOut_gfs = np.zeros((len(xr_mf.time), len(GFSzarrVars)))
@@ -1785,6 +1795,11 @@ async def PW_Forecast(
 
             for vIDX, v in enumerate(GFSzarrVars[1:]):
                 dataOut_gfs[:, vIDX + 1] = xr_mf[v][:, y_p, x_p].compute().data
+
+            # Sanity check for REFC < 5 dBZ on GFS
+            # REFC_entireatmosphere is at index 21
+            dataOut_gfs[:, 21] = np.where(dataOut_gfs[:, 21] < 5, 0, dataOut_gfs[:, 21])
+
             now3 = time.time()
 
         if TIMING:
@@ -1925,6 +1940,33 @@ async def PW_Forecast(
     results = await asyncio.gather(*zarrTasks.values())
     zarr_results = {key: result for key, result in zip(zarrTasks.keys(), results)}
 
+    # Apply sanity checks for REFC < 5 dBZ right after data is loaded.
+    # This is ideal for development when using pre-ingested data.
+    # For production, this logic is best placed in the ingest scripts.
+    if readHRRR:
+        if zarr_results.get("SubH") is not False:
+            # Sub-Hourly HRRR: REFC is at index 12
+            zarr_results["SubH"][:, 12] = np.where(
+                zarr_results["SubH"][:, 12] < 5, 0, zarr_results["SubH"][:, 12]
+            )
+        if zarr_results.get("HRRR_6H") is not False:
+            # 6-Hourly HRRR: REFC is at index 17
+            zarr_results["HRRR_6H"][:, 17] = np.where(
+                zarr_results["HRRR_6H"][:, 17] < 5, 0, zarr_results["HRRR_6H"][:, 17]
+            )
+        if zarr_results.get("HRRR") is not False:
+            # Hourly HRRR: REFC is at index 17
+            zarr_results["HRRR"][:, 17] = np.where(
+                zarr_results["HRRR"][:, 17] < 5, 0, zarr_results["HRRR"][:, 17]
+            )
+
+    if readGFS:
+        if zarr_results.get("GFS") is not False:
+            # GFS: REFC is at index 21
+            zarr_results["GFS"][:, 21] = np.where(
+                zarr_results["GFS"][:, 21] < 5, 0, zarr_results["GFS"][:, 21]
+            )
+
     if readHRRR:
         dataOut = zarr_results["SubH"]
         dataOut_h2 = zarr_results["HRRR_6H"]
@@ -1992,7 +2034,8 @@ async def PW_Forecast(
 
     if readGFS:
         dataOut_gfs = zarr_results["GFS"]
-        gfsRunTime = dataOut_gfs[47, 0]  # 48-1
+        if dataOut_gfs is not False:
+            gfsRunTime = dataOut_gfs[47, 0]  # 48-1
 
     if readGEFS:
         dataOut_gefs = zarr_results["GEFS"]
@@ -2195,12 +2238,13 @@ async def PW_Forecast(
                 else:
                     HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), np.nan)
                     # TODO: The sizes of the 0-18 and 18-48 are differernt because of the REFC_entireatmosphere param
-                    # Need to either add this to 18-48 or just keep it for the first 18 hours
-                    HRRR_Merged[0 : (67 - HRRR_StartIDX) + (31 - H2_StartIDX), 0:20] = (
+                    # The 0-18 hour HRRR data (dataOut_hrrrh) has fewer columns than the 18-48 hour data (dataOut_h2)
+                    # when in timeMachine mode. Only concatenate the common columns (0-17).
+                    HRRR_Merged[0 : (67 - HRRR_StartIDX) + (31 - H2_StartIDX), 0:18] = (
                         np.concatenate(
                             (
-                                dataOut_hrrrh[HRRR_StartIDX:, 0:20],
-                                dataOut_h2[H2_StartIDX:, 0:20],
+                                dataOut_hrrrh[HRRR_StartIDX:, 0:18],
+                                dataOut_h2[H2_StartIDX:, 0:18],
                             ),
                             axis=0,
                         )
@@ -2669,6 +2713,13 @@ async def PW_Forecast(
                 left=np.nan,
                 right=np.nan,
             )
+            hrrrSubHInterpolation[:, 12] = np.interp(
+                minute_array_grib,
+                HRRR_Merged[:, 0].squeeze(),
+                HRRR_Merged[:, 17],
+                left=np.nan,
+                right=np.nan,
+            )
 
             # Visibility is at a weird index
             hrrrSubHInterpolation[:, 14] = np.interp(
@@ -2763,13 +2814,17 @@ async def PW_Forecast(
 
     # Keep it simple for now
     if "hrrrsubh" in sourceList:
-        InterPminute[:, 1] = hrrrSubHInterpolation[:, 7] * 3600 * prepIntensityUnit
+        InterPminute[:, 1] = (
+            0.036 * pow(0.0625 * hrrrSubHInterpolation[:, 12], 10) * prepIntensityUnit
+        )
     elif "nbm" in sourceList:
         InterPminute[:, 1] = nbmMinuteInterpolation[:, 8] * prepIntensityUnit
     elif "gefs" in sourceList:
         InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * 1 * prepIntensityUnit
     else:  # GFS fallback
-        InterPminute[:, 1] = gfsMinuteInterpolation[:, 10] * 3600 * prepIntensityUnit
+        InterPminute[:, 1] = (
+            0.036 * pow(0.0625 * gfsMinuteInterpolation[:, 21], 10) * prepIntensityUnit
+        )
 
     if "hrrrsubh" not in sourceList:
         # Set intensity to zero if POP == 0

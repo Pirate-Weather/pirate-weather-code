@@ -271,6 +271,12 @@ if spOUT3.returncode != 0:
 # Read the netcdf file using xarray
 xarray_forecast_merged = xr.open_mfdataset(forecast_process_path + "_wgrib2_merged.nc")
 
+
+# Set REFC values < 5 to 0
+xarray_forecast_merged["REFC_entireatmosphere"] = xarray_forecast_merged[
+    "REFC_entireatmosphere"
+].where(xarray_forecast_merged["REFC_entireatmosphere"] >= 5, 0)
+
 if len(xarray_forecast_merged.time) != len(hrrr_range1) * 4:
     print(len(xarray_forecast_merged.time))
     print(len(hrrr_range1) * 4)

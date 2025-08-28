@@ -365,6 +365,11 @@ APCP_surface_tmp[120:, :, :] = APCP_surface_tmp[120:, :, :] / 3
 
 xarray_forecast_merged["APCP_surface"].data = APCP_surface_tmp
 
+# Set REFC values < 5 to 0
+xarray_forecast_merged["REFC_entireatmosphere"] = xarray_forecast_merged[
+    "REFC_entireatmosphere"
+].where(xarray_forecast_merged["REFC_entireatmosphere"] >= 5, 0)
+
 
 # Create a new xarray for storm distance processing using dask
 xarray_forecast_distance = xr.Dataset()
