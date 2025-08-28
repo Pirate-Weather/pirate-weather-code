@@ -1001,7 +1001,7 @@ def dbz_to_rate(dbz_array, precip_type_array):
 
     Args:
         dbz_array (np.ndarray): Radar reflectivity in dBZ.
-        precip_type_array (np.ndarray): Type of precipitation ('rain', 'snow', or 'sleet').
+        precip_type_array (np.ndarray): Type of precipitation ('rain' or 'snow').
 
     Returns:
         np.ndarray: Precipitation rate in mm/h.
@@ -2073,7 +2073,7 @@ async def PW_Forecast(
 
     if readGFS:
         dataOut_gfs = zarr_results["GFS"]
-        if dataOut_gfs is not False:
+        if dataOut_gfs:
             gfsRunTime = dataOut_gfs[47, 0]  # 48-1
 
     if readGEFS:
