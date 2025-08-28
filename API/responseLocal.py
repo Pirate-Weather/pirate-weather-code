@@ -30,13 +30,13 @@ from fastapi.responses import ORJSONResponse
 from fastapi_utils.tasks import repeat_every
 from pirateweather_translations.dynamic_loader import load_all_translations
 from PirateText import calculate_text
+from PirateTextHelper import REFC_THRESHOLD
 from PirateMinutelyText import calculate_minutely_text
 from PirateWeeklyText import calculate_weekly_text
 from PirateDailyText import calculate_day_text
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
-from ingest_utils import REFC_THRESHOLD
 
 Translations = load_all_translations()
 

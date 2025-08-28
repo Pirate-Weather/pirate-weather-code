@@ -9,10 +9,10 @@ import dask.array as da
 import numpy as np
 import time
 from herbie import Path
+from PirateTextHelper import REFC_THRESHOLD
 
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
-REFC_THRESHOLD = 5.0
 
 
 def mask_invalid_data(daskArray, ignoreAxis=None):
