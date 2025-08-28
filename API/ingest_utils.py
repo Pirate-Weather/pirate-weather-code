@@ -3,12 +3,13 @@
 
 import re
 import sys
-
+import xarray as xr
 
 import dask.array as da
 import numpy as np
 import time
 from herbie import Path
+from PirateTextHelper import REFC_THRESHOLD
 
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
@@ -26,6 +27,18 @@ def mask_invalid_data(daskArray, ignoreAxis=None):
         for i in ignoreAxis:
             valid_mask[i, :, :, :] = True
     return da.where(valid_mask, daskArray, np.nan)
+
+
+def mask_invalid_refc(xrArr: "xr.DataArray") -> "xr.DataArray":
+    """Masks REFC values less than 5, setting them to 0.
+
+    Args:
+        xrArr: The input xarray DataArray with REFC values.
+
+    Returns:
+        The masked xarray DataArray.
+    """
+    return xrArr.where(xrArr >= REFC_THRESHOLD, 0)
 
 
 # Linear interpolation of time blocks in a dask array
