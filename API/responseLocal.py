@@ -2073,7 +2073,7 @@ async def PW_Forecast(
 
     if readGFS:
         dataOut_gfs = zarr_results["GFS"]
-        if dataOut_gfs:
+        if dataOut_gfs is not False:
             gfsRunTime = dataOut_gfs[47, 0]  # 48-1
 
     if readGEFS:
