@@ -20,7 +20,7 @@ import zarr
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
-from ingest_utils import mask_invalid_data, validate_grib_stats, mask_invalid_refc
+from ingest_utils import mask_invalid_data, validate_grib_stats
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -270,12 +270,6 @@ if spOUT3.returncode != 0:
 # %% Create XArray
 # Read the netcdf file using xarray
 xarray_forecast_merged = xr.open_mfdataset(forecast_process_path + "_wgrib2_merged.nc")
-
-
-# Set REFC values < 5 to 0
-xarray_forecast_merged["REFC_entireatmosphere"] = mask_invalid_refc(
-    xarray_forecast_merged["REFC_entireatmosphere"]
-)
 
 if len(xarray_forecast_merged.time) != len(hrrr_range1) * 4:
     print(len(xarray_forecast_merged.time))

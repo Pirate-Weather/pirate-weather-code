@@ -22,12 +22,7 @@ from xrspatial import direction, proximity
 
 from dask.diagnostics import ProgressBar
 
-from ingest_utils import (
-    mask_invalid_data,
-    interp_time_block,
-    validate_grib_stats,
-    mask_invalid_refc,
-)
+from ingest_utils import mask_invalid_data, interp_time_block, validate_grib_stats
 
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -369,11 +364,6 @@ APCP_surface_tmp = da.diff(
 APCP_surface_tmp[120:, :, :] = APCP_surface_tmp[120:, :, :] / 3
 
 xarray_forecast_merged["APCP_surface"].data = APCP_surface_tmp
-
-# Set REFC values < 5 to 0
-xarray_forecast_merged["REFC_entireatmosphere"] = mask_invalid_refc(
-    xarray_forecast_merged["REFC_entireatmosphere"]
-)
 
 
 # Create a new xarray for storm distance processing using dask

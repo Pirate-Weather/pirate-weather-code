@@ -36,7 +36,6 @@ from PirateDailyText import calculate_day_text
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
-from ingest_utils import REFC_THRESHOLD
 
 Translations = load_all_translations()
 
@@ -54,7 +53,7 @@ force_now = os.getenv("force_now", default=False)
 
 # Version code for ingest files
 ingestVersion = "v27"
-API_VERSION = "V2.7.7a"
+API_VERSION = "V2.7.6"
 
 
 def setup_logging():
@@ -972,56 +971,6 @@ def calculate_wbgt(
     return wbgt
 
 
-def apply_refc_masking(zarrResults: dict, modelsToCheck: dict) -> dict:
-    """Apply sanity checks for REFC < 5 dBZ right after data is loaded.
-
-    This is a safeguard for development or when using pre-ingested data
-    that might not have been processed by the latest ingest scripts.
-
-    Args:
-        zarrResults: Dictionary of loaded zarr arrays.
-        modelsToCheck: Dictionary mapping model names to their REFC index.
-
-    Returns:
-        The dictionary of zarr arrays with REFC values masked.
-    """
-    for model, refc_index in modelsToCheck.items():
-        if zarrResults.get(model) is not False:
-            zarrResults[model][:, refc_index] = np.where(
-                zarrResults[model][:, refc_index] < REFC_THRESHOLD,
-                0,
-                zarrResults[model][:, refc_index],
-            )
-    return zarrResults
-
-
-def dbz_to_rate(dbz_array, precip_type_array):
-    """
-    Convert dBZ to precipitation rate (mm/h) using a Z-R relationship.
-
-    Args:
-        dbz_array (np.ndarray): Radar reflectivity in dBZ.
-        precip_type_array (np.ndarray): Type of precipitation ('rain', 'snow', or 'sleet').
-
-    Returns:
-        np.ndarray: Precipitation rate in mm/h.
-    """
-    z_array = 10 ** (dbz_array / 10.0)  # Convert dBZ to Z for all values
-
-    # Initialize rate array with default 'rain' coefficients
-    a_array = np.full_like(dbz_array, 200.0, dtype=float)
-    b_array = np.full_like(dbz_array, 1.6, dtype=float)
-
-    # Apply 'snow' coefficients where precip_type is 'snow'
-    snow_mask = precip_type_array == "snow"
-    a_array[snow_mask] = 58.7
-    b_array[snow_mask] = 1.94
-
-    # Calculate precipitation rate using vectorized operations
-    rate_array = (z_array / a_array) ** (1.0 / b_array)
-    return rate_array
-
-
 @app.get("/timemachine/{apikey}/{location}", response_class=ORJSONResponse)
 @app.get("/forecast/{apikey}/{location}", response_class=ORJSONResponse)
 async def PW_Forecast(
@@ -1488,6 +1437,7 @@ async def PW_Forecast(
                     },
                     cache=False,
                     drop_variables=[
+                        "REFC_entireatmosphere",
                         "DSWRF_surface",
                         "CAPE_surface",
                     ],
@@ -1512,7 +1462,6 @@ async def PW_Forecast(
                             "CRAIN_surface",
                             "TCDC_entireatmosphere",
                             "MASSDEN_8maboveground",
-                            "REFC_entireatmosphere",
                         )
                     else:
                         HRRRHzarrVars = (
@@ -1533,7 +1482,6 @@ async def PW_Forecast(
                             "CRAIN_surface",
                             "TCDC_entireatmosphere",
                             "MASSDEN_8maboveground",
-                            "REFC_entireatmosphere",
                         )
 
                     dataOut_hrrrh = np.zeros((len(xr_mf.time), len(HRRRHzarrVars)))
@@ -1545,15 +1493,6 @@ async def PW_Forecast(
                         dataOut_hrrrh[:, vIDX + 1] = (
                             xr_mf[v][:, y_hrrr, x_hrrr].compute().data
                         )
-
-                    # Sanity check for REFC < 5 dBZ on HRRR
-                    refc_idx = HRRRHzarrVars.index("REFC_entireatmosphere")
-                    dataOut_hrrrh[:, refc_idx] = np.where(
-                        dataOut_hrrrh[:, refc_idx] < REFC_THRESHOLD,
-                        0,
-                        dataOut_hrrrh[:, refc_idx],
-                    )
-
                     now2 = time.time()
 
                 # Timing Check
@@ -1783,7 +1722,7 @@ async def PW_Forecast(
             parallel=True,
             storage_options={"key": aws_access_key_id, "secret": aws_secret_access_key},
             cache=False,
-            drop_variables=["DSWRF_surface", "CAPE_surface"],
+            drop_variables=["REFC_entireatmosphere", "DSWRF_surface", "CAPE_surface"],
         ) as xr_mf:
             now2 = time.time()
             if TIMING:
@@ -1814,7 +1753,6 @@ async def PW_Forecast(
                     "DUVB_surface",
                     "Storm_Distance",
                     "Storm_Direction",
-                    "REFC_entireatmosphere",
                 )
             else:
                 GFSzarrVars = (
@@ -1839,7 +1777,6 @@ async def PW_Forecast(
                     "DUVB_surface",
                     "Storm_Distance",
                     "Storm_Direction",
-                    "REFC_entireatmosphere",
                 )
 
             dataOut_gfs = np.zeros((len(xr_mf.time), len(GFSzarrVars)))
@@ -1848,13 +1785,6 @@ async def PW_Forecast(
 
             for vIDX, v in enumerate(GFSzarrVars[1:]):
                 dataOut_gfs[:, vIDX + 1] = xr_mf[v][:, y_p, x_p].compute().data
-
-            # Sanity check for REFC < 5 dBZ on GFS
-            refc_idx = GFSzarrVars.index("REFC_entireatmosphere")
-            dataOut_gfs[:, refc_idx] = np.where(
-                dataOut_gfs[:, refc_idx] < REFC_THRESHOLD, 0, dataOut_gfs[:, refc_idx]
-            )
-
             now3 = time.time()
 
         if TIMING:
@@ -1995,17 +1925,6 @@ async def PW_Forecast(
     results = await asyncio.gather(*zarrTasks.values())
     zarr_results = {key: result for key, result in zip(zarrTasks.keys(), results)}
 
-    # Apply sanity checks for REFC < 5 dBZ right after data is loaded as a
-    # safeguard for development or when using pre-ingested data.
-    modelsToCheck = {}
-    if readHRRR:
-        modelsToCheck.update({"SubH": 12, "HRRR_6H": 17, "HRRR": 17})
-    if readGFS:
-        modelsToCheck.update({"GFS": 21})
-
-    if modelsToCheck:
-        zarr_results = apply_refc_masking(zarr_results, modelsToCheck)
-
     if readHRRR:
         dataOut = zarr_results["SubH"]
         dataOut_h2 = zarr_results["HRRR_6H"]
@@ -2073,8 +1992,7 @@ async def PW_Forecast(
 
     if readGFS:
         dataOut_gfs = zarr_results["GFS"]
-        if dataOut_gfs is not False:
-            gfsRunTime = dataOut_gfs[47, 0]  # 48-1
+        gfsRunTime = dataOut_gfs[47, 0]  # 48-1
 
     if readGEFS:
         dataOut_gefs = zarr_results["GEFS"]
@@ -2277,17 +2195,15 @@ async def PW_Forecast(
                 else:
                     HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), np.nan)
                     # TODO: The sizes of the 0-18 and 18-48 are differernt because of the REFC_entireatmosphere param
-                    # The 0-18 hour HRRR data (dataOut_hrrrh) has fewer columns than the 18-48 hour data (dataOut_h2)
-                    # when in timeMachine mode. Only concatenate the common columns (0-17).
-                    common_cols = min(dataOut_hrrrh.shape[1], dataOut_h2.shape[1])
-                    HRRR_Merged[
-                        0 : (67 - HRRR_StartIDX) + (31 - H2_StartIDX), 0:common_cols
-                    ] = np.concatenate(
-                        (
-                            dataOut_hrrrh[HRRR_StartIDX:, 0:common_cols],
-                            dataOut_h2[H2_StartIDX:, 0:common_cols],
-                        ),
-                        axis=0,
+                    # Need to either add this to 18-48 or just keep it for the first 18 hours
+                    HRRR_Merged[0 : (67 - HRRR_StartIDX) + (31 - H2_StartIDX), 0:20] = (
+                        np.concatenate(
+                            (
+                                dataOut_hrrrh[HRRR_StartIDX:, 0:20],
+                                dataOut_h2[H2_StartIDX:, 0:20],
+                            ),
+                            axis=0,
+                        )
                     )
 
             # NBM
@@ -2753,13 +2669,6 @@ async def PW_Forecast(
                 left=np.nan,
                 right=np.nan,
             )
-            hrrrSubHInterpolation[:, 12] = np.interp(
-                minute_array_grib,
-                HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, 17],
-                left=np.nan,
-                right=np.nan,
-            )
 
             # Visibility is at a weird index
             hrrrSubHInterpolation[:, 14] = np.interp(
@@ -2829,56 +2738,38 @@ async def PW_Forecast(
     # Less than 5% set to 0
     InterPminute[InterPminute[:, 2] < 0.05, 2] = 0
 
-    # Precipitation Type
-    # IF HRRR, use that, otherwise GEFS
+    # Prep Intensity
+    # Kind of complex, process:
+    # 1. If probability >0:
+    # 2. If HRRR intensity >0, use that, else use NBM, unless one isn't available, then use the other one or GEFS
+
+    # probMask = np.where(InterPminute[:, 2] > 0)
+    #
+    # if ('hrrrsubh' in sourceList) or ('nbm' in sourceList):
+    #     subHMask = np.full(len(InterPminute), False)
+    #
+    #     if ('hrrrsubh' in sourceList):
+    #         subHMask = np.where(hrrrSubHInterpolation[:, 7] > 0)
+    #         InterPminute[subHMask, 1] = hrrrSubHInterpolation[subHMask, 7] * 3600 * prepIntensityUnit
+    #
+    #     if ('nbm' in sourceList):
+    #         InterPminute[probMask & ~subHMask, 1] = nbmMinuteInterpolation[probMask & ~subHMask,8] * prepIntensityUnit
+    # elif  ('hrrrsubh' in sourceList):
+    #     InterPminute[:, 1] = hrrrSubHInterpolation[:, 7] * 3600 * prepIntensityUnit
+    # elif ('nbm' in sourceList):
+    #     InterPminute[:, 1] = nbmMinuteInterpolation[:,8] * prepIntensityUnit
+    # else:
+    #     InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * 1 * prepIntensityUnit
+
+    # Keep it simple for now
     if "hrrrsubh" in sourceList:
-        for i in [8, 9, 10, 11]:
-            InterTminute[:, i - 7] = hrrrSubHInterpolation[:, i]
-    elif "nbm" in sourceList:
-        # 14 = Rain (1,2), 15 = Freezing Rain/ Ice (3,4), 16 = Snow (5,6,7), 17 = Ice (8,9)
-        # https://www.nco.ncep.noaa.gov/pmb/docs/grib2/grib2_doc/grib2_table4-201.shtml
-
-        # Snow
-        InterTminute[:, 1] = nbmMinuteInterpolation[:, 16]
-        # Ice
-        InterTminute[:, 2] = nbmMinuteInterpolation[:, 17]
-        # Freezing Rain
-        InterTminute[:, 3] = nbmMinuteInterpolation[:, 15]
-        # Rain
-        InterTminute[:, 4] = nbmMinuteInterpolation[:, 14]
-    elif "gefs" in sourceList:
-        for i in [4, 5, 6, 7]:
-            InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
-    else:  # GFS Fallback
-        for i in [12, 13, 14, 15]:
-            InterTminute[:, i - 11] = gfsMinuteInterpolation[:, i]
-
-    # If all nan, set pchance to -999, otherwise determine the predominant type
-    maxPchance = (
-        np.argmax(InterTminute, axis=1)
-        if not np.any(np.isnan(InterTminute))
-        else np.full(len(minute_array_grib), 5)
-    )
-    pTypes = ["none", "snow", "sleet", "sleet", "rain", -999]
-    pTypesText = ["Clear", "Snow", "Sleet", "Sleet", "Rain", -999]
-    pTypesIcon = ["clear", "snow", "sleet", "sleet", "rain", -999]
-
-    minuteType = [pTypes[maxPchance[idx]] for idx in range(61)]
-
-    precipTypes = np.array(minuteType)
-
-    if "hrrrsubh" in sourceList:
-        InterPminute[:, 1] = (
-            dbz_to_rate(hrrrSubHInterpolation[:, 12], precipTypes) * prepIntensityUnit
-        )
+        InterPminute[:, 1] = hrrrSubHInterpolation[:, 7] * 3600 * prepIntensityUnit
     elif "nbm" in sourceList:
         InterPminute[:, 1] = nbmMinuteInterpolation[:, 8] * prepIntensityUnit
     elif "gefs" in sourceList:
-        InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * prepIntensityUnit
-    else:
-        InterPminute[:, 1] = (
-            dbz_to_rate(gfsMinuteInterpolation[:, 21], precipTypes) * prepIntensityUnit
-        )
+        InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * 1 * prepIntensityUnit
+    else:  # GFS fallback
+        InterPminute[:, 1] = gfsMinuteInterpolation[:, 10] * 3600 * prepIntensityUnit
 
     if "hrrrsubh" not in sourceList:
         # Set intensity to zero if POP == 0
@@ -2890,6 +2781,29 @@ async def PW_Forecast(
     else:  # Missing
         InterPminute[:, 3] = np.ones(len(minute_array_grib)) * -999
 
+    # Precipitation Type
+    # IF HRRR, use that, otherwise GEFS
+    if "hrrrsubh" in sourceList:
+        for i in [8, 9, 10, 11]:
+            InterTminute[:, i - 7] = hrrrSubHInterpolation[:, i]
+    elif "nbm" in sourceList:
+        InterTminute[:, 1] = nbmMinuteInterpolation[:, 16]
+        InterTminute[:, 2] = nbmMinuteInterpolation[:, 17]
+        InterTminute[:, 3] = nbmMinuteInterpolation[:, 15]
+        InterTminute[:, 4] = nbmMinuteInterpolation[:, 14]
+    elif "gefs" in sourceList:
+        for i in [4, 5, 6, 7]:
+            InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
+    else:  # GFS Fallback
+        for i in [12, 13, 14, 15]:
+            InterTminute[:, i - 11] = gfsMinuteInterpolation[:, i]
+
+    # If all nan, set pchance to -999
+    if np.any(np.isnan(InterTminute)):
+        maxPchance = np.full(len(minute_array_grib), 5)
+    else:
+        maxPchance = np.argmax(InterTminute, axis=1)
+
     # Create list of icons based off of maxPchance
     minuteKeys = [
         "time",
@@ -2898,6 +2812,11 @@ async def PW_Forecast(
         "precipIntensityError",
         "precipType",
     ]
+    pTypes = ["none", "snow", "sleet", "sleet", "rain", -999]
+    pTypesText = ["Clear", "Snow", "Sleet", "Sleet", "Rain", -999]
+    pTypesIcon = ["clear", "snow", "sleet", "sleet", "rain", -999]
+
+    minuteType = [pTypes[maxPchance[idx]] for idx in range(61)]
 
     # Assign pfactors for rain and snow for intensity
     pFacMinute = np.zeros((len(minute_array_grib)))
