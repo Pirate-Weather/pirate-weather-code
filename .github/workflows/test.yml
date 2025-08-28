@@ -18,6 +18,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r Docker/requirements-api.txt
+          pip install -r Docker/requirements-ingest.txt
           pip install pytest
       - name: Run pytest
         env:
