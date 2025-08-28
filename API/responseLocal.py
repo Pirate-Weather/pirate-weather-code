@@ -36,6 +36,7 @@ from PirateDailyText import calculate_day_text
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
+from ingest_utils import REFC_THRESHOLD
 
 Translations = load_all_translations()
 
@@ -969,6 +970,25 @@ def calculate_wbgt(
         wbgt = 0.7 * temperature + 0.3 * (humidity / 100.0 * temperature)
 
     return wbgt
+
+
+def apply_refc_masking(zarr_results, models_to_check):
+    """
+    Apply sanity checks for REFC < 5 dBZ right after data is loaded.
+    This is a safeguard for development or when using pre-ingested data
+    that might not have been processed by the latest ingest scripts.
+
+    :param zarr_results: Dictionary of loaded zarr arrays.
+    :param models_to_check: Dictionary mapping model names to their REFC index.
+    """
+    for model, refc_index in models_to_check.items():
+        if zarr_results.get(model) is not False:
+            zarr_results[model][:, refc_index] = np.where(
+                zarr_results[model][:, refc_index] < REFC_THRESHOLD,
+                0,
+                zarr_results[model][:, refc_index],
+            )
+    return zarr_results
 
 
 @app.get("/timemachine/{apikey}/{location}", response_class=ORJSONResponse)
@@ -1940,32 +1960,16 @@ async def PW_Forecast(
     results = await asyncio.gather(*zarrTasks.values())
     zarr_results = {key: result for key, result in zip(zarrTasks.keys(), results)}
 
-    # Apply sanity checks for REFC < 5 dBZ right after data is loaded.
-    # This is ideal for development when using pre-ingested data.
-    # For production, this logic is best placed in the ingest scripts.
+    # Apply sanity checks for REFC < 5 dBZ right after data is loaded as a
+    # safeguard for development or when using pre-ingested data.
+    modelsToCheck = {}
     if readHRRR:
-        if zarr_results.get("SubH") is not False:
-            # Sub-Hourly HRRR: REFC is at index 12
-            zarr_results["SubH"][:, 12] = np.where(
-                zarr_results["SubH"][:, 12] < 5, 0, zarr_results["SubH"][:, 12]
-            )
-        if zarr_results.get("HRRR_6H") is not False:
-            # 6-Hourly HRRR: REFC is at index 17
-            zarr_results["HRRR_6H"][:, 17] = np.where(
-                zarr_results["HRRR_6H"][:, 17] < 5, 0, zarr_results["HRRR_6H"][:, 17]
-            )
-        if zarr_results.get("HRRR") is not False:
-            # Hourly HRRR: REFC is at index 17
-            zarr_results["HRRR"][:, 17] = np.where(
-                zarr_results["HRRR"][:, 17] < 5, 0, zarr_results["HRRR"][:, 17]
-            )
-
+        modelsToCheck.update({"SubH": 12, "HRRR_6H": 17, "HRRR": 17})
     if readGFS:
-        if zarr_results.get("GFS") is not False:
-            # GFS: REFC is at index 21
-            zarr_results["GFS"][:, 21] = np.where(
-                zarr_results["GFS"][:, 21] < 5, 0, zarr_results["GFS"][:, 21]
-            )
+        modelsToCheck.update({"GFS": 21})
+
+    if modelsToCheck:
+        zarr_results = apply_refc_masking(zarr_results, modelsToCheck)
 
     if readHRRR:
         dataOut = zarr_results["SubH"]

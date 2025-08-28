@@ -12,6 +12,7 @@ from herbie import Path
 
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
+REFC_THRESHOLD = 5.0
 
 
 def mask_invalid_data(daskArray, ignoreAxis=None):
@@ -26,6 +27,13 @@ def mask_invalid_data(daskArray, ignoreAxis=None):
         for i in ignoreAxis:
             valid_mask[i, :, :, :] = True
     return da.where(valid_mask, daskArray, np.nan)
+
+
+def mask_invalid_refc(xr_arr):
+    """
+    Masks REFC values less than 5, setting them to 0.
+    """
+    return xr_arr.where(xr_arr >= REFC_THRESHOLD, 0)
 
 
 # Linear interpolation of time blocks in a dask array

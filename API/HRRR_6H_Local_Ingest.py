@@ -22,7 +22,7 @@ from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 from numcodecs import BitRound, Blosc
 
-from ingest_utils import mask_invalid_data, validate_grib_stats
+from ingest_utils import mask_invalid_data, validate_grib_stats, mask_invalid_refc
 
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -295,9 +295,9 @@ xarray_forecast_merged["MASSDEN_8maboveground"] = (
 )
 
 # Set REFC values < 5 to 0
-xarray_forecast_merged["REFC_entireatmosphere"] = xarray_forecast_merged[
-    "REFC_entireatmosphere"
-].where(xarray_forecast_merged["REFC_entireatmosphere"] >= 5, 0)
+xarray_forecast_merged["REFC_entireatmosphere"] = mask_invalid_refc(
+    xarray_forecast_merged["REFC_entireatmosphere"]
+)
 
 
 # Save the dataset with compression and filters for all variables
