@@ -29,11 +29,11 @@ def mask_invalid_data(daskArray, ignoreAxis=None):
     return da.where(valid_mask, daskArray, np.nan)
 
 
-def mask_invalid_refc(xr_arr):
+def mask_invalid_refc(xrArr):
     """
     Masks REFC values less than 5, setting them to 0.
     """
-    return xr_arr.where(xr_arr >= REFC_THRESHOLD, 0)
+    return xrArr.where(xrArr >= REFC_THRESHOLD, 0)
 
 
 # Linear interpolation of time blocks in a dask array
