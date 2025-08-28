@@ -972,46 +972,54 @@ def calculate_wbgt(
     return wbgt
 
 
-def apply_refc_masking(zarr_results, models_to_check):
-    """
-    Apply sanity checks for REFC < 5 dBZ right after data is loaded.
+def apply_refc_masking(zarrResults: dict, modelsToCheck: dict) -> dict:
+    """Apply sanity checks for REFC < 5 dBZ right after data is loaded.
+
     This is a safeguard for development or when using pre-ingested data
     that might not have been processed by the latest ingest scripts.
 
-    :param zarr_results: Dictionary of loaded zarr arrays.
-    :param models_to_check: Dictionary mapping model names to their REFC index.
+    Args:
+        zarrResults: Dictionary of loaded zarr arrays.
+        modelsToCheck: Dictionary mapping model names to their REFC index.
+
+    Returns:
+        The dictionary of zarr arrays with REFC values masked.
     """
-    for model, refc_index in models_to_check.items():
-        if zarr_results.get(model) is not False:
-            zarr_results[model][:, refc_index] = np.where(
-                zarr_results[model][:, refc_index] < REFC_THRESHOLD,
+    for model, refc_index in modelsToCheck.items():
+        if zarrResults.get(model) is not False:
+            zarrResults[model][:, refc_index] = np.where(
+                zarrResults[model][:, refc_index] < REFC_THRESHOLD,
                 0,
-                zarr_results[model][:, refc_index],
+                zarrResults[model][:, refc_index],
             )
-    return zarr_results
+    return zarrResults
 
 
-def dbz_to_rate(dbz, precip_type="rain"):
+def dbz_to_rate(dbz_array, precip_type_array):
     """
     Convert dBZ to precipitation rate (mm/h) using a Z-R relationship.
 
     Args:
-        bz (float): Radar reflectivity in dBZ.
-        precip_type (str): Type of precipitation ('rain', 'snow', or 'sleet').
+        dbz_array (np.ndarray): Radar reflectivity in dBZ.
+        precip_type_array (np.ndarray): Type of precipitation ('rain', 'snow', or 'sleet').
 
     Returns:
-        float: Precipitation rate in mm/h.
+        np.ndarray: Precipitation rate in mm/h.
     """
-    a = 200.0
-    b = 1.6
-    if precip_type == "snow":
-        # Coefficients for snow (Gunn-Marshall)
-        a = 58.7
-        b = 1.94
+    z_array = 10 ** (dbz_array / 10.0)  # Convert dBZ to Z for all values
 
-    z = 10 ** (dbz / 10.0)  # Convert dBZ to Z
-    rate = (z / a) ** (1.0 / b)  # Calculate precipitation rate
-    return rate
+    # Initialize rate array with default 'rain' coefficients
+    a_array = np.full_like(dbz_array, 200.0, dtype=float)
+    b_array = np.full_like(dbz_array, 1.6, dtype=float)
+
+    # Apply 'snow' coefficients where precip_type is 'snow'
+    snow_mask = precip_type_array == "snow"
+    a_array[snow_mask] = 58.7
+    b_array[snow_mask] = 1.94
+
+    # Calculate precipitation rate using vectorized operations
+    rate_array = (z_array / a_array) ** (1.0 / b_array)
+    return rate_array
 
 
 @app.get("/timemachine/{apikey}/{location}", response_class=ORJSONResponse)
@@ -2857,17 +2865,11 @@ async def PW_Forecast(
 
     minuteType = [pTypes[maxPchance[idx]] for idx in range(61)]
 
-    precip_types = np.array(minuteType)
+    precipTypes = np.array(minuteType)
 
     if "hrrrsubh" in sourceList:
         InterPminute[:, 1] = (
-            np.array(
-                [
-                    dbz_to_rate(dbz, precip_type=ptype)
-                    for dbz, ptype in zip(hrrrSubHInterpolation[:, 12], precip_types)
-                ]
-            )
-            * prepIntensityUnit
+            dbz_to_rate(hrrrSubHInterpolation[:, 12], precipTypes) * prepIntensityUnit
         )
     elif "nbm" in sourceList:
         InterPminute[:, 1] = nbmMinuteInterpolation[:, 8] * prepIntensityUnit
@@ -2875,13 +2877,7 @@ async def PW_Forecast(
         InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * prepIntensityUnit
     else:
         InterPminute[:, 1] = (
-            np.array(
-                [
-                    dbz_to_rate(dbz, precip_type=ptype)
-                    for dbz, ptype in zip(gfsMinuteInterpolation[:, 21], precip_types)
-                ]
-            )
-            * prepIntensityUnit
+            dbz_to_rate(gfsMinuteInterpolation[:, 21], precipTypes) * prepIntensityUnit
         )
 
     if "hrrrsubh" not in sourceList:
