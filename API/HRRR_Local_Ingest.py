@@ -20,7 +20,7 @@ import zarr.storage
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
-from ingest_utils import mask_invalid_data, validate_grib_stats
+from ingest_utils import mask_invalid_data, validate_grib_stats, mask_invalid_refc
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -297,6 +297,11 @@ xarray_forecast_merged["APCP_surface"] = xarray_forecast_merged["APCP_surface"].
 # Adjust smoke units to avoid rounding issues
 xarray_forecast_merged["MASSDEN_8maboveground"] = (
     xarray_forecast_merged["MASSDEN_8maboveground"] * 1e9
+)
+
+# Set REFC values < 5 to 0
+xarray_forecast_merged["REFC_entireatmosphere"] = mask_invalid_refc(
+    xarray_forecast_merged["REFC_entireatmosphere"]
 )
 
 # %% Save merged and processed xarray dataset to disk using zarr with compression
