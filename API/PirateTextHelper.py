@@ -38,6 +38,7 @@ DEFAULT_POP = 1
 MISSING_DATA = -999
 REFC_THRESHOLD = 5.0
 
+
 def Most_Common(lst):
     """
     Finds the most common icon to use as the icon
