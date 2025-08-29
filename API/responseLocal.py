@@ -53,7 +53,7 @@ force_now = os.getenv("force_now", default=False)
 
 # Version code for ingest files
 ingestVersion = "v27"
-API_VERSION = "V2.7.7a"
+API_VERSION = "V2.7.7b"
 
 
 def setup_logging():
@@ -983,6 +983,9 @@ def dbz_to_rate(dbz_array, precip_type_array, min_dbz=5.0):
     Returns:
         np.ndarray: Precipitation rate in mm/h.
     """
+    # Ensure no negative dBZ values
+    dbz_array = np.maximum(dbz_array, 0.0)
+
     # Convert dBZ to Z
     z_array = 10 ** (dbz_array / 10.0)
 
@@ -1001,6 +1004,9 @@ def dbz_to_rate(dbz_array, precip_type_array, min_dbz=5.0):
     # Apply soft threshold for sub-threshold dBZ values
     below_threshold = dbz_array < min_dbz
     rate_array[below_threshold] *= dbz_array[below_threshold] / min_dbz
+
+    # Final check: ensure no negative rates
+    rate_array = np.maximum(rate_array, 0.0)
 
     return rate_array
 
