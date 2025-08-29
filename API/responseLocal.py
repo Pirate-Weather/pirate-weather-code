@@ -30,7 +30,6 @@ from fastapi.responses import ORJSONResponse
 from fastapi_utils.tasks import repeat_every
 from pirateweather_translations.dynamic_loader import load_all_translations
 from PirateText import calculate_text
-from PirateTextHelper import REFC_THRESHOLD
 from PirateMinutelyText import calculate_minutely_text
 from PirateWeeklyText import calculate_weekly_text
 from PirateDailyText import calculate_day_text
@@ -54,7 +53,7 @@ force_now = os.getenv("force_now", default=False)
 
 # Version code for ingest files
 ingestVersion = "v27"
-API_VERSION = "V2.7.7a"
+API_VERSION = "V2.7.7b"
 
 
 def setup_logging():
@@ -972,43 +971,25 @@ def calculate_wbgt(
     return wbgt
 
 
-def apply_refc_masking(zarrResults: dict, modelsToCheck: dict) -> dict:
-    """Apply sanity checks for REFC < 5 dBZ right after data is loaded.
-
-    This is a safeguard for development or when using pre-ingested data
-    that might not have been processed by the latest ingest scripts.
-
-    Args:
-        zarrResults: Dictionary of loaded zarr arrays.
-        modelsToCheck: Dictionary mapping model names to their REFC index.
-
-    Returns:
-        The dictionary of zarr arrays with REFC values masked.
+def dbz_to_rate(dbz_array, precip_type_array, min_dbz=5.0):
     """
-    for model, refc_index in modelsToCheck.items():
-        if zarrResults.get(model) is not False:
-            zarrResults[model][:, refc_index] = np.where(
-                zarrResults[model][:, refc_index] < REFC_THRESHOLD,
-                0,
-                zarrResults[model][:, refc_index],
-            )
-    return zarrResults
-
-
-def dbz_to_rate(dbz_array, precip_type_array):
-    """
-    Convert dBZ to precipitation rate (mm/h) using a Z-R relationship.
+    Convert dBZ to precipitation rate (mm/h) using a Z-R relationship with soft threshold.
 
     Args:
         dbz_array (np.ndarray): Radar reflectivity in dBZ.
-        precip_type_array (np.ndarray): Type of precipitation ('rain' or 'snow').
+        precip_type_array (np.ndarray): Array of precipitation types ('rain' or 'snow').
+        min_dbz (float): Minimum dBZ for soft thresholding. Values below this are scaled linearly.
 
     Returns:
         np.ndarray: Precipitation rate in mm/h.
     """
-    z_array = 10 ** (dbz_array / 10.0)  # Convert dBZ to Z for all values
+    # Ensure no negative dBZ values
+    dbz_array = np.maximum(dbz_array, 0.0)
 
-    # Initialize rate array with default 'rain' coefficients
+    # Convert dBZ to Z
+    z_array = 10 ** (dbz_array / 10.0)
+
+    # Initialize rate coefficients for rain
     a_array = np.full_like(dbz_array, 200.0, dtype=float)
     b_array = np.full_like(dbz_array, 1.6, dtype=float)
 
@@ -1017,8 +998,16 @@ def dbz_to_rate(dbz_array, precip_type_array):
     a_array[snow_mask] = 58.7
     b_array[snow_mask] = 1.94
 
-    # Calculate precipitation rate using vectorized operations
+    # Compute precipitation rate
     rate_array = (z_array / a_array) ** (1.0 / b_array)
+
+    # Apply soft threshold for sub-threshold dBZ values
+    below_threshold = dbz_array < min_dbz
+    rate_array[below_threshold] *= dbz_array[below_threshold] / min_dbz
+
+    # Final check: ensure no negative rates
+    rate_array = np.maximum(rate_array, 0.0)
+
     return rate_array
 
 
@@ -1546,14 +1535,6 @@ async def PW_Forecast(
                             xr_mf[v][:, y_hrrr, x_hrrr].compute().data
                         )
 
-                    # Sanity check for REFC < 5 dBZ on HRRR
-                    refc_idx = HRRRHzarrVars.index("REFC_entireatmosphere")
-                    dataOut_hrrrh[:, refc_idx] = np.where(
-                        dataOut_hrrrh[:, refc_idx] < REFC_THRESHOLD,
-                        0,
-                        dataOut_hrrrh[:, refc_idx],
-                    )
-
                     now2 = time.time()
 
                 # Timing Check
@@ -1849,12 +1830,6 @@ async def PW_Forecast(
             for vIDX, v in enumerate(GFSzarrVars[1:]):
                 dataOut_gfs[:, vIDX + 1] = xr_mf[v][:, y_p, x_p].compute().data
 
-            # Sanity check for REFC < 5 dBZ on GFS
-            refc_idx = GFSzarrVars.index("REFC_entireatmosphere")
-            dataOut_gfs[:, refc_idx] = np.where(
-                dataOut_gfs[:, refc_idx] < REFC_THRESHOLD, 0, dataOut_gfs[:, refc_idx]
-            )
-
             now3 = time.time()
 
         if TIMING:
@@ -1994,17 +1969,6 @@ async def PW_Forecast(
 
     results = await asyncio.gather(*zarrTasks.values())
     zarr_results = {key: result for key, result in zip(zarrTasks.keys(), results)}
-
-    # Apply sanity checks for REFC < 5 dBZ right after data is loaded as a
-    # safeguard for development or when using pre-ingested data.
-    modelsToCheck = {}
-    if readHRRR:
-        modelsToCheck.update({"SubH": 12, "HRRR_6H": 17, "HRRR": 17})
-    if readGFS:
-        modelsToCheck.update({"GFS": 21})
-
-    if modelsToCheck:
-        zarr_results = apply_refc_masking(zarr_results, modelsToCheck)
 
     if readHRRR:
         dataOut = zarr_results["SubH"]
