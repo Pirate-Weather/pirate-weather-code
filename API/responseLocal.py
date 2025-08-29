@@ -30,7 +30,6 @@ from fastapi.responses import ORJSONResponse
 from fastapi_utils.tasks import repeat_every
 from pirateweather_translations.dynamic_loader import load_all_translations
 from PirateText import calculate_text
-from PirateTextHelper import REFC_THRESHOLD
 from PirateMinutelyText import calculate_minutely_text
 from PirateWeeklyText import calculate_weekly_text
 from PirateDailyText import calculate_day_text
@@ -992,7 +991,7 @@ def dbz_to_rate(dbz_array, precip_type_array, min_dbz=5.0):
     b_array = np.full_like(dbz_array, 1.6, dtype=float)
 
     # Apply 'snow' coefficients where precip_type is 'snow'
-    snow_mask = (precip_type_array == "snow")
+    snow_mask = precip_type_array == "snow"
     a_array[snow_mask] = 58.7
     b_array[snow_mask] = 1.94
 
