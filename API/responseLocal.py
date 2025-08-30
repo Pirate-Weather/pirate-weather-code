@@ -53,7 +53,7 @@ force_now = os.getenv("force_now", default=False)
 
 # Version code for ingest files
 ingestVersion = "v27"
-API_VERSION = "V2.7.7c"
+API_VERSION = "V2.7.7d"
 
 
 def setup_logging():
@@ -4292,7 +4292,7 @@ async def PW_Forecast(
     currnetSnowAccum = 0
     currnetIceAccum = 0
 
-    if minuteDict[0]["precipType"] == "rain":
+    if minuteDict[0]["precipType"] in ("rain", "none"):
         currnetRainAccum = (
             minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
         )
