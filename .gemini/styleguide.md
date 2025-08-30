@@ -32,7 +32,7 @@ preferences within our organization.
 
 ## Naming Conventions
 
-* **Variables:** Use lower camel case (lowerCamelCase): `userName`, `totalCount`
+* **Variables:** Use lowercase with underscores (snake_case): `user_name`, `total_count`
 * **Constants:**  Use uppercase with underscores: `MAX_VALUE`, `DATABASE_NAME`
 * **Functions:** Use lowercase with underscores (snake_case): `calculate_total()`, `process_data()`
 * **Classes:** Use CapWords (CamelCase): `UserManager`, `PaymentProcessor`
@@ -120,46 +120,46 @@ DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0
 DEFAULT_VISIBILITY = 1000
 
 
-def calculate_wind_text(wind, windUnit, icon="darksky", mode="both"):
+def calculate_wind_text(wind, wind_unit, icon="darksky", mode="both"):
     """
     Calculates the wind text
 
     Parameters:
     - wind (float) -  The wind speed
-    - windUnit (float) -  The unit of the wind speed
+    - wind_unit (float) -  The unit of the wind speed
     - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the wind will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
 
     Returns:
-    - windText (str) - The textual representation of the wind
-    - windIcon (str) - The icon representation of the wind
+    - wind_text (str) - The textual representation of the wind
+    - wind_icon (str) - The icon representation of the wind
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
     """
-    windText = None
-    windIcon = None
+    wind_text = None
+    wind_icon = None
 
-    lightWindThresh = 6.7056 * windUnit
-    midWindThresh = 10 * windUnit
-    heavyWindThresh = 17.8816 * windUnit
+    light_wind_thresh = 6.7056 * wind_unit
+    mid_wind_thresh = 10 * wind_unit
+    heavy_wind_thresh = 17.8816 * wind_unit
 
-    if wind >= lightWindThresh and wind < midWindThresh:
-        windText = "light-wind"
+    if wind >= light_wind_thresh and wind < mid_wind_thresh:
+        wind_text = "light-wind"
         if icon == "pirate":
-            windIcon = "breezy"
+            wind_icon = "breezy"
         else:
-            windIcon = "wind"
-    elif wind >= midWindThresh and wind < heavyWindThresh:
-        windText = "medium-wind"
-        windIcon = "wind"
-    elif wind >= heavyWindThresh:
-        windText = "heavy-wind"
+            wind_icon = "wind"
+    elif wind >= mid_wind_thresh and wind < heavy_wind_thresh:
+        wind_text = "medium-wind"
+        wind_icon = "wind"
+    elif wind >= heavy_wind_thresh:
+        wind_text = "heavy-wind"
         if icon == "pirate":
-            windIcon = "dangerous-wind"
+            wind_icon = "dangerous-wind"
         else:
-            windIcon = "wind"
+            wind_icon = "wind"
 
     if mode == "summary":
-        return windText
+        return wind_text
     elif mode == "icon":
-        return windIcon
+        return wind_icon
     else:
-        return windText, windIcon
+        return wind_text, wind_icon

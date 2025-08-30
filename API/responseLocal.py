@@ -53,7 +53,7 @@ force_now = os.getenv("force_now", default=False)
 
 # Version code for ingest files
 ingestVersion = "v27"
-API_VERSION = "V2.7.7b"
+API_VERSION = "V2.7.7c"
 
 
 def setup_logging():
@@ -2870,6 +2870,13 @@ async def PW_Forecast(
     )
     # Note, this means that intensity is always in liquid water equivalent
     pFacMinute[(maxPchance == 1)] = 1  # Snow
+
+    if "hrrrsubh" in sourceList:
+        # Sometimes, reflectivity shows precipitation when the type is 'none', which causes the intensity to suddenly drop to 0.
+        # Setting the pFacMinute for the 'None' type to 1 prevents this issue.
+        # Note: This change is worth testing to see if it causes unintended side effects.
+        PTYPE_NONE_IDX = 0
+        pFacMinute[(maxPchance == PTYPE_NONE_IDX)] = 1  # None
 
     minuteTimes = InterPminute[:, 0]
     minuteIntensity = np.maximum(np.round(InterPminute[:, 1] * pFacMinute, 4), 0)
