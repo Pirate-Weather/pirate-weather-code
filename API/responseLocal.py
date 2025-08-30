@@ -4292,7 +4292,7 @@ async def PW_Forecast(
     currnetSnowAccum = 0
     currnetIceAccum = 0
 
-    if minuteDict[0]["precipType"] == "rain":
+    if minuteDict[0]["precipType"] == "rain" or minuteDict[0]["precipType"] == "none":
         currnetRainAccum = (
             minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
         )
