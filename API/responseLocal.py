@@ -4348,7 +4348,7 @@ async def PW_Forecast(
     )
 
     # Storm Bearing from GFS
-    InterPcurrent[17] = GFS_Merged[currentIDX_hrrrh, GFS["storm_bearing"]]
+    InterPcurrent[17] = GFS_Merged[currentIDX_hrrrh, GFS["storm_direction"]]
 
     # Smoke from HRRR
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
