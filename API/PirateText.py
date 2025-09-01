@@ -14,7 +14,7 @@ from PirateTextHelper import (
     humidity_sky_text,
     calculate_thunderstorm_text,
 )
-from API.shared_const import MISSING_DATA
+from shared_const import MISSING_DATA
 
 
 def calculate_text(
