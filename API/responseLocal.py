@@ -3240,7 +3240,7 @@ async def PW_Forecast(
     ### Wind Bearing
     WindBearingHour = np.full((len(hour_array_grib), 3), np.nan)
     if "nbm" in sourceList:
-        WindBearingHour[:, 0] = NBM_Merged[:, NBM["wind_bearing"]]
+        WindBearingHour[:, 0] = NBM_Merged[:, NBM["wind_direction"]]
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         WindBearingHour[:, 1] = np.rad2deg(
             np.mod(
