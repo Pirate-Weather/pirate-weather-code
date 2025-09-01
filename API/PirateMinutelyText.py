@@ -3,7 +3,7 @@
 from PirateTextHelper import calculate_precip_text
 from itertools import groupby
 from operator import itemgetter
-from shared_const import MISSING_DATA
+from API.shared_const import MISSING_DATA
 
 # Number of minutes in an hour
 MINUTES_IN_HOUR = 60

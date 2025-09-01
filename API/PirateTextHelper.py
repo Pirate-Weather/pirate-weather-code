@@ -1,7 +1,7 @@
 # %% Script to contain the helper functions that can be used to generate the text summary of the forecast data for Pirate Weather
 from collections import Counter
-from shared_const import MISSING_DATA
-from text_const import (
+from API.shared_const import MISSING_DATA
+from API.text_const import (
     CLOUD_COVER_THRESHOLDS,
     PRECIP_INTENSITY_THRESHOLDS,
     SNOW_INTENSITY_THRESHOLDS,
