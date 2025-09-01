@@ -45,7 +45,9 @@ def calculate_summary_text(
     wWeekend = False
     dayIndexes = []
     days = []
-    maxCape = maxLiftedIndex = MISSING_DATA  # Could use a constant for missing data if desired
+    maxCape = maxLiftedIndex = (
+        MISSING_DATA  # Could use a constant for missing data if desired
+    )
     numThunderstormDays = 0
 
     # Loop through each index in the precipitation array
@@ -70,7 +72,10 @@ def calculate_summary_text(
             # Calculate the maximum lifted index for the week
             if maxLiftedIndex == MISSING_DATA and day[2]["liftedIndex"] != MISSING_DATA:
                 maxLiftedIndex = day[2]["liftedIndex"]
-            elif maxLiftedIndex != MISSING_DATA and day[2]["liftedIndex"] > maxLiftedIndex:
+            elif (
+                maxLiftedIndex != MISSING_DATA
+                and day[2]["liftedIndex"] > maxLiftedIndex
+            ):
                 maxLiftedIndex = day[2]["liftedIndex"]
 
         # Calculate the number of days with thunderstorms forecasted
