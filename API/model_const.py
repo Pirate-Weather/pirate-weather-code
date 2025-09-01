@@ -61,7 +61,7 @@ GFS = {
     "cloud_cover": 17,
     "uv": 18,
     "storm_distance": 19,
-    "storm_bearing": 20,
+    "storm_direction": 20,
     "refc": 21,
     "solar": 22,
     "cape": 23,
