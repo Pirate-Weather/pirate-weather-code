@@ -1,42 +1,24 @@
 # %% Script to contain the helper functions that can be used to generate the text summary of the forecast data for Pirate Weather
 from collections import Counter
+from API.shared_const import MISSING_DATA
+from API.text_const import (
+    CLOUD_COVER_THRESHOLDS,
+    PRECIP_INTENSITY_THRESHOLDS,
+    SNOW_INTENSITY_THRESHOLDS,
+    HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
+    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
+    FOG_THRESHOLD_METERS,
+    MIST_THRESHOLD_METERS,
+    SMOKE_CONCENTRATION_THRESHOLD_UGM3,
+    TEMP_DEWPOINT_SPREAD_FOR_FOG,
+    TEMP_DEWPOINT_SPREAD_FOR_MIST,
+    WIND_THRESHOLDS,
+    CAPE_THRESHOLDS,
+    LIFTED_INDEX_THRESHOLD,
+)
 import math
-
-# Cloud Cover Thresholds (%)
-cloudyThreshold = 0.875
-mostlyCloudyThreshold = 0.625
-partlyCloudyThreshold = 0.375
-mostlyClearThreshold = 0.125
-
-# Precipitation Intensity Thresholds (mm/h liquid equivalent)
-LIGHT_PRECIP_MM_PER_HOUR = 0.4
-MID_PRECIP_MM_PER_HOUR = 2.5
-HEAVY_PRECIP_MM_PER_HOUR = 10.0
-
-# Snow Intensity Thresholds (mm/h liquid equivalent)
-LIGHT_SNOW_MM_PER_HOUR = 0.13
-MID_SNOW_MM_PER_HOUR = 0.83
-HEAVY_SNOW_MM_PER_HOUR = 3.33
-
-# Icon Thresholds for Precipitation Accumulation (mm liquid equivalent)
-HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM = 0.2
-HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 0.02
-
-DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM = 10.0
-DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0
-
-# Icon Thresholds for Visbility (meters)
-FOG_THRESHOLD_METERS = 1000
-MIST_THRESHOLD_METERS = 10000
-SMOKE_CONCENTRATION_THRESHOLD_UGM3 = 25
-TEMP_DEWPOINT_SPREAD_FOR_FOG = 2
-TEMP_DEWPOINT_SPREAD_FOR_MIST = 3
-DEFAULT_VISIBILITY = 10000
-DEFAULT_POP = 1
-
-# Invalid data
-MISSING_DATA = -999
-REFC_THRESHOLD = 5.0
 
 
 def Most_Common(lst):
@@ -67,19 +49,19 @@ def calculate_sky_icon(cloudCover, isDayTime, icon="darksky"):
     """
     sky_icon = None
 
-    if cloudCover > cloudyThreshold:
+    if cloudCover > CLOUD_COVER_THRESHOLDS["cloudy"]:
         sky_icon = "cloudy"
-    elif cloudCover > mostlyCloudyThreshold and icon == "pirate":
+    elif cloudCover > CLOUD_COVER_THRESHOLDS["mostly_cloudy"] and icon == "pirate":
         if isDayTime:
             sky_icon = "mostly-cloudy-day"
         else:
             sky_icon = "mostly-cloudy-night"
-    elif cloudCover > partlyCloudyThreshold:
+    elif cloudCover > CLOUD_COVER_THRESHOLDS["partly_cloudy"]:
         if isDayTime:
             sky_icon = "partly-cloudy-day"
         else:
             sky_icon = "partly-cloudy-night"
-    elif cloudCover > mostlyClearThreshold and icon == "pirate":
+    elif cloudCover > CLOUD_COVER_THRESHOLDS["mostly_clear"] and icon == "pirate":
         if isDayTime:
             sky_icon = "mostly-clear-day"
         else:
@@ -142,12 +124,12 @@ def calculate_precip_text(
         pop = 1
 
     # In mm/h
-    lightPrecipThresh = LIGHT_PRECIP_MM_PER_HOUR * prepIntensityUnit
-    midPrecipThresh = MID_PRECIP_MM_PER_HOUR * prepIntensityUnit
-    heavyPrecipThresh = HEAVY_PRECIP_MM_PER_HOUR * prepIntensityUnit
-    lightSnowThresh = LIGHT_SNOW_MM_PER_HOUR * prepIntensityUnit
-    midSnowThresh = MID_SNOW_MM_PER_HOUR * prepIntensityUnit
-    heavySnowThresh = HEAVY_SNOW_MM_PER_HOUR * prepIntensityUnit
+    lightPrecipThresh = PRECIP_INTENSITY_THRESHOLDS["light"] * prepIntensityUnit
+    midPrecipThresh = PRECIP_INTENSITY_THRESHOLDS["mid"] * prepIntensityUnit
+    heavyPrecipThresh = PRECIP_INTENSITY_THRESHOLDS["heavy"] * prepIntensityUnit
+    lightSnowThresh = SNOW_INTENSITY_THRESHOLDS["light"] * prepIntensityUnit
+    midSnowThresh = SNOW_INTENSITY_THRESHOLDS["mid"] * prepIntensityUnit
+    heavySnowThresh = SNOW_INTENSITY_THRESHOLDS["heavy"] * prepIntensityUnit
 
     snowIconThresholdHour = HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
     precipIconThresholdHour = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
@@ -430,9 +412,9 @@ def calculate_wind_text(wind, windUnits, icon="darksky", mode="both"):
     if wind == MISSING_DATA:
         return (None, None) if mode == "both" else None
 
-    lightWindThresh = 6.7056 * windUnits
-    midWindThresh = 10 * windUnits
-    heavyWindThresh = 17.8816 * windUnits
+    lightWindThresh = WIND_THRESHOLDS["light"] * windUnits
+    midWindThresh = WIND_THRESHOLDS["mid"] * windUnits
+    heavyWindThresh = WIND_THRESHOLDS["heavy"] * windUnits
 
     if wind >= lightWindThresh and wind < midWindThresh:
         windText = "light-wind"
@@ -544,20 +526,20 @@ def calculate_sky_text(cloudCover, isDayTime, icon="darksky", mode="both"):
     if cloudCover == MISSING_DATA:
         return (None, None) if mode == "both" else None
 
-    if cloudCover > cloudyThreshold:
+    if cloudCover > CLOUD_COVER_THRESHOLDS["cloudy"]:
         skyText = "heavy-clouds"
         skyIcon = calculate_sky_icon(cloudCover, isDayTime, icon)
 
-    elif cloudCover > partlyCloudyThreshold:
+    elif cloudCover > CLOUD_COVER_THRESHOLDS["partly_cloudy"]:
         skyIcon = calculate_sky_icon(cloudCover, isDayTime, icon)
-        if cloudCover > mostlyCloudyThreshold:
+        if cloudCover > CLOUD_COVER_THRESHOLDS["mostly_cloudy"]:
             skyText = "medium-clouds"
 
         else:
             skyText = "light-clouds"
     else:
         skyIcon = calculate_sky_icon(cloudCover, isDayTime, icon)
-        if cloudCover > mostlyClearThreshold:
+        if cloudCover > CLOUD_COVER_THRESHOLDS["mostly_clear"]:
             skyText = "very-light-clouds"
         else:
             skyText = "clear"
@@ -592,12 +574,8 @@ def humidity_sky_text(temp, tempUnits, humidity):
     ):
         return None
 
-    # Only use humid if also warm (>20C)
-    if tempUnits == 0:
-        tempThresh = 68
-    else:
-        tempThresh = 20
-
+    # Only use humid if also warm (>20C or >68F)
+    tempThresh = 68 if tempUnits == 0 else 20
     humidityText = None
     lowHumidityThresh = 0.15
     highHumidityThresh = 0.95
@@ -627,16 +605,16 @@ def calculate_thunderstorm_text(liftedIndex, cape, mode="both"):
     thuText = None
     thuIcon = None
 
-    if 1000 <= cape < 2500:
+    if CAPE_THRESHOLDS["low"] <= cape < CAPE_THRESHOLDS["high"]:
         thuText = "possible-thunderstorm"
-    elif cape >= 2500:
+    elif cape >= CAPE_THRESHOLDS["high"]:
         thuText = "thunderstorm"
         thuIcon = "thunderstorm"
 
     if liftedIndex != MISSING_DATA and thuText is None:
-        if 0 > liftedIndex > -4:
+        if 0 > liftedIndex > LIFTED_INDEX_THRESHOLD:
             thuText = "possible-thunderstorm"
-        elif liftedIndex <= -4:
+        elif liftedIndex <= LIFTED_INDEX_THRESHOLD:
             thuText = "thunderstorm"
             thuIcon = "thunderstorm"
 
