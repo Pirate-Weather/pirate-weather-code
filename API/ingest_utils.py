@@ -9,7 +9,7 @@ import dask.array as da
 import numpy as np
 import time
 from herbie import Path
-from API.api_const import REFC_THRESHOLD
+from API.shared_const import REFC_THRESHOLD
 
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000

@@ -6,6 +6,7 @@ CLOUD_COVER_THRESHOLDS = {
     "mostly_cloudy": 0.625,
     "partly_cloudy": 0.375,
     "mostly_clear": 0.125,
+    "clear": 0.0,
 }
 
 # Precipitation intensity thresholds (mm/h liquid equivalent)

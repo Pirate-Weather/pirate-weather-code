@@ -87,7 +87,7 @@ NBM = {
     "wind_direction": 7,
     "accumulation": 8,
     "cloud_cover": 9,
-    "vis": 10,
+    "visibility": 10,
     "weather": 11,
     "pop": 12,
     "precip_rate": 13,

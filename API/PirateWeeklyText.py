@@ -16,6 +16,7 @@ from API.text_const import (
 )
 from API.shared_const import MISSING_DATA
 
+WEEK_DAYS_MINUS_ONE = 6
 WEEK_DAYS = 7
 WEEK_DAYS_PLUS_ONE = 8
 
@@ -44,7 +45,7 @@ def calculate_summary_text(
     wWeekend = False
     dayIndexes = []
     days = []
-    maxCape = maxLiftedIndex = -999  # Could use a constant for missing data if desired
+    maxCape = maxLiftedIndex = MISSING_DATA  # Could use a constant for missing data if desired
     numThunderstormDays = 0
 
     # Loop through each index in the precipitation array
@@ -60,16 +61,16 @@ def calculate_summary_text(
 
         if "cape" in day[2]:
             # Calculate the maximum cape for the week
-            if maxCape == -999 and day[2]["cape"] != -999:
+            if maxCape == MISSING_DATA and day[2]["cape"] != MISSING_DATA:
                 maxCape = day[2]["cape"]
-            elif maxCape != -999 and day[2]["cape"] > maxCape:
+            elif maxCape != MISSING_DATA and day[2]["cape"] > maxCape:
                 maxCape = day[2]["cape"]
 
         if "liftedIndex" in day[2]:
             # Calculate the maximum lifted index for the week
-            if maxLiftedIndex == -999 and day[2]["liftedIndex"] != -999:
+            if maxLiftedIndex == MISSING_DATA and day[2]["liftedIndex"] != MISSING_DATA:
                 maxLiftedIndex = day[2]["liftedIndex"]
-            elif maxLiftedIndex != -999 and day[2]["liftedIndex"] > maxLiftedIndex:
+            elif maxLiftedIndex != MISSING_DATA and day[2]["liftedIndex"] > maxLiftedIndex:
                 maxLiftedIndex = day[2]["liftedIndex"]
 
         # Calculate the number of days with thunderstorms forecasted
@@ -369,7 +370,7 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
     if all(
         weekArr[i]["temperatureHigh"] < weekArr[i + 1]["temperatureHigh"]
         for i in range(WEEK_DAYS)
-    ) or (highTemp[0] >= WEEK_DAYS and lowTemp[0] <= 1):
+    ) or (highTemp[0] >= WEEK_DAYS_MINUS_ONE and lowTemp[0] <= 1):
         # Set the temperature summary
         return [
             "temperatures-rising",
@@ -380,14 +381,14 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
     elif all(
         weekArr[i]["temperatureHigh"] > weekArr[i + 1]["temperatureHigh"]
         for i in range(WEEK_DAYS)
-    ) or (highTemp[0] <= 1 and lowTemp[0] >= WEEK_DAYS):
+    ) or (highTemp[0] <= 1 and lowTemp[0] >= WEEK_DAYS_MINUS_ONE):
         return [
             "temperatures-falling",
             [lowTemp[3], int(round(lowTemp[2], 0))],
             lowTemp[1],
         ]
     # If the lowest temperatue is in the middle of the week and the highest temperature is at the start or end of the week use the valleying text
-    elif (highTemp[0] <= 1 or highTemp[0] >= WEEK_DAYS) and 0 < lowTemp[
+    elif (highTemp[0] <= 1 or highTemp[0] >= WEEK_DAYS_MINUS_ONE) and 0 < lowTemp[
         0
     ] < WEEK_DAYS_PLUS_ONE:
         return [

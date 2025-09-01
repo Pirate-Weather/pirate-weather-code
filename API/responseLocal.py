@@ -84,6 +84,7 @@ from API.grid_const import (
     NBM_Y_MIN,
     NBM_X_MAX,
     NBM_Y_MAX,
+    US_BOUNDING_BOX,
 )
 from API.shared_const import REFC_THRESHOLD
 
@@ -834,8 +835,6 @@ def cull(lng, lat):
     """
 
     ### TODO: Add Alaska somehow
-
-    from .grid_const import US_BOUNDING_BOX
 
     top = US_BOUNDING_BOX["top"]
     left = US_BOUNDING_BOX["left"]
@@ -3045,7 +3044,7 @@ async def PW_Forecast(
     # NBM
     prcipIntensityHour = np.full((len(hour_array_grib), 3), np.nan)
     if "nbm" in sourceList:
-        prcipIntensityHour[:, 0] = NBM_Merged[:, NBM["precip_date"]]
+        prcipIntensityHour[:, 0] = NBM_Merged[:, NBM["precip_rate"]]
     # HRRR
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         prcipIntensityHour[:, 1] = HRRR_Merged[:, HRRR["precip_rate"]] * 3600
@@ -4323,7 +4322,7 @@ async def PW_Forecast(
         )
     else:
         InterPcurrent[14] = (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["visibilty"]] * interpFac1
+            GFS_Merged[currentIDX_hrrrh_A, GFS["visibility"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["visibility"]] * interpFac2
         )
 
@@ -4486,7 +4485,7 @@ async def PW_Forecast(
     currnetSnowAccum = 0
     currnetIceAccum = 0
 
-    if minuteDict[0]["precipType"] == "rain":
+    if minuteDict[0]["precipType"] in ("rain", "none"):
         currnetRainAccum = (
             minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
         )
