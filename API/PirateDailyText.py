@@ -16,6 +16,7 @@ from API.text_const import (
     DEFAULT_VISIBILITY,
     DEFAULT_POP,
     DEFAULT_HUMIDITY,
+    PRECIP_INTENSITY_THRESHOLDS
 )
 from API.shared_const import MISSING_DATA
 
@@ -987,7 +988,7 @@ def calculate_day_text(
 
         # Check if precipitation is significant enough in this period
         is_precip_in_period = (
-            p_data["snow_accum"] > (2.5 * precip_accum_unit)
+            p_data["snow_accum"] > (PRECIP_INTENSITY_THRESHOLDS["mid"] * precip_accum_unit)
             or p_data["rain_accum"] > (PRECIP_THRESH * precip_accum_unit)
             or p_data["sleet_accum"] > (PRECIP_THRESH * precip_accum_unit)
         )

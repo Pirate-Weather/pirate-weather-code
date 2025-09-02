@@ -3348,7 +3348,7 @@ async def PW_Forecast(
     )
 
     # Set accumulation to zero if POP == 0
-    InterPhour[InterPhour[:, DATA_HOURLY["prob"]] == 0, 17] = 0
+    InterPhour[InterPhour[:, DATA_HOURLY["prob"]] == 0, DATA_HOURLY["accum"]] = 0
 
     ### Near Storm Distance
     if "gfs" in sourceList:
@@ -3420,8 +3420,8 @@ async def PW_Forecast(
             InterPhour[:, DATA_HOURLY["feels_like"]] - 273.15
         ) * 9 / 5 + 32
     else:
-        InterPhour[:, 5:8] = InterPhour[:, 5:8] - tempUnits
-        InterPhour[:, 25] = InterPhour[:, 25] - tempUnits
+        InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] = InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] - tempUnits
+        InterPhour[:, DATA_HOURLY["feels_like"]] = InterPhour[:, DATA_HOURLY["feels_like"]] - tempUnits
 
     # Add a global check for weird values, since nothing should ever be greater than 10000
     # Keep time col
@@ -3548,8 +3548,8 @@ async def PW_Forecast(
         :, DATA_HOURLY["error"] : DATA_HOURLY["temp"]
     ].round(4)
     InterPhour[:, DATA_HOURLY["accum"]] = InterPhour[:, DATA_HOURLY["accum"]].round(4)
-    InterPhour[:, DATA_HOURLY["rain"] : DATA_HOURLY["snow"]] = InterPhour[
-        :, DATA_HOURLY["rain"] : DATA_HOURLY["snow"]
+    InterPhour[:, DATA_HOURLY["rain"] : DATA_HOURLY["fire"]] = InterPhour[
+        :, DATA_HOURLY["rain"] : DATA_HOURLY["fire"]
     ].round(4)
 
     # Fix very small neg from interp to solve -0
@@ -3582,11 +3582,11 @@ async def PW_Forecast(
             (
                 (
                     InterPhour[idx, DATA_HOURLY["rain"]]
-                    + InterPhour[idx, DATA_HOURLY["snow"]]
+                    + InterPhour[idx, DATA_HOURLY["ice"]]
                 )
                 > (0.02 * prepAccumUnit)
             )
-            or (InterPhour[idx, DATA_HOURLY["ice"]] > (0.02 * prepAccumUnit))
+            or (InterPhour[idx, DATA_HOURLY["snow"]] > (0.02 * prepAccumUnit))
         ):
             # If more than 30% chance of precip at any point throughout the day, then the icon for whatever is happening
             # Thresholds set in mm

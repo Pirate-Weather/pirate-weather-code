@@ -45,9 +45,7 @@ def calculate_summary_text(
     wWeekend = False
     dayIndexes = []
     days = []
-    maxCape = maxLiftedIndex = (
-        MISSING_DATA  # Could use a constant for missing data if desired
-    )
+    maxCape = maxLiftedIndex = MISSING_DATA  
     numThunderstormDays = 0
 
     # Loop through each index in the precipitation array
@@ -395,7 +393,7 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
     # If the lowest temperatue is in the middle of the week and the highest temperature is at the start or end of the week use the valleying text
     elif (highTemp[0] <= 1 or highTemp[0] >= WEEK_DAYS_MINUS_ONE) and 0 < lowTemp[
         0
-    ] < WEEK_DAYS_PLUS_ONE:
+    ] < WEEK_DAYS:
         return [
             "temperatures-valleying",
             [lowTemp[3], int(round(lowTemp[2], 0))],
