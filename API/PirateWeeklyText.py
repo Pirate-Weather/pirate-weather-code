@@ -45,7 +45,7 @@ def calculate_summary_text(
     wWeekend = False
     dayIndexes = []
     days = []
-    maxCape = maxLiftedIndex = MISSING_DATA  
+    maxCape = maxLiftedIndex = MISSING_DATA
     numThunderstormDays = 0
 
     # Loop through each index in the precipitation array

@@ -3420,8 +3420,12 @@ async def PW_Forecast(
             InterPhour[:, DATA_HOURLY["feels_like"]] - 273.15
         ) * 9 / 5 + 32
     else:
-        InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] = InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] - tempUnits
-        InterPhour[:, DATA_HOURLY["feels_like"]] = InterPhour[:, DATA_HOURLY["feels_like"]] - tempUnits
+        InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] = (
+            InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] - tempUnits
+        )
+        InterPhour[:, DATA_HOURLY["feels_like"]] = (
+            InterPhour[:, DATA_HOURLY["feels_like"]] - tempUnits
+        )
 
     # Add a global check for weird values, since nothing should ever be greater than 10000
     # Keep time col
