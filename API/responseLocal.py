@@ -1162,7 +1162,7 @@ async def PW_Forecast(
         )
 
     timeMachine = False
-
+    timeMachineNear = False
     # Set up translations
     if not lang:
         lang = "en"
@@ -1176,6 +1176,8 @@ async def PW_Forecast(
         raise HTTPException(status_code=400, detail="Language Not Supported")
 
     translation = Translations[lang]
+    print((nowTime - utcTime))
+    print(datetime.timedelta(hours=47))
 
     if utcTime < datetime.datetime(2024, 5, 1):
         timeMachine = True
@@ -1196,7 +1198,10 @@ async def PW_Forecast(
                 detail="Requested Time is in the Past. Please Use Timemachine.",
             )
 
-    elif (nowTime - utcTime) > datetime.timedelta(hours=25):
+
+
+    elif (nowTime - utcTime) > datetime.timedelta(hours=47):
+        # More than 47 hours ago must be time machine request
         if (
             ("localhost" in str(request.url))
             or ("timemachine" in str(request.url))
@@ -1216,6 +1221,14 @@ async def PW_Forecast(
             raise HTTPException(
                 status_code=400, detail="Requested Time is in the Future"
             )
+    elif (nowTime - utcTime) < datetime.timedelta(hours=47):
+        # If within the last 47 hours, it may or may not be a timemachine request
+        if "timemachine" in str(request.url):
+            timeMachineNear = True
+            # This results in the API using the live zip file, but only doing a 24 hour forecast from midnight of the requested day
+            print("Near term timemachine request")
+
+        # Otherwise, just a normal request
 
     # Timing Check
     if TIMING:
@@ -2190,6 +2203,10 @@ async def PW_Forecast(
     if timeMachine:
         daily_days = 1
         daily_day_hours = 1
+        numHours = 24
+    elif timeMachineNear:
+        daily_days = 1
+        daily_day_hours = 5
         numHours = 24
     elif extendFlag == 1:
         daily_days = 8
