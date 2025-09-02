@@ -36,6 +36,7 @@ from PirateDailyText import calculate_day_text
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
+from zoneinfo import ZoneInfo
 
 Translations = load_all_translations()
 
@@ -751,7 +752,7 @@ class WeatherParallel(object):
 
                 # Check for missing/ bad data and interpolate
                 # This should not occur, but good to have a fallback
-                if has_interior_nan_holes(dataOut):
+                if has_interior_nan_holes(dataOut.T):
                     print("### " + model + " Interpolating missing data!")
 
                     # Print the location of the missing data
@@ -1176,8 +1177,6 @@ async def PW_Forecast(
         raise HTTPException(status_code=400, detail="Language Not Supported")
 
     translation = Translations[lang]
-    print((nowTime - utcTime))
-    print(datetime.timedelta(hours=47))
 
     if utcTime < datetime.datetime(2024, 5, 1):
         timeMachine = True
@@ -1197,9 +1196,6 @@ async def PW_Forecast(
                 status_code=400,
                 detail="Requested Time is in the Past. Please Use Timemachine.",
             )
-
-
-
     elif (nowTime - utcTime) > datetime.timedelta(hours=47):
         # More than 47 hours ago must be time machine request
         if (
@@ -1227,7 +1223,6 @@ async def PW_Forecast(
             timeMachineNear = True
             # This results in the API using the live zip file, but only doing a 24 hour forecast from midnight of the requested day
             print("Near term timemachine request")
-
         # Otherwise, just a normal request
 
     # Timing Check
@@ -1552,10 +1547,13 @@ async def PW_Forecast(
                     dataOut_hrrrh[:, 0] = xr_mf.time.compute().data
 
                     for vIDX, v in enumerate(HRRRHzarrVars[1:]):
-                        dataOut_hrrrh[:, vIDX + 1] = (
-                            xr_mf[v][:, y_hrrr, x_hrrr].compute().data
-                        )
-
+                        if v in xr_mf.data_vars:
+                            dataOut_hrrrh[:, vIDX + 1] = (
+                                xr_mf[v][:, y_hrrr, x_hrrr].compute().data
+                            )
+                        else:
+                            print("Variable not in HRRR Zarr:")
+                            print(v)
                     now2 = time.time()
 
                 # Timing Check
@@ -1849,8 +1847,11 @@ async def PW_Forecast(
             dataOut_gfs[:, 0] = xr_mf.time.compute().data
 
             for vIDX, v in enumerate(GFSzarrVars[1:]):
-                dataOut_gfs[:, vIDX + 1] = xr_mf[v][:, y_p, x_p].compute().data
-
+                if v in xr_mf.data_vars:
+                    dataOut_gfs[:, vIDX + 1] = xr_mf[v][:, y_p, x_p].compute().data
+                else:
+                    print("Variable not in GFS Zarr:")
+                    print(v)
             now3 = time.time()
 
         if TIMING:
@@ -2200,23 +2201,28 @@ async def PW_Forecast(
     InterTminute = np.zeros((61, 5))  # Type
     InterPminute = np.full((61, 4), np.nan)  # Time, Intensity,Probability
 
+    # Setup the time parameters for output and processing
     if timeMachine:
-        daily_days = 1
-        daily_day_hours = 1
-        numHours = 24
+        daily_days = 1 # Number of days to output
+        daily_day_hours = 1 # Additional hours to use in the processing
+        ouputHours = 24
+        ouputDays = 1
+
     elif timeMachineNear:
-        daily_days = 1
-        daily_day_hours = 5
-        numHours = 24
-    elif extendFlag == 1:
         daily_days = 8
         daily_day_hours = 5
-        numHours = daily_days * 24 + daily_day_hours
+        ouputHours = 24
+        ouputDays = 1
+
     else:
-        # Calculate full range of hours for text summary, then only display 48
         daily_days = 8
         daily_day_hours = 5
-        numHours = daily_days * 24 + daily_day_hours
+
+        if extendFlag:
+            ouputHours = 168
+        else:
+            ouputHours = 24
+        ouputDays = 7
 
     hour_array = np.arange(
         baseDay.astimezone(utc).replace(tzinfo=None),
@@ -2226,7 +2232,9 @@ async def PW_Forecast(
         datetime.timedelta(hours=1),
     )
 
-    InterPhour = np.full((len(hour_array), 27), np.nan)  # Time, Intensity,Probability
+    numHours = len(hour_array)
+
+    InterPhour = np.full((numHours, 27), np.nan)  # Time, Intensity,Probability
 
     hour_array_grib = (
         (hour_array - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0)))
@@ -2264,8 +2272,9 @@ async def PW_Forecast(
                     )
 
                 else:
+                    print("numHours")
+                    print(numHours)
                     HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), np.nan)
-                    # TODO: The sizes of the 0-18 and 18-48 are differernt because of the REFC_entireatmosphere param
                     # The 0-18 hour HRRR data (dataOut_hrrrh) has fewer columns than the 18-48 hour data (dataOut_h2)
                     # when in timeMachine mode. Only concatenate the common columns (0-17).
                     common_cols = min(dataOut_hrrrh.shape[1], dataOut_h2.shape[1])
@@ -2857,6 +2866,7 @@ async def PW_Forecast(
     precipTypes = np.array(minuteType)
 
     if "hrrrsubh" in sourceList:
+        # If not missing
         InterPminute[:, 1] = (
             dbz_to_rate(hrrrSubHInterpolation[:, 12], precipTypes) * prepIntensityUnit
         )
@@ -3033,7 +3043,6 @@ async def PW_Forecast(
     InterPhour[:, 1] = np.choose(
         np.argmin(np.isnan(prcipIntensityHour), axis=1), maxPchanceHour.T
     )
-
     # Probability
     # NBM
     prcipProbabilityHour = np.full((len(hour_array_grib), 2), np.nan)
@@ -3333,7 +3342,8 @@ async def PW_Forecast(
     # Everything that isn't the current day
     dayZeroPrepRain[hourlyDayIndex != 0] = 0
     # Everything after the request time
-    dayZeroPrepRain[int(baseTimeOffset) :] = 0
+    if not (timeMachine or timeMachineNear):
+        dayZeroPrepRain[int(baseTimeOffset) :] = 0
 
     # Snow
     # Calculate prep accumulation for current day before zeroing
@@ -3341,7 +3351,8 @@ async def PW_Forecast(
     # Everything that isn't the current day
     dayZeroPrepSnow[hourlyDayIndex != 0] = 0
     # Everything after the request time
-    dayZeroPrepSnow[int(baseTimeOffset) :] = 0
+    if not (timeMachine or timeMachineNear):
+        dayZeroPrepSnow[int(baseTimeOffset) :] = 0
 
     # Sleet
     # Calculate prep accumilation for current day before zeroing
@@ -3349,7 +3360,8 @@ async def PW_Forecast(
     # Everything that isn't the current day
     dayZeroPrepSleet[hourlyDayIndex != 0] = 0
     # Everything after the request time
-    dayZeroPrepSleet[int(baseTimeOffset) :] = 0
+    if not (timeMachine or timeMachineNear):
+        dayZeroPrepSleet[int(baseTimeOffset) :] = 0
 
     # Accumulations in liquid equivalent
     dayZeroRain = dayZeroPrepRain.sum().round(4)  # rain
@@ -3562,7 +3574,6 @@ async def PW_Forecast(
     low_results = []
     arghigh_results = []
     arglow_results = []
-    maxPchanceDay = []
     mean_4am_results = []
     sum_4am_results = []
     max_4am_results = []
@@ -3582,7 +3593,6 @@ async def PW_Forecast(
         minTime = np.argmin(filtered_data, axis=0)
         argmax_results.append(filtered_data[maxTime, 0])
         argmin_results.append(filtered_data[minTime, 0])
-        # maxPchanceDay.append(stats.mode(filtered_data[:,1], axis=0)[0])
 
     # Icon/ summary parameters go from 4 am to 4 am
     masks = [hourlyDay4amIndex == day_index for day_index in range(daily_days)]
@@ -4522,13 +4532,14 @@ async def PW_Forecast(
                 for field in fieldsToRemove:
                     hourItem.pop(field, None)
 
-        if extendFlag == 1:
+        # If a timemachine request, do not offset to now
+        if (timeMachine or timeMachineNear):
             returnOBJ["hourly"]["data"] = hourList[
-                int(baseTimeOffset) : int(baseTimeOffset) + 169
+                0 : ouputHours
             ]
         else:
             returnOBJ["hourly"]["data"] = hourList[
-                int(baseTimeOffset) : int(baseTimeOffset) + 48
+                int(baseTimeOffset) : int(baseTimeOffset) + ouputHours
             ]
 
     if exDaily != 1:
@@ -4560,7 +4571,7 @@ async def PW_Forecast(
                 returnOBJ["daily"]["icon"] = max(
                     set(dayIconList), key=dayIconList.count
                 )
-        returnOBJ["daily"]["data"] = dayList
+        returnOBJ["daily"]["data"] = dayList[0: ouputDays]
 
     if exAlerts != 1:
         returnOBJ["alerts"] = alertList
