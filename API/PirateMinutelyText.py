@@ -233,7 +233,7 @@ def calculate_minutely_text(
         snowMaxIntensity,
         sleetMaxIntensity,
         hailMaxIntensity,
-        noneMaxIntensity
+        noneMaxIntensity,
     )
 
     # If the array has any values check the minimum against the different precipitation start times and set that as the first precipitaion
