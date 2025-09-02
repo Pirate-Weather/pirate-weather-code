@@ -6,7 +6,7 @@ ujson==5.11.0
 fastapi[standard]==0.116.1
 fastapi-utils==0.8.0
 scipy==1.16.1
-orjson==3.11.2
+orjson==3.11.3
 psutil==5.9.0
 typing-inspect==0.9.0
 watchfiles==1.1.0
