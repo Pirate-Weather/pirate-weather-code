@@ -2865,7 +2865,6 @@ async def PW_Forecast(
     precipTypes = np.array(minuteType)
 
     if "hrrrsubh" in sourceList:
-        # If not missing
         InterPminute[:, 1] = (
             dbz_to_rate(hrrrSubHInterpolation[:, 12], precipTypes) * prepIntensityUnit
         )
