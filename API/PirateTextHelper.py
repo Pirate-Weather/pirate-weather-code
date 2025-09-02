@@ -36,6 +36,7 @@ DEFAULT_POP = 1
 
 # Invalid data
 MISSING_DATA = -999
+REFC_THRESHOLD = 5.0
 
 
 def Most_Common(lst):

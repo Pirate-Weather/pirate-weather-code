@@ -14,6 +14,7 @@ import time
 from collections import Counter
 import traceback
 from typing import Union
+import random
 
 import boto3
 import s3fs
@@ -52,7 +53,7 @@ force_now = os.getenv("force_now", default=False)
 
 # Version code for ingest files
 ingestVersion = "v27"
-API_VERSION = "V2.7.7"
+API_VERSION = "V2.7.7d"
 
 
 def setup_logging():
@@ -76,6 +77,27 @@ def _add_custom_header(request, **kwargs):
     request.headers["apikey"] = pw_api_key
 
 
+def _retry_s3_operation(operation, max_retries=5, base_delay=1):
+    """Retry S3 operations with exponential backoff for rate limiting."""
+    for attempt in range(max_retries):
+        try:
+            return operation()
+        except Exception as e:
+            # Check if it's a rate limiting error
+            if "429" in str(e) or "Too Many Requests" in str(e):
+                if attempt < max_retries - 1:
+                    # Calculate delay with exponential backoff and jitter
+                    delay = base_delay * (2**attempt) + random.uniform(0, 1)
+                    print(
+                        f"S3 rate limit hit (attempt {attempt + 1}/{max_retries}), retrying in {delay:.2f}s: {e}"
+                    )
+                    time.sleep(delay)
+                    continue
+            # Re-raise the exception if it's not rate limiting or max retries reached
+            raise e
+    raise Exception(f"Failed after {max_retries} attempts")
+
+
 def download_if_newer(
     s3_bucket, s3_object_key, local_file_path, local_lmdb_path, initialDownload
 ):
@@ -93,7 +115,10 @@ def download_if_newer(
         )
 
         # Get the last modified timestamp of the S3 object
-        s3_response = s3_client.head_object(Bucket=s3_bucket, Key=s3_object_key)
+        # Use retry logic to handle rate limiting
+        s3_response = _retry_s3_operation(
+            lambda: s3_client.head_object(Bucket=s3_bucket, Key=s3_object_key)
+        )
         s3_last_modified = s3_response["LastModified"].timestamp()
     else:
         # If saved locally, get the last modified timestamp of the local file
@@ -113,8 +138,10 @@ def download_if_newer(
         if s3_last_modified > local_last_modified:
             # Download the file
             if save_type == "S3":
-                s3_client.download_file(
-                    s3_bucket, s3_object_key, local_file_path, Config=config
+                _retry_s3_operation(
+                    lambda: s3_client.download_file(
+                        s3_bucket, s3_object_key, local_file_path, Config=config
+                    )
                 )
             else:
                 # Copy the local file over
@@ -131,8 +158,10 @@ def download_if_newer(
     else:
         # Download the file
         if save_type == "S3":
-            s3_client.download_file(
-                s3_bucket, s3_object_key, local_file_path, Config=config
+            _retry_s3_operation(
+                lambda: s3_client.download_file(
+                    s3_bucket, s3_object_key, local_file_path, Config=config
+                )
             )
         else:
             # Otherwise copy local file
@@ -399,19 +428,25 @@ if STAGE == "TESTING":
         )
         s3.s3.meta.events.register("before-sign.s3.*", _add_custom_header)
 
-        f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/NWS_Alerts.zarr.zip")
+        f = _retry_s3_operation(
+            lambda: s3.open(
+                "s3://ForecastTar_v2/" + ingestVersion + "/NWS_Alerts.zarr.zip"
+            )
+        )
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
         s3 = s3fs.S3FileSystem(
             key=aws_access_key_id, secret=aws_secret_access_key, version_aware=True
         )
 
-        f = s3.open(
-            "s3://"
-            + s3_bucket
-            + "/ForecastTar_v2/"
-            + ingestVersion
-            + "/NWS_Alerts.zarr.zip"
+        f = _retry_s3_operation(
+            lambda: s3.open(
+                "s3://"
+                + s3_bucket
+                + "/ForecastTar_v2/"
+                + ingestVersion
+                + "/NWS_Alerts.zarr.zip"
+            )
         )
         store = S3ZipStore(f)
 
@@ -422,11 +457,19 @@ if STAGE == "TESTING":
     NWS_Alerts_Zarr = zarr.open(store, mode="r")
 
     if save_type == "S3":
-        f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/SubH.zarr.zip")
+        f = _retry_s3_operation(
+            lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/SubH.zarr.zip")
+        )
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open(
-            "s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/SubH.zarr.zip"
+        f = _retry_s3_operation(
+            lambda: s3.open(
+                "s3://"
+                + s3_bucket
+                + "/ForecastTar_v2/"
+                + ingestVersion
+                + "/SubH.zarr.zip"
+            )
         )
         store = S3ZipStore(f)
     else:
@@ -437,15 +480,21 @@ if STAGE == "TESTING":
     print("SubH Read")
 
     if save_type == "S3":
-        f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/HRRR_6H.zarr.zip")
+        f = _retry_s3_operation(
+            lambda: s3.open(
+                "s3://ForecastTar_v2/" + ingestVersion + "/HRRR_6H.zarr.zip"
+            )
+        )
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open(
-            "s3://"
-            + s3_bucket
-            + "/ForecastTar_v2/"
-            + ingestVersion
-            + "/HRRR_6H.zarr.zip"
+        f = _retry_s3_operation(
+            lambda: s3.open(
+                "s3://"
+                + s3_bucket
+                + "/ForecastTar_v2/"
+                + ingestVersion
+                + "/HRRR_6H.zarr.zip"
+            )
         )
         store = S3ZipStore(f)
     else:
@@ -456,11 +505,19 @@ if STAGE == "TESTING":
     print("HRRR_6H Read")
 
     if save_type == "S3":
-        f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/GFS.zarr.zip")
+        f = _retry_s3_operation(
+            lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/GFS.zarr.zip")
+        )
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open(
-            "s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/GFS.zarr.zip"
+        f = _retry_s3_operation(
+            lambda: s3.open(
+                "s3://"
+                + s3_bucket
+                + "/ForecastTar_v2/"
+                + ingestVersion
+                + "/GFS.zarr.zip"
+            )
         )
         store = S3ZipStore(f)
     else:
@@ -471,11 +528,19 @@ if STAGE == "TESTING":
     print("GFS Read")
 
     if save_type == "S3":
-        f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/GEFS.zarr.zip")
+        f = _retry_s3_operation(
+            lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/GEFS.zarr.zip")
+        )
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open(
-            "s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/GEFS.zarr.zip"
+        f = _retry_s3_operation(
+            lambda: s3.open(
+                "s3://"
+                + s3_bucket
+                + "/ForecastTar_v2/"
+                + ingestVersion
+                + "/GEFS.zarr.zip"
+            )
         )
         store = S3ZipStore(f)
     else:
@@ -486,14 +551,22 @@ if STAGE == "TESTING":
     print("GEFS Read")
 
     if save_type == "S3":
-        f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/NBM.zarr.zip")
+        f = _retry_s3_operation(
+            lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/NBM.zarr.zip")
+        )
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
         # print('USE VERSION NBM')
         # f = s3.open("s3://" + s3_bucket + "/NBM.zarr.zip",
         #             version_id="sfWxulLYHDWCQTiM2u0v.x_Sg4pTwpG7")
-        f = s3.open(
-            "s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/NBM.zarr.zip"
+        f = _retry_s3_operation(
+            lambda: s3.open(
+                "s3://"
+                + s3_bucket
+                + "/ForecastTar_v2/"
+                + ingestVersion
+                + "/NBM.zarr.zip"
+            )
         )
 
         store = S3ZipStore(f)
@@ -505,15 +578,21 @@ if STAGE == "TESTING":
     print("NBM Read")
 
     if save_type == "S3":
-        f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/NBM_Fire.zarr.zip")
+        f = _retry_s3_operation(
+            lambda: s3.open(
+                "s3://ForecastTar_v2/" + ingestVersion + "/NBM_Fire.zarr.zip"
+            )
+        )
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open(
-            "s3://"
-            + s3_bucket
-            + "/ForecastTar_v2/"
-            + ingestVersion
-            + "/NBM_Fire.zarr.zip"
+        f = _retry_s3_operation(
+            lambda: s3.open(
+                "s3://"
+                + s3_bucket
+                + "/ForecastTar_v2/"
+                + ingestVersion
+                + "/NBM_Fire.zarr.zip"
+            )
         )
         store = S3ZipStore(f)
     else:
@@ -524,11 +603,19 @@ if STAGE == "TESTING":
     print("NBM Fire Read")
 
     if save_type == "S3":
-        f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/HRRR.zarr.zip")
+        f = _retry_s3_operation(
+            lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/HRRR.zarr.zip")
+        )
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
-        f = s3.open(
-            "s3://" + s3_bucket + "/ForecastTar_v2/" + ingestVersion + "/HRRR.zarr.zip"
+        f = _retry_s3_operation(
+            lambda: s3.open(
+                "s3://"
+                + s3_bucket
+                + "/ForecastTar_v2/"
+                + ingestVersion
+                + "/HRRR.zarr.zip"
+            )
         )
         store = S3ZipStore(f)
     else:
@@ -540,15 +627,21 @@ if STAGE == "TESTING":
 
     if useETOPO:
         if save_type == "S3":
-            f = s3.open("s3://ForecastTar_v2/" + ingestVersion + "/ETOPO_DA_C.zarr.zip")
+            f = _retry_s3_operation(
+                lambda: s3.open(
+                    "s3://ForecastTar_v2/" + ingestVersion + "/ETOPO_DA_C.zarr.zip"
+                )
+            )
             store = S3ZipStore(f)
         elif save_type == "S3Zarr":
-            f = s3.open(
-                "s3://"
-                + s3_bucket
-                + "/ForecastTar_v2/"
-                + ingestVersion
-                + "/ETOPO_DA_C.zarr.zip"
+            f = _retry_s3_operation(
+                lambda: s3.open(
+                    "s3://"
+                    + s3_bucket
+                    + "/ForecastTar_v2/"
+                    + ingestVersion
+                    + "/ETOPO_DA_C.zarr.zip"
+                )
             )
             store = S3ZipStore(f)
         else:
@@ -884,6 +977,46 @@ def calculate_wbgt(
         wbgt = 0.7 * temperature + 0.3 * (humidity / 100.0 * temperature)
 
     return wbgt
+
+
+def dbz_to_rate(dbz_array, precip_type_array, min_dbz=5.0):
+    """
+    Convert dBZ to precipitation rate (mm/h) using a Z-R relationship with soft threshold.
+
+    Args:
+        dbz_array (np.ndarray): Radar reflectivity in dBZ.
+        precip_type_array (np.ndarray): Array of precipitation types ('rain' or 'snow').
+        min_dbz (float): Minimum dBZ for soft thresholding. Values below this are scaled linearly.
+
+    Returns:
+        np.ndarray: Precipitation rate in mm/h.
+    """
+    # Ensure no negative dBZ values
+    dbz_array = np.maximum(dbz_array, 0.0)
+
+    # Convert dBZ to Z
+    z_array = 10 ** (dbz_array / 10.0)
+
+    # Initialize rate coefficients for rain
+    a_array = np.full_like(dbz_array, 200.0, dtype=float)
+    b_array = np.full_like(dbz_array, 1.6, dtype=float)
+
+    # Apply 'snow' coefficients where precip_type is 'snow'
+    snow_mask = precip_type_array == "snow"
+    a_array[snow_mask] = 58.7
+    b_array[snow_mask] = 1.94
+
+    # Compute precipitation rate
+    rate_array = (z_array / a_array) ** (1.0 / b_array)
+
+    # Apply soft threshold for sub-threshold dBZ values
+    below_threshold = dbz_array < min_dbz
+    rate_array[below_threshold] *= dbz_array[below_threshold] / min_dbz
+
+    # Final check: ensure no negative rates
+    rate_array = np.maximum(rate_array, 0.0)
+
+    return rate_array
 
 
 @app.get("/timemachine/{apikey}/{location}", response_class=ORJSONResponse)
@@ -1352,7 +1485,6 @@ async def PW_Forecast(
                     },
                     cache=False,
                     drop_variables=[
-                        "REFC_entireatmosphere",
                         "DSWRF_surface",
                         "CAPE_surface",
                     ],
@@ -1377,6 +1509,7 @@ async def PW_Forecast(
                             "CRAIN_surface",
                             "TCDC_entireatmosphere",
                             "MASSDEN_8maboveground",
+                            "REFC_entireatmosphere",
                         )
                     else:
                         HRRRHzarrVars = (
@@ -1397,6 +1530,7 @@ async def PW_Forecast(
                             "CRAIN_surface",
                             "TCDC_entireatmosphere",
                             "MASSDEN_8maboveground",
+                            "REFC_entireatmosphere",
                         )
 
                     dataOut_hrrrh = np.zeros((len(xr_mf.time), len(HRRRHzarrVars)))
@@ -1408,6 +1542,7 @@ async def PW_Forecast(
                         dataOut_hrrrh[:, vIDX + 1] = (
                             xr_mf[v][:, y_hrrr, x_hrrr].compute().data
                         )
+
                     now2 = time.time()
 
                 # Timing Check
@@ -1637,7 +1772,7 @@ async def PW_Forecast(
             parallel=True,
             storage_options={"key": aws_access_key_id, "secret": aws_secret_access_key},
             cache=False,
-            drop_variables=["REFC_entireatmosphere", "DSWRF_surface", "CAPE_surface"],
+            drop_variables=["DSWRF_surface", "CAPE_surface"],
         ) as xr_mf:
             now2 = time.time()
             if TIMING:
@@ -1668,6 +1803,7 @@ async def PW_Forecast(
                     "DUVB_surface",
                     "Storm_Distance",
                     "Storm_Direction",
+                    "REFC_entireatmosphere",
                 )
             else:
                 GFSzarrVars = (
@@ -1692,6 +1828,7 @@ async def PW_Forecast(
                     "DUVB_surface",
                     "Storm_Distance",
                     "Storm_Direction",
+                    "REFC_entireatmosphere",
                 )
 
             dataOut_gfs = np.zeros((len(xr_mf.time), len(GFSzarrVars)))
@@ -1700,6 +1837,7 @@ async def PW_Forecast(
 
             for vIDX, v in enumerate(GFSzarrVars[1:]):
                 dataOut_gfs[:, vIDX + 1] = xr_mf[v][:, y_p, x_p].compute().data
+
             now3 = time.time()
 
         if TIMING:
@@ -1907,7 +2045,8 @@ async def PW_Forecast(
 
     if readGFS:
         dataOut_gfs = zarr_results["GFS"]
-        gfsRunTime = dataOut_gfs[47, 0]  # 48-1
+        if dataOut_gfs is not False:
+            gfsRunTime = dataOut_gfs[47, 0]  # 48-1
 
     if readGEFS:
         dataOut_gefs = zarr_results["GEFS"]
@@ -2110,15 +2249,17 @@ async def PW_Forecast(
                 else:
                     HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), np.nan)
                     # TODO: The sizes of the 0-18 and 18-48 are differernt because of the REFC_entireatmosphere param
-                    # Need to either add this to 18-48 or just keep it for the first 18 hours
-                    HRRR_Merged[0 : (67 - HRRR_StartIDX) + (31 - H2_StartIDX), 0:20] = (
-                        np.concatenate(
-                            (
-                                dataOut_hrrrh[HRRR_StartIDX:, 0:20],
-                                dataOut_h2[H2_StartIDX:, 0:20],
-                            ),
-                            axis=0,
-                        )
+                    # The 0-18 hour HRRR data (dataOut_hrrrh) has fewer columns than the 18-48 hour data (dataOut_h2)
+                    # when in timeMachine mode. Only concatenate the common columns (0-17).
+                    common_cols = min(dataOut_hrrrh.shape[1], dataOut_h2.shape[1])
+                    HRRR_Merged[
+                        0 : (67 - HRRR_StartIDX) + (31 - H2_StartIDX), 0:common_cols
+                    ] = np.concatenate(
+                        (
+                            dataOut_hrrrh[HRRR_StartIDX:, 0:common_cols],
+                            dataOut_h2[H2_StartIDX:, 0:common_cols],
+                        ),
+                        axis=0,
                     )
 
             # NBM
@@ -2584,6 +2725,13 @@ async def PW_Forecast(
                 left=np.nan,
                 right=np.nan,
             )
+            hrrrSubHInterpolation[:, 12] = np.interp(
+                minute_array_grib,
+                HRRR_Merged[:, 0].squeeze(),
+                HRRR_Merged[:, 17],
+                left=np.nan,
+                right=np.nan,
+            )
 
             # Visibility is at a weird index
             hrrrSubHInterpolation[:, 14] = np.interp(
@@ -2653,38 +2801,56 @@ async def PW_Forecast(
     # Less than 5% set to 0
     InterPminute[InterPminute[:, 2] < 0.05, 2] = 0
 
-    # Prep Intensity
-    # Kind of complex, process:
-    # 1. If probability >0:
-    # 2. If HRRR intensity >0, use that, else use NBM, unless one isn't available, then use the other one or GEFS
-
-    # probMask = np.where(InterPminute[:, 2] > 0)
-    #
-    # if ('hrrrsubh' in sourceList) or ('nbm' in sourceList):
-    #     subHMask = np.full(len(InterPminute), False)
-    #
-    #     if ('hrrrsubh' in sourceList):
-    #         subHMask = np.where(hrrrSubHInterpolation[:, 7] > 0)
-    #         InterPminute[subHMask, 1] = hrrrSubHInterpolation[subHMask, 7] * 3600 * prepIntensityUnit
-    #
-    #     if ('nbm' in sourceList):
-    #         InterPminute[probMask & ~subHMask, 1] = nbmMinuteInterpolation[probMask & ~subHMask,8] * prepIntensityUnit
-    # elif  ('hrrrsubh' in sourceList):
-    #     InterPminute[:, 1] = hrrrSubHInterpolation[:, 7] * 3600 * prepIntensityUnit
-    # elif ('nbm' in sourceList):
-    #     InterPminute[:, 1] = nbmMinuteInterpolation[:,8] * prepIntensityUnit
-    # else:
-    #     InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * 1 * prepIntensityUnit
-
-    # Keep it simple for now
+    # Precipitation Type
+    # IF HRRR, use that, otherwise GEFS
     if "hrrrsubh" in sourceList:
-        InterPminute[:, 1] = hrrrSubHInterpolation[:, 7] * 3600 * prepIntensityUnit
+        for i in [8, 9, 10, 11]:
+            InterTminute[:, i - 7] = hrrrSubHInterpolation[:, i]
+    elif "nbm" in sourceList:
+        # 14 = Rain (1,2), 15 = Freezing Rain/ Ice (3,4), 16 = Snow (5,6,7), 17 = Ice (8,9)
+        # https://www.nco.ncep.noaa.gov/pmb/docs/grib2/grib2_doc/grib2_table4-201.shtml
+
+        # Snow
+        InterTminute[:, 1] = nbmMinuteInterpolation[:, 16]
+        # Ice
+        InterTminute[:, 2] = nbmMinuteInterpolation[:, 17]
+        # Freezing Rain
+        InterTminute[:, 3] = nbmMinuteInterpolation[:, 15]
+        # Rain
+        InterTminute[:, 4] = nbmMinuteInterpolation[:, 14]
+    elif "gefs" in sourceList:
+        for i in [4, 5, 6, 7]:
+            InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
+    else:  # GFS Fallback
+        for i in [12, 13, 14, 15]:
+            InterTminute[:, i - 11] = gfsMinuteInterpolation[:, i]
+
+    # If all nan, set pchance to -999, otherwise determine the predominant type
+    maxPchance = (
+        np.argmax(InterTminute, axis=1)
+        if not np.any(np.isnan(InterTminute))
+        else np.full(len(minute_array_grib), 5)
+    )
+    pTypes = ["none", "snow", "sleet", "sleet", "rain", -999]
+    pTypesText = ["Clear", "Snow", "Sleet", "Sleet", "Rain", -999]
+    pTypesIcon = ["clear", "snow", "sleet", "sleet", "rain", -999]
+
+    minuteType = [pTypes[maxPchance[idx]] for idx in range(61)]
+
+    precipTypes = np.array(minuteType)
+
+    if "hrrrsubh" in sourceList:
+        InterPminute[:, 1] = (
+            dbz_to_rate(hrrrSubHInterpolation[:, 12], precipTypes) * prepIntensityUnit
+        )
     elif "nbm" in sourceList:
         InterPminute[:, 1] = nbmMinuteInterpolation[:, 8] * prepIntensityUnit
     elif "gefs" in sourceList:
-        InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * 1 * prepIntensityUnit
-    else:  # GFS fallback
-        InterPminute[:, 1] = gfsMinuteInterpolation[:, 10] * 3600 * prepIntensityUnit
+        InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * prepIntensityUnit
+    else:
+        InterPminute[:, 1] = (
+            dbz_to_rate(gfsMinuteInterpolation[:, 21], precipTypes) * prepIntensityUnit
+        )
 
     if "hrrrsubh" not in sourceList:
         # Set intensity to zero if POP == 0
@@ -2696,29 +2862,6 @@ async def PW_Forecast(
     else:  # Missing
         InterPminute[:, 3] = np.ones(len(minute_array_grib)) * -999
 
-    # Precipitation Type
-    # IF HRRR, use that, otherwise GEFS
-    if "hrrrsubh" in sourceList:
-        for i in [8, 9, 10, 11]:
-            InterTminute[:, i - 7] = hrrrSubHInterpolation[:, i]
-    elif "nbm" in sourceList:
-        InterTminute[:, 1] = nbmMinuteInterpolation[:, 16]
-        InterTminute[:, 2] = nbmMinuteInterpolation[:, 17]
-        InterTminute[:, 3] = nbmMinuteInterpolation[:, 15]
-        InterTminute[:, 4] = nbmMinuteInterpolation[:, 14]
-    elif "gefs" in sourceList:
-        for i in [4, 5, 6, 7]:
-            InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
-    else:  # GFS Fallback
-        for i in [12, 13, 14, 15]:
-            InterTminute[:, i - 11] = gfsMinuteInterpolation[:, i]
-
-    # If all nan, set pchance to -999
-    if np.any(np.isnan(InterTminute)):
-        maxPchance = np.full(len(minute_array_grib), 5)
-    else:
-        maxPchance = np.argmax(InterTminute, axis=1)
-
     # Create list of icons based off of maxPchance
     minuteKeys = [
         "time",
@@ -2727,11 +2870,6 @@ async def PW_Forecast(
         "precipIntensityError",
         "precipType",
     ]
-    pTypes = ["none", "snow", "sleet", "sleet", "rain", -999]
-    pTypesText = ["Clear", "Snow", "Sleet", "Sleet", "Rain", -999]
-    pTypesIcon = ["clear", "snow", "sleet", "sleet", "rain", -999]
-
-    minuteType = [pTypes[maxPchance[idx]] for idx in range(61)]
 
     # Assign pfactors for rain and snow for intensity
     pFacMinute = np.zeros((len(minute_array_grib)))
@@ -2740,6 +2878,13 @@ async def PW_Forecast(
     )
     # Note, this means that intensity is always in liquid water equivalent
     pFacMinute[(maxPchance == 1)] = 1  # Snow
+
+    if "hrrrsubh" in sourceList:
+        # Sometimes, reflectivity shows precipitation when the type is 'none', which causes the intensity to suddenly drop to 0.
+        # Setting the pFacMinute for the 'None' type to 1 prevents this issue.
+        # Note: This change is worth testing to see if it causes unintended side effects.
+        PTYPE_NONE_IDX = 0
+        pFacMinute[(maxPchance == PTYPE_NONE_IDX)] = 1  # None
 
     minuteTimes = InterPminute[:, 0]
     minuteIntensity = np.maximum(np.round(InterPminute[:, 1] * pFacMinute, 4), 0)
@@ -4155,7 +4300,7 @@ async def PW_Forecast(
     currnetSnowAccum = 0
     currnetIceAccum = 0
 
-    if minuteDict[0]["precipType"] == "rain":
+    if minuteDict[0]["precipType"] in ("rain", "none"):
         currnetRainAccum = (
             minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
         )
