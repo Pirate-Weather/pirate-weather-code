@@ -3353,7 +3353,7 @@ async def PW_Forecast(
         dayZeroPrepSnow[int(baseTimeOffset) :] = 0
 
     # Sleet
-    # Calculate prep accumilation for current day before zeroing
+    # Calculate prep accumulation for current day before zeroing
     dayZeroPrepSleet = InterPhour[:, 23].copy()
     # Everything that isn't the current day
     dayZeroPrepSleet[hourlyDayIndex != 0] = 0
