@@ -57,7 +57,7 @@ APPARENT_TEMP_CONSTS = {
     "e_const": 6.105,
 }
 # API versioning and ingest version constants
-API_VERSION = "V2.7.7d"
+API_VERSION = "V2.7.7e"
 INGEST_VERSION_STR = "v27"
 
 # Command priorities
