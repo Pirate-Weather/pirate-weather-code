@@ -36,7 +36,6 @@ from PirateDailyText import calculate_day_text
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
-from zoneinfo import ZoneInfo
 
 Translations = load_all_translations()
 
@@ -2203,8 +2202,8 @@ async def PW_Forecast(
 
     # Setup the time parameters for output and processing
     if timeMachine:
-        daily_days = 1 # Number of days to output
-        daily_day_hours = 1 # Additional hours to use in the processing
+        daily_days = 1  # Number of days to output
+        daily_day_hours = 1  # Additional hours to use in the processing
         ouputHours = 24
         ouputDays = 1
 
@@ -4533,10 +4532,8 @@ async def PW_Forecast(
                     hourItem.pop(field, None)
 
         # If a timemachine request, do not offset to now
-        if (timeMachine or timeMachineNear):
-            returnOBJ["hourly"]["data"] = hourList[
-                0 : ouputHours
-            ]
+        if timeMachine or timeMachineNear:
+            returnOBJ["hourly"]["data"] = hourList[0:ouputHours]
         else:
             returnOBJ["hourly"]["data"] = hourList[
                 int(baseTimeOffset) : int(baseTimeOffset) + ouputHours
@@ -4571,7 +4568,7 @@ async def PW_Forecast(
                 returnOBJ["daily"]["icon"] = max(
                     set(dayIconList), key=dayIconList.count
                 )
-        returnOBJ["daily"]["data"] = dayList[0: ouputDays]
+        returnOBJ["daily"]["data"] = dayList[0:ouputDays]
 
     if exAlerts != 1:
         returnOBJ["alerts"] = alertList
