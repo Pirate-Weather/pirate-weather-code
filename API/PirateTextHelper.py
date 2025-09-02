@@ -17,7 +17,7 @@ from text_const import (
     WIND_THRESHOLDS,
     CAPE_THRESHOLDS,
     LIFTED_INDEX_THRESHOLD,
-    PRECIP_PROB_THRESHOLD
+    PRECIP_PROB_THRESHOLD,
 )
 import math
 
