@@ -1553,6 +1553,7 @@ async def PW_Forecast(
                         else:
                             print("Variable not in HRRR Zarr:")
                             print(v)
+                    now2 = time.time()
 
                 # Timing Check
                 if TIMING:
