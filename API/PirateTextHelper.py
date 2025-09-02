@@ -1,7 +1,7 @@
 # %% Script to contain the helper functions that can be used to generate the text summary of the forecast data for Pirate Weather
 from collections import Counter
-from API.shared_const import MISSING_DATA
-from API.text_const import (
+from shared_const import MISSING_DATA
+from text_const import (
     CLOUD_COVER_THRESHOLDS,
     PRECIP_INTENSITY_THRESHOLDS,
     SNOW_INTENSITY_THRESHOLDS,
@@ -17,6 +17,7 @@ from API.text_const import (
     WIND_THRESHOLDS,
     CAPE_THRESHOLDS,
     LIFTED_INDEX_THRESHOLD,
+    PRECIP_PROB_THRESHOLD
 )
 import math
 
@@ -151,7 +152,7 @@ def calculate_precip_text(
     cText = None
     totalPrep = rainPrep + snowPrep + icePrep
     # Add the possible precipitation text if pop is less than 25% or if pop is greater than 0 but precipIntensity is between 0-0.02 mm/h
-    if (pop < 0.25) or (
+    if (pop < PRECIP_PROB_THRESHOLD) or (
         (
             (prepType == "rain" or prepType == "none")
             and (rainPrep > 0 and rainPrep < precipIconThreshold)
@@ -183,7 +184,7 @@ def calculate_precip_text(
     if (
         totalPrep >= precipIconThreshold
         and possiblePrecip == "possible-"
-        and pop >= 0.25
+        and pop >= PRECIP_PROB_THRESHOLD
         and numTypes > 1
     ):
         possiblePrecip = ""
@@ -194,7 +195,7 @@ def calculate_precip_text(
     # icePrepPercent = icePrep / iceIconThreshold
 
     # Find the largest percentage difference to determine the icon
-    if pop >= 0.25 and (
+    if pop >= PRECIP_PROB_THRESHOLD and (
         (rainPrep > precipIconThreshold and prepIntensity > precipIconThresholdHour)
         or (snowPrep >= snowIconThreshold and prepIntensity > snowIconThresholdHour)
         or (icePrep >= precipIconThreshold and prepIntensity > precipIconThresholdHour)

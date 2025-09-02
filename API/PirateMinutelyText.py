@@ -3,7 +3,7 @@
 from PirateTextHelper import calculate_precip_text
 from itertools import groupby
 from operator import itemgetter
-from API.shared_const import MISSING_DATA
+from shared_const import MISSING_DATA
 
 # Number of minutes in an hour
 MINUTES_IN_HOUR = 60
@@ -236,7 +236,7 @@ def calculate_minutely_text(
 
     # Calculate the maximum intensity
     maxIntensity = max(
-        rainMaxIntensity, snowMaxIntensity, sleetMaxIntensity, hailMaxIntensity
+        rainMaxIntensity, snowMaxIntensity, sleetMaxIntensity, hailMaxIntensity, noneMaxIntensity
     )
 
     # If the array has any values check the minimum against the different precipitation start times and set that as the first precipitaion
@@ -432,5 +432,9 @@ def calculate_minutely_text(
             consecutiveNone[1][0] if len(consecutiveNone) > 1 else -1,
             text,
         )
+
+    # If we have no icon fallback to the current icon
+    if cIcon is None:
+        cIcon = currentIcon
 
     return cText, cIcon
