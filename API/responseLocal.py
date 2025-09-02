@@ -808,8 +808,16 @@ class WeatherParallel(object):
 
                 # Check for missing/ bad data and interpolate
                 # This should not occur, but good to have a fallback
-                if has_interior_nan_holes(dataOut):
+                if has_interior_nan_holes(dataOut.T):
                     print("### " + model + " Interpolating missing data!")
+
+                    # Print the location of the missing data
+                    if TIMING:
+                        print(
+                            "### " + model + " Missing data at: ",
+                            np.argwhere(np.isnan(dataOut)),
+                        )
+
                     dataOut = np.apply_along_axis(_interp_row, 0, dataOut)
 
                 if TIMING:
@@ -1218,7 +1226,7 @@ async def PW_Forecast(
         )
 
     timeMachine = False
-
+    timeMachineNear = False
     # Set up translations
     if not lang:
         lang = "en"
@@ -1251,8 +1259,8 @@ async def PW_Forecast(
                 status_code=400,
                 detail="Requested Time is in the Past. Please Use Timemachine.",
             )
-
-    elif (nowTime - utcTime) > datetime.timedelta(hours=25):
+    elif (nowTime - utcTime) > datetime.timedelta(hours=47):
+        # More than 47 hours ago must be time machine request
         if (
             ("localhost" in str(request.url))
             or ("timemachine" in str(request.url))
@@ -1272,6 +1280,13 @@ async def PW_Forecast(
             raise HTTPException(
                 status_code=400, detail="Requested Time is in the Future"
             )
+    elif (nowTime - utcTime) < datetime.timedelta(hours=47):
+        # If within the last 47 hours, it may or may not be a timemachine request
+        if "timemachine" in str(request.url):
+            timeMachineNear = True
+            # This results in the API using the live zip file, but only doing a 24 hour forecast from midnight of the requested day
+            print("Near term timemachine request")
+        # Otherwise, just a normal request
 
     # Timing Check
     if TIMING:
@@ -1581,10 +1596,13 @@ async def PW_Forecast(
                     dataOut_hrrrh[:, 0] = xr_mf.time.compute().data
 
                     for vIDX, v in enumerate(HRRRHzarrVars[1:]):
-                        dataOut_hrrrh[:, vIDX + 1] = (
-                            xr_mf[v][:, y_hrrr, x_hrrr].compute().data
-                        )
-
+                        if v in xr_mf.data_vars:
+                            dataOut_hrrrh[:, vIDX + 1] = (
+                                xr_mf[v][:, y_hrrr, x_hrrr].compute().data
+                            )
+                        else:
+                            print("Variable not in HRRR Zarr:")
+                            print(v)
                     now2 = time.time()
 
                 # Timing Check
@@ -1883,8 +1901,11 @@ async def PW_Forecast(
             dataOut_gfs[:, 0] = xr_mf.time.compute().data
 
             for vIDX, v in enumerate(GFSzarrVars[1:]):
-                dataOut_gfs[:, vIDX + 1] = xr_mf[v][:, y_p, x_p].compute().data
-
+                if v in xr_mf.data_vars:
+                    dataOut_gfs[:, vIDX + 1] = xr_mf[v][:, y_p, x_p].compute().data
+                else:
+                    print("Variable not in GFS Zarr:")
+                    print(v)
             now3 = time.time()
 
         if TIMING:
@@ -2234,19 +2255,28 @@ async def PW_Forecast(
     InterTminute = np.zeros((61, 5))  # Type
     InterPminute = np.full((61, 4), np.nan)  # Time, Intensity,Probability
 
+    # Setup the time parameters for output and processing
     if timeMachine:
-        daily_days = 1
-        daily_day_hours = 1
-        numHours = 24
-    elif extendFlag == 1:
+        daily_days = 1  # Number of days to output
+        daily_day_hours = 1  # Additional hours to use in the processing
+        ouputHours = 24
+        ouputDays = 1
+
+    elif timeMachineNear:
         daily_days = 8
         daily_day_hours = 5
-        numHours = daily_days * 24 + daily_day_hours
+        ouputHours = 24
+        ouputDays = 1
+
     else:
-        # Calculate full range of hours for text summary, then only display 48
         daily_days = 8
         daily_day_hours = 5
-        numHours = daily_days * 24 + daily_day_hours
+
+        if extendFlag:
+            ouputHours = 168
+        else:
+            ouputHours = 24
+        ouputDays = 7
 
     hour_array = np.arange(
         baseDay.astimezone(utc).replace(tzinfo=None),
@@ -2256,7 +2286,9 @@ async def PW_Forecast(
         datetime.timedelta(hours=1),
     )
 
-    InterPhour = np.full((len(hour_array), 27), np.nan)  # Time, Intensity,Probability
+    numHours = len(hour_array)
+
+    InterPhour = np.full((numHours, 27), np.nan)  # Time, Intensity,Probability
 
     hour_array_grib = (
         (hour_array - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0)))
@@ -2294,8 +2326,9 @@ async def PW_Forecast(
                     )
 
                 else:
+                    print("numHours")
+                    print(numHours)
                     HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), np.nan)
-                    # TODO: The sizes of the 0-18 and 18-48 are differernt because of the REFC_entireatmosphere param
                     # The 0-18 hour HRRR data (dataOut_hrrrh) has fewer columns than the 18-48 hour data (dataOut_h2)
                     # when in timeMachine mode. Only concatenate the common columns (0-17).
                     common_cols = min(dataOut_hrrrh.shape[1], dataOut_h2.shape[1])
@@ -3069,7 +3102,6 @@ async def PW_Forecast(
     InterPhour[:, DATA_HOURLY["type"]] = np.choose(
         np.argmin(np.isnan(prcipIntensityHour), axis=1), maxPchanceHour.T
     )
-
     # Probability
     # NBM
     prcipProbabilityHour = np.full((len(hour_array_grib), 2), np.nan)
@@ -3477,7 +3509,8 @@ async def PW_Forecast(
     # Everything that isn't the current day
     dayZeroPrepRain[hourlyDayIndex != 0] = 0
     # Everything after the request time
-    dayZeroPrepRain[int(baseTimeOffset) :] = 0
+    if not (timeMachine or timeMachineNear):
+        dayZeroPrepRain[int(baseTimeOffset) :] = 0
 
     # Snow
     # Calculate prep accumulation for current day before zeroing
@@ -3485,15 +3518,17 @@ async def PW_Forecast(
     # Everything that isn't the current day
     dayZeroPrepSnow[hourlyDayIndex != 0] = 0
     # Everything after the request time
-    dayZeroPrepSnow[int(baseTimeOffset) :] = 0
+    if not (timeMachine or timeMachineNear):
+        dayZeroPrepSnow[int(baseTimeOffset) :] = 0
 
     # Sleet
-    # Calculate prep accumilation for current day before zeroing
+    # Calculate prep accumulation for current day before zeroing
     dayZeroPrepSleet = InterPhour[:, DATA_HOURLY["ice"]].copy()
     # Everything that isn't the current day
     dayZeroPrepSleet[hourlyDayIndex != 0] = 0
     # Everything after the request time
-    dayZeroPrepSleet[int(baseTimeOffset) :] = 0
+    if not (timeMachine or timeMachineNear):
+        dayZeroPrepSleet[int(baseTimeOffset) :] = 0
 
     # Accumulations in liquid equivalent
     dayZeroRain = dayZeroPrepRain.sum().round(4)  # rain
@@ -3730,7 +3765,6 @@ async def PW_Forecast(
     low_results = []
     arghigh_results = []
     arglow_results = []
-    maxPchanceDay = []
     mean_4am_results = []
     sum_4am_results = []
     max_4am_results = []
@@ -3750,7 +3784,6 @@ async def PW_Forecast(
         minTime = np.argmin(filtered_data, axis=0)
         argmax_results.append(filtered_data[maxTime, 0])
         argmin_results.append(filtered_data[minTime, 0])
-        # maxPchanceDay.append(stats.mode(filtered_data[:,1], axis=0)[0])
 
     # Icon/ summary parameters go from 4 am to 4 am
     masks = [hourlyDay4amIndex == day_index for day_index in range(daily_days)]
@@ -4153,7 +4186,7 @@ async def PW_Forecast(
         )
 
     # Clip between -90 and 60
-    InterPcurrent[4] = clipLog(InterPcurrent[4], -183, 333, "Temperature Current")
+    InterPcurrent[4] = clipLog(InterPcurrent[4], 183, 333, "Temperature Current")
 
     # Dewpoint from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
@@ -4170,7 +4203,7 @@ async def PW_Forecast(
         )
 
     # Clip between -90 and 60
-    InterPcurrent[6] = clipLog(InterPcurrent[6], -183, 333, "Dewpoint Current")
+    InterPcurrent[6] = clipLog(InterPcurrent[6], 183, 333, "Dewpoint Current")
 
     # humidity, NBM then HRRR, then GFS
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
@@ -4392,7 +4425,7 @@ async def PW_Forecast(
 
     # Clip
     InterPcurrent[20] = clipLog(
-        InterPcurrent[20], -183, 333, "Apparent Temperature Current"
+        InterPcurrent[20], 183, 333, "Apparent Temperature Current"
     )
 
     # Fire index from NBM Fire
@@ -4694,13 +4727,12 @@ async def PW_Forecast(
                 for field in fieldsToRemove:
                     hourItem.pop(field, None)
 
-        if extendFlag == 1:
-            returnOBJ["hourly"]["data"] = hourList[
-                int(baseTimeOffset) : int(baseTimeOffset) + 169
-            ]
+        # If a timemachine request, do not offset to now
+        if timeMachine or timeMachineNear:
+            returnOBJ["hourly"]["data"] = hourList[0:ouputHours]
         else:
             returnOBJ["hourly"]["data"] = hourList[
-                int(baseTimeOffset) : int(baseTimeOffset) + 48
+                int(baseTimeOffset) : int(baseTimeOffset) + ouputHours
             ]
 
     if exDaily != 1:
@@ -4732,7 +4764,7 @@ async def PW_Forecast(
                 returnOBJ["daily"]["icon"] = max(
                     set(dayIconList), key=dayIconList.count
                 )
-        returnOBJ["daily"]["data"] = dayList
+        returnOBJ["daily"]["data"] = dayList[0:ouputDays]
 
     if exAlerts != 1:
         returnOBJ["alerts"] = alertList
@@ -5023,13 +5055,20 @@ def clipLog(data, min, max, name):
     """
     Clip the data between min and max. Log if there is an error
     """
-    # Only print if the clipping is larger than 10% of the min
+
+    # Print if the clipping is larger than 25 of the min
     if data.min() < (min - 0.25):
         # Print the data and the index it occurs
         logger.error("Min clipping required for " + name)
         logger.error("Min Value: " + str(data.min()))
         if isinstance(data, np.ndarray):
             logger.error("Min Index: " + str(np.where(data == data.min())))
+
+        # Replace values below the threshold with np.nan
+        data[data < min] = np.nan
+
+    else:
+        data = np.clip(data, a_min=min, a_max=None)
 
     # Same for max
     if data.max() > (max + 0.25):
@@ -5040,7 +5079,13 @@ def clipLog(data, min, max, name):
         if isinstance(data, np.ndarray):
             logger.error("Max Index: " + str(np.where(data == data.max())))
 
-    return np.clip(data, min, max)
+        # Replace values above the threshold with np.nan
+        data[data > max] = np.nan
+
+    else:
+        data = np.clip(data, a_min=None, a_max=max)
+
+    return data
 
 
 def nearest_index(a, v):
