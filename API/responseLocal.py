@@ -3687,9 +3687,9 @@ async def PW_Forecast(
 
     # Only update where not all types are present.
     not_all_types = ~all_types
-    maxPchanceDay[not_all_types & (np.max(precip_accum, axis=1) > 0)] = dominant_type[
-        not_all_types & (np.max(precip_accum, axis=1) > 0)
-    ]
+    has_precip = np.max(precip_accum, axis=1) > 0
+    update_mask = not_all_types & has_precip
+    maxPchanceDay[update_mask] = dominant_type[update_mask]
 
     # The following thresholds are applied after the dominant type (by volume) is determined.
     # They serve to highlight significant precipitation events, overriding the volume-based
