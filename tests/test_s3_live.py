@@ -127,3 +127,5 @@ def test_live_s3_forecast_blocks(location):
     data = response.json()
     assert data["latitude"] == pytest.approx(lat, abs=0.5)
     assert data["longitude"] == pytest.approx(lon, abs=0.5)
+
+    _check_forecast_structure(data)
