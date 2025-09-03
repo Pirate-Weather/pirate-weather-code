@@ -76,7 +76,5 @@ def test_local_vs_production():
         diffs = _diff_nested(local_data, prod_data)
         diff_text = json.dumps(diffs, indent=2, sort_keys=True)
         if diffs:
-            with pytest.warns(DiffWarning) as record:
+            with pytest.warns(DiffWarning):
                 warnings.warn(f"Differences for {lat},{lon}:\n{diff_text}", DiffWarning)
-            # Optionally, you can assert on the warning message here
-            assert any(f"Differences for {lat},{lon}" in str(w.message) for w in record)
