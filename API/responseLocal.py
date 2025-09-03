@@ -3691,7 +3691,10 @@ async def PW_Forecast(
         not_all_types & (np.max(precip_accum, axis=1) > 0)
     ]
 
-    # Then, apply thresholds to adjust.
+    # The following thresholds are applied after the dominant type (by volume) is determined.
+    # They serve to highlight significant precipitation events, overriding the volume-based
+    # determination if a certain threshold is met. The priority for these overrides is:
+    # Ice > Snow > Rain.
     # If more than 10 mm of rain is forecast, then rain.
     maxPchanceDay[InterPdaySum[:, 21] > (10 * prepAccumUnit)] = 4
 
