@@ -1003,8 +1003,7 @@ def dbz_to_rate(dbz_array, precip_type_array, min_dbz=5.0):
 
     # Apply 'snow' coefficients where precip_type is 'snow'
     snow_mask = precip_type_array == "snow"
-    a_array[snow_mask] = 58.7
-    b_array[snow_mask] = 1.94
+    b_array[snow_mask] = 2.0
 
     # Compute precipitation rate
     rate_array = (z_array / a_array) ** (1.0 / b_array)
