@@ -2220,8 +2220,8 @@ async def PW_Forecast(
         if extendFlag:
             ouputHours = 168
         else:
-            ouputHours = 24
-        ouputDays = 7
+            ouputHours = 48
+        ouputDays = 8
 
     hour_array = np.arange(
         baseDay.astimezone(utc).replace(tzinfo=None),
