@@ -56,6 +56,7 @@ ingestVersion = "v27"
 API_VERSION = "V2.7.7f"
 
 
+
 def setup_logging():
     handler = logging.StreamHandler(sys.stdout)
     # include timestamp, level, logger name, module, line number, message
@@ -2271,8 +2272,6 @@ async def PW_Forecast(
                     )
 
                 else:
-                    print("numHours")
-                    print(numHours)
                     HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), np.nan)
                     # The 0-18 hour HRRR data (dataOut_hrrrh) has fewer columns than the 18-48 hour data (dataOut_h2)
                     # when in timeMachine mode. Only concatenate the common columns (0-17).
