@@ -2957,7 +2957,7 @@ async def PW_Forecast(
 
     if "hrrrsubh" in sourceList:
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
-            dbz_to_rate(hrrrSubHInterpolation[:, HRRR["refc"]], precipTypes)
+            dbz_to_rate(hrrrSubHInterpolation[:, HRRR_SUBH["refc"]], precipTypes)
             * prepIntensityUnit
         )
     elif "nbm" in sourceList:
