@@ -17,6 +17,7 @@ from API.constants.text_const import (
     DEFAULT_POP,
     DEFAULT_HUMIDITY,
     PRECIP_INTENSITY_THRESHOLDS,
+    CLOUD_COVER_DAILY_THRESHOLDS,
 )
 from API.constants.shared_const import MISSING_DATA
 
@@ -1074,19 +1075,19 @@ def calculate_day_text(
             # to a representative value for icon calculation.
             if most_common_cloud_level_value == 0:
                 final_cloud_text = "clear"
-                derived_avg_cloud_for_icon = CLOUD_COVER_THRESHOLDS["clear"]
+                derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS["clear"]
             elif most_common_cloud_level_value == 1:
                 final_cloud_text = "very-light-clouds"
-                derived_avg_cloud_for_icon = CLOUD_COVER_THRESHOLDS["mostly_clear"]
+                derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS["mostly_clear"]
             elif most_common_cloud_level_value == 2:
                 final_cloud_text = "light-clouds"
-                derived_avg_cloud_for_icon = CLOUD_COVER_THRESHOLDS["partly_cloudy"]
+                derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS["partly_cloudy"]
             elif most_common_cloud_level_value == 3:
                 final_cloud_text = "medium-clouds"
-                derived_avg_cloud_for_icon = CLOUD_COVER_THRESHOLDS["mostly_cloudy"]
+                derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS["mostly_cloudy"]
             else:  # most_common_cloud_level_value == 4
                 final_cloud_text = "heavy-clouds"
-                derived_avg_cloud_for_icon = CLOUD_COVER_THRESHOLDS["cloudy"]
+                derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS["cloudy"]
 
     # If there's only one period in the forecast, use its actual average cloud cover for the icon directly
     # This overrides the above logic if a single period is available.

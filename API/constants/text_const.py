@@ -8,6 +8,14 @@ CLOUD_COVER_THRESHOLDS = {
     "mostly_clear": 0.125,
     "clear": 0.0,
 }
+# Cloud cover thresholds for daily text generation
+CLOUD_COVER_DAILY_THRESHOLDS = {
+    "cloudy": 1.0,
+    "mostly_cloudy": 0.75,
+    "partly_cloudy": 0.50,
+    "mostly_clear": 0.25,
+    "clear": 0.0,
+}
 
 # Precipitation intensity thresholds (mm/h liquid equivalent)
 PRECIP_INTENSITY_THRESHOLDS = {
