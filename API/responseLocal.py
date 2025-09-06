@@ -4300,7 +4300,7 @@ async def PW_Forecast(
     InterPcurrent = np.zeros(shape=22)  # Time, Intensity,Probability
     InterPcurrent[DATA_CURRENT["time"]] = int(minute_array_grib[0])
 
-    # Get prep probability, type, and intensity from minutely
+    # Get prep probability, intensity and error from minutely
     InterPcurrent[DATA_CURRENT["intensity"]] = InterPminute[
         0, DATA_MINUTELY["intensity"]
     ]

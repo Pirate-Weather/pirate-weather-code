@@ -6,9 +6,9 @@ Constants for the forecast indicies
 # Currently column indexes
 DATA_CURRENT = {
     "time": 0,
-    "type": 1,
-    "intensity": 2,
-    "prob": 3,
+    "intensity": 1,
+    "prob": 2,
+    "error": 3,
     "temp": 4,
     "apparent": 5,
     "dew": 6,
