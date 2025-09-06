@@ -9,7 +9,7 @@ import dask.array as da
 import numpy as np
 import time
 from herbie import Path
-from API.shared_const import REFC_THRESHOLD
+from API.constants.shared_const import REFC_THRESHOLD
 
 # Shared ingest constants
 CHUNK_SIZES = {
