@@ -1078,13 +1078,19 @@ def calculate_day_text(
                 derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS["clear"]
             elif most_common_cloud_level_value == 1:
                 final_cloud_text = "very-light-clouds"
-                derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS["mostly_clear"]
+                derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS[
+                    "mostly_clear"
+                ]
             elif most_common_cloud_level_value == 2:
                 final_cloud_text = "light-clouds"
-                derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS["partly_cloudy"]
+                derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS[
+                    "partly_cloudy"
+                ]
             elif most_common_cloud_level_value == 3:
                 final_cloud_text = "medium-clouds"
-                derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS["mostly_cloudy"]
+                derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS[
+                    "mostly_cloudy"
+                ]
             else:  # most_common_cloud_level_value == 4
                 final_cloud_text = "heavy-clouds"
                 derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS["cloudy"]
