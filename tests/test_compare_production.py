@@ -3,6 +3,7 @@ import warnings
 
 import httpx
 import pytest
+import json
 
 from tests import DiffWarning
 from tests.test_s3_live import _get_client
@@ -74,7 +75,5 @@ def test_local_vs_production():
 
         diffs = _diff_nested(local_data, prod_data)
         if diffs:
-            import json
-
             diff_text = json.dumps(diffs, indent=2, sort_keys=True)
             warnings.warn(f"Differences for {lat},{lon}:\n{diff_text}", DiffWarning)

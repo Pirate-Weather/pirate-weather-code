@@ -2275,8 +2275,8 @@ async def PW_Forecast(
         if extendFlag:
             ouputHours = 168
         else:
-            ouputHours = 24
-        ouputDays = 7
+            ouputHours = 48
+        ouputDays = 8
 
     hour_array = np.arange(
         baseDay.astimezone(utc).replace(tzinfo=None),
@@ -2326,8 +2326,6 @@ async def PW_Forecast(
                     )
 
                 else:
-                    print("numHours")
-                    print(numHours)
                     HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), np.nan)
                     # The 0-18 hour HRRR data (dataOut_hrrrh) has fewer columns than the 18-48 hour data (dataOut_h2)
                     # when in timeMachine mode. Only concatenate the common columns (0-17).
@@ -3855,18 +3853,46 @@ async def PW_Forecast(
     # otherwise it looks like an unreasonable amount of rain. So snow greater than 1 cm takes priority over rain.
     # Finally, if there is much ice at all, that takes priority over rain or snow.
 
-    # First, add a fallback if any precipitation is expected
-    maxPchanceDay[((maxPchanceDay == 0) & (InterPdaySum[:, 21] > 0))] = 4
-    maxPchanceDay[((maxPchanceDay == 0) & (InterPdaySum[:, 22] > 0))] = 1
-    maxPchanceDay[((maxPchanceDay == 0) & (InterPdaySum[:, 23] > 0))] = 2
+    # Improved logic: if all types are present, use sleet (3).
+    all_types = (
+        (InterPdaySum[:, 21] > 0)
+        & (InterPdaySum[:, 22] > 0)
+        & (InterPdaySum[:, 23] > 0)
+    )
+    maxPchanceDay[all_types] = 3
 
-    # Then, if more than 10 mm of rain is forecast, then rain
+    # Otherwise, use the type with the most accumulation.
+    # 21: rain, 22: snow, 23: ice
+    precip_accum = np.stack(
+        [
+            InterPdaySum[:, 21],  # rain
+            InterPdaySum[:, 22],  # snow
+            InterPdaySum[:, 23],  # ice
+        ],
+        axis=1,
+    )
+    # 4: rain, 1: snow, 2: ice (map index to type)
+
+    type_map = np.array([4, 1, 2])
+    dominant_type = type_map[np.argmax(precip_accum, axis=1)]
+
+    # Only update where not all types are present.
+    not_all_types = ~all_types
+    has_precip = np.max(precip_accum, axis=1) > 0
+    update_mask = not_all_types & has_precip
+    maxPchanceDay[update_mask] = dominant_type[update_mask]
+
+    # The following thresholds are applied after the dominant type (by volume) is determined.
+    # They serve to highlight significant precipitation events, overriding the volume-based
+    # determination if a certain threshold is met. The priority for these overrides is:
+    # Ice > Snow > Rain.
+    # If more than 10 mm of rain is forecast, then rain.
     maxPchanceDay[InterPdaySum[:, 21] > (10 * prepAccumUnit)] = 4
 
-    # If more than 5 mm of snow is forecast, then snow
+    # If more than 5 mm of snow is forecast, then snow.
     maxPchanceDay[InterPdaySum[:, 22] > (5 * prepAccumUnit)] = 1
 
-    # Else, if more than 1 mm of ice is forecast, then ice
+    # Else, if more than 1 mm of ice is forecast, then ice.
     maxPchanceDay[InterPdaySum[:, 23] > (1 * prepAccumUnit)] = 2
 
     # Process Daily Data for ouput
