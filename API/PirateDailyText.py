@@ -9,7 +9,7 @@ from PirateTextHelper import (
     humidity_sky_text,
     Most_Common,
 )
-from API.text_const import (
+from API.constants.text_const import (
     CLOUD_COVER_THRESHOLDS,
     DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
@@ -18,7 +18,7 @@ from API.text_const import (
     DEFAULT_HUMIDITY,
     PRECIP_INTENSITY_THRESHOLDS,
 )
-from API.shared_const import MISSING_DATA
+from API.constants.shared_const import MISSING_DATA
 
 MORNING_START = 4
 AFTERNOON_START = 12

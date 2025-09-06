@@ -9,12 +9,12 @@ from PirateTextHelper import (
 )
 from itertools import groupby
 from operator import itemgetter
-from API.text_const import (
+from API.constants.text_const import (
     DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     PRECIP_PROB_THRESHOLD,
 )
-from API.shared_const import MISSING_DATA
+from API.constants.shared_const import MISSING_DATA
 
 WEEK_DAYS_MINUS_ONE = 6
 WEEK_DAYS = 7

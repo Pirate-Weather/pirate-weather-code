@@ -43,8 +43,8 @@ WBGT_CONST = {
 DBZ_CONST = {
     "rain_a": 200.0,
     "rain_b": 1.6,
-    "snow_a": 58.7,
-    "snow_b": 1.94,
+    "snow_a": 600.0,
+    "snow_b": 2.0,
 }
 
 # Grouped apparent temperature constants
@@ -57,8 +57,7 @@ APPARENT_TEMP_CONSTS = {
     "e_const": 6.105,
 }
 # API versioning and ingest version constants
-API_VERSION = "V2.7.7e"
-INGEST_VERSION_STR = "v27"
+API_VERSION = "V2.7.7f"
 
 # Command priorities
 NICE_PRIORITY = 20

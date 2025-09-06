@@ -29,12 +29,16 @@ from ingest_utils import (
     interp_time_block,
     getGribList,
     validate_grib_stats,
+    CHUNK_SIZES,
+    FINAL_CHUNK_SIZES,
+    HISTORY_PERIODS,
 )
+from API.constants.shared_const import INGEST_VERSION_STR
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-ingestVersion = "v27"
+ingestVersion = INGEST_VERSION_STR
 
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
@@ -57,13 +61,14 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
+
 # Define the processing and history chunk size
-processChunk = 100
+processChunk = CHUNK_SIZES["NBM"]
 
 # Define the final x/y chunk size
-finalChunk = 3
+finalChunk = FINAL_CHUNK_SIZES["NBM"]
 
-hisPeriod = 48
+hisPeriod = HISTORY_PERIODS["NBM"]
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):

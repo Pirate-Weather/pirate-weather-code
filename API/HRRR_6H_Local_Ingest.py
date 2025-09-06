@@ -22,13 +22,22 @@ from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 from numcodecs import BitRound, Blosc
 
-from ingest_utils import mask_invalid_data, mask_invalid_refc, validate_grib_stats
+from ingest_utils import (
+    mask_invalid_data,
+    mask_invalid_refc,
+    validate_grib_stats,
+    CHUNK_SIZES,
+    FINAL_CHUNK_SIZES,
+    HISTORY_PERIODS,
+    FORECAST_LEAD_RANGES,
+)
+from API.constants.shared_const import INGEST_VERSION_STR
 
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-ingestVersion = "v27"
+ingestVersion = INGEST_VERSION_STR
 
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
@@ -48,13 +57,14 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
+
 # Define the processing and history chunk size
-processChunk = 100
+processChunk = CHUNK_SIZES["HRRR_6H"]
 
 # Define the final x/y chunksize
-finalChunk = 5
+finalChunk = FINAL_CHUNK_SIZES["HRRR_6H"]
 
-hisPeriod = 48
+hisPeriod = HISTORY_PERIODS["HRRR_6H"]
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -171,7 +181,8 @@ matchStrings = (
 
 # Create a range of forecast lead times
 # Go from 1 to 7 to account for the weird prate approach
-hrrr_range1 = range(18, 49)
+
+hrrr_range1 = FORECAST_LEAD_RANGES["HRRR_6H"]
 # Create FastHerbie object
 FH_forecastsub = FastHerbie(
     pd.date_range(start=base_time, periods=1, freq="1h"),

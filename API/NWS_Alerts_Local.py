@@ -16,9 +16,10 @@ import requests
 import s3fs
 import zarr
 from numpy.dtypes import StringDType
+from API.constants.shared_const import INGEST_VERSION_STR
 
 # %% Setup paths and parameters
-ingestVersion = "v27"
+ingestVersion = INGEST_VERSION_STR
 
 wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
 

@@ -2,7 +2,7 @@
 import math
 import numpy as np
 
-from API.text_const import (
+from API.constants.text_const import (
     DEFAULT_VISIBILITY,
     DEFAULT_POP,
     DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
@@ -17,7 +17,7 @@ from PirateTextHelper import (
     calculate_sky_text,
     humidity_sky_text,
 )
-from API.shared_const import MISSING_DATA
+from API.constants.shared_const import MISSING_DATA
 
 DAILY_RAIN_THRESHOLD = 10.0
 DAILY_SNOW_THRESHOLD = 5.0

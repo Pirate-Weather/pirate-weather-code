@@ -36,20 +36,19 @@ from PirateText import calculate_text
 from PirateMinutelyText import calculate_minutely_text
 from PirateWeeklyText import calculate_weekly_text
 from PirateDailyText import calculate_day_text
-from API.shared_const import MISSING_DATA
+from API.constants.shared_const import REFC_THRESHOLD, INGEST_VERSION_STR, MISSING_DATA
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
 
 # Project imports
-from API.model_const import HRRR_SUBH, HRRR, NBM_FIRE_INDEX, NBM, GFS, GEFS
-from API.api_const import (
+from API.constants.model_const import HRRR_SUBH, HRRR, NBM_FIRE_INDEX, NBM, GFS, GEFS
+from API.constants.api_const import (
     MAX_S3_RETRIES,
     S3_BASE_DELAY,
     S3_MAX_BANDWIDTH,
     LARGEST_DIR_INIT,
     API_VERSION,
-    INGEST_VERSION_STR,
     NICE_PRIORITY,
     SOLAR_RAD_CONST,
     SOLAR_IRRADIANCE_CONST,
@@ -58,8 +57,7 @@ from API.api_const import (
     DBZ_CONST,
     APPARENT_TEMP_CONSTS,
 )
-from API.clip_const import (
-    DATA_POINT_CLIPS,
+from API.constants.clip_const import (
     CLIP_GLOBAL,
     CLIP_HUMIDITY,
     CLIP_PRESSURE,
@@ -74,8 +72,8 @@ from API.clip_const import (
     CLIP_PROB,
     CLIP_TEMP,
 )
-from API.forecast_const import DATA_HOURLY
-from API.grid_const import (
+from API.constants.forecast_const import DATA_HOURLY
+from API.constants.grid_const import (
     HRRR_X_MIN,
     HRRR_Y_MIN,
     HRRR_X_MAX,
@@ -86,7 +84,6 @@ from API.grid_const import (
     NBM_Y_MAX,
     US_BOUNDING_BOX,
 )
-from API.shared_const import REFC_THRESHOLD
 
 Translations = load_all_translations()
 
@@ -3352,7 +3349,7 @@ async def PW_Forecast(
         InterPhour[:, DATA_HOURLY["ozone"]] = clipLog(
             GFS_Merged[:, GFS["ozone"]],
             CLIP_OZONE["min"],
-            DATA_POINT_CLIPS["ozone"],
+            CLIP_OZONE["max"],
             "Ozone Hour",
         )
 
@@ -3395,7 +3392,7 @@ async def PW_Forecast(
         InterPhour[:, DATA_HOURLY["smoke"]] = clipLog(
             HRRR_Merged[:, HRRR["smoke"]],
             CLIP_SMOKE["min"],
-            DATA_POINT_CLIPS["smoke"],
+            CLIP_SMOKE["max"],
             "Air quality Hour",
         )  # Maximum US AQI value for PM2.5 (smoke) is 500 which corresponds to 500 PM2.5
     else:
@@ -3406,7 +3403,7 @@ async def PW_Forecast(
         InterPhour[:, DATA_HOURLY["fire"]] = clipLog(
             NBM_Fire_Merged[:, NBM_FIRE_INDEX],
             CLIP_FIRE["min"],
-            DATA_POINT_CLIPS["fire"],
+            CLIP_FIRE["max"],
             "Fire Hour",
         )
 
@@ -4396,7 +4393,7 @@ async def PW_Forecast(
         GFS_Merged[currentIDX_hrrrh_A, GFS["ozone"]] * interpFac1
         + GFS_Merged[currentIDX_hrrrh, GFS["ozone"]] * interpFac2,
         0,
-        DATA_POINT_CLIPS["ozone"],
+        CLIP_OZONE["max"],
         "Ozone Current",
     )
 
@@ -4421,7 +4418,7 @@ async def PW_Forecast(
                 + HRRR_Merged[currentIDX_hrrrh, HRRR["smoke"]] * interpFac2
             ),
             0,
-            DATA_POINT_CLIPS["smoke"],
+            CLIP_SMOKE["max"],
             "Smoke Current",
         )
 
@@ -4462,7 +4459,7 @@ async def PW_Forecast(
                 + NBM_Fire_Merged[currentIDX_hrrrh, NBM_FIRE_INDEX] * interpFac2
             ),
             0,
-            DATA_POINT_CLIPS["fire"],
+            CLIP_FIRE["max"],
             "Fire index Current",
         )
 
