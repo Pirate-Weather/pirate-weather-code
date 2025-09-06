@@ -56,6 +56,15 @@ APPARENT_TEMP_CONSTS = {
     "exp_b": 237.7,
     "e_const": 6.105,
 }
+
+PRECIP_IDX = {
+    "none": 0,
+    "snow": 1,
+    "ice": 2,
+    "sleet": 3,
+    "rain": 4,
+}
+
 # API versioning and ingest version constants
 API_VERSION = "V2.7.7f"
 
@@ -67,3 +76,6 @@ MAX_S3_RETRIES = 5
 S3_BASE_DELAY = 1
 S3_MAX_BANDWIDTH = 100000000
 LARGEST_DIR_INIT = -1
+
+# Temperature thresholds
+TEMPERATURE_UNITS_THRESH = {"c": 0, "f": 32}

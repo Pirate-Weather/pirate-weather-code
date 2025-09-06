@@ -18,6 +18,7 @@ from API.constants.text_const import (
     CAPE_THRESHOLDS,
     LIFTED_INDEX_THRESHOLD,
     PRECIP_PROB_THRESHOLD,
+    WARM_TEMPERATURE_THRESHOLD,
 )
 import math
 
@@ -576,7 +577,11 @@ def humidity_sky_text(temp, tempUnits, humidity):
         return None
 
     # Only use humid if also warm (>20C or >68F)
-    tempThresh = 68 if tempUnits == 0 else 20
+    tempThresh = (
+        WARM_TEMPERATURE_THRESHOLD["f"]
+        if tempUnits == 0
+        else WARM_TEMPERATURE_THRESHOLD["c"]
+    )
     humidityText = None
     lowHumidityThresh = 0.15
     highHumidityThresh = 0.95

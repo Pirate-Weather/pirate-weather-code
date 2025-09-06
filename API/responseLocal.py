@@ -36,7 +36,12 @@ from PirateText import calculate_text
 from PirateMinutelyText import calculate_minutely_text
 from PirateWeeklyText import calculate_weekly_text
 from PirateDailyText import calculate_day_text
-from API.constants.shared_const import REFC_THRESHOLD, INGEST_VERSION_STR, MISSING_DATA
+from API.constants.shared_const import (
+    REFC_THRESHOLD,
+    INGEST_VERSION_STR,
+    MISSING_DATA,
+    KELVIN_TO_CELSIUS,
+)
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
@@ -56,6 +61,8 @@ from API.constants.api_const import (
     WBGT_CONST,
     DBZ_CONST,
     APPARENT_TEMP_CONSTS,
+    PRECIP_IDX,
+    TEMPERATURE_UNITS_THRESH,
 )
 from API.constants.clip_const import (
     CLIP_GLOBAL,
@@ -72,7 +79,12 @@ from API.constants.clip_const import (
     CLIP_PROB,
     CLIP_TEMP,
 )
-from API.constants.forecast_const import DATA_HOURLY
+from API.constants.forecast_const import (
+    DATA_HOURLY,
+    DATA_MINUTELY,
+    DATA_DAY,
+    DATA_CURRENT,
+)
 from API.constants.grid_const import (
     HRRR_X_MIN,
     HRRR_Y_MIN,
@@ -83,6 +95,15 @@ from API.constants.grid_const import (
     NBM_X_MAX,
     NBM_Y_MAX,
     US_BOUNDING_BOX,
+)
+from API.constants.text_const import (
+    PRECIP_PROB_THRESHOLD,
+    CLOUD_COVER_THRESHOLDS,
+    WIND_THRESHOLDS,
+    FOG_THRESHOLD_METERS,
+    HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
+    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
 )
 
 Translations = load_all_translations()
@@ -1388,7 +1409,7 @@ async def PW_Forecast(
             windUnit = 3.600  # kph
             prepIntensityUnit = 1  # mm/h
             prepAccumUnit = 0.1  # cm
-            tempUnits = 273.15  # Celsius
+            tempUnits = KELVIN_TO_CELSIUS  # Celsius
             pressUnits = 0.01  # Hectopascals
             visUnits = 0.001  # km
             humidUnit = 0.01  # %
@@ -1397,7 +1418,7 @@ async def PW_Forecast(
             windUnit = 2.234  # mph
             prepIntensityUnit = 1  # mm/h
             prepAccumUnit = 0.1  # cm
-            tempUnits = 273.15  # Celsius
+            tempUnits = KELVIN_TO_CELSIUS  # Celsius
             pressUnits = 0.01  # Hectopascals
             visUnits = 0.00062137  # miles
             humidUnit = 0.01  # %
@@ -1406,7 +1427,7 @@ async def PW_Forecast(
             windUnit = 1  # m/s
             prepIntensityUnit = 1  # mm/h
             prepAccumUnit = 0.1  # cm
-            tempUnits = 273.15  # Celsius
+            tempUnits = KELVIN_TO_CELSIUS  # Celsius
             pressUnits = 0.01  # Hectopascals
             visUnits = 0.001  # km
             humidUnit = 0.01  # %
@@ -2603,7 +2624,7 @@ async def PW_Forecast(
                 loc.observer, date=baseDay + datetime.timedelta(days=i)
             )  # Use local to get the correct date
 
-            InterSday[i, 17] = (
+            InterSday[i, DATA_DAY["sunrise"]] = (
                 (
                     np.datetime64(s["sunrise"].astimezone(utc).replace(tzinfo=None))
                     - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
@@ -2611,7 +2632,7 @@ async def PW_Forecast(
                 .astype("timedelta64[s]")
                 .astype(np.int32)
             )
-            InterSday[i, 18] = (
+            InterSday[i, DATA_DAY["sunset"]] = (
                 (
                     np.datetime64(s["sunset"].astimezone(utc).replace(tzinfo=None))
                     - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
@@ -2620,7 +2641,7 @@ async def PW_Forecast(
                 .astype(np.int32)
             )
 
-            InterSday[i, 15] = (
+            InterSday[i, DATA_DAY["dawn"]] = (
                 (
                     np.datetime64(s["dawn"].astimezone(utc).replace(tzinfo=None))
                     - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
@@ -2628,7 +2649,7 @@ async def PW_Forecast(
                 .astype("timedelta64[s]")
                 .astype(np.int32)
             )
-            InterSday[i, 16] = (
+            InterSday[i, DATA_DAY["dusk"]] = (
                 (
                     np.datetime64(s["dusk"].astimezone(utc).replace(tzinfo=None))
                     - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
@@ -2643,22 +2664,22 @@ async def PW_Forecast(
                 (lat < 0) & (baseDay.month <= 3) | (baseDay.month >= 10)
             ):
                 # Set sunrise to one second after midnight
-                InterSday[i, 17] = day_array_grib[i] + np.timedelta64(1, "s").astype(
-                    "timedelta64[s]"
-                ).astype(np.int32)
+                InterSday[i, DATA_DAY["sunrise"]] = day_array_grib[i] + np.timedelta64(
+                    1, "s"
+                ).astype("timedelta64[s]").astype(np.int32)
                 # Set sunset to one second before midnight the following day
-                InterSday[i, 18] = (
+                InterSday[i, DATA_DAY["sunset"]] = (
                     day_array_grib[i]
                     + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
                     - np.timedelta64(1, "s").astype("timedelta64[s]").astype(np.int32)
                 )
 
                 # Set sunrise to one second after midnight
-                InterSday[i, 15] = day_array_grib[i] + np.timedelta64(1, "s").astype(
-                    "timedelta64[s]"
-                ).astype(np.int32)
+                InterSday[i, DATA_DAY["dawn"]] = day_array_grib[i] + np.timedelta64(
+                    1, "s"
+                ).astype("timedelta64[s]").astype(np.int32)
                 # Set sunset to one second before midnight the following day
-                InterSday[i, 16] = (
+                InterSday[i, DATA_DAY["dusk"]] = (
                     day_array_grib[i]
                     + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
                     - np.timedelta64(1, "s").astype("timedelta64[s]").astype(np.int32)
@@ -2667,32 +2688,32 @@ async def PW_Forecast(
             # Else
             else:
                 # Set sunrise to two seconds before midnight
-                InterSday[i, 17] = (
+                InterSday[i, DATA_DAY["sunrise"]] = (
                     day_array_grib[i]
                     + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
                     - np.timedelta64(2, "s").astype("timedelta64[s]").astype(np.int32)
                 )
                 # Set sunset to one seconds before midnight
-                InterSday[i, 18] = (
+                InterSday[i, DATA_DAY["sunset"]] = (
                     day_array_grib[i]
                     + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
                     - np.timedelta64(1, "s").astype("timedelta64[s]").astype(np.int32)
                 )
 
-                InterSday[i, 15] = (
+                InterSday[i, DATA_DAY["dawn"]] = (
                     day_array_grib[i]
                     + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
                     - np.timedelta64(2, "s").astype("timedelta64[s]").astype(np.int32)
                 )
                 # Set sunset to one seconds before midnight
-                InterSday[i, 16] = (
+                InterSday[i, DATA_DAY["dusk"]] = (
                     day_array_grib[i]
                     + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
                     - np.timedelta64(1, "s").astype("timedelta64[s]").astype(np.int32)
                 )
 
         m = moon.phase(baseDay + datetime.timedelta(days=i))
-        InterSday[i, 19] = m / 27.99
+    InterSday[i, DATA_DAY["moon_phase"]] = m / 27.99
 
     # Timing Check
     if TIMING:
@@ -2848,7 +2869,14 @@ async def PW_Forecast(
                 )
 
     if "nbm" in sourceList:
-        for i in [8, 12, 14, 15, 16, 17]:
+        for i in [
+            NBM["accumulation"],
+            NBM["prob"],
+            NBM["rain"],
+            NBM["freezing_rain"],
+            NBM["snow"],
+            NBM["ice"],
+        ]:
             nbmMinuteInterpolation[:, i] = np.interp(
                 minute_array_grib,
                 dataOut_nbm[:, 0].squeeze(),
@@ -2862,19 +2890,27 @@ async def PW_Forecast(
         print("Minutely Start")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
-    InterPminute[:, 0] = minute_array_grib
+    InterPminute[:, DATA_MINUTELY["time"]] = minute_array_grib
 
     # "precipProbability"
     # Use NBM where available
     if "nbm" in sourceList:
-        InterPminute[:, 2] = nbmMinuteInterpolation[:, 12] * 0.01
+        InterPminute[:, DATA_MINUTELY["prob"]] = (
+            nbmMinuteInterpolation[:, NBM["prob"]] * 0.01
+        )
     elif "gefs" in sourceList:
-        InterPminute[:, 2] = gefsMinuteInterpolation[:, 1]
+        InterPminute[:, DATA_MINUTELY["prob"]] = gefsMinuteInterpolation[
+            :, GEFS["prob"]
+        ]
     else:  # Missing (-999) fallback
-        InterPminute[:, 2] = np.ones(len(minute_array_grib)) * MISSING_DATA
+        InterPminute[:, DATA_MINUTELY["prob"]] = (
+            np.ones(len(minute_array_grib)) * MISSING_DATA
+        )
 
     # Less than 5% set to 0
-    InterPminute[InterPminute[:, 2] < 0.05, 2] = 0
+    InterPminute[
+        InterPminute[:, DATA_MINUTELY["prob"]] < 0.05, DATA_MINUTELY["prob"]
+    ] = 0
 
     # Precipitation Type
     # IF HRRR, use that, otherwise GEFS
@@ -2891,18 +2927,18 @@ async def PW_Forecast(
         # https://www.nco.ncep.noaa.gov/pmb/docs/grib2/grib2_doc/grib2_table4-201.shtml
 
         # Snow
-        InterTminute[:, 1] = nbmMinuteInterpolation[:, 16]
+        InterTminute[:, 1] = nbmMinuteInterpolation[:, NBM["snow"]]
         # Ice
-        InterTminute[:, 2] = nbmMinuteInterpolation[:, 17]
+        InterTminute[:, 2] = nbmMinuteInterpolation[:, NBM["ice"]]
         # Freezing Rain
-        InterTminute[:, 3] = nbmMinuteInterpolation[:, 15]
+        InterTminute[:, 3] = nbmMinuteInterpolation[:, NBM["freezing_rain"]]
         # Rain
-        InterTminute[:, 4] = nbmMinuteInterpolation[:, 14]
+        InterTminute[:, 4] = nbmMinuteInterpolation[:, NBM["rain"]]
     elif "gefs" in sourceList:
-        for i in [4, 5, 6, 7]:
+        for i in [GEFS["snow"], GEFS["ice"], GEFS["freezing_rain"], GEFS["rain"]]:
             InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
     else:  # GFS Fallback
-        for i in [12, 13, 14, 15]:
+        for i in [GFS["snow"], GFS["ice"], GFS["freezing_rain"], GFS["rain"]]:
             InterTminute[:, i - 11] = gfsMinuteInterpolation[:, i]
 
     # If all nan, set pchance to -999, otherwise determine the predominant type
@@ -2920,27 +2956,39 @@ async def PW_Forecast(
     precipTypes = np.array(minuteType)
 
     if "hrrrsubh" in sourceList:
-        InterPminute[:, 1] = (
-            dbz_to_rate(hrrrSubHInterpolation[:, 12], precipTypes) * prepIntensityUnit
+        InterPminute[:, DATA_MINUTELY["intensity"]] = (
+            dbz_to_rate(hrrrSubHInterpolation[:, HRRR["refc"]], precipTypes)
+            * prepIntensityUnit
         )
     elif "nbm" in sourceList:
-        InterPminute[:, 1] = nbmMinuteInterpolation[:, 8] * prepIntensityUnit
+        InterPminute[:, DATA_MINUTELY["intensity"]] = (
+            nbmMinuteInterpolation[:, NBM["accumulation"]] * prepIntensityUnit
+        )
     elif "gefs" in sourceList:
-        InterPminute[:, 1] = gefsMinuteInterpolation[:, 2] * prepIntensityUnit
+        InterPminute[:, DATA_MINUTELY["intensity"]] = (
+            gefsMinuteInterpolation[:, GEFS["accumulation"]] * prepIntensityUnit
+        )
     else:
-        InterPminute[:, 1] = (
-            dbz_to_rate(gfsMinuteInterpolation[:, 21], precipTypes) * prepIntensityUnit
+        InterPminute[:, DATA_MINUTELY["intensity"]] = (
+            dbz_to_rate(gfsMinuteInterpolation[:, GFS["refc"]], precipTypes)
+            * prepIntensityUnit
         )
 
     if "hrrrsubh" not in sourceList:
         # Set intensity to zero if POP == 0
-        InterPminute[InterPminute[:, 2] == 0, 1] = 0
+        InterPminute[
+            InterPminute[:, DATA_MINUTELY["prob"]] == 0, DATA_MINUTELY["intensity"]
+        ] = 0
 
     # "precipIntensityError"
     if "gefs" in sourceList:
-        InterPminute[:, 3] = gefsMinuteInterpolation[:, 3] * prepIntensityUnit
+        InterPminute[:, DATA_MINUTELY["error"]] = (
+            gefsMinuteInterpolation[:, GEFS["error"]] * prepIntensityUnit
+        )
     else:  # Missing
-        InterPminute[:, 3] = np.ones(len(minute_array_grib)) * MISSING_DATA
+        InterPminute[:, DATA_MINUTELY["error"]] = (
+            np.ones(len(minute_array_grib)) * MISSING_DATA
+        )
 
     # Create list of icons based off of maxPchance
     minuteKeys = [
@@ -2953,22 +3001,32 @@ async def PW_Forecast(
 
     # Assign pfactors for rain and snow for intensity
     pFacMinute = np.zeros((len(minute_array_grib)))
-    pFacMinute[((maxPchance == 4) | (maxPchance == 2) | (maxPchance == 3))] = (
-        1  # Rain, Ice
-    )
+    pFacMinute[
+        (
+            (maxPchance == PRECIP_IDX["rain"])
+            | (maxPchance == PRECIP_IDX["ice"])
+            | (maxPchance == PRECIP_IDX["sleet"])
+        )
+    ] = 1  # Rain, Ice
     # Note, this means that intensity is always in liquid water equivalent
-    pFacMinute[(maxPchance == 1)] = 1  # Snow
+    pFacMinute[(maxPchance == PRECIP_IDX["snow"])] = 1  # Snow
 
     if "hrrrsubh" in sourceList:
         # Sometimes reflectivity shows precipitation when the type is none which causes the intensity to suddenly drop to 0
         # Setting the pFacMinute for None type to 1 will prevent this issue
         # Is worth testing to see if this causes unintended side effects
-        pFacMinute[(maxPchance == 0)] = 1  # None
+        pFacMinute[(maxPchance == PRECIP_IDX["none"])] = 1  # None
 
-    minuteTimes = InterPminute[:, 0]
-    minuteIntensity = np.maximum(np.round(InterPminute[:, 1] * pFacMinute, 4), 0)
-    minuteProbability = np.minimum(np.maximum(np.round(InterPminute[:, 2], 2), 0), 1)
-    minuteIntensityError = np.maximum(np.round(InterPminute[:, 3], 2), 0)
+    minuteTimes = InterPminute[:, DATA_MINUTELY["time"]]
+    minuteIntensity = np.maximum(
+        np.round(InterPminute[:, DATA_MINUTELY["intensity"]] * pFacMinute, 4), 0
+    )
+    minuteProbability = np.minimum(
+        np.maximum(np.round(InterPminute[:, DATA_MINUTELY["prob"]], 2), 0), 1
+    )
+    minuteIntensityError = np.maximum(
+        np.round(InterPminute[:, DATA_MINUTELY["error"]], 2), 0
+    )
 
     # Convert nan to -999 for json
     minuteIntensity[np.isnan(minuteIntensity)] = MISSING_DATA
@@ -3101,10 +3159,10 @@ async def PW_Forecast(
     # NBM
     prcipProbabilityHour = np.full((len(hour_array_grib), 2), np.nan)
     if "nbm" in sourceList:
-        prcipProbabilityHour[:, 0] = NBM_Merged[:, NBM["pop"]] * 0.01
+        prcipProbabilityHour[:, 0] = NBM_Merged[:, NBM["prob"]] * 0.01
     # GEFS
     if "gefs" in sourceList:
-        prcipProbabilityHour[:, 1] = GEFS_Merged[:, GEFS["pop"]]
+        prcipProbabilityHour[:, 1] = GEFS_Merged[:, GEFS["prob"]]
 
     # Take first non-NaN value
     InterPhour[:, DATA_HOURLY["prob"]] = np.choose(
@@ -3441,10 +3499,11 @@ async def PW_Forecast(
     # Set temperature units
     if tempUnits == 0:
         InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] = (
-            InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] - 273.15
+            InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]]
+            - KELVIN_TO_CELSIUS
         ) * 9 / 5 + 32
         InterPhour[:, DATA_HOURLY["feels_like"]] = (
-            InterPhour[:, DATA_HOURLY["feels_like"]] - 273.15
+            InterPhour[:, DATA_HOURLY["feels_like"]] - KELVIN_TO_CELSIUS
         ) * 9 / 5 + 32
     else:
         InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] = (
@@ -3544,13 +3603,13 @@ async def PW_Forecast(
     pFacHour = np.zeros((len(hour_array)))
     pFacHour[
         (
-            (InterPhour[:, DATA_HOURLY["type"]] == 4)
-            | (InterPhour[:, DATA_HOURLY["type"]] == 2)
-            | (InterPhour[:, DATA_HOURLY["type"]] == 3)
+            (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["rain"])
+            | (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["ice"])
+            | (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["sleet"])
         )
     ] = 1  # Rain, Ice
     # NOTE, this means that intensity is always liquid water equivalent.
-    pFacHour[(InterPhour[:, DATA_HOURLY["type"]] == 1)] = 1  # Snow
+    pFacHour[(InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["snow"])] = 1  # Snow
 
     InterPhour[:, DATA_HOURLY["intensity"]] = (
         InterPhour[:, DATA_HOURLY["intensity"]] * pFacHour
@@ -3601,26 +3660,30 @@ async def PW_Forecast(
     # For day 0 summary, need to calculate hourly data from midnight local
     for idx in range(0, numHours):
         # Check if day or night
-        if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], 17]:
+        if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]:
             isDay = False
         elif (
-            hour_array_grib[idx] >= InterSday[hourlyDayIndex[idx], 17]
-            and hour_array_grib[idx] <= InterSday[hourlyDayIndex[idx], 18]
+            hour_array_grib[idx] >= InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]
+            and hour_array_grib[idx]
+            <= InterSday[hourlyDayIndex[idx], DATA_DAY["sunset"]]
         ):
             isDay = True
-        elif hour_array_grib[idx] > InterSday[hourlyDayIndex[idx], 18]:
+        elif hour_array_grib[idx] > InterSday[hourlyDayIndex[idx], DATA_DAY["sunset"]]:
             isDay = False
 
         # Set text
-        if InterPhour[idx, DATA_HOURLY["prob"]] >= 0.3 and (
+        if InterPhour[idx, DATA_HOURLY["prob"]] >= PRECIP_PROB_THRESHOLD and (
             (
                 (
                     InterPhour[idx, DATA_HOURLY["rain"]]
                     + InterPhour[idx, DATA_HOURLY["ice"]]
                 )
-                > (0.02 * prepAccumUnit)
+                > (HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit)
             )
-            or (InterPhour[idx, DATA_HOURLY["snow"]] > (0.02 * prepAccumUnit))
+            or (
+                InterPhour[idx, DATA_HOURLY["snow"]]
+                > (HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit)
+            )
         ):
             # If more than 30% chance of precip at any point throughout the day, then the icon for whatever is happening
             # Thresholds set in mm
@@ -3628,44 +3691,65 @@ async def PW_Forecast(
             hourText = PTextHour[idx]
         # If visibility <1000 and during the day
         # elif InterPhour[idx,14]<1000 and (hour_array_grib[idx]>InterPday[dCount,16] and hour_array_grib[idx]<InterPday[dCount,17]):
-        elif InterPhour[idx, DATA_HOURLY["vis"]] < (1000 * visUnits):
+        elif InterPhour[idx, DATA_HOURLY["vis"]] < (FOG_THRESHOLD_METERS * visUnits):
             hourIcon = "fog"
             hourText = "Fog"
         # If wind is greater than 10 m/s
-        elif InterPhour[idx, DATA_HOURLY["wind"]] > (10 * windUnit):
+        elif InterPhour[idx, DATA_HOURLY["wind"]] > (
+            WIND_THRESHOLDS["light"] * windUnit
+        ):
             hourIcon = "wind"
             hourText = "Windy"
-        elif InterPhour[idx, DATA_HOURLY["cloud"]] > 0.75:
+        elif InterPhour[idx, DATA_HOURLY["cloud"]] > CLOUD_COVER_THRESHOLDS["cloudy"]:
             hourIcon = "cloudy"
             hourText = "Cloudy"
-        elif InterPhour[idx, DATA_HOURLY["cloud"]] > 0.375:
+        elif (
+            InterPhour[idx, DATA_HOURLY["cloud"]]
+            > CLOUD_COVER_THRESHOLDS["partly_cloudy"]
+        ):
             hourText = "Partly Cloudy"
 
-            if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], 17]:
+            if (
+                hour_array_grib[idx]
+                < InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]
+            ):
                 # Before sunrise
                 hourIcon = "partly-cloudy-night"
             elif (
-                hour_array_grib[idx] >= InterSday[hourlyDayIndex[idx], 17]
-                and hour_array_grib[idx] <= InterSday[hourlyDayIndex[idx], 18]
+                hour_array_grib[idx]
+                >= InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]
+                and hour_array_grib[idx]
+                <= InterSday[hourlyDayIndex[idx], DATA_DAY["sunset"]]
             ):
                 # After sunrise before sunset
                 hourIcon = "partly-cloudy-day"
-            elif hour_array_grib[idx] > InterSday[hourlyDayIndex[idx], 18]:
+            elif (
+                hour_array_grib[idx]
+                > InterSday[hourlyDayIndex[idx], DATA_DAY["sunset"]]
+            ):
                 # After sunset
                 hourIcon = "partly-cloudy-night"
         else:
             hourText = "Clear"
 
-            if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], 17]:
+            if (
+                hour_array_grib[idx]
+                < InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]
+            ):
                 # Before sunrise
                 hourIcon = "clear-night"
             elif (
-                hour_array_grib[idx] >= InterSday[hourlyDayIndex[idx], 17]
-                and hour_array_grib[idx] <= InterSday[hourlyDayIndex[idx], 18]
+                hour_array_grib[idx]
+                >= InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]
+                and hour_array_grib[idx]
+                <= InterSday[hourlyDayIndex[idx], DATA_DAY["sunset"]]
             ):
                 # After sunrise before sunset
                 hourIcon = "clear-day"
-            elif hour_array_grib[idx] > InterSday[hourlyDayIndex[idx], 18]:
+            elif (
+                hour_array_grib[idx]
+                > InterSday[hourlyDayIndex[idx], DATA_DAY["sunset"]]
+            ):
                 # After sunset
                 hourIcon = "clear-night"
 
@@ -3852,9 +3936,9 @@ async def PW_Forecast(
 
     # Improved logic: if all types are present, use sleet (3).
     all_types = (
-        (InterPdaySum[:, 21] > 0)
-        & (InterPdaySum[:, 22] > 0)
-        & (InterPdaySum[:, 23] > 0)
+        (InterPdaySum[:, DATA_DAY["rain"]] > 0)
+        & (InterPdaySum[:, DATA_DAY["snow"]] > 0)
+        & (InterPdaySum[:, DATA_DAY["ice"]] > 0)
     )
     maxPchanceDay[all_types] = 3
 
@@ -3862,15 +3946,15 @@ async def PW_Forecast(
     # 21: rain, 22: snow, 23: ice
     precip_accum = np.stack(
         [
-            InterPdaySum[:, 21],  # rain
-            InterPdaySum[:, 22],  # snow
-            InterPdaySum[:, 23],  # ice
+            InterPdaySum[:, DATA_DAY["rain"]],  # rain
+            InterPdaySum[:, DATA_DAY["snow"]],  # snow
+            InterPdaySum[:, DATA_DAY["ice"]],  # ice
         ],
         axis=1,
     )
     # 4: rain, 1: snow, 2: ice (map index to type)
 
-    type_map = np.array([4, 1, 2])
+    type_map = np.array([PRECIP_IDX["rain"], PRECIP_IDX["snow"], PRECIP_IDX["ice"]])
     dominant_type = type_map[np.argmax(precip_accum, axis=1)]
 
     # Only update where not all types are present.
@@ -3884,13 +3968,19 @@ async def PW_Forecast(
     # determination if a certain threshold is met. The priority for these overrides is:
     # Ice > Snow > Rain.
     # If more than 10 mm of rain is forecast, then rain.
-    maxPchanceDay[InterPdaySum[:, 21] > (10 * prepAccumUnit)] = 4
+    maxPchanceDay[InterPdaySum[:, DATA_DAY["rain"]] > (10 * prepAccumUnit)] = (
+        PRECIP_IDX["rain"]
+    )
 
     # If more than 5 mm of snow is forecast, then snow.
-    maxPchanceDay[InterPdaySum[:, 22] > (5 * prepAccumUnit)] = 1
+    maxPchanceDay[InterPdaySum[:, DATA_DAY["snow"]] > (5 * prepAccumUnit)] = PRECIP_IDX[
+        "snow"
+    ]
 
     # Else, if more than 1 mm of ice is forecast, then ice.
-    maxPchanceDay[InterPdaySum[:, 23] > (1 * prepAccumUnit)] = 2
+    maxPchanceDay[InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit)] = PRECIP_IDX[
+        "ice"
+    ]
 
     # Process Daily Data for ouput
     dayList = []
@@ -3904,9 +3994,9 @@ async def PW_Forecast(
     # Round
     # Round all to 2 except precipitations
     InterPday[:, 5:18] = InterPday[:, 5:18].round(2)
-    InterPdayMax[:, 3] = InterPdayMax[:, 3].round(2)
+    InterPdayMax[:, DATA_DAY["prob"]] = InterPdayMax[:, DATA_DAY["prob"]].round(2)
     InterPdayMax[:, 5:18] = InterPdayMax[:, 5:18].round(2)
-    InterPdayMax[:, 24] = InterPdayMax[:, 24].round(2)
+    InterPdayMax[:, DATA_DAY["fire"]] = InterPdayMax[:, DATA_DAY["fire"]].round(2)
 
     InterPdayMin[:, 5:18] = InterPdayMin[:, 5:18].round(2)
     InterPdaySum[:, 5:18] = InterPdaySum[:, 5:18].round(2)
@@ -3925,12 +4015,18 @@ async def PW_Forecast(
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     for idx in range(0, daily_days):
-        if InterPdayMax4am[idx, 3] > 0.3 and (
+        if InterPdayMax4am[idx, DATA_DAY["prob"]] > PRECIP_PROB_THRESHOLD and (
             (
-                (InterPdaySum4am[idx, 21] + InterPdaySum4am[idx, 23])
-                > (1 * prepAccumUnit)
+                (
+                    InterPdaySum4am[idx, DATA_DAY["rain"]]
+                    + InterPdaySum4am[idx, DATA_DAY["ice"]]
+                )
+                > (DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit)
             )
-            or (InterPdaySum4am[idx, 22] > (10 * prepAccumUnit))
+            or (
+                InterPdaySum4am[idx, DATA_DAY["snow"]]
+                > (DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit)
+            )
         ):
             # If more than 30% chance of precip at any point throughout the day, and either more than 1 mm of rain or 5 mm of snow
             # Thresholds set in mm
@@ -3940,27 +4036,32 @@ async def PW_Forecast(
             # Fallback if no ptype for some reason. This should never occur though
             if dayIcon == "none":
                 if tempUnits == 0:
-                    tempThresh = 32
+                    tempThresh = TEMPERATURE_UNITS_THRESH["f"]
                 else:
-                    tempThresh = 0
+                    tempThresh = TEMPERATURE_UNITS_THRESH["c"]
 
-                if InterPday[idx, 5] > tempThresh:
+                if InterPday[idx, DATA_DAY["temp"]] > tempThresh:
                     dayIcon = "rain"
                     dayText = "Rain"
                 else:
                     dayIcon = "snow"
                     dayText = "Snow"
 
-        elif InterPday4am[idx, 15] < (1000 * visUnits):
+        elif InterPday4am[idx, DATA_DAY["vis"]] < (FOG_THRESHOLD_METERS * visUnits):
             dayIcon = "fog"
             dayText = "Fog"
-        elif InterPday4am[idx, 10] > (10 * windUnit):
+        elif InterPday4am[idx, DATA_DAY["wind"]] > (
+            WIND_THRESHOLDS["light"] * windUnit
+        ):
             dayIcon = "wind"
             dayText = "Windy"
-        elif InterPday4am[idx, 13] > 0.75:
+        elif InterPday4am[idx, DATA_DAY["cloud"]] > CLOUD_COVER_THRESHOLDS["cloudy"]:
             dayIcon = "cloudy"
             dayText = "Cloudy"
-        elif InterPday4am[idx, 13] > 0.375:
+        elif (
+            InterPday4am[idx, DATA_DAY["cloud"]]
+            > CLOUD_COVER_THRESHOLDS["partly_cloudy"]
+        ):
             dayIcon = "partly-cloudy-day"
             dayText = "Partly Cloudy"
         else:
@@ -3974,54 +4075,64 @@ async def PW_Forecast(
             "time": int(day_array_grib[idx]),
             "summary": dayText,
             "icon": dayIcon,
-            "dawnTime": int(InterSday[idx, 15]),
-            "sunriseTime": int(InterSday[idx, 17]),
-            "sunsetTime": int(InterSday[idx, 18]),
-            "duskTime": int(InterSday[idx, 16]),
-            "moonPhase": InterSday[idx, 19].round(2),
-            "precipIntensity": InterPday[idx, 2],
-            "precipIntensityMax": InterPdayMax[idx, 2],
-            "precipIntensityMaxTime": int(InterPdayMaxTime[idx, 2]),
-            "precipProbability": InterPdayMax[idx, 3],
+            "dawnTime": int(InterSday[idx, DATA_DAY["dawn"]]),
+            "sunriseTime": int(InterSday[idx, DATA_DAY["sunrise"]]),
+            "sunsetTime": int(InterSday[idx, DATA_DAY["sunset"]]),
+            "duskTime": int(InterSday[idx, DATA_DAY["dusk"]]),
+            "moonPhase": InterSday[idx, DATA_DAY["moon_phase"]].round(2),
+            "precipIntensity": InterPday[idx, DATA_DAY["intensity"]],
+            "precipIntensityMax": InterPdayMax[idx, DATA_DAY["intensity"]],
+            "precipIntensityMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["intensity"]]),
+            "precipProbability": InterPdayMax[idx, DATA_DAY["prob"]],
             "precipAccumulation": round(
-                InterPdaySum[idx, 21] + InterPdaySum[idx, 22] + InterPdaySum[idx, 23],
+                InterPdaySum[idx, DATA_DAY["rain"]]
+                + InterPdaySum[idx, DATA_DAY["snow"]]
+                + InterPdaySum[idx, DATA_DAY["ice"]],
                 4,
             ),
             "precipType": PTypeDay[idx],
-            "temperatureHigh": InterPdayHigh[idx, 5],
-            "temperatureHighTime": int(InterPdayHighTime[idx, 5]),
-            "temperatureLow": InterPdayLow[idx, 5],
-            "temperatureLowTime": int(InterPdayLowTime[idx, 5]),
-            "apparentTemperatureHigh": InterPdayHigh[idx, 6],
-            "apparentTemperatureHighTime": int(InterPdayHighTime[idx, 6]),
-            "apparentTemperatureLow": InterPdayLow[idx, 6],
-            "apparentTemperatureLowTime": int(InterPdayLowTime[idx, 6]),
-            "dewPoint": InterPday[idx, 7],
-            "humidity": InterPday[idx, 8],
-            "pressure": InterPday[idx, 9],
-            "windSpeed": InterPday[idx, 10],
-            "windGust": InterPday[idx, 11],
-            "windGustTime": int(InterPdayMaxTime[idx, 11]),
-            "windBearing": int(InterPday[idx, 12]),
-            "cloudCover": InterPday[idx, 13],
-            "uvIndex": InterPdayMax[idx, 14],
-            "uvIndexTime": int(InterPdayMaxTime[idx, 14]),
-            "visibility": InterPday[idx, 15],
-            "temperatureMin": InterPdayMin[idx, 5],
-            "temperatureMinTime": int(InterPdayMinTime[idx, 5]),
-            "temperatureMax": InterPdayMax[idx, 5],
-            "temperatureMaxTime": int(InterPdayMaxTime[idx, 5]),
-            "apparentTemperatureMin": InterPdayMin[idx, 6],
-            "apparentTemperatureMinTime": int(InterPdayMinTime[idx, 6]),
-            "apparentTemperatureMax": InterPdayMax[idx, 6],
-            "apparentTemperatureMaxTime": int(InterPdayMaxTime[idx, 6]),
-            "smokeMax": InterPdayMax[idx, 20],
-            "smokeMaxTime": int(InterPdayMaxTime[idx, 20]),
-            "liquidAccumulation": InterPdaySum[idx, 21],
-            "snowAccumulation": InterPdaySum[idx, 22],
-            "iceAccumulation": InterPdaySum[idx, 23],
-            "fireIndexMax": InterPdayMax[idx, 24],
-            "fireIndexMaxTime": int(InterPdayMaxTime[idx, 24]),
+            "temperatureHigh": InterPdayHigh[idx, DATA_DAY["temp"]],
+            "temperatureHighTime": int(InterPdayHighTime[idx, DATA_DAY["temp"]]),
+            "temperatureLow": InterPdayLow[idx, DATA_DAY["temp"]],
+            "temperatureLowTime": int(InterPdayLowTime[idx, DATA_DAY["temp"]]),
+            "apparentTemperatureHigh": InterPdayHigh[idx, DATA_DAY["apparent"]],
+            "apparentTemperatureHighTime": int(
+                InterPdayHighTime[idx, DATA_DAY["apparent"]]
+            ),
+            "apparentTemperatureLow": InterPdayLow[idx, DATA_DAY["apparent"]],
+            "apparentTemperatureLowTime": int(
+                InterPdayLowTime[idx, DATA_DAY["apparent"]]
+            ),
+            "dewPoint": InterPday[idx, DATA_DAY["dew"]],
+            "humidity": InterPday[idx, DATA_DAY["humidity"]],
+            "pressure": InterPday[idx, DATA_DAY["pressure"]],
+            "windSpeed": InterPday[idx, DATA_DAY["wind"]],
+            "windGust": InterPday[idx, DATA_DAY["gust"]],
+            "windGustTime": int(InterPdayMaxTime[idx, DATA_DAY["gust"]]),
+            "windBearing": int(InterPday[idx, DATA_DAY["bearing"]]),
+            "cloudCover": InterPday[idx, DATA_DAY["cloud"]],
+            "uvIndex": InterPdayMax[idx, DATA_DAY["uv"]],
+            "uvIndexTime": int(InterPdayMaxTime[idx, DATA_DAY["uv"]]),
+            "visibility": InterPday[idx, DATA_DAY["vis"]],
+            "temperatureMin": InterPdayMin[idx, DATA_DAY["temp"]],
+            "temperatureMinTime": int(InterPdayMinTime[idx, DATA_DAY["temp"]]),
+            "temperatureMax": InterPdayMax[idx, DATA_DAY["temp"]],
+            "temperatureMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["temp"]]),
+            "apparentTemperatureMin": InterPdayMin[idx, DATA_DAY["apparent"]],
+            "apparentTemperatureMinTime": int(
+                InterPdayMinTime[idx, DATA_DAY["apparent"]]
+            ),
+            "apparentTemperatureMax": InterPdayMax[idx, DATA_DAY["apparent"]],
+            "apparentTemperatureMaxTime": int(
+                InterPdayMaxTime[idx, DATA_DAY["apparent"]]
+            ),
+            "smokeMax": InterPdayMax[idx, DATA_DAY["smoke"]],
+            "smokeMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["smoke"]]),
+            "liquidAccumulation": InterPdaySum[idx, DATA_DAY["rain"]],
+            "snowAccumulation": InterPdaySum[idx, DATA_DAY["snow"]],
+            "iceAccumulation": InterPdaySum[idx, DATA_DAY["ice"]],
+            "fireIndexMax": InterPdayMax[idx, DATA_DAY["fire"]],
+            "fireIndexMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["fire"]]),
         }
 
         try:
@@ -4186,98 +4297,129 @@ async def PW_Forecast(
 
     currentIDX_hrrrh_A = np.max((currentIDX_hrrrh - 1, 0))
 
-    InterPcurrent = np.zeros(shape=21)  # Time, Intensity,Probability
-    InterPcurrent[0] = int(minute_array_grib[0])
+    InterPcurrent = np.zeros(shape=22)  # Time, Intensity,Probability
+    InterPcurrent[DATA_CURRENT["time"]] = int(minute_array_grib[0])
 
     # Get prep probability, type, and intensity from minutely
-    InterPcurrent[1] = InterPminute[0, 1]
-    InterPcurrent[2] = InterPminute[0, 2]  # "precipProbability"
-    InterPcurrent[3] = InterPminute[0, 3]  # "precipIntensityError"
+    InterPcurrent[DATA_CURRENT["intensity"]] = InterPminute[
+        0, DATA_MINUTELY["intensity"]
+    ]
+    InterPcurrent[DATA_CURRENT["prob"]] = InterPminute[
+        0, DATA_MINUTELY["prob"]
+    ]  # "precipProbability"
+    InterPcurrent[DATA_CURRENT["error"]] = InterPminute[
+        0, DATA_MINUTELY["error"]
+    ]  # "precipIntensityError"
 
     # Temperature from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
-        InterPcurrent[4] = hrrrSubHInterpolation[0, HRRR_SUBH["temperature"]]
+        InterPcurrent[DATA_CURRENT["temp"]] = hrrrSubHInterpolation[
+            0, HRRR_SUBH["temperature"]
+        ]
     elif "nbm" in sourceList:
-        InterPcurrent[4] = (
+        InterPcurrent[DATA_CURRENT["temp"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["temperature"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["temperature"]] * interpFac2
         )
     else:
-        InterPcurrent[4] = (
+        InterPcurrent[DATA_CURRENT["temp"]] = (
             GFS_Merged[currentIDX_hrrrh_A, GFS["temperature"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["temperature"]] * interpFac2
         )
 
     # Clip between -90 and 60
-    InterPcurrent[4] = clipLog(InterPcurrent[4], 183, 333, "Temperature Current")
+    InterPcurrent[DATA_CURRENT["temp"]] = clipLog(
+        InterPcurrent[DATA_CURRENT["temp"]],
+        CLIP_TEMP["min"],
+        CLIP_TEMP["max"],
+        "Temperature Current",
+    )
 
     # Dewpoint from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
-        InterPcurrent[6] = hrrrSubHInterpolation[0, HRRR_SUBH["dew_point"]]
+        InterPcurrent[DATA_CURRENT["dew"]] = hrrrSubHInterpolation[
+            0, HRRR_SUBH["dew_point"]
+        ]
     elif "nbm" in sourceList:
-        InterPcurrent[6] = (
+        InterPcurrent[DATA_CURRENT["dew"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["dew_point"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["dew_point"]] * interpFac2
         )
     else:
-        InterPcurrent[6] = (
+        InterPcurrent[DATA_CURRENT["dew"]] = (
             GFS_Merged[currentIDX_hrrrh_A, GFS["dew_point"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["dew_point"]] * interpFac2
         )
 
-    # Clip between -90 and 60
-    InterPcurrent[6] = clipLog(InterPcurrent[6], 183, 333, "Dewpoint Current")
+        # Clip between -90 and 60
+        InterPcurrent[DATA_CURRENT["dew"]] = clipLog(
+            InterPcurrent[DATA_CURRENT["dew"]],
+            CLIP_TEMP["min"],
+            CLIP_TEMP["max"],
+            "Dewpoint Current",
+        )
 
     # humidity, NBM then HRRR, then GFS
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-        InterPcurrent[7] = (
+        InterPcurrent[DATA_CURRENT["humidity"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["humidity"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["humidity"]] * interpFac2
         ) * humidUnit
     elif "nbm" in sourceList:
-        InterPcurrent[7] = (
+        InterPcurrent[DATA_CURRENT["humidity"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["humidity"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["humidity"]] * interpFac2
         ) * humidUnit
     else:
-        InterPcurrent[7] = (
+        InterPcurrent[DATA_CURRENT["humidity"]] = (
             GFS_Merged[currentIDX_hrrrh_A, GFS["humidity"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["humidity"]] * interpFac2
         ) * humidUnit
 
     # Clip between 0 and 1
-    InterPcurrent[7] = clipLog(InterPcurrent[7], 0, 1, "Humidity Current")
+    InterPcurrent[DATA_CURRENT["humidity"]] = clipLog(
+        InterPcurrent[DATA_CURRENT["humidity"]],
+        CLIP_HUMIDITY["min"],
+        CLIP_HUMIDITY["max"],
+        "Humidity Current",
+    )
 
     # Pressure from HRRR, then GFS
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-        InterPcurrent[8] = (
+        InterPcurrent[DATA_CURRENT["pressure"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["pressure"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["pressure"]] * interpFac2
         )
     else:
-        InterPcurrent[8] = (
+        InterPcurrent[DATA_CURRENT["pressure"]] = (
             GFS_Merged[currentIDX_hrrrh_A, GFS["pressure"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["pressure"]] * interpFac2
         )
 
     # Clip between 800 and 1100
-    InterPcurrent[8] = (
-        clipLog(InterPcurrent[8], 80000, 110000, "Pressure Current") * pressUnits
+    InterPcurrent[DATA_CURRENT["pressure"]] = (
+        clipLog(
+            InterPcurrent[DATA_CURRENT["pressure"]],
+            CLIP_PRESSURE["min"],
+            CLIP_PRESSURE["max"],
+            "Pressure Current",
+        )
+        * pressUnits
     )
 
     # WindSpeed from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
-        InterPcurrent[9] = math.sqrt(
+        InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
             hrrrSubHInterpolation[0, HRRR_SUBH["wind_u"]] ** 2
             + hrrrSubHInterpolation[0, HRRR_SUBH["wind_v"]] ** 2
         )
     elif "nbm" in sourceList:
-        InterPcurrent[9] = (
+        InterPcurrent[DATA_CURRENT["wind"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["wind_speed"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["wind_speed"]] * interpFac2
         )
     else:
-        InterPcurrent[9] = math.sqrt(
+        InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
             (
                 GFS_Merged[currentIDX_hrrrh_A, GFS["wind_u"]] * interpFac1
                 + GFS_Merged[currentIDX_hrrrh, GFS["wind_u"]] * interpFac2
@@ -4289,28 +4431,46 @@ async def PW_Forecast(
             )
             ** 2
         )
-    InterPcurrent[9] = clipLog(InterPcurrent[9], 0, 120, "WindSpeed Current") * windUnit
+    InterPcurrent[DATA_CURRENT["wind"]] = (
+        clipLog(
+            InterPcurrent[DATA_CURRENT["wind"]],
+            CLIP_WIND["min"],
+            CLIP_WIND["max"],
+            "WindSpeed Current",
+        )
+        * windUnit
+    )
 
     # Gust from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
-        InterPcurrent[10] = hrrrSubHInterpolation[0, HRRR_SUBH["gust"]]
+        InterPcurrent[DATA_CURRENT["gust"]] = hrrrSubHInterpolation[
+            0, HRRR_SUBH["gust"]
+        ]
     elif "nbm" in sourceList:
-        InterPcurrent[10] = (
+        InterPcurrent[DATA_CURRENT["gust"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["gust"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["gust"]] * interpFac2
         )
     else:
-        InterPcurrent[10] = (
+        InterPcurrent[DATA_CURRENT["gust"]] = (
             GFS_Merged[currentIDX_hrrrh_A, GFS["gust"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["gust"]] * interpFac2
         )
 
     # Clip between 0 and 400
-    InterPcurrent[10] = clipLog(InterPcurrent[10], 0, 120, "Gust Current") * windUnit
+    InterPcurrent[DATA_CURRENT["gust"]] = (
+        clipLog(
+            InterPcurrent[DATA_CURRENT["gust"]],
+            CLIP_WIND["min"],
+            CLIP_WIND["max"],
+            "Gust Current",
+        )
+        * windUnit
+    )
 
     # WindDir from subH, then NBM, the GFS
     if "hrrrsubh" in sourceList:
-        InterPcurrent[11] = np.rad2deg(
+        InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
             np.mod(
                 np.arctan2(
                     hrrrSubHInterpolation[0, HRRR_SUBH["wind_u"]],
@@ -4321,9 +4481,11 @@ async def PW_Forecast(
             )
         )
     elif "nbm" in sourceList:
-        InterPcurrent[11] = NBM_Merged[currentIDX_hrrrh, NBM["wind_direction"]]
+        InterPcurrent[DATA_CURRENT["bearing"]] = NBM_Merged[
+            currentIDX_hrrrh, NBM["wind_direction"]
+        ]
     else:
-        InterPcurrent[11] = np.rad2deg(
+        InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
             np.mod(
                 np.arctan2(
                     GFS_Merged[currentIDX_hrrrh, GFS["wind_u"]],
@@ -4336,69 +4498,76 @@ async def PW_Forecast(
 
     # Cloud, NBM then HRRR, then GFS
     if "nbm" in sourceList:
-        InterPcurrent[12] = (
+        InterPcurrent[DATA_CURRENT["cloud"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["cloud_cover"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["cloud_cover"]] * interpFac2
         ) * 0.01
     elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-        InterPcurrent[12] = (
+        InterPcurrent[DATA_CURRENT["cloud"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["cloud_cover"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["cloud_cover"]] * interpFac2
         ) * 0.01
     else:
-        InterPcurrent[12] = (
+        InterPcurrent[DATA_CURRENT["cloud"]] = (
             GFS_Merged[currentIDX_hrrrh_A, GFS["cloud_cover"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["cloud_cover"]] * interpFac2
         ) * 0.01
 
     # Clip
-    InterPcurrent[12] = clipLog(InterPcurrent[12], 0, 1, "Cloud Current")
+    InterPcurrent[DATA_CURRENT["cloud"]] = clipLog(
+        InterPcurrent[DATA_CURRENT["cloud"]],
+        CLIP_CLOUD["min"],
+        CLIP_CLOUD["max"],
+        "Cloud Current",
+    )
 
     # UV Index from GFS
-    InterPcurrent[13] = clipLog(
+    InterPcurrent[DATA_CURRENT["uv"]] = clipLog(
         (
             GFS_Merged[currentIDX_hrrrh_A, GFS["uv"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["uv"]] * interpFac2
         )
         * 18.9
         * 0.025,
-        0,
-        15,
+        CLIP_UV["min"],
+        CLIP_UV["max"],
         "UV Current",
     )
 
     # VIS, SubH, NBM then HRRR, then GFS
     if "hrrrsubh" in sourceList:
-        InterPcurrent[14] = hrrrSubHInterpolation[0, HRRR_SUBH["visibility"]]
+        InterPcurrent[DATA_CURRENT["vis"]] = hrrrSubHInterpolation[
+            0, HRRR_SUBH["visibility"]
+        ]
     elif "nbm" in sourceList:
-        InterPcurrent[14] = (
+        InterPcurrent[DATA_CURRENT["vis"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["visibility"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["visibility"]] * interpFac2
         )
     elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-        InterPcurrent[14] = (
+        InterPcurrent[DATA_CURRENT["vis"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["visibility"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["visibility"]] * interpFac2
         )
     else:
-        InterPcurrent[14] = (
+        InterPcurrent[DATA_CURRENT["vis"]] = (
             GFS_Merged[currentIDX_hrrrh_A, GFS["visibility"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["visibility"]] * interpFac2
         )
 
-    InterPcurrent[14] = np.clip(InterPcurrent[14], 0, 16090) * visUnits
+    InterPcurrent[DATA_CURRENT["vis"]] = np.clip(InterPcurrent[14], 0, 16090) * visUnits
 
     # Ozone from GFS
-    InterPcurrent[15] = clipLog(
+    InterPcurrent[DATA_CURRENT["ozone"]] = clipLog(
         GFS_Merged[currentIDX_hrrrh_A, GFS["ozone"]] * interpFac1
         + GFS_Merged[currentIDX_hrrrh, GFS["ozone"]] * interpFac2,
-        0,
+        CLIP_OZONE["min"],
         CLIP_OZONE["max"],
         "Ozone Current",
     )
 
     # Storm Distance from GFS
-    InterPcurrent[16] = np.maximum(
+    InterPcurrent[DATA_CURRENT["storm_distance"]] = np.maximum(
         (
             GFS_Merged[currentIDX_hrrrh_A, GFS["storm_distance"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["storm_distance"]] * interpFac2
@@ -4408,78 +4577,97 @@ async def PW_Forecast(
     )
 
     # Storm Bearing from GFS
-    InterPcurrent[17] = GFS_Merged[currentIDX_hrrrh, GFS["storm_direction"]]
+    InterPcurrent[DATA_CURRENT["storm_direction"]] = GFS_Merged[
+        currentIDX_hrrrh, GFS["storm_direction"]
+    ]
 
     # Smoke from HRRR
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-        InterPcurrent[18] = clipLog(
+        InterPcurrent[DATA_CURRENT["smoke"]] = clipLog(
             (
                 HRRR_Merged[currentIDX_hrrrh_A, HRRR["smoke"]] * interpFac1
                 + HRRR_Merged[currentIDX_hrrrh, HRRR["smoke"]] * interpFac2
             ),
-            0,
+            CLIP_SMOKE["min"],
             CLIP_SMOKE["max"],
             "Smoke Current",
         )
 
     else:
-        InterPcurrent[18] = MISSING_DATA
+        InterPcurrent[DATA_CURRENT["smoke"]] = MISSING_DATA
 
     # Convert wind speed from its display unit to m/s for the apparent temperature function
     currentWindSpeedMps = InterPcurrent[9] / windUnit
 
     # Calculate the apparent temperature
-    InterPcurrent[5] = calculate_apparent_temperature(
-        InterPcurrent[4],  # Air temperature in Kelvin
-        InterPcurrent[7],  # Relative humidity (0.0 to 1.0)
+    InterPcurrent[DATA_CURRENT["apparent"]] = calculate_apparent_temperature(
+        InterPcurrent[DATA_CURRENT["temp"]],  # Air temperature in Kelvin
+        InterPcurrent[DATA_CURRENT["humidity"]],  # Relative humidity (0.0 to 1.0)
         currentWindSpeedMps,  # Wind speed in meters per second
     )
 
     if "nbm" in sourceList:
-        InterPcurrent[20] = (
+        InterPcurrent[DATA_CURRENT["feels_like"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["apparent_temperature"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["apparent_temperature"]] * interpFac2
         )
     else:
-        InterPcurrent[20] = (
+        InterPcurrent[DATA_CURRENT["feels_like"]] = (
             GFS_Merged[currentIDX_hrrrh_A, GFS["apparent_temperature"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["apparent_temperature"]] * interpFac2
         )
 
     # Clip
-    InterPcurrent[20] = clipLog(
-        InterPcurrent[20], 183, 333, "Apparent Temperature Current"
+    InterPcurrent[DATA_CURRENT["feels_like"]] = clipLog(
+        InterPcurrent[DATA_CURRENT["feels_like"]],
+        CLIP_TEMP["min"],
+        CLIP_TEMP["max"],
+        "Apparent Temperature Current",
     )
 
     # Fire index from NBM Fire
     if "nbm_fire" in sourceList:
-        InterPcurrent[19] = clipLog(
+        InterPcurrent[DATA_CURRENT["fire"]] = clipLog(
             (
                 NBM_Fire_Merged[currentIDX_hrrrh_A, NBM_FIRE_INDEX] * interpFac1
                 + NBM_Fire_Merged[currentIDX_hrrrh, NBM_FIRE_INDEX] * interpFac2
             ),
-            0,
+            CLIP_FIRE["min"],
             CLIP_FIRE["max"],
             "Fire index Current",
         )
 
     else:
-        InterPcurrent[19] = MISSING_DATA
+        InterPcurrent[DATA_CURRENT["fire"]] = MISSING_DATA
 
     # Put temperature into units
     if tempUnits == 0:
-        InterPcurrent[4] = (InterPcurrent[4] - 273.15) * 9 / 5 + 32  # "temperature"
-        InterPcurrent[5] = (
-            InterPcurrent[5] - 273.15
+        InterPcurrent[DATA_CURRENT["temp"]] = (
+            InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS
+        ) * 9 / 5 + 32  # "temperature"
+        InterPcurrent[DATA_CURRENT["apparent"]] = (
+            InterPcurrent[DATA_CURRENT["apparent"]] - KELVIN_TO_CELSIUS
         ) * 9 / 5 + 32  # "apparentTemperature"
-        InterPcurrent[6] = (InterPcurrent[6] - 273.15) * 9 / 5 + 32  # "dewPoint"
-        InterPcurrent[20] = (InterPcurrent[20] - 273.15) * 9 / 5 + 32  # "FeelsLike"
+        InterPcurrent[DATA_CURRENT["dew"]] = (
+            InterPcurrent[DATA_CURRENT["dew"]] - KELVIN_TO_CELSIUS
+        ) * 9 / 5 + 32  # "dewPoint"
+        InterPcurrent[DATA_CURRENT["feels_like"]] = (
+            InterPcurrent[DATA_CURRENT["feels_like"]] - KELVIN_TO_CELSIUS
+        ) * 9 / 5 + 32  # "FeelsLike"
 
     else:
-        InterPcurrent[4] = InterPcurrent[4] - tempUnits  # "temperature"
-        InterPcurrent[5] = InterPcurrent[5] - tempUnits  # "apparentTemperature"
-        InterPcurrent[6] = InterPcurrent[6] - tempUnits  # "dewPoint"
-        InterPcurrent[20] = InterPcurrent[20] - tempUnits  # "FeelsLike"
+        InterPcurrent[DATA_CURRENT["temp"]] = (
+            InterPcurrent[DATA_CURRENT["temp"]] - tempUnits
+        )  # "temperature"
+        InterPcurrent[DATA_CURRENT["apparent"]] = (
+            InterPcurrent[DATA_CURRENT["apparent"]] - tempUnits
+        )  # "apparentTemperature"
+        InterPcurrent[DATA_CURRENT["dew"]] = (
+            InterPcurrent[DATA_CURRENT["dew"]] - tempUnits
+        )  # "dewPoint"
+        InterPcurrent[DATA_CURRENT["feels_like"]] = (
+            InterPcurrent[DATA_CURRENT["feels_like"]] - tempUnits
+        )  # "FeelsLike"
 
     if ((minuteDict[0]["precipIntensity"]) > (0.02 * prepIntensityUnit)) & (
         minuteDict[0]["precipType"] is not None
@@ -4492,40 +4680,42 @@ async def PW_Forecast(
 
     # If visibility <1km and during the day
     # elif InterPcurrent[14]<1000 and (InterPcurrent[0]>InterPday[0,16] and InterPcurrent[0]<InterPday[0,17]):
-    elif InterPcurrent[14] < (1000 * visUnits):
+    elif InterPcurrent[DATA_CURRENT["vis"]] < (FOG_THRESHOLD_METERS * visUnits):
         cIcon = "fog"
         cText = "Fog"
-    elif InterPcurrent[9] > (10 * windUnit):
+    elif InterPcurrent[DATA_CURRENT["wind"]] > (WIND_THRESHOLDS["min"] * windUnit):
         cIcon = "wind"
         cText = "Windy"
-    elif InterPcurrent[12] > 0.75:
+    elif InterPcurrent[DATA_CURRENT["cloud"]] > CLOUD_COVER_THRESHOLDS["cloudy"]:
         cIcon = "cloudy"
         cText = "Cloudy"
-    elif InterPcurrent[12] > 0.375:
+    elif InterPcurrent[DATA_CURRENT["cloud"]] > CLOUD_COVER_THRESHOLDS["partly_cloudy"]:
         cText = "Partly Cloudy"
 
-        if InterPcurrent[0] < InterSday[0, 17]:
+        if InterPcurrent[DATA_CURRENT["time"]] < InterSday[0, DATA_DAY["sunrise"]]:
             # Before sunrise
             cIcon = "partly-cloudy-night"
         elif (
-            InterPcurrent[0] > InterSday[0, 17] and InterPcurrent[0] < InterSday[0, 18]
+            InterPcurrent[DATA_CURRENT["time"]] > InterSday[0, DATA_DAY["sunrise"]]
+            and InterPcurrent[DATA_CURRENT["time"]] < InterSday[0, DATA_DAY["sunset"]]
         ):
             # After sunrise before sunset
             cIcon = "partly-cloudy-day"
-        elif InterPcurrent[0] > InterSday[0, 18]:
+        elif InterPcurrent[DATA_CURRENT["time"]] > InterSday[0, DATA_DAY["sunset"]]:
             # After sunset
             cIcon = "partly-cloudy-night"
     else:
         cText = "Clear"
-        if InterPcurrent[0] < InterSday[0, 17]:
+        if InterPcurrent[DATA_CURRENT["time"]] < InterSday[0, DATA_DAY["sunrise"]]:
             # Before sunrise
             cIcon = "clear-night"
         elif (
-            InterPcurrent[0] > InterSday[0, 17] and InterPcurrent[0] < InterSday[0, 18]
+            InterPcurrent[DATA_CURRENT["time"]] > InterSday[0, DATA_DAY["sunrise"]]
+            and InterPcurrent[DATA_CURRENT["time"]] < InterSday[0, DATA_DAY["sunset"]]
         ):
             # After sunrise before sunset
             cIcon = "clear-day"
-        elif InterPcurrent[0] > InterSday[0, 18]:
+        elif InterPcurrent[DATA_CURRENT["time"]] > InterSday[0, DATA_DAY["sunset"]]:
             # After sunset
             cIcon = "clear-night"
 
@@ -4572,45 +4762,54 @@ async def PW_Forecast(
         returnOBJ["currently"]["time"] = int(minute_array_grib[0])
         returnOBJ["currently"]["summary"] = cText
         returnOBJ["currently"]["icon"] = cIcon
-        returnOBJ["currently"]["nearestStormDistance"] = InterPcurrent[16]
-        returnOBJ["currently"]["nearestStormBearing"] = int(InterPcurrent[17].round())
+        returnOBJ["currently"]["nearestStormDistance"] = InterPcurrent[
+            DATA_CURRENT["storm_distance"]
+        ]
+        returnOBJ["currently"]["nearestStormBearing"] = int(
+            InterPcurrent[DATA_CURRENT["storm_direction"]].round()
+        )
         returnOBJ["currently"]["precipIntensity"] = minuteDict[0]["precipIntensity"]
         returnOBJ["currently"]["precipProbability"] = minuteDict[0]["precipProbability"]
         returnOBJ["currently"]["precipIntensityError"] = minuteDict[0][
             "precipIntensityError"
         ]
         returnOBJ["currently"]["precipType"] = minuteDict[0]["precipType"]
-        returnOBJ["currently"]["temperature"] = InterPcurrent[4]
-        returnOBJ["currently"]["apparentTemperature"] = InterPcurrent[5]
-        returnOBJ["currently"]["dewPoint"] = InterPcurrent[6]
-        returnOBJ["currently"]["humidity"] = InterPcurrent[7]
-        returnOBJ["currently"]["pressure"] = InterPcurrent[8]
-        returnOBJ["currently"]["windSpeed"] = InterPcurrent[9]
-        returnOBJ["currently"]["windGust"] = InterPcurrent[10]
+        returnOBJ["currently"]["temperature"] = InterPcurrent[DATA_CURRENT["temp"]]
+        returnOBJ["currently"]["apparentTemperature"] = InterPcurrent[
+            DATA_CURRENT["apparent"]
+        ]
+        returnOBJ["currently"]["dewPoint"] = InterPcurrent[DATA_CURRENT["dew"]]
+        returnOBJ["currently"]["humidity"] = InterPcurrent[DATA_CURRENT["humidity"]]
+        returnOBJ["currently"]["pressure"] = InterPcurrent[DATA_CURRENT["pressure"]]
+        returnOBJ["currently"]["windSpeed"] = InterPcurrent[DATA_CURRENT["wind"]]
+        returnOBJ["currently"]["windGust"] = InterPcurrent[DATA_CURRENT["gust"]]
         returnOBJ["currently"]["windBearing"] = int(
-            np.mod(InterPcurrent[11], 360).round()
+            np.mod(InterPcurrent[DATA_CURRENT["bearing"]], 360).round()
         )
-        returnOBJ["currently"]["cloudCover"] = InterPcurrent[12]
-        returnOBJ["currently"]["uvIndex"] = InterPcurrent[13]
-        returnOBJ["currently"]["visibility"] = InterPcurrent[14]
-        returnOBJ["currently"]["ozone"] = InterPcurrent[15]
-        returnOBJ["currently"]["smoke"] = InterPcurrent[18]  # kg/m3 to ug/m3
-        returnOBJ["currently"]["fireIndex"] = InterPcurrent[19]
-        returnOBJ["currently"]["feelsLike"] = InterPcurrent[20]
+        returnOBJ["currently"]["cloudCover"] = InterPcurrent[DATA_CURRENT["cloud"]]
+        returnOBJ["currently"]["uvIndex"] = InterPcurrent[DATA_CURRENT["uv"]]
+        returnOBJ["currently"]["visibility"] = InterPcurrent[DATA_CURRENT["vis"]]
+        returnOBJ["currently"]["ozone"] = InterPcurrent[DATA_CURRENT["ozone"]]
+        returnOBJ["currently"]["smoke"] = InterPcurrent[
+            DATA_CURRENT["smoke"]
+        ]  # kg/m3 to ug/m3
+        returnOBJ["currently"]["fireIndex"] = InterPcurrent[DATA_CURRENT["fire"]]
+        returnOBJ["currently"]["feelsLike"] = InterPcurrent[DATA_CURRENT["feels_like"]]
         returnOBJ["currently"]["currentDayIce"] = dayZeroIce
         returnOBJ["currently"]["currentDayLiquid"] = dayZeroRain
         returnOBJ["currently"]["currentDaySnow"] = dayZeroSnow
 
         # Update the text
-        if InterPcurrent[0] < InterSday[0, 17]:
+        if InterPcurrent[DATA_CURRENT["time"]] < InterSday[0, DATA_DAY["sunrise"]]:
             # Before sunrise
             currentDay = False
         elif (
-            InterPcurrent[0] > InterSday[0, 17] and InterPcurrent[0] < InterSday[0, 18]
+            InterPcurrent[DATA_CURRENT["time"]] > InterSday[0, DATA_DAY]
+            and InterPcurrent[DATA_CURRENT["time"]] < InterSday[0, DATA_DAY["sunset"]]
         ):
             # After sunrise before sunset
             currentDay = True
-        elif InterPcurrent[0] > InterSday[0, 18]:
+        elif InterPcurrent[DATA_CURRENT["time"]] > InterSday[0, DATA_DAY["sunset"]]:
             # After sunset
             currentDay = False
 
@@ -5039,7 +5238,7 @@ def calculate_apparent_temperature(airTemp, humidity, wind):
     """
 
     # Convert air_temp from Kelvin to Celsius for the formula parts that use Celsius
-    airTempC = airTemp - 273.15
+    airTempC = airTemp - KELVIN_TO_CELSIUS
 
     # Calculate water vapor pressure 'e'
     # Ensure humidity is not 0 for calculation, replace with a small non-zero value if needed
@@ -5063,7 +5262,7 @@ def calculate_apparent_temperature(airTemp, humidity, wind):
     )
 
     # Convert back to Kelvin
-    apparentTempK = apparentTempC + 273.15
+    apparentTempK = apparentTempC + KELVIN_TO_CELSIUS
 
     # Clip between -90 and 60
     return clipLog(

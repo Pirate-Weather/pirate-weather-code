@@ -57,3 +57,6 @@ CAPE_THRESHOLDS = {
 
 # Lifted Index threshold
 LIFTED_INDEX_THRESHOLD = -4
+
+# Temperature thresholds
+WARM_TEMPERATURE_THRESHOLD = {"c": 20, "f": 68}

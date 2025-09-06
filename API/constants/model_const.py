@@ -68,7 +68,7 @@ GFS = {
 }
 
 GEFS = {
-    "pop": 1,
+    "prob": 1,
     "accumulation": 2,
     "error": 3,
     "snow": 4,
@@ -89,7 +89,7 @@ NBM = {
     "cloud_cover": 9,
     "visibility": 10,
     "weather": 11,
-    "pop": 12,
+    "prob": 12,
     "precip_rate": 13,
     "rain": 14,
     "freezing_rain": 15,
