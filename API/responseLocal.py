@@ -4373,11 +4373,11 @@ async def PW_Forecast(
         )
     elif minuteDict[0]["precipType"] == "snow":
         # Use the new snow height estimation (in mm), then convert to cm
-        curr_liquid = (
-            minuteDict[0]["precipIntensity"] / prepIntensityUnit
-        )
+        curr_liquid = minuteDict[0]["precipIntensity"] / prepIntensityUnit
         currnetSnowAccum = (
-            estimate_snow_height(curr_liquid, curr_temp, currentWindSpeedMps) / prepIntensityUnit * prepAccumUnit
+            estimate_snow_height(curr_liquid, curr_temp, currentWindSpeedMps)
+            / prepIntensityUnit
+            * prepAccumUnit
         )
     elif minuteDict[0]["precipType"] == "sleet":
         currnetIceAccum = (
