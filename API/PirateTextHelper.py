@@ -696,19 +696,15 @@ def estimate_snow_density(temperature_c, wind_speed_mps):
     wind_speed_exp_17 = np.power(wind_speed_mps, 1.7)
 
     density_low_temp = 500 * (1 - 0.904 * np.exp(-0.008 * wind_speed_exp_17))
-    
+
     power_term = np.power(278.15 - kelvins, -1.15)
-    
+
     density_high_temp = 500 * (
-        1
-        - 0.951
-        * np.exp(-1.4 * power_term - 0.008 * wind_speed_exp_17)
+        1 - 0.951 * np.exp(-1.4 * power_term - 0.008 * wind_speed_exp_17)
     )
 
     snow_density_kg_m3 = np.where(
-        kelvins <= 260.15,
-        density_low_temp,
-        density_high_temp
+        kelvins <= 260.15, density_low_temp, density_high_temp
     )
-    
+
     return np.maximum(snow_density_kg_m3, 50)
