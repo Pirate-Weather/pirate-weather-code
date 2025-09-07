@@ -3323,8 +3323,7 @@ async def PW_Forecast(
         InterPhour[:, 1] == 4, 17
     ]  # rain
 
-    # 10:1 Snow factor applied here!
-    # Use the new snow height estimation for snow accumulation, converting all units as needed
+    # Use the new snow height estimation for snow accumulation.
     snow_indices = np.where(InterPhour[:, 1] == 1)[0]
     for idx in snow_indices:
         # Convert precipitation to mm
