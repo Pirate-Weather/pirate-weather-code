@@ -3325,24 +3325,21 @@ async def PW_Forecast(
 
     # Use the new snow height estimation for snow accumulation.
     snow_indices = np.where(InterPhour[:, 1] == 1)[0]
-    for idx in snow_indices:
-        # Convert precipitation to mm
-        liquid_mm = InterPhour[idx, 17] / prepAccumUnit
-
-        # Convert temperature to Celsius if needed
+    if snow_indices.size > 0:
+        # Extract and convert data for all snow events in a vectorized way
+        liquid_mm = InterPhour[snow_indices, 17] / prepAccumUnit
         if tempUnits == 0:  # Fahrenheit
-            temp_c = (InterPhour[idx, 5] - 32) * 5 / 9
+            temp_c = (InterPhour[snow_indices, 5] - 32) * 5 / 9
         else:
-            temp_c = InterPhour[idx, 5]
-
-        # Convert wind speed to m/s
-        wind_mps = InterPhour[idx, 10] / windUnit
-
-        # Calculate snow height in mm
-        snow_mm = estimate_snow_height(liquid_mm, temp_c, wind_mps)
-
-        # Convert output to requested units
-        InterPhour[idx, 22] = snow_mm * prepAccumUnit
+            temp_c = InterPhour[snow_indices, 5]
+        wind_mps = InterPhour[snow_indices, 10] / windUnit
+        # Calculate snow height for all snow indices using a list comprehension
+        snow_mm_values = [
+            estimate_snow_height(l, t, w)
+            for l, t, w in zip(liquid_mm, temp_c, wind_mps)
+        ]
+        # Convert output to requested units and assign back to the main array
+        InterPhour[snow_indices, 22] = np.array(snow_mm_values) * prepAccumUnit
 
     InterPhour[((InterPhour[:, 1] == 2) | (InterPhour[:, 1] == 3)), 23] = (
         InterPhour[((InterPhour[:, 1] == 2) | (InterPhour[:, 1] == 3)), 17] * 1
@@ -4289,7 +4286,7 @@ async def PW_Forecast(
         InterPcurrent[19] = -999
 
     # Current temperature in Celsius
-    curr_temp = InterPcurrent[4] - tempUnits  # temperature in Celsius
+    curr_temp = InterPcurrent[4] - 273.15  # temperature in Celsius
 
     # Put temperature into units
     if tempUnits == 0:
@@ -4377,11 +4374,11 @@ async def PW_Forecast(
     elif minuteDict[0]["precipType"] == "snow":
         # Use the new snow height estimation (in mm), then convert to cm
         curr_liquid = (
-            minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
+            minuteDict[0]["precipIntensity"] / prepIntensityUnit
         )
         currnetSnowAccum = (
-            estimate_snow_height(curr_liquid, curr_temp, currentWindSpeedMps) / 10
-        )  # convert mm to cm
+            estimate_snow_height(curr_liquid, curr_temp, currentWindSpeedMps) / prepIntensityUnit * prepAccumUnit
+        )
     elif minuteDict[0]["precipType"] == "sleet":
         currnetIceAccum = (
             minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit

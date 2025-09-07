@@ -695,20 +695,14 @@ def estimate_snow_density(temperature_c, wind_speed_mps):
 
     wind_speed_exp_17 = pow(wind_speed_mps, 1.7)
 
-    snow_density_kg_m3 = 1000
     if kelvins <= 260.15:
         snow_density_kg_m3 = 500 * (1 - 0.904 * math.exp(-0.008 * wind_speed_exp_17))
-    elif kelvins <= 275.65:
+    else:  # This covers the range (260.15, 275.65]
         snow_density_kg_m3 = 500 * (
             1
             - 0.951
             * math.exp(-1.4 * pow(278.15 - kelvins, -1.15) - 0.008 * wind_speed_exp_17)
         )
-    else:
-        # above 2.5 degrees -> fallback, return precip mm (-> ratio = 1)
-        # should not happen - see above
-        snow_density_kg_m3 = 1000
-
     # ensure we don't divide by zero - ensure minimum
     snow_density_kg_m3 = max(snow_density_kg_m3, 50)
 
