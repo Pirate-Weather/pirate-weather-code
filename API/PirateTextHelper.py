@@ -677,7 +677,6 @@ def estimate_snow_height(precipitation_mm, temperature_c, wind_speed_mps):
     return precipitation_mm * 10 / snow_density_kg_m3
 
 
-
 def estimate_snow_density(temperature_c, wind_speed_mps):
     """
     Estimates the density of newly fallen snow (in kg/m^3) based on temperature and wind speed.
