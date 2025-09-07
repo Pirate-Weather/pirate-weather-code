@@ -8,8 +8,8 @@ import math
 from API.PirateTextHelper import (
     calculate_sky_icon,
     calculate_precip_text,
-    estimateSnowDensity,
-    estimateSnowHeight,
+    estimate_snow_density,
+    estimate_snow_height,
     humidity_sky_text,
 )
 
@@ -40,9 +40,9 @@ def test_calculate_precip_text_light_rain():
 
 
 def test_estimate_snow_density_and_height():
-    density = estimateSnowDensity(0, 0)
+    density = estimate_snow_density(0, 0)
     assert math.isclose(density, 118.381, rel_tol=1e-3)
-    height = estimateSnowHeight(10, 0, 0)
+    height = estimate_snow_height(10, 0, 0)
     expected_height = 10 * 10 / density
     assert math.isclose(height, expected_height, rel_tol=1e-6)
 
