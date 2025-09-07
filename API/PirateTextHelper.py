@@ -1,5 +1,6 @@
 # %% Script to contain the helper functions that can be used to generate the text summary of the forecast data for Pirate Weather
 from collections import Counter
+import numpy as np
 import math
 
 # Cloud Cover Thresholds (%)
@@ -680,30 +681,34 @@ def estimate_snow_height(precipitation_mm, temperature_c, wind_speed_mps):
 def estimate_snow_density(temperature_c, wind_speed_mps):
     """
     Estimates the density of newly fallen snow (in kg/m^3) based on temperature and wind speed.
+    This function is vectorized to handle numpy arrays.
 
-    Parameters:
-    - temperature_c (float): Air temperature in Celsius
-    - wind_speed_mps (float): Wind speed in meters per second
+    Args:
+        temperature_c (float | np.ndarray): Air temperature in Celsius.
+        wind_speed_mps (float | np.ndarray): Wind speed in meters per second.
 
     Returns:
-    - float: Estimated snow density in kg/m^3
+        float | np.ndarray: Estimated snow density in kg/m^3.
     """
     kelvins = kelvin_from_celsius(temperature_c)
+    kelvins = np.minimum(kelvins, 275.65)
 
-    # above 2.5? bring it down, it shouldn't happen, but if it does, let's just assume it's 2.5 deg
-    kelvins = min(kelvins, 275.65)
+    wind_speed_exp_17 = np.power(wind_speed_mps, 1.7)
 
-    wind_speed_exp_17 = pow(wind_speed_mps, 1.7)
+    density_low_temp = 500 * (1 - 0.904 * np.exp(-0.008 * wind_speed_exp_17))
+    
+    power_term = np.power(278.15 - kelvins, -1.15)
+    
+    density_high_temp = 500 * (
+        1
+        - 0.951
+        * np.exp(-1.4 * power_term - 0.008 * wind_speed_exp_17)
+    )
 
-    if kelvins <= 260.15:
-        snow_density_kg_m3 = 500 * (1 - 0.904 * math.exp(-0.008 * wind_speed_exp_17))
-    else:  # This covers the range (260.15, 275.65]
-        snow_density_kg_m3 = 500 * (
-            1
-            - 0.951
-            * math.exp(-1.4 * pow(278.15 - kelvins, -1.15) - 0.008 * wind_speed_exp_17)
-        )
-    # ensure we don't divide by zero - ensure minimum
-    snow_density_kg_m3 = max(snow_density_kg_m3, 50)
-
-    return snow_density_kg_m3
+    snow_density_kg_m3 = np.where(
+        kelvins <= 260.15,
+        density_low_temp,
+        density_high_temp
+    )
+    
+    return np.maximum(snow_density_kg_m3, 50)

@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import math
+import numpy as np
 
 from API.PirateTextHelper import (
     calculate_sky_icon,
@@ -39,12 +39,20 @@ def test_calculate_precip_text_light_rain():
     assert icon == "possible-rain-day"
 
 
-def test_estimate_snow_density_and_height():
-    density = estimate_snow_density(0, 0)
-    assert math.isclose(density, 118.381, rel_tol=1e-3)
-    height = estimate_snow_height(10, 0, 0)
-    expected_height = 10 * 10 / density
-    assert math.isclose(height, expected_height, rel_tol=1e-6)
+def test_estimate_snow_density_and_height_vectorized():
+    temperatures_c = np.array([0.0, -5.0, 2.0])
+    wind_speeds_mps = np.array([0.0, 5.0, 10.0])
+    liquid_mm = np.array([10.0, 5.0, 15.0])
+
+    # Expected densities (calculated based on the vectorized function logic)
+    expected_densities = np.array([118.3810, 119.3624, 285.6412])
+    calculated_densities = estimate_snow_density(temperatures_c, wind_speeds_mps)
+    np.testing.assert_allclose(calculated_densities, expected_densities, rtol=1e-3)
+
+    # Expected heights
+    expected_heights = np.array([0.84473, 0.418892, 0.525134])
+    calculated_heights = estimate_snow_height(liquid_mm, temperatures_c, wind_speeds_mps)
+    np.testing.assert_allclose(calculated_heights, expected_heights, rtol=1e-6)
 
 
 def test_humidity_sky_text():
