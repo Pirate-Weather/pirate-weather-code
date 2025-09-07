@@ -3335,8 +3335,8 @@ async def PW_Forecast(
         wind_mps = InterPhour[snow_indices, 10] / windUnit
         # Calculate snow height for all snow indices using a list comprehension
         snow_mm_values = [
-            estimate_snow_height(l, t, w)
-            for l, t, w in zip(liquid_mm, temp_c, wind_mps)
+            estimate_snow_height(liquid, temp, wind)
+            for liquid, temp, wind in zip(liquid_mm, temp_c, wind_mps)
         ]
         # Convert output to requested units and assign back to the main array
         InterPhour[snow_indices, 22] = np.array(snow_mm_values) * prepAccumUnit
