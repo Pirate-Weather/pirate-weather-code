@@ -675,7 +675,7 @@ def estimate_snow_height(precipitation_mm, temperature_c, wind_speed_mps):
     - float: Estimated snow depth in millimeters
     """
     snow_density_kg_m3 = estimate_snow_density(temperature_c, wind_speed_mps)
-    return precipitation_mm * 10 / snow_density_kg_m3
+    return precipitation_mm * 1000 / snow_density_kg_m3
 
 
 def estimate_snow_density(temperature_c, wind_speed_mps):

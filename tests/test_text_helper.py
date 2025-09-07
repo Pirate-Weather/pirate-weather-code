@@ -50,7 +50,7 @@ def test_estimate_snow_density_and_height_vectorized():
     np.testing.assert_allclose(calculated_densities, expected_densities, rtol=1e-3)
 
     # Expected heights
-    expected_heights = np.array([0.84473, 0.418892, 0.525134])
+    expected_heights = np.array([84.47300, 41.88923, 52.51342])
     calculated_heights = estimate_snow_height(
         liquid_mm, temperatures_c, wind_speeds_mps
     )
