@@ -1,7 +1,7 @@
 # %% Script to contain the helper functions that can be used to generate the text summary of the forecast data for Pirate Weather
 from collections import Counter
-import numpy as np
 import math
+import numpy as np
 
 # Cloud Cover Thresholds (%)
 cloudyThreshold = 0.875
