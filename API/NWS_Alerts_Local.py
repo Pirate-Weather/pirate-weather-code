@@ -7,7 +7,6 @@ import shutil
 import tarfile
 import xml.etree.ElementTree as ET
 
-
 import geopandas as gp
 import numpy as np
 import nwswx
@@ -16,6 +15,7 @@ import requests
 import s3fs
 import zarr
 from numpy.dtypes import StringDType
+
 from API.constants.shared_const import INGEST_VERSION_STR
 
 # %% Setup paths and parameters

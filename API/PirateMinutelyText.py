@@ -1,8 +1,10 @@
 # %% Script to contain the functions that can be used to generate the minutely text summary of the forecast data for Pirate Weather
 
-from PirateTextHelper import calculate_precip_text
 from itertools import groupby
 from operator import itemgetter
+
+from PirateTextHelper import calculate_precip_text
+
 from API.constants.shared_const import MISSING_DATA
 
 # Number of minutes in an hour

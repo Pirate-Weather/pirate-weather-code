@@ -6,8 +6,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import math
 
 from API.PirateTextHelper import (
-    calculate_sky_icon,
     calculate_precip_text,
+    calculate_sky_icon,
     estimateSnowDensity,
     estimateSnowHeight,
     humidity_sky_text,

@@ -3,12 +3,13 @@
 
 import re
 import sys
-import xarray as xr
+import time
 
 import dask.array as da
 import numpy as np
-import time
+import xarray as xr
 from herbie import Path
+
 from API.constants.shared_const import REFC_THRESHOLD
 
 # Shared ingest constants

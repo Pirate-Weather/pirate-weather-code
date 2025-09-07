@@ -1,20 +1,22 @@
 # %% Script to contain the functions that can be used to generate the weekly text summary of the forecast data for Pirate Weather
 
 import datetime
+from itertools import groupby
+from operator import itemgetter
+
 from dateutil import tz
 from PirateTextHelper import (
     Most_Common,
     calculate_precip_text,
     calculate_thunderstorm_text,
 )
-from itertools import groupby
-from operator import itemgetter
+
+from API.constants.shared_const import MISSING_DATA
 from API.constants.text_const import (
-    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
+    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
     PRECIP_PROB_THRESHOLD,
 )
-from API.constants.shared_const import MISSING_DATA
 
 WEEK_DAYS_MINUS_ONE = 6
 WEEK_DAYS = 7
