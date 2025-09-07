@@ -82,7 +82,6 @@ DATA_DAY = {
     "bearing": 12,
     "cloud": 13,
     "uv": 14,
-    "uv_time": 14,
     "vis": 15,
     "dawn": 15,
     "dusk": 16,

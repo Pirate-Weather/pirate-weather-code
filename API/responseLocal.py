@@ -7,7 +7,6 @@ import math
 import os
 import pickle
 import platform
-import random
 import re
 import shutil
 import subprocess
@@ -15,14 +14,15 @@ import sys
 import threading
 import time
 import traceback
+import random
 from collections import Counter
 from typing import Union
 
 # Third-party imports
 import boto3
+import s3fs
 import numpy as np
 import pandas as pd
-import s3fs
 import xarray as xr
 import zarr
 from astral import LocationInfo, moon
@@ -31,80 +31,79 @@ from boto3.s3.transfer import TransferConfig
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import ORJSONResponse
 from fastapi_utils.tasks import repeat_every
-from PirateDailyText import calculate_day_text
-from PirateMinutelyText import calculate_minutely_text
-from PirateText import calculate_text
 from pirateweather_translations.dynamic_loader import load_all_translations
+from PirateText import calculate_text
+from PirateMinutelyText import calculate_minutely_text
 from PirateWeeklyText import calculate_weekly_text
+from PirateDailyText import calculate_day_text
+from API.constants.shared_const import (
+    REFC_THRESHOLD,
+    INGEST_VERSION_STR,
+    MISSING_DATA,
+    KELVIN_TO_CELSIUS,
+)
 from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
 
+# Project imports
+from API.constants.model_const import HRRR_SUBH, HRRR, NBM_FIRE_INDEX, NBM, GFS, GEFS
 from API.constants.api_const import (
-    API_VERSION,
-    APPARENT_TEMP_CONSTS,
-    DBZ_CONST,
-    GLOBE_TEMP_CONST,
-    LARGEST_DIR_INIT,
     MAX_S3_RETRIES,
-    NICE_PRIORITY,
-    PRECIP_IDX,
     S3_BASE_DELAY,
     S3_MAX_BANDWIDTH,
-    SOLAR_IRRADIANCE_CONST,
+    LARGEST_DIR_INIT,
+    API_VERSION,
+    NICE_PRIORITY,
     SOLAR_RAD_CONST,
-    TEMPERATURE_UNITS_THRESH,
+    SOLAR_IRRADIANCE_CONST,
+    GLOBE_TEMP_CONST,
     WBGT_CONST,
+    DBZ_CONST,
+    APPARENT_TEMP_CONSTS,
+    PRECIP_IDX,
+    TEMPERATURE_UNITS_THRESH,
 )
 from API.constants.clip_const import (
-    CLIP_CLOUD,
-    CLIP_FEELS_LIKE,
-    CLIP_FIRE,
     CLIP_GLOBAL,
     CLIP_HUMIDITY,
-    CLIP_OZONE,
     CLIP_PRESSURE,
-    CLIP_PROB,
-    CLIP_SMOKE,
-    CLIP_TEMP,
+    CLIP_WIND,
+    CLIP_CLOUD,
     CLIP_UV,
     CLIP_VIS,
-    CLIP_WIND,
+    CLIP_OZONE,
+    CLIP_SMOKE,
+    CLIP_FIRE,
+    CLIP_FEELS_LIKE,
+    CLIP_PROB,
+    CLIP_TEMP,
 )
 from API.constants.forecast_const import (
-    DATA_CURRENT,
-    DATA_DAY,
     DATA_HOURLY,
     DATA_MINUTELY,
+    DATA_DAY,
+    DATA_CURRENT,
 )
 from API.constants.grid_const import (
-    HRRR_X_MAX,
     HRRR_X_MIN,
-    HRRR_Y_MAX,
     HRRR_Y_MIN,
-    NBM_X_MAX,
+    HRRR_X_MAX,
+    HRRR_Y_MAX,
     NBM_X_MIN,
-    NBM_Y_MAX,
     NBM_Y_MIN,
+    NBM_X_MAX,
+    NBM_Y_MAX,
     US_BOUNDING_BOX,
 )
-
-# Project imports
-from API.constants.model_const import GEFS, GFS, HRRR, HRRR_SUBH, NBM, NBM_FIRE_INDEX
-from API.constants.shared_const import (
-    INGEST_VERSION_STR,
-    KELVIN_TO_CELSIUS,
-    MISSING_DATA,
-    REFC_THRESHOLD,
-)
 from API.constants.text_const import (
+    PRECIP_PROB_THRESHOLD,
     CLOUD_COVER_THRESHOLDS,
-    DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
-    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    WIND_THRESHOLDS,
     FOG_THRESHOLD_METERS,
     HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
-    PRECIP_PROB_THRESHOLD,
-    WIND_THRESHOLDS,
+    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
 )
 
 Translations = load_all_translations()
@@ -2759,14 +2758,14 @@ async def PW_Forecast(
                 left=np.nan,
                 right=np.nan,
             )
-            hrrrSubHInterpolation[:, HRRR_SUBH["temperature"]] = np.interp(
+            hrrrSubHInterpolation[:, HRRR_SUBH["temp"]] = np.interp(
                 minute_array_grib,
                 HRRR_Merged[:, 0].squeeze(),
                 HRRR_Merged[:, HRRR["temperature"]],
                 left=np.nan,
                 right=np.nan,
             )
-            hrrrSubHInterpolation[:, HRRR_SUBH["dew_point"]] = np.interp(
+            hrrrSubHInterpolation[:, HRRR_SUBH["dew"]] = np.interp(
                 minute_array_grib,
                 HRRR_Merged[:, 0].squeeze(),
                 HRRR_Merged[:, HRRR["dew_point"]],
@@ -2831,7 +2830,7 @@ async def PW_Forecast(
             )
 
             # Visibility is at a weird index
-            hrrrSubHInterpolation[:, HRRR_SUBH["visibility"]] = np.interp(
+            hrrrSubHInterpolation[:, HRRR_SUBH["vis"]] = np.interp(
                 minute_array_grib,
                 HRRR_Merged[:, 0].squeeze(),
                 HRRR_Merged[:, HRRR["visibility"]],
