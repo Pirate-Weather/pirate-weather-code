@@ -4535,9 +4535,7 @@ async def PW_Forecast(
 
     # VIS, SubH, NBM then HRRR, then GFS
     if "hrrrsubh" in sourceList:
-        InterPcurrent[DATA_CURRENT["vis"]] = hrrrSubHInterpolation[
-            0, HRRR_SUBH["vis"]
-        ]
+        InterPcurrent[DATA_CURRENT["vis"]] = hrrrSubHInterpolation[0, HRRR_SUBH["vis"]]
     elif "nbm" in sourceList:
         InterPcurrent[DATA_CURRENT["vis"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["vis"]] * interpFac1
