@@ -30,6 +30,7 @@ from fastapi.responses import ORJSONResponse
 from fastapi_utils.tasks import repeat_every
 from pirateweather_translations.dynamic_loader import load_all_translations
 from PirateText import calculate_text
+from PirateTextHelper import estimate_snow_height
 from PirateMinutelyText import calculate_minutely_text
 from PirateWeeklyText import calculate_weekly_text
 from PirateDailyText import calculate_day_text
@@ -53,7 +54,7 @@ force_now = os.getenv("force_now", default=False)
 
 # Version code for ingest files
 ingestVersion = "v27"
-API_VERSION = "V2.7.7f"
+API_VERSION = "V2.7.7g"
 
 
 def setup_logging():
@@ -1003,6 +1004,7 @@ def dbz_to_rate(dbz_array, precip_type_array, min_dbz=5.0):
 
     # Apply 'snow' coefficients where precip_type is 'snow'
     snow_mask = precip_type_array == "snow"
+    a_array[snow_mask] = 600.0
     b_array[snow_mask] = 2.0
 
     # Compute precipitation rate
@@ -3322,10 +3324,20 @@ async def PW_Forecast(
         InterPhour[:, 1] == 4, 17
     ]  # rain
 
-    # 10:1 Snow factor applied here!
-    InterPhour[InterPhour[:, 1] == 1, 22] = (
-        InterPhour[InterPhour[:, 1] == 1, 17] * 10
-    )  # Snow
+    # Use the new snow height estimation for snow accumulation.
+    snow_indices = np.where(InterPhour[:, 1] == 1)[0]
+    if snow_indices.size > 0:
+        # Extract and convert data for all snow events in a vectorized way
+        liquid_mm = InterPhour[snow_indices, 17] / prepAccumUnit
+        if tempUnits == 0:  # Fahrenheit
+            temp_c = (InterPhour[snow_indices, 5] - 32) * 5 / 9
+        else:
+            temp_c = InterPhour[snow_indices, 5]
+        wind_mps = InterPhour[snow_indices, 10] / windUnit
+        # Calculate snow height for all snow indices in a vectorized operation.
+        snow_mm_values = estimate_snow_height(liquid_mm, temp_c, wind_mps)
+        # Convert output to requested units and assign back to the main array
+        InterPhour[snow_indices, 22] = snow_mm_values * prepAccumUnit
 
     InterPhour[((InterPhour[:, 1] == 2) | (InterPhour[:, 1] == 3)), 23] = (
         InterPhour[((InterPhour[:, 1] == 2) | (InterPhour[:, 1] == 3)), 17] * 1
@@ -4271,6 +4283,9 @@ async def PW_Forecast(
     else:
         InterPcurrent[19] = -999
 
+    # Current temperature in Celsius
+    curr_temp = InterPcurrent[4] - 273.15  # temperature in Celsius
+
     # Put temperature into units
     if tempUnits == 0:
         InterPcurrent[4] = (InterPcurrent[4] - 273.15) * 9 / 5 + 32  # "temperature"
@@ -4355,9 +4370,12 @@ async def PW_Forecast(
             minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
         )
     elif minuteDict[0]["precipType"] == "snow":
+        # Use the new snow height estimation (in mm), then convert to requested units
+        curr_liquid = minuteDict[0]["precipIntensity"] / prepIntensityUnit
         currnetSnowAccum = (
-            minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
-        ) * 10  # 1:10 since intensity is in liquid water equivalent
+            estimate_snow_height(curr_liquid, curr_temp, currentWindSpeedMps)
+            * prepAccumUnit
+        )
     elif minuteDict[0]["precipType"] == "sleet":
         currnetIceAccum = (
             minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
