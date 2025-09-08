@@ -3479,10 +3479,10 @@ async def PW_Forecast(
     ### Feels Like Temperature
     AppTemperatureHour = np.full((len(hour_array_grib), 2), np.nan)
     if "nbm" in sourceList:
-        AppTemperatureHour[:, 0] = NBM_Merged[:, NBM["apparent_temperature"]]
+        AppTemperatureHour[:, 0] = NBM_Merged[:, NBM["apparent"]]
 
     if "gfs" in sourceList:
-        AppTemperatureHour[:, 1] = GFS_Merged[:, GFS["apparent_temperature"]]
+        AppTemperatureHour[:, 1] = GFS_Merged[:, GFS["apparent"]]
 
     # Take first non-NaN value
     InterPhour[:, DATA_HOURLY["feels_like"]] = np.choose(
