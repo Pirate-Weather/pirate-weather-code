@@ -94,3 +94,20 @@ DATA_DAY = {
     "ice": 23,
     "fire": 24,
 }
+
+DATA_TIMEMACHINE = {
+    "time": 0,
+    "intensity": 1,
+    "temp": 4,
+    "apparent": 5,
+    "dew": 6,
+    "pressure": 8,
+    "wind": 9,
+    "bearing": 11,
+    "cloud": 12,
+    "snow": 13,
+    "gust": 14,
+    "sunrise": 15,
+    "sunset": 16,
+    "moon_phase": 17,
+}
