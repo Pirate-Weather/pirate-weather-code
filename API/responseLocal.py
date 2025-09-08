@@ -3276,7 +3276,7 @@ async def PW_Forecast(
     ### Wind Speed
     WindSpeedHour = np.full((len(hour_array_grib), 3), np.nan)
     if "nbm" in sourceList:
-        WindSpeedHour[:, 0] = NBM_Merged[:, NBM["wind_speed"]]
+        WindSpeedHour[:, 0] = NBM_Merged[:, NBM["wind"]]
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         WindSpeedHour[:, 1] = np.sqrt(
             HRRR_Merged[:, HRRR["wind_u"]] ** 2 + HRRR_Merged[:, HRRR["wind_v"]] ** 2
@@ -3352,11 +3352,11 @@ async def PW_Forecast(
     ### Cloud Cover
     CloudCoverHour = np.full((len(hour_array_grib), 3), np.nan)
     if "nbm" in sourceList:
-        CloudCoverHour[:, 0] = NBM_Merged[:, NBM["cloud_cover"]]
+        CloudCoverHour[:, 0] = NBM_Merged[:, NBM["cloud"]]
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-        CloudCoverHour[:, 1] = HRRR_Merged[:, HRRR["cloud_cover"]]
+        CloudCoverHour[:, 1] = HRRR_Merged[:, HRRR["cloud"]]
     if "gfs" in sourceList:
-        CloudCoverHour[:, 2] = GFS_Merged[:, GFS["cloud_cover"]]
+        CloudCoverHour[:, 2] = GFS_Merged[:, GFS["cloud"]]
     InterPhour[:, DATA_HOURLY["cloud"]] = np.maximum(
         np.choose(np.argmin(np.isnan(CloudCoverHour), axis=1), CloudCoverHour.T) * 0.01,
         0,
@@ -4414,8 +4414,8 @@ async def PW_Forecast(
         )
     elif "nbm" in sourceList:
         InterPcurrent[DATA_CURRENT["wind"]] = (
-            NBM_Merged[currentIDX_hrrrh_A, NBM["wind_speed"]] * interpFac1
-            + NBM_Merged[currentIDX_hrrrh, NBM["wind_speed"]] * interpFac2
+            NBM_Merged[currentIDX_hrrrh_A, NBM["wind"]] * interpFac1
+            + NBM_Merged[currentIDX_hrrrh, NBM["wind"]] * interpFac2
         )
     else:
         InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
@@ -4498,18 +4498,18 @@ async def PW_Forecast(
     # Cloud, NBM then HRRR, then GFS
     if "nbm" in sourceList:
         InterPcurrent[DATA_CURRENT["cloud"]] = (
-            NBM_Merged[currentIDX_hrrrh_A, NBM["cloud_cover"]] * interpFac1
-            + NBM_Merged[currentIDX_hrrrh, NBM["cloud_cover"]] * interpFac2
+            NBM_Merged[currentIDX_hrrrh_A, NBM["cloud"]] * interpFac1
+            + NBM_Merged[currentIDX_hrrrh, NBM["cloud"]] * interpFac2
         ) * 0.01
     elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[DATA_CURRENT["cloud"]] = (
-            HRRR_Merged[currentIDX_hrrrh_A, HRRR["cloud_cover"]] * interpFac1
-            + HRRR_Merged[currentIDX_hrrrh, HRRR["cloud_cover"]] * interpFac2
+            HRRR_Merged[currentIDX_hrrrh_A, HRRR["cloud"]] * interpFac1
+            + HRRR_Merged[currentIDX_hrrrh, HRRR["cloud"]] * interpFac2
         ) * 0.01
     else:
         InterPcurrent[DATA_CURRENT["cloud"]] = (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["cloud_cover"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["cloud_cover"]] * interpFac2
+            GFS_Merged[currentIDX_hrrrh_A, GFS["cloud"]] * interpFac1
+            + GFS_Merged[currentIDX_hrrrh, GFS["cloud"]] * interpFac2
         ) * 0.01
 
     # Clip
@@ -4536,22 +4536,22 @@ async def PW_Forecast(
     # VIS, SubH, NBM then HRRR, then GFS
     if "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["vis"]] = hrrrSubHInterpolation[
-            0, HRRR_SUBH["visibility"]
+            0, HRRR_SUBH["vis"]
         ]
     elif "nbm" in sourceList:
         InterPcurrent[DATA_CURRENT["vis"]] = (
-            NBM_Merged[currentIDX_hrrrh_A, NBM["visibility"]] * interpFac1
-            + NBM_Merged[currentIDX_hrrrh, NBM["visibility"]] * interpFac2
+            NBM_Merged[currentIDX_hrrrh_A, NBM["vis"]] * interpFac1
+            + NBM_Merged[currentIDX_hrrrh, NBM["vis"]] * interpFac2
         )
     elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[DATA_CURRENT["vis"]] = (
-            HRRR_Merged[currentIDX_hrrrh_A, HRRR["visibility"]] * interpFac1
-            + HRRR_Merged[currentIDX_hrrrh, HRRR["visibility"]] * interpFac2
+            HRRR_Merged[currentIDX_hrrrh_A, HRRR["vis"]] * interpFac1
+            + HRRR_Merged[currentIDX_hrrrh, HRRR["vis"]] * interpFac2
         )
     else:
         InterPcurrent[DATA_CURRENT["vis"]] = (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["visibility"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["visibility"]] * interpFac2
+            GFS_Merged[currentIDX_hrrrh_A, GFS["vis"]] * interpFac1
+            + GFS_Merged[currentIDX_hrrrh, GFS["vis"]] * interpFac2
         )
 
     InterPcurrent[DATA_CURRENT["vis"]] = np.clip(InterPcurrent[14], 0, 16090) * visUnits
@@ -4607,13 +4607,13 @@ async def PW_Forecast(
 
     if "nbm" in sourceList:
         InterPcurrent[DATA_CURRENT["feels_like"]] = (
-            NBM_Merged[currentIDX_hrrrh_A, NBM["apparent_temperature"]] * interpFac1
-            + NBM_Merged[currentIDX_hrrrh, NBM["apparent_temperature"]] * interpFac2
+            NBM_Merged[currentIDX_hrrrh_A, NBM["apparent"]] * interpFac1
+            + NBM_Merged[currentIDX_hrrrh, NBM["apparent"]] * interpFac2
         )
     else:
         InterPcurrent[DATA_CURRENT["feels_like"]] = (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["apparent_temperature"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["apparent_temperature"]] * interpFac2
+            GFS_Merged[currentIDX_hrrrh_A, GFS["apparent"]] * interpFac1
+            + GFS_Merged[currentIDX_hrrrh, GFS["apparent"]] * interpFac2
         )
 
     # Clip
