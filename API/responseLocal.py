@@ -2834,7 +2834,7 @@ async def PW_Forecast(
             hrrrSubHInterpolation[:, HRRR_SUBH["vis"]] = np.interp(
                 minute_array_grib,
                 HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, HRRR["visibility"]],
+                HRRR_Merged[:, HRRR["vis"]],
                 left=np.nan,
                 right=np.nan,
             )
@@ -3326,7 +3326,7 @@ async def PW_Forecast(
     ### Wind Bearing
     WindBearingHour = np.full((len(hour_array_grib), 3), np.nan)
     if "nbm" in sourceList:
-        WindBearingHour[:, 0] = NBM_Merged[:, NBM["wind_direction"]]
+        WindBearingHour[:, 0] = NBM_Merged[:, NBM["bearing"]]
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         WindBearingHour[:, 1] = np.rad2deg(
             np.mod(
@@ -3384,15 +3384,15 @@ async def PW_Forecast(
     ### Visibility
     VisibilityHour = np.full((len(hour_array_grib), 3), np.nan)
     if "nbm" in sourceList:
-        VisibilityHour[:, 0] = NBM_Merged[:, NBM["visibility"]]
+        VisibilityHour[:, 0] = NBM_Merged[:, NBM["vis"]]
 
         # Filter out missing visibility values
         VisibilityHour[VisibilityHour[:, 0] < -1, 0] = np.nan
         VisibilityHour[VisibilityHour[:, 0] > 1e6, 0] = np.nan
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-        VisibilityHour[:, 1] = HRRR_Merged[:, HRRR["visibility"]]
+        VisibilityHour[:, 1] = HRRR_Merged[:, HRRR["vis"]]
     if "gfs" in sourceList:
-        VisibilityHour[:, 2] = GFS_Merged[:, GFS["visibility"]]
+        VisibilityHour[:, 2] = GFS_Merged[:, GFS["vis"]]
 
     InterPhour[:, DATA_HOURLY["vis"]] = (
         np.clip(
@@ -4481,7 +4481,7 @@ async def PW_Forecast(
         )
     elif "nbm" in sourceList:
         InterPcurrent[DATA_CURRENT["bearing"]] = NBM_Merged[
-            currentIDX_hrrrh, NBM["wind_direction"]
+            currentIDX_hrrrh, NBM["bearing"]
         ]
     else:
         InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
