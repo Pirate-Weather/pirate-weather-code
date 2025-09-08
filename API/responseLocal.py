@@ -3538,19 +3538,19 @@ async def PW_Forecast(
     )  # rain
 
     # Use the new snow height estimation for snow accumulation.
-    snow_indices = np.where(InterPhour[:, 1] == 1)[0]
+    snow_indices = np.where(InterPhour[:, DATA_HOURLY["type"]] == 1)[0]
     if snow_indices.size > 0:
         # Extract and convert data for all snow events in a vectorized way
-        liquid_mm = InterPhour[snow_indices, 17] / prepAccumUnit
+        liquid_mm = InterPhour[snow_indices, DATA_HOURLY["accum"]] / prepAccumUnit
         if tempUnits == 0:  # Fahrenheit
-            temp_c = (InterPhour[snow_indices, 5] - 32) * 5 / 9
+            temp_c = (InterPhour[snow_indices, DATA_HOURLY["temp"]] - 32) * 5 / 9
         else:
-            temp_c = InterPhour[snow_indices, 5]
-        wind_mps = InterPhour[snow_indices, 10] / windUnit
+            temp_c = InterPhour[snow_indices, DATA_HOURLY["temp"]]
+        wind_mps = InterPhour[snow_indices, DATA_HOURLY["wind"]] / windUnit
         # Calculate snow height for all snow indices in a vectorized operation.
         snow_mm_values = estimate_snow_height(liquid_mm, temp_c, wind_mps)
         # Convert output to requested units and assign back to the main array
-        InterPhour[snow_indices, 22] = snow_mm_values * prepAccumUnit
+        InterPhour[snow_indices, DATA_HOURLY["snow"]] = snow_mm_values * prepAccumUnit
 
     InterPhour[
         (
@@ -4649,7 +4649,7 @@ async def PW_Forecast(
         InterPcurrent[DATA_CURRENT["fire"]] = MISSING_DATA
 
     # Current temperature in Celsius
-    curr_temp = InterPcurrent[4] - 273.15  # temperature in Celsius
+    curr_temp = InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS  # temperature in Celsius
 
     # Put temperature into units
     if tempUnits == 0:
@@ -4680,7 +4680,7 @@ async def PW_Forecast(
             InterPcurrent[DATA_CURRENT["feels_like"]] - tempUnits
         )  # "FeelsLike"
 
-    if ((minuteDict[0]["precipIntensity"]) > (0.02 * prepIntensityUnit)) & (
+    if ((minuteDict[0]["precipIntensity"]) > (HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepIntensityUnit)) & (
         minuteDict[0]["precipType"] is not None
     ):
         # If more than 25% chance of precip, then the icon for whatever is happening, so long as the icon exists

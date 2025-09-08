@@ -68,3 +68,20 @@ LIFTED_INDEX_THRESHOLD = -4
 
 # Temperature thresholds
 WARM_TEMPERATURE_THRESHOLD = {"c": 20, "f": 68}
+LIQUID_DENSITY_CONVERSION = 1000
+
+# Snow density and snow height calculation constants
+SNOW_DENSITY_CONST = {
+    "max_kelvin": 275.65,
+    "low_temp_threshold": 260.15,
+    "density_base": 500,
+    "low_temp_exp_coeff": 0.904,
+    "low_temp_exp_factor": 0.008,
+    "wind_exp": 1.7,
+    "high_temp_exp_coeff": 0.951,
+    "high_temp_exp_factor": 0.008,
+    "high_temp_power_base": 278.15,
+    "high_temp_power_exp": -1.15,
+    "high_temp_exp_factor2": 1.4,
+    "min_density": 50,
+}
