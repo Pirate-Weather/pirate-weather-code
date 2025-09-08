@@ -23,6 +23,7 @@ WEEK_DAYS = 7
 WEEK_DAYS_PLUS_ONE = 8
 MIN_THUNDERSTORM_DAYS = 2
 
+
 def calculate_summary_text(
     precipitation, avgIntensity, intensityUnit, icon, maxIntensity
 ):
