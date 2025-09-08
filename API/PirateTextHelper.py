@@ -23,7 +23,7 @@ from API.constants.text_const import (
     WARM_TEMPERATURE_THRESHOLD,
     WIND_THRESHOLDS,
     SNOW_DENSITY_CONST,
-    LIQUID_DENSITY_CONVERSION
+    LIQUID_DENSITY_CONVERSION,
 )
 
 
@@ -691,7 +691,12 @@ def estimate_snow_density(temperature_c, wind_speed_mps):
     power_term = np.power(c["high_temp_power_base"] - kelvins, c["high_temp_power_exp"])
 
     density_high_temp = c["density_base"] * (
-        1 - c["high_temp_exp_coeff"] * np.exp(-c["high_temp_exp_factor2"] * power_term - c["high_temp_exp_factor"] * wind_speed_exp)
+        1
+        - c["high_temp_exp_coeff"]
+        * np.exp(
+            -c["high_temp_exp_factor2"] * power_term
+            - c["high_temp_exp_factor"] * wind_speed_exp
+        )
     )
 
     snow_density_kg_m3 = np.where(

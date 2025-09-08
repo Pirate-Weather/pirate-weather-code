@@ -4649,7 +4649,9 @@ async def PW_Forecast(
         InterPcurrent[DATA_CURRENT["fire"]] = MISSING_DATA
 
     # Current temperature in Celsius
-    curr_temp = InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS  # temperature in Celsius
+    curr_temp = (
+        InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS
+    )  # temperature in Celsius
 
     # Put temperature into units
     if tempUnits == 0:
@@ -4680,9 +4682,10 @@ async def PW_Forecast(
             InterPcurrent[DATA_CURRENT["feels_like"]] - tempUnits
         )  # "FeelsLike"
 
-    if ((minuteDict[0]["precipIntensity"]) > (HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepIntensityUnit)) & (
-        minuteDict[0]["precipType"] is not None
-    ):
+    if (
+        (minuteDict[0]["precipIntensity"])
+        > (HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepIntensityUnit)
+    ) & (minuteDict[0]["precipType"] is not None):
         # If more than 25% chance of precip, then the icon for whatever is happening, so long as the icon exists
         cIcon = minuteDict[0]["precipType"]
         cText = minuteDict[0]["precipType"][0].upper() + minuteDict[0]["precipType"][1:]
