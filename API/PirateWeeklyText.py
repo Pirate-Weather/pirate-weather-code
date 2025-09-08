@@ -21,7 +21,7 @@ from API.constants.text_const import (
 WEEK_DAYS_MINUS_ONE = 6
 WEEK_DAYS = 7
 WEEK_DAYS_PLUS_ONE = 8
-
+MIN_THUNDERSTORM_DAYS = 2
 
 def calculate_summary_text(
     precipitation, avgIntensity, intensityUnit, icon, maxIntensity
@@ -110,8 +110,8 @@ def calculate_summary_text(
 
     # If more than half the days with precipitation show thurnderstorms then set the icon to thunderstorm and add it in front of the precipitation text
     if thuText is not None and numThunderstormDays >= (
-        len(precipitation) / 2
-    ):  # 2 is half the week, could use a constant if desired
+        len(precipitation) / MIN_THUNDERSTORM_DAYS
+    ):
         cIcon = "thunderstorm"
         wIcon = ["and", thuText, wIcon]
     # Otherwise show it after the text and use the possible text instead

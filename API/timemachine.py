@@ -606,7 +606,7 @@ async def TimeMachine(
         ## Add Temperature
         InterPhour[idx, DATA_TIMEMACHINE["temp"]] = dataDict["VAR_2t"][idx]
         ## Add Precip
-        InterPhour[idx, DATA_TIMEMACHINE["precip"]] = (
+        InterPhour[idx, DATA_TIMEMACHINE["intensity"]] = (
             dataDict["VAR_lsp"][idx] + dataDict["VAR_cp"][idx]
         ) * pFac
         ## Add Dew Point
