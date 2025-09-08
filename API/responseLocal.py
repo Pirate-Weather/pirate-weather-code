@@ -34,6 +34,7 @@ from fastapi_utils.tasks import repeat_every
 from PirateDailyText import calculate_day_text
 from PirateMinutelyText import calculate_minutely_text
 from PirateText import calculate_text
+from PirateTextHelper import estimate_snow_height
 from pirateweather_translations.dynamic_loader import load_all_translations
 from PirateWeeklyText import calculate_weekly_text
 from pytz import timezone, utc
@@ -3536,10 +3537,20 @@ async def PW_Forecast(
         InterPhour[InterPhour[:, DATA_HOURLY["type"]] == 4, DATA_HOURLY["accum"]]
     )  # rain
 
-    # 10:1 Snow factor applied here!
-    InterPhour[InterPhour[:, DATA_HOURLY["type"]] == 1, DATA_HOURLY["snow"]] = (
-        InterPhour[InterPhour[:, DATA_HOURLY["type"]] == 1, DATA_HOURLY["accum"]] * 10
-    )  # Snow
+    # Use the new snow height estimation for snow accumulation.
+    snow_indices = np.where(InterPhour[:, 1] == 1)[0]
+    if snow_indices.size > 0:
+        # Extract and convert data for all snow events in a vectorized way
+        liquid_mm = InterPhour[snow_indices, 17] / prepAccumUnit
+        if tempUnits == 0:  # Fahrenheit
+            temp_c = (InterPhour[snow_indices, 5] - 32) * 5 / 9
+        else:
+            temp_c = InterPhour[snow_indices, 5]
+        wind_mps = InterPhour[snow_indices, 10] / windUnit
+        # Calculate snow height for all snow indices in a vectorized operation.
+        snow_mm_values = estimate_snow_height(liquid_mm, temp_c, wind_mps)
+        # Convert output to requested units and assign back to the main array
+        InterPhour[snow_indices, 22] = snow_mm_values * prepAccumUnit
 
     InterPhour[
         (
@@ -4637,6 +4648,9 @@ async def PW_Forecast(
     else:
         InterPcurrent[DATA_CURRENT["fire"]] = MISSING_DATA
 
+    # Current temperature in Celsius
+    curr_temp = InterPcurrent[4] - 273.15  # temperature in Celsius
+
     # Put temperature into units
     if tempUnits == 0:
         InterPcurrent[DATA_CURRENT["temp"]] = (
@@ -4737,9 +4751,12 @@ async def PW_Forecast(
             minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
         )
     elif minuteDict[0]["precipType"] == "snow":
+        # Use the new snow height estimation (in mm), then convert to requested units
+        curr_liquid = minuteDict[0]["precipIntensity"] / prepIntensityUnit
         currnetSnowAccum = (
-            minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
-        ) * 10  # 1:10 since intensity is in liquid water equivalent
+            estimate_snow_height(curr_liquid, curr_temp, currentWindSpeedMps)
+            * prepAccumUnit
+        )
     elif minuteDict[0]["precipType"] == "sleet":
         currnetIceAccum = (
             minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit

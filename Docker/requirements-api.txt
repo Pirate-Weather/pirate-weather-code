@@ -11,9 +11,9 @@ psutil==5.9.0
 typing-inspect==0.9.0
 watchfiles==1.1.0
 dask==2025.7.0
-xarray==2025.8.0
+xarray==2025.9.0
 pandas==2.3.2
 fastparquet==2024.11.0
 pirateweather-translations==1.2.1
-s3fs==2025.7.0
-aiobotocore[boto3]==2.24.1
+s3fs==2025.9.0
+aiobotocore[boto3]==2.24.2
