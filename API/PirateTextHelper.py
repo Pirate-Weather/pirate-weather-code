@@ -93,6 +93,28 @@ def calculate_sky_icon(cloudCover, isDayTime, icon="darksky"):
 
     return sky_icon
 
+def matches_precip(prep_type, valid_types, amount, threshold, intensity, intensity_threshold):
+    """
+    Determines if precipitation conditions match for a given type.
+
+    Parameters:
+    - prep_type (str): The current precipitation type (e.g., "rain", "snow").
+    - valid_types (tuple of str): Precipitation types to check against.
+    - amount (float): The measured precipitation amount for this type.
+    - threshold (float): The threshold amount for displaying an icon.
+    - intensity (float): The overall precipitation intensity.
+    - intensity_threshold (float): The threshold intensity for displaying an icon.
+
+    Returns:
+    - bool: True if the precipitation type matches and either the amount or intensity is within thresholds.
+    """
+    return (
+        prep_type in valid_types
+        and (
+            (0 < amount < threshold)
+            or (0 < intensity < intensity_threshold)
+        )
+    )
 
 def calculate_precip_text(
     prepIntensity,
@@ -169,26 +191,27 @@ def calculate_precip_text(
     cIcon = None
     cText = None
     totalPrep = rainPrep + snowPrep + icePrep
+
+    rain_condition = matches_precip(
+        prepType, ("rain", "none"),
+        rainPrep, precipIconThreshold,
+        prepIntensity, precipIconThresholdHour
+    )
+
+    snow_condition = matches_precip(
+        prepType, ("snow",),
+        snowPrep, snowIconThreshold,
+        prepIntensity, snowIconThresholdHour
+    )
+
+    ice_condition = matches_precip(
+        prepType, ("sleet", "ice", "hail"),
+        icePrep, precipIconThreshold,
+        prepIntensity, precipIconThresholdHour
+    )
+
     # Add the possible precipitation text if pop is less than 25% or if pop is greater than 0 but precipIntensity is between 0-0.02 mm/h
-    if (pop < 0.25) or (
-        (
-            (prepType == "rain" or prepType == "none")
-            and (rainPrep > 0 and rainPrep < precipIconThreshold)
-            or (prepIntensity > 0 and prepIntensity < precipIconThresholdHour)
-        )
-        or (
-            prepType == "snow"
-            and snowPrep > 0
-            and snowPrep < snowIconThreshold
-            or (prepIntensity > 0 and prepIntensity < snowIconThresholdHour)
-        )
-        or (
-            (prepType == "sleet" or prepType == "ice" or prepType == "hail")
-            and icePrep > 0
-            and icePrep < precipIconThreshold
-            or (prepIntensity > 0 and prepIntensity < precipIconThresholdHour)
-        )
-    ):
+    if pop < 0.25 or rain_condition or snow_condition or ice_condition:
         possiblePrecip = "possible-"
 
     # Determine the number of precipitation types for the day
