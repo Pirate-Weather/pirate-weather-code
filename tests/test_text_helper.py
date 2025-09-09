@@ -24,7 +24,7 @@ def test_calculate_sky_icon_day_night():
 
 def test_calculate_precip_text_light_rain():
     text, icon = calculate_precip_text(
-        prepIntensity=0.1,
+        prepIntensity=0.01,
         prepAccumUnit=1.0,
         prepType="rain",
         type="hour",
