@@ -93,7 +93,10 @@ def calculate_sky_icon(cloudCover, isDayTime, icon="darksky"):
 
     return sky_icon
 
-def matches_precip(prep_type, valid_types, amount, threshold, intensity, intensity_threshold):
+
+def matches_precip(
+    prep_type, valid_types, amount, threshold, intensity, intensity_threshold
+):
     """
     Determines if precipitation conditions match for a given type.
 
@@ -108,13 +111,10 @@ def matches_precip(prep_type, valid_types, amount, threshold, intensity, intensi
     Returns:
     - bool: True if the precipitation type matches and either the amount or intensity is within thresholds.
     """
-    return (
-        prep_type in valid_types
-        and (
-            (0 < amount < threshold)
-            or (0 < intensity < intensity_threshold)
-        )
+    return prep_type in valid_types and (
+        (0 < amount < threshold) or (0 < intensity < intensity_threshold)
     )
+
 
 def calculate_precip_text(
     prepIntensity,
@@ -193,21 +193,30 @@ def calculate_precip_text(
     totalPrep = rainPrep + snowPrep + icePrep
 
     rain_condition = matches_precip(
-        prepType, ("rain", "none"),
-        rainPrep, precipIconThreshold,
-        prepIntensity, precipIconThresholdHour
+        prepType,
+        ("rain", "none"),
+        rainPrep,
+        precipIconThreshold,
+        prepIntensity,
+        precipIconThresholdHour,
     )
 
     snow_condition = matches_precip(
-        prepType, ("snow",),
-        snowPrep, snowIconThreshold,
-        prepIntensity, snowIconThresholdHour
+        prepType,
+        ("snow",),
+        snowPrep,
+        snowIconThreshold,
+        prepIntensity,
+        snowIconThresholdHour,
     )
 
     ice_condition = matches_precip(
-        prepType, ("sleet", "ice", "hail"),
-        icePrep, precipIconThreshold,
-        prepIntensity, precipIconThresholdHour
+        prepType,
+        ("sleet", "ice", "hail"),
+        icePrep,
+        precipIconThreshold,
+        prepIntensity,
+        precipIconThresholdHour,
     )
 
     # Add the possible precipitation text if pop is less than 25% or if pop is greater than 0 but precipIntensity is between 0-0.02 mm/h
