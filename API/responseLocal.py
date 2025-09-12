@@ -4689,7 +4689,6 @@ async def PW_Forecast(
         # Because soemtimes there's precipitation not no type, don't use an icon in those cases
 
     # If visibility <1km and during the day
-    # elif InterPcurrent[14]<1000 and (InterPcurrent[0]>InterPday[0,16] and InterPcurrent[0]<InterPday[0,17]):
     elif InterPcurrent[DATA_CURRENT["vis"]] < (FOG_THRESHOLD_METERS * visUnits):
         cIcon = "fog"
         cText = "Fog"
