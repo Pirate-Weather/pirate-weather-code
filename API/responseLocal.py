@@ -3261,17 +3261,20 @@ async def PW_Forecast(
         PressureHour[:, 0] = HRRR_Merged[:, HRRR["pressure"]]
     if "gfs" in sourceList:
         PressureHour[:, 1] = GFS_Merged[:, GFS["pressure"]]
-    InterPhour[:, DATA_HOURLY["pressure"]] = (
-        np.choose(np.argmin(np.isnan(PressureHour), axis=1), PressureHour.T)
+    InterPhour[:, DATA_HOURLY["pressure"]] = np.choose(
+        np.argmin(np.isnan(PressureHour), axis=1), PressureHour.T
     )
 
     # Clip between 800 and 1100
-    InterPhour[:, DATA_HOURLY["pressure"]] = clipLog(
-        InterPhour[:, DATA_HOURLY["pressure"]],
-        CLIP_PRESSURE["min"],
-        CLIP_PRESSURE["max"],
-        "Pressure Hour",
-    ) * pressUnits
+    InterPhour[:, DATA_HOURLY["pressure"]] = (
+        clipLog(
+            InterPhour[:, DATA_HOURLY["pressure"]],
+            CLIP_PRESSURE["min"],
+            CLIP_PRESSURE["max"],
+            "Pressure Hour",
+        )
+        * pressUnits
+    )
 
     ### Wind Speed
     WindSpeedHour = np.full((len(hour_array_grib), 3), np.nan)
