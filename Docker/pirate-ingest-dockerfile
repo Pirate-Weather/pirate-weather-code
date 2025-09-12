@@ -8,10 +8,12 @@
 FROM python:3.13
 
 # Set environment variables
-ENV DEBIAN_FRONTEND=noninteractive
-ENV CC=gcc
-ENV FC=gfortran
-
+ENV DEBIAN_FRONTEND=noninteractive \
+    CC=gcc \
+    FC=gfortran \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
 
 # Update package lists and install dependencies
 RUN apt update && \
@@ -30,7 +32,7 @@ RUN apt update && \
                        git \
                        libnetcdf-dev \
                        libhdf5-dev \
-		       libgdal-dev \ 
+		               libgdal-dev \
                        libaec-dev 					   
 
 # Manual ECCodes
@@ -74,6 +76,6 @@ COPY Docker/requirements-ingest.txt requirements-ingest.txt
 RUN python3 -m pip install -r requirements-ingest.txt  --no-binary eccodes
  
 # Copy Files
-COPY API/ ./
- 
+COPY API /app/API
+
 ENTRYPOINT ["python3"]

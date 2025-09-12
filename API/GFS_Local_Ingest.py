@@ -17,23 +17,28 @@ import pandas as pd
 import s3fs
 import xarray as xr
 import zarr.storage
+from dask.diagnostics import ProgressBar
 from herbie import FastHerbie, HerbieLatest, Path
+from ingest_utils import (
+    interp_time_block,
+    mask_invalid_data,
+    mask_invalid_refc,
+    validate_grib_stats,
+)
 from xrspatial import direction, proximity
 
-from dask.diagnostics import ProgressBar
-
-from ingest_utils import (
-    mask_invalid_data,
-    interp_time_block,
-    validate_grib_stats,
-    mask_invalid_refc,
+from API.constants.shared_const import INGEST_VERSION_STR
+from API.ingest_utils import (
+    CHUNK_SIZES,
+    FINAL_CHUNK_SIZES,
+    FORECAST_LEAD_RANGES,
+    HISTORY_PERIODS,
 )
-
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-ingestVersion = "v27"
+ingestVersion = INGEST_VERSION_STR
 
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
@@ -56,13 +61,14 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
+
 # Define the processing and history chunk size
-processChunk = 100
+processChunk = CHUNK_SIZES["GFS"]
 
 # Define the final x/y chunksize
-finalChunk = 3
+finalChunk = FINAL_CHUNK_SIZES["GFS"]
 
-hisPeriod = 48
+hisPeriod = HISTORY_PERIODS["GFS"]
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -200,8 +206,9 @@ matchStrings = (
 
 # Create a range of forecast lead times
 # Go from 1 to 7 to account for the weird prate approach
-gfs_range1 = range(1, 121)
-gfs_range2 = range(123, 241, 3)
+
+gfs_range1 = FORECAST_LEAD_RANGES["GFS_1"]
+gfs_range2 = FORECAST_LEAD_RANGES["GFS_2"]
 gfsFileRange = [*gfs_range1, *gfs_range2]
 
 # Create FastHerbie object

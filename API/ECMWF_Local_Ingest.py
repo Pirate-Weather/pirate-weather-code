@@ -17,17 +17,22 @@ import pandas as pd
 import s3fs
 import xarray as xr
 import zarr.storage
-from herbie import FastHerbie, HerbieLatest, Path
-
 from dask.diagnostics import ProgressBar
+from herbie import FastHerbie, HerbieLatest, Path
+from ingest_utils import interp_time_block, mask_invalid_data, validate_grib_stats
 
-from ingest_utils import mask_invalid_data, interp_time_block, validate_grib_stats
-
+from API.constants.shared_const import INGEST_VERSION_STR
+from API.ingest_utils import (
+    CHUNK_SIZES,
+    FINAL_CHUNK_SIZES,
+    FORECAST_LEAD_RANGES,
+    HISTORY_PERIODS,
+)
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-ingestVersion = "v27"
+ingestVersion = INGEST_VERSION_STR
 
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
@@ -50,13 +55,14 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
+
 # Define the processing and history chunk size
-processChunk = 100
+processChunk = CHUNK_SIZES["ECMWF"]
 
 # Define the final x/y chunksize
-finalChunk = 3
+finalChunk = FINAL_CHUNK_SIZES["ECMWF"]
 
-hisPeriod = 48
+hisPeriod = HISTORY_PERIODS["ECMWF"]
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -144,9 +150,10 @@ zarrVars = (
 # Needed for tcc
 # Find the latest run with 240 hours
 
+
 # Create a range of forecast lead times
 # Go from 1 to 7 to account for the weird prate approach
-aifs_range1 = range(0, 241, 6)
+aifs_range1 = FORECAST_LEAD_RANGES["ECMWF_AIFS"]
 
 # Create FastHerbie object
 FH_forecastsub = FastHerbie(
@@ -212,9 +219,10 @@ if spOUT.returncode != 0:
 # Needed for tcc
 # Find the latest run with 240 hours
 
+
 # Create a range of forecast lead times
-ifs_range1 = range(3, 144, 3)
-ifs_range2 = range(144, 241, 6)
+ifs_range1 = FORECAST_LEAD_RANGES["ECMWF_IFS_1"]
+ifs_range2 = FORECAST_LEAD_RANGES["ECMWF_IFS_2"]
 ifsFileRange = [*ifs_range1, *ifs_range2]
 
 # Create FastHerbie object

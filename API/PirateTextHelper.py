@@ -1,43 +1,31 @@
 # %% Script to contain the helper functions that can be used to generate the text summary of the forecast data for Pirate Weather
-from collections import Counter
 import math
+from collections import Counter
+
 import numpy as np
 
-# Cloud Cover Thresholds (%)
-cloudyThreshold = 0.875
-mostlyCloudyThreshold = 0.625
-partlyCloudyThreshold = 0.375
-mostlyClearThreshold = 0.125
-
-# Precipitation Intensity Thresholds (mm/h liquid equivalent)
-LIGHT_PRECIP_MM_PER_HOUR = 0.4
-MID_PRECIP_MM_PER_HOUR = 2.5
-HEAVY_PRECIP_MM_PER_HOUR = 10.0
-
-# Snow Intensity Thresholds (mm/h liquid equivalent)
-LIGHT_SNOW_MM_PER_HOUR = 0.13
-MID_SNOW_MM_PER_HOUR = 0.83
-HEAVY_SNOW_MM_PER_HOUR = 3.33
-
-# Icon Thresholds for Precipitation Accumulation (mm liquid equivalent)
-HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM = 0.2
-HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 0.02
-
-DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM = 10.0
-DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0
-
-# Icon Thresholds for Visbility (meters)
-FOG_THRESHOLD_METERS = 1000
-MIST_THRESHOLD_METERS = 10000
-SMOKE_CONCENTRATION_THRESHOLD_UGM3 = 25
-TEMP_DEWPOINT_SPREAD_FOR_FOG = 2
-TEMP_DEWPOINT_SPREAD_FOR_MIST = 3
-DEFAULT_VISIBILITY = 10000
-DEFAULT_POP = 1
-
-# Invalid data
-MISSING_DATA = -999
-REFC_THRESHOLD = 5.0
+from API.constants.shared_const import KELVIN_TO_CELSIUS, MISSING_DATA
+from API.constants.text_const import (
+    CAPE_THRESHOLDS,
+    CLOUD_COVER_THRESHOLDS,
+    DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
+    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    FOG_THRESHOLD_METERS,
+    HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
+    HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    LIFTED_INDEX_THRESHOLD,
+    LIQUID_DENSITY_CONVERSION,
+    MIST_THRESHOLD_METERS,
+    PRECIP_INTENSITY_THRESHOLDS,
+    PRECIP_PROB_THRESHOLD,
+    SMOKE_CONCENTRATION_THRESHOLD_UGM3,
+    SNOW_DENSITY_CONST,
+    SNOW_INTENSITY_THRESHOLDS,
+    TEMP_DEWPOINT_SPREAD_FOR_FOG,
+    TEMP_DEWPOINT_SPREAD_FOR_MIST,
+    WARM_TEMPERATURE_THRESHOLD,
+    WIND_THRESHOLDS,
+)
 
 
 def Most_Common(lst):
@@ -68,19 +56,19 @@ def calculate_sky_icon(cloudCover, isDayTime, icon="darksky"):
     """
     sky_icon = None
 
-    if cloudCover > cloudyThreshold:
+    if cloudCover > CLOUD_COVER_THRESHOLDS["cloudy"]:
         sky_icon = "cloudy"
-    elif cloudCover > mostlyCloudyThreshold and icon == "pirate":
+    elif cloudCover > CLOUD_COVER_THRESHOLDS["mostly_cloudy"] and icon == "pirate":
         if isDayTime:
             sky_icon = "mostly-cloudy-day"
         else:
             sky_icon = "mostly-cloudy-night"
-    elif cloudCover > partlyCloudyThreshold:
+    elif cloudCover > CLOUD_COVER_THRESHOLDS["partly_cloudy"]:
         if isDayTime:
             sky_icon = "partly-cloudy-day"
         else:
             sky_icon = "partly-cloudy-night"
-    elif cloudCover > mostlyClearThreshold and icon == "pirate":
+    elif cloudCover > CLOUD_COVER_THRESHOLDS["mostly_clear"] and icon == "pirate":
         if isDayTime:
             sky_icon = "mostly-clear-day"
         else:
@@ -165,12 +153,12 @@ def calculate_precip_text(
         pop = 1
 
     # In mm/h
-    lightPrecipThresh = LIGHT_PRECIP_MM_PER_HOUR * prepIntensityUnit
-    midPrecipThresh = MID_PRECIP_MM_PER_HOUR * prepIntensityUnit
-    heavyPrecipThresh = HEAVY_PRECIP_MM_PER_HOUR * prepIntensityUnit
-    lightSnowThresh = LIGHT_SNOW_MM_PER_HOUR * prepIntensityUnit
-    midSnowThresh = MID_SNOW_MM_PER_HOUR * prepIntensityUnit
-    heavySnowThresh = HEAVY_SNOW_MM_PER_HOUR * prepIntensityUnit
+    lightPrecipThresh = PRECIP_INTENSITY_THRESHOLDS["light"] * prepIntensityUnit
+    midPrecipThresh = PRECIP_INTENSITY_THRESHOLDS["mid"] * prepIntensityUnit
+    heavyPrecipThresh = PRECIP_INTENSITY_THRESHOLDS["heavy"] * prepIntensityUnit
+    lightSnowThresh = SNOW_INTENSITY_THRESHOLDS["light"] * prepIntensityUnit
+    midSnowThresh = SNOW_INTENSITY_THRESHOLDS["mid"] * prepIntensityUnit
+    heavySnowThresh = SNOW_INTENSITY_THRESHOLDS["heavy"] * prepIntensityUnit
 
     snowIconThresholdHour = HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
     precipIconThresholdHour = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
@@ -220,7 +208,7 @@ def calculate_precip_text(
     )
 
     # Add the possible precipitation text if pop is less than 25% or if pop is greater than 0 but precipIntensity is between 0-0.02 mm/h
-    if pop < 0.25 or rain_condition or snow_condition or ice_condition:
+    if pop < PRECIP_PROB_THRESHOLD or rain_condition or snow_condition or ice_condition:
         possiblePrecip = "possible-"
 
     # Determine the number of precipitation types for the day
@@ -234,7 +222,7 @@ def calculate_precip_text(
     if (
         totalPrep >= precipIconThreshold
         and possiblePrecip == "possible-"
-        and pop >= 0.25
+        and pop >= PRECIP_PROB_THRESHOLD
         and numTypes > 1
     ):
         possiblePrecip = ""
@@ -245,7 +233,7 @@ def calculate_precip_text(
     # icePrepPercent = icePrep / iceIconThreshold
 
     # Find the largest percentage difference to determine the icon
-    if pop >= 0.25 and (
+    if pop >= PRECIP_PROB_THRESHOLD and (
         (rainPrep > precipIconThreshold and prepIntensity > precipIconThresholdHour)
         or (snowPrep >= snowIconThreshold and prepIntensity > snowIconThresholdHour)
         or (icePrep >= precipIconThreshold and prepIntensity > precipIconThresholdHour)
@@ -463,9 +451,9 @@ def calculate_wind_text(wind, windUnits, icon="darksky", mode="both"):
     if wind == MISSING_DATA:
         return (None, None) if mode == "both" else None
 
-    lightWindThresh = 6.7056 * windUnits
-    midWindThresh = 10 * windUnits
-    heavyWindThresh = 17.8816 * windUnits
+    lightWindThresh = WIND_THRESHOLDS["light"] * windUnits
+    midWindThresh = WIND_THRESHOLDS["mid"] * windUnits
+    heavyWindThresh = WIND_THRESHOLDS["heavy"] * windUnits
 
     if wind >= lightWindThresh and wind < midWindThresh:
         windText = "light-wind"
@@ -577,20 +565,20 @@ def calculate_sky_text(cloudCover, isDayTime, icon="darksky", mode="both"):
     if cloudCover == MISSING_DATA:
         return (None, None) if mode == "both" else None
 
-    if cloudCover > cloudyThreshold:
+    if cloudCover > CLOUD_COVER_THRESHOLDS["cloudy"]:
         skyText = "heavy-clouds"
         skyIcon = calculate_sky_icon(cloudCover, isDayTime, icon)
 
-    elif cloudCover > partlyCloudyThreshold:
+    elif cloudCover > CLOUD_COVER_THRESHOLDS["partly_cloudy"]:
         skyIcon = calculate_sky_icon(cloudCover, isDayTime, icon)
-        if cloudCover > mostlyCloudyThreshold:
+        if cloudCover > CLOUD_COVER_THRESHOLDS["mostly_cloudy"]:
             skyText = "medium-clouds"
 
         else:
             skyText = "light-clouds"
     else:
         skyIcon = calculate_sky_icon(cloudCover, isDayTime, icon)
-        if cloudCover > mostlyClearThreshold:
+        if cloudCover > CLOUD_COVER_THRESHOLDS["mostly_clear"]:
             skyText = "very-light-clouds"
         else:
             skyText = "clear"
@@ -625,12 +613,12 @@ def humidity_sky_text(temp, tempUnits, humidity):
     ):
         return None
 
-    # Only use humid if also warm (>20C)
-    if tempUnits == 0:
-        tempThresh = 68
-    else:
-        tempThresh = 20
-
+    # Only use humid if also warm (>20C or >68F)
+    tempThresh = (
+        WARM_TEMPERATURE_THRESHOLD["f"]
+        if tempUnits == 0
+        else WARM_TEMPERATURE_THRESHOLD["c"]
+    )
     humidityText = None
     lowHumidityThresh = 0.15
     highHumidityThresh = 0.95
@@ -660,16 +648,16 @@ def calculate_thunderstorm_text(liftedIndex, cape, mode="both"):
     thuText = None
     thuIcon = None
 
-    if 1000 <= cape < 2500:
+    if CAPE_THRESHOLDS["low"] <= cape < CAPE_THRESHOLDS["high"]:
         thuText = "possible-thunderstorm"
-    elif cape >= 2500:
+    elif cape >= CAPE_THRESHOLDS["high"]:
         thuText = "thunderstorm"
         thuIcon = "thunderstorm"
 
     if liftedIndex != MISSING_DATA and thuText is None:
-        if 0 > liftedIndex > -4:
+        if 0 > liftedIndex > LIFTED_INDEX_THRESHOLD:
             thuText = "possible-thunderstorm"
-        elif liftedIndex <= -4:
+        elif liftedIndex <= LIFTED_INDEX_THRESHOLD:
             thuText = "thunderstorm"
             thuIcon = "thunderstorm"
 
@@ -691,7 +679,7 @@ def kelvin_from_celsius(celsius):
     Returns:
     - float: Temperature in Kelvin
     """
-    return celsius + 273.15
+    return celsius + KELVIN_TO_CELSIUS
 
 
 def estimate_snow_height(precipitation_mm, temperature_c, wind_speed_mps):
@@ -707,7 +695,8 @@ def estimate_snow_height(precipitation_mm, temperature_c, wind_speed_mps):
     - float: Estimated snow depth in millimeters
     """
     snow_density_kg_m3 = estimate_snow_density(temperature_c, wind_speed_mps)
-    return precipitation_mm * 1000 / snow_density_kg_m3
+    # 1000 is a conversion factor from mm to grams (for density in kg/m^3)
+    return precipitation_mm * LIQUID_DENSITY_CONVERSION / snow_density_kg_m3
 
 
 def estimate_snow_density(temperature_c, wind_speed_mps):
@@ -722,21 +711,29 @@ def estimate_snow_density(temperature_c, wind_speed_mps):
     Returns:
         float | np.ndarray: Estimated snow density in kg/m^3.
     """
+    c = SNOW_DENSITY_CONST
     kelvins = kelvin_from_celsius(temperature_c)
-    kelvins = np.minimum(kelvins, 275.65)
+    kelvins = np.minimum(kelvins, c["max_kelvin"])
 
-    wind_speed_exp_17 = np.power(wind_speed_mps, 1.7)
+    wind_speed_exp = np.power(wind_speed_mps, c["wind_exp"])
 
-    density_low_temp = 500 * (1 - 0.904 * np.exp(-0.008 * wind_speed_exp_17))
+    density_low_temp = c["density_base"] * (
+        1 - c["low_temp_exp_coeff"] * np.exp(-c["low_temp_exp_factor"] * wind_speed_exp)
+    )
 
-    power_term = np.power(278.15 - kelvins, -1.15)
+    power_term = np.power(c["high_temp_power_base"] - kelvins, c["high_temp_power_exp"])
 
-    density_high_temp = 500 * (
-        1 - 0.951 * np.exp(-1.4 * power_term - 0.008 * wind_speed_exp_17)
+    density_high_temp = c["density_base"] * (
+        1
+        - c["high_temp_exp_coeff"]
+        * np.exp(
+            -c["high_temp_exp_factor2"] * power_term
+            - c["high_temp_exp_factor"] * wind_speed_exp
+        )
     )
 
     snow_density_kg_m3 = np.where(
-        kelvins <= 260.15, density_low_temp, density_high_temp
+        kelvins <= c["low_temp_threshold"], density_low_temp, density_high_temp
     )
 
-    return np.maximum(snow_density_kg_m3, 50)
+    return np.maximum(snow_density_kg_m3, c["min_density"])

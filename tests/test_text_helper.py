@@ -6,8 +6,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
 
 from API.PirateTextHelper import (
-    calculate_sky_icon,
     calculate_precip_text,
+    calculate_sky_icon,
     estimate_snow_density,
     estimate_snow_height,
     humidity_sky_text,

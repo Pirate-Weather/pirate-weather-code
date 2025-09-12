@@ -1,9 +1,9 @@
+import json
 import os
 import warnings
 
 import httpx
 import pytest
-import json
 
 from tests import DiffWarning
 from tests.test_s3_live import _get_client

@@ -1,8 +1,14 @@
 # %% Script to contain the functions that can be used to generate the minutely text summary of the forecast data for Pirate Weather
 
-from PirateTextHelper import calculate_precip_text
 from itertools import groupby
 from operator import itemgetter
+
+from PirateTextHelper import calculate_precip_text
+
+from API.constants.shared_const import MISSING_DATA
+
+# Number of minutes in an hour
+MINUTES_IN_HOUR = 60
 
 
 def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
@@ -20,7 +26,7 @@ def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
     """
 
     # If the current precipitation stops before the end of the hour
-    if precipStart1 == 0 and precipEnd1 < 60 and precipStart2 == -1:
+    if precipStart1 == 0 and precipEnd1 < MINUTES_IN_HOUR and precipStart2 == -1:
         cText = [
             "stopping-in",
             text,
@@ -29,14 +35,14 @@ def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
             else ["less-than", ["minutes", 1]],
         ]
     # If the current precipitation doesn't stop before the end of the hour
-    elif precipStart1 == 0 and precipEnd1 == 60:
+    elif precipStart1 == 0 and precipEnd1 == MINUTES_IN_HOUR:
         cText = [
             "for-hour",
             text,
         ]
 
     # If the current precipitation stops before the hour but starts again
-    elif precipStart1 == 0 and precipEnd1 < 60 and precipStart2 != -1:
+    elif precipStart1 == 0 and precipEnd1 < MINUTES_IN_HOUR and precipStart2 != -1:
         cText = [
             "stopping-then-starting-later",
             text,
@@ -46,14 +52,14 @@ def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
             ["minutes", precipStart2 - precipEnd1],
         ]
     # If precip starts during the hour and lasts until the end of the hour
-    elif precipStart1 > 0 and precipEnd1 == 60:
+    elif precipStart1 > 0 and precipEnd1 == MINUTES_IN_HOUR:
         cText = [
             "starting-in",
             text,
             ["minutes", precipStart1],
         ]
     # If precip starts during the hour and ends before the end of the hour
-    elif precipStart1 > 0 and precipEnd1 < 60:
+    elif precipStart1 > 0 and precipEnd1 < MINUTES_IN_HOUR:
         cText = [
             "starting-then-stopping-later",
             text,
@@ -116,7 +122,10 @@ def calculate_minutely_text(
 
     # Loop through the minute array
     for idx, minute in enumerate(minuteArr):
-        if minute["precipIntensity"] == -999 or minute["precipType"] == -999:
+        if (
+            minute["precipIntensity"] == MISSING_DATA
+            or minute["precipType"] == MISSING_DATA
+        ):
             return [
                 "next-hour-forecast-status",
                 "temporarily-unavailable",

@@ -3,13 +3,57 @@
 
 import re
 import sys
-import xarray as xr
+import time
 
 import dask.array as da
 import numpy as np
-import time
+import xarray as xr
 from herbie import Path
-from PirateTextHelper import REFC_THRESHOLD
+
+from API.constants.shared_const import REFC_THRESHOLD
+
+# Shared ingest constants
+CHUNK_SIZES = {
+    "NBM": 100,
+    "HRRR": 100,
+    "HRRR_6H": 100,
+    "GFS": 100,
+    "GEFS": 100,
+    "ECMWF": 100,
+    "NBM_Fire": 100,
+}
+
+FINAL_CHUNK_SIZES = {
+    "NBM": 3,
+    "HRRR": 5,
+    "HRRR_6H": 5,
+    "GFS": 3,
+    "GEFS": 3,
+    "ECMWF": 3,
+    "NBM_Fire": 5,
+}
+
+HISTORY_PERIODS = {
+    "NBM": 48,
+    "HRRR": 48,
+    "HRRR_6H": 48,
+    "GFS": 48,
+    "GEFS": 48,
+    "ECMWF": 48,
+    "NBM_Fire": 48,
+}
+
+FORECAST_LEAD_RANGES = {
+    "GFS_1": list(range(1, 121)),
+    "GFS_2": list(range(123, 241, 3)),
+    "GEFS": list(range(3, 241, 3)),
+    "NBM_FIRE": list(range(6, 192, 6)),
+    "HRRR_1H": list(range(1, 19)),
+    "HRRR_6H": list(range(18, 49)),
+    "ECMWF_AIFS": list(range(0, 241, 6)),
+    "ECMWF_IFS_1": list(range(3, 144, 3)),
+    "ECMWF_IFS_2": list(range(144, 241, 6)),
+}
 
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000

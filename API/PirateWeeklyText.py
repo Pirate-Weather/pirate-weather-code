@@ -1,16 +1,27 @@
 # %% Script to contain the functions that can be used to generate the weekly text summary of the forecast data for Pirate Weather
 
 import datetime
-from dateutil import tz
-from PirateTextHelper import Most_Common
 from itertools import groupby
 from operator import itemgetter
+
+from dateutil import tz
 from PirateTextHelper import (
+    Most_Common,
     calculate_precip_text,
     calculate_thunderstorm_text,
-    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
-    DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
 )
+
+from API.constants.shared_const import MISSING_DATA
+from API.constants.text_const import (
+    DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
+    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    PRECIP_PROB_THRESHOLD,
+)
+
+WEEK_DAYS_MINUS_ONE = 6
+WEEK_DAYS = 7
+WEEK_DAYS_PLUS_ONE = 8
+MIN_THUNDERSTORM_DAYS = 2
 
 
 def calculate_summary_text(
@@ -37,7 +48,7 @@ def calculate_summary_text(
     wWeekend = False
     dayIndexes = []
     days = []
-    maxCape = maxLiftedIndex = -999
+    maxCape = maxLiftedIndex = MISSING_DATA
     numThunderstormDays = 0
 
     # Loop through each index in the precipitation array
@@ -53,16 +64,19 @@ def calculate_summary_text(
 
         if "cape" in day[2]:
             # Calculate the maximum cape for the week
-            if maxCape == -999 and day[2]["cape"] != -999:
+            if maxCape == MISSING_DATA and day[2]["cape"] != MISSING_DATA:
                 maxCape = day[2]["cape"]
-            elif maxCape != -999 and day[2]["cape"] > maxCape:
+            elif maxCape != MISSING_DATA and day[2]["cape"] > maxCape:
                 maxCape = day[2]["cape"]
 
         if "liftedIndex" in day[2]:
             # Calculate the maximum lifted index for the week
-            if maxLiftedIndex == -999 and day[2]["liftedIndex"] != -999:
+            if maxLiftedIndex == MISSING_DATA and day[2]["liftedIndex"] != MISSING_DATA:
                 maxLiftedIndex = day[2]["liftedIndex"]
-            elif maxLiftedIndex != -999 and day[2]["liftedIndex"] > maxLiftedIndex:
+            elif (
+                maxLiftedIndex != MISSING_DATA
+                and day[2]["liftedIndex"] > maxLiftedIndex
+            ):
                 maxLiftedIndex = day[2]["liftedIndex"]
 
         # Calculate the number of days with thunderstorms forecasted
@@ -96,7 +110,9 @@ def calculate_summary_text(
         thuText = calculate_thunderstorm_text(maxLiftedIndex, maxCape, "summary")
 
     # If more than half the days with precipitation show thurnderstorms then set the icon to thunderstorm and add it in front of the precipitation text
-    if thuText is not None and numThunderstormDays >= (len(precipitation) / 2):
+    if thuText is not None and numThunderstormDays >= (
+        len(precipitation) / MIN_THUNDERSTORM_DAYS
+    ):
         cIcon = "thunderstorm"
         wIcon = ["and", thuText, wIcon]
     # Otherwise show it after the text and use the possible text instead
@@ -357,13 +373,10 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
         lowTemp[3] = "fahrenheit"
 
     # If the temperature is increasing everyday or if the lowest temperatue is at the start of the week and the highest temperature is at the end of the week use the rising text
-    if weekArr[0]["temperatureHigh"] < weekArr[1]["temperatureHigh"] < weekArr[2][
-        "temperatureHigh"
-    ] < weekArr[3]["temperatureHigh"] < weekArr[4]["temperatureHigh"] < weekArr[5][
-        "temperatureHigh"
-    ] < weekArr[6]["temperatureHigh"] < weekArr[7]["temperatureHigh"] or (
-        highTemp[0] >= 6 and lowTemp[0] <= 1
-    ):
+    if all(
+        weekArr[i]["temperatureHigh"] < weekArr[i + 1]["temperatureHigh"]
+        for i in range(WEEK_DAYS)
+    ) or (highTemp[0] >= WEEK_DAYS_MINUS_ONE and lowTemp[0] <= 1):
         # Set the temperature summary
         return [
             "temperatures-rising",
@@ -371,20 +384,19 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
             highTemp[1],
         ]
     # If the temperature is decreasing everyday or if the lowest temperatue is at the end of the week and the highest temperature is at the start of the week use the rising text
-    elif weekArr[0]["temperatureHigh"] > weekArr[1]["temperatureHigh"] > weekArr[2][
-        "temperatureHigh"
-    ] > weekArr[3]["temperatureHigh"] > weekArr[4]["temperatureHigh"] > weekArr[5][
-        "temperatureHigh"
-    ] > weekArr[6]["temperatureHigh"] > weekArr[7]["temperatureHigh"] or (
-        highTemp[0] <= 1 and lowTemp[0] >= 6
-    ):
+    elif all(
+        weekArr[i]["temperatureHigh"] > weekArr[i + 1]["temperatureHigh"]
+        for i in range(WEEK_DAYS)
+    ) or (highTemp[0] <= 1 and lowTemp[0] >= WEEK_DAYS_MINUS_ONE):
         return [
             "temperatures-falling",
             [lowTemp[3], int(round(lowTemp[2], 0))],
             lowTemp[1],
         ]
     # If the lowest temperatue is in the middle of the week and the highest temperature is at the start or end of the week use the valleying text
-    elif (highTemp[0] <= 1 or highTemp[0] >= 6) and 0 < lowTemp[0] < 7:
+    elif (highTemp[0] <= 1 or highTemp[0] >= WEEK_DAYS_MINUS_ONE) and 0 < lowTemp[
+        0
+    ] < WEEK_DAYS:
         return [
             "temperatures-valleying",
             [lowTemp[3], int(round(lowTemp[2], 0))],
@@ -441,7 +453,7 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
             weekday = "today"
         elif idx == 1:
             weekday = "tomorrow"
-        elif idx == 7:
+        elif idx == len(weekArr) - 1:
             weekday = "next-" + weekday
 
         # Check if the day has enough precipitation to reach the threshold and record the index in the array, the day it occured on and the type
@@ -449,7 +461,10 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
             day["precipType"] == "snow"
             and day["precipAccumulation"]
             >= (DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * intensityUnit)
-            and (day["precipProbability"] >= 0.25 or day["precipProbability"] == -999)
+            and (
+                day["precipProbability"] >= PRECIP_PROB_THRESHOLD
+                or day["precipProbability"] == MISSING_DATA
+            )
         ):
             # Sets that there has been precipitation during the week
             precipitation = True
@@ -464,7 +479,7 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
             day["precipType"] != "snow"
             and day["precipAccumulation"]
             >= (DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * intensityUnit)
-            and day["precipProbability"] >= 0.25
+            and day["precipProbability"] >= PRECIP_PROB_THRESHOLD
         ):
             # Sets that there has been precipitation during the week
             precipitation = True
@@ -527,7 +542,9 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
         precipSummary = ["for-week", "unavailable"]
 
     # Only calcaulte the temperature summary if we have eight days to prevent issues with the time machine
-    if len(weekArr) == 8 or (highTemp != -999 and lowTemp != -999):
+    if len(weekArr) == WEEK_DAYS_PLUS_ONE or (
+        highTemp != MISSING_DATA and lowTemp != MISSING_DATA
+    ):
         tempSummary = calculate_temp_summary(highTemp, lowTemp, weekArr)
         # Combine the two texts together using with
         cText = ["with", precipSummary, tempSummary]

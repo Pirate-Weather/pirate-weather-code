@@ -1,25 +1,38 @@
-import os
-import datetime
-import numpy as np
-import math
-import platform
 import asyncio
-import zarr
+import datetime
 import logging
+import math
+import os
+import platform
+from typing import Union
 
+import numpy as np
+import zarr
 from astral import LocationInfo, moon
 from astral.sun import sun
 from dateutil.relativedelta import relativedelta
 from fastapi import HTTPException
 from fastapi.responses import ORJSONResponse
-from PirateText import calculate_text
 from PirateSimpleDayText import calculate_simple_day_text
+from PirateText import calculate_text
 from pirateweather_translations.dynamic_loader import load_all_translations
 from pytz import timezone, utc
-from typing import Union
+
+from constants.api_const import SOLAR_RAD_CONST
+from constants.forecast_const import DATA_TIMEMACHINE
+from constants.shared_const import KELVIN_TO_CELSIUS
+from constants.text_const import (
+    CLOUD_COVER_THRESHOLDS,
+    HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    WIND_THRESHOLDS,
+)
+from constants.timemachine_const import (
+    APPARENT_TEMP_WINDCHILL_CONST,
+    DAILY_PRECIP_THRESHOLD,
+    ICE_ACCUMULATION,
+)
 
 Translations = load_all_translations()
-ICE_ACCUMULATION = 0
 
 
 def solar_rad(D_t, lat, t_t):
@@ -28,12 +41,18 @@ def solar_rad(D_t, lat, t_t):
     https://www.mdpi.com/2072-4292/5/10/4735/htm
     """
 
-    d = 1 + 0.0167 * math.sin((2 * math.pi * (D_t - 93.5365)) / 365)
-    r = 0.75
-    S_0 = 1367
-    delta = 0.4096 * math.sin((2 * math.pi * (D_t + 284)) / 365)
+    d = 1 + SOLAR_RAD_CONST["eccentricity"] * math.sin(
+        (2 * math.pi * (D_t - SOLAR_RAD_CONST["offset"])) / 365
+    )
+    r = SOLAR_RAD_CONST["r"]
+    S_0 = SOLAR_RAD_CONST["S0"]
+    delta = SOLAR_RAD_CONST["delta_factor"] * math.sin(
+        (2 * math.pi * (D_t + SOLAR_RAD_CONST["delta_offset"])) / 365
+    )
     radLat = np.deg2rad(lat)
-    solarHour = math.pi * ((t_t - 12) / 12)
+    solarHour = math.pi * (
+        (t_t - SOLAR_RAD_CONST["hour_offset"]) / SOLAR_RAD_CONST["hour_offset"]
+    )
     cosTheta = math.sin(delta) * math.sin(radLat) + math.cos(delta) * math.cos(
         radLat
     ) * math.cos(solarHour)
@@ -135,7 +154,7 @@ async def TimeMachine(
             windUnit = 3.600  # kph
             prepIntensityUnit = 1  # mm/h
             prepAccumUnit = 0.1  # cm
-            tempUnits = 273.15  # Celsius
+            tempUnits = KELVIN_TO_CELSIUS  # Celsius
             pressUnits = 0.01  # Hectopascals
             visUnits = 0.001  # km
             # humidUnit = 0.01  # %
@@ -144,7 +163,7 @@ async def TimeMachine(
             windUnit = 2.234  # mph
             prepIntensityUnit = 1  # mm/h
             prepAccumUnit = 0.1  # cm
-            tempUnits = 273.15  # Celsius
+            tempUnits = KELVIN_TO_CELSIUS  # Celsius
             pressUnits = 0.01  # Hectopascals
             visUnits = 0.00062137  # miles
             # humidUnit = 0.01  # %
@@ -153,7 +172,7 @@ async def TimeMachine(
             windUnit = 1  # m/s
             prepIntensityUnit = 1  # mm/h
             prepAccumUnit = 0.1  # cm
-            tempUnits = 273.15  # Celsius
+            tempUnits = KELVIN_TO_CELSIUS  # Celsius
             pressUnits = 0.01  # Hectopascals
             visUnits = 0.001  # km
 
@@ -585,63 +604,87 @@ async def TimeMachine(
                 pFac = 10000  # Units in m, convert to mm * 10 snow/water ratio
 
         ## Add Temperature
-        InterPhour[idx, 4] = dataDict["VAR_2t"][idx]
+        InterPhour[idx, DATA_TIMEMACHINE["temp"]] = dataDict["VAR_2t"][idx]
         ## Add Precip
-        InterPhour[idx, 1] = (dataDict["VAR_lsp"][idx] + dataDict["VAR_cp"][idx]) * pFac
+        InterPhour[idx, DATA_TIMEMACHINE["intensity"]] = (
+            dataDict["VAR_lsp"][idx] + dataDict["VAR_cp"][idx]
+        ) * pFac
         ## Add Dew Point
-        InterPhour[idx, 6] = dataDict["VAR_2d"][idx]
+        InterPhour[idx, DATA_TIMEMACHINE["dew"]] = dataDict["VAR_2d"][idx]
         # Pressure
-        InterPhour[idx, 8] = dataDict["VAR_msl"][idx]
+        InterPhour[idx, DATA_TIMEMACHINE["pressure"]] = dataDict["VAR_msl"][idx]
         ## Add wind speed
-        InterPhour[idx, 9] = np.sqrt(
+        InterPhour[idx, DATA_TIMEMACHINE["wind"]] = np.sqrt(
             dataDict["VAR_10u"][idx] ** 2 + dataDict["VAR_10v"][idx] ** 2
         )
         # Add Wind Bearing
-        InterPhour[idx, 11] = np.rad2deg(
+        InterPhour[idx, DATA_TIMEMACHINE["bearing"]] = np.rad2deg(
             np.mod(
                 np.arctan2(dataDict["VAR_10u"][idx], dataDict["VAR_10v"][idx]) + np.pi,
                 2 * np.pi,
             )
         )
         # Add Cloud Cover
-        InterPhour[idx, 12] = dataDict["VAR_tcc"][idx]
+        InterPhour[idx, DATA_TIMEMACHINE["cloud"]] = dataDict["VAR_tcc"][idx]
         # Add Snow
-        InterPhour[idx, 13] = dataDict["VAR_sf"][idx] * 10000
+        InterPhour[idx, DATA_TIMEMACHINE["snow"]] = dataDict["VAR_sf"][idx] * 10000
         # Add Wind Gust
-        InterPhour[idx, 14] = dataDict["VAR_i10fg"][idx]
+        InterPhour[idx, DATA_TIMEMACHINE["gust"]] = dataDict["VAR_i10fg"][idx]
 
-        # Add Apparent Temperatire based on https://en.wikipedia.org/wiki/Wind_chill
-        if dataDict["VAR_2t"][idx] < 283.15:  # 10C in K
+        # Add Apparent Temperature based on https://en.wikipedia.org/wiki/Wind_chill
+        wc = APPARENT_TEMP_WINDCHILL_CONST
+        if dataDict["VAR_2t"][idx] < wc["threshold_k"]:
             # Convert to C, then back to K
-            InterPhour[idx, 5] = (
-                13.12
-                + 0.6215 * (dataDict["VAR_2t"][idx] - 273.15)
-                - 11.37 * (InterPhour[idx, 9] * 3.6) ** 0.16
-                + 0.3965
-                * (dataDict["VAR_2t"][idx] - 273.15)
-                * (InterPhour[idx, 9] * 3.6) ** 0.16
+            InterPhour[idx, DATA_TIMEMACHINE["apparent"]] = (
+                wc["windchill_1"]
+                + wc["windchill_2"] * (dataDict["VAR_2t"][idx] - KELVIN_TO_CELSIUS)
+                - wc["windchill_3"]
+                * (InterPhour[idx, DATA_TIMEMACHINE["wind"]] * wc["windchill_kph_conv"])
+                ** wc["windchill_exp"]
+                + wc["windchill_4"]
+                * (dataDict["VAR_2t"][idx] - KELVIN_TO_CELSIUS)
+                * (InterPhour[idx, DATA_TIMEMACHINE["wind"]] * wc["windchill_kph_conv"])
+                ** wc["windchill_exp"]
             )
         else:
-            InterPhour[idx, 5] = (dataDict["VAR_2t"][idx] - 273.15) + (5 / 9) * (
-                6.11
+            InterPhour[idx, DATA_TIMEMACHINE["apparent"]] = (
+                dataDict["VAR_2t"][idx] - KELVIN_TO_CELSIUS
+            ) + wc["apparent_temp_const"] * (
+                wc["apparent_temp_2"]
                 * math.exp(
-                    5417.7530
+                    wc["apparent_temp_3"]
                     * (
-                        (1 / 273.16)
-                        - (1 / (273.15 + (dataDict["VAR_2d"][idx] - 273.15)))
+                        (1 / wc["apparent_temp_4"])
+                        - (
+                            1
+                            / (
+                                KELVIN_TO_CELSIUS
+                                + (dataDict["VAR_2d"][idx] - KELVIN_TO_CELSIUS)
+                            )
+                        )
                     )
                 )
-                - 10
+                - wc["apparent_temp_5"]
             )
 
-        InterPhour[idx, 5] = InterPhour[idx, 5] + 273.15
+        InterPhour[idx, DATA_TIMEMACHINE["apparent"]] = (
+            InterPhour[idx, DATA_TIMEMACHINE["apparent"]] + KELVIN_TO_CELSIUS
+        )
 
     # Put temperature into units
     if tempUnits == 0:
-        for k in [4, 5, 6]:
-            InterPhour[:, k] = (InterPhour[:, k] - 273.15) * 9 / 5 + 32
+        for k in [
+            DATA_TIMEMACHINE["temp"],
+            DATA_TIMEMACHINE["apparent"],
+            DATA_TIMEMACHINE["dew"],
+        ]:
+            InterPhour[:, k] = (InterPhour[:, k] - KELVIN_TO_CELSIUS) * 9 / 5 + 32
     else:
-        for k in [4, 5, 6]:
+        for k in [
+            DATA_TIMEMACHINE["temp"],
+            DATA_TIMEMACHINE["apparent"],
+            DATA_TIMEMACHINE["dew"],
+        ]:
             InterPhour[:, k] = InterPhour[:, k] - tempUnits
 
     ## Daily setup
@@ -683,26 +726,45 @@ async def TimeMachine(
         hourRainAccum = 0
         hourSnowAccum = 0
         if pTypeList[idx] == "snow":
-            hourSnowAccum += InterPhour[idx, 1] * prepAccumUnit
+            hourSnowAccum += (
+                InterPhour[idx, DATA_TIMEMACHINE["intensity"]] * prepAccumUnit
+            )
         else:
-            hourRainAccum += InterPhour[idx, 1] * prepAccumUnit
+            hourRainAccum += (
+                InterPhour[idx, DATA_TIMEMACHINE["intensity"]] * prepAccumUnit
+            )
 
         dayRainAccum += hourRainAccum
         daySnowAccum += hourSnowAccum
 
         # Check if day or night
-        sunrise_ts = InterPday[16, 0]
-        sunset_ts = InterPday[17, 0]
+        sunrise_ts = InterPday[DATA_TIMEMACHINE["sunrise"], 0]
+        sunset_ts = InterPday[DATA_TIMEMACHINE["sunset"], 0]
         isDay = sunrise_ts <= InterPhour[idx, 0] <= sunset_ts
 
         ## Icon
-        if InterPhour[idx, 1] > 0.2:
+        if (
+            InterPhour[idx, DATA_TIMEMACHINE["intensity"]]
+            > HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepIntensityUnit
+        ):
             pIconList.append(pTypeList[idx])
             hourText = pTextList[idx]
-        elif InterPhour[idx, 12] > 0.75:
+        elif (
+            InterPhour[idx, DATA_TIMEMACHINE["wind"]]
+            > WIND_THRESHOLDS["light"] * windUnit
+        ):
+            pIconList.append("wind")
+            hourText = "Windy"
+        elif (
+            InterPhour[idx, DATA_TIMEMACHINE["cloud"]]
+            > CLOUD_COVER_THRESHOLDS["cloudy"]
+        ):
             pIconList.append("cloudy")
             hourText = "Cloudy"
-        elif InterPhour[idx, 12] > 0.375:
+        elif (
+            InterPhour[idx, DATA_TIMEMACHINE["cloud"]]
+            > CLOUD_COVER_THRESHOLDS["partly_cloudy"]
+        ):
             hourText = "Partly Cloudy"
             if isDay:
                 # Before sunrise
@@ -719,21 +781,31 @@ async def TimeMachine(
 
         hTextList.append(hourText)
         hourDict = {
-            "time": int(InterPhour[idx, 0]) + halfTZ,
+            "time": int(InterPhour[idx, DATA_TIMEMACHINE["time"]]) + halfTZ,
             "summary": hourText,
             "icon": pIconList[idx],
-            "precipIntensity": round(InterPhour[idx, 1] * prepIntensityUnit, 4),
-            "precipAccumulation": round(InterPhour[idx, 1] * prepAccumUnit, 4),
+            "precipIntensity": round(
+                InterPhour[idx, DATA_TIMEMACHINE["intensity"]] * prepIntensityUnit, 4
+            ),
+            "precipAccumulation": round(
+                InterPhour[idx, DATA_TIMEMACHINE["intensity"]] * prepAccumUnit, 4
+            ),
             "precipType": pTypeList[idx],
-            "temperature": round(InterPhour[idx, 4], 2),
-            "apparentTemperature": round(InterPhour[idx, 5], 2),
-            "dewPoint": round(InterPhour[idx, 6], 2),
-            "pressure": round(InterPhour[idx, 8] * pressUnits, 2),
-            "windSpeed": round(InterPhour[idx, 9] * windUnit, 2),
-            "windGust": round(InterPhour[idx, 14] * windUnit, 2),
-            "windBearing": int(round(InterPhour[idx, 11], 0)),
-            "cloudCover": round(InterPhour[idx, 12], 2),
-            "snowAccumulation": round(InterPhour[idx, 13] * prepAccumUnit, 2),
+            "temperature": round(InterPhour[idx, DATA_TIMEMACHINE["temp"]], 2),
+            "apparentTemperature": round(
+                InterPhour[idx, DATA_TIMEMACHINE["apparent"]], 2
+            ),
+            "dewPoint": round(InterPhour[idx, DATA_TIMEMACHINE["dew"]], 2),
+            "pressure": round(
+                InterPhour[idx, DATA_TIMEMACHINE["pressure"]] * pressUnits, 2
+            ),
+            "windSpeed": round(InterPhour[idx, DATA_TIMEMACHINE["wind"]] * windUnit, 2),
+            "windGust": round(InterPhour[idx, DATA_TIMEMACHINE["gust"]] * windUnit, 2),
+            "windBearing": int(round(InterPhour[idx, DATA_TIMEMACHINE["bearing"]], 0)),
+            "cloudCover": round(InterPhour[idx, DATA_TIMEMACHINE["cloud"]], 2),
+            "snowAccumulation": round(
+                InterPhour[idx, DATA_TIMEMACHINE["snow"]] * prepAccumUnit, 2
+            ),
         }
 
         try:
@@ -761,7 +833,18 @@ async def TimeMachine(
         hourList.append(dict(hourDict))
 
     # Find daily averages/max/min/times
-    for j in [1, 4, 5, 6, 8, 9, 11, 12, 13, 14]:
+    for j in [
+        DATA_TIMEMACHINE["intensity"],
+        DATA_TIMEMACHINE["temp"],
+        DATA_TIMEMACHINE["apparent"],
+        DATA_TIMEMACHINE["dew"],
+        DATA_TIMEMACHINE["pressure"],
+        DATA_TIMEMACHINE["wind"],
+        DATA_TIMEMACHINE["bearing"],
+        DATA_TIMEMACHINE["cloud"],
+        DATA_TIMEMACHINE["snow"],
+        DATA_TIMEMACHINE["gust"],
+    ]:
         InterPday[j, 0] = np.average(InterPhour[:, j])
         InterPdayMax[j, 0] = np.amax(InterPhour[:, j])
         InterPdayMaxTime[j, 0] = np.argmax(InterPhour[:, j])
@@ -770,8 +853,11 @@ async def TimeMachine(
         InterPdaySum[j, 0] = np.sum(InterPhour[:, j])
 
     # Daily precipitation type
-    if InterPdaySum[1, 0] > 0:
-        if InterPdaySum[1, 0] * 0.5 > InterPdaySum[13, 0]:
+    if InterPdaySum[DATA_TIMEMACHINE["intensity"], 0] > 0:
+        if (
+            InterPdaySum[DATA_TIMEMACHINE["intensity"], 0] * 0.5
+            > InterPdaySum[DATA_TIMEMACHINE["snow"], 0]
+        ):
             # Rain
             maxPchanceDay = 1
         else:
@@ -786,7 +872,7 @@ async def TimeMachine(
     pTextListDay = []
     dayIconList = []
     idx = 0
-    if InterPdaySum[1, 0] == 0:
+    if InterPdaySum[DATA_TIMEMACHINE["intensity"], 0] == 0:
         pTypeListDay.append("none")
         pTextListDay.append("None")
     elif maxPchanceDay == 1:
@@ -799,14 +885,26 @@ async def TimeMachine(
         pTypeListDay.append("none")
         pTextListDay.append("None")
 
-    if InterPdaySum[1, 0] > 0.5:
+    if (
+        InterPdaySum[DATA_TIMEMACHINE["intensity"], 0]
+        > DAILY_PRECIP_THRESHOLD * prepAccumUnit
+    ):
         # If more than 0.5 mm of precip at any throughout the day, then the icon for whatever is happening
         pIcon = pTypeListDay[idx]
         pText = pTextListDay[idx]
-    elif InterPday[12, idx] > 0.75:
+    elif (
+        InterPday[DATA_TIMEMACHINE["intensity"], idx]
+        > WIND_THRESHOLDS["light"] * windUnit
+    ):
+        pIcon = "wind"
+        pText = "Windy"
+    elif InterPday[DATA_TIMEMACHINE["cloud"], idx] > CLOUD_COVER_THRESHOLDS["cloudy"]:
         pIcon = "cloudy"
         pText = "Cloudy"
-    elif InterPday[12, idx] > 0.375:
+    elif (
+        InterPday[DATA_TIMEMACHINE["cloud"], idx]
+        > CLOUD_COVER_THRESHOLDS["partly_cloudy"]
+    ):
         pIcon = "partly-cloudy-day"
         pText = "Partly Cloudy"
     else:
@@ -816,43 +914,77 @@ async def TimeMachine(
     dayIconList.append(pIcon)
 
     dayDict = {
-        "time": int(InterPhour[0, 0]) + halfTZ,
+        "time": int(InterPhour[DATA_TIMEMACHINE["time"], 0]) + halfTZ,
         "summary": pText,
         "icon": pIcon,
-        "sunriseTime": int(InterPday[16, 0]),
-        "sunsetTime": int(InterPday[17, 0]),
-        "moonPhase": round(InterPday[18, 0], 2),
-        "precipIntensity": round(InterPday[1, idx] * prepIntensityUnit, 4),
-        "precipIntensityMax": round(InterPdayMax[1, idx] * prepIntensityUnit, 4),
-        "precipIntensityMaxTime": int(InterPhour[int(InterPdayMaxTime[1, idx]), 0]),
-        "precipAccumulation": round(InterPdaySum[1, idx] * prepAccumUnit, 4),
+        "sunriseTime": int(InterPday[DATA_TIMEMACHINE["sunrise"], 0]),
+        "sunsetTime": int(InterPday[DATA_TIMEMACHINE["sunset"], 0]),
+        "moonPhase": round(InterPday[DATA_TIMEMACHINE["moon_phase"], 0], 2),
+        "precipIntensity": round(
+            InterPday[DATA_TIMEMACHINE["intensity"], idx] * prepIntensityUnit, 4
+        ),
+        "precipIntensityMax": round(
+            InterPdayMax[DATA_TIMEMACHINE["intensity"], idx] * prepIntensityUnit, 4
+        ),
+        "precipIntensityMaxTime": int(
+            InterPhour[int(InterPdayMaxTime[DATA_TIMEMACHINE["intensity"], idx]), 0]
+        ),
+        "precipAccumulation": round(
+            InterPdaySum[DATA_TIMEMACHINE["intensity"], idx] * prepAccumUnit, 4
+        ),
         "precipType": pTypeListDay[idx],
         "temperatureHigh": round(InterPdayMax[4, idx], 2),
-        "temperatureHighTime": int(InterPhour[int(InterPdayMaxTime[4, idx]), 0]),
-        "temperatureLow": round(InterPdayMin[4, idx], 2),
-        "temperatureLowTime": int(InterPhour[int(InterPdayMinTime[4, idx]), 0]),
-        "apparentTemperatureHigh": round(InterPdayMax[5, idx], 2),
-        "apparentTemperatureHighTime": int(
-            InterPhour[int(InterPdayMaxTime[5, idx]), 0]
+        "temperatureHighTime": int(
+            InterPhour[int(InterPdayMaxTime[DATA_TIMEMACHINE["temp"], idx]), 0]
         ),
-        "apparentTemperatureLow": round(InterPdayMin[5, idx], 2),
-        "apparentTemperatureLowTime": int(InterPhour[int(InterPdayMinTime[5, idx]), 0]),
-        "dewPoint": round(InterPday[6, idx], 2),
-        "pressure": round(InterPday[8, idx] * pressUnits, 2),
-        "windSpeed": round(InterPday[9, idx] * windUnit, 2),
-        "windGust": round(InterPday[14, idx] * windUnit, 2),
-        "windGustTime": int(InterPhour[int(InterPdayMaxTime[14, idx]), 0]),
-        "windBearing": int(round(InterPday[11, idx], 0)),
-        "cloudCover": round(InterPday[12, idx], 2),
-        "temperatureMin": round(InterPdayMin[4, idx], 2),
-        "temperatureMinTime": int(InterPhour[int(InterPdayMinTime[4, idx]), 0]),
-        "temperatureMax": round(InterPdayMax[4, idx], 2),
-        "temperatureMaxTime": int(InterPhour[int(InterPdayMaxTime[4, idx]), 0]),
-        "apparentTemperatureMin": round(InterPdayMin[5, idx], 2),
-        "apparentTemperatureMinTime": int(InterPhour[int(InterPdayMinTime[5, idx]), 0]),
-        "apparentTemperatureMax": round(InterPdayMax[5, idx], 2),
-        "apparentTemperatureMaxTime": int(InterPhour[int(InterPdayMaxTime[5, idx]), 0]),
-        "snowAccumulation": round(InterPdaySum[13, idx] * prepAccumUnit, 4),
+        "temperatureLow": round(InterPdayMin[DATA_TIMEMACHINE["temp"], idx], 2),
+        "temperatureLowTime": int(
+            InterPhour[int(InterPdayMinTime[DATA_TIMEMACHINE["temp"], idx]), 0]
+        ),
+        "apparentTemperatureHigh": round(
+            InterPdayMax[DATA_TIMEMACHINE["apparent"], idx], 2
+        ),
+        "apparentTemperatureHighTime": int(
+            InterPhour[int(InterPdayMaxTime[DATA_TIMEMACHINE["apparent"], idx]), 0]
+        ),
+        "apparentTemperatureLow": round(
+            InterPdayMin[DATA_TIMEMACHINE["apparent"], idx], 2
+        ),
+        "apparentTemperatureLowTime": int(
+            InterPhour[int(InterPdayMinTime[DATA_TIMEMACHINE["apparent"], idx]), 0]
+        ),
+        "dewPoint": round(InterPday[DATA_TIMEMACHINE["dew"], idx], 2),
+        "pressure": round(InterPday[DATA_TIMEMACHINE["pressure"], idx] * pressUnits, 2),
+        "windSpeed": round(InterPday[DATA_TIMEMACHINE["wind"], idx] * windUnit, 2),
+        "windGust": round(InterPday[DATA_TIMEMACHINE["gust"], idx] * windUnit, 2),
+        "windGustTime": int(
+            InterPhour[int(InterPdayMaxTime[DATA_TIMEMACHINE["gust"], idx]), 0]
+        ),
+        "windBearing": int(round(InterPday[DATA_TIMEMACHINE["bearing"], idx], 0)),
+        "cloudCover": round(InterPday[DATA_TIMEMACHINE["cloud"], idx], 2),
+        "temperatureMin": round(InterPdayMin[DATA_TIMEMACHINE["temp"], idx], 2),
+        "temperatureMinTime": int(
+            InterPhour[int(InterPdayMinTime[DATA_TIMEMACHINE["temp"], idx]), 0]
+        ),
+        "temperatureMax": round(InterPdayMax[DATA_TIMEMACHINE["temp"], idx], 2),
+        "temperatureMaxTime": int(
+            InterPhour[int(InterPdayMaxTime[DATA_TIMEMACHINE["temp"], idx]), 0]
+        ),
+        "apparentTemperatureMin": round(
+            InterPdayMin[DATA_TIMEMACHINE["apparent"], idx], 2
+        ),
+        "apparentTemperatureMinTime": int(
+            InterPhour[int(InterPdayMinTime[DATA_TIMEMACHINE["apparent"], idx]), 0]
+        ),
+        "apparentTemperatureMax": round(
+            InterPdayMax[DATA_TIMEMACHINE["apparent"], idx], 2
+        ),
+        "apparentTemperatureMaxTime": int(
+            InterPhour[int(InterPdayMaxTime[DATA_TIMEMACHINE["apparent"], idx]), 0]
+        ),
+        "snowAccumulation": round(
+            InterPdaySum[DATA_TIMEMACHINE["snow"], idx] * prepAccumUnit, 4
+        ),
     }
 
     try:
@@ -891,18 +1023,36 @@ async def TimeMachine(
     # currentIDX       = find_nearest(InterPhour[:,0], minute_array_grib[0])
     currentIDX = find_nearest(InterPhour[:, 0], baseTime_grib[0])
 
-    InterPcurrent = np.zeros(shape=(14))  # Time, Intensity,Probability
+    InterPcurrent = np.zeros(shape=(15))  # Time, Intensity,Probability
 
-    InterPcurrent[0] = baseTime_grib
-    InterPcurrent[1] = InterPhour[currentIDX, 1] / 3600  # "precipIntensity"
-    InterPcurrent[4] = InterPhour[currentIDX, 4]  # "temperature"
-    InterPcurrent[5] = InterPhour[currentIDX, 5]  # "apparentTemperature"
-    InterPcurrent[6] = InterPhour[currentIDX, 6]  # "dewPoint"
-    InterPcurrent[8] = InterPhour[currentIDX, 8]  # "pressure"
-    InterPcurrent[9] = InterPhour[currentIDX, 9]  #
-    InterPcurrent[11] = InterPhour[currentIDX, 11]  #
-    InterPcurrent[12] = InterPhour[currentIDX, 12]  #
-    InterPcurrent[13] = InterPhour[currentIDX, 15]  # Wind Gust
+    InterPcurrent[DATA_TIMEMACHINE["time"]] = baseTime_grib
+    InterPcurrent[DATA_TIMEMACHINE["intensity"]] = (
+        InterPhour[currentIDX, DATA_TIMEMACHINE["intensity"]] / 3600
+    )
+    InterPcurrent[DATA_TIMEMACHINE["temp"]] = InterPhour[
+        currentIDX, DATA_TIMEMACHINE["temp"]
+    ]
+    InterPcurrent[DATA_TIMEMACHINE["apparent"]] = InterPhour[
+        currentIDX, DATA_TIMEMACHINE["apparent"]
+    ]
+    InterPcurrent[DATA_TIMEMACHINE["dew"]] = InterPhour[
+        currentIDX, DATA_TIMEMACHINE["dew"]
+    ]
+    InterPcurrent[DATA_TIMEMACHINE["pressure"]] = InterPhour[
+        currentIDX, DATA_TIMEMACHINE["pressure"]
+    ]
+    InterPcurrent[DATA_TIMEMACHINE["wind"]] = InterPhour[
+        currentIDX, DATA_TIMEMACHINE["wind"]
+    ]
+    InterPcurrent[DATA_TIMEMACHINE["bearing"]] = InterPhour[
+        currentIDX, DATA_TIMEMACHINE["bearing"]
+    ]
+    InterPcurrent[DATA_TIMEMACHINE["cloud"]] = InterPhour[
+        currentIDX, DATA_TIMEMACHINE["cloud"]
+    ]
+    InterPcurrent[DATA_TIMEMACHINE["gust"]] = InterPhour[
+        currentIDX, DATA_TIMEMACHINE["gust"]
+    ]
 
     cIcon = pIconList[currentIDX]
     cText = hTextList[currentIDX]
@@ -924,24 +1074,42 @@ async def TimeMachine(
 
     if exCurrently == 0:
         returnOBJ["currently"] = dict()
-        returnOBJ["currently"]["time"] = int(InterPcurrent[0])
+        returnOBJ["currently"]["time"] = int(InterPcurrent[DATA_TIMEMACHINE["time"]])
         returnOBJ["currently"]["summary"] = cText
         returnOBJ["currently"]["icon"] = cIcon
         returnOBJ["currently"]["precipIntensity"] = round(
-            InterPcurrent[1] * prepIntensityUnit, 4
+            InterPcurrent[DATA_TIMEMACHINE["intensity"]] * prepIntensityUnit, 4
         )
         returnOBJ["currently"]["precipType"] = pTypeCurrent
-        returnOBJ["currently"]["temperature"] = round(InterPcurrent[4], 2)
-        returnOBJ["currently"]["apparentTemperature"] = round(InterPcurrent[5], 2)
+        returnOBJ["currently"]["temperature"] = round(
+            InterPcurrent[DATA_TIMEMACHINE["temp"]], 2
+        )
+        returnOBJ["currently"]["apparentTemperature"] = round(
+            InterPcurrent[DATA_TIMEMACHINE["apparent"]], 2
+        )
         returnOBJ["currently"]["dewPoint"] = round(InterPcurrent[6], 2)
-        returnOBJ["currently"]["pressure"] = round(InterPcurrent[8] * pressUnits, 2)
-        returnOBJ["currently"]["windSpeed"] = round(InterPcurrent[9] * windUnit, 2)
-        returnOBJ["currently"]["windGust"] = round(InterPcurrent[9] * windUnit, 2)
-        returnOBJ["currently"]["windBearing"] = int(round(InterPcurrent[11], 0))
-        returnOBJ["currently"]["cloudCover"] = round(InterPcurrent[12], 2)
+        returnOBJ["currently"]["pressure"] = round(
+            InterPcurrent[DATA_TIMEMACHINE["pressure"]] * pressUnits, 2
+        )
+        returnOBJ["currently"]["windSpeed"] = round(
+            InterPcurrent[DATA_TIMEMACHINE["wind"]] * windUnit, 2
+        )
+        returnOBJ["currently"]["windGust"] = round(
+            InterPcurrent[DATA_TIMEMACHINE["gust"]] * windUnit, 2
+        )
+        returnOBJ["currently"]["windBearing"] = int(
+            round(InterPcurrent[DATA_TIMEMACHINE["bearing"]], 0)
+        )
+        returnOBJ["currently"]["cloudCover"] = round(
+            InterPcurrent[DATA_TIMEMACHINE["cloud"]], 2
+        )
 
         # Update the text
-        currentDay = InterPday[16, 0] <= InterPcurrent[0] <= InterPday[17, 0]
+        currentDay = (
+            InterPday[DATA_TIMEMACHINE["sunrise"], 0]
+            <= InterPcurrent[DATA_TIMEMACHINE["time"]]
+            <= InterPday[DATA_TIMEMACHINE["sunset"], 0]
+        )
 
         try:
             currentText, currentIcon = calculate_text(
@@ -955,7 +1123,7 @@ async def TimeMachine(
                 currentSnowAccum,
                 ICE_ACCUMULATION,
                 "current",
-                InterPcurrent[1] * prepIntensityUnit,
+                InterPcurrent[DATA_TIMEMACHINE["intensity"]] * prepIntensityUnit,
             )
             returnOBJ["currently"]["summary"] = translation.translate(
                 ["title", currentText]

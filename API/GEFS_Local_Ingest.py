@@ -19,15 +19,21 @@ import xarray as xr
 import zarr.storage
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
+from ingest_utils import interp_time_block, mask_invalid_data, validate_grib_stats
 
-from ingest_utils import mask_invalid_data, interp_time_block, validate_grib_stats
-
+from API.constants.shared_const import INGEST_VERSION_STR
+from API.ingest_utils import (
+    CHUNK_SIZES,
+    FINAL_CHUNK_SIZES,
+    FORECAST_LEAD_RANGES,
+    HISTORY_PERIODS,
+)
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 
 # %% Setup paths and parameters
-ingestVersion = "v27"
+ingestVersion = INGEST_VERSION_STR
 
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
@@ -50,13 +56,14 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
+
 # Define the processing and history chunk size
-processChunk = 100
+processChunk = CHUNK_SIZES["GEFS"]
 
 # Define the final x/y chunksize
-finalChunk = 3
+finalChunk = FINAL_CHUNK_SIZES["GEFS"]
 
-hisPeriod = 48
+hisPeriod = HISTORY_PERIODS["GEFS"]
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -158,7 +165,8 @@ matchStrings = matchstring_su + "|" + matchstring_ap
 
 # Create a range of forecast lead times
 # Go from 1 to 7 to account for the weird prate approach
-gefs_range = range(3, 241, 3)
+
+gefs_range = FORECAST_LEAD_RANGES["GEFS"]
 
 # Create FastHerbie object for all 30 members
 FH_forecastsubMembers = []

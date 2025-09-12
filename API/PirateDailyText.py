@@ -1,27 +1,34 @@
 import datetime
 import math
+
 from dateutil import tz
 from PirateTextHelper import (
-    calculate_precip_text,
-    calculate_wind_text,
-    calculate_vis_text,
-    calculate_sky_icon,
-    humidity_sky_text,
     Most_Common,
-    # Import shared cloud cover constants
-    cloudyThreshold,  # Use shared
-    mostlyCloudyThreshold,  # Use shared
-    partlyCloudyThreshold,  # Use shared
-    mostlyClearThreshold,  # Use shared
-    # Import shared precipitation thresholds
-    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
-    DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
-    DEFAULT_VISIBILITY,
-    DEFAULT_POP,
-    MISSING_DATA,
+    calculate_precip_text,
+    calculate_sky_icon,
+    calculate_vis_text,
+    calculate_wind_text,
+    humidity_sky_text,
 )
 
-DEFAULT_HUMIDITY = 0.5
+from constants.shared_const import MISSING_DATA
+from constants.text_const import (
+    CLOUD_COVER_DAILY_THRESHOLDS,
+    CLOUD_COVER_THRESHOLDS,
+    DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
+    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    DEFAULT_HUMIDITY,
+    DEFAULT_POP,
+    DEFAULT_VISIBILITY,
+    PRECIP_INTENSITY_THRESHOLDS,
+)
+
+MORNING_START = 4
+AFTERNOON_START = 12
+EVENING_START = 17
+NIGHT_START = 22
+MAX_HOURS = 25
+PRECIP_THRESH = 0.25
 
 
 def calculate_cloud_text(cloud_cover):
@@ -36,13 +43,13 @@ def calculate_cloud_text(cloud_cover):
         - cloud_text (str): The textual representation of the cloud cover.
         - cloud_level (int): The level of the cloud cover (0-4).
     """
-    if cloud_cover > cloudyThreshold:
+    if cloud_cover > CLOUD_COVER_THRESHOLDS["cloudy"]:
         return "heavy-clouds", 4
-    elif cloud_cover > mostlyCloudyThreshold:
+    elif cloud_cover > CLOUD_COVER_THRESHOLDS["mostly_cloudy"]:
         return "medium-clouds", 3
-    elif cloud_cover > partlyCloudyThreshold:
+    elif cloud_cover > CLOUD_COVER_THRESHOLDS["partly_cloudy"]:
         return "light-clouds", 2
-    elif cloud_cover > mostlyClearThreshold:
+    elif cloud_cover > CLOUD_COVER_THRESHOLDS["mostly_clear"]:
         return "very-light-clouds", 1
     else:
         return "clear", 0
@@ -65,11 +72,11 @@ def _get_period_name(hour_of_day, is_today=True, mode="daily"):
     if mode == "hour":
         prefix = "today-" if is_today else "tomorrow-"
 
-    if 4 <= hour_of_day < 12:
+    if MORNING_START <= hour_of_day < AFTERNOON_START:
         return prefix + "morning"
-    elif 12 <= hour_of_day < 17:
+    elif AFTERNOON_START <= hour_of_day < EVENING_START:
         return prefix + "afternoon"
-    elif 17 <= hour_of_day < 22:
+    elif EVENING_START <= hour_of_day < NIGHT_START:
         return prefix + "evening"
     else:  # 22:00 to 3:59
         return prefix + "night"
@@ -726,7 +733,7 @@ def calculate_day_text(
     overall_dewpoint_at_min_spread = 0.0
 
     # Return "unavailable" if too much data is provided
-    if len(hours) > 25:
+    if len(hours) > MAX_HOURS:
         return "none", ["for-day", "unavailable"]
 
     # Get local time and current hour
@@ -984,9 +991,10 @@ def calculate_day_text(
 
         # Check if precipitation is significant enough in this period
         is_precip_in_period = (
-            p_data["snow_accum"] > (2.5 * precip_accum_unit)
-            or p_data["rain_accum"] > (0.25 * precip_accum_unit)
-            or p_data["sleet_accum"] > (0.25 * precip_accum_unit)
+            p_data["snow_accum"]
+            > (PRECIP_INTENSITY_THRESHOLDS["mid"] * precip_accum_unit)
+            or p_data["rain_accum"] > (PRECIP_THRESH * precip_accum_unit)
+            or p_data["sleet_accum"] > (PRECIP_THRESH * precip_accum_unit)
         )
         if is_precip_in_period:
             precip_periods.append(i)
@@ -1069,19 +1077,25 @@ def calculate_day_text(
             # to a representative value for icon calculation.
             if most_common_cloud_level_value == 0:
                 final_cloud_text = "clear"
-                derived_avg_cloud_for_icon = 0.0
+                derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS["clear"]
             elif most_common_cloud_level_value == 1:
                 final_cloud_text = "very-light-clouds"
-                derived_avg_cloud_for_icon = 0.25
+                derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS[
+                    "mostly_clear"
+                ]
             elif most_common_cloud_level_value == 2:
                 final_cloud_text = "light-clouds"
-                derived_avg_cloud_for_icon = 0.50
+                derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS[
+                    "partly_cloudy"
+                ]
             elif most_common_cloud_level_value == 3:
                 final_cloud_text = "medium-clouds"
-                derived_avg_cloud_for_icon = 0.75
+                derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS[
+                    "mostly_cloudy"
+                ]
             else:  # most_common_cloud_level_value == 4
                 final_cloud_text = "heavy-clouds"
-                derived_avg_cloud_for_icon = 1.0
+                derived_avg_cloud_for_icon = CLOUD_COVER_DAILY_THRESHOLDS["cloudy"]
 
     # If there's only one period in the forecast, use its actual average cloud cover for the icon directly
     # This overrides the above logic if a single period is available.

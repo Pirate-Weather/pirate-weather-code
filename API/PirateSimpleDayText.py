@@ -1,17 +1,26 @@
 # %% Script to contain the functions that can be used to generate a simple daily text summary of the forecast data for Pirate Weather
 import math
-import numpy as np
 
+import numpy as np
 from PirateTextHelper import (
     calculate_precip_text,
-    calculate_wind_text,
-    calculate_vis_text,
     calculate_sky_text,
+    calculate_vis_text,
+    calculate_wind_text,
     humidity_sky_text,
-    DEFAULT_VISIBILITY,
-    DEFAULT_POP,
-    MISSING_DATA,
 )
+
+from API.constants.shared_const import MISSING_DATA
+from API.constants.text_const import (
+    DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
+    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    DEFAULT_POP,
+    DEFAULT_VISIBILITY,
+    HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
+)
+
+DAILY_RAIN_THRESHOLD = 10.0
+DAILY_SNOW_THRESHOLD = 5.0
 
 
 def calculate_simple_day_text(
@@ -68,7 +77,7 @@ def calculate_simple_day_text(
     totalPrep = rainPrep + snowPrep + icePrep
 
     # Only calculate the precipitation text if there is any possibility of precipitation > 0
-    if pop > 0 and totalPrep >= (0.01 * prepAccumUnit):
+    if pop > 0 and totalPrep >= (HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit):
         # Check if there is rain, snow and ice accumulation for the day
         if snowPrep > 0 and rainPrep > 0 and icePrep > 0:
             # If there is then used the mixed precipitation text and set the icon/type to sleet. Set the secondary condition to snow so the totals can be in the summary
@@ -137,15 +146,24 @@ def calculate_simple_day_text(
                     precipType = "rain"
 
             # If more than 10 mm of rain is forecast, then rain
-            if rainPrep > (10 * prepAccumUnit) and precipType != "rain":
+            if (
+                rainPrep > (DAILY_RAIN_THRESHOLD * prepAccumUnit)
+                and precipType != "rain"
+            ):
                 secondary = "medium-" + precipType
                 precipType = "rain"
             # If more than 5 mm of snow is forecast, then snow
-            if snowPrep > (5 * prepAccumUnit) and precipType != "snow":
+            if (
+                snowPrep > (DAILY_SNOW_THRESHOLD * prepAccumUnit)
+                and precipType != "snow"
+            ):
                 secondary = "medium-" + precipType
                 precipType = "snow"
-            # Else, if more than 1 mm of ice is forecast, then ice
-            if icePrep > (1 * prepAccumUnit) and precipType != "sleet":
+            # Else, if more than 1 mm of ice is forecast, then ice (use constant)
+            if (
+                icePrep > (DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit)
+                and precipType != "sleet"
+            ):
                 secondary = "medium-" + precipType
                 precipType = "sleet"
 
@@ -167,7 +185,10 @@ def calculate_simple_day_text(
         secondary = "medium-precipitation"
 
     # If we have only snow or if snow is the secondary condition then calculate the accumulation range
-    if snowPrep > (10 * prepAccumUnit) or secondary == "medium-snow":
+    if (
+        snowPrep > (DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit)
+        or secondary == "medium-snow"
+    ):
         # GEFS accumulation error seems to always be equal to the accumulation so use half of the accumulation as the range
         snowLowAccum = math.floor(snowPrep - (snowPrep / 2))
         snowMaxAccum = math.ceil(snowPrep + (snowPrep / 2))

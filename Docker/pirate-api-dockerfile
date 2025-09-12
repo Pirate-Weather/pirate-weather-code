@@ -1,5 +1,9 @@
 FROM python:3.13-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
 RUN apt update && \
     apt -y install build-essential \
                     libffi-dev \
@@ -10,16 +14,14 @@ RUN apt update && \
 # Set the working directory inside the container
 WORKDIR /app
 
-# Copy the requirements file from the Docker directory into the image
-COPY Docker/requirements-api.txt ./
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements-api.txt
+# Install deps first for better build caching
+COPY Docker/requirements-api.txt /app/
+RUN pip install --no-cache-dir -r /app/requirements-api.txt
 
 # Copy the run scripts from the API directory (relative to the build context)
-COPY API/ ./
+COPY API /app/API
 
 ENTRYPOINT ["uvicorn"]
 
 # Set the default command
-CMD ["responseLocal:app", "--host", "0.0.0.0"]
+CMD ["API.responseLocal:app", "--host", "0.0.0.0"]
