@@ -19,7 +19,7 @@ import xarray as xr
 import zarr.storage
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
-from ingest_utils import interp_time_block, mask_invalid_data, validate_grib_stats
+from API.ingest_utils import interp_time_block, mask_invalid_data, validate_grib_stats
 
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (

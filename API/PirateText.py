@@ -1,6 +1,6 @@
 # %% Script to contain the functions that can be used to generate the text summary of the forecast data for Pirate Weather
 import numpy as np
-from PirateTextHelper import (
+from API.PirateTextHelper import (
     calculate_precip_text,
     calculate_sky_text,
     calculate_thunderstorm_text,
