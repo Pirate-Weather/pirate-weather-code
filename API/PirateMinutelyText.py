@@ -5,7 +5,7 @@ from operator import itemgetter
 
 from PirateTextHelper import calculate_precip_text
 
-from constants.shared_const import MISSING_DATA
+from API.constants.shared_const import MISSING_DATA
 
 # Number of minutes in an hour
 MINUTES_IN_HOUR = 60

@@ -11,8 +11,8 @@ from PirateTextHelper import (
     calculate_thunderstorm_text,
 )
 
-from constants.shared_const import MISSING_DATA
-from constants.text_const import (
+from API.constants.shared_const import MISSING_DATA
+from API.constants.text_const import (
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
     PRECIP_PROB_THRESHOLD,

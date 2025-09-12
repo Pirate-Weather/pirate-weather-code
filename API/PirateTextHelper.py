@@ -4,8 +4,8 @@ from collections import Counter
 
 import numpy as np
 
-from constants.shared_const import KELVIN_TO_CELSIUS, MISSING_DATA
-from constants.text_const import (
+from API.constants.shared_const import KELVIN_TO_CELSIUS, MISSING_DATA
+from API.constants.text_const import (
     CAPE_THRESHOLDS,
     CLOUD_COVER_THRESHOLDS,
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,

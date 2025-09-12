@@ -9,8 +9,8 @@ from PirateTextHelper import (
     humidity_sky_text,
 )
 
-from constants.shared_const import MISSING_DATA
-from constants.text_const import (
+from API.constants.shared_const import MISSING_DATA
+from API.constants.text_const import (
     DEFAULT_POP,
     DEFAULT_VISIBILITY,
 )
