@@ -11,8 +11,8 @@ from PirateTextHelper import (
     humidity_sky_text,
 )
 
-from API.constants.shared_const import MISSING_DATA
-from API.constants.text_const import (
+from constants.shared_const import MISSING_DATA
+from constants.text_const import (
     CLOUD_COVER_DAILY_THRESHOLDS,
     CLOUD_COVER_THRESHOLDS,
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,

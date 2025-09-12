@@ -18,15 +18,15 @@ from PirateText import calculate_text
 from pirateweather_translations.dynamic_loader import load_all_translations
 from pytz import timezone, utc
 
-from API.constants.api_const import SOLAR_RAD_CONST
-from API.constants.forecast_const import DATA_TIMEMACHINE
-from API.constants.shared_const import KELVIN_TO_CELSIUS
-from API.constants.text_const import (
+from constants.api_const import SOLAR_RAD_CONST
+from constants.forecast_const import DATA_TIMEMACHINE
+from constants.shared_const import KELVIN_TO_CELSIUS
+from constants.text_const import (
     CLOUD_COVER_THRESHOLDS,
     HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM,
     WIND_THRESHOLDS,
 )
-from API.constants.timemachine_const import (
+from constants.timemachine_const import (
     APPARENT_TEMP_WINDCHILL_CONST,
     DAILY_PRECIP_THRESHOLD,
     ICE_ACCUMULATION,

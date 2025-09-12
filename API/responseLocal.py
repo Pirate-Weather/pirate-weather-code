@@ -41,7 +41,7 @@ from pytz import timezone, utc
 from timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
 
-from API.constants.api_const import (
+from constants.api_const import (
     API_VERSION,
     APPARENT_TEMP_CONSTS,
     DBZ_CONST,
@@ -57,7 +57,7 @@ from API.constants.api_const import (
     TEMPERATURE_UNITS_THRESH,
     WBGT_CONST,
 )
-from API.constants.clip_const import (
+from constants.clip_const import (
     CLIP_CLOUD,
     CLIP_FEELS_LIKE,
     CLIP_FIRE,
@@ -72,13 +72,13 @@ from API.constants.clip_const import (
     CLIP_VIS,
     CLIP_WIND,
 )
-from API.constants.forecast_const import (
+from constants.forecast_const import (
     DATA_CURRENT,
     DATA_DAY,
     DATA_HOURLY,
     DATA_MINUTELY,
 )
-from API.constants.grid_const import (
+from constants.grid_const import (
     HRRR_X_MAX,
     HRRR_X_MIN,
     HRRR_Y_MAX,
@@ -91,14 +91,14 @@ from API.constants.grid_const import (
 )
 
 # Project imports
-from API.constants.model_const import GEFS, GFS, HRRR, HRRR_SUBH, NBM, NBM_FIRE_INDEX
-from API.constants.shared_const import (
+from constants.model_const import GEFS, GFS, HRRR, HRRR_SUBH, NBM, NBM_FIRE_INDEX
+from constants.shared_const import (
     INGEST_VERSION_STR,
     KELVIN_TO_CELSIUS,
     MISSING_DATA,
     REFC_THRESHOLD,
 )
-from API.constants.text_const import (
+from constants.text_const import (
     CLOUD_COVER_THRESHOLDS,
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
@@ -3708,7 +3708,7 @@ async def PW_Forecast(
             hourText = "Fog"
         # If wind is greater than 10 m/s
         elif InterPhour[idx, DATA_HOURLY["wind"]] > (
-            WIND_THRESHOLDS["light"] * windUnit
+            WIND_THRESHOLDS["mid"] * windUnit
         ):
             hourIcon = "wind"
             hourText = "Windy"
@@ -4063,7 +4063,7 @@ async def PW_Forecast(
             dayIcon = "fog"
             dayText = "Fog"
         elif InterPday4am[idx, DATA_DAY["wind"]] > (
-            WIND_THRESHOLDS["light"] * windUnit
+            WIND_THRESHOLDS["mid"] * windUnit
         ):
             dayIcon = "wind"
             dayText = "Windy"
@@ -4697,7 +4697,7 @@ async def PW_Forecast(
     elif InterPcurrent[DATA_CURRENT["vis"]] < (FOG_THRESHOLD_METERS * visUnits):
         cIcon = "fog"
         cText = "Fog"
-    elif InterPcurrent[DATA_CURRENT["wind"]] > (WIND_THRESHOLDS["min"] * windUnit):
+    elif InterPcurrent[DATA_CURRENT["wind"]] > (WIND_THRESHOLDS["mid"] * windUnit):
         cIcon = "wind"
         cText = "Windy"
     elif InterPcurrent[DATA_CURRENT["cloud"]] > CLOUD_COVER_THRESHOLDS["cloudy"]:
@@ -5304,7 +5304,12 @@ def clipLog(data, min, max, name):
             logger.error("Min Index: " + str(np.where(data == data.min())))
 
         # Replace values below the threshold with np.nan
-        data[data < min] = np.nan
+        if np.isscalar(data):
+            if data < min:
+                data = np.nan
+        else:
+            data = np.array(data, dtype=float)
+            data[data < min] = np.nan
 
     else:
         data = np.clip(data, a_min=min, a_max=None)
@@ -5319,7 +5324,12 @@ def clipLog(data, min, max, name):
             logger.error("Max Index: " + str(np.where(data == data.max())))
 
         # Replace values above the threshold with np.nan
-        data[data > max] = np.nan
+        if np.isscalar(data):
+            if data > max:
+                data = np.nan
+        else:
+            data = np.array(data, dtype=float)
+            data[data > max] = np.nan
 
     else:
         data = np.clip(data, a_min=None, a_max=max)
