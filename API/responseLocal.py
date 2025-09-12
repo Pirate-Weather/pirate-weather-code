@@ -38,7 +38,7 @@ from API.PirateTextHelper import estimate_snow_height
 from pirateweather_translations.dynamic_loader import load_all_translations
 from API.PirateWeeklyText import calculate_weekly_text
 from pytz import timezone, utc
-from timemachine import TimeMachine
+from API.timemachine import TimeMachine
 from timezonefinder import TimezoneFinder
 
 from API.constants.api_const import (
