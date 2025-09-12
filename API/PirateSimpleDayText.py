@@ -2,7 +2,7 @@
 import math
 
 import numpy as np
-from PirateTextHelper import (
+from API.PirateTextHelper import (
     calculate_precip_text,
     calculate_sky_text,
     calculate_vis_text,
