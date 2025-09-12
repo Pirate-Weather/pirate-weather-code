@@ -3,7 +3,7 @@
 from itertools import groupby
 from operator import itemgetter
 
-from PirateTextHelper import calculate_precip_text
+from API.PirateTextHelper import calculate_precip_text
 
 from API.constants.shared_const import MISSING_DATA
 

@@ -2,7 +2,7 @@ import datetime
 import math
 
 from dateutil import tz
-from PirateTextHelper import (
+from API.PirateTextHelper import (
     Most_Common,
     calculate_precip_text,
     calculate_sky_icon,
@@ -11,8 +11,8 @@ from PirateTextHelper import (
     humidity_sky_text,
 )
 
-from constants.shared_const import MISSING_DATA
-from constants.text_const import (
+from API.constants.shared_const import MISSING_DATA
+from API.constants.text_const import (
     CLOUD_COVER_DAILY_THRESHOLDS,
     CLOUD_COVER_THRESHOLDS,
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
