@@ -3707,9 +3707,7 @@ async def PW_Forecast(
             hourIcon = "fog"
             hourText = "Fog"
         # If wind is greater than 10 m/s
-        elif InterPhour[idx, DATA_HOURLY["wind"]] > (
-            WIND_THRESHOLDS["mid"] * windUnit
-        ):
+        elif InterPhour[idx, DATA_HOURLY["wind"]] > (WIND_THRESHOLDS["mid"] * windUnit):
             hourIcon = "wind"
             hourText = "Windy"
         elif InterPhour[idx, DATA_HOURLY["cloud"]] > CLOUD_COVER_THRESHOLDS["cloudy"]:
@@ -4062,9 +4060,7 @@ async def PW_Forecast(
         elif InterPday4am[idx, DATA_DAY["vis"]] < (FOG_THRESHOLD_METERS * visUnits):
             dayIcon = "fog"
             dayText = "Fog"
-        elif InterPday4am[idx, DATA_DAY["wind"]] > (
-            WIND_THRESHOLDS["mid"] * windUnit
-        ):
+        elif InterPday4am[idx, DATA_DAY["wind"]] > (WIND_THRESHOLDS["mid"] * windUnit):
             dayIcon = "wind"
             dayText = "Windy"
         elif InterPday4am[idx, DATA_DAY["cloud"]] > CLOUD_COVER_THRESHOLDS["cloudy"]:
