@@ -3263,7 +3263,6 @@ async def PW_Forecast(
         PressureHour[:, 1] = GFS_Merged[:, GFS["pressure"]]
     InterPhour[:, DATA_HOURLY["pressure"]] = (
         np.choose(np.argmin(np.isnan(PressureHour), axis=1), PressureHour.T)
-        * pressUnits
     )
 
     # Clip between 800 and 1100
@@ -3272,7 +3271,7 @@ async def PW_Forecast(
         CLIP_PRESSURE["min"],
         CLIP_PRESSURE["max"],
         "Pressure Hour",
-    )
+    ) * pressUnits
 
     ### Wind Speed
     WindSpeedHour = np.full((len(hour_array_grib), 3), np.nan)
@@ -4816,7 +4815,7 @@ async def PW_Forecast(
             # Before sunrise
             currentDay = False
         elif (
-            InterPcurrent[DATA_CURRENT["time"]] > InterSday[0, DATA_DAY]
+            InterPcurrent[DATA_CURRENT["time"]] > InterSday[0, DATA_DAY["sunrise"]]
             and InterPcurrent[DATA_CURRENT["time"]] < InterSday[0, DATA_DAY["sunset"]]
         ):
             # After sunrise before sunset
