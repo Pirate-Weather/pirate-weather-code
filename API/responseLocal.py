@@ -54,7 +54,8 @@ from API.constants.api_const import (
     S3_MAX_BANDWIDTH,
     SOLAR_IRRADIANCE_CONST,
     SOLAR_RAD_CONST,
-    TEMP_ESTIMATION_THRESH,
+    TEMP_THRESHOLD_RAIN_C,
+    TEMP_THRESHOLD_SNOW_C,
     TEMPERATURE_UNITS_THRESH,
     WBGT_CONST,
 )
@@ -2966,11 +2967,15 @@ async def PW_Forecast(
         # Vectorized estimation of type using temperature
         temp_arr = hrrrSubHInterpolation[:, HRRR_SUBH["temp"]]
         minuteType_np = np.array(minuteType)
-        mask = (minuteType_np == "none") & (InterPminute[:, DATA_MINUTELY["intensity"]] > 0)
+        mask = (minuteType_np == "none") & (
+            InterPminute[:, DATA_MINUTELY["intensity"]] > 0
+        )
         # Assign rain, snow, sleet based on temperature
-        minuteType_np[mask & (temp_arr >= TEMP_ESTIMATION_THRESH)] = "rain"
-        minuteType_np[mask & (temp_arr <= -TEMP_ESTIMATION_THRESH)] = "snow"
-        minuteType_np[mask & (np.abs(temp_arr) < TEMP_ESTIMATION_THRESH)] = "sleet"
+        minuteType_np[mask] = np.where(
+            temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
+            "rain",
+            np.where(temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C, "snow", "sleet"),
+        )
         minuteType = minuteType_np.tolist()
         precipTypes = np.array(minuteType)
     elif "nbm" in sourceList:
