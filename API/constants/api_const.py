@@ -79,3 +79,4 @@ LARGEST_DIR_INIT = -1
 
 # Temperature thresholds
 TEMPERATURE_UNITS_THRESH = {"c": 0, "f": 32}
+TEMP_ESTIMATION_THRESH = 1

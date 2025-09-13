@@ -54,6 +54,7 @@ from API.constants.api_const import (
     S3_MAX_BANDWIDTH,
     SOLAR_IRRADIANCE_CONST,
     SOLAR_RAD_CONST,
+    TEMP_ESTIMATION_THRESH,
     TEMPERATURE_UNITS_THRESH,
     WBGT_CONST,
 )
@@ -2967,9 +2968,9 @@ async def PW_Forecast(
         minuteType_np = np.array(minuteType)
         mask = (minuteType_np == "none") & (InterPminute[:, DATA_MINUTELY["intensity"]] > 0)
         # Assign rain, snow, sleet based on temperature
-        minuteType_np[mask & (temp_arr >= 1)] = "rain"
-        minuteType_np[mask & (temp_arr <= -1)] = "snow"
-        minuteType_np[mask & (np.abs(temp_arr) < 1)] = "sleet"
+        minuteType_np[mask & (temp_arr >= TEMP_ESTIMATION_THRESH)] = "rain"
+        minuteType_np[mask & (temp_arr <= -TEMP_ESTIMATION_THRESH)] = "snow"
+        minuteType_np[mask & (np.abs(temp_arr) < TEMP_ESTIMATION_THRESH)] = "sleet"
         minuteType = minuteType_np.tolist()
         precipTypes = np.array(minuteType)
     elif "nbm" in sourceList:
