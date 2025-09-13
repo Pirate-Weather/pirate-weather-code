@@ -2840,10 +2840,10 @@ async def PW_Forecast(
                 right=np.nan,
             )
         if "gefs" in sourceList:
-            gefsMinuteInterpolation[:, 3] = np.interp(
+            gefsMinuteInterpolation[:, GEFS["error"]] = np.interp(
                 minute_array_grib,
                 dataOut_gefs[:, 0].squeeze(),
-                dataOut_gefs[:, 3],
+                dataOut_gefs[:, GEFS["error"]],
                 left=np.nan,
                 right=np.nan,
             )
@@ -2962,6 +2962,16 @@ async def PW_Forecast(
             dbz_to_rate(hrrrSubHInterpolation[:, HRRR_SUBH["refc"]], precipTypes)
             * prepIntensityUnit
         )
+        # Vectorized estimation of type using temperature
+        temp_arr = hrrrSubHInterpolation[:, HRRR_SUBH["temp"]]
+        minuteType_np = np.array(minuteType)
+        mask = (minuteType_np == "none") & (InterPminute[:, DATA_MINUTELY["intensity"]] > 0)
+        # Assign rain, snow, sleet based on temperature
+        minuteType_np[mask & (temp_arr >= 1)] = "rain"
+        minuteType_np[mask & (temp_arr <= -1)] = "snow"
+        minuteType_np[mask & (np.abs(temp_arr) < 1)] = "sleet"
+        minuteType = minuteType_np.tolist()
+        precipTypes = np.array(minuteType)
     elif "nbm" in sourceList:
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
             nbmMinuteInterpolation[:, NBM["accum"]] * prepIntensityUnit
