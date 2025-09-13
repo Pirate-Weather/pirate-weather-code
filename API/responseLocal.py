@@ -2965,7 +2965,7 @@ async def PW_Forecast(
         refc_arr = hrrrSubHInterpolation[:, HRRR_SUBH["refc"]]
 
         # Mask: only assign type if current type is "none" AND reflectivity shows precip
-        mask = (precipTypes == "none") & (refc_arr >= 0)
+        mask = (precipTypes == "none") & (refc_arr > 0)
 
         # Assign rain, snow, sleet based on temperature thresholds
         precipTypes[mask] = np.where(
