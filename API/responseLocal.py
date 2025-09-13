@@ -2960,24 +2960,28 @@ async def PW_Forecast(
     precipTypes = np.array(minuteType)
 
     if "hrrrsubh" in sourceList:
-        InterPminute[:, DATA_MINUTELY["intensity"]] = (
-            dbz_to_rate(hrrrSubHInterpolation[:, HRRR_SUBH["refc"]], precipTypes)
-            * prepIntensityUnit
-        )
-        # Vectorized estimation of type using temperature
+        # Get temperature and reflectivity arrays first
         temp_arr = hrrrSubHInterpolation[:, HRRR_SUBH["temp"]]
-        minuteType_np = np.array(minuteType)
-        mask = (minuteType_np == "none") & (
-            InterPminute[:, DATA_MINUTELY["intensity"]] > 0
-        )
-        # Assign rain, snow, sleet based on temperature
-        minuteType_np[mask] = np.where(
+        refc_arr = hrrrSubHInterpolation[:, HRRR_SUBH["refc"]]
+
+        # Mask: only assign type if current type is "none" AND reflectivity shows precip
+        mask = (precipTypes == "none") & (refc_arr >= 0)
+
+        # Assign rain, snow, sleet based on temperature thresholds
+        precipTypes[mask] = np.where(
             temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
             "rain",
             np.where(temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C, "snow", "sleet"),
         )
-        minuteType = minuteType_np.tolist()
+
+        # Update lists and arrays
+        minuteType = precipTypes.tolist()
         precipTypes = np.array(minuteType)
+
+        # Now convert reflectivity to precipitation intensity using estimated types
+        InterPminute[:, DATA_MINUTELY["intensity"]] = (
+            dbz_to_rate(refc_arr, precipTypes) * prepIntensityUnit
+        )
     elif "nbm" in sourceList:
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
             nbmMinuteInterpolation[:, NBM["accum"]] * prepIntensityUnit
