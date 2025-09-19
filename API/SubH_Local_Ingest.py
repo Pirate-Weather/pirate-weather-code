@@ -19,13 +19,14 @@ import xarray as xr
 import zarr
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
+from API.ingest_utils import mask_invalid_data, mask_invalid_refc, validate_grib_stats
 
-from ingest_utils import mask_invalid_data, validate_grib_stats
+from API.constants.shared_const import INGEST_VERSION_STR
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-ingestVersion = "v27"
+ingestVersion = INGEST_VERSION_STR
 
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
@@ -270,6 +271,12 @@ if spOUT3.returncode != 0:
 # %% Create XArray
 # Read the netcdf file using xarray
 xarray_forecast_merged = xr.open_mfdataset(forecast_process_path + "_wgrib2_merged.nc")
+
+
+# Set REFC values < 5 to 0
+xarray_forecast_merged["REFC_entireatmosphere"] = mask_invalid_refc(
+    xarray_forecast_merged["REFC_entireatmosphere"]
+)
 
 if len(xarray_forecast_merged.time) != len(hrrr_range1) * 4:
     print(len(xarray_forecast_merged.time))

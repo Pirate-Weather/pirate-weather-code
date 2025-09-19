@@ -14,27 +14,31 @@ from itertools import chain
 
 import dask
 import dask.array as da
-from dask.diagnostics import ProgressBar
 import netCDF4 as nc
 import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
 import zarr.storage
+from dask.diagnostics import ProgressBar
 from herbie import FastHerbie
 from herbie.fast import Herbie_latest
-
-from ingest_utils import (
-    mask_invalid_data,
-    interp_time_block,
+from API.ingest_utils import (
+    CHUNK_SIZES,
+    FINAL_CHUNK_SIZES,
+    HISTORY_PERIODS,
     getGribList,
+    interp_time_block,
+    mask_invalid_data,
     validate_grib_stats,
 )
+
+from API.constants.shared_const import INGEST_VERSION_STR
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-ingestVersion = "v27"
+ingestVersion = INGEST_VERSION_STR
 
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
@@ -57,13 +61,14 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
+
 # Define the processing and history chunk size
-processChunk = 100
+processChunk = CHUNK_SIZES["NBM"]
 
 # Define the final x/y chunk size
-finalChunk = 3
+finalChunk = FINAL_CHUNK_SIZES["NBM"]
 
-hisPeriod = 48
+hisPeriod = HISTORY_PERIODS["NBM"]
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):

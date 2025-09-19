@@ -22,8 +22,17 @@ import s3fs
 import xarray as xr
 import zarr.storage
 from herbie import FastHerbie, Herbie, Path
+from API.ingest_utils import (
+    CHUNK_SIZES,
+    FINAL_CHUNK_SIZES,
+    FORECAST_LEAD_RANGES,
+    HISTORY_PERIODS,
+    interp_time_block,
+    mask_invalid_data,
+    validate_grib_stats,
+)
 
-from ingest_utils import mask_invalid_data, interp_time_block, validate_grib_stats
+from API.constants.shared_const import INGEST_VERSION_STR
 
 
 def rounder(t):
@@ -39,7 +48,7 @@ def rounder(t):
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-ingestVersion = "v27"
+ingestVersion = INGEST_VERSION_STR
 
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
@@ -64,13 +73,14 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
+
 # Define the processing and history chunk size
-processChunk = 100
+processChunk = CHUNK_SIZES["NBM_Fire"]
 
 # Define the final x/y chunksize
-finalChunk = 5
+finalChunk = FINAL_CHUNK_SIZES["NBM_Fire"]
 
-hisPeriod = 48
+hisPeriod = HISTORY_PERIODS["NBM_Fire"]
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -174,7 +184,8 @@ zarrVars = ("time", "FOSINDX_surface")
 #####################################################################################################
 # %% Download forecast data using Herbie Latest
 # Set download rannges
-nbm_range = range(6, 192, 6)
+
+nbm_range = FORECAST_LEAD_RANGES["NBM_FIRE"]
 
 # Define the subset of variables to download as a list of strings
 matchstring_su = ":FOSINDX:"
