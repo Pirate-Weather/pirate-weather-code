@@ -922,7 +922,7 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
         # Add a fallback in case of a FileNotFoundError
         except FileNotFoundError:
             print("File not found, adding NaN array for: " + local_ncpath)
-            daskVarArrays.append(da.full((6, 721, 1440), np.nan).rechunk((6, 100, 100)))
+            daskVarArrays.append(da.full((6, 721, 1440), np.nan).rechunk((6, processChunk, processChunk)))
 
     daskVarArraysStack = da.stack(daskVarArrays, allow_unknown_chunksizes=True)
 
