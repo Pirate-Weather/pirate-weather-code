@@ -507,27 +507,53 @@ if STAGE == "TESTING":
         )
         s3.s3.meta.events.register("before-sign.s3.*", _add_custom_header)
 
-        f = _retry_s3_operation(
-            lambda: s3.open(
-                "s3://ForecastTar_v2/" + ingestVersion + "/NWS_Alerts.zarr.zip"
+        try:
+            f = _retry_s3_operation(
+                lambda: s3.open(
+                    "s3://ForecastTar_v2/" + ingestVersion + "/NWS_Alerts.zarr.zip"
+                )
             )
-        )
-        store = S3ZipStore(f)
+            store = S3ZipStore(f)
+        # Try an old ingest version for testing
+        except FileNotFoundError:
+            ingestVersion = "v27"
+            print("Using old ingest version: " + ingestVersion)
+            f = _retry_s3_operation(
+                lambda: s3.open(
+                    "s3://ForecastTar_v2/" + ingestVersion + "/NWS_Alerts.zarr.zip"
+                )
+            )
+            store = S3ZipStore(f)
+
     elif save_type == "S3Zarr":
         s3 = s3fs.S3FileSystem(
             key=aws_access_key_id, secret=aws_secret_access_key, version_aware=True
         )
 
-        f = _retry_s3_operation(
-            lambda: s3.open(
-                "s3://"
-                + s3_bucket
-                + "/ForecastTar_v2/"
-                + ingestVersion
-                + "/NWS_Alerts.zarr.zip"
+        try:
+            f = _retry_s3_operation(
+                lambda: s3.open(
+                    "s3://"
+                    + s3_bucket
+                    + "/ForecastTar_v2/"
+                    + ingestVersion
+                    + "/NWS_Alerts.zarr.zip"
+                )
             )
-        )
-        store = S3ZipStore(f)
+            store = S3ZipStore(f)
+        except FileNotFoundError:
+            ingestVersion = "v27"
+            print("Using old ingest version: " + ingestVersion)
+            f = _retry_s3_operation(
+                lambda: s3.open(
+                    "s3://"
+                    + s3_bucket
+                    + "/ForecastTar_v2/"
+                    + ingestVersion
+                    + "/NWS_Alerts.zarr.zip"
+                )
+            )
+            store = S3ZipStore(f)
 
     else:
         f = s3_bucket + "NWS_Alerts.zarr.zip"
@@ -1118,6 +1144,7 @@ async def PW_Forecast(
     tmextra: Union[str, None] = None,
     apikey: Union[str, None] = None,
     icon: Union[str, None] = None,
+    extraVars: Union[str, None] = None,
 ) -> dict:
     global ETOPO_f
     global SubH_Zarr
@@ -1161,6 +1188,7 @@ async def PW_Forecast(
     # version = "2"
     # tmextra: None
     # apikey: None
+
 
     locationReq = location.split(",")
 
@@ -1350,6 +1378,11 @@ async def PW_Forecast(
         excludeParams = ""
     else:
         excludeParams = exclude
+
+    if not extraVars:
+        extraVars = []
+    else:
+        extraVars = extraVars.split(",")
 
     exCurrently = 0
     exMinutely = 0
@@ -1916,9 +1949,10 @@ async def PW_Forecast(
                     "Storm_Distance",
                     "Storm_Direction",
                     "REFC_entireatmosphere",
+                    "PRES_station",
                 )
 
-            dataOut_gfs = np.zeros((len(xr_mf.time), len(GFSzarrVars)))
+            dataOut_gfs = np.full((len(xr_mf.time), len(GFSzarrVars)), np.nan)
             # Add time
             dataOut_gfs[:, 0] = xr_mf.time.compute().data
 
@@ -2310,7 +2344,7 @@ async def PW_Forecast(
 
     numHours = len(hour_array)
 
-    InterPhour = np.full((numHours, 27), np.nan)  # Time, Intensity,Probability
+    InterPhour = np.full((numHours, 28), np.nan)  # Time, Intensity,Probability
 
     hour_array_grib = (
         (hour_array - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0)))
@@ -2430,10 +2464,10 @@ async def PW_Forecast(
         # GFS
         GFS_StartIDX = nearest_index(dataOut_gfs[:, 0], baseDayUTC_Grib)
         GFS_EndIDX = min((len(dataOut_gfs), (numHours + GFS_StartIDX)))
-        GFS_Merged = np.zeros((numHours, dataOut_gfs.shape[1]))
-        GFS_Merged[0 : (GFS_EndIDX - GFS_StartIDX), :] = dataOut_gfs[
-            GFS_StartIDX:GFS_EndIDX, :
-        ]
+        GFS_Merged = np.full((numHours, max(GFS.values()) + 1), np.nan)
+        GFS_Merged[0 : (GFS_EndIDX - GFS_StartIDX), 0 : dataOut_gfs.shape[1]] = (
+            dataOut_gfs[GFS_StartIDX:GFS_EndIDX, 0 : dataOut_gfs.shape[1]]
+        )
 
         # GEFS
         if "gefs" in sourceList:
@@ -2442,7 +2476,7 @@ async def PW_Forecast(
 
     # Interpolate if Time Machine
     else:
-        GFS_Merged = np.zeros((len(hour_array_grib), dataOut_gfs.shape[1]))
+        GFS_Merged = np.full((len(hour_array_grib), max(GFS.values()) + 1), np.nan)
         for i in range(0, len(dataOut_gfs[0, :])):
             GFS_Merged[:, i] = np.interp(
                 hour_array_grib,
@@ -3520,6 +3554,15 @@ async def PW_Forecast(
         "Feels Like Hour",
     )
 
+    # Station Pressure
+    if "gfs" in sourceList:
+        InterPhour[:, DATA_HOURLY["station_pressure"]] = clipLog(
+            GFS_Merged[:, GFS["station_pressure"]],
+            CLIP_PRESSURE["min"],
+            CLIP_PRESSURE["max"],
+            "Station Pressure Hour",
+        )
+
     # Set temperature units
     if tempUnits == 0:
         InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] = (
@@ -3820,6 +3863,12 @@ async def PW_Forecast(
             "feelsLike": InterPhour[idx, DATA_HOURLY["feels_like"]],
         }
 
+        # Add station pressure if requested
+        if "stationPressure" in extraVars:
+            hourItem["stationPressure"] = InterPhour[
+                idx, DATA_HOURLY["station_pressure"]
+            ]
+
         try:
             hourText, hourIcon = calculate_text(
                 hourItem,
@@ -4028,6 +4077,10 @@ async def PW_Forecast(
     # Round
     # Round all to 2 except precipitations
     InterPday[:, 5:18] = InterPday[:, 5:18].round(2)
+    InterPday[:, DATA_DAY["station_pressure"]] = InterPday[
+        :, DATA_DAY["station_pressure"]
+    ].round(2)
+
     InterPdayMax[:, DATA_DAY["prob"]] = InterPdayMax[:, DATA_DAY["prob"]].round(2)
     InterPdayMax[:, 5:18] = InterPdayMax[:, 5:18].round(2)
     InterPdayMax[:, DATA_DAY["fire"]] = InterPdayMax[:, DATA_DAY["fire"]].round(2)
@@ -4168,6 +4221,10 @@ async def PW_Forecast(
             "fireIndexMax": InterPdayMax[idx, DATA_DAY["fire"]],
             "fireIndexMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["fire"]]),
         }
+
+        # Add station pressure if requested
+        if "stationPressure" in extraVars:
+            dayObject["stationPressure"] = InterPday[idx, DATA_DAY["station_pressure"]]
 
         try:
             if idx < 8:
@@ -4566,6 +4623,17 @@ async def PW_Forecast(
         "UV Current",
     )
 
+    # Station Pressure from GFS
+    InterPcurrent[DATA_CURRENT["station_pressure"]] = clipLog(
+        (
+            GFS_Merged[currentIDX_hrrrh_A, GFS["station_pressure"]] * interpFac1
+            + GFS_Merged[currentIDX_hrrrh, GFS["station_pressure"]] * interpFac2
+        ),
+        CLIP_PRESSURE["min"],
+        CLIP_PRESSURE["max"],
+        "Station Pressure Current",
+    )
+
     # VIS, SubH, NBM then HRRR, then GFS
     if "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["vis"]] = hrrrSubHInterpolation[0, HRRR_SUBH["vis"]]
@@ -4836,6 +4904,11 @@ async def PW_Forecast(
         returnOBJ["currently"]["currentDayIce"] = dayZeroIce
         returnOBJ["currently"]["currentDayLiquid"] = dayZeroRain
         returnOBJ["currently"]["currentDaySnow"] = dayZeroSnow
+
+        if "stationPressure" in extraVars:
+            returnOBJ["currently"]["stationPressure"] = InterPcurrent[
+                DATA_CURRENT["station_pressure"]
+            ]
 
         # Update the text
         if InterPcurrent[DATA_CURRENT["time"]] < InterSday[0, DATA_DAY["sunrise"]]:
