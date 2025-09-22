@@ -905,9 +905,9 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
         dask_var = "PRES_station"
 
     for local_ncpath in ncLocalWorking_paths:
-        if saveType == "S3":
-            # If not found in array, use np.nan to show missing
-            try:
+        # If not found in array, use np.nan to show missing
+        try:
+            if saveType == "S3":
                 daskVarArrays.append(
                     da.from_zarr(
                         local_ncpath,
@@ -919,15 +919,15 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
                         },
                     )
                 )
-            except Exception:
-                print("Missing historic data for variable " + dask_var)
-                daskVarArrays.append(
-                    da.full((6, 721, 1440), np.nan).rechunk((6, 100, 100))
-                )
 
-        else:
+            else:
+                daskVarArrays.append(
+                    da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
+                )
+        except Exception:
+            print("Missing historic data for variable " + dask_var)
             daskVarArrays.append(
-                da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
+                da.full((6, 721, 1440), np.nan).rechunk((6, 100, 100))
             )
 
     daskVarArraysStack = da.stack(daskVarArrays, allow_unknown_chunksizes=True)

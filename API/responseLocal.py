@@ -1916,9 +1916,10 @@ async def PW_Forecast(
                     "Storm_Distance",
                     "Storm_Direction",
                     "REFC_entireatmosphere",
+                    "PRES_station",
                 )
 
-            dataOut_gfs = np.zeros((len(xr_mf.time), len(GFSzarrVars)))
+            dataOut_gfs = np.full((len(xr_mf.time), len(GFSzarrVars)), np.nan)
             # Add time
             dataOut_gfs[:, 0] = xr_mf.time.compute().data
 
