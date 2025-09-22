@@ -1189,7 +1189,6 @@ async def PW_Forecast(
     # tmextra: None
     # apikey: None
 
-
     locationReq = location.split(",")
 
     # Get the location
