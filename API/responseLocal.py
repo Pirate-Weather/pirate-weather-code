@@ -514,7 +514,8 @@ if STAGE == "TESTING":
             )
             store = S3ZipStore(f)
         # Try an old ingest version for testing
-        except:
+        except FileNotFoundError:
+            print("Using old ingest version")
             ingestVersion = "v27"
             f = _retry_s3_operation(
                 lambda: s3.open(
@@ -539,7 +540,8 @@ if STAGE == "TESTING":
                 )
             )
             store = S3ZipStore(f)
-        except:
+        except FileNotFoundError:
+            print("Using old ingest version")
             ingestVersion = "v27"
             f = _retry_s3_operation(
                 lambda: s3.open(
@@ -4622,9 +4624,7 @@ async def PW_Forecast(
         (
             GFS_Merged[currentIDX_hrrrh_A, GFS["station_pressure"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["station_pressure"]] * interpFac2
-        )
-        * 18.9
-        * 0.025,
+        ),
         CLIP_PRESSURE["min"],
         CLIP_PRESSURE["max"],
         "Station Pressure Current",

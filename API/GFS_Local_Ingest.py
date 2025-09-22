@@ -172,7 +172,7 @@ hisPeriod = 48
 # Define the subset of variables to download as a list of strings
 matchstring_2m = ":((DPT|TMP|APTMP|RH):2 m above ground:)"
 matchstring_su = (
-    ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|PRES|VIS|GUST|CAPE|PRES):surface:.*hour fcst)"
+    ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|PRES|VIS|GUST|CAPE):surface:.*hour fcst)"
 )
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
 matchstring_oz = "(:TOZNE:)"
@@ -919,8 +919,9 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
                 daskVarArrays.append(
                     da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
                 )
-        except Exception:
-            print("Missing historic data for variable " + dask_var)
+        # Add a fallback in case of a FileNotFoundError
+        except FileNotFoundError:
+            print("File not found, adding NaN array for: " + local_ncpath)
             daskVarArrays.append(
                 da.full((6, 721, 1440), np.nan).rechunk((6, 100, 100))
             )
