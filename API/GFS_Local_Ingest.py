@@ -40,19 +40,20 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 # %% Setup paths and parameters
 ingestVersion = INGEST_VERSION_STR
 
+# Note that when running the docker container, this should be: "/build/wgrib2_build/bin/wgrib2 "
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
 
 forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/home/ubuntu/Weather/GFS"
+    "forecast_process_dir", default="/mnt/nvme/data/GFS"
 )
 forecast_process_path = forecast_process_dir + "/GFS_Process"
 hist_process_path = forecast_process_dir + "/GFS_Historic"
 tmpDIR = forecast_process_dir + "/Downloads"
 
-forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/GFS")
-historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/History/GFS")
+forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/GFS")
+historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/GFS")
 
 
 saveType = os.getenv("save_type", default="Download")
@@ -160,6 +161,7 @@ zarrVars = (
     "REFC_entireatmosphere",
     "DSWRF_surface",
     "CAPE_surface",
+    "PRES_surface",
 )
 
 hisPeriod = 48
@@ -172,7 +174,7 @@ hisPeriod = 48
 # Define the subset of variables to download as a list of strings
 matchstring_2m = ":((DPT|TMP|APTMP|RH):2 m above ground:)"
 matchstring_su = (
-    ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|PRES|VIS|GUST|CAPE):surface:.*hour fcst)"
+    ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|PRES|VIS|GUST|CAPE|PRES):surface:.*hour fcst)"
 )
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
 matchstring_oz = "(:TOZNE:)"
@@ -506,6 +508,12 @@ for accumVar in accumVars:
 
 
 # %% Save merged and processed xarray dataset to disk using zarr with compression
+
+# Rename PRES_surface to PRES_station for clarity
+xarray_forecast_merged = xarray_forecast_merged.rename(
+    {"PRES_surface": "PRES_station"}
+)
+
 # Save the dataset with compression and filters for all variables
 xarray_forecast_merged = xarray_forecast_merged.chunk(
     chunks={"time": 240, "latitude": processChunk, "longitude": processChunk}
@@ -823,6 +831,9 @@ for i in range(hisPeriod, 0, -6):
         xarray_his_wgribUV_merged,
     )
 
+    # Rename PRES_surface to PRES_station for clarity
+    xarray_hist_merged = xarray_hist_merged.rename({"PRES_surface": "PRES_station"})
+
     # Save merged and processed xarray dataset to disk using zarr with compression
     # Define the path to save the zarr dataset with the run time in the filename
     # format the time following iso8601
@@ -871,6 +882,8 @@ for i in range(hisPeriod, 0, -6):
 
     print((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
 
+
+
 # %% Merge the historic and forecast datasets and then squash using dask
 # Get the s3 paths to the historic data
 ncLocalWorking_paths = [
@@ -887,19 +900,31 @@ daskVarArrays = []
 daskVarArrayList = []
 
 for daskVarIDX, dask_var in enumerate(zarrVars[:]):
+    # Rename PRES_surface to PRES_station for clarity
+    if dask_var == "PRES_surface":
+        dask_var = "PRES_station"
+
     for local_ncpath in ncLocalWorking_paths:
         if saveType == "S3":
-            daskVarArrays.append(
-                da.from_zarr(
-                    local_ncpath,
-                    component=dask_var,
-                    inline_array=True,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
+            # If not found in array, use np.nan to show missing
+            try:
+                daskVarArrays.append(
+                    da.from_zarr(
+                        local_ncpath,
+                        component=dask_var,
+                        inline_array=True,
+                        storage_options={
+                            "key": aws_access_key_id,
+                            "secret": aws_secret_access_key,
+                        },
+                    )
                 )
-            )
+            except Exception:
+                print("Missing historic data for variable " + dask_var)
+                daskVarArrays.append(
+                    da.full((6, 721, 1440), np.nan).rechunk((6, 100, 100))
+                )
+
         else:
             daskVarArrays.append(
                 da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
