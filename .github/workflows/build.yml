@@ -12,6 +12,7 @@ concurrency:
 
 env:
   IMAGE_VERSION: ${{ github.event_name == 'release' && 'release' || 'dev' }}
+  RELEASE_VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
 
 #################################################################
 # INGEST IMAGE BUILD (Native Builds on ARM and x64 nodes)
@@ -47,6 +48,11 @@ jobs:
         run: |
           docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-ingest-dockerfile .
           docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+          if [ -n "$RELEASE_VERSION" ]; then
+            docker tag $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
+              $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-arm64
+            docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-arm64
+          fi
 
   ingest_x64:
     name: Build Ingest Image (x64)
@@ -77,6 +83,11 @@ jobs:
         run: |
           docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-ingest-dockerfile .
           docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+          if [ -n "$RELEASE_VERSION" ]; then
+            docker tag $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
+              $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-amd64
+            docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-amd64
+          fi
 
   manifest_ingest:
     name: Create Ingest MultiArch Manifest
@@ -107,6 +118,12 @@ jobs:
             --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-amd64 \
             --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-arm64
           docker manifest push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+          if [ -n "$RELEASE_VERSION" ]; then
+            docker manifest create $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION \
+              --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-amd64 \
+              --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-arm64
+            docker manifest push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION
+          fi
 
 #################################################################
 # API IMAGE BUILD (Native Builds on ARM and x64 nodes)
@@ -141,6 +158,11 @@ jobs:
         run: |
           docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-api-dockerfile .
           docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+          if [ -n "$RELEASE_VERSION" ]; then
+            docker tag $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
+              $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-arm64
+            docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-arm64
+          fi
 
   api_x64:
     name: Build API Image (x64)
@@ -171,6 +193,11 @@ jobs:
         run: |
           docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG -f Docker/pirate-api-dockerfile .
           docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+          if [ -n "$RELEASE_VERSION" ]; then
+            docker tag $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
+              $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-amd64
+            docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-amd64
+          fi
 
   manifest_api:
     name: Create API MultiArch Manifest
@@ -201,6 +228,12 @@ jobs:
             --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-amd64 \
             --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-arm64
           docker manifest push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+          if [ -n "$RELEASE_VERSION" ]; then
+            docker manifest create $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION \
+              --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-amd64 \
+              --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-arm64
+            docker manifest push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION
+          fi
 
 #################################################################
 # DEPLOYMENT JOB
