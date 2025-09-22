@@ -10,7 +10,7 @@ dask==2025.9.1
 s3fs==2025.9.0
 bottleneck==1.6.0
 rioxarray==0.19.0
-distributed==2025.9.0
+distributed==2025.9.1
 xarray-spatial==0.4.0
 geopandas==1.1.1
 nwswx==0.1.2
