@@ -65,7 +65,7 @@ GFS = {
     "refc": 21,
     "solar": 22,
     "cape": 23,
-    "pressure_station": 24,
+    "station_pressure": 24,
 }
 
 GEFS = {
