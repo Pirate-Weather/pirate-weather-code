@@ -127,6 +127,7 @@ force_now = os.getenv("force_now", default=False)
 # Version code for ingest files
 ingestVersion = INGEST_VERSION_STR
 
+
 def setup_logging():
     handler = logging.StreamHandler(sys.stdout)
     # include timestamp, level, logger name, module, line number, message
@@ -1382,7 +1383,6 @@ async def PW_Forecast(
     else:
         extraVars = extraVars.split(",")
 
-
     exCurrently = 0
     exMinutely = 0
     exHourly = 0
@@ -2464,9 +2464,9 @@ async def PW_Forecast(
         GFS_StartIDX = nearest_index(dataOut_gfs[:, 0], baseDayUTC_Grib)
         GFS_EndIDX = min((len(dataOut_gfs), (numHours + GFS_StartIDX)))
         GFS_Merged = np.full((numHours, max(GFS.values()) + 1), np.nan)
-        GFS_Merged[0 : (GFS_EndIDX - GFS_StartIDX), 0:dataOut_gfs.shape[1]] = dataOut_gfs[
-            GFS_StartIDX:GFS_EndIDX, 0:dataOut_gfs.shape[1]
-        ]
+        GFS_Merged[0 : (GFS_EndIDX - GFS_StartIDX), 0 : dataOut_gfs.shape[1]] = (
+            dataOut_gfs[GFS_StartIDX:GFS_EndIDX, 0 : dataOut_gfs.shape[1]]
+        )
 
         # GEFS
         if "gefs" in sourceList:
@@ -3562,7 +3562,6 @@ async def PW_Forecast(
             "Station Pressure Hour",
         )
 
-
     # Set temperature units
     if tempUnits == 0:
         InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] = (
@@ -3865,7 +3864,9 @@ async def PW_Forecast(
 
         # Add station pressure if requested
         if "stationPressure" in extraVars:
-            hourItem["stationPressure"] = InterPhour[idx, DATA_HOURLY["station_pressure"]]
+            hourItem["stationPressure"] = InterPhour[
+                idx, DATA_HOURLY["station_pressure"]
+            ]
 
         try:
             hourText, hourIcon = calculate_text(
@@ -4075,7 +4076,9 @@ async def PW_Forecast(
     # Round
     # Round all to 2 except precipitations
     InterPday[:, 5:18] = InterPday[:, 5:18].round(2)
-    InterPday[:, DATA_DAY["station_pressure"]] = InterPday[:, DATA_DAY["station_pressure"]].round(2)
+    InterPday[:, DATA_DAY["station_pressure"]] = InterPday[
+        :, DATA_DAY["station_pressure"]
+    ].round(2)
 
     InterPdayMax[:, DATA_DAY["prob"]] = InterPdayMax[:, DATA_DAY["prob"]].round(2)
     InterPdayMax[:, 5:18] = InterPdayMax[:, 5:18].round(2)
@@ -4630,7 +4633,6 @@ async def PW_Forecast(
         "Station Pressure Current",
     )
 
-
     # VIS, SubH, NBM then HRRR, then GFS
     if "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["vis"]] = hrrrSubHInterpolation[0, HRRR_SUBH["vis"]]
@@ -4903,8 +4905,9 @@ async def PW_Forecast(
         returnOBJ["currently"]["currentDaySnow"] = dayZeroSnow
 
         if "stationPressure" in extraVars:
-            returnOBJ["currently"]["stationPressure"] = InterPcurrent[DATA_CURRENT["station_pressure"]]
-
+            returnOBJ["currently"]["stationPressure"] = InterPcurrent[
+                DATA_CURRENT["station_pressure"]
+            ]
 
         # Update the text
         if InterPcurrent[DATA_CURRENT["time"]] < InterSday[0, DATA_DAY["sunrise"]]:
