@@ -4695,7 +4695,6 @@ async def PW_Forecast(
             CLIP_SMOKE["max"],
             "Smoke Current",
         )
-
     else:
         InterPcurrent[DATA_CURRENT["smoke"]] = MISSING_DATA
 
