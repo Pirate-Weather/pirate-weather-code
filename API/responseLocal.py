@@ -3560,7 +3560,7 @@ async def PW_Forecast(
             CLIP_PRESSURE["min"],
             CLIP_PRESSURE["max"],
             "Station Pressure Hour",
-        )
+        )  * pressUnits
 
     # Set temperature units
     if tempUnits == 0:
@@ -4631,7 +4631,7 @@ async def PW_Forecast(
         CLIP_PRESSURE["min"],
         CLIP_PRESSURE["max"],
         "Station Pressure Current",
-    )
+    )  * pressUnits
 
     # VIS, SubH, NBM then HRRR, then GFS
     if "hrrrsubh" in sourceList:
