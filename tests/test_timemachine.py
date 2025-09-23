@@ -189,7 +189,9 @@ def test_timemachine_vs_production(location, test_date):
         pytest.skip(f"Could not fetch production timemachine API: {exc}")
 
     if prod_resp.status_code != 200:
-        pytest.skip(f"Production API returned {prod_resp.status_code}: {prod_resp.text}")
+        pytest.skip(
+            f"Production API returned {prod_resp.status_code}: {prod_resp.text}"
+        )
 
     prod_data = prod_resp.json()
 
@@ -262,9 +264,13 @@ def test_production_timemachine_api(location, test_date):
         pytest.skip(f"Could not fetch production timemachine API: {exc}")
 
     if prod_resp.status_code == 404:
-        pytest.skip(f"Production timemachine API endpoint may not be available: {prod_resp.text}")
+        pytest.skip(
+            f"Production timemachine API endpoint may not be available: {prod_resp.text}"
+        )
     elif prod_resp.status_code != 200:
-        pytest.skip(f"Production API returned {prod_resp.status_code}: {prod_resp.text}")
+        pytest.skip(
+            f"Production API returned {prod_resp.status_code}: {prod_resp.text}"
+        )
     data = prod_resp.json()
 
     # Validate response structure
@@ -290,9 +296,13 @@ def test_timemachine_error_handling():
 
     # Skip if the endpoint doesn't exist or has other issues
     if prod_resp.status_code == 404:
-        pytest.skip(f"Production timemachine API endpoint may not be available: {prod_resp.text}")
+        pytest.skip(
+            f"Production timemachine API endpoint may not be available: {prod_resp.text}"
+        )
     elif prod_resp.status_code not in [400, 200]:
-        pytest.skip(f"Production API returned unexpected status {prod_resp.status_code}: {prod_resp.text}")
+        pytest.skip(
+            f"Production API returned unexpected status {prod_resp.status_code}: {prod_resp.text}"
+        )
 
     # Should get an error for future dates (if endpoint exists)
     if prod_resp.status_code == 400:
