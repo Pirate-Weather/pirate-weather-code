@@ -3707,9 +3707,7 @@ async def PW_Forecast(
     InterPhour[:, DATA_HOURLY["storm_dist"] : DATA_HOURLY["rain"]] = InterPhour[
         :, DATA_HOURLY["storm_dist"] : DATA_HOURLY["rain"]
     ].round(2)
-    InterPhour[:, DATA_HOURLY["fire"]] = InterPhour[
-        :, DATA_HOURLY["fire"]
-    ].round(2)
+    InterPhour[:, DATA_HOURLY["fire"]] = InterPhour[:, DATA_HOURLY["fire"]].round(2)
     InterPhour[:, DATA_HOURLY["station_pressure"]] = InterPhour[
         :, DATA_HOURLY["station_pressure"]
     ].round(2)
