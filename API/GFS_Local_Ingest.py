@@ -45,9 +45,7 @@ wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
 
-forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/mnt/nvme/data/GFS"
-)
+forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/GFS")
 forecast_process_path = forecast_process_dir + "/GFS_Process"
 hist_process_path = forecast_process_dir + "/GFS_Historic"
 tmpDIR = forecast_process_dir + "/Downloads"
@@ -510,9 +508,7 @@ for accumVar in accumVars:
 # %% Save merged and processed xarray dataset to disk using zarr with compression
 
 # Rename PRES_surface to PRES_station for clarity
-xarray_forecast_merged = xarray_forecast_merged.rename(
-    {"PRES_surface": "PRES_station"}
-)
+xarray_forecast_merged = xarray_forecast_merged.rename({"PRES_surface": "PRES_station"})
 
 # Save the dataset with compression and filters for all variables
 xarray_forecast_merged = xarray_forecast_merged.chunk(
@@ -881,7 +877,6 @@ for i in range(hisPeriod, 0, -6):
             f.write("Done")
 
     print((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
-
 
 
 # %% Merge the historic and forecast datasets and then squash using dask
