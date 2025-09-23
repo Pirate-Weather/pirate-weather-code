@@ -9,7 +9,7 @@ MISSING_DATA = -999
 REFC_THRESHOLD = 5.0
 
 # Ingest version
-INGEST_VERSION_STR = "v27"
+INGEST_VERSION_STR = "v28"
 
 # Convert Kelvin to Celsius
 KELVIN_TO_CELSIUS = 273.15
