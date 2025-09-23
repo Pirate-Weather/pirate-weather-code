@@ -1161,7 +1161,6 @@ async def PW_Forecast(
     readNBM = False
     readGEFS = False
 
-    print(os.environ.get("STAGE", "PROD"))
     STAGE = os.environ.get("STAGE", "PROD")
 
     # Timing Check
