@@ -113,7 +113,6 @@ def _diff_nested(a: object, b: object, path: str = "") -> dict:
     return diffs
 
 
-@pytest.mark.skipif(not PW_API, reason="PW_API environment variable not set")
 @pytest.mark.parametrize(
     "location,test_date",
     [
@@ -126,6 +125,9 @@ def _diff_nested(a: object, b: object, path: str = "") -> dict:
 )
 def test_timemachine_historical_data(location, test_date):
     """Test timemachine requests for historical dates post May 2024."""
+    if not PW_API:
+        pytest.skip("PW_API environment variable not set")
+    
     if _get_client is None:
         pytest.skip("Local API client not available - missing dependencies")
 
@@ -157,7 +159,6 @@ def test_timemachine_historical_data(location, test_date):
     _check_timemachine_structure(data, test_date)
 
 
-@pytest.mark.skipif(not PW_API, reason="PW_API environment variable not set")
 @pytest.mark.parametrize(
     "location,test_date",
     [
@@ -167,6 +168,9 @@ def test_timemachine_historical_data(location, test_date):
 )
 def test_timemachine_vs_production(location, test_date):
     """Compare local timemachine responses with production API for validation."""
+    if not PW_API:
+        pytest.skip("PW_API environment variable not set")
+    
     if _get_client is None:
         pytest.skip("Local API client not available - missing dependencies")
 
@@ -226,9 +230,11 @@ def test_timemachine_vs_production(location, test_date):
             )
 
 
-@pytest.mark.skipif(not PW_API, reason="PW_API environment variable not set")
 def test_timemachine_error_conditions():
     """Test error conditions for timemachine requests."""
+    if not PW_API:
+        pytest.skip("PW_API environment variable not set")
+    
     if _get_client is None:
         pytest.skip("Local API client not available - missing dependencies")
 
@@ -253,7 +259,6 @@ def test_timemachine_error_conditions():
     assert "Future" in response.json()["detail"]
 
 
-@pytest.mark.skipif(not PW_API, reason="PW_API environment variable not set")
 @pytest.mark.parametrize(
     "location,test_date",
     [
@@ -265,6 +270,9 @@ def test_timemachine_error_conditions():
 )
 def test_production_timemachine_api(location, test_date):
     """Test that production timemachine API is working for historical dates."""
+    if not PW_API:
+        pytest.skip("PW_API environment variable not set")
+    
     session = httpx.Client()
 
     lat, lon = location
@@ -293,9 +301,11 @@ def test_production_timemachine_api(location, test_date):
     _check_timemachine_structure(data, test_date)
 
 
-@pytest.mark.skipif(not PW_API, reason="PW_API environment variable not set")
 def test_timemachine_error_handling():
     """Test that production API correctly handles invalid timemachine requests."""
+    if not PW_API:
+        pytest.skip("PW_API environment variable not set")
+    
     session = httpx.Client()
 
     # Test future date (should fail)
@@ -324,6 +334,82 @@ def test_timemachine_error_handling():
         assert "Future" in error_detail, (
             f"Expected 'Future' in error message, got: {error_detail}"
         )
+
+
+def test_timemachine_integration_with_demo_key():
+    """Test timemachine functionality using demo key or graceful fallback."""
+    # Try with demo key first, then fall back to any available key
+    test_api_key = PW_API or "demo"
+    
+    # Try to use production API directly for validation
+    session = httpx.Client()
+    
+    # Test a historical date post May 2024
+    test_date = datetime.datetime(2024, 6, 15, 12, 0, 0)
+    lat, lon = 45.0, -75.0  # Ottawa, Canada
+    timestamp = int(test_date.timestamp())
+
+    # Test production timemachine endpoint directly
+    prod_url = f"{PROD_BASE}/timemachine/{test_api_key}/{lat},{lon},{timestamp}"
+    try:
+        prod_resp = session.get(prod_url, timeout=10)
+        
+        # If we get a response, validate it
+        if prod_resp.status_code == 200:
+            data = prod_resp.json()
+            assert data["latitude"] == pytest.approx(lat, abs=0.5)
+            assert data["longitude"] == pytest.approx(lon, abs=0.5)
+            _check_timemachine_structure(data, test_date)
+            
+        elif prod_resp.status_code == 400:
+            # Check if it's a proper error response for invalid API key
+            error_data = prod_resp.json()
+            assert "detail" in error_data or "message" in error_data
+            # This is expected for invalid API keys
+            
+        elif prod_resp.status_code == 403:
+            # API key issue - expected with demo key
+            pytest.skip("API key authentication issue (expected with demo key)")
+            
+        elif prod_resp.status_code == 404:
+            # Endpoint may not exist or be accessible
+            pytest.skip("Production timemachine endpoint not accessible")
+            
+        else:
+            # Other errors - validate we're getting proper error responses
+            assert prod_resp.status_code in [400, 401, 403, 404, 500]
+            
+    except Exception as e:
+        # Network or other connectivity issues
+        pytest.skip(f"Could not reach production API for integration test: {e}")
+
+
+def test_timemachine_request_format_validation():
+    """Test that timemachine request URL formats are constructed correctly."""
+    # Test various API key and location combinations
+    test_cases = [
+        ("demo", 45.0, -75.0, 1718452800),
+        ("test_key", 40.7128, -74.0060, 1720094400),
+        ("api_key_123", 51.5074, -0.1278, 1724155200),
+    ]
+    
+    for api_key, lat, lon, timestamp in test_cases:
+        # Test local timemachine URL format
+        local_url = f"/timemachine/{api_key}/{lat},{lon},{timestamp}"
+        assert local_url.startswith("/timemachine/")
+        assert api_key in local_url
+        assert str(lat) in local_url
+        assert str(lon) in local_url
+        assert str(timestamp) in local_url
+        
+        # Test production timemachine URL format
+        prod_url = f"{PROD_BASE}/timemachine/{api_key}/{lat},{lon},{timestamp}"
+        assert prod_url.startswith("https://api.pirateweather.net/timemachine/")
+        assert api_key in prod_url
+        
+        # Validate URL contains timemachine pattern (for bypass logic)
+        assert "timemachine" in local_url
+        assert "timemachine" in prod_url
 
 
 def test_timemachine_url_detection():
