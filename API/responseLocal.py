@@ -3555,12 +3555,15 @@ async def PW_Forecast(
 
     # Station Pressure
     if "gfs" in sourceList:
-        InterPhour[:, DATA_HOURLY["station_pressure"]] = clipLog(
-            GFS_Merged[:, GFS["station_pressure"]],
-            CLIP_PRESSURE["min"],
-            CLIP_PRESSURE["max"],
-            "Station Pressure Hour",
-        )  * pressUnits
+        InterPhour[:, DATA_HOURLY["station_pressure"]] = (
+            clipLog(
+                GFS_Merged[:, GFS["station_pressure"]],
+                CLIP_PRESSURE["min"],
+                CLIP_PRESSURE["max"],
+                "Station Pressure Hour",
+            )
+            * pressUnits
+        )
 
     # Set temperature units
     if tempUnits == 0:
@@ -4623,15 +4626,18 @@ async def PW_Forecast(
     )
 
     # Station Pressure from GFS
-    InterPcurrent[DATA_CURRENT["station_pressure"]] = clipLog(
-        (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["station_pressure"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["station_pressure"]] * interpFac2
-        ),
-        CLIP_PRESSURE["min"],
-        CLIP_PRESSURE["max"],
-        "Station Pressure Current",
-    )  * pressUnits
+    InterPcurrent[DATA_CURRENT["station_pressure"]] = (
+        clipLog(
+            (
+                GFS_Merged[currentIDX_hrrrh_A, GFS["station_pressure"]] * interpFac1
+                + GFS_Merged[currentIDX_hrrrh, GFS["station_pressure"]] * interpFac2
+            ),
+            CLIP_PRESSURE["min"],
+            CLIP_PRESSURE["max"],
+            "Station Pressure Current",
+        )
+        * pressUnits
+    )
 
     # VIS, SubH, NBM then HRRR, then GFS
     if "hrrrsubh" in sourceList:
