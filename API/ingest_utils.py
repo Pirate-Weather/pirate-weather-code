@@ -10,8 +10,6 @@ import numpy as np
 import xarray as xr
 from herbie import Path
 
-from API.constants.shared_const import REFC_THRESHOLD
-
 # Shared ingest constants
 CHUNK_SIZES = {
     "NBM": 100,
@@ -57,6 +55,7 @@ FORECAST_LEAD_RANGES = {
 
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
+REFC_THRESHOLD_INGEST = 0
 
 
 def mask_invalid_data(daskArray, ignoreAxis=None):
@@ -82,7 +81,7 @@ def mask_invalid_refc(xrArr: "xr.DataArray") -> "xr.DataArray":
     Returns:
         The masked xarray DataArray.
     """
-    return xrArr.where(xrArr >= REFC_THRESHOLD, 0)
+    return xrArr.where(xrArr >= REFC_THRESHOLD_INGEST, 0)
 
 
 # Linear interpolation of time blocks in a dask array

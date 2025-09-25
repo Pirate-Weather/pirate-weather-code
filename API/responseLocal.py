@@ -44,7 +44,7 @@ from timezonefinder import TimezoneFinder
 from API.constants.api_const import (
     API_VERSION,
     APPARENT_TEMP_CONSTS,
-    DBZ_CONST,
+    DB_CONST,
     GLOBE_TEMP_CONST,
     LARGEST_DIR_INIT,
     MAX_S3_RETRIES,
@@ -1068,37 +1068,39 @@ def calculate_wbgt(
     return wbgt
 
 
-def dbz_to_rate(dbz_array, precip_type_array, min_dbz=REFC_THRESHOLD):
+def db_to_rate(db_array, precip_type_array, min_db=REFC_THRESHOLD):
     """
-    Convert dBZ to precipitation rate (mm/h) using a Z-R relationship with soft threshold.
+    Convert dB to precipitation rate (mm/h) using a Z-R relationship with soft threshold.
 
     Args:
-        dbz_array (np.ndarray): Radar reflectivity in dBZ.
+        db_array (np.ndarray): Radar reflectivity in dB.
         precip_type_array (np.ndarray): Array of precipitation types ('rain' or 'snow').
-        min_dbz (float): Minimum dBZ for soft thresholding. Values below this are scaled linearly.
+        min_db (float): Minimum dB for soft thresholding. Values below this are scaled linearly.
 
     Returns:
         np.ndarray: Precipitation rate in mm/h.
     """
-    # Ensure no negative dBZ values
-    dbz_array = np.maximum(dbz_array, 0.0)
+    # Ensure no negative dB values
+    db_array = np.maximum(db_array, 0.0)
 
-    # Convert dBZ to Z
-    z_array = 10 ** (dbz_array / 10.0)
+    # Convert dB to Z
+    z_array = 10 ** (db_array / 10.0)
 
     # Initialize rate coefficients for rain
-    a_array = np.full_like(dbz_array, DBZ_CONST["rain_a"], dtype=float)
-    b_array = np.full_like(dbz_array, DBZ_CONST["rain_b"], dtype=float)
+    a_array = np.full_like(db_array, DB_CONST["rain_a"], dtype=float)
+    b_array = np.full_like(db_array, DB_CONST["rain_b"], dtype=float)
+
+    # Apply snow mask for snow-specific constants
     snow_mask = precip_type_array == "snow"
-    a_array[snow_mask] = DBZ_CONST["snow_a"]
-    b_array[snow_mask] = DBZ_CONST["snow_b"]
+    a_array[snow_mask] = DB_CONST["snow_a"]
+    b_array[snow_mask] = DB_CONST["snow_b"]
 
     # Compute precipitation rate
     rate_array = (z_array / a_array) ** (1.0 / b_array)
 
-    # Apply soft threshold for sub-threshold dBZ values
-    below_threshold = dbz_array < min_dbz
-    rate_array[below_threshold] *= dbz_array[below_threshold] / min_dbz
+    # Apply soft threshold for sub-threshold dB values
+    below_threshold = db_array < min_db
+    rate_array[below_threshold] *= db_array[below_threshold] / min_db
 
     # Final check: ensure no negative rates
     rate_array = np.maximum(rate_array, 0.0)
@@ -2980,7 +2982,7 @@ async def PW_Forecast(
 
         # Now convert reflectivity to precipitation intensity using estimated types
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
-            dbz_to_rate(refc_arr, precipTypes) * prepIntensityUnit
+            db_to_rate(refc_arr, precipTypes) * prepIntensityUnit
         )
     elif "nbm" in sourceList:
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
@@ -2992,7 +2994,7 @@ async def PW_Forecast(
         )
     else:
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
-            dbz_to_rate(gfsMinuteInterpolation[:, GFS["refc"]], precipTypes)
+            db_to_rate(gfsMinuteInterpolation[:, GFS["refc"]], precipTypes)
             * prepIntensityUnit
         )
 
