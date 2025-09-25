@@ -39,7 +39,7 @@ WBGT_CONST = {
     "humidity_weight": 0.3,
 }
 
-# Grouped DBZ constants
+# Grouped DB constants
 DB_CONST = {
     "rain_a": 200.0,
     "rain_b": 1.6,

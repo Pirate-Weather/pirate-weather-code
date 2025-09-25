@@ -1069,17 +1069,19 @@ def calculate_wbgt(
 
 
 def db_to_rate(db_array, precip_type_array, min_db=REFC_THRESHOLD):
-    """
-    Convert dB to precipitation rate (mm/h) using a Z-R relationship with soft threshold.
+    """Convert dB to precipitation rate (mm/h) using a Z-R relationship.  
 
-    Args:
-        db_array (np.ndarray): Radar reflectivity in dB.
-        precip_type_array (np.ndarray): Array of precipitation types ('rain' or 'snow').
-        min_db (float): Minimum dB for soft thresholding. Values below this are scaled linearly.
+    This function applies a soft threshold, where values below `min_db` are  
+    scaled linearly.  
 
-    Returns:
-        np.ndarray: Precipitation rate in mm/h.
-    """
+    Parameters:  
+        - db_array (np.ndarray): Radar reflectivity in dB.  
+        - precip_type_array (np.ndarray): Array of precipitation types ('rain' or 'snow').  
+        - min_db (float): Minimum dB for soft thresholding.  
+
+    Returns:  
+        - np.ndarray: Precipitation rate in mm/h.  
+    """ 
     # Ensure no negative dB values
     db_array = np.maximum(db_array, 0.0)
 
