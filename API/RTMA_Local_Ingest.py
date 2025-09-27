@@ -16,7 +16,7 @@ import xarray as xr
 import s3fs
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
-from API.ingest_utils import mask_invalid_data
+from API.ingest_utils import mask_invalid_data, CHUNK_SIZES, FINAL_CHUNK_SIZES
 from metpy.calc import relative_humidity_from_dewpoint
 import logging
 
@@ -35,15 +35,18 @@ logging.basicConfig(
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
 analysis_process_dir = os.getenv(
-    "analysis_process_dir", default="/home/ubuntu/Weather/RTMA"
+    "forecast_process_dir", default="/home/ubuntu/Weather/RTMA"
 )
 analysis_process_path = analysis_process_dir + "/RTMA_Process"
 tmp_dir = analysis_process_dir + "/Downloads"
-analysis_path = os.getenv("analysis_path", default="/home/ubuntu/Weather/Prod/RTMA")
+analysis_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/RTMA")
+historic_base_path = os.getenv(
+    "historic_base_path", default="/home/ubuntu/Weather/Hist/RTMA"
+)
 
 # Define the processing and final chunk size
-process_chunk = 100
-final_chunk = 5
+process_chunk = CHUNK_SIZES["RTMA"]
+final_chunk = FINAL_CHUNK_SIZES["RTMA"]
 
 save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
@@ -75,7 +78,7 @@ latest_run = Herbie_latest(
     n=1,
     freq="1h",
     fxx=[0],
-    product="analysis",
+    product="anl",
     verbose=False,
     priority="aws",
     save_dir=tmp_dir,
@@ -116,6 +119,7 @@ zarr_vars = (
     "GUST_10maboveground",
     "VIS_surface",
     "TCCC_entireatmosphere",
+    "PRES_station",
 )
 
 
@@ -125,15 +129,15 @@ match_strings = (
     "|:(GUST:10 m above ground:)"
     "|:(UGRD:10 m above ground:)"
     "|:(VGRD:10 m above ground:)"
-    "|:(VIS:surface:)"
-    "|:(TCC|TCDC|TCCC):entire atmosphere:"
+    "|:((VIS|PRES):surface:)"
+    "|:TCC:entire atmosphere:"
 )
 
 fh_analysis = FastHerbie(
     pd.date_range(start=base_time, periods=1, freq="1h"),
     model="rtma",
     fxx=[0],
-    product="analysis",
+    product="anl",
     verbose=False,
     priority="aws",
     save_dir=tmp_dir,
@@ -182,10 +186,10 @@ rename_dict = {
     "v10": "VGRD_10maboveground",
     "i10fg": "GUST_10maboveground",
     "vis": "VIS_surface",
+    "pres": "PRES_station",
+    "tcc": "TCCC_entireatmosphere",
 }
-for var in ["tcc", "tcdc", "tccc"]:
-    if var in xarray_analysis_merged.data_vars:
-        rename_dict[var] = "TCCC_entireatmosphere"
+
 rename_dict = {
     k: v for k, v in rename_dict.items() if k in xarray_analysis_merged.data_vars
 }
@@ -285,6 +289,15 @@ if save_type == "S3":
 
 
 # %% Upload to S3 or move to final location
+# Define Historical Save Path and Ensure Directory Exists
+time_str = base_time.strftime("%Y%m%d_%H%M")
+historic_save_path = f"{historic_base_path}/{ingest_version}/{time_str}"
+
+if save_type == "Download":
+    if not os.path.exists(historic_save_path):
+        os.makedirs(historic_save_path)
+
+# Save to Production Path (Existing Logic)
 if save_type == "S3":
     s3.put_file(
         analysis_process_dir + "/RTMA.zarr.zip",
@@ -313,6 +326,42 @@ else:
         dirs_exist_ok=True,
     )
     logging.info("Final Zarr and time pickle files moved to local storage.")
+
+# Save to Historical Path
+logging.info(f"Saving to Historical Archive: {historic_save_path}")
+
+if save_type == "S3":
+    # Upload Zarr
+    s3.put_file(
+        analysis_process_dir + "/RTMA.zarr.zip",
+        historic_save_path + "/RTMA.zarr.zip",
+    )
+    logging.info("Historical Zarr zip file uploaded to S3.")
+
+    # Upload Time Pickle
+    # The pickle file is needed in the historic path for verification
+    s3.put_file(
+        analysis_process_dir + "/RTMA.time.pickle",
+        historic_save_path + "/RTMA.time.pickle",
+    )
+    logging.info("Historical Time pickle file uploaded to S3.")
+
+else:
+    # Copy Time Pickle
+    # Note: Use copy since the production move already happened above.
+    shutil.copy(
+        analysis_process_dir + "/RTMA.time.pickle",
+        historic_save_path + "/RTMA.time.pickle",
+    )
+    logging.info("Historical Time pickle file copied to local storage.")
+
+    # Copy Zarr
+    shutil.copytree(
+        analysis_process_dir + "/RTMA.zarr",
+        historic_save_path + "/RTMA.zarr",
+        dirs_exist_ok=True,
+    )
+    logging.info("Historical Zarr file copied to local storage.")
 
 
 # Clean up

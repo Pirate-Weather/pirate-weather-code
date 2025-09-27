@@ -162,8 +162,6 @@ zarrVars = (
     "PRES_surface",
 )
 
-hisPeriod = 48
-
 #####################################################################################################
 # %% Download forecast data using Herbie Latest
 # Find the latest run with 240 hours

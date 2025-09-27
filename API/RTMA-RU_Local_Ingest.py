@@ -15,7 +15,7 @@ import pandas as pd
 import xarray as xr
 import s3fs
 import logging
-from API.ingest_utils import mask_invalid_data
+from API.ingest_utils import mask_invalid_data, CHUNK_SIZES, FINAL_CHUNK_SIZES
 from metpy.calc import relative_humidity_from_dewpoint
 from API.constants.shared_const import INGEST_VERSION_STR
 
@@ -32,15 +32,15 @@ logging.basicConfig(
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
 analysis_process_dir = os.getenv(
-    "analysis_process_dir", default="/home/ubuntu/Weather/RTMA"
+    "forecast_process_dir", default="/home/ubuntu/Weather/RTMA-RU"
 )
-analysis_process_path = analysis_process_dir + "/RTMA_Process"
+analysis_process_path = analysis_process_dir + "/RTMA-RU_Process"
 tmp_dir = analysis_process_dir + "/Downloads"
-analysis_path = os.getenv("analysis_path", default="/home/ubuntu/Weather/Prod/RTMA")
+analysis_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/RTMA-RU")
 
 # Define the processing and final chunk size
-process_chunk = 100
-final_chunk = 5
+process_chunk = CHUNK_SIZES["RTMA"]
+final_chunk = FINAL_CHUNK_SIZES["RTMA"]
 
 save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
@@ -72,7 +72,7 @@ t0 = time.time()
 # We'll use the current time as a proxy and try to download the latest available file.
 # The RTMA-RU data is available every 15 minutes, so we'll round the time
 # to the nearest 15 minutes to determine the latest valid time.
-now = pd.to_datetime("now", utc=True)
+now = pd.to_datetime("now", utc=True) - pd.Timedelta(minutes=25)
 base_time = now.round("15min")
 logging.info(f"Checking for new RTMA-RU data for base time: {base_time}")
 
@@ -108,6 +108,7 @@ zarr_vars = (
     "GUST_10maboveground",
     "VIS_surface",
     "TCCC_entireatmosphere",
+    "PRES_station",
 )
 
 # --- Download RTMA-RU data directly from AWS S3 ---
@@ -157,10 +158,10 @@ rename_dict = {
     "v10": "VGRD_10maboveground",
     "i10fg": "GUST_10maboveground",
     "vis": "VIS_surface",
+    "tcc": "TCCC_entireatmosphere",
+    "pres": "PRES_station",
 }
-for var in ["tcc", "tcdc", "tccc"]:
-    if var in xarray_analysis_merged.data_vars:
-        rename_dict[var] = "TCCC_entireatmosphere"
+
 rename_dict = {
     k: v for k, v in rename_dict.items() if k in xarray_analysis_merged.data_vars
 }
