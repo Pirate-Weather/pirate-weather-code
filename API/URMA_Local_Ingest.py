@@ -23,6 +23,8 @@ from metpy.calc import relative_humidity_from_dewpoint
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import CHUNK_SIZES, FINAL_CHUNK_SIZES, mask_invalid_data
 
+URMA_DELAY_HOURS = 6
+
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -75,15 +77,19 @@ if save_type == "Download":
 # %% Define base time from the most recent run
 t0 = time.time()
 
+# Account for the 6 hour delay on URMA Data
+now = pd.to_datetime("now", utc=True) - pd.Timedelta(hours=URMA_DELAY_HOURS)
+
 latest_run = Herbie_latest(
     model="urma",
     n=1,
     freq="1h",
-    fxx=[6],
+    fxx=[0],
     product="anl",
     verbose=False,
     priority="aws",
     save_dir=tmp_dir,
+    date=now,
 )
 
 base_time = latest_run.date

@@ -21,6 +21,8 @@ from metpy.calc import relative_humidity_from_dewpoint
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import CHUNK_SIZES, FINAL_CHUNK_SIZES, mask_invalid_data
 
+RTMA_RU_DELAY_MINUTES = 25
+
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -74,7 +76,7 @@ t0 = time.time()
 # We'll use the current time as a proxy and try to download the latest available file.
 # The RTMA-RU data is available every 15 minutes, so we'll round the time
 # to the nearest 15 minutes to determine the latest valid time.
-now = pd.to_datetime("now", utc=True) - pd.Timedelta(minutes=25)
+now = pd.to_datetime("now", utc=True) - pd.Timedelta(minutes=RTMA_RU_DELAY_MINUTES)
 base_time = now.round("15min")
 logging.info(f"Checking for new RTMA-RU data for base time: {base_time}")
 
