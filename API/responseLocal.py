@@ -54,6 +54,8 @@ from API.constants.api_const import (
     S3_MAX_BANDWIDTH,
     SOLAR_IRRADIANCE_CONST,
     SOLAR_RAD_CONST,
+    TEMP_THRESHOLD_RAIN_C,
+    TEMP_THRESHOLD_SNOW_C,
     TEMPERATURE_UNITS_THRESH,
     WBGT_CONST,
 )
@@ -2840,10 +2842,10 @@ async def PW_Forecast(
                 right=np.nan,
             )
         if "gefs" in sourceList:
-            gefsMinuteInterpolation[:, 3] = np.interp(
+            gefsMinuteInterpolation[:, GEFS["error"]] = np.interp(
                 minute_array_grib,
                 dataOut_gefs[:, 0].squeeze(),
-                dataOut_gefs[:, 3],
+                dataOut_gefs[:, GEFS["error"]],
                 left=np.nan,
                 right=np.nan,
             )
@@ -2958,9 +2960,27 @@ async def PW_Forecast(
     precipTypes = np.array(minuteType)
 
     if "hrrrsubh" in sourceList:
+        # Get temperature and reflectivity arrays first.
+        temp_arr = hrrrSubHInterpolation[:, HRRR_SUBH["temp"]]
+        refc_arr = hrrrSubHInterpolation[:, HRRR_SUBH["refc"]]
+
+        # Mask: only assign type if current type is "none" AND reflectivity shows precip
+        mask = (precipTypes == "none") & (refc_arr > 0)
+
+        # Assign rain, snow, sleet based on temperature thresholds
+        precipTypes[mask] = np.where(
+            temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
+            "rain",
+            np.where(temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C, "snow", "sleet"),
+        )
+
+        # Update lists and arrays
+        minuteType = precipTypes.tolist()
+        precipTypes = np.array(minuteType)
+
+        # Now convert reflectivity to precipitation intensity using estimated types
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
-            dbz_to_rate(hrrrSubHInterpolation[:, HRRR_SUBH["refc"]], precipTypes)
-            * prepIntensityUnit
+            dbz_to_rate(refc_arr, precipTypes) * prepIntensityUnit
         )
     elif "nbm" in sourceList:
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
