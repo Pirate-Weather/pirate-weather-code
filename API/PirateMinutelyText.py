@@ -3,9 +3,8 @@
 from itertools import groupby
 from operator import itemgetter
 
-from API.PirateTextHelper import calculate_precip_text
-
 from API.constants.shared_const import MISSING_DATA
+from API.PirateTextHelper import calculate_precip_text
 
 # Number of minutes in an hour
 MINUTES_IN_HOUR = 60

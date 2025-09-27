@@ -2,25 +2,26 @@
 # Alexander Rey, September 2025
 
 # %% Import modules
+import logging
 import os
 import pickle
 import shutil
 import sys
 import time
 import warnings
-import zarr
+
 import dask.array as da
 import numpy as np
 import pandas as pd
-import xarray as xr
 import s3fs
+import xarray as xr
+import zarr
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
-from API.ingest_utils import mask_invalid_data, CHUNK_SIZES, FINAL_CHUNK_SIZES
 from metpy.calc import relative_humidity_from_dewpoint
-import logging
 
 from API.constants.shared_const import INGEST_VERSION_STR
+from API.ingest_utils import CHUNK_SIZES, FINAL_CHUNK_SIZES, mask_invalid_data
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -170,7 +171,7 @@ try:
     xarray_analysis_merged["rh"] = rh
     xarray_analysis_merged["rh"].attrs.update(units="%", long_name="Relative Humidity")
     logging.info("Relative Humidity calculated and added to dataset.")
-except Exception as e:
+except (KeyError, AttributeError, ValueError) as e:
     logging.warning(f"Failed to calculate RH: {e}")
     xarray_analysis_merged["rh"] = xr.full_like(xarray_analysis_merged["t2m"], np.nan)
     xarray_analysis_merged["rh"].attrs.update(
@@ -219,7 +220,6 @@ del xarray_analysis_merged
 
 # %% Format as dask and save as zarr
 dask_var_array_list = []
-dask_var_arrays = []
 
 logging.info("Starting Dask array creation and processing.")
 for dask_var_idx, dask_var in enumerate(zarr_vars[:]):

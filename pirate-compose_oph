@@ -64,19 +64,19 @@ services:
       ofelia.job-run.rtma-ru-ingest.schedule: "0 0/25 * * * *"
       ofelia.job-run.rtma-ru-ingest.image: "pirateingest:latest" 
       ofelia.job-run.rtma-ru-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
-      ofelia.job-run.rtma-ru-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/RTMA-RU", "forecast_path=/data/Prod/RTMA-RU" "historic_path=/data/Hist/RTMA-RU", "save_type=Download"]'
+      ofelia.job-run.rtma-ru-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/RTMA-RU", "forecast_path=/data/Prod/RTMA-RU", "historic_path=/data/Hist/RTMA-RU", "save_type=Download"]'
       ofelia.job-run.rtma-ru-ingest.command: "RTMA-RU_Local_Ingest.py" 
       ofelia.job-run.rtma-ru-ingest.no-overlap: "true"
       ofelia.job-run.rtma-ingest.schedule: "0 0 * * * *"
       ofelia.job-run.rtma-ingest.image: "pirateingest:latest" 
       ofelia.job-run.rtma-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
-      ofelia.job-run.rtma-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/RTMA", "forecast_path=/data/Prod/RTMA" "historic_path=/data/Hist/RTMA", "save_type=Download"]'
+      ofelia.job-run.rtma-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/RTMA", "forecast_path=/data/Prod/RTMA", "historic_path=/data/Hist/RTMA", "save_type=Download"]'
       ofelia.job-run.rtma-ingest.command: "RTMA_Local_Ingest.py" 
       ofelia.job-run.rtma-ingest.no-overlap: "true"
-      ofelia.job-run.rtma-ingest.schedule: "0 0 * * * *"
+      ofelia.job-run.urma-ingest.schedule: "0 0 * * * *"
       ofelia.job-run.urma-ingest.image: "pirateingest:latest" 
       ofelia.job-run.urma-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
-      ofelia.job-run.urma-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/URMA", "forecast_path=/data/Prod/URMA" "historic_path=/data/Hist/URMA", "save_type=Download"]'
+      ofelia.job-run.urma-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/URMA", "forecast_path=/data/Prod/URMA", "historic_path=/data/Hist/URMA", "save_type=Download"]'
       ofelia.job-run.urma-ingest.command: "URMA_Local_Ingest.py" 
       ofelia.job-run.urma-ingest.no-overlap: "true"
     depends_on:
