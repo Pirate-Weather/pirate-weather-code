@@ -26,6 +26,7 @@ DATA_CURRENT = {
     "smoke": 18,
     "fire": 19,
     "feels_like": 20,
+    "station_pressure": 21,
 }
 
 # Minutely comumn indexes
@@ -66,9 +67,13 @@ DATA_HOURLY = {
     "ice": 23,
     "fire": 24,
     "feels_like": 25,
+    "station_pressure": 26,
 }
 
 # Daily column indexes
+# These are mostly the same as hourly, but add dawn/dusk, sunrise/sunset, moon_phase, and remove:
+# error, type, ozone, accum, storm_dist, storm_dir, feels_like
+# 0:15 are the same, as are 20:26
 DATA_DAY = {
     "intensity": 2,
     "prob": 3,
@@ -93,6 +98,7 @@ DATA_DAY = {
     "snow": 22,
     "ice": 23,
     "fire": 24,
+    "station_pressure": 26,
 }
 
 DATA_TIMEMACHINE = {
