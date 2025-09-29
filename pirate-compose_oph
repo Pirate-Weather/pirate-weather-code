@@ -61,7 +61,7 @@ services:
       ofelia.job-run.ecmwf-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/ECMWF", "forecast_path=/data/Prod/ECMWF", "historic_path=/data/Hist/ECMWF", "save_type=Download"]'
       ofelia.job-run.ecmwf-ingest.command: "ECMWF_Local_Ingest.py" 
       ofelia.job-run.ecmwf-ingest.no-overlap: "true"
-      ofelia.job-run.rtma-ru-ingest.schedule: "0 0/25 * * * *"
+      ofelia.job-run.rtma-ru-ingest.schedule: "0 10,25,40,55 * * * *"
       ofelia.job-run.rtma-ru-ingest.image: "pirateingest:latest" 
       ofelia.job-run.rtma-ru-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
       ofelia.job-run.rtma-ru-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/RTMA-RU", "forecast_path=/data/Prod/RTMA-RU", "historic_path=/data/Hist/RTMA-RU", "save_type=Download"]'
