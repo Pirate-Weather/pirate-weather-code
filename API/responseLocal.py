@@ -1161,7 +1161,6 @@ async def PW_Forecast(
     readNBM = False
     readGEFS = False
 
-    print(os.environ.get("STAGE", "PROD"))
     STAGE = os.environ.get("STAGE", "PROD")
 
     # Timing Check
@@ -3555,12 +3554,15 @@ async def PW_Forecast(
 
     # Station Pressure
     if "gfs" in sourceList:
-        InterPhour[:, DATA_HOURLY["station_pressure"]] = clipLog(
-            GFS_Merged[:, GFS["station_pressure"]],
-            CLIP_PRESSURE["min"],
-            CLIP_PRESSURE["max"],
-            "Station Pressure Hour",
-        )  * pressUnits
+        InterPhour[:, DATA_HOURLY["station_pressure"]] = (
+            clipLog(
+                GFS_Merged[:, GFS["station_pressure"]],
+                CLIP_PRESSURE["min"],
+                CLIP_PRESSURE["max"],
+                "Station Pressure Hour",
+            )
+            * pressUnits
+        )
 
     # Set temperature units
     if tempUnits == 0:
@@ -3705,8 +3707,9 @@ async def PW_Forecast(
     InterPhour[:, DATA_HOURLY["storm_dist"] : DATA_HOURLY["rain"]] = InterPhour[
         :, DATA_HOURLY["storm_dist"] : DATA_HOURLY["rain"]
     ].round(2)
-    InterPhour[:, DATA_HOURLY["fire"] : 26] = InterPhour[
-        :, DATA_HOURLY["fire"] : 26
+    InterPhour[:, DATA_HOURLY["fire"]] = InterPhour[:, DATA_HOURLY["fire"]].round(2)
+    InterPhour[:, DATA_HOURLY["station_pressure"]] = InterPhour[
+        :, DATA_HOURLY["station_pressure"]
     ].round(2)
 
     # Round to 4
@@ -4623,15 +4626,18 @@ async def PW_Forecast(
     )
 
     # Station Pressure from GFS
-    InterPcurrent[DATA_CURRENT["station_pressure"]] = clipLog(
-        (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["station_pressure"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["station_pressure"]] * interpFac2
-        ),
-        CLIP_PRESSURE["min"],
-        CLIP_PRESSURE["max"],
-        "Station Pressure Current",
-    )  * pressUnits
+    InterPcurrent[DATA_CURRENT["station_pressure"]] = (
+        clipLog(
+            (
+                GFS_Merged[currentIDX_hrrrh_A, GFS["station_pressure"]] * interpFac1
+                + GFS_Merged[currentIDX_hrrrh, GFS["station_pressure"]] * interpFac2
+            ),
+            CLIP_PRESSURE["min"],
+            CLIP_PRESSURE["max"],
+            "Station Pressure Current",
+        )
+        * pressUnits
+    )
 
     # VIS, SubH, NBM then HRRR, then GFS
     if "hrrrsubh" in sourceList:
@@ -4689,7 +4695,6 @@ async def PW_Forecast(
             CLIP_SMOKE["max"],
             "Smoke Current",
         )
-
     else:
         InterPcurrent[DATA_CURRENT["smoke"]] = MISSING_DATA
 
