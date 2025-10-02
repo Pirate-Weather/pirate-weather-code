@@ -1161,7 +1161,6 @@ async def PW_Forecast(
     readNBM = False
     readGEFS = False
 
-    print(os.environ.get("STAGE", "PROD"))
     STAGE = os.environ.get("STAGE", "PROD")
 
     # Timing Check
@@ -1308,8 +1307,8 @@ async def PW_Forecast(
                 status_code=400,
                 detail="Requested Time is in the Past. Please Use Timemachine.",
             )
-    elif (nowTime - utcTime) > datetime.timedelta(hours=47):
-        # More than 47 hours ago must be time machine request
+    elif (nowTime - utcTime) > datetime.timedelta(hours=30):
+        # More than 30 hours ago must be time machine request
         if (
             ("localhost" in str(request.url))
             or ("timemachine" in str(request.url))
@@ -1329,12 +1328,15 @@ async def PW_Forecast(
             raise HTTPException(
                 status_code=400, detail="Requested Time is in the Future"
             )
-    elif (nowTime - utcTime) < datetime.timedelta(hours=47):
-        # If within the last 47 hours, it may or may not be a timemachine request
+    elif (nowTime - utcTime) < datetime.timedelta(hours=30):
+        # If within the last 30 hours, it may or may not be a timemachine request
         if "timemachine" in str(request.url):
             timeMachineNear = True
             # This results in the API using the live zip file, but only doing a 24 hour forecast from midnight of the requested day
-            print("Near term timemachine request")
+            if TIMING:
+                print("Near term timemachine request")
+                # Print how far in the past it is
+                print((nowTime - utcTime))
         # Otherwise, just a normal request
 
     # Timing Check
@@ -1554,7 +1556,7 @@ async def PW_Forecast(
             dataOut_h2 = False
             dataOut_hrrrh = False
         else:
-            # Subh
+            # HRRRH
             # Check if timemachine request, use different sources
             if timeMachine:
                 date_range = pd.date_range(
@@ -1584,6 +1586,11 @@ async def PW_Forecast(
                     consolidateZarr = False
 
                 now = time.time()
+                HRRRdropvars = []
+                if utcTime < datetime.datetime(2025, 7, 7):
+                    HRRRdropvars.append("DSWRF_surface")
+                    HRRRdropvars.append("CAPE_surface")
+
                 with xr.open_mfdataset(
                     zarrList,
                     engine="zarr",
@@ -1595,10 +1602,7 @@ async def PW_Forecast(
                         "secret": aws_secret_access_key,
                     },
                     cache=False,
-                    drop_variables=[
-                        "DSWRF_surface",
-                        "CAPE_surface",
-                    ],
+                    drop_variables=HRRRdropvars,
                 ) as xr_mf:
                     # Correct for Pressure Switch
                     if "PRES_surface" in xr_mf.data_vars:
@@ -1758,6 +1762,11 @@ async def PW_Forecast(
 
                 now = time.time()
 
+                NBMdropvars = []
+                if utcTime < datetime.datetime(2025, 10, 5):
+                    NBMdropvars.append("DSWRF_surface")
+                    NBMdropvars.append("CAPE_surface")
+
                 with xr.open_mfdataset(
                     zarrList,
                     engine="zarr",
@@ -1769,7 +1778,7 @@ async def PW_Forecast(
                         "secret": aws_secret_access_key,
                     },
                     cache=False,
-                    drop_variables=["DSWRF_surface", "CAPE_surface"],
+                    drop_variables=NBMdropvars,
                 ) as xr_mf:
                     now2 = time.time()
                     if TIMING:
@@ -1883,6 +1892,22 @@ async def PW_Forecast(
             ]
             consolidateZarr = False
 
+        GFSdropvars = []
+
+        # Check if before October 5, 2025, and drop "DSWRF_surface", "CAPE_surface" if so
+        # This avoids issues with missing variable in earlier files
+        if utcTime < datetime.datetime(2025, 10, 5):
+            GFSdropvars.append("DSWRF_surface")
+            GFSdropvars.append("CAPE_surface")
+            GFSdropvars.append("PRES_station")
+            GFSdropvars.append("DUVB_surface")
+
+        # Fix an issue with the chunking of "PRES_surface" during september 2025
+        if (utcTime >= datetime.datetime(2025, 9, 1)) and (
+            utcTime < datetime.datetime(2025, 10, 1)
+        ):
+            GFSdropvars.append("PRES_surface")
+
         with xr.open_mfdataset(
             zarrList,
             engine="zarr",
@@ -1891,7 +1916,7 @@ async def PW_Forecast(
             parallel=True,
             storage_options={"key": aws_access_key_id, "secret": aws_secret_access_key},
             cache=False,
-            drop_variables=["DSWRF_surface", "CAPE_surface"],
+            drop_variables=GFSdropvars,
         ) as xr_mf:
             now2 = time.time()
             if TIMING:
@@ -1929,7 +1954,7 @@ async def PW_Forecast(
                     "time",
                     "VIS_surface",
                     "GUST_surface",
-                    "PRES_surface",
+                    "PRMSL_meansealevel",
                     "TMP_2maboveground",
                     "DPT_2maboveground",
                     "RH_2maboveground",
@@ -2362,6 +2387,7 @@ async def PW_Forecast(
         try:  # Add a fallback to GFS if these don't work
             # HRRR
             if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+
                 HRRR_StartIDX = nearest_index(dataOut_hrrrh[:, 0], baseDayUTC_Grib)
                 H2_StartIDX = nearest_index(dataOut_h2[:, 0], dataOut_hrrrh[-1, 0]) + 1
 
@@ -3555,11 +3581,14 @@ async def PW_Forecast(
 
     # Station Pressure
     if "gfs" in sourceList:
-        InterPhour[:, DATA_HOURLY["station_pressure"]] = clipLog(
-            GFS_Merged[:, GFS["station_pressure"]],
-            CLIP_PRESSURE["min"],
-            CLIP_PRESSURE["max"],
-            "Station Pressure Hour",
+        InterPhour[:, DATA_HOURLY["station_pressure"]] = (
+            clipLog(
+                GFS_Merged[:, GFS["station_pressure"]],
+                CLIP_PRESSURE["min"],
+                CLIP_PRESSURE["max"],
+                "Station Pressure Hour",
+            )
+            * pressUnits
         )
 
     # Set temperature units
@@ -3705,8 +3734,9 @@ async def PW_Forecast(
     InterPhour[:, DATA_HOURLY["storm_dist"] : DATA_HOURLY["rain"]] = InterPhour[
         :, DATA_HOURLY["storm_dist"] : DATA_HOURLY["rain"]
     ].round(2)
-    InterPhour[:, DATA_HOURLY["fire"] : 26] = InterPhour[
-        :, DATA_HOURLY["fire"] : 26
+    InterPhour[:, DATA_HOURLY["fire"]] = InterPhour[:, DATA_HOURLY["fire"]].round(2)
+    InterPhour[:, DATA_HOURLY["station_pressure"]] = InterPhour[
+        :, DATA_HOURLY["station_pressure"]
     ].round(2)
 
     # Round to 4
@@ -4623,14 +4653,17 @@ async def PW_Forecast(
     )
 
     # Station Pressure from GFS
-    InterPcurrent[DATA_CURRENT["station_pressure"]] = clipLog(
-        (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["station_pressure"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["station_pressure"]] * interpFac2
-        ),
-        CLIP_PRESSURE["min"],
-        CLIP_PRESSURE["max"],
-        "Station Pressure Current",
+    InterPcurrent[DATA_CURRENT["station_pressure"]] = (
+        clipLog(
+            (
+                GFS_Merged[currentIDX_hrrrh_A, GFS["station_pressure"]] * interpFac1
+                + GFS_Merged[currentIDX_hrrrh, GFS["station_pressure"]] * interpFac2
+            ),
+            CLIP_PRESSURE["min"],
+            CLIP_PRESSURE["max"],
+            "Station Pressure Current",
+        )
+        * pressUnits
     )
 
     # VIS, SubH, NBM then HRRR, then GFS
@@ -4689,7 +4722,6 @@ async def PW_Forecast(
             CLIP_SMOKE["max"],
             "Smoke Current",
         )
-
     else:
         InterPcurrent[DATA_CURRENT["smoke"]] = MISSING_DATA
 

@@ -172,7 +172,7 @@ hisPeriod = 48
 # Define the subset of variables to download as a list of strings
 matchstring_2m = ":((DPT|TMP|APTMP|RH):2 m above ground:)"
 matchstring_su = (
-    ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|PRES|VIS|GUST|CAPE):surface:.*hour fcst)"
+    ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|PRES|VIS|GUST|CAPE|PRES):surface:.*hour fcst)"
 )
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
 matchstring_oz = "(:TOZNE:)"
@@ -782,11 +782,11 @@ for i in range(hisPeriod, 0, -6):
     # with ProgressBar():
     xarray_hist_merged["Storm_Distance"] = (
         ("time", "latitude", "longitude"),
-        da.stack(distances).rechunk((6, 100, 100)).compute(),
+        da.stack(distances).rechunk((6, processChunk, processChunk)).compute(),
     )
     xarray_hist_merged["Storm_Direction"] = (
         ("time", "latitude", "longitude"),
-        da.stack(directions).rechunk((6, 100, 100)).compute(),
+        da.stack(directions).rechunk((6, processChunk, processChunk)).compute(),
     )
 
     # UV is an average from zero to 6, repeating throughout the time series.
@@ -849,10 +849,8 @@ for i in range(hisPeriod, 0, -6):
 
     # Save the dataset with compression and filters for all variables
     # Use the same encoding as last time but with larger chuncks to speed up read times
-
-    # No chunking since only one time step
     encoding = {
-        vname: {"chunks": (6, processChunk, processChunk)} for vname in zarrVars[1:-2]
+        vname: {"chunks": (6, processChunk, processChunk)} for vname in zarrVars[1:]
     }
 
     # with ProgressBar():
