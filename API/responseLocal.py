@@ -1586,6 +1586,10 @@ async def PW_Forecast(
                     consolidateZarr = False
 
                 now = time.time()
+                HRRRdropvars = []
+                if utcTime < datetime.datetime(2025, 7, 7):
+                    HRRRdropvars.append("DSWRF_surface")
+                    HRRRdropvars.append("CAPE_surface")
                 with xr.open_mfdataset(
                     zarrList,
                     engine="zarr",
@@ -1597,10 +1601,7 @@ async def PW_Forecast(
                         "secret": aws_secret_access_key,
                     },
                     cache=False,
-                    drop_variables=[
-                        "DSWRF_surface",
-                        "CAPE_surface",
-                    ],
+                    drop_variables=HRRRdropvars,
                 ) as xr_mf:
                     # Correct for Pressure Switch
                     if "PRES_surface" in xr_mf.data_vars:
@@ -1760,6 +1761,11 @@ async def PW_Forecast(
 
                 now = time.time()
 
+                NBMdropvars = []
+                if utcTime < datetime.datetime(2025, 10, 5):
+                    NBMdropvars.append("DSWRF_surface")
+                    NBMdropvars.append("CAPE_surface")
+
                 with xr.open_mfdataset(
                     zarrList,
                     engine="zarr",
@@ -1771,7 +1777,7 @@ async def PW_Forecast(
                         "secret": aws_secret_access_key,
                     },
                     cache=False,
-                    drop_variables=["DSWRF_surface", "CAPE_surface"],
+                    drop_variables=NBMdropvars,
                 ) as xr_mf:
                     now2 = time.time()
                     if TIMING:
@@ -1885,6 +1891,22 @@ async def PW_Forecast(
             ]
             consolidateZarr = False
 
+        GFSdropvars = []
+
+        # Check if before October 8, 2025, and drop "DSWRF_surface", "CAPE_surface" if so
+        # This avoids issues with missing variable in earlier files
+        if utcTime < datetime.datetime(2025, 10, 5):
+            GFSdropvars.append("DSWRF_surface")
+            GFSdropvars.append("CAPE_surface")
+            GFSdropvars.append("PRES_station")
+            GFSdropvars.append("DUVB_surface")
+
+        # Fix an issue with the chunking of "PRES_surface" during september 2025
+        if ((utcTime >= datetime.datetime(2025, 9, 1)) and (
+            utcTime < datetime.datetime(2025, 10, 1))):
+
+            GFSdropvars.append("PRES_surface")
+
         with xr.open_mfdataset(
             zarrList,
             engine="zarr",
@@ -1893,8 +1915,9 @@ async def PW_Forecast(
             parallel=True,
             storage_options={"key": aws_access_key_id, "secret": aws_secret_access_key},
             cache=False,
-            drop_variables=["DSWRF_surface", "CAPE_surface"],
+            drop_variables=GFSdropvars,
         ) as xr_mf:
+
             now2 = time.time()
             if TIMING:
                 print("GFS Open Time")
