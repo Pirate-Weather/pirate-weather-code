@@ -778,11 +778,11 @@ for i in range(hisPeriod, 0, -6):
     # with ProgressBar():
     xarray_hist_merged["Storm_Distance"] = (
         ("time", "latitude", "longitude"),
-        da.stack(distances).rechunk((6, 100, 100)).compute(),
+        da.stack(distances).rechunk((6, processChunk, processChunk)).compute(),
     )
     xarray_hist_merged["Storm_Direction"] = (
         ("time", "latitude", "longitude"),
-        da.stack(directions).rechunk((6, 100, 100)).compute(),
+        da.stack(directions).rechunk((6, processChunk, processChunk)).compute(),
     )
 
     # UV is an average from zero to 6, repeating throughout the time series.
@@ -844,12 +844,14 @@ for i in range(hisPeriod, 0, -6):
         zarrStore = zarr.storage.LocalStore(local_path)
 
     # Save the dataset with compression and filters for all variables
-    # Use the same encoding as last time but with larger chuncks to speed up read times
-
-    # No chunking since only one time step
+    # Use the same encoding as last time but with larger chunks to speed up read times
+    # Small fix for PRES_station/ PRES_surface
     encoding = {
-        vname: {"chunks": (6, processChunk, processChunk)} for vname in zarrVars[1:-2]
+        vname: {"chunks": (6, processChunk, processChunk)}
+        for vname in zarrVars[1:]
+        if vname != "PRES_surface"
     }
+    encoding["PRES_station"] = {"chunks": (6, processChunk, processChunk)}
 
     # with ProgressBar():
     xarray_hist_merged.to_zarr(
