@@ -1307,8 +1307,8 @@ async def PW_Forecast(
                 status_code=400,
                 detail="Requested Time is in the Past. Please Use Timemachine.",
             )
-    elif (nowTime - utcTime) > datetime.timedelta(hours=24):
-        # More than 47 hours ago must be time machine request
+    elif (nowTime - utcTime) > datetime.timedelta(hours=30):
+        # More than 30 hours ago must be time machine request
         if (
             ("localhost" in str(request.url))
             or ("timemachine" in str(request.url))
@@ -1328,8 +1328,8 @@ async def PW_Forecast(
             raise HTTPException(
                 status_code=400, detail="Requested Time is in the Future"
             )
-    elif (nowTime - utcTime) < datetime.timedelta(hours=24):
-        # If within the last 24 hours, it may or may not be a timemachine request
+    elif (nowTime - utcTime) < datetime.timedelta(hours=30):
+        # If within the last 30 hours, it may or may not be a timemachine request
         if "timemachine" in str(request.url):
             timeMachineNear = True
             # This results in the API using the live zip file, but only doing a 24 hour forecast from midnight of the requested day
