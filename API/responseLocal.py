@@ -2364,7 +2364,6 @@ async def PW_Forecast(
         try:  # Add a fallback to GFS if these don't work
             # HRRR
             if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-
                 HRRR_StartIDX = nearest_index(dataOut_hrrrh[:, 0], baseDayUTC_Grib)
                 H2_StartIDX = nearest_index(dataOut_h2[:, 0], dataOut_hrrrh[-1, 0]) + 1
 
