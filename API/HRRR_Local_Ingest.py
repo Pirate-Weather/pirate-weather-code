@@ -19,6 +19,8 @@ import xarray as xr
 import zarr.storage
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
+
+from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -28,8 +30,6 @@ from API.ingest_utils import (
     mask_invalid_refc,
     validate_grib_stats,
 )
-
-from API.constants.shared_const import INGEST_VERSION_STR
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
