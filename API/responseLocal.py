@@ -1590,6 +1590,7 @@ async def PW_Forecast(
                 if utcTime < datetime.datetime(2025, 7, 7):
                     HRRRdropvars.append("DSWRF_surface")
                     HRRRdropvars.append("CAPE_surface")
+                    
                 with xr.open_mfdataset(
                     zarrList,
                     engine="zarr",
@@ -1893,7 +1894,7 @@ async def PW_Forecast(
 
         GFSdropvars = []
 
-        # Check if before October 8, 2025, and drop "DSWRF_surface", "CAPE_surface" if so
+        # Check if before October 5, 2025, and drop "DSWRF_surface", "CAPE_surface" if so
         # This avoids issues with missing variable in earlier files
         if utcTime < datetime.datetime(2025, 10, 5):
             GFSdropvars.append("DSWRF_surface")
