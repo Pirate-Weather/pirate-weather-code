@@ -1902,9 +1902,9 @@ async def PW_Forecast(
             GFSdropvars.append("DUVB_surface")
 
         # Fix an issue with the chunking of "PRES_surface" during september 2025
-        if ((utcTime >= datetime.datetime(2025, 9, 1)) and (
-            utcTime < datetime.datetime(2025, 10, 1))):
-
+        if (utcTime >= datetime.datetime(2025, 9, 1)) and (
+            utcTime < datetime.datetime(2025, 10, 1)
+        ):
             GFSdropvars.append("PRES_surface")
 
         with xr.open_mfdataset(
@@ -1917,7 +1917,6 @@ async def PW_Forecast(
             cache=False,
             drop_variables=GFSdropvars,
         ) as xr_mf:
-
             now2 = time.time()
             if TIMING:
                 print("GFS Open Time")
