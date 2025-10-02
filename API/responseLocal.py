@@ -1556,7 +1556,7 @@ async def PW_Forecast(
             dataOut_h2 = False
             dataOut_hrrrh = False
         else:
-            # Subh
+            # HRRRH
             # Check if timemachine request, use different sources
             if timeMachine:
                 date_range = pd.date_range(
