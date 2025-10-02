@@ -1590,7 +1590,7 @@ async def PW_Forecast(
                 if utcTime < datetime.datetime(2025, 7, 7):
                     HRRRdropvars.append("DSWRF_surface")
                     HRRRdropvars.append("CAPE_surface")
-                    
+
                 with xr.open_mfdataset(
                     zarrList,
                     engine="zarr",
