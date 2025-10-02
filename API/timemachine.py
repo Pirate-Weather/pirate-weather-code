@@ -13,8 +13,6 @@ from astral.sun import sun
 from dateutil.relativedelta import relativedelta
 from fastapi import HTTPException
 from fastapi.responses import ORJSONResponse
-from API.PirateSimpleDayText import calculate_simple_day_text
-from API.PirateText import calculate_text
 from pirateweather_translations.dynamic_loader import load_all_translations
 from pytz import timezone, utc
 
@@ -31,6 +29,8 @@ from API.constants.timemachine_const import (
     DAILY_PRECIP_THRESHOLD,
     ICE_ACCUMULATION,
 )
+from API.PirateSimpleDayText import calculate_simple_day_text
+from API.PirateText import calculate_text
 
 Translations = load_all_translations()
 

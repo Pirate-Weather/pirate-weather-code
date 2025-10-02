@@ -19,12 +19,6 @@ import xarray as xr
 import zarr.storage
 from dask.diagnostics import ProgressBar
 from herbie import FastHerbie, HerbieLatest, Path
-from API.ingest_utils import (
-    interp_time_block,
-    mask_invalid_data,
-    mask_invalid_refc,
-    validate_grib_stats,
-)
 from xrspatial import direction, proximity
 
 from API.constants.shared_const import INGEST_VERSION_STR
@@ -33,6 +27,10 @@ from API.ingest_utils import (
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
     HISTORY_PERIODS,
+    interp_time_block,
+    mask_invalid_data,
+    mask_invalid_refc,
+    validate_grib_stats,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -848,10 +846,14 @@ for i in range(hisPeriod, 0, -6):
         zarrStore = zarr.storage.LocalStore(local_path)
 
     # Save the dataset with compression and filters for all variables
-    # Use the same encoding as last time but with larger chuncks to speed up read times
+    # Use the same encoding as last time but with larger chunks to speed up read times
+    # Small fix for PRES_station/ PRES_surface
     encoding = {
-        vname: {"chunks": (6, processChunk, processChunk)} for vname in zarrVars[1:]
+        vname: {"chunks": (6, processChunk, processChunk)}
+        for vname in zarrVars[1:]
+        if vname != "PRES_surface"
     }
+    encoding["PRES_station"] = {"chunks": (6, processChunk, processChunk)}
 
     # with ProgressBar():
     xarray_hist_merged.to_zarr(
