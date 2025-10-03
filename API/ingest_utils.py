@@ -32,7 +32,7 @@ FINAL_CHUNK_SIZES = {
     "GEFS": 3,
     "ECMWF": 3,
     "NBM_Fire": 5,
-    "RTMA": 5,
+    "RTMA": 25,
 }
 
 HISTORY_PERIODS = {
