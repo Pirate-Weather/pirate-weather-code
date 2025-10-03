@@ -12,22 +12,22 @@ import warnings
 
 # Define ECCODES_DEFINITION_PATH env variable for eccodes
 # This is needed in my testing instance- should not be required for the docker image
-os.environ["ECCODES_DEFINITION_PATH"] = "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+os.environ["ECCODES_DEFINITION_PATH"] = (
+    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+)
 
 
-import dask.array as da
 import numpy as np
-import pandas as pd
 import s3fs
 import xarray as xr
 import zarr
-from herbie import FastHerbie, Path, Herbie
+from herbie import Herbie
 from herbie.fast import Herbie_latest
 from metpy.calc import relative_humidity_from_specific_humidity
 from metpy.units import units
 
 from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_utils import CHUNK_SIZES, FINAL_CHUNK_SIZES, mask_invalid_data
+from API.ingest_utils import CHUNK_SIZES, FINAL_CHUNK_SIZES
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -156,9 +156,9 @@ xarray_analysis_merged = xr.merge(xarray_herbie_list, compat="override")
 
 # Convert RH from specific humidity and pressure and add it to the dataset
 rh_2m = relative_humidity_from_specific_humidity(
-    pressure = xarray_analysis_merged["sp"] * units.Pa,
-    temperature = xarray_analysis_merged["t2m"]  * units.degK,
-    specific_humidity = xarray_analysis_merged["sh2"],
+    pressure=xarray_analysis_merged["sp"] * units.Pa,
+    temperature=xarray_analysis_merged["t2m"] * units.degK,
+    specific_humidity=xarray_analysis_merged["sh2"],
 )
 
 xarray_analysis_merged["rh"] = rh_2m.metpy.dequantify()
@@ -204,10 +204,11 @@ keep_vars = [v for v in zarr_vars if v in xarray_analysis_merged.data_vars]
 xarray_analysis_merged = xarray_analysis_merged[keep_vars]
 
 # Merge the arrays into a single 3D array
-xarray_analysis_stack = xarray_analysis_merged.to_stacked_array(new_dim='var',
-                                                                    sample_dims=['y', 'x']).chunk(
-    chunks={"var": -1, "x": final_chunk, "y": final_chunk}
-).transpose("var", "y", "x")
+xarray_analysis_stack = (
+    xarray_analysis_merged.to_stacked_array(new_dim="var", sample_dims=["y", "x"])
+    .chunk(chunks={"var": -1, "x": final_chunk, "y": final_chunk})
+    .transpose("var", "y", "x")
+)
 
 # Convert from xarray to the raw dask array
 dask_var_array = xarray_analysis_stack.data
@@ -233,8 +234,7 @@ zarr_array = zarr.create_array(
     dtype="float32",
 )
 
-dask_var_array.to_zarr(
-    zarr_array, overwrite=True, compute=True)
+dask_var_array.to_zarr(zarr_array, overwrite=True, compute=True)
 
 if save_type == "S3":
     zarr_store.close()
