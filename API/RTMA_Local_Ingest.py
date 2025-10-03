@@ -41,9 +41,7 @@ logging.basicConfig(
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
-forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/mnt/nvme/data/RTMA"
-)
+forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/RTMA")
 forecast_process_path = forecast_process_dir + "/RTMA_Process"
 tmp_dir = forecast_process_dir + "/Downloads"
 
