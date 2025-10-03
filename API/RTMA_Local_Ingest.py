@@ -74,7 +74,6 @@ if save_type == "Download":
     if not os.path.exists(forecast_path + "/" + ingest_version):
         os.makedirs(forecast_path + "/" + ingest_version)
 
-
 # %% Define base time from the most recent run
 t0 = time.time()
 
