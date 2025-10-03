@@ -42,12 +42,12 @@ logging.basicConfig(
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
 forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/mnt/nvme/data/RTMA_RU"
+    "forecast_process_dir", default="/mnt/nvme/data/RTMA"
 )
-forecast_process_path = forecast_process_dir + "/RTMA_RU_Process"
-tmpDIR = forecast_process_dir + "/Downloads"
+forecast_process_path = forecast_process_dir + "/RTMA_Process"
+tmp_dir = forecast_process_dir + "/Downloads"
 
-forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/RTMA_RU")
+forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/RTMA")
 
 # Define the processing and final chunk size
 process_chunk = CHUNK_SIZES["RTMA"]
@@ -67,8 +67,8 @@ else:
     shutil.rmtree(forecast_process_dir)
     os.makedirs(forecast_process_dir)
 
-if not os.path.exists(tmpDIR):
-    os.makedirs(tmpDIR)
+if not os.path.exists(tmp_dir):
+    os.makedirs(tmp_dir)
 
 if save_type == "Download":
     if not os.path.exists(forecast_path + "/" + ingest_version):
@@ -78,37 +78,37 @@ if save_type == "Download":
 t0 = time.time()
 
 latest_run = Herbie_latest(
-    model="rtma_ru",
+    model="rtma",
     n=5,
-    freq="15min",
+    freq="1h",
     product="anl",
     verbose=True,
     priority="aws",
-    save_dir=tmpDIR,
+    save_dir=tmp_dir,
 )
 
 base_time = latest_run.date
-logging.info(f"Checking for new RTMA_RU data for base time: {base_time}")
+logging.info(f"Checking for new RTMA data for base time: {base_time}")
 
 # Check if this is newer than the current file
 if save_type == "S3":
-    if s3.exists(forecast_path + "/" + ingest_version + "/RTMA_RU.time.pickle"):
+    if s3.exists(forecast_path + "/" + ingest_version + "/RTMA.time.pickle"):
         with s3.open(
-            forecast_path + "/" + ingest_version + "/RTMA_RU.time.pickle", "rb"
+            forecast_path + "/" + ingest_version + "/RTMA.time.pickle", "rb"
         ) as f:
             previous_base_time = pickle.load(f)
         if previous_base_time >= base_time:
-            logging.info("No Update to RTMA_RU, ending")
+            logging.info("No Update to RTMA, ending")
             sys.exit()
 
 else:
-    if os.path.exists(forecast_path + "/" + ingest_version + "/RTMA_RU.time.pickle"):
+    if os.path.exists(forecast_path + "/" + ingest_version + "/RTMA.time.pickle"):
         with open(
-            forecast_path + "/" + ingest_version + "/RTMA_RU.time.pickle", "rb"
+            forecast_path + "/" + ingest_version + "/RTMA.time.pickle", "rb"
         ) as file:
             previous_base_time = pickle.load(file)
         if previous_base_time >= base_time:
-            logging.info("No Update to RTMA_RU, ending")
+            logging.info("No Update to RTMA, ending")
             sys.exit()
 
 
@@ -137,16 +137,16 @@ match_strings = (
 
 fh_analysis = Herbie(
     base_time,
-    model="rtma_ru",
+    model="rtma",
     product="anl",
     verbose=False,
     priority="aws",
-    save_dir=tmpDIR,
+    save_dir=tmp_dir,
 )
 
 fh_analysis.download(match_strings, verbose=False)
 
-logging.info("RTMA_RU GRIB file downloaded successfully.")
+logging.info("RTMA GRIB file downloaded successfully.")
 
 xarray_herbie_list = fh_analysis.xarray(match_strings)
 
@@ -215,10 +215,10 @@ dask_var_array = xarray_analysis_stack.data
 # Create a zarr backed dask array
 if save_type == "S3":
     zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/RTMA_RU3.zarr.zip", mode="w", compression=0
+        forecast_process_dir + "/RTMA3.zarr.zip", mode="w", compression=0
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/RTMA_RU.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/RTMA.zarr")
 
 # Create zarr array
 zarr_array = zarr.create_array(
@@ -245,29 +245,29 @@ if save_type == "S3":
 # Save to Production Path (Existing Logic)
 if save_type == "S3":
     s3.put_file(
-        forecast_process_dir + "/RTMA_RU.zarr.zip",
-        forecast_path + "/" + ingest_version + "/RTMA_RU.zarr.zip",
+        forecast_process_dir + "/RTMA.zarr.zip",
+        forecast_path + "/" + ingest_version + "/RTMA.zarr.zip",
     )
     logging.info("Final Zarr zip file uploaded to S3.")
 
-    with open(forecast_process_dir + "/RTMA_RU.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/RTMA.time.pickle", "wb") as file:
         pickle.dump(base_time, file)
     s3.put_file(
-        forecast_process_dir + "/RTMA_RU.time.pickle",
-        forecast_path + "/" + ingest_version + "/RTMA_RU.time.pickle",
+        forecast_process_dir + "/RTMA.time.pickle",
+        forecast_path + "/" + ingest_version + "/RTMA.time.pickle",
     )
     logging.info("Time pickle file uploaded to S3.")
 
 else:
-    with open(forecast_process_dir + "/RTMA_RU.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/RTMA.time.pickle", "wb") as file:
         pickle.dump(base_time, file)
     shutil.move(
-        forecast_process_dir + "/RTMA_RU.time.pickle",
-        forecast_path + "/" + ingest_version + "/RTMA_RU.time.pickle",
+        forecast_process_dir + "/RTMA.time.pickle",
+        forecast_path + "/" + ingest_version + "/RTMA.time.pickle",
     )
     shutil.copytree(
-        forecast_process_dir + "/RTMA_RU.zarr",
-        forecast_path + "/" + ingest_version + "/RTMA_RU.zarr",
+        forecast_process_dir + "/RTMA.zarr",
+        forecast_path + "/" + ingest_version + "/RTMA.zarr",
         dirs_exist_ok=True,
     )
     logging.info("Final Zarr and time pickle files moved to local storage.")
