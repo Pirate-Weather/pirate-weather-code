@@ -1,4 +1,4 @@
-# %% RTMA Rapid Update Processing script using Dask, FastHerbie, and MetPy
+# %% RTMA Processing script using Dask, FastHerbie, and MetPy
 # Alexander Rey, September 2025
 
 # %% Import modules
