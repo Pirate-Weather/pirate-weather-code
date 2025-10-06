@@ -27,7 +27,12 @@ from metpy.calc import relative_humidity_from_specific_humidity
 from metpy.units import units
 
 from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_utils import CHUNK_SIZES, FINAL_CHUNK_SIZES, mask_invalid_data, earth_relative_wind_components
+from API.ingest_utils import (
+    CHUNK_SIZES,
+    FINAL_CHUNK_SIZES,
+    mask_invalid_data,
+    earth_relative_wind_components,
+)
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -154,7 +159,9 @@ xarray_herbie_list = fh_analysis.xarray(match_strings)
 xarray_analysis_merged = xr.merge(xarray_herbie_list, compat="override")
 
 # Assign coordinates from one of the datasets to the merged dataset
-xarray_analysis_merged = xarray_analysis_merged.assign_coords(xarray_herbie_list[0].metpy.parse_cf().coords)
+xarray_analysis_merged = xarray_analysis_merged.assign_coords(
+    xarray_herbie_list[0].metpy.parse_cf().coords
+)
 
 # Convert RH from specific humidity and pressure and add it to the dataset
 rh_2m = relative_humidity_from_specific_humidity(
@@ -167,8 +174,8 @@ xarray_analysis_merged["rh"] = rh_2m.metpy.dequantify()
 
 # Convert winds from grid relative to earth relative
 u_earth, v_earth = earth_relative_wind_components(
-    xarray_analysis_merged["u10"],
-    xarray_analysis_merged["v10"])
+    xarray_analysis_merged["u10"], xarray_analysis_merged["v10"]
+)
 
 # Put U and V back into the dataset, replacing the grid relative versions
 xarray_analysis_merged["u10"].data = u_earth

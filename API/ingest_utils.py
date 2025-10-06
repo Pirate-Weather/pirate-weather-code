@@ -7,7 +7,6 @@ import time
 
 import cartopy.crs as ccrs
 import dask.array as da
-from metpy.units import units
 import numpy as np
 import xarray as xr
 from herbie import Path
@@ -258,6 +257,8 @@ def earth_relative_wind_components(ugrd, vgrd):
 
     xx, yy = np.meshgrid(x, y)
 
-    ut, vt = ccrs.PlateCarree().transform_vectors(data_crs, xx, yy, ugrd.values, vgrd.values)
+    ut, vt = ccrs.PlateCarree().transform_vectors(
+        data_crs, xx, yy, ugrd.values, vgrd.values
+    )
 
     return ut, vt
