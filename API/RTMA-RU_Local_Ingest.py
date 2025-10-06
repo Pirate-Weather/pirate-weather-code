@@ -27,7 +27,7 @@ from metpy.calc import relative_humidity_from_specific_humidity
 from metpy.units import units
 
 from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_utils import CHUNK_SIZES, FINAL_CHUNK_SIZES
+from API.ingest_utils import CHUNK_SIZES, FINAL_CHUNK_SIZES, mask_invalid_data, earth_relative_wind_components
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -153,6 +153,9 @@ xarray_herbie_list = fh_analysis.xarray(match_strings)
 # Merge the three datasets into one
 xarray_analysis_merged = xr.merge(xarray_herbie_list, compat="override")
 
+# Assign coordinates from one of the datasets to the merged dataset
+xarray_analysis_merged = xarray_analysis_merged.assign_coords(xarray_herbie_list[0].metpy.parse_cf().coords)
+
 # Convert RH from specific humidity and pressure and add it to the dataset
 rh_2m = relative_humidity_from_specific_humidity(
     pressure=xarray_analysis_merged["sp"] * units.Pa,
@@ -162,25 +165,15 @@ rh_2m = relative_humidity_from_specific_humidity(
 
 xarray_analysis_merged["rh"] = rh_2m.metpy.dequantify()
 
+# Convert winds from grid relative to earth relative
+u_earth, v_earth = earth_relative_wind_components(
+    xarray_analysis_merged["u10"],
+    xarray_analysis_merged["v10"])
 
-# Rename variables
-rename_dict = {
-    "t2m": "TMP_2maboveground",
-    "d2m": "DPT_2maboveground",
-    "rh": "RH_2maboveground",
-    "u10": "UGRD_10maboveground",
-    "v10": "VGRD_10maboveground",
-    "i10fg": "GUST_10maboveground",
-    "vis": "VIS_surface",
-    "sp": "PRES_station",
-    "tcc": "TCDC_entireatmosphere",
-}
+# Put U and V back into the dataset, replacing the grid relative versions
+xarray_analysis_merged["u10"].data = u_earth
+xarray_analysis_merged["v10"].data = v_earth
 
-rename_dict = {
-    k: v for k, v in rename_dict.items() if k in xarray_analysis_merged.data_vars
-}
-xarray_analysis_merged = xarray_analysis_merged.rename(rename_dict)
-logging.info("Variables renamed for consistency.")
 
 # Drop time as a coordinate
 model_UNIX_time = xarray_analysis_merged.time.data.astype("datetime64[s]").astype(int)
@@ -197,20 +190,18 @@ xarray_analysis_merged["time"] = (
     ),
 )
 
+# Drop the sh2 variable as we no longer need it
+xarray_analysis_merged = xarray_analysis_merged.drop_vars("sh2")
 
-# Only keep required variables
-keep_vars = [v for v in zarr_vars if v in xarray_analysis_merged.data_vars]
-xarray_analysis_merged = xarray_analysis_merged[keep_vars]
-
-# Merge the arrays into a single 3D array
+# Merge the arrays into a single 3D array, add a 1 length time dimension, and rechunk
 xarray_analysis_stack = (
     xarray_analysis_merged.to_stacked_array(new_dim="var", sample_dims=["y", "x"])
-    .chunk(chunks={"var": -1, "x": final_chunk, "y": final_chunk})
-    .transpose("var", "y", "x")
+    .expand_dims("time", axis=1)
+    .chunk(chunks={"var": -1, "time": 1, "x": final_chunk, "y": final_chunk})
+    .transpose("var", "time", "y", "x")
 )
-
-# Convert from xarray to the raw dask array
-dask_var_array = xarray_analysis_stack.data
+# Mask out invalid data
+dask_var_array = mask_invalid_data(xarray_analysis_stack)
 
 # Create a zarr backed dask array
 if save_type == "S3":
@@ -225,10 +216,11 @@ zarr_array = zarr.create_array(
     store=zarr_store,
     shape=(
         len(zarr_vars),
+        1,
         dask_var_array.shape[1],
         dask_var_array.shape[2],
     ),
-    chunks=(len(zarr_vars), final_chunk, final_chunk),
+    chunks=(len(zarr_vars), 1, final_chunk, final_chunk),
     compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
     dtype="float32",
 )

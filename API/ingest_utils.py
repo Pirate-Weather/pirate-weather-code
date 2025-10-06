@@ -5,7 +5,9 @@ import re
 import sys
 import time
 
+import cartopy.crs as ccrs
 import dask.array as da
+from metpy.units import units
 import numpy as np
 import xarray as xr
 from herbie import Path
@@ -229,3 +231,33 @@ def validate_grib_stats(gribCheck):
 
     # all good
     return True
+
+
+def earth_relative_wind_components(ugrd, vgrd):
+    # Based off: https://unidata.github.io/python-gallery/examples/500hPa_Absolute_Vorticity_winds.html#function-to-compute-earth-relative-winds
+    """Calculate the north-relative components of the wind from the grid-relative
+    components using Cartopy transform_vectors.
+
+    Parameters
+    ----------
+        ugrd : Xarray DataArray (M, N)
+            grid relative u-component of the wind
+        vgrd : Xarray DataArray (M, N)
+            grid relative v-component of the wind
+
+    Returns
+    -------
+        unr, vnr : tuple of array-like Quantity
+            The north-relative wind components in the X (East-West) and Y (North-South)
+            directions, respectively.
+    """
+    data_crs = ugrd.metpy_crs.metpy.cartopy_crs
+
+    x = ugrd.x.values
+    y = ugrd.y.values
+
+    xx, yy = np.meshgrid(x, y)
+
+    ut, vt = ccrs.PlateCarree().transform_vectors(data_crs, xx, yy, ugrd.values, vgrd.values)
+
+    return ut, vt
