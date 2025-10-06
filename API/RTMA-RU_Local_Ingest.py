@@ -207,6 +207,7 @@ xarray_analysis_stack = (
     .chunk(chunks={"var": -1, "time": 1, "x": final_chunk, "y": final_chunk})
     .transpose("var", "time", "y", "x")
 )
+
 # Mask out invalid data
 dask_var_array = mask_invalid_data(xarray_analysis_stack)
 
