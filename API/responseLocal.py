@@ -1251,7 +1251,7 @@ async def PW_Forecast(
                             locationReq[2], "%Y-%m-%dT%H:%M:%S"
                         )
 
-                        # If no time zome specified, assume local time, and convert
+                        # If no time zone specified, assume local time, and convert
                         tz_offsetLocIN = {
                             "lat": lat,
                             "lng": az_Lon,
@@ -3733,10 +3733,8 @@ async def PW_Forecast(
     InterPhour[:, DATA_HOURLY["storm_dist"] : DATA_HOURLY["rain"]] = InterPhour[
         :, DATA_HOURLY["storm_dist"] : DATA_HOURLY["rain"]
     ].round(2)
-    InterPhour[:, DATA_HOURLY["fire"]] = InterPhour[:, DATA_HOURLY["fire"]].round(2)
-    InterPhour[:, DATA_HOURLY["station_pressure"]] = InterPhour[
-        :, DATA_HOURLY["station_pressure"]
-    ].round(2)
+    # Round remaining to 2
+    InterPhour[:, DATA_HOURLY["fire"]:] = InterPhour[:, DATA_HOURLY["fire"]:].round(2)
 
     # Round to 4
     InterPhour[:, DATA_HOURLY["type"] : DATA_HOURLY["prob"]] = InterPhour[
