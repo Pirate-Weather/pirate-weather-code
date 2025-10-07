@@ -1,29 +1,31 @@
-#%% Script to initialize the ERA5 data from the Google Cloud public dataset
+# %% Script to initialize the ERA5 data from the Google Cloud public dataset
 # Alexander Rey. October 2025
 
 import xarray as xr
 
 # Optimize dask for reading large zarr datasets
 import dask
-dask.config.set({
-    "array.slicing.split_large_chunks": True,
-    "optimization.fuse.active": True,
-})
+
+dask.config.set(
+    {
+        "array.slicing.split_large_chunks": True,
+        "optimization.fuse.active": True,
+    }
+)
 
 
 # Function to initialize in ERA5 xarray dataset
 def init_ERA5():
     # Open the ERA5 dataset from Google Cloud
     dsERA5 = xr.open_zarr(
-        'gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3',
-        chunks={'time': 48},
-        storage_options=dict(token='anon'),
+        "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3",
+        chunks={"time": 48},
+        storage_options=dict(token="anon"),
     )
 
-    lats = dsERA5['latitude'][:]
-    lons = dsERA5['longitude'][:]
-    times = dsERA5['time'][:]
-
+    lats = dsERA5["latitude"][:]
+    lons = dsERA5["longitude"][:]
+    times = dsERA5["time"][:]
 
     return dsERA5, lats, lons, times
 

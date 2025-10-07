@@ -3734,7 +3734,7 @@ async def PW_Forecast(
         :, DATA_HOURLY["storm_dist"] : DATA_HOURLY["rain"]
     ].round(2)
     # Round remaining to 2
-    InterPhour[:, DATA_HOURLY["fire"]:] = InterPhour[:, DATA_HOURLY["fire"]:].round(2)
+    InterPhour[:, DATA_HOURLY["fire"] :] = InterPhour[:, DATA_HOURLY["fire"] :].round(2)
 
     # Round to 4
     InterPhour[:, DATA_HOURLY["type"] : DATA_HOURLY["prob"]] = InterPhour[
