@@ -224,21 +224,18 @@ def validate_grib_stats(gribCheck):
 
 def earth_relative_wind_components(ugrd, vgrd):
     # Based off: https://unidata.github.io/python-gallery/examples/500hPa_Absolute_Vorticity_winds.html#function-to-compute-earth-relative-winds
-    """Calculate the north-relative components of the wind from the grid-relative
-    components using Cartopy transform_vectors.
+    """Calculate north-relative wind components from grid-relative components.
 
-    Parameters
-    ----------
-        ugrd : Xarray DataArray (M, N)
-            grid relative u-component of the wind
-        vgrd : Xarray DataArray (M, N)
-            grid relative v-component of the wind
+    Uses Cartopy to transform vectors from the model's grid-relative projection
+    to a standard Plate Carree projection (earth-relative).
 
-    Returns
-    -------
-        unr, vnr : tuple of array-like Quantity
-            The north-relative wind components in the X (East-West) and Y (North-South)
-            directions, respectively.
+    Args:
+        ugrd: Xarray DataArray of the grid-relative u-component of the wind.
+        vgrd: Xarray DataArray of the grid-relative v-component of the wind.
+
+    Returns:
+        A tuple containing two numpy arrays: the earth-relative u-component (ut)
+        and v-component (vt) of the wind.
     """
     data_crs = ugrd.metpy_crs.metpy.cartopy_crs
 

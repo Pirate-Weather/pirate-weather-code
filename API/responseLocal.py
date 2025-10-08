@@ -2190,16 +2190,16 @@ async def PW_Forecast(
             print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
         if dataOut_nbmFire is not False:
-            nbmFireRunTime = dataOut_nbmFire[HISTORY_PERIODS["NBM"] - 6, 0]  # 48-6
+            nbmFireRunTime = dataOut_nbmFire[HISTORY_PERIODS["NBM"] - 6, 0]
 
     if readGFS:
         dataOut_gfs = zarr_results["GFS"]
         if dataOut_gfs is not False:
-            gfsRunTime = dataOut_gfs[HISTORY_PERIODS["GFS"] - 1, 0]  # 48-1
+            gfsRunTime = dataOut_gfs[HISTORY_PERIODS["GFS"] - 1, 0]
 
     if readGEFS:
         dataOut_gefs = zarr_results["GEFS"]
-        gefsRunTime = dataOut_gefs[HISTORY_PERIODS["GEFS"] - 3, 0]  # 48-3
+        gefsRunTime = dataOut_gefs[HISTORY_PERIODS["GEFS"] - 3, 0]
 
     sourceTimes = dict()
     if timeMachine is False:

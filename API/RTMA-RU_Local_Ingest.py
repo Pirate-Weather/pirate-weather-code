@@ -49,7 +49,6 @@ ingest_version = INGEST_VERSION_STR
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/mnt/nvme/data/RTMA_RU"
 )
-forecast_process_path = forecast_process_dir + "/RTMA_RU_Process"
 tmp_dir = forecast_process_dir + "/Downloads"
 
 forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/RTMA_RU")
@@ -214,7 +213,7 @@ dask_var_array = mask_invalid_data(xarray_analysis_stack)
 # Create a zarr backed dask array
 if save_type == "S3":
     zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/RTMA_RU3.zarr.zip", mode="w", compression=0
+        forecast_process_dir + "/RTMA_RU.zarr.zip", mode="w", compression=0
     )
 else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/RTMA_RU.zarr")
