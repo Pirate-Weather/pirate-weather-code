@@ -22,11 +22,7 @@ from herbie import FastHerbie, HerbieLatest, Path
 from ingest_utils import interp_time_block, mask_invalid_data, validate_grib_stats
 
 from API.constants.shared_const import INGEST_VERSION_STR, HISTORY_PERIODS
-from API.ingest_utils import (
-    CHUNK_SIZES,
-    FINAL_CHUNK_SIZES,
-    FORECAST_LEAD_RANGES
-)
+from API.ingest_utils import CHUNK_SIZES, FINAL_CHUNK_SIZES, FORECAST_LEAD_RANGES
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
