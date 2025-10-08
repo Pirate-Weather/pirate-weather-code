@@ -24,11 +24,10 @@ from dask.diagnostics import ProgressBar
 from herbie import FastHerbie
 from herbie.fast import Herbie_latest
 
-from API.constants.shared_const import INGEST_VERSION_STR
+from API.constants.shared_const import INGEST_VERSION_STR, HISTORY_PERIODS
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
-    HISTORY_PERIODS,
     getGribList,
     interp_time_block,
     mask_invalid_data,

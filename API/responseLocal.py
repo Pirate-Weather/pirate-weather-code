@@ -85,7 +85,6 @@ from API.constants.grid_const import (
     NBM_Y_MIN,
     US_BOUNDING_BOX,
 )
-from API.ingest_utils import HISTORY_PERIODS
 
 # Project imports
 from API.constants.model_const import GEFS, GFS, HRRR, HRRR_SUBH, NBM, NBM_FIRE_INDEX
@@ -94,6 +93,7 @@ from API.constants.shared_const import (
     KELVIN_TO_CELSIUS,
     MISSING_DATA,
     REFC_THRESHOLD,
+    HISTORY_PERIODS,
 )
 from API.constants.text_const import (
     CLOUD_COVER_THRESHOLDS,

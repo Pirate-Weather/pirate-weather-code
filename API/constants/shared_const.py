@@ -13,3 +13,13 @@ INGEST_VERSION_STR = "v29"
 
 # Convert Kelvin to Celsius
 KELVIN_TO_CELSIUS = 273.15
+
+HISTORY_PERIODS = {
+    "NBM": 48,
+    "HRRR": 48,
+    "HRRR_6H": 48,
+    "GFS": 192,
+    "GEFS": 48,
+    "ECMWF": 48,
+    "NBM_Fire": 48,
+}

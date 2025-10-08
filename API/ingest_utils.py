@@ -19,7 +19,7 @@ CHUNK_SIZES = {
     "HRRR": 100,
     "HRRR_6H": 100,
     "GFS": 50,
-    "GEFS": 50,
+    "GEFS": 100,
     "ECMWF": 100,
     "NBM_Fire": 100,
     "RTMA": 100,
@@ -34,16 +34,6 @@ FINAL_CHUNK_SIZES = {
     "ECMWF": 3,
     "NBM_Fire": 5,
     "RTMA": 25,
-}
-
-HISTORY_PERIODS = {
-    "NBM": 48,
-    "HRRR": 48,
-    "HRRR_6H": 48,
-    "GFS": 192,
-    "GEFS": 48,
-    "ECMWF": 48,
-    "NBM_Fire": 48,
 }
 
 FORECAST_LEAD_RANGES = {
