@@ -1091,9 +1091,10 @@ for z in [0, 4, 8, 9, 10, 11, 12, 13, 14, 15, 21]:
     )
 
     with ProgressBar():
-        da.rechunk(daskVarArrayStackDisk[z, hisPeriod-12:hisPeriod+24, :, :], (36, 100, 100)).to_zarr(
-            zarr_array, overwrite=True, compute=True
-        )
+        da.rechunk(
+            daskVarArrayStackDisk[z, hisPeriod - 12 : hisPeriod + 24, :, :],
+            (36, 100, 100),
+        ).to_zarr(zarr_array, overwrite=True, compute=True)
 
     print(zarrVars[z])
 
