@@ -39,11 +39,10 @@ Example
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import io
 import json
 import logging
-from typing import Iterable, List, Tuple, Dict, Optional
+from typing import Iterable, List, Dict, Optional
 
 import requests
 import xml.etree.ElementTree as ET
@@ -95,9 +94,11 @@ def _fetch_json(url: str, timeout: float = 30.0) -> Dict:
         logger.error("Failed to decode JSON from %s", url)
         raise ValueError(f"Invalid JSON received from {url}") from exc
 
+
 def _extract_polygons_from_cap(cap_xml: str, source_id: str):
     from xml.etree import ElementTree as ET
     from shapely.geometry import Polygon
+
     results = []
 
     try:
@@ -107,39 +108,45 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str):
         return results
 
     # Detect namespace (CAP 1.1 or 1.2)
-    ns = {'cap': root.tag.split('}')[0].strip('{')} if root.tag.startswith('{') else {}
+    ns = {"cap": root.tag.split("}")[0].strip("{")} if root.tag.startswith("{") else {}
 
     # --- Skip duplicate languages ---
     seen_languages = set()
 
-    for info in root.findall('.//cap:info' if ns else './/info', ns):
-        lang_elem = info.find('cap:language' if ns else 'language', ns)
-        lang = (lang_elem.text or '').strip().lower() if lang_elem is not None else 'unknown'
+    for info in root.findall(".//cap:info" if ns else ".//info", ns):
+        lang_elem = info.find("cap:language" if ns else "language", ns)
+        lang = (
+            (lang_elem.text or "").strip().lower()
+            if lang_elem is not None
+            else "unknown"
+        )
         if lang in seen_languages:
             continue  # Skip duplicate language section
         seen_languages.add(lang)
 
-        urgency = (info.findtext('cap:urgency' if ns else 'urgency', '').strip())
+        urgency = info.findtext("cap:urgency" if ns else "urgency", "").strip()
         if urgency == "Past":
             continue
 
-        event = info.findtext('cap:event' if ns else 'event', '').strip()
-        headline = info.findtext('cap:headline' if ns else 'headline', '').strip()
-        description = info.findtext('cap:description' if ns else 'description', '').strip()
-        severity = info.findtext('cap:severity' if ns else 'severity', '').strip()
-        effective = info.findtext('cap:effective' if ns else 'effective', '').strip()
-        expires = info.findtext('cap:expires' if ns else 'expires', '').strip()
+        event = info.findtext("cap:event" if ns else "event", "").strip()
+        headline = info.findtext("cap:headline" if ns else "headline", "").strip()
+        description = info.findtext(
+            "cap:description" if ns else "description", ""
+        ).strip()
+        severity = info.findtext("cap:severity" if ns else "severity", "").strip()
+        effective = info.findtext("cap:effective" if ns else "effective", "").strip()
+        expires = info.findtext("cap:expires" if ns else "expires", "").strip()
 
-        for area in info.findall('cap:area' if ns else 'area', ns):
-            area_desc = area.findtext('cap:areaDesc' if ns else 'areaDesc', '').strip()
-            for poly_elem in area.findall('cap:polygon' if ns else 'polygon', ns):
-                polygon_text = (poly_elem.text or '').strip()
+        for area in info.findall("cap:area" if ns else "area", ns):
+            area_desc = area.findtext("cap:areaDesc" if ns else "areaDesc", "").strip()
+            for poly_elem in area.findall("cap:polygon" if ns else "polygon", ns):
+                polygon_text = (poly_elem.text or "").strip()
                 if not polygon_text:
                     continue
                 coords = []
-                for part in polygon_text.replace(';', ' ').split():
-                    if ',' in part:
-                        lat_str, lon_str = part.split(',', 1)
+                for part in polygon_text.replace(";", " ").split():
+                    if "," in part:
+                        lat_str, lon_str = part.split(",", 1)
                     else:
                         continue
                     try:
@@ -153,7 +160,17 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str):
                     try:
                         poly = Polygon(coords)
                         results.append(
-                            (source_id, event, headline, description, severity, effective, expires, area_desc, poly)
+                            (
+                                source_id,
+                                event,
+                                headline,
+                                description,
+                                severity,
+                                effective,
+                                expires,
+                                area_desc,
+                                poly,
+                            )
                         )
                     except Exception as e:
                         print(f"Polygon construction failed: {e}")
@@ -181,6 +198,7 @@ def find_cap_expires(item, ns):
             return e.text.strip()
 
     return None
+
 
 def build_alert_polygon_geodataframe(timeout: float = 30.0) -> gpd.GeoDataFrame:
     """Retrieve CAP alert polygons from all RSS feeds and return them as a GeoDataFrame.
@@ -231,8 +249,9 @@ def build_alert_polygon_geodataframe(timeout: float = 30.0) -> gpd.GeoDataFrame:
     sources: Iterable[Dict] = sources_data.get("sources", [])
 
     # Download list of current alerts:
-    wmo_all_data = _fetch_json("https://severeweather.wmo.int" + "/v2/json/wmo_all.json",
-                          timeout=timeout)
+    wmo_all_data = _fetch_json(
+        "https://severeweather.wmo.int" + "/v2/json/wmo_all.json", timeout=timeout
+    )
     wmo_all: Iterable[Dict] = wmo_all_data.get("items", [])
 
     # Loop through each wmo record and build a list of agencies and ids
@@ -248,7 +267,6 @@ def build_alert_polygon_geodataframe(timeout: float = 30.0) -> gpd.GeoDataFrame:
         elif url:
             agency.append(url.split("/")[0])
 
-
     # Find unique agencies
     unique_agency = list(set(agency))
     unique_ids = list(set(wmo_id))
@@ -258,11 +276,15 @@ def build_alert_polygon_geodataframe(timeout: float = 30.0) -> gpd.GeoDataFrame:
     # the SWIC table. Also exclude NWS since it's handled separately.
     # Also exclude China CMA since their CAPs do not have locations.
     # Also exclude Hong Kong and Macao since their CAPs do not have expiry times.
-    excluded_ids = {"co-ungrd-es", "mv-ndmc-en",
-                    "us-noaa-nws-en-marine", "us-noaa-nws-en",
-                    "cn-cma-xx", "mo-smg-xx"}
+    excluded_ids = {
+        "co-ungrd-es",
+        "mv-ndmc-en",
+        "us-noaa-nws-en-marine",
+        "us-noaa-nws-en",
+        "cn-cma-xx",
+        "mo-smg-xx",
+    }
     # Count the number of unique ids, excluding ones from an excluded agency
-
 
     source_ids: List[str] = []
     for entry in sources:
@@ -273,7 +295,9 @@ def build_alert_polygon_geodataframe(timeout: float = 30.0) -> gpd.GeoDataFrame:
             continue
         if sid in excluded_ids:
             continue
-        if sid in unique_agency: # Only include if there is a current alert from that agency
+        if (
+            sid in unique_agency
+        ):  # Only include if there is a current alert from that agency
             source_ids.append(sid)
 
     # Container for results
@@ -301,25 +325,33 @@ def build_alert_polygon_geodataframe(timeout: float = 30.0) -> gpd.GeoDataFrame:
 
         # Get the namespace for the overall feed
         ns = {}
-        for event, elem in ET.iterparse(io.BytesIO(feed_resp.content), events=("start-ns",)):
+        for event, elem in ET.iterparse(
+            io.BytesIO(feed_resp.content), events=("start-ns",)
+        ):
             prefix, uri = elem
             # Empty prefix means default ns; store as 'default' so we can inspect
             ns[prefix or "default"] = uri
 
-
         # Iterate over all items
         itemCount = 0
         geomCount = 0
-        for item in feed_root.findall('.//item'):
-            link_elem = item.find('link')
-            cap_link = link_elem.text.strip() if link_elem is not None and link_elem.text else None
+        for item in feed_root.findall(".//item"):
+            link_elem = item.find("link")
+            cap_link = (
+                link_elem.text.strip()
+                if link_elem is not None and link_elem.text
+                else None
+            )
             if not cap_link:
                 continue
 
-
             # Check if the alert guid is in the current wmo_all list
-            guid_elem = item.find('guid')
-            guid = guid_elem.text.strip() if guid_elem is not None and guid_elem.text else None
+            guid_elem = item.find("guid")
+            guid = (
+                guid_elem.text.strip()
+                if guid_elem is not None and guid_elem.text
+                else None
+            )
 
             if not any(guid in id for id in unique_ids):
                 continue
@@ -334,20 +366,40 @@ def build_alert_polygon_geodataframe(timeout: float = 30.0) -> gpd.GeoDataFrame:
             itemCount = itemCount + 1
             poly_entries = _extract_polygons_from_cap(cap_resp.text, sid)
 
-            for src_id, event, headline, description, severity, effective, expires, area_desc, poly in poly_entries:
-                rows.append({'source_id': src_id,
-                             'event': event,
-                             'headline': headline,
-                             'description': description,
-                             'severity': severity,
-                             'effective': effective,
-                             'expires': expires,
-                             'area_desc': area_desc,
-                             'URL': cap_link})
+            for (
+                src_id,
+                event,
+                headline,
+                description,
+                severity,
+                effective,
+                expires,
+                area_desc,
+                poly,
+            ) in poly_entries:
+                rows.append(
+                    {
+                        "source_id": src_id,
+                        "event": event,
+                        "headline": headline,
+                        "description": description,
+                        "severity": severity,
+                        "effective": effective,
+                        "expires": expires,
+                        "area_desc": area_desc,
+                        "URL": cap_link,
+                    }
+                )
                 geometries.append(poly)
 
-                geomCount = geomCount +1
-        print(" Processed " + str(itemCount) + " items, found " + str(geomCount) + " polygons")
+                geomCount = geomCount + 1
+        print(
+            " Processed "
+            + str(itemCount)
+            + " items, found "
+            + str(geomCount)
+            + " polygons"
+        )
     # Create the GeoDataFrame
     if not geometries:
         # Return an empty GeoDataFrame with the expected columns if no polygons were found
@@ -355,5 +407,6 @@ def build_alert_polygon_geodataframe(timeout: float = 30.0) -> gpd.GeoDataFrame:
     gdf = gpd.GeoDataFrame(rows, geometry=geometries, crs="EPSG:4326")
     return gdf
 
-#%% TODO: Take the polyongs, generate a grid, and determine which points are inside which polygons.
+
+# %% TODO: Take the polyongs, generate a grid, and determine which points are inside which polygons.
 # Then save a zarr zip the same way NWS alerts does
