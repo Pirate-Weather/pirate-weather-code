@@ -1470,6 +1470,8 @@ async def PW_Forecast(
             visUnits = 0.001  # km
             humidUnit = 0.01  # %
             elevUnit = 1  # m
+        else:
+            unitSystem = "us"
 
     weather = WeatherParallel()
 

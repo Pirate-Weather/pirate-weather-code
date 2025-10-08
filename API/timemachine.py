@@ -175,6 +175,8 @@ async def TimeMachine(
             tempUnits = KELVIN_TO_CELSIUS  # Celsius
             pressUnits = 0.01  # Hectopascals
             visUnits = 0.001  # km
+        else:
+            unitSystem = "us"
 
     if not exclude:
         excludeParams = ""
