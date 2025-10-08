@@ -2550,7 +2550,7 @@ async def PW_Forecast(
     InterPhour[:, DATA_HOURLY["time"]] = hour_array_grib
 
     # Daily array, 12 to 12
-    # Have to redo the localize because of dayligt saving time
+    # Have to redo the localize because of daylight saving time
     day_array_grib = np.array(
         [
             pytzTZ.localize(
