@@ -3619,7 +3619,7 @@ async def PW_Forecast(
     hourIconList = []
     hourTextList = []
 
-    # Find snow and liqiud precip
+    # Find snow and liquid precip
     # Set to zero as baseline
     InterPhour[:, DATA_HOURLY["rain"]] = 0
     InterPhour[:, DATA_HOURLY["snow"]] = 0
