@@ -37,6 +37,6 @@ country_units = {
 }
 
 # Example use
-code = "GB"
-units = country_units.get(code, "SI")
-print(f"{code} uses {units} units")
+#code = "GB"
+#units = country_units.get(code, "SI")
+#print(f"{code} uses {units} units")

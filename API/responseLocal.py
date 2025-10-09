@@ -1356,7 +1356,7 @@ async def PW_Forecast(
     tzReq = tf.timezone_at(lat=lat, lng=az_Lon)
 
     # Reverse geocode the location to return a city name and approx unit system
-    loc_name = reverse_geocode.get((lat, az_lon))
+    loc_name = reverse_geocode.get((lat, az_Lon))
 
     # Timing Check
     if TIMING:
@@ -1450,7 +1450,7 @@ async def PW_Forecast(
 
     if units:
         if units == 'auto':
-            unitSystem = country_units[loc_name['country_code']].lower()
+            unitSystem = country_units.get(loc_name['country_code'], 'us').lower()
         else:
             unitSystem = units[0:2]
 
