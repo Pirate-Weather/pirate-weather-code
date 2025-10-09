@@ -44,23 +44,21 @@ Notes
 from __future__ import annotations
 
 import asyncio
-import aiohttp
 import io
-import os
 import logging
-import numpy as np
-from typing import Dict, List, Optional, Iterable, Tuple
-import zarr
-from zarr.core.dtype import VariableLengthUTF8
+import os
 import shutil
-import s3fs
 import sys
-
+from typing import Dict, Iterable, List, Optional, Tuple
 from xml.etree import ElementTree as ET
 
+import aiohttp
 import geopandas as gpd
+import numpy as np
+import s3fs
+import zarr
 from shapely.geometry import Polygon
-
+from zarr.core.dtype import VariableLengthUTF8
 
 from API.constants.shared_const import INGEST_VERSION_STR
 

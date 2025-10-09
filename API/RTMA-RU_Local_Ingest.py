@@ -15,8 +15,6 @@ import warnings
 # os.environ["ECCODES_DEFINITION_PATH"] = (
 #    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
 # )
-
-
 import numpy as np
 import s3fs
 import xarray as xr
@@ -30,8 +28,8 @@ from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
-    mask_invalid_data,
     earth_relative_wind_components,
+    mask_invalid_data,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")

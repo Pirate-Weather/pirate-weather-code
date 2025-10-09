@@ -23,7 +23,7 @@ import xarray as xr
 import zarr.storage
 from herbie import FastHerbie, Herbie, Path
 
-from API.constants.shared_const import INGEST_VERSION_STR, HISTORY_PERIODS
+from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,

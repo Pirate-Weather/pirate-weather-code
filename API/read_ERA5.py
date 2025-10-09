@@ -1,10 +1,9 @@
 # %% Script to initialize the ERA5 data from the Google Cloud public dataset
 # Alexander Rey. October 2025
 
-import xarray as xr
-
 # Optimize dask for reading large zarr datasets
 import dask
+import xarray as xr
 
 dask.config.set(
     {
