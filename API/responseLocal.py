@@ -1449,8 +1449,8 @@ async def PW_Forecast(
     elevUnit = 3.28084  # ft
 
     if units:
-        if units == 'auto':
-            unitSystem = country_units.get(loc_name['country_code'], 'us').lower()
+        if units == "auto":
+            unitSystem = country_units.get(loc_name["country_code"], "us").lower()
         else:
             unitSystem = units[0:2]
 
@@ -5162,7 +5162,7 @@ async def PW_Forecast(
             ).microseconds
             returnOBJ["flags"]["ingestVersion"] = ingestVersion
             # Return the approx city name
-            returnOBJ["flags"]["nearestCity"] = loc_name['city']
+            returnOBJ["flags"]["nearestCity"] = loc_name["city"]
 
         # if timeMachine:
         # lock.release()
