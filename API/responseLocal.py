@@ -1356,7 +1356,7 @@ async def PW_Forecast(
     tzReq = tf.timezone_at(lat=lat, lng=az_Lon)
 
     # Reverse geocode the location to return a city name and approx unit system
-    loc_name = reverse_geocode.get((lat, az_Lon))
+    loc_name = await asyncio.to_thread(reverse_geocode.get, (lat, az_Lon))
 
     # Timing Check
     if TIMING:
