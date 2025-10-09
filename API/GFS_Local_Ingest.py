@@ -21,12 +21,11 @@ from dask.diagnostics import ProgressBar
 from herbie import FastHerbie, HerbieLatest, Path
 from xrspatial import direction, proximity
 
-from API.constants.shared_const import INGEST_VERSION_STR
+from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
-    HISTORY_PERIODS,
     interp_time_block,
     mask_invalid_data,
     mask_invalid_refc,
@@ -159,8 +158,6 @@ zarrVars = (
     "CAPE_surface",
     "PRES_surface",
 )
-
-hisPeriod = 48
 
 #####################################################################################################
 # %% Download forecast data using Herbie Latest
@@ -1037,19 +1034,19 @@ w = (x_b - x_a[idx0]) / (x_a[idx1] - x_a[idx0])  # float array, shape (T_new,)
 # boolean mask of “in‐range” points
 valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
 
-# with ProgressBar():
-da.map_blocks(
-    interp_time_block,
-    daskVarArrayStackDisk,
-    idx0,
-    idx1,
-    w,
-    valid,
-    dtype="float32",
-    chunks=(1, len(hourly_timesUnix), processChunk, processChunk),
-).round(3).rechunk(
-    (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)
-).to_zarr(zarr_array, overwrite=True, compute=True)
+with ProgressBar():
+    da.map_blocks(
+        interp_time_block,
+        daskVarArrayStackDisk,
+        idx0,
+        idx1,
+        w,
+        valid,
+        dtype="float32",
+        chunks=(1, len(hourly_timesUnix), processChunk, processChunk),
+    ).round(3).rechunk(
+        (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)
+    ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
 if saveType == "S3":
@@ -1093,9 +1090,10 @@ for z in [0, 4, 8, 9, 10, 11, 12, 13, 14, 15, 21]:
     )
 
     with ProgressBar():
-        da.rechunk(daskVarArrayStackDisk[z, 36:72, :, :], (36, 100, 100)).to_zarr(
-            zarr_array, overwrite=True, compute=True
-        )
+        da.rechunk(
+            daskVarArrayStackDisk[z, hisPeriod - 12 : hisPeriod + 24, :, :],
+            (36, 100, 100),
+        ).to_zarr(zarr_array, overwrite=True, compute=True)
 
     print(zarrVars[z])
 
@@ -1154,3 +1152,6 @@ shutil.rmtree(forecast_process_dir)
 # Test Read
 T1 = time.time()
 print(T1 - T0)
+
+# G = zarr.open(forecast_path + "/" + ingestVersion + "/GFS.zarr", read_only=True)
+# G.info

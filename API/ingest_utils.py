@@ -5,6 +5,7 @@ import re
 import sys
 import time
 
+import cartopy.crs as ccrs
 import dask.array as da
 import numpy as np
 import xarray as xr
@@ -17,10 +18,11 @@ CHUNK_SIZES = {
     "NBM": 100,
     "HRRR": 100,
     "HRRR_6H": 100,
-    "GFS": 100,
+    "GFS": 50,
     "GEFS": 100,
     "ECMWF": 100,
     "NBM_Fire": 100,
+    "RTMA": 100,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -31,16 +33,7 @@ FINAL_CHUNK_SIZES = {
     "GEFS": 3,
     "ECMWF": 3,
     "NBM_Fire": 5,
-}
-
-HISTORY_PERIODS = {
-    "NBM": 48,
-    "HRRR": 48,
-    "HRRR_6H": 48,
-    "GFS": 48,
-    "GEFS": 48,
-    "ECMWF": 48,
-    "NBM_Fire": 48,
+    "RTMA": 25,
 }
 
 FORECAST_LEAD_RANGES = {
@@ -227,3 +220,35 @@ def validate_grib_stats(gribCheck):
 
     # all good
     return True
+
+
+def earth_relative_wind_components(
+    ugrd: xr.DataArray, vgrd: xr.DataArray
+) -> tuple[
+    np.ndarray, np.ndarray
+]:  # Based off: https://unidata.github.io/python-gallery/examples/500hPa_Absolute_Vorticity_winds.html#function-to-compute-earth-relative-winds
+    """Calculate north-relative wind components from grid-relative components.
+
+    Uses Cartopy to transform vectors from the model's grid-relative projection
+    to a standard Plate Carree projection (earth-relative).
+
+    Args:
+        ugrd: Xarray DataArray of the grid-relative u-component of the wind.
+        vgrd: Xarray DataArray of the grid-relative v-component of the wind.
+
+    Returns:
+        A tuple containing two numpy arrays: the earth-relative u-component (ut)
+        and v-component (vt) of the wind.
+    """
+    data_crs = ugrd.metpy_crs.metpy.cartopy_crs
+
+    x = ugrd.x.values
+    y = ugrd.y.values
+
+    xx, yy = np.meshgrid(x, y)
+
+    ut, vt = ccrs.PlateCarree().transform_vectors(
+        data_crs, xx, yy, ugrd.values, vgrd.values
+    )
+
+    return ut, vt

@@ -14,7 +14,7 @@ import pandas as pd
 import requests
 import s3fs
 import zarr
-from numpy.dtypes import StringDType
+from zarr.core.dtype import VariableLengthUTF8
 
 from API.constants.shared_const import INGEST_VERSION_STR
 
@@ -44,13 +44,6 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
-# Define the processing and history chunk size
-processChunk = 100
-
-# Define the final x/y chunksize
-finalChunk = 3
-
-hisPeriod = 36
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -222,7 +215,7 @@ gridPointsSeries["string"] = gridPointsSeries["string"].astype(str)
 gridPoints_XR = gridPointsSeries["string"].to_xarray()
 
 # Reshape to 2D
-gridPoints_XR2 = gridPoints_XR.values.astype(StringDType()).reshape(lons.shape)
+gridPoints_XR2 = gridPoints_XR.values.astype(VariableLengthUTF8).reshape(lons.shape)
 
 # Write to zarr
 # Save as zarr
@@ -235,12 +228,16 @@ else:
 
 
 # Create a Zarr array in the store with zstd compression
-# with ProgressBar():
 zarr_array = zarr.create_array(
-    data=gridPoints_XR2,
     store=zarr_store,
-    chunks=(4, 4),
+    shape=gridPoints_XR2.shape,
+    dtype=zarr.dtype.VariableLengthUTF8(),
+    chunks=(10, 10),
+    overwrite=True,
 )
+
+# Save the data
+zarr_array[:] = gridPoints_XR2
 
 if saveType == "S3":
     zarr_store.close()
