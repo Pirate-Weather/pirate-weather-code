@@ -3524,7 +3524,8 @@ async def PW_Forecast(
         )
     if "ecmwf" in sourceList:
         WindSpeedHour[:, 2] = np.sqrt(
-            ECMWF_Merged[:, ECMWF["wind_u"]] ** 2 + ECMWF_Merged[:, ECMWF["wind_v"]] ** 2
+            ECMWF_Merged[:, ECMWF["wind_u"]] ** 2
+            + ECMWF_Merged[:, ECMWF["wind_v"]] ** 2
         )
     if "gfs" in sourceList:
         WindSpeedHour[:, 3] = np.sqrt(
