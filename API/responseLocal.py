@@ -88,7 +88,15 @@ from API.constants.grid_const import (
 )
 
 # Project imports
-from API.constants.model_const import ECMWF, GEFS, GFS, HRRR, HRRR_SUBH, NBM, NBM_FIRE_INDEX
+from API.constants.model_const import (
+    ECMWF,
+    GEFS,
+    GFS,
+    HRRR,
+    HRRR_SUBH,
+    NBM,
+    NBM_FIRE_INDEX,
+)
 from API.constants.shared_const import (
     HISTORY_PERIODS,
     INGEST_VERSION_STR,
@@ -654,9 +662,7 @@ if STAGE == "TESTING":
 
     if save_type == "S3":
         f = _retry_s3_operation(
-            lambda: s3.open(
-                "s3://ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip"
-            )
+            lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip")
         )
         store = S3ZipStore(f)
     elif save_type == "S3Zarr":
@@ -2062,13 +2068,13 @@ async def PW_Forecast(
     if TIMING:
         print("### ECMWF Detail Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-    
+
     if timeMachine:
         dataOut_ecmwf = False
         readECMWF = False
     else:
         readECMWF = True
-    
+
     if TIMING:
         print("### ECMWF Detail END ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
