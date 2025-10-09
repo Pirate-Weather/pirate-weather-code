@@ -41,7 +41,6 @@ Notes
   they contain at least three vertices and are closed.
 """
 
-
 from __future__ import annotations
 
 import asyncio
@@ -74,12 +73,8 @@ forecast_process_dir = os.getenv(
 forecast_process_path = forecast_process_dir + "/WMO_Alerts_Process"
 hist_process_path = forecast_process_dir + "/WMO_Alerts_Historic"
 
-forecast_path = os.getenv(
-    "forecast_path", default="/mnt/nvme/data/Prod/WMO_Alerts"
-)
-historic_path = os.getenv(
-    "historic_path", default="/mnt/nvme/data/History/WMO_Alerts"
-)
+forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/WMO_Alerts")
+historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/WMO_Alerts")
 
 
 save_type = os.getenv("save_type", default="Download")
@@ -108,6 +103,7 @@ if save_type == "Download":
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
+
 def _cap_text(elem, tag: str, ns: dict) -> str:
     """Get text for a CAP tag under elem, handling namespaces gracefully."""
     if ns:  # e.g., {'cap': 'urn:oasis:names:tc:emergency:cap:1.2'}
@@ -115,6 +111,7 @@ def _cap_text(elem, tag: str, ns: dict) -> str:
         return (elem.findtext(f"cap:{tag}", default="", namespaces=ns) or "").strip()
     # No namespace: plain tag
     return (elem.findtext(tag, default="") or "").strip()
+
 
 def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
     results = []
@@ -146,7 +143,6 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
             seen_languages.add(lang)
             continue  # Skip additional languages
 
-
         urgency = _cap_text(info, "urgency", ns)
         if urgency.lower() == "past":  # handle case-insensitive variants
             continue
@@ -167,7 +163,6 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
         else:
             effective = _cap_text(info, "onset", ns)
         expires = _cap_text(info, "expires", ns)
-
 
         for area in info.findall("cap:area" if ns else "area", ns):
             area_desc = area.findtext("cap:areaDesc" if ns else "areaDesc", "").strip()
@@ -231,19 +226,24 @@ def find_cap_expires(item, ns):
 
     return None
 
-#%% WMO Alert Processing
+
+# %% WMO Alert Processing
 
 # Async HTTP helpers
 # -------------------------------
 DEFAULT_TIMEOUT = 30
-MAX_CONCURRENCY = 20         # tune between 8–32
+MAX_CONCURRENCY = 20  # tune between 8–32
 MAX_RETRIES = 3
 BACKOFF_BASE = 0.6
+
 
 class HttpError(Exception):
     pass
 
-async def _fetch_json(session: aiohttp.ClientSession, url: str, timeout: float = DEFAULT_TIMEOUT) -> Dict:
+
+async def _fetch_json(
+    session: aiohttp.ClientSession, url: str, timeout: float = DEFAULT_TIMEOUT
+) -> Dict:
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             async with asyncio.timeout(timeout):
@@ -251,12 +251,15 @@ async def _fetch_json(session: aiohttp.ClientSession, url: str, timeout: float =
                     if resp.status != 200:
                         raise HttpError(f"{url} -> {resp.status}")
                     return await resp.json()
-        except Exception as e:
+        except Exception:
             if attempt == MAX_RETRIES:
                 raise
             await asyncio.sleep(BACKOFF_BASE * attempt)
 
-async def _fetch_text(session: aiohttp.ClientSession, url: str, timeout: float = DEFAULT_TIMEOUT) -> Optional[str]:
+
+async def _fetch_text(
+    session: aiohttp.ClientSession, url: str, timeout: float = DEFAULT_TIMEOUT
+) -> Optional[str]:
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             async with asyncio.timeout(timeout):
@@ -269,6 +272,7 @@ async def _fetch_text(session: aiohttp.ClientSession, url: str, timeout: float =
                 return None
             await asyncio.sleep(BACKOFF_BASE * attempt)
 
+
 # -------------------------------
 # Parsing helpers
 # -------------------------------
@@ -278,6 +282,7 @@ def _find_feed_namespaces(feed_bytes: bytes) -> Dict[str, str]:
         prefix, uri = elem
         ns[prefix or "default"] = uri
     return ns
+
 
 def _rss_item_links_and_guids(feed_content: bytes) -> List[Tuple[str, Optional[str]]]:
     try:
@@ -292,6 +297,7 @@ def _rss_item_links_and_guids(feed_content: bytes) -> List[Tuple[str, Optional[s
             out.append((link, guid))
     return out
 
+
 # -------------------------------
 # Main async pipeline
 # -------------------------------
@@ -302,12 +308,16 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
     connector = aiohttp.TCPConnector(limit=MAX_CONCURRENCY, ttl_dns_cache=300)
     sem = asyncio.Semaphore(MAX_CONCURRENCY)
 
-    async with aiohttp.ClientSession(connector=connector, raise_for_status=False) as session:
+    async with aiohttp.ClientSession(
+        connector=connector, raise_for_status=False
+    ) as session:
         sources_data = await _fetch_json(session, sources_url, timeout)
         sources: Iterable[Dict] = sources_data.get("sources", [])
 
         # Pull the “current alerts” list once
-        wmo_all = (await _fetch_json(session, f"{base_url}/v2/json/wmo_all.json", timeout)).get("items", [])
+        wmo_all = (
+            await _fetch_json(session, f"{base_url}/v2/json/wmo_all.json", timeout)
+        ).get("items", [])
         # Build quick lookups
         current_ids = {item.get("id") for item in wmo_all if item.get("id")}
         current_agencies = set()
@@ -409,11 +419,16 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
 
         return gpd.GeoDataFrame(rows, geometry=geometries, crs="EPSG:4326")
 
-#%% Main script starts here
 
-logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(levelname)s: %(message)s")
+# %% Main script starts here
+
+logging.basicConfig(
+    level=logging.INFO, stream=sys.stdout, format="%(levelname)s: %(message)s"
+)
 wmo_gdf = asyncio.run(gather_cap_polygons_async(timeout=30.0))
-print(f"Built GeoDataFrame with {len(wmo_gdf)} polygons from {wmo_gdf['source_id'].nunique()} sources.")
+print(
+    f"Built GeoDataFrame with {len(wmo_gdf)} polygons from {wmo_gdf['source_id'].nunique()} sources."
+)
 
 # %% TODO: Take the polygons, generate a grid, and determine which points are inside which polygons.
 # Then save a zarr zip the same way NWS alerts does
@@ -490,7 +505,7 @@ zarr_array = zarr.create_array(
     store=zarr_store,
     shape=gridPoints_XR2.shape,
     dtype=zarr.dtype.VariableLengthUTF8(),
-    chunks=(10,10),
+    chunks=(10, 10),
     overwrite=True,
 )
 
@@ -522,7 +537,7 @@ if save_type == "S3":
 
 
 # Upload to S3
-if  save_type == "S3":
+if save_type == "S3":
     # Upload to S3
     s3.put_file(
         forecast_process_dir + "/WMO_Alerts.zarr.zip",

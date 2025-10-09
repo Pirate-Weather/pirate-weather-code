@@ -232,7 +232,7 @@ zarr_array = zarr.create_array(
     store=zarr_store,
     shape=gridPoints_XR2.shape,
     dtype=zarr.dtype.VariableLengthUTF8(),
-    chunks=(10,10),
+    chunks=(10, 10),
     overwrite=True,
 )
 
