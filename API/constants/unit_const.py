@@ -1,0 +1,42 @@
+# Mapping between country codes and their preferred measurement systems.
+# Only used for units='auto'
+# Alexander Rey, October 2025
+
+country_units = {
+    # US customary units
+    "US": "US",
+    "LR": "US",  # Liberia
+    "MM": "US",  # Myanmar
+
+    # UK imperial hybrid (uses miles, but Celsius and millibars)
+    "GB": "UK",
+    "IE": "UK",
+
+    # Canadian metric (metric units, but often uses kph instead of m/s)
+    "CA": "CA",
+
+    # SI / metric (default)
+    "AF": "SI", "AL": "SI", "DZ": "SI", "AD": "SI", "AO": "SI", "AR": "SI", "AM": "SI", "AU": "SI",
+    "AT": "SI", "AZ": "SI", "BH": "SI", "BD": "SI", "BE": "SI", "BJ": "SI", "BT": "SI", "BO": "SI",
+    "BA": "SI", "BW": "SI", "BR": "SI", "BN": "SI", "BG": "SI", "BF": "SI", "BI": "SI", "KH": "SI",
+    "CM": "SI", "CF": "SI", "TD": "SI", "CL": "SI", "CN": "SI", "CO": "SI", "KM": "SI", "CG": "SI",
+    "CD": "SI", "CR": "SI", "HR": "SI", "CU": "SI", "CY": "SI", "CZ": "SI", "DK": "SI", "DJ": "SI",
+    "DO": "SI", "EC": "SI", "EG": "SI", "SV": "SI", "EE": "SI", "ET": "SI", "FI": "SI", "FR": "SI",
+    "GA": "SI", "GE": "SI", "DE": "SI", "GH": "SI", "GR": "SI", "GT": "SI", "GN": "SI", "GY": "SI",
+    "HT": "SI", "HN": "SI", "HU": "SI", "IS": "SI", "IN": "SI", "ID": "SI", "IR": "SI", "IQ": "SI",
+    "IL": "SI", "IT": "SI", "JP": "SI", "JO": "SI", "KZ": "SI", "KE": "SI", "KR": "SI", "KW": "SI",
+    "KG": "SI", "LA": "SI", "LV": "SI", "LB": "SI", "LS": "SI", "LY": "SI", "LI": "SI", "LT": "SI",
+    "LU": "SI", "MG": "SI", "MW": "SI", "MY": "SI", "MV": "SI", "ML": "SI", "MT": "SI", "MR": "SI",
+    "MU": "SI", "MX": "SI", "MD": "SI", "MC": "SI", "MN": "SI", "ME": "SI", "MA": "SI", "MZ": "SI",
+    "NA": "SI", "NP": "SI", "NL": "SI", "NZ": "SI", "NI": "SI", "NE": "SI", "NG": "SI", "NO": "SI",
+    "OM": "SI", "PK": "SI", "PA": "SI", "PY": "SI", "PE": "SI", "PH": "SI", "PL": "SI", "PT": "SI",
+    "QA": "SI", "RO": "SI", "RU": "SI", "RW": "SI", "SA": "SI", "SN": "SI", "RS": "SI", "SG": "SI",
+    "SK": "SI", "SI": "SI", "ZA": "SI", "ES": "SI", "LK": "SI", "SD": "SI", "SE": "SI", "CH": "SI",
+    "SY": "SI", "TW": "SI", "TH": "SI", "TN": "SI", "TR": "SI", "UG": "SI", "UA": "SI", "AE": "SI",
+    "UY": "SI", "UZ": "SI", "VE": "SI", "VN": "SI", "YE": "SI", "ZM": "SI", "ZW": "SI",
+}
+
+# Example use
+code = "GB"
+units = country_units.get(code, "SI")
+print(f"{code} uses {units} units")

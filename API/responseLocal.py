@@ -23,6 +23,7 @@ import boto3
 import numpy as np
 import pandas as pd
 import s3fs
+import reverse_geocode
 import xarray as xr
 import zarr
 from astral import LocationInfo, moon
@@ -104,6 +105,9 @@ from API.constants.text_const import (
     PRECIP_PROB_THRESHOLD,
     WIND_THRESHOLDS,
 )
+
+from API.constants.unit_const import country_units
+
 from API.PirateDailyText import calculate_day_text
 from API.PirateMinutelyText import calculate_minutely_text
 from API.PirateText import calculate_text
@@ -1351,6 +1355,9 @@ async def PW_Forecast(
 
     tzReq = tf.timezone_at(lat=lat, lng=az_Lon)
 
+    # Reverse geocode the location to return a city name and approx unit system
+    loc_name = reverse_geocode.get((lat, az_lon))
+
     # Timing Check
     if TIMING:
         print("Timezone offset time")
@@ -1442,7 +1449,10 @@ async def PW_Forecast(
     elevUnit = 3.28084  # ft
 
     if units:
-        unitSystem = units[0:2]
+        if units == 'auto':
+            unitSystem = country_units[loc_name['country_code']].lower()
+        else:
+            unitSystem = units[0:2]
 
         if unitSystem == "ca":
             windUnit = 3.600  # kph
@@ -5150,6 +5160,9 @@ async def PW_Forecast(
             returnOBJ["flags"]["processTime"] = (
                 datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
             ).microseconds
+            returnOBJ["flags"]["ingestVersion"] = ingestVersion
+            # Return the approx city name
+            returnOBJ["flags"]["nearestCity"] = loc_name['city']
 
         # if timeMachine:
         # lock.release()
