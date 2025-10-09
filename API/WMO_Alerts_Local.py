@@ -97,9 +97,6 @@ else:
     shutil.rmtree(forecast_process_dir)
     os.makedirs(forecast_process_dir)
 
-if not os.path.exists(tmpDIR):
-    os.makedirs(tmpDIR)
-
 if save_type == "Download":
     if not os.path.exists(forecast_path + "/" + ingest_version):
         os.makedirs(forecast_path + "/" + ingest_version)
@@ -525,7 +522,7 @@ if save_type == "S3":
 
 
 # Upload to S3
-if save_type save_type== "S3":
+if  save_type == "S3":
     # Upload to S3
     s3.put_file(
         forecast_process_dir + "/WMO_Alerts.zarr.zip",
