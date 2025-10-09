@@ -78,6 +78,22 @@ GEFS = {
     "rain": 7,
 }
 
+ECMWF = {
+    "gust": 1,
+    "pressure": 2,
+    "temp": 3,
+    "dew": 4,
+    "wind_u": 5,
+    "wind_v": 6,
+    "intensity": 7,
+    "accum": 8,
+    "ptype": 9,
+    "cloud": 10,
+    "prob": 11,
+    "accum_mean": 12,
+    "accum_stddev": 13,
+}
+
 NBM = {
     "gust": 1,
     "temp": 2,

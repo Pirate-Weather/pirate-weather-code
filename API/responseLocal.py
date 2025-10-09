@@ -88,7 +88,7 @@ from API.constants.grid_const import (
 )
 
 # Project imports
-from API.constants.model_const import GEFS, GFS, HRRR, HRRR_SUBH, NBM, NBM_FIRE_INDEX
+from API.constants.model_const import ECMWF, GEFS, GFS, HRRR, HRRR_SUBH, NBM, NBM_FIRE_INDEX
 from API.constants.shared_const import (
     HISTORY_PERIODS,
     INGEST_VERSION_STR,
@@ -314,6 +314,7 @@ def update_zarr_store(initialRun):
     global SubH_Zarr
     global HRRR_6H_Zarr
     global GFS_Zarr
+    global ECMWF_Zarr
     global NBM_Zarr
     global NBM_Fire_Zarr
     global GEFS_Zarr
@@ -384,6 +385,20 @@ def update_zarr_store(initialRun):
             logger.info("Removing old: " + old_dir)
             # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
             # subprocess.run(command, shell=True)
+            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+            subprocess.run(command, shell=True)
+
+    latest_ECMWF, old_ECMWF = find_largest_integer_directory(
+        "/tmp", "ECMWF.zarr", initialRun
+    )
+    if latest_ECMWF is not None:
+        ECMWF_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_ECMWF, mode="r"), mode="r"
+        )
+        logger.info("Loading new: " + latest_ECMWF)
+    for old_dir in old_ECMWF:
+        if STAGE == "PROD":
+            logger.info("Removing old: " + old_dir)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
@@ -636,6 +651,31 @@ if STAGE == "TESTING":
 
     GFS_Zarr = zarr.open(store, mode="r")
     print("GFS Read")
+
+    if save_type == "S3":
+        f = _retry_s3_operation(
+            lambda: s3.open(
+                "s3://ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip"
+            )
+        )
+        store = S3ZipStore(f)
+    elif save_type == "S3Zarr":
+        f = _retry_s3_operation(
+            lambda: s3.open(
+                "s3://"
+                + s3_bucket
+                + "/ForecastTar_v2/"
+                + ingestVersion
+                + "/ECMWF.zarr.zip"
+            )
+        )
+        store = S3ZipStore(f)
+    else:
+        f = s3_bucket + "ECMWF.zarr.zip"
+        store = zarr.storage.ZipStore(f, mode="r")
+
+    ECMWF_Zarr = zarr.open(store, mode="r")
+    print("ECMWF Read")
 
     if save_type == "S3":
         f = _retry_s3_operation(
@@ -1155,6 +1195,7 @@ async def PW_Forecast(
     global SubH_Zarr
     global HRRR_6H_Zarr
     global GFS_Zarr
+    global ECMWF_Zarr
     global NBM_Zarr
     global NBM_Fire_Zarr
     global GEFS_Zarr
@@ -1163,6 +1204,7 @@ async def PW_Forecast(
 
     readHRRR = False
     readGFS = False
+    readECMWF = False
     readNBM = False
     readGEFS = False
 
@@ -2016,6 +2058,21 @@ async def PW_Forecast(
         print("### GFS Detail END ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
+    # ECMWF - only for non-timemachine requests
+    if TIMING:
+        print("### ECMWF Detail Start ###")
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+    
+    if timeMachine:
+        dataOut_ecmwf = False
+        readECMWF = False
+    else:
+        readECMWF = True
+    
+    if TIMING:
+        print("### ECMWF Detail END ###")
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+
     # GEFS
     # Timing Check
     if TIMING:
@@ -2113,6 +2170,13 @@ async def PW_Forecast(
     sourceIDX["gfs"]["lat"] = round(gfs_lat, 2)
     sourceIDX["gfs"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
 
+    # ECMWF uses the same grid as GFS
+    sourceIDX["ecmwf"] = dict()
+    sourceIDX["ecmwf"]["x"] = int(x_p)
+    sourceIDX["ecmwf"]["y"] = int(y_p)
+    sourceIDX["ecmwf"]["lat"] = round(gfs_lat, 2)
+    sourceIDX["ecmwf"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
+
     if readHRRR:
         zarrTasks["SubH"] = weather.zarr_read("SubH", SubH_Zarr, x_hrrr, y_hrrr)
 
@@ -2132,6 +2196,9 @@ async def PW_Forecast(
 
     if readGFS:
         zarrTasks["GFS"] = weather.zarr_read("GFS", GFS_Zarr, x_p, y_p)
+
+    if readECMWF:
+        zarrTasks["ECMWF"] = weather.zarr_read("ECMWF", ECMWF_Zarr, x_p, y_p)
 
     if readGEFS:
         zarrTasks["GEFS"] = weather.zarr_read("GEFS", GEFS_Zarr, x_p, y_p)
@@ -2209,6 +2276,11 @@ async def PW_Forecast(
         if dataOut_gfs is not False:
             gfsRunTime = dataOut_gfs[HISTORY_PERIODS["GFS"] - 1, 0]
 
+    if readECMWF:
+        dataOut_ecmwf = zarr_results["ECMWF"]
+        if dataOut_ecmwf is not False:
+            ecmwfRunTime = dataOut_ecmwf[HISTORY_PERIODS["ECMWF"] - 1, 0]
+
     if readGEFS:
         dataOut_gefs = zarr_results["GEFS"]
         gefsRunTime = dataOut_gefs[HISTORY_PERIODS["GEFS"] - 3, 0]
@@ -2261,6 +2333,15 @@ async def PW_Forecast(
         sourceTimes["nbm_fire"] = rounder(
             datetime.datetime.fromtimestamp(
                 nbmFireRunTime.astype(int), datetime.UTC
+            ).replace(tzinfo=None)
+        ).strftime("%Y-%m-%d %HZ")
+
+    # Add ECMWF after NBM, before GFS
+    if (isinstance(dataOut_ecmwf, np.ndarray)) & (not timeMachine):
+        sourceList.append("ecmwf")
+        sourceTimes["ecmwf"] = rounder(
+            datetime.datetime.fromtimestamp(
+                ecmwfRunTime.astype(int), datetime.UTC
             ).replace(tzinfo=None)
         ).strftime("%Y-%m-%d %HZ")
 
@@ -2505,6 +2586,15 @@ async def PW_Forecast(
         GFS_Merged[0 : (GFS_EndIDX - GFS_StartIDX), 0 : dataOut_gfs.shape[1]] = (
             dataOut_gfs[GFS_StartIDX:GFS_EndIDX, 0 : dataOut_gfs.shape[1]]
         )
+
+        # ECMWF
+        if "ecmwf" in sourceList:
+            ECMWF_StartIDX = nearest_index(dataOut_ecmwf[:, 0], baseDayUTC_Grib)
+            ECMWF_EndIDX = min((len(dataOut_ecmwf), (numHours + ECMWF_StartIDX)))
+            ECMWF_Merged = np.full((numHours, max(ECMWF.values()) + 1), np.nan)
+            ECMWF_Merged[
+                0 : (ECMWF_EndIDX - ECMWF_StartIDX), 0 : dataOut_ecmwf.shape[1]
+            ] = dataOut_ecmwf[ECMWF_StartIDX:ECMWF_EndIDX, 0 : dataOut_ecmwf.shape[1]]
 
         # GEFS
         if "gefs" in sourceList:
@@ -2804,6 +2894,11 @@ async def PW_Forecast(
 
     gfsMinuteInterpolation = np.zeros((len(minute_array_grib), len(dataOut_gfs[0, :])))
 
+    if "ecmwf" in sourceList:
+        ecmwfMinuteInterpolation = np.zeros(
+            (len(minute_array_grib), len(dataOut_ecmwf[0, :]))
+        )
+
     nbmMinuteInterpolation = np.zeros((len(minute_array_grib), 18))
 
     if "hrrrsubh" in sourceList:
@@ -2943,6 +3038,16 @@ async def PW_Forecast(
                     right=np.nan,
                 )
 
+    if "ecmwf" in sourceList:
+        for i in range(len(dataOut_ecmwf[0, :]) - 1):
+            ecmwfMinuteInterpolation[:, i + 1] = np.interp(
+                minute_array_grib,
+                dataOut_ecmwf[:, 0].squeeze(),
+                dataOut_ecmwf[:, i + 1],
+                left=np.nan,
+                right=np.nan,
+            )
+
     if "nbm" in sourceList:
         for i in [
             NBM["accum"],
@@ -2968,11 +3073,15 @@ async def PW_Forecast(
     InterPminute[:, DATA_MINUTELY["time"]] = minute_array_grib
 
     # "precipProbability"
-    # Use NBM where available
+    # Use NBM where available, then ECMWF, then GEFS
     if "nbm" in sourceList:
         InterPminute[:, DATA_MINUTELY["prob"]] = (
             nbmMinuteInterpolation[:, NBM["prob"]] * 0.01
         )
+    elif "ecmwf" in sourceList:
+        InterPminute[:, DATA_MINUTELY["prob"]] = ecmwfMinuteInterpolation[
+            :, ECMWF["prob"]
+        ]
     elif "gefs" in sourceList:
         InterPminute[:, DATA_MINUTELY["prob"]] = gefsMinuteInterpolation[
             :, GEFS["prob"]
@@ -3249,13 +3358,16 @@ async def PW_Forecast(
         np.argmin(np.isnan(prcipIntensityHour), axis=1), maxPchanceHour.T
     )
     # Probability
-    # NBM
-    prcipProbabilityHour = np.full((len(hour_array_grib), 2), np.nan)
+    # NBM, ECMWF, GEFS priority order
+    prcipProbabilityHour = np.full((len(hour_array_grib), 3), np.nan)
     if "nbm" in sourceList:
         prcipProbabilityHour[:, 0] = NBM_Merged[:, NBM["prob"]] * 0.01
+    # ECMWF
+    if "ecmwf" in sourceList:
+        prcipProbabilityHour[:, 1] = ECMWF_Merged[:, ECMWF["prob"]]
     # GEFS
     if "gefs" in sourceList:
-        prcipProbabilityHour[:, 1] = GEFS_Merged[:, GEFS["prob"]]
+        prcipProbabilityHour[:, 2] = GEFS_Merged[:, GEFS["prob"]]
 
     # Take first non-NaN value
     InterPhour[:, DATA_HOURLY["prob"]] = np.choose(
@@ -5222,6 +5334,14 @@ def initialDataSync() -> None:
         print("GFS Download!")
         download_if_newer(
             s3_bucket,
+            "ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip",
+            "/tmp/ECMWF_TMP.zarr.zip",
+            "/tmp/ECMWF.zarr.prod.zip",
+            True,
+        )
+        print("ECMWF Download!")
+        download_if_newer(
+            s3_bucket,
             "ForecastTar_v2/" + ingestVersion + "/NBM.zarr.zip",
             "/tmp/NBM.zarr_TMP.zip",
             "/tmp/NBM.zarr.prod.zip",
@@ -5318,6 +5438,14 @@ def dataSync() -> None:
                 False,
             )
             logger.info("GFS Download!")
+            download_if_newer(
+                s3_bucket,
+                "ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip",
+                "/tmp/ECMWF_TMP.zarr.zip",
+                "/tmp/ECMWF.zarr.prod.zip",
+                False,
+            )
+            logger.info("ECMWF Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar_v2/" + ingestVersion + "/NBM.zarr.zip",
