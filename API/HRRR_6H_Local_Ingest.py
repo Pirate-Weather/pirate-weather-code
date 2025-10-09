@@ -22,12 +22,11 @@ from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 from numcodecs import BitRound, Blosc
 
-from API.constants.shared_const import INGEST_VERSION_STR
+from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
-    HISTORY_PERIODS,
     mask_invalid_data,
     mask_invalid_refc,
     validate_grib_stats,

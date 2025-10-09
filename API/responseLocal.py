@@ -23,6 +23,7 @@ import boto3
 import numpy as np
 import pandas as pd
 import s3fs
+import reverse_geocode
 import xarray as xr
 import zarr
 from astral import LocationInfo, moon
@@ -89,6 +90,7 @@ from API.constants.grid_const import (
 # Project imports
 from API.constants.model_const import GEFS, GFS, HRRR, HRRR_SUBH, NBM, NBM_FIRE_INDEX
 from API.constants.shared_const import (
+    HISTORY_PERIODS,
     INGEST_VERSION_STR,
     KELVIN_TO_CELSIUS,
     MISSING_DATA,
@@ -103,6 +105,9 @@ from API.constants.text_const import (
     PRECIP_PROB_THRESHOLD,
     WIND_THRESHOLDS,
 )
+
+from API.constants.unit_const import country_units
+
 from API.PirateDailyText import calculate_day_text
 from API.PirateMinutelyText import calculate_minutely_text
 from API.PirateText import calculate_text
@@ -516,7 +521,7 @@ if STAGE == "TESTING":
             store = S3ZipStore(f)
         # Try an old ingest version for testing
         except FileNotFoundError:
-            ingestVersion = "v27"
+            ingestVersion = "v28"
             print("Using old ingest version: " + ingestVersion)
             f = _retry_s3_operation(
                 lambda: s3.open(
@@ -542,7 +547,7 @@ if STAGE == "TESTING":
             )
             store = S3ZipStore(f)
         except FileNotFoundError:
-            ingestVersion = "v27"
+            ingestVersion = "v28"
             print("Using old ingest version: " + ingestVersion)
             f = _retry_s3_operation(
                 lambda: s3.open(
@@ -1251,7 +1256,7 @@ async def PW_Forecast(
                             locationReq[2], "%Y-%m-%dT%H:%M:%S"
                         )
 
-                        # If no time zome specified, assume local time, and convert
+                        # If no time zone specified, assume local time, and convert
                         tz_offsetLocIN = {
                             "lat": lat,
                             "lng": az_Lon,
@@ -1350,6 +1355,9 @@ async def PW_Forecast(
 
     tzReq = tf.timezone_at(lat=lat, lng=az_Lon)
 
+    # Reverse geocode the location to return a city name and approx unit system
+    loc_name = await asyncio.to_thread(reverse_geocode.get, (lat, az_Lon))
+
     # Timing Check
     if TIMING:
         print("Timezone offset time")
@@ -1441,7 +1449,10 @@ async def PW_Forecast(
     elevUnit = 3.28084  # ft
 
     if units:
-        unitSystem = units[0:2]
+        if units == "auto":
+            unitSystem = country_units.get(loc_name["country_code"], "us").lower()
+        else:
+            unitSystem = units[0:2]
 
         if unitSystem == "ca":
             windUnit = 3.600  # kph
@@ -1470,6 +1481,8 @@ async def PW_Forecast(
             visUnits = 0.001  # km
             humidUnit = 0.01  # %
             elevUnit = 1  # m
+        else:
+            unitSystem = "us"
 
     weather = WeatherParallel()
 
@@ -2149,7 +2162,7 @@ async def PW_Forecast(
                 dataOut = False
                 print("OLD SubH")
 
-            hrrrhRunTime = dataOut_hrrrh[48, 0]
+            hrrrhRunTime = dataOut_hrrrh[HISTORY_PERIODS["HRRR"], 0]
             # print( datetime.datetime.fromtimestamp(dataOut_hrrrh[35, 0].astype(int)))
             if (
                 utcTime
@@ -2175,7 +2188,7 @@ async def PW_Forecast(
         dataOut_nbmFire = zarr_results["NBM_Fire"]
 
         if dataOut_nbm is not False:
-            nbmRunTime = dataOut_nbm[48, 0]
+            nbmRunTime = dataOut_nbm[HISTORY_PERIODS["NBM"], 0]
 
         sourceIDX["nbm"] = dict()
         sourceIDX["nbm"]["x"] = int(x_nbm)
@@ -2189,16 +2202,16 @@ async def PW_Forecast(
             print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
         if dataOut_nbmFire is not False:
-            nbmFireRunTime = dataOut_nbmFire[42, 0]  # 48-6
+            nbmFireRunTime = dataOut_nbmFire[HISTORY_PERIODS["NBM"] - 6, 0]
 
     if readGFS:
         dataOut_gfs = zarr_results["GFS"]
         if dataOut_gfs is not False:
-            gfsRunTime = dataOut_gfs[47, 0]  # 48-1
+            gfsRunTime = dataOut_gfs[HISTORY_PERIODS["GFS"] - 1, 0]
 
     if readGEFS:
         dataOut_gefs = zarr_results["GEFS"]
-        gefsRunTime = dataOut_gefs[45, 0]  # 48-3
+        gefsRunTime = dataOut_gefs[HISTORY_PERIODS["GEFS"] - 3, 0]
 
     sourceTimes = dict()
     if timeMachine is False:
@@ -2549,7 +2562,7 @@ async def PW_Forecast(
     InterPhour[:, DATA_HOURLY["time"]] = hour_array_grib
 
     # Daily array, 12 to 12
-    # Have to redo the localize because of dayligt saving time
+    # Have to redo the localize because of daylight saving time
     day_array_grib = np.array(
         [
             pytzTZ.localize(
@@ -3618,7 +3631,7 @@ async def PW_Forecast(
     hourIconList = []
     hourTextList = []
 
-    # Find snow and liqiud precip
+    # Find snow and liquid precip
     # Set to zero as baseline
     InterPhour[:, DATA_HOURLY["rain"]] = 0
     InterPhour[:, DATA_HOURLY["snow"]] = 0
@@ -3733,10 +3746,8 @@ async def PW_Forecast(
     InterPhour[:, DATA_HOURLY["storm_dist"] : DATA_HOURLY["rain"]] = InterPhour[
         :, DATA_HOURLY["storm_dist"] : DATA_HOURLY["rain"]
     ].round(2)
-    InterPhour[:, DATA_HOURLY["fire"]] = InterPhour[:, DATA_HOURLY["fire"]].round(2)
-    InterPhour[:, DATA_HOURLY["station_pressure"]] = InterPhour[
-        :, DATA_HOURLY["station_pressure"]
-    ].round(2)
+    # Round remaining to 2
+    InterPhour[:, DATA_HOURLY["fire"] :] = InterPhour[:, DATA_HOURLY["fire"] :].round(2)
 
     # Round to 4
     InterPhour[:, DATA_HOURLY["type"] : DATA_HOURLY["prob"]] = InterPhour[
@@ -5149,6 +5160,9 @@ async def PW_Forecast(
             returnOBJ["flags"]["processTime"] = (
                 datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
             ).microseconds
+            returnOBJ["flags"]["ingestVersion"] = ingestVersion
+            # Return the approx city name
+            returnOBJ["flags"]["nearestCity"] = loc_name["city"]
 
         # if timeMachine:
         # lock.release()
