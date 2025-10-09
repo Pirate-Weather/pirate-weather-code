@@ -521,7 +521,7 @@ if STAGE == "TESTING":
             store = S3ZipStore(f)
         # Try an old ingest version for testing
         except FileNotFoundError:
-            ingestVersion = "v27"
+            ingestVersion = "v28"
             print("Using old ingest version: " + ingestVersion)
             f = _retry_s3_operation(
                 lambda: s3.open(
@@ -547,7 +547,7 @@ if STAGE == "TESTING":
             )
             store = S3ZipStore(f)
         except FileNotFoundError:
-            ingestVersion = "v27"
+            ingestVersion = "v28"
             print("Using old ingest version: " + ingestVersion)
             f = _retry_s3_operation(
                 lambda: s3.open(
@@ -1356,7 +1356,7 @@ async def PW_Forecast(
     tzReq = tf.timezone_at(lat=lat, lng=az_Lon)
 
     # Reverse geocode the location to return a city name and approx unit system
-    loc_name = reverse_geocode.get((lat, az_lon))
+    loc_name = await asyncio.to_thread(reverse_geocode.get, (lat, az_Lon))
 
     # Timing Check
     if TIMING:
@@ -1449,8 +1449,8 @@ async def PW_Forecast(
     elevUnit = 3.28084  # ft
 
     if units:
-        if units == 'auto':
-            unitSystem = country_units[loc_name['country_code']].lower()
+        if units == "auto":
+            unitSystem = country_units.get(loc_name["country_code"], "us").lower()
         else:
             unitSystem = units[0:2]
 
@@ -5162,7 +5162,7 @@ async def PW_Forecast(
             ).microseconds
             returnOBJ["flags"]["ingestVersion"] = ingestVersion
             # Return the approx city name
-            returnOBJ["flags"]["nearestCity"] = loc_name['city']
+            returnOBJ["flags"]["nearestCity"] = loc_name["city"]
 
         # if timeMachine:
         # lock.release()
