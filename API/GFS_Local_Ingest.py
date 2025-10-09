@@ -1144,9 +1144,10 @@ else:
 # Clean up
 shutil.rmtree(forecast_process_dir)
 
-# Test Read
+# Timing
 T1 = time.time()
 print(T1 - T0)
 
+# Test Read
 # G = zarr.open(forecast_path + "/" + ingestVersion + "/GFS.zarr", read_only=True)
 # G.info
