@@ -535,7 +535,6 @@ if save_type == "S3":
 # alertsReadTest = zarr.open_array(zip_store_read)
 # print(alertsReadTest[alerts_y_p, alerts_x_p])
 
-
 # Upload to S3
 if save_type == "S3":
     # Upload to S3
