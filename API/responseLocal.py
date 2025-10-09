@@ -400,10 +400,14 @@ def update_zarr_store(initialRun):
         "/tmp", "ECMWF.zarr", initialRun
     )
     if latest_ECMWF is not None:
-        ECMWF_Zarr = zarr.open(
-            zarr.storage.ZipStore("/tmp/" + latest_ECMWF, mode="r"), mode="r"
-        )
-        logger.info("Loading new: " + latest_ECMWF)
+        try:
+            ECMWF_Zarr = zarr.open(
+                zarr.storage.ZipStore("/tmp/" + latest_ECMWF, mode="r"), mode="r"
+            )
+            logger.info("Loading new: " + latest_ECMWF)
+        except Exception as e:
+            logger.info(f"ECMWF not available: {e}")
+            ECMWF_Zarr = None
     for old_dir in old_ECMWF:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
@@ -660,28 +664,34 @@ if STAGE == "TESTING":
     GFS_Zarr = zarr.open(store, mode="r")
     print("GFS Read")
 
-    if save_type == "S3":
-        f = _retry_s3_operation(
-            lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip")
-        )
-        store = S3ZipStore(f)
-    elif save_type == "S3Zarr":
-        f = _retry_s3_operation(
-            lambda: s3.open(
-                "s3://"
-                + s3_bucket
-                + "/ForecastTar_v2/"
-                + ingestVersion
-                + "/ECMWF.zarr.zip"
+    try:
+        if save_type == "S3":
+            f = _retry_s3_operation(
+                lambda: s3.open(
+                    "s3://ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip"
+                )
             )
-        )
-        store = S3ZipStore(f)
-    else:
-        f = s3_bucket + "ECMWF.zarr.zip"
-        store = zarr.storage.ZipStore(f, mode="r")
+            store = S3ZipStore(f)
+        elif save_type == "S3Zarr":
+            f = _retry_s3_operation(
+                lambda: s3.open(
+                    "s3://"
+                    + s3_bucket
+                    + "/ForecastTar_v2/"
+                    + ingestVersion
+                    + "/ECMWF.zarr.zip"
+                )
+            )
+            store = S3ZipStore(f)
+        else:
+            f = s3_bucket + "ECMWF.zarr.zip"
+            store = zarr.storage.ZipStore(f, mode="r")
 
-    ECMWF_Zarr = zarr.open(store, mode="r")
-    print("ECMWF Read")
+        ECMWF_Zarr = zarr.open(store, mode="r")
+        print("ECMWF Read")
+    except Exception as e:
+        print(f"ECMWF not available: {e}")
+        ECMWF_Zarr = None
 
     if save_type == "S3":
         f = _retry_s3_operation(
@@ -2064,12 +2074,15 @@ async def PW_Forecast(
         print("### GFS Detail END ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
-    # ECMWF - only for non-timemachine requests
+    # ECMWF - only for non-timemachine requests and if data is available
     if TIMING:
         print("### ECMWF Detail Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     if timeMachine:
+        dataOut_ecmwf = False
+        readECMWF = False
+    elif ECMWF_Zarr is None:
         dataOut_ecmwf = False
         readECMWF = False
     else:
@@ -3269,8 +3282,8 @@ async def PW_Forecast(
     # Use HRRR for some other variables
 
     # Precipitation Type
-    # NBM
-    maxPchanceHour = np.full((len(hour_array_grib), 3), MISSING_DATA)
+    # NBM, HRRR, ECMWF, GEFS/GFS
+    maxPchanceHour = np.full((len(hour_array_grib), 4), MISSING_DATA)
 
     if "nbm" in sourceList:
         InterThour = np.zeros(shape=(len(hour_array), 5))  # Type
@@ -3304,6 +3317,12 @@ async def PW_Forecast(
         # Put Nan's where they exist in the original data
         maxPchanceHour[np.isnan(InterThour[:, 1]), 1] = MISSING_DATA
 
+    # ECMWF - uses ptype directly (categorical precipitation type)
+    if "ecmwf" in sourceList:
+        maxPchanceHour[:, 2] = ECMWF_Merged[:, ECMWF["ptype"]]
+        # Put Nan's where they exist in the original data
+        maxPchanceHour[np.isnan(ECMWF_Merged[:, ECMWF["ptype"]]), 2] = MISSING_DATA
+
     # GEFS
     if "gefs" in sourceList:
         InterThour = np.zeros(shape=(len(hour_array), 5))  # Type
@@ -3315,10 +3334,10 @@ async def PW_Forecast(
         # Fix rounding issues
         InterThour[InterThour < 0.01] = 0
 
-        maxPchanceHour[:, 2] = np.argmax(InterThour, axis=1)
+        maxPchanceHour[:, 3] = np.argmax(InterThour, axis=1)
 
         # Put Nan's where they exist in the original data
-        maxPchanceHour[np.isnan(InterThour[:, 1]), 2] = MISSING_DATA
+        maxPchanceHour[np.isnan(InterThour[:, 1]), 3] = MISSING_DATA
     else:  # GFS Fallback
         InterThour = np.zeros(shape=(len(hour_array), 5))  # Type
         for i in [GFS["snow"], GFS["ice"], GFS["freezing_rain"], GFS["rain"]]:
@@ -3329,24 +3348,27 @@ async def PW_Forecast(
         # Fix rounding issues
         InterThour[InterThour < 0.01] = 0
 
-        maxPchanceHour[:, 2] = np.argmax(InterThour, axis=1)
+        maxPchanceHour[:, 3] = np.argmax(InterThour, axis=1)
 
         # Put Nan's where they exist in the original data
-        maxPchanceHour[np.isnan(InterThour[:, 1]), 2] = MISSING_DATA
+        maxPchanceHour[np.isnan(InterThour[:, 1]), 3] = MISSING_DATA
 
     # Intensity
-    # NBM
-    prcipIntensityHour = np.full((len(hour_array_grib), 3), np.nan)
+    # NBM, HRRR, ECMWF, GEFS/GFS
+    prcipIntensityHour = np.full((len(hour_array_grib), 4), np.nan)
     if "nbm" in sourceList:
         prcipIntensityHour[:, 0] = NBM_Merged[:, NBM["intensity"]]
     # HRRR
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         prcipIntensityHour[:, 1] = HRRR_Merged[:, HRRR["intensity"]] * 3600
-    # GEFS
+    # ECMWF
+    if "ecmwf" in sourceList:
+        prcipIntensityHour[:, 2] = ECMWF_Merged[:, ECMWF["intensity"]] * 3600
+    # GEFS or GFS
     if "gefs" in sourceList:
-        prcipIntensityHour[:, 2] = GEFS_Merged[:, GEFS["accum"]]
+        prcipIntensityHour[:, 3] = GEFS_Merged[:, GEFS["accum"]]
     else:  # GFS Fallback
-        prcipIntensityHour[:, 2] = GFS_Merged[:, GFS["intensity"]] * 3600
+        prcipIntensityHour[:, 3] = GFS_Merged[:, GFS["intensity"]] * 3600
 
     # Take first non-NaN value
     InterPhour[:, DATA_HOURLY["intensity"]] = (
@@ -3401,15 +3423,18 @@ async def PW_Forecast(
         )
 
     ### Temperature
-    TemperatureHour = np.full((len(hour_array_grib), 3), np.nan)
+    TemperatureHour = np.full((len(hour_array_grib), 4), np.nan)
     if "nbm" in sourceList:
         TemperatureHour[:, 0] = NBM_Merged[:, NBM["temp"]]
 
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         TemperatureHour[:, 1] = HRRR_Merged[:, HRRR["temp"]]
 
+    if "ecmwf" in sourceList:
+        TemperatureHour[:, 2] = ECMWF_Merged[:, ECMWF["temp"]]
+
     if "gfs" in sourceList:
-        TemperatureHour[:, 2] = GFS_Merged[:, GFS["temp"]]
+        TemperatureHour[:, 3] = GFS_Merged[:, GFS["temp"]]
 
     # Take first non-NaN value
     InterPhour[:, DATA_HOURLY["temp"]] = np.choose(
@@ -3425,13 +3450,15 @@ async def PW_Forecast(
     )
 
     ### Dew Point
-    DewPointHour = np.full((len(hour_array_grib), 3), np.nan)
+    DewPointHour = np.full((len(hour_array_grib), 4), np.nan)
     if "nbm" in sourceList:
         DewPointHour[:, 0] = NBM_Merged[:, NBM["dew"]]
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         DewPointHour[:, 1] = HRRR_Merged[:, HRRR["dew"]]
+    if "ecmwf" in sourceList:
+        DewPointHour[:, 2] = ECMWF_Merged[:, ECMWF["dew"]]
     if "gfs" in sourceList:
-        DewPointHour[:, 2] = GFS_Merged[:, GFS["dew"]]
+        DewPointHour[:, 3] = GFS_Merged[:, GFS["dew"]]
     InterPhour[:, DATA_HOURLY["dew"]] = np.choose(
         np.argmin(np.isnan(DewPointHour), axis=1), DewPointHour.T
     )
@@ -3465,11 +3492,13 @@ async def PW_Forecast(
     )
 
     ### Pressure
-    PressureHour = np.full((len(hour_array_grib), 2), np.nan)
+    PressureHour = np.full((len(hour_array_grib), 3), np.nan)
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         PressureHour[:, 0] = HRRR_Merged[:, HRRR["pressure"]]
+    if "ecmwf" in sourceList:
+        PressureHour[:, 1] = ECMWF_Merged[:, ECMWF["pressure"]]
     if "gfs" in sourceList:
-        PressureHour[:, 1] = GFS_Merged[:, GFS["pressure"]]
+        PressureHour[:, 2] = GFS_Merged[:, GFS["pressure"]]
     InterPhour[:, DATA_HOURLY["pressure"]] = np.choose(
         np.argmin(np.isnan(PressureHour), axis=1), PressureHour.T
     )
@@ -3486,15 +3515,19 @@ async def PW_Forecast(
     )
 
     ### Wind Speed
-    WindSpeedHour = np.full((len(hour_array_grib), 3), np.nan)
+    WindSpeedHour = np.full((len(hour_array_grib), 4), np.nan)
     if "nbm" in sourceList:
         WindSpeedHour[:, 0] = NBM_Merged[:, NBM["wind"]]
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         WindSpeedHour[:, 1] = np.sqrt(
             HRRR_Merged[:, HRRR["wind_u"]] ** 2 + HRRR_Merged[:, HRRR["wind_v"]] ** 2
         )
-    if "gfs" in sourceList:
+    if "ecmwf" in sourceList:
         WindSpeedHour[:, 2] = np.sqrt(
+            ECMWF_Merged[:, ECMWF["wind_u"]] ** 2 + ECMWF_Merged[:, ECMWF["wind_v"]] ** 2
+        )
+    if "gfs" in sourceList:
+        WindSpeedHour[:, 3] = np.sqrt(
             GFS_Merged[:, GFS["wind_u"]] ** 2 + GFS_Merged[:, GFS["wind_v"]] ** 2
         )
 
@@ -3514,13 +3547,15 @@ async def PW_Forecast(
     )
 
     ### Wind Gust
-    WindGustHour = np.full((len(hour_array_grib), 3), np.nan)
+    WindGustHour = np.full((len(hour_array_grib), 4), np.nan)
     if "nbm" in sourceList:
         WindGustHour[:, 0] = NBM_Merged[:, NBM["gust"]]
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         WindGustHour[:, 1] = HRRR_Merged[:, HRRR["gust"]]
+    if "ecmwf" in sourceList:
+        WindGustHour[:, 2] = ECMWF_Merged[:, ECMWF["gust"]]
     if "gfs" in sourceList:
-        WindGustHour[:, 2] = GFS_Merged[:, GFS["gust"]]
+        WindGustHour[:, 3] = GFS_Merged[:, GFS["gust"]]
     InterPhour[:, DATA_HOURLY["gust"]] = np.choose(
         np.argmin(np.isnan(WindGustHour), axis=1), WindGustHour.T
     )
@@ -3536,7 +3571,7 @@ async def PW_Forecast(
     )
 
     ### Wind Bearing
-    WindBearingHour = np.full((len(hour_array_grib), 3), np.nan)
+    WindBearingHour = np.full((len(hour_array_grib), 4), np.nan)
     if "nbm" in sourceList:
         WindBearingHour[:, 0] = NBM_Merged[:, NBM["bearing"]]
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
@@ -3549,8 +3584,18 @@ async def PW_Forecast(
                 2 * np.pi,
             )
         )
-    if "gfs" in sourceList:
+    if "ecmwf" in sourceList:
         WindBearingHour[:, 2] = np.rad2deg(
+            np.mod(
+                np.arctan2(
+                    ECMWF_Merged[:, ECMWF["wind_u"]], ECMWF_Merged[:, ECMWF["wind_v"]]
+                )
+                + np.pi,
+                2 * np.pi,
+            )
+        )
+    if "gfs" in sourceList:
+        WindBearingHour[:, 3] = np.rad2deg(
             np.mod(
                 np.arctan2(GFS_Merged[:, GFS["wind_u"]], GFS_Merged[:, GFS["wind_v"]])
                 + np.pi,
@@ -3562,13 +3607,15 @@ async def PW_Forecast(
     )
 
     ### Cloud Cover
-    CloudCoverHour = np.full((len(hour_array_grib), 3), np.nan)
+    CloudCoverHour = np.full((len(hour_array_grib), 4), np.nan)
     if "nbm" in sourceList:
         CloudCoverHour[:, 0] = NBM_Merged[:, NBM["cloud"]]
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         CloudCoverHour[:, 1] = HRRR_Merged[:, HRRR["cloud"]]
+    if "ecmwf" in sourceList:
+        CloudCoverHour[:, 2] = ECMWF_Merged[:, ECMWF["cloud"]]
     if "gfs" in sourceList:
-        CloudCoverHour[:, 2] = GFS_Merged[:, GFS["cloud"]]
+        CloudCoverHour[:, 3] = GFS_Merged[:, GFS["cloud"]]
     InterPhour[:, DATA_HOURLY["cloud"]] = np.maximum(
         np.choose(np.argmin(np.isnan(CloudCoverHour), axis=1), CloudCoverHour.T) * 0.01,
         0,
@@ -3625,19 +3672,22 @@ async def PW_Forecast(
         )
 
     ### Precipitation Accumulation
-    PrecpAccumHour = np.full((len(hour_array_grib), 4), np.nan)
+    PrecpAccumHour = np.full((len(hour_array_grib), 5), np.nan)
     # NBM
     if "nbm" in sourceList:
         PrecpAccumHour[:, 0] = NBM_Merged[:, NBM["intensity"]]
     # HRRR
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         PrecpAccumHour[:, 1] = HRRR_Merged[:, HRRR["accum"]]
+    # ECMWF
+    if "ecmwf" in sourceList:
+        PrecpAccumHour[:, 2] = ECMWF_Merged[:, ECMWF["accum"]]
     # GEFS
     if "gefs" in sourceList:
-        PrecpAccumHour[:, 2] = GEFS_Merged[:, GEFS["accum"]]
+        PrecpAccumHour[:, 3] = GEFS_Merged[:, GEFS["accum"]]
     # GFS
     if "gfs" in sourceList:
-        PrecpAccumHour[:, 3] = GFS_Merged[:, GFS["accum"]]
+        PrecpAccumHour[:, 4] = GFS_Merged[:, GFS["accum"]]
 
     InterPhour[:, DATA_HOURLY["accum"]] = np.maximum(
         np.choose(np.argmin(np.isnan(PrecpAccumHour), axis=1), PrecpAccumHour.T)
