@@ -521,7 +521,7 @@ if STAGE == "TESTING":
             store = S3ZipStore(f)
         # Try an old ingest version for testing
         except FileNotFoundError:
-            ingestVersion = "v27"
+            ingestVersion = "v28"
             print("Using old ingest version: " + ingestVersion)
             f = _retry_s3_operation(
                 lambda: s3.open(
@@ -547,7 +547,7 @@ if STAGE == "TESTING":
             )
             store = S3ZipStore(f)
         except FileNotFoundError:
-            ingestVersion = "v27"
+            ingestVersion = "v28"
             print("Using old ingest version: " + ingestVersion)
             f = _retry_s3_operation(
                 lambda: s3.open(
