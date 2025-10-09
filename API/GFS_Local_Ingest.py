@@ -156,7 +156,7 @@ zarrVars = (
     "REFC_entireatmosphere",
     "DSWRF_surface",
     "CAPE_surface",
-    "PRES_surface",
+    "PRES_station",
 )
 
 #####################################################################################################
@@ -503,6 +503,7 @@ for accumVar in accumVars:
 # %% Save merged and processed xarray dataset to disk using zarr with compression
 
 # Rename PRES_surface to PRES_station for clarity
+# From here on out, it'll be referred to as PRES_station
 xarray_forecast_merged = xarray_forecast_merged.rename({"PRES_surface": "PRES_station"})
 
 # Save the dataset with compression and filters for all variables
@@ -823,6 +824,7 @@ for i in range(hisPeriod, 0, -6):
     )
 
     # Rename PRES_surface to PRES_station for clarity
+    # From here on out, it'll be referred to as PRES_station
     xarray_hist_merged = xarray_hist_merged.rename({"PRES_surface": "PRES_station"})
 
     # Save merged and processed xarray dataset to disk using zarr with compression
@@ -848,9 +850,7 @@ for i in range(hisPeriod, 0, -6):
     encoding = {
         vname: {"chunks": (6, processChunk, processChunk)}
         for vname in zarrVars[1:]
-        if vname != "PRES_surface"
     }
-    encoding["PRES_station"] = {"chunks": (6, processChunk, processChunk)}
 
     # with ProgressBar():
     xarray_hist_merged.to_zarr(
@@ -892,10 +892,6 @@ daskVarArrays = []
 daskVarArrayList = []
 
 for daskVarIDX, dask_var in enumerate(zarrVars[:]):
-    # Rename PRES_surface to PRES_station for clarity
-    if dask_var == "PRES_surface":
-        dask_var = "PRES_station"
-
     for local_ncpath in ncLocalWorking_paths:
         # If not found in array, use np.nan to show missing
         try:
