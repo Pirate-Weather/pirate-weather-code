@@ -19,14 +19,15 @@ import xarray as xr
 import zarr.storage
 from dask.diagnostics import ProgressBar
 from herbie import FastHerbie, HerbieLatest, Path
-from ingest_utils import interp_time_block, mask_invalid_data, validate_grib_stats
 
-from API.constants.shared_const import INGEST_VERSION_STR
+from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
-    HISTORY_PERIODS,
+    interp_time_block,
+    mask_invalid_data,
+    validate_grib_stats,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -38,15 +39,13 @@ wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
 
-forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/home/ubuntu/Weather/ECMWF"
-)
+forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/ECMWF")
 forecast_process_path = forecast_process_dir + "/ECMWF_Process"
 hist_process_path = forecast_process_dir + "/ECMWF_Historic"
 tmpDIR = forecast_process_dir + "/Downloads"
 
-forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/ECMWF")
-historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/History/ECMWF")
+forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/ECMWF")
+historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/ECMWF")
 
 
 saveType = os.getenv("save_type", default="Download")
