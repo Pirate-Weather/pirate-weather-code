@@ -848,8 +848,7 @@ for i in range(hisPeriod, 0, -6):
     # Use the same encoding as last time but with larger chunks to speed up read times
     # Small fix for PRES_station/ PRES_surface
     encoding = {
-        vname: {"chunks": (6, processChunk, processChunk)}
-        for vname in zarrVars[1:]
+        vname: {"chunks": (6, processChunk, processChunk)} for vname in zarrVars[1:]
     }
 
     # with ProgressBar():
