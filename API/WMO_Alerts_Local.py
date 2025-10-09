@@ -44,8 +44,8 @@ Notes
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-import asyncio, aiohttp, async_timeout, io, logging
+import asyncio
+import aiohttp
 import io
 import os
 import logging
@@ -57,7 +57,7 @@ import shutil
 import s3fs
 import sys
 
-import xml.etree.ElementTree as ET
+from xml.etree import ElementTree as ET
 
 import geopandas as gpd
 from shapely.geometry import Polygon
@@ -66,14 +66,13 @@ from shapely.geometry import Polygon
 from API.constants.shared_const import INGEST_VERSION_STR
 
 # %% Setup paths and parameters
-ingestVersion = INGEST_VERSION_STR
+ingest_version = INGEST_VERSION_STR
 
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/mnt/nvme/data/WMO_Alerts"
 )
 forecast_process_path = forecast_process_dir + "/WMO_Alerts_Process"
 hist_process_path = forecast_process_dir + "/WMO_Alerts_Historic"
-tmpDIR = forecast_process_dir + "/Downloads"
 
 forecast_path = os.getenv(
     "forecast_path", default="/mnt/nvme/data/Prod/WMO_Alerts"
@@ -83,7 +82,7 @@ historic_path = os.getenv(
 )
 
 
-saveType = os.getenv("save_type", default="Download")
+save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
@@ -101,9 +100,9 @@ else:
 if not os.path.exists(tmpDIR):
     os.makedirs(tmpDIR)
 
-if saveType == "Download":
-    if not os.path.exists(forecast_path + "/" + ingestVersion):
-        os.makedirs(forecast_path + "/" + ingestVersion)
+if save_type == "Download":
+    if not os.path.exists(forecast_path + "/" + ingest_version):
+        os.makedirs(forecast_path + "/" + ingest_version)
     if not os.path.exists(historic_path):
         os.makedirs(historic_path)
 
@@ -121,9 +120,6 @@ def _cap_text(elem, tag: str, ns: dict) -> str:
     return (elem.findtext(tag, default="") or "").strip()
 
 def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
-    from xml.etree import ElementTree as ET
-    from shapely.geometry import Polygon
-
     results = []
 
     try:
@@ -253,7 +249,7 @@ class HttpError(Exception):
 async def _fetch_json(session: aiohttp.ClientSession, url: str, timeout: float = DEFAULT_TIMEOUT) -> Dict:
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            async with async_timeout.timeout(timeout):
+            async with asyncio.timeout(timeout):
                 async with session.get(url) as resp:
                     if resp.status != 200:
                         raise HttpError(f"{url} -> {resp.status}")
@@ -266,7 +262,7 @@ async def _fetch_json(session: aiohttp.ClientSession, url: str, timeout: float =
 async def _fetch_text(session: aiohttp.ClientSession, url: str, timeout: float = DEFAULT_TIMEOUT) -> Optional[str]:
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            async with async_timeout.timeout(timeout):
+            async with asyncio.timeout(timeout):
                 async with session.get(url) as resp:
                     if resp.status != 200:
                         raise HttpError(f"{url} -> {resp.status}")
@@ -309,8 +305,7 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
     connector = aiohttp.TCPConnector(limit=MAX_CONCURRENCY, ttl_dns_cache=300)
     sem = asyncio.Semaphore(MAX_CONCURRENCY)
 
-    # async with aiohttp.ClientSession(connector=connector, raise_for_status=False) as session:
-    async with aiohttp.ClientSession(raise_for_status=False) as session:
+    async with aiohttp.ClientSession(connector=connector, raise_for_status=False) as session:
         sources_data = await _fetch_json(session, sources_url, timeout)
         sources: Iterable[Dict] = sources_data.get("sources", [])
 
@@ -463,14 +458,6 @@ points_in_polygons["string"] = (
     + points_in_polygons["URL"].astype(str)
 )
 
-
-float_rows = points_in_polygons[
-    points_in_polygons["string"].apply(lambda x: isinstance(x, float))
-]
-
-# Print the filtered rows
-print(float_rows)
-
 # Combine the formatted strings using "|" as a spacer
 df = points_in_polygons.groupby("INDEX").agg({"string": "|".join}).reset_index()
 
@@ -493,9 +480,9 @@ gridPoints_XR2 = gridPoints_XR.values.astype(VariableLengthUTF8).reshape(lons.sh
 
 # Write to zarr
 # Save as zarr
-if saveType == "S3":
+if save_type == "S3":
     zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/WMO_Alerts.zarr.zip", mode="a", compression=0
+        forecast_process_dir + "/WMO_Alerts.zarr.zip", mode="w", compression=0
     )
 else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/WMO_Alerts.zarr")
@@ -514,7 +501,7 @@ zarr_array = zarr.create_array(
 zarr_array[:] = gridPoints_XR2
 
 
-if saveType == "S3":
+if save_type == "S3":
     zarr_store.close()
 
 ## TEST READ
@@ -538,17 +525,17 @@ if saveType == "S3":
 
 
 # Upload to S3
-if saveType == "S3":
+if save_type save_type== "S3":
     # Upload to S3
     s3.put_file(
         forecast_process_dir + "/WMO_Alerts.zarr.zip",
-        forecast_path + "/" + ingestVersion + "/WMO_Alerts.zarr.zip",
+        forecast_path + "/" + ingest_version + "/WMO_Alerts.zarr.zip",
     )
 else:
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/WMO_Alerts.zarr",
-        forecast_path + "/" + ingestVersion + "/WMO_Alerts.zarr",
+        forecast_path + "/" + ingest_version + "/WMO_Alerts.zarr",
         dirs_exist_ok=True,
     )
 
