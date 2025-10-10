@@ -3,6 +3,10 @@
 
 # %% Import modules
 import os
+
+# os.environ["ECCODES_DEFINITION_PATH"] = (
+#    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+# )
 import pickle
 import shutil
 import subprocess
@@ -12,12 +16,13 @@ import traceback
 import warnings
 
 import dask.array as da
+from dask.diagnostics import ProgressBar
+
 import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
 import zarr.storage
-from dask.diagnostics import ProgressBar
 from herbie import FastHerbie, HerbieLatest, Path
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
@@ -26,8 +31,9 @@ from API.ingest_utils import (
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
     interp_time_block,
-    mask_invalid_data,
     validate_grib_stats,
+    VALID_DATA_MIN,
+    VALID_DATA_MAX,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -130,20 +136,22 @@ else:
 
 zarrVars = (
     "time",
-    "GUST_10maboveground",
-    "PRES_meansealevel",
-    "TMP_2maboveground",
-    "DPT_2maboveground",
-    "UGRD_10maboveground",
-    "VGRD_10maboveground",
-    "TPRATE_surface",
-    "var0_1_193_surface",
-    "PTYPE_surface",
-    "TCDC_atmoscol",
+    "fg10",
+    "msl",
+    "t2m",
+    "d2m",
+    "u10",
+    "v10",
+    "tprate",
+    "tp",
+    "ptype",
+    "tcc",
     "Precipitation_Prob",
     "APCP_Mean",
     "APCP_StdDev",
 )
+
+
 #####################################################################################################
 # %% Download AIFS data using Herbie Latest
 # Needed for tcc
@@ -165,8 +173,7 @@ FH_forecastsub = FastHerbie(
 )
 
 # Download the subsets
-FH_forecastsub.download("tcc", verbose=False)
-
+aifs_paths = FH_forecastsub.download("tcc", verbose=False)
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(aifs_range1):
@@ -193,24 +200,16 @@ validate_grib_stats(gribCheck)
 print("Grib files passed validation, proceeding with processing")
 
 
-# Create a string to pass to wgrib2 to merge all gribs into one netcdf
-cmd = (
-    "cat "
-    + " ".join(gribList)
-    + " | "
-    + f"{wgrib2_path}"
-    + " - "
-    + " -netcdf "
-    + forecast_process_path
-    + "_aifs_wgrib2_merged.nc"
-)
-
-
-# Run wgrib2
-spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-if spOUT.returncode != 0:
-    print(spOUT.stderr)
-    sys.exit()
+aifs_mf = xr.open_mfdataset(
+    aifs_paths,
+    engine="cfgrib",
+    combine="nested",
+    concat_dim="step",
+    decode_timedelta=False,
+    join="outer",
+    coords="minimal",
+    compat="override",
+).sortby("step")
 
 
 #####################################################################################################
@@ -233,155 +232,73 @@ FH_forecastsub = FastHerbie(
     verbose=False,
     save_dir=tmpDIR,
 )
-gribList = []
-failCount = 0
-ensNum = 1
-while ensNum < 51:
-    # Download the subsets
-    matchString = ":(tp:sfc:" + str(ensNum) + "):"
-    FH_forecastsub.download(matchString, verbose=True)
-
-    # Create list of downloaded grib files
-    gribList.append(
-        [
-            str(Path(x.get_localFilePath(matchString)).expand())
-            for x in FH_forecastsub.file_exists
-        ]
-    )
-
-    # Check for download length
-    if len(gribList[-1]) != len(ifsFileRange):
-        print(
-            "Download failed, expected "
-            + str(len(ifsFileRange))
-            + " files, but got "
-            + str(len(FH_forecastsub.file_exists))
-        )
-        sys.exit(1)
-
-    # Perform a check if any data seems to be invalid
-    cmd = "cat " + " ".join(gribList[-1]) + " | " + f"{wgrib2_path}" + "- -s -stats"
-
-    gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-
-    validate_grib_stats(gribCheck)
-    print("Grib files passed validation, proceeding with processing")
-
-    # Create a string to pass to wgrib2 to merge all gribs into one netcdf
-    cmd = (
-        "cat "
-        + " ".join(gribList[-1])
-        + " | "
-        + f"{wgrib2_path}"
-        + " - "
-        + " -netcdf "
-        + forecast_process_path
-        + "_enfo_"
-        + str(ensNum)
-        + "_wgrib2_merged.nc"
-    )
-
-    # Run wgrib2
-    spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-    if spOUT.returncode != 0:
-        print(spOUT.stderr)
-        sys.exit()
-
-    # Open the time merged file and fix the precipitation accumulation
-    # Find the difference between steps to calculate the hourly rainfall
-    xarray_forecast_merged = xr.open_mfdataset(
-        [forecast_process_path + "_enfo_" + str(ensNum) + "_wgrib2_merged.nc"],
-        engine="netcdf4",
-    )
-
-    # Check for download length
-    if len(xarray_forecast_merged["time"]) != 64:
-        print(
-            "Member " + str(ensNum + 1) + " has not downloaded all files, trying again"
-        )
-        failCount += 1
-
-        # Break after 10 failed attempts
-        if failCount > 10:
-            break
-
-        continue
-
-    xarray_forecast_merged["var0_1_193_surface"] = xarray_forecast_merged[
-        "var0_1_193_surface"
-    ].copy(
-        data=np.diff(
-            xarray_forecast_merged["var0_1_193_surface"],
-            axis=xarray_forecast_merged["var0_1_193_surface"].get_axis_num("time"),
-            prepend=0,
-        )
-    )
-
-    # Change the 3 and 6 hour accumulations to hourly
-    # STeps 3 to 144 are 3-hourly, the rest are 6 hourly
-    xarray_forecast_merged["var0_1_193_surface"][0:48] = (
-        xarray_forecast_merged["var0_1_193_surface"][0:48] / 3
-    )
-    xarray_forecast_merged["var0_1_193_surface"][48:] = (
-        xarray_forecast_merged["var0_1_193_surface"][48:] / 6
-    )
-
-    # Save as zarr
-    xarray_forecast_merged.chunk(
-        chunks={"time": 64, "latitude": 100, "longitude": 100}
-    ).to_zarr(
-        forecast_process_path + "_enfo_" + str(ensNum) + "_wgrib2_merged.zarr",
-        mode="w",
-        consolidated=False,
-        compute=True,
-    )
-
-    print(ensNum)
-    ensNum += 1
 
 
-unix_epoch = np.datetime64(0, "s")
-one_second = np.timedelta64(1, "s")
-#
+match_string_enfo = r":(tp:sfc:\d+):"
+ens_paths = FH_forecastsub.download(match_string_enfo, verbose=True)
 
-# Combine NetCDF files into a Dask Array, since it works significantly better than the xarray mfdataset appraoach
-ncLocalWorking_paths = [
-    forecast_process_path + "_enfo_" + str(i) + "_wgrib2_merged.zarr"
-    for i in range(1, 31, 1)
+gribList = [
+    str(Path(x.get_localFilePath(match_string_enfo)).expand())
+    for x in FH_forecastsub.file_exists
 ]
 
-daskVarArrays = []
-for local_ncpath in ncLocalWorking_paths:
-    daskVarArrays.append(da.from_zarr(local_ncpath, "var0_1_193_surface"))
+# Perform a check if any data seems to be invalid
+cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-# Stack times together, keeping variables separate
-daskArrays = da.stack(daskVarArrays, axis=0)
+gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+print("Grib files passed validation, proceeding with processing")
 
 
-# Dict to hold output dask arrays
-daskOutput = dict()
+ens_mf = xr.open_mfdataset(
+    ens_paths,
+    engine="cfgrib",
+    combine="nested",
+    concat_dim="step",
+    decode_timedelta=False,
+    join="outer",
+    coords="minimal",
+    compat="override",
+).sortby("step")
 
-# Create new xr dataset for enso by dropping the data variable from xarray_forecast_merged
-xr_ensoOut = xarray_forecast_merged.drop_vars("var0_1_193_surface")
+ens_mf["tpd"] = ens_mf["tp"].diff(dim="step")
 
-# Find the probability of precipitation greater than 0.1 mm/h  across all members
-xr_ensoOut["Precipitation_Prob"] = (
-    ("time", "latitude", "longitude"),
-    ((daskArrays) > 0.1).sum(axis=0) / 50,
-)
+# Set the first difference value to zero
+ens_mf["tpd"][dict(step=0)] = ens_mf["tp"].isel(step=0)
+
+# Change the 3 and 6 hour accumulations to hourly
+# Steps 3 to 144 are 3-hourly, the rest are 6 hourly
+first48 = ens_mf.step.isel(step=slice(0, 48))
+mask = ens_mf.step.isin(first48)
+ens_mf = ens_mf.assign(tpd=xr.where(mask, ens_mf.tpd / 3, ens_mf.tpd))
+
+after48 = ens_mf.step.isel(step=slice(48, None))
+mask = ens_mf.step.isin(after48)
+ens_mf = ens_mf.assign(tpd=xr.where(mask, ens_mf.tpd / 6, ens_mf.tpd))
+
+# Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
+X3_Precipitation_Prob = (ens_mf["tpd"] > 0.0001).sum(dim="number") / ens_mf.sizes[
+    "number"
+]
 
 # Find the standard deviation of precipitation accumulation across all members
-xr_ensoOut["APCP_StdDev"] = (("time", "latitude", "longitude"), daskArrays.std(axis=0))
+X3_Precipitation_StdDev = ens_mf["tpd"].std(dim="number")
 
 # Find the average precipitation accumulation across all members
-xr_ensoOut["APCP_Mean"] = (("time", "latitude", "longitude"), daskArrays.mean(axis=0))
+X3_Precipitation_Mean = ens_mf["tpd"].mean(dim="number")
 
-# Save as zarr
-# with ProgressBar():
-xr_ensoOut.to_zarr(
-    forecast_process_path + "_ensoOut.zarr", mode="w", consolidated=False, compute=True
+# Merge into a new xarray dataset
+xr_ensoOut = xr.Dataset(
+    {
+        "Precipitation_Prob": X3_Precipitation_Prob,
+        "APCP_StdDev": X3_Precipitation_StdDev,
+        "APCP_Mean": X3_Precipitation_Mean,
+    },
+    coords={
+        "time": ens_mf["step"],
+        "latitude": ens_mf["latitude"],
+        "longitude": ens_mf["longitude"],
+    },
 )
-
 
 #####################################################################################################
 # %% Download Base IFS data using Herbie Latest
@@ -414,84 +331,119 @@ FH_forecastsub = FastHerbie(
 )
 
 # Download the subsets
-FH_forecastsub.download(matchStrings, verbose=False)
+ifs_paths = FH_forecastsub.download(matchStrings, verbose=True)
 
-# Create list of downloaded grib files
 gribList = [
     str(Path(x.get_localFilePath(matchStrings)).expand())
     for x in FH_forecastsub.file_exists
 ]
 
-# Check for download length
-if len(gribList) != len(ifsFileRange):
-    print(
-        "Download failed, expected "
-        + str(len(ifsFileRange))
-        + " files, but got "
-        + str(len(FH_forecastsub.file_exists))
-    )
-    sys.exit(1)
-
 # Perform a check if any data seems to be invalid
 cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-
-validate_grib_stats(gribCheck)
 print("Grib files passed validation, proceeding with processing")
 
-# Create a string to pass to wgrib2 to merge all gribs into one netcdf
-cmd = (
-    "cat "
-    + " ".join(gribList)
-    + " | "
-    + f"{wgrib2_path}"
-    + " - "
-    + " -netcdf "
-    + forecast_process_path
-    + "_wgrib2_merged.nc"
+
+ifs_mf_2 = xr.open_mfdataset(
+    ifs_paths,
+    engine="cfgrib",
+    combine="nested",
+    concat_dim="step",
+    decode_timedelta=False,
+    join="outer",
+    coords="minimal",
+    compat="override",
+    backend_kwargs={
+        "filter_by_keys": {"typeOfLevel": "heightAboveGround", "level": [2]}
+    },
+).sortby("step")
+ifs_mf_10 = xr.open_mfdataset(
+    ifs_paths,
+    engine="cfgrib",
+    combine="nested",
+    concat_dim="step",
+    decode_timedelta=False,
+    join="outer",
+    coords="minimal",
+    compat="override",
+    backend_kwargs={
+        "filter_by_keys": {"typeOfLevel": "heightAboveGround", "level": [10]}
+    },
+).sortby("step")
+# Take fg310 values where fg10 has nan
+ifs_mf_10_gust = xr.where(
+    ~xr.ufuncs.isnan(ifs_mf_10["fg10"]), ifs_mf_10["fg10"], ifs_mf_10["fg310"]
 )
 
-# TP is var0_1_193_surface
+# Replace the fg10 variable with the new gust variable
+ifs_mf_10 = ifs_mf_10.drop_vars(["fg10", "fg310"])
+ifs_mf_10["fg10"] = ifs_mf_10_gust
 
-# Run wgrib2
-spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-if spOUT.returncode != 0:
-    print(spOUT.stderr)
-    sys.exit()
+ifs_mf_surf = xr.open_mfdataset(
+    ifs_paths,
+    engine="cfgrib",
+    combine="nested",
+    concat_dim="step",
+    decode_timedelta=False,
+    join="outer",
+    coords="minimal",
+    compat="override",
+    backend_kwargs={"filter_by_keys": {"typeOfLevel": "surface"}},
+).sortby("step")
+
+ifs_mf_msl = xr.open_mfdataset(
+    ifs_paths,
+    engine="cfgrib",
+    combine="nested",
+    concat_dim="step",
+    decode_timedelta=False,
+    join="outer",
+    coords="minimal",
+    compat="override",
+    backend_kwargs={"filter_by_keys": {"typeOfLevel": "meanSea"}},
+).sortby("step")
+
+# Combine the datasets
+ifs_mf = xr.merge([ifs_mf_2, ifs_mf_10, ifs_mf_surf, ifs_mf_msl], compat="override")
 
 
 # %% Merge the IFS, ENSO, and AIFS data
 
-# Read the files using xarray
-xarray_wgrib_merged = xr.open_mfdataset(forecast_process_path + "_wgrib2_merged.nc")
-xarray_wgrib_AIFS_merged = xr.open_mfdataset(
-    forecast_process_path + "_aifs_wgrib2_merged.nc"
-)
-xarray_wgrib_enso_merged = xr.open_mfdataset(
-    forecast_process_path + "_ensoOut.zarr", consolidated=False
-)
-
 # Reinterpolate the AIFS array to the same times as the IFS arrays
-xarray_wgrib_AIFS_merged = xarray_wgrib_AIFS_merged.interp(
-    time=xarray_wgrib_merged.time, method="linear"
+aifs_mf = aifs_mf.interp(
+    step=ifs_mf.step, method="linear", kwargs={"fill_value": "extrapolate"}
 )
 
-# Merge the xarray objects
+
 xarray_forecast_merged = xr.merge(
-    [xarray_wgrib_merged, xarray_wgrib_AIFS_merged, xarray_wgrib_enso_merged],
-    compat="override",
+    [ifs_mf, aifs_mf, xr_ensoOut], compat="override", join="outer"
 )
 
-assert len(xarray_forecast_merged.time) == len(ifsFileRange), (
+
+assert len(xarray_forecast_merged.step) == len(ifsFileRange), (
     "Incorrect number of timesteps! Exiting"
 )
 
+# Replace the step variable with a time variable using the start time and the step values
+xarray_forecast_merged = (
+    xarray_forecast_merged.assign_coords(
+        time=(
+            "step",
+            pd.to_datetime(xarray_forecast_merged.time.values)
+            + pd.to_timedelta(xarray_forecast_merged.step.values, unit="h"),
+        )
+    )
+    .swap_dims({"step": "time"})
+    .drop_vars("step")
+)
+
+
 # Create a new time series
-start = xarray_forecast_merged.time.min().values  # Adjust as necessary
-end = xarray_forecast_merged.time.max().values  # Adjust as necessary
+start = xarray_forecast_merged.time[0].values
+end = xarray_forecast_merged.time[-1].values
 new_hourly_time = pd.date_range(
-    start=start - pd.Timedelta(hisPeriod, "h"), end=end, freq="h"
+    start=pd.to_datetime(start) - pd.Timedelta(hisPeriod, "h"), end=end, freq="h"
 )
 
 stacked_times = np.concatenate(
@@ -500,7 +452,7 @@ stacked_times = np.concatenate(
             start=start - pd.Timedelta(hisPeriod, "h"),
             end=start - pd.Timedelta(1, "h"),
             freq="3h",
-        ),
+        ).to_numpy(),
         xarray_forecast_merged.time.values,
     )
 )
@@ -508,6 +460,7 @@ unix_epoch = np.datetime64(0, "s")
 one_second = np.timedelta64(1, "s")
 stacked_timesUnix = (stacked_times - unix_epoch) / one_second
 hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
+
 
 # Chunk and save as zarr
 xarray_forecast_merged = xarray_forecast_merged.chunk(
@@ -525,10 +478,14 @@ with ProgressBar():
 
 # %% Delete to free memory
 del (
-    xarray_wgrib_merged,
-    xarray_wgrib_AIFS_merged,
-    xarray_wgrib_enso_merged,
     xarray_forecast_merged,
+    ifs_mf,
+    ifs_mf_2,
+    ifs_mf_10,
+    ifs_mf_surf,
+    aifs_mf,
+    ens_mf,
+    xr_ensoOut,
 )
 
 T1 = time.time()
@@ -606,7 +563,7 @@ for i in range(hisPeriod, 1, -12):
 
     # Download the subsets
     # Start with oper
-    FH_histsub.download(matchStrings, verbose=False)
+    ifs_hisgribs = FH_histsub.download(matchStrings, verbose=False)
 
     # Check for download length
     if len(FH_histsub.file_exists) != len(fxx):
@@ -632,23 +589,64 @@ for i in range(hisPeriod, 1, -12):
     validate_grib_stats(gribCheck)
     print("Grib files passed validation, proceeding with processing")
 
-    # Create a string to pass to wgrib2 to merge all gribs into one netcdf
-    cmd = (
-        "cat "
-        + " ".join(gribList)
-        + " | "
-        + f"{wgrib2_path}"
-        + " - "
-        + " -netcdf "
-        + hist_process_path
-        + "_wgrib2_merged.nc"
-    )
+    # Created merged xarray object for the ifs data
+    ifs_his_mf_10 = xr.open_mfdataset(
+        ifs_hisgribs,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        decode_timedelta=False,
+        join="outer",
+        coords="minimal",
+        compat="override",
+        backend_kwargs={
+            "filter_by_keys": {"typeOfLevel": "heightAboveGround", "level": [10]}
+        },
+    ).sortby("step")
 
-    # Run wgrib2
-    spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-    if spOUT.returncode != 0:
-        print(spOUT.stderr)
-        sys.exit()
+    ifs_his_mf_2 = xr.open_mfdataset(
+        ifs_hisgribs,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        decode_timedelta=False,
+        join="outer",
+        coords="minimal",
+        compat="override",
+        backend_kwargs={
+            "filter_by_keys": {"typeOfLevel": "heightAboveGround", "level": [2]}
+        },
+    ).sortby("step")
+
+    ifs_his_mf_surf = xr.open_mfdataset(
+        ifs_hisgribs,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        decode_timedelta=False,
+        join="outer",
+        coords="minimal",
+        compat="override",
+        backend_kwargs={"filter_by_keys": {"typeOfLevel": "surface"}},
+    ).sortby("step")
+
+    ifs_his_mf_msl = xr.open_mfdataset(
+        ifs_hisgribs,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        decode_timedelta=False,
+        join="outer",
+        coords="minimal",
+        compat="override",
+        backend_kwargs={"filter_by_keys": {"typeOfLevel": "meanSea"}},
+    ).sortby("step")
+
+    # Combine the datasets
+    ifs_his_mf = xr.merge(
+        [ifs_his_mf_2, ifs_his_mf_10, ifs_his_mf_surf, ifs_his_mf_msl],
+        compat="override",
+    )
 
     ########################################################################
     ### Download the enfo data
@@ -657,147 +655,55 @@ for i in range(hisPeriod, 1, -12):
         DATES, model="ifs", fxx=fxx, product="enfo", verbose=False, save_dir=tmpDIR
     )
 
-    gribList = []
-    for ensNum in range(1, 51):
-        # Download the subsets
-        matchString = ":(tp:sfc:" + str(ensNum) + "):"
-        FH_histsub.download(matchString, verbose=True)
+    ens_his_paths = FH_histsub.download(match_string_enfo, verbose=True)
 
-        # Create list of downloaded grib files
-        gribList.append(
-            [
-                str(Path(x.get_localFilePath(matchString)).expand())
-                for x in FH_histsub.file_exists
-            ]
-        )
+    ens_his_mf = xr.open_mfdataset(
+        ens_his_paths,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        decode_timedelta=False,
+        join="outer",
+        coords="minimal",
+        compat="override",
+    ).sortby("step")
 
-        # Check for download length
-        if len(gribList[-1]) != len(fxx):
-            print(
-                "Download failed, expected "
-                + str(len(fxx))
-                + " files but got "
-                + str(len(FH_histsub.file_exists))
-            )
-            sys.exit(1)
+    ens_his_mf["tpd"] = ens_his_mf["tp"].diff(dim="step")
 
-        # Perform a check if any data seems to be invalid
-        cmd = (
-            "cat "
-            + " ".join(gribList[-1])
-            + " | "
-            + f"{wgrib2_path}"
-            + " - "
-            + " -s -stats"
-        )
-
-        gribCheck = subprocess.run(
-            cmd, shell=True, capture_output=True, encoding="utf-8"
-        )
-
-        validate_grib_stats(gribCheck)
-        print("Grib files passed validation, proceeding with processing")
-
-        # Create a string to pass to wgrib2 to merge all gribs into one netcdf
-        cmd = (
-            "cat "
-            + " ".join(gribList[-1])
-            + " | "
-            + f"{wgrib2_path}"
-            + " - "
-            + " -netcdf "
-            + hist_process_path
-            + "_enfo_"
-            + str(ensNum)
-            + "_wgrib2_merged.nc"
-        )
-
-        # Run wgrib2
-        spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-        if spOUT.returncode != 0:
-            print(spOUT.stderr)
-            sys.exit()
-
-        # Open the time merged file and fix the precipitation accumulation
-        # Find the difference between steps to calculate the hourly rainfall
-        xarray_forecast_merged = xr.open_mfdataset(
-            [hist_process_path + "_enfo_" + str(ensNum) + "_wgrib2_merged.nc"],
-            engine="netcdf4",
-        )
-
-        xarray_forecast_merged["var0_1_193_surface"] = xarray_forecast_merged[
-            "var0_1_193_surface"
-        ].copy(
-            data=np.diff(
-                xarray_forecast_merged["var0_1_193_surface"],
-                axis=xarray_forecast_merged["var0_1_193_surface"].get_axis_num("time"),
-                prepend=0,
-            )
-        )
-
-        # Change the 3 hour accumulations to hourly
-        xarray_forecast_merged["var0_1_193_surface"] = (
-            xarray_forecast_merged["var0_1_193_surface"] / 3
-        )
-
-        # Save as zarr
-        xarray_forecast_merged.chunk(
-            chunks={"time": 64, "latitude": 100, "longitude": 100}
-        ).to_zarr(
-            hist_process_path + "_enfo_" + str(ensNum) + "_wgrib2_merged.zarr",
-            mode="w",
-            consolidated=False,
-            compute=True,
-        )
-
-        print(ensNum)
-
-    # Combine NetCDF files into a Dask Array, since it works significantly better than the xarray mfdataset appraoach
-    ncLocalWorking_paths = [
-        hist_process_path + "_enfo_" + str(i) + "_wgrib2_merged.zarr"
-        for i in range(1, 31, 1)
-    ]
-
-    # Note that the chunks
-    daskVarArrays = []
-    for local_ncpath in ncLocalWorking_paths:
-        daskVarArrays.append(da.from_zarr(local_ncpath, "var0_1_193_surface"))
-
-    # Stack times together, keeping variables separate
-    daskArrays = da.stack(daskVarArrays, axis=0)
-
-    # Dict to hold output dask arrays
-    daskOutput = dict()
-
-    # Create new xr dataset for enso by dropping the data variable from xarray_forecast_merged
-    xr_ensoOut = xarray_forecast_merged.drop_vars("var0_1_193_surface")
-
-    # Find the probability of precipitation greater than 0.1 mm/h  across all members
-    xr_ensoOut["Precipitation_Prob"] = (
-        ("time", "latitude", "longitude"),
-        ((daskArrays) > 0.1).sum(axis=0) / 50,
+    # Set the first difference value to the first value
+    ens_his_mf["tpd"] = xr.where(
+        ens_his_mf.step == ens_his_mf.step.isel(step=0),
+        ens_his_mf["tp"].isel(step=0),
+        ens_his_mf["tpd"],
     )
+
+    # Change the 3 hour accumulations to hourly
+    ens_his_mf["tpd"] = ens_his_mf["tpd"] / 3
+
+    # Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
+    X3_Precipitation_Prob_His = (ens_his_mf["tpd"] > 0.0001).sum(
+        dim="number"
+    ) / ens_his_mf.sizes["number"]
 
     # Find the standard deviation of precipitation accumulation across all members
-    xr_ensoOut["APCP_StdDev"] = (
-        ("time", "latitude", "longitude"),
-        daskArrays.std(axis=0),
-    )
+    X3_Precipitation_StdDev_His = ens_his_mf["tpd"].std(dim="number")
 
     # Find the average precipitation accumulation across all members
-    xr_ensoOut["APCP_Mean"] = (
-        ("time", "latitude", "longitude"),
-        daskArrays.mean(axis=0),
-    )
+    X3_Precipitation_Mean_His = ens_his_mf["tpd"].mean(dim="number")
 
-    # Save as netcdf
-    with ProgressBar():
-        xr_ensoOut.to_zarr(
-            hist_process_path + "_ensoOut.zarr",
-            mode="w",
-            consolidated=False,
-            compute=True,
-        )
+    # Merge into a new xarray dataset
+    xr_enso_hisOut = xr.Dataset(
+        {
+            "Precipitation_Prob": X3_Precipitation_Prob_His,
+            "APCP_StdDev": X3_Precipitation_StdDev_His,
+            "APCP_Mean": X3_Precipitation_Mean_His,
+        },
+        coords={
+            "step": ens_his_mf["step"],
+            "latitude": ens_his_mf["latitude"],
+            "longitude": ens_his_mf["longitude"],
+        },
+    )
 
     ########################################################################
     # Save the aifs data
@@ -813,7 +719,7 @@ for i in range(hisPeriod, 1, -12):
     )
 
     # Download the subsets
-    FH_histsub.download("tcc", verbose=False)
+    aifs_his_paths = FH_histsub.download("tcc", verbose=False)
 
     # Create list of downloaded grib files
     gribList = [
@@ -838,42 +744,25 @@ for i in range(hisPeriod, 1, -12):
     validate_grib_stats(gribCheck)
     print("Grib files passed validation, proceeding with processing")
 
-    # Create a string to pass to wgrib2 to merge all gribs into one netcdf
-    cmd = (
-        "cat "
-        + " ".join(gribList)
-        + " | "
-        + f"{wgrib2_path}"
-        + " - "
-        + " -netcdf "
-        + hist_process_path
-        + "_aifs_wgrib2_merged.nc"
-    )
-
-    # Run wgrib2
-    spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-    if spOUT.returncode != 0:
-        print(spOUT.stderr)
-        sys.exit()
-
-    # Read the files using xarray
-    xarray_hist_IFS_merged = xr.open_mfdataset(hist_process_path + "_wgrib2_merged.nc")
-    xarray_hist_AIFS_merged = xr.open_mfdataset(
-        hist_process_path + "_aifs_wgrib2_merged.nc"
-    )
-    xarray_hist_ENSO_merged = xr.open_mfdataset(
-        hist_process_path + "_ensoOut.zarr", consolidated=False
-    )
+    aifs_his_mf = xr.open_mfdataset(
+        aifs_his_paths,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        decode_timedelta=False,
+        join="outer",
+        coords="minimal",
+        compat="override",
+    ).sortby("step")
 
     # Reinterpolate the AIFS array to the same times as the IFS arrays
-    xarray_hist_ENSO_merged = xarray_hist_ENSO_merged.interp(
-        time=xarray_hist_IFS_merged.time, method="linear"
+    aifs_his_mf = aifs_his_mf.interp(
+        step=ifs_his_mf.step, method="linear", kwargs={"fill_value": "extrapolate"}
     )
 
     # Merge the xarray objects
     xarray_hist_merged = xr.merge(
-        [xarray_hist_IFS_merged, xarray_hist_AIFS_merged, xarray_hist_ENSO_merged],
-        compat="override",
+        [ifs_his_mf, aifs_his_mf, xr_enso_hisOut], compat="override", join="outer"
     )
 
     # Save merged and processed xarray dataset to disk using zarr with compression
@@ -894,19 +783,32 @@ for i in range(hisPeriod, 1, -12):
         zarrStore = zarr.storage.LocalStore(local_path)
 
     # Save the dataset with compression and filters for all variables
-    # Use the same encoding as last time but with larger chuncks to speed up read times
+    # Use the same encoding as last time but with larger chunks to speed up read times
+
+    # Replace the step variable with a time variable using the start time and the step values
+    xarray_hist_merged = (
+        xarray_hist_merged.assign_coords(
+            time=(
+                "step",
+                pd.to_datetime(xarray_hist_merged.time.values)
+                + pd.to_timedelta(xarray_hist_merged.step.values, unit="h"),
+            )
+        )
+        .swap_dims({"step": "time"})
+        .drop_vars("step")
+    )
 
     # Chunk and save as zarr
     xarray_hist_merged = xarray_hist_merged.chunk(
-        chunks={"time": 64, "latitude": 100, "longitude": 100}
+        chunks={"time": 64, "latitude": processChunk, "longitude": processChunk}
     )
 
-    # with ProgressBar():
-    xarray_hist_merged.to_zarr(
-        store=zarrStore,
-        mode="w",
-        consolidated=False,
-    )
+    with ProgressBar():
+        xarray_hist_merged.to_zarr(
+            store=zarrStore,
+            mode="w",
+            consolidated=False,
+        )
 
     # Clear the xarray dataset from memory
     del xarray_hist_merged
@@ -936,92 +838,67 @@ ncLocalWorking_paths = [
     for i in range(hisPeriod, 1, -12)
 ]
 
-# Dask Setup
-daskInterpArrays = []
-daskVarArrays = []
-daskVarArrayList = []
-
-for daskVarIDX, dask_var in enumerate(zarrVars[:]):
-    for local_ncpath in ncLocalWorking_paths:
-        if saveType == "S3":
-            daskVarArrays.append(
-                da.from_zarr(
-                    local_ncpath,
-                    component=dask_var,
-                    inline_array=True,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-            )
-        else:
-            daskVarArrays.append(
-                da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
-            )
-
-    daskVarArraysStack = da.stack(daskVarArrays, allow_unknown_chunksizes=True)
-
-    daskForecastArray = da.from_zarr(
-        forecast_process_path + "_merged.zarr", component=dask_var, inline_array=True
-    )
-
-    if dask_var == "time":
-        # Create a time array with the same shape
-        daskVarArraysShape = da.reshape(
-            daskVarArraysStack,
-            (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], 1),
-            merge_chunks=False,
-        )
-        daskCatTimes = da.concatenate(
-            (da.squeeze(daskVarArraysShape), daskForecastArray), axis=0
-        ).astype("float32")
-
-        # Get times as numpy
-        npCatTimes = daskCatTimes.compute()
-
-        daskArrayOut = da.from_array(
-            np.tile(
-                np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
-                (1, 721, 1440),
-            )
-        ).rechunk((len(stacked_timesUnix), processChunk, processChunk))
-
-        daskVarArrayList.append(daskArrayOut)
-
-    else:
-        daskVarArraysShape = da.reshape(
-            daskVarArraysStack,
-            (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], 721, 1440),
-            merge_chunks=False,
-        )
-        daskArrayOut = da.concatenate((daskVarArraysShape, daskForecastArray), axis=0)
-
-        daskVarArrayList.append(
-            daskArrayOut[:, :, :]
-            .rechunk((len(stacked_timesUnix), processChunk, processChunk))
-            .astype("float32")
-        )
-
-    daskVarArrays = []
-
-    print(dask_var)
-
-# Merge the arrays into a single 4D array
-daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
-
-# Mask out invalid data
-daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
-
-# Write out to disk
-# This intermediate step is necessary to avoid memory overflow
-# Read in stacked 4D array back in
-daskVarArrayListMergeNaN.to_zarr(
-    forecast_process_path + "_stack.zarr", overwrite=True, compute=True
+# Read in the zarr arrays
+hist = [xr.open_zarr(p, consolidated=False) for p in ncLocalWorking_paths]
+fcst = xr.open_zarr(f"{forecast_process_path}_merged.zarr", consolidated=False)
+ds = xr.concat(
+    [*hist, fcst],
+    dim="time",
+    data_vars="minimal",
+    coords="minimal",
+    compat="override",
+    join="override",
 )
 
+# Clip to valid data ranges
+for var in zarrVars:
+    if var in ds.data_vars:
+        ds_clip = ds[var]
+        if np.issubdtype(ds_clip.dtype, np.number):
+            mask = (ds_clip >= VALID_DATA_MIN) & (ds_clip <= VALID_DATA_MAX)
+            ds[var] = ds_clip.where(mask)  # out-of-range → NaN
+
+# Rename time dimension to match later processing
+ds_rename = ds.rename({"time": "stacked_time"})
+
+# Add a 3D time array
+time3d = (
+    ((ds_rename["stacked_time"] - unix_epoch) / np.timedelta64(1, "s"))
+    .astype("float32")  # 1D ('time',)
+    .expand_dims(
+        latitude=ds_rename.latitude,  # add ('latitude',)
+        longitude=ds_rename.longitude,
+    )  # add ('longitude',)
+    .transpose("stacked_time", "latitude", "longitude")  # order dims
+)
+
+# Add the time array to the dataset
+ds_rename["time"] = time3d
+
+# Set the order correctly
+vars_in = [
+    v for v in zarrVars if v in ds_rename.data_vars
+]  # keep only those that exist
+ds_stack = ds_rename[vars_in].to_array(dim="var", name="var")
+
+# Rechunk the data to be more manageable for processing
+ds_chunk = ds_stack.chunk(
+    {
+        "var": 1,
+        "stacked_time": len(stacked_timesUnix),
+        "latitude": processChunk,
+        "longitude": processChunk,
+    }
+)
+
+# Interim zarr save of the stacked array. Not necessary for local, but speeds things up on S3
+with ProgressBar():
+    ds_chunk.to_zarr(forecast_process_path + "_stack.zarr", mode="w")
+
 # Read in stacked 4D array back in
-daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
+daskVarArrayStackDisk = da.from_zarr(
+    forecast_process_path + "_stack.zarr", component="__xarray_dataarray_variable__"
+)
 
 # Create a zarr backed dask array
 if saveType == "S3":
@@ -1061,23 +938,28 @@ w = (x_b - x_a[idx0]) / (x_a[idx1] - x_a[idx0])  # float array, shape (T_new,)
 # boolean mask of “in‐range” points
 valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
 
-# with ProgressBar():
-da.map_blocks(
-    interp_time_block,
-    daskVarArrayStackDisk,
-    idx0,
-    idx1,
-    w,
-    valid,
-    dtype="float32",
-    chunks=(1, len(hourly_timesUnix), processChunk, processChunk),
-).round(3).rechunk(
-    (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)
-).to_zarr(zarr_array, overwrite=True, compute=True)
+with ProgressBar():
+    da.map_blocks(
+        interp_time_block,
+        ds_chunk.data,
+        idx0,
+        idx1,
+        w,
+        valid,
+        dtype="float32",
+        chunks=(1, len(hourly_timesUnix), processChunk, processChunk),
+    ).round(3).rechunk(
+        (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)
+    ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
 if saveType == "S3":
     zarr_store.close()
+
+
+# TEST READ
+# Z = zarr.storage.LocalStore(forecast_process_dir + "/ECMWF.zarr", read_only='r')
+# Z2 = zarr.open(Z)
 
 # Rechunk subset of data for maps!
 # Want variables:
