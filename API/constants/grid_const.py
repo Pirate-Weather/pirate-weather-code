@@ -15,3 +15,13 @@ NBM_X_MIN = 1
 NBM_Y_MIN = 1
 NBM_X_MAX = 2344
 NBM_Y_MAX = 1596
+
+# RTMA Rapid Update grid constants (approximate 2.5 km resolution)
+# These are nominal bounds used for nearest-index lookup when exact coordinates
+# are not present in the zarr store. If exact coordinates are present in the
+# zarr, prefer reading them from the file instead of these constants.
+RTMA_LAT_MAX = 55.0
+RTMA_LAT_MIN = 20.0
+RTMA_LON_MIN = -130.0
+RTMA_LON_MAX = -60.0
+RTMA_DEG_STEP = 0.0225  # ~2.5 km spacing in degrees

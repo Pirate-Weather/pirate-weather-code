@@ -88,7 +88,15 @@ from API.constants.grid_const import (
 )
 
 # Project imports
-from API.constants.model_const import GEFS, GFS, HRRR, HRRR_SUBH, NBM, NBM_FIRE_INDEX
+from API.constants.model_const import (
+    GEFS,
+    GFS,
+    HRRR,
+    HRRR_SUBH,
+    NBM,
+    NBM_FIRE_INDEX,
+    RTMA,
+)
 from API.constants.shared_const import (
     HISTORY_PERIODS,
     INGEST_VERSION_STR,
@@ -131,6 +139,11 @@ force_now = os.getenv("force_now", default=False)
 
 # Version code for ingest files
 ingestVersion = INGEST_VERSION_STR
+
+# RTMA rapid update globals
+RTMA_Zarr = None
+RTMA_lats = None
+RTMA_lons = None
 
 
 def setup_logging():
@@ -318,6 +331,7 @@ def update_zarr_store(initialRun):
     global NBM_Fire_Zarr
     global GEFS_Zarr
     global HRRR_Zarr
+    global RTMA_Zarr
     global NWS_Alerts_Zarr
 
     STAGE = os.environ.get("STAGE", "PROD")
@@ -734,6 +748,36 @@ if STAGE == "TESTING":
 
     HRRR_Zarr = zarr.open(store, mode="r")
     print("HRRR Read")
+
+    # Try to load RTMA for testing
+    try:
+        if save_type == "S3":
+            f = _retry_s3_operation(
+                lambda: s3.open(
+                    "s3://ForecastTar_v2/" + ingestVersion + "/RTMA_RU.zarr.zip"
+                )
+            )
+            store = S3ZipStore(f)
+        elif save_type == "S3Zarr":
+            f = _retry_s3_operation(
+                lambda: s3.open(
+                    "s3://"
+                    + s3_bucket
+                    + "/ForecastTar_v2/"
+                    + ingestVersion
+                    + "/RTMA_RU.zarr.zip"
+                )
+            )
+            store = S3ZipStore(f)
+        else:
+            f = s3_bucket + "RTMA_RU.zarr.zip"
+            store = zarr.storage.ZipStore(f, mode="r")
+
+        RTMA_Zarr = zarr.open(store, mode="r")
+        print("RTMA Read")
+    except Exception:
+        RTMA_Zarr = None
+        print("RTMA not available in TESTING")
 
     if useETOPO:
         if save_type == "S3":
@@ -1159,12 +1203,16 @@ async def PW_Forecast(
     global NBM_Fire_Zarr
     global GEFS_Zarr
     global HRRR_Zarr
+    global RTMA_Zarr
+    global RTMA_lats
+    global RTMA_lons
     global NWS_Alerts_Zarr
 
     readHRRR = False
     readGFS = False
     readNBM = False
     readGEFS = False
+    # RTMA read flag is handled by presence of RTMA in zarr_tasks/results
 
     STAGE = os.environ.get("STAGE", "PROD")
 
@@ -2133,6 +2181,33 @@ async def PW_Forecast(
     if readGFS:
         zarrTasks["GFS"] = weather.zarr_read("GFS", GFS_Zarr, x_p, y_p)
 
+    # RTMA Rapid Update: prefer for current observations inside domain (non-historical)
+    if (RTMA_Zarr is not None) and (not timeMachine):
+        # lazily construct nominal RTMA lat/lon arrays using constants
+        from API.constants.grid_const import (
+            RTMA_LAT_MAX,
+            RTMA_LAT_MIN,
+            RTMA_LON_MIN,
+            RTMA_LON_MAX,
+            RTMA_DEG_STEP,
+        )
+
+        if RTMA_lats is None or RTMA_lons is None:
+            RTMA_lats = np.arange(RTMA_LAT_MAX, RTMA_LAT_MIN - 0.0001, -RTMA_DEG_STEP)
+            RTMA_lons = np.arange(RTMA_LON_MIN, RTMA_LON_MAX + 0.0001, RTMA_DEG_STEP)
+
+        abslat_rtma = np.abs(RTMA_lats - lat)
+        abslon_rtma = np.abs(RTMA_lons - az_Lon)
+        y_rtma = int(np.argmin(abslat_rtma))
+        x_rtma = int(np.argmin(abslon_rtma))
+
+        try:
+            zarrTasks["RTMA"] = weather.zarr_read("RTMA", RTMA_Zarr, x_rtma, y_rtma)
+        except Exception:
+            # Best-effort: if RTMA indexing fails, skip it
+            print("RTMA enqueue failed:")
+            print(traceback.print_exc())
+
     if readGEFS:
         zarrTasks["GEFS"] = weather.zarr_read("GEFS", GEFS_Zarr, x_p, y_p)
 
@@ -2292,6 +2367,52 @@ async def PW_Forecast(
             ).strftime("%Y-%m-%d %HZ")
     elif (isinstance(dataOut_gefs, np.ndarray)) & (timeMachine):
         sourceList.append("gefs")
+
+    # RTMA bookkeeping: if RTMA was read, add its run time and grid indices
+    if "RTMA" in zarr_results:
+        try:
+            dataOut_rtma = zarr_results["RTMA"]
+            if isinstance(dataOut_rtma, np.ndarray) and dataOut_rtma.shape[0] > 0:
+                rt_run_time = int(dataOut_rtma[0, 0])
+                # Add to sourceTimes for live requests
+                if not timeMachine:
+                    # RTMA runs every 15 minutes; show exact minute rather than rounding
+                    dt_rt = datetime.datetime.fromtimestamp(
+                        rt_run_time, datetime.UTC
+                    ).replace(tzinfo=None)
+                    sourceTimes["rtma-ru"] = dt_rt.strftime("%Y-%m-%d %H:%MZ")
+
+                # Compute nearest indices and store lat/lon
+                from API.constants.grid_const import (
+                    RTMA_LAT_MAX,
+                    RTMA_LAT_MIN,
+                    RTMA_LON_MIN,
+                    RTMA_LON_MAX,
+                    RTMA_DEG_STEP,
+                )
+
+                if RTMA_lats is None or RTMA_lons is None:
+                    RTMA_lats = np.arange(
+                        RTMA_LAT_MAX, RTMA_LAT_MIN - 0.0001, -RTMA_DEG_STEP
+                    )
+                    RTMA_lons = np.arange(
+                        RTMA_LON_MIN, RTMA_LON_MAX + 0.0001, RTMA_DEG_STEP
+                    )
+
+                abslat_rtma = np.abs(RTMA_lats - lat)
+                abslon_rtma = np.abs(RTMA_lons - az_Lon)
+                y_rt = int(np.argmin(abslat_rtma))
+                x_rt = int(np.argmin(abslon_rtma))
+
+                sourceIDX["rtma"] = dict()
+                sourceIDX["rtma"]["x"] = int(x_rt)
+                sourceIDX["rtma"]["y"] = int(y_rt)
+                sourceIDX["rtma"]["lat"] = round(RTMA_lats[y_rt], 2)
+                sourceIDX["rtma"]["lon"] = round(RTMA_lons[x_rt], 2)
+        except Exception:
+            if TIMING:
+                print("RTMA bookkeeping failed")
+                print(traceback.print_exc())
 
     # Timing Check
     if TIMING:
@@ -4695,7 +4816,9 @@ async def PW_Forecast(
             + GFS_Merged[currentIDX_hrrrh, GFS["vis"]] * interpFac2
         )
 
-    InterPcurrent[DATA_CURRENT["vis"]] = np.clip(InterPcurrent[14], 0, 16090) * visUnits
+    InterPcurrent[DATA_CURRENT["vis"]] = (
+        np.clip(InterPcurrent[DATA_CURRENT["vis"]], 0, 16090) * visUnits
+    )
 
     # Ozone from GFS
     InterPcurrent[DATA_CURRENT["ozone"]] = clipLog(
@@ -4783,6 +4906,130 @@ async def PW_Forecast(
     curr_temp = (
         InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS
     )  # temperature in Celsius
+
+    # --- RTMA Rapid Update override (live requests only) ---
+    # If RTMA data was read, prefer its analysis values for the "currently" block.
+    # Use mapping from API.constants.model_const.RTMA
+    try:
+        if ("RTMA" in zarr_results) and (not timeMachine):
+            dataOut_rtma = zarr_results.get("RTMA")
+            if isinstance(dataOut_rtma, np.ndarray) and dataOut_rtma.shape[0] > 0:
+                rt0 = dataOut_rtma[0, :]
+                # temp, dew and pressure are in same units as other models (Kelvin / hPa)
+                InterPcurrent[DATA_CURRENT["temp"]] = rt0[RTMA["temp"]]
+                InterPcurrent[DATA_CURRENT["dew"]] = rt0[RTMA["dew"]]
+                # RTMA humidity is percent (0-100) per ingest — convert to 0-1 using humidUnit
+                InterPcurrent[DATA_CURRENT["humidity"]] = (
+                    rt0[RTMA["humidity"]] * humidUnit
+                )
+
+                # RTMA provides surface pressure; update station pressure with RTMA value
+                InterPcurrent[DATA_CURRENT["station_pressure"]] = (
+                    clipLog(
+                        rt0[RTMA["pressure"]],
+                        CLIP_PRESSURE["min"],
+                        CLIP_PRESSURE["max"],
+                        "RTMA Station Pressure",
+                    )
+                    * pressUnits
+                )
+
+                # Visibility and gust
+                InterPcurrent[DATA_CURRENT["vis"]] = rt0[RTMA["vis"]]
+                InterPcurrent[DATA_CURRENT["gust"]] = rt0[RTMA["gust"]]
+
+                # Cloud cover (RTMA gives percent -> convert to 0-1)
+                InterPcurrent[DATA_CURRENT["cloud"]] = rt0[RTMA["cloud"]] * 0.01
+
+                # Wind: compute speed and bearing from u/v
+                u = rt0[RTMA["wind_u"]]
+                v = rt0[RTMA["wind_v"]]
+                InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(u * u + v * v)
+                InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
+                    np.mod(np.arctan2(u, v) + np.pi, 2 * np.pi)
+                )
+    except Exception:
+        if TIMING:
+            print("RTMA override failed")
+            print(traceback.print_exc())
+
+    # Re-run clipping for currently fields so RTMA values are validated/clipped as needed
+    try:
+        InterPcurrent[DATA_CURRENT["temp"]] = clipLog(
+            InterPcurrent[DATA_CURRENT["temp"]],
+            CLIP_TEMP["min"],
+            CLIP_TEMP["max"],
+            "Temperature Current",
+        )
+
+        InterPcurrent[DATA_CURRENT["dew"]] = clipLog(
+            InterPcurrent[DATA_CURRENT["dew"]],
+            CLIP_TEMP["min"],
+            CLIP_TEMP["max"],
+            "Dewpoint Current",
+        )
+
+        InterPcurrent[DATA_CURRENT["humidity"]] = clipLog(
+            InterPcurrent[DATA_CURRENT["humidity"]],
+            CLIP_HUMIDITY["min"],
+            CLIP_HUMIDITY["max"],
+            "Humidity Current",
+        )
+
+        InterPcurrent[DATA_CURRENT["pressure"]] = (
+            clipLog(
+                InterPcurrent[DATA_CURRENT["pressure"]],
+                CLIP_PRESSURE["min"],
+                CLIP_PRESSURE["max"],
+                "Pressure Current",
+            )
+            * pressUnits
+        )
+
+        InterPcurrent[DATA_CURRENT["wind"]] = (
+            clipLog(
+                InterPcurrent[DATA_CURRENT["wind"]],
+                CLIP_WIND["min"],
+                CLIP_WIND["max"],
+                "WindSpeed Current",
+            )
+            * windUnit
+        )
+
+        InterPcurrent[DATA_CURRENT["gust"]] = (
+            clipLog(
+                InterPcurrent[DATA_CURRENT["gust"]],
+                CLIP_WIND["min"],
+                CLIP_WIND["max"],
+                "Gust Current",
+            )
+            * windUnit
+        )
+
+        InterPcurrent[DATA_CURRENT["cloud"]] = clipLog(
+            InterPcurrent[DATA_CURRENT["cloud"]],
+            CLIP_CLOUD["min"],
+            CLIP_CLOUD["max"],
+            "Cloud Current",
+        )
+
+        InterPcurrent[DATA_CURRENT["vis"]] = (
+            np.clip(
+                InterPcurrent[DATA_CURRENT["vis"]], CLIP_VIS["min"], CLIP_VIS["max"]
+            )
+            * visUnits
+        )
+
+        InterPcurrent[DATA_CURRENT["feels_like"]] = clipLog(
+            InterPcurrent[DATA_CURRENT["feels_like"]],
+            CLIP_TEMP["min"],
+            CLIP_TEMP["max"],
+            "Apparent Temperature Current",
+        )
+    except Exception:
+        if TIMING:
+            print("RTMA post-clip failed")
+            print(traceback.print_exc())
 
     # Put temperature into units
     if tempUnits == 0:
