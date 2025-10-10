@@ -265,7 +265,6 @@ ens_mf["tpd"] = ens_mf["tp"].diff(dim="step")
 # Set the first difference value to zero
 ens_mf["tpd"][dict(step=0)] = ens_mf["tp"].isel(step=0)
 
-
 # Change the 3 and 6 hour accumulations to hourly
 # Steps 3 to 144 are 3-hourly, the rest are 6 hourly
 first48 = ens_mf.step.isel(step=slice(0, 48))
@@ -275,7 +274,6 @@ ens_mf = ens_mf.assign(tpd=xr.where(mask, ens_mf.tpd / 3, ens_mf.tpd))
 after48 = ens_mf.step.isel(step=slice(48, None))
 mask = ens_mf.step.isin(after48)
 ens_mf = ens_mf.assign(tpd=xr.where(mask, ens_mf.tpd / 6, ens_mf.tpd))
-
 
 # Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
 X3_Precipitation_Prob = (ens_mf["tpd"] > 0.0001).sum(dim="number") / ens_mf.sizes[
