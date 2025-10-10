@@ -3116,7 +3116,7 @@ async def PW_Forecast(
     ] = 0
 
     # Precipitation Type
-    # IF HRRR, use that, otherwise GEFS
+    # IF HRRR, use that, then NBM, then ECMWF, then GEFS, else GFS
     if "hrrrsubh" in sourceList:
         for i in [
             HRRR_SUBH["snow"],
@@ -3137,6 +3137,17 @@ async def PW_Forecast(
         InterTminute[:, 3] = nbmMinuteInterpolation[:, NBM["freezing_rain"]]
         # Rain
         InterTminute[:, 4] = nbmMinuteInterpolation[:, NBM["rain"]]
+    elif "ecmwf" in sourceList:
+        # ECMWF uses ptype directly which maps to precipitation type categories
+        # We need to convert ECMWF ptype to the InterTminute array format
+        # For now, use a simplified approach - this may need refinement based on ECMWF ptype encoding
+        ptype_ecmwf = ecmwfMinuteInterpolation[:, ECMWF["ptype"]]
+        # Map ECMWF ptype to InterTminute columns (simplified mapping)
+        # This assumes ptype follows standard categorical encoding
+        InterTminute[:, 1] = np.where(ptype_ecmwf == 1, 1, 0)  # Snow
+        InterTminute[:, 2] = np.where(ptype_ecmwf == 2, 1, 0)  # Ice/Sleet
+        InterTminute[:, 3] = np.where(ptype_ecmwf == 3, 1, 0)  # Freezing Rain
+        InterTminute[:, 4] = np.where(ptype_ecmwf == 0, 1, 0)  # Rain
     elif "gefs" in sourceList:
         for i in [GEFS["snow"], GEFS["ice"], GEFS["freezing_rain"], GEFS["rain"]]:
             InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
@@ -3185,6 +3196,10 @@ async def PW_Forecast(
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
             nbmMinuteInterpolation[:, NBM["accum"]] * prepIntensityUnit
         )
+    elif "ecmwf" in sourceList:
+        InterPminute[:, DATA_MINUTELY["intensity"]] = (
+            ecmwfMinuteInterpolation[:, ECMWF["intensity"]] * 3600 * prepIntensityUnit
+        )
     elif "gefs" in sourceList:
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
             gefsMinuteInterpolation[:, GEFS["accum"]] * prepIntensityUnit
@@ -3202,7 +3217,11 @@ async def PW_Forecast(
         ] = 0
 
     # "precipIntensityError"
-    if "gefs" in sourceList:
+    if "ecmwf" in sourceList:
+        InterPminute[:, DATA_MINUTELY["error"]] = (
+            ecmwfMinuteInterpolation[:, ECMWF["accum_stddev"]] * prepIntensityUnit
+        )
+    elif "gefs" in sourceList:
         InterPminute[:, DATA_MINUTELY["error"]] = (
             gefsMinuteInterpolation[:, GEFS["error"]] * prepIntensityUnit
         )
@@ -3416,8 +3435,12 @@ async def PW_Forecast(
     InterPhour[InterPhour[:, DATA_HOURLY["prob"]] == 0, 2] = 0
 
     # Intensity Error
-    # GEFS
-    if "gefs" in sourceList:
+    # ECMWF, then GEFS
+    if "ecmwf" in sourceList:
+        InterPhour[:, DATA_HOURLY["error"]] = np.maximum(
+            ECMWF_Merged[:, ECMWF["accum_stddev"]] * prepIntensityUnit, 0
+        )
+    elif "gefs" in sourceList:
         InterPhour[:, DATA_HOURLY["error"]] = np.maximum(
             GEFS_Merged[:, GEFS["error"]] * prepIntensityUnit, 0
         )
@@ -4610,7 +4633,7 @@ async def PW_Forecast(
         0, DATA_MINUTELY["error"]
     ]  # "precipIntensityError"
 
-    # Temperature from subH, then NBM, the GFS
+    # Temperature from subH, then NBM, then ECMWF, then GFS
     if "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["temp"]] = hrrrSubHInterpolation[
             0, HRRR_SUBH["temp"]
@@ -4619,6 +4642,11 @@ async def PW_Forecast(
         InterPcurrent[DATA_CURRENT["temp"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["temp"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["temp"]] * interpFac2
+        )
+    elif "ecmwf" in sourceList:
+        InterPcurrent[DATA_CURRENT["temp"]] = (
+            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["temp"]] * interpFac1
+            + ECMWF_Merged[currentIDX_hrrrh, ECMWF["temp"]] * interpFac2
         )
     else:
         InterPcurrent[DATA_CURRENT["temp"]] = (
@@ -4634,13 +4662,18 @@ async def PW_Forecast(
         "Temperature Current",
     )
 
-    # Dewpoint from subH, then NBM, the GFS
+    # Dewpoint from subH, then NBM, then ECMWF, then GFS
     if "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["dew"]] = hrrrSubHInterpolation[0, HRRR_SUBH["dew"]]
     elif "nbm" in sourceList:
         InterPcurrent[DATA_CURRENT["dew"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["dew"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["dew"]] * interpFac2
+        )
+    elif "ecmwf" in sourceList:
+        InterPcurrent[DATA_CURRENT["dew"]] = (
+            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["dew"]] * interpFac1
+            + ECMWF_Merged[currentIDX_hrrrh, ECMWF["dew"]] * interpFac2
         )
     else:
         InterPcurrent[DATA_CURRENT["dew"]] = (
@@ -4681,11 +4714,16 @@ async def PW_Forecast(
         "Humidity Current",
     )
 
-    # Pressure from HRRR, then GFS
+    # Pressure from HRRR, then ECMWF, then GFS
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[DATA_CURRENT["pressure"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["pressure"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["pressure"]] * interpFac2
+        )
+    elif "ecmwf" in sourceList:
+        InterPcurrent[DATA_CURRENT["pressure"]] = (
+            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["pressure"]] * interpFac1
+            + ECMWF_Merged[currentIDX_hrrrh, ECMWF["pressure"]] * interpFac2
         )
     else:
         InterPcurrent[DATA_CURRENT["pressure"]] = (
@@ -4704,7 +4742,7 @@ async def PW_Forecast(
         * pressUnits
     )
 
-    # WindSpeed from subH, then NBM, the GFS
+    # WindSpeed from subH, then NBM, then ECMWF, then GFS
     if "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
             hrrrSubHInterpolation[0, HRRR_SUBH["wind_u"]] ** 2
@@ -4714,6 +4752,19 @@ async def PW_Forecast(
         InterPcurrent[DATA_CURRENT["wind"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["wind"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["wind"]] * interpFac2
+        )
+    elif "ecmwf" in sourceList:
+        InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
+            (
+                ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["wind_u"]] * interpFac1
+                + ECMWF_Merged[currentIDX_hrrrh, ECMWF["wind_u"]] * interpFac2
+            )
+            ** 2
+            + (
+                ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["wind_v"]] * interpFac1
+                + ECMWF_Merged[currentIDX_hrrrh, ECMWF["wind_v"]] * interpFac2
+            )
+            ** 2
         )
     else:
         InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
@@ -4738,7 +4789,7 @@ async def PW_Forecast(
         * windUnit
     )
 
-    # Gust from subH, then NBM, the GFS
+    # Gust from subH, then NBM, then ECMWF, then GFS
     if "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["gust"]] = hrrrSubHInterpolation[
             0, HRRR_SUBH["gust"]
@@ -4747,6 +4798,11 @@ async def PW_Forecast(
         InterPcurrent[DATA_CURRENT["gust"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["gust"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["gust"]] * interpFac2
+        )
+    elif "ecmwf" in sourceList:
+        InterPcurrent[DATA_CURRENT["gust"]] = (
+            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["gust"]] * interpFac1
+            + ECMWF_Merged[currentIDX_hrrrh, ECMWF["gust"]] * interpFac2
         )
     else:
         InterPcurrent[DATA_CURRENT["gust"]] = (
@@ -4765,7 +4821,7 @@ async def PW_Forecast(
         * windUnit
     )
 
-    # WindDir from subH, then NBM, the GFS
+    # WindDir from subH, then NBM, then ECMWF, then GFS
     if "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
             np.mod(
@@ -4781,6 +4837,17 @@ async def PW_Forecast(
         InterPcurrent[DATA_CURRENT["bearing"]] = NBM_Merged[
             currentIDX_hrrrh, NBM["bearing"]
         ]
+    elif "ecmwf" in sourceList:
+        InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
+            np.mod(
+                np.arctan2(
+                    ECMWF_Merged[currentIDX_hrrrh, ECMWF["wind_u"]],
+                    ECMWF_Merged[currentIDX_hrrrh, ECMWF["wind_v"]],
+                )
+                + np.pi,
+                2 * np.pi,
+            )
+        )
     else:
         InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
             np.mod(
@@ -4793,11 +4860,16 @@ async def PW_Forecast(
             )
         )
 
-    # Cloud, NBM then HRRR, then GFS
+    # Cloud, NBM, then ECMWF, then HRRR, then GFS
     if "nbm" in sourceList:
         InterPcurrent[DATA_CURRENT["cloud"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["cloud"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["cloud"]] * interpFac2
+        ) * 0.01
+    elif "ecmwf" in sourceList:
+        InterPcurrent[DATA_CURRENT["cloud"]] = (
+            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["cloud"]] * interpFac1
+            + ECMWF_Merged[currentIDX_hrrrh, ECMWF["cloud"]] * interpFac2
         ) * 0.01
     elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[DATA_CURRENT["cloud"]] = (
