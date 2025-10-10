@@ -3,6 +3,7 @@
 
 # %% Import modules
 import os
+
 # os.environ["ECCODES_DEFINITION_PATH"] = (
 #    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
 # )
@@ -277,7 +278,9 @@ ens_mf = ens_mf.assign(tpd=xr.where(mask, ens_mf.tpd / 6, ens_mf.tpd))
 
 
 # Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
-X3_Precipitation_Prob = (ens_mf["tpd"] > 0.0001).sum(dim="number") / ens_mf.sizes["number"]
+X3_Precipitation_Prob = (ens_mf["tpd"] > 0.0001).sum(dim="number") / ens_mf.sizes[
+    "number"
+]
 
 # Find the standard deviation of precipitation accumulation across all members
 X3_Precipitation_StdDev = ens_mf["tpd"].std(dim="number")
@@ -680,7 +683,9 @@ for i in range(hisPeriod, 1, -12):
     ens_his_mf["tpd"] = ens_his_mf["tpd"] / 3
 
     # Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
-    X3_Precipitation_Prob_His = (ens_his_mf["tpd"] > 0.0001).sum(dim="number") / ens_his_mf.sizes["number"]
+    X3_Precipitation_Prob_His = (ens_his_mf["tpd"] > 0.0001).sum(
+        dim="number"
+    ) / ens_his_mf.sizes["number"]
 
     # Find the standard deviation of precipitation accumulation across all members
     X3_Precipitation_StdDev_His = ens_his_mf["tpd"].std(dim="number")
