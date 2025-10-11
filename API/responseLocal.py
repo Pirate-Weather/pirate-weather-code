@@ -22,8 +22,8 @@ from typing import Union
 import boto3
 import numpy as np
 import pandas as pd
-import s3fs
 import reverse_geocode
+import s3fs
 import xarray as xr
 import zarr
 from astral import LocationInfo, moon
@@ -84,6 +84,11 @@ from API.constants.grid_const import (
     NBM_X_MIN,
     NBM_Y_MAX,
     NBM_Y_MIN,
+    RTMA_DEG_STEP,
+    RTMA_LAT_MAX,
+    RTMA_LAT_MIN,
+    RTMA_LON_MAX,
+    RTMA_LON_MIN,
     US_BOUNDING_BOX,
 )
 
@@ -113,9 +118,7 @@ from API.constants.text_const import (
     PRECIP_PROB_THRESHOLD,
     WIND_THRESHOLDS,
 )
-
 from API.constants.unit_const import country_units
-
 from API.PirateDailyText import calculate_day_text
 from API.PirateMinutelyText import calculate_minutely_text
 from API.PirateText import calculate_text
@@ -2184,13 +2187,6 @@ async def PW_Forecast(
     # RTMA Rapid Update: prefer for current observations inside domain (non-historical)
     if (RTMA_Zarr is not None) and (not timeMachine):
         # lazily construct nominal RTMA lat/lon arrays using constants
-        from API.constants.grid_const import (
-            RTMA_LAT_MAX,
-            RTMA_LAT_MIN,
-            RTMA_LON_MIN,
-            RTMA_LON_MAX,
-            RTMA_DEG_STEP,
-        )
 
         if RTMA_lats is None or RTMA_lons is None:
             RTMA_lats = np.arange(RTMA_LAT_MAX, RTMA_LAT_MIN - 0.0001, -RTMA_DEG_STEP)
@@ -2381,15 +2377,6 @@ async def PW_Forecast(
                         rt_run_time, datetime.UTC
                     ).replace(tzinfo=None)
                     sourceTimes["rtma-ru"] = dt_rt.strftime("%Y-%m-%d %H:%MZ")
-
-                # Compute nearest indices and store lat/lon
-                from API.constants.grid_const import (
-                    RTMA_LAT_MAX,
-                    RTMA_LAT_MIN,
-                    RTMA_LON_MIN,
-                    RTMA_LON_MAX,
-                    RTMA_DEG_STEP,
-                )
 
                 if RTMA_lats is None or RTMA_lons is None:
                     RTMA_lats = np.arange(
