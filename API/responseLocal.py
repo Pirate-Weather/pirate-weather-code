@@ -2189,13 +2189,6 @@ async def PW_Forecast(
     sourceIDX["gfs"]["lat"] = round(gfs_lat, 2)
     sourceIDX["gfs"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
 
-    # ECMWF uses the same grid as GFS
-    sourceIDX["ecmwf"] = dict()
-    sourceIDX["ecmwf"]["x"] = int(x_p)
-    sourceIDX["ecmwf"]["y"] = int(y_p)
-    sourceIDX["ecmwf"]["lat"] = round(gfs_lat, 2)
-    sourceIDX["ecmwf"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
-
     if readHRRR:
         zarrTasks["SubH"] = weather.zarr_read("SubH", SubH_Zarr, x_hrrr, y_hrrr)
 
@@ -2299,6 +2292,12 @@ async def PW_Forecast(
         dataOut_ecmwf = zarr_results["ECMWF"]
         if dataOut_ecmwf is not False:
             ecmwfRunTime = dataOut_ecmwf[HISTORY_PERIODS["ECMWF"] - 1, 0]
+            # ECMWF IFS uses the same grid as GFS - only add to sourceIDX if data exists
+            sourceIDX["ecmwf_ifs"] = dict()
+            sourceIDX["ecmwf_ifs"]["x"] = int(x_p)
+            sourceIDX["ecmwf_ifs"]["y"] = int(y_p)
+            sourceIDX["ecmwf_ifs"]["lat"] = round(gfs_lat, 2)
+            sourceIDX["ecmwf_ifs"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
 
     if readGEFS:
         dataOut_gefs = zarr_results["GEFS"]
@@ -2355,10 +2354,10 @@ async def PW_Forecast(
             ).replace(tzinfo=None)
         ).strftime("%Y-%m-%d %HZ")
 
-    # Add ECMWF after NBM, before GFS
+    # Add ECMWF IFS after NBM, before GFS
     if (isinstance(dataOut_ecmwf, np.ndarray)) & (not timeMachine):
-        sourceList.append("ecmwf")
-        sourceTimes["ecmwf"] = rounder(
+        sourceList.append("ecmwf_ifs")
+        sourceTimes["ecmwf_ifs"] = rounder(
             datetime.datetime.fromtimestamp(
                 ecmwfRunTime.astype(int), datetime.UTC
             ).replace(tzinfo=None)
@@ -2607,7 +2606,7 @@ async def PW_Forecast(
         )
 
         # ECMWF
-        if "ecmwf" in sourceList:
+        if "ecmwf_ifs" in sourceList:
             ECMWF_StartIDX = nearest_index(dataOut_ecmwf[:, 0], baseDayUTC_Grib)
             ECMWF_EndIDX = min((len(dataOut_ecmwf), (numHours + ECMWF_StartIDX)))
             ECMWF_Merged = np.full((numHours, max(ECMWF.values()) + 1), np.nan)
@@ -2913,7 +2912,7 @@ async def PW_Forecast(
 
     gfsMinuteInterpolation = np.zeros((len(minute_array_grib), len(dataOut_gfs[0, :])))
 
-    if "ecmwf" in sourceList:
+    if "ecmwf_ifs" in sourceList:
         ecmwfMinuteInterpolation = np.zeros(
             (len(minute_array_grib), len(dataOut_ecmwf[0, :]))
         )
@@ -3057,7 +3056,7 @@ async def PW_Forecast(
                     right=np.nan,
                 )
 
-    if "ecmwf" in sourceList:
+    if "ecmwf_ifs" in sourceList:
         for i in range(len(dataOut_ecmwf[0, :]) - 1):
             ecmwfMinuteInterpolation[:, i + 1] = np.interp(
                 minute_array_grib,
@@ -3097,7 +3096,7 @@ async def PW_Forecast(
         InterPminute[:, DATA_MINUTELY["prob"]] = (
             nbmMinuteInterpolation[:, NBM["prob"]] * 0.01
         )
-    elif "ecmwf" in sourceList:
+    elif "ecmwf_ifs" in sourceList:
         InterPminute[:, DATA_MINUTELY["prob"]] = ecmwfMinuteInterpolation[
             :, ECMWF["prob"]
         ]
@@ -3137,7 +3136,7 @@ async def PW_Forecast(
         InterTminute[:, 3] = nbmMinuteInterpolation[:, NBM["freezing_rain"]]
         # Rain
         InterTminute[:, 4] = nbmMinuteInterpolation[:, NBM["rain"]]
-    elif "ecmwf" in sourceList:
+    elif "ecmwf_ifs" in sourceList:
         # ECMWF precipitation type codes:
         # 0=No precip, 1=Rain, 2=Thunderstorm, 3=Freezing rain, 4=Mixed/ice, 5=Snow,
         # 6=Wet snow, 7=Mix of rain/snow, 8=Ice pellets, 9=Graupel, 10=Hail,
@@ -3216,7 +3215,7 @@ async def PW_Forecast(
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
             nbmMinuteInterpolation[:, NBM["accum"]] * prepIntensityUnit
         )
-    elif "ecmwf" in sourceList:
+    elif "ecmwf_ifs" in sourceList:
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
             ecmwfMinuteInterpolation[:, ECMWF["intensity"]] * 3600 * prepIntensityUnit
         )
@@ -3237,7 +3236,7 @@ async def PW_Forecast(
         ] = 0
 
     # "precipIntensityError"
-    if "ecmwf" in sourceList:
+    if "ecmwf_ifs" in sourceList:
         InterPminute[:, DATA_MINUTELY["error"]] = (
             ecmwfMinuteInterpolation[:, ECMWF["accum_stddev"]] * prepIntensityUnit
         )
@@ -3357,7 +3356,7 @@ async def PW_Forecast(
         maxPchanceHour[np.isnan(InterThour[:, 1]), 1] = MISSING_DATA
 
     # ECMWF - convert ptype codes to categorical indices
-    if "ecmwf" in sourceList:
+    if "ecmwf_ifs" in sourceList:
         # ECMWF precipitation type codes:
         # 0=No precip, 1=Rain, 2=Thunderstorm, 3=Freezing rain, 4=Mixed/ice, 5=Snow,
         # 6=Wet snow, 7=Mix of rain/snow, 8=Ice pellets, 9=Graupel, 10=Hail,
@@ -3443,7 +3442,7 @@ async def PW_Forecast(
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         prcipIntensityHour[:, 1] = HRRR_Merged[:, HRRR["intensity"]] * 3600
     # ECMWF
-    if "ecmwf" in sourceList:
+    if "ecmwf_ifs" in sourceList:
         prcipIntensityHour[:, 2] = ECMWF_Merged[:, ECMWF["intensity"]] * 3600
     # GEFS or GFS
     if "gefs" in sourceList:
@@ -3472,7 +3471,7 @@ async def PW_Forecast(
     if "nbm" in sourceList:
         prcipProbabilityHour[:, 0] = NBM_Merged[:, NBM["prob"]] * 0.01
     # ECMWF
-    if "ecmwf" in sourceList:
+    if "ecmwf_ifs" in sourceList:
         prcipProbabilityHour[:, 1] = ECMWF_Merged[:, ECMWF["prob"]]
     # GEFS
     if "gefs" in sourceList:
@@ -3498,7 +3497,7 @@ async def PW_Forecast(
 
     # Intensity Error
     # ECMWF, then GEFS
-    if "ecmwf" in sourceList:
+    if "ecmwf_ifs" in sourceList:
         InterPhour[:, DATA_HOURLY["error"]] = np.maximum(
             ECMWF_Merged[:, ECMWF["accum_stddev"]] * prepIntensityUnit, 0
         )
@@ -3515,7 +3514,7 @@ async def PW_Forecast(
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         TemperatureHour[:, 1] = HRRR_Merged[:, HRRR["temp"]]
 
-    if "ecmwf" in sourceList:
+    if "ecmwf_ifs" in sourceList:
         TemperatureHour[:, 2] = ECMWF_Merged[:, ECMWF["temp"]]
 
     if "gfs" in sourceList:
@@ -3540,7 +3539,7 @@ async def PW_Forecast(
         DewPointHour[:, 0] = NBM_Merged[:, NBM["dew"]]
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         DewPointHour[:, 1] = HRRR_Merged[:, HRRR["dew"]]
-    if "ecmwf" in sourceList:
+    if "ecmwf_ifs" in sourceList:
         DewPointHour[:, 2] = ECMWF_Merged[:, ECMWF["dew"]]
     if "gfs" in sourceList:
         DewPointHour[:, 3] = GFS_Merged[:, GFS["dew"]]
@@ -3580,7 +3579,7 @@ async def PW_Forecast(
     PressureHour = np.full((len(hour_array_grib), 3), np.nan)
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         PressureHour[:, 0] = HRRR_Merged[:, HRRR["pressure"]]
-    if "ecmwf" in sourceList:
+    if "ecmwf_ifs" in sourceList:
         PressureHour[:, 1] = ECMWF_Merged[:, ECMWF["pressure"]]
     if "gfs" in sourceList:
         PressureHour[:, 2] = GFS_Merged[:, GFS["pressure"]]
@@ -3607,7 +3606,7 @@ async def PW_Forecast(
         WindSpeedHour[:, 1] = np.sqrt(
             HRRR_Merged[:, HRRR["wind_u"]] ** 2 + HRRR_Merged[:, HRRR["wind_v"]] ** 2
         )
-    if "ecmwf" in sourceList:
+    if "ecmwf_ifs" in sourceList:
         WindSpeedHour[:, 2] = np.sqrt(
             ECMWF_Merged[:, ECMWF["wind_u"]] ** 2
             + ECMWF_Merged[:, ECMWF["wind_v"]] ** 2
@@ -3638,7 +3637,7 @@ async def PW_Forecast(
         WindGustHour[:, 0] = NBM_Merged[:, NBM["gust"]]
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         WindGustHour[:, 1] = HRRR_Merged[:, HRRR["gust"]]
-    if "ecmwf" in sourceList:
+    if "ecmwf_ifs" in sourceList:
         WindGustHour[:, 2] = ECMWF_Merged[:, ECMWF["gust"]]
     if "gfs" in sourceList:
         WindGustHour[:, 3] = GFS_Merged[:, GFS["gust"]]
@@ -3670,7 +3669,7 @@ async def PW_Forecast(
                 2 * np.pi,
             )
         )
-    if "ecmwf" in sourceList:
+    if "ecmwf_ifs" in sourceList:
         WindBearingHour[:, 2] = np.rad2deg(
             np.mod(
                 np.arctan2(
@@ -3698,7 +3697,7 @@ async def PW_Forecast(
         CloudCoverHour[:, 0] = NBM_Merged[:, NBM["cloud"]]
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         CloudCoverHour[:, 1] = HRRR_Merged[:, HRRR["cloud"]]
-    if "ecmwf" in sourceList:
+    if "ecmwf_ifs" in sourceList:
         CloudCoverHour[:, 2] = ECMWF_Merged[:, ECMWF["cloud"]]
     if "gfs" in sourceList:
         CloudCoverHour[:, 3] = GFS_Merged[:, GFS["cloud"]]
@@ -3766,7 +3765,7 @@ async def PW_Forecast(
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         PrecpAccumHour[:, 1] = HRRR_Merged[:, HRRR["accum"]]
     # ECMWF
-    if "ecmwf" in sourceList:
+    if "ecmwf_ifs" in sourceList:
         PrecpAccumHour[:, 2] = ECMWF_Merged[:, ECMWF["accum"]]
     # GEFS
     if "gefs" in sourceList:
@@ -4705,7 +4704,7 @@ async def PW_Forecast(
             NBM_Merged[currentIDX_hrrrh_A, NBM["temp"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["temp"]] * interpFac2
         )
-    elif "ecmwf" in sourceList:
+    elif "ecmwf_ifs" in sourceList:
         InterPcurrent[DATA_CURRENT["temp"]] = (
             ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["temp"]] * interpFac1
             + ECMWF_Merged[currentIDX_hrrrh, ECMWF["temp"]] * interpFac2
@@ -4732,7 +4731,7 @@ async def PW_Forecast(
             NBM_Merged[currentIDX_hrrrh_A, NBM["dew"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["dew"]] * interpFac2
         )
-    elif "ecmwf" in sourceList:
+    elif "ecmwf_ifs" in sourceList:
         InterPcurrent[DATA_CURRENT["dew"]] = (
             ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["dew"]] * interpFac1
             + ECMWF_Merged[currentIDX_hrrrh, ECMWF["dew"]] * interpFac2
@@ -4782,7 +4781,7 @@ async def PW_Forecast(
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["pressure"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["pressure"]] * interpFac2
         )
-    elif "ecmwf" in sourceList:
+    elif "ecmwf_ifs" in sourceList:
         InterPcurrent[DATA_CURRENT["pressure"]] = (
             ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["pressure"]] * interpFac1
             + ECMWF_Merged[currentIDX_hrrrh, ECMWF["pressure"]] * interpFac2
@@ -4815,7 +4814,7 @@ async def PW_Forecast(
             NBM_Merged[currentIDX_hrrrh_A, NBM["wind"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["wind"]] * interpFac2
         )
-    elif "ecmwf" in sourceList:
+    elif "ecmwf_ifs" in sourceList:
         InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
             (
                 ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["wind_u"]] * interpFac1
@@ -4861,7 +4860,7 @@ async def PW_Forecast(
             NBM_Merged[currentIDX_hrrrh_A, NBM["gust"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["gust"]] * interpFac2
         )
-    elif "ecmwf" in sourceList:
+    elif "ecmwf_ifs" in sourceList:
         InterPcurrent[DATA_CURRENT["gust"]] = (
             ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["gust"]] * interpFac1
             + ECMWF_Merged[currentIDX_hrrrh, ECMWF["gust"]] * interpFac2
@@ -4899,7 +4898,7 @@ async def PW_Forecast(
         InterPcurrent[DATA_CURRENT["bearing"]] = NBM_Merged[
             currentIDX_hrrrh, NBM["bearing"]
         ]
-    elif "ecmwf" in sourceList:
+    elif "ecmwf_ifs" in sourceList:
         InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
             np.mod(
                 np.arctan2(
@@ -4928,7 +4927,7 @@ async def PW_Forecast(
             NBM_Merged[currentIDX_hrrrh_A, NBM["cloud"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["cloud"]] * interpFac2
         ) * 0.01
-    elif "ecmwf" in sourceList:
+    elif "ecmwf_ifs" in sourceList:
         InterPcurrent[DATA_CURRENT["cloud"]] = (
             ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["cloud"]] * interpFac1
             + ECMWF_Merged[currentIDX_hrrrh, ECMWF["cloud"]] * interpFac2
