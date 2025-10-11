@@ -2369,6 +2369,7 @@ async def PW_Forecast(
         try:
             dataOut_rtma = zarr_results["RTMA"]
             if isinstance(dataOut_rtma, np.ndarray) and dataOut_rtma.shape[0] > 0:
+                sourceList.append("rtma-ru")
                 rt_run_time = int(dataOut_rtma[0, 0])
                 # Add to sourceTimes for live requests
                 if not timeMachine:
