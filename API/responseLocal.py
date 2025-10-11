@@ -144,9 +144,9 @@ force_now = os.getenv("force_now", default=False)
 ingestVersion = INGEST_VERSION_STR
 
 # RTMA rapid update globals
-RTMA_Zarr = None
-RTMA_lats = None
-RTMA_lons = None
+rtma_zarr = None
+rtma_lats = None
+rtma_lons = None
 
 
 def setup_logging():
@@ -334,7 +334,7 @@ def update_zarr_store(initialRun):
     global NBM_Fire_Zarr
     global GEFS_Zarr
     global HRRR_Zarr
-    global RTMA_Zarr
+    global rtma_zarr
     global NWS_Alerts_Zarr
 
     STAGE = os.environ.get("STAGE", "PROD")
@@ -776,10 +776,10 @@ if STAGE == "TESTING":
             f = s3_bucket + "RTMA_RU.zarr.zip"
             store = zarr.storage.ZipStore(f, mode="r")
 
-        RTMA_Zarr = zarr.open(store, mode="r")
+        rtma_zarr = zarr.open(store, mode="r")
         print("RTMA Read")
     except Exception:
-        RTMA_Zarr = None
+        rtma_zarr = None
         print("RTMA not available in TESTING")
 
     if useETOPO:
@@ -1206,9 +1206,9 @@ async def PW_Forecast(
     global NBM_Fire_Zarr
     global GEFS_Zarr
     global HRRR_Zarr
-    global RTMA_Zarr
-    global RTMA_lats
-    global RTMA_lons
+    global rtma_zarr
+    global rtma_lats
+    global rtma_lons
     global NWS_Alerts_Zarr
 
     readHRRR = False
@@ -2185,20 +2185,20 @@ async def PW_Forecast(
         zarrTasks["GFS"] = weather.zarr_read("GFS", GFS_Zarr, x_p, y_p)
 
     # RTMA Rapid Update: prefer for current observations inside domain (non-historical)
-    if (RTMA_Zarr is not None) and (not timeMachine):
+    if (rtma_zarr is not None) and (not timeMachine):
         # lazily construct nominal RTMA lat/lon arrays using constants
 
-        if RTMA_lats is None or RTMA_lons is None:
-            RTMA_lats = np.arange(RTMA_LAT_MAX, RTMA_LAT_MIN - 0.0001, -RTMA_DEG_STEP)
-            RTMA_lons = np.arange(RTMA_LON_MIN, RTMA_LON_MAX + 0.0001, RTMA_DEG_STEP)
+        if rtma_lats is None or rtma_lons is None:
+            rtma_lats = np.arange(RTMA_LAT_MAX, RTMA_LAT_MIN - 0.0001, -RTMA_DEG_STEP)
+            rtma_lons = np.arange(RTMA_LON_MIN, RTMA_LON_MAX + 0.0001, RTMA_DEG_STEP)
 
-        abslat_rtma = np.abs(RTMA_lats - lat)
-        abslon_rtma = np.abs(RTMA_lons - az_Lon)
+        abslat_rtma = np.abs(rtma_lats - lat)
+        abslon_rtma = np.abs(rtma_lons - az_Lon)
         y_rtma = int(np.argmin(abslat_rtma))
         x_rtma = int(np.argmin(abslon_rtma))
 
         try:
-            zarrTasks["RTMA"] = weather.zarr_read("RTMA", RTMA_Zarr, x_rtma, y_rtma)
+            zarrTasks["RTMA"] = weather.zarr_read("RTMA", rtma_zarr, x_rtma, y_rtma)
         except Exception:
             # Best-effort: if RTMA indexing fails, skip it
             print("RTMA enqueue failed:")
@@ -2379,24 +2379,24 @@ async def PW_Forecast(
                     ).replace(tzinfo=None)
                     sourceTimes["rtma-ru"] = dt_rt.strftime("%Y-%m-%d %H:%MZ")
 
-                if RTMA_lats is None or RTMA_lons is None:
-                    RTMA_lats = np.arange(
+                if rtma_lats is None or rtma_lons is None:
+                    rtma_lats = np.arange(
                         RTMA_LAT_MAX, RTMA_LAT_MIN - 0.0001, -RTMA_DEG_STEP
                     )
-                    RTMA_lons = np.arange(
+                    rtma_lons = np.arange(
                         RTMA_LON_MIN, RTMA_LON_MAX + 0.0001, RTMA_DEG_STEP
                     )
 
-                abslat_rtma = np.abs(RTMA_lats - lat)
-                abslon_rtma = np.abs(RTMA_lons - az_Lon)
+                abslat_rtma = np.abs(rtma_lats - lat)
+                abslon_rtma = np.abs(rtma_lons - az_Lon)
                 y_rt = int(np.argmin(abslat_rtma))
                 x_rt = int(np.argmin(abslon_rtma))
 
                 sourceIDX["rtma"] = dict()
                 sourceIDX["rtma"]["x"] = int(x_rt)
                 sourceIDX["rtma"]["y"] = int(y_rt)
-                sourceIDX["rtma"]["lat"] = round(RTMA_lats[y_rt], 2)
-                sourceIDX["rtma"]["lon"] = round(RTMA_lons[x_rt], 2)
+                sourceIDX["rtma"]["lat"] = round(rtma_lats[y_rt], 2)
+                sourceIDX["rtma"]["lon"] = round(rtma_lons[x_rt], 2)
         except Exception:
             if TIMING:
                 print("RTMA bookkeeping failed")
