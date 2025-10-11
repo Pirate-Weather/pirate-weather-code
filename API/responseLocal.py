@@ -4562,8 +4562,10 @@ async def PW_Forecast(
         0, DATA_MINUTELY["error"]
     ]  # "precipIntensityError"
 
-    # Temperature from subH, then NBM, the GFS
-    if "hrrrsubh" in sourceList:
+    # Temperature from RTMA-RU, then subH, then NBM, then GFS
+    if "rtma-ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["temp"]] = dataOut_rtma[0, RTMA["temp"]]
+    elif "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["temp"]] = hrrrSubHInterpolation[
             0, HRRR_SUBH["temp"]
         ]
@@ -4586,8 +4588,10 @@ async def PW_Forecast(
         "Temperature Current",
     )
 
-    # Dewpoint from subH, then NBM, the GFS
-    if "hrrrsubh" in sourceList:
+    # Dewpoint from RTMA-RU, then subH, then NBM, then GFS
+    if "rtma-ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["dew"]] = dataOut_rtma[0, RTMA["dew"]]
+    elif "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["dew"]] = hrrrSubHInterpolation[0, HRRR_SUBH["dew"]]
     elif "nbm" in sourceList:
         InterPcurrent[DATA_CURRENT["dew"]] = (
@@ -4600,16 +4604,18 @@ async def PW_Forecast(
             + GFS_Merged[currentIDX_hrrrh, GFS["dew"]] * interpFac2
         )
 
-        # Clip between -90 and 60
-        InterPcurrent[DATA_CURRENT["dew"]] = clipLog(
-            InterPcurrent[DATA_CURRENT["dew"]],
-            CLIP_TEMP["min"],
-            CLIP_TEMP["max"],
-            "Dewpoint Current",
-        )
+    # Clip between -90 and 60
+    InterPcurrent[DATA_CURRENT["dew"]] = clipLog(
+        InterPcurrent[DATA_CURRENT["dew"]],
+        CLIP_TEMP["min"],
+        CLIP_TEMP["max"],
+        "Dewpoint Current",
+    )
 
-    # humidity, NBM then HRRR, then GFS
-    if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+    # humidity, RTMA-RU, then HRRR, then NBM, then GFS
+    if "rtma-ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["humidity"]] = dataOut_rtma[0, RTMA["humidity"]] * humidUnit
+    elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[DATA_CURRENT["humidity"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["humidity"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["humidity"]] * interpFac2
@@ -4656,8 +4662,13 @@ async def PW_Forecast(
         * pressUnits
     )
 
-    # WindSpeed from subH, then NBM, the GFS
-    if "hrrrsubh" in sourceList:
+    # WindSpeed from RTMA-RU, then subH, then NBM, then GFS
+    if "rtma-ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
+            dataOut_rtma[0, RTMA["wind_u"]] ** 2
+            + dataOut_rtma[0, RTMA["wind_v"]] ** 2
+        )
+    elif "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
             hrrrSubHInterpolation[0, HRRR_SUBH["wind_u"]] ** 2
             + hrrrSubHInterpolation[0, HRRR_SUBH["wind_v"]] ** 2
@@ -4690,8 +4701,10 @@ async def PW_Forecast(
         * windUnit
     )
 
-    # Gust from subH, then NBM, the GFS
-    if "hrrrsubh" in sourceList:
+    # Gust from RTMA-RU, then subH, then NBM, then GFS
+    if "rtma-ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["gust"]] = dataOut_rtma[0, RTMA["gust"]]
+    elif "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["gust"]] = hrrrSubHInterpolation[
             0, HRRR_SUBH["gust"]
         ]
@@ -4717,8 +4730,19 @@ async def PW_Forecast(
         * windUnit
     )
 
-    # WindDir from subH, then NBM, the GFS
-    if "hrrrsubh" in sourceList:
+    # WindDir from RTMA-RU, then subH, then NBM, then GFS
+    if "rtma-ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
+            np.mod(
+                np.arctan2(
+                    dataOut_rtma[0, RTMA["wind_u"]],
+                    dataOut_rtma[0, RTMA["wind_v"]],
+                )
+                + np.pi,
+                2 * np.pi,
+            )
+        )
+    elif "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
             np.mod(
                 np.arctan2(
@@ -4745,8 +4769,10 @@ async def PW_Forecast(
             )
         )
 
-    # Cloud, NBM then HRRR, then GFS
-    if "nbm" in sourceList:
+    # Cloud from RTMA-RU, then NBM then HRRR, then GFS
+    if "rtma-ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["cloud"]] = dataOut_rtma[0, RTMA["cloud"]] * 0.01
+    elif "nbm" in sourceList:
         InterPcurrent[DATA_CURRENT["cloud"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["cloud"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["cloud"]] * interpFac2
@@ -4783,22 +4809,27 @@ async def PW_Forecast(
         "UV Current",
     )
 
-    # Station Pressure from GFS
-    InterPcurrent[DATA_CURRENT["station_pressure"]] = (
-        clipLog(
-            (
-                GFS_Merged[currentIDX_hrrrh_A, GFS["station_pressure"]] * interpFac1
-                + GFS_Merged[currentIDX_hrrrh, GFS["station_pressure"]] * interpFac2
-            ),
-            CLIP_PRESSURE["min"],
-            CLIP_PRESSURE["max"],
-            "Station Pressure Current",
+    # Station Pressure from RTMA-RU then GFS
+    if "rtma-ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["station_pressure"]] = dataOut_rtma[0, RTMA["pressure"]]
+    else:
+        InterPcurrent[DATA_CURRENT["station_pressure"]] = (
+            GFS_Merged[currentIDX_hrrrh_A, GFS["station_pressure"]] * interpFac1
+            + GFS_Merged[currentIDX_hrrrh, GFS["station_pressure"]] * interpFac2
         )
-        * pressUnits
-    )
 
-    # VIS, SubH, NBM then HRRR, then GFS
-    if "hrrrsubh" in sourceList:
+    # Clip
+    InterPcurrent[DATA_CURRENT["station_pressure"]] = clipLog(
+        InterPcurrent[DATA_CURRENT["station_pressure"]],
+        CLIP_PRESSURE["min"],
+        CLIP_PRESSURE["max"],
+        "Station Pressure Current",
+    ) * pressUnits
+
+    # Visibility from RTMA-RU, then SubH, NBM then HRRR, then GFS
+    if "rtma-ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["vis"]] = dataOut_rtma[0, RTMA["vis"]]
+    elif "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["vis"]] = hrrrSubHInterpolation[0, HRRR_SUBH["vis"]]
     elif "nbm" in sourceList:
         InterPcurrent[DATA_CURRENT["vis"]] = (
@@ -4906,130 +4937,6 @@ async def PW_Forecast(
     curr_temp = (
         InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS
     )  # temperature in Celsius
-
-    # --- RTMA Rapid Update override (live requests only) ---
-    # If RTMA data was read, prefer its analysis values for the "currently" block.
-    # Use mapping from API.constants.model_const.RTMA
-    try:
-        if ("RTMA" in zarr_results) and (not timeMachine):
-            dataOut_rtma = zarr_results.get("RTMA")
-            if isinstance(dataOut_rtma, np.ndarray) and dataOut_rtma.shape[0] > 0:
-                rt0 = dataOut_rtma[0, :]
-                # temp, dew and pressure are in same units as other models (Kelvin / hPa)
-                InterPcurrent[DATA_CURRENT["temp"]] = rt0[RTMA["temp"]]
-                InterPcurrent[DATA_CURRENT["dew"]] = rt0[RTMA["dew"]]
-                # RTMA humidity is percent (0-100) per ingest — convert to 0-1 using humidUnit
-                InterPcurrent[DATA_CURRENT["humidity"]] = (
-                    rt0[RTMA["humidity"]] * humidUnit
-                )
-
-                # RTMA provides surface pressure; update station pressure with RTMA value
-                InterPcurrent[DATA_CURRENT["station_pressure"]] = (
-                    clipLog(
-                        rt0[RTMA["pressure"]],
-                        CLIP_PRESSURE["min"],
-                        CLIP_PRESSURE["max"],
-                        "RTMA Station Pressure",
-                    )
-                    * pressUnits
-                )
-
-                # Visibility and gust
-                InterPcurrent[DATA_CURRENT["vis"]] = rt0[RTMA["vis"]]
-                InterPcurrent[DATA_CURRENT["gust"]] = rt0[RTMA["gust"]]
-
-                # Cloud cover (RTMA gives percent -> convert to 0-1)
-                InterPcurrent[DATA_CURRENT["cloud"]] = rt0[RTMA["cloud"]] * 0.01
-
-                # Wind: compute speed and bearing from u/v
-                u = rt0[RTMA["wind_u"]]
-                v = rt0[RTMA["wind_v"]]
-                InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(u * u + v * v)
-                InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
-                    np.mod(np.arctan2(u, v) + np.pi, 2 * np.pi)
-                )
-    except Exception:
-        if TIMING:
-            print("RTMA override failed")
-            print(traceback.print_exc())
-
-    # Re-run clipping for currently fields so RTMA values are validated/clipped as needed
-    try:
-        InterPcurrent[DATA_CURRENT["temp"]] = clipLog(
-            InterPcurrent[DATA_CURRENT["temp"]],
-            CLIP_TEMP["min"],
-            CLIP_TEMP["max"],
-            "Temperature Current",
-        )
-
-        InterPcurrent[DATA_CURRENT["dew"]] = clipLog(
-            InterPcurrent[DATA_CURRENT["dew"]],
-            CLIP_TEMP["min"],
-            CLIP_TEMP["max"],
-            "Dewpoint Current",
-        )
-
-        InterPcurrent[DATA_CURRENT["humidity"]] = clipLog(
-            InterPcurrent[DATA_CURRENT["humidity"]],
-            CLIP_HUMIDITY["min"],
-            CLIP_HUMIDITY["max"],
-            "Humidity Current",
-        )
-
-        InterPcurrent[DATA_CURRENT["pressure"]] = (
-            clipLog(
-                InterPcurrent[DATA_CURRENT["pressure"]],
-                CLIP_PRESSURE["min"],
-                CLIP_PRESSURE["max"],
-                "Pressure Current",
-            )
-            * pressUnits
-        )
-
-        InterPcurrent[DATA_CURRENT["wind"]] = (
-            clipLog(
-                InterPcurrent[DATA_CURRENT["wind"]],
-                CLIP_WIND["min"],
-                CLIP_WIND["max"],
-                "WindSpeed Current",
-            )
-            * windUnit
-        )
-
-        InterPcurrent[DATA_CURRENT["gust"]] = (
-            clipLog(
-                InterPcurrent[DATA_CURRENT["gust"]],
-                CLIP_WIND["min"],
-                CLIP_WIND["max"],
-                "Gust Current",
-            )
-            * windUnit
-        )
-
-        InterPcurrent[DATA_CURRENT["cloud"]] = clipLog(
-            InterPcurrent[DATA_CURRENT["cloud"]],
-            CLIP_CLOUD["min"],
-            CLIP_CLOUD["max"],
-            "Cloud Current",
-        )
-
-        InterPcurrent[DATA_CURRENT["vis"]] = (
-            np.clip(
-                InterPcurrent[DATA_CURRENT["vis"]], CLIP_VIS["min"], CLIP_VIS["max"]
-            )
-            * visUnits
-        )
-
-        InterPcurrent[DATA_CURRENT["feels_like"]] = clipLog(
-            InterPcurrent[DATA_CURRENT["feels_like"]],
-            CLIP_TEMP["min"],
-            CLIP_TEMP["max"],
-            "Apparent Temperature Current",
-        )
-    except Exception:
-        if TIMING:
-            print("RTMA post-clip failed")
-            print(traceback.print_exc())
 
     # Put temperature into units
     if tempUnits == 0:
