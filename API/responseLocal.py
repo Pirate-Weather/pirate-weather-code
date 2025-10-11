@@ -4614,7 +4614,9 @@ async def PW_Forecast(
 
     # humidity, RTMA-RU, then HRRR, then NBM, then GFS
     if "rtma-ru" in sourceList:
-        InterPcurrent[DATA_CURRENT["humidity"]] = dataOut_rtma[0, RTMA["humidity"]] * humidUnit
+        InterPcurrent[DATA_CURRENT["humidity"]] = (
+            dataOut_rtma[0, RTMA["humidity"]] * humidUnit
+        )
     elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[DATA_CURRENT["humidity"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["humidity"]] * interpFac1
@@ -4665,8 +4667,7 @@ async def PW_Forecast(
     # WindSpeed from RTMA-RU, then subH, then NBM, then GFS
     if "rtma-ru" in sourceList:
         InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
-            dataOut_rtma[0, RTMA["wind_u"]] ** 2
-            + dataOut_rtma[0, RTMA["wind_v"]] ** 2
+            dataOut_rtma[0, RTMA["wind_u"]] ** 2 + dataOut_rtma[0, RTMA["wind_v"]] ** 2
         )
     elif "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
@@ -4811,7 +4812,9 @@ async def PW_Forecast(
 
     # Station Pressure from RTMA-RU then GFS
     if "rtma-ru" in sourceList:
-        InterPcurrent[DATA_CURRENT["station_pressure"]] = dataOut_rtma[0, RTMA["pressure"]]
+        InterPcurrent[DATA_CURRENT["station_pressure"]] = dataOut_rtma[
+            0, RTMA["pressure"]
+        ]
     else:
         InterPcurrent[DATA_CURRENT["station_pressure"]] = (
             GFS_Merged[currentIDX_hrrrh_A, GFS["station_pressure"]] * interpFac1
@@ -4819,12 +4822,15 @@ async def PW_Forecast(
         )
 
     # Clip
-    InterPcurrent[DATA_CURRENT["station_pressure"]] = clipLog(
-        InterPcurrent[DATA_CURRENT["station_pressure"]],
-        CLIP_PRESSURE["min"],
-        CLIP_PRESSURE["max"],
-        "Station Pressure Current",
-    ) * pressUnits
+    InterPcurrent[DATA_CURRENT["station_pressure"]] = (
+        clipLog(
+            InterPcurrent[DATA_CURRENT["station_pressure"]],
+            CLIP_PRESSURE["min"],
+            CLIP_PRESSURE["max"],
+            "Station Pressure Current",
+        )
+        * pressUnits
+    )
 
     # Visibility from RTMA-RU, then SubH, NBM then HRRR, then GFS
     if "rtma-ru" in sourceList:
