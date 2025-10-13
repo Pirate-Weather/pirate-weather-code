@@ -5,7 +5,7 @@
 # Available versions: ftp://ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/
 # ======================================================================
 
-FROM python:3.13
+FROM python:3.14
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive \
