@@ -319,6 +319,7 @@ def update_zarr_store(initialRun):
     global GEFS_Zarr
     global HRRR_Zarr
     global NWS_Alerts_Zarr
+    global WMO_Alerts_Zarr
 
     STAGE = os.environ.get("STAGE", "PROD")
     # Create empty dir
@@ -457,6 +458,19 @@ def update_zarr_store(initialRun):
             zarr.storage.ZipStore("/tmp/" + latest_ETOPO, mode="r"), mode="r"
         )
 
+    # Load WMO Alerts if present
+    latest_WMO, old_WMO = find_largest_integer_directory(
+        "/tmp", "WMO_Alerts.zarr", initialRun
+    )
+    if latest_WMO is not None:
+        try:
+            WMO_Alerts_Zarr = zarr.open(
+                zarr.storage.ZipStore("/tmp/" + latest_WMO, mode="r"), mode="r"
+            )
+            logger.info("Loading new: " + latest_WMO)
+        except Exception:
+            logger.exception("Failed to open WMO alerts zarr: %s", latest_WMO)
+
     print("Refreshed Zarrs")
 
 
@@ -565,6 +579,38 @@ if STAGE == "TESTING":
         store = zarr.storage.ZipStore(f, mode="r")
 
     NWS_Alerts_Zarr = zarr.open(store, mode="r")
+
+    # Try to load WMO alerts (global) if present
+    try:
+        if save_type == "S3":
+            f = _retry_s3_operation(
+                lambda: s3.open(
+                    "s3://ForecastTar_v2/" + ingestVersion + "/WMO_Alerts.zarr.zip"
+                )
+            )
+            store = S3ZipStore(f)
+        elif save_type == "S3Zarr":
+            f = _retry_s3_operation(
+                lambda: s3.open(
+                    "s3://"
+                    + s3_bucket
+                    + "/ForecastTar_v2/"
+                    + ingestVersion
+                    + "/WMO_Alerts.zarr.zip"
+                )
+            )
+            store = S3ZipStore(f)
+        else:
+            f = s3_bucket + "WMO_Alerts.zarr.zip"
+            store = zarr.storage.ZipStore(f, mode="r")
+
+        WMO_Alerts_Zarr = zarr.open(store, mode="r")
+        print("WMO Alerts Read")
+    except FileNotFoundError:
+        # Not critical; proceed without WMO alerts
+        WMO_Alerts_Zarr = None
+    except Exception:
+        WMO_Alerts_Zarr = None
 
     if save_type == "S3":
         f = _retry_s3_operation(
@@ -4390,10 +4436,96 @@ async def PW_Forecast(
                     alertList.append(dict(alertDict))
         else:
             alertList = []
-
     except Exception:
         print("An Alert error occurred:")
         print(traceback.print_exc())
+
+    # If alerts are requested and NOT in the US, try WMO alerts (global)
+    if (not timeMachine) and (exAlerts == 0) and (cull(az_Lon, lat) == 0):
+        try:
+            # Ensure WMO store is available
+            if "WMO_Alerts_Zarr" in globals() and WMO_Alerts_Zarr is not None:
+                # WMO grid used in WMO_Alerts_Local: lats = np.arange(-60,85,0.0625), lons = np.arange(-180,180,0.0625)
+                alerts_lats = np.arange(-60, 85, 0.0625)
+                alerts_lons = np.arange(-180, 180, 0.0625)
+
+                # Find nearest grid point
+                abslat = np.abs(alerts_lats - lat)
+                abslon = np.abs(alerts_lons - az_Lon)
+                alerts_y_p = np.argmin(abslat)
+                alerts_x_p = np.argmin(abslon)
+
+                # Read stored string
+                try:
+                    alertDat = WMO_Alerts_Zarr[alerts_y_p, alerts_x_p]
+                except Exception:
+                    alertDat = ""
+
+                if not alertDat:
+                    # no alerts for this point
+                    pass
+                else:
+                    alerts = str(alertDat).split("|")
+                    for alert in alerts:
+                        alertDetails = alert.split("}{")
+
+                        # Some WMO entries may not have the exact number of fields; guard access
+                        try:
+                            alertOnset = datetime.datetime.strptime(
+                                alertDetails[3], "%Y-%m-%dT%H:%M:%S%z"
+                            ).astimezone(utc)
+                            alertEnd = datetime.datetime.strptime(
+                                alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
+                            ).astimezone(utc)
+                        except Exception:
+                            # If timestamps missing/invalid, skip this alert
+                            continue
+
+                        alertDescript = alertDetails[1] if len(alertDetails) > 1 else ""
+                        formatted_text = re.sub(r"(?<!\n)\n(?!\n)", " ", alertDescript)
+                        formatted_text = re.sub(r"\n\n", "\n", formatted_text)
+
+                        alertDict = {
+                            "title": alertDetails[0] if len(alertDetails) > 0 else "",
+                            "regions": [
+                                s.lstrip()
+                                for s in (
+                                    alertDetails[2].split(";")
+                                    if len(alertDetails) > 2
+                                    else []
+                                )
+                            ],
+                            "severity": alertDetails[5]
+                            if len(alertDetails) > 5
+                            else "",
+                            "time": int(
+                                (
+                                    alertOnset
+                                    - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(
+                                        utc
+                                    )
+                                ).total_seconds()
+                            ),
+                            "expires": int(
+                                (
+                                    alertEnd
+                                    - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(
+                                        utc
+                                    )
+                                ).total_seconds()
+                            ),
+                            "description": formatted_text,
+                            "uri": alertDetails[6] if len(alertDetails) > 6 else "",
+                        }
+
+                        # append to alertList (may overwrite previous US alerts if any; that's intended for non-US)
+                        alertList.append(dict(alertDict))
+            else:
+                # WMO store not available; nothing to do
+                pass
+        except Exception:
+            print("An WMO Alert error occurred:")
+            print(traceback.print_exc())
 
     # Timing Check
     if TIMING:

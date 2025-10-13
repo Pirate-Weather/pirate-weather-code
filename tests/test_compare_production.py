@@ -60,7 +60,7 @@ def test_local_vs_production():
     client = _get_client()
     session = httpx.Client()
 
-    for lat, lon in [(45.0, -75.0), (10.0, 10.0)]:
+    for lat, lon in [(53.0642, -93.3444), (10.0, 10.0)]:
         local_resp = client.get(f"/forecast/{PW_API}/{lat},{lon}?version=2")
         assert local_resp.status_code == 200
         local_data = local_resp.json()
