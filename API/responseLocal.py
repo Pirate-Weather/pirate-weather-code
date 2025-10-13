@@ -1478,11 +1478,6 @@ async def PW_Forecast(
     if timeMachine:
         exAlerts = 1
 
-    # Exclude Alerts outside US
-    if exAlerts == 0:
-        if cull(az_Lon, lat) == 0:
-            exAlerts = 1
-
     # Default to US
     unitSystem = "us"
     windUnit = 2.234  # mph
@@ -4482,8 +4477,6 @@ async def PW_Forecast(
                             continue
 
                         alertDescript = alertDetails[1] if len(alertDetails) > 1 else ""
-                        formatted_text = re.sub(r"(?<!\n)\n(?!\n)", " ", alertDescript)
-                        formatted_text = re.sub(r"\n\n", "\n", formatted_text)
 
                         alertDict = {
                             "title": alertDetails[0] if len(alertDetails) > 0 else "",
@@ -4514,7 +4507,7 @@ async def PW_Forecast(
                                     )
                                 ).total_seconds()
                             ),
-                            "description": formatted_text,
+                            "description": alertDescript,
                             "uri": alertDetails[6] if len(alertDetails) > 6 else "",
                         }
 
@@ -5392,6 +5385,16 @@ def initialDataSync() -> None:
             True,
         )
         print("Alerts Download!")
+
+        # Download WMO/global alerts zarr so non-US alerts are available
+        download_if_newer(
+            s3_bucket,
+            "ForecastTar_v2/" + ingestVersion + "/WMO_Alerts.zarr.zip",
+            "/tmp/WMO_Alerts_TMP.zarr.zip",
+            "/tmp/WMO_Alerts.zarr.prod.zip",
+            True,
+        )
+        print("WMO Alerts Download!")
 
         if useETOPO:
             download_if_newer(
