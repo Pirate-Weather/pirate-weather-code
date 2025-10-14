@@ -469,7 +469,9 @@ def update_zarr_store(initialRun):
             )
             logger.info("Loading new: " + latest_WMO)
         except (zarr.errors.PathNotFoundError, IOError) as e:
-            logger.exception("Failed to open WMO alerts zarr: %s, error: %s", latest_WMO, e)
+            logger.exception(
+                "Failed to open WMO alerts zarr: %s, error: %s", latest_WMO, e
+            )
 
     print("Refreshed Zarrs")
 
