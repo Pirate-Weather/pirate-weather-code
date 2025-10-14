@@ -4476,8 +4476,6 @@ async def PW_Forecast(
                             # If timestamps missing/invalid, skip this alert
                             continue
 
-                        alertDescript = alertDetails[1] if len(alertDetails) > 1 else ""
-
                         alertDict = {
                             "title": alertDetails[0] if len(alertDetails) > 0 else "",
                             "regions": [
@@ -4507,7 +4505,9 @@ async def PW_Forecast(
                                     )
                                 ).total_seconds()
                             ),
-                            "description": alertDescript,
+                            "description": alertDetails[1]
+                            if len(alertDetails) > 1
+                            else "",
                             "uri": alertDetails[6] if len(alertDetails) > 6 else "",
                         }
 
