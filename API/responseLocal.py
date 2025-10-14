@@ -36,6 +36,8 @@ from pirateweather_translations.dynamic_loader import load_all_translations
 from pytz import timezone, utc
 from timezonefinder import TimezoneFinder
 
+from API.api_utils import get_alert_field
+
 from API.constants.api_const import (
     API_VERSION,
     APPARENT_TEMP_CONSTS,
@@ -4403,7 +4405,7 @@ async def PW_Forecast(
                     ).astimezone(utc)
 
                     # Format description newlines
-                    alertDescript = alertDetails[1]
+                    alertDescript = get_alert_field(alertDetails, 1)
                     # Step 1: Replace double newlines with a single newline
                     formatted_text = re.sub(r"(?<!\n)\n(?!\n)", " ", alertDescript)
 
@@ -4411,9 +4413,9 @@ async def PW_Forecast(
                     formatted_text = re.sub(r"\n\n", "\n", formatted_text)
 
                     alertDict = {
-                        "title": alertDetails[0],
+                        "title": get_alert_field(alertDetails, 0),
                         "regions": [s.lstrip() for s in alertDetails[2].split(";")],
-                        "severity": alertDetails[5],
+                        "severity": get_alert_field(alertDetails, 5),
                         "time": int(
                             (
                                 alertOnset
@@ -4427,7 +4429,7 @@ async def PW_Forecast(
                             ).total_seconds()
                         ),
                         "description": formatted_text,
-                        "uri": alertDetails[6],
+                        "uri": get_alert_field(alertDetails, 6),
                     }
 
                     alertList.append(dict(alertDict))
@@ -4458,10 +4460,7 @@ async def PW_Forecast(
                 except Exception:
                     alertDat = ""
 
-                if not alertDat:
-                    # no alerts for this point
-                    pass
-                else:
+                if alertDat:
                     alerts = str(alertDat).split("|")
                     for alert in alerts:
                         alertDetails = alert.split("}{")
@@ -4474,12 +4473,12 @@ async def PW_Forecast(
                             alertEnd = datetime.datetime.strptime(
                                 alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
                             ).astimezone(utc)
-                        except Exception:
+                        except (ValueError, IndexError):
                             # If timestamps missing/invalid, skip this alert
                             continue
 
                         alertDict = {
-                            "title": alertDetails[0] if len(alertDetails) > 0 else "",
+                            "title": get_alert_field(alertDetails, 0),
                             "regions": [
                                 s.lstrip()
                                 for s in (
@@ -4488,9 +4487,7 @@ async def PW_Forecast(
                                     else []
                                 )
                             ],
-                            "severity": alertDetails[5]
-                            if len(alertDetails) > 5
-                            else "",
+                            "severity": get_alert_field(alertDetails, 5),
                             "time": int(
                                 (
                                     alertOnset
@@ -4507,10 +4504,8 @@ async def PW_Forecast(
                                     )
                                 ).total_seconds()
                             ),
-                            "description": alertDetails[1]
-                            if len(alertDetails) > 1
-                            else "",
-                            "uri": alertDetails[6] if len(alertDetails) > 6 else "",
+                            "description": get_alert_field(alertDetails, 1),
+                            "uri": get_alert_field(alertDetails, 6),
                         }
 
                         # append to alertList (may overwrite previous US alerts if any; that's intended for non-US)
