@@ -1452,6 +1452,7 @@ async def PW_Forecast(
     exAlerts = 0
     exNBM = 0
     exHRRR = 0
+    exRTMA = 0
     exGEFS = 0
     summaryText = True
 
@@ -1471,6 +1472,8 @@ async def PW_Forecast(
         exNBM = 1
     if "hrrr" in excludeParams:
         exHRRR = 1
+    if "rtma" in excludeParams or "rtma-ru" in excludeParams:
+        exRTMA = 1
     if "gefs" in excludeParams:
         exGEFS = 1
     if "summary" in excludeParams:
@@ -2185,7 +2188,11 @@ async def PW_Forecast(
         zarrTasks["GFS"] = weather.zarr_read("GFS", GFS_Zarr, x_p, y_p)
 
     # RTMA Rapid Update: prefer for current observations inside domain (non-historical)
-    if (rtma_zarr is not None) and (not timeMachine):
+    if (
+        (rtma_zarr is not None)
+        and (not timeMachine)
+        and (locals().get("exRTMA", 0) == 0)
+    ):
         # lazily construct nominal RTMA lat/lon arrays using constants
 
         if rtma_lats is None or rtma_lons is None:
