@@ -1215,7 +1215,8 @@ async def PW_Forecast(
     readGFS = False
     readNBM = False
     readGEFS = False
-    # RTMA read flag is handled by presence of RTMA in zarr_tasks/results
+    readRTMA = False
+    dataOut_rtma = False
 
     STAGE = os.environ.get("STAGE", "PROD")
 
@@ -2167,6 +2168,25 @@ async def PW_Forecast(
     sourceIDX["gfs"]["lat"] = round(gfs_lat, 2)
     sourceIDX["gfs"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
 
+    # RTMA Rapid Update: prefer for current observations inside domain (non-historical)
+    if (
+        (rtma_zarr is not None)
+        and (not timeMachine)
+        and exRTMA == 0
+    ):
+        # lazily construct nominal RTMA lat/lon arrays using constants
+
+        if rtma_lats is None or rtma_lons is None:
+            rtma_lats = np.arange(RTMA_LAT_MAX, RTMA_LAT_MIN - 0.0001, -RTMA_DEG_STEP)
+            rtma_lons = np.arange(RTMA_LON_MIN, RTMA_LON_MAX + 0.0001, RTMA_DEG_STEP)
+
+        abslat_rtma = np.abs(rtma_lats - lat)
+        abslon_rtma = np.abs(rtma_lons - az_Lon)
+        y_rtma = int(np.argmin(abslat_rtma))
+        x_rtma = int(np.argmin(abslon_rtma))
+
+        readRTMA = True
+
     if readHRRR:
         zarrTasks["SubH"] = weather.zarr_read("SubH", SubH_Zarr, x_hrrr, y_hrrr)
 
@@ -2186,30 +2206,6 @@ async def PW_Forecast(
 
     if readGFS:
         zarrTasks["GFS"] = weather.zarr_read("GFS", GFS_Zarr, x_p, y_p)
-
-    # RTMA Rapid Update: prefer for current observations inside domain (non-historical)
-    if (
-        (rtma_zarr is not None)
-        and (not timeMachine)
-        and (locals().get("exRTMA", 0) == 0)
-    ):
-        # lazily construct nominal RTMA lat/lon arrays using constants
-
-        if rtma_lats is None or rtma_lons is None:
-            rtma_lats = np.arange(RTMA_LAT_MAX, RTMA_LAT_MIN - 0.0001, -RTMA_DEG_STEP)
-            rtma_lons = np.arange(RTMA_LON_MIN, RTMA_LON_MAX + 0.0001, RTMA_DEG_STEP)
-
-        abslat_rtma = np.abs(rtma_lats - lat)
-        abslon_rtma = np.abs(rtma_lons - az_Lon)
-        y_rtma = int(np.argmin(abslat_rtma))
-        x_rtma = int(np.argmin(abslon_rtma))
-
-        try:
-            zarrTasks["RTMA"] = weather.zarr_read("RTMA", rtma_zarr, x_rtma, y_rtma)
-        except Exception:
-            # Best-effort: if RTMA indexing fails, skip it
-            print("RTMA enqueue failed:")
-            print(traceback.print_exc())
 
     if readGEFS:
         zarrTasks["GEFS"] = weather.zarr_read("GEFS", GEFS_Zarr, x_p, y_p)
@@ -2261,6 +2257,24 @@ async def PW_Forecast(
                 dataOut_h2 = False
                 print("OLD HRRR_6H")
 
+    if readRTMA:
+        try:
+            zarrTasks["RTMA"] = weather.zarr_read("RTMA", rtma_zarr, x_rtma, y_rtma)
+            dataOut_rtma = zarr_results["RTMA"]
+            if isinstance(dataOut_rtma, np.ndarray) and dataOut_rtma.shape[0] > 0:
+                y_rt = int(np.argmin(abslat_rtma))
+                x_rt = int(np.argmin(abslon_rtma))
+
+                sourceIDX["rtma"] = dict()
+                sourceIDX["rtma"]["x"] = int(x_rt)
+                sourceIDX["rtma"]["y"] = int(y_rt)
+                sourceIDX["rtma"]["lat"] = round(rtma_lats[y_rt], 2)
+                sourceIDX["rtma"]["lon"] = round(rtma_lons[x_rt], 2)
+        except Exception:
+            # Best-effort: if RTMA indexing fails, skip it
+            print("RTMA enqueue failed:")
+            print(traceback.print_exc())
+
     if readNBM:
         dataOut_nbm = zarr_results["NBM"]
         dataOut_nbmFire = zarr_results["NBM_Fire"]
@@ -2304,6 +2318,16 @@ async def PW_Forecast(
     if TIMING:
         print("### Sources Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+
+    if isinstance(dataOut_rtma, np.ndarray) and not timeMachine:
+        sourceList.append("rtma-ru")
+        rt_run_time = int(dataOut_rtma[0, 0])
+        # Add to sourceTimes for live requests
+        # RTMA runs every 15 minutes; show exact minute rather than rounding
+        dt_rt = datetime.datetime.fromtimestamp(
+            rt_run_time, datetime.UTC
+        ).replace(tzinfo=None)
+        sourceTimes["rtma-ru"] = dt_rt.strftime("%Y-%m-%d %H:%MZ")
 
     # If point is not in HRRR coverage or HRRR-subh is more than 4 hours old, the fallback to GFS
     if isinstance(dataOut, np.ndarray):
@@ -2370,44 +2394,6 @@ async def PW_Forecast(
             ).strftime("%Y-%m-%d %HZ")
     elif (isinstance(dataOut_gefs, np.ndarray)) & (timeMachine):
         sourceList.append("gefs")
-
-    # RTMA bookkeeping: if RTMA was read, add its run time and grid indices
-    if "RTMA" in zarr_results:
-        try:
-            dataOut_rtma = zarr_results["RTMA"]
-            if isinstance(dataOut_rtma, np.ndarray) and dataOut_rtma.shape[0] > 0:
-                sourceList.append("rtma-ru")
-                rt_run_time = int(dataOut_rtma[0, 0])
-                # Add to sourceTimes for live requests
-                if not timeMachine:
-                    # RTMA runs every 15 minutes; show exact minute rather than rounding
-                    dt_rt = datetime.datetime.fromtimestamp(
-                        rt_run_time, datetime.UTC
-                    ).replace(tzinfo=None)
-                    sourceTimes["rtma-ru"] = dt_rt.strftime("%Y-%m-%d %H:%MZ")
-
-                if rtma_lats is None or rtma_lons is None:
-                    rtma_lats = np.arange(
-                        RTMA_LAT_MAX, RTMA_LAT_MIN - 0.0001, -RTMA_DEG_STEP
-                    )
-                    rtma_lons = np.arange(
-                        RTMA_LON_MIN, RTMA_LON_MAX + 0.0001, RTMA_DEG_STEP
-                    )
-
-                abslat_rtma = np.abs(rtma_lats - lat)
-                abslon_rtma = np.abs(rtma_lons - az_Lon)
-                y_rt = int(np.argmin(abslat_rtma))
-                x_rt = int(np.argmin(abslon_rtma))
-
-                sourceIDX["rtma"] = dict()
-                sourceIDX["rtma"]["x"] = int(x_rt)
-                sourceIDX["rtma"]["y"] = int(y_rt)
-                sourceIDX["rtma"]["lat"] = round(rtma_lats[y_rt], 2)
-                sourceIDX["rtma"]["lon"] = round(rtma_lons[x_rt], 2)
-        except Exception:
-            if TIMING:
-                print("RTMA bookkeeping failed")
-                print(traceback.print_exc())
 
     # Timing Check
     if TIMING:
