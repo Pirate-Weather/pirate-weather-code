@@ -2169,11 +2169,7 @@ async def PW_Forecast(
     sourceIDX["gfs"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
 
     # RTMA Rapid Update: prefer for current observations inside domain (non-historical)
-    if (
-        (rtma_zarr is not None)
-        and (not timeMachine)
-        and exRTMA == 0
-    ):
+    if (rtma_zarr is not None) and (not timeMachine) and exRTMA == 0:
         # lazily construct nominal RTMA lat/lon arrays using constants
 
         if rtma_lats is None or rtma_lons is None:
@@ -2324,9 +2320,9 @@ async def PW_Forecast(
         rt_run_time = int(dataOut_rtma[0, 0])
         # Add to sourceTimes for live requests
         # RTMA runs every 15 minutes; show exact minute rather than rounding
-        dt_rt = datetime.datetime.fromtimestamp(
-            rt_run_time, datetime.UTC
-        ).replace(tzinfo=None)
+        dt_rt = datetime.datetime.fromtimestamp(rt_run_time, datetime.UTC).replace(
+            tzinfo=None
+        )
         sourceTimes["rtma-ru"] = dt_rt.strftime("%Y-%m-%d %H:%MZ")
 
     # If point is not in HRRR coverage or HRRR-subh is more than 4 hours old, the fallback to GFS
