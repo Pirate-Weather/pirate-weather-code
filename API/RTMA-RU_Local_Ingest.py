@@ -211,7 +211,7 @@ dask_var_array = mask_invalid_data(xarray_analysis_stack)
 # Create a zarr backed dask array
 if save_type == "S3":
     zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/RTMA_RU.zarr.zip", mode="w", compression=0
+        forecast_process_dir + "/RTMA_RU.zarr.zip", mode="a", compression=0
     )
 else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/RTMA_RU.zarr")
