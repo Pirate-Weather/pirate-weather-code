@@ -614,7 +614,9 @@ if STAGE == "TESTING":
         # Not critical; proceed without WMO alerts
         WMO_Alerts_Zarr = None
     except Exception:
-        logger.exception("Failed to load WMO alerts during testing, proceeding without them.")
+        logger.exception(
+            "Failed to load WMO alerts during testing, proceeding without them."
+        )
         WMO_Alerts_Zarr = None
 
     if save_type == "S3":
