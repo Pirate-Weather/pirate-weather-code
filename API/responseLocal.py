@@ -2086,6 +2086,7 @@ async def PW_Forecast(
         dataOut_ecmwf = False
         readECMWF = False
     else:
+        dataOut_ecmwf = False  # Will be set later from zarr_results if successful
         readECMWF = True
 
     if TIMING:
