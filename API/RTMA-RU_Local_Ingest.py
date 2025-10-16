@@ -12,9 +12,9 @@ import warnings
 
 # Define ECCODES_DEFINITION_PATH env variable for eccodes
 # This is needed in my testing instance- should not be required for the docker image
-#os.environ["ECCODES_DEFINITION_PATH"] = (
+# os.environ["ECCODES_DEFINITION_PATH"] = (
 #   "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
-#)
+# )
 import numpy as np
 import s3fs
 import xarray as xr
@@ -211,13 +211,12 @@ for var in zarr_vars:
 xarray_analysis_merged = xarray_analysis_merged.drop_vars("sh2")
 
 # Set the order correctly
-vars_in = [
-    v for v in zarr_vars if v in xarray_analysis_merged.data_vars
-]
+vars_in = [v for v in zarr_vars if v in xarray_analysis_merged.data_vars]
 
 # Merge the arrays into a single 3D array with the correct order, add a 1 length time dimension, and rechunk
 xarray_analysis_stack = (
-    xarray_analysis_merged[vars_in].to_stacked_array(new_dim="var", sample_dims=["y", "x"])
+    xarray_analysis_merged[vars_in]
+    .to_stacked_array(new_dim="var", sample_dims=["y", "x"])
     .expand_dims("time", axis=1)
     .chunk(chunks={"var": -1, "time": 1, "x": final_chunk, "y": final_chunk})
     .transpose("var", "time", "y", "x")
@@ -255,7 +254,7 @@ if save_type == "S3":
     logging.info("Zarr zip store closed.")
 
 
-#%% Test read
+# %% Test read
 # zarr_store_test =  zarr.storage.LocalStore(forecast_process_dir + "/RTMA_RU.zarr")
 #
 # zarr_array_test = zarr.open_array(zarr_store_test)
