@@ -1953,6 +1953,7 @@ async def PW_Forecast(
         WMO_alertDat = WMO_Alerts_Zarr[wmo_alerts_y_p, wmo_alerts_x_p]
 
         if TIMING:
+            # Temp until added to response
             print(WMO_alertDat)
 
     results = await asyncio.gather(*zarrTasks.values())
