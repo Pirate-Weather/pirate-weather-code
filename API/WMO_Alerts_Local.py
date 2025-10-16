@@ -145,13 +145,21 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
         if urgency.lower() == "past":  # handle case-insensitive variants
             continue
 
-        event = _cap_text(info, "event", ns)
+        # All CAP feeds seem to have the event field, some have headline and description, some just one or the other
+        # If there is a headline and description, use headline for event and description for description
+        # If there is a headline but no description, use headline for description and event for event
+        # If there is a description but no headline, use description for description and event for event
+        # Treat blank strings as missing
+        event = _cap_text(info, "event", ns) or None
+        headline = _cap_text(info, "headline", ns) or None
+        description = _cap_text(info, "description", ns) or None
 
-        # If description is empty or missing, use headline instead
-        if _cap_text(info, "description", ns) == "":
-            description = _cap_text(info, "headline", ns)
+        description_text = description or headline
+
+        if headline and description:
+            event_text = headline
         else:
-            description = _cap_text(info, "description", ns)
+            event_text = event
 
         severity = _cap_text(info, "severity", ns)
 
@@ -187,8 +195,8 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                         results.append(
                             (
                                 source_id,
-                                event,
-                                description,
+                                event_text,
+                                description_text,
                                 severity,
                                 effective,
                                 expires,
