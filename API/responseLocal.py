@@ -7,7 +7,6 @@ import math
 import os
 import pickle
 import platform
-import random
 import re
 import shutil
 import subprocess
@@ -42,10 +41,8 @@ from API.constants.api_const import (
     DBZ_CONST,
     GLOBE_TEMP_CONST,
     LARGEST_DIR_INIT,
-    MAX_S3_RETRIES,
     NICE_PRIORITY,
     PRECIP_IDX,
-    S3_BASE_DELAY,
     S3_MAX_BANDWIDTH,
     SOLAR_IRRADIANCE_CONST,
     SOLAR_RAD_CONST,
@@ -125,6 +122,11 @@ from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
 from API.PirateWeeklyText import calculate_weekly_text
 from API.timemachine import TimeMachine
+from API.ZarrHelpers import (
+    _retry_s3_operation,
+    setup_testing_zipstore,
+    _add_custom_header,
+)
 
 Translations = load_all_translations()
 
@@ -158,39 +160,6 @@ def setup_logging():
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     root.addHandler(handler)
-
-
-class S3ZipStore(zarr.storage.ZipStore):
-    def __init__(self, path: s3fs.S3File) -> None:
-        super().__init__(path="", mode="r")
-        self.path = path
-
-
-def _add_custom_header(request, **kwargs):
-    request.headers["apikey"] = pw_api_key
-
-
-def _retry_s3_operation(
-    operation, max_retries=MAX_S3_RETRIES, base_delay=S3_BASE_DELAY
-):
-    """Retry S3 operations with exponential backoff for rate limiting."""
-    for attempt in range(max_retries):
-        try:
-            return operation()
-        except Exception as e:
-            # Check if it's a rate limiting error
-            if "429" in str(e) or "Too Many Requests" in str(e):
-                if attempt < max_retries - 1:
-                    # Calculate delay with exponential backoff and jitter
-                    delay = base_delay * (2**attempt) + random.uniform(0, 1)
-                    print(
-                        f"S3 rate limit hit (attempt {attempt + 1}/{max_retries}), retrying in {delay:.2f}s: {e}"
-                    )
-                    time.sleep(delay)
-                    continue
-            # Re-raise the exception if it's not rate limiting or max retries reached
-            raise e
-    raise Exception(f"Failed after {max_retries} attempts")
 
 
 def download_if_newer(
@@ -336,6 +305,9 @@ def update_zarr_store(initialRun):
     global HRRR_Zarr
     global rtma_zarr
     global NWS_Alerts_Zarr
+    global WMO_Alerts_Zarr
+    global RTMA_RU_Zarr
+    global ECMWF_Zarr
 
     STAGE = os.environ.get("STAGE", "PROD")
     # Create empty dir
@@ -466,6 +438,54 @@ def update_zarr_store(initialRun):
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
+    latest_WMO_Alerts, old_WMO_Alerts = find_largest_integer_directory(
+        "/tmp", "WMO_Alerts.zarr", initialRun
+    )
+    if latest_WMO_Alerts is not None:
+        WMO_Alerts_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_WMO_Alerts, mode="r"), mode="r"
+        )
+        logger.info("Loading new: " + latest_WMO_Alerts)
+    for old_dir in old_WMO_Alerts:
+        if STAGE == "PROD":
+            logger.info("Removing old: " + old_dir)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
+            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+            subprocess.run(command, shell=True)
+
+    latest_RTMA_RU, old_RTMA_RU = find_largest_integer_directory(
+        "/tmp", "RTMA_RU.zarr", initialRun
+    )
+    if latest_RTMA_RU is not None:
+        RTMA_RU_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_RTMA_RU, mode="r"), mode="r"
+        )
+        logger.info("Loading new: " + latest_RTMA_RU)
+    for old_dir in old_RTMA_RU:
+        if STAGE == "PROD":
+            logger.info("Removing old: " + old_dir)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
+            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+            subprocess.run(command, shell=True)
+
+    latest_ECMWF, old_ECMWF = find_largest_integer_directory(
+        "/tmp", "ECMWF.zarr", initialRun
+    )
+    if latest_ECMWF is not None:
+        ECMWF_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_ECMWF, mode="r"), mode="r"
+        )
+        logger.info("Loading new: " + latest_ECMWF)
+    for old_dir in old_ECMWF:
+        if STAGE == "PROD":
+            logger.info("Removing old: " + old_dir)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
+            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+            subprocess.run(command, shell=True)
+
     if (initialRun) and (useETOPO):
         latest_ETOPO, old_ETOPO = find_largest_integer_directory(
             "/tmp", "ETOPO_DA_C.zarr", initialRun
@@ -521,292 +541,80 @@ if STAGE == "TESTING":
     print("Setting up S3 zarrs")
     # If S3, use that, otherwise use local
     if save_type == "S3":
-        # s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key, asynchronous=False)
         s3 = s3fs.S3FileSystem(
             anon=True,
             asynchronous=False,
             endpoint_url="https://api.pirateweather.net/files/",
         )
         s3.s3.meta.events.register("before-sign.s3.*", _add_custom_header)
-
-        try:
-            f = _retry_s3_operation(
-                lambda: s3.open(
-                    "s3://ForecastTar_v2/" + ingestVersion + "/NWS_Alerts.zarr.zip"
-                )
-            )
-            store = S3ZipStore(f)
-        # Try an old ingest version for testing
-        except FileNotFoundError:
-            ingestVersion = "v28"
-            print("Using old ingest version: " + ingestVersion)
-            f = _retry_s3_operation(
-                lambda: s3.open(
-                    "s3://ForecastTar_v2/" + ingestVersion + "/NWS_Alerts.zarr.zip"
-                )
-            )
-            store = S3ZipStore(f)
-
     elif save_type == "S3Zarr":
         s3 = s3fs.S3FileSystem(
             key=aws_access_key_id, secret=aws_secret_access_key, version_aware=True
         )
-
-        try:
-            f = _retry_s3_operation(
-                lambda: s3.open(
-                    "s3://"
-                    + s3_bucket
-                    + "/ForecastTar_v2/"
-                    + ingestVersion
-                    + "/NWS_Alerts.zarr.zip"
-                )
-            )
-            store = S3ZipStore(f)
-        except FileNotFoundError:
-            ingestVersion = "v28"
-            print("Using old ingest version: " + ingestVersion)
-            f = _retry_s3_operation(
-                lambda: s3.open(
-                    "s3://"
-                    + s3_bucket
-                    + "/ForecastTar_v2/"
-                    + ingestVersion
-                    + "/NWS_Alerts.zarr.zip"
-                )
-            )
-            store = S3ZipStore(f)
-
     else:
-        f = s3_bucket + "NWS_Alerts.zarr.zip"
-        store = zarr.storage.ZipStore(f, mode="r")
+        s3 = None
 
-    NWS_Alerts_Zarr = zarr.open(store, mode="r")
+    NWS_Alerts_store = setup_testing_zipstore(
+        s3, s3_bucket, ingestVersion, save_type, "NWS_Alerts"
+    )
+    NWS_Alerts_Zarr = zarr.open(NWS_Alerts_store, mode="r")
 
-    if save_type == "S3":
-        f = _retry_s3_operation(
-            lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/SubH.zarr.zip")
-        )
-        store = S3ZipStore(f)
-    elif save_type == "S3Zarr":
-        f = _retry_s3_operation(
-            lambda: s3.open(
-                "s3://"
-                + s3_bucket
-                + "/ForecastTar_v2/"
-                + ingestVersion
-                + "/SubH.zarr.zip"
-            )
-        )
-        store = S3ZipStore(f)
-    else:
-        f = s3_bucket + "SubH_v2.zarr.zip"
-        store = zarr.storage.ZipStore(f, mode="r")
-
-    SubH_Zarr = zarr.open(store, mode="r")
+    SubH_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "SubH")
+    SubH_Zarr = zarr.open(SubH_store, mode="r")
     print("SubH Read")
 
-    if save_type == "S3":
-        f = _retry_s3_operation(
-            lambda: s3.open(
-                "s3://ForecastTar_v2/" + ingestVersion + "/HRRR_6H.zarr.zip"
-            )
-        )
-        store = S3ZipStore(f)
-    elif save_type == "S3Zarr":
-        f = _retry_s3_operation(
-            lambda: s3.open(
-                "s3://"
-                + s3_bucket
-                + "/ForecastTar_v2/"
-                + ingestVersion
-                + "/HRRR_6H.zarr.zip"
-            )
-        )
-        store = S3ZipStore(f)
-    else:
-        f = s3_bucket + "HRRR_6H.zarr.zip"
-        store = zarr.storage.ZipStore(f, mode="r")
-
-    HRRR_6H_Zarr = zarr.open(store, mode="r")
+    HRRR_6H_store = setup_testing_zipstore(
+        s3, s3_bucket, ingestVersion, save_type, "HRRR_6H"
+    )
+    HRRR_6H_Zarr = zarr.open(HRRR_6H_store, mode="r")
     print("HRRR_6H Read")
 
-    if save_type == "S3":
-        f = _retry_s3_operation(
-            lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/GFS.zarr.zip")
-        )
-        store = S3ZipStore(f)
-    elif save_type == "S3Zarr":
-        f = _retry_s3_operation(
-            lambda: s3.open(
-                "s3://"
-                + s3_bucket
-                + "/ForecastTar_v2/"
-                + ingestVersion
-                + "/GFS.zarr.zip"
-            )
-        )
-        store = S3ZipStore(f)
-    else:
-        f = s3_bucket + "GFS.zarr.zip"
-        store = zarr.storage.ZipStore(f, mode="r")
-
-    GFS_Zarr = zarr.open(store, mode="r")
+    GFS_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "GFS")
+    GFS_Zarr = zarr.open(GFS_store, mode="r")
     print("GFS Read")
 
-    if save_type == "S3":
-        f = _retry_s3_operation(
-            lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/GEFS.zarr.zip")
-        )
-        store = S3ZipStore(f)
-    elif save_type == "S3Zarr":
-        f = _retry_s3_operation(
-            lambda: s3.open(
-                "s3://"
-                + s3_bucket
-                + "/ForecastTar_v2/"
-                + ingestVersion
-                + "/GEFS.zarr.zip"
-            )
-        )
-        store = S3ZipStore(f)
-    else:
-        f = s3_bucket + "GEFS.zarr.zip"
-        store = zarr.storage.ZipStore(f, mode="r")
-
-    GEFS_Zarr = zarr.open(store, mode="r")
+    GEFS_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "GEFS")
+    GEFS_Zarr = zarr.open(GEFS_store, mode="r")
     print("GEFS Read")
 
-    if save_type == "S3":
-        f = _retry_s3_operation(
-            lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/NBM.zarr.zip")
-        )
-        store = S3ZipStore(f)
-    elif save_type == "S3Zarr":
-        # print('USE VERSION NBM')
-        # f = s3.open("s3://" + s3_bucket + "/NBM.zarr.zip",
-        #             version_id="sfWxulLYHDWCQTiM2u0v.x_Sg4pTwpG7")
-        f = _retry_s3_operation(
-            lambda: s3.open(
-                "s3://"
-                + s3_bucket
-                + "/ForecastTar_v2/"
-                + ingestVersion
-                + "/NBM.zarr.zip"
-            )
-        )
-
-        store = S3ZipStore(f)
-    else:
-        f = s3_bucket + "NBM.zarr.zip"
-        store = zarr.storage.ZipStore(f, mode="r")
-
-    NBM_Zarr = zarr.open(store, mode="r")
+    NBM_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "NBM")
+    NBM_Zarr = zarr.open(NBM_store, mode="r")
     print("NBM Read")
 
-    if save_type == "S3":
-        f = _retry_s3_operation(
-            lambda: s3.open(
-                "s3://ForecastTar_v2/" + ingestVersion + "/NBM_Fire.zarr.zip"
-            )
-        )
-        store = S3ZipStore(f)
-    elif save_type == "S3Zarr":
-        f = _retry_s3_operation(
-            lambda: s3.open(
-                "s3://"
-                + s3_bucket
-                + "/ForecastTar_v2/"
-                + ingestVersion
-                + "/NBM_Fire.zarr.zip"
-            )
-        )
-        store = S3ZipStore(f)
-    else:
-        f = s3_bucket + "NBM_Fire.zarr.zip"
-        store = zarr.storage.ZipStore(f, mode="r")
-
-    NBM_Fire_Zarr = zarr.open(store, mode="r")
+    NBM_Fire_store = setup_testing_zipstore(
+        s3, s3_bucket, ingestVersion, save_type, "NBM_Fire"
+    )
+    NBM_Fire_Zarr = zarr.open(NBM_Fire_store, mode="r")
     print("NBM Fire Read")
 
-    if save_type == "S3":
-        f = _retry_s3_operation(
-            lambda: s3.open("s3://ForecastTar_v2/" + ingestVersion + "/HRRR.zarr.zip")
-        )
-        store = S3ZipStore(f)
-    elif save_type == "S3Zarr":
-        f = _retry_s3_operation(
-            lambda: s3.open(
-                "s3://"
-                + s3_bucket
-                + "/ForecastTar_v2/"
-                + ingestVersion
-                + "/HRRR.zarr.zip"
-            )
-        )
-        store = S3ZipStore(f)
-    else:
-        f = s3_bucket + "HRRR.zarr.zip"
-        store = zarr.storage.ZipStore(f, mode="r")
-
-    HRRR_Zarr = zarr.open(store, mode="r")
+    HRRR_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "HRRR")
+    HRRR_Zarr = zarr.open(HRRR_store, mode="r")
     print("HRRR Read")
 
-    # Try to load RTMA for testing
-    try:
-        if save_type == "S3":
-            f = _retry_s3_operation(
-                lambda: s3.open(
-                    "s3://ForecastTar_v2/" + ingestVersion + "/RTMA_RU.zarr.zip"
-                )
-            )
-            store = S3ZipStore(f)
-        elif save_type == "S3Zarr":
-            f = _retry_s3_operation(
-                lambda: s3.open(
-                    "s3://"
-                    + s3_bucket
-                    + "/ForecastTar_v2/"
-                    + ingestVersion
-                    + "/RTMA_RU.zarr.zip"
-                )
-            )
-            store = S3ZipStore(f)
-        else:
-            f = s3_bucket + "RTMA_RU.zarr.zip"
-            store = zarr.storage.ZipStore(f, mode="r")
+    WMO_Alerts_store = setup_testing_zipstore(
+        s3, s3_bucket, ingestVersion, save_type, "WMO_Alerts"
+    )
+    WMO_Alerts_Zarr = zarr.open(WMO_Alerts_store, mode="r")
+    print("WMO_Alerts Read")
 
-        rtma_zarr = zarr.open(store, mode="r")
-        print("RTMA Read")
-    except Exception:
-        rtma_zarr = None
-        print("RTMA not available in TESTING")
+    RTMA_RU_store = setup_testing_zipstore(
+        s3, s3_bucket, ingestVersion, save_type, "RTMA_RU"
+    )
+    RTMA_RU_Zarr = zarr.open(RTMA_RU_store, mode="r")
+    print("RTMA_RU Read")
+
+    ECMWF_store = setup_testing_zipstore(
+        s3, s3_bucket, ingestVersion, save_type, "ECMWF"
+    )
+    ECMWF_Zarr = zarr.open(ECMWF_store, mode="r")
+    print("ECMWF Read")
 
     if useETOPO:
-        if save_type == "S3":
-            f = _retry_s3_operation(
-                lambda: s3.open(
-                    "s3://ForecastTar_v2/" + ingestVersion + "/ETOPO_DA_C.zarr.zip"
-                )
-            )
-            store = S3ZipStore(f)
-        elif save_type == "S3Zarr":
-            f = _retry_s3_operation(
-                lambda: s3.open(
-                    "s3://"
-                    + s3_bucket
-                    + "/ForecastTar_v2/"
-                    + ingestVersion
-                    + "/ETOPO_DA_C.zarr.zip"
-                )
-            )
-            store = S3ZipStore(f)
-        else:
-            f = s3_bucket + "ETOPO_DA_C.zarr.zip"
-            store = zarr.storage.ZipStore(f, mode="r")
-
-        ETOPO_f = zarr.open(store, mode="r")
-    print("ETOPO Read")
+        ETOPO_store = setup_testing_zipstore(
+            s3, s3_bucket, ingestVersion, save_type, "ETOPO_DA_C"
+        )
+        ETOPO_f = zarr.open(ETOPO_store, mode="r")
+        print("ETOPO Read")
 
 
 async def get_zarr(store, X, Y):
@@ -1210,13 +1018,19 @@ async def PW_Forecast(
     global rtma_lats
     global rtma_lons
     global NWS_Alerts_Zarr
+    global WMO_Alerts_Zarr
+    global RTMA_RU_Zarr
+    global ECMWF_Zarr
 
     readHRRR = False
     readGFS = False
     readNBM = False
     readGEFS = False
-    readRTMA = False
-    dataOut_rtma = False
+
+    # Testing ECMWF/ RTMA_RU/ WMO_Alerts
+    readECMWF = True
+    readRTMA_RU = True
+    readWMOAlerts = True
 
     STAGE = os.environ.get("STAGE", "PROD")
 
@@ -2205,6 +2019,27 @@ async def PW_Forecast(
 
     if readGEFS:
         zarrTasks["GEFS"] = weather.zarr_read("GEFS", GEFS_Zarr, x_p, y_p)
+
+    ## WIP: Initial read of RTMA_RU/ECMWF/WMO_Alerts
+    if readRTMA_RU:
+        zarrTasks["RTMA"] = weather.zarr_read("RTMA", RTMA_RU_Zarr, 1465, 854)
+
+    if readECMWF:
+        zarrTasks["ECMWF"] = weather.zarr_read("ECMWF", ECMWF_Zarr, x_p, y_p)
+
+    if readWMOAlerts:
+        wmo_alerts_lats = np.arange(-60, 85, 0.0625)
+        wmo_alerts_lons = np.arange(-180, 180, 0.0625)
+        wmo_abslat = np.abs(wmo_alerts_lats - lat)
+        wmo_abslon = np.abs(wmo_alerts_lons - az_Lon)
+        wmo_alerts_y_p = np.argmin(wmo_abslat)
+        wmo_alerts_x_p = np.argmin(wmo_abslon)
+
+        WMO_alertDat = WMO_Alerts_Zarr[wmo_alerts_y_p, wmo_alerts_x_p]
+
+        if TIMING:
+            # Temp until added to response
+            print(WMO_alertDat)
 
     results = await asyncio.gather(*zarrTasks.values())
     zarr_results = {key: result for key, result in zip(zarrTasks.keys(), results)}
@@ -5300,6 +5135,8 @@ async def PW_Forecast(
             returnOBJ["flags"]["ingestVersion"] = ingestVersion
             # Return the approx city name
             returnOBJ["flags"]["nearestCity"] = loc_name["city"]
+            returnOBJ["flags"]["nearestCountry"] = loc_name["country"]
+            returnOBJ["flags"]["nearestSubNational"] = loc_name["state"]
 
         # if timeMachine:
         # lock.release()
@@ -5397,6 +5234,30 @@ def initialDataSync() -> None:
             True,
         )
         print("Alerts Download!")
+        download_if_newer(
+            s3_bucket,
+            "ForecastTar_v2/" + ingestVersion + "/WMO_Alerts.zarr.zip",
+            "/tmp/WMO_Alerts_TMP.zarr.zip",
+            "/tmp/WMO_Alerts.zarr.prod.zip",
+            True,
+        )
+        print("WMO Alerts Download!")
+        download_if_newer(
+            s3_bucket,
+            "ForecastTar_v2/" + ingestVersion + "/RTMA_RU.zarr.zip",
+            "/tmp/RTMA_RU_TMP.zarr.zip",
+            "/tmp/RTMA_RU.zarr.prod.zip",
+            True,
+        )
+        print("RTMA_RU Download!")
+        download_if_newer(
+            s3_bucket,
+            "ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip",
+            "/tmp/ECMWF_TMP.zarr.zip",
+            "/tmp/ECMWF.zarr.prod.zip",
+            True,
+        )
+        print("ECMWF Download!")
 
         if useETOPO:
             download_if_newer(
@@ -5495,6 +5356,30 @@ def dataSync() -> None:
                 False,
             )
             logger.info("Alerts Download!")
+            download_if_newer(
+                s3_bucket,
+                "ForecastTar_v2/" + ingestVersion + "/WMO_Alerts.zarr.zip",
+                "/tmp/WMO_Alerts_TMP.zarr.zip",
+                "/tmp/WMO_Alerts.zarr.prod.zip",
+                False,
+            )
+            logger.info("Alerts Download!")
+            download_if_newer(
+                s3_bucket,
+                "ForecastTar_v2/" + ingestVersion + "/RTMA_RU.zarr.zip",
+                "/tmp/RTMA_RU_TMP.zarr.zip",
+                "/tmp/RTMA_RU.zarr.prod.zip",
+                False,
+            )
+            logger.info("RTMA_RU Download!")
+            download_if_newer(
+                s3_bucket,
+                "ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip",
+                "/tmp/ECMWF_TMP.zarr.zip",
+                "/tmp/ECMWF.zarr.prod.zip",
+                False,
+            )
+            logger.info("ECMWF Download!")
 
             if useETOPO:
                 download_if_newer(
