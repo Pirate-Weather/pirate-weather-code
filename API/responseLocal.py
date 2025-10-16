@@ -1566,7 +1566,14 @@ async def PW_Forecast(
 
     # RTMA_RU - only for currently, not for time machine
     # Uses same grid as NBM (Lambert conformal conic projection, 2.5km resolution)
-    if az_Lon < -138.3 or az_Lon > -59 or lat < 19.3 or lat > 57 or timeMachine or exRTMA_RU == 1:
+    if (
+        az_Lon < -138.3
+        or az_Lon > -59
+        or lat < 19.3
+        or lat > 57
+        or timeMachine
+        or exRTMA_RU == 1
+    ):
         dataOut_rtma_ru = False
     else:
         # RTMA_RU uses same Lambert Conformal Conic projection as NBM
