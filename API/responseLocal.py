@@ -524,7 +524,6 @@ if STAGE == "TESTING":
     print("Setting up S3 zarrs")
     # If S3, use that, otherwise use local
     if save_type == "S3":
-        # s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key, asynchronous=False)
         s3 = s3fs.S3FileSystem(
             anon=True,
             asynchronous=False,
