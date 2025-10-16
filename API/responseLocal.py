@@ -123,9 +123,9 @@ from API.PirateTextHelper import estimate_snow_height
 from API.PirateWeeklyText import calculate_weekly_text
 from API.timemachine import TimeMachine
 from API.ZarrHelpers import (
+    _add_custom_header,
     _retry_s3_operation,
     setup_testing_zipstore,
-    _add_custom_header,
 )
 
 Translations = load_all_translations()
