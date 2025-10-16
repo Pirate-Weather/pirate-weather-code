@@ -253,15 +253,6 @@ if save_type == "S3":
     zarr_store.close()
     logging.info("Zarr zip store closed.")
 
-
-# %% Test read
-# zarr_store_test =  zarr.storage.LocalStore(forecast_process_dir + "/RTMA_RU.zarr")
-#
-# zarr_array_test = zarr.open_array(zarr_store_test)
-# print(zarr_array_test.info)
-# print(zarr_array_test[:, 0, 600, 1500:1510])
-# print(xarray_analysis_stack[:, 0, 600, 1500:1510].compute())
-
 # %% Upload to S3 or move to final location
 
 # Save to Production Path (Existing Logic)

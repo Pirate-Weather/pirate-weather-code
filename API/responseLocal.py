@@ -4982,7 +4982,6 @@ async def PW_Forecast(
             ).microseconds
             returnOBJ["flags"]["ingestVersion"] = ingestVersion
             # Return the approx city name
-            print(loc_name)
             returnOBJ["flags"]["nearestCity"] = loc_name["city"]
             returnOBJ["flags"]["nearestCountry"] = loc_name["country"]
             returnOBJ["flags"]["nearestSubNational"] = loc_name["state"]

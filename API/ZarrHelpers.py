@@ -48,18 +48,18 @@ def _retry_s3_operation(
     raise Exception(f"Failed after {max_retries} attempts")
 
 
-def setup_testing_zipstore(s3, s3_bucket, ingest_version, save_type, model_name):
+def setup_testing_zipstore(s3: s3fs.S3FileSystem, s3_bucket: str, ingest_version: str, save_type: str, model_name: str) -> zarr.storage.BaseStore:
     """Sets up a zarr store from a zipped zarr file in S3 or locally.
 
-    Args:
-        s3: An s3fs filesystem object.
-        s3_bucket: The S3 bucket name or local path.
-        ingest_version: The version string for the data.
-        save_type: The type of storage ("S3", "S3Zarr", or local path).
-        model_name: The name of the model.
+    Parameters:
+        - s3 (s3fs.S3FileSystem): An s3fs filesystem object.
+        - s3_bucket (str): The S3 bucket name or local path.
+        - ingest_version (str): The version string for the data.
+        - save_type (str): The type of storage ("S3", "S3Zarr", or local path).
+        - model_name (str): The name of the model.
 
     Returns:
-        A zarr store object.
+        - zarr.storage.BaseStore: A zarr store object.
     """
 
     if save_type == "S3":
