@@ -81,11 +81,15 @@ from API.constants.grid_const import (
     NBM_X_MIN,
     NBM_Y_MAX,
     NBM_Y_MIN,
+    RTMA_RU_X_MAX,
+    RTMA_RU_X_MIN,
+    RTMA_RU_Y_MAX,
+    RTMA_RU_Y_MIN,
     US_BOUNDING_BOX,
 )
 
 # Project imports
-from API.constants.model_const import GEFS, GFS, HRRR, HRRR_SUBH, NBM, NBM_FIRE_INDEX
+from API.constants.model_const import GEFS, GFS, HRRR, HRRR_SUBH, NBM, NBM_FIRE_INDEX, RTMA_RU
 from API.constants.shared_const import (
     HISTORY_PERIODS,
     INGEST_VERSION_STR,
@@ -1009,7 +1013,7 @@ async def PW_Forecast(
 
     # Testing ECMWF/ RTMA_RU/ WMO_Alerts
     readECMWF = True
-    readRTMA_RU = True
+    readRTMA_RU = False
     readWMOAlerts = True
 
     STAGE = os.environ.get("STAGE", "PROD")
@@ -1546,6 +1550,53 @@ async def PW_Forecast(
 
     # Timing Check
     if TIMING:
+        print("### RTMA_RU Start ###")
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+    
+    # RTMA_RU - only for currently, not for time machine
+    # Uses same coverage area as HRRR but different grid (2.5km resolution)
+    if az_Lon < -134 or az_Lon > -61 or lat < 21 or lat > 53 or timeMachine:
+        dataOut_rtma_ru = False
+    else:
+        # RTMA_RU uses Lambert Conformal Conic projection similar to HRRR
+        central_longitude_rtma = math.radians(265.0)
+        central_latitude_rtma = math.radians(25.0)
+        standard_parallel_rtma = math.radians(25.0)
+        semimajor_axis_rtma = 6371200
+        rtma_minX = -3271152.8
+        rtma_minY = -263793.46
+        rtma_delta = 2500.0  # 2.5km grid
+
+        rtma_lat, rtma_lon, x_rtma, y_rtma = lambertGridMatch(
+            central_longitude_rtma,
+            central_latitude_rtma,
+            standard_parallel_rtma,
+            semimajor_axis_rtma,
+            lat,
+            lon,
+            rtma_minX,
+            rtma_minY,
+            rtma_delta,
+        )
+
+        if (
+            (x_rtma < RTMA_RU_X_MIN)
+            or (y_rtma < RTMA_RU_Y_MIN)
+            or (x_rtma > RTMA_RU_X_MAX)
+            or (y_rtma > RTMA_RU_Y_MAX)
+        ):
+            dataOut_rtma_ru = False
+        else:
+            readRTMA_RU = True
+
+        sourceIDX["rtma_ru"] = dict()
+        sourceIDX["rtma_ru"]["x"] = int(x_rtma)
+        sourceIDX["rtma_ru"]["y"] = int(y_rtma)
+        sourceIDX["rtma_ru"]["lat"] = round(rtma_lat, 2)
+        sourceIDX["rtma_ru"]["lon"] = round(((rtma_lon + 180) % 360) - 180, 2)
+
+    # Timing Check
+    if TIMING:
         print("### NBM Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
     # Ignore areas outside of NBM coverage
@@ -1984,7 +2035,7 @@ async def PW_Forecast(
 
     ## WIP: Initial read of RTMA_RU/ECMWF/WMO_Alerts
     if readRTMA_RU:
-        zarrTasks["RTMA"] = weather.zarr_read("RTMA", RTMA_RU_Zarr, 1465, 854)
+        zarrTasks["RTMA_RU"] = weather.zarr_read("RTMA_RU", RTMA_RU_Zarr, x_rtma, y_rtma)
 
     if readECMWF:
         zarrTasks["ECMWF"] = weather.zarr_read("ECMWF", ECMWF_Zarr, x_p, y_p)
@@ -2080,6 +2131,22 @@ async def PW_Forecast(
         dataOut_gefs = zarr_results["GEFS"]
         gefsRunTime = dataOut_gefs[HISTORY_PERIODS["GEFS"] - 3, 0]
 
+    if readRTMA_RU:
+        dataOut_rtma_ru = zarr_results["RTMA_RU"]
+        
+        # Check if RTMA_RU data is valid (not too old)
+        if dataOut_rtma_ru is not False:
+            rtma_ru_time = dataOut_rtma_ru[0, 0]
+            # RTMA-RU is updated every 15 minutes, so data older than 1 hour is stale
+            if (
+                utcTime
+                - datetime.datetime.fromtimestamp(
+                    rtma_ru_time.astype(int), datetime.UTC
+                ).replace(tzinfo=None)
+            ) > datetime.timedelta(hours=1):
+                dataOut_rtma_ru = False
+                print("OLD RTMA_RU")
+
     sourceTimes = dict()
     if timeMachine is False:
         if useETOPO:
@@ -2102,6 +2169,13 @@ async def PW_Forecast(
                 subhRunTime.astype(int), datetime.UTC
             ).replace(tzinfo=None)
         ).strftime("%Y-%m-%d %HZ")
+
+    # Add RTMA_RU to source list if available (only for currently, not time machine)
+    if (isinstance(dataOut_rtma_ru, np.ndarray)) & (not timeMachine):
+        sourceList.append("rtma_ru")
+        sourceTimes["rtma_ru"] = datetime.datetime.fromtimestamp(
+            dataOut_rtma_ru[0, 0].astype(int), datetime.UTC
+        ).replace(tzinfo=None).strftime("%Y-%m-%d %H:%MZ")
 
     if (isinstance(dataOut_hrrrh, np.ndarray)) & (not timeMachine):
         sourceList.append("hrrr_0-18")
@@ -4308,8 +4382,10 @@ async def PW_Forecast(
         0, DATA_MINUTELY["error"]
     ]  # "precipIntensityError"
 
-    # Temperature from subH, then NBM, the GFS
-    if "hrrrsubh" in sourceList:
+    # Temperature from RTMA_RU (highest priority), then subH, then NBM, then GFS
+    if "rtma_ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["temp"]] = dataOut_rtma_ru[0, RTMA_RU["temp"]]
+    elif "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["temp"]] = hrrrSubHInterpolation[
             0, HRRR_SUBH["temp"]
         ]
@@ -4332,8 +4408,10 @@ async def PW_Forecast(
         "Temperature Current",
     )
 
-    # Dewpoint from subH, then NBM, the GFS
-    if "hrrrsubh" in sourceList:
+    # Dewpoint from RTMA_RU (highest priority), then subH, then NBM, then GFS
+    if "rtma_ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["dew"]] = dataOut_rtma_ru[0, RTMA_RU["dew"]]
+    elif "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["dew"]] = hrrrSubHInterpolation[0, HRRR_SUBH["dew"]]
     elif "nbm" in sourceList:
         InterPcurrent[DATA_CURRENT["dew"]] = (
@@ -4346,16 +4424,20 @@ async def PW_Forecast(
             + GFS_Merged[currentIDX_hrrrh, GFS["dew"]] * interpFac2
         )
 
-        # Clip between -90 and 60
-        InterPcurrent[DATA_CURRENT["dew"]] = clipLog(
-            InterPcurrent[DATA_CURRENT["dew"]],
-            CLIP_TEMP["min"],
-            CLIP_TEMP["max"],
-            "Dewpoint Current",
-        )
+    # Clip between -90 and 60
+    InterPcurrent[DATA_CURRENT["dew"]] = clipLog(
+        InterPcurrent[DATA_CURRENT["dew"]],
+        CLIP_TEMP["min"],
+        CLIP_TEMP["max"],
+        "Dewpoint Current",
+    )
 
-    # humidity, NBM then HRRR, then GFS
-    if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+    # humidity, RTMA_RU then NBM then HRRR, then GFS
+    if "rtma_ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["humidity"]] = (
+            dataOut_rtma_ru[0, RTMA_RU["humidity"]]
+        ) * humidUnit
+    elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[DATA_CURRENT["humidity"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["humidity"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["humidity"]] * interpFac2
@@ -4379,8 +4461,12 @@ async def PW_Forecast(
         "Humidity Current",
     )
 
-    # Pressure from HRRR, then GFS
-    if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+    # Pressure from RTMA_RU (surface pressure), then HRRR, then GFS
+    if "rtma_ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["pressure"]] = dataOut_rtma_ru[
+            0, RTMA_RU["pressure"]
+        ]
+    elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[DATA_CURRENT["pressure"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["pressure"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["pressure"]] * interpFac2
@@ -4402,8 +4488,13 @@ async def PW_Forecast(
         * pressUnits
     )
 
-    # WindSpeed from subH, then NBM, the GFS
-    if "hrrrsubh" in sourceList:
+    # WindSpeed from RTMA_RU, then subH, then NBM, then GFS
+    if "rtma_ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
+            dataOut_rtma_ru[0, RTMA_RU["wind_u"]] ** 2
+            + dataOut_rtma_ru[0, RTMA_RU["wind_v"]] ** 2
+        )
+    elif "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
             hrrrSubHInterpolation[0, HRRR_SUBH["wind_u"]] ** 2
             + hrrrSubHInterpolation[0, HRRR_SUBH["wind_v"]] ** 2
@@ -4436,8 +4527,10 @@ async def PW_Forecast(
         * windUnit
     )
 
-    # Gust from subH, then NBM, the GFS
-    if "hrrrsubh" in sourceList:
+    # Gust from RTMA_RU, then subH, then NBM, then GFS
+    if "rtma_ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["gust"]] = dataOut_rtma_ru[0, RTMA_RU["gust"]]
+    elif "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["gust"]] = hrrrSubHInterpolation[
             0, HRRR_SUBH["gust"]
         ]
@@ -4463,8 +4556,19 @@ async def PW_Forecast(
         * windUnit
     )
 
-    # WindDir from subH, then NBM, the GFS
-    if "hrrrsubh" in sourceList:
+    # WindDir from RTMA_RU, then subH, then NBM, then GFS
+    if "rtma_ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
+            np.mod(
+                np.arctan2(
+                    dataOut_rtma_ru[0, RTMA_RU["wind_u"]],
+                    dataOut_rtma_ru[0, RTMA_RU["wind_v"]],
+                )
+                + np.pi,
+                2 * np.pi,
+            )
+        )
+    elif "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
             np.mod(
                 np.arctan2(
@@ -4491,8 +4595,12 @@ async def PW_Forecast(
             )
         )
 
-    # Cloud, NBM then HRRR, then GFS
-    if "nbm" in sourceList:
+    # Cloud, RTMA_RU then NBM then HRRR, then GFS
+    if "rtma_ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["cloud"]] = (
+            dataOut_rtma_ru[0, RTMA_RU["cloud"]]
+        ) * 0.01
+    elif "nbm" in sourceList:
         InterPcurrent[DATA_CURRENT["cloud"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["cloud"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["cloud"]] * interpFac2
@@ -4529,22 +4637,35 @@ async def PW_Forecast(
         "UV Current",
     )
 
-    # Station Pressure from GFS
-    InterPcurrent[DATA_CURRENT["station_pressure"]] = (
-        clipLog(
-            (
-                GFS_Merged[currentIDX_hrrrh_A, GFS["station_pressure"]] * interpFac1
-                + GFS_Merged[currentIDX_hrrrh, GFS["station_pressure"]] * interpFac2
-            ),
-            CLIP_PRESSURE["min"],
-            CLIP_PRESSURE["max"],
-            "Station Pressure Current",
+    # Station Pressure from RTMA_RU (surface pressure), then GFS
+    if "rtma_ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["station_pressure"]] = (
+            clipLog(
+                dataOut_rtma_ru[0, RTMA_RU["pressure"]],
+                CLIP_PRESSURE["min"],
+                CLIP_PRESSURE["max"],
+                "Station Pressure Current",
+            )
+            * pressUnits
         )
-        * pressUnits
-    )
+    else:
+        InterPcurrent[DATA_CURRENT["station_pressure"]] = (
+            clipLog(
+                (
+                    GFS_Merged[currentIDX_hrrrh_A, GFS["station_pressure"]] * interpFac1
+                    + GFS_Merged[currentIDX_hrrrh, GFS["station_pressure"]] * interpFac2
+                ),
+                CLIP_PRESSURE["min"],
+                CLIP_PRESSURE["max"],
+                "Station Pressure Current",
+            )
+            * pressUnits
+        )
 
-    # VIS, SubH, NBM then HRRR, then GFS
-    if "hrrrsubh" in sourceList:
+    # VIS, RTMA_RU, then SubH, then NBM then HRRR, then GFS
+    if "rtma_ru" in sourceList:
+        InterPcurrent[DATA_CURRENT["vis"]] = dataOut_rtma_ru[0, RTMA_RU["vis"]]
+    elif "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["vis"]] = hrrrSubHInterpolation[0, HRRR_SUBH["vis"]]
     elif "nbm" in sourceList:
         InterPcurrent[DATA_CURRENT["vis"]] = (
