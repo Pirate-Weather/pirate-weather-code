@@ -145,13 +145,34 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
         if urgency.lower() == "past":  # handle case-insensitive variants
             continue
 
-        event = _cap_text(info, "event", ns)
+        # All CAP feeds seem to have the event field, some have headline and description, some just one or the other
+        # If there is a headline and description, use headline for event and description for description
+        # If there is a headline but no description, use headline for description and event for event
+        # If there is a description but no headline, use description for description and event for event
+        # Treat blank strings as missing
 
-        # If description is empty or missing, use headline instead
-        if _cap_text(info, "description", ns) == "":
-            description = _cap_text(info, "headline", ns)
+        event = _cap_text(info, "event", ns)
+        headline = _cap_text(info, "headline", ns)
+        description = _cap_text(info, "description", ns)
+
+        # Treat empty strings as missing
+        event = event or None
+        headline = headline or None
+        description = description or None
+
+        # Apply selection logic
+        if headline and description:
+            event_text = headline
+            description_text = description
+        elif headline and not description:
+            event_text = event
+            description_text = headline
+        elif description and not headline:
+            event_text = event
+            description_text = description
         else:
-            description = _cap_text(info, "description", ns)
+            event_text = event
+            description_text = None
 
         severity = _cap_text(info, "severity", ns)
 
@@ -187,8 +208,8 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                         results.append(
                             (
                                 source_id,
-                                event,
-                                description,
+                                event_text,
+                                description_text,
                                 severity,
                                 effective,
                                 expires,
