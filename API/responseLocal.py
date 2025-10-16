@@ -437,7 +437,6 @@ def update_zarr_store(initialRun):
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
-
     latest_RTMA_RU, old_RTMA_RU = find_largest_integer_directory(
         "/tmp", "RTMA_RU.zarr", initialRun
     )
@@ -454,7 +453,6 @@ def update_zarr_store(initialRun):
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
-
     latest_ECMWF, old_ECMWF = find_largest_integer_directory(
         "/tmp", "ECMWF.zarr", initialRun
     )
@@ -470,7 +468,6 @@ def update_zarr_store(initialRun):
             # subprocess.run(command, shell=True)
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
-
 
     if (initialRun) and (useETOPO):
         latest_ETOPO, old_ETOPO = find_largest_integer_directory(
