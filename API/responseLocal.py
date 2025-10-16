@@ -89,7 +89,15 @@ from API.constants.grid_const import (
 )
 
 # Project imports
-from API.constants.model_const import GEFS, GFS, HRRR, HRRR_SUBH, NBM, NBM_FIRE_INDEX, RTMA_RU
+from API.constants.model_const import (
+    GEFS,
+    GFS,
+    HRRR,
+    HRRR_SUBH,
+    NBM,
+    NBM_FIRE_INDEX,
+    RTMA_RU,
+)
 from API.constants.shared_const import (
     HISTORY_PERIODS,
     INGEST_VERSION_STR,
@@ -1552,7 +1560,7 @@ async def PW_Forecast(
     if TIMING:
         print("### RTMA_RU Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-    
+
     # RTMA_RU - only for currently, not for time machine
     # Uses same coverage area as HRRR but different grid (2.5km resolution)
     if az_Lon < -134 or az_Lon > -61 or lat < 21 or lat > 53 or timeMachine:
@@ -2035,7 +2043,9 @@ async def PW_Forecast(
 
     ## WIP: Initial read of RTMA_RU/ECMWF/WMO_Alerts
     if readRTMA_RU:
-        zarrTasks["RTMA_RU"] = weather.zarr_read("RTMA_RU", RTMA_RU_Zarr, x_rtma, y_rtma)
+        zarrTasks["RTMA_RU"] = weather.zarr_read(
+            "RTMA_RU", RTMA_RU_Zarr, x_rtma, y_rtma
+        )
 
     if readECMWF:
         zarrTasks["ECMWF"] = weather.zarr_read("ECMWF", ECMWF_Zarr, x_p, y_p)
@@ -2133,7 +2143,7 @@ async def PW_Forecast(
 
     if readRTMA_RU:
         dataOut_rtma_ru = zarr_results["RTMA_RU"]
-        
+
         # Check if RTMA_RU data is valid (not too old)
         if dataOut_rtma_ru is not False:
             rtma_ru_time = dataOut_rtma_ru[0, 0]
@@ -2173,9 +2183,13 @@ async def PW_Forecast(
     # Add RTMA_RU to source list if available (only for currently, not time machine)
     if (isinstance(dataOut_rtma_ru, np.ndarray)) & (not timeMachine):
         sourceList.append("rtma_ru")
-        sourceTimes["rtma_ru"] = datetime.datetime.fromtimestamp(
-            dataOut_rtma_ru[0, 0].astype(int), datetime.UTC
-        ).replace(tzinfo=None).strftime("%Y-%m-%d %H:%MZ")
+        sourceTimes["rtma_ru"] = (
+            datetime.datetime.fromtimestamp(
+                dataOut_rtma_ru[0, 0].astype(int), datetime.UTC
+            )
+            .replace(tzinfo=None)
+            .strftime("%Y-%m-%d %H:%MZ")
+        )
 
     if (isinstance(dataOut_hrrrh, np.ndarray)) & (not timeMachine):
         sourceList.append("hrrr_0-18")
@@ -4435,8 +4449,8 @@ async def PW_Forecast(
     # humidity, RTMA_RU then NBM then HRRR, then GFS
     if "rtma_ru" in sourceList:
         InterPcurrent[DATA_CURRENT["humidity"]] = (
-            dataOut_rtma_ru[0, RTMA_RU["humidity"]]
-        ) * humidUnit
+            (dataOut_rtma_ru[0, RTMA_RU["humidity"]]) * humidUnit
+        )
     elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[DATA_CURRENT["humidity"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["humidity"]] * interpFac1
@@ -4598,8 +4612,8 @@ async def PW_Forecast(
     # Cloud, RTMA_RU then NBM then HRRR, then GFS
     if "rtma_ru" in sourceList:
         InterPcurrent[DATA_CURRENT["cloud"]] = (
-            dataOut_rtma_ru[0, RTMA_RU["cloud"]]
-        ) * 0.01
+            (dataOut_rtma_ru[0, RTMA_RU["cloud"]]) * 0.01
+        )
     elif "nbm" in sourceList:
         InterPcurrent[DATA_CURRENT["cloud"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["cloud"]] * interpFac1
