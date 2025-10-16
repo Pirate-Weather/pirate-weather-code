@@ -4708,7 +4708,7 @@ async def PW_Forecast(
     InterPcurrent[DATA_CURRENT["vis"]] = np.where(
         InterPcurrent[DATA_CURRENT["vis"]] >= 16000,
         16090,
-        InterPcurrent[DATA_CURRENT["vis"]]
+        InterPcurrent[DATA_CURRENT["vis"]],
     )
     InterPcurrent[DATA_CURRENT["vis"]] = np.clip(InterPcurrent[14], 0, 16090) * visUnits
 
