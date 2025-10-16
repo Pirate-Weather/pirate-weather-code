@@ -485,7 +485,6 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-
 def solar_rad(D_t, lat, t_t):
     """
     returns The theortical clear sky short wave radiation
