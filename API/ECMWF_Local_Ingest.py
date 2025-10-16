@@ -5,8 +5,8 @@
 import os
 
 # os.environ["ECCODES_DEFINITION_PATH"] = (
-#    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
-# )
+#     "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+#  )
 import pickle
 import shutil
 import subprocess
@@ -95,7 +95,7 @@ latestRun = HerbieLatest(
     freq="12h",
     fxx=240,
     product="oper",
-    verbose=False,
+    verbose=True,
     priority=["aws"],
     save_dir=tmpDIR,
 )
@@ -136,7 +136,6 @@ else:
 
 zarrVars = (
     "time",
-    "fg10",
     "msl",
     "t2m",
     "d2m",
@@ -195,7 +194,6 @@ gribList = [
 cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-
 validate_grib_stats(gribCheck)
 print("Grib files passed validation, proceeding with processing")
 
@@ -235,7 +233,7 @@ FH_forecastsub = FastHerbie(
 
 
 match_string_enfo = r":(tp:sfc:\d+):"
-ens_paths = FH_forecastsub.download(match_string_enfo, verbose=True)
+ens_paths = FH_forecastsub.download(match_string_enfo, verbose=False)
 
 gribList = [
     str(Path(x.get_localFilePath(match_string_enfo)).expand())
@@ -246,6 +244,7 @@ gribList = [
 cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+validate_grib_stats(gribCheck)
 print("Grib files passed validation, proceeding with processing")
 
 
@@ -308,7 +307,7 @@ xr_ensoOut = xr.Dataset(
 # 2 m level – use ECMWF’s 2t (temperature) and 2d (dew point)
 matchstring_2m = "(:(2d|2t):)"
 
-matchstring_10m = "(:(10u|10v|10fg3|10fg):)"
+matchstring_10m = "(:(10u|10v):)"
 matchstring_ap = "(:(ptype|tprate|tp):)"
 matchstring_sl = "(:(msl):)"
 
@@ -331,7 +330,7 @@ FH_forecastsub = FastHerbie(
 )
 
 # Download the subsets
-ifs_paths = FH_forecastsub.download(matchStrings, verbose=True)
+ifs_paths = FH_forecastsub.download(matchStrings, verbose=False)
 
 gribList = [
     str(Path(x.get_localFilePath(matchStrings)).expand())
@@ -371,14 +370,6 @@ ifs_mf_10 = xr.open_mfdataset(
         "filter_by_keys": {"typeOfLevel": "heightAboveGround", "level": [10]}
     },
 ).sortby("step")
-# Take fg310 values where fg10 has nan
-ifs_mf_10_gust = xr.where(
-    ~xr.ufuncs.isnan(ifs_mf_10["fg10"]), ifs_mf_10["fg10"], ifs_mf_10["fg310"]
-)
-
-# Replace the fg10 variable with the new gust variable
-ifs_mf_10 = ifs_mf_10.drop_vars(["fg10", "fg310"])
-ifs_mf_10["fg10"] = ifs_mf_10_gust
 
 ifs_mf_surf = xr.open_mfdataset(
     ifs_paths,
@@ -585,7 +576,6 @@ for i in range(hisPeriod, 1, -12):
     cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
 
     gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-
     validate_grib_stats(gribCheck)
     print("Grib files passed validation, proceeding with processing")
 
@@ -655,7 +645,7 @@ for i in range(hisPeriod, 1, -12):
         DATES, model="ifs", fxx=fxx, product="enfo", verbose=False, save_dir=tmpDIR
     )
 
-    ens_his_paths = FH_histsub.download(match_string_enfo, verbose=True)
+    ens_his_paths = FH_histsub.download(match_string_enfo, verbose=False)
 
     ens_his_mf = xr.open_mfdataset(
         ens_his_paths,
@@ -740,7 +730,6 @@ for i in range(hisPeriod, 1, -12):
     cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
 
     gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-
     validate_grib_stats(gribCheck)
     print("Grib files passed validation, proceeding with processing")
 
@@ -839,7 +828,21 @@ ncLocalWorking_paths = [
 ]
 
 # Read in the zarr arrays
-hist = [xr.open_zarr(p, consolidated=False) for p in ncLocalWorking_paths]
+if saveType == "S3":
+    hist = [
+        xr.open_zarr(
+            p,
+            consolidated=False,
+            storage_options={
+                "key": aws_access_key_id,
+                "secret": aws_secret_access_key,
+            },
+        )
+        for p in ncLocalWorking_paths
+    ]
+else:
+    hist = [xr.open_zarr(p, consolidated=False) for p in ncLocalWorking_paths]
+
 fcst = xr.open_zarr(f"{forecast_process_path}_merged.zarr", consolidated=False)
 ds = xr.concat(
     [*hist, fcst],

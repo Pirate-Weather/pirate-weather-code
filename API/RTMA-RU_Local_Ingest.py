@@ -13,7 +13,7 @@ import warnings
 # Define ECCODES_DEFINITION_PATH env variable for eccodes
 # This is needed in my testing instance- should not be required for the docker image
 # os.environ["ECCODES_DEFINITION_PATH"] = (
-#    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+#   "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
 # )
 import numpy as np
 import s3fs
@@ -30,6 +30,8 @@ from API.ingest_utils import (
     FINAL_CHUNK_SIZES,
     earth_relative_wind_components,
     mask_invalid_data,
+    VALID_DATA_MIN,
+    VALID_DATA_MAX,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -116,15 +118,15 @@ else:
 
 zarr_vars = (
     "time",
-    "VIS_surface",
-    "GUST_10maboveground",
-    "PRES_station",
-    "TMP_2maboveground",
-    "DPT_2maboveground",
-    "RH_2maboveground",
-    "TCDC_entireatmosphere",
-    "UGRD_10maboveground",
-    "VGRD_10maboveground",
+    "vis",
+    "i10fg",
+    "sp",
+    "t2m",
+    "d2m",
+    "rh",
+    "tcc",
+    "u10",
+    "v10",
 )
 
 # %% Download RTMA analysis data using Herbie Latest
@@ -194,12 +196,27 @@ xarray_analysis_merged["time"] = (
     ),
 )
 
+# Clip to valid data ranges
+for var in zarr_vars:
+    if var == "time":
+        continue
+    elif var in xarray_analysis_merged.data_vars:
+        ds_clip = xarray_analysis_merged[var]
+        if np.issubdtype(ds_clip.dtype, np.number):
+            mask = (ds_clip >= VALID_DATA_MIN) & (ds_clip <= VALID_DATA_MAX)
+            xarray_analysis_merged[var] = ds_clip.where(mask)  # out-of-range → NaN
+
+
 # Drop the sh2 variable as we no longer need it
 xarray_analysis_merged = xarray_analysis_merged.drop_vars("sh2")
 
-# Merge the arrays into a single 3D array, add a 1 length time dimension, and rechunk
+# Set the order correctly
+vars_in = [v for v in zarr_vars if v in xarray_analysis_merged.data_vars]
+
+# Merge the arrays into a single 3D array with the correct order, add a 1 length time dimension, and rechunk
 xarray_analysis_stack = (
-    xarray_analysis_merged.to_stacked_array(new_dim="var", sample_dims=["y", "x"])
+    xarray_analysis_merged[vars_in]
+    .to_stacked_array(new_dim="var", sample_dims=["y", "x"])
     .expand_dims("time", axis=1)
     .chunk(chunks={"var": -1, "time": 1, "x": final_chunk, "y": final_chunk})
     .transpose("var", "time", "y", "x")
@@ -211,7 +228,7 @@ dask_var_array = mask_invalid_data(xarray_analysis_stack)
 # Create a zarr backed dask array
 if save_type == "S3":
     zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/RTMA_RU.zarr.zip", mode="w", compression=0
+        forecast_process_dir + "/RTMA_RU.zarr.zip", mode="a", compression=0
     )
 else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/RTMA_RU.zarr")
@@ -222,8 +239,8 @@ zarr_array = zarr.create_array(
     shape=(
         len(zarr_vars),
         1,
-        dask_var_array.shape[1],
         dask_var_array.shape[2],
+        dask_var_array.shape[3],
     ),
     chunks=(len(zarr_vars), 1, final_chunk, final_chunk),
     compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
@@ -235,7 +252,6 @@ dask_var_array.to_zarr(zarr_array, overwrite=True, compute=True)
 if save_type == "S3":
     zarr_store.close()
     logging.info("Zarr zip store closed.")
-
 
 # %% Upload to S3 or move to final location
 
