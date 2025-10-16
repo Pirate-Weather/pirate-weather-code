@@ -4704,9 +4704,12 @@ async def PW_Forecast(
             + GFS_Merged[currentIDX_hrrrh, GFS["vis"]] * interpFac2
         )
 
-    # Convert 16000m to 16090m for exact 10 miles display
-    if InterPcurrent[DATA_CURRENT["vis"]] >= 16000:
-        InterPcurrent[DATA_CURRENT["vis"]] = 16090
+    # Convert 16000m to 16090m for exact 10 miles display using numpy
+    InterPcurrent[DATA_CURRENT["vis"]] = np.where(
+        InterPcurrent[DATA_CURRENT["vis"]] >= 16000,
+        16090,
+        InterPcurrent[DATA_CURRENT["vis"]]
+    )
     InterPcurrent[DATA_CURRENT["vis"]] = np.clip(InterPcurrent[14], 0, 16090) * visUnits
 
     # Ozone from GFS
