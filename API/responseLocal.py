@@ -3476,8 +3476,6 @@ async def PW_Forecast(
         WindGustHour[:, 0] = NBM_Merged[:, NBM["gust"]]
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         WindGustHour[:, 1] = HRRR_Merged[:, HRRR["gust"]]
-    if "ecmwf_ifs" in sourceList:
-        WindGustHour[:, 2] = ECMWF_Merged[:, ECMWF["gust"]]
     if "gfs" in sourceList:
         WindGustHour[:, 3] = GFS_Merged[:, GFS["gust"]]
     InterPhour[:, DATA_HOURLY["gust"]] = np.choose(
@@ -4689,7 +4687,7 @@ async def PW_Forecast(
         * windUnit
     )
 
-    # Gust from subH, then NBM, then ECMWF, then GFS
+    # Gust from subH, then NBM, then GFS
     if "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["gust"]] = hrrrSubHInterpolation[
             0, HRRR_SUBH["gust"]
@@ -4698,11 +4696,6 @@ async def PW_Forecast(
         InterPcurrent[DATA_CURRENT["gust"]] = (
             NBM_Merged[currentIDX_hrrrh_A, NBM["gust"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["gust"]] * interpFac2
-        )
-    elif "ecmwf_ifs" in sourceList:
-        InterPcurrent[DATA_CURRENT["gust"]] = (
-            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["gust"]] * interpFac1
-            + ECMWF_Merged[currentIDX_hrrrh, ECMWF["gust"]] * interpFac2
         )
     else:
         InterPcurrent[DATA_CURRENT["gust"]] = (

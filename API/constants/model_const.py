@@ -79,19 +79,18 @@ GEFS = {
 }
 
 ECMWF = {
-    "gust": 1,
-    "pressure": 2,
-    "temp": 3,
-    "dew": 4,
-    "wind_u": 5,
-    "wind_v": 6,
-    "intensity": 7,
-    "accum": 8,
-    "ptype": 9,
-    "cloud": 10,
-    "prob": 11,
-    "accum_mean": 12,
-    "accum_stddev": 13,
+    "pressure": 1,
+    "temp": 2,
+    "dew": 3,
+    "wind_u": 4,
+    "wind_v": 5,
+    "intensity": 6,
+    "accum": 7,
+    "ptype": 8,
+    "cloud": 9,
+    "prob": 10,
+    "accum_mean": 11,
+    "accum_stddev": 12,
 }
 
 NBM = {
