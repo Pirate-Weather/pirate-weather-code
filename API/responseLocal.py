@@ -1260,6 +1260,7 @@ async def PW_Forecast(
     exNBM = 0
     exHRRR = 0
     exGEFS = 0
+    exRTMA_RU = 0
     summaryText = True
 
     if "currently" in excludeParams:
@@ -1280,6 +1281,8 @@ async def PW_Forecast(
         exHRRR = 1
     if "gefs" in excludeParams:
         exGEFS = 1
+    if "rtma_ru" in excludeParams:
+        exRTMA_RU = 1
     if "summary" in excludeParams:
         summaryText = False
 
@@ -1562,11 +1565,11 @@ async def PW_Forecast(
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # RTMA_RU - only for currently, not for time machine
-    # Uses same coverage area as HRRR but different grid (2.5km resolution)
-    if az_Lon < -134 or az_Lon > -61 or lat < 21 or lat > 53 or timeMachine:
+    # Uses same grid as NBM (Lambert conformal conic projection, 2.5km resolution)
+    if az_Lon < -138.3 or az_Lon > -59 or lat < 19.3 or lat > 57 or timeMachine or exRTMA_RU == 1:
         dataOut_rtma_ru = False
     else:
-        # RTMA_RU uses Lambert Conformal Conic projection similar to HRRR
+        # RTMA_RU uses same Lambert Conformal Conic projection as NBM
         central_longitude_rtma = math.radians(265.0)
         central_latitude_rtma = math.radians(25.0)
         standard_parallel_rtma = math.radians(25.0)
@@ -4447,9 +4450,10 @@ async def PW_Forecast(
     )
 
     # humidity, RTMA_RU then NBM then HRRR, then GFS
+    # Note: RTMA_RU humidity is already in percentage (0-100), not fraction
     if "rtma_ru" in sourceList:
         InterPcurrent[DATA_CURRENT["humidity"]] = (
-            (dataOut_rtma_ru[0, RTMA_RU["humidity"]]) * humidUnit
+            dataOut_rtma_ru[0, RTMA_RU["humidity"]] * 0.01
         )
     elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[DATA_CURRENT["humidity"]] = (
@@ -4475,12 +4479,8 @@ async def PW_Forecast(
         "Humidity Current",
     )
 
-    # Pressure from RTMA_RU (surface pressure), then HRRR, then GFS
-    if "rtma_ru" in sourceList:
-        InterPcurrent[DATA_CURRENT["pressure"]] = dataOut_rtma_ru[
-            0, RTMA_RU["pressure"]
-        ]
-    elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+    # Pressure from HRRR, then GFS (RTMA_RU has mean sea level pressure, not surface pressure)
+    if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[DATA_CURRENT["pressure"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["pressure"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["pressure"]] * interpFac2
@@ -4697,6 +4697,9 @@ async def PW_Forecast(
             + GFS_Merged[currentIDX_hrrrh, GFS["vis"]] * interpFac2
         )
 
+    # Convert 16000m to 16090m for exact 10 miles display
+    if InterPcurrent[DATA_CURRENT["vis"]] >= 16000:
+        InterPcurrent[DATA_CURRENT["vis"]] = 16090
     InterPcurrent[DATA_CURRENT["vis"]] = np.clip(InterPcurrent[14], 0, 16090) * visUnits
 
     # Ozone from GFS
