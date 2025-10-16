@@ -66,7 +66,7 @@ PRECIP_IDX = {
 }
 
 # API versioning and ingest version constants
-API_VERSION = "V2.7.10"
+API_VERSION = "V2.7.11"
 
 # Command priorities
 NICE_PRIORITY = 20
