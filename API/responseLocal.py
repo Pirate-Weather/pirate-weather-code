@@ -421,6 +421,54 @@ def update_zarr_store(initialRun):
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
+    latest_WMO_Alerts, old_WMO_Alerts = find_largest_integer_directory(
+        "/tmp", "WMO_Alerts.zarr", initialRun
+    )
+    if latest_WMO_Alerts is not None:
+        WMO_Alerts_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_WMO_Alerts, mode="r"), mode="r"
+        )
+        logger.info("Loading new: " + latest_WMO_Alerts)
+    for old_dir in old_WMO_Alerts:
+        if STAGE == "PROD":
+            logger.info("Removing old: " + old_dir)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
+            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+            subprocess.run(command, shell=True)
+
+    latest_RTMA_RU, old_RTMA_RU = find_largest_integer_directory(
+        "/tmp", "RTMA_RU.zarr", initialRun
+    )
+    if latest_RTMA_RU is not None:
+        RTMA_RU_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_RTMA_RU, mode="r"), mode="r"
+        )
+        logger.info("Loading new: " + latest_RTMA_RU)
+    for old_dir in old_RTMA_RU:
+        if STAGE == "PROD":
+            logger.info("Removing old: " + old_dir)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
+            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+            subprocess.run(command, shell=True)
+
+    latest_ECMWF, old_ECMWF = find_largest_integer_directory(
+        "/tmp", "ECMWF.zarr", initialRun
+    )
+    if latest_ECMWF is not None:
+        ECMWF_Zarr = zarr.open(
+            zarr.storage.ZipStore("/tmp/" + latest_ECMWF, mode="r"), mode="r"
+        )
+        logger.info("Loading new: " + latest_ECMWF)
+    for old_dir in old_ECMWF:
+        if STAGE == "PROD":
+            logger.info("Removing old: " + old_dir)
+            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+            # subprocess.run(command, shell=True)
+            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+            subprocess.run(command, shell=True)
+
     if (initialRun) and (useETOPO):
         latest_ETOPO, old_ETOPO = find_largest_integer_directory(
             "/tmp", "ETOPO_DA_C.zarr", initialRun
@@ -476,7 +524,6 @@ if STAGE == "TESTING":
     print("Setting up S3 zarrs")
     # If S3, use that, otherwise use local
     if save_type == "S3":
-        # s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key, asynchronous=False)
         s3 = s3fs.S3FileSystem(
             anon=True,
             asynchronous=False,
