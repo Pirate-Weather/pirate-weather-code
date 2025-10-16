@@ -829,12 +829,17 @@ ncLocalWorking_paths = [
 
 # Read in the zarr arrays
 if saveType == "S3":
-    hist = [xr.open_zarr(p,
-                         consolidated=False,
-                            storage_options={
-                                "key": aws_access_key_id,
-                                "secret": aws_secret_access_key,
-                            }) for p in ncLocalWorking_paths]
+    hist = [
+        xr.open_zarr(
+            p,
+            consolidated=False,
+            storage_options={
+                "key": aws_access_key_id,
+                "secret": aws_secret_access_key,
+            },
+        )
+        for p in ncLocalWorking_paths
+    ]
 else:
     hist = [xr.open_zarr(p, consolidated=False) for p in ncLocalWorking_paths]
 

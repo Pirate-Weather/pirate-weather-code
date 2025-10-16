@@ -15,7 +15,6 @@ from API.constants.api_const import (
 pw_api_key = os.environ.get("PW_API", "")
 
 
-
 def _add_custom_header(request, **kwargs):
     request.headers["apikey"] = pw_api_key
 
@@ -24,8 +23,7 @@ class S3ZipStore(zarr.storage.ZipStore):
     def __init__(self, path: s3fs.S3File) -> None:
         super().__init__(path="", mode="r")
         self.path = path
-       
-       
+
 
 def _retry_s3_operation(
     operation, max_retries=MAX_S3_RETRIES, base_delay=S3_BASE_DELAY
@@ -68,7 +66,11 @@ def setup_testing_zipstore(s3, s3_bucket, ingest_version, save_type, model_name)
         try:
             f = _retry_s3_operation(
                 lambda: s3.open(
-                    "s3://ForecastTar_v2/" + ingest_version + "/" + model_name + ".zarr.zip"
+                    "s3://ForecastTar_v2/"
+                    + ingest_version
+                    + "/"
+                    + model_name
+                    + ".zarr.zip"
                 )
             )
             store = S3ZipStore(f)
@@ -78,7 +80,11 @@ def setup_testing_zipstore(s3, s3_bucket, ingest_version, save_type, model_name)
             print("Using old ingest version: " + ingest_version)
             f = _retry_s3_operation(
                 lambda: s3.open(
-                    "s3://ForecastTar_v2/" + ingest_version + "/" + model_name + ".zarr.zip"
+                    "s3://ForecastTar_v2/"
+                    + ingest_version
+                    + "/"
+                    + model_name
+                    + ".zarr.zip"
                 )
             )
             store = S3ZipStore(f)
@@ -90,7 +96,9 @@ def setup_testing_zipstore(s3, s3_bucket, ingest_version, save_type, model_name)
                     + s3_bucket
                     + "/ForecastTar_v2/"
                     + ingest_version
-                    + "/" + model_name + ".zarr.zip"
+                    + "/"
+                    + model_name
+                    + ".zarr.zip"
                 )
             )
             store = S3ZipStore(f)
@@ -103,13 +111,15 @@ def setup_testing_zipstore(s3, s3_bucket, ingest_version, save_type, model_name)
                     + s3_bucket
                     + "/ForecastTar_v2/"
                     + ingest_version
-                    + "/" + model_name + ".zarr.zip"
+                    + "/"
+                    + model_name
+                    + ".zarr.zip"
                 )
             )
             store = S3ZipStore(f)
 
     else:
-        f = s3_bucket  + model_name + ".zarr.zip"
+        f = s3_bucket + model_name + ".zarr.zip"
         store = zarr.storage.ZipStore(f, mode="r")
 
     return store

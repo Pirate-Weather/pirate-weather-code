@@ -7,7 +7,6 @@ import math
 import os
 import pickle
 import platform
-import random
 import re
 import shutil
 import subprocess
@@ -42,10 +41,8 @@ from API.constants.api_const import (
     DBZ_CONST,
     GLOBE_TEMP_CONST,
     LARGEST_DIR_INIT,
-    MAX_S3_RETRIES,
     NICE_PRIORITY,
     PRECIP_IDX,
-    S3_BASE_DELAY,
     S3_MAX_BANDWIDTH,
     SOLAR_IRRADIANCE_CONST,
     SOLAR_RAD_CONST,
@@ -114,7 +111,11 @@ from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
 from API.PirateWeeklyText import calculate_weekly_text
 from API.timemachine import TimeMachine
-from API.ZarrHelpers import _retry_s3_operation, setup_testing_zipstore, _add_custom_header
+from API.ZarrHelpers import (
+    _retry_s3_operation,
+    setup_testing_zipstore,
+    _add_custom_header,
+)
 
 Translations = load_all_translations()
 
@@ -489,14 +490,18 @@ if STAGE == "TESTING":
     else:
         s3 = None
 
-    NWS_Alerts_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "NWS_Alerts")
+    NWS_Alerts_store = setup_testing_zipstore(
+        s3, s3_bucket, ingestVersion, save_type, "NWS_Alerts"
+    )
     NWS_Alerts_Zarr = zarr.open(NWS_Alerts_store, mode="r")
 
     SubH_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "SubH")
     SubH_Zarr = zarr.open(SubH_store, mode="r")
     print("SubH Read")
 
-    HRRR_6H_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "HRRR_6H")
+    HRRR_6H_store = setup_testing_zipstore(
+        s3, s3_bucket, ingestVersion, save_type, "HRRR_6H"
+    )
     HRRR_6H_Zarr = zarr.open(HRRR_6H_store, mode="r")
     print("HRRR_6H Read")
 
@@ -512,7 +517,9 @@ if STAGE == "TESTING":
     NBM_Zarr = zarr.open(NBM_store, mode="r")
     print("NBM Read")
 
-    NBM_Fire_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "NBM_Fire")
+    NBM_Fire_store = setup_testing_zipstore(
+        s3, s3_bucket, ingestVersion, save_type, "NBM_Fire"
+    )
     NBM_Fire_Zarr = zarr.open(NBM_Fire_store, mode="r")
     print("NBM Fire Read")
 
@@ -520,20 +527,28 @@ if STAGE == "TESTING":
     HRRR_Zarr = zarr.open(HRRR_store, mode="r")
     print("HRRR Read")
 
-    WMO_Alerts_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "WMO_Alerts")
+    WMO_Alerts_store = setup_testing_zipstore(
+        s3, s3_bucket, ingestVersion, save_type, "WMO_Alerts"
+    )
     WMO_Alerts_Zarr = zarr.open(WMO_Alerts_store, mode="r")
     print("WMO_Alerts Read")
 
-    RTMA_RU_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "RTMA_RU")
+    RTMA_RU_store = setup_testing_zipstore(
+        s3, s3_bucket, ingestVersion, save_type, "RTMA_RU"
+    )
     RTMA_RU_Zarr = zarr.open(RTMA_RU_store, mode="r")
     print("RTMA_RU Read")
 
-    ECMWF_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "ECMWF")
+    ECMWF_store = setup_testing_zipstore(
+        s3, s3_bucket, ingestVersion, save_type, "ECMWF"
+    )
     ECMWF_Zarr = zarr.open(ECMWF_store, mode="r")
     print("ECMWF Read")
 
     if useETOPO:
-        ETOPO_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "ETOPO_DA_C")
+        ETOPO_store = setup_testing_zipstore(
+            s3, s3_bucket, ingestVersion, save_type, "ETOPO_DA_C"
+        )
         ETOPO_f = zarr.open(ETOPO_store, mode="r")
         print("ETOPO Read")
 
@@ -948,7 +963,7 @@ async def PW_Forecast(
     # Testing ECMWF/ RTMA_RU/ WMO_Alerts
     readECMWF = True
     readRTMA_RU = True
-    readWMOAlerts= True
+    readWMOAlerts = True
 
     STAGE = os.environ.get("STAGE", "PROD")
 
@@ -5213,7 +5228,6 @@ def dataSync() -> None:
                 False,
             )
             logger.info("ECMWF Download!")
-
 
             if useETOPO:
                 download_if_newer(
