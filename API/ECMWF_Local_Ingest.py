@@ -3,9 +3,10 @@
 
 # %% Import modules
 import os
-os.environ["ECCODES_DEFINITION_PATH"] = (
-   "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
-)
+
+# os.environ["ECCODES_DEFINITION_PATH"] = (
+#    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+# )
 import pickle
 import shutil
 import subprocess
@@ -22,7 +23,6 @@ import pandas as pd
 import s3fs
 import xarray as xr
 import zarr.storage
-from dask.diagnostics import ProgressBar
 from herbie import FastHerbie, HerbieLatest, Path
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
@@ -31,10 +31,9 @@ from API.ingest_utils import (
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
     interp_time_block,
-    mask_invalid_data,
     validate_grib_stats,
     VALID_DATA_MIN,
-    VALID_DATA_MAX
+    VALID_DATA_MAX,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -153,7 +152,6 @@ zarrVars = (
 )
 
 
-
 #####################################################################################################
 # %% Download AIFS data using Herbie Latest
 # Needed for tcc
@@ -202,13 +200,16 @@ validate_grib_stats(gribCheck)
 print("Grib files passed validation, proceeding with processing")
 
 
-aifs_mf = xr.open_mfdataset(aifs_paths, engine='cfgrib',
-    combine='nested',
+aifs_mf = xr.open_mfdataset(
+    aifs_paths,
+    engine="cfgrib",
+    combine="nested",
     concat_dim="step",
     decode_timedelta=False,
-    join='outer',
-    coords='minimal',
-    compat='override').sortby("step")
+    join="outer",
+    coords="minimal",
+    compat="override",
+).sortby("step")
 
 
 #####################################################################################################
@@ -237,7 +238,8 @@ match_string_enfo = r":(tp:sfc:\d+):"
 ens_paths = FH_forecastsub.download(match_string_enfo, verbose=True)
 
 gribList = [
-    str(Path(x.get_localFilePath(match_string_enfo)).expand()) for x in FH_forecastsub.file_exists
+    str(Path(x.get_localFilePath(match_string_enfo)).expand())
+    for x in FH_forecastsub.file_exists
 ]
 
 # Perform a check if any data seems to be invalid
@@ -247,20 +249,21 @@ gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8
 print("Grib files passed validation, proceeding with processing")
 
 
-ens_mf = xr.open_mfdataset(ens_paths, engine='cfgrib',
-    combine='nested',
+ens_mf = xr.open_mfdataset(
+    ens_paths,
+    engine="cfgrib",
+    combine="nested",
     concat_dim="step",
     decode_timedelta=False,
-    join='outer',
-    coords='minimal',
-    compat='override').sortby("step")
+    join="outer",
+    coords="minimal",
+    compat="override",
+).sortby("step")
 
-ens_mf["tpd"] = ens_mf["tp"].diff(
-        dim="step")
+ens_mf["tpd"] = ens_mf["tp"].diff(dim="step")
 
 # Set the first difference value to zero
 ens_mf["tpd"][dict(step=0)] = ens_mf["tp"].isel(step=0)
-
 
 # Change the 3 and 6 hour accumulations to hourly
 # Steps 3 to 144 are 3-hourly, the rest are 6 hourly
@@ -269,15 +272,16 @@ mask = ens_mf.step.isin(first48)
 ens_mf = ens_mf.assign(tpd=xr.where(mask, ens_mf.tpd / 3, ens_mf.tpd))
 
 after48 = ens_mf.step.isel(step=slice(48, None))
-mask = ens_mf.step.isin(first48)
+mask = ens_mf.step.isin(after48)
 ens_mf = ens_mf.assign(tpd=xr.where(mask, ens_mf.tpd / 6, ens_mf.tpd))
 
-
 # Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
-X3_Precipitation_Prob = (ens_mf["tpd"] > 0.0001).sum(dim="number") / 50
+X3_Precipitation_Prob = (ens_mf["tpd"] > 0.0001).sum(dim="number") / ens_mf.sizes[
+    "number"
+]
 
 # Find the standard deviation of precipitation accumulation across all members
-X3_Precipitation_StdDev =  ens_mf["tpd"].std(dim="number")
+X3_Precipitation_StdDev = ens_mf["tpd"].std(dim="number")
 
 # Find the average precipitation accumulation across all members
 X3_Precipitation_Mean = ens_mf["tpd"].mean(dim="number")
@@ -340,65 +344,80 @@ gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8
 print("Grib files passed validation, proceeding with processing")
 
 
-ifs_mf_2 = xr.open_mfdataset(ifs_paths, engine='cfgrib',
-    combine='nested',
+ifs_mf_2 = xr.open_mfdataset(
+    ifs_paths,
+    engine="cfgrib",
+    combine="nested",
     concat_dim="step",
     decode_timedelta=False,
-    join='outer',
-    coords='minimal',
-    compat='override',
-    backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround',
-                                       'level': [2]}}).sortby("step")
-ifs_mf_10 = xr.open_mfdataset(ifs_paths, engine='cfgrib',
-    combine='nested',
+    join="outer",
+    coords="minimal",
+    compat="override",
+    backend_kwargs={
+        "filter_by_keys": {"typeOfLevel": "heightAboveGround", "level": [2]}
+    },
+).sortby("step")
+ifs_mf_10 = xr.open_mfdataset(
+    ifs_paths,
+    engine="cfgrib",
+    combine="nested",
     concat_dim="step",
     decode_timedelta=False,
-    join='outer',
-    coords='minimal',
-    compat='override',
-    backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround',
-                                       'level': [10]}}).sortby("step")
+    join="outer",
+    coords="minimal",
+    compat="override",
+    backend_kwargs={
+        "filter_by_keys": {"typeOfLevel": "heightAboveGround", "level": [10]}
+    },
+).sortby("step")
 # Take fg310 values where fg10 has nan
-ifs_mf_10_gust = xr.where(~xr.ufuncs.isnan(ifs_mf_10["fg10"]),
-                          ifs_mf_10["fg10"],
-                          ifs_mf_10["fg310"])
+ifs_mf_10_gust = xr.where(
+    ~xr.ufuncs.isnan(ifs_mf_10["fg10"]), ifs_mf_10["fg10"], ifs_mf_10["fg310"]
+)
 
 # Replace the fg10 variable with the new gust variable
 ifs_mf_10 = ifs_mf_10.drop_vars(["fg10", "fg310"])
 ifs_mf_10["fg10"] = ifs_mf_10_gust
 
-ifs_mf_surf = xr.open_mfdataset(ifs_paths, engine='cfgrib',
-    combine='nested',
+ifs_mf_surf = xr.open_mfdataset(
+    ifs_paths,
+    engine="cfgrib",
+    combine="nested",
     concat_dim="step",
     decode_timedelta=False,
-    join='outer',
-    coords='minimal',
-    compat='override',
-    backend_kwargs={'filter_by_keys': {'typeOfLevel': 'surface'}}).sortby("step")
+    join="outer",
+    coords="minimal",
+    compat="override",
+    backend_kwargs={"filter_by_keys": {"typeOfLevel": "surface"}},
+).sortby("step")
 
-ifs_mf_msl = xr.open_mfdataset(ifs_paths, engine='cfgrib',
-    combine='nested',
+ifs_mf_msl = xr.open_mfdataset(
+    ifs_paths,
+    engine="cfgrib",
+    combine="nested",
     concat_dim="step",
     decode_timedelta=False,
-    join='outer',
-    coords='minimal',
-    compat='override',
-    backend_kwargs={'filter_by_keys': {'typeOfLevel': 'meanSea'}}).sortby("step")
+    join="outer",
+    coords="minimal",
+    compat="override",
+    backend_kwargs={"filter_by_keys": {"typeOfLevel": "meanSea"}},
+).sortby("step")
 
 # Combine the datasets
-ifs_mf = xr.merge([ifs_mf_2, ifs_mf_10, ifs_mf_surf, ifs_mf_msl], compat='override')
+ifs_mf = xr.merge([ifs_mf_2, ifs_mf_10, ifs_mf_surf, ifs_mf_msl], compat="override")
 
 
 # %% Merge the IFS, ENSO, and AIFS data
 
 # Reinterpolate the AIFS array to the same times as the IFS arrays
-aifs_mf = aifs_mf.interp(step=ifs_mf.step, method="linear", kwargs={"fill_value": "extrapolate"})
+aifs_mf = aifs_mf.interp(
+    step=ifs_mf.step, method="linear", kwargs={"fill_value": "extrapolate"}
+)
 
 
-xarray_forecast_merged = xr.merge([ifs_mf, aifs_mf, xr_ensoOut],
-                      compat='override',
-                      join='outer'
-                      )
+xarray_forecast_merged = xr.merge(
+    [ifs_mf, aifs_mf, xr_ensoOut], compat="override", join="outer"
+)
 
 
 assert len(xarray_forecast_merged.step) == len(ifsFileRange), (
@@ -406,12 +425,17 @@ assert len(xarray_forecast_merged.step) == len(ifsFileRange), (
 )
 
 # Replace the step variable with a time variable using the start time and the step values
-xarray_forecast_merged = xarray_forecast_merged.assign_coords(
-    time=("step",
-          pd.to_datetime(xarray_forecast_merged.time.values) +
-          pd.to_timedelta(xarray_forecast_merged.step.values, unit='h')
-          )
-).swap_dims({"step": "time"}).drop_vars("step")
+xarray_forecast_merged = (
+    xarray_forecast_merged.assign_coords(
+        time=(
+            "step",
+            pd.to_datetime(xarray_forecast_merged.time.values)
+            + pd.to_timedelta(xarray_forecast_merged.step.values, unit="h"),
+        )
+    )
+    .swap_dims({"step": "time"})
+    .drop_vars("step")
+)
 
 
 # Create a new time series
@@ -452,7 +476,16 @@ with ProgressBar():
 
 
 # %% Delete to free memory
-del (xarray_forecast_merged, ifs_mf, ifs_mf_2, ifs_mf_10, ifs_mf_surf, aifs_mf, ens_mf, xr_ensoOut)
+del (
+    xarray_forecast_merged,
+    ifs_mf,
+    ifs_mf_2,
+    ifs_mf_10,
+    ifs_mf_surf,
+    aifs_mf,
+    ens_mf,
+    xr_ensoOut,
+)
 
 T1 = time.time()
 print(T1 - T0)
@@ -556,46 +589,63 @@ for i in range(hisPeriod, 1, -12):
     print("Grib files passed validation, proceeding with processing")
 
     # Created merged xarray object for the ifs data
-    ifs_his_mf_10 = xr.open_mfdataset(ifs_hisgribs, engine='cfgrib',
-        combine='nested',
+    ifs_his_mf_10 = xr.open_mfdataset(
+        ifs_hisgribs,
+        engine="cfgrib",
+        combine="nested",
         concat_dim="step",
         decode_timedelta=False,
-        join='outer',
-        coords='minimal',
-        compat='override',
-        backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround',
-                                           'level': [10]}}).sortby("step")
+        join="outer",
+        coords="minimal",
+        compat="override",
+        backend_kwargs={
+            "filter_by_keys": {"typeOfLevel": "heightAboveGround", "level": [10]}
+        },
+    ).sortby("step")
 
-    ifs_his_mf_2 = xr.open_mfdataset(ifs_hisgribs, engine='cfgrib',
-        combine='nested',
+    ifs_his_mf_2 = xr.open_mfdataset(
+        ifs_hisgribs,
+        engine="cfgrib",
+        combine="nested",
         concat_dim="step",
         decode_timedelta=False,
-        join='outer',
-        coords='minimal',
-        compat='override',
-        backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround',
-                                           'level': [2]}}).sortby("step")
+        join="outer",
+        coords="minimal",
+        compat="override",
+        backend_kwargs={
+            "filter_by_keys": {"typeOfLevel": "heightAboveGround", "level": [2]}
+        },
+    ).sortby("step")
 
-    ifs_his_mf_surf = xr.open_mfdataset(ifs_hisgribs, engine='cfgrib',
-        combine='nested',
+    ifs_his_mf_surf = xr.open_mfdataset(
+        ifs_hisgribs,
+        engine="cfgrib",
+        combine="nested",
         concat_dim="step",
         decode_timedelta=False,
-        join='outer',
-        coords='minimal',
-        compat='override',
-        backend_kwargs={'filter_by_keys': {'typeOfLevel': 'surface'}}).sortby("step")
+        join="outer",
+        coords="minimal",
+        compat="override",
+        backend_kwargs={"filter_by_keys": {"typeOfLevel": "surface"}},
+    ).sortby("step")
 
-    ifs_his_mf_msl = xr.open_mfdataset(ifs_hisgribs, engine='cfgrib',
-        combine='nested',
+    ifs_his_mf_msl = xr.open_mfdataset(
+        ifs_hisgribs,
+        engine="cfgrib",
+        combine="nested",
         concat_dim="step",
         decode_timedelta=False,
-        join='outer',
-        coords='minimal',
-        compat='override',
-        backend_kwargs={'filter_by_keys': {'typeOfLevel': 'meanSea'}}).sortby("step")
+        join="outer",
+        coords="minimal",
+        compat="override",
+        backend_kwargs={"filter_by_keys": {"typeOfLevel": "meanSea"}},
+    ).sortby("step")
 
     # Combine the datasets
-    ifs_his_mf = xr.merge([ifs_his_mf_2, ifs_his_mf_10, ifs_his_mf_surf, ifs_his_mf_msl], compat='override')
+    ifs_his_mf = xr.merge(
+        [ifs_his_mf_2, ifs_his_mf_10, ifs_his_mf_surf, ifs_his_mf_msl],
+        compat="override",
+    )
 
     ########################################################################
     ### Download the enfo data
@@ -606,31 +656,33 @@ for i in range(hisPeriod, 1, -12):
 
     ens_his_paths = FH_histsub.download(match_string_enfo, verbose=True)
 
-    ens_his_mf = xr.open_mfdataset(ens_his_paths, engine='cfgrib',
-                               combine='nested',
-                               concat_dim="step",
-                               decode_timedelta=False,
-                               join='outer',
-                               coords='minimal',
-                               compat='override').sortby("step")
+    ens_his_mf = xr.open_mfdataset(
+        ens_his_paths,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        decode_timedelta=False,
+        join="outer",
+        coords="minimal",
+        compat="override",
+    ).sortby("step")
 
-    ens_his_mf["tpd"] = ens_his_mf["tp"].diff(
-        dim="step")
+    ens_his_mf["tpd"] = ens_his_mf["tp"].diff(dim="step")
 
     # Set the first difference value to the first value
     ens_his_mf["tpd"] = xr.where(
         ens_his_mf.step == ens_his_mf.step.isel(step=0),
         ens_his_mf["tp"].isel(step=0),
-        ens_his_mf["tpd"]
+        ens_his_mf["tpd"],
     )
 
     # Change the 3 hour accumulations to hourly
-    ens_his_mf["tpd"] = (
-            ens_his_mf["tpd"] / 3
-    )
+    ens_his_mf["tpd"] = ens_his_mf["tpd"] / 3
 
     # Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
-    X3_Precipitation_Prob_His = (ens_his_mf["tpd"] > 0.0001).sum(dim="number") / 50
+    X3_Precipitation_Prob_His = (ens_his_mf["tpd"] > 0.0001).sum(
+        dim="number"
+    ) / ens_his_mf.sizes["number"]
 
     # Find the standard deviation of precipitation accumulation across all members
     X3_Precipitation_StdDev_His = ens_his_mf["tpd"].std(dim="number")
@@ -651,7 +703,6 @@ for i in range(hisPeriod, 1, -12):
             "longitude": ens_his_mf["longitude"],
         },
     )
-
 
     ########################################################################
     # Save the aifs data
@@ -692,20 +743,26 @@ for i in range(hisPeriod, 1, -12):
     validate_grib_stats(gribCheck)
     print("Grib files passed validation, proceeding with processing")
 
-    aifs_his_mf = xr.open_mfdataset(aifs_his_paths,
-                                    engine='cfgrib',
-                                combine='nested',
-                                concat_dim="step",
-                                decode_timedelta=False,
-                                join='outer',
-                                coords='minimal',
-                                compat='override').sortby("step")
+    aifs_his_mf = xr.open_mfdataset(
+        aifs_his_paths,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        decode_timedelta=False,
+        join="outer",
+        coords="minimal",
+        compat="override",
+    ).sortby("step")
 
     # Reinterpolate the AIFS array to the same times as the IFS arrays
-    aifs_his_mf = aifs_his_mf.interp(step=ifs_his_mf.step, method="linear", kwargs={"fill_value": "extrapolate"})
+    aifs_his_mf = aifs_his_mf.interp(
+        step=ifs_his_mf.step, method="linear", kwargs={"fill_value": "extrapolate"}
+    )
 
     # Merge the xarray objects
-    xarray_hist_merged = xr.merge([ifs_his_mf, aifs_his_mf, xr_enso_hisOut], compat='override', join='outer')
+    xarray_hist_merged = xr.merge(
+        [ifs_his_mf, aifs_his_mf, xr_enso_hisOut], compat="override", join="outer"
+    )
 
     # Save merged and processed xarray dataset to disk using zarr with compression
     # Define the path to save the zarr dataset with the run time in the filename
@@ -728,12 +785,17 @@ for i in range(hisPeriod, 1, -12):
     # Use the same encoding as last time but with larger chunks to speed up read times
 
     # Replace the step variable with a time variable using the start time and the step values
-    xarray_hist_merged = xarray_hist_merged.assign_coords(
-        time=("step",
-            pd.to_datetime(xarray_hist_merged.time.values) +
-            pd.to_timedelta(xarray_hist_merged.step.values, unit='h')
+    xarray_hist_merged = (
+        xarray_hist_merged.assign_coords(
+            time=(
+                "step",
+                pd.to_datetime(xarray_hist_merged.time.values)
+                + pd.to_timedelta(xarray_hist_merged.step.values, unit="h"),
+            )
         )
-    ).swap_dims({"step": "time"}).drop_vars("step")
+        .swap_dims({"step": "time"})
+        .drop_vars("step")
+    )
 
     # Chunk and save as zarr
     xarray_hist_merged = xarray_hist_merged.chunk(
@@ -776,12 +838,16 @@ ncLocalWorking_paths = [
 ]
 
 # Read in the zarr arrays
-hist = [xr.open_zarr(p,
-                     consolidated=False) for p in ncLocalWorking_paths]
-fcst = xr.open_zarr(f"{forecast_process_path}_merged.zarr",
-                     consolidated=False)
-ds = xr.concat([*hist, fcst], dim="time", data_vars="minimal", coords="minimal",
-               compat="override", join="override")
+hist = [xr.open_zarr(p, consolidated=False) for p in ncLocalWorking_paths]
+fcst = xr.open_zarr(f"{forecast_process_path}_merged.zarr", consolidated=False)
+ds = xr.concat(
+    [*hist, fcst],
+    dim="time",
+    data_vars="minimal",
+    coords="minimal",
+    compat="override",
+    join="override",
+)
 
 # Clip to valid data ranges
 for var in zarrVars:
@@ -796,32 +862,42 @@ ds_rename = ds.rename({"time": "stacked_time"})
 
 # Add a 3D time array
 time3d = (
-    ((ds_rename["stacked_time"]- unix_epoch) / np.timedelta64(1, "s")).astype("float32")           # 1D ('time',)
-    .expand_dims(latitude=ds_rename.latitude,       # add ('latitude',)
-                  longitude=ds_rename.longitude)    # add ('longitude',)
-    .transpose("stacked_time", "latitude", "longitude")     # order dims
+    ((ds_rename["stacked_time"] - unix_epoch) / np.timedelta64(1, "s"))
+    .astype("float32")  # 1D ('time',)
+    .expand_dims(
+        latitude=ds_rename.latitude,  # add ('latitude',)
+        longitude=ds_rename.longitude,
+    )  # add ('longitude',)
+    .transpose("stacked_time", "latitude", "longitude")  # order dims
 )
 
 # Add the time array to the dataset
 ds_rename["time"] = time3d
 
 # Set the order correctly
-vars_in = [v for v in zarrVars if v in ds_rename.data_vars]  # keep only those that exist
+vars_in = [
+    v for v in zarrVars if v in ds_rename.data_vars
+]  # keep only those that exist
 ds_stack = ds_rename[vars_in].to_array(dim="var", name="var")
 
 # Rechunk the data to be more manageable for processing
 ds_chunk = ds_stack.chunk(
-    {"var": 1, "stacked_time": len(stacked_timesUnix), "latitude": processChunk, "longitude": processChunk}
+    {
+        "var": 1,
+        "stacked_time": len(stacked_timesUnix),
+        "latitude": processChunk,
+        "longitude": processChunk,
+    }
 )
 
 # Interim zarr save of the stacked array. Not necessary for local, but speeds things up on S3
 with ProgressBar():
-    ds_chunk.to_zarr(
-        forecast_process_path + "_stack.zarr", mode='w'
-    )
+    ds_chunk.to_zarr(forecast_process_path + "_stack.zarr", mode="w")
 
 # Read in stacked 4D array back in
-daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr", component='__xarray_dataarray_variable__')
+daskVarArrayStackDisk = da.from_zarr(
+    forecast_process_path + "_stack.zarr", component="__xarray_dataarray_variable__"
+)
 
 # Create a zarr backed dask array
 if saveType == "S3":
@@ -881,8 +957,8 @@ if saveType == "S3":
 
 
 # TEST READ
-Z = zarr.storage.LocalStore(forecast_process_dir + "/ECMWF.zarr", read_only='r')
-Z2 = zarr.open(Z)
+# Z = zarr.storage.LocalStore(forecast_process_dir + "/ECMWF.zarr", read_only='r')
+# Z2 = zarr.open(Z)
 
 # Rechunk subset of data for maps!
 # Want variables:

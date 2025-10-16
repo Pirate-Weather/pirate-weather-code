@@ -38,7 +38,7 @@ updates:
   - package-ecosystem: "docker"
     directory: "/Docker"
     schedule:
-      interval: "weekly"
+      interval: "quarterly"
       time: "13:00"
       timezone: "America/Toronto"
     assignees:
