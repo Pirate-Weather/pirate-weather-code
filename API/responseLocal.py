@@ -1937,6 +1937,9 @@ async def PW_Forecast(
 
         WMO_alertDat = WMO_Alerts_Zarr[wmo_alerts_y_p, wmo_alerts_x_p]
 
+        if TIMING:
+            print(WMO_alertDat)
+
     results = await asyncio.gather(*zarrTasks.values())
     zarr_results = {key: result for key, result in zip(zarrTasks.keys(), results)}
 
