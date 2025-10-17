@@ -1571,7 +1571,7 @@ async def PW_Forecast(
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # RTMA_RU - only for currently, not for time machine
-    # Uses same grid as NBM (Lambert conformal conic projection, 2.5km resolution)
+    # Uses same grid as NBM (Lambert conformal conic projection, ~2.54km resolution)
     if (
         az_Lon < -138.3
         or az_Lon > -59
@@ -1589,7 +1589,7 @@ async def PW_Forecast(
         semimajor_axis_rtma = RTMA_RU_AXIS
         rtma_minX = RTMA_RU_MIN_X
         rtma_minY = RTMA_RU_MIN_Y
-        rtma_delta = RTMA_RU_DELTA  # 2.5km grid
+        rtma_delta = RTMA_RU_DELTA  # 2539.703m grid matching NBM
 
         rtma_lat, rtma_lon, x_rtma, y_rtma = lambertGridMatch(
             central_longitude_rtma,
