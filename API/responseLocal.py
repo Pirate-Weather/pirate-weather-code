@@ -4459,9 +4459,18 @@ async def PW_Forecast(
     # humidity, RTMA_RU then NBM then HRRR, then GFS
     # Note: RTMA_RU humidity is already in percentage (0-100), not fraction
     if "rtma_ru" in sourceList:
-        InterPcurrent[DATA_CURRENT["humidity"]] = (
-            dataOut_rtma_ru[0, RTMA_RU["humidity"]] * 0.01
-        )
+        rtma_humidity = dataOut_rtma_ru[0, RTMA_RU["humidity"]] * 0.01
+        # If RTMA humidity is 0 or invalid, calculate from temp and dewpoint
+        if rtma_humidity <= 0.001:
+            # Calculate relative humidity from temperature and dewpoint
+            # RH = 100 * exp((17.625*Td)/(243.04+Td)) / exp((17.625*T)/(243.04+T))
+            temp_c = InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS
+            dew_c = InterPcurrent[DATA_CURRENT["dew"]] - KELVIN_TO_CELSIUS
+            rtma_humidity = np.exp((17.625 * dew_c) / (243.04 + dew_c)) / np.exp(
+                (17.625 * temp_c) / (243.04 + temp_c)
+            )
+            rtma_humidity = np.clip(rtma_humidity, 0, 1)
+        InterPcurrent[DATA_CURRENT["humidity"]] = rtma_humidity
     elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[DATA_CURRENT["humidity"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["humidity"]] * interpFac1
@@ -4704,16 +4713,15 @@ async def PW_Forecast(
             + GFS_Merged[currentIDX_hrrrh, GFS["vis"]] * interpFac2
         )
 
-    # Clip first, then convert 16000m to 16090m for exact 10 miles display
-    InterPcurrent[DATA_CURRENT["vis"]] = np.clip(
-        InterPcurrent[DATA_CURRENT["vis"]], 0, 16090
-    )
+    # Convert 16000m to 16090m for exact 10 miles display, then clip and apply units
     InterPcurrent[DATA_CURRENT["vis"]] = np.where(
-        InterPcurrent[DATA_CURRENT["vis"]] >= 16000,
+        InterPcurrent[DATA_CURRENT["vis"]] >= 15999.5,
         16090,
         InterPcurrent[DATA_CURRENT["vis"]],
     )
-    InterPcurrent[DATA_CURRENT["vis"]] = InterPcurrent[DATA_CURRENT["vis"]] * visUnits
+    InterPcurrent[DATA_CURRENT["vis"]] = (
+        np.clip(InterPcurrent[DATA_CURRENT["vis"]], 0, 16090) * visUnits
+    )
 
     # Ozone from GFS
     InterPcurrent[DATA_CURRENT["ozone"]] = clipLog(
