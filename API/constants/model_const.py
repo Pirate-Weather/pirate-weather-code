@@ -116,3 +116,15 @@ NBM = {
 }
 
 NBM_FIRE_INDEX = 1
+
+RTMA_RU = {
+    "vis": 1,
+    "gust": 2,
+    "pressure": 3,
+    "temp": 4,
+    "dew": 5,
+    "humidity": 6,
+    "cloud": 7,
+    "wind_u": 8,
+    "wind_v": 9,
+}
