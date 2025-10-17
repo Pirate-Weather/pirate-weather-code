@@ -4463,9 +4463,10 @@ async def PW_Forecast(
         # If RTMA humidity is 0 or invalid, calculate from temp and dewpoint
         if rtma_humidity <= 0.001:
             # Calculate relative humidity from temperature and dewpoint
-            # RH = 100 * exp((17.625*Td)/(243.04+Td)) / exp((17.625*T)/(243.04+T))
-            temp_c = InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS
-            dew_c = InterPcurrent[DATA_CURRENT["dew"]] - KELVIN_TO_CELSIUS
+            # RH = exp((17.625*Td)/(243.04+Td)) / exp((17.625*T)/(243.04+T))
+            # Temperature is in Kelvin, convert to Celsius
+            temp_c = InterPcurrent[DATA_CURRENT["temp"]] - 273.15
+            dew_c = InterPcurrent[DATA_CURRENT["dew"]] - 273.15
             rtma_humidity = np.exp((17.625 * dew_c) / (243.04 + dew_c)) / np.exp(
                 (17.625 * temp_c) / (243.04 + temp_c)
             )
@@ -4669,32 +4670,29 @@ async def PW_Forecast(
 
     # Station Pressure from RTMA_RU (surface pressure), then GFS
     if "rtma_ru" in sourceList:
-        InterPcurrent[DATA_CURRENT["station_pressure"]] = (
-            clipLog(
-                dataOut_rtma_ru[0, RTMA_RU["pressure"]],
-                CLIP_PRESSURE["min"],
-                CLIP_PRESSURE["max"],
-                "Station Pressure Current",
-            )
-            * pressUnits
-        )
+        station_pressure_value = dataOut_rtma_ru[0, RTMA_RU["pressure"]]
     else:
-        InterPcurrent[DATA_CURRENT["station_pressure"]] = (
-            clipLog(
-                (
-                    GFS_Merged[currentIDX_hrrrh_A, GFS["station_pressure"]] * interpFac1
-                    + GFS_Merged[currentIDX_hrrrh, GFS["station_pressure"]] * interpFac2
-                ),
-                CLIP_PRESSURE["min"],
-                CLIP_PRESSURE["max"],
-                "Station Pressure Current",
-            )
-            * pressUnits
+        station_pressure_value = (
+            GFS_Merged[currentIDX_hrrrh_A, GFS["station_pressure"]] * interpFac1
+            + GFS_Merged[currentIDX_hrrrh, GFS["station_pressure"]] * interpFac2
         )
+    
+    InterPcurrent[DATA_CURRENT["station_pressure"]] = (
+        clipLog(
+            station_pressure_value,
+            CLIP_PRESSURE["min"],
+            CLIP_PRESSURE["max"],
+            "Station Pressure Current",
+        )
+        * pressUnits
+    )
 
     # VIS, RTMA_RU, then SubH, then NBM then HRRR, then GFS
     if "rtma_ru" in sourceList:
         InterPcurrent[DATA_CURRENT["vis"]] = dataOut_rtma_ru[0, RTMA_RU["vis"]]
+        # RTMA_RU has max visibility of 16000m, convert to 16090m for exact 10 miles
+        if InterPcurrent[DATA_CURRENT["vis"]] >= 16000:
+            InterPcurrent[DATA_CURRENT["vis"]] = 16090
     elif "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["vis"]] = hrrrSubHInterpolation[0, HRRR_SUBH["vis"]]
     elif "nbm" in sourceList:
@@ -4713,15 +4711,7 @@ async def PW_Forecast(
             + GFS_Merged[currentIDX_hrrrh, GFS["vis"]] * interpFac2
         )
 
-    # Convert 16000m to 16090m for exact 10 miles display, then clip and apply units
-    InterPcurrent[DATA_CURRENT["vis"]] = np.where(
-        InterPcurrent[DATA_CURRENT["vis"]] >= 15999.5,
-        16090,
-        InterPcurrent[DATA_CURRENT["vis"]],
-    )
-    InterPcurrent[DATA_CURRENT["vis"]] = (
-        np.clip(InterPcurrent[DATA_CURRENT["vis"]], 0, 16090) * visUnits
-    )
+    InterPcurrent[DATA_CURRENT["vis"]] = np.clip(InterPcurrent[14], 0, 16090) * visUnits
 
     # Ozone from GFS
     InterPcurrent[DATA_CURRENT["ozone"]] = clipLog(
