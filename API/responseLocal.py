@@ -4496,7 +4496,7 @@ async def PW_Forecast(
         "Humidity Current",
     )
 
-    # Pressure from HRRR, then GFS (RTMA_RU has mean sea level pressure, not surface pressure)
+    # Pressure from HRRR, then GFS (RTMA_RU has surface pressure, not mean sea level pressure)
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[DATA_CURRENT["pressure"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["pressure"]] * interpFac1
