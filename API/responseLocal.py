@@ -4676,7 +4676,7 @@ async def PW_Forecast(
             GFS_Merged[currentIDX_hrrrh_A, GFS["station_pressure"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["station_pressure"]] * interpFac2
         )
-    
+
     InterPcurrent[DATA_CURRENT["station_pressure"]] = (
         clipLog(
             station_pressure_value,
