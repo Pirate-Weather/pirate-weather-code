@@ -21,8 +21,8 @@ from typing import Union
 import boto3
 import numpy as np
 import pandas as pd
-import s3fs
 import reverse_geocode
+import s3fs
 import xarray as xr
 import zarr
 from astral import LocationInfo, moon
@@ -41,6 +41,7 @@ from API.constants.api_const import (
     DBZ_CONST,
     GLOBE_TEMP_CONST,
     LARGEST_DIR_INIT,
+    MAGNUS_FORMULA_CONSTS,
     NICE_PRIORITY,
     PRECIP_IDX,
     S3_MAX_BANDWIDTH,
@@ -81,6 +82,13 @@ from API.constants.grid_const import (
     NBM_X_MIN,
     NBM_Y_MAX,
     NBM_Y_MIN,
+    RTMA_RU_AXIS,
+    RTMA_RU_CENTRAL_LAT,
+    RTMA_RU_CENTRAL_LONG,
+    RTMA_RU_DELTA,
+    RTMA_RU_MIN_X,
+    RTMA_RU_MIN_Y,
+    RTMA_RU_PARALLEL,
     RTMA_RU_X_MAX,
     RTMA_RU_X_MIN,
     RTMA_RU_Y_MAX,
@@ -114,9 +122,7 @@ from API.constants.text_const import (
     PRECIP_PROB_THRESHOLD,
     WIND_THRESHOLDS,
 )
-
 from API.constants.unit_const import country_units
-
 from API.PirateDailyText import calculate_day_text
 from API.PirateMinutelyText import calculate_minutely_text
 from API.PirateText import calculate_text
@@ -124,9 +130,9 @@ from API.PirateTextHelper import estimate_snow_height
 from API.PirateWeeklyText import calculate_weekly_text
 from API.timemachine import TimeMachine
 from API.ZarrHelpers import (
+    _add_custom_header,
     _retry_s3_operation,
     setup_testing_zipstore,
-    _add_custom_header,
 )
 
 Translations = load_all_translations()
@@ -1577,13 +1583,13 @@ async def PW_Forecast(
         dataOut_rtma_ru = False
     else:
         # RTMA_RU uses same Lambert Conformal Conic projection as NBM
-        central_longitude_rtma = math.radians(265.0)
-        central_latitude_rtma = math.radians(25.0)
-        standard_parallel_rtma = math.radians(25.0)
-        semimajor_axis_rtma = 6371200
-        rtma_minX = -3271152.8
-        rtma_minY = -263793.46
-        rtma_delta = 2500.0  # 2.5km grid
+        central_longitude_rtma = math.radians(RTMA_RU_CENTRAL_LONG)
+        central_latitude_rtma = math.radians(RTMA_RU_CENTRAL_LAT)
+        standard_parallel_rtma = math.radians(RTMA_RU_PARALLEL)
+        semimajor_axis_rtma = RTMA_RU_AXIS
+        rtma_minX = RTMA_RU_MIN_X
+        rtma_minY = RTMA_RU_MIN_Y
+        rtma_delta = RTMA_RU_DELTA  # 2.5km grid
 
         rtma_lat, rtma_lon, x_rtma, y_rtma = lambertGridMatch(
             central_longitude_rtma,
@@ -4465,10 +4471,10 @@ async def PW_Forecast(
             # Calculate relative humidity from temperature and dewpoint
             # RH = exp((17.625*Td)/(243.04+Td)) / exp((17.625*T)/(243.04+T))
             # Temperature is in Kelvin, convert to Celsius
-            temp_c = InterPcurrent[DATA_CURRENT["temp"]] - 273.15
-            dew_c = InterPcurrent[DATA_CURRENT["dew"]] - 273.15
-            rtma_humidity = np.exp((17.625 * dew_c) / (243.04 + dew_c)) / np.exp(
-                (17.625 * temp_c) / (243.04 + temp_c)
+            temp_c = InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS
+            dew_c = InterPcurrent[DATA_CURRENT["dew"]] - KELVIN_TO_CELSIUS
+            rtma_humidity = np.exp((MAGNUS_FORMULA_CONSTS["dew_factor"] * dew_c) / (MAGNUS_FORMULA_CONSTS["temp_factor"] + dew_c)) / np.exp(
+                (MAGNUS_FORMULA_CONSTS["dew_factor"] * temp_c) / (MAGNUS_FORMULA_CONSTS["temp_factor"] + temp_c)
             )
             rtma_humidity = np.clip(rtma_humidity, 0, 1)
         InterPcurrent[DATA_CURRENT["humidity"]] = rtma_humidity

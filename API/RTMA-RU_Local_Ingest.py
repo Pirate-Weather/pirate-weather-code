@@ -28,10 +28,10 @@ from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    VALID_DATA_MAX,
+    VALID_DATA_MIN,
     earth_relative_wind_components,
     mask_invalid_data,
-    VALID_DATA_MIN,
-    VALID_DATA_MAX,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")

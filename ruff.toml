@@ -1,0 +1,13 @@
+# Ruff configuration - keep default rules and enable import-related checks
+# This file intentionally minimal: it uses Ruff defaults and extends the selected
+# rules to include the 'I' (import-related) rule group. Adjust as needed.
+
+# Extend the default rule set with import-related rules (I = isort/imports)
+[lint]
+extend-select = ["I", "E", "W"]
+# Ignore long line errors for now to avoid failing the linter. We'll address line-length
+# cleanups in a follow-up stage if you want stricter enforcement.
+ignore = ["E501"]
+# Provide a more permissive line length so automated formatting has more room.
+[lint.pycodestyle]
+max-line-length = 120
