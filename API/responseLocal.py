@@ -1964,15 +1964,8 @@ async def PW_Forecast(
         print("### ECMWF Detail Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
-    if timeMachine:
-        dataOut_ecmwf = False
-        readECMWF = False
-    elif ECMWF_Zarr is None:
-        dataOut_ecmwf = False
-        readECMWF = False
-    else:
-        dataOut_ecmwf = False  # Will be set later from zarr_results if successful
-        readECMWF = True
+    dataOut_ecmwf = False
+    readECMWF = not timeMachine and ECMWF_Zarr is not None
 
     if TIMING:
         print("### ECMWF Detail END ###")
@@ -2291,7 +2284,7 @@ async def PW_Forecast(
         ).strftime("%Y-%m-%d %HZ")
 
     # Add ECMWF IFS after NBM, before GFS
-    if (isinstance(dataOut_ecmwf, np.ndarray)) & (not timeMachine):
+    if (isinstance(dataOut_ecmwf, np.ndarray)) and (not timeMachine):
         sourceList.append("ecmwf_ifs")
         sourceTimes["ecmwf_ifs"] = rounder(
             datetime.datetime.fromtimestamp(
@@ -3086,23 +3079,10 @@ async def PW_Forecast(
         # InterTminute[:, 3] = freezing rain (codes 3, 12)
         # InterTminute[:, 4] = rain (codes 1, 2, 7, 11)
 
-        InterTminute[:, 1] = np.where(
-            (ptype_ecmwf == 5) | (ptype_ecmwf == 6) | (ptype_ecmwf == 9), 1, 0
-        )  # Snow, wet snow, graupel
-        InterTminute[:, 2] = np.where(
-            (ptype_ecmwf == 4) | (ptype_ecmwf == 8) | (ptype_ecmwf == 10), 1, 0
-        )  # Mixed/ice, ice pellets, hail
-        InterTminute[:, 3] = np.where(
-            (ptype_ecmwf == 3) | (ptype_ecmwf == 12), 1, 0
-        )  # Freezing rain, freezing drizzle
-        InterTminute[:, 4] = np.where(
-            (ptype_ecmwf == 1)
-            | (ptype_ecmwf == 2)
-            | (ptype_ecmwf == 7)
-            | (ptype_ecmwf == 11),
-            1,
-            0,
-        )  # Rain, thunderstorm, rain/snow mix, drizzle
+        InterTminute[:, 1] = np.where(np.isin(ptype_ecmwf, [5, 6, 9]), 1, 0)  # Snow, wet snow, graupel
+        InterTminute[:, 2] = np.where(np.isin(ptype_ecmwf, [4, 8, 10]), 1, 0)  # Mixed/ice, ice pellets, hail
+        InterTminute[:, 3] = np.where(np.isin(ptype_ecmwf, [3, 12]), 1, 0)  # Freezing rain, freezing drizzle
+        InterTminute[:, 4] = np.where(np.isin(ptype_ecmwf, [1, 2, 7, 11]), 1, 0)  # Rain, thunderstorm, rain/snow mix, drizzle
     elif "gefs" in sourceList:
         for i in [GEFS["snow"], GEFS["ice"], GEFS["freezing_rain"], GEFS["rain"]]:
             InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
@@ -3302,38 +3282,14 @@ async def PW_Forecast(
         ptype_ecmwf_hour = ECMWF_Merged[:, ECMWF["ptype"]]
 
         # Initialize with 0 (none)
-        mapped_ptype = np.zeros(len(hour_array_grib))
-
-        # Map snow types (5, 6, 9) to index 1
-        mapped_ptype = np.where(
-            (ptype_ecmwf_hour == 5) | (ptype_ecmwf_hour == 6) | (ptype_ecmwf_hour == 9),
-            1,
-            mapped_ptype,
-        )
-
-        # Map ice/sleet types (4, 8, 10) to index 2
-        mapped_ptype = np.where(
-            (ptype_ecmwf_hour == 4)
-            | (ptype_ecmwf_hour == 8)
-            | (ptype_ecmwf_hour == 10),
-            2,
-            mapped_ptype,
-        )
-
-        # Map freezing rain types (3, 12) to index 3
-        mapped_ptype = np.where(
-            (ptype_ecmwf_hour == 3) | (ptype_ecmwf_hour == 12), 3, mapped_ptype
-        )
-
-        # Map rain types (1, 2, 7, 11) to index 4
-        mapped_ptype = np.where(
-            (ptype_ecmwf_hour == 1)
-            | (ptype_ecmwf_hour == 2)
-            | (ptype_ecmwf_hour == 7)
-            | (ptype_ecmwf_hour == 11),
-            4,
-            mapped_ptype,
-        )
+        conditions = [
+            np.isin(ptype_ecmwf_hour, [5, 6, 9]),  # snow
+            np.isin(ptype_ecmwf_hour, [4, 8, 10]),  # sleet
+            np.isin(ptype_ecmwf_hour, [3, 12]),  # freezing rain
+            np.isin(ptype_ecmwf_hour, [1, 2, 7, 11]),  # rain
+        ]
+        choices = [1, 2, 3, 4]
+        mapped_ptype = np.select(conditions, choices, default=0)
 
         maxPchanceHour[:, 2] = mapped_ptype
         # Put Nan's where they exist in the original data
