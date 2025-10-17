@@ -1,11 +1,12 @@
 # Helpers for working with Zarr data in the Pirate Weather API
 # Alexander Rey, October 2025
 
-import zarr
-import s3fs
-import time
 import os
 import random
+import time
+
+import s3fs
+import zarr
 
 from API.constants.api_const import (
     MAX_S3_RETRIES,

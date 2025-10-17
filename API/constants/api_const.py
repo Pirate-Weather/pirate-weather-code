@@ -57,6 +57,11 @@ APPARENT_TEMP_CONSTS = {
     "e_const": 6.105,
 }
 
+MAGNUS_FORMULA_CONSTS = {
+    "dew_factor": 17.625,
+    "temp_factor": 243.04,
+}
+
 PRECIP_IDX = {
     "none": 0,
     "snow": 1,
@@ -66,7 +71,7 @@ PRECIP_IDX = {
 }
 
 # API versioning and ingest version constants
-API_VERSION = "V2.7.11"
+API_VERSION = "V2.8a"
 
 # Command priorities
 NICE_PRIORITY = 20
