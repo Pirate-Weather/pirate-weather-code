@@ -4460,8 +4460,8 @@ async def PW_Forecast(
     # Note: RTMA_RU humidity is already in percentage (0-100), not fraction
     if "rtma_ru" in sourceList:
         rtma_humidity = dataOut_rtma_ru[0, RTMA_RU["humidity"]] * 0.01
-        # If RTMA humidity is 0 or invalid, calculate from temp and dewpoint
-        if rtma_humidity <= 0.001:
+        # If RTMA humidity is 0 or very low (likely invalid), calculate from temp and dewpoint
+        if rtma_humidity < 0.05:  # Less than 5% is likely invalid
             # Calculate relative humidity from temperature and dewpoint
             # RH = exp((17.625*Td)/(243.04+Td)) / exp((17.625*T)/(243.04+T))
             # Temperature is in Kelvin, convert to Celsius
@@ -4691,7 +4691,8 @@ async def PW_Forecast(
     if "rtma_ru" in sourceList:
         InterPcurrent[DATA_CURRENT["vis"]] = dataOut_rtma_ru[0, RTMA_RU["vis"]]
         # RTMA_RU has max visibility of 16000m, convert to 16090m for exact 10 miles
-        if InterPcurrent[DATA_CURRENT["vis"]] >= 16000:
+        # Use threshold to handle floating point precision
+        if InterPcurrent[DATA_CURRENT["vis"]] >= 15999:
             InterPcurrent[DATA_CURRENT["vis"]] = 16090
     elif "hrrrsubh" in sourceList:
         InterPcurrent[DATA_CURRENT["vis"]] = hrrrSubHInterpolation[0, HRRR_SUBH["vis"]]
