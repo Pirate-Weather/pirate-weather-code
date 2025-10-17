@@ -4473,8 +4473,12 @@ async def PW_Forecast(
             # Temperature is in Kelvin, convert to Celsius
             temp_c = InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS
             dew_c = InterPcurrent[DATA_CURRENT["dew"]] - KELVIN_TO_CELSIUS
-            rtma_humidity = np.exp((MAGNUS_FORMULA_CONSTS["dew_factor"] * dew_c) / (MAGNUS_FORMULA_CONSTS["temp_factor"] + dew_c)) / np.exp(
-                (MAGNUS_FORMULA_CONSTS["dew_factor"] * temp_c) / (MAGNUS_FORMULA_CONSTS["temp_factor"] + temp_c)
+            rtma_humidity = np.exp(
+                (MAGNUS_FORMULA_CONSTS["dew_factor"] * dew_c)
+                / (MAGNUS_FORMULA_CONSTS["temp_factor"] + dew_c)
+            ) / np.exp(
+                (MAGNUS_FORMULA_CONSTS["dew_factor"] * temp_c)
+                / (MAGNUS_FORMULA_CONSTS["temp_factor"] + temp_c)
             )
             rtma_humidity = np.clip(rtma_humidity, 0, 1)
         InterPcurrent[DATA_CURRENT["humidity"]] = rtma_humidity
