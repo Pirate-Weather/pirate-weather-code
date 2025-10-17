@@ -3079,10 +3079,18 @@ async def PW_Forecast(
         # InterTminute[:, 3] = freezing rain (codes 3, 12)
         # InterTminute[:, 4] = rain (codes 1, 2, 7, 11)
 
-        InterTminute[:, 1] = np.where(np.isin(ptype_ecmwf, [5, 6, 9]), 1, 0)  # Snow, wet snow, graupel
-        InterTminute[:, 2] = np.where(np.isin(ptype_ecmwf, [4, 8, 10]), 1, 0)  # Mixed/ice, ice pellets, hail
-        InterTminute[:, 3] = np.where(np.isin(ptype_ecmwf, [3, 12]), 1, 0)  # Freezing rain, freezing drizzle
-        InterTminute[:, 4] = np.where(np.isin(ptype_ecmwf, [1, 2, 7, 11]), 1, 0)  # Rain, thunderstorm, rain/snow mix, drizzle
+        InterTminute[:, 1] = np.where(
+            np.isin(ptype_ecmwf, [5, 6, 9]), 1, 0
+        )  # Snow, wet snow, graupel
+        InterTminute[:, 2] = np.where(
+            np.isin(ptype_ecmwf, [4, 8, 10]), 1, 0
+        )  # Mixed/ice, ice pellets, hail
+        InterTminute[:, 3] = np.where(
+            np.isin(ptype_ecmwf, [3, 12]), 1, 0
+        )  # Freezing rain, freezing drizzle
+        InterTminute[:, 4] = np.where(
+            np.isin(ptype_ecmwf, [1, 2, 7, 11]), 1, 0
+        )  # Rain, thunderstorm, rain/snow mix, drizzle
     elif "gefs" in sourceList:
         for i in [GEFS["snow"], GEFS["ice"], GEFS["freezing_rain"], GEFS["rain"]]:
             InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
