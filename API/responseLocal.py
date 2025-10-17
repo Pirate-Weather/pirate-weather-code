@@ -2165,7 +2165,7 @@ async def PW_Forecast(
                 ).replace(tzinfo=None)
             ) > datetime.timedelta(hours=1):
                 dataOut_rtma_ru = False
-                print("OLD RTMA_RU")
+                logger.warning("OLD RTMA_RU")
 
     sourceTimes = dict()
     if timeMachine is False:
