@@ -4491,6 +4491,8 @@ async def PW_Forecast(
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     alertDict = []
+    alertList = []
+
     # If alerts are requested and in the US
     try:
         if (
@@ -4511,13 +4513,9 @@ async def PW_Forecast(
             alerts_y_p = np.argmin(abslat)
             alerts_x_p = np.argmin(abslon)
 
-            alertList = []
-
             alertDat = NWS_Alerts_Zarr[alerts_y_p, alerts_x_p]
 
-            if alertDat == "":
-                alertList = []
-            else:
+            if alertDat != "":
                 # Match if any alerts
                 alerts = str(alertDat).split("|")
                 # Loop through each alert
@@ -4561,8 +4559,6 @@ async def PW_Forecast(
                     }
 
                     alertList.append(dict(alertDict))
-        else:
-            alertList = []
 
     except Exception:
         print("An Alert error occurred:")
