@@ -4591,7 +4591,9 @@ async def PW_Forecast(
 
                 wmo_alertDict = {
                     "title": wmo_alertDetails[0],
-                    "regions": [s.lstrip() for s in wmo_alertDetails[2].split(";")],
+                    "regions": [
+                        s.lstrip() for s in wmo_alertDetails[2].split(";") if s.strip()
+                    ],
                     "severity": wmo_alertDetails[5],
                     "time": int(
                         (
