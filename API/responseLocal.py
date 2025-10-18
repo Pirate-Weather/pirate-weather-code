@@ -2196,7 +2196,8 @@ async def PW_Forecast(
     if readECMWF:
         dataOut_ecmwf = zarr_results["ECMWF"]
         if dataOut_ecmwf is not False:
-            ecmwfRunTime = dataOut_ecmwf[HISTORY_PERIODS["ECMWF"] - 1, 0]
+            # ECMWF forecast starts at hour +3, so base_time is at HISTORY_PERIODS - 3
+            ecmwfRunTime = dataOut_ecmwf[HISTORY_PERIODS["ECMWF"] - 3, 0]
             # ECMWF IFS uses the same grid as GFS - only add to sourceIDX if data exists
             sourceIDX["ecmwf_ifs"] = dict()
             sourceIDX["ecmwf_ifs"]["x"] = int(x_p)
@@ -3346,7 +3347,9 @@ async def PW_Forecast(
         prcipIntensityHour[:, 1] = HRRR_Merged[:, HRRR["intensity"]] * 3600
     # ECMWF
     if "ecmwf_ifs" in sourceList:
-        prcipIntensityHour[:, 2] = ECMWF_Merged[:, ECMWF["intensity"]] * 3600
+        # Use APCP_Mean (ensemble mean) instead of tprate for better accuracy
+        # APCP_Mean is already in m/h (hourly rate), convert to mm/h
+        prcipIntensityHour[:, 2] = ECMWF_Merged[:, ECMWF["accum_mean"]] * 1000
     # GEFS or GFS
     if "gefs" in sourceList:
         prcipIntensityHour[:, 3] = GEFS_Merged[:, GEFS["accum"]]
