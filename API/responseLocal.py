@@ -2114,6 +2114,9 @@ async def PW_Forecast(
     if readECMWF:
         zarrTasks["ECMWF"] = weather.zarr_read("ECMWF", ECMWF_Zarr, x_p, y_p)
 
+    # Initialize WMO alert data
+    WMO_alertDat = None
+
     if readWMOAlerts:
         wmo_alerts_lats = np.arange(-60, 85, 0.0625)
         wmo_alerts_lons = np.arange(-180, 180, 0.0625)
@@ -4563,6 +4566,70 @@ async def PW_Forecast(
 
     except Exception:
         print("An Alert error occurred:")
+        print(traceback.print_exc())
+
+    # Process WMO alerts for non-US locations
+    try:
+        if (
+            (not timeMachine)
+            and (exAlerts == 0)
+            and readWMOAlerts
+            and WMO_alertDat is not None
+            and WMO_alertDat != ""
+        ):
+            # WMO alerts use the same grid as was calculated earlier:
+            # wmo_alerts_lats = np.arange(-60, 85, 0.0625)
+            # wmo_alerts_lons = np.arange(-180, 180, 0.0625)
+            # WMO_alertDat was already read at line 2125
+
+            # Match if any alerts
+            wmo_alerts = str(WMO_alertDat).split("|")
+            # Loop through each alert
+            for wmo_alert in wmo_alerts:
+                # Extract alert details
+                # Format: event}{description}{area_desc}{effective}{expires}{severity}{URL
+                wmo_alertDetails = wmo_alert.split("}{")
+
+                # Parse times - WMO times are in ISO format
+                alertOnset = datetime.datetime.strptime(
+                    wmo_alertDetails[3], "%Y-%m-%dT%H:%M:%S%z"
+                ).astimezone(utc)
+                alertEnd = datetime.datetime.strptime(
+                    wmo_alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
+                ).astimezone(utc)
+
+                # Format description newlines
+                alertDescript = wmo_alertDetails[1]
+                # Step 1: Replace double newlines with a single newline
+                formatted_text = re.sub(r"(?<!\n)\n(?!\n)", " ", alertDescript)
+
+                # Step 2: Replace remaining single newlines with a space
+                formatted_text = re.sub(r"\n\n", "\n", formatted_text)
+
+                wmo_alertDict = {
+                    "title": wmo_alertDetails[0],
+                    "regions": [s.lstrip() for s in wmo_alertDetails[2].split(";")],
+                    "severity": wmo_alertDetails[5],
+                    "time": int(
+                        (
+                            alertOnset
+                            - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(utc)
+                        ).total_seconds()
+                    ),
+                    "expires": int(
+                        (
+                            alertEnd
+                            - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(utc)
+                        ).total_seconds()
+                    ),
+                    "description": formatted_text,
+                    "uri": wmo_alertDetails[6],
+                }
+
+                alertList.append(dict(wmo_alertDict))
+
+    except Exception:
+        print("A WMO Alert error occurred:")
         print(traceback.print_exc())
 
     # Timing Check
