@@ -2540,7 +2540,10 @@ async def PW_Forecast(
 
         # ECMWF
         if "ecmwf_ifs" in sourceList:
-            ECMWF_StartIDX = nearest_index(dataOut_ecmwf[:, 0], baseDayUTC_Grib)
+            # ECMWF forecast starts at hour +3, causing a time offset in the data
+            # The data array is offset by ~3 hours from its timestamps
+            # Adjust the search time by +3 hours to find the correct data
+            ECMWF_StartIDX = nearest_index(dataOut_ecmwf[:, 0], baseDayUTC_Grib + 10800)
             ECMWF_EndIDX = min((len(dataOut_ecmwf), (numHours + ECMWF_StartIDX)))
             ECMWF_Merged = np.full((numHours, max(ECMWF.values()) + 1), np.nan)
             ECMWF_Merged[
