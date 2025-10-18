@@ -1332,11 +1332,6 @@ async def PW_Forecast(
     if timeMachine:
         exAlerts = 1
 
-    # Exclude Alerts outside US
-    if exAlerts == 0:
-        if cull(az_Lon, lat) == 0:
-            exAlerts = 1
-
     # Default to US
     unitSystem = "us"
     windUnit = 2.234  # mph
@@ -4594,14 +4589,6 @@ async def PW_Forecast(
                     wmo_alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
                 ).astimezone(utc)
 
-                # Format description newlines
-                alertDescript = wmo_alertDetails[1]
-                # Step 1: Replace double newlines with a single newline
-                formatted_text = re.sub(r"(?<!\n)\n(?!\n)", " ", alertDescript)
-
-                # Step 2: Replace remaining single newlines with a space
-                formatted_text = re.sub(r"\n\n", "\n", formatted_text)
-
                 wmo_alertDict = {
                     "title": wmo_alertDetails[0],
                     "regions": [s.lstrip() for s in wmo_alertDetails[2].split(";")],
@@ -4618,7 +4605,7 @@ async def PW_Forecast(
                             - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(utc)
                         ).total_seconds()
                     ),
-                    "description": formatted_text,
+                    "description": wmo_alertDetails[1],
                     "uri": wmo_alertDetails[6],
                 }
 
