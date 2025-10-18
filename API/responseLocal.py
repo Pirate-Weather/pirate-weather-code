@@ -4537,8 +4537,11 @@ async def PW_Forecast(
 
                     alertDict = {
                         "title": get_alert_field(alertDetails, 0),
-                        "regions": [s.lstrip() for s in get_alert_field(alertDetails, 2).split(";")],
-                        "severity":get_alert_field(alertDetails, 5),
+                        "regions": [
+                            s.lstrip()
+                            for s in get_alert_field(alertDetails, 2).split(";")
+                        ],
+                        "severity": get_alert_field(alertDetails, 5),
                         "time": int(
                             (
                                 alertOnset
