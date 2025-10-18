@@ -1290,7 +1290,7 @@ async def PW_Forecast(
     exHRRR = 0
     exGEFS = 0
     exRTMA_RU = 0
-    exECMWF = 0
+    # exECMWF = 0
     summaryText = True
 
     if "currently" in excludeParams:
@@ -1313,8 +1313,8 @@ async def PW_Forecast(
         exGEFS = 1
     if "rtma_ru" in excludeParams:
         exRTMA_RU = 1
-    if "ecmwf_ifs" in excludeParams:
-        exECMWF = 1
+    # if "ecmwf_ifs" in excludeParams:
+    #    exECMWF = 1
     if "summary" in excludeParams:
         summaryText = False
 
