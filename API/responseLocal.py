@@ -1318,12 +1318,12 @@ async def PW_Forecast(
     if "summary" in excludeParams:
         summaryText = False
 
-    # Enable ECMWF on PROD or if explicitly included
-    # On development endpoints, ECMWF is opt-in via include=ecmwf_ifs
-    if STAGE == "PROD" or "ecmwf_ifs" in includeParams:
+    # ECMWF is opt-in via include=ecmwf_ifs
+    if "ecmwf_ifs" in includeParams:
         readECMWF = True
-        readRTMA_RU = False
-        readWMOAlerts = True
+
+    readRTMA_RU = False
+    readWMOAlerts = True
 
     # Set up timemache params
     if timeMachine and not tmExtra:
@@ -1976,7 +1976,7 @@ async def PW_Forecast(
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     dataOut_ecmwf = False
-    readECMWF = not timeMachine and ECMWF_Zarr is not None and exECMWF == 0
+    # readECMWF = not timeMachine and ECMWF_Zarr is not None and exECMWF == 0
 
     if TIMING:
         print("### ECMWF Detail END ###")
