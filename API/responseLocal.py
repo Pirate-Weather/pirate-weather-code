@@ -1020,6 +1020,7 @@ async def PW_Forecast(
     units: Union[str, None] = None,
     extend: Union[str, None] = None,
     exclude: Union[str, None] = None,
+    include: Union[str, None] = None,
     lang: Union[str, None] = None,
     version: Union[str, None] = None,
     tmextra: Union[str, None] = None,
@@ -1046,11 +1047,6 @@ async def PW_Forecast(
     readECMWF = False
     readNBM = False
     readGEFS = False
-
-    # Testing ECMWF/ RTMA_RU/ WMO_Alerts
-    readECMWF = True
-    readRTMA_RU = False
-    readWMOAlerts = True
 
     STAGE = os.environ.get("STAGE", "PROD")
 
@@ -1274,6 +1270,11 @@ async def PW_Forecast(
     else:
         excludeParams = exclude
 
+    if not include:
+        includeParams = ""
+    else:
+        includeParams = include
+
     if not extraVars:
         extraVars = []
     else:
@@ -1316,6 +1317,13 @@ async def PW_Forecast(
         exECMWF = 1
     if "summary" in excludeParams:
         summaryText = False
+
+    # Enable ECMWF on PROD or if explicitly included
+    # On development endpoints, ECMWF is opt-in via include=ecmwf_ifs
+    if STAGE == "PROD" or "ecmwf_ifs" in includeParams:
+        readECMWF = True
+        readRTMA_RU = False
+        readWMOAlerts = True
 
     # Set up timemache params
     if timeMachine and not tmExtra:
