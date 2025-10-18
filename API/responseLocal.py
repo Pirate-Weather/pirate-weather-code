@@ -1332,11 +1332,6 @@ async def PW_Forecast(
     if timeMachine:
         exAlerts = 1
 
-    # Exclude Alerts outside US
-    if exAlerts == 0:
-        if cull(az_Lon, lat) == 0:
-            exAlerts = 1
-
     # Default to US
     unitSystem = "us"
     windUnit = 2.234  # mph
@@ -2113,6 +2108,9 @@ async def PW_Forecast(
 
     if readECMWF:
         zarrTasks["ECMWF"] = weather.zarr_read("ECMWF", ECMWF_Zarr, x_p, y_p)
+
+    # Initialize WMO alert data
+    WMO_alertDat = None
 
     if readWMOAlerts:
         wmo_alerts_lats = np.arange(-60, 85, 0.0625)
@@ -4488,6 +4486,8 @@ async def PW_Forecast(
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     alertDict = []
+    alertList = []
+
     # If alerts are requested and in the US
     try:
         if (
@@ -4508,13 +4508,9 @@ async def PW_Forecast(
             alerts_y_p = np.argmin(abslat)
             alerts_x_p = np.argmin(abslon)
 
-            alertList = []
-
             alertDat = NWS_Alerts_Zarr[alerts_y_p, alerts_x_p]
 
-            if alertDat == "":
-                alertList = []
-            else:
+            if alertDat != "":
                 # Match if any alerts
                 alerts = str(alertDat).split("|")
                 # Loop through each alert
@@ -4558,11 +4554,67 @@ async def PW_Forecast(
                     }
 
                     alertList.append(dict(alertDict))
-        else:
-            alertList = []
 
     except Exception:
         print("An Alert error occurred:")
+        print(traceback.print_exc())
+
+    # Process WMO alerts for non-US locations
+    try:
+        if (
+            (not timeMachine)
+            and (exAlerts == 0)
+            and readWMOAlerts
+            and WMO_alertDat is not None
+            and WMO_alertDat != ""
+        ):
+            # WMO alerts use the same grid as was calculated earlier:
+            # wmo_alerts_lats = np.arange(-60, 85, 0.0625)
+            # wmo_alerts_lons = np.arange(-180, 180, 0.0625)
+            # WMO_alertDat was already read at line 2125
+
+            # Match if any alerts
+            wmo_alerts = str(WMO_alertDat).split("|")
+            # Loop through each alert
+            for wmo_alert in wmo_alerts:
+                # Extract alert details
+                # Format: event}{description}{area_desc}{effective}{expires}{severity}{URL
+                wmo_alertDetails = wmo_alert.split("}{")
+
+                # Parse times - WMO times are in ISO format
+                alertOnset = datetime.datetime.strptime(
+                    wmo_alertDetails[3], "%Y-%m-%dT%H:%M:%S%z"
+                ).astimezone(utc)
+                alertEnd = datetime.datetime.strptime(
+                    wmo_alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
+                ).astimezone(utc)
+
+                wmo_alertDict = {
+                    "title": wmo_alertDetails[0],
+                    "regions": [
+                        s.lstrip() for s in wmo_alertDetails[2].split(";") if s.strip()
+                    ],
+                    "severity": wmo_alertDetails[5],
+                    "time": int(
+                        (
+                            alertOnset
+                            - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(utc)
+                        ).total_seconds()
+                    ),
+                    "expires": int(
+                        (
+                            alertEnd
+                            - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(utc)
+                        ).total_seconds()
+                    ),
+                    "description": wmo_alertDetails[1],
+                    "uri": wmo_alertDetails[6],
+                }
+
+                alertList.append(dict(wmo_alertDict))
+
+    except Exception:
+        print("A WMO Alert error occurred:")
         print(traceback.print_exc())
 
     # Timing Check
