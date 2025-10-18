@@ -35,6 +35,7 @@ from pirateweather_translations.dynamic_loader import load_all_translations
 from pytz import timezone, utc
 from timezonefinder import TimezoneFinder
 
+from API.api_utils import get_alert_field
 from API.constants.api_const import (
     API_VERSION,
     APPARENT_TEMP_CONSTS,
@@ -1331,11 +1332,6 @@ async def PW_Forecast(
 
     if timeMachine:
         exAlerts = 1
-
-    # Exclude Alerts outside US
-    if exAlerts == 0:
-        if cull(az_Lon, lat) == 0:
-            exAlerts = 1
 
     # Default to US
     unitSystem = "us"
@@ -4488,6 +4484,8 @@ async def PW_Forecast(
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     alertDict = []
+    alertList = []
+
     # If alerts are requested and in the US
     try:
         if (
@@ -4523,14 +4521,14 @@ async def PW_Forecast(
                     alertDetails = alert.split("}{")
 
                     alertOnset = datetime.datetime.strptime(
-                        alertDetails[3], "%Y-%m-%dT%H:%M:%S%z"
+                        get_alert_field(alertDetails, 3), "%Y-%m-%dT%H:%M:%S%z"
                     ).astimezone(utc)
                     alertEnd = datetime.datetime.strptime(
-                        alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
+                        get_alert_field(alertDetails, 4), "%Y-%m-%dT%H:%M:%S%z"
                     ).astimezone(utc)
 
                     # Format description newlines
-                    alertDescript = alertDetails[1]
+                    alertDescript = get_alert_field(alertDetails, 1)
                     # Step 1: Replace double newlines with a single newline
                     formatted_text = re.sub(r"(?<!\n)\n(?!\n)", " ", alertDescript)
 
@@ -4538,9 +4536,9 @@ async def PW_Forecast(
                     formatted_text = re.sub(r"\n\n", "\n", formatted_text)
 
                     alertDict = {
-                        "title": alertDetails[0],
-                        "regions": [s.lstrip() for s in alertDetails[2].split(";")],
-                        "severity": alertDetails[5],
+                        "title": get_alert_field(alertDetails, 0),
+                        "regions": [s.lstrip() for s in get_alert_field(alertDetails, 2).split(";")],
+                        "severity":get_alert_field(alertDetails, 5),
                         "time": int(
                             (
                                 alertOnset
@@ -4554,16 +4552,67 @@ async def PW_Forecast(
                             ).total_seconds()
                         ),
                         "description": formatted_text,
-                        "uri": alertDetails[6],
+                        "uri": get_alert_field(alertDetails, 6),
                     }
 
                     alertList.append(dict(alertDict))
-        else:
-            alertList = []
 
     except Exception:
         print("An Alert error occurred:")
         print(traceback.print_exc())
+
+    # If alerts are requested and NOT in the US, try WMO alerts (global)
+    if (not timeMachine) and (exAlerts == 0) and (cull(az_Lon, lat) == 0):
+        try:
+            if WMO_alertDat:
+                alerts = str(WMO_alertDat).split("|")
+                for alert in alerts:
+                    alertDetails = alert.split("}{")
+
+                    # Some WMO entries may not have the exact number of fields; guard access
+                    try:
+                        alertOnset = datetime.datetime.strptime(
+                            get_alert_field(alertDetails, 3), "%Y-%m-%dT%H:%M:%S%z"
+                        ).astimezone(utc)
+                        alertEnd = datetime.datetime.strptime(
+                            get_alert_field(alertDetails, 4), "%Y-%m-%dT%H:%M:%S%z"
+                        ).astimezone(utc)
+                    except (ValueError, IndexError):
+                        # If timestamps missing/invalid, skip this alert
+                        continue
+
+                    alertDict = {
+                        "title": get_alert_field(alertDetails, 0),
+                        "regions": [
+                            s.lstrip()
+                            for s in (
+                                get_alert_field(alertDetails, 2).split(";")
+                                if len(alertDetails) > 2
+                                else []
+                            )
+                        ],
+                        "severity": get_alert_field(alertDetails, 5),
+                        "time": int(
+                            (
+                                alertOnset
+                                - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(utc)
+                            ).total_seconds()
+                        ),
+                        "expires": int(
+                            (
+                                alertEnd
+                                - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(utc)
+                            ).total_seconds()
+                        ),
+                        "description": get_alert_field(alertDetails, 1),
+                        "uri": get_alert_field(alertDetails, 6),
+                    }
+
+                    # append to alertList (may overwrite previous US alerts if any; that's intended for non-US)
+                    alertList.append(dict(alertDict))
+
+        except Exception:
+            logger.exception("An WMO Alert error occurred:")
 
     # Timing Check
     if TIMING:
