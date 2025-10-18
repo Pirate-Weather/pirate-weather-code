@@ -1020,6 +1020,7 @@ async def PW_Forecast(
     units: Union[str, None] = None,
     extend: Union[str, None] = None,
     exclude: Union[str, None] = None,
+    include: Union[str, None] = None,
     lang: Union[str, None] = None,
     version: Union[str, None] = None,
     tmextra: Union[str, None] = None,
@@ -1046,11 +1047,6 @@ async def PW_Forecast(
     readECMWF = False
     readNBM = False
     readGEFS = False
-
-    # Testing ECMWF/ RTMA_RU/ WMO_Alerts
-    readECMWF = True
-    readRTMA_RU = False
-    readWMOAlerts = True
 
     STAGE = os.environ.get("STAGE", "PROD")
 
@@ -1274,6 +1270,11 @@ async def PW_Forecast(
     else:
         excludeParams = exclude
 
+    if not include:
+        includeParams = ""
+    else:
+        includeParams = include
+
     if not extraVars:
         extraVars = []
     else:
@@ -1289,7 +1290,7 @@ async def PW_Forecast(
     exHRRR = 0
     exGEFS = 0
     exRTMA_RU = 0
-    exECMWF = 0
+    # exECMWF = 0
     summaryText = True
 
     if "currently" in excludeParams:
@@ -1312,10 +1313,17 @@ async def PW_Forecast(
         exGEFS = 1
     if "rtma_ru" in excludeParams:
         exRTMA_RU = 1
-    if "ecmwf_ifs" in excludeParams:
-        exECMWF = 1
+    # if "ecmwf_ifs" in excludeParams:
+    #    exECMWF = 1
     if "summary" in excludeParams:
         summaryText = False
+
+    # ECMWF is opt-in via include=ecmwf_ifs
+    if "ecmwf_ifs" in includeParams:
+        readECMWF = True
+
+    readRTMA_RU = False
+    readWMOAlerts = True
 
     # Set up timemache params
     if timeMachine and not tmExtra:
@@ -1968,7 +1976,7 @@ async def PW_Forecast(
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     dataOut_ecmwf = False
-    readECMWF = not timeMachine and ECMWF_Zarr is not None and exECMWF == 0
+    # readECMWF = not timeMachine and ECMWF_Zarr is not None and exECMWF == 0
 
     if TIMING:
         print("### ECMWF Detail END ###")
@@ -2196,7 +2204,8 @@ async def PW_Forecast(
     if readECMWF:
         dataOut_ecmwf = zarr_results["ECMWF"]
         if dataOut_ecmwf is not False:
-            ecmwfRunTime = dataOut_ecmwf[HISTORY_PERIODS["ECMWF"] - 1, 0]
+            # ECMWF forecast starts at hour +3, so base_time is at HISTORY_PERIODS - 3
+            ecmwfRunTime = dataOut_ecmwf[HISTORY_PERIODS["ECMWF"] - 3, 0]
             # ECMWF IFS uses the same grid as GFS - only add to sourceIDX if data exists
             sourceIDX["ecmwf_ifs"] = dict()
             sourceIDX["ecmwf_ifs"]["x"] = int(x_p)
@@ -2539,7 +2548,10 @@ async def PW_Forecast(
 
         # ECMWF
         if "ecmwf_ifs" in sourceList:
-            ECMWF_StartIDX = nearest_index(dataOut_ecmwf[:, 0], baseDayUTC_Grib)
+            # ECMWF forecast starts at hour +3, causing a time offset in the data
+            # The data array is offset by ~3 hours from its timestamps
+            # Adjust the search time by +3 hours to find the correct data
+            ECMWF_StartIDX = nearest_index(dataOut_ecmwf[:, 0], baseDayUTC_Grib + 10800)
             ECMWF_EndIDX = min((len(dataOut_ecmwf), (numHours + ECMWF_StartIDX)))
             ECMWF_Merged = np.full((numHours, max(ECMWF.values()) + 1), np.nan)
             ECMWF_Merged[
@@ -3346,7 +3358,9 @@ async def PW_Forecast(
         prcipIntensityHour[:, 1] = HRRR_Merged[:, HRRR["intensity"]] * 3600
     # ECMWF
     if "ecmwf_ifs" in sourceList:
-        prcipIntensityHour[:, 2] = ECMWF_Merged[:, ECMWF["intensity"]] * 3600
+        # Use APCP_Mean (ensemble mean) instead of tprate for better accuracy
+        # APCP_Mean is already in m/h (hourly rate), convert to mm/h
+        prcipIntensityHour[:, 2] = ECMWF_Merged[:, ECMWF["accum_mean"]] * 1000
     # GEFS or GFS
     if "gefs" in sourceList:
         prcipIntensityHour[:, 3] = GEFS_Merged[:, GEFS["accum"]]
@@ -3667,7 +3681,9 @@ async def PW_Forecast(
         PrecpAccumHour[:, 1] = HRRR_Merged[:, HRRR["accum"]]
     # ECMWF
     if "ecmwf_ifs" in sourceList:
-        PrecpAccumHour[:, 2] = ECMWF_Merged[:, ECMWF["accum"]]
+        # Use APCP_Mean for accumulation to match intensity source
+        # APCP_Mean is in m/h, convert to match expected accumulation units
+        PrecpAccumHour[:, 2] = ECMWF_Merged[:, ECMWF["accum_mean"]]
     # GEFS
     if "gefs" in sourceList:
         PrecpAccumHour[:, 3] = GEFS_Merged[:, GEFS["accum"]]
