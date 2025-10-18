@@ -3670,7 +3670,9 @@ async def PW_Forecast(
         PrecpAccumHour[:, 1] = HRRR_Merged[:, HRRR["accum"]]
     # ECMWF
     if "ecmwf_ifs" in sourceList:
-        PrecpAccumHour[:, 2] = ECMWF_Merged[:, ECMWF["accum"]]
+        # Use APCP_Mean for accumulation to match intensity source
+        # APCP_Mean is in m/h, convert to match expected accumulation units
+        PrecpAccumHour[:, 2] = ECMWF_Merged[:, ECMWF["accum_mean"]]
     # GEFS
     if "gefs" in sourceList:
         PrecpAccumHour[:, 3] = GEFS_Merged[:, GEFS["accum"]]
