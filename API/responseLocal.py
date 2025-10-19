@@ -5089,7 +5089,9 @@ async def PW_Forecast(
             + GFS_Merged[currentIDX_hrrrh, GFS["vis"]] * interpFac2
         )
 
-    InterPcurrent[DATA_CURRENT["vis"]] = np.clip(InterPcurrent[DATA_CURRENT["vis"]], 0, 16090) * visUnits
+    InterPcurrent[DATA_CURRENT["vis"]] = (
+        np.clip(InterPcurrent[DATA_CURRENT["vis"]], 0, 16090) * visUnits
+    )
 
     # Ozone from GFS
     InterPcurrent[DATA_CURRENT["ozone"]] = clipLog(
