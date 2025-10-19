@@ -62,6 +62,7 @@ from API.constants.clip_const import (
     CLIP_PRESSURE,
     CLIP_PROB,
     CLIP_SMOKE,
+    CLIP_SOLAR,
     CLIP_TEMP,
     CLIP_UV,
     CLIP_VIS,
@@ -2419,7 +2420,7 @@ async def PW_Forecast(
 
     numHours = len(hour_array)
 
-    InterPhour = np.full((numHours, 28), np.nan)  # Time, Intensity,Probability
+    InterPhour = np.full((numHours, 29), np.nan)  # Time, Intensity,Probability
 
     hour_array_grib = (
         (hour_array - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0)))
@@ -2955,6 +2956,13 @@ async def PW_Forecast(
                 minute_array_grib,
                 HRRR_Merged[:, 0].squeeze(),
                 HRRR_Merged[:, HRRR["refc"]],
+                left=np.nan,
+                right=np.nan,
+            )
+            hrrrSubHInterpolation[:, HRRR_SUBH["solar"]] = np.interp(
+                minute_array_grib,
+                HRRR_Merged[:, 0].squeeze(),
+                HRRR_Merged[:, HRRR["solar"]],
                 left=np.nan,
                 right=np.nan,
             )
@@ -3771,6 +3779,36 @@ async def PW_Forecast(
             * pressUnits
         )
 
+    # Solar
+    if "nbm" in sourceList:
+        InterPhour[:, DATA_HOURLY["solar"]] = NBM_Merged[:, NBM["solar"]]
+    if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+        InterPhour[:, DATA_HOURLY["solar"]] = HRRR_Merged[:, HRRR["solar"]]
+    if "gfs" in sourceList:
+        InterPhour[:, DATA_HOURLY["solar"]] = GFS_Merged[:, GFS["solar"]]
+
+    InterPhour[:, DATA_HOURLY["solar"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["solar"]],
+        CLIP_SOLAR["min"],
+        CLIP_SOLAR["max"],
+        "Solar Hour",
+    )
+
+    # CAPE
+    if "nbm" in sourceList:
+        InterPhour[:, DATA_HOURLY["cape"]] = NBM_Merged[:, NBM["cape"]]
+    if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+        InterPhour[:, DATA_HOURLY["cape"]] = HRRR_Merged[:, HRRR["cape"]]
+    if "gfs" in sourceList:
+        InterPhour[:, DATA_HOURLY["cape"]] = GFS_Merged[:, GFS["cape"]]
+
+    InterPhour[:, DATA_HOURLY["cape"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["cape"]],
+        CLIP_SOLAR["min"],
+        CLIP_SOLAR["max"],
+        "CAPE Hour",
+    )
+
     # Set temperature units
     if tempUnits == 0:
         InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] = (
@@ -4068,6 +4106,8 @@ async def PW_Forecast(
             "nearestStormBearing": int(InterPhour[idx, DATA_HOURLY["storm_dir"]]),
             "fireIndex": InterPhour[idx, DATA_HOURLY["fire"]],
             "feelsLike": InterPhour[idx, DATA_HOURLY["feels_like"]],
+            "solar": InterPhour[idx, DATA_HOURLY["solar"]],
+            "cape": InterPhour[idx, DATA_HOURLY["cape"]],
         }
 
         # Add station pressure if requested
@@ -4108,6 +4148,8 @@ async def PW_Forecast(
             hourItem.pop("nearestStormBearing", None)
             hourItem.pop("fireIndex", None)
             hourItem.pop("feelsLike", None)
+            hourItem.pop("solar", None)
+            hourItem.pop("cape", None)
 
         if timeMachine and not tmExtra:
             hourItem.pop("uvIndex", None)
@@ -4283,26 +4325,48 @@ async def PW_Forecast(
 
     # Round
     # Round all to 2 except precipitations
-    InterPday[:, 5:18] = InterPday[:, 5:18].round(2)
+    InterPday[:, DATA_DAY["temp"] : DATA_DAY["sunset"]] = InterPday[
+        :, DATA_DAY["temp"] : DATA_DAY["sunset"]
+    ].round(2)
     InterPday[:, DATA_DAY["station_pressure"]] = InterPday[
         :, DATA_DAY["station_pressure"]
     ].round(2)
 
     InterPdayMax[:, DATA_DAY["prob"]] = InterPdayMax[:, DATA_DAY["prob"]].round(2)
-    InterPdayMax[:, 5:18] = InterPdayMax[:, 5:18].round(2)
-    InterPdayMax[:, DATA_DAY["fire"]] = InterPdayMax[:, DATA_DAY["fire"]].round(2)
+    InterPdayMax[:, DATA_DAY["temp"] : DATA_DAY["sunset"]] = InterPdayMax[
+        :, DATA_DAY["temp"] : DATA_DAY["sunset"]
+    ].round(2)
+    InterPdayMax[:, DATA_DAY["fire"] :] = InterPdayMax[:, DATA_DAY["fire"] :].round(2)
 
-    InterPdayMin[:, 5:18] = InterPdayMin[:, 5:18].round(2)
-    InterPdaySum[:, 5:18] = InterPdaySum[:, 5:18].round(2)
-    InterPdayHigh[:, 5:18] = InterPdayHigh[:, 5:18].round(2)
-    InterPdayLow[:, 5:18] = InterPdayLow[:, 5:18].round(2)
+    InterPdayMin[:, DATA_DAY["temp"] : DATA_DAY["sunset"]] = InterPdayMin[
+        :, DATA_DAY["temp"] : DATA_DAY["sunset"]
+    ].round(2)
+    InterPdaySum[:, DATA_DAY["temp"] : DATA_DAY["sunset"]] = InterPdaySum[
+        :, DATA_DAY["temp"] : DATA_DAY["sunset"]
+    ].round(2)
+    InterPdayHigh[:, DATA_DAY["temp"] : DATA_DAY["sunset"]] = InterPdayHigh[
+        :, DATA_DAY["temp"] : DATA_DAY["sunset"]
+    ].round(2)
+    InterPdayLow[:, DATA_DAY["temp"] : DATA_DAY["sunset"]] = InterPdayLow[
+        :, DATA_DAY["temp"] : DATA_DAY["sunset"]
+    ].round(2)
 
-    InterPday[:, 1:5] = InterPday[:, 1:5].round(4)
-    InterPdaySum[:, 1:5] = InterPdaySum[:, 1:5].round(4)
-    InterPdayMax[:, 1:3] = InterPdayMax[:, 1:3].round(4)
-    InterPdayMax[:, 4:5] = InterPdayMax[:, 4:5].round(4)
-    InterPdaySum[:, 21:24] = InterPdaySum[:, 21:24].round(4)
-    InterPdayMax[:, 21:24] = InterPdayMax[:, 21:24].round(4)
+    InterPday[:, 1 : DATA_DAY["temp"]] = InterPday[:, 1 : DATA_DAY["temp"]].round(4)
+    InterPdaySum[:, 1 : DATA_DAY["temp"]] = InterPdaySum[:, 1 : DATA_DAY["temp"]].round(
+        4
+    )
+    InterPdayMax[:, 1 : DATA_DAY["prob"]] = InterPdayMax[:, 1 : DATA_DAY["prob"]].round(
+        4
+    )
+    InterPdayMax[:, 4 : DATA_DAY["temp"]] = InterPdayMax[:, 4 : DATA_DAY["temp"]].round(
+        4
+    )
+    InterPdaySum[:, DATA_DAY["rain"] : DATA_DAY["fire"]] = InterPdaySum[
+        :, DATA_DAY["rain"] : DATA_DAY["fire"]
+    ].round(4)
+    InterPdayMax[:, DATA_DAY["rain"] : DATA_DAY["fire"]] = InterPdayMax[
+        :, DATA_DAY["rain"] : DATA_DAY["fire"]
+    ].round(4)
 
     if TIMING:
         print("Daily Loop start")
@@ -4427,6 +4491,10 @@ async def PW_Forecast(
             "iceAccumulation": InterPdaySum[idx, DATA_DAY["ice"]],
             "fireIndexMax": InterPdayMax[idx, DATA_DAY["fire"]],
             "fireIndexMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["fire"]]),
+            "solarMax": InterPdayMax[idx, DATA_DAY["solar"]],
+            "solarMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["solar"]]),
+            "capeMax": InterPdayMax[idx, DATA_DAY["cape"]],
+            "capeMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["cape"]]),
         }
 
         # Add station pressure if requested
@@ -4467,6 +4535,10 @@ async def PW_Forecast(
             dayObject.pop("iceAccumulation", None)
             dayObject.pop("fireIndexMax", None)
             dayObject.pop("fireIndexMaxTime", None)
+            dayObject.pop("solarIndexMax", None)
+            dayObject.pop("solarIndexMaxTime", None)
+            dayObject.pop("capeIndexMax", None)
+            dayObject.pop("capeIndexMaxTime", None)
 
         if timeMachine and not tmExtra:
             dayObject.pop("precipProbability", None)
@@ -4649,7 +4721,7 @@ async def PW_Forecast(
 
     currentIDX_hrrrh_A = np.max((currentIDX_hrrrh - 1, 0))
 
-    InterPcurrent = np.zeros(shape=22)  # Time, Intensity,Probability
+    InterPcurrent = np.zeros(shape=24)  # Time, Intensity,Probability
     InterPcurrent[DATA_CURRENT["time"]] = int(minute_array_grib[0])
 
     # Get prep probability, intensity and error from minutely
@@ -5017,7 +5089,7 @@ async def PW_Forecast(
             + GFS_Merged[currentIDX_hrrrh, GFS["vis"]] * interpFac2
         )
 
-    InterPcurrent[DATA_CURRENT["vis"]] = np.clip(InterPcurrent[14], 0, 16090) * visUnits
+    InterPcurrent[DATA_CURRENT["vis"]] = np.clip(InterPcurrent[DATA_CURRENT["vis"]], 0, 16090) * visUnits
 
     # Ozone from GFS
     InterPcurrent[DATA_CURRENT["ozone"]] = clipLog(
@@ -5057,8 +5129,60 @@ async def PW_Forecast(
     else:
         InterPcurrent[DATA_CURRENT["smoke"]] = MISSING_DATA
 
+    # Solar from subH, then NBM, then, HRRR, then GFS
+    if "hrrrsubh" in sourceList:
+        InterPcurrent[DATA_CURRENT["solar"]] = hrrrSubHInterpolation[
+            0, HRRR_SUBH["solar"]
+        ]
+    elif "nbm" in sourceList:
+        InterPcurrent[DATA_CURRENT["solar"]] = (
+            NBM_Merged[currentIDX_hrrrh_A, NBM["solar"]] * interpFac1
+            + NBM_Merged[currentIDX_hrrrh, NBM["solar"]] * interpFac2
+        )
+    elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+        InterPcurrent[DATA_CURRENT["solar"]] = (
+            HRRR_Merged[currentIDX_hrrrh_A, HRRR["solar"]] * interpFac1
+            + HRRR_Merged[currentIDX_hrrrh, HRRR["solar"]] * interpFac2
+        )
+    else:
+        InterPcurrent[DATA_CURRENT["solar"]] = (
+            GFS_Merged[currentIDX_hrrrh_A, GFS["solar"]] * interpFac1
+            + GFS_Merged[currentIDX_hrrrh, GFS["solar"]] * interpFac2
+        )
+
+    InterPcurrent[DATA_CURRENT["solar"]] = clipLog(
+        InterPcurrent[DATA_CURRENT["solar"]],
+        CLIP_SOLAR["min"],
+        CLIP_SOLAR["max"],
+        "Solar Current",
+    )
+
+    # CAPE from NBM, then, HRRR, then GFS
+    if "nbm" in sourceList:
+        InterPcurrent[DATA_CURRENT["cape"]] = (
+            NBM_Merged[currentIDX_hrrrh_A, NBM["cape"]] * interpFac1
+            + NBM_Merged[currentIDX_hrrrh, NBM["cape"]] * interpFac2
+        )
+    elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+        InterPcurrent[DATA_CURRENT["cape"]] = (
+            HRRR_Merged[currentIDX_hrrrh_A, HRRR["cape"]] * interpFac1
+            + HRRR_Merged[currentIDX_hrrrh, HRRR["cape"]] * interpFac2
+        )
+    else:
+        InterPcurrent[DATA_CURRENT["cape"]] = (
+            GFS_Merged[currentIDX_hrrrh_A, GFS["cape"]] * interpFac1
+            + GFS_Merged[currentIDX_hrrrh, GFS["cape"]] * interpFac2
+        )
+
+    InterPcurrent[DATA_CURRENT["cape"]] = clipLog(
+        InterPcurrent[DATA_CURRENT["cape"]],
+        CLIP_SOLAR["min"],
+        CLIP_SOLAR["max"],
+        "CAPE Current",
+    )
+
     # Convert wind speed from its display unit to m/s for the apparent temperature function
-    currentWindSpeedMps = InterPcurrent[9] / windUnit
+    currentWindSpeedMps = InterPcurrent[DATA_CURRENT["wind"]] / windUnit
 
     # Calculate the apparent temperature
     InterPcurrent[DATA_CURRENT["apparent"]] = calculate_apparent_temperature(
@@ -5267,6 +5391,8 @@ async def PW_Forecast(
         returnOBJ["currently"]["currentDayIce"] = dayZeroIce
         returnOBJ["currently"]["currentDayLiquid"] = dayZeroRain
         returnOBJ["currently"]["currentDaySnow"] = dayZeroSnow
+        returnOBJ["currently"]["solar"] = InterPcurrent[DATA_CURRENT["solar"]]
+        returnOBJ["currently"]["cape"] = InterPcurrent[DATA_CURRENT["cape"]]
 
         if "stationPressure" in extraVars:
             returnOBJ["currently"]["stationPressure"] = InterPcurrent[
@@ -5318,6 +5444,8 @@ async def PW_Forecast(
             returnOBJ["currently"].pop("currentDaySnow", None)
             returnOBJ["currently"].pop("fireIndex", None)
             returnOBJ["currently"].pop("feelsLike", None)
+            returnOBJ["currently"].pop("solar", None)
+            returnOBJ["currently"].pop("cape", None)
 
         if timeMachine and not tmExtra:
             returnOBJ["currently"].pop("nearestStormDistance", None)

@@ -16,3 +16,5 @@ CLIP_FIRE = {"min": 0, "max": 100}
 CLIP_SMOKE = {"min": 0, "max": 500}
 CLIP_FEELS_LIKE = {"min": 183, "max": 333}
 CLIP_GLOBAL = {"min": -1000, "max": 10000}
+CLIP_SOLAR = {"min": 0, "max": 10000}
+CLIP_CAPE = {"min": 0, "max": 10000}
