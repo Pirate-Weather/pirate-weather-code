@@ -71,7 +71,8 @@ PRECIP_IDX = {
 }
 
 # API versioning and ingest version constants
-API_VERSION = "V2.8b"
+# Version scheme is: Major.Minor.Patch
+API_VERSION = "V2.8c"
 
 # Command priorities
 NICE_PRIORITY = 20
