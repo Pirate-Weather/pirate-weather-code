@@ -78,6 +78,21 @@ GEFS = {
     "rain": 7,
 }
 
+ECMWF = {
+    "pressure": 1,
+    "temp": 2,
+    "dew": 3,
+    "wind_u": 4,
+    "wind_v": 5,
+    "intensity": 6,
+    "accum": 7,
+    "ptype": 8,
+    "cloud": 9,
+    "prob": 10,
+    "accum_mean": 11,
+    "accum_stddev": 12,
+}
+
 NBM = {
     "gust": 1,
     "temp": 2,
@@ -101,3 +116,15 @@ NBM = {
 }
 
 NBM_FIRE_INDEX = 1
+
+RTMA_RU = {
+    "vis": 1,
+    "gust": 2,
+    "pressure": 3,
+    "temp": 4,
+    "dew": 5,
+    "humidity": 6,
+    "cloud": 7,
+    "wind_u": 8,
+    "wind_v": 9,
+}
