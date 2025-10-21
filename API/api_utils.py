@@ -10,6 +10,7 @@ from API.constants.shared_const import KELVIN_TO_CELSIUS
 
 logger = logging.getLogger(__name__)
 
+
 def calculate_apparent_temperature(airTemp, humidity, wind):
     """
     Calculates the apparent temperature temperature based on air temperature, wind speed and humidity
@@ -59,6 +60,7 @@ def calculate_apparent_temperature(airTemp, humidity, wind):
         CLIP_TEMP["max"],
         "Apparent Temperature Current",
     )
+
 
 def calculate_apparent_temperature_solar(airTemp, humidity, wind, solar):
     """
@@ -111,6 +113,7 @@ def calculate_apparent_temperature_solar(airTemp, humidity, wind, solar):
         CLIP_TEMP["max"],
         "Apparent Temperature Current",
     )
+
 
 def clipLog(data, min, max, name):
     """

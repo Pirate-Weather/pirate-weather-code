@@ -3744,7 +3744,7 @@ async def PW_Forecast(
         InterPhour[:, DATA_HOURLY["temp"]],  # Air temperature in Kelvin
         InterPhour[:, DATA_HOURLY["humidity"]],  # Relative humidity (0.0 to 1.0)
         windSpeedMps,  # Wind speed in meters per second
-        InterPhour[:, DATA_HOURLY["solar"]] # Solar radiation in W/m^2
+        InterPhour[:, DATA_HOURLY["solar"]],  # Solar radiation in W/m^2
     )
 
     ### Feels Like Temperature
@@ -5192,7 +5192,7 @@ async def PW_Forecast(
         InterPcurrent[DATA_CURRENT["temp"]],  # Air temperature in Kelvin
         InterPcurrent[DATA_CURRENT["humidity"]],  # Relative humidity (0.0 to 1.0)
         currentWindSpeedMps,  # Wind speed in meters per second
-        InterPcurrent[DATA_CURRENT["solar"]] # Solar radiation in W/m^2
+        InterPcurrent[DATA_CURRENT["solar"]],  # Solar radiation in W/m^2
     )
 
     if "nbm" in sourceList:
@@ -5897,6 +5897,7 @@ def dataSync() -> None:
             update_zarr_store(False)
 
     logger.info("Sync End!")
+
 
 def nearest_index(a, v):
     # Slightly faster than a simple linear search for large arrays
