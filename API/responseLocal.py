@@ -35,9 +35,9 @@ from pirateweather_translations.dynamic_loader import load_all_translations
 from pytz import timezone, utc
 from timezonefinder import TimezoneFinder
 
+from API.api_utils import calculate_apparent_temperature_solar, clipLog
 from API.constants.api_const import (
     API_VERSION,
-    APPARENT_TEMP_CONSTS,
     DBZ_CONST,
     GLOBE_TEMP_CONST,
     LARGEST_DIR_INIT,
@@ -3740,10 +3740,11 @@ async def PW_Forecast(
     windSpeedMps = InterPhour[:, DATA_HOURLY["wind"]] / windUnit
 
     # Calculate the apparent temperature
-    InterPhour[:, DATA_HOURLY["apparent"]] = calculate_apparent_temperature(
+    InterPhour[:, DATA_HOURLY["apparent"]] = calculate_apparent_temperature_solar(
         InterPhour[:, DATA_HOURLY["temp"]],  # Air temperature in Kelvin
         InterPhour[:, DATA_HOURLY["humidity"]],  # Relative humidity (0.0 to 1.0)
         windSpeedMps,  # Wind speed in meters per second
+        InterPhour[:, DATA_HOURLY["solar"]] # Solar radiation in W/m^2
     )
 
     ### Feels Like Temperature
@@ -5187,10 +5188,11 @@ async def PW_Forecast(
     currentWindSpeedMps = InterPcurrent[DATA_CURRENT["wind"]] / windUnit
 
     # Calculate the apparent temperature
-    InterPcurrent[DATA_CURRENT["apparent"]] = calculate_apparent_temperature(
+    InterPcurrent[DATA_CURRENT["apparent"]] = calculate_apparent_temperature_solar(
         InterPcurrent[DATA_CURRENT["temp"]],  # Air temperature in Kelvin
         InterPcurrent[DATA_CURRENT["humidity"]],  # Relative humidity (0.0 to 1.0)
         currentWindSpeedMps,  # Wind speed in meters per second
+        InterPcurrent[DATA_CURRENT["solar"]] # Solar radiation in W/m^2
     )
 
     if "nbm" in sourceList:
@@ -5895,105 +5897,6 @@ def dataSync() -> None:
             update_zarr_store(False)
 
     logger.info("Sync End!")
-
-
-def calculate_apparent_temperature(airTemp, humidity, wind):
-    """
-    Calculates the apparent temperature temperature based on air temperature, wind speed and humidity
-    Formula from: https://github.com/breezy-weather/breezy-weather/discussions/1085
-    AT = Ta + 0.33 * rh / 100 * 6.105 * exp(17.27 * Ta / (237.7 + Ta)) - 0.70 * ws - 4.00
-
-    Parameters:
-    - airTemperature (float): Air temperature
-    - humidity (float): Relative humidity
-    - windSpeed (float): Wind speed in meters per second
-
-    Returns:
-    - float: Apparent temperature
-    """
-
-    # Convert air_temp from Kelvin to Celsius for the formula parts that use Celsius
-    airTempC = airTemp - KELVIN_TO_CELSIUS
-
-    # Calculate water vapor pressure 'e'
-    # Ensure humidity is not 0 for calculation, replace with a small non-zero value if needed
-    # The original equation does not guard for zero humidity. If relative_humidity_0_1 is 0, e will be 0.
-    e = (
-        humidity
-        * APPARENT_TEMP_CONSTS["e_const"]
-        * np.exp(
-            APPARENT_TEMP_CONSTS["exp_a"]
-            * airTempC
-            / (APPARENT_TEMP_CONSTS["exp_b"] + airTempC)
-        )
-    )
-
-    # Calculate apparent temperature in Celsius
-    apparentTempC = (
-        airTempC
-        + APPARENT_TEMP_CONSTS["humidity_factor"] * e
-        - APPARENT_TEMP_CONSTS["wind_factor"] * wind
-        + APPARENT_TEMP_CONSTS["const"]
-    )
-
-    # Convert back to Kelvin
-    apparentTempK = apparentTempC + KELVIN_TO_CELSIUS
-
-    # Clip between -90 and 60
-    return clipLog(
-        apparentTempK,
-        CLIP_TEMP["min"],
-        CLIP_TEMP["max"],
-        "Apparent Temperature Current",
-    )
-
-
-def clipLog(data, min, max, name):
-    """
-    Clip the data between min and max. Log if there is an error
-    """
-
-    # Print if the clipping is larger than 25 of the min
-    if data.min() < (min - 0.25):
-        # Print the data and the index it occurs
-        logger.error("Min clipping required for " + name)
-        logger.error("Min Value: " + str(data.min()))
-        if isinstance(data, np.ndarray):
-            logger.error("Min Index: " + str(np.where(data == data.min())))
-
-        # Replace values below the threshold with np.nan
-        if np.isscalar(data):
-            if data < min:
-                data = np.nan
-        else:
-            data = np.array(data, dtype=float)
-            data[data < min] = np.nan
-
-    else:
-        data = np.clip(data, a_min=min, a_max=None)
-
-    # Same for max
-    if data.max() > (max + 0.25):
-        logger.error("Max clipping required for " + name)
-        logger.error("Max Value: " + str(data.max()))
-
-        # Print the data and the index it occurs
-        if isinstance(data, np.ndarray):
-            logger.error("Max Index: " + str(np.where(data == data.max())))
-
-        # Replace values above the threshold with np.nan
-        if np.isscalar(data):
-            if data > max:
-                data = np.nan
-        else:
-            data = np.array(data, dtype=float)
-            data[data > max] = np.nan
-
-    else:
-        data = np.clip(data, a_min=None, a_max=max)
-
-    return data
-
 
 def nearest_index(a, v):
     # Slightly faster than a simple linear search for large arrays

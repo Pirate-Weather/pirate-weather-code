@@ -57,6 +57,16 @@ APPARENT_TEMP_CONSTS = {
     "e_const": 6.105,
 }
 
+# Grouped apparent temperature solar constants
+APPARENT_TEMP_SOLAR_CONSTS = {
+    "humidity_factor": 0.48,
+    "wind_factor": 0.70,
+    "const": -4.25,
+    "exp_a": 17.27,
+    "exp_b": 237.7,
+    "e_const": 6.105,
+}
+
 MAGNUS_FORMULA_CONSTS = {
     "dew_factor": 17.625,
     "temp_factor": 243.04,
