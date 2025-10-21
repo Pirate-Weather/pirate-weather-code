@@ -424,13 +424,14 @@ for i in range(hisPeriod, -1, -1):
     fxx = range(1, 2)
 
     # Create FastHerbie Object.
+    # Fallback to NOMADS of missing on AWS
     FH_histsub = FastHerbie(
         DATES,
         model="hrrr",
         fxx=fxx,
         product="sfc",
         verbose=False,
-        priority="aws",
+        priority=["aws", "nomads"],
         save_dir=tmpDIR,
     )
 
