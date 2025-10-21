@@ -3736,6 +3736,21 @@ async def PW_Forecast(
             "Fire Hour",
         )
 
+    # Solar
+    if "nbm" in sourceList:
+        InterPhour[:, DATA_HOURLY["solar"]] = NBM_Merged[:, NBM["solar"]]
+    if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+        InterPhour[:, DATA_HOURLY["solar"]] = HRRR_Merged[:, HRRR["solar"]]
+    if "gfs" in sourceList:
+        InterPhour[:, DATA_HOURLY["solar"]] = GFS_Merged[:, GFS["solar"]]
+
+    InterPhour[:, DATA_HOURLY["solar"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["solar"]],
+        CLIP_SOLAR["min"],
+        CLIP_SOLAR["max"],
+        "Solar Hour",
+    )
+
     # Convert wind speed from its display unit to m/s for the apparent temperature
     windSpeedMps = InterPhour[:, DATA_HOURLY["wind"]] / windUnit
 
@@ -3779,21 +3794,6 @@ async def PW_Forecast(
             )
             * pressUnits
         )
-
-    # Solar
-    if "nbm" in sourceList:
-        InterPhour[:, DATA_HOURLY["solar"]] = NBM_Merged[:, NBM["solar"]]
-    if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-        InterPhour[:, DATA_HOURLY["solar"]] = HRRR_Merged[:, HRRR["solar"]]
-    if "gfs" in sourceList:
-        InterPhour[:, DATA_HOURLY["solar"]] = GFS_Merged[:, GFS["solar"]]
-
-    InterPhour[:, DATA_HOURLY["solar"]] = clipLog(
-        InterPhour[:, DATA_HOURLY["solar"]],
-        CLIP_SOLAR["min"],
-        CLIP_SOLAR["max"],
-        "Solar Hour",
-    )
 
     # CAPE
     if "nbm" in sourceList:
