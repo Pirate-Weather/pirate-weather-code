@@ -62,7 +62,7 @@ def calculate_apparent_temperature(airTemp, humidity, wind):
     )
 
 
-def calculate_apparent_temperature_solar(airTemp, humidity, wind, solar):
+def calculate_apparent_temperature_solar(air_temp, humidity, wind, solar):
     """
     Calculates the apparent temperature temperature based on air temperature, wind speed and humidity and solar radiation
     Formula from: https://github.com/breezy-weather/breezy-weather/discussions/1085
@@ -79,7 +79,7 @@ def calculate_apparent_temperature_solar(airTemp, humidity, wind, solar):
     """
 
     # Convert air_temp from Kelvin to Celsius for the formula parts that use Celsius
-    airTempC = airTemp - KELVIN_TO_CELSIUS
+    air_temp_c = air_temp - KELVIN_TO_CELSIUS
 
     # Calculate water vapor pressure 'e'
     # Ensure humidity is not 0 for calculation, replace with a small non-zero value if needed
@@ -89,29 +89,32 @@ def calculate_apparent_temperature_solar(airTemp, humidity, wind, solar):
         * APPARENT_TEMP_SOLAR_CONSTS["e_const"]
         * np.exp(
             APPARENT_TEMP_SOLAR_CONSTS["exp_a"]
-            * airTempC
-            / (APPARENT_TEMP_SOLAR_CONSTS["exp_b"] + airTempC)
+            * air_temp_c
+            / (APPARENT_TEMP_SOLAR_CONSTS["exp_b"] + air_temp_c)
         )
     )
 
+    # Calculate the solar radiation (q)
+    q = solar * APPARENT_TEMP_SOLAR_CONSTS["q_factor"]
+
     # Calculate apparent temperature in Celsius
-    apparentTempC = (
-        airTempC
+    apparent_temp_c = (
+        air_temp_c
         + APPARENT_TEMP_SOLAR_CONSTS["humidity_factor"] * e
         - APPARENT_TEMP_SOLAR_CONSTS["wind_factor"] * wind
-        + (APPARENT_TEMP_SOLAR_CONSTS["wind_factor"] * solar) / (wind + 10)
+        + (APPARENT_TEMP_SOLAR_CONSTS["solar_factor"] * q) / (wind + 10)
         + APPARENT_TEMP_SOLAR_CONSTS["const"]
     )
 
     # Convert back to Kelvin
-    apparentTempK = apparentTempC + KELVIN_TO_CELSIUS
+    apparent_temp_k = apparent_temp_c + KELVIN_TO_CELSIUS
 
     # Clip between -90 and 60
     return clipLog(
-        apparentTempK,
-        CLIP_TEMP["min"],
-        CLIP_TEMP["max"],
-        "Apparent Temperature Current",
+       apparent_temp_k,
+       CLIP_TEMP["min"],
+       CLIP_TEMP["max"],
+       "Apparent Temperature Current",
     )
 
 

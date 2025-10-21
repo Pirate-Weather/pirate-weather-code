@@ -59,8 +59,12 @@ APPARENT_TEMP_CONSTS = {
 
 # Grouped apparent temperature solar constants
 APPARENT_TEMP_SOLAR_CONSTS = {
+    # Matches formula: 0.348 * rh / 100 * 6.105 * exp(...)
+    # Note: humidity is treated as 0-1 in the code -> multiply by 0.348
     "humidity_factor": 0.348,
     "wind_factor": 0.70,
+    "solar_factor": 0.70,
+    "q_factor": 0.10,
     "const": -4.25,
     "exp_a": 17.27,
     "exp_b": 237.7,
