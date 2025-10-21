@@ -424,6 +424,7 @@ for i in range(hisPeriod, -1, -1):
     fxx = range(1, 2)
 
     # Create FastHerbie Object.
+    # Fallback to NOMADS of missing on AWS
     FH_histsub = FastHerbie(
         DATES,
         model="hrrr",
