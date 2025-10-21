@@ -94,7 +94,11 @@ def calculate_apparent_temperature_solar(air_temp, humidity, wind, solar):
         )
     )
 
-    # Calculate the solar radiation (q)
+    # Calculate the effective solar term 'q' used in the apparent temperature formula.
+    # The model's `solar` value is Downward Short-Wave Radiation Flux in W/m^2.
+    # `q_factor` scales that irradiance to the empirical Q used in the formula
+    # (for example q_factor=0.1 reduces the raw W/m^2 to a smaller effective value).
+    # Tuning `q_factor` controls how strongly solar irradiance influences apparent temp.
     q = solar * APPARENT_TEMP_SOLAR_CONSTS["q_factor"]
 
     # Calculate apparent temperature in Celsius
