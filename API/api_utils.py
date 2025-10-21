@@ -111,10 +111,10 @@ def calculate_apparent_temperature_solar(air_temp, humidity, wind, solar):
 
     # Clip between -90 and 60
     return clipLog(
-       apparent_temp_k,
-       CLIP_TEMP["min"],
-       CLIP_TEMP["max"],
-       "Apparent Temperature Current",
+        apparent_temp_k,
+        CLIP_TEMP["min"],
+        CLIP_TEMP["max"],
+        "Apparent Temperature Current",
     )
 
 
