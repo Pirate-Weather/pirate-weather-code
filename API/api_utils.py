@@ -100,7 +100,7 @@ def calculate_apparent_temperature_solar(airTemp, humidity, wind, solar):
         + APPARENT_TEMP_SOLAR_CONSTS["humidity_factor"] * e
         - APPARENT_TEMP_SOLAR_CONSTS["wind_factor"] * wind
         + (APPARENT_TEMP_SOLAR_CONSTS["wind_factor"] * solar) / (wind + 10)
-        - APPARENT_TEMP_SOLAR_CONSTS["const"]
+        + APPARENT_TEMP_SOLAR_CONSTS["const"]
     )
 
     # Convert back to Kelvin

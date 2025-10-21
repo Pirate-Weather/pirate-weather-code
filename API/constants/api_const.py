@@ -59,7 +59,7 @@ APPARENT_TEMP_CONSTS = {
 
 # Grouped apparent temperature solar constants
 APPARENT_TEMP_SOLAR_CONSTS = {
-    "humidity_factor": 0.48,
+    "humidity_factor": 0.348,
     "wind_factor": 0.70,
     "const": -4.25,
     "exp_a": 17.27,
