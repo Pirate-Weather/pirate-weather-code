@@ -610,6 +610,7 @@ for i in range(hisPeriod, 0, -6):
         fxx=fxx,
         product="pgrb2.0p25",
         verbose=False,
+        priority=["aws", "nomads"],
         save_dir=tmpDIR,
     )
 
@@ -663,6 +664,7 @@ for i in range(hisPeriod, 0, -6):
         fxx=fxx,
         product="pgrb2b.0p25",
         verbose=False,
+        priority=["aws", "nomads"],
         save_dir=tmpDIR,
     )
 

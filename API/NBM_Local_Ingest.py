@@ -786,7 +786,7 @@ for i in range(hisPeriod, -1, -1):
         fxx=fxx,
         product="co",
         verbose=False,
-        priority=["aws"],
+        priority=["aws", "nomads"],
         save_dir=tmpDIR,
     )
 

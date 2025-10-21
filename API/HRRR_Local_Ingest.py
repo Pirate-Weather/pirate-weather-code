@@ -430,7 +430,7 @@ for i in range(hisPeriod, -1, -1):
         fxx=fxx,
         product="sfc",
         verbose=False,
-        priority="aws",
+        priority=["aws", "nomads"],
         save_dir=tmpDIR,
     )
 
