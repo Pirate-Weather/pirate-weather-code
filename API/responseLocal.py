@@ -4732,6 +4732,7 @@ async def PW_Forecast(
             # Calculate relative humidity from temperature and dewpoint
             # RH = exp((17.625*Td)/(243.04+Td)) / exp((17.625*T)/(243.04+T))
             # Temperature is in Kelvin, convert to Celsius
+            logger.info("RTMA-RU RH invalid. Calculating from temp and dewpoint.")
             temp_c = InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS
             dew_c = InterPcurrent[DATA_CURRENT["dew"]] - KELVIN_TO_CELSIUS
             rtma_humidity = np.exp(

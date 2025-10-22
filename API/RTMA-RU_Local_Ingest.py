@@ -166,7 +166,7 @@ xarray_analysis_merged = xarray_analysis_merged.assign_coords(
 rh_2m = relative_humidity_from_specific_humidity(
     pressure=xarray_analysis_merged["sp"] * units.Pa,
     temperature=xarray_analysis_merged["t2m"] * units.degK,
-    specific_humidity=xarray_analysis_merged["sh2"],
+    specific_humidity=xarray_analysis_merged["sh2"] * units("kg/kg"),
 )
 
 xarray_analysis_merged["rh"] = rh_2m.metpy.dequantify()
