@@ -35,7 +35,7 @@ from pirateweather_translations.dynamic_loader import load_all_translations
 from pytz import timezone, utc
 from timezonefinder import TimezoneFinder
 
-from API.api_utils import calculate_apparent_temperature_solar, clipLog
+from API.api_utils import calculate_apparent_temperature, clipLog
 from API.constants.api_const import (
     API_VERSION,
     DBZ_CONST,
@@ -53,6 +53,7 @@ from API.constants.api_const import (
     WBGT_CONST,
 )
 from API.constants.clip_const import (
+    CLIP_CAPE,
     CLIP_CLOUD,
     CLIP_FEELS_LIKE,
     CLIP_FIRE,
@@ -3755,7 +3756,7 @@ async def PW_Forecast(
     windSpeedMps = InterPhour[:, DATA_HOURLY["wind"]] / windUnit
 
     # Calculate the apparent temperature
-    InterPhour[:, DATA_HOURLY["apparent"]] = calculate_apparent_temperature_solar(
+    InterPhour[:, DATA_HOURLY["apparent"]] = calculate_apparent_temperature(
         InterPhour[:, DATA_HOURLY["temp"]],  # Air temperature in Kelvin
         InterPhour[:, DATA_HOURLY["humidity"]],  # Relative humidity (0.0 to 1.0)
         windSpeedMps,  # Wind speed in meters per second
@@ -3805,8 +3806,8 @@ async def PW_Forecast(
 
     InterPhour[:, DATA_HOURLY["cape"]] = clipLog(
         InterPhour[:, DATA_HOURLY["cape"]],
-        CLIP_SOLAR["min"],
-        CLIP_SOLAR["max"],
+        CLIP_CAPE["min"],
+        CLIP_CAPE["max"],
         "CAPE Hour",
     )
 
@@ -5179,8 +5180,8 @@ async def PW_Forecast(
 
     InterPcurrent[DATA_CURRENT["cape"]] = clipLog(
         InterPcurrent[DATA_CURRENT["cape"]],
-        CLIP_SOLAR["min"],
-        CLIP_SOLAR["max"],
+        CLIP_CAPE["min"],
+        CLIP_CAPE["max"],
         "CAPE Current",
     )
 
@@ -5188,7 +5189,7 @@ async def PW_Forecast(
     currentWindSpeedMps = InterPcurrent[DATA_CURRENT["wind"]] / windUnit
 
     # Calculate the apparent temperature
-    InterPcurrent[DATA_CURRENT["apparent"]] = calculate_apparent_temperature_solar(
+    InterPcurrent[DATA_CURRENT["apparent"]] = calculate_apparent_temperature(
         InterPcurrent[DATA_CURRENT["temp"]],  # Air temperature in Kelvin
         InterPcurrent[DATA_CURRENT["humidity"]],  # Relative humidity (0.0 to 1.0)
         currentWindSpeedMps,  # Wind speed in meters per second
