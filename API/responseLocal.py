@@ -4536,10 +4536,10 @@ async def PW_Forecast(
             dayObject.pop("iceAccumulation", None)
             dayObject.pop("fireIndexMax", None)
             dayObject.pop("fireIndexMaxTime", None)
-            dayObject.pop("solarIndexMax", None)
-            dayObject.pop("solarIndexMaxTime", None)
-            dayObject.pop("capeIndexMax", None)
-            dayObject.pop("capeIndexMaxTime", None)
+            dayObject.pop("solarMax", None)
+            dayObject.pop("solarMaxTime", None)
+            dayObject.pop("capeMax", None)
+            dayObject.pop("capeMaxTime", None)
 
         if timeMachine and not tmExtra:
             dayObject.pop("precipProbability", None)
