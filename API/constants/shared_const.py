@@ -18,7 +18,7 @@ HISTORY_PERIODS = {
     "NBM": 48,
     "HRRR": 48,
     "HRRR_6H": 48,
-    "GFS": 192,
+    "GFS": 288,
     "GEFS": 48,
     "ECMWF": 48,
     "NBM_Fire": 48,
