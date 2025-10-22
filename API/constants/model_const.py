@@ -128,3 +128,24 @@ RTMA_RU = {
     "wind_u": 8,
     "wind_v": 9,
 }
+
+ERA5 = {
+    "instantaneous_10m_wind_gust": 1,
+    "mean_sea_level_pressure": 2,
+    "2m_temperature": 3,
+    "2m_dewpoint_temperature": 4,
+    "10m_u_component_of_wind": 5,
+    "10m_v_component_of_wind": 6,
+    "mean_total_precipitation_rate": 7,
+    "total_precipitation": 8,
+    "large_scale_rain_rate": 9,
+    "convective_rain_rate": 10,
+    "large_scale_snowfall_rate_water_equivalent": 11,
+    "convective_snowfall_rate_water_equivalent": 12,
+    "total_column_ozone": 13,
+    "total_cloud_cover": 14,
+    "downward_uv_radiation_at_the_surface": 15,
+    "surface_solar_radiation_downwards": 16,
+    "convective_available_potential_energy": 17,
+    "surface_pressure": 18,
+}

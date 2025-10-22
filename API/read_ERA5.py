@@ -62,11 +62,11 @@ def init_ERA5():
 #     storage_options=dict(token='anon'),
 # )
 #
-# import numpy as np
-# startDate = np.datetime64("1990-07-04 00:00:00", 's')
-# endDate = np.datetime64("1990-07-05 00:00:00", 's')
-# step = np.timedelta64(1, 'h')
-# datetimes = np.arange(startDate, endDate + step, step, dtype='datetime64[s]')
+import numpy as np
+startDate = np.datetime64("1990-07-04 00:00:00", 's')
+endDate = np.datetime64("1990-07-05 00:00:00", 's')
+step = np.timedelta64(1, 'D')
+datetimes = np.arange(startDate, endDate + step, step, dtype='datetime64[s]')
 #
 # # Timing test for debugging
 # import time

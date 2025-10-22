@@ -6,6 +6,7 @@ import random
 import time
 
 import s3fs
+import xarray as xr
 import zarr
 
 from API.constants.api_const import (
@@ -124,3 +125,25 @@ def setup_testing_zipstore(s3, s3_bucket, ingest_version, save_type, model_name)
         store = zarr.storage.ZipStore(f, mode="r")
 
     return store
+
+# Function to initialize in ERA5 xarray dataset
+def init_ERA5():
+    # Open the ERA5 dataset from Google Cloud
+    dsERA5 = xr.open_zarr(
+        "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3",
+        chunks={"time": 25},
+        storage_options=dict(token="anon"),
+    )
+
+    ERA5_lats = dsERA5["latitude"][:]
+    ERA5_lons = dsERA5["longitude"][:]
+    ERA5_times = dsERA5["time"][:]
+
+    ERA5_Data = {
+        "dsERA5": dsERA5,
+        "ERA5_lats": ERA5_lats,
+        "ERA5_lons": ERA5_lons,
+        "ERA5_times": ERA5_times,
+    }
+
+    return ERA5_Data
