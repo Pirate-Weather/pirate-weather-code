@@ -539,7 +539,14 @@ def calculate_period_summary_text(
 
     # Helper to check if condition text contains thunderstorms
     def _contains_thunderstorm(text):
-        """Check if the text structure contains thunderstorm text."""
+        """Recursively check if the text structure contains thunderstorm text.
+
+        Parameters:
+            text (str or list): The text structure to check.
+
+        Returns:
+            bool: True if "thunderstorm" is found, False otherwise.
+        """
         if isinstance(text, str):
             return "thunderstorm" in text
         elif isinstance(text, list):
@@ -1059,18 +1066,14 @@ def calculate_day_text(
             if p_data["max_cape_with_precip"] > overall_max_cape_with_precip:
                 overall_max_cape_with_precip = p_data["max_cape_with_precip"]
 
-            if p_data["max_lifted_index_with_precip"] != MISSING_DATA:
-                if overall_max_lifted_index_with_precip == MISSING_DATA:
-                    overall_max_lifted_index_with_precip = p_data[
-                        "max_lifted_index_with_precip"
-                    ]
-                elif (
-                    p_data["max_lifted_index_with_precip"]
-                    < overall_max_lifted_index_with_precip
-                ):
-                    overall_max_lifted_index_with_precip = p_data[
-                        "max_lifted_index_with_precip"
-                    ]
+            if p_data["max_lifted_index_with_precip"] != MISSING_DATA and (
+                overall_max_lifted_index_with_precip == MISSING_DATA
+                or p_data["max_lifted_index_with_precip"]
+                < overall_max_lifted_index_with_precip
+            ):
+                overall_max_lifted_index_with_precip = p_data[
+                    "max_lifted_index_with_precip"
+                ]
 
         # Check if thunderstorms are significant in this period
         # Thunderstorms require both precipitation and sufficient atmospheric instability
