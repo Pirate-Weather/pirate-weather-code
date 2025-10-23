@@ -77,6 +77,92 @@ def test_currently_hourly_thunderstorm_with_precipitation():
     assert icon == "thunderstorm"
 
 
+def test_currently_possible_thunderstorm_with_precipitation():
+    """
+    Test that thunderstorms are combined with precipitation in currently/hourly summaries.
+    When both precipitation and CAPE >= 1000 exist, thunderstorm text should appear.
+    """
+    hour_object = {
+        "precipType": "rain",
+        "cloudCover": 0.8,
+        "windSpeed": 5.0,
+        "temperature": 25.0,
+        "humidity": 0.7,
+        "visibility": 10000,
+        "precipProbability": 0.8,
+        "precipIntensity": 5.0,
+        "precipAccumulation": 5.0,
+        "dewPoint": 20.0,
+        "smoke": 0,
+        "cape": 1500,  # Above high threshold for icon
+        "liftedIndex": -5,  # Indicates thunderstorms
+    }
+
+    text, icon = calculate_text(
+        hourObject=hour_object,
+        prepAccumUnit=1.0,
+        visUnits=1.0,
+        windUnit=1.0,
+        tempUnits=1,
+        isDayTime=True,
+        rainPrep=5.0,
+        snowPrep=0.0,
+        icePrep=0.0,
+        type="current",
+        precipIntensity=5.0,
+        icon="darksky",
+    )
+
+    # Thunderstorm text should not be combined with precipitation
+    # Check exact structure: ['medium-rain']
+    assert text == "medium-rain"
+    # Icon should be rain when CAPE < 2500
+    assert icon == "rain"
+
+
+def test_hourly_possible_thunderstorm_with_precipitation():
+    """
+    Test that thunderstorms are combined with precipitation in currently/hourly summaries.
+    When both precipitation and CAPE >= 1000 exist, thunderstorm text should appear.
+    """
+    hour_object = {
+        "precipType": "rain",
+        "cloudCover": 0.8,
+        "windSpeed": 5.0,
+        "temperature": 25.0,
+        "humidity": 0.7,
+        "visibility": 10000,
+        "precipProbability": 0.8,
+        "precipIntensity": 5.0,
+        "precipAccumulation": 5.0,
+        "dewPoint": 20.0,
+        "smoke": 0,
+        "cape": 1500,  # Above high threshold for icon
+        "liftedIndex": -5,  # Indicates thunderstorms
+    }
+
+    text, icon = calculate_text(
+        hourObject=hour_object,
+        prepAccumUnit=1.0,
+        visUnits=1.0,
+        windUnit=1.0,
+        tempUnits=1,
+        isDayTime=True,
+        rainPrep=5.0,
+        snowPrep=0.0,
+        icePrep=0.0,
+        type="hour",
+        precipIntensity=5.0,
+        icon="darksky",
+    )
+
+    # Thunderstorm text should be combined with precipitation
+    # Check exact structure: ['and', 'possible-thunderstorm', 'medium-rain']
+    assert text == ["and", "possible-thunderstorm", "medium-rain"]
+    # Icon should be rain when CAPE < 2500
+    assert icon == "rain"
+
+
 def test_currently_hourly_no_thunderstorm_without_precipitation():
     """
     Test that thunderstorms don't appear without precipitation, even with high CAPE.
