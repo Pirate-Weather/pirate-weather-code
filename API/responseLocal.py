@@ -4151,7 +4151,6 @@ async def PW_Forecast(
             hourItem.pop("fireIndex", None)
             hourItem.pop("feelsLike", None)
             hourItem.pop("solar", None)
-            hourItem.pop("cape", None)
 
         if timeMachine and not tmExtra:
             hourItem.pop("uvIndex", None)
@@ -5538,7 +5537,7 @@ async def PW_Forecast(
 
         # Remove 'smoke' if the version is less than 2.
         if version < 2:
-            fieldsToRemove.append("smoke")
+            fieldsToRemove.extend(["smoke", "cape"])
 
         # Remove extra fields for basic Time Machine requests.
         if timeMachine and not tmExtra:
