@@ -3090,7 +3090,7 @@ async def PW_Forecast(
         HumidityHour[:, 3] = relative_humidity_from_dewpoint(
             ERA5_MERGED[:, ERA5["2m_temperature"]] * mp.units.units.degK,
             ERA5_MERGED[:, ERA5["2m_dewpoint_temperature"]] *  mp.units.units.degK,
-            phase='auto').magnitude
+            phase='auto').magnitude * 100 # Convert to percentage
 
     InterPhour[:, DATA_HOURLY["humidity"]] = (
         np.choose(np.argmin(np.isnan(HumidityHour), axis=1), HumidityHour.T) * humidUnit
@@ -4530,10 +4530,10 @@ async def PW_Forecast(
             phase='auto').magnitude
 
 
-        InterPcurrent[DATA_CURRENT["dew"]] = (
-                ERA5_humidFac1 * interpFac1
-                + ERA5_humidFac2 * interpFac2
-        ) * humidUnit
+    InterPcurrent[DATA_CURRENT["humidity"]] = (
+            ERA5_humidFac1 * interpFac1
+            + ERA5_humidFac2 * interpFac2
+    ) * humidUnit
 
     # Clip between 0 and 1
     InterPcurrent[DATA_CURRENT["humidity"]] = clipLog(

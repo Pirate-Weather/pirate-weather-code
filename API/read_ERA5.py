@@ -106,8 +106,8 @@ np.round(dsERA5['large_scale_rain_rate'].sel(latitude=45.4215, longitude=-75.697
 
 # Test vis
 dataOut_ERA5_xr =dsERA5[ERA5.keys()].sel(
-            latitude=45.4215,
-            longitude=-75.6972%360,
+            latitude=48.64,
+            longitude=-77.092 % 360,
             time=datetimes,
             method="nearest")
 dataOut_ERA5 = xr.concat([dataOut_ERA5_xr[var] for var in ERA5.keys()], dim='variable')
@@ -116,7 +116,34 @@ unix_times_era5 = (
     np.int64)
 ERA5_MERGED = np.vstack((unix_times_era5, dataOut_ERA5.values)).T
 
-V = estimate_visibility_from_numpy(ERA5_MERGED, ERA5)
+V = estimate_visibility_from_numpy(ERA5_MERGED, ERA5, var_axis=1)
+
+dsERA5['surface_solar_radiation_downwards'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute()
+
+
+dsERA5['surface_solar_radiation_downwards'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute()
+dsERA5['convective_available_potential_energy'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().max()
+dsERA5['2m_dewpoint_temperature'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute()
+
+startDate = np.datetime64("2022-10-22 20:00:00", 's') # Snow
+endDate = np.datetime64("2022-10-23 21:00:00", 's')
+step = np.timedelta64(1, 'h')
+datetimes = np.arange(startDate, endDate, step, dtype='datetime64[s]')
+
+
+dsERA5['2m_dewpoint_temperature'].sel(latitude=48.64, longitude=-77.092%360, time=datetimes, method="nearest").compute()
+
+import metpy as mp
+from metpy.calc import relative_humidity_from_dewpoint
+
+relative_humidity_from_dewpoint(
+            dsERA5['2m_temperature'].sel(latitude=48.64, longitude=-77.092%360, time=datetimes, method="nearest").compute()* mp.units.units.degK,
+            dsERA5['2m_dewpoint_temperature'].sel(latitude=48.64, longitude=-77.092%360, time=datetimes, method="nearest").compute() * mp.units.units.degK,
+            phase='auto').magnitude
+
+
+
+
 #
 # # Timing test for debugging
 # import time

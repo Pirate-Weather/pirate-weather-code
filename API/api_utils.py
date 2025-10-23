@@ -183,16 +183,15 @@ def estimate_visibility_from_numpy(
     if params:
         p.update(params)
 
-    # Helper to get a variable vector (time,) from 1-based index mapping
+    # Helper to get a variable vector (time,) from index mapping
     def get(name):
         idx1 = var_index.get(name)
         if idx1 is None:
             return None
-        i = idx1 - 1  # convert 1-based -> 0-based
         if var_axis == 0:
-            out = arr[i, ...]
+            out = arr[idx1, ...]
         else:
-            out = arr[..., i]
+            out = arr[..., idx1]
         # Ensure shape (time,)
         return np.asarray(out)
 
@@ -204,12 +203,13 @@ def estimate_visibility_from_numpy(
 
     lcc   = get("low_cloud_cover")
     cbase = get("cloud_base_height")
+
     u10   = get("10m_u_component_of_wind")
     v10   = get("10m_v_component_of_wind")
 
-    # Rates in m s-1 → mm h-1
+    # Rates in kg/m2 s-1 → mm h-1
     def mmh(x):
-        return x * 3600.0 * 1000.0
+        return x * 3600.0
 
     ls_rain = get("large_scale_rain_rate")
     cv_rain = get("convective_rain_rate")
@@ -223,6 +223,9 @@ def estimate_visibility_from_numpy(
 
     if lcc   is None: lcc   = zeros()
     if cbase is None: cbase = full(1e9)
+    # Replace nan in cbase with large number
+    cbase = np.where(np.isnan(cbase), 1e9, cbase)
+    # print('cbase:', cbase)
     if u10   is None: u10   = zeros()
     if v10   is None: v10   = zeros()
     if ls_rain is None: ls_rain = zeros()
@@ -246,6 +249,9 @@ def estimate_visibility_from_numpy(
     vis_snow = binned_vis(snow_rate_mm_h, p["snow_bins_mm_h"], p["snow_vis_km"])
     vis_precip = np.minimum(vis_rain, vis_snow)
 
+    # print('vis_rain:', vis_rain)
+    # print('vis_snow:', vis_snow)
+
     # --- Clear-sky component from dewpoint depression + low cloud ---
     dpd = t2m - td2m
     no_precip = (rain_rate_mm_h <= p["no_precip_mm_h"]) & (snow_rate_mm_h <= p["no_precip_mm_h"])
@@ -257,19 +263,27 @@ def estimate_visibility_from_numpy(
         np.where(haze_flag, p["vis_haze_km"], p["vis_clear_km"])
     )
 
+    # print('vis_clear:', vis_clear)
+
     # --- Combine (more limiting wins) ---
     vis = np.minimum(vis_clear, vis_precip)
+    # print("combined vis:", vis)
 
     # --- Ceiling penalties ---
     vis = np.where(cbase < p["cap1_cbase_m"], np.minimum(vis, p["cap1_vis_km"]), vis)
+    # print("after cap1 vis:", vis)
     mid_cap = (cbase >= p["cap1_cbase_m"]) & (cbase < p["cap2_cbase_m"])
     vis = np.where(mid_cap, np.minimum(vis, p["cap2_vis_km"]), vis)
+    # print("after cap2 vis:", vis)
 
     # --- Wind mixing relaxation for dense fog ---
     wind10 = np.hypot(u10, v10)
     relax = (wind10 >= p["wind_relax_ms"]) & fog_flag
     vis = np.where(relax, np.maximum(vis, p["wind_relax_min_vis_km"]), vis)
+    # print("after wind relax vis:", vis)
 
     # --- Clamp & return ---
-    np.clip(vis, p["min_vis_km"], p["max_vis_km"], out=vis) * 1000 # Return in m
+    np.clip(vis, p["min_vis_km"], p["max_vis_km"], out=vis)
+    vis = vis * 1000 # Return in m
+
     return vis
