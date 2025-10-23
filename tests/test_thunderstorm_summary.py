@@ -47,11 +47,8 @@ def test_currently_hourly_thunderstorm_with_precipitation():
     )
 
     # Thunderstorm text should be combined with precipitation
-    assert text is not None
-    assert isinstance(text, list)
-    assert "and" in text
-    # Thunderstorm should come first
-    assert "possible-thunderstorm" in text or "thunderstorm" in text
+    # Check exact structure: ['and', 'thunderstorm', 'medium-rain']
+    assert text == ["and", "thunderstorm", "medium-rain"]
     # Icon should be thunderstorm when CAPE >= 2500
     assert icon == "thunderstorm"
 
@@ -91,12 +88,11 @@ def test_currently_hourly_no_thunderstorm_without_precipitation():
         icon="darksky",
     )
 
-    # Should not have thunderstorm text
+    # Should not have thunderstorm text - check exact structure
     assert text is not None
-    if isinstance(text, list):
-        assert "thunderstorm" not in str(text).lower()
-    else:
-        assert "thunderstorm" not in text.lower()
+    # For no precipitation, expect just sky cover text
+    assert isinstance(text, str)
+    assert "thunderstorm" not in text.lower()
 
 
 def test_currently_hourly_no_thunderstorm_low_cape():
@@ -134,13 +130,12 @@ def test_currently_hourly_no_thunderstorm_low_cape():
         icon="darksky",
     )
 
-    # Should not have thunderstorm text
+    # Should not have thunderstorm text with low CAPE
+    # Check that it's just rain without thunderstorm
     assert text is not None
-    if isinstance(text, list):
-        text_str = str(text).lower()
-        assert "thunderstorm" not in text_str
-    else:
-        assert "thunderstorm" not in text.lower()
+    # Could be a string or list, but should not contain thunderstorm
+    text_str = str(text) if not isinstance(text, str) else text
+    assert "thunderstorm" not in text_str.lower()
 
 
 def test_daily_thunderstorms_joined_with_precipitation():
@@ -185,10 +180,14 @@ def test_daily_thunderstorms_joined_with_precipitation():
     )
 
     # Should have combined thunderstorm and precipitation
-    assert summary_text is not None
-    summary_str = str(summary_text).lower()
-    assert "thunderstorm" in summary_str
-    assert "rain" in summary_str or "precipitation" in summary_str
+    # Check exact structure: thunderstorm and rain combined with wind "for-day"
+    assert summary_text == [
+        "sentence",
+        [
+            "for-day",
+            ["and", ["and", "thunderstorm", "medium-rain"], "light-wind"],
+        ],
+    ]
     # Icon should be thunderstorm
     assert icon == "thunderstorm"
 
@@ -257,13 +256,16 @@ def test_daily_thunderstorms_not_joined_with_precipitation():
         icon_set="darksky",
     )
 
-    # Should mention both rain and thunderstorms
-    assert summary_text is not None
-    summary_str = str(summary_text).lower()
-    # Both should be present in the summary
-    assert "rain" in summary_str or "precipitation" in summary_str
-    # Thunderstorm should be present
-    assert "thunderstorm" in summary_str
+    # Should mention both rain and thunderstorms separately
+    # Check exact structure: rain "for-day" AND thunderstorm "during morning"
+    assert summary_text == [
+        "sentence",
+        [
+            "and",
+            ["for-day", "medium-rain"],
+            ["during", ["and", "possible-thunderstorm", "medium-wind"], "morning"],
+        ],
+    ]
 
 
 def test_24hour_thunderstorms_starting_later():
@@ -330,10 +332,16 @@ def test_24hour_thunderstorms_starting_later():
         icon_set="darksky",
     )
 
-    # Should show thunderstorms
-    assert summary_text is not None
-    summary_str = str(summary_text).lower()
-    assert "thunderstorm" in summary_str
+    # Should show thunderstorms combined with rain and wind during today-morning
+    # Check exact structure
+    assert summary_text == [
+        "sentence",
+        [
+            "during",
+            ["and", ["and", "thunderstorm", "medium-rain"], "medium-wind"],
+            "today-morning",
+        ],
+    ]
     # Icon should be thunderstorm
     assert icon == "thunderstorm"
 
@@ -398,10 +406,16 @@ def test_weekly_thunderstorms():
         icon="darksky",
     )
 
-    # Should mention thunderstorms
-    assert text is not None
-    text_str = str(text).lower()
-    assert "thunderstorm" in text_str
+    # Should mention thunderstorms - check exact structure
+    assert text == [
+        "with",
+        [
+            "during",
+            ["and", "thunderstorm", "medium-rain"],
+            ["and", "today", "tomorrow"],
+        ],
+        ["temperatures-rising", ["celsius", 31], "next-friday"],
+    ]
     # Icon should be thunderstorm since more than half of precipitation days have them
     assert icon == "thunderstorm"
 
@@ -472,8 +486,14 @@ def test_daily_uses_max_cape_with_precipitation():
     )
 
     # Should show thunderstorms (using CAPE=2600 which occurs with precipitation)
-    assert summary_text is not None
-    summary_str = str(summary_text).lower()
-    assert "thunderstorm" in summary_str
+    # Check exact structure
+    assert summary_text == [
+        "sentence",
+        [
+            "during",
+            ["and", ["and", "thunderstorm", "medium-rain"], "medium-wind"],
+            "morning",
+        ],
+    ]
     # Icon should be thunderstorm
     assert icon == "thunderstorm"
