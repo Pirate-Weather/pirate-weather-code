@@ -10,6 +10,30 @@ from API.PirateText import calculate_text
 from API.PirateWeeklyText import calculate_weekly_text
 
 
+# Base hour object with common default values
+def create_base_hour(time_offset=0, **overrides):
+    """Create a base hour object with default values, allowing overrides."""
+    base_hour = {
+        "time": 1609459200 + time_offset,
+        "precipType": "none",
+        "precipIntensity": 0.0,
+        "precipAccumulation": 0.0,
+        "precipProbability": 0.0,
+        "cloudCover": 0.5,
+        "windSpeed": 5.0,
+        "temperature": 22.0,
+        "humidity": 0.6,
+        "visibility": 10000,
+        "dewPoint": 18.0,
+        "smoke": 0,
+        "cape": 0,
+        "liftedIndex": MISSING_DATA,
+        "precipIntensityError": 0,
+    }
+    base_hour.update(overrides)
+    return base_hour
+
+
 def test_currently_hourly_thunderstorm_with_precipitation():
     """
     Test that thunderstorms are combined with precipitation in currently/hourly summaries.
@@ -332,14 +356,14 @@ def test_24hour_thunderstorms_starting_later():
         icon_set="darksky",
     )
 
-    # Should show thunderstorms combined with rain and wind during today-morning
-    # Check exact structure
+    # Should show thunderstorms combined with rain and wind "later" during today-morning
+    # Check exact structure with "later-" prefix
     assert summary_text == [
         "sentence",
         [
             "during",
             ["and", ["and", "thunderstorm", "medium-rain"], "medium-wind"],
-            "today-morning",
+            "later-today-morning",
         ],
     ]
     # Icon should be thunderstorm
@@ -504,29 +528,26 @@ def test_thunderstorms_dont_combine_with_humidity():
     Test that humid/dry conditions don't combine with thunderstorms + precipitation.
     This prevents overly wordy summaries like "thunderstorms and rain and humid".
     """
-    hours = []
-
     # All day: thunderstorms with rain and high humidity
-    for i in range(8):
-        hours.append(
-            {
-                "time": 1609459200 + (i * 3600),
-                "precipType": "rain",
-                "precipIntensity": 5.0,
-                "precipAccumulation": 5.0,
-                "precipProbability": 0.8,
-                "cloudCover": 0.9,
-                "windSpeed": 5.0,  # Low wind so it doesn't combine
-                "temperature": 28.0,  # High temp
-                "humidity": 0.96,  # High humidity
-                "visibility": 8000,
-                "dewPoint": 26.0,
-                "smoke": 0,
-                "cape": 2600,
-                "liftedIndex": -5,
-                "precipIntensityError": 0.5,
-            }
+    hours = [
+        create_base_hour(
+            time_offset=i * 3600,
+            precipType="rain",
+            precipIntensity=5.0,
+            precipAccumulation=5.0,
+            precipProbability=0.8,
+            cloudCover=0.9,
+            windSpeed=5.0,  # Low wind so it doesn't combine
+            temperature=28.0,  # High temp
+            humidity=0.96,  # High humidity
+            visibility=8000,
+            dewPoint=26.0,
+            cape=2600,
+            liftedIndex=-5,
+            precipIntensityError=0.5,
         )
+        for i in range(8)
+    ]
 
     icon, summary_text = calculate_day_text(
         hours=hours,
@@ -558,29 +579,26 @@ def test_humidity_still_combines_without_thunderstorms():
     """
     Test that humid/dry still combines with regular precipitation when there are no thunderstorms.
     """
-    hours = []
-
     # All day: rain with high humidity but no thunderstorms
-    for i in range(8):
-        hours.append(
-            {
-                "time": 1609459200 + (i * 3600),
-                "precipType": "rain",
-                "precipIntensity": 5.0,
-                "precipAccumulation": 5.0,
-                "precipProbability": 0.8,
-                "cloudCover": 0.9,
-                "windSpeed": 5.0,
-                "temperature": 28.0,
-                "humidity": 0.96,  # High humidity
-                "visibility": 8000,
-                "dewPoint": 26.0,
-                "smoke": 0,
-                "cape": 500,  # Low CAPE - no thunderstorms
-                "liftedIndex": 0,
-                "precipIntensityError": 0.5,
-            }
+    hours = [
+        create_base_hour(
+            time_offset=i * 3600,
+            precipType="rain",
+            precipIntensity=5.0,
+            precipAccumulation=5.0,
+            precipProbability=0.8,
+            cloudCover=0.9,
+            windSpeed=5.0,
+            temperature=28.0,
+            humidity=0.96,  # High humidity
+            visibility=8000,
+            dewPoint=26.0,
+            cape=500,  # Low CAPE - no thunderstorms
+            liftedIndex=0,
+            precipIntensityError=0.5,
         )
+        for i in range(8)
+    ]
 
     icon, summary_text = calculate_day_text(
         hours=hours,
