@@ -4109,7 +4109,7 @@ async def PW_Forecast(
             "fireIndex": InterPhour[idx, DATA_HOURLY["fire"]],
             "feelsLike": InterPhour[idx, DATA_HOURLY["feels_like"]],
             "solar": InterPhour[idx, DATA_HOURLY["solar"]],
-            "cape": InterPhour[idx, DATA_HOURLY["cape"]],
+            "cape": int(InterPhour[idx, DATA_HOURLY["cape"]]),
         }
 
         # Add station pressure if requested
@@ -4495,7 +4495,7 @@ async def PW_Forecast(
             "fireIndexMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["fire"]]),
             "solarMax": InterPdayMax[idx, DATA_DAY["solar"]],
             "solarMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["solar"]]),
-            "capeMax": InterPdayMax[idx, DATA_DAY["cape"]],
+            "capeMax": int(InterPdayMax[idx, DATA_DAY["cape"]]),
             "capeMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["cape"]]),
         }
 
@@ -5398,7 +5398,7 @@ async def PW_Forecast(
         returnOBJ["currently"]["currentDayLiquid"] = dayZeroRain
         returnOBJ["currently"]["currentDaySnow"] = dayZeroSnow
         returnOBJ["currently"]["solar"] = InterPcurrent[DATA_CURRENT["solar"]]
-        returnOBJ["currently"]["cape"] = InterPcurrent[DATA_CURRENT["cape"]]
+        returnOBJ["currently"]["cape"] = int(InterPcurrent[DATA_CURRENT["cape"]])
 
         if "stationPressure" in extraVars:
             returnOBJ["currently"]["stationPressure"] = InterPcurrent[

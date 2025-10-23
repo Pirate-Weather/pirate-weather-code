@@ -18,6 +18,7 @@ from API.PirateTextHelper import (
     Most_Common,
     calculate_precip_text,
     calculate_sky_icon,
+    calculate_thunderstorm_text,
     calculate_vis_text,
     calculate_wind_text,
     humidity_sky_text,
@@ -536,8 +537,24 @@ def calculate_period_summary_text(
     def _are_periods_matching(cond_a, cond_b):
         return sorted(cond_a) == sorted(cond_b)
 
+    # Helper to check if condition text contains thunderstorms
+    def _contains_thunderstorm(text):
+        """Recursively check if the text structure contains thunderstorm text.
+
+        Parameters:
+            text (str or list): The text structure to check.
+
+        Returns:
+            bool: True if "thunderstorm" is found, False otherwise.
+        """
+        if isinstance(text, str):
+            return "thunderstorm" in text
+        elif isinstance(text, list):
+            return any(_contains_thunderstorm(item) for item in text)
+        return False
+
     # Check for accompanying conditions that can be combined with the primary condition
-    # Dry and Humid should not combine with Fog (vis)
+    # Dry and Humid should not combine with Fog (vis) or Thunderstorms
     if condition_type == "precip" or condition_type == "cloud":
         if all_wind_periods and _are_periods_matching(period_indices, all_wind_periods):
             wind_condition_combined = True
@@ -549,11 +566,19 @@ def calculate_period_summary_text(
         if all_vis_periods and _are_periods_matching(period_indices, all_vis_periods):
             vis_condition_combined = True
             current_condition_text = ["and", current_condition_text, "fog"]
-        if all_dry_periods and _are_periods_matching(period_indices, all_dry_periods):
+        # Don't combine humid/dry with thunderstorms
+        has_thunderstorm = _contains_thunderstorm(current_condition_text)
+        if (
+            all_dry_periods
+            and _are_periods_matching(period_indices, all_dry_periods)
+            and not has_thunderstorm
+        ):
             dry_condition_combined = True
             current_condition_text = ["and", current_condition_text, "low-humidity"]
-        if all_humid_periods and _are_periods_matching(
-            period_indices, all_humid_periods
+        if (
+            all_humid_periods
+            and _are_periods_matching(period_indices, all_humid_periods)
+            and not has_thunderstorm
         ):
             humid_condition_combined = True
             current_condition_text = ["and", current_condition_text, "high-humidity"]
@@ -802,6 +827,7 @@ def calculate_day_text(
                 "num_hours_fog": 0,
                 "num_hours_dry": 0,
                 "num_hours_wind": 0,
+                "num_hours_thunderstorm": 0,
                 "rain_accum": 0.0,
                 "snow_accum": 0.0,
                 "snow_error": 0.0,
@@ -818,6 +844,8 @@ def calculate_day_text(
                 "avg_cloud_cover": 0.0,
                 "min_visibility": float("inf"),  # Initialize for visibility
                 "max_smoke": 0.0,  # Initialize for smoke
+                "max_cape_with_precip": 0.0,  # Initialize for thunderstorms
+                "max_lifted_index_with_precip": MISSING_DATA,  # Initialize for thunderstorms
             }
 
         # Stop generating period names if we have enough for a full 24-hour cycle (e.g., 5 periods)
@@ -927,6 +955,32 @@ def calculate_day_text(
                 period_data["precip_hours_count"] += 1
                 period_data["precip_intensity_sum"] += hour["precipIntensity"]
 
+                # Track CAPE/LiftedIndex when there is precipitation
+                hour_cape = hour.get("cape", MISSING_DATA)
+                hour_lifted_index = hour.get("liftedIndex", MISSING_DATA)
+
+                if (
+                    hour_cape != MISSING_DATA
+                    and hour_cape > period_data["max_cape_with_precip"]
+                ):
+                    period_data["max_cape_with_precip"] = hour_cape
+
+                if hour_lifted_index != MISSING_DATA:
+                    if period_data["max_lifted_index_with_precip"] == MISSING_DATA:
+                        period_data["max_lifted_index_with_precip"] = hour_lifted_index
+                    elif (
+                        hour_lifted_index < period_data["max_lifted_index_with_precip"]
+                    ):
+                        # Lower lifted index means more unstable (more likely thunderstorm)
+                        period_data["max_lifted_index_with_precip"] = hour_lifted_index
+
+                # Count hours with thunderstorms (precipitation + CAPE >= low threshold)
+                thu_text = calculate_thunderstorm_text(
+                    hour_lifted_index, hour_cape, "summary"
+                )
+                if thu_text is not None:
+                    period_data["num_hours_thunderstorm"] += 1
+
     # Finalize `period_stats` list by only including periods that actually have data,
     # and in the correct order determined by `all_period_names_in_forecast_order`.
     period_stats_list_final = []
@@ -952,6 +1006,7 @@ def calculate_day_text(
 
     # Initialize lists for storing period indices of various conditions
     precip_periods = []
+    thunderstorm_periods = []
     vis_periods = []
     wind_periods = []
     humid_periods = []
@@ -971,6 +1026,10 @@ def calculate_day_text(
     overall_precip_intensity_sum = 0.0
     overall_min_visibility = float("inf")  # Initialize for visibility
     overall_max_smoke = 0.0
+    overall_max_cape_with_precip = 0.0  # Track max CAPE that occurs with precipitation
+    overall_max_lifted_index_with_precip = (
+        MISSING_DATA  # Track max lifted index with precipitation
+    )
 
     overall_most_common_precip = []
 
@@ -1002,6 +1061,26 @@ def calculate_day_text(
             overall_avg_pop = max(overall_avg_pop, p_data["max_pop"])
             overall_precip_hours_count += p_data["precip_hours_count"]
             overall_precip_intensity_sum += p_data["precip_intensity_sum"]
+
+            # Track max CAPE and lifted index that occurs with precipitation
+            if p_data["max_cape_with_precip"] > overall_max_cape_with_precip:
+                overall_max_cape_with_precip = p_data["max_cape_with_precip"]
+
+            if p_data["max_lifted_index_with_precip"] != MISSING_DATA and (
+                overall_max_lifted_index_with_precip == MISSING_DATA
+                or p_data["max_lifted_index_with_precip"]
+                < overall_max_lifted_index_with_precip
+            ):
+                overall_max_lifted_index_with_precip = p_data[
+                    "max_lifted_index_with_precip"
+                ]
+
+        # Check if thunderstorms are significant in this period
+        # Thunderstorms require both precipitation and sufficient atmospheric instability
+        if is_precip_in_period and p_data["num_hours_thunderstorm"] >= (
+            min(p_data["period_length"] / 2, 1)
+        ):
+            thunderstorm_periods.append(i)
 
         # Determine if other conditions are significant in this period
         # Note: These thresholds depend on `period_length` being correct now.
@@ -1263,11 +1342,10 @@ def calculate_day_text(
         and all_period_names
         and all_period_names[0] == today_period_for_later_check
     ):
-        # Check precip
-        if (
-            precip_periods and precip_periods[0] == 0
-        ):  # If precip occurs in the first period
-            # But the very first hour forecast doesn't have it
+        # Check precip (including thunderstorms)
+        # Check if precip/thunderstorms occur in any early period but not in the first hour
+        if precip_periods:
+            # Check the first hour of the forecast
             curr_precip_text_for_first_hour = calculate_precip_text(
                 hours[0]["precipIntensity"],
                 precip_accum_unit,
@@ -1281,9 +1359,33 @@ def calculate_day_text(
                 "summary",
                 hours[0]["precipIntensity"],
             )
-            if curr_precip_text_for_first_hour is None:
-                all_period_names[0] = "later-" + all_period_names[0]
-                later_conditions_list.append("precip")
+
+            # Check if thunderstorms are present but not in first hour
+            first_hour_has_thunderstorm = False
+            if thunderstorm_periods and curr_precip_text_for_first_hour is not None:
+                first_hour_cape = hours[0].get("cape", MISSING_DATA)
+                first_hour_lifted_index = hours[0].get("liftedIndex", MISSING_DATA)
+                first_hour_thu_text = calculate_thunderstorm_text(
+                    first_hour_lifted_index, first_hour_cape, "summary"
+                )
+                first_hour_has_thunderstorm = first_hour_thu_text is not None
+
+            # Mark the relevant period as "later" if:
+            # 1. Precip doesn't exist in first hour, OR
+            # 2. Precip exists but thunderstorms don't (they start later)
+            if curr_precip_text_for_first_hour is None or (
+                thunderstorm_periods and not first_hour_has_thunderstorm
+            ):
+                # Find which period to mark as "later"
+                period_to_mark = precip_periods[0] if precip_periods else None
+                if period_to_mark is not None and period_to_mark < len(
+                    all_period_names
+                ):
+                    if "later" not in all_period_names[period_to_mark]:
+                        all_period_names[period_to_mark] = (
+                            "later-" + all_period_names[period_to_mark]
+                        )
+                        later_conditions_list.append("precip")
 
         # Check visibility (fog)
         if vis_periods and vis_periods[0] == 0:
@@ -1342,13 +1444,39 @@ def calculate_day_text(
 
     # Flags to indicate if a condition is present at all in the forecast block
     has_precip = bool(precip_periods) and precip_summary_text is not None
+    has_thunderstorm = bool(thunderstorm_periods)
     has_wind = bool(wind_periods)
     has_vis = bool(vis_periods)
     has_dry = bool(dry_periods)
     has_humid = bool(humid_periods)
 
+    # Calculate thunderstorm text if thunderstorms occur
+    thunderstorm_summary_text = None
+    thunderstorm_icon = None
+    thunderstorms_match_precip = False
+
+    if has_thunderstorm:
+        # Use max CAPE/lifted index that occurred with precipitation
+        thunderstorm_summary_text, thunderstorm_icon = calculate_thunderstorm_text(
+            overall_max_lifted_index_with_precip, overall_max_cape_with_precip, "both"
+        )
+        # Check if thunderstorm periods match precipitation periods exactly
+        if sorted(thunderstorm_periods) == sorted(precip_periods):
+            thunderstorms_match_precip = True
+            # Combine thunderstorm with precipitation text
+            if precip_summary_text and thunderstorm_summary_text:
+                precip_summary_text = [
+                    "and",
+                    thunderstorm_summary_text,
+                    precip_summary_text,
+                ]
+                # Use thunderstorm icon if present
+                if thunderstorm_icon:
+                    precip_icon = thunderstorm_icon
+
     # Initialize variables for condition-specific summary texts
     precip_only_summary = None
+    thunderstorm_only_summary = None
     wind_only_summary = None
     vis_only_summary = None
     dry_only_summary = None
@@ -1387,6 +1515,26 @@ def calculate_day_text(
         combined_dry_flag = temp_dry_combined
         combined_humid_flag = temp_humid_combined
         combined_vis_flag = temp_vis_combined
+
+    # Calculate thunderstorm summary if they don't match precipitation periods
+    if has_thunderstorm and not thunderstorms_match_precip:
+        thunderstorm_only_summary, _, _, _, _ = calculate_period_summary_text(
+            thunderstorm_periods,
+            thunderstorm_summary_text,
+            "precip",  # Use precip type since thunderstorms have same priority
+            all_period_names,
+            wind_periods,
+            dry_periods,
+            humid_periods,
+            vis_periods,
+            overall_max_wind,
+            wind_unit,
+            icon_set,
+            0,
+            mode,
+            later_conditions_list,
+            today_period_for_later_check,
+        )
 
     # Calculate summaries for other conditions. The combination flags for them are local to their calls.
     if has_wind:
@@ -1505,7 +1653,7 @@ def calculate_day_text(
     # Properties: 'type', 'priority', 'all_day', 'start_idx', 'text', 'icon'
 
     # Priority order (lower number = higher priority):
-    # 0: Precipitation
+    # 0: Precipitation and Thunderstorms (same priority)
     # 1: Visibility (Fog)
     # 2: Wind
     # 3: Dry/Humid (if combined, or if primary cloud is clear)
@@ -1527,6 +1675,22 @@ def calculate_day_text(
                 "start_idx": precip_periods[0] if precip_periods else -1,
                 "text": precip_only_summary,
                 "icon": precip_icon,
+            }
+        )
+
+    # 1b. Thunderstorms (if not joined with precipitation) - same priority as precipitation
+    if thunderstorm_only_summary:
+        is_thunderstorm_all_day = (
+            len(thunderstorm_periods) == len(period_stats) if period_stats else False
+        )
+        candidate_summaries_for_final_assembly.append(
+            {
+                "type": "thunderstorm",
+                "priority": 0,
+                "all_day": is_thunderstorm_all_day,
+                "start_idx": thunderstorm_periods[0] if thunderstorm_periods else -1,
+                "text": thunderstorm_only_summary,
+                "icon": thunderstorm_icon,
             }
         )
 
