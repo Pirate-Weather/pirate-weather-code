@@ -27,6 +27,8 @@ DATA_CURRENT = {
     "fire": 19,
     "feels_like": 20,
     "station_pressure": 21,
+    "solar": 22,
+    "cape": 23,
 }
 
 # Minutely comumn indexes
@@ -68,6 +70,8 @@ DATA_HOURLY = {
     "fire": 24,
     "feels_like": 25,
     "station_pressure": 26,
+    "solar": 27,
+    "cape": 28,
 }
 
 # Daily column indexes
@@ -99,6 +103,8 @@ DATA_DAY = {
     "ice": 23,
     "fire": 24,
     "station_pressure": 26,
+    "solar": 27,
+    "cape": 28,
 }
 
 DATA_TIMEMACHINE = {
