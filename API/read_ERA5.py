@@ -63,10 +63,60 @@ def init_ERA5():
 # )
 #
 import numpy as np
-startDate = np.datetime64("1990-07-04 00:00:00", 's')
-endDate = np.datetime64("1990-07-05 00:00:00", 's')
-step = np.timedelta64(1, 'D')
-datetimes = np.arange(startDate, endDate + step, step, dtype='datetime64[s]')
+startDate = np.datetime64("2016-02-16 00:00:00", 's') # Snow
+endDate = np.datetime64("2016-02-16 00:00:00", 's')
+step = np.timedelta64(1, 'h')
+datetimes = np.arange(startDate, endDate + 24 * step, step, dtype='datetime64[s]')
+
+dsERA5['snowfall'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum()
+dsERA5['total_precipitation'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum()
+dsERA5['mean_snowfall_rate'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum()
+dsERA5['convective_precipitation'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum()
+dsERA5['large_scale_precipitation'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum()
+dsERA5['precipitation_type'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute()
+
+# Rain
+startDate = np.datetime64("2004-09-09 00:00:00", 's') # Snow
+endDate = np.datetime64("2004-09-09 00:00:00", 's')
+step = np.timedelta64(1, 'h')
+datetimes = np.arange(startDate, endDate + 24 * step, step, dtype='datetime64[s]')
+
+dsERA5['total_precipitation'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum()
+dsERA5['convective_precipitation'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum()
+dsERA5['large_scale_precipitation'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum()
+dsERA5['large_scale_rain_rate'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum()
+dsERA5['convective_rain_rate'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum()
+
+
+# Ice?
+startDate = np.datetime64("1998-01-05 00:00:00", 's') # Snow
+endDate = np.datetime64("1998-01-08 00:00:00", 's')
+step = np.timedelta64(1, 'h')
+datetimes = np.arange(startDate, endDate + 24 * step, step, dtype='datetime64[s]')
+
+np.round(dsERA5['precipitation_type'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute())
+np.round(dsERA5['large_scale_rain_rate'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute()*10000)
+np.round(dsERA5['convective_rain_rate'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute()*10000)
+np.round(dsERA5['large_scale_snowfall_rate_water_equivalent'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute()*10000)
+np.round(dsERA5['convective_snowfall_rate_water_equivalent'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute()*10000)
+np.round(dsERA5['total_precipitation'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute()*10000)
+
+np.round(dsERA5['large_scale_rain_rate'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute()*36000)
+np.round(dsERA5['large_scale_rain_rate'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute()*36000)
+
+# Test vis
+dataOut_ERA5_xr =dsERA5[ERA5.keys()].sel(
+            latitude=45.4215,
+            longitude=-75.6972%360,
+            time=datetimes,
+            method="nearest")
+dataOut_ERA5 = xr.concat([dataOut_ERA5_xr[var] for var in ERA5.keys()], dim='variable')
+unix_times_era5 = (
+            dataOut_ERA5_xr['time'].values.astype('datetime64[s]') - np.datetime64('1970-01-01T00:00:00Z')).astype(
+    np.int64)
+ERA5_MERGED = np.vstack((unix_times_era5, dataOut_ERA5.values)).T
+
+V = estimate_visibility_from_numpy(ERA5_MERGED, ERA5)
 #
 # # Timing test for debugging
 # import time

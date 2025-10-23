@@ -136,8 +136,8 @@ ERA5 = {
     "2m_dewpoint_temperature": 4,
     "10m_u_component_of_wind": 5,
     "10m_v_component_of_wind": 6,
-    "mean_total_precipitation_rate": 7,
-    "total_precipitation": 8,
+    "precipitation_type": 7,
+    "total_precipitation": 8, # Snow + rain in m/liquid water equivalent
     "large_scale_rain_rate": 9,
     "convective_rain_rate": 10,
     "large_scale_snowfall_rate_water_equivalent": 11,
@@ -148,4 +148,6 @@ ERA5 = {
     "surface_solar_radiation_downwards": 16,
     "convective_available_potential_energy": 17,
     "surface_pressure": 18,
+    "low_cloud_cover": 19,
+    "cloud_base_height": 20,
 }
