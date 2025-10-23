@@ -5547,6 +5547,7 @@ async def PW_Forecast(
                     "precipIntensityError",
                     "humidity",
                     "visibility",
+                    "cape",
                     "solar",
                 ]
             )
