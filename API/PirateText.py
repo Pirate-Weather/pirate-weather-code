@@ -122,9 +122,7 @@ def calculate_text(
 
     # If there is precipitation text use that and join with thunderstorm or humidity or wind texts if they exist
     if precipText is not None:
-        if thuText is not None and (
-            type != "current" or (type == "current" and "possible" not in thuText)
-        ):
+        if thuText is not None and not (type == "current" and "possible" in thuText):
             cText = ["and", thuText, precipText]
         elif windText is not None:
             cText = ["and", precipText, windText]

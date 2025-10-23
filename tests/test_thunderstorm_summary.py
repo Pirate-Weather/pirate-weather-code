@@ -12,7 +12,16 @@ from API.PirateWeeklyText import calculate_weekly_text
 
 # Base hour object with common default values
 def create_base_hour(time_offset=0, **overrides):
-    """Create a base hour object with default values, allowing overrides."""
+    """Create a base hour object with default values, allowing overrides.
+
+    Args:
+        time_offset (int): The time offset in seconds to add to the base time.
+        **overrides: Keyword arguments to override default values in the base hour.
+
+    Returns:
+        dict: A dictionary representing an hourly forecast data point.
+    """
+
     base_hour = {
         "time": 1609459200 + time_offset,
         "precipType": "none",
@@ -39,21 +48,18 @@ def test_currently_hourly_thunderstorm_with_precipitation():
     Test that thunderstorms are combined with precipitation in currently/hourly summaries.
     When both precipitation and CAPE >= 1000 exist, thunderstorm text should appear.
     """
-    hour_object = {
-        "precipType": "rain",
-        "cloudCover": 0.8,
-        "windSpeed": 5.0,
-        "temperature": 25.0,
-        "humidity": 0.7,
-        "visibility": 10000,
-        "precipProbability": 0.8,
-        "precipIntensity": 5.0,
-        "precipAccumulation": 5.0,
-        "dewPoint": 20.0,
-        "smoke": 0,
-        "cape": 2600,  # Above high threshold for icon
-        "liftedIndex": -5,  # Indicates thunderstorms
-    }
+    hour_object = create_base_hour(
+        precipType="rain",
+        cloudCover=0.8,
+        temperature=25.0,
+        humidity=0.7,
+        precipProbability=0.8,
+        precipIntensity=5.0,
+        precipAccumulation=5.0,
+        dewPoint=20.0,
+        cape=2600,  # Above high threshold for icon
+        liftedIndex=-5,  # Indicates thunderstorms
+    )
 
     text, icon = calculate_text(
         hourObject=hour_object,
@@ -82,21 +88,18 @@ def test_currently_possible_thunderstorm_with_precipitation():
     Test that thunderstorms are combined with precipitation in currently/hourly summaries.
     When both precipitation and CAPE >= 1000 exist, thunderstorm text should appear.
     """
-    hour_object = {
-        "precipType": "rain",
-        "cloudCover": 0.8,
-        "windSpeed": 5.0,
-        "temperature": 25.0,
-        "humidity": 0.7,
-        "visibility": 10000,
-        "precipProbability": 0.8,
-        "precipIntensity": 5.0,
-        "precipAccumulation": 5.0,
-        "dewPoint": 20.0,
-        "smoke": 0,
-        "cape": 1500,  # Above high threshold for icon
-        "liftedIndex": -5,  # Indicates thunderstorms
-    }
+    hour_object = create_base_hour(
+        precipType="rain",
+        cloudCover=0.8,
+        temperature=25.0,
+        humidity=0.7,
+        precipProbability=0.8,
+        precipIntensity=5.0,
+        precipAccumulation=5.0,
+        dewPoint=20.0,
+        cape=1500,  # Above high threshold for icon
+        liftedIndex=-5,  # Indicates thunderstorms
+    )
 
     text, icon = calculate_text(
         hourObject=hour_object,
@@ -125,21 +128,18 @@ def test_hourly_possible_thunderstorm_with_precipitation():
     Test that thunderstorms are combined with precipitation in currently/hourly summaries.
     When both precipitation and CAPE >= 1000 exist, thunderstorm text should appear.
     """
-    hour_object = {
-        "precipType": "rain",
-        "cloudCover": 0.8,
-        "windSpeed": 5.0,
-        "temperature": 25.0,
-        "humidity": 0.7,
-        "visibility": 10000,
-        "precipProbability": 0.8,
-        "precipIntensity": 5.0,
-        "precipAccumulation": 5.0,
-        "dewPoint": 20.0,
-        "smoke": 0,
-        "cape": 1500,  # Above high threshold for icon
-        "liftedIndex": -5,  # Indicates thunderstorms
-    }
+    hour_object = create_base_hour(
+        precipType="rain",
+        cloudCover=0.8,
+        temperature=25.0,
+        humidity=0.7,
+        precipProbability=0.8,
+        precipIntensity=5.0,
+        precipAccumulation=5.0,
+        dewPoint=20.0,
+        cape=1500,  # Above high threshold for icon
+        liftedIndex=-5,  # Indicates thunderstorms
+    )
 
     text, icon = calculate_text(
         hourObject=hour_object,
