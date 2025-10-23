@@ -2,6 +2,7 @@ import datetime
 import math
 
 from dateutil import tz
+import numpy as np
 
 from API.constants.shared_const import MISSING_DATA
 from API.constants.text_const import (
@@ -829,12 +830,30 @@ def calculate_day_text(
     for idx, hour in enumerate(hours):
         # Provide default values for missing data (timemachine)
         hour.setdefault("humidity", DEFAULT_HUMIDITY)
+        # If humidity is MISSING_DATA, set to default
+        if ((hour["humidity"] == MISSING_DATA) or (np.isnan(hour["humidity"]))):
+            hour["humidity"] = DEFAULT_HUMIDITY
+
         hour.setdefault("visibility", DEFAULT_VISIBILITY)
+        if ((hour["visibility"] == MISSING_DATA) or (np.isnan(hour["visibility"]))):
+            hour["visibility"] = DEFAULT_VISIBILITY
+
         hour.setdefault("precipIntensityError", 0)
+        if ((hour["precipIntensityError"] == MISSING_DATA) or (np.isnan(hour["precipIntensityError"]))):
+            hour["precipIntensityError"] = 0
+
         hour.setdefault("precipProbability", DEFAULT_POP)
+        if ((hour["precipProbability"] == MISSING_DATA) or (np.isnan(hour["precipProbability"]))):
+            hour["precipProbability"] = DEFAULT_POP
+
         hour.setdefault("smoke", 0.0)
+        if ((hour["smoke"] == MISSING_DATA) or (np.isnan(hour["smoke"]))):
+            hour["smoke"] = 0.0
+
         # Set dewPoint to temperature if missing, resulting in no spread
         hour.setdefault("dewPoint", hour["temperature"])
+        if ((hour["dewPoint"] == MISSING_DATA) or (np.isnan(hour["dewPoint"]))):
+            hour["dewPoint"] = hour["temperature"]
 
         hour_date = datetime.datetime.fromtimestamp(hour["time"], zone)
         hour_in_loop = int(hour_date.strftime("%H"))

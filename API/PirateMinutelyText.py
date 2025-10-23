@@ -3,6 +3,8 @@
 from itertools import groupby
 from operator import itemgetter
 
+import numpy as np
+
 from API.constants.shared_const import MISSING_DATA
 from API.PirateTextHelper import calculate_precip_text
 
@@ -124,6 +126,7 @@ def calculate_minutely_text(
         if (
             minute["precipIntensity"] == MISSING_DATA
             or minute["precipType"] == MISSING_DATA
+            or np.isnan(minute["precipIntensity"])
         ):
             return [
                 "next-hour-forecast-status",

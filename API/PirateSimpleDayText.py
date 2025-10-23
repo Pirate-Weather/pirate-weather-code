@@ -58,7 +58,7 @@ def calculate_simple_day_text(
     cloudCover = hourObject.get("cloudCover", 0)
     wind = hourObject.get("windSpeed", 0)
     pop = hourObject.get("pop", DEFAULT_POP)
-    if pop == MISSING_DATA:
+    if ((pop == MISSING_DATA) or np.isnan(pop)):
         pop = DEFAULT_POP
     temp = hourObject.get(
         "temperature", hourObject.get("temperatureHigh", MISSING_DATA)

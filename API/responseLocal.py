@@ -40,8 +40,8 @@ from timezonefinder import TimezoneFinder
 from API.api_utils import (
     calculate_apparent_temperature,
     clipLog,
-    estimate_visibility_from_numpy,
-    )
+    estimate_visibility_gultepe_rh_pr_numpy,
+    replace_nan)
 
 from API.constants.api_const import (
     API_VERSION,
@@ -1202,6 +1202,7 @@ async def PW_Forecast(
             or ("127.0.0.1" in str(request.url))
         ):
             timeMachine = True
+
         else:
             raise HTTPException(
                 status_code=400,
@@ -1217,6 +1218,7 @@ async def PW_Forecast(
             )
     elif (nowTime - utcTime) < datetime.timedelta(hours=10*24):
         # If within the last 10 days , it may or may not be a timemachine request
+        # If it is, then only return 24h of data
         if "timemachine" in str(request.url):
             timeMachineNear = True
             # This results in the API using the live zip file, but only doing a 24 hour forecast from midnight of the requested day
@@ -1324,6 +1326,16 @@ async def PW_Forecast(
     if "ecmwf_ifs" in includeParams:
         readECMWF = True
 
+    # If more than 25 hours in the past, exclude everything except gfs
+    if (nowTime - utcTime) > datetime.timedelta(hours=25):
+        exNBM = 1
+        exAlerts = 1
+        exHRRR = 1
+        exGEFS = 1
+        exRTMA_RU = 1
+        exECMWF = 1
+
+
     readRTMA_RU = False
     readWMOAlerts = True
 
@@ -1422,17 +1434,18 @@ async def PW_Forecast(
     )
 
     # Setup the time parameters for output and processing
-    if timeMachine:
+    if timeMachine or timeMachineNear:
         daily_days = 1  # Number of days to output
         daily_day_hours = 1  # Additional hours to use in the processing
         ouputHours = 24
         ouputDays = 1
 
-    elif timeMachineNear:
-        daily_days = 8
-        daily_day_hours = 5
-        ouputHours = 24
-        ouputDays = 1
+    # elif timeMachineNear:
+    #     # If a timemachine request using production zip files, multiple days need to be calculated
+    #     daily_days = 8
+    #     daily_day_hours = 5
+    #     ouputHours = 24
+    #     ouputDays = 1
 
     else:
         daily_days = 8
@@ -2253,10 +2266,10 @@ async def PW_Forecast(
     #        'timedelta64[s]').astype(np.int32)
 
     # Which hours map to which days
-    hourlyDayIndex = np.full(len(hour_array_grib), int(MISSING_DATA))
-    hourlyDay4amIndex = np.full(len(hour_array_grib), int(MISSING_DATA))
-    hourlyHighIndex = np.full(len(hour_array_grib), int(MISSING_DATA))
-    hourlyLowIndex = np.full(len(hour_array_grib), int(MISSING_DATA))
+    hourlyDayIndex = np.full(len(hour_array_grib), np.nan)
+    hourlyDay4amIndex = np.full(len(hour_array_grib), np.nan)
+    hourlyHighIndex = np.full(len(hour_array_grib), np.nan)
+    hourlyLowIndex = np.full(len(hour_array_grib), np.nan)
 
     # Zero to 9 to account for the four horus in day 8
     for d in range(0, 9):
@@ -2689,9 +2702,9 @@ async def PW_Forecast(
         if not np.any(np.isnan(InterTminute))
         else np.full(len(minute_array_grib), 5)
     )
-    pTypes = ["none", "snow", "sleet", "sleet", "rain", MISSING_DATA]
-    pTypesText = ["Clear", "Snow", "Sleet", "Sleet", "Rain", MISSING_DATA]
-    pTypesIcon = ["clear", "snow", "sleet", "sleet", "rain", MISSING_DATA]
+    pTypes = ["none", "snow", "sleet", "sleet", "rain", np.nan]
+    pTypesText = ["Clear", "Snow", "Sleet", "Sleet", "Rain", np.nan]
+    pTypesIcon = ["clear", "snow", "sleet", "sleet", "rain", np.nan]
 
     minuteType = [pTypes[maxPchance[idx]] for idx in range(61)]
 
@@ -2755,7 +2768,7 @@ async def PW_Forecast(
         )
     else:  # Missing
         InterPminute[:, DATA_MINUTELY["error"]] = (
-            np.ones(len(minute_array_grib)) * MISSING_DATA
+            np.ones(len(minute_array_grib)) * np.nan
         )
 
     # Create list of icons based off of maxPchance
@@ -2830,7 +2843,7 @@ async def PW_Forecast(
 
     # Precipitation Type
     # NBM, HRRR, ECMWF, GEFS/GFS, ERA5
-    maxPchanceHour = np.full((len(hour_array_grib), 5), MISSING_DATA)
+    maxPchanceHour = np.full((len(hour_array_grib), 5), np.nan)
 
     if "nbm" in sourceList:
         InterThour = np.zeros(shape=(len(hour_array), 5))  # Type
@@ -2848,7 +2861,7 @@ async def PW_Forecast(
         maxPchanceHour[:, 0] = np.argmax(InterThour, axis=1)
 
         # Put Nan's where they exist in the original data
-        maxPchanceHour[np.isnan(InterThour[:, 1]), 0] = MISSING_DATA
+        maxPchanceHour[np.isnan(InterThour[:, 1]), 0] = np.nan
 
     # HRRR
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
@@ -2862,7 +2875,7 @@ async def PW_Forecast(
         InterThour[InterThour < 0.01] = 0
         maxPchanceHour[:, 1] = np.argmax(InterThour, axis=1)
         # Put Nan's where they exist in the original data
-        maxPchanceHour[np.isnan(InterThour[:, 1]), 1] = MISSING_DATA
+        maxPchanceHour[np.isnan(InterThour[:, 1]), 1] = np.nan
 
     # ECMWF - convert ptype codes to categorical indices
     if "ecmwf_ifs" in sourceList:
@@ -2886,7 +2899,7 @@ async def PW_Forecast(
 
         maxPchanceHour[:, 2] = mapped_ptype
         # Put Nan's where they exist in the original data
-        maxPchanceHour[np.isnan(ptype_ecmwf_hour), 2] = MISSING_DATA
+        maxPchanceHour[np.isnan(ptype_ecmwf_hour), 2] = np.nan
 
     # GEFS
     if "gefs" in sourceList:
@@ -2902,7 +2915,7 @@ async def PW_Forecast(
         maxPchanceHour[:, 3] = np.argmax(InterThour, axis=1)
 
         # Put Nan's where they exist in the original data
-        maxPchanceHour[np.isnan(InterThour[:, 1]), 3] = MISSING_DATA
+        maxPchanceHour[np.isnan(InterThour[:, 1]), 3] = np.nan
     elif "gfs" in sourceList:  # GFS Fallback
         InterThour = np.zeros(shape=(len(hour_array), 5))  # Type
         for i in [GFS["snow"], GFS["ice"], GFS["freezing_rain"], GFS["rain"]]:
@@ -2916,7 +2929,7 @@ async def PW_Forecast(
         maxPchanceHour[:, 3] = np.argmax(InterThour, axis=1)
 
         # Put Nan's where they exist in the original data
-        maxPchanceHour[np.isnan(InterThour[:, 1]), 3] = MISSING_DATA
+        maxPchanceHour[np.isnan(InterThour[:, 1]), 3] = np.nan
 
     # ERA5 for Timemachine
     if "era5" in sourceList:
@@ -2937,7 +2950,7 @@ async def PW_Forecast(
 
         maxPchanceHour[:, 4] = mapped_ptype
         # Put Nan's where they exist in the original data
-        maxPchanceHour[np.isnan(ptype_era5_hour), 4] = MISSING_DATA
+        maxPchanceHour[np.isnan(ptype_era5_hour), 4] = np.nan
 
     # Intensity
     # NBM, HRRR, ECMWF, GEFS/GFS
@@ -2957,6 +2970,7 @@ async def PW_Forecast(
         prcipIntensityHour[:, 3] = GEFS_Merged[:, GEFS["accum"]]
     elif "gfs" in sourceList:  # GFS Fallback
         prcipIntensityHour[:, 3] = GFS_Merged[:, GFS["intensity"]] * 3600
+
     # ERA5
     if "era5" in sourceList:
         # This isn't perfect, since ERA5 only has instant rates for rain and snow, not ice.
@@ -2998,6 +3012,7 @@ async def PW_Forecast(
     InterPhour[:, DATA_HOURLY["prob"]] = np.choose(
         np.argmin(np.isnan(prcipProbabilityHour), axis=1), prcipProbabilityHour.T
     )
+
     # Cap at 1
     InterPhour[:, DATA_HOURLY["prob"]] = clipLog(
         InterPhour[:, DATA_HOURLY["prob"]],
@@ -3276,7 +3291,7 @@ async def PW_Forecast(
     elif "era5" in sourceList:
         #TODO: Implement a more accurate uv index
         InterPhour[:, DATA_HOURLY["uv"]] = clipLog(
-            ERA5_MERGED[:, ERA5["downward_uv_radiation_at_the_surface"]]
+            ERA5_MERGED[:, ERA5["downward_uv_radiation_at_the_surface"]] / 3600
             * 40
             * 0.0025,
             CLIP_UV["min"],
@@ -3298,7 +3313,7 @@ async def PW_Forecast(
     if "gfs" in sourceList:
         VisibilityHour[:, 2] = GFS_Merged[:, GFS["vis"]]
     if "era5"  in sourceList:
-        VisibilityHour[:, 3] = estimate_visibility_from_numpy(ERA5_MERGED,
+        VisibilityHour[:, 3] = estimate_visibility_gultepe_rh_pr_numpy(ERA5_MERGED,
                                                               var_index=ERA5,
                                                               var_axis=1)
 
@@ -3379,7 +3394,7 @@ async def PW_Forecast(
             "Air quality Hour",
         )  # Maximum US AQI value for PM2.5 (smoke) is 500 which corresponds to 500 PM2.5
     else:
-        InterPhour[:, DATA_HOURLY["smoke"]] = MISSING_DATA
+        InterPhour[:, DATA_HOURLY["smoke"]] = np.nan
 
     # Fire Index
     if "nbm_fire" in sourceList:
@@ -3576,15 +3591,17 @@ async def PW_Forecast(
     dayZeroSnow = dayZeroPrepSnow.sum().round(4)  # Snow
     dayZeroIce = dayZeroPrepSleet.sum().round(4)  # Ice
 
-    # Zero prep intensity and accum before forecast time
-    InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["intensity"]] = 0
-    InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["accum"]] = 0
-    InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["rain"]] = 0
-    InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["snow"]] = 0
-    InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["ice"]] = 0
 
-    # Zero prep prob before forecast time
-    InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["prob"]] = 0
+    # Zero prep intensity and accum before forecast time
+    if not (timeMachine or timeMachineNear):
+        InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["intensity"]] = 0
+        InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["accum"]] = 0
+        InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["rain"]] = 0
+        InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["snow"]] = 0
+        InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["ice"]] = 0
+
+        # Zero prep prob before forecast time
+        InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["prob"]] = 0
 
     # Assign pfactors for rain and snow for intensity
     pFacHour = np.zeros((len(hour_array)))
@@ -3634,8 +3651,6 @@ async def PW_Forecast(
     # Fix very small neg from interp to solve -0
     InterPhour[((InterPhour > -0.001) & (InterPhour < 0.001))] = 0
 
-    # Replace NaN with -999 for json
-    InterPhour[np.isnan(InterPhour)] = MISSING_DATA
 
     # Timing Check
     if TIMING:
@@ -3757,7 +3772,7 @@ async def PW_Forecast(
             "pressure": InterPhour[idx, DATA_HOURLY["pressure"]],
             "windSpeed": InterPhour[idx, DATA_HOURLY["wind"]],
             "windGust": InterPhour[idx, DATA_HOURLY["gust"]],
-            "windBearing": int(InterPhour[idx, DATA_HOURLY["bearing"]]),
+            "windBearing": InterPhour[idx, DATA_HOURLY["bearing"]].round(),
             "cloudCover": InterPhour[idx, DATA_HOURLY["cloud"]],
             "uvIndex": InterPhour[idx, DATA_HOURLY["uv"]],
             "visibility": InterPhour[idx, DATA_HOURLY["vis"]],
@@ -3767,7 +3782,7 @@ async def PW_Forecast(
             "snowAccumulation": InterPhour[idx, DATA_HOURLY["snow"]],
             "iceAccumulation": InterPhour[idx, DATA_HOURLY["ice"]],
             "nearestStormDistance": InterPhour[idx, DATA_HOURLY["storm_dist"]],
-            "nearestStormBearing": int(InterPhour[idx, DATA_HOURLY["storm_dir"]]),
+            "nearestStormBearing": InterPhour[idx, DATA_HOURLY["storm_dir"]].round(),
             "fireIndex": InterPhour[idx, DATA_HOURLY["fire"]],
             "feelsLike": InterPhour[idx, DATA_HOURLY["feels_like"]],
             "solar": InterPhour[idx, DATA_HOURLY["solar"]],
@@ -4530,10 +4545,10 @@ async def PW_Forecast(
             phase='auto').magnitude
 
 
-    InterPcurrent[DATA_CURRENT["humidity"]] = (
-            ERA5_humidFac1 * interpFac1
-            + ERA5_humidFac2 * interpFac2
-    ) * humidUnit
+        InterPcurrent[DATA_CURRENT["humidity"]] = (
+                ERA5_humidFac1 * interpFac1
+                + ERA5_humidFac2 * interpFac2
+        ) * 100 * humidUnit
 
     # Clip between 0 and 1
     InterPcurrent[DATA_CURRENT["humidity"]] = clipLog(
@@ -4665,7 +4680,7 @@ async def PW_Forecast(
             + ERA5_MERGED[currentIDX_hrrrh, ERA5["instantaneous_10m_wind_gust"]] * interpFac2
         )
     else:
-        InterPcurrent[DATA_CURRENT["gust"]] = MISSING_DATA
+        InterPcurrent[DATA_CURRENT["gust"]] = np.nan
 
     # Clip between 0 and 400
     InterPcurrent[DATA_CURRENT["gust"]] = (
@@ -4739,7 +4754,7 @@ async def PW_Forecast(
             )
         )
     else:
-        InterPcurrent[DATA_CURRENT["bearing"]] = MISSING_DATA
+        InterPcurrent[DATA_CURRENT["bearing"]] = np.nan
 
 
 
@@ -4774,7 +4789,7 @@ async def PW_Forecast(
                 + ERA5_MERGED[currentIDX_hrrrh, ERA5["total_cloud_cover"]] * interpFac2
         )
     else:
-        InterPcurrent[DATA_CURRENT["cloud"]] = MISSING_DATA
+        InterPcurrent[DATA_CURRENT["cloud"]] = np.nan
 
 
     # Clip
@@ -4804,7 +4819,7 @@ async def PW_Forecast(
             (
                     ERA5_MERGED[currentIDX_hrrrh_A, ERA5["downward_uv_radiation_at_the_surface"]] * interpFac1
                     + ERA5_MERGED[currentIDX_hrrrh, ERA5["downward_uv_radiation_at_the_surface"]] * interpFac2
-            )
+            ) / 3600
             * 40
             * 0.0025,
             CLIP_UV["min"],
@@ -4812,7 +4827,7 @@ async def PW_Forecast(
             "UV Current",
         )
     else:
-        InterPcurrent[DATA_CURRENT["uv"]] = MISSING_DATA
+        InterPcurrent[DATA_CURRENT["uv"]] = np.nan
 
 
     # Station Pressure from RTMA_RU (surface pressure), then GFS
@@ -4864,8 +4879,15 @@ async def PW_Forecast(
             GFS_Merged[currentIDX_hrrrh_A, GFS["vis"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["vis"]] * interpFac2
         )
+    elif "era5" in sourceList:
+        InterPcurrent[DATA_CURRENT["vis"]] = estimate_visibility_gultepe_rh_pr_numpy(
+                                                ERA5_MERGED[currentIDX_hrrrh_A, :] * interpFac1 +
+                                                ERA5_MERGED[currentIDX_hrrrh, :] * interpFac2,
+                                                              var_index=ERA5,
+                                                              var_axis=1)
+
     else:
-        InterPcurrent[DATA_CURRENT["vis"]] = MISSING_DATA
+        InterPcurrent[DATA_CURRENT["vis"]] = np.nan
 
     InterPcurrent[DATA_CURRENT["vis"]] = (
         np.clip(InterPcurrent[DATA_CURRENT["vis"]], 0, 16090) * visUnits
@@ -4905,8 +4927,8 @@ async def PW_Forecast(
             currentIDX_hrrrh, GFS["storm_dir"]
         ]
     else:
-        InterPcurrent[DATA_CURRENT["storm_dist"]] = MISSING_DATA
-        InterPcurrent[DATA_CURRENT["storm_dir"]] = MISSING_DATA
+        InterPcurrent[DATA_CURRENT["storm_dist"]] = np.nan
+        InterPcurrent[DATA_CURRENT["storm_dir"]] = np.nan
 
     # Smoke from HRRR
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
@@ -4920,7 +4942,7 @@ async def PW_Forecast(
             "Smoke Current",
         )
     else:
-        InterPcurrent[DATA_CURRENT["smoke"]] = MISSING_DATA
+        InterPcurrent[DATA_CURRENT["smoke"]] = np.nan
 
     # Solar from subH, then NBM, then, HRRR, then GFS
     if "hrrrsubh" in sourceList:
@@ -5006,8 +5028,11 @@ async def PW_Forecast(
             GFS_Merged[currentIDX_hrrrh_A, GFS["apparent"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["apparent"]] * interpFac2
         )
+    elif timeMachine:
+        # If timemachine, use the calculated value
+        InterPcurrent[DATA_CURRENT["feels_like"]] = InterPcurrent[DATA_CURRENT["apparent"]]
     else:
-        InterPcurrent[DATA_CURRENT["feels_like"]] = MISSING_DATA
+        InterPcurrent[DATA_CURRENT["feels_like"]] = np.nan
 
     # Clip
     InterPcurrent[DATA_CURRENT["feels_like"]] = clipLog(
@@ -5030,7 +5055,7 @@ async def PW_Forecast(
         )
 
     else:
-        InterPcurrent[DATA_CURRENT["fire"]] = MISSING_DATA
+        InterPcurrent[DATA_CURRENT["fire"]] = np.nan
 
     # Current temperature in Celsius
     curr_temp = (
@@ -5122,7 +5147,6 @@ async def PW_Forecast(
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     InterPcurrent = InterPcurrent.round(2)
-    InterPcurrent[np.isnan(InterPcurrent)] = MISSING_DATA
 
     # Fix small neg zero
     InterPcurrent[((InterPcurrent > -0.01) & (InterPcurrent < 0.01))] = 0
@@ -5168,6 +5192,8 @@ async def PW_Forecast(
             currnetIceAccum = (
                 minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
             )
+
+    InterPcurrent[np.isnan(InterPcurrent)] = MISSING_DATA
 
     ### RETURN ###
     returnOBJ = dict()
@@ -5318,7 +5344,7 @@ async def PW_Forecast(
 
     if exHourly != 1:
         returnOBJ["hourly"] = dict()
-        if (not timeMachine) or (tmExtra):
+        if (not timeMachine):
             try:
                 hourIcon, hourText = calculate_day_text(
                     hourList[int(baseTimeOffset) : int(baseTimeOffset) + 24],
@@ -5348,6 +5374,31 @@ async def PW_Forecast(
             except Exception:
                 print("TEXT GEN ERROR:")
                 print(traceback.print_exc())
+                returnOBJ["hourly"]["summary"] = max(
+                    set(hourTextList), key=hourTextList.count
+                )
+                returnOBJ["hourly"]["icon"] = max(
+                    set(hourIconList), key=hourIconList.count
+                )
+        else: # Timemachine
+            hourIcon, hourText = calculate_day_text(
+                hourList,
+                prepAccumUnit,
+                visUnits,
+                windUnit,
+                tempUnits,
+                True,
+                str(tz_name),
+                int(time.time()),
+                "hour",
+                icon,
+            )
+            if summaryText:
+                returnOBJ["hourly"]["summary"] = translation.translate(
+                    ["sentence", hourText]
+                )
+                returnOBJ["hourly"]["icon"] = hourIcon
+            else:
                 returnOBJ["hourly"]["summary"] = max(
                     set(hourTextList), key=hourTextList.count
                 )
@@ -5391,7 +5442,7 @@ async def PW_Forecast(
 
     if exDaily != 1:
         returnOBJ["daily"] = dict()
-        if (not timeMachine) or (tmExtra):
+        if not timeMachine: # Since TimeMachine Requests only have 24 hours of data, skip weekly summary
             try:
                 if summaryText:
                     weekText, weekIcon = calculate_weekly_text(
@@ -5418,6 +5469,15 @@ async def PW_Forecast(
                 returnOBJ["daily"]["icon"] = max(
                     set(dayIconList), key=dayIconList.count
                 )
+        else:
+            # Timemachine fallback
+            returnOBJ["daily"]["summary"] = max(
+                set(dayTextList), key=dayTextList.count
+            )
+            returnOBJ["daily"]["icon"] = max(
+                set(dayIconList), key=dayIconList.count
+            )
+
         returnOBJ["daily"]["data"] = dayList[0:ouputDays]
 
     if exAlerts != 1:
@@ -5448,6 +5508,13 @@ async def PW_Forecast(
 
         # if timeMachine:
         # lock.release()
+
+    # Replace all nan with -999
+    # returnOBJ = replace_nan(returnOBJ, -999)
+    if TIMING:
+        print("Replace NaN Time")
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+
 
     return ORJSONResponse(
         content=returnOBJ,

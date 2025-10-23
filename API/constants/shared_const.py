@@ -1,9 +1,10 @@
 """
 Shared constants
 """
+import numpy as np
 
 # Invalid data
-MISSING_DATA = -999
+MISSING_DATA = np.nan
 
 # Minimum reflectivity threshold (dBZ)
 REFC_THRESHOLD = 5.0

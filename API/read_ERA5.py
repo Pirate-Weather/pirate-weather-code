@@ -142,6 +142,15 @@ relative_humidity_from_dewpoint(
             phase='auto').magnitude
 
 
+# UV
+startDate = np.datetime64("2024-07-07 16:00:00", 's') # Snow
+endDate = np.datetime64("2024-07-07 18:00:00", 's')
+step = np.timedelta64(1, 'h')
+datetimes = np.arange(startDate, endDate, step, dtype='datetime64[s]')
+
+
+dsERA5['downward_uv_radiation_at_the_surface'].sel(latitude=48.64, longitude=-77.092%360, time=datetimes, method="nearest").compute()
+
 
 
 #

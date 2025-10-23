@@ -148,6 +148,4 @@ ERA5 = {
     "surface_solar_radiation_downwards": 16,
     "convective_available_potential_energy": 17,
     "surface_pressure": 18,
-    "low_cloud_cover": 19,
-    "cloud_base_height": 20,
 }

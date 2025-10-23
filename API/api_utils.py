@@ -2,14 +2,27 @@
 # Alexander Rey. October 2025
 import logging
 
+import metpy as mp
+from metpy.calc import relative_humidity_from_dewpoint
 import numpy as np
 import xarray as xr
 
 from API.constants.api_const import APPARENT_TEMP_CONSTS, APPARENT_TEMP_SOLAR_CONSTS
 from API.constants.clip_const import CLIP_TEMP
-from API.constants.shared_const import KELVIN_TO_CELSIUS
+from API.constants.shared_const import KELVIN_TO_CELSIUS, MISSING_DATA
 
 logger = logging.getLogger(__name__)
+
+def replace_nan(obj, replacement=MISSING_DATA):
+    """Recursively replace np.nan with a given value in a dict/list."""
+    if isinstance(obj, dict):
+        return {k: replace_nan(v, replacement) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [replace_nan(v, replacement) for v in obj]
+    elif isinstance(obj, float) and np.isnan(obj):
+        return replacement
+    else:
+        return obj
 
 
 def calculate_apparent_temperature(air_temp, humidity, wind, solar=None):
@@ -127,163 +140,124 @@ def clipLog(data, min_val, max_val, name):
 
 
 ## Estimate Visibility for ERA5
-# https://chatgpt.com/share/68fa2b7f-0840-800d-b90e-81f5edb4bc90
-def estimate_visibility_from_numpy(
+# https://journals.ametsoc.org/view/journals/apme/49/1/2009jamc1927.1.xml
+# https://ams.confex.com/ams/Madison2006/techprogram/paper_113177.htm
+def estimate_visibility_gultepe_rh_pr_numpy(
     arr: np.ndarray,
     var_index: dict,
-    var_axis: int = 0,   # 0 => shape (n_vars, n_time); set to 1 if (n_time, n_vars)
+    var_axis: int = 0,             # 0 => (n_vars, n_time); 1 => (n_time, n_vars)
+    use_precip: bool = True,       # set False to ignore PR contribution entirely
+    which_rh_fit: str = "FRAM",    # "FRAM" (Eq. 2) or "AIRS2" (Eq. 3)
     params: dict | None = None,
 ) -> np.ndarray:
     """
-    Heuristic visibility proxy (km) from a NumPy array built from ERA5 variables.
+    Visibility (km) using Gültepe & Milbrandt (2010):
+      - RH→VIS via FRAM/AIRS2 fit
+      - PRR→VIS via Table 2 rain-type parameterizations (heavy/moderate/light)
 
-    Parameters
-    ----------
-    arr : np.ndarray
-        Array with variables stacked along `var_axis` and time along the other axis.
-        Typically shape = (n_vars, n_time).
-    var_index : dict[str,int]
-        Mapping from variable name -> 1-based index in `arr` (as in your ERA5 dict).
-    var_axis : int
-        Axis along which variables are stacked (0 or 1).
-    params : dict
-        Optional thresholds/parameters override.
-
-    Returns
-    -------
-    np.ndarray
-        Visibility in km, shape = (n_time,)
+    Requires metpy for RH computation.
+    Inputs (1-based indices in var_index):
+      - "2m_temperature" (K), "2m_dewpoint_temperature" (K)
+    Optional (for PRR in m s^-1 water equivalent):
+      - "large_scale_rain_rate", "convective_rain_rate"
+      - (Snow not parameterized in Table 2; ignored here by default.)
     """
-    # Thresholds/parameters (same logic as xarray version)
+    try:
+        from metpy.calc import relative_humidity_from_dewpoint as _rh_from_td
+        from metpy.units import units
+    except Exception as e:
+        raise ImportError("Requires MetPy (`pip install metpy`).") from e
+
+    # ------------------- parameters -------------------
     p = {
-        # Fog/haze
-        "dpd_fog_K": 1.0,
-        "dpd_haze_K": 2.0,
-        "lcc_fog_min": 0.6,
-        "no_precip_mm_h": 0.1,
-        # Precip→vis bins (mm/h)
-        "rain_bins_mm_h":  np.array([0.5, 5.0, 20.0]),
-        "rain_vis_km":     np.array([10.0, 8.0, 3.0, 1.0]),
-        "snow_bins_mm_h":  np.array([0.1, 1.0, 5.0]),
-        "snow_vis_km":     np.array([10.0, 5.0, 2.0, 0.8]),
-        # Clear sky vis (km)
-        "vis_fog_km": 0.5,
-        "vis_haze_km": 5.0,
-        "vis_clear_km": 10.0,
-        # Ceiling caps
-        "cap1_cbase_m": 50,   "cap1_vis_km": 1.0,
-        "cap2_cbase_m": 100,  "cap2_vis_km": 3.0,
-        # Wind relaxation
-        "wind_relax_ms": 8.0,
-        "wind_relax_min_vis_km": 2.0,
-        # Output clamp
-        "min_vis_km": 0.2,
-        "max_vis_km": 16.0,
+        "rh_fit": which_rh_fit,   # "FRAM" or "AIRS2"
+        "rh_min": 30.0,           # % clamp lower bound
+        "rh_max": 100.0,          # % clamp upper bound
+        "vis_min_km": 0.05,
+        "vis_max_km": 16.0,
+        # Rain-type thresholds per Glickman (2000) used by Gültepe & Milbrandt (2010):
+        "pr_light_max": 2.6,      # mm/h
+        "pr_moderate_max": 7.6,   # mm/h (heavy > 7.6)
     }
     if params:
         p.update(params)
 
-    # Helper to get a variable vector (time,) from index mapping
-    def get(name):
+    # ------------------- helpers -------------------
+    def pick(name):
         idx1 = var_index.get(name)
         if idx1 is None:
             return None
-        if var_axis == 0:
-            out = arr[idx1, ...]
-        else:
-            out = arr[..., idx1]
-        # Ensure shape (time,)
-        return np.asarray(out)
 
-    # Pull what we need (some optional)
-    t2m  = get("2m_temperature")
-    td2m = get("2m_dewpoint_temperature")
-    if t2m is None or td2m is None:
-        raise ValueError("Need both '2m_temperature' and '2m_dewpoint_temperature' in var_index.")
+        return np.asarray(arr[idx1, ...] if var_axis == 0 else arr[..., idx1])
 
-    lcc   = get("low_cloud_cover")
-    cbase = get("cloud_base_height")
-
-    u10   = get("10m_u_component_of_wind")
-    v10   = get("10m_v_component_of_wind")
-
-    # Rates in kg/m2 s-1 → mm h-1
-    def mmh(x):
+    def mmh(x):  # kg/m2 s^-1 -> mm h^-1
         return x * 3600.0
 
-    ls_rain = get("large_scale_rain_rate")
-    cv_rain = get("convective_rain_rate")
-    ls_snow = get("large_scale_snowfall_rate_water_equivalent")
-    cv_snow = get("convective_snowfall_rate_water_equivalent")
+    # ------------------- inputs -------------------
+    T2m  = pick("2m_temperature")            # K
+    Td2m = pick("2m_dewpoint_temperature")   # K
+    if T2m is None or Td2m is None:
+        raise ValueError("Need '2m_temperature' and '2m_dewpoint_temperature' in the array/map.")
 
-    # Determine time length and make safe defaults
-    n_time = t2m.shape[0]
-    def zeros(): return np.zeros(n_time, dtype=float)
-    def full(v): return np.full(n_time, v, dtype=float)
+    # Check if multiple times or 1d
+    if T2m.ndim == 0:
+        n_time = 1
+    else:
+        n_time = T2m.shape[0]
 
-    if lcc   is None: lcc   = zeros()
-    if cbase is None: cbase = full(1e9)
-    # Replace nan in cbase with large number
-    cbase = np.where(np.isnan(cbase), 1e9, cbase)
-    # print('cbase:', cbase)
-    if u10   is None: u10   = zeros()
-    if v10   is None: v10   = zeros()
-    if ls_rain is None: ls_rain = zeros()
-    if cv_rain is None: cv_rain = zeros()
-    if ls_snow is None: ls_snow = zeros()
-    if cv_snow is None: cv_snow = zeros()
+    # ------------------- RH via MetPy -------------------
+    Rh_frac = _rh_from_td((T2m * mp.units.units.degK), (Td2m * mp.units.units.degK)).magnitude
+    RH = np.clip(Rh_frac * 100.0, p["rh_min"], p["rh_max"])  # percent
 
-    rain_rate_mm_h = mmh(ls_rain + cv_rain)
-    snow_rate_mm_h = mmh(ls_snow + cv_snow)
+    # RH → VIS (Gültepe RH fits)
+    fit = (p["rh_fit"] or "FRAM").upper()
+    if fit == "AIRS2":
+        vis_rh = -0.0177 * (RH ** 2) + 1.462 * RH + 30.8
+    else:  # FRAM
+        vis_rh = -41.5 * np.log(RH) + 192.3
 
-    # --- Precip → visibility via piecewise-constant bins ---
-    def binned_vis(rate, edges, values):
-        # values length = len(edges)+1
-        vis = np.full_like(rate, values[-1], dtype=float)
-        # fill from highest edge downward so lower bins overwrite
-        for i in range(len(edges)-1, -1, -1):
-            vis = np.where(rate <= edges[i], values[i], vis)
-        return vis
+    beta_rh = 3 / vis_rh
 
-    vis_rain = binned_vis(rain_rate_mm_h, p["rain_bins_mm_h"], p["rain_vis_km"])
-    vis_snow = binned_vis(snow_rate_mm_h, p["snow_bins_mm_h"], p["snow_vis_km"])
-    vis_precip = np.minimum(vis_rain, vis_snow)
+    # ------------------- PRR → VIS (Gültepe Table 2) -------------------
+    def _vis_from_pr_gultepe(prr_mm_h: np.ndarray) -> np.ndarray:
+        """Apply rain-type thresholds and Table 2 percentile fits."""
+        pr = np.clip(prr_mm_h, 0.0, np.inf)
+        out = np.full(pr.shape, np.nan, dtype=float)
 
-    # print('vis_rain:', vis_rain)
-    # print('vis_snow:', vis_snow)
+        heavy = pr > p["pr_moderate_max"]            # > 7.6 mm/h
+        moderate = (pr >= p["pr_light_max"]) & (pr <= p["pr_moderate_max"])  # 2.6–7.6
+        light = pr < p["pr_light_max"]               # < 2.6
 
-    # --- Clear-sky component from dewpoint depression + low cloud ---
-    dpd = t2m - td2m
-    no_precip = (rain_rate_mm_h <= p["no_precip_mm_h"]) & (snow_rate_mm_h <= p["no_precip_mm_h"])
-    fog_flag  = (dpd <= p["dpd_fog_K"])  & (lcc >= p["lcc_fog_min"]) & no_precip
-    haze_flag = (dpd <= p["dpd_haze_K"]) & no_precip
+        # Heavy rain → 5th percentile fit: 0.45*PR^0.394 + 2.28
+        out[heavy] = -0.45 * np.power(pr[heavy], 0.394) + 2.28
 
-    vis_clear = np.where(
-        fog_flag, p["vis_fog_km"],
-        np.where(haze_flag, p["vis_haze_km"], p["vis_clear_km"])
-    )
+        # Moderate rain → 50th percentile fit: 2.65*PR^0.256 + 7.65
+        out[moderate] = -2.65 * np.power(pr[moderate], 0.256) + 7.65
 
-    # print('vis_clear:', vis_clear)
+        # Light rain → 95th percentile fit: 863.26*PR^0.003 + 874.19
+        out[light] = -863.26 * np.power(pr[light], 0.003) + 874.19
 
-    # --- Combine (more limiting wins) ---
-    vis = np.minimum(vis_clear, vis_precip)
-    # print("combined vis:", vis)
+        return out
 
-    # --- Ceiling penalties ---
-    vis = np.where(cbase < p["cap1_cbase_m"], np.minimum(vis, p["cap1_vis_km"]), vis)
-    # print("after cap1 vis:", vis)
-    mid_cap = (cbase >= p["cap1_cbase_m"]) & (cbase < p["cap2_cbase_m"])
-    vis = np.where(mid_cap, np.minimum(vis, p["cap2_vis_km"]), vis)
-    # print("after cap2 vis:", vis)
+    if use_precip:
+        ls_rain = pick("large_scale_rain_rate")
+        cv_rain = pick("convective_rain_rate")
+        if ls_rain is None: ls_rain = np.zeros(n_time)
+        if cv_rain is None: cv_rain = np.zeros(n_time)
 
-    # --- Wind mixing relaxation for dense fog ---
-    wind10 = np.hypot(u10, v10)
-    relax = (wind10 >= p["wind_relax_ms"]) & fog_flag
-    vis = np.where(relax, np.maximum(vis, p["wind_relax_min_vis_km"]), vis)
-    # print("after wind relax vis:", vis)
+        prr_mm_h = mmh(ls_rain + cv_rain)
+        vis_pr = _vis_from_pr_gultepe(prr_mm_h)
 
-    # --- Clamp & return ---
-    np.clip(vis, p["min_vis_km"], p["max_vis_km"], out=vis)
+        beta_pr = 3 / vis_pr
+    else:
+        beta_pr = np.zeros(n_time)
+    # Add the beta factors and convert back to vis
+    beta = beta_rh + beta_pr
+    vis = 3 / beta
+
+    # Clamp & return
+    vis = np.atleast_1d(np.array(vis, dtype=float))
+    np.clip(vis, p["vis_min_km"], p["vis_max_km"], out=vis)
     vis = vis * 1000 # Return in m
 
-    return vis
+    return vis[0] if vis.size == 1 else vis
