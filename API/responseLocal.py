@@ -37,7 +37,12 @@ from pirateweather_translations.dynamic_loader import load_all_translations
 from pytz import timezone, utc
 from timezonefinder import TimezoneFinder
 
-from API.api_utils import calculate_apparent_temperature, clipLog
+from API.api_utils import (
+    calculate_apparent_temperature,
+    clipLog,
+    estimate_visibility_from_numpy,
+    )
+
 from API.constants.api_const import (
     API_VERSION,
     DBZ_CONST,
@@ -2021,7 +2026,7 @@ async def PW_Forecast(
 
     # Create the hourly time and main data arrays
     # InterPhour is the main data array
-    InterPhour = np.full((numHours, 28), np.nan)  # Time, Intensity,Probability
+    InterPhour = np.full((numHours,  max(DATA_HOURLY.values())+1), np.nan)  # Time, Intensity,Probability
 
     hour_array_grib = (
         (hour_array - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0)))
@@ -3271,7 +3276,7 @@ async def PW_Forecast(
     elif "era5" in sourceList:
         #TODO: Implement a more accurate uv index
         InterPhour[:, DATA_HOURLY["uv"]] = clipLog(
-            ERA5_MERGED[:, ERA5["uv"]]
+            ERA5_MERGED[:, ERA5["downward_uv_radiation_at_the_surface"]]
             * 40
             * 0.0025,
             CLIP_UV["min"],
@@ -3293,7 +3298,9 @@ async def PW_Forecast(
     if "gfs" in sourceList:
         VisibilityHour[:, 2] = GFS_Merged[:, GFS["vis"]]
     if "era5"  in sourceList:
-        VisibilityHour[:, 3] = estimate_visibility_from_numpy(ERA5_MERGED, ERA5)
+        VisibilityHour[:, 3] = estimate_visibility_from_numpy(ERA5_MERGED,
+                                                              var_index=ERA5,
+                                                              var_axis=1)
 
     InterPhour[:, DATA_HOURLY["vis"]] = (
         np.clip(
@@ -3406,7 +3413,7 @@ async def PW_Forecast(
         InterPhour[:, DATA_HOURLY["temp"]],  # Air temperature in Kelvin
         InterPhour[:, DATA_HOURLY["humidity"]],  # Relative humidity (0.0 to 1.0)
         windSpeedMps,  # Wind speed in meters per second
-        InterPhour[:, DATA_HOURLY["solar"]],  # Solar radiation in W/m^2
+        solar=InterPhour[:, DATA_HOURLY["solar"]],  # Solar radiation in W/m^2
     )
 
     ### Feels Like Temperature
@@ -3434,9 +3441,9 @@ async def PW_Forecast(
     # Station Pressure
     station_pressure_hour = np.full((len(hour_array_grib), 2), np.nan)
     if "gfs" in sourceList:
-        station_pressure_hour = GFS_Merged[:, GFS["station_pressure"]]
+        station_pressure_hour[:, 0] = GFS_Merged[:, GFS["station_pressure"]]
     elif "era5" in sourceList:
-        station_pressure_hour = ERA5_MERGED[:, ERA5["surface_pressure"]]
+        station_pressure_hour[:, 1] = ERA5_MERGED[:, ERA5["surface_pressure"]]
 
 
     InterPhour[:, DATA_HOURLY["station_pressure"]] = (
@@ -4384,10 +4391,15 @@ async def PW_Forecast(
     # Get prep probability, intensity and error from minutely
     if timeMachine:
         InterPcurrent[DATA_CURRENT["intensity"]] = (
-                ERA5_MERGED[currentIDX_hrrrh_A, ERA5["mean_total_precipitation_rate"]] * interpFac1
-                + ERA5_MERGED[currentIDX_hrrrh, ERA5["mean_total_precipitation_rate"]] * interpFac2
+                (ERA5_MERGED[currentIDX_hrrrh_A, ERA5["large_scale_rain_rate"]] +
+                 ERA5_MERGED[currentIDX_hrrrh_A, ERA5["convective_rain_rate"]] +
+                 ERA5_MERGED[currentIDX_hrrrh_A, ERA5["large_scale_snowfall_rate_water_equivalent"]] +
+                 ERA5_MERGED[currentIDX_hrrrh_A, ERA5["convective_snowfall_rate_water_equivalent"]]) * interpFac1 +
+                (ERA5_MERGED[currentIDX_hrrrh, ERA5["large_scale_rain_rate"]] +
+                 ERA5_MERGED[currentIDX_hrrrh, ERA5["convective_rain_rate"]] +
+                 ERA5_MERGED[currentIDX_hrrrh, ERA5["large_scale_snowfall_rate_water_equivalent"]] +
+                 ERA5_MERGED[currentIDX_hrrrh, ERA5["convective_snowfall_rate_water_equivalent"]]) * interpFac2
         ) * 3600  # Convert from mm/s to mm/hr
-
     else:
         InterPcurrent[DATA_CURRENT["intensity"]] = InterPminute[
             0, DATA_MINUTELY["intensity"]
@@ -4925,11 +4937,17 @@ async def PW_Forecast(
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["solar"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["solar"]] * interpFac2
         )
-    else:
+    elif "gfs" in sourceList:
         InterPcurrent[DATA_CURRENT["solar"]] = (
             GFS_Merged[currentIDX_hrrrh_A, GFS["solar"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["solar"]] * interpFac2
         )
+    elif "era5" in sourceList:
+        InterPcurrent[DATA_CURRENT["solar"]] = (
+            ERA5_MERGED[currentIDX_hrrrh_A, ERA5["surface_solar_radiation_downwards"]] * interpFac1
+            + ERA5_MERGED[currentIDX_hrrrh, ERA5["surface_solar_radiation_downwards"]] * interpFac2
+        )
+
 
     InterPcurrent[DATA_CURRENT["solar"]] = clipLog(
         InterPcurrent[DATA_CURRENT["solar"]],
@@ -4949,10 +4967,15 @@ async def PW_Forecast(
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["cape"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["cape"]] * interpFac2
         )
-    else:
+    elif "gfs" in sourceList:
         InterPcurrent[DATA_CURRENT["cape"]] = (
             GFS_Merged[currentIDX_hrrrh_A, GFS["cape"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["cape"]] * interpFac2
+        )
+    elif "era5" in sourceList:
+        InterPcurrent[DATA_CURRENT["cape"]] = (
+            ERA5_MERGED[currentIDX_hrrrh_A, ERA5["convective_available_potential_energy"]] * interpFac1
+            + ERA5_MERGED[currentIDX_hrrrh, ERA5["convective_available_potential_energy"]] * interpFac2
         )
 
     InterPcurrent[DATA_CURRENT["cape"]] = clipLog(
@@ -5698,105 +5721,6 @@ def dataSync() -> None:
             update_zarr_store(False)
 
     logger.info("Sync End!")
-
-
-def calculate_apparent_temperature(airTemp, humidity, wind):
-    """
-    Calculates the apparent temperature temperature based on air temperature, wind speed and humidity
-    Formula from: https://github.com/breezy-weather/breezy-weather/discussions/1085
-    AT = Ta + 0.33 * rh / 100 * 6.105 * exp(17.27 * Ta / (237.7 + Ta)) - 0.70 * ws - 4.00
-
-    Parameters:
-    - airTemperature (float): Air temperature
-    - humidity (float): Relative humidity
-    - windSpeed (float): Wind speed in meters per second
-
-    Returns:
-    - float: Apparent temperature
-    """
-
-    # Convert air_temp from Kelvin to Celsius for the formula parts that use Celsius
-    airTempC = airTemp - KELVIN_TO_CELSIUS
-
-    # Calculate water vapor pressure 'e'
-    # Ensure humidity is not 0 for calculation, replace with a small non-zero value if needed
-    # The original equation does not guard for zero humidity. If relative_humidity_0_1 is 0, e will be 0.
-    e = (
-        humidity
-        * APPARENT_TEMP_CONSTS["e_const"]
-        * np.exp(
-            APPARENT_TEMP_CONSTS["exp_a"]
-            * airTempC
-            / (APPARENT_TEMP_CONSTS["exp_b"] + airTempC)
-        )
-    )
-
-    # Calculate apparent temperature in Celsius
-    apparentTempC = (
-        airTempC
-        + APPARENT_TEMP_CONSTS["humidity_factor"] * e
-        - APPARENT_TEMP_CONSTS["wind_factor"] * wind
-        + APPARENT_TEMP_CONSTS["const"]
-    )
-
-    # Convert back to Kelvin
-    apparentTempK = apparentTempC + KELVIN_TO_CELSIUS
-
-    # Clip between -90 and 60
-    return clipLog(
-        apparentTempK,
-        CLIP_TEMP["min"],
-        CLIP_TEMP["max"],
-        "Apparent Temperature Current",
-    )
-
-
-def clipLog(data, min, max, name):
-    """
-    Clip the data between min and max. Log if there is an error
-    """
-
-    # Print if the clipping is larger than 25 of the min
-    if np.min(data) < (min * 0.75):
-        # Print the data and the index it occurs
-        logger.error("Min clipping required for " + name)
-        logger.error("Min Value: " + str(np.max(data)))
-        if isinstance(data, np.ndarray):
-            logger.error("Min Index: " + str(np.where(data == data.min())))
-
-        # Replace values below the threshold with np.nan
-        if np.isscalar(data):
-            if data < min:
-                data = np.nan
-        else:
-            data = np.array(data, dtype=float)
-            data[data < min] = np.nan
-
-    else:
-        data = np.clip(data, a_min=min, a_max=None)
-
-    # Same for max
-    if np.max(data) > (max * 1.25):
-        logger.error("Max clipping required for " + name)
-        logger.error("Max Value: " + str(np.max(data)))
-
-        # Print the data and the index it occurs
-        if isinstance(data, np.ndarray):
-            logger.error("Max Index: " + str(np.where(data == data.max())))
-
-        # Replace values above the threshold with np.nan
-        if np.isscalar(data):
-            if data > max:
-                data = np.nan
-        else:
-            data = np.array(data, dtype=float)
-            data[data > max] = np.nan
-
-    else:
-        data = np.clip(data, a_min=None, a_max=max)
-
-    return data
-
 
 def nearest_index(a, v):
     # Slightly faster than a simple linear search for large arrays
