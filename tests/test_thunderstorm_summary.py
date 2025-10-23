@@ -3,12 +3,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import pytest
 
+from API.constants.shared_const import MISSING_DATA
 from API.PirateDailyText import calculate_day_text
 from API.PirateText import calculate_text
 from API.PirateWeeklyText import calculate_weekly_text
-from API.constants.shared_const import MISSING_DATA
 
 
 def test_currently_hourly_thunderstorm_with_precipitation():
