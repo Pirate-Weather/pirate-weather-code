@@ -537,8 +537,17 @@ def calculate_period_summary_text(
     def _are_periods_matching(cond_a, cond_b):
         return sorted(cond_a) == sorted(cond_b)
 
+    # Helper to check if condition text contains thunderstorms
+    def _contains_thunderstorm(text):
+        """Check if the text structure contains thunderstorm text."""
+        if isinstance(text, str):
+            return "thunderstorm" in text
+        elif isinstance(text, list):
+            return any(_contains_thunderstorm(item) for item in text)
+        return False
+
     # Check for accompanying conditions that can be combined with the primary condition
-    # Dry and Humid should not combine with Fog (vis)
+    # Dry and Humid should not combine with Fog (vis) or Thunderstorms
     if condition_type == "precip" or condition_type == "cloud":
         if all_wind_periods and _are_periods_matching(period_indices, all_wind_periods):
             wind_condition_combined = True
@@ -550,11 +559,19 @@ def calculate_period_summary_text(
         if all_vis_periods and _are_periods_matching(period_indices, all_vis_periods):
             vis_condition_combined = True
             current_condition_text = ["and", current_condition_text, "fog"]
-        if all_dry_periods and _are_periods_matching(period_indices, all_dry_periods):
+        # Don't combine humid/dry with thunderstorms
+        has_thunderstorm = _contains_thunderstorm(current_condition_text)
+        if (
+            all_dry_periods
+            and _are_periods_matching(period_indices, all_dry_periods)
+            and not has_thunderstorm
+        ):
             dry_condition_combined = True
             current_condition_text = ["and", current_condition_text, "low-humidity"]
-        if all_humid_periods and _are_periods_matching(
-            period_indices, all_humid_periods
+        if (
+            all_humid_periods
+            and _are_periods_matching(period_indices, all_humid_periods)
+            and not has_thunderstorm
         ):
             humid_condition_combined = True
             current_condition_text = ["and", current_condition_text, "high-humidity"]

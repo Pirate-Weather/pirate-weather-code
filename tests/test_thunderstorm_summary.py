@@ -497,3 +497,107 @@ def test_daily_uses_max_cape_with_precipitation():
     ]
     # Icon should be thunderstorm
     assert icon == "thunderstorm"
+
+
+def test_thunderstorms_dont_combine_with_humidity():
+    """
+    Test that humid/dry conditions don't combine with thunderstorms + precipitation.
+    This prevents overly wordy summaries like "thunderstorms and rain and humid".
+    """
+    hours = []
+
+    # All day: thunderstorms with rain and high humidity
+    for i in range(8):
+        hours.append(
+            {
+                "time": 1609459200 + (i * 3600),
+                "precipType": "rain",
+                "precipIntensity": 5.0,
+                "precipAccumulation": 5.0,
+                "precipProbability": 0.8,
+                "cloudCover": 0.9,
+                "windSpeed": 5.0,  # Low wind so it doesn't combine
+                "temperature": 28.0,  # High temp
+                "humidity": 0.96,  # High humidity
+                "visibility": 8000,
+                "dewPoint": 26.0,
+                "smoke": 0,
+                "cape": 2600,
+                "liftedIndex": -5,
+                "precipIntensityError": 0.5,
+            }
+        )
+
+    icon, summary_text = calculate_day_text(
+        hours=hours,
+        precip_accum_unit=1.0,
+        vis_units=1.0,
+        wind_unit=1.0,
+        temp_units=1,
+        is_day_time=True,
+        time_zone="UTC",
+        curr_time=1609459200,
+        mode="daily",
+        icon_set="darksky",
+    )
+
+    # Should NOT include humidity with thunderstorms
+    # Check exact structure - no "high-humidity" or "low-humidity"
+    assert summary_text == [
+        "sentence",
+        ["for-day", ["and", "thunderstorm", "medium-rain"]],
+    ]
+    assert icon == "thunderstorm"
+
+    # Verify humidity doesn't appear in the text
+    summary_str = str(summary_text)
+    assert "humidity" not in summary_str.lower()
+
+
+def test_humidity_still_combines_without_thunderstorms():
+    """
+    Test that humid/dry still combines with regular precipitation when there are no thunderstorms.
+    """
+    hours = []
+
+    # All day: rain with high humidity but no thunderstorms
+    for i in range(8):
+        hours.append(
+            {
+                "time": 1609459200 + (i * 3600),
+                "precipType": "rain",
+                "precipIntensity": 5.0,
+                "precipAccumulation": 5.0,
+                "precipProbability": 0.8,
+                "cloudCover": 0.9,
+                "windSpeed": 5.0,
+                "temperature": 28.0,
+                "humidity": 0.96,  # High humidity
+                "visibility": 8000,
+                "dewPoint": 26.0,
+                "smoke": 0,
+                "cape": 500,  # Low CAPE - no thunderstorms
+                "liftedIndex": 0,
+                "precipIntensityError": 0.5,
+            }
+        )
+
+    icon, summary_text = calculate_day_text(
+        hours=hours,
+        precip_accum_unit=1.0,
+        vis_units=1.0,
+        wind_unit=1.0,
+        temp_units=1,
+        is_day_time=True,
+        time_zone="UTC",
+        curr_time=1609459200,
+        mode="daily",
+        icon_set="darksky",
+    )
+
+    # Should include humidity with regular rain
+    assert summary_text == [
+        "sentence",
+        ["for-day", ["and", "medium-rain", "high-humidity"]],
+    ]
+    assert icon == "rain"
