@@ -41,7 +41,6 @@ from API.constants.api_const import (
     DBZ_CONST,
     GLOBE_TEMP_CONST,
     LARGEST_DIR_INIT,
-    MAGNUS_FORMULA_CONSTS,
     NICE_PRIORITY,
     PRECIP_IDX,
     S3_MAX_BANDWIDTH,
@@ -4799,7 +4798,9 @@ async def PW_Forecast(
     # humidity, RTMA_RU then NBM then HRRR, then GFS
     # Note: RTMA_RU humidity is already in percentage (0-100), not fraction
     if "rtma_ru" in sourceList:
-        InterPcurrent[DATA_CURRENT["humidity"]] = dataOut_rtma_ru[0, RTMA_RU["humidity"]]
+        InterPcurrent[DATA_CURRENT["humidity"]] = dataOut_rtma_ru[
+            0, RTMA_RU["humidity"]
+        ]
     elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[DATA_CURRENT["humidity"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["humidity"]] * interpFac1
