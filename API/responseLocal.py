@@ -4796,7 +4796,7 @@ async def PW_Forecast(
     )
 
     # humidity, RTMA_RU then NBM then HRRR, then GFS
-    # Note: RTMA_RU humidity is already in percentage (0-100), not fraction
+    # Note: RTMA_RU humidity is already a fraction so no need to convert
     if "rtma_ru" in sourceList:
         InterPcurrent[DATA_CURRENT["humidity"]] = dataOut_rtma_ru[
             0, RTMA_RU["humidity"]

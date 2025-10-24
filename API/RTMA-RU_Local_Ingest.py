@@ -177,7 +177,6 @@ xarray_analysis_merged = xarray_analysis_merged.assign_coords(
 
 # Convert RH from specific humidity and pressure and add it to the dataset
 # relative_humidity_from_specific_humidity returns a dimensionless fraction (0-1)
-# but the response expects percentage (0-100), so multiply by 100
 rh_2m = relative_humidity_from_specific_humidity(
     pressure=xarray_analysis_merged["sp"] * units.Pa,
     temperature=xarray_analysis_merged["t2m"] * units.degK,
