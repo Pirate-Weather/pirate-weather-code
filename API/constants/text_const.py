@@ -59,7 +59,7 @@ PRECIP_PROB_THRESHOLD = 0.25
 
 # CAPE thresholds
 CAPE_THRESHOLDS = {
-    "low": 1000,
+    "low": 1250,
     "high": 2500,
 }
 
