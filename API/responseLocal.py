@@ -1219,7 +1219,7 @@ async def PW_Forecast(
         # If within the last 10 days , it may or may not be a timemachine request
         # If it is, then only return 24h of data
         if "timemachine" in str(request.url):
-            timeMachineNear = True
+            timeMachine = True
             # This results in the API using the live zip file, but only doing a 24 hour forecast from midnight of the requested day
             if TIMING:
                 print("Near term timemachine request")
@@ -2628,6 +2628,25 @@ async def PW_Forecast(
                 right=MISSING_DATA,
             )
 
+    era5_MinuteInterpolation = np.zeros((len(minute_array_grib), max(ERA5.values())))
+
+    if "era5" in sourceList:
+        for i in [
+            ERA5["precipitation_type"],
+            ERA5["large_scale_rain_rate"],
+            ERA5["convective_rain_rate"],
+            ERA5["large_scale_snowfall_rate_water_equivalent"],
+            ERA5["convective_snowfall_rate_water_equivalent"],
+        ]:
+            era5_MinuteInterpolation[:, i] = np.interp(
+                minute_array_grib,
+                ERA5_MERGED[:, 0].squeeze(),
+                ERA5_MERGED[:, i],
+                left=MISSING_DATA,
+                right=MISSING_DATA,
+            )
+
+
     # Timing Check
     if TIMING:
         print("Minutely Start")
@@ -2713,6 +2732,26 @@ async def PW_Forecast(
     elif "gfs" in sourceList:  # GFS Fallback
         for i in [GFS["snow"], GFS["ice"], GFS["freezing_rain"], GFS["rain"]]:
             InterTminute[:, i - 11] = gfsMinuteInterpolation[:, i]
+    elif "era5" in sourceList:
+        # ERA5 precipitation type codes:
+        # 0=No precip, 1=Rain, 2=Thunderstorm, 3=Freezing rain, 4=Mixed/ice, 5=Snow,
+        # 6=Wet snow, 7=Mix of rain/snow, 8=Ice pellets, 9=Graupel, 10=Hail,
+        # 11=Drizzle, 12=Freezing drizzle, 255=Missing
+        ptype_era5 = era5_MinuteInterpolation[:, ERA5["precipitation_type"]]
+
+        InterTminute[:, 1] = np.where(
+            np.isin(ptype_era5, [5, 6, 9]), 1, 0
+        )  # Snow, wet snow, graupel
+        InterTminute[:, 2] = np.where(
+            np.isin(ptype_era5, [4, 8, 10]), 1, 0
+        )  # Mixed/ice, ice pellets, hail
+        InterTminute[:, 3] = np.where(
+            np.isin(ptype_era5, [3, 12]), 1, 0
+        )  # Freezing rain, freezing drizzle
+        InterTminute[:, 4] = np.where(
+            np.isin(ptype_era5, [1, 2, 7, 11]), 1, 0
+        )  # Rain, thunderstorm, rain/snow mix, drizzle
+
 
     # If all nan, set pchance to -999, otherwise determine the predominant type
     maxPchance = (
@@ -2768,12 +2807,13 @@ async def PW_Forecast(
             dbz_to_rate(gfsMinuteInterpolation[:, GFS["refc"]], precipTypes)
             * prepIntensityUnit
         )
-
-    if "hrrrsubh" not in sourceList:
-        # Set intensity to zero if POP == 0
-        InterPminute[
-            InterPminute[:, DATA_MINUTELY["prob"]] == 0, DATA_MINUTELY["intensity"]
-        ] = 0
+    elif "era5" in sourceList:
+        InterPminute[:, DATA_MINUTELY["intensity"]] = (
+            era5_MinuteInterpolation[:, ERA5["large_scale_snowfall_rate_water_equivalent"]] +
+            era5_MinuteInterpolation[:, ERA5["convective_snowfall_rate_water_equivalent"]] +
+            era5_MinuteInterpolation[:, ERA5["large_scale_rain_rate"]] +
+            era5_MinuteInterpolation[:, ERA5["convective_rain_rate"]]
+        ) * 3600 * prepIntensityUnit
 
     # "precipIntensityError"
     if "ecmwf_ifs" in sourceList:
@@ -5287,8 +5327,6 @@ async def PW_Forecast(
                 minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
             )
 
-    InterPcurrent[np.isnan(InterPcurrent)] = MISSING_DATA
-
     ### RETURN ###
     returnOBJ = dict()
 
@@ -5306,9 +5344,7 @@ async def PW_Forecast(
         returnOBJ["currently"]["nearestStormDistance"] = InterPcurrent[
             DATA_CURRENT["storm_dist"]
         ]
-        returnOBJ["currently"]["nearestStormBearing"] = int(
-            InterPcurrent[DATA_CURRENT["storm_dir"]].round()
-        )
+        returnOBJ["currently"]["nearestStormBearing"] = InterPcurrent[DATA_CURRENT["storm_dir"]].round()
         returnOBJ["currently"]["precipIntensity"] = minuteDict[0]["precipIntensity"]
         returnOBJ["currently"]["precipProbability"] = minuteDict[0]["precipProbability"]
         returnOBJ["currently"]["precipIntensityError"] = minuteDict[0][
