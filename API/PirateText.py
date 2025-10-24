@@ -110,6 +110,7 @@ def calculate_text(
         icon,
         "both",
     )
+
     windText, windIcon = calculate_wind_text(wind, windUnit, icon, "both")
     visText, visIcon = calculate_vis_text(
         vis, visUnits, tempUnits, temp, dewPoint, smoke, icon, "both"

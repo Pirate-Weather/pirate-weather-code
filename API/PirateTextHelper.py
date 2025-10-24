@@ -122,7 +122,7 @@ def calculate_precip_text(
 
     Parameters:
     - prepIntensity (float): The precipitation intensity
-    - prepAccumUnit (float): The precipitation accumulation/intensity unit
+    - prepIntensityUnit (float): The precipitation accumulation/intensity unit
     - prepType (str): The type of precipitation
     - type (str): What type of summary is being generated.
     - rainPrep (float): The rain accumulation
@@ -142,14 +142,14 @@ def calculate_precip_text(
     if any(np.isnan(x) for x in (rainPrep, snowPrep, icePrep, prepIntensity)):
         return (None, None) if mode == "both" else None
 
+    # If pop is -999 set it to 1 so we can calculate the precipitation text
+    if np.isnan(pop):
+        pop = 1
+
     if prepAccumUnit == 0.1:
         prepIntensityUnit = 1
     else:
         prepIntensityUnit = prepAccumUnit
-
-    # If pop is -999 set it to 1 so we can calculate the precipitation text
-    if np.isnan(pop):
-        pop = 1
 
     # In mm/h
     lightPrecipThresh = PRECIP_INTENSITY_THRESHOLDS["light"] * prepIntensityUnit
@@ -161,6 +161,7 @@ def calculate_precip_text(
 
     snowIconThresholdHour = HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
     precipIconThresholdHour = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
+    precipIconThresholdHourIntensity = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepIntensityUnit # Liquid equivalent mm for intensity, so no snow variation
 
     snowIconThresholdDay = DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
     precipIconThresholdDay = DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
@@ -185,7 +186,7 @@ def calculate_precip_text(
         rainPrep,
         precipIconThreshold,
         prepIntensity,
-        precipIconThresholdHour,
+        precipIconThresholdHourIntensity,
     )
 
     snow_condition = matches_precip(
@@ -194,7 +195,7 @@ def calculate_precip_text(
         snowPrep,
         snowIconThreshold,
         prepIntensity,
-        snowIconThresholdHour,
+        precipIconThresholdHourIntensity,
     )
 
     ice_condition = matches_precip(
@@ -203,7 +204,7 @@ def calculate_precip_text(
         icePrep,
         precipIconThreshold,
         prepIntensity,
-        precipIconThresholdHour,
+        precipIconThresholdHourIntensity,
     )
 
     # Add the possible precipitation text if pop is less than 25% or if pop is greater than 0 but precipIntensity is between 0-0.02 mm/h
@@ -233,9 +234,9 @@ def calculate_precip_text(
 
     # Find the largest percentage difference to determine the icon
     if pop >= PRECIP_PROB_THRESHOLD and (
-        (rainPrep > precipIconThreshold and prepIntensity > precipIconThresholdHour)
-        or (snowPrep >= snowIconThreshold and prepIntensity > snowIconThresholdHour)
-        or (icePrep >= precipIconThreshold and prepIntensity > precipIconThresholdHour)
+        (rainPrep > precipIconThreshold and prepIntensity > precipIconThresholdHourIntensity)
+        or (snowPrep >= snowIconThreshold and prepIntensity > precipIconThresholdHourIntensity)
+        or (icePrep >= precipIconThreshold and prepIntensity > precipIconThresholdHourIntensity)
         or (totalPrep >= precipIconThreshold and numTypes > 1)
     ):
         if prepType == "none":

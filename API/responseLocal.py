@@ -2632,7 +2632,6 @@ async def PW_Forecast(
 
     if "era5" in sourceList:
         for i in [
-            ERA5["precipitation_type"],
             ERA5["large_scale_rain_rate"],
             ERA5["convective_rain_rate"],
             ERA5["large_scale_snowfall_rate_water_equivalent"],
@@ -2646,6 +2645,14 @@ async def PW_Forecast(
                 right=MISSING_DATA,
             )
 
+            # Precipitation type should be nearest, not linear
+            era5_MinuteInterpolation[:, ERA5["precipitation_type"]] = np.interp(
+                minute_array_grib,
+                ERA5_MERGED[:, 0].squeeze(),
+                ERA5_MERGED[:, ERA5["precipitation_type"]],
+                left=MISSING_DATA,
+                right=MISSING_DATA
+            ).round()
 
     # Timing Check
     if TIMING:
@@ -2751,6 +2758,7 @@ async def PW_Forecast(
         InterTminute[:, 4] = np.where(
             np.isin(ptype_era5, [1, 2, 7, 11]), 1, 0
         )  # Rain, thunderstorm, rain/snow mix, drizzle
+
 
 
     # If all nan, set pchance to -999, otherwise determine the predominant type
@@ -3429,7 +3437,7 @@ async def PW_Forecast(
     if "gfs" in sourceList:
         PrecpAccumHour[:, 4] = GFS_Merged[:, GFS["accum"]]
     if "era5" in sourceList:
-        PrecpAccumHour[:, 5] = ERA5_MERGED[:, ERA5["total_precipitation"]]
+        PrecpAccumHour[:, 5] = ERA5_MERGED[:, ERA5["total_precipitation"]]*1000 # m to mm
 
     InterPhour[:, DATA_HOURLY["accum"]] = np.maximum(
         np.choose(np.argmin(np.isnan(PrecpAccumHour), axis=1), PrecpAccumHour.T)
@@ -3700,20 +3708,20 @@ async def PW_Forecast(
     # Round remaining to 2
     InterPhour[:, DATA_HOURLY["fire"] :] = InterPhour[:, DATA_HOURLY["fire"] :].round(2)
 
-    # Round to 4
+    # Round to 5 for intensity
     InterPhour[:, DATA_HOURLY["type"] : DATA_HOURLY["prob"]] = InterPhour[
         :, DATA_HOURLY["type"] : DATA_HOURLY["prob"]
-    ].round(4)
+    ].round(5)
     InterPhour[:, DATA_HOURLY["error"] : DATA_HOURLY["temp"]] = InterPhour[
         :, DATA_HOURLY["error"] : DATA_HOURLY["temp"]
     ].round(4)
-    InterPhour[:, DATA_HOURLY["accum"]] = InterPhour[:, DATA_HOURLY["accum"]].round(4)
+    InterPhour[:, DATA_HOURLY["accum"]] = InterPhour[:, DATA_HOURLY["accum"]].round(5)
     InterPhour[:, DATA_HOURLY["rain"] : DATA_HOURLY["fire"]] = InterPhour[
         :, DATA_HOURLY["rain"] : DATA_HOURLY["fire"]
-    ].round(4)
+    ].round(5)
 
     # Fix very small neg from interp to solve -0
-    InterPhour[((InterPhour > -0.001) & (InterPhour < 0.001))] = 0
+    InterPhour[((InterPhour >= -0.00001) & (InterPhour <= 0.00001))] = 0
 
     # Timing Check
     if TIMING:
@@ -5400,7 +5408,7 @@ async def PW_Forecast(
         try:
             currentText, currentIcon = calculate_text(
                 returnOBJ["currently"],
-                prepAccumUnit,
+                prepIntensityUnit,
                 visUnits,
                 windUnit,
                 tempUnits,
@@ -5511,30 +5519,13 @@ async def PW_Forecast(
                     set(hourIconList), key=hourIconList.count
                 )
         else:  # Timemachine
-            hourIcon, hourText = calculate_day_text(
-                hourList,
-                prepAccumUnit,
-                visUnits,
-                windUnit,
-                tempUnits,
-                True,
-                str(tz_name),
-                int(time.time()),
-                "hour",
-                icon,
+            # Use simplified text for timemachine since this is covered in daily
+            returnOBJ["hourly"]["summary"] = max(
+                set(hourTextList), key=hourTextList.count
             )
-            if summaryText:
-                returnOBJ["hourly"]["summary"] = translation.translate(
-                    ["sentence", hourText]
-                )
-                returnOBJ["hourly"]["icon"] = hourIcon
-            else:
-                returnOBJ["hourly"]["summary"] = max(
-                    set(hourTextList), key=hourTextList.count
-                )
-                returnOBJ["hourly"]["icon"] = max(
-                    set(hourIconList), key=hourIconList.count
-                )
+            returnOBJ["hourly"]["icon"] = max(
+                set(hourIconList), key=hourIconList.count
+            )
 
         # Final hourly cleanup.
         fieldsToRemove = []

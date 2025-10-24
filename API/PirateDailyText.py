@@ -868,33 +868,7 @@ def calculate_day_text(
             break
 
     # Now iterate through the actual hourly forecast data and aggregate into the pre-defined standard periods
-    for idx, hourIN in enumerate(hours):
-        # Provide default values for missing data (timemachine)
-        hour.setdefault("humidity", DEFAULT_HUMIDITY)
-        # If humidity is MISSING_DATA, set to default
-        if np.isnan(hour["humidity"]):
-            hour["humidity"] = DEFAULT_HUMIDITY
-
-        hour.setdefault("visibility", DEFAULT_VISIBILITY)
-        if np.isnan(hour["visibility"]):
-            hour["visibility"] = DEFAULT_VISIBILITY
-
-        hour.setdefault("precipIntensityError", 0)
-        if np.isnan(hour["precipIntensityError"]):
-            hour["precipIntensityError"] = 0
-
-        hour.setdefault("precipProbability", DEFAULT_POP)
-        if np.isnan(hour["precipProbability"]):
-            hour["precipProbability"] = DEFAULT_POP
-
-        hour.setdefault("smoke", 0.0)
-        if np.isnan(hour["smoke"]):
-            hour["smoke"] = 0.0
-
-        # Set dewPoint to temperature if missing, resulting in no spread
-        hour.setdefault("dewPoint", hour["temperature"])
-        if np.isnan(hour["dewPoint"]):
-            hour["dewPoint"] = hour["temperature"]
+    for idx, hour in enumerate(hours):
 
         hour_date = datetime.datetime.fromtimestamp(hour["time"], zone)
         hour_in_loop = int(hour_date.strftime("%H"))

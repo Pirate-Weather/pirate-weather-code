@@ -76,16 +76,17 @@ dsERA5['large_scale_precipitation'].sel(latitude=45.4215, longitude=-75.6972%360
 dsERA5['precipitation_type'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute()
 
 # Rain
-startDate = np.datetime64("2004-09-09 00:00:00", 's') # Snow
+startDate = np.datetime64("2004-09-09 04:00:00", 's') # Snow
 endDate = np.datetime64("2004-09-09 00:00:00", 's')
 step = np.timedelta64(1, 'h')
 datetimes = np.arange(startDate, endDate + 24 * step, step, dtype='datetime64[s]')
 
 dsERA5['total_precipitation'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum()
-dsERA5['convective_precipitation'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum()
-dsERA5['large_scale_precipitation'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum()
-dsERA5['large_scale_rain_rate'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum()
-dsERA5['convective_rain_rate'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum()
+A = (dsERA5['convective_precipitation'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum() +
+    dsERA5['large_scale_precipitation'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum() +
+    dsERA5['large_scale_rain_rate'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum() +
+    dsERA5['convective_rain_rate'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute().sum())*3600
+dsERA5['precipitation_type'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute()
 
 
 # Ice?
