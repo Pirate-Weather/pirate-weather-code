@@ -184,7 +184,7 @@ rh_2m = relative_humidity_from_specific_humidity(
     specific_humidity=xarray_analysis_merged["sh2"] * units("kg/kg"),
 )
 
-xarray_analysis_merged["rh"] = rh_2m.metpy.dequantify() * 100
+xarray_analysis_merged["rh"] = rh_2m.metpy.dequantify()
 
 # Convert winds from grid relative to earth relative
 u_earth, v_earth = earth_relative_wind_components(
