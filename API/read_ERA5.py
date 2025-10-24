@@ -18,7 +18,7 @@ def init_ERA5():
     # Open the ERA5 dataset from Google Cloud
     dsERA5 = xr.open_zarr(
         "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3",
-        chunks={"time": 48},
+        chunks={"time": 24},
         storage_options=dict(token="anon"),
     )
 
@@ -76,7 +76,7 @@ dsERA5['large_scale_precipitation'].sel(latitude=45.4215, longitude=-75.6972%360
 dsERA5['precipitation_type'].sel(latitude=45.4215, longitude=-75.6972%360, time=datetimes, method="nearest").compute()
 
 # Rain
-startDate = np.datetime64("2004-09-09 04:00:00", 's') # Snow
+startDate = np.datetime64("2004-09-09 00:00:00", 's') # Snow
 endDate = np.datetime64("2004-09-09 00:00:00", 's')
 step = np.timedelta64(1, 'h')
 datetimes = np.arange(startDate, endDate + 24 * step, step, dtype='datetime64[s]')
@@ -145,7 +145,7 @@ relative_humidity_from_dewpoint(
 
 # UV
 startDate = np.datetime64("2024-07-07 16:00:00", 's') # Snow
-endDate = np.datetime64("2024-07-07 18:00:00", 's')
+endDate = np.datetime64("2024-07-08 16:00:00", 's')
 step = np.timedelta64(1, 'h')
 datetimes = np.arange(startDate, endDate, step, dtype='datetime64[s]')
 
@@ -156,10 +156,122 @@ dsERA5['downward_uv_radiation_at_the_surface'].sel(latitude=48.64, longitude=-77
 
 #
 # # Timing test for debugging
-# import time
-# start_time = time.time()
-#
-# print(dsERA5[zarrVars].sel(time=datetimes).isel(latitude=10, longitude=10).compute())
-# end_time = time.time()
-#
-# print(f"Time taken to load and compute: {end_time - start_time} seconds")
+from dask.distributed import Client
+client = Client()                       # start a local cluster
+print("Dashboard:", client.dashboard_link)
+
+import dask
+import xarray as xr
+from dask.distributed import Client
+import time
+import numpy as np
+client = Client()  # optional: launch local Dask cluster
+
+import gcsfs
+
+fs = gcsfs.GCSFileSystem(token="anon", asynchronous=True, block_size=10_485_760)  # 10 MB blocks
+mapper = fs.get_mapper("gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3")
+dsERA5 = xr.open_zarr(mapper, consolidated=True, chunks={"time":24})
+
+
+dsERA5 = xr.open_zarr(
+    "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3",
+    chunks={"time": 48},
+    storage_options=dict(token="anon"),
+)
+
+import zarr
+store = zarr.open_group(
+    "gcs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3",
+    mode="r",
+    storage_options={"token": "anon"},
+)
+print(list(store.keys()))
+
+
+
+from dask.distributed import Client, LocalCluster
+
+cluster = LocalCluster(
+    n_workers=1,
+    threads_per_worker=18,   # <- 18 threads on a single worker
+    processes=False,          # threads, not processes
+    memory_limit="32GB",      # adjust to your machine
+)
+client = Client(cluster)
+print(client)
+
+
+
+fs = gcsfs.GCSFileSystem(token="anon", asynchronous=True)
+
+# Get a fsspec mapper to the Zarr store
+store = fs.get_mapper(
+    "gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
+)
+dsERA5 = xr.open_zarr(store, chunks={"time": 24, "latitude":1, "longitude":1})
+
+dsERA5 = xr.open_zarr(
+    "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3",
+    chunks={"time": 24},
+    storage_options=dict(token="anon"), consolidated=True
+)
+
+
+
+import time
+
+# Read the ERA5 data for the location and time
+keys = ERA5.keys()
+# Select every 3rd key for testing
+selKeys = [key for i, key in enumerate(keys) if i % 1 == 0]
+
+start_time = time.time()
+
+dataOut_ERA5_xr = dsERA5[keys].sel(
+    latitude=48.64, longitude=-77.092%360, method="nearest"
+).isel(time=slice(500000,500024))
+# dataOut_ERA5_xr = dsERA5[keys].isel(time=slice(510000,510024), latitude=100, longitude=100)
+
+end_timeA = time.time()
+
+# dataOut_ERA5_xr.persist(scheduler="threads", num_workers=18)
+# arrays = [store[v][500000:500024,100,100] for v in selKeys]
+
+end_timeB = time.time()
+
+dataOut_ERA5 = xr.concat([dataOut_ERA5_xr[var] for var in ERA5.keys()], dim='variable')
+end_timeC = time.time()
+
+
+print(dataOut_ERA5.values)
+end_timeD = time.time()
+print(f"Time taken to load and compute: {end_timeA - start_time} seconds")
+print(f"Time taken to load and compute: {end_timeB - start_time} seconds")
+print(f"Time taken to load and compute: {end_timeC - start_time} seconds")
+
+print(f"Time taken to load and compute: {end_timeD - start_time} seconds")
+
+
+dsERA5[['surface_solar_radiation_downwards', 'latitude','longitude','time']].isel(latitude=178, longitude=1137,time=917692+12).compute()
+import datetime as datetime
+A =datetime.datetime(
+            year=2024,
+            month=7,
+            day=7,
+            hour=7,
+            minute=0,
+        )
+np.argmin(
+            np.abs(dsERA5["time"].values - np.datetime64(A))
+        )
+
+baseDayUTC_Grib = (
+    (
+            np.datetime64(A)
+            - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
+    )
+    .astype("timedelta64[s]")
+    .astype(np.int32)
+)
+A.timestamp()

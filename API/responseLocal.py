@@ -1719,9 +1719,33 @@ async def PW_Forecast(
             dtype="datetime64[s]",
         )
 
+
+        # Find nearest latitude and longitude in ERA5 data
+        # Same as GFS
+
+        abslat = np.abs(ERA5_Data["ERA5_lats"] - lat)
+        abslon = np.abs(ERA5_Data["ERA5_lons"] - lon) # 0-360
+        y_p = np.argmin(abslat)
+        x_p = np.argmin(abslon)
+
+        era5_lat = ERA5_Data["ERA5_lats"][y_p]
+        era5_lon = ERA5_Data["ERA5_lons"][x_p]
+
+        # Find closest date to baseDayUTC
+        t_p = np.argmin(
+            np.abs(ERA5_Data["ERA5_times"] - np.datetime64(baseDayUTC))
+        )
+
+        print('y_p, x_p, t_p')
+        print(y_p, x_p, t_p)
+
         # Read the ERA5 data for the location and time
-        dataOut_ERA5_xr = ERA5_Data["dsERA5"][ERA5.keys()].sel(
-            latitude=lat, longitude=lon, time=datetimes_era5, method="nearest"
+        # dataOut_ERA5_xr = ERA5_Data["dsERA5"][ERA5.keys()].sel(
+        #     latitude=lat, longitude=lon, time=datetimes_era5, method="nearest"
+        # )
+        # isel is significantly faster than sel for this operation
+        dataOut_ERA5_xr = ERA5_Data["dsERA5"][ERA5.keys()].isel(
+            latitude=y_p, longitude=x_p, time=slice(t_p,t_p+25)
         )
 
         # Stack into a 2D (var, time) array
@@ -1731,7 +1755,7 @@ async def PW_Forecast(
 
         # Add unix time as first row
         unix_times_era5 = (
-            dataOut_ERA5_xr["time"].values.astype("datetime64[s]")
+            dataOut_ERA5_xr["time"].astype("datetime64[s]")
             - np.datetime64("1970-01-01T00:00:00Z")
         ).astype(np.int64)
         ERA5_MERGED = np.vstack((unix_times_era5, dataOut_ERA5.values)).T
@@ -3058,6 +3082,14 @@ async def PW_Forecast(
         InterPhour[:, DATA_HOURLY["intensity"]], 0
     )
 
+    # Set all values below 0.0005 (0.5 mm of snow/ 0.05 mm of rain) to zero
+    InterPhour[
+        InterPhour[:, DATA_HOURLY["intensity"]]
+        < (0.0005 * prepIntensityUnit),
+        DATA_HOURLY["intensity"],
+    ] = 0
+
+
     # Use the same type value as the intensity
     InterPhour[:, DATA_HOURLY["type"]] = np.choose(
         np.argmin(np.isnan(prcipIntensityHour), axis=1), maxPchanceHour.T
@@ -3337,7 +3369,7 @@ async def PW_Forecast(
     if "gfs" in sourceList:
         CloudCoverHour[:, 3] = GFS_Merged[:, GFS["cloud"]]
     if "era5" in sourceList:
-        CloudCoverHour[:, 3] = ERA5_MERGED[:, ERA5["total_cloud_cover"]]
+        CloudCoverHour[:, 4] = ERA5_MERGED[:, ERA5["total_cloud_cover"]]*100
 
     InterPhour[:, DATA_HOURLY["cloud"]] = np.maximum(
         np.choose(np.argmin(np.isnan(CloudCoverHour), axis=1), CloudCoverHour.T) * 0.01,
@@ -3439,6 +3471,10 @@ async def PW_Forecast(
     if "era5" in sourceList:
         PrecpAccumHour[:, 5] = ERA5_MERGED[:, ERA5["total_precipitation"]]*1000 # m to mm
 
+
+    # Set all values below 0.0005 (0.5 mm of snow/ 0.05 mm of rain) to zero
+    PrecpAccumHour[ PrecpAccumHour < 0.0005] = 0
+
     InterPhour[:, DATA_HOURLY["accum"]] = np.maximum(
         np.choose(np.argmin(np.isnan(PrecpAccumHour), axis=1), PrecpAccumHour.T)
         * prepAccumUnit,
@@ -3485,6 +3521,8 @@ async def PW_Forecast(
         InterPhour[:, DATA_HOURLY["solar"]] = HRRR_Merged[:, HRRR["solar"]]
     if "gfs" in sourceList:
         InterPhour[:, DATA_HOURLY["solar"]] = GFS_Merged[:, GFS["solar"]]
+    if "era5" in sourceList:
+        InterPhour[:, DATA_HOURLY["solar"]] = ERA5_MERGED[:, ERA5["surface_solar_radiation_downwards"]] / 3600 # J/m2 to W/m2
 
     InterPhour[:, DATA_HOURLY["solar"]] = clipLog(
         InterPhour[:, DATA_HOURLY["solar"]],
@@ -3553,6 +3591,8 @@ async def PW_Forecast(
         InterPhour[:, DATA_HOURLY["cape"]] = HRRR_Merged[:, HRRR["cape"]]
     if "gfs" in sourceList:
         InterPhour[:, DATA_HOURLY["cape"]] = GFS_Merged[:, GFS["cape"]]
+    if "era5" in sourceList:
+        InterPhour[:, DATA_HOURLY["cape"]] = ERA5_MERGED[:, ERA5["convective_available_potential_energy"]]
 
     InterPhour[:, DATA_HOURLY["cape"]] = clipLog(
         InterPhour[:, DATA_HOURLY["cape"]],
@@ -3720,6 +3760,9 @@ async def PW_Forecast(
         :, DATA_HOURLY["rain"] : DATA_HOURLY["fire"]
     ].round(5)
 
+    # Round cape to 0
+    InterPhour[:, DATA_HOURLY["cape"]] = InterPhour[:, DATA_HOURLY["cape"]].round(0)
+
     # Fix very small neg from interp to solve -0
     InterPhour[((InterPhour >= -0.00001) & (InterPhour <= 0.00001))] = 0
 
@@ -3857,7 +3900,7 @@ async def PW_Forecast(
             "fireIndex": InterPhour[idx, DATA_HOURLY["fire"]],
             "feelsLike": InterPhour[idx, DATA_HOURLY["feels_like"]],
             "solar": InterPhour[idx, DATA_HOURLY["solar"]],
-            "cape": int(InterPhour[idx, DATA_HOURLY["cape"]]),
+            "cape": InterPhour[idx, DATA_HOURLY["cape"]],
         }
 
         # Add station pressure if requested
@@ -4242,7 +4285,7 @@ async def PW_Forecast(
             "fireIndexMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["fire"]]),
             "solarMax": InterPdayMax[idx, DATA_DAY["solar"]],
             "solarMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["solar"]]),
-            "capeMax": int(InterPdayMax[idx, DATA_DAY["cape"]]),
+            "capeMax": InterPdayMax[idx, DATA_DAY["cape"]],
             "capeMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["cape"]]),
         }
 
@@ -5082,7 +5125,7 @@ async def PW_Forecast(
             * interpFac1
             + ERA5_MERGED[currentIDX_hrrrh, ERA5["surface_solar_radiation_downwards"]]
             * interpFac2
-        )
+        )/3600  # Convert from J/m2 to W/m2
 
     InterPcurrent[DATA_CURRENT["solar"]] = clipLog(
         InterPcurrent[DATA_CURRENT["solar"]],

@@ -96,7 +96,7 @@ def clipLog(data, min_val, max_val, name):
     """
 
     # Print if the clipping is larger than 25 of the min
-    if np.min(data) < (min_val * 0.75):
+    if np.min(data) < (min_val * 0.75) - 2:
         # Print the data and the index it occurs
         logger.error("Min clipping required for " + name)
         logger.error("Min Value: " + str(np.min(data)))

@@ -159,8 +159,8 @@ def calculate_precip_text(
     midSnowThresh = SNOW_INTENSITY_THRESHOLDS["mid"] * prepIntensityUnit
     heavySnowThresh = SNOW_INTENSITY_THRESHOLDS["heavy"] * prepIntensityUnit
 
-    snowIconThresholdHour = HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
-    precipIconThresholdHour = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
+    snowIconThresholdHour = HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit # In snow units (accum units of snow)
+    precipIconThresholdHour = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit # Liquid equivalent accum units
     precipIconThresholdHourIntensity = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepIntensityUnit # Liquid equivalent mm for intensity, so no snow variation
 
     snowIconThresholdDay = DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit

@@ -136,9 +136,9 @@ def init_ERA5():
         storage_options=dict(token="anon"),
     )
 
-    ERA5_lats = dsERA5["latitude"][:]
-    ERA5_lons = dsERA5["longitude"][:]
-    ERA5_times = dsERA5["time"][:]
+    ERA5_lats = dsERA5["latitude"].values
+    ERA5_lons = dsERA5["longitude"].values
+    ERA5_times = dsERA5["time"].values
 
     ERA5_Data = {
         "dsERA5": dsERA5,
