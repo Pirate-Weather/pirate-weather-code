@@ -3,15 +3,14 @@
 import logging
 
 import metpy as mp
-from metpy.calc import relative_humidity_from_dewpoint
 import numpy as np
-import xarray as xr
 
 from API.constants.api_const import APPARENT_TEMP_CONSTS, APPARENT_TEMP_SOLAR_CONSTS
 from API.constants.clip_const import CLIP_TEMP
 from API.constants.shared_const import KELVIN_TO_CELSIUS, MISSING_DATA
 
 logger = logging.getLogger(__name__)
+
 
 def replace_nan(obj, replacement=MISSING_DATA):
     """Recursively replace np.nan with a given value in a dict/list."""
@@ -104,13 +103,13 @@ def clipLog(data, min_val, max_val, name):
         if isinstance(data, np.ndarray):
             logger.error("Min Index: " + str(np.where(data == data.min())))
 
-        # Replace values below the threshold with np.nan
+        # Replace values below the threshold with MISSING_DATA
         if np.isscalar(data):
             if data < min_val:
-                data = np.nan
+                data = MISSING_DATA
         else:
             data = np.array(data, dtype=float)
-            data[data < min_val] = np.nan
+            data[data < min_val] = MISSING_DATA
 
     else:
         data = np.clip(data, a_min=min_val, a_max=None)
@@ -124,19 +123,18 @@ def clipLog(data, min_val, max_val, name):
         if isinstance(data, np.ndarray):
             logger.error("Max Index: " + str(np.where(data == data.max())))
 
-        # Replace values above the threshold with np.nan
+        # Replace values above the threshold with MISSING_DATA
         if np.isscalar(data):
             if data > max_val:
-                data = np.nan
+                data = MISSING_DATA
         else:
             data = np.array(data, dtype=float)
-            data[data > max_val] = np.nan
+            data[data > max_val] = MISSING_DATA
 
     else:
         data = np.clip(data, a_min=None, a_max=max_val)
 
     return data
-
 
 
 ## Estimate Visibility for ERA5
@@ -145,9 +143,9 @@ def clipLog(data, min_val, max_val, name):
 def estimate_visibility_gultepe_rh_pr_numpy(
     arr: np.ndarray,
     var_index: dict,
-    var_axis: int = 0,             # 0 => (n_vars, n_time); 1 => (n_time, n_vars)
-    use_precip: bool = True,       # set False to ignore PR contribution entirely
-    which_rh_fit: str = "FRAM",    # "FRAM" (Eq. 2) or "AIRS2" (Eq. 3)
+    var_axis: int = 0,  # 0 => (n_vars, n_time); 1 => (n_time, n_vars)
+    use_precip: bool = True,  # set False to ignore PR contribution entirely
+    which_rh_fit: str = "FRAM",  # "FRAM" (Eq. 2) or "AIRS2" (Eq. 3)
     params: dict | None = None,
 ) -> np.ndarray:
     """
@@ -164,20 +162,19 @@ def estimate_visibility_gultepe_rh_pr_numpy(
     """
     try:
         from metpy.calc import relative_humidity_from_dewpoint as _rh_from_td
-        from metpy.units import units
     except Exception as e:
         raise ImportError("Requires MetPy (`pip install metpy`).") from e
 
     # ------------------- parameters -------------------
     p = {
-        "rh_fit": which_rh_fit,   # "FRAM" or "AIRS2"
-        "rh_min": 30.0,           # % clamp lower bound
-        "rh_max": 100.0,          # % clamp upper bound
+        "rh_fit": which_rh_fit,  # "FRAM" or "AIRS2"
+        "rh_min": 30.0,  # % clamp lower bound
+        "rh_max": 100.0,  # % clamp upper bound
         "vis_min_km": 0.05,
         "vis_max_km": 16.0,
         # Rain-type thresholds per Glickman (2000) used by Gültepe & Milbrandt (2010):
-        "pr_light_max": 2.6,      # mm/h
-        "pr_moderate_max": 7.6,   # mm/h (heavy > 7.6)
+        "pr_light_max": 2.6,  # mm/h
+        "pr_moderate_max": 7.6,  # mm/h (heavy > 7.6)
     }
     if params:
         p.update(params)
@@ -194,10 +191,12 @@ def estimate_visibility_gultepe_rh_pr_numpy(
         return x * 3600.0
 
     # ------------------- inputs -------------------
-    T2m  = pick("2m_temperature")            # K
-    Td2m = pick("2m_dewpoint_temperature")   # K
+    T2m = pick("2m_temperature")  # K
+    Td2m = pick("2m_dewpoint_temperature")  # K
     if T2m is None or Td2m is None:
-        raise ValueError("Need '2m_temperature' and '2m_dewpoint_temperature' in the array/map.")
+        raise ValueError(
+            "Need '2m_temperature' and '2m_dewpoint_temperature' in the array/map."
+        )
 
     # Check if multiple times or 1d
     if T2m.ndim == 0:
@@ -206,13 +205,15 @@ def estimate_visibility_gultepe_rh_pr_numpy(
         n_time = T2m.shape[0]
 
     # ------------------- RH via MetPy -------------------
-    Rh_frac = _rh_from_td((T2m * mp.units.units.degK), (Td2m * mp.units.units.degK)).magnitude
+    Rh_frac = _rh_from_td(
+        (T2m * mp.units.units.degK), (Td2m * mp.units.units.degK)
+    ).magnitude
     RH = np.clip(Rh_frac * 100.0, p["rh_min"], p["rh_max"])  # percent
 
     # RH → VIS (Gültepe RH fits)
     fit = (p["rh_fit"] or "FRAM").upper()
     if fit == "AIRS2":
-        vis_rh = -0.0177 * (RH ** 2) + 1.462 * RH + 30.8
+        vis_rh = -0.0177 * (RH**2) + 1.462 * RH + 30.8
     else:  # FRAM
         vis_rh = -41.5 * np.log(RH) + 192.3
 
@@ -222,11 +223,11 @@ def estimate_visibility_gultepe_rh_pr_numpy(
     def _vis_from_pr_gultepe(prr_mm_h: np.ndarray) -> np.ndarray:
         """Apply rain-type thresholds and Table 2 percentile fits."""
         pr = np.clip(prr_mm_h, 0.0, np.inf)
-        out = np.full(pr.shape, np.nan, dtype=float)
+        out = np.full(pr.shape, MISSING_DATA, dtype=float)
 
-        heavy = pr > p["pr_moderate_max"]            # > 7.6 mm/h
+        heavy = pr > p["pr_moderate_max"]  # > 7.6 mm/h
         moderate = (pr >= p["pr_light_max"]) & (pr <= p["pr_moderate_max"])  # 2.6–7.6
-        light = pr < p["pr_light_max"]               # < 2.6
+        light = pr < p["pr_light_max"]  # < 2.6
 
         # Heavy rain → 5th percentile fit: 0.45*PR^0.394 + 2.28
         out[heavy] = -0.45 * np.power(pr[heavy], 0.394) + 2.28
@@ -242,8 +243,10 @@ def estimate_visibility_gultepe_rh_pr_numpy(
     if use_precip:
         ls_rain = pick("large_scale_rain_rate")
         cv_rain = pick("convective_rain_rate")
-        if ls_rain is None: ls_rain = np.zeros(n_time)
-        if cv_rain is None: cv_rain = np.zeros(n_time)
+        if ls_rain is None:
+            ls_rain = np.zeros(n_time)
+        if cv_rain is None:
+            cv_rain = np.zeros(n_time)
 
         prr_mm_h = mmh(ls_rain + cv_rain)
         vis_pr = _vis_from_pr_gultepe(prr_mm_h)
@@ -258,6 +261,6 @@ def estimate_visibility_gultepe_rh_pr_numpy(
     # Clamp & return
     vis = np.atleast_1d(np.array(vis, dtype=float))
     np.clip(vis, p["vis_min_km"], p["vis_max_km"], out=vis)
-    vis = vis * 1000 # Return in m
+    vis = vis * 1000  # Return in m
 
     return vis[0] if vis.size == 1 else vis

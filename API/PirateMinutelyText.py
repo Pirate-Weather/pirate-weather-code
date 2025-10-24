@@ -5,7 +5,6 @@ from operator import itemgetter
 
 import numpy as np
 
-from API.constants.shared_const import MISSING_DATA
 from API.PirateTextHelper import calculate_precip_text
 
 # Number of minutes in an hour
@@ -123,10 +122,9 @@ def calculate_minutely_text(
 
     # Loop through the minute array
     for idx, minute in enumerate(minuteArr):
-        if (
-            minute["precipIntensity"] == MISSING_DATA
-            or minute["precipType"] == MISSING_DATA
-            or np.isnan(minute["precipIntensity"])
+        if np.isnan(minute["precipIntensity"]) or (
+            isinstance(minute["precipType"], (float, np.floating))
+            and np.isnan(minute["precipType"])
         ):
             return [
                 "next-hour-forecast-status",

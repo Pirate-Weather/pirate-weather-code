@@ -1,10 +1,9 @@
 # %% Script to contain the helper functions that can be used to generate the text summary of the forecast data for Pirate Weather
-import math
 from collections import Counter
 
 import numpy as np
 
-from API.constants.shared_const import KELVIN_TO_CELSIUS, MISSING_DATA
+from API.constants.shared_const import KELVIN_TO_CELSIUS
 from API.constants.text_const import (
     CAPE_THRESHOLDS,
     CLOUD_COVER_THRESHOLDS,
@@ -140,7 +139,7 @@ def calculate_precip_text(
     """
 
     # If any precipitation is missing, return None appropriately for the mode.
-    if any(x == MISSING_DATA for x in (rainPrep, snowPrep, icePrep, prepIntensity)):
+    if any(np.isnan(x) for x in (rainPrep, snowPrep, icePrep, prepIntensity)):
         return (None, None) if mode == "both" else None
 
     if prepAccumUnit == 0.1:
@@ -149,7 +148,7 @@ def calculate_precip_text(
         prepIntensityUnit = prepAccumUnit
 
     # If pop is -999 set it to 1 so we can calculate the precipitation text
-    if ((pop == MISSING_DATA) or np.isnan(pop)):
+    if np.isnan(pop):
         pop = 1
 
     # In mm/h
@@ -448,7 +447,7 @@ def calculate_wind_text(wind, windUnits, icon="darksky", mode="both"):
     windIcon = None
 
     # If wind is missing, return None appropriately for the mode.
-    if ((wind == MISSING_DATA) or np.isnan(wind)):
+    if np.isnan(wind):
         return (None, None) if mode == "both" else None
 
     lightWindThresh = WIND_THRESHOLDS["light"] * windUnits
@@ -504,7 +503,7 @@ def calculate_vis_text(
     mistThresh = MIST_THRESHOLD_METERS * visUnits
 
     # If temp, dewPoint or vis are missing, return None appropriately for the mode.
-    if any(((x == MISSING_DATA) or (np.isnan(x))) for x in (temp, dewPoint, vis)):
+    if any(np.isnan(x) for x in (temp, dewPoint, vis)):
         return (None, None) if mode == "both" else None
 
     # Convert Fahrenheit to Celsius for temperature spread comparisons
@@ -562,7 +561,7 @@ def calculate_sky_text(cloudCover, isDayTime, icon="darksky", mode="both"):
     skyIcon = None
 
     # If cloud cover is missing, return None appropriately for the mode.
-    if ((cloudCover == MISSING_DATA) or np.isnan(cloudCover)):
+    if np.isnan(cloudCover):
         return (None, None) if mode == "both" else None
 
     if cloudCover > CLOUD_COVER_THRESHOLDS["cloudy"]:
@@ -605,13 +604,7 @@ def humidity_sky_text(temp, tempUnits, humidity):
     """
 
     # Return None if humidity or temperature data is missing.
-    if (
-        humidity is None
-        or np.isnan(humidity)
-        or humidity == MISSING_DATA
-        or np.isnan(temp)
-        or temp == MISSING_DATA
-    ):
+    if humidity is None or np.isnan(humidity) or np.isnan(temp):
         return None
 
     # Only use humid if also warm (>20C or >68F)
@@ -655,7 +648,7 @@ def calculate_thunderstorm_text(liftedIndex, cape, mode="both"):
         thuText = "thunderstorm"
         thuIcon = "thunderstorm"
 
-    if ((liftedIndex != MISSING_DATA) and (not np.isnan(liftedIndex))) and thuText is None:
+    if (not np.isnan(liftedIndex)) and thuText is None:
         if 0 > liftedIndex > LIFTED_INDEX_THRESHOLD:
             thuText = "possible-thunderstorm"
         elif liftedIndex <= LIFTED_INDEX_THRESHOLD:

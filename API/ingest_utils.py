@@ -11,7 +11,7 @@ import numpy as np
 import xarray as xr
 from herbie import Path
 
-from API.constants.shared_const import REFC_THRESHOLD
+from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
 
 # Shared ingest constants
 CHUNK_SIZES = {
@@ -63,7 +63,7 @@ def mask_invalid_data(daskArray, ignoreAxis=None):
     if ignoreAxis is not None:
         for i in ignoreAxis:
             valid_mask[i, :, :, :] = True
-    return da.where(valid_mask, daskArray, np.nan)
+    return da.where(valid_mask, daskArray, MISSING_DATA)
 
 
 def mask_invalid_refc(xrArr: "xr.DataArray") -> "xr.DataArray":
@@ -100,7 +100,7 @@ def interp_time_block(y_block, idx0, idx1, w, valid):
     if not np.all(valid):
         # valid==False where x_b is outside [x_a[0], x_a[-1]]
         inv = ~valid
-        y_interp[:, inv, :, :] = np.nan
+        y_interp[:, inv, :, :] = MISSING_DATA
 
     return y_interp
 
