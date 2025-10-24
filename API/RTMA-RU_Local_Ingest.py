@@ -99,7 +99,9 @@ base_time = latest_run.date
 minute = base_time.minute
 rounded_minute = round(minute / 15) * 15
 if rounded_minute == 60:
-    base_time = base_time.replace(minute=0, second=0, microsecond=0) + datetime.timedelta(hours=1)
+    base_time = base_time.replace(
+        minute=0, second=0, microsecond=0
+    ) + datetime.timedelta(hours=1)
 else:
     base_time = base_time.replace(minute=rounded_minute, second=0, microsecond=0)
 
