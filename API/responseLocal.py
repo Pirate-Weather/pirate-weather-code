@@ -41,7 +41,6 @@ from API.constants.api_const import (
     DBZ_CONST,
     GLOBE_TEMP_CONST,
     LARGEST_DIR_INIT,
-    MAGNUS_FORMULA_CONSTS,
     NICE_PRIORITY,
     PRECIP_IDX,
     S3_MAX_BANDWIDTH,
@@ -4797,26 +4796,11 @@ async def PW_Forecast(
     )
 
     # humidity, RTMA_RU then NBM then HRRR, then GFS
-    # Note: RTMA_RU humidity is already in percentage (0-100), not fraction
+    # Note: RTMA_RU humidity is already a fraction so no need to convert
     if "rtma_ru" in sourceList:
-        rtma_humidity = dataOut_rtma_ru[0, RTMA_RU["humidity"]] * 0.01
-        # If RTMA humidity is 0 or very low (likely invalid), calculate from temp and dewpoint
-        if rtma_humidity < 0.05:  # Less than 5% is likely invalid
-            # Calculate relative humidity from temperature and dewpoint
-            # RH = exp((17.625*Td)/(243.04+Td)) / exp((17.625*T)/(243.04+T))
-            # Temperature is in Kelvin, convert to Celsius
-            logger.info("RTMA-RU RH invalid. Calculating from temp and dewpoint.")
-            temp_c = InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS
-            dew_c = InterPcurrent[DATA_CURRENT["dew"]] - KELVIN_TO_CELSIUS
-            rtma_humidity = np.exp(
-                (MAGNUS_FORMULA_CONSTS["dew_factor"] * dew_c)
-                / (MAGNUS_FORMULA_CONSTS["temp_factor"] + dew_c)
-            ) / np.exp(
-                (MAGNUS_FORMULA_CONSTS["dew_factor"] * temp_c)
-                / (MAGNUS_FORMULA_CONSTS["temp_factor"] + temp_c)
-            )
-            rtma_humidity = np.clip(rtma_humidity, 0, 1)
-        InterPcurrent[DATA_CURRENT["humidity"]] = rtma_humidity
+        InterPcurrent[DATA_CURRENT["humidity"]] = dataOut_rtma_ru[
+            0, RTMA_RU["humidity"]
+        ]
     elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         InterPcurrent[DATA_CURRENT["humidity"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["humidity"]] * interpFac1

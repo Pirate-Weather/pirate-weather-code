@@ -2,6 +2,7 @@
 # Alexander Rey, September 2025
 
 # %% Import modules
+import datetime
 import logging
 import os
 import pickle
@@ -92,6 +93,18 @@ latest_run = Herbie_latest(
 )
 
 base_time = latest_run.date
+
+# Round base_time to nearest 15 minutes to ensure sourceTimes are exactly on :00, :15, :30, :45
+# Herbie may return times like :14, :29, :44, :59 due to data availability timing
+minute = base_time.minute
+rounded_minute = round(minute / 15) * 15
+if rounded_minute == 60:
+    base_time = base_time.replace(
+        minute=0, second=0, microsecond=0
+    ) + datetime.timedelta(hours=1)
+else:
+    base_time = base_time.replace(minute=rounded_minute, second=0, microsecond=0)
+
 logging.info(f"Checking for new RTMA_RU data for base time: {base_time}")
 
 # Check if this is newer than the current file
@@ -163,6 +176,7 @@ xarray_analysis_merged = xarray_analysis_merged.assign_coords(
 )
 
 # Convert RH from specific humidity and pressure and add it to the dataset
+# relative_humidity_from_specific_humidity returns a dimensionless fraction (0-1)
 rh_2m = relative_humidity_from_specific_humidity(
     pressure=xarray_analysis_merged["sp"] * units.Pa,
     temperature=xarray_analysis_merged["t2m"] * units.degK,
