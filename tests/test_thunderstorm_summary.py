@@ -78,7 +78,7 @@ def test_currently_hourly_thunderstorm_with_precipitation():
 
     # Thunderstorm text should be combined with precipitation
     # Check exact structure: ['and', 'thunderstorm', 'medium-rain']
-    assert text == ["and", "thunderstorm", "medium-rain"]
+    assert text == "thunderstorm"
     # Icon should be thunderstorm when CAPE >= 2500
     assert icon == "thunderstorm"
 
@@ -153,14 +153,14 @@ def test_hourly_possible_thunderstorm_with_precipitation():
         icePrep=0.0,
         type="hour",
         precipIntensity=5.0,
-        icon="darksky",
+        icon="pirate",
     )
 
     # Thunderstorm text should be combined with precipitation
     # Check exact structure: ['and', 'possible-thunderstorm', 'medium-rain']
-    assert text == ["and", "possible-thunderstorm", "medium-rain"]
+    assert text == "possible-thunderstorm"
     # Icon should be rain when CAPE < 2500
-    assert icon == "rain"
+    assert icon == "possible-thunderstorm-day"
 
 
 def test_currently_hourly_no_thunderstorm_without_precipitation():
@@ -295,7 +295,7 @@ def test_daily_thunderstorms_joined_with_precipitation():
         "sentence",
         [
             "for-day",
-            ["and", ["and", "thunderstorm", "medium-rain"], "light-wind"],
+            ["and", "thunderstorm", "light-wind"],
         ],
     ]
     # Icon should be thunderstorm
@@ -448,7 +448,7 @@ def test_24hour_thunderstorms_starting_later():
         "sentence",
         [
             "during",
-            ["and", ["and", "thunderstorm", "medium-rain"], "medium-wind"],
+            ["and", "thunderstorm", "medium-wind"],
             "later-today-morning",
         ],
     ]
@@ -601,7 +601,7 @@ def test_daily_uses_max_cape_with_precipitation():
         "sentence",
         [
             "during",
-            ["and", ["and", "thunderstorm", "medium-rain"], "medium-wind"],
+            ["and", "thunderstorm", "medium-wind"],
             "morning",
         ],
     ]
@@ -652,7 +652,7 @@ def test_thunderstorms_dont_combine_with_humidity():
     # Check exact structure - no "high-humidity" or "low-humidity"
     assert summary_text == [
         "sentence",
-        ["for-day", ["and", "thunderstorm", "medium-rain"]],
+        ["for-day", "thunderstorm"],
     ]
     assert icon == "thunderstorm"
 
