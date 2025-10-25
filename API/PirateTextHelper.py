@@ -632,7 +632,9 @@ def humidity_sky_text(temp, tempUnits, humidity):
     return humidityText
 
 
-def calculate_thunderstorm_text(liftedIndex, cape, mode="both", icon="darksky", is_day=True):
+def calculate_thunderstorm_text(
+    liftedIndex, cape, mode="both", icon="darksky", is_day=True
+):
     """
     Calculates the thunderstorm text
 
