@@ -1463,13 +1463,9 @@ def calculate_day_text(
         # Check if thunderstorm periods match precipitation periods exactly
         if sorted(thunderstorm_periods) == sorted(precip_periods):
             thunderstorms_match_precip = True
-            # Combine thunderstorm with precipitation text
+            # Override precipitation text with thunderstorm text
             if precip_summary_text and thunderstorm_summary_text:
-                precip_summary_text = [
-                    "and",
-                    thunderstorm_summary_text,
-                    precip_summary_text,
-                ]
+                precip_summary_text = thunderstorm_summary_text
                 # Use thunderstorm icon if present
                 if thunderstorm_icon:
                     precip_icon = thunderstorm_icon

@@ -632,7 +632,7 @@ def humidity_sky_text(temp, tempUnits, humidity):
     return humidityText
 
 
-def calculate_thunderstorm_text(liftedIndex, cape, mode="both"):
+def calculate_thunderstorm_text(liftedIndex, cape, mode="both", icon="darksky", is_day=True):
     """
     Calculates the thunderstorm text
 
@@ -640,6 +640,8 @@ def calculate_thunderstorm_text(liftedIndex, cape, mode="both"):
     - liftedIndex (float) -  The lifted index
     - cape (float) -  The CAPE (Convective available potential energy)
     - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the thunderstorm will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
+    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
+    - is_day (bool): Whether it is day or night time
 
     Returns:
     - str | None: The textual representation of the thunderstorm
@@ -650,6 +652,8 @@ def calculate_thunderstorm_text(liftedIndex, cape, mode="both"):
 
     if CAPE_THRESHOLDS["low"] <= cape < CAPE_THRESHOLDS["high"]:
         thuText = "possible-thunderstorm"
+        if icon == "pirate":
+            thuIcon = "possible-thunderstorm-day" if is_day else "possible-thunderstorm-night"
     elif cape >= CAPE_THRESHOLDS["high"]:
         thuText = "thunderstorm"
         thuIcon = "thunderstorm"
@@ -657,6 +661,8 @@ def calculate_thunderstorm_text(liftedIndex, cape, mode="both"):
     if liftedIndex != MISSING_DATA and thuText is None:
         if 0 > liftedIndex > LIFTED_INDEX_THRESHOLD:
             thuText = "possible-thunderstorm"
+            if icon == "pirate":
+                thuIcon = "possible-thunderstorm-day" if is_day else "possible-thunderstorm-night"
         elif liftedIndex <= LIFTED_INDEX_THRESHOLD:
             thuText = "thunderstorm"
             thuIcon = "thunderstorm"
