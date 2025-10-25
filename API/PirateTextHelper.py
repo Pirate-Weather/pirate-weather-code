@@ -652,20 +652,21 @@ def calculate_thunderstorm_text(liftedIndex, cape, mode="both", icon="darksky", 
 
     if CAPE_THRESHOLDS["low"] <= cape < CAPE_THRESHOLDS["high"]:
         thuText = "possible-thunderstorm"
-        if icon == "pirate":
-            thuIcon = "possible-thunderstorm-day" if is_day else "possible-thunderstorm-night"
     elif cape >= CAPE_THRESHOLDS["high"]:
         thuText = "thunderstorm"
-        thuIcon = "thunderstorm"
 
     if liftedIndex != MISSING_DATA and thuText is None:
         if 0 > liftedIndex > LIFTED_INDEX_THRESHOLD:
             thuText = "possible-thunderstorm"
-            if icon == "pirate":
-                thuIcon = "possible-thunderstorm-day" if is_day else "possible-thunderstorm-night"
         elif liftedIndex <= LIFTED_INDEX_THRESHOLD:
             thuText = "thunderstorm"
-            thuIcon = "thunderstorm"
+
+    if thuText == "thunderstorm":
+        thuIcon = "thunderstorm"
+    elif thuText == "possible-thunderstorm" and icon == "pirate":
+        thuIcon = (
+            "possible-thunderstorm-day" if is_day else "possible-thunderstorm-night"
+        )
 
     if mode == "summary":
         return thuText
