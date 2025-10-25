@@ -87,7 +87,7 @@ latest_run = Herbie_latest(
     freq="15min",
     product="anl",
     verbose=True,
-    priority="aws",
+    priority=["aws", "nomdas"],
     save_dir=tmp_dir,
 )
 
@@ -144,7 +144,7 @@ fh_analysis = Herbie(
     model="rtma_ru",
     product="anl",
     verbose=False,
-    priority="aws",
+    priority=["aws", "nomdas"],
     save_dir=tmp_dir,
 )
 
