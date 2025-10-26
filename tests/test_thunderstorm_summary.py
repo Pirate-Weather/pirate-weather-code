@@ -449,7 +449,7 @@ def test_24hour_thunderstorms_starting_later():
         [
             "during",
             ["and", "thunderstorm", "medium-wind"],
-            "later-today-morning",
+            "today-morning",
         ],
     ]
     # Icon should be thunderstorm
