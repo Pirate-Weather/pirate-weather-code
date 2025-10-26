@@ -1345,8 +1345,8 @@ def calculate_day_text(
         # Check precip
         if (
             precip_periods and precip_periods[0] == 0
-        ):  # If precip occurs in the first period
-            # But the very first hour forecast doesn't have it
+        ):  # This checks if precipitation occurs in the first period.
+            # This handles cases where precipitation starts after the first hour of the period.
             curr_precip_text_for_first_hour = calculate_precip_text(
                 hours[0]["precipIntensity"],
                 precip_accum_unit,
