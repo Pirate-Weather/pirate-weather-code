@@ -1342,10 +1342,11 @@ def calculate_day_text(
         and all_period_names
         and all_period_names[0] == today_period_for_later_check
     ):
-        # Check precip (including thunderstorms)
-        # Check if precip/thunderstorms occur in any early period but not in the first hour
-        if precip_periods:
-            # Check the first hour of the forecast
+        # Check precip
+        if (
+            precip_periods and precip_periods[0] == 0
+        ):  # If precip occurs in the first period
+            # But the very first hour forecast doesn't have it
             curr_precip_text_for_first_hour = calculate_precip_text(
                 hours[0]["precipIntensity"],
                 precip_accum_unit,
@@ -1359,33 +1360,9 @@ def calculate_day_text(
                 "summary",
                 hours[0]["precipIntensity"],
             )
-
-            # Check if thunderstorms are present but not in first hour
-            first_hour_has_thunderstorm = False
-            if thunderstorm_periods and curr_precip_text_for_first_hour is not None:
-                first_hour_cape = hours[0].get("cape", MISSING_DATA)
-                first_hour_lifted_index = hours[0].get("liftedIndex", MISSING_DATA)
-                first_hour_thu_text = calculate_thunderstorm_text(
-                    first_hour_lifted_index, first_hour_cape, "summary"
-                )
-                first_hour_has_thunderstorm = first_hour_thu_text is not None
-
-            # Mark the relevant period as "later" if:
-            # 1. Precip doesn't exist in first hour, OR
-            # 2. Precip exists but thunderstorms don't (they start later)
-            if curr_precip_text_for_first_hour is None or (
-                thunderstorm_periods and not first_hour_has_thunderstorm
-            ):
-                # Find which period to mark as "later"
-                period_to_mark = precip_periods[0] if precip_periods else None
-                if period_to_mark is not None and period_to_mark < len(
-                    all_period_names
-                ):
-                    if "later" not in all_period_names[period_to_mark]:
-                        all_period_names[period_to_mark] = (
-                            "later-" + all_period_names[period_to_mark]
-                        )
-                        later_conditions_list.append("precip")
+            if curr_precip_text_for_first_hour is None:
+                all_period_names[0] = "later-" + all_period_names[0]
+                later_conditions_list.append("precip")
 
         # Check visibility (fog)
         if vis_periods and vis_periods[0] == 0:
