@@ -5450,8 +5450,21 @@ async def PW_Forecast(
         returnOBJ["minutely"] = dict()
         try:
             if summaryText:
+                # Get max CAPE for the next hour to determine if thunderstorms should be shown
+                # Use the maximum of current CAPE and first hourly CAPE
+                currentCAPE = returnOBJ["currently"].get("cape", 0)
+                if currentCAPE == MISSING_DATA:
+                    currentCAPE = 0
+                # Get CAPE from first hourly entry if available
+                hourlyCAPE = 0
+                if len(InterPhour) > 0:
+                    hourlyCAPE = InterPhour[0, DATA_HOURLY["cape"]]
+                    if hourlyCAPE == MISSING_DATA:
+                        hourlyCAPE = 0
+                maxCAPE = max(currentCAPE, hourlyCAPE)
+
                 minuteText, minuteIcon = calculate_minutely_text(
-                    minuteDict, currentText, currentIcon, icon, prepIntensityUnit
+                    minuteDict, currentText, currentIcon, icon, prepIntensityUnit, maxCAPE
                 )
                 returnOBJ["minutely"]["summary"] = translation.translate(
                     ["sentence", minuteText]

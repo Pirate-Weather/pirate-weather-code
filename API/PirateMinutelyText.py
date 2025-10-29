@@ -4,6 +4,7 @@ from itertools import groupby
 from operator import itemgetter
 
 from API.constants.shared_const import MISSING_DATA
+from API.constants.text_const import CAPE_THRESHOLDS
 from API.PirateTextHelper import calculate_precip_text
 
 # Number of minutes in an hour
@@ -88,7 +89,7 @@ def calcaulate_consecutive_indexes(prepIndex):
 
 
 def calculate_minutely_text(
-    minuteArr, currentText, currentIcon, icon, precipIntensityUnit
+    minuteArr, currentText, currentIcon, icon, precipIntensityUnit, maxCAPE=0
 ):
     """
     Calculates the minutely summary given an array of minutes
@@ -99,6 +100,7 @@ def calculate_minutely_text(
     - currentIcon (str): The icon representing the current conditions
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
     - prepAccumUnit (float): The precipitation accumulation/intensity unit
+    - maxCAPE (float): The maximum CAPE value for the next hour (default: 0)
 
     Returns:
     - cText (arr): The precipitation summary for the hour.
@@ -441,5 +443,17 @@ def calculate_minutely_text(
     # If we have no icon fallback to the current icon
     if cIcon is None:
         cIcon = currentIcon
+
+    # Check for thunderstorms: if CAPE > 2500 and there's precipitation, replace summary with thunderstorm
+    if maxCAPE >= CAPE_THRESHOLDS["high"] and precipIndex:
+        # Replace precipitation summary with thunderstorm summary
+        # Keep the same timing structure but replace the precipitation type with "thunderstorm"
+        if cText and isinstance(cText, list) and len(cText) > 0:
+            # Extract the timing part and replace precipitation text with thunderstorm
+            if cText[0] in ("stopping-in", "for-hour", "stopping-then-starting-later",
+                           "starting-in", "starting-then-stopping-later"):
+                # Replace the precipitation text (second element) with "thunderstorm"
+                cText = [cText[0], "thunderstorm"] + cText[2:] if len(cText) > 2 else [cText[0], "thunderstorm"]
+        cIcon = "thunderstorm"
 
     return cText, cIcon
