@@ -5464,7 +5464,12 @@ async def PW_Forecast(
                 maxCAPE = max(currentCAPE, hourlyCAPE)
 
                 minuteText, minuteIcon = calculate_minutely_text(
-                    minuteDict, currentText, currentIcon, icon, prepIntensityUnit, maxCAPE
+                    minuteDict,
+                    currentText,
+                    currentIcon,
+                    icon,
+                    prepIntensityUnit,
+                    maxCAPE,
                 )
                 returnOBJ["minutely"]["summary"] = translation.translate(
                     ["sentence", minuteText]
