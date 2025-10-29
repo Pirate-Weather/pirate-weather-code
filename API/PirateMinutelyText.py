@@ -458,11 +458,7 @@ def calculate_minutely_text(
                 "starting-then-stopping-later",
             ):
                 # Replace the precipitation text (second element) with "thunderstorm"
-                cText = (
-                    [cText[0], "thunderstorm"] + cText[2:]
-                    if len(cText) > 2
-                    else [cText[0], "thunderstorm"]
-                )
+                cText[1] = "thunderstorm"
         cIcon = "thunderstorm"
 
     return cText, cIcon
