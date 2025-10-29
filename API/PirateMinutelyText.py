@@ -448,7 +448,7 @@ def calculate_minutely_text(
     if maxCAPE >= CAPE_THRESHOLDS["high"] and precipIndex:
         # Replace precipitation summary with thunderstorm summary
         # Keep the same timing structure but replace the precipitation type with "thunderstorm"
-        if cText and isinstance(cText, list) and len(cText) > 0:
+        if cText and isinstance(cText, list) and len(cText) >= 2:
             # Extract the timing part and replace precipitation text with thunderstorm
             if cText[0] in ("stopping-in", "for-hour", "stopping-then-starting-later",
                            "starting-in", "starting-then-stopping-later"):

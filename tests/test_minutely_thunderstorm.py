@@ -135,7 +135,10 @@ def test_minutely_no_thunderstorm_without_precipitation():
 
 def test_minutely_thunderstorm_with_snow():
     """
-    Test that thunderstorms work with snow as well.
+    Test thunderstorm detection with snow-type precipitation.
+    Note: This tests the technical behavior; meteorologically, thunderstorms
+    with snow are extremely rare since thunderstorms require strong convection
+    typically associated with warmer conditions.
     """
     # Create 61 minutes of snow
     minute_arr = [create_minute_with_rain(3.0, "snow") for _ in range(61)]
