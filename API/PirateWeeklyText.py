@@ -384,7 +384,7 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
         # Set the temperature summary (temperature in Celsius)
         return [
             "temperatures-rising",
-            int(round(highTemp[2], 0)),
+            round(highTemp[2]),
             highTemp[1],
         ]
     # If the temperature is decreasing everyday or if the lowest temperatue is at the end of the week and the highest temperature is at the start of the week use the rising text
@@ -394,7 +394,7 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
     ) or (highTemp[0] <= 1 and lowTemp[0] >= WEEK_DAYS_MINUS_ONE):
         return [
             "temperatures-falling",
-            int(round(lowTemp[2], 0)),
+            round(lowTemp[2]),
             lowTemp[1],
         ]
     # If the lowest temperatue is in the middle of the week and the highest temperature is at the start or end of the week use the valleying text
@@ -403,14 +403,14 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
     ] < WEEK_DAYS:
         return [
             "temperatures-valleying",
-            int(round(lowTemp[2], 0)),
+            round(lowTemp[2]),
             lowTemp[1],
         ]
     else:
         # Otherwise use the peaking text
         return [
             "temperatures-peaking",
-            int(round(highTemp[2], 0)),
+            round(highTemp[2]),
             highTemp[1],
         ]
 

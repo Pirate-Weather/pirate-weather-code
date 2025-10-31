@@ -1327,7 +1327,7 @@ def calculate_day_text(
         if total_snow_error <= 0:
             snow_sentence = [
                 "centimeters",
-                int(math.ceil(snow_accum_cm)),
+                math.ceil(snow_accum_cm),
             ]
         elif snow_max_accum > 0:
             if snow_accum_cm == 0:
