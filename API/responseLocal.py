@@ -5191,7 +5191,7 @@ async def PW_Forecast(
     curr_temp = (
         InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS
     )  # temperature in Celsius
-    
+
     # Save SI unit values for text generation before converting to requested units
     curr_temp_si = curr_temp
     curr_dew_si = InterPcurrent[DATA_CURRENT["dew"]] - KELVIN_TO_CELSIUS
@@ -5432,7 +5432,7 @@ async def PW_Forecast(
         currently_si["humidity"] = InterPcurrent[DATA_CURRENT["humidity"]]
         currently_si["smoke"] = InterPcurrent[DATA_CURRENT["smoke"]]
         currently_si["cape"] = InterPcurrent[DATA_CURRENT["cape"]]
-        
+
         # Accumulation in SI units (mm) for text generation
         currentRainAccum_si = currnetRainAccum / prepAccumUnit if prepAccumUnit != 0 else currnetRainAccum
         currentSnowAccum_si = currnetSnowAccum / prepAccumUnit if prepAccumUnit != 0 else currnetSnowAccum
