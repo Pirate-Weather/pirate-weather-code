@@ -518,21 +518,6 @@ def update_zarr_store(initialRun):
                 command = f"nice -n 20 rm -rf /tmp/{old_dir}"
                 subprocess.run(command, shell=True)
 
-        latest_ECMWF, old_ECMWF = find_largest_integer_directory(
-            "/tmp", "ECMWF.zarr", initialRun
-        )
-        if latest_ECMWF is not None:
-            ECMWF_Zarr = zarr.open(
-                zarr.storage.ZipStore("/tmp/" + latest_ECMWF, mode="r"), mode="r"
-            )
-            logger.info("Loading new: " + latest_ECMWF)
-        for old_dir in old_ECMWF:
-            if STAGE == "PROD":
-                logger.info("Removing old: " + old_dir)
-                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-                # subprocess.run(command, shell=True)
-                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
-                subprocess.run(command, shell=True)
 
     print("Refreshed Zarrs")
 
