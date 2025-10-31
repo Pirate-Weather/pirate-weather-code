@@ -3896,13 +3896,11 @@ async def PW_Forecast(
                 idx, DATA_HOURLY["station_pressure"]
             ]
 
+        # TODO: hourItem and InterPhour values need to be in SI units for text generation
+        # This requires refactoring to keep SI versions separate from unit-converted versions
         try:
             hourText, hourIcon = calculate_text(
                 hourItem,
-                prepAccumUnit,
-                visUnits,
-                windUnit,
-                tempUnits,
                 isDay,
                 InterPhour[idx, DATA_HOURLY["rain"]],
                 InterPhour[idx, DATA_HOURLY["snow"]],
@@ -4285,10 +4283,6 @@ async def PW_Forecast(
                 # Calculate the day summary from 4 to 4
                 dayIcon, dayText = calculate_day_text(
                     hourList[((idx) * 24) + 4 : ((idx + 1) * 24) + 4],
-                    prepAccumUnit,
-                    visUnits,
-                    windUnit,
-                    tempUnits,
                     True,
                     str(tz_name),
                     int(time.time()),
@@ -5539,10 +5533,6 @@ async def PW_Forecast(
             try:
                 hourIcon, hourText = calculate_day_text(
                     hourList[int(baseTimeOffset) : int(baseTimeOffset) + 24],
-                    prepAccumUnit,
-                    visUnits,
-                    windUnit,
-                    tempUnits,
                     True,
                     str(tz_name),
                     int(time.time()),
@@ -5620,7 +5610,7 @@ async def PW_Forecast(
             try:
                 if summaryText:
                     weekText, weekIcon = calculate_weekly_text(
-                        dayList, prepAccumUnit, tempUnits, str(tz_name), icon
+                        dayList, str(tz_name), icon
                     )
                     returnOBJ["daily"]["summary"] = translation.translate(
                         ["sentence", weekText]
