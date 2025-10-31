@@ -605,12 +605,7 @@ def humidity_sky_text(temp, tempUnits, humidity):
     """
 
     # Return None if humidity or temperature data is missing.
-    if (
-        humidity is None
-        or math.isnan(humidity)
-        or np.isnan(humidity)
-        or np.isnan(temp)
-    ):
+    if humidity is None or math.isnan(humidity) or np.isnan(humidity) or np.isnan(temp):
         return None
 
     # Only use humid if also warm (>20C or >68F)
