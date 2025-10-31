@@ -1705,24 +1705,13 @@ async def PW_Forecast(
     # If a timemachine request, read ERA5
     if timeMachine:
         # Get nearest lat and lon
-        datetimes_era5 = np.arange(
-            baseDayUTC,
-            baseDayUTC + np.timedelta64(numHours, "h"),
-            np.timedelta64(1, "h"),
-            dtype="datetime64[s]",
-        )
-
-
+        
         # Find nearest latitude and longitude in ERA5 data
         # Same as GFS
-
         abslat = np.abs(ERA5_Data["ERA5_lats"] - lat)
         abslon = np.abs(ERA5_Data["ERA5_lons"] - lon) # 0-360
         y_p = np.argmin(abslat)
         x_p = np.argmin(abslon)
-
-        era5_lat = ERA5_Data["ERA5_lats"][y_p]
-        era5_lon = ERA5_Data["ERA5_lons"][x_p]
 
         # Find closest date to baseDayUTC
         t_p = np.argmin(
@@ -1730,9 +1719,6 @@ async def PW_Forecast(
         )
 
         # Read the ERA5 data for the location and time
-        # dataOut_ERA5_xr = ERA5_Data["dsERA5"][ERA5.keys()].sel(
-        #     latitude=lat, longitude=lon, time=datetimes_era5, method="nearest"
-        # )
         # isel is significantly faster than sel for this operation
         dataOut_ERA5_xr = ERA5_Data["dsERA5"][ERA5.keys()].isel(
             latitude=y_p, longitude=x_p, time=slice(t_p,t_p+25)
