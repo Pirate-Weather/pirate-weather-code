@@ -58,7 +58,7 @@ This phase involves making the new variable available in the API's forecasting l
     * **Example (adding to `InterPhour`)**:
         ```
         # Increase the size of InterPhour array by 1 for the new variable
-        InterPhour = np.full((len(hour_array_grib), 27), np.nan) # Change 27 to 28 for new variable
+        InterPhour = np.full((len(hour_array_grib), 27), MISSING_DATA) # Change 27 to 28 for new variable
 
         # ... existing variable assignments ...
 

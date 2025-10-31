@@ -1,6 +1,7 @@
 import datetime
 import math
 
+import numpy as np
 from dateutil import tz
 
 from API.constants.shared_const import MISSING_DATA
@@ -30,6 +31,17 @@ EVENING_START = 17
 NIGHT_START = 22
 MAX_HOURS = 25
 PRECIP_THRESH = 0.25
+
+
+def _value_or_default(value, default):
+    if value is None:
+        return default
+    try:
+        if np.isnan(value):
+            return default
+    except TypeError:
+        pass
+    return value
 
 
 def calculate_cloud_text(cloud_cover):
@@ -771,6 +783,36 @@ def calculate_day_text(
     today_period_for_later_check = _get_period_name(
         curr_hour_local - 1, is_today=True, mode=mode
     )
+    # Prepare sanitized copies of the hourly data so modifications in this
+    # function do not leak back to the original structures.
+    sanitized_hours = []
+    for hour in hours:
+        sanitized_hour = dict(hour)
+
+        sanitized_hour["humidity"] = _value_or_default(
+            sanitized_hour.get("humidity", DEFAULT_HUMIDITY), DEFAULT_HUMIDITY
+        )
+        sanitized_hour["visibility"] = _value_or_default(
+            sanitized_hour.get("visibility", DEFAULT_VISIBILITY), DEFAULT_VISIBILITY
+        )
+        sanitized_hour["precipIntensityError"] = _value_or_default(
+            sanitized_hour.get("precipIntensityError", 0), 0
+        )
+        sanitized_hour["precipProbability"] = _value_or_default(
+            sanitized_hour.get("precipProbability", DEFAULT_POP), DEFAULT_POP
+        )
+        sanitized_hour["smoke"] = _value_or_default(
+            sanitized_hour.get("smoke", 0.0), 0.0
+        )
+
+        dew_point_default = sanitized_hour.get("temperature")
+        sanitized_hour["dewPoint"] = _value_or_default(
+            sanitized_hour.get("dewPoint", dew_point_default), dew_point_default
+        )
+
+        sanitized_hours.append(sanitized_hour)
+
+    hours = sanitized_hours
 
     # This dictionary will store processed data for each logical standard period (Morning, Afternoon, Evening, Night)
     # The keys will be the unique period names encountered (e.g., 'today-morning', 'tomorrow-night').
@@ -855,15 +897,6 @@ def calculate_day_text(
 
     # Now iterate through the actual hourly forecast data and aggregate into the pre-defined standard periods
     for idx, hour in enumerate(hours):
-        # Provide default values for missing data (timemachine)
-        hour.setdefault("humidity", DEFAULT_HUMIDITY)
-        hour.setdefault("visibility", DEFAULT_VISIBILITY)
-        hour.setdefault("precipIntensityError", 0)
-        hour.setdefault("precipProbability", DEFAULT_POP)
-        hour.setdefault("smoke", 0.0)
-        # Set dewPoint to temperature if missing, resulting in no spread
-        hour.setdefault("dewPoint", hour["temperature"])
-
         hour_date = datetime.datetime.fromtimestamp(hour["time"], zone)
         hour_in_loop = int(hour_date.strftime("%H"))
 

@@ -58,13 +58,13 @@ def calculate_simple_day_text(
     cloudCover = hourObject.get("cloudCover", 0)
     wind = hourObject.get("windSpeed", 0)
     pop = hourObject.get("pop", DEFAULT_POP)
-    if pop == MISSING_DATA:
+    if np.isnan(pop):
         pop = DEFAULT_POP
     temp = hourObject.get(
         "temperature", hourObject.get("temperatureHigh", MISSING_DATA)
     )
     vis = hourObject.get("visibility", DEFAULT_VISIBILITY * visUnits)
-    humidity = hourObject.get("humidity", np.nan)
+    humidity = hourObject.get("humidity", MISSING_DATA)
     prepIntensityMax = hourObject.get(
         "precipIntensityMax", (rainPrep + snowPrep + icePrep) / 24
     )

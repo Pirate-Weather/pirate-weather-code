@@ -62,7 +62,7 @@ def calculate_text(
 
     # If time machine, no humidity data, so set to 0
     if "humidity" not in hourObject:
-        humidity = np.nan
+        humidity = MISSING_DATA
     else:
         humidity = hourObject["humidity"]
 
@@ -94,9 +94,7 @@ def calculate_text(
     dewPoint = hourObject.get("dewPoint", MISSING_DATA)
 
     # If we missing or incomplete data then return clear icon/text instead of calculating
-    if all(
-        v == MISSING_DATA for v in (temp, wind, vis, cloudCover, humidity, dewPoint)
-    ):
+    if all(np.isnan(v) for v in (temp, wind, vis, cloudCover, humidity, dewPoint)):
         return "unavailable", "none"
 
     # Calculate the text/icon for precipitation, wind, visibility, sky cover, humidity and thunderstorms
@@ -112,6 +110,7 @@ def calculate_text(
         icon,
         "both",
     )
+
     windText, windIcon = calculate_wind_text(wind, windUnit, icon, "both")
     visText, visIcon = calculate_vis_text(
         vis, visUnits, tempUnits, temp, dewPoint, smoke, icon, "both"

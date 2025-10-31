@@ -21,7 +21,7 @@ from dask.diagnostics import ProgressBar
 from herbie import FastHerbie, HerbieLatest, Path
 from xrspatial import direction, proximity
 
-from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
+from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -894,7 +894,7 @@ daskVarArrayList = []
 
 for daskVarIDX, dask_var in enumerate(zarrVars[:]):
     for local_ncpath in ncLocalWorking_paths:
-        # If not found in array, use np.nan to show missing
+        # If not found in array, use MISSING_DATA to show missing
         try:
             if saveType == "S3":
                 daskVarArrays.append(
@@ -917,7 +917,9 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
         except FileNotFoundError:
             print("File not found, adding NaN array for: " + local_ncpath)
             daskVarArrays.append(
-                da.full((6, 721, 1440), np.nan).rechunk((6, processChunk, processChunk))
+                da.full((6, 721, 1440), MISSING_DATA).rechunk(
+                    (6, processChunk, processChunk)
+                )
             )
 
     daskVarArraysStack = da.stack(daskVarArrays, allow_unknown_chunksizes=True)

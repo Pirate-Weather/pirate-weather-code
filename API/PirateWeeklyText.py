@@ -4,12 +4,14 @@ import datetime
 from itertools import groupby
 from operator import itemgetter
 
+import numpy as np
 from dateutil import tz
 
 from API.constants.shared_const import MISSING_DATA
 from API.constants.text_const import (
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    DEFAULT_POP,
     PRECIP_PROB_THRESHOLD,
 )
 from API.PirateTextHelper import (
@@ -64,17 +66,19 @@ def calculate_summary_text(
 
         if "cape" in day[2]:
             # Calculate the maximum cape for the week
-            if maxCape == MISSING_DATA and day[2]["cape"] != MISSING_DATA:
-                maxCape = day[2]["cape"]
-            elif maxCape != MISSING_DATA and day[2]["cape"] > maxCape:
+            if np.isnan(maxCape):
+                if not np.isnan(day[2]["cape"]):
+                    maxCape = day[2]["cape"]
+            elif not np.isnan(day[2]["cape"]) and day[2]["cape"] > maxCape:
                 maxCape = day[2]["cape"]
 
         if "liftedIndex" in day[2]:
             # Calculate the maximum lifted index for the week
-            if maxLiftedIndex == MISSING_DATA and day[2]["liftedIndex"] != MISSING_DATA:
-                maxLiftedIndex = day[2]["liftedIndex"]
+            if np.isnan(maxLiftedIndex):
+                if not np.isnan(day[2]["liftedIndex"]):
+                    maxLiftedIndex = day[2]["liftedIndex"]
             elif (
-                maxLiftedIndex != MISSING_DATA
+                not np.isnan(day[2]["liftedIndex"])
                 and day[2]["liftedIndex"] > maxLiftedIndex
             ):
                 maxLiftedIndex = day[2]["liftedIndex"]
@@ -448,6 +452,10 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
         dayDate = datetime.datetime.fromtimestamp(day["time"], zone)
         weekday = dayDate.strftime("%A").lower()
 
+        # Correct missing data for precipProbability
+        if np.isnan(day["precipProbability"]):
+            day["precipProbability"] = DEFAULT_POP
+
         # First index is always today, second index is always tomorrow and the last index has the next- text at the start
         if idx == 0:
             weekday = "today"
@@ -463,7 +471,7 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
             >= (DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * intensityUnit)
             and (
                 day["precipProbability"] >= PRECIP_PROB_THRESHOLD
-                or day["precipProbability"] == MISSING_DATA
+                or np.isnan(day["precipProbability"])
             )
         ):
             # Sets that there has been precipitation during the week
@@ -541,10 +549,8 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
     if None in precipSummary:
         precipSummary = ["for-week", "unavailable"]
 
-    # Only calcaulte the temperature summary if we have eight days to prevent issues with the time machine
-    if len(weekArr) == WEEK_DAYS_PLUS_ONE or (
-        highTemp != MISSING_DATA and lowTemp != MISSING_DATA
-    ):
+    # Only calculate the temperature summary if we have eight days to prevent issues with the time machine
+    if len(weekArr) == WEEK_DAYS_PLUS_ONE:
         tempSummary = calculate_temp_summary(highTemp, lowTemp, weekArr)
         # Combine the two texts together using with
         cText = ["with", precipSummary, tempSummary]
