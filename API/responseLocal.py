@@ -40,6 +40,7 @@ from API.api_utils import (
     calculate_apparent_temperature,
     clipLog,
     estimate_visibility_gultepe_rh_pr_numpy,
+    replace_nan,
 )
 from API.constants.api_const import (
     API_VERSION,
@@ -569,7 +570,7 @@ def toTimestamp(d):
 # If testing, read zarrs directly from S3
 # This should be implemented as a fallback at some point
 STAGE = os.environ.get("STAGE", "PROD")
-if STAGE == "TESTING":
+if (STAGE == "TESTING") or (STAGE == "TM_TESTING"):
     print("Setting up S3 zarrs")
     # If S3, use that, otherwise use local
     if save_type == "S3":
@@ -586,70 +587,72 @@ if STAGE == "TESTING":
     else:
         s3 = None
 
-    NWS_Alerts_store = setup_testing_zipstore(
-        s3, s3_bucket, ingestVersion, save_type, "NWS_Alerts"
-    )
-    NWS_Alerts_Zarr = zarr.open(NWS_Alerts_store, mode="r")
-
-    SubH_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "SubH")
-    SubH_Zarr = zarr.open(SubH_store, mode="r")
-    print("SubH Read")
-
-    HRRR_6H_store = setup_testing_zipstore(
-        s3, s3_bucket, ingestVersion, save_type, "HRRR_6H"
-    )
-    HRRR_6H_Zarr = zarr.open(HRRR_6H_store, mode="r")
-    print("HRRR_6H Read")
-
     GFS_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "GFS")
     GFS_Zarr = zarr.open(GFS_store, mode="r")
     print("GFS Read")
 
-    GEFS_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "GEFS")
-    GEFS_Zarr = zarr.open(GEFS_store, mode="r")
-    print("GEFS Read")
-
-    NBM_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "NBM")
-    NBM_Zarr = zarr.open(NBM_store, mode="r")
-    print("NBM Read")
-
-    NBM_Fire_store = setup_testing_zipstore(
-        s3, s3_bucket, ingestVersion, save_type, "NBM_Fire"
-    )
-    NBM_Fire_Zarr = zarr.open(NBM_Fire_store, mode="r")
-    print("NBM Fire Read")
-
-    HRRR_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "HRRR")
-    HRRR_Zarr = zarr.open(HRRR_store, mode="r")
-    print("HRRR Read")
-
-    WMO_Alerts_store = setup_testing_zipstore(
-        s3, s3_bucket, ingestVersion, save_type, "WMO_Alerts"
-    )
-    WMO_Alerts_Zarr = zarr.open(WMO_Alerts_store, mode="r")
-    print("WMO_Alerts Read")
-
-    RTMA_RU_store = setup_testing_zipstore(
-        s3, s3_bucket, ingestVersion, save_type, "RTMA_RU"
-    )
-    RTMA_RU_Zarr = zarr.open(RTMA_RU_store, mode="r")
-    print("RTMA_RU Read")
-
-    ECMWF_store = setup_testing_zipstore(
-        s3, s3_bucket, ingestVersion, save_type, "ECMWF"
-    )
-    ECMWF_Zarr = zarr.open(ECMWF_store, mode="r")
-    print("ECMWF Read")
-
     ERA5_Data = init_ERA5()
     print("ERA5 Read")
 
-    if useETOPO:
-        ETOPO_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "ETOPO_DA_C"
+    if STAGE=="TESTING":
+        NWS_Alerts_store = setup_testing_zipstore(
+            s3, s3_bucket, ingestVersion, save_type, "NWS_Alerts"
         )
-        ETOPO_f = zarr.open(ETOPO_store, mode="r")
-        print("ETOPO Read")
+        NWS_Alerts_Zarr = zarr.open(NWS_Alerts_store, mode="r")
+
+        SubH_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "SubH")
+        SubH_Zarr = zarr.open(SubH_store, mode="r")
+        print("SubH Read")
+
+        HRRR_6H_store = setup_testing_zipstore(
+            s3, s3_bucket, ingestVersion, save_type, "HRRR_6H"
+        )
+        HRRR_6H_Zarr = zarr.open(HRRR_6H_store, mode="r")
+        print("HRRR_6H Read")
+
+        GEFS_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "GEFS")
+        GEFS_Zarr = zarr.open(GEFS_store, mode="r")
+        print("GEFS Read")
+
+        NBM_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "NBM")
+        NBM_Zarr = zarr.open(NBM_store, mode="r")
+        print("NBM Read")
+
+        NBM_Fire_store = setup_testing_zipstore(
+            s3, s3_bucket, ingestVersion, save_type, "NBM_Fire"
+        )
+        NBM_Fire_Zarr = zarr.open(NBM_Fire_store, mode="r")
+        print("NBM Fire Read")
+
+        HRRR_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "HRRR")
+        HRRR_Zarr = zarr.open(HRRR_store, mode="r")
+        print("HRRR Read")
+
+        WMO_Alerts_store = setup_testing_zipstore(
+            s3, s3_bucket, ingestVersion, save_type, "WMO_Alerts"
+        )
+        WMO_Alerts_Zarr = zarr.open(WMO_Alerts_store, mode="r")
+        print("WMO_Alerts Read")
+
+        RTMA_RU_store = setup_testing_zipstore(
+            s3, s3_bucket, ingestVersion, save_type, "RTMA_RU"
+        )
+        RTMA_RU_Zarr = zarr.open(RTMA_RU_store, mode="r")
+        print("RTMA_RU Read")
+
+        ECMWF_store = setup_testing_zipstore(
+            s3, s3_bucket, ingestVersion, save_type, "ECMWF"
+        )
+        ECMWF_Zarr = zarr.open(ECMWF_store, mode="r")
+        print("ECMWF Read")
+
+
+        if useETOPO:
+            ETOPO_store = setup_testing_zipstore(
+                s3, s3_bucket, ingestVersion, save_type, "ETOPO_DA_C"
+            )
+            ETOPO_f = zarr.open(ETOPO_store, mode="r")
+            print("ETOPO Read")
 
 
 async def get_zarr(store, X, Y):
@@ -1322,6 +1325,8 @@ async def PW_Forecast(
     # ECMWF is opt-in via include=ecmwf_ifs
     if "ecmwf_ifs" in includeParams:
         readECMWF = True
+    else:
+        exECMWF = 1
 
     # If more than 25 hours in the past, exclude everything except gfs
     if (nowTime - utcTime) > datetime.timedelta(hours=25):
@@ -1333,7 +1338,11 @@ async def PW_Forecast(
         exECMWF = 1
 
     readRTMA_RU = False
-    readWMOAlerts = True
+
+    if (timeMachine or exAlerts==1):
+        readWMOAlerts = False
+    else:
+        readWMOAlerts = True
 
     # Set up timemachine params
     if timeMachine and not tmExtra:
@@ -1714,7 +1723,7 @@ async def PW_Forecast(
         x_p = np.argmin(abslon)
 
         # Find closest date to baseDayUTC
-        t_p = np.argmin(np.abs(ERA5_Data["ERA5_times"] - np.datetime64(baseDayUTC)))
+        t_p = np.argmin(np.abs(ERA5_Data["ERA5_times"] - np.datetime64(baseDayUTC.replace(tzinfo=None))))
 
         # Read the ERA5 data for the location and time
         # isel is significantly faster than sel for this operation
@@ -1730,7 +1739,7 @@ async def PW_Forecast(
         # Add unix time as first row
         unix_times_era5 = (
             dataOut_ERA5_xr["time"].astype("datetime64[s]")
-            - np.datetime64("1970-01-01T00:00:00Z")
+            - np.datetime64("1970-01-01T00:00:00")
         ).astype(np.int64)
         ERA5_MERGED = np.vstack((unix_times_era5, dataOut_ERA5.values)).T
     else:
@@ -1767,9 +1776,6 @@ async def PW_Forecast(
         zarrTasks["RTMA_RU"] = weather.zarr_read(
             "RTMA_RU", RTMA_RU_Zarr, x_rtma, y_rtma
         )
-
-    if readECMWF:
-        zarrTasks["ECMWF"] = weather.zarr_read("ECMWF", ECMWF_Zarr, x_p, y_p)
 
     # Initialize WMO alert data
     WMO_alertDat = None
@@ -2068,110 +2074,110 @@ async def PW_Forecast(
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # HRRR
-    if timeMachine is False:
-        # Since the forecast files are pre-processed, they'll always be hourly and the same length. This avoids interpolation
-        try:  # Add a fallback to GFS if these don't work
-            # HRRR
-            if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-                HRRR_StartIDX = nearest_index(dataOut_hrrrh[:, 0], baseDayUTC_Grib)
-                H2_StartIDX = nearest_index(dataOut_h2[:, 0], dataOut_hrrrh[-1, 0]) + 1
+    # Since the forecast files are pre-processed, they'll always be hourly and the same length. This avoids interpolation
+    try:  # Add a fallback to GFS if these don't work
+        # HRRR
+        if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+            HRRR_StartIDX = nearest_index(dataOut_hrrrh[:, 0], baseDayUTC_Grib)
+            H2_StartIDX = nearest_index(dataOut_h2[:, 0], dataOut_hrrrh[-1, 0]) + 1
 
-                if (H2_StartIDX < 1) or (HRRR_StartIDX < 2):
-                    if "hrrr_18-48" in sourceTimes:
-                        sourceTimes.pop("hrrr_18-48", None)
-                    if "hrrr_18-48" in sourceTimes:
-                        sourceTimes.pop("hrrr_18-48", None)
-                    if "hrrr_0-18" in sourceTimes:
-                        sourceTimes.pop("hrrr_0-18", None)
-                    if "hrrr_0-18" in sourceTimes:
-                        sourceTimes.pop("hrrr_0-18", None)
+            if (H2_StartIDX < 1) or (HRRR_StartIDX < 2):
+                if "hrrr_18-48" in sourceTimes:
+                    sourceTimes.pop("hrrr_18-48", None)
+                if "hrrr_18-48" in sourceTimes:
+                    sourceTimes.pop("hrrr_18-48", None)
+                if "hrrr_0-18" in sourceTimes:
+                    sourceTimes.pop("hrrr_0-18", None)
+                if "hrrr_0-18" in sourceTimes:
+                    sourceTimes.pop("hrrr_0-18", None)
 
-                    # Log the error
-                    logger.error(
-                        "HRRR data not available for the requested time range."
-                    )
-
-                else:
-                    HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), MISSING_DATA)
-                    # The 0-18 hour HRRR data (dataOut_hrrrh) has fewer columns than the 18-48 hour data (dataOut_h2)
-                    # when in timeMachine mode. Only concatenate the common columns (0-17).
-                    common_cols = min(dataOut_hrrrh.shape[1], dataOut_h2.shape[1])
-                    HRRR_Merged[
-                        0 : (67 - HRRR_StartIDX) + (31 - H2_StartIDX), 0:common_cols
-                    ] = np.concatenate(
-                        (
-                            dataOut_hrrrh[HRRR_StartIDX:, 0:common_cols],
-                            dataOut_h2[H2_StartIDX:, 0:common_cols],
-                        ),
-                        axis=0,
-                    )
-
-            # NBM
-            if "nbm" in sourceList:
-                NBM_StartIDX = nearest_index(dataOut_nbm[:, 0], baseDayUTC_Grib)
-
-                if NBM_StartIDX < 1:
-                    if "nbm" in sourceList:
-                        sourceList.remove("nbm")
-                    if "nbm" in sourceTimes:
-                        sourceTimes.pop("nbm", None)
-                    logger.error("NBM data not available for the requested time range.")
-                else:
-                    NBM_Merged = np.full((numHours, dataOut_nbm.shape[1]), MISSING_DATA)
-                    NBM_Merged[0 : (242 - NBM_StartIDX), :] = dataOut_nbm[
-                        NBM_StartIDX : (numHours + NBM_StartIDX), :
-                    ]
-
-            # NBM FIre
-            if "nbm_fire" in sourceList:
-                NBM_Fire_StartIDX = nearest_index(
-                    dataOut_nbmFire[:, 0], baseDayUTC_Grib
+                # Log the error
+                logger.error(
+                    "HRRR data not available for the requested time range."
                 )
 
-                if NBM_Fire_StartIDX < 1:
-                    if "nbm_fire" in sourceList:
-                        sourceList.remove("nbm_fire")
-                    if "nbm_fire" in sourceTimes:
-                        sourceTimes.pop("nbm_fire", None)
+            else:
+                HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), MISSING_DATA)
+                # The 0-18 hour HRRR data (dataOut_hrrrh) has fewer columns than the 18-48 hour data (dataOut_h2)
+                # when in timeMachine mode. Only concatenate the common columns (0-17).
+                common_cols = min(dataOut_hrrrh.shape[1], dataOut_h2.shape[1])
+                HRRR_Merged[
+                    0 : (67 - HRRR_StartIDX) + (31 - H2_StartIDX), 0:common_cols
+                ] = np.concatenate(
+                    (
+                        dataOut_hrrrh[HRRR_StartIDX:, 0:common_cols],
+                        dataOut_h2[H2_StartIDX:, 0:common_cols],
+                    ),
+                    axis=0,
+                )
 
-                    logger.error(
-                        "NBM Fire data not available for the requested time range."
-                    )
-                else:
-                    NBM_Fire_Merged = np.full(
-                        (numHours, dataOut_nbmFire.shape[1]), MISSING_DATA
-                    )
+        # NBM
+        if "nbm" in sourceList:
+            NBM_StartIDX = nearest_index(dataOut_nbm[:, 0], baseDayUTC_Grib)
 
-                    NBM_Fire_Merged[0 : (229 - NBM_Fire_StartIDX), :] = dataOut_nbmFire[
-                        NBM_Fire_StartIDX : (numHours + NBM_Fire_StartIDX), :
-                    ]
+            if NBM_StartIDX < 1:
+                if "nbm" in sourceList:
+                    sourceList.remove("nbm")
+                if "nbm" in sourceTimes:
+                    sourceTimes.pop("nbm", None)
+                logger.error("NBM data not available for the requested time range.")
+            else:
+                NBM_Merged = np.full((numHours, dataOut_nbm.shape[1]), MISSING_DATA)
+                NBM_Merged[0 : (242 - NBM_StartIDX), :] = dataOut_nbm[
+                    NBM_StartIDX : (numHours + NBM_StartIDX), :
+                ]
 
-        except Exception:
-            print("HRRR or NBM data not available, falling back to GFS")
-            print(traceback.print_exc())
-            if "hrrr_18-48" in sourceTimes:
-                sourceTimes.pop("hrrr_18-48", None)
-            if "nbm_fire" in sourceTimes:
-                sourceTimes.pop("nbm_fire", None)
-            if "nbm" in sourceTimes:
-                sourceTimes.pop("nbm", None)
-            if "hrrr_0-18" in sourceTimes:
-                sourceTimes.pop("hrrr_0-18", None)
-            if "hrrr_subh" in sourceTimes:
-                sourceTimes.pop("hrrr_subh", None)
+        # NBM FIre
+        if "nbm_fire" in sourceList:
+            NBM_Fire_StartIDX = nearest_index(
+                dataOut_nbmFire[:, 0], baseDayUTC_Grib
+            )
 
-            if "hrrrsubh" in sourceList:
-                sourceList.remove("hrrrsubh")
-            if "hrrr_0-18" in sourceList:
-                sourceList.remove("hrrr_0-18")
-            if "nbm" in sourceList:
-                sourceList.remove("nbm")
-            if "nbm_fire" in sourceList:
-                sourceList.remove("nbm_fire")
-            if "hrrr_18-48" in sourceList:
-                sourceList.remove("hrrr_18-48")
+            if NBM_Fire_StartIDX < 1:
+                if "nbm_fire" in sourceList:
+                    sourceList.remove("nbm_fire")
+                if "nbm_fire" in sourceTimes:
+                    sourceTimes.pop("nbm_fire", None)
 
-        # GFS
+                logger.error(
+                    "NBM Fire data not available for the requested time range."
+                )
+            else:
+                NBM_Fire_Merged = np.full(
+                    (numHours, dataOut_nbmFire.shape[1]), MISSING_DATA
+                )
+
+                NBM_Fire_Merged[0 : (229 - NBM_Fire_StartIDX), :] = dataOut_nbmFire[
+                    NBM_Fire_StartIDX : (numHours + NBM_Fire_StartIDX), :
+                ]
+
+    except Exception:
+        print("HRRR or NBM data not available, falling back to GFS")
+        print(traceback.print_exc())
+        if "hrrr_18-48" in sourceTimes:
+            sourceTimes.pop("hrrr_18-48", None)
+        if "nbm_fire" in sourceTimes:
+            sourceTimes.pop("nbm_fire", None)
+        if "nbm" in sourceTimes:
+            sourceTimes.pop("nbm", None)
+        if "hrrr_0-18" in sourceTimes:
+            sourceTimes.pop("hrrr_0-18", None)
+        if "hrrr_subh" in sourceTimes:
+            sourceTimes.pop("hrrr_subh", None)
+
+        if "hrrrsubh" in sourceList:
+            sourceList.remove("hrrrsubh")
+        if "hrrr_0-18" in sourceList:
+            sourceList.remove("hrrr_0-18")
+        if "nbm" in sourceList:
+            sourceList.remove("nbm")
+        if "nbm_fire" in sourceList:
+            sourceList.remove("nbm_fire")
+        if "hrrr_18-48" in sourceList:
+            sourceList.remove("hrrr_18-48")
+
+    # GFS
+    if "gfs" in sourceList:
         GFS_StartIDX = nearest_index(dataOut_gfs[:, 0], baseDayUTC_Grib)
         GFS_EndIDX = min((len(dataOut_gfs), (numHours + GFS_StartIDX)))
         GFS_Merged = np.full((numHours, max(GFS.values()) + 1), MISSING_DATA)
@@ -2179,22 +2185,22 @@ async def PW_Forecast(
             dataOut_gfs[GFS_StartIDX:GFS_EndIDX, 0 : dataOut_gfs.shape[1]]
         )
 
-        # ECMWF
-        if "ecmwf_ifs" in sourceList:
-            # ECMWF forecast starts at hour +3, causing a time offset in the data
-            # The data array is offset by ~3 hours from its timestamps
-            # Adjust the search time by +3 hours to find the correct data
-            ECMWF_StartIDX = nearest_index(dataOut_ecmwf[:, 0], baseDayUTC_Grib + 10800)
-            ECMWF_EndIDX = min((len(dataOut_ecmwf), (numHours + ECMWF_StartIDX)))
-            ECMWF_Merged = np.full((numHours, max(ECMWF.values()) + 1), MISSING_DATA)
-            ECMWF_Merged[
-                0 : (ECMWF_EndIDX - ECMWF_StartIDX), 0 : dataOut_ecmwf.shape[1]
-            ] = dataOut_ecmwf[ECMWF_StartIDX:ECMWF_EndIDX, 0 : dataOut_ecmwf.shape[1]]
+    # ECMWF
+    if "ecmwf_ifs" in sourceList:
+        # ECMWF forecast starts at hour +3, causing a time offset in the data
+        # The data array is offset by ~3 hours from its timestamps
+        # Adjust the search time by +3 hours to find the correct data
+        ECMWF_StartIDX = nearest_index(dataOut_ecmwf[:, 0], baseDayUTC_Grib + 10800)
+        ECMWF_EndIDX = min((len(dataOut_ecmwf), (numHours + ECMWF_StartIDX)))
+        ECMWF_Merged = np.full((numHours, max(ECMWF.values()) + 1), MISSING_DATA)
+        ECMWF_Merged[
+            0 : (ECMWF_EndIDX - ECMWF_StartIDX), 0 : dataOut_ecmwf.shape[1]
+        ] = dataOut_ecmwf[ECMWF_StartIDX:ECMWF_EndIDX, 0 : dataOut_ecmwf.shape[1]]
 
-        # GEFS
-        if "gefs" in sourceList:
-            GEFS_StartIDX = nearest_index(dataOut_gefs[:, 0], baseDayUTC_Grib)
-            GEFS_Merged = dataOut_gefs[GEFS_StartIDX : (numHours + GEFS_StartIDX), :]
+    # GEFS
+    if "gefs" in sourceList:
+        GEFS_StartIDX = nearest_index(dataOut_gefs[:, 0], baseDayUTC_Grib)
+        GEFS_Merged = dataOut_gefs[GEFS_StartIDX : (numHours + GEFS_StartIDX), :]
 
     # Timing Check
     if TIMING:
@@ -5657,7 +5663,8 @@ async def PW_Forecast(
         # lock.release()
 
     # Replace all nan with -999
-    # returnOBJ = replace_nan(returnOBJ, -999)
+    returnOBJ = replace_nan(returnOBJ, -999)
+
     if TIMING:
         print("Replace NaN Time")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
