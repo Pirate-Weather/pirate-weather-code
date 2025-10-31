@@ -1,6 +1,7 @@
 """
 Shared constants
 """
+
 import numpy as np
 
 # Invalid data

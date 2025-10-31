@@ -1,4 +1,3 @@
-import copy
 import datetime
 import math
 
@@ -43,6 +42,7 @@ def _value_or_default(value, default):
     except TypeError:
         pass
     return value
+
 
 def calculate_cloud_text(cloud_cover):
     """
@@ -897,7 +897,6 @@ def calculate_day_text(
 
     # Now iterate through the actual hourly forecast data and aggregate into the pre-defined standard periods
     for idx, hour in enumerate(hours):
-
         hour_date = datetime.datetime.fromtimestamp(hour["time"], zone)
         hour_in_loop = int(hour_date.strftime("%H"))
 

@@ -32,10 +32,10 @@ SNOW_INTENSITY_THRESHOLDS = {
 }
 
 # Icon thresholds for precipitation accumulation
-HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM = 0.2 # In snow units (mm of snow)
-HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 0.02 # (mm liquid equivalent)
-DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM = 5.0 # In snow units (mm of snow)
-DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0 # (mm liquid equivalent)
+HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM = 0.2  # In snow units (mm of snow)
+HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 0.02  # (mm liquid equivalent)
+DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM = 5.0  # In snow units (mm of snow)
+DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0  # (mm liquid equivalent)
 
 # Visibility thresholds (meters)
 FOG_THRESHOLD_METERS = 1000

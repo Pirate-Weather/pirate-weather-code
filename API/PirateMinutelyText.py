@@ -3,10 +3,9 @@
 from itertools import groupby
 from operator import itemgetter
 
-from API.constants.shared_const import MISSING_DATA
-from API.constants.text_const import CAPE_THRESHOLDS
 import numpy as np
 
+from API.constants.text_const import CAPE_THRESHOLDS
 from API.PirateTextHelper import calculate_precip_text
 
 # Number of minutes in an hour

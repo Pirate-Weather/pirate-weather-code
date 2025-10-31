@@ -137,7 +137,7 @@ ERA5 = {
     "10m_u_component_of_wind": 5,
     "10m_v_component_of_wind": 6,
     "precipitation_type": 7,
-    "total_precipitation": 8, # Snow + rain in m/liquid water equivalent
+    "total_precipitation": 8,  # Snow + rain in m/liquid water equivalent
     "large_scale_rain_rate": 9,
     "convective_rain_rate": 10,
     "large_scale_snowfall_rate_water_equivalent": 11,

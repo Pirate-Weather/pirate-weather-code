@@ -159,9 +159,15 @@ def calculate_precip_text(
     midSnowThresh = SNOW_INTENSITY_THRESHOLDS["mid"] * prepIntensityUnit
     heavySnowThresh = SNOW_INTENSITY_THRESHOLDS["heavy"] * prepIntensityUnit
 
-    snowIconThresholdHour = HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit # In snow units (accum units of snow)
-    precipIconThresholdHour = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit # Liquid equivalent accum units
-    precipIconThresholdHourIntensity = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepIntensityUnit # Liquid equivalent mm for intensity, so no snow variation
+    snowIconThresholdHour = (
+        HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
+    )  # In snow units (accum units of snow)
+    precipIconThresholdHour = (
+        HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
+    )  # Liquid equivalent accum units
+    precipIconThresholdHourIntensity = (
+        HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepIntensityUnit
+    )  # Liquid equivalent mm for intensity, so no snow variation
 
     snowIconThresholdDay = DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
     precipIconThresholdDay = DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
@@ -234,9 +240,18 @@ def calculate_precip_text(
 
     # Find the largest percentage difference to determine the icon
     if pop >= PRECIP_PROB_THRESHOLD and (
-        (rainPrep > precipIconThreshold and prepIntensity > precipIconThresholdHourIntensity)
-        or (snowPrep >= snowIconThreshold and prepIntensity > precipIconThresholdHourIntensity)
-        or (icePrep >= precipIconThreshold and prepIntensity > precipIconThresholdHourIntensity)
+        (
+            rainPrep > precipIconThreshold
+            and prepIntensity > precipIconThresholdHourIntensity
+        )
+        or (
+            snowPrep >= snowIconThreshold
+            and prepIntensity > precipIconThresholdHourIntensity
+        )
+        or (
+            icePrep >= precipIconThreshold
+            and prepIntensity > precipIconThresholdHourIntensity
+        )
         or (totalPrep >= precipIconThreshold and numTypes > 1)
     ):
         if prepType == "none":

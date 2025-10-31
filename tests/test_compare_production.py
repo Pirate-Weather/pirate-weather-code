@@ -124,15 +124,11 @@ def test_timemachine_vs_production():
     lat, lon = TIMEMACHINE_TEST_LOCATION
     timestamp = TIMEMACHINE_TIMESTAMP
 
-    local_resp = client.get(
-        f"/timemachine/{PW_API}/{lat},{lon},{timestamp}?version=2"
-    )
+    local_resp = client.get(f"/timemachine/{PW_API}/{lat},{lon},{timestamp}?version=2")
     assert local_resp.status_code == 200
     local_data = local_resp.json()
 
-    prod_url = (
-        f"{PROD_TIMEMACHINE_BASE}/{PW_API}/{lat},{lon},{timestamp}?version=2"
-    )
+    prod_url = f"{PROD_TIMEMACHINE_BASE}/{PW_API}/{lat},{lon},{timestamp}?version=2"
     try:
         prod_data = _fetch_production_json(prod_url)
     except ProductionRequestError as exc:  # pragma: no cover - network failure
