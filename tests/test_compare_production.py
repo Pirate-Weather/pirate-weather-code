@@ -39,13 +39,9 @@ def _fetch_production_json(url: str) -> dict:
 
     try:
         with urlopen(url, timeout=10) as response:
-            status_code = response.getcode()
             payload = response.read()
     except URLError as exc:  # pragma: no cover - network failure
-        raise ProductionRequestError(exc) from exc
-
-    if status_code != 200:
-        raise ProductionRequestError(f"Unexpected status {status_code} from {url}")
+        raise ProductionRequestError(f"Request to {url} failed: {exc}") from exc
 
     try:
         return json.loads(payload.decode("utf-8"))
