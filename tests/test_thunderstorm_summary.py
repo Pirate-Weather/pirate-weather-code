@@ -63,10 +63,6 @@ def test_currently_hourly_thunderstorm_with_precipitation():
 
     text, icon = calculate_text(
         hourObject=hour_object,
-        prepAccumUnit=1.0,
-        visUnits=1.0,
-        windUnit=1.0,
-        tempUnits=1,
         isDayTime=True,
         rainPrep=5.0,
         snowPrep=0.0,
@@ -103,10 +99,6 @@ def test_currently_possible_thunderstorm_with_precipitation():
 
     text, icon = calculate_text(
         hourObject=hour_object,
-        prepAccumUnit=1.0,
-        visUnits=1.0,
-        windUnit=1.0,
-        tempUnits=1,
         isDayTime=True,
         rainPrep=5.0,
         snowPrep=0.0,
@@ -143,10 +135,6 @@ def test_hourly_possible_thunderstorm_with_precipitation():
 
     text, icon = calculate_text(
         hourObject=hour_object,
-        prepAccumUnit=1.0,
-        visUnits=1.0,
-        windUnit=1.0,
-        tempUnits=1,
         isDayTime=True,
         rainPrep=5.0,
         snowPrep=0.0,
@@ -185,10 +173,6 @@ def test_currently_hourly_no_thunderstorm_without_precipitation():
 
     text, icon = calculate_text(
         hourObject=hour_object,
-        prepAccumUnit=1.0,
-        visUnits=1.0,
-        windUnit=1.0,
-        tempUnits=1,
         isDayTime=True,
         rainPrep=0.0,
         snowPrep=0.0,
@@ -227,10 +211,6 @@ def test_currently_hourly_no_thunderstorm_low_cape():
 
     text, icon = calculate_text(
         hourObject=hour_object,
-        prepAccumUnit=1.0,
-        visUnits=1.0,
-        windUnit=1.0,
-        tempUnits=1,
         isDayTime=True,
         rainPrep=3.0,
         snowPrep=0.0,
@@ -278,10 +258,6 @@ def test_daily_thunderstorms_joined_with_precipitation():
 
     icon, summary_text = calculate_day_text(
         hours=hours,
-        precip_accum_unit=1.0,
-        vis_units=1.0,
-        wind_unit=1.0,
-        temp_units=1,
         is_day_time=True,
         time_zone="UTC",
         curr_time=1609459200,
@@ -355,10 +331,6 @@ def test_daily_thunderstorms_not_joined_with_precipitation():
 
     icon, summary_text = calculate_day_text(
         hours=hours,
-        precip_accum_unit=1.0,
-        vis_units=1.0,
-        wind_unit=1.0,
-        temp_units=1,
         is_day_time=True,
         time_zone="UTC",
         curr_time=1609459200,
@@ -431,10 +403,6 @@ def test_24hour_thunderstorms_starting_later():
 
     icon, summary_text = calculate_day_text(
         hours=hours,
-        precip_accum_unit=1.0,
-        vis_units=1.0,
-        wind_unit=1.0,
-        temp_units=1,
         is_day_time=True,
         time_zone="UTC",
         curr_time=1609470000,
@@ -510,8 +478,6 @@ def test_weekly_thunderstorms():
 
     text, icon = calculate_weekly_text(
         weekArr=week_array,
-        intensityUnit=1.0,
-        tempUnit=1,
         timeZone="UTC",
         icon="darksky",
     )
@@ -584,10 +550,6 @@ def test_daily_uses_max_cape_with_precipitation():
 
     icon, summary_text = calculate_day_text(
         hours=hours,
-        precip_accum_unit=1.0,
-        vis_units=1.0,
-        wind_unit=1.0,
-        temp_units=1,
         is_day_time=True,
         time_zone="UTC",
         curr_time=1609459200,
@@ -637,10 +599,6 @@ def test_thunderstorms_dont_combine_with_humidity():
 
     icon, summary_text = calculate_day_text(
         hours=hours,
-        precip_accum_unit=1.0,
-        vis_units=1.0,
-        wind_unit=1.0,
-        temp_units=1,
         is_day_time=True,
         time_zone="UTC",
         curr_time=1609459200,
@@ -688,10 +646,6 @@ def test_humidity_still_combines_without_thunderstorms():
 
     icon, summary_text = calculate_day_text(
         hours=hours,
-        precip_accum_unit=1.0,
-        vis_units=1.0,
-        wind_unit=1.0,
-        temp_units=1,
         is_day_time=True,
         time_zone="UTC",
         curr_time=1609459200,
