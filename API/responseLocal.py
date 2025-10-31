@@ -3858,12 +3858,14 @@ async def PW_Forecast(
         vis_display = InterPhour[idx, DATA_HOURLY["vis"]] * visUnits
 
         # Precipitation conversion (from mm to requested units)
-        intensity_display = InterPhour[idx, DATA_HOURLY["intensity"]] * prepIntensityUnit
+        intensity_display = (
+            InterPhour[idx, DATA_HOURLY["intensity"]] * prepIntensityUnit
+        )
         error_display = InterPhour[idx, DATA_HOURLY["error"]] * prepIntensityUnit
         rain_display = InterPhour[idx, DATA_HOURLY["rain"]] * prepAccumUnit
         snow_display = InterPhour[idx, DATA_HOURLY["snow"]] * prepAccumUnit
         ice_display = InterPhour[idx, DATA_HOURLY["ice"]] * prepAccumUnit
-        accum_display = (rain_display + snow_display + ice_display)
+        accum_display = rain_display + snow_display + ice_display
 
         # Pressure conversion (already in appropriate units from data source)
         pressure_display = InterPhour[idx, DATA_HOURLY["pressure"]] * pressUnits
@@ -3906,9 +3908,9 @@ async def PW_Forecast(
 
         # Add station pressure if requested
         if "stationPressure" in extraVars:
-            hourItem["stationPressure"] = InterPhour[
-                idx, DATA_HOURLY["station_pressure"]
-            ] * pressUnits
+            hourItem["stationPressure"] = (
+                InterPhour[idx, DATA_HOURLY["station_pressure"]] * pressUnits
+            )
 
         # Create SI version of hourItem for text generation (values already in SI units in InterPhour)
         hourItem_si = {
@@ -5029,7 +5031,9 @@ async def PW_Forecast(
         InterPcurrent[DATA_CURRENT["vis"]] = MISSING_DATA
 
     # Keep visibility in meters (SI units)
-    InterPcurrent[DATA_CURRENT["vis"]] = np.clip(InterPcurrent[DATA_CURRENT["vis"]], 0, 16090)
+    InterPcurrent[DATA_CURRENT["vis"]] = np.clip(
+        InterPcurrent[DATA_CURRENT["vis"]], 0, 16090
+    )
 
     # Ozone from GFS or ERA5
     ozone_value = MISSING_DATA
@@ -5402,14 +5406,20 @@ async def PW_Forecast(
         returnOBJ["currently"]["dewPoint"] = InterPcurrent[DATA_CURRENT["dew"]]
         returnOBJ["currently"]["humidity"] = InterPcurrent[DATA_CURRENT["humidity"]]
         returnOBJ["currently"]["pressure"] = InterPcurrent[DATA_CURRENT["pressure"]]
-        returnOBJ["currently"]["windSpeed"] = InterPcurrent[DATA_CURRENT["wind"]] * windUnit
-        returnOBJ["currently"]["windGust"] = InterPcurrent[DATA_CURRENT["gust"]] * windUnit
+        returnOBJ["currently"]["windSpeed"] = (
+            InterPcurrent[DATA_CURRENT["wind"]] * windUnit
+        )
+        returnOBJ["currently"]["windGust"] = (
+            InterPcurrent[DATA_CURRENT["gust"]] * windUnit
+        )
         returnOBJ["currently"]["windBearing"] = int(
             np.mod(InterPcurrent[DATA_CURRENT["bearing"]], 360).round()
         )
         returnOBJ["currently"]["cloudCover"] = InterPcurrent[DATA_CURRENT["cloud"]]
         returnOBJ["currently"]["uvIndex"] = InterPcurrent[DATA_CURRENT["uv"]]
-        returnOBJ["currently"]["visibility"] = InterPcurrent[DATA_CURRENT["vis"]] * visUnits
+        returnOBJ["currently"]["visibility"] = (
+            InterPcurrent[DATA_CURRENT["vis"]] * visUnits
+        )
         returnOBJ["currently"]["ozone"] = InterPcurrent[DATA_CURRENT["ozone"]]
         returnOBJ["currently"]["smoke"] = InterPcurrent[
             DATA_CURRENT["smoke"]
