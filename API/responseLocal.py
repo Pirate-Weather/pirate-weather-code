@@ -3256,15 +3256,12 @@ async def PW_Forecast(
         np.argmin(np.isnan(WindSpeedHour), axis=1), WindSpeedHour.T
     )
 
-    # Clip between 0 and 400
-    InterPhour[:, DATA_HOURLY["wind"]] = (
-        clipLog(
-            InterPhour[:, DATA_HOURLY["wind"]],
-            CLIP_WIND["min"],
-            CLIP_WIND["max"],
-            "Wind Speed",
-        )
-        * windUnit
+    # Clip between 0 and 400, keep in m/s (SI units)
+    InterPhour[:, DATA_HOURLY["wind"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["wind"]],
+        CLIP_WIND["min"],
+        CLIP_WIND["max"],
+        "Wind Speed",
     )
 
     ### Wind Gust
@@ -3281,15 +3278,12 @@ async def PW_Forecast(
     InterPhour[:, DATA_HOURLY["gust"]] = np.choose(
         np.argmin(np.isnan(WindGustHour), axis=1), WindGustHour.T
     )
-    # Clip between 0 and 400
-    InterPhour[:, DATA_HOURLY["gust"]] = (
-        clipLog(
-            InterPhour[:, DATA_HOURLY["gust"]],
-            CLIP_WIND["min"],
-            CLIP_WIND["max"],
-            "Wind Gust Hour",
-        )
-        * windUnit
+    # Clip between 0 and 400, keep in m/s (SI units)
+    InterPhour[:, DATA_HOURLY["gust"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["gust"]],
+        CLIP_WIND["min"],
+        CLIP_WIND["max"],
+        "Wind Gust Hour",
     )
 
     ### Wind Bearing
@@ -3405,13 +3399,11 @@ async def PW_Forecast(
             ERA5_MERGED, var_index=ERA5, var_axis=1
         )
 
-    InterPhour[:, DATA_HOURLY["vis"]] = (
-        np.clip(
-            np.choose(np.argmin(np.isnan(VisibilityHour), axis=1), VisibilityHour.T),
-            CLIP_VIS["min"],
-            CLIP_VIS["max"],
-        )
-        * visUnits
+    # Keep visibility in meters (SI units)
+    InterPhour[:, DATA_HOURLY["vis"]] = np.clip(
+        np.choose(np.argmin(np.isnan(VisibilityHour), axis=1), VisibilityHour.T),
+        CLIP_VIS["min"],
+        CLIP_VIS["max"],
     )
 
     ### Ozone Index
@@ -3468,9 +3460,10 @@ async def PW_Forecast(
     InterPhour[InterPhour[:, DATA_HOURLY["prob"]] == 0, DATA_HOURLY["accum"]] = 0
 
     ### Near Storm Distance
+    # Keep in meters (SI units)
     if "gfs" in sourceList:
         InterPhour[:, DATA_HOURLY["storm_dist"]] = np.maximum(
-            GFS_Merged[:, GFS["storm_dist"]] * visUnits, 0
+            GFS_Merged[:, GFS["storm_dist"]], 0
         )
 
     ### Near Storm Direction
@@ -3516,8 +3509,8 @@ async def PW_Forecast(
         "Solar Hour",
     )
 
-    # Convert wind speed from its display unit to m/s for the apparent temperature
-    windSpeedMps = InterPhour[:, DATA_HOURLY["wind"]] / windUnit
+    # Wind speed is already in m/s (SI units)
+    windSpeedMps = InterPhour[:, DATA_HOURLY["wind"]]
 
     # Calculate the apparent temperature
     InterPhour[:, DATA_HOURLY["apparent"]] = calculate_apparent_temperature(
@@ -3588,22 +3581,14 @@ async def PW_Forecast(
         "CAPE Hour",
     )
 
-    # Set temperature units
-    if tempUnits == 0:
-        InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] = (
-            InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]]
-            - KELVIN_TO_CELSIUS
-        ) * 9 / 5 + 32
-        InterPhour[:, DATA_HOURLY["feels_like"]] = (
-            InterPhour[:, DATA_HOURLY["feels_like"]] - KELVIN_TO_CELSIUS
-        ) * 9 / 5 + 32
-    else:
-        InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] = (
-            InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] - tempUnits
-        )
-        InterPhour[:, DATA_HOURLY["feels_like"]] = (
-            InterPhour[:, DATA_HOURLY["feels_like"]] - tempUnits
-        )
+    # Keep temperatures in SI units (Celsius) - conversion happens when building output
+    # Convert from Kelvin to Celsius for internal use
+    InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] = (
+        InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] - KELVIN_TO_CELSIUS
+    )
+    InterPhour[:, DATA_HOURLY["feels_like"]] = (
+        InterPhour[:, DATA_HOURLY["feels_like"]] - KELVIN_TO_CELSIUS
+    )
 
     # Add a global check for weird values, since nothing should ever be greater than 10000
     # Keep time col
@@ -3628,19 +3613,18 @@ async def PW_Forecast(
     )  # rain
 
     # Use the new snow height estimation for snow accumulation.
+    # Keep in SI units (mm)
     snow_indices = np.where(InterPhour[:, DATA_HOURLY["type"]] == 1)[0]
     if snow_indices.size > 0:
-        # Extract and convert data for all snow events in a vectorized way
-        liquid_mm = InterPhour[snow_indices, DATA_HOURLY["accum"]] / prepAccumUnit
-        if tempUnits == 0:  # Fahrenheit
-            temp_c = (InterPhour[snow_indices, DATA_HOURLY["temp"]] - 32) * 5 / 9
-        else:
-            temp_c = InterPhour[snow_indices, DATA_HOURLY["temp"]]
-        wind_mps = InterPhour[snow_indices, DATA_HOURLY["wind"]] / windUnit
-        # Calculate snow height for all snow indices in a vectorized operation.
+        # Extract data for all snow events - already in SI units (mm, Celsius, m/s)
+        liquid_mm = InterPhour[snow_indices, DATA_HOURLY["accum"]]
+        temp_c = InterPhour[snow_indices, DATA_HOURLY["temp"]]
+        # windSpeedMps is already calculated as m/s above at line 3520
+        wind_mps = windSpeedMps[snow_indices]
+        # Calculate snow height for all snow indices in a vectorized operation (returns mm)
         snow_mm_values = estimate_snow_height(liquid_mm, temp_c, wind_mps)
-        # Convert output to requested units and assign back to the main array
-        InterPhour[snow_indices, DATA_HOURLY["snow"]] = snow_mm_values * prepAccumUnit
+        # Keep in mm (SI units)
+        InterPhour[snow_indices, DATA_HOURLY["snow"]] = snow_mm_values
 
     InterPhour[
         (
@@ -3774,32 +3758,30 @@ async def PW_Forecast(
             isDay = False
 
         # Set text
+        # Thresholds are in SI units (mm for precipitation, meters for visibility, m/s for wind)
         if InterPhour[idx, DATA_HOURLY["prob"]] >= PRECIP_PROB_THRESHOLD and (
             (
                 (
                     InterPhour[idx, DATA_HOURLY["rain"]]
                     + InterPhour[idx, DATA_HOURLY["ice"]]
                 )
-                > (HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit)
+                > HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM
             )
             or (
                 InterPhour[idx, DATA_HOURLY["snow"]]
-                > (HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit)
+                > HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM
             )
         ):
             # If more than 30% chance of precip at any point throughout the day, then the icon for whatever is happening
             # Thresholds set in mm
             hourIcon = PTypeHour[idx]
             hourText = PTextHour[idx]
-        # If visibility <1000 and during the day
-        # elif InterPhour[idx,14]<1000 and (hour_array_grib[idx]>InterPday[dCount,16] and hour_array_grib[idx]<InterPday[dCount,17]):
-        elif InterPhour[idx, DATA_HOURLY["vis"]] < (FOG_THRESHOLD_METERS * visUnits):
+        # If visibility < FOG_THRESHOLD_METERS
+        elif InterPhour[idx, DATA_HOURLY["vis"]] < FOG_THRESHOLD_METERS:
             hourIcon = "fog"
             hourText = "Fog"
-        # If wind is greater than 10 m/s
-        elif InterPhour[idx, DATA_HOURLY["wind"]] > (
-            WIND_THRESHOLDS["light"] * windUnit
-        ):
+        # If wind is greater than light wind threshold (m/s)
+        elif InterPhour[idx, DATA_HOURLY["wind"]] > WIND_THRESHOLDS["light"]:
             hourIcon = "wind"
             hourText = "Windy"
         elif InterPhour[idx, DATA_HOURLY["cloud"]] > CLOUD_COVER_THRESHOLDS["cloudy"]:
@@ -3855,37 +3837,69 @@ async def PW_Forecast(
                 # After sunset
                 hourIcon = "clear-night"
 
+        # Convert values from SI units to requested units for output
+        # Temperature conversion
+        if tempUnits == 0:  # Fahrenheit
+            temp_display = InterPhour[idx, DATA_HOURLY["temp"]] * 9 / 5 + 32
+            apparent_display = InterPhour[idx, DATA_HOURLY["apparent"]] * 9 / 5 + 32
+            dew_display = InterPhour[idx, DATA_HOURLY["dew"]] * 9 / 5 + 32
+            feels_like_display = InterPhour[idx, DATA_HOURLY["feels_like"]] * 9 / 5 + 32
+        else:  # Celsius (already in Celsius)
+            temp_display = InterPhour[idx, DATA_HOURLY["temp"]]
+            apparent_display = InterPhour[idx, DATA_HOURLY["apparent"]]
+            dew_display = InterPhour[idx, DATA_HOURLY["dew"]]
+            feels_like_display = InterPhour[idx, DATA_HOURLY["feels_like"]]
+
+        # Wind conversion (from m/s)
+        wind_display = InterPhour[idx, DATA_HOURLY["wind"]] * windUnit
+        gust_display = InterPhour[idx, DATA_HOURLY["gust"]] * windUnit
+
+        # Visibility conversion (from meters)
+        vis_display = InterPhour[idx, DATA_HOURLY["vis"]] * visUnits
+
+        # Precipitation conversion (from mm to requested units)
+        intensity_display = InterPhour[idx, DATA_HOURLY["intensity"]] * prepIntensityUnit
+        error_display = InterPhour[idx, DATA_HOURLY["error"]] * prepIntensityUnit
+        rain_display = InterPhour[idx, DATA_HOURLY["rain"]] * prepAccumUnit
+        snow_display = InterPhour[idx, DATA_HOURLY["snow"]] * prepAccumUnit
+        ice_display = InterPhour[idx, DATA_HOURLY["ice"]] * prepAccumUnit
+        accum_display = (rain_display + snow_display + ice_display)
+
+        # Pressure conversion (already in appropriate units from data source)
+        pressure_display = InterPhour[idx, DATA_HOURLY["pressure"]] * pressUnits
+
+        # Storm distance conversion (from meters)
+        storm_dist_display = InterPhour[idx, DATA_HOURLY["storm_dist"]] * visUnits
+
         hourItem = {
             "time": int(hour_array_grib[idx]),
             "summary": hourText,
             "icon": hourIcon,
-            "precipIntensity": InterPhour[idx, DATA_HOURLY["intensity"]],
+            "precipIntensity": intensity_display,
             "precipProbability": InterPhour[idx, DATA_HOURLY["prob"]],
-            "precipIntensityError": InterPhour[idx, DATA_HOURLY["error"]],
-            "precipAccumulation": InterPhour[idx, DATA_HOURLY["rain"]]
-            + InterPhour[idx, DATA_HOURLY["snow"]]
-            + InterPhour[idx, DATA_HOURLY["ice"]],
+            "precipIntensityError": error_display,
+            "precipAccumulation": accum_display,
             "precipType": PTypeHour[idx],
-            "temperature": InterPhour[idx, DATA_HOURLY["temp"]],
-            "apparentTemperature": InterPhour[idx, DATA_HOURLY["apparent"]],
-            "dewPoint": InterPhour[idx, DATA_HOURLY["dew"]],
+            "temperature": temp_display,
+            "apparentTemperature": apparent_display,
+            "dewPoint": dew_display,
             "humidity": InterPhour[idx, DATA_HOURLY["humidity"]],
-            "pressure": InterPhour[idx, DATA_HOURLY["pressure"]],
-            "windSpeed": InterPhour[idx, DATA_HOURLY["wind"]],
-            "windGust": InterPhour[idx, DATA_HOURLY["gust"]],
+            "pressure": pressure_display,
+            "windSpeed": wind_display,
+            "windGust": gust_display,
             "windBearing": InterPhour[idx, DATA_HOURLY["bearing"]].round(),
             "cloudCover": InterPhour[idx, DATA_HOURLY["cloud"]],
             "uvIndex": InterPhour[idx, DATA_HOURLY["uv"]],
-            "visibility": InterPhour[idx, DATA_HOURLY["vis"]],
+            "visibility": vis_display,
             "ozone": InterPhour[idx, DATA_HOURLY["ozone"]],
             "smoke": InterPhour[idx, DATA_HOURLY["smoke"]],
-            "liquidAccumulation": InterPhour[idx, DATA_HOURLY["rain"]],
-            "snowAccumulation": InterPhour[idx, DATA_HOURLY["snow"]],
-            "iceAccumulation": InterPhour[idx, DATA_HOURLY["ice"]],
-            "nearestStormDistance": InterPhour[idx, DATA_HOURLY["storm_dist"]],
+            "liquidAccumulation": rain_display,
+            "snowAccumulation": snow_display,
+            "iceAccumulation": ice_display,
+            "nearestStormDistance": storm_dist_display,
             "nearestStormBearing": InterPhour[idx, DATA_HOURLY["storm_dir"]].round(),
             "fireIndex": InterPhour[idx, DATA_HOURLY["fire"]],
-            "feelsLike": InterPhour[idx, DATA_HOURLY["feels_like"]],
+            "feelsLike": feels_like_display,
             "solar": InterPhour[idx, DATA_HOURLY["solar"]],
             "cape": InterPhour[idx, DATA_HOURLY["cape"]],
         }
@@ -3894,13 +3908,26 @@ async def PW_Forecast(
         if "stationPressure" in extraVars:
             hourItem["stationPressure"] = InterPhour[
                 idx, DATA_HOURLY["station_pressure"]
-            ]
+            ] * pressUnits
 
-        # TODO: hourItem and InterPhour values need to be in SI units for text generation
-        # This requires refactoring to keep SI versions separate from unit-converted versions
+        # Create SI version of hourItem for text generation (values already in SI units in InterPhour)
+        hourItem_si = {
+            "temperature": InterPhour[idx, DATA_HOURLY["temp"]],
+            "dewPoint": InterPhour[idx, DATA_HOURLY["dew"]],
+            "humidity": InterPhour[idx, DATA_HOURLY["humidity"]],
+            "windSpeed": InterPhour[idx, DATA_HOURLY["wind"]],
+            "visibility": InterPhour[idx, DATA_HOURLY["vis"]],
+            "cloudCover": InterPhour[idx, DATA_HOURLY["cloud"]],
+            "smoke": InterPhour[idx, DATA_HOURLY["smoke"]],
+            "precipType": PTypeHour[idx],
+            "precipProbability": InterPhour[idx, DATA_HOURLY["prob"]],
+            "cape": InterPhour[idx, DATA_HOURLY["cape"]],
+            "liftedIndex": InterPhour[idx, DATA_HOURLY["lifted"]],
+        }
+
         try:
             hourText, hourIcon = calculate_text(
-                hourItem,
+                hourItem_si,
                 isDay,
                 InterPhour[idx, DATA_HOURLY["rain"]],
                 InterPhour[idx, DATA_HOURLY["snow"]],
@@ -4182,12 +4209,10 @@ async def PW_Forecast(
                     dayIcon = "snow"
                     dayText = "Snow"
 
-        elif InterPday4am[idx, DATA_DAY["vis"]] < (FOG_THRESHOLD_METERS * visUnits):
+        elif InterPday4am[idx, DATA_DAY["vis"]] < FOG_THRESHOLD_METERS:
             dayIcon = "fog"
             dayText = "Fog"
-        elif InterPday4am[idx, DATA_DAY["wind"]] > (
-            WIND_THRESHOLDS["light"] * windUnit
-        ):
+        elif InterPday4am[idx, DATA_DAY["wind"]] > WIND_THRESHOLDS["light"]:
             dayIcon = "wind"
             dayText = "Windy"
         elif InterPday4am[idx, DATA_DAY["cloud"]] > CLOUD_COVER_THRESHOLDS["cloudy"]:
@@ -4241,14 +4266,14 @@ async def PW_Forecast(
             "dewPoint": InterPday[idx, DATA_DAY["dew"]],
             "humidity": InterPday[idx, DATA_DAY["humidity"]],
             "pressure": InterPday[idx, DATA_DAY["pressure"]],
-            "windSpeed": InterPday[idx, DATA_DAY["wind"]],
-            "windGust": InterPday[idx, DATA_DAY["gust"]],
+            "windSpeed": InterPday[idx, DATA_DAY["wind"]] * windUnit,
+            "windGust": InterPday[idx, DATA_DAY["gust"]] * windUnit,
             "windGustTime": int(InterPdayMaxTime[idx, DATA_DAY["gust"]]),
             "windBearing": int(InterPday[idx, DATA_DAY["bearing"]]),
             "cloudCover": InterPday[idx, DATA_DAY["cloud"]],
             "uvIndex": InterPdayMax[idx, DATA_DAY["uv"]],
             "uvIndexTime": int(InterPdayMaxTime[idx, DATA_DAY["uv"]]),
-            "visibility": InterPday[idx, DATA_DAY["vis"]],
+            "visibility": InterPday[idx, DATA_DAY["vis"]] * visUnits,
             "temperatureMin": InterPdayMin[idx, DATA_DAY["temp"]],
             "temperatureMinTime": int(InterPdayMinTime[idx, DATA_DAY["temp"]]),
             "temperatureMax": InterPdayMax[idx, DATA_DAY["temp"]],
@@ -4760,14 +4785,12 @@ async def PW_Forecast(
             ** 2
         )
 
-    InterPcurrent[DATA_CURRENT["wind"]] = (
-        clipLog(
-            InterPcurrent[DATA_CURRENT["wind"]],
-            CLIP_WIND["min"],
-            CLIP_WIND["max"],
-            "WindSpeed Current",
-        )
-        * windUnit
+    # Keep wind speed in m/s (SI units)
+    InterPcurrent[DATA_CURRENT["wind"]] = clipLog(
+        InterPcurrent[DATA_CURRENT["wind"]],
+        CLIP_WIND["min"],
+        CLIP_WIND["max"],
+        "WindSpeed Current",
     )
 
     # Gust from RTMA_RU, then subH, then NBM, then GFS
@@ -4797,15 +4820,12 @@ async def PW_Forecast(
     else:
         InterPcurrent[DATA_CURRENT["gust"]] = MISSING_DATA
 
-    # Clip between 0 and 400
-    InterPcurrent[DATA_CURRENT["gust"]] = (
-        clipLog(
-            InterPcurrent[DATA_CURRENT["gust"]],
-            CLIP_WIND["min"],
-            CLIP_WIND["max"],
-            "Gust Current",
-        )
-        * windUnit
+    # Clip between 0 and 400, keep in m/s (SI units)
+    InterPcurrent[DATA_CURRENT["gust"]] = clipLog(
+        InterPcurrent[DATA_CURRENT["gust"]],
+        CLIP_WIND["min"],
+        CLIP_WIND["max"],
+        "Gust Current",
     )
 
     # WindDir from RTMA_RU, then subH, then NBM, then ECMWF, then GFS
@@ -5008,9 +5028,8 @@ async def PW_Forecast(
     else:
         InterPcurrent[DATA_CURRENT["vis"]] = MISSING_DATA
 
-    InterPcurrent[DATA_CURRENT["vis"]] = (
-        np.clip(InterPcurrent[DATA_CURRENT["vis"]], 0, 16090) * visUnits
-    )
+    # Keep visibility in meters (SI units)
+    InterPcurrent[DATA_CURRENT["vis"]] = np.clip(InterPcurrent[DATA_CURRENT["vis"]], 0, 16090)
 
     # Ozone from GFS or ERA5
     ozone_value = MISSING_DATA
@@ -5136,8 +5155,8 @@ async def PW_Forecast(
         "CAPE Current",
     )
 
-    # Convert wind speed from its display unit to m/s for the apparent temperature function
-    currentWindSpeedMps = InterPcurrent[DATA_CURRENT["wind"]] / windUnit
+    # Wind speed is already in m/s (SI units)
+    currentWindSpeedMps = InterPcurrent[DATA_CURRENT["wind"]]
 
     # Calculate the apparent temperature
     InterPcurrent[DATA_CURRENT["apparent"]] = calculate_apparent_temperature(
@@ -5238,11 +5257,11 @@ async def PW_Forecast(
 
         # Because soemtimes there's precipitation not no type, don't use an icon in those cases
 
-    # If visibility <1km and during the day
-    elif InterPcurrent[DATA_CURRENT["vis"]] < (FOG_THRESHOLD_METERS * visUnits):
+    # If visibility < FOG_THRESHOLD_METERS and during the day
+    elif InterPcurrent[DATA_CURRENT["vis"]] < FOG_THRESHOLD_METERS:
         cIcon = "fog"
         cText = "Fog"
-    elif InterPcurrent[DATA_CURRENT["wind"]] > (WIND_THRESHOLDS["light"] * windUnit):
+    elif InterPcurrent[DATA_CURRENT["wind"]] > WIND_THRESHOLDS["light"]:
         cIcon = "wind"
         cText = "Windy"
     elif InterPcurrent[DATA_CURRENT["cloud"]] > CLOUD_COVER_THRESHOLDS["cloudy"]:
@@ -5364,9 +5383,9 @@ async def PW_Forecast(
         returnOBJ["currently"]["time"] = int(minute_array_grib[0])
         returnOBJ["currently"]["summary"] = cText
         returnOBJ["currently"]["icon"] = cIcon
-        returnOBJ["currently"]["nearestStormDistance"] = InterPcurrent[
-            DATA_CURRENT["storm_dist"]
-        ]
+        returnOBJ["currently"]["nearestStormDistance"] = (
+            InterPcurrent[DATA_CURRENT["storm_dist"]] * visUnits
+        )
         returnOBJ["currently"]["nearestStormBearing"] = InterPcurrent[
             DATA_CURRENT["storm_dir"]
         ].round()
@@ -5383,14 +5402,14 @@ async def PW_Forecast(
         returnOBJ["currently"]["dewPoint"] = InterPcurrent[DATA_CURRENT["dew"]]
         returnOBJ["currently"]["humidity"] = InterPcurrent[DATA_CURRENT["humidity"]]
         returnOBJ["currently"]["pressure"] = InterPcurrent[DATA_CURRENT["pressure"]]
-        returnOBJ["currently"]["windSpeed"] = InterPcurrent[DATA_CURRENT["wind"]]
-        returnOBJ["currently"]["windGust"] = InterPcurrent[DATA_CURRENT["gust"]]
+        returnOBJ["currently"]["windSpeed"] = InterPcurrent[DATA_CURRENT["wind"]] * windUnit
+        returnOBJ["currently"]["windGust"] = InterPcurrent[DATA_CURRENT["gust"]] * windUnit
         returnOBJ["currently"]["windBearing"] = int(
             np.mod(InterPcurrent[DATA_CURRENT["bearing"]], 360).round()
         )
         returnOBJ["currently"]["cloudCover"] = InterPcurrent[DATA_CURRENT["cloud"]]
         returnOBJ["currently"]["uvIndex"] = InterPcurrent[DATA_CURRENT["uv"]]
-        returnOBJ["currently"]["visibility"] = InterPcurrent[DATA_CURRENT["vis"]]
+        returnOBJ["currently"]["visibility"] = InterPcurrent[DATA_CURRENT["vis"]] * visUnits
         returnOBJ["currently"]["ozone"] = InterPcurrent[DATA_CURRENT["ozone"]]
         returnOBJ["currently"]["smoke"] = InterPcurrent[
             DATA_CURRENT["smoke"]
