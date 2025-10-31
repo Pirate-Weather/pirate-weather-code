@@ -349,8 +349,8 @@ def update_zarr_store(initialRun):
             zarr.storage.ZipStore("/tmp/" + latest_ETOPO, mode="r"), mode="r"
         )
 
+    # Open the Google ERA5 dataset for Dev and TimeMachine
     if STAGE in ("DEV", "TIMEMACHINE"):
-        # Open the Google ERA5 dataset in dev and TimeMachine
         ERA5_Data = init_ERA5()
 
     # Don't open the other files in TimeMachine to reduce memory
