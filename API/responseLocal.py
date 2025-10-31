@@ -325,58 +325,7 @@ def update_zarr_store(initialRun):
     # Create empty dir
     os.makedirs("/tmp/empty", exist_ok=True)
 
-    # Open the Google ERA5 dataset
-    ERA5_Data = init_ERA5()
-
-    # Find the latest file that's ready
-    latest_Alert, old_Alert = find_largest_integer_directory(
-        "/tmp", "NWS_Alerts.zarr", initialRun
-    )
-    if latest_Alert is not None:
-        NWS_Alerts_Zarr = zarr.open(
-            zarr.storage.ZipStore("/tmp/" + latest_Alert, mode="r"), mode="r"
-        )
-        logger.info("Loading new: " + latest_Alert)
-    for old_dir in old_Alert:
-        if STAGE == "PROD":
-            logger.info("Removing old: " + old_dir)
-            # command = f"nice -n {NICE_PRIORITY} rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            # subprocess.run(command, shell=True)
-            command = f"nice -n {NICE_PRIORITY} rm -rf /tmp/{old_dir}"
-            subprocess.run(command, shell=True)
-
-    latest_SubH, old_SubH = find_largest_integer_directory(
-        "/tmp", "SubH.zarr", initialRun
-    )
-    if latest_SubH is not None:
-        SubH_Zarr = zarr.open(
-            zarr.storage.ZipStore("/tmp/" + latest_SubH, mode="r"), mode="r"
-        )
-        logger.info("Loading new: " + latest_SubH)
-    for old_dir in old_SubH:
-        if STAGE == "PROD":
-            logger.info("Removing old: " + old_dir)
-            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            # subprocess.run(command, shell=True)
-            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
-            subprocess.run(command, shell=True)
-
-    latest_HRRR_6H, old_HRRR_6H = find_largest_integer_directory(
-        "/tmp", "HRRR_6H.zarr", initialRun
-    )
-    if latest_HRRR_6H is not None:
-        HRRR_6H_Zarr = zarr.open(
-            zarr.storage.ZipStore("/tmp/" + latest_HRRR_6H, mode="r"), mode="r"
-        )
-        logger.info("Loading new: " + latest_HRRR_6H)
-    for old_dir in old_HRRR_6H:
-        if STAGE == "PROD":
-            logger.info("Removing old: " + old_dir)
-            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            # subprocess.run(command, shell=True)
-            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
-            subprocess.run(command, shell=True)
-
+    # Always load GFS
     latest_GFS, old_GFS = find_largest_integer_directory("/tmp", "GFS.zarr", initialRun)
     if latest_GFS is not None:
         GFS_Zarr = zarr.open(
@@ -391,134 +340,6 @@ def update_zarr_store(initialRun):
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
-    latest_ECMWF, old_ECMWF = find_largest_integer_directory(
-        "/tmp", "ECMWF.zarr", initialRun
-    )
-    if latest_ECMWF is not None:
-        try:
-            ECMWF_Zarr = zarr.open(
-                zarr.storage.ZipStore("/tmp/" + latest_ECMWF, mode="r"), mode="r"
-            )
-            logger.info("Loading new: " + latest_ECMWF)
-        except Exception as e:
-            logger.info(f"ECMWF not available: {e}")
-            ECMWF_Zarr = None
-    for old_dir in old_ECMWF:
-        if STAGE == "PROD":
-            logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
-            subprocess.run(command, shell=True)
-
-    latest_NBM, old_NBM = find_largest_integer_directory("/tmp", "NBM.zarr", initialRun)
-    if latest_NBM is not None:
-        NBM_Zarr = zarr.open(
-            zarr.storage.ZipStore("/tmp/" + latest_NBM, mode="r"), mode="r"
-        )
-        logger.info("Loading new: " + latest_NBM)
-    for old_dir in old_NBM:
-        if STAGE == "PROD":
-            logger.info("Removing old: " + old_dir)
-            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            # subprocess.run(command, shell=True)
-            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
-            subprocess.run(command, shell=True)
-
-    latest_NBM_Fire, old_NBM_Fire = find_largest_integer_directory(
-        "/tmp", "NBM_Fire.zarr", initialRun
-    )
-    if latest_NBM_Fire is not None:
-        NBM_Fire_Zarr = zarr.open(
-            zarr.storage.ZipStore("/tmp/" + latest_NBM_Fire, mode="r"), mode="r"
-        )
-        logger.info("Loading new: " + latest_NBM_Fire)
-    for old_dir in old_NBM_Fire:
-        if STAGE == "PROD":
-            logger.info("Removing old: " + old_dir)
-            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            # subprocess.run(command, shell=True)
-            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
-            subprocess.run(command, shell=True)
-
-    latest_GEFS, old_GEFS = find_largest_integer_directory(
-        "/tmp", "GEFS.zarr", initialRun
-    )
-    if latest_GEFS is not None:
-        GEFS_Zarr = zarr.open(
-            zarr.storage.ZipStore("/tmp/" + latest_GEFS, mode="r"), mode="r"
-        )
-        logger.info("Loading new: " + latest_GEFS)
-    for old_dir in old_GEFS:
-        if STAGE == "PROD":
-            logger.info("Removing old: " + old_dir)
-            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            # subprocess.run(command, shell=True)
-            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
-            subprocess.run(command, shell=True)
-
-    latest_HRRR, old_HRRR = find_largest_integer_directory(
-        "/tmp", "HRRR.zarr", initialRun
-    )
-    if latest_HRRR is not None:
-        HRRR_Zarr = zarr.open(
-            zarr.storage.ZipStore("/tmp/" + latest_HRRR, mode="r"), mode="r"
-        )
-        logger.info("Loading new: " + latest_HRRR)
-    for old_dir in old_HRRR:
-        if STAGE == "PROD":
-            logger.info("Removing old: " + old_dir)
-            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            # subprocess.run(command, shell=True)
-            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
-            subprocess.run(command, shell=True)
-
-    latest_WMO_Alerts, old_WMO_Alerts = find_largest_integer_directory(
-        "/tmp", "WMO_Alerts.zarr", initialRun
-    )
-    if latest_WMO_Alerts is not None:
-        WMO_Alerts_Zarr = zarr.open(
-            zarr.storage.ZipStore("/tmp/" + latest_WMO_Alerts, mode="r"), mode="r"
-        )
-        logger.info("Loading new: " + latest_WMO_Alerts)
-    for old_dir in old_WMO_Alerts:
-        if STAGE == "PROD":
-            logger.info("Removing old: " + old_dir)
-            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            # subprocess.run(command, shell=True)
-            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
-            subprocess.run(command, shell=True)
-
-    latest_RTMA_RU, old_RTMA_RU = find_largest_integer_directory(
-        "/tmp", "RTMA_RU.zarr", initialRun
-    )
-    if latest_RTMA_RU is not None:
-        RTMA_RU_Zarr = zarr.open(
-            zarr.storage.ZipStore("/tmp/" + latest_RTMA_RU, mode="r"), mode="r"
-        )
-        logger.info("Loading new: " + latest_RTMA_RU)
-    for old_dir in old_RTMA_RU:
-        if STAGE == "PROD":
-            logger.info("Removing old: " + old_dir)
-            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            # subprocess.run(command, shell=True)
-            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
-            subprocess.run(command, shell=True)
-
-    latest_ECMWF, old_ECMWF = find_largest_integer_directory(
-        "/tmp", "ECMWF.zarr", initialRun
-    )
-    if latest_ECMWF is not None:
-        ECMWF_Zarr = zarr.open(
-            zarr.storage.ZipStore("/tmp/" + latest_ECMWF, mode="r"), mode="r"
-        )
-        logger.info("Loading new: " + latest_ECMWF)
-    for old_dir in old_ECMWF:
-        if STAGE == "PROD":
-            logger.info("Removing old: " + old_dir)
-            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            # subprocess.run(command, shell=True)
-            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
-            subprocess.run(command, shell=True)
-
     if (initialRun) and (useETOPO):
         latest_ETOPO, old_ETOPO = find_largest_integer_directory(
             "/tmp", "ETOPO_DA_C.zarr", initialRun
@@ -526,6 +347,191 @@ def update_zarr_store(initialRun):
         ETOPO_f = zarr.open(
             zarr.storage.ZipStore("/tmp/" + latest_ETOPO, mode="r"), mode="r"
         )
+
+    if STAGE in ("DEV", "TIMEMACHINE"):
+        # Open the Google ERA5 dataset in dev and TimeMachine
+        ERA5_Data = init_ERA5()
+
+    # Don't open the other files in TimeMachine to reduce memory
+    if STAGE in ("DEV", "PROD"):
+        # Find the latest file that's ready
+        latest_Alert, old_Alert = find_largest_integer_directory(
+            "/tmp", "NWS_Alerts.zarr", initialRun
+        )
+        if latest_Alert is not None:
+            NWS_Alerts_Zarr = zarr.open(
+                zarr.storage.ZipStore("/tmp/" + latest_Alert, mode="r"), mode="r"
+            )
+            logger.info("Loading new: " + latest_Alert)
+        for old_dir in old_Alert:
+            if STAGE == "PROD":
+                logger.info("Removing old: " + old_dir)
+                # command = f"nice -n {NICE_PRIORITY} rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+                # subprocess.run(command, shell=True)
+                command = f"nice -n {NICE_PRIORITY} rm -rf /tmp/{old_dir}"
+                subprocess.run(command, shell=True)
+
+        latest_SubH, old_SubH = find_largest_integer_directory(
+            "/tmp", "SubH.zarr", initialRun
+        )
+        if latest_SubH is not None:
+            SubH_Zarr = zarr.open(
+                zarr.storage.ZipStore("/tmp/" + latest_SubH, mode="r"), mode="r"
+            )
+            logger.info("Loading new: " + latest_SubH)
+        for old_dir in old_SubH:
+            if STAGE == "PROD":
+                logger.info("Removing old: " + old_dir)
+                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+                # subprocess.run(command, shell=True)
+                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                subprocess.run(command, shell=True)
+
+        latest_HRRR_6H, old_HRRR_6H = find_largest_integer_directory(
+            "/tmp", "HRRR_6H.zarr", initialRun
+        )
+        if latest_HRRR_6H is not None:
+            HRRR_6H_Zarr = zarr.open(
+                zarr.storage.ZipStore("/tmp/" + latest_HRRR_6H, mode="r"), mode="r"
+            )
+            logger.info("Loading new: " + latest_HRRR_6H)
+        for old_dir in old_HRRR_6H:
+            if STAGE == "PROD":
+                logger.info("Removing old: " + old_dir)
+                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+                # subprocess.run(command, shell=True)
+                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                subprocess.run(command, shell=True)
+
+
+        latest_ECMWF, old_ECMWF = find_largest_integer_directory(
+            "/tmp", "ECMWF.zarr", initialRun
+        )
+        if latest_ECMWF is not None:
+            try:
+                ECMWF_Zarr = zarr.open(
+                    zarr.storage.ZipStore("/tmp/" + latest_ECMWF, mode="r"), mode="r"
+                )
+                logger.info("Loading new: " + latest_ECMWF)
+            except Exception as e:
+                logger.info(f"ECMWF not available: {e}")
+                ECMWF_Zarr = None
+        for old_dir in old_ECMWF:
+            if STAGE == "PROD":
+                logger.info("Removing old: " + old_dir)
+                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                subprocess.run(command, shell=True)
+
+        latest_NBM, old_NBM = find_largest_integer_directory("/tmp", "NBM.zarr", initialRun)
+        if latest_NBM is not None:
+            NBM_Zarr = zarr.open(
+                zarr.storage.ZipStore("/tmp/" + latest_NBM, mode="r"), mode="r"
+            )
+            logger.info("Loading new: " + latest_NBM)
+        for old_dir in old_NBM:
+            if STAGE == "PROD":
+                logger.info("Removing old: " + old_dir)
+                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+                # subprocess.run(command, shell=True)
+                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                subprocess.run(command, shell=True)
+
+        latest_NBM_Fire, old_NBM_Fire = find_largest_integer_directory(
+            "/tmp", "NBM_Fire.zarr", initialRun
+        )
+        if latest_NBM_Fire is not None:
+            NBM_Fire_Zarr = zarr.open(
+                zarr.storage.ZipStore("/tmp/" + latest_NBM_Fire, mode="r"), mode="r"
+            )
+            logger.info("Loading new: " + latest_NBM_Fire)
+        for old_dir in old_NBM_Fire:
+            if STAGE == "PROD":
+                logger.info("Removing old: " + old_dir)
+                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+                # subprocess.run(command, shell=True)
+                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                subprocess.run(command, shell=True)
+
+        latest_GEFS, old_GEFS = find_largest_integer_directory(
+            "/tmp", "GEFS.zarr", initialRun
+        )
+        if latest_GEFS is not None:
+            GEFS_Zarr = zarr.open(
+                zarr.storage.ZipStore("/tmp/" + latest_GEFS, mode="r"), mode="r"
+            )
+            logger.info("Loading new: " + latest_GEFS)
+        for old_dir in old_GEFS:
+            if STAGE == "PROD":
+                logger.info("Removing old: " + old_dir)
+                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+                # subprocess.run(command, shell=True)
+                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                subprocess.run(command, shell=True)
+
+        latest_HRRR, old_HRRR = find_largest_integer_directory(
+            "/tmp", "HRRR.zarr", initialRun
+        )
+        if latest_HRRR is not None:
+            HRRR_Zarr = zarr.open(
+                zarr.storage.ZipStore("/tmp/" + latest_HRRR, mode="r"), mode="r"
+            )
+            logger.info("Loading new: " + latest_HRRR)
+        for old_dir in old_HRRR:
+            if STAGE == "PROD":
+                logger.info("Removing old: " + old_dir)
+                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+                # subprocess.run(command, shell=True)
+                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                subprocess.run(command, shell=True)
+
+        latest_WMO_Alerts, old_WMO_Alerts = find_largest_integer_directory(
+            "/tmp", "WMO_Alerts.zarr", initialRun
+        )
+        if latest_WMO_Alerts is not None:
+            WMO_Alerts_Zarr = zarr.open(
+                zarr.storage.ZipStore("/tmp/" + latest_WMO_Alerts, mode="r"), mode="r"
+            )
+            logger.info("Loading new: " + latest_WMO_Alerts)
+        for old_dir in old_WMO_Alerts:
+            if STAGE == "PROD":
+                logger.info("Removing old: " + old_dir)
+                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+                # subprocess.run(command, shell=True)
+                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                subprocess.run(command, shell=True)
+
+        latest_RTMA_RU, old_RTMA_RU = find_largest_integer_directory(
+            "/tmp", "RTMA_RU.zarr", initialRun
+        )
+        if latest_RTMA_RU is not None:
+            RTMA_RU_Zarr = zarr.open(
+                zarr.storage.ZipStore("/tmp/" + latest_RTMA_RU, mode="r"), mode="r"
+            )
+            logger.info("Loading new: " + latest_RTMA_RU)
+        for old_dir in old_RTMA_RU:
+            if STAGE == "PROD":
+                logger.info("Removing old: " + old_dir)
+                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+                # subprocess.run(command, shell=True)
+                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                subprocess.run(command, shell=True)
+
+        latest_ECMWF, old_ECMWF = find_largest_integer_directory(
+            "/tmp", "ECMWF.zarr", initialRun
+        )
+        if latest_ECMWF is not None:
+            ECMWF_Zarr = zarr.open(
+                zarr.storage.ZipStore("/tmp/" + latest_ECMWF, mode="r"), mode="r"
+            )
+            logger.info("Loading new: " + latest_ECMWF)
+        for old_dir in old_ECMWF:
+            if STAGE == "PROD":
+                logger.info("Removing old: " + old_dir)
+                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
+                # subprocess.run(command, shell=True)
+                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                subprocess.run(command, shell=True)
+
 
     print("Refreshed Zarrs")
 
