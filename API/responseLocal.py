@@ -594,13 +594,15 @@ if (STAGE == "TESTING") or (STAGE == "TM_TESTING"):
     ERA5_Data = init_ERA5()
     print("ERA5 Read")
 
-    if STAGE=="TESTING":
+    if STAGE == "TESTING":
         NWS_Alerts_store = setup_testing_zipstore(
             s3, s3_bucket, ingestVersion, save_type, "NWS_Alerts"
         )
         NWS_Alerts_Zarr = zarr.open(NWS_Alerts_store, mode="r")
 
-        SubH_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "SubH")
+        SubH_store = setup_testing_zipstore(
+            s3, s3_bucket, ingestVersion, save_type, "SubH"
+        )
         SubH_Zarr = zarr.open(SubH_store, mode="r")
         print("SubH Read")
 
@@ -610,11 +612,15 @@ if (STAGE == "TESTING") or (STAGE == "TM_TESTING"):
         HRRR_6H_Zarr = zarr.open(HRRR_6H_store, mode="r")
         print("HRRR_6H Read")
 
-        GEFS_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "GEFS")
+        GEFS_store = setup_testing_zipstore(
+            s3, s3_bucket, ingestVersion, save_type, "GEFS"
+        )
         GEFS_Zarr = zarr.open(GEFS_store, mode="r")
         print("GEFS Read")
 
-        NBM_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "NBM")
+        NBM_store = setup_testing_zipstore(
+            s3, s3_bucket, ingestVersion, save_type, "NBM"
+        )
         NBM_Zarr = zarr.open(NBM_store, mode="r")
         print("NBM Read")
 
@@ -624,7 +630,9 @@ if (STAGE == "TESTING") or (STAGE == "TM_TESTING"):
         NBM_Fire_Zarr = zarr.open(NBM_Fire_store, mode="r")
         print("NBM Fire Read")
 
-        HRRR_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "HRRR")
+        HRRR_store = setup_testing_zipstore(
+            s3, s3_bucket, ingestVersion, save_type, "HRRR"
+        )
         HRRR_Zarr = zarr.open(HRRR_store, mode="r")
         print("HRRR Read")
 
@@ -645,7 +653,6 @@ if (STAGE == "TESTING") or (STAGE == "TM_TESTING"):
         )
         ECMWF_Zarr = zarr.open(ECMWF_store, mode="r")
         print("ECMWF Read")
-
 
         if useETOPO:
             ETOPO_store = setup_testing_zipstore(
@@ -1339,7 +1346,7 @@ async def PW_Forecast(
 
     readRTMA_RU = False
 
-    if (timeMachine or exAlerts==1):
+    if timeMachine or exAlerts == 1:
         readWMOAlerts = False
     else:
         readWMOAlerts = True
@@ -1723,7 +1730,11 @@ async def PW_Forecast(
         x_p = np.argmin(abslon)
 
         # Find closest date to baseDayUTC
-        t_p = np.argmin(np.abs(ERA5_Data["ERA5_times"] - np.datetime64(baseDayUTC.replace(tzinfo=None))))
+        t_p = np.argmin(
+            np.abs(
+                ERA5_Data["ERA5_times"] - np.datetime64(baseDayUTC.replace(tzinfo=None))
+            )
+        )
 
         # Read the ERA5 data for the location and time
         # isel is significantly faster than sel for this operation
@@ -2092,9 +2103,7 @@ async def PW_Forecast(
                     sourceTimes.pop("hrrr_0-18", None)
 
                 # Log the error
-                logger.error(
-                    "HRRR data not available for the requested time range."
-                )
+                logger.error("HRRR data not available for the requested time range.")
 
             else:
                 HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), MISSING_DATA)
@@ -2129,9 +2138,7 @@ async def PW_Forecast(
 
         # NBM FIre
         if "nbm_fire" in sourceList:
-            NBM_Fire_StartIDX = nearest_index(
-                dataOut_nbmFire[:, 0], baseDayUTC_Grib
-            )
+            NBM_Fire_StartIDX = nearest_index(dataOut_nbmFire[:, 0], baseDayUTC_Grib)
 
             if NBM_Fire_StartIDX < 1:
                 if "nbm_fire" in sourceList:
