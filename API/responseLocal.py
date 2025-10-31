@@ -403,7 +403,6 @@ def update_zarr_store(initialRun):
                 command = f"nice -n 20 rm -rf /tmp/{old_dir}"
                 subprocess.run(command, shell=True)
 
-
         latest_ECMWF, old_ECMWF = find_largest_integer_directory(
             "/tmp", "ECMWF.zarr", initialRun
         )
@@ -422,7 +421,9 @@ def update_zarr_store(initialRun):
                 command = f"nice -n 20 rm -rf /tmp/{old_dir}"
                 subprocess.run(command, shell=True)
 
-        latest_NBM, old_NBM = find_largest_integer_directory("/tmp", "NBM.zarr", initialRun)
+        latest_NBM, old_NBM = find_largest_integer_directory(
+            "/tmp", "NBM.zarr", initialRun
+        )
         if latest_NBM is not None:
             NBM_Zarr = zarr.open(
                 zarr.storage.ZipStore("/tmp/" + latest_NBM, mode="r"), mode="r"
@@ -531,7 +532,6 @@ def update_zarr_store(initialRun):
                 # subprocess.run(command, shell=True)
                 command = f"nice -n 20 rm -rf /tmp/{old_dir}"
                 subprocess.run(command, shell=True)
-
 
     print("Refreshed Zarrs")
 
