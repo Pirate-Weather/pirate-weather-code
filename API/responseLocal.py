@@ -5666,10 +5666,7 @@ async def PW_Forecast(
             returnOBJ["flags"]["nearestCountry"] = loc_name.get("country") or None
             returnOBJ["flags"]["nearestSubNational"] = loc_name.get("state") or None
 
-        # if timeMachine:
-        # lock.release()
-
-    # Replace all nan with -999
+    # Replace all MISSING_DATA with -999
     returnOBJ = replace_nan(returnOBJ, -999)
 
     if TIMING:
