@@ -4288,6 +4288,7 @@ async def PW_Forecast(
                     int(time.time()),
                     "day",
                     icon,
+                    unitSystem,
                 )
 
                 # Translate the text
@@ -5538,6 +5539,7 @@ async def PW_Forecast(
                     int(time.time()),
                     "hour",
                     icon,
+                    unitSystem,
                 )
                 if summaryText:
                     returnOBJ["hourly"]["summary"] = translation.translate(
@@ -5610,7 +5612,7 @@ async def PW_Forecast(
             try:
                 if summaryText:
                     weekText, weekIcon = calculate_weekly_text(
-                        dayList, str(tz_name), icon
+                        dayList, str(tz_name), unitSystem, icon
                     )
                     returnOBJ["daily"]["summary"] = translation.translate(
                         ["sentence", weekText]

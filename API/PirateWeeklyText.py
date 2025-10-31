@@ -290,7 +290,6 @@ def calculate_precip_summary(
         # If one day has any precipitation then set the icon to the precipitation type and use the medium precipitation text in the precipitation summary
         text, cIcon = calculate_precip_text(
             maxIntensity,
-            intensityUnit,
             precipitationDays[0][2]["precipType"],
             "week",
             precipitationDays[0][2]["precipAccumulation"],
@@ -299,6 +298,8 @@ def calculate_precip_summary(
             avgPop,
             icon,
             "both",
+            isDayTime=True,
+            avgPrep=avgIntensity,
         )
         precipSummary = [
             "during",
@@ -330,7 +331,6 @@ def calculate_precip_summary(
             # If all days have precipitation then if they all have the same type then use that icon
             text, cIcon = calculate_precip_text(
                 avgIntensity,
-                intensityUnit,
                 precipitationDays[0][2]["precipType"],
                 "week",
                 maxIntensity,
@@ -339,6 +339,8 @@ def calculate_precip_summary(
                 avgPop,
                 icon,
                 "both",
+                isDayTime=True,
+                avgPrep=avgIntensity,
             )
             # Since precipitation is occuring everyday use the for week text instead of through
             precipSummary = [
@@ -353,38 +355,42 @@ def calculate_precip_summary(
     return precipSummary, cIcon
 
 
-def calculate_temp_summary(highTemp, lowTemp, weekArr):
+def calculate_temp_summary(highTemp, lowTemp, weekArr, unitSystem="si"):
     """
-    Calculates the temperature summary for the week
+    Calculates the temperature summary for the week.
+    Temperatures in highTemp and lowTemp are in Celsius (SI units).
+    Display values are converted based on unitSystem.
 
     Parameters:
-    - highTemp (arr): An array that contains the index in the week array, the high temperture of the week and the temperature units.
-    - lowTemp (arr): An array that contains the index in the week array, the low temperture of the week and the temperature units.
+    - highTemp (arr): An array that contains [index, day_name, temperature_celsius].
+    - lowTemp (arr): An array that contains [index, day_name, temperature_celsius].
+    - weekArr (arr): The array of week data
+    - unitSystem (str): Unit system for display ("us", "si", "ca", "uk")
 
     Returns:
     - arr: A summary of the temperature for the week.
     """
 
-    # Change C to celsius otherwise change it to fahrenheit
-    if highTemp[3] != 0:
-        highTemp[3] = "celsius"
-    else:
-        highTemp[3] = "fahrenheit"
-
-    if lowTemp[3] != 0:
-        lowTemp[3] = "celsius"
-    else:
-        lowTemp[3] = "fahrenheit"
+    # Determine unit string and convert temperature if needed
+    if unitSystem == "us":
+        temp_unit_str = "fahrenheit"
+        # Convert Celsius to Fahrenheit for display
+        high_temp_display = round(highTemp[2] * 9 / 5 + 32)
+        low_temp_display = round(lowTemp[2] * 9 / 5 + 32)
+    else:  # si, ca, uk all use Celsius
+        temp_unit_str = "celsius"
+        high_temp_display = round(highTemp[2])
+        low_temp_display = round(lowTemp[2])
 
     # If the temperature is increasing everyday or if the lowest temperatue is at the start of the week and the highest temperature is at the end of the week use the rising text
     if all(
         weekArr[i]["temperatureHigh"] < weekArr[i + 1]["temperatureHigh"]
         for i in range(WEEK_DAYS)
     ) or (highTemp[0] >= WEEK_DAYS_MINUS_ONE and lowTemp[0] <= 1):
-        # Set the temperature summary (temperature in Celsius)
+        # Set the temperature summary
         return [
             "temperatures-rising",
-            round(highTemp[2]),
+            [temp_unit_str, high_temp_display],
             highTemp[1],
         ]
     # If the temperature is decreasing everyday or if the lowest temperatue is at the end of the week and the highest temperature is at the start of the week use the rising text
@@ -394,7 +400,7 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
     ) or (highTemp[0] <= 1 and lowTemp[0] >= WEEK_DAYS_MINUS_ONE):
         return [
             "temperatures-falling",
-            round(lowTemp[2]),
+            [temp_unit_str, low_temp_display],
             lowTemp[1],
         ]
     # If the lowest temperatue is in the middle of the week and the highest temperature is at the start or end of the week use the valleying text
@@ -403,26 +409,28 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
     ] < WEEK_DAYS:
         return [
             "temperatures-valleying",
-            round(lowTemp[2]),
+            [temp_unit_str, low_temp_display],
             lowTemp[1],
         ]
     else:
         # Otherwise use the peaking text
         return [
             "temperatures-peaking",
-            round(highTemp[2]),
+            [temp_unit_str, high_temp_display],
             highTemp[1],
         ]
 
 
-def calculate_weekly_text(weekArr, timeZone, icon="darksky"):
+def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
     """
     Calculates the weekly summary given an array of weekdays.
     All inputs are expected in SI units (mm/h for intensity, Celsius for temperature).
+    Display values are converted based on unitSystem.
 
     Parameters:
     - weekArr (arr): An array of the weekdays (in SI units)
     - timeZone (string): The timezone for the current location
+    - unitSystem (str): Unit system for display ("us", "si", "ca", "uk")
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
 
     Returns:
@@ -464,10 +472,10 @@ def calculate_weekly_text(weekArr, timeZone, icon="darksky"):
             weekday = "next-" + weekday
 
         # Check if the day has enough precipitation to reach the threshold and record the index in the array, the day it occured on and the type
+        # Data is already in SI units (mm for accumulation, mm/h for intensity)
         if (
             day["precipType"] == "snow"
-            and day["precipAccumulation"]
-            >= (DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * intensityUnit)
+            and day["precipAccumulation"] >= DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM
             and (
                 day["precipProbability"] >= PRECIP_PROB_THRESHOLD
                 or np.isnan(day["precipProbability"])
@@ -476,7 +484,7 @@ def calculate_weekly_text(weekArr, timeZone, icon="darksky"):
             # Sets that there has been precipitation during the week
             precipitation = True
             precipitationDays.append([idx, weekday, day])
-            avgIntensity += intensityUnit * day["precipIntensityMax"]
+            avgIntensity += day["precipIntensityMax"]
             avgPop += day["precipProbability"]
             if maxIntensity == 0:
                 maxIntensity = day["precipIntensityMax"]
@@ -484,14 +492,13 @@ def calculate_weekly_text(weekArr, timeZone, icon="darksky"):
                 maxIntensity = day["precipIntensityMax"]
         elif (
             day["precipType"] != "snow"
-            and day["precipAccumulation"]
-            >= (DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * intensityUnit)
+            and day["precipAccumulation"] >= DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
             and day["precipProbability"] >= PRECIP_PROB_THRESHOLD
         ):
             # Sets that there has been precipitation during the week
             precipitation = True
             precipitationDays.append([idx, weekday, day])
-            avgIntensity += intensityUnit * day["precipIntensityMax"]
+            avgIntensity += day["precipIntensityMax"]
             avgPop += day["precipProbability"]
             if maxIntensity == 0:
                 maxIntensity = day["precipIntensityMax"]
@@ -549,7 +556,7 @@ def calculate_weekly_text(weekArr, timeZone, icon="darksky"):
 
     # Only calculate the temperature summary if we have eight days to prevent issues with the time machine
     if len(weekArr) == WEEK_DAYS_PLUS_ONE:
-        tempSummary = calculate_temp_summary(highTemp, lowTemp, weekArr)
+        tempSummary = calculate_temp_summary(highTemp, lowTemp, weekArr, unitSystem)
         # Combine the two texts together using with
         cText = ["with", precipSummary, tempSummary]
     else:

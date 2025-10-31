@@ -730,6 +730,7 @@ def calculate_day_text(
     curr_time,
     mode="daily",
     icon_set="darksky",
+    unit_system="si",
 ):
     """
     Calculates the daily or next 24-hour weather summary text.
@@ -738,6 +739,7 @@ def calculate_day_text(
     - Wind speed in m/s
     - Visibility in meters
     - Precipitation in mm/h (intensity) and mm (accumulation)
+    Display values are converted based on unit_system.
 
     Parameters:
     - hours (list): An array of hourly forecast data (in SI units).
@@ -746,6 +748,7 @@ def calculate_day_text(
     - curr_time (int): The current epoch time.
     - mode (str, optional): Which mode to run the function in ("daily" or "hour"). Defaults to "daily".
     - icon_set (str): Which icon set to use - Dark Sky or Pirate Weather
+    - unit_system (str): Unit system for display ("us", "si", "ca", "uk")
 
     Returns:
     - tuple: A tuple containing:
@@ -1310,42 +1313,50 @@ def calculate_day_text(
         secondary_precip_condition = "medium-precipitation"
 
     # Add snow accumulation range to precip text if applicable
-    # Convert mm to cm for display (threshold in mm, display in cm)
+    # Convert mm to display units based on unit_system
     snow_sentence = None
     if (
         total_snow_accum > 10
         or secondary_precip_condition == "medium-snow"
     ):
-        # Convert to cm for display
-        snow_accum_cm = total_snow_accum / 10
-        snow_error_cm = total_snow_error / 10
-        
-        snow_low_accum = math.floor(snow_accum_cm - (snow_error_cm / 2))
-        snow_max_accum = math.ceil(snow_accum_cm + (snow_error_cm / 2))
+        # Determine snow unit and convert
+        if unit_system == "us":
+            snow_unit_str = "inches"
+            # Convert mm to inches (1 inch = 25.4 mm)
+            snow_accum_display = total_snow_accum / 25.4
+            snow_error_display = total_snow_error / 25.4
+        else:  # si, ca, uk use centimeters
+            snow_unit_str = "centimeters"
+            # Convert mm to cm
+            snow_accum_display = total_snow_accum / 10
+            snow_error_display = total_snow_error / 10
+
+        snow_low_accum = math.floor(snow_accum_display - (snow_error_display / 2))
+        snow_max_accum = math.ceil(snow_accum_display + (snow_error_display / 2))
         snow_low_accum = max(0, snow_low_accum)  # Snow accumulation cannot be negative
 
         if total_snow_error <= 0:
             snow_sentence = [
-                "centimeters",
-                math.ceil(snow_accum_cm),
+                snow_unit_str,
+                math.ceil(snow_accum_display),
             ]
         elif snow_max_accum > 0:
-            if snow_accum_cm == 0:
+            if snow_accum_display == 0:
                 snow_sentence = [
                     "less-than",
-                    ["centimeters", 1],
+                    [snow_unit_str, 1],
                 ]
             elif snow_low_accum == 0:
                 snow_sentence = [
                     "less-than",
                     [
-                        "centimeters",
+                        snow_unit_str,
                         snow_max_accum,
                     ],
                 ]
             else:
                 snow_sentence = [
-                    "centimeters",
+                    snow_unit_str,
                     ["range", snow_low_accum, snow_max_accum],
                 ]
 
@@ -1378,7 +1389,6 @@ def calculate_day_text(
             # This handles cases where precipitation starts after the first hour of the period.
             curr_precip_text_for_first_hour = calculate_precip_text(
                 hours[0]["precipIntensity"],
-                precip_accum_unit,
                 hours[0]["precipType"],
                 "hourly",
                 hours[0]["precipAccumulation"],
@@ -1387,7 +1397,8 @@ def calculate_day_text(
                 hours[0]["precipProbability"],
                 icon_set,
                 "summary",
-                hours[0]["precipIntensity"],
+                isDayTime=is_day_time,
+                avgPrep=hours[0]["precipIntensity"],
             )
             if curr_precip_text_for_first_hour is None:
                 all_period_names[0] = "later-" + all_period_names[0]
@@ -1699,8 +1710,6 @@ def calculate_day_text(
                 "text": vis_only_summary,
                 "icon": calculate_vis_text(
                     overall_min_visibility,
-                    vis_units,
-                    temp_units,
                     overall_temp_at_min_spread,
                     overall_dewpoint_at_min_spread,
                     overall_max_smoke,
