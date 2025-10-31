@@ -5810,7 +5810,7 @@ def initialDataSync() -> None:
             print("ETOPO Download!")
     else:
         print(STAGE)
-    if (STAGE == "PROD") or (STAGE == "DEV") or (STAGE == "TIMEMACHINE"):
+    if STAGE in ("PROD", "DEV", "TIMEMACHINE"):
         update_zarr_store(True)
 
     zarrReady = True
