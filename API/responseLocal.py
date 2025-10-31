@@ -5193,10 +5193,16 @@ async def PW_Forecast(
     else:
         InterPcurrent[DATA_CURRENT["fire"]] = MISSING_DATA
 
-    # Current temperature in Celsius
+    # Current temperature in Celsius (SI unit for text generation)
     curr_temp = (
         InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS
     )  # temperature in Celsius
+    
+    # Save SI unit values for text generation before converting to requested units
+    curr_temp_si = curr_temp
+    curr_dew_si = InterPcurrent[DATA_CURRENT["dew"]] - KELVIN_TO_CELSIUS
+    curr_wind_si = currentWindSpeedMps
+    curr_vis_si = InterPcurrent[DATA_CURRENT["vis"]]
 
     # Put temperature into units
     if tempUnits == 0:
@@ -5421,19 +5427,33 @@ async def PW_Forecast(
             # After sunset
             currentDay = False
 
+        # Create SI unit version of currently object for text generation
+        currently_si = dict(returnOBJ["currently"])
+        # Replace converted values with SI values
+        currently_si["windSpeed"] = curr_wind_si
+        currently_si["visibility"] = curr_vis_si
+        currently_si["temperature"] = curr_temp_si
+        currently_si["dewPoint"] = curr_dew_si
+        currently_si["cloudCover"] = InterPcurrent[DATA_CURRENT["cloud"]]
+        currently_si["humidity"] = InterPcurrent[DATA_CURRENT["humidity"]]
+        currently_si["smoke"] = InterPcurrent[DATA_CURRENT["smoke"]]
+        currently_si["cape"] = InterPcurrent[DATA_CURRENT["cape"]]
+        
+        # Accumulation in SI units (mm) for text generation
+        currentRainAccum_si = currnetRainAccum / prepAccumUnit if prepAccumUnit != 0 else currnetRainAccum
+        currentSnowAccum_si = currnetSnowAccum / prepAccumUnit if prepAccumUnit != 0 else currnetSnowAccum
+        currentIceAccum_si = currnetIceAccum / prepAccumUnit if prepAccumUnit != 0 else currnetIceAccum
+        currentPrecipIntensity_si = minuteDict[0]["precipIntensity"] / prepIntensityUnit if prepIntensityUnit != 0 else minuteDict[0]["precipIntensity"]
+
         try:
             currentText, currentIcon = calculate_text(
-                returnOBJ["currently"],
-                prepAccumUnit,
-                visUnits,
-                windUnit,
-                tempUnits,
+                currently_si,
                 currentDay,
-                currnetRainAccum,
-                currnetSnowAccum,
-                currnetIceAccum,
+                currentRainAccum_si,
+                currentSnowAccum_si,
+                currentIceAccum_si,
                 "current",
-                minuteDict[0]["precipIntensity"],
+                currentPrecipIntensity_si,
                 icon,
             )
             if summaryText:
@@ -5487,7 +5507,6 @@ async def PW_Forecast(
                     currentText,
                     currentIcon,
                     icon,
-                    prepIntensityUnit,
                     maxCAPE,
                 )
                 returnOBJ["minutely"]["summary"] = translation.translate(
