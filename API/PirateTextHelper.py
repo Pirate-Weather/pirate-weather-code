@@ -106,7 +106,6 @@ def matches_precip(
 
 def calculate_precip_text(
     prepIntensity,
-    prepAccumUnit,
     prepType,
     type,
     rainPrep,
@@ -119,20 +118,20 @@ def calculate_precip_text(
     avgPrep=0,
 ):
     """
-    Calculates the precipitation
+    Calculates the precipitation text and icon.
+    All inputs are expected in SI units (mm/h for intensity, mm for accumulation).
 
     Parameters:
-    - prepIntensity (float): The precipitation intensity
-    - prepAccumUnit (float): The precipitation accumulation/intensity unit
+    - prepIntensity (float): The precipitation intensity in mm/h
     - prepType (str): The type of precipitation
     - type (str): What type of summary is being generated.
-    - rainPrep (float): The rain accumulation
-    - snowPrep (float): The snow accumulation
-    - icePrep (float): The ice accumulation
+    - rainPrep (float): The rain accumulation in mm
+    - snowPrep (float): The snow accumulation in mm
+    - icePrep (float): The ice accumulation in mm
     - pop (float): The current probability of precipitation defaulting to 1
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
     - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the precipitation will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
-    - avgPrep (float): The average precipitation intensity
+    - avgPrep (float): The average precipitation intensity in mm/h
 
     Returns:
     - str | None: The summary text representing the current precipitation
@@ -143,28 +142,24 @@ def calculate_precip_text(
     if any(np.isnan(x) for x in (rainPrep, snowPrep, icePrep, prepIntensity)):
         return (None, None) if mode == "both" else None
 
-    if prepAccumUnit == 0.1:
-        prepIntensityUnit = 1
-    else:
-        prepIntensityUnit = prepAccumUnit
-
     # If pop is missing set it to 1 so we can calculate the precipitation text
     if np.isnan(pop):
         pop = 1
 
-    # In mm/h
-    lightPrecipThresh = PRECIP_INTENSITY_THRESHOLDS["light"] * prepIntensityUnit
-    midPrecipThresh = PRECIP_INTENSITY_THRESHOLDS["mid"] * prepIntensityUnit
-    heavyPrecipThresh = PRECIP_INTENSITY_THRESHOLDS["heavy"] * prepIntensityUnit
-    lightSnowThresh = SNOW_INTENSITY_THRESHOLDS["light"] * prepIntensityUnit
-    midSnowThresh = SNOW_INTENSITY_THRESHOLDS["mid"] * prepIntensityUnit
-    heavySnowThresh = SNOW_INTENSITY_THRESHOLDS["heavy"] * prepIntensityUnit
+    # Thresholds in mm/h for intensity
+    lightPrecipThresh = PRECIP_INTENSITY_THRESHOLDS["light"]
+    midPrecipThresh = PRECIP_INTENSITY_THRESHOLDS["mid"]
+    heavyPrecipThresh = PRECIP_INTENSITY_THRESHOLDS["heavy"]
+    lightSnowThresh = SNOW_INTENSITY_THRESHOLDS["light"]
+    midSnowThresh = SNOW_INTENSITY_THRESHOLDS["mid"]
+    heavySnowThresh = SNOW_INTENSITY_THRESHOLDS["heavy"]
 
-    snowIconThresholdHour = HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
-    precipIconThresholdHour = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
+    # Thresholds in mm for accumulation
+    snowIconThresholdHour = HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM
+    precipIconThresholdHour = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM
 
-    snowIconThresholdDay = DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
-    precipIconThresholdDay = DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
+    snowIconThresholdDay = DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM
+    precipIconThresholdDay = DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
     numTypes = 0
 
     # Use daily or hourly thresholds depending on the situation
@@ -316,7 +311,7 @@ def calculate_precip_text(
                 cIcon = "heavy-snow"
         if (
             (type == "week" or type == "hourly")
-            and avgPrep < (heavySnowThresh - (0.66 * prepAccumUnit))
+            and avgPrep < (heavySnowThresh - 0.66)
             and prepIntensity >= heavySnowThresh
         ):
             cText = ["and", "medium-snow", "possible-heavy-snow"]
@@ -353,7 +348,7 @@ def calculate_precip_text(
                 cIcon = "heavy-sleet"
         if (
             (type == "week" or type == "hourly")
-            and avgPrep < (heavyPrecipThresh - (2 * prepAccumUnit))
+            and avgPrep < (heavyPrecipThresh - 2)
             and prepIntensity >= heavyPrecipThresh
         ):
             cText = ["and", "medium-sleet", "possible-heavy-sleet"]
@@ -391,7 +386,7 @@ def calculate_precip_text(
                 cIcon = "heavy-freezing-rain"
         if (
             (type == "week" or type == "hourly")
-            and avgPrep < (heavyPrecipThresh - (2 * prepAccumUnit))
+            and avgPrep < (heavyPrecipThresh - 2)
             and prepIntensity >= heavyPrecipThresh
         ):
             cText = ["and", "medium-freezing-rain", "possible-heavy-freezing-rain"]
@@ -410,7 +405,7 @@ def calculate_precip_text(
             cText = possiblePrecip + "heavy-precipitation"
         if (
             (type == "week" or type == "hourly")
-            and avgPrep < (heavyPrecipThresh - (2 * prepAccumUnit))
+            and avgPrep < (heavyPrecipThresh - 2)
             and prepIntensity >= heavyPrecipThresh
         ):
             cText = ["and", "medium-precipitation", "possible-heavy-precipitation"]
@@ -430,13 +425,13 @@ def calculate_precip_text(
         return cText, cIcon
 
 
-def calculate_wind_text(wind, windUnits, icon="darksky", mode="both"):
+def calculate_wind_text(wind, icon="darksky", mode="both"):
     """
-    Calculates the wind text
+    Calculates the wind text.
+    Wind speed is expected in SI units (m/s).
 
     Parameters:
-    - wind (float) -  The wind speed
-    - windUnits (float) -  The unit of the wind speed
+    - wind (float) - The wind speed in m/s
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
     - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the wind will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
 
@@ -451,9 +446,10 @@ def calculate_wind_text(wind, windUnits, icon="darksky", mode="both"):
     if np.isnan(wind):
         return (None, None) if mode == "both" else None
 
-    lightWindThresh = WIND_THRESHOLDS["light"] * windUnits
-    midWindThresh = WIND_THRESHOLDS["mid"] * windUnits
-    heavyWindThresh = WIND_THRESHOLDS["heavy"] * windUnits
+    # Thresholds in m/s
+    lightWindThresh = WIND_THRESHOLDS["light"]
+    midWindThresh = WIND_THRESHOLDS["mid"]
+    heavyWindThresh = WIND_THRESHOLDS["heavy"]
 
     if wind >= lightWindThresh and wind < midWindThresh:
         windText = "light-wind"
@@ -480,17 +476,16 @@ def calculate_wind_text(wind, windUnits, icon="darksky", mode="both"):
 
 
 def calculate_vis_text(
-    vis, visUnits, tempUnits, temp, dewPoint, smoke=0, icon="darksky", mode="both"
+    vis, temp, dewPoint, smoke=0, icon="darksky", mode="both"
 ):
     """
-    Calculates the visibility text
+    Calculates the visibility text.
+    All inputs are expected in SI units (meters for visibility, Celsius for temperature).
 
     Parameters:
-    - vis (float) -  The visibility
-    - visUnits (float) -  The unit of the visibility
-    - tempUnits (float) - The unit of the temperature
-    - temp (float) - The ambient temperature
-    - dewPoint (float) - The dew point temperature
+    - vis (float) - The visibility in meters
+    - temp (float) - The ambient temperature in Celsius
+    - dewPoint (float) - The dew point temperature in Celsius
     - smoke (float) - Surface smoke concentration in ug/m3
     - icon (str) - Which icon set to use - Dark Sky or Pirate Weather
     - mode (str) - Determines what gets returned by the function. If set to both the summary and icon for the visibility will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
@@ -500,19 +495,15 @@ def calculate_vis_text(
     """
     visText = None
     visIcon = None
-    fogThresh = FOG_THRESHOLD_METERS * visUnits
-    mistThresh = MIST_THRESHOLD_METERS * visUnits
+    # Thresholds in meters
+    fogThresh = FOG_THRESHOLD_METERS
+    mistThresh = MIST_THRESHOLD_METERS
 
     # If temp, dewPoint or vis are missing, return None appropriately for the mode.
     if any(np.isnan(x) for x in (temp, dewPoint, vis)):
         return (None, None) if mode == "both" else None
 
-    # Convert Fahrenheit to Celsius for temperature spread comparisons
-    if tempUnits == 0:
-        temp = (temp - 32) * 5 / 9
-        dewPoint = (dewPoint - 32) * 5 / 9
-
-    # Calculate the temperature dew point spread
+    # Calculate the temperature dew point spread (already in Celsius)
     tempDewSpread = temp - dewPoint
 
     # Fog
@@ -591,14 +582,14 @@ def calculate_sky_text(cloudCover, isDayTime, icon="darksky", mode="both"):
         return skyText, skyIcon
 
 
-def humidity_sky_text(temp, tempUnits, humidity):
+def humidity_sky_text(temp, humidity):
     """
-    Calculates the sky cover text
+    Calculates the humidity text.
+    Temperature is expected in SI units (Celsius).
 
     Parameters:
-    - temp (string): The temperature for the period
-    - tempUnits (int): The temperature units
-    - humidity (str): The humidity for the period
+    - temp (float): The temperature in Celsius
+    - humidity (float): The humidity as a fraction (0.0 to 1.0)
 
     Returns:
     - str | None: The text representing the humidity
@@ -608,12 +599,8 @@ def humidity_sky_text(temp, tempUnits, humidity):
     if humidity is None or math.isnan(humidity) or np.isnan(humidity) or np.isnan(temp):
         return None
 
-    # Only use humid if also warm (>20C or >68F)
-    tempThresh = (
-        WARM_TEMPERATURE_THRESHOLD["f"]
-        if tempUnits == 0
-        else WARM_TEMPERATURE_THRESHOLD["c"]
-    )
+    # Only use humid if also warm (>20C)
+    tempThresh = WARM_TEMPERATURE_THRESHOLD["c"]
     humidityText = None
     lowHumidityThresh = 0.15
     highHumidityThresh = 0.95

@@ -573,7 +573,7 @@ def calculate_period_summary_text(
             current_condition_text = [
                 "and",
                 current_condition_text,
-                calculate_wind_text(max_wind_speed, wind_unit, icon_set, "summary"),
+                calculate_wind_text(max_wind_speed, icon_set, "summary"),
             ]
         if all_vis_periods and _are_periods_matching(period_indices, all_vis_periods):
             vis_condition_combined = True
@@ -725,10 +725,6 @@ def calculate_period_summary_text(
 
 def calculate_day_text(
     hours,
-    precip_accum_unit,
-    vis_units,
-    wind_unit,
-    temp_units,
     is_day_time,
     time_zone,
     curr_time,
@@ -737,17 +733,19 @@ def calculate_day_text(
 ):
     """
     Calculates the daily or next 24-hour weather summary text.
+    All inputs are expected in SI units:
+    - Temperature in Celsius
+    - Wind speed in m/s
+    - Visibility in meters
+    - Precipitation in mm/h (intensity) and mm (accumulation)
 
     Parameters:
-    - hours (list): An array of hourly forecast data.
-    - precip_accum_unit (float): The precipitation accumulation unit (e.g., 0.1 for cm, 1 for inches).
-    - vis_units (float): The visibility unit used.
-    - wind_unit (float): The wind speed unit used.
-    - temp_units (float): The temperature unit used.
+    - hours (list): An array of hourly forecast data (in SI units).
     - is_day_time (bool): Whether it's currently daytime.
     - time_zone (str): The timezone for the current location.
     - curr_time (int): The current epoch time.
     - mode (str, optional): Which mode to run the function in ("daily" or "hour"). Defaults to "daily".
+    - icon_set (str): Which icon set to use - Dark Sky or Pirate Weather
 
     Returns:
     - tuple: A tuple containing:
@@ -935,20 +933,18 @@ def calculate_day_text(
             )
 
             if (
-                humidity_sky_text(hour["temperature"], temp_units, hour["humidity"])
+                humidity_sky_text(hour["temperature"], hour["humidity"])
                 == "high-humidity"
             ):
                 period_data["num_hours_humid"] += 1
             if (
-                humidity_sky_text(hour["temperature"], temp_units, hour["humidity"])
+                humidity_sky_text(hour["temperature"], hour["humidity"])
                 == "low-humidity"
             ):
                 period_data["num_hours_dry"] += 1
             if (
                 calculate_vis_text(
                     hour["visibility"],
-                    vis_units,
-                    temp_units,
                     hour["temperature"],
                     hour["dewPoint"],
                     hour["smoke"],
@@ -956,7 +952,7 @@ def calculate_day_text(
                     "icon",
                 )
                 is not None
-                and hour["precipIntensity"] <= 0.02 * precip_accum_unit
+                and hour["precipIntensity"] <= 0.02
             ):
                 period_data["max_smoke"] = max(period_data["max_smoke"], hour["smoke"])
                 period_data["num_hours_fog"] += 1
@@ -967,7 +963,7 @@ def calculate_day_text(
                         overall_temp_at_min_spread = hour["temperature"]
                         overall_dewpoint_at_min_spread = hour["dewPoint"]
             if (
-                calculate_wind_text(hour["windSpeed"], wind_unit, "darksky", "icon")
+                calculate_wind_text(hour["windSpeed"], "darksky", "icon")
                 == "wind"
             ):
                 period_data["num_hours_wind"] += 1
@@ -1081,12 +1077,11 @@ def calculate_day_text(
         overall_min_visibility = min(overall_min_visibility, p_data["min_visibility"])
         overall_max_smoke = max(overall_max_smoke, p_data["max_smoke"])
 
-        # Check if precipitation is significant enough in this period
+        # Check if precipitation is significant enough in this period (thresholds in mm)
         is_precip_in_period = (
-            p_data["snow_accum"]
-            > (PRECIP_INTENSITY_THRESHOLDS["mid"] * precip_accum_unit)
-            or p_data["rain_accum"] > (PRECIP_THRESH * precip_accum_unit)
-            or p_data["sleet_accum"] > (PRECIP_THRESH * precip_accum_unit)
+            p_data["snow_accum"] > PRECIP_INTENSITY_THRESHOLDS["mid"]
+            or p_data["rain_accum"] > PRECIP_THRESH
+            or p_data["sleet_accum"] > PRECIP_THRESH
         )
         if is_precip_in_period:
             precip_periods.append(i)
@@ -1120,8 +1115,8 @@ def calculate_day_text(
         if p_data["num_hours_wind"] >= (min(p_data["period_length"] / 2, 3)):
             wind_periods.append(i)
         if (
-            p_data["max_intensity"] < 0.02 * precip_accum_unit
-            and p_data["max_wind_speed"] / wind_unit < 6.7056
+            p_data["max_intensity"] < 0.02
+            and p_data["max_wind_speed"] < 6.7056
             and p_data["num_hours_fog"] >= (min(p_data["period_length"] / 2, 3))
         ):
             vis_periods.append(i)
@@ -1134,9 +1129,7 @@ def calculate_day_text(
         _, cloud_level = calculate_cloud_text(p_data["avg_cloud_cover"])
         cloud_levels.append(cloud_level)
 
-    # Convert total snow error if unit is cm (original had this conversion)
-    if precip_accum_unit == 0.1:
-        total_snow_error /= 10
+    # Snow error is already in SI units (mm), no conversion needed
 
     # Calculate overall average cloud cover for the entire forecast block
     overall_avg_cloud_cover = (
@@ -1227,8 +1220,8 @@ def calculate_day_text(
 
     total_precip_accum = total_rain_accum + total_snow_accum + total_sleet_accum
 
-    # Calculate overall precipitation text and icon if significant precipitation occurs
-    if overall_avg_pop > 0 and total_precip_accum >= (0.1 * precip_accum_unit):
+    # Calculate overall precipitation text and icon if significant precipitation occurs (threshold in mm)
+    if overall_avg_pop > 0 and total_precip_accum >= 0.1:
         if total_snow_accum > 0 and total_rain_accum > 0 and total_sleet_accum > 0:
             precip_summary_text = "mixed-precipitation"
             most_common_overall_precip_type = "sleet"
@@ -1275,32 +1268,29 @@ def calculate_day_text(
                 elif total_rain_accum > 0:
                     most_common_overall_precip_type = "rain"
 
-            # Promote to stronger precip if significant accumulation is forecast
+            # Promote to stronger precip if significant accumulation is forecast (thresholds in mm)
             if (
-                total_rain_accum
-                > ((DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * 10) * precip_accum_unit)
+                total_rain_accum > (DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * 10)
                 and most_common_overall_precip_type != "rain"
             ):
                 secondary_precip_condition = "medium-" + most_common_overall_precip_type
                 most_common_overall_precip_type = "rain"
             if (
-                total_snow_accum
-                > ((DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * 0.5) * precip_accum_unit)
+                total_snow_accum > (DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * 0.5)
                 and most_common_overall_precip_type != "snow"
             ):
                 secondary_precip_condition = "medium-" + most_common_overall_precip_type
                 most_common_overall_precip_type = "snow"
             if (
-                total_sleet_accum > (1 * precip_accum_unit)
+                total_sleet_accum > 1
                 and most_common_overall_precip_type != "sleet"
             ):
                 secondary_precip_condition = "medium-" + most_common_overall_precip_type
                 most_common_overall_precip_type = "sleet"
 
-        # Calculate final precipitation text and icon
+        # Calculate final precipitation text and icon (all in mm)
         precip_summary_text, precip_icon = calculate_precip_text(
             overall_max_intensity,
-            precip_accum_unit,
             most_common_overall_precip_type,
             "hourly",  # This is a fixed parameter as per original code
             total_rain_accum,
@@ -1309,7 +1299,8 @@ def calculate_day_text(
             overall_avg_pop if overall_avg_pop != -999 else 1,
             icon_set,
             "both",
-            overall_precip_intensity_sum / overall_precip_hours_count
+            isDayTime=is_day_time,
+            avgPrep=overall_precip_intensity_sum / overall_precip_hours_count
             if overall_precip_hours_count > 0
             else 0,
         )
@@ -1319,37 +1310,42 @@ def calculate_day_text(
         secondary_precip_condition = "medium-precipitation"
 
     # Add snow accumulation range to precip text if applicable
+    # Convert mm to cm for display (threshold in mm, display in cm)
     snow_sentence = None
     if (
-        total_snow_accum > (10 * precip_accum_unit)
+        total_snow_accum > 10
         or secondary_precip_condition == "medium-snow"
     ):
-        snow_low_accum = math.floor(total_snow_accum - (total_snow_error / 2))
-        snow_max_accum = math.ceil(total_snow_accum + (total_snow_error / 2))
+        # Convert to cm for display
+        snow_accum_cm = total_snow_accum / 10
+        snow_error_cm = total_snow_error / 10
+        
+        snow_low_accum = math.floor(snow_accum_cm - (snow_error_cm / 2))
+        snow_max_accum = math.ceil(snow_accum_cm + (snow_error_cm / 2))
         snow_low_accum = max(0, snow_low_accum)  # Snow accumulation cannot be negative
 
         if total_snow_error <= 0:
             snow_sentence = [
-                "centimeters" if precip_accum_unit == 0.1 else "inches",
-                int(math.ceil(total_snow_accum)),
+                "centimeters",
+                int(math.ceil(snow_accum_cm)),
             ]
         elif snow_max_accum > 0:
-            if total_snow_accum == 0:
+            if snow_accum_cm == 0:
                 snow_sentence = [
                     "less-than",
-                    ["centimeters" if precip_accum_unit == 0.1 else "inches", 1],
+                    ["centimeters", 1],
                 ]
             elif snow_low_accum == 0:
                 snow_sentence = [
                     "less-than",
                     [
-                        "centimeters" if precip_accum_unit == 0.1 else "inches",
+                        "centimeters",
                         snow_max_accum,
                     ],
                 ]
             else:
                 snow_sentence = [
-                    "centimeters" if precip_accum_unit == 0.1 else "inches",
+                    "centimeters",
                     ["range", snow_low_accum, snow_max_accum],
                 ]
 
@@ -1402,8 +1398,6 @@ def calculate_day_text(
             if (
                 calculate_vis_text(
                     hours[0].get("visibility", DEFAULT_VISIBILITY),
-                    vis_units,
-                    temp_units,
                     hours[0].get("temperature", MISSING_DATA),
                     hours[0].get("dewPoint", MISSING_DATA),
                     hours[0].get("smoke", 0.0),
@@ -1420,7 +1414,7 @@ def calculate_day_text(
         if wind_periods and wind_periods[0] == 0:
             if (
                 calculate_wind_text(
-                    hours[0]["windSpeed"], wind_unit, icon_set, "summary"
+                    hours[0]["windSpeed"], icon_set, "summary"
                 )
                 is None
                 and "later" not in all_period_names[0]
@@ -1432,7 +1426,7 @@ def calculate_day_text(
         if dry_periods and dry_periods[0] == 0:
             if (
                 humidity_sky_text(
-                    hours[0]["temperature"], temp_units, hours[0]["humidity"]
+                    hours[0]["temperature"], hours[0]["humidity"]
                 )
                 is None
                 and "later" not in all_period_names[0]
@@ -1444,7 +1438,7 @@ def calculate_day_text(
         if humid_periods and humid_periods[0] == 0:
             if (
                 humidity_sky_text(
-                    hours[0]["temperature"], temp_units, hours[0]["humidity"]
+                    hours[0]["temperature"], hours[0]["humidity"]
                 )
                 is None
                 and "later" not in all_period_names[0]
@@ -1546,7 +1540,7 @@ def calculate_day_text(
     if has_wind:
         wind_only_summary, _, _, _, _ = calculate_period_summary_text(
             wind_periods,
-            calculate_wind_text(overall_max_wind, wind_unit, icon_set, "summary"),
+            calculate_wind_text(overall_max_wind, icon_set, "summary"),
             "wind",
             all_period_names,
             [],
@@ -1738,7 +1732,7 @@ def calculate_day_text(
                 "start_idx": wind_periods[0] if wind_periods else -1,
                 "text": wind_only_summary,
                 "icon": calculate_wind_text(
-                    overall_max_wind, wind_unit, icon_set, "icon"
+                    overall_max_wind, icon_set, "icon"
                 ),
             }
         )

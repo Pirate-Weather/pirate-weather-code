@@ -18,10 +18,6 @@ from API.PirateTextHelper import (
 
 def calculate_text(
     hourObject,
-    prepAccumUnit,
-    visUnits,
-    windUnit,
-    tempUnits,
     isDayTime,
     rainPrep,
     snowPrep,
@@ -31,19 +27,22 @@ def calculate_text(
     icon="darksky",
 ):
     """
-    Calculates the textual summary and icon with the given parameters
+    Calculates the textual summary and icon with the given parameters.
+    All inputs are expected in SI units:
+    - Temperature in Celsius
+    - Wind speed in m/s
+    - Visibility in meters
+    - Precipitation intensity in mm/h
+    - Precipitation accumulation in mm
 
     Parameters:
-    - hourObject (dict): A dictionary of the object used to generate the summary
-    - prepAccumUnit (float): The precipitation unit used
-    - visUnits (float): The visibility unit used
-    - tempUnits (float): The temperature unit used
+    - hourObject (dict): A dictionary of the object used to generate the summary (in SI units)
     - isDayTime (bool): Whether its currently day or night
-    - rainPrep (float): The rain accumulation
-    - snowPrep (float): The snow accumulation
-    - icePrep (float): The ice accumulation
+    - rainPrep (float): The rain accumulation in mm
+    - snowPrep (float): The snow accumulation in mm
+    - icePrep (float): The ice accumulation in mm
     - type (str): What type of summary is being generated.
-    - precipIntensity (float): The precipitation intensity
+    - precipIntensity (float): The precipitation intensity in mm/h
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
 
     Returns:
@@ -100,7 +99,6 @@ def calculate_text(
     # Calculate the text/icon for precipitation, wind, visibility, sky cover, humidity and thunderstorms
     precipText, precipIcon = calculate_precip_text(
         precipIntensity,
-        prepAccumUnit,
         precipType,
         type,
         rainPrep,
@@ -111,15 +109,15 @@ def calculate_text(
         "both",
     )
 
-    windText, windIcon = calculate_wind_text(wind, windUnit, icon, "both")
+    windText, windIcon = calculate_wind_text(wind, icon, "both")
     visText, visIcon = calculate_vis_text(
-        vis, visUnits, tempUnits, temp, dewPoint, smoke, icon, "both"
+        vis, temp, dewPoint, smoke, icon, "both"
     )
     thuText, thuIcon = calculate_thunderstorm_text(
         liftedIndex, cape, "both", icon, isDayTime
     )
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
-    humidityText = humidity_sky_text(temp, tempUnits, humidity)
+    humidityText = humidity_sky_text(temp, humidity)
 
     # If there is precipitation text use that and join with thunderstorm or humidity or wind texts if they exist
     if precipText is not None:
