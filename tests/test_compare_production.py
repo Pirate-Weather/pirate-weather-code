@@ -1,8 +1,10 @@
+import datetime
 import json
 import os
 import warnings
+from urllib.error import URLError
+from urllib.request import urlopen
 
-import httpx
 import pytest
 
 from tests import DiffWarning
@@ -10,6 +12,41 @@ from tests.test_s3_live import _get_client
 
 PW_API = os.environ.get("PW_API")
 PROD_BASE = "https://api.pirateweather.net/forecast"
+PROD_TIMEMACHINE_BASE = "https://api.pirateweather.net/timemachine"
+
+TIMEMACHINE_TEST_LOCATION = (45.4215, -75.6972)  # Ottawa, Canada
+TIMEMACHINE_TEST_DATE = datetime.datetime(2020, 6, 15, tzinfo=datetime.UTC)
+TIMEMACHINE_TIMESTAMP = int(TIMEMACHINE_TEST_DATE.timestamp())
+
+
+class ProductionRequestError(Exception):
+    """Raised when a production API request cannot be fulfilled."""
+
+
+def _fetch_production_json(url: str) -> dict:
+    """Fetch JSON from the production API with a 10 second timeout.
+
+    Args:
+        url: The URL to fetch JSON data from.
+
+    Returns:
+        A dictionary parsed from the JSON response.
+
+    Raises:
+        ProductionRequestError: If the request fails due to a network issue,
+            an unexpected status code, or invalid JSON in the response.
+    """
+
+    try:
+        with urlopen(url, timeout=10) as response:
+            payload = response.read()
+    except URLError as exc:  # pragma: no cover - network failure
+        raise ProductionRequestError(f"Request to {url} failed: {exc}") from exc
+
+    try:
+        return json.loads(payload.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ProductionRequestError(f"Invalid JSON from {url}: {exc}") from exc
 
 
 def _diff_nested(a: object, b: object, path: str = "") -> dict:
@@ -58,7 +95,6 @@ def _diff_nested(a: object, b: object, path: str = "") -> dict:
 )
 def test_local_vs_production():
     client = _get_client()
-    session = httpx.Client()
 
     # Houston, TX (29.7604, -95.3698) and London, UK (51.50853, -0.12574)
     for lat, lon in [(29.7604, -95.3698), (51.50853, -0.12574)]:
@@ -68,13 +104,44 @@ def test_local_vs_production():
 
         prod_url = f"{PROD_BASE}/{PW_API}/{lat},{lon}?version=2"
         try:
-            prod_resp = session.get(prod_url, timeout=10)
-        except Exception as exc:  # pragma: no cover - network failure
+            prod_data = _fetch_production_json(prod_url)
+        except ProductionRequestError as exc:
             pytest.skip(f"Could not fetch production API: {exc}")
-        assert prod_resp.status_code == 200
-        prod_data = prod_resp.json()
 
         diffs = _diff_nested(local_data, prod_data)
         if diffs:
             diff_text = json.dumps(diffs, indent=2, sort_keys=True)
             warnings.warn(f"Differences for {lat},{lon}:\n{diff_text}", DiffWarning)
+
+
+@pytest.mark.skipif(
+    not PW_API,
+    reason="PW_API environment variable not set",
+)
+def test_timemachine_vs_production():
+    client = _get_client()
+
+    lat, lon = TIMEMACHINE_TEST_LOCATION
+    timestamp = TIMEMACHINE_TIMESTAMP
+
+    local_resp = client.get(
+        f"/timemachine/{PW_API}/{lat},{lon},{timestamp}?version=2"
+    )
+    assert local_resp.status_code == 200
+    local_data = local_resp.json()
+
+    prod_url = (
+        f"{PROD_TIMEMACHINE_BASE}/{PW_API}/{lat},{lon},{timestamp}?version=2"
+    )
+    try:
+        prod_data = _fetch_production_json(prod_url)
+    except ProductionRequestError as exc:  # pragma: no cover - network failure
+        pytest.skip(f"Could not fetch production API: {exc}")
+
+    diffs = _diff_nested(local_data, prod_data)
+    if diffs:
+        diff_text = json.dumps(diffs, indent=2, sort_keys=True)
+        warnings.warn(
+            f"Timemachine differences for {lat},{lon} at {timestamp}:\n{diff_text}",
+            DiffWarning,
+        )
