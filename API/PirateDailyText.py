@@ -888,7 +888,6 @@ def calculate_day_text(
                 "min_visibility": float("inf"),  # Initialize for visibility
                 "max_smoke": 0.0,  # Initialize for smoke
                 "max_cape_with_precip": 0.0,  # Initialize for thunderstorms
-                "max_lifted_index_with_precip": MISSING_DATA,  # Initialize for thunderstorms
             }
 
         # Stop generating period names if we have enough for a full 24-hour cycle (e.g., 5 periods)
@@ -984,9 +983,8 @@ def calculate_day_text(
                 period_data["precip_hours_count"] += 1
                 period_data["precip_intensity_sum"] += hour["precipIntensity"]
 
-                # Track CAPE/LiftedIndex when there is precipitation
+                # Track CAPE when there is precipitation
                 hour_cape = hour.get("cape", MISSING_DATA)
-                hour_lifted_index = hour.get("liftedIndex", MISSING_DATA)
 
                 if (
                     hour_cape != MISSING_DATA
@@ -994,19 +992,8 @@ def calculate_day_text(
                 ):
                     period_data["max_cape_with_precip"] = hour_cape
 
-                if hour_lifted_index != MISSING_DATA:
-                    if period_data["max_lifted_index_with_precip"] == MISSING_DATA:
-                        period_data["max_lifted_index_with_precip"] = hour_lifted_index
-                    elif (
-                        hour_lifted_index < period_data["max_lifted_index_with_precip"]
-                    ):
-                        # Lower lifted index means more unstable (more likely thunderstorm)
-                        period_data["max_lifted_index_with_precip"] = hour_lifted_index
-
                 # Count hours with thunderstorms (precipitation + CAPE >= low threshold)
-                thu_text = calculate_thunderstorm_text(
-                    hour_lifted_index, hour_cape, "summary"
-                )
+                thu_text = calculate_thunderstorm_text(hour_cape, "summary")
                 if thu_text is not None:
                     period_data["num_hours_thunderstorm"] += 1
 
@@ -1056,9 +1043,6 @@ def calculate_day_text(
     overall_min_visibility = float("inf")  # Initialize for visibility
     overall_max_smoke = 0.0
     overall_max_cape_with_precip = 0.0  # Track max CAPE that occurs with precipitation
-    overall_max_lifted_index_with_precip = (
-        MISSING_DATA  # Track max lifted index with precipitation
-    )
 
     overall_most_common_precip = []
 
@@ -1090,18 +1074,9 @@ def calculate_day_text(
             overall_precip_hours_count += p_data["precip_hours_count"]
             overall_precip_intensity_sum += p_data["precip_intensity_sum"]
 
-            # Track max CAPE and lifted index that occurs with precipitation
+            # Track max CAPE that occurs with precipitation
             if p_data["max_cape_with_precip"] > overall_max_cape_with_precip:
                 overall_max_cape_with_precip = p_data["max_cape_with_precip"]
-
-            if p_data["max_lifted_index_with_precip"] != MISSING_DATA and (
-                overall_max_lifted_index_with_precip == MISSING_DATA
-                or p_data["max_lifted_index_with_precip"]
-                < overall_max_lifted_index_with_precip
-            ):
-                overall_max_lifted_index_with_precip = p_data[
-                    "max_lifted_index_with_precip"
-                ]
 
         # Check if thunderstorms are significant in this period
         # Thunderstorms require both precipitation and sufficient atmospheric instability
@@ -1453,9 +1428,9 @@ def calculate_day_text(
     thunderstorms_match_precip = False
 
     if has_thunderstorm:
-        # Use max CAPE/lifted index that occurred with precipitation
+        # Use max CAPE that occurred with precipitation
         thunderstorm_summary_text, thunderstorm_icon = calculate_thunderstorm_text(
-            overall_max_lifted_index_with_precip, overall_max_cape_with_precip, "both"
+            overall_max_cape_with_precip, "both"
         )
         # Check if thunderstorm periods match precipitation periods exactly
         if sorted(thunderstorm_periods) == sorted(precip_periods):

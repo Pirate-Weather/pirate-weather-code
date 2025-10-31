@@ -48,7 +48,7 @@ def calculate_summary_text(precipitation, avgIntensity, icon, maxIntensity):
     wWeekend = False
     dayIndexes = []
     days = []
-    maxCape = maxLiftedIndex = MISSING_DATA
+    maxCape = MISSING_DATA
     numThunderstormDays = 0
 
     # Loop through each index in the precipitation array
@@ -69,17 +69,6 @@ def calculate_summary_text(precipitation, avgIntensity, icon, maxIntensity):
                     maxCape = day[2]["cape"]
             elif not np.isnan(day[2]["cape"]) and day[2]["cape"] > maxCape:
                 maxCape = day[2]["cape"]
-
-        if "liftedIndex" in day[2]:
-            # Calculate the maximum lifted index for the week
-            if np.isnan(maxLiftedIndex):
-                if not np.isnan(day[2]["liftedIndex"]):
-                    maxLiftedIndex = day[2]["liftedIndex"]
-            elif (
-                not np.isnan(day[2]["liftedIndex"])
-                and day[2]["liftedIndex"] > maxLiftedIndex
-            ):
-                maxLiftedIndex = day[2]["liftedIndex"]
 
         # Calculate the number of days with thunderstorms forecasted
         if day[2]["icon"] == "thunderstorm":
@@ -109,7 +98,7 @@ def calculate_summary_text(precipitation, avgIntensity, icon, maxIntensity):
 
     # If there are any days with thunderstorms occurring then calculate the text
     if numThunderstormDays > 0:
-        thuText = calculate_thunderstorm_text(maxLiftedIndex, maxCape, "summary")
+        thuText = calculate_thunderstorm_text(maxCape, "summary")
 
     # If more than half the days with precipitation show thurnderstorms then set the icon to thunderstorm and add it in front of the precipitation text
     if thuText is not None and numThunderstormDays >= (

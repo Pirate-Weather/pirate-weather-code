@@ -3924,7 +3924,6 @@ async def PW_Forecast(
             "precipType": PTypeHour[idx],
             "precipProbability": InterPhour[idx, DATA_HOURLY["prob"]],
             "cape": InterPhour[idx, DATA_HOURLY["cape"]],
-            "liftedIndex": InterPhour[idx, DATA_HOURLY["lifted"]],
         }
 
         try:

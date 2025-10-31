@@ -13,7 +13,6 @@ from API.constants.text_const import (
     FOG_THRESHOLD_METERS,
     HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM,
-    LIFTED_INDEX_THRESHOLD,
     LIQUID_DENSITY_CONVERSION,
     MIST_THRESHOLD_METERS,
     PRECIP_INTENSITY_THRESHOLDS,
@@ -612,14 +611,11 @@ def humidity_sky_text(temp, humidity):
     return humidityText
 
 
-def calculate_thunderstorm_text(
-    liftedIndex, cape, mode="both", icon="darksky", is_day=True
-):
+def calculate_thunderstorm_text(cape, mode="both", icon="darksky", is_day=True):
     """
-    Calculates the thunderstorm text
+    Calculates the thunderstorm text based on CAPE values.
 
     Parameters:
-    - liftedIndex (float) -  The lifted index
     - cape (float) -  The CAPE (Convective available potential energy)
     - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the thunderstorm will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
@@ -636,12 +632,6 @@ def calculate_thunderstorm_text(
         thuText = "possible-thunderstorm"
     elif cape >= CAPE_THRESHOLDS["high"]:
         thuText = "thunderstorm"
-
-    if np.isnan(liftedIndex) and thuText is None:
-        if 0 > liftedIndex > LIFTED_INDEX_THRESHOLD:
-            thuText = "possible-thunderstorm"
-        elif liftedIndex <= LIFTED_INDEX_THRESHOLD:
-            thuText = "thunderstorm"
 
     if thuText == "thunderstorm":
         thuIcon = "thunderstorm"

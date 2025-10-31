@@ -36,7 +36,6 @@ def create_base_hour(time_offset=0, **overrides):
         "dewPoint": 18.0,
         "smoke": 0,
         "cape": 0,
-        "liftedIndex": MISSING_DATA,
         "precipIntensityError": 0,
     }
     base_hour.update(overrides)
@@ -58,7 +57,6 @@ def test_currently_hourly_thunderstorm_with_precipitation():
         precipAccumulation=5.0,
         dewPoint=20.0,
         cape=2600,  # Above high threshold for icon
-        liftedIndex=-5,  # Indicates thunderstorms
     )
 
     text, icon = calculate_text(
@@ -94,7 +92,6 @@ def test_currently_possible_thunderstorm_with_precipitation():
         precipAccumulation=5.0,
         dewPoint=20.0,
         cape=1500,  # Above high threshold for icon
-        liftedIndex=-5,  # Indicates thunderstorms
     )
 
     text, icon = calculate_text(
@@ -130,7 +127,6 @@ def test_hourly_possible_thunderstorm_with_precipitation():
         precipAccumulation=5.0,
         dewPoint=20.0,
         cape=1500,  # Above high threshold for icon
-        liftedIndex=-5,  # Indicates thunderstorms
     )
 
     text, icon = calculate_text(
@@ -168,7 +164,6 @@ def test_currently_hourly_no_thunderstorm_without_precipitation():
         "dewPoint": 15.0,
         "smoke": 0,
         "cape": 2000,  # High CAPE but no precipitation
-        "liftedIndex": -6,
     }
 
     text, icon = calculate_text(
@@ -206,7 +201,6 @@ def test_currently_hourly_no_thunderstorm_low_cape():
         "dewPoint": 20.0,
         "smoke": 0,
         "cape": 500,  # Below low threshold
-        "liftedIndex": 0,
     }
 
     text, icon = calculate_text(
@@ -251,7 +245,6 @@ def test_daily_thunderstorms_joined_with_precipitation():
                 "dewPoint": 18.0,
                 "smoke": 0,
                 "cape": 2600,  # Above high threshold for icon
-                "liftedIndex": -5,
                 "precipIntensityError": 0.5,
             }
         )
@@ -302,7 +295,6 @@ def test_daily_thunderstorms_not_joined_with_precipitation():
                 "dewPoint": 15.0,
                 "smoke": 0,
                 "cape": 500,  # Below threshold - no thunderstorms
-                "liftedIndex": 0,
                 "precipIntensityError": 0.3,
             }
         )
@@ -324,7 +316,6 @@ def test_daily_thunderstorms_not_joined_with_precipitation():
                 "dewPoint": 20.0,
                 "smoke": 0,
                 "cape": 2000,  # Above threshold - thunderstorms
-                "liftedIndex": -7,
                 "precipIntensityError": 0.5,
             }
         )
@@ -374,7 +365,6 @@ def test_24hour_thunderstorms_starting_later():
                 "dewPoint": 14.0,
                 "smoke": 0,
                 "cape": 0,
-                "liftedIndex": MISSING_DATA,
                 "precipIntensityError": 0,
             }
         )
@@ -396,7 +386,6 @@ def test_24hour_thunderstorms_starting_later():
                 "dewPoint": 21.0,
                 "smoke": 0,
                 "cape": 2600,  # High CAPE for thunderstorm icon
-                "liftedIndex": -8,
                 "precipIntensityError": 0.7,
             }
         )
@@ -441,7 +430,6 @@ def test_weekly_thunderstorms():
             "precipProbability": 0.8,
             "temperatureHigh": 25.0,
             "cape": 2000,
-            "liftedIndex": -6,
         }
     )
 
@@ -456,7 +444,6 @@ def test_weekly_thunderstorms():
             "precipProbability": 0.85,
             "temperatureHigh": 26.0,
             "cape": 2500,
-            "liftedIndex": -7,
         }
     )
 
@@ -472,7 +459,6 @@ def test_weekly_thunderstorms():
                 "precipProbability": 0.0,
                 "temperatureHigh": 24.0 + i,
                 "cape": MISSING_DATA,
-                "liftedIndex": MISSING_DATA,
             }
         )
 
@@ -521,7 +507,6 @@ def test_daily_uses_max_cape_with_precipitation():
                 "dewPoint": 15.0,
                 "smoke": 0,
                 "cape": 3000,  # Very high CAPE but no precipitation
-                "liftedIndex": -8,
                 "precipIntensityError": 0,
             }
         )
@@ -543,7 +528,6 @@ def test_daily_uses_max_cape_with_precipitation():
                 "dewPoint": 20.0,
                 "smoke": 0,
                 "cape": 2600,  # High enough for thunderstorm icon, but less than 3000
-                "liftedIndex": -5,
                 "precipIntensityError": 0.5,
             }
         )
@@ -591,7 +575,6 @@ def test_thunderstorms_dont_combine_with_humidity():
             visibility=8000,
             dewPoint=26.0,
             cape=2600,
-            liftedIndex=-5,
             precipIntensityError=0.5,
         )
         for i in range(8)
@@ -638,7 +621,6 @@ def test_humidity_still_combines_without_thunderstorms():
             visibility=8000,
             dewPoint=26.0,
             cape=500,  # Low CAPE - no thunderstorms
-            liftedIndex=0,
             precipIntensityError=0.5,
         )
         for i in range(8)
