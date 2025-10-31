@@ -27,17 +27,17 @@ MIN_THUNDERSTORM_DAYS = 2
 
 
 def calculate_summary_text(
-    precipitation, avgIntensity, intensityUnit, icon, maxIntensity
+    precipitation, avgIntensity, icon, maxIntensity
 ):
     """
-    Calculates the precipitation summary if there are between 1 and 8 days of precipitation
+    Calculates the precipitation summary if there are between 1 and 8 days of precipitation.
+    Intensities are expected in SI units (mm/h).
 
     Parameters:
     - precipitation (arr): An array of arrays that contain the days with precipitation if there are any. The inner array contains: The index in the week array, the day of the week and the precipitation type
-    - avgIntensity (float): The average precipitation intensity for the week
-    - intensityUnit (int): The conversion factor for the precipitation intensity
+    - avgIntensity (float): The average precipitation intensity for the week in mm/h
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
-    - maxIntensity (float): The maximum precipitation intensity for the week
+    - maxIntensity (float): The maximum precipitation intensity for the week in mm/h
 
     Returns:
     - precipSummary (arr): A summary of the precipitation for the week.
@@ -95,7 +95,6 @@ def calculate_summary_text(
     if wIcon != "mixed-precipitation":
         wIcon, cIcon = calculate_precip_text(
             maxIntensity,
-            intensityUnit,
             wIcon,
             "week",
             maxIntensity,
@@ -104,7 +103,8 @@ def calculate_summary_text(
             1,
             icon,
             "both",
-            avgIntensity,
+            isDayTime=True,
+            avgPrep=avgIntensity,
         )
     else:
         cIcon = "sleet"
@@ -247,21 +247,21 @@ def calculate_precip_summary(
     precipitationDays,
     icons,
     avgIntensity,
-    intensityUnit,
     avgPop,
     maxIntensity,
     icon="darksky",
 ):
     """
     Calculates the weekly precipitation summary.
+    Intensities are expected in SI units (mm/h).
 
     Parameters:
     - precipitation (bool): If precipitation is occuring during the week or not
     - precipitationDays (arr): An array of arrays that contain the days with precipitation if there are any. The inner array contains: The index in the week array, the day of the week and the precipitation type
     - icons (arr): An array of the daily icons
-    - avgIntensity (float): The average precipitation intensity for the week
-    - maxIntensity (float): The maximum precipitation intensity for the week
-    - intensityUnit (int): The conversion factor for the precipitation intensity
+    - avgIntensity (float): The average precipitation intensity for the week in mm/h
+    - avgPop (float): Average probability of precipitation
+    - maxIntensity (float): The maximum precipitation intensity for the week in mm/h
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
 
     Returns:
@@ -308,7 +308,7 @@ def calculate_precip_summary(
     elif 1 < len(precipitationDays) < 8:
         # If between 1 and 8 days have precipitation call the function to calculate the summary text using the precipitation array.
         wIcon, wSummary, wWeekend, cIcon = calculate_summary_text(
-            precipitationDays, avgIntensity, intensityUnit, icon, maxIntensity
+            precipitationDays, avgIntensity, icon, maxIntensity
         )
 
         # Check if the summary has the over-weekend text
@@ -381,10 +381,10 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
         weekArr[i]["temperatureHigh"] < weekArr[i + 1]["temperatureHigh"]
         for i in range(WEEK_DAYS)
     ) or (highTemp[0] >= WEEK_DAYS_MINUS_ONE and lowTemp[0] <= 1):
-        # Set the temperature summary
+        # Set the temperature summary (temperature in Celsius)
         return [
             "temperatures-rising",
-            [highTemp[3], int(round(highTemp[2], 0))],
+            int(round(highTemp[2], 0)),
             highTemp[1],
         ]
     # If the temperature is decreasing everyday or if the lowest temperatue is at the end of the week and the highest temperature is at the start of the week use the rising text
@@ -394,7 +394,7 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
     ) or (highTemp[0] <= 1 and lowTemp[0] >= WEEK_DAYS_MINUS_ONE):
         return [
             "temperatures-falling",
-            [lowTemp[3], int(round(lowTemp[2], 0))],
+            int(round(lowTemp[2], 0)),
             lowTemp[1],
         ]
     # If the lowest temperatue is in the middle of the week and the highest temperature is at the start or end of the week use the valleying text
@@ -403,26 +403,25 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr):
     ] < WEEK_DAYS:
         return [
             "temperatures-valleying",
-            [lowTemp[3], int(round(lowTemp[2], 0))],
+            int(round(lowTemp[2], 0)),
             lowTemp[1],
         ]
     else:
         # Otherwise use the peaking text
         return [
             "temperatures-peaking",
-            [highTemp[3], int(round(highTemp[2], 0))],
+            int(round(highTemp[2], 0)),
             highTemp[1],
         ]
 
 
-def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="darksky"):
+def calculate_weekly_text(weekArr, timeZone, icon="darksky"):
     """
-    Calculates the weekly summary given an array of weekdays
+    Calculates the weekly summary given an array of weekdays.
+    All inputs are expected in SI units (mm/h for intensity, Celsius for temperature).
 
     Parameters:
-    - weekArr (arr): An array of the weekdays
-    - intensityUnit (float): The conversion factor for the precipitation intensity
-    - tempUnit (float): The conversion factor for the temperature
+    - weekArr (arr): An array of the weekdays (in SI units)
     - timeZone (string): The timezone for the current location
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
 
@@ -499,17 +498,17 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
             elif day["precipIntensityMax"] > maxIntensity:
                 maxIntensity = day["precipIntensityMax"]
 
-        # Determine the highest temperature of the week and record the index in the array, the day it occured on, the temperature and the temperature units
+        # Determine the highest temperature of the week and record the index in the array, the day it occured on, and the temperature (in Celsius)
         if not highTemp:
-            highTemp = [idx, weekday, day["temperatureHigh"], tempUnit]
+            highTemp = [idx, weekday, day["temperatureHigh"]]
         elif day["temperatureHigh"] > highTemp[2]:
-            highTemp = [idx, weekday, day["temperatureHigh"], tempUnit]
+            highTemp = [idx, weekday, day["temperatureHigh"]]
 
-        # Determine the lowest temperature of the week and record the index in the array, the day it occured on, the temperature and the temperature units
+        # Determine the lowest temperature of the week and record the index in the array, the day it occured on, and the temperature (in Celsius)
         if not lowTemp:
-            lowTemp = [idx, weekday, day["temperatureHigh"], tempUnit]
+            lowTemp = [idx, weekday, day["temperatureHigh"]]
         elif day["temperatureHigh"] < lowTemp[2]:
-            lowTemp = [idx, weekday, day["temperatureHigh"], tempUnit]
+            lowTemp = [idx, weekday, day["temperatureHigh"]]
 
     if len(precipitationDays) > 0:
         avgIntensity = avgIntensity / len(precipitationDays)
@@ -520,7 +519,6 @@ def calculate_weekly_text(weekArr, intensityUnit, tempUnit, timeZone, icon="dark
         precipitationDays,
         icons,
         avgIntensity,
-        intensityUnit,
         avgPop,
         maxIntensity,
         icon,

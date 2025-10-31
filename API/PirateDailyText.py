@@ -497,7 +497,6 @@ def calculate_period_summary_text(
     all_humid_periods,
     all_vis_periods,
     max_wind_speed,
-    wind_unit,
     icon_set,
     check_period,
     mode,
@@ -510,6 +509,7 @@ def calculate_period_summary_text(
     """
     Calculates the textual summary for a specific condition (precip, cloud, wind, vis, dry, humid)
     across a set of periods.
+    Wind speed is expected in SI units (m/s).
 
     Parameters:
     - period_indices (list): List of indices where the condition is present.
@@ -1503,7 +1503,6 @@ def calculate_day_text(
             humid_periods,
             vis_periods,
             overall_max_wind,
-            wind_unit,
             icon_set,
             0,
             mode,
@@ -1528,7 +1527,6 @@ def calculate_day_text(
             humid_periods,
             vis_periods,
             overall_max_wind,
-            wind_unit,
             icon_set,
             0,
             mode,
@@ -1548,7 +1546,6 @@ def calculate_day_text(
             humid_periods,
             [],  # Wind can combine with dry/humid
             overall_max_wind,
-            wind_unit,
             icon_set,
             0,
             mode,
@@ -1563,8 +1560,6 @@ def calculate_day_text(
             vis_periods,
             calculate_vis_text(
                 overall_min_visibility,
-                vis_units,
-                temp_units,
                 overall_temp_at_min_spread,
                 overall_dewpoint_at_min_spread,
                 overall_max_smoke,
@@ -1578,7 +1573,6 @@ def calculate_day_text(
             [],
             [],
             overall_max_wind,
-            wind_unit,
             icon_set,
             0,
             mode,
@@ -1596,7 +1590,6 @@ def calculate_day_text(
             [],
             [],
             overall_max_wind,
-            wind_unit,
             icon_set,
             0,
             mode,
@@ -1614,7 +1607,6 @@ def calculate_day_text(
             [],
             [],
             overall_max_wind,
-            wind_unit,
             icon_set,
             0,
             mode,
@@ -1639,7 +1631,6 @@ def calculate_day_text(
         humid_periods,
         vis_periods,
         overall_max_wind,
-        wind_unit,
         icon_set,
         0,
         mode,
