@@ -1704,7 +1704,7 @@ async def PW_Forecast(
 
     # If a timemachine request, read ERA5
     if timeMachine:
-        # Get nearest lat and lon
+        # Get nearest lat and lon for the ERA5 model
 
         # Find nearest latitude and longitude in ERA5 data
         # Same as GFS
