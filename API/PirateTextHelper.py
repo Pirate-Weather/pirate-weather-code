@@ -475,9 +475,7 @@ def calculate_wind_text(wind, icon="darksky", mode="both"):
         return windText, windIcon
 
 
-def calculate_vis_text(
-    vis, temp, dewPoint, smoke=0, icon="darksky", mode="both"
-):
+def calculate_vis_text(vis, temp, dewPoint, smoke=0, icon="darksky", mode="both"):
     """
     Calculates the visibility text.
     All inputs are expected in SI units (meters for visibility, Celsius for temperature).

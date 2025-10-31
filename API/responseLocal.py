@@ -5435,10 +5435,20 @@ async def PW_Forecast(
         currently_si["cape"] = InterPcurrent[DATA_CURRENT["cape"]]
 
         # Accumulation in SI units (mm) for text generation
-        currentRainAccum_si = currnetRainAccum / prepAccumUnit if prepAccumUnit != 0 else currnetRainAccum
-        currentSnowAccum_si = currnetSnowAccum / prepAccumUnit if prepAccumUnit != 0 else currnetSnowAccum
-        currentIceAccum_si = currnetIceAccum / prepAccumUnit if prepAccumUnit != 0 else currnetIceAccum
-        currentPrecipIntensity_si = minuteDict[0]["precipIntensity"] / prepIntensityUnit if prepIntensityUnit != 0 else minuteDict[0]["precipIntensity"]
+        currentRainAccum_si = (
+            currnetRainAccum / prepAccumUnit if prepAccumUnit != 0 else currnetRainAccum
+        )
+        currentSnowAccum_si = (
+            currnetSnowAccum / prepAccumUnit if prepAccumUnit != 0 else currnetSnowAccum
+        )
+        currentIceAccum_si = (
+            currnetIceAccum / prepAccumUnit if prepAccumUnit != 0 else currnetIceAccum
+        )
+        currentPrecipIntensity_si = (
+            minuteDict[0]["precipIntensity"] / prepIntensityUnit
+            if prepIntensityUnit != 0
+            else minuteDict[0]["precipIntensity"]
+        )
 
         try:
             currentText, currentIcon = calculate_text(

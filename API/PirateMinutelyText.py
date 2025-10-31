@@ -89,9 +89,7 @@ def calcaulate_consecutive_indexes(prepIndex):
     return consecutiveIndex
 
 
-def calculate_minutely_text(
-    minuteArr, currentText, currentIcon, icon, maxCAPE=0
-):
+def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0):
     """
     Calculates the minutely summary given an array of minutes.
     All inputs are expected in SI units (mm/h for precipitation intensity).

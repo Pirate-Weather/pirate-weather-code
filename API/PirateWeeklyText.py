@@ -26,9 +26,7 @@ WEEK_DAYS_PLUS_ONE = 8
 MIN_THUNDERSTORM_DAYS = 2
 
 
-def calculate_summary_text(
-    precipitation, avgIntensity, icon, maxIntensity
-):
+def calculate_summary_text(precipitation, avgIntensity, icon, maxIntensity):
     """
     Calculates the precipitation summary if there are between 1 and 8 days of precipitation.
     Intensities are expected in SI units (mm/h).

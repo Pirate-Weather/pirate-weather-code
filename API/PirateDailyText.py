@@ -965,10 +965,7 @@ def calculate_day_text(
                         overall_min_temp_dewpoint_spread = current_spread
                         overall_temp_at_min_spread = hour["temperature"]
                         overall_dewpoint_at_min_spread = hour["dewPoint"]
-            if (
-                calculate_wind_text(hour["windSpeed"], "darksky", "icon")
-                == "wind"
-            ):
+            if calculate_wind_text(hour["windSpeed"], "darksky", "icon") == "wind":
                 period_data["num_hours_wind"] += 1
 
             if hour["precipType"] == "rain" or hour["precipType"] == "none":
@@ -1284,10 +1281,7 @@ def calculate_day_text(
             ):
                 secondary_precip_condition = "medium-" + most_common_overall_precip_type
                 most_common_overall_precip_type = "snow"
-            if (
-                total_sleet_accum > 1
-                and most_common_overall_precip_type != "sleet"
-            ):
+            if total_sleet_accum > 1 and most_common_overall_precip_type != "sleet":
                 secondary_precip_condition = "medium-" + most_common_overall_precip_type
                 most_common_overall_precip_type = "sleet"
 
@@ -1315,10 +1309,7 @@ def calculate_day_text(
     # Add snow accumulation range to precip text if applicable
     # Convert mm to display units based on unit_system
     snow_sentence = None
-    if (
-        total_snow_accum > 10
-        or secondary_precip_condition == "medium-snow"
-    ):
+    if total_snow_accum > 10 or secondary_precip_condition == "medium-snow":
         # Determine snow unit and convert
         if unit_system == "us":
             snow_unit_str = "inches"
@@ -1424,10 +1415,7 @@ def calculate_day_text(
         # Check wind
         if wind_periods and wind_periods[0] == 0:
             if (
-                calculate_wind_text(
-                    hours[0]["windSpeed"], icon_set, "summary"
-                )
-                is None
+                calculate_wind_text(hours[0]["windSpeed"], icon_set, "summary") is None
                 and "later" not in all_period_names[0]
             ):
                 all_period_names[0] = "later-" + all_period_names[0]
@@ -1436,10 +1424,7 @@ def calculate_day_text(
         # Check dry humidity
         if dry_periods and dry_periods[0] == 0:
             if (
-                humidity_sky_text(
-                    hours[0]["temperature"], hours[0]["humidity"]
-                )
-                is None
+                humidity_sky_text(hours[0]["temperature"], hours[0]["humidity"]) is None
                 and "later" not in all_period_names[0]
             ):
                 all_period_names[0] = "later-" + all_period_names[0]
@@ -1448,10 +1433,7 @@ def calculate_day_text(
         # Check humid humidity
         if humid_periods and humid_periods[0] == 0:
             if (
-                humidity_sky_text(
-                    hours[0]["temperature"], hours[0]["humidity"]
-                )
-                is None
+                humidity_sky_text(hours[0]["temperature"], hours[0]["humidity"]) is None
                 and "later" not in all_period_names[0]
             ):
                 all_period_names[0] = "later-" + all_period_names[0]
@@ -1731,9 +1713,7 @@ def calculate_day_text(
                 "all_day": is_wind_all_day,
                 "start_idx": wind_periods[0] if wind_periods else -1,
                 "text": wind_only_summary,
-                "icon": calculate_wind_text(
-                    overall_max_wind, icon_set, "icon"
-                ),
+                "icon": calculate_wind_text(overall_max_wind, icon_set, "icon"),
             }
         )
 
