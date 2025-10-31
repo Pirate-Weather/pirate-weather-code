@@ -87,7 +87,7 @@ latest_run = Herbie_latest(
     freq="15min",
     product="anl",
     verbose=True,
-    priority="aws",
+    priority=["aws", "nomdas"],
     save_dir=tmp_dir,
 )
 
@@ -144,7 +144,7 @@ fh_analysis = Herbie(
     model="rtma_ru",
     product="anl",
     verbose=False,
-    priority="aws",
+    priority=["aws", "nomdas"],
     save_dir=tmp_dir,
 )
 
@@ -163,6 +163,7 @@ xarray_analysis_merged = xarray_analysis_merged.assign_coords(
 )
 
 # Convert RH from specific humidity and pressure and add it to the dataset
+# relative_humidity_from_specific_humidity returns a dimensionless fraction (0-1)
 rh_2m = relative_humidity_from_specific_humidity(
     pressure=xarray_analysis_merged["sp"] * units.Pa,
     temperature=xarray_analysis_merged["t2m"] * units.degK,

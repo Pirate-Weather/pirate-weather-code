@@ -115,14 +115,16 @@ def calculate_text(
     visText, visIcon = calculate_vis_text(
         vis, visUnits, tempUnits, temp, dewPoint, smoke, icon, "both"
     )
-    thuText, thuIcon = calculate_thunderstorm_text(liftedIndex, cape, "both")
+    thuText, thuIcon = calculate_thunderstorm_text(
+        liftedIndex, cape, "both", icon, isDayTime
+    )
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
     humidityText = humidity_sky_text(temp, tempUnits, humidity)
 
     # If there is precipitation text use that and join with thunderstorm or humidity or wind texts if they exist
     if precipText is not None:
         if thuText is not None and not (type == "current" and "possible" in thuText):
-            cText = ["and", thuText, precipText]
+            cText = thuText
         elif windText is not None:
             cText = ["and", precipText, windText]
         else:

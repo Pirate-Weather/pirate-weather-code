@@ -428,26 +428,18 @@ xarray_forecast_merged = (
 )
 
 
-# Create a new time series
+# Create a new time series for the interpolation target
 start = xarray_forecast_merged.time[0].values
 end = xarray_forecast_merged.time[-1].values
 new_hourly_time = pd.date_range(
     start=pd.to_datetime(start) - pd.Timedelta(hisPeriod, "h"), end=end, freq="h"
 )
 
-stacked_times = np.concatenate(
-    (
-        pd.date_range(
-            start=start - pd.Timedelta(hisPeriod, "h"),
-            end=start - pd.Timedelta(1, "h"),
-            freq="3h",
-        ).to_numpy(),
-        xarray_forecast_merged.time.values,
-    )
-)
+# Get the actual stacked times from the concatenated dataset (to be created later)
+# This will be computed after loading and concatenating historical + forecast data
+# For now, just compute the hourly target times
 unix_epoch = np.datetime64(0, "s")
 one_second = np.timedelta64(1, "s")
-stacked_timesUnix = (stacked_times - unix_epoch) / one_second
 hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
 
@@ -858,6 +850,11 @@ for var in zarrVars:
         if np.issubdtype(ds_clip.dtype, np.number):
             mask = (ds_clip >= VALID_DATA_MIN) & (ds_clip <= VALID_DATA_MAX)
             ds[var] = ds_clip.where(mask)  # out-of-range → NaN
+
+# Get the actual stacked times from the concatenated dataset
+# This contains the real data times, not artificial times
+stacked_times = ds.time.values
+stacked_timesUnix = (stacked_times - unix_epoch) / one_second
 
 # Rename time dimension to match later processing
 ds_rename = ds.rename({"time": "stacked_time"})
