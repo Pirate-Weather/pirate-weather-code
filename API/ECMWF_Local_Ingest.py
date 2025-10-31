@@ -332,7 +332,8 @@ FH_forecastsub = FastHerbie(
 ifs_paths = FH_forecastsub.download(matchStrings, verbose=False)
 
 gribList = [
-    str(Path(x.get_localFilePath(matchStrings)).expand()) for x in FH_forecastsub.file_exists
+    str(Path(x.get_localFilePath(matchStrings)).expand())
+    for x in FH_forecastsub.file_exists
 ]
 
 # Perform a check if any data seems to be invalid

@@ -1177,7 +1177,6 @@ async def PW_Forecast(
         )
 
     timeMachine = False
-    timeMachineNear = False
     # Set up translations
     if not lang:
         lang = "en"
@@ -1192,12 +1191,13 @@ async def PW_Forecast(
 
     translation = Translations[lang]
 
-    if (nowTime - utcTime) > datetime.timedelta(hours=10 * 24):
+    if (nowTime - utcTime) > datetime.timedelta(hours=25):
         # More than 10 days ago must be time machine request
         if (
             ("localhost" in str(request.url))
             or ("timemachine" in str(request.url))
             or ("127.0.0.1" in str(request.url))
+            or ("dev" in str(request.url))
         ):
             timeMachine = True
 
@@ -1214,8 +1214,8 @@ async def PW_Forecast(
             raise HTTPException(
                 status_code=400, detail="Requested Time is in the Future"
             )
-    elif (nowTime - utcTime) < datetime.timedelta(hours=10 * 24):
-        # If within the last 10 days , it may or may not be a timemachine request
+    elif (nowTime - utcTime) < datetime.timedelta(hours=25):
+        # If within the last 25 hours, it may or may not be a timemachine request
         # If it is, then only return 24h of data
         if "timemachine" in str(request.url):
             timeMachine = True
@@ -1430,18 +1430,11 @@ async def PW_Forecast(
     )
 
     # Setup the time parameters for output and processing
-    if timeMachine or timeMachineNear:
+    if timeMachine:
         daily_days = 1  # Number of days to output
         daily_day_hours = 1  # Additional hours to use in the processing
         ouputHours = 24
         ouputDays = 1
-
-    # elif timeMachineNear:
-    #     # If a timemachine request using production zip files, multiple days need to be calculated
-    #     daily_days = 8
-    #     daily_day_hours = 5
-    #     ouputHours = 24
-    #     ouputDays = 1
 
     else:
         daily_days = 8
@@ -1655,7 +1648,8 @@ async def PW_Forecast(
         print("### GFS Detail Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
-    if timeMachine:
+    # If within the last 10 days, read GFS
+    if  (nowTime - utcTime) > datetime.timedelta(hours=10 * 24):
         dataOut_gfs = False
     else:
         readGFS = True
@@ -1734,9 +1728,6 @@ async def PW_Forecast(
         t_p = np.argmin(
             np.abs(ERA5_Data["ERA5_times"] - np.datetime64(baseDayUTC))
         )
-
-        print('y_p, x_p, t_p')
-        print(y_p, x_p, t_p)
 
         # Read the ERA5 data for the location and time
         # dataOut_ERA5_xr = ERA5_Data["dsERA5"][ERA5.keys()].sel(
@@ -1924,10 +1915,10 @@ async def PW_Forecast(
         sourceList.append("ETOPO1")
 
     if isinstance(dataOut_gfs, np.ndarray):
-        sourceList = ["gfs"]
+        sourceList.append("gfs")
 
     if isinstance(dataOut_ERA5, np.ndarray):
-        sourceList = ["era5"]
+        sourceList.append("era5")
 
     # Timing Check
     if TIMING:
@@ -3677,7 +3668,7 @@ async def PW_Forecast(
     # Everything that isn't the current day
     dayZeroPrepRain[hourlyDayIndex != 0] = 0
     # Everything after the request time
-    if not (timeMachine or timeMachineNear):
+    if not timeMachine:
         dayZeroPrepRain[int(baseTimeOffset) :] = 0
 
     # Snow
@@ -3686,7 +3677,7 @@ async def PW_Forecast(
     # Everything that isn't the current day
     dayZeroPrepSnow[hourlyDayIndex != 0] = 0
     # Everything after the request time
-    if not (timeMachine or timeMachineNear):
+    if not timeMachine:
         dayZeroPrepSnow[int(baseTimeOffset) :] = 0
 
     # Sleet
@@ -3695,7 +3686,7 @@ async def PW_Forecast(
     # Everything that isn't the current day
     dayZeroPrepSleet[hourlyDayIndex != 0] = 0
     # Everything after the request time
-    if not (timeMachine or timeMachineNear):
+    if not timeMachine:
         dayZeroPrepSleet[int(baseTimeOffset) :] = 0
 
     # Accumulations in liquid equivalent
@@ -3704,7 +3695,7 @@ async def PW_Forecast(
     dayZeroIce = dayZeroPrepSleet.sum().round(4)  # Ice
 
     # Zero prep intensity and accum before forecast time
-    if not (timeMachine or timeMachineNear):
+    if not timeMachine:
         InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["intensity"]] = 0
         InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["accum"]] = 0
         InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["rain"]] = 0
@@ -5598,7 +5589,7 @@ async def PW_Forecast(
                     hourItem.pop(field, None)
 
         # If a timemachine request, do not offset to now
-        if timeMachine or timeMachineNear:
+        if timeMachine:
             returnOBJ["hourly"]["data"] = hourList[0:ouputHours]
         else:
             returnOBJ["hourly"]["data"] = hourList[
