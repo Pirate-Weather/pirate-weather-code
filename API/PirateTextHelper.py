@@ -1,4 +1,5 @@
 # %% Script to contain the helper functions that can be used to generate the text summary of the forecast data for Pirate Weather
+import math
 from collections import Counter
 
 import numpy as np
@@ -122,7 +123,7 @@ def calculate_precip_text(
 
     Parameters:
     - prepIntensity (float): The precipitation intensity
-    - prepIntensityUnit (float): The precipitation accumulation/intensity unit
+    - prepAccumUnit (float): The precipitation accumulation/intensity unit
     - prepType (str): The type of precipitation
     - type (str): What type of summary is being generated.
     - rainPrep (float): The rain accumulation
@@ -142,14 +143,14 @@ def calculate_precip_text(
     if any(np.isnan(x) for x in (rainPrep, snowPrep, icePrep, prepIntensity)):
         return (None, None) if mode == "both" else None
 
-    # If pop is -999 set it to 1 so we can calculate the precipitation text
-    if np.isnan(pop):
-        pop = 1
-
     if prepAccumUnit == 0.1:
         prepIntensityUnit = 1
     else:
         prepIntensityUnit = prepAccumUnit
+
+    # If pop is -999 set it to 1 so we can calculate the precipitation text
+    if np.isnan(pop):
+        pop = 1
 
     # In mm/h
     lightPrecipThresh = PRECIP_INTENSITY_THRESHOLDS["light"] * prepIntensityUnit
@@ -159,15 +160,8 @@ def calculate_precip_text(
     midSnowThresh = SNOW_INTENSITY_THRESHOLDS["mid"] * prepIntensityUnit
     heavySnowThresh = SNOW_INTENSITY_THRESHOLDS["heavy"] * prepIntensityUnit
 
-    snowIconThresholdHour = (
-        HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
-    )  # In snow units (accum units of snow)
-    precipIconThresholdHour = (
-        HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
-    )  # Liquid equivalent accum units
-    precipIconThresholdHourIntensity = (
-        HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepIntensityUnit
-    )  # Liquid equivalent mm for intensity, so no snow variation
+    snowIconThresholdHour = HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
+    precipIconThresholdHour = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
 
     snowIconThresholdDay = DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
     precipIconThresholdDay = DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
@@ -192,7 +186,7 @@ def calculate_precip_text(
         rainPrep,
         precipIconThreshold,
         prepIntensity,
-        precipIconThresholdHourIntensity,
+        precipIconThresholdHour,
     )
 
     snow_condition = matches_precip(
@@ -201,7 +195,7 @@ def calculate_precip_text(
         snowPrep,
         snowIconThreshold,
         prepIntensity,
-        precipIconThresholdHourIntensity,
+        snowIconThresholdHour,
     )
 
     ice_condition = matches_precip(
@@ -210,7 +204,7 @@ def calculate_precip_text(
         icePrep,
         precipIconThreshold,
         prepIntensity,
-        precipIconThresholdHourIntensity,
+        precipIconThresholdHour,
     )
 
     # Add the possible precipitation text if pop is less than 25% or if pop is greater than 0 but precipIntensity is between 0-0.02 mm/h
@@ -240,18 +234,9 @@ def calculate_precip_text(
 
     # Find the largest percentage difference to determine the icon
     if pop >= PRECIP_PROB_THRESHOLD and (
-        (
-            rainPrep > precipIconThreshold
-            and prepIntensity > precipIconThresholdHourIntensity
-        )
-        or (
-            snowPrep >= snowIconThreshold
-            and prepIntensity > precipIconThresholdHourIntensity
-        )
-        or (
-            icePrep >= precipIconThreshold
-            and prepIntensity > precipIconThresholdHourIntensity
-        )
+        (rainPrep > precipIconThreshold and prepIntensity > precipIconThresholdHour)
+        or (snowPrep >= snowIconThreshold and prepIntensity > snowIconThresholdHour)
+        or (icePrep >= precipIconThreshold and prepIntensity > precipIconThresholdHour)
         or (totalPrep >= precipIconThreshold and numTypes > 1)
     ):
         if prepType == "none":
@@ -620,7 +605,12 @@ def humidity_sky_text(temp, tempUnits, humidity):
     """
 
     # Return None if humidity or temperature data is missing.
-    if humidity is None or np.isnan(humidity) or np.isnan(temp):
+    if (
+        humidity is None
+        or math.isnan(humidity)
+        or np.isnan(humidity)
+        or np.isnan(temp)
+    ):
         return None
 
     # Only use humid if also warm (>20C or >68F)
@@ -667,7 +657,7 @@ def calculate_thunderstorm_text(
     elif cape >= CAPE_THRESHOLDS["high"]:
         thuText = "thunderstorm"
 
-    if (not np.isnan(liftedIndex)) and thuText is None:
+    if np.isnan(liftedIndex) and thuText is None:
         if 0 > liftedIndex > LIFTED_INDEX_THRESHOLD:
             thuText = "possible-thunderstorm"
         elif liftedIndex <= LIFTED_INDEX_THRESHOLD:

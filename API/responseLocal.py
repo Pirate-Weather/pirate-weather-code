@@ -5433,7 +5433,7 @@ async def PW_Forecast(
         try:
             currentText, currentIcon = calculate_text(
                 returnOBJ["currently"],
-                prepIntensityUnit,
+                prepAccumUnit,
                 visUnits,
                 windUnit,
                 tempUnits,
