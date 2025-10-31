@@ -148,7 +148,7 @@ def calculate_precip_text(
     else:
         prepIntensityUnit = prepAccumUnit
 
-    # If pop is -999 set it to 1 so we can calculate the precipitation text
+    # If pop is missing set it to 1 so we can calculate the precipitation text
     if np.isnan(pop):
         pop = 1
 
