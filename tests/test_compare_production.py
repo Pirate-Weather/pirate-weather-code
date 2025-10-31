@@ -24,7 +24,18 @@ class ProductionRequestError(Exception):
 
 
 def _fetch_production_json(url: str) -> dict:
-    """Fetch JSON from the production API with a 10 second timeout."""
+    """Fetch JSON from the production API with a 10 second timeout.
+
+    Args:
+        url: The URL to fetch JSON data from.
+
+    Returns:
+        A dictionary parsed from the JSON response.
+
+    Raises:
+        ProductionRequestError: If the request fails due to a network issue,
+            an unexpected status code, or invalid JSON in the response.
+    """
 
     try:
         with urlopen(url, timeout=10) as response:
