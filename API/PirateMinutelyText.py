@@ -90,17 +90,17 @@ def calcaulate_consecutive_indexes(prepIndex):
 
 
 def calculate_minutely_text(
-    minuteArr, currentText, currentIcon, icon, precipIntensityUnit, maxCAPE=0
+    minuteArr, currentText, currentIcon, icon, maxCAPE=0
 ):
     """
-    Calculates the minutely summary given an array of minutes
+    Calculates the minutely summary given an array of minutes.
+    All inputs are expected in SI units (mm/h for precipitation intensity).
 
     Parameters:
-    - minuteArr (arr): An array of the minutes
+    - minuteArr (arr): An array of the minutes (with SI units)
     - currentText (str/arr): The current conditions in translations format
     - currentIcon (str): The icon representing the current conditions
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
-    - prepAccumUnit (float): The precipitation accumulation/intensity unit
     - maxCAPE (float): The maximum CAPE value for the next hour (default: 0)
 
     Returns:
@@ -268,10 +268,9 @@ def calculate_minutely_text(
         cIcon = "mixed"
     # If there is two precipitation types for the hour
     elif len(starts) == 2:
-        # Calculate the precipitation text and icon
+        # Calculate the precipitation text and icon (all in SI units: mm/h)
         text, cIcon = calculate_precip_text(
             maxIntensity,
-            precipIntensityUnit,
             first_precip,
             "minute",
             rainMaxIntensity,
@@ -287,7 +286,6 @@ def calculate_minutely_text(
                 "and",
                 calculate_precip_text(
                     maxIntensity,
-                    precipIntensityUnit,
                     "rain",
                     "minute",
                     rainMaxIntensity,
@@ -324,7 +322,6 @@ def calculate_minutely_text(
     elif sleetIndex:
         text, cIcon = calculate_precip_text(
             maxIntensity,
-            precipIntensityUnit,
             "sleet",
             "minute",
             rainMaxIntensity,
@@ -344,7 +341,6 @@ def calculate_minutely_text(
     elif snowIndex:
         text, cIcon = calculate_precip_text(
             maxIntensity,
-            precipIntensityUnit,
             "snow",
             "minute",
             rainMaxIntensity,
@@ -364,7 +360,6 @@ def calculate_minutely_text(
     elif rainIndex:
         text, cIcon = calculate_precip_text(
             maxIntensity,
-            precipIntensityUnit,
             "rain",
             "minute",
             rainMaxIntensity,
@@ -384,7 +379,6 @@ def calculate_minutely_text(
     elif iceIndex:
         text, cIcon = calculate_precip_text(
             maxIntensity,
-            precipIntensityUnit,
             "ice",
             "minute",
             rainMaxIntensity,
@@ -404,7 +398,6 @@ def calculate_minutely_text(
     elif iceIndex:
         text, cIcon = calculate_precip_text(
             maxIntensity,
-            precipIntensityUnit,
             "hail",
             "minute",
             rainMaxIntensity,
@@ -424,7 +417,6 @@ def calculate_minutely_text(
     else:
         text, cIcon = calculate_precip_text(
             maxIntensity,
-            precipIntensityUnit,
             "none",
             "minute",
             noneMaxIntensity,
