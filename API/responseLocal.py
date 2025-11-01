@@ -4271,7 +4271,9 @@ async def PW_Forecast(
         pressure_hpa = round(InterPday[idx, DATA_DAY["pressure"]] / 100, 2)
 
         dayObject = {
-            "time": int(day_array_grib[idx]) if not np.isnan(day_array_grib[idx]) else 0,
+            "time": int(day_array_grib[idx])
+            if not np.isnan(day_array_grib[idx])
+            else 0,
             "summary": dayText,
             "icon": dayIcon,
             "dawnTime": int(InterSday[idx, DATA_DAY["dawn"]])
