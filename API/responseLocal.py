@@ -3871,7 +3871,9 @@ async def PW_Forecast(
         pressure_display = round(InterPhour[idx, DATA_HOURLY["pressure"]] / 100, 2)
 
         # Storm distance conversion (from meters)
-        storm_dist_display = round(InterPhour[idx, DATA_HOURLY["storm_dist"]] * visUnits, 2)
+        storm_dist_display = round(
+            InterPhour[idx, DATA_HOURLY["storm_dist"]] * visUnits, 2
+        )
 
         hourItem = {
             "time": int(hour_array_grib[idx]),
@@ -4232,17 +4234,25 @@ async def PW_Forecast(
         # Temperature High is daytime high, so 6 am to 6 pm
         # First index is 6 am, then index 2
         # Nightime is index 1, 3, etc.
-        
+
         # Convert temperatures from Celsius to requested units
         if tempUnits == 0:  # Fahrenheit
             temp_high = round(InterPdayHigh[idx, DATA_DAY["temp"]] * 9 / 5 + 32, 2)
             temp_low = round(InterPdayLow[idx, DATA_DAY["temp"]] * 9 / 5 + 32, 2)
             temp_min = round(InterPdayMin[idx, DATA_DAY["temp"]] * 9 / 5 + 32, 2)
             temp_max = round(InterPdayMax[idx, DATA_DAY["temp"]] * 9 / 5 + 32, 2)
-            apparent_high = round(InterPdayHigh[idx, DATA_DAY["apparent"]] * 9 / 5 + 32, 2)
-            apparent_low = round(InterPdayLow[idx, DATA_DAY["apparent"]] * 9 / 5 + 32, 2)
-            apparent_min = round(InterPdayMin[idx, DATA_DAY["apparent"]] * 9 / 5 + 32, 2)
-            apparent_max = round(InterPdayMax[idx, DATA_DAY["apparent"]] * 9 / 5 + 32, 2)
+            apparent_high = round(
+                InterPdayHigh[idx, DATA_DAY["apparent"]] * 9 / 5 + 32, 2
+            )
+            apparent_low = round(
+                InterPdayLow[idx, DATA_DAY["apparent"]] * 9 / 5 + 32, 2
+            )
+            apparent_min = round(
+                InterPdayMin[idx, DATA_DAY["apparent"]] * 9 / 5 + 32, 2
+            )
+            apparent_max = round(
+                InterPdayMax[idx, DATA_DAY["apparent"]] * 9 / 5 + 32, 2
+            )
             dew_point = round(InterPday[idx, DATA_DAY["dew"]] * 9 / 5 + 32, 2)
         else:  # Celsius (already in Celsius)
             temp_high = round(InterPdayHigh[idx, DATA_DAY["temp"]], 2)
@@ -4254,10 +4264,10 @@ async def PW_Forecast(
             apparent_min = round(InterPdayMin[idx, DATA_DAY["apparent"]], 2)
             apparent_max = round(InterPdayMax[idx, DATA_DAY["apparent"]], 2)
             dew_point = round(InterPday[idx, DATA_DAY["dew"]], 2)
-        
+
         # Convert pressure from Pascals to hectopascals
         pressure_hpa = round(InterPday[idx, DATA_DAY["pressure"]] / 100, 2)
-        
+
         dayObject = {
             "time": int(day_array_grib[idx]),
             "summary": dayText,
@@ -4328,7 +4338,9 @@ async def PW_Forecast(
 
         # Add station pressure if requested
         if "stationPressure" in extraVars:
-            dayObject["stationPressure"] = round(InterPday[idx, DATA_DAY["station_pressure"]] / 100, 2)
+            dayObject["stationPressure"] = round(
+                InterPday[idx, DATA_DAY["station_pressure"]] / 100, 2
+            )
 
         try:
             if idx < 8:
@@ -5418,19 +5430,31 @@ async def PW_Forecast(
         returnOBJ["currently"]["nearestStormBearing"] = int(
             InterPcurrent[DATA_CURRENT["storm_dir"]]
         )
-        returnOBJ["currently"]["precipIntensity"] = round(minuteDict[0]["precipIntensity"], 4)
-        returnOBJ["currently"]["precipProbability"] = round(minuteDict[0]["precipProbability"], 2)
-        returnOBJ["currently"]["precipIntensityError"] = round(minuteDict[0][
-            "precipIntensityError"
-        ], 4)
+        returnOBJ["currently"]["precipIntensity"] = round(
+            minuteDict[0]["precipIntensity"], 4
+        )
+        returnOBJ["currently"]["precipProbability"] = round(
+            minuteDict[0]["precipProbability"], 2
+        )
+        returnOBJ["currently"]["precipIntensityError"] = round(
+            minuteDict[0]["precipIntensityError"], 4
+        )
         returnOBJ["currently"]["precipType"] = minuteDict[0]["precipType"]
-        returnOBJ["currently"]["temperature"] = round(InterPcurrent[DATA_CURRENT["temp"]], 2)
-        returnOBJ["currently"]["apparentTemperature"] = round(InterPcurrent[
-            DATA_CURRENT["apparent"]
-        ], 2)
-        returnOBJ["currently"]["dewPoint"] = round(InterPcurrent[DATA_CURRENT["dew"]], 2)
-        returnOBJ["currently"]["humidity"] = round(InterPcurrent[DATA_CURRENT["humidity"]], 2)
-        returnOBJ["currently"]["pressure"] = round(InterPcurrent[DATA_CURRENT["pressure"]] / 100, 2)
+        returnOBJ["currently"]["temperature"] = round(
+            InterPcurrent[DATA_CURRENT["temp"]], 2
+        )
+        returnOBJ["currently"]["apparentTemperature"] = round(
+            InterPcurrent[DATA_CURRENT["apparent"]], 2
+        )
+        returnOBJ["currently"]["dewPoint"] = round(
+            InterPcurrent[DATA_CURRENT["dew"]], 2
+        )
+        returnOBJ["currently"]["humidity"] = round(
+            InterPcurrent[DATA_CURRENT["humidity"]], 2
+        )
+        returnOBJ["currently"]["pressure"] = round(
+            InterPcurrent[DATA_CURRENT["pressure"]] / 100, 2
+        )
         returnOBJ["currently"]["windSpeed"] = round(
             InterPcurrent[DATA_CURRENT["wind"]] * windUnit, 2
         )
@@ -5440,17 +5464,23 @@ async def PW_Forecast(
         returnOBJ["currently"]["windBearing"] = int(
             np.mod(InterPcurrent[DATA_CURRENT["bearing"]], 360)
         )
-        returnOBJ["currently"]["cloudCover"] = round(InterPcurrent[DATA_CURRENT["cloud"]], 2)
+        returnOBJ["currently"]["cloudCover"] = round(
+            InterPcurrent[DATA_CURRENT["cloud"]], 2
+        )
         returnOBJ["currently"]["uvIndex"] = round(InterPcurrent[DATA_CURRENT["uv"]], 2)
         returnOBJ["currently"]["visibility"] = round(
             InterPcurrent[DATA_CURRENT["vis"]] * visUnits, 2
         )
         returnOBJ["currently"]["ozone"] = round(InterPcurrent[DATA_CURRENT["ozone"]], 2)
-        returnOBJ["currently"]["smoke"] = round(InterPcurrent[
-            DATA_CURRENT["smoke"]
-        ], 2)  # kg/m3 to ug/m3
-        returnOBJ["currently"]["fireIndex"] = round(InterPcurrent[DATA_CURRENT["fire"]], 2)
-        returnOBJ["currently"]["feelsLike"] = round(InterPcurrent[DATA_CURRENT["feels_like"]], 2)
+        returnOBJ["currently"]["smoke"] = round(
+            InterPcurrent[DATA_CURRENT["smoke"]], 2
+        )  # kg/m3 to ug/m3
+        returnOBJ["currently"]["fireIndex"] = round(
+            InterPcurrent[DATA_CURRENT["fire"]], 2
+        )
+        returnOBJ["currently"]["feelsLike"] = round(
+            InterPcurrent[DATA_CURRENT["feels_like"]], 2
+        )
         returnOBJ["currently"]["currentDayIce"] = round(dayZeroIce, 4)
         returnOBJ["currently"]["currentDayLiquid"] = round(dayZeroRain, 4)
         returnOBJ["currently"]["currentDaySnow"] = round(dayZeroSnow, 4)
@@ -5458,9 +5488,9 @@ async def PW_Forecast(
         returnOBJ["currently"]["cape"] = int(InterPcurrent[DATA_CURRENT["cape"]])
 
         if "stationPressure" in extraVars:
-            returnOBJ["currently"]["stationPressure"] = round(InterPcurrent[
-                DATA_CURRENT["station_pressure"]
-            ] / 100, 2)
+            returnOBJ["currently"]["stationPressure"] = round(
+                InterPcurrent[DATA_CURRENT["station_pressure"]] / 100, 2
+            )
 
         # Update the text
         if InterPcurrent[DATA_CURRENT["time"]] < InterSday[0, DATA_DAY["sunrise"]]:
