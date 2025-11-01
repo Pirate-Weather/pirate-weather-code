@@ -3885,7 +3885,9 @@ async def PW_Forecast(
             "pressure": pressure_display,
             "windSpeed": round(wind_display, 2),
             "windGust": round(gust_display, 2),
-            "windBearing": int(InterPhour[idx, DATA_HOURLY["bearing"]]) if not np.isnan(InterPhour[idx, DATA_HOURLY["bearing"]]) else 0,
+            "windBearing": int(InterPhour[idx, DATA_HOURLY["bearing"]])
+            if not np.isnan(InterPhour[idx, DATA_HOURLY["bearing"]])
+            else 0,
             "cloudCover": round(InterPhour[idx, DATA_HOURLY["cloud"]], 2),
             "uvIndex": round(InterPhour[idx, DATA_HOURLY["uv"]], 2),
             "visibility": round(vis_display, 2),
@@ -3895,11 +3897,15 @@ async def PW_Forecast(
             "snowAccumulation": snow_display,
             "iceAccumulation": ice_display,
             "nearestStormDistance": storm_dist_display,
-            "nearestStormBearing": int(InterPhour[idx, DATA_HOURLY["storm_dir"]]) if not np.isnan(InterPhour[idx, DATA_HOURLY["storm_dir"]]) else 0,
+            "nearestStormBearing": int(InterPhour[idx, DATA_HOURLY["storm_dir"]])
+            if not np.isnan(InterPhour[idx, DATA_HOURLY["storm_dir"]])
+            else 0,
             "fireIndex": round(InterPhour[idx, DATA_HOURLY["fire"]], 2),
             "feelsLike": round(feels_like_display, 2),
             "solar": round(InterPhour[idx, DATA_HOURLY["solar"]], 2),
-            "cape": int(InterPhour[idx, DATA_HOURLY["cape"]]) if not np.isnan(InterPhour[idx, DATA_HOURLY["cape"]]) else 0,
+            "cape": int(InterPhour[idx, DATA_HOURLY["cape"]])
+            if not np.isnan(InterPhour[idx, DATA_HOURLY["cape"]])
+            else 0,
         }
 
         # Add station pressure if requested
@@ -4273,7 +4279,9 @@ async def PW_Forecast(
             "moonPhase": round(InterSday[idx, DATA_DAY["moon_phase"]], 2),
             "precipIntensity": round(InterPday[idx, DATA_DAY["intensity"]], 4),
             "precipIntensityMax": round(InterPdayMax[idx, DATA_DAY["intensity"]], 4),
-            "precipIntensityMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["intensity"]]) if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["intensity"]]) else 0,
+            "precipIntensityMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["intensity"]])
+            if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["intensity"]])
+            else 0,
             "precipProbability": round(InterPdayMax[idx, DATA_DAY["prob"]], 2),
             "precipAccumulation": round(
                 InterPdaySum[idx, DATA_DAY["rain"]]
@@ -4283,43 +4291,83 @@ async def PW_Forecast(
             ),
             "precipType": PTypeDay[idx],
             "temperatureHigh": temp_high,
-            "temperatureHighTime": int(InterPdayHighTime[idx, DATA_DAY["temp"]]) if not np.isnan(InterPdayHighTime[idx, DATA_DAY["temp"]]) else 0,
+            "temperatureHighTime": int(InterPdayHighTime[idx, DATA_DAY["temp"]])
+            if not np.isnan(InterPdayHighTime[idx, DATA_DAY["temp"]])
+            else 0,
             "temperatureLow": temp_low,
-            "temperatureLowTime": int(InterPdayLowTime[idx, DATA_DAY["temp"]]) if not np.isnan(InterPdayLowTime[idx, DATA_DAY["temp"]]) else 0,
+            "temperatureLowTime": int(InterPdayLowTime[idx, DATA_DAY["temp"]])
+            if not np.isnan(InterPdayLowTime[idx, DATA_DAY["temp"]])
+            else 0,
             "apparentTemperatureHigh": apparent_high,
-            "apparentTemperatureHighTime": int(InterPdayHighTime[idx, DATA_DAY["apparent"]]) if not np.isnan(InterPdayHighTime[idx, DATA_DAY["apparent"]]) else 0,
+            "apparentTemperatureHighTime": int(
+                InterPdayHighTime[idx, DATA_DAY["apparent"]]
+            )
+            if not np.isnan(InterPdayHighTime[idx, DATA_DAY["apparent"]])
+            else 0,
             "apparentTemperatureLow": apparent_low,
-            "apparentTemperatureLowTime": int(InterPdayLowTime[idx, DATA_DAY["apparent"]]) if not np.isnan(InterPdayLowTime[idx, DATA_DAY["apparent"]]) else 0,
+            "apparentTemperatureLowTime": int(
+                InterPdayLowTime[idx, DATA_DAY["apparent"]]
+            )
+            if not np.isnan(InterPdayLowTime[idx, DATA_DAY["apparent"]])
+            else 0,
             "dewPoint": dew_point,
             "humidity": round(InterPday[idx, DATA_DAY["humidity"]], 2),
             "pressure": pressure_hpa,
             "windSpeed": round(InterPday[idx, DATA_DAY["wind"]] * windUnit, 2),
             "windGust": round(InterPday[idx, DATA_DAY["gust"]] * windUnit, 2),
-            "windGustTime": int(InterPdayMaxTime[idx, DATA_DAY["gust"]]) if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["gust"]]) else 0,
-            "windBearing": int(InterPday[idx, DATA_DAY["bearing"]]) if not np.isnan(InterPday[idx, DATA_DAY["bearing"]]) else 0,
+            "windGustTime": int(InterPdayMaxTime[idx, DATA_DAY["gust"]])
+            if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["gust"]])
+            else 0,
+            "windBearing": int(InterPday[idx, DATA_DAY["bearing"]])
+            if not np.isnan(InterPday[idx, DATA_DAY["bearing"]])
+            else 0,
             "cloudCover": round(InterPday[idx, DATA_DAY["cloud"]], 2),
             "uvIndex": round(InterPdayMax[idx, DATA_DAY["uv"]], 2),
-            "uvIndexTime": int(InterPdayMaxTime[idx, DATA_DAY["uv"]]) if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["uv"]]) else 0,
+            "uvIndexTime": int(InterPdayMaxTime[idx, DATA_DAY["uv"]])
+            if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["uv"]])
+            else 0,
             "visibility": round(InterPday[idx, DATA_DAY["vis"]] * visUnits, 2),
             "temperatureMin": temp_min,
-            "temperatureMinTime": int(InterPdayMinTime[idx, DATA_DAY["temp"]]) if not np.isnan(InterPdayMinTime[idx, DATA_DAY["temp"]]) else 0,
+            "temperatureMinTime": int(InterPdayMinTime[idx, DATA_DAY["temp"]])
+            if not np.isnan(InterPdayMinTime[idx, DATA_DAY["temp"]])
+            else 0,
             "temperatureMax": temp_max,
-            "temperatureMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["temp"]]) if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["temp"]]) else 0,
+            "temperatureMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["temp"]])
+            if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["temp"]])
+            else 0,
             "apparentTemperatureMin": apparent_min,
-            "apparentTemperatureMinTime": int(InterPdayMinTime[idx, DATA_DAY["apparent"]]) if not np.isnan(InterPdayMinTime[idx, DATA_DAY["apparent"]]) else 0,
+            "apparentTemperatureMinTime": int(
+                InterPdayMinTime[idx, DATA_DAY["apparent"]]
+            )
+            if not np.isnan(InterPdayMinTime[idx, DATA_DAY["apparent"]])
+            else 0,
             "apparentTemperatureMax": apparent_max,
-            "apparentTemperatureMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["apparent"]]) if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["apparent"]]) else 0,
+            "apparentTemperatureMaxTime": int(
+                InterPdayMaxTime[idx, DATA_DAY["apparent"]]
+            )
+            if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["apparent"]])
+            else 0,
             "smokeMax": round(InterPdayMax[idx, DATA_DAY["smoke"]], 2),
-            "smokeMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["smoke"]]) if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["smoke"]]) else 0,
+            "smokeMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["smoke"]])
+            if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["smoke"]])
+            else 0,
             "liquidAccumulation": round(InterPdaySum[idx, DATA_DAY["rain"]], 4),
             "snowAccumulation": round(InterPdaySum[idx, DATA_DAY["snow"]], 4),
             "iceAccumulation": round(InterPdaySum[idx, DATA_DAY["ice"]], 4),
             "fireIndexMax": round(InterPdayMax[idx, DATA_DAY["fire"]], 2),
-            "fireIndexMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["fire"]]) if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["fire"]]) else 0,
+            "fireIndexMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["fire"]])
+            if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["fire"]])
+            else 0,
             "solarMax": round(InterPdayMax[idx, DATA_DAY["solar"]], 2),
-            "solarMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["solar"]]) if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["solar"]]) else 0,
-            "capeMax": int(InterPdayMax[idx, DATA_DAY["cape"]]) if not np.isnan(InterPdayMax[idx, DATA_DAY["cape"]]) else 0,
-            "capeMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["cape"]]) if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["cape"]]) else 0,
+            "solarMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["solar"]])
+            if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["solar"]])
+            else 0,
+            "capeMax": int(InterPdayMax[idx, DATA_DAY["cape"]])
+            if not np.isnan(InterPdayMax[idx, DATA_DAY["cape"]])
+            else 0,
+            "capeMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["cape"]])
+            if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["cape"]])
+            else 0,
         }
 
         # Add station pressure if requested
@@ -5465,7 +5513,11 @@ async def PW_Forecast(
         returnOBJ["currently"]["currentDayLiquid"] = round(dayZeroRain, 4)
         returnOBJ["currently"]["currentDaySnow"] = round(dayZeroSnow, 4)
         returnOBJ["currently"]["solar"] = round(InterPcurrent[DATA_CURRENT["solar"]], 2)
-        returnOBJ["currently"]["cape"] = int(InterPcurrent[DATA_CURRENT["cape"]]) if not np.isnan(InterPcurrent[DATA_CURRENT["cape"]]) else 0
+        returnOBJ["currently"]["cape"] = (
+            int(InterPcurrent[DATA_CURRENT["cape"]])
+            if not np.isnan(InterPcurrent[DATA_CURRENT["cape"]])
+            else 0
+        )
 
         if "stationPressure" in extraVars:
             returnOBJ["currently"]["stationPressure"] = round(
