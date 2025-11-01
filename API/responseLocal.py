@@ -3218,7 +3218,7 @@ async def PW_Forecast(
         np.argmin(np.isnan(PressureHour), axis=1), PressureHour.T
     )
 
-    # Clip between 800 and 1100 (keep in Pascals)
+    # Clip between 800 and 1100 hPa (80000-110000 Pascals)
     InterPhour[:, DATA_HOURLY["pressure"]] = clipLog(
         InterPhour[:, DATA_HOURLY["pressure"]],
         CLIP_PRESSURE["min"],
@@ -4739,7 +4739,7 @@ async def PW_Forecast(
             * interpFac2
         )
 
-    # Clip between 800 and 1100 (keep in Pascals)
+    # Clip between 800 and 1100 hPa (80000-110000 Pascals)
     InterPcurrent[DATA_CURRENT["pressure"]] = clipLog(
         InterPcurrent[DATA_CURRENT["pressure"]],
         CLIP_PRESSURE["min"],
