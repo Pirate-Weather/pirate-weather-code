@@ -3870,7 +3870,9 @@ async def PW_Forecast(
         )
 
         hourItem = {
-            "time": int(hour_array_grib[idx]),
+            "time": int(hour_array_grib[idx])
+            if not np.isnan(hour_array_grib[idx])
+            else 0,
             "summary": hourText,
             "icon": hourIcon,
             "precipIntensity": round(intensity_display, 4),
@@ -4269,13 +4271,21 @@ async def PW_Forecast(
         pressure_hpa = round(InterPday[idx, DATA_DAY["pressure"]] / 100, 2)
 
         dayObject = {
-            "time": int(day_array_grib[idx]),
+            "time": int(day_array_grib[idx]) if not np.isnan(day_array_grib[idx]) else 0,
             "summary": dayText,
             "icon": dayIcon,
-            "dawnTime": int(InterSday[idx, DATA_DAY["dawn"]]),
-            "sunriseTime": int(InterSday[idx, DATA_DAY["sunrise"]]),
-            "sunsetTime": int(InterSday[idx, DATA_DAY["sunset"]]),
-            "duskTime": int(InterSday[idx, DATA_DAY["dusk"]]),
+            "dawnTime": int(InterSday[idx, DATA_DAY["dawn"]])
+            if not np.isnan(InterSday[idx, DATA_DAY["dawn"]])
+            else 0,
+            "sunriseTime": int(InterSday[idx, DATA_DAY["sunrise"]])
+            if not np.isnan(InterSday[idx, DATA_DAY["sunrise"]])
+            else 0,
+            "sunsetTime": int(InterSday[idx, DATA_DAY["sunset"]])
+            if not np.isnan(InterSday[idx, DATA_DAY["sunset"]])
+            else 0,
+            "duskTime": int(InterSday[idx, DATA_DAY["dusk"]])
+            if not np.isnan(InterSday[idx, DATA_DAY["dusk"]])
+            else 0,
             "moonPhase": round(InterSday[idx, DATA_DAY["moon_phase"]], 2),
             "precipIntensity": round(InterPday[idx, DATA_DAY["intensity"]], 4),
             "precipIntensityMax": round(InterPdayMax[idx, DATA_DAY["intensity"]], 4),
