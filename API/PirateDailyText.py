@@ -180,6 +180,12 @@ def _get_time_phrase(
 
         # Handle specific patterns for 2 periods
         if num_periods == 2:
+            # Return for-day for day/night summaries if it occurs over both periods
+            if total_periods_available == 2 and is_continuous:
+                return ["for-day"]
+            # Otherwise return during
+            elif total_periods_available == 2 and not is_continuous:
+                return ["during", all_periods[start_idx]]
             # Starts in the 3rd period and continues to the 4th (total 4 periods)
             if (
                 start_idx == check_period + 2

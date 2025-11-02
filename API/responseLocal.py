@@ -2319,14 +2319,14 @@ async def PW_Forecast(
         ] = d
         hourlyDay4pmIndex[
             np.where(
-                (hour_array_grib > day_array_4am_grib[d])
+                (hour_array_grib >= day_array_4am_grib[d])
                 & (hour_array_grib <= day_array_4pm_grib[d])
             )
         ] = d
         hourlyNight4amIndex[
             np.where(
                 (hour_array_grib > day_array_4pm_grib[d])
-                & (hour_array_grib <= day_array_4am_grib[d + 1])
+                & (hour_array_grib < day_array_4am_grib[d + 1])
             )
         ] = d
         hourlyHighIndex[
