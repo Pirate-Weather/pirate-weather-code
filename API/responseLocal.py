@@ -5896,7 +5896,7 @@ async def PW_Forecast(
             ]
 
     returnOBJ["day_night"] = dict()
-    returnOBJ["day_night"]["data"] = day_night_list[0:(ouputDays * 2)]
+    returnOBJ["day_night"]["data"] = day_night_list[0 : (ouputDays * 2)]
 
     if exDaily != 1:
         returnOBJ["daily"] = dict()
