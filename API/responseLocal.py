@@ -13,7 +13,6 @@ import subprocess
 import sys
 import threading
 import time
-import traceback
 from collections import Counter
 from typing import Union
 
@@ -41,6 +40,7 @@ from API.api_utils import (
     clipLog,
     estimate_visibility_gultepe_rh_pr_numpy,
     replace_nan,
+    select_daily_precip_type,
 )
 from API.constants.api_const import (
     API_VERSION,
@@ -772,11 +772,10 @@ class WeatherParallel(object):
                 return dataOut
 
             except Exception:
-                print("### " + model + " Failure!")
+                logger.exception("### %s Failure!", model)
                 errCount = errCount + 1
-                print(traceback.print_exc())
 
-        print("### " + model + " Failure!")
+        logger.error("### %s Failure!", model)
         dataOut = False
         return dataOut
 
@@ -2150,8 +2149,7 @@ async def PW_Forecast(
                 ]
 
     except Exception:
-        print("HRRR or NBM data not available, falling back to GFS")
-        print(traceback.print_exc())
+        logger.exception("HRRR or NBM data not available, falling back to GFS")
         if "hrrr_18-48" in sourceTimes:
             sourceTimes.pop("hrrr_18-48", None)
         if "nbm_fire" in sourceTimes:
@@ -2237,6 +2235,20 @@ async def PW_Forecast(
         ]
     ).astype(np.int32)
 
+    day_array_4pm_grib = np.array(
+        [
+            pytzTZ.localize(
+                datetime.datetime(
+                    year=baseTime.year, month=baseTime.month, day=baseTime.day, hour=16
+                )
+                + datetime.timedelta(days=i)
+            )
+            .astimezone(utc)
+            .timestamp()
+            for i in range(10)
+        ]
+    ).astype(np.int32)
+
     day_array_6am_grib = np.array(
         [
             pytzTZ.localize(
@@ -2288,6 +2300,8 @@ async def PW_Forecast(
     hourlyDay4amIndex = np.full(len(hour_array_grib), MISSING_DATA)
     hourlyHighIndex = np.full(len(hour_array_grib), MISSING_DATA)
     hourlyLowIndex = np.full(len(hour_array_grib), MISSING_DATA)
+    hourlyDay4pmIndex = np.full(len(hour_array_grib), MISSING_DATA)
+    hourlyNight4amIndex = np.full(len(hour_array_grib), MISSING_DATA)
 
     # Zero to 9 to account for the four horus in day 8
     for d in range(0, 9):
@@ -2301,6 +2315,18 @@ async def PW_Forecast(
             np.where(
                 (hour_array_grib >= day_array_4am_grib[d])
                 & (hour_array_grib < day_array_4am_grib[d + 1])
+            )
+        ] = d
+        hourlyDay4pmIndex[
+            np.where(
+                (hour_array_grib > day_array_4am_grib[d])
+                & (hour_array_grib <= day_array_4pm_grib[d])
+            )
+        ] = d
+        hourlyNight4amIndex[
+            np.where(
+                (hour_array_grib > day_array_4pm_grib[d])
+                & (hour_array_grib <= day_array_4am_grib[d + 1])
             )
         ] = d
         hourlyHighIndex[
@@ -2321,12 +2347,16 @@ async def PW_Forecast(
         hourlyDay4amIndex = hourlyDay4amIndex.astype(int)
         hourlyHighIndex = hourlyHighIndex.astype(int)
         hourlyLowIndex = hourlyLowIndex.astype(int)
+        hourlyDay4pmIndex = hourlyDay4pmIndex.astype(int)
+        hourlyNight4amIndex = hourlyNight4amIndex.astype(int)
     else:
         # When running in timemachine mode, don't try to parse through different times, use the current 24h day for everything
         hourlyDayIndex = np.full(len(hour_array_grib), int(0))
         hourlyDay4amIndex = np.full(len(hour_array_grib), int(0))
         hourlyHighIndex = np.full(len(hour_array_grib), int(0))
         hourlyLowIndex = np.full(len(hour_array_grib), int(0))
+        hourlyDay4pmIndex = np.full(len(hour_array_grib), int(0))
+        hourlyNight4amIndex = np.full(len(hour_array_grib), int(0))
 
     # +1 to account for the extra 4 hours of summary
     InterSday = np.zeros(shape=(daily_days + 1, 21))
@@ -3917,8 +3947,7 @@ async def PW_Forecast(
                 hourItem["icon"] = hourIcon
 
         except Exception:
-            print("HOURLY TEXT GEN ERROR:")
-            print(traceback.print_exc())
+            logger.exception("HOURLY TEXT GEN ERROR")
 
         if version < 2:
             hourItem.pop("liquidAccumulation", None)
@@ -3958,7 +3987,13 @@ async def PW_Forecast(
     mean_4am_results = []
     sum_4am_results = []
     max_4am_results = []
+    mean_day_results = []
+    sum_day_results = []
+    mean_night_results = []
+    sum_night_results = []
     maxPchanceDay = np.zeros((daily_days))
+    max_precip_chance_day = np.zeros((daily_days))
+    max_precip_chance_night = np.zeros((daily_days))
 
     # Pre-calculate masks for each group to avoid redundant computation
     masks = [hourlyDayIndex == day_index for day_index in range(daily_days)]
@@ -3999,6 +4034,52 @@ async def PW_Forecast(
         else:
             maxPchanceDay[mIDX] = dailyTypeCount[0][0]
 
+    # Day portion of half day runs from 4am to 4pm
+    masks = [hourlyDay4pmIndex == day_index for day_index in range(daily_days)]
+    for mIDX, mask in enumerate(masks):
+        filtered_data = InterPhour[mask]
+
+        # Calculate and store each statistic for the current group
+        mean_day_results.append(np.mean(filtered_data, axis=0))
+        sum_day_results.append(np.sum(filtered_data, axis=0))
+
+        dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
+
+        # Check if the most common type is zero, in that case return the second most common
+        if dailyTypeCount[0][0] == 0:
+            if len(dailyTypeCount) == 2:
+                max_precip_chance_day[mIDX] = dailyTypeCount[1][0]
+            else:
+                max_precip_chance_day[mIDX] = dailyTypeCount[0][
+                    0
+                ]  # If all ptypes are none, then really shouldn't be any precipitation
+
+        else:
+            max_precip_chance_day[mIDX] = dailyTypeCount[0][0]
+
+    # Night portion of half day runs from 4pm to 4am the next day
+    masks = [hourlyNight4amIndex == day_index for day_index in range(daily_days)]
+    for mIDX, mask in enumerate(masks):
+        filtered_data = InterPhour[mask]
+
+        # Calculate and store each statistic for the current group
+        mean_night_results.append(np.mean(filtered_data, axis=0))
+        sum_night_results.append(np.sum(filtered_data, axis=0))
+
+        dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
+
+        # Check if the most common type is zero, in that case return the second most common
+        if dailyTypeCount[0][0] == 0:
+            if len(dailyTypeCount) == 2:
+                max_precip_chance_night[mIDX] = dailyTypeCount[1][0]
+            else:
+                max_precip_chance_night[mIDX] = dailyTypeCount[0][
+                    0
+                ]  # If all ptypes are none, then really shouldn't be any precipitation
+
+        else:
+            max_precip_chance_night[mIDX] = dailyTypeCount[0][0]
+
     # Daily High
     masks = [hourlyHighIndex == day_index for day_index in range(daily_days)]
 
@@ -4035,63 +4116,42 @@ async def PW_Forecast(
     InterPday4am = np.array(mean_4am_results)
     InterPdaySum4am = np.array(sum_4am_results)
     InterPdayMax4am = np.array(max_4am_results)
+    interp_half_day_sum = np.array(sum_day_results)
+    interp_half_day_mean = np.array(mean_day_results)
+    interp_half_night_sum = np.array(sum_night_results)
+    interp_half_night_mean = np.array(mean_night_results)
 
-    # Select the daily accum type:
-    # Start with the most common type for the day as a baseline
+    # Determine the daily precipitation type (encapsulated helper)
+    try:
+        maxPchanceDay = select_daily_precip_type(
+            InterPdaySum, DATA_DAY, maxPchanceDay, PRECIP_IDX, prepAccumUnit
+        )
+        max_precip_chance_day = select_daily_precip_type(
+            interp_half_day_sum,
+            DATA_DAY,
+            max_precip_chance_day,
+            PRECIP_IDX,
+            prepAccumUnit,
+        )
+        max_precip_chance_night = select_daily_precip_type(
+            interp_half_night_sum,
+            DATA_DAY,
+            max_precip_chance_night,
+            PRECIP_IDX,
+            prepAccumUnit,
+        )
+    except Exception:
+        # Fallback: preserve original inline logic if helper fails (shouldn't happen)
+        logger.exception("select_daily_precip_type error")
 
-    # The logic here is trying to guess what the most "useful" type of precipitation would be, while avoiding strange results
-    # First, if there is a ton of rain, that should show up even if there's a lot of snow "hours"
-    # Then, since snow is 10x rain, the rain icon shouldn't appear is there is much snow,
-    # otherwise it looks like an unreasonable amount of rain. So snow greater than 1 cm takes priority over rain.
-    # Finally, if there is much ice at all, that takes priority over rain or snow.
-
-    # Improved logic: if all types are present, use sleet (3).
-    all_types = (
-        (InterPdaySum[:, DATA_DAY["rain"]] > 0)
-        & (InterPdaySum[:, DATA_DAY["snow"]] > 0)
-        & (InterPdaySum[:, DATA_DAY["ice"]] > 0)
-    )
-    maxPchanceDay[all_types] = 3
-
-    # Otherwise, use the type with the most accumulation.
-    # 21: rain, 22: snow, 23: ice
-    precip_accum = np.stack(
-        [
-            InterPdaySum[:, DATA_DAY["rain"]],  # rain
-            InterPdaySum[:, DATA_DAY["snow"]],  # snow
-            InterPdaySum[:, DATA_DAY["ice"]],  # ice
-        ],
-        axis=1,
-    )
-    # 4: rain, 1: snow, 2: ice (map index to type)
-
-    type_map = np.array([PRECIP_IDX["rain"], PRECIP_IDX["snow"], PRECIP_IDX["ice"]])
-    dominant_type = type_map[np.argmax(precip_accum, axis=1)]
-
-    # Only update where not all types are present.
-    not_all_types = ~all_types
-    has_precip = np.max(precip_accum, axis=1) > 0
-    update_mask = not_all_types & has_precip
-    maxPchanceDay[update_mask] = dominant_type[update_mask]
-
-    # The following thresholds are applied after the dominant type (by volume) is determined.
-    # They serve to highlight significant precipitation events, overriding the volume-based
-    # determination if a certain threshold is met. The priority for these overrides is:
-    # Ice > Snow > Rain.
-    # If more than 10 mm of rain is forecast, then rain.
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["rain"]] > (10 * prepAccumUnit)] = (
-        PRECIP_IDX["rain"]
-    )
-
-    # If more than 5 mm of snow is forecast, then snow.
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["snow"]] > (5 * prepAccumUnit)] = PRECIP_IDX[
-        "snow"
-    ]
-
-    # Else, if more than 1 mm of ice is forecast, then ice.
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit)] = PRECIP_IDX[
-        "ice"
-    ]
+    # Process Day/Night data for output
+    day_night_list = []
+    max_precip_chance_day = np.array(max_precip_chance_day).astype(int)
+    precip_type_half_day = pTypeMap[max_precip_chance_day]
+    precip_text_half_day = pTextMap[max_precip_chance_day]
+    max_precip_chance_night = np.array(max_precip_chance_night).astype(int)
+    precip_type_half_night = pTypeMap[max_precip_chance_night]
+    precip_text_half_night = pTextMap[max_precip_chance_night]
 
     # Process Daily Data for ouput
     dayList = []
@@ -4146,6 +4206,259 @@ async def PW_Forecast(
     InterPdayMax[:, DATA_DAY["rain"] : DATA_DAY["fire"]] = InterPdayMax[
         :, DATA_DAY["rain"] : DATA_DAY["fire"]
     ].round(4)
+
+    if TIMING:
+        print("Day/Night Loop start")
+        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+
+    for idx in range(0, daily_days):
+        # Day
+        # Set text
+        if interp_half_day_mean[idx, DATA_HOURLY["prob"]] >= PRECIP_PROB_THRESHOLD and (
+            (
+                (
+                    interp_half_day_mean[idx, DATA_HOURLY["rain"]]
+                    + interp_half_day_mean[idx, DATA_HOURLY["ice"]]
+                )
+                > (HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit)
+            )
+            or (
+                interp_half_day_mean[idx, DATA_HOURLY["snow"]]
+                > (HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit)
+            )
+        ):
+            # If more than 30% chance of precip at any point throughout the day, then the icon for whatever is happening
+            # Thresholds set in mm
+            day_icon = precip_type_half_day[idx]
+            day_text = precip_text_half_day[idx]
+        # If visibility <1000 and during the day
+        # elif InterPhour[idx,14]<1000 and (hour_array_grib[idx]>InterPday[dCount,16] and hour_array_grib[idx]<InterPday[dCount,17]):
+        elif interp_half_day_mean[idx, DATA_HOURLY["vis"]] < (
+            FOG_THRESHOLD_METERS * visUnits
+        ):
+            day_icon = "fog"
+            day_text = "Fog"
+        # If wind is greater than 10 m/s
+        elif interp_half_day_mean[idx, DATA_HOURLY["wind"]] > (
+            WIND_THRESHOLDS["light"] * windUnit
+        ):
+            day_icon = "wind"
+            day_text = "Windy"
+        elif (
+            interp_half_day_mean[idx, DATA_HOURLY["cloud"]]
+            > CLOUD_COVER_THRESHOLDS["cloudy"]
+        ):
+            day_icon = "cloudy"
+            day_text = "Cloudy"
+        elif (
+            interp_half_day_mean[idx, DATA_HOURLY["cloud"]]
+            > CLOUD_COVER_THRESHOLDS["partly_cloudy"]
+        ):
+            day_text = "Partly Cloudy"
+            day_icon = "partly-cloudy-day"
+        else:
+            day_text = "Clear"
+            day_icon = "clear-day"
+
+        day_item = {
+            "time": int(day_array_4am_grib[idx]),
+            "summary": day_text,
+            "icon": day_icon,
+            "precipIntensity": interp_half_day_mean[idx, DATA_HOURLY["intensity"]],
+            "precipProbability": interp_half_day_mean[idx, DATA_HOURLY["prob"]],
+            "precipAccumulation": interp_half_day_sum[idx, DATA_HOURLY["rain"]]
+            + interp_half_day_sum[idx, DATA_HOURLY["snow"]]
+            + interp_half_day_sum[idx, DATA_HOURLY["ice"]],
+            "precipType": precip_type_half_day[idx],
+            "temperature": InterPdayHigh[idx, DATA_DAY["temp"]],
+            "apparentTemperature": InterPdayHigh[idx, DATA_DAY["apparent"]],
+            "dewPoint": interp_half_day_mean[idx, DATA_HOURLY["dew"]],
+            "humidity": interp_half_day_mean[idx, DATA_HOURLY["humidity"]],
+            "pressure": interp_half_day_mean[idx, DATA_HOURLY["pressure"]],
+            "windSpeed": interp_half_day_mean[idx, DATA_HOURLY["wind"]],
+            "windGust": interp_half_day_mean[idx, DATA_HOURLY["gust"]],
+            "windBearing": interp_half_day_mean[idx, DATA_HOURLY["bearing"]].round(),
+            "cloudCover": interp_half_day_mean[idx, DATA_HOURLY["cloud"]],
+            "uvIndex": interp_half_day_mean[idx, DATA_HOURLY["uv"]],
+            "visibility": interp_half_day_mean[idx, DATA_HOURLY["vis"]],
+            "ozone": interp_half_day_mean[idx, DATA_HOURLY["ozone"]],
+            "smoke": interp_half_day_mean[idx, DATA_HOURLY["smoke"]],
+            "liquidAccumulation": interp_half_day_sum[idx, DATA_HOURLY["rain"]],
+            "snowAccumulation": interp_half_day_sum[idx, DATA_HOURLY["snow"]],
+            "iceAccumulation": interp_half_day_sum[idx, DATA_HOURLY["ice"]],
+            "fireIndex": interp_half_day_mean[idx, DATA_HOURLY["fire"]],
+            "feelsLike": interp_half_day_mean[idx, DATA_HOURLY["feels_like"]],
+            "solar": interp_half_day_mean[idx, DATA_HOURLY["solar"]],
+            "cape": interp_half_day_mean[idx, DATA_HOURLY["cape"]],
+        }
+
+        # Add station pressure if requested
+        if "stationPressure" in extraVars:
+            day_item["stationPressure"] = interp_half_day_mean[
+                idx, DATA_HOURLY["station_pressure"]
+            ]
+
+        try:
+            if idx < 8:
+                # Calculate the day summary from 4 to 4
+                dayIcon, dayText = calculate_day_text(
+                    hourList[idx + 4 : idx + 16],
+                    prepAccumUnit,
+                    visUnits,
+                    windUnit,
+                    tempUnits,
+                    True,
+                    str(tz_name),
+                    int(time.time()),
+                    "day",
+                    icon,
+                )
+
+                # Translate the text
+                if summaryText:
+                    day_item["summary"] = translation.translate(["sentence", dayText])
+                    day_item["icon"] = dayIcon
+        except Exception:
+            logger.exception("DAILY TEXT GEN ERROR")
+
+        if version < 2:
+            day_item.pop("liquidAccumulation", None)
+            day_item.pop("snowAccumulation", None)
+            day_item.pop("iceAccumulation", None)
+            day_item.pop("fireIndex", None)
+            day_item.pop("feelsLike", None)
+            day_item.pop("solar", None)
+
+        if timeMachine and not tmExtra:
+            day_item.pop("uvIndex", None)
+            day_item.pop("ozone", None)
+
+        day_night_list.append(day_item)
+
+        # Night
+        # Set text
+        if interp_half_night_mean[
+            idx, DATA_HOURLY["prob"]
+        ] >= PRECIP_PROB_THRESHOLD and (
+            (
+                (
+                    interp_half_night_mean[idx, DATA_HOURLY["rain"]]
+                    + interp_half_night_mean[idx, DATA_HOURLY["ice"]]
+                )
+                > (HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit)
+            )
+            or (
+                interp_half_night_mean[idx, DATA_HOURLY["snow"]]
+                > (HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit)
+            )
+        ):
+            # If more than 30% chance of precip at any point throughout the day, then the icon for whatever is happening
+            # Thresholds set in mm
+            day_icon = precip_type_half_night[idx]
+            day_text = precip_text_half_night[idx]
+        # If visibility <1000 and during the day
+        # elif InterPhour[idx,14]<1000 and (hour_array_grib[idx]>InterPday[dCount,16] and hour_array_grib[idx]<InterPday[dCount,17]):
+        elif interp_half_night_mean[idx, DATA_HOURLY["vis"]] < (
+            FOG_THRESHOLD_METERS * visUnits
+        ):
+            day_icon = "fog"
+            day_text = "Fog"
+        # If wind is greater than 10 m/s
+        elif interp_half_night_mean[idx, DATA_HOURLY["wind"]] > (
+            WIND_THRESHOLDS["light"] * windUnit
+        ):
+            day_icon = "wind"
+            day_text = "Windy"
+        elif (
+            interp_half_night_mean[idx, DATA_HOURLY["cloud"]]
+            > CLOUD_COVER_THRESHOLDS["cloudy"]
+        ):
+            day_icon = "cloudy"
+            day_text = "Cloudy"
+        elif (
+            interp_half_night_mean[idx, DATA_HOURLY["cloud"]]
+            > CLOUD_COVER_THRESHOLDS["partly_cloudy"]
+        ):
+            day_text = "Partly Cloudy"
+            day_icon = "partly-cloudy-night"
+        else:
+            day_text = "Clear"
+            day_icon = "clear-night"
+
+        day_item = {
+            "time": int(day_array_4pm_grib[idx]),
+            "summary": day_text,
+            "icon": day_icon,
+            "precipIntensity": interp_half_night_mean[idx, DATA_HOURLY["intensity"]],
+            "precipProbability": interp_half_night_mean[idx, DATA_HOURLY["prob"]],
+            "precipAccumulation": interp_half_day_sum[idx, DATA_HOURLY["rain"]]
+            + interp_half_day_sum[idx, DATA_HOURLY["snow"]]
+            + interp_half_day_sum[idx, DATA_HOURLY["ice"]],
+            "precipType": precip_type_half_night[idx],
+            "temperature": InterPdayLow[idx, DATA_DAY["temp"]],
+            "apparentTemperature": InterPdayLow[idx, DATA_DAY["apparent"]],
+            "dewPoint": interp_half_night_mean[idx, DATA_HOURLY["dew"]],
+            "humidity": interp_half_night_mean[idx, DATA_HOURLY["humidity"]],
+            "pressure": interp_half_night_mean[idx, DATA_HOURLY["pressure"]],
+            "windSpeed": interp_half_night_mean[idx, DATA_HOURLY["wind"]],
+            "windGust": interp_half_night_mean[idx, DATA_HOURLY["gust"]],
+            "windBearing": interp_half_night_mean[idx, DATA_HOURLY["bearing"]].round(),
+            "cloudCover": interp_half_night_mean[idx, DATA_HOURLY["cloud"]],
+            "uvIndex": interp_half_night_mean[idx, DATA_HOURLY["uv"]],
+            "visibility": interp_half_night_mean[idx, DATA_HOURLY["vis"]],
+            "ozone": interp_half_night_mean[idx, DATA_HOURLY["ozone"]],
+            "smoke": interp_half_night_mean[idx, DATA_HOURLY["smoke"]],
+            "liquidAccumulation": interp_half_day_sum[idx, DATA_HOURLY["rain"]],
+            "snowAccumulation": interp_half_day_sum[idx, DATA_HOURLY["snow"]],
+            "iceAccumulation": interp_half_day_sum[idx, DATA_HOURLY["ice"]],
+            "fireIndex": interp_half_night_mean[idx, DATA_HOURLY["fire"]],
+            "feelsLike": interp_half_night_mean[idx, DATA_HOURLY["feels_like"]],
+            "solar": interp_half_night_mean[idx, DATA_HOURLY["solar"]],
+            "cape": interp_half_night_mean[idx, DATA_HOURLY["cape"]],
+        }
+
+        # Add station pressure if requested
+        if "stationPressure" in extraVars:
+            day_item["stationPressure"] = interp_half_day_mean[
+                idx, DATA_HOURLY["station_pressure"]
+            ]
+
+        try:
+            if idx < 8:
+                # Calculate the day summary from 4 to 4
+                dayIcon, dayText = calculate_day_text(
+                    hourList[idx + 16 : (idx + 1) + 4],
+                    prepAccumUnit,
+                    visUnits,
+                    windUnit,
+                    tempUnits,
+                    False,
+                    str(tz_name),
+                    int(time.time()),
+                    "day",
+                    icon,
+                )
+
+                # Translate the text
+                if summaryText:
+                    day_item["summary"] = translation.translate(["sentence", dayText])
+                    day_item["icon"] = dayIcon
+        except Exception:
+            logger.exception("DAILY TEXT GEN ERROR")
+
+        if version < 2:
+            day_item.pop("liquidAccumulation", None)
+            day_item.pop("snowAccumulation", None)
+            day_item.pop("iceAccumulation", None)
+            day_item.pop("fireIndex", None)
+            day_item.pop("feelsLike", None)
+            day_item.pop("solar", None)
+
+        if timeMachine and not tmExtra:
+            day_item.pop("uvIndex", None)
+            day_item.pop("ozone", None)
+
+        day_night_list.append(day_item)
 
     if TIMING:
         print("Daily Loop start")
@@ -4301,8 +4614,7 @@ async def PW_Forecast(
                     dayObject["summary"] = translation.translate(["sentence", dayText])
                     dayObject["icon"] = dayIcon
         except Exception:
-            print("DAILY TEXT GEN ERROR:")
-            print(traceback.print_exc())
+            logger.exception("DAILY TEXT GEN ERROR")
 
         if version < 2:
             dayObject.pop("dawnTime", None)
@@ -4407,8 +4719,7 @@ async def PW_Forecast(
                     alertList.append(dict(alertDict))
 
     except Exception:
-        print("An Alert error occurred:")
-        print(traceback.print_exc())
+        logger.exception("An Alert error occurred")
 
     # Process WMO alerts for non-US locations
     try:
@@ -4465,8 +4776,7 @@ async def PW_Forecast(
                 alertList.append(dict(wmo_alertDict))
 
     except Exception:
-        print("A WMO Alert error occurred:")
-        print(traceback.print_exc())
+        logger.exception("A WMO Alert error occurred")
 
     # Timing Check
     if TIMING:
@@ -5442,8 +5752,7 @@ async def PW_Forecast(
                 )
                 returnOBJ["currently"]["icon"] = currentIcon
         except Exception:
-            print("CURRENTLY TEXT GEN ERROR:")
-            print(traceback.print_exc())
+            logger.exception("CURRENTLY TEXT GEN ERROR")
 
         if version < 2:
             returnOBJ["currently"].pop("smoke", None)
@@ -5503,8 +5812,7 @@ async def PW_Forecast(
                 ]
 
         except Exception:
-            print("MINUTELY TEXT GEN ERROR:")
-            print(traceback.print_exc())
+            logger.exception("MINUTELY TEXT GEN ERROR")
             returnOBJ["minutely"]["summary"] = pTypesText[
                 int(Counter(maxPchance).most_common(1)[0][0])
             ]
@@ -5544,8 +5852,7 @@ async def PW_Forecast(
                     )
 
             except Exception:
-                print("TEXT GEN ERROR:")
-                print(traceback.print_exc())
+                logger.exception("TEXT GEN ERROR")
                 returnOBJ["hourly"]["summary"] = max(
                     set(hourTextList), key=hourTextList.count
                 )
@@ -5593,6 +5900,9 @@ async def PW_Forecast(
                 int(baseTimeOffset) : int(baseTimeOffset) + ouputHours
             ]
 
+    returnOBJ["day_night"] = dict()
+    returnOBJ["daily"]["data"] = day_night_list[0:ouputDays]
+
     if exDaily != 1:
         returnOBJ["daily"] = dict()
         if (
@@ -5616,8 +5926,7 @@ async def PW_Forecast(
                     )
 
             except Exception:
-                print("DAILY SUMMARY TEXT GEN ERROR:")
-                print(traceback.print_exc())
+                logger.exception("DAILY SUMMARY TEXT GEN ERROR")
                 returnOBJ["daily"]["summary"] = max(
                     set(dayTextList), key=dayTextList.count
                 )
@@ -5689,7 +5998,7 @@ def initialDataSync() -> None:
     global zarrReady
 
     zarrReady = False
-    print("Initial Download")
+    logger.info("Initial Download")
 
     STAGE = os.environ.get("STAGE", "PROD")
     if STAGE == "PROD":
@@ -5700,7 +6009,7 @@ def initialDataSync() -> None:
             "/tmp/SubH.zarr.prod.zip",
             True,
         )
-        print("SubH Download!")
+        logger.info("SubH Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingestVersion + "/HRRR_6H.zarr.zip",
@@ -5708,7 +6017,7 @@ def initialDataSync() -> None:
             "/tmp/HRRR_6H.zarr.prod.zip",
             True,
         )
-        print("HRRR_6H Download!")
+        logger.info("HRRR_6H Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingestVersion + "/GFS.zarr.zip",
@@ -5716,7 +6025,7 @@ def initialDataSync() -> None:
             "/tmp/GFS.zarr.prod.zip",
             True,
         )
-        print("GFS Download!")
+        logger.info("GFS Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip",
@@ -5724,7 +6033,7 @@ def initialDataSync() -> None:
             "/tmp/ECMWF.zarr.prod.zip",
             True,
         )
-        print("ECMWF Download!")
+        logger.info("ECMWF Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingestVersion + "/NBM.zarr.zip",
@@ -5732,7 +6041,7 @@ def initialDataSync() -> None:
             "/tmp/NBM.zarr.prod.zip",
             True,
         )
-        print("NBM Download!")
+        logger.info("NBM Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingestVersion + "/NBM_Fire.zarr.zip",
@@ -5740,7 +6049,7 @@ def initialDataSync() -> None:
             "/tmp/NBM_Fire.zarr.prod.zip",
             True,
         )
-        print("NBM_Fire Download!")
+        logger.info("NBM_Fire Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingestVersion + "/GEFS.zarr.zip",
@@ -5748,7 +6057,7 @@ def initialDataSync() -> None:
             "/tmp/GEFS.zarr.prod.zip",
             True,
         )
-        print("GEFS  Download!")
+        logger.info("GEFS  Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingestVersion + "/HRRR.zarr.zip",
@@ -5756,7 +6065,7 @@ def initialDataSync() -> None:
             "/tmp/HRRR.zarr.prod.zip",
             True,
         )
-        print("HRRR  Download!")
+        logger.info("HRRR  Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingestVersion + "/NWS_Alerts.zarr.zip",
@@ -5764,7 +6073,7 @@ def initialDataSync() -> None:
             "/tmp/NWS_Alerts.zarr.prod.zip",
             True,
         )
-        print("Alerts Download!")
+        logger.info("Alerts Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingestVersion + "/WMO_Alerts.zarr.zip",
@@ -5772,7 +6081,7 @@ def initialDataSync() -> None:
             "/tmp/WMO_Alerts.zarr.prod.zip",
             True,
         )
-        print("WMO Alerts Download!")
+        logger.info("WMO Alerts Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingestVersion + "/RTMA_RU.zarr.zip",
@@ -5780,7 +6089,7 @@ def initialDataSync() -> None:
             "/tmp/RTMA_RU.zarr.prod.zip",
             True,
         )
-        print("RTMA_RU Download!")
+        logger.info("RTMA_RU Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip",
@@ -5788,7 +6097,7 @@ def initialDataSync() -> None:
             "/tmp/ECMWF.zarr.prod.zip",
             True,
         )
-        print("ECMWF Download!")
+        logger.info("ECMWF Download!")
 
         if useETOPO:
             download_if_newer(
@@ -5798,15 +6107,15 @@ def initialDataSync() -> None:
                 "/tmp/ETOPO_DA_C.zarr.prod.zip",
                 True,
             )
-            print("ETOPO Download!")
+            logger.info("ETOPO Download!")
     else:
-        print(STAGE)
+        logger.info(STAGE)
     if STAGE in ("PROD", "DEV", "TIMEMACHINE"):
         update_zarr_store(True)
 
     zarrReady = True
 
-    print("Initial Download End!")
+    logger.info("Initial Download End!")
 
 
 @app.on_event("startup")
