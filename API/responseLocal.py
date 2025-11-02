@@ -4427,7 +4427,7 @@ async def PW_Forecast(
             if idx < 8:
                 # Calculate the day summary from 4 to 4
                 dayIcon, dayText = calculate_day_text(
-                    hourList[(idx * 24) + 16 : ((idx * 24) + 1) + 4],
+                    hourList[(idx * 24) + 16 : ((idx + 1) * 24) + 4],
                     prepAccumUnit,
                     visUnits,
                     windUnit,
