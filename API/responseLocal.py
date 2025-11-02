@@ -4208,7 +4208,7 @@ async def PW_Forecast(
     ].round(4)
 
     if TIMING:
-        print("Day/Night Loop start")
+        print("Daily Loop start")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     for idx in range(0, daily_days):
@@ -4460,11 +4460,6 @@ async def PW_Forecast(
 
         day_night_list.append(day_item)
 
-    if TIMING:
-        print("Daily Loop start")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-
-    for idx in range(0, daily_days):
         if InterPdayMax4am[idx, DATA_DAY["prob"]] > PRECIP_PROB_THRESHOLD and (
             (
                 (
@@ -5901,7 +5896,7 @@ async def PW_Forecast(
             ]
 
     returnOBJ["day_night"] = dict()
-    returnOBJ["day_night"]["data"] = day_night_list[0:ouputDays]
+    returnOBJ["day_night"]["data"] = day_night_list[0:(ouputDays * 2)]
 
     if exDaily != 1:
         returnOBJ["daily"] = dict()
