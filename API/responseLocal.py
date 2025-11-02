@@ -4300,7 +4300,7 @@ async def PW_Forecast(
 
         try:
             if idx < 8:
-                # Calculate the day summary from 4 to 4
+                # Calculate the day summary from 4am to 4pm
                 dayIcon, dayText = calculate_day_text(
                     hourList[(idx * 24) + 4 : (idx * 24) + 17],
                     prepAccumUnit,
@@ -4419,13 +4419,13 @@ async def PW_Forecast(
 
         # Add station pressure if requested
         if "stationPressure" in extraVars:
-            day_item["stationPressure"] = interp_half_day_mean[
+            day_item["stationPressure"] = interp_half_night_mean[
                 idx, DATA_HOURLY["station_pressure"]
             ]
 
         try:
             if idx < 8:
-                # Calculate the day summary from 4 to 4
+                # Calculate the night summary from 5pm to 3am
                 dayIcon, dayText = calculate_day_text(
                     hourList[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
                     prepAccumUnit,
