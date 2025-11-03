@@ -320,6 +320,7 @@ def update_zarr_store(initialRun):
     global RTMA_RU_Zarr
     global ERA5_Data
 
+    # Get Stage
     STAGE = os.environ.get("STAGE", "PROD")
 
     # Create empty dir
@@ -348,8 +349,8 @@ def update_zarr_store(initialRun):
             zarr.storage.ZipStore("/tmp/" + latest_ETOPO, mode="r"), mode="r"
         )
 
+    # Open the Google ERA5 dataset for Dev and TimeMachine
     if STAGE in ("DEV", "TIMEMACHINE"):
-        # Open the Google ERA5 dataset in dev and TimeMachine
         ERA5_Data = init_ERA5()
 
     # Don't open the other files in TimeMachine to reduce memory
@@ -403,7 +404,6 @@ def update_zarr_store(initialRun):
                 command = f"nice -n 20 rm -rf /tmp/{old_dir}"
                 subprocess.run(command, shell=True)
 
-
         latest_ECMWF, old_ECMWF = find_largest_integer_directory(
             "/tmp", "ECMWF.zarr", initialRun
         )
@@ -422,7 +422,9 @@ def update_zarr_store(initialRun):
                 command = f"nice -n 20 rm -rf /tmp/{old_dir}"
                 subprocess.run(command, shell=True)
 
-        latest_NBM, old_NBM = find_largest_integer_directory("/tmp", "NBM.zarr", initialRun)
+        latest_NBM, old_NBM = find_largest_integer_directory(
+            "/tmp", "NBM.zarr", initialRun
+        )
         if latest_NBM is not None:
             NBM_Zarr = zarr.open(
                 zarr.storage.ZipStore("/tmp/" + latest_NBM, mode="r"), mode="r"
@@ -509,22 +511,6 @@ def update_zarr_store(initialRun):
             )
             logger.info("Loading new: " + latest_RTMA_RU)
         for old_dir in old_RTMA_RU:
-            if STAGE == "PROD":
-                logger.info("Removing old: " + old_dir)
-                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-                # subprocess.run(command, shell=True)
-                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
-                subprocess.run(command, shell=True)
-
-        latest_ECMWF, old_ECMWF = find_largest_integer_directory(
-            "/tmp", "ECMWF.zarr", initialRun
-        )
-        if latest_ECMWF is not None:
-            ECMWF_Zarr = zarr.open(
-                zarr.storage.ZipStore("/tmp/" + latest_ECMWF, mode="r"), mode="r"
-            )
-            logger.info("Loading new: " + latest_ECMWF)
-        for old_dir in old_ECMWF:
             if STAGE == "PROD":
                 logger.info("Removing old: " + old_dir)
                 # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"

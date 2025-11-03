@@ -10,5 +10,13 @@
 /.github/workflows/sanity.yml @alexander0042
 /.github/workflows/build.yml @alexander0042
 
+# Summary Scripts
+/API/PirateDailyText.py @cloneofghosts
+/API/PirateMinutelyText.py @cloneofghosts
+/API/PirateSimpleDayText.py @cloneofghosts
+/API/PirateText.py @cloneofghosts
+/API/PirateTextHelper.py @cloneofghosts
+/API/PirateWeeklyText.py @cloneofghosts
+
 # Remove CODEOWNER for requirements file
 /requirements.txt
