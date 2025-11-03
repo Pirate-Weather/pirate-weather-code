@@ -98,7 +98,7 @@ def test_local_vs_production():
 
     # Ottawa, ON (45.4215, -75.6972) and London, UK (51.50853, -0.12574)
     for lat, lon in [(45.4215, -75.6972), (51.50853, -0.12574)]:
-        local_resp = client.get(f"/forecast/{PW_API}/{lat},{lon}?version=2")
+        local_resp = client.get(f"/forecast/{PW_API}/{lat},{lon}?version=2&include=day_night_summary")
         assert local_resp.status_code == 200
         local_data = local_resp.json()
 
