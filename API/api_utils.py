@@ -267,62 +267,60 @@ def estimate_visibility_gultepe_rh_pr_numpy(
 
 
 def select_daily_precip_type(
-    InterPdaySum, DATA_DAY, maxPchanceDay, PRECIP_IDX, prepAccumUnit
+    inter_pday_sum, data_day, max_pchance_day, precip_idx, prep_accum_unit
 ):
     """Determine the dominant precipitation type for each day.
 
     This encapsulates the logic used by the API to pick a single "precip type" icon
     for a day based on accumulated rain/snow/ice. It updates and returns
-    `maxPchanceDay` (modified in-place) for convenience.
+    `max_pchance_day` (modified in-place) for convenience.
 
-    Parameters
-    - InterPdaySum: 2D array-like (n_days, vars) with accumulated precip amounts
-    - DATA_DAY: mapping of variable names to column indices
-    - maxPchanceDay: array-like of ints that will be updated with precip type codes
-    - PRECIP_IDX: mapping of precipitation type names to integer codes
-    - prepAccumUnit: unit conversion multiplier for accumulation thresholds
+    Args:
+        inter_pday_sum: 2D array-like (n_days, vars) with accumulated precip amounts
+        data_day: mapping of variable names to column indices
+        max_pchance_day: array-like of ints that will be updated with precip type codes
+        precip_idx: mapping of precipitation type names to integer codes
+        prep_accum_unit: unit conversion multiplier for accumulation thresholds
 
-    Returns
-    - maxPchanceDay (numpy array)
+    Returns:
+        numpy array: Updated max_pchance_day with precipitation type codes
     """
-    import numpy as _np
-
     # If rain, snow and ice are all present, choose sleet (code 3)
     all_types = (
-        (InterPdaySum[:, DATA_DAY["rain"]] > 0)
-        & (InterPdaySum[:, DATA_DAY["snow"]] > 0)
-        & (InterPdaySum[:, DATA_DAY["ice"]] > 0)
+        (inter_pday_sum[:, data_day["rain"]] > 0)
+        & (inter_pday_sum[:, data_day["snow"]] > 0)
+        & (inter_pday_sum[:, data_day["ice"]] > 0)
     )
-    maxPchanceDay[all_types] = 3
+    max_pchance_day[all_types] = 3
 
     # Use the type with the greatest accumulation as baseline
-    precip_accum = _np.stack(
+    precip_accum = np.stack(
         [
-            InterPdaySum[:, DATA_DAY["rain"]],
-            InterPdaySum[:, DATA_DAY["snow"]],
-            InterPdaySum[:, DATA_DAY["ice"]],
+            inter_pday_sum[:, data_day["rain"]],
+            inter_pday_sum[:, data_day["snow"]],
+            inter_pday_sum[:, data_day["ice"]],
         ],
         axis=1,
     )
 
-    type_map = _np.array([PRECIP_IDX["rain"], PRECIP_IDX["snow"], PRECIP_IDX["ice"]])
-    dominant_type = type_map[_np.argmax(precip_accum, axis=1)]
+    type_map = np.array([precip_idx["rain"], precip_idx["snow"], precip_idx["ice"]])
+    dominant_type = type_map[np.argmax(precip_accum, axis=1)]
 
     # Only update where not all types are present and some precip exists
     not_all_types = ~all_types
-    has_precip = _np.max(precip_accum, axis=1) > 0
+    has_precip = np.max(precip_accum, axis=1) > 0
     update_mask = not_all_types & has_precip
-    maxPchanceDay[update_mask] = dominant_type[update_mask]
+    max_pchance_day[update_mask] = dominant_type[update_mask]
 
     # Threshold overrides: large accumulations force their respective type
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["rain"]] > (10 * prepAccumUnit)] = (
-        PRECIP_IDX["rain"]
+    max_pchance_day[inter_pday_sum[:, data_day["rain"]] > (10 * prep_accum_unit)] = (
+        precip_idx["rain"]
     )
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["snow"]] > (5 * prepAccumUnit)] = PRECIP_IDX[
+    max_pchance_day[inter_pday_sum[:, data_day["snow"]] > (5 * prep_accum_unit)] = precip_idx[
         "snow"
     ]
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit)] = PRECIP_IDX[
+    max_pchance_day[inter_pday_sum[:, data_day["ice"]] > (1 * prep_accum_unit)] = precip_idx[
         "ice"
     ]
 
-    return maxPchanceDay
+    return max_pchance_day
