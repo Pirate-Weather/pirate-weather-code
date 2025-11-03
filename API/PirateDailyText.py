@@ -963,7 +963,11 @@ def calculate_day_text(
                 )
                 is not None
                 # This uses a the 10:1 snow ratio to determine if fog is likely
-                and (hour["liquidIntensity"] <= 0.02 and hour["snowIntensity"] <= 0.2 and hour["iceIntensity"] <= 0.02)
+                and (
+                    hour["liquidIntensity"] <= 0.02
+                    and hour["snowIntensity"] <= 0.2
+                    and hour["iceIntensity"] <= 0.02
+                )
             ):
                 period_data["max_smoke"] = max(period_data["max_smoke"], hour["smoke"])
                 period_data["num_hours_fog"] += 1
@@ -984,16 +988,21 @@ def calculate_day_text(
             elif hour["precipType"] == "sleet":
                 period_data["sleet_accum"] += hour["iceAccumulation"]
 
-            if hour["liquidAccumulation"] > 0 or \
-                hour["snowAccumulation"] > 0 or \
-                hour["iceAccumulation"] > 0:
-                
+            if (
+                hour["liquidAccumulation"] > 0
+                or hour["snowAccumulation"] > 0
+                or hour["iceAccumulation"] > 0
+            ):
                 period_data["precip_types_in_period"].append(hour["precipType"])
                 period_data["max_pop"] = max(
                     period_data["max_pop"], hour["precipProbability"]
                 )
                 period_data["precip_hours_count"] += 1
-                period_data["precip_accum_sum"] += hour["liquidAccumulation"] + hour["snowAccumulation"] + hour["iceAccumulation"]
+                period_data["precip_accum_sum"] += (
+                    hour["liquidAccumulation"]
+                    + hour["snowAccumulation"]
+                    + hour["iceAccumulation"]
+                )
 
                 # Track CAPE when there is precipitation
                 hour_cape = hour.get("cape", MISSING_DATA)
@@ -1067,9 +1076,15 @@ def calculate_day_text(
         total_snow_accum += p_data["snow_accum"]
         total_sleet_accum += p_data["sleet_accum"]
         total_snow_error += p_data["snow_error"]
-        overall_max_rain_intensity = max(overall_max_rain_intensity, p_data["max_rain_intensity"])
-        overall_max_snow_intensity = max(overall_max_snow_intensity, p_data["max_snow_intensity"])
-        overall_max_ice_intensity = max(overall_max_ice_intensity, p_data["max_ice_intensity"])
+        overall_max_rain_intensity = max(
+            overall_max_rain_intensity, p_data["max_rain_intensity"]
+        )
+        overall_max_snow_intensity = max(
+            overall_max_snow_intensity, p_data["max_snow_intensity"]
+        )
+        overall_max_ice_intensity = max(
+            overall_max_ice_intensity, p_data["max_ice_intensity"]
+        )
         overall_max_wind = max(overall_max_wind, p_data["max_wind_speed"])
         overall_avg_cloud_cover_sum += p_data[
             "avg_cloud_cover"

@@ -2795,49 +2795,44 @@ async def PW_Forecast(
         precipTypes = np.array(minuteType)
 
         # Now convert reflectivity to precipitation intensity using estimated types
-        InterPminute[:, DATA_MINUTELY["intensity"]] = (
-            dbz_to_rate(refc_arr, precipTypes)
-        )
+        InterPminute[:, DATA_MINUTELY["intensity"]] = dbz_to_rate(refc_arr, precipTypes)
     elif "nbm" in sourceList:
-        InterPminute[:, DATA_MINUTELY["intensity"]] = (
-            nbmMinuteInterpolation[:, NBM["accum"]]
-        )
+        InterPminute[:, DATA_MINUTELY["intensity"]] = nbmMinuteInterpolation[
+            :, NBM["accum"]
+        ]
     elif "ecmwf_ifs" in sourceList:
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
             ecmwfMinuteInterpolation[:, ECMWF["intensity"]] * 3600
         )
     elif "gefs" in sourceList:
-        InterPminute[:, DATA_MINUTELY["intensity"]] = (
-            gefsMinuteInterpolation[:, GEFS["accum"]]
-        )
+        InterPminute[:, DATA_MINUTELY["intensity"]] = gefsMinuteInterpolation[
+            :, GEFS["accum"]
+        ]
     elif "gfs" in sourceList:
-        InterPminute[:, DATA_MINUTELY["intensity"]] = (
-            dbz_to_rate(gfsMinuteInterpolation[:, GFS["refc"]], precipTypes)
+        InterPminute[:, DATA_MINUTELY["intensity"]] = dbz_to_rate(
+            gfsMinuteInterpolation[:, GFS["refc"]], precipTypes
         )
     elif "era5" in sourceList:
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
-            (
-                era5_MinuteInterpolation[
-                    :, ERA5["large_scale_snowfall_rate_water_equivalent"]
-                ]
-                + era5_MinuteInterpolation[
-                    :, ERA5["convective_snowfall_rate_water_equivalent"]
-                ]
-                + era5_MinuteInterpolation[:, ERA5["large_scale_rain_rate"]]
-                + era5_MinuteInterpolation[:, ERA5["convective_rain_rate"]]
-            )
-            * 3600
-        )
+            era5_MinuteInterpolation[
+                :, ERA5["large_scale_snowfall_rate_water_equivalent"]
+            ]
+            + era5_MinuteInterpolation[
+                :, ERA5["convective_snowfall_rate_water_equivalent"]
+            ]
+            + era5_MinuteInterpolation[:, ERA5["large_scale_rain_rate"]]
+            + era5_MinuteInterpolation[:, ERA5["convective_rain_rate"]]
+        ) * 3600
 
     # "precipIntensityError"
     if "ecmwf_ifs" in sourceList:
-        InterPminute[:, DATA_MINUTELY["error"]] = (
-            ecmwfMinuteInterpolation[:, ECMWF["accum_stddev"]]
-        )
+        InterPminute[:, DATA_MINUTELY["error"]] = ecmwfMinuteInterpolation[
+            :, ECMWF["accum_stddev"]
+        ]
     elif "gefs" in sourceList:
-        InterPminute[:, DATA_MINUTELY["error"]] = (
-            gefsMinuteInterpolation[:, GEFS["error"]]
-        )
+        InterPminute[:, DATA_MINUTELY["error"]] = gefsMinuteInterpolation[
+            :, GEFS["error"]
+        ]
     else:  # Missing
         InterPminute[:, DATA_MINUTELY["error"]] = (
             np.ones(len(minute_array_grib)) * MISSING_DATA
@@ -2870,9 +2865,9 @@ async def PW_Forecast(
     # Snow intensity - for minutely, we don't have temperature/wind readily available
     # So use a default 10:1 ratio
     snow_mask_min = maxPchance == PRECIP_IDX["snow"]
-    InterPminute[snow_mask_min, DATA_MINUTELY["snow_intensity"]] = InterPminute[
-        snow_mask_min, DATA_MINUTELY["intensity"]
-    ] * 10
+    InterPminute[snow_mask_min, DATA_MINUTELY["snow_intensity"]] = (
+        InterPminute[snow_mask_min, DATA_MINUTELY["intensity"]] * 10
+    )
 
     # Sleet intensity (direct from intensity)
     sleet_mask_min = (maxPchance == PRECIP_IDX["ice"]) | (
@@ -3722,7 +3717,9 @@ async def PW_Forecast(
     if snow_indices.size > 0:
         # Convert snow accumulation to intensity using liquid water conversion
         snow_intensity_si = estimate_snow_height(
-            InterPhour[snow_indices, DATA_HOURLY["intensity"]],  # mm/h of water equivalent
+            InterPhour[
+                snow_indices, DATA_HOURLY["intensity"]
+            ],  # mm/h of water equivalent
             InterPhour[snow_indices, DATA_HOURLY["temp"]],  # Celsius
             windSpeedMps[snow_indices],  # m/s
         )
@@ -3773,9 +3770,7 @@ async def PW_Forecast(
     ] = InterPhour[
         :,
         DATA_HOURLY["rain_intensity"] : DATA_HOURLY["ice_intensity"] + 1,
-    ].round(
-        5
-    )
+    ].round(5)
 
     # Round cape to 0
     InterPhour[:, DATA_HOURLY["cape"]] = InterPhour[:, DATA_HOURLY["cape"]].round(0)
@@ -4002,7 +3997,9 @@ async def PW_Forecast(
             "rainIntensity": InterPhour[idx, DATA_HOURLY["rain_intensity"]],
             "snowIntensity": InterPhour[idx, DATA_HOURLY["snow_intensity"]],
             "iceIntensity": InterPhour[idx, DATA_HOURLY["ice_intensity"]],
-            "precipIntensity": InterPhour[idx, DATA_HOURLY["intensity"]], # mm/h, SI, liquid equivalent
+            "precipIntensity": InterPhour[
+                idx, DATA_HOURLY["intensity"]
+            ],  # mm/h, SI, liquid equivalent
         }
 
         try:
@@ -4356,16 +4353,24 @@ async def PW_Forecast(
             if not np.isnan(InterSday[idx, DATA_DAY["dusk"]])
             else 0,
             "moonPhase": round(InterSday[idx, DATA_DAY["moon_phase"]], 2),
-            "precipIntensity": round(InterPday[idx, DATA_DAY["intensity"]] * prepIntensityUnit, 4),
-            "precipIntensityMax": round(InterPdayMax[idx, DATA_DAY["intensity"]] * prepIntensityUnit, 4),
+            "precipIntensity": round(
+                InterPday[idx, DATA_DAY["intensity"]] * prepIntensityUnit, 4
+            ),
+            "precipIntensityMax": round(
+                InterPdayMax[idx, DATA_DAY["intensity"]] * prepIntensityUnit, 4
+            ),
             "precipIntensityMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["intensity"]])
             if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["intensity"]])
             else 0,
             "precipProbability": round(InterPdayMax[idx, DATA_DAY["prob"]], 2),
             "precipAccumulation": round(
-                (InterPdaySum[idx, DATA_DAY["rain"]]
-                + InterPdaySum[idx, DATA_DAY["snow"]]
-                + InterPdaySum[idx, DATA_DAY["ice"]]) * prepAccumUnit, 4
+                (
+                    InterPdaySum[idx, DATA_DAY["rain"]]
+                    + InterPdaySum[idx, DATA_DAY["snow"]]
+                    + InterPdaySum[idx, DATA_DAY["ice"]]
+                )
+                * prepAccumUnit,
+                4,
             ),
             "precipType": PTypeDay[idx],
             "rainIntensity": round(
@@ -4447,9 +4452,15 @@ async def PW_Forecast(
             "smokeMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["smoke"]])
             if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["smoke"]])
             else 0,
-            "liquidAccumulation": round(InterPdaySum[idx, DATA_DAY["rain"]] * prepAccumUnit, 4),
-            "snowAccumulation": round(InterPdaySum[idx, DATA_DAY["snow"]] * prepAccumUnit, 4),
-            "iceAccumulation": round(InterPdaySum[idx, DATA_DAY["ice"]] * prepAccumUnit, 4),
+            "liquidAccumulation": round(
+                InterPdaySum[idx, DATA_DAY["rain"]] * prepAccumUnit, 4
+            ),
+            "snowAccumulation": round(
+                InterPdaySum[idx, DATA_DAY["snow"]] * prepAccumUnit, 4
+            ),
+            "iceAccumulation": round(
+                InterPdaySum[idx, DATA_DAY["ice"]] * prepAccumUnit, 4
+            ),
             "fireIndexMax": round(InterPdayMax[idx, DATA_DAY["fire"]], 2),
             "fireIndexMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["fire"]])
             if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["fire"]])
@@ -5495,7 +5506,7 @@ async def PW_Forecast(
 
     # Determine current precip type from minuteDict
     current_precip_type = minuteDict[0]["precipType"]
-    
+
     if current_precip_type == "rain":
         InterPcurrent[DATA_CURRENT["rain_intensity"]] = InterPcurrent[
             DATA_CURRENT["intensity"]

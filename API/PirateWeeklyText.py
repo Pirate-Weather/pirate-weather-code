@@ -26,8 +26,16 @@ WEEK_DAYS_PLUS_ONE = 8
 MIN_THUNDERSTORM_DAYS = 2
 
 
-def calculate_summary_text(precipitation,
-                            rain_accum, snow_accum, ice_accum, icon, max_rain_intensity, max_snow_intensity, max_ice_intensity):
+def calculate_summary_text(
+    precipitation,
+    rain_accum,
+    snow_accum,
+    ice_accum,
+    icon,
+    max_rain_intensity,
+    max_snow_intensity,
+    max_ice_intensity,
+):
     """
     Calculates the precipitation summary if there are between 1 and 8 days of precipitation.
     Intensities are expected in SI units (mm/h).
@@ -317,7 +325,7 @@ def calculate_precip_summary(
             icon,
             max_rain_intensity,
             max_snow_intensity,
-            max_ice_intensity
+            max_ice_intensity,
         )
 
         # Check if the summary has the over-weekend text
@@ -349,7 +357,7 @@ def calculate_precip_summary(
                 isDayTime=True,
                 eff_rain_intensity=max_rain_intensity,
                 eff_snow_intensity=max_snow_intensity,
-                eff_ice_intensity=max_ice_intensity
+                eff_ice_intensity=max_ice_intensity,
             )
             # Since precipitation is occuring everyday use the for week text instead of through
             precipSummary = [
@@ -483,24 +491,30 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
         # Check if the day has enough precipitation to reach the threshold and record the index in the array, the day it occured on and the type
         # Data is already in SI units (mm for accumulation, mm/h for intensity)
         if (
-            (day["precipType"] == "snow"
-            and day["snowAccumulation"] >= DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM
-            and (
-                day["precipProbability"] >= PRECIP_PROB_THRESHOLD
-                or np.isnan(day["precipProbability"])
-            ))
-            or (day["precipType"] == "rain"
-            and day["liquidAccumulation"] >= DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
-            and (
-                day["precipProbability"] >= PRECIP_PROB_THRESHOLD
-                or np.isnan(day["precipProbability"])
-            ))
-            or (day["precipType"] == "sleet"
-            and day["iceAccumulation"] >= DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
-            and (
-                day["precipProbability"] >= PRECIP_PROB_THRESHOLD
-                or np.isnan(day["precipProbability"])
-            ))
+            (
+                day["precipType"] == "snow"
+                and day["snowAccumulation"] >= DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM
+                and (
+                    day["precipProbability"] >= PRECIP_PROB_THRESHOLD
+                    or np.isnan(day["precipProbability"])
+                )
+            )
+            or (
+                day["precipType"] == "rain"
+                and day["liquidAccumulation"] >= DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
+                and (
+                    day["precipProbability"] >= PRECIP_PROB_THRESHOLD
+                    or np.isnan(day["precipProbability"])
+                )
+            )
+            or (
+                day["precipType"] == "sleet"
+                and day["iceAccumulation"] >= DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
+                and (
+                    day["precipProbability"] >= PRECIP_PROB_THRESHOLD
+                    or np.isnan(day["precipProbability"])
+                )
+            )
         ):
             # Sets that there has been precipitation during the week
             precipitation = True
