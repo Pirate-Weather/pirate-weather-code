@@ -125,9 +125,9 @@ def calculate_precip_text(
     Parameters:
     - precipType (str): The type of precipitation
     - type (str): What type of summary is being generated.
-    - rainAccum (float): The rain accumulation in mm
-    - snowAccum (float): The snow accumulation in mm
-    - sleetAccum (float): The ice/sleet accumulation in mm
+    - rainAccum (float): The rain accumulation during a period in mm
+    - snowAccum (float): The snow accumulation during a period in mm
+    - sleetAccum (float): The ice/sleet accumulation during a period in mm
     - pop (float): The current probability of precipitation defaulting to 1
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
     - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the precipitation will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
