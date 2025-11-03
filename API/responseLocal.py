@@ -4379,7 +4379,7 @@ async def PW_Forecast(
                     True,
                     str(tz_name),
                     int(time.time()),
-                    "day",
+                    "daily",
                     icon,
                 )
 
@@ -4561,7 +4561,7 @@ async def PW_Forecast(
                     False,
                     str(tz_name),
                     int(time.time()),
-                    "day",
+                    "daily",
                     icon,
                 )
 
