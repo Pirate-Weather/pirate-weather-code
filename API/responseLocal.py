@@ -4301,7 +4301,7 @@ async def PW_Forecast(
             PRECIP_IDX,
             prepAccumUnit,
         )
-    except (KeyError, IndexError, ValueError) as e:
+    except Exception as e:
         # Fallback: preserve original inline logic if helper fails (shouldn't happen)
         logger.exception("select_daily_precip_type error: %s", e)
 
