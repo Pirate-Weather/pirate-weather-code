@@ -799,15 +799,11 @@ async def TimeMachine(
             "time": int(InterPhour[idx, DATA_TIMEMACHINE["time"]]) + halfTZ,
             "summary": hourText,
             "icon": pIconList[idx],
-            "precipIntensity": round(
-                precip_intensity_si * prepIntensityUnit, 4
-            ),
+            "precipIntensity": round(precip_intensity_si * prepIntensityUnit, 4),
             "rainIntensity": round(rain_intensity * prepIntensityUnit, 4),
             "snowIntensity": round(snow_intensity * prepIntensityUnit, 4),
             "sleetIntensity": round(sleet_intensity * prepIntensityUnit, 4),
-            "precipAccumulation": round(
-                precip_intensity_si * prepAccumUnit, 4
-            ),
+            "precipAccumulation": round(precip_intensity_si * prepAccumUnit, 4),
             "precipType": pTypeList[idx],
             "temperature": round(InterPhour[idx, DATA_TIMEMACHINE["temp"]], 2),
             "apparentTemperature": round(
