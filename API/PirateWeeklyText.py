@@ -521,9 +521,16 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
             precipitationDays.append([idx, weekday, day])
             avgPop += day["precipProbability"]
             if max_rain_intensity == 0:
-                max_rain_intensity = day.get("rainIntensityMax", day.get("liquidIntensityMax", 0))
-            elif day.get("rainIntensityMax", day.get("liquidIntensityMax", 0)) > max_rain_intensity:
-                max_rain_intensity = day.get("rainIntensityMax", day.get("liquidIntensityMax", 0))
+                max_rain_intensity = day.get(
+                    "rainIntensityMax", day.get("liquidIntensityMax", 0)
+                )
+            elif (
+                day.get("rainIntensityMax", day.get("liquidIntensityMax", 0))
+                > max_rain_intensity
+            ):
+                max_rain_intensity = day.get(
+                    "rainIntensityMax", day.get("liquidIntensityMax", 0)
+                )
             if max_snow_intensity == 0:
                 max_snow_intensity = day["snowIntensityMax"]
             elif day["snowIntensityMax"] > max_snow_intensity:

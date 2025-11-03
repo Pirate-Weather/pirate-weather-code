@@ -234,8 +234,13 @@ def calculate_precip_text(
 
     # Decide on an icon if either accumulation or intensity thresholds are met
     if pop >= PRECIP_PROB_THRESHOLD and (
-        (rainAccum > precipIconThreshold or eff_rain_intensity > precipIconThresholdHour)
-        or (snowAccum >= snowIconThreshold or eff_snow_intensity > snowIconThresholdHour)
+        (
+            rainAccum > precipIconThreshold
+            or eff_rain_intensity > precipIconThresholdHour
+        )
+        or (
+            snowAccum >= snowIconThreshold or eff_snow_intensity > snowIconThresholdHour
+        )
         or (
             sleetAccum >= precipIconThreshold
             or eff_ice_intensity > precipIconThresholdHour
