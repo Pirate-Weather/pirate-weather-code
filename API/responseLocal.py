@@ -3448,8 +3448,7 @@ async def PW_Forecast(
     PrecpAccumHour[PrecpAccumHour < 0.0005] = 0
 
     InterPhour[:, DATA_HOURLY["accum"]] = np.maximum(
-        np.choose(np.argmin(np.isnan(PrecpAccumHour), axis=1), PrecpAccumHour.T)
-        * prepAccumUnit,
+        np.choose(np.argmin(np.isnan(PrecpAccumHour), axis=1), PrecpAccumHour.T),
         0,
     )
 
@@ -4109,17 +4108,17 @@ async def PW_Forecast(
     # determination if a certain threshold is met. The priority for these overrides is:
     # Ice > Snow > Rain.
     # If more than 10 mm of rain is forecast, then rain.
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["rain"]] > (10 * prepAccumUnit)] = (
+    maxPchanceDay[InterPdaySum[:, DATA_DAY["rain"]] > (10)] = (
         PRECIP_IDX["rain"]
     )
 
     # If more than 5 mm of snow is forecast, then snow.
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["snow"]] > (5 * prepAccumUnit)] = PRECIP_IDX[
+    maxPchanceDay[InterPdaySum[:, DATA_DAY["snow"]] > (5)] = PRECIP_IDX[
         "snow"
     ]
 
     # Else, if more than 1 mm of ice is forecast, then ice.
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit)] = PRECIP_IDX[
+    maxPchanceDay[InterPdaySum[:, DATA_DAY["ice"]] > (1)] = PRECIP_IDX[
         "ice"
     ]
 
@@ -4188,11 +4187,11 @@ async def PW_Forecast(
                     InterPdaySum4am[idx, DATA_DAY["rain"]]
                     + InterPdaySum4am[idx, DATA_DAY["ice"]]
                 )
-                > (DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit)
+                > (DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM)
             )
             or (
                 InterPdaySum4am[idx, DATA_DAY["snow"]]
-                > (DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit)
+                > (DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM)
             )
         ):
             # If more than 30% chance of precip at any point throughout the day, and either more than 1 mm of rain or 5 mm of snow
@@ -5291,7 +5290,7 @@ async def PW_Forecast(
     # Save SI unit values for text generation before converting to requested units
     curr_temp_si = curr_temp
     curr_dew_si = InterPcurrent[DATA_CURRENT["dew"]] - KELVIN_TO_CELSIUS
-    curr_wind_si = currentWindSpeedMps
+    curr_wind_si = InterPcurrent[DATA_CURRENT["wind"]]
     curr_vis_si = InterPcurrent[DATA_CURRENT["vis"]]
 
     # Put temperature into units
@@ -5401,7 +5400,6 @@ async def PW_Forecast(
                 * interpFac2
             )
             * 3600
-            * prepAccumUnit
         )  # Convert from mm/s to mm/hr and then into accumilation units (cm)
         curr_liquid = (
             ERA5_MERGED[
@@ -5422,8 +5420,7 @@ async def PW_Forecast(
             * interpFac2
         ) * 3600  # Convert from mm/s to mm/hr
         currnetSnowAccum = (
-            estimate_snow_height(curr_liquid, curr_temp, currentWindSpeedMps)
-            * prepAccumUnit
+            estimate_snow_height(curr_liquid, curr_temp, InterPcurrent[DATA_CURRENT["wind"]])
         )
 
         currnetIceAccum = 0
@@ -5436,7 +5433,7 @@ async def PW_Forecast(
             # Use the new snow height estimation (in mm), then convert to requested units
             curr_liquid = minuteDict[0]["precipIntensity"] / prepIntensityUnit
             currnetSnowAccum = (
-                estimate_snow_height(curr_liquid, curr_temp, currentWindSpeedMps)
+                estimate_snow_height(curr_liquid, curr_temp, InterPcurrent[DATA_CURRENT["wind"]])
                 * prepAccumUnit
             )
         elif minuteDict[0]["precipType"] == "sleet":
