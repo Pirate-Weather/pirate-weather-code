@@ -2339,7 +2339,7 @@ async def PW_Forecast(
         ] = d
         hourlyNight4amIndex[
             np.where(
-                (hour_array_grib > day_array_5pm_grib[d])
+                (hour_array_grib >= day_array_5pm_grib[d])
                 & (hour_array_grib < day_array_4am_grib[d + 1])
             )
         ] = d
@@ -4551,7 +4551,7 @@ async def PW_Forecast(
 
         try:
             if idx < 8:
-                # Calculate the night summary from 5pm to 3am
+                # Calculate the night summary from 5pm to 4am
                 dayIcon, dayText = calculate_day_text(
                     hourList[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
                     prepAccumUnit,
