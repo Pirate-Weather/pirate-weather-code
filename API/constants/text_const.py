@@ -24,18 +24,18 @@ PRECIP_INTENSITY_THRESHOLDS = {
     "heavy": 10.0,
 }
 
-# Snow intensity thresholds (mm/h liquid equivalent)
+# Snow intensity thresholds (mm/h of snow)
 SNOW_INTENSITY_THRESHOLDS = {
-    "light": 0.13,
-    "mid": 0.83,
-    "heavy": 3.33,
+    "light": 1.30,
+    "mid": 8.30,
+    "heavy": 33.30,
 }
 
 # Icon thresholds for precipitation accumulation
 HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM = 0.2  # In snow units (mm of snow)
-HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 0.02  # (mm liquid equivalent)
+HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 0.02  # (mm liquid)
 DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM = 5.0  # In snow units (mm of snow)
-DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0  # (mm liquid equivalent)
+DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0  # (mm liquid)
 
 # Visibility thresholds (meters)
 FOG_THRESHOLD_METERS = 1000

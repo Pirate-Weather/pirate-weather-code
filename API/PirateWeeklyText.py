@@ -26,16 +26,21 @@ WEEK_DAYS_PLUS_ONE = 8
 MIN_THUNDERSTORM_DAYS = 2
 
 
-def calculate_summary_text(precipitation, avgIntensity, icon, maxIntensity):
+def calculate_summary_text(precipitation,
+                            rain_accum, snow_accum, ice_accum, icon, max_rain_intensity, max_snow_intensity, max_ice_intensity):
     """
     Calculates the precipitation summary if there are between 1 and 8 days of precipitation.
     Intensities are expected in SI units (mm/h).
 
     Parameters:
     - precipitation (arr): An array of arrays that contain the days with precipitation if there are any. The inner array contains: The index in the week array, the day of the week and the precipitation type
-    - avgIntensity (float): The average precipitation intensity for the week in mm/h
+    - rain_accum (float): The total rain accumulation for the week in mm
+    - snow_accum (float): The total snow accumulation for the week in mm
+    - ice_accum (float): The total ice accumulation for the week in mm
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
-    - maxIntensity (float): The maximum precipitation intensity for the week in mm/h
+    - max_rain_intensity (float): The maximum precipitation intensity for the week in mm/h
+    - max_snow_intensity (float): The maximum snow intensity for the week in mm/h
+    - max_ice_intensity (float): The maximum ice intensity for the week in mm/h
 
     Returns:
     - precipSummary (arr): A summary of the precipitation for the week.
@@ -81,17 +86,17 @@ def calculate_summary_text(precipitation, avgIntensity, icon, maxIntensity):
     # If the icon is not mixed precipitation change it to translations format
     if wIcon != "mixed-precipitation":
         wIcon, cIcon = calculate_precip_text(
-            maxIntensity,
             wIcon,
             "week",
-            maxIntensity,
-            maxIntensity,
-            maxIntensity,
+            rain_accum,
+            snow_accum,
+            ice_accum,
             1,
             icon,
             "both",
-            isDayTime=True,
-            avgPrep=avgIntensity,
+            eff_rain_intensity=max_rain_intensity,
+            eff_snow_intensity=max_snow_intensity,
+            eff_ice_intensity=max_ice_intensity,
         )
     else:
         cIcon = "sleet"
@@ -233,9 +238,13 @@ def calculate_precip_summary(
     precipitation,
     precipitationDays,
     icons,
-    avgIntensity,
+    rain_accum,
+    snow_accum,
+    ice_accum,
     avgPop,
-    maxIntensity,
+    max_rain_intensity,
+    max_snow_intensity,
+    max_ice_intensity,
     icon="darksky",
 ):
     """
@@ -246,9 +255,13 @@ def calculate_precip_summary(
     - precipitation (bool): If precipitation is occuring during the week or not
     - precipitationDays (arr): An array of arrays that contain the days with precipitation if there are any. The inner array contains: The index in the week array, the day of the week and the precipitation type
     - icons (arr): An array of the daily icons
-    - avgIntensity (float): The average precipitation intensity for the week in mm/h
+    - rain_accum (float): The total rain accumulation for the week in mm
+    - snow_accum (float): The total snow accumulation for the week in mm
+    - ice_accum (float): The total ice accumulation for the week in mm
     - avgPop (float): Average probability of precipitation
-    - maxIntensity (float): The maximum precipitation intensity for the week in mm/h
+    - max_rain_intensity (float): The maximum rain intensity for the week in mm/h
+    - max_snow_intensity (float): The maximum snow intensity for the week in mm/h
+    - max_ice_intensity (float): The maximum ice intensity for the week in mm/h
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
 
     Returns:
@@ -276,17 +289,18 @@ def calculate_precip_summary(
     elif len(precipitationDays) == 1:
         # If one day has any precipitation then set the icon to the precipitation type and use the medium precipitation text in the precipitation summary
         text, cIcon = calculate_precip_text(
-            maxIntensity,
             precipitationDays[0][2]["precipType"],
             "week",
-            precipitationDays[0][2]["precipAccumulation"],
-            precipitationDays[0][2]["precipAccumulation"],
-            precipitationDays[0][2]["precipAccumulation"],
+            rain_accum,
+            snow_accum,
+            ice_accum,
             avgPop,
             icon,
             "both",
             isDayTime=True,
-            avgPrep=avgIntensity,
+            eff_rain_intensity=max_rain_intensity,
+            eff_snow_intensity=max_snow_intensity,
+            eff_ice_intensity=max_ice_intensity,
         )
         precipSummary = [
             "during",
@@ -296,7 +310,14 @@ def calculate_precip_summary(
     elif 1 < len(precipitationDays) < 8:
         # If between 1 and 8 days have precipitation call the function to calculate the summary text using the precipitation array.
         wIcon, wSummary, wWeekend, cIcon = calculate_summary_text(
-            precipitationDays, avgIntensity, icon, maxIntensity
+            precipitationDays,
+            rain_accum,
+            snow_accum,
+            ice_accum,
+            icon,
+            max_rain_intensity,
+            max_snow_intensity,
+            max_ice_intensity
         )
 
         # Check if the summary has the over-weekend text
@@ -317,17 +338,18 @@ def calculate_precip_summary(
         ):
             # If all days have precipitation then if they all have the same type then use that icon
             text, cIcon = calculate_precip_text(
-                avgIntensity,
                 precipitationDays[0][2]["precipType"],
                 "week",
-                maxIntensity,
-                maxIntensity,
-                maxIntensity,
+                rain_accum,
+                snow_accum,
+                ice_accum,
                 avgPop,
                 icon,
                 "both",
                 isDayTime=True,
-                avgPrep=avgIntensity,
+                eff_rain_intensity=max_rain_intensity,
+                eff_snow_intensity=max_snow_intensity,
+                eff_ice_intensity=max_ice_intensity
             )
             # Since precipitation is occuring everyday use the for week text instead of through
             precipSummary = [
@@ -435,7 +457,7 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
     lowTemp = []
     icons = []
     tempSummary = ""
-    avgIntensity = avgPop = maxIntensity = 0
+    avgPop = max_rain_intensity = max_snow_intensity = max_ice_intensity = 0
     zone = tz.gettz(timeZone)
 
     # Loop through the week array
@@ -461,36 +483,41 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
         # Check if the day has enough precipitation to reach the threshold and record the index in the array, the day it occured on and the type
         # Data is already in SI units (mm for accumulation, mm/h for intensity)
         if (
-            day["precipType"] == "snow"
-            and day["precipAccumulation"] >= DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM
+            (day["precipType"] == "snow"
+            and day["snowAccumulation"] >= DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM
             and (
                 day["precipProbability"] >= PRECIP_PROB_THRESHOLD
                 or np.isnan(day["precipProbability"])
-            )
+            ))
+            or (day["precipType"] == "rain"
+            and day["liquidAccumulation"] >= DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
+            and (
+                day["precipProbability"] >= PRECIP_PROB_THRESHOLD
+                or np.isnan(day["precipProbability"])
+            ))
+            or (day["precipType"] == "sleet"
+            and day["iceAccumulation"] >= DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
+            and (
+                day["precipProbability"] >= PRECIP_PROB_THRESHOLD
+                or np.isnan(day["precipProbability"])
+            ))
         ):
             # Sets that there has been precipitation during the week
             precipitation = True
             precipitationDays.append([idx, weekday, day])
-            avgIntensity += day["precipIntensityMax"]
             avgPop += day["precipProbability"]
-            if maxIntensity == 0:
-                maxIntensity = day["precipIntensityMax"]
-            elif day["precipIntensityMax"] > maxIntensity:
-                maxIntensity = day["precipIntensityMax"]
-        elif (
-            day["precipType"] != "snow"
-            and day["precipAccumulation"] >= DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
-            and day["precipProbability"] >= PRECIP_PROB_THRESHOLD
-        ):
-            # Sets that there has been precipitation during the week
-            precipitation = True
-            precipitationDays.append([idx, weekday, day])
-            avgIntensity += day["precipIntensityMax"]
-            avgPop += day["precipProbability"]
-            if maxIntensity == 0:
-                maxIntensity = day["precipIntensityMax"]
-            elif day["precipIntensityMax"] > maxIntensity:
-                maxIntensity = day["precipIntensityMax"]
+            if max_rain_intensity == 0:
+                max_rain_intensity = day["liquidIntensityMax"]
+            elif day["liquidIntensityMax"] > max_rain_intensity:
+                max_rain_intensity = day["liquidIntensityMax"]
+            if max_snow_intensity == 0:
+                max_snow_intensity = day["snowIntensityMax"]
+            elif day["snowIntensityMax"] > max_snow_intensity:
+                max_snow_intensity = day["snowIntensityMax"]
+            if max_ice_intensity == 0:
+                max_ice_intensity = day["iceIntensityMax"]
+            elif day["iceIntensityMax"] > max_ice_intensity:
+                max_ice_intensity = day["iceIntensityMax"]
 
         # Determine the highest temperature of the week and record the index in the array, the day it occured on, and the temperature (in Celsius)
         if not highTemp:
@@ -505,16 +532,19 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
             lowTemp = [idx, weekday, day["temperatureHigh"]]
 
     if len(precipitationDays) > 0:
-        avgIntensity = avgIntensity / len(precipitationDays)
         avgPop = avgPop / len(precipitationDays)
 
     precipSummary, cIcon = calculate_precip_summary(
         precipitation,
         precipitationDays,
         icons,
-        avgIntensity,
+        sum(day[2]["liquidAccumulation"] for day in precipitationDays),
+        sum(day[2]["snowAccumulation"] for day in precipitationDays),
+        sum(day[2]["iceAccumulation"] for day in precipitationDays),
         avgPop,
-        maxIntensity,
+        max_rain_intensity,
+        max_snow_intensity,
+        max_ice_intensity,
         icon,
     )
 

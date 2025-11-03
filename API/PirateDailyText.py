@@ -876,13 +876,15 @@ def calculate_day_text(
                 "snow_error": 0.0,
                 "sleet_accum": 0.0,
                 "max_pop": 0.0,
-                "max_intensity": 0.0,
+                "max_rain_intensity": 0.0,
+                "max_snow_intensity": 0.0,
+                "max_ice_intensity": 0.0,
                 "cloud_cover_sum": 0.0,
                 "max_wind_speed": 0.0,
                 "period_length": 0,
                 "num_hours_humid": 0,
                 "precip_types_in_period": [],
-                "precip_intensity_sum": 0.0,
+                "precip_accum_sum": 0.0,
                 "precip_hours_count": 0,
                 "avg_cloud_cover": 0.0,
                 "min_visibility": float("inf"),  # Initialize for visibility
@@ -927,8 +929,14 @@ def calculate_day_text(
             period_data["max_wind_speed"] = max(
                 period_data["max_wind_speed"], hour["windSpeed"]
             )
-            period_data["max_intensity"] = max(
-                period_data["max_intensity"], hour["precipIntensity"]
+            period_data["max_rain_intensity"] = max(
+                period_data["max_rain_intensity"], hour["liquidIntensity"]
+            )
+            period_data["max_snow_intensity"] = max(
+                period_data["max_snow_intensity"], hour["snowIntensity"]
+            )
+            period_data["max_ice_intensity"] = max(
+                period_data["max_ice_intensity"], hour["iceIntensity"]
             )
             period_data["min_visibility"] = min(
                 period_data["min_visibility"], hour["visibility"]
@@ -954,7 +962,8 @@ def calculate_day_text(
                     "icon",
                 )
                 is not None
-                and hour["precipIntensity"] <= 0.02
+                # This uses a the 10:1 snow ratio to determine if fog is likely
+                and (hour["liquidIntensity"] <= 0.02 and hour["snowIntensity"] <= 0.2 and hour["iceIntensity"] <= 0.02)
             ):
                 period_data["max_smoke"] = max(period_data["max_smoke"], hour["smoke"])
                 period_data["num_hours_fog"] += 1
@@ -968,20 +977,23 @@ def calculate_day_text(
                 period_data["num_hours_wind"] += 1
 
             if hour["precipType"] == "rain" or hour["precipType"] == "none":
-                period_data["rain_accum"] += hour["precipAccumulation"]
+                period_data["rain_accum"] += hour["liquidAccumulation"]
             elif hour["precipType"] == "snow":
-                period_data["snow_accum"] += hour["precipAccumulation"]
-                period_data["snow_error"] += hour["precipIntensityError"]
+                period_data["snow_accum"] += hour["snowAccumulation"]
+                period_data["snow_error"] += hour["precipIntensityError"] * 0.1
             elif hour["precipType"] == "sleet":
-                period_data["sleet_accum"] += hour["precipAccumulation"]
+                period_data["sleet_accum"] += hour["iceAccumulation"]
 
-            if hour["precipIntensity"] > 0 or hour["precipAccumulation"] > 0:
+            if hour["liquidAccumulation"] > 0 or \
+                hour["snowAccumulation"] > 0 or \
+                hour["iceAccumulation"] > 0:
+                
                 period_data["precip_types_in_period"].append(hour["precipType"])
                 period_data["max_pop"] = max(
                     period_data["max_pop"], hour["precipProbability"]
                 )
                 period_data["precip_hours_count"] += 1
-                period_data["precip_intensity_sum"] += hour["precipIntensity"]
+                period_data["precip_accum_sum"] += hour["liquidAccumulation"] + hour["snowAccumulation"] + hour["iceAccumulation"]
 
                 # Track CAPE when there is precipitation
                 hour_cape = hour.get("cape", MISSING_DATA)
@@ -1034,12 +1046,14 @@ def calculate_day_text(
     total_snow_accum = 0.0
     total_sleet_accum = 0.0
     total_snow_error = 0.0
-    overall_max_intensity = 0.0
+    overall_max_rain_intensity = 0.0
+    overall_max_snow_intensity = 0.0
+    overall_max_ice_intensity = 0.0
     overall_max_wind = 0.0
     overall_avg_cloud_cover_sum = 0.0  # Sum of average cloud cover for each period
     overall_avg_pop = 0.0
     overall_precip_hours_count = 0
-    overall_precip_intensity_sum = 0.0
+    overall_precip_accum_sum = 0.0
     overall_min_visibility = float("inf")  # Initialize for visibility
     overall_max_smoke = 0.0
     overall_max_cape_with_precip = 0.0  # Track max CAPE that occurs with precipitation
@@ -1053,7 +1067,9 @@ def calculate_day_text(
         total_snow_accum += p_data["snow_accum"]
         total_sleet_accum += p_data["sleet_accum"]
         total_snow_error += p_data["snow_error"]
-        overall_max_intensity = max(overall_max_intensity, p_data["max_intensity"])
+        overall_max_rain_intensity = max(overall_max_rain_intensity, p_data["max_rain_intensity"])
+        overall_max_snow_intensity = max(overall_max_snow_intensity, p_data["max_snow_intensity"])
+        overall_max_ice_intensity = max(overall_max_ice_intensity, p_data["max_ice_intensity"])
         overall_max_wind = max(overall_max_wind, p_data["max_wind_speed"])
         overall_avg_cloud_cover_sum += p_data[
             "avg_cloud_cover"
@@ -1061,7 +1077,7 @@ def calculate_day_text(
         overall_min_visibility = min(overall_min_visibility, p_data["min_visibility"])
         overall_max_smoke = max(overall_max_smoke, p_data["max_smoke"])
 
-        # Check if precipitation is significant enough in this period (thresholds in mm)
+        # Check if precipitation is significant enough in this period (thresholds in cm)
         is_precip_in_period = (
             p_data["snow_accum"] > PRECIP_INTENSITY_THRESHOLDS["mid"]
             or p_data["rain_accum"] > PRECIP_THRESH
@@ -1072,7 +1088,7 @@ def calculate_day_text(
             overall_most_common_precip.extend(p_data["precip_types_in_period"])
             overall_avg_pop = max(overall_avg_pop, p_data["max_pop"])
             overall_precip_hours_count += p_data["precip_hours_count"]
-            overall_precip_intensity_sum += p_data["precip_intensity_sum"]
+            overall_precip_accum_sum += p_data["precip_accum_sum"]
 
             # Track max CAPE that occurs with precipitation
             if p_data["max_cape_with_precip"] > overall_max_cape_with_precip:
@@ -1090,7 +1106,9 @@ def calculate_day_text(
         if p_data["num_hours_wind"] >= (min(p_data["period_length"] / 2, 3)):
             wind_periods.append(i)
         if (
-            p_data["max_intensity"] < 0.02
+            p_data["max_rain_intensity"] < 0.02
+            and p_data["max_snow_intensity"] < 0.2
+            and p_data["max_ice_intensity"] < 0.02
             and p_data["max_wind_speed"] < 6.7056
             and p_data["num_hours_fog"] >= (min(p_data["period_length"] / 2, 3))
         ):
@@ -1262,7 +1280,6 @@ def calculate_day_text(
 
         # Calculate final precipitation text and icon (all in mm)
         precip_summary_text, precip_icon = calculate_precip_text(
-            overall_max_intensity,
             most_common_overall_precip_type,
             "hourly",  # This is a fixed parameter as per original code
             total_rain_accum,
@@ -1272,9 +1289,9 @@ def calculate_day_text(
             icon_set,
             "both",
             isDayTime=is_day_time,
-            avgPrep=overall_precip_intensity_sum / overall_precip_hours_count
-            if overall_precip_hours_count > 0
-            else 0,
+            eff_rain_intensity=overall_max_rain_intensity,
+            eff_snow_intensity=overall_max_snow_intensity,
+            eff_ice_intensity=overall_max_ice_intensity,
         )
 
     # Correct "medium-none" secondary condition to "medium-precipitation"
@@ -1354,17 +1371,18 @@ def calculate_day_text(
         ):  # This checks if precipitation occurs in the first period.
             # This handles cases where precipitation starts after the first hour of the period.
             curr_precip_text_for_first_hour = calculate_precip_text(
-                hours[0]["precipIntensity"],
                 hours[0]["precipType"],
                 "hourly",
-                hours[0]["precipAccumulation"],
-                hours[0]["precipAccumulation"],
-                hours[0]["precipAccumulation"],
+                hours[0]["liquidAccumulation"],
+                hours[0]["snowAccumulation"],
+                hours[0]["iceAccumulation"],
                 hours[0]["precipProbability"],
                 icon_set,
                 "summary",
                 isDayTime=is_day_time,
-                avgPrep=hours[0]["precipIntensity"],
+                eff_rain_intensity=hours[0].get("liquidIntensity", 0.0),
+                eff_snow_intensity=hours[0].get("snowIntensity", 0.0),
+                eff_ice_intensity=hours[0].get("iceIntensity", 0.0),
             )
             if curr_precip_text_for_first_hour is None:
                 all_period_names[0] = "later-" + all_period_names[0]

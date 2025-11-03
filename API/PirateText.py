@@ -19,11 +19,7 @@ from API.PirateTextHelper import (
 def calculate_text(
     hourObject,
     isDayTime,
-    rainPrep,
-    snowPrep,
-    icePrep,
     type,
-    precipIntensity,
     icon="darksky",
 ):
     """
@@ -93,9 +89,13 @@ def calculate_text(
     if all(np.isnan(v) for v in (temp, wind, vis, cloudCover, humidity, dewPoint)):
         return "unavailable", "none"
 
+    # Extract rainPrep, snowPrep, icePrep from hourObject
+    rainPrep = hourObject.get("liquidAccumulation", 0.0)
+    snowPrep = hourObject.get("snowAccumulation", 0.0)
+    icePrep = hourObject.get("iceAccumulation", 0.0)
+
     # Calculate the text/icon for precipitation, wind, visibility, sky cover, humidity and thunderstorms
     precipText, precipIcon = calculate_precip_text(
-        precipIntensity,
         precipType,
         type,
         rainPrep,
@@ -104,6 +104,10 @@ def calculate_text(
         pop,
         icon,
         "both",
+        # provide per-type intensities when available (mm/h)
+        eff_rain_intensity=hourObject.get("liquidIntensity"),
+        eff_snow_intensity=hourObject.get("snowIntensity"),
+        eff_ice_intensity=hourObject.get("iceIntensity"),
     )
 
     windText, windIcon = calculate_wind_text(wind, icon, "both")

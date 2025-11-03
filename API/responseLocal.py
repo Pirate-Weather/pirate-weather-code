@@ -2056,7 +2056,7 @@ async def PW_Forecast(
     )
 
     InterTminute = np.zeros((61, 5))  # Type
-    InterPminute = np.full((61, 4), MISSING_DATA)  # Time, Intensity,Probability
+    InterPminute = np.full((61, max(DATA_MINUTELY.values()) + 1), MISSING_DATA)
 
     # Create the hourly time and main data arrays
     # InterPhour is the main data array
@@ -2796,24 +2796,23 @@ async def PW_Forecast(
 
         # Now convert reflectivity to precipitation intensity using estimated types
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
-            dbz_to_rate(refc_arr, precipTypes) * prepIntensityUnit
+            dbz_to_rate(refc_arr, precipTypes)
         )
     elif "nbm" in sourceList:
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
-            nbmMinuteInterpolation[:, NBM["accum"]] * prepIntensityUnit
+            nbmMinuteInterpolation[:, NBM["accum"]]
         )
     elif "ecmwf_ifs" in sourceList:
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
-            ecmwfMinuteInterpolation[:, ECMWF["intensity"]] * 3600 * prepIntensityUnit
+            ecmwfMinuteInterpolation[:, ECMWF["intensity"]] * 3600
         )
     elif "gefs" in sourceList:
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
-            gefsMinuteInterpolation[:, GEFS["accum"]] * prepIntensityUnit
+            gefsMinuteInterpolation[:, GEFS["accum"]]
         )
     elif "gfs" in sourceList:
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
             dbz_to_rate(gfsMinuteInterpolation[:, GFS["refc"]], precipTypes)
-            * prepIntensityUnit
         )
     elif "era5" in sourceList:
         InterPminute[:, DATA_MINUTELY["intensity"]] = (
@@ -2828,17 +2827,16 @@ async def PW_Forecast(
                 + era5_MinuteInterpolation[:, ERA5["convective_rain_rate"]]
             )
             * 3600
-            * prepIntensityUnit
         )
 
     # "precipIntensityError"
     if "ecmwf_ifs" in sourceList:
         InterPminute[:, DATA_MINUTELY["error"]] = (
-            ecmwfMinuteInterpolation[:, ECMWF["accum_stddev"]] * prepIntensityUnit
+            ecmwfMinuteInterpolation[:, ECMWF["accum_stddev"]]
         )
     elif "gefs" in sourceList:
         InterPminute[:, DATA_MINUTELY["error"]] = (
-            gefsMinuteInterpolation[:, GEFS["error"]] * prepIntensityUnit
+            gefsMinuteInterpolation[:, GEFS["error"]]
         )
     else:  # Missing
         InterPminute[:, DATA_MINUTELY["error"]] = (
@@ -2852,29 +2850,41 @@ async def PW_Forecast(
         "precipProbability",
         "precipIntensityError",
         "precipType",
+        "rainIntensity",
+        "snowIntensity",
+        "sleetIntensity",
     ]
 
-    # Assign pfactors for rain and snow for intensity
-    pFacMinute = np.zeros((len(minute_array_grib)))
-    pFacMinute[
-        (
-            (maxPchance == PRECIP_IDX["rain"])
-            | (maxPchance == PRECIP_IDX["ice"])
-            | (maxPchance == PRECIP_IDX["sleet"])
-        )
-    ] = 1  # Rain, Ice
-    # Note, this means that intensity is always in liquid water equivalent
-    pFacMinute[(maxPchance == PRECIP_IDX["snow"])] = 1  # Snow
+    # Calculate type-specific intensities for minutely (in SI units - mm/h liquid equivalent)
+    # Initialize all to zero
+    InterPminute[:, DATA_MINUTELY["rain_intensity"]] = 0
+    InterPminute[:, DATA_MINUTELY["snow_intensity"]] = 0
+    InterPminute[:, DATA_MINUTELY["ice_intensity"]] = 0
 
-    if "hrrrsubh" in sourceList:
-        # Sometimes reflectivity shows precipitation when the type is none which causes the intensity to suddenly drop to 0
-        # Setting the pFacMinute for None type to 1 will prevent this issue
-        # Is worth testing to see if this causes unintended side effects
-        pFacMinute[(maxPchance == PRECIP_IDX["none"])] = 1  # None
+    # Rain intensity (direct from intensity)
+    rain_mask_min = maxPchance == PRECIP_IDX["rain"]
+    InterPminute[rain_mask_min, DATA_MINUTELY["rain_intensity"]] = InterPminute[
+        rain_mask_min, DATA_MINUTELY["intensity"]
+    ]
+
+    # Snow intensity - for minutely, we don't have temperature/wind readily available
+    # So use a default 10:1 ratio
+    snow_mask_min = maxPchance == PRECIP_IDX["snow"]
+    InterPminute[snow_mask_min, DATA_MINUTELY["snow_intensity"]] = InterPminute[
+        snow_mask_min, DATA_MINUTELY["intensity"]
+    ] * 10
+
+    # Sleet intensity (direct from intensity)
+    sleet_mask_min = (maxPchance == PRECIP_IDX["ice"]) | (
+        maxPchance == PRECIP_IDX["sleet"]
+    )
+    InterPminute[sleet_mask_min, DATA_MINUTELY["ice_intensity"]] = InterPminute[
+        sleet_mask_min, DATA_MINUTELY["intensity"]
+    ]
 
     minuteTimes = InterPminute[:, DATA_MINUTELY["time"]]
     minuteIntensity = np.maximum(
-        np.round(InterPminute[:, DATA_MINUTELY["intensity"]] * pFacMinute, 4), 0
+        np.round(InterPminute[:, DATA_MINUTELY["intensity"]], 4), 0
     )
     minuteProbability = np.minimum(
         np.maximum(np.round(InterPminute[:, DATA_MINUTELY["prob"]], 2), 0), 1
@@ -2888,16 +2898,30 @@ async def PW_Forecast(
     minuteProbability[np.isnan(minuteProbability)] = MISSING_DATA
     minuteIntensityError[np.isnan(minuteIntensityError)] = MISSING_DATA
 
+    # Prepare minutely intensity arrays for output
+    minuteRainIntensity = np.maximum(
+        np.round(InterPminute[:, DATA_MINUTELY["rain_intensity"]], 4), 0
+    )
+    minuteSnowIntensity = np.maximum(
+        np.round(InterPminute[:, DATA_MINUTELY["snow_intensity"]], 4), 0
+    )
+    minuteSleetIntensity = np.maximum(
+        np.round(InterPminute[:, DATA_MINUTELY["ice_intensity"]], 4), 0
+    )
+
     minuteDict = [
         dict(
             zip(
                 minuteKeys,
                 [
                     int(minuteTimes[idx]),
-                    float(minuteIntensity[idx]),
+                    float(minuteIntensity[idx]) * prepIntensityUnit,
                     float(minuteProbability[idx]),
-                    float(minuteIntensityError[idx]),
+                    float(minuteIntensityError[idx]) * prepIntensityUnit,
                     minuteType[idx],
+                    float(minuteRainIntensity[idx]) * prepIntensityUnit,
+                    float(minuteSnowIntensity[idx]) * prepIntensityUnit,
+                    float(minuteSleetIntensity[idx]) * prepIntensityUnit,
                 ],
             )
         )
@@ -3591,6 +3615,7 @@ async def PW_Forecast(
     InterPhour[:, 1:] = InterPhourData
 
     hourList = []
+    hourList_si = []
     hourIconList = []
     hourTextList = []
 
@@ -3679,21 +3704,37 @@ async def PW_Forecast(
         # Zero prep prob before forecast time
         InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["prob"]] = 0
 
-    # Assign pfactors for rain and snow for intensity
-    pFacHour = np.zeros((len(hour_array)))
-    pFacHour[
-        (
-            (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["rain"])
-            | (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["ice"])
-            | (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["sleet"])
-        )
-    ] = 1  # Rain, Ice
-    # NOTE, this means that intensity is always liquid water equivalent.
-    pFacHour[(InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["snow"])] = 1  # Snow
+    # Calculate type-specific intensities (in SI units - mm/h liquid equivalent)
+    # Initialize all to zero
+    InterPhour[:, DATA_HOURLY["rain_intensity"]] = 0
+    InterPhour[:, DATA_HOURLY["snow_intensity"]] = 0
+    InterPhour[:, DATA_HOURLY["ice_intensity"]] = 0
 
-    InterPhour[:, DATA_HOURLY["intensity"]] = (
-        InterPhour[:, DATA_HOURLY["intensity"]] * pFacHour
+    # Rain intensity (direct from intensity)
+    rain_mask = InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["rain"]
+    InterPhour[rain_mask, DATA_HOURLY["rain_intensity"]] = InterPhour[
+        rain_mask, DATA_HOURLY["intensity"]
+    ]
+
+    # Snow intensity (use liquid water conversion)
+    snow_mask = InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["snow"]
+    snow_indices = np.where(snow_mask)[0]
+    if snow_indices.size > 0:
+        # Convert snow accumulation to intensity using liquid water conversion
+        snow_intensity_si = estimate_snow_height(
+            InterPhour[snow_indices, DATA_HOURLY["intensity"]],  # mm/h of water equivalent
+            InterPhour[snow_indices, DATA_HOURLY["temp"]],  # Celsius
+            windSpeedMps[snow_indices],  # m/s
+        )
+        InterPhour[snow_indices, DATA_HOURLY["snow_intensity"]] = snow_intensity_si
+
+    # Sleet intensity (direct from intensity for types 2 and 3)
+    sleet_mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["ice"]) | (
+        InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["sleet"]
     )
+    InterPhour[sleet_mask, DATA_HOURLY["ice_intensity"]] = InterPhour[
+        sleet_mask, DATA_HOURLY["intensity"]
+    ]
 
     # pTypeMap = {0: 'none', 1: 'snow', 2: 'sleet', 3: 'sleet', 4: 'rain'}
     pTypeMap = np.array(["none", "snow", "sleet", "sleet", "rain"])
@@ -3709,8 +3750,10 @@ async def PW_Forecast(
     InterPhour[:, DATA_HOURLY["storm_dist"] : DATA_HOURLY["rain"]] = InterPhour[
         :, DATA_HOURLY["storm_dist"] : DATA_HOURLY["rain"]
     ].round(2)
-    # Round remaining to 2
-    InterPhour[:, DATA_HOURLY["fire"] :] = InterPhour[:, DATA_HOURLY["fire"] :].round(2)
+    # Round fire to solar to 2
+    InterPhour[:, DATA_HOURLY["fire"] : DATA_HOURLY["cape"] + 1] = InterPhour[
+        :, DATA_HOURLY["fire"] : DATA_HOURLY["cape"] + 1
+    ].round(2)
 
     # Round to 5 for intensity
     InterPhour[:, DATA_HOURLY["type"] : DATA_HOURLY["prob"]] = InterPhour[
@@ -3723,6 +3766,16 @@ async def PW_Forecast(
     InterPhour[:, DATA_HOURLY["rain"] : DATA_HOURLY["fire"]] = InterPhour[
         :, DATA_HOURLY["rain"] : DATA_HOURLY["fire"]
     ].round(5)
+    # Round type-specific intensities to 5
+    InterPhour[
+        :,
+        DATA_HOURLY["rain_intensity"] : DATA_HOURLY["ice_intensity"] + 1,
+    ] = InterPhour[
+        :,
+        DATA_HOURLY["rain_intensity"] : DATA_HOURLY["ice_intensity"] + 1,
+    ].round(
+        5
+    )
 
     # Round cape to 0
     InterPhour[:, DATA_HOURLY["cape"]] = InterPhour[:, DATA_HOURLY["cape"]].round(0)
@@ -3860,27 +3913,17 @@ async def PW_Forecast(
         ice_display = round(InterPhour[idx, DATA_HOURLY["ice"]] * prepAccumUnit, 4)
         accum_display = round(rain_display + snow_display + ice_display, 4)
 
-        # Calculate type-specific intensities based on precipType
-        # Keep in SI units (mm/h) internally, convert only at output
-        precip_type = PTypeHour[idx]
-        intensity_si = InterPhour[idx, DATA_HOURLY["intensity"]]
-
-        if precip_type == "rain":
-            rain_intensity_display = round(intensity_si * prepIntensityUnit, 4)
-            snow_intensity_display = 0.0
-            sleet_intensity_display = 0.0
-        elif precip_type == "snow":
-            rain_intensity_display = 0.0
-            snow_intensity_display = round(intensity_si * prepIntensityUnit, 4)
-            sleet_intensity_display = 0.0
-        elif precip_type == "sleet":
-            rain_intensity_display = 0.0
-            snow_intensity_display = 0.0
-            sleet_intensity_display = round(intensity_si * prepIntensityUnit, 4)
-        else:  # "none" or other
-            rain_intensity_display = 0.0
-            snow_intensity_display = 0.0
-            sleet_intensity_display = 0.0
+        # Use pre-calculated type-specific intensities from InterPhour
+        # Convert from SI units (mm/h) to requested units
+        rain_intensity_display = round(
+            InterPhour[idx, DATA_HOURLY["rain_intensity"]] * prepIntensityUnit, 4
+        )
+        snow_intensity_display = round(
+            InterPhour[idx, DATA_HOURLY["snow_intensity"]] * prepIntensityUnit, 4
+        )
+        ice_intensity_display = round(
+            InterPhour[idx, DATA_HOURLY["ice_intensity"]] * prepIntensityUnit, 4
+        )
 
         # Pressure conversion from Pascals to hectopascals
         pressure_display = round(InterPhour[idx, DATA_HOURLY["pressure"]] / 100, 2)
@@ -3903,7 +3946,7 @@ async def PW_Forecast(
             "precipType": PTypeHour[idx],
             "rainIntensity": rain_intensity_display,
             "snowIntensity": snow_intensity_display,
-            "sleetIntensity": sleet_intensity_display,
+            "iceIntensity": ice_intensity_display,
             "temperature": round(temp_display, 2),
             "apparentTemperature": round(apparent_display, 2),
             "dewPoint": round(dew_display, 2),
@@ -3942,6 +3985,7 @@ async def PW_Forecast(
 
         # Create SI version of hourItem for text generation (values already in SI units in InterPhour)
         hourItem_si = {
+            "time": int(hour_array_grib[idx]),
             "temperature": InterPhour[idx, DATA_HOURLY["temp"]],
             "dewPoint": InterPhour[idx, DATA_HOURLY["dew"]],
             "humidity": InterPhour[idx, DATA_HOURLY["humidity"]],
@@ -3952,17 +3996,20 @@ async def PW_Forecast(
             "precipType": PTypeHour[idx],
             "precipProbability": InterPhour[idx, DATA_HOURLY["prob"]],
             "cape": InterPhour[idx, DATA_HOURLY["cape"]],
+            "liquidAccumulation": InterPhour[idx, DATA_HOURLY["rain"]],
+            "snowAccumulation": InterPhour[idx, DATA_HOURLY["snow"]],
+            "iceAccumulation": InterPhour[idx, DATA_HOURLY["ice"]],
+            "rainIntensity": InterPhour[idx, DATA_HOURLY["rain_intensity"]],
+            "snowIntensity": InterPhour[idx, DATA_HOURLY["snow_intensity"]],
+            "iceIntensity": InterPhour[idx, DATA_HOURLY["ice_intensity"]],
+            "precipIntensity": InterPhour[idx, DATA_HOURLY["intensity"]], # mm/h, SI, liquid equivalent
         }
 
         try:
             hourText, hourIcon = calculate_text(
                 hourItem_si,
                 isDay,
-                InterPhour[idx, DATA_HOURLY["rain"]],
-                InterPhour[idx, DATA_HOURLY["snow"]],
-                InterPhour[idx, DATA_HOURLY["ice"]],
                 "hour",
-                InterPhour[idx, DATA_HOURLY["intensity"]],
                 icon,
             )
 
@@ -3989,6 +4036,7 @@ async def PW_Forecast(
             hourItem.pop("ozone", None)
 
         hourList.append(hourItem)
+        hourList_si.append(hourItem_si)
 
         hourIconList.append(hourIcon)
         hourTextList.append(hourItem["summary"])
@@ -4143,6 +4191,7 @@ async def PW_Forecast(
 
     # Process Daily Data for ouput
     dayList = []
+    dayList_si = []
     dayIconList = []
     dayTextList = []
 
@@ -4307,19 +4356,36 @@ async def PW_Forecast(
             if not np.isnan(InterSday[idx, DATA_DAY["dusk"]])
             else 0,
             "moonPhase": round(InterSday[idx, DATA_DAY["moon_phase"]], 2),
-            "precipIntensity": round(InterPday[idx, DATA_DAY["intensity"]], 4),
-            "precipIntensityMax": round(InterPdayMax[idx, DATA_DAY["intensity"]], 4),
+            "precipIntensity": round(InterPday[idx, DATA_DAY["intensity"]] * prepIntensityUnit, 4),
+            "precipIntensityMax": round(InterPdayMax[idx, DATA_DAY["intensity"]] * prepIntensityUnit, 4),
             "precipIntensityMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["intensity"]])
             if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["intensity"]])
             else 0,
             "precipProbability": round(InterPdayMax[idx, DATA_DAY["prob"]], 2),
             "precipAccumulation": round(
-                InterPdaySum[idx, DATA_DAY["rain"]]
+                (InterPdaySum[idx, DATA_DAY["rain"]]
                 + InterPdaySum[idx, DATA_DAY["snow"]]
-                + InterPdaySum[idx, DATA_DAY["ice"]],
-                4,
+                + InterPdaySum[idx, DATA_DAY["ice"]]) * prepAccumUnit, 4
             ),
             "precipType": PTypeDay[idx],
+            "rainIntensity": round(
+                InterPday[idx, DATA_DAY["rain_intensity"]] * prepIntensityUnit, 4
+            ),
+            "rainIntensityMax": round(
+                InterPdayMax[idx, DATA_DAY["rain_intensity"]] * prepIntensityUnit, 4
+            ),
+            "snowIntensity": round(
+                InterPday[idx, DATA_DAY["snow_intensity"]] * prepIntensityUnit, 4
+            ),
+            "snowIntensityMax": round(
+                InterPdayMax[idx, DATA_DAY["snow_intensity"]] * prepIntensityUnit, 4
+            ),
+            "iceIntensity": round(
+                InterPday[idx, DATA_DAY["ice_intensity"]] * prepIntensityUnit, 4
+            ),
+            "iceIntensityMax": round(
+                InterPdayMax[idx, DATA_DAY["ice_intensity"]] * prepIntensityUnit, 4
+            ),
             "temperatureHigh": temp_high,
             "temperatureHighTime": int(InterPdayHighTime[idx, DATA_DAY["temp"]])
             if not np.isnan(InterPdayHighTime[idx, DATA_DAY["temp"]])
@@ -4381,9 +4447,9 @@ async def PW_Forecast(
             "smokeMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["smoke"]])
             if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["smoke"]])
             else 0,
-            "liquidAccumulation": round(InterPdaySum[idx, DATA_DAY["rain"]], 4),
-            "snowAccumulation": round(InterPdaySum[idx, DATA_DAY["snow"]], 4),
-            "iceAccumulation": round(InterPdaySum[idx, DATA_DAY["ice"]], 4),
+            "liquidAccumulation": round(InterPdaySum[idx, DATA_DAY["rain"]] * prepAccumUnit, 4),
+            "snowAccumulation": round(InterPdaySum[idx, DATA_DAY["snow"]] * prepAccumUnit, 4),
+            "iceAccumulation": round(InterPdaySum[idx, DATA_DAY["ice"]] * prepAccumUnit, 4),
             "fireIndexMax": round(InterPdayMax[idx, DATA_DAY["fire"]], 2),
             "fireIndexMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["fire"]])
             if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["fire"]])
@@ -4410,7 +4476,7 @@ async def PW_Forecast(
             if idx < 8:
                 # Calculate the day summary from 4 to 4
                 dayIcon, dayText = calculate_day_text(
-                    hourList[((idx) * 24) + 4 : ((idx + 1) * 24) + 4],
+                    hourList_si[((idx) * 24) + 4 : ((idx + 1) * 24) + 4],
                     True,
                     str(tz_name),
                     int(time.time()),
@@ -4450,6 +4516,31 @@ async def PW_Forecast(
             dayObject.pop("visibility", None)
 
         dayList.append(dayObject)
+
+        # Create a SI version of dayObject for text generation (values already in SI units in InterPday)
+        dayObject_si = {
+            "time": int(day_array_grib[idx]),
+            "icon": dayIcon,
+            "precipType": PTypeDay[idx],
+            "precipProbability": InterPdayMax[idx, DATA_DAY["prob"]],
+            "precipIntensity": InterPday[idx, DATA_DAY["intensity"]],
+            "snowAccumulation": InterPdaySum[idx, DATA_DAY["snow"]],
+            "iceAccumulation": InterPdaySum[idx, DATA_DAY["ice"]],
+            "liquidAccumulation": InterPdaySum[idx, DATA_DAY["rain"]],
+            "rainIntensityMax": InterPdayMax[idx, DATA_DAY["rain_intensity"]],
+            "snowIntensityMax": InterPdayMax[idx, DATA_DAY["snow_intensity"]],
+            "iceIntensityMax": InterPdayMax[idx, DATA_DAY["ice_intensity"]],
+            "temperatureHigh": InterPdayHigh[idx, DATA_DAY["temp"]],
+            "temperatureLow": InterPdayLow[idx, DATA_DAY["temp"]],
+            "apparentTemperatureHigh": InterPdayHigh[idx, DATA_DAY["apparent"]],
+            "apparentTemperatureLow": InterPdayLow[idx, DATA_DAY["apparent"]],
+            "dewPoint": InterPday[idx, DATA_DAY["dew"]],
+            "humidity": InterPday[idx, DATA_DAY["humidity"]],
+            "windSpeed": InterPday[idx, DATA_DAY["wind"]],
+            "cloudCover": InterPday[idx, DATA_DAY["cloud"]],
+            "visibility": InterPday[idx, DATA_DAY["vis"]],
+        }
+        dayList_si.append(dayObject_si)
 
         dayTextList.append(dayObject["summary"])
         dayIconList.append(dayIcon)
@@ -4629,7 +4720,7 @@ async def PW_Forecast(
 
     currentIDX_hrrrh_A = np.max((currentIDX_hrrrh - 1, 0))
 
-    InterPcurrent = np.zeros(shape=24)  # Time, Intensity,Probability
+    InterPcurrent = np.zeros(shape=max(DATA_CURRENT.values()) + 1)
     InterPcurrent[DATA_CURRENT["time"]] = int(minute_array_grib[0])
 
     # Get prep probability, intensity and error from minutely
@@ -5396,6 +5487,29 @@ async def PW_Forecast(
         print("Object Start")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
+    # Calculate type-specific intensities for currently (in SI units - mm/h)
+    # Initialize all to zero
+    InterPcurrent[DATA_CURRENT["rain_intensity"]] = 0
+    InterPcurrent[DATA_CURRENT["snow_intensity"]] = 0
+    InterPcurrent[DATA_CURRENT["ice_intensity"]] = 0
+
+    # Determine current precip type from minuteDict
+    current_precip_type = minuteDict[0]["precipType"]
+    
+    if current_precip_type == "rain":
+        InterPcurrent[DATA_CURRENT["rain_intensity"]] = InterPcurrent[
+            DATA_CURRENT["intensity"]
+        ]
+    elif current_precip_type == "snow":
+        # For snow, use the estimate_snow_height function to convert liquid equivalent to snow intensity
+        InterPcurrent[DATA_CURRENT["snow_intensity"]] = estimate_snow_height(
+            InterPcurrent[DATA_CURRENT["intensity"]], curr_temp_si, curr_wind_si
+        )
+    elif current_precip_type == "sleet":
+        InterPcurrent[DATA_CURRENT["ice_intensity"]] = InterPcurrent[
+            DATA_CURRENT["intensity"]
+        ]
+
     InterPcurrent = InterPcurrent.round(2)
 
     # Fix small neg zero
@@ -5485,6 +5599,15 @@ async def PW_Forecast(
             minuteDict[0]["precipIntensityError"], 4
         )
         returnOBJ["currently"]["precipType"] = minuteDict[0]["precipType"]
+        returnOBJ["currently"]["rainIntensity"] = round(
+            InterPcurrent[DATA_CURRENT["rain_intensity"]] * prepIntensityUnit, 4
+        )
+        returnOBJ["currently"]["snowIntensity"] = round(
+            InterPcurrent[DATA_CURRENT["snow_intensity"]] * prepIntensityUnit, 4
+        )
+        returnOBJ["currently"]["iceIntensity"] = round(
+            InterPcurrent[DATA_CURRENT["ice_intensity"]] * prepIntensityUnit, 4
+        )
         returnOBJ["currently"]["temperature"] = round(
             InterPcurrent[DATA_CURRENT["temp"]], 2
         )
@@ -5566,32 +5689,15 @@ async def PW_Forecast(
         currently_si["humidity"] = InterPcurrent[DATA_CURRENT["humidity"]]
         currently_si["smoke"] = InterPcurrent[DATA_CURRENT["smoke"]]
         currently_si["cape"] = InterPcurrent[DATA_CURRENT["cape"]]
-
-        # Accumulation in SI units (mm) for text generation
-        currentRainAccum_si = (
-            currnetRainAccum / prepAccumUnit if prepAccumUnit != 0 else currnetRainAccum
-        )
-        currentSnowAccum_si = (
-            currnetSnowAccum / prepAccumUnit if prepAccumUnit != 0 else currnetSnowAccum
-        )
-        currentIceAccum_si = (
-            currnetIceAccum / prepAccumUnit if prepAccumUnit != 0 else currnetIceAccum
-        )
-        currentPrecipIntensity_si = (
-            minuteDict[0]["precipIntensity"] / prepIntensityUnit
-            if prepIntensityUnit != 0
-            else minuteDict[0]["precipIntensity"]
-        )
+        currently_si["rainIntensity"] = InterPcurrent[DATA_CURRENT["rain_intensity"]]
+        currently_si["snowIntensity"] = InterPcurrent[DATA_CURRENT["snow_intensity"]]
+        currently_si["iceIntensity"] = InterPcurrent[DATA_CURRENT["ice_intensity"]]
 
         try:
             currentText, currentIcon = calculate_text(
                 currently_si,
                 currentDay,
-                currentRainAccum_si,
-                currentSnowAccum_si,
-                currentIceAccum_si,
                 "current",
-                currentPrecipIntensity_si,
                 icon,
             )
             if summaryText:
@@ -5676,7 +5782,7 @@ async def PW_Forecast(
         if not timeMachine:
             try:
                 hourIcon, hourText = calculate_day_text(
-                    hourList[int(baseTimeOffset) : int(baseTimeOffset) + 24],
+                    hourList_si[int(baseTimeOffset) : int(baseTimeOffset) + 24],
                     True,
                     str(tz_name),
                     int(time.time()),
@@ -5755,7 +5861,7 @@ async def PW_Forecast(
             try:
                 if summaryText:
                     weekText, weekIcon = calculate_weekly_text(
-                        dayList, str(tz_name), unitSystem, icon
+                        dayList_si, str(tz_name), unitSystem, icon
                     )
                     returnOBJ["daily"]["summary"] = translation.translate(
                         ["sentence", weekText]
