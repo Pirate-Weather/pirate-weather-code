@@ -782,15 +782,31 @@ async def TimeMachine(
                 pIconList.append("clear-night")
 
         hTextList.append(hourText)
+        # Calculate type-specific precipitation intensities
+        precip_intensity_si = InterPhour[idx, DATA_TIMEMACHINE["intensity"]]
+        rain_intensity = 0.0
+        snow_intensity = 0.0
+        sleet_intensity = 0.0
+
+        if pTypeList[idx] == "rain":
+            rain_intensity = precip_intensity_si
+        elif pTypeList[idx] == "snow":
+            snow_intensity = precip_intensity_si
+        elif pTypeList[idx] == "sleet":
+            sleet_intensity = precip_intensity_si
+
         hourDict = {
             "time": int(InterPhour[idx, DATA_TIMEMACHINE["time"]]) + halfTZ,
             "summary": hourText,
             "icon": pIconList[idx],
             "precipIntensity": round(
-                InterPhour[idx, DATA_TIMEMACHINE["intensity"]] * prepIntensityUnit, 4
+                precip_intensity_si * prepIntensityUnit, 4
             ),
+            "rainIntensity": round(rain_intensity * prepIntensityUnit, 4),
+            "snowIntensity": round(snow_intensity * prepIntensityUnit, 4),
+            "sleetIntensity": round(sleet_intensity * prepIntensityUnit, 4),
             "precipAccumulation": round(
-                InterPhour[idx, DATA_TIMEMACHINE["intensity"]] * prepAccumUnit, 4
+                precip_intensity_si * prepAccumUnit, 4
             ),
             "precipType": pTypeList[idx],
             "temperature": round(InterPhour[idx, DATA_TIMEMACHINE["temp"]], 2),
@@ -1075,12 +1091,34 @@ async def TimeMachine(
     returnOBJ["offset"] = tz_offset / 60
 
     if exCurrently == 0:
+        # Calculate type-specific precipitation intensities for currently
+        curr_precip_intensity_si = InterPcurrent[DATA_TIMEMACHINE["intensity"]]
+        curr_rain_intensity = 0.0
+        curr_snow_intensity = 0.0
+        curr_sleet_intensity = 0.0
+
+        if pTypeCurrent == "rain":
+            curr_rain_intensity = curr_precip_intensity_si
+        elif pTypeCurrent == "snow":
+            curr_snow_intensity = curr_precip_intensity_si
+        elif pTypeCurrent == "sleet":
+            curr_sleet_intensity = curr_precip_intensity_si
+
         returnOBJ["currently"] = dict()
         returnOBJ["currently"]["time"] = int(InterPcurrent[DATA_TIMEMACHINE["time"]])
         returnOBJ["currently"]["summary"] = cText
         returnOBJ["currently"]["icon"] = cIcon
         returnOBJ["currently"]["precipIntensity"] = round(
-            InterPcurrent[DATA_TIMEMACHINE["intensity"]] * prepIntensityUnit, 4
+            curr_precip_intensity_si * prepIntensityUnit, 4
+        )
+        returnOBJ["currently"]["rainIntensity"] = round(
+            curr_rain_intensity * prepIntensityUnit, 4
+        )
+        returnOBJ["currently"]["snowIntensity"] = round(
+            curr_snow_intensity * prepIntensityUnit, 4
+        )
+        returnOBJ["currently"]["sleetIntensity"] = round(
+            curr_sleet_intensity * prepIntensityUnit, 4
         )
         returnOBJ["currently"]["precipType"] = pTypeCurrent
         returnOBJ["currently"]["temperature"] = round(
