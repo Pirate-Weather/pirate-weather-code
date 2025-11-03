@@ -3860,6 +3860,28 @@ async def PW_Forecast(
         ice_display = round(InterPhour[idx, DATA_HOURLY["ice"]] * prepAccumUnit, 4)
         accum_display = round(rain_display + snow_display + ice_display, 4)
 
+        # Calculate type-specific intensities based on precipType
+        # Keep in SI units (mm/h) internally, convert only at output
+        precip_type = PTypeHour[idx]
+        intensity_si = InterPhour[idx, DATA_HOURLY["intensity"]]
+
+        if precip_type == "rain":
+            rain_intensity_display = round(intensity_si * prepIntensityUnit, 4)
+            snow_intensity_display = 0.0
+            sleet_intensity_display = 0.0
+        elif precip_type == "snow":
+            rain_intensity_display = 0.0
+            snow_intensity_display = round(intensity_si * prepIntensityUnit, 4)
+            sleet_intensity_display = 0.0
+        elif precip_type == "sleet":
+            rain_intensity_display = 0.0
+            snow_intensity_display = 0.0
+            sleet_intensity_display = round(intensity_si * prepIntensityUnit, 4)
+        else:  # "none" or other
+            rain_intensity_display = 0.0
+            snow_intensity_display = 0.0
+            sleet_intensity_display = 0.0
+
         # Pressure conversion from Pascals to hectopascals
         pressure_display = round(InterPhour[idx, DATA_HOURLY["pressure"]] / 100, 2)
 
@@ -3879,6 +3901,9 @@ async def PW_Forecast(
             "precipIntensityError": round(error_display, 4),
             "precipAccumulation": accum_display,
             "precipType": PTypeHour[idx],
+            "rainIntensity": rain_intensity_display,
+            "snowIntensity": snow_intensity_display,
+            "sleetIntensity": sleet_intensity_display,
             "temperature": round(temp_display, 2),
             "apparentTemperature": round(apparent_display, 2),
             "dewPoint": round(dew_display, 2),
