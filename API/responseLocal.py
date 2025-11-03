@@ -2249,6 +2249,20 @@ async def PW_Forecast(
         ]
     ).astype(np.int32)
 
+    day_array_5pm_grib = np.array(
+        [
+            pytzTZ.localize(
+                datetime.datetime(
+                    year=baseTime.year, month=baseTime.month, day=baseTime.day, hour=17
+                )
+                + datetime.timedelta(days=i)
+            )
+            .astimezone(utc)
+            .timestamp()
+            for i in range(10)
+        ]
+    ).astype(np.int32)
+
     day_array_6am_grib = np.array(
         [
             pytzTZ.localize(
@@ -2325,7 +2339,7 @@ async def PW_Forecast(
         ] = d
         hourlyNight4amIndex[
             np.where(
-                (hour_array_grib > day_array_4pm_grib[d])
+                (hour_array_grib >= day_array_5pm_grib[d])
                 & (hour_array_grib < day_array_4am_grib[d + 1])
             )
         ] = d
@@ -3989,8 +4003,10 @@ async def PW_Forecast(
     max_4am_results = []
     mean_day_results = []
     sum_day_results = []
+    max_day_results = []
     mean_night_results = []
     sum_night_results = []
+    max_night_results = []
     maxPchanceDay = np.zeros((daily_days))
     max_precip_chance_day = np.zeros((daily_days))
     max_precip_chance_night = np.zeros((daily_days))
@@ -4042,6 +4058,7 @@ async def PW_Forecast(
         # Calculate and store each statistic for the current group
         mean_day_results.append(np.mean(filtered_data, axis=0))
         sum_day_results.append(np.sum(filtered_data, axis=0))
+        max_day_results.append(np.max(filtered_data, axis=0))
 
         dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
 
@@ -4057,7 +4074,7 @@ async def PW_Forecast(
         else:
             max_precip_chance_day[mIDX] = dailyTypeCount[0][0]
 
-    # Night portion of half day runs from 4pm to 4am the next day
+    # Night portion of half day runs from 5pm to 4am the next day
     masks = [hourlyNight4amIndex == day_index for day_index in range(daily_days)]
     for mIDX, mask in enumerate(masks):
         filtered_data = InterPhour[mask]
@@ -4065,6 +4082,7 @@ async def PW_Forecast(
         # Calculate and store each statistic for the current group
         mean_night_results.append(np.mean(filtered_data, axis=0))
         sum_night_results.append(np.sum(filtered_data, axis=0))
+        max_night_results.append(np.max(filtered_data, axis=0))
 
         dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
 
@@ -4118,8 +4136,10 @@ async def PW_Forecast(
     InterPdayMax4am = np.array(max_4am_results)
     interp_half_day_sum = np.array(sum_day_results)
     interp_half_day_mean = np.array(mean_day_results)
+    interp_half_day_max = np.array(max_day_results)
     interp_half_night_sum = np.array(sum_night_results)
     interp_half_night_mean = np.array(mean_night_results)
+    interp_half_night_max = np.array(max_night_results)
 
     # Determine the daily precipitation type (encapsulated helper)
     try:
@@ -4214,7 +4234,7 @@ async def PW_Forecast(
     for idx in range(0, daily_days):
         # Day
         # Set text
-        if interp_half_day_mean[idx, DATA_HOURLY["prob"]] >= PRECIP_PROB_THRESHOLD and (
+        if interp_half_day_max[idx, DATA_HOURLY["prob"]] >= PRECIP_PROB_THRESHOLD and (
             (
                 (
                     interp_half_day_mean[idx, DATA_HOURLY["rain"]]
@@ -4264,39 +4284,88 @@ async def PW_Forecast(
             "time": int(day_array_4am_grib[idx]),
             "summary": day_text,
             "icon": day_icon,
-            "precipIntensity": interp_half_day_mean[idx, DATA_HOURLY["intensity"]],
-            "precipProbability": interp_half_day_mean[idx, DATA_HOURLY["prob"]],
-            "precipAccumulation": interp_half_day_sum[idx, DATA_HOURLY["rain"]]
-            + interp_half_day_sum[idx, DATA_HOURLY["snow"]]
-            + interp_half_day_sum[idx, DATA_HOURLY["ice"]],
+            "precipIntensity": round(
+                interp_half_day_mean[idx, DATA_HOURLY["intensity"]], 4
+            )
+            if not np.isnan(interp_half_day_mean[idx, DATA_HOURLY["intensity"]])
+            else interp_half_day_mean[idx, DATA_HOURLY["intensity"]],
+            "precipProbability": round(interp_half_day_max[idx, DATA_HOURLY["prob"]], 4)
+            if not np.isnan(interp_half_day_max[idx, DATA_HOURLY["prob"]])
+            else interp_half_day_max[idx, DATA_HOURLY["prob"]],
+            "precipAccumulation": round(
+                interp_half_day_sum[idx, DATA_HOURLY["rain"]]
+                + interp_half_day_sum[idx, DATA_HOURLY["snow"]]
+                + interp_half_day_sum[idx, DATA_HOURLY["ice"]],
+                4,
+            ),
             "precipType": precip_type_half_day[idx],
-            "temperature": InterPdayHigh[idx, DATA_DAY["temp"]],
-            "apparentTemperature": InterPdayHigh[idx, DATA_DAY["apparent"]],
-            "dewPoint": interp_half_day_mean[idx, DATA_HOURLY["dew"]],
-            "humidity": interp_half_day_mean[idx, DATA_HOURLY["humidity"]],
-            "pressure": interp_half_day_mean[idx, DATA_HOURLY["pressure"]],
-            "windSpeed": interp_half_day_mean[idx, DATA_HOURLY["wind"]],
-            "windGust": interp_half_day_mean[idx, DATA_HOURLY["gust"]],
-            "windBearing": interp_half_day_mean[idx, DATA_HOURLY["bearing"]].round(),
-            "cloudCover": interp_half_day_mean[idx, DATA_HOURLY["cloud"]],
-            "uvIndex": interp_half_day_mean[idx, DATA_HOURLY["uv"]],
-            "visibility": interp_half_day_mean[idx, DATA_HOURLY["vis"]],
-            "ozone": interp_half_day_mean[idx, DATA_HOURLY["ozone"]],
-            "smoke": interp_half_day_mean[idx, DATA_HOURLY["smoke"]],
-            "liquidAccumulation": interp_half_day_sum[idx, DATA_HOURLY["rain"]],
-            "snowAccumulation": interp_half_day_sum[idx, DATA_HOURLY["snow"]],
-            "iceAccumulation": interp_half_day_sum[idx, DATA_HOURLY["ice"]],
-            "fireIndex": interp_half_day_mean[idx, DATA_HOURLY["fire"]],
-            "feelsLike": interp_half_day_mean[idx, DATA_HOURLY["feels_like"]],
-            "solar": interp_half_day_mean[idx, DATA_HOURLY["solar"]],
-            "cape": interp_half_day_mean[idx, DATA_HOURLY["cape"]],
+            "temperature": round(InterPdayHigh[idx, DATA_DAY["temp"]], 2)
+            if not np.isnan(InterPdayHigh[idx, DATA_DAY["temp"]])
+            else InterPdayHigh[idx, DATA_DAY["temp"]],
+            "apparentTemperature": round(InterPdayHigh[idx, DATA_DAY["apparent"]], 2)
+            if not np.isnan(InterPdayHigh[idx, DATA_DAY["apparent"]])
+            else InterPdayHigh[idx, DATA_DAY["apparent"]],
+            "dewPoint": round(interp_half_day_mean[idx, DATA_HOURLY["dew"]], 2)
+            if not np.isnan(interp_half_day_mean[idx, DATA_HOURLY["dew"]])
+            else interp_half_day_mean[idx, DATA_HOURLY["dew"]],
+            "humidity": round(interp_half_day_mean[idx, DATA_HOURLY["humidity"]], 2)
+            if not np.isnan(interp_half_day_mean[idx, DATA_HOURLY["humidity"]])
+            else interp_half_day_mean[idx, DATA_HOURLY["humidity"]],
+            "pressure": round(interp_half_day_mean[idx, DATA_HOURLY["pressure"]], 2)
+            if not np.isnan(interp_half_day_mean[idx, DATA_HOURLY["pressure"]])
+            else interp_half_day_mean[idx, DATA_HOURLY["pressure"]],
+            "windSpeed": round(interp_half_day_mean[idx, DATA_HOURLY["wind"]], 2)
+            if not np.isnan(interp_half_day_mean[idx, DATA_HOURLY["wind"]])
+            else interp_half_day_mean[idx, DATA_HOURLY["wind"]],
+            "windGust": round(interp_half_day_mean[idx, DATA_HOURLY["gust"]], 2)
+            if not np.isnan(interp_half_day_mean[idx, DATA_HOURLY["gust"]])
+            else interp_half_day_mean[idx, DATA_HOURLY["gust"]],
+            "windBearing": int(round(interp_half_day_mean[idx, DATA_HOURLY["bearing"]]))
+            if not np.isnan(interp_half_day_mean[idx, DATA_HOURLY["bearing"]])
+            else interp_half_day_mean[idx, DATA_HOURLY["bearing"]],
+            "cloudCover": round(interp_half_day_mean[idx, DATA_HOURLY["cloud"]], 2)
+            if not np.isnan(interp_half_day_mean[idx, DATA_HOURLY["cloud"]])
+            else interp_half_day_mean[idx, DATA_HOURLY["cloud"]],
+            "uvIndex": round(interp_half_day_mean[idx, DATA_HOURLY["uv"]], 2)
+            if not np.isnan(interp_half_day_mean[idx, DATA_HOURLY["uv"]])
+            else interp_half_day_mean[idx, DATA_HOURLY["uv"]],
+            "visibility": round(interp_half_day_mean[idx, DATA_HOURLY["vis"]], 2)
+            if not np.isnan(interp_half_day_mean[idx, DATA_HOURLY["vis"]])
+            else interp_half_day_mean[idx, DATA_HOURLY["vis"]],
+            "ozone": round(interp_half_day_mean[idx, DATA_HOURLY["ozone"]], 2)
+            if not np.isnan(interp_half_day_mean[idx, DATA_HOURLY["ozone"]])
+            else interp_half_day_mean[idx, DATA_HOURLY["ozone"]],
+            "smoke": round(interp_half_day_mean[idx, DATA_HOURLY["smoke"]], 2)
+            if not np.isnan(interp_half_day_mean[idx, DATA_HOURLY["smoke"]])
+            else interp_half_day_mean[idx, DATA_HOURLY["smoke"]],
+            "liquidAccumulation": round(
+                interp_half_day_sum[idx, DATA_HOURLY["rain"]], 4
+            ),
+            "snowAccumulation": round(interp_half_day_sum[idx, DATA_HOURLY["snow"]], 4),
+            "iceAccumulation": round(interp_half_day_sum[idx, DATA_HOURLY["ice"]], 4),
+            "fireIndex": round(interp_half_day_mean[idx, DATA_HOURLY["fire"]], 2)
+            if not np.isnan(interp_half_day_mean[idx, DATA_HOURLY["fire"]])
+            else interp_half_day_mean[idx, DATA_HOURLY["fire"]],
+            "feelsLike": round(interp_half_day_mean[idx, DATA_HOURLY["feels_like"]], 2)
+            if not np.isnan(interp_half_day_mean[idx, DATA_HOURLY["feels_like"]])
+            else interp_half_day_mean[idx, DATA_HOURLY["feels_like"]],
+            "solar": round(interp_half_day_mean[idx, DATA_HOURLY["solar"]], 2)
+            if not np.isnan(interp_half_day_mean[idx, DATA_HOURLY["solar"]])
+            else interp_half_day_mean[idx, DATA_HOURLY["solar"]],
+            "cape": int(round(interp_half_day_mean[idx, DATA_HOURLY["cape"]]))
+            if not np.isnan(interp_half_day_mean[idx, DATA_HOURLY["cape"]])
+            else interp_half_day_mean[idx, DATA_HOURLY["cape"]],
         }
 
         # Add station pressure if requested
         if "stationPressure" in extraVars:
-            day_item["stationPressure"] = interp_half_day_mean[
-                idx, DATA_HOURLY["station_pressure"]
-            ]
+            day_item["stationPressure"] = (
+                round(interp_half_day_mean[idx, DATA_HOURLY["station_pressure"]], 2)
+                if not np.isnan(
+                    interp_half_day_mean[idx, DATA_HOURLY["station_pressure"]]
+                )
+                else interp_half_day_mean[idx, DATA_HOURLY["station_pressure"]]
+            )
 
         try:
             if idx < 8:
@@ -4310,7 +4379,7 @@ async def PW_Forecast(
                     True,
                     str(tz_name),
                     int(time.time()),
-                    "day",
+                    "daily",
                     icon,
                 )
 
@@ -4337,7 +4406,7 @@ async def PW_Forecast(
 
         # Night
         # Set text
-        if interp_half_night_mean[
+        if interp_half_night_max[
             idx, DATA_HOURLY["prob"]
         ] >= PRECIP_PROB_THRESHOLD and (
             (
@@ -4386,46 +4455,103 @@ async def PW_Forecast(
             day_icon = "clear-night"
 
         day_item = {
-            "time": int(day_array_4pm_grib[idx]),
+            "time": int(day_array_5pm_grib[idx]),
             "summary": day_text,
             "icon": day_icon,
-            "precipIntensity": interp_half_night_mean[idx, DATA_HOURLY["intensity"]],
-            "precipProbability": interp_half_night_mean[idx, DATA_HOURLY["prob"]],
-            "precipAccumulation": interp_half_day_sum[idx, DATA_HOURLY["rain"]]
-            + interp_half_day_sum[idx, DATA_HOURLY["snow"]]
-            + interp_half_day_sum[idx, DATA_HOURLY["ice"]],
+            "precipIntensity": round(
+                interp_half_night_mean[idx, DATA_HOURLY["intensity"]], 4
+            )
+            if not np.isnan(interp_half_night_mean[idx, DATA_HOURLY["intensity"]])
+            else interp_half_night_mean[idx, DATA_HOURLY["intensity"]],
+            "precipProbability": round(
+                interp_half_night_max[idx, DATA_HOURLY["prob"]], 4
+            )
+            if not np.isnan(interp_half_night_max[idx, DATA_HOURLY["prob"]])
+            else interp_half_night_max[idx, DATA_HOURLY["prob"]],
+            "precipAccumulation": round(
+                interp_half_night_sum[idx, DATA_HOURLY["rain"]]
+                + interp_half_night_sum[idx, DATA_HOURLY["snow"]]
+                + interp_half_night_sum[idx, DATA_HOURLY["ice"]],
+                4,
+            ),
             "precipType": precip_type_half_night[idx],
-            "temperature": InterPdayLow[idx, DATA_DAY["temp"]],
-            "apparentTemperature": InterPdayLow[idx, DATA_DAY["apparent"]],
-            "dewPoint": interp_half_night_mean[idx, DATA_HOURLY["dew"]],
-            "humidity": interp_half_night_mean[idx, DATA_HOURLY["humidity"]],
-            "pressure": interp_half_night_mean[idx, DATA_HOURLY["pressure"]],
-            "windSpeed": interp_half_night_mean[idx, DATA_HOURLY["wind"]],
-            "windGust": interp_half_night_mean[idx, DATA_HOURLY["gust"]],
-            "windBearing": interp_half_night_mean[idx, DATA_HOURLY["bearing"]].round(),
-            "cloudCover": interp_half_night_mean[idx, DATA_HOURLY["cloud"]],
-            "uvIndex": interp_half_night_mean[idx, DATA_HOURLY["uv"]],
-            "visibility": interp_half_night_mean[idx, DATA_HOURLY["vis"]],
-            "ozone": interp_half_night_mean[idx, DATA_HOURLY["ozone"]],
-            "smoke": interp_half_night_mean[idx, DATA_HOURLY["smoke"]],
-            "liquidAccumulation": interp_half_day_sum[idx, DATA_HOURLY["rain"]],
-            "snowAccumulation": interp_half_day_sum[idx, DATA_HOURLY["snow"]],
-            "iceAccumulation": interp_half_day_sum[idx, DATA_HOURLY["ice"]],
-            "fireIndex": interp_half_night_mean[idx, DATA_HOURLY["fire"]],
-            "feelsLike": interp_half_night_mean[idx, DATA_HOURLY["feels_like"]],
-            "solar": interp_half_night_mean[idx, DATA_HOURLY["solar"]],
-            "cape": interp_half_night_mean[idx, DATA_HOURLY["cape"]],
+            "temperature": round(InterPdayLow[idx, DATA_DAY["temp"]], 2)
+            if not np.isnan(InterPdayLow[idx, DATA_DAY["temp"]])
+            else InterPdayLow[idx, DATA_DAY["temp"]],
+            "apparentTemperature": round(InterPdayLow[idx, DATA_DAY["apparent"]], 2)
+            if not np.isnan(InterPdayLow[idx, DATA_DAY["apparent"]])
+            else InterPdayLow[idx, DATA_DAY["apparent"]],
+            "dewPoint": round(interp_half_night_mean[idx, DATA_HOURLY["dew"]], 2)
+            if not np.isnan(interp_half_night_mean[idx, DATA_HOURLY["dew"]])
+            else interp_half_night_mean[idx, DATA_HOURLY["dew"]],
+            "humidity": round(interp_half_night_mean[idx, DATA_HOURLY["humidity"]], 2)
+            if not np.isnan(interp_half_night_mean[idx, DATA_HOURLY["humidity"]])
+            else interp_half_night_mean[idx, DATA_HOURLY["humidity"]],
+            "pressure": round(interp_half_night_mean[idx, DATA_HOURLY["pressure"]], 2)
+            if not np.isnan(interp_half_night_mean[idx, DATA_HOURLY["pressure"]])
+            else interp_half_night_mean[idx, DATA_HOURLY["pressure"]],
+            "windSpeed": round(interp_half_night_mean[idx, DATA_HOURLY["wind"]], 2)
+            if not np.isnan(interp_half_night_mean[idx, DATA_HOURLY["wind"]])
+            else interp_half_night_mean[idx, DATA_HOURLY["wind"]],
+            "windGust": round(interp_half_night_mean[idx, DATA_HOURLY["gust"]], 2)
+            if not np.isnan(interp_half_night_mean[idx, DATA_HOURLY["gust"]])
+            else interp_half_night_mean[idx, DATA_HOURLY["gust"]],
+            "windBearing": int(
+                round(interp_half_night_mean[idx, DATA_HOURLY["bearing"]])
+            )
+            if not np.isnan(interp_half_night_mean[idx, DATA_HOURLY["bearing"]])
+            else interp_half_night_mean[idx, DATA_HOURLY["bearing"]],
+            "cloudCover": round(interp_half_night_mean[idx, DATA_HOURLY["cloud"]], 2)
+            if not np.isnan(interp_half_night_mean[idx, DATA_HOURLY["cloud"]])
+            else interp_half_night_mean[idx, DATA_HOURLY["cloud"]],
+            "uvIndex": round(interp_half_night_mean[idx, DATA_HOURLY["uv"]], 2)
+            if not np.isnan(interp_half_night_mean[idx, DATA_HOURLY["uv"]])
+            else interp_half_night_mean[idx, DATA_HOURLY["uv"]],
+            "visibility": round(interp_half_night_mean[idx, DATA_HOURLY["vis"]], 2)
+            if not np.isnan(interp_half_night_mean[idx, DATA_HOURLY["vis"]])
+            else interp_half_night_mean[idx, DATA_HOURLY["vis"]],
+            "ozone": round(interp_half_night_mean[idx, DATA_HOURLY["ozone"]], 2)
+            if not np.isnan(interp_half_night_mean[idx, DATA_HOURLY["ozone"]])
+            else interp_half_night_mean[idx, DATA_HOURLY["ozone"]],
+            "smoke": round(interp_half_night_mean[idx, DATA_HOURLY["smoke"]], 2)
+            if not np.isnan(interp_half_night_mean[idx, DATA_HOURLY["smoke"]])
+            else interp_half_night_mean[idx, DATA_HOURLY["smoke"]],
+            "liquidAccumulation": round(
+                interp_half_night_sum[idx, DATA_HOURLY["rain"]], 4
+            ),
+            "snowAccumulation": round(
+                interp_half_night_sum[idx, DATA_HOURLY["snow"]], 4
+            ),
+            "iceAccumulation": round(interp_half_night_sum[idx, DATA_HOURLY["ice"]], 4),
+            "fireIndex": round(interp_half_night_mean[idx, DATA_HOURLY["fire"]], 2)
+            if not np.isnan(interp_half_night_mean[idx, DATA_HOURLY["fire"]])
+            else interp_half_night_mean[idx, DATA_HOURLY["fire"]],
+            "feelsLike": round(
+                interp_half_night_mean[idx, DATA_HOURLY["feels_like"]], 2
+            )
+            if not np.isnan(interp_half_night_mean[idx, DATA_HOURLY["feels_like"]])
+            else interp_half_night_mean[idx, DATA_HOURLY["feels_like"]],
+            "solar": round(interp_half_night_mean[idx, DATA_HOURLY["solar"]], 2)
+            if not np.isnan(interp_half_night_mean[idx, DATA_HOURLY["solar"]])
+            else interp_half_night_mean[idx, DATA_HOURLY["solar"]],
+            "cape": int(round(interp_half_night_mean[idx, DATA_HOURLY["cape"]]))
+            if not np.isnan(interp_half_night_mean[idx, DATA_HOURLY["cape"]])
+            else interp_half_night_mean[idx, DATA_HOURLY["cape"]],
         }
 
         # Add station pressure if requested
         if "stationPressure" in extraVars:
-            day_item["stationPressure"] = interp_half_night_mean[
-                idx, DATA_HOURLY["station_pressure"]
-            ]
+            day_item["stationPressure"] = (
+                round(interp_half_night_mean[idx, DATA_HOURLY["station_pressure"]], 2)
+                if not np.isnan(
+                    interp_half_night_mean[idx, DATA_HOURLY["station_pressure"]]
+                )
+                else interp_half_night_mean[idx, DATA_HOURLY["station_pressure"]]
+            )
 
         try:
             if idx < 8:
-                # Calculate the night summary from 5pm to 3am
+                # Calculate the night summary from 5pm to 4am
                 dayIcon, dayText = calculate_day_text(
                     hourList[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
                     prepAccumUnit,
@@ -4435,7 +4561,7 @@ async def PW_Forecast(
                     False,
                     str(tz_name),
                     int(time.time()),
-                    "day",
+                    "daily",
                     icon,
                 )
 
