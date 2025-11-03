@@ -5515,60 +5515,6 @@ async def PW_Forecast(
     # Fix small neg zero
     InterPcurrent[((InterPcurrent > -0.01) & (InterPcurrent < 0.01))] = 0
 
-    # Convert intensity to accumulation based on type
-    currnetRainAccum = 0
-    currnetSnowAccum = 0
-    currnetIceAccum = 0
-
-    if timeMachine:
-        currnetRainAccum = (
-            ERA5_MERGED[currentIDX_hrrrh_A, ERA5["large_scale_rain_rate"]] * interpFac1
-            + ERA5_MERGED[currentIDX_hrrrh, ERA5["large_scale_rain_rate"]] * interpFac2
-            + ERA5_MERGED[currentIDX_hrrrh_A, ERA5["convective_rain_rate"]] * interpFac1
-            + ERA5_MERGED[currentIDX_hrrrh, ERA5["convective_rain_rate"]] * interpFac2
-        ) * 3600  # Convert from mm/s to mm/hr and then into accumilation units (cm)
-        curr_liquid = (
-            ERA5_MERGED[
-                currentIDX_hrrrh_A, ERA5["large_scale_snowfall_rate_water_equivalent"]
-            ]
-            * interpFac1
-            + ERA5_MERGED[
-                currentIDX_hrrrh, ERA5["large_scale_snowfall_rate_water_equivalent"]
-            ]
-            * interpFac2
-            + ERA5_MERGED[
-                currentIDX_hrrrh_A, ERA5["convective_snowfall_rate_water_equivalent"]
-            ]
-            * interpFac1
-            + ERA5_MERGED[
-                currentIDX_hrrrh, ERA5["convective_snowfall_rate_water_equivalent"]
-            ]
-            * interpFac2
-        ) * 3600  # Convert from mm/s to mm/hr
-        currnetSnowAccum = estimate_snow_height(
-            curr_liquid, curr_temp, InterPcurrent[DATA_CURRENT["wind"]]
-        )
-
-        currnetIceAccum = 0
-    else:
-        if minuteDict[0]["precipType"] in ("rain", "none"):
-            currnetRainAccum = (
-                minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
-            )
-        elif minuteDict[0]["precipType"] == "snow":
-            # Use the new snow height estimation (in mm), then convert to requested units
-            curr_liquid = minuteDict[0]["precipIntensity"] / prepIntensityUnit
-            currnetSnowAccum = (
-                estimate_snow_height(
-                    curr_liquid, curr_temp, InterPcurrent[DATA_CURRENT["wind"]]
-                )
-                * prepAccumUnit
-            )
-        elif minuteDict[0]["precipType"] == "sleet":
-            currnetIceAccum = (
-                minuteDict[0]["precipIntensity"] / prepIntensityUnit * prepAccumUnit
-            )
-
     ### RETURN ###
     returnOBJ = dict()
 
