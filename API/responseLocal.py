@@ -4027,6 +4027,10 @@ async def PW_Forecast(
             hourItem.pop("fireIndex", None)
             hourItem.pop("feelsLike", None)
             hourItem.pop("solar", None)
+            hourItem.pop("rainIntensity", None)
+            hourItem.pop("snowIntensity", None)
+            hourItem.pop("iceIntensity", None)
+            hourItem.pop("cape", None)
 
         if timeMachine and not tmExtra:
             hourItem.pop("uvIndex", None)
@@ -4518,6 +4522,12 @@ async def PW_Forecast(
             dayObject.pop("solarMaxTime", None)
             dayObject.pop("capeMax", None)
             dayObject.pop("capeMaxTime", None)
+            dayObject.pop("rainIntensity", None)
+            dayObject.pop("snowIntensity", None)
+            dayObject.pop("iceIntensity", None)
+            dayObject.pop("liquidIntensityMax", None)
+            dayObject.pop("snowIntensityMax", None)
+            dayObject.pop("iceIntensityMax", None)
 
         if timeMachine and not tmExtra:
             dayObject.pop("precipProbability", None)
@@ -5504,14 +5514,10 @@ async def PW_Forecast(
     InterPcurrent[DATA_CURRENT["snow_intensity"]] = 0
     InterPcurrent[DATA_CURRENT["ice_intensity"]] = 0
 
-    # Determine current precip type from minuteDict
-    current_precip_type = minuteDict[0]["precipType"]
-
-
     # Get the current precip intensity from the minuteRainIntensity
     InterPcurrent[DATA_CURRENT["rain_intensity"]] = minuteRainIntensity[0]
     InterPcurrent[DATA_CURRENT["snow_intensity"]] = minuteSnowIntensity[0]
-    InterPcurrent[DATA_CURRENT["ice_intensity"]] = minuteIceIntensity[0]
+    InterPcurrent[DATA_CURRENT["ice_intensity"]] = minuteSleetIntensity[0]
 
     InterPcurrent = InterPcurrent.round(2)
 
@@ -5630,6 +5636,8 @@ async def PW_Forecast(
         # Create SI unit version of currently object for text generation
         currently_si = dict(returnOBJ["currently"])
         # Replace converted values with SI values
+        currently_si["icon"] = returnOBJ["currently"]["icon"]
+        currently_si["precipType"] = returnOBJ["currently"]["precipType"]
         currently_si["windSpeed"] = curr_wind_si
         currently_si["visibility"] = curr_vis_si
         currently_si["temperature"] = curr_temp_si
@@ -5667,6 +5675,10 @@ async def PW_Forecast(
             returnOBJ["currently"].pop("feelsLike", None)
             returnOBJ["currently"].pop("solar", None)
             returnOBJ["currently"].pop("cape", None)
+            returnOBJ["currently"].pop("rainIntensity", None)
+            returnOBJ["currently"].pop("snowIntensity", None)
+            returnOBJ["currently"].pop("iceIntensity", None)
+
 
         if timeMachine and not tmExtra:
             returnOBJ["currently"].pop("nearestStormDistance", None)
