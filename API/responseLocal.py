@@ -4108,19 +4108,13 @@ async def PW_Forecast(
     # determination if a certain threshold is met. The priority for these overrides is:
     # Ice > Snow > Rain.
     # If more than 10 mm of rain is forecast, then rain.
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["rain"]] > (10)] = (
-        PRECIP_IDX["rain"]
-    )
+    maxPchanceDay[InterPdaySum[:, DATA_DAY["rain"]] > (10)] = PRECIP_IDX["rain"]
 
     # If more than 5 mm of snow is forecast, then snow.
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["snow"]] > (5)] = PRECIP_IDX[
-        "snow"
-    ]
+    maxPchanceDay[InterPdaySum[:, DATA_DAY["snow"]] > (5)] = PRECIP_IDX["snow"]
 
     # Else, if more than 1 mm of ice is forecast, then ice.
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["ice"]] > (1)] = PRECIP_IDX[
-        "ice"
-    ]
+    maxPchanceDay[InterPdaySum[:, DATA_DAY["ice"]] > (1)] = PRECIP_IDX["ice"]
 
     # Process Daily Data for ouput
     dayList = []
@@ -5108,7 +5102,7 @@ async def PW_Forecast(
 
     # Keep visibility in meters (SI units)
     InterPcurrent[DATA_CURRENT["vis"]] = np.clip(
-        InterPcurrent[DATA_CURRENT["vis"]], CLIP_VIS['min'], CLIP_VIS['max']
+        InterPcurrent[DATA_CURRENT["vis"]], CLIP_VIS["min"], CLIP_VIS["max"]
     )
 
     # Ozone from GFS or ERA5
@@ -5389,18 +5383,11 @@ async def PW_Forecast(
 
     if timeMachine:
         currnetRainAccum = (
-            (
-                ERA5_MERGED[currentIDX_hrrrh_A, ERA5["large_scale_rain_rate"]]
-                * interpFac1
-                + ERA5_MERGED[currentIDX_hrrrh, ERA5["large_scale_rain_rate"]]
-                * interpFac2
-                + ERA5_MERGED[currentIDX_hrrrh_A, ERA5["convective_rain_rate"]]
-                * interpFac1
-                + ERA5_MERGED[currentIDX_hrrrh, ERA5["convective_rain_rate"]]
-                * interpFac2
-            )
-            * 3600
-        )  # Convert from mm/s to mm/hr and then into accumilation units (cm)
+            ERA5_MERGED[currentIDX_hrrrh_A, ERA5["large_scale_rain_rate"]] * interpFac1
+            + ERA5_MERGED[currentIDX_hrrrh, ERA5["large_scale_rain_rate"]] * interpFac2
+            + ERA5_MERGED[currentIDX_hrrrh_A, ERA5["convective_rain_rate"]] * interpFac1
+            + ERA5_MERGED[currentIDX_hrrrh, ERA5["convective_rain_rate"]] * interpFac2
+        ) * 3600  # Convert from mm/s to mm/hr and then into accumilation units (cm)
         curr_liquid = (
             ERA5_MERGED[
                 currentIDX_hrrrh_A, ERA5["large_scale_snowfall_rate_water_equivalent"]
@@ -5419,8 +5406,8 @@ async def PW_Forecast(
             ]
             * interpFac2
         ) * 3600  # Convert from mm/s to mm/hr
-        currnetSnowAccum = (
-            estimate_snow_height(curr_liquid, curr_temp, InterPcurrent[DATA_CURRENT["wind"]])
+        currnetSnowAccum = estimate_snow_height(
+            curr_liquid, curr_temp, InterPcurrent[DATA_CURRENT["wind"]]
         )
 
         currnetIceAccum = 0
@@ -5433,7 +5420,9 @@ async def PW_Forecast(
             # Use the new snow height estimation (in mm), then convert to requested units
             curr_liquid = minuteDict[0]["precipIntensity"] / prepIntensityUnit
             currnetSnowAccum = (
-                estimate_snow_height(curr_liquid, curr_temp, InterPcurrent[DATA_CURRENT["wind"]])
+                estimate_snow_height(
+                    curr_liquid, curr_temp, InterPcurrent[DATA_CURRENT["wind"]]
+                )
                 * prepAccumUnit
             )
         elif minuteDict[0]["precipType"] == "sleet":
