@@ -3385,8 +3385,8 @@ async def PW_Forecast(
         VisibilityHour[:, 0] = NBM_Merged[:, NBM["vis"]]
 
         # Filter out missing visibility values
-        VisibilityHour[VisibilityHour[:, 0] < -1, 0] = MISSING_DATA
-        VisibilityHour[VisibilityHour[:, 0] > 1e6, 0] = MISSING_DATA
+        # VisibilityHour[VisibilityHour[:, 0] < -1, 0] = MISSING_DATA
+        # VisibilityHour[VisibilityHour[:, 0] > 1e6, 0] = MISSING_DATA
     if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
         VisibilityHour[:, 1] = HRRR_Merged[:, HRRR["vis"]]
     if "gfs" in sourceList:
@@ -5109,7 +5109,7 @@ async def PW_Forecast(
 
     # Keep visibility in meters (SI units)
     InterPcurrent[DATA_CURRENT["vis"]] = np.clip(
-        InterPcurrent[DATA_CURRENT["vis"]], 0, 16090
+        InterPcurrent[DATA_CURRENT["vis"]], CLIP_VIS['min'], CLIP_VIS['max']
     )
 
     # Ozone from GFS or ERA5
@@ -5139,11 +5139,9 @@ async def PW_Forecast(
             (
                 GFS_Merged[currentIDX_hrrrh_A, GFS["storm_dist"]] * interpFac1
                 + GFS_Merged[currentIDX_hrrrh, GFS["storm_dist"]] * interpFac2
-            )
-            * visUnits,
+            ),
             0,
         )
-
         # Storm Bearing from GFS
         InterPcurrent[DATA_CURRENT["storm_dir"]] = GFS_Merged[
             currentIDX_hrrrh, GFS["storm_dir"]
@@ -5236,14 +5234,11 @@ async def PW_Forecast(
         "CAPE Current",
     )
 
-    # Wind speed is already in m/s (SI units)
-    currentWindSpeedMps = InterPcurrent[DATA_CURRENT["wind"]]
-
     # Calculate the apparent temperature
     InterPcurrent[DATA_CURRENT["apparent"]] = calculate_apparent_temperature(
         InterPcurrent[DATA_CURRENT["temp"]],  # Air temperature in Kelvin
         InterPcurrent[DATA_CURRENT["humidity"]],  # Relative humidity (0.0 to 1.0)
-        currentWindSpeedMps,  # Wind speed in meters per second
+        InterPcurrent[DATA_CURRENT["wind"]],  # Wind speed in meters per second
         InterPcurrent[DATA_CURRENT["solar"]],  # Solar radiation in W/m^2
     )
 
@@ -5394,7 +5389,6 @@ async def PW_Forecast(
     currnetIceAccum = 0
 
     if timeMachine:
-        # TODO: Check the accumulation units here
         currnetRainAccum = (
             (
                 ERA5_MERGED[currentIDX_hrrrh_A, ERA5["large_scale_rain_rate"]]
