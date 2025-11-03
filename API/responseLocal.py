@@ -5679,7 +5679,6 @@ async def PW_Forecast(
             returnOBJ["currently"].pop("snowIntensity", None)
             returnOBJ["currently"].pop("iceIntensity", None)
 
-
         if timeMachine and not tmExtra:
             returnOBJ["currently"].pop("nearestStormDistance", None)
             returnOBJ["currently"].pop("nearestStormBearing", None)
