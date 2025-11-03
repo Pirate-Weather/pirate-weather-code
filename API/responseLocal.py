@@ -3073,6 +3073,19 @@ async def PW_Forecast(
             + ERA5_MERGED[:, ERA5["large_scale_snowfall_rate_water_equivalent"]]
             + ERA5_MERGED[:, ERA5["convective_snowfall_rate_water_equivalent"]]
         ) * 3600
+        
+        # Calculate separate rain and snow intensities for ERA5
+        # Rain intensity from ERA5 rain rates (mm/h liquid)
+        era5_rain_intensity = (
+            ERA5_MERGED[:, ERA5["large_scale_rain_rate"]]
+            + ERA5_MERGED[:, ERA5["convective_rain_rate"]]
+        ) * 3600  # Convert from m/s to mm/h
+        
+        # Snow intensity from ERA5 snow rates (mm/h water equivalent)
+        era5_snow_water_equivalent = (
+            ERA5_MERGED[:, ERA5["large_scale_snowfall_rate_water_equivalent"]]
+            + ERA5_MERGED[:, ERA5["convective_snowfall_rate_water_equivalent"]]
+        ) * 3600  # Convert from m/s to mm/h
 
     # Take first non-NaN value
     InterPhour[:, DATA_HOURLY["intensity"]] = (
@@ -3705,33 +3718,49 @@ async def PW_Forecast(
     InterPhour[:, DATA_HOURLY["snow_intensity"]] = 0
     InterPhour[:, DATA_HOURLY["ice_intensity"]] = 0
 
-    # Rain intensity (direct from intensity)
-    rain_mask = InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["rain"]
-    InterPhour[rain_mask, DATA_HOURLY["rain_intensity"]] = InterPhour[
-        rain_mask, DATA_HOURLY["intensity"]
-    ]
-
-    # Snow intensity (use liquid water conversion)
-    snow_mask = InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["snow"]
-    snow_indices = np.where(snow_mask)[0]
-    if snow_indices.size > 0:
-        # Convert snow accumulation to intensity using liquid water conversion
-        snow_intensity_si = estimate_snow_height(
-            InterPhour[
-                snow_indices, DATA_HOURLY["intensity"]
-            ],  # mm/h of water equivalent
-            InterPhour[snow_indices, DATA_HOURLY["temp"]],  # Celsius
-            windSpeedMps[snow_indices],  # m/s
+    # For ERA5 source, use separate rain and snow rates directly
+    if "era5" in sourceList:
+        # Rain intensity from ERA5 rain rates (already in mm/h)
+        InterPhour[:, DATA_HOURLY["rain_intensity"]] = era5_rain_intensity
+        
+        # Snow intensity: convert ERA5 snow water equivalent to snow depth using temperature and wind
+        era5_snow_intensity_si = estimate_snow_height(
+            era5_snow_water_equivalent,  # mm/h of water equivalent
+            InterPhour[:, DATA_HOURLY["temp"]],  # Celsius
+            windSpeedMps,  # m/s
         )
-        InterPhour[snow_indices, DATA_HOURLY["snow_intensity"]] = snow_intensity_si
+        InterPhour[:, DATA_HOURLY["snow_intensity"]] = era5_snow_intensity_si
+        
+        # ERA5 doesn't provide separate ice/sleet rates, so sleet intensity remains 0
+    else:
+        # For non-ERA5 sources, derive type-specific intensities from main intensity
+        # Rain intensity (direct from intensity)
+        rain_mask = InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["rain"]
+        InterPhour[rain_mask, DATA_HOURLY["rain_intensity"]] = InterPhour[
+            rain_mask, DATA_HOURLY["intensity"]
+        ]
 
-    # Sleet intensity (direct from intensity for types 2 and 3)
-    sleet_mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["ice"]) | (
-        InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["sleet"]
-    )
-    InterPhour[sleet_mask, DATA_HOURLY["ice_intensity"]] = InterPhour[
-        sleet_mask, DATA_HOURLY["intensity"]
-    ]
+        # Snow intensity (use liquid water conversion)
+        snow_mask = InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["snow"]
+        snow_indices = np.where(snow_mask)[0]
+        if snow_indices.size > 0:
+            # Convert snow accumulation to intensity using liquid water conversion
+            snow_intensity_si = estimate_snow_height(
+                InterPhour[
+                    snow_indices, DATA_HOURLY["intensity"]
+                ],  # mm/h of water equivalent
+                InterPhour[snow_indices, DATA_HOURLY["temp"]],  # Celsius
+                windSpeedMps[snow_indices],  # m/s
+            )
+            InterPhour[snow_indices, DATA_HOURLY["snow_intensity"]] = snow_intensity_si
+
+        # Sleet intensity (direct from intensity for types 2 and 3)
+        sleet_mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["ice"]) | (
+            InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["sleet"]
+        )
+        InterPhour[sleet_mask, DATA_HOURLY["ice_intensity"]] = InterPhour[
+            sleet_mask, DATA_HOURLY["intensity"]
+        ]
 
     # pTypeMap = {0: 'none', 1: 'snow', 2: 'sleet', 3: 'sleet', 4: 'rain'}
     pTypeMap = np.array(["none", "snow", "sleet", "sleet", "rain"])
@@ -4772,6 +4801,55 @@ async def PW_Forecast(
             )
             * interpFac2
         ) * 3600  # Convert from mm/s to mm/hr
+        
+        # Calculate separate rain and snow intensities for ERA5
+        # Rain intensity (mm/h)
+        InterPcurrent[DATA_CURRENT["rain_intensity"]] = (
+            (
+                ERA5_MERGED[currentIDX_hrrrh_A, ERA5["large_scale_rain_rate"]]
+                + ERA5_MERGED[currentIDX_hrrrh_A, ERA5["convective_rain_rate"]]
+            )
+            * interpFac1
+            + (
+                ERA5_MERGED[currentIDX_hrrrh, ERA5["large_scale_rain_rate"]]
+                + ERA5_MERGED[currentIDX_hrrrh, ERA5["convective_rain_rate"]]
+            )
+            * interpFac2
+        ) * 3600  # Convert from mm/s to mm/hr
+        
+        # Snow water equivalent (mm/h)
+        era5_current_snow_we = (
+            (
+                ERA5_MERGED[
+                    currentIDX_hrrrh_A,
+                    ERA5["large_scale_snowfall_rate_water_equivalent"],
+                ]
+                + ERA5_MERGED[
+                    currentIDX_hrrrh_A,
+                    ERA5["convective_snowfall_rate_water_equivalent"],
+                ]
+            )
+            * interpFac1
+            + (
+                ERA5_MERGED[
+                    currentIDX_hrrrh, ERA5["large_scale_snowfall_rate_water_equivalent"]
+                ]
+                + ERA5_MERGED[
+                    currentIDX_hrrrh, ERA5["convective_snowfall_rate_water_equivalent"]
+                ]
+            )
+            * interpFac2
+        ) * 3600  # Convert from mm/s to mm/hr
+        
+        # Convert snow water equivalent to snow depth (cm/h)
+        InterPcurrent[DATA_CURRENT["snow_intensity"]] = estimate_snow_height(
+            np.array([era5_current_snow_we]),  # mm/h water equivalent
+            np.array([InterPcurrent[DATA_CURRENT["temp"]]]),  # Celsius
+            np.array([InterPcurrent[DATA_CURRENT["wind"]]]),  # m/s
+        )[0]
+        
+        # ERA5 doesn't provide sleet/ice rates
+        InterPcurrent[DATA_CURRENT["ice_intensity"]] = 0
     else:
         InterPcurrent[DATA_CURRENT["intensity"]] = InterPminute[
             0, DATA_MINUTELY["intensity"]
