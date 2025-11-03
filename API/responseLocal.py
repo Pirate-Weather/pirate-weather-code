@@ -2561,12 +2561,13 @@ async def PW_Forecast(
         ] = d
 
     if not timeMachine:
-        hourlyDayIndex = hourlyDayIndex.astype(int)
-        hourlyDay4amIndex = hourlyDay4amIndex.astype(int)
-        hourlyHighIndex = hourlyHighIndex.astype(int)
-        hourlyLowIndex = hourlyLowIndex.astype(int)
-        hourlyDay4pmIndex = hourlyDay4pmIndex.astype(int)
-        hourlyNight4amIndex = hourlyNight4amIndex.astype(int)
+        # Replace NaN values with 0 before casting to int to avoid RuntimeWarning
+        hourlyDayIndex = np.nan_to_num(hourlyDayIndex, nan=0).astype(int)
+        hourlyDay4amIndex = np.nan_to_num(hourlyDay4amIndex, nan=0).astype(int)
+        hourlyHighIndex = np.nan_to_num(hourlyHighIndex, nan=0).astype(int)
+        hourlyLowIndex = np.nan_to_num(hourlyLowIndex, nan=0).astype(int)
+        hourlyDay4pmIndex = np.nan_to_num(hourlyDay4pmIndex, nan=0).astype(int)
+        hourlyNight4amIndex = np.nan_to_num(hourlyNight4amIndex, nan=0).astype(int)
     else:
         # When running in timemachine mode, don't try to parse through different times, use the current 24h day for everything
         hourlyDayIndex = np.full(len(hour_array_grib), int(0))
