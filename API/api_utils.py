@@ -316,11 +316,11 @@ def select_daily_precip_type(
     max_pchance_day[inter_pday_sum[:, data_day["rain"]] > (10 * prep_accum_unit)] = (
         precip_idx["rain"]
     )
-    max_pchance_day[inter_pday_sum[:, data_day["snow"]] > (5 * prep_accum_unit)] = precip_idx[
-        "snow"
-    ]
-    max_pchance_day[inter_pday_sum[:, data_day["ice"]] > (1 * prep_accum_unit)] = precip_idx[
-        "ice"
-    ]
+    max_pchance_day[inter_pday_sum[:, data_day["snow"]] > (5 * prep_accum_unit)] = (
+        precip_idx["snow"]
+    )
+    max_pchance_day[inter_pday_sum[:, data_day["ice"]] > (1 * prep_accum_unit)] = (
+        precip_idx["ice"]
+    )
 
     return max_pchance_day

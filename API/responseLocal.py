@@ -4232,8 +4232,10 @@ async def PW_Forecast(
     )
 
     # Night portion of half day runs from 5pm to 4am the next day
-    mean_night_results, sum_night_results, max_night_results = process_period_statistics(
-        InterPhour, hourlyNight4amIndex, daily_days, max_precip_chance_night
+    mean_night_results, sum_night_results, max_night_results = (
+        process_period_statistics(
+            InterPhour, hourlyNight4amIndex, daily_days, max_precip_chance_night
+        )
     )
 
     # Daily High
