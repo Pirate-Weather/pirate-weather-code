@@ -1028,6 +1028,60 @@ def dbz_to_rate(dbz_array, precip_type_array, min_dbz=REFC_THRESHOLD):
     return rate_array
 
 
+def round_if_not_nan(value, decimals):
+    """Round a value to specified decimals, preserving NaN values.
+
+    Args:
+        value: The value to round (may be NaN)
+        decimals: Number of decimal places
+
+    Returns:
+        Rounded value or original NaN
+    """
+    return round(value, decimals) if not np.isnan(value) else value
+
+
+def process_period_statistics(inter_phour, period_index, daily_days, max_precip_chance):
+    """Process hourly data for a specific period (day/night) and calculate statistics.
+
+    Args:
+        inter_phour: 2D array of hourly interpolated data
+        period_index: Array indicating which day each hour belongs to
+        daily_days: Number of days to process
+        max_precip_chance: Array to store max precipitation type for each period
+
+    Returns:
+        Tuple of (mean_results, sum_results, max_results) as numpy arrays
+    """
+    mean_results = []
+    sum_results = []
+    max_results = []
+
+    masks = [period_index == day_index for day_index in range(daily_days)]
+    for m_idx, mask in enumerate(masks):
+        filtered_data = inter_phour[mask]
+
+        # Calculate and store each statistic for the current group
+        mean_results.append(np.mean(filtered_data, axis=0))
+        sum_results.append(np.sum(filtered_data, axis=0))
+        max_results.append(np.max(filtered_data, axis=0))
+
+        daily_type_count = Counter(filtered_data[:, 1]).most_common(2)
+
+        # Check if the most common type is zero, in that case return the second most common
+        if daily_type_count[0][0] == 0:
+            if len(daily_type_count) == 2:
+                max_precip_chance[m_idx] = daily_type_count[1][0]
+            else:
+                max_precip_chance[m_idx] = daily_type_count[0][
+                    0
+                ]  # If all ptypes are none, then really shouldn't be any precipitation
+        else:
+            max_precip_chance[m_idx] = daily_type_count[0][0]
+
+    return np.array(mean_results), np.array(sum_results), np.array(max_results)
+
+
 @app.get("/timemachine/{apikey}/{location}", response_class=ORJSONResponse)
 @app.get("/forecast/{apikey}/{location}", response_class=ORJSONResponse)
 async def PW_Forecast(
@@ -3998,15 +4052,6 @@ async def PW_Forecast(
     low_results = []
     arghigh_results = []
     arglow_results = []
-    mean_4am_results = []
-    sum_4am_results = []
-    max_4am_results = []
-    mean_day_results = []
-    sum_day_results = []
-    max_day_results = []
-    mean_night_results = []
-    sum_night_results = []
-    max_night_results = []
     maxPchanceDay = np.zeros((daily_days))
     max_precip_chance_day = np.zeros((daily_days))
     max_precip_chance_night = np.zeros((daily_days))
@@ -4027,76 +4072,19 @@ async def PW_Forecast(
         argmin_results.append(filtered_data[minTime, 0])
 
     # Icon/ summary parameters go from 4 am to 4 am
-    masks = [hourlyDay4amIndex == day_index for day_index in range(daily_days)]
-    for mIDX, mask in enumerate(masks):
-        filtered_data = InterPhour[mask]
-
-        # Calculate and store each statistic for the current group
-        mean_4am_results.append(np.mean(filtered_data, axis=0))
-        sum_4am_results.append(np.sum(filtered_data, axis=0))
-        max_4am_results.append(np.max(filtered_data, axis=0))
-
-        dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
-
-        # Check if the most common type is zero, in that case return the second most common
-        if dailyTypeCount[0][0] == 0:
-            if len(dailyTypeCount) == 2:
-                maxPchanceDay[mIDX] = dailyTypeCount[1][0]
-            else:
-                maxPchanceDay[mIDX] = dailyTypeCount[0][
-                    0
-                ]  # If all ptypes are none, then really shouldn't be any precipitation
-
-        else:
-            maxPchanceDay[mIDX] = dailyTypeCount[0][0]
+    mean_4am_results, sum_4am_results, max_4am_results = process_period_statistics(
+        InterPhour, hourlyDay4amIndex, daily_days, maxPchanceDay
+    )
 
     # Day portion of half day runs from 4am to 4pm
-    masks = [hourlyDay4pmIndex == day_index for day_index in range(daily_days)]
-    for mIDX, mask in enumerate(masks):
-        filtered_data = InterPhour[mask]
-
-        # Calculate and store each statistic for the current group
-        mean_day_results.append(np.mean(filtered_data, axis=0))
-        sum_day_results.append(np.sum(filtered_data, axis=0))
-        max_day_results.append(np.max(filtered_data, axis=0))
-
-        dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
-
-        # Check if the most common type is zero, in that case return the second most common
-        if dailyTypeCount[0][0] == 0:
-            if len(dailyTypeCount) == 2:
-                max_precip_chance_day[mIDX] = dailyTypeCount[1][0]
-            else:
-                max_precip_chance_day[mIDX] = dailyTypeCount[0][
-                    0
-                ]  # If all ptypes are none, then really shouldn't be any precipitation
-
-        else:
-            max_precip_chance_day[mIDX] = dailyTypeCount[0][0]
+    mean_day_results, sum_day_results, max_day_results = process_period_statistics(
+        InterPhour, hourlyDay4pmIndex, daily_days, max_precip_chance_day
+    )
 
     # Night portion of half day runs from 5pm to 4am the next day
-    masks = [hourlyNight4amIndex == day_index for day_index in range(daily_days)]
-    for mIDX, mask in enumerate(masks):
-        filtered_data = InterPhour[mask]
-
-        # Calculate and store each statistic for the current group
-        mean_night_results.append(np.mean(filtered_data, axis=0))
-        sum_night_results.append(np.sum(filtered_data, axis=0))
-        max_night_results.append(np.max(filtered_data, axis=0))
-
-        dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
-
-        # Check if the most common type is zero, in that case return the second most common
-        if dailyTypeCount[0][0] == 0:
-            if len(dailyTypeCount) == 2:
-                max_precip_chance_night[mIDX] = dailyTypeCount[1][0]
-            else:
-                max_precip_chance_night[mIDX] = dailyTypeCount[0][
-                    0
-                ]  # If all ptypes are none, then really shouldn't be any precipitation
-
-        else:
-            max_precip_chance_night[mIDX] = dailyTypeCount[0][0]
+    mean_night_results, sum_night_results, max_night_results = process_period_statistics(
+        InterPhour, hourlyNight4amIndex, daily_days, max_precip_chance_night
+    )
 
     # Daily High
     masks = [hourlyHighIndex == day_index for day_index in range(daily_days)]
@@ -4160,9 +4148,9 @@ async def PW_Forecast(
             PRECIP_IDX,
             prepAccumUnit,
         )
-    except Exception:
+    except (KeyError, IndexError, ValueError) as e:
         # Fallback: preserve original inline logic if helper fails (shouldn't happen)
-        logger.exception("select_daily_precip_type error")
+        logger.exception("select_daily_precip_type error: %s", e)
 
     # Process Day/Night data for output
     day_night_list = []
