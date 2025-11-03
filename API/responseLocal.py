@@ -564,7 +564,7 @@ def _safe_round(val, digits):
 
 def _safe_int_round(val, digits=0):
     """Round val to digits and cast to int if not NaN, otherwise return val unchanged."""
-    return int(val, digits) if not np.isnan(val) else val
+    return int(round(val, digits)) if not np.isnan(val) else val
 
 
 # If testing, read zarrs directly from S3
