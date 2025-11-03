@@ -34,9 +34,9 @@ def calculate_text(
     Parameters:
     - hourObject (dict): A dictionary of the object used to generate the summary (in SI units)
     - isDayTime (bool): Whether its currently day or night
-    - rainPrep (float): The rain accumulation in mm
-    - snowPrep (float): The snow accumulation in mm
-    - icePrep (float): The ice accumulation in mm
+    - rainAccum (float): The rain accumulation in mm
+    - snowAccum (float): The snow accumulation in mm
+    - sleetAccum (float): The ice accumulation in mm
     - type (str): What type of summary is being generated.
     - precipIntensity (float): The precipitation intensity in mm/h
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
@@ -89,18 +89,18 @@ def calculate_text(
     if all(np.isnan(v) for v in (temp, wind, vis, cloudCover, humidity, dewPoint)):
         return "unavailable", "none"
 
-    # Extract rainPrep, snowPrep, icePrep from hourObject
-    rainPrep = hourObject.get("liquidAccumulation", 0.0)
-    snowPrep = hourObject.get("snowAccumulation", 0.0)
-    icePrep = hourObject.get("iceAccumulation", 0.0)
+    # Extract rainAccum, snowAccum, sleetAccum from hourObject
+    rainAccum = hourObject.get("precipAccumulation", 0.0)
+    snowAccum = hourObject.get("snowAccumulation", 0.0)
+    sleetAccum = hourObject.get("sleetAccumulation", 0.0)
 
     # Calculate the text/icon for precipitation, wind, visibility, sky cover, humidity and thunderstorms
     precipText, precipIcon = calculate_precip_text(
         precipType,
         type,
-        rainPrep,
-        snowPrep,
-        icePrep,
+        rainAccum,
+        snowAccum,
+        sleetAccum,
         pop,
         icon,
         "both",

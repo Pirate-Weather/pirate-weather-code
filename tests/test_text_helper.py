@@ -24,15 +24,15 @@ def test_calculate_sky_icon_day_night():
 
 def test_calculate_precip_text_light_rain():
     text, icon = calculate_precip_text(
-        prepIntensity=0.01,
-        prepType="rain",
+        precipType="rain",
         type="hour",
-        rainPrep=0.1,
-        snowPrep=0,
-        icePrep=0,
+        rainAccum=0.1,
+        snowAccum=0,
+        sleetAccum=0,
         pop=0.5,
         icon="pirate",
         isDayTime=True,
+        eff_rain_intensity=0.01,
     )
     assert text == "possible-very-light-rain"
     assert icon == "possible-rain-day"

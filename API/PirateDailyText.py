@@ -930,7 +930,7 @@ def calculate_day_text(
                 period_data["max_wind_speed"], hour["windSpeed"]
             )
             period_data["max_rain_intensity"] = max(
-                period_data["max_rain_intensity"], hour["liquidIntensity"]
+                period_data["max_rain_intensity"], hour["rainIntensity"]
             )
             period_data["max_snow_intensity"] = max(
                 period_data["max_snow_intensity"], hour["snowIntensity"]
@@ -964,7 +964,7 @@ def calculate_day_text(
                 is not None
                 # This uses a the 10:1 snow ratio to determine if fog is likely
                 and (
-                    hour["liquidIntensity"] <= 0.02
+                    hour["rainIntensity"] <= 0.02
                     and hour["snowIntensity"] <= 0.2
                     and hour["iceIntensity"] <= 0.02
                 )
@@ -981,7 +981,7 @@ def calculate_day_text(
                 period_data["num_hours_wind"] += 1
 
             if hour["precipType"] == "rain" or hour["precipType"] == "none":
-                period_data["rain_accum"] += hour["liquidAccumulation"]
+                period_data["rain_accum"] += hour["precipAccumulation"]
             elif hour["precipType"] == "snow":
                 period_data["snow_accum"] += hour["snowAccumulation"]
                 period_data["snow_error"] += hour["precipIntensityError"] * 0.1
@@ -989,7 +989,7 @@ def calculate_day_text(
                 period_data["sleet_accum"] += hour["iceAccumulation"]
 
             if (
-                hour["liquidAccumulation"] > 0
+                hour["precipAccumulation"] > 0
                 or hour["snowAccumulation"] > 0
                 or hour["iceAccumulation"] > 0
             ):
@@ -999,7 +999,7 @@ def calculate_day_text(
                 )
                 period_data["precip_hours_count"] += 1
                 period_data["precip_accum_sum"] += (
-                    hour["liquidAccumulation"]
+                    hour["precipAccumulation"]
                     + hour["snowAccumulation"]
                     + hour["iceAccumulation"]
                 )
@@ -1388,14 +1388,14 @@ def calculate_day_text(
             curr_precip_text_for_first_hour = calculate_precip_text(
                 hours[0]["precipType"],
                 "hourly",
-                hours[0]["liquidAccumulation"],
+                hours[0]["precipAccumulation"],
                 hours[0]["snowAccumulation"],
                 hours[0]["iceAccumulation"],
                 hours[0]["precipProbability"],
                 icon_set,
                 "summary",
                 isDayTime=is_day_time,
-                eff_rain_intensity=hours[0].get("liquidIntensity", 0.0),
+                eff_rain_intensity=hours[0].get("rainIntensity", 0.0),
                 eff_snow_intensity=hours[0].get("snowIntensity", 0.0),
                 eff_ice_intensity=hours[0].get("iceIntensity", 0.0),
             )

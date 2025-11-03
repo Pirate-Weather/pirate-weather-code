@@ -62,11 +62,7 @@ def test_currently_hourly_thunderstorm_with_precipitation():
     text, icon = calculate_text(
         hourObject=hour_object,
         isDayTime=True,
-        rainPrep=5.0,
-        snowPrep=0.0,
-        icePrep=0.0,
         type="current",
-        precipIntensity=5.0,
         icon="darksky",
     )
 
@@ -97,11 +93,7 @@ def test_currently_possible_thunderstorm_with_precipitation():
     text, icon = calculate_text(
         hourObject=hour_object,
         isDayTime=True,
-        rainPrep=5.0,
-        snowPrep=0.0,
-        icePrep=0.0,
         type="current",
-        precipIntensity=5.0,
         icon="darksky",
     )
 
@@ -132,11 +124,7 @@ def test_hourly_possible_thunderstorm_with_precipitation():
     text, icon = calculate_text(
         hourObject=hour_object,
         isDayTime=True,
-        rainPrep=5.0,
-        snowPrep=0.0,
-        icePrep=0.0,
         type="hour",
-        precipIntensity=5.0,
         icon="pirate",
     )
 
@@ -169,11 +157,7 @@ def test_currently_hourly_no_thunderstorm_without_precipitation():
     text, icon = calculate_text(
         hourObject=hour_object,
         isDayTime=True,
-        rainPrep=0.0,
-        snowPrep=0.0,
-        icePrep=0.0,
         type="current",
-        precipIntensity=0.0,
         icon="darksky",
     )
 
@@ -206,11 +190,7 @@ def test_currently_hourly_no_thunderstorm_low_cape():
     text, icon = calculate_text(
         hourObject=hour_object,
         isDayTime=True,
-        rainPrep=3.0,
-        snowPrep=0.0,
-        icePrep=0.0,
         type="current",
-        precipIntensity=3.0,
         icon="darksky",
     )
 
