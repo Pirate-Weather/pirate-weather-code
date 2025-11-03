@@ -5507,19 +5507,11 @@ async def PW_Forecast(
     # Determine current precip type from minuteDict
     current_precip_type = minuteDict[0]["precipType"]
 
-    if current_precip_type == "rain":
-        InterPcurrent[DATA_CURRENT["rain_intensity"]] = InterPcurrent[
-            DATA_CURRENT["intensity"]
-        ]
-    elif current_precip_type == "snow":
-        # For snow, use the estimate_snow_height function to convert liquid equivalent to snow intensity
-        InterPcurrent[DATA_CURRENT["snow_intensity"]] = estimate_snow_height(
-            InterPcurrent[DATA_CURRENT["intensity"]], curr_temp_si, curr_wind_si
-        )
-    elif current_precip_type == "sleet":
-        InterPcurrent[DATA_CURRENT["ice_intensity"]] = InterPcurrent[
-            DATA_CURRENT["intensity"]
-        ]
+
+    # Get the current precip intensity from the minuteRainIntensity
+    InterPcurrent[DATA_CURRENT["rain_intensity"]] = minuteRainIntensity[0]
+    InterPcurrent[DATA_CURRENT["snow_intensity"]] = minuteSnowIntensity[0]
+    InterPcurrent[DATA_CURRENT["ice_intensity"]] = minuteIceIntensity[0]
 
     InterPcurrent = InterPcurrent.round(2)
 
