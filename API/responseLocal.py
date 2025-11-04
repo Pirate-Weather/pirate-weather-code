@@ -2890,11 +2890,6 @@ async def PW_Forecast(
         np.round(InterPminute[:, DATA_MINUTELY["error"]], 2), 0
     )
 
-    # Convert nan to -999 for json
-    minuteIntensity[np.isnan(minuteIntensity)] = MISSING_DATA
-    minuteProbability[np.isnan(minuteProbability)] = MISSING_DATA
-    minuteIntensityError[np.isnan(minuteIntensityError)] = MISSING_DATA
-
     # Prepare minutely intensity arrays for output
     minuteRainIntensity = np.maximum(
         np.round(InterPminute[:, DATA_MINUTELY["rain_intensity"]], 4), 0
