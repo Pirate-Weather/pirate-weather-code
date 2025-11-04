@@ -4298,7 +4298,7 @@ async def PW_Forecast(
         """
         Select an icon and summary text for a day/half-day based on arrays and thresholds.
         Legacy approach encapsulated in a helper function.
-        
+
         Args:
             max_arr: array used for max/probability checks (indexable by [idx, ...]).
             mean_arr: array used for mean-based checks (indexable by [idx, ...]).
@@ -4440,9 +4440,7 @@ async def PW_Forecast(
                 "snowIntensityMax": (
                     max_arr[idx, DATA_HOURLY["snow"]] * prepIntensityUnit
                 ),
-                "iceIntensity": (
-                    mean_arr[idx, DATA_HOURLY["ice"]] * prepIntensityUnit
-                ),
+                "iceIntensity": (mean_arr[idx, DATA_HOURLY["ice"]] * prepIntensityUnit),
                 "iceIntensityMax": (
                     max_arr[idx, DATA_HOURLY["ice"]] * prepIntensityUnit
                 ),
@@ -4474,13 +4472,15 @@ async def PW_Forecast(
                 "ozone": mean_arr[idx, DATA_HOURLY["ozone"]],
                 "smoke": mean_arr[idx, DATA_HOURLY["smoke"]],
                 # Accumulations split by type in requested units
-                "liquidAccumulation": (sum_arr[idx, DATA_HOURLY["rain"]] * prepAccumUnit),
+                "liquidAccumulation": (
+                    sum_arr[idx, DATA_HOURLY["rain"]] * prepAccumUnit
+                ),
                 "snowAccumulation": (sum_arr[idx, DATA_HOURLY["snow"]] * prepAccumUnit),
                 "iceAccumulation": (sum_arr[idx, DATA_HOURLY["ice"]] * prepAccumUnit),
                 "fireIndex": mean_arr[idx, DATA_HOURLY["fire"]],
                 "solar": mean_arr[idx, DATA_HOURLY["solar"]],
                 # CAPE reported as integer where available
-                "cape": int(mean_arr[idx, DATA_HOURLY["cape"]])
+                "cape": int(mean_arr[idx, DATA_HOURLY["cape"]]),
             }
 
             return item
@@ -4668,7 +4668,7 @@ async def PW_Forecast(
 
         dayObject = {
             "time": int(day_array_grib[idx]),
-             "summary": dayText,
+            "summary": dayText,
             "icon": dayIcon,
             "dawnTime": InterSday[idx, DATA_DAY["dawn"]],
             "sunriseTime": InterSday[idx, DATA_DAY["sunrise"]],

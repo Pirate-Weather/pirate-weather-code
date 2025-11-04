@@ -23,6 +23,7 @@ def replace_nan(obj, replacement=MISSING_DATA):
     else:
         return obj
 
+
 def apply_rounding(obj, rounding_rules):
     """
     Recursively apply rounding to numeric values in a dict/list based on field names.
