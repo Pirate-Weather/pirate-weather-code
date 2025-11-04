@@ -4477,15 +4477,11 @@ async def PW_Forecast(
             if idx < 8:
                 # Calculate the day summary from 4am to 4pm (13 hours)
                 dayIcon, dayText = calculate_half_day_text(
-                    hourList[(idx * 24) + 4 : (idx * 24) + 17],
-                    prepAccumUnit,
-                    visUnits,
-                    windUnit,
-                    tempUnits,
+                    hourList_si[(idx * 24) + 4 : (idx * 24) + 17],
                     True,
                     str(tz_name),
                     int(time.time()),
-                    icon,
+                    icon_set=icon,
                 )
 
                 # Translate the text
@@ -4544,15 +4540,11 @@ async def PW_Forecast(
             if idx < 8:
                 # Calculate the night summary from 5pm to 4am (11 hours)
                 dayIcon, dayText = calculate_half_day_text(
-                    hourList[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
-                    prepAccumUnit,
-                    visUnits,
-                    windUnit,
-                    tempUnits,
+                    hourList_si[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
                     False,
                     str(tz_name),
                     int(time.time()),
-                    icon,
+                    icon_set=icon,
                 )
 
                 # Translate the text
