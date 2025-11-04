@@ -2,16 +2,14 @@
 # This is designed for half-day forecasts (day: 4am-4pm, night: 5pm-4am)
 # Unlike the full daily summary, this only uses 2 periods and simpler phrases
 
-import numpy as np
-
 from API.constants.shared_const import MISSING_DATA
 from API.constants.text_const import (
-    CLOUD_COVER_THRESHOLDS,
     DEFAULT_HUMIDITY,
     DEFAULT_POP,
     DEFAULT_VISIBILITY,
     PRECIP_INTENSITY_THRESHOLDS,
 )
+from API.PirateDailyText import _value_or_default, calculate_cloud_text
 from API.PirateTextHelper import (
     Most_Common,
     calculate_precip_text,
@@ -24,42 +22,9 @@ from API.PirateTextHelper import (
 
 # Threshold for precipitation to be considered significant
 PRECIP_THRESH = 0.25
-
-
-def _value_or_default(value, default):
-    """Return value or default if value is None or NaN"""
-    if value is None:
-        return default
-    try:
-        if np.isnan(value):
-            return default
-    except TypeError:
-        pass
-    return value
-
-
-def calculate_cloud_text(cloud_cover):
-    """
-    Calculates the textual representation and level of cloud cover.
-
-    Parameters:
-    - cloud_cover (float): The cloud cover for the period (0.0 to 1.0).
-
-    Returns:
-    - tuple: A tuple containing:
-        - cloud_text (str): The textual representation of the cloud cover.
-        - cloud_level (int): The level of the cloud cover (0-4).
-    """
-    if cloud_cover > CLOUD_COVER_THRESHOLDS["cloudy"]:
-        return "heavy-clouds", 4
-    elif cloud_cover > CLOUD_COVER_THRESHOLDS["mostly_cloudy"]:
-        return "medium-clouds", 3
-    elif cloud_cover > CLOUD_COVER_THRESHOLDS["partly_cloudy"]:
-        return "light-clouds", 2
-    elif cloud_cover > CLOUD_COVER_THRESHOLDS["mostly_clear"]:
-        return "very-light-clouds", 1
-    else:
-        return "clear", 0
+# Min and max hours for half-day forecast window
+MIN_HALF_DAY_HOURS = 8
+MAX_HALF_DAY_HOURS = 15
 
 
 def calculate_half_day_text(
@@ -100,7 +65,7 @@ def calculate_half_day_text(
     """
 
     # Return "unavailable" if insufficient data
-    if len(hours) < 8 or len(hours) > 15:
+    if len(hours) < MIN_HALF_DAY_HOURS or len(hours) > MAX_HALF_DAY_HOURS:
         return "none", ["unavailable"]
 
     # Sanitize hourly data with defaults
