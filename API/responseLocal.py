@@ -41,7 +41,7 @@ from API.api_utils import (
     clipLog,
     estimate_visibility_gultepe_rh_pr_numpy,
     replace_nan,
-    select_daily_precip_type
+    select_daily_precip_type,
 )
 from API.constants.api_const import (
     API_VERSION,
@@ -135,6 +135,7 @@ from API.constants.text_const import (
 )
 from API.constants.unit_const import country_units
 from API.PirateDailyText import calculate_day_text
+from API.PirateDayNightText import calculate_half_day_text
 from API.PirateMinutelyText import calculate_minutely_text
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
@@ -4475,8 +4476,8 @@ async def PW_Forecast(
 
         try:
             if idx < 8:
-                # Calculate the day summary from 4am to 4pm
-                dayIcon, dayText = calculate_day_text(
+                # Calculate the day summary from 4am to 4pm (13 hours)
+                dayIcon, dayText = calculate_half_day_text(
                     hourList[(idx * 24) + 4 : (idx * 24) + 17],
                     prepAccumUnit,
                     visUnits,
@@ -4485,7 +4486,6 @@ async def PW_Forecast(
                     True,
                     str(tz_name),
                     int(time.time()),
-                    "daily",
                     icon,
                 )
 
@@ -4541,8 +4541,8 @@ async def PW_Forecast(
 
         try:
             if idx < 8:
-                # Calculate the night summary from 5pm to 4am
-                dayIcon, dayText = calculate_day_text(
+                # Calculate the night summary from 5pm to 4am (11 hours)
+                dayIcon, dayText = calculate_half_day_text(
                     hourList[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
                     prepAccumUnit,
                     visUnits,
@@ -4551,7 +4551,6 @@ async def PW_Forecast(
                     False,
                     str(tz_name),
                     int(time.time()),
-                    "daily",
                     icon,
                 )
 
