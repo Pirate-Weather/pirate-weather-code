@@ -4283,7 +4283,10 @@ async def PW_Forecast(
 
         if prob >= PRECIP_PROB_THRESHOLD and (
             (mode == "hourly" and ((rain + ice) > accum_thresh or snow > accum_thresh))
-            or (mode in ("half-day", "daily") and ((rain + ice) > accum_thresh or snow > snow_thresh))
+            or (
+                mode in ("half-day", "daily")
+                and ((rain + ice) > accum_thresh or snow > snow_thresh)
+            )
         ):
             return precip_type, precip_text
 
