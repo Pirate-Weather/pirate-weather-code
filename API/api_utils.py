@@ -23,7 +23,6 @@ def replace_nan(obj, replacement=MISSING_DATA):
     else:
         return obj
 
-
 def apply_rounding(obj, rounding_rules):
     """
     Recursively apply rounding to numeric values in a dict/list based on field names.
@@ -36,14 +35,18 @@ def apply_rounding(obj, rounding_rules):
     - The object with rounded values
     """
     if isinstance(obj, dict):
-        return {
-            k: apply_rounding(v, rounding_rules)
-            if k not in rounding_rules
-            else round(v, rounding_rules[k])
-            if isinstance(v, (int, float)) and not np.isnan(v)
-            else apply_rounding(v, rounding_rules)
-            for k, v in obj.items()
-        }
+        new_dict = {}
+        for k, v in obj.items():
+            if k in rounding_rules and isinstance(v, (int, float)) and not np.isnan(v):
+                num_decimals = rounding_rules[k]
+                rounded_val = round(v, num_decimals)
+                if num_decimals == 0:
+                    new_dict[k] = int(rounded_val)
+                else:
+                    new_dict[k] = rounded_val
+            else:
+                new_dict[k] = apply_rounding(v, rounding_rules)
+        return new_dict
     elif isinstance(obj, list):
         return [apply_rounding(item, rounding_rules) for item in obj]
     else:
