@@ -25,8 +25,8 @@ def create_base_hour(time_offset=0, **overrides):
     base_hour = {
         "time": 1609459200 + time_offset,
         "precipType": "none",
-        "precipIntensity": 0.0,
-        "precipAccumulation": 0.0,
+        "rainIntensity": 0.0,
+        "liquidAccumulation": 0.0,
         "precipProbability": 0.0,
         "cloudCover": 0.5,
         "windSpeed": 5.0,
@@ -37,6 +37,10 @@ def create_base_hour(time_offset=0, **overrides):
         "smoke": 0,
         "cape": 0,
         "precipIntensityError": 0,
+        "snowIntensity": 0.0,
+        "iceIntensity": 0.0,
+        "snowAccumulation": 0.0,
+        "iceAccumulation": 0.0,
     }
     base_hour.update(overrides)
     return base_hour
@@ -53,8 +57,8 @@ def test_currently_hourly_thunderstorm_with_precipitation():
         temperature=25.0,
         humidity=0.7,
         precipProbability=0.8,
-        precipIntensity=5.0,
-        precipAccumulation=5.0,
+        rainIntensity=5.0,
+        liquidAccumulation=5.0,
         dewPoint=20.0,
         cape=2600,  # Above high threshold for icon
     )
@@ -84,8 +88,8 @@ def test_currently_possible_thunderstorm_with_precipitation():
         temperature=25.0,
         humidity=0.7,
         precipProbability=0.8,
-        precipIntensity=5.0,
-        precipAccumulation=5.0,
+        rainIntensity=5.0,
+        liquidAccumulation=5.0,
         dewPoint=20.0,
         cape=1500,  # Above high threshold for icon
     )
@@ -115,8 +119,8 @@ def test_hourly_possible_thunderstorm_with_precipitation():
         temperature=25.0,
         humidity=0.7,
         precipProbability=0.8,
-        precipIntensity=5.0,
-        precipAccumulation=5.0,
+        rainIntensity=5.0,
+        liquidAccumulation=5.0,
         dewPoint=20.0,
         cape=1500,  # Above high threshold for icon
     )
@@ -147,11 +151,15 @@ def test_currently_hourly_no_thunderstorm_without_precipitation():
         "humidity": 0.5,
         "visibility": 10000,
         "precipProbability": 0.0,
-        "precipIntensity": 0.0,
-        "precipAccumulation": 0.0,
+        "rainIntensity": 0.0,
+        "liquidAccumulation": 0.0,
         "dewPoint": 15.0,
         "smoke": 0,
         "cape": 2000,  # High CAPE but no precipitation
+        "snowIntensity": 0.0,
+        "iceIntensity": 0.0,
+        "snowAccumulation": 0.0,
+        "iceAccumulation": 0.0,
     }
 
     text, icon = calculate_text(
@@ -180,11 +188,15 @@ def test_currently_hourly_no_thunderstorm_low_cape():
         "humidity": 0.7,
         "visibility": 10000,
         "precipProbability": 0.8,
-        "precipIntensity": 3.0,
-        "precipAccumulation": 3.0,
+        "rainIntensity": 3.0,
+        "liquidAccumulation": 3.0,
         "dewPoint": 20.0,
         "smoke": 0,
         "cape": 500,  # Below low threshold
+        "snowIntensity": 0.0,
+        "iceIntensity": 0.0,
+        "snowAccumulation": 0.0,
+        "iceAccumulation": 0.0,
     }
 
     text, icon = calculate_text(
@@ -214,8 +226,8 @@ def test_daily_thunderstorms_joined_with_precipitation():
             {
                 "time": 1609459200 + (i * 3600),  # Starting from 8 AM
                 "precipType": "rain",
-                "precipIntensity": 5.0,
-                "precipAccumulation": 5.0,
+                "rainIntensity": 5.0,
+                "liquidAccumulation": 5.0,
                 "precipProbability": 0.8,
                 "cloudCover": 0.9,
                 "windSpeed": 8.0,
@@ -226,6 +238,10 @@ def test_daily_thunderstorms_joined_with_precipitation():
                 "smoke": 0,
                 "cape": 2600,  # Above high threshold for icon
                 "precipIntensityError": 0.5,
+                "snowIntensity": 0.0,
+                "iceIntensity": 0.0,
+                "snowAccumulation": 0.0,
+                "iceAccumulation": 0.0,
             }
         )
 
@@ -264,8 +280,8 @@ def test_daily_thunderstorms_not_joined_with_precipitation():
             {
                 "time": 1609459200 + (i * 3600),  # 8 AM - 12 PM
                 "precipType": "rain",
-                "precipIntensity": 3.0,
-                "precipAccumulation": 3.0,
+                "rainIntensity": 3.0,
+                "liquidAccumulation": 3.0,
                 "precipProbability": 0.7,
                 "cloudCover": 0.8,
                 "windSpeed": 5.0,
@@ -276,6 +292,10 @@ def test_daily_thunderstorms_not_joined_with_precipitation():
                 "smoke": 0,
                 "cape": 500,  # Below threshold - no thunderstorms
                 "precipIntensityError": 0.3,
+                "snowIntensity": 0.0,
+                "iceIntensity": 0.0,
+                "snowAccumulation": 0.0,
+                "iceAccumulation": 0.0,
             }
         )
 
@@ -285,8 +305,8 @@ def test_daily_thunderstorms_not_joined_with_precipitation():
             {
                 "time": 1609459200 + (i * 3600),  # 12 PM - 4 PM
                 "precipType": "rain",
-                "precipIntensity": 6.0,
-                "precipAccumulation": 6.0,
+                "rainIntensity": 6.0,
+                "liquidAccumulation": 6.0,
                 "precipProbability": 0.9,
                 "cloudCover": 0.95,
                 "windSpeed": 10.0,
@@ -297,6 +317,10 @@ def test_daily_thunderstorms_not_joined_with_precipitation():
                 "smoke": 0,
                 "cape": 2000,  # Above threshold - thunderstorms
                 "precipIntensityError": 0.5,
+                "snowIntensity": 0.0,
+                "iceIntensity": 0.0,
+                "snowAccumulation": 0.0,
+                "iceAccumulation": 0.0,
             }
         )
 
@@ -334,8 +358,8 @@ def test_24hour_thunderstorms_starting_later():
             {
                 "time": 1609470000 + (i * 3600),  # Starting from 11 AM
                 "precipType": "none",
-                "precipIntensity": 0.0,
-                "precipAccumulation": 0.0,
+                "rainIntensity": 0.0,
+                "liquidAccumulation": 0.0,
                 "precipProbability": 0.0,
                 "cloudCover": 0.5,
                 "windSpeed": 5.0,
@@ -346,6 +370,10 @@ def test_24hour_thunderstorms_starting_later():
                 "smoke": 0,
                 "cape": 0,
                 "precipIntensityError": 0,
+                "snowIntensity": 0.0,
+                "iceIntensity": 0.0,
+                "snowAccumulation": 0.0,
+                "iceAccumulation": 0.0,
             }
         )
 
@@ -355,8 +383,8 @@ def test_24hour_thunderstorms_starting_later():
             {
                 "time": 1609470000 + (i * 3600),  # 2 PM - 6 PM
                 "precipType": "rain",
-                "precipIntensity": 8.0,
-                "precipAccumulation": 8.0,
+                "rainIntensity": 8.0,
+                "liquidAccumulation": 8.0,
                 "precipProbability": 0.85,
                 "cloudCover": 0.95,
                 "windSpeed": 12.0,
@@ -367,6 +395,10 @@ def test_24hour_thunderstorms_starting_later():
                 "smoke": 0,
                 "cape": 2600,  # High CAPE for thunderstorm icon
                 "precipIntensityError": 0.7,
+                "snowIntensity": 0.0,
+                "iceIntensity": 0.0,
+                "snowAccumulation": 0.0,
+                "iceAccumulation": 0.0,
             }
         )
 
@@ -405,11 +437,15 @@ def test_weekly_thunderstorms():
             "time": 1609459200,
             "icon": "thunderstorm",
             "precipType": "rain",
-            "precipAccumulation": 10.0,
-            "precipIntensityMax": 5.0,
+            "liquidAccumulation": 10.0,
+            "rainIntensityMax": 5.0,
             "precipProbability": 0.8,
             "temperatureHigh": 25.0,
             "cape": 2000,
+            "snowIntensityMax": 0.0,
+            "iceIntensityMax": 0.0,
+            "snowAccumulation": 0.0,
+            "iceAccumulation": 0.0,
         }
     )
 
@@ -419,11 +455,15 @@ def test_weekly_thunderstorms():
             "time": 1609545600,
             "icon": "thunderstorm",
             "precipType": "rain",
-            "precipAccumulation": 12.0,
-            "precipIntensityMax": 6.0,
+            "liquidAccumulation": 12.0,
+            "rainIntensityMax": 6.0,
             "precipProbability": 0.85,
             "temperatureHigh": 26.0,
             "cape": 2500,
+            "snowIntensityMax": 0.0,
+            "iceIntensityMax": 0.0,
+            "snowAccumulation": 0.0,
+            "iceAccumulation": 0.0,            
         }
     )
 
@@ -434,11 +474,15 @@ def test_weekly_thunderstorms():
                 "time": 1609459200 + (i * 86400),
                 "icon": "partly-cloudy-day",
                 "precipType": "none",
-                "precipAccumulation": 0.0,
-                "precipIntensityMax": 0.0,
+                "liquidAccumulation": 0.0,
+                "rainIntensityMax": 0.0,
                 "precipProbability": 0.0,
                 "temperatureHigh": 24.0 + i,
                 "cape": MISSING_DATA,
+                "snowIntensityMax": 0.0,
+                "iceIntensityMax": 0.0,
+                "snowAccumulation": 0.0,
+                "iceAccumulation": 0.0,                
             }
         )
 
@@ -476,8 +520,8 @@ def test_daily_uses_max_cape_with_precipitation():
             {
                 "time": 1609459200 + (i * 3600),
                 "precipType": "none",
-                "precipIntensity": 0.0,
-                "precipAccumulation": 0.0,
+                "rainIntensity": 0.0,
+                "liquidAccumulation": 0.0,
                 "precipProbability": 0.0,
                 "cloudCover": 0.6,
                 "windSpeed": 5.0,
@@ -488,6 +532,10 @@ def test_daily_uses_max_cape_with_precipitation():
                 "smoke": 0,
                 "cape": 3000,  # Very high CAPE but no precipitation
                 "precipIntensityError": 0,
+                "snowIntensity": 0.0,
+                "iceIntensity": 0.0,
+                "snowAccumulation": 0.0,
+                "iceAccumulation": 0.0,
             }
         )
 
@@ -497,8 +545,8 @@ def test_daily_uses_max_cape_with_precipitation():
             {
                 "time": 1609459200 + (i * 3600),
                 "precipType": "rain",
-                "precipIntensity": 7.0,
-                "precipAccumulation": 7.0,
+                "rainIntensity": 7.0,
+                "liquidAccumulation": 7.0,
                 "precipProbability": 0.85,
                 "cloudCover": 0.9,
                 "windSpeed": 10.0,
@@ -509,6 +557,10 @@ def test_daily_uses_max_cape_with_precipitation():
                 "smoke": 0,
                 "cape": 2600,  # High enough for thunderstorm icon, but less than 3000
                 "precipIntensityError": 0.5,
+                "snowIntensity": 0.0,
+                "iceIntensity": 0.0,
+                "snowAccumulation": 0.0,
+                "iceAccumulation": 0.0,
             }
         )
 
@@ -545,8 +597,8 @@ def test_thunderstorms_dont_combine_with_humidity():
         create_base_hour(
             time_offset=i * 3600,
             precipType="rain",
-            precipIntensity=5.0,
-            precipAccumulation=5.0,
+            rainIntensity=5.0,
+            liquidAccumulation=5.0,
             precipProbability=0.8,
             cloudCover=0.9,
             windSpeed=5.0,  # Low wind so it doesn't combine
@@ -591,8 +643,8 @@ def test_humidity_still_combines_without_thunderstorms():
         create_base_hour(
             time_offset=i * 3600,
             precipType="rain",
-            precipIntensity=5.0,
-            precipAccumulation=5.0,
+            rainIntensity=5.0,
+            liquidAccumulation=5.0,
             precipProbability=0.8,
             cloudCover=0.9,
             windSpeed=5.0,

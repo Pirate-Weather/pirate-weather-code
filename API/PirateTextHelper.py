@@ -117,6 +117,7 @@ def calculate_precip_text(
     eff_rain_intensity=None,
     eff_snow_intensity=None,
     eff_ice_intensity=None,
+    num_precip_days=1,
 ):
     """
     Calculates the precipitation text and icon.
@@ -135,6 +136,7 @@ def calculate_precip_text(
     - eff_rain_intensity (float | None): The effective rain intensity in mm/h
     - eff_snow_intensity (float | None): The effective snow intensity in mm/h
     - eff_ice_intensity (float | None): The effective ice intensity in mm/h
+    - num_precip_days (int): The number of days with precipitation (used for weekly summaries)
 
     Returns:
     - str | None: The summary text representing the current precipitation
@@ -294,7 +296,7 @@ def calculate_precip_text(
         if (
             (type == "minute" or type == "week")
             and eff_rain_intensity < heavyPrecipThresh
-            and rainAccum >= heavyPrecipThresh
+            and rainAccum >= heavyPrecipThresh * num_precip_days * 2
         ):
             cText = ["and", "medium-rain", "possible-heavy-rain"]
     elif (snowAccum > 0 or eff_snow_intensity > 0) and precipType == "snow":
@@ -334,7 +336,7 @@ def calculate_precip_text(
                 cIcon = "heavy-snow"
         if (
             (type == "week" or type == "hourly")
-            and snowAccum < (snowIconThreshold * 2)
+            and snowAccum < (snowIconThreshold * num_precip_days * 2)
             and eff_snow_intensity >= heavySnowThresh
         ):
             cText = ["and", "medium-snow", "possible-heavy-snow"]
@@ -377,7 +379,7 @@ def calculate_precip_text(
                 cIcon = "heavy-sleet"
         if (
             (type == "week" or type == "hourly")
-            and sleetAccum < (precipIconThreshold * 2)
+            and sleetAccum < (precipIconThreshold * num_precip_days * 2)
             and eff_ice_intensity >= heavyPrecipThresh
         ):
             cText = ["and", "medium-sleet", "possible-heavy-sleet"]
@@ -421,7 +423,7 @@ def calculate_precip_text(
                 cIcon = "heavy-freezing-rain"
         if (
             (type == "week" or type == "hourly")
-            and sleetAccum < (precipIconThreshold * 2)
+            and sleetAccum < (precipIconThreshold * num_precip_days * 2)
             and eff_ice_intensity >= heavyPrecipThresh
         ):
             cText = ["and", "medium-freezing-rain", "possible-heavy-freezing-rain"]

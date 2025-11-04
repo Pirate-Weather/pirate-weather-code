@@ -105,6 +105,7 @@ def calculate_summary_text(
             eff_rain_intensity=max_rain_intensity,
             eff_snow_intensity=max_snow_intensity,
             eff_ice_intensity=max_ice_intensity,
+            num_precip_days=len(precipitation),
         )
     else:
         cIcon = "sleet"
@@ -309,6 +310,7 @@ def calculate_precip_summary(
             eff_rain_intensity=max_rain_intensity,
             eff_snow_intensity=max_snow_intensity,
             eff_ice_intensity=max_ice_intensity,
+            num_precip_days=len(precipitation),
         )
         precipSummary = [
             "during",
@@ -501,7 +503,7 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
             )
             or (
                 day["precipType"] == "rain"
-                and day["precipAccumulation"] >= DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
+                and day["liquidAccumulation"] >= DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
                 and (
                     day["precipProbability"] >= PRECIP_PROB_THRESHOLD
                     or np.isnan(day["precipProbability"])
@@ -559,7 +561,7 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
         precipitation,
         precipitationDays,
         icons,
-        sum(day[2]["precipAccumulation"] for day in precipitationDays),
+        sum(day[2]["liquidAccumulation"] for day in precipitationDays),
         sum(day[2]["snowAccumulation"] for day in precipitationDays),
         sum(day[2]["iceAccumulation"] for day in precipitationDays),
         avgPop,
