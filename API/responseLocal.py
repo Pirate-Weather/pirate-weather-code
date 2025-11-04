@@ -40,6 +40,7 @@ from API.api_utils import (
     clipLog,
     estimate_visibility_gultepe_rh_pr_numpy,
     replace_nan,
+    select_daily_precip_type,
 )
 from API.constants.api_const import (
     API_VERSION,
@@ -132,6 +133,7 @@ from API.constants.text_const import (
 )
 from API.constants.unit_const import country_units
 from API.PirateDailyText import calculate_day_text
+from API.PirateDayNightText import calculate_half_day_text
 from API.PirateMinutelyText import calculate_minutely_text
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
@@ -4154,53 +4156,28 @@ async def PW_Forecast(
     interp_half_night_mean = np.array(mean_night_results)
     interp_half_night_max = np.array(max_night_results)
 
-    # Day portion of half day runs from 4am to 4pm
-    masks = [hourlyDay4pmIndex == day_index for day_index in range(daily_days)]
-    for mIDX, mask in enumerate(masks):
-        filtered_data = InterPhour[mask]
-
-        # Calculate and store each statistic for the current group
-        mean_day_results.append(np.mean(filtered_data, axis=0))
-        sum_day_results.append(np.sum(filtered_data, axis=0))
-        max_day_results.append(np.max(filtered_data, axis=0))
-
-        dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
-
-        # Check if the most common type is zero, in that case return the second most common
-        if dailyTypeCount[0][0] == 0:
-            if len(dailyTypeCount) == 2:
-                max_precip_chance_day[mIDX] = dailyTypeCount[1][0]
-            else:
-                max_precip_chance_day[mIDX] = dailyTypeCount[0][
-                    0
-                ]  # If all ptypes are none, then really shouldn't be any precipitation
-
-        else:
-            max_precip_chance_day[mIDX] = dailyTypeCount[0][0]
-
-    # Night portion of half day runs from 5pm to 4am the next day
-    masks = [hourlyNight4amIndex == day_index for day_index in range(daily_days)]
-    for mIDX, mask in enumerate(masks):
-        filtered_data = InterPhour[mask]
-
-        # Calculate and store each statistic for the current group
-        mean_night_results.append(np.mean(filtered_data, axis=0))
-        sum_night_results.append(np.sum(filtered_data, axis=0))
-        max_night_results.append(np.max(filtered_data, axis=0))
-
-        dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
-
-        # Check if the most common type is zero, in that case return the second most common
-        if dailyTypeCount[0][0] == 0:
-            if len(dailyTypeCount) == 2:
-                max_precip_chance_night[mIDX] = dailyTypeCount[1][0]
-            else:
-                max_precip_chance_night[mIDX] = dailyTypeCount[0][
-                    0
-                ]  # If all ptypes are none, then really shouldn't be any precipitation
-
-        else:
-            max_precip_chance_night[mIDX] = dailyTypeCount[0][0]
+    # Determine the daily precipitation type (encapsulated helper)
+    try:
+        maxPchanceDay = select_daily_precip_type(
+            InterPdaySum, DATA_DAY, maxPchanceDay, PRECIP_IDX, prepAccumUnit
+        )
+        max_precip_chance_day = select_daily_precip_type(
+            interp_half_day_sum,
+            DATA_DAY,
+            max_precip_chance_day,
+            PRECIP_IDX,
+            prepAccumUnit,
+        )
+        max_precip_chance_night = select_daily_precip_type(
+            interp_half_night_sum,
+            DATA_DAY,
+            max_precip_chance_night,
+            PRECIP_IDX,
+            prepAccumUnit,
+        )
+    except Exception:
+        # Fallback: preserve original inline logic if helper fails (shouldn't happen)
+        logger.exception("select_daily_precip_type error")
 
     # Process Day/Night data for output
     day_night_list = []
@@ -4466,8 +4443,8 @@ async def PW_Forecast(
 
         try:
             if idx < 8:
-                # Calculate the day summary from 4am to 4pm
-                dayIcon, dayText = calculate_day_text(
+                # Calculate the day summary from 4am to 4pm (13 hours)
+                dayIcon, dayText = calculate_half_day_text(
                     hourList[(idx * 24) + 4 : (idx * 24) + 17],
                     prepAccumUnit,
                     visUnits,
@@ -4476,7 +4453,6 @@ async def PW_Forecast(
                     True,
                     str(tz_name),
                     int(time.time()),
-                    "daily",
                     icon,
                 )
 
@@ -4534,8 +4510,8 @@ async def PW_Forecast(
 
         try:
             if idx < 8:
-                # Calculate the night summary from 5pm to 4am
-                dayIcon, dayText = calculate_day_text(
+                # Calculate the night summary from 5pm to 4am (11 hours)
+                dayIcon, dayText = calculate_half_day_text(
                     hourList[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
                     prepAccumUnit,
                     visUnits,
@@ -4544,7 +4520,6 @@ async def PW_Forecast(
                     False,
                     str(tz_name),
                     int(time.time()),
-                    "daily",
                     icon,
                 )
 
