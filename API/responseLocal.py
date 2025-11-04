@@ -2389,6 +2389,9 @@ async def PW_Forecast(
 
     loc = LocationInfo("name", "region", tz_name, lat, az_Lon)
 
+    is_all_day = False
+    is_all_night = False
+
     # Calculate Sunrise, Sunset, Moon Phase
     for i in range(0, daily_days + 1):
         try:
@@ -2456,6 +2459,7 @@ async def PW_Forecast(
                     + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
                     - np.timedelta64(1, "s").astype("timedelta64[s]").astype(np.int32)
                 )
+                is_all_day = True
 
             # Else
             else:
@@ -2483,6 +2487,8 @@ async def PW_Forecast(
                     + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
                     - np.timedelta64(1, "s").astype("timedelta64[s]").astype(np.int32)
                 )
+
+                is_all_night = True
 
         m = moon.phase(baseDay + datetime.timedelta(days=i))
         InterSday[i, DATA_DAY["moon_phase"]] = m / 27.99
@@ -4497,7 +4503,7 @@ async def PW_Forecast(
             precip_type_half_day,
             precip_text_half_day,
             idx,
-            is_night=False,
+            is_night=True if is_all_night else False,
             mode="hourly",
         )
 
@@ -4524,7 +4530,7 @@ async def PW_Forecast(
                 # Calculate the day summary from 4am to 4pm (13 hours)
                 dayIcon, dayText = calculate_half_day_text(
                     hourList_si[(idx * 24) + 4 : (idx * 24) + 17],
-                    True,
+                    False if is_all_night else True,
                     str(tz_name),
                     int(time.time()),
                     icon_set=icon,
@@ -4560,7 +4566,7 @@ async def PW_Forecast(
             precip_type_half_night,
             precip_text_half_night,
             idx,
-            is_night=True,
+            is_night=False if is_all_day else True,
             mode="hourly",
         )
 
@@ -4587,7 +4593,7 @@ async def PW_Forecast(
                 # Calculate the night summary from 5pm to 4am (11 hours)
                 dayIcon, dayText = calculate_half_day_text(
                     hourList_si[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
-                    False,
+                    True if is_all_day else False,
                     str(tz_name),
                     int(time.time()),
                     icon_set=icon,
@@ -4622,7 +4628,7 @@ async def PW_Forecast(
             PTypeDay,
             PTextDay,
             idx,
-            is_night=False,
+            is_night=True if is_all_night else False,
             mode="daily",
         )
 
@@ -4764,7 +4770,7 @@ async def PW_Forecast(
                 # Calculate the day summary from 4 to 4
                 dayIcon, dayText = calculate_day_text(
                     hourList_si[((idx) * 24) + 4 : ((idx + 1) * 24) + 4],
-                    True,
+                    False if is_all_night else True,
                     str(tz_name),
                     int(time.time()),
                     "day",
