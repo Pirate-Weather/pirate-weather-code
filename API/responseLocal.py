@@ -2933,8 +2933,6 @@ async def PW_Forecast(
         for idx in range(61)
     ]
 
-    
-
     # Timing Check
     if TIMING:
         print("Hourly start")
@@ -3963,9 +3961,7 @@ async def PW_Forecast(
         pressure_display = InterPhour[idx, DATA_HOURLY["pressure"]] / 100
 
         # Storm distance conversion (from meters)
-        storm_dist_display = (
-            InterPhour[idx, DATA_HOURLY["storm_dist"]] * visUnits
-        )
+        storm_dist_display = InterPhour[idx, DATA_HOURLY["storm_dist"]] * visUnits
 
         hourItem = {
             "time": int(hour_array_grib[idx])
@@ -4350,18 +4346,10 @@ async def PW_Forecast(
             temp_low = InterPdayLow[idx, DATA_DAY["temp"]] * 9 / 5 + 32
             temp_min = InterPdayMin[idx, DATA_DAY["temp"]] * 9 / 5 + 32
             temp_max = InterPdayMax[idx, DATA_DAY["temp"]] * 9 / 5 + 32
-            apparent_high = (
-                InterPdayHigh[idx, DATA_DAY["apparent"]] * 9 / 5 + 32
-            )
-            apparent_low = (
-                InterPdayLow[idx, DATA_DAY["apparent"]] * 9 / 5 + 32
-            )
-            apparent_min = (
-                InterPdayMin[idx, DATA_DAY["apparent"]] * 9 / 5 + 32
-            )
-            apparent_max = (
-                InterPdayMax[idx, DATA_DAY["apparent"]] * 9 / 5 + 32
-            )
+            apparent_high = InterPdayHigh[idx, DATA_DAY["apparent"]] * 9 / 5 + 32
+            apparent_low = InterPdayLow[idx, DATA_DAY["apparent"]] * 9 / 5 + 32
+            apparent_min = InterPdayMin[idx, DATA_DAY["apparent"]] * 9 / 5 + 32
+            apparent_max = InterPdayMax[idx, DATA_DAY["apparent"]] * 9 / 5 + 32
             dew_point = InterPday[idx, DATA_DAY["dew"]] * 9 / 5 + 32
         else:  # Celsius (already in Celsius)
             temp_high = InterPdayHigh[idx, DATA_DAY["temp"]]
@@ -4494,15 +4482,9 @@ async def PW_Forecast(
             "smokeMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["smoke"]])
             if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["smoke"]])
             else 0,
-            "liquidAccumulation": (
-                InterPdaySum[idx, DATA_DAY["rain"]] * prepAccumUnit
-            ),
-            "snowAccumulation": (
-                InterPdaySum[idx, DATA_DAY["snow"]] * prepAccumUnit
-            ),
-            "iceAccumulation": (
-                InterPdaySum[idx, DATA_DAY["ice"]] * prepAccumUnit
-            ),
+            "liquidAccumulation": (InterPdaySum[idx, DATA_DAY["rain"]] * prepAccumUnit),
+            "snowAccumulation": (InterPdaySum[idx, DATA_DAY["snow"]] * prepAccumUnit),
+            "iceAccumulation": (InterPdaySum[idx, DATA_DAY["ice"]] * prepAccumUnit),
             "fireIndexMax": InterPdayMax[idx, DATA_DAY["fire"]],
             "fireIndexMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["fire"]])
             if not np.isnan(InterPdayMaxTime[idx, DATA_DAY["fire"]])
@@ -5634,9 +5616,7 @@ async def PW_Forecast(
             else np.nan
         )
         returnOBJ["currently"]["precipIntensity"] = minuteDict[0]["precipIntensity"]
-        returnOBJ["currently"]["precipProbability"] = minuteDict[0][
-            "precipProbability"
-        ]
+        returnOBJ["currently"]["precipProbability"] = minuteDict[0]["precipProbability"]
         returnOBJ["currently"]["precipIntensityError"] = minuteDict[0][
             "precipIntensityError"
         ]
@@ -5956,7 +5936,7 @@ async def PW_Forecast(
 
     # Apply rounding to all numeric fields
     returnOBJ = apply_rounding(returnOBJ, ROUNDING_RULES)
-    
+
     # Replace all MISSING_DATA with -999
     returnOBJ = replace_nan(returnOBJ, -999)
 
