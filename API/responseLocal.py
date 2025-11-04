@@ -2317,10 +2317,10 @@ async def PW_Forecast(
         ] = d
 
     if not timeMachine:
-        hourlyDayIndex = hourlyDayIndex.astype(int)
-        hourlyDay4amIndex = hourlyDay4amIndex.astype(int)
-        hourlyHighIndex = hourlyHighIndex.astype(int)
-        hourlyLowIndex = hourlyLowIndex.astype(int)
+        hourlyDayIndex = np.nan_to_num(hourlyDayIndex, nan=-999).astype(int)
+        hourlyDay4amIndex = np.nan_to_num(hourlyDay4amIndex, nan=-999).astype(int)
+        hourlyHighIndex = np.nan_to_num(hourlyHighIndex, nan=-999).astype(int)
+        hourlyLowIndex = np.nan_to_num(hourlyLowIndex, nan=-999).astype(int)
     else:
         # When running in timemachine mode, don't try to parse through different times, use the current 24h day for everything
         hourlyDayIndex = np.full(len(hour_array_grib), int(0))
@@ -5619,8 +5619,10 @@ async def PW_Forecast(
         returnOBJ["currently"]["nearestStormDistance"] = round(
             InterPcurrent[DATA_CURRENT["storm_dist"]] * visUnits, 2
         )
-        returnOBJ["currently"]["nearestStormBearing"] = int(
-            InterPcurrent[DATA_CURRENT["storm_dir"]]
+        returnOBJ["currently"]["nearestStormBearing"] = (
+            int(InterPcurrent[DATA_CURRENT["storm_dir"]])
+            if not np.isnan(InterPcurrent[DATA_CURRENT["storm_dir"]])
+            else np.nan
         )
         returnOBJ["currently"]["precipIntensity"] = round(
             minuteDict[0]["precipIntensity"], 4
