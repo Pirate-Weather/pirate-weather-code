@@ -4243,8 +4243,9 @@ async def PW_Forecast(
             precip_text_arr: array mapping summary text for precip types per period.
             idx: integer index for the current period.
             is_night: if True, use night-specific icons for partly-cloudy/clear.
-            mode: "hourly" (default) uses hourly accumulation thresholds and mean-based checks;
-                  "daily" uses daily accumulation thresholds and sum-based checks.
+            mode: "hourly" uses hourly accumulation thresholds and mean-based precip checks;
+                  "half-day" uses daily thresholds and sum-based precip checks with hourly indexing;
+                  "daily" uses daily accumulation thresholds and sum-based checks with daily indexing.
 
         Returns:
             (icon:str, text:str)
@@ -4259,7 +4260,17 @@ async def PW_Forecast(
             accum_thresh = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
             precip_type = precip_type_arr[idx]
             precip_text = precip_text_arr[idx]
-        else:
+        elif mode == "half-day":
+            # Half-day mode: uses hourly indexing but sum arrays for accumulation
+            prob = max_arr[idx, DATA_HOURLY["prob"]]
+            rain = sum_arr[idx, DATA_HOURLY["rain"]]
+            ice = sum_arr[idx, DATA_HOURLY["ice"]]
+            snow = sum_arr[idx, DATA_HOURLY["snow"]]
+            accum_thresh = DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
+            snow_thresh = DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
+            precip_type = precip_type_arr[idx]
+            precip_text = precip_text_arr[idx]
+        else:  # daily
             prob = max_arr[idx, DATA_DAY["prob"]]
             rain = sum_arr[idx, DATA_DAY["rain"]]
             ice = sum_arr[idx, DATA_DAY["ice"]]
@@ -4272,14 +4283,14 @@ async def PW_Forecast(
 
         if prob >= PRECIP_PROB_THRESHOLD and (
             (mode == "hourly" and ((rain + ice) > accum_thresh or snow > accum_thresh))
-            or (mode == "daily" and ((rain + ice) > accum_thresh or snow > snow_thresh))
+            or (mode in ("half-day", "daily") and ((rain + ice) > accum_thresh or snow > snow_thresh))
         ):
             return precip_type, precip_text
 
         # Fog check
         vis_val = (
             mean_arr[idx, DATA_HOURLY["vis"]]
-            if mode == "hourly"
+            if mode in ("hourly", "half-day")
             else mean_arr[idx, DATA_DAY["vis"]]
         )
         if vis_val < (FOG_THRESHOLD_METERS * visUnits):
@@ -4288,7 +4299,7 @@ async def PW_Forecast(
         # Wind check
         wind_val = (
             mean_arr[idx, DATA_HOURLY["wind"]]
-            if mode == "hourly"
+            if mode in ("hourly", "half-day")
             else mean_arr[idx, DATA_DAY["wind"]]
         )
         if wind_val > (WIND_THRESHOLDS["light"] * windUnit):
@@ -4297,7 +4308,7 @@ async def PW_Forecast(
         # Cloud checks
         cloud_val = (
             mean_arr[idx, DATA_HOURLY["cloud"]]
-            if mode == "hourly"
+            if mode in ("hourly", "half-day")
             else mean_arr[idx, DATA_DAY["cloud"]]
         )
         if cloud_val > CLOUD_COVER_THRESHOLDS["cloudy"]:
@@ -4396,7 +4407,7 @@ async def PW_Forecast(
             precip_text_half_day,
             idx,
             is_night=False,
-            mode="hourly",
+            mode="half-day",
         )
 
         day_item = _build_half_day_item(
@@ -4463,7 +4474,7 @@ async def PW_Forecast(
             precip_text_half_night,
             idx,
             is_night=True,
-            mode="hourly",
+            mode="half-day",
         )
 
         day_item = _build_half_day_item(
