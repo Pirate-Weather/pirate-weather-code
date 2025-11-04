@@ -24,7 +24,7 @@ def calculate_text(
 ):
     """
     Calculates the textual summary and icon for an hourly forecast period.
-    All inputs are expected in SI units:
+    All inputs (hourObject) are expected in SI units:
     - Temperature in Celsius
     - Wind speed in m/s
     - Visibility in meters
