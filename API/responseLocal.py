@@ -4375,12 +4375,12 @@ async def PW_Forecast(
                 "uvIndex": _safe_round(mean_arr[idx, DATA_HOURLY["uv"]], 2),
                 "visibility": _safe_round(mean_arr[idx, DATA_HOURLY["vis"]], 2),
                 "ozone": _safe_round(mean_arr[idx, DATA_HOURLY["ozone"]], 2),
-                "smoke": _safe_round(mean_arr[idx, DATA_HOURLY["smoke"]], 2),
+                "smoke": _safe_round(max_arr[idx, DATA_HOURLY["smoke"]], 2),
                 "liquidAccumulation": round(sum_arr[idx, DATA_HOURLY["rain"]], 4),
                 "snowAccumulation": round(sum_arr[idx, DATA_HOURLY["snow"]], 4),
                 "iceAccumulation": round(sum_arr[idx, DATA_HOURLY["ice"]], 4),
                 "fireIndex": _safe_round(mean_arr[idx, DATA_HOURLY["fire"]], 2),
-                "solar": _safe_round(mean_arr[idx, DATA_HOURLY["solar"]], 2),
+                "solar": _safe_round(max_arr[idx, DATA_HOURLY["solar"]], 2),
                 "cape": _safe_int_round(mean_arr[idx, DATA_HOURLY["cape"]]),
             }
 
