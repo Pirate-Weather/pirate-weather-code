@@ -709,9 +709,8 @@ def _polar_is_all_day(lat_val, month_val):
         sunrise/sunset times; it is only used as a fallback when
         Astral cannot compute sun times for polar conditions.
     """
-    return (
-        (lat_val > 0 and month_val >= 4 and month_val <= 9)
-        or (lat_val < 0 and (month_val >= 10 or month_val <= 3))
+    return (lat_val > 0 and month_val >= 4 and month_val <= 9) or (
+        lat_val < 0 and (month_val >= 10 or month_val <= 3)
     )
 
 
