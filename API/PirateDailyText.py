@@ -982,7 +982,7 @@ def calculate_day_text(
 
             period_data["rain_accum"] += hour["liquidAccumulation"]
             period_data["snow_accum"] += hour["snowAccumulation"]
-            period_data["snow_error"] += hour["precipIntensityError"] * 0.1
+            period_data["snow_error"] += hour["precipIntensityError"]
             period_data["sleet_accum"] += hour["iceAccumulation"]
 
             if (
@@ -1334,18 +1334,14 @@ def calculate_day_text(
         snow_max_accum = math.ceil(snow_accum_display + (snow_error_display / 2))
         snow_low_accum = max(0, snow_low_accum)  # Snow accumulation cannot be negative
 
-        if total_snow_error <= 0:
-            snow_sentence = [
-                snow_unit_str,
-                math.ceil(snow_accum_display),
-            ]
-        elif snow_max_accum > 0:
+        if snow_max_accum > 0:
             if snow_accum_display == 0:
                 snow_sentence = [
                     "less-than",
                     [snow_unit_str, 1],
                 ]
-            elif snow_low_accum == 0:
+            # If error is missing or very small, use less-than format
+            elif snow_error_display <= 0.01 or snow_low_accum == 0:
                 snow_sentence = [
                     "less-than",
                     [

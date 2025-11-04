@@ -4039,6 +4039,9 @@ async def PW_Forecast(
             "precipIntensity": InterPhour[
                 idx, DATA_HOURLY["intensity"]
             ],  # mm/h, SI, liquid equivalent
+            "precipIntensityError": InterPhour[
+                idx, DATA_HOURLY["error"]
+            ],  # mm, SI, accumulation error
         }
 
         try:
