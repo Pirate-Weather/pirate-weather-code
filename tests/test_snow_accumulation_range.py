@@ -42,7 +42,7 @@ def create_hour_with_snow(snow_accum, snow_error=0, time_offset=0):
 def test_snow_range_with_error_si_units():
     """Test that snow accumulation shows range when error data is available (SI units - cm)."""
     # Create 24 hours with 1mm snow each and 0.5mm error each = 24mm total, 12mm total error
-    # This should result in 2.4cm ± 0.6cm = range of 1-3 cm
+    # This should result in 2.4cm ± 1.2cm = range of 1-4 cm (floor/ceil applied)
     hours = [create_hour_with_snow(1.0, 0.5, i * 3600) for i in range(24)]
 
     icon, summary = calculate_day_text(
@@ -143,7 +143,7 @@ def test_snow_range_without_error_si_units():
 def test_snow_range_with_error_us_units():
     """Test that snow accumulation shows range when error data is available (US units - inches)."""
     # Create 24 hours with 2.54mm snow each and 1.27mm error each = 60.96mm total, 30.48mm error
-    # This should convert to ~2.4 inches ± ~1.2 inches = range
+    # This converts to ~2.4 inches total ± ~1.2 inches error = range with floor/ceil applied
     hours = [create_hour_with_snow(2.54, 1.27, i * 3600) for i in range(24)]
 
     icon, summary = calculate_day_text(
@@ -192,8 +192,8 @@ def test_snow_range_with_error_us_units():
 
 def test_snow_small_accumulation_with_error():
     """Test that small snow accumulation with error still shows appropriate format."""
-    # Create 24 hours with 0.5mm snow and 0.3mm error = 12mm total, 7.2mm error
-    # This should result in 1.2cm ± 0.36cm = range of 0-2 cm, which becomes "< 2 cm"
+    # Create 24 hours with 0.5mm snow and 0.3mm error = 12mm total, 7.2mm total error
+    # This should result in 1.2cm ± 0.72cm = range of 0-2 cm, which becomes "< 2 cm"
     hours = [create_hour_with_snow(0.5, 0.3, i * 3600) for i in range(24)]
 
     icon, summary = calculate_day_text(
