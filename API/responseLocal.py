@@ -4155,54 +4155,6 @@ async def PW_Forecast(
     interp_half_night_mean = np.array(mean_night_results)
     interp_half_night_max = np.array(max_night_results)
 
-    # Day portion of half day runs from 4am to 4pm
-    masks = [hourlyDay4pmIndex == day_index for day_index in range(daily_days)]
-    for mIDX, mask in enumerate(masks):
-        filtered_data = InterPhour[mask]
-
-        # Calculate and store each statistic for the current group
-        mean_day_results.append(np.mean(filtered_data, axis=0))
-        sum_day_results.append(np.sum(filtered_data, axis=0))
-        max_day_results.append(np.max(filtered_data, axis=0))
-
-        dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
-
-        # Check if the most common type is zero, in that case return the second most common
-        if dailyTypeCount[0][0] == 0:
-            if len(dailyTypeCount) == 2:
-                max_precip_chance_day[mIDX] = dailyTypeCount[1][0]
-            else:
-                max_precip_chance_day[mIDX] = dailyTypeCount[0][
-                    0
-                ]  # If all ptypes are none, then really shouldn't be any precipitation
-
-        else:
-            max_precip_chance_day[mIDX] = dailyTypeCount[0][0]
-
-    # Night portion of half day runs from 5pm to 4am the next day
-    masks = [hourlyNight4amIndex == day_index for day_index in range(daily_days)]
-    for mIDX, mask in enumerate(masks):
-        filtered_data = InterPhour[mask]
-
-        # Calculate and store each statistic for the current group
-        mean_night_results.append(np.mean(filtered_data, axis=0))
-        sum_night_results.append(np.sum(filtered_data, axis=0))
-        max_night_results.append(np.max(filtered_data, axis=0))
-
-        dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
-
-        # Check if the most common type is zero, in that case return the second most common
-        if dailyTypeCount[0][0] == 0:
-            if len(dailyTypeCount) == 2:
-                max_precip_chance_night[mIDX] = dailyTypeCount[1][0]
-            else:
-                max_precip_chance_night[mIDX] = dailyTypeCount[0][
-                    0
-                ]  # If all ptypes are none, then really shouldn't be any precipitation
-
-        else:
-            max_precip_chance_night[mIDX] = dailyTypeCount[0][0]
-
     # Process Day/Night data for output
     day_night_list = []
     max_precip_chance_day = np.array(max_precip_chance_day).astype(int)
