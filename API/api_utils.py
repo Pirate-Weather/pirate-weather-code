@@ -24,6 +24,36 @@ def replace_nan(obj, replacement=MISSING_DATA):
         return obj
 
 
+def apply_rounding(obj, rounding_rules):
+    """
+    Recursively apply rounding to numeric values in a dict/list based on field names.
+
+    Parameters:
+    - obj: The object to round (dict, list, or primitive)
+    - rounding_rules: Dict mapping field names to number of decimal places
+
+    Returns:
+    - The object with rounded values
+    """
+    if isinstance(obj, dict):
+        new_dict = {}
+        for k, v in obj.items():
+            if k in rounding_rules and isinstance(v, (int, float)) and not np.isnan(v):
+                num_decimals = rounding_rules[k]
+                rounded_val = round(v, num_decimals)
+                if num_decimals == 0:
+                    new_dict[k] = int(rounded_val)
+                else:
+                    new_dict[k] = rounded_val
+            else:
+                new_dict[k] = apply_rounding(v, rounding_rules)
+        return new_dict
+    elif isinstance(obj, list):
+        return [apply_rounding(item, rounding_rules) for item in obj]
+    else:
+        return obj
+
+
 def calculate_apparent_temperature(air_temp, humidity, wind, solar=None):
     """
     Calculates the apparent temperature based on air temperature, wind speed, humidity and solar radiation if provided.

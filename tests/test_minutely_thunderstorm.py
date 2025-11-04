@@ -35,7 +35,6 @@ def test_minutely_thunderstorm_replaces_rain_for_hour():
         currentText="clear",
         currentIcon="clear-day",
         icon="darksky",
-        precipIntensityUnit=1.0,
         maxCAPE=2600,  # Above 2500 threshold
     )
 
@@ -58,7 +57,6 @@ def test_minutely_thunderstorm_starting_in():
         currentText="clear",
         currentIcon="clear-day",
         icon="darksky",
-        precipIntensityUnit=1.0,
         maxCAPE=3000,  # Well above threshold
     )
 
@@ -81,7 +79,6 @@ def test_minutely_thunderstorm_stopping_in():
         currentText="medium-rain",
         currentIcon="rain",
         icon="darksky",
-        precipIntensityUnit=1.0,
         maxCAPE=2800,
     )
 
@@ -102,7 +99,6 @@ def test_minutely_normal_rain_when_cape_low():
         currentText="clear",
         currentIcon="clear-day",
         icon="darksky",
-        precipIntensityUnit=1.0,
         maxCAPE=1500,  # Below 2500 threshold
     )
 
@@ -124,7 +120,6 @@ def test_minutely_no_thunderstorm_without_precipitation():
         currentText="clear",
         currentIcon="clear-day",
         icon="darksky",
-        precipIntensityUnit=1.0,
         maxCAPE=3000,  # High CAPE but no precipitation
     )
 
@@ -148,7 +143,6 @@ def test_minutely_thunderstorm_with_snow():
         currentText="clear",
         currentIcon="clear-day",
         icon="darksky",
-        precipIntensityUnit=1.0,
         maxCAPE=2600,
     )
 
@@ -171,7 +165,6 @@ def test_minutely_thunderstorm_stopping_then_starting():
         currentText="medium-rain",
         currentIcon="rain",
         icon="darksky",
-        precipIntensityUnit=1.0,
         maxCAPE=2700,
     )
 
@@ -194,7 +187,6 @@ def test_minutely_default_cape_zero():
         currentText="clear",
         currentIcon="clear-day",
         icon="darksky",
-        precipIntensityUnit=1.0,
         # maxCAPE not provided, defaults to 0
     )
 
@@ -215,7 +207,6 @@ def test_minutely_thunderstorm_at_exact_threshold():
         currentText="clear",
         currentIcon="clear-day",
         icon="darksky",
-        precipIntensityUnit=1.0,
         maxCAPE=2500,  # Exactly at threshold
     )
 
@@ -236,7 +227,6 @@ def test_minutely_thunderstorm_just_below_threshold():
         currentText="clear",
         currentIcon="clear-day",
         icon="darksky",
-        precipIntensityUnit=1.0,
         maxCAPE=2499,  # Just below threshold
     )
 
