@@ -41,6 +41,7 @@ from API.api_utils import (
     clipLog,
     estimate_visibility_gultepe_rh_pr_numpy,
     replace_nan,
+    select_daily_precip_type
 )
 from API.constants.api_const import (
     API_VERSION,
@@ -557,17 +558,6 @@ def solar_rad(D_t, lat, t_t):
 
 def toTimestamp(d):
     return d.timestamp()
-
-
-def _safe_round(val, digits):
-    """Round val to digits if it's not NaN, otherwise return val unchanged."""
-    return round(val, digits) if not np.isnan(val) else val
-
-
-def _safe_int_round(val, digits=0):
-    """Round val to digits and cast to int if not NaN, otherwise return val unchanged."""
-    return int(round(val, digits)) if not np.isnan(val) else val
-
 
 # If testing, read zarrs directly from S3
 # This should be implemented as a fallback at some point
@@ -2938,24 +2928,24 @@ async def PW_Forecast(
 
     minuteTimes = InterPminute[:, DATA_MINUTELY["time"]]
     minuteIntensity = np.maximum(
-        np.round(InterPminute[:, DATA_MINUTELY["intensity"]], 4), 0
+        InterPminute[:, DATA_MINUTELY["intensity"]], 0
     )
     minuteProbability = np.minimum(
-        np.maximum(np.round(InterPminute[:, DATA_MINUTELY["prob"]], 2), 0), 1
+        np.maximum(InterPminute[:, DATA_MINUTELY["prob"]], 0), 1
     )
     minuteIntensityError = np.maximum(
-        np.round(InterPminute[:, DATA_MINUTELY["error"]], 2), 0
+        InterPminute[:, DATA_MINUTELY["error"]], 0
     )
 
     # Prepare minutely intensity arrays for output
     minuteRainIntensity = np.maximum(
-        np.round(InterPminute[:, DATA_MINUTELY["rain_intensity"]], 4), 0
+        InterPminute[:, DATA_MINUTELY["rain_intensity"]], 0
     )
     minuteSnowIntensity = np.maximum(
-        np.round(InterPminute[:, DATA_MINUTELY["snow_intensity"]], 4), 0
+        InterPminute[:, DATA_MINUTELY["snow_intensity"]], 0
     )
     minuteSleetIntensity = np.maximum(
-        np.round(InterPminute[:, DATA_MINUTELY["ice_intensity"]], 4), 0
+        InterPminute[:, DATA_MINUTELY["ice_intensity"]], 0
     )
 
     # Set values below 0.1 mm/h to zero to reduce noise
@@ -3757,9 +3747,9 @@ async def PW_Forecast(
         dayZeroPrepSleet[int(baseTimeOffset) :] = 0
 
     # Accumulations in liquid equivalent
-    dayZeroRain = dayZeroPrepRain.sum().round(4)  # rain
-    dayZeroSnow = dayZeroPrepSnow.sum().round(4)  # Snow
-    dayZeroIce = dayZeroPrepSleet.sum().round(4)  # Ice
+    dayZeroRain = dayZeroPrepRain.sum()  # rain
+    dayZeroSnow = dayZeroPrepSnow.sum()  # Snow
+    dayZeroIce = dayZeroPrepSleet.sum()  # Ice
 
     # Zero prep intensity and accum before forecast time
     if not timeMachine:
@@ -3827,42 +3817,6 @@ async def PW_Forecast(
     pTextMap = np.array(["None", "Snow", "Sleet", "Sleet", "Rain"])
     PTypeHour = pTypeMap[InterPhour[:, DATA_HOURLY["type"]].astype(int)]
     PTextHour = pTextMap[InterPhour[:, DATA_HOURLY["type"]].astype(int)]
-
-    # Round all to 2 except precipitations
-    InterPhour[:, DATA_HOURLY["prob"]] = InterPhour[:, DATA_HOURLY["prob"]].round(2)
-    InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["accum"]] = InterPhour[
-        :, DATA_HOURLY["temp"] : DATA_HOURLY["accum"]
-    ].round(2)
-    InterPhour[:, DATA_HOURLY["storm_dist"] : DATA_HOURLY["rain"]] = InterPhour[
-        :, DATA_HOURLY["storm_dist"] : DATA_HOURLY["rain"]
-    ].round(2)
-    # Round fire to solar to 2
-    InterPhour[:, DATA_HOURLY["fire"] : DATA_HOURLY["cape"] + 1] = InterPhour[
-        :, DATA_HOURLY["fire"] : DATA_HOURLY["cape"] + 1
-    ].round(2)
-
-    # Round to 5 for intensity
-    InterPhour[:, DATA_HOURLY["type"] : DATA_HOURLY["prob"]] = InterPhour[
-        :, DATA_HOURLY["type"] : DATA_HOURLY["prob"]
-    ].round(5)
-    InterPhour[:, DATA_HOURLY["error"] : DATA_HOURLY["temp"]] = InterPhour[
-        :, DATA_HOURLY["error"] : DATA_HOURLY["temp"]
-    ].round(4)
-    InterPhour[:, DATA_HOURLY["accum"]] = InterPhour[:, DATA_HOURLY["accum"]].round(5)
-    InterPhour[:, DATA_HOURLY["rain"] : DATA_HOURLY["fire"]] = InterPhour[
-        :, DATA_HOURLY["rain"] : DATA_HOURLY["fire"]
-    ].round(5)
-    # Round type-specific intensities to 5
-    InterPhour[
-        :,
-        DATA_HOURLY["rain_intensity"] : DATA_HOURLY["ice_intensity"] + 1,
-    ] = InterPhour[
-        :,
-        DATA_HOURLY["rain_intensity"] : DATA_HOURLY["ice_intensity"] + 1,
-    ].round(5)
-
-    # Round cape to 0
-    InterPhour[:, DATA_HOURLY["cape"]] = InterPhour[:, DATA_HOURLY["cape"]].round(0)
 
     # Fix very small neg from interp to solve -0
     InterPhour[((InterPhour >= -0.01) & (InterPhour <= 0.01))] = 0
@@ -4321,57 +4275,13 @@ async def PW_Forecast(
 
     # Process Daily Data for ouput
     dayList = []
+    dayList_si = []
     dayIconList = []
     dayTextList = []
     
     maxPchanceDay = np.array(maxPchanceDay).astype(int)
     PTypeDay = pTypeMap[maxPchanceDay]
     PTextDay = pTextMap[maxPchanceDay]
-
-    # Round
-    # Round all to 2 except precipitations
-    InterPday[:, DATA_DAY["temp"] : DATA_DAY["sunset"]] = InterPday[
-        :, DATA_DAY["temp"] : DATA_DAY["sunset"]
-    ].round(2)
-    InterPday[:, DATA_DAY["station_pressure"]] = InterPday[
-        :, DATA_DAY["station_pressure"]
-    ].round(2)
-
-    InterPdayMax[:, DATA_DAY["prob"]] = InterPdayMax[:, DATA_DAY["prob"]].round(2)
-    InterPdayMax[:, DATA_DAY["temp"] : DATA_DAY["sunset"]] = InterPdayMax[
-        :, DATA_DAY["temp"] : DATA_DAY["sunset"]
-    ].round(2)
-    InterPdayMax[:, DATA_DAY["fire"] :] = InterPdayMax[:, DATA_DAY["fire"] :].round(2)
-
-    InterPdayMin[:, DATA_DAY["temp"] : DATA_DAY["sunset"]] = InterPdayMin[
-        :, DATA_DAY["temp"] : DATA_DAY["sunset"]
-    ].round(2)
-    InterPdaySum[:, DATA_DAY["temp"] : DATA_DAY["sunset"]] = InterPdaySum[
-        :, DATA_DAY["temp"] : DATA_DAY["sunset"]
-    ].round(2)
-    InterPdayHigh[:, DATA_DAY["temp"] : DATA_DAY["sunset"]] = InterPdayHigh[
-        :, DATA_DAY["temp"] : DATA_DAY["sunset"]
-    ].round(2)
-    InterPdayLow[:, DATA_DAY["temp"] : DATA_DAY["sunset"]] = InterPdayLow[
-        :, DATA_DAY["temp"] : DATA_DAY["sunset"]
-    ].round(2)
-
-    InterPday[:, 1 : DATA_DAY["temp"]] = InterPday[:, 1 : DATA_DAY["temp"]].round(4)
-    InterPdaySum[:, 1 : DATA_DAY["temp"]] = InterPdaySum[:, 1 : DATA_DAY["temp"]].round(
-        4
-    )
-    InterPdayMax[:, 1 : DATA_DAY["prob"]] = InterPdayMax[:, 1 : DATA_DAY["prob"]].round(
-        4
-    )
-    InterPdayMax[:, 4 : DATA_DAY["temp"]] = InterPdayMax[:, 4 : DATA_DAY["temp"]].round(
-        4
-    )
-    InterPdaySum[:, DATA_DAY["rain"] : DATA_DAY["fire"]] = InterPdaySum[
-        :, DATA_DAY["rain"] : DATA_DAY["fire"]
-    ].round(4)
-    InterPdayMax[:, DATA_DAY["rain"] : DATA_DAY["fire"]] = InterPdayMax[
-        :, DATA_DAY["rain"] : DATA_DAY["fire"]
-    ].round(4)
 
     if TIMING:
         print("Daily Loop start")
@@ -4502,41 +4412,34 @@ async def PW_Forecast(
                 "time": int(time_val),
                 "summary": text,
                 "icon": icon,
-                "precipIntensity": _safe_round(
-                    mean_arr[idx, DATA_HOURLY["intensity"]], 4
-                ),
-                "precipIntensityMax": _safe_round(
-                    max_arr[idx, DATA_HOURLY["intensity"]], 4
-                ),
-                "precipProbability": _safe_round(max_arr[idx, DATA_HOURLY["prob"]], 4),
-                "precipAccumulation": round(
+                "precipIntensity": mean_arr[idx, DATA_HOURLY["intensity"]],
+                "precipIntensityMax": max_arr[idx, DATA_HOURLY["intensity"]],
+                "precipProbability": max_arr[idx, DATA_HOURLY["prob"]],
+                "precipAccumulation": (
                     sum_arr[idx, DATA_HOURLY["rain"]]
                     + sum_arr[idx, DATA_HOURLY["snow"]]
-                    + sum_arr[idx, DATA_HOURLY["ice"]],
-                    4,
+                    + sum_arr[idx, DATA_HOURLY["ice"]]
                 ),
                 "precipType": precip_type_arr[idx],
-                "temperature": _safe_round(temp_arr[idx, DATA_DAY["temp"]], 2),
-                "apparentTemperature": _safe_round(
-                    temp_arr[idx, DATA_DAY["apparent"]], 2
-                ),
-                "dewPoint": _safe_round(mean_arr[idx, DATA_HOURLY["dew"]], 2),
-                "humidity": _safe_round(mean_arr[idx, DATA_HOURLY["humidity"]], 2),
-                "pressure": _safe_round(mean_arr[idx, DATA_HOURLY["pressure"]], 2),
-                "windSpeed": _safe_round(mean_arr[idx, DATA_HOURLY["wind"]], 2),
-                "windGust": _safe_round(mean_arr[idx, DATA_HOURLY["gust"]], 2),
-                "windBearing": _safe_int_round(mean_arr[idx, DATA_HOURLY["bearing"]]),
-                "cloudCover": _safe_round(mean_arr[idx, DATA_HOURLY["cloud"]], 2),
-                "uvIndex": _safe_round(mean_arr[idx, DATA_HOURLY["uv"]], 2),
-                "visibility": _safe_round(mean_arr[idx, DATA_HOURLY["vis"]], 2),
-                "ozone": _safe_round(mean_arr[idx, DATA_HOURLY["ozone"]], 2),
-                "smoke": _safe_round(mean_arr[idx, DATA_HOURLY["smoke"]], 2),
-                "liquidAccumulation": round(sum_arr[idx, DATA_HOURLY["rain"]], 4),
-                "snowAccumulation": round(sum_arr[idx, DATA_HOURLY["snow"]], 4),
-                "iceAccumulation": round(sum_arr[idx, DATA_HOURLY["ice"]], 4),
-                "fireIndex": _safe_round(mean_arr[idx, DATA_HOURLY["fire"]], 2),
-                "solar": _safe_round(mean_arr[idx, DATA_HOURLY["solar"]], 2),
-                "cape": _safe_int_round(mean_arr[idx, DATA_HOURLY["cape"]]),
+                "temperature": temp_arr[idx, DATA_DAY["temp"]],
+                "apparentTemperature": temp_arr[idx, DATA_DAY["apparent"]],
+                "dewPoint": mean_arr[idx, DATA_HOURLY["dew"]],
+                "humidity": mean_arr[idx, DATA_HOURLY["humidity"]],
+                "pressure": mean_arr[idx, DATA_HOURLY["pressure"]],
+                "windSpeed": mean_arr[idx, DATA_HOURLY["wind"]],
+                "windGust": mean_arr[idx, DATA_HOURLY["gust"]],
+                "windBearing": mean_arr[idx, DATA_HOURLY["bearing"]],
+                "cloudCover": mean_arr[idx, DATA_HOURLY["cloud"]],
+                "uvIndex": mean_arr[idx, DATA_HOURLY["uv"]],
+                "visibility": mean_arr[idx, DATA_HOURLY["vis"]],
+                "ozone": mean_arr[idx, DATA_HOURLY["ozone"]],
+                "smoke": mean_arr[idx, DATA_HOURLY["smoke"]],
+                "liquidAccumulation": sum_arr[idx, DATA_HOURLY["rain"]],
+                "snowAccumulation": sum_arr[idx, DATA_HOURLY["snow"]],
+                "iceAccumulation": sum_arr[idx, DATA_HOURLY["ice"]],
+                "fireIndex": mean_arr[idx, DATA_HOURLY["fire"]],
+                "solar": mean_arr[idx, DATA_HOURLY["solar"]],
+                "cape": mean_arr[idx, DATA_HOURLY["cape"]],
             }
 
             return item
@@ -4568,9 +4471,7 @@ async def PW_Forecast(
 
         # Add station pressure if requested
         if "stationPressure" in extraVars:
-            day_item["stationPressure"] = _safe_round(
-                interp_half_day_mean[idx, DATA_HOURLY["station_pressure"]], 2
-            )
+            day_item["stationPressure"] = interp_half_day_mean[idx, DATA_HOURLY["station_pressure"]]
 
         try:
             if idx < 8:
@@ -4636,9 +4537,7 @@ async def PW_Forecast(
 
         # Add station pressure if requested
         if "stationPressure" in extraVars:
-            day_item["stationPressure"] = _safe_round(
-                interp_half_night_mean[idx, DATA_HOURLY["station_pressure"]], 2
-            )
+            day_item["stationPressure"] = interp_half_night_mean[idx, DATA_HOURLY["station_pressure"]]
 
         try:
             if idx < 8:
@@ -5951,8 +5850,6 @@ async def PW_Forecast(
     InterPcurrent[DATA_CURRENT["rain_intensity"]] = minuteRainIntensity[0]
     InterPcurrent[DATA_CURRENT["snow_intensity"]] = minuteSnowIntensity[0]
     InterPcurrent[DATA_CURRENT["ice_intensity"]] = minuteSleetIntensity[0]
-
-    InterPcurrent = InterPcurrent.round(2)
 
     # Fix small neg zero
     InterPcurrent[((InterPcurrent > -0.01) & (InterPcurrent < 0.01))] = 0
