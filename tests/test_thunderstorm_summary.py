@@ -463,7 +463,7 @@ def test_weekly_thunderstorms():
             "snowIntensityMax": 0.0,
             "iceIntensityMax": 0.0,
             "snowAccumulation": 0.0,
-            "iceAccumulation": 0.0,            
+            "iceAccumulation": 0.0,
         }
     )
 
@@ -482,7 +482,7 @@ def test_weekly_thunderstorms():
                 "snowIntensityMax": 0.0,
                 "iceIntensityMax": 0.0,
                 "snowAccumulation": 0.0,
-                "iceAccumulation": 0.0,                
+                "iceAccumulation": 0.0,
             }
         )
 
