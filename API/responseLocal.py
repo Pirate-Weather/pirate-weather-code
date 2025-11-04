@@ -40,6 +40,7 @@ from API.api_utils import (
     clipLog,
     estimate_visibility_gultepe_rh_pr_numpy,
     replace_nan,
+    select_daily_precip_type,
 )
 from API.constants.api_const import (
     API_VERSION,
@@ -4154,6 +4155,30 @@ async def PW_Forecast(
     interp_half_night_sum = np.array(sum_night_results)
     interp_half_night_mean = np.array(mean_night_results)
     interp_half_night_max = np.array(max_night_results)
+
+    # Determine the daily precipitation type (encapsulated helper)
+    try:
+        maxPchanceDay = select_daily_precip_type(
+            InterPdaySum, DATA_DAY, maxPchanceDay, PRECIP_IDX, prepAccumUnit
+        )
+        max_precip_chance_day = select_daily_precip_type(
+            interp_half_day_sum,
+            DATA_DAY,
+            max_precip_chance_day,
+            PRECIP_IDX,
+            prepAccumUnit,
+        )
+        max_precip_chance_night = select_daily_precip_type(
+            interp_half_night_sum,
+            DATA_DAY,
+            max_precip_chance_night,
+            PRECIP_IDX,
+            prepAccumUnit,
+        )
+    except Exception:
+        # Fallback: preserve original inline logic if helper fails (shouldn't happen)
+        logger.exception("select_daily_precip_type error")
+
 
     # Process Day/Night data for output
     day_night_list = []
