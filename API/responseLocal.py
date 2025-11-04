@@ -132,8 +132,8 @@ from API.constants.text_const import (
     WIND_THRESHOLDS,
 )
 from API.constants.unit_const import country_units
-from API.PirateDailyText import calculate_day_text
 from API.PirateDayNightText import calculate_half_day_text
+from API.PirateDailyText import calculate_day_text
 from API.PirateMinutelyText import calculate_minutely_text
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
@@ -4246,370 +4246,329 @@ async def PW_Forecast(
         print("Daily Loop start")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
-        for idx in range(0, daily_days):
+    def _pick_day_icon_and_summary(
+        max_arr,
+        mean_arr,
+        sum_arr,
+        precip_type_arr,
+        precip_text_arr,
+        idx,
+        is_night=False,
+        mode="hourly",
+    ):
+        """
+        Select an icon and summary text for a day/half-day based on arrays and thresholds.
 
-            def _pick_day_icon_and_summary(
-                max_arr,
-                mean_arr,
-                sum_arr,
-                precip_type_arr,
-                precip_text_arr,
-                idx,
-                is_night=False,
-                mode="hourly",
-            ):
-                """
-                Select an icon and summary text for a day/half-day based on arrays and thresholds.
+        Args:
+            max_arr: array used for max/probability checks (indexable by [idx, ...]).
+            mean_arr: array used for mean-based checks (indexable by [idx, ...]).
+            sum_arr: array used for sum/accumulation checks (indexable by [idx, ...]).
+            precip_type_arr: array mapping most-likely precip type per period.
+            precip_text_arr: array mapping summary text for precip types per period.
+            idx: integer index for the current period.
+            is_night: if True, use night-specific icons for partly-cloudy/clear.
+            mode: "hourly" (default) uses hourly accumulation thresholds and mean-based checks;
+                  "daily" uses daily accumulation thresholds and sum-based checks.
 
-                Args:
-                    max_arr: array used for max/probability checks (indexable by [idx, ...]).
-                    mean_arr: array used for mean-based checks (indexable by [idx, ...]).
-                    sum_arr: array used for sum/accumulation checks (indexable by [idx, ...]).
-                    precip_type_arr: array mapping most-likely precip type per period.
-                    precip_text_arr: array mapping summary text for precip types per period.
-                    idx: integer index for the current period.
-                    is_night: if True, use night-specific icons for partly-cloudy/clear.
-                    mode: "hourly" (default) uses hourly accumulation thresholds and mean-based checks;
-                        "daily" uses daily accumulation thresholds and sum-based checks.
+        Returns:
+            (icon:str, text:str)
+        """
 
-                Returns:
-                    (icon:str, text:str)
-                """
+        # Precipitation check (probability + accumulation threshold). Use different thresholds for hourly vs daily.
+        if mode == "hourly":
+            prob = max_arr[idx, DATA_HOURLY["prob"]]
+            rain = mean_arr[idx, DATA_HOURLY["rain"]]
+            ice = mean_arr[idx, DATA_HOURLY["ice"]]
+            snow = mean_arr[idx, DATA_HOURLY["snow"]]
+            accum_thresh = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
+            precip_type = precip_type_arr[idx]
+            precip_text = precip_text_arr[idx]
+        else:
+            prob = max_arr[idx, DATA_DAY["prob"]]
+            rain = sum_arr[idx, DATA_DAY["rain"]]
+            ice = sum_arr[idx, DATA_DAY["ice"]]
+            snow = sum_arr[idx, DATA_DAY["snow"]]
+            accum_thresh = DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
+            # daily snow uses a larger separate threshold
+            snow_thresh = DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
+            precip_type = precip_type_arr[idx]
+            precip_text = precip_text_arr[idx]
 
-                # Precipitation check (probability + accumulation threshold). Use different thresholds for hourly vs daily.
-                if mode == "hourly":
-                    prob = max_arr[idx, DATA_HOURLY["prob"]]
-                    rain = mean_arr[idx, DATA_HOURLY["rain"]]
-                    ice = mean_arr[idx, DATA_HOURLY["ice"]]
-                    snow = mean_arr[idx, DATA_HOURLY["snow"]]
-                    accum_thresh = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
-                    precip_type = precip_type_arr[idx]
-                    precip_text = precip_text_arr[idx]
-                else:
-                    prob = max_arr[idx, DATA_DAY["prob"]]
-                    rain = sum_arr[idx, DATA_DAY["rain"]]
-                    ice = sum_arr[idx, DATA_DAY["ice"]]
-                    snow = sum_arr[idx, DATA_DAY["snow"]]
-                    accum_thresh = DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
-                    # daily snow uses a larger separate threshold
-                    snow_thresh = DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
-                    precip_type = precip_type_arr[idx]
-                    precip_text = precip_text_arr[idx]
+        if prob >= PRECIP_PROB_THRESHOLD and (
+            (mode == "hourly" and ((rain + ice) > accum_thresh or snow > accum_thresh))
+            or (mode == "daily" and ((rain + ice) > accum_thresh or snow > snow_thresh))
+        ):
+            return precip_type, precip_text
 
-                if prob >= PRECIP_PROB_THRESHOLD and (
-                    (
-                        mode == "hourly"
-                        and ((rain + ice) > accum_thresh or snow > accum_thresh)
-                    )
-                    or (
-                        mode == "daily"
-                        and ((rain + ice) > accum_thresh or snow > snow_thresh)
-                    )
-                ):
-                    return precip_type, precip_text
+        # Fog check
+        vis_val = (
+            mean_arr[idx, DATA_HOURLY["vis"]]
+            if mode == "hourly"
+            else mean_arr[idx, DATA_DAY["vis"]]
+        )
+        if vis_val < (FOG_THRESHOLD_METERS * visUnits):
+            return "fog", "Fog"
 
-                # Fog check
-                vis_val = (
-                    mean_arr[idx, DATA_HOURLY["vis"]]
-                    if mode == "hourly"
-                    else mean_arr[idx, DATA_DAY["vis"]]
-                )
-                if vis_val < (FOG_THRESHOLD_METERS * visUnits):
-                    return "fog", "Fog"
+        # Wind check
+        wind_val = (
+            mean_arr[idx, DATA_HOURLY["wind"]]
+            if mode == "hourly"
+            else mean_arr[idx, DATA_DAY["wind"]]
+        )
+        if wind_val > (WIND_THRESHOLDS["light"] * windUnit):
+            return "wind", "Windy"
 
-                # Wind check
-                wind_val = (
-                    mean_arr[idx, DATA_HOURLY["wind"]]
-                    if mode == "hourly"
-                    else mean_arr[idx, DATA_DAY["wind"]]
-                )
-                if wind_val > (WIND_THRESHOLDS["light"] * windUnit):
-                    return "wind", "Windy"
-
-                # Cloud checks
-                cloud_val = (
-                    mean_arr[idx, DATA_HOURLY["cloud"]]
-                    if mode == "hourly"
-                    else mean_arr[idx, DATA_DAY["cloud"]]
-                )
-                if cloud_val > CLOUD_COVER_THRESHOLDS["cloudy"]:
-                    return "cloudy", "Cloudy"
-                if cloud_val > CLOUD_COVER_THRESHOLDS["partly_cloudy"]:
-                    return (
-                        ("partly-cloudy-night", "Partly Cloudy")
-                        if is_night
-                        else ("partly-cloudy-day", "Partly Cloudy")
-                    )
-
-                # Clear fallback
-                return ("clear-night", "Clear") if is_night else ("clear-day", "Clear")
-
-        for idx in range(0, daily_days):
-
-            def _build_half_day_item(
-                idx,
-                time_val,
-                icon,
-                text,
-                mean_arr,
-                max_arr,
-                sum_arr,
-                precip_type_arr,
-                temp_arr,
-            ):
-                """
-                Build the half-day forecast item dict for day or night.
-
-                Args:
-                    idx: index for period arrays
-                    time_val: integer timestamp for the period
-                    icon: selected icon string
-                    text: selected summary string
-                    mean_arr: hourly-mean array used for many fields
-                    max_arr: hourly-max array used for probability
-                    sum_arr: hourly-sum array used for accumulations
-                    precip_type_arr: precip type mapping array for this half-day
-                    temp_arr: InterPdayHigh or InterPdayLow array for temperature fields
-
-                Returns:
-                    dict: the half-day item matching the original structure
-                """
-
-                item = {
-                    "time": int(time_val),
-                    "summary": text,
-                    "icon": icon,
-                    "precipIntensity": _safe_round(
-                        mean_arr[idx, DATA_HOURLY["intensity"]], 4
-                    ),
-                    "precipIntensityMax": _safe_round(
-                        max_arr[idx, DATA_HOURLY["intensity"]], 4
-                    ),
-                    "precipProbability": _safe_round(
-                        max_arr[idx, DATA_HOURLY["prob"]], 4
-                    ),
-                    "precipAccumulation": round(
-                        sum_arr[idx, DATA_HOURLY["rain"]]
-                        + sum_arr[idx, DATA_HOURLY["snow"]]
-                        + sum_arr[idx, DATA_HOURLY["ice"]],
-                        4,
-                    ),
-                    "precipType": precip_type_arr[idx],
-                    "temperature": _safe_round(temp_arr[idx, DATA_DAY["temp"]], 2),
-                    "apparentTemperature": _safe_round(
-                        temp_arr[idx, DATA_DAY["apparent"]], 2
-                    ),
-                    "dewPoint": _safe_round(mean_arr[idx, DATA_HOURLY["dew"]], 2),
-                    "humidity": _safe_round(mean_arr[idx, DATA_HOURLY["humidity"]], 2),
-                    "pressure": _safe_round(mean_arr[idx, DATA_HOURLY["pressure"]], 2),
-                    "windSpeed": _safe_round(mean_arr[idx, DATA_HOURLY["wind"]], 2),
-                    "windGust": _safe_round(mean_arr[idx, DATA_HOURLY["gust"]], 2),
-                    "windBearing": _safe_int_round(
-                        mean_arr[idx, DATA_HOURLY["bearing"]]
-                    ),
-                    "cloudCover": _safe_round(mean_arr[idx, DATA_HOURLY["cloud"]], 2),
-                    "uvIndex": _safe_round(mean_arr[idx, DATA_HOURLY["uv"]], 2),
-                    "visibility": _safe_round(mean_arr[idx, DATA_HOURLY["vis"]], 2),
-                    "ozone": _safe_round(mean_arr[idx, DATA_HOURLY["ozone"]], 2),
-                    "smoke": _safe_round(mean_arr[idx, DATA_HOURLY["smoke"]], 2),
-                    "liquidAccumulation": round(sum_arr[idx, DATA_HOURLY["rain"]], 4),
-                    "snowAccumulation": round(sum_arr[idx, DATA_HOURLY["snow"]], 4),
-                    "iceAccumulation": round(sum_arr[idx, DATA_HOURLY["ice"]], 4),
-                    "fireIndex": _safe_round(mean_arr[idx, DATA_HOURLY["fire"]], 2),
-                    "solar": _safe_round(mean_arr[idx, DATA_HOURLY["solar"]], 2),
-                    "cape": _safe_int_round(mean_arr[idx, DATA_HOURLY["cape"]]),
-                }
-
-                return item
-
-            # Day
-            # Set text (select icon and summary)
-            day_icon, day_text = _pick_day_icon_and_summary(
-                interp_half_day_max,
-                interp_half_day_mean,
-                interp_half_day_sum,
-                precip_type_half_day,
-                precip_text_half_day,
-                idx,
-                is_night=False,
-                mode="hourly",
+        # Cloud checks
+        cloud_val = (
+            mean_arr[idx, DATA_HOURLY["cloud"]]
+            if mode == "hourly"
+            else mean_arr[idx, DATA_DAY["cloud"]]
+        )
+        if cloud_val > CLOUD_COVER_THRESHOLDS["cloudy"]:
+            return "cloudy", "Cloudy"
+        if cloud_val > CLOUD_COVER_THRESHOLDS["partly_cloudy"]:
+            return (
+                ("partly-cloudy-night", "Partly Cloudy")
+                if is_night
+                else ("partly-cloudy-day", "Partly Cloudy")
             )
 
-            day_item = _build_half_day_item(
-                idx,
-                day_array_4am_grib[idx],
-                day_icon,
-                day_text,
-                interp_half_day_mean,
-                interp_half_day_max,
-                interp_half_day_sum,
-                precip_type_half_day,
-                InterPdayHigh,
+        # Clear fallback
+        return ("clear-night", "Clear") if is_night else ("clear-day", "Clear")
+
+    for idx in range(0, daily_days):
+
+        def _build_half_day_item(
+            idx,
+            time_val,
+            icon,
+            text,
+            mean_arr,
+            max_arr,
+            sum_arr,
+            precip_type_arr,
+            temp_arr,
+        ):
+            """
+            Build the half-day forecast item dict for day or night.
+
+            Args:
+                idx: index for period arrays
+                time_val: integer timestamp for the period
+                icon: selected icon string
+                text: selected summary string
+                mean_arr: hourly-mean array used for many fields
+                max_arr: hourly-max array used for probability
+                sum_arr: hourly-sum array used for accumulations
+                precip_type_arr: precip type mapping array for this half-day
+                temp_arr: InterPdayHigh or InterPdayLow array for temperature fields
+
+            Returns:
+                dict: the half-day item matching the original structure
+            """
+
+            item = {
+                "time": int(time_val),
+                "summary": text,
+                "icon": icon,
+                "precipIntensity": _safe_round(
+                    mean_arr[idx, DATA_HOURLY["intensity"]], 4
+                ),
+                "precipIntensityMax": _safe_round(
+                    max_arr[idx, DATA_HOURLY["intensity"]], 4
+                ),
+                "precipProbability": _safe_round(max_arr[idx, DATA_HOURLY["prob"]], 4),
+                "precipAccumulation": round(
+                    sum_arr[idx, DATA_HOURLY["rain"]]
+                    + sum_arr[idx, DATA_HOURLY["snow"]]
+                    + sum_arr[idx, DATA_HOURLY["ice"]],
+                    4,
+                ),
+                "precipType": precip_type_arr[idx],
+                "temperature": _safe_round(temp_arr[idx, DATA_DAY["temp"]], 2),
+                "apparentTemperature": _safe_round(
+                    temp_arr[idx, DATA_DAY["apparent"]], 2
+                ),
+                "dewPoint": _safe_round(mean_arr[idx, DATA_HOURLY["dew"]], 2),
+                "humidity": _safe_round(mean_arr[idx, DATA_HOURLY["humidity"]], 2),
+                "pressure": _safe_round(mean_arr[idx, DATA_HOURLY["pressure"]], 2),
+                "windSpeed": _safe_round(mean_arr[idx, DATA_HOURLY["wind"]], 2),
+                "windGust": _safe_round(mean_arr[idx, DATA_HOURLY["gust"]], 2),
+                "windBearing": _safe_int_round(mean_arr[idx, DATA_HOURLY["bearing"]]),
+                "cloudCover": _safe_round(mean_arr[idx, DATA_HOURLY["cloud"]], 2),
+                "uvIndex": _safe_round(mean_arr[idx, DATA_HOURLY["uv"]], 2),
+                "visibility": _safe_round(mean_arr[idx, DATA_HOURLY["vis"]], 2),
+                "ozone": _safe_round(mean_arr[idx, DATA_HOURLY["ozone"]], 2),
+                "smoke": _safe_round(mean_arr[idx, DATA_HOURLY["smoke"]], 2),
+                "liquidAccumulation": round(sum_arr[idx, DATA_HOURLY["rain"]], 4),
+                "snowAccumulation": round(sum_arr[idx, DATA_HOURLY["snow"]], 4),
+                "iceAccumulation": round(sum_arr[idx, DATA_HOURLY["ice"]], 4),
+                "fireIndex": _safe_round(mean_arr[idx, DATA_HOURLY["fire"]], 2),
+                "solar": _safe_round(mean_arr[idx, DATA_HOURLY["solar"]], 2),
+                "cape": _safe_int_round(mean_arr[idx, DATA_HOURLY["cape"]]),
+            }
+
+            return item
+
+        # Day
+        # Set text (select icon and summary)
+        day_icon, day_text = _pick_day_icon_and_summary(
+            interp_half_day_max,
+            interp_half_day_mean,
+            interp_half_day_sum,
+            precip_type_half_day,
+            precip_text_half_day,
+            idx,
+            is_night=False,
+            mode="hourly",
+        )
+
+        day_item = _build_half_day_item(
+            idx,
+            day_array_4am_grib[idx],
+            day_icon,
+            day_text,
+            interp_half_day_mean,
+            interp_half_day_max,
+            interp_half_day_sum,
+            precip_type_half_day,
+            InterPdayHigh,
+        )
+
+        # Add station pressure if requested
+        if "stationPressure" in extraVars:
+            day_item["stationPressure"] = _safe_round(
+                interp_half_day_mean[idx, DATA_HOURLY["station_pressure"]], 2
             )
 
-            # Add station pressure if requested
-            if "stationPressure" in extraVars:
-                day_item["stationPressure"] = _safe_round(
-                    interp_half_day_mean[idx, DATA_HOURLY["station_pressure"]], 2
+        try:
+            if idx < 8:
+                # Calculate the day summary from 4am to 4pm (13 hours)
+                dayIcon, dayText = calculate_half_day_text(
+                    hourList[(idx * 24) + 4 : (idx * 24) + 17],
+                    prepAccumUnit,
+                    visUnits,
+                    windUnit,
+                    tempUnits,
+                    True,
+                    str(tz_name),
+                    int(time.time()),
+                    icon,
                 )
 
-            try:
-                if idx < 8:
-                    # Calculate the day summary from 4am to 4pm
-                    dayIcon, dayText = calculate_half_day_text(
-                        hourList[(idx * 24) + 4 : (idx * 24) + 17],
-                        prepAccumUnit,
-                        visUnits,
-                        windUnit,
-                        tempUnits,
-                        True,
-                        str(tz_name),
-                        int(time.time()),
-                        "daily",
-                        icon,
-                    )
+                # Translate the text
+                if summaryText:
+                    day_item["summary"] = translation.translate(["sentence", dayText])
+                    day_item["icon"] = dayIcon
+        except Exception:
+            logger.exception("DAILY TEXT GEN ERROR")
 
-                    # Translate the text
-                    if summaryText:
-                        day_item["summary"] = translation.translate(
-                            ["sentence", dayText]
-                        )
-                        day_item["icon"] = dayIcon
-            except Exception:
-                logger.exception("DAILY TEXT GEN ERROR")
+        if version < 2:
+            day_item.pop("liquidAccumulation", None)
+            day_item.pop("snowAccumulation", None)
+            day_item.pop("iceAccumulation", None)
+            day_item.pop("fireIndex", None)
+            day_item.pop("feelsLike", None)
+            day_item.pop("solar", None)
 
-            if version < 2:
-                day_item.pop("liquidAccumulation", None)
-                day_item.pop("snowAccumulation", None)
-                day_item.pop("iceAccumulation", None)
-                day_item.pop("fireIndex", None)
-                day_item.pop("feelsLike", None)
-                day_item.pop("solar", None)
+        if timeMachine and not tmExtra:
+            day_item.pop("uvIndex", None)
+            day_item.pop("ozone", None)
 
-            if timeMachine and not tmExtra:
-                day_item.pop("uvIndex", None)
-                day_item.pop("ozone", None)
+        day_night_list.append(day_item)
 
-            day_night_list.append(day_item)
+        # Night
+        # Set text (select icon and summary)
+        day_icon, day_text = _pick_day_icon_and_summary(
+            interp_half_night_max,
+            interp_half_night_mean,
+            interp_half_night_sum,
+            precip_type_half_night,
+            precip_text_half_night,
+            idx,
+            is_night=True,
+            mode="hourly",
+        )
 
-            # Night
-            # Set text (select icon and summary)
-            day_icon, day_text = _pick_day_icon_and_summary(
-                interp_half_night_max,
-                interp_half_night_mean,
-                interp_half_night_sum,
-                precip_type_half_night,
-                precip_text_half_night,
-                idx,
-                is_night=True,
-                mode="hourly",
+        day_item = _build_half_day_item(
+            idx,
+            day_array_5pm_grib[idx],
+            day_icon,
+            day_text,
+            interp_half_night_mean,
+            interp_half_night_max,
+            interp_half_night_sum,
+            precip_type_half_night,
+            InterPdayLow,
+        )
+
+        # Add station pressure if requested
+        if "stationPressure" in extraVars:
+            day_item["stationPressure"] = _safe_round(
+                interp_half_night_mean[idx, DATA_HOURLY["station_pressure"]], 2
             )
 
-            day_item = _build_half_day_item(
-                idx,
-                day_array_5pm_grib[idx],
-                day_icon,
-                day_text,
-                interp_half_night_mean,
-                interp_half_night_max,
-                interp_half_night_sum,
-                precip_type_half_night,
-                InterPdayLow,
-            )
-
-            # Add station pressure if requested
-            if "stationPressure" in extraVars:
-                day_item["stationPressure"] = _safe_round(
-                    interp_half_night_mean[idx, DATA_HOURLY["station_pressure"]], 2
+        try:
+            if idx < 8:
+                # Calculate the night summary from 5pm to 4am (11 hours)
+                dayIcon, dayText = calculate_half_day_text(
+                    hourList[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
+                    prepAccumUnit,
+                    visUnits,
+                    windUnit,
+                    tempUnits,
+                    False,
+                    str(tz_name),
+                    int(time.time()),
+                    icon,
                 )
 
-            try:
-                if idx < 8:
-                    # Calculate the night summary from 5pm to 4am
-                    dayIcon, dayText = calculate_half_day_text(
-                        hourList[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
-                        prepAccumUnit,
-                        visUnits,
-                        windUnit,
-                        tempUnits,
-                        False,
-                        str(tz_name),
-                        int(time.time()),
-                        "daily",
-                        icon,
-                    )
+                # Translate the text
+                if summaryText:
+                    day_item["summary"] = translation.translate(["sentence", dayText])
+                    day_item["icon"] = dayIcon
+        except Exception:
+            logger.exception("DAILY TEXT GEN ERROR")
 
-                    # Translate the text
-                    if summaryText:
-                        day_item["summary"] = translation.translate(
-                            ["sentence", dayText]
-                        )
-                        day_item["icon"] = dayIcon
-            except Exception:
-                logger.exception("DAILY TEXT GEN ERROR")
+        if version < 2:
+            day_item.pop("liquidAccumulation", None)
+            day_item.pop("snowAccumulation", None)
+            day_item.pop("iceAccumulation", None)
+            day_item.pop("fireIndex", None)
+            day_item.pop("feelsLike", None)
+            day_item.pop("solar", None)
 
-            if version < 2:
-                day_item.pop("liquidAccumulation", None)
-                day_item.pop("snowAccumulation", None)
-                day_item.pop("iceAccumulation", None)
-                day_item.pop("fireIndex", None)
-                day_item.pop("feelsLike", None)
-                day_item.pop("solar", None)
+        if timeMachine and not tmExtra:
+            day_item.pop("uvIndex", None)
+            day_item.pop("ozone", None)
 
-            if timeMachine and not tmExtra:
-                day_item.pop("uvIndex", None)
-                day_item.pop("ozone", None)
+        day_night_list.append(day_item)
 
-            day_night_list.append(day_item)
+        # Select icon and summary for the full-day object
+        dayIcon, dayText = _pick_day_icon_and_summary(
+            InterPdayMax4am,
+            InterPday4am,
+            InterPdaySum4am,
+            PTypeDay,
+            PTextDay,
+            idx,
+            is_night=False,
+            mode="daily",
+        )
 
-            # Select icon and summary for the full-day object
-            dayIcon, dayText = _pick_day_icon_and_summary(
-                InterPdayMax4am,
-                InterPday4am,
-                InterPdaySum4am,
-                PTypeDay,
-                PTextDay,
-                idx,
-                is_night=False,
-                mode="daily",
-            )
-
-            # Fallback if no ptype for some reason. This should never occur though
-            if dayIcon == "none":
-                if tempUnits == 0:
-                    tempThresh = TEMPERATURE_UNITS_THRESH["f"]
-                else:
-                    tempThresh = TEMPERATURE_UNITS_THRESH["c"]
-
-                if InterPday[idx, DATA_DAY["temp"]] > tempThresh:
-                    dayIcon = "rain"
-                    dayText = "Rain"
-                else:
-                    dayIcon = "snow"
-                    dayText = "Snow"
-
-            elif InterPday4am[idx, DATA_DAY["vis"]] < (FOG_THRESHOLD_METERS * visUnits):
-                dayIcon = "fog"
-                dayText = "Fog"
-            elif InterPday4am[idx, DATA_DAY["wind"]] > (
-                WIND_THRESHOLDS["light"] * windUnit
-            ):
-                dayIcon = "wind"
-                dayText = "Windy"
-            elif (
-                InterPday4am[idx, DATA_DAY["cloud"]] > CLOUD_COVER_THRESHOLDS["cloudy"]
-            ):
-                dayIcon = "cloudy"
-                dayText = "Cloudy"
-            elif (
-                InterPday4am[idx, DATA_DAY["cloud"]]
-                > CLOUD_COVER_THRESHOLDS["partly_cloudy"]
-            ):
-                dayIcon = "partly-cloudy-day"
-                dayText = "Partly Cloudy"
+        # Fallback if no ptype for some reason. This should only apply when precipitation selection returned 'none'
+        if dayIcon == "none":
+            if tempUnits == 0:
+                tempThresh = TEMPERATURE_UNITS_THRESH["f"]
             else:
-                dayIcon = "clear-day"
-                dayText = "Clear"
+                tempThresh = TEMPERATURE_UNITS_THRESH["c"]
+
+            if InterPday[idx, DATA_DAY["temp"]] > tempThresh:
+                dayIcon = "rain"
+                dayText = "Rain"
+            else:
+                dayIcon = "snow"
+                dayText = "Snow"
 
         # Temperature High is daytime high, so 6 am to 6 pm
         # First index is 6 am, then index 2
