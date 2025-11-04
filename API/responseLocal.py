@@ -41,7 +41,7 @@ from API.api_utils import (
     clipLog,
     estimate_visibility_gultepe_rh_pr_numpy,
     replace_nan,
-    select_daily_precip_type
+    select_daily_precip_type,
 )
 from API.constants.api_const import (
     API_VERSION,
@@ -558,6 +558,7 @@ def solar_rad(D_t, lat, t_t):
 
 def toTimestamp(d):
     return d.timestamp()
+
 
 # If testing, read zarrs directly from S3
 # This should be implemented as a fallback at some point
@@ -2927,15 +2928,11 @@ async def PW_Forecast(
     ]
 
     minuteTimes = InterPminute[:, DATA_MINUTELY["time"]]
-    minuteIntensity = np.maximum(
-        InterPminute[:, DATA_MINUTELY["intensity"]], 0
-    )
+    minuteIntensity = np.maximum(InterPminute[:, DATA_MINUTELY["intensity"]], 0)
     minuteProbability = np.minimum(
         np.maximum(InterPminute[:, DATA_MINUTELY["prob"]], 0), 1
     )
-    minuteIntensityError = np.maximum(
-        InterPminute[:, DATA_MINUTELY["error"]], 0
-    )
+    minuteIntensityError = np.maximum(InterPminute[:, DATA_MINUTELY["error"]], 0)
 
     # Prepare minutely intensity arrays for output
     minuteRainIntensity = np.maximum(
@@ -4278,7 +4275,7 @@ async def PW_Forecast(
     dayList_si = []
     dayIconList = []
     dayTextList = []
-    
+
     maxPchanceDay = np.array(maxPchanceDay).astype(int)
     PTypeDay = pTypeMap[maxPchanceDay]
     PTextDay = pTextMap[maxPchanceDay]
@@ -4471,7 +4468,9 @@ async def PW_Forecast(
 
         # Add station pressure if requested
         if "stationPressure" in extraVars:
-            day_item["stationPressure"] = interp_half_day_mean[idx, DATA_HOURLY["station_pressure"]]
+            day_item["stationPressure"] = interp_half_day_mean[
+                idx, DATA_HOURLY["station_pressure"]
+            ]
 
         try:
             if idx < 8:
@@ -4537,7 +4536,9 @@ async def PW_Forecast(
 
         # Add station pressure if requested
         if "stationPressure" in extraVars:
-            day_item["stationPressure"] = interp_half_night_mean[idx, DATA_HOURLY["station_pressure"]]
+            day_item["stationPressure"] = interp_half_night_mean[
+                idx, DATA_HOURLY["station_pressure"]
+            ]
 
         try:
             if idx < 8:
