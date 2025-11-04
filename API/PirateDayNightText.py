@@ -1271,7 +1271,9 @@ def calculate_half_day_text(
                 "all_day": is_cloud_all_day,
                 "start_idx": 0,  # Cloud is always "present" from the start of the forecast
                 "text": cloud_full_summary,
-                "icon": calculate_sky_icon(derived_avg_cloud_for_icon, is_day_time, icon_set),
+                "icon": calculate_sky_icon(
+                    derived_avg_cloud_for_icon, is_day_time, icon_set
+                ),
             }
         )
 
