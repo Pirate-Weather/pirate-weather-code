@@ -92,9 +92,9 @@ def test_snow_range_with_error_si_units():
 
 
 def test_snow_range_without_error_si_units():
-    """Test that snow accumulation shows less-than format when error is missing (SI units - cm)."""
-    # Create 24 hours with 1mm snow each but NO error = 24mm total, 0mm error
-    # This should result in "< 3 cm" format
+    """Test that snow accumulation shows less-than format when error is 0 (SI units - cm)."""
+    # Create 24 hours with 1mm snow each and 0.0 error (not missing) = 24mm total, 0mm error
+    # With error = 0 (ECMWF/GEFS), should show "< 3 cm" format
     hours = [create_hour_with_snow(1.0, 0.0, i * 3600) for i in range(24)]
 
     icon, summary = calculate_day_text(
@@ -137,7 +137,7 @@ def test_snow_range_without_error_si_units():
     assert isinstance(snow_sentence[1], list)
     assert snow_sentence[1][0] == "centimeters"
     assert snow_sentence[1][1] > 0  # Should have a positive upper bound
-    print(f"✓ Snow range without error (SI): < {snow_sentence[1][1]} cm")
+    print(f"✓ Snow with error=0 (SI): < {snow_sentence[1][1]} cm")
 
 
 def test_snow_range_with_error_us_units():
@@ -249,3 +249,56 @@ def test_snow_small_accumulation_with_error():
             )
         else:
             print("✓ Small snow accumulation in correct format")
+
+
+def test_snow_exact_value_when_error_missing():
+    """Test that snow accumulation shows exact value when error is missing (np.nan)."""
+    import numpy as np
+
+    # Create 24 hours with 1mm snow each but error is np.nan (ERA5 data)
+    # With missing error data, should show exact value "3 cm" (not range or <)
+    hours = [create_hour_with_snow(1.0, np.nan, i * 3600) for i in range(24)]
+
+    icon, summary = calculate_day_text(
+        hours,
+        is_day_time=True,
+        time_zone="UTC",
+        curr_time=1609459200,
+        mode="daily",
+        icon_set="darksky",
+        unit_system="si",
+    )
+
+    assert summary is not None
+    assert isinstance(summary, list)
+
+    # Recursively search for the snow sentence with exact value
+    def find_exact_value_sentence(obj):
+        if isinstance(obj, list):
+            for item in obj:
+                if isinstance(item, list) and len(item) >= 2:
+                    # Look for ["centimeters", <number>] (exact value, not range or less-than)
+                    if (
+                        item[0] == "centimeters"
+                        and isinstance(item[1], (int, float))
+                        and not isinstance(item[1], list)
+                    ):
+                        return item
+                result = find_exact_value_sentence(item)
+                if result:
+                    return result
+        return None
+
+    snow_sentence = find_exact_value_sentence(summary)
+    assert snow_sentence is not None, f"Snow sentence not found in summary: {summary}"
+
+    # Should use exact value format when error is missing (np.nan)
+    assert snow_sentence[0] == "centimeters", (
+        f"Expected centimeters format, got: {snow_sentence}"
+    )
+    assert isinstance(snow_sentence[1], (int, float))
+    assert not isinstance(snow_sentence[1], list), (
+        f"Expected exact value, not range or less-than: {snow_sentence}"
+    )
+    assert snow_sentence[1] > 0  # Should have a positive value
+    print(f"✓ Snow with missing error (SI): {snow_sentence[1]} cm (exact)")
