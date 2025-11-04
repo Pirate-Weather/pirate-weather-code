@@ -302,7 +302,7 @@ def calculate_period_summary_text(
     )
 
 
-def calculate_day_text(
+def calculate_half_day_text(
     hours,
     precip_accum_unit,
     vis_units,
