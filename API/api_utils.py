@@ -24,6 +24,36 @@ def replace_nan(obj, replacement=MISSING_DATA):
         return obj
 
 
+def apply_rounding(obj, rounding_rules):
+    """
+    Recursively apply rounding to numeric values in a dict/list based on field names.
+
+    Parameters:
+    - obj: The object to round (dict, list, or primitive)
+    - rounding_rules: Dict mapping field names to number of decimal places
+
+    Returns:
+    - The object with rounded values
+    """
+    if isinstance(obj, dict):
+        new_dict = {}
+        for k, v in obj.items():
+            if k in rounding_rules and isinstance(v, (int, float)) and not np.isnan(v):
+                num_decimals = rounding_rules[k]
+                rounded_val = round(v, num_decimals)
+                if num_decimals == 0:
+                    new_dict[k] = int(rounded_val)
+                else:
+                    new_dict[k] = rounded_val
+            else:
+                new_dict[k] = apply_rounding(v, rounding_rules)
+        return new_dict
+    elif isinstance(obj, list):
+        return [apply_rounding(item, rounding_rules) for item in obj]
+    else:
+        return obj
+
+
 def calculate_apparent_temperature(air_temp, humidity, wind, solar=None):
     """
     Calculates the apparent temperature based on air temperature, wind speed, humidity and solar radiation if provided.
@@ -264,3 +294,67 @@ def estimate_visibility_gultepe_rh_pr_numpy(
     vis = vis * 1000  # Return in m
 
     return vis[0] if vis.size == 1 else vis
+
+
+def select_daily_precip_type(
+    InterPdaySum: np.ndarray,
+    DATA_DAY: dict,
+    maxPchanceDay: np.ndarray,
+    PRECIP_IDX: dict,
+    prepAccumUnit: float,
+) -> np.ndarray:
+    """Determines the dominant precipitation type for each day.
+
+    This encapsulates the logic used by the API to pick a single "precip type" icon
+    for a day based on accumulated rain/snow/ice. It updates and returns
+    `maxPchanceDay` (modified in-place) for convenience.
+
+    Args:
+        InterPdaySum: 2D array-like (n_days, vars) with accumulated precip amounts.
+        DATA_DAY: Mapping of variable names to column indices.
+        maxPchanceDay: Array-like of ints that will be updated with precip type codes.
+        PRECIP_IDX: Mapping of precipitation type names to integer codes.
+        prepAccumUnit: Unit conversion multiplier for accumulation thresholds.
+
+    Returns:
+        The updated `maxPchanceDay` numpy array.
+    """
+    # If rain, snow and ice are all present, choose sleet (code 3)
+    all_types = (
+        (InterPdaySum[:, DATA_DAY["rain"]] > 0)
+        & (InterPdaySum[:, DATA_DAY["snow"]] > 0)
+        & (InterPdaySum[:, DATA_DAY["ice"]] > 0)
+    )
+    maxPchanceDay[all_types] = 3
+
+    # Use the type with the greatest accumulation as baseline
+    precip_accum = np.stack(
+        [
+            InterPdaySum[:, DATA_DAY["rain"]],
+            InterPdaySum[:, DATA_DAY["snow"]],
+            InterPdaySum[:, DATA_DAY["ice"]],
+        ],
+        axis=1,
+    )
+
+    type_map = np.array([PRECIP_IDX["rain"], PRECIP_IDX["snow"], PRECIP_IDX["ice"]])
+    dominant_type = type_map[np.argmax(precip_accum, axis=1)]
+
+    # Only update where not all types are present and some precip exists
+    not_all_types = ~all_types
+    has_precip = np.max(precip_accum, axis=1) > 0
+    update_mask = not_all_types & has_precip
+    maxPchanceDay[update_mask] = dominant_type[update_mask]
+
+    # Threshold overrides: large accumulations force their respective type
+    maxPchanceDay[InterPdaySum[:, DATA_DAY["rain"]] > (10 * prepAccumUnit)] = (
+        PRECIP_IDX["rain"]
+    )
+    maxPchanceDay[InterPdaySum[:, DATA_DAY["snow"]] > (5 * prepAccumUnit)] = PRECIP_IDX[
+        "snow"
+    ]
+    maxPchanceDay[InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit)] = PRECIP_IDX[
+        "ice"
+    ]
+
+    return maxPchanceDay

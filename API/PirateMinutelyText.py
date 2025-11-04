@@ -89,18 +89,16 @@ def calcaulate_consecutive_indexes(prepIndex):
     return consecutiveIndex
 
 
-def calculate_minutely_text(
-    minuteArr, currentText, currentIcon, icon, precipIntensityUnit, maxCAPE=0
-):
+def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0):
     """
-    Calculates the minutely summary given an array of minutes
+    Calculates the minutely summary given an array of minutes.
+    All inputs are expected in SI units (mm/h for precipitation intensity).
 
     Parameters:
-    - minuteArr (arr): An array of the minutes
+    - minuteArr (arr): An array of the minutes (with SI units)
     - currentText (str/arr): The current conditions in translations format
     - currentIcon (str): The icon representing the current conditions
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
-    - prepAccumUnit (float): The precipitation accumulation/intensity unit
     - maxCAPE (float): The maximum CAPE value for the next hour (default: 0)
 
     Returns:
@@ -238,15 +236,6 @@ def calculate_minutely_text(
         starts.append(hailIndex[0])
         sleetMaxIntensity = hailMaxIntensity
 
-    # Calculate the maximum intensity
-    maxIntensity = max(
-        rainMaxIntensity,
-        snowMaxIntensity,
-        sleetMaxIntensity,
-        hailMaxIntensity,
-        noneMaxIntensity,
-    )
-
     # If the array has any values check the minimum against the different precipitation start times and set that as the first precipitaion
     if starts:
         if hailIndex:
@@ -268,34 +257,35 @@ def calculate_minutely_text(
         cIcon = "mixed"
     # If there is two precipitation types for the hour
     elif len(starts) == 2:
-        # Calculate the precipitation text and icon
+        # Calculate the precipitation text and icon (all in SI units: mm/h)
         text, cIcon = calculate_precip_text(
-            maxIntensity,
-            precipIntensityUnit,
             first_precip,
             "minute",
-            rainMaxIntensity,
-            snowMaxIntensity,
-            sleetMaxIntensity,
+            0,
+            0,
+            0,
             1,
-            icon,
-            "both",
+            icon=icon,
+            mode="both",
+            eff_rain_intensity=rainMaxIntensity,
+            eff_snow_intensity=snowMaxIntensity,
+            eff_ice_intensity=sleetMaxIntensity,
         )
-
         if first_precip == "hail" and rainIndex:
             text = [
                 "and",
                 calculate_precip_text(
-                    maxIntensity,
-                    precipIntensityUnit,
                     "rain",
                     "minute",
-                    rainMaxIntensity,
-                    snowMaxIntensity,
-                    sleetMaxIntensity,
+                    0,
+                    0,
+                    0,
                     1,
-                    icon,
-                    "summary",
+                    icon=icon,
+                    mode="summary",
+                    eff_rain_intensity=rainMaxIntensity,
+                    eff_snow_intensity=snowMaxIntensity,
+                    eff_ice_intensity=sleetMaxIntensity,
                 ),
                 "hail",
             ]
@@ -323,16 +313,17 @@ def calculate_minutely_text(
     # If there if the only one precipitation is sleet
     elif sleetIndex:
         text, cIcon = calculate_precip_text(
-            maxIntensity,
-            precipIntensityUnit,
             "sleet",
             "minute",
-            rainMaxIntensity,
-            snowMaxIntensity,
-            sleetMaxIntensity,
+            0,
+            0,
+            0,
             1,
-            icon,
-            "both",
+            icon=icon,
+            mode="both",
+            eff_rain_intensity=rainMaxIntensity,
+            eff_snow_intensity=snowMaxIntensity,
+            eff_ice_intensity=sleetMaxIntensity,
         )
         cText = minutely_summary(
             consecutiveSleet[0][0],
@@ -343,16 +334,17 @@ def calculate_minutely_text(
     # If there if the only one precipitation is snow
     elif snowIndex:
         text, cIcon = calculate_precip_text(
-            maxIntensity,
-            precipIntensityUnit,
             "snow",
             "minute",
-            rainMaxIntensity,
-            snowMaxIntensity,
-            sleetMaxIntensity,
+            0,
+            0,
+            0,
             1,
-            icon,
-            "both",
+            icon=icon,
+            mode="both",
+            eff_rain_intensity=rainMaxIntensity,
+            eff_snow_intensity=snowMaxIntensity,
+            eff_ice_intensity=sleetMaxIntensity,
         )
         cText = minutely_summary(
             consecutiveSnow[0][0],
@@ -363,16 +355,17 @@ def calculate_minutely_text(
     # If there if the only one precipitation is rain
     elif rainIndex:
         text, cIcon = calculate_precip_text(
-            maxIntensity,
-            precipIntensityUnit,
             "rain",
             "minute",
-            rainMaxIntensity,
-            snowMaxIntensity,
-            sleetMaxIntensity,
+            0,
+            0,
+            0,
             1,
-            icon,
-            "both",
+            icon=icon,
+            mode="both",
+            eff_rain_intensity=rainMaxIntensity,
+            eff_snow_intensity=snowMaxIntensity,
+            eff_ice_intensity=sleetMaxIntensity,
         )
         cText = minutely_summary(
             consecutiveRain[0][0],
@@ -383,16 +376,17 @@ def calculate_minutely_text(
     # If there if the only one precipitation is ice
     elif iceIndex:
         text, cIcon = calculate_precip_text(
-            maxIntensity,
-            precipIntensityUnit,
             "ice",
             "minute",
-            rainMaxIntensity,
-            snowMaxIntensity,
-            sleetMaxIntensity,
+            0,
+            0,
+            0,
             1,
-            icon,
-            "both",
+            icon=icon,
+            mode="both",
+            eff_rain_intensity=rainMaxIntensity,
+            eff_snow_intensity=snowMaxIntensity,
+            eff_ice_intensity=sleetMaxIntensity,
         )
         cText = minutely_summary(
             consecutiveIce[0][0],
@@ -403,16 +397,17 @@ def calculate_minutely_text(
     # If there if the only one precipitation is hail
     elif iceIndex:
         text, cIcon = calculate_precip_text(
-            maxIntensity,
-            precipIntensityUnit,
             "hail",
             "minute",
-            rainMaxIntensity,
-            snowMaxIntensity,
-            sleetMaxIntensity,
+            0,
+            0,
+            0,
             1,
-            icon,
-            "both",
+            icon=icon,
+            mode="both",
+            eff_rain_intensity=rainMaxIntensity,
+            eff_snow_intensity=snowMaxIntensity,
+            eff_ice_intensity=sleetMaxIntensity,
         )
         cText = minutely_summary(
             consecutiveHail[0][0],
@@ -423,16 +418,17 @@ def calculate_minutely_text(
     # If there if the only one precipitation has any other type
     else:
         text, cIcon = calculate_precip_text(
-            maxIntensity,
-            precipIntensityUnit,
             "none",
             "minute",
-            noneMaxIntensity,
-            snowMaxIntensity,
-            sleetMaxIntensity,
+            0,
+            0,
+            0,
             1,
-            icon,
-            "both",
+            icon=icon,
+            mode="both",
+            eff_rain_intensity=rainMaxIntensity,
+            eff_snow_intensity=snowMaxIntensity,
+            eff_ice_intensity=sleetMaxIntensity,
         )
         cText = minutely_summary(
             consecutiveNone[0][0],
