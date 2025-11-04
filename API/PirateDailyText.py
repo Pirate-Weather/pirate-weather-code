@@ -1164,12 +1164,14 @@ def calculate_day_text(
         if len(cloud_levels) > 1 and len(set(cloud_levels)) == len(cloud_levels):
             # All cloud levels are different, find the period with the highest *average* cloud cover
             highest_avg_cloud_period = None
+            highest_avg_cloud_period_idx = -1
             max_avg_cloud_value = -1.0
 
-            for p_data in period_stats:
+            for idx, p_data in enumerate(period_stats):
                 if p_data["avg_cloud_cover"] > max_avg_cloud_value:
                     max_avg_cloud_value = p_data["avg_cloud_cover"]
                     highest_avg_cloud_period = p_data
+                    highest_avg_cloud_period_idx = idx
 
             if highest_avg_cloud_period:
                 # Use the cloud text and level derived from this highest average period
@@ -1177,6 +1179,8 @@ def calculate_day_text(
                     highest_avg_cloud_period["avg_cloud_cover"]
                 )
                 derived_avg_cloud_for_icon = highest_avg_cloud_period["avg_cloud_cover"]
+                # Update overall_cloud_idx to reflect the selected period
+                overall_cloud_idx = [highest_avg_cloud_period_idx]
             else:  # Fallback if no period data (shouldn't happen with valid input)
                 final_cloud_text, _ = calculate_cloud_text(overall_avg_cloud_cover)
                 derived_avg_cloud_for_icon = overall_avg_cloud_cover
