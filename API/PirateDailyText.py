@@ -797,7 +797,7 @@ def calculate_day_text(
             sanitized_hour.get("visibility", DEFAULT_VISIBILITY), DEFAULT_VISIBILITY
         )
         sanitized_hour["precipIntensityError"] = _value_or_default(
-            sanitized_hour.get("precipIntensityError", 0), 0
+            sanitized_hour.get("precipIntensityError", np.nan), np.nan
         )
         sanitized_hour["precipProbability"] = _value_or_default(
             sanitized_hour.get("precipProbability", DEFAULT_POP), DEFAULT_POP
@@ -874,6 +874,7 @@ def calculate_day_text(
                 "rain_accum": 0.0,
                 "snow_accum": 0.0,
                 "snow_error": 0.0,
+                "has_snow_error_data": False,  # Track if any error data exists
                 "sleet_accum": 0.0,
                 "max_pop": 0.0,
                 "max_rain_intensity": 0.0,
@@ -982,7 +983,10 @@ def calculate_day_text(
 
             period_data["rain_accum"] += hour["liquidAccumulation"]
             period_data["snow_accum"] += hour["snowAccumulation"]
-            period_data["snow_error"] += hour["precipIntensityError"] * 0.1
+            # Only accumulate error if it's not nan (missing data)
+            if not np.isnan(hour["precipIntensityError"]):
+                period_data["snow_error"] += hour["precipIntensityError"]
+                period_data["has_snow_error_data"] = True
             period_data["sleet_accum"] += hour["iceAccumulation"]
 
             if (
@@ -1052,6 +1056,7 @@ def calculate_day_text(
     total_snow_accum = 0.0
     total_sleet_accum = 0.0
     total_snow_error = 0.0
+    has_any_snow_error_data = False  # Track if any period has error data
     overall_max_rain_intensity = 0.0
     overall_max_snow_intensity = 0.0
     overall_max_ice_intensity = 0.0
@@ -1073,6 +1078,8 @@ def calculate_day_text(
         total_snow_accum += p_data["snow_accum"]
         total_sleet_accum += p_data["sleet_accum"]
         total_snow_error += p_data["snow_error"]
+        if p_data["has_snow_error_data"]:
+            has_any_snow_error_data = True
         overall_max_rain_intensity = max(
             overall_max_rain_intensity, p_data["max_rain_intensity"]
         )
@@ -1330,34 +1337,41 @@ def calculate_day_text(
             snow_accum_display = total_snow_accum / 10
             snow_error_display = total_snow_error / 10
 
-        snow_low_accum = math.floor(snow_accum_display - (snow_error_display / 2))
-        snow_max_accum = math.ceil(snow_accum_display + (snow_error_display / 2))
-        snow_low_accum = max(0, snow_low_accum)  # Snow accumulation cannot be negative
-
-        if total_snow_error <= 0:
+        # If error data is missing (ERA5, etc.), show exact value without range or "<"
+        if not has_any_snow_error_data and snow_accum_display > 0:
+            # No error data available - show exact accumulation value
             snow_sentence = [
                 snow_unit_str,
                 math.ceil(snow_accum_display),
             ]
-        elif snow_max_accum > 0:
-            if snow_accum_display == 0:
-                snow_sentence = [
-                    "less-than",
-                    [snow_unit_str, 1],
-                ]
-            elif snow_low_accum == 0:
-                snow_sentence = [
-                    "less-than",
-                    [
+        else:
+            # Error data exists - calculate range
+            snow_low_accum = math.floor(snow_accum_display - (snow_error_display / 2))
+            snow_max_accum = math.ceil(snow_accum_display + (snow_error_display / 2))
+            snow_low_accum = max(
+                0, snow_low_accum
+            )  # Snow accumulation cannot be negative
+
+            if snow_max_accum > 0:
+                if snow_accum_display == 0:
+                    snow_sentence = [
+                        "less-than",
+                        [snow_unit_str, 1],
+                    ]
+                # If error is very small or lower range is 0, use less-than format
+                elif snow_error_display <= 0.01 or snow_low_accum == 0:
+                    snow_sentence = [
+                        "less-than",
+                        [
+                            snow_unit_str,
+                            snow_max_accum,
+                        ],
+                    ]
+                else:
+                    snow_sentence = [
                         snow_unit_str,
-                        snow_max_accum,
-                    ],
-                ]
-            else:
-                snow_sentence = [
-                    snow_unit_str,
-                    ["range", snow_low_accum, snow_max_accum],
-                ]
+                        ["range", snow_low_accum, snow_max_accum],
+                    ]
 
     if snow_sentence is not None:
         if most_common_overall_precip_type == "snow":
