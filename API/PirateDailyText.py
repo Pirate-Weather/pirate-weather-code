@@ -1831,7 +1831,7 @@ def calculate_day_text(
 
     # Ensure an icon is always returned, defaulting to overall average cloud cover if none set.
     if current_c_icon is None:
-        current_c_icon = calculate_sky_icon(overall_avg_cloud_cover, True, icon_set)
+        current_c_icon = calculate_sky_icon(overall_avg_cloud_cover, is_day_time, icon_set)
 
     # print(period_stats)
 
