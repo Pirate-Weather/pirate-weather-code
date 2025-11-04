@@ -293,7 +293,8 @@ def calculate_precip_text(
                 cIcon = "possible-rain-night"
             elif icon == "pirate":
                 cIcon = "heavy-rain"
-        if (
+        if ( # This handles the case where over a week or multiple days there is heavy rain but each day individually does not meet the heavy threshold
+             # Some additional tweaking of this logic may be needed based on testing
             (type == "minute" or type == "week")
             and eff_rain_intensity < heavyPrecipThresh
             and rainAccum >= heavyPrecipThresh * num_precip_days * 2
