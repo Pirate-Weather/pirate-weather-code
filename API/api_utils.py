@@ -265,6 +265,7 @@ def estimate_visibility_gultepe_rh_pr_numpy(
 
     return vis[0] if vis.size == 1 else vis
 
+
 def select_daily_precip_type(
     InterPdaySum, DATA_DAY, maxPchanceDay, PRECIP_IDX, prepAccumUnit
 ):

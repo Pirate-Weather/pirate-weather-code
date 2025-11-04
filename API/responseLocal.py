@@ -4179,7 +4179,6 @@ async def PW_Forecast(
         # Fallback: preserve original inline logic if helper fails (shouldn't happen)
         logger.exception("select_daily_precip_type error")
 
-
     # Process Day/Night data for output
     day_night_list = []
     max_precip_chance_day = np.array(max_precip_chance_day).astype(int)
