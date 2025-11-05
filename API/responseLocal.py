@@ -1742,8 +1742,6 @@ async def PW_Forecast(
         print("### GEFS Detail Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
-
-
     # If a timemachine request for more than 10 days ago, read ERA5
     if readERA5:
         # Get nearest lat and lon for the ERA5 model
@@ -5933,7 +5931,9 @@ async def PW_Forecast(
         returnOBJ["currently"]["windGust"] = (
             InterPcurrent[DATA_CURRENT["gust"]] * windUnit
         )
-        returnOBJ["currently"]["windBearing"] = np.mod(InterPcurrent[DATA_CURRENT["bearing"]], 360)
+        returnOBJ["currently"]["windBearing"] = np.mod(
+            InterPcurrent[DATA_CURRENT["bearing"]], 360
+        )
         returnOBJ["currently"]["cloudCover"] = InterPcurrent[DATA_CURRENT["cloud"]]
         returnOBJ["currently"]["uvIndex"] = InterPcurrent[DATA_CURRENT["uv"]]
         returnOBJ["currently"]["visibility"] = (
