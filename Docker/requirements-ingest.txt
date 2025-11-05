@@ -14,7 +14,7 @@ distributed==2025.10.0
 xarray-spatial==0.4.0
 geopandas==1.1.1
 nwswx==0.1.2
-herbie-data==2025.11.0
+git+https://github.com/alexander0042/Herbie.git
 pyarrow==22.0.0
 numba==0.62.1
 metpy==1.7.1

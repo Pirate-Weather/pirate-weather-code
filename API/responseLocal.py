@@ -785,10 +785,6 @@ class WeatherParallel(object):
             try:
                 dataOut = await asyncio.to_thread(lambda: opened_zarr[:, :, y, x].T)
 
-                # Fake some bad data for testing
-                # if model == "GFS":
-                # dataOut[10:100, 4] = MISSING_DATA
-
                 # Check for missing/ bad data and interpolate
                 # This should not occur, but good to have a fallback
                 if has_interior_nan_holes(dataOut.T):
@@ -1100,6 +1096,7 @@ async def PW_Forecast(
     readECMWF = False
     readNBM = False
     readGEFS = False
+    readERA5 = False
 
     STAGE = os.environ.get("STAGE", "PROD")
 
@@ -1352,16 +1349,11 @@ async def PW_Forecast(
         exGEFS = 1
     if "rtma_ru" in excludeParams:
         exRTMA_RU = 1
-    # if "ecmwf_ifs" in excludeParams:
-    #    exECMWF = 1
+    if "ecmwf_ifs" in excludeParams:
+        exECMWF = 1
     if "summary" in excludeParams:
         summaryText = False
 
-    # ECMWF is opt-in via include=ecmwf_ifs
-    if "ecmwf_ifs" in includeParams:
-        readECMWF = True
-    else:
-        exECMWF = 1
     if "day_night_forecast" in includeParams:
         inc_day_night = 1
 
@@ -1694,9 +1686,10 @@ async def PW_Forecast(
         print("### GFS Detail Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
-    # If within the last 10 days, read GFS
+    # If more than 10 days ago, read ERA5
     if (nowTime - utcTime) > datetime.timedelta(hours=10 * 24):
         dataOut_gfs = False
+        readERA5 = True
     else:
         readGFS = True
 
@@ -1719,6 +1712,13 @@ async def PW_Forecast(
         dataOut_ecmwf = False
     else:
         readECMWF = True
+        lats_ecmwf = np.arange(90, -90, -0.25)
+        lons_ecmwf = np.arange(-180, 180, 0.25)
+
+        abslat_ecmwf = np.abs(lats_ecmwf - lat)
+        abslon_ecmwf = np.abs(lons_ecmwf - az_Lon)
+        y_p_eur = np.argmin(abslat_ecmwf)
+        x_p_eur = np.argmin(abslon_ecmwf)
 
     if TIMING:
         print("### ECMWF Detail END ###")
@@ -1742,14 +1742,8 @@ async def PW_Forecast(
         print("### GEFS Detail Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
-    sourceIDX["gfs"] = dict()
-    sourceIDX["gfs"]["x"] = int(x_p)
-    sourceIDX["gfs"]["y"] = int(y_p)
-    sourceIDX["gfs"]["lat"] = round(gfs_lat, 2)
-    sourceIDX["gfs"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
-
-    # If a timemachine request, read ERA5
-    if timeMachine:
+    # If a timemachine request for more than 10 days ago, read ERA5
+    if readERA5:
         # Get nearest lat and lon for the ERA5 model
 
         # Find nearest latitude and longitude in ERA5 data
@@ -1784,6 +1778,7 @@ async def PW_Forecast(
         ).astype(np.int64)
         ERA5_MERGED = np.vstack((unix_times_era5, dataOut_ERA5.values)).T
     else:
+        ERA5_MERGED = False
         dataOut_ERA5 = False
 
     if readHRRR:
@@ -1807,7 +1802,7 @@ async def PW_Forecast(
         zarrTasks["GFS"] = weather.zarr_read("GFS", GFS_Zarr, x_p, y_p)
 
     if readECMWF:
-        zarrTasks["ECMWF"] = weather.zarr_read("ECMWF", ECMWF_Zarr, x_p, y_p)
+        zarrTasks["ECMWF"] = weather.zarr_read("ECMWF", ECMWF_Zarr, x_p_eur, y_p_eur)
 
     if readGEFS:
         zarrTasks["GEFS"] = weather.zarr_read("GEFS", GEFS_Zarr, x_p, y_p)
@@ -1913,12 +1908,11 @@ async def PW_Forecast(
         if dataOut_ecmwf is not False:
             # ECMWF forecast starts at hour +3, so base_time is at HISTORY_PERIODS - 3
             ecmwfRunTime = dataOut_ecmwf[HISTORY_PERIODS["ECMWF"] - 3, 0]
-            # ECMWF IFS uses the same grid as GFS - only add to sourceIDX if data exists
             sourceIDX["ecmwf_ifs"] = dict()
-            sourceIDX["ecmwf_ifs"]["x"] = int(x_p)
-            sourceIDX["ecmwf_ifs"]["y"] = int(y_p)
-            sourceIDX["ecmwf_ifs"]["lat"] = round(gfs_lat, 2)
-            sourceIDX["ecmwf_ifs"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
+            sourceIDX["ecmwf_ifs"]["x"] = int(x_p_eur)
+            sourceIDX["ecmwf_ifs"]["y"] = int(y_p_eur)
+            sourceIDX["ecmwf_ifs"]["lat"] = round(lats_ecmwf[y_p_eur], 2)
+            sourceIDX["ecmwf_ifs"]["lon"] = round(lons_ecmwf[x_p_eur], 2)
 
     if readGEFS:
         dataOut_gefs = zarr_results["GEFS"]
@@ -1947,8 +1941,14 @@ async def PW_Forecast(
 
     if isinstance(dataOut_gfs, np.ndarray):
         sourceList.append("gfs")
+        sourceIDX["gfs"] = dict()
+        sourceIDX["gfs"]["x"] = int(x_p)
+        sourceIDX["gfs"]["y"] = int(y_p)
+        sourceIDX["gfs"]["lat"] = round(gfs_lat, 2)
+        sourceIDX["gfs"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
 
-    if isinstance(dataOut_ERA5, np.ndarray):
+    # If ERA5 data was read and merged
+    if isinstance(ERA5_MERGED, np.ndarray):
         sourceList.append("era5")
 
     # Timing Check
@@ -2039,8 +2039,6 @@ async def PW_Forecast(
                     gefsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
             ).strftime("%Y-%m-%d %HZ")
-    else:
-        sourceList.append("era5")
 
     # Timing Check
     if TIMING:
@@ -2050,11 +2048,11 @@ async def PW_Forecast(
     ## ELEVATION
     abslat = np.abs(lats_etopo - lat)
     abslon = np.abs(lons_etopo - az_Lon)
-    y_p = np.argmin(abslat)
-    x_p = np.argmin(abslon)
+    y_p_etopo = np.argmin(abslat)
+    x_p_etopo = np.argmin(abslon)
 
     if (useETOPO) and ((STAGE == "PROD") or (STAGE == "DEV")):
-        ETOPO = int(ETOPO_f[y_p, x_p])
+        ETOPO = int(ETOPO_f[y_p_etopo, x_p_etopo])
     else:
         ETOPO = 0
 
@@ -2063,10 +2061,10 @@ async def PW_Forecast(
 
     if useETOPO:
         sourceIDX["etopo"] = dict()
-        sourceIDX["etopo"]["x"] = int(x_p)
-        sourceIDX["etopo"]["y"] = int(y_p)
-        sourceIDX["etopo"]["lat"] = round(lats_etopo[y_p], 4)
-        sourceIDX["etopo"]["lon"] = round(lons_etopo[x_p], 4)
+        sourceIDX["etopo"]["x"] = int(x_p_etopo)
+        sourceIDX["etopo"]["y"] = int(y_p_etopo)
+        sourceIDX["etopo"]["lat"] = round(lats_etopo[y_p_etopo], 4)
+        sourceIDX["etopo"]["lon"] = round(lons_etopo[x_p_etopo], 4)
 
     # Timing Check
     if TIMING:
@@ -2223,10 +2221,7 @@ async def PW_Forecast(
 
     # ECMWF
     if "ecmwf_ifs" in sourceList:
-        # ECMWF forecast starts at hour +3, causing a time offset in the data
-        # The data array is offset by ~3 hours from its timestamps
-        # Adjust the search time by +3 hours to find the correct data
-        ECMWF_StartIDX = nearest_index(dataOut_ecmwf[:, 0], baseDayUTC_Grib + 10800)
+        ECMWF_StartIDX = nearest_index(dataOut_ecmwf[:, 0], baseDayUTC_Grib)
         ECMWF_EndIDX = min((len(dataOut_ecmwf), (numHours + ECMWF_StartIDX)))
         ECMWF_Merged = np.full((numHours, max(ECMWF.values()) + 1), MISSING_DATA)
         ECMWF_Merged[
@@ -3147,9 +3142,8 @@ async def PW_Forecast(
         prcipIntensityHour[:, 1] = HRRR_Merged[:, HRRR["intensity"]] * 3600
     # ECMWF
     if "ecmwf_ifs" in sourceList:
-        # Use APCP_Mean (ensemble mean) instead of tprate for better accuracy
-        # APCP_Mean is already in m/h (hourly rate), convert to mm/h
-        prcipIntensityHour[:, 2] = ECMWF_Merged[:, ECMWF["accum_mean"]] * 1000
+        # Use tprate (total precipitation rate) for intensity
+        prcipIntensityHour[:, 2] = ECMWF_Merged[:, ECMWF["intensity"]] * 3600
     # GEFS or GFS
     if "gefs" in sourceList:
         prcipIntensityHour[:, 3] = GEFS_Merged[:, GEFS["accum"]]
@@ -3552,9 +3546,9 @@ async def PW_Forecast(
         PrecpAccumHour[:, 1] = HRRR_Merged[:, HRRR["accum"]]
     # ECMWF
     if "ecmwf_ifs" in sourceList:
-        # Use APCP_Mean for accumulation to match intensity source
-        # APCP_Mean is in m/h, convert to match expected accumulation units
-        PrecpAccumHour[:, 2] = ECMWF_Merged[:, ECMWF["accum_mean"]]
+        # Use APCP_Mean for accumulation.
+        # APCP_Mean is in m/h, convert to mm for accumulation units.
+        PrecpAccumHour[:, 2] = ECMWF_Merged[:, ECMWF["accum_mean"]] * 1000
     # GEFS
     if "gefs" in sourceList:
         PrecpAccumHour[:, 3] = GEFS_Merged[:, GEFS["accum"]]
@@ -4509,7 +4503,7 @@ async def PW_Forecast(
                 # Wind in requested units
                 "windSpeed": (mean_arr[idx, DATA_HOURLY["wind"]] * windUnit),
                 "windGust": (mean_arr[idx, DATA_HOURLY["gust"]] * windUnit),
-                "windBearing": int(mean_arr[idx, DATA_HOURLY["bearing"]]),
+                "windBearing": mean_arr[idx, DATA_HOURLY["bearing"]],
                 "cloudCover": mean_arr[idx, DATA_HOURLY["cloud"]],
                 "uvIndex": mean_arr[idx, DATA_HOURLY["uv"]],
                 # Visibility in requested units
@@ -4525,7 +4519,7 @@ async def PW_Forecast(
                 "fireIndex": mean_arr[idx, DATA_HOURLY["fire"]],
                 "solar": mean_arr[idx, DATA_HOURLY["solar"]],
                 # CAPE reported as integer where available
-                "cape": int(mean_arr[idx, DATA_HOURLY["cape"]]),
+                "cape": mean_arr[idx, DATA_HOURLY["cape"]],
             }
 
             return item
@@ -4783,12 +4777,16 @@ async def PW_Forecast(
             "apparentTemperatureMax": apparent_max,
             "apparentTemperatureMaxTime": InterPdayMaxTime[idx, DATA_DAY["apparent"]],
             "smokeMax": InterPdayMax[idx, DATA_DAY["smoke"]],
-            "smokeMaxTime": InterPdayMaxTime[idx, DATA_DAY["smoke"]],
+            "smokeMaxTime": InterPdayMaxTime[idx, DATA_DAY["smoke"]]
+            if not np.isnan(InterPdayMax[idx, DATA_DAY["smoke"]])
+            else MISSING_DATA,
             "liquidAccumulation": (InterPdaySum[idx, DATA_DAY["rain"]] * prepAccumUnit),
             "snowAccumulation": (InterPdaySum[idx, DATA_DAY["snow"]] * prepAccumUnit),
             "iceAccumulation": (InterPdaySum[idx, DATA_DAY["ice"]] * prepAccumUnit),
             "fireIndexMax": InterPdayMax[idx, DATA_DAY["fire"]],
-            "fireIndexMaxTime": InterPdayMaxTime[idx, DATA_DAY["fire"]],
+            "fireIndexMaxTime": InterPdayMaxTime[idx, DATA_DAY["fire"]]
+            if not np.isnan(InterPdayMax[idx, DATA_DAY["fire"]])
+            else MISSING_DATA,
             "solarMax": InterPdayMax[idx, DATA_DAY["solar"]],
             "solarMaxTime": InterPdayMaxTime[idx, DATA_DAY["solar"]],
             "capeMax": InterPdayMax[idx, DATA_DAY["cape"]],
@@ -5056,7 +5054,7 @@ async def PW_Forecast(
     InterPcurrent[DATA_CURRENT["time"]] = int(minute_array_grib[0])
 
     # Get prep probability, intensity and error from minutely
-    if timeMachine:
+    if "era5" in sourceList:
         InterPcurrent[DATA_CURRENT["intensity"]] = (
             (
                 ERA5_MERGED[currentIDX_hrrrh_A, ERA5["large_scale_rain_rate"]]
@@ -5934,8 +5932,8 @@ async def PW_Forecast(
         returnOBJ["currently"]["windGust"] = (
             InterPcurrent[DATA_CURRENT["gust"]] * windUnit
         )
-        returnOBJ["currently"]["windBearing"] = int(
-            np.mod(InterPcurrent[DATA_CURRENT["bearing"]], 360)
+        returnOBJ["currently"]["windBearing"] = np.mod(
+            InterPcurrent[DATA_CURRENT["bearing"]], 360
         )
         returnOBJ["currently"]["cloudCover"] = InterPcurrent[DATA_CURRENT["cloud"]]
         returnOBJ["currently"]["uvIndex"] = InterPcurrent[DATA_CURRENT["uv"]]
