@@ -2029,21 +2029,20 @@ async def PW_Forecast(
             - datetime.timedelta(hours=18)
         ).strftime("%Y-%m-%d %HZ")
 
-    # Always include GFS
-    if timeMachine is False:
+    if isinstance(dataOut_gfs, np.ndarray):
         sourceTimes["gfs"] = rounder(
             datetime.datetime.fromtimestamp(
                 gfsRunTime.astype(int), datetime.UTC
             ).replace(tzinfo=None)
         ).strftime("%Y-%m-%d %HZ")
 
-        if isinstance(dataOut_gefs, np.ndarray):
-            sourceList.append("gefs")
-            sourceTimes["gefs"] = rounder(
-                datetime.datetime.fromtimestamp(
-                    gefsRunTime.astype(int), datetime.UTC
-                ).replace(tzinfo=None)
-            ).strftime("%Y-%m-%d %HZ")
+    if isinstance(dataOut_gefs, np.ndarray):
+        sourceList.append("gefs")
+        sourceTimes["gefs"] = rounder(
+            datetime.datetime.fromtimestamp(
+                gefsRunTime.astype(int), datetime.UTC
+            ).replace(tzinfo=None)
+        ).strftime("%Y-%m-%d %HZ")
 
     # Timing Check
     if TIMING:
