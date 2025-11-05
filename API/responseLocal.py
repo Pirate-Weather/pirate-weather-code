@@ -889,16 +889,24 @@ def lambertGridMatch(
     return lat_grid, lon_grid, x_hrrr, y_hrrr
 
 
-def rounder(t):
-    if t.minute >= 30:
-        # Round up to the next hour
-        rounded_dt = t.replace(second=0, microsecond=0, minute=0) + datetime.timedelta(
-            hours=1
-        )
-    else:
-        # Round down to the current hour
-        rounded_dt = t.replace(second=0, microsecond=0, minute=0)
-    return rounded_dt
+def rounder(t, to=60):
+    """
+    Rounds a datetime object to the nearest interval in minutes (default 60 for hour).
+    Args:
+        t (datetime): The datetime to round.
+        to (int): The interval in minutes to round to (e.g., 60 for hour, 15 for quarter-hour).
+    Returns:
+        datetime: The rounded datetime.
+    """
+    discard = datetime.timedelta(
+        minutes=t.minute % to,
+        seconds=t.second,
+        microseconds=t.microsecond
+    )
+    t -= discard
+    if discard >= datetime.timedelta(minutes=to/2):
+        t += datetime.timedelta(minutes=to)
+    return t.replace(second=0, microsecond=0)
 
 
 def unix_to_day_of_year_and_lst(dt, longitude):
@@ -1968,13 +1976,11 @@ async def PW_Forecast(
     # Add RTMA_RU to source list if available (only for currently, not time machine)
     if (isinstance(dataOut_rtma_ru, np.ndarray)) & (not timeMachine):
         sourceList.append("rtma_ru")
-        sourceTimes["rtma_ru"] = (
+        sourceTimes["rtma_ru"] = rounder(
             datetime.datetime.fromtimestamp(
                 dataOut_rtma_ru[0, 0].astype(int), datetime.UTC
-            )
-            .replace(tzinfo=None)
-            .strftime("%Y-%m-%d %H:%MZ")
-        )
+            ).replace(tzinfo=None), to=15
+        ).strftime("%Y-%m-%d %H:%MZ")
 
     if (isinstance(dataOut_hrrrh, np.ndarray)) & (not timeMachine):
         sourceList.append("hrrr_0-18")
