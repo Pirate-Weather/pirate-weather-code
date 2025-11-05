@@ -1355,7 +1355,7 @@ async def PW_Forecast(
     if "gefs" in excludeParams:
         exGEFS = 1
     if "gfs" in excludeParams:
-        exGFS = 1        
+        exGFS = 1
     if "rtma_ru" in excludeParams:
         exRTMA_RU = 1
     if "ecmwf_ifs" in excludeParams:
@@ -5248,17 +5248,13 @@ async def PW_Forecast(
     elif "ecmwf_ifs" in sourceList:
         # ECMWF humidity needs to be calculated from dewpoint and temperature
         ECMWF_humidFac1 = relative_humidity_from_dewpoint(
-            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["temp"]]
-            * mp.units.units.degK,
-            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["dew"]]
-            * mp.units.units.degK,
+            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["temp"]] * mp.units.units.degK,
+            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["dew"]] * mp.units.units.degK,
             phase="auto",
         ).magnitude
         ECMWF_humidFac2 = relative_humidity_from_dewpoint(
-            ECMWF_Merged[currentIDX_hrrrh, ECMWF["temp"]]
-              * mp.units.units.degK,
-            ECMWF_Merged[currentIDX_hrrrh, ECMWF["dew"]]
-            * mp.units.units.degK,
+            ECMWF_Merged[currentIDX_hrrrh, ECMWF["temp"]] * mp.units.units.degK,
+            ECMWF_Merged[currentIDX_hrrrh, ECMWF["dew"]] * mp.units.units.degK,
             phase="auto",
         ).magnitude
 
