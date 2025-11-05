@@ -1778,6 +1778,7 @@ async def PW_Forecast(
         ).astype(np.int64)
         ERA5_MERGED = np.vstack((unix_times_era5, dataOut_ERA5.values)).T
     else:
+        ERA5_MERGED = False
         dataOut_ERA5 = False
 
     if readHRRR:
