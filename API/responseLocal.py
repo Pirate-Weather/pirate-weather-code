@@ -1354,6 +1354,8 @@ async def PW_Forecast(
         exHRRR = 1
     if "gefs" in excludeParams:
         exGEFS = 1
+    if "gfs" in excludeParams:
+        exGFS = 1        
     if "rtma_ru" in excludeParams:
         exRTMA_RU = 1
     if "ecmwf_ifs" in excludeParams:
@@ -1697,6 +1699,11 @@ async def PW_Forecast(
     if (nowTime - utcTime) > datetime.timedelta(hours=10 * 24):
         dataOut_gfs = False
         readERA5 = True
+        readGFS = False
+        exGFS = 1  # Force exclude GFS
+    elif exGFS:
+        dataOut_gfs = False
+        readGFS = False
     else:
         readGFS = True
 
@@ -5238,6 +5245,28 @@ async def PW_Forecast(
             GFS_Merged[currentIDX_hrrrh_A, GFS["humidity"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["humidity"]] * interpFac2
         ) * humidUnit
+    elif "ecmwf_ifs" in sourceList:
+        # ECMWF humidity needs to be calculated from dewpoint and temperature
+        ECMWF_humidFac1 = relative_humidity_from_dewpoint(
+            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["temp"]]
+            * mp.units.units.degK,
+            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["dew"]]
+            * mp.units.units.degK,
+            phase="auto",
+        ).magnitude
+        ECMWF_humidFac2 = relative_humidity_from_dewpoint(
+            ECMWF_Merged[currentIDX_hrrrh, ECMWF["temp"]]
+              * mp.units.units.degK,
+            ECMWF_Merged[currentIDX_hrrrh, ECMWF["dew"]]
+            * mp.units.units.degK,
+            phase="auto",
+        ).magnitude
+
+        InterPcurrent[DATA_CURRENT["humidity"]] = (
+            (ECMWF_humidFac1 * interpFac1 + ECMWF_humidFac2 * interpFac2)
+            * 100
+            * humidUnit
+        )
     elif "era5" in sourceList:
         ERA5_humidFac1 = relative_humidity_from_dewpoint(
             ERA5_MERGED[currentIDX_hrrrh_A, ERA5["2m_temperature"]]
