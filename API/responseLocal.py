@@ -680,7 +680,7 @@ def get_offset(*, lat, lng, utcTime, tf):
     return (today_utc - today_target).total_seconds() / 60, tz_target
 
 
-def _polar_is_all_day(lat_val, month_val):
+def _polar_is_all_day(lat_val: float, month_val: int) -> bool:
     """Determine whether a given latitude and month fall inside the
     "polar day" season.
 
@@ -4539,7 +4539,7 @@ async def PW_Forecast(
             precip_type_half_day,
             precip_text_half_day,
             idx,
-            is_night=True if is_all_night else False,
+            is_night=is_all_night,
             mode="hourly",
         )
 
@@ -4566,7 +4566,7 @@ async def PW_Forecast(
                 # Calculate the day summary from 4am to 4pm (13 hours)
                 dayIcon, dayText = calculate_half_day_text(
                     hourList_si[(idx * 24) + 4 : (idx * 24) + 17],
-                    False if is_all_night else True,
+                    not is_all_night,
                     str(tz_name),
                     int(time.time()),
                     icon_set=icon,
@@ -4602,7 +4602,7 @@ async def PW_Forecast(
             precip_type_half_night,
             precip_text_half_night,
             idx,
-            is_night=False if is_all_day else True,
+            is_night=not is_all_day,
             mode="hourly",
         )
 
@@ -4629,7 +4629,7 @@ async def PW_Forecast(
                 # Calculate the night summary from 5pm to 4am (11 hours)
                 dayIcon, dayText = calculate_half_day_text(
                     hourList_si[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
-                    True if is_all_day else False,
+                    is_all_day,
                     str(tz_name),
                     int(time.time()),
                     icon_set=icon,
@@ -4664,7 +4664,7 @@ async def PW_Forecast(
             PTypeDay,
             PTextDay,
             idx,
-            is_night=True if is_all_night else False,
+            is_night=is_all_night,
             mode="daily",
         )
 
@@ -4806,7 +4806,7 @@ async def PW_Forecast(
                 # Calculate the day summary from 4 to 4
                 dayIcon, dayText = calculate_day_text(
                     hourList_si[((idx) * 24) + 4 : ((idx + 1) * 24) + 4],
-                    False if is_all_night else True,
+                    not is_all_night,
                     str(tz_name),
                     int(time.time()),
                     "day",
