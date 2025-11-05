@@ -1742,11 +1742,7 @@ async def PW_Forecast(
         print("### GEFS Detail Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
-    sourceIDX["gfs"] = dict()
-    sourceIDX["gfs"]["x"] = int(x_p)
-    sourceIDX["gfs"]["y"] = int(y_p)
-    sourceIDX["gfs"]["lat"] = round(gfs_lat, 2)
-    sourceIDX["gfs"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
+
 
     # If a timemachine request for more than 10 days ago, read ERA5
     if readERA5:
@@ -1946,8 +1942,14 @@ async def PW_Forecast(
 
     if isinstance(dataOut_gfs, np.ndarray):
         sourceList.append("gfs")
+        sourceIDX["gfs"] = dict()
+        sourceIDX["gfs"]["x"] = int(x_p)
+        sourceIDX["gfs"]["y"] = int(y_p)
+        sourceIDX["gfs"]["lat"] = round(gfs_lat, 2)
+        sourceIDX["gfs"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
 
-    if isinstance(dataOut_ERA5, np.ndarray):
+    # If ERA5 data was read
+    if isinstance(ERA5_MERGED, np.ndarray):
         sourceList.append("era5")
 
     # Timing Check
@@ -5931,9 +5933,7 @@ async def PW_Forecast(
         returnOBJ["currently"]["windGust"] = (
             InterPcurrent[DATA_CURRENT["gust"]] * windUnit
         )
-        returnOBJ["currently"]["windBearing"] = int(
-            np.mod(InterPcurrent[DATA_CURRENT["bearing"]], 360)
-        )
+        returnOBJ["currently"]["windBearing"] = np.mod(InterPcurrent[DATA_CURRENT["bearing"]], 360)
         returnOBJ["currently"]["cloudCover"] = InterPcurrent[DATA_CURRENT["cloud"]]
         returnOBJ["currently"]["uvIndex"] = InterPcurrent[DATA_CURRENT["uv"]]
         returnOBJ["currently"]["visibility"] = (
