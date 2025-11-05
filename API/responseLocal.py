@@ -1353,16 +1353,11 @@ async def PW_Forecast(
         exGEFS = 1
     if "rtma_ru" in excludeParams:
         exRTMA_RU = 1
-    # if "ecmwf_ifs" in excludeParams:
-    #    exECMWF = 1
+    if "ecmwf_ifs" in excludeParams:
+       exECMWF = 1
     if "summary" in excludeParams:
         summaryText = False
 
-    # ECMWF is opt-in via include=ecmwf_ifs
-    if "ecmwf_ifs" in includeParams:
-        readECMWF = True
-    else:
-        exECMWF = 1
     if "day_night_forecast" in includeParams:
         inc_day_night = 1
 
@@ -4785,12 +4780,16 @@ async def PW_Forecast(
             "apparentTemperatureMax": apparent_max,
             "apparentTemperatureMaxTime": InterPdayMaxTime[idx, DATA_DAY["apparent"]],
             "smokeMax": InterPdayMax[idx, DATA_DAY["smoke"]],
-            "smokeMaxTime": InterPdayMaxTime[idx, DATA_DAY["smoke"]],
+            "smokeMaxTime": InterPdayMaxTime[idx, DATA_DAY["smoke"]]
+            if not np.isnan(InterPdayMax[idx, DATA_DAY["smoke"]])
+            else MISSING_DATA,
             "liquidAccumulation": (InterPdaySum[idx, DATA_DAY["rain"]] * prepAccumUnit),
             "snowAccumulation": (InterPdaySum[idx, DATA_DAY["snow"]] * prepAccumUnit),
             "iceAccumulation": (InterPdaySum[idx, DATA_DAY["ice"]] * prepAccumUnit),
             "fireIndexMax": InterPdayMax[idx, DATA_DAY["fire"]],
-            "fireIndexMaxTime": InterPdayMaxTime[idx, DATA_DAY["fire"]],
+            "fireIndexMaxTime": InterPdayMaxTime[idx, DATA_DAY["fire"]]
+            if not np.isnan(InterPdayMax[idx, DATA_DAY["fire"]])
+            else MISSING_DATA,
             "solarMax": InterPdayMax[idx, DATA_DAY["solar"]],
             "solarMaxTime": InterPdayMaxTime[idx, DATA_DAY["solar"]],
             "capeMax": InterPdayMax[idx, DATA_DAY["cape"]],
