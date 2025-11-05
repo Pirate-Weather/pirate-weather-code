@@ -1946,7 +1946,7 @@ async def PW_Forecast(
         sourceIDX["gfs"]["lat"] = round(gfs_lat, 2)
         sourceIDX["gfs"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
 
-    # If ERA5 data was read
+    # If ERA5 data was read and merged
     if isinstance(ERA5_MERGED, np.ndarray):
         sourceList.append("era5")
 
