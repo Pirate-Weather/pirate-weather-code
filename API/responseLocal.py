@@ -1354,7 +1354,7 @@ async def PW_Forecast(
     if "rtma_ru" in excludeParams:
         exRTMA_RU = 1
     if "ecmwf_ifs" in excludeParams:
-       exECMWF = 1
+        exECMWF = 1
     if "summary" in excludeParams:
         summaryText = False
 
