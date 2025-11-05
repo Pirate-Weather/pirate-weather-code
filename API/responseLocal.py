@@ -889,16 +889,23 @@ def lambertGridMatch(
     return lat_grid, lon_grid, x_hrrr, y_hrrr
 
 
-def rounder(t):
-    if t.minute >= 30:
-        # Round up to the next hour
-        rounded_dt = t.replace(second=0, microsecond=0, minute=0) + datetime.timedelta(
-            hours=1
-        )
-    else:
-        # Round down to the current hour
-        rounded_dt = t.replace(second=0, microsecond=0, minute=0)
-    return rounded_dt
+def rounder(t: datetime.datetime, to: int = 60) -> datetime.datetime:
+    """Rounds a datetime object to the nearest interval in minutes.
+
+    Parameters:
+        t (datetime.datetime): The datetime to round.
+        to (int): The interval in minutes to round to (e.g., 60 for hour, 15 for quarter-hour).
+
+    Returns:
+        datetime.datetime: The rounded datetime.
+    """
+    discard = datetime.timedelta(
+        minutes=t.minute % to, seconds=t.second, microseconds=t.microsecond
+    )
+    t -= discard
+    if discard >= datetime.timedelta(minutes=to / 2):
+        t += datetime.timedelta(minutes=to)
+    return t.replace(second=0, microsecond=0)
 
 
 def unix_to_day_of_year_and_lst(dt, longitude):
@@ -1323,6 +1330,7 @@ async def PW_Forecast(
     exNBM = 0
     exHRRR = 0
     exGEFS = 0
+    exGFS = 0
     exRTMA_RU = 0
     exECMWF = 0
     inc_day_night = 0
@@ -1347,6 +1355,8 @@ async def PW_Forecast(
         exHRRR = 1
     if "gefs" in excludeParams:
         exGEFS = 1
+    if "gfs" in excludeParams:
+        exGFS = 1
     if "rtma_ru" in excludeParams:
         exRTMA_RU = 1
     if "ecmwf_ifs" in excludeParams:
@@ -1690,6 +1700,11 @@ async def PW_Forecast(
     if (nowTime - utcTime) > datetime.timedelta(hours=10 * 24):
         dataOut_gfs = False
         readERA5 = True
+        readGFS = False
+        exGFS = 1  # Force exclude GFS
+    elif exGFS:
+        dataOut_gfs = False
+        readGFS = False
     else:
         readGFS = True
 
@@ -1968,13 +1983,11 @@ async def PW_Forecast(
     # Add RTMA_RU to source list if available (only for currently, not time machine)
     if (isinstance(dataOut_rtma_ru, np.ndarray)) & (not timeMachine):
         sourceList.append("rtma_ru")
-        sourceTimes["rtma_ru"] = (
-            datetime.datetime.fromtimestamp(
-                dataOut_rtma_ru[0, 0].astype(int), datetime.UTC
-            )
-            .replace(tzinfo=None)
-            .strftime("%Y-%m-%d %H:%MZ")
-        )
+        rtma_timestamp = datetime.datetime.fromtimestamp(
+            dataOut_rtma_ru[0, 0].astype(int), datetime.UTC
+        ).replace(tzinfo=None)
+        rounded_rtma_time = rounder(rtma_timestamp, to=15)
+        sourceTimes["rtma_ru"] = rounded_rtma_time.strftime("%Y-%m-%d %H:%MZ")
 
     if (isinstance(dataOut_hrrrh, np.ndarray)) & (not timeMachine):
         sourceList.append("hrrr_0-18")
@@ -2024,21 +2037,20 @@ async def PW_Forecast(
             - datetime.timedelta(hours=18)
         ).strftime("%Y-%m-%d %HZ")
 
-    # Always include GFS
-    if timeMachine is False:
+    if isinstance(dataOut_gfs, np.ndarray):
         sourceTimes["gfs"] = rounder(
             datetime.datetime.fromtimestamp(
                 gfsRunTime.astype(int), datetime.UTC
             ).replace(tzinfo=None)
         ).strftime("%Y-%m-%d %HZ")
 
-        if isinstance(dataOut_gefs, np.ndarray):
-            sourceList.append("gefs")
-            sourceTimes["gefs"] = rounder(
-                datetime.datetime.fromtimestamp(
-                    gefsRunTime.astype(int), datetime.UTC
-                ).replace(tzinfo=None)
-            ).strftime("%Y-%m-%d %HZ")
+    if isinstance(dataOut_gefs, np.ndarray):
+        sourceList.append("gefs")
+        sourceTimes["gefs"] = rounder(
+            datetime.datetime.fromtimestamp(
+                gefsRunTime.astype(int), datetime.UTC
+            ).replace(tzinfo=None)
+        ).strftime("%Y-%m-%d %HZ")
 
     # Timing Check
     if TIMING:
@@ -2325,24 +2337,6 @@ async def PW_Forecast(
             for i in range(10)
         ]
     ).astype(np.int32)
-
-    # day_array_grib = (np.datetime64(day_array) - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))).astype(
-    #    'timedelta64[s]').astype(np.int32)
-
-    #    baseDay_6am_Local = datetime.datetime(year=baseTimeLocal.year, month=baseTimeLocal.month, day=baseTimeLocal.day,
-    #                                          hour=6, minute=0, second=0)
-    #    baseDayUTC_6am = baseDay_6am_Local - datetime.timedelta(minutes=tz_offset)
-    #
-    #    day_array_6am = np.arange(baseDayUTC_6am, baseDayUTC_6am + datetime.timedelta(days=9), datetime.timedelta(days=1))
-    #    day_array_6am_grib = (day_array_6am - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))).astype(
-    #        'timedelta64[s]').astype(np.int32)
-    #
-    #    baseDay_6pm_Local = datetime.datetime(year=baseTimeLocal.year, month=baseTimeLocal.month, day=baseTimeLocal.day,
-    #                                          hour=18, minute=0, second=0)
-    #    baseDayUTC_6pm = baseDay_6pm_Local - datetime.timedelta(minutes=tz_offset)
-    #    day_array_6pm = np.arange(baseDayUTC_6pm, baseDayUTC_6pm + datetime.timedelta(days=9), datetime.timedelta(days=1))
-    #    day_array_6pm_grib = (day_array_6pm - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))).astype(
-    #        'timedelta64[s]').astype(np.int32)
 
     # Which hours map to which days
     hourlyDayIndex = np.full(len(hour_array_grib), MISSING_DATA)
@@ -5234,6 +5228,24 @@ async def PW_Forecast(
             GFS_Merged[currentIDX_hrrrh_A, GFS["humidity"]] * interpFac1
             + GFS_Merged[currentIDX_hrrrh, GFS["humidity"]] * interpFac2
         ) * humidUnit
+    elif "ecmwf_ifs" in sourceList:
+        # ECMWF humidity needs to be calculated from dewpoint and temperature
+        ECMWF_humidFac1 = relative_humidity_from_dewpoint(
+            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["temp"]] * mp.units.units.degK,
+            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["dew"]] * mp.units.units.degK,
+            phase="auto",
+        ).magnitude
+        ECMWF_humidFac2 = relative_humidity_from_dewpoint(
+            ECMWF_Merged[currentIDX_hrrrh, ECMWF["temp"]] * mp.units.units.degK,
+            ECMWF_Merged[currentIDX_hrrrh, ECMWF["dew"]] * mp.units.units.degK,
+            phase="auto",
+        ).magnitude
+
+        InterPcurrent[DATA_CURRENT["humidity"]] = (
+            (ECMWF_humidFac1 * interpFac1 + ECMWF_humidFac2 * interpFac2)
+            * 100
+            * humidUnit
+        )
     elif "era5" in sourceList:
         ERA5_humidFac1 = relative_humidity_from_dewpoint(
             ERA5_MERGED[currentIDX_hrrrh_A, ERA5["2m_temperature"]]
