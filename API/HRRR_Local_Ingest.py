@@ -39,15 +39,13 @@ wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
 
-forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/home/ubuntu/Weather/HRRR"
-)
+forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/HRRR")
 forecast_process_path = forecast_process_dir + "/HRRR_Process"
 hist_process_path = forecast_process_dir + "/HRRR_Historic"
 tmpDIR = forecast_process_dir + "/Downloads"
 
-forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/HRRR")
-historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/History/HRRR")
+forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/HRRR")
+historic_path = os.getenv("historic_path", default="/mnt/nvme/data/HRRR")
 
 
 saveType = os.getenv("save_type", default="Download")
@@ -84,7 +82,7 @@ if saveType == "Download":
 
 
 # %% Define base time from the most recent run
-# base_time = pd.Timestamp("2023-07-01 00:00")
+# base_time = pd.Timestamp("2025-11-05 11:00")
 T0 = time.time()
 
 latestRun = Herbie_latest(
@@ -308,6 +306,7 @@ xarray_forecast_merged["APCP_surface"] = xarray_forecast_merged["APCP_surface"].
 xarray_forecast_merged["MASSDEN_8maboveground"] = (
     xarray_forecast_merged["MASSDEN_8maboveground"] * 1e9
 )
+
 
 # Set REFC values < 5 to 0
 xarray_forecast_merged["REFC_entireatmosphere"] = mask_invalid_refc(
@@ -649,7 +648,7 @@ zarr_array = zarr.create_array(
 
 # with ProgressBar():
 da.rechunk(
-    daskVarArrayStackDisk.round(3),
+    daskVarArrayStackDisk.round(5),
     (len(zarrVars), daskVarArrayStackDisk.shape[1], finalChunk, finalChunk),
 ).to_zarr(zarr_array, compute=True)
 

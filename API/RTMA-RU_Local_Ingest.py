@@ -148,7 +148,7 @@ fh_analysis = Herbie(
     save_dir=tmp_dir,
 )
 
-fh_analysis.download(match_strings, verbose=False)
+fh_analysis.download(match_strings, verbose=True)
 
 logging.info("RTMA_RU GRIB file downloaded successfully.")
 
