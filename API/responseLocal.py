@@ -1100,6 +1100,7 @@ async def PW_Forecast(
     readECMWF = False
     readNBM = False
     readGEFS = False
+    readERA5 = False
 
     STAGE = os.environ.get("STAGE", "PROD")
 
@@ -1694,9 +1695,10 @@ async def PW_Forecast(
         print("### GFS Detail Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
-    # If within the last 10 days, read GFS
+    # If more than 10 days ago, read ERA5
     if (nowTime - utcTime) > datetime.timedelta(hours=10 * 24):
         dataOut_gfs = False
+        readERA5 = True
     else:
         readGFS = True
 
@@ -1756,8 +1758,8 @@ async def PW_Forecast(
     sourceIDX["gfs"]["lat"] = round(gfs_lat, 2)
     sourceIDX["gfs"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
 
-    # If a timemachine request, read ERA5
-    if timeMachine:
+    # If a timemachine request for more than 10 days ago, read ERA5
+    if readERA5:
         # Get nearest lat and lon for the ERA5 model
 
         # Find nearest latitude and longitude in ERA5 data
@@ -2046,8 +2048,6 @@ async def PW_Forecast(
                     gefsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
             ).strftime("%Y-%m-%d %HZ")
-    else:
-        sourceList.append("era5")
 
     # Timing Check
     if TIMING:
@@ -5059,7 +5059,7 @@ async def PW_Forecast(
     InterPcurrent[DATA_CURRENT["time"]] = int(minute_array_grib[0])
 
     # Get prep probability, intensity and error from minutely
-    if timeMachine:
+    if "era5" in sourceList:
         InterPcurrent[DATA_CURRENT["intensity"]] = (
             (
                 ERA5_MERGED[currentIDX_hrrrh_A, ERA5["large_scale_rain_rate"]]
