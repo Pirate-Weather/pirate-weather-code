@@ -785,10 +785,6 @@ class WeatherParallel(object):
             try:
                 dataOut = await asyncio.to_thread(lambda: opened_zarr[:, :, y, x].T)
 
-                # Fake some bad data for testing
-                # if model == "GFS":
-                # dataOut[10:100, 4] = MISSING_DATA
-
                 # Check for missing/ bad data and interpolate
                 # This should not occur, but good to have a fallback
                 if has_interior_nan_holes(dataOut.T):
