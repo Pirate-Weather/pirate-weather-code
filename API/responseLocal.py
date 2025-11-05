@@ -1330,6 +1330,7 @@ async def PW_Forecast(
     exNBM = 0
     exHRRR = 0
     exGEFS = 0
+    exGFS = 0
     exRTMA_RU = 0
     exECMWF = 0
     inc_day_night = 0
