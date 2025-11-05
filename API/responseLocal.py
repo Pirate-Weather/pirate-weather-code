@@ -521,7 +521,6 @@ def update_zarr_store(initialRun):
                 command = f"nice -n 20 rm -rf /tmp/{old_dir}"
                 subprocess.run(command, shell=True)
 
-
     print("Refreshed Zarrs")
 
 
