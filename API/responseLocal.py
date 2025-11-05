@@ -1715,10 +1715,10 @@ async def PW_Forecast(
         lats_ecmwf = np.arange(90, -90, -0.25)
         lons_ecmwf = np.arange(-180, 180, 0.25)
 
-        abslat = np.abs(lats_ecmwf - lat)
-        abslon = np.abs(lons_ecmwf - az_Lon)
-        y_p_eur = np.argmin(abslat)
-        x_p_eur = np.argmin(abslon)
+        abslat_ecmwf = np.abs(lats_ecmwf - lat)
+        abslon_ecmwf = np.abs(lons_ecmwf - az_Lon)
+        y_p_eur = np.argmin(abslat_ecmwf)
+        x_p_eur = np.argmin(abslon_ecmwf)
 
     if TIMING:
         print("### ECMWF Detail END ###")
