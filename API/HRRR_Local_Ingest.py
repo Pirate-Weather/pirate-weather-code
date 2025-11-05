@@ -39,9 +39,7 @@ wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
 
-forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/mnt/nvme/data/HRRR"
-)
+forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/HRRR")
 forecast_process_path = forecast_process_dir + "/HRRR_Process"
 hist_process_path = forecast_process_dir + "/HRRR_Historic"
 tmpDIR = forecast_process_dir + "/Downloads"
