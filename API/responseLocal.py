@@ -899,12 +899,10 @@ def rounder(t, to=60):
         datetime: The rounded datetime.
     """
     discard = datetime.timedelta(
-        minutes=t.minute % to,
-        seconds=t.second,
-        microseconds=t.microsecond
+        minutes=t.minute % to, seconds=t.second, microseconds=t.microsecond
     )
     t -= discard
-    if discard >= datetime.timedelta(minutes=to/2):
+    if discard >= datetime.timedelta(minutes=to / 2):
         t += datetime.timedelta(minutes=to)
     return t.replace(second=0, microsecond=0)
 
@@ -1979,7 +1977,8 @@ async def PW_Forecast(
         sourceTimes["rtma_ru"] = rounder(
             datetime.datetime.fromtimestamp(
                 dataOut_rtma_ru[0, 0].astype(int), datetime.UTC
-            ).replace(tzinfo=None), to=15
+            ).replace(tzinfo=None),
+            to=15,
         ).strftime("%Y-%m-%d %H:%MZ")
 
     if (isinstance(dataOut_hrrrh, np.ndarray)) & (not timeMachine):
