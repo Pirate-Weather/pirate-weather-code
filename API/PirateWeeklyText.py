@@ -310,7 +310,7 @@ def calculate_precip_summary(
             eff_rain_intensity=max_rain_intensity,
             eff_snow_intensity=max_snow_intensity,
             eff_ice_intensity=max_ice_intensity,
-            num_precip_days=len(precipitation),
+            num_precip_days=len(precipitationDays),
         )
         precipSummary = [
             "during",
@@ -360,6 +360,7 @@ def calculate_precip_summary(
                 eff_rain_intensity=max_rain_intensity,
                 eff_snow_intensity=max_snow_intensity,
                 eff_ice_intensity=max_ice_intensity,
+                num_precip_days=len(precipitationDays),
             )
             # Since precipitation is occuring everyday use the for week text instead of through
             precipSummary = [
