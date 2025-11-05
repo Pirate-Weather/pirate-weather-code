@@ -1271,7 +1271,9 @@ def calculate_half_day_text(
                 "all_day": is_cloud_all_day,
                 "start_idx": 0,  # Cloud is always "present" from the start of the forecast
                 "text": cloud_full_summary,
-                "icon": calculate_sky_icon(derived_avg_cloud_for_icon, True, icon_set),
+                "icon": calculate_sky_icon(
+                    derived_avg_cloud_for_icon, is_day_time, icon_set
+                ),
             }
         )
 
@@ -1311,7 +1313,9 @@ def calculate_half_day_text(
 
     # Ensure an icon is always returned, defaulting to overall average cloud cover if none set.
     if current_c_icon is None:
-        current_c_icon = calculate_sky_icon(overall_avg_cloud_cover, True, icon_set)
+        current_c_icon = calculate_sky_icon(
+            overall_avg_cloud_cover, is_day_time, icon_set
+        )
 
     # print(period_stats)
 

@@ -681,6 +681,40 @@ def get_offset(*, lat, lng, utcTime, tf):
     return (today_utc - today_target).total_seconds() / 60, tz_target
 
 
+def _polar_is_all_day(lat_val: float, month_val: int) -> bool:
+    """Determine whether a given latitude and month fall inside the
+    "polar day" season.
+
+    This helper encapsulates the heuristic used for locations inside the
+    polar circles where the Astral library may raise a ``ValueError``
+    (sun never rises or never sets). The heuristic is based on the
+    hemisphere and month:
+
+    - Northern hemisphere (lat > 0): months April (4) through September (9)
+      are treated as the polar-day season.
+    - Southern hemisphere (lat < 0): months October (10) through March (3)
+      are treated as the polar-day season.
+
+    Args:
+        lat_val (float): Latitude in decimal degrees. Positive values are
+            north of the equator, negative values are south.
+        month_val (int): Month as an integer in the range 1..12.
+
+    Returns:
+        bool: True when the (latitude, month) pair corresponds to a
+        polar-day season (i.e. the sun would effectively be "always up"
+        for that date), False otherwise.
+
+    Notes:
+        This is a simple heuristic and does not compute astronomical
+        sunrise/sunset times; it is only used as a fallback when
+        Astral cannot compute sun times for polar conditions.
+    """
+    return (lat_val > 0 and month_val >= 4 and month_val <= 9) or (
+        lat_val < 0 and (month_val >= 10 or month_val <= 3)
+    )
+
+
 def has_interior_nan_holes(arr: np.ndarray) -> bool:
     """
     Return True if `arr` (2D: rows × cols) contains at least one
@@ -2390,6 +2424,9 @@ async def PW_Forecast(
 
     loc = LocationInfo("name", "region", tz_name, lat, az_Lon)
 
+    is_all_day = False
+    is_all_night = False
+
     # Calculate Sunrise, Sunset, Moon Phase
     for i in range(0, daily_days + 1):
         try:
@@ -2432,10 +2469,13 @@ async def PW_Forecast(
             )
 
         except ValueError:
-            # If always sunny, (northern hemisphere during the summer) OR southern hemi during the winter
-            if ((lat > 0) & (baseDay.month >= 4) & (baseDay.month <= 9)) or (
-                (lat < 0) & (baseDay.month <= 3) | (baseDay.month >= 10)
-            ):
+            # If always sunny (polar day) or always dark (polar night) we need to
+            # determine which case applies based on hemisphere and month ranges.
+            # Use boolean operators with explicit grouping to avoid accidental
+            # precedence issues from bitwise operators.
+            # Northern hemisphere: roughly April (4) through September (9) -> polar day
+            # Southern hemisphere: roughly October (10) through March (3) -> polar day
+            if _polar_is_all_day(lat, baseDay.month):
                 # Set sunrise to one second after midnight
                 InterSday[i, DATA_DAY["sunrise"]] = day_array_grib[i] + np.timedelta64(
                     1, "s"
@@ -2458,7 +2498,7 @@ async def PW_Forecast(
                     - np.timedelta64(1, "s").astype("timedelta64[s]").astype(np.int32)
                 )
 
-            # Else
+                is_all_day = True
             else:
                 # Set sunrise to two seconds before midnight
                 InterSday[i, DATA_DAY["sunrise"]] = (
@@ -2484,6 +2524,8 @@ async def PW_Forecast(
                     + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
                     - np.timedelta64(1, "s").astype("timedelta64[s]").astype(np.int32)
                 )
+
+                is_all_night = True
 
         m = moon.phase(baseDay + datetime.timedelta(days=i))
         InterSday[i, DATA_DAY["moon_phase"]] = m / 27.99
@@ -4498,7 +4540,7 @@ async def PW_Forecast(
             precip_type_half_day,
             precip_text_half_day,
             idx,
-            is_night=False,
+            is_night=is_all_night,
             mode="hourly",
         )
 
@@ -4525,7 +4567,7 @@ async def PW_Forecast(
                 # Calculate the day summary from 4am to 4pm (13 hours)
                 dayIcon, dayText = calculate_half_day_text(
                     hourList_si[(idx * 24) + 4 : (idx * 24) + 17],
-                    True,
+                    not is_all_night,
                     str(tz_name),
                     int(time.time()),
                     icon_set=icon,
@@ -4561,7 +4603,7 @@ async def PW_Forecast(
             precip_type_half_night,
             precip_text_half_night,
             idx,
-            is_night=True,
+            is_night=not is_all_day,
             mode="hourly",
         )
 
@@ -4588,7 +4630,7 @@ async def PW_Forecast(
                 # Calculate the night summary from 5pm to 4am (11 hours)
                 dayIcon, dayText = calculate_half_day_text(
                     hourList_si[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
-                    False,
+                    is_all_day,
                     str(tz_name),
                     int(time.time()),
                     icon_set=icon,
@@ -4623,7 +4665,7 @@ async def PW_Forecast(
             PTypeDay,
             PTextDay,
             idx,
-            is_night=False,
+            is_night=is_all_night,
             mode="daily",
         )
 
@@ -4765,7 +4807,7 @@ async def PW_Forecast(
                 # Calculate the day summary from 4 to 4
                 dayIcon, dayText = calculate_day_text(
                     hourList_si[((idx) * 24) + 4 : ((idx + 1) * 24) + 4],
-                    True,
+                    not is_all_night,
                     str(tz_name),
                     int(time.time()),
                     "day",
