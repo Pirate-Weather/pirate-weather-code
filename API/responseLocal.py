@@ -2337,24 +2337,6 @@ async def PW_Forecast(
         ]
     ).astype(np.int32)
 
-    # day_array_grib = (np.datetime64(day_array) - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))).astype(
-    #    'timedelta64[s]').astype(np.int32)
-
-    #    baseDay_6am_Local = datetime.datetime(year=baseTimeLocal.year, month=baseTimeLocal.month, day=baseTimeLocal.day,
-    #                                          hour=6, minute=0, second=0)
-    #    baseDayUTC_6am = baseDay_6am_Local - datetime.timedelta(minutes=tz_offset)
-    #
-    #    day_array_6am = np.arange(baseDayUTC_6am, baseDayUTC_6am + datetime.timedelta(days=9), datetime.timedelta(days=1))
-    #    day_array_6am_grib = (day_array_6am - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))).astype(
-    #        'timedelta64[s]').astype(np.int32)
-    #
-    #    baseDay_6pm_Local = datetime.datetime(year=baseTimeLocal.year, month=baseTimeLocal.month, day=baseTimeLocal.day,
-    #                                          hour=18, minute=0, second=0)
-    #    baseDayUTC_6pm = baseDay_6pm_Local - datetime.timedelta(minutes=tz_offset)
-    #    day_array_6pm = np.arange(baseDayUTC_6pm, baseDayUTC_6pm + datetime.timedelta(days=9), datetime.timedelta(days=1))
-    #    day_array_6pm_grib = (day_array_6pm - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))).astype(
-    #        'timedelta64[s]').astype(np.int32)
-
     # Which hours map to which days
     hourlyDayIndex = np.full(len(hour_array_grib), MISSING_DATA)
     hourlyDay4amIndex = np.full(len(hour_array_grib), MISSING_DATA)
