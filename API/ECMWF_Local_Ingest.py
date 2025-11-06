@@ -4,6 +4,7 @@
 # %% Import modules
 import os
 
+# Developer note: If you have eccodes installed in a non-standard location,
 # os.environ["ECCODES_DEFINITION_PATH"] = (
 #     "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
 # )
