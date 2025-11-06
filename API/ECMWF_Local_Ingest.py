@@ -4,9 +4,9 @@
 # %% Import modules
 import os
 
-os.environ["ECCODES_DEFINITION_PATH"] = (
-    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
-)
+# os.environ["ECCODES_DEFINITION_PATH"] = (
+#     "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+# )
 import pickle
 import shutil
 import subprocess
@@ -100,7 +100,8 @@ latestRun = HerbieLatest(
 )
 
 base_time = latestRun.date
-base_time = pd.Timestamp("2025-11-05 00:00:00")
+# Base date for testing
+# base_time = pd.Timestamp("2025-11-05 00:00:00")
 
 print(base_time)
 
@@ -943,6 +944,11 @@ nearest_idx = np.where(w < 0.5, idx0, idx1).astype(idx0.dtype)
 # boolean mask of “in‐range” points
 valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
 
+# Define which variables are integers and need special handling
+int_vars = ["ptype"]
+# Find the index of these variables in the zarrVars list
+int_var_indices = [i for i, v in enumerate(zarrVars) if v in int_vars]
+
 with ProgressBar():
     da.map_blocks(
         interp_time_block,
@@ -952,7 +958,7 @@ with ProgressBar():
         w,
         valid,
         nearest_idx,
-        8,
+        int_var_indices,
         dtype="float32",
         chunks=(1, len(hourly_timesUnix), processChunk, processChunk),
     ).round(5).rechunk(

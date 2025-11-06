@@ -50,6 +50,7 @@ from API.constants.api_const import (
     LARGEST_DIR_INIT,
     NICE_PRIORITY,
     PRECIP_IDX,
+    PRECIP_NOISE_THRESHOLD_MMH,
     ROUNDING_RULES,
     S3_MAX_BANDWIDTH,
     SOLAR_IRRADIANCE_CONST,
@@ -59,6 +60,8 @@ from API.constants.api_const import (
     TEMPERATURE_UNITS_THRESH,
     WBGT_CONST,
 )
+
+
 from API.constants.clip_const import (
     CLIP_CAPE,
     CLIP_CLOUD,
