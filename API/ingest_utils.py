@@ -79,7 +79,7 @@ def mask_invalid_refc(xrArr: "xr.DataArray") -> "xr.DataArray":
 
 
 # Linear interpolation of time blocks in a dask array
-def interp_time_block(y_block, idx0, idx1, w, valid):
+def interp_time_block(y_block, idx0, idx1, w, valid, nearest_idx=None, nearest_var=None, block_info=None):
     """
     y_block: np.ndarray of shape (Vb, T_old, Yb, Xb)
     idx0, idx1, w, valid: 1D NumPy arrays of length T_new
@@ -94,6 +94,16 @@ def interp_time_block(y_block, idx0, idx1, w, valid):
 
     # 3) linear blend
     y_interp = omw_r * y0 + w_r * y1
+
+    # Optional nearest override
+    if nearest_var is not None and block_info is not None:
+        # block_info[0] corresponds to the first array argument (y_block)
+        # 'array-location' is a tuple of slices, one per axis (V, T, Y, X)
+        var_slice = block_info[0]["array-location"][0]  # slice for V axis
+        global_var_start = var_slice[0]              # since chunks=(1, ...), start == the variable index
+
+        if global_var_start == nearest_var:
+            y_interp[0, ...] = y_block[0, nearest_idx, ...]
 
     # 4) zero‐out (or NaN‐out) anything outside the original time range
     #    here we choose NaN so it’s clear these were out-of-range

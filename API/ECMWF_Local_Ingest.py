@@ -4,9 +4,9 @@
 # %% Import modules
 import os
 
-# os.environ["ECCODES_DEFINITION_PATH"] = (
-#     "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
-#  )
+os.environ["ECCODES_DEFINITION_PATH"] = (
+    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+ )
 import pickle
 import shutil
 import subprocess
@@ -100,7 +100,7 @@ latestRun = HerbieLatest(
 )
 
 base_time = latestRun.date
-# base_time = pd.Timestamp("2024-03-24 06:00:00Z")
+base_time = pd.Timestamp("2025-11-05 00:00:00")
 
 print(base_time)
 
@@ -688,7 +688,8 @@ for i in range(hisPeriod, 1, -12):
 
     ########################################################################
     # Save the aifs data
-    aifs_range = range(6, 13, 6)
+    # Note: Use a different fxx range for  AIFS data, this is fixed during interp
+    aifs_range = range(0, 13, 6)
     # Create FastHerbie object
     FH_histsub = FastHerbie(
         DATES,
@@ -737,8 +738,9 @@ for i in range(hisPeriod, 1, -12):
 
     # Reinterpolate the AIFS array to the same times as the IFS arrays
     aifs_his_mf = aifs_his_mf.interp(
-        step=ifs_his_mf.step, method="linear", kwargs={"fill_value": "extrapolate"}
+        step=ifs_his_mf.step, method="linear",
     )
+
 
     # Merge the xarray objects
     xarray_hist_merged = xr.merge(
@@ -899,6 +901,7 @@ daskVarArrayStackDisk = da.from_zarr(
     forecast_process_path + "_stack.zarr", component="__xarray_dataarray_variable__"
 )
 
+
 # Create a zarr backed dask array
 if saveType == "S3":
     zarr_store = zarr.storage.ZipStore(
@@ -934,22 +937,28 @@ idx0 = np.clip(idx, 0, len(x_a) - 2)
 idx1 = idx0 + 1
 w = (x_b - x_a[idx0]) / (x_a[idx1] - x_a[idx0])  # float array, shape (T_new,)
 
+# precompute nearest indices once: closer of idx0 / idx1
+nearest_idx = np.where(w < 0.5, idx0, idx1).astype(idx0.dtype)
+
 # boolean mask of “in‐range” points
 valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
 
 with ProgressBar():
     da.map_blocks(
         interp_time_block,
-        ds_chunk.data,
+        daskVarArrayStackDisk,
         idx0,
         idx1,
         w,
         valid,
+        nearest_idx,
+        8,
         dtype="float32",
         chunks=(1, len(hourly_timesUnix), processChunk, processChunk),
     ).round(5).rechunk(
         (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)
     ).to_zarr(zarr_array, overwrite=True, compute=True)
+
 
 
 if saveType == "S3":
