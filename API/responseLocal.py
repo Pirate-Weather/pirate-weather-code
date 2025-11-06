@@ -2992,6 +2992,17 @@ async def PW_Forecast(
     minuteIntensity[np.abs(minuteIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
 
     minuteItems = []
+    minuteItems_si = []
+    all_minute_keys = [
+        "time",
+        "precipIntensity",
+        "precipProbability",
+        "precipIntensityError",
+        "precipType",
+        "rainIntensity",
+        "snowIntensity",
+        "sleetIntensity",
+    ]
     for idx in range(61):
         values = [
             int(minuteTimes[idx]),
@@ -3007,6 +3018,19 @@ async def PW_Forecast(
                 float(minuteSleetIntensity[idx]) * prepIntensityUnit,
             ]
         minuteItems.append(dict(zip(minuteKeys, values)))
+
+        # SI version always includes all keys
+        values_si = [
+            int(minuteTimes[idx]),
+            float(minuteIntensity[idx]),
+            float(minuteProbability[idx]),
+            float(minuteIntensityError[idx]),
+            minuteType[idx],
+            float(minuteRainIntensity[idx]),
+            float(minuteSnowIntensity[idx]),
+            float(minuteSleetIntensity[idx]),
+        ]
+        minuteItems_si.append(dict(zip(all_minute_keys, values_si)))
 
     # Timing Check
     if TIMING:
@@ -6066,7 +6090,7 @@ async def PW_Forecast(
                 maxCAPE = max(currentCAPE, hourlyCAPE)
 
                 minuteText, minuteIcon = calculate_minutely_text(
-                    minuteItems,
+                    minuteItems_si,
                     currentText,
                     currentIcon,
                     icon,
