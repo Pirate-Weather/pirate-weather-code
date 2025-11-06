@@ -1983,7 +1983,6 @@ async def PW_Forecast(
             "lon": round(((rtma_lon + 180) % 360) - 180, 2),
         }
 
-
     if (isinstance(dataOut_hrrrh, np.ndarray)) & (not timeMachine):
         sourceList.append("hrrr_0-18")
         sourceTimes["hrrr_0-18"] = rounder(
@@ -2038,7 +2037,7 @@ async def PW_Forecast(
                 gfsRunTime.astype(int), datetime.UTC
             ).replace(tzinfo=None)
         ).strftime("%Y-%m-%d %HZ")
-        
+
         sourceList.append("gfs")
         sourceIDX["gfs"] = dict()
         sourceIDX["gfs"]["x"] = int(x_p)
@@ -5857,7 +5856,9 @@ async def PW_Forecast(
     ) & (minuteItems[0]["precipType"] is not None):
         # If more than 25% chance of precip, then the icon for whatever is happening, so long as the icon exists
         cIcon = minuteItems[0]["precipType"]
-        cText = minuteItems[0]["precipType"][0].upper() + minuteItems[0]["precipType"][1:]
+        cText = (
+            minuteItems[0]["precipType"][0].upper() + minuteItems[0]["precipType"][1:]
+        )
 
         # Because soemtimes there's precipitation not no type, don't use an icon in those cases
 
@@ -5943,7 +5944,9 @@ async def PW_Forecast(
             else np.nan
         )
         returnOBJ["currently"]["precipIntensity"] = minuteItems[0]["precipIntensity"]
-        returnOBJ["currently"]["precipProbability"] = minuteItems[0]["precipProbability"]
+        returnOBJ["currently"]["precipProbability"] = minuteItems[0][
+            "precipProbability"
+        ]
         returnOBJ["currently"]["precipIntensityError"] = minuteItems[0][
             "precipIntensityError"
         ]
