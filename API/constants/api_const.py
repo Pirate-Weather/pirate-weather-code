@@ -79,6 +79,10 @@ PRECIP_IDX = {
     "rain": 4,
 }
 
+PRECIP_NOISE_THRESHOLD_MMH = (
+    0.01  # Threshold in mm/h to filter out noise in precipitation intensity
+)
+
 # API versioning and ingest version constants
 # Version scheme is: Major.Minor.Patch
 API_VERSION = "V2.8"

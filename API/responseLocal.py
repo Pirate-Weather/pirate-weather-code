@@ -50,6 +50,7 @@ from API.constants.api_const import (
     LARGEST_DIR_INIT,
     NICE_PRIORITY,
     PRECIP_IDX,
+    PRECIP_NOISE_THRESHOLD_MMH,
     ROUNDING_RULES,
     S3_MAX_BANDWIDTH,
     SOLAR_IRRADIANCE_CONST,
@@ -1613,12 +1614,6 @@ async def PW_Forecast(
         else:
             readRTMA_RU = True
 
-        sourceIDX["rtma_ru"] = dict()
-        sourceIDX["rtma_ru"]["x"] = int(x_rtma)
-        sourceIDX["rtma_ru"]["y"] = int(y_rtma)
-        sourceIDX["rtma_ru"]["lat"] = round(rtma_lat, 2)
-        sourceIDX["rtma_ru"]["lon"] = round(((rtma_lon + 180) % 360) - 180, 2)
-
     # Timing Check
     if TIMING:
         print("### NBM Start ###")
@@ -1954,14 +1949,6 @@ async def PW_Forecast(
     if useETOPO:
         sourceList.append("ETOPO1")
 
-    if isinstance(dataOut_gfs, np.ndarray):
-        sourceList.append("gfs")
-        sourceIDX["gfs"] = dict()
-        sourceIDX["gfs"]["x"] = int(x_p)
-        sourceIDX["gfs"]["y"] = int(y_p)
-        sourceIDX["gfs"]["lat"] = round(gfs_lat, 2)
-        sourceIDX["gfs"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
-
     # If ERA5 data was read and merged
     if isinstance(ERA5_MERGED, np.ndarray):
         sourceList.append("era5")
@@ -1988,6 +1975,13 @@ async def PW_Forecast(
         ).replace(tzinfo=None)
         rounded_rtma_time = rounder(rtma_timestamp, to=15)
         sourceTimes["rtma_ru"] = rounded_rtma_time.strftime("%Y-%m-%d %H:%MZ")
+
+        sourceIDX["rtma_ru"] = {
+            "x": int(x_rtma),
+            "y": int(y_rtma),
+            "lat": round(rtma_lat, 2),
+            "lon": round(((rtma_lon + 180) % 360) - 180, 2),
+        }
 
     if (isinstance(dataOut_hrrrh, np.ndarray)) & (not timeMachine):
         sourceList.append("hrrr_0-18")
@@ -2043,6 +2037,13 @@ async def PW_Forecast(
                 gfsRunTime.astype(int), datetime.UTC
             ).replace(tzinfo=None)
         ).strftime("%Y-%m-%d %HZ")
+
+        sourceList.append("gfs")
+        sourceIDX["gfs"] = dict()
+        sourceIDX["gfs"]["x"] = int(x_p)
+        sourceIDX["gfs"]["y"] = int(y_p)
+        sourceIDX["gfs"]["lat"] = round(gfs_lat, 2)
+        sourceIDX["gfs"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
 
     if isinstance(dataOut_gefs, np.ndarray):
         sourceList.append("gefs")
@@ -2817,6 +2818,7 @@ async def PW_Forecast(
         InterTminute[:, 4] = np.where(
             np.isin(ptype_ecmwf, [1, 2, 7, 11]), 1, 0
         )  # Rain, thunderstorm, rain/snow mix, drizzle
+
     elif "gefs" in sourceList:
         for i in [GEFS["snow"], GEFS["ice"], GEFS["freezing_rain"], GEFS["rain"]]:
             InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
@@ -2908,9 +2910,9 @@ async def PW_Forecast(
 
     # "precipIntensityError"
     if "ecmwf_ifs" in sourceList:
-        InterPminute[:, DATA_MINUTELY["error"]] = ecmwfMinuteInterpolation[
-            :, ECMWF["accum_stddev"]
-        ]
+        InterPminute[:, DATA_MINUTELY["error"]] = (
+            ecmwfMinuteInterpolation[:, ECMWF["accum_stddev"]] * 1000
+        )  # Accum stddev is in meters
     elif "gefs" in sourceList:
         InterPminute[:, DATA_MINUTELY["error"]] = gefsMinuteInterpolation[
             :, GEFS["error"]
@@ -2927,10 +2929,9 @@ async def PW_Forecast(
         "precipProbability",
         "precipIntensityError",
         "precipType",
-        "rainIntensity",
-        "snowIntensity",
-        "sleetIntensity",
     ]
+    if version > 2:
+        minuteKeys += ["rainIntensity", "snowIntensity", "sleetIntensity"]
 
     # Calculate type-specific intensities for minutely (in SI units - mm/h liquid equivalent)
     # Initialize all to zero
@@ -2977,32 +2978,58 @@ async def PW_Forecast(
         InterPminute[:, DATA_MINUTELY["ice_intensity"]], 0
     )
 
-    # Set values below 0.1 mm/h to zero to reduce noise
-    minuteRainIntensity[np.abs(minuteRainIntensity) < 0.1] = 0.0
-    minuteSnowIntensity[np.abs(minuteSnowIntensity) < 0.1] = 0.0
-    minuteSleetIntensity[np.abs(minuteSleetIntensity) < 0.1] = 0.0
-    minuteProbability[np.abs(minuteProbability) < 0.1] = 0.0
-    minuteIntensityError[np.abs(minuteIntensityError) < 0.1] = 0.0
-    minuteIntensity[np.abs(minuteIntensity) < 0.1] = 0.0
+    # Set values below 0.01 mm/h to zero to reduce noise. This value can be tuned if needed.
+    minuteRainIntensity[np.abs(minuteRainIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
+    minuteSnowIntensity[np.abs(minuteSnowIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
+    minuteSleetIntensity[np.abs(minuteSleetIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = (
+        0.0
+    )
+    minuteProbability[np.abs(minuteProbability) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
+    minuteIntensityError[np.abs(minuteIntensityError) < PRECIP_NOISE_THRESHOLD_MMH] = (
+        0.0
+    )
+    minuteIntensity[np.abs(minuteIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
 
-    minuteDict = [
-        dict(
-            zip(
-                minuteKeys,
-                [
-                    int(minuteTimes[idx]),
-                    float(minuteIntensity[idx]) * prepIntensityUnit,
-                    float(minuteProbability[idx]),
-                    float(minuteIntensityError[idx]) * prepIntensityUnit,
-                    minuteType[idx],
-                    float(minuteRainIntensity[idx]) * prepIntensityUnit,
-                    float(minuteSnowIntensity[idx]) * prepIntensityUnit,
-                    float(minuteSleetIntensity[idx]) * prepIntensityUnit,
-                ],
-            )
-        )
-        for idx in range(61)
+    minuteItems = []
+    minuteItems_si = []
+    all_minute_keys = [
+        "time",
+        "precipIntensity",
+        "precipProbability",
+        "precipIntensityError",
+        "precipType",
+        "rainIntensity",
+        "snowIntensity",
+        "sleetIntensity",
     ]
+    for idx in range(61):
+        values = [
+            int(minuteTimes[idx]),
+            float(minuteIntensity[idx]) * prepIntensityUnit,
+            float(minuteProbability[idx]),
+            float(minuteIntensityError[idx]) * prepIntensityUnit,
+            minuteType[idx],
+        ]
+        if version > 2:
+            values += [
+                float(minuteRainIntensity[idx]) * prepIntensityUnit,
+                float(minuteSnowIntensity[idx]) * prepIntensityUnit,
+                float(minuteSleetIntensity[idx]) * prepIntensityUnit,
+            ]
+        minuteItems.append(dict(zip(minuteKeys, values)))
+
+        # SI version always includes all keys
+        values_si = [
+            int(minuteTimes[idx]),
+            float(minuteIntensity[idx]),
+            float(minuteProbability[idx]),
+            float(minuteIntensityError[idx]),
+            minuteType[idx],
+            float(minuteRainIntensity[idx]),
+            float(minuteSnowIntensity[idx]),
+            float(minuteSleetIntensity[idx]),
+        ]
+        minuteItems_si.append(dict(zip(all_minute_keys, values_si)))
 
     # Timing Check
     if TIMING:
@@ -3011,9 +3038,9 @@ async def PW_Forecast(
 
     ## Approach
     # Use NBM where available
-    # Use GFS past the end of NBM
-    # Use HRRRH/ HRRRH2 if requested (?)
     # Use HRRR for some other variables
+    # Use ECMWF where HRRR not available
+    # If ECMWF is not available, use GFS
 
     # Precipitation Type
     # NBM, HRRR, ECMWF, GEFS/GFS, ERA5
@@ -3224,11 +3251,11 @@ async def PW_Forecast(
     # ECMWF, then GEFS
     if "ecmwf_ifs" in sourceList:
         InterPhour[:, DATA_HOURLY["error"]] = np.maximum(
-            ECMWF_Merged[:, ECMWF["accum_stddev"]] * prepIntensityUnit, 0
+            ECMWF_Merged[:, ECMWF["accum_stddev"]] * 1000, 0
         )
     elif "gefs" in sourceList:
         InterPhour[:, DATA_HOURLY["error"]] = np.maximum(
-            GEFS_Merged[:, GEFS["error"]] * prepIntensityUnit, 0
+            GEFS_Merged[:, GEFS["error"]], 0
         )
 
     ### Temperature
@@ -5824,12 +5851,14 @@ async def PW_Forecast(
         )  # "FeelsLike"
 
     if (
-        (minuteDict[0]["precipIntensity"])
+        (minuteItems[0]["precipIntensity"])
         > (HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepIntensityUnit)
-    ) & (minuteDict[0]["precipType"] is not None):
+    ) & (minuteItems[0]["precipType"] is not None):
         # If more than 25% chance of precip, then the icon for whatever is happening, so long as the icon exists
-        cIcon = minuteDict[0]["precipType"]
-        cText = minuteDict[0]["precipType"][0].upper() + minuteDict[0]["precipType"][1:]
+        cIcon = minuteItems[0]["precipType"]
+        cText = (
+            minuteItems[0]["precipType"][0].upper() + minuteItems[0]["precipType"][1:]
+        )
 
         # Because soemtimes there's precipitation not no type, don't use an icon in those cases
 
@@ -5914,12 +5943,14 @@ async def PW_Forecast(
             if not np.isnan(InterPcurrent[DATA_CURRENT["storm_dir"]])
             else np.nan
         )
-        returnOBJ["currently"]["precipIntensity"] = minuteDict[0]["precipIntensity"]
-        returnOBJ["currently"]["precipProbability"] = minuteDict[0]["precipProbability"]
-        returnOBJ["currently"]["precipIntensityError"] = minuteDict[0][
+        returnOBJ["currently"]["precipIntensity"] = minuteItems[0]["precipIntensity"]
+        returnOBJ["currently"]["precipProbability"] = minuteItems[0][
+            "precipProbability"
+        ]
+        returnOBJ["currently"]["precipIntensityError"] = minuteItems[0][
             "precipIntensityError"
         ]
-        returnOBJ["currently"]["precipType"] = minuteDict[0]["precipType"]
+        returnOBJ["currently"]["precipType"] = minuteItems[0]["precipType"]
         returnOBJ["currently"]["rainIntensity"] = (
             InterPcurrent[DATA_CURRENT["rain_intensity"]] * prepIntensityUnit
         )
@@ -6062,7 +6093,7 @@ async def PW_Forecast(
                 maxCAPE = max(currentCAPE, hourlyCAPE)
 
                 minuteText, minuteIcon = calculate_minutely_text(
-                    minuteDict,
+                    minuteItems_si,
                     currentText,
                     currentIcon,
                     icon,
@@ -6089,7 +6120,7 @@ async def PW_Forecast(
                 int(Counter(maxPchance).most_common(1)[0][0])
             ]
 
-        returnOBJ["minutely"]["data"] = minuteDict
+        returnOBJ["minutely"]["data"] = minuteItems
 
     if exHourly != 1:
         returnOBJ["hourly"] = dict()
