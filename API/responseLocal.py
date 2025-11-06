@@ -2978,7 +2978,7 @@ async def PW_Forecast(
         InterPminute[:, DATA_MINUTELY["ice_intensity"]], 0
     )
 
-    # Set values below 0.01 mm/h to zero to reduce noise
+    # Set values below 0.01 mm/h to zero to reduce noise (Perhaps this is too low?)
     minuteRainIntensity[np.abs(minuteRainIntensity) < 0.01] = 0.0
     minuteSnowIntensity[np.abs(minuteSnowIntensity) < 0.01] = 0.0
     minuteSleetIntensity[np.abs(minuteSleetIntensity) < 0.01] = 0.0
