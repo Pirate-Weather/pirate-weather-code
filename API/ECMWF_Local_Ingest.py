@@ -6,7 +6,7 @@ import os
 
 os.environ["ECCODES_DEFINITION_PATH"] = (
     "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
- )
+)
 import pickle
 import shutil
 import subprocess
@@ -738,9 +738,9 @@ for i in range(hisPeriod, 1, -12):
 
     # Reinterpolate the AIFS array to the same times as the IFS arrays
     aifs_his_mf = aifs_his_mf.interp(
-        step=ifs_his_mf.step, method="linear",
+        step=ifs_his_mf.step,
+        method="linear",
     )
-
 
     # Merge the xarray objects
     xarray_hist_merged = xr.merge(
@@ -958,7 +958,6 @@ with ProgressBar():
     ).round(5).rechunk(
         (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)
     ).to_zarr(zarr_array, overwrite=True, compute=True)
-
 
 
 if saveType == "S3":
