@@ -3012,9 +3012,9 @@ async def PW_Forecast(
 
     ## Approach
     # Use NBM where available
-    # Use GFS past the end of NBM
-    # Use HRRRH/ HRRRH2 if requested (?)
     # Use HRRR for some other variables
+    # Use ECMWF where HRRR not available
+    # If ECMWF is not available, use GFS
 
     # Precipitation Type
     # NBM, HRRR, ECMWF, GEFS/GFS, ERA5
