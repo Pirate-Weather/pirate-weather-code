@@ -6097,7 +6097,7 @@ async def PW_Forecast(
             try:
                 hourIcon, hourText = calculate_day_text(
                     hourList_si[int(baseTimeOffset) : int(baseTimeOffset) + 24],
-                    True,
+                    not is_all_night,
                     str(tz_name),
                     int(time.time()),
                     "hour",
