@@ -2817,6 +2817,7 @@ async def PW_Forecast(
         InterTminute[:, 4] = np.where(
             np.isin(ptype_ecmwf, [1, 2, 7, 11]), 1, 0
         )  # Rain, thunderstorm, rain/snow mix, drizzle
+
     elif "gefs" in sourceList:
         for i in [GEFS["snow"], GEFS["ice"], GEFS["freezing_rain"], GEFS["rain"]]:
             InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
@@ -2909,8 +2910,8 @@ async def PW_Forecast(
     # "precipIntensityError"
     if "ecmwf_ifs" in sourceList:
         InterPminute[:, DATA_MINUTELY["error"]] = ecmwfMinuteInterpolation[
-            :, ECMWF["accum_stddev"]
-        ]
+            :, ECMWF["accum_stddev"] 
+        ]  * 1000 # Accum stddev is in meters
     elif "gefs" in sourceList:
         InterPminute[:, DATA_MINUTELY["error"]] = gefsMinuteInterpolation[
             :, GEFS["error"]
@@ -2977,13 +2978,13 @@ async def PW_Forecast(
         InterPminute[:, DATA_MINUTELY["ice_intensity"]], 0
     )
 
-    # Set values below 0.1 mm/h to zero to reduce noise
-    minuteRainIntensity[np.abs(minuteRainIntensity) < 0.1] = 0.0
-    minuteSnowIntensity[np.abs(minuteSnowIntensity) < 0.1] = 0.0
-    minuteSleetIntensity[np.abs(minuteSleetIntensity) < 0.1] = 0.0
-    minuteProbability[np.abs(minuteProbability) < 0.1] = 0.0
-    minuteIntensityError[np.abs(minuteIntensityError) < 0.1] = 0.0
-    minuteIntensity[np.abs(minuteIntensity) < 0.1] = 0.0
+    # Set values below 0.01 mm/h to zero to reduce noise
+    minuteRainIntensity[np.abs(minuteRainIntensity) < 0.01] = 0.0
+    minuteSnowIntensity[np.abs(minuteSnowIntensity) < 0.01] = 0.0
+    minuteSleetIntensity[np.abs(minuteSleetIntensity) < 0.01] = 0.0
+    minuteProbability[np.abs(minuteProbability) < 0.01] = 0.0
+    minuteIntensityError[np.abs(minuteIntensityError) < 0.01] = 0.0
+    minuteIntensity[np.abs(minuteIntensity) < 0.01] = 0.0
 
     minuteDict = [
         dict(
@@ -3224,11 +3225,11 @@ async def PW_Forecast(
     # ECMWF, then GEFS
     if "ecmwf_ifs" in sourceList:
         InterPhour[:, DATA_HOURLY["error"]] = np.maximum(
-            ECMWF_Merged[:, ECMWF["accum_stddev"]] * prepIntensityUnit, 0
+            ECMWF_Merged[:, ECMWF["accum_stddev"]] * 1000, 0
         )
     elif "gefs" in sourceList:
         InterPhour[:, DATA_HOURLY["error"]] = np.maximum(
-            GEFS_Merged[:, GEFS["error"]] * prepIntensityUnit, 0
+            GEFS_Merged[:, GEFS["error"]], 0
         )
 
     ### Temperature
