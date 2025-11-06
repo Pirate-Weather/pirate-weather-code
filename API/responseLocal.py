@@ -2909,9 +2909,9 @@ async def PW_Forecast(
 
     # "precipIntensityError"
     if "ecmwf_ifs" in sourceList:
-        InterPminute[:, DATA_MINUTELY["error"]] = ecmwfMinuteInterpolation[
-            :, ECMWF["accum_stddev"] 
-        ]  * 1000 # Accum stddev is in meters
+        InterPminute[:, DATA_MINUTELY["error"]] = (
+            ecmwfMinuteInterpolation[:, ECMWF["accum_stddev"]] * 1000
+        )  # Accum stddev is in meters
     elif "gefs" in sourceList:
         InterPminute[:, DATA_MINUTELY["error"]] = gefsMinuteInterpolation[
             :, GEFS["error"]
