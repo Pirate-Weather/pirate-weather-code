@@ -2979,12 +2979,12 @@ async def PW_Forecast(
     )
 
     # Set values below 0.01 mm/h to zero to reduce noise. This value can be tuned if needed.
-    minuteRainIntensity[np.abs(minuteRainIntensity) < 0.01] = 0.0
-    minuteSnowIntensity[np.abs(minuteSnowIntensity) < 0.01] = 0.0
-    minuteSleetIntensity[np.abs(minuteSleetIntensity) < 0.01] = 0.0
-    minuteProbability[np.abs(minuteProbability) < 0.01] = 0.0
-    minuteIntensityError[np.abs(minuteIntensityError) < 0.01] = 0.0
-    minuteIntensity[np.abs(minuteIntensity) < 0.01] = 0.0
+    minuteRainIntensity[np.abs(minuteRainIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
+    minuteSnowIntensity[np.abs(minuteSnowIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
+    minuteSleetIntensity[np.abs(minuteSleetIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
+    minuteProbability[np.abs(minuteProbability) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
+    minuteIntensityError[np.abs(minuteIntensityError) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
+    minuteIntensity[np.abs(minuteIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
 
     minuteDict = [
         dict(
