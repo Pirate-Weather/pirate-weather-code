@@ -60,8 +60,6 @@ from API.constants.api_const import (
     TEMPERATURE_UNITS_THRESH,
     WBGT_CONST,
 )
-
-
 from API.constants.clip_const import (
     CLIP_CAPE,
     CLIP_CLOUD,
@@ -2984,9 +2982,13 @@ async def PW_Forecast(
     # Set values below 0.01 mm/h to zero to reduce noise. This value can be tuned if needed.
     minuteRainIntensity[np.abs(minuteRainIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
     minuteSnowIntensity[np.abs(minuteSnowIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
-    minuteSleetIntensity[np.abs(minuteSleetIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
+    minuteSleetIntensity[np.abs(minuteSleetIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = (
+        0.0
+    )
     minuteProbability[np.abs(minuteProbability) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
-    minuteIntensityError[np.abs(minuteIntensityError) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
+    minuteIntensityError[np.abs(minuteIntensityError) < PRECIP_NOISE_THRESHOLD_MMH] = (
+        0.0
+    )
     minuteIntensity[np.abs(minuteIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
 
     minuteDict = [
