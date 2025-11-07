@@ -29,7 +29,7 @@ MORNING_START = 4
 AFTERNOON_START = 12
 EVENING_START = 17
 NIGHT_START = 22
-MAX_HOURS = 25
+MAX_HOURS = 15
 PRECIP_THRESH = 0.25
 
 
@@ -116,8 +116,6 @@ def _get_time_phrase(
     all_periods,
     check_period,
     mode,
-    later_conditions,
-    today_period_for_later_check,
 ):
     """
     Determines the appropriate time phrase (e.g., "during", "starting", "until")
@@ -129,362 +127,23 @@ def _get_time_phrase(
     - all_periods (list): List of all period names (e.g., ["today-morning"]).
     - check_period (int): The starting index for checks (usually 0).
     - mode (str): "daily" or "hour".
-    - later_conditions (list): List of conditions marked as "later".
-    - today_period_for_later_check (str): The name of the current period for 'later' comparison.
 
     Returns:
     - list: The time phrase structure.
     """
     num_periods = len(period_indices)
     total_periods_available = len(all_periods)
-    summary_text_temp = None
 
     if num_periods == 0:
         return None
 
     if num_periods == total_periods_available:
-        # Condition spans all available periods: "for-day" or "starting [first_period]" if 'later' applies
-        # The 'later' text only applies if in hourly mode and the first period is marked as 'later'.
-        if (
-            mode == "hour"
-            and "later" in all_periods[0]
-            and condition_type in later_conditions
-        ):
-            return ["starting", all_periods[period_indices[0]]]
-        elif condition_type == "cloud":
-            # Cloud "for-day" only if it spans a *standard* full day's worth of periods (4 or 5 periods for 24h).
-            # This prevents "for-day" for cloud if the forecast window is short (e.g., 2 periods).
-            if (
-                total_periods_available >= 4
-            ):  # If forecast covers at least 4 standard periods
-                return ["for-day"]
-            else:  # If shorter than 4 periods, be more specific like "during [period]"
-                return ["during", all_periods[period_indices[0]]]
-        else:  # For non-cloud conditions, "for-day" is generally fine if it covers all available periods
-            return ["for-day"]
+        # Condition spans all available periods: "for-day"
+        return ["for-day"]
 
     if num_periods == 1:
         # Single period: "during [period_name]"
         return ["during", all_periods[period_indices[0]]]
-
-    # Logic for multiple disjoint or continuous periods (more than 1 period)
-    if num_periods > 1:
-        start_idx = period_indices[0]
-        end_idx = period_indices[-1]
-
-        # Check if the periods are continuous (e.g., [0, 1, 2])
-        is_continuous = all(
-            period_indices[i] == period_indices[i - 1] + 1
-            for i in range(1, num_periods)
-        )
-
-        # Handle specific patterns for 2 periods
-        if num_periods == 2:
-            # Starts in the 3rd period and continues to the 4th (total 4 periods)
-            if (
-                start_idx == check_period + 2
-                and end_idx == 3
-                and total_periods_available == 4
-            ):
-                summary_text_temp = ["starting", all_periods[start_idx]]
-            # Starts in the 4th period and continues to the 5th (total 5 periods)
-            elif (
-                start_idx == check_period + 3
-                and end_idx == 4
-                and total_periods_available == 5
-            ):
-                summary_text_temp = ["starting", all_periods[start_idx]]
-            # Starts at 'check_period' and is continuous for 2 periods
-            elif start_idx == check_period and is_continuous:
-                summary_text_temp = [  # Store temp to check later condition
-                    "until",
-                    all_periods[min(end_idx + 1, total_periods_available - 1)],
-                ]
-            # Starts after 'check_period' and is continuous for 2 periods
-            elif start_idx > check_period and is_continuous:
-                summary_text_temp = [  # Store temp to check later condition
-                    "starting-continuing-until",
-                    all_periods[start_idx],
-                    all_periods[min(end_idx + 1, total_periods_available - 1)],
-                ]
-            # Starts at 'check_period', not continuous, and ends in the 4th period (index 3)
-            # This covers patterns like [0, 3] in a 4-period day
-            elif start_idx == check_period and not is_continuous and end_idx == 3:
-                summary_text_temp = [  # Store temp to check later condition
-                    "until-starting-again",
-                    all_periods[start_idx + 1],  # The period after the first occurrence
-                    all_periods[end_idx],  # The last period of occurrence
-                ]
-            else:
-                # Two disjoint periods, e.g., ["during", ["and", period1, period2]]
-                summary_text_temp = [  # Store temp to check later condition
-                    "during",
-                    ["and", all_periods[start_idx], all_periods[end_idx]],
-                ]
-
-            # Specific "later" check for 2-period conditions
-            if (
-                mode == "hour"  # 'later' only applies in hourly mode
-                and "later"
-                in all_periods[0]  # Check if the first period is indeed "later-"
-                and condition_type in later_conditions
-            ):
-                # If the current summary_text_temp is an "until" pattern and not explicitly "starting"
-                # (which would be overridden by "later")
-                if "until" in summary_text_temp and "starting" not in summary_text_temp:
-                    return [
-                        "starting",
-                        all_periods[start_idx],
-                    ]  # Simplify to "starting"
-                # If it's an "until-starting-again" pattern
-                elif "until-starting-again" in summary_text_temp:
-                    # Original logic combined into "and" for the two parts if 'later' applied.
-                    return [
-                        "and",
-                        ["during", all_periods[start_idx]],
-                        ["during", all_periods[end_idx]],
-                    ]
-
-            return summary_text_temp  # Return the determined summary phrase if 'later' didn't apply
-
-        # Handle specific patterns for 3 periods
-        elif num_periods == 3:
-            mid_idx = period_indices[1]
-            # Starts in the 2nd period and continuous for 3 periods (total 4 periods)
-            if (
-                start_idx == check_period + 1
-                and end_idx == 3
-                and total_periods_available == 4
-            ):
-                summary_text_temp = ["starting", all_periods[start_idx]]
-            # Starts in the 3rd period and continuous for 3 periods (total 5 periods)
-            elif (
-                start_idx == check_period + 2
-                and end_idx == 4
-                and total_periods_available == 5
-            ):
-                summary_text_temp = ["starting", all_periods[start_idx]]
-            # Continuous block of 3 periods starting at 'check_period'
-            elif start_idx == check_period and is_continuous:
-                summary_text_temp = [
-                    "until",
-                    all_periods[min(end_idx + 1, total_periods_available - 1)],
-                ]
-            # Three continuous periods starting after 'check_period' (for 5 total periods)
-            elif (
-                start_idx > check_period
-                and is_continuous
-                and total_periods_available == 5
-            ):
-                summary_text_temp = [
-                    "starting-continuing-until",
-                    all_periods[start_idx],
-                    all_periods[min(end_idx + 1, total_periods_available - 1)],
-                ]
-            # Discontinuous 3 periods
-            elif not is_continuous:
-                # All three periods are disjoint (e.g., [0, 2, 4])
-                if (mid_idx - start_idx) != 1 and (end_idx - mid_idx) != 1:
-                    summary_text_temp = [
-                        "during",
-                        [
-                            "and",
-                            all_periods[start_idx],
-                            ["and", all_periods[mid_idx], all_periods[end_idx]],
-                        ],
-                    ]
-                # First two are continuous, third is disjoint (e.g., [0, 1, 3])
-                elif (
-                    start_idx == check_period
-                    and (mid_idx - start_idx) == 1
-                    and end_idx >= 3
-                ):
-                    summary_text_temp = [
-                        "until-starting-again",
-                        all_periods[mid_idx + 1],
-                        all_periods[end_idx],
-                    ]
-                # First is disjoint, last two are continuous (e.g., [0, 2, 3])
-                elif (
-                    start_idx == check_period
-                    and (mid_idx - start_idx) != 1
-                    and mid_idx >= 2
-                ):
-                    summary_text_temp = [
-                        "until-starting-again",
-                        all_periods[start_idx + 1],
-                        all_periods[mid_idx],
-                    ]
-                # First is disjoint, next two are continuous (for 5 total periods)
-                elif (
-                    start_idx > check_period
-                    and (mid_idx - start_idx) != 1
-                    and (end_idx - mid_idx) == 1
-                    and total_periods_available == 5
-                ):
-                    summary_text_temp = [
-                        "and",
-                        ["during", all_periods[start_idx]],
-                        ["starting", all_periods[mid_idx]],
-                    ]
-                # First two are continuous, last is disjoint (for 5 total periods)
-                elif (
-                    start_idx > check_period
-                    and (mid_idx - start_idx) == 1
-                    and (end_idx - mid_idx) != 1
-                    and total_periods_available == 5
-                ):
-                    summary_text_temp = [
-                        "and",
-                        [
-                            "starting-continuing-until",
-                            all_periods[start_idx],
-                            all_periods[min(mid_idx + 1, total_periods_available - 1)],
-                        ],
-                        ["during", all_periods[end_idx]],
-                    ]
-
-            # Apply "later" re-structuring specific to 3-period patterns
-            if (
-                mode == "hour"  # 'later' only applies in hourly mode
-                and "later"
-                in all_periods[0]  # Check if the first period is indeed "later-"
-                and condition_type in later_conditions
-            ):
-                # Restructuring for "until-starting-again" (0,1 and 3) to "and" format
-                if (
-                    len(period_indices) == 3
-                    and start_idx == check_period
-                    and (mid_idx - start_idx) == 1
-                    and end_idx >= 3
-                ):
-                    return [
-                        "and",
-                        [
-                            "starting-continuing-until",
-                            all_periods[start_idx],
-                            all_periods[mid_idx + 1],
-                        ],
-                        ["during", all_periods[end_idx]],
-                    ]
-                # Restructuring for "until-starting-again" (0 and 2,3) to "and" format
-                elif (
-                    len(period_indices) == 3
-                    and start_idx == check_period
-                    and (mid_idx - start_idx) != 1
-                    and mid_idx >= 2
-                ):
-                    return [
-                        "and",
-                        ["during", all_periods[start_idx]],
-                        [
-                            "starting-continuing-until",
-                            all_periods[mid_idx],
-                            all_periods[min(end_idx + 1, total_periods_available - 1)],
-                        ],
-                    ]
-                # For a continuous block where "later" applies, just "starting"
-                elif is_continuous:
-                    return [
-                        "starting-continuing-until",
-                        all_periods[start_idx],
-                        all_periods[min(end_idx + 1, total_periods_available - 1)],
-                    ]
-            return summary_text_temp  # Return the determined summary phrase if 'later' didn't apply
-
-        # Handle specific patterns for 4 periods (assuming total_periods_available is 5)
-        elif num_periods == 4 and total_periods_available == 5:
-            # Starts in the 2nd period and continuous for 4 periods
-            if start_idx == check_period + 1 and end_idx == 4:
-                summary_text_temp = ["starting", all_periods[start_idx]]
-            # Continuous block of 4 periods starting at 'check_period'
-            elif start_idx == check_period and is_continuous:
-                summary_text_temp = ["until", all_periods[end_idx]]
-            # Continuous block of 4 periods starting after 'check_period'
-            elif start_idx > check_period and is_continuous:
-                summary_text_temp = [
-                    "starting-continuing-until",
-                    all_periods[start_idx],
-                    all_periods[end_idx],
-                ]
-            # Discontinuous 4 periods starting at 'check_period'
-            elif start_idx == check_period and not is_continuous:
-                # E.g., [0] and [2,3,4]
-                if (period_indices[2] - period_indices[1]) == 1 and (
-                    end_idx - period_indices[2]
-                ) == 1:
-                    summary_text_temp = [
-                        "until-starting-again",
-                        all_periods[start_idx + 1],
-                        all_periods[period_indices[1]],
-                    ]
-                # E.g., [0,1] and [3,4]
-                elif (
-                    (period_indices[1] - start_idx) == 1
-                    and (period_indices[2] - period_indices[1]) != 1
-                    and (end_idx - period_indices[2]) == 1
-                ):
-                    summary_text_temp = [
-                        "until-starting-again",
-                        all_periods[period_indices[1] + 1],
-                        all_periods[period_indices[2]],
-                    ]
-                # E.g., [0,1,2] and [4]
-                elif (end_idx - period_indices[2]) != 1:
-                    summary_text_temp = [
-                        "until-starting-again",
-                        all_periods[period_indices[2] + 1],
-                        all_periods[end_idx],
-                    ]
-
-            # Apply "later" re-structuring specific to 4-period patterns
-            if (
-                mode == "hour"  # 'later' only applies in hourly mode
-                and "later"
-                in all_periods[0]  # Check if the first period is indeed "later-"
-                and condition_type in later_conditions
-            ):
-                if is_continuous:
-                    return ["starting", all_periods[start_idx]]
-                # Restructuring for [0] and [2,3,4] to "and" format
-                elif (
-                    len(period_indices) == 4
-                    and (period_indices[2] - period_indices[1]) == 1
-                    and (end_idx - period_indices[2]) == 1
-                    and end_idx == 4
-                ):
-                    return [
-                        "and",
-                        ["during", all_periods[start_idx]],
-                        ["starting", all_periods[period_indices[1]]],
-                    ]
-                # Restructuring for [0,1,2] and [4] to "and" format
-                elif (
-                    len(period_indices) == 4
-                    and (end_idx - period_indices[2]) != 1
-                    and end_idx == 4
-                ):
-                    return [
-                        "and",
-                        [
-                            "starting-continuing-until",
-                            all_periods[start_idx],
-                            all_periods[period_indices[2]],
-                        ],
-                        ["starting", all_periods[end_idx]],
-                    ]
-            return summary_text_temp  # Return the determined summary phrase if 'later' didn't apply
-
-    # Default fallback: combine all individual periods with 'during' and 'and'
-    # This only triggers if `num_periods > 1` and `is_continuous` is False,
-    # and none of the specific 2, 3, or 4 period patterns matched.
-    if num_periods > 1 and not is_continuous:
-        combined_periods_text = []
-        for idx in period_indices:
-            combined_periods_text.append(all_periods[idx])
-        return ["during", combined_periods_text]
-
-    return None
 
 
 def calculate_period_summary_text(
@@ -500,8 +159,6 @@ def calculate_period_summary_text(
     icon_set,
     check_period,
     mode,
-    later_conditions,
-    today_period_for_later_check,
     # New parameters for cloud-wind/dry/humid combination
     overall_cloud_text=None,  # Added for wind to combine with cloud
     overall_cloud_idx_for_wind=None,  # Added for wind to combine with cloud
@@ -509,7 +166,6 @@ def calculate_period_summary_text(
     """
     Calculates the textual summary for a specific condition (precip, cloud, wind, vis, dry, humid)
     across a set of periods.
-    Wind speed is expected in SI units (m/s).
 
     Parameters:
     - period_indices (list): List of indices where the condition is present.
@@ -521,12 +177,9 @@ def calculate_period_summary_text(
     - all_humid_periods (list): Indices of periods with high humidity.
     - all_vis_periods (list): Indices of periods with low visibility (fog).
     - max_wind_speed (float): Maximum wind speed across all relevant periods.
-    - wind_unit (float): The unit conversion for wind speed.
     - icon_set (str): Which icon set to use - Dark Sky or Pirate Weather.
     - check_period (int): The current period index being checked (usually 0 for the start).
     - mode (str): Whether the summary is for the day or the next 24h ("daily" or "hour").
-    - later_conditions (list): List of conditions that start later in the first period.
-    - today_period_for_later_check (str): The name of the current period for 'later' comparison.
     - overall_cloud_text (str, optional): The determined overall cloud text (e.g., "clear", "light-clouds").
     - overall_cloud_idx_for_wind (list, optional): The indices of periods where overall_cloud_text is present.
 
@@ -624,8 +277,6 @@ def calculate_period_summary_text(
         all_periods,
         check_period,
         mode,
-        later_conditions,
-        today_period_for_later_check,
     )
 
     if time_phrase_structure is None:
@@ -634,85 +285,11 @@ def calculate_period_summary_text(
     phrase_type = time_phrase_structure[0]
     phrase_args = time_phrase_structure[1:]
 
-    # Apply the tomorrow-night to today-night correction before generating summary text
-    # This check ensures we only correct if the forecast starts in the problematic 12am-4am window
-    # and if 'today-night' isn't natively present in the overall periods, but 'tomorrow-night' is.
-    if (
-        check_period == 0
-        and all_periods
-        and all_periods[0].endswith("night")
-        and "tomorrow-night" in all_periods[0]
-        and "today-night" not in all_periods
-    ):
-        phrase_args = _recursive_replace_period_name(
-            phrase_args, "tomorrow-night", "today-night"
-        )
-
     # Construct the final summary text based on the phrase template
     if phrase_type == "for-day":
         summary_text = ["for-day", current_condition_text]
     elif phrase_type == "during":
-        if (
-            len(phrase_args) == 1
-            and isinstance(phrase_args[0], list)
-            and (phrase_args[0][0] != "and" and phrase_args[0][0])
-        ):
-            period_combination_text = phrase_args[0]
-            if len(period_combination_text) > 1:
-                formatted_periods = period_combination_text[0]
-                for i in range(1, len(period_combination_text)):
-                    formatted_periods = [
-                        "and",
-                        formatted_periods,
-                        period_combination_text[i],
-                    ]
-            else:
-                formatted_periods = period_combination_text[0]
-            summary_text = ["during", current_condition_text, formatted_periods]
-        else:
-            summary_text = ["during", current_condition_text, phrase_args[0]]
-    elif phrase_type == "starting":
-        summary_text = ["starting", current_condition_text, phrase_args[0]]
-    elif phrase_type == "until":
-        summary_text = ["until", current_condition_text, phrase_args[0]]
-    elif phrase_type == "starting-continuing-until":
-        summary_text = [
-            "starting-continuing-until",
-            current_condition_text,
-            phrase_args[0],
-            phrase_args[1],
-        ]
-    elif phrase_type == "until-starting-again":
-        summary_text = [
-            "until-starting-again",
-            current_condition_text,
-            phrase_args[0],
-            phrase_args[1],
-        ]
-    elif phrase_type == "and":
-
-        def _inject_condition_text(phrase_part, condition_text_to_inject):
-            if isinstance(phrase_part, list):
-                if phrase_part[0] in [
-                    "during",
-                    "starting",
-                    "until",
-                    "starting-continuing-until",
-                    "until-starting-again",
-                ]:
-                    new_phrase = phrase_part[:]
-                    new_phrase.insert(1, condition_text_to_inject)
-                    return new_phrase
-                elif phrase_part[0] == "and":
-                    return [phrase_part[0]] + [
-                        _inject_condition_text(sub_part, condition_text_to_inject)
-                        for sub_part in phrase_part[1:]
-                    ]
-            return phrase_part
-
-        summary_text = _inject_condition_text(
-            time_phrase_structure, current_condition_text
-        )
+        summary_text = ["during", current_condition_text, phrase_args[0]]
 
     return (
         summary_text,
@@ -723,7 +300,7 @@ def calculate_period_summary_text(
     )
 
 
-def calculate_day_text(
+def calculate_half_day_text(
     hours,
     is_day_time,
     time_zone,
@@ -779,11 +356,6 @@ def calculate_day_text(
     curr_date = datetime.datetime.fromtimestamp(hours[0]["time"], zone)
     curr_hour_local = int(curr_date.strftime("%H"))
 
-    # This is used for the "later" check.
-    # It correctly gets the period name for `curr_hour_local - 1` without redundant prefix.
-    today_period_for_later_check = _get_period_name(
-        curr_hour_local - 1, is_today=True, mode=mode
-    )
     # Prepare sanitized copies of the hourly data so modifications in this
     # function do not leak back to the original structures.
     sanitized_hours = []
@@ -1096,7 +668,7 @@ def calculate_day_text(
         overall_min_visibility = min(overall_min_visibility, p_data["min_visibility"])
         overall_max_smoke = max(overall_max_smoke, p_data["max_smoke"])
 
-        # Check if precipitation is significant enough in this period (thresholds in cm)
+        # Check if precipitation is significant enough in this period (thresholds in mm)
         is_precip_in_period = (
             p_data["snow_accum"] > PRECIP_INTENSITY_THRESHOLDS["mid"]
             or p_data["rain_accum"] > PRECIP_THRESH
@@ -1386,82 +958,6 @@ def calculate_day_text(
     ):
         precip_summary_text = ["and", precip_summary_text, secondary_precip_condition]
 
-    # List to track conditions that start "later" in the first period (only for hourly mode)
-    later_conditions_list = []
-
-    # Apply "later" text only when in hourly mode and condition starts later in the first period
-    if (
-        mode == "hour"
-        and all_period_names
-        and all_period_names[0] == today_period_for_later_check
-    ):
-        # Check precip
-        if (
-            precip_periods and precip_periods[0] == 0
-        ):  # This checks if precipitation occurs in the first period.
-            # This handles cases where precipitation starts after the first hour of the period.
-            curr_precip_text_for_first_hour = calculate_precip_text(
-                hours[0]["precipType"],
-                "hourly",
-                hours[0]["liquidAccumulation"],
-                hours[0]["snowAccumulation"],
-                hours[0]["iceAccumulation"],
-                hours[0]["precipProbability"],
-                icon_set,
-                "summary",
-                isDayTime=is_day_time,
-                eff_rain_intensity=hours[0].get("rainIntensity", 0.0),
-                eff_snow_intensity=hours[0].get("snowIntensity", 0.0),
-                eff_ice_intensity=hours[0].get("iceIntensity", 0.0),
-            )
-            if curr_precip_text_for_first_hour is None:
-                all_period_names[0] = "later-" + all_period_names[0]
-                later_conditions_list.append("precip")
-
-        # Check visibility (fog)
-        if vis_periods and vis_periods[0] == 0:
-            if (
-                calculate_vis_text(
-                    hours[0].get("visibility", DEFAULT_VISIBILITY),
-                    hours[0].get("temperature", MISSING_DATA),
-                    hours[0].get("dewPoint", MISSING_DATA),
-                    hours[0].get("smoke", 0.0),
-                    icon_set,
-                    "summary",
-                )
-                is None
-                and "later" not in all_period_names[0]
-            ):  # Avoid double "later"
-                all_period_names[0] = "later-" + all_period_names[0]
-                later_conditions_list.append("vis")
-
-        # Check wind
-        if wind_periods and wind_periods[0] == 0:
-            if (
-                calculate_wind_text(hours[0]["windSpeed"], icon_set, "summary") is None
-                and "later" not in all_period_names[0]
-            ):
-                all_period_names[0] = "later-" + all_period_names[0]
-                later_conditions_list.append("wind")
-
-        # Check dry humidity
-        if dry_periods and dry_periods[0] == 0:
-            if (
-                humidity_sky_text(hours[0]["temperature"], hours[0]["humidity"]) is None
-                and "later" not in all_period_names[0]
-            ):
-                all_period_names[0] = "later-" + all_period_names[0]
-                later_conditions_list.append("dry")
-
-        # Check humid humidity
-        if humid_periods and humid_periods[0] == 0:
-            if (
-                humidity_sky_text(hours[0]["temperature"], hours[0]["humidity"]) is None
-                and "later" not in all_period_names[0]
-            ):
-                all_period_names[0] = "later-" + all_period_names[0]
-                later_conditions_list.append("humid")
-
     # Flags to indicate if a condition is present at all in the forecast block
     has_precip = bool(precip_periods) and precip_summary_text is not None
     has_thunderstorm = bool(thunderstorm_periods)
@@ -1522,8 +1018,6 @@ def calculate_day_text(
             icon_set,
             0,
             mode,
-            later_conditions_list,
-            today_period_for_later_check,
         )
         # These flags indicate if the *higher priority* summary (precip) consumed these conditions.
         combined_wind_flag = temp_wind_combined
@@ -1546,8 +1040,6 @@ def calculate_day_text(
             icon_set,
             0,
             mode,
-            later_conditions_list,
-            today_period_for_later_check,
         )
 
     # Calculate summaries for other conditions. The combination flags for them are local to their calls.
@@ -1565,8 +1057,6 @@ def calculate_day_text(
             icon_set,
             0,
             mode,
-            later_conditions_list,
-            today_period_for_later_check,
             # Pass cloud info for wind to combine with clear cloud
             overall_cloud_text=final_cloud_text,
             overall_cloud_idx_for_wind=overall_cloud_idx,
@@ -1592,8 +1082,6 @@ def calculate_day_text(
             icon_set,
             0,
             mode,
-            later_conditions_list,
-            today_period_for_later_check,
         )
     if has_dry:
         dry_only_summary, _, _, _, _ = calculate_period_summary_text(
@@ -1609,8 +1097,6 @@ def calculate_day_text(
             icon_set,
             0,
             mode,
-            later_conditions_list,
-            today_period_for_later_check,
         )
     if has_humid:
         humid_only_summary, _, _, _, _ = calculate_period_summary_text(
@@ -1626,8 +1112,6 @@ def calculate_day_text(
             icon_set,
             0,
             mode,
-            later_conditions_list,
-            today_period_for_later_check,
         )
 
     # Cloud full summary, including potential combinations with wind/dry/humid/vis
@@ -1650,8 +1134,6 @@ def calculate_day_text(
         icon_set,
         0,
         mode,
-        later_conditions_list,
-        today_period_for_later_check,
     )
     # --- Final Summary Construction Logic: Select top 2 conditions based on priority ---
 

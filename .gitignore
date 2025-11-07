@@ -12,3 +12,6 @@ API/venv313/
 API/KongRedia.py
 
 .idea/
+
+API/read_ERA5.py
+.env
