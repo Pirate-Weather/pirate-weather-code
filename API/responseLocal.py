@@ -6081,15 +6081,9 @@ async def PW_Forecast(
             if summaryText:
                 # Get max CAPE for the next hour to determine if thunderstorms should be shown
                 # Use the maximum of current CAPE and first hourly CAPE
-                currentCAPE = InterPcurrent[DATA_CURRENT["cape"]]
-                if np.isnan(currentCAPE):
-                    currentCAPE = 0
+                currentCAPE = np.nan_to_num(InterPcurrent[DATA_CURRENT["cape"]], nan=0)
                 # Get CAPE from first hourly entry if available
-                hourlyCAPE = 0
-                if len(InterPhour) > 0:
-                    hourlyCAPE = InterPhour[0, DATA_HOURLY["cape"]]
-                    if np.isnan(hourlyCAPE):
-                        hourlyCAPE = 0
+                hourlyCAPE = np.nan_to_num(InterPhour[0, DATA_HOURLY["cape"]], nan=0) if len(InterPhour) > 0 else 0
                 maxCAPE = max(currentCAPE, hourlyCAPE)
 
                 minuteText, minuteIcon = calculate_minutely_text(
