@@ -97,7 +97,7 @@ def test_local_vs_production():
     client = _get_client()
 
     # Ottawa, ON (45.4215, -75.6972) and London, UK (51.50853, -0.12574)
-    for lat, lon in [(76.417, -82.894), (51.50853, -0.12574)]:
+    for lat, lon in [(45.4215, -75.6972), (22.1875, 114.375)]:
         local_resp = client.get(
             f"/forecast/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast"
         )
