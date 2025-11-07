@@ -4997,14 +4997,18 @@ async def PW_Forecast(
                 # Extract alert details
                 # Format: event}{description}{area_desc}{effective}{expires}{severity}{URL
                 wmo_alertDetails = wmo_alert.split("}{")
+                alertEnd = None
+                expires_ts = None
 
                 # Parse times - WMO times are in ISO format
                 alertOnset = datetime.datetime.strptime(
                     wmo_alertDetails[3], "%Y-%m-%dT%H:%M:%S%z"
                 ).astimezone(utc)
-                alertEnd = datetime.datetime.strptime(
-                    wmo_alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
-                ).astimezone(utc)
+                if wmo_alertDetails[4].strip():
+                    alertEnd = datetime.datetime.strptime(
+                        wmo_alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
+                    ).astimezone(utc)
+                    expires_ts = int(alertEnd.timestamp())
 
                 wmo_alertDict = {
                     "title": wmo_alertDetails[0],
@@ -5012,18 +5016,8 @@ async def PW_Forecast(
                         s.lstrip() for s in wmo_alertDetails[2].split(";") if s.strip()
                     ],
                     "severity": wmo_alertDetails[5],
-                    "time": int(
-                        (
-                            alertOnset
-                            - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(utc)
-                        ).total_seconds()
-                    ),
-                    "expires": int(
-                        (
-                            alertEnd
-                            - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(utc)
-                        ).total_seconds()
-                    ),
+                    "time": int(alertOnset.timestamp()),
+                    "expires": expires_ts,
                     "description": wmo_alertDetails[1],
                     "uri": wmo_alertDetails[6],
                 }
