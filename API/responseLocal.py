@@ -5009,7 +5009,10 @@ async def PW_Forecast(
                         wmo_alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
                     ).astimezone(utc)
                     expires_ts = int(
-                        (alertEnd - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(utc)).total_seconds()
+                        (
+                            alertEnd
+                            - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(utc)
+                        ).total_seconds()
                     )
 
                 wmo_alertDict = {
