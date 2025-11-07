@@ -492,7 +492,7 @@ for i in range(hisPeriod, 1, -6):
         fxx=fxx,
         product="co",
         verbose=False,
-        priority=["aws", "nomads"],
+        priority="aws",
         save_dir=tmpDIR,
     )
 

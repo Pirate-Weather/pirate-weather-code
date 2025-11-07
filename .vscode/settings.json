@@ -1,9 +1,0 @@
-{
-    "python.defaultInterpreterPath": "/home/ubuntu/PirateResponse/bin/python3.13",
-    "python.terminal.activateEnvironment": true,
-    "python.testing.pytestArgs": [
-        "tests"
-    ],
-    "python.testing.unittestEnabled": false,
-    "python.testing.pytestEnabled": true
-}
