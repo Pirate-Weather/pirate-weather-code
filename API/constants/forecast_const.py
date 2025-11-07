@@ -27,6 +27,11 @@ DATA_CURRENT = {
     "fire": 19,
     "feels_like": 20,
     "station_pressure": 21,
+    "solar": 22,
+    "cape": 23,
+    "rain_intensity": 24,
+    "snow_intensity": 25,
+    "ice_intensity": 26,
 }
 
 # Minutely comumn indexes
@@ -36,6 +41,9 @@ DATA_MINUTELY = {
     "prob": 2,
     "error": 3,
     "type": 4,
+    "rain_intensity": 5,
+    "snow_intensity": 6,
+    "ice_intensity": 7,
 }
 
 
@@ -68,6 +76,11 @@ DATA_HOURLY = {
     "fire": 24,
     "feels_like": 25,
     "station_pressure": 26,
+    "solar": 27,
+    "cape": 28,
+    "rain_intensity": 29,
+    "snow_intensity": 30,
+    "ice_intensity": 31,
 }
 
 # Daily column indexes
@@ -99,6 +112,11 @@ DATA_DAY = {
     "ice": 23,
     "fire": 24,
     "station_pressure": 26,
+    "solar": 27,
+    "cape": 28,
+    "rain_intensity": 29,
+    "snow_intensity": 30,
+    "ice_intensity": 31,
 }
 
 DATA_TIMEMACHINE = {

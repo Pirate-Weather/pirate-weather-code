@@ -15,7 +15,7 @@ preferences within our organization.
 # Deviations from PEP 8
 
 ## Line Length
-* **Maximum line length:** 100 characters (instead of PEP 8's 79).
+* **Maximum line length:** 120 characters (instead of PEP 8's 79).
     * Modern screens allow for wider lines, improving code readability in many cases.
     * Many common patterns in our codebase, like long strings or URLs, often exceed 79 characters.
 

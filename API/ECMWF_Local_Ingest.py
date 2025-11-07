@@ -4,9 +4,10 @@
 # %% Import modules
 import os
 
+# Developer note: If you have eccodes installed in a non-standard location,
 # os.environ["ECCODES_DEFINITION_PATH"] = (
 #     "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
-#  )
+# )
 import pickle
 import shutil
 import subprocess
@@ -16,13 +17,12 @@ import traceback
 import warnings
 
 import dask.array as da
-from dask.diagnostics import ProgressBar
-
 import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
 import zarr.storage
+from dask.diagnostics import ProgressBar
 from herbie import FastHerbie, HerbieLatest, Path
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
@@ -30,10 +30,10 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    VALID_DATA_MAX,
+    VALID_DATA_MIN,
     interp_time_block,
     validate_grib_stats,
-    VALID_DATA_MIN,
-    VALID_DATA_MAX,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -101,7 +101,8 @@ latestRun = HerbieLatest(
 )
 
 base_time = latestRun.date
-# base_time = pd.Timestamp("2024-03-24 06:00:00Z")
+# Base date for testing
+# base_time = pd.Timestamp("2025-11-05 00:00:00")
 
 print(base_time)
 
@@ -430,26 +431,18 @@ xarray_forecast_merged = (
 )
 
 
-# Create a new time series
+# Create a new time series for the interpolation target
 start = xarray_forecast_merged.time[0].values
 end = xarray_forecast_merged.time[-1].values
 new_hourly_time = pd.date_range(
     start=pd.to_datetime(start) - pd.Timedelta(hisPeriod, "h"), end=end, freq="h"
 )
 
-stacked_times = np.concatenate(
-    (
-        pd.date_range(
-            start=start - pd.Timedelta(hisPeriod, "h"),
-            end=start - pd.Timedelta(1, "h"),
-            freq="3h",
-        ).to_numpy(),
-        xarray_forecast_merged.time.values,
-    )
-)
+# Get the actual stacked times from the concatenated dataset (to be created later)
+# This will be computed after loading and concatenating historical + forecast data
+# For now, just compute the hourly target times
 unix_epoch = np.datetime64(0, "s")
 one_second = np.timedelta64(1, "s")
-stacked_timesUnix = (stacked_times - unix_epoch) / one_second
 hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
 
@@ -697,7 +690,8 @@ for i in range(hisPeriod, 1, -12):
 
     ########################################################################
     # Save the aifs data
-    aifs_range = range(6, 13, 6)
+    # Note: Use a different fxx range for  AIFS data, this is fixed during interp
+    aifs_range = range(0, 13, 6)
     # Create FastHerbie object
     FH_histsub = FastHerbie(
         DATES,
@@ -746,7 +740,8 @@ for i in range(hisPeriod, 1, -12):
 
     # Reinterpolate the AIFS array to the same times as the IFS arrays
     aifs_his_mf = aifs_his_mf.interp(
-        step=ifs_his_mf.step, method="linear", kwargs={"fill_value": "extrapolate"}
+        step=ifs_his_mf.step,
+        method="linear",
     )
 
     # Merge the xarray objects
@@ -861,6 +856,11 @@ for var in zarrVars:
             mask = (ds_clip >= VALID_DATA_MIN) & (ds_clip <= VALID_DATA_MAX)
             ds[var] = ds_clip.where(mask)  # out-of-range → NaN
 
+# Get the actual stacked times from the concatenated dataset
+# This contains the real data times, not artificial times
+stacked_times = ds.time.values
+stacked_timesUnix = (stacked_times - unix_epoch) / one_second
+
 # Rename time dimension to match later processing
 ds_rename = ds.rename({"time": "stacked_time"})
 
@@ -903,6 +903,7 @@ daskVarArrayStackDisk = da.from_zarr(
     forecast_process_path + "_stack.zarr", component="__xarray_dataarray_variable__"
 )
 
+
 # Create a zarr backed dask array
 if saveType == "S3":
     zarr_store = zarr.storage.ZipStore(
@@ -938,20 +939,30 @@ idx0 = np.clip(idx, 0, len(x_a) - 2)
 idx1 = idx0 + 1
 w = (x_b - x_a[idx0]) / (x_a[idx1] - x_a[idx0])  # float array, shape (T_new,)
 
+# precompute nearest indices once: closer of idx0 / idx1
+nearest_idx = np.where(w < 0.5, idx0, idx1).astype(idx0.dtype)
+
 # boolean mask of “in‐range” points
 valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
+
+# Define which variables are integers and need special handling
+int_vars = ["ptype"]
+# Find the index of these variables in the zarrVars list
+int_var_indices = [i for i, v in enumerate(zarrVars) if v in int_vars]
 
 with ProgressBar():
     da.map_blocks(
         interp_time_block,
-        ds_chunk.data,
+        daskVarArrayStackDisk,
         idx0,
         idx1,
         w,
         valid,
+        nearest_idx,
+        int_var_indices,
         dtype="float32",
         chunks=(1, len(hourly_timesUnix), processChunk, processChunk),
-    ).round(3).rechunk(
+    ).round(5).rechunk(
         (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)
     ).to_zarr(zarr_array, overwrite=True, compute=True)
 

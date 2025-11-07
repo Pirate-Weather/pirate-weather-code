@@ -473,7 +473,7 @@ for i in range(hisPeriod, 0, -6):
                 member=mem + 1,
                 product="atmos.25",
                 verbose=False,
-                priority="aws",
+                priority=["aws", "nomads"],
                 save_dir=tmpDIR,
             )
         )
@@ -811,7 +811,7 @@ da.map_blocks(
     valid,
     dtype="float32",
     chunks=(1, len(hourly_timesUnix), processChunk, processChunk),
-).round(3).rechunk(
+).round(5).rechunk(
     (len(probVars), len(hourly_timesUnix), finalChunk, finalChunk)
 ).to_zarr(zarr_array, overwrite=True, compute=True)
 
