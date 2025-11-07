@@ -171,9 +171,7 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
         expires = _cap_text(info, "expires", ns)
 
         for area in info.findall("cap:area" if ns else "area", ns):
-            area_desc = area.findtext(
-                "cap:areaDesc" if ns else "areaDesc", "", ns
-            ).strip()
+            area_desc = area.findtext("cap:areaDesc" if ns else "areaDesc", "").strip()
             for poly_elem in area.findall("cap:polygon" if ns else "polygon", ns):
                 polygon_text = (poly_elem.text or "").strip()
                 if not polygon_text:

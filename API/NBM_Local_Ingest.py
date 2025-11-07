@@ -786,7 +786,7 @@ for i in range(hisPeriod, -1, -1):
         fxx=fxx,
         product="co",
         verbose=False,
-        priority=["aws", "nomads"],
+        priority=["aws"],
         save_dir=tmpDIR,
     )
 
@@ -1044,7 +1044,7 @@ with ProgressBar():
         valid,
         dtype="float32",
         chunks=(1, len(hourly_timesUnix), processChunk, processChunk),
-    ).round(5).rechunk(
+    ).round(3).rechunk(
         (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)
     ).to_zarr(zarr_array, overwrite=True, compute=True)
 

@@ -24,22 +24,22 @@ PRECIP_INTENSITY_THRESHOLDS = {
     "heavy": 10.0,
 }
 
-# Snow intensity thresholds (mm/h of snow)
+# Snow intensity thresholds (mm/h liquid equivalent)
 SNOW_INTENSITY_THRESHOLDS = {
-    "light": 1.30,
-    "mid": 8.30,
-    "heavy": 33.30,
+    "light": 0.13,
+    "mid": 0.83,
+    "heavy": 3.33,
 }
 
-# Icon thresholds for precipitation accumulation
-HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM = 0.2  # In snow units (mm of snow)
-HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 0.02  # (mm liquid)
-DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM = 5.0  # In snow units (mm of snow)
-DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0  # (mm liquid)
+# Icon thresholds for precipitation accumulation (mm liquid equivalent)
+HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM = 0.2
+HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 0.02
+DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM = 10.0
+DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0
 
 # Visibility thresholds (meters)
 FOG_THRESHOLD_METERS = 1000
-MIST_THRESHOLD_METERS = 5000
+MIST_THRESHOLD_METERS = 10000
 SMOKE_CONCENTRATION_THRESHOLD_UGM3 = 25
 TEMP_DEWPOINT_SPREAD_FOR_FOG = 2
 TEMP_DEWPOINT_SPREAD_FOR_MIST = 3
@@ -59,7 +59,7 @@ PRECIP_PROB_THRESHOLD = 0.25
 
 # CAPE thresholds
 CAPE_THRESHOLDS = {
-    "low": 1250,
+    "low": 1000,
     "high": 2500,
 }
 

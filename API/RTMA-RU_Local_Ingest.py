@@ -28,10 +28,10 @@ from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
-    VALID_DATA_MAX,
-    VALID_DATA_MIN,
     earth_relative_wind_components,
     mask_invalid_data,
+    VALID_DATA_MIN,
+    VALID_DATA_MAX,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -87,7 +87,7 @@ latest_run = Herbie_latest(
     freq="15min",
     product="anl",
     verbose=True,
-    priority=["aws", "nomdas"],
+    priority="aws",
     save_dir=tmp_dir,
 )
 
@@ -144,11 +144,11 @@ fh_analysis = Herbie(
     model="rtma_ru",
     product="anl",
     verbose=False,
-    priority=["aws", "nomdas"],
+    priority="aws",
     save_dir=tmp_dir,
 )
 
-fh_analysis.download(match_strings, verbose=True)
+fh_analysis.download(match_strings, verbose=False)
 
 logging.info("RTMA_RU GRIB file downloaded successfully.")
 
@@ -163,11 +163,10 @@ xarray_analysis_merged = xarray_analysis_merged.assign_coords(
 )
 
 # Convert RH from specific humidity and pressure and add it to the dataset
-# relative_humidity_from_specific_humidity returns a dimensionless fraction (0-1)
 rh_2m = relative_humidity_from_specific_humidity(
     pressure=xarray_analysis_merged["sp"] * units.Pa,
     temperature=xarray_analysis_merged["t2m"] * units.degK,
-    specific_humidity=xarray_analysis_merged["sh2"] * units("kg/kg"),
+    specific_humidity=xarray_analysis_merged["sh2"],
 )
 
 xarray_analysis_merged["rh"] = rh_2m.metpy.dequantify()

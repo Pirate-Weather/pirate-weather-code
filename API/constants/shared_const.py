@@ -2,10 +2,8 @@
 Shared constants
 """
 
-import numpy as np
-
 # Invalid data
-MISSING_DATA = np.nan
+MISSING_DATA = -999
 
 # Minimum reflectivity threshold (dBZ)
 REFC_THRESHOLD = 5.0
@@ -20,7 +18,7 @@ HISTORY_PERIODS = {
     "NBM": 48,
     "HRRR": 48,
     "HRRR_6H": 48,
-    "GFS": 288,  # GFS has a 12-day history, allowing 10 days of local retrievals. Beyond that is Google ERA5
+    "GFS": 192,
     "GEFS": 48,
     "ECMWF": 48,
     "NBM_Fire": 48,

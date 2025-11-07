@@ -18,33 +18,37 @@ from API.PirateTextHelper import (
 
 def calculate_text(
     hourObject,
+    prepAccumUnit,
+    visUnits,
+    windUnit,
+    tempUnits,
     isDayTime,
+    rainPrep,
+    snowPrep,
+    icePrep,
     type,
+    precipIntensity,
     icon="darksky",
 ):
     """
-    Calculates the textual summary and icon for an hourly forecast period.
-    All inputs (hourObject) are expected in SI units:
-    - Temperature in Celsius
-    - Wind speed in m/s
-    - Visibility in meters
-    - Precipitation intensity in mm/h
-    - Precipitation accumulation in mm
+    Calculates the textual summary and icon with the given parameters
 
     Parameters:
-    - hourObject (dict): A dictionary containing hourly forecast data (in SI units).
-        Expected keys include: precipType, cloudCover, windSpeed, temperature/temperatureHigh,
-        humidity, visibility, cape, smoke, dewPoint, precipProbability,
-        precipAccumulation, snowAccumulation, sleetAccumulation,
-        liquidIntensity, snowIntensity, iceIntensity
-    - isDayTime (bool): Whether it's currently daytime
-    - type (str): The type of summary being generated ("current", "hour", "hourly")
-    - icon (str): Which icon set to use - "darksky" or "pirate" (default: "darksky")
+    - hourObject (dict): A dictionary of the object used to generate the summary
+    - prepAccumUnit (float): The precipitation unit used
+    - visUnits (float): The visibility unit used
+    - tempUnits (float): The temperature unit used
+    - isDayTime (bool): Whether its currently day or night
+    - rainPrep (float): The rain accumulation
+    - snowPrep (float): The snow accumulation
+    - icePrep (float): The ice accumulation
+    - type (str): What type of summary is being generated.
+    - precipIntensity (float): The precipitation intensity
+    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
 
     Returns:
-    - tuple: A tuple containing:
-        - cText (str or list): A textual summary representing the conditions for the period
-        - cIcon (str): The icon representing the conditions for the period
+    - cText (str): A summary representing the conditions for the period.
+    - cIcon (str): The icon representing the conditions for the period.
     """
 
     cText = cIcon = precipText = precipIcon = windText = windIcon = skyText = (
@@ -58,7 +62,7 @@ def calculate_text(
 
     # If time machine, no humidity data, so set to 0
     if "humidity" not in hourObject:
-        humidity = MISSING_DATA
+        humidity = np.nan
     else:
         humidity = hourObject["humidity"]
 
@@ -77,6 +81,9 @@ def calculate_text(
     # If visibility exists in the hourObject then use it otherwise use the default
     vis = hourObject.get("visibility", DEFAULT_VISIBILITY)
 
+    # If liftedIndex exists in the hourObject then use it otherwise -999
+    liftedIndex = hourObject.get("liftedIndex", MISSING_DATA)
+
     # If cape exists in the hourObject then use it otherwise -999
     cape = hourObject.get("cape", MISSING_DATA)
 
@@ -87,40 +94,36 @@ def calculate_text(
     dewPoint = hourObject.get("dewPoint", MISSING_DATA)
 
     # If we missing or incomplete data then return clear icon/text instead of calculating
-    if all(np.isnan(v) for v in (temp, wind, vis, cloudCover, humidity, dewPoint)):
+    if all(
+        v == MISSING_DATA for v in (temp, wind, vis, cloudCover, humidity, dewPoint)
+    ):
         return "unavailable", "none"
-
-    # Extract liquidAccumulation, snowAccum, sleetAccum from hourObject
-    rainAccum = hourObject.get("liquidAccumulation", 0.0)
-    snowAccum = hourObject.get("snowAccumulation", 0.0)
-    sleetAccum = hourObject.get("sleetAccumulation", 0.0)
 
     # Calculate the text/icon for precipitation, wind, visibility, sky cover, humidity and thunderstorms
     precipText, precipIcon = calculate_precip_text(
+        precipIntensity,
+        prepAccumUnit,
         precipType,
         type,
-        rainAccum,
-        snowAccum,
-        sleetAccum,
+        rainPrep,
+        snowPrep,
+        icePrep,
         pop,
         icon,
         "both",
-        # provide per-type intensities when available (mm/h)
-        eff_rain_intensity=hourObject.get("rainIntensity"),
-        eff_snow_intensity=hourObject.get("snowIntensity"),
-        eff_ice_intensity=hourObject.get("iceIntensity"),
     )
-
-    windText, windIcon = calculate_wind_text(wind, icon, "both")
-    visText, visIcon = calculate_vis_text(vis, temp, dewPoint, smoke, icon, "both")
-    thuText, thuIcon = calculate_thunderstorm_text(cape, "both", icon, isDayTime)
+    windText, windIcon = calculate_wind_text(wind, windUnit, icon, "both")
+    visText, visIcon = calculate_vis_text(
+        vis, visUnits, tempUnits, temp, dewPoint, smoke, icon, "both"
+    )
+    thuText, thuIcon = calculate_thunderstorm_text(liftedIndex, cape, "both")
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
-    humidityText = humidity_sky_text(temp, humidity)
+    humidityText = humidity_sky_text(temp, tempUnits, humidity)
 
     # If there is precipitation text use that and join with thunderstorm or humidity or wind texts if they exist
     if precipText is not None:
-        if thuText is not None and not (type == "current" and "possible" in thuText):
-            cText = thuText
+        if thuText is not None:
+            cText = ["and", thuText, precipText]
         elif windText is not None:
             cText = ["and", precipText, windText]
         else:
