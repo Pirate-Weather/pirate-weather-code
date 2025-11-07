@@ -6081,7 +6081,7 @@ async def PW_Forecast(
             if summaryText:
                 # Get max CAPE for the next hour to determine if thunderstorms should be shown
                 # Use the maximum of current CAPE and first hourly CAPE
-                currentCAPE = returnOBJ["currently"].get("cape", 0)
+                currentCAPE = InterPcurrent[DATA_CURRENT["cape"]]
                 if currentCAPE == MISSING_DATA:
                     currentCAPE = 0
                 # Get CAPE from first hourly entry if available
