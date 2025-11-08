@@ -4998,7 +4998,7 @@ async def PW_Forecast(
                 # Format: event}{description}{area_desc}{effective}{expires}{severity}{URL
                 wmo_alertDetails = wmo_alert.split("}{")
                 alertEnd = None
-                expires_ts = None
+                expires_ts = -999
 
                 # Parse times - WMO times are in ISO format
                 alertOnset = datetime.datetime.strptime(
