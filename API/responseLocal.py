@@ -4585,7 +4585,6 @@ async def PW_Forecast(
                     str(tz_name),
                     int(time.time()),
                     icon=icon,
-                    unit_system=unitSystem,
                 )
 
                 # Translate the text
@@ -4649,7 +4648,6 @@ async def PW_Forecast(
                     str(tz_name),
                     int(time.time()),
                     icon=icon,
-                    unit_system=unitSystem,
                 )
 
                 # Translate the text
