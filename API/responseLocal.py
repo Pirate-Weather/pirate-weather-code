@@ -4584,8 +4584,8 @@ async def PW_Forecast(
                     not is_all_night,
                     str(tz_name),
                     int(time.time()),
-                    icon_set=icon,
-                    unit_system=units,
+                    icon,
+                    unitSystem,
                 )
 
                 # Translate the text
@@ -4648,8 +4648,8 @@ async def PW_Forecast(
                     is_all_day,
                     str(tz_name),
                     int(time.time()),
-                    icon_set=icon,
-                    unit_system=units,
+                    icon,
+                    unitSystem,
                 )
 
                 # Translate the text
