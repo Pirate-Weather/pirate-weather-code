@@ -4588,7 +4588,7 @@ async def PW_Forecast(
                 )
 
                 # Translate the text
-                if dayText:
+                if summaryText:
                     day_item["summary"] = translation.translate(["sentence", dayText])
                     day_item["icon"] = dayIcon
         except Exception:
@@ -4651,7 +4651,7 @@ async def PW_Forecast(
                 )
 
                 # Translate the text
-                if dayText:
+                if summaryText:
                     day_item["summary"] = translation.translate(["sentence", dayText])
                     day_item["icon"] = dayIcon
         except Exception:
