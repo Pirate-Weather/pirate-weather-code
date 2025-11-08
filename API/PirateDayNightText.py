@@ -563,7 +563,6 @@ def calculate_half_day_text(
             # to snow depth (mm) via estimate_snow_height. If temperature is
             # missing, fall back to using error directly.
             if not np.isnan(hour["precipIntensityError"]):
-                period_data["snow_error"] += hour["precipIntensityError"]
                 liquid_error_mm = hour["precipIntensityError"] * 1.0
                 temp = hour.get("temperature", MISSING_DATA)
                 wind = hour.get("windSpeed", 0.0)
