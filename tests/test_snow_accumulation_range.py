@@ -31,7 +31,7 @@ def create_hour_with_snow(snow_accum, snow_error=0, time_offset=0):
         "windSpeed": 5.0,
         "temperature": -2.0,
         "humidity": 0.8,
-        "visibility": 5000,
+        "visibility": 5.0,
         "dewPoint": -4.0,
         "smoke": 0,
         "cape": 0,
@@ -43,7 +43,7 @@ def test_snow_range_with_error_si_units():
     """Test that snow accumulation shows range when error data is available (SI units - cm)."""
     # Create 24 hours with 1mm snow each and 0.5mm error each = 24mm total, 12mm total error
     # This should result in 2.4cm ± 1.2cm = range of 1-4 cm (floor/ceil applied)
-    hours = [create_hour_with_snow(1.0, 0.5, i * 3600) for i in range(24)]
+    hours = [create_hour_with_snow(1.0, 0.05, i * 3600) for i in range(24)]
 
     icon, summary = calculate_day_text(
         hours,
@@ -144,7 +144,7 @@ def test_snow_range_with_error_us_units():
     """Test that snow accumulation shows range when error data is available (US units - inches)."""
     # Create 24 hours with 2.54mm snow each and 1.27mm error each = 60.96mm total, 30.48mm error
     # This converts to ~2.4 inches total ± ~1.2 inches error = range with floor/ceil applied
-    hours = [create_hour_with_snow(2.54, 1.27, i * 3600) for i in range(24)]
+    hours = [create_hour_with_snow(2.54, 0.127, i * 3600) for i in range(24)]
 
     icon, summary = calculate_day_text(
         hours,
@@ -175,6 +175,7 @@ def test_snow_range_with_error_us_units():
                     return result
         return None
 
+    print(summary)
     snow_sentence = find_snow_sentence(summary)
     assert snow_sentence is not None, f"Snow sentence not found in summary: {summary}"
     assert snow_sentence[0] == "inches"
