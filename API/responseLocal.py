@@ -4585,6 +4585,7 @@ async def PW_Forecast(
                     str(tz_name),
                     int(time.time()),
                     icon_set=icon,
+                    unit_system=unitSystem,
                 )
 
                 # Translate the text
@@ -4592,7 +4593,7 @@ async def PW_Forecast(
                     day_item["summary"] = translation.translate(["sentence", dayText])
                     day_item["icon"] = dayIcon
         except Exception:
-            logger.exception("DAILY TEXT GEN ERROR")
+            logger.exception("DAY HALF DAY TEXT GEN ERROR")
 
         if version < 2:
             day_item.pop("liquidAccumulation", None)
@@ -4648,6 +4649,7 @@ async def PW_Forecast(
                     str(tz_name),
                     int(time.time()),
                     icon_set=icon,
+                    unit_system=unitSystem,
                 )
 
                 # Translate the text
@@ -4655,7 +4657,7 @@ async def PW_Forecast(
                     day_item["summary"] = translation.translate(["sentence", dayText])
                     day_item["icon"] = dayIcon
         except Exception:
-            logger.exception("DAILY TEXT GEN ERROR")
+            logger.exception("NIGHT HALF DAY TEXT GEN ERROR")
 
         if version < 2:
             day_item.pop("liquidAccumulation", None)
