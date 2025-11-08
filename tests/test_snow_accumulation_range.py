@@ -175,7 +175,6 @@ def test_snow_range_with_error_us_units():
                     return result
         return None
 
-    print(summary)
     snow_sentence = find_snow_sentence(summary)
     assert snow_sentence is not None, f"Snow sentence not found in summary: {summary}"
     assert snow_sentence[0] == "inches"
