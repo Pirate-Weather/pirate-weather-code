@@ -564,8 +564,8 @@ def calculate_half_day_text(
             # missing, fall back to using error directly.
             if (
                 not np.isnan(hour["precipIntensityError"])
-                and hour["precipType"] == "snow"
-                and hour["snowAccumulation"] > 0.0
+                and hour.get("precipType") == "snow"
+                and hour.get("snowAccumulation", 0.0) > 0.0
             ):
                 liquid_error_mm = hour["precipIntensityError"] * 1.0
                 temp = hour.get("temperature", MISSING_DATA)
