@@ -556,13 +556,17 @@ def calculate_half_day_text(
 
             period_data["rain_accum"] += hour["liquidAccumulation"]
             period_data["snow_accum"] += hour["snowAccumulation"]
-            # Only accumulate error if it's not nan (missing data)
-            # Only accumulate error if it's not nan (missing data).
+            # Only accumulate error if it's not nan (missing data), the precipitation
+            # type is snow and there is any accumulation.
             # precipIntensityError is an intensity error (mm/h). Convert that
             # to a liquid accumulation error for the hour (mm) then convert
             # to snow depth (mm) via estimate_snow_height. If temperature is
             # missing, fall back to using error directly.
-            if not np.isnan(hour["precipIntensityError"]):
+            if (
+                not np.isnan(hour["precipIntensityError"])
+                and hour.get("precipType") == "snow"
+                and hour.get("snowAccumulation", 0.0) > 0.0
+            ):
                 liquid_error_mm = hour["precipIntensityError"] * 1.0
                 temp = hour.get("temperature", MISSING_DATA)
                 wind = hour.get("windSpeed", 0.0)
