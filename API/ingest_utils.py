@@ -77,6 +77,11 @@ def mask_invalid_refc(xrArr: "xr.DataArray") -> "xr.DataArray":
     """
     return xrArr.where(xrArr >= REFC_THRESHOLD, 0)
 
+def _start_stop(sl):
+    # robust to (start, stop) tuples OR slice objects
+    if isinstance(sl, slice):
+        return sl.start, sl.stop
+    return sl  # assume (start, stop)
 
 # Linear interpolation of time blocks in a dask array
 def interp_time_block(
@@ -149,12 +154,9 @@ def interp_time_block(
     if nearest_var is not None and block_info is not None:
         # block_info[0] corresponds to the first array argument (y_block)
         # 'array-location' is a tuple of slices, one per axis (V, T, Y, X)
-        var_slice = block_info[0]["array-location"][0]  # slice for V axis
-        global_var_start = var_slice[
-            0
-        ]  # since chunks=(1, ...), start == the variable index
+        v_start, v_stop = _start_stop(block_info[0]["array-location"][0])
 
-        if global_var_start == nearest_var:
+        if v_start in nearest_var:  # only true for the single var in this block
             y_interp[0, ...] = y_block[0, nearest_idx, ...]
 
     # 4) zero‐out (or NaN‐out) anything outside the original time range
@@ -165,7 +167,6 @@ def interp_time_block(
         y_interp[:, inv, :, :] = MISSING_DATA
 
     return y_interp
-
 
 # Function to get the list of GRIB files from the forecast subscription, used by NBM
 def getGribList(FH_forecastsub, matchStrings):
