@@ -95,7 +95,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
     All inputs are expected in SI units (mm/h for precipitation intensity).
 
     Parameters:
-    - minuteArr (arr): An array of the minutes (with SI units)
+    - minuteArr (arr): An array of the minutely objects (with SI units)
     - currentText (str/arr): The current conditions in translations format
     - currentIcon (str): The icon representing the current conditions
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather

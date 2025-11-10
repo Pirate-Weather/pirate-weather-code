@@ -776,6 +776,12 @@ for i in range(hisPeriod, 0, -6):
             )
         )
 
+    # Set REFC values < 5 to 0
+    xarray_hist_merged["REFC_entireatmosphere"] = mask_invalid_refc(
+        xarray_hist_merged["REFC_entireatmosphere"]
+    )
+
+
     # Copy back to main array
     # with ProgressBar():
     xarray_hist_merged["Storm_Distance"] = (
