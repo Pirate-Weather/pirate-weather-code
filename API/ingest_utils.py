@@ -79,10 +79,60 @@ def mask_invalid_refc(xrArr: "xr.DataArray") -> "xr.DataArray":
 
 
 # Linear interpolation of time blocks in a dask array
-def interp_time_block(y_block, idx0, idx1, w, valid):
-    """
-    y_block: np.ndarray of shape (Vb, T_old, Yb, Xb)
-    idx0, idx1, w, valid: 1D NumPy arrays of length T_new
+def interp_time_block(
+    y_block, idx0, idx1, w, valid, nearest_idx=None, nearest_var=None, block_info=None
+):
+    """Linearly interpolate a time block within a dask-chunked 4D array.
+
+    This helper is designed to be used with dask.map_blocks to resample the time
+    dimension of a chunked array by linearly blending between two source time
+    slices. It supports an optional nearest-neighbor override for a specific
+    variable index (useful for non-continuous variables like precipitation type).
+
+    Parameters
+    ----------
+    y_block : np.ndarray
+        Chunk of the source array with shape ``(Vb, T_old, Yb, Xb)`` where:
+        - Vb: number of variables in this chunk (typically 1 when chunked on V)
+        - T_old: number of source time steps in this chunk
+        - Yb, Xb: spatial chunk sizes.
+    idx0, idx1 : np.ndarray (int64), shape (T_new,)
+        Indices into the source time axis ``T_old`` for the lower (floor) and
+        upper (ceil) neighbor used for interpolation of each target time step.
+    w : np.ndarray (float32/float64), shape (T_new,)
+        Interpolation weights in [0, 1] corresponding to the upper neighbor.
+        The output is computed as ``(1 - w) * y[idx0] + w * y[idx1]``.
+    valid : np.ndarray (bool), shape (T_new,)
+        Mask indicating which target time steps are within the original source
+        time range. Any target step where ``valid == False`` will be set to the
+        missing-data sentinel ``MISSING_DATA``.
+    nearest_idx : np.ndarray (int64), shape (T_new,), optional
+        For variables that should not be linearly interpolated, this provides a
+        nearest-neighbor index into ``T_old`` for each target time step. Only
+        used when ``nearest_var`` is provided and this block corresponds to that
+        variable.
+    nearest_var : int, optional
+        The global variable index along the V axis for which the nearest-neighbor
+        override should be applied. Requires that the V dimension is chunked with
+        size 1 (``chunks=(1, ...)``) so that each block contains a single
+        variable.
+    block_info : dict, optional
+        Dask ``block_info`` dictionary provided to ``map_blocks``. Used to
+        determine the global variable index of this block and decide whether to
+        apply the nearest-neighbor override.
+
+    Returns
+    -------
+    np.ndarray
+        Interpolated array with shape ``(Vb, T_new, Yb, Xb)`` where values
+        outside the valid source time range are set to ``MISSING_DATA``.
+
+    Notes
+    -----
+    - This function assumes the first axis is the variable axis and that it is
+      chunked with size 1 when using the nearest-neighbor override.
+    - The interpolation is purely along the time axis; spatial dimensions are
+      untouched aside from broadcasting the weights.
     """
     # 1) pull out the two knot‐time slices
     y0 = y_block[:, idx0, ...]  # → (Vb, T_new, Yb, Xb)
@@ -94,6 +144,18 @@ def interp_time_block(y_block, idx0, idx1, w, valid):
 
     # 3) linear blend
     y_interp = omw_r * y0 + w_r * y1
+
+    # Optional nearest override
+    if nearest_var is not None and block_info is not None:
+        # block_info[0] corresponds to the first array argument (y_block)
+        # 'array-location' is a tuple of slices, one per axis (V, T, Y, X)
+        var_slice = block_info[0]["array-location"][0]  # slice for V axis
+        global_var_start = var_slice[
+            0
+        ]  # since chunks=(1, ...), start == the variable index
+
+        if global_var_start == nearest_var:
+            y_interp[0, ...] = y_block[0, nearest_idx, ...]
 
     # 4) zero‐out (or NaN‐out) anything outside the original time range
     #    here we choose NaN so it’s clear these were out-of-range
