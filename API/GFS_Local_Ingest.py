@@ -781,7 +781,6 @@ for i in range(hisPeriod, 0, -6):
         xarray_hist_merged["REFC_entireatmosphere"]
     )
 
-
     # Copy back to main array
     # with ProgressBar():
     xarray_hist_merged["Storm_Distance"] = (
