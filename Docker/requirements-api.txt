@@ -1,7 +1,7 @@
 aiobotocore[boto3]==2.25.1
 astral==3.2
-dask==2025.10.0
-fastapi[standard]==0.121.0
+dask==2025.11.0
+fastapi[standard]==0.121.1
 fastapi-utils==0.8.0
 fastparquet==2024.11.0
 gcsfs==2025.10.0
