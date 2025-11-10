@@ -3018,7 +3018,7 @@ async def PW_Forecast(
             ]
         minuteItems.append(dict(zip(minuteKeys, values)))
 
-        # SI version always includes all keys
+        # SI object always includes all keys
         values_si = [
             int(minuteTimes[idx]),
             float(minuteIntensity[idx]),
