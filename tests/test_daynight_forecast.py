@@ -6,7 +6,15 @@ from API.PirateDayNightText import calculate_half_day_text
 
 
 def make_hour(dt, **overrides):
-    # default hour structure used by calculate_half_day_text
+    """Creates a default hourly data structure for tests.
+
+    Parameters:
+        - dt (datetime.datetime): The datetime object for the hour.
+        - **overrides: Keyword arguments to override any of the default values.
+
+    Returns:
+        - dict: A dictionary representing an hour of weather data.
+    """
     defaults = {
         "time": int(dt.timestamp()),
         "cloudCover": 0.0,
@@ -32,7 +40,7 @@ def make_hour(dt, **overrides):
 
 
 def test_half_day_clear_day_icon_and_summary():
-    # Construct 3 hourly records around local noon
+    """Tests that a clear day scenario produces the correct icon and summary."""
     zone = tz.gettz("UTC")
     base = datetime.datetime(2025, 11, 10, 12, 0, tzinfo=zone)
     hours = [
@@ -49,7 +57,7 @@ def test_half_day_clear_day_icon_and_summary():
 
 
 def test_all_day_half_day_clear_day_icon_and_summary():
-    # Construct 3 hourly records around local noon
+    """Tests that a full day clear day scenario produces the correct icon and summary."""
     zone = tz.gettz("UTC")
     base = datetime.datetime(2025, 11, 10, 4, 0, tzinfo=zone)
     hours = [
@@ -66,7 +74,7 @@ def test_all_day_half_day_clear_day_icon_and_summary():
 
 
 def test_half_day_cloudy_night_icon_and_summary():
-    # Construct 3 hourly records around local 23:00 (night)
+    """Tests that a cloudy night scenario produces the correct icon and summary."""
     zone = tz.gettz("UTC")
     base = datetime.datetime(2025, 11, 10, 23, 0, tzinfo=zone)
     hours = [
@@ -83,7 +91,7 @@ def test_half_day_cloudy_night_icon_and_summary():
 
 
 def test_precipitation_pirate_possible_day_and_night_icons():
-    # Create a light rain scenario with low POP so it becomes "possible-" and uses pirate day/night icons
+    """Tests a light rain scenario with low POP using the pirate icon set."""
     zone = tz.gettz("UTC")
     base_day = datetime.datetime(2025, 11, 10, 13, 0, tzinfo=zone)
     hour_day = make_hour(
@@ -114,3 +122,19 @@ def test_precipitation_pirate_possible_day_and_night_icons():
         [hour_night], False, "UTC", hour_night["time"], mode="hour", icon_set="pirate"
     )
     assert icon_night == "possible-rain-night"
+
+def test_too_many_hours_returns_unavailable():
+    """Tests that providing more than MAX_HOURS returns 'unavailable'."""
+    # MAX_HOURS is 15, so we use 16 hours
+    zone = tz.gettz("UTC")
+    base = datetime.datetime(2025, 11, 10, 12, 0, tzinfo=zone)
+    hours = [
+        make_hour(base + datetime.timedelta(hours=i)) for i in range(16)
+    ]
+
+    icon, summary = calculate_half_day_text(
+        hours, True, "UTC", hours[0]["time"], mode="hour", icon_set="darksky"
+    )
+
+    assert icon == "none"
+    assert summary == "unavailable"
