@@ -4,10 +4,9 @@
 # %% Import modules
 import os
 
-# Developer note: If you have eccodes installed in a non-standard location,
-# os.environ["ECCODES_DEFINITION_PATH"] = (
-#     "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
-# )
+os.environ["ECCODES_DEFINITION_PATH"] = (
+    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+ )
 import pickle
 import shutil
 import subprocess
@@ -744,6 +743,7 @@ for i in range(hisPeriod, 1, -12):
         method="linear",
     )
 
+
     # Merge the xarray objects
     xarray_hist_merged = xr.merge(
         [ifs_his_mf, aifs_his_mf, xr_enso_hisOut], compat="override", join="outer"
@@ -965,6 +965,7 @@ with ProgressBar():
     ).round(5).rechunk(
         (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)
     ).to_zarr(zarr_array, overwrite=True, compute=True)
+
 
 
 if saveType == "S3":
