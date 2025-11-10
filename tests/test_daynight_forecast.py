@@ -123,14 +123,13 @@ def test_precipitation_pirate_possible_day_and_night_icons():
     )
     assert icon_night == "possible-rain-night"
 
+
 def test_too_many_hours_returns_unavailable():
     """Tests that providing more than MAX_HOURS returns 'unavailable'."""
     # MAX_HOURS is 15, so we use 16 hours
     zone = tz.gettz("UTC")
     base = datetime.datetime(2025, 11, 10, 12, 0, tzinfo=zone)
-    hours = [
-        make_hour(base + datetime.timedelta(hours=i)) for i in range(16)
-    ]
+    hours = [make_hour(base + datetime.timedelta(hours=i)) for i in range(16)]
 
     icon, summary = calculate_half_day_text(
         hours, True, "UTC", hours[0]["time"], mode="hour", icon_set="darksky"
