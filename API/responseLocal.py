@@ -562,7 +562,7 @@ def toTimestamp(d):
     return d.timestamp()
 
 
-# If testing, read zarrs directly from S3
+# If testing, read zarrs directly from S3 zip files
 # This should be implemented as a fallback at some point
 STAGE = os.environ.get("STAGE", "PROD")
 if (STAGE == "TESTING") or (STAGE == "TM_TESTING"):
