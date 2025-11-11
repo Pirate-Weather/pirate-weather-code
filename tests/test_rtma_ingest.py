@@ -54,9 +54,7 @@ def test_rtma_script_has_required_imports():
     ]
 
     for import_stmt in required_imports:
-        assert (
-            import_stmt in script_content
-        ), f"Missing required import: {import_stmt}"
+        assert import_stmt in script_content, f"Missing required import: {import_stmt}"
 
 
 def test_rtma_script_has_required_components():
@@ -75,9 +73,7 @@ def test_rtma_script_has_required_components():
     assert "match_strings" in script_content, "Missing match_strings definition"
 
     # Check for RTMA-specific elements
-    assert (
-        "rtma_ru" in script_content.lower()
-    ), "Script should reference rtma_ru model"
+    assert "rtma_ru" in script_content.lower(), "Script should reference rtma_ru model"
 
     # Check for key variables
     assert "vis" in script_content, "Missing visibility variable"
@@ -99,6 +95,4 @@ def test_rtma_script_python_check():
         text=True,
     )
 
-    assert (
-        result.returncode == 0
-    ), f"Script failed to compile: {result.stderr}"
+    assert result.returncode == 0, f"Script failed to compile: {result.stderr}"
