@@ -12,9 +12,9 @@ import warnings
 
 # Define ECCODES_DEFINITION_PATH env variable for eccodes
 # This is needed in my testing instance- should not be required for the docker image
-os.environ["ECCODES_DEFINITION_PATH"] = (
-    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
-)
+#os.environ["ECCODES_DEFINITION_PATH"] = (
+#    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+#)
 import dask.array as da
 import numpy as np
 import s3fs
