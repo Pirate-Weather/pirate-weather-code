@@ -563,7 +563,7 @@ def toTimestamp(d):
     return d.timestamp()
 
 
-# If testing, read zarrs directly from S3
+# If testing, read zarrs directly from S3 zip files
 # This should be implemented as a fallback at some point
 STAGE = os.environ.get("STAGE", "PROD")
 if (STAGE == "TESTING") or (STAGE == "TM_TESTING"):
@@ -5810,7 +5810,7 @@ async def PW_Forecast(
     # Current temperature in Celsius (SI unit for text generation)
     curr_temp = (
         InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS
-    )  # temperature in Celsius
+    )  # Temperature in Celsius
 
     # Save SI unit values for text generation before converting to requested units
     curr_temp_si = curr_temp

@@ -21,7 +21,12 @@ from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
 from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_utils import mask_invalid_data, mask_invalid_refc, validate_grib_stats
+from API.ingest_utils import (
+    mask_invalid_data,
+    mask_invalid_refc,
+    pad_to_chunk_size,
+    validate_grib_stats,
+)
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -362,6 +367,9 @@ daskVarArrayListMergeNaN.to_zarr(
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
+# Add padding to the zarr store for main forecast chunking
+daskVarArrayStackDisk_main = pad_to_chunk_size(daskVarArrayStackDisk, finalChunk)
+
 # Create a zarr backed dask array
 if saveType == "S3":
     zarr_store = zarr.storage.ZipStore(
@@ -373,10 +381,10 @@ else:
 
 zarr_array = zarr.create_array(
     store=zarr_store,
-    shape=daskVarArrayStackDisk.shape,
+    shape=daskVarArrayStackDisk_main.shape,
     chunks=(
         len(zarrVars),
-        daskVarArrayStackDisk.shape[1],
+        daskVarArrayStackDisk_main.shape[1],
         finalChunk,
         finalChunk,
     ),
@@ -387,8 +395,8 @@ zarr_array = zarr.create_array(
 
 # with ProgressBar():
 da.rechunk(
-    daskVarArrayStackDisk.round(5),
-    (len(zarrVars), daskVarArrayStackDisk.shape[1], finalChunk, finalChunk),
+    daskVarArrayStackDisk_main.round(5),
+    (len(zarrVars), daskVarArrayStackDisk_main.shape[1], finalChunk, finalChunk),
 ).to_zarr(zarr_array, compute=True)
 
 if saveType == "S3":

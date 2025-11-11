@@ -31,6 +31,7 @@ from API.ingest_utils import (
     getGribList,
     interp_time_block,
     mask_invalid_data,
+    pad_to_chunk_size,
     validate_grib_stats,
 )
 
@@ -995,6 +996,9 @@ print("Stacked 4D array saved to disk.")
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
+# Add padding to the zarr store for main forecast chunking
+daskVarArrayStackDisk_main = pad_to_chunk_size(daskVarArrayStackDisk, finalChunk)
+
 # Create a zarr backed dask array
 if saveType == "S3":
     zarr_store = zarr.storage.ZipStore(
@@ -1009,8 +1013,8 @@ zarr_array = zarr.create_array(
     shape=(
         len(zarrVars),
         len(hourly_timesUnix),
-        daskVarArrayStackDisk.shape[2],
-        daskVarArrayStackDisk.shape[3],
+        daskVarArrayStackDisk_main.shape[2],
+        daskVarArrayStackDisk_main.shape[3],
     ),
     chunks=(len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
     compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
@@ -1031,13 +1035,13 @@ idx0 = np.clip(idx, 0, len(x_a) - 2)
 idx1 = idx0 + 1
 w = (x_b - x_a[idx0]) / (x_a[idx1] - x_a[idx0])  # float array, shape (T_new,)
 
-# boolean mask of “in‐range” points
+# boolean mask of "in‐range" points
 valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
 
 with ProgressBar():
     da.map_blocks(
         interp_time_block,
-        daskVarArrayStackDisk,
+        daskVarArrayStackDisk_main,
         idx0,
         idx1,
         w,
@@ -1067,6 +1071,10 @@ if saveType == "S3":
 # Loop through variables, creating a new one with a name and 36 x 100 x 100 chunks
 # Save -12:24 hours, aka steps 24:60
 # Create a Zarr array in the store with zstd compression
+
+# Add padding for map chunking (100x100)
+daskVarArrayStackDisk_maps = pad_to_chunk_size(daskVarArrayStackDisk, 100)
+
 if saveType == "S3":
     zarr_store_maps = zarr.storage.ZipStore(
         forecast_process_dir + "/NBM_Maps.zarr.zip", mode="a"
@@ -1081,8 +1089,8 @@ for z in [0, 2, 6, 7, 8, 13, 14, 15, 16, 17]:
         name=zarrVars[z],
         shape=(
             36,
-            daskVarArrayStackDisk.shape[2],
-            daskVarArrayStackDisk.shape[3],
+            daskVarArrayStackDisk_maps.shape[2],
+            daskVarArrayStackDisk_maps.shape[3],
         ),
         chunks=(36, 100, 100),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
@@ -1090,7 +1098,7 @@ for z in [0, 2, 6, 7, 8, 13, 14, 15, 16, 17]:
     )
 
     # with ProgressBar():
-    da.rechunk(daskVarArrayStackDisk[z, 36:72, :, :], (36, 100, 100)).to_zarr(
+    da.rechunk(daskVarArrayStackDisk_maps[z, 36:72, :, :], (36, 100, 100)).to_zarr(
         zarr_array, overwrite=True, compute=True
     )
 

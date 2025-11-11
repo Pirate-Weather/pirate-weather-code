@@ -287,6 +287,35 @@ def validate_grib_stats(gribCheck):
     return True
 
 
+def pad_to_chunk_size(dask_array: da.Array, final_chunk: int) -> da.Array:
+    """Pad a 4D dask array so its Y and X dimensions are multiples of final_chunk.
+
+    This ensures efficient zarr storage by aligning spatial dimensions to chunk boundaries.
+    Padding is done with NaN values on the right and bottom edges.
+
+    Args:
+        dask_array: 4D dask array with shape (var, time, y, x).
+        final_chunk: The target chunk size for spatial dimensions.
+
+    Returns:
+        Padded dask array with y and x dimensions that are multiples of final_chunk.
+        If no padding is needed, returns the original array.
+    """
+    y, x = dask_array.shape[2], dask_array.shape[3]
+    pad_y = (-y) % final_chunk  # 0..(final_chunk - 1)
+    pad_x = (-x) % final_chunk  # 0..(final_chunk - 1)
+
+    # Only pad if necessary
+    if pad_y or pad_x:
+        return da.pad(
+            dask_array,
+            ((0, 0), (0, 0), (0, pad_y), (0, pad_x)),
+            mode="constant",
+            constant_values=np.nan,
+        )
+    return dask_array
+
+
 def earth_relative_wind_components(
     ugrd: xr.DataArray, vgrd: xr.DataArray
 ) -> tuple[
