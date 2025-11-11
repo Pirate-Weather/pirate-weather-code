@@ -43,6 +43,10 @@ def test_rtma_script_runs():
             timeout=600,  # 10 minute timeout
         )
 
+        # Print stdout and stderr for debugging if needed
+        print("STDOUT:\n", result.stdout)
+        print("STDERR:\n", result.stderr)
+
         # The script should either complete successfully (exit code 0)
         # or exit early if no update is needed (also exit code 0)
         assert result.returncode == 0, (
