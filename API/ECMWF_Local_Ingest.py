@@ -4,9 +4,9 @@
 # %% Import modules
 import os
 
-os.environ["ECCODES_DEFINITION_PATH"] = (
-    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
- )
+# os.environ["ECCODES_DEFINITION_PATH"] = (
+#    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+# )
 import pickle
 import shutil
 import subprocess
@@ -1069,4 +1069,4 @@ T2 = time.time()
 print(T2 - T0)
 
 
-#%% Test Read of local zarr
+# %% Test Read of local zarr
