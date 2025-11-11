@@ -1067,3 +1067,6 @@ shutil.rmtree(forecast_process_dir)
 
 T2 = time.time()
 print(T2 - T0)
+
+
+#%% Test Read of local zarr

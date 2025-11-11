@@ -79,11 +79,10 @@ def mask_invalid_refc(xrArr: "xr.DataArray") -> "xr.DataArray":
 
 
 def _start_stop(sl):
-    # Robust to (start, stop) tuples OR slice objects
+    # robust to (start, stop) tuples OR slice objects
     if isinstance(sl, slice):
         return sl.start, sl.stop
     return sl  # assume (start, stop)
-
 
 # Linear interpolation of time blocks in a dask array
 def interp_time_block(
