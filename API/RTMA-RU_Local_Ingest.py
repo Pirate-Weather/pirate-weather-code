@@ -15,7 +15,6 @@ import warnings
 # os.environ["ECCODES_DEFINITION_PATH"] = (
 #    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
 # )
-import dask.array as da
 import numpy as np
 import s3fs
 import xarray as xr
