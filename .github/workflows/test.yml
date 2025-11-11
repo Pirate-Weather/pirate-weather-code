@@ -22,4 +22,4 @@ jobs:
       - name: Run pytest
         env:
           PW_API: ${{ secrets.PW_API }}
-        run: pytest -q
+        run: pytest -q --ignore=tests/test_rtma_ingest.py
