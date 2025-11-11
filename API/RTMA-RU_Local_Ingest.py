@@ -264,7 +264,6 @@ zarr_array = zarr.create_array(
     chunks=(len(zarr_vars), 1, final_chunk, final_chunk),
     compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
     dtype="float32",
-    write_empty_chunks=True,
 )
 
 dask_var_array.to_zarr(zarr_array, overwrite=True, compute=True)
