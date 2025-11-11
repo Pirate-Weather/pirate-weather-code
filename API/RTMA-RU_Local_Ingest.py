@@ -13,7 +13,7 @@ import warnings
 # Define ECCODES_DEFINITION_PATH env variable for eccodes
 # This is needed in my testing instance- should not be required for the docker image
 os.environ["ECCODES_DEFINITION_PATH"] = (
-  "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
 )
 import dask.array as da
 import numpy as np
@@ -25,7 +25,6 @@ from herbie.fast import Herbie_latest
 from metpy.calc import relative_humidity_from_specific_humidity
 from metpy.units import units
 
-from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -49,7 +48,7 @@ logging.basicConfig(
 # ingest_version = INGEST_VERSION_STR
 
 #### TEMP FOR CHECK ###
-ingest_version = 'v30'
+ingest_version = "v30"
 
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/mnt/nvme/data/RTMA_RU"
@@ -241,13 +240,13 @@ else:
 
 # Add padding to the zarr store
 y, x = dask_var_array.shape[2], dask_var_array.shape[3]
-pad_y = (-y) % final_chunk   # 0..24
-pad_x = (-x) % final_chunk   # 0..24
+pad_y = (-y) % final_chunk  # 0..24
+pad_x = (-x) % final_chunk  # 0..24
 
 if pad_y or pad_x:
     dask_var_array = da.pad(
         dask_var_array,
-        ((0,0), (0,0), (0,pad_y), (0,pad_x)),
+        ((0, 0), (0, 0), (0, pad_y), (0, pad_x)),
         mode="constant",
         constant_values=np.nan,
     )

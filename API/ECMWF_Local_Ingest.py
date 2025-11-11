@@ -6,7 +6,7 @@ import os
 
 os.environ["ECCODES_DEFINITION_PATH"] = (
     "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
- )
+)
 import pickle
 import shutil
 import subprocess
@@ -743,7 +743,6 @@ for i in range(hisPeriod, 1, -12):
         method="linear",
     )
 
-
     # Merge the xarray objects
     xarray_hist_merged = xr.merge(
         [ifs_his_mf, aifs_his_mf, xr_enso_hisOut], compat="override", join="outer"
@@ -967,7 +966,6 @@ with ProgressBar():
     ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
-
 if saveType == "S3":
     zarr_store.close()
 
@@ -1069,4 +1067,4 @@ T2 = time.time()
 print(T2 - T0)
 
 
-#%% Test Read of local zarr
+# %% Test Read of local zarr

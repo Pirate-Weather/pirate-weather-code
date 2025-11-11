@@ -84,6 +84,7 @@ def _start_stop(sl):
         return sl.start, sl.stop
     return sl  # assume (start, stop)
 
+
 # Linear interpolation of time blocks in a dask array
 def interp_time_block(
     y_block, idx0, idx1, w, valid, nearest_idx=None, nearest_var=None, block_info=None
