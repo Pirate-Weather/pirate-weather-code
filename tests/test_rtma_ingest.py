@@ -1,11 +1,55 @@
 """Test for RTMA-RU ingest script functionality."""
 
 import ast
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
+
+
+def test_rtma_script_runs():
+    """Test that RTMA-RU_Local_Ingest.py runs successfully.
+
+    This test actually executes the script with appropriate environment variables
+    to ensure it can run without errors. The script will download real RTMA data
+    and process it.
+    """
+    rtma_script_path = (
+        Path(__file__).resolve().parents[1] / "API" / "RTMA-RU_Local_Ingest.py"
+    )
+
+    # Create a temporary directory for the test
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Set up environment variables for the script
+        env = os.environ.copy()
+        env["forecast_process_dir"] = os.path.join(tmpdir, "RTMA_RU")
+        env["forecast_path"] = os.path.join(tmpdir, "Prod", "RTMA_RU")
+        env["save_type"] = "Download"
+        env["AWS_KEY"] = ""
+        env["AWS_SECRET"] = ""
+        # Add the repository root to PYTHONPATH so API module can be imported
+        repo_root = str(Path(__file__).resolve().parents[1])
+        env["PYTHONPATH"] = repo_root + os.pathsep + env.get("PYTHONPATH", "")
+
+        # Run the script
+        result = subprocess.run(
+            [sys.executable, str(rtma_script_path)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=600,  # 10 minute timeout
+        )
+
+        # The script should either complete successfully (exit code 0)
+        # or exit early if no update is needed (also exit code 0)
+        assert result.returncode == 0, (
+            f"Script failed with exit code {result.returncode}\n"
+            f"STDOUT:\n{result.stdout}\n"
+            f"STDERR:\n{result.stderr}"
+        )
 
 
 def test_rtma_script_exists():
