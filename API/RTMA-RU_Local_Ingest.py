@@ -240,8 +240,8 @@ else:
 
 # Add padding to the zarr store
 y, x = dask_var_array.shape[2], dask_var_array.shape[3]
-pad_y = (-y) % final_chunk  # 0..24
-pad_x = (-x) % final_chunk  # 0..24
+pad_y = (-y) % final_chunk  # 0..(final_chunk - 1)
+pad_x = (-x) % final_chunk  # 0..(final_chunk - 1)
 
 # Pad the array
 if pad_y or pad_x:
