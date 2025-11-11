@@ -25,7 +25,7 @@ from herbie.fast import Herbie_latest
 from metpy.calc import relative_humidity_from_specific_humidity
 from metpy.units import units
 
-from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
+from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
