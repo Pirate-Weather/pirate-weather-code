@@ -243,6 +243,7 @@ y, x = dask_var_array.shape[2], dask_var_array.shape[3]
 pad_y = (-y) % final_chunk  # 0..24
 pad_x = (-x) % final_chunk  # 0..24
 
+# Pad the array
 if pad_y or pad_x:
     dask_var_array = da.pad(
         dask_var_array,
