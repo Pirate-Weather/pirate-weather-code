@@ -5809,7 +5809,7 @@ async def PW_Forecast(
     # Current temperature in Celsius (SI unit for text generation)
     curr_temp = (
         InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS
-    )  # temperature in Celsius
+    )  # Temperature in Celsius
 
     # Save SI unit values for text generation before converting to requested units
     curr_temp_si = curr_temp
