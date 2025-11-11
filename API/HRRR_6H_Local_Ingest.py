@@ -391,8 +391,8 @@ daskVarArrayListMergeNaN.to_zarr(
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
-# Add padding to the zarr store
-daskVarArrayStackDisk = pad_to_chunk_size(daskVarArrayStackDisk, finalChunk)
+# Add padding to the zarr store for main forecast chunking
+daskVarArrayStackDisk_main = pad_to_chunk_size(daskVarArrayStackDisk, finalChunk)
 
 # Create a zarr backed dask array
 if saveType == "S3":
@@ -407,8 +407,8 @@ zarr_array = zarr.create_array(
     shape=(
         len(zarrVars),
         len(npCatTimes),
-        daskVarArrayStackDisk.shape[2],
-        daskVarArrayStackDisk.shape[3],
+        daskVarArrayStackDisk_main.shape[2],
+        daskVarArrayStackDisk_main.shape[3],
     ),
     chunks=(len(zarrVars), len(npCatTimes), finalChunk, finalChunk),
     compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
@@ -418,7 +418,7 @@ zarr_array = zarr.create_array(
 
 # with ProgressBar():
 da.rechunk(
-    daskVarArrayStackDisk.round(5),
+    daskVarArrayStackDisk_main.round(5),
     (len(zarrVars), len(npCatTimes), finalChunk, finalChunk),
 ).to_zarr(zarr_array, compute=True)
 
