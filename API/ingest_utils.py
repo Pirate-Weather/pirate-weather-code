@@ -79,7 +79,7 @@ def mask_invalid_refc(xrArr: "xr.DataArray") -> "xr.DataArray":
 
 
 def _start_stop(sl):
-    # robust to (start, stop) tuples OR slice objects
+    # Robust to (start, stop) tuples OR slice objects
     if isinstance(sl, slice):
         return sl.start, sl.stop
     return sl  # assume (start, stop)
