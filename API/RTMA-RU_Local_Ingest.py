@@ -15,6 +15,7 @@ import warnings
 os.environ["ECCODES_DEFINITION_PATH"] = (
   "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
 )
+import dask.array as da
 import numpy as np
 import s3fs
 import xarray as xr
@@ -45,7 +46,11 @@ logging.basicConfig(
 
 
 # %% Setup paths and parameters
-ingest_version = INGEST_VERSION_STR
+# ingest_version = INGEST_VERSION_STR
+
+#### TEMP FOR CHECK ###
+ingest_version = 'v30'
+
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/mnt/nvme/data/RTMA_RU"
 )
@@ -234,6 +239,19 @@ if save_type == "S3":
 else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/RTMA_RU.zarr")
 
+# Add padding to the zarr store
+y, x = dask_var_array.shape[2], dask_var_array.shape[3]
+pad_y = (-y) % final_chunk   # 0..24
+pad_x = (-x) % final_chunk   # 0..24
+
+if pad_y or pad_x:
+    dask_var_array = da.pad(
+        dask_var_array,
+        ((0,0), (0,0), (0,pad_y), (0,pad_x)),
+        mode="constant",
+        constant_values=np.nan,
+    )
+
 # Create zarr array
 zarr_array = zarr.create_array(
     store=zarr_store,
@@ -246,6 +264,7 @@ zarr_array = zarr.create_array(
     chunks=(len(zarr_vars), 1, final_chunk, final_chunk),
     compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
     dtype="float32",
+    write_empty_chunks=True,
 )
 
 dask_var_array.to_zarr(zarr_array, overwrite=True, compute=True)
