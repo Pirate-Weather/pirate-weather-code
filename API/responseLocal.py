@@ -2931,7 +2931,7 @@ async def PW_Forecast(
         "precipIntensityError",
         "precipType",
     ]
-    if version > 2:
+    if version >= 2:
         minuteKeys += ["rainIntensity", "snowIntensity", "sleetIntensity"]
 
     # Calculate type-specific intensities for minutely (in SI units - mm/h liquid equivalent)
@@ -3011,7 +3011,7 @@ async def PW_Forecast(
             float(minuteIntensityError[idx]) * prepIntensityUnit,
             minuteType[idx],
         ]
-        if version > 2:
+        if version >= 2:
             values += [
                 float(minuteRainIntensity[idx]) * prepIntensityUnit,
                 float(minuteSnowIntensity[idx]) * prepIntensityUnit,
@@ -3019,7 +3019,7 @@ async def PW_Forecast(
             ]
         minuteItems.append(dict(zip(minuteKeys, values)))
 
-        # SI version always includes all keys
+        # SI object always includes all keys
         values_si = [
             int(minuteTimes[idx]),
             float(minuteIntensity[idx]),

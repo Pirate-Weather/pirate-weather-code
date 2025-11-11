@@ -958,8 +958,8 @@ with ProgressBar():
         idx1,
         w,
         valid,
-        nearest_idx,
-        int_var_indices,
+        nearest_idx=np.asarray(nearest_idx),
+        nearest_var=set(int_var_indices),
         dtype="float32",
         chunks=(1, len(hourly_timesUnix), processChunk, processChunk),
     ).round(5).rechunk(
