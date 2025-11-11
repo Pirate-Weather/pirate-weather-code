@@ -29,6 +29,7 @@ from API.ingest_utils import (
     FORECAST_LEAD_RANGES,
     mask_invalid_data,
     mask_invalid_refc,
+    pad_to_chunk_size,
     validate_grib_stats,
 )
 
@@ -389,6 +390,9 @@ daskVarArrayListMergeNaN.to_zarr(
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
+
+# Add padding to the zarr store
+daskVarArrayStackDisk = pad_to_chunk_size(daskVarArrayStackDisk, finalChunk)
 
 # Create a zarr backed dask array
 if saveType == "S3":

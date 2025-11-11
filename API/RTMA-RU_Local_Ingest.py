@@ -15,7 +15,6 @@ import warnings
 # os.environ["ECCODES_DEFINITION_PATH"] = (
 #    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
 # )
-import dask.array as da
 import numpy as np
 import s3fs
 import xarray as xr
@@ -25,6 +24,7 @@ from herbie.fast import Herbie_latest
 from metpy.calc import relative_humidity_from_specific_humidity
 from metpy.units import units
 
+from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -32,6 +32,7 @@ from API.ingest_utils import (
     VALID_DATA_MIN,
     earth_relative_wind_components,
     mask_invalid_data,
+    pad_to_chunk_size,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -43,12 +44,8 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-
 # %% Setup paths and parameters
-# ingest_version = INGEST_VERSION_STR
-
-#### TEMP FOR CHECK ###
-ingest_version = "v30"
+ingest_version = INGEST_VERSION_STR
 
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/mnt/nvme/data/RTMA_RU"
@@ -230,6 +227,9 @@ xarray_analysis_stack = (
 # Mask out invalid data
 dask_var_array = mask_invalid_data(xarray_analysis_stack)
 
+# Add padding to the zarr store
+dask_var_array = pad_to_chunk_size(dask_var_array, final_chunk)
+
 # Create a zarr backed dask array
 if save_type == "S3":
     zarr_store = zarr.storage.ZipStore(
@@ -237,20 +237,6 @@ if save_type == "S3":
     )
 else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/RTMA_RU.zarr")
-
-# Add padding to the zarr store
-y, x = dask_var_array.shape[2], dask_var_array.shape[3]
-pad_y = (-y) % final_chunk  # 0..(final_chunk - 1)
-pad_x = (-x) % final_chunk  # 0..(final_chunk - 1)
-
-# Pad the array
-if pad_y or pad_x:
-    dask_var_array = da.pad(
-        dask_var_array,
-        ((0, 0), (0, 0), (0, pad_y), (0, pad_x)),
-        mode="constant",
-        constant_values=np.nan,
-    )
 
 # Create zarr array
 zarr_array = zarr.create_array(

@@ -32,6 +32,7 @@ from API.ingest_utils import (
     VALID_DATA_MAX,
     VALID_DATA_MIN,
     interp_time_block,
+    pad_to_chunk_size,
     validate_grib_stats,
 )
 
@@ -902,6 +903,8 @@ daskVarArrayStackDisk = da.from_zarr(
     forecast_process_path + "_stack.zarr", component="__xarray_dataarray_variable__"
 )
 
+# Add padding to the zarr store
+daskVarArrayStackDisk = pad_to_chunk_size(daskVarArrayStackDisk, finalChunk)
 
 # Create a zarr backed dask array
 if saveType == "S3":
