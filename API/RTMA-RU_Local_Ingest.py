@@ -33,6 +33,7 @@ from API.ingest_utils import (
     VALID_DATA_MIN,
     earth_relative_wind_components,
     mask_invalid_data,
+    pad_to_chunk_size,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -227,6 +228,9 @@ xarray_analysis_stack = (
 # Mask out invalid data
 dask_var_array = mask_invalid_data(xarray_analysis_stack)
 
+# Add padding to the zarr store
+dask_var_array = pad_to_chunk_size(dask_var_array, final_chunk)
+
 # Create a zarr backed dask array
 if save_type == "S3":
     zarr_store = zarr.storage.ZipStore(
@@ -234,20 +238,6 @@ if save_type == "S3":
     )
 else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/RTMA_RU.zarr")
-
-# Add padding to the zarr store
-y, x = dask_var_array.shape[2], dask_var_array.shape[3]
-pad_y = (-y) % final_chunk  # 0..(final_chunk - 1)
-pad_x = (-x) % final_chunk  # 0..(final_chunk - 1)
-
-# Pad the array
-if pad_y or pad_x:
-    dask_var_array = da.pad(
-        dask_var_array,
-        ((0, 0), (0, 0), (0, pad_y), (0, pad_x)),
-        mode="constant",
-        constant_values=np.nan,
-    )
 
 # Create zarr array
 zarr_array = zarr.create_array(
