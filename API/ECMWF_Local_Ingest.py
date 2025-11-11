@@ -4,9 +4,8 @@
 # %% Import modules
 import os
 
-# Developer note: If you have eccodes installed in a non-standard location,
 # os.environ["ECCODES_DEFINITION_PATH"] = (
-#     "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+#    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
 # )
 import pickle
 import shutil
@@ -1066,3 +1065,6 @@ shutil.rmtree(forecast_process_dir)
 
 T2 = time.time()
 print(T2 - T0)
+
+
+# %% Test Read of local zarr

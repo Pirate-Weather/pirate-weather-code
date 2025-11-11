@@ -438,7 +438,6 @@ print(
     f"Built GeoDataFrame with {len(wmo_gdf)} polygons from {wmo_gdf['source_id'].nunique()} sources."
 )
 
-# %% TODO: Take the polygons, generate a grid, and determine which points are inside which polygons.
 # Then save a zarr zip the same way NWS alerts does
 
 # Create a grid of points, using a 0.125 degree spacing
