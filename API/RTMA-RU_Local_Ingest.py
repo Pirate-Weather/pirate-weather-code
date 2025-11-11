@@ -43,12 +43,8 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-
 # %% Setup paths and parameters
-# ingest_version = INGEST_VERSION_STR
-
-#### TEMP FOR CHECK ###
-ingest_version = "v30"
+ingest_version = INGEST_VERSION_STR
 
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/mnt/nvme/data/RTMA_RU"

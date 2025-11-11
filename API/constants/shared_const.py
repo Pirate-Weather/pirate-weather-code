@@ -11,7 +11,7 @@ MISSING_DATA = np.nan
 REFC_THRESHOLD = 5.0
 
 # Ingest version
-INGEST_VERSION_STR = "v29"
+INGEST_VERSION_STR = "v30"
 
 # Convert Kelvin to Celsius
 KELVIN_TO_CELSIUS = 273.15
