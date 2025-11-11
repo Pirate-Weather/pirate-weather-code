@@ -1005,7 +1005,11 @@ for z in [0, 3, 5, 6, 7, 8, 9]:
     zarr_array = zarr.create_array(
         store=zarr_store_maps,
         name=zarrVars[z],
-        shape=(36, daskVarArrayStackDisk_maps.shape[2], daskVarArrayStackDisk_maps.shape[3]),
+        shape=(
+            36,
+            daskVarArrayStackDisk_maps.shape[2],
+            daskVarArrayStackDisk_maps.shape[3],
+        ),
         chunks=(36, 100, 100),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
         dtype="float32",
