@@ -1,17 +1,16 @@
 # %% Import modules
+import logging
 import os
 import pickle
 import shutil
 import sys
 import time
 import warnings
-import requests
-import logging
 from datetime import datetime, timedelta, timezone
 
+import requests
 import s3fs
 import xarray as xr
-
 from dask.diagnostics import ProgressBar
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")

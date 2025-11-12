@@ -9,30 +9,28 @@
 # Date: June 2025
 
 # %% Import modules
+import io
+import logging
 import os
 import pickle
 import shutil
 import sys
 import time
 import warnings
-from datetime import datetime
-import logging
-
-import numpy as np
-import pandas as pd
-import xarray as xr
-import requests
-import io
 import zipfile
-from pykml import parser
+from datetime import datetime
 
 import dask.array as da
+import numpy as np
+import pandas as pd
+import requests
+import s3fs
+import xarray as xr
+from pykml import parser
 from scipy.interpolate import griddata
 from scipy.spatial import (
     cKDTree,
 )
-
-import s3fs
 
 # Suppress specific warnings that might arise from pandas/xarray operations with NaNs
 warnings.filterwarnings("ignore", "This pattern is interpreted")
