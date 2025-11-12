@@ -26,11 +26,16 @@ import pandas as pd
 import requests
 import s3fs
 import xarray as xr
+import zarr
+import zarr.storage
 from pykml import parser
 from scipy.interpolate import griddata
 from scipy.spatial import (
     cKDTree,
 )
+
+from API.constants.shared_const import INGEST_VERSION_STR
+from API.ingest_utils import CHUNK_SIZES
 
 # Suppress specific warnings that might arise from pandas/xarray operations with NaNs
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -710,10 +715,10 @@ def interpolate_dwd_to_grid(
         coords={"time": dwd_ds_point.time, "latitude": gfs_lats, "longitude": gfs_lons}
     )
 
-    # Define optimal chunking for the output gridded data.
-    # Chunk over time dimension (e.g., 1 time step per chunk) and potentially subdivide lat/lon.
-    # This enables Dask to parallelize computations efficiently.
-    output_grid_chunk_shape = (1, len(gfs_lats) // 10, len(gfs_lons) // 10)
+    # Define optimal chunking for the output gridded data using shared CHUNK_SIZES.
+    # Chunk over time dimension (e.g., 1 time step per chunk) and spatial chunks from CHUNK_SIZES
+    processChunk = CHUNK_SIZES.get("GFS", 50)
+    output_grid_chunk_shape = (1, processChunk, processChunk)
 
     # --- Interpolate Numerical Variables ---
     for var_name in numerical_variables_to_interpolate:
@@ -836,291 +841,237 @@ def interpolate_dwd_to_grid(
 
 
 # --- Main Ingest Execution Block ---
-# All main logic has been removed from the __main__ block for direct importability.
-# The code below is for demonstration and would typically be called from another script.
+# This script follows the same top-level script style as other ingest scripts in
+# the repository (no `main()` wrapper). It expects environment variables to be
+# set for paths and S3 options when run as a script.
 
+# --- Configuration ---
+# URL for the DWD MOSMIX-S latest 240-hour forecast KMZ file
+dwd_mosmix_url = "https://opendata.dwd.de/weather/local_forecasts/mos/MOSMIX_S/all_stations/kml/MOSMIX_S_LATEST_240.kmz"
+downloaded_kmz_file = "MOSMIX_S_LATEST_240.kmz"
 
-def main():
-    # --- Configuration ---
-    # URL for the DWD MOSMIX-S latest 240-hour forecast KMZ file
-    dwd_mosmix_url = "https://opendata.dwd.de/weather/local_forecasts/mos/MOSMIX_S/all_stations/kml/MOSMIX_S_LATEST_240.kmz"
-    downloaded_kmz_file = "MOSMIX_S_LATEST_240.kmz"
+ingestVersion = INGEST_VERSION_STR
 
-    # Base directory for all processing and output files.
-    forecast_process_dir = os.getenv("forecast_process_dir", "/home/ubuntu/Weather/DWD")
-    # Temporary directory for downloaded files.
-    tmpDIR = os.getenv("tmp_dir", os.path.join(forecast_process_dir, "Downloads"))
-    # Final destination directory for processed Zarr files.
-    forecast_path = os.getenv("forecast_path", "/home/ubuntu/Weather/Prod/DWD")
+# Base directory for all processing and output files.
+forecast_process_dir = os.getenv(
+    "forecast_process_dir", "/home/ubuntu/Weather/Process/DWD"
+)
+# Temporary directory for downloaded files.
+tmpDIR = os.getenv("tmp_dir", os.path.join(forecast_process_dir, "Downloads"))
+# Final destination directory for processed Zarr files.
+forecast_path = os.getenv("forecast_path", "/home/ubuntu/Weather/Prod/DWD")
 
-    # Path to an existing GFS Zarr file that will be used as the reference grid.
-    # This environment variable MUST be set for the script to run correctly.
-    gfs_zarr_reference_path = os.getenv(
-        "GFS_ZARR_PATH", "/path/to/your/GFS.zarr"
-    )  # TODO: Set this environment variable!
+# Path to an existing GFS Zarr file that will be used as the reference grid.
+# This environment variable MUST be set for the script to run correctly.
+gfs_zarr_reference_path = os.getenv("GFS_ZARR_PATH", "/path/to/your/GFS.zarr")
 
-    # Defines where the final Zarr file should be saved: "Download" (local) or "S3" (AWS S3).
-    saveType = os.getenv("save_type", "Download")
-    # AWS Credentials for S3 operations (should be set as environment variables).
-    aws_access_key_id = os.environ.get("AWS_KEY", "")
-    aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+# Defines where the final Zarr file should be saved: "Download" (local) or "S3" (AWS S3).
+saveType = os.getenv("save_type", "Download")
+# AWS Credentials for S3 operations (should be set as environment variables).
+aws_access_key_id = os.environ.get("AWS_KEY", "")
+aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
-    # Initialize S3 filesystem object if saving to S3.
-    s3 = None
-    if saveType == "S3":
-        s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+# Initialize S3 filesystem object if saving to S3.
+s3 = None
+if saveType == "S3":
+    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
-    # --- Directory Setup and Cleanup ---
-    # Create the main processing directory; remove and recreate if it already exists for a clean slate.
-    os.makedirs(forecast_process_dir, exist_ok=True)
-    if os.path.exists(forecast_process_dir):
-        shutil.rmtree(forecast_process_dir)  # Cleans up any previous partial runs
-    os.makedirs(forecast_process_dir)
+# zarr import for S3 stores (imports are at top)
 
-    # Create the temporary download directory.
-    os.makedirs(tmpDIR, exist_ok=True)
+# --- Directory Setup and Cleanup ---
+# Create the main processing directory; remove and recreate if it already exists for a clean slate.
+if os.path.exists(forecast_process_dir):
+    shutil.rmtree(forecast_process_dir)
+os.makedirs(forecast_process_dir, exist_ok=True)
 
-    # Create the final forecast output directory if saving locally.
-    if saveType == "Download":
-        os.makedirs(forecast_path, exist_ok=True)
+# Create the temporary download directory.
+os.makedirs(tmpDIR, exist_ok=True)
 
-    T0 = time.time()  # Start timer for script execution
+# Create the final forecast output directory if saving locally (versioned by ingest).
+if saveType == "Download":
+    os.makedirs(os.path.join(forecast_path, ingestVersion), exist_ok=True)
 
-    # --- Step 1: Download and Parse DWD MOSMIX-S KML/KMZ Data ---
+T0 = time.time()  # Start timer for script execution
+
+# --- Step 1: Download and Parse DWD MOSMIX-S KML/KMZ Data ---
+logging.info(f"\n--- Attempting to download DWD MOSMIX data from: {dwd_mosmix_url} ---")
+try:
+    response = requests.get(dwd_mosmix_url, stream=True)
+    response.raise_for_status()  # Raises HTTPError for bad responses (4xx or 5xx)
+    with open(os.path.join(tmpDIR, downloaded_kmz_file), "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            f.write(chunk)
     logging.info(
-        f"\n--- Attempting to download DWD MOSMIX data from: {dwd_mosmix_url} ---"
+        f"File downloaded successfully to: {os.path.join(tmpDIR, downloaded_kmz_file)}"
     )
+except Exception as e:
+    logging.critical(f"Error downloading DWD data: {e}. Exiting.")
+    sys.exit(1)
+
+logging.info(
+    f"\n--- Reading and Parsing KML from {os.path.join(tmpDIR, downloaded_kmz_file)} ---"
+)
+df_data, global_metadata = parse_mosmix_kml(os.path.join(tmpDIR, downloaded_kmz_file))
+if df_data.empty:
+    logging.critical("No data extracted from KML/KMZ. Exiting.")
+    sys.exit(1)
+
+# --- Ensure unique stations based on latitude and longitude ---
+initial_station_count = df_data["station_id"].nunique()
+df_data_unique_stations = df_data.drop_duplicates(
+    subset=["latitude", "longitude"], keep="first"
+)
+unique_station_count = df_data_unique_stations["station_id"].nunique()
+
+if initial_station_count > unique_station_count:
+    logging.info(
+        f"Removed {initial_station_count - unique_station_count} duplicate stations based on latitude/longitude."
+    )
+    logging.info(
+        f"Proceeding with {unique_station_count} unique stations for interpolation."
+    )
+else:
+    logging.info(
+        "No duplicate stations found based on latitude/longitude in the raw data."
+    )
+
+df_data = df_data_unique_stations
+
+# Extract the base time from the KML metadata (IssueTime) for update checks.
+base_time = global_metadata.get("IssueTime", datetime.utcnow())
+logging.info(f"Base time for this ingest run (from KML metadata): {base_time}")
+
+# --- Check for Updates (Skip if no new data) ---
+final_time_pickle_path = os.path.join(forecast_path, ingestVersion, "DWD.time.pickle")
+if saveType == "S3":
+    s3_bucket_name = os.getenv("s3_bucket", "your-s3-bucket")
+    s3_time_pickle_key = os.path.join("ForecastTar_v2", "DWD.time.pickle")
     try:
-        response = requests.get(dwd_mosmix_url, stream=True)
-        response.raise_for_status()  # Raises HTTPError for bad responses (4xx or 5xx)
-        with open(os.path.join(tmpDIR, downloaded_kmz_file), "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
+        with s3.open(f"{s3_bucket_name}/{s3_time_pickle_key}", "rb") as f:
+            previous_base_time = pickle.load(f)
+        if previous_base_time >= base_time:
+            logging.info("No new update to DWD found in S3, ending script.")
+            sys.exit()
+    except FileNotFoundError:
         logging.info(
-            f"File downloaded successfully to: {os.path.join(tmpDIR, downloaded_kmz_file)}"
+            "Previous DWD time pickle not found in S3, proceeding with ingest."
         )
     except Exception as e:
-        logging.critical(f"Error downloading DWD data: {e}. Exiting.")
-        sys.exit(1)
+        logging.error(f"Error checking previous DWD time in S3: {e}. Proceeding.")
+else:
+    if os.path.exists(final_time_pickle_path):
+        with open(final_time_pickle_path, "rb") as file:
+            previous_base_time = pickle.load(file)
+        if previous_base_time >= base_time:
+            logging.info("No new update to DWD found locally, ending script.")
+            sys.exit()
 
-    logging.info(
-        f"\n--- Reading and Parsing KML from {os.path.join(tmpDIR, downloaded_kmz_file)} ---"
+# --- Step 2: Convert Pandas DataFrame to xarray Dataset (Point-Based Format) ---
+logging.info("\n--- Converting DataFrame to xarray Dataset (point-based) ---")
+dwd_ds_point = convert_df_to_xarray(df_data, global_metadata=global_metadata)
+if not dwd_ds_point.dims:
+    logging.critical("Point-based xarray Dataset is empty after conversion. Exiting.")
+    sys.exit(1)
+logging.info("Point-based DWD Dataset preview:\n%s", dwd_ds_point)
+
+# --- Step 3: Load GFS Grid Coordinates for Target Interpolation Grid ---
+logging.info(f"\n--- Loading GFS grid coordinates from: {gfs_zarr_reference_path} ---")
+gfs_lats, gfs_lons = load_gfs_grid_coordinates(gfs_zarr_reference_path)
+if gfs_lats is None or gfs_lons is None:
+    logging.critical("Failed to load GFS grid coordinates. Exiting.")
+    sys.exit(1)
+
+# --- Step 4: Interpolate DWD Point Data to the GFS Grid ---
+logging.info("\n--- Interpolating DWD point data to GFS grid ---")
+gridded_dwd_ds = interpolate_dwd_to_grid(
+    dwd_ds_point, gfs_lats, gfs_lons, api_target_numerical_variables, zarrVars
+)
+
+logging.info("\nGridded DWD Dataset preview (after interpolation):\n%s", gridded_dwd_ds)
+logging.info(f"\nGridded DWD Dataset dimensions: {gridded_dwd_ds.dims}")
+logging.info(
+    f"Gridded DWD Dataset data variables: {list(gridded_dwd_ds.data_vars.keys())}"
+)
+
+# --- Step 5: Save Gridded DWD Dataset to Zarr ---
+gridded_zarr_output_full_path = os.path.join(forecast_process_dir, "DWD_Gridded.zarr")
+logging.info(
+    f"\n--- Saving Gridded xarray Dataset to Zarr: {gridded_zarr_output_full_path} ---"
+)
+
+if saveType == "S3":
+    # Write directly to S3-backed zarr store to match other ingest scripts
+    s3_bucket_name = os.getenv("s3_bucket", "your-s3-bucket")
+    s3_gridded_zarr_key = os.path.join("ForecastTar_v2", "DWD.zarr")
+    s3_url = f"s3://{s3_bucket_name}/{s3_gridded_zarr_key}"
+    zarr_store = zarr.storage.FsspecStore.from_url(
+        s3_url,
+        storage_options={"key": aws_access_key_id, "secret": aws_secret_access_key},
     )
-    df_data, global_metadata = parse_mosmix_kml(
-        os.path.join(tmpDIR, downloaded_kmz_file)
-    )
-    if df_data.empty:
-        logging.critical("No data extracted from KML/KMZ. Exiting.")
-        sys.exit(1)
-
-    # --- Ensure unique stations based on latitude and longitude ---
-    # This step filters out stations that might have different IDs but identical lat/lon coordinates.
-    initial_station_count = df_data["station_id"].nunique()
-    # Use drop_duplicates on the lat/lon subset, keeping the first occurrence.
-    df_data_unique_stations = df_data.drop_duplicates(
-        subset=["latitude", "longitude"], keep="first"
-    )
-    unique_station_count = df_data_unique_stations["station_id"].nunique()
-
-    if initial_station_count > unique_station_count:
-        logging.info(
-            f"Removed {initial_station_count - unique_station_count} duplicate stations based on latitude/longitude."
-        )
-        logging.info(
-            f"Proceeding with {unique_station_count} unique stations for interpolation."
-        )
-    else:
-        logging.info(
-            "No duplicate stations found based on latitude/longitude in the raw data."
-        )
-
-    df_data = df_data_unique_stations  # Use the filtered DataFrame for all subsequent processing
-
-    # Extract the base time from the KML metadata (IssueTime) for update checks.
-    base_time = global_metadata.get("IssueTime", datetime.utcnow())
-    logging.info(f"Base time for this ingest run (from KML metadata): {base_time}")
-
-    # --- Check for Updates (Skip if no new data) ---
-    # This prevents redundant processing if the latest downloaded data is not newer than the last ingested.
-    final_time_pickle_path = os.path.join(forecast_path, "DWD.time.pickle")
-    if saveType == "S3":
-        s3_bucket_name = os.getenv(
-            "s3_bucket", "your-s3-bucket"
-        )  # Ensure this env var is set
-        s3_time_pickle_key = os.path.join("ForecastTar_v2", "DWD.time.pickle")
-        try:
-            with s3.open(f"{s3_bucket_name}/{s3_time_pickle_key}", "rb") as f:
-                previous_base_time = pickle.load(f)
-            if previous_base_time >= base_time:
-                logging.info("No new update to DWD found in S3, ending script.")
-                sys.exit()
-        except FileNotFoundError:
-            logging.info(
-                "Previous DWD time pickle not found in S3, proceeding with ingest."
-            )
-        except Exception as e:
-            logging.error(f"Error checking previous DWD time in S3: {e}. Proceeding.")
-    else:  # saveType == "Download" (local check)
-        if os.path.exists(final_time_pickle_path):
-            with open(final_time_pickle_path, "rb") as file:
-                previous_base_time = pickle.load(file)
-            if previous_base_time >= base_time:
-                logging.info("No new update to DWD found locally, ending script.")
-                sys.exit()
-
-    # --- Step 2: Convert Pandas DataFrame to xarray Dataset (Point-Based Format) ---
-    # This step transforms the flat DataFrame into an xarray Dataset with station_id and time as dimensions.
-    logging.info("\n--- Converting DataFrame to xarray Dataset (point-based) ---")
-    dwd_ds_point = convert_df_to_xarray(df_data, global_metadata=global_metadata)
-    if (
-        not dwd_ds_point.dims
-    ):  # Check if the resulting dataset has dimensions (i.e., is not empty)
-        logging.critical(
-            "Point-based xarray Dataset is empty after conversion. Exiting."
-        )
-        sys.exit(1)
-    logging.info("Point-based DWD Dataset preview:\n%s", dwd_ds_point)
-
-    # --- Step 3: Load GFS Grid Coordinates for Target Interpolation Grid ---
-    # This provides the target latitude and longitude arrays for the interpolation.
-    logging.info(
-        f"\n--- Loading GFS grid coordinates from: {gfs_zarr_reference_path} ---"
-    )
-    gfs_lats, gfs_lons = load_gfs_grid_coordinates(gfs_zarr_reference_path)
-    if gfs_lats is None or gfs_lons is None:
-        logging.critical("Failed to load GFS grid coordinates. Exiting.")
-        sys.exit(1)
-
-    # --- Step 4: Interpolate DWD Point Data to the GFS Grid ---
-    # This is the core transformation where point data is converted to gridded data (4D array).
-    # Dask is leveraged internally by `xr.apply_ufunc` for parallel processing.
-    logging.info("\n--- Interpolating DWD point data to GFS grid ---")
-    gridded_dwd_ds = interpolate_dwd_to_grid(
-        dwd_ds_point, gfs_lats, gfs_lons, api_target_numerical_variables, zarrVars
-    )
-
-    logging.info(
-        "\nGridded DWD Dataset preview (after interpolation):\n%s", gridded_dwd_ds
-    )
-    logging.info(f"\nGridded DWD Dataset dimensions: {gridded_dwd_ds.dims}")
-    logging.info(
-        f"Gridded DWD Dataset data variables: {list(gridded_dwd_ds.data_vars.keys())}"
-    )
-
-    # --- Step 5: Save Gridded DWD Dataset to Zarr ---
-    # The final gridded and interpolated data is saved as a Zarr store.
-    gridded_zarr_output_full_path = os.path.join(
-        forecast_process_dir, "DWD_Gridded.zarr"
-    )
-    logging.info(
-        f"\n--- Saving Gridded xarray Dataset to Zarr: {gridded_zarr_output_full_path} ---"
-    )
+    gridded_dwd_ds.to_zarr(store=zarr_store, mode="w", consolidated=False)
+else:
     save_to_zarr(gridded_dwd_ds, gridded_zarr_output_full_path)
 
-    # --- Step 6: Save Original Station Metadata (for API's 'nearest station' logic) ---
-    # This saves a separate JSON file containing the original unique station details,
-    # which can be used by the API to find the nearest station to a query point.
-    station_metadata_df = (
-        df_data[["station_id", "station_name", "latitude", "longitude", "altitude"]]
-        .drop_duplicates(subset="station_id")
-        .set_index("station_id")
+# --- Step 6: Save Original Station Metadata (for API's 'nearest station' logic) ---
+station_metadata_df = (
+    df_data[["station_id", "station_name", "latitude", "longitude", "altitude"]]
+    .drop_duplicates(subset="station_id")
+    .set_index("station_id")
+)
+station_metadata_path = os.path.join(forecast_process_dir, "DWD_Station_Metadata.json")
+logging.info(f"\n--- Saving original station metadata to: {station_metadata_path} ---")
+station_metadata_df.to_json(station_metadata_path, orient="index")
+logging.info("Station metadata saved.")
+
+# --- Step 7: Final Data Transfer (Upload to S3 or Copy Locally) ---
+final_gridded_zarr_target_path = os.path.join(forecast_path, ingestVersion, "DWD.zarr")
+final_time_pickle_path_dest = os.path.join(
+    forecast_path, ingestVersion, "DWD.time.pickle"
+)
+
+if saveType == "S3":
+    # Upload time pickle and metadata using s3fs helper methods
+    temp_time_pickle_source_path = os.path.join(forecast_process_dir, "DWD.time.pickle")
+    with open(temp_time_pickle_source_path, "wb") as file:
+        pickle.dump(base_time, file)
+    s3.put_file(temp_time_pickle_source_path, f"{s3_bucket_name}/{s3_time_pickle_key}")
+
+    # Upload station metadata
+    s3.put_file(
+        station_metadata_path,
+        f"{s3_bucket_name}/{os.path.join('ForecastTar_v2', 'DWD_Station_Metadata.json')}",
     )
-    station_metadata_path = os.path.join(
-        forecast_process_dir, "DWD_Station_Metadata.json"
+    logging.info("All files uploaded to S3.")
+else:
+    # Save and move time pickle to final local path
+    temp_time_pickle_source_path = os.path.join(forecast_process_dir, "DWD.time.pickle")
+    with open(temp_time_pickle_source_path, "wb") as file:
+        pickle.dump(base_time, file)
+    shutil.move(temp_time_pickle_source_path, final_time_pickle_path_dest)
+
+    # Copy gridded Zarr directory to final local path (versioned)
+    shutil.copytree(
+        gridded_zarr_output_full_path,
+        final_gridded_zarr_target_path,
+        dirs_exist_ok=True,
+    )
+
+    # Copy station metadata JSON to final local path
+    shutil.copy(
+        station_metadata_path,
+        os.path.join(forecast_path, ingestVersion, "DWD_Station_Metadata.json"),
     )
     logging.info(
-        f"\n--- Saving original station metadata to: {station_metadata_path} ---"
+        f"All files copied locally to {os.path.join(forecast_path, ingestVersion)}."
     )
-    station_metadata_df.to_json(
-        station_metadata_path, orient="index"
-    )  # Saves as a dictionary-like JSON (station_id as key)
-    logging.info("Station metadata saved.")
 
-    # --- Step 7: Final Data Transfer (Upload to S3 or Copy Locally) ---
-    # This step moves the processed Zarr file and associated metadata to their final destination.
-    final_gridded_zarr_target_path = os.path.join(
-        forecast_path, "DWD.zarr"
-    )  # Standardized name for API consumption
-    final_time_pickle_path_dest = os.path.join(forecast_path, "DWD.time.pickle")
+# --- Final Cleanup ---
+if os.path.exists(forecast_process_dir):
+    shutil.rmtree(forecast_process_dir)
+    logging.info(f"\nCleaned up processing directory: {forecast_process_dir}")
+if os.path.exists(tmpDIR):
+    shutil.rmtree(tmpDIR)
+    logging.info(f"Cleaned up downloads directory: {tmpDIR}")
 
-    if saveType == "S3":
-        s3_bucket_name = os.getenv(
-            "s3_bucket", "your-s3-bucket"
-        )  # Ensure this env var is set
-        s3_gridded_zarr_key = os.path.join(
-            "ForecastTar_v2", "DWD.zarr"
-        )  # Example S3 key path for gridded Zarr
-        s3_time_pickle_key_upload = os.path.join(
-            "ForecastTar_v2", "DWD.time.pickle"
-        )  # S3 key for time pickle
-        s3_station_metadata_key = os.path.join(
-            "ForecastTar_v2", "DWD_Station_Metadata.json"
-        )  # S3 key for station metadata
-
-        logging.info(
-            f"Uploading gridded Zarr from {gridded_zarr_output_full_path} to S3://{s3_bucket_name}/{s3_gridded_zarr_key}"
-        )
-        s3.put(
-            gridded_zarr_output_full_path,
-            f"{s3_bucket_name}/{s3_gridded_zarr_key}",
-            recursive=True,
-        )
-
-        # Save and upload time pickle
-        temp_time_pickle_source_path = os.path.join(
-            forecast_process_dir, "DWD.time.pickle"
-        )
-        with open(temp_time_pickle_source_path, "wb") as file:
-            pickle.dump(base_time, file)
-        logging.info(
-            f"Uploading time pickle from {temp_time_pickle_source_path} to S3://{s3_bucket_name}/{s3_time_pickle_key_upload}"
-        )
-        s3.put_file(
-            temp_time_pickle_source_path,
-            f"{s3_bucket_name}/{s3_time_pickle_key_upload}",
-        )
-
-        # Upload station metadata JSON
-        logging.info(
-            f"Uploading station metadata from {station_metadata_path} to S3://{s3_bucket_name}/{s3_station_metadata_key}"
-        )
-        s3.put_file(
-            station_metadata_path, f"{s3_bucket_name}/{s3_station_metadata_key}"
-        )
-
-        logging.info("All files uploaded to S3.")
-
-    else:  # saveType == "Download" (local copy operation)
-        # Save and move time pickle to final local path
-        temp_time_pickle_source_path = os.path.join(
-            forecast_process_dir, "DWD.time.pickle"
-        )
-        with open(temp_time_pickle_source_path, "wb") as file:
-            pickle.dump(base_time, file)
-        shutil.move(temp_time_pickle_source_path, final_time_pickle_path_dest)
-
-        # Copy gridded Zarr directory to final local path
-        shutil.copytree(
-            gridded_zarr_output_full_path,
-            final_gridded_zarr_target_path,
-            dirs_exist_ok=True,
-        )
-
-        # Copy station metadata JSON to final local path
-        shutil.copy(
-            station_metadata_path,
-            os.path.join(forecast_path, "DWD_Station_Metadata.json"),
-        )
-        logging.info(f"All files copied locally to {forecast_path}.")
-
-    # --- Final Cleanup ---
-    # Remove temporary processing directories.
-    if os.path.exists(forecast_process_dir):
-        shutil.rmtree(forecast_process_dir)
-        logging.info(f"\nCleaned up processing directory: {forecast_process_dir}")
-    if os.path.exists(tmpDIR):
-        shutil.rmtree(tmpDIR)
-        logging.info(f"Cleaned up downloads directory: {tmpDIR}")
-
-    T_end = time.time()  # End timer
-    logging.info(f"\nTotal script execution time: {T_end - T0:.2f} seconds")
+T_end = time.time()  # End timer
+logging.info(f"\nTotal script execution time: {T_end - T0:.2f} seconds")
