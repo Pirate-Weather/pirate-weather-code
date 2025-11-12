@@ -801,7 +801,7 @@ zarr_array = zarr.create_array(
 # 4. Rechunk it to match the final array
 # 5. Write it out to the zarr array
 daskVarArrayStackDiskInterpPad.round(5).rechunk(
-    (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)
+    (len(probVars), len(hourly_timesUnix), finalChunk, finalChunk)
 ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 # Close the zarr

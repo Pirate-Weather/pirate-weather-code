@@ -682,7 +682,7 @@ if saveType == "S3":
     )
 
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/NBM_Fire .zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/NBM_Fire.zarr")
 
 
 # 1. Interpolate the stacked array to be hourly along the time axis
