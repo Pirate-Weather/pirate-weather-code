@@ -26,9 +26,10 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
-    interp_time_block,
+    interp_time_take_blend,
     mask_invalid_data,
     mask_invalid_refc,
+    pad_to_chunk_size,
     validate_grib_stats,
 )
 
@@ -776,6 +777,11 @@ for i in range(hisPeriod, 0, -6):
             )
         )
 
+    # Set REFC values < 5 to 0
+    xarray_hist_merged["REFC_entireatmosphere"] = mask_invalid_refc(
+        xarray_hist_merged["REFC_entireatmosphere"]
+    )
+
     # Copy back to main array
     # with ProgressBar():
     xarray_hist_merged["Storm_Distance"] = (
@@ -1000,50 +1006,48 @@ if saveType == "S3":
         forecast_process_dir + "/GFS.zarr.zip", mode="a", compression=0
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/GFS.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/GFS4.zarr")
 
-zarr_array = zarr.create_array(
-    store=zarr_store,
-    shape=(
-        len(zarrVars),
-        len(hourly_timesUnix),
-        daskVarArrayStackDisk.shape[2],
-        daskVarArrayStackDisk.shape[3],
-    ),
-    chunks=(len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
-    compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-    dtype="float32",
-)
 
 #
 # 1. Interpolate the stacked array to be hourly along the time axis
-# 2. Rechunk it to match the final array
-# 3. Write it out to the zarr array
-
-# Precompute the two neighbor‐indices and the weights
-x_a = np.array(stacked_timesUnix)
-x_b = np.array(hourly_timesUnix)
-
-idx = np.searchsorted(x_a, x_b) - 1
-idx0 = np.clip(idx, 0, len(x_a) - 2)
-idx1 = idx0 + 1
-
-w = (x_b - x_a[idx0]) / (x_a[idx1] - x_a[idx0])  # float array, shape (T_new,)
-
-# boolean mask of “in‐range” points
-valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
+# 2. Pad to chunk size
+# 3. Create the zarr array
+# 4. Rechunk it to match the final array
+# 5. Write it out to the zarr array
 
 with ProgressBar():
-    da.map_blocks(
-        interp_time_block,
+    # 1. Interpolate the stacked array to be hourly along the time axis
+    daskVarArrayStackDiskInterp = interp_time_take_blend(
         daskVarArrayStackDisk,
-        idx0,
-        idx1,
-        w,
-        valid,
+        stacked_timesUnix=stacked_timesUnix,
+        hourly_timesUnix=hourly_timesUnix,
         dtype="float32",
-        chunks=(1, len(hourly_timesUnix), processChunk, processChunk),
-    ).round(5).rechunk(
+        fill_value=np.nan,
+    )
+
+    # 2. Pad to chunk size
+    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+        daskVarArrayStackDiskInterp, finalChunk
+    )
+
+    # 3. Create the zarr array
+    zarr_array = zarr.create_array(
+        store=zarr_store,
+        shape=(
+            len(zarrVars),
+            len(hourly_timesUnix),
+            daskVarArrayStackDiskInterpPad.shape[2],
+            daskVarArrayStackDiskInterpPad.shape[3],
+        ),
+        chunks=(len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32",
+    )
+
+    # 4. Rechunk it to match the final array
+    # 5. Write it out to the zarr array
+    daskVarArrayStackDiskInterpPad.round(5).rechunk(
         (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)
     ).to_zarr(zarr_array, overwrite=True, compute=True)
 
@@ -1066,6 +1070,9 @@ if saveType == "S3":
 # Save -12:24 hours, aka steps 24:60
 # Create a Zarr array in the store with zstd compression
 
+# Add padding for map chunking (100x100)
+daskVarArrayStackDisk_maps = pad_to_chunk_size(daskVarArrayStackDisk, 100)
+
 if saveType == "S3":
     zarr_store_maps = zarr.storage.ZipStore(
         forecast_process_dir + "/GFS_Maps.zarr.zip", mode="a"
@@ -1080,8 +1087,8 @@ for z in [0, 4, 8, 9, 10, 11, 12, 13, 14, 15, 21]:
         name=zarrVars[z],
         shape=(
             36,
-            daskVarArrayStackDisk.shape[2],
-            daskVarArrayStackDisk.shape[3],
+            daskVarArrayStackDisk_maps.shape[2],
+            daskVarArrayStackDisk_maps.shape[3],
         ),
         chunks=(36, 100, 100),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
@@ -1090,7 +1097,7 @@ for z in [0, 4, 8, 9, 10, 11, 12, 13, 14, 15, 21]:
 
     with ProgressBar():
         da.rechunk(
-            daskVarArrayStackDisk[z, hisPeriod - 12 : hisPeriod + 24, :, :],
+            daskVarArrayStackDisk_maps[z, hisPeriod - 12 : hisPeriod + 24, :, :],
             (36, 100, 100),
         ).to_zarr(zarr_array, overwrite=True, compute=True)
 

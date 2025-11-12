@@ -13,7 +13,7 @@ import warnings
 # Define ECCODES_DEFINITION_PATH env variable for eccodes
 # This is needed in my testing instance- should not be required for the docker image
 # os.environ["ECCODES_DEFINITION_PATH"] = (
-#   "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+#    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
 # )
 import numpy as np
 import s3fs
@@ -32,6 +32,7 @@ from API.ingest_utils import (
     VALID_DATA_MIN,
     earth_relative_wind_components,
     mask_invalid_data,
+    pad_to_chunk_size,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -43,9 +44,9 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
+
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/mnt/nvme/data/RTMA_RU"
 )
@@ -225,6 +226,9 @@ xarray_analysis_stack = (
 
 # Mask out invalid data
 dask_var_array = mask_invalid_data(xarray_analysis_stack)
+
+# Add padding to the zarr store
+dask_var_array = pad_to_chunk_size(dask_var_array, final_chunk)
 
 # Create a zarr backed dask array
 if save_type == "S3":

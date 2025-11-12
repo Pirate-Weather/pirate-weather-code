@@ -562,7 +562,7 @@ def toTimestamp(d):
     return d.timestamp()
 
 
-# If testing, read zarrs directly from S3
+# If testing, read zarrs directly from S3 zip files
 # This should be implemented as a fallback at some point
 STAGE = os.environ.get("STAGE", "PROD")
 if (STAGE == "TESTING") or (STAGE == "TM_TESTING"):
@@ -2930,7 +2930,7 @@ async def PW_Forecast(
         "precipIntensityError",
         "precipType",
     ]
-    if version > 2:
+    if version >= 2:
         minuteKeys += ["rainIntensity", "snowIntensity", "sleetIntensity"]
 
     # Calculate type-specific intensities for minutely (in SI units - mm/h liquid equivalent)
@@ -3010,7 +3010,7 @@ async def PW_Forecast(
             float(minuteIntensityError[idx]) * prepIntensityUnit,
             minuteType[idx],
         ]
-        if version > 2:
+        if version >= 2:
             values += [
                 float(minuteRainIntensity[idx]) * prepIntensityUnit,
                 float(minuteSnowIntensity[idx]) * prepIntensityUnit,
@@ -3018,7 +3018,7 @@ async def PW_Forecast(
             ]
         minuteItems.append(dict(zip(minuteKeys, values)))
 
-        # SI version always includes all keys
+        # SI object always includes all keys
         values_si = [
             int(minuteTimes[idx]),
             float(minuteIntensity[idx]),
@@ -4585,6 +4585,7 @@ async def PW_Forecast(
                     str(tz_name),
                     int(time.time()),
                     icon_set=icon,
+                    unit_system=unitSystem,
                 )
 
                 # Translate the text
@@ -4592,7 +4593,7 @@ async def PW_Forecast(
                     day_item["summary"] = translation.translate(["sentence", dayText])
                     day_item["icon"] = dayIcon
         except Exception:
-            logger.exception("DAILY TEXT GEN ERROR")
+            logger.exception("DAY HALF DAY TEXT GEN ERROR")
 
         if version < 2:
             day_item.pop("liquidAccumulation", None)
@@ -4648,6 +4649,7 @@ async def PW_Forecast(
                     str(tz_name),
                     int(time.time()),
                     icon_set=icon,
+                    unit_system=unitSystem,
                 )
 
                 # Translate the text
@@ -4655,7 +4657,7 @@ async def PW_Forecast(
                     day_item["summary"] = translation.translate(["sentence", dayText])
                     day_item["icon"] = dayIcon
         except Exception:
-            logger.exception("DAILY TEXT GEN ERROR")
+            logger.exception("NIGHT HALF DAY TEXT GEN ERROR")
 
         if version < 2:
             day_item.pop("liquidAccumulation", None)
@@ -4997,14 +4999,18 @@ async def PW_Forecast(
                 # Extract alert details
                 # Format: event}{description}{area_desc}{effective}{expires}{severity}{URL
                 wmo_alertDetails = wmo_alert.split("}{")
+                alertEnd = None
+                expires_ts = -999
 
                 # Parse times - WMO times are in ISO format
                 alertOnset = datetime.datetime.strptime(
                     wmo_alertDetails[3], "%Y-%m-%dT%H:%M:%S%z"
                 ).astimezone(utc)
-                alertEnd = datetime.datetime.strptime(
-                    wmo_alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
-                ).astimezone(utc)
+                if wmo_alertDetails[4].strip():
+                    alertEnd = datetime.datetime.strptime(
+                        wmo_alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
+                    ).astimezone(utc)
+                    expires_ts = int(alertEnd.timestamp())
 
                 wmo_alertDict = {
                     "title": wmo_alertDetails[0],
@@ -5012,18 +5018,8 @@ async def PW_Forecast(
                         s.lstrip() for s in wmo_alertDetails[2].split(";") if s.strip()
                     ],
                     "severity": wmo_alertDetails[5],
-                    "time": int(
-                        (
-                            alertOnset
-                            - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(utc)
-                        ).total_seconds()
-                    ),
-                    "expires": int(
-                        (
-                            alertEnd
-                            - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(utc)
-                        ).total_seconds()
-                    ),
+                    "time": int(alertOnset.timestamp()),
+                    "expires": expires_ts,
                     "description": wmo_alertDetails[1],
                     "uri": wmo_alertDetails[6],
                 }
@@ -5813,7 +5809,7 @@ async def PW_Forecast(
     # Current temperature in Celsius (SI unit for text generation)
     curr_temp = (
         InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS
-    )  # temperature in Celsius
+    )  # Temperature in Celsius
 
     # Save SI unit values for text generation before converting to requested units
     curr_temp_si = curr_temp
@@ -6081,15 +6077,13 @@ async def PW_Forecast(
             if summaryText:
                 # Get max CAPE for the next hour to determine if thunderstorms should be shown
                 # Use the maximum of current CAPE and first hourly CAPE
-                currentCAPE = returnOBJ["currently"].get("cape", 0)
-                if currentCAPE == MISSING_DATA:
-                    currentCAPE = 0
+                currentCAPE = np.nan_to_num(InterPcurrent[DATA_CURRENT["cape"]], nan=0)
                 # Get CAPE from first hourly entry if available
-                hourlyCAPE = 0
-                if len(InterPhour) > 0:
-                    hourlyCAPE = InterPhour[0, DATA_HOURLY["cape"]]
-                    if hourlyCAPE == MISSING_DATA:
-                        hourlyCAPE = 0
+                hourlyCAPE = (
+                    np.nan_to_num(InterPhour[0, DATA_HOURLY["cape"]], nan=0)
+                    if len(InterPhour) > 0
+                    else 0
+                )
                 maxCAPE = max(currentCAPE, hourlyCAPE)
 
                 minuteText, minuteIcon = calculate_minutely_text(

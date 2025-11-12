@@ -22,6 +22,7 @@ from API.PirateTextHelper import (
     calculate_thunderstorm_text,
     calculate_vis_text,
     calculate_wind_text,
+    estimate_snow_height,
     humidity_sky_text,
 )
 
@@ -287,7 +288,7 @@ def calculate_period_summary_text(
 
     # Construct the final summary text based on the phrase template
     if phrase_type == "for-day":
-        summary_text = ["for-day", current_condition_text]
+        summary_text = current_condition_text
     elif phrase_type == "during":
         summary_text = ["during", current_condition_text, phrase_args[0]]
 
@@ -349,7 +350,7 @@ def calculate_half_day_text(
 
     # Return "unavailable" if too much data is provided
     if len(hours) > MAX_HOURS:
-        return "none", ["for-day", "unavailable"]
+        return "none", "unavailable"
 
     # Get local time and current hour
     zone = tz.gettz(time_zone)
@@ -555,9 +556,31 @@ def calculate_half_day_text(
 
             period_data["rain_accum"] += hour["liquidAccumulation"]
             period_data["snow_accum"] += hour["snowAccumulation"]
-            # Only accumulate error if it's not nan (missing data)
-            if not np.isnan(hour["precipIntensityError"]):
-                period_data["snow_error"] += hour["precipIntensityError"]
+            # Only accumulate error if it's not nan (missing data), the precipitation
+            # type is snow and there is any accumulation.
+            # precipIntensityError is an intensity error (mm/h). Convert that
+            # to a liquid accumulation error for the hour (mm) then convert
+            # to snow depth (mm) via estimate_snow_height. If temperature is
+            # missing, fall back to using error directly.
+            if (
+                not np.isnan(hour["precipIntensityError"])
+                and hour.get("precipType") == "snow"
+                and hour.get("snowAccumulation", 0.0) > 0.0
+            ):
+                liquid_error_mm = hour["precipIntensityError"] * 1.0
+                temp = hour.get("temperature", MISSING_DATA)
+                wind = hour.get("windSpeed", 0.0)
+                if (
+                    temp is None
+                    or (isinstance(temp, float) and np.isnan(temp))
+                    or temp == MISSING_DATA
+                ):
+                    estimated_snow_error_mm = liquid_error_mm
+                else:
+                    estimated_snow_error_mm = estimate_snow_height(
+                        liquid_error_mm, temp, wind
+                    )
+                period_data["snow_error"] += estimated_snow_error_mm
                 period_data["has_snow_error_data"] = True
             period_data["sleet_accum"] += hour["iceAccumulation"]
 
@@ -1309,7 +1332,7 @@ def calculate_half_day_text(
             ["and", selected_final_summary_texts[0], selected_final_summary_texts[1]],
         ]
     else:  # Fallback if no summaries generated (shouldn't happen with cloud fallback)
-        final_constructed_summary = ["for-day", "unavailable"]
+        final_constructed_summary = "unavailable"
 
     # Ensure an icon is always returned, defaulting to overall average cloud cover if none set.
     if current_c_icon is None:

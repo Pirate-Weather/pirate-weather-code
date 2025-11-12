@@ -27,6 +27,7 @@ from API.ingest_utils import (
     FORECAST_LEAD_RANGES,
     mask_invalid_data,
     mask_invalid_refc,
+    pad_to_chunk_size,
     validate_grib_stats,
 )
 
@@ -623,6 +624,8 @@ daskVarArrayListMergeNaN.to_zarr(
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
+# Add padding to the zarr store for main forecast chunking
+daskVarArrayStackDisk_main = pad_to_chunk_size(daskVarArrayStackDisk, finalChunk)
 
 # Create a zarr backed dask array
 if saveType == "S3":
@@ -634,10 +637,10 @@ else:
 
 zarr_array = zarr.create_array(
     store=zarr_store,
-    shape=daskVarArrayStackDisk.shape,
+    shape=daskVarArrayStackDisk_main.shape,
     chunks=(
         len(zarrVars),
-        daskVarArrayStackDisk.shape[1],
+        daskVarArrayStackDisk_main.shape[1],
         finalChunk,
         finalChunk,
     ),
@@ -648,8 +651,8 @@ zarr_array = zarr.create_array(
 
 # with ProgressBar():
 da.rechunk(
-    daskVarArrayStackDisk.round(5),
-    (len(zarrVars), daskVarArrayStackDisk.shape[1], finalChunk, finalChunk),
+    daskVarArrayStackDisk_main.round(5),
+    (len(zarrVars), daskVarArrayStackDisk_main.shape[1], finalChunk, finalChunk),
 ).to_zarr(zarr_array, compute=True)
 
 
@@ -668,6 +671,9 @@ if saveType == "S3":
 # 16 (MASSDEN)
 # 17 (REFC)
 
+# Add padding for map chunking (100x100)
+daskVarArrayStackDisk_maps = pad_to_chunk_size(daskVarArrayStackDisk, 100)
+
 # Loop through variables, creating a new one with a name and 36 x 100 x 100 chunks
 # Save -12:24 hours, aka steps 24:60
 # Create a Zarr array in the store with zstd compression
@@ -685,15 +691,15 @@ for z in (0, 4, 7, 8, 9, 11, 12, 13, 14, 16, 17):
         name=zarrVars[z],
         shape=(
             36,
-            daskVarArrayStackDisk.shape[2],
-            daskVarArrayStackDisk.shape[3],
+            daskVarArrayStackDisk_maps.shape[2],
+            daskVarArrayStackDisk_maps.shape[3],
         ),
         chunks=(36, 100, 100),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
         dtype="float32",
     )
 
-    da.rechunk(daskVarArrayStackDisk[z, 36:72, :, :], (36, 100, 100)).to_zarr(
+    da.rechunk(daskVarArrayStackDisk_maps[z, 36:72, :, :], (36, 100, 100)).to_zarr(
         zarr_array, overwrite=True, compute=True
     )
 
