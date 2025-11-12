@@ -744,7 +744,6 @@ for i in range(hisPeriod, 1, -12):
         method="linear",
     )
 
-
     # Merge the xarray objects
     xarray_hist_merged = xr.merge(
         [ifs_his_mf, aifs_his_mf, xr_enso_hisOut], compat="override", join="outer"
@@ -933,10 +932,13 @@ with ProgressBar():
         hourly_timesUnix=hourly_timesUnix,
         nearest_vars=int_var_indices,
         dtype="float32",
-        fill_value=np.nan)
+        fill_value=np.nan,
+    )
 
     # 2. Pad to chunk size
-    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(daskVarArrayStackDiskInterp, finalChunk)
+    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+        daskVarArrayStackDiskInterp, finalChunk
+    )
 
     # 3. Create the zarr array
     zarr_array = zarr.create_array(

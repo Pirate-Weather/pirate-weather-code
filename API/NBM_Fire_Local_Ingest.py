@@ -62,9 +62,7 @@ hist_process_path = forecast_process_dir + "/NBM_Fire_Historic"
 tmpDIR = forecast_process_dir + "/Downloads"
 
 forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/NBM_Fire")
-historic_path = os.getenv(
-    "historic_path", default="/mnt/nvme/data/History/NBM_Fire"
-)
+historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/NBM_Fire")
 
 
 saveType = os.getenv("save_type", default="Download")
@@ -700,10 +698,13 @@ daskVarArrayStackDiskInterp = interp_time_take_blend(
     stacked_timesUnix=stacked_timesUnix,
     hourly_timesUnix=hourly_timesUnix,
     dtype="float32",
-    fill_value=np.nan)
+    fill_value=np.nan,
+)
 
 # 2. Pad to chunk size
-daskVarArrayStackDiskInterpPad = pad_to_chunk_size(daskVarArrayStackDiskInterp, finalChunk)
+daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+    daskVarArrayStackDiskInterp, finalChunk
+)
 
 # 3. Create the zarr array
 zarr_array = zarr.create_array(
@@ -724,7 +725,6 @@ zarr_array = zarr.create_array(
 daskVarArrayStackDiskInterpPad.round(5).rechunk(
     (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)
 ).to_zarr(zarr_array, overwrite=True, compute=True)
-
 
 
 if saveType == "S3":

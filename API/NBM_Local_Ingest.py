@@ -1012,10 +1012,13 @@ with ProgressBar():
         stacked_timesUnix=stacked_timesUnix,
         hourly_timesUnix=hourly_timesUnix,
         dtype="float32",
-        fill_value=np.nan)
+        fill_value=np.nan,
+    )
 
     # 2. Pad to chunk size
-    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(daskVarArrayStackDiskInterp, finalChunk)
+    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+        daskVarArrayStackDiskInterp, finalChunk
+    )
 
     # 3. Create the zarr array
     zarr_array = zarr.create_array(

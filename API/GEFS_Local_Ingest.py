@@ -41,9 +41,7 @@ wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
 
-forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/mnt/nvme/data/GEFS"
-)
+forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/GEFS")
 forecast_process_path = forecast_process_dir + "/GEFS_Process"
 hist_process_path = forecast_process_dir + "/GEFS_Historic"
 tmpDIR = forecast_process_dir + "/Downloads"
@@ -778,10 +776,13 @@ daskVarArrayStackDiskInterp = interp_time_take_blend(
     stacked_timesUnix=stacked_timesUnix,
     hourly_timesUnix=hourly_timesUnix,
     dtype="float32",
-    fill_value=np.nan)
+    fill_value=np.nan,
+)
 
 # 2. Pad to chunk size
-daskVarArrayStackDiskInterpPad = pad_to_chunk_size(daskVarArrayStackDiskInterp, finalChunk)
+daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+    daskVarArrayStackDiskInterp, finalChunk
+)
 
 # 3. Create the zarr array
 zarr_array = zarr.create_array(

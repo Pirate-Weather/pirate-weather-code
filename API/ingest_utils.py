@@ -12,8 +12,6 @@ import numpy as np
 import xarray as xr
 from herbie import Path
 
-
-
 from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
 
 # Shared ingest constants
@@ -86,6 +84,7 @@ def _start_stop(sl):
     if isinstance(sl, slice):
         return sl.start, sl.stop
     return sl  # assume (start, stop)
+
 
 # Linear interpolation of time blocks in a dask array
 def interp_time_block(
@@ -351,7 +350,6 @@ def earth_relative_wind_components(
     return ut, vt
 
 
-
 def interp_time_take_blend(
     arr: da.Array,
     stacked_timesUnix: np.ndarray,
@@ -409,7 +407,6 @@ def interp_time_take_blend(
 
     # Optional nearest-neighbor override for specified variable indices
     if nearest_vars is not None:
-
         # Precompute nearest indices once: closer of idx0 / idx1
         nearest_idx = np.where(w < 0.5, idx0, idx1).astype(idx0.dtype)
 
@@ -426,10 +423,14 @@ def interp_time_take_blend(
         prev = 0
         for i in nv:
             if i < 0 or i >= arr.shape[VAX]:
-                raise IndexError(f"nearest_vars index {i} out of range for V={arr.shape[VAX]}")
+                raise IndexError(
+                    f"nearest_vars index {i} out of range for V={arr.shape[VAX]}"
+                )
             if i > prev:
                 pieces.append(out[prev:i])  # unchanged segment
-            pieces.append(take_nn[i:i+1].astype(dtype, copy=False))  # nearest segment
+            pieces.append(
+                take_nn[i : i + 1].astype(dtype, copy=False)
+            )  # nearest segment
             prev = i + 1
         if prev < arr.shape[VAX]:
             pieces.append(out[prev:])
