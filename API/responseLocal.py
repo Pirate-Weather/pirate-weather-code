@@ -45,20 +45,47 @@ from API.api_utils import (
 )
 from API.constants.api_const import (
     API_VERSION,
+    DAYS_PER_YEAR,
     DBZ_CONST,
+    DBZ_DIVISOR,
+    DBZ_EXPONENT,
+    DBZ_MIN_VALUE,
+    DEFAULT_ROUNDING_INTERVAL,
+    ETOPO_LAT_RESOLUTION,
+    ETOPO_LON_RESOLUTION,
+    FILENAME_TIMESTAMP_SLICE_LENGTH,
     GLOBE_TEMP_CONST,
+    HOURS_TO_MINUTES,
+    LAMBERT_HALF_PI_FACTOR,
+    LAMBERT_PI_FACTOR,
     LARGEST_DIR_INIT,
+    LATITUDE_MAX,
+    LATITUDE_MIN,
+    LONGITUDE_MAX,
+    LONGITUDE_MIN,
+    LONGITUDE_OFFSET,
+    LONGITUDE_TO_HOURS,
+    MAX_ZARR_READ_RETRIES,
     NICE_PRIORITY,
     PRECIP_IDX,
     PRECIP_NOISE_THRESHOLD_MMH,
     ROUNDING_RULES,
     S3_MAX_BANDWIDTH,
+    SECONDS_TO_HOURS,
+    SECONDS_TO_MINUTES,
+    SOLAR_DAY_OF_YEAR_BASE,
+    SOLAR_DEGREES_PER_YEAR,
+    SOLAR_HOUR_FACTOR,
+    SOLAR_HOUR_OFFSET,
     SOLAR_IRRADIANCE_CONST,
     SOLAR_RAD_CONST,
     TEMP_THRESHOLD_RAIN_C,
     TEMP_THRESHOLD_SNOW_C,
     TEMPERATURE_UNITS_THRESH,
+    TIME_MACHINE_THRESHOLD_HOURS,
+    VERY_NEGATIVE_TIME_THRESHOLD,
     WBGT_CONST,
+    WBGT_PERCENTAGE_DIVISOR,
 )
 from API.constants.clip_const import (
     CLIP_CAPE,
@@ -203,7 +230,7 @@ def download_if_newer(
         # If saved locally, get the last modified timestamp of the local file
         s3_last_modified = os.path.getmtime(s3_bucket + "/" + s3_object_key)
 
-    newFile = False
+    new_file = False
 
     # Check if the local file exists
     # Read pickle with last modified time
@@ -226,7 +253,7 @@ def download_if_newer(
                 # Copy the local file over
                 shutil.copy(s3_bucket + "/" + s3_object_key, local_file_path)
 
-            newFile = True
+            new_file = True
             with open(local_file_path + ".modtime.pickle", "wb") as file:
                 # Serialize and write the variable to the file
                 pickle.dump(s3_last_modified, file)
@@ -250,11 +277,11 @@ def download_if_newer(
             # Serialize and write the variable to the file
             pickle.dump(s3_last_modified, file)
 
-        newFile = True
+        new_file = True
         # Untar the file
         # shutil.unpack_archive(local_file_path, extract_path, 'tar')
 
-    if newFile:
+    if new_file:
         # Write a file to show an update is in progress, do not reload
         with open(local_lmdb_path + ".lock", "w"):
             pass
@@ -289,8 +316,8 @@ def find_largest_integer_directory(parent_dir, key_string, initialRun):
             try:
                 # Extract the integer value from the directory name
                 value = float(
-                    entry[-12:]
-                )  # No constant needed, this is a filename slice
+                    entry[-FILENAME_TIMESTAMP_SLICE_LENGTH:]
+                )  # This is a filename timestamp slice
 
                 if value > largest_value:
                     largest_value = value
@@ -522,7 +549,7 @@ def update_zarr_store(initialRun):
                 command = f"nice -n 20 rm -rf /tmp/{old_dir}"
                 subprocess.run(command, shell=True)
 
-    print("Refreshed Zarrs")
+    logger.info("Refreshed Zarrs")
 
 
 setup_logging()
@@ -566,7 +593,7 @@ def toTimestamp(d):
 # This should be implemented as a fallback at some point
 STAGE = os.environ.get("STAGE", "PROD")
 if (STAGE == "TESTING") or (STAGE == "TM_TESTING"):
-    print("Setting up S3 zarrs")
+    logger.info("Setting up S3 zarrs")
     # If S3, use that, otherwise use local
     if save_type == "S3":
         s3 = s3fs.S3FileSystem(
@@ -584,10 +611,10 @@ if (STAGE == "TESTING") or (STAGE == "TM_TESTING"):
 
     GFS_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "GFS")
     GFS_Zarr = zarr.open(GFS_store, mode="r")
-    print("GFS Read")
+    logger.info("GFS Read")
 
     ERA5_Data = init_ERA5()
-    print("ERA5 Read")
+    logger.info("ERA5 Read")
 
     if STAGE == "TESTING":
         NWS_Alerts_store = setup_testing_zipstore(
@@ -599,70 +626,70 @@ if (STAGE == "TESTING") or (STAGE == "TM_TESTING"):
             s3, s3_bucket, ingestVersion, save_type, "SubH"
         )
         SubH_Zarr = zarr.open(SubH_store, mode="r")
-        print("SubH Read")
+        logger.info("SubH Read")
 
         HRRR_6H_store = setup_testing_zipstore(
             s3, s3_bucket, ingestVersion, save_type, "HRRR_6H"
         )
         HRRR_6H_Zarr = zarr.open(HRRR_6H_store, mode="r")
-        print("HRRR_6H Read")
+        logger.info("HRRR_6H Read")
 
         GEFS_store = setup_testing_zipstore(
             s3, s3_bucket, ingestVersion, save_type, "GEFS"
         )
         GEFS_Zarr = zarr.open(GEFS_store, mode="r")
-        print("GEFS Read")
+        logger.info("GEFS Read")
 
         NBM_store = setup_testing_zipstore(
             s3, s3_bucket, ingestVersion, save_type, "NBM"
         )
         NBM_Zarr = zarr.open(NBM_store, mode="r")
-        print("NBM Read")
+        logger.info("NBM Read")
 
         NBM_Fire_store = setup_testing_zipstore(
             s3, s3_bucket, ingestVersion, save_type, "NBM_Fire"
         )
         NBM_Fire_Zarr = zarr.open(NBM_Fire_store, mode="r")
-        print("NBM Fire Read")
+        logger.info("NBM Fire Read")
 
         HRRR_store = setup_testing_zipstore(
             s3, s3_bucket, ingestVersion, save_type, "HRRR"
         )
         HRRR_Zarr = zarr.open(HRRR_store, mode="r")
-        print("HRRR Read")
+        logger.info("HRRR Read")
 
         WMO_Alerts_store = setup_testing_zipstore(
             s3, s3_bucket, ingestVersion, save_type, "WMO_Alerts"
         )
         WMO_Alerts_Zarr = zarr.open(WMO_Alerts_store, mode="r")
-        print("WMO_Alerts Read")
+        logger.info("WMO_Alerts Read")
 
         RTMA_RU_store = setup_testing_zipstore(
             s3, s3_bucket, ingestVersion, save_type, "RTMA_RU"
         )
         RTMA_RU_Zarr = zarr.open(RTMA_RU_store, mode="r")
-        print("RTMA_RU Read")
+        logger.info("RTMA_RU Read")
 
         ECMWF_store = setup_testing_zipstore(
             s3, s3_bucket, ingestVersion, save_type, "ECMWF"
         )
         ECMWF_Zarr = zarr.open(ECMWF_store, mode="r")
-        print("ECMWF Read")
+        logger.info("ECMWF Read")
 
         if useETOPO:
             ETOPO_store = setup_testing_zipstore(
                 s3, s3_bucket, ingestVersion, save_type, "ETOPO_DA_C"
             )
             ETOPO_f = zarr.open(ETOPO_store, mode="r")
-            print("ETOPO Read")
+            logger.info("ETOPO Read")
 
 
 async def get_zarr(store, X, Y):
     return store[:, :, X, Y]
 
 
-lats_etopo = np.arange(-90, 90, 0.01666667)
-lons_etopo = np.arange(-180, 180, 0.01666667)
+lats_etopo = np.arange(LATITUDE_MIN, LATITUDE_MAX, ETOPO_LAT_RESOLUTION)
+lons_etopo = np.arange(LONGITUDE_MIN, LONGITUDE_OFFSET, ETOPO_LON_RESOLUTION)
 
 tf = TimezoneFinder(in_memory=True)
 
@@ -678,7 +705,7 @@ def get_offset(*, lat, lng, utcTime, tf):
     # ATTENTION: tz_target could be None! handle error case
     today_target = tz_target.localize(today)
     today_utc = utc.localize(today)
-    return (today_utc - today_target).total_seconds() / 60, tz_target
+    return (today_utc - today_target).total_seconds() / SECONDS_TO_MINUTES, tz_target
 
 
 def _polar_is_all_day(lat_val: float, month_val: int) -> bool:
@@ -776,33 +803,34 @@ def _interp_row(row: np.ndarray) -> np.ndarray:
 class WeatherParallel(object):
     async def zarr_read(self, model, opened_zarr, x, y):
         if TIMING:
-            print("### " + model + " Reading!")
-            print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None))
+            logger.debug(f"### {model} Reading!")
+            logger.debug(datetime.datetime.now(datetime.UTC).replace(tzinfo=None))
 
         errCount = 0
         dataOut = False
         # Try to read Zarr file
-        while errCount < 4:
+        while errCount < MAX_ZARR_READ_RETRIES:
             try:
                 dataOut = await asyncio.to_thread(lambda: opened_zarr[:, :, y, x].T)
 
                 # Check for missing/ bad data and interpolate
                 # This should not occur, but good to have a fallback
                 if has_interior_nan_holes(dataOut.T):
-                    print("### " + model + " Interpolating missing data!")
+                    logger.warning(f"### {model} Interpolating missing data!")
 
                     # Print the location of the missing data
                     if TIMING:
-                        print(
-                            "### " + model + " Missing data at: ",
-                            np.argwhere(np.isnan(dataOut)),
+                        logger.debug(
+                            f"### {model} Missing data at: {np.argwhere(np.isnan(dataOut))}"
                         )
 
                     dataOut = np.apply_along_axis(_interp_row, 0, dataOut)
 
                 if TIMING:
-                    print("### " + model + " Done!")
-                    print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None))
+                    logger.debug(f"### {model} Done!")
+                    logger.debug(
+                        datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+                    )
                 return dataOut
 
             except Exception:
@@ -851,19 +879,34 @@ def lambertGridMatch(
     hrr_n = math.sin(standard_parallel)
     hrrr_F = (
         math.cos(standard_parallel)
-        * (math.tan(0.25 * math.pi + 0.5 * standard_parallel)) ** hrr_n
+        * (
+            math.tan(
+                LAMBERT_PI_FACTOR * math.pi + LAMBERT_HALF_PI_FACTOR * standard_parallel
+            )
+        )
+        ** hrr_n
     ) / hrr_n
     hrrr_p = (
         semimajor_axis
         * hrrr_F
         * 1
-        / (math.tan(0.25 * math.pi + 0.5 * math.radians(lat)) ** hrr_n)
+        / (
+            math.tan(
+                LAMBERT_PI_FACTOR * math.pi + LAMBERT_HALF_PI_FACTOR * math.radians(lat)
+            )
+            ** hrr_n
+        )
     )
     hrrr_p0 = (
         semimajor_axis
         * hrrr_F
         * 1
-        / (math.tan(0.25 * math.pi + 0.5 * central_latitude) ** hrr_n)
+        / (
+            math.tan(
+                LAMBERT_PI_FACTOR * math.pi + LAMBERT_HALF_PI_FACTOR * central_latitude
+            )
+            ** hrr_n
+        )
     )
 
     x_hrrrLoc = hrrr_p * math.sin(hrr_n * (math.radians(lon) - central_longitude))
@@ -890,7 +933,9 @@ def lambertGridMatch(
     return lat_grid, lon_grid, x_hrrr, y_hrrr
 
 
-def rounder(t: datetime.datetime, to: int = 60) -> datetime.datetime:
+def rounder(
+    t: datetime.datetime, to: int = DEFAULT_ROUNDING_INTERVAL
+) -> datetime.datetime:
     """Rounds a datetime object to the nearest interval in minutes.
 
     Parameters:
@@ -914,12 +959,14 @@ def unix_to_day_of_year_and_lst(dt, longitude):
     day_of_year = dt.timetuple().tm_yday
 
     # Calculate UTC time in hours
-    utc_time = dt.hour + dt.minute / 60 + dt.second / 3600
-    print(utc_time)
+    utc_time = dt.hour + dt.minute / HOURS_TO_MINUTES + dt.second / SECONDS_TO_HOURS
+    if TIMING:
+        logger.debug(f"UTC time: {utc_time}")
 
     # Calculate Local Solar Time (LST) considering the longitude
-    lst = utc_time + (longitude / 15)
-    print(lst)
+    lst = utc_time + (longitude / LONGITUDE_TO_HOURS)
+    if TIMING:
+        logger.debug(f"LST: {lst}")
 
     return day_of_year, lst
 
@@ -932,11 +979,15 @@ def solar_irradiance(latitude, longitude, unix_time):
 
     # Calculate solar declination (delta) in radians
     delta = math.radians(SOLAR_IRRADIANCE_CONST["declination"]) * math.sin(
-        math.radians(360 / 365 * (284 + day_of_year))
+        math.radians(
+            SOLAR_DEGREES_PER_YEAR
+            / DAYS_PER_YEAR
+            * (SOLAR_DAY_OF_YEAR_BASE + day_of_year)
+        )
     )
 
     # Calculate hour angle (H) in degrees, then convert to radians
-    H = math.radians(15 * (local_solar_time - 12))
+    H = math.radians(SOLAR_HOUR_FACTOR * (local_solar_time - SOLAR_HOUR_OFFSET))
 
     # Convert latitude to radians
     phi = math.radians(latitude)
@@ -951,7 +1002,7 @@ def solar_irradiance(latitude, longitude, unix_time):
     G_0 = G_sc * (
         1
         + SOLAR_IRRADIANCE_CONST["g0_coeff"]
-        * math.cos(math.radians(360 * day_of_year / 365))
+        * math.cos(math.radians(SOLAR_DEGREES_PER_YEAR * day_of_year / DAYS_PER_YEAR))
     )
     G = (
         G_0 * sin_alpha * math.exp(-SOLAR_IRRADIANCE_CONST["am_coeff"] * AM)
@@ -1027,7 +1078,7 @@ def calculate_wbgt(
     else:
         wbgt = WBGT_CONST["temp_weight"] * temperature + WBGT_CONST[
             "humidity_weight"
-        ] * (humidity / 100.0 * temperature)
+        ] * (humidity / WBGT_PERCENTAGE_DIVISOR * temperature)
 
     return wbgt
 
@@ -1045,10 +1096,10 @@ def dbz_to_rate(dbz_array, precip_type_array, min_dbz=REFC_THRESHOLD):
         np.ndarray: Precipitation rate in mm/h.
     """
     # Ensure no negative dBZ values
-    dbz_array = np.maximum(dbz_array, 0.0)
+    dbz_array = np.maximum(dbz_array, DBZ_MIN_VALUE)
 
     # Convert dBZ to Z
-    z_array = 10 ** (dbz_array / 10.0)
+    z_array = 10 ** (dbz_array / DBZ_DIVISOR)
 
     # Initialize rate coefficients for rain
     a_array = np.full_like(dbz_array, DBZ_CONST["rain_a"], dtype=float)
@@ -1058,14 +1109,14 @@ def dbz_to_rate(dbz_array, precip_type_array, min_dbz=REFC_THRESHOLD):
     b_array[snow_mask] = DBZ_CONST["snow_b"]
 
     # Compute precipitation rate
-    rate_array = (z_array / a_array) ** (1.0 / b_array)
+    rate_array = (z_array / a_array) ** (DBZ_EXPONENT / b_array)
 
     # Apply soft threshold for sub-threshold dBZ values
     below_threshold = dbz_array < min_dbz
     rate_array[below_threshold] *= dbz_array[below_threshold] / min_dbz
 
     # Final check: ensure no negative rates
-    rate_array = np.maximum(rate_array, 0.0)
+    rate_array = np.maximum(rate_array, DBZ_MIN_VALUE)
     return rate_array
 
 
@@ -1120,8 +1171,8 @@ async def PW_Forecast(
             tzinfo=None
         )
 
-        print("Forced Current Time to:")
-        print(nowTime)
+        logger.info("Forced Current Time to:")
+        logger.info(nowTime)
 
     ### If developing in REPL, uncomment to provide static variables
     # location = "47.1756,27.594,1741126460"
@@ -1145,14 +1196,14 @@ async def PW_Forecast(
         #     'statusCode': 400,
         #     'body': json.dumps('Invalid Location Specification')
         # }
-    lon = lon_IN % 360  # 0-360
-    az_Lon = ((lon + 180) % 360) - 180  # -180-180
+    lon = lon_IN % LONGITUDE_MAX  # 0-360
+    az_Lon = ((lon + LONGITUDE_OFFSET) % LONGITUDE_MAX) - LONGITUDE_OFFSET  # -180-180
 
-    if (lon_IN < -180) or (lon > 360):
-        # print('ERROR')
+    if (lon_IN < LONGITUDE_MIN) or (lon > LONGITUDE_MAX):
+        # logger.error('Invalid Longitude')
         raise HTTPException(status_code=400, detail="Invalid Longitude")
-    if (lat < -90) or (lat > 90):
-        # print('ERROR')
+    if (lat < LATITUDE_MIN) or (lat > LATITUDE_MAX):
+        # logger.error('Invalid Latitude')
         raise HTTPException(status_code=400, detail="Invalid Latitude")
 
     if len(locationReq) == 2:
@@ -1169,7 +1220,9 @@ async def PW_Forecast(
                 utcTime = datetime.datetime.fromtimestamp(
                     float(locationReq[2]), datetime.UTC
                 ).replace(tzinfo=None)
-            elif float(locationReq[2]) < -100000:  # Very negatime time
+            elif (
+                float(locationReq[2]) < VERY_NEGATIVE_TIME_THRESHOLD
+            ):  # Very negative time
                 utcTime = datetime.datetime.fromtimestamp(
                     float(locationReq[2]), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1208,7 +1261,7 @@ async def PW_Forecast(
                         utcTime = localTime - datetime.timedelta(minutes=tz_offsetIN)
 
                     except Exception:
-                        # print('ERROR')
+                        # logger.error('Invalid Time Specification')
                         raise HTTPException(
                             status_code=400, detail="Invalid Time Specification"
                         )
@@ -1256,22 +1309,22 @@ async def PW_Forecast(
             raise HTTPException(
                 status_code=400, detail="Requested Time is in the Future"
             )
-    elif (nowTime - utcTime) < datetime.timedelta(hours=25):
+    elif (nowTime - utcTime) < datetime.timedelta(hours=TIME_MACHINE_THRESHOLD_HOURS):
         # If within the last 25 hours, it may or may not be a timemachine request
         # If it is, then only return 24h of data
         if "timemachine" in str(request.url):
             timeMachine = True
             # This results in the API using the live zip file, but only doing a 24 hour forecast from midnight of the requested day
             if TIMING:
-                print("Near term timemachine request")
-                # Print how far in the past it is
-                print((nowTime - utcTime))
+                logger.debug("Near term timemachine request")
+                # Log how far in the past it is
+                logger.debug(nowTime - utcTime)
         # Otherwise, just a normal request
 
     # Timing Check
     if TIMING:
-        print("Request process time")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+        logger.debug("Request process time")
+        logger.debug(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # Calculate the timezone offset
     tz_offsetLoc = {"lat": lat, "lng": az_Lon, "utcTime": utcTime, "tf": tf}

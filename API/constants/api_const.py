@@ -101,6 +101,80 @@ TEMPERATURE_UNITS_THRESH = {"c": 0, "f": 32}
 TEMP_THRESHOLD_RAIN_C = 274.15
 TEMP_THRESHOLD_SNOW_C = 272.15
 
+# Zarr read retry constants
+MAX_ZARR_READ_RETRIES = 4
+
+# Coordinate constants
+LONGITUDE_MIN = -180
+LONGITUDE_MAX = 360
+LATITUDE_MIN = -90
+LATITUDE_MAX = 90
+LONGITUDE_OFFSET = 180
+
+# Time machine constants
+TIME_MACHINE_THRESHOLD_HOURS = 25
+VERY_NEGATIVE_TIME_THRESHOLD = -100000
+
+# Filename constants
+FILENAME_TIMESTAMP_SLICE_LENGTH = 12
+
+# Unit conversion constants
+SECONDS_TO_MINUTES = 60
+HOURS_TO_MINUTES = 60
+SECONDS_TO_HOURS = 3600
+LONGITUDE_TO_HOURS = 15
+
+# Etopo resolution
+ETOPO_LAT_RESOLUTION = 0.01666667
+ETOPO_LON_RESOLUTION = 0.01666667
+
+# Lambert projection constants
+LAMBERT_PI_FACTOR = 0.25
+LAMBERT_HALF_PI_FACTOR = 0.5
+
+# DBZ conversion constants
+DBZ_DIVISOR = 10.0
+DBZ_MIN_VALUE = 0.0
+DBZ_EXPONENT = 1.0
+
+# Humidity conversion constants
+HUMIDITY_PERCENTAGE_FACTOR = 100.0
+
+# Pressure conversion constants
+PRESSURE_TO_HPA = 100
+
+# Cloud cover conversion constants
+CLOUD_COVER_PERCENTAGE_FACTOR = 0.01
+
+# RTMA_RU visibility constants
+RTMA_RU_MAX_VIS_THRESHOLD = 15999
+RTMA_RU_VIS_CONVERTED = 16090
+
+# Solar radiation conversion constants (J/m2 to W/m2)
+JOULES_TO_WATTS = 3600
+
+# UV index constants
+GFS_UV_FACTOR = 18.9
+GFS_UV_MULTIPLIER = 0.025
+ERA5_UV_FACTOR = 40
+ERA5_UV_MULTIPLIER = 0.0025
+
+# Ozone conversion constants (to Dobson units)
+OZONE_TO_DOBSON = 46696
+
+# Default rounding interval (minutes)
+DEFAULT_ROUNDING_INTERVAL = 60
+
+# Solar calculations
+SOLAR_DAY_OF_YEAR_BASE = 284
+SOLAR_DEGREES_PER_YEAR = 360
+DAYS_PER_YEAR = 365
+SOLAR_HOUR_FACTOR = 15
+SOLAR_HOUR_OFFSET = 12
+
+# WBGT temperature units
+WBGT_PERCENTAGE_DIVISOR = 100.0
+
 # Define rounding rules for all numeric fields
 ROUNDING_RULES = {
     # Coordinates and general
