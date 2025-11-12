@@ -1,3 +1,11 @@
+"""
+Response Local Module for Pirate Weather API.
+
+This module handles the local weather data processing and API responses.
+It includes functions for reading weather data from zarr files, processing
+weather forecasts, and generating API responses.
+"""
+
 import asyncio
 import datetime
 import logging
