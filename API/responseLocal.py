@@ -184,13 +184,13 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 pw_api_key = os.environ.get("PW_API", "")
 save_type = os.getenv("save_type", default="S3")
 s3_bucket = os.getenv("s3_bucket", default="piratezarr2")
-useETOPO = os.getenv("useETOPO", default=True)
+use_etopo = os.getenv("use_etopo", default=True)
 TIMING = os.environ.get("TIMING", False)
 
 force_now = os.getenv("force_now", default=False)
 
 # Version code for ingest files
-ingestVersion = INGEST_VERSION_STR
+ingest_version = INGEST_VERSION_STR
 
 
 def setup_logging():
@@ -391,7 +391,7 @@ def update_zarr_store(initialRun):
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
-    if (initialRun) and (useETOPO):
+    if (initialRun) and (use_etopo):
         latest_ETOPO, old_ETOPO = find_largest_integer_directory(
             "/tmp", "ETOPO_DA_C.zarr", initialRun
         )
@@ -636,7 +636,7 @@ if (STAGE == "TESTING") or (STAGE == "TM_TESTING"):
     else:
         s3 = None
 
-    GFS_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "GFS")
+    GFS_store = setup_testing_zipstore(s3, s3_bucket, ingest_version, save_type, "GFS")
     GFS_Zarr = zarr.open(GFS_store, mode="r")
     logger.info("GFS Read")
 
@@ -645,67 +645,67 @@ if (STAGE == "TESTING") or (STAGE == "TM_TESTING"):
 
     if STAGE == "TESTING":
         NWS_Alerts_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "NWS_Alerts"
+            s3, s3_bucket, ingest_version, save_type, "NWS_Alerts"
         )
         NWS_Alerts_Zarr = zarr.open(NWS_Alerts_store, mode="r")
 
         SubH_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "SubH"
+            s3, s3_bucket, ingest_version, save_type, "SubH"
         )
         SubH_Zarr = zarr.open(SubH_store, mode="r")
         logger.info("SubH Read")
 
         HRRR_6H_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "HRRR_6H"
+            s3, s3_bucket, ingest_version, save_type, "HRRR_6H"
         )
         HRRR_6H_Zarr = zarr.open(HRRR_6H_store, mode="r")
         logger.info("HRRR_6H Read")
 
         GEFS_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "GEFS"
+            s3, s3_bucket, ingest_version, save_type, "GEFS"
         )
         GEFS_Zarr = zarr.open(GEFS_store, mode="r")
         logger.info("GEFS Read")
 
         NBM_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "NBM"
+            s3, s3_bucket, ingest_version, save_type, "NBM"
         )
         NBM_Zarr = zarr.open(NBM_store, mode="r")
         logger.info("NBM Read")
 
         NBM_Fire_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "NBM_Fire"
+            s3, s3_bucket, ingest_version, save_type, "NBM_Fire"
         )
         NBM_Fire_Zarr = zarr.open(NBM_Fire_store, mode="r")
         logger.info("NBM Fire Read")
 
         HRRR_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "HRRR"
+            s3, s3_bucket, ingest_version, save_type, "HRRR"
         )
         HRRR_Zarr = zarr.open(HRRR_store, mode="r")
         logger.info("HRRR Read")
 
         WMO_Alerts_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "WMO_Alerts"
+            s3, s3_bucket, ingest_version, save_type, "WMO_Alerts"
         )
         WMO_Alerts_Zarr = zarr.open(WMO_Alerts_store, mode="r")
         logger.info("WMO_Alerts Read")
 
         RTMA_RU_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "RTMA_RU"
+            s3, s3_bucket, ingest_version, save_type, "RTMA_RU"
         )
         RTMA_RU_Zarr = zarr.open(RTMA_RU_store, mode="r")
         logger.info("RTMA_RU Read")
 
         ECMWF_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "ECMWF"
+            s3, s3_bucket, ingest_version, save_type, "ECMWF"
         )
         ECMWF_Zarr = zarr.open(ECMWF_store, mode="r")
         logger.info("ECMWF Read")
 
-        if useETOPO:
+        if use_etopo:
             ETOPO_store = setup_testing_zipstore(
-                s3, s3_bucket, ingestVersion, save_type, "ETOPO_DA_C"
+                s3, s3_bucket, ingest_version, save_type, "ETOPO_DA_C"
             )
             ETOPO_f = zarr.open(ETOPO_store, mode="r")
             logger.info("ETOPO Read")
@@ -803,15 +803,15 @@ def has_interior_nan_holes(arr: np.ndarray) -> bool:
 
     # 4) ignore any that occur at the very first or last original column:
     #    we only want starts/ends in columns 1…(cols-2)
-    interiorStarts = starts[:, 1:-1]
-    interiorEnds = ends[:, 1:-1]
+    interior_starts = starts[:, 1:-1]
+    interior_ends = ends[:, 1:-1]
 
     # 5) a row has an interior hole iff it has at least one interior start
     #    *and* at least one interior end.  If any row meets that, we’re done.
-    rowHasStart = interiorStarts.any(axis=1)
-    rowHasEnd = interiorEnds.any(axis=1)
+    row_has_start = interior_starts.any(axis=1)
+    row_has_end = interior_ends.any(axis=1)
 
-    return bool(np.any(rowHasStart & rowHasEnd))
+    return bool(np.any(row_has_start & row_has_end))
 
 
 # Interpolation function to interpolate nans in a row, keeping nan's at the start and end
@@ -2047,7 +2047,7 @@ async def PW_Forecast(
 
     sourceTimes = dict()
     sourceList = []
-    if useETOPO:
+    if use_etopo:
         sourceList.append("ETOPO1")
 
     # If ERA5 data was read and merged
@@ -2165,7 +2165,7 @@ async def PW_Forecast(
     y_p_etopo = np.argmin(abslat)
     x_p_etopo = np.argmin(abslon)
 
-    if (useETOPO) and ((STAGE == "PROD") or (STAGE == "DEV")):
+    if (use_etopo) and ((STAGE == "PROD") or (STAGE == "DEV")):
         ETOPO = int(ETOPO_f[y_p_etopo, x_p_etopo])
     else:
         ETOPO = 0
@@ -2173,7 +2173,7 @@ async def PW_Forecast(
     if ETOPO < 0:
         ETOPO = 0
 
-    if useETOPO:
+    if use_etopo:
         sourceIDX["etopo"] = dict()
         sourceIDX["etopo"]["x"] = int(x_p_etopo)
         sourceIDX["etopo"]["y"] = int(y_p_etopo)
@@ -6353,7 +6353,7 @@ async def PW_Forecast(
             returnOBJ["flags"]["processTime"] = (
                 datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
             ).microseconds
-            returnOBJ["flags"]["ingestVersion"] = ingestVersion
+            returnOBJ["flags"]["ingest_version"] = ingest_version
             # Return the approx location names, if they are found
             returnOBJ["flags"]["nearestCity"] = loc_name.get("city") or None
             returnOBJ["flags"]["nearestCountry"] = loc_name.get("country") or None
@@ -6400,7 +6400,7 @@ def initialDataSync() -> None:
     if STAGE == "PROD":
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/SubH.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/SubH.zarr.zip",
             "/tmp/SubH_TMP.zarr.zip",
             "/tmp/SubH.zarr.prod.zip",
             True,
@@ -6408,7 +6408,7 @@ def initialDataSync() -> None:
         logger.info("SubH Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/HRRR_6H.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/HRRR_6H.zarr.zip",
             "/tmp/HRRR_6H_TMP.zarr.zip",
             "/tmp/HRRR_6H.zarr.prod.zip",
             True,
@@ -6416,7 +6416,7 @@ def initialDataSync() -> None:
         logger.info("HRRR_6H Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/GFS.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/GFS.zarr.zip",
             "/tmp/GFS.zarr_TMP.zip",
             "/tmp/GFS.zarr.prod.zip",
             True,
@@ -6424,7 +6424,7 @@ def initialDataSync() -> None:
         logger.info("GFS Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/ECMWF.zarr.zip",
             "/tmp/ECMWF_TMP.zarr.zip",
             "/tmp/ECMWF.zarr.prod.zip",
             True,
@@ -6432,7 +6432,7 @@ def initialDataSync() -> None:
         logger.info("ECMWF Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/NBM.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/NBM.zarr.zip",
             "/tmp/NBM.zarr_TMP.zip",
             "/tmp/NBM.zarr.prod.zip",
             True,
@@ -6440,7 +6440,7 @@ def initialDataSync() -> None:
         logger.info("NBM Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/NBM_Fire.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/NBM_Fire.zarr.zip",
             "/tmp/NBM_Fire_TMP.zarr.zip",
             "/tmp/NBM_Fire.zarr.prod.zip",
             True,
@@ -6448,7 +6448,7 @@ def initialDataSync() -> None:
         logger.info("NBM_Fire Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/GEFS.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/GEFS.zarr.zip",
             "/tmp/GEFS_TMP.zarr.zip",
             "/tmp/GEFS.zarr.prod.zip",
             True,
@@ -6456,7 +6456,7 @@ def initialDataSync() -> None:
         logger.info("GEFS  Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/HRRR.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/HRRR.zarr.zip",
             "/tmp/HRRR_TMP.zarr.zip",
             "/tmp/HRRR.zarr.prod.zip",
             True,
@@ -6464,7 +6464,7 @@ def initialDataSync() -> None:
         logger.info("HRRR  Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/NWS_Alerts.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/NWS_Alerts.zarr.zip",
             "/tmp/NWS_Alerts_TMP.zarr.zip",
             "/tmp/NWS_Alerts.zarr.prod.zip",
             True,
@@ -6472,7 +6472,7 @@ def initialDataSync() -> None:
         logger.info("Alerts Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/WMO_Alerts.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/WMO_Alerts.zarr.zip",
             "/tmp/WMO_Alerts_TMP.zarr.zip",
             "/tmp/WMO_Alerts.zarr.prod.zip",
             True,
@@ -6480,7 +6480,7 @@ def initialDataSync() -> None:
         logger.info("WMO Alerts Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/RTMA_RU.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/RTMA_RU.zarr.zip",
             "/tmp/RTMA_RU_TMP.zarr.zip",
             "/tmp/RTMA_RU.zarr.prod.zip",
             True,
@@ -6488,17 +6488,17 @@ def initialDataSync() -> None:
         logger.info("RTMA_RU Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/ECMWF.zarr.zip",
             "/tmp/ECMWF_TMP.zarr.zip",
             "/tmp/ECMWF.zarr.prod.zip",
             True,
         )
         logger.info("ECMWF Download!")
 
-        if useETOPO:
+        if use_etopo:
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/ETOPO_DA_C.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/ETOPO_DA_C.zarr.zip",
                 "/tmp/ETOPO_DA_C_TMP.zarr.zip",
                 "/tmp/ETOPO_DA_C.zarr.prod.zip",
                 True,
@@ -6530,7 +6530,7 @@ def dataSync() -> None:
 
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/SubH.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/SubH.zarr.zip",
                 "/tmp/SubH_TMP.zarr.zip",
                 "/tmp/SubH.zarr.prod.zip",
                 False,
@@ -6538,7 +6538,7 @@ def dataSync() -> None:
             logger.info("SubH Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/HRRR_6H.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/HRRR_6H.zarr.zip",
                 "/tmp/HRRR_6H_TMP.zarr.zip",
                 "/tmp/HRRR_6H.zarr.prod.zip",
                 False,
@@ -6546,7 +6546,7 @@ def dataSync() -> None:
             logger.info("HRRR_6H Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/GFS.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/GFS.zarr.zip",
                 "/tmp/GFS.zarr_TMP.zip",
                 "/tmp/GFS.zarr.prod.zip",
                 False,
@@ -6554,7 +6554,7 @@ def dataSync() -> None:
             logger.info("GFS Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/ECMWF.zarr.zip",
                 "/tmp/ECMWF_TMP.zarr.zip",
                 "/tmp/ECMWF.zarr.prod.zip",
                 False,
@@ -6562,7 +6562,7 @@ def dataSync() -> None:
             logger.info("ECMWF Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/NBM.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/NBM.zarr.zip",
                 "/tmp/NBM.zarr_TMP.zip",
                 "/tmp/NBM.zarr.prod.zip",
                 False,
@@ -6570,7 +6570,7 @@ def dataSync() -> None:
             logger.info("NBM Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/NBM_Fire.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/NBM_Fire.zarr.zip",
                 "/tmp/NBM_Fire_TMP.zarr.zip",
                 "/tmp/NBM_Fire.zarr.prod.zip",
                 False,
@@ -6578,7 +6578,7 @@ def dataSync() -> None:
             logger.info("NBM_Fire Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/GEFS.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/GEFS.zarr.zip",
                 "/tmp/GEFS_TMP.zarr.zip",
                 "/tmp/GEFS.zarr.prod.zip",
                 False,
@@ -6586,7 +6586,7 @@ def dataSync() -> None:
             logger.info("GEFS  Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/HRRR.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/HRRR.zarr.zip",
                 "/tmp/HRRR_TMP.zarr.zip",
                 "/tmp/HRRR.zarr.prod.zip",
                 False,
@@ -6594,7 +6594,7 @@ def dataSync() -> None:
             logger.info("HRRR  Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/NWS_Alerts.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/NWS_Alerts.zarr.zip",
                 "/tmp/NWS_Alerts_TMP.zarr.zip",
                 "/tmp/NWS_Alerts.zarr.prod.zip",
                 False,
@@ -6602,7 +6602,7 @@ def dataSync() -> None:
             logger.info("Alerts Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/WMO_Alerts.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/WMO_Alerts.zarr.zip",
                 "/tmp/WMO_Alerts_TMP.zarr.zip",
                 "/tmp/WMO_Alerts.zarr.prod.zip",
                 False,
@@ -6610,7 +6610,7 @@ def dataSync() -> None:
             logger.info("Alerts Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/RTMA_RU.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/RTMA_RU.zarr.zip",
                 "/tmp/RTMA_RU_TMP.zarr.zip",
                 "/tmp/RTMA_RU.zarr.prod.zip",
                 False,
@@ -6618,17 +6618,17 @@ def dataSync() -> None:
             logger.info("RTMA_RU Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/ECMWF.zarr.zip",
                 "/tmp/ECMWF_TMP.zarr.zip",
                 "/tmp/ECMWF.zarr.prod.zip",
                 False,
             )
             logger.info("ECMWF Download!")
 
-            if useETOPO:
+            if use_etopo:
                 download_if_newer(
                     s3_bucket,
-                    "ForecastTar_v2/" + ingestVersion + "/ETOPO_DA_C.zarr.zip",
+                    "ForecastTar_v2/" + ingest_version + "/ETOPO_DA_C.zarr.zip",
                     "/tmp/ETOPO_DA_C_TMP.zarr.zip",
                     "/tmp/ETOPO_DA_C.zarr.prod.zip",
                     False,
