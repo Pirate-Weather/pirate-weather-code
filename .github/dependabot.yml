@@ -19,6 +19,10 @@ updates:
         - "minor"         # an array, possible values being minor, patch and major
         - "patch"
     open-pull-requests-limit: 100
+    ignore:
+      # Dependabot should not update numpy and eccodes
+      - dependency-name: "numpy"
+      - dependency-name: "eccodes"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -34,7 +38,7 @@ updates:
   - package-ecosystem: "docker"
     directory: "/Docker"
     schedule:
-      interval: "weekly"
+      interval: "quarterly"
       time: "13:00"
       timezone: "America/Toronto"
     assignees:

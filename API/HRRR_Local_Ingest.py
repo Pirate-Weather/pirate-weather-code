@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 import warnings
 
 import dask.array as da
@@ -19,22 +20,33 @@ import zarr.storage
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
+from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
+from API.ingest_utils import (
+    CHUNK_SIZES,
+    FINAL_CHUNK_SIZES,
+    FORECAST_LEAD_RANGES,
+    mask_invalid_data,
+    mask_invalid_refc,
+    pad_to_chunk_size,
+    validate_grib_stats,
+)
+
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
+ingestVersion = INGEST_VERSION_STR
+
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
 
-forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/home/ubuntu/Weather/HRRR"
-)
+forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/HRRR")
 forecast_process_path = forecast_process_dir + "/HRRR_Process"
 hist_process_path = forecast_process_dir + "/HRRR_Historic"
 tmpDIR = forecast_process_dir + "/Downloads"
 
-forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/HRRR")
-historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/History/HRRR")
+forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/HRRR")
+historic_path = os.getenv("historic_path", default="/mnt/nvme/data/HRRR")
 
 
 saveType = os.getenv("save_type", default="Download")
@@ -43,13 +55,14 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
+
 # Define the processing and history chunk size
-processChunk = 100
+processChunk = CHUNK_SIZES["HRRR"]
 
 # Define the final x/y chunksize
-finalChunk = 5
+finalChunk = FINAL_CHUNK_SIZES["HRRR"]
 
-hisPeriod = 36
+hisPeriod = HISTORY_PERIODS["HRRR"]
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -63,14 +76,14 @@ if not os.path.exists(tmpDIR):
     os.makedirs(tmpDIR)
 
 if saveType == "Download":
-    if not os.path.exists(forecast_path):
-        os.makedirs(forecast_path)
+    if not os.path.exists(forecast_path + "/" + ingestVersion):
+        os.makedirs(forecast_path + "/" + ingestVersion)
     if not os.path.exists(historic_path):
         os.makedirs(historic_path)
 
 
 # %% Define base time from the most recent run
-# base_time = pd.Timestamp("2023-07-01 00:00")
+# base_time = pd.Timestamp("2025-11-05 11:00")
 T0 = time.time()
 
 latestRun = Herbie_latest(
@@ -83,8 +96,10 @@ print(base_time)
 # Check if this is newer than the current file
 if saveType == "S3":
     # Check if the file exists and load it
-    if s3.exists(forecast_path + "/HRRR.time.pickle"):
-        with s3.open(forecast_path + "/HRRR.time.pickle", "rb") as f:
+    if s3.exists(forecast_path + "/" + ingestVersion + "/HRRR.time.pickle"):
+        with s3.open(
+            forecast_path + "/" + ingestVersion + "/HRRR.time.pickle", "rb"
+        ) as f:
             previous_base_time = pickle.load(f)
 
         # Compare timestamps and download if the S3 object is more recent
@@ -93,9 +108,11 @@ if saveType == "S3":
             sys.exit()
 
 else:
-    if os.path.exists(forecast_path + "/HRRR.time.pickle"):
+    if os.path.exists(forecast_path + "/" + ingestVersion + "/HRRR.time.pickle"):
         # Open the file in binary mode
-        with open(forecast_path + "/HRRR.time.pickle", "rb") as file:
+        with open(
+            forecast_path + "/" + ingestVersion + "/HRRR.time.pickle", "rb"
+        ) as file:
             # Deserialize and retrieve the variable from the file
             previous_base_time = pickle.load(file)
 
@@ -163,7 +180,8 @@ matchStrings = (
 
 # Create a range of forecast lead times
 # Go from 1 to 7 to account for the weird prate approach
-hrrr_range1 = range(1, 19)
+
+hrrr_range1 = FORECAST_LEAD_RANGES["HRRR_1H"]
 # Create FastHerbie object
 FH_forecastsub = FastHerbie(
     pd.date_range(start=base_time, periods=1, freq="1h"),
@@ -176,13 +194,34 @@ FH_forecastsub = FastHerbie(
 )
 
 # Download the subsets
-FH_forecastsub.download(matchStrings, verbose=True)
+FH_forecastsub.download(matchStrings, verbose=False)
+
+
+# Check for download length
+if len(FH_forecastsub.file_exists) != len(hrrr_range1):
+    print(
+        "Download failed, expected "
+        + str(len(hrrr_range1))
+        + " files but got "
+        + str(len(FH_forecastsub.file_exists))
+    )
+    sys.exit(1)
+
 
 # Create list of downloaded grib files
 gribList = [
     str(Path(x.get_localFilePath(matchStrings)).expand())
     for x in FH_forecastsub.file_exists
 ]
+
+# Perform a check if any data seems to be invalid
+cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
+
+gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+validate_grib_stats(gribCheck)
+print("Grib files passed validation, proceeding with processing")
+
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
 cmd = (
@@ -264,6 +303,17 @@ xarray_forecast_merged["APCP_surface"] = xarray_forecast_merged["APCP_surface"].
     )
 )
 
+# Adjust smoke units to avoid rounding issues
+xarray_forecast_merged["MASSDEN_8maboveground"] = (
+    xarray_forecast_merged["MASSDEN_8maboveground"] * 1e9
+)
+
+
+# Set REFC values < 5 to 0
+xarray_forecast_merged["REFC_entireatmosphere"] = mask_invalid_refc(
+    xarray_forecast_merged["REFC_entireatmosphere"]
+)
+
 # %% Save merged and processed xarray dataset to disk using zarr with compression
 # Define the path to save the zarr dataset
 
@@ -318,27 +368,29 @@ for i in range(hisPeriod, -1, -1):
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
+        if s3.exists(s3_path.replace(".zarr", ".done")):
+            print("File already exists in S3, skipping download for: " + s3_path)
+            # If the file exists, check that it works
 
-        if s3.exists(s3_path):
-            # Check that all the data is there and that the data is the right shape
-            zarrCheckStore = zarr.storage.FsspecStore.from_url(
-                s3_path,
-                storage_options={
-                    "key": aws_access_key_id,
-                    "secret": aws_secret_access_key,
-                },
-            )
+            if s3.exists(s3_path):
+                # Try to open and read data from the last variable of the zarr file to check if it has already been saved
+                try:
+                    hisCheckStore = zarr.storage.FsspecStore.from_url(
+                        s3_path,
+                        storage_options={
+                            "key": aws_access_key_id,
+                            "secret": aws_secret_access_key,
+                        },
+                    )
+                    zarr.open(hisCheckStore)[zarrVars[-1]][-1, -1, -1]
+                    continue  # If it exists, skip to the next iteration
+                except Exception:
+                    print("### Historic Data Failure!")
+                    print(traceback.print_exc())
 
-            zarrCheck = zarr.open(zarrCheckStore, "r")
-
-            # # Try to open the zarr file to check if it has already been saved
-            if (len(zarrCheck) - 4) == len(
-                zarrVars
-            ):  # Subtract 4 for lat, lon, x, and y
-                if zarrCheck[zarrVars[-1]].shape[1] == 1059:
-                    if zarrCheck[zarrVars[-1]].shape[2] == 1799:
-                        # print('Data is there and the right shape')
-                        continue
+                    # Delete the file if it exists
+                    if s3.exists(s3_path):
+                        s3.rm(s3_path)
 
     else:
         # Local Path Setup
@@ -349,19 +401,10 @@ for i in range(hisPeriod, -1, -1):
             + ".zarr"
         )
 
-        # Check if local file exists
-        if os.path.exists(local_path):
-            # Check that all the data is there and that the data is the right shape
-            zarrCheck = zarr.open(local_path, "r")
-
-            # # Try to open the zarr file to check if it has already been saved
-            if (len(zarrCheck) - 4) == len(
-                zarrVars
-            ):  # Subtract 4 for lat, lon, x, and y
-                if zarrCheck[zarrVars[-1]].shape[1] == 1059:
-                    if zarrCheck[zarrVars[-1]].shape[2] == 1799:
-                        # print('Data is there and the right shape')
-                        continue
+        # Check for a loca done file
+        if os.path.exists(local_path.replace(".zarr", ".done")):
+            print("File already exists in S3, skipping download for: " + local_path)
+            continue
 
     print(
         "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
@@ -381,18 +424,32 @@ for i in range(hisPeriod, -1, -1):
     fxx = range(1, 2)
 
     # Create FastHerbie Object.
+    # Fallback to NOMADS if missing on AWS
     FH_histsub = FastHerbie(
         DATES,
         model="hrrr",
         fxx=fxx,
         product="sfc",
         verbose=False,
-        priority="aws",
+        priority=["aws", "nomads"],
         save_dir=tmpDIR,
     )
 
     # Download the subsets
     FH_histsub.download(matchStrings, verbose=False)
+
+    # Perform a check if any data seems to be invalid
+    cmd = (
+        f"{wgrib2_path}"
+        + " "
+        + str(FH_histsub.file_exists[0].get_localFilePath(matchStrings))
+        + " -s -stats"
+    )
+
+    gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+    validate_grib_stats(gribCheck)
+    print("Grib files passed validation, proceeding with processing")
 
     # Use wgrib2 to rotate the wind vectors
     # From https://github.com/blaylockbk/pyBKB_v2/blob/master/demos/HRRR_earthRelative_vs_gridRelative_winds.ipynb
@@ -460,6 +517,15 @@ for i in range(hisPeriod, -1, -1):
     # Remove temp file created by wgrib2
     os.remove(hist_process_path + "_wgrib_merge.regrid")
     os.remove(hist_process_path + "_wgrib_merge.nc")
+
+    # Save a done file to s3 to indicate that the historic data has been processed
+    if saveType == "S3":
+        done_file = s3_path.replace(".zarr", ".done")
+        s3.touch(done_file)
+    else:
+        done_file = local_path.replace(".zarr", ".done")
+        with open(done_file, "w") as f:
+            f.write("Done")
 
     print((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
 
@@ -544,15 +610,22 @@ for dask_var in zarrVars:
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
+# Mask out invalid data
+daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
+
+
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
-daskVarArrayListMerge.to_zarr(
+daskVarArrayListMergeNaN.to_zarr(
     forecast_process_path + "_stack.zarr", overwrite=True, compute=True
 )
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
+
+# Add padding to the zarr store for main forecast chunking
+daskVarArrayStackDisk_main = pad_to_chunk_size(daskVarArrayStackDisk, finalChunk)
 
 # Create a zarr backed dask array
 if saveType == "S3":
@@ -564,10 +637,10 @@ else:
 
 zarr_array = zarr.create_array(
     store=zarr_store,
-    shape=daskVarArrayStackDisk.shape,
+    shape=daskVarArrayStackDisk_main.shape,
     chunks=(
         len(zarrVars),
-        daskVarArrayStackDisk.shape[1],
+        daskVarArrayStackDisk_main.shape[1],
         finalChunk,
         finalChunk,
     ),
@@ -578,8 +651,8 @@ zarr_array = zarr.create_array(
 
 # with ProgressBar():
 da.rechunk(
-    daskVarArrayStackDisk.round(3),
-    (len(zarrVars), daskVarArrayStackDisk.shape[1], finalChunk, finalChunk),
+    daskVarArrayStackDisk_main.round(5),
+    (len(zarrVars), daskVarArrayStackDisk_main.shape[1], finalChunk, finalChunk),
 ).to_zarr(zarr_array, compute=True)
 
 
@@ -598,6 +671,9 @@ if saveType == "S3":
 # 16 (MASSDEN)
 # 17 (REFC)
 
+# Add padding for map chunking (100x100)
+daskVarArrayStackDisk_maps = pad_to_chunk_size(daskVarArrayStackDisk, 100)
+
 # Loop through variables, creating a new one with a name and 36 x 100 x 100 chunks
 # Save -12:24 hours, aka steps 24:60
 # Create a Zarr array in the store with zstd compression
@@ -615,15 +691,15 @@ for z in (0, 4, 7, 8, 9, 11, 12, 13, 14, 16, 17):
         name=zarrVars[z],
         shape=(
             36,
-            daskVarArrayStackDisk.shape[2],
-            daskVarArrayStackDisk.shape[3],
+            daskVarArrayStackDisk_maps.shape[2],
+            daskVarArrayStackDisk_maps.shape[3],
         ),
         chunks=(36, 100, 100),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
         dtype="float32",
     )
 
-    da.rechunk(daskVarArrayStackDisk[z, 24:60, :, :], (36, 100, 100)).to_zarr(
+    da.rechunk(daskVarArrayStackDisk_maps[z, 36:72, :, :], (36, 100, 100)).to_zarr(
         zarr_array, overwrite=True, compute=True
     )
 
@@ -637,11 +713,12 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/HRRR.zarr.zip", forecast_path + "/HRRR.zarr.zip"
+        forecast_process_dir + "/HRRR.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/HRRR.zarr.zip",
     )
     s3.put_file(
         forecast_process_dir + "/HRRR_maps.zarr.zip",
-        forecast_path + "/HRRR_maps.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/HRRR_maps.zarr.zip",
     )
 
     # Write most recent forecast time
@@ -651,7 +728,7 @@ if saveType == "S3":
 
     s3.put_file(
         forecast_process_dir + "/HRRR.time.pickle",
-        forecast_path + "/HRRR.time.pickle",
+        forecast_path + "/" + ingestVersion + "/HRRR.time.pickle",
     )
 else:
     # Write most recent forecast time
@@ -661,20 +738,20 @@ else:
 
     shutil.move(
         forecast_process_dir + "/HRRR.time.pickle",
-        forecast_path + "/HRRR.time.pickle",
+        forecast_path + "/" + ingestVersion + "/HRRR.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/HRRR.zarr",
-        forecast_path + "/HRRR.zarr",
+        forecast_path + "/" + ingestVersion + "/HRRR.zarr",
         dirs_exist_ok=True,
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/HRRR_maps.zarr",
-        forecast_path + "/HRRR_maps.zarr",
+        forecast_path + "/" + ingestVersion + "/HRRR_maps.zarr",
         dirs_exist_ok=True,
     )
 

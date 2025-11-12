@@ -8,10 +8,12 @@
 FROM python:3.13
 
 # Set environment variables
-ENV DEBIAN_FRONTEND=noninteractive
-ENV CC=gcc
-ENV FC=gfortran
-
+ENV DEBIAN_FRONTEND=noninteractive \
+    CC=gcc \
+    FC=gfortran \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
 
 # Update package lists and install dependencies
 RUN apt update && \
@@ -30,17 +32,17 @@ RUN apt update && \
                        git \
                        libnetcdf-dev \
                        libhdf5-dev \
-		       libgdal-dev \ 
+		               libgdal-dev \
                        libaec-dev 					   
 
 # Manual ECCodes
-RUN wget https://confluence.ecmwf.int/download/attachments/45757960/eccodes-2.41.0-Source.tar.gz
-RUN tar xzf eccodes-2.41.0-Source.tar.gz && rm eccodes-2.41.0-Source.tar.gz
+RUN wget https://confluence.ecmwf.int/download/attachments/45757960/eccodes-2.42.0-Source.tar.gz
+RUN tar xzf eccodes-2.42.0-Source.tar.gz && rm eccodes-2.42.0-Source.tar.gz
 
 RUN mkdir /build
 WORKDIR /build
 
-RUN cmake -DCMAKE_INSTALL_PREFIX=/usr/local ../eccodes-2.41.0-Source
+RUN cmake -DCMAKE_INSTALL_PREFIX=/usr/local ../eccodes-2.42.0-Source
 RUN make -j4
 RUN ctest -j4
 RUN make install
@@ -53,13 +55,13 @@ RUN cmake --install NCEPLIBS-ip/build
 
 
 # Get wgrib2
-RUN wget -q -O /build/wgrib2.tgz https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v3.6.0.tar.gz
+RUN wget -q -O /build/wgrib2.tgz https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v3.7.0.tar.gz
 
 RUN mkdir /build/wgrib2
 
 RUN tar -xf /build/wgrib2.tgz -C /build/wgrib2
 
-WORKDIR /build/wgrib2/wgrib2-3.6.0
+WORKDIR /build/wgrib2/wgrib2-3.7.0
 
 RUN  cmake --fresh -DCMAKE_INSTALL_PREFIX="/build/wgrib2_build/" -DCMAKE_PREFIX_PATH="/build/NCEPLIBS_build/" -DUSE_NETCDF=ON -DUSE_OPENMP=ON -DUSE_IPOLATES=ON -DUSE_AEC=ON
 RUN cmake --build . --parallel 4
@@ -74,6 +76,6 @@ COPY Docker/requirements-ingest.txt requirements-ingest.txt
 RUN python3 -m pip install -r requirements-ingest.txt  --no-binary eccodes
  
 # Copy Files
-COPY API/ ./
- 
+COPY API /app/API
+
 ENTRYPOINT ["python3"]

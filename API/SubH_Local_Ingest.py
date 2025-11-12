@@ -20,9 +20,19 @@ import zarr
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
+from API.constants.shared_const import INGEST_VERSION_STR
+from API.ingest_utils import (
+    mask_invalid_data,
+    mask_invalid_refc,
+    pad_to_chunk_size,
+    validate_grib_stats,
+)
+
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
+ingestVersion = INGEST_VERSION_STR
+
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
@@ -61,8 +71,8 @@ if not os.path.exists(tmpDIR):
     os.makedirs(tmpDIR)
 
 if saveType == "Download":
-    if not os.path.exists(forecast_path):
-        os.makedirs(forecast_path)
+    if not os.path.exists(forecast_path + "/" + ingestVersion):
+        os.makedirs(forecast_path + "/" + ingestVersion)
 
 # %% Define base time from the most recent run
 # base_time = pd.Timestamp("2023-07-01 00:00")
@@ -86,8 +96,10 @@ print(base_time)
 # Check if this is newer than the current file
 if saveType == "S3":
     # Check if the file exists and load it
-    if s3.exists(forecast_path + "/SubH_v2.time.pickle"):
-        with s3.open(forecast_path + "/SubH_v2.time.pickle", "rb") as f:
+    if s3.exists(forecast_path + "/" + ingestVersion + "/SubH_v2.time.pickle"):
+        with s3.open(
+            forecast_path + "/" + ingestVersion + "/SubH_v2.time.pickle", "rb"
+        ) as f:
             previous_base_time = pickle.load(f)
 
         # Compare timestamps and download if the S3 object is more recent
@@ -96,9 +108,11 @@ if saveType == "S3":
             sys.exit()
 
 else:
-    if os.path.exists(forecast_path + "/SubH_v2.time.pickle"):
+    if os.path.exists(forecast_path + "/" + ingestVersion + "/SubH_v2.time.pickle"):
         # Open the file in binary mode
-        with open(forecast_path + "/SubH_v2.time.pickle", "rb") as file:
+        with open(
+            forecast_path + "/" + ingestVersion + "/SubH_v2.time.pickle", "rb"
+        ) as file:
             # Deserialize and retrieve the variable from the file
             previous_base_time = pickle.load(file)
 
@@ -126,7 +140,6 @@ zarrVars = (
     "VIS_surface",
     "SPFH_2maboveground",
     "DSWRF_surface",
-    "CAPE_surface",
 )
 
 
@@ -140,7 +153,7 @@ zarrVars = (
 # Define the subset of variables to download as a list of strings
 matchstring_2m = ":((DPT|TMP|SPFH):2 m above ground:)"
 matchstring_su = (
-    ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST|DSWRF|CAPE):surface:.*min fcst)"
+    ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST|DSWRF):surface:.*min fcst)"
 )
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*min fcst)"
 matchstring_sl = "(:(REFC):)"
@@ -176,11 +189,31 @@ FH_forecastsub = FastHerbie(
 # Download the subsets
 FH_forecastsub.download(matchStrings, verbose=False)
 
+# Check for download length
+if len(FH_forecastsub.file_exists) != len(hrrr_range1):
+    print(
+        "Download failed, expected "
+        + str(len(hrrr_range1))
+        + " files but got "
+        + str(len(FH_forecastsub.file_exists))
+    )
+    sys.exit(1)
+
+
 # Create list of downloaded grib files
 gribList = [
     str(Path(x.get_localFilePath(matchStrings)).expand())
     for x in FH_forecastsub.file_exists
 ]
+
+# Perform a check if any data seems to be invalid
+cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
+
+gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+
+validate_grib_stats(gribCheck)
+print("Grib files passed validation, proceeding with processing")
+
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
 cmd = (
@@ -243,6 +276,12 @@ if spOUT3.returncode != 0:
 # %% Create XArray
 # Read the netcdf file using xarray
 xarray_forecast_merged = xr.open_mfdataset(forecast_process_path + "_wgrib2_merged.nc")
+
+
+# Set REFC values < 5 to 0
+xarray_forecast_merged["REFC_entireatmosphere"] = mask_invalid_refc(
+    xarray_forecast_merged["REFC_entireatmosphere"]
+)
 
 if len(xarray_forecast_merged.time) != len(hrrr_range1) * 4:
     print(len(xarray_forecast_merged.time))
@@ -315,15 +354,21 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
+# Mask out invalid data
+daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
+
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
-daskVarArrayListMerge.to_zarr(
+daskVarArrayListMergeNaN.to_zarr(
     forecast_process_path + "_stack.zarr", overwrite=True, compute=True
 )
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
+
+# Add padding to the zarr store for main forecast chunking
+daskVarArrayStackDisk_main = pad_to_chunk_size(daskVarArrayStackDisk, finalChunk)
 
 # Create a zarr backed dask array
 if saveType == "S3":
@@ -336,10 +381,10 @@ else:
 
 zarr_array = zarr.create_array(
     store=zarr_store,
-    shape=daskVarArrayStackDisk.shape,
+    shape=daskVarArrayStackDisk_main.shape,
     chunks=(
         len(zarrVars),
-        daskVarArrayStackDisk.shape[1],
+        daskVarArrayStackDisk_main.shape[1],
         finalChunk,
         finalChunk,
     ),
@@ -350,8 +395,8 @@ zarr_array = zarr.create_array(
 
 # with ProgressBar():
 da.rechunk(
-    daskVarArrayStackDisk.round(3),
-    (len(zarrVars), daskVarArrayStackDisk.shape[1], finalChunk, finalChunk),
+    daskVarArrayStackDisk_main.round(5),
+    (len(zarrVars), daskVarArrayStackDisk_main.shape[1], finalChunk, finalChunk),
 ).to_zarr(zarr_array, compute=True)
 
 if saveType == "S3":
@@ -361,7 +406,8 @@ if saveType == "S3":
 if saveType == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/SubH.zarr.zip", forecast_path + "/SubH.zarr.zip"
+        forecast_process_dir + "/SubH.zarr.zip",
+        forecast_path + "/" + ingestVersion + "/SubH.zarr.zip",
     )
 
     # Write most recent forecast time
@@ -371,7 +417,7 @@ if saveType == "S3":
 
     s3.put_file(
         forecast_process_dir + "/SubH.time.pickle",
-        forecast_path + "/SubH.time.pickle",
+        forecast_path + "/" + ingestVersion + "/SubH.time.pickle",
     )
 else:
     # Write most recent forecast time
@@ -381,13 +427,13 @@ else:
 
     shutil.move(
         forecast_process_dir + "/SubH.time.pickle",
-        forecast_path + "/SubH.time.pickle",
+        forecast_path + "/" + ingestVersion + "/SubH.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/SubH.zarr",
-        forecast_path + "/SubH.zarr",
+        forecast_path + "/" + ingestVersion + "/SubH.zarr",
         dirs_exist_ok=True,
     )
 

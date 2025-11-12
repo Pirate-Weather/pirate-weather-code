@@ -61,6 +61,12 @@ services:
       ofelia.job-run.ecmwf-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/ECMWF", "forecast_path=/data/Prod/ECMWF", "historic_path=/data/Hist/ECMWF", "save_type=Download"]'
       ofelia.job-run.ecmwf-ingest.command: "ECMWF_Local_Ingest.py" 
       ofelia.job-run.ecmwf-ingest.no-overlap: "true"
+      ofelia.job-run.rtma-ru-ingest.schedule: "0 10,25,40,55 * * * *"
+      ofelia.job-run.rtma-ru-ingest.image: "pirateingest:latest" 
+      ofelia.job-run.rtma-ru-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
+      ofelia.job-run.rtma-ru-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/RTMA-RU", "forecast_path=/data/Prod/RTMA-RU", "historic_path=/data/Hist/RTMA-RU", "save_type=Download"]'
+      ofelia.job-run.rtma-ru-ingest.command: "RTMA-RU_Local_Ingest.py" 
+      ofelia.job-run.rtma-ru-ingest.no-overlap: "true"
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
@@ -77,9 +83,11 @@ services:
       hrrr_6h_ingest:
         condition: service_completed_successfully
       nws_alerts_ingest:
-        condition: service_completed_successfully         
+        condition: service_completed_successfully
       ecmwf_ingest:
-        condition: service_completed_successfully         
+        condition: service_completed_successfully
+      rtma-ru_ingest:
+        condition: service_completed_successfully
                                                                                                             
 
   # GFS Ingest
@@ -247,7 +255,7 @@ services:
       nbm_fire_ingest:
         condition: service_completed_successfully 
       gefs_ingest:
-        condition: service_completed_successfully       
+        condition: service_completed_successfully
 
   # ECMWF Ingest
   ecmwf_ingest:
@@ -266,13 +274,38 @@ services:
       gfs_ingest:
         condition: service_completed_successfully
       nbm_ingest:
-        condition: service_completed_successfully      
+        condition: service_completed_successfully
       subh_ingest:
         condition: service_completed_successfully
       nbm_fire_ingest:
-        condition: service_completed_successfully 
+        condition: service_completed_successfully
       gefs_ingest:
-        condition: service_completed_successfully  
+        condition: service_completed_successfully
+
+  # RTMA-RU Ingest
+  rtma-ru_ingest:
+    image: pirateingest:latest
+    volumes:
+      - /home/ubuntu/Weather:/data
+      - /mnt/block:/tmp
+    environment:
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/RTMA-RU"
+      forecast_path: "/data/Prod/RTMA-RU"
+      historic_path: "/data/Hist/RTMA-RU"
+      save_type: "Download"
+    command: ["RTMA-RU_Local_Ingest.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully
+      subh_ingest:
+        condition: service_completed_successfully
+      nbm_fire_ingest:
+        condition: service_completed_successfully
+      gefs_ingest:
+        condition: service_completed_successfully
 
   # Consistently running API server
 #  api_server:
