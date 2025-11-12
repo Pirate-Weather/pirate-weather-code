@@ -674,8 +674,8 @@ if saveType == "S3":
 # Add padding for map chunking (100x100)
 daskVarArrayStackDisk_maps = pad_to_chunk_size(daskVarArrayStackDisk, 100)
 
-# Loop through variables, creating a new one with a name and 36 x 100 x 100 chunks
-# Save -12:24 hours, aka steps 24:60
+# Loop through variables, creating a new one with a name and 30 x 100 x 100 chunks
+# Save -12:18 hours, aka steps 36:66
 # Create a Zarr array in the store with zstd compression
 if saveType == "S3":
     zarr_store_maps = zarr.storage.ZipStore(
@@ -690,16 +690,16 @@ for z in (0, 4, 7, 8, 9, 11, 12, 13, 14, 16, 17):
         store=zarr_store_maps,
         name=zarrVars[z],
         shape=(
-            36,
+            30,
             daskVarArrayStackDisk_maps.shape[2],
             daskVarArrayStackDisk_maps.shape[3],
         ),
-        chunks=(36, 100, 100),
+        chunks=(30, 100, 100),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
         dtype="float32",
     )
 
-    da.rechunk(daskVarArrayStackDisk_maps[z, 36:72, :, :], (36, 100, 100)).to_zarr(
+    da.rechunk(daskVarArrayStackDisk_maps[z, 36:66, :, :], (30, 100, 100)).to_zarr(
         zarr_array, overwrite=True, compute=True
     )
 
