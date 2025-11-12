@@ -207,6 +207,15 @@ def setup_logging():
 def download_if_newer(
     s3_bucket, s3_object_key, local_file_path, local_lmdb_path, initialDownload
 ):
+    """Download a file from S3 if it's newer than the local version.
+
+    Args:
+        s3_bucket: S3 bucket name or local path
+        s3_object_key: S3 object key or local file path
+        local_file_path: Path to download the file to
+        local_lmdb_path: Path for the final lmdb file
+        initialDownload: Whether this is the initial download (affects transfer config)
+    """
     if initialDownload:
         config = TransferConfig(use_threads=True, max_bandwidth=None)
     else:
@@ -303,6 +312,16 @@ logger.addHandler(handler)
 
 
 def find_largest_integer_directory(parent_dir, key_string, initialRun):
+    """Find the directory with the largest integer timestamp suffix.
+
+    Args:
+        parent_dir: Parent directory to search in
+        key_string: String to filter directory names
+        initialRun: Whether this is the initial run
+
+    Returns:
+        tuple: (largest_dir, old_dirs) - the newest directory and list of older ones
+    """
     largest_value = LARGEST_DIR_INIT
     largest_dir = None
     old_dirs = []
@@ -572,12 +591,12 @@ def solar_rad(D_t, lat, t_t):
     delta = SOLAR_RAD_CONST["delta_factor"] * math.sin(
         (2 * math.pi * (D_t + SOLAR_RAD_CONST["delta_offset"])) / 365
     )
-    radLat = np.deg2rad(lat)
-    solarHour = math.pi * ((t_t - SOLAR_RAD_CONST["hour_offset"]) / 12)
-    cosTheta = math.sin(delta) * math.sin(radLat) + math.cos(delta) * math.cos(
-        radLat
-    ) * math.cos(solarHour)
-    R_s = r * (S_0 / d**2) * cosTheta
+    rad_lat = np.deg2rad(lat)
+    solar_hour = math.pi * ((t_t - SOLAR_RAD_CONST["hour_offset"]) / 12)
+    cos_theta = math.sin(delta) * math.sin(rad_lat) + math.cos(delta) * math.cos(
+        rad_lat
+    ) * math.cos(solar_hour)
+    R_s = r * (S_0 / d**2) * cos_theta
 
     if R_s < 0:
         R_s = 0
@@ -586,6 +605,14 @@ def solar_rad(D_t, lat, t_t):
 
 
 def toTimestamp(d):
+    """Convert datetime to Unix timestamp.
+
+    Args:
+        d: datetime object
+
+    Returns:
+        Unix timestamp (float)
+    """
     return d.timestamp()
 
 
@@ -685,6 +712,16 @@ if (STAGE == "TESTING") or (STAGE == "TM_TESTING"):
 
 
 async def get_zarr(store, X, Y):
+    """Asynchronously retrieve zarr data at given coordinates.
+
+    Args:
+        store: Zarr store to read from
+        X: X coordinate
+        Y: Y coordinate
+
+    Returns:
+        Zarr data at the specified coordinates
+    """
     return store[:, :, X, Y]
 
 
@@ -801,45 +838,47 @@ def _interp_row(row: np.ndarray) -> np.ndarray:
 
 
 class WeatherParallel(object):
+    """Helper class for parallel zarr reading operations."""
+
     async def zarr_read(self, model, opened_zarr, x, y):
         if TIMING:
             logger.debug(f"### {model} Reading!")
             logger.debug(datetime.datetime.now(datetime.UTC).replace(tzinfo=None))
 
-        errCount = 0
-        dataOut = False
+        err_count = 0
+        data_out = False
         # Try to read Zarr file
-        while errCount < MAX_ZARR_READ_RETRIES:
+        while err_count < MAX_ZARR_READ_RETRIES:
             try:
-                dataOut = await asyncio.to_thread(lambda: opened_zarr[:, :, y, x].T)
+                data_out = await asyncio.to_thread(lambda: opened_zarr[:, :, y, x].T)
 
                 # Check for missing/ bad data and interpolate
                 # This should not occur, but good to have a fallback
-                if has_interior_nan_holes(dataOut.T):
+                if has_interior_nan_holes(data_out.T):
                     logger.warning(f"### {model} Interpolating missing data!")
 
                     # Print the location of the missing data
                     if TIMING:
                         logger.debug(
-                            f"### {model} Missing data at: {np.argwhere(np.isnan(dataOut))}"
+                            f"### {model} Missing data at: {np.argwhere(np.isnan(data_out))}"
                         )
 
-                    dataOut = np.apply_along_axis(_interp_row, 0, dataOut)
+                    data_out = np.apply_along_axis(_interp_row, 0, data_out)
 
                 if TIMING:
                     logger.debug(f"### {model} Done!")
                     logger.debug(
                         datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
                     )
-                return dataOut
+                return data_out
 
             except Exception:
                 logger.exception("### %s Failure!", model)
-                errCount = errCount + 1
+                err_count = err_count + 1
 
         logger.error("### %s Failure!", model)
-        dataOut = False
-        return dataOut
+        data_out = False
+        return data_out
 
 
 def cull(lng, lat):
@@ -955,6 +994,15 @@ def rounder(
 
 
 def unix_to_day_of_year_and_lst(dt, longitude):
+    """Convert Unix time to day of year and local solar time.
+
+    Args:
+        dt: datetime object
+        longitude: Longitude in degrees
+
+    Returns:
+        tuple: (day_of_year, local_solar_time)
+    """
     # Calculate the day of the year
     day_of_year = dt.timetuple().tm_yday
 
@@ -1226,7 +1274,7 @@ async def PW_Forecast(
                 utcTime = datetime.datetime.fromtimestamp(
                     float(locationReq[2]), datetime.UTC
                 ).replace(tzinfo=None)
-            elif float(locationReq[2]) < 0:  # Negatime time
+            elif float(locationReq[2]) < 0:  # Negative time
                 utcTime = nowTime + datetime.timedelta(seconds=float(locationReq[2]))
 
         else:
@@ -6596,7 +6644,17 @@ def dataSync() -> None:
 
 
 def nearest_index(a, v):
-    # Slightly faster than a simple linear search for large arrays
+    """Find the nearest index in array to value using binary search.
+
+    Slightly faster than a simple linear search for large arrays.
+
+    Args:
+        a: Sorted array
+        v: Value to find
+
+    Returns:
+        Index of nearest value in array
+    """
     # Find insertion point
     idx = np.searchsorted(a, v)
     # Clip so we don’t run off the ends
