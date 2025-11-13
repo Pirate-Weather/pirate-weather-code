@@ -104,73 +104,85 @@ TEMP_THRESHOLD_SNOW_C = 272.15
 # Zarr read retry constants
 MAX_ZARR_READ_RETRIES = 4
 
-# Coordinate constants
-LONGITUDE_MIN = -180
-LONGITUDE_MAX = 360
-LATITUDE_MIN = -90
-LATITUDE_MAX = 90
-LONGITUDE_OFFSET = 180
+# Grouped coordinate constants
+COORDINATE_CONST = {
+    "longitude_min": -180,
+    "longitude_max": 360,
+    "latitude_min": -90,
+    "latitude_max": 90,
+    "longitude_offset": 180,
+}
 
-# Time machine constants
-TIME_MACHINE_THRESHOLD_HOURS = 25
-VERY_NEGATIVE_TIME_THRESHOLD = -100000
+# Grouped time machine constants
+TIME_MACHINE_CONST = {
+    "threshold_hours": 25,
+    "very_negative_threshold": -100000,
+}
 
 # Filename constants
 FILENAME_TIMESTAMP_SLICE_LENGTH = 12
 
-# Unit conversion constants
-SECONDS_TO_MINUTES = 60
-HOURS_TO_MINUTES = 60
-SECONDS_TO_HOURS = 3600
-LONGITUDE_TO_HOURS = 15
+# Grouped unit conversion constants
+UNIT_CONVERSION_CONST = {
+    "seconds_to_minutes": 60,
+    "hours_to_minutes": 60,
+    "seconds_to_hours": 3600,
+    "longitude_to_hours": 15,
+}
 
-# Etopo resolution
-ETOPO_LAT_RESOLUTION = 0.01666667
-ETOPO_LON_RESOLUTION = 0.01666667
+# Grouped Etopo resolution constants
+ETOPO_CONST = {
+    "lat_resolution": 0.01666667,
+    "lon_resolution": 0.01666667,
+}
 
-# Lambert projection constants
-LAMBERT_PI_FACTOR = 0.25
-LAMBERT_HALF_PI_FACTOR = 0.5
+# Grouped Lambert projection constants
+LAMBERT_CONST = {
+    "pi_factor": 0.25,
+    "half_pi_factor": 0.5,
+}
 
-# DBZ conversion constants
-DBZ_DIVISOR = 10.0
-DBZ_MIN_VALUE = 0.0
-DBZ_EXPONENT = 1.0
+# Grouped DBZ conversion constants
+DBZ_CONVERSION_CONST = {
+    "divisor": 10.0,
+    "min_value": 0.0,
+    "exponent": 1.0,
+}
 
-# Humidity conversion constants
-HUMIDITY_PERCENTAGE_FACTOR = 100.0
+# Grouped conversion factor constants
+CONVERSION_FACTORS = {
+    "humidity_percentage": 100.0,
+    "pressure_to_hpa": 100,
+    "cloud_cover_percentage": 0.01,
+    "joules_to_watts": 3600,
+    "ozone_to_dobson": 46696,
+}
 
-# Pressure conversion constants
-PRESSURE_TO_HPA = 100
+# Grouped RTMA_RU visibility constants
+RTMA_RU_VIS_CONST = {
+    "max_threshold": 15999,
+    "converted_value": 16090,
+}
 
-# Cloud cover conversion constants
-CLOUD_COVER_PERCENTAGE_FACTOR = 0.01
-
-# RTMA_RU visibility constants
-RTMA_RU_MAX_VIS_THRESHOLD = 15999
-RTMA_RU_VIS_CONVERTED = 16090
-
-# Solar radiation conversion constants (J/m2 to W/m2)
-JOULES_TO_WATTS = 3600
-
-# UV index constants
-GFS_UV_FACTOR = 18.9
-GFS_UV_MULTIPLIER = 0.025
-ERA5_UV_FACTOR = 40
-ERA5_UV_MULTIPLIER = 0.0025
-
-# Ozone conversion constants (to Dobson units)
-OZONE_TO_DOBSON = 46696
+# Grouped UV index constants
+UV_INDEX_CONST = {
+    "gfs_factor": 18.9,
+    "gfs_multiplier": 0.025,
+    "era5_factor": 40,
+    "era5_multiplier": 0.0025,
+}
 
 # Default rounding interval (minutes)
 DEFAULT_ROUNDING_INTERVAL = 60
 
-# Solar calculations
-SOLAR_DAY_OF_YEAR_BASE = 284
-SOLAR_DEGREES_PER_YEAR = 360
-DAYS_PER_YEAR = 365
-SOLAR_HOUR_FACTOR = 15
-SOLAR_HOUR_OFFSET = 12
+# Grouped solar calculation constants
+SOLAR_CALC_CONST = {
+    "day_of_year_base": 284,
+    "degrees_per_year": 360,
+    "days_per_year": 365,
+    "hour_factor": 15,
+    "hour_offset": 12,
+}
 
 # WBGT temperature units
 WBGT_PERCENTAGE_DIVISOR = 100.0

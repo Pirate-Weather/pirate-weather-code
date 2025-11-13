@@ -53,45 +53,29 @@ from API.api_utils import (
 )
 from API.constants.api_const import (
     API_VERSION,
-    DAYS_PER_YEAR,
+    COORDINATE_CONST,
     DBZ_CONST,
-    DBZ_DIVISOR,
-    DBZ_EXPONENT,
-    DBZ_MIN_VALUE,
+    DBZ_CONVERSION_CONST,
     DEFAULT_ROUNDING_INTERVAL,
-    ETOPO_LAT_RESOLUTION,
-    ETOPO_LON_RESOLUTION,
+    ETOPO_CONST,
     FILENAME_TIMESTAMP_SLICE_LENGTH,
     GLOBE_TEMP_CONST,
-    HOURS_TO_MINUTES,
-    LAMBERT_HALF_PI_FACTOR,
-    LAMBERT_PI_FACTOR,
+    LAMBERT_CONST,
     LARGEST_DIR_INIT,
-    LATITUDE_MAX,
-    LATITUDE_MIN,
-    LONGITUDE_MAX,
-    LONGITUDE_MIN,
-    LONGITUDE_OFFSET,
-    LONGITUDE_TO_HOURS,
     MAX_ZARR_READ_RETRIES,
     NICE_PRIORITY,
     PRECIP_IDX,
     PRECIP_NOISE_THRESHOLD_MMH,
     ROUNDING_RULES,
     S3_MAX_BANDWIDTH,
-    SECONDS_TO_HOURS,
-    SECONDS_TO_MINUTES,
-    SOLAR_DAY_OF_YEAR_BASE,
-    SOLAR_DEGREES_PER_YEAR,
-    SOLAR_HOUR_FACTOR,
-    SOLAR_HOUR_OFFSET,
+    SOLAR_CALC_CONST,
     SOLAR_IRRADIANCE_CONST,
     SOLAR_RAD_CONST,
     TEMP_THRESHOLD_RAIN_C,
     TEMP_THRESHOLD_SNOW_C,
     TEMPERATURE_UNITS_THRESH,
-    TIME_MACHINE_THRESHOLD_HOURS,
-    VERY_NEGATIVE_TIME_THRESHOLD,
+    TIME_MACHINE_CONST,
+    UNIT_CONVERSION_CONST,
     WBGT_CONST,
     WBGT_PERCENTAGE_DIVISOR,
 )
@@ -733,8 +717,16 @@ async def get_zarr(store, X, Y):
     return store[:, :, X, Y]
 
 
-lats_etopo = np.arange(LATITUDE_MIN, LATITUDE_MAX, ETOPO_LAT_RESOLUTION)
-lons_etopo = np.arange(LONGITUDE_MIN, LONGITUDE_OFFSET, ETOPO_LON_RESOLUTION)
+lats_etopo = np.arange(
+    COORDINATE_CONST["latitude_min"],
+    COORDINATE_CONST["latitude_max"],
+    ETOPO_CONST["lat_resolution"],
+)
+lons_etopo = np.arange(
+    COORDINATE_CONST["longitude_min"],
+    COORDINATE_CONST["longitude_offset"],
+    ETOPO_CONST["lon_resolution"],
+)
 
 tf = TimezoneFinder(in_memory=True)
 
@@ -750,7 +742,9 @@ def get_offset(*, lat, lng, utcTime, tf):
     # ATTENTION: tz_target could be None! handle error case
     today_target = tz_target.localize(today)
     today_utc = utc.localize(today)
-    return (today_utc - today_target).total_seconds() / SECONDS_TO_MINUTES, tz_target
+    return (today_utc - today_target).total_seconds() / UNIT_CONVERSION_CONST[
+        "seconds_to_minutes"
+    ], tz_target
 
 
 def _polar_is_all_day(lat_val: float, month_val: int) -> bool:
@@ -882,7 +876,7 @@ class WeatherParallel(object):
 
             except Exception:
                 logger.exception("### %s Failure!", model)
-                err_count = err_count + 1
+                err_count += 1
 
         logger.error("### %s Failure!", model)
         data_out = False
@@ -928,7 +922,8 @@ def lambertGridMatch(
         math.cos(standard_parallel)
         * (
             math.tan(
-                LAMBERT_PI_FACTOR * math.pi + LAMBERT_HALF_PI_FACTOR * standard_parallel
+                LAMBERT_CONST["pi_factor"] * math.pi
+                + LAMBERT_CONST["half_pi_factor"] * standard_parallel
             )
         )
         ** hrr_n
@@ -939,7 +934,8 @@ def lambertGridMatch(
         * 1
         / (
             math.tan(
-                LAMBERT_PI_FACTOR * math.pi + LAMBERT_HALF_PI_FACTOR * math.radians(lat)
+                LAMBERT_CONST["pi_factor"] * math.pi
+                + LAMBERT_CONST["half_pi_factor"] * math.radians(lat)
             )
             ** hrr_n
         )
@@ -950,7 +946,8 @@ def lambertGridMatch(
         * 1
         / (
             math.tan(
-                LAMBERT_PI_FACTOR * math.pi + LAMBERT_HALF_PI_FACTOR * central_latitude
+                LAMBERT_CONST["pi_factor"] * math.pi
+                + LAMBERT_CONST["half_pi_factor"] * central_latitude
             )
             ** hrr_n
         )
@@ -1015,12 +1012,16 @@ def unix_to_day_of_year_and_lst(dt, longitude):
     day_of_year = dt.timetuple().tm_yday
 
     # Calculate UTC time in hours
-    utc_time = dt.hour + dt.minute / HOURS_TO_MINUTES + dt.second / SECONDS_TO_HOURS
+    utc_time = (
+        dt.hour
+        + dt.minute / UNIT_CONVERSION_CONST["hours_to_minutes"]
+        + dt.second / UNIT_CONVERSION_CONST["seconds_to_hours"]
+    )
     if TIMING:
         logger.debug(f"UTC time: {utc_time}")
 
     # Calculate Local Solar Time (LST) considering the longitude
-    lst = utc_time + (longitude / LONGITUDE_TO_HOURS)
+    lst = utc_time + (longitude / UNIT_CONVERSION_CONST["longitude_to_hours"])
     if TIMING:
         logger.debug(f"LST: {lst}")
 
@@ -1036,14 +1037,17 @@ def solar_irradiance(latitude, longitude, unix_time):
     # Calculate solar declination (delta) in radians
     delta = math.radians(SOLAR_IRRADIANCE_CONST["declination"]) * math.sin(
         math.radians(
-            SOLAR_DEGREES_PER_YEAR
-            / DAYS_PER_YEAR
-            * (SOLAR_DAY_OF_YEAR_BASE + day_of_year)
+            SOLAR_CALC_CONST["degrees_per_year"]
+            / SOLAR_CALC_CONST["days_per_year"]
+            * (SOLAR_CALC_CONST["day_of_year_base"] + day_of_year)
         )
     )
 
     # Calculate hour angle (H) in degrees, then convert to radians
-    H = math.radians(SOLAR_HOUR_FACTOR * (local_solar_time - SOLAR_HOUR_OFFSET))
+    H = math.radians(
+        SOLAR_CALC_CONST["hour_factor"]
+        * (local_solar_time - SOLAR_CALC_CONST["hour_offset"])
+    )
 
     # Convert latitude to radians
     phi = math.radians(latitude)
@@ -1058,7 +1062,13 @@ def solar_irradiance(latitude, longitude, unix_time):
     G_0 = G_sc * (
         1
         + SOLAR_IRRADIANCE_CONST["g0_coeff"]
-        * math.cos(math.radians(SOLAR_DEGREES_PER_YEAR * day_of_year / DAYS_PER_YEAR))
+        * math.cos(
+            math.radians(
+                SOLAR_CALC_CONST["degrees_per_year"]
+                * day_of_year
+                / SOLAR_CALC_CONST["days_per_year"]
+            )
+        )
     )
     G = (
         G_0 * sin_alpha * math.exp(-SOLAR_IRRADIANCE_CONST["am_coeff"] * AM)
@@ -1152,10 +1162,10 @@ def dbz_to_rate(dbz_array, precip_type_array, min_dbz=REFC_THRESHOLD):
         np.ndarray: Precipitation rate in mm/h.
     """
     # Ensure no negative dBZ values
-    dbz_array = np.maximum(dbz_array, DBZ_MIN_VALUE)
+    dbz_array = np.maximum(dbz_array, DBZ_CONVERSION_CONST["min_value"])
 
     # Convert dBZ to Z
-    z_array = 10 ** (dbz_array / DBZ_DIVISOR)
+    z_array = 10 ** (dbz_array / DBZ_CONVERSION_CONST["divisor"])
 
     # Initialize rate coefficients for rain
     a_array = np.full_like(dbz_array, DBZ_CONST["rain_a"], dtype=float)
@@ -1165,14 +1175,14 @@ def dbz_to_rate(dbz_array, precip_type_array, min_dbz=REFC_THRESHOLD):
     b_array[snow_mask] = DBZ_CONST["snow_b"]
 
     # Compute precipitation rate
-    rate_array = (z_array / a_array) ** (DBZ_EXPONENT / b_array)
+    rate_array = (z_array / a_array) ** (DBZ_CONVERSION_CONST["exponent"] / b_array)
 
     # Apply soft threshold for sub-threshold dBZ values
     below_threshold = dbz_array < min_dbz
     rate_array[below_threshold] *= dbz_array[below_threshold] / min_dbz
 
     # Final check: ensure no negative rates
-    rate_array = np.maximum(rate_array, DBZ_MIN_VALUE)
+    rate_array = np.maximum(rate_array, DBZ_CONVERSION_CONST["min_value"])
     return rate_array
 
 
@@ -1252,13 +1262,19 @@ async def PW_Forecast(
         #     'statusCode': 400,
         #     'body': json.dumps('Invalid Location Specification')
         # }
-    lon = lon_IN % LONGITUDE_MAX  # 0-360
-    az_Lon = ((lon + LONGITUDE_OFFSET) % LONGITUDE_MAX) - LONGITUDE_OFFSET  # -180-180
+    lon = lon_IN % COORDINATE_CONST["longitude_max"]  # 0-360
+    az_Lon = (
+        (lon + COORDINATE_CONST["longitude_offset"]) % COORDINATE_CONST["longitude_max"]
+    ) - COORDINATE_CONST["longitude_offset"]  # -180-180
 
-    if (lon_IN < LONGITUDE_MIN) or (lon > LONGITUDE_MAX):
+    if (lon_IN < COORDINATE_CONST["longitude_min"]) or (
+        lon > COORDINATE_CONST["longitude_max"]
+    ):
         # logger.error('Invalid Longitude')
         raise HTTPException(status_code=400, detail="Invalid Longitude")
-    if (lat < LATITUDE_MIN) or (lat > LATITUDE_MAX):
+    if (lat < COORDINATE_CONST["latitude_min"]) or (
+        lat > COORDINATE_CONST["latitude_max"]
+    ):
         # logger.error('Invalid Latitude')
         raise HTTPException(status_code=400, detail="Invalid Latitude")
 
@@ -1277,7 +1293,7 @@ async def PW_Forecast(
                     float(locationReq[2]), datetime.UTC
                 ).replace(tzinfo=None)
             elif (
-                float(locationReq[2]) < VERY_NEGATIVE_TIME_THRESHOLD
+                float(locationReq[2]) < TIME_MACHINE_CONST["very_negative_threshold"]
             ):  # Very negative time
                 utcTime = datetime.datetime.fromtimestamp(
                     float(locationReq[2]), datetime.UTC
@@ -1365,7 +1381,9 @@ async def PW_Forecast(
             raise HTTPException(
                 status_code=400, detail="Requested Time is in the Future"
             )
-    elif (nowTime - utcTime) < datetime.timedelta(hours=TIME_MACHINE_THRESHOLD_HOURS):
+    elif (nowTime - utcTime) < datetime.timedelta(
+        hours=TIME_MACHINE_CONST["threshold_hours"]
+    ):
         # If within the last 25 hours, it may or may not be a timemachine request
         # If it is, then only return 24h of data
         if "timemachine" in str(request.url):
@@ -6227,10 +6245,12 @@ async def PW_Forecast(
 
     if exHourly != 1:
         returnOBJ["hourly"] = dict()
+        # Compute int conversion once for reuse
+        base_time_offset_int = int(baseTimeOffset)
         if not timeMachine:
             try:
                 hourIcon, hourText = calculate_day_text(
-                    hourList_si[int(baseTimeOffset) : int(baseTimeOffset) + 24],
+                    hourList_si[base_time_offset_int : base_time_offset_int + 24],
                     not is_all_night,
                     str(tz_name),
                     int(time.time()),
@@ -6297,7 +6317,7 @@ async def PW_Forecast(
             returnOBJ["hourly"]["data"] = hourList[0:ouputHours]
         else:
             returnOBJ["hourly"]["data"] = hourList[
-                int(baseTimeOffset) : int(baseTimeOffset) + ouputHours
+                base_time_offset_int : base_time_offset_int + ouputHours
             ]
 
     if inc_day_night == 1 and not timeMachine:
