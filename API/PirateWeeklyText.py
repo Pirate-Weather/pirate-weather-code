@@ -15,9 +15,9 @@ from API.constants.text_const import (
     PRECIP_PROB_THRESHOLD,
 )
 from API.PirateTextHelper import (
-    Most_Common,
     calculate_precip_text,
     calculate_thunderstorm_text,
+    most_common,
 )
 
 WEEK_DAYS_MINUS_ONE = 6
@@ -54,10 +54,10 @@ def calculate_summary_text(
     - precipSummary (arr): A summary of the precipitation for the week.
     - wIcon (str): The textual summary of conditions (Drizzle, Sleet, etc.).
     - wWeekend (bool): If the summary includes over-weekend or not
-    - cIcon (str): The icon representing the conditions for the week.
+    - c_icon (str): The icon representing the conditions for the week.
     """
 
-    wIcon = wText = cIcon = thuText = None
+    wIcon = wText = c_icon = thuText = None
     wWeekend = False
     dayIndexes = []
     days = []
@@ -93,7 +93,7 @@ def calculate_summary_text(
 
     # If the icon is not mixed precipitation change it to translations format
     if wIcon != "mixed-precipitation":
-        wIcon, cIcon = calculate_precip_text(
+        wIcon, c_icon = calculate_precip_text(
             wIcon,
             "week",
             rain_accum,
@@ -108,7 +108,7 @@ def calculate_summary_text(
             num_precip_days=len(precipitation),
         )
     else:
-        cIcon = "sleet"
+        c_icon = "sleet"
 
     # If there are any days with thunderstorms occurring then calculate the text
     if numThunderstormDays > 0:
@@ -118,7 +118,7 @@ def calculate_summary_text(
     if thuText is not None and numThunderstormDays >= (
         len(precipitation) / MIN_THUNDERSTORM_DAYS
     ):
-        cIcon = "thunderstorm"
+        c_icon = "thunderstorm"
         wIcon = ["and", thuText, wIcon]
     # Otherwise show it after the text and use the possible text instead
     elif thuText is not None:
@@ -149,7 +149,7 @@ def calculate_summary_text(
         ]
     else:
         # Calcuate the start/end of the second day array
-        arrTwoStart = len(days[0])
+        arr_two_start = len(days[0])
         arrTwoEnd = len(days[0]) + len(days[1])
         arr0 = ""
         arr1 = ""
@@ -158,10 +158,10 @@ def calculate_summary_text(
 
         if len(days[0]) > 2:
             # If there are more than two indexes in the array use the through text
-            arr0 = ["through", precipitation[0][1], precipitation[arrTwoStart - 1][1]]
+            arr0 = ["through", precipitation[0][1], precipitation[arr_two_start - 1][1]]
         elif len(days[0]) == 2:
             # Join the days together with an and
-            arr0 = ["and", precipitation[0][1], precipitation[arrTwoStart - 1][1]]
+            arr0 = ["and", precipitation[0][1], precipitation[arr_two_start - 1][1]]
         else:
             # Otherwise just return the day
             arr0 = precipitation[0][1]
@@ -170,19 +170,19 @@ def calculate_summary_text(
             # If there are more than two indexes in the array use the through text
             arr1 = [
                 "through",
-                precipitation[arrTwoStart][1],
+                precipitation[arr_two_start][1],
                 precipitation[arrTwoEnd - 1][1],
             ]
         elif len(days[1]) == 2:
             # Join the days together with an and
             arr1 = [
                 "and",
-                precipitation[arrTwoStart][1],
+                precipitation[arr_two_start][1],
                 precipitation[arrTwoEnd - 1][1],
             ]
         else:
             # Otherwise just return the day
-            arr1 = precipitation[arrTwoStart][1]
+            arr1 = precipitation[arr_two_start][1]
 
         # If there are more than two day indexes then calculate the text for the third index
         if len(days) >= 3:
@@ -240,7 +240,7 @@ def calculate_summary_text(
         if len(days) == 4:
             wText = ["and", arr0, ["and", arr1, ["and", arr2, arr3]]]
 
-    return wIcon, wText, wWeekend, cIcon
+    return wIcon, wText, wWeekend, c_icon
 
 
 def calculate_precip_summary(
@@ -275,10 +275,10 @@ def calculate_precip_summary(
 
     Returns:
     - precipSummary (arr): A summary of the precipitation for the week.
-    - cIcon (str): An string representing the conditions for the week.
+    - c_icon (str): An string representing the conditions for the week.
     """
 
-    cIcon = None
+    c_icon = None
 
     if not precipitation:
         # If there has been no precipitation use the no precipitation text.
@@ -286,18 +286,18 @@ def calculate_precip_summary(
         # If there has been any fog forecast during the week show that icon, then the wind icon otherwise use the most common icon during the week
 
         if "fog" in icons:
-            cIcon = "fog"
+            c_icon = "fog"
         elif "dangerous-wind" in icons:
-            cIcon = "dangerous-windy"
+            c_icon = "dangerous-windy"
         elif "wind" in icons:
-            cIcon = "wind"
+            c_icon = "wind"
         elif "breezy" in icons:
-            cIcon = "breezy"
+            c_icon = "breezy"
         else:
-            cIcon = Most_Common(icons)
+            c_icon = most_common(icons)
     elif len(precipitationDays) == 1:
         # If one day has any precipitation then set the icon to the precipitation type and use the medium precipitation text in the precipitation summary
-        text, cIcon = calculate_precip_text(
+        text, c_icon = calculate_precip_text(
             precipitationDays[0][2]["precipType"],
             "week",
             rain_accum,
@@ -306,7 +306,7 @@ def calculate_precip_summary(
             avgPop,
             icon,
             "both",
-            isDayTime=True,
+            is_day_time=True,
             eff_rain_intensity=max_rain_intensity,
             eff_snow_intensity=max_snow_intensity,
             eff_ice_intensity=max_ice_intensity,
@@ -319,7 +319,7 @@ def calculate_precip_summary(
         ]
     elif 1 < len(precipitationDays) < 8:
         # If between 1 and 8 days have precipitation call the function to calculate the summary text using the precipitation array.
-        wIcon, wSummary, wWeekend, cIcon = calculate_summary_text(
+        wIcon, wSummary, wWeekend, c_icon = calculate_summary_text(
             precipitationDays,
             rain_accum,
             snow_accum,
@@ -347,7 +347,7 @@ def calculate_precip_summary(
             == precipitationDays[7][2]["precipType"]
         ):
             # If all days have precipitation then if they all have the same type then use that icon
-            text, cIcon = calculate_precip_text(
+            text, c_icon = calculate_precip_text(
                 precipitationDays[0][2]["precipType"],
                 "week",
                 rain_accum,
@@ -356,7 +356,7 @@ def calculate_precip_summary(
                 avgPop,
                 icon,
                 "both",
-                isDayTime=True,
+                is_day_time=True,
                 eff_rain_intensity=max_rain_intensity,
                 eff_snow_intensity=max_snow_intensity,
                 eff_ice_intensity=max_ice_intensity,
@@ -369,10 +369,10 @@ def calculate_precip_summary(
             ]
         else:
             # If the types are not the same then set the icon to sleet and use the mixed precipitation text (as is how Dark Sky did it)
-            cIcon = "sleet"
+            c_icon = "sleet"
             precipSummary = ["for-week", "mixed-precipitation"]
 
-    return precipSummary, cIcon
+    return precipSummary, c_icon
 
 
 def calculate_temp_summary(highTemp, lowTemp, weekArr, unitSystem="si"):
@@ -454,13 +454,13 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
 
     Returns:
-    - cText (arr): The precipitation and temperature summary for the week.
-    - cIcon (str): The icon representing the conditions for the week.
+    - c_text (arr): The precipitation and temperature summary for the week.
+    - c_icon (str): The icon representing the conditions for the week.
     """
 
     # Variables to use in calculating the weekly summary
-    cIcon = None
-    cText = None
+    c_icon = None
+    c_text = None
     precipitation = False
     precipitationDays = []
     precipSummary = ""
@@ -558,7 +558,7 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
     if len(precipitationDays) > 0:
         avgPop = avgPop / len(precipitationDays)
 
-    precipSummary, cIcon = calculate_precip_summary(
+    precipSummary, c_icon = calculate_precip_summary(
         precipitation,
         precipitationDays,
         icons,
@@ -573,23 +573,23 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
     )
 
     # If the icon is None then set the icon
-    if cIcon is None:
+    if c_icon is None:
         if "fog" in icons:
-            cIcon = "fog"
+            c_icon = "fog"
         elif "smoke" in icons:
-            cIcon = "smoke"
+            c_icon = "smoke"
         elif "mist" in icons:
-            cIcon = "mist"
+            c_icon = "mist"
         elif "haze" in icons:
-            cIcon = "haze"
+            c_icon = "haze"
         elif "dangerous-wind" in icons:
-            cIcon = "dangerous-windy"
+            c_icon = "dangerous-windy"
         elif "wind" in icons:
-            cIcon = "wind"
+            c_icon = "wind"
         elif "breezy" in icons:
-            cIcon = "breezy"
+            c_icon = "breezy"
         else:
-            cIcon = Most_Common(icons)
+            c_icon = most_common(icons)
 
     # If the none text exists in the precipitation summary then change it to not available
     if None in precipSummary:
@@ -599,15 +599,15 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
     if len(weekArr) == WEEK_DAYS_PLUS_ONE:
         tempSummary = calculate_temp_summary(highTemp, lowTemp, weekArr, unitSystem)
         # Combine the two texts together using with
-        cText = ["with", precipSummary, tempSummary]
+        c_text = ["with", precipSummary, tempSummary]
     else:
         # If there is no precipitation show the no precipitation text instead of no precipitation for the week.
         if len(precipitationDays) == 0:
             precipSummary = ["no-precipitation"]
-        cText = precipSummary
+        c_text = precipSummary
 
     # If we somehow have a generic precipitation icon we use rain instead
-    if cIcon == "precipitation":
-        cIcon = "rain"
+    if c_icon == "precipitation":
+        c_icon = "rain"
 
-    return cText, cIcon
+    return c_text, c_icon
