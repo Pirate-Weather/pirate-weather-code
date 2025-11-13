@@ -175,6 +175,7 @@ aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 pw_api_key = os.environ.get("PW_API", "")
 save_type = os.getenv("save_type", default="S3")
+save_dir = os.getenv("save_dir", default="/tmp")
 s3_bucket = os.getenv("s3_bucket", default="piratezarr2")
 use_etopo = os.getenv("use_etopo", default=True)
 TIMING = os.environ.get("TIMING", False)
@@ -366,29 +367,27 @@ def update_zarr_store(initialRun):
     STAGE = os.environ.get("STAGE", "PROD")
 
     # Create empty dir
-    os.makedirs("/tmp/empty", exist_ok=True)
+    os.makedirs(save_dir + "/empty", exist_ok=True)
 
     # Always load GFS
-    latest_GFS, old_GFS = find_largest_integer_directory("/tmp", "GFS.zarr", initialRun)
+    latest_GFS, old_GFS = find_largest_integer_directory(save_dir, "GFS.zarr", initialRun)
     if latest_GFS is not None:
         GFS_Zarr = zarr.open(
-            zarr.storage.ZipStore("/tmp/" + latest_GFS, mode="r"), mode="r"
+            zarr.storage.ZipStore(save_dir + "/" + latest_GFS, mode="r"), mode="r"
         )
         logger.info("Loading new: " + latest_GFS)
     for old_dir in old_GFS:
         if STAGE == "PROD":
             logger.info("Removing old: " + old_dir)
-            # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-            # subprocess.run(command, shell=True)
-            command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+            command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
             subprocess.run(command, shell=True)
 
     if (initialRun) and (use_etopo):
         latest_ETOPO, old_ETOPO = find_largest_integer_directory(
-            "/tmp", "ETOPO_DA_C.zarr", initialRun
+            save_dir, "ETOPO_DA_C.zarr", initialRun
         )
         ETOPO_f = zarr.open(
-            zarr.storage.ZipStore("/tmp/" + latest_ETOPO, mode="r"), mode="r"
+            zarr.storage.ZipStore(save_dir + "/" + latest_ETOPO, mode="r"), mode="r"
         )
 
     # Open the Google ERA5 dataset for Dev and TimeMachine
@@ -399,60 +398,54 @@ def update_zarr_store(initialRun):
     if STAGE in ("DEV", "PROD"):
         # Find the latest file that's ready
         latest_Alert, old_Alert = find_largest_integer_directory(
-            "/tmp", "NWS_Alerts.zarr", initialRun
+            save_dir, "NWS_Alerts.zarr", initialRun
         )
         if latest_Alert is not None:
             NWS_Alerts_Zarr = zarr.open(
-                zarr.storage.ZipStore("/tmp/" + latest_Alert, mode="r"), mode="r"
+                zarr.storage.ZipStore(save_dir + "/" + latest_Alert, mode="r"), mode="r"
             )
             logger.info("Loading new: " + latest_Alert)
         for old_dir in old_Alert:
             if STAGE == "PROD":
                 logger.info("Removing old: " + old_dir)
-                # command = f"nice -n {NICE_PRIORITY} rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-                # subprocess.run(command, shell=True)
-                command = f"nice -n {NICE_PRIORITY} rm -rf /tmp/{old_dir}"
+                command = f"nice -n {NICE_PRIORITY} rm -rf {save_dir}/{old_dir}"
                 subprocess.run(command, shell=True)
 
         latest_SubH, old_SubH = find_largest_integer_directory(
-            "/tmp", "SubH.zarr", initialRun
+            save_dir, "SubH.zarr", initialRun
         )
         if latest_SubH is not None:
             SubH_Zarr = zarr.open(
-                zarr.storage.ZipStore("/tmp/" + latest_SubH, mode="r"), mode="r"
+                zarr.storage.ZipStore(save_dir + "/" + latest_SubH, mode="r"), mode="r"
             )
             logger.info("Loading new: " + latest_SubH)
         for old_dir in old_SubH:
             if STAGE == "PROD":
                 logger.info("Removing old: " + old_dir)
-                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-                # subprocess.run(command, shell=True)
-                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
                 subprocess.run(command, shell=True)
 
         latest_HRRR_6H, old_HRRR_6H = find_largest_integer_directory(
-            "/tmp", "HRRR_6H.zarr", initialRun
+            save_dir, "HRRR_6H.zarr", initialRun
         )
         if latest_HRRR_6H is not None:
             HRRR_6H_Zarr = zarr.open(
-                zarr.storage.ZipStore("/tmp/" + latest_HRRR_6H, mode="r"), mode="r"
+                zarr.storage.ZipStore(save_dir + "/" + latest_HRRR_6H, mode="r"), mode="r"
             )
             logger.info("Loading new: " + latest_HRRR_6H)
         for old_dir in old_HRRR_6H:
             if STAGE == "PROD":
                 logger.info("Removing old: " + old_dir)
-                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-                # subprocess.run(command, shell=True)
-                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
                 subprocess.run(command, shell=True)
 
         latest_ECMWF, old_ECMWF = find_largest_integer_directory(
-            "/tmp", "ECMWF.zarr", initialRun
+            save_dir, "ECMWF.zarr", initialRun
         )
         if latest_ECMWF is not None:
             try:
                 ECMWF_Zarr = zarr.open(
-                    zarr.storage.ZipStore("/tmp/" + latest_ECMWF, mode="r"), mode="r"
+                    zarr.storage.ZipStore(save_dir + "/" + latest_ECMWF, mode="r"), mode="r"
                 )
                 logger.info("Loading new: " + latest_ECMWF)
             except Exception as e:
@@ -461,103 +454,91 @@ def update_zarr_store(initialRun):
         for old_dir in old_ECMWF:
             if STAGE == "PROD":
                 logger.info("Removing old: " + old_dir)
-                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
                 subprocess.run(command, shell=True)
 
         latest_NBM, old_NBM = find_largest_integer_directory(
-            "/tmp", "NBM.zarr", initialRun
+            save_dir, "NBM.zarr", initialRun
         )
         if latest_NBM is not None:
             NBM_Zarr = zarr.open(
-                zarr.storage.ZipStore("/tmp/" + latest_NBM, mode="r"), mode="r"
+                zarr.storage.ZipStore(save_dir + "/" + latest_NBM, mode="r"), mode="r"
             )
             logger.info("Loading new: " + latest_NBM)
         for old_dir in old_NBM:
             if STAGE == "PROD":
                 logger.info("Removing old: " + old_dir)
-                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-                # subprocess.run(command, shell=True)
-                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
                 subprocess.run(command, shell=True)
 
         latest_NBM_Fire, old_NBM_Fire = find_largest_integer_directory(
-            "/tmp", "NBM_Fire.zarr", initialRun
+            save_dir, "NBM_Fire.zarr", initialRun
         )
         if latest_NBM_Fire is not None:
             NBM_Fire_Zarr = zarr.open(
-                zarr.storage.ZipStore("/tmp/" + latest_NBM_Fire, mode="r"), mode="r"
+                zarr.storage.ZipStore(save_dir + "/" + latest_NBM_Fire, mode="r"), mode="r"
             )
             logger.info("Loading new: " + latest_NBM_Fire)
         for old_dir in old_NBM_Fire:
             if STAGE == "PROD":
                 logger.info("Removing old: " + old_dir)
-                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-                # subprocess.run(command, shell=True)
-                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
                 subprocess.run(command, shell=True)
 
         latest_GEFS, old_GEFS = find_largest_integer_directory(
-            "/tmp", "GEFS.zarr", initialRun
+            save_dir, "GEFS.zarr", initialRun
         )
         if latest_GEFS is not None:
             GEFS_Zarr = zarr.open(
-                zarr.storage.ZipStore("/tmp/" + latest_GEFS, mode="r"), mode="r"
+                zarr.storage.ZipStore(save_dir + "/" + latest_GEFS, mode="r"), mode="r"
             )
             logger.info("Loading new: " + latest_GEFS)
         for old_dir in old_GEFS:
             if STAGE == "PROD":
                 logger.info("Removing old: " + old_dir)
-                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-                # subprocess.run(command, shell=True)
-                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
                 subprocess.run(command, shell=True)
 
         latest_HRRR, old_HRRR = find_largest_integer_directory(
-            "/tmp", "HRRR.zarr", initialRun
+            save_dir, "HRRR.zarr", initialRun
         )
         if latest_HRRR is not None:
             HRRR_Zarr = zarr.open(
-                zarr.storage.ZipStore("/tmp/" + latest_HRRR, mode="r"), mode="r"
+                zarr.storage.ZipStore(save_dir + "/" + latest_HRRR, mode="r"), mode="r"
             )
             logger.info("Loading new: " + latest_HRRR)
         for old_dir in old_HRRR:
             if STAGE == "PROD":
                 logger.info("Removing old: " + old_dir)
-                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-                # subprocess.run(command, shell=True)
-                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
                 subprocess.run(command, shell=True)
 
         latest_WMO_Alerts, old_WMO_Alerts = find_largest_integer_directory(
-            "/tmp", "WMO_Alerts.zarr", initialRun
+            save_dir, "WMO_Alerts.zarr", initialRun
         )
         if latest_WMO_Alerts is not None:
             WMO_Alerts_Zarr = zarr.open(
-                zarr.storage.ZipStore("/tmp/" + latest_WMO_Alerts, mode="r"), mode="r"
+                zarr.storage.ZipStore(save_dir + "/" + latest_WMO_Alerts, mode="r"), mode="r"
             )
             logger.info("Loading new: " + latest_WMO_Alerts)
         for old_dir in old_WMO_Alerts:
             if STAGE == "PROD":
                 logger.info("Removing old: " + old_dir)
-                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-                # subprocess.run(command, shell=True)
-                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
                 subprocess.run(command, shell=True)
 
         latest_RTMA_RU, old_RTMA_RU = find_largest_integer_directory(
-            "/tmp", "RTMA_RU.zarr", initialRun
+            save_dir, "RTMA_RU.zarr", initialRun
         )
         if latest_RTMA_RU is not None:
             RTMA_RU_Zarr = zarr.open(
-                zarr.storage.ZipStore("/tmp/" + latest_RTMA_RU, mode="r"), mode="r"
+                zarr.storage.ZipStore(save_dir + "/" + latest_RTMA_RU, mode="r"), mode="r"
             )
             logger.info("Loading new: " + latest_RTMA_RU)
         for old_dir in old_RTMA_RU:
             if STAGE == "PROD":
                 logger.info("Removing old: " + old_dir)
-                # command = f"nice -n 20 rsync -a --bwlimit=200 --delete /tmp/empty/ /tmp/{old_dir}/"
-                # subprocess.run(command, shell=True)
-                command = f"nice -n 20 rm -rf /tmp/{old_dir}"
+                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
                 subprocess.run(command, shell=True)
 
     logger.info("Refreshed Zarrs")
@@ -6429,96 +6410,96 @@ def initialDataSync() -> None:
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingest_version + "/SubH.zarr.zip",
-            "/tmp/SubH_TMP.zarr.zip",
-            "/tmp/SubH.zarr.prod.zip",
+            save_dir + "/SubH_TMP.zarr.zip",
+            save_dir + "/SubH.zarr.prod.zip",
             True,
         )
         logger.info("SubH Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingest_version + "/HRRR_6H.zarr.zip",
-            "/tmp/HRRR_6H_TMP.zarr.zip",
-            "/tmp/HRRR_6H.zarr.prod.zip",
+            save_dir + "/HRRR_6H_TMP.zarr.zip",
+            save_dir + "/HRRR_6H.zarr.prod.zip",
             True,
         )
         logger.info("HRRR_6H Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingest_version + "/GFS.zarr.zip",
-            "/tmp/GFS.zarr_TMP.zip",
-            "/tmp/GFS.zarr.prod.zip",
+            save_dir + "/GFS.zarr_TMP.zip",
+            save_dir + "/GFS.zarr.prod.zip",
             True,
         )
         logger.info("GFS Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingest_version + "/ECMWF.zarr.zip",
-            "/tmp/ECMWF_TMP.zarr.zip",
-            "/tmp/ECMWF.zarr.prod.zip",
+            save_dir + "/ECMWF_TMP.zarr.zip",
+            save_dir + "/ECMWF.zarr.prod.zip",
             True,
         )
         logger.info("ECMWF Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingest_version + "/NBM.zarr.zip",
-            "/tmp/NBM.zarr_TMP.zip",
-            "/tmp/NBM.zarr.prod.zip",
+            save_dir + "/NBM.zarr_TMP.zip",
+            save_dir + "/NBM.zarr.prod.zip",
             True,
         )
         logger.info("NBM Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingest_version + "/NBM_Fire.zarr.zip",
-            "/tmp/NBM_Fire_TMP.zarr.zip",
-            "/tmp/NBM_Fire.zarr.prod.zip",
+            save_dir + "/NBM_Fire_TMP.zarr.zip",
+            save_dir + "/NBM_Fire.zarr.prod.zip",
             True,
         )
         logger.info("NBM_Fire Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingest_version + "/GEFS.zarr.zip",
-            "/tmp/GEFS_TMP.zarr.zip",
-            "/tmp/GEFS.zarr.prod.zip",
+            save_dir + "/GEFS_TMP.zarr.zip",
+            save_dir + "/GEFS.zarr.prod.zip",
             True,
         )
         logger.info("GEFS  Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingest_version + "/HRRR.zarr.zip",
-            "/tmp/HRRR_TMP.zarr.zip",
-            "/tmp/HRRR.zarr.prod.zip",
+            save_dir + "/HRRR_TMP.zarr.zip",
+            save_dir + "/HRRR.zarr.prod.zip",
             True,
         )
         logger.info("HRRR  Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingest_version + "/NWS_Alerts.zarr.zip",
-            "/tmp/NWS_Alerts_TMP.zarr.zip",
-            "/tmp/NWS_Alerts.zarr.prod.zip",
+            save_dir + "/NWS_Alerts_TMP.zarr.zip",
+            save_dir + "/NWS_Alerts.zarr.prod.zip",
             True,
         )
         logger.info("Alerts Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingest_version + "/WMO_Alerts.zarr.zip",
-            "/tmp/WMO_Alerts_TMP.zarr.zip",
-            "/tmp/WMO_Alerts.zarr.prod.zip",
+            save_dir + "/WMO_Alerts_TMP.zarr.zip",
+            save_dir + "/WMO_Alerts.zarr.prod.zip",
             True,
         )
         logger.info("WMO Alerts Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingest_version + "/RTMA_RU.zarr.zip",
-            "/tmp/RTMA_RU_TMP.zarr.zip",
-            "/tmp/RTMA_RU.zarr.prod.zip",
+            save_dir + "/RTMA_RU_TMP.zarr.zip",
+            save_dir + "/RTMA_RU.zarr.prod.zip",
             True,
         )
         logger.info("RTMA_RU Download!")
         download_if_newer(
             s3_bucket,
             "ForecastTar_v2/" + ingest_version + "/ECMWF.zarr.zip",
-            "/tmp/ECMWF_TMP.zarr.zip",
-            "/tmp/ECMWF.zarr.prod.zip",
+            save_dir + "/ECMWF_TMP.zarr.zip",
+            save_dir + "/ECMWF.zarr.prod.zip",
             True,
         )
         logger.info("ECMWF Download!")
@@ -6527,8 +6508,8 @@ def initialDataSync() -> None:
             download_if_newer(
                 s3_bucket,
                 "ForecastTar_v2/" + ingest_version + "/ETOPO_DA_C.zarr.zip",
-                "/tmp/ETOPO_DA_C_TMP.zarr.zip",
-                "/tmp/ETOPO_DA_C.zarr.prod.zip",
+                save_dir + "/ETOPO_DA_C_TMP.zarr.zip",
+                save_dir + "/ETOPO_DA_C.zarr.prod.zip",
                 True,
             )
             logger.info("ETOPO Download!")
@@ -6559,96 +6540,96 @@ def dataSync() -> None:
             download_if_newer(
                 s3_bucket,
                 "ForecastTar_v2/" + ingest_version + "/SubH.zarr.zip",
-                "/tmp/SubH_TMP.zarr.zip",
-                "/tmp/SubH.zarr.prod.zip",
+                save_dir + "/SubH_TMP.zarr.zip",
+                save_dir + "/SubH.zarr.prod.zip",
                 False,
             )
             logger.info("SubH Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar_v2/" + ingest_version + "/HRRR_6H.zarr.zip",
-                "/tmp/HRRR_6H_TMP.zarr.zip",
-                "/tmp/HRRR_6H.zarr.prod.zip",
+                save_dir + "/HRRR_6H_TMP.zarr.zip",
+                save_dir + "/HRRR_6H.zarr.prod.zip",
                 False,
             )
             logger.info("HRRR_6H Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar_v2/" + ingest_version + "/GFS.zarr.zip",
-                "/tmp/GFS.zarr_TMP.zip",
-                "/tmp/GFS.zarr.prod.zip",
+                save_dir + "/GFS_TMP.zarr.zip",
+                save_dir + "/GFS.zarr.prod.zip",
                 False,
             )
             logger.info("GFS Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar_v2/" + ingest_version + "/ECMWF.zarr.zip",
-                "/tmp/ECMWF_TMP.zarr.zip",
-                "/tmp/ECMWF.zarr.prod.zip",
+                save_dir + "/ECMWF_TMP.zarr.zip",
+                save_dir + "/ECMWF.zarr.prod.zip",
                 False,
             )
             logger.info("ECMWF Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar_v2/" + ingest_version + "/NBM.zarr.zip",
-                "/tmp/NBM.zarr_TMP.zip",
-                "/tmp/NBM.zarr.prod.zip",
+                save_dir + "/NBM_TMP.zarr.zip",
+                save_dir + "/NBM.zarr.prod.zip",
                 False,
             )
             logger.info("NBM Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar_v2/" + ingest_version + "/NBM_Fire.zarr.zip",
-                "/tmp/NBM_Fire_TMP.zarr.zip",
-                "/tmp/NBM_Fire.zarr.prod.zip",
+                save_dir + "/NBM_Fire_TMP.zarr.zip",
+                save_dir + "/NBM_Fire.zarr.prod.zip",
                 False,
             )
             logger.info("NBM_Fire Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar_v2/" + ingest_version + "/GEFS.zarr.zip",
-                "/tmp/GEFS_TMP.zarr.zip",
-                "/tmp/GEFS.zarr.prod.zip",
+                save_dir + "/GEFS_TMP.zarr.zip",
+                save_dir + "/GEFS.zarr.prod.zip",
                 False,
             )
             logger.info("GEFS  Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar_v2/" + ingest_version + "/HRRR.zarr.zip",
-                "/tmp/HRRR_TMP.zarr.zip",
-                "/tmp/HRRR.zarr.prod.zip",
+                save_dir + "/HRRR_TMP.zarr.zip",
+                save_dir + "/HRRR.zarr.prod.zip",
                 False,
             )
             logger.info("HRRR  Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar_v2/" + ingest_version + "/NWS_Alerts.zarr.zip",
-                "/tmp/NWS_Alerts_TMP.zarr.zip",
-                "/tmp/NWS_Alerts.zarr.prod.zip",
+                save_dir + "/NWS_Alerts_TMP.zarr.zip",
+                save_dir + "/NWS_Alerts.zarr.prod.zip",
                 False,
             )
             logger.info("Alerts Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar_v2/" + ingest_version + "/WMO_Alerts.zarr.zip",
-                "/tmp/WMO_Alerts_TMP.zarr.zip",
-                "/tmp/WMO_Alerts.zarr.prod.zip",
+                save_dir + "/WMO_Alerts_TMP.zarr.zip",
+                save_dir + "/WMO_Alerts.zarr.prod.zip",
                 False,
             )
             logger.info("Alerts Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar_v2/" + ingest_version + "/RTMA_RU.zarr.zip",
-                "/tmp/RTMA_RU_TMP.zarr.zip",
-                "/tmp/RTMA_RU.zarr.prod.zip",
+                save_dir + "/RTMA_RU_TMP.zarr.zip",
+                save_dir + "/RTMA_RU.zarr.prod.zip",
                 False,
             )
             logger.info("RTMA_RU Download!")
             download_if_newer(
                 s3_bucket,
                 "ForecastTar_v2/" + ingest_version + "/ECMWF.zarr.zip",
-                "/tmp/ECMWF_TMP.zarr.zip",
-                "/tmp/ECMWF.zarr.prod.zip",
+                save_dir + "/ECMWF_TMP.zarr.zip",
+                save_dir + "/ECMWF.zarr.prod.zip",
                 False,
             )
             logger.info("ECMWF Download!")
@@ -6657,8 +6638,8 @@ def dataSync() -> None:
                 download_if_newer(
                     s3_bucket,
                     "ForecastTar_v2/" + ingest_version + "/ETOPO_DA_C.zarr.zip",
-                    "/tmp/ETOPO_DA_C_TMP.zarr.zip",
-                    "/tmp/ETOPO_DA_C.zarr.prod.zip",
+                    save_dir + "/ETOPO_DA_C_TMP.zarr.zip",
+                    save_dir + "/ETOPO_DA_C.zarr.prod.zip",
                     False,
                 )
                 logger.info("ETOPO Download!")
