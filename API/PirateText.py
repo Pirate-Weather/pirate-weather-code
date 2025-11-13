@@ -43,11 +43,11 @@ def calculate_text(
 
     Returns:
     - tuple: A tuple containing:
-        - cText (str or list): A textual summary representing the conditions for the period
-        - cIcon (str): The icon representing the conditions for the period
+        - c_text (str or list): A textual summary representing the conditions for the period
+        - c_icon (str): The icon representing the conditions for the period
     """
 
-    cText = cIcon = precipText = precipIcon = windText = windIcon = skyText = (
+    c_text = c_icon = precipText = precipIcon = windText = windIcon = skyText = (
         skyIcon
     ) = visText = visIcon = None
 
@@ -120,60 +120,60 @@ def calculate_text(
     # If there is precipitation text use that and join with thunderstorm or humidity or wind texts if they exist
     if precipText is not None:
         if thuText is not None and not (type == "current" and "possible" in thuText):
-            cText = thuText
+            c_text = thuText
         elif windText is not None:
-            cText = ["and", precipText, windText]
+            c_text = ["and", precipText, windText]
         else:
             if humidityText is not None:
-                cText = ["and", precipText, humidityText]
+                c_text = ["and", precipText, humidityText]
             else:
-                cText = precipText
+                c_text = precipText
     # If there is visibility text then use that and join with humidity if it exists
     elif visText is not None:
         if humidityText is not None:
-            cText = ["and", visText, humidityText]
+            c_text = ["and", visText, humidityText]
         else:
-            cText = visText
+            c_text = visText
     # If there is wind text use that. If the skies are clear then join with humidity text if it exists otherwise just use the wind text
     elif windText is not None:
         if skyText == "clear":
             if humidityText is not None:
-                cText = ["and", windText, humidityText]
+                c_text = ["and", windText, humidityText]
             else:
-                cText = windText
+                c_text = windText
         else:
-            cText = ["and", windText, skyText]
+            c_text = ["and", windText, skyText]
     # If there is the humidity text then join with the sky text
     elif humidityText is not None:
-        cText = ["and", humidityText, skyText]
+        c_text = ["and", humidityText, skyText]
     else:
-        cText = skyText
+        c_text = skyText
 
     # If precipitation icon use that unless there are thunderstorms occurring
     if precipIcon is not None:
         if thuIcon is not None:
-            cIcon = thuIcon
+            c_icon = thuIcon
         else:
-            cIcon = precipIcon
+            c_icon = precipIcon
     # If visibility icon use that
     elif visIcon is not None:
-        cIcon = visIcon
+        c_icon = visIcon
     # If wind icon use that
     elif windIcon is not None:
-        cIcon = windIcon
+        c_icon = windIcon
     # Otherwise use the sky icon
     else:
-        cIcon = skyIcon
+        c_icon = skyIcon
 
     # If we somehow have no text
-    if cText is None:
-        cText = "clear"
+    if c_text is None:
+        c_text = "clear"
 
     # If we somehow have no icon
-    if cIcon is None:
+    if c_icon is None:
         if isDayTime:
-            cIcon = "clear-day"
+            c_icon = "clear-day"
         else:
-            cIcon = "clear-night"
+            c_icon = "clear-night"
 
-    return cText, cIcon
+    return c_text, c_icon

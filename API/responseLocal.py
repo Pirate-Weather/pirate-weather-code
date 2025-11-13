@@ -1,3 +1,11 @@
+"""
+Response Local Module for Pirate Weather API.
+
+This module handles the local weather data processing and API responses.
+It includes functions for reading weather data from zarr files, processing
+weather forecasts, and generating API responses.
+"""
+
 import asyncio
 import datetime
 import logging
@@ -45,20 +53,31 @@ from API.api_utils import (
 )
 from API.constants.api_const import (
     API_VERSION,
+    COORDINATE_CONST,
     DBZ_CONST,
+    DBZ_CONVERSION_CONST,
+    DEFAULT_ROUNDING_INTERVAL,
+    ETOPO_CONST,
+    FILENAME_TIMESTAMP_SLICE_LENGTH,
     GLOBE_TEMP_CONST,
+    LAMBERT_CONST,
     LARGEST_DIR_INIT,
+    MAX_ZARR_READ_RETRIES,
     NICE_PRIORITY,
     PRECIP_IDX,
     PRECIP_NOISE_THRESHOLD_MMH,
     ROUNDING_RULES,
     S3_MAX_BANDWIDTH,
+    SOLAR_CALC_CONST,
     SOLAR_IRRADIANCE_CONST,
     SOLAR_RAD_CONST,
     TEMP_THRESHOLD_RAIN_C,
     TEMP_THRESHOLD_SNOW_C,
     TEMPERATURE_UNITS_THRESH,
+    TIME_MACHINE_CONST,
+    UNIT_CONVERSION_CONST,
     WBGT_CONST,
+    WBGT_PERCENTAGE_DIVISOR,
 )
 from API.constants.clip_const import (
     CLIP_CAPE,
@@ -157,13 +176,13 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 pw_api_key = os.environ.get("PW_API", "")
 save_type = os.getenv("save_type", default="S3")
 s3_bucket = os.getenv("s3_bucket", default="piratezarr2")
-useETOPO = os.getenv("useETOPO", default=True)
+use_etopo = os.getenv("use_etopo", default=True)
 TIMING = os.environ.get("TIMING", False)
 
 force_now = os.getenv("force_now", default=False)
 
 # Version code for ingest files
-ingestVersion = INGEST_VERSION_STR
+ingest_version = INGEST_VERSION_STR
 
 
 def setup_logging():
@@ -180,6 +199,15 @@ def setup_logging():
 def download_if_newer(
     s3_bucket, s3_object_key, local_file_path, local_lmdb_path, initialDownload
 ):
+    """Download a file from S3 if it's newer than the local version.
+
+    Args:
+        s3_bucket: S3 bucket name or local path
+        s3_object_key: S3 object key or local file path
+        local_file_path: Path to download the file to
+        local_lmdb_path: Path for the final lmdb file
+        initialDownload: Whether this is the initial download (affects transfer config)
+    """
     if initialDownload:
         config = TransferConfig(use_threads=True, max_bandwidth=None)
     else:
@@ -203,7 +231,7 @@ def download_if_newer(
         # If saved locally, get the last modified timestamp of the local file
         s3_last_modified = os.path.getmtime(s3_bucket + "/" + s3_object_key)
 
-    newFile = False
+    new_file = False
 
     # Check if the local file exists
     # Read pickle with last modified time
@@ -226,7 +254,7 @@ def download_if_newer(
                 # Copy the local file over
                 shutil.copy(s3_bucket + "/" + s3_object_key, local_file_path)
 
-            newFile = True
+            new_file = True
             with open(local_file_path + ".modtime.pickle", "wb") as file:
                 # Serialize and write the variable to the file
                 pickle.dump(s3_last_modified, file)
@@ -250,11 +278,11 @@ def download_if_newer(
             # Serialize and write the variable to the file
             pickle.dump(s3_last_modified, file)
 
-        newFile = True
+        new_file = True
         # Untar the file
         # shutil.unpack_archive(local_file_path, extract_path, 'tar')
 
-    if newFile:
+    if new_file:
         # Write a file to show an update is in progress, do not reload
         with open(local_lmdb_path + ".lock", "w"):
             pass
@@ -276,6 +304,16 @@ logger.addHandler(handler)
 
 
 def find_largest_integer_directory(parent_dir, key_string, initialRun):
+    """Find the directory with the largest integer timestamp suffix.
+
+    Args:
+        parent_dir: Parent directory to search in
+        key_string: String to filter directory names
+        initialRun: Whether this is the initial run
+
+    Returns:
+        tuple: (largest_dir, old_dirs) - the newest directory and list of older ones
+    """
     largest_value = LARGEST_DIR_INIT
     largest_dir = None
     old_dirs = []
@@ -289,8 +327,8 @@ def find_largest_integer_directory(parent_dir, key_string, initialRun):
             try:
                 # Extract the integer value from the directory name
                 value = float(
-                    entry[-12:]
-                )  # No constant needed, this is a filename slice
+                    entry[-FILENAME_TIMESTAMP_SLICE_LENGTH:]
+                )  # This is a filename timestamp slice
 
                 if value > largest_value:
                     largest_value = value
@@ -345,7 +383,7 @@ def update_zarr_store(initialRun):
             command = f"nice -n 20 rm -rf /tmp/{old_dir}"
             subprocess.run(command, shell=True)
 
-    if (initialRun) and (useETOPO):
+    if (initialRun) and (use_etopo):
         latest_ETOPO, old_ETOPO = find_largest_integer_directory(
             "/tmp", "ETOPO_DA_C.zarr", initialRun
         )
@@ -522,7 +560,7 @@ def update_zarr_store(initialRun):
                 command = f"nice -n 20 rm -rf /tmp/{old_dir}"
                 subprocess.run(command, shell=True)
 
-    print("Refreshed Zarrs")
+    logger.info("Refreshed Zarrs")
 
 
 setup_logging()
@@ -545,12 +583,12 @@ def solar_rad(D_t, lat, t_t):
     delta = SOLAR_RAD_CONST["delta_factor"] * math.sin(
         (2 * math.pi * (D_t + SOLAR_RAD_CONST["delta_offset"])) / 365
     )
-    radLat = np.deg2rad(lat)
-    solarHour = math.pi * ((t_t - SOLAR_RAD_CONST["hour_offset"]) / 12)
-    cosTheta = math.sin(delta) * math.sin(radLat) + math.cos(delta) * math.cos(
-        radLat
-    ) * math.cos(solarHour)
-    R_s = r * (S_0 / d**2) * cosTheta
+    rad_lat = np.deg2rad(lat)
+    solar_hour = math.pi * ((t_t - SOLAR_RAD_CONST["hour_offset"]) / 12)
+    cos_theta = math.sin(delta) * math.sin(rad_lat) + math.cos(delta) * math.cos(
+        rad_lat
+    ) * math.cos(solar_hour)
+    R_s = r * (S_0 / d**2) * cos_theta
 
     if R_s < 0:
         R_s = 0
@@ -559,6 +597,14 @@ def solar_rad(D_t, lat, t_t):
 
 
 def toTimestamp(d):
+    """Convert datetime to Unix timestamp.
+
+    Args:
+        d: datetime object
+
+    Returns:
+        Unix timestamp (float)
+    """
     return d.timestamp()
 
 
@@ -566,7 +612,7 @@ def toTimestamp(d):
 # This should be implemented as a fallback at some point
 STAGE = os.environ.get("STAGE", "PROD")
 if (STAGE == "TESTING") or (STAGE == "TM_TESTING"):
-    print("Setting up S3 zarrs")
+    logger.info("Setting up S3 zarrs")
     # If S3, use that, otherwise use local
     if save_type == "S3":
         s3 = s3fs.S3FileSystem(
@@ -582,87 +628,105 @@ if (STAGE == "TESTING") or (STAGE == "TM_TESTING"):
     else:
         s3 = None
 
-    GFS_store = setup_testing_zipstore(s3, s3_bucket, ingestVersion, save_type, "GFS")
+    GFS_store = setup_testing_zipstore(s3, s3_bucket, ingest_version, save_type, "GFS")
     GFS_Zarr = zarr.open(GFS_store, mode="r")
-    print("GFS Read")
+    logger.info("GFS Read")
 
     ERA5_Data = init_ERA5()
-    print("ERA5 Read")
+    logger.info("ERA5 Read")
 
     if STAGE == "TESTING":
         NWS_Alerts_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "NWS_Alerts"
+            s3, s3_bucket, ingest_version, save_type, "NWS_Alerts"
         )
         NWS_Alerts_Zarr = zarr.open(NWS_Alerts_store, mode="r")
 
         SubH_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "SubH"
+            s3, s3_bucket, ingest_version, save_type, "SubH"
         )
         SubH_Zarr = zarr.open(SubH_store, mode="r")
-        print("SubH Read")
+        logger.info("SubH Read")
 
         HRRR_6H_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "HRRR_6H"
+            s3, s3_bucket, ingest_version, save_type, "HRRR_6H"
         )
         HRRR_6H_Zarr = zarr.open(HRRR_6H_store, mode="r")
-        print("HRRR_6H Read")
+        logger.info("HRRR_6H Read")
 
         GEFS_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "GEFS"
+            s3, s3_bucket, ingest_version, save_type, "GEFS"
         )
         GEFS_Zarr = zarr.open(GEFS_store, mode="r")
-        print("GEFS Read")
+        logger.info("GEFS Read")
 
         NBM_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "NBM"
+            s3, s3_bucket, ingest_version, save_type, "NBM"
         )
         NBM_Zarr = zarr.open(NBM_store, mode="r")
-        print("NBM Read")
+        logger.info("NBM Read")
 
         NBM_Fire_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "NBM_Fire"
+            s3, s3_bucket, ingest_version, save_type, "NBM_Fire"
         )
         NBM_Fire_Zarr = zarr.open(NBM_Fire_store, mode="r")
-        print("NBM Fire Read")
+        logger.info("NBM Fire Read")
 
         HRRR_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "HRRR"
+            s3, s3_bucket, ingest_version, save_type, "HRRR"
         )
         HRRR_Zarr = zarr.open(HRRR_store, mode="r")
-        print("HRRR Read")
+        logger.info("HRRR Read")
 
         WMO_Alerts_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "WMO_Alerts"
+            s3, s3_bucket, ingest_version, save_type, "WMO_Alerts"
         )
         WMO_Alerts_Zarr = zarr.open(WMO_Alerts_store, mode="r")
-        print("WMO_Alerts Read")
+        logger.info("WMO_Alerts Read")
 
         RTMA_RU_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "RTMA_RU"
+            s3, s3_bucket, ingest_version, save_type, "RTMA_RU"
         )
         RTMA_RU_Zarr = zarr.open(RTMA_RU_store, mode="r")
-        print("RTMA_RU Read")
+        logger.info("RTMA_RU Read")
 
         ECMWF_store = setup_testing_zipstore(
-            s3, s3_bucket, ingestVersion, save_type, "ECMWF"
+            s3, s3_bucket, ingest_version, save_type, "ECMWF"
         )
         ECMWF_Zarr = zarr.open(ECMWF_store, mode="r")
-        print("ECMWF Read")
+        logger.info("ECMWF Read")
 
-        if useETOPO:
+        if use_etopo:
             ETOPO_store = setup_testing_zipstore(
-                s3, s3_bucket, ingestVersion, save_type, "ETOPO_DA_C"
+                s3, s3_bucket, ingest_version, save_type, "ETOPO_DA_C"
             )
             ETOPO_f = zarr.open(ETOPO_store, mode="r")
-            print("ETOPO Read")
+            logger.info("ETOPO Read")
 
 
 async def get_zarr(store, X, Y):
+    """Asynchronously retrieve zarr data at given coordinates.
+
+    Args:
+        store: Zarr store to read from
+        X: X coordinate
+        Y: Y coordinate
+
+    Returns:
+        Zarr data at the specified coordinates
+    """
     return store[:, :, X, Y]
 
 
-lats_etopo = np.arange(-90, 90, 0.01666667)
-lons_etopo = np.arange(-180, 180, 0.01666667)
+lats_etopo = np.arange(
+    COORDINATE_CONST["latitude_min"],
+    COORDINATE_CONST["latitude_max"],
+    ETOPO_CONST["lat_resolution"],
+)
+lons_etopo = np.arange(
+    COORDINATE_CONST["longitude_min"],
+    COORDINATE_CONST["longitude_offset"],
+    ETOPO_CONST["lon_resolution"],
+)
 
 tf = TimezoneFinder(in_memory=True)
 
@@ -678,7 +742,9 @@ def get_offset(*, lat, lng, utcTime, tf):
     # ATTENTION: tz_target could be None! handle error case
     today_target = tz_target.localize(today)
     today_utc = utc.localize(today)
-    return (today_utc - today_target).total_seconds() / 60, tz_target
+    return (today_utc - today_target).total_seconds() / UNIT_CONVERSION_CONST[
+        "seconds_to_minutes"
+    ], tz_target
 
 
 def _polar_is_all_day(lat_val: float, month_val: int) -> bool:
@@ -739,15 +805,15 @@ def has_interior_nan_holes(arr: np.ndarray) -> bool:
 
     # 4) ignore any that occur at the very first or last original column:
     #    we only want starts/ends in columns 1…(cols-2)
-    interiorStarts = starts[:, 1:-1]
-    interiorEnds = ends[:, 1:-1]
+    interior_starts = starts[:, 1:-1]
+    interior_ends = ends[:, 1:-1]
 
     # 5) a row has an interior hole iff it has at least one interior start
     #    *and* at least one interior end.  If any row meets that, we’re done.
-    rowHasStart = interiorStarts.any(axis=1)
-    rowHasEnd = interiorEnds.any(axis=1)
+    row_has_start = interior_starts.any(axis=1)
+    row_has_end = interior_ends.any(axis=1)
 
-    return bool(np.any(rowHasStart & rowHasEnd))
+    return bool(np.any(row_has_start & row_has_end))
 
 
 # Interpolation function to interpolate nans in a row, keeping nan's at the start and end
@@ -774,44 +840,47 @@ def _interp_row(row: np.ndarray) -> np.ndarray:
 
 
 class WeatherParallel(object):
+    """Helper class for parallel zarr reading operations."""
+
     async def zarr_read(self, model, opened_zarr, x, y):
         if TIMING:
-            print("### " + model + " Reading!")
-            print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None))
+            logger.debug(f"### {model} Reading!")
+            logger.debug(datetime.datetime.now(datetime.UTC).replace(tzinfo=None))
 
-        errCount = 0
-        dataOut = False
+        err_count = 0
+        data_out = False
         # Try to read Zarr file
-        while errCount < 4:
+        while err_count < MAX_ZARR_READ_RETRIES:
             try:
-                dataOut = await asyncio.to_thread(lambda: opened_zarr[:, :, y, x].T)
+                data_out = await asyncio.to_thread(lambda: opened_zarr[:, :, y, x].T)
 
                 # Check for missing/ bad data and interpolate
                 # This should not occur, but good to have a fallback
-                if has_interior_nan_holes(dataOut.T):
-                    print("### " + model + " Interpolating missing data!")
+                if has_interior_nan_holes(data_out.T):
+                    logger.warning(f"### {model} Interpolating missing data!")
 
                     # Print the location of the missing data
                     if TIMING:
-                        print(
-                            "### " + model + " Missing data at: ",
-                            np.argwhere(np.isnan(dataOut)),
+                        logger.debug(
+                            f"### {model} Missing data at: {np.argwhere(np.isnan(data_out))}"
                         )
 
-                    dataOut = np.apply_along_axis(_interp_row, 0, dataOut)
+                    data_out = np.apply_along_axis(_interp_row, 0, data_out)
 
                 if TIMING:
-                    print("### " + model + " Done!")
-                    print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None))
-                return dataOut
+                    logger.debug(f"### {model} Done!")
+                    logger.debug(
+                        datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+                    )
+                return data_out
 
             except Exception:
                 logger.exception("### %s Failure!", model)
-                errCount = errCount + 1
+                err_count += 1
 
         logger.error("### %s Failure!", model)
-        dataOut = False
-        return dataOut
+        data_out = False
+        return data_out
 
 
 def cull(lng, lat):
@@ -851,19 +920,37 @@ def lambertGridMatch(
     hrr_n = math.sin(standard_parallel)
     hrrr_F = (
         math.cos(standard_parallel)
-        * (math.tan(0.25 * math.pi + 0.5 * standard_parallel)) ** hrr_n
+        * (
+            math.tan(
+                LAMBERT_CONST["pi_factor"] * math.pi
+                + LAMBERT_CONST["half_pi_factor"] * standard_parallel
+            )
+        )
+        ** hrr_n
     ) / hrr_n
     hrrr_p = (
         semimajor_axis
         * hrrr_F
         * 1
-        / (math.tan(0.25 * math.pi + 0.5 * math.radians(lat)) ** hrr_n)
+        / (
+            math.tan(
+                LAMBERT_CONST["pi_factor"] * math.pi
+                + LAMBERT_CONST["half_pi_factor"] * math.radians(lat)
+            )
+            ** hrr_n
+        )
     )
     hrrr_p0 = (
         semimajor_axis
         * hrrr_F
         * 1
-        / (math.tan(0.25 * math.pi + 0.5 * central_latitude) ** hrr_n)
+        / (
+            math.tan(
+                LAMBERT_CONST["pi_factor"] * math.pi
+                + LAMBERT_CONST["half_pi_factor"] * central_latitude
+            )
+            ** hrr_n
+        )
     )
 
     x_hrrrLoc = hrrr_p * math.sin(hrr_n * (math.radians(lon) - central_longitude))
@@ -890,7 +977,9 @@ def lambertGridMatch(
     return lat_grid, lon_grid, x_hrrr, y_hrrr
 
 
-def rounder(t: datetime.datetime, to: int = 60) -> datetime.datetime:
+def rounder(
+    t: datetime.datetime, to: int = DEFAULT_ROUNDING_INTERVAL
+) -> datetime.datetime:
     """Rounds a datetime object to the nearest interval in minutes.
 
     Parameters:
@@ -910,16 +999,31 @@ def rounder(t: datetime.datetime, to: int = 60) -> datetime.datetime:
 
 
 def unix_to_day_of_year_and_lst(dt, longitude):
+    """Convert Unix time to day of year and local solar time.
+
+    Args:
+        dt: datetime object
+        longitude: Longitude in degrees
+
+    Returns:
+        tuple: (day_of_year, local_solar_time)
+    """
     # Calculate the day of the year
     day_of_year = dt.timetuple().tm_yday
 
     # Calculate UTC time in hours
-    utc_time = dt.hour + dt.minute / 60 + dt.second / 3600
-    print(utc_time)
+    utc_time = (
+        dt.hour
+        + dt.minute / UNIT_CONVERSION_CONST["hours_to_minutes"]
+        + dt.second / UNIT_CONVERSION_CONST["seconds_to_hours"]
+    )
+    if TIMING:
+        logger.debug(f"UTC time: {utc_time}")
 
     # Calculate Local Solar Time (LST) considering the longitude
-    lst = utc_time + (longitude / 15)
-    print(lst)
+    lst = utc_time + (longitude / UNIT_CONVERSION_CONST["longitude_to_hours"])
+    if TIMING:
+        logger.debug(f"LST: {lst}")
 
     return day_of_year, lst
 
@@ -932,11 +1036,18 @@ def solar_irradiance(latitude, longitude, unix_time):
 
     # Calculate solar declination (delta) in radians
     delta = math.radians(SOLAR_IRRADIANCE_CONST["declination"]) * math.sin(
-        math.radians(360 / 365 * (284 + day_of_year))
+        math.radians(
+            SOLAR_CALC_CONST["degrees_per_year"]
+            / SOLAR_CALC_CONST["days_per_year"]
+            * (SOLAR_CALC_CONST["day_of_year_base"] + day_of_year)
+        )
     )
 
     # Calculate hour angle (H) in degrees, then convert to radians
-    H = math.radians(15 * (local_solar_time - 12))
+    H = math.radians(
+        SOLAR_CALC_CONST["hour_factor"]
+        * (local_solar_time - SOLAR_CALC_CONST["hour_offset"])
+    )
 
     # Convert latitude to radians
     phi = math.radians(latitude)
@@ -951,7 +1062,13 @@ def solar_irradiance(latitude, longitude, unix_time):
     G_0 = G_sc * (
         1
         + SOLAR_IRRADIANCE_CONST["g0_coeff"]
-        * math.cos(math.radians(360 * day_of_year / 365))
+        * math.cos(
+            math.radians(
+                SOLAR_CALC_CONST["degrees_per_year"]
+                * day_of_year
+                / SOLAR_CALC_CONST["days_per_year"]
+            )
+        )
     )
     G = (
         G_0 * sin_alpha * math.exp(-SOLAR_IRRADIANCE_CONST["am_coeff"] * AM)
@@ -1027,7 +1144,7 @@ def calculate_wbgt(
     else:
         wbgt = WBGT_CONST["temp_weight"] * temperature + WBGT_CONST[
             "humidity_weight"
-        ] * (humidity / 100.0 * temperature)
+        ] * (humidity / WBGT_PERCENTAGE_DIVISOR * temperature)
 
     return wbgt
 
@@ -1045,10 +1162,10 @@ def dbz_to_rate(dbz_array, precip_type_array, min_dbz=REFC_THRESHOLD):
         np.ndarray: Precipitation rate in mm/h.
     """
     # Ensure no negative dBZ values
-    dbz_array = np.maximum(dbz_array, 0.0)
+    dbz_array = np.maximum(dbz_array, DBZ_CONVERSION_CONST["min_value"])
 
     # Convert dBZ to Z
-    z_array = 10 ** (dbz_array / 10.0)
+    z_array = 10 ** (dbz_array / DBZ_CONVERSION_CONST["divisor"])
 
     # Initialize rate coefficients for rain
     a_array = np.full_like(dbz_array, DBZ_CONST["rain_a"], dtype=float)
@@ -1058,14 +1175,14 @@ def dbz_to_rate(dbz_array, precip_type_array, min_dbz=REFC_THRESHOLD):
     b_array[snow_mask] = DBZ_CONST["snow_b"]
 
     # Compute precipitation rate
-    rate_array = (z_array / a_array) ** (1.0 / b_array)
+    rate_array = (z_array / a_array) ** (DBZ_CONVERSION_CONST["exponent"] / b_array)
 
     # Apply soft threshold for sub-threshold dBZ values
     below_threshold = dbz_array < min_dbz
     rate_array[below_threshold] *= dbz_array[below_threshold] / min_dbz
 
     # Final check: ensure no negative rates
-    rate_array = np.maximum(rate_array, 0.0)
+    rate_array = np.maximum(rate_array, DBZ_CONVERSION_CONST["min_value"])
     return rate_array
 
 
@@ -1120,8 +1237,8 @@ async def PW_Forecast(
             tzinfo=None
         )
 
-        print("Forced Current Time to:")
-        print(nowTime)
+        logger.info("Forced Current Time to:")
+        logger.info(nowTime)
 
     ### If developing in REPL, uncomment to provide static variables
     # location = "47.1756,27.594,1741126460"
@@ -1145,14 +1262,20 @@ async def PW_Forecast(
         #     'statusCode': 400,
         #     'body': json.dumps('Invalid Location Specification')
         # }
-    lon = lon_IN % 360  # 0-360
-    az_Lon = ((lon + 180) % 360) - 180  # -180-180
+    lon = lon_IN % COORDINATE_CONST["longitude_max"]  # 0-360
+    az_Lon = (
+        (lon + COORDINATE_CONST["longitude_offset"]) % COORDINATE_CONST["longitude_max"]
+    ) - COORDINATE_CONST["longitude_offset"]  # -180-180
 
-    if (lon_IN < -180) or (lon > 360):
-        # print('ERROR')
+    if (lon_IN < COORDINATE_CONST["longitude_min"]) or (
+        lon > COORDINATE_CONST["longitude_max"]
+    ):
+        # logger.error('Invalid Longitude')
         raise HTTPException(status_code=400, detail="Invalid Longitude")
-    if (lat < -90) or (lat > 90):
-        # print('ERROR')
+    if (lat < COORDINATE_CONST["latitude_min"]) or (
+        lat > COORDINATE_CONST["latitude_max"]
+    ):
+        # logger.error('Invalid Latitude')
         raise HTTPException(status_code=400, detail="Invalid Latitude")
 
     if len(locationReq) == 2:
@@ -1169,11 +1292,13 @@ async def PW_Forecast(
                 utcTime = datetime.datetime.fromtimestamp(
                     float(locationReq[2]), datetime.UTC
                 ).replace(tzinfo=None)
-            elif float(locationReq[2]) < -100000:  # Very negatime time
+            elif (
+                float(locationReq[2]) < TIME_MACHINE_CONST["very_negative_threshold"]
+            ):  # Very negative time
                 utcTime = datetime.datetime.fromtimestamp(
                     float(locationReq[2]), datetime.UTC
                 ).replace(tzinfo=None)
-            elif float(locationReq[2]) < 0:  # Negatime time
+            elif float(locationReq[2]) < 0:  # Negative time
                 utcTime = nowTime + datetime.timedelta(seconds=float(locationReq[2]))
 
         else:
@@ -1208,7 +1333,7 @@ async def PW_Forecast(
                         utcTime = localTime - datetime.timedelta(minutes=tz_offsetIN)
 
                     except Exception:
-                        # print('ERROR')
+                        # logger.error('Invalid Time Specification')
                         raise HTTPException(
                             status_code=400, detail="Invalid Time Specification"
                         )
@@ -1256,22 +1381,24 @@ async def PW_Forecast(
             raise HTTPException(
                 status_code=400, detail="Requested Time is in the Future"
             )
-    elif (nowTime - utcTime) < datetime.timedelta(hours=25):
+    elif (nowTime - utcTime) < datetime.timedelta(
+        hours=TIME_MACHINE_CONST["threshold_hours"]
+    ):
         # If within the last 25 hours, it may or may not be a timemachine request
         # If it is, then only return 24h of data
         if "timemachine" in str(request.url):
             timeMachine = True
             # This results in the API using the live zip file, but only doing a 24 hour forecast from midnight of the requested day
             if TIMING:
-                print("Near term timemachine request")
-                # Print how far in the past it is
-                print((nowTime - utcTime))
+                logger.debug("Near term timemachine request")
+                # Log how far in the past it is
+                logger.debug(nowTime - utcTime)
         # Otherwise, just a normal request
 
     # Timing Check
     if TIMING:
-        print("Request process time")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+        logger.debug("Request process time")
+        logger.debug(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # Calculate the timezone offset
     tz_offsetLoc = {"lat": lat, "lng": az_Lon, "utcTime": utcTime, "tf": tf}
@@ -1946,7 +2073,7 @@ async def PW_Forecast(
 
     sourceTimes = dict()
     sourceList = []
-    if useETOPO:
+    if use_etopo:
         sourceList.append("ETOPO1")
 
     # If ERA5 data was read and merged
@@ -2064,7 +2191,7 @@ async def PW_Forecast(
     y_p_etopo = np.argmin(abslat)
     x_p_etopo = np.argmin(abslon)
 
-    if (useETOPO) and ((STAGE == "PROD") or (STAGE == "DEV")):
+    if (use_etopo) and ((STAGE == "PROD") or (STAGE == "DEV")):
         ETOPO = int(ETOPO_f[y_p_etopo, x_p_etopo])
     else:
         ETOPO = 0
@@ -2072,7 +2199,7 @@ async def PW_Forecast(
     if ETOPO < 0:
         ETOPO = 0
 
-    if useETOPO:
+    if use_etopo:
         sourceIDX["etopo"] = dict()
         sourceIDX["etopo"]["x"] = int(x_p_etopo)
         sourceIDX["etopo"]["y"] = int(y_p_etopo)
@@ -6118,10 +6245,12 @@ async def PW_Forecast(
 
     if exHourly != 1:
         returnOBJ["hourly"] = dict()
+        # Compute int conversion once for reuse
+        base_time_offset_int = int(baseTimeOffset)
         if not timeMachine:
             try:
                 hourIcon, hourText = calculate_day_text(
-                    hourList_si[int(baseTimeOffset) : int(baseTimeOffset) + 24],
+                    hourList_si[base_time_offset_int : base_time_offset_int + 24],
                     not is_all_night,
                     str(tz_name),
                     int(time.time()),
@@ -6188,7 +6317,7 @@ async def PW_Forecast(
             returnOBJ["hourly"]["data"] = hourList[0:ouputHours]
         else:
             returnOBJ["hourly"]["data"] = hourList[
-                int(baseTimeOffset) : int(baseTimeOffset) + ouputHours
+                base_time_offset_int : base_time_offset_int + ouputHours
             ]
 
     if inc_day_night == 1 and not timeMachine:
@@ -6252,7 +6381,7 @@ async def PW_Forecast(
             returnOBJ["flags"]["processTime"] = (
                 datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
             ).microseconds
-            returnOBJ["flags"]["ingestVersion"] = ingestVersion
+            returnOBJ["flags"]["ingest_version"] = ingest_version
             # Return the approx location names, if they are found
             returnOBJ["flags"]["nearestCity"] = loc_name.get("city") or None
             returnOBJ["flags"]["nearestCountry"] = loc_name.get("country") or None
@@ -6299,7 +6428,7 @@ def initialDataSync() -> None:
     if STAGE == "PROD":
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/SubH.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/SubH.zarr.zip",
             "/tmp/SubH_TMP.zarr.zip",
             "/tmp/SubH.zarr.prod.zip",
             True,
@@ -6307,7 +6436,7 @@ def initialDataSync() -> None:
         logger.info("SubH Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/HRRR_6H.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/HRRR_6H.zarr.zip",
             "/tmp/HRRR_6H_TMP.zarr.zip",
             "/tmp/HRRR_6H.zarr.prod.zip",
             True,
@@ -6315,7 +6444,7 @@ def initialDataSync() -> None:
         logger.info("HRRR_6H Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/GFS.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/GFS.zarr.zip",
             "/tmp/GFS.zarr_TMP.zip",
             "/tmp/GFS.zarr.prod.zip",
             True,
@@ -6323,7 +6452,7 @@ def initialDataSync() -> None:
         logger.info("GFS Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/ECMWF.zarr.zip",
             "/tmp/ECMWF_TMP.zarr.zip",
             "/tmp/ECMWF.zarr.prod.zip",
             True,
@@ -6331,7 +6460,7 @@ def initialDataSync() -> None:
         logger.info("ECMWF Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/NBM.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/NBM.zarr.zip",
             "/tmp/NBM.zarr_TMP.zip",
             "/tmp/NBM.zarr.prod.zip",
             True,
@@ -6339,7 +6468,7 @@ def initialDataSync() -> None:
         logger.info("NBM Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/NBM_Fire.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/NBM_Fire.zarr.zip",
             "/tmp/NBM_Fire_TMP.zarr.zip",
             "/tmp/NBM_Fire.zarr.prod.zip",
             True,
@@ -6347,7 +6476,7 @@ def initialDataSync() -> None:
         logger.info("NBM_Fire Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/GEFS.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/GEFS.zarr.zip",
             "/tmp/GEFS_TMP.zarr.zip",
             "/tmp/GEFS.zarr.prod.zip",
             True,
@@ -6355,7 +6484,7 @@ def initialDataSync() -> None:
         logger.info("GEFS  Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/HRRR.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/HRRR.zarr.zip",
             "/tmp/HRRR_TMP.zarr.zip",
             "/tmp/HRRR.zarr.prod.zip",
             True,
@@ -6363,7 +6492,7 @@ def initialDataSync() -> None:
         logger.info("HRRR  Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/NWS_Alerts.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/NWS_Alerts.zarr.zip",
             "/tmp/NWS_Alerts_TMP.zarr.zip",
             "/tmp/NWS_Alerts.zarr.prod.zip",
             True,
@@ -6371,7 +6500,7 @@ def initialDataSync() -> None:
         logger.info("Alerts Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/WMO_Alerts.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/WMO_Alerts.zarr.zip",
             "/tmp/WMO_Alerts_TMP.zarr.zip",
             "/tmp/WMO_Alerts.zarr.prod.zip",
             True,
@@ -6379,7 +6508,7 @@ def initialDataSync() -> None:
         logger.info("WMO Alerts Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/RTMA_RU.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/RTMA_RU.zarr.zip",
             "/tmp/RTMA_RU_TMP.zarr.zip",
             "/tmp/RTMA_RU.zarr.prod.zip",
             True,
@@ -6387,17 +6516,17 @@ def initialDataSync() -> None:
         logger.info("RTMA_RU Download!")
         download_if_newer(
             s3_bucket,
-            "ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip",
+            "ForecastTar_v2/" + ingest_version + "/ECMWF.zarr.zip",
             "/tmp/ECMWF_TMP.zarr.zip",
             "/tmp/ECMWF.zarr.prod.zip",
             True,
         )
         logger.info("ECMWF Download!")
 
-        if useETOPO:
+        if use_etopo:
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/ETOPO_DA_C.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/ETOPO_DA_C.zarr.zip",
                 "/tmp/ETOPO_DA_C_TMP.zarr.zip",
                 "/tmp/ETOPO_DA_C.zarr.prod.zip",
                 True,
@@ -6429,7 +6558,7 @@ def dataSync() -> None:
 
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/SubH.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/SubH.zarr.zip",
                 "/tmp/SubH_TMP.zarr.zip",
                 "/tmp/SubH.zarr.prod.zip",
                 False,
@@ -6437,7 +6566,7 @@ def dataSync() -> None:
             logger.info("SubH Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/HRRR_6H.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/HRRR_6H.zarr.zip",
                 "/tmp/HRRR_6H_TMP.zarr.zip",
                 "/tmp/HRRR_6H.zarr.prod.zip",
                 False,
@@ -6445,7 +6574,7 @@ def dataSync() -> None:
             logger.info("HRRR_6H Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/GFS.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/GFS.zarr.zip",
                 "/tmp/GFS.zarr_TMP.zip",
                 "/tmp/GFS.zarr.prod.zip",
                 False,
@@ -6453,7 +6582,7 @@ def dataSync() -> None:
             logger.info("GFS Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/ECMWF.zarr.zip",
                 "/tmp/ECMWF_TMP.zarr.zip",
                 "/tmp/ECMWF.zarr.prod.zip",
                 False,
@@ -6461,7 +6590,7 @@ def dataSync() -> None:
             logger.info("ECMWF Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/NBM.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/NBM.zarr.zip",
                 "/tmp/NBM.zarr_TMP.zip",
                 "/tmp/NBM.zarr.prod.zip",
                 False,
@@ -6469,7 +6598,7 @@ def dataSync() -> None:
             logger.info("NBM Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/NBM_Fire.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/NBM_Fire.zarr.zip",
                 "/tmp/NBM_Fire_TMP.zarr.zip",
                 "/tmp/NBM_Fire.zarr.prod.zip",
                 False,
@@ -6477,7 +6606,7 @@ def dataSync() -> None:
             logger.info("NBM_Fire Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/GEFS.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/GEFS.zarr.zip",
                 "/tmp/GEFS_TMP.zarr.zip",
                 "/tmp/GEFS.zarr.prod.zip",
                 False,
@@ -6485,7 +6614,7 @@ def dataSync() -> None:
             logger.info("GEFS  Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/HRRR.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/HRRR.zarr.zip",
                 "/tmp/HRRR_TMP.zarr.zip",
                 "/tmp/HRRR.zarr.prod.zip",
                 False,
@@ -6493,7 +6622,7 @@ def dataSync() -> None:
             logger.info("HRRR  Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/NWS_Alerts.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/NWS_Alerts.zarr.zip",
                 "/tmp/NWS_Alerts_TMP.zarr.zip",
                 "/tmp/NWS_Alerts.zarr.prod.zip",
                 False,
@@ -6501,7 +6630,7 @@ def dataSync() -> None:
             logger.info("Alerts Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/WMO_Alerts.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/WMO_Alerts.zarr.zip",
                 "/tmp/WMO_Alerts_TMP.zarr.zip",
                 "/tmp/WMO_Alerts.zarr.prod.zip",
                 False,
@@ -6509,7 +6638,7 @@ def dataSync() -> None:
             logger.info("Alerts Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/RTMA_RU.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/RTMA_RU.zarr.zip",
                 "/tmp/RTMA_RU_TMP.zarr.zip",
                 "/tmp/RTMA_RU.zarr.prod.zip",
                 False,
@@ -6517,17 +6646,17 @@ def dataSync() -> None:
             logger.info("RTMA_RU Download!")
             download_if_newer(
                 s3_bucket,
-                "ForecastTar_v2/" + ingestVersion + "/ECMWF.zarr.zip",
+                "ForecastTar_v2/" + ingest_version + "/ECMWF.zarr.zip",
                 "/tmp/ECMWF_TMP.zarr.zip",
                 "/tmp/ECMWF.zarr.prod.zip",
                 False,
             )
             logger.info("ECMWF Download!")
 
-            if useETOPO:
+            if use_etopo:
                 download_if_newer(
                     s3_bucket,
-                    "ForecastTar_v2/" + ingestVersion + "/ETOPO_DA_C.zarr.zip",
+                    "ForecastTar_v2/" + ingest_version + "/ETOPO_DA_C.zarr.zip",
                     "/tmp/ETOPO_DA_C_TMP.zarr.zip",
                     "/tmp/ETOPO_DA_C.zarr.prod.zip",
                     False,
@@ -6543,7 +6672,17 @@ def dataSync() -> None:
 
 
 def nearest_index(a, v):
-    # Slightly faster than a simple linear search for large arrays
+    """Find the nearest index in array to value using binary search.
+
+    Slightly faster than a simple linear search for large arrays.
+
+    Args:
+        a: Sorted array
+        v: Value to find
+
+    Returns:
+        Index of nearest value in array
+    """
     # Find insertion point
     idx = np.searchsorted(a, v)
     # Clip so we don’t run off the ends

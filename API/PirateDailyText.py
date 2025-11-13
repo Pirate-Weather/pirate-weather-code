@@ -16,7 +16,6 @@ from API.constants.text_const import (
     PRECIP_INTENSITY_THRESHOLDS,
 )
 from API.PirateTextHelper import (
-    Most_Common,
     calculate_precip_text,
     calculate_sky_icon,
     calculate_thunderstorm_text,
@@ -24,6 +23,7 @@ from API.PirateTextHelper import (
     calculate_wind_text,
     estimate_snow_height,
     humidity_sky_text,
+    most_common,
 )
 
 MORNING_START = 4
@@ -1180,7 +1180,7 @@ def calculate_day_text(
 
     if cloud_levels:
         # Step 1: Get the most common cloud level across all periods
-        most_common_cloud_level_value = Most_Common(
+        most_common_cloud_level_value = most_common(
             cloud_levels
         )  # This is the numerical level (0-4)
         for idx, level in enumerate(cloud_levels):
@@ -1248,7 +1248,7 @@ def calculate_day_text(
 
     # Determine the most common precipitation type for overall summary
     most_common_overall_precip_type = (
-        Most_Common(overall_most_common_precip)
+        most_common(overall_most_common_precip)
         if overall_most_common_precip
         else "none"
     )

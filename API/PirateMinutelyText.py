@@ -23,12 +23,12 @@ def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
     - text (str): The textual representation of the precipitation
 
     Returns:
-    - cText (arr): The precipitation summary for the hour.
+    - c_text (arr): The precipitation summary for the hour.
     """
 
     # If the current precipitation stops before the end of the hour
     if precipStart1 == 0 and precipEnd1 < MINUTES_IN_HOUR and precipStart2 == -1:
-        cText = [
+        c_text = [
             "stopping-in",
             text,
             ["minutes", precipEnd1 + 1]
@@ -37,14 +37,14 @@ def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
         ]
     # If the current precipitation doesn't stop before the end of the hour
     elif precipStart1 == 0 and precipEnd1 == MINUTES_IN_HOUR:
-        cText = [
+        c_text = [
             "for-hour",
             text,
         ]
 
     # If the current precipitation stops before the hour but starts again
     elif precipStart1 == 0 and precipEnd1 < MINUTES_IN_HOUR and precipStart2 != -1:
-        cText = [
+        c_text = [
             "stopping-then-starting-later",
             text,
             ["minutes", precipEnd1 + 1]
@@ -54,14 +54,14 @@ def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
         ]
     # If precip starts during the hour and lasts until the end of the hour
     elif precipStart1 > 0 and precipEnd1 == MINUTES_IN_HOUR:
-        cText = [
+        c_text = [
             "starting-in",
             text,
             ["minutes", precipStart1],
         ]
     # If precip starts during the hour and ends before the end of the hour
     elif precipStart1 > 0 and precipEnd1 < MINUTES_IN_HOUR:
-        cText = [
+        c_text = [
             "starting-then-stopping-later",
             text,
             ["minutes", precipStart1]
@@ -69,7 +69,7 @@ def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
             else ["less-than", ["minutes", 1]],
             ["minutes", precipEnd1 - precipStart1],
         ]
-    return cText
+    return c_text
 
 
 def calcaulate_consecutive_indexes(prepIndex):
@@ -102,12 +102,12 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
     - maxCAPE (float): The maximum CAPE value for the next hour (default: 0)
 
     Returns:
-    - cText (arr): The precipitation summary for the hour.
-    - cIcon (str): The icon representing the conditions for the hour.
+    - c_text (arr): The precipitation summary for the hour.
+    - c_icon (str): The icon representing the conditions for the hour.
     """
 
     # Variables to use in calculating the minutely summary
-    cIcon = cText = None
+    c_icon = c_text = None
     precipMinutes = rainMaxIntensity = snowMaxIntensity = sleetMaxIntensity = (
         noneMaxIntensity
     ) = hailMaxIntensity = iceMaxIntensity = 0
@@ -254,11 +254,11 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
     # If there are more than two precipitation types used the mixed text
     if len(starts) > 2:
         text = "mixed-precipitation"
-        cIcon = "mixed"
+        c_icon = "mixed"
     # If there is two precipitation types for the hour
     elif len(starts) == 2:
         # Calculate the precipitation text and icon (all in SI units: mm/h)
-        text, cIcon = calculate_precip_text(
+        text, c_icon = calculate_precip_text(
             first_precip,
             "minute",
             0,
@@ -299,12 +299,12 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
         and not hailIndex
         and not noneIndex
     ):
-        cText = ["for-hour", currentText]
-        cIcon = currentIcon
+        c_text = ["for-hour", currentText]
+        c_icon = currentIcon
     # If there is more than one precipitation for the hour
     elif len(starts) > 1:
         # Calculate the text using the start/end times for precipitation as a whole instead of the individual precipitation
-        cText = minutely_summary(
+        c_text = minutely_summary(
             consecutivePrep[0][0],
             consecutivePrep[0][len(consecutivePrep[0]) - 1],
             consecutivePrep[1][0] if len(consecutivePrep) > 1 else -1,
@@ -312,7 +312,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
         )
     # If there if the only one precipitation is sleet
     elif sleetIndex:
-        text, cIcon = calculate_precip_text(
+        text, c_icon = calculate_precip_text(
             "sleet",
             "minute",
             0,
@@ -325,7 +325,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
             eff_snow_intensity=snowMaxIntensity,
             eff_ice_intensity=sleetMaxIntensity,
         )
-        cText = minutely_summary(
+        c_text = minutely_summary(
             consecutiveSleet[0][0],
             consecutiveSleet[0][len(consecutiveSleet[0]) - 1],
             consecutiveSleet[1][0] if len(consecutiveSleet) > 1 else -1,
@@ -333,7 +333,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
         )
     # If there if the only one precipitation is snow
     elif snowIndex:
-        text, cIcon = calculate_precip_text(
+        text, c_icon = calculate_precip_text(
             "snow",
             "minute",
             0,
@@ -346,7 +346,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
             eff_snow_intensity=snowMaxIntensity,
             eff_ice_intensity=sleetMaxIntensity,
         )
-        cText = minutely_summary(
+        c_text = minutely_summary(
             consecutiveSnow[0][0],
             consecutiveSnow[0][len(consecutiveSnow[0]) - 1],
             consecutiveSnow[1][0] if len(consecutiveSnow) > 1 else -1,
@@ -354,7 +354,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
         )
     # If there if the only one precipitation is rain
     elif rainIndex:
-        text, cIcon = calculate_precip_text(
+        text, c_icon = calculate_precip_text(
             "rain",
             "minute",
             0,
@@ -367,7 +367,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
             eff_snow_intensity=snowMaxIntensity,
             eff_ice_intensity=sleetMaxIntensity,
         )
-        cText = minutely_summary(
+        c_text = minutely_summary(
             consecutiveRain[0][0],
             consecutiveRain[0][len(consecutiveRain[0]) - 1],
             consecutiveRain[1][0] if len(consecutiveRain) > 1 else -1,
@@ -375,7 +375,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
         )
     # If there if the only one precipitation is ice
     elif iceIndex:
-        text, cIcon = calculate_precip_text(
+        text, c_icon = calculate_precip_text(
             "ice",
             "minute",
             0,
@@ -388,7 +388,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
             eff_snow_intensity=snowMaxIntensity,
             eff_ice_intensity=sleetMaxIntensity,
         )
-        cText = minutely_summary(
+        c_text = minutely_summary(
             consecutiveIce[0][0],
             consecutiveIce[0][len(consecutiveIce[0]) - 1],
             consecutiveIce[1][0] if len(consecutiveIce) > 1 else -1,
@@ -396,7 +396,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
         )
     # If there if the only one precipitation is hail
     elif iceIndex:
-        text, cIcon = calculate_precip_text(
+        text, c_icon = calculate_precip_text(
             "hail",
             "minute",
             0,
@@ -409,7 +409,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
             eff_snow_intensity=snowMaxIntensity,
             eff_ice_intensity=sleetMaxIntensity,
         )
-        cText = minutely_summary(
+        c_text = minutely_summary(
             consecutiveHail[0][0],
             consecutiveHail[0][len(consecutiveHail[0]) - 1],
             consecutiveHail[1][0] if len(consecutiveHail) > 1 else -1,
@@ -417,7 +417,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
         )
     # If there if the only one precipitation has any other type
     else:
-        text, cIcon = calculate_precip_text(
+        text, c_icon = calculate_precip_text(
             "none",
             "minute",
             0,
@@ -430,7 +430,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
             eff_snow_intensity=snowMaxIntensity,
             eff_ice_intensity=sleetMaxIntensity,
         )
-        cText = minutely_summary(
+        c_text = minutely_summary(
             consecutiveNone[0][0],
             consecutiveNone[0][len(consecutiveNone[0]) - 1],
             consecutiveNone[1][0] if len(consecutiveNone) > 1 else -1,
@@ -438,16 +438,16 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
         )
 
     # If we have no icon fallback to the current icon
-    if cIcon is None:
-        cIcon = currentIcon
+    if c_icon is None:
+        c_icon = currentIcon
 
     # Check for thunderstorms: if CAPE > 2500 and there's precipitation, replace summary with thunderstorm
     if maxCAPE >= CAPE_THRESHOLDS["high"] and precipIndex:
         # Replace precipitation summary with thunderstorm summary
         # Keep the same timing structure but replace the precipitation type with "thunderstorm"
-        if cText and isinstance(cText, list) and len(cText) >= 2:
+        if c_text and isinstance(c_text, list) and len(c_text) >= 2:
             # Extract the timing part and replace precipitation text with thunderstorm
-            if cText[0] in (
+            if c_text[0] in (
                 "stopping-in",
                 "for-hour",
                 "stopping-then-starting-later",
@@ -455,7 +455,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
                 "starting-then-stopping-later",
             ):
                 # Replace the precipitation text (second element) with "thunderstorm"
-                cText[1] = "thunderstorm"
-        cIcon = "thunderstorm"
+                c_text[1] = "thunderstorm"
+        c_icon = "thunderstorm"
 
-    return cText, cIcon
+    return c_text, c_icon
