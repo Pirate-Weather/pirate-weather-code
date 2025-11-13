@@ -370,7 +370,9 @@ def update_zarr_store(initialRun):
     os.makedirs(save_dir + "/empty", exist_ok=True)
 
     # Always load GFS
-    latest_GFS, old_GFS = find_largest_integer_directory(save_dir, "GFS.zarr", initialRun)
+    latest_GFS, old_GFS = find_largest_integer_directory(
+        save_dir, "GFS.zarr", initialRun
+    )
     if latest_GFS is not None:
         GFS_Zarr = zarr.open(
             zarr.storage.ZipStore(save_dir + "/" + latest_GFS, mode="r"), mode="r"
@@ -430,7 +432,8 @@ def update_zarr_store(initialRun):
         )
         if latest_HRRR_6H is not None:
             HRRR_6H_Zarr = zarr.open(
-                zarr.storage.ZipStore(save_dir + "/" + latest_HRRR_6H, mode="r"), mode="r"
+                zarr.storage.ZipStore(save_dir + "/" + latest_HRRR_6H, mode="r"),
+                mode="r",
             )
             logger.info("Loading new: " + latest_HRRR_6H)
         for old_dir in old_HRRR_6H:
@@ -445,7 +448,8 @@ def update_zarr_store(initialRun):
         if latest_ECMWF is not None:
             try:
                 ECMWF_Zarr = zarr.open(
-                    zarr.storage.ZipStore(save_dir + "/" + latest_ECMWF, mode="r"), mode="r"
+                    zarr.storage.ZipStore(save_dir + "/" + latest_ECMWF, mode="r"),
+                    mode="r",
                 )
                 logger.info("Loading new: " + latest_ECMWF)
             except Exception as e:
@@ -476,7 +480,8 @@ def update_zarr_store(initialRun):
         )
         if latest_NBM_Fire is not None:
             NBM_Fire_Zarr = zarr.open(
-                zarr.storage.ZipStore(save_dir + "/" + latest_NBM_Fire, mode="r"), mode="r"
+                zarr.storage.ZipStore(save_dir + "/" + latest_NBM_Fire, mode="r"),
+                mode="r",
             )
             logger.info("Loading new: " + latest_NBM_Fire)
         for old_dir in old_NBM_Fire:
@@ -518,7 +523,8 @@ def update_zarr_store(initialRun):
         )
         if latest_WMO_Alerts is not None:
             WMO_Alerts_Zarr = zarr.open(
-                zarr.storage.ZipStore(save_dir + "/" + latest_WMO_Alerts, mode="r"), mode="r"
+                zarr.storage.ZipStore(save_dir + "/" + latest_WMO_Alerts, mode="r"),
+                mode="r",
             )
             logger.info("Loading new: " + latest_WMO_Alerts)
         for old_dir in old_WMO_Alerts:
@@ -532,7 +538,8 @@ def update_zarr_store(initialRun):
         )
         if latest_RTMA_RU is not None:
             RTMA_RU_Zarr = zarr.open(
-                zarr.storage.ZipStore(save_dir + "/" + latest_RTMA_RU, mode="r"), mode="r"
+                zarr.storage.ZipStore(save_dir + "/" + latest_RTMA_RU, mode="r"),
+                mode="r",
             )
             logger.info("Loading new: " + latest_RTMA_RU)
         for old_dir in old_RTMA_RU:
