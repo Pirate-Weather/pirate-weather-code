@@ -906,7 +906,7 @@ def calculate_half_day_text(
             overall_avg_pop if overall_avg_pop != -999 else 1,
             icon_set,
             "both",
-            is_day_time=is_day_time,
+            isDayTime=is_day_time,
             eff_rain_intensity=overall_max_rain_intensity,
             eff_snow_intensity=overall_max_snow_intensity,
             eff_ice_intensity=overall_max_ice_intensity,

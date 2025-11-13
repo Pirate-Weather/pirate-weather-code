@@ -18,7 +18,7 @@ from API.PirateTextHelper import (
 
 def calculate_text(
     hourObject,
-    is_day_time,
+    isDayTime,
     type,
     icon="darksky",
 ):
@@ -37,7 +37,7 @@ def calculate_text(
         humidity, visibility, cape, smoke, dewPoint, precipProbability,
         precipAccumulation, snowAccumulation, sleetAccumulation,
         liquidIntensity, snowIntensity, iceIntensity
-    - is_day_time (bool): Whether it's currently daytime
+    - isDayTime (bool): Whether it's currently daytime
     - type (str): The type of summary being generated ("current", "hour", "hourly")
     - icon (str): Which icon set to use - "darksky" or "pirate" (default: "darksky")
 
@@ -113,8 +113,8 @@ def calculate_text(
 
     windText, windIcon = calculate_wind_text(wind, icon, "both")
     visText, visIcon = calculate_vis_text(vis, temp, dewPoint, smoke, icon, "both")
-    thuText, thuIcon = calculate_thunderstorm_text(cape, "both", icon, is_day_time)
-    skyText, skyIcon = calculate_sky_text(cloudCover, is_day_time, icon, "both")
+    thuText, thuIcon = calculate_thunderstorm_text(cape, "both", icon, isDayTime)
+    skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
     humidityText = humidity_sky_text(temp, humidity)
 
     # If there is precipitation text use that and join with thunderstorm or humidity or wind texts if they exist
@@ -171,7 +171,7 @@ def calculate_text(
 
     # If we somehow have no icon
     if c_icon is None:
-        if is_day_time:
+        if isDayTime:
             c_icon = "clear-day"
         else:
             c_icon = "clear-night"
