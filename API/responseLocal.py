@@ -2079,7 +2079,9 @@ async def PW_Forecast(
                 ]
 
     except Exception:
-        logger.exception("HRRR or NBM data not available, falling back to GFS %s", loc_tag)
+        logger.exception(
+            "HRRR or NBM data not available, falling back to GFS %s", loc_tag
+        )
         if "hrrr_18-48" in sourceTimes:
             sourceTimes.pop("hrrr_18-48", None)
         if "nbm_fire" in sourceTimes:
