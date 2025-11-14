@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Script to sync and unzip forecast model data from remote storage using rclone.
+# Designed to run in a container or cron job, continuously updating local data.
+
 # Example defaults if not specified
 BASE_DIR="${BASE_DIR:-/mnt/nvme/data/ProdTest3}"
 REMOTE_BASE="${REMOTE_BASE:-s3:piratezarr2/ForecastTar_v2/v30}"
