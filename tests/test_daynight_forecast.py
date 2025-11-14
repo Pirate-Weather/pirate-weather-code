@@ -48,7 +48,7 @@ def test_half_day_clear_day_icon_and_summary():
     ]
 
     icon, summary = calculate_half_day_text(
-        hours, True, "UTC", hours[0]["time"], mode="hour", icon_set="darksky"
+        hours, True, "UTC", mode="hour", icon_set="darksky"
     )
 
     assert icon == "clear-day"
@@ -65,7 +65,7 @@ def test_all_day_half_day_clear_day_icon_and_summary():
     ]
 
     icon, summary = calculate_half_day_text(
-        hours, True, "UTC", hours[0]["time"], mode="hour", icon_set="darksky"
+        hours, True, "UTC", mode="hour", icon_set="darksky"
     )
 
     assert icon == "clear-day"
@@ -82,7 +82,7 @@ def test_half_day_cloudy_night_icon_and_summary():
     ]
 
     icon, summary = calculate_half_day_text(
-        hours, False, "UTC", hours[0]["time"], mode="hour", icon_set="darksky"
+        hours, False, "UTC", mode="hour", icon_set="darksky"
     )
 
     assert icon == "cloudy"
@@ -104,7 +104,7 @@ def test_precipitation_pirate_possible_day_and_night_icons():
     )
 
     icon_day, summary_day = calculate_half_day_text(
-        [hour_day], True, "UTC", hour_day["time"], mode="hour", icon_set="pirate"
+        [hour_day], True, "UTC", mode="hour", icon_set="pirate"
     )
     assert icon_day == "possible-rain-day"
 
@@ -119,7 +119,7 @@ def test_precipitation_pirate_possible_day_and_night_icons():
     )
 
     icon_night, summary_night = calculate_half_day_text(
-        [hour_night], False, "UTC", hour_night["time"], mode="hour", icon_set="pirate"
+        [hour_night], False, "UTC", mode="hour", icon_set="pirate"
     )
     assert icon_night == "possible-rain-night"
 
@@ -132,7 +132,7 @@ def test_too_many_hours_returns_unavailable():
     hours = [make_hour(base + datetime.timedelta(hours=i)) for i in range(16)]
 
     icon, summary = calculate_half_day_text(
-        hours, True, "UTC", hours[0]["time"], mode="hour", icon_set="darksky"
+        hours, True, "UTC", mode="hour", icon_set="darksky"
     )
 
     assert icon == "none"
