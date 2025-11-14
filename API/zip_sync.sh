@@ -56,7 +56,7 @@ while true; do
       continue
     fi
 
-    echo "Remote changed for $MODEL (or first run). Downloading ZIP…"
+    echo "Remote changed for $MODEL (or first run). Downloading ZIPâ€¦"
 
     # 3) Download ZIP only if remote changed; apply bwlimit after first run
     if [ "$first_run" -eq 1 ]; then
@@ -81,7 +81,7 @@ while true; do
       continue
     fi
 
-    echo "New ZIP for $MODEL downloaded. Extracting…"
+    echo "New ZIP for $MODEL downloaded. Extractingâ€¦"
 
     # 4) Create versioned directory and temp extraction dir
     timestamp="$(date -u +"%Y%m%dT%H%M%SZ")"
@@ -130,7 +130,8 @@ while true; do
       if [ -n "$old_versions" ]; then
         echo "Pruning old versions for $MODEL:"
         echo "$old_versions"
-        rm -rf $old_versions
+        echo "$old_versions"
+        echo "$old_versions" | xargs -d '\n' rm -rf
       fi
     )
 
