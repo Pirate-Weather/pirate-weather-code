@@ -51,16 +51,12 @@ from API.constants.api_const import (
     DBZ_CONVERSION_CONST,
     DEFAULT_ROUNDING_INTERVAL,
     ETOPO_CONST,
-    FILENAME_TIMESTAMP_SLICE_LENGTH,
     GLOBE_TEMP_CONST,
     LAMBERT_CONST,
-    LARGEST_DIR_INIT,
     MAX_ZARR_READ_RETRIES,
-    NICE_PRIORITY,
     PRECIP_IDX,
     PRECIP_NOISE_THRESHOLD_MMH,
     ROUNDING_RULES,
-    S3_MAX_BANDWIDTH,
     SOLAR_CALC_CONST,
     SOLAR_IRRADIANCE_CONST,
     SOLAR_RAD_CONST,
@@ -199,10 +195,10 @@ logger.addHandler(handler)
 
 def update_zarr_store(initialRun):
     """Load zarr data stores from static file paths.
-    
+
     File syncing and download is now handled by a separate container.
     This function simply opens the zarr stores at their expected paths.
-    
+
     Args:
         initialRun: Whether this is the initial run (kept for compatibility)
     """
@@ -226,18 +222,14 @@ def update_zarr_store(initialRun):
     # Always load GFS
     gfs_path = os.path.join(save_dir, "GFS.zarr")
     if os.path.exists(gfs_path):
-        GFS_Zarr = zarr.open(
-            zarr.storage.LocalStore(gfs_path), mode="r"
-        )
+        GFS_Zarr = zarr.open(zarr.storage.LocalStore(gfs_path), mode="r")
         logger.info("Loaded GFS from: " + gfs_path)
 
     # Load ETOPO on initial run if enabled
     if (initialRun) and (use_etopo):
         etopo_path = os.path.join(save_dir, "ETOPO_DA_C.zarr")
         if os.path.exists(etopo_path):
-            ETOPO_f = zarr.open(
-                zarr.storage.LocalStore(etopo_path), mode="r"
-            )
+            ETOPO_f = zarr.open(zarr.storage.LocalStore(etopo_path), mode="r")
             logger.info("Loaded ETOPO from: " + etopo_path)
 
     # Open the Google ERA5 dataset for Dev and TimeMachine
@@ -257,26 +249,20 @@ def update_zarr_store(initialRun):
         # Load SubH
         subh_path = os.path.join(save_dir, "SubH.zarr")
         if os.path.exists(subh_path):
-            SubH_Zarr = zarr.open(
-                zarr.storage.LocalStore(subh_path), mode="r"
-            )
+            SubH_Zarr = zarr.open(zarr.storage.LocalStore(subh_path), mode="r")
             logger.info("Loaded SubH from: " + subh_path)
 
         # Load HRRR_6H
         hrrr_6h_path = os.path.join(save_dir, "HRRR_6H.zarr")
         if os.path.exists(hrrr_6h_path):
-            HRRR_6H_Zarr = zarr.open(
-                zarr.storage.LocalStore(hrrr_6h_path), mode="r"
-            )
+            HRRR_6H_Zarr = zarr.open(zarr.storage.LocalStore(hrrr_6h_path), mode="r")
             logger.info("Loaded HRRR_6H from: " + hrrr_6h_path)
 
         # Load ECMWF
         ecmwf_path = os.path.join(save_dir, "ECMWF.zarr")
         if os.path.exists(ecmwf_path):
             try:
-                ECMWF_Zarr = zarr.open(
-                    zarr.storage.LocalStore(ecmwf_path), mode="r"
-                )
+                ECMWF_Zarr = zarr.open(zarr.storage.LocalStore(ecmwf_path), mode="r")
                 logger.info("Loaded ECMWF from: " + ecmwf_path)
             except Exception as e:
                 logger.info(f"ECMWF not available: {e}")
@@ -285,33 +271,25 @@ def update_zarr_store(initialRun):
         # Load NBM
         nbm_path = os.path.join(save_dir, "NBM.zarr")
         if os.path.exists(nbm_path):
-            NBM_Zarr = zarr.open(
-                zarr.storage.LocalStore(nbm_path), mode="r"
-            )
+            NBM_Zarr = zarr.open(zarr.storage.LocalStore(nbm_path), mode="r")
             logger.info("Loaded NBM from: " + nbm_path)
 
         # Load NBM_Fire
         nbm_fire_path = os.path.join(save_dir, "NBM_Fire.zarr")
         if os.path.exists(nbm_fire_path):
-            NBM_Fire_Zarr = zarr.open(
-                zarr.storage.LocalStore(nbm_fire_path), mode="r"
-            )
+            NBM_Fire_Zarr = zarr.open(zarr.storage.LocalStore(nbm_fire_path), mode="r")
             logger.info("Loaded NBM_Fire from: " + nbm_fire_path)
 
         # Load GEFS
         gefs_path = os.path.join(save_dir, "GEFS.zarr")
         if os.path.exists(gefs_path):
-            GEFS_Zarr = zarr.open(
-                zarr.storage.LocalStore(gefs_path), mode="r"
-            )
+            GEFS_Zarr = zarr.open(zarr.storage.LocalStore(gefs_path), mode="r")
             logger.info("Loaded GEFS from: " + gefs_path)
 
         # Load HRRR
         hrrr_path = os.path.join(save_dir, "HRRR.zarr")
         if os.path.exists(hrrr_path):
-            HRRR_Zarr = zarr.open(
-                zarr.storage.LocalStore(hrrr_path), mode="r"
-            )
+            HRRR_Zarr = zarr.open(zarr.storage.LocalStore(hrrr_path), mode="r")
             logger.info("Loaded HRRR from: " + hrrr_path)
 
         # Load WMO_Alerts
@@ -325,9 +303,7 @@ def update_zarr_store(initialRun):
         # Load RTMA_RU
         rtma_ru_path = os.path.join(save_dir, "RTMA_RU.zarr")
         if os.path.exists(rtma_ru_path):
-            RTMA_RU_Zarr = zarr.open(
-                zarr.storage.LocalStore(rtma_ru_path), mode="r"
-            )
+            RTMA_RU_Zarr = zarr.open(zarr.storage.LocalStore(rtma_ru_path), mode="r")
             logger.info("Loaded RTMA_RU from: " + rtma_ru_path)
 
     logger.info("Zarr stores loaded")
@@ -6186,7 +6162,7 @@ if __name__ == "__main__":
 @app.on_event("startup")
 def initialDataLoad() -> None:
     """Load zarr stores on startup.
-    
+
     File syncing is now handled by a separate container.
     This just loads the zarr stores from their expected paths.
     """
@@ -6196,7 +6172,7 @@ def initialDataLoad() -> None:
     logger.info("Initial data load")
 
     STAGE = os.environ.get("STAGE", "PROD")
-    
+
     if STAGE in ("PROD", "DEV", "TIMEMACHINE"):
         update_zarr_store(True)
 
