@@ -376,7 +376,9 @@ def find_largest_integer_directory(parent_dir, key_string, initialRun):
         # Also remove the second largest to keep two largest directories
         if len(old_dirs) > 0:
             # Find and remove the second largest
-            second_largest = max(old_dirs, key=lambda x: float(x[-FILENAME_TIMESTAMP_SLICE_LENGTH:]))
+            second_largest = max(
+                old_dirs, key=lambda x: float(x[-FILENAME_TIMESTAMP_SLICE_LENGTH:])
+            )
             old_dirs.remove(second_largest)
 
     if (not initialRun) & (len(old_dirs) == 0):
