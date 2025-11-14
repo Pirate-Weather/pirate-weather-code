@@ -43,7 +43,7 @@ while true; do
     ZIP_LOCAL="${BASE_DIR}/${MODEL}.zarr.zip"
     STATE_FILE="${BASE_DIR}/${MODEL}.zarr.state"
 
-    
+
     # 1) Query remote info via rclone lsl (size, date, time, path)
     remote_info="$(rclone lsl "$REMOTE" 2>/dev/null || true)"
 
