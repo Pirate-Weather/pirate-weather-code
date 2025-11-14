@@ -373,6 +373,11 @@ def find_largest_integer_directory(parent_dir, key_string, initialRun):
     # Remove the latest dir from old_dirs
     if STAGE == "PROD":
         old_dirs.remove(largest_dir)
+        # Also remove the second largest to keep two largest directories
+        if len(old_dirs) > 0:
+            # Find and remove the second largest
+            second_largest = max(old_dirs, key=lambda x: float(x[-FILENAME_TIMESTAMP_SLICE_LENGTH:]))
+            old_dirs.remove(second_largest)
 
     if (not initialRun) & (len(old_dirs) == 0):
         largest_dir = None
