@@ -305,7 +305,6 @@ def download_if_newer(
             os.remove(local_lmdb_path + ".lock")
 
 
-
 logger = logging.getLogger("dataSync")
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()

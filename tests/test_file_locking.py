@@ -211,4 +211,3 @@ class TestFileLocking:
         assert result_container[0] == "timeout"
 
         t1.join()
-
