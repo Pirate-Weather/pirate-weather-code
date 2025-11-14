@@ -24,7 +24,7 @@ from typing import Union
 import metpy as mp
 import numpy as np
 import reverse_geocode
-import s3fs  # Used for TESTING/TM_TESTING stages
+import s3fs
 import xarray as xr
 import zarr
 from astral import LocationInfo, moon
@@ -588,6 +588,9 @@ def _interp_row(row: np.ndarray) -> np.ndarray:
 class WeatherParallel(object):
     """Helper class for parallel zarr reading operations."""
 
+    def __init__(self, loc_tag: str = "") -> None:
+        self.loc_tag = loc_tag
+
     async def zarr_read(self, model, opened_zarr, x, y):
         if TIMING:
             logger.debug(f"### {model} Reading!")
@@ -621,10 +624,10 @@ class WeatherParallel(object):
                 return data_out
 
             except Exception:
-                logger.exception("### %s Failure!", model)
+                logger.exception("### %s Failure! %s", model, self.loc_tag)
                 err_count += 1
 
-        logger.error("### %s Failure!", model)
+        logger.error("### %s Failure! %s", model, self.loc_tag)
         data_out = False
         return data_out
 
@@ -1024,6 +1027,9 @@ async def PW_Forecast(
         # logger.error('Invalid Latitude')
         raise HTTPException(status_code=400, detail="Invalid Latitude")
 
+    # Debug tag for logging with location
+    loc_tag = f"[loc={lat:.4f},{az_Lon:.4f}]"
+
     if len(locationReq) == 2:
         if STAGE == "TIMEMACHINE":
             raise HTTPException(status_code=400, detail="Missing Time Specification")
@@ -1311,7 +1317,7 @@ async def PW_Forecast(
         else:
             unitSystem = "us"
 
-    weather = WeatherParallel()
+    weather = WeatherParallel(loc_tag=loc_tag)
 
     zarrTasks = dict()
 
@@ -2073,7 +2079,7 @@ async def PW_Forecast(
                 ]
 
     except Exception:
-        logger.exception("HRRR or NBM data not available, falling back to GFS")
+        logger.exception("HRRR or NBM data not available, falling back to GFS %s", loc_tag)
         if "hrrr_18-48" in sourceTimes:
             sourceTimes.pop("hrrr_18-48", None)
         if "nbm_fire" in sourceTimes:
@@ -3987,7 +3993,7 @@ async def PW_Forecast(
                 hourItem["icon"] = hourIcon
 
         except Exception:
-            logger.exception("HOURLY TEXT GEN ERROR")
+            logger.exception("HOURLY TEXT GEN ERROR %s", loc_tag)
 
         if version < 2:
             hourItem.pop("liquidAccumulation", None)
@@ -4193,7 +4199,7 @@ async def PW_Forecast(
         )
     except Exception:
         # Fallback: preserve original inline logic if helper fails (shouldn't happen)
-        logger.exception("select_daily_precip_type error")
+        logger.exception("select_daily_precip_type error %s", loc_tag)
 
     # Process Day/Night data for output
     day_night_list = []
@@ -4465,7 +4471,7 @@ async def PW_Forecast(
                     day_item["summary"] = translation.translate(["sentence", dayText])
                     day_item["icon"] = dayIcon
         except Exception:
-            logger.exception("DAY HALF DAY TEXT GEN ERROR")
+            logger.exception("DAY HALF DAY TEXT GEN ERROR %s", loc_tag)
 
         if version < 2:
             day_item.pop("liquidAccumulation", None)
@@ -4528,7 +4534,7 @@ async def PW_Forecast(
                     day_item["summary"] = translation.translate(["sentence", dayText])
                     day_item["icon"] = dayIcon
         except Exception:
-            logger.exception("NIGHT HALF DAY TEXT GEN ERROR")
+            logger.exception("NIGHT HALF DAY TEXT GEN ERROR %s", loc_tag)
 
         if version < 2:
             day_item.pop("liquidAccumulation", None)
@@ -4710,7 +4716,7 @@ async def PW_Forecast(
                     dayObject["summary"] = translation.translate(["sentence", dayText])
                     dayObject["icon"] = dayIcon
         except Exception:
-            logger.exception("DAILY TEXT GEN ERROR")
+            logger.exception("DAILY TEXT GEN ERROR %s", loc_tag)
 
         if version < 2:
             dayObject.pop("dawnTime", None)
@@ -4846,7 +4852,7 @@ async def PW_Forecast(
                     alertList.append(dict(alertDict))
 
     except Exception:
-        logger.exception("An Alert error occurred")
+        logger.exception("An Alert error occurred %s", loc_tag)
 
     # Process WMO alerts for non-US locations
     try:
@@ -4897,7 +4903,7 @@ async def PW_Forecast(
                 alertList.append(dict(wmo_alertDict))
 
     except Exception:
-        logger.exception("A WMO Alert error occurred")
+        logger.exception("A WMO Alert error occurred %s", loc_tag)
 
     # Timing Check
     if TIMING:
@@ -5916,7 +5922,7 @@ async def PW_Forecast(
                 )
                 returnOBJ["currently"]["icon"] = currentIcon
         except Exception:
-            logger.exception("CURRENTLY TEXT GEN ERROR")
+            logger.exception("CURRENTLY TEXT GEN ERROR %s", loc_tag)
 
         if version < 2:
             returnOBJ["currently"].pop("smoke", None)
@@ -5976,7 +5982,7 @@ async def PW_Forecast(
                 ]
 
         except Exception:
-            logger.exception("MINUTELY TEXT GEN ERROR")
+            logger.exception("MINUTELY TEXT GEN ERROR %s", loc_tag)
             returnOBJ["minutely"]["summary"] = pTypesText[
                 int(Counter(maxPchance).most_common(1)[0][0])
             ]
@@ -6014,7 +6020,7 @@ async def PW_Forecast(
                     )
 
             except Exception:
-                logger.exception("TEXT GEN ERROR")
+                logger.exception("TEXT GEN ERROR %s", loc_tag)
                 returnOBJ["hourly"]["summary"] = max(
                     set(hourTextList), key=hourTextList.count
                 )
@@ -6089,7 +6095,7 @@ async def PW_Forecast(
                     )
 
             except Exception:
-                logger.exception("DAILY SUMMARY TEXT GEN ERROR")
+                logger.exception("DAILY SUMMARY TEXT GEN ERROR %s", loc_tag)
                 returnOBJ["daily"]["summary"] = max(
                     set(dayTextList), key=dayTextList.count
                 )
