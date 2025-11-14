@@ -249,7 +249,6 @@ def test_daily_thunderstorms_joined_with_precipitation():
         hours=hours,
         is_day_time=True,
         time_zone="UTC",
-        curr_time=1609459200,
         mode="daily",
         icon_set="darksky",
     )
@@ -328,7 +327,6 @@ def test_daily_thunderstorms_not_joined_with_precipitation():
         hours=hours,
         is_day_time=True,
         time_zone="UTC",
-        curr_time=1609459200,
         mode="daily",
         icon_set="darksky",
     )
@@ -406,7 +404,6 @@ def test_24hour_thunderstorms_starting_later():
         hours=hours,
         is_day_time=True,
         time_zone="UTC",
-        curr_time=1609470000,
         mode="hour",  # 24-hour mode
         icon_set="darksky",
     )
@@ -568,7 +565,6 @@ def test_daily_uses_max_cape_with_precipitation():
         hours=hours,
         is_day_time=True,
         time_zone="UTC",
-        curr_time=1609459200,
         mode="daily",
         icon_set="darksky",
     )
@@ -616,7 +612,6 @@ def test_thunderstorms_dont_combine_with_humidity():
         hours=hours,
         is_day_time=True,
         time_zone="UTC",
-        curr_time=1609459200,
         mode="daily",
         icon_set="darksky",
     )
@@ -662,7 +657,6 @@ def test_humidity_still_combines_without_thunderstorms():
         hours=hours,
         is_day_time=True,
         time_zone="UTC",
-        curr_time=1609459200,
         mode="daily",
         icon_set="darksky",
     )
