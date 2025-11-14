@@ -12,7 +12,8 @@
             "args": [
                 "API.responseLocal:app",
                 "--host", "0.0.0.0",
-                "--port", "8081"
+                "--port", "8081",
+                "--workers", "5",
             ],
             "jinja": true,
             "python": "/home/ubuntu/PirateResponse/bin/python3.13",

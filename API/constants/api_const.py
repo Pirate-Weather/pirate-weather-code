@@ -85,7 +85,7 @@ PRECIP_NOISE_THRESHOLD_MMH = (
 
 # API versioning and ingest version constants
 # Version scheme is: Major.Minor.Patch
-API_VERSION = "V2.8.1"
+API_VERSION = "V2.8.2"
 
 # Command priorities
 NICE_PRIORITY = 20
@@ -100,6 +100,92 @@ LARGEST_DIR_INIT = -1
 TEMPERATURE_UNITS_THRESH = {"c": 0, "f": 32}
 TEMP_THRESHOLD_RAIN_C = 274.15
 TEMP_THRESHOLD_SNOW_C = 272.15
+
+# Zarr read retry constants
+MAX_ZARR_READ_RETRIES = 4
+
+# Grouped coordinate constants
+COORDINATE_CONST = {
+    "longitude_min": -180,
+    "longitude_max": 360,
+    "latitude_min": -90,
+    "latitude_max": 90,
+    "longitude_offset": 180,
+}
+
+# Grouped time machine constants
+TIME_MACHINE_CONST = {
+    "threshold_hours": 25,
+    "very_negative_threshold": -100000,
+}
+
+# Filename constants
+FILENAME_TIMESTAMP_SLICE_LENGTH = 12
+
+# Grouped unit conversion constants
+UNIT_CONVERSION_CONST = {
+    "seconds_to_minutes": 60,
+    "hours_to_minutes": 60,
+    "seconds_to_hours": 3600,
+    "longitude_to_hours": 15,
+}
+
+# Grouped Etopo resolution constants
+ETOPO_CONST = {
+    "lat_resolution": 0.01666667,
+    "lon_resolution": 0.01666667,
+}
+
+# Grouped Lambert projection constants
+LAMBERT_CONST = {
+    "pi_factor": 0.25,
+    "half_pi_factor": 0.5,
+}
+
+# Grouped DBZ conversion constants
+DBZ_CONVERSION_CONST = {
+    "divisor": 10.0,
+    "min_value": 0.0,
+    "exponent": 1.0,
+}
+
+# Grouped conversion factor constants
+CONVERSION_FACTORS = {
+    "humidity_percentage": 100.0,
+    "pressure_to_hpa": 100,
+    "cloud_cover_percentage": 0.01,
+    "joules_to_watts": 3600,
+    "ozone_to_dobson": 46696,
+}
+
+# Grouped RTMA_RU visibility constants
+RTMA_RU_VIS_CONST = {
+    "max_threshold": 15999,
+    "converted_value": 16090,
+}
+
+# Grouped UV index constants
+UV_INDEX_CONST = {
+    "gfs_factor": 18.9,
+    "gfs_multiplier": 0.025,
+    "era5_factor": 40,
+    "era5_multiplier": 0.0025,
+}
+
+# Default rounding interval (minutes)
+DEFAULT_ROUNDING_INTERVAL = 60
+
+# Grouped solar calculation constants
+SOLAR_CALC_CONST = {
+    "day_of_year_base": 284,
+    "degrees_per_year": 360,
+    "days_per_year": 365,
+    "hour_factor": 15,
+    "hour_offset": 12,
+}
+
+# WBGT temperature units
+WBGT_PERCENTAGE_DIVISOR = 100.0
 
 # Define rounding rules for all numeric fields
 ROUNDING_RULES = {

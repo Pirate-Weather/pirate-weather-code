@@ -28,7 +28,7 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
-    interp_time_block,
+    interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
     validate_grib_stats,
@@ -48,26 +48,24 @@ def rounder(t):
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup paths and parameters
-ingestVersion = INGEST_VERSION_STR
+ingest_version = INGEST_VERSION_STR
 
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
 
 forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/home/ubuntu/Weather/NBM_Fire"
+    "forecast_process_dir", default="/mnt/nvme/data/NBM_Fire"
 )
 forecast_process_path = forecast_process_dir + "/NBM_Fire_Process"
 hist_process_path = forecast_process_dir + "/NBM_Fire_Historic"
-tmpDIR = forecast_process_dir + "/Downloads"
+tmp_dir = forecast_process_dir + "/Downloads"
 
-forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/NBM_Fire")
-historic_path = os.getenv(
-    "historic_path", default="/home/ubuntu/Weather/History/NBM_Fire"
-)
+forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/NBM_Fire")
+historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/NBM_Fire")
 
 
-saveType = os.getenv("save_type", default="Download")
+save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
@@ -75,12 +73,12 @@ s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
 
 # Define the processing and history chunk size
-processChunk = CHUNK_SIZES["NBM_Fire"]
+process_chunk = CHUNK_SIZES["NBM_Fire"]
 
 # Define the final x/y chunksize
-finalChunk = FINAL_CHUNK_SIZES["NBM_Fire"]
+final_chunk = FINAL_CHUNK_SIZES["NBM_Fire"]
 
-hisPeriod = HISTORY_PERIODS["NBM_Fire"]
+his_period = HISTORY_PERIODS["NBM_Fire"]
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -90,12 +88,12 @@ else:
     shutil.rmtree(forecast_process_dir)
     os.makedirs(forecast_process_dir)
 
-if not os.path.exists(tmpDIR):
-    os.makedirs(tmpDIR)
+if not os.path.exists(tmp_dir):
+    os.makedirs(tmp_dir)
 
-if saveType == "Download":
-    if not os.path.exists(forecast_path + "/" + ingestVersion):
-        os.makedirs(forecast_path + "/" + ingestVersion)
+if save_type == "Download":
+    if not os.path.exists(forecast_path + "/" + ingest_version):
+        os.makedirs(forecast_path + "/" + ingest_version)
     if not os.path.exists(historic_path):
         os.makedirs(historic_path)
 
@@ -133,7 +131,7 @@ while base_time is False:
         product="co",
         verbose=False,
         priority=["aws", "nomdas"],
-        save_dir=tmpDIR,
+        save_dir=tmp_dir,
     )
     if latestRuns.grib:
         base_time = most_recent_time
@@ -152,11 +150,11 @@ while base_time is False:
 print(base_time)
 
 # Check if this is newer than the current file
-if saveType == "S3":
+if save_type == "S3":
     # Check if the file exists and load it
-    if s3.exists(forecast_path + "/" + ingestVersion + "/NBM_Fire.time.pickle"):
+    if s3.exists(forecast_path + "/" + ingest_version + "/NBM_Fire.time.pickle"):
         with s3.open(
-            forecast_path + "/" + ingestVersion + "/NBM_Fire.time.pickle", "rb"
+            forecast_path + "/" + ingest_version + "/NBM_Fire.time.pickle", "rb"
         ) as f:
             previous_base_time = pickle.load(f)
 
@@ -166,10 +164,10 @@ if saveType == "S3":
             sys.exit()
 
 else:
-    if os.path.exists(forecast_path + "/" + ingestVersion + "/NBM_Fire.time.pickle"):
+    if os.path.exists(forecast_path + "/" + ingest_version + "/NBM_Fire.time.pickle"):
         # Open the file in binary mode
         with open(
-            forecast_path + "/" + ingestVersion + "/NBM_Fire.time.pickle", "rb"
+            forecast_path + "/" + ingest_version + "/NBM_Fire.time.pickle", "rb"
         ) as file:
             # Deserialize and retrieve the variable from the file
             previous_base_time = pickle.load(file)
@@ -179,7 +177,7 @@ else:
             print("No Update to NBM_Fire, ending")
             sys.exit()
 
-zarrVars = ("time", "FOSINDX_surface")
+zarr_vars = ("time", "FOSINDX_surface")
 
 #####################################################################################################
 # %% Download forecast data using Herbie Latest
@@ -191,7 +189,7 @@ nbm_range = FORECAST_LEAD_RANGES["NBM_FIRE"]
 matchstring_su = ":FOSINDX:"
 
 # Merge matchstrings for download
-matchStrings = matchstring_su
+match_strings = matchstring_su
 
 
 # Create a range of forecast lead times
@@ -204,60 +202,60 @@ FH_forecastsub = FastHerbie(
     product="co",
     verbose=False,
     priority=["aws", "nomads"],
-    save_dir=tmpDIR,
+    save_dir=tmp_dir,
 )
 
-FH_forecastsub.download(matchStrings, verbose=False)
+FH_forecastsub.download(match_strings, verbose=False)
 
 # Create list of downloaded grib files
 try:
-    gribList = [
-        str(Path(x.get_localFilePath(matchStrings)).expand())
+    grib_list = [
+        str(Path(x.get_localFilePath(match_strings)).expand())
         for x in FH_forecastsub.file_exists
     ]
 except Exception:
     print("Download Failure 1, wait 20 seconds and retry")
     time.sleep(20)
-    FH_forecastsub.download(matchStrings, verbose=False)
+    FH_forecastsub.download(match_strings, verbose=False)
     try:
-        gribList = [
-            str(Path(x.get_localFilePath(matchStrings)).expand())
+        grib_list = [
+            str(Path(x.get_localFilePath(match_strings)).expand())
             for x in FH_forecastsub.file_exists
         ]
     except Exception:
         print("Download Failure 2, wait 20 seconds and retry")
         time.sleep(20)
-        FH_forecastsub.download(matchStrings, verbose=False)
+        FH_forecastsub.download(match_strings, verbose=False)
         try:
-            gribList = [
-                str(Path(x.get_localFilePath(matchStrings)).expand())
+            grib_list = [
+                str(Path(x.get_localFilePath(match_strings)).expand())
                 for x in FH_forecastsub.file_exists
             ]
         except Exception:
             print("Download Failure 3, wait 20 seconds and retry")
             time.sleep(20)
-            FH_forecastsub.download(matchStrings, verbose=False)
+            FH_forecastsub.download(match_strings, verbose=False)
             try:
-                gribList = [
-                    str(Path(x.get_localFilePath(matchStrings)).expand())
+                grib_list = [
+                    str(Path(x.get_localFilePath(match_strings)).expand())
                     for x in FH_forecastsub.file_exists
                 ]
             except Exception:
                 print("Download Failure 4, wait 20 seconds and retry")
                 time.sleep(20)
-                FH_forecastsub.download(matchStrings, verbose=False)
+                FH_forecastsub.download(match_strings, verbose=False)
                 try:
-                    gribList = [
-                        str(Path(x.get_localFilePath(matchStrings)).expand())
+                    grib_list = [
+                        str(Path(x.get_localFilePath(match_strings)).expand())
                         for x in FH_forecastsub.file_exists
                     ]
                 except Exception:
                     print("Download Failure 5, wait 20 seconds and retry")
                     time.sleep(20)
-                    FH_forecastsub.download(matchStrings, verbose=False)
+                    FH_forecastsub.download(match_strings, verbose=False)
                     try:
-                        gribList = [
-                            str(Path(x.get_localFilePath(matchStrings)).expand())
+                        grib_list = [
+                            str(Path(x.get_localFilePath(match_strings)).expand())
                             for x in FH_forecastsub.file_exists
                         ]
                     except Exception:
@@ -276,18 +274,18 @@ if len(FH_forecastsub.file_exists) != len(nbm_range):
 
 
 # Perform a check if any data seems to be invalid
-cmd = "cat " + " ".join(gribList) + " | " + f"{wgrib2_path}" + "- -s -stats"
+cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
-validate_grib_stats(gribCheck)
+validate_grib_stats(grib_check)
 print("Grib files passed validation, proceeding with processing")
 
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
 cmd = (
     "cat "
-    + " ".join(gribList)
+    + " ".join(grib_list)
     + " | "
     + f"{wgrib2_path}"
     + " - "
@@ -296,13 +294,13 @@ cmd = (
     + "_wgrib2_merged.grib2"
 )
 # Run wgrib2
-spOUT = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-if spOUT.returncode != 0:
-    print(spOUT.stderr)
+sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+if sp_out.returncode != 0:
+    print(sp_out.stderr)
     sys.exit()
 
 # Check output from wgrib2
-# print(spOUT.stdout)
+# print(sp_out.stdout)
 
 # Use wgrib2 to change the order
 cmd2 = (
@@ -355,13 +353,13 @@ assert len(xarray_forecast_base.time) == len(nbm_range), (
 start = xarray_forecast_base.time.min().values
 end = xarray_forecast_base.time.max().values
 new_hourly_time = pd.date_range(
-    start=start - pd.Timedelta(hisPeriod, "h"), end=end, freq="h"
+    start=start - pd.Timedelta(his_period, "h"), end=end, freq="h"
 )
 
 stacked_times = np.concatenate(
     (
         pd.date_range(
-            start=start - pd.Timedelta(hisPeriod, "h"),
+            start=start - pd.Timedelta(his_period, "h"),
             end=start - pd.Timedelta(1, "h"),
             freq="6h",
         ),
@@ -383,14 +381,14 @@ xarray_forecast_base = xarray_forecast_base.drop_vars(
 # Combine NetCDF files into a Dask Array, since it works significantly better than the xarray mfdataset appraoach
 # Note: don't chunk on loading since we don't know how wgrib2 chunked the files. Intead, read the variable into memory and chunk later
 with dask.config.set(**{"array.slicing.split_large_chunks": True}):
-    for dask_var in zarrVars:
+    for dask_var in zarr_vars:
         daskArray = da.from_array(
             nc.Dataset(forecast_process_path + "_wgrib2_merged.nc")[dask_var], lock=True
         )
 
         # Rechunk
         daskArray = daskArray.rechunk(
-            chunks=(len(nbm_range), processChunk, processChunk)
+            chunks=(len(nbm_range), process_chunk, process_chunk)
         )
 
         # Save merged and processed xarray dataset to disk using zarr with compression
@@ -424,11 +422,11 @@ print(T0 - T1)
 # Loop through the runs and check if they have already been processed to s3
 
 # Hourly Runs- hisperiod to 1, since the 0th hour run is needed (ends up being basetime -1H since using the 1h forecast)
-for i in range(hisPeriod, 1, -6):
+for i in range(his_period, 1, -6):
     # Define the path to save the zarr dataset with the run time in the filename
     # format the time following iso8601
 
-    if saveType == "S3":
+    if save_type == "S3":
         s3_path = (
             historic_path
             + "/NBM_Fire_Hist"
@@ -447,7 +445,7 @@ for i in range(hisPeriod, 1, -6):
                         "secret": aws_secret_access_key,
                     },
                 )
-                zarr.open(hisCheckStore)[zarrVars[-1]][-1, -1, -1]
+                zarr.open(hisCheckStore)[zarr_vars[-1]][-1, -1, -1]
                 continue  # If it exists, skip to the next iteration
             except Exception:
                 print("### Historic Data Failure!")
@@ -494,31 +492,31 @@ for i in range(hisPeriod, 1, -6):
         product="co",
         verbose=False,
         priority=["aws", "nomads"],
-        save_dir=tmpDIR,
+        save_dir=tmp_dir,
     )
 
     # Main Vars + Accum
     # Download the subsets
-    FH_histsub.download(matchStrings, verbose=False)
+    FH_histsub.download(match_strings, verbose=False)
 
     # Perform a check if any data seems to be invalid
     cmd = (
         f"{wgrib2_path}"
         + " "
-        + str(FH_histsub.file_exists[0].get_localFilePath(matchStrings))
+        + str(FH_histsub.file_exists[0].get_localFilePath(match_strings))
         + " -s -stats"
     )
 
-    gribCheck = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
-    validate_grib_stats(gribCheck)
+    validate_grib_stats(grib_check)
     print("Grib files passed validation, proceeding with processing")
 
     # Use wgrib2 to change the order
     cmd1 = (
         f"{wgrib2_path}"
         + "  "
-        + str(FH_histsub.file_exists[0].get_localFilePath(matchStrings))
+        + str(FH_histsub.file_exists[0].get_localFilePath(match_strings))
         + " -ijsmall_grib "
         + " 1:2345 1:1597 "
         + hist_process_path
@@ -551,7 +549,7 @@ for i in range(hisPeriod, 1, -6):
     # Save merged and processed xarray dataset to disk using zarr
     # No chunking since only one time step
     # Save as Zarr to s3 for Time Machine
-    if saveType == "S3":
+    if save_type == "S3":
         zarrStore = zarr.storage.FsspecStore.from_url(
             s3_path,
             storage_options={
@@ -574,7 +572,7 @@ for i in range(hisPeriod, 1, -6):
     # os.remove(hist_process_path + '_ncTemp.nc')
 
     # Save a done file to s3 to indicate that the historic data has been processed
-    if saveType == "S3":
+    if save_type == "S3":
         done_file = s3_path.replace(".zarr", ".done")
         s3.touch(done_file)
     else:
@@ -592,7 +590,7 @@ ncLocalWorking_paths = [
     + "/NBM_Fire_Hist"
     + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
     + ".zarr"
-    for i in range(hisPeriod, 1, -6)
+    for i in range(his_period, 1, -6)
 ]
 
 # Dask Setup
@@ -600,9 +598,9 @@ daskInterpArrays = []
 daskVarArrays = []
 daskVarArrayList = []
 
-for daskVarIDX, dask_var in enumerate(zarrVars[:]):
+for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
     for local_ncpath in ncLocalWorking_paths:
-        if saveType == "S3":
+        if save_type == "S3":
             daskVarArrays.append(
                 da.from_zarr(
                     local_ncpath,
@@ -641,7 +639,7 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
                 np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
                 (1, 1597, 2345),
             )
-        ).rechunk((len(stacked_timesUnix), processChunk, processChunk))
+        ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
 
         daskVarArrayList.append(daskArrayOut)
 
@@ -650,7 +648,7 @@ for daskVarIDX, dask_var in enumerate(zarrVars[:]):
 
         daskVarArrayList.append(
             daskArrayOut[:, :, :]
-            .rechunk((len(stacked_timesUnix), processChunk, processChunk))
+            .rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
             .astype("float32")
         )
 
@@ -676,11 +674,9 @@ daskVarArrayListMergeNaN.to_zarr(
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
-# Add padding to the zarr store for main forecast chunking
-daskVarArrayStackDisk_main = pad_to_chunk_size(daskVarArrayStackDisk, finalChunk)
 
 # Create a zarr backed dask array
-if saveType == "S3":
+if save_type == "S3":
     zarr_store = zarr.storage.ZipStore(
         forecast_process_dir + "/NBM_Fire.zarr.zip", mode="a", compression=0
     )
@@ -688,47 +684,50 @@ if saveType == "S3":
 else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/NBM_Fire.zarr")
 
+
+# 1. Interpolate the stacked array to be hourly along the time axis
+# 2. Pad to chunk size
+# 3. Create the zarr array
+# 4. Rechunk it to match the final array
+# 5. Write it out to the zarr array
+
+# with ProgressBar():
+# 1. Interpolate the stacked array to be hourly along the time axis
+daskVarArrayStackDiskInterp = interp_time_take_blend(
+    daskVarArrayStackDisk,
+    stacked_timesUnix=stacked_timesUnix,
+    hourly_timesUnix=hourly_timesUnix,
+    dtype="float32",
+    fill_value=np.nan,
+)
+
+# 2. Pad to chunk size
+daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+    daskVarArrayStackDiskInterp, final_chunk
+)
+
+# 3. Create the zarr array
 zarr_array = zarr.create_array(
     store=zarr_store,
     shape=(
-        len(zarrVars),
+        len(zarr_vars),
         len(hourly_timesUnix),
-        daskVarArrayStackDisk_main.shape[2],
-        daskVarArrayStackDisk_main.shape[3],
+        daskVarArrayStackDiskInterpPad.shape[2],
+        daskVarArrayStackDiskInterpPad.shape[3],
     ),
-    chunks=(len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk),
+    chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
     compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
     dtype="float32",
 )
 
-# Precompute the two neighbor‐indices and the weights
-x_a = np.array(stacked_timesUnix)
-x_b = np.array(hourly_timesUnix)
-
-idx = np.searchsorted(x_a, x_b) - 1
-idx0 = np.clip(idx, 0, len(x_a) - 2)
-idx1 = idx0 + 1
-w = (x_b - x_a[idx0]) / (x_a[idx1] - x_a[idx0])  # float array, shape (T_new,)
-
-# boolean mask of “in‐range” points
-valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
-
-# with ProgressBar():
-da.map_blocks(
-    interp_time_block,
-    daskVarArrayStackDisk,
-    idx0,
-    idx1,
-    w,
-    valid,
-    dtype="float32",
-    chunks=(1, len(hourly_timesUnix), processChunk, processChunk),
-).round(3).rechunk(
-    (len(zarrVars), len(hourly_timesUnix), finalChunk, finalChunk)
+# 4. Rechunk it to match the final array
+# 5. Write it out to the zarr array
+daskVarArrayStackDiskInterpPad.round(5).rechunk(
+    (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
 ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
-if saveType == "S3":
+if save_type == "S3":
     zarr_store.close()
 
 # Test Read
@@ -736,11 +735,11 @@ if saveType == "S3":
 # testZarr = zarr.open_array(zarr_store_test)
 # print(testZarr[:,:,100,100])
 
-if saveType == "S3":
+if save_type == "S3":
     # Upload to S3
     s3.put_file(
         forecast_process_dir + "/NBM_Fire.zarr.zip",
-        forecast_path + "/" + ingestVersion + "/NBM_Fire.zarr.zip",
+        forecast_path + "/" + ingest_version + "/NBM_Fire.zarr.zip",
     )
 
     # Write most recent forecast time
@@ -750,7 +749,7 @@ if saveType == "S3":
 
     s3.put_file(
         forecast_process_dir + "/NBM_Fire.time.pickle",
-        forecast_path + "/" + ingestVersion + "/NBM_Fire.time.pickle",
+        forecast_path + "/" + ingest_version + "/NBM_Fire.time.pickle",
     )
 else:
     # Write most recent forecast time
@@ -760,13 +759,13 @@ else:
 
     shutil.move(
         forecast_process_dir + "/NBM_Fire.time.pickle",
-        forecast_path + "/" + ingestVersion + "/NBM_Fire.time.pickle",
+        forecast_path + "/" + ingest_version + "/NBM_Fire.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
         forecast_process_dir + "/NBM_Fire.zarr",
-        forecast_path + "/" + ingestVersion + "/NBM_Fire.zarr",
+        forecast_path + "/" + ingest_version + "/NBM_Fire.zarr",
         dirs_exist_ok=True,
     )
 

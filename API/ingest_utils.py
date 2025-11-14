@@ -4,6 +4,7 @@
 import re
 import sys
 import time
+from typing import Iterable, Optional, Union
 
 import cartopy.crs as ccrs
 import dask.array as da
@@ -76,99 +77,6 @@ def mask_invalid_refc(xrArr: "xr.DataArray") -> "xr.DataArray":
         The masked xarray DataArray.
     """
     return xrArr.where(xrArr >= REFC_THRESHOLD, 0)
-
-
-def _start_stop(sl):
-    # Robust to (start, stop) tuples OR slice objects
-    if isinstance(sl, slice):
-        return sl.start, sl.stop
-    return sl  # assume (start, stop)
-
-
-# Linear interpolation of time blocks in a dask array
-def interp_time_block(
-    y_block, idx0, idx1, w, valid, nearest_idx=None, nearest_var=None, block_info=None
-):
-    """Linearly interpolate a time block within a dask-chunked 4D array.
-
-    This helper is designed to be used with dask.map_blocks to resample the time
-    dimension of a chunked array by linearly blending between two source time
-    slices. It supports an optional nearest-neighbor override for a specific
-    variable index (useful for non-continuous variables like precipitation type).
-
-    Parameters
-    ----------
-    y_block : np.ndarray
-        Chunk of the source array with shape ``(Vb, T_old, Yb, Xb)`` where:
-        - Vb: number of variables in this chunk (typically 1 when chunked on V)
-        - T_old: number of source time steps in this chunk
-        - Yb, Xb: spatial chunk sizes.
-    idx0, idx1 : np.ndarray (int64), shape (T_new,)
-        Indices into the source time axis ``T_old`` for the lower (floor) and
-        upper (ceil) neighbor used for interpolation of each target time step.
-    w : np.ndarray (float32/float64), shape (T_new,)
-        Interpolation weights in [0, 1] corresponding to the upper neighbor.
-        The output is computed as ``(1 - w) * y[idx0] + w * y[idx1]``.
-    valid : np.ndarray (bool), shape (T_new,)
-        Mask indicating which target time steps are within the original source
-        time range. Any target step where ``valid == False`` will be set to the
-        missing-data sentinel ``MISSING_DATA``.
-    nearest_idx : np.ndarray (int64), shape (T_new,), optional
-        For variables that should not be linearly interpolated, this provides a
-        nearest-neighbor index into ``T_old`` for each target time step. Only
-        used when ``nearest_var`` is provided and this block corresponds to that
-        variable.
-    nearest_var : int, optional
-        The global variable index along the V axis for which the nearest-neighbor
-        override should be applied. Requires that the V dimension is chunked with
-        size 1 (``chunks=(1, ...)``) so that each block contains a single
-        variable.
-    block_info : dict, optional
-        Dask ``block_info`` dictionary provided to ``map_blocks``. Used to
-        determine the global variable index of this block and decide whether to
-        apply the nearest-neighbor override.
-
-    Returns
-    -------
-    np.ndarray
-        Interpolated array with shape ``(Vb, T_new, Yb, Xb)`` where values
-        outside the valid source time range are set to ``MISSING_DATA``.
-
-    Notes
-    -----
-    - This function assumes the first axis is the variable axis and that it is
-      chunked with size 1 when using the nearest-neighbor override.
-    - The interpolation is purely along the time axis; spatial dimensions are
-      untouched aside from broadcasting the weights.
-    """
-    # 1) pull out the two knot‐time slices
-    y0 = y_block[:, idx0, ...]  # → (Vb, T_new, Yb, Xb)
-    y1 = y_block[:, idx1, ...]
-
-    # 2) build the broadcastable weights
-    w_r = w[None, :, None, None]
-    omw_r = (1 - w)[None, :, None, None]
-
-    # 3) linear blend
-    y_interp = omw_r * y0 + w_r * y1
-
-    # Optional nearest override
-    if nearest_var is not None and block_info is not None:
-        # block_info[0] corresponds to the first array argument (y_block)
-        # 'array-location' is a tuple of slices, one per axis (V, T, Y, X)
-        v_start, v_stop = _start_stop(block_info[0]["array-location"][0])
-
-        if v_start in nearest_var:  # only true for the single var in this block
-            y_interp[0, ...] = y_block[0, nearest_idx, ...]
-
-    # 4) zero‐out (or NaN‐out) anything outside the original time range
-    #    here we choose NaN so it’s clear these were out-of-range
-    if not np.all(valid):
-        # valid==False where x_b is outside [x_a[0], x_a[-1]]
-        inv = ~valid
-        y_interp[:, inv, :, :] = MISSING_DATA
-
-    return y_interp
 
 
 # Function to get the list of GRIB files from the forecast subscription, used by NBM
@@ -347,3 +255,92 @@ def earth_relative_wind_components(
     )
 
     return ut, vt
+
+
+def interp_time_take_blend(
+    arr: da.Array,
+    stacked_timesUnix: np.ndarray,
+    hourly_timesUnix: np.ndarray,
+    nearest_vars: Optional[Union[int, Iterable[int]]] = None,  # var indices using NN
+    dtype: str = "float32",
+    fill_value: float = np.nan,
+    time_axis: int = 1,
+) -> da.Array:
+    """
+    Interpolate along `time_axis` of a 4D array (V, T, Y, X) using gather+blend,
+    with optional nearest-neighbor override for selected variable indices.
+
+    Returns a Dask array with shape (V, T_new, Y, X) and dtype `dtype`.
+    """
+    if arr.ndim != 4:
+        raise ValueError("Expected arr with dims (V, T, Y, X).")
+
+    VAX, TAX = 0, time_axis
+    if TAX != 1:
+        raise NotImplementedError("This helper assumes time_axis == 1 for (V,T,Y,X).")
+
+    # Precompute the two neighbor‐indices and the weights
+    x_a = np.array(stacked_timesUnix)
+    x_b = np.array(hourly_timesUnix)
+
+    idx = np.searchsorted(x_a, x_b) - 1
+    idx0 = np.clip(idx, 0, len(x_a) - 2)
+    idx1 = idx0 + 1
+    w = (x_b - x_a[idx0]) / (x_a[idx1] - x_a[idx0])  # float array, shape (T_new,)
+
+    # boolean mask of “in‐range” points
+    valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
+
+    T_new = int(len(idx0))
+    if not (len(idx1) == T_new and len(w) == T_new and len(valid) == T_new):
+        raise ValueError("idx0, idx1, w, and valid must all have length T_new.")
+
+    # Ensure time is one chunk so gather (`da.take`) stays within chunk boundaries
+    arr_t = arr.rechunk({TAX: -1})
+
+    # Gather neighbors along time
+    y0 = da.take(arr_t, idx0, axis=TAX)  # (V, T_new, Y, X)
+    y1 = da.take(arr_t, idx1, axis=TAX)
+
+    # Weighted blend
+    w_r = da.asarray(w, chunks=(T_new,))[None, :, None, None]
+    out = (1 - w_r) * y0 + w_r * y1
+    out = out.astype(dtype, copy=False)
+
+    # Mask invalid new times
+    if (~valid).any():
+        valid_r = da.asarray(valid, chunks=(T_new,))[None, :, None, None]
+        out = da.where(valid_r, out, fill_value)
+
+    # Optional nearest-neighbor override for specified variable indices
+    if nearest_vars is not None:
+        # Precompute nearest indices once: closer of idx0 / idx1
+        nearest_idx = np.where(w < 0.5, idx0, idx1).astype(idx0.dtype)
+
+        # Normalize indices as a sorted, unique list
+        if isinstance(nearest_vars, int):
+            nearest_vars = [nearest_vars]
+        nv = sorted(set(int(i) for i in nearest_vars))
+
+        # Compute nearest only for needed variables (cheap if few vars)
+        # Shape of each nearest slice: (1, T_new, Y, X)
+        take_nn = da.take(arr_t, nearest_idx, axis=TAX)
+        # Replace in 'out' per variable index
+        pieces = []
+        prev = 0
+        for i in nv:
+            if i < 0 or i >= arr.shape[VAX]:
+                raise IndexError(
+                    f"nearest_vars index {i} out of range for V={arr.shape[VAX]}"
+                )
+            if i > prev:
+                pieces.append(out[prev:i])  # unchanged segment
+            pieces.append(
+                take_nn[i : i + 1].astype(dtype, copy=False)
+            )  # nearest segment
+            prev = i + 1
+        if prev < arr.shape[VAX]:
+            pieces.append(out[prev:])
+        out = da.concatenate(pieces, axis=VAX)
+
+    return out
