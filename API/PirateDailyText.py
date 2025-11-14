@@ -728,7 +728,6 @@ def calculate_day_text(
     hours,
     is_day_time,
     time_zone,
-    curr_time,
     mode="daily",
     icon_set="darksky",
     unit_system="si",
@@ -746,7 +745,6 @@ def calculate_day_text(
     - hours (list): An array of hourly forecast data (in SI units).
     - is_day_time (bool): Whether it's currently daytime.
     - time_zone (str): The timezone for the current location.
-    - curr_time (int): The current epoch time.
     - mode (str, optional): Which mode to run the function in ("daily" or "hour"). Defaults to "daily".
     - icon_set (str): Which icon set to use - Dark Sky or Pirate Weather
     - unit_system (str): Unit system for display ("us", "si", "ca", "uk")

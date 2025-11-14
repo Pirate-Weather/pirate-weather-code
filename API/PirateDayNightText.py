@@ -305,7 +305,6 @@ def calculate_half_day_text(
     hours,
     is_day_time,
     time_zone,
-    curr_time,
     mode="daily",
     icon_set="darksky",
     unit_system="si",

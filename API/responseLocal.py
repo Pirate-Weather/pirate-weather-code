@@ -13,32 +13,24 @@ import logging
 # Standard library imports
 import math
 import os
-import pickle
 import platform
 import re
-import shutil
-import subprocess
 import sys
 import threading
-import time
 from collections import Counter
 from typing import Union
 
 # Third-party imports
-import boto3
 import metpy as mp
 import numpy as np
 import reverse_geocode
-import s3fs
+import s3fs  # Used for TESTING/TM_TESTING stages
 import xarray as xr
 import zarr
 from astral import LocationInfo, moon
 from astral.sun import sun
-from boto3.s3.transfer import TransferConfig
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import ORJSONResponse
-from fastapi_utils.tasks import repeat_every
-from filelock import FileLock
 from metpy.calc import relative_humidity_from_dewpoint
 from pirateweather_translations.dynamic_loader import load_all_translations
 from pytz import timezone, utc
@@ -163,7 +155,6 @@ from API.PirateTextHelper import estimate_snow_height
 from API.PirateWeeklyText import calculate_weekly_text
 from API.ZarrHelpers import (
     _add_custom_header,
-    _retry_s3_operation,
     init_ERA5,
     setup_testing_zipstore,
 )
@@ -172,19 +163,19 @@ Translations = load_all_translations()
 
 lock = threading.Lock()
 
+# Keep these for TESTING/TM_TESTING stages that still use S3
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
-pw_api_key = os.environ.get("PW_API", "")
-save_type = os.getenv("save_type", default="S3")
-save_dir = os.getenv("save_dir", default="/tmp")
 s3_bucket = os.getenv("s3_bucket", default="piratezarr2")
+ingest_version = INGEST_VERSION_STR
+save_type = os.getenv("save_type", default="S3")
+
+pw_api_key = os.environ.get("PW_API", "")
+save_dir = os.getenv("save_dir", default="/tmp")
 use_etopo = os.getenv("use_etopo", default=True)
 TIMING = os.environ.get("TIMING", False)
 
 force_now = os.getenv("force_now", default=False)
-
-# Version code for ingest files
-ingest_version = INGEST_VERSION_STR
 
 
 def setup_logging():
@@ -198,114 +189,7 @@ def setup_logging():
     root.addHandler(handler)
 
 
-def download_if_newer(
-    s3_bucket, s3_object_key, local_file_path, local_lmdb_path, initialDownload
-):
-    """Download a file from S3 if it's newer than the local version.
-
-    Uses file locking to ensure only one worker downloads at a time when running
-    with multiple gunicorn/uvicorn workers.
-
-    Args:
-        s3_bucket: S3 bucket name or local path
-        s3_object_key: S3 object key or local file path
-        local_file_path: Path to download the file to
-        local_lmdb_path: Path for the final lmdb file
-        initialDownload: Whether this is the initial download (affects transfer config)
-    """
-    # Use file lock to ensure only one worker downloads at a time
-    lock_file = local_file_path + ".download.lock"
-    lock = FileLock(lock_file, timeout=300)  # 5 minute timeout
-
-    with lock:
-        if initialDownload:
-            config = TransferConfig(use_threads=True, max_bandwidth=None)
-        else:
-            config = TransferConfig(use_threads=False, max_bandwidth=S3_MAX_BANDWIDTH)
-
-        # Initialize the S3 client
-        if save_type == "S3":
-            s3_client = boto3.client(
-                "s3",
-                aws_access_key_id=aws_access_key_id,
-                aws_secret_access_key=aws_secret_access_key,
-            )
-
-            # Get the last modified timestamp of the S3 object
-            # Use retry logic to handle rate limiting
-            s3_response = _retry_s3_operation(
-                lambda: s3_client.head_object(Bucket=s3_bucket, Key=s3_object_key)
-            )
-            s3_last_modified = s3_response["LastModified"].timestamp()
-        else:
-            # If saved locally, get the last modified timestamp of the local file
-            s3_last_modified = os.path.getmtime(s3_bucket + "/" + s3_object_key)
-
-        new_file = False
-
-        # Check if the local file exists
-        # Read pickle with last modified time
-        if os.path.exists(local_file_path + ".modtime.pickle"):
-            # Open the file in binary mode
-            with open(local_file_path + ".modtime.pickle", "rb") as file:
-                # Deserialize and retrieve the variable from the file
-                local_last_modified = pickle.load(file)
-
-            # Compare timestamps and download if the S3 object is more recent
-            if s3_last_modified > local_last_modified:
-                # Download the file
-                if save_type == "S3":
-                    _retry_s3_operation(
-                        lambda: s3_client.download_file(
-                            s3_bucket, s3_object_key, local_file_path, Config=config
-                        )
-                    )
-                else:
-                    # Copy the local file over
-                    shutil.copy(s3_bucket + "/" + s3_object_key, local_file_path)
-
-                new_file = True
-                with open(local_file_path + ".modtime.pickle", "wb") as file:
-                    # Serialize and write the variable to the file
-                    pickle.dump(s3_last_modified, file)
-
-            else:
-                (f"{s3_object_key} is already up to date.")
-
-        else:
-            # Download the file
-            if save_type == "S3":
-                _retry_s3_operation(
-                    lambda: s3_client.download_file(
-                        s3_bucket, s3_object_key, local_file_path, Config=config
-                    )
-                )
-            else:
-                # Otherwise copy local file
-                shutil.copy(s3_bucket + "/" + s3_object_key, local_file_path)
-
-            with open(local_file_path + ".modtime.pickle", "wb") as file:
-                # Serialize and write the variable to the file
-                pickle.dump(s3_last_modified, file)
-
-            new_file = True
-            # Untar the file
-            # shutil.unpack_archive(local_file_path, extract_path, 'tar')
-
-        if new_file:
-            # Write a file to show an update is in progress, do not reload
-            with open(local_lmdb_path + ".lock", "w"):
-                pass
-
-            # Rename
-            shutil.move(local_file_path, local_lmdb_path + "_" + str(s3_last_modified))
-
-            # ZipZarr.close()
-            # os.remove(local_file_path)
-            os.remove(local_lmdb_path + ".lock")
-
-
-logger = logging.getLogger("dataSync")
+logger = logging.getLogger("pirate-weather-api")
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -313,81 +197,15 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
-def delete_old_directory(parent_dir, old_dir):
-    """Delete an old directory with file locking to prevent race conditions.
-
-    Uses file locking to ensure only one worker deletes directories at a time
-    when running with multiple gunicorn/uvicorn workers.
-
-    Args:
-        parent_dir: Parent directory containing the directory to delete
-        old_dir: Name of the directory to delete
-    """
-    # Use file lock to ensure only one worker deletes at a time
-    lock_file = os.path.join(parent_dir, ".delete.lock")
-    lock = FileLock(lock_file, timeout=300)  # 5 minute timeout
-
-    with lock:
-        dir_path = os.path.join(parent_dir, old_dir)
-        # Check if directory still exists (another worker might have deleted it)
-        if os.path.exists(dir_path):
-            logger.info("Removing old: " + old_dir)
-            command = f"nice -n {NICE_PRIORITY} rm -rf {dir_path}"
-            subprocess.run(command, shell=True)
-
-
-def find_largest_integer_directory(parent_dir, key_string, initialRun):
-    """Find the directory with the largest integer timestamp suffix.
-
-    Args:
-        parent_dir: Parent directory to search in
-        key_string: String to filter directory names
-        initialRun: Whether this is the initial run
-
-    Returns:
-        tuple: (largest_dir, old_dirs) - the newest directory and list of older ones
-    """
-    largest_value = LARGEST_DIR_INIT
-    largest_dir = None
-    old_dirs = []
-
-    STAGE = os.environ.get("STAGE", "PROD")
-
-    for entry in os.listdir(parent_dir):
-        # entry_path = os.path.join(parent_dir, entry)
-        if (key_string in entry) & ("TMP" not in entry):
-            old_dirs.append(entry)
-            try:
-                # Extract the integer value from the directory name
-                value = float(
-                    entry[-FILENAME_TIMESTAMP_SLICE_LENGTH:]
-                )  # This is a filename timestamp slice
-
-                if value > largest_value:
-                    largest_value = value
-                    largest_dir = entry
-            except ValueError:
-                # If the directory name is not an integer, skip it
-                continue
-
-    # Remove the latest dir from old_dirs
-    if STAGE == "PROD":
-        old_dirs.remove(largest_dir)
-        # Also remove the second largest to keep two largest directories
-        if len(old_dirs) > 0:
-            # Find and remove the second largest
-            second_largest = max(
-                old_dirs, key=lambda x: float(x[-FILENAME_TIMESTAMP_SLICE_LENGTH:])
-            )
-            old_dirs.remove(second_largest)
-
-    if (not initialRun) & (len(old_dirs) == 0):
-        largest_dir = None
-
-    return largest_dir, old_dirs
-
-
 def update_zarr_store(initialRun):
+    """Load zarr data stores from static file paths.
+    
+    File syncing and download is now handled by a separate container.
+    This function simply opens the zarr stores at their expected paths.
+    
+    Args:
+        initialRun: Whether this is the initial run (kept for compatibility)
+    """
     global ETOPO_f
     global SubH_Zarr
     global HRRR_6H_Zarr
@@ -405,29 +223,22 @@ def update_zarr_store(initialRun):
     # Get Stage
     STAGE = os.environ.get("STAGE", "PROD")
 
-    # Create empty dir
-    os.makedirs(save_dir + "/empty", exist_ok=True)
-
     # Always load GFS
-    latest_GFS, old_GFS = find_largest_integer_directory(
-        save_dir, "GFS.zarr", initialRun
-    )
-    if latest_GFS is not None:
+    gfs_path = os.path.join(save_dir, "GFS.zarr")
+    if os.path.exists(gfs_path):
         GFS_Zarr = zarr.open(
-            zarr.storage.ZipStore(save_dir + "/" + latest_GFS, mode="r"), mode="r"
+            zarr.storage.LocalStore(gfs_path), mode="r"
         )
-        logger.info("Loading new: " + latest_GFS)
-    for old_dir in old_GFS:
-        if STAGE == "PROD":
-            delete_old_directory(save_dir, old_dir)
+        logger.info("Loaded GFS from: " + gfs_path)
 
+    # Load ETOPO on initial run if enabled
     if (initialRun) and (use_etopo):
-        latest_ETOPO, old_ETOPO = find_largest_integer_directory(
-            save_dir, "ETOPO_DA_C.zarr", initialRun
-        )
-        ETOPO_f = zarr.open(
-            zarr.storage.ZipStore(save_dir + "/" + latest_ETOPO, mode="r"), mode="r"
-        )
+        etopo_path = os.path.join(save_dir, "ETOPO_DA_C.zarr")
+        if os.path.exists(etopo_path):
+            ETOPO_f = zarr.open(
+                zarr.storage.LocalStore(etopo_path), mode="r"
+            )
+            logger.info("Loaded ETOPO from: " + etopo_path)
 
     # Open the Google ERA5 dataset for Dev and TimeMachine
     if STAGE in ("DEV", "TIMEMACHINE"):
@@ -435,137 +246,91 @@ def update_zarr_store(initialRun):
 
     # Don't open the other files in TimeMachine to reduce memory
     if STAGE in ("DEV", "PROD"):
-        # Find the latest file that's ready
-        latest_Alert, old_Alert = find_largest_integer_directory(
-            save_dir, "NWS_Alerts.zarr", initialRun
-        )
-        if latest_Alert is not None:
+        # Load NWS Alerts
+        nws_alerts_path = os.path.join(save_dir, "NWS_Alerts.zarr")
+        if os.path.exists(nws_alerts_path):
             NWS_Alerts_Zarr = zarr.open(
-                zarr.storage.ZipStore(save_dir + "/" + latest_Alert, mode="r"), mode="r"
+                zarr.storage.LocalStore(nws_alerts_path), mode="r"
             )
-            logger.info("Loading new: " + latest_Alert)
-        for old_dir in old_Alert:
-            if STAGE == "PROD":
-                delete_old_directory(save_dir, old_dir)
+            logger.info("Loaded NWS_Alerts from: " + nws_alerts_path)
 
-        latest_SubH, old_SubH = find_largest_integer_directory(
-            save_dir, "SubH.zarr", initialRun
-        )
-        if latest_SubH is not None:
+        # Load SubH
+        subh_path = os.path.join(save_dir, "SubH.zarr")
+        if os.path.exists(subh_path):
             SubH_Zarr = zarr.open(
-                zarr.storage.ZipStore(save_dir + "/" + latest_SubH, mode="r"), mode="r"
+                zarr.storage.LocalStore(subh_path), mode="r"
             )
-            logger.info("Loading new: " + latest_SubH)
-        for old_dir in old_SubH:
-            if STAGE == "PROD":
-                delete_old_directory(save_dir, old_dir)
+            logger.info("Loaded SubH from: " + subh_path)
 
-        latest_HRRR_6H, old_HRRR_6H = find_largest_integer_directory(
-            save_dir, "HRRR_6H.zarr", initialRun
-        )
-        if latest_HRRR_6H is not None:
+        # Load HRRR_6H
+        hrrr_6h_path = os.path.join(save_dir, "HRRR_6H.zarr")
+        if os.path.exists(hrrr_6h_path):
             HRRR_6H_Zarr = zarr.open(
-                zarr.storage.ZipStore(save_dir + "/" + latest_HRRR_6H, mode="r"),
-                mode="r",
+                zarr.storage.LocalStore(hrrr_6h_path), mode="r"
             )
-            logger.info("Loading new: " + latest_HRRR_6H)
-        for old_dir in old_HRRR_6H:
-            if STAGE == "PROD":
-                delete_old_directory(save_dir, old_dir)
+            logger.info("Loaded HRRR_6H from: " + hrrr_6h_path)
 
-        latest_ECMWF, old_ECMWF = find_largest_integer_directory(
-            save_dir, "ECMWF.zarr", initialRun
-        )
-        if latest_ECMWF is not None:
+        # Load ECMWF
+        ecmwf_path = os.path.join(save_dir, "ECMWF.zarr")
+        if os.path.exists(ecmwf_path):
             try:
                 ECMWF_Zarr = zarr.open(
-                    zarr.storage.ZipStore(save_dir + "/" + latest_ECMWF, mode="r"),
-                    mode="r",
+                    zarr.storage.LocalStore(ecmwf_path), mode="r"
                 )
-                logger.info("Loading new: " + latest_ECMWF)
+                logger.info("Loaded ECMWF from: " + ecmwf_path)
             except Exception as e:
                 logger.info(f"ECMWF not available: {e}")
                 ECMWF_Zarr = None
-        for old_dir in old_ECMWF:
-            if STAGE == "PROD":
-                delete_old_directory(save_dir, old_dir)
 
-        latest_NBM, old_NBM = find_largest_integer_directory(
-            save_dir, "NBM.zarr", initialRun
-        )
-        if latest_NBM is not None:
+        # Load NBM
+        nbm_path = os.path.join(save_dir, "NBM.zarr")
+        if os.path.exists(nbm_path):
             NBM_Zarr = zarr.open(
-                zarr.storage.ZipStore(save_dir + "/" + latest_NBM, mode="r"), mode="r"
+                zarr.storage.LocalStore(nbm_path), mode="r"
             )
-            logger.info("Loading new: " + latest_NBM)
-        for old_dir in old_NBM:
-            if STAGE == "PROD":
-                delete_old_directory(save_dir, old_dir)
+            logger.info("Loaded NBM from: " + nbm_path)
 
-        latest_NBM_Fire, old_NBM_Fire = find_largest_integer_directory(
-            save_dir, "NBM_Fire.zarr", initialRun
-        )
-        if latest_NBM_Fire is not None:
+        # Load NBM_Fire
+        nbm_fire_path = os.path.join(save_dir, "NBM_Fire.zarr")
+        if os.path.exists(nbm_fire_path):
             NBM_Fire_Zarr = zarr.open(
-                zarr.storage.ZipStore(save_dir + "/" + latest_NBM_Fire, mode="r"),
-                mode="r",
+                zarr.storage.LocalStore(nbm_fire_path), mode="r"
             )
-            logger.info("Loading new: " + latest_NBM_Fire)
-        for old_dir in old_NBM_Fire:
-            if STAGE == "PROD":
-                delete_old_directory(save_dir, old_dir)
+            logger.info("Loaded NBM_Fire from: " + nbm_fire_path)
 
-        latest_GEFS, old_GEFS = find_largest_integer_directory(
-            save_dir, "GEFS.zarr", initialRun
-        )
-        if latest_GEFS is not None:
+        # Load GEFS
+        gefs_path = os.path.join(save_dir, "GEFS.zarr")
+        if os.path.exists(gefs_path):
             GEFS_Zarr = zarr.open(
-                zarr.storage.ZipStore(save_dir + "/" + latest_GEFS, mode="r"), mode="r"
+                zarr.storage.LocalStore(gefs_path), mode="r"
             )
-            logger.info("Loading new: " + latest_GEFS)
-        for old_dir in old_GEFS:
-            if STAGE == "PROD":
-                delete_old_directory(save_dir, old_dir)
+            logger.info("Loaded GEFS from: " + gefs_path)
 
-        latest_HRRR, old_HRRR = find_largest_integer_directory(
-            save_dir, "HRRR.zarr", initialRun
-        )
-        if latest_HRRR is not None:
+        # Load HRRR
+        hrrr_path = os.path.join(save_dir, "HRRR.zarr")
+        if os.path.exists(hrrr_path):
             HRRR_Zarr = zarr.open(
-                zarr.storage.ZipStore(save_dir + "/" + latest_HRRR, mode="r"), mode="r"
+                zarr.storage.LocalStore(hrrr_path), mode="r"
             )
-            logger.info("Loading new: " + latest_HRRR)
-        for old_dir in old_HRRR:
-            if STAGE == "PROD":
-                delete_old_directory(save_dir, old_dir)
+            logger.info("Loaded HRRR from: " + hrrr_path)
 
-        latest_WMO_Alerts, old_WMO_Alerts = find_largest_integer_directory(
-            save_dir, "WMO_Alerts.zarr", initialRun
-        )
-        if latest_WMO_Alerts is not None:
+        # Load WMO_Alerts
+        wmo_alerts_path = os.path.join(save_dir, "WMO_Alerts.zarr")
+        if os.path.exists(wmo_alerts_path):
             WMO_Alerts_Zarr = zarr.open(
-                zarr.storage.ZipStore(save_dir + "/" + latest_WMO_Alerts, mode="r"),
-                mode="r",
+                zarr.storage.LocalStore(wmo_alerts_path), mode="r"
             )
-            logger.info("Loading new: " + latest_WMO_Alerts)
-        for old_dir in old_WMO_Alerts:
-            if STAGE == "PROD":
-                delete_old_directory(save_dir, old_dir)
+            logger.info("Loaded WMO_Alerts from: " + wmo_alerts_path)
 
-        latest_RTMA_RU, old_RTMA_RU = find_largest_integer_directory(
-            save_dir, "RTMA_RU.zarr", initialRun
-        )
-        if latest_RTMA_RU is not None:
+        # Load RTMA_RU
+        rtma_ru_path = os.path.join(save_dir, "RTMA_RU.zarr")
+        if os.path.exists(rtma_ru_path):
             RTMA_RU_Zarr = zarr.open(
-                zarr.storage.ZipStore(save_dir + "/" + latest_RTMA_RU, mode="r"),
-                mode="r",
+                zarr.storage.LocalStore(rtma_ru_path), mode="r"
             )
-            logger.info("Loading new: " + latest_RTMA_RU)
-        for old_dir in old_RTMA_RU:
-            if STAGE == "PROD":
-                delete_old_directory(save_dir, old_dir)
+            logger.info("Loaded RTMA_RU from: " + rtma_ru_path)
 
-    logger.info("Refreshed Zarrs")
+    logger.info("Zarr stores loaded")
 
 
 setup_logging()
@@ -4715,7 +4480,6 @@ async def PW_Forecast(
                     hourList_si[(idx * 24) + 4 : (idx * 24) + 17],
                     not is_all_night,
                     str(tz_name),
-                    int(time.time()),
                     icon_set=icon,
                     unit_system=unitSystem,
                 )
@@ -4779,7 +4543,6 @@ async def PW_Forecast(
                     hourList_si[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
                     is_all_day,
                     str(tz_name),
-                    int(time.time()),
                     icon_set=icon,
                     unit_system=unitSystem,
                 )
@@ -4961,7 +4724,6 @@ async def PW_Forecast(
                     hourList_si[((idx) * 24) + 4 : ((idx + 1) * 24) + 4],
                     not is_all_night,
                     str(tz_name),
-                    int(time.time()),
                     "day",
                     icon,
                     unitSystem,
@@ -6258,7 +6020,6 @@ async def PW_Forecast(
                     hourList_si[base_time_offset_int : base_time_offset_int + 24],
                     not is_all_night,
                     str(tz_name),
-                    int(time.time()),
                     "hour",
                     icon,
                     unitSystem,
@@ -6423,257 +6184,25 @@ if __name__ == "__main__":
 
 
 @app.on_event("startup")
-def initialDataSync() -> None:
+def initialDataLoad() -> None:
+    """Load zarr stores on startup.
+    
+    File syncing is now handled by a separate container.
+    This just loads the zarr stores from their expected paths.
+    """
     global zarrReady
 
     zarrReady = False
-    logger.info("Initial Download")
+    logger.info("Initial data load")
 
     STAGE = os.environ.get("STAGE", "PROD")
-    if STAGE == "PROD":
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/" + ingest_version + "/SubH.zarr.zip",
-            save_dir + "/SubH_TMP.zarr.zip",
-            save_dir + "/SubH.zarr.prod.zip",
-            True,
-        )
-        logger.info("SubH Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/" + ingest_version + "/HRRR_6H.zarr.zip",
-            save_dir + "/HRRR_6H_TMP.zarr.zip",
-            save_dir + "/HRRR_6H.zarr.prod.zip",
-            True,
-        )
-        logger.info("HRRR_6H Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/" + ingest_version + "/GFS.zarr.zip",
-            save_dir + "/GFS.zarr_TMP.zip",
-            save_dir + "/GFS.zarr.prod.zip",
-            True,
-        )
-        logger.info("GFS Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/" + ingest_version + "/ECMWF.zarr.zip",
-            save_dir + "/ECMWF_TMP.zarr.zip",
-            save_dir + "/ECMWF.zarr.prod.zip",
-            True,
-        )
-        logger.info("ECMWF Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/" + ingest_version + "/NBM.zarr.zip",
-            save_dir + "/NBM.zarr_TMP.zip",
-            save_dir + "/NBM.zarr.prod.zip",
-            True,
-        )
-        logger.info("NBM Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/" + ingest_version + "/NBM_Fire.zarr.zip",
-            save_dir + "/NBM_Fire_TMP.zarr.zip",
-            save_dir + "/NBM_Fire.zarr.prod.zip",
-            True,
-        )
-        logger.info("NBM_Fire Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/" + ingest_version + "/GEFS.zarr.zip",
-            save_dir + "/GEFS_TMP.zarr.zip",
-            save_dir + "/GEFS.zarr.prod.zip",
-            True,
-        )
-        logger.info("GEFS  Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/" + ingest_version + "/HRRR.zarr.zip",
-            save_dir + "/HRRR_TMP.zarr.zip",
-            save_dir + "/HRRR.zarr.prod.zip",
-            True,
-        )
-        logger.info("HRRR  Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/" + ingest_version + "/NWS_Alerts.zarr.zip",
-            save_dir + "/NWS_Alerts_TMP.zarr.zip",
-            save_dir + "/NWS_Alerts.zarr.prod.zip",
-            True,
-        )
-        logger.info("Alerts Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/" + ingest_version + "/WMO_Alerts.zarr.zip",
-            save_dir + "/WMO_Alerts_TMP.zarr.zip",
-            save_dir + "/WMO_Alerts.zarr.prod.zip",
-            True,
-        )
-        logger.info("WMO Alerts Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/" + ingest_version + "/RTMA_RU.zarr.zip",
-            save_dir + "/RTMA_RU_TMP.zarr.zip",
-            save_dir + "/RTMA_RU.zarr.prod.zip",
-            True,
-        )
-        logger.info("RTMA_RU Download!")
-        download_if_newer(
-            s3_bucket,
-            "ForecastTar_v2/" + ingest_version + "/ECMWF.zarr.zip",
-            save_dir + "/ECMWF_TMP.zarr.zip",
-            save_dir + "/ECMWF.zarr.prod.zip",
-            True,
-        )
-        logger.info("ECMWF Download!")
-
-        if use_etopo:
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/" + ingest_version + "/ETOPO_DA_C.zarr.zip",
-                save_dir + "/ETOPO_DA_C_TMP.zarr.zip",
-                save_dir + "/ETOPO_DA_C.zarr.prod.zip",
-                True,
-            )
-            logger.info("ETOPO Download!")
-    else:
-        logger.info(STAGE)
+    
     if STAGE in ("PROD", "DEV", "TIMEMACHINE"):
         update_zarr_store(True)
 
     zarrReady = True
 
-    logger.info("Initial Download End!")
-
-
-@app.on_event("startup")
-@repeat_every(seconds=60 * 5, logger=logger)  # 5 Minute
-def dataSync() -> None:
-    global zarrReady
-
-    logger.info(zarrReady)
-
-    STAGE = os.environ.get("STAGE", "PROD")
-
-    if zarrReady:
-        if STAGE == "PROD":
-            time.sleep(20)
-            logger.info("Starting Update")
-
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/" + ingest_version + "/SubH.zarr.zip",
-                save_dir + "/SubH_TMP.zarr.zip",
-                save_dir + "/SubH.zarr.prod.zip",
-                False,
-            )
-            logger.info("SubH Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/" + ingest_version + "/HRRR_6H.zarr.zip",
-                save_dir + "/HRRR_6H_TMP.zarr.zip",
-                save_dir + "/HRRR_6H.zarr.prod.zip",
-                False,
-            )
-            logger.info("HRRR_6H Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/" + ingest_version + "/GFS.zarr.zip",
-                save_dir + "/GFS_TMP.zarr.zip",
-                save_dir + "/GFS.zarr.prod.zip",
-                False,
-            )
-            logger.info("GFS Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/" + ingest_version + "/ECMWF.zarr.zip",
-                save_dir + "/ECMWF_TMP.zarr.zip",
-                save_dir + "/ECMWF.zarr.prod.zip",
-                False,
-            )
-            logger.info("ECMWF Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/" + ingest_version + "/NBM.zarr.zip",
-                save_dir + "/NBM_TMP.zarr.zip",
-                save_dir + "/NBM.zarr.prod.zip",
-                False,
-            )
-            logger.info("NBM Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/" + ingest_version + "/NBM_Fire.zarr.zip",
-                save_dir + "/NBM_Fire_TMP.zarr.zip",
-                save_dir + "/NBM_Fire.zarr.prod.zip",
-                False,
-            )
-            logger.info("NBM_Fire Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/" + ingest_version + "/GEFS.zarr.zip",
-                save_dir + "/GEFS_TMP.zarr.zip",
-                save_dir + "/GEFS.zarr.prod.zip",
-                False,
-            )
-            logger.info("GEFS  Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/" + ingest_version + "/HRRR.zarr.zip",
-                save_dir + "/HRRR_TMP.zarr.zip",
-                save_dir + "/HRRR.zarr.prod.zip",
-                False,
-            )
-            logger.info("HRRR  Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/" + ingest_version + "/NWS_Alerts.zarr.zip",
-                save_dir + "/NWS_Alerts_TMP.zarr.zip",
-                save_dir + "/NWS_Alerts.zarr.prod.zip",
-                False,
-            )
-            logger.info("Alerts Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/" + ingest_version + "/WMO_Alerts.zarr.zip",
-                save_dir + "/WMO_Alerts_TMP.zarr.zip",
-                save_dir + "/WMO_Alerts.zarr.prod.zip",
-                False,
-            )
-            logger.info("Alerts Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/" + ingest_version + "/RTMA_RU.zarr.zip",
-                save_dir + "/RTMA_RU_TMP.zarr.zip",
-                save_dir + "/RTMA_RU.zarr.prod.zip",
-                False,
-            )
-            logger.info("RTMA_RU Download!")
-            download_if_newer(
-                s3_bucket,
-                "ForecastTar_v2/" + ingest_version + "/ECMWF.zarr.zip",
-                save_dir + "/ECMWF_TMP.zarr.zip",
-                save_dir + "/ECMWF.zarr.prod.zip",
-                False,
-            )
-            logger.info("ECMWF Download!")
-
-            if use_etopo:
-                download_if_newer(
-                    s3_bucket,
-                    "ForecastTar_v2/" + ingest_version + "/ETOPO_DA_C.zarr.zip",
-                    save_dir + "/ETOPO_DA_C_TMP.zarr.zip",
-                    save_dir + "/ETOPO_DA_C.zarr.prod.zip",
-                    False,
-                )
-                logger.info("ETOPO Download!")
-        else:
-            print(STAGE)
-
-        if STAGE in ("PROD", "DEV", "TIMEMACHINE"):
-            update_zarr_store(False)
-
-    logger.info("Sync End!")
+    logger.info("Initial data load complete")
 
 
 def nearest_index(a, v):
