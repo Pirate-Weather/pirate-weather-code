@@ -48,7 +48,7 @@ def test_half_day_clear_day_icon_and_summary():
     ]
 
     icon, summary = calculate_half_day_text(
-        hours, True, "UTC",  mode="hour", icon_set="darksky"
+        hours, True, "UTC", mode="hour", icon_set="darksky"
     )
 
     assert icon == "clear-day"
