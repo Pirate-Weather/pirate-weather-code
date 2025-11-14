@@ -38,6 +38,7 @@ from boto3.s3.transfer import TransferConfig
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import ORJSONResponse
 from fastapi_utils.tasks import repeat_every
+from filelock import FileLock
 from metpy.calc import relative_humidity_from_dewpoint
 from pirateweather_translations.dynamic_loader import load_all_translations
 from pytz import timezone, utc
@@ -202,6 +203,9 @@ def download_if_newer(
 ):
     """Download a file from S3 if it's newer than the local version.
 
+    Uses file locking to ensure only one worker downloads at a time when running
+    with multiple gunicorn/uvicorn workers.
+
     Args:
         s3_bucket: S3 bucket name or local path
         s3_object_key: S3 object key or local file path
@@ -209,41 +213,66 @@ def download_if_newer(
         local_lmdb_path: Path for the final lmdb file
         initialDownload: Whether this is the initial download (affects transfer config)
     """
-    if initialDownload:
-        config = TransferConfig(use_threads=True, max_bandwidth=None)
-    else:
-        config = TransferConfig(use_threads=False, max_bandwidth=S3_MAX_BANDWIDTH)
+    # Use file lock to ensure only one worker downloads at a time
+    lock_file = local_file_path + ".download.lock"
+    lock = FileLock(lock_file, timeout=300)  # 5 minute timeout
 
-    # Initialize the S3 client
-    if save_type == "S3":
-        s3_client = boto3.client(
-            "s3",
-            aws_access_key_id=aws_access_key_id,
-            aws_secret_access_key=aws_secret_access_key,
-        )
+    with lock:
+        if initialDownload:
+            config = TransferConfig(use_threads=True, max_bandwidth=None)
+        else:
+            config = TransferConfig(use_threads=False, max_bandwidth=S3_MAX_BANDWIDTH)
 
-        # Get the last modified timestamp of the S3 object
-        # Use retry logic to handle rate limiting
-        s3_response = _retry_s3_operation(
-            lambda: s3_client.head_object(Bucket=s3_bucket, Key=s3_object_key)
-        )
-        s3_last_modified = s3_response["LastModified"].timestamp()
-    else:
-        # If saved locally, get the last modified timestamp of the local file
-        s3_last_modified = os.path.getmtime(s3_bucket + "/" + s3_object_key)
+        # Initialize the S3 client
+        if save_type == "S3":
+            s3_client = boto3.client(
+                "s3",
+                aws_access_key_id=aws_access_key_id,
+                aws_secret_access_key=aws_secret_access_key,
+            )
 
-    new_file = False
+            # Get the last modified timestamp of the S3 object
+            # Use retry logic to handle rate limiting
+            s3_response = _retry_s3_operation(
+                lambda: s3_client.head_object(Bucket=s3_bucket, Key=s3_object_key)
+            )
+            s3_last_modified = s3_response["LastModified"].timestamp()
+        else:
+            # If saved locally, get the last modified timestamp of the local file
+            s3_last_modified = os.path.getmtime(s3_bucket + "/" + s3_object_key)
 
-    # Check if the local file exists
-    # Read pickle with last modified time
-    if os.path.exists(local_file_path + ".modtime.pickle"):
-        # Open the file in binary mode
-        with open(local_file_path + ".modtime.pickle", "rb") as file:
-            # Deserialize and retrieve the variable from the file
-            local_last_modified = pickle.load(file)
+        new_file = False
 
-        # Compare timestamps and download if the S3 object is more recent
-        if s3_last_modified > local_last_modified:
+        # Check if the local file exists
+        # Read pickle with last modified time
+        if os.path.exists(local_file_path + ".modtime.pickle"):
+            # Open the file in binary mode
+            with open(local_file_path + ".modtime.pickle", "rb") as file:
+                # Deserialize and retrieve the variable from the file
+                local_last_modified = pickle.load(file)
+
+            # Compare timestamps and download if the S3 object is more recent
+            if s3_last_modified > local_last_modified:
+                # Download the file
+                if save_type == "S3":
+                    _retry_s3_operation(
+                        lambda: s3_client.download_file(
+                            s3_bucket, s3_object_key, local_file_path, Config=config
+                        )
+                    )
+                else:
+                    # Copy the local file over
+                    shutil.copy(s3_bucket + "/" + s3_object_key, local_file_path)
+
+                new_file = True
+                with open(local_file_path + ".modtime.pickle", "wb") as file:
+                    # Serialize and write the variable to the file
+                    pickle.dump(s3_last_modified, file)
+
+            else:
+                (f"{s3_object_key} is already up to date.")
+
+        else:
             # Download the file
             if save_type == "S3":
                 _retry_s3_operation(
@@ -252,48 +281,29 @@ def download_if_newer(
                     )
                 )
             else:
-                # Copy the local file over
+                # Otherwise copy local file
                 shutil.copy(s3_bucket + "/" + s3_object_key, local_file_path)
 
-            new_file = True
             with open(local_file_path + ".modtime.pickle", "wb") as file:
                 # Serialize and write the variable to the file
                 pickle.dump(s3_last_modified, file)
 
-        else:
-            (f"{s3_object_key} is already up to date.")
+            new_file = True
+            # Untar the file
+            # shutil.unpack_archive(local_file_path, extract_path, 'tar')
 
-    else:
-        # Download the file
-        if save_type == "S3":
-            _retry_s3_operation(
-                lambda: s3_client.download_file(
-                    s3_bucket, s3_object_key, local_file_path, Config=config
-                )
-            )
-        else:
-            # Otherwise copy local file
-            shutil.copy(s3_bucket + "/" + s3_object_key, local_file_path)
+        if new_file:
+            # Write a file to show an update is in progress, do not reload
+            with open(local_lmdb_path + ".lock", "w"):
+                pass
 
-        with open(local_file_path + ".modtime.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(s3_last_modified, file)
+            # Rename
+            shutil.move(local_file_path, local_lmdb_path + "_" + str(s3_last_modified))
 
-        new_file = True
-        # Untar the file
-        # shutil.unpack_archive(local_file_path, extract_path, 'tar')
+            # ZipZarr.close()
+            # os.remove(local_file_path)
+            os.remove(local_lmdb_path + ".lock")
 
-    if new_file:
-        # Write a file to show an update is in progress, do not reload
-        with open(local_lmdb_path + ".lock", "w"):
-            pass
-
-        # Rename
-        shutil.move(local_file_path, local_lmdb_path + "_" + str(s3_last_modified))
-
-        # ZipZarr.close()
-        # os.remove(local_file_path)
-        os.remove(local_lmdb_path + ".lock")
 
 
 logger = logging.getLogger("dataSync")
@@ -302,6 +312,29 @@ handler = logging.StreamHandler()
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 handler.setFormatter(formatter)
 logger.addHandler(handler)
+
+
+def delete_old_directory(parent_dir, old_dir):
+    """Delete an old directory with file locking to prevent race conditions.
+
+    Uses file locking to ensure only one worker deletes directories at a time
+    when running with multiple gunicorn/uvicorn workers.
+
+    Args:
+        parent_dir: Parent directory containing the directory to delete
+        old_dir: Name of the directory to delete
+    """
+    # Use file lock to ensure only one worker deletes at a time
+    lock_file = os.path.join(parent_dir, ".delete.lock")
+    lock = FileLock(lock_file, timeout=300)  # 5 minute timeout
+
+    with lock:
+        dir_path = os.path.join(parent_dir, old_dir)
+        # Check if directory still exists (another worker might have deleted it)
+        if os.path.exists(dir_path):
+            logger.info("Removing old: " + old_dir)
+            command = f"nice -n {NICE_PRIORITY} rm -rf {dir_path}"
+            subprocess.run(command, shell=True)
 
 
 def find_largest_integer_directory(parent_dir, key_string, initialRun):
@@ -380,9 +413,7 @@ def update_zarr_store(initialRun):
         logger.info("Loading new: " + latest_GFS)
     for old_dir in old_GFS:
         if STAGE == "PROD":
-            logger.info("Removing old: " + old_dir)
-            command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
-            subprocess.run(command, shell=True)
+            delete_old_directory(save_dir, old_dir)
 
     if (initialRun) and (use_etopo):
         latest_ETOPO, old_ETOPO = find_largest_integer_directory(
@@ -409,9 +440,7 @@ def update_zarr_store(initialRun):
             logger.info("Loading new: " + latest_Alert)
         for old_dir in old_Alert:
             if STAGE == "PROD":
-                logger.info("Removing old: " + old_dir)
-                command = f"nice -n {NICE_PRIORITY} rm -rf {save_dir}/{old_dir}"
-                subprocess.run(command, shell=True)
+                delete_old_directory(save_dir, old_dir)
 
         latest_SubH, old_SubH = find_largest_integer_directory(
             save_dir, "SubH.zarr", initialRun
@@ -423,9 +452,7 @@ def update_zarr_store(initialRun):
             logger.info("Loading new: " + latest_SubH)
         for old_dir in old_SubH:
             if STAGE == "PROD":
-                logger.info("Removing old: " + old_dir)
-                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
-                subprocess.run(command, shell=True)
+                delete_old_directory(save_dir, old_dir)
 
         latest_HRRR_6H, old_HRRR_6H = find_largest_integer_directory(
             save_dir, "HRRR_6H.zarr", initialRun
@@ -438,9 +465,7 @@ def update_zarr_store(initialRun):
             logger.info("Loading new: " + latest_HRRR_6H)
         for old_dir in old_HRRR_6H:
             if STAGE == "PROD":
-                logger.info("Removing old: " + old_dir)
-                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
-                subprocess.run(command, shell=True)
+                delete_old_directory(save_dir, old_dir)
 
         latest_ECMWF, old_ECMWF = find_largest_integer_directory(
             save_dir, "ECMWF.zarr", initialRun
@@ -457,9 +482,7 @@ def update_zarr_store(initialRun):
                 ECMWF_Zarr = None
         for old_dir in old_ECMWF:
             if STAGE == "PROD":
-                logger.info("Removing old: " + old_dir)
-                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
-                subprocess.run(command, shell=True)
+                delete_old_directory(save_dir, old_dir)
 
         latest_NBM, old_NBM = find_largest_integer_directory(
             save_dir, "NBM.zarr", initialRun
@@ -471,9 +494,7 @@ def update_zarr_store(initialRun):
             logger.info("Loading new: " + latest_NBM)
         for old_dir in old_NBM:
             if STAGE == "PROD":
-                logger.info("Removing old: " + old_dir)
-                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
-                subprocess.run(command, shell=True)
+                delete_old_directory(save_dir, old_dir)
 
         latest_NBM_Fire, old_NBM_Fire = find_largest_integer_directory(
             save_dir, "NBM_Fire.zarr", initialRun
@@ -486,9 +507,7 @@ def update_zarr_store(initialRun):
             logger.info("Loading new: " + latest_NBM_Fire)
         for old_dir in old_NBM_Fire:
             if STAGE == "PROD":
-                logger.info("Removing old: " + old_dir)
-                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
-                subprocess.run(command, shell=True)
+                delete_old_directory(save_dir, old_dir)
 
         latest_GEFS, old_GEFS = find_largest_integer_directory(
             save_dir, "GEFS.zarr", initialRun
@@ -500,9 +519,7 @@ def update_zarr_store(initialRun):
             logger.info("Loading new: " + latest_GEFS)
         for old_dir in old_GEFS:
             if STAGE == "PROD":
-                logger.info("Removing old: " + old_dir)
-                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
-                subprocess.run(command, shell=True)
+                delete_old_directory(save_dir, old_dir)
 
         latest_HRRR, old_HRRR = find_largest_integer_directory(
             save_dir, "HRRR.zarr", initialRun
@@ -514,9 +531,7 @@ def update_zarr_store(initialRun):
             logger.info("Loading new: " + latest_HRRR)
         for old_dir in old_HRRR:
             if STAGE == "PROD":
-                logger.info("Removing old: " + old_dir)
-                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
-                subprocess.run(command, shell=True)
+                delete_old_directory(save_dir, old_dir)
 
         latest_WMO_Alerts, old_WMO_Alerts = find_largest_integer_directory(
             save_dir, "WMO_Alerts.zarr", initialRun
@@ -529,9 +544,7 @@ def update_zarr_store(initialRun):
             logger.info("Loading new: " + latest_WMO_Alerts)
         for old_dir in old_WMO_Alerts:
             if STAGE == "PROD":
-                logger.info("Removing old: " + old_dir)
-                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
-                subprocess.run(command, shell=True)
+                delete_old_directory(save_dir, old_dir)
 
         latest_RTMA_RU, old_RTMA_RU = find_largest_integer_directory(
             save_dir, "RTMA_RU.zarr", initialRun
@@ -544,9 +557,7 @@ def update_zarr_store(initialRun):
             logger.info("Loading new: " + latest_RTMA_RU)
         for old_dir in old_RTMA_RU:
             if STAGE == "PROD":
-                logger.info("Removing old: " + old_dir)
-                command = f"nice -n 20 rm -rf {save_dir}/{old_dir}"
-                subprocess.run(command, shell=True)
+                delete_old_directory(save_dir, old_dir)
 
     logger.info("Refreshed Zarrs")
 
