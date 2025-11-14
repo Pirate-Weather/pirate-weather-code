@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_DIR="/mnt/nvme/data/ProdTest3"
-READY_FILE="/mnt/nvme/data/ProdTest3/models_ready"
+# Example defaults if not specified
+BASE_DIR="${BASE_DIR:-/mnt/nvme/data/ProdTest3}"
+REMOTE_BASE="${REMOTE_BASE:-s3:piratezarr2/ForecastTar_v2/v30}"
+
+# READY_FILE automatically derived from BASE_DIR
+READY_FILE="${BASE_DIR}/models_ready"
 
 # Models to update
 MODELS=('HRRR'
@@ -35,10 +39,11 @@ while true; do
   for MODEL in "${MODELS[@]}"; do
     echo "=== Updating $MODEL ==="
 
-    REMOTE="s3:piratezarr2/ForecastTar_v2/v30/${MODEL}.zarr.zip"
+    REMOTE="${REMOTE_BASE}/${MODEL}.zarr.zip"
     ZIP_LOCAL="${BASE_DIR}/${MODEL}.zarr.zip"
     STATE_FILE="${BASE_DIR}/${MODEL}.zarr.state"
 
+    
     # 1) Query remote info via rclone lsl (size, date, time, path)
     remote_info="$(rclone lsl "$REMOTE" 2>/dev/null || true)"
 
@@ -81,7 +86,7 @@ while true; do
       continue
     fi
 
-    echo "New ZIP for $MODEL downloaded. Extracting…"
+    echo "New ZIP for $MODEL downloaded. Extracting..."
 
     # 4) Create versioned directory and temp extraction dir
     timestamp="$(date -u +"%Y%m%dT%H%M%SZ")"
