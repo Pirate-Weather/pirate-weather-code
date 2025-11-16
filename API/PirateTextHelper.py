@@ -551,7 +551,9 @@ def calculate_wind_text(wind, icon="darksky", mode="both"):
         return windText, windIcon
 
 
-def calculate_vis_text(vis, temp, dewPoint, wind_speed, smoke=0, icon="darksky", mode="both"):
+def calculate_vis_text(
+    vis, temp, dewPoint, wind_speed, smoke=0, icon="darksky", mode="both"
+):
     """
     Calculates the visibility text.
     All inputs are expected in SI units (meters for visibility, Celsius for temperature).
@@ -587,7 +589,11 @@ def calculate_vis_text(vis, temp, dewPoint, wind_speed, smoke=0, icon="darksky",
     tempDewSpread = temp - dewPoint
 
     # Fog
-    if not wind_too_strong and vis < fogThresh and tempDewSpread <= TEMP_DEWPOINT_SPREAD_FOR_FOG:
+    if (
+        not wind_too_strong
+        and vis < fogThresh
+        and tempDewSpread <= TEMP_DEWPOINT_SPREAD_FOR_FOG
+    ):
         visText = "fog"
         visIcon = "fog"
     # Smoke
@@ -595,7 +601,11 @@ def calculate_vis_text(vis, temp, dewPoint, wind_speed, smoke=0, icon="darksky",
         visText = "smoke"
         visIcon = "smoke" if icon == "pirate" else "fog"
     # Mist
-    elif not wind_too_strong and vis < mistThresh and tempDewSpread <= TEMP_DEWPOINT_SPREAD_FOR_MIST:
+    elif (
+        not wind_too_strong
+        and vis < mistThresh
+        and tempDewSpread <= TEMP_DEWPOINT_SPREAD_FOR_MIST
+    ):
         visText = "mist"
         visIcon = "mist" if icon == "pirate" else "fog"
     # Haze
