@@ -2075,10 +2075,12 @@ async def PW_Forecast(
                     (numHours, dataOut_nbmFire.shape[1]), MISSING_DATA
                 )
 
-                NBM_Fire_EndIDX = min((len(dataOut_nbmFire), (numHours + NBM_Fire_StartIDX)))
-                NBM_Fire_Merged[0 : (NBM_Fire_EndIDX - NBM_Fire_StartIDX), :] = dataOut_nbmFire[
-                    NBM_Fire_StartIDX:NBM_Fire_EndIDX, :
-                ]
+                NBM_Fire_EndIDX = min(
+                    (len(dataOut_nbmFire), (numHours + NBM_Fire_StartIDX))
+                )
+                NBM_Fire_Merged[0 : (NBM_Fire_EndIDX - NBM_Fire_StartIDX), :] = (
+                    dataOut_nbmFire[NBM_Fire_StartIDX:NBM_Fire_EndIDX, :]
+                )
 
     except Exception:
         logger.exception(
