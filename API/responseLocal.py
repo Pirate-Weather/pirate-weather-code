@@ -2132,7 +2132,10 @@ async def PW_Forecast(
     if "gefs" in sourceList:
         GEFS_StartIDX = nearest_index(dataOut_gefs[:, 0], baseDayUTC_Grib)
         GEFS_EndIDX = min((len(dataOut_gefs), (numHours + GEFS_StartIDX)))
-        GEFS_Merged = dataOut_gefs[GEFS_StartIDX:GEFS_EndIDX, :]
+        GEFS_Merged = np.full((numHours, dataOut_gefs.shape[1]), MISSING_DATA)
+        GEFS_Merged[0 : (GEFS_EndIDX - GEFS_StartIDX), :] = dataOut_gefs[
+            GEFS_StartIDX:GEFS_EndIDX, :
+        ]
 
     # Timing Check
     if TIMING:
