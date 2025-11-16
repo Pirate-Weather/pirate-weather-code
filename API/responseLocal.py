@@ -2052,8 +2052,9 @@ async def PW_Forecast(
                 logger.error("NBM data not available for the requested time range.")
             else:
                 NBM_Merged = np.full((numHours, dataOut_nbm.shape[1]), MISSING_DATA)
-                NBM_Merged[0 : (242 - NBM_StartIDX), :] = dataOut_nbm[
-                    NBM_StartIDX : (numHours + NBM_StartIDX), :
+                NBM_EndIDX = min((len(dataOut_nbm), (numHours + NBM_StartIDX)))
+                NBM_Merged[0 : (NBM_EndIDX - NBM_StartIDX), :] = dataOut_nbm[
+                    NBM_StartIDX:NBM_EndIDX, :
                 ]
 
         # NBM FIre
@@ -2074,8 +2075,9 @@ async def PW_Forecast(
                     (numHours, dataOut_nbmFire.shape[1]), MISSING_DATA
                 )
 
-                NBM_Fire_Merged[0 : (229 - NBM_Fire_StartIDX), :] = dataOut_nbmFire[
-                    NBM_Fire_StartIDX : (numHours + NBM_Fire_StartIDX), :
+                NBM_Fire_EndIDX = min((len(dataOut_nbmFire), (numHours + NBM_Fire_StartIDX)))
+                NBM_Fire_Merged[0 : (NBM_Fire_EndIDX - NBM_Fire_StartIDX), :] = dataOut_nbmFire[
+                    NBM_Fire_StartIDX:NBM_Fire_EndIDX, :
                 ]
 
     except Exception:
@@ -2125,7 +2127,8 @@ async def PW_Forecast(
     # GEFS
     if "gefs" in sourceList:
         GEFS_StartIDX = nearest_index(dataOut_gefs[:, 0], baseDayUTC_Grib)
-        GEFS_Merged = dataOut_gefs[GEFS_StartIDX : (numHours + GEFS_StartIDX), :]
+        GEFS_EndIDX = min((len(dataOut_gefs), (numHours + GEFS_StartIDX)))
+        GEFS_Merged = dataOut_gefs[GEFS_StartIDX:GEFS_EndIDX, :]
 
     # Timing Check
     if TIMING:
