@@ -2030,15 +2030,17 @@ async def PW_Forecast(
                 # The 0-18 hour HRRR data (dataOut_hrrrh) has fewer columns than the 18-48 hour data (dataOut_h2)
                 # when in timeMachine mode. Only concatenate the common columns (0-17).
                 common_cols = min(dataOut_hrrrh.shape[1], dataOut_h2.shape[1])
-                HRRR_Merged[
-                    0 : (67 - HRRR_StartIDX) + (31 - H2_StartIDX), 0:common_cols
-                ] = np.concatenate(
+                # Calculate actual concatenated size dynamically
+                hrrr_rows = len(dataOut_hrrrh) - HRRR_StartIDX
+                h2_rows = len(dataOut_h2) - H2_StartIDX
+                total_rows = min(hrrr_rows + h2_rows, numHours)
+                HRRR_Merged[0:total_rows, 0:common_cols] = np.concatenate(
                     (
                         dataOut_hrrrh[HRRR_StartIDX:, 0:common_cols],
                         dataOut_h2[H2_StartIDX:, 0:common_cols],
                     ),
                     axis=0,
-                )
+                )[0:total_rows, :]
 
         # NBM
         if "nbm" in sourceList:
@@ -2052,8 +2054,9 @@ async def PW_Forecast(
                 logger.error("NBM data not available for the requested time range.")
             else:
                 NBM_Merged = np.full((numHours, dataOut_nbm.shape[1]), MISSING_DATA)
-                NBM_Merged[0 : (242 - NBM_StartIDX), :] = dataOut_nbm[
-                    NBM_StartIDX : (numHours + NBM_StartIDX), :
+                NBM_EndIDX = min((len(dataOut_nbm), (numHours + NBM_StartIDX)))
+                NBM_Merged[0 : (NBM_EndIDX - NBM_StartIDX), :] = dataOut_nbm[
+                    NBM_StartIDX:NBM_EndIDX, :
                 ]
 
         # NBM FIre
@@ -2074,9 +2077,12 @@ async def PW_Forecast(
                     (numHours, dataOut_nbmFire.shape[1]), MISSING_DATA
                 )
 
-                NBM_Fire_Merged[0 : (229 - NBM_Fire_StartIDX), :] = dataOut_nbmFire[
-                    NBM_Fire_StartIDX : (numHours + NBM_Fire_StartIDX), :
-                ]
+                NBM_Fire_EndIDX = min(
+                    (len(dataOut_nbmFire), (numHours + NBM_Fire_StartIDX))
+                )
+                NBM_Fire_Merged[0 : (NBM_Fire_EndIDX - NBM_Fire_StartIDX), :] = (
+                    dataOut_nbmFire[NBM_Fire_StartIDX:NBM_Fire_EndIDX, :]
+                )
 
     except Exception:
         logger.exception(
@@ -2125,7 +2131,11 @@ async def PW_Forecast(
     # GEFS
     if "gefs" in sourceList:
         GEFS_StartIDX = nearest_index(dataOut_gefs[:, 0], baseDayUTC_Grib)
-        GEFS_Merged = dataOut_gefs[GEFS_StartIDX : (numHours + GEFS_StartIDX), :]
+        GEFS_EndIDX = min((len(dataOut_gefs), (numHours + GEFS_StartIDX)))
+        GEFS_Merged = np.full((numHours, dataOut_gefs.shape[1]), MISSING_DATA)
+        GEFS_Merged[0 : (GEFS_EndIDX - GEFS_StartIDX), :] = dataOut_gefs[
+            GEFS_StartIDX:GEFS_EndIDX, :
+        ]
 
     # Timing Check
     if TIMING:
@@ -3751,8 +3761,12 @@ async def PW_Forecast(
     # pTypeMap = {0: 'none', 1: 'snow', 2: 'sleet', 3: 'sleet', 4: 'rain'}
     pTypeMap = np.array(["none", "snow", "sleet", "sleet", "rain"])
     pTextMap = np.array(["None", "Snow", "Sleet", "Sleet", "Rain"])
-    PTypeHour = pTypeMap[InterPhour[:, DATA_HOURLY["type"]].astype(int)]
-    PTextHour = pTextMap[InterPhour[:, DATA_HOURLY["type"]].astype(int)]
+    PTypeHour = pTypeMap[
+        np.nan_to_num(InterPhour[:, DATA_HOURLY["type"]], 0).astype(int)
+    ]
+    PTextHour = pTextMap[
+        np.nan_to_num(InterPhour[:, DATA_HOURLY["type"]], 0).astype(int)
+    ]
 
     # Fix very small neg from interp to solve -0
     InterPhour[((InterPhour >= -0.01) & (InterPhour <= 0.01))] = 0
@@ -4785,6 +4799,7 @@ async def PW_Forecast(
 
     alertDict = []
     alertList = []
+    now_utc = datetime.datetime.now(datetime.UTC).astimezone(utc)
 
     # If alerts are requested and in the US
     try:
@@ -4850,8 +4865,11 @@ async def PW_Forecast(
                         "description": formatted_text,
                         "uri": alertDetails[6],
                     }
-
-                    alertList.append(dict(alertDict))
+                    # Only append if alert has not already expired
+                    if alertEnd is None or alertEnd > now_utc:
+                        alertList.append(dict(alertDict))
+                    else:
+                        logger.debug("Skipping expired NWS alert: %s", alertDetails[0])
 
     except Exception:
         logger.exception("An Alert error occurred %s", loc_tag)
@@ -4902,7 +4920,11 @@ async def PW_Forecast(
                     "uri": wmo_alertDetails[6],
                 }
 
-                alertList.append(dict(wmo_alertDict))
+                # Only append if alert has not already expired
+                if alertEnd is None or alertEnd > now_utc:
+                    alertList.append(dict(wmo_alertDict))
+                else:
+                    logger.debug("Skipping expired WMO alert: %s", alertDetails[0])
 
     except Exception:
         logger.exception("A WMO Alert error occurred %s", loc_tag)
