@@ -3001,13 +3001,16 @@ async def PW_Forecast(
 
         # 4 = Snow, 5 = Sleet, 6 = Freezing Rain, 7 = Rain
 
+        # Replace NaN values with 0 to handle missing data
+        InterThour = np.nan_to_num(InterThour, nan=0.0)
+
         # Fix rounding issues
         InterThour[InterThour < 0.01] = 0
 
         maxPchanceHour[:, 3] = np.argmax(InterThour, axis=1)
 
         # Put Nan's where they exist in the original data
-        maxPchanceHour[np.isnan(InterThour[:, 1]), 3] = MISSING_DATA
+        maxPchanceHour[np.isnan(GEFS_Merged[:, GEFS["snow"]]), 3] = MISSING_DATA
     elif "gfs" in sourceList:  # GFS Fallback
         InterThour = np.zeros(shape=(len(hour_array), 5))  # Type
         for i in [GFS["snow"], GFS["ice"], GFS["freezing_rain"], GFS["rain"]]:
