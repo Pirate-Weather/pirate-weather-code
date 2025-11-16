@@ -957,6 +957,7 @@ def calculate_day_text(
                     hour["visibility"],
                     hour["temperature"],
                     hour["dewPoint"],
+                    hour["windSpeed"],
                     hour["smoke"],
                     icon_set,
                     "icon",
