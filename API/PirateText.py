@@ -112,7 +112,7 @@ def calculate_text(
     )
 
     windText, windIcon = calculate_wind_text(wind, icon, "both")
-    visText, visIcon = calculate_vis_text(vis, temp, dewPoint, smoke, icon, "both")
+    visText, visIcon = calculate_vis_text(vis, temp, dewPoint, wind, smoke, icon, "both")
     thuText, thuIcon = calculate_thunderstorm_text(cape, "both", icon, isDayTime)
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
     humidityText = humidity_sky_text(temp, humidity)

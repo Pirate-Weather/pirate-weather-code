@@ -551,7 +551,7 @@ def calculate_wind_text(wind, icon="darksky", mode="both"):
         return windText, windIcon
 
 
-def calculate_vis_text(vis, temp, dewPoint, smoke=0, icon="darksky", mode="both"):
+def calculate_vis_text(vis, temp, dewPoint, wind_speed, smoke=0, icon="darksky", mode="both"):
     """
     Calculates the visibility text.
     All inputs are expected in SI units (meters for visibility, Celsius for temperature).
@@ -561,6 +561,7 @@ def calculate_vis_text(vis, temp, dewPoint, smoke=0, icon="darksky", mode="both"
     - temp (float) - The ambient temperature in Celsius
     - dewPoint (float) - The dew point temperature in Celsius
     - smoke (float) - Surface smoke concentration in ug/m3
+    - wind_speed (float) - Wind speed in m/s
     - icon (str) - Which icon set to use - Dark Sky or Pirate Weather
     - mode (str) - Determines what gets returned by the function. If set to both the summary and icon for the visibility will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
     Returns:
@@ -572,16 +573,21 @@ def calculate_vis_text(vis, temp, dewPoint, smoke=0, icon="darksky", mode="both"
     # Thresholds in meters
     fogThresh = FOG_THRESHOLD_METERS
     mistThresh = MIST_THRESHOLD_METERS
+    # If we have strong winds.
+    wind_too_strong = False
 
     # If temp, dewPoint or vis are missing, return None appropriately for the mode.
     if any(np.isnan(x) for x in (temp, dewPoint, vis)):
         return (None, None) if mode == "both" else None
 
+    if not np.isnan(wind_speed):
+        wind_too_strong = wind_speed >= WIND_THRESHOLDS["light"]
+
     # Calculate the temperature dew point spread (already in Celsius)
     tempDewSpread = temp - dewPoint
 
     # Fog
-    if vis < fogThresh and tempDewSpread <= TEMP_DEWPOINT_SPREAD_FOR_FOG:
+    if not wind_too_strong and vis < fogThresh and tempDewSpread <= TEMP_DEWPOINT_SPREAD_FOR_FOG:
         visText = "fog"
         visIcon = "fog"
     # Smoke
@@ -589,7 +595,7 @@ def calculate_vis_text(vis, temp, dewPoint, smoke=0, icon="darksky", mode="both"
         visText = "smoke"
         visIcon = "smoke" if icon == "pirate" else "fog"
     # Mist
-    elif vis < mistThresh and tempDewSpread <= TEMP_DEWPOINT_SPREAD_FOR_MIST:
+    elif not wind_too_strong and vis < mistThresh and tempDewSpread <= TEMP_DEWPOINT_SPREAD_FOR_MIST:
         visText = "mist"
         visIcon = "mist" if icon == "pirate" else "fog"
     # Haze
