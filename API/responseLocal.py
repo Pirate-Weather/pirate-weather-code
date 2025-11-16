@@ -4799,6 +4799,7 @@ async def PW_Forecast(
 
     alertDict = []
     alertList = []
+    now_utc = datetime.datetime.now(datetime.UTC).astimezone(utc)
 
     # If alerts are requested and in the US
     try:
@@ -4864,8 +4865,11 @@ async def PW_Forecast(
                         "description": formatted_text,
                         "uri": alertDetails[6],
                     }
-
-                    alertList.append(dict(alertDict))
+                    # Only append if alert has not already expired
+                    if alertEnd is None or alertEnd > now_utc:
+                        alertList.append(dict(alertDict))
+                    else:
+                        logger.debug("Skipping expired NWS alert: %s", alertDetails[0])
 
     except Exception:
         logger.exception("An Alert error occurred %s", loc_tag)
@@ -4916,7 +4920,11 @@ async def PW_Forecast(
                     "uri": wmo_alertDetails[6],
                 }
 
-                alertList.append(dict(wmo_alertDict))
+                # Only append if alert has not already expired
+                if alertEnd is None or alertEnd > now_utc:
+                    alertList.append(dict(wmo_alertDict))
+                else:
+                    logger.debug("Skipping expired WMO alert: %s", alertDetails[0])
 
     except Exception:
         logger.exception("A WMO Alert error occurred %s", loc_tag)
