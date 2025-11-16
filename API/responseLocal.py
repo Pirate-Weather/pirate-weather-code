@@ -3761,8 +3761,12 @@ async def PW_Forecast(
     # pTypeMap = {0: 'none', 1: 'snow', 2: 'sleet', 3: 'sleet', 4: 'rain'}
     pTypeMap = np.array(["none", "snow", "sleet", "sleet", "rain"])
     pTextMap = np.array(["None", "Snow", "Sleet", "Sleet", "Rain"])
-    PTypeHour = pTypeMap[np.nan_to_num(InterPhour[:, DATA_HOURLY["type"]], 0).astype(int)]
-    PTextHour = pTextMap[np.nan_to_num(InterPhour[:, DATA_HOURLY["type"]], 0).astype(int)]
+    PTypeHour = pTypeMap[
+        np.nan_to_num(InterPhour[:, DATA_HOURLY["type"]], 0).astype(int)
+    ]
+    PTextHour = pTextMap[
+        np.nan_to_num(InterPhour[:, DATA_HOURLY["type"]], 0).astype(int)
+    ]
 
     # Fix very small neg from interp to solve -0
     InterPhour[((InterPhour >= -0.01) & (InterPhour <= 0.01))] = 0
