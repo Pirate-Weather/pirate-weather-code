@@ -2030,15 +2030,17 @@ async def PW_Forecast(
                 # The 0-18 hour HRRR data (dataOut_hrrrh) has fewer columns than the 18-48 hour data (dataOut_h2)
                 # when in timeMachine mode. Only concatenate the common columns (0-17).
                 common_cols = min(dataOut_hrrrh.shape[1], dataOut_h2.shape[1])
-                HRRR_Merged[
-                    0 : (67 - HRRR_StartIDX) + (31 - H2_StartIDX), 0:common_cols
-                ] = np.concatenate(
+                # Calculate actual concatenated size dynamically
+                hrrr_rows = len(dataOut_hrrrh) - HRRR_StartIDX
+                h2_rows = len(dataOut_h2) - H2_StartIDX
+                total_rows = min(hrrr_rows + h2_rows, numHours)
+                HRRR_Merged[0:total_rows, 0:common_cols] = np.concatenate(
                     (
                         dataOut_hrrrh[HRRR_StartIDX:, 0:common_cols],
                         dataOut_h2[H2_StartIDX:, 0:common_cols],
                     ),
                     axis=0,
-                )
+                )[0:total_rows, :]
 
         # NBM
         if "nbm" in sourceList:
