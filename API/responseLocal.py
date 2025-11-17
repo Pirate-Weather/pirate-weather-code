@@ -37,7 +37,6 @@ from pytz import timezone, utc
 from timezonefinder import TimezoneFinder
 
 from API.api_utils import (
-    apply_rounding_inplace,
     calculate_apparent_temperature,
     clipLog,
     estimate_visibility_gultepe_rh_pr_numpy,
@@ -3792,42 +3791,78 @@ async def PW_Forecast(
     # This reduces the overhead from O(n*m) to O(n) where n=hours, m=fields
     # Create display arrays with all unit conversions applied at once
     hourly_display = np.zeros((numHours, max(DATA_HOURLY.values()) + 1))
-    
+
     # Temperature conversions - vectorized
     if tempUnits == 0:  # Fahrenheit
-        hourly_display[:, DATA_HOURLY["temp"]] = InterPhour[:, DATA_HOURLY["temp"]] * 9 / 5 + 32
-        hourly_display[:, DATA_HOURLY["apparent"]] = InterPhour[:, DATA_HOURLY["apparent"]] * 9 / 5 + 32
-        hourly_display[:, DATA_HOURLY["dew"]] = InterPhour[:, DATA_HOURLY["dew"]] * 9 / 5 + 32
-        hourly_display[:, DATA_HOURLY["feels_like"]] = InterPhour[:, DATA_HOURLY["feels_like"]] * 9 / 5 + 32
+        hourly_display[:, DATA_HOURLY["temp"]] = (
+            InterPhour[:, DATA_HOURLY["temp"]] * 9 / 5 + 32
+        )
+        hourly_display[:, DATA_HOURLY["apparent"]] = (
+            InterPhour[:, DATA_HOURLY["apparent"]] * 9 / 5 + 32
+        )
+        hourly_display[:, DATA_HOURLY["dew"]] = (
+            InterPhour[:, DATA_HOURLY["dew"]] * 9 / 5 + 32
+        )
+        hourly_display[:, DATA_HOURLY["feels_like"]] = (
+            InterPhour[:, DATA_HOURLY["feels_like"]] * 9 / 5 + 32
+        )
     else:  # Celsius (already in Celsius)
         hourly_display[:, DATA_HOURLY["temp"]] = InterPhour[:, DATA_HOURLY["temp"]]
-        hourly_display[:, DATA_HOURLY["apparent"]] = InterPhour[:, DATA_HOURLY["apparent"]]
+        hourly_display[:, DATA_HOURLY["apparent"]] = InterPhour[
+            :, DATA_HOURLY["apparent"]
+        ]
         hourly_display[:, DATA_HOURLY["dew"]] = InterPhour[:, DATA_HOURLY["dew"]]
-        hourly_display[:, DATA_HOURLY["feels_like"]] = InterPhour[:, DATA_HOURLY["feels_like"]]
-    
+        hourly_display[:, DATA_HOURLY["feels_like"]] = InterPhour[
+            :, DATA_HOURLY["feels_like"]
+        ]
+
     # Wind conversions - vectorized
-    hourly_display[:, DATA_HOURLY["wind"]] = InterPhour[:, DATA_HOURLY["wind"]] * windUnit
-    hourly_display[:, DATA_HOURLY["gust"]] = InterPhour[:, DATA_HOURLY["gust"]] * windUnit
-    
+    hourly_display[:, DATA_HOURLY["wind"]] = (
+        InterPhour[:, DATA_HOURLY["wind"]] * windUnit
+    )
+    hourly_display[:, DATA_HOURLY["gust"]] = (
+        InterPhour[:, DATA_HOURLY["gust"]] * windUnit
+    )
+
     # Visibility conversion - vectorized
     hourly_display[:, DATA_HOURLY["vis"]] = InterPhour[:, DATA_HOURLY["vis"]] * visUnits
-    
+
     # Precipitation conversions - vectorized
-    hourly_display[:, DATA_HOURLY["intensity"]] = InterPhour[:, DATA_HOURLY["intensity"]] * prepIntensityUnit
-    hourly_display[:, DATA_HOURLY["error"]] = InterPhour[:, DATA_HOURLY["error"]] * prepIntensityUnit
-    hourly_display[:, DATA_HOURLY["rain"]] = InterPhour[:, DATA_HOURLY["rain"]] * prepAccumUnit
-    hourly_display[:, DATA_HOURLY["snow"]] = InterPhour[:, DATA_HOURLY["snow"]] * prepAccumUnit
-    hourly_display[:, DATA_HOURLY["ice"]] = InterPhour[:, DATA_HOURLY["ice"]] * prepAccumUnit
-    hourly_display[:, DATA_HOURLY["rain_intensity"]] = InterPhour[:, DATA_HOURLY["rain_intensity"]] * prepIntensityUnit
-    hourly_display[:, DATA_HOURLY["snow_intensity"]] = InterPhour[:, DATA_HOURLY["snow_intensity"]] * prepIntensityUnit
-    hourly_display[:, DATA_HOURLY["ice_intensity"]] = InterPhour[:, DATA_HOURLY["ice_intensity"]] * prepIntensityUnit
-    
+    hourly_display[:, DATA_HOURLY["intensity"]] = (
+        InterPhour[:, DATA_HOURLY["intensity"]] * prepIntensityUnit
+    )
+    hourly_display[:, DATA_HOURLY["error"]] = (
+        InterPhour[:, DATA_HOURLY["error"]] * prepIntensityUnit
+    )
+    hourly_display[:, DATA_HOURLY["rain"]] = (
+        InterPhour[:, DATA_HOURLY["rain"]] * prepAccumUnit
+    )
+    hourly_display[:, DATA_HOURLY["snow"]] = (
+        InterPhour[:, DATA_HOURLY["snow"]] * prepAccumUnit
+    )
+    hourly_display[:, DATA_HOURLY["ice"]] = (
+        InterPhour[:, DATA_HOURLY["ice"]] * prepAccumUnit
+    )
+    hourly_display[:, DATA_HOURLY["rain_intensity"]] = (
+        InterPhour[:, DATA_HOURLY["rain_intensity"]] * prepIntensityUnit
+    )
+    hourly_display[:, DATA_HOURLY["snow_intensity"]] = (
+        InterPhour[:, DATA_HOURLY["snow_intensity"]] * prepIntensityUnit
+    )
+    hourly_display[:, DATA_HOURLY["ice_intensity"]] = (
+        InterPhour[:, DATA_HOURLY["ice_intensity"]] * prepIntensityUnit
+    )
+
     # Pressure conversion - vectorized (Pascals to hectopascals)
-    hourly_display[:, DATA_HOURLY["pressure"]] = InterPhour[:, DATA_HOURLY["pressure"]] / 100
-    
+    hourly_display[:, DATA_HOURLY["pressure"]] = (
+        InterPhour[:, DATA_HOURLY["pressure"]] / 100
+    )
+
     # Storm distance conversion - vectorized
-    hourly_display[:, DATA_HOURLY["storm_dist"]] = InterPhour[:, DATA_HOURLY["storm_dist"]] * visUnits
-    
+    hourly_display[:, DATA_HOURLY["storm_dist"]] = (
+        InterPhour[:, DATA_HOURLY["storm_dist"]] * visUnits
+    )
+
     # Copy unchanged fields
     hourly_display[:, DATA_HOURLY["prob"]] = InterPhour[:, DATA_HOURLY["prob"]]
     hourly_display[:, DATA_HOURLY["humidity"]] = InterPhour[:, DATA_HOURLY["humidity"]]
@@ -3836,13 +3871,17 @@ async def PW_Forecast(
     hourly_display[:, DATA_HOURLY["uv"]] = InterPhour[:, DATA_HOURLY["uv"]]
     hourly_display[:, DATA_HOURLY["ozone"]] = InterPhour[:, DATA_HOURLY["ozone"]]
     hourly_display[:, DATA_HOURLY["smoke"]] = InterPhour[:, DATA_HOURLY["smoke"]]
-    hourly_display[:, DATA_HOURLY["storm_dir"]] = InterPhour[:, DATA_HOURLY["storm_dir"]]
+    hourly_display[:, DATA_HOURLY["storm_dir"]] = InterPhour[
+        :, DATA_HOURLY["storm_dir"]
+    ]
     hourly_display[:, DATA_HOURLY["fire"]] = InterPhour[:, DATA_HOURLY["fire"]]
     hourly_display[:, DATA_HOURLY["solar"]] = InterPhour[:, DATA_HOURLY["solar"]]
     hourly_display[:, DATA_HOURLY["cape"]] = InterPhour[:, DATA_HOURLY["cape"]]
     if "stationPressure" in extraVars:
-        hourly_display[:, DATA_HOURLY["station_pressure"]] = InterPhour[:, DATA_HOURLY["station_pressure"]] / 100
-    
+        hourly_display[:, DATA_HOURLY["station_pressure"]] = (
+            InterPhour[:, DATA_HOURLY["station_pressure"]] / 100
+        )
+
     # Apply rounding to the converted values - define mapping for hourly fields
     hourly_rounding_map = {
         DATA_HOURLY["temp"]: ROUNDING_RULES.get("temperature", 2),
@@ -3871,14 +3910,18 @@ async def PW_Forecast(
         DATA_HOURLY["fire"]: ROUNDING_RULES.get("fireIndex", 2),
         DATA_HOURLY["solar"]: ROUNDING_RULES.get("solar", 2),
     }
-    
+
     # Apply rounding in-place to the hourly_display array
     for idx_field, decimals in hourly_rounding_map.items():
         if decimals == 0:
-            hourly_display[:, idx_field] = np.round(hourly_display[:, idx_field]).astype(int)
+            hourly_display[:, idx_field] = np.round(
+                hourly_display[:, idx_field]
+            ).astype(int)
         else:
-            hourly_display[:, idx_field] = np.round(hourly_display[:, idx_field], decimals)
-    
+            hourly_display[:, idx_field] = np.round(
+                hourly_display[:, idx_field], decimals
+            )
+
     # for idx in range(int(baseTimeOffset), hourly_hours + int(baseTimeOffset)):
     # For day 0 summary, need to calculate hourly data from midnight local
     for idx in range(0, numHours):
@@ -3976,9 +4019,9 @@ async def PW_Forecast(
 
         # Use pre-converted and rounded values from hourly_display
         accum_display = (
-            hourly_display[idx, DATA_HOURLY["rain"]] +
-            hourly_display[idx, DATA_HOURLY["snow"]] +
-            hourly_display[idx, DATA_HOURLY["ice"]]
+            hourly_display[idx, DATA_HOURLY["rain"]]
+            + hourly_display[idx, DATA_HOURLY["snow"]]
+            + hourly_display[idx, DATA_HOURLY["ice"]]
         )
 
         hourItem = {
@@ -4027,7 +4070,9 @@ async def PW_Forecast(
 
         # Add station pressure if requested
         if "stationPressure" in extraVars:
-            hourItem["stationPressure"] = hourly_display[idx, DATA_HOURLY["station_pressure"]]
+            hourItem["stationPressure"] = hourly_display[
+                idx, DATA_HOURLY["station_pressure"]
+            ]
 
         # Create SI version of hourItem for text generation (values already in SI units in InterPhour)
         hourItem_si = {
@@ -4316,7 +4361,7 @@ async def PW_Forecast(
         daily_apparent_min = InterPdayMin[:, DATA_DAY["apparent"]] * 9 / 5 + 32
         daily_apparent_max = InterPdayMax[:, DATA_DAY["apparent"]] * 9 / 5 + 32
         daily_dew_point = InterPday[:, DATA_DAY["dew"]] * 9 / 5 + 32
-        
+
         # For half-day items
         half_day_dew = interp_half_day_mean[:, DATA_HOURLY["dew"]] * 9 / 5 + 32
         half_night_dew = interp_half_night_mean[:, DATA_HOURLY["dew"]] * 9 / 5 + 32
@@ -4334,7 +4379,7 @@ async def PW_Forecast(
         daily_apparent_min = InterPdayMin[:, DATA_DAY["apparent"]]
         daily_apparent_max = InterPdayMax[:, DATA_DAY["apparent"]]
         daily_dew_point = InterPday[:, DATA_DAY["dew"]]
-        
+
         # For half-day items
         half_day_dew = interp_half_day_mean[:, DATA_HOURLY["dew"]]
         half_night_dew = interp_half_night_mean[:, DATA_HOURLY["dew"]]
@@ -4348,150 +4393,280 @@ async def PW_Forecast(
     daily_wind_speed = InterPday[:, DATA_DAY["wind"]] * windUnit
     daily_wind_gust = InterPday[:, DATA_DAY["gust"]] * windUnit
     daily_visibility = InterPday[:, DATA_DAY["vis"]] * visUnits
-    
+
     # Pre-convert precipitation fields
     daily_precip_intensity = InterPday[:, DATA_DAY["intensity"]] * prepIntensityUnit
-    daily_precip_intensity_max = InterPdayMax[:, DATA_DAY["intensity"]] * prepIntensityUnit
+    daily_precip_intensity_max = (
+        InterPdayMax[:, DATA_DAY["intensity"]] * prepIntensityUnit
+    )
     daily_rain_intensity = InterPday[:, DATA_DAY["rain_intensity"]] * prepIntensityUnit
-    daily_rain_intensity_max = InterPdayMax[:, DATA_DAY["rain_intensity"]] * prepIntensityUnit
+    daily_rain_intensity_max = (
+        InterPdayMax[:, DATA_DAY["rain_intensity"]] * prepIntensityUnit
+    )
     daily_snow_intensity = InterPday[:, DATA_DAY["snow_intensity"]] * prepIntensityUnit
-    daily_snow_intensity_max = InterPdayMax[:, DATA_DAY["snow_intensity"]] * prepIntensityUnit
+    daily_snow_intensity_max = (
+        InterPdayMax[:, DATA_DAY["snow_intensity"]] * prepIntensityUnit
+    )
     daily_ice_intensity = InterPday[:, DATA_DAY["ice_intensity"]] * prepIntensityUnit
-    daily_ice_intensity_max = InterPdayMax[:, DATA_DAY["ice_intensity"]] * prepIntensityUnit
-    
+    daily_ice_intensity_max = (
+        InterPdayMax[:, DATA_DAY["ice_intensity"]] * prepIntensityUnit
+    )
+
     daily_liquid_accum = InterPdaySum[:, DATA_DAY["rain"]] * prepAccumUnit
     daily_snow_accum = InterPdaySum[:, DATA_DAY["snow"]] * prepAccumUnit
     daily_ice_accum = InterPdaySum[:, DATA_DAY["ice"]] * prepAccumUnit
     daily_precip_accum = daily_liquid_accum + daily_snow_accum + daily_ice_accum
-    
+
     # Pre-convert half-day precipitation fields
-    half_day_precip_intensity = interp_half_day_mean[:, DATA_HOURLY["intensity"]] * prepIntensityUnit
-    half_day_precip_intensity_max = interp_half_day_max[:, DATA_HOURLY["intensity"]] * prepIntensityUnit
-    half_day_rain_intensity = interp_half_day_mean[:, DATA_HOURLY["rain"]] * prepIntensityUnit
-    half_day_rain_intensity_max = interp_half_day_max[:, DATA_HOURLY["rain"]] * prepIntensityUnit
-    half_day_snow_intensity = interp_half_day_mean[:, DATA_HOURLY["snow"]] * prepIntensityUnit
-    half_day_snow_intensity_max = interp_half_day_max[:, DATA_HOURLY["snow"]] * prepIntensityUnit
-    half_day_ice_intensity = interp_half_day_mean[:, DATA_HOURLY["ice"]] * prepIntensityUnit
-    half_day_ice_intensity_max = interp_half_day_max[:, DATA_HOURLY["ice"]] * prepIntensityUnit
+    half_day_precip_intensity = (
+        interp_half_day_mean[:, DATA_HOURLY["intensity"]] * prepIntensityUnit
+    )
+    half_day_precip_intensity_max = (
+        interp_half_day_max[:, DATA_HOURLY["intensity"]] * prepIntensityUnit
+    )
+    half_day_rain_intensity = (
+        interp_half_day_mean[:, DATA_HOURLY["rain"]] * prepIntensityUnit
+    )
+    half_day_rain_intensity_max = (
+        interp_half_day_max[:, DATA_HOURLY["rain"]] * prepIntensityUnit
+    )
+    half_day_snow_intensity = (
+        interp_half_day_mean[:, DATA_HOURLY["snow"]] * prepIntensityUnit
+    )
+    half_day_snow_intensity_max = (
+        interp_half_day_max[:, DATA_HOURLY["snow"]] * prepIntensityUnit
+    )
+    half_day_ice_intensity = (
+        interp_half_day_mean[:, DATA_HOURLY["ice"]] * prepIntensityUnit
+    )
+    half_day_ice_intensity_max = (
+        interp_half_day_max[:, DATA_HOURLY["ice"]] * prepIntensityUnit
+    )
     half_day_liquid_accum = interp_half_day_sum[:, DATA_HOURLY["rain"]] * prepAccumUnit
     half_day_snow_accum = interp_half_day_sum[:, DATA_HOURLY["snow"]] * prepAccumUnit
     half_day_ice_accum = interp_half_day_sum[:, DATA_HOURLY["ice"]] * prepAccumUnit
-    half_day_precip_accum = half_day_liquid_accum + half_day_snow_accum + half_day_ice_accum
-    
-    half_night_precip_intensity = interp_half_night_mean[:, DATA_HOURLY["intensity"]] * prepIntensityUnit
-    half_night_precip_intensity_max = interp_half_night_max[:, DATA_HOURLY["intensity"]] * prepIntensityUnit
-    half_night_rain_intensity = interp_half_night_mean[:, DATA_HOURLY["rain"]] * prepIntensityUnit
-    half_night_rain_intensity_max = interp_half_night_max[:, DATA_HOURLY["rain"]] * prepIntensityUnit
-    half_night_snow_intensity = interp_half_night_mean[:, DATA_HOURLY["snow"]] * prepIntensityUnit
-    half_night_snow_intensity_max = interp_half_night_max[:, DATA_HOURLY["snow"]] * prepIntensityUnit
-    half_night_ice_intensity = interp_half_night_mean[:, DATA_HOURLY["ice"]] * prepIntensityUnit
-    half_night_ice_intensity_max = interp_half_night_max[:, DATA_HOURLY["ice"]] * prepIntensityUnit
-    half_night_liquid_accum = interp_half_night_sum[:, DATA_HOURLY["rain"]] * prepAccumUnit
-    half_night_snow_accum = interp_half_night_sum[:, DATA_HOURLY["snow"]] * prepAccumUnit
+    half_day_precip_accum = (
+        half_day_liquid_accum + half_day_snow_accum + half_day_ice_accum
+    )
+
+    half_night_precip_intensity = (
+        interp_half_night_mean[:, DATA_HOURLY["intensity"]] * prepIntensityUnit
+    )
+    half_night_precip_intensity_max = (
+        interp_half_night_max[:, DATA_HOURLY["intensity"]] * prepIntensityUnit
+    )
+    half_night_rain_intensity = (
+        interp_half_night_mean[:, DATA_HOURLY["rain"]] * prepIntensityUnit
+    )
+    half_night_rain_intensity_max = (
+        interp_half_night_max[:, DATA_HOURLY["rain"]] * prepIntensityUnit
+    )
+    half_night_snow_intensity = (
+        interp_half_night_mean[:, DATA_HOURLY["snow"]] * prepIntensityUnit
+    )
+    half_night_snow_intensity_max = (
+        interp_half_night_max[:, DATA_HOURLY["snow"]] * prepIntensityUnit
+    )
+    half_night_ice_intensity = (
+        interp_half_night_mean[:, DATA_HOURLY["ice"]] * prepIntensityUnit
+    )
+    half_night_ice_intensity_max = (
+        interp_half_night_max[:, DATA_HOURLY["ice"]] * prepIntensityUnit
+    )
+    half_night_liquid_accum = (
+        interp_half_night_sum[:, DATA_HOURLY["rain"]] * prepAccumUnit
+    )
+    half_night_snow_accum = (
+        interp_half_night_sum[:, DATA_HOURLY["snow"]] * prepAccumUnit
+    )
     half_night_ice_accum = interp_half_night_sum[:, DATA_HOURLY["ice"]] * prepAccumUnit
-    half_night_precip_accum = half_night_liquid_accum + half_night_snow_accum + half_night_ice_accum
-    
+    half_night_precip_accum = (
+        half_night_liquid_accum + half_night_snow_accum + half_night_ice_accum
+    )
+
     # Pre-convert half-day wind and other fields
     half_day_wind_speed = interp_half_day_mean[:, DATA_HOURLY["wind"]] * windUnit
     half_day_wind_gust = interp_half_day_mean[:, DATA_HOURLY["gust"]] * windUnit
     half_day_visibility = interp_half_day_mean[:, DATA_HOURLY["vis"]] * visUnits
     half_day_pressure = interp_half_day_mean[:, DATA_HOURLY["pressure"]] / 100
-    
+
     half_night_wind_speed = interp_half_night_mean[:, DATA_HOURLY["wind"]] * windUnit
     half_night_wind_gust = interp_half_night_mean[:, DATA_HOURLY["gust"]] * windUnit
     half_night_visibility = interp_half_night_mean[:, DATA_HOURLY["vis"]] * visUnits
     half_night_pressure = interp_half_night_mean[:, DATA_HOURLY["pressure"]] / 100
-    
+
     if "stationPressure" in extraVars:
-        half_day_station_pressure = interp_half_day_mean[:, DATA_HOURLY["station_pressure"]] / 100
-        half_night_station_pressure = interp_half_night_mean[:, DATA_HOURLY["station_pressure"]] / 100
+        half_day_station_pressure = (
+            interp_half_day_mean[:, DATA_HOURLY["station_pressure"]] / 100
+        )
+        half_night_station_pressure = (
+            interp_half_night_mean[:, DATA_HOURLY["station_pressure"]] / 100
+        )
         daily_station_pressure = InterPday[:, DATA_DAY["station_pressure"]] / 100
-    
+
     # Apply rounding to all converted arrays
     daily_rounding_map = {
-        'temp': ROUNDING_RULES.get("temperatureHigh", 2),
-        'apparent': ROUNDING_RULES.get("apparentTemperatureHigh", 2),
-        'dew': ROUNDING_RULES.get("dewPoint", 2),
-        'pressure': ROUNDING_RULES.get("pressure", 2),
-        'wind': ROUNDING_RULES.get("windSpeed", 2),
-        'vis': ROUNDING_RULES.get("visibility", 2),
-        'precip_intensity': ROUNDING_RULES.get("precipIntensity", 4),
-        'precip_accum': ROUNDING_RULES.get("precipAccumulation", 2),
+        "temp": ROUNDING_RULES.get("temperatureHigh", 2),
+        "apparent": ROUNDING_RULES.get("apparentTemperatureHigh", 2),
+        "dew": ROUNDING_RULES.get("dewPoint", 2),
+        "pressure": ROUNDING_RULES.get("pressure", 2),
+        "wind": ROUNDING_RULES.get("windSpeed", 2),
+        "vis": ROUNDING_RULES.get("visibility", 2),
+        "precip_intensity": ROUNDING_RULES.get("precipIntensity", 4),
+        "precip_accum": ROUNDING_RULES.get("precipAccumulation", 2),
     }
-    
+
     # Round all the arrays
-    daily_temp_high = np.round(daily_temp_high, daily_rounding_map['temp'])
-    daily_temp_low = np.round(daily_temp_low, daily_rounding_map['temp'])
-    daily_temp_min = np.round(daily_temp_min, daily_rounding_map['temp'])
-    daily_temp_max = np.round(daily_temp_max, daily_rounding_map['temp'])
-    daily_apparent_high = np.round(daily_apparent_high, daily_rounding_map['apparent'])
-    daily_apparent_low = np.round(daily_apparent_low, daily_rounding_map['apparent'])
-    daily_apparent_min = np.round(daily_apparent_min, daily_rounding_map['apparent'])
-    daily_apparent_max = np.round(daily_apparent_max, daily_rounding_map['apparent'])
-    daily_dew_point = np.round(daily_dew_point, daily_rounding_map['dew'])
-    daily_pressure = np.round(daily_pressure, daily_rounding_map['pressure'])
-    daily_wind_speed = np.round(daily_wind_speed, daily_rounding_map['wind'])
-    daily_wind_gust = np.round(daily_wind_gust, daily_rounding_map['wind'])
-    daily_visibility = np.round(daily_visibility, daily_rounding_map['vis'])
-    daily_precip_intensity = np.round(daily_precip_intensity, daily_rounding_map['precip_intensity'])
-    daily_precip_intensity_max = np.round(daily_precip_intensity_max, daily_rounding_map['precip_intensity'])
-    daily_rain_intensity = np.round(daily_rain_intensity, daily_rounding_map['precip_intensity'])
-    daily_rain_intensity_max = np.round(daily_rain_intensity_max, daily_rounding_map['precip_intensity'])
-    daily_snow_intensity = np.round(daily_snow_intensity, daily_rounding_map['precip_intensity'])
-    daily_snow_intensity_max = np.round(daily_snow_intensity_max, daily_rounding_map['precip_intensity'])
-    daily_ice_intensity = np.round(daily_ice_intensity, daily_rounding_map['precip_intensity'])
-    daily_ice_intensity_max = np.round(daily_ice_intensity_max, daily_rounding_map['precip_intensity'])
-    daily_liquid_accum = np.round(daily_liquid_accum, daily_rounding_map['precip_accum'])
-    daily_snow_accum = np.round(daily_snow_accum, daily_rounding_map['precip_accum'])
-    daily_ice_accum = np.round(daily_ice_accum, daily_rounding_map['precip_accum'])
-    daily_precip_accum = np.round(daily_precip_accum, daily_rounding_map['precip_accum'])
-    
+    daily_temp_high = np.round(daily_temp_high, daily_rounding_map["temp"])
+    daily_temp_low = np.round(daily_temp_low, daily_rounding_map["temp"])
+    daily_temp_min = np.round(daily_temp_min, daily_rounding_map["temp"])
+    daily_temp_max = np.round(daily_temp_max, daily_rounding_map["temp"])
+    daily_apparent_high = np.round(daily_apparent_high, daily_rounding_map["apparent"])
+    daily_apparent_low = np.round(daily_apparent_low, daily_rounding_map["apparent"])
+    daily_apparent_min = np.round(daily_apparent_min, daily_rounding_map["apparent"])
+    daily_apparent_max = np.round(daily_apparent_max, daily_rounding_map["apparent"])
+    daily_dew_point = np.round(daily_dew_point, daily_rounding_map["dew"])
+    daily_pressure = np.round(daily_pressure, daily_rounding_map["pressure"])
+    daily_wind_speed = np.round(daily_wind_speed, daily_rounding_map["wind"])
+    daily_wind_gust = np.round(daily_wind_gust, daily_rounding_map["wind"])
+    daily_visibility = np.round(daily_visibility, daily_rounding_map["vis"])
+    daily_precip_intensity = np.round(
+        daily_precip_intensity, daily_rounding_map["precip_intensity"]
+    )
+    daily_precip_intensity_max = np.round(
+        daily_precip_intensity_max, daily_rounding_map["precip_intensity"]
+    )
+    daily_rain_intensity = np.round(
+        daily_rain_intensity, daily_rounding_map["precip_intensity"]
+    )
+    daily_rain_intensity_max = np.round(
+        daily_rain_intensity_max, daily_rounding_map["precip_intensity"]
+    )
+    daily_snow_intensity = np.round(
+        daily_snow_intensity, daily_rounding_map["precip_intensity"]
+    )
+    daily_snow_intensity_max = np.round(
+        daily_snow_intensity_max, daily_rounding_map["precip_intensity"]
+    )
+    daily_ice_intensity = np.round(
+        daily_ice_intensity, daily_rounding_map["precip_intensity"]
+    )
+    daily_ice_intensity_max = np.round(
+        daily_ice_intensity_max, daily_rounding_map["precip_intensity"]
+    )
+    daily_liquid_accum = np.round(
+        daily_liquid_accum, daily_rounding_map["precip_accum"]
+    )
+    daily_snow_accum = np.round(daily_snow_accum, daily_rounding_map["precip_accum"])
+    daily_ice_accum = np.round(daily_ice_accum, daily_rounding_map["precip_accum"])
+    daily_precip_accum = np.round(
+        daily_precip_accum, daily_rounding_map["precip_accum"]
+    )
+
     # Round half-day arrays
-    half_day_temp_high = np.round(half_day_temp_high, daily_rounding_map['temp'])
-    half_day_temp_low = np.round(half_day_temp_low, daily_rounding_map['temp'])
-    half_day_apparent_high = np.round(half_day_apparent_high, daily_rounding_map['apparent'])
-    half_day_apparent_low = np.round(half_day_apparent_low, daily_rounding_map['apparent'])
-    half_day_dew = np.round(half_day_dew, daily_rounding_map['dew'])
-    half_night_dew = np.round(half_night_dew, daily_rounding_map['dew'])
-    half_day_wind_speed = np.round(half_day_wind_speed, daily_rounding_map['wind'])
-    half_day_wind_gust = np.round(half_day_wind_gust, daily_rounding_map['wind'])
-    half_day_visibility = np.round(half_day_visibility, daily_rounding_map['vis'])
-    half_day_pressure = np.round(half_day_pressure, daily_rounding_map['pressure'])
-    half_night_wind_speed = np.round(half_night_wind_speed, daily_rounding_map['wind'])
-    half_night_wind_gust = np.round(half_night_wind_gust, daily_rounding_map['wind'])
-    half_night_visibility = np.round(half_night_visibility, daily_rounding_map['vis'])
-    half_night_pressure = np.round(half_night_pressure, daily_rounding_map['pressure'])
-    
-    half_day_precip_intensity = np.round(half_day_precip_intensity, daily_rounding_map['precip_intensity'])
-    half_day_precip_intensity_max = np.round(half_day_precip_intensity_max, daily_rounding_map['precip_intensity'])
-    half_day_rain_intensity = np.round(half_day_rain_intensity, daily_rounding_map['precip_intensity'])
-    half_day_rain_intensity_max = np.round(half_day_rain_intensity_max, daily_rounding_map['precip_intensity'])
-    half_day_snow_intensity = np.round(half_day_snow_intensity, daily_rounding_map['precip_intensity'])
-    half_day_snow_intensity_max = np.round(half_day_snow_intensity_max, daily_rounding_map['precip_intensity'])
-    half_day_ice_intensity = np.round(half_day_ice_intensity, daily_rounding_map['precip_intensity'])
-    half_day_ice_intensity_max = np.round(half_day_ice_intensity_max, daily_rounding_map['precip_intensity'])
-    half_day_liquid_accum = np.round(half_day_liquid_accum, daily_rounding_map['precip_accum'])
-    half_day_snow_accum = np.round(half_day_snow_accum, daily_rounding_map['precip_accum'])
-    half_day_ice_accum = np.round(half_day_ice_accum, daily_rounding_map['precip_accum'])
-    half_day_precip_accum = np.round(half_day_precip_accum, daily_rounding_map['precip_accum'])
-    
-    half_night_precip_intensity = np.round(half_night_precip_intensity, daily_rounding_map['precip_intensity'])
-    half_night_precip_intensity_max = np.round(half_night_precip_intensity_max, daily_rounding_map['precip_intensity'])
-    half_night_rain_intensity = np.round(half_night_rain_intensity, daily_rounding_map['precip_intensity'])
-    half_night_rain_intensity_max = np.round(half_night_rain_intensity_max, daily_rounding_map['precip_intensity'])
-    half_night_snow_intensity = np.round(half_night_snow_intensity, daily_rounding_map['precip_intensity'])
-    half_night_snow_intensity_max = np.round(half_night_snow_intensity_max, daily_rounding_map['precip_intensity'])
-    half_night_ice_intensity = np.round(half_night_ice_intensity, daily_rounding_map['precip_intensity'])
-    half_night_ice_intensity_max = np.round(half_night_ice_intensity_max, daily_rounding_map['precip_intensity'])
-    half_night_liquid_accum = np.round(half_night_liquid_accum, daily_rounding_map['precip_accum'])
-    half_night_snow_accum = np.round(half_night_snow_accum, daily_rounding_map['precip_accum'])
-    half_night_ice_accum = np.round(half_night_ice_accum, daily_rounding_map['precip_accum'])
-    half_night_precip_accum = np.round(half_night_precip_accum, daily_rounding_map['precip_accum'])
-    
+    half_day_temp_high = np.round(half_day_temp_high, daily_rounding_map["temp"])
+    half_day_temp_low = np.round(half_day_temp_low, daily_rounding_map["temp"])
+    half_day_apparent_high = np.round(
+        half_day_apparent_high, daily_rounding_map["apparent"]
+    )
+    half_day_apparent_low = np.round(
+        half_day_apparent_low, daily_rounding_map["apparent"]
+    )
+    half_day_dew = np.round(half_day_dew, daily_rounding_map["dew"])
+    half_night_dew = np.round(half_night_dew, daily_rounding_map["dew"])
+    half_day_wind_speed = np.round(half_day_wind_speed, daily_rounding_map["wind"])
+    half_day_wind_gust = np.round(half_day_wind_gust, daily_rounding_map["wind"])
+    half_day_visibility = np.round(half_day_visibility, daily_rounding_map["vis"])
+    half_day_pressure = np.round(half_day_pressure, daily_rounding_map["pressure"])
+    half_night_wind_speed = np.round(half_night_wind_speed, daily_rounding_map["wind"])
+    half_night_wind_gust = np.round(half_night_wind_gust, daily_rounding_map["wind"])
+    half_night_visibility = np.round(half_night_visibility, daily_rounding_map["vis"])
+    half_night_pressure = np.round(half_night_pressure, daily_rounding_map["pressure"])
+
+    half_day_precip_intensity = np.round(
+        half_day_precip_intensity, daily_rounding_map["precip_intensity"]
+    )
+    half_day_precip_intensity_max = np.round(
+        half_day_precip_intensity_max, daily_rounding_map["precip_intensity"]
+    )
+    half_day_rain_intensity = np.round(
+        half_day_rain_intensity, daily_rounding_map["precip_intensity"]
+    )
+    half_day_rain_intensity_max = np.round(
+        half_day_rain_intensity_max, daily_rounding_map["precip_intensity"]
+    )
+    half_day_snow_intensity = np.round(
+        half_day_snow_intensity, daily_rounding_map["precip_intensity"]
+    )
+    half_day_snow_intensity_max = np.round(
+        half_day_snow_intensity_max, daily_rounding_map["precip_intensity"]
+    )
+    half_day_ice_intensity = np.round(
+        half_day_ice_intensity, daily_rounding_map["precip_intensity"]
+    )
+    half_day_ice_intensity_max = np.round(
+        half_day_ice_intensity_max, daily_rounding_map["precip_intensity"]
+    )
+    half_day_liquid_accum = np.round(
+        half_day_liquid_accum, daily_rounding_map["precip_accum"]
+    )
+    half_day_snow_accum = np.round(
+        half_day_snow_accum, daily_rounding_map["precip_accum"]
+    )
+    half_day_ice_accum = np.round(
+        half_day_ice_accum, daily_rounding_map["precip_accum"]
+    )
+    half_day_precip_accum = np.round(
+        half_day_precip_accum, daily_rounding_map["precip_accum"]
+    )
+
+    half_night_precip_intensity = np.round(
+        half_night_precip_intensity, daily_rounding_map["precip_intensity"]
+    )
+    half_night_precip_intensity_max = np.round(
+        half_night_precip_intensity_max, daily_rounding_map["precip_intensity"]
+    )
+    half_night_rain_intensity = np.round(
+        half_night_rain_intensity, daily_rounding_map["precip_intensity"]
+    )
+    half_night_rain_intensity_max = np.round(
+        half_night_rain_intensity_max, daily_rounding_map["precip_intensity"]
+    )
+    half_night_snow_intensity = np.round(
+        half_night_snow_intensity, daily_rounding_map["precip_intensity"]
+    )
+    half_night_snow_intensity_max = np.round(
+        half_night_snow_intensity_max, daily_rounding_map["precip_intensity"]
+    )
+    half_night_ice_intensity = np.round(
+        half_night_ice_intensity, daily_rounding_map["precip_intensity"]
+    )
+    half_night_ice_intensity_max = np.round(
+        half_night_ice_intensity_max, daily_rounding_map["precip_intensity"]
+    )
+    half_night_liquid_accum = np.round(
+        half_night_liquid_accum, daily_rounding_map["precip_accum"]
+    )
+    half_night_snow_accum = np.round(
+        half_night_snow_accum, daily_rounding_map["precip_accum"]
+    )
+    half_night_ice_accum = np.round(
+        half_night_ice_accum, daily_rounding_map["precip_accum"]
+    )
+    half_night_precip_accum = np.round(
+        half_night_precip_accum, daily_rounding_map["precip_accum"]
+    )
+
     if "stationPressure" in extraVars:
-        half_day_station_pressure = np.round(half_day_station_pressure, daily_rounding_map['pressure'])
-        half_night_station_pressure = np.round(half_night_station_pressure, daily_rounding_map['pressure'])
-        daily_station_pressure = np.round(daily_station_pressure, daily_rounding_map['pressure'])
+        half_day_station_pressure = np.round(
+            half_day_station_pressure, daily_rounding_map["pressure"]
+        )
+        half_night_station_pressure = np.round(
+            half_night_station_pressure, daily_rounding_map["pressure"]
+        )
+        daily_station_pressure = np.round(
+            daily_station_pressure, daily_rounding_map["pressure"]
+        )
 
     def _pick_day_icon_and_summary(
         max_arr,
@@ -4639,7 +4814,11 @@ async def PW_Forecast(
                 fire = interp_half_day_mean[idx, DATA_HOURLY["fire"]]
                 solar = interp_half_day_mean[idx, DATA_HOURLY["solar"]]
                 cape = interp_half_day_mean[idx, DATA_HOURLY["cape"]]
-                station_press = half_day_station_pressure[idx] if "stationPressure" in extraVars else None
+                station_press = (
+                    half_day_station_pressure[idx]
+                    if "stationPressure" in extraVars
+                    else None
+                )
             else:
                 temp_val = half_day_temp_low[idx]
                 apparent_val = half_day_apparent_low[idx]
@@ -4670,7 +4849,11 @@ async def PW_Forecast(
                 fire = interp_half_night_mean[idx, DATA_HOURLY["fire"]]
                 solar = interp_half_night_mean[idx, DATA_HOURLY["solar"]]
                 cape = interp_half_night_mean[idx, DATA_HOURLY["cape"]]
-                station_press = half_night_station_pressure[idx] if "stationPressure" in extraVars else None
+                station_press = (
+                    half_night_station_pressure[idx]
+                    if "stationPressure" in extraVars
+                    else None
+                )
 
             item = {
                 "time": int(time_val),
@@ -4707,7 +4890,7 @@ async def PW_Forecast(
                 "solar": solar,
                 "cape": cape,
             }
-            
+
             if station_press is not None:
                 item["stationPressure"] = station_press
 
@@ -4737,7 +4920,6 @@ async def PW_Forecast(
 
         try:
             if idx < 8:
-
                 # Translate the text
                 if summaryText:
                     # Calculate the day summary from 4am to 4pm (13 hours)
@@ -5258,7 +5440,9 @@ async def PW_Forecast(
         ) * 3600  # Convert from mm/s to mm/hr
 
         # Convert snow water equivalent to snow depth (10:1 ratio assumed, depends on temperature)
-        InterPcurrent[DATA_CURRENT["snow_intensity"]] = np.array([era5_current_snow_we]) * 10
+        InterPcurrent[DATA_CURRENT["snow_intensity"]] = (
+            np.array([era5_current_snow_we]) * 10
+        )
 
         # ERA5 doesn't provide sleet/ice rates
         InterPcurrent[DATA_CURRENT["ice_intensity"]] = 0
@@ -5921,7 +6105,6 @@ async def PW_Forecast(
     else:
         InterPcurrent[DATA_CURRENT["fire"]] = MISSING_DATA
 
-
     # Save SI unit values for text generation before converting to requested units
     curr_temp_si = InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS
     curr_dew_si = InterPcurrent[DATA_CURRENT["dew"]] - KELVIN_TO_CELSIUS
@@ -5931,27 +6114,52 @@ async def PW_Forecast(
     # Pre-calculate all unit conversions for currently block (vectorized approach)
     # Temperature conversions
     if tempUnits == 0:
-        curr_temp_display = np.round((InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS) * 9 / 5 + 32, 2)
-        curr_apparent_display = np.round((InterPcurrent[DATA_CURRENT["apparent"]] - KELVIN_TO_CELSIUS) * 9 / 5 + 32, 2)
-        curr_dew_display = np.round((InterPcurrent[DATA_CURRENT["dew"]] - KELVIN_TO_CELSIUS) * 9 / 5 + 32, 2)
-        curr_feels_like_display = np.round((InterPcurrent[DATA_CURRENT["feels_like"]] - KELVIN_TO_CELSIUS) * 9 / 5 + 32, 2)
+        curr_temp_display = np.round(
+            (InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS) * 9 / 5 + 32, 2
+        )
+        curr_apparent_display = np.round(
+            (InterPcurrent[DATA_CURRENT["apparent"]] - KELVIN_TO_CELSIUS) * 9 / 5 + 32,
+            2,
+        )
+        curr_dew_display = np.round(
+            (InterPcurrent[DATA_CURRENT["dew"]] - KELVIN_TO_CELSIUS) * 9 / 5 + 32, 2
+        )
+        curr_feels_like_display = np.round(
+            (InterPcurrent[DATA_CURRENT["feels_like"]] - KELVIN_TO_CELSIUS) * 9 / 5
+            + 32,
+            2,
+        )
     else:
         curr_temp_display = np.round(InterPcurrent[DATA_CURRENT["temp"]] - tempUnits, 2)
-        curr_apparent_display = np.round(InterPcurrent[DATA_CURRENT["apparent"]] - tempUnits, 2)
+        curr_apparent_display = np.round(
+            InterPcurrent[DATA_CURRENT["apparent"]] - tempUnits, 2
+        )
         curr_dew_display = np.round(InterPcurrent[DATA_CURRENT["dew"]] - tempUnits, 2)
-        curr_feels_like_display = np.round(InterPcurrent[DATA_CURRENT["feels_like"]] - tempUnits, 2)
+        curr_feels_like_display = np.round(
+            InterPcurrent[DATA_CURRENT["feels_like"]] - tempUnits, 2
+        )
 
     # Other unit conversions
-    curr_storm_dist_display = np.round(InterPcurrent[DATA_CURRENT["storm_dist"]] * visUnits, 2)
-    curr_rain_intensity_display = np.round(InterPcurrent[DATA_CURRENT["rain_intensity"]] * prepIntensityUnit, 2)
-    curr_snow_intensity_display = np.round(InterPcurrent[DATA_CURRENT["snow_intensity"]] * prepIntensityUnit, 2)
-    curr_ice_intensity_display = np.round(InterPcurrent[DATA_CURRENT["ice_intensity"]] * prepIntensityUnit, 2)
+    curr_storm_dist_display = np.round(
+        InterPcurrent[DATA_CURRENT["storm_dist"]] * visUnits, 2
+    )
+    curr_rain_intensity_display = np.round(
+        InterPcurrent[DATA_CURRENT["rain_intensity"]] * prepIntensityUnit, 2
+    )
+    curr_snow_intensity_display = np.round(
+        InterPcurrent[DATA_CURRENT["snow_intensity"]] * prepIntensityUnit, 2
+    )
+    curr_ice_intensity_display = np.round(
+        InterPcurrent[DATA_CURRENT["ice_intensity"]] * prepIntensityUnit, 2
+    )
     curr_pressure_display = np.round(InterPcurrent[DATA_CURRENT["pressure"]] / 100, 2)
     curr_wind_display = np.round(InterPcurrent[DATA_CURRENT["wind"]] * windUnit, 2)
     curr_gust_display = np.round(InterPcurrent[DATA_CURRENT["gust"]] * windUnit, 2)
     curr_vis_display = np.round(InterPcurrent[DATA_CURRENT["vis"]] * visUnits, 2)
-    curr_station_pressure_display = np.round(InterPcurrent[DATA_CURRENT["station_pressure"]] / 100, 2)
-    
+    curr_station_pressure_display = np.round(
+        InterPcurrent[DATA_CURRENT["station_pressure"]] / 100, 2
+    )
+
     # Fields that don't need unit conversion but do need rounding
     curr_humidity_display = np.round(InterPcurrent[DATA_CURRENT["humidity"]], 2)
     curr_cloud_display = np.round(InterPcurrent[DATA_CURRENT["cloud"]], 2)
@@ -5960,8 +6168,14 @@ async def PW_Forecast(
     curr_smoke_display = np.round(InterPcurrent[DATA_CURRENT["smoke"]], 2)
     curr_fire_display = np.round(InterPcurrent[DATA_CURRENT["fire"]], 2)
     curr_solar_display = np.round(InterPcurrent[DATA_CURRENT["solar"]], 2)
-    curr_bearing_display = int(np.round(np.mod(InterPcurrent[DATA_CURRENT["bearing"]], 360), 0))
-    curr_cape_display = int(np.round(InterPcurrent[DATA_CURRENT["cape"]], 0)) if not np.isnan(InterPcurrent[DATA_CURRENT["cape"]]) else 0
+    curr_bearing_display = int(
+        np.round(np.mod(InterPcurrent[DATA_CURRENT["bearing"]], 360), 0)
+    )
+    curr_cape_display = (
+        int(np.round(InterPcurrent[DATA_CURRENT["cape"]], 0))
+        if not np.isnan(InterPcurrent[DATA_CURRENT["cape"]])
+        else 0
+    )
 
     if (
         (minuteItems[0]["precipIntensity"])
