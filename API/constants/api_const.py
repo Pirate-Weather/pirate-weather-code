@@ -85,7 +85,7 @@ PRECIP_NOISE_THRESHOLD_MMH = (
 
 # API versioning and ingest version constants
 # Version scheme is: Major.Minor.Patch
-API_VERSION = "V2.8.2"
+API_VERSION = "V2.8.3"
 
 # Command priorities
 NICE_PRIORITY = 20
