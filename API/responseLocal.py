@@ -4063,7 +4063,7 @@ async def PW_Forecast(
             if not np.isnan(hourly_display[idx, DATA_HOURLY["bearing"]])
             else 0,
             "cloudCover": hourly_display[idx, DATA_HOURLY["cloud"]],
-            "uvIndex": int(hourly_display[idx, DATA_HOURLY["uv"]]),
+            "uvIndex": hourly_display[idx, DATA_HOURLY["uv"]],
             "visibility": hourly_display[idx, DATA_HOURLY["vis"]],
             "ozone": hourly_display[idx, DATA_HOURLY["ozone"]],
             "smoke": hourly_display[idx, DATA_HOURLY["smoke"]],
