@@ -6262,11 +6262,11 @@ async def PW_Forecast(
     ### RETURN ###
     returnOBJ = dict()
 
-    returnOBJ["latitude"] = float(lat)
-    returnOBJ["longitude"] = float(lon_IN)
+    returnOBJ["latitude"] = round(float(lat), 4)
+    returnOBJ["longitude"] = round(float(lon_IN), 4)
     returnOBJ["timezone"] = str(tz_name)
     returnOBJ["offset"] = float(tz_offset / 60)
-    returnOBJ["elevation"] = float(ETOPO * elevUnit)
+    returnOBJ["elevation"] = round(float(ETOPO * elevUnit), 2)
 
     if exCurrently != 1:
         returnOBJ["currently"] = dict()

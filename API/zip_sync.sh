@@ -1,5 +1,7 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
+
+apk add --no-cache unzip coreutils util-linux pv >/dev/null 2>&1
 
 # Script to sync and unzip forecast model data from remote storage using rclone.
 # Designed to run in a container or cron job, continuously updating local data.
@@ -11,19 +13,11 @@ REMOTE_BASE="${REMOTE_BASE:-s3:piratezarr2/ForecastTar_v2/v30}"
 # READY_FILE automatically derived from BASE_DIR
 READY_FILE="${BASE_DIR}/models_ready"
 
-# Models to update
-MODELS=('HRRR'
-        'GFS'
-        'NBM'
-        'HRRR_6H'
-        'RTMA_RU'
-        'GEFS'
-        'ECMWF'
-        'NWS_Alerts'
-        'WMO_Alerts'
-        'SubH'
-        'NBM_Fire'
-        'ETOPO_DA_C')
+# Remove READY_FILE on startup if it already exists
+[ -f "$READY_FILE" ] && rm -f "$READY_FILE"
+
+# Models to update (space-separated list for POSIX sh)
+MODELS="NBM HRRR GFS HRRR_6H RTMA_RU GEFS ECMWF NWS_Alerts WMO_Alerts SubH NBM_Fire ETOPO_DA_C"
 
 cleanup() {
     # If the container/script exits, mark not-ready
@@ -39,16 +33,19 @@ while true; do
   echo "Starting update loop at $(date -Iseconds)"
   loop_ok=1
 
-  for MODEL in "${MODELS[@]}"; do
+  for MODEL in $MODELS; do
     echo "=== Updating $MODEL ==="
 
     REMOTE="${REMOTE_BASE}/${MODEL}.zarr.zip"
     ZIP_LOCAL="${BASE_DIR}/${MODEL}.zarr.zip"
     STATE_FILE="${BASE_DIR}/${MODEL}.zarr.state"
 
-
     # 1) Query remote info via rclone lsl (size, date, time, path)
-    remote_info="$(rclone lsl "$REMOTE" 2>/dev/null || true)"
+    if remote_info=$(rclone lsl "$REMOTE" 2>/dev/null); then
+      :
+    else
+      remote_info=""
+    fi
 
     if [ -z "$remote_info" ]; then
       echo "Remote file not found or rclone lsl failed for $MODEL"
@@ -57,7 +54,11 @@ while true; do
     fi
 
     # 2) Load last-seen remote info from state file (if any)
-    last_info="$(cat "$STATE_FILE" 2>/dev/null || echo "")"
+    if [ -f "$STATE_FILE" ]; then
+      last_info=$(cat "$STATE_FILE")
+    else
+      last_info=""
+    fi
 
     if [ "$remote_info" = "$last_info" ]; then
       echo "No change detected on remote for $MODEL. Skipping download/unzip."
@@ -92,13 +93,16 @@ while true; do
     echo "New ZIP for $MODEL downloaded. Extracting..."
 
     # 4) Create versioned directory and temp extraction dir
-    timestamp="$(date -u +"%Y%m%dT%H%M%SZ")"
+    timestamp=$(date -u +"%Y%m%dT%H%M%SZ")
     version_dir="${BASE_DIR}/${MODEL}_${timestamp}.zarr"
-    tmpdir="$(mktemp -d "${version_dir}.tmp.XXXXXX")" || {
+    tmpdir=$(mktemp -d "${version_dir}.tmp.XXXXXX") || {
       echo "Failed to create temp dir for $MODEL"
       loop_ok=0
       continue
     }
+
+    sleep 5
+
 
     # 5) Unzip with low priority so it doesn't hammer the disk, only for subsequent runs
     if [ "$first_run" -eq 1 ]; then
@@ -111,7 +115,7 @@ while true; do
       fi
     else
       # later runs: low priority I/O
-      if ! ionice -c3 nice -n 19 unzip -q "$ZIP_LOCAL" -d "$tmpdir"; then
+      if ! ionice -c3 nice -n 19 pv -q -L 400m "$ZIP_LOCAL" | busybox unzip -q -d "$tmpdir" -; then
         echo "Unzip failed for $MODEL"
         rm -rf "$tmpdir"
         loop_ok=0
@@ -123,25 +127,32 @@ while true; do
     mv "$tmpdir" "$version_dir"
     echo "Created versioned dir: $version_dir"
 
-    # 7) Atomically repoint MODEL.zarr symlink ? MODEL_<timestamp>.zarr (relative)
+    # 7) Atomically repoint MODEL.zarr symlink → MODEL_<timestamp>.zarr (relative)
     (
-      cd "$BASE_DIR"
+      cd "$BASE_DIR" || exit 1
       ln -sfn "$(basename "$version_dir")" "${MODEL}.zarr"
     )
-    echo "Updated symlink: ${BASE_DIR}/${MODEL}.zarr ? $(basename "$version_dir")"
+    echo "Updated symlink: ${BASE_DIR}/${MODEL}.zarr → $(basename "$version_dir")"
+
 
     # 8) Keep ONLY the newest version dir per model, delete older ones
     (
-      cd "$BASE_DIR"
-      # newest ? oldest, drop everything after the first
-      old_versions="$(ls -dt "${MODEL}_"*.zarr 2>/dev/null | tail -n +2 || true)"
+      cd "$BASE_DIR" || exit 1
+      # newest first, drop everything after the first
+      old_versions=$(
+        ls -dt "${MODEL}_"[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.zarr 2>/dev/null \
+        | sed '1d' || true
+      )
+    
       if [ -n "$old_versions" ]; then
         echo "Pruning old versions for $MODEL:"
-        echo "$old_versions"
-        echo "$old_versions"
-        echo "$old_versions" | xargs -d '\n' rm -rf
+        printf '%s\n' "$old_versions"
+        for d in $old_versions; do
+          rm -rf "$d"
+        done
       fi
     )
+
 
     # 9) Update state file with the latest remote info
     echo "$remote_info" > "$STATE_FILE"
