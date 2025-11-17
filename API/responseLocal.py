@@ -186,7 +186,7 @@ def setup_logging():
     root.addHandler(handler)
 
 
-# Define TimingMiddleware
+# Define TimingMiddleware for performance measurement
 class TimingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         start = time.perf_counter()
