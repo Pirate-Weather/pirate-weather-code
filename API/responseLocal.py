@@ -215,7 +215,7 @@ def update_zarr_store(initialRun):
     global RTMA_RU_Zarr
     global ERA5_Data
 
-    # Get Stage
+    # Get stage
     STAGE = os.environ.get("STAGE", "PROD")
 
     # Always load GFS
