@@ -17,6 +17,7 @@ import platform
 import re
 import sys
 import threading
+import time
 from collections import Counter
 from typing import Union
 
@@ -34,7 +35,17 @@ from fastapi.responses import ORJSONResponse
 from metpy.calc import relative_humidity_from_dewpoint
 from pirateweather_translations.dynamic_loader import load_all_translations
 from pytz import timezone, utc
+from starlette.middleware.base import BaseHTTPMiddleware
 from timezonefinder import TimezoneFinder
+
+
+class TimingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        start = time.perf_counter()
+        response = await call_next(request)
+        total_ms = (time.perf_counter() - start) * 1000
+        response.headers["X-Server-Time"] = f"{total_ms:.1f}"
+        return response
 
 from API.api_utils import (
     calculate_apparent_temperature,
@@ -312,6 +323,8 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+app.add_middleware(TimingMiddleware)
 
 
 def solar_rad(D_t, lat, t_t):
@@ -6575,14 +6588,24 @@ async def PW_Forecast(
         print("Replace NaN Time")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
+        handler_ms = (
+            datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
+            ).total_seconds() * 1000
+        
+    else:
+        handler_ms = (
+            datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
+        ).total_seconds() * 1000
+
     return ORJSONResponse(
         content=returnOBJ,
         headers={
             "X-Node-ID": platform.node(),
+            "X-Handler-Time": f"{handler_ms:.1f}",
             "X-Response-Time": str(
                 (
                     datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
-                ).microseconds
+                ).total_seconds() * 1000
             ),
             "Cache-Control": "max-age=900, must-revalidate",
         },
