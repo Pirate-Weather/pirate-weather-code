@@ -38,15 +38,6 @@ from pytz import timezone, utc
 from starlette.middleware.base import BaseHTTPMiddleware
 from timezonefinder import TimezoneFinder
 
-
-class TimingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        start = time.perf_counter()
-        response = await call_next(request)
-        total_ms = (time.perf_counter() - start) * 1000
-        response.headers["X-Server-Time"] = f"{total_ms:.1f}"
-        return response
-
 from API.api_utils import (
     calculate_apparent_temperature,
     clipLog,
@@ -193,6 +184,15 @@ def setup_logging():
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     root.addHandler(handler)
+
+# Define TimingMiddleware
+class TimingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        start = time.perf_counter()
+        response = await call_next(request)
+        total_ms = (time.perf_counter() - start) * 1000
+        response.headers["X-Server-Time"] = f"{total_ms:.1f}"
+        return response
 
 
 logger = logging.getLogger("pirate-weather-api")
