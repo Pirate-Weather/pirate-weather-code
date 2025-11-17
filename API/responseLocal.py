@@ -185,6 +185,7 @@ def setup_logging():
     root.setLevel(logging.INFO)
     root.addHandler(handler)
 
+
 # Define TimingMiddleware
 class TimingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
@@ -6590,8 +6591,8 @@ async def PW_Forecast(
 
         handler_ms = (
             datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
-            ).total_seconds() * 1000
-        
+        ).total_seconds() * 1000
+
     else:
         handler_ms = (
             datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
@@ -6605,7 +6606,8 @@ async def PW_Forecast(
             "X-Response-Time": str(
                 (
                     datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
-                ).total_seconds() * 1000
+                ).total_seconds()
+                * 1000
             ),
             "Cache-Control": "max-age=900, must-revalidate",
         },
