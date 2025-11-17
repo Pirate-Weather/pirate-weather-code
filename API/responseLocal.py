@@ -5206,92 +5206,6 @@ async def PW_Forecast(
     InterPcurrent = np.zeros(shape=max(DATA_CURRENT.values()) + 1)
     InterPcurrent[DATA_CURRENT["time"]] = int(minute_array_grib[0])
 
-    # Get prep probability, intensity and error from minutely
-    if "era5" in sourceList:
-        InterPcurrent[DATA_CURRENT["intensity"]] = (
-            (
-                ERA5_MERGED[currentIDX_hrrrh_A, ERA5["large_scale_rain_rate"]]
-                + ERA5_MERGED[currentIDX_hrrrh_A, ERA5["convective_rain_rate"]]
-                + ERA5_MERGED[
-                    currentIDX_hrrrh_A,
-                    ERA5["large_scale_snowfall_rate_water_equivalent"],
-                ]
-                + ERA5_MERGED[
-                    currentIDX_hrrrh_A,
-                    ERA5["convective_snowfall_rate_water_equivalent"],
-                ]
-            )
-            * interpFac1
-            + (
-                ERA5_MERGED[currentIDX_hrrrh, ERA5["large_scale_rain_rate"]]
-                + ERA5_MERGED[currentIDX_hrrrh, ERA5["convective_rain_rate"]]
-                + ERA5_MERGED[
-                    currentIDX_hrrrh, ERA5["large_scale_snowfall_rate_water_equivalent"]
-                ]
-                + ERA5_MERGED[
-                    currentIDX_hrrrh, ERA5["convective_snowfall_rate_water_equivalent"]
-                ]
-            )
-            * interpFac2
-        ) * 3600  # Convert from mm/s to mm/hr
-
-        # Calculate separate rain and snow intensities for ERA5
-        # Rain intensity (mm/h)
-        InterPcurrent[DATA_CURRENT["rain_intensity"]] = (
-            (
-                ERA5_MERGED[currentIDX_hrrrh_A, ERA5["large_scale_rain_rate"]]
-                + ERA5_MERGED[currentIDX_hrrrh_A, ERA5["convective_rain_rate"]]
-            )
-            * interpFac1
-            + (
-                ERA5_MERGED[currentIDX_hrrrh, ERA5["large_scale_rain_rate"]]
-                + ERA5_MERGED[currentIDX_hrrrh, ERA5["convective_rain_rate"]]
-            )
-            * interpFac2
-        ) * 3600  # Convert from mm/s to mm/hr
-
-        # Snow water equivalent (mm/h)
-        era5_current_snow_we = (
-            (
-                ERA5_MERGED[
-                    currentIDX_hrrrh_A,
-                    ERA5["large_scale_snowfall_rate_water_equivalent"],
-                ]
-                + ERA5_MERGED[
-                    currentIDX_hrrrh_A,
-                    ERA5["convective_snowfall_rate_water_equivalent"],
-                ]
-            )
-            * interpFac1
-            + (
-                ERA5_MERGED[
-                    currentIDX_hrrrh, ERA5["large_scale_snowfall_rate_water_equivalent"]
-                ]
-                + ERA5_MERGED[
-                    currentIDX_hrrrh, ERA5["convective_snowfall_rate_water_equivalent"]
-                ]
-            )
-            * interpFac2
-        ) * 3600  # Convert from mm/s to mm/hr
-
-        # Convert snow water equivalent to snow depth (10:1 ratio assumed, depends on temperature)
-        InterPcurrent[DATA_CURRENT["snow_intensity"]] = (
-            np.array([era5_current_snow_we]) * 10
-        )
-
-        # ERA5 doesn't provide sleet/ice rates
-        InterPcurrent[DATA_CURRENT["ice_intensity"]] = 0
-    else:
-        InterPcurrent[DATA_CURRENT["intensity"]] = InterPminute[
-            0, DATA_MINUTELY["intensity"]
-        ]
-        InterPcurrent[DATA_CURRENT["prob"]] = InterPminute[
-            0, DATA_MINUTELY["prob"]
-        ]  # "precipProbability"
-        InterPcurrent[DATA_CURRENT["error"]] = InterPminute[
-            0, DATA_MINUTELY["error"]
-        ]  # "precipIntensityError"
-
     # Temperature from RTMA_RU (highest priority), then subH, then NBM, then ECMWF, then GFS
     if "rtma_ru" in sourceList:
         InterPcurrent[DATA_CURRENT["temp"]] = dataOut_rtma_ru[0, RTMA_RU["temp"]]
@@ -5566,6 +5480,97 @@ async def PW_Forecast(
         CLIP_WIND["max"],
         "Gust Current",
     )
+
+
+    # Get prep probability, intensity and error from minutely
+    if "era5" in sourceList:
+        InterPcurrent[DATA_CURRENT["intensity"]] = (
+            (
+                ERA5_MERGED[currentIDX_hrrrh_A, ERA5["large_scale_rain_rate"]]
+                + ERA5_MERGED[currentIDX_hrrrh_A, ERA5["convective_rain_rate"]]
+                + ERA5_MERGED[
+                    currentIDX_hrrrh_A,
+                    ERA5["large_scale_snowfall_rate_water_equivalent"],
+                ]
+                + ERA5_MERGED[
+                    currentIDX_hrrrh_A,
+                    ERA5["convective_snowfall_rate_water_equivalent"],
+                ]
+            )
+            * interpFac1
+            + (
+                ERA5_MERGED[currentIDX_hrrrh, ERA5["large_scale_rain_rate"]]
+                + ERA5_MERGED[currentIDX_hrrrh, ERA5["convective_rain_rate"]]
+                + ERA5_MERGED[
+                    currentIDX_hrrrh, ERA5["large_scale_snowfall_rate_water_equivalent"]
+                ]
+                + ERA5_MERGED[
+                    currentIDX_hrrrh, ERA5["convective_snowfall_rate_water_equivalent"]
+                ]
+            )
+            * interpFac2
+        ) * 3600  # Convert from mm/s to mm/hr
+
+        # Calculate separate rain and snow intensities for ERA5
+        # Rain intensity (mm/h)
+        InterPcurrent[DATA_CURRENT["rain_intensity"]] = (
+            (
+                ERA5_MERGED[currentIDX_hrrrh_A, ERA5["large_scale_rain_rate"]]
+                + ERA5_MERGED[currentIDX_hrrrh_A, ERA5["convective_rain_rate"]]
+            )
+            * interpFac1
+            + (
+                ERA5_MERGED[currentIDX_hrrrh, ERA5["large_scale_rain_rate"]]
+                + ERA5_MERGED[currentIDX_hrrrh, ERA5["convective_rain_rate"]]
+            )
+            * interpFac2
+        ) * 3600  # Convert from mm/s to mm/hr
+
+        # Snow water equivalent (mm/h)
+        era5_current_snow_we = (
+            (
+                ERA5_MERGED[
+                    currentIDX_hrrrh_A,
+                    ERA5["large_scale_snowfall_rate_water_equivalent"],
+                ]
+                + ERA5_MERGED[
+                    currentIDX_hrrrh_A,
+                    ERA5["convective_snowfall_rate_water_equivalent"],
+                ]
+            )
+            * interpFac1
+            + (
+                ERA5_MERGED[
+                    currentIDX_hrrrh, ERA5["large_scale_snowfall_rate_water_equivalent"]
+                ]
+                + ERA5_MERGED[
+                    currentIDX_hrrrh, ERA5["convective_snowfall_rate_water_equivalent"]
+                ]
+            )
+            * interpFac2
+        ) * 3600  # Convert from mm/s to mm/hr
+
+        # Convert snow water equivalent to snow depth (cm/h)
+        InterPcurrent[DATA_CURRENT["snow_intensity"]] = estimate_snow_height(
+            np.array([era5_current_snow_we]),  # mm/h water equivalent
+            np.array([InterPcurrent[DATA_CURRENT["temp"]]]) - KELVIN_TO_CELSIUS,  # Celsius
+            np.array([InterPcurrent[DATA_CURRENT["wind"]]]),  # m/s
+        )[0]
+
+
+        # ERA5 doesn't provide sleet/ice rates
+        InterPcurrent[DATA_CURRENT["ice_intensity"]] = 0
+    else:
+        InterPcurrent[DATA_CURRENT["intensity"]] = InterPminute[
+            0, DATA_MINUTELY["intensity"]
+        ]
+        InterPcurrent[DATA_CURRENT["prob"]] = InterPminute[
+            0, DATA_MINUTELY["prob"]
+        ]  # "precipProbability"
+        InterPcurrent[DATA_CURRENT["error"]] = InterPminute[
+            0, DATA_MINUTELY["error"]
+        ]  # "precipIntensityError"
+
 
     # WindDir from RTMA_RU, then subH, then NBM, then ECMWF, then GFS
     if "rtma_ru" in sourceList:
