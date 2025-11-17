@@ -3612,6 +3612,7 @@ async def PW_Forecast(
 
     # Keep temperatures in SI units (Celsius) - conversion happens when building output
     # Convert from Kelvin to Celsius for internal use
+    # From here on out, temperature should be in Celsius
     InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] = (
         InterPhour[:, DATA_HOURLY["temp"] : DATA_HOURLY["humidity"]] - KELVIN_TO_CELSIUS
     )
