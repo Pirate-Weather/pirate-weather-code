@@ -477,7 +477,7 @@ points_in_polygons["string"] = (
     + points_in_polygons["URL"].astype(str)
 )
 
-# Combine the formatted strings using "~" as a spacer
+# Combine the formatted strings using "~" as a spacer, since it doesn't seem to be used in CAP messages
 df = points_in_polygons.groupby("INDEX").agg({"string": "~".join}).reset_index()
 
 
