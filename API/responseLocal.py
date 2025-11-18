@@ -42,6 +42,7 @@ from API.api_utils import (
     calculate_apparent_temperature,
     clipLog,
     estimate_visibility_gultepe_rh_pr_numpy,
+    fast_nearest_interp,
     replace_nan,
     select_daily_precip_type,
 )
@@ -202,6 +203,22 @@ handler = logging.StreamHandler()
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 handler.setFormatter(formatter)
 logger.addHandler(handler)
+
+
+# Initialize Zarr stores
+ETOPO_f = None
+SubH_Zarr = None
+HRRR_6H_Zarr = None
+GFS_Zarr = None
+ECMWF_Zarr = None
+NBM_Zarr = None
+NBM_Fire_Zarr = None
+GEFS_Zarr = None
+HRRR_Zarr = None
+NWS_Alerts_Zarr = None
+WMO_Alerts_Zarr = None
+RTMA_RU_Zarr = None
+ERA5_Data = None
 
 
 def update_zarr_store(initialRun):
@@ -1709,7 +1726,6 @@ async def PW_Forecast(
     if readGEFS:
         zarrTasks["GEFS"] = weather.zarr_read("GEFS", GEFS_Zarr, x_p, y_p)
 
-    ## WIP: Initial read of RTMA_RU/ECMWF/WMO_Alerts
     if readRTMA_RU:
         zarrTasks["RTMA_RU"] = weather.zarr_read(
             "RTMA_RU", RTMA_RU_Zarr, x_rtma, y_rtma
@@ -1778,6 +1794,10 @@ async def PW_Forecast(
             ) > datetime.timedelta(hours=46):
                 dataOut_h2 = False
                 print("OLD HRRR_6H")
+        else:  # Set all to false if any failed
+            dataOut = False
+            dataOut_h2 = False
+            dataOut_hrrrh = False
 
     if readNBM:
         dataOut_nbm = zarr_results["NBM"]
@@ -2026,14 +2046,12 @@ async def PW_Forecast(
             H2_StartIDX = nearest_index(dataOut_h2[:, 0], dataOut_hrrrh[-1, 0]) + 1
 
             if (H2_StartIDX < 1) or (HRRR_StartIDX < 2):
-                if "hrrr_18-48" in sourceTimes:
+                if "hrrr_18-48" in sourceList:
                     sourceTimes.pop("hrrr_18-48", None)
-                if "hrrr_18-48" in sourceTimes:
-                    sourceTimes.pop("hrrr_18-48", None)
-                if "hrrr_0-18" in sourceTimes:
+                    sourceList.remove("hrrr_18-48")
+                if "hrrr_0-18" in sourceList:
                     sourceTimes.pop("hrrr_0-18", None)
-                if "hrrr_0-18" in sourceTimes:
-                    sourceTimes.pop("hrrr_0-18", None)
+                    sourceList.remove("hrrr_0-18")
 
                 # Log the error
                 logger.error("HRRR data not available for the requested time range.")
@@ -2592,13 +2610,21 @@ async def PW_Forecast(
 
     if "ecmwf_ifs" in sourceList:
         for i in range(len(dataOut_ecmwf[0, :]) - 1):
-            ecmwfMinuteInterpolation[:, i + 1] = np.interp(
-                minute_array_grib,
-                dataOut_ecmwf[:, 0].squeeze(),
-                dataOut_ecmwf[:, i + 1],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
+            # Switch to nearest for precipitation type
+            if i + 1 == ECMWF["ptype"]:
+                ecmwfMinuteInterpolation[:, i + 1] = fast_nearest_interp(
+                    minute_array_grib,
+                    dataOut_ecmwf[:, 0].squeeze(),
+                    dataOut_ecmwf[:, i + 1],
+                )
+            else:
+                ecmwfMinuteInterpolation[:, i + 1] = np.interp(
+                    minute_array_grib,
+                    dataOut_ecmwf[:, 0].squeeze(),
+                    dataOut_ecmwf[:, i + 1],
+                    left=MISSING_DATA,
+                    right=MISSING_DATA,
+                )
 
     if "nbm" in sourceList:
         for i in [
@@ -2634,14 +2660,12 @@ async def PW_Forecast(
                 right=MISSING_DATA,
             )
 
-            # Precipitation type should be nearest, not linear
-            era5_MinuteInterpolation[:, ERA5["precipitation_type"]] = np.interp(
-                minute_array_grib,
-                ERA5_MERGED[:, 0].squeeze(),
-                ERA5_MERGED[:, ERA5["precipitation_type"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            ).round()
+        # Precipitation type should be nearest, not linear
+        era5_MinuteInterpolation[:, ERA5["precipitation_type"]] = fast_nearest_interp(
+            minute_array_grib,
+            ERA5_MERGED[:, 0].squeeze(),
+            ERA5_MERGED[:, ERA5["precipitation_type"]],
+        )
 
     # Timing Check
     if TIMING:
@@ -5299,35 +5323,52 @@ async def PW_Forecast(
             # WMO_alertDat was already read at line 2125
 
             # Match if any alerts
-            wmo_alerts = str(WMO_alertDat).split("|")
+            wmo_alerts = str(WMO_alertDat).split("~")
             # Loop through each alert
             for wmo_alert in wmo_alerts:
                 # Extract alert details
                 # Format: event}{description}{area_desc}{effective}{expires}{severity}{URL
                 wmo_alertDetails = wmo_alert.split("}{")
+                # Ensure there are enough parts to parse basic info, preventing IndexError.
+                if len(wmo_alertDetails) < 3:
+                    continue
+
                 alertEnd = None
                 expires_ts = -999
+                alertOnset = None
+                onset_ts = -999
+                alert_severity = "Unknown"
+                alert_uri = ""
 
                 # Parse times - WMO times are in ISO format
-                alertOnset = datetime.datetime.strptime(
-                    wmo_alertDetails[3], "%Y-%m-%dT%H:%M:%S%z"
-                ).astimezone(utc)
-                if wmo_alertDetails[4].strip():
+                if len(wmo_alertDetails) > 3 and wmo_alertDetails[3].strip():
+                    alertOnset = datetime.datetime.strptime(
+                        wmo_alertDetails[3], "%Y-%m-%dT%H:%M:%S%z"
+                    ).astimezone(utc)
+                    onset_ts = int(alertOnset.timestamp())
+
+                if len(wmo_alertDetails) > 4 and wmo_alertDetails[4].strip():
                     alertEnd = datetime.datetime.strptime(
                         wmo_alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
                     ).astimezone(utc)
                     expires_ts = int(alertEnd.timestamp())
+
+                if len(wmo_alertDetails) > 5:
+                    alert_severity = wmo_alertDetails[5]
+
+                if len(wmo_alertDetails) > 6:
+                    alert_uri = wmo_alertDetails[6]
 
                 wmo_alertDict = {
                     "title": wmo_alertDetails[0],
                     "regions": [
                         s.lstrip() for s in wmo_alertDetails[2].split(";") if s.strip()
                     ],
-                    "severity": wmo_alertDetails[5],
-                    "time": int(alertOnset.timestamp()),
+                    "severity": alert_severity,
+                    "time": onset_ts,
                     "expires": expires_ts,
                     "description": wmo_alertDetails[1],
-                    "uri": wmo_alertDetails[6],
+                    "uri": alert_uri,
                 }
 
                 # Only append if alert has not already expired
@@ -5345,8 +5386,6 @@ async def PW_Forecast(
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # Currently data, find points for linear averaging
-    # Use GFS, since should also be there and the should cover all times... this could be an issue at some point
-
     # If within 2 minutes of a hour, do not using rounding
     if np.min(np.abs(hour_array_grib - minute_array_grib[0])) < 120:
         currentIDX_hrrrh = np.argmin(np.abs(hour_array_grib - minute_array_grib[0]))
@@ -6571,7 +6610,7 @@ async def PW_Forecast(
             returnOBJ["flags"]["processTime"] = (
                 datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
             ).microseconds
-            returnOBJ["flags"]["ingest_version"] = ingest_version
+            returnOBJ["flags"]["ingestVersion"] = ingest_version
             # Return the approx location names, if they are found
             returnOBJ["flags"]["nearestCity"] = loc_name.get("city") or None
             returnOBJ["flags"]["nearestCountry"] = loc_name.get("country") or None
