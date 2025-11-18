@@ -1794,11 +1794,10 @@ async def PW_Forecast(
             ) > datetime.timedelta(hours=46):
                 dataOut_h2 = False
                 print("OLD HRRR_6H")
-        else: # Set all to false if any failed
+        else:  # Set all to false if any failed
             dataOut = False
             dataOut_h2 = False
             dataOut_hrrrh = False
-
 
     if readNBM:
         dataOut_nbm = zarr_results["NBM"]
