@@ -11,6 +11,7 @@ from API.constants.shared_const import KELVIN_TO_CELSIUS, MISSING_DATA
 
 logger = logging.getLogger(__name__)
 
+
 def fast_nearest_interp(xi, x, y):
     """Assumes that x is monotonically increasing!!."""
     # Source - https://stackoverflow.com/a
