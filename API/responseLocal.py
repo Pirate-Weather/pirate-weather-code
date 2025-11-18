@@ -5369,7 +5369,7 @@ async def PW_Forecast(
                     "description": wmo_alertDetails[1],
                     "uri": alert_uri,
                 }
-                
+
                 # Only append if alert has not already expired
                 if alertEnd is None or alertEnd > now_utc:
                     alertList.append(dict(wmo_alertDict))

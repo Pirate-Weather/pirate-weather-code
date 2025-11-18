@@ -32,8 +32,8 @@ def fast_nearest_interp(xi, x, y):
     # Source - https://stackoverflow.com/a/28677914
     # Posted by Joe Kington
     # Retrieved 2025-11-18, License - CC BY-SA 3.0
-    # 
-    
+    #
+
     spacing = np.diff(x) / 2
     x = x + np.hstack([spacing, spacing[-1]])
     # Append the last point in y twice for ease of use
