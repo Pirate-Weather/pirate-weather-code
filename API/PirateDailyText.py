@@ -14,7 +14,9 @@ from API.constants.text_const import (
     DEFAULT_POP,
     DEFAULT_VISIBILITY,
     PRECIP_INTENSITY_THRESHOLDS,
+    DAILY_TEXT_LIQUID_THRESHOLD
 )
+
 from API.PirateTextHelper import (
     calculate_precip_text,
     calculate_sky_icon,
@@ -31,7 +33,6 @@ AFTERNOON_START = 12
 EVENING_START = 17
 NIGHT_START = 22
 MAX_HOURS = 25
-PRECIP_THRESH = 0.25
 
 
 def _value_or_default(value, default):
@@ -1118,11 +1119,11 @@ def calculate_day_text(
         overall_min_visibility = min(overall_min_visibility, p_data["min_visibility"])
         overall_max_smoke = max(overall_max_smoke, p_data["max_smoke"])
 
-        # Check if precipitation is significant enough in this period (thresholds in cm)
+        # Check if precipitation is significant enough in this period (thresholds in mm)
         is_precip_in_period = (
             p_data["snow_accum"] > PRECIP_INTENSITY_THRESHOLDS["mid"]
-            or p_data["rain_accum"] > PRECIP_THRESH
-            or p_data["sleet_accum"] > PRECIP_THRESH
+            or p_data["rain_accum"] > DAILY_TEXT_LIQUID_THRESHOLD
+            or p_data["sleet_accum"] > DAILY_TEXT_LIQUID_THRESHOLD
         )
         if is_precip_in_period:
             precip_periods.append(i)
