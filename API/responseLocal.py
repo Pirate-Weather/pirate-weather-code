@@ -42,6 +42,7 @@ from API.api_utils import (
     calculate_apparent_temperature,
     clipLog,
     estimate_visibility_gultepe_rh_pr_numpy,
+    fast_nearest_interp,
     replace_nan,
     select_daily_precip_type,
 )
@@ -2608,13 +2609,21 @@ async def PW_Forecast(
 
     if "ecmwf_ifs" in sourceList:
         for i in range(len(dataOut_ecmwf[0, :]) - 1):
-            ecmwfMinuteInterpolation[:, i + 1] = np.interp(
-                minute_array_grib,
-                dataOut_ecmwf[:, 0].squeeze(),
-                dataOut_ecmwf[:, i + 1],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
+            # Switch to nearest for precipitation type
+            if i + 1 == ECMWF["ptype"]:
+                ecmwfMinuteInterpolation[:, i + 1] = fast_nearest_interp(
+                    minute_array_grib,
+                    dataOut_ecmwf[:, 0].squeeze(),
+                    dataOut_ecmwf[:, i + 1],
+                )
+            else:
+                ecmwfMinuteInterpolation[:, i + 1] = np.interp(
+                    minute_array_grib,
+                    dataOut_ecmwf[:, 0].squeeze(),
+                    dataOut_ecmwf[:, i + 1],
+                    left=MISSING_DATA,
+                    right=MISSING_DATA,
+                )
 
     if "nbm" in sourceList:
         for i in [
@@ -2650,14 +2659,13 @@ async def PW_Forecast(
                 right=MISSING_DATA,
             )
 
-            # Precipitation type should be nearest, not linear
-            era5_MinuteInterpolation[:, ERA5["precipitation_type"]] = np.interp(
-                minute_array_grib,
-                ERA5_MERGED[:, 0].squeeze(),
-                ERA5_MERGED[:, ERA5["precipitation_type"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            ).round()
+        # Precipitation type should be nearest, not linear
+        era5_MinuteInterpolation[:, ERA5["precipitation_type"]] = fast_nearest_interp(
+            minute_array_grib,
+            ERA5_MERGED[:, 0].squeeze(),
+            ERA5_MERGED[:, ERA5["precipitation_type"]],
+        )
+
 
     # Timing Check
     if TIMING:

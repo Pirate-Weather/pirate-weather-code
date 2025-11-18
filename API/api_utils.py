@@ -11,6 +11,18 @@ from API.constants.shared_const import KELVIN_TO_CELSIUS, MISSING_DATA
 
 logger = logging.getLogger(__name__)
 
+def fast_nearest_interp(xi, x, y):
+    """Assumes that x is monotonically increasing!!."""
+    # Source - https://stackoverflow.com/a
+    # Posted by Joe Kington
+    # Retrieved 2025-11-18, License - CC BY-SA 3.0
+    # Shift x points to centers
+    spacing = np.diff(x) / 2
+    x = x + np.hstack([spacing, spacing[-1]])
+    # Append the last point in y twice for ease of use
+    y = np.hstack([y, y[-1]])
+    return y[np.searchsorted(x, xi)]
+
 
 def replace_nan(obj, replacement=MISSING_DATA):
     """Recursively replace np.nan with a given value in a dict/list."""
