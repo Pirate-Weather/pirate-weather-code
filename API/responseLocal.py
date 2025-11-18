@@ -6610,7 +6610,7 @@ async def PW_Forecast(
             returnOBJ["flags"]["processTime"] = (
                 datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
             ).microseconds
-            returnOBJ["flags"]["ingest_version"] = ingest_version
+            returnOBJ["flags"]["ingestVersion"] = ingest_version
             # Return the approx location names, if they are found
             returnOBJ["flags"]["nearestCity"] = loc_name.get("city") or None
             returnOBJ["flags"]["nearestCountry"] = loc_name.get("country") or None
