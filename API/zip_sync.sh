@@ -92,7 +92,8 @@ while true; do
     # Prune old versions (keep only the most recent)
     (
       cd "$BASE_DIR" || exit 1
-      old_versions=$(ls -dt "${MODEL}_"*.zarr 2>/dev/null | sed '1d' || true)
+      old_versions=$(ls -dt "${MODEL}_"[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.zarr 2>/dev/null \
+      | sed '1d' || true)
       if [ -n "$old_versions" ]; then
         echo "Pruning old versions for $MODEL:"
         printf '%s\n' "$old_versions"
