@@ -10,13 +10,12 @@ from API.constants.text_const import (
     CLOUD_COVER_THRESHOLDS,
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    DAILY_TEXT_LIQUID_THRESHOLD,
     DEFAULT_HUMIDITY,
     DEFAULT_POP,
     DEFAULT_VISIBILITY,
     PRECIP_INTENSITY_THRESHOLDS,
-    DAILY_TEXT_LIQUID_THRESHOLD
 )
-
 from API.PirateTextHelper import (
     calculate_precip_text,
     calculate_sky_icon,
