@@ -5334,7 +5334,7 @@ async def PW_Forecast(
                         wmo_alertDetails[3], "%Y-%m-%dT%H:%M:%S%z"
                     ).astimezone(utc)
                     onset_ts = int(alertOnset.timestamp())
-                
+
                 if len(wmo_alertDetails) > 4:
                     alertEnd = datetime.datetime.strptime(
                         wmo_alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
@@ -5358,7 +5358,7 @@ async def PW_Forecast(
                     "description": wmo_alertDetails[1],
                     "uri": alert_uri,
                 }
-                
+
                 # Only append if alert has not already expired
                 if alertEnd is None or alertEnd > now_utc:
                     alertList.append(dict(wmo_alertDict))
