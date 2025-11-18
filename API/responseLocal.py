@@ -204,6 +204,22 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
+# Initialize Zarr stores
+ETOPO_f = None
+SubH_Zarr = None
+HRRR_6H_Zarr = None
+GFS_Zarr = None
+ECMWF_Zarr = None
+NBM_Zarr = None
+NBM_Fire_Zarr = None
+GEFS_Zarr = None
+HRRR_Zarr = None
+NWS_Alerts_Zarr = None
+WMO_Alerts_Zarr = None
+RTMA_RU_Zarr = None
+ERA5_Data = None
+
+
 def update_zarr_store(initialRun):
     """Load zarr data stores from static file paths.
 
@@ -5299,7 +5315,7 @@ async def PW_Forecast(
             # WMO_alertDat was already read at line 2125
 
             # Match if any alerts
-            wmo_alerts = str(WMO_alertDat).split("|")
+            wmo_alerts = str(WMO_alertDat).split("~")
             # Loop through each alert
             for wmo_alert in wmo_alerts:
                 # Extract alert details
@@ -5307,29 +5323,42 @@ async def PW_Forecast(
                 wmo_alertDetails = wmo_alert.split("}{")
                 alertEnd = None
                 expires_ts = -999
+                alertOnset = None
+                onset_ts = -999
+                alert_severity = "Unknown"
+                alert_uri = ""
 
                 # Parse times - WMO times are in ISO format
-                alertOnset = datetime.datetime.strptime(
-                    wmo_alertDetails[3], "%Y-%m-%dT%H:%M:%S%z"
-                ).astimezone(utc)
-                if wmo_alertDetails[4].strip():
+                if len(wmo_alertDetails) > 3:
+                    alertOnset = datetime.datetime.strptime(
+                        wmo_alertDetails[3], "%Y-%m-%dT%H:%M:%S%z"
+                    ).astimezone(utc)
+                    onset_ts = int(alertOnset.timestamp())
+                
+                if len(wmo_alertDetails) > 4:
                     alertEnd = datetime.datetime.strptime(
                         wmo_alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
                     ).astimezone(utc)
                     expires_ts = int(alertEnd.timestamp())
+
+                if len(wmo_alertDetails) > 5:
+                    alert_severity = wmo_alertDetails[5]
+
+                if len(wmo_alertDetails) > 6:
+                    alert_uri = wmo_alertDetails[6]
 
                 wmo_alertDict = {
                     "title": wmo_alertDetails[0],
                     "regions": [
                         s.lstrip() for s in wmo_alertDetails[2].split(";") if s.strip()
                     ],
-                    "severity": wmo_alertDetails[5],
-                    "time": int(alertOnset.timestamp()),
+                    "severity": alert_severity,
+                    "time": onset_ts,
                     "expires": expires_ts,
                     "description": wmo_alertDetails[1],
-                    "uri": wmo_alertDetails[6],
+                    "uri": alert_uri,
                 }
-
+                
                 # Only append if alert has not already expired
                 if alertEnd is None or alertEnd > now_utc:
                     alertList.append(dict(wmo_alertDict))

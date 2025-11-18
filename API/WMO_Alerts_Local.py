@@ -477,8 +477,8 @@ points_in_polygons["string"] = (
     + points_in_polygons["URL"].astype(str)
 )
 
-# Combine the formatted strings using "|" as a spacer
-df = points_in_polygons.groupby("INDEX").agg({"string": "|".join}).reset_index()
+# Combine the formatted strings using "~" as a spacer
+df = points_in_polygons.groupby("INDEX").agg({"string": "~".join}).reset_index()
 
 
 # Merge back into primary geodataframe
