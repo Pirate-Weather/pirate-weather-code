@@ -5385,8 +5385,6 @@ async def PW_Forecast(
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
     # Currently data, find points for linear averaging
-    # Use GFS, since should also be there and the should cover all times... this could be an issue at some point
-
     # If within 2 minutes of a hour, do not using rounding
     if np.min(np.abs(hour_array_grib - minute_array_grib[0])) < 120:
         currentIDX_hrrrh = np.argmin(np.abs(hour_array_grib - minute_array_grib[0]))
