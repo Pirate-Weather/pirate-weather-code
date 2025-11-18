@@ -38,7 +38,7 @@ DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM = 5.0  # In snow units (mm of snow)
 DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0  # (mm liquid)
 
 # Text thresholds for precipitation accumulation
-DAILY_TEXT_LIQUID_THRESHOLD = 0.2  # (mm rain/sleet)
+DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM = 0.2  # (mm rain/sleet)
 
 # Visibility thresholds (meters)
 FOG_THRESHOLD_METERS = 1000

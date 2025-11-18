@@ -15,6 +15,7 @@ from API.constants.text_const import (
     DEFAULT_POP,
     DEFAULT_VISIBILITY,
     PRECIP_INTENSITY_THRESHOLDS,
+    DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM
 )
 from API.PirateTextHelper import (
     calculate_precip_text,
@@ -1121,8 +1122,8 @@ def calculate_day_text(
         # Check if precipitation is significant enough in this period (thresholds in mm)
         is_precip_in_period = (
             p_data["snow_accum"] > PRECIP_INTENSITY_THRESHOLDS["mid"]
-            or p_data["rain_accum"] > DAILY_TEXT_LIQUID_THRESHOLD
-            or p_data["sleet_accum"] > DAILY_TEXT_LIQUID_THRESHOLD
+            or p_data["rain_accum"] > DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM
+            or p_data["sleet_accum"] > DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM
         )
         if is_precip_in_period:
             precip_periods.append(i)
