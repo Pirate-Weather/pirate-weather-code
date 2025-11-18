@@ -5328,6 +5328,10 @@ async def PW_Forecast(
                 # Extract alert details
                 # Format: event}{description}{area_desc}{effective}{expires}{severity}{URL
                 wmo_alertDetails = wmo_alert.split("}{")
+                # Ensure there are enough parts to parse basic info, preventing IndexError.
+                if len(wmo_alertDetails) < 3:
+                    continue
+
                 alertEnd = None
                 expires_ts = -999
                 alertOnset = None
@@ -5336,13 +5340,13 @@ async def PW_Forecast(
                 alert_uri = ""
 
                 # Parse times - WMO times are in ISO format
-                if len(wmo_alertDetails) > 3:
+                if len(wmo_alertDetails) > 3 and wmo_alertDetails[3].strip():
                     alertOnset = datetime.datetime.strptime(
                         wmo_alertDetails[3], "%Y-%m-%dT%H:%M:%S%z"
                     ).astimezone(utc)
                     onset_ts = int(alertOnset.timestamp())
 
-                if len(wmo_alertDetails) > 4:
+                if len(wmo_alertDetails) > 4 and wmo_alertDetails[4].strip():
                     alertEnd = datetime.datetime.strptime(
                         wmo_alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
                     ).astimezone(utc)
@@ -5365,7 +5369,7 @@ async def PW_Forecast(
                     "description": wmo_alertDetails[1],
                     "uri": alert_uri,
                 }
-
+                
                 # Only append if alert has not already expired
                 if alertEnd is None or alertEnd > now_utc:
                     alertList.append(dict(wmo_alertDict))

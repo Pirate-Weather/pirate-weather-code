@@ -13,11 +13,27 @@ logger = logging.getLogger(__name__)
 
 
 def fast_nearest_interp(xi, x, y):
-    """Assumes that x is monotonically increasing!!."""
-    # Source - https://stackoverflow.com/a
+    """Performs a fast nearest-neighbor interpolation.
+
+    This function assumes that the input array `x` is monotonically increasing.
+    It is sourced from a Stack Overflow answer by Joe Kington.
+
+    Source: https://stackoverflow.com/a/28677914
+    License: CC BY-SA 3.0
+
+    Args:
+        xi (np.ndarray): The coordinates to evaluate the interpolated values at.
+        x (np.ndarray): The data point coordinates, must be monotonically increasing.
+        y (np.ndarray): The data point values.
+
+    Returns:
+        np.ndarray: The interpolated values, same shape as `xi`.
+    """
+    # Source - https://stackoverflow.com/a/28677914
     # Posted by Joe Kington
     # Retrieved 2025-11-18, License - CC BY-SA 3.0
-    # Shift x points to centers
+    # 
+    
     spacing = np.diff(x) / 2
     x = x + np.hstack([spacing, spacing[-1]])
     # Append the last point in y twice for ease of use
