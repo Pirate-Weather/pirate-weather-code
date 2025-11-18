@@ -1726,7 +1726,6 @@ async def PW_Forecast(
     if readGEFS:
         zarrTasks["GEFS"] = weather.zarr_read("GEFS", GEFS_Zarr, x_p, y_p)
 
-    ## WIP: Initial read of RTMA_RU/ECMWF/WMO_Alerts
     if readRTMA_RU:
         zarrTasks["RTMA_RU"] = weather.zarr_read(
             "RTMA_RU", RTMA_RU_Zarr, x_rtma, y_rtma
@@ -1795,6 +1794,11 @@ async def PW_Forecast(
             ) > datetime.timedelta(hours=46):
                 dataOut_h2 = False
                 print("OLD HRRR_6H")
+        else: # Set all to false if any failed
+            dataOut = False
+            dataOut_h2 = False
+            dataOut_hrrrh = False
+
 
     if readNBM:
         dataOut_nbm = zarr_results["NBM"]
@@ -2043,14 +2047,12 @@ async def PW_Forecast(
             H2_StartIDX = nearest_index(dataOut_h2[:, 0], dataOut_hrrrh[-1, 0]) + 1
 
             if (H2_StartIDX < 1) or (HRRR_StartIDX < 2):
-                if "hrrr_18-48" in sourceTimes:
+                if "hrrr_18-48" in sourceList:
                     sourceTimes.pop("hrrr_18-48", None)
-                if "hrrr_18-48" in sourceTimes:
-                    sourceTimes.pop("hrrr_18-48", None)
-                if "hrrr_0-18" in sourceTimes:
+                    sourceList.remove("hrrr_18-48")
+                if "hrrr_0-18" in sourceList:
                     sourceTimes.pop("hrrr_0-18", None)
-                if "hrrr_0-18" in sourceTimes:
-                    sourceTimes.pop("hrrr_0-18", None)
+                    sourceList.remove("hrrr_0-18")
 
                 # Log the error
                 logger.error("HRRR data not available for the requested time range.")
