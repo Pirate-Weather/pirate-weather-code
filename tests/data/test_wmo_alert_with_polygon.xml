@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+  <identifier>2.49.0.0.250.0.FR.20251119160107.266025</identifier>
+  <sender>vigilance@meteo.fr</sender>
+  <sent>2025-11-19T16:01:07+01:00</sent>
+  <status>Actual</status>
+  <msgType>Alert</msgType>
+  <scope>Public</scope>
+  <info>
+    <language>fr-FR</language>
+    <category>Met</category>
+    <event>Vigilance jaune neige-verglas</event>
+    <responseType>Monitor</responseType>
+    <urgency>Future</urgency>
+    <severity>Moderate</severity>
+    <certainty>Likely</certainty>
+    <effective>2025-11-20T00:00:00+01:00</effective>
+    <onset>2025-11-20T00:00:00+01:00</onset>
+    <expires>2025-11-21T00:00:00+01:00</expires>
+    <senderName>METEO-FRANCE</senderName>
+    <headline>Vigilance jaune neige-verglas</headline>
+    <description>Des phénomènes habituels dans la région mais occasionnellement et localement dangereux sont prévus (exemple : mistral, orage d'été, montée des eaux, fortes vagues submergeant le littoral).</description>
+    <instruction>Soyez attentifs si vous pratiquez des activités sensibles au risque météorologique ou à proximité d'un rivage ou d'un cours d'eau. Tenez-vous au courant de l'évolution de la situation.</instruction>
+    <web>https://vigilance.meteofrance.fr/</web>
+    <contact>METEO-FRANCE</contact>
+    <parameter>
+      <valueName>awareness_level</valueName>
+      <value>2; yellow; Moderate</value>
+    </parameter>
+    <parameter>
+      <valueName>awareness_type</valueName>
+      <value>2; snow-ice</value>
+    </parameter>
+    <area>
+      <areaDesc>Paris Region Test Area</areaDesc>
+      <polygon>48.8,2.2 48.9,2.2 48.9,2.4 48.8,2.4 48.8,2.2</polygon>
+      <geocode>
+        <valueName>NUTS3</valueName>
+        <value>FR101</value>
+      </geocode>
+    </area>
+    <area>
+      <areaDesc>Northern France Test Area</areaDesc>
+      <polygon>49.0,2.0 49.2,2.0 49.2,2.3 49.0,2.3 49.0,2.0</polygon>
+      <geocode>
+        <valueName>NUTS3</valueName>
+        <value>FR302</value>
+      </geocode>
+    </area>
+  </info>
+</alert>
