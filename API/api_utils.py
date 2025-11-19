@@ -12,6 +12,35 @@ from API.constants.shared_const import KELVIN_TO_CELSIUS, MISSING_DATA
 logger = logging.getLogger(__name__)
 
 
+def fast_nearest_interp(xi, x, y):
+    """Performs a fast nearest-neighbor interpolation.
+
+    This function assumes that the input array `x` is monotonically increasing.
+    It is sourced from a Stack Overflow answer by Joe Kington.
+
+    Source: https://stackoverflow.com/a/28677914
+    License: CC BY-SA 3.0
+
+    Args:
+        xi (np.ndarray): The coordinates to evaluate the interpolated values at.
+        x (np.ndarray): The data point coordinates, must be monotonically increasing.
+        y (np.ndarray): The data point values.
+
+    Returns:
+        np.ndarray: The interpolated values, same shape as `xi`.
+    """
+    # Source - https://stackoverflow.com/a/28677914
+    # Posted by Joe Kington
+    # Retrieved 2025-11-18, License - CC BY-SA 3.0
+    #
+
+    spacing = np.diff(x) / 2
+    x = x + np.hstack([spacing, spacing[-1]])
+    # Append the last point in y twice for ease of use
+    y = np.hstack([y, y[-1]])
+    return y[np.searchsorted(x, xi)]
+
+
 def replace_nan(obj, replacement=MISSING_DATA):
     """Recursively replace np.nan with a given value in a dict/list."""
     if isinstance(obj, dict):
@@ -20,36 +49,6 @@ def replace_nan(obj, replacement=MISSING_DATA):
         return [replace_nan(v, replacement) for v in obj]
     elif isinstance(obj, float) and np.isnan(obj):
         return replacement
-    else:
-        return obj
-
-
-def apply_rounding(obj, rounding_rules):
-    """
-    Recursively apply rounding to numeric values in a dict/list based on field names.
-
-    Parameters:
-    - obj: The object to round (dict, list, or primitive)
-    - rounding_rules: Dict mapping field names to number of decimal places
-
-    Returns:
-    - The object with rounded values
-    """
-    if isinstance(obj, dict):
-        new_dict = {}
-        for k, v in obj.items():
-            if k in rounding_rules and isinstance(v, (int, float)) and not np.isnan(v):
-                num_decimals = rounding_rules[k]
-                rounded_val = round(v, num_decimals)
-                if num_decimals == 0:
-                    new_dict[k] = int(rounded_val)
-                else:
-                    new_dict[k] = rounded_val
-            else:
-                new_dict[k] = apply_rounding(v, rounding_rules)
-        return new_dict
-    elif isinstance(obj, list):
-        return [apply_rounding(item, rounding_rules) for item in obj]
     else:
         return obj
 

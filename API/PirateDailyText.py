@@ -9,6 +9,7 @@ from API.constants.text_const import (
     CLOUD_COVER_DAILY_THRESHOLDS,
     CLOUD_COVER_THRESHOLDS,
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
+    DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM,
     DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
     DEFAULT_HUMIDITY,
     DEFAULT_POP,
@@ -31,7 +32,6 @@ AFTERNOON_START = 12
 EVENING_START = 17
 NIGHT_START = 22
 MAX_HOURS = 25
-PRECIP_THRESH = 0.25
 
 
 def _value_or_default(value, default):
@@ -957,6 +957,7 @@ def calculate_day_text(
                     hour["visibility"],
                     hour["temperature"],
                     hour["dewPoint"],
+                    hour["windSpeed"],
                     hour["smoke"],
                     icon_set,
                     "icon",
@@ -1117,11 +1118,11 @@ def calculate_day_text(
         overall_min_visibility = min(overall_min_visibility, p_data["min_visibility"])
         overall_max_smoke = max(overall_max_smoke, p_data["max_smoke"])
 
-        # Check if precipitation is significant enough in this period (thresholds in cm)
+        # Check if precipitation is significant enough in this period (thresholds in mm)
         is_precip_in_period = (
             p_data["snow_accum"] > PRECIP_INTENSITY_THRESHOLDS["mid"]
-            or p_data["rain_accum"] > PRECIP_THRESH
-            or p_data["sleet_accum"] > PRECIP_THRESH
+            or p_data["rain_accum"] > DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM
+            or p_data["sleet_accum"] > DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM
         )
         if is_precip_in_period:
             precip_periods.append(i)
@@ -1446,6 +1447,7 @@ def calculate_day_text(
                     hours[0].get("visibility", DEFAULT_VISIBILITY),
                     hours[0].get("temperature", MISSING_DATA),
                     hours[0].get("dewPoint", MISSING_DATA),
+                    hours[0].get("windSpeed", MISSING_DATA),
                     hours[0].get("smoke", 0.0),
                     icon_set,
                     "summary",
@@ -1599,6 +1601,7 @@ def calculate_day_text(
                 overall_min_visibility,
                 overall_temp_at_min_spread,
                 overall_dewpoint_at_min_spread,
+                overall_max_wind,
                 overall_max_smoke,
                 icon_set,
                 "summary",
@@ -1738,6 +1741,7 @@ def calculate_day_text(
                     overall_min_visibility,
                     overall_temp_at_min_spread,
                     overall_dewpoint_at_min_spread,
+                    overall_max_wind,
                     overall_max_smoke,
                     icon_set,
                     "icon",
