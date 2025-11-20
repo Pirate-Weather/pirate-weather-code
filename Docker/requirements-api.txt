@@ -1,6 +1,5 @@
 aiobotocore[boto3]==2.25.2
 astral==3.2
-crc32c==2.8
 dask==2025.11.0
 fastapi[standard]==0.121.2
 fastapi-utils==0.8.0
