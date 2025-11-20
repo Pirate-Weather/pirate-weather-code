@@ -437,8 +437,14 @@ def geocode_to_polygon(
 
                     # Try to find regions that might correspond
                     # EMMA regions often align with NUTS2, so try prefix matching
-                    nuts2_prefix = geocode_value[:4] if len(geocode_value) >= 4 else geocode_value[:3]
-                    prefix_match = nuts_gdf[nuts_gdf["NUTS_ID"].str.startswith(nuts2_prefix)]
+                    nuts2_prefix = (
+                        geocode_value[:4]
+                        if len(geocode_value) >= 4
+                        else geocode_value[:3]
+                    )
+                    prefix_match = nuts_gdf[
+                        nuts_gdf["NUTS_ID"].str.startswith(nuts2_prefix)
+                    ]
 
                     if not prefix_match.empty:
                         # Use union of matching regions

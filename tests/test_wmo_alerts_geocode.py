@@ -7,9 +7,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # Conditional import for shapely - only needed for test functions that use it
 try:
     from shapely.geometry import Polygon
+
     SHAPELY_AVAILABLE = True
 except ImportError:
     SHAPELY_AVAILABLE = False
+
     # Mock Polygon class for when shapely is not available
     class Polygon:
         def __init__(self, *args, **kwargs):
