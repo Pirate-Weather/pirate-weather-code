@@ -6228,6 +6228,11 @@ async def PW_Forecast(
         else 0
     )
 
+    # Round current day accumulations to 4 decimal places
+    dayZeroIce = float(np.round(dayZeroIce * prepAccumUnit, 4))
+    dayZeroRain = float(np.round(dayZeroRain * prepAccumUnit, 4))
+    dayZeroSnow = float(np.round(dayZeroSnow * prepAccumUnit, 4))
+
     if (
         (minuteItems[0]["precipIntensity"])
         > (HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepIntensityUnit)
@@ -6306,7 +6311,7 @@ async def PW_Forecast(
     returnOBJ["longitude"] = round(float(lon_IN), 4)
     returnOBJ["timezone"] = str(tz_name)
     returnOBJ["offset"] = float(tz_offset / 60)
-    returnOBJ["elevation"] = round(float(ETOPO * elevUnit), 2)
+    returnOBJ["elevation"] = int(round(float(ETOPO * elevUnit), 0))
 
     if exCurrently != 1:
         returnOBJ["currently"] = dict()
