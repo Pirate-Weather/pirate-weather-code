@@ -58,6 +58,7 @@ import logging
 import os
 import shutil
 import sys
+import time
 from typing import Dict, Iterable, List, Optional, Tuple
 from xml.etree import ElementTree as ET
 
@@ -360,21 +361,60 @@ def _rss_item_links_and_guids(feed_content: bytes) -> List[Tuple[str, Optional[s
 # -------------------------------
 # Geocode to Polygon Conversion
 # -------------------------------
-def load_nuts_boundaries() -> Optional[gpd.GeoDataFrame]:
+def load_nuts_boundaries(cache_dir: str = None) -> Optional[gpd.GeoDataFrame]:
     """
     Load NUTS (Nomenclature of Territorial Units for Statistics) boundaries from Eurostat.
 
-    Returns a GeoDataFrame with NUTS regions at level 3 (most detailed).
-    Returns None if the download fails.
+    Uses caching to avoid re-downloading on every run. If a cached file exists and is
+    less than 30 days old, it will be used instead of re-downloading.
+
+    Parameters
+    ----------
+    cache_dir : str, optional
+        Directory to cache the NUTS boundaries file. If None, uses forecast_process_dir.
+
+    Returns
+    -------
+    GeoDataFrame or None
+        A GeoDataFrame with NUTS regions at level 3 (most detailed), or None if loading fails.
     """
+    if cache_dir is None:
+        cache_dir = forecast_process_dir
+
+    cache_file = os.path.join(cache_dir, "nuts_boundaries_cache.geojson")
+    cache_max_age_days = 30  # Re-download if cache is older than 30 days
+
+    # Check if cached file exists and is recent enough
+    use_cache = False
+    if os.path.exists(cache_file):
+        file_age_days = (time.time() - os.path.getmtime(cache_file)) / 86400
+        if file_age_days < cache_max_age_days:
+            use_cache = True
+            print(f"Using cached NUTS boundaries (age: {file_age_days:.1f} days)")
+
     try:
-        # Use 03M (medium resolution, 1:3 million scale) for reasonable file size
-        # Level 3 provides the most detailed regional boundaries
-        nuts_url = "https://ec.europa.eu/eurostat/cache/GISCO/distribution/v2/nuts/geojson/NUTS_RG_03M_2021_4326_LEVL_3.geojson"
-        print("Downloading NUTS boundaries from Eurostat...")
-        nuts_gdf = gpd.read_file(nuts_url)
-        print(f"Loaded {len(nuts_gdf)} NUTS3 regions")
+        if use_cache:
+            # Load from cache
+            nuts_gdf = gpd.read_file(cache_file)
+            print(f"Loaded {len(nuts_gdf)} NUTS3 regions from cache")
+        else:
+            # Download fresh data
+            # Use 03M (medium resolution, 1:3 million scale) for reasonable file size
+            # Level 3 provides the most detailed regional boundaries
+            nuts_url = "https://ec.europa.eu/eurostat/cache/GISCO/distribution/v2/nuts/geojson/NUTS_RG_03M_2021_4326_LEVL_3.geojson"
+            print("Downloading NUTS boundaries from Eurostat...")
+            nuts_gdf = gpd.read_file(nuts_url)
+            print(f"Downloaded {len(nuts_gdf)} NUTS3 regions")
+
+            # Save to cache for future use
+            try:
+                nuts_gdf.to_file(cache_file, driver="GeoJSON")
+                print(f"Cached NUTS boundaries to {cache_file}")
+            except Exception as cache_error:
+                print(f"Warning: Could not cache NUTS boundaries: {cache_error}")
+
         return nuts_gdf
+
     except Exception as e:
         print(f"Warning: Could not load NUTS boundaries: {e}")
         print("Geocode-to-polygon conversion will be disabled")
@@ -386,6 +426,8 @@ def geocode_to_polygon(
 ) -> Optional[Polygon]:
     """
     Convert a geocode (NUTS3 or EMMA_ID) to a polygon geometry.
+
+    Uses optimized lookups with early returns to minimize processing time.
 
     Parameters
     ----------
@@ -406,52 +448,46 @@ def geocode_to_polygon(
 
     try:
         if geocode_name == "NUTS3":
-            # Direct NUTS3 code lookup
+            # Direct NUTS3 code lookup - optimized with boolean indexing
             match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
             if not match.empty:
                 return match.geometry.iloc[0]
 
         elif geocode_name == "EMMA_ID":
             # EMMA_ID format: [Country][Number] (e.g., IT003, FR433, DE001)
-            # Try multiple strategies:
+            # Try multiple strategies with early returns for efficiency:
 
             # Strategy 1: Direct match (some EMMA IDs align with NUTS codes)
             match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
             if not match.empty:
                 return match.geometry.iloc[0]
 
-            # Strategy 2: Try as NUTS2 code (e.g., IT00 -> matches ITH1)
+            # Strategy 2: Country-based prefix matching
             # Extract country code (first 2 chars)
             if len(geocode_value) >= 2:
                 country = geocode_value[:2]
 
-                # Try matching by NUTS name or searching for similar codes
-                # Look for NUTS regions in the same country
+                # Filter by country first to reduce search space
                 country_regions = nuts_gdf[nuts_gdf["CNTR_CODE"] == country]
 
                 if not country_regions.empty:
-                    # Strategy 3: Use union of all NUTS3 regions for that country level
-                    # This is a fallback that provides *some* geographic coverage
-                    # Better than excluding the alert entirely
-                    # For more precision, would need actual EMMA_ID boundary files
-
-                    # Try to find regions that might correspond
+                    # Strategy 3: Prefix matching for NUTS2 alignment
                     # EMMA regions often align with NUTS2, so try prefix matching
                     nuts2_prefix = (
                         geocode_value[:4]
                         if len(geocode_value) >= 4
                         else geocode_value[:3]
                     )
-                    prefix_match = nuts_gdf[
-                        nuts_gdf["NUTS_ID"].str.startswith(nuts2_prefix)
+                    prefix_match = country_regions[
+                        country_regions["NUTS_ID"].str.startswith(nuts2_prefix)
                     ]
 
                     if not prefix_match.empty:
-                        # Use union of matching regions
+                        # Use union of matching regions for better coverage
                         return prefix_match.geometry.union_all()
 
                     # Last resort: return first matching country region
-                    # This is very approximate but better than nothing
+                    # This is very approximate but better than excluding the alert
                     return country_regions.geometry.iloc[0]
 
         # Fallback: try direct lookup regardless of geocode_name
