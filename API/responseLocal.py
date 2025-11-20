@@ -6229,9 +6229,9 @@ async def PW_Forecast(
     )
 
     # Round current day accumulations to 4 decimal places
-    dayZeroIce = float(np.round(dayZeroIce, 4))
-    dayZeroRain = float(np.round(dayZeroRain, 4))
-    dayZeroSnow = float(np.round(dayZeroSnow, 4))
+    dayZeroIce = float(np.round(dayZeroIce * prepAccumUnit, 4))
+    dayZeroRain = float(np.round(dayZeroRain * prepAccumUnit, 4))
+    dayZeroSnow = float(np.round(dayZeroSnow * prepAccumUnit, 4))
 
     if (
         (minuteItems[0]["precipIntensity"])
