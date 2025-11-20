@@ -179,7 +179,9 @@ def test_extract_geocode_with_polygon():
   </info>
 </alert>"""
 
-    results = _extract_polygons_from_cap_test(cap_xml, "test-source", "http://test.com/alert")
+    results = _extract_polygons_from_cap_test(
+        cap_xml, "test-source", "http://test.com/alert"
+    )
 
     assert len(results) == 1
     result = results[0]
@@ -220,7 +222,9 @@ def test_extract_geocode_without_polygon():
   </info>
 </alert>"""
 
-    results = _extract_polygons_from_cap_test(cap_xml, "fr-source", "http://test.fr/alert")
+    results = _extract_polygons_from_cap_test(
+        cap_xml, "fr-source", "http://test.fr/alert"
+    )
 
     assert len(results) == 1
     result = results[0]
@@ -258,7 +262,9 @@ def test_extract_no_geocode_with_polygon():
   </info>
 </alert>"""
 
-    results = _extract_polygons_from_cap_test(cap_xml, "test-no-geo", "http://test.com/nogeo")
+    results = _extract_polygons_from_cap_test(
+        cap_xml, "test-no-geo", "http://test.com/nogeo"
+    )
 
     assert len(results) == 1
     result = results[0]
@@ -297,7 +303,9 @@ def test_extract_multiple_geocodes_uses_first():
   </info>
 </alert>"""
 
-    results = _extract_polygons_from_cap_test(cap_xml, "test-multi", "http://test.com/multi")
+    results = _extract_polygons_from_cap_test(
+        cap_xml, "test-multi", "http://test.com/multi"
+    )
 
     assert len(results) == 1
     result = results[0]
@@ -329,7 +337,8 @@ def test_extract_past_urgency_skipped():
   </info>
 </alert>"""
 
-    results = _extract_polygons_from_cap_test(cap_xml, "test-past", "http://test.com/past")
+    results = _extract_polygons_from_cap_test(
+        cap_xml, "test-past", "http://test.com/past"
+    )
 
     assert len(results) == 0  # Should be skipped
-
