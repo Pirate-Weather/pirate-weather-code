@@ -1,10 +1,10 @@
 """
 Alexander Rey, October 2025
 
-NOTE: This script only processes alerts where the CAP contains polygon data. This does not include every alert.
+NOTE: This script processes alerts where the CAP contains polygon data or geocode information.
 NOTE: US Alerts are handled separately in NWS_Alerts_Local.py, since polygons are not always included in the CAP messages.
 
-Retrieve CAP alert polygons from all RSS feeds and return them as a GeoDataFrame.
+Retrieve CAP alert polygons and geocodes from all RSS feeds and return them as a GeoDataFrame.
 
 This convenience function automates the entire workflow:
 
@@ -14,9 +14,9 @@ This convenience function automates the entire workflow:
    at ``https://severeweather.wmo.int/v2/cap-alerts/{sourceId}/rss.xml``.
 3. Parse each feed for item links and download every CAP XML
    document referenced.
-4. Extract all polygons defined in the CAP documents and assemble
+4. Extract all polygons and geocodes defined in the CAP documents and assemble
    them into a ``geopandas.GeoDataFrame`` with columns for
-   ``source_id``, ``event``, ``area_desc`` and a geometry column.
+   ``source_id``, ``event``, ``area_desc``, ``geocode_name``, ``geocode_value`` and a geometry column.
 
 Parameters
 ----------
@@ -29,7 +29,8 @@ Returns
 geopandas.GeoDataFrame
     A GeoDataFrame where each row corresponds to a single polygon
     extracted from a CAP message.  The geometry column contains
-    ``shapely.geometry.Polygon`` objects in EPSG:4326.
+    ``shapely.geometry.Polygon`` objects in EPSG:4326. Geocode information
+    is included in ``geocode_name`` and ``geocode_value`` columns when available.
 
 Notes
 -----
@@ -39,6 +40,8 @@ Notes
   number of feeds and the volume of CAP alerts published.
 * Polygons are not simplified or validated beyond ensuring that
   they contain at least three vertices and are closed.
+* Geocode information (EMMA_ID, NUTS3, etc.) is extracted and stored
+  alongside polygon data when present.
 """
 
 from __future__ import annotations
@@ -174,6 +177,24 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
             area_desc = area.findtext(
                 "cap:areaDesc" if ns else "areaDesc", "", ns
             ).strip()
+
+            # Extract geocode information if present
+            geocode_name = ""
+            geocode_value = ""
+            for geocode_elem in area.findall("cap:geocode" if ns else "geocode", ns):
+                value_name = geocode_elem.findtext(
+                    "cap:valueName" if ns else "valueName", "", ns
+                ).strip()
+                value = geocode_elem.findtext(
+                    "cap:value" if ns else "value", "", ns
+                ).strip()
+                if value_name and value:
+                    geocode_name = value_name
+                    geocode_value = value
+                    break  # Use the first geocode found
+
+            # Process polygons if available
+            has_polygon = False
             for poly_elem in area.findall("cap:polygon" if ns else "polygon", ns):
                 polygon_text = (poly_elem.text or "").strip()
                 if not polygon_text:
@@ -194,6 +215,7 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                         coords.append(coords[0])
                     try:
                         poly = Polygon(coords)
+                        has_polygon = True
                         results.append(
                             (
                                 source_id,
@@ -205,11 +227,34 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                                 area_desc,
                                 poly,
                                 cap_link,
+                                geocode_name,
+                                geocode_value,
                             )
                         )
                     except Exception as e:
                         print(f"Polygon construction failed: {e}")
                         continue
+
+            # If no polygon was found but geocode exists, still create an entry
+            # Use a None/empty polygon placeholder - will be filtered later
+            if not has_polygon and geocode_name and geocode_value:
+                # Create a minimal point geometry as placeholder (0,0) - will be filtered
+                # This allows geocode-only alerts to be stored for future processing
+                results.append(
+                    (
+                        source_id,
+                        event_text,
+                        description_text,
+                        severity,
+                        effective,
+                        expires,
+                        area_desc,
+                        None,  # No polygon geometry
+                        cap_link,
+                        geocode_name,
+                        geocode_value,
+                    )
+                )
 
     return results
 
@@ -407,20 +452,27 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
                     area_desc,
                     poly,
                     cap_link,
+                    geocode_name,
+                    geocode_value,
                 ) in poly_entries:
-                    rows.append(
-                        {
-                            "source_id": src_id,
-                            "event": event,
-                            "description": description,
-                            "severity": severity,
-                            "effective": effective,
-                            "expires": expires,
-                            "area_desc": area_desc,
-                            "URL": cap_link,  # optionally store cap_link; add it to fetch_and_extract signature if you want it
-                        }
-                    )
-                    geometries.append(poly)
+                    # Only include entries that have a polygon geometry
+                    # Geocode-only alerts (poly=None) are not included in spatial processing
+                    if poly is not None:
+                        rows.append(
+                            {
+                                "source_id": src_id,
+                                "event": event,
+                                "description": description,
+                                "severity": severity,
+                                "effective": effective,
+                                "expires": expires,
+                                "area_desc": area_desc,
+                                "URL": cap_link,
+                                "geocode_name": geocode_name,
+                                "geocode_value": geocode_value,
+                            }
+                        )
+                        geometries.append(poly)
 
         # Kick off all feed tasks
         await asyncio.gather(*(process_feed(sid) for sid in source_ids))
@@ -475,6 +527,12 @@ points_in_polygons["string"] = (
     + "}"
     + "{"
     + points_in_polygons["URL"].astype(str)
+    + "}"
+    + "{"
+    + points_in_polygons["geocode_name"].astype(str)
+    + "}"
+    + "{"
+    + points_in_polygons["geocode_value"].astype(str)
 )
 
 # Combine the formatted strings using "~" as a spacer, since it doesn't seem to be used in CAP messages
