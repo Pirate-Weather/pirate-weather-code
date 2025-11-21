@@ -4612,7 +4612,7 @@ async def PW_Forecast(
         DATA_DAY["solar"]: ROUNDING_RULES.get("solar", 2),
         DATA_DAY["station_pressure"]: ROUNDING_RULES.get("pressure", 2),
         DATA_DAY["cape"]: ROUNDING_RULES.get("cape", 0),
-        DATA_DAY["windBearing"]: ROUNDING_RULES.get("cape", 0),
+        DATA_DAY["bearing"]: ROUNDING_RULES.get("cape", 0),
     }
 
     for idx_field, decimals in daily_mean_rounding_map.items():
@@ -4703,7 +4703,7 @@ async def PW_Forecast(
         DATA_HOURLY["solar"]: ROUNDING_RULES.get("solar", 2),
         DATA_HOURLY["station_pressure"]: ROUNDING_RULES.get("pressure", 2),
         DATA_HOURLY["cape"]: ROUNDING_RULES.get("cape", 0),
-        DATA_HOURLY["windBearing"]: ROUNDING_RULES.get("windBearing", 0),
+        DATA_HOURLY["bearing"]: ROUNDING_RULES.get("windBearing", 0),
     }
 
     def _apply_rounding_to(arr, rounding_map):
