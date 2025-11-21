@@ -3949,7 +3949,7 @@ async def PW_Forecast(
         DATA_HOURLY["fire"]: ROUNDING_RULES.get("fireIndex", 2),
         DATA_HOURLY["solar"]: ROUNDING_RULES.get("solar", 2),
         DATA_HOURLY["cape"]: ROUNDING_RULES.get("cape", 0),
-        DATA_HOURLY["windBearing"]: ROUNDING_RULES.get("cape", 0),
+        DATA_HOURLY["bearing"]: ROUNDING_RULES.get("windBearing", 0),
     }
 
     # Apply rounding in-place to the hourly_display array
@@ -4612,7 +4612,7 @@ async def PW_Forecast(
         DATA_DAY["solar"]: ROUNDING_RULES.get("solar", 2),
         DATA_DAY["station_pressure"]: ROUNDING_RULES.get("pressure", 2),
         DATA_DAY["cape"]: ROUNDING_RULES.get("cape", 0),
-        DATA_DAY["bearing"]: ROUNDING_RULES.get("cape", 0),
+        DATA_DAY["bearing"]: ROUNDING_RULES.get("windBearing", 0),
     }
 
     for idx_field, decimals in daily_mean_rounding_map.items():
