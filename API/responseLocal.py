@@ -3948,6 +3948,8 @@ async def PW_Forecast(
         DATA_HOURLY["smoke"]: ROUNDING_RULES.get("smoke", 2),
         DATA_HOURLY["fire"]: ROUNDING_RULES.get("fireIndex", 2),
         DATA_HOURLY["solar"]: ROUNDING_RULES.get("solar", 2),
+        DATA_HOURLY["cape"]: ROUNDING_RULES.get("cape", 0),
+        DATA_HOURLY["windBearing"]: ROUNDING_RULES.get("cape", 0),
     }
 
     # Apply rounding in-place to the hourly_display array
@@ -4609,6 +4611,8 @@ async def PW_Forecast(
         DATA_DAY["fire"]: ROUNDING_RULES.get("fireIndex", 2),
         DATA_DAY["solar"]: ROUNDING_RULES.get("solar", 2),
         DATA_DAY["station_pressure"]: ROUNDING_RULES.get("pressure", 2),
+        DATA_DAY["cape"]: ROUNDING_RULES.get("cape", 0),
+        DATA_DAY["windBearing"]: ROUNDING_RULES.get("cape", 0),
     }
 
     for idx_field, decimals in daily_mean_rounding_map.items():
@@ -4698,6 +4702,8 @@ async def PW_Forecast(
         DATA_HOURLY["fire"]: ROUNDING_RULES.get("fireIndex", 2),
         DATA_HOURLY["solar"]: ROUNDING_RULES.get("solar", 2),
         DATA_HOURLY["station_pressure"]: ROUNDING_RULES.get("pressure", 2),
+        DATA_HOURLY["cape"]: ROUNDING_RULES.get("cape", 0),
+        DATA_HOURLY["windBearing"]: ROUNDING_RULES.get("windBearing", 0),
     }
 
     def _apply_rounding_to(arr, rounding_map):
@@ -4884,7 +4890,7 @@ async def PW_Forecast(
                 "pressure": display_mean[idx, DATA_HOURLY["pressure"]],
                 "windSpeed": display_mean[idx, DATA_HOURLY["wind"]],
                 "windGust": display_mean[idx, DATA_HOURLY["gust"]],
-                "windBearing": interp_mean[idx, DATA_HOURLY["bearing"]],
+                "windBearing": int(interp_mean[idx, DATA_HOURLY["bearing"]]),
                 "cloudCover": display_mean[idx, DATA_HOURLY["cloud"]],
                 "uvIndex": display_mean[idx, DATA_HOURLY["uv"]],
                 "visibility": display_mean[idx, DATA_HOURLY["vis"]],
@@ -4895,7 +4901,7 @@ async def PW_Forecast(
                 "iceAccumulation": ice_accum,
                 "fireIndex": display_mean[idx, DATA_HOURLY["fire"]],
                 "solar": display_mean[idx, DATA_HOURLY["solar"]],
-                "cape": interp_mean[idx, DATA_HOURLY["cape"]],
+                "cape": int(interp_mean[idx, DATA_HOURLY["cape"]]),
             }
 
             if "stationPressure" in extraVars:
@@ -5108,7 +5114,7 @@ async def PW_Forecast(
             "windSpeed": daily_display_mean[idx, DATA_DAY["wind"]],
             "windGust": daily_display_mean[idx, DATA_DAY["gust"]],
             "windGustTime": int(InterPdayMaxTime[idx, DATA_DAY["gust"]]),
-            "windBearing": InterPday[idx, DATA_DAY["bearing"]],
+            "windBearing": int(InterPday[idx, DATA_DAY["bearing"]]),
             "cloudCover": daily_display_mean[idx, DATA_DAY["cloud"]],
             "uvIndex": daily_display_max[idx, DATA_DAY["uv"]],
             "uvIndexTime": int(InterPdayMaxTime[idx, DATA_DAY["uv"]]),
