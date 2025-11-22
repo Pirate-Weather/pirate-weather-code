@@ -425,7 +425,20 @@ def geocode_to_polygon(
     geocode_value: str, geocode_name: str, nuts_gdf: Optional[gpd.GeoDataFrame]
 ) -> Optional[Polygon]:
     """
-    Convert a geocode (NUTS3 or EMMA_ID) to a polygon geometry.
+    Convert a geocode to a polygon geometry.
+
+    Currently supports NUTS3 and EMMA_ID geocodes. Other geocode types are logged
+    but not converted to polygons.
+
+    Supported geocode types:
+    - NUTS3: European NUTS regions (exact match via Eurostat boundaries)
+    - EMMA_ID: EUMETNET MeteoAlarm regions (approximation using NUTS)
+
+    Known unsupported types (will be logged for future analysis):
+    - AMOC-AreaCode: Australian weather district codes
+    - UGC: Universal Geographic Code (US/Canada zones)
+    - SAME: Specific Area Message Encoding (US FIPS codes)
+    - Country-specific codes (Japan JMA, China, New Zealand, etc.)
 
     Uses optimized lookups with early returns to minimize processing time.
 
@@ -434,14 +447,14 @@ def geocode_to_polygon(
     geocode_value : str
         The geocode value (e.g., "FR433", "IT003")
     geocode_name : str
-        The geocode type (e.g., "NUTS3", "EMMA_ID")
+        The geocode type (e.g., "NUTS3", "EMMA_ID", "AMOC-AreaCode")
     nuts_gdf : GeoDataFrame or None
         GeoDataFrame containing NUTS boundaries
 
     Returns
     -------
     Polygon or None
-        The polygon geometry for the geocode, or None if not found
+        The polygon geometry for the geocode, or None if not found/supported
     """
     if nuts_gdf is None or not geocode_value:
         return None
@@ -497,6 +510,12 @@ def geocode_to_polygon(
 
     except Exception as e:
         print(f"Warning: Error converting geocode {geocode_name}={geocode_value}: {e}")
+
+    # Log unsupported geocode types for future analysis
+    # Currently supported: NUTS3, EMMA_ID
+    # Known unsupported: AMOC-AreaCode (Australia), UGC (US/Canada), SAME (US), etc.
+    if geocode_name not in ["NUTS3", "EMMA_ID"]:
+        print(f"Info: Unsupported geocode type '{geocode_name}' with value '{geocode_value}' - polygon conversion not available")
 
     return None
 
