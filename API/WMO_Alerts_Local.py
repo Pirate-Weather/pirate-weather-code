@@ -1,22 +1,26 @@
 """
 Alexander Rey, October 2025
 
-NOTE: This script only processes alerts where the CAP contains polygon data. This does not include every alert.
+NOTE: This script processes alerts where the CAP contains polygon data or geocode information.
+NOTE: Geocodes (NUTS3, EMMA_ID) are automatically converted to polygons using Eurostat NUTS boundaries.
 NOTE: US Alerts are handled separately in NWS_Alerts_Local.py, since polygons are not always included in the CAP messages.
 
-Retrieve CAP alert polygons from all RSS feeds and return them as a GeoDataFrame.
+Retrieve CAP alert polygons and geocodes from all RSS feeds and return them as a GeoDataFrame.
 
 This convenience function automates the entire workflow:
 
 1. Download the WMO ``sources.json`` file to determine which feed
    identifiers are currently operational.
-2. For each ``sourceId``, fetch the corresponding RSS feed located
+2. Load NUTS (Nomenclature of Territorial Units for Statistics) boundaries
+   from Eurostat for geocode-to-polygon conversion.
+3. For each ``sourceId``, fetch the corresponding RSS feed located
    at ``https://severeweather.wmo.int/v2/cap-alerts/{sourceId}/rss.xml``.
-3. Parse each feed for item links and download every CAP XML
+4. Parse each feed for item links and download every CAP XML
    document referenced.
-4. Extract all polygons defined in the CAP documents and assemble
-   them into a ``geopandas.GeoDataFrame`` with columns for
-   ``source_id``, ``event``, ``area_desc`` and a geometry column.
+5. Extract all polygons and geocodes defined in the CAP documents.
+6. Convert geocodes (NUTS3, EMMA_ID) to polygon geometries when possible.
+7. Assemble them into a ``geopandas.GeoDataFrame`` with columns for
+   ``source_id``, ``event``, ``area_desc``, ``geocode_name``, ``geocode_value`` and a geometry column.
 
 Parameters
 ----------
@@ -28,8 +32,9 @@ Returns
 -------
 geopandas.GeoDataFrame
     A GeoDataFrame where each row corresponds to a single polygon
-    extracted from a CAP message.  The geometry column contains
-    ``shapely.geometry.Polygon`` objects in EPSG:4326.
+    extracted from a CAP message or converted from a geocode.  The geometry column contains
+    ``shapely.geometry.Polygon`` objects in EPSG:4326. Geocode information
+    is included in ``geocode_name`` and ``geocode_value`` columns when available.
 
 Notes
 -----
@@ -39,6 +44,10 @@ Notes
   number of feeds and the volume of CAP alerts published.
 * Polygons are not simplified or validated beyond ensuring that
   they contain at least three vertices and are closed.
+* Geocode information (EMMA_ID, NUTS3, etc.) is extracted and converted
+  to polygon geometries when NUTS boundaries are available.
+* NUTS3 codes are matched directly to Eurostat NUTS regions.
+* EMMA_ID codes are approximated using NUTS regions based on country and prefix matching.
 """
 
 from __future__ import annotations
@@ -49,6 +58,7 @@ import logging
 import os
 import shutil
 import sys
+import time
 from typing import Dict, Iterable, List, Optional, Tuple
 from xml.etree import ElementTree as ET
 
@@ -174,6 +184,24 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
             area_desc = area.findtext(
                 "cap:areaDesc" if ns else "areaDesc", "", ns
             ).strip()
+
+            # Extract geocode information if present
+            geocode_name = ""
+            geocode_value = ""
+            for geocode_elem in area.findall("cap:geocode" if ns else "geocode", ns):
+                value_name = geocode_elem.findtext(
+                    "cap:valueName" if ns else "valueName", "", ns
+                ).strip()
+                value = geocode_elem.findtext(
+                    "cap:value" if ns else "value", "", ns
+                ).strip()
+                if value_name and value:
+                    geocode_name = value_name
+                    geocode_value = value
+                    break  # Use the first geocode found
+
+            # Process polygons if available
+            has_polygon = False
             for poly_elem in area.findall("cap:polygon" if ns else "polygon", ns):
                 polygon_text = (poly_elem.text or "").strip()
                 if not polygon_text:
@@ -194,6 +222,7 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                         coords.append(coords[0])
                     try:
                         poly = Polygon(coords)
+                        has_polygon = True
                         results.append(
                             (
                                 source_id,
@@ -205,11 +234,34 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                                 area_desc,
                                 poly,
                                 cap_link,
+                                geocode_name,
+                                geocode_value,
                             )
                         )
                     except Exception as e:
                         print(f"Polygon construction failed: {e}")
                         continue
+
+            # If no polygon was found but geocode exists, still create an entry
+            # Use a None/empty polygon placeholder - will be filtered later
+            if not has_polygon and geocode_name and geocode_value:
+                # Create a minimal point geometry as placeholder (0,0) - will be filtered
+                # This allows geocode-only alerts to be stored for future processing
+                results.append(
+                    (
+                        source_id,
+                        event_text,
+                        description_text,
+                        severity,
+                        effective,
+                        expires,
+                        area_desc,
+                        None,  # No polygon geometry
+                        cap_link,
+                        geocode_name,
+                        geocode_value,
+                    )
+                )
 
     return results
 
@@ -307,11 +359,179 @@ def _rss_item_links_and_guids(feed_content: bytes) -> List[Tuple[str, Optional[s
 
 
 # -------------------------------
+# Geocode to Polygon Conversion
+# -------------------------------
+def load_nuts_boundaries(cache_dir: str = None) -> Optional[gpd.GeoDataFrame]:
+    """
+    Load NUTS (Nomenclature of Territorial Units for Statistics) boundaries from Eurostat.
+
+    Uses caching to avoid re-downloading on every run. If a cached file exists and is
+    less than 30 days old, it will be used instead of re-downloading.
+
+    Parameters
+    ----------
+    cache_dir : str, optional
+        Directory to cache the NUTS boundaries file. If None, uses forecast_process_dir.
+
+    Returns
+    -------
+    GeoDataFrame or None
+        A GeoDataFrame with NUTS regions at level 3 (most detailed), or None if loading fails.
+    """
+    if cache_dir is None:
+        cache_dir = forecast_process_dir
+
+    cache_file = os.path.join(cache_dir, "nuts_boundaries_cache.geojson")
+    cache_max_age_days = 30  # Re-download if cache is older than 30 days
+
+    # Check if cached file exists and is recent enough
+    use_cache = False
+    if os.path.exists(cache_file):
+        file_age_days = (time.time() - os.path.getmtime(cache_file)) / 86400
+        if file_age_days < cache_max_age_days:
+            use_cache = True
+            print(f"Using cached NUTS boundaries (age: {file_age_days:.1f} days)")
+
+    try:
+        if use_cache:
+            # Load from cache
+            nuts_gdf = gpd.read_file(cache_file)
+            print(f"Loaded {len(nuts_gdf)} NUTS3 regions from cache")
+        else:
+            # Download fresh data
+            # Use 03M (medium resolution, 1:3 million scale) for reasonable file size
+            # Level 3 provides the most detailed regional boundaries
+            nuts_url = "https://ec.europa.eu/eurostat/cache/GISCO/distribution/v2/nuts/geojson/NUTS_RG_03M_2021_4326_LEVL_3.geojson"
+            print("Downloading NUTS boundaries from Eurostat...")
+            nuts_gdf = gpd.read_file(nuts_url)
+            print(f"Downloaded {len(nuts_gdf)} NUTS3 regions")
+
+            # Save to cache for future use
+            try:
+                nuts_gdf.to_file(cache_file, driver="GeoJSON")
+                print(f"Cached NUTS boundaries to {cache_file}")
+            except Exception as cache_error:
+                print(f"Warning: Could not cache NUTS boundaries: {cache_error}")
+
+        return nuts_gdf
+
+    except Exception as e:
+        print(f"Warning: Could not load NUTS boundaries: {e}")
+        print("Geocode-to-polygon conversion will be disabled")
+        return None
+
+
+def geocode_to_polygon(
+    geocode_value: str, geocode_name: str, nuts_gdf: Optional[gpd.GeoDataFrame]
+) -> Optional[Polygon]:
+    """
+    Convert a geocode to a polygon geometry.
+
+    Currently supports NUTS3 and EMMA_ID geocodes. Other geocode types are logged
+    but not converted to polygons.
+
+    Supported geocode types:
+    - NUTS3: European NUTS regions (exact match via Eurostat boundaries)
+    - EMMA_ID: EUMETNET MeteoAlarm regions (approximation using NUTS)
+
+    Known unsupported types (will be logged for future analysis):
+    - AMOC-AreaCode: Australian weather district codes
+    - UGC: Universal Geographic Code (US/Canada zones)
+    - SAME: Specific Area Message Encoding (US FIPS codes)
+    - Country-specific codes (Japan JMA, China, New Zealand, etc.)
+
+    Uses optimized lookups with early returns to minimize processing time.
+
+    Parameters
+    ----------
+    geocode_value : str
+        The geocode value (e.g., "FR433", "IT003")
+    geocode_name : str
+        The geocode type (e.g., "NUTS3", "EMMA_ID", "AMOC-AreaCode")
+    nuts_gdf : GeoDataFrame or None
+        GeoDataFrame containing NUTS boundaries
+
+    Returns
+    -------
+    Polygon or None
+        The polygon geometry for the geocode, or None if not found/supported
+    """
+    if nuts_gdf is None or not geocode_value:
+        return None
+
+    try:
+        if geocode_name == "NUTS3":
+            # Direct NUTS3 code lookup - optimized with boolean indexing
+            match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
+            if not match.empty:
+                return match.geometry.iloc[0]
+
+        elif geocode_name == "EMMA_ID":
+            # EMMA_ID format: [Country][Number] (e.g., IT003, FR433, DE001)
+            # Try multiple strategies with early returns for efficiency:
+
+            # Strategy 1: Direct match (some EMMA IDs align with NUTS codes)
+            match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
+            if not match.empty:
+                return match.geometry.iloc[0]
+
+            # Strategy 2: Country-based prefix matching
+            # Extract country code (first 2 chars)
+            if len(geocode_value) >= 2:
+                country = geocode_value[:2]
+
+                # Filter by country first to reduce search space
+                country_regions = nuts_gdf[nuts_gdf["CNTR_CODE"] == country]
+
+                if not country_regions.empty:
+                    # Strategy 3: Prefix matching for NUTS2 alignment
+                    # EMMA regions often align with NUTS2, so try prefix matching
+                    nuts2_prefix = (
+                        geocode_value[:4]
+                        if len(geocode_value) >= 4
+                        else geocode_value[:3]
+                    )
+                    prefix_match = country_regions[
+                        country_regions["NUTS_ID"].str.startswith(nuts2_prefix)
+                    ]
+
+                    if not prefix_match.empty:
+                        # Use union of matching regions for better coverage
+                        return prefix_match.geometry.union_all()
+
+                    # Last resort: return first matching country region
+                    # This is very approximate but better than excluding the alert
+                    return country_regions.geometry.iloc[0]
+
+        # Fallback: try direct lookup regardless of geocode_name
+        match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
+        if not match.empty:
+            return match.geometry.iloc[0]
+
+    except Exception as e:
+        print(f"Warning: Error converting geocode {geocode_name}={geocode_value}: {e}")
+
+    # Log unsupported geocode types for future analysis
+    # Currently supported: NUTS3, EMMA_ID
+    # Known unsupported: AMOC-AreaCode (Australia), UGC (US/Canada), SAME (US), etc.
+    if geocode_name not in ["NUTS3", "EMMA_ID"]:
+        print(
+            f"Info: Unsupported geocode type '{geocode_name}' with value '{geocode_value}' - polygon conversion not available"
+        )
+
+    return None
+
+
+# -------------------------------
 # Main async pipeline
 # -------------------------------
 async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
     base_url = "https://severeweather.wmo.int"
     sources_url = f"{base_url}/json/sources.json"
+
+    # Load NUTS boundaries for geocode-to-polygon conversion
+    # This is done once at the start to avoid repeated downloads
+    nuts_gdf = load_nuts_boundaries()
 
     connector = aiohttp.TCPConnector(limit=MAX_CONCURRENCY, ttl_dns_cache=300)
     sem = asyncio.Semaphore(MAX_CONCURRENCY)
@@ -407,20 +627,31 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
                     area_desc,
                     poly,
                     cap_link,
+                    geocode_name,
+                    geocode_value,
                 ) in poly_entries:
-                    rows.append(
-                        {
-                            "source_id": src_id,
-                            "event": event,
-                            "description": description,
-                            "severity": severity,
-                            "effective": effective,
-                            "expires": expires,
-                            "area_desc": area_desc,
-                            "URL": cap_link,  # optionally store cap_link; add it to fetch_and_extract signature if you want it
-                        }
-                    )
-                    geometries.append(poly)
+                    # If no polygon but we have a geocode, try to convert it
+                    if poly is None and geocode_name and geocode_value:
+                        poly = geocode_to_polygon(geocode_value, geocode_name, nuts_gdf)
+
+                    # Include all entries that have a polygon geometry
+                    # (either from CAP or converted from geocode)
+                    if poly is not None:
+                        rows.append(
+                            {
+                                "source_id": src_id,
+                                "event": event,
+                                "description": description,
+                                "severity": severity,
+                                "effective": effective,
+                                "expires": expires,
+                                "area_desc": area_desc,
+                                "URL": cap_link,
+                                "geocode_name": geocode_name,
+                                "geocode_value": geocode_value,
+                            }
+                        )
+                        geometries.append(poly)
 
         # Kick off all feed tasks
         await asyncio.gather(*(process_feed(sid) for sid in source_ids))
@@ -475,6 +706,12 @@ points_in_polygons["string"] = (
     + "}"
     + "{"
     + points_in_polygons["URL"].astype(str)
+    + "}"
+    + "{"
+    + points_in_polygons["geocode_name"].astype(str)
+    + "}"
+    + "{"
+    + points_in_polygons["geocode_value"].astype(str)
 )
 
 # Combine the formatted strings using "~" as a spacer, since it doesn't seem to be used in CAP messages
