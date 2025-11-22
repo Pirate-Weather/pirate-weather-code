@@ -515,7 +515,9 @@ def geocode_to_polygon(
     # Currently supported: NUTS3, EMMA_ID
     # Known unsupported: AMOC-AreaCode (Australia), UGC (US/Canada), SAME (US), etc.
     if geocode_name not in ["NUTS3", "EMMA_ID"]:
-        print(f"Info: Unsupported geocode type '{geocode_name}' with value '{geocode_value}' - polygon conversion not available")
+        print(
+            f"Info: Unsupported geocode type '{geocode_name}' with value '{geocode_value}' - polygon conversion not available"
+        )
 
     return None
 
