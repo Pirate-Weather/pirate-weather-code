@@ -258,8 +258,9 @@ def test_daily_thunderstorms_joined_with_precipitation():
     assert summary_text == [
         "sentence",
         [
-            "for-day",
-            ["and", "thunderstorm", "light-wind"],
+            "and",
+            "thunderstorm",
+            "light-wind",
         ],
     ]
     # Icon should be thunderstorm
@@ -336,8 +337,8 @@ def test_daily_thunderstorms_not_joined_with_precipitation():
     assert summary_text == [
         "sentence",
         [
-            "and",
-            ["for-day", "medium-rain"],
+            "with",
+            "medium-rain",
             ["during", ["and", "possible-thunderstorm", "medium-wind"], "morning"],
         ],
     ]
@@ -620,7 +621,7 @@ def test_thunderstorms_dont_combine_with_humidity():
     # Check exact structure - no "high-humidity" or "low-humidity"
     assert summary_text == [
         "sentence",
-        ["for-day", "thunderstorm"],
+        "thunderstorm",
     ]
     assert icon == "thunderstorm"
 
@@ -664,6 +665,6 @@ def test_humidity_still_combines_without_thunderstorms():
     # Should include humidity with regular rain
     assert summary_text == [
         "sentence",
-        ["for-day", ["and", "medium-rain", "high-humidity"]],
+        "medium-rain",
     ]
     assert icon == "rain"

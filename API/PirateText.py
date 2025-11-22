@@ -12,7 +12,6 @@ from API.PirateTextHelper import (
     calculate_thunderstorm_text,
     calculate_vis_text,
     calculate_wind_text,
-    humidity_sky_text,
 )
 
 
@@ -117,37 +116,24 @@ def calculate_text(
     )
     thuText, thuIcon = calculate_thunderstorm_text(cape, "both", icon, isDayTime)
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
-    humidityText = humidity_sky_text(temp, humidity)
 
-    # If there is precipitation text use that and join with thunderstorm or humidity or wind texts if they exist
+    # If there is precipitation text use that and join with thunderstorm or wind texts if they exist
     if precipText is not None:
         if thuText is not None and not (type == "current" and "possible" in thuText):
             c_text = thuText
         elif windText is not None:
             c_text = ["and", precipText, windText]
         else:
-            if humidityText is not None:
-                c_text = ["and", precipText, humidityText]
-            else:
-                c_text = precipText
-    # If there is visibility text then use that and join with humidity if it exists
+            c_text = precipText
+    # If there is visibility text then use that
     elif visText is not None:
-        if humidityText is not None:
-            c_text = ["and", visText, humidityText]
-        else:
-            c_text = visText
-    # If there is wind text use that. If the skies are clear then join with humidity text if it exists otherwise just use the wind text
+        c_text = visText
+    # If there is wind text use that. If the skies are clear then just use the wind text otherwise join with sky text
     elif windText is not None:
         if skyText == "clear":
-            if humidityText is not None:
-                c_text = ["and", windText, humidityText]
-            else:
-                c_text = windText
+            c_text = windText
         else:
             c_text = ["and", windText, skyText]
-    # If there is the humidity text then join with the sky text
-    elif humidityText is not None:
-        c_text = ["and", humidityText, skyText]
     else:
         c_text = skyText
 

@@ -672,38 +672,6 @@ def calculate_sky_text(cloudCover, isDayTime, icon="darksky", mode="both"):
         return skyText, skyIcon
 
 
-def humidity_sky_text(temp, humidity):
-    """
-    Calculates the humidity text.
-    Temperature is expected in SI units (Celsius).
-
-    Parameters:
-    - temp (float): The temperature in Celsius
-    - humidity (float): The humidity as a fraction (0.0 to 1.0)
-
-    Returns:
-    - str | None: The text representing the humidity
-    """
-
-    # Return None if humidity or temperature data is missing.
-    if humidity is None or math.isnan(humidity) or np.isnan(humidity) or np.isnan(temp):
-        return None
-
-    # Only use humid if also warm (>20C)
-    tempThresh = WARM_TEMPERATURE_THRESHOLD["c"]
-    humidityText = None
-    lowHumidityThresh = 0.15
-    highHumidityThresh = 0.95
-
-    if humidity <= lowHumidityThresh:
-        humidityText = "low-humidity"
-    elif humidity >= highHumidityThresh:
-        if temp > tempThresh:
-            humidityText = "high-humidity"
-
-    return humidityText
-
-
 def calculate_thunderstorm_text(cape, mode="both", icon="darksky", is_day=True):
     """
     Calculates the thunderstorm text based on CAPE values.
