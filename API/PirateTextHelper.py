@@ -1,5 +1,4 @@
 # %% Script to contain the helper functions that can be used to generate the text summary of the forecast data for Pirate Weather
-import math
 from collections import Counter
 
 import numpy as np
@@ -22,7 +21,6 @@ from API.constants.text_const import (
     SNOW_INTENSITY_THRESHOLDS,
     TEMP_DEWPOINT_SPREAD_FOR_FOG,
     TEMP_DEWPOINT_SPREAD_FOR_MIST,
-    WARM_TEMPERATURE_THRESHOLD,
     WIND_THRESHOLDS,
 )
 
