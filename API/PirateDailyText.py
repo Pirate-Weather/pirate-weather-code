@@ -1697,14 +1697,7 @@ def calculate_day_text(
 
         # NEW CHECK: Use the boolean flag we calculated earlier
         # If the primary condition is all_day, use "with" for the secondary condition
-        if (
-            primary["all_day"]
-            and (primary.get("type") == "cloud" or primary.get("type") == "precip")
-            and (
-                secondary.get("type") == "precip"
-                or secondary.get("type") == "thunderstorm"
-            )
-        ):
+        if primary["all_day"]:
             joiner = "with"
 
         final_constructed_summary = [
