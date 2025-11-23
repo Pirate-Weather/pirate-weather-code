@@ -916,12 +916,7 @@ def calculate_day_text(
                     "icon",
                 )
                 is not None
-                # This uses a the 10:1 snow ratio to determine if fog is likely
-                and (
-                    hour["rainIntensity"] <= 0.02
-                    and hour["snowIntensity"] <= 0.2
-                    and hour["iceIntensity"] <= 0.02
-                )
+                and hour["precipIntensity"] <= 0.02
             ):
                 period_data["max_smoke"] = max(period_data["max_smoke"], hour["smoke"])
                 period_data["num_hours_fog"] += 1
@@ -1702,7 +1697,14 @@ def calculate_day_text(
 
         # NEW CHECK: Use the boolean flag we calculated earlier
         # If the primary condition is all_day, use "with" for the secondary condition
-        if primary["all_day"]:
+        if (
+            primary["all_day"]
+            and (primary.get("type") == "cloud" or primary.get("type") == "precip")
+            and (
+                secondary.get("type") == "precip"
+                or secondary.get("type") == "thunderstorm"
+            )
+        ):
             joiner = "with"
 
         final_constructed_summary = [

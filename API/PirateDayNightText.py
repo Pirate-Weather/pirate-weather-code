@@ -490,12 +490,7 @@ def calculate_half_day_text(
                     "icon",
                 )
                 is not None
-                # This uses a the 10:1 snow ratio to determine if fog is likely
-                and (
-                    hour["rainIntensity"] <= 0.02
-                    and hour["snowIntensity"] <= 0.2
-                    and hour["iceIntensity"] <= 0.02
-                )
+                and hour["precipIntensity"] <= 0.02
             ):
                 period_data["max_smoke"] = max(period_data["max_smoke"], hour["smoke"])
                 period_data["num_hours_fog"] += 1

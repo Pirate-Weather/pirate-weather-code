@@ -22,6 +22,7 @@ def create_hour_with_snow(snow_accum, snow_error=0, time_offset=0):
         "precipType": "snow",
         "rainIntensity": 0.0,
         "snowIntensity": 1.0,
+        "precipIntensity": 1.0,
         "iceIntensity": 0.0,
         "liquidAccumulation": 0.0,
         "snowAccumulation": snow_accum,
