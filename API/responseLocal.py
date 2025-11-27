@@ -4613,7 +4613,7 @@ async def PW_Forecast(
         DATA_DAY["station_pressure"]: ROUNDING_RULES.get("pressure", 2),
         DATA_DAY["cape"]: ROUNDING_RULES.get("cape", 0),
         DATA_DAY["bearing"]: ROUNDING_RULES.get("windBearing", 0),
-        DATA_DAY["moonPhase"]: ROUNDING_RULES.get("moonPhase", 2),
+        DATA_DAY["moon_phase"]: ROUNDING_RULES.get("moonPhase", 2),
     }
 
     for idx_field, decimals in daily_mean_rounding_map.items():
