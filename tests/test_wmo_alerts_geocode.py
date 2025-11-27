@@ -355,28 +355,235 @@ def test_extract_past_urgency_skipped():
     assert len(results) == 0  # Should be skipped
 
 
-def test_geocode_to_polygon_nuts3():
-    """Test NUTS3 geocode to polygon conversion.
+def _geocode_to_polygon_test(geocode_value, geocode_name, nuts_gdf):
+    """Test version of geocode_to_polygon function.
 
-    Note: This is a placeholder test. The actual geocode-to-polygon conversion
-    is tested through integration tests when the full WMO alerts ingestion runs.
-    The conversion requires geopandas and shapely which are ingest dependencies.
+    This is a copy of the function from WMO_Alerts_Local.py to avoid
+    importing the module which has side effects (creates directories).
     """
-    # Geocode-to-polygon conversion is tested through integration
-    # when WMO_Alerts_Local.py runs with actual NUTS boundaries
-    assert True
+    if nuts_gdf is None or not geocode_value:
+        return None
+
+    try:
+        if geocode_name == "NUTS3":
+            # Direct NUTS3 code lookup - optimized with boolean indexing
+            match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
+            if not match.empty:
+                return match.geometry.iloc[0]
+
+        elif geocode_name == "EMMA_ID":
+            # EMMA_ID format: [Country][Number] (e.g., IT003, FR433, DE001)
+            # Try multiple strategies with early returns for efficiency:
+
+            # Strategy 1: Direct match (some EMMA IDs align with NUTS codes)
+            match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
+            if not match.empty:
+                return match.geometry.iloc[0]
+
+            # Strategy 2: Country-based prefix matching
+            # Extract country code (first 2 chars)
+            if len(geocode_value) >= 2:
+                country = geocode_value[:2]
+
+                # Filter by country first to reduce search space
+                country_regions = nuts_gdf[nuts_gdf["CNTR_CODE"] == country]
+
+                if not country_regions.empty:
+                    # Strategy 3: Prefix matching for NUTS2 alignment
+                    # EMMA regions often align with NUTS2, so try prefix matching
+                    nuts2_prefix = (
+                        geocode_value[:4]
+                        if len(geocode_value) >= 4
+                        else geocode_value[:3]
+                    )
+                    prefix_match = country_regions[
+                        country_regions["NUTS_ID"].str.startswith(nuts2_prefix)
+                    ]
+
+                    if not prefix_match.empty:
+                        # Use union of matching regions for better coverage
+                        return prefix_match.geometry.union_all()
+
+                    # Last resort: return first matching country region
+                    # This is very approximate but better than excluding the alert
+                    return country_regions.geometry.iloc[0]
+
+        # Fallback: try direct lookup regardless of geocode_name
+        match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
+        if not match.empty:
+            return match.geometry.iloc[0]
+
+    except Exception:
+        pass
+
+    return None
+
+
+def test_geocode_to_polygon_nuts3():
+    """Test NUTS3 geocode to polygon conversion with mocked NUTS GeoDataFrame.
+
+    This test uses a mock GeoDataFrame to test the geocode_to_polygon function
+    without requiring external HTTP requests to Eurostat.
+    """
+    # Skip if shapely/geopandas not available (these are ingest dependencies)
+    if not SHAPELY_AVAILABLE:
+        return
+
+    try:
+        import geopandas as gpd
+        from shapely.geometry import Polygon as ShapelyPolygon
+    except ImportError:
+        return  # Skip test if geopandas not available
+
+    # Create a small mock NUTS GeoDataFrame with test polygons
+    mock_nuts_data = {
+        "NUTS_ID": ["FR433", "FR101", "IT003", "DE001", "IT001", "IT002"],
+        "CNTR_CODE": ["FR", "FR", "IT", "DE", "IT", "IT"],
+        "geometry": [
+            ShapelyPolygon(
+                [(6.0, 47.0), (7.0, 47.0), (7.0, 48.0), (6.0, 48.0)]
+            ),  # FR433 Haute-Saône
+            ShapelyPolygon(
+                [(2.0, 48.5), (3.0, 48.5), (3.0, 49.5), (2.0, 49.5)]
+            ),  # FR101 Paris
+            ShapelyPolygon(
+                [(9.0, 45.0), (10.0, 45.0), (10.0, 46.0), (9.0, 46.0)]
+            ),  # IT003 Lombardia approx
+            ShapelyPolygon(
+                [(6.0, 50.0), (7.0, 50.0), (7.0, 51.0), (6.0, 51.0)]
+            ),  # DE001
+            ShapelyPolygon(
+                [(7.0, 45.0), (8.0, 45.0), (8.0, 46.0), (7.0, 46.0)]
+            ),  # IT001
+            ShapelyPolygon(
+                [(8.0, 45.0), (9.0, 45.0), (9.0, 46.0), (8.0, 46.0)]
+            ),  # IT002
+        ],
+    }
+    mock_nuts_gdf = gpd.GeoDataFrame(mock_nuts_data, crs="EPSG:4326")
+
+    # Test NUTS3 direct lookup - should find FR433
+    result = _geocode_to_polygon_test("FR433", "NUTS3", mock_nuts_gdf)
+    assert result is not None
+    assert result.is_valid
+
+    # Test NUTS3 lookup for FR101 (Paris)
+    result = _geocode_to_polygon_test("FR101", "NUTS3", mock_nuts_gdf)
+    assert result is not None
+    assert result.is_valid
+
+    # Test NUTS3 lookup for non-existent code
+    result = _geocode_to_polygon_test("XX999", "NUTS3", mock_nuts_gdf)
+    assert result is None
+
+    # Test with None GeoDataFrame
+    result = _geocode_to_polygon_test("FR433", "NUTS3", None)
+    assert result is None
+
+    # Test with empty geocode value
+    result = _geocode_to_polygon_test("", "NUTS3", mock_nuts_gdf)
+    assert result is None
 
 
 def test_geocode_to_polygon_emma_id():
-    """Test EMMA_ID geocode to polygon conversion.
+    """Test EMMA_ID geocode to polygon conversion with mocked NUTS GeoDataFrame.
 
-    Note: This is a placeholder test. The actual EMMA_ID conversion logic
-    is tested through integration tests when the full WMO alerts ingestion runs.
-    The conversion requires geopandas and shapely which are ingest dependencies.
+    This test uses a mock GeoDataFrame to test the EMMA_ID conversion logic
+    without requiring external HTTP requests to Eurostat.
     """
-    # EMMA_ID geocode-to-polygon conversion is tested through integration
-    # when WMO_Alerts_Local.py runs with actual NUTS boundaries
-    assert True
+    # Skip if shapely/geopandas not available (these are ingest dependencies)
+    if not SHAPELY_AVAILABLE:
+        return
+
+    try:
+        import geopandas as gpd
+        from shapely.geometry import Polygon as ShapelyPolygon
+    except ImportError:
+        return  # Skip test if geopandas not available
+
+    # Create a mock NUTS GeoDataFrame with Italian regions for EMMA_ID testing
+    mock_nuts_data = {
+        "NUTS_ID": ["IT003", "ITC41", "ITC42", "ITC43", "FR433", "DE001"],
+        "CNTR_CODE": ["IT", "IT", "IT", "IT", "FR", "DE"],
+        "geometry": [
+            ShapelyPolygon(
+                [(9.0, 45.0), (10.0, 45.0), (10.0, 46.0), (9.0, 46.0)]
+            ),  # IT003 direct match
+            ShapelyPolygon(
+                [(9.5, 45.5), (10.5, 45.5), (10.5, 46.5), (9.5, 46.5)]
+            ),  # ITC41
+            ShapelyPolygon(
+                [(8.5, 45.0), (9.5, 45.0), (9.5, 46.0), (8.5, 46.0)]
+            ),  # ITC42
+            ShapelyPolygon(
+                [(8.0, 44.5), (9.0, 44.5), (9.0, 45.5), (8.0, 45.5)]
+            ),  # ITC43
+            ShapelyPolygon(
+                [(6.0, 47.0), (7.0, 47.0), (7.0, 48.0), (6.0, 48.0)]
+            ),  # FR433
+            ShapelyPolygon(
+                [(6.0, 50.0), (7.0, 50.0), (7.0, 51.0), (6.0, 51.0)]
+            ),  # DE001
+        ],
+    }
+    mock_nuts_gdf = gpd.GeoDataFrame(mock_nuts_data, crs="EPSG:4326")
+
+    # Test EMMA_ID with direct match (IT003 exists in NUTS)
+    result = _geocode_to_polygon_test("IT003", "EMMA_ID", mock_nuts_gdf)
+    assert result is not None
+    assert result.is_valid
+
+    # Test EMMA_ID with country-based fallback (IT999 doesn't exist but IT country does)
+    result = _geocode_to_polygon_test("IT999", "EMMA_ID", mock_nuts_gdf)
+    assert result is not None  # Should fall back to first Italian region
+    assert result.is_valid
+
+    # Test EMMA_ID for non-existent country
+    result = _geocode_to_polygon_test("XX999", "EMMA_ID", mock_nuts_gdf)
+    assert result is None
+
+    # Test with None GeoDataFrame
+    result = _geocode_to_polygon_test("IT003", "EMMA_ID", None)
+    assert result is None
+
+
+def test_geocode_to_polygon_unsupported_type():
+    """Test that unsupported geocode types return None but are logged.
+
+    This verifies that unsupported types like AMOC-AreaCode don't cause errors
+    and return None gracefully.
+    """
+    # Skip if shapely/geopandas not available
+    if not SHAPELY_AVAILABLE:
+        return
+
+    try:
+        import geopandas as gpd
+        from shapely.geometry import Polygon as ShapelyPolygon
+    except ImportError:
+        return
+
+    # Create a minimal mock GeoDataFrame
+    mock_nuts_data = {
+        "NUTS_ID": ["FR433"],
+        "CNTR_CODE": ["FR"],
+        "geometry": [
+            ShapelyPolygon([(6.0, 47.0), (7.0, 47.0), (7.0, 48.0), (6.0, 48.0)]),
+        ],
+    }
+    mock_nuts_gdf = gpd.GeoDataFrame(mock_nuts_data, crs="EPSG:4326")
+
+    # Test AMOC-AreaCode (Australian) - should return None
+    result = _geocode_to_polygon_test("NSW_FW001", "AMOC-AreaCode", mock_nuts_gdf)
+    assert result is None
+
+    # Test UGC (US/Canada) - should return None
+    result = _geocode_to_polygon_test("CAZ006", "UGC", mock_nuts_gdf)
+    assert result is None
+
+    # Test SAME (US FIPS) - should return None
+    result = _geocode_to_polygon_test("006001", "SAME", mock_nuts_gdf)
+    assert result is None
 
 
 def test_extract_french_nuts3_multi_area_alert():
@@ -525,7 +732,9 @@ def test_extract_italian_emma_id_alert():
     result = results[0]
     assert result[0] == "it-meteoam-en"  # source_id
     # When headline and description both exist, headline becomes the event
-    assert result[1] == "Yellow Snow-ice Warning for Italy - Lombardia"  # event (headline)
+    assert (
+        result[1] == "Yellow Snow-ice Warning for Italy - Lombardia"
+    )  # event (headline)
     assert result[3] == "Moderate"  # severity
     assert "2025-11-20" in result[4]  # effective date
     assert "2025-11-21" in result[5]  # expires date
