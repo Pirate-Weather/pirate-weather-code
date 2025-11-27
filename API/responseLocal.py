@@ -3542,9 +3542,10 @@ async def PW_Forecast(
         InterPhour[ecmwf_missing_int_mask, DATA_HOURLY["intensity"]] = (
             InterPhour[ecmwf_missing_int_mask, DATA_HOURLY["accum"]] * 10
         )
-    except (NameError, IndexError, ValueError, TypeError, AttributeError):
+    except (NameError, IndexError, ValueError, TypeError, AttributeError) as e:
         # If anything unexpected happens (missing variable, shape/indexing issues),
-        # don't break the response—silently skip the fallback.
+        # log the error but don't break the response—silently skip the fallback.
+        logger.warning("ECMWF intensity fallback failed: %s", e)
         pass
 
     # Set accumulation to zero if POP == 0
