@@ -3526,6 +3526,28 @@ async def PW_Forecast(
         0,
     )
 
+    # Fallback for ECMWF only: if ECMWF provided accumulation but not tprate/intensity,
+    # derive intensity from accumulation so we don't show non-zero accumulation with
+    # zero intensity.  Determine which model supplied the chosen intensity value
+    # using the `prcipIntensityHour` selection index (0=NBM,1=HRRR,2=ECMWF,3=GEFS/GFS,4=ERA5).
+    try:
+        chosen_idx = np.argmin(np.isnan(prcipIntensityHour), axis=1)
+        # Mask where chosen source is ECMWF (index 2), intensity is zero, but accumulation > 0
+        ecmwf_missing_int_mask = (
+            (chosen_idx == 2)
+            & (InterPhour[:, DATA_HOURLY["intensity"]] == 0)
+            & (InterPhour[:, DATA_HOURLY["accum"]] > 0)
+        )
+        # Convert accumulation (cm) to intensity in mm/h (cm -> mm = *10)
+        InterPhour[ecmwf_missing_int_mask, DATA_HOURLY["intensity"]] = (
+            InterPhour[ecmwf_missing_int_mask, DATA_HOURLY["accum"]] * 10
+        )
+    except (NameError, IndexError, ValueError, TypeError, AttributeError) as e:
+        # If anything unexpected happens (missing variable, shape/indexing issues),
+        # log the error but don't break the response—silently skip the fallback.
+        logger.warning("ECMWF intensity fallback failed: %s", e)
+        pass
+
     # Set accumulation to zero if POP == 0
     InterPhour[InterPhour[:, DATA_HOURLY["prob"]] == 0, DATA_HOURLY["accum"]] = 0
 
