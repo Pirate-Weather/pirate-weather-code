@@ -509,7 +509,9 @@ def geocode_to_polygon(
             return match.geometry.iloc[0]
 
     except Exception as e:
-        logger.warning("Error converting geocode %s=%s: %s", geocode_name, geocode_value, e)
+        logger.warning(
+            "Error converting geocode %s=%s: %s", geocode_name, geocode_value, e
+        )
 
     # Log unsupported geocode types for future analysis
     # Currently supported: NUTS3, EMMA_ID
