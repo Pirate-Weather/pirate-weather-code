@@ -1091,7 +1091,7 @@ def calculate_half_day_text(
                 overall_min_visibility,
                 overall_temp_at_min_spread,
                 overall_dewpoint_at_min_spread,
-                overall_max_wind,
+                0,
                 overall_max_smoke,
                 icon_set,
                 "summary",
