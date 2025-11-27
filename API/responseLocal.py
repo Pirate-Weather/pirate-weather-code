@@ -2925,7 +2925,7 @@ async def PW_Forecast(
     minuteRainIntensity_display = np.round(minuteRainIntensity * prepIntensityUnit, 4)
     minuteSnowIntensity_display = np.round(minuteSnowIntensity * prepIntensityUnit, 4)
     minuteSleetIntensity_display = np.round(minuteSleetIntensity * prepIntensityUnit, 4)
-    minuteProbability_display = np.round(minuteProbability, 4)
+    minuteProbability_display = np.round(minuteProbability, 2)
 
     minuteItems = []
     minuteItems_si = []
@@ -4613,6 +4613,7 @@ async def PW_Forecast(
         DATA_DAY["station_pressure"]: ROUNDING_RULES.get("pressure", 2),
         DATA_DAY["cape"]: ROUNDING_RULES.get("cape", 0),
         DATA_DAY["bearing"]: ROUNDING_RULES.get("windBearing", 0),
+        DATA_DAY["moon_phase"]: ROUNDING_RULES.get("moonPhase", 2),
     }
 
     for idx_field, decimals in daily_mean_rounding_map.items():
@@ -6201,13 +6202,13 @@ async def PW_Forecast(
         InterPcurrent[DATA_CURRENT["storm_dist"]] * visUnits, 2
     )
     curr_rain_intensity_display = np.round(
-        InterPcurrent[DATA_CURRENT["rain_intensity"]] * prepIntensityUnit, 2
+        InterPcurrent[DATA_CURRENT["rain_intensity"]] * prepIntensityUnit, 4
     )
     curr_snow_intensity_display = np.round(
-        InterPcurrent[DATA_CURRENT["snow_intensity"]] * prepIntensityUnit, 2
+        InterPcurrent[DATA_CURRENT["snow_intensity"]] * prepIntensityUnit, 4
     )
     curr_ice_intensity_display = np.round(
-        InterPcurrent[DATA_CURRENT["ice_intensity"]] * prepIntensityUnit, 2
+        InterPcurrent[DATA_CURRENT["ice_intensity"]] * prepIntensityUnit, 4
     )
     curr_pressure_display = np.round(InterPcurrent[DATA_CURRENT["pressure"]] / 100, 2)
     curr_wind_display = np.round(InterPcurrent[DATA_CURRENT["wind"]] * windUnit, 2)
