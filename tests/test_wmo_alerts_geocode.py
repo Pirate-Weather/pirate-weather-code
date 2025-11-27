@@ -471,3 +471,65 @@ def test_extract_french_nuts3_multi_area_alert():
     assert "FR433" in geocodes  # Haute-Saône
     assert "FR717" in geocodes  # Savoie
     assert "FR221" in geocodes  # Aisne
+
+
+def test_extract_italian_emma_id_alert():
+    """Test extraction of an Italian alert with EMMA_ID geocode.
+
+    This test uses a real-world Italian MeteoAlarm alert that has
+    EMMA_ID geocode but no polygon data. Based on the alert:
+    https://github.com/user-attachments/files/23634547/49-d0899b149ee9273d569ed762d735ce6e.xml
+    """
+    cap_xml = """<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+  <identifier>2.49.0.0.380.3.IT.251119104948.038</identifier>
+  <sender>aerocnmca.1sv.prv1@aeronautica.difesa.it</sender>
+  <sent>2025-11-19T10:49:49+01:00</sent>
+  <status>Actual</status>
+  <msgType>Alert</msgType>
+  <scope>Public</scope>
+  <info>
+    <language>en-GB</language>
+    <category>Met</category>
+    <event>Yellow Snow-ice Warning</event>
+    <responseType>Monitor</responseType>
+    <urgency>Future</urgency>
+    <severity>Moderate</severity>
+    <certainty>Likely</certainty>
+    <audience>Private</audience>
+    <effective>2025-11-20T01:00:00+01:00</effective>
+    <onset>2025-11-20T01:00:00+01:00</onset>
+    <expires>2025-11-21T00:59:00+01:00</expires>
+    <senderName>Italian Air Force National Meteorological Service</senderName>
+    <headline>Yellow Snow-ice Warning for Italy - Lombardia</headline>
+    <description>Moderate intensity weather phenomena expected</description>
+    <instruction>BE AWARE, keep up to date with the latest weather forecast.</instruction>
+    <web>https://meteoalarm.org/en/live/region/IT?s=lombardia</web>
+    <area>
+      <areaDesc>Lombardia</areaDesc>
+      <geocode>
+        <valueName>EMMA_ID</valueName>
+        <value>IT003</value>
+      </geocode>
+    </area>
+  </info>
+</alert>"""
+
+    results = _extract_polygons_from_cap_test(
+        cap_xml, "it-meteoam-en", "https://meteoalarm.org/alert.xml"
+    )
+
+    # Should have 1 area with EMMA_ID geocode
+    assert len(results) == 1
+
+    result = results[0]
+    assert result[0] == "it-meteoam-en"  # source_id
+    # When headline and description both exist, headline becomes the event
+    assert result[1] == "Yellow Snow-ice Warning for Italy - Lombardia"  # event (headline)
+    assert result[3] == "Moderate"  # severity
+    assert "2025-11-20" in result[4]  # effective date
+    assert "2025-11-21" in result[5]  # expires date
+    assert result[6] == "Lombardia"  # area description
+    assert result[7] is None  # No polygon (only geocode)
+    assert result[9] == "EMMA_ID"  # geocode_name
+    assert result[10] == "IT003"  # geocode_value (Lombardia)
