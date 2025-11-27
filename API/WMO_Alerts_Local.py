@@ -127,7 +127,7 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
     try:
         root = ET.fromstring(cap_xml)
     except ET.ParseError as exc:
-        print(f"Failed to parse {source_id}: {exc}")
+        logger.warning("Failed to parse %s: %s", source_id, exc)
         return results
 
     # Detect namespace (CAP 1.1 or 1.2)
@@ -239,7 +239,7 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                             )
                         )
                     except Exception as e:
-                        print(f"Polygon construction failed: {e}")
+                        logger.warning("Polygon construction failed: %s", e)
                         continue
 
             # If no polygon was found but geocode exists, still create an entry
@@ -390,34 +390,34 @@ def load_nuts_boundaries(cache_dir: str = None) -> Optional[gpd.GeoDataFrame]:
         file_age_days = (time.time() - os.path.getmtime(cache_file)) / 86400
         if file_age_days < cache_max_age_days:
             use_cache = True
-            print(f"Using cached NUTS boundaries (age: {file_age_days:.1f} days)")
+            logger.info("Using cached NUTS boundaries (age: %.1f days)", file_age_days)
 
     try:
         if use_cache:
             # Load from cache
             nuts_gdf = gpd.read_file(cache_file)
-            print(f"Loaded {len(nuts_gdf)} NUTS3 regions from cache")
+            logger.info("Loaded %d NUTS3 regions from cache", len(nuts_gdf))
         else:
             # Download fresh data
             # Use 03M (medium resolution, 1:3 million scale) for reasonable file size
             # Level 3 provides the most detailed regional boundaries
             nuts_url = "https://ec.europa.eu/eurostat/cache/GISCO/distribution/v2/nuts/geojson/NUTS_RG_03M_2021_4326_LEVL_3.geojson"
-            print("Downloading NUTS boundaries from Eurostat...")
+            logger.info("Downloading NUTS boundaries from Eurostat...")
             nuts_gdf = gpd.read_file(nuts_url)
-            print(f"Downloaded {len(nuts_gdf)} NUTS3 regions")
+            logger.info("Downloaded %d NUTS3 regions", len(nuts_gdf))
 
             # Save to cache for future use
             try:
                 nuts_gdf.to_file(cache_file, driver="GeoJSON")
-                print(f"Cached NUTS boundaries to {cache_file}")
+                logger.info("Cached NUTS boundaries to %s", cache_file)
             except Exception as cache_error:
-                print(f"Warning: Could not cache NUTS boundaries: {cache_error}")
+                logger.warning("Could not cache NUTS boundaries: %s", cache_error)
 
         return nuts_gdf
 
     except Exception as e:
-        print(f"Warning: Could not load NUTS boundaries: {e}")
-        print("Geocode-to-polygon conversion will be disabled")
+        logger.warning("Could not load NUTS boundaries: %s", e)
+        logger.warning("Geocode-to-polygon conversion will be disabled")
         return None
 
 
@@ -509,14 +509,16 @@ def geocode_to_polygon(
             return match.geometry.iloc[0]
 
     except Exception as e:
-        print(f"Warning: Error converting geocode {geocode_name}={geocode_value}: {e}")
+        logger.warning("Error converting geocode %s=%s: %s", geocode_name, geocode_value, e)
 
     # Log unsupported geocode types for future analysis
     # Currently supported: NUTS3, EMMA_ID
     # Known unsupported: AMOC-AreaCode (Australia), UGC (US/Canada), SAME (US), etc.
     if geocode_name not in ["NUTS3", "EMMA_ID"]:
-        print(
-            f"Info: Unsupported geocode type '{geocode_name}' with value '{geocode_value}' - polygon conversion not available"
+        logger.info(
+            "Unsupported geocode type '%s' with value '%s' - polygon conversion not available",
+            geocode_name,
+            geocode_value,
         )
 
     return None
@@ -665,8 +667,10 @@ logging.basicConfig(
     level=logging.INFO, stream=sys.stdout, format="%(levelname)s: %(message)s"
 )
 wmo_gdf = asyncio.run(gather_cap_polygons_async(timeout=30.0))
-print(
-    f"Built GeoDataFrame with {len(wmo_gdf)} polygons from {wmo_gdf['source_id'].nunique()} sources."
+logger.info(
+    "Built GeoDataFrame with %d polygons from %d sources.",
+    len(wmo_gdf),
+    wmo_gdf["source_id"].nunique(),
 )
 
 # Then save a zarr zip the same way NWS alerts does

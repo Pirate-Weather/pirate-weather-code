@@ -377,3 +377,97 @@ def test_geocode_to_polygon_emma_id():
     # EMMA_ID geocode-to-polygon conversion is tested through integration
     # when WMO_Alerts_Local.py runs with actual NUTS boundaries
     assert True
+
+
+def test_extract_french_nuts3_multi_area_alert():
+    """Test extraction of a French alert with multiple NUTS3 geocodes.
+
+    This test uses a real-world French Meteo-France alert that has multiple
+    areas with NUTS3 geocodes but no polygon data. Based on the alert:
+    https://github.com/user-attachments/files/23634546/07-39995720e024962746976cbdafc71a4f.xml
+    """
+    # Simplified version of the French alert with key areas
+    cap_xml = """<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+  <identifier>2.49.0.0.250.0.FR.20251119160107.266025</identifier>
+  <sender>vigilance@meteo.fr</sender>
+  <sent>2025-11-19T16:01:07+01:00</sent>
+  <status>Actual</status>
+  <msgType>Alert</msgType>
+  <scope>Public</scope>
+  <info>
+    <language>en-GB</language>
+    <category>Met</category>
+    <event>Moderate snow-ice warning</event>
+    <responseType>Monitor</responseType>
+    <urgency>Future</urgency>
+    <severity>Moderate</severity>
+    <certainty>Likely</certainty>
+    <effective>2025-11-20T00:00:00+01:00</effective>
+    <onset>2025-11-20T00:00:00+01:00</onset>
+    <expires>2025-11-21T00:00:00+01:00</expires>
+    <senderName>METEO-FRANCE</senderName>
+    <headline>Moderate snow-ice warning</headline>
+    <description>Moderate damages may occur.</description>
+    <instruction>Be careful, keep informed.</instruction>
+    <web>https://vigilance.meteofrance.fr/</web>
+    <contact>METEO-FRANCE</contact>
+    <area>
+      <areaDesc>Aisne</areaDesc>
+      <geocode>
+        <valueName>NUTS3</valueName>
+        <value>FR221</value>
+      </geocode>
+    </area>
+    <area>
+      <areaDesc>Paris</areaDesc>
+      <geocode>
+        <valueName>NUTS3</valueName>
+        <value>FR101</value>
+      </geocode>
+    </area>
+    <area>
+      <areaDesc>Haute-Saône</areaDesc>
+      <geocode>
+        <valueName>NUTS3</valueName>
+        <value>FR433</value>
+      </geocode>
+    </area>
+    <area>
+      <areaDesc>Savoie</areaDesc>
+      <geocode>
+        <valueName>NUTS3</valueName>
+        <value>FR717</value>
+      </geocode>
+    </area>
+  </info>
+</alert>"""
+
+    results = _extract_polygons_from_cap_test(
+        cap_xml, "fr-meteofrance-en", "https://vigilance.meteofrance.fr/alert.xml"
+    )
+
+    # Should have 4 areas, all with NUTS3 geocodes
+    assert len(results) == 4
+
+    # Check that all results have the expected structure
+    for result in results:
+        assert result[0] == "fr-meteofrance-en"  # source_id
+        assert result[1] == "Moderate snow-ice warning"  # event
+        assert result[3] == "Moderate"  # severity
+        assert "2025-11-20" in result[4]  # effective date
+        assert "2025-11-21" in result[5]  # expires date
+        assert result[7] is None  # No polygon (only geocode)
+        assert result[9] == "NUTS3"  # geocode_name
+        assert result[10].startswith("FR")  # geocode_value is a French NUTS3 code
+
+    # Check specific area descriptions and geocodes
+    area_descs = [r[6] for r in results]
+    geocodes = [r[10] for r in results]
+
+    assert "Paris" in area_descs
+    assert "Haute-Saône" in area_descs
+    assert "FR101" in geocodes  # Paris
+    assert "FR433" in geocodes  # Haute-Saône
+    assert "FR717" in geocodes  # Savoie
+    assert "FR221" in geocodes  # Aisne
