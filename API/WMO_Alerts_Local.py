@@ -556,7 +556,7 @@ def geocode_to_polygon(
             # Typically they use "emma_id", "EMMA_ID", "geocode", or similar
             match = meteoalarm_gdf[meteoalarm_gdf["code"] == geocode_value]
             if not match.empty:
-                logger.info(
+                logger.debug(
                     "Matched %s to %s in MeteoAlarm geocodes",
                     geocode_name,
                     geocode_value,
@@ -567,7 +567,7 @@ def geocode_to_polygon(
 
     # Log unsupported geocode types for future analysis
     else:
-        logger.info(
+        logger.debug(
             "Geocode type %s with value %s not currently supported for polygon conversion",
             geocode_name,
             geocode_value,
