@@ -387,9 +387,7 @@ def _geocode_to_polygon_test(geocode_value, geocode_name, nuts_gdf):
                 # Strategy 3: Prefix matching for NUTS2 alignment
                 # EMMA regions often align with NUTS2, so try prefix matching
                 nuts2_prefix = (
-                    geocode_value[:4]
-                    if len(geocode_value) >= 4
-                    else geocode_value[:3]
+                    geocode_value[:4] if len(geocode_value) >= 4 else geocode_value[:3]
                 )
                 prefix_match = country_regions[
                     country_regions["NUTS_ID"].str.startswith(nuts2_prefix)
