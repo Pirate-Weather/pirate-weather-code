@@ -3538,9 +3538,8 @@ async def PW_Forecast(
             & (InterPhour[:, DATA_HOURLY["intensity"]] == 0)
             & (InterPhour[:, DATA_HOURLY["accum"]] > 0)
         )
-        # Convert accumulation (cm) to intensity in mm/h (cm -> mm = *10)
         InterPhour[ecmwf_missing_int_mask, DATA_HOURLY["intensity"]] = (
-            InterPhour[ecmwf_missing_int_mask, DATA_HOURLY["accum"]] * 10
+            InterPhour[ecmwf_missing_int_mask, DATA_HOURLY["accum"]] 
         )
     except (NameError, IndexError, ValueError, TypeError, AttributeError) as e:
         # If anything unexpected happens (missing variable, shape/indexing issues),
