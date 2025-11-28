@@ -18,6 +18,20 @@
             "jinja": true,
             "python": "/home/ubuntu/PirateResponse/bin/python3.13",
             "envFile": "${workspaceFolder}/.env",
-        }
+        },
+        {
+            "name": "Python: WMO_Alerts_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.WMO_Alerts_Local",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "env": {
+                "save_type": "Download",
+                "forecast_process_dir": "/mnt/nvme/data/WMO_Alerts",
+                "forecast_path": "/mnt/nvme/data/Prod/WMO_Alerts"
+            }
+        },
     ]
 }

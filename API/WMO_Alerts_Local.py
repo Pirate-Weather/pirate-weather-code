@@ -64,6 +64,7 @@ from xml.etree import ElementTree as ET
 
 import aiohttp
 import geopandas as gpd
+import pandas as pd
 import numpy as np
 import s3fs
 import zarr
@@ -358,6 +359,54 @@ def _rss_item_links_and_guids(feed_content: bytes) -> List[Tuple[str, Optional[s
     return out
 
 
+def load_nuts_2013_boundaries(cache_dir: str = None) -> Optional[gpd.GeoDataFrame]:
+    """
+    Load NUTS 2013 boundaries from Eurostat (GeoJSON inside ZIP). Uses caching.
+    Returns a GeoDataFrame or None if loading fails.
+    """
+    import zipfile
+    if cache_dir is None:
+        cache_dir = forecast_process_dir
+
+    zip_url = "https://gisco-services.ec.europa.eu/distribution/v2/nuts/download/ref-nuts-2013-01m.geojson.zip"
+    zip_file = os.path.join(cache_dir, "nuts_2013.geojson.zip")
+    geojson_file = os.path.join(cache_dir, "NUTS_RG_01M_2013_4326.geojson")
+    cache_max_age_days = 30
+
+    # Download if not cached or too old
+    need_download = True
+    if os.path.exists(geojson_file):
+        file_age_days = (time.time() - os.path.getmtime(geojson_file)) / 86400
+        if file_age_days < cache_max_age_days:
+            need_download = False
+
+    try:
+        if need_download:
+            import requests
+            logger.info("Downloading NUTS 2013 boundaries from Eurostat...")
+            r = requests.get(zip_url, stream=True)
+            r.raise_for_status()
+            with open(zip_file, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            # Extract the GeoJSON
+            with zipfile.ZipFile(zip_file, "r") as z:
+                for name in z.namelist():
+                    if name.endswith(".geojson"):
+                        z.extract(name, cache_dir)
+                        os.rename(os.path.join(cache_dir, name), geojson_file)
+                        break
+            logger.info("Extracted NUTS 2013 GeoJSON to %s", geojson_file)
+        gdf = gpd.read_file(geojson_file)
+        # Ensure CRS matches 2021 boundaries (EPSG:4326)
+        if gdf.crs is None or gdf.crs.to_string().upper() != "EPSG:4326":
+            gdf = gdf.to_crs("EPSG:4326")
+        logger.info("Loaded %d NUTS 2013 regions (CRS: %s)", len(gdf), gdf.crs)
+        return gdf
+    except Exception as e:
+        logger.warning("Could not load NUTS 2013 boundaries: %s", e)
+        return None
+
 # -------------------------------
 # Geocode to Polygon Conversion
 # -------------------------------
@@ -413,6 +462,8 @@ def load_nuts_boundaries(cache_dir: str = None) -> Optional[gpd.GeoDataFrame]:
             except Exception as cache_error:
                 logger.warning("Could not cache NUTS boundaries: %s", cache_error)
 
+
+
         return nuts_gdf
 
     except Exception as e:
@@ -422,7 +473,7 @@ def load_nuts_boundaries(cache_dir: str = None) -> Optional[gpd.GeoDataFrame]:
 
 
 def geocode_to_polygon(
-    geocode_value: str, geocode_name: str, nuts_gdf: Optional[gpd.GeoDataFrame]
+    geocode_value: str, geocode_name: str, nuts_gdf: Optional[gpd.GeoDataFrame], cache_dir: str = None
 ) -> Optional[Polygon]:
     """
     Convert a geocode to a polygon geometry.
@@ -459,70 +510,59 @@ def geocode_to_polygon(
     if nuts_gdf is None or not geocode_value:
         return None
 
-    try:
-        if geocode_name == "NUTS3":
-            # Direct NUTS3 code lookup - optimized with boolean indexing
-            match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
+    def try_match(gdf):
+        try:
+            if geocode_name == "NUTS3":
+                match = gdf[gdf["NUTS_ID"] == geocode_value]
+                if not match.empty:
+                    return match.geometry.iloc[0]
+            elif geocode_name == "EMMA_ID":
+                match = gdf[gdf["NUTS_ID"] == geocode_value]
+                if not match.empty:
+                    return match.geometry.iloc[0]
+                if len(geocode_value) >= 2:
+                    country = geocode_value[:2]
+                    country_regions = gdf[gdf["CNTR_CODE"] == country]
+                    if not country_regions.empty:
+                        nuts2_prefix = (
+                            geocode_value[:4]
+                            if len(geocode_value) >= 4
+                            else geocode_value[:3]
+                        )
+                        prefix_match = country_regions[
+                            country_regions["NUTS_ID"].str.startswith(nuts2_prefix)
+                        ]
+                        if not prefix_match.empty:
+                            return prefix_match.geometry.union_all()
+                        return country_regions.geometry.iloc[0]
+            # Fallback: try direct lookup regardless of geocode_name
+            match = gdf[gdf["NUTS_ID"] == geocode_value]
             if not match.empty:
                 return match.geometry.iloc[0]
+        except Exception as e:
+            logger.warning("Error matching geocode %s=%s: %s", geocode_name, geocode_value, e)
+        return None
 
-        elif geocode_name == "EMMA_ID":
-            # EMMA_ID format: [Country][Number] (e.g., IT003, FR433, DE001)
-            # Try multiple strategies with early returns for efficiency:
+    # Try 2021 boundaries first
+    poly = try_match(nuts_gdf)
+    if poly is not None:
+        return poly
 
-            # Strategy 1: Direct match (some EMMA IDs align with NUTS codes)
-            match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
-            if not match.empty:
-                return match.geometry.iloc[0]
-
-            # Strategy 2: Country-based prefix matching
-            # Extract country code (first 2 chars)
-            if len(geocode_value) >= 2:
-                country = geocode_value[:2]
-
-                # Filter by country first to reduce search space
-                country_regions = nuts_gdf[nuts_gdf["CNTR_CODE"] == country]
-
-                if not country_regions.empty:
-                    # Strategy 3: Prefix matching for NUTS2 alignment
-                    # EMMA regions often align with NUTS2, so try prefix matching
-                    nuts2_prefix = (
-                        geocode_value[:4]
-                        if len(geocode_value) >= 4
-                        else geocode_value[:3]
-                    )
-                    prefix_match = country_regions[
-                        country_regions["NUTS_ID"].str.startswith(nuts2_prefix)
-                    ]
-
-                    if not prefix_match.empty:
-                        # Use union of matching regions for better coverage
-                        return prefix_match.geometry.union_all()
-
-                    # Last resort: return first matching country region
-                    # This is very approximate but better than excluding the alert
-                    return country_regions.geometry.iloc[0]
-
-        # Fallback: try direct lookup regardless of geocode_name
-        match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
-        if not match.empty:
-            return match.geometry.iloc[0]
-
-    except Exception as e:
-        logger.warning(
-            "Error converting geocode %s=%s: %s", geocode_name, geocode_value, e
-        )
+    # Fallback: try 2013 boundaries
+    gdf2013 = load_nuts_2013_boundaries(cache_dir)
+    if gdf2013 is not None:
+        poly = try_match(gdf2013)
+        if poly is not None:
+            logger.info("Matched geocode %s=%s in NUTS 2013 boundaries", geocode_name, geocode_value)
+            return poly
 
     # Log unsupported geocode types for future analysis
-    # Currently supported: NUTS3, EMMA_ID
-    # Known unsupported: AMOC-AreaCode (Australia), UGC (US/Canada), SAME (US), etc.
     if geocode_name not in ["NUTS3", "EMMA_ID"]:
         logger.info(
             "Unsupported geocode type '%s' with value '%s' - polygon conversion not available",
             geocode_name,
             geocode_value,
         )
-
     return None
 
 
@@ -584,6 +624,10 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
 
         rows: List[Dict[str, Optional[str]]] = []
         geometries: List[Polygon] = []
+
+
+        # For debug: set source_ids = ["fr-meteofrance-xx", "it-protezionecivile-it"]
+        # source_ids = ["fr-meteofrance-xx", "it-protezionecivile-it"]
 
         async def process_feed(sid: str):
             feed_url = f"{base_url}/v2/cap-alerts/{sid}/rss.xml"
@@ -746,6 +790,7 @@ if save_type == "S3":
     zarr_store = zarr.storage.ZipStore(
         forecast_process_dir + "/WMO_Alerts.zarr.zip", mode="w", compression=0
     )
+
 else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/WMO_Alerts.zarr")
 
@@ -768,17 +813,21 @@ if save_type == "S3":
 
 ## TEST READ
 # Find the index for 45.6060335,-73.7919091
-# lat = 16.687474
-# az_Lon =82.144343
-#
+# lat = 46.6621918
+# az_Lon =4.2712967
+
 # alerts_lats = np.arange(-60, 85, 0.0625)
 # alerts_lons = np.arange(-180, 180, 0.0625)
 # abslat = np.abs(alerts_lats - lat)
 # abslon = np.abs(alerts_lons - az_Lon)
 # alerts_y_p = np.argmin(abslat)
 # alerts_x_p = np.argmin(abslon)
-#
-# # gridPoints_XR2[alerts_y_p, alerts_x_p]
+
+# gridPoints_XR2[alerts_y_p, alerts_x_p]
+
+# # Find locations in wmo_gdf where source_id'=='fr-meteofrance-xx'
+# fr_meteofrance_alerts = wmo_gdf.loc[wmo_gdf["source_id"] == "fr-meteofrance-xx"]
+
 # zip_store_read = zarr.storage.ZipStore(
 #     forecast_process_dir + "/WMO_Alerts.zarr.zip", compression=0, mode="r"
 # )
