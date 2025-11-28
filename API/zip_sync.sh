@@ -100,7 +100,7 @@ while true; do
       if [ -n "$old_versions" ]; then
         echo "Pruning old versions for $MODEL:"
         printf '%s\n' "$old_versions"
-        rm -rf $old_versions
+printf '%s\n' "$old_versions" | xargs -r rm -rf
       fi
     )
 
