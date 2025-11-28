@@ -2,7 +2,7 @@
 Alexander Rey, October 2025
 
 NOTE: This script processes alerts where the CAP contains polygon data or geocode information.
-NOTE: Geocodes (NUTS3, EMMA_ID) are automatically converted to polygons using Eurostat NUTS boundaries and MeteoAlarm geocodes.
+NOTE: Geocodes (EMMA_ID) are automatically converted to polygons using MeteoAlarm geocodes.
 NOTE: US Alerts are handled separately in NWS_Alerts_Local.py, since polygons are not always included in the CAP messages.
 
 Retrieve CAP alert polygons and geocodes from all RSS feeds and return them as a GeoDataFrame.
@@ -11,17 +11,15 @@ This convenience function automates the entire workflow:
 
 1. Download the WMO ``sources.json`` file to determine which feed
    identifiers are currently operational.
-2. Load NUTS (Nomenclature of Territorial Units for Statistics) boundaries
-   from Eurostat for geocode-to-polygon conversion.
-3. Load MeteoAlarm geocodes from the official MeteoAlarm repository for
+2. Load MeteoAlarm geocodes from the official MeteoAlarm repository for
    improved EMMA_ID to polygon mapping.
-4. For each ``sourceId``, fetch the corresponding RSS feed located
+3. For each ``sourceId``, fetch the corresponding RSS feed located
    at ``https://severeweather.wmo.int/v2/cap-alerts/{sourceId}/rss.xml``.
-5. Parse each feed for item links and download every CAP XML
+4. Parse each feed for item links and download every CAP XML
    document referenced.
-6. Extract all polygons and geocodes defined in the CAP documents.
-7. Convert geocodes (NUTS3, EMMA_ID) to polygon geometries when possible.
-8. Assemble them into a ``geopandas.GeoDataFrame`` with columns for
+5. Extract all polygons and geocodes defined in the CAP documents.
+6. Convert EMMA_ID geocodes to polygon geometries when MeteoAlarm data provides a match.
+7. Assemble them into a ``geopandas.GeoDataFrame`` with columns for
    ``source_id``, ``event``, ``area_desc``, ``geocode_name``, ``geocode_value`` and a geometry column.
 
 Parameters
@@ -46,11 +44,8 @@ Notes
   number of feeds and the volume of CAP alerts published.
 * Polygons are not simplified or validated beyond ensuring that
   they contain at least three vertices and are closed.
-* Geocode information (EMMA_ID, NUTS3, etc.) is extracted and converted
-  to polygon geometries when NUTS boundaries or MeteoAlarm geocodes are available.
-* NUTS3 codes are matched directly to Eurostat NUTS regions.
-* EMMA_ID codes are matched first to MeteoAlarm geocodes for accuracy, then
-  approximated using NUTS regions based on country and prefix matching.
+* Geocode information (EMMA_ID) is extracted and converted to polygon geometries when
+    MeteoAlarm geocodes provide a match.
 """
 
 from __future__ import annotations
@@ -192,9 +187,9 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                 "cap:areaDesc" if ns else "areaDesc", "", ns
             ).strip()
 
-            # Extract geocode information if present
-            geocode_name = ""
-            geocode_value = ""
+            # Extract all geocode entries for this area
+            geocode_entries: List[Tuple[Optional[str], Optional[str]]] = []
+            seen_geocodes: set[Tuple[str, str]] = set()
             for geocode_elem in area.findall("cap:geocode" if ns else "geocode", ns):
                 value_name = geocode_elem.findtext(
                     "cap:valueName" if ns else "valueName", "", ns
@@ -202,10 +197,17 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                 value = geocode_elem.findtext(
                     "cap:value" if ns else "value", "", ns
                 ).strip()
-                if value_name and value:
-                    geocode_name = value_name
-                    geocode_value = value
-                    break  # Use the first geocode found
+                if not value:
+                    continue
+
+                normalized = (value_name.upper(), value.upper())
+                if normalized in seen_geocodes:
+                    continue
+                seen_geocodes.add(normalized)
+                geocode_entries.append((value_name or None, value))
+
+            if not geocode_entries:
+                geocode_entries.append((None, None))
 
             # Process polygons if available
             has_polygon = False
@@ -230,45 +232,49 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                     try:
                         poly = Polygon(coords)
                         has_polygon = True
-                        results.append(
-                            (
-                                source_id,
-                                event_text,
-                                description_text,
-                                severity,
-                                effective,
-                                expires,
-                                area_desc,
-                                poly,
-                                cap_link,
-                                geocode_name,
-                                geocode_value,
+                        for geocode_name, geocode_value in geocode_entries:
+                            results.append(
+                                (
+                                    source_id,
+                                    event_text,
+                                    description_text,
+                                    severity,
+                                    effective,
+                                    expires,
+                                    area_desc,
+                                    poly,
+                                    cap_link,
+                                    geocode_name or "",
+                                    geocode_value or "",
+                                )
                             )
-                        )
                     except Exception as e:
                         logger.warning("Polygon construction failed: %s", e)
                         continue
 
             # If no polygon was found but geocode exists, still create an entry
             # Use a None/empty polygon placeholder - will be filtered later
-            if not has_polygon and geocode_name and geocode_value:
-                # Create a minimal point geometry as placeholder (0,0) - will be filtered
-                # This allows geocode-only alerts to be stored for future processing
-                results.append(
-                    (
-                        source_id,
-                        event_text,
-                        description_text,
-                        severity,
-                        effective,
-                        expires,
-                        area_desc,
-                        None,  # No polygon geometry
-                        cap_link,
-                        geocode_name,
-                        geocode_value,
+            if not has_polygon:
+                for geocode_name, geocode_value in geocode_entries:
+                    if not geocode_name or not geocode_value:
+                        continue
+                    # Create a minimal point geometry as placeholder (0,0) - will be filtered
+                    # This allows geocode-only alerts to be stored for future processing
+                    results.append(
+                        (
+                            source_id,
+                            event_text,
+                            description_text,
+                            severity,
+                            effective,
+                            expires,
+                            area_desc,
+                            None,  # No polygon geometry
+                            cap_link,
+                            geocode_name,
+                            geocode_value,
+                        )
                     )
-                )
 
     return results
 
@@ -404,27 +410,16 @@ def _apply_meteoalarm_aliases(
 
     alias_df["CODE"] = alias_df["CODE"].str.strip().str.upper()
     alias_df["ALIAS_CODE"] = alias_df["ALIAS_CODE"].str.strip().str.upper()
-    alias_df = alias_df[(alias_df["CODE"] != "") & (alias_df["ALIAS_CODE"] != "")]
+    alias_df = alias_df[
+        (alias_df["CODE"] != "")
+        & (alias_df["CODE"] != "NAN")
+        & (alias_df["ALIAS_CODE"] != "")
+        & (alias_df["ALIAS_CODE"] != "NAN")
+    ]
     if alias_df.empty:
         return gdf
 
-    id_column = next(
-        (
-            col
-            for col in [
-                "emma_id",
-                "EMMA_ID",
-                "code",
-                "CODE",
-                "geocode",
-                "Geocode",
-                "id",
-                "ID",
-            ]
-            if col in gdf.columns
-        ),
-        None,
-    )
+    id_column = 'code'
     if id_column is None:
         logger.warning(
             "Could not identify MeteoAlarm geocode column; skipping alias expansion"
@@ -453,7 +448,7 @@ def _apply_meteoalarm_aliases(
 
         for _, alias_row in group.iterrows():
             alias_code = alias_row["ALIAS_CODE"]
-            if alias_code in existing_codes:
+            if alias_code == "NAN" or alias_code in existing_codes:
                 continue
 
             alias_copy = base_rows.copy(deep=True)
@@ -549,135 +544,16 @@ def load_meteoalarm_geocodes(cache_dir: str = None) -> Optional[gpd.GeoDataFrame
         return None
 
 
-def load_nuts_2013_boundaries(cache_dir: str = None) -> Optional[gpd.GeoDataFrame]:
-    """
-    Load NUTS 2013 boundaries from Eurostat. Uses caching.
-    Returns a GeoDataFrame or None if loading fails.
-    """
-    if cache_dir is None:
-        cache_dir = forecast_process_dir
-
-    cache_file = os.path.join(cache_dir, "nuts_2013_boundaries_cache.geojson")
-    cache_max_age_days = 30
-
-    # Check if cached file exists and is recent enough
-    use_cache = False
-    if os.path.exists(cache_file):
-        file_age_days = (time.time() - os.path.getmtime(cache_file)) / 86400
-        if file_age_days < cache_max_age_days:
-            use_cache = True
-            logger.info(
-                "Using cached NUTS 2013 boundaries (age: %.1f days)", file_age_days
-            )
-
-    try:
-        if use_cache:
-            # Load from cache
-            gdf = gpd.read_file(cache_file)
-            logger.info("Loaded %d NUTS 2013 regions from cache", len(gdf))
-        else:
-            # Download fresh data
-            nuts_url = "https://ec.europa.eu/eurostat/cache/GISCO/distribution/v2/nuts/geojson/NUTS_RG_01M_2013_4326_LEVL_3.geojson"
-            logger.info("Downloading NUTS 2013 boundaries from Eurostat...")
-            gdf = gpd.read_file(nuts_url)
-            logger.info("Downloaded %d NUTS 2013 regions", len(gdf))
-
-            # Save to cache for future use
-            try:
-                gdf.to_file(cache_file, driver="GeoJSON")
-                logger.info("Cached NUTS 2013 boundaries to %s", cache_file)
-            except Exception as cache_error:
-                logger.warning("Could not cache NUTS 2013 boundaries: %s", cache_error)
-
-        # Ensure CRS matches 2021 boundaries (EPSG:4326)
-        if gdf.crs is None or gdf.crs.to_string().upper() != "EPSG:4326":
-            gdf = gdf.to_crs("EPSG:4326")
-        logger.info("NUTS 2013 boundaries ready (CRS: %s)", gdf.crs)
-        return gdf
-    except Exception as e:
-        logger.warning("Could not load NUTS 2013 boundaries: %s", e)
-        return None
-
-
-# -------------------------------
-# Geocode to Polygon Conversion
-# -------------------------------
-def load_nuts_boundaries(cache_dir: str = None) -> Optional[gpd.GeoDataFrame]:
-    """
-    Load NUTS (Nomenclature of Territorial Units for Statistics) boundaries from Eurostat.
-
-    Uses caching to avoid re-downloading on every run. If a cached file exists and is
-    less than 30 days old, it will be used instead of re-downloading.
-
-    Parameters
-    ----------
-    cache_dir : str, optional
-        Directory to cache the NUTS boundaries file. If None, uses forecast_process_dir.
-
-    Returns
-    -------
-    GeoDataFrame or None
-        A GeoDataFrame with NUTS regions at level 3 (most detailed), or None if loading fails.
-    """
-    if cache_dir is None:
-        cache_dir = forecast_process_dir
-
-    cache_file = os.path.join(cache_dir, "nuts_boundaries_cache.geojson")
-    cache_max_age_days = 30  # Re-download if cache is older than 30 days
-
-    # Check if cached file exists and is recent enough
-    use_cache = False
-    if os.path.exists(cache_file):
-        file_age_days = (time.time() - os.path.getmtime(cache_file)) / 86400
-        if file_age_days < cache_max_age_days:
-            use_cache = True
-            logger.info("Using cached NUTS boundaries (age: %.1f days)", file_age_days)
-
-    try:
-        if use_cache:
-            # Load from cache
-            nuts_gdf = gpd.read_file(cache_file)
-            logger.info("Loaded %d NUTS3 regions from cache", len(nuts_gdf))
-        else:
-            # Download fresh data
-            # Use 03M (medium resolution, 1:1 million scale)
-            # Level 3 provides the most detailed regional boundaries
-            nuts_url = "https://ec.europa.eu/eurostat/cache/GISCO/distribution/v2/nuts/geojson/NUTS_RG_01M_2021_4326_LEVL_3.geojson"
-            logger.info("Downloading NUTS boundaries from Eurostat...")
-            nuts_gdf = gpd.read_file(nuts_url)
-            logger.info("Downloaded %d NUTS3 regions", len(nuts_gdf))
-
-            # Save to cache for future use
-            try:
-                nuts_gdf.to_file(cache_file, driver="GeoJSON")
-                logger.info("Cached NUTS boundaries to %s", cache_file)
-            except Exception as cache_error:
-                logger.warning("Could not cache NUTS boundaries: %s", cache_error)
-
-        return nuts_gdf
-
-    except Exception as e:
-        logger.warning("Could not load NUTS boundaries: %s", e)
-        logger.warning("Geocode-to-polygon conversion will be disabled")
-        return None
-
-
 def geocode_to_polygon(
     geocode_value: str,
     geocode_name: str,
-    nuts_gdf: Optional[gpd.GeoDataFrame],
     meteoalarm_gdf: Optional[gpd.GeoDataFrame] = None,
-    cache_dir: str = None,
 ) -> Optional[Polygon]:
     """
     Convert a geocode to a polygon geometry.
 
-    Currently supports NUTS3 and EMMA_ID geocodes. Other geocode types are logged
+    Currently supports EMMA_ID geocodes using MeteoAlarm polygons. Other geocode types are logged
     but not converted to polygons.
-
-    Supported geocode types:
-    - NUTS3: European NUTS regions (exact match via Eurostat boundaries)
-    - EMMA_ID: EUMETNET MeteoAlarm regions (direct match via MeteoAlarm geocodes, fallback to NUTS approximation)
 
     Known unsupported types (will be logged for future analysis):
     - AMOC-AreaCode: Australian weather district codes
@@ -692,9 +568,7 @@ def geocode_to_polygon(
     geocode_value : str
         The geocode value (e.g., "FR433", "IT003")
     geocode_name : str
-        The geocode type (e.g., "NUTS3", "EMMA_ID", "AMOC-AreaCode")
-    nuts_gdf : GeoDataFrame or None
-        GeoDataFrame containing NUTS boundaries
+        The geocode type (e.g., "EMMA_ID", "AMOC-AreaCode")
     meteoalarm_gdf : GeoDataFrame or None, optional
         GeoDataFrame containing MeteoAlarm geocode boundaries
 
@@ -703,86 +577,33 @@ def geocode_to_polygon(
     Polygon or None
         The polygon geometry for the geocode, or None if not found/supported
     """
-    if nuts_gdf is None or not geocode_value:
-        return None
-
-    def try_match(gdf):
-        try:
-            if geocode_name == "NUTS3":
-                match = gdf[gdf["NUTS_ID"] == geocode_value]
-                if not match.empty:
-                    return match.geometry.iloc[0]
-            elif geocode_name == "EMMA_ID":
-                match = gdf[gdf["NUTS_ID"] == geocode_value]
-                if not match.empty:
-                    return match.geometry.iloc[0]
-                if len(geocode_value) >= 2:
-                    country = geocode_value[:2]
-                    country_regions = gdf[gdf["CNTR_CODE"] == country]
-                    if not country_regions.empty:
-                        nuts2_prefix = (
-                            geocode_value[:4]
-                            if len(geocode_value) >= 4
-                            else geocode_value[:3]
-                        )
-                        prefix_match = country_regions[
-                            country_regions["NUTS_ID"].str.startswith(nuts2_prefix)
-                        ]
-                        if not prefix_match.empty:
-                            return prefix_match.geometry.union_all()
-                        return country_regions.geometry.iloc[0]
-            # Fallback: try direct lookup regardless of geocode_name
-            match = gdf[gdf["NUTS_ID"] == geocode_value]
-            if not match.empty:
-                return match.geometry.iloc[0]
-        except Exception as e:
-            logger.warning(
-                "Error matching geocode %s=%s: %s", geocode_name, geocode_value, e
-            )
+    if not geocode_value:
         return None
 
     # For EMMA_ID, try MeteoAlarm geocodes first (most accurate)
-    if geocode_name == "EMMA_ID" and meteoalarm_gdf is not None:
+    if (geocode_name == "EMMA_ID" or  geocode_name == "NUTS3") and meteoalarm_gdf is not None:
         try:
             # MeteoAlarm geocodes may have different field names, try common ones
             # Typically they use "emma_id", "EMMA_ID", "geocode", or similar
-            for field in ["emma_id", "EMMA_ID", "geocode", "Geocode", "id", "ID"]:
-                if field in meteoalarm_gdf.columns:
-                    match = meteoalarm_gdf[meteoalarm_gdf[field] == geocode_value]
-                    if not match.empty:
-                        logger.info(
-                            "Matched EMMA_ID %s in MeteoAlarm geocodes using field '%s'",
-                            geocode_value,
-                            field,
-                        )
-                        return match.geometry.iloc[0]
+            match = meteoalarm_gdf[meteoalarm_gdf['code'] == geocode_value]
+            if not match.empty:
+                logger.info(
+                    "Matched %s to %s in MeteoAlarm geocodes",
+                    geocode_name,
+                    geocode_value,
+                )
+                return match.geometry.iloc[0]
         except Exception as e:
             logger.warning("Error matching EMMA_ID in MeteoAlarm geocodes: %s", e)
 
-    # Try 2021 boundaries first
-    poly = try_match(nuts_gdf)
-    if poly is not None:
-        return poly
-
-    # Fallback: try 2013 boundaries
-    gdf2013 = load_nuts_2013_boundaries(cache_dir)
-    if gdf2013 is not None:
-        poly = try_match(gdf2013)
-        if poly is not None:
-            logger.info(
-                "Matched geocode %s=%s in NUTS 2013 boundaries",
-                geocode_name,
-                geocode_value,
-            )
-            return poly
-
     # Log unsupported geocode types for future analysis
-    if geocode_name not in ["NUTS3", "EMMA_ID"]:
-        logger.info(
-            "Unsupported geocode type '%s' with value '%s' - polygon conversion not available",
+    else:
+        logger.debug(
+            "Geocode type %s with value %s not currently supported for polygon conversion",
             geocode_name,
             geocode_value,
         )
+
     return None
 
 
@@ -792,10 +613,6 @@ def geocode_to_polygon(
 async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
     base_url = "https://severeweather.wmo.int"
     sources_url = f"{base_url}/json/sources.json"
-
-    # Load NUTS boundaries for geocode-to-polygon conversion
-    # This is done once at the start to avoid repeated downloads
-    nuts_gdf = load_nuts_boundaries()
 
     # Load MeteoAlarm geocodes for EMMA_ID lookups
     meteoalarm_gdf = load_meteoalarm_geocodes()
@@ -847,9 +664,6 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
 
         rows: List[Dict[str, Optional[str]]] = []
         geometries: List[Polygon] = []
-
-        # For debug: set source_ids = ["fr-meteofrance-xx", "it-protezionecivile-it"]
-        source_ids = ["fr-meteofrance-xx", "cz-chmi-cs"]
 
         async def process_feed(sid: str):
             feed_url = f"{base_url}/v2/cap-alerts/{sid}/rss.xml"
@@ -903,7 +717,9 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
                     # If no polygon but we have a geocode, try to convert it
                     if poly is None and geocode_name and geocode_value:
                         poly = geocode_to_polygon(
-                            geocode_value, geocode_name, nuts_gdf, meteoalarm_gdf
+                            geocode_value,
+                            geocode_name,
+                            meteoalarm_gdf,
                         )
 
                     # Include all entries that have a polygon geometry
@@ -926,6 +742,10 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
                         geometries.append(poly)
 
         # Kick off all feed tasks
+
+        # Use only "cz-chmi-cs" for testing
+        # source_ids = ["cz-chmi-cs"]
+
         await asyncio.gather(*(process_feed(sid) for sid in source_ids))
 
         return gpd.GeoDataFrame(rows, geometry=geometries, crs="EPSG:4326")
@@ -1037,17 +857,17 @@ if save_type == "S3":
 
 ## TEST READ
 # Find the index for 45.6060335,-73.7919091
-lat = 50.1354714
-az_Lon = 12.7283631
+# lat = 42.4974694
+# az_Lon = -94.1680158
 
-alerts_lats = np.arange(-60, 85, 0.0625)
-alerts_lons = np.arange(-180, 180, 0.0625)
-abslat = np.abs(alerts_lats - lat)
-abslon = np.abs(alerts_lons - az_Lon)
-alerts_y_p = np.argmin(abslat)
-alerts_x_p = np.argmin(abslon)
+# alerts_lats = np.arange(-60, 85, 0.0625)
+# alerts_lons = np.arange(-180, 180, 0.0625)
+# abslat = np.abs(alerts_lats - lat)
+# abslon = np.abs(alerts_lons - az_Lon)
+# alerts_y_p = np.argmin(abslat)
+# alerts_x_p = np.argmin(abslon)
 
-print(gridPoints_XR2[alerts_y_p, alerts_x_p])
+# gridPoints_XR2[alerts_y_p, alerts_x_p]
 
 # # Find locations in wmo_gdf where source_id'=='fr-meteofrance-xx'
 # fr_meteofrance_alerts = wmo_gdf.loc[wmo_gdf["source_id"] == "fr-meteofrance-xx"]
