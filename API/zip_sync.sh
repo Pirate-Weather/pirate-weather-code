@@ -8,6 +8,9 @@ BASE_DIR="${BASE_DIR:-/mnt/nvme/data/ProdTest3}"
 REMOTE_BASE="${REMOTE_BASE:-s3:piratezarr2/ForecastTar_v2/v30}"
 READY_FILE="${BASE_DIR}/models_ready"
 
+# Create BASE_DIR if it doesn't exist
+mkdir -p "$BASE_DIR"
+
 # Remove ready flag on startup
 [ -f "$READY_FILE" ] && rm -f "$READY_FILE"
 
@@ -97,7 +100,7 @@ while true; do
       if [ -n "$old_versions" ]; then
         echo "Pruning old versions for $MODEL:"
         printf '%s\n' "$old_versions"
-        printf '%s\n' "$old_versions" | xargs -r rm -rf
+        rm -rf $old_versions
       fi
     )
 
