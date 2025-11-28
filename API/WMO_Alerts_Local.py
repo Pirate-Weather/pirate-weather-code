@@ -64,7 +64,6 @@ from xml.etree import ElementTree as ET
 
 import aiohttp
 import geopandas as gpd
-import pandas as pd
 import numpy as np
 import s3fs
 import zarr
@@ -365,6 +364,7 @@ def load_nuts_2013_boundaries(cache_dir: str = None) -> Optional[gpd.GeoDataFram
     Returns a GeoDataFrame or None if loading fails.
     """
     import zipfile
+
     if cache_dir is None:
         cache_dir = forecast_process_dir
 
@@ -383,6 +383,7 @@ def load_nuts_2013_boundaries(cache_dir: str = None) -> Optional[gpd.GeoDataFram
     try:
         if need_download:
             import requests
+
             logger.info("Downloading NUTS 2013 boundaries from Eurostat...")
             r = requests.get(zip_url, stream=True)
             r.raise_for_status()
@@ -406,6 +407,7 @@ def load_nuts_2013_boundaries(cache_dir: str = None) -> Optional[gpd.GeoDataFram
     except Exception as e:
         logger.warning("Could not load NUTS 2013 boundaries: %s", e)
         return None
+
 
 # -------------------------------
 # Geocode to Polygon Conversion
@@ -462,8 +464,6 @@ def load_nuts_boundaries(cache_dir: str = None) -> Optional[gpd.GeoDataFrame]:
             except Exception as cache_error:
                 logger.warning("Could not cache NUTS boundaries: %s", cache_error)
 
-
-
         return nuts_gdf
 
     except Exception as e:
@@ -473,7 +473,10 @@ def load_nuts_boundaries(cache_dir: str = None) -> Optional[gpd.GeoDataFrame]:
 
 
 def geocode_to_polygon(
-    geocode_value: str, geocode_name: str, nuts_gdf: Optional[gpd.GeoDataFrame], cache_dir: str = None
+    geocode_value: str,
+    geocode_name: str,
+    nuts_gdf: Optional[gpd.GeoDataFrame],
+    cache_dir: str = None,
 ) -> Optional[Polygon]:
     """
     Convert a geocode to a polygon geometry.
@@ -540,7 +543,9 @@ def geocode_to_polygon(
             if not match.empty:
                 return match.geometry.iloc[0]
         except Exception as e:
-            logger.warning("Error matching geocode %s=%s: %s", geocode_name, geocode_value, e)
+            logger.warning(
+                "Error matching geocode %s=%s: %s", geocode_name, geocode_value, e
+            )
         return None
 
     # Try 2021 boundaries first
@@ -553,7 +558,11 @@ def geocode_to_polygon(
     if gdf2013 is not None:
         poly = try_match(gdf2013)
         if poly is not None:
-            logger.info("Matched geocode %s=%s in NUTS 2013 boundaries", geocode_name, geocode_value)
+            logger.info(
+                "Matched geocode %s=%s in NUTS 2013 boundaries",
+                geocode_name,
+                geocode_value,
+            )
             return poly
 
     # Log unsupported geocode types for future analysis
@@ -624,7 +633,6 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
 
         rows: List[Dict[str, Optional[str]]] = []
         geometries: List[Polygon] = []
-
 
         # For debug: set source_ids = ["fr-meteofrance-xx", "it-protezionecivile-it"]
         # source_ids = ["fr-meteofrance-xx", "it-protezionecivile-it"]
