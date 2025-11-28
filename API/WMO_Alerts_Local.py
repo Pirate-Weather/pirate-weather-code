@@ -419,7 +419,7 @@ def _apply_meteoalarm_aliases(
     if alias_df.empty:
         return gdf
 
-    id_column = 'code'
+    id_column = "code"
     if id_column is None:
         logger.warning(
             "Could not identify MeteoAlarm geocode column; skipping alias expansion"
@@ -581,11 +581,13 @@ def geocode_to_polygon(
         return None
 
     # For EMMA_ID, try MeteoAlarm geocodes first (most accurate)
-    if (geocode_name == "EMMA_ID" or  geocode_name == "NUTS3") and meteoalarm_gdf is not None:
+    if (
+        geocode_name == "EMMA_ID" or geocode_name == "NUTS3"
+    ) and meteoalarm_gdf is not None:
         try:
             # MeteoAlarm geocodes may have different field names, try common ones
             # Typically they use "emma_id", "EMMA_ID", "geocode", or similar
-            match = meteoalarm_gdf[meteoalarm_gdf['code'] == geocode_value]
+            match = meteoalarm_gdf[meteoalarm_gdf["code"] == geocode_value]
             if not match.empty:
                 logger.info(
                     "Matched %s to %s in MeteoAlarm geocodes",
