@@ -3538,9 +3538,9 @@ async def PW_Forecast(
             & (InterPhour[:, DATA_HOURLY["intensity"]] == 0)
             & (InterPhour[:, DATA_HOURLY["accum"]] > 0)
         )
-        InterPhour[ecmwf_missing_int_mask, DATA_HOURLY["intensity"]] = (
-            InterPhour[ecmwf_missing_int_mask, DATA_HOURLY["accum"]] 
-        )
+        InterPhour[ecmwf_missing_int_mask, DATA_HOURLY["intensity"]] = InterPhour[
+            ecmwf_missing_int_mask, DATA_HOURLY["accum"]
+        ]
     except (NameError, IndexError, ValueError, TypeError, AttributeError) as e:
         # If anything unexpected happens (missing variable, shape/indexing issues),
         # log the error but don't break the response—silently skip the fallback.
