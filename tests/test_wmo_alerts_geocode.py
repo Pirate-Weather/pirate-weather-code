@@ -31,11 +31,7 @@ def _extract_polygons_from_cap_test(cap_xml: str, source_id: str, cap_link: str)
     """Test version of _extract_polygons_from_cap - copied from WMO_Alerts_Local.py"""
     results = []
 
-    try:
-        root = ET.fromstring(cap_xml)
-    except ET.ParseError as exc:
-        print(f"Failed to parse {source_id}: {exc}")
-        return results
+    root = ET.fromstring(cap_xml)
 
     # Detect namespace (CAP 1.1 or 1.2)
     ns = {"cap": root.tag.split("}")[0].strip("{")} if root.tag.startswith("{") else {}
@@ -364,57 +360,53 @@ def _geocode_to_polygon_test(geocode_value, geocode_name, nuts_gdf):
     if nuts_gdf is None or not geocode_value:
         return None
 
-    try:
-        if geocode_name == "NUTS3":
-            # Direct NUTS3 code lookup - optimized with boolean indexing
-            match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
-            if not match.empty:
-                return match.geometry.iloc[0]
-
-        elif geocode_name == "EMMA_ID":
-            # EMMA_ID format: [Country][Number] (e.g., IT003, FR433, DE001)
-            # Try multiple strategies with early returns for efficiency:
-
-            # Strategy 1: Direct match (some EMMA IDs align with NUTS codes)
-            match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
-            if not match.empty:
-                return match.geometry.iloc[0]
-
-            # Strategy 2: Country-based prefix matching
-            # Extract country code (first 2 chars)
-            if len(geocode_value) >= 2:
-                country = geocode_value[:2]
-
-                # Filter by country first to reduce search space
-                country_regions = nuts_gdf[nuts_gdf["CNTR_CODE"] == country]
-
-                if not country_regions.empty:
-                    # Strategy 3: Prefix matching for NUTS2 alignment
-                    # EMMA regions often align with NUTS2, so try prefix matching
-                    nuts2_prefix = (
-                        geocode_value[:4]
-                        if len(geocode_value) >= 4
-                        else geocode_value[:3]
-                    )
-                    prefix_match = country_regions[
-                        country_regions["NUTS_ID"].str.startswith(nuts2_prefix)
-                    ]
-
-                    if not prefix_match.empty:
-                        # Use union of matching regions for better coverage
-                        return prefix_match.geometry.union_all()
-
-                    # Last resort: return first matching country region
-                    # This is very approximate but better than excluding the alert
-                    return country_regions.geometry.iloc[0]
-
-        # Fallback: try direct lookup regardless of geocode_name
+    if geocode_name == "NUTS3":
+        # Direct NUTS3 code lookup - optimized with boolean indexing
         match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
         if not match.empty:
             return match.geometry.iloc[0]
 
-    except Exception:
-        pass
+    elif geocode_name == "EMMA_ID":
+        # EMMA_ID format: [Country][Number] (e.g., IT003, FR433, DE001)
+        # Try multiple strategies with early returns for efficiency:
+
+        # Strategy 1: Direct match (some EMMA IDs align with NUTS codes)
+        match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
+        if not match.empty:
+            return match.geometry.iloc[0]
+
+        # Strategy 2: Country-based prefix matching
+        # Extract country code (first 2 chars)
+        if len(geocode_value) >= 2:
+            country = geocode_value[:2]
+
+            # Filter by country first to reduce search space
+            country_regions = nuts_gdf[nuts_gdf["CNTR_CODE"] == country]
+
+            if not country_regions.empty:
+                # Strategy 3: Prefix matching for NUTS2 alignment
+                # EMMA regions often align with NUTS2, so try prefix matching
+                nuts2_prefix = (
+                    geocode_value[:4]
+                    if len(geocode_value) >= 4
+                    else geocode_value[:3]
+                )
+                prefix_match = country_regions[
+                    country_regions["NUTS_ID"].str.startswith(nuts2_prefix)
+                ]
+
+                if not prefix_match.empty:
+                    # Use union of matching regions for better coverage
+                    return prefix_match.geometry.union_all()
+
+                # Last resort: return first matching country region
+                # This is very approximate but better than excluding the alert
+                return country_regions.geometry.iloc[0]
+
+    # Fallback: try direct lookup regardless of geocode_name
+    match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
+    if not match.empty:
+        return match.geometry.iloc[0]
 
     return None
 
