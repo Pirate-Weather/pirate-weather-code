@@ -598,7 +598,7 @@ def geocode_to_polygon(
 
     # Log unsupported geocode types for future analysis
     else:
-        logger.debug(
+        logger.info(
             "Geocode type %s with value %s not currently supported for polygon conversion",
             geocode_name,
             geocode_value,
