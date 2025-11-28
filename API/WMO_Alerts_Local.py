@@ -11,7 +11,7 @@ This convenience function automates the entire workflow:
 
 1. Download the WMO ``sources.json`` file to determine which feed
    identifiers are currently operational.
-2. Load MeteoAlarm geocodes from the official MeteoAlarm repository for
+2. Load MeteoAlarm geocodes bundled with the project for
    improved EMMA_ID to polygon mapping.
 3. For each ``sourceId``, fetch the corresponding RSS feed located
    at ``https://severeweather.wmo.int/v2/cap-alerts/{sourceId}/rss.xml``.
@@ -56,7 +56,6 @@ import logging
 import os
 import shutil
 import sys
-import time
 from typing import Dict, Iterable, List, Optional, Tuple
 from xml.etree import ElementTree as ET
 
@@ -73,6 +72,7 @@ from API.constants.shared_const import INGEST_VERSION_STR
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 METEOALARM_ALIASES_PATH = os.path.join(DATA_DIR, "meteoalarm_aliases.csv")
+METEOALARM_GEOJSON_PATH = os.path.join(DATA_DIR, "meteoalarm_geocodes.json")
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -481,57 +481,24 @@ def _apply_meteoalarm_aliases(
     return gpd.GeoDataFrame(combined, geometry=gdf.geometry.name, crs=gdf.crs)
 
 
-def load_meteoalarm_geocodes(cache_dir: str = None) -> Optional[gpd.GeoDataFrame]:
+def load_meteoalarm_geocodes() -> Optional[gpd.GeoDataFrame]:
     """
-    Load MeteoAlarm geocodes from the official MeteoAlarm repository.
-
-    These geocodes provide EMMA_ID to polygon mappings for European weather alerts.
-    Uses caching to avoid re-downloading on every run.
-
-    Parameters
-    ----------
-    cache_dir : str, optional
-        Directory to cache the MeteoAlarm geocodes file. If None, uses forecast_process_dir.
+    Load MeteoAlarm geocodes packaged with the repository.
 
     Returns
     -------
     GeoDataFrame or None
         A GeoDataFrame with MeteoAlarm regions and EMMA_ID codes, or None if loading fails.
     """
-    if cache_dir is None:
-        cache_dir = forecast_process_dir
-
-    cache_file = os.path.join(cache_dir, "meteoalarm_geocodes_cache.geojson")
-    cache_max_age_days = 30
-
-    # Check if cached file exists and is recent enough
-    use_cache = False
-    if os.path.exists(cache_file):
-        file_age_days = (time.time() - os.path.getmtime(cache_file)) / 86400
-        if file_age_days < cache_max_age_days:
-            use_cache = True
-            logger.info(
-                "Using cached MeteoAlarm geocodes (age: %.1f days)", file_age_days
-            )
-
     try:
-        if use_cache:
-            # Load from cache
-            gdf = gpd.read_file(cache_file)
-            logger.info("Loaded %d MeteoAlarm regions from cache", len(gdf))
-        else:
-            # Download fresh data
-            meteoalarm_url = "https://gitlab.com/meteoalarm-pm-group/documents/-/raw/master/MeteoAlarm_Geocodes_2025_10_06.json?inline=false"
-            logger.info("Downloading MeteoAlarm geocodes from GitLab...")
-            gdf = gpd.read_file(meteoalarm_url)
-            logger.info("Downloaded %d MeteoAlarm regions", len(gdf))
+        if not os.path.exists(METEOALARM_GEOJSON_PATH):
+            logger.warning(
+                "MeteoAlarm geocode file missing at %s", METEOALARM_GEOJSON_PATH
+            )
+            return None
 
-            # Save to cache for future use
-            try:
-                gdf.to_file(cache_file, driver="GeoJSON")
-                logger.info("Cached MeteoAlarm geocodes to %s", cache_file)
-            except Exception as cache_error:
-                logger.warning("Could not cache MeteoAlarm geocodes: %s", cache_error)
+        gdf = gpd.read_file(METEOALARM_GEOJSON_PATH)
+        logger.info("Loaded %d MeteoAlarm regions from bundled data", len(gdf))
 
         # Ensure CRS is EPSG:4326
         if gdf.crs is None or gdf.crs.to_string().upper() != "EPSG:4326":
