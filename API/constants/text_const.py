@@ -37,7 +37,10 @@ HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 0.02  # (mm liquid)
 DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM = 5.0  # In snow units (mm of snow)
 DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0  # (mm liquid)
 
-# Visibility thresholds (meters)
+# Text thresholds for precipitation accumulation (only rain/sleet)
+DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM = 0.2  # (mm rain/sleet)
+
+# Visibility thresholds (metres)
 FOG_THRESHOLD_METERS = 1000
 MIST_THRESHOLD_METERS = 5000
 SMOKE_CONCENTRATION_THRESHOLD_UGM3 = 25

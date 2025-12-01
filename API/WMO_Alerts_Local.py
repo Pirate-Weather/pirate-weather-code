@@ -1,22 +1,26 @@
 """
 Alexander Rey, October 2025
 
-NOTE: This script only processes alerts where the CAP contains polygon data. This does not include every alert.
+NOTE: This script processes alerts where the CAP contains polygon data or geocode information.
+NOTE: Geocodes (EMMA_ID) are automatically converted to polygons using MeteoAlarm geocodes.
 NOTE: US Alerts are handled separately in NWS_Alerts_Local.py, since polygons are not always included in the CAP messages.
 
-Retrieve CAP alert polygons from all RSS feeds and return them as a GeoDataFrame.
+Retrieve CAP alert polygons and geocodes from all RSS feeds and return them as a GeoDataFrame.
 
 This convenience function automates the entire workflow:
 
 1. Download the WMO ``sources.json`` file to determine which feed
    identifiers are currently operational.
-2. For each ``sourceId``, fetch the corresponding RSS feed located
+2. Load MeteoAlarm geocodes bundled with the project for
+   improved EMMA_ID to polygon mapping.
+3. For each ``sourceId``, fetch the corresponding RSS feed located
    at ``https://severeweather.wmo.int/v2/cap-alerts/{sourceId}/rss.xml``.
-3. Parse each feed for item links and download every CAP XML
+4. Parse each feed for item links and download every CAP XML
    document referenced.
-4. Extract all polygons defined in the CAP documents and assemble
-   them into a ``geopandas.GeoDataFrame`` with columns for
-   ``source_id``, ``event``, ``area_desc`` and a geometry column.
+5. Extract all polygons and geocodes defined in the CAP documents.
+6. Convert EMMA_ID geocodes to polygon geometries when MeteoAlarm data provides a match.
+7. Assemble them into a ``geopandas.GeoDataFrame`` with columns for
+   ``source_id``, ``event``, ``area_desc``, ``geocode_name``, ``geocode_value`` and a geometry column.
 
 Parameters
 ----------
@@ -28,8 +32,9 @@ Returns
 -------
 geopandas.GeoDataFrame
     A GeoDataFrame where each row corresponds to a single polygon
-    extracted from a CAP message.  The geometry column contains
-    ``shapely.geometry.Polygon`` objects in EPSG:4326.
+    extracted from a CAP message or converted from a geocode.  The geometry column contains
+    ``shapely.geometry.Polygon`` objects in EPSG:4326. Geocode information
+    is included in ``geocode_name`` and ``geocode_value`` columns when available.
 
 Notes
 -----
@@ -39,6 +44,8 @@ Notes
   number of feeds and the volume of CAP alerts published.
 * Polygons are not simplified or validated beyond ensuring that
   they contain at least three vertices and are closed.
+* Geocode information (EMMA_ID) is extracted and converted to polygon geometries when
+    MeteoAlarm geocodes provide a match.
 """
 
 from __future__ import annotations
@@ -55,12 +62,17 @@ from xml.etree import ElementTree as ET
 import aiohttp
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import s3fs
 import zarr
 from shapely.geometry import Polygon
 from zarr.core.dtype import VariableLengthUTF8
 
 from API.constants.shared_const import INGEST_VERSION_STR
+
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+METEOALARM_ALIASES_PATH = os.path.join(DATA_DIR, "meteoalarm_aliases.csv")
+METEOALARM_GEOJSON_PATH = os.path.join(DATA_DIR, "meteoalarm_geocodes.json")
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -117,7 +129,7 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
     try:
         root = ET.fromstring(cap_xml)
     except ET.ParseError as exc:
-        print(f"Failed to parse {source_id}: {exc}")
+        logger.warning("Failed to parse %s: %s", source_id, exc)
         return results
 
     # Detect namespace (CAP 1.1 or 1.2)
@@ -174,6 +186,31 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
             area_desc = area.findtext(
                 "cap:areaDesc" if ns else "areaDesc", "", ns
             ).strip()
+
+            # Extract all geocode entries for this area
+            geocode_entries: List[Tuple[Optional[str], Optional[str]]] = []
+            seen_geocodes: set[Tuple[str, str]] = set()
+            for geocode_elem in area.findall("cap:geocode" if ns else "geocode", ns):
+                value_name = geocode_elem.findtext(
+                    "cap:valueName" if ns else "valueName", "", ns
+                ).strip()
+                value = geocode_elem.findtext(
+                    "cap:value" if ns else "value", "", ns
+                ).strip()
+                if not value:
+                    continue
+
+                normalized = (value_name.upper(), value.upper())
+                if normalized in seen_geocodes:
+                    continue
+                seen_geocodes.add(normalized)
+                geocode_entries.append((value_name or None, value))
+
+            if not geocode_entries:
+                geocode_entries.append((None, None))
+
+            # Process polygons if available
+            has_polygon = False
             for poly_elem in area.findall("cap:polygon" if ns else "polygon", ns):
                 polygon_text = (poly_elem.text or "").strip()
                 if not polygon_text:
@@ -194,22 +231,50 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                         coords.append(coords[0])
                     try:
                         poly = Polygon(coords)
-                        results.append(
-                            (
-                                source_id,
-                                event_text,
-                                description_text,
-                                severity,
-                                effective,
-                                expires,
-                                area_desc,
-                                poly,
-                                cap_link,
+                        has_polygon = True
+                        for geocode_name, geocode_value in geocode_entries:
+                            results.append(
+                                (
+                                    source_id,
+                                    event_text,
+                                    description_text,
+                                    severity,
+                                    effective,
+                                    expires,
+                                    area_desc,
+                                    poly,
+                                    cap_link,
+                                    geocode_name or "",
+                                    geocode_value or "",
+                                )
                             )
-                        )
                     except Exception as e:
-                        print(f"Polygon construction failed: {e}")
+                        logger.warning("Polygon construction failed: %s", e)
                         continue
+
+            # If no polygon was found but geocode exists, still create an entry
+            # Use a None/empty polygon placeholder - will be filtered later
+            if not has_polygon:
+                for geocode_name, geocode_value in geocode_entries:
+                    if not geocode_name or not geocode_value:
+                        continue
+                    # Create a minimal point geometry as placeholder (0,0) - will be filtered
+                    # This allows geocode-only alerts to be stored for future processing
+                    results.append(
+                        (
+                            source_id,
+                            event_text,
+                            description_text,
+                            severity,
+                            effective,
+                            expires,
+                            area_desc,
+                            None,  # No polygon geometry
+                            cap_link,
+                            geocode_name,
+                            geocode_value,
+                        )
+                    )
 
     return results
 
@@ -306,12 +371,220 @@ def _rss_item_links_and_guids(feed_content: bytes) -> List[Tuple[str, Optional[s
     return out
 
 
+def _apply_meteoalarm_aliases(
+    gdf: gpd.GeoDataFrame, alias_csv_path: str
+) -> gpd.GeoDataFrame:
+    """Duplicate MeteoAlarm polygons for alias codes defined in CSV."""
+    if gdf is None or gdf.empty:
+        return gdf
+
+    if not alias_csv_path or not os.path.exists(alias_csv_path):
+        logger.info(
+            "MeteoAlarm alias file not found at %s; skipping alias expansion",
+            alias_csv_path,
+        )
+        return gdf
+
+    try:
+        alias_df = pd.read_csv(alias_csv_path, dtype=str)
+    except Exception as exc:
+        logger.warning(
+            "Could not read MeteoAlarm alias CSV %s: %s", alias_csv_path, exc
+        )
+        return gdf
+
+    if alias_df.empty:
+        return gdf
+
+    required_columns = {"CODE", "ALIAS_CODE"}
+    missing_columns = required_columns.difference(alias_df.columns)
+    if missing_columns:
+        logger.warning(
+            "MeteoAlarm alias CSV missing required columns: %s", missing_columns
+        )
+        return gdf
+
+    alias_df = alias_df.dropna(subset=["CODE", "ALIAS_CODE"])
+    if alias_df.empty:
+        return gdf
+
+    alias_df["CODE"] = alias_df["CODE"].str.strip().str.upper()
+    alias_df["ALIAS_CODE"] = alias_df["ALIAS_CODE"].str.strip().str.upper()
+    alias_df = alias_df[
+        (alias_df["CODE"] != "")
+        & (alias_df["CODE"] != "NAN")
+        & (alias_df["ALIAS_CODE"] != "")
+        & (alias_df["ALIAS_CODE"] != "NAN")
+    ]
+    if alias_df.empty:
+        return gdf
+
+    id_column = "code"
+    if id_column is None:
+        logger.warning(
+            "Could not identify MeteoAlarm geocode column; skipping alias expansion"
+        )
+        return gdf
+
+    normalized_codes = gdf[id_column].fillna("").astype(str).str.strip()
+    normalized_upper = normalized_codes.str.upper()
+    existing_codes = {code for code in normalized_upper if code}
+
+    new_rows: List[pd.DataFrame] = []
+    added_features = 0
+
+    # Optional alias metadata columns
+    alias_type_column = "ALIAS_TYPE" if "ALIAS_TYPE" in alias_df.columns else None
+
+    for code_value, group in alias_df.groupby("CODE"):
+        base_mask = normalized_upper == code_value
+        if not base_mask.any():
+            logger.debug(
+                "Alias source code %s not present in MeteoAlarm dataset", code_value
+            )
+            continue
+
+        base_rows = gdf.loc[base_mask]
+
+        for _, alias_row in group.iterrows():
+            alias_code = alias_row["ALIAS_CODE"]
+            if alias_code == "NAN" or alias_code in existing_codes:
+                continue
+
+            alias_copy = base_rows.copy(deep=True)
+            alias_copy[id_column] = alias_code
+
+            if alias_type_column:
+                alias_value = alias_row.get(alias_type_column, "")
+                alias_value = (
+                    alias_value.strip() if isinstance(alias_value, str) else alias_value
+                )
+            else:
+                alias_value = None
+
+            alias_copy["alias_type"] = alias_value
+            alias_copy["alias_source_code"] = code_value
+
+            new_rows.append(alias_copy)
+            existing_codes.add(alias_code)
+            added_features += len(alias_copy)
+
+    if not new_rows:
+        return gdf
+
+    combined = pd.concat([gdf, *new_rows], ignore_index=True)
+    logger.info(
+        "Added %d MeteoAlarm alias polygons for %d alias definitions",
+        added_features,
+        len(new_rows),
+    )
+    return gpd.GeoDataFrame(combined, geometry=gdf.geometry.name, crs=gdf.crs)
+
+
+def load_meteoalarm_geocodes() -> Optional[gpd.GeoDataFrame]:
+    """
+    Load MeteoAlarm geocodes packaged with the repository.
+
+    Returns
+    -------
+    GeoDataFrame or None
+        A GeoDataFrame with MeteoAlarm regions and EMMA_ID codes, or None if loading fails.
+    """
+    try:
+        if not os.path.exists(METEOALARM_GEOJSON_PATH):
+            logger.warning(
+                "MeteoAlarm geocode file missing at %s", METEOALARM_GEOJSON_PATH
+            )
+            return None
+
+        gdf = gpd.read_file(METEOALARM_GEOJSON_PATH)
+        logger.info("Loaded %d MeteoAlarm regions from bundled data", len(gdf))
+
+        # Ensure CRS is EPSG:4326
+        if gdf.crs is None or gdf.crs.to_string().upper() != "EPSG:4326":
+            gdf = gdf.to_crs("EPSG:4326")
+        gdf = _apply_meteoalarm_aliases(gdf, METEOALARM_ALIASES_PATH)
+        logger.info("MeteoAlarm geocodes ready (CRS: %s)", gdf.crs)
+        return gdf
+    except Exception as e:
+        logger.warning("Could not load MeteoAlarm geocodes: %s", e)
+        return None
+
+
+def geocode_to_polygon(
+    geocode_value: str,
+    geocode_name: str,
+    meteoalarm_gdf: Optional[gpd.GeoDataFrame] = None,
+) -> Optional[Polygon]:
+    """
+    Convert a geocode to a polygon geometry.
+
+    Currently supports EMMA_ID geocodes using MeteoAlarm polygons. Other geocode types are logged
+    but not converted to polygons.
+
+    Known unsupported types (will be logged for future analysis):
+    - AMOC-AreaCode: Australian weather district codes
+    - UGC: Universal Geographic Code (US/Canada zones)
+    - SAME: Specific Area Message Encoding (US FIPS codes)
+    - Country-specific codes (Japan JMA, China, New Zealand, etc.)
+
+    Uses optimized lookups with early returns to minimize processing time.
+
+    Parameters
+    ----------
+    geocode_value : str
+        The geocode value (e.g., "FR433", "IT003")
+    geocode_name : str
+        The geocode type (e.g., "EMMA_ID", "AMOC-AreaCode")
+    meteoalarm_gdf : GeoDataFrame or None, optional
+        GeoDataFrame containing MeteoAlarm geocode boundaries
+
+    Returns
+    -------
+    Polygon or None
+        The polygon geometry for the geocode, or None if not found/supported
+    """
+    if not geocode_value:
+        return None
+
+    # For EMMA_ID, try MeteoAlarm geocodes first (most accurate)
+    if (
+        geocode_name == "EMMA_ID" or geocode_name == "NUTS3"
+    ) and meteoalarm_gdf is not None:
+        try:
+            # MeteoAlarm geocodes may have different field names, try common ones
+            # Typically they use "emma_id", "EMMA_ID", "geocode", or similar
+            match = meteoalarm_gdf[meteoalarm_gdf["code"] == geocode_value]
+            if not match.empty:
+                logger.debug(
+                    "Matched %s to %s in MeteoAlarm geocodes",
+                    geocode_name,
+                    geocode_value,
+                )
+                return match.geometry.iloc[0]
+        except Exception as e:
+            logger.warning("Error matching EMMA_ID in MeteoAlarm geocodes: %s", e)
+
+    # Log unsupported geocode types for future analysis
+    else:
+        logger.debug(
+            "Geocode type %s with value %s not currently supported for polygon conversion",
+            geocode_name,
+            geocode_value,
+        )
+
+    return None
+
+
 # -------------------------------
 # Main async pipeline
 # -------------------------------
 async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
     base_url = "https://severeweather.wmo.int"
     sources_url = f"{base_url}/json/sources.json"
+
+    # Load MeteoAlarm geocodes for EMMA_ID lookups
+    meteoalarm_gdf = load_meteoalarm_geocodes()
 
     connector = aiohttp.TCPConnector(limit=MAX_CONCURRENCY, ttl_dns_cache=300)
     sem = asyncio.Semaphore(MAX_CONCURRENCY)
@@ -407,22 +680,41 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
                     area_desc,
                     poly,
                     cap_link,
+                    geocode_name,
+                    geocode_value,
                 ) in poly_entries:
-                    rows.append(
-                        {
-                            "source_id": src_id,
-                            "event": event,
-                            "description": description,
-                            "severity": severity,
-                            "effective": effective,
-                            "expires": expires,
-                            "area_desc": area_desc,
-                            "URL": cap_link,  # optionally store cap_link; add it to fetch_and_extract signature if you want it
-                        }
-                    )
-                    geometries.append(poly)
+                    # If no polygon but we have a geocode, try to convert it
+                    if poly is None and geocode_name and geocode_value:
+                        poly = geocode_to_polygon(
+                            geocode_value,
+                            geocode_name,
+                            meteoalarm_gdf,
+                        )
+
+                    # Include all entries that have a polygon geometry
+                    # (either from CAP or converted from geocode)
+                    if poly is not None:
+                        rows.append(
+                            {
+                                "source_id": src_id,
+                                "event": event,
+                                "description": description,
+                                "severity": severity,
+                                "effective": effective,
+                                "expires": expires,
+                                "area_desc": area_desc,
+                                "URL": cap_link,
+                                "geocode_name": geocode_name,
+                                "geocode_value": geocode_value,
+                            }
+                        )
+                        geometries.append(poly)
 
         # Kick off all feed tasks
+
+        # Use only "cz-chmi-cs" for testing
+        # source_ids = ["cz-chmi-cs"]
+
         await asyncio.gather(*(process_feed(sid) for sid in source_ids))
 
         return gpd.GeoDataFrame(rows, geometry=geometries, crs="EPSG:4326")
@@ -434,8 +726,10 @@ logging.basicConfig(
     level=logging.INFO, stream=sys.stdout, format="%(levelname)s: %(message)s"
 )
 wmo_gdf = asyncio.run(gather_cap_polygons_async(timeout=30.0))
-print(
-    f"Built GeoDataFrame with {len(wmo_gdf)} polygons from {wmo_gdf['source_id'].nunique()} sources."
+logger.info(
+    "Built GeoDataFrame with %d polygons from %d sources.",
+    len(wmo_gdf),
+    wmo_gdf["source_id"].nunique(),
 )
 
 # Then save a zarr zip the same way NWS alerts does
@@ -475,10 +769,16 @@ points_in_polygons["string"] = (
     + "}"
     + "{"
     + points_in_polygons["URL"].astype(str)
+    + "}"
+    + "{"
+    + points_in_polygons["geocode_name"].astype(str)
+    + "}"
+    + "{"
+    + points_in_polygons["geocode_value"].astype(str)
 )
 
-# Combine the formatted strings using "|" as a spacer
-df = points_in_polygons.groupby("INDEX").agg({"string": "|".join}).reset_index()
+# Combine the formatted strings using "~" as a spacer, since it doesn't seem to be used in CAP messages
+df = points_in_polygons.groupby("INDEX").agg({"string": "~".join}).reset_index()
 
 
 # Merge back into primary geodataframe
@@ -503,6 +803,7 @@ if save_type == "S3":
     zarr_store = zarr.storage.ZipStore(
         forecast_process_dir + "/WMO_Alerts.zarr.zip", mode="w", compression=0
     )
+
 else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/WMO_Alerts.zarr")
 
@@ -525,17 +826,21 @@ if save_type == "S3":
 
 ## TEST READ
 # Find the index for 45.6060335,-73.7919091
-# lat = 16.687474
-# az_Lon =82.144343
-#
+# lat = 42.4974694
+# az_Lon = -94.1680158
+
 # alerts_lats = np.arange(-60, 85, 0.0625)
 # alerts_lons = np.arange(-180, 180, 0.0625)
 # abslat = np.abs(alerts_lats - lat)
 # abslon = np.abs(alerts_lons - az_Lon)
 # alerts_y_p = np.argmin(abslat)
 # alerts_x_p = np.argmin(abslon)
-#
-# # gridPoints_XR2[alerts_y_p, alerts_x_p]
+
+# gridPoints_XR2[alerts_y_p, alerts_x_p]
+
+# # Find locations in wmo_gdf where source_id'=='fr-meteofrance-xx'
+# fr_meteofrance_alerts = wmo_gdf.loc[wmo_gdf["source_id"] == "fr-meteofrance-xx"]
+
 # zip_store_read = zarr.storage.ZipStore(
 #     forecast_process_dir + "/WMO_Alerts.zarr.zip", compression=0, mode="r"
 # )

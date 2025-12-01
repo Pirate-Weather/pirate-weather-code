@@ -13,11 +13,71 @@
                 "API.responseLocal:app",
                 "--host", "0.0.0.0",
                 "--port", "8081",
-                "--workers", "5",
+                "--workers", "1",
             ],
             "jinja": true,
             "python": "/home/ubuntu/PirateResponse/bin/python3.13",
             "envFile": "${workspaceFolder}/.env",
-        }
+        },
+        {
+            "name": "Python: WMO_Alerts_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.WMO_Alerts_Local",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "env": {
+                "save_type": "Download",
+                "forecast_process_dir": "/mnt/nvme/data/WMO_Alerts",
+                "forecast_path": "/mnt/nvme/data/Prod/WMO_Alerts"
+            }
+        },
+        {
+            "name": "Python: ECMWF_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.ECMWF_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "env": {
+                "save_type": "Download",
+                "forecast_process_dir": "/mnt/nvme/data/ECMWF",
+                "forecast_path": "/mnt/nvme/data/Prod/ECMWF",
+                "ECCODES_DEFINITION_PATH": "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+            }
+        },
+        {
+            "name": "Python: SubH_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.SubH_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "env": {
+                "save_type": "Download",
+                "forecast_process_dir": "/mnt/nvme/data/SubH",
+                "forecast_path": "/mnt/nvme/data/Prod/SubH",
+                "ECCODES_DEFINITION_PATH": "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+            }
+        },
+        {
+            "name": "Python: RTMA_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.RTMA-RU_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "env": {
+                "save_type": "Download",
+                "forecast_process_dir": "/mnt/nvme/data/RTMA_RU",
+                "forecast_path": "/mnt/nvme/data/Prod/RTMA_RU",
+                "ECCODES_DEFINITION_PATH": "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+            }
+        },
+
     ]
 }

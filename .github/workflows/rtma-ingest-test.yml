@@ -1,4 +1,4 @@
-name: RTMA-RU Ingest Test
+name: Ingest Test
 
 on:
   pull_request:
@@ -7,13 +7,13 @@ on:
     branches-ignore: ['dev']
 
 jobs:
-  rtma-ingest-test:
+  ingest-test:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5.0.0
+      - uses: actions/checkout@v6.0.0
       - uses: actions/setup-python@v6.0.0
         with:
           python-version: '3.13'
@@ -24,3 +24,5 @@ jobs:
           pip install pytest
       - name: Run RTMA-RU ingest test
         run: pytest -v tests/test_rtma_ingest.py
+      - name: Run WMO Alerts geocode test
+        run: pytest -v tests/test_wmo_alerts_geocode.py
