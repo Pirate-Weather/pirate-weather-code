@@ -1,4 +1,3 @@
-import os
 import sys
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -20,9 +19,9 @@ except ImportError:
 
 
 # Path to local data files
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "API", "data")
-METEOALARM_ALIASES_PATH = os.path.join(DATA_DIR, "meteoalarm_aliases.csv")
-METEOALARM_GEOJSON_PATH = os.path.join(DATA_DIR, "meteoalarm_geocodes.json")
+DATA_DIR = Path(__file__).resolve().parent.parent / "API" / "data"
+METEOALARM_ALIASES_PATH = DATA_DIR / "meteoalarm_aliases.csv"
+METEOALARM_GEOJSON_PATH = DATA_DIR / "meteoalarm_geocodes.json"
 
 
 def _cap_text(elem, tag: str, ns: dict) -> str:
@@ -370,7 +369,7 @@ def _load_local_meteoalarm_geocodes():
     except ImportError:
         return None
 
-    if not os.path.exists(METEOALARM_GEOJSON_PATH):
+    if not METEOALARM_GEOJSON_PATH.exists():
         return None
 
     gdf = gpd.read_file(METEOALARM_GEOJSON_PATH)
@@ -380,7 +379,7 @@ def _load_local_meteoalarm_geocodes():
         gdf = gdf.to_crs("EPSG:4326")
 
     # Apply aliases if available
-    if os.path.exists(METEOALARM_ALIASES_PATH):
+    if METEOALARM_ALIASES_PATH.exists():
         try:
             alias_df = pd.read_csv(METEOALARM_ALIASES_PATH, dtype=str)
             if not alias_df.empty:
