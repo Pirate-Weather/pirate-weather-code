@@ -2933,7 +2933,7 @@ async def PW_Forecast(
     )
     minuteIntensity[np.abs(minuteIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
 
-    # Set values where type is 0 to zero.
+# Zero out intensity and probability if the precipitation type is 'none' to ensure data consistency.
     zero_type_mask = maxPchance == 0
     minuteRainIntensity[zero_type_mask] = 0.0
     minuteSnowIntensity[zero_type_mask] = 0.0
