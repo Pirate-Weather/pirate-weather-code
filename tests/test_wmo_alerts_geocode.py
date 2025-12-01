@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -16,6 +17,12 @@ except ImportError:
     class Polygon:
         def __init__(self, *args, **kwargs):
             pass
+
+
+# Path to local data files
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "API", "data")
+METEOALARM_ALIASES_PATH = os.path.join(DATA_DIR, "meteoalarm_aliases.csv")
+METEOALARM_GEOJSON_PATH = os.path.join(DATA_DIR, "meteoalarm_geocodes.json")
 
 
 def _cap_text(elem, tag: str, ns: dict) -> str:
@@ -351,119 +358,132 @@ def test_extract_past_urgency_skipped():
     assert len(results) == 0  # Should be skipped
 
 
-def _geocode_to_polygon_test(geocode_value, geocode_name, nuts_gdf):
-    """Test version of geocode_to_polygon function.
+def _load_local_meteoalarm_geocodes():
+    """Load meteoalarm geocodes from local bundled files.
 
-    This is a copy of the function from WMO_Alerts_Local.py to avoid
-    importing the module which has side effects (creates directories).
+    Returns a GeoDataFrame with meteoalarm regions including alias codes.
+    This mirrors the load_meteoalarm_geocodes function from WMO_Alerts_Local.py.
     """
-    if nuts_gdf is None or not geocode_value:
+    try:
+        import geopandas as gpd
+        import pandas as pd
+    except ImportError:
         return None
 
-    if geocode_name == "NUTS3":
-        # Direct NUTS3 code lookup - optimized with boolean indexing
-        match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
-        if not match.empty:
-            return match.geometry.iloc[0]
+    if not os.path.exists(METEOALARM_GEOJSON_PATH):
+        return None
 
-    elif geocode_name == "EMMA_ID":
-        # EMMA_ID format: [Country][Number] (e.g., IT003, FR433, DE001)
-        # Try multiple strategies with early returns for efficiency:
+    gdf = gpd.read_file(METEOALARM_GEOJSON_PATH)
 
-        # Strategy 1: Direct match (some EMMA IDs align with NUTS codes)
-        match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
-        if not match.empty:
-            return match.geometry.iloc[0]
+    # Ensure CRS is EPSG:4326
+    if gdf.crs is None or gdf.crs.to_string().upper() != "EPSG:4326":
+        gdf = gdf.to_crs("EPSG:4326")
 
-        # Strategy 2: Country-based prefix matching
-        # Extract country code (first 2 chars)
-        if len(geocode_value) >= 2:
-            country = geocode_value[:2]
+    # Apply aliases if available
+    if os.path.exists(METEOALARM_ALIASES_PATH):
+        try:
+            alias_df = pd.read_csv(METEOALARM_ALIASES_PATH, dtype=str)
+            if not alias_df.empty:
+                required_columns = {"CODE", "ALIAS_CODE"}
+                if required_columns.issubset(alias_df.columns):
+                    alias_df = alias_df.dropna(subset=["CODE", "ALIAS_CODE"])
+                    alias_df["CODE"] = alias_df["CODE"].str.strip().str.upper()
+                    alias_df["ALIAS_CODE"] = (
+                        alias_df["ALIAS_CODE"].str.strip().str.upper()
+                    )
+                    alias_df = alias_df[
+                        (alias_df["CODE"] != "")
+                        & (alias_df["CODE"] != "NAN")
+                        & (alias_df["ALIAS_CODE"] != "")
+                        & (alias_df["ALIAS_CODE"] != "NAN")
+                    ]
 
-            # Filter by country first to reduce search space
-            country_regions = nuts_gdf[nuts_gdf["CNTR_CODE"] == country]
+                    # Build alias entries
+                    id_column = "code"
+                    normalized_codes = gdf[id_column].fillna("").astype(str).str.strip()
+                    normalized_upper = normalized_codes.str.upper()
+                    existing_codes = {code for code in normalized_upper if code}
 
-            if not country_regions.empty:
-                # Strategy 3: Prefix matching for NUTS2 alignment
-                # EMMA regions often align with NUTS2, so try prefix matching
-                nuts2_prefix = (
-                    geocode_value[:4] if len(geocode_value) >= 4 else geocode_value[:3]
-                )
-                prefix_match = country_regions[
-                    country_regions["NUTS_ID"].str.startswith(nuts2_prefix)
-                ]
+                    new_rows = []
+                    for code_value, group in alias_df.groupby("CODE"):
+                        base_mask = normalized_upper == code_value
+                        if not base_mask.any():
+                            continue
+                        base_rows = gdf.loc[base_mask]
+                        for _, alias_row in group.iterrows():
+                            alias_code = alias_row["ALIAS_CODE"]
+                            if alias_code == "NAN" or alias_code in existing_codes:
+                                continue
+                            alias_copy = base_rows.copy(deep=True)
+                            alias_copy[id_column] = alias_code
+                            new_rows.append(alias_copy)
+                            existing_codes.add(alias_code)
 
-                if not prefix_match.empty:
-                    # Use union of matching regions for better coverage
-                    return prefix_match.geometry.union_all()
+                    if new_rows:
+                        combined = pd.concat([gdf, *new_rows], ignore_index=True)
+                        gdf = gpd.GeoDataFrame(
+                            combined, geometry=gdf.geometry.name, crs=gdf.crs
+                        )
+        except Exception:
+            pass  # Ignore alias errors
 
-                # Last resort: return first matching country region
-                # This is very approximate but better than excluding the alert
-                return country_regions.geometry.iloc[0]
+    return gdf
 
-    # Fallback: try direct lookup regardless of geocode_name
-    match = nuts_gdf[nuts_gdf["NUTS_ID"] == geocode_value]
-    if not match.empty:
-        return match.geometry.iloc[0]
+
+def _geocode_to_polygon_test(geocode_value, geocode_name, meteoalarm_gdf):
+    """Test version of geocode_to_polygon function.
+
+    This mirrors the geocode_to_polygon function from WMO_Alerts_Local.py.
+    Uses the 'code' column to match geocodes in the MeteoAlarm GeoDataFrame.
+    """
+    if meteoalarm_gdf is None or not geocode_value:
+        return None
+
+    # For EMMA_ID or NUTS3, try MeteoAlarm geocodes
+    if geocode_name == "EMMA_ID" or geocode_name == "NUTS3":
+        try:
+            match = meteoalarm_gdf[meteoalarm_gdf["code"] == geocode_value]
+            if not match.empty:
+                return match.geometry.iloc[0]
+        except Exception:
+            pass
 
     return None
 
 
 def test_geocode_to_polygon_nuts3():
-    """Test NUTS3 geocode to polygon conversion with mocked NUTS GeoDataFrame.
+    """Test NUTS3 geocode to polygon conversion using local MeteoAlarm data.
 
-    This test uses a mock GeoDataFrame to test the geocode_to_polygon function
-    without requiring external HTTP requests to Eurostat.
+    This test uses the actual bundled meteoalarm_geocodes.json file with alias
+    expansion to test NUTS3 geocode lookups. NUTS3 codes are available through
+    the alias mapping (e.g., FR082 -> FR433).
     """
     # Skip if shapely/geopandas not available (these are ingest dependencies)
     if not SHAPELY_AVAILABLE:
         return
 
     try:
-        import geopandas as gpd
-        from shapely.geometry import Polygon as ShapelyPolygon
+        import geopandas as gpd  # noqa: F401
     except ImportError:
         return  # Skip test if geopandas not available
 
-    # Create a small mock NUTS GeoDataFrame with test polygons
-    mock_nuts_data = {
-        "NUTS_ID": ["FR433", "FR101", "IT003", "DE001", "IT001", "IT002"],
-        "CNTR_CODE": ["FR", "FR", "IT", "DE", "IT", "IT"],
-        "geometry": [
-            ShapelyPolygon(
-                [(6.0, 47.0), (7.0, 47.0), (7.0, 48.0), (6.0, 48.0)]
-            ),  # FR433 Haute-Saône
-            ShapelyPolygon(
-                [(2.0, 48.5), (3.0, 48.5), (3.0, 49.5), (2.0, 49.5)]
-            ),  # FR101 Paris
-            ShapelyPolygon(
-                [(9.0, 45.0), (10.0, 45.0), (10.0, 46.0), (9.0, 46.0)]
-            ),  # IT003 Lombardia approx
-            ShapelyPolygon(
-                [(6.0, 50.0), (7.0, 50.0), (7.0, 51.0), (6.0, 51.0)]
-            ),  # DE001
-            ShapelyPolygon(
-                [(7.0, 45.0), (8.0, 45.0), (8.0, 46.0), (7.0, 46.0)]
-            ),  # IT001
-            ShapelyPolygon(
-                [(8.0, 45.0), (9.0, 45.0), (9.0, 46.0), (8.0, 46.0)]
-            ),  # IT002
-        ],
-    }
-    mock_nuts_gdf = gpd.GeoDataFrame(mock_nuts_data, crs="EPSG:4326")
+    # Load actual local MeteoAlarm geocodes with aliases
+    meteoalarm_gdf = _load_local_meteoalarm_geocodes()
+    if meteoalarm_gdf is None:
+        return  # Skip if data files not available
 
-    # Test NUTS3 direct lookup - should find FR433
-    result = _geocode_to_polygon_test("FR433", "NUTS3", mock_nuts_gdf)
-    assert result is not None
+    # Test NUTS3 lookup for FR433 (Haute-Saône) - available via alias from FR082
+    result = _geocode_to_polygon_test("FR433", "NUTS3", meteoalarm_gdf)
+    assert result is not None, "FR433 should be found via alias from FR082"
     assert result.is_valid
 
-    # Test NUTS3 lookup for FR101 (Paris)
-    result = _geocode_to_polygon_test("FR101", "NUTS3", mock_nuts_gdf)
-    assert result is not None
+    # Test NUTS3 lookup for FR101 (Paris) - direct EMMA_ID code
+    result = _geocode_to_polygon_test("FR101", "NUTS3", meteoalarm_gdf)
+    assert result is not None, "FR101 should be found as direct EMMA_ID"
     assert result.is_valid
 
     # Test NUTS3 lookup for non-existent code
-    result = _geocode_to_polygon_test("XX999", "NUTS3", mock_nuts_gdf)
+    result = _geocode_to_polygon_test("XX999", "NUTS3", meteoalarm_gdf)
     assert result is None
 
     # Test with None GeoDataFrame
@@ -471,65 +491,42 @@ def test_geocode_to_polygon_nuts3():
     assert result is None
 
     # Test with empty geocode value
-    result = _geocode_to_polygon_test("", "NUTS3", mock_nuts_gdf)
+    result = _geocode_to_polygon_test("", "NUTS3", meteoalarm_gdf)
     assert result is None
 
 
 def test_geocode_to_polygon_emma_id():
-    """Test EMMA_ID geocode to polygon conversion with mocked NUTS GeoDataFrame.
+    """Test EMMA_ID geocode to polygon conversion using local MeteoAlarm data.
 
-    This test uses a mock GeoDataFrame to test the EMMA_ID conversion logic
-    without requiring external HTTP requests to Eurostat.
+    This test uses the actual bundled meteoalarm_geocodes.json file to test
+    EMMA_ID geocode lookups for real regions like IT003 (Lombardia).
     """
     # Skip if shapely/geopandas not available (these are ingest dependencies)
     if not SHAPELY_AVAILABLE:
         return
 
     try:
-        import geopandas as gpd
-        from shapely.geometry import Polygon as ShapelyPolygon
+        import geopandas as gpd  # noqa: F401
     except ImportError:
         return  # Skip test if geopandas not available
 
-    # Create a mock NUTS GeoDataFrame with Italian regions for EMMA_ID testing
-    mock_nuts_data = {
-        "NUTS_ID": ["IT003", "ITC41", "ITC42", "ITC43", "FR433", "DE001"],
-        "CNTR_CODE": ["IT", "IT", "IT", "IT", "FR", "DE"],
-        "geometry": [
-            ShapelyPolygon(
-                [(9.0, 45.0), (10.0, 45.0), (10.0, 46.0), (9.0, 46.0)]
-            ),  # IT003 direct match
-            ShapelyPolygon(
-                [(9.5, 45.5), (10.5, 45.5), (10.5, 46.5), (9.5, 46.5)]
-            ),  # ITC41
-            ShapelyPolygon(
-                [(8.5, 45.0), (9.5, 45.0), (9.5, 46.0), (8.5, 46.0)]
-            ),  # ITC42
-            ShapelyPolygon(
-                [(8.0, 44.5), (9.0, 44.5), (9.0, 45.5), (8.0, 45.5)]
-            ),  # ITC43
-            ShapelyPolygon(
-                [(6.0, 47.0), (7.0, 47.0), (7.0, 48.0), (6.0, 48.0)]
-            ),  # FR433
-            ShapelyPolygon(
-                [(6.0, 50.0), (7.0, 50.0), (7.0, 51.0), (6.0, 51.0)]
-            ),  # DE001
-        ],
-    }
-    mock_nuts_gdf = gpd.GeoDataFrame(mock_nuts_data, crs="EPSG:4326")
+    # Load actual local MeteoAlarm geocodes
+    meteoalarm_gdf = _load_local_meteoalarm_geocodes()
+    if meteoalarm_gdf is None:
+        return  # Skip if data files not available
 
-    # Test EMMA_ID with direct match (IT003 exists in NUTS)
-    result = _geocode_to_polygon_test("IT003", "EMMA_ID", mock_nuts_gdf)
-    assert result is not None
+    # Test EMMA_ID with direct match (IT003 - Lombardia)
+    result = _geocode_to_polygon_test("IT003", "EMMA_ID", meteoalarm_gdf)
+    assert result is not None, "IT003 (Lombardia) should be found in MeteoAlarm data"
     assert result.is_valid
 
-    # Test EMMA_ID with country-based fallback (IT999 doesn't exist but IT country does)
-    result = _geocode_to_polygon_test("IT999", "EMMA_ID", mock_nuts_gdf)
-    assert result is not None  # Should fall back to first Italian region
+    # Test EMMA_ID for FR082 (Haute-Saône) - direct EMMA_ID
+    result = _geocode_to_polygon_test("FR082", "EMMA_ID", meteoalarm_gdf)
+    assert result is not None, "FR082 (Haute-Saône) should be found in MeteoAlarm data"
     assert result.is_valid
 
-    # Test EMMA_ID for non-existent country
-    result = _geocode_to_polygon_test("XX999", "EMMA_ID", mock_nuts_gdf)
+    # Test EMMA_ID for non-existent code
+    result = _geocode_to_polygon_test("XX999", "EMMA_ID", meteoalarm_gdf)
     assert result is None
 
     # Test with None GeoDataFrame
@@ -538,7 +535,7 @@ def test_geocode_to_polygon_emma_id():
 
 
 def test_geocode_to_polygon_unsupported_type():
-    """Test that unsupported geocode types return None but are logged.
+    """Test that unsupported geocode types return None gracefully.
 
     This verifies that unsupported types like AMOC-AreaCode don't cause errors
     and return None gracefully.
@@ -548,31 +545,25 @@ def test_geocode_to_polygon_unsupported_type():
         return
 
     try:
-        import geopandas as gpd
-        from shapely.geometry import Polygon as ShapelyPolygon
+        import geopandas as gpd  # noqa: F401
     except ImportError:
         return
 
-    # Create a minimal mock GeoDataFrame
-    mock_nuts_data = {
-        "NUTS_ID": ["FR433"],
-        "CNTR_CODE": ["FR"],
-        "geometry": [
-            ShapelyPolygon([(6.0, 47.0), (7.0, 47.0), (7.0, 48.0), (6.0, 48.0)]),
-        ],
-    }
-    mock_nuts_gdf = gpd.GeoDataFrame(mock_nuts_data, crs="EPSG:4326")
+    # Load actual local MeteoAlarm geocodes
+    meteoalarm_gdf = _load_local_meteoalarm_geocodes()
+    if meteoalarm_gdf is None:
+        return  # Skip if data files not available
 
     # Test AMOC-AreaCode (Australian) - should return None
-    result = _geocode_to_polygon_test("NSW_FW001", "AMOC-AreaCode", mock_nuts_gdf)
+    result = _geocode_to_polygon_test("NSW_FW001", "AMOC-AreaCode", meteoalarm_gdf)
     assert result is None
 
     # Test UGC (US/Canada) - should return None
-    result = _geocode_to_polygon_test("CAZ006", "UGC", mock_nuts_gdf)
+    result = _geocode_to_polygon_test("CAZ006", "UGC", meteoalarm_gdf)
     assert result is None
 
     # Test SAME (US FIPS) - should return None
-    result = _geocode_to_polygon_test("006001", "SAME", mock_nuts_gdf)
+    result = _geocode_to_polygon_test("006001", "SAME", meteoalarm_gdf)
     assert result is None
 
 
