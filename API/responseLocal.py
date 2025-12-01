@@ -2451,7 +2451,10 @@ async def PW_Forecast(
                 is_all_night = True
 
         m = moon.phase(baseDay + datetime.timedelta(days=i))
-        InterSday[i, DATA_DAY["moon_phase"]] = m / 27.99
+        moon_phase_value = np.clip(m / 27.99, 0.0, 1.0)
+        InterSday[i, DATA_DAY["moon_phase"]] = np.round(
+            moon_phase_value, ROUNDING_RULES.get("moonPhase", 2)
+        )
 
     # Timing Check
     if TIMING:
@@ -2929,6 +2932,15 @@ async def PW_Forecast(
         0.0
     )
     minuteIntensity[np.abs(minuteIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
+
+    # Set values where type is 0 to zero.
+    zero_type_mask = maxPchance == 0
+    minuteRainIntensity[zero_type_mask] = 0.0
+    minuteSnowIntensity[zero_type_mask] = 0.0
+    minuteSleetIntensity[zero_type_mask] = 0.0
+    minuteProbability[zero_type_mask] = 0.0
+    minuteIntensityError[zero_type_mask] = 0.0
+    minuteIntensity[zero_type_mask] = 0.0
 
     # Pre-calculate all unit conversions for minutely block (vectorized approach)
     # Convert to display units and round
