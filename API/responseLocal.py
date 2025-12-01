@@ -19,7 +19,7 @@ import sys
 import threading
 import time
 from collections import Counter
-from typing import Union
+from typing import Optional, Tuple, Union
 
 # Third-party imports
 import metpy as mp
@@ -557,12 +557,17 @@ def _polar_is_all_day(lat_val: float, month_val: int) -> bool:
     )
 
 
-def has_interior_nan_holes(arr: np.ndarray) -> bool:
+def has_interior_nan_holes(arr: np.ndarray) -> Tuple[bool, Optional[int]]:
     """
-    Return True if `arr` (2D: rows × cols) contains at least one
-    contiguous block of NaNs that:
-      - does *not* touch the first or last column
-      - has at least one NaN
+    Detect an interior block of NaNs in a 2D array.
+
+    Args:
+        arr (np.ndarray): Array shaped as ``rows × cols``.
+
+    Returns:
+        Tuple[bool, Optional[int]]: ``(True, row_index)`` if a contiguous
+        NaN block that does *not* touch the first or last column is found in
+        the specified 0-based ``row_index``; otherwise ``(False, None)``.
     """
     # 1) make a mask of NaNs
     mask = np.isnan(arr)
@@ -589,7 +594,11 @@ def has_interior_nan_holes(arr: np.ndarray) -> bool:
     row_has_start = interior_starts.any(axis=1)
     row_has_end = interior_ends.any(axis=1)
 
-    return bool(np.any(row_has_start & row_has_end))
+    matching_rows = np.flatnonzero(row_has_start & row_has_end)
+    if matching_rows.size:
+        return True, int(matching_rows[0])
+
+    return False, None
 
 
 # Interpolation function to interpolate nans in a row, keeping nan's at the start and end
@@ -635,8 +644,11 @@ class WeatherParallel(object):
 
                 # Check for missing/ bad data and interpolate
                 # This should not occur, but good to have a fallback
-                if has_interior_nan_holes(data_out.T):
-                    logger.warning(f"### {model} Interpolating missing data!")
+                has_missing_data, missing_row = has_interior_nan_holes(data_out.T)
+                if has_missing_data:
+                    logger.warning(
+                        f"### {model} Interpolating missing data (row {missing_row})!"
+                    )
 
                     # Print the location of the missing data
                     if TIMING:
