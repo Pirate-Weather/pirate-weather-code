@@ -93,10 +93,10 @@ jobs:
         uses: peter-evans/create-pull-request@v7.0.9
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore: update MeteoAlarm data files"
-          title: "chore: Update MeteoAlarm geocodes and aliases"
+          commit-message: "chore: update MeteoAlarm geocodes data"
+          title: "chore: Update MeteoAlarm geocodes"
           body: |
-            This PR updates the MeteoAlarm data files.
+            This PR updates the MeteoAlarm geocodes data file.
 
             ## Changed files
             ${{ steps.update-files.outputs.changed_files }}
