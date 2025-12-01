@@ -40,7 +40,7 @@ DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0  # (mm liquid)
 # Text thresholds for precipitation accumulation (only rain/sleet)
 DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM = 0.2  # (mm rain/sleet)
 
-# Visibility thresholds (meters)
+# Visibility thresholds (metres)
 FOG_THRESHOLD_METERS = 1000
 MIST_THRESHOLD_METERS = 5000
 SMOKE_CONCENTRATION_THRESHOLD_UGM3 = 25

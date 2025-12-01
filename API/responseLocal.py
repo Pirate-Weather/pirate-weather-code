@@ -19,7 +19,7 @@ import sys
 import threading
 import time
 from collections import Counter
-from typing import Union
+from typing import Optional, Tuple, Union
 
 # Third-party imports
 import metpy as mp
@@ -557,12 +557,17 @@ def _polar_is_all_day(lat_val: float, month_val: int) -> bool:
     )
 
 
-def has_interior_nan_holes(arr: np.ndarray) -> bool:
+def has_interior_nan_holes(arr: np.ndarray) -> Tuple[bool, Optional[int]]:
     """
-    Return True if `arr` (2D: rows × cols) contains at least one
-    contiguous block of NaNs that:
-      - does *not* touch the first or last column
-      - has at least one NaN
+    Detect an interior block of NaNs in a 2D array.
+
+    Args:
+        arr (np.ndarray): Array shaped as ``rows × cols``.
+
+    Returns:
+        Tuple[bool, Optional[int]]: ``(True, row_index)`` if a contiguous
+        NaN block that does *not* touch the first or last column is found in
+        the specified 0-based ``row_index``; otherwise ``(False, None)``.
     """
     # 1) make a mask of NaNs
     mask = np.isnan(arr)
@@ -589,7 +594,11 @@ def has_interior_nan_holes(arr: np.ndarray) -> bool:
     row_has_start = interior_starts.any(axis=1)
     row_has_end = interior_ends.any(axis=1)
 
-    return bool(np.any(row_has_start & row_has_end))
+    matching_rows = np.flatnonzero(row_has_start & row_has_end)
+    if matching_rows.size:
+        return True, int(matching_rows[0])
+
+    return False, None
 
 
 # Interpolation function to interpolate nans in a row, keeping nan's at the start and end
@@ -635,8 +644,11 @@ class WeatherParallel(object):
 
                 # Check for missing/ bad data and interpolate
                 # This should not occur, but good to have a fallback
-                if has_interior_nan_holes(data_out.T):
-                    logger.warning(f"### {model} Interpolating missing data!")
+                has_missing_data, missing_row = has_interior_nan_holes(data_out.T)
+                if has_missing_data:
+                    logger.warning(
+                        f"### {model} Interpolating missing data (row {missing_row})!"
+                    )
 
                     # Print the location of the missing data
                     if TIMING:
@@ -2439,7 +2451,10 @@ async def PW_Forecast(
                 is_all_night = True
 
         m = moon.phase(baseDay + datetime.timedelta(days=i))
-        InterSday[i, DATA_DAY["moon_phase"]] = m / 27.99
+        moon_phase_value = np.clip(m / 27.99, 0.0, 1.0)
+        InterSday[i, DATA_DAY["moon_phase"]] = np.round(
+            moon_phase_value, ROUNDING_RULES.get("moonPhase", 2)
+        )
 
     # Timing Check
     if TIMING:
@@ -2918,6 +2933,15 @@ async def PW_Forecast(
     )
     minuteIntensity[np.abs(minuteIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
 
+    # Zero out intensity and probability if the precipitation type is 'none' to ensure data consistency.
+    zero_type_mask = maxPchance == 0
+    minuteRainIntensity[zero_type_mask] = 0.0
+    minuteSnowIntensity[zero_type_mask] = 0.0
+    minuteSleetIntensity[zero_type_mask] = 0.0
+    minuteProbability[zero_type_mask] = 0.0
+    minuteIntensityError[zero_type_mask] = 0.0
+    minuteIntensity[zero_type_mask] = 0.0
+
     # Pre-calculate all unit conversions for minutely block (vectorized approach)
     # Convert to display units and round
     minuteIntensity_display = np.round(minuteIntensity * prepIntensityUnit, 4)
@@ -2925,7 +2949,7 @@ async def PW_Forecast(
     minuteRainIntensity_display = np.round(minuteRainIntensity * prepIntensityUnit, 4)
     minuteSnowIntensity_display = np.round(minuteSnowIntensity * prepIntensityUnit, 4)
     minuteSleetIntensity_display = np.round(minuteSleetIntensity * prepIntensityUnit, 4)
-    minuteProbability_display = np.round(minuteProbability, 4)
+    minuteProbability_display = np.round(minuteProbability, 2)
 
     minuteItems = []
     minuteItems_si = []
@@ -3526,6 +3550,27 @@ async def PW_Forecast(
         0,
     )
 
+    # Fallback for ECMWF only: if ECMWF provided accumulation but not tprate/intensity,
+    # derive intensity from accumulation so we don't show non-zero accumulation with
+    # zero intensity.  Determine which model supplied the chosen intensity value
+    # using the `prcipIntensityHour` selection index (0=NBM,1=HRRR,2=ECMWF,3=GEFS/GFS,4=ERA5).
+    try:
+        chosen_idx = np.argmin(np.isnan(prcipIntensityHour), axis=1)
+        # Mask where chosen source is ECMWF (index 2), intensity is zero, but accumulation > 0
+        ecmwf_missing_int_mask = (
+            (chosen_idx == 2)
+            & (InterPhour[:, DATA_HOURLY["intensity"]] == 0)
+            & (InterPhour[:, DATA_HOURLY["accum"]] > 0)
+        )
+        InterPhour[ecmwf_missing_int_mask, DATA_HOURLY["intensity"]] = InterPhour[
+            ecmwf_missing_int_mask, DATA_HOURLY["accum"]
+        ]
+    except (NameError, IndexError, ValueError, TypeError, AttributeError) as e:
+        # If anything unexpected happens (missing variable, shape/indexing issues),
+        # log the error but don't break the response—silently skip the fallback.
+        logger.warning("ECMWF intensity fallback failed: %s", e)
+        pass
+
     # Set accumulation to zero if POP == 0
     InterPhour[InterPhour[:, DATA_HOURLY["prob"]] == 0, DATA_HOURLY["accum"]] = 0
 
@@ -3948,6 +3993,8 @@ async def PW_Forecast(
         DATA_HOURLY["smoke"]: ROUNDING_RULES.get("smoke", 2),
         DATA_HOURLY["fire"]: ROUNDING_RULES.get("fireIndex", 2),
         DATA_HOURLY["solar"]: ROUNDING_RULES.get("solar", 2),
+        DATA_HOURLY["cape"]: ROUNDING_RULES.get("cape", 0),
+        DATA_HOURLY["bearing"]: ROUNDING_RULES.get("windBearing", 0),
     }
 
     # Apply rounding in-place to the hourly_display array
@@ -4609,6 +4656,9 @@ async def PW_Forecast(
         DATA_DAY["fire"]: ROUNDING_RULES.get("fireIndex", 2),
         DATA_DAY["solar"]: ROUNDING_RULES.get("solar", 2),
         DATA_DAY["station_pressure"]: ROUNDING_RULES.get("pressure", 2),
+        DATA_DAY["cape"]: ROUNDING_RULES.get("cape", 0),
+        DATA_DAY["bearing"]: ROUNDING_RULES.get("windBearing", 0),
+        DATA_DAY["moon_phase"]: ROUNDING_RULES.get("moonPhase", 2),
     }
 
     for idx_field, decimals in daily_mean_rounding_map.items():
@@ -4698,6 +4748,8 @@ async def PW_Forecast(
         DATA_HOURLY["fire"]: ROUNDING_RULES.get("fireIndex", 2),
         DATA_HOURLY["solar"]: ROUNDING_RULES.get("solar", 2),
         DATA_HOURLY["station_pressure"]: ROUNDING_RULES.get("pressure", 2),
+        DATA_HOURLY["cape"]: ROUNDING_RULES.get("cape", 0),
+        DATA_HOURLY["bearing"]: ROUNDING_RULES.get("windBearing", 0),
     }
 
     def _apply_rounding_to(arr, rounding_map):
@@ -4884,7 +4936,7 @@ async def PW_Forecast(
                 "pressure": display_mean[idx, DATA_HOURLY["pressure"]],
                 "windSpeed": display_mean[idx, DATA_HOURLY["wind"]],
                 "windGust": display_mean[idx, DATA_HOURLY["gust"]],
-                "windBearing": interp_mean[idx, DATA_HOURLY["bearing"]],
+                "windBearing": int(interp_mean[idx, DATA_HOURLY["bearing"]]),
                 "cloudCover": display_mean[idx, DATA_HOURLY["cloud"]],
                 "uvIndex": display_mean[idx, DATA_HOURLY["uv"]],
                 "visibility": display_mean[idx, DATA_HOURLY["vis"]],
@@ -4895,7 +4947,7 @@ async def PW_Forecast(
                 "iceAccumulation": ice_accum,
                 "fireIndex": display_mean[idx, DATA_HOURLY["fire"]],
                 "solar": display_mean[idx, DATA_HOURLY["solar"]],
-                "cape": interp_mean[idx, DATA_HOURLY["cape"]],
+                "cape": int(interp_mean[idx, DATA_HOURLY["cape"]]),
             }
 
             if "stationPressure" in extraVars:
@@ -5108,7 +5160,7 @@ async def PW_Forecast(
             "windSpeed": daily_display_mean[idx, DATA_DAY["wind"]],
             "windGust": daily_display_mean[idx, DATA_DAY["gust"]],
             "windGustTime": int(InterPdayMaxTime[idx, DATA_DAY["gust"]]),
-            "windBearing": InterPday[idx, DATA_DAY["bearing"]],
+            "windBearing": int(InterPday[idx, DATA_DAY["bearing"]]),
             "cloudCover": daily_display_mean[idx, DATA_DAY["cloud"]],
             "uvIndex": daily_display_max[idx, DATA_DAY["uv"]],
             "uvIndexTime": int(InterPdayMaxTime[idx, DATA_DAY["uv"]]),
@@ -6195,13 +6247,13 @@ async def PW_Forecast(
         InterPcurrent[DATA_CURRENT["storm_dist"]] * visUnits, 2
     )
     curr_rain_intensity_display = np.round(
-        InterPcurrent[DATA_CURRENT["rain_intensity"]] * prepIntensityUnit, 2
+        InterPcurrent[DATA_CURRENT["rain_intensity"]] * prepIntensityUnit, 4
     )
     curr_snow_intensity_display = np.round(
-        InterPcurrent[DATA_CURRENT["snow_intensity"]] * prepIntensityUnit, 2
+        InterPcurrent[DATA_CURRENT["snow_intensity"]] * prepIntensityUnit, 4
     )
     curr_ice_intensity_display = np.round(
-        InterPcurrent[DATA_CURRENT["ice_intensity"]] * prepIntensityUnit, 2
+        InterPcurrent[DATA_CURRENT["ice_intensity"]] * prepIntensityUnit, 4
     )
     curr_pressure_display = np.round(InterPcurrent[DATA_CURRENT["pressure"]] / 100, 2)
     curr_wind_display = np.round(InterPcurrent[DATA_CURRENT["wind"]] * windUnit, 2)
@@ -6227,6 +6279,11 @@ async def PW_Forecast(
         if not np.isnan(InterPcurrent[DATA_CURRENT["cape"]])
         else 0
     )
+
+    # Round current day accumulations to 4 decimal places
+    dayZeroIce = float(np.round(dayZeroIce * prepAccumUnit, 4))
+    dayZeroRain = float(np.round(dayZeroRain * prepAccumUnit, 4))
+    dayZeroSnow = float(np.round(dayZeroSnow * prepAccumUnit, 4))
 
     if (
         (minuteItems[0]["precipIntensity"])
@@ -6306,7 +6363,7 @@ async def PW_Forecast(
     returnOBJ["longitude"] = round(float(lon_IN), 4)
     returnOBJ["timezone"] = str(tz_name)
     returnOBJ["offset"] = float(tz_offset / 60)
-    returnOBJ["elevation"] = round(float(ETOPO * elevUnit), 2)
+    returnOBJ["elevation"] = int(round(float(ETOPO * elevUnit), 0))
 
     if exCurrently != 1:
         returnOBJ["currently"] = dict()
