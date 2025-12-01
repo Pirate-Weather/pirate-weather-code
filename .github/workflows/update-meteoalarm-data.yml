@@ -1,4 +1,4 @@
-name: Update MeteoAlarm Data
+name: Check MeteoAlarm Data Updates
 
 on:
   schedule:
@@ -7,8 +7,8 @@ on:
   workflow_dispatch:  # Allow manual triggering
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  issues: write
 
 jobs:
   check-for-updates:
@@ -25,89 +25,99 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Check and update MeteoAlarm files
-        id: update-files
+      - name: Check for MeteoAlarm repository updates
+        id: check-updates
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python << 'EOF'
-          import hashlib
           import json
           import os
           import requests
+          from datetime import datetime, timedelta, timezone
 
-          # Source URLs
-          GEOCODES_URL = "https://raw.githubusercontent.com/NiklasJordan/meteoalarm/main/src/meteoalarm/assets/geocodes.json"
-          # Note: meteoalarm_aliases.csv currently has no clear upstream source
-          # The file appears to be maintained locally or derived from meteoalarm data
+          # Official MeteoAlarm GitLab repository
+          # Source: https://gitlab.com/meteoalarm-pm-group/documents
+          GITLAB_API_URL = "https://gitlab.com/api/v4/projects/meteoalarm-pm-group%2Fdocuments/repository/commits"
 
-          # Local file paths
-          GEOCODES_PATH = "API/data/meteoalarm_geocodes.json"
-          ALIASES_PATH = "API/data/meteoalarm_aliases.csv"
+          # Check for commits in the last 90 days (quarterly check)
+          def get_recent_commits():
+              """Get recent commits from the MeteoAlarm GitLab repository."""
+              try:
+                  since_date = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+                  response = requests.get(
+                      GITLAB_API_URL,
+                      params={"since": since_date, "per_page": 10},
+                      timeout=60
+                  )
+                  response.raise_for_status()
+                  return response.json()
+              except Exception as e:
+                  print(f"Error fetching commits: {e}")
+                  return []
 
-          changes = []
+          print("Checking for updates in MeteoAlarm GitLab repository...")
+          commits = get_recent_commits()
 
-          def get_file_hash(filepath):
-              """Calculate SHA256 hash of a file."""
-              if not os.path.exists(filepath):
-                  return None
-              with open(filepath, "rb") as f:
-                  return hashlib.sha256(f.read()).hexdigest()
-
-          def download_file(url):
-              """Download file content from URL."""
-              response = requests.get(url, timeout=60)
-              response.raise_for_status()
-              return response.content
-
-          # Check and update geocodes.json
-          print("Checking for geocodes.json updates...")
-          try:
-              current_hash = get_file_hash(GEOCODES_PATH)
-              new_content = download_file(GEOCODES_URL)
-              new_hash = hashlib.sha256(new_content).hexdigest()
+          if commits:
+              print(f"Found {len(commits)} recent commit(s) in the last 90 days:")
+              commit_info = []
+              for commit in commits[:5]:  # Show up to 5 recent commits
+                  short_id = commit.get("short_id", "unknown")
+                  title = commit.get("title", "No title")
+                  date = commit.get("created_at", "unknown")
+                  print(f"  - {short_id}: {title} ({date})")
+                  commit_info.append(f"- `{short_id}`: {title} ({date})")
               
-              if current_hash != new_hash:
-                  print(f"Update found for geocodes.json")
-                  print(f"  Current hash: {current_hash}")
-                  print(f"  New hash: {new_hash}")
-                  with open(GEOCODES_PATH, "wb") as f:
-                      f.write(new_content)
-                  changes.append("meteoalarm_geocodes.json")
-              else:
-                  print("geocodes.json is up to date")
-          except Exception as e:
-              print(f"Error checking geocodes.json: {e}")
-
-          # Write output for GitHub Actions
-          with open(os.environ.get("GITHUB_OUTPUT", "/dev/null"), "a") as f:
-              if changes:
-                  f.write(f"has_changes=true\n")
-                  f.write(f"changed_files={', '.join(changes)}\n")
-              else:
-                  f.write("has_changes=false\n")
-
-          print(f"\nSummary: {len(changes)} file(s) updated")
+              # Write outputs for GitHub Actions
+              with open(os.environ.get("GITHUB_OUTPUT", "/dev/null"), "a") as f:
+                  f.write("has_updates=true\n")
+                  f.write(f"commit_count={len(commits)}\n")
+          else:
+              print("No recent updates found in the MeteoAlarm repository.")
+              with open(os.environ.get("GITHUB_OUTPUT", "/dev/null"), "a") as f:
+                  f.write("has_updates=false\n")
           EOF
 
-      - name: Create Pull Request
-        if: steps.update-files.outputs.has_changes == 'true'
-        uses: peter-evans/create-pull-request@v7.0.9
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore: update MeteoAlarm geocodes data"
-          title: "chore: Update MeteoAlarm geocodes"
-          body: |
-            This PR updates the MeteoAlarm geocodes data file.
+      - name: Check for existing issue
+        if: steps.check-updates.outputs.has_updates == 'true'
+        id: check-issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check if an open issue with the label already exists
+          existing=$(gh issue list --label "meteoalarm-update" --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "existing_issue=$existing" >> $GITHUB_OUTPUT
+            echo "Issue #$existing already exists"
+          else
+            echo "existing_issue=" >> $GITHUB_OUTPUT
+            echo "No existing issue found"
+          fi
 
-            ## Changed files
-            ${{ steps.update-files.outputs.changed_files }}
+      - name: Create issue for MeteoAlarm updates
+        if: steps.check-updates.outputs.has_updates == 'true' && steps.check-issue.outputs.existing_issue == ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "MeteoAlarm data files may need updating" \
+            --label "meteoalarm-update" \
+            --body "## MeteoAlarm Repository Update Detected
 
-            ## Source
-            - `meteoalarm_geocodes.json` is sourced from [NiklasJordan/meteoalarm](https://github.com/NiklasJordan/meteoalarm/blob/main/src/meteoalarm/assets/geocodes.json)
+          The [MeteoAlarm GitLab repository](https://gitlab.com/meteoalarm-pm-group/documents) has had recent updates in the last 90 days.
 
-            ---
-            *This PR was automatically generated by the Update MeteoAlarm Data workflow.*
-          branch: update-meteoalarm-data
-          delete-branch: true
-          labels: |
-            dependencies
-            automated
+          ### Action Required
+          Please review the following files for potential updates:
+          - \`API/data/meteoalarm_geocodes.json\`
+          - \`API/data/meteoalarm_aliases.csv\`
+
+          ### Source Files
+          - [MeteoAlarm Documents Repository](https://gitlab.com/meteoalarm-pm-group/documents) - Browse for latest geocodes JSON files
+
+          ### Notes
+          - The CSV files in the source repository are not versioned, so manual review is required
+          - Recent commits found: ${{ steps.check-updates.outputs.commit_count }}
+
+          ---
+          *This issue was automatically created by the Check MeteoAlarm Data Updates workflow.*"
