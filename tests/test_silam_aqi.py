@@ -11,83 +11,27 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-# Import the functions to test - these need to be extracted from the ingest script
-# For now, we'll copy the core calculation logic for isolated testing
+# Import the functions to test from the shared ingest utilities
+from API.ingest_utils import calculate_nowcast_concentration
 
+# EPA AQI breakpoints
+PM25_BP = [0, 12.0, 35.4, 55.4, 150.4, 250.4, 350.4, 500.4]
+PM25_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
-def calculate_nowcast_concentration(concentrations, num_hours=12):
-    """
-    Calculate the EPA NowCast weighted concentration for PM2.5 and PM10.
+PM10_BP = [0, 54, 154, 254, 354, 424, 504, 604]
+PM10_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
-    The NowCast algorithm weights recent hours more heavily than older hours,
-    making it more responsive to changing air quality conditions than a
-    simple 24-hour average.
-
-    Args:
-        concentrations: Array of concentrations with time as the first dimension.
-                       Shape: (time, latitude, longitude)
-        num_hours: Number of hours to use in NowCast calculation (default 12)
-
-    Returns:
-        NowCast weighted concentration array with same shape as input
-    """
-    if concentrations.shape[0] < 3:
-        # Need at least 3 hours for NowCast, return original if not enough data
-        return concentrations
-
-    # Limit to available hours
-    hours_to_use = min(num_hours, concentrations.shape[0])
-
-    # Initialize output array with same shape as input
-    nowcast_result = np.full_like(concentrations, np.nan)
-
-    # Process each time step
-    for t in range(concentrations.shape[0]):
-        # Determine the window of hours to use (looking back from current hour)
-        start_idx = max(0, t - hours_to_use + 1)
-        window = concentrations[start_idx : t + 1]
-
-        if window.shape[0] < 3:
-            # Not enough hours, use instantaneous value
-            nowcast_result[t] = concentrations[t]
-            continue
-
-        # Calculate weight factor based on concentration range
-        # Weight = 1 - (range / max), minimum 0.5
-        with np.errstate(invalid="ignore", divide="ignore"):
-            c_max = np.nanmax(window, axis=0)
-            c_min = np.nanmin(window, axis=0)
-            c_range = c_max - c_min
-
-            # Avoid division by zero - weight_factor is 2D (lat, lon)
-            weight_factor = np.where(
-                c_max > 0, np.maximum(1 - c_range / c_max, 0.5), 0.5
-            )
-
-        # Calculate weighted average with spatially varying weight factor
-        # Weights: w^0, w^1, w^2, ... w^(n-1) from most recent to oldest
-        num_window_hours = window.shape[0]
-
-        # Build weights array with shape (time, lat, lon) for broadcasting
-        weights = np.zeros_like(window)
-        for i in range(num_window_hours):
-            # i=0 is oldest, i=num_window_hours-1 is most recent
-            hours_ago = num_window_hours - 1 - i
-            weights[i] = weight_factor**hours_ago
-
-        # Calculate weighted concentration
-        with np.errstate(invalid="ignore"):
-            weighted_sum = np.nansum(window * weights, axis=0)
-            weight_sum = np.nansum(np.where(~np.isnan(window), weights, 0), axis=0)
-            nowcast_result[t] = np.where(
-                weight_sum > 0, weighted_sum / weight_sum, np.nan
-            )
-
-    return nowcast_result
+O3_BP = [0, 108, 140, 170, 210, 400, 504, 604]
+O3_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
 
 def _calc_aqi_for_pollutant(conc, bp, aqi_vals):
-    """Calculate AQI for a single pollutant using linear interpolation."""
+    """Calculate AQI for a single pollutant using linear interpolation.
+
+    This is a small scalar helper used by the tests to validate breakpoint
+    interpolation. Kept local to the tests to avoid changing vectorized
+    semantics in `calculate_aqi`.
+    """
     if np.isnan(conc):
         return np.nan
     if conc <= 0:
@@ -102,17 +46,6 @@ def _calc_aqi_for_pollutant(conc, bp, aqi_vals):
 
     # If concentration exceeds highest breakpoint
     return aqi_vals[-1]
-
-
-# EPA AQI breakpoints
-PM25_BP = [0, 12.0, 35.4, 55.4, 150.4, 250.4, 350.4, 500.4]
-PM25_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
-
-PM10_BP = [0, 54, 154, 254, 354, 424, 504, 604]
-PM10_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
-
-O3_BP = [0, 108, 140, 170, 210, 400, 504, 604]
-O3_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
 
 class TestNowCastAlgorithm:

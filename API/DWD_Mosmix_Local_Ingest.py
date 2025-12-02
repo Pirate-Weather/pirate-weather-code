@@ -867,7 +867,7 @@ os.makedirs(tmp_dir, exist_ok=True)
 if save_type == "Download":
     os.makedirs(os.path.join(forecast_path, ingest_version), exist_ok=True)
 
-T0 = time.time()  # Start timer for script execution
+start_time = time.time()  # Start timer for script execution
 
 # --- Step 1: Download and Parse DWD MOSMIX-S KML/KMZ Data ---
 logging.info(f"\n--- Attempting to download DWD MOSMIX data from: {dwd_mosmix_url} ---")
@@ -1045,5 +1045,5 @@ else:
 _clear_directory(forecast_process_dir)
 _clear_directory(tmp_dir)
 
-T_end = time.time()  # End timer
-logging.info(f"\nTotal script execution time: {T_end - T0:.2f} seconds")
+end_time = time.time()  # End timer
+logging.info(f"\nTotal script execution time: {end_time - start_time:.2f} seconds")

@@ -344,3 +344,123 @@ def interp_time_take_blend(
         out = da.concatenate(pieces, axis=VAX)
 
     return out
+
+
+# --- Air quality helpers (NowCast & EPA AQI) ---
+def calculate_nowcast_concentration(concentrations, num_hours=12):
+    """
+    Calculate the EPA NowCast weighted concentration for PM2.5 and PM10.
+
+    The NowCast algorithm weights recent hours more heavily than older hours,
+    making it more responsive to changing air quality conditions than a
+    simple average.
+
+    Args:
+        concentrations: Array of concentrations with time as the first dimension.
+                       Shape: (time, latitude, longitude)
+        num_hours: Number of hours to use in NowCast calculation (default 12)
+
+    Returns:
+        NowCast weighted concentration array with same shape as input
+    """
+    if concentrations.shape[0] < 3:
+        return concentrations
+
+    hours_to_use = min(num_hours, concentrations.shape[0])
+    nowcast_result = np.full_like(concentrations, np.nan)
+
+    for t in range(concentrations.shape[0]):
+        start_idx = max(0, t - hours_to_use + 1)
+        window = concentrations[start_idx : t + 1]
+
+        if window.shape[0] < 3:
+            nowcast_result[t] = concentrations[t]
+            continue
+
+        with np.errstate(invalid="ignore", divide="ignore"):
+            c_max = np.nanmax(window, axis=0)
+            c_min = np.nanmin(window, axis=0)
+            c_range = c_max - c_min
+            weight_factor = np.where(
+                c_max > 0, np.maximum(1 - c_range / c_max, 0.5), 0.5
+            )
+
+        num_window_hours = window.shape[0]
+        weights = np.zeros_like(window)
+        for i in range(num_window_hours):
+            hours_ago = num_window_hours - 1 - i
+            weights[i] = weight_factor**hours_ago
+
+        with np.errstate(invalid="ignore"):
+            weighted_sum = np.nansum(window * weights, axis=0)
+            weight_sum = np.nansum(np.where(~np.isnan(window), weights, 0), axis=0)
+            nowcast_result[t] = np.where(
+                weight_sum > 0, weighted_sum / weight_sum, np.nan
+            )
+
+    return nowcast_result
+
+
+def calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=True):
+    """
+    Calculate Air Quality Index (AQI) based on EPA standards.
+    Returns the maximum AQI value among all pollutants.
+
+    Args:
+        pm25: PM2.5 concentration in µg/m³ (time, lat, lon)
+        pm10: PM10 concentration in µg/m³ (time, lat, lon)
+        o3: Ozone concentration in µg/m³ (time, lat, lon)
+        no2: NO2 concentration in µg/m³ (time, lat, lon)
+        so2: SO2 concentration in µg/m³ (time, lat, lon)
+        use_nowcast: Whether to use EPA NowCast for PM2.5/PM10 (default True)
+
+    Returns:
+        AQI value (0-500+ scale)
+    """
+    pm25_bp = [0, 12.0, 35.4, 55.4, 150.4, 250.4, 350.4, 500.4]
+    pm25_aqi = [0, 50, 100, 150, 200, 300, 400, 500]
+
+    pm10_bp = [0, 54, 154, 254, 354, 424, 504, 604]
+    pm10_aqi = [0, 50, 100, 150, 200, 300, 400, 500]
+
+    o3_bp = [0, 108, 140, 170, 210, 400, 504, 604]
+    o3_aqi = [0, 50, 100, 150, 200, 300, 400, 500]
+
+    no2_bp = [0, 100, 188, 677, 1221, 1880, 2350, 2820]
+    no2_aqi = [0, 50, 100, 150, 200, 300, 400, 500]
+
+    so2_bp = [0, 92, 197, 485, 800, 1574, 2101, 2620]
+    so2_aqi = [0, 50, 100, 150, 200, 300, 400, 500]
+
+    def _calc_aqi_for_pollutant(conc, bp, aqi_vals):
+        if np.isnan(conc):
+            return np.nan
+        if conc <= 0:
+            return 0
+
+        for i in range(len(bp) - 1):
+            if bp[i] <= conc < bp[i + 1]:
+                aqi = ((aqi_vals[i + 1] - aqi_vals[i]) / (bp[i + 1] - bp[i])) * (
+                    conc - bp[i]
+                ) + aqi_vals[i]
+                return aqi
+        return aqi_vals[-1]
+
+    calc_aqi_vec = np.vectorize(_calc_aqi_for_pollutant, otypes=[float])
+
+    if use_nowcast:
+        pm25_nowcast = calculate_nowcast_concentration(pm25, num_hours=12)
+        pm10_nowcast = calculate_nowcast_concentration(pm10, num_hours=12)
+        aqi_pm25 = calc_aqi_vec(pm25_nowcast, pm25_bp, pm25_aqi)
+        aqi_pm10 = calc_aqi_vec(pm10_nowcast, pm10_bp, pm10_aqi)
+    else:
+        aqi_pm25 = calc_aqi_vec(pm25, pm25_bp, pm25_aqi)
+        aqi_pm10 = calc_aqi_vec(pm10, pm10_bp, pm10_aqi)
+
+    aqi_o3 = calc_aqi_vec(o3, o3_bp, o3_aqi)
+    aqi_no2 = calc_aqi_vec(no2, no2_bp, no2_aqi)
+    aqi_so2 = calc_aqi_vec(so2, so2_bp, so2_aqi)
+
+    return np.nanmax(
+        np.stack([aqi_pm25, aqi_pm10, aqi_o3, aqi_no2, aqi_so2], axis=0), axis=0
+    )
