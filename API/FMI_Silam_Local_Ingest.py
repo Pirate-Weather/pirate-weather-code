@@ -57,7 +57,6 @@ s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
 # Define the processing chunk size - use GFS chunk sizes as SILAM is global data
 processChunk = CHUNK_SIZES.get("GFS", 50)
-finalChunk = 3
 
 # Define the variables to be saved in the final Zarr store
 # These match the SILAM output variables for air quality
@@ -71,17 +70,6 @@ zarrVars = (
     "cnc_CO",  # Carbon monoxide concentration (µg/m³)
     "AQI",  # Air Quality Index (calculated)
 )
-
-# SILAM variable names as they appear in the NetCDF/OPeNDAP data
-# These are mapped to our internal variable names
-silam_to_zarr_map = {
-    "cnc_PM2_5_gas": "cnc_PM2_5",  # PM2.5 particulate matter
-    "cnc_PM10_gas": "cnc_PM10",  # PM10 particulate matter
-    "cnc_O3_gas": "cnc_O3",  # Ozone
-    "cnc_NO2_gas": "cnc_NO2",  # Nitrogen dioxide
-    "cnc_SO2_gas": "cnc_SO2",  # Sulfur dioxide
-    "cnc_CO_gas": "cnc_CO",  # Carbon monoxide
-}
 
 # Alternative SILAM variable names (different SILAM versions may use different names)
 silam_alt_names = {
@@ -369,30 +357,38 @@ for var in zarrVars[1:-1]:
 
 # Calculate AQI from pollutant concentrations
 logger.info("Calculating Air Quality Index (AQI)...")
+
+# Create fallback shape for missing data (3D: time, latitude, longitude)
+fallback_shape = (
+    len(xarray_processed.time),
+    len(xarray_processed.latitude),
+    len(xarray_processed.longitude),
+)
+
 pm25_data = (
     xarray_processed["cnc_PM2_5"].values
     if "cnc_PM2_5" in xarray_processed
-    else np.nan * np.ones_like(xarray_processed["time"].values)
+    else np.full(fallback_shape, np.nan, dtype=np.float32)
 )
 pm10_data = (
     xarray_processed["cnc_PM10"].values
     if "cnc_PM10" in xarray_processed
-    else np.nan * np.ones_like(pm25_data)
+    else np.full(fallback_shape, np.nan, dtype=np.float32)
 )
 o3_data = (
     xarray_processed["cnc_O3"].values
     if "cnc_O3" in xarray_processed
-    else np.nan * np.ones_like(pm25_data)
+    else np.full(fallback_shape, np.nan, dtype=np.float32)
 )
 no2_data = (
     xarray_processed["cnc_NO2"].values
     if "cnc_NO2" in xarray_processed
-    else np.nan * np.ones_like(pm25_data)
+    else np.full(fallback_shape, np.nan, dtype=np.float32)
 )
 so2_data = (
     xarray_processed["cnc_SO2"].values
     if "cnc_SO2" in xarray_processed
-    else np.nan * np.ones_like(pm25_data)
+    else np.full(fallback_shape, np.nan, dtype=np.float32)
 )
 
 aqi_values = calculate_aqi(pm25_data, pm10_data, o3_data, no2_data, so2_data)
