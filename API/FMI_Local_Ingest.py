@@ -279,7 +279,9 @@ else:
     os.makedirs(dest_dir, exist_ok=True)
 
     shutil.copy(local_time_pickle, os.path.join(dest_dir, "FMI.time.pickle"))
-    shutil.copytree(process_zarr, os.path.join(dest_dir, "FMI.zarr"), dirs_exist_ok=True)
+    shutil.copytree(
+        process_zarr, os.path.join(dest_dir, "FMI.zarr"), dirs_exist_ok=True
+    )
     logger.info("Copied Zarr and time pickle to %s", dest_dir)
 
 # Clean up process folder (only the process zarr and temp GRIB)
