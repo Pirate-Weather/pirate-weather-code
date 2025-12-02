@@ -304,10 +304,11 @@ origintime = get_latest_silam_run()
 
 # Construct the OPeNDAP URL for SILAM global forecast
 # SILAM data is available via THREDDS OPeNDAP service
-# The URL pattern follows: base_url/silam_glob05_v5_9/runs/silam_glob05_v5_9_YYYYMMDDHH.nc
+# Using SILAM version 6.1 (silam_glob06_v6_1) - the latest available version
+# The URL pattern follows: base_url/silam_glob06_v6_1/runs/silam_glob06_v6_1_YYYYMMDDHH.nc
 base_opendap_url = "https://thredds.silam.fmi.fi/thredds/dodsC"
-silam_dataset_path = "silam_glob05_v5_9/runs"
-run_filename = f"silam_glob05_v5_9_{origintime.strftime('%Y%m%d%H')}.nc"
+silam_dataset_path = "silam_glob06_v6_1/runs"
+run_filename = f"silam_glob06_v6_1_{origintime.strftime('%Y%m%d%H')}.nc"
 
 opendap_url = f"{base_opendap_url}/{silam_dataset_path}/{run_filename}"
 
@@ -353,11 +354,13 @@ except Exception as e:
     logger.error(f"Error opening SILAM data via OPeNDAP: {e}")
     logger.info("Attempting fallback URL pattern...")
 
-    # Try alternative URL patterns
+    # Try alternative URL patterns (including older versions as fallback)
     alt_urls = [
+        f"{base_opendap_url}/silam_glob06_v6_1/silam_glob06_v6_1_{origintime.strftime('%Y%m%d%H')}.nc",
+        f"{base_opendap_url}/silam_glob06_v6_1/latest.nc",
+        # Fallback to older v5.9 if v6.1 is unavailable
+        f"{base_opendap_url}/silam_glob05_v5_9/runs/silam_glob05_v5_9_{origintime.strftime('%Y%m%d%H')}.nc",
         f"{base_opendap_url}/silam_glob05_v5_9/silam_glob05_v5_9_{origintime.strftime('%Y%m%d%H')}.nc",
-        f"{base_opendap_url}/silam_glob05_v5_9/latest.nc",
-        f"{base_opendap_url}/silam_glob_v5_9/runs/silam_glob_v5_9_{origintime.strftime('%Y%m%d%H')}.nc",
     ]
 
     xarray_silam_data = None
