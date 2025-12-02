@@ -13,6 +13,8 @@ import s3fs
 import xarray as xr
 from dask.diagnostics import ProgressBar
 
+from API.constants.shared_const import INGEST_VERSION_STR
+
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 # %% Setup logging
@@ -22,15 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # %% Setup paths and parameters
-ingestVersion = "v27"
-
-# FMI GRIBs are opened with the `cfgrib` engine (used via xarray) in this script.
-# In most workflows `wgrib2` is not required. If you need low-level inspection or
-# format conversions, install `wgrib2` or use `pygrib`. The `wgrib2_path` default
-# is provided only as a hint and is not used by the current code path.
-wgrib2_path = os.getenv(
-    "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2"
-)
+ingestVersion = INGEST_VERSION_STR
 
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/home/ubuntu/Weather/FMI"

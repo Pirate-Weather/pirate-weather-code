@@ -28,6 +28,8 @@ import s3fs
 import xarray as xr
 import zarr
 import zarr.storage
+from metpy.calc import relative_humidity_from_dewpoint
+from metpy.units import units
 from pykml import parser
 from scipy.interpolate import griddata
 from scipy.spatial import (
@@ -55,43 +57,22 @@ DWD_NAMESPACE = (
 )
 
 # Define the comprehensive list of variables to be saved in the final Zarr dataset.
-# This list matches the schema expected by the downstream API (responseLocal.py).
-# Variables not directly available from MOSMIX-S will be filled with NaNs or default values
 # during the interpolation process to maintain a consistent schema.
-zarrVars = (
+zarr_vars = (
     "time",
-    "TMP_2maboveground",  # Temperature at 2m (Kelvin)
-    "DPT_2maboveground",  # Dew Point Temperature at 2m (Kelvin)
-    "RH_2maboveground",  # Relative Humidity at 2m (calculated, %)
-    "PRES_meansealevel",  # Pressure at Mean Sea Level (Pa)
-    "UGRD_10maboveground",  # U-component of Wind at 10m (m/s)
-    "VGRD_10maboveground",  # V-component of Wind at 10m (m/s)
-    "GUST_surface",  # Wind Gust at surface (m/s)
-    "PRATE_surface",  # Precipitation Rate at surface (mm/h, 1-hour accumulation)
-    "APCP_surface",  # Accumulated Precipitation at surface (cm, 1-hour accumulation)
-    "TCDC_entireatmosphere",  # Total Cloud Cover (0-100%)
-    "VIS_surface",  # Visibility at surface (meters)
-    "PPROB",  # Probability of Precipitation (NaN placeholder for MOSMIX-S)
-    "PTYPE_surface",  # Precipitation Type (string: "rain", "snow", "sleet", "none")
-    "DSWRF_surface",  # Downward Short-Wave Radiation Flux (W/m^2, calculated from Rad1h)
-    # Placeholders for variables not directly available from DWD MOSMIX-S.
-    # These will be initialized with NaNs to ensure schema compatibility.
-    "APTMP_2maboveground",  # Apparent Temperature
-    "CSNOW_surface",  # Categorical Snow
-    "CICEP_surface",  # Categorical Ice Pellets
-    "CFRZR_surface",  # Categorical Freezing Rain
-    "CRAIN_surface",  # Categorical Rain
-    "REFC_entireatmosphere",  # Radar Reflectivity
-    "CAPE_surface",  # Convective Available Potential Energy
-    "TOZNE_entireatmosphere_consideredasasinglelayer_",  # Total Ozone
-    "DUVB_surface",  # UV-B Radiation
-    "MASSDEN_8maboveground",  # Mass Density (e.g., for smoke)
-    "Storm_Distance",  # Distance to nearest storm
-    "Storm_Direction",  # Direction to nearest storm
-    "FOSINDX_surface",  # Fire Outbreak Spreading Index
-    "PWTHER_surfaceMreserved",  # NBM specific Present Weather
-    "WIND_10maboveground",  # Scalar Wind Speed at 10m
-    "WDIR_10maboveground",  # Scalar Wind Direction at 10m
+    "TMP_2maboveground",
+    "DPT_2maboveground",
+    "RH_2maboveground",
+    "PRES_meansealevel",
+    "UGRD_10maboveground",
+    "VGRD_10maboveground",
+    "GUST_surface",
+    "PRATE_surface",
+    "APCP_surface",
+    "TCDC_entireatmosphere",
+    "VIS_surface",
+    "PTYPE_surface",
+    "DSWRF_surface",
 )
 
 # Define the subset of standardized variables that are directly sourced from
@@ -159,50 +140,9 @@ def _get_precip_type_from_ww(ww_code):
     return "none"  # Fallback for any unmapped codes
 
 
-def _calculate_saturation_vapor_pressure(T_kelvin):
-    """
-    Calculates saturation vapor pressure (in hPa) from temperature in Kelvin.
-    Uses the Magnus formula (based on Goff-Gratch equation approximation) over water.
-
-    Args:
-        T_kelvin (np.ndarray or float): Temperature in Kelvin.
-
-    Returns:
-        np.ndarray or float: Saturation vapor pressure in hPa.
-    """
-    T_celsius = T_kelvin - 273.15
-    # Clip T_celsius to a reasonable range to prevent numerical issues with exp() for extreme values.
-    T_celsius = np.clip(T_celsius, -100, 100)
-    return 6.1094 * np.exp((17.625 * T_celsius) / (243.04 + T_celsius))
-
-
-def calculate_relative_humidity(T_kelvin, Td_kelvin):
-    """
-    Calculates relative humidity (%) from temperature (T) and dew point temperature (Td),
-    both in Kelvin.
-
-    Args:
-        T_kelvin (np.ndarray or float): Temperature in Kelvin.
-        Td_kelvin (np.ndarray or float): Dew point temperature in Kelvin.
-
-    Returns:
-        np.ndarray or float: Relative humidity in percentage (0-100%). Returns NaN if T or Td are NaN.
-    """
-    # Use np.where to handle NaN values gracefully in a vectorized manner.
-    rh = np.where(
-        np.isnan(T_kelvin) | np.isnan(Td_kelvin),  # Condition for NaN output
-        np.nan,  # Value if condition is True (NaN input)
-        (
-            _calculate_saturation_vapor_pressure(Td_kelvin)  # Actual vapor pressure
-            / _calculate_saturation_vapor_pressure(
-                T_kelvin
-            )  # Saturation vapor pressure
-        )
-        * 100,  # Convert to percentage
-    )
-    # Clip values to be strictly between 0 and 100%
-    rh = np.clip(rh, 0, 100)
-    return rh
+# Relative humidity is calculated using MetPy's `relative_humidity_from_dewpoint`.
+# This removes the need for custom vapor-pressure approximations and leverages
+# a tested implementation that supports pint units.
 
 
 def parse_mosmix_kml(kml_filepath):
@@ -428,14 +368,34 @@ def convert_df_to_xarray(df, global_metadata=None):
 
     # Calculate Relative Humidity (RH_2maboveground) from Temperature (TTT) and Dew Point (Td)
     if "TMP_2maboveground" in ds.data_vars and "DPT_2maboveground" in ds.data_vars:
-        ds["RH_2maboveground"] = xr.apply_ufunc(
-            calculate_relative_humidity,
-            ds["TMP_2maboveground"],
-            ds["DPT_2maboveground"],
-            vectorize=True,  # Allows element-wise application over arrays
-            dask="parallelized",  # Enables Dask for parallel computation
-            output_dtypes=[np.float32],  # Specify output data type
-        )
+        try:
+            # Use MetPy which expects pint quantities. We multiply by units.kelvin
+            # and return the dimensionless magnitude (0-1) scaled to percent (0-100).
+            def _rh_metpy(t, td):
+                t_q = t * units.kelvin
+                td_q = td * units.kelvin
+                rh_q = relative_humidity_from_dewpoint(t_q, td_q)
+                # Convert to percent
+                return (rh_q.magnitude * 100).astype(np.float32)
+
+            ds["RH_2maboveground"] = xr.apply_ufunc(
+                _rh_metpy,
+                ds["TMP_2maboveground"],
+                ds["DPT_2maboveground"],
+                vectorize=True,
+                dask="parallelized",
+                output_dtypes=[np.float32],
+            )
+        except Exception as e:
+            logging.warning(
+                "MetPy RH calculation failed (%s). Filling RH with NaNs.", e
+            )
+            ds["RH_2maboveground"] = (
+                ("station_id", "time"),
+                np.full(
+                    (ds.sizes["station_id"], ds.sizes["time"]), np.nan, dtype=np.float32
+                ),
+            )
     else:
         logging.warning(
             "Warning: Cannot calculate Relative Humidity (RH_2maboveground) due to missing Temperature (TTT) or Dew Point (Td) data. Filling with NaN."
@@ -473,8 +433,6 @@ def convert_df_to_xarray(df, global_metadata=None):
         ds["TCDC_entireatmosphere"] = ds["N"]
     if "VV" in ds.data_vars:
         ds["VIS_surface"] = ds["VV"]
-
-    # PPROB (from R101) is not in MOSMIX-S, so no processing from source. Will be NaN placeholder later.
 
     # Precipitation Type (WW)
     if "WW" in ds.data_vars:
@@ -850,14 +808,15 @@ def interpolate_dwd_to_grid(
 dwd_mosmix_url = "https://opendata.dwd.de/weather/local_forecasts/mos/MOSMIX_S/all_stations/kml/MOSMIX_S_LATEST_240.kmz"
 downloaded_kmz_file = "MOSMIX_S_LATEST_240.kmz"
 
-ingestVersion = INGEST_VERSION_STR
+# Script ingest version string
+ingest_version = INGEST_VERSION_STR
 
 # Base directory for all processing and output files.
 forecast_process_dir = os.getenv(
     "forecast_process_dir", "/home/ubuntu/Weather/Process/DWD"
 )
 # Temporary directory for downloaded files.
-tmpDIR = os.getenv("tmp_dir", os.path.join(forecast_process_dir, "Downloads"))
+tmp_dir = os.getenv("tmp_dir", os.path.join(forecast_process_dir, "Downloads"))
 # Final destination directory for processed Zarr files.
 forecast_path = os.getenv("forecast_path", "/home/ubuntu/Weather/Prod/DWD")
 
@@ -866,30 +825,47 @@ forecast_path = os.getenv("forecast_path", "/home/ubuntu/Weather/Prod/DWD")
 gfs_zarr_reference_path = os.getenv("GFS_ZARR_PATH", "/path/to/your/GFS.zarr")
 
 # Defines where the final Zarr file should be saved: "Download" (local) or "S3" (AWS S3).
-saveType = os.getenv("save_type", "Download")
+save_type = os.getenv("save_type", "Download")
 # AWS Credentials for S3 operations (should be set as environment variables).
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 # Initialize S3 filesystem object if saving to S3.
 s3 = None
-if saveType == "S3":
+if save_type == "S3":
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
 # zarr import for S3 stores (imports are at top)
 
+
 # --- Directory Setup and Cleanup ---
-# Create the main processing directory; remove and recreate if it already exists for a clean slate.
+# Create the main processing directory; clear its contents if it already exists to avoid
+# deleting the directory itself (safer for processes that depend on the parent dir).
+def _clear_directory(path):
+    """Remove all contents of a directory but keep the directory itself."""
+    if not os.path.exists(path):
+        return
+    for entry in os.scandir(path):
+        try:
+            if entry.is_dir(follow_symlinks=False):
+                shutil.rmtree(entry.path)
+            else:
+                os.remove(entry.path)
+        except Exception:
+            logging.warning(f"Could not remove {entry.path} during clear_directory.")
+
+
 if os.path.exists(forecast_process_dir):
-    shutil.rmtree(forecast_process_dir)
-os.makedirs(forecast_process_dir, exist_ok=True)
+    _clear_directory(forecast_process_dir)
+else:
+    os.makedirs(forecast_process_dir, exist_ok=True)
 
 # Create the temporary download directory.
-os.makedirs(tmpDIR, exist_ok=True)
+os.makedirs(tmp_dir, exist_ok=True)
 
 # Create the final forecast output directory if saving locally (versioned by ingest).
-if saveType == "Download":
-    os.makedirs(os.path.join(forecast_path, ingestVersion), exist_ok=True)
+if save_type == "Download":
+    os.makedirs(os.path.join(forecast_path, ingest_version), exist_ok=True)
 
 T0 = time.time()  # Start timer for script execution
 
@@ -898,20 +874,20 @@ logging.info(f"\n--- Attempting to download DWD MOSMIX data from: {dwd_mosmix_ur
 try:
     response = requests.get(dwd_mosmix_url, stream=True)
     response.raise_for_status()  # Raises HTTPError for bad responses (4xx or 5xx)
-    with open(os.path.join(tmpDIR, downloaded_kmz_file), "wb") as f:
+    with open(os.path.join(tmp_dir, downloaded_kmz_file), "wb") as f:
         for chunk in response.iter_content(chunk_size=8192):
             f.write(chunk)
     logging.info(
-        f"File downloaded successfully to: {os.path.join(tmpDIR, downloaded_kmz_file)}"
+        f"File downloaded successfully to: {os.path.join(tmp_dir, downloaded_kmz_file)}"
     )
 except Exception as e:
     logging.critical(f"Error downloading DWD data: {e}. Exiting.")
     sys.exit(1)
 
 logging.info(
-    f"\n--- Reading and Parsing KML from {os.path.join(tmpDIR, downloaded_kmz_file)} ---"
+    f"\n--- Reading and Parsing KML from {os.path.join(tmp_dir, downloaded_kmz_file)} ---"
 )
-df_data, global_metadata = parse_mosmix_kml(os.path.join(tmpDIR, downloaded_kmz_file))
+df_data, global_metadata = parse_mosmix_kml(os.path.join(tmp_dir, downloaded_kmz_file))
 if df_data.empty:
     logging.critical("No data extracted from KML/KMZ. Exiting.")
     sys.exit(1)
@@ -942,8 +918,8 @@ base_time = global_metadata.get("IssueTime", datetime.utcnow())
 logging.info(f"Base time for this ingest run (from KML metadata): {base_time}")
 
 # --- Check for Updates (Skip if no new data) ---
-final_time_pickle_path = os.path.join(forecast_path, ingestVersion, "DWD.time.pickle")
-if saveType == "S3":
+final_time_pickle_path = os.path.join(forecast_path, ingest_version, "DWD.time.pickle")
+if save_type == "S3":
     s3_bucket_name = os.getenv("s3_bucket", "your-s3-bucket")
     s3_time_pickle_key = os.path.join("ForecastTar_v2", "DWD.time.pickle")
     try:
@@ -984,7 +960,7 @@ if gfs_lats is None or gfs_lons is None:
 # --- Step 4: Interpolate DWD Point Data to the GFS Grid ---
 logging.info("\n--- Interpolating DWD point data to GFS grid ---")
 gridded_dwd_ds = interpolate_dwd_to_grid(
-    dwd_ds_point, gfs_lats, gfs_lons, api_target_numerical_variables, zarrVars
+    dwd_ds_point, gfs_lats, gfs_lons, api_target_numerical_variables, zarr_vars
 )
 
 logging.info("\nGridded DWD Dataset preview (after interpolation):\n%s", gridded_dwd_ds)
@@ -999,7 +975,7 @@ logging.info(
     f"\n--- Saving Gridded xarray Dataset to Zarr: {gridded_zarr_output_full_path} ---"
 )
 
-if saveType == "S3":
+if save_type == "S3":
     # Write directly to S3-backed zarr store to match other ingest scripts
     s3_bucket_name = os.getenv("s3_bucket", "your-s3-bucket")
     s3_gridded_zarr_key = os.path.join("ForecastTar_v2", "DWD.zarr")
@@ -1024,12 +1000,12 @@ station_metadata_df.to_json(station_metadata_path, orient="index")
 logging.info("Station metadata saved.")
 
 # --- Step 7: Final Data Transfer (Upload to S3 or Copy Locally) ---
-final_gridded_zarr_target_path = os.path.join(forecast_path, ingestVersion, "DWD.zarr")
+final_gridded_zarr_target_path = os.path.join(forecast_path, ingest_version, "DWD.zarr")
 final_time_pickle_path_dest = os.path.join(
-    forecast_path, ingestVersion, "DWD.time.pickle"
+    forecast_path, ingest_version, "DWD.time.pickle"
 )
 
-if saveType == "S3":
+if save_type == "S3":
     # Upload time pickle and metadata using s3fs helper methods
     temp_time_pickle_source_path = os.path.join(forecast_process_dir, "DWD.time.pickle")
     with open(temp_time_pickle_source_path, "wb") as file:
@@ -1059,19 +1035,15 @@ else:
     # Copy station metadata JSON to final local path
     shutil.copy(
         station_metadata_path,
-        os.path.join(forecast_path, ingestVersion, "DWD_Station_Metadata.json"),
+        os.path.join(forecast_path, ingest_version, "DWD_Station_Metadata.json"),
     )
     logging.info(
-        f"All files copied locally to {os.path.join(forecast_path, ingestVersion)}."
+        f"All files copied locally to {os.path.join(forecast_path, ingest_version)}."
     )
 
 # --- Final Cleanup ---
-if os.path.exists(forecast_process_dir):
-    shutil.rmtree(forecast_process_dir)
-    logging.info(f"\nCleaned up processing directory: {forecast_process_dir}")
-if os.path.exists(tmpDIR):
-    shutil.rmtree(tmpDIR)
-    logging.info(f"Cleaned up downloads directory: {tmpDIR}")
+_clear_directory(forecast_process_dir)
+_clear_directory(tmp_dir)
 
 T_end = time.time()  # End timer
 logging.info(f"\nTotal script execution time: {T_end - T0:.2f} seconds")
