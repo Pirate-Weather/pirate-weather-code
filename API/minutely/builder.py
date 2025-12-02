@@ -8,6 +8,7 @@ import numpy as np
 
 from API.api_utils import fast_nearest_interp
 from API.constants.api_const import (
+    PRECIP_IDX,
     PRECIP_NOISE_THRESHOLD_MMH,
     TEMP_THRESHOLD_RAIN_C,
     TEMP_THRESHOLD_SNOW_C,
@@ -15,7 +16,6 @@ from API.constants.api_const import (
 from API.constants.forecast_const import DATA_MINUTELY
 from API.constants.model_const import ECMWF, ERA5, GEFS, GFS, HRRR, HRRR_SUBH, NBM
 from API.constants.shared_const import MISSING_DATA
-from API.constants.api_const import PRECIP_IDX
 from API.utils.precip import dbz_to_rate
 
 

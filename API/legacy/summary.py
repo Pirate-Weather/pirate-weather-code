@@ -6,9 +6,9 @@ import logging
 from collections import Counter
 from typing import Tuple
 
+from API.PirateDailyText import calculate_day_text
 from API.PirateMinutelyText import calculate_minutely_text
 from API.PirateWeeklyText import calculate_weekly_text
-from API.PirateDailyText import calculate_day_text
 
 
 def build_minutely_summary(

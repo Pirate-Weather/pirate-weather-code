@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from API.PirateText import calculate_text
-from API.constants.api_const import ROUNDING_RULES
+from API.constants.api_const import PRECIP_IDX, ROUNDING_RULES
 from API.constants.clip_const import (
     CLIP_CLOUD,
     CLIP_HUMIDITY,
@@ -16,7 +15,6 @@ from API.constants.clip_const import (
     CLIP_WIND,
 )
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
-from API.constants.model_const import ECMWF, ERA5, GEFS, GFS, HRRR, NBM
 from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
 from API.constants.text_const import (
     CLOUD_COVER_THRESHOLDS,
@@ -25,7 +23,7 @@ from API.constants.text_const import (
     PRECIP_PROB_THRESHOLD,
     WIND_THRESHOLDS,
 )
-from API.constants.api_const import PRECIP_IDX
+from API.PirateText import calculate_text
 from API.utils.precip import dbz_to_rate
 
 
@@ -140,11 +138,21 @@ def build_hourly_block(
         maxPchanceHour[np.isnan(ptype_era5_hour), 4] = MISSING_DATA
 
     prcipIntensityHour = np.full((len(hour_array_grib), 5), MISSING_DATA)
-    prcipIntensityHour[:, 0] = prcipIntensity_inputs["nbm"]
-    prcipIntensityHour[:, 1] = prcipIntensity_inputs["hrrr"]
-    prcipIntensityHour[:, 2] = prcipIntensity_inputs["ecmwf"]
-    prcipIntensityHour[:, 3] = prcipIntensity_inputs["gfs_gefs"]
-    prcipIntensityHour[:, 4] = prcipIntensity_inputs["era5"]
+    nbm_intensity = prcipIntensity_inputs.get("nbm")
+    if nbm_intensity is not None:
+        prcipIntensityHour[:, 0] = nbm_intensity
+    hrrr_intensity = prcipIntensity_inputs.get("hrrr")
+    if hrrr_intensity is not None:
+        prcipIntensityHour[:, 1] = hrrr_intensity
+    ecmwf_intensity = prcipIntensity_inputs.get("ecmwf")
+    if ecmwf_intensity is not None:
+        prcipIntensityHour[:, 2] = ecmwf_intensity
+    gfs_gefs_intensity = prcipIntensity_inputs.get("gfs_gefs")
+    if gfs_gefs_intensity is not None:
+        prcipIntensityHour[:, 3] = gfs_gefs_intensity
+    era5_intensity = prcipIntensity_inputs.get("era5")
+    if era5_intensity is not None:
+        prcipIntensityHour[:, 4] = era5_intensity
 
     InterPhour[:, DATA_HOURLY["intensity"]] = (
         np.choose(np.argmin(np.isnan(prcipIntensityHour), axis=1), prcipIntensityHour.T)
@@ -162,9 +170,15 @@ def build_hourly_block(
     )
 
     prcipProbabilityHour = np.full((len(hour_array_grib), 3), MISSING_DATA)
-    prcipProbabilityHour[:, 0] = prcipProbability_inputs["nbm"]
-    prcipProbabilityHour[:, 1] = prcipProbability_inputs["ecmwf"]
-    prcipProbabilityHour[:, 2] = prcipProbability_inputs["gefs"]
+    nbm_prob = prcipProbability_inputs.get("nbm")
+    if nbm_prob is not None:
+        prcipProbabilityHour[:, 0] = nbm_prob
+    ecmwf_prob = prcipProbability_inputs.get("ecmwf")
+    if ecmwf_prob is not None:
+        prcipProbabilityHour[:, 1] = ecmwf_prob
+    gefs_prob = prcipProbability_inputs.get("gefs")
+    if gefs_prob is not None:
+        prcipProbabilityHour[:, 2] = gefs_prob
 
     InterPhour[:, DATA_HOURLY["prob"]] = np.choose(
         np.argmin(np.isnan(prcipProbabilityHour), axis=1), prcipProbabilityHour.T
@@ -175,12 +189,17 @@ def build_hourly_block(
     InterPhour[InterPhour[:, DATA_HOURLY["prob"]] < 0.05, DATA_HOURLY["prob"]] = 0
     InterPhour[InterPhour[:, DATA_HOURLY["prob"]] == 0, 2] = 0
 
+    ecmwf_prob = prcipProbability_inputs.get("ecmwf")
+    gefs_prob = prcipProbability_inputs.get("gefs")
+    empty_prob = np.full(len(hour_array_grib), np.nan)
+    ecmwf_prob_arr = ecmwf_prob if ecmwf_prob is not None else empty_prob
+    gefs_prob_arr = gefs_prob if gefs_prob is not None else empty_prob
     InterPhour[:, DATA_HOURLY["error"]] = np.where(
-        ~np.isnan(prcipProbability_inputs["ecmwf"]),
-        prcipProbability_inputs["ecmwf"] * 1000,
+        ~np.isnan(ecmwf_prob_arr),
+        ecmwf_prob_arr * 1000,
         np.where(
-            ~np.isnan(prcipProbability_inputs["gefs"]),
-            prcipProbability_inputs["gefs"],
+            ~np.isnan(gefs_prob_arr),
+            gefs_prob_arr,
             InterPhour[:, DATA_HOURLY["error"]],
         ),
     )

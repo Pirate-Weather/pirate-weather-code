@@ -10,8 +10,6 @@ import metpy as mp
 import numpy as np
 from metpy.calc import relative_humidity_from_dewpoint
 
-from API.PirateText import calculate_text
-from API.PirateTextHelper import estimate_snow_height
 from API.api_utils import (
     calculate_apparent_temperature,
     clipLog,
@@ -31,11 +29,9 @@ from API.constants.clip_const import (
     CLIP_VIS,
     CLIP_WIND,
 )
-from API.constants.shared_const import KELVIN_TO_CELSIUS
 from API.constants.forecast_const import (
     DATA_CURRENT,
     DATA_DAY,
-    DATA_HOURLY,
     DATA_MINUTELY,
 )
 from API.constants.model_const import (
@@ -48,13 +44,15 @@ from API.constants.model_const import (
     NBM_FIRE_INDEX,
     RTMA_RU,
 )
-from API.constants.shared_const import MISSING_DATA
+from API.constants.shared_const import KELVIN_TO_CELSIUS, MISSING_DATA
 from API.constants.text_const import (
     CLOUD_COVER_THRESHOLDS,
     FOG_THRESHOLD_METERS,
     HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     WIND_THRESHOLDS,
 )
+from API.PirateText import calculate_text
+from API.PirateTextHelper import estimate_snow_height
 
 
 @dataclass
@@ -63,6 +61,7 @@ class CurrentSection:
 
     currently: dict
     interp_current: np.ndarray
+    summary_key: Optional[str] = None
 
 
 def build_current_section(
@@ -101,6 +100,7 @@ def build_current_section(
     elevUnit: float,
     dataOut_rtma_ru,
     hrrrSubHInterpolation,
+    HRRR_Merged,
     NBM_Merged,
     ECMWF_Merged,
     GFS_Merged,
@@ -114,6 +114,8 @@ def build_current_section(
     """Calculate the currently block and return it alongside the raw array."""
     if log_timing:
         log_timing("Current Start")
+
+    current_summary_key: Optional[str] = None
 
     if np.min(np.abs(hour_array_grib - minute_array_grib[0])) < 120:
         currentIDX_hrrrh = np.argmin(np.abs(hour_array_grib - minute_array_grib[0]))
@@ -144,6 +146,12 @@ def build_current_section(
 
     InterPcurrent = np.zeros(shape=max(DATA_CURRENT.values()) + 1)
     InterPcurrent[DATA_CURRENT["time"]] = int(minute_array_grib[0])
+
+    has_hrrr_merged = (
+        HRRR_Merged is not None
+        and ("hrrr_0-18" in sourceList)
+        and ("hrrr_18-48" in sourceList)
+    )
 
     if "rtma_ru" in sourceList:
         InterPcurrent[DATA_CURRENT["temp"]] = dataOut_rtma_ru[0, RTMA_RU["temp"]]
@@ -217,7 +225,7 @@ def build_current_section(
         InterPcurrent[DATA_CURRENT["humidity"]] = dataOut_rtma_ru[
             0, RTMA_RU["humidity"]
         ]
-    elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+    elif has_hrrr_merged:
         InterPcurrent[DATA_CURRENT["humidity"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["humidity"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["humidity"]] * interpFac2
@@ -277,7 +285,7 @@ def build_current_section(
         "Humidity Current",
     )
 
-    if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+    if has_hrrr_merged:
         InterPcurrent[DATA_CURRENT["pressure"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["pressure"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["pressure"]] * interpFac2
@@ -560,7 +568,7 @@ def build_current_section(
             ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["cloud"]] * interpFac1
             + ECMWF_Merged[currentIDX_hrrrh, ECMWF["cloud"]] * interpFac2
         ) * 0.01
-    elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+    elif has_hrrr_merged:
         InterPcurrent[DATA_CURRENT["cloud"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["cloud"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["cloud"]] * interpFac2
@@ -651,7 +659,7 @@ def build_current_section(
             NBM_Merged[currentIDX_hrrrh_A, NBM["vis"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["vis"]] * interpFac2
         )
-    elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+    elif has_hrrr_merged:
         InterPcurrent[DATA_CURRENT["vis"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["vis"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["vis"]] * interpFac2
@@ -710,7 +718,7 @@ def build_current_section(
         InterPcurrent[DATA_CURRENT["storm_dist"]] = MISSING_DATA
         InterPcurrent[DATA_CURRENT["storm_dir"]] = MISSING_DATA
 
-    if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+    if has_hrrr_merged:
         InterPcurrent[DATA_CURRENT["smoke"]] = clipLog(
             (
                 HRRR_Merged[currentIDX_hrrrh_A, HRRR["smoke"]] * interpFac1
@@ -732,7 +740,7 @@ def build_current_section(
             NBM_Merged[currentIDX_hrrrh_A, NBM["solar"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["solar"]] * interpFac2
         )
-    elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+    elif has_hrrr_merged:
         InterPcurrent[DATA_CURRENT["solar"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["solar"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["solar"]] * interpFac2
@@ -762,7 +770,7 @@ def build_current_section(
             NBM_Merged[currentIDX_hrrrh_A, NBM["cape"]] * interpFac1
             + NBM_Merged[currentIDX_hrrrh, NBM["cape"]] * interpFac2
         )
-    elif ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
+    elif has_hrrr_merged:
         InterPcurrent[DATA_CURRENT["cape"]] = (
             HRRR_Merged[currentIDX_hrrrh_A, HRRR["cape"]] * interpFac1
             + HRRR_Merged[currentIDX_hrrrh, HRRR["cape"]] * interpFac2
@@ -1042,6 +1050,7 @@ def build_current_section(
                     "current",
                     icon,
                 )
+                current_summary_key = currentText
                 currently["summary"] = translation.translate(["title", currentText])
                 currently["icon"] = currentIcon
         except Exception:
@@ -1070,4 +1079,8 @@ def build_current_section(
             currently.pop("visibility", None)
             currently.pop("ozone", None)
 
-    return CurrentSection(currently=currently, interp_current=InterPcurrent)
+    return CurrentSection(
+        currently=currently,
+        interp_current=InterPcurrent,
+        summary_key=current_summary_key,
+    )

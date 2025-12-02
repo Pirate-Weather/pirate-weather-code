@@ -6,9 +6,14 @@ from typing import Optional
 
 import numpy as np
 
-from API.constants.api_const import DBZ_CONVERSION_CONST, DBZ_CONST, GLOBE_TEMP_CONST
+from API.constants.api_const import (
+    DBZ_CONST,
+    DBZ_CONVERSION_CONST,
+    GLOBE_TEMP_CONST,
+    WBGT_CONST,
+    WBGT_PERCENTAGE_DIVISOR,
+)
 from API.constants.shared_const import REFC_THRESHOLD
-from API.constants.api_const import WBGT_CONST, WBGT_PERCENTAGE_DIVISOR
 
 
 def calculate_globe_temperature(
