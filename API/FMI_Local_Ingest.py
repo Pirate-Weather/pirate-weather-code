@@ -24,10 +24,12 @@ logger = logging.getLogger(__name__)
 # %% Setup paths and parameters
 ingestVersion = "v27"
 
-# NOTE: You may need a similar tool to wgrib2 for FMI data if it needs to be processed.
-# Assuming standard GRIB format readable by cfgrib, wgrib2 might not be necessary.
+# FMI GRIBs are opened with the `cfgrib` engine (used via xarray) in this script.
+# In most workflows `wgrib2` is not required. If you need low-level inspection or
+# format conversions, install `wgrib2` or use `pygrib`. The `wgrib2_path` default
+# is provided only as a hint and is not used by the current code path.
 wgrib2_path = os.getenv(
-    "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
+    "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2"
 )
 
 forecast_process_dir = os.getenv(
@@ -68,9 +70,11 @@ zarrVars = (
 
 hisPeriod = 48
 
-# A dictionary to map FMI GRIB short names to our desired Zarr names.
-# This mapping is crucial and needs to be verified by inspecting the actual GRIB file.
-# The keys are placeholders and must be replaced with the actual short names from the FMI data.
+# Map of GRIB parameter short names (as exposed by cfgrib/xarray) to our target
+# Zarr variable names. Confirm these keys by inspecting the GRIB (for example:
+# `xr.open_dataset(path, engine='cfgrib')` and check `dataset.variables`), or
+# with tools like `pygrib`/`wgrib2 -v`. Keep this mapping aligned with the
+# source GRIB short names to ensure variables are renamed correctly.
 grib_to_zarr_map = {
     "pressure": "PRMSL_meansealevel",
     "temperature": "TMP_2maboveground",
@@ -87,19 +91,13 @@ grib_to_zarr_map = {
 }
 
 
-# Create new directory for processing if it does not exist
-if not os.path.exists(forecast_process_dir):
-    os.makedirs(forecast_process_dir)
-else:
-    shutil.rmtree(forecast_process_dir)
-    os.makedirs(forecast_process_dir)
-
-if not os.path.exists(tmpDIR):
-    os.makedirs(tmpDIR)
+# Create directories for processing, but avoid deleting higher-level folders.
+os.makedirs(forecast_process_dir, exist_ok=True)
+os.makedirs(forecast_process_path, exist_ok=True)
+os.makedirs(tmpDIR, exist_ok=True)
 
 if saveType == "Download":
-    if not os.path.exists(forecast_path + "/" + ingestVersion):
-        os.makedirs(forecast_path + "/" + ingestVersion)
+    os.makedirs(os.path.join(forecast_path, ingestVersion), exist_ok=True)
 
 T0 = time.time()
 
@@ -107,8 +105,9 @@ T0 = time.time()
 # Function to get the latest model run time (origintime)
 def get_latest_origintime():
     """
-    Finds the latest available model run time, rounded to the nearest 3-hour interval.
-    The FMI Harmonie model runs are typically at 00, 03, 06, 09, 12, 15, 18, and 21 UTC.
+    Find the latest model run time, rounded to the most recent 3-hour interval.
+    FMI Harmonie runs on 3-hour cycles (00, 03, 06, ... 21 UTC). We use a small
+    buffer (45 minutes) to avoid picking a run that may still be uploading.
     """
     now_utc = datetime.now(timezone.utc)
 
@@ -139,7 +138,9 @@ origintime = get_latest_origintime()
 starttime = origintime
 endtime = origintime + timedelta(hours=72)  # FMI Harmonie has a 72-hour forecast
 
-# A more robust solution for the bounding box might be needed, but this is a good start
+# Bounding box for the FMI request. Format is `lon_min,lat_min,lon_max,lat_max`
+# in WGS84 (EPSG:4326). Consider moving this to configuration or environment
+# variables for different deployments/regions.
 bbox = "-18.118179851154,49.765786639371,54.237,75.227023343491"
 projection = "EPSG:4326"
 file_format = "grib2"
@@ -202,7 +203,10 @@ except requests.exceptions.RequestException as e:
 
 # %% Process the GRIB file
 try:
-    # Use cfgrib to open the GRIB file.
+    # Use cfgrib to open the GRIB file. If cfgrib returns multiple messages or
+    # variables, `filter_by_keys` helps limit what is loaded. If a parameter is
+    # missing here, inspect the GRIB's available short names and update
+    # `grib_to_zarr_map` accordingly.
     xarray_fmi_data = xr.open_dataset(
         local_grib_file,
         engine="cfgrib",
@@ -228,52 +232,66 @@ except Exception as e:
     sys.exit(1)
 
 # %% Save the dataset with compression and filters
-# We'll rechunk to make sure it's optimized for saving
+# Rechunk before writing to make the Zarr store more efficient for reads and
+# downstream processing. Chunk sizes are tuned heuristically for our workflow.
 xarray_fmi_data = xarray_fmi_data.chunk(
     chunks={"time": xarray_fmi_data.time.size, "x": processChunk, "y": processChunk}
 )
 
+# Save to a clear Zarr path inside the process folder
+process_zarr = os.path.join(forecast_process_path, "FMI.zarr")
+
 with ProgressBar():
-    xarray_fmi_data.to_zarr(
-        forecast_process_path + "_.zarr", mode="w", consolidated=False, compute=True
-    )
-logger.info("Saved Zarr data to disk.")
+    xarray_fmi_data.to_zarr(process_zarr, mode="w", consolidated=False, compute=True)
+logger.info("Saved Zarr data to disk at %s", process_zarr)
 
 
 # %% Final output handling and cleanup
-# This section is directly modeled after the GFS script's final steps
+# Final output handling. We support either uploading to S3 or copying to a local
+# deployment directory. Note: writing many small files to S3 with `s3.open` can
+# be slower than using zarr's native S3 stores (`S3Map`/`s3fs.S3Map`) or writing
+# the zarr store directly to S3 via zarr's store implementations. The current
+# approach is portable and straightforward; consider optimizing for large
+# deployments.
 if saveType == "S3":
-    # Upload the Zarr directory to S3
-    s3.put(
-        forecast_process_path + "_.zarr",
-        forecast_path + "/" + ingestVersion + "/FMI.zarr",
-        recursive=True,
-    )
+    # Upload the Zarr directory to S3 by walking its files. This is more portable
+    # than attempting to call a recursive put on the filesystem object.
+    dest_base = f"{forecast_path}/{ingestVersion}/FMI.zarr"
+    for root, dirs, files in os.walk(process_zarr):
+        for fname in files:
+            local_path = os.path.join(root, fname)
+            rel_path = os.path.relpath(local_path, process_zarr)
+            s3_path = os.path.join(dest_base, rel_path)
+            with open(local_path, "rb") as lf, s3.open(s3_path, "wb") as sf:
+                sf.write(lf.read())
 
-    with open(forecast_process_dir + "/FMI.time.pickle", "wb") as file:
-        pickle.dump(origintime, file)
-
-    s3.put_file(
-        forecast_process_dir + "/FMI.time.pickle",
-        forecast_path + "/" + ingestVersion + "/FMI.time.pickle",
-    )
+    # write the time pickle to S3
+    with s3.open(f"{forecast_path}/{ingestVersion}/FMI.time.pickle", "wb") as f:
+        pickle.dump(origintime, f)
+    logger.info("Uploaded Zarr and time pickle to S3 at %s", dest_base)
 else:
-    with open(forecast_process_dir + "/FMI.time.pickle", "wb") as file:
+    # Local filesystem: save the time pickle and copy the zarr directory
+    local_time_pickle = os.path.join(forecast_process_dir, "FMI.time.pickle")
+    with open(local_time_pickle, "wb") as file:
         pickle.dump(origintime, file)
 
-    shutil.move(
-        forecast_process_dir + "/FMI.time.pickle",
-        forecast_path + "/" + ingestVersion + "/FMI.time.pickle",
-    )
+    dest_dir = os.path.join(forecast_path, ingestVersion)
+    os.makedirs(dest_dir, exist_ok=True)
 
-    shutil.copytree(
-        forecast_process_path + "_.zarr",
-        forecast_path + "/" + ingestVersion + "/FMI.zarr",
-        dirs_exist_ok=True,
-    )
+    shutil.copy(local_time_pickle, os.path.join(dest_dir, "FMI.time.pickle"))
+    shutil.copytree(process_zarr, os.path.join(dest_dir, "FMI.zarr"), dirs_exist_ok=True)
+    logger.info("Copied Zarr and time pickle to %s", dest_dir)
 
-# Clean up temporary files and directories
-shutil.rmtree(forecast_process_dir)
+# Clean up process folder (only the process zarr and temp GRIB)
+# We intentionally do NOT remove the parent `forecast_process_dir` so
+# configuration and other process-level files are preserved across runs.
+try:
+    if os.path.exists(process_zarr):
+        shutil.rmtree(process_zarr)
+    if os.path.exists(local_grib_file):
+        os.remove(local_grib_file)
+except Exception:
+    logger.warning("Failed to fully clean up temporary files.")
 
 T1 = time.time()
 logger.info(f"Total processing time: {T1 - T0} seconds")
