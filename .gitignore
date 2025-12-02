@@ -15,3 +15,6 @@ API/KongRedia.py
 
 API/read_ERA5.py
 .env
+venv/
+.venv/
+.vscode/settings.json
