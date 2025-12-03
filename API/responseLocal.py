@@ -58,6 +58,7 @@ from API.constants.model_const import (
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.current.metrics import build_current_section
 from API.daily.builder import build_daily_section
+from API.data_inputs import prepare_data_inputs
 from API.forecast_sources import (
     add_etopo_source,
     build_source_metadata,
@@ -532,284 +533,39 @@ async def PW_Forecast(
             moon_phase_value, ROUNDING_RULES.get("moonPhase", 2)
         )
 
-    def _stack_fields(*arrays):
-        valid = [np.asarray(arr) for arr in arrays if arr is not None]
-        if not valid:
-            return np.full((numHours, 1), np.nan)
-        return np.column_stack(valid)
-
-    InterThour_inputs = {}
-    if "nbm" in sourceList and NBM_Merged is not None:
-        InterThour_inputs["nbm_snow"] = NBM_Merged[:, NBM["snow"]]
-        InterThour_inputs["nbm_ice"] = NBM_Merged[:, NBM["ice"]]
-        InterThour_inputs["nbm_freezing_rain"] = NBM_Merged[:, NBM["freezing_rain"]]
-        InterThour_inputs["nbm_rain"] = NBM_Merged[:, NBM["rain"]]
-    if (
-        ("hrrr_0-18" in sourceList)
-        and ("hrrr_18-48" in sourceList)
-        and (HRRR_Merged is not None)
-    ):
-        InterThour_inputs["hrrr_snow"] = HRRR_Merged[:, HRRR["snow"]]
-        InterThour_inputs["hrrr_ice"] = HRRR_Merged[:, HRRR["ice"]]
-        InterThour_inputs["hrrr_freezing_rain"] = HRRR_Merged[:, HRRR["freezing_rain"]]
-        InterThour_inputs["hrrr_rain"] = HRRR_Merged[:, HRRR["rain"]]
-    if "ecmwf_ifs" in sourceList and ECMWF_Merged is not None:
-        InterThour_inputs["ecmwf_ptype"] = ECMWF_Merged[:, ECMWF["ptype"]]
-    if "gefs" in sourceList and GEFS_Merged is not None:
-        InterThour_inputs["gefs_snow"] = GEFS_Merged[:, GEFS["snow"]]
-        InterThour_inputs["gefs_ice"] = GEFS_Merged[:, GEFS["ice"]]
-        InterThour_inputs["gefs_freezing_rain"] = GEFS_Merged[:, GEFS["freezing_rain"]]
-        InterThour_inputs["gefs_rain"] = GEFS_Merged[:, GEFS["rain"]]
-    elif "gfs" in sourceList and GFS_Merged is not None:
-        InterThour_inputs["gefs_snow"] = GFS_Merged[:, GFS["snow"]]
-        InterThour_inputs["gefs_ice"] = GFS_Merged[:, GFS["ice"]]
-        InterThour_inputs["gefs_freezing_rain"] = GFS_Merged[:, GFS["freezing_rain"]]
-        InterThour_inputs["gefs_rain"] = GFS_Merged[:, GFS["rain"]]
-    if "era5" in sourceList and isinstance(ERA5_MERGED, np.ndarray):
-        InterThour_inputs["era5_ptype"] = ERA5_MERGED[:, ERA5["precipitation_type"]]
-
-    prcipIntensity_inputs = {}
-    if "nbm" in sourceList and NBM_Merged is not None:
-        prcipIntensity_inputs["nbm"] = NBM_Merged[:, NBM["intensity"]]
-    if (
-        ("hrrr_0-18" in sourceList)
-        and ("hrrr_18-48" in sourceList)
-        and (HRRR_Merged is not None)
-    ):
-        prcipIntensity_inputs["hrrr"] = HRRR_Merged[:, HRRR["intensity"]] * 3600
-    if "ecmwf_ifs" in sourceList and ECMWF_Merged is not None:
-        prcipIntensity_inputs["ecmwf"] = ECMWF_Merged[:, ECMWF["intensity"]] * 3600
-    if "gefs" in sourceList and GEFS_Merged is not None:
-        prcipIntensity_inputs["gfs_gefs"] = GEFS_Merged[:, GEFS["accum"]]
-    elif "gfs" in sourceList and GFS_Merged is not None:
-        prcipIntensity_inputs["gfs_gefs"] = GFS_Merged[:, GFS["intensity"]] * 3600
-    if "era5" in sourceList and isinstance(ERA5_MERGED, np.ndarray):
-        prcipIntensity_inputs["era5"] = (
-            ERA5_MERGED[:, ERA5["large_scale_rain_rate"]]
-            + ERA5_MERGED[:, ERA5["convective_rain_rate"]]
-            + ERA5_MERGED[:, ERA5["large_scale_snowfall_rate_water_equivalent"]]
-            + ERA5_MERGED[:, ERA5["convective_snowfall_rate_water_equivalent"]]
-        ) * 3600
-        era5_rain_intensity = (
-            ERA5_MERGED[:, ERA5["large_scale_rain_rate"]]
-            + ERA5_MERGED[:, ERA5["convective_rain_rate"]]
-        ) * 3600
-        era5_snow_water_equivalent = (
-            ERA5_MERGED[:, ERA5["large_scale_snowfall_rate_water_equivalent"]]
-            + ERA5_MERGED[:, ERA5["convective_snowfall_rate_water_equivalent"]]
-        ) * 3600
-    else:
-        era5_rain_intensity = None
-        era5_snow_water_equivalent = None
-
-    prcipProbability_inputs = {}
-    if "nbm" in sourceList and NBM_Merged is not None:
-        prcipProbability_inputs["nbm"] = NBM_Merged[:, NBM["prob"]] * 0.01
-    if "ecmwf_ifs" in sourceList and ECMWF_Merged is not None:
-        prcipProbability_inputs["ecmwf"] = ECMWF_Merged[:, ECMWF["prob"]]
-    if "gefs" in sourceList and GEFS_Merged is not None:
-        prcipProbability_inputs["gefs"] = GEFS_Merged[:, GEFS["prob"]]
-
-    temperature_inputs = _stack_fields(
-        NBM_Merged[:, NBM["temp"]] if NBM_Merged is not None else None,
-        HRRR_Merged[:, HRRR["temp"]] if HRRR_Merged is not None else None,
-        ECMWF_Merged[:, ECMWF["temp"]] if ECMWF_Merged is not None else None,
-        GFS_Merged[:, GFS["temp"]] if GFS_Merged is not None else None,
-        ERA5_MERGED[:, ERA5["2m_temperature"]]
-        if isinstance(ERA5_MERGED, np.ndarray)
-        else None,
-    )
-    dew_inputs = _stack_fields(
-        NBM_Merged[:, NBM["dew"]] if NBM_Merged is not None else None,
-        HRRR_Merged[:, HRRR["dew"]] if HRRR_Merged is not None else None,
-        ECMWF_Merged[:, ECMWF["dew"]] if ECMWF_Merged is not None else None,
-        GFS_Merged[:, GFS["dew"]] if GFS_Merged is not None else None,
-        ERA5_MERGED[:, ERA5["2m_dewpoint_temperature"]]
-        if isinstance(ERA5_MERGED, np.ndarray)
-        else None,
+    inputs = prepare_data_inputs(
+        source_list=sourceList,
+        nbm_merged=NBM_Merged,
+        hrrr_merged=HRRR_Merged,
+        ecmwf_merged=ECMWF_Merged,
+        gefs_merged=GEFS_Merged,
+        gfs_merged=GFS_Merged,
+        era5_merged=ERA5_MERGED,
+        extra_vars=extraVars,
+        num_hours=numHours,
     )
 
-    era5_humidity = None
-    if isinstance(ERA5_MERGED, np.ndarray):
-        era5_humidity = (
-            relative_humidity_from_dewpoint(
-                ERA5_MERGED[:, ERA5["2m_temperature"]] * mp.units.units.degK,
-                ERA5_MERGED[:, ERA5["2m_dewpoint_temperature"]] * mp.units.units.degK,
-                phase="auto",
-            ).magnitude
-            * 100
-        )
-    humidity_inputs = _stack_fields(
-        NBM_Merged[:, NBM["humidity"]] if NBM_Merged is not None else None,
-        HRRR_Merged[:, HRRR["humidity"]] if HRRR_Merged is not None else None,
-        GFS_Merged[:, GFS["humidity"]] if GFS_Merged is not None else None,
-        era5_humidity,
-    )
-
-    pressure_inputs = _stack_fields(
-        HRRR_Merged[:, HRRR["pressure"]] if HRRR_Merged is not None else None,
-        ECMWF_Merged[:, ECMWF["pressure"]] if ECMWF_Merged is not None else None,
-        GFS_Merged[:, GFS["pressure"]] if GFS_Merged is not None else None,
-        ERA5_MERGED[:, ERA5["mean_sea_level_pressure"]]
-        if isinstance(ERA5_MERGED, np.ndarray)
-        else None,
-    )
-
-    def _wind_speed(u, v):
-        if u is None or v is None:
-            return None
-        return np.sqrt(u**2 + v**2)
-
-    wind_inputs = _stack_fields(
-        NBM_Merged[:, NBM["wind"]] if NBM_Merged is not None else None,
-        _wind_speed(HRRR_Merged[:, HRRR["wind_u"]], HRRR_Merged[:, HRRR["wind_v"]])
-        if HRRR_Merged is not None
-        else None,
-        _wind_speed(ECMWF_Merged[:, ECMWF["wind_u"]], ECMWF_Merged[:, ECMWF["wind_v"]])
-        if ECMWF_Merged is not None
-        else None,
-        _wind_speed(GFS_Merged[:, GFS["wind_u"]], GFS_Merged[:, GFS["wind_v"]])
-        if GFS_Merged is not None
-        else None,
-        _wind_speed(
-            ERA5_MERGED[:, ERA5["10m_u_component_of_wind"]],
-            ERA5_MERGED[:, ERA5["10m_v_component_of_wind"]],
-        )
-        if isinstance(ERA5_MERGED, np.ndarray)
-        else None,
-    )
-
-    gust_inputs = _stack_fields(
-        NBM_Merged[:, NBM["gust"]] if NBM_Merged is not None else None,
-        HRRR_Merged[:, HRRR["gust"]] if HRRR_Merged is not None else None,
-        GFS_Merged[:, GFS["gust"]] if GFS_Merged is not None else None,
-        ERA5_MERGED[:, ERA5["instantaneous_10m_wind_gust"]]
-        if isinstance(ERA5_MERGED, np.ndarray)
-        else None,
-    )
-
-    def _bearing(u, v):
-        if u is None or v is None:
-            return None
-        return np.rad2deg(np.mod(np.arctan2(u, v) + np.pi, 2 * np.pi))
-
-    bearing_inputs = _stack_fields(
-        NBM_Merged[:, NBM["bearing"]] if NBM_Merged is not None else None,
-        _bearing(HRRR_Merged[:, HRRR["wind_u"]], HRRR_Merged[:, HRRR["wind_v"]])
-        if HRRR_Merged is not None
-        else None,
-        _bearing(ECMWF_Merged[:, ECMWF["wind_u"]], ECMWF_Merged[:, ECMWF["wind_v"]])
-        if ECMWF_Merged is not None
-        else None,
-        _bearing(GFS_Merged[:, GFS["wind_u"]], GFS_Merged[:, GFS["wind_v"]])
-        if GFS_Merged is not None
-        else None,
-        _bearing(
-            ERA5_MERGED[:, ERA5["10m_u_component_of_wind"]],
-            ERA5_MERGED[:, ERA5["10m_v_component_of_wind"]],
-        )
-        if isinstance(ERA5_MERGED, np.ndarray)
-        else None,
-    )
-
-    cloud_inputs = _stack_fields(
-        NBM_Merged[:, NBM["cloud"]] * 0.01 if NBM_Merged is not None else None,
-        HRRR_Merged[:, HRRR["cloud"]] * 0.01 if HRRR_Merged is not None else None,
-        ECMWF_Merged[:, ECMWF["cloud"]] * 0.01 if ECMWF_Merged is not None else None,
-        GFS_Merged[:, GFS["cloud"]] * 0.01 if GFS_Merged is not None else None,
-        ERA5_MERGED[:, ERA5["total_cloud_cover"]]
-        if isinstance(ERA5_MERGED, np.ndarray)
-        else None,
-    )
-
-    uv_inputs = _stack_fields(
-        (GFS_Merged[:, GFS["uv"]] * 18.9 * 0.025) if GFS_Merged is not None else None,
-        (
-            ERA5_MERGED[:, ERA5["downward_uv_radiation_at_the_surface"]]
-            / 3600
-            * 40
-            * 0.0025
-        )
-        if isinstance(ERA5_MERGED, np.ndarray)
-        else None,
-    )
-
-    vis_inputs = _stack_fields(
-        NBM_Merged[:, NBM["vis"]] if NBM_Merged is not None else None,
-        HRRR_Merged[:, HRRR["vis"]] if HRRR_Merged is not None else None,
-        GFS_Merged[:, GFS["vis"]] if GFS_Merged is not None else None,
-        estimate_visibility_gultepe_rh_pr_numpy(ERA5_MERGED, var_index=ERA5, var_axis=1)
-        if isinstance(ERA5_MERGED, np.ndarray)
-        else None,
-    )
-
-    ozone_inputs = _stack_fields(
-        clipLog(
-            GFS_Merged[:, GFS["ozone"]],
-            CLIP_OZONE["min"],
-            CLIP_OZONE["max"],
-            "Ozone Hour",
-        )
-        if GFS_Merged is not None
-        else None,
-        clipLog(
-            ERA5_MERGED[:, ERA5["total_column_ozone"]] * 46696,
-            CLIP_OZONE["min"],
-            CLIP_OZONE["max"],
-            "Ozone Hour",
-        )
-        if isinstance(ERA5_MERGED, np.ndarray)
-        else None,
-    )
-
-    smoke_inputs = _stack_fields(
-        clipLog(
-            HRRR_Merged[:, HRRR["smoke"]],
-            CLIP_SMOKE["min"],
-            CLIP_SMOKE["max"],
-            "Air quality Hour",
-        )
-        if HRRR_Merged is not None
-        else None
-    )
-
-    accum_inputs = _stack_fields(
-        NBM_Merged[:, NBM["intensity"]] if NBM_Merged is not None else None,
-        HRRR_Merged[:, HRRR["accum"]] if HRRR_Merged is not None else None,
-        ECMWF_Merged[:, ECMWF["accum_mean"]] * 1000
-        if ECMWF_Merged is not None
-        else None,
-        GEFS_Merged[:, GEFS["accum"]] if GEFS_Merged is not None else None,
-        GFS_Merged[:, GFS["accum"]] if GFS_Merged is not None else None,
-        ERA5_MERGED[:, ERA5["total_precipitation"]] * 1000
-        if isinstance(ERA5_MERGED, np.ndarray)
-        else None,
-    )
-
-    nearstorm_inputs = {
-        "dist": _stack_fields(
-            np.maximum(GFS_Merged[:, GFS["storm_dist"]], 0)
-            if GFS_Merged is not None
-            else None
-        ),
-        "dir": _stack_fields(
-            GFS_Merged[:, GFS["storm_dir"]] if GFS_Merged is not None else None
-        ),
-    }
-
-    apparent_inputs = _stack_fields(
-        NBM_Merged[:, NBM["apparent"]] if NBM_Merged is not None else None,
-        GFS_Merged[:, GFS["apparent"]] if GFS_Merged is not None else None,
-    )
-
-    station_pressure_inputs = None
-    if "stationPressure" in extraVars:
-        station_pressure_inputs = _stack_fields(
-            GFS_Merged[:, GFS["station_pressure"]] if GFS_Merged is not None else None,
-            ERA5_MERGED[:, ERA5["surface_pressure"]]
-            if isinstance(ERA5_MERGED, np.ndarray)
-            else None,
-        )
+    InterThour_inputs = inputs["InterThour_inputs"]
+    prcipIntensity_inputs = inputs["prcipIntensity_inputs"]
+    prcipProbability_inputs = inputs["prcipProbability_inputs"]
+    temperature_inputs = inputs["temperature_inputs"]
+    dew_inputs = inputs["dew_inputs"]
+    humidity_inputs = inputs["humidity_inputs"]
+    pressure_inputs = inputs["pressure_inputs"]
+    wind_inputs = inputs["wind_inputs"]
+    gust_inputs = inputs["gust_inputs"]
+    bearing_inputs = inputs["bearing_inputs"]
+    cloud_inputs = inputs["cloud_inputs"]
+    uv_inputs = inputs["uv_inputs"]
+    vis_inputs = inputs["vis_inputs"]
+    ozone_inputs = inputs["ozone_inputs"]
+    smoke_inputs = inputs["smoke_inputs"]
+    accum_inputs = inputs["accum_inputs"]
+    nearstorm_inputs = inputs["nearstorm_inputs"]
+    apparent_inputs = inputs["apparent_inputs"]
+    station_pressure_inputs = inputs["station_pressure_inputs"]
+    era5_rain_intensity = inputs["era5_rain_intensity"]
+    era5_snow_water_equivalent = inputs["era5_snow_water_equivalent"]
 
     with timing_tracker.track("Hourly block"):
         (
