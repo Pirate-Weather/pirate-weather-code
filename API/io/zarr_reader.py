@@ -61,7 +61,7 @@ def has_interior_nan_holes(arr: np.ndarray) -> tuple[bool, Optional[int]]:
 
 
 def _interp_row(row: np.ndarray) -> np.ndarray:
-    """Fill only strictly interior NaN‐runs in a 1D array."""
+    """Fill only strictly interior NaN-runs in a 1D array."""
     n = row.size
     x = np.arange(n)
     mask = np.isnan(row)

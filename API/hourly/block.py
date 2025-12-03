@@ -359,7 +359,7 @@ def build_hourly_block(
         if snow_indices.size > 0:
             snow_intensity_si = dbz_to_rate(
                 InterPhour[snow_indices, DATA_HOURLY["intensity"]],
-                np.array(["snow"] * snow_indices.size),
+                np.full(snow_indices.size, "snow", dtype=object),
                 min_dbz=REFC_THRESHOLD,
             )
             InterPhour[snow_indices, DATA_HOURLY["snow_intensity"]] = snow_intensity_si

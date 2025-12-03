@@ -39,14 +39,6 @@ class TimingTracker:
         finally:
             self._log_duration(label, start)
 
-    def log_delta(self, label: str, start_time: float) -> None:
-        """Log a delta given a start perf_counter value."""
-        if not self.enabled:
-            return
-        duration_ms = (time.perf_counter() - start_time) * 1000
-        self.marks[label] = duration_ms
-        self.logger.debug("%s%s: %.1f ms", self.prefix, label, duration_ms)
-
     def _log_duration(self, label: str, start_time: float) -> None:
         if not self.enabled:
             return

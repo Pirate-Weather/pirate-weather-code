@@ -20,7 +20,18 @@ from API.constants.grid_const import US_BOUNDING_BOX
 
 def get_offset(*, lat, lng, utcTime, tf: TimezoneFinder):
     """
-    returns a location's time zone offset from UTC in minutes.
+    Get a location's time zone offset from UTC in minutes.
+
+    Args:
+        lat (float): Latitude of the location.
+        lng (float): Longitude of the location.
+        utcTime (datetime.datetime): The UTC datetime to convert.
+        tf (TimezoneFinder): TimezoneFinder instance.
+
+    Returns:
+        tuple: (offset_minutes (float), tz_target (pytz.timezone))
+            offset_minutes: The time zone offset from UTC in minutes.
+            tz_target: The pytz timezone object for the location.
     """
 
     today = utcTime
@@ -41,8 +52,8 @@ def _polar_is_all_day(lat_val: float, month_val: int) -> bool:
     (sun never rises or never sets). The heuristic is based on the
     hemisphere and month:
 
-    - Northern hemisphere (lat > 0): months April (4) through September (9)
-      are treated as the polar-day season.
+    Accepts individual longitude and latitude values.
+    Returns 1 if the point is within the bounding box for the US, 0 otherwise.
     - Southern hemisphere (lat < 0): months October (10) through March (3)
       are treated as the polar-day season.
     """

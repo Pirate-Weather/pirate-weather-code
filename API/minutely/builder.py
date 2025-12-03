@@ -278,8 +278,8 @@ def build_minutely_block(
             "rain",
             np.where(temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C, "snow", "sleet"),
         )
-        minuteType = precipTypes.tolist()
-        precipTypes = np.array(minuteType)
+        # Keep precipTypes as a numpy array; no need to convert to list and back
+        # precipTypes = np.array(minuteType)
 
         InterPminute[:, DATA_MINUTELY["intensity"]] = dbz_to_rate(refc_arr, precipTypes)
     elif "nbm" in source_list:

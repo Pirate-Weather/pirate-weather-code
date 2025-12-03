@@ -114,8 +114,6 @@ def test_gfs_zip_store_can_be_opened(monkeypatch):
     if save_type not in {"S3", "S3Zarr"}:
         pytest.skip(f"GFS zip store not available for save_type={save_type}")
 
-    monkeypatch.setattr(zarr_reader, "init_ERA5", lambda: {"dsERA5": None})
-
     stores = zarr_reader.update_zarr_store(
         initial_run=False,
         stage=STAGE,
