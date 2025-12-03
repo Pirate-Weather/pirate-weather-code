@@ -125,6 +125,11 @@ app.add_middleware(TimingMiddleware)
 STAGE = os.environ.get("STAGE", "PROD")
 logger.info("OS: %s Stage: %s", platform.system(), STAGE)
 
+"""Load zarr stores on startup.
+
+File syncing is now handled by a separate container.
+This just loads the zarr stores from their expected paths.
+"""
 zarr_stores = update_zarr_store(
     True,
     stage=STAGE,
@@ -136,6 +141,8 @@ zarr_stores = update_zarr_store(
     aws_secret_access_key=aws_secret_access_key,
     logger=logger,
 )
+
+logger.info("Initial data load complete")
 
 ETOPO_f = zarr_stores.ETOPO_f
 SubH_Zarr = zarr_stores.SubH_Zarr
@@ -184,6 +191,35 @@ async def PW_Forecast(
     icon: Union[str, None] = None,
     extraVars: Union[str, None] = None,
 ) -> dict:
+    """
+    Main entry point for the Pirate Weather API forecast.
+
+    This function handles the entire forecast generation process:
+    1. Parses request parameters.
+    2. Initializes Zarr data stores.
+    3. Calculates grid indexing for the requested location.
+    4. Merges data from various weather models (HRRR, GFS, etc.).
+    5. Generates minutely, hourly, daily, and current weather sections.
+    6. Processes alerts.
+    7. Constructs and returns the final JSON response.
+
+    Args:
+        request: The FastAPI request object.
+        location: The location string (lat,lon).
+        units: Unit system (us, si, ca, uk2).
+        extend: Extend hourly forecast (hourly).
+        exclude: Blocks to exclude (currently, minutely, hourly, daily, alerts, flags).
+        include: Blocks to include (overrides exclude).
+        lang: Language for text summaries.
+        version: API version.
+        tmextra: Extra time machine parameters.
+        apikey: The API key used for the request.
+        icon: Icon set to use.
+        extraVars: Extra variables to include.
+
+    Returns:
+        dict: The complete weather forecast JSON object.
+    """
     global ETOPO_f
     global SubH_Zarr
     global HRRR_6H_Zarr
@@ -201,6 +237,8 @@ async def PW_Forecast(
     # Timing Check
     T_Start = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
 
+    # Parse request parameters and initialize variables
+    # This function handles all the input validation and setup
     initial = await prepare_initial_request(
         request=request,
         location=location,
@@ -306,6 +344,8 @@ async def PW_Forecast(
         era5_data=ERA5_Data,
     )
 
+    # Calculate grid indices for the requested location to retrieve data from Zarr stores
+    # This determines which grid points in the model data correspond to the user's lat/lon
     grid_result = await calculate_grid_indexing(
         lat=lat,
         lon=lon,
@@ -390,6 +430,7 @@ async def PW_Forecast(
 
     # Merge hourly models onto a consistent time grid, starting from midnight on the requested day
     # Note that baseTime is the requested time, in TZ aware datetime format
+    # This combines data from multiple weather models (HRRR, GFS, etc.) to create a unified forecast
     if TIMING:
         print("Nearest IDX Start")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
@@ -421,6 +462,7 @@ async def PW_Forecast(
     sourceTimes = merge_result.metadata.source_times
     sourceIDX = merge_result.metadata.source_idx
 
+    # Generate the minutely forecast section (precipitation intensity, etc.)
     with timing_tracker.track("Minutely block"):
         (
             InterPminute,
@@ -457,6 +499,7 @@ async def PW_Forecast(
 
     InterPhour[:, DATA_HOURLY["time"]] = hour_array_grib
 
+    # Calculate time indices to align data with the requested time zone and intervals
     time_indexing = calculate_time_indexing(
         base_time=baseTime,
         timezone_localizer=pytzTZ,
@@ -517,6 +560,7 @@ async def PW_Forecast(
             moon_phase_value, ROUNDING_RULES.get("moonPhase", 2)
         )
 
+    # Extract and prepare specific weather variables (temperature, wind, etc.) from the merged model data
     inputs = prepare_data_inputs(
         source_list=sourceList,
         nbm_merged=NBM_Merged,
@@ -551,6 +595,7 @@ async def PW_Forecast(
     era5_rain_intensity = inputs["era5_rain_intensity"]
     era5_snow_water_equivalent = inputs["era5_snow_water_equivalent"]
 
+    # Generate the hourly forecast section
     with timing_tracker.track("Hourly block"):
         (
             hourList,
@@ -611,6 +656,7 @@ async def PW_Forecast(
     pTypeMap = np.array(["none", "snow", "sleet", "sleet", "rain"])
     pTextMap = np.array(["None", "Snow", "Sleet", "Sleet", "Rain"])
 
+    # Generate the daily forecast section
     with timing_tracker.track("Daily block"):
         daily_section = build_daily_section(
             InterPhour=InterPhour,
@@ -659,6 +705,7 @@ async def PW_Forecast(
         print("Alert Start")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
+    # Process weather alerts for the location
     alertList = build_alerts(
         time_machine=timeMachine,
         ex_alerts=exAlerts,
@@ -671,6 +718,7 @@ async def PW_Forecast(
         loc_tag=loc_tag,
     )
 
+    # Generate the current weather conditions section
     with timing_tracker.track("Current block"):
         current_section = build_current_section(
             sourceList=sourceList,
@@ -719,6 +767,7 @@ async def PW_Forecast(
         )
 
     ### RETURN ###
+    # Construct the final JSON response object
     returnOBJ = dict()
 
     returnOBJ["latitude"] = round(float(lat), 4)
@@ -914,23 +963,3 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080, log_level="info")
 
 
-@app.on_event("startup")
-def initialDataLoad() -> None:
-    """Load zarr stores on startup.
-
-    File syncing is now handled by a separate container.
-    This just loads the zarr stores from their expected paths.
-    """
-    global zarrReady
-
-    zarrReady = False
-    logger.info("Initial data load")
-
-    STAGE = os.environ.get("STAGE", "PROD")
-
-    if STAGE in ("PROD", "DEV", "TIMEMACHINE"):
-        update_zarr_store(True)
-
-    zarrReady = True
-
-    logger.info("Initial data load complete")
