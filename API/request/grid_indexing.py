@@ -274,7 +274,10 @@ async def calculate_grid_indexing(
         else:
             if timing_enabled:
                 print("### NBM Detail Start ###")
-                print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - timing_start)
+                print(
+                    datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+                    - timing_start
+                )
             readNBM = True
             dataOut_nbm = None
             dataOut_nbmFire = None
