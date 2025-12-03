@@ -711,6 +711,7 @@ async def PW_Forecast(
             windUnit=windUnit,
             visUnits=visUnits,
             tempUnits=tempUnits,
+            humidUnit=humidUnit,
             extraVars=extraVars,
             summaryText=summaryText,
             icon=icon,

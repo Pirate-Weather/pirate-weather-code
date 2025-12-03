@@ -38,6 +38,7 @@ def build_hourly_block(
     windUnit: float,
     visUnits: float,
     tempUnits: int,
+    humidUnit: float,
     extraVars,
     summaryText: bool,
     icon: str,
@@ -187,6 +188,10 @@ def build_hourly_block(
     InterPhour[:, DATA_HOURLY["humidity"]] = np.choose(
         np.argmin(np.isnan(humidity_inputs), axis=1), humidity_inputs.T
     )
+
+    # Convert humidity to between 0 and 1
+    InterPhour[:, DATA_HOURLY["humidity"]] = InterPhour[:, DATA_HOURLY["humidity"]] * humidUnit
+
     InterPhour[:, DATA_HOURLY["humidity"]] = np.clip(
         InterPhour[:, DATA_HOURLY["humidity"]],
         CLIP_HUMIDITY["min"],
