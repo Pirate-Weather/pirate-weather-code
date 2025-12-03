@@ -19,7 +19,6 @@ from API.constants.shared_const import MISSING_DATA
 from API.legacy.hourly import apply_legacy_hourly_text
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
-from API.utils.precip import dbz_to_rate
 
 
 def build_hourly_block(
@@ -367,7 +366,9 @@ def build_hourly_block(
     )
 
     # Convert snow intensity from liquid equivalent to snow depth equivalent
-    snow_intensity_indices = np.where(InterPhour[:, DATA_HOURLY["snow_intensity"]] > 0)[0]
+    snow_intensity_indices = np.where(InterPhour[:, DATA_HOURLY["snow_intensity"]] > 0)[
+        0
+    ]
     if snow_intensity_indices.size > 0:
         liquid_intensity = InterPhour[
             snow_intensity_indices, DATA_HOURLY["snow_intensity"]
@@ -376,9 +377,9 @@ def build_hourly_block(
         wind_mps = InterPhour[snow_intensity_indices, DATA_HOURLY["wind"]]
 
         snow_intensity_values = estimate_snow_height(liquid_intensity, temp_c, wind_mps)
-        InterPhour[
-            snow_intensity_indices, DATA_HOURLY["snow_intensity"]
-        ] = snow_intensity_values
+        InterPhour[snow_intensity_indices, DATA_HOURLY["snow_intensity"]] = (
+            snow_intensity_values
+        )
     InterPhour[:, DATA_HOURLY["ice_intensity"]] = np.choose(
         np.argmin(np.isnan(ice_intensity_inputs), axis=1), ice_intensity_inputs.T
     )
