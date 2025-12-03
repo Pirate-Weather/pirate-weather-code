@@ -14,7 +14,6 @@ from API.constants.model_const import (
     NBM_FIRE_INDEX,
 )
 
-
 def _stack_fields(num_hours, *arrays):
     """
     Stack valid arrays column-wise.
@@ -164,8 +163,8 @@ def prepare_data_inputs(
     if era5_valid:
         era5_humidity = (
             relative_humidity_from_dewpoint(
-                era5_merged[:, ERA5["2m_temperature"]] * mp.units.units.degK,
-                era5_merged[:, ERA5["2m_dewpoint_temperature"]] * mp.units.units.degK,
+                era5_merged[:, ERA5["2m_temperature"]] * mp.units.units.degC,
+                era5_merged[:, ERA5["2m_dewpoint_temperature"]] * mp.units.units.degC,
                 phase="auto",
             ).magnitude
             * 100
@@ -335,13 +334,6 @@ def prepare_data_inputs(
         ),
     }
 
-    # --- apparent_inputs ---
-    apparent_inputs = _stack_fields(
-        num_hours,
-        nbm_merged[:, NBM["apparent"]] if nbm_merged is not None else None,
-        gfs_merged[:, GFS["apparent"]] if gfs_merged is not None else None,
-    )
-
     # --- station_pressure_inputs ---
     station_pressure_inputs = None
     if "stationPressure" in extra_vars:
@@ -386,40 +378,11 @@ def prepare_data_inputs(
         else None,
     )
 
-    # --- rain_intensity_inputs ---
-    rain_intensity_inputs = _stack_fields(
-        num_hours,
-        nbm_merged[:, NBM["rain"]] if nbm_merged is not None else None,
-        hrrr_merged[:, HRRR["rain"]] if hrrr_merged is not None else None,
-        gefs_merged[:, GEFS["rain"]] if gefs_merged is not None else None,
-        gfs_merged[:, GFS["rain"]] if gfs_merged is not None else None,
-        era5_rain_intensity if era5_valid else None,
-    )
-
-    # --- snow_intensity_inputs ---
-    snow_intensity_inputs = _stack_fields(
-        num_hours,
-        nbm_merged[:, NBM["snow"]] if nbm_merged is not None else None,
-        hrrr_merged[:, HRRR["snow"]] if hrrr_merged is not None else None,
-        gefs_merged[:, GEFS["snow"]] if gefs_merged is not None else None,
-        gfs_merged[:, GFS["snow"]] if gfs_merged is not None else None,
-        era5_snow_water_equivalent if era5_valid else None,
-    )
-
-    # --- ice_intensity_inputs ---
-    ice_intensity_inputs = _stack_fields(
-        num_hours,
-        nbm_merged[:, NBM["ice"]] if nbm_merged is not None else None,
-        hrrr_merged[:, HRRR["ice"]] if hrrr_merged is not None else None,
-        gefs_merged[:, GEFS["ice"]] if gefs_merged is not None else None,
-        gfs_merged[:, GFS["ice"]] if gfs_merged is not None else None,
-    )
-
     # --- error_inputs ---
     error_inputs = _stack_fields(
         num_hours,
         gefs_merged[:, GEFS["error"]] if gefs_merged is not None else None,
-    )
+    )    
 
     return {
         "InterThour_inputs": inter_thour_inputs,
@@ -439,7 +402,6 @@ def prepare_data_inputs(
         "smoke_inputs": smoke_inputs,
         "accum_inputs": accum_inputs,
         "nearstorm_inputs": nearstorm_inputs,
-        "apparent_inputs": apparent_inputs,
         "station_pressure_inputs": station_pressure_inputs,
         "era5_rain_intensity": era5_rain_intensity,
         "era5_snow_water_equivalent": era5_snow_water_equivalent,
@@ -447,8 +409,5 @@ def prepare_data_inputs(
         "feels_like_inputs": feels_like_inputs,
         "solar_inputs": solar_inputs,
         "cape_inputs": cape_inputs,
-        "rain_intensity_inputs": rain_intensity_inputs,
-        "snow_intensity_inputs": snow_intensity_inputs,
-        "ice_intensity_inputs": ice_intensity_inputs,
         "error_inputs": error_inputs,
     }

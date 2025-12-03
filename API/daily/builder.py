@@ -246,7 +246,7 @@ def build_daily_section(
         log_timing("Daily Loop start")
 
     def _conv_temp(arr):
-        return arr * 9 / 5 + 32 if tempUnits == 0 else arr - tempUnits
+        return arr * 9 / 5 + 32 if tempUnits == 0 else arr
 
     daily_display_mean = InterPday.copy()
     daily_display_mean[:, DATA_DAY["dew"]] = _conv_temp(InterPday[:, DATA_DAY["dew"]])

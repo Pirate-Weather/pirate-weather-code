@@ -37,9 +37,18 @@ from API.constants.forecast_const import (
     DATA_HOURLY,
     DATA_MINUTELY,
 )
+from API.constants.model_const import (
+    ECMWF,
+    ERA5,
+    GFS,
+    HRRR,
+    HRRR_SUBH,
+    NBM,
+    RTMA_RU,
+)
 
 # Project imports
-from API.constants.shared_const import INGEST_VERSION_STR
+from API.constants.shared_const import INGEST_VERSION_STR, KELVIN_TO_CELSIUS
 from API.current.metrics import build_current_section
 from API.daily.builder import build_daily_section
 from API.data_inputs import prepare_data_inputs
@@ -173,6 +182,63 @@ lons_etopo = np.arange(
 )
 
 tf = TimezoneFinder(in_memory=True)
+
+
+def convert_data_to_celsius(
+    dataOut,
+    dataOut_h2,
+    dataOut_hrrrh,
+    dataOut_nbm,
+    dataOut_gfs,
+    dataOut_ecmwf,
+    dataOut_rtma_ru,
+    era5_merged,
+):
+    """
+    Converts temperature, dew point, and apparent temperature from Kelvin to Celsius
+    for the provided data arrays.
+    """
+    # HRRR Sub-Hourly
+    if isinstance(dataOut, np.ndarray):
+        dataOut[:, HRRR_SUBH["temp"]] -= KELVIN_TO_CELSIUS
+        dataOut[:, HRRR_SUBH["dew"]] -= KELVIN_TO_CELSIUS
+
+    # HRRR 6H
+    if isinstance(dataOut_h2, np.ndarray):
+        dataOut_h2[:, HRRR["temp"]] -= KELVIN_TO_CELSIUS
+        dataOut_h2[:, HRRR["dew"]] -= KELVIN_TO_CELSIUS
+
+    # HRRR Hourly
+    if isinstance(dataOut_hrrrh, np.ndarray):
+        dataOut_hrrrh[:, HRRR["temp"]] -= KELVIN_TO_CELSIUS
+        dataOut_hrrrh[:, HRRR["dew"]] -= KELVIN_TO_CELSIUS
+
+    # NBM
+    if isinstance(dataOut_nbm, np.ndarray):
+        dataOut_nbm[:, NBM["temp"]] -= KELVIN_TO_CELSIUS
+        dataOut_nbm[:, NBM["dew"]] -= KELVIN_TO_CELSIUS
+        dataOut_nbm[:, NBM["apparent"]] -= KELVIN_TO_CELSIUS
+
+    # GFS
+    if isinstance(dataOut_gfs, np.ndarray):
+        dataOut_gfs[:, GFS["temp"]] -= KELVIN_TO_CELSIUS
+        dataOut_gfs[:, GFS["dew"]] -= KELVIN_TO_CELSIUS
+        dataOut_gfs[:, GFS["apparent"]] -= KELVIN_TO_CELSIUS
+
+    # ECMWF
+    if isinstance(dataOut_ecmwf, np.ndarray):
+        dataOut_ecmwf[:, ECMWF["temp"]] -= KELVIN_TO_CELSIUS
+        dataOut_ecmwf[:, ECMWF["dew"]] -= KELVIN_TO_CELSIUS
+
+    # RTMA
+    if isinstance(dataOut_rtma_ru, np.ndarray):
+        dataOut_rtma_ru[:, RTMA_RU["temp"]] -= KELVIN_TO_CELSIUS
+        dataOut_rtma_ru[:, RTMA_RU["dew"]] -= KELVIN_TO_CELSIUS
+
+    # ERA5
+    if isinstance(era5_merged, np.ndarray):
+        era5_merged[:, ERA5["2m_temperature"]] -= KELVIN_TO_CELSIUS
+        era5_merged[:, ERA5["2m_dewpoint_temperature"]] -= KELVIN_TO_CELSIUS
 
 
 @app.get("/timemachine/{apikey}/{location}", response_class=ORJSONResponse)
@@ -378,7 +444,21 @@ async def PW_Forecast(
     dataOut_gefs = grid_result.dataOut_gefs
     dataOut_rtma_ru = grid_result.dataOut_rtma_ru
     WMO_alertDat = grid_result.WMO_alertDat
+
     ERA5_MERGED = grid_result.era5_merged
+
+    # Convert temperature columns to Celsius based on model index
+    convert_data_to_celsius(
+        dataOut,
+        dataOut_h2,
+        dataOut_hrrrh,
+        dataOut_nbm,
+        dataOut_gfs,
+        dataOut_ecmwf,
+        dataOut_rtma_ru,
+        ERA5_MERGED,
+    )
+
     source_metadata = build_source_metadata(
         grid_result=grid_result,
         era5_merged=ERA5_MERGED,
@@ -386,6 +466,9 @@ async def PW_Forecast(
         time_machine=timeMachine,
     )
 
+    # Convert temperature columns to Celsius based on model index
+    
+    
     if TIMING:
         print("### Sources Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
@@ -591,7 +674,6 @@ async def PW_Forecast(
     smoke_inputs = inputs["smoke_inputs"]
     accum_inputs = inputs["accum_inputs"]
     nearstorm_inputs = inputs["nearstorm_inputs"]
-    apparent_inputs = inputs["apparent_inputs"]
     station_pressure_inputs = inputs["station_pressure_inputs"]
     era5_rain_intensity = inputs["era5_rain_intensity"]
     era5_snow_water_equivalent = inputs["era5_snow_water_equivalent"]
@@ -599,9 +681,6 @@ async def PW_Forecast(
     feels_like_inputs = inputs["feels_like_inputs"]
     solar_inputs = inputs["solar_inputs"]
     cape_inputs = inputs["cape_inputs"]
-    rain_intensity_inputs = inputs["rain_intensity_inputs"]
-    snow_intensity_inputs = inputs["snow_intensity_inputs"]
-    ice_intensity_inputs = inputs["ice_intensity_inputs"]
     error_inputs = inputs["error_inputs"]
 
     # Generate the hourly forecast section
@@ -617,6 +696,7 @@ async def PW_Forecast(
             hourly_display,
             PTypeHour,
             PTextHour,
+            InterPhour,
         ) = build_hourly_block(
             source_list=sourceList,
             InterPhour=InterPhour,
@@ -656,7 +736,6 @@ async def PW_Forecast(
             smoke_inputs=smoke_inputs,
             accum_inputs=accum_inputs,
             nearstorm_inputs=nearstorm_inputs,
-            apparent_inputs=apparent_inputs,
             station_pressure_inputs=station_pressure_inputs,
             era5_rain_intensity=era5_rain_intensity,
             era5_snow_water_equivalent=era5_snow_water_equivalent,
@@ -664,10 +743,8 @@ async def PW_Forecast(
             feels_like_inputs=feels_like_inputs,
             solar_inputs=solar_inputs,
             cape_inputs=cape_inputs,
-            rain_intensity_inputs=rain_intensity_inputs,
-            snow_intensity_inputs=snow_intensity_inputs,
-            ice_intensity_inputs=ice_intensity_inputs,
             error_inputs=error_inputs,
+            version=version,
         )
 
     pTypeMap = np.array(["none", "snow", "sleet", "sleet", "rain"])

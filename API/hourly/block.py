@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from API.constants.api_const import ROUNDING_RULES
+from API.api_utils import calculate_apparent_temperature
+
+from API.constants.api_const import PRECIP_IDX, ROUNDING_RULES
 from API.constants.clip_const import (
     CLIP_CLOUD,
     CLIP_HUMIDITY,
@@ -61,7 +63,6 @@ def build_hourly_block(
     smoke_inputs,
     accum_inputs,
     nearstorm_inputs,
-    apparent_inputs,
     station_pressure_inputs,
     era5_rain_intensity,
     era5_snow_water_equivalent,
@@ -69,10 +70,8 @@ def build_hourly_block(
     feels_like_inputs,
     solar_inputs,
     cape_inputs,
-    rain_intensity_inputs,
-    snow_intensity_inputs,
-    ice_intensity_inputs,
     error_inputs,
+    version,
 ):
     """Build hourly output objects and summary text/icon lists."""
 
@@ -174,6 +173,7 @@ def build_hourly_block(
     InterPhour[:, DATA_HOURLY["temp"]] = np.choose(
         np.argmin(np.isnan(temperature_inputs), axis=1), temperature_inputs.T
     )
+
     InterPhour[:, DATA_HOURLY["temp"]] = np.clip(
         InterPhour[:, DATA_HOURLY["temp"]], CLIP_TEMP["min"], CLIP_TEMP["max"]
     )
@@ -263,9 +263,6 @@ def build_hourly_block(
         np.argmin(np.isnan(nearstorm_inputs["dir"]), axis=1),
         nearstorm_inputs["dir"].T,
     )
-    InterPhour[:, DATA_HOURLY["apparent"]] = np.choose(
-        np.argmin(np.isnan(apparent_inputs), axis=1), apparent_inputs.T
-    )
     InterPhour[:, DATA_HOURLY["fire"]] = np.choose(
         np.argmin(np.isnan(fire_inputs), axis=1), fire_inputs.T
     )
@@ -277,13 +274,24 @@ def build_hourly_block(
     )
     InterPhour[:, DATA_HOURLY["feels_like"]] = np.choose(
         np.argmin(np.isnan(feels_like_inputs), axis=1), feels_like_inputs.T
-    )
+    )   
+
 
     if station_pressure_inputs is not None:
         InterPhour[:, DATA_HOURLY["station_pressure"]] = np.choose(
             np.argmin(np.isnan(station_pressure_inputs), axis=1),
             station_pressure_inputs.T,
         )
+
+    #### Perform a number of calculations based on the hourly data to get additional metrics 
+
+    # Calculate the apparent temperature
+    InterPhour[:, DATA_HOURLY["apparent"]] = calculate_apparent_temperature(
+        InterPhour[:, DATA_HOURLY["temp"]],  # Air temperature in Celsius
+        InterPhour[:, DATA_HOURLY["humidity"]],  # Relative humidity (0.0 to 1.0)
+        InterPhour[:, DATA_HOURLY["wind"]],  # Wind speed in meters per second
+        solar=InterPhour[:, DATA_HOURLY["solar"]],  # Solar radiation in W/m^2
+    )
 
     # Find snow and liquid precip
     # Set to zero as baseline
@@ -358,31 +366,36 @@ def build_hourly_block(
         InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["ice"]] = 0
         InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["prob"]] = 0
 
-    InterPhour[:, DATA_HOURLY["rain_intensity"]] = np.choose(
-        np.argmin(np.isnan(rain_intensity_inputs), axis=1), rain_intensity_inputs.T
-    )
-    InterPhour[:, DATA_HOURLY["snow_intensity"]] = np.choose(
-        np.argmin(np.isnan(snow_intensity_inputs), axis=1), snow_intensity_inputs.T
-    )
+    # Initialize all to type intensity to zero
+    InterPhour[:, DATA_HOURLY["rain_intensity"]] = 0
+    InterPhour[:, DATA_HOURLY["snow_intensity"]] = 0
+    InterPhour[:, DATA_HOURLY["ice_intensity"]] = 0
+
+    rain_mask = InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["rain"]
+    InterPhour[rain_mask, DATA_HOURLY["rain_intensity"]] = InterPhour[
+        rain_mask, DATA_HOURLY["intensity"]
+    ]
 
     # Convert snow intensity from liquid equivalent to snow depth equivalent
-    snow_intensity_indices = np.where(InterPhour[:, DATA_HOURLY["snow_intensity"]] > 0)[
-        0
-    ]
+    snow_intensity_indices = np.where(InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["snow"])[0]
     if snow_intensity_indices.size > 0:
-        liquid_intensity = InterPhour[
-            snow_intensity_indices, DATA_HOURLY["snow_intensity"]
-        ]
-        temp_c = InterPhour[snow_intensity_indices, DATA_HOURLY["temp"]]
-        wind_mps = InterPhour[snow_intensity_indices, DATA_HOURLY["wind"]]
+            # Convert snow accumulation to intensity using liquid water conversion
+            snow_intensity_si = estimate_snow_height(
+                InterPhour[
+                    snow_intensity_indices, DATA_HOURLY["intensity"]
+                ],  # mm/h of water equivalent
+                InterPhour[snow_intensity_indices, DATA_HOURLY["temp"]],  # Celsius
+                InterPhour[snow_intensity_indices, DATA_HOURLY["wind"]],  # m/s
+            )
+            InterPhour[snow_intensity_indices, DATA_HOURLY["snow_intensity"]] = snow_intensity_si
 
-        snow_intensity_values = estimate_snow_height(liquid_intensity, temp_c, wind_mps)
-        InterPhour[snow_intensity_indices, DATA_HOURLY["snow_intensity"]] = (
-            snow_intensity_values
-        )
-    InterPhour[:, DATA_HOURLY["ice_intensity"]] = np.choose(
-        np.argmin(np.isnan(ice_intensity_inputs), axis=1), ice_intensity_inputs.T
+    # Sleet intensity (direct from intensity for types 2 and 3)
+    sleet_mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["ice"]) | (
+        InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["sleet"]
     )
+    InterPhour[sleet_mask, DATA_HOURLY["ice_intensity"]] = InterPhour[
+        sleet_mask, DATA_HOURLY["intensity"]
+    ]
 
     pTypeMap = np.array(["none", "snow", "sleet", "sleet", "rain"])
     pTextMap = np.array(["None", "Snow", "Sleet", "Sleet", "Rain"])
@@ -393,8 +406,10 @@ def build_hourly_block(
         np.nan_to_num(InterPhour[:, DATA_HOURLY["type"]], 0).astype(int)
     ]
 
+    # Global zeroing
     InterPhour[((InterPhour >= -0.01) & (InterPhour <= 0.01))] = 0
 
+    # Initialize hourly_display to zero
     hourly_display = np.zeros((len(hour_array), max(DATA_HOURLY.values()) + 1))
 
     if tempUnits == 0:
@@ -535,6 +550,7 @@ def build_hourly_block(
         timeMachine=timeMachine,
         tmExtra=tmExtra,
         extraVars=extraVars,
+        version=version,
     )
 
     return (
@@ -548,6 +564,7 @@ def build_hourly_block(
         hourly_display,
         PTypeHour,
         PTextHour,
+        InterPhour
     )
 
 
@@ -567,6 +584,7 @@ def build_hourly_objects(
     timeMachine: bool,
     tmExtra: bool,
     extraVars,
+    version,
 ):
     """Create hourly response objects and associated summary/icon lists."""
     hourList = []
@@ -672,7 +690,8 @@ def build_hourly_objects(
                 idx, DATA_HOURLY["station_pressure"]
             ]
 
-        if tempUnits < 2:
+        if version < 2:
+            # Before version 2, apparentTemperature and feelsLike were the same
             hourItem["apparentTemperature"] = hourItem["feelsLike"]
 
         if timeMachine and not summaryText:
