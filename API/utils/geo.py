@@ -25,7 +25,7 @@ def get_offset(*, lat, lng, utc_time, tf: TimezoneFinder):
     Args:
         lat (float): Latitude of the location.
         lng (float): Longitude of the location.
-        utcTime (datetime.datetime): The UTC datetime to convert.
+        utc_time (datetime.datetime): The UTC datetime to convert.
         tf (TimezoneFinder): TimezoneFinder instance.
 
     Returns:
@@ -34,7 +34,7 @@ def get_offset(*, lat, lng, utc_time, tf: TimezoneFinder):
             tz_target: The pytz timezone object for the location.
     """
 
-    today = utcTime
+    today = utc_time
     tz_target = timezone(tf.timezone_at(lng=lng, lat=lat))
     today_target = tz_target.localize(today)
     today_utc = utc.localize(today)

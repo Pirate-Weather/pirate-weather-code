@@ -6,10 +6,8 @@ It includes functions for reading weather data from zarr files, processing
 weather forecasts, and generating API responses.
 """
 
-import asyncio
 import datetime
 import logging
-import math
 import os
 import platform
 import re
@@ -19,15 +17,13 @@ from typing import Union
 
 import metpy as mp
 import numpy as np
-import reverse_geocode
-import xarray as xr
 from astral import LocationInfo, moon
 from astral.sun import sun
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import ORJSONResponse
 from metpy.calc import relative_humidity_from_dewpoint
 from pirateweather_translations.dynamic_loader import load_all_translations
-from pytz import timezone, utc
+from pytz import utc
 from timezonefinder import TimezoneFinder
 
 from API.api_utils import (
@@ -103,12 +99,9 @@ from API.legacy.summary import (
     build_minutely_summary,
 )
 from API.minutely.builder import build_minutely_block
-from API.utils.geo import (
-    _polar_is_all_day,
-    get_offset,
-    lambertGridMatch,
-    rounder,
-)
+from API.request.grid_indexing import ZarrSources, calculate_grid_indexing
+from API.request.preprocess import prepare_initial_request
+from API.utils.geo import _polar_is_all_day, rounder
 from API.utils.timing import TimingMiddleware, TimingTracker
 
 Translations = load_all_translations()
@@ -247,439 +240,95 @@ async def PW_Forecast(
     global RTMA_RU_Zarr
     global ERA5_Data
 
-    readHRRR = False
-    readGFS = False
-    readECMWF = False
-    readNBM = False
-    readGEFS = False
-    readERA5 = False
-
-    STAGE = os.environ.get("STAGE", "PROD")
-
     # Timing Check
     T_Start = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
 
-    # Current time
-    if force_now is False:
-        nowTime = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
-    else:
-        # Force now for testing with static inputs
-        nowTime = datetime.datetime.fromtimestamp(int(force_now), datetime.UTC).replace(
-            tzinfo=None
-        )
-
-        logger.info("Forced Current Time to:")
-        logger.info(nowTime)
-
-    ### If developing in REPL, uncomment to provide static variables
-    # location = "47.1756,27.594,1741126460"
-    # units = "ca"
-    # extend = None
-    # exclude = None
-    # lang = "en"
-    # version = "2"
-    # tmextra: None
-    # apikey: None
-
-    locationReq = location.split(",")
-
-    # Get the location
-    try:
-        lat = float(locationReq[0])
-        lon_IN = float(locationReq[1])
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Location Specification")
-        # return {
-        #     'statusCode': 400,
-        #     'body': json.dumps('Invalid Location Specification')
-        # }
-    lon = lon_IN % COORDINATE_CONST["longitude_max"]  # 0-360
-    az_Lon = (
-        (lon + COORDINATE_CONST["longitude_offset"]) % COORDINATE_CONST["longitude_max"]
-    ) - COORDINATE_CONST["longitude_offset"]  # -180-180
-
-    if (lon_IN < COORDINATE_CONST["longitude_min"]) or (
-        lon > COORDINATE_CONST["longitude_max"]
-    ):
-        # logger.error('Invalid Longitude')
-        raise HTTPException(status_code=400, detail="Invalid Longitude")
-    if (lat < COORDINATE_CONST["latitude_min"]) or (
-        lat > COORDINATE_CONST["latitude_max"]
-    ):
-        # logger.error('Invalid Latitude')
-        raise HTTPException(status_code=400, detail="Invalid Latitude")
-
-    # Debug tag for logging with location
-    loc_tag = f"[loc={lat:.4f},{az_Lon:.4f}]"
-
-    timing_tracker = TimingTracker(
+    initial = await prepare_initial_request(
+        request=request,
+        location=location,
+        units=units,
+        extend=extend,
+        exclude=exclude,
+        include=include,
+        lang=lang,
+        version=version,
+        tmextra=tmextra,
+        icon=icon,
+        extraVars=extraVars,
+        tf=tf,
+        translations=Translations,
+        timing_enabled=TIMING,
+        force_now=force_now,
         logger=logger,
-        enabled=TIMING,
-        prefix=f"{loc_tag} ",
+        start_time=T_Start,
     )
 
-    if len(locationReq) == 2:
-        if STAGE == "TIMEMACHINE":
-            raise HTTPException(status_code=400, detail="Missing Time Specification")
+    STAGE = initial.stage
+    lat = initial.lat
+    lon_IN = initial.lon_in
+    lon = initial.lon
+    az_Lon = initial.az_lon
+    nowTime = initial.now_time
+    utcTime = initial.utc_time
+    timeMachine = initial.time_machine
+    loc_tag = initial.loc_tag
+    timing_tracker = initial.timing_tracker
+    tz_offset = initial.tz_offset
+    tz_name = initial.tz_name
+    tzReq = initial.tz_req
+    loc_name = initial.loc_name
+    icon = initial.icon
+    translation = initial.translation
+    extendFlag = initial.extend_flag
+    version = initial.version
+    tmExtra = initial.tm_extra
+    excludeParams = initial.exclude_params
+    includeParams = initial.include_params
+    extraVars = initial.extra_vars
+    exCurrently = initial.ex_currently
+    exMinutely = initial.ex_minutely
+    exHourly = initial.ex_hourly
+    exDaily = initial.ex_daily
+    exFlags = initial.ex_flags
+    exAlerts = initial.ex_alerts
+    exNBM = initial.ex_nbm
+    exHRRR = initial.ex_hrrr
+    exGEFS = initial.ex_gefs
+    exGFS = initial.ex_gfs
+    exRTMA_RU = initial.ex_rtma_ru
+    exECMWF = initial.ex_ecmwf
+    inc_day_night = initial.inc_day_night
+    summaryText = initial.summary_text
+    unitSystem = initial.unit_system
+    windUnit = initial.wind_unit
+    prepIntensityUnit = initial.prep_intensity_unit
+    prepAccumUnit = initial.prep_accum_unit
+    tempUnits = initial.temp_units
+    visUnits = initial.vis_units
+    humidUnit = initial.humid_unit
+    elevUnit = initial.elev_unit
+    weather = initial.weather
+    pytzTZ = initial.pytz_tz
+    baseTime = initial.base_time
+    baseHour = initial.base_hour
+    baseDay = initial.base_day
+    baseDayUTC = initial.base_day_utc
+    baseDayUTC_Grib = initial.base_day_utc_grib
+    daily_days = initial.daily_days
+    daily_day_hours = initial.daily_day_hours
+    ouputHours = initial.output_hours
+    ouputDays = initial.output_days
+    minute_array_grib = initial.minute_array_grib
+    minute_array = initial.minute_array
+    InterTminute = initial.inter_tminute
+    InterPminute = initial.inter_pminute
+    InterPhour = initial.inter_phour
+    hour_array_grib = initial.hour_array_grib
+    hour_array = initial.hour_array
+    day_array_grib = initial.day_array_grib
+    numHours = initial.num_hours
+    readWMOAlerts = initial.read_wmo_alerts
 
-        else:
-            utcTime = nowTime
-
-    elif len(locationReq) == 3:
-        # If time is specified as a unix time
-        if locationReq[2].lstrip("-+").isnumeric():
-            if float(locationReq[2]) > 0:
-                utcTime = datetime.datetime.fromtimestamp(
-                    float(locationReq[2]), datetime.UTC
-                ).replace(tzinfo=None)
-            elif (
-                float(locationReq[2]) < TIME_MACHINE_CONST["very_negative_threshold"]
-            ):  # Very negative time
-                utcTime = datetime.datetime.fromtimestamp(
-                    float(locationReq[2]), datetime.UTC
-                ).replace(tzinfo=None)
-            elif float(locationReq[2]) < 0:  # Negative time
-                utcTime = nowTime + datetime.timedelta(seconds=float(locationReq[2]))
-
-        else:
-            try:
-                utcTime = datetime.datetime.strptime(
-                    locationReq[2], "%Y-%m-%dT%H:%M:%S%z"
-                )
-                # Since it is in UTC time already
-                utcTime = utcTime.replace(tzinfo=None)
-            except Exception:
-                try:
-                    utcTime = datetime.datetime.strptime(
-                        locationReq[2], "%Y-%m-%dT%H:%M:%S%Z"
-                    )
-                    # Since it is in UTC time already
-                    utcTime = utcTime.replace(tzinfo=None)
-                except Exception:
-                    try:
-                        localTime = datetime.datetime.strptime(
-                            locationReq[2], "%Y-%m-%dT%H:%M:%S"
-                        )
-
-                        # If no time zone specified, assume local time, and convert
-                        tz_offsetLocIN = {
-                            "lat": lat,
-                            "lng": az_Lon,
-                            "utcTime": localTime,
-                            "tf": tf,
-                        }
-
-                        tz_offsetIN, tz_name = get_offset(**tz_offsetLocIN)
-                        utcTime = localTime - datetime.timedelta(minutes=tz_offsetIN)
-
-                    except Exception:
-                        # logger.error('Invalid Time Specification')
-                        raise HTTPException(
-                            status_code=400, detail="Invalid Time Specification"
-                        )
-
-    else:
-        raise HTTPException(
-            status_code=400, detail="Invalid Time or Location Specification"
-        )
-
-    timeMachine = False
-    # Set up translations
-    if not lang:
-        lang = "en"
-
-    if icon != "pirate":
-        icon = "darksky"
-
-    # Check if langugage is supported
-    if lang not in Translations:
-        # Throw an error
-        raise HTTPException(status_code=400, detail="Language Not Supported")
-
-    translation = Translations[lang]
-
-    if (nowTime - utcTime) > datetime.timedelta(hours=25):
-        # More than 10 days ago must be time machine request
-        if (
-            ("localhost" in str(request.url))
-            or ("timemachine" in str(request.url))
-            or ("127.0.0.1" in str(request.url))
-            or ("dev" in str(request.url))
-        ):
-            timeMachine = True
-
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail="Requested Time is in the Past. Please Use Timemachine.",
-            )
-
-    elif nowTime < utcTime:
-        if (utcTime - nowTime) < datetime.timedelta(hours=1):
-            utcTime = nowTime
-        else:
-            raise HTTPException(
-                status_code=400, detail="Requested Time is in the Future"
-            )
-    elif (nowTime - utcTime) < datetime.timedelta(
-        hours=TIME_MACHINE_CONST["threshold_hours"]
-    ):
-        # If within the last 25 hours, it may or may not be a timemachine request
-        # If it is, then only return 24h of data
-        if "timemachine" in str(request.url):
-            timeMachine = True
-            # This results in the API using the live zip file, but only doing a 24 hour forecast from midnight of the requested day
-            if TIMING:
-                logger.debug("Near term timemachine request")
-                # Log how far in the past it is
-                logger.debug(nowTime - utcTime)
-        # Otherwise, just a normal request
-
-    # Timing Check
-    if TIMING:
-        logger.debug("Request process time")
-        logger.debug(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-
-    # Calculate the timezone offset
-    tz_offsetLoc = {"lat": lat, "lng": az_Lon, "utcTime": utcTime, "tf": tf}
-    tz_offset, tz_name = get_offset(**tz_offsetLoc)
-
-    tzReq = tf.timezone_at(lat=lat, lng=az_Lon)
-
-    # Reverse geocode the location to return a city name and approx unit system
-    loc_name = await asyncio.to_thread(reverse_geocode.get, (lat, az_Lon))
-
-    # Timing Check
-    if TIMING:
-        print("Timezone offset time")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-
-    # Set defaults
-    if not extend:
-        extendFlag = 0
-    else:
-        if extend == "hourly":
-            extendFlag = 1
-        else:
-            extendFlag = 0
-
-    if not version:
-        version = 1
-
-    version = float(version)
-
-    # Check if extra information should be included with time machine
-    if not tmextra:
-        tmExtra = False
-    else:
-        tmExtra = True
-
-    if not exclude:
-        excludeParams = ""
-    else:
-        excludeParams = exclude
-
-    if not include:
-        includeParams = ""
-    else:
-        includeParams = include
-
-    if not extraVars:
-        extraVars = []
-    else:
-        extraVars = extraVars.split(",")
-
-    exCurrently = 0
-    exMinutely = 0
-    exHourly = 0
-    exDaily = 0
-    exFlags = 0
-    exAlerts = 0
-    exNBM = 0
-    exHRRR = 0
-    exGEFS = 0
-    exGFS = 0
-    exRTMA_RU = 0
-    exECMWF = 0
-    inc_day_night = 0
-
-    summaryText = True
-
-    if "currently" in excludeParams:
-        exCurrently = 1
-    if "minutely" in excludeParams:
-        exMinutely = 1
-    if "hourly" in excludeParams:
-        exHourly = 1
-    if "daily" in excludeParams:
-        exDaily = 1
-    if "flags" in excludeParams:
-        exFlags = 1
-    if "alerts" in excludeParams:
-        exAlerts = 1
-    if "nbm" in excludeParams:
-        exNBM = 1
-    if "hrrr" in excludeParams:
-        exHRRR = 1
-    if "gefs" in excludeParams:
-        exGEFS = 1
-    if "gfs" in excludeParams:
-        exGFS = 1
-    if "rtma_ru" in excludeParams:
-        exRTMA_RU = 1
-    if "ecmwf_ifs" in excludeParams:
-        exECMWF = 1
-    if "summary" in excludeParams:
-        summaryText = False
-
-    if "day_night_forecast" in includeParams:
-        inc_day_night = 1
-
-    # If more than 25 hours in the past, exclude everything except gfs
-    if (nowTime - utcTime) > datetime.timedelta(hours=25):
-        exNBM = 1
-        exAlerts = 1
-        exHRRR = 1
-        exGEFS = 1
-        exRTMA_RU = 1
-        exECMWF = 1
-
-    readRTMA_RU = False
-
-    if timeMachine or exAlerts == 1:
-        readWMOAlerts = False
-    else:
-        readWMOAlerts = True
-
-    # Set up timemachine params
-    if timeMachine and not tmExtra:
-        exMinutely = 1
-
-    if timeMachine:
-        exAlerts = 1
-
-    # Default to US
-    unitSystem = "us"
-    windUnit = 2.234  # mph
-    prepIntensityUnit = 0.0394  # inches/hour
-    prepAccumUnit = 0.0394  # inches
-    tempUnits = 0  # F. This is harder
-    # pressUnits removed - pressure kept in Pascals, converted to hPa at output
-    visUnits = 0.00062137  # miles
-    humidUnit = 0.01  # %
-    elevUnit = 3.28084  # ft
-
-    if units:
-        if units == "auto":
-            unitSystem = country_units.get(loc_name["country_code"], "us").lower()
-        else:
-            unitSystem = units[0:2]
-
-        if unitSystem == "ca":
-            windUnit = 3.600  # kph
-            prepIntensityUnit = 1  # mm/h
-            prepAccumUnit = 0.1  # cm
-            tempUnits = KELVIN_TO_CELSIUS  # Celsius
-            # pressUnits removed - pressure kept in Pascals, converted to hPa at output
-            visUnits = 0.001  # km
-            humidUnit = 0.01  # %
-            elevUnit = 1  # m
-        elif unitSystem == "uk":
-            windUnit = 2.234  # mph
-            prepIntensityUnit = 1  # mm/h
-            prepAccumUnit = 0.1  # cm
-            tempUnits = KELVIN_TO_CELSIUS  # Celsius
-            # pressUnits removed - pressure kept in Pascals, converted to hPa at output
-            visUnits = 0.00062137  # miles
-            humidUnit = 0.01  # %
-            elevUnit = 1  # m
-        elif unitSystem == "si":
-            windUnit = 1  # m/s
-            prepIntensityUnit = 1  # mm/h
-            prepAccumUnit = 0.1  # cm
-            tempUnits = KELVIN_TO_CELSIUS  # Celsius
-            # pressUnits removed - pressure kept in Pascals, converted to hPa at output
-            visUnits = 0.001  # km
-            humidUnit = 0.01  # %
-            elevUnit = 1  # m
-        else:
-            unitSystem = "us"
-
-    weather = WeatherParallel(loc_tag=loc_tag)
-
-    zarrTasks = dict()
-
-    # Base times
-    pytzTZ = timezone(tzReq)
-
-    # utcTime  = datetime.datetime(year=2024, month=3, day=8, hour=6, minute=15)
-    baseTime = utc.localize(
-        datetime.datetime(
-            year=utcTime.year,
-            month=utcTime.month,
-            day=utcTime.day,
-            hour=utcTime.hour,
-            minute=utcTime.minute,
-        )
-    ).astimezone(pytzTZ)
-    baseHour = pytzTZ.localize(
-        datetime.datetime(
-            year=baseTime.year,
-            month=baseTime.month,
-            day=baseTime.day,
-            hour=baseTime.hour,
-        )
-    )
-
-    baseDay = baseTime.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    baseDayUTC = baseDay.astimezone(utc)
-
-    # Find UTC time for the base day
-    baseDayUTC_Grib = (
-        (
-            np.datetime64(baseDay.astimezone(utc).replace(tzinfo=None))
-            - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
-        )
-        .astype("timedelta64[s]")
-        .astype(np.int32)
-    )
-
-    # Setup the time parameters for output and processing
-    if timeMachine:
-        daily_days = 1  # Number of days to output
-        daily_day_hours = 1  # Additional hours to use in the processing
-        ouputHours = 24
-        ouputDays = 1
-
-    else:
-        daily_days = 8
-        daily_day_hours = 5
-
-        if extendFlag:
-            ouputHours = 168
-        else:
-            ouputHours = 48
-        ouputDays = 8
-
-    (
-        minute_array_grib,
-        minute_array,
-        InterTminute,
-        InterPminute,
-        InterPhour,
-        hour_array_grib,
-        hour_array,
-        day_array_grib,
-    ) = initialize_time_grids(
-        base_time=baseTime,
-        base_day=baseDay,
-        daily_days=daily_days,
-        daily_day_hours=daily_day_hours,
-        timezone_localizer=pytzTZ,
-    )
-
-    numHours = len(hour_array)
     HRRR_Merged = None
     NBM_Merged = None
     NBM_Fire_Merged = None
@@ -687,447 +336,82 @@ async def PW_Forecast(
     ECMWF_Merged = None
     GEFS_Merged = None
 
-    # Timing Check
     if TIMING:
         print("### HRRR Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
-    sourceIDX = dict()
+    zarr_sources = ZarrSources(
+        subh=SubH_Zarr,
+        hrrr_6h=HRRR_6H_Zarr,
+        hrrr=HRRR_Zarr,
+        nbm=NBM_Zarr,
+        nbm_fire=NBM_Fire_Zarr,
+        gfs=GFS_Zarr,
+        ecmwf=ECMWF_Zarr,
+        gefs=GEFS_Zarr,
+        rtma_ru=RTMA_RU_Zarr,
+        wmo_alerts=WMO_Alerts_Zarr,
+        era5_data=ERA5_Data,
+    )
 
-    # Ignore areas outside of HRRR coverage
-    if (
-        az_Lon < -134
-        or az_Lon > -61
-        or lat < 21
-        or lat > 53
-        or exHRRR == 1
-        or timeMachine
-    ):
-        dataOut = False
-        dataOut_hrrrh = False
-        dataOut_h2 = False
+    grid_result = await calculate_grid_indexing(
+        lat=lat,
+        lon=lon,
+        az_lon=az_Lon,
+        utc_time=utcTime,
+        now_time=nowTime,
+        time_machine=timeMachine,
+        ex_hrrr=exHRRR,
+        ex_nbm=exNBM,
+        ex_gfs=exGFS,
+        ex_ecmwf=exECMWF,
+        ex_gefs=exGEFS,
+        ex_rtma_ru=exRTMA_RU,
+        read_wmo_alerts=readWMOAlerts,
+        base_day_utc=baseDayUTC,
+        zarr_sources=zarr_sources,
+        weather=weather,
+        timing_start=T_Start,
+        timing_enabled=TIMING,
+        logger=logger,
+    )
 
-    else:
-        # HRRR
-        central_longitude_hrrr = math.radians(262.5)
-        central_latitude_hrrr = math.radians(38.5)
-        standard_parallel_hrrr = math.radians(38.5)
-        semimajor_axis_hrrr = 6371229
-        hrrr_minX = -2697500
-        hrrr_minY = -1587300
-        hrrr_delta = 3000
-
-        hrrr_lat, hrrr_lon, x_hrrr, y_hrrr = lambertGridMatch(
-            central_longitude_hrrr,
-            central_latitude_hrrr,
-            standard_parallel_hrrr,
-            semimajor_axis_hrrr,
-            lat,
-            lon,
-            hrrr_minX,
-            hrrr_minY,
-            hrrr_delta,
-        )
-
-        if (
-            (x_hrrr < HRRR_X_MIN)
-            or (y_hrrr < HRRR_Y_MIN)
-            or (x_hrrr > HRRR_X_MAX)
-            or (y_hrrr > HRRR_Y_MAX)
-        ):
-            dataOut = False
-            dataOut_h2 = False
-            dataOut_hrrrh = False
-        else:
-            # Read HRRR if within bounds
-            readHRRR = True
-
-        sourceIDX["hrrr"] = dict()
-        sourceIDX["hrrr"]["x"] = int(x_hrrr)
-        sourceIDX["hrrr"]["y"] = int(y_hrrr)
-        sourceIDX["hrrr"]["lat"] = round(hrrr_lat, 2)
-        sourceIDX["hrrr"]["lon"] = round(((hrrr_lon + 180) % 360) - 180, 2)
-
-    # Timing Check
-    if TIMING:
-        print("### RTMA_RU Start ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-
-    # RTMA_RU - only for currently, not for time machine
-    # Uses same grid as NBM (Lambert conformal conic projection, ~2.54km resolution)
-    if (
-        az_Lon < -138.3
-        or az_Lon > -59
-        or lat < 19.3
-        or lat > 57
-        or timeMachine
-        or exRTMA_RU == 1
-    ):
-        dataOut_rtma_ru = False
-    else:
-        # RTMA_RU uses same Lambert Conformal Conic projection as NBM
-        central_longitude_rtma = math.radians(RTMA_RU_CENTRAL_LONG)
-        central_latitude_rtma = math.radians(RTMA_RU_CENTRAL_LAT)
-        standard_parallel_rtma = math.radians(RTMA_RU_PARALLEL)
-        semimajor_axis_rtma = RTMA_RU_AXIS
-        rtma_minX = RTMA_RU_MIN_X
-        rtma_minY = RTMA_RU_MIN_Y
-        rtma_delta = RTMA_RU_DELTA  # 2539.703m grid matching NBM
-
-        rtma_lat, rtma_lon, x_rtma, y_rtma = lambertGridMatch(
-            central_longitude_rtma,
-            central_latitude_rtma,
-            standard_parallel_rtma,
-            semimajor_axis_rtma,
-            lat,
-            lon,
-            rtma_minX,
-            rtma_minY,
-            rtma_delta,
-        )
-
-        if (
-            (x_rtma < RTMA_RU_X_MIN)
-            or (y_rtma < RTMA_RU_Y_MIN)
-            or (x_rtma > RTMA_RU_X_MAX)
-            or (y_rtma > RTMA_RU_Y_MAX)
-        ):
-            dataOut_rtma_ru = False
-        else:
-            readRTMA_RU = True
-
-    # Timing Check
-    if TIMING:
-        print("### NBM Start ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-    # Ignore areas outside of NBM coverage
-    if (
-        az_Lon < -138.3
-        or az_Lon > -59
-        or lat < 19.3
-        or lat > 57
-        or exNBM == 1
-        or timeMachine
-    ):
-        dataOut_nbm = False
-        dataOut_nbmFire = False
-    else:
-        # NBM
-        central_longitude_nbm = math.radians(265)
-        central_latitude_nbm = math.radians(25)
-        standard_parallel_nbm = math.radians(25.0)
-        semimajor_axis_nbm = 6371200
-        nbm_minX = -3271152.8
-        nbm_minY = -263793.46
-        nbm_delta = 2539.703000
-
-        nbm_lat, nbm_lon, x_nbm, y_nbm = lambertGridMatch(
-            central_longitude_nbm,
-            central_latitude_nbm,
-            standard_parallel_nbm,
-            semimajor_axis_nbm,
-            lat,
-            lon,
-            nbm_minX,
-            nbm_minY,
-            nbm_delta,
-        )
-
-        if (
-            (x_nbm < NBM_X_MIN)
-            or (y_nbm < NBM_Y_MIN)
-            or (x_nbm > NBM_X_MAX)
-            or (y_nbm > NBM_Y_MAX)
-        ):
-            dataOut_nbm = False
-            dataOut_nbmFire = False
-        else:
-            # Timing Check
-            if TIMING:
-                print("### NBM Detail Start ###")
-                print(
-                    datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
-                )
-
-            readNBM = True
-
-    # Timing Check
-    if TIMING:
-        print("### GFS/GEFS Start ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-
-    # GFS
-    lats_gfs = np.arange(-90, 90, 0.25)
-    lons_gfs = np.arange(0, 360, 0.25)
-
-    abslat = np.abs(lats_gfs - lat)
-    abslon = np.abs(lons_gfs - lon)
-    y_p = np.argmin(abslat)
-    x_p = np.argmin(abslon)
-
-    gfs_lat = lats_gfs[y_p]
-    gfs_lon = lons_gfs[x_p]
-
-    # Timing Check
-    if TIMING:
-        print("### GFS Detail Start ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-
-    # If more than 10 days ago, read ERA5
-    if (nowTime - utcTime) > datetime.timedelta(hours=10 * 24):
-        dataOut_gfs = False
-        readERA5 = True
-        readGFS = False
-        exGFS = 1  # Force exclude GFS
-    elif exGFS:
-        dataOut_gfs = False
-        readGFS = False
-    else:
-        readGFS = True
-
-    # Timing Check
-    if TIMING:
-        print("### GFS Detail END ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-
-    # ECMWF - only for non-timemachine requests and if data is available
-    if TIMING:
-        print("### ECMWF Detail Start ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-
-    dataOut_ecmwf = False
-    if exECMWF == 1:
-        dataOut_ecmwf = False
-    elif timeMachine:
-        dataOut_ecmwf = False
-    elif ECMWF_Zarr is None:
-        dataOut_ecmwf = False
-    else:
-        readECMWF = True
-        lats_ecmwf = np.arange(90, -90, -0.25)
-        lons_ecmwf = np.arange(-180, 180, 0.25)
-
-        abslat_ecmwf = np.abs(lats_ecmwf - lat)
-        abslon_ecmwf = np.abs(lons_ecmwf - az_Lon)
-        y_p_eur = np.argmin(abslat_ecmwf)
-        x_p_eur = np.argmin(abslon_ecmwf)
-
-    if TIMING:
-        print("### ECMWF Detail END ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-
-    # GEFS
-    # Timing Check
-    if TIMING:
-        print("### GEFS Detail Start ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-
-    if exGEFS == 1:
-        dataOut_gefs = False
-    elif timeMachine:
-        dataOut_gefs = False
-    else:
-        readGEFS = True
-
-    # Timing Check
-    if TIMING:
-        print("### GEFS Detail Start ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-
-    # If a timemachine request for more than 10 days ago, read ERA5
-    if readERA5:
-        # Get nearest lat and lon for the ERA5 model
-
-        # Find nearest latitude and longitude in ERA5 data
-        # Same as GFS
-        abslat = np.abs(ERA5_Data["ERA5_lats"] - lat)
-        abslon = np.abs(ERA5_Data["ERA5_lons"] - lon)  # 0-360
-        y_p = np.argmin(abslat)
-        x_p = np.argmin(abslon)
-
-        # Find closest date to baseDayUTC
-        t_p = np.argmin(
-            np.abs(
-                ERA5_Data["ERA5_times"] - np.datetime64(baseDayUTC.replace(tzinfo=None))
-            )
-        )
-
-        # Read the ERA5 data for the location and time
-        # isel is significantly faster than sel for this operation
-        dataOut_ERA5_xr = ERA5_Data["dsERA5"][ERA5.keys()].isel(
-            latitude=y_p, longitude=x_p, time=slice(t_p, t_p + 25)
-        )
-
-        # Stack into a 2D (var, time) array
-        dataOut_ERA5 = xr.concat(
-            [dataOut_ERA5_xr[var] for var in ERA5.keys()], dim="variable"
-        )
-
-        # Add unix time as first row
-        unix_times_era5 = (
-            dataOut_ERA5_xr["time"].astype("datetime64[s]")
-            - np.datetime64("1970-01-01T00:00:00")
-        ).astype(np.int64)
-        ERA5_MERGED = np.vstack((unix_times_era5, dataOut_ERA5.values)).T
-    else:
-        ERA5_MERGED = False
-        dataOut_ERA5 = False
-
-    if readHRRR:
-        zarrTasks["SubH"] = weather.zarr_read("SubH", SubH_Zarr, x_hrrr, y_hrrr)
-
-        # HRRR_6H
-        zarrTasks["HRRR_6H"] = weather.zarr_read(
-            "HRRR_6H", HRRR_6H_Zarr, x_hrrr, y_hrrr
-        )
-
-        # HRRR
-        zarrTasks["HRRR"] = weather.zarr_read("HRRR", HRRR_Zarr, x_hrrr, y_hrrr)
-
-    if readNBM:
-        zarrTasks["NBM"] = weather.zarr_read("NBM", NBM_Zarr, x_nbm, y_nbm)
-        zarrTasks["NBM_Fire"] = weather.zarr_read(
-            "NBM_Fire", NBM_Fire_Zarr, x_nbm, y_nbm
-        )
-
-    if readGFS:
-        zarrTasks["GFS"] = weather.zarr_read("GFS", GFS_Zarr, x_p, y_p)
-
-    if readECMWF:
-        zarrTasks["ECMWF"] = weather.zarr_read("ECMWF", ECMWF_Zarr, x_p_eur, y_p_eur)
-
-    if readGEFS:
-        zarrTasks["GEFS"] = weather.zarr_read("GEFS", GEFS_Zarr, x_p, y_p)
-
-    if readRTMA_RU:
-        zarrTasks["RTMA_RU"] = weather.zarr_read(
-            "RTMA_RU", RTMA_RU_Zarr, x_rtma, y_rtma
-        )
-
-    # Initialize WMO alert data
-    WMO_alertDat = None
-
-    if readWMOAlerts:
-        wmo_alerts_lats = np.arange(-60, 85, 0.0625)
-        wmo_alerts_lons = np.arange(-180, 180, 0.0625)
-        wmo_abslat = np.abs(wmo_alerts_lats - lat)
-        wmo_abslon = np.abs(wmo_alerts_lons - az_Lon)
-        wmo_alerts_y_p = np.argmin(wmo_abslat)
-        wmo_alerts_x_p = np.argmin(wmo_abslon)
-
-        WMO_alertDat = WMO_Alerts_Zarr[wmo_alerts_y_p, wmo_alerts_x_p]
-
-        if TIMING:
-            # Temp until added to response
-            print(WMO_alertDat)
-
-    results = await asyncio.gather(*zarrTasks.values())
-    zarr_results = {key: result for key, result in zip(zarrTasks.keys(), results)}
-
-    if readHRRR:
-        dataOut = zarr_results["SubH"]
-        dataOut_h2 = zarr_results["HRRR_6H"]
-        dataOut_hrrrh = zarr_results["HRRR"]
-
-        if (
-            (dataOut is not False)
-            and (dataOut_h2 is not False)
-            and (dataOut_hrrrh is not False)
-        ):
-            # Calculate run times from specific time step for each model
-            subhRunTime = dataOut[0, 0]
-
-            # Check if the model times are valid for the request time
-            if (
-                utcTime
-                - datetime.datetime.fromtimestamp(
-                    subhRunTime.astype(int), datetime.UTC
-                ).replace(tzinfo=None)
-            ) > datetime.timedelta(hours=4):
-                dataOut = False
-                print("OLD SubH")
-
-            hrrrhRunTime = dataOut_hrrrh[HISTORY_PERIODS["HRRR"], 0]
-            # print( datetime.datetime.fromtimestamp(dataOut_hrrrh[35, 0].astype(int)))
-            if (
-                utcTime
-                - datetime.datetime.fromtimestamp(
-                    hrrrhRunTime.astype(int), datetime.UTC
-                ).replace(tzinfo=None)
-            ) > datetime.timedelta(hours=16):
-                dataOut_hrrrh = False
-                print("OLD HRRRH")
-
-            h2RunTime = dataOut_h2[0, 0]
-            if (
-                utcTime
-                - datetime.datetime.fromtimestamp(
-                    h2RunTime.astype(int), datetime.UTC
-                ).replace(tzinfo=None)
-            ) > datetime.timedelta(hours=46):
-                dataOut_h2 = False
-                print("OLD HRRR_6H")
-        else:  # Set all to false if any failed
-            dataOut = False
-            dataOut_h2 = False
-            dataOut_hrrrh = False
-
-    if readNBM:
-        dataOut_nbm = zarr_results["NBM"]
-        dataOut_nbmFire = zarr_results["NBM_Fire"]
-
-        if dataOut_nbm is not False:
-            nbmRunTime = dataOut_nbm[HISTORY_PERIODS["NBM"], 0]
-
-        sourceIDX["nbm"] = dict()
-        sourceIDX["nbm"]["x"] = int(x_nbm)
-        sourceIDX["nbm"]["y"] = int(y_nbm)
-        sourceIDX["nbm"]["lat"] = round(nbm_lat, 2)
-        sourceIDX["nbm"]["lon"] = round(((nbm_lon + 180) % 360) - 180, 2)
-
-        # Timing Check
-        if TIMING:
-            print("### NMB Detail End ###")
-            print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-
-        if dataOut_nbmFire is not False:
-            nbmFireRunTime = dataOut_nbmFire[HISTORY_PERIODS["NBM"] - 6, 0]
-
-    if readGFS:
-        dataOut_gfs = zarr_results["GFS"]
-        if dataOut_gfs is not False:
-            gfsRunTime = dataOut_gfs[HISTORY_PERIODS["GFS"] - 1, 0]
-
-    if readECMWF:
-        dataOut_ecmwf = zarr_results["ECMWF"]
-        if dataOut_ecmwf is not False:
-            # ECMWF forecast starts at hour +3, so base_time is at HISTORY_PERIODS - 3
-            ecmwfRunTime = dataOut_ecmwf[HISTORY_PERIODS["ECMWF"] - 3, 0]
-            sourceIDX["ecmwf_ifs"] = dict()
-            sourceIDX["ecmwf_ifs"]["x"] = int(x_p_eur)
-            sourceIDX["ecmwf_ifs"]["y"] = int(y_p_eur)
-            sourceIDX["ecmwf_ifs"]["lat"] = round(lats_ecmwf[y_p_eur], 2)
-            sourceIDX["ecmwf_ifs"]["lon"] = round(lons_ecmwf[x_p_eur], 2)
-
-    if readGEFS:
-        dataOut_gefs = zarr_results["GEFS"]
-        gefsRunTime = dataOut_gefs[HISTORY_PERIODS["GEFS"] - 3, 0]
-
-    if readRTMA_RU:
-        dataOut_rtma_ru = zarr_results["RTMA_RU"]
-
-        # Check if RTMA_RU data is valid (not too old)
-        if dataOut_rtma_ru is not False:
-            rtma_ru_time = dataOut_rtma_ru[0, 0]
-            # RTMA-RU is updated every 15 minutes, so data older than 1 hour is stale
-            if (
-                utcTime
-                - datetime.datetime.fromtimestamp(
-                    rtma_ru_time.astype(int), datetime.UTC
-                ).replace(tzinfo=None)
-            ) > datetime.timedelta(hours=1):
-                dataOut_rtma_ru = False
-                logger.warning("OLD RTMA_RU")
+    dataOut = grid_result.dataOut
+    dataOut_h2 = grid_result.dataOut_h2
+    dataOut_hrrrh = grid_result.dataOut_hrrrh
+    dataOut_nbm = grid_result.dataOut_nbm
+    dataOut_nbmFire = grid_result.dataOut_nbmFire
+    dataOut_gfs = grid_result.dataOut_gfs
+    dataOut_ecmwf = grid_result.dataOut_ecmwf
+    dataOut_gefs = grid_result.dataOut_gefs
+    dataOut_rtma_ru = grid_result.dataOut_rtma_ru
+    WMO_alertDat = grid_result.WMO_alertDat
+    ERA5_MERGED = grid_result.era5_merged
+    subhRunTime = grid_result.subhRunTime
+    hrrrhRunTime = grid_result.hrrrhRunTime
+    h2RunTime = grid_result.h2RunTime
+    nbmRunTime = grid_result.nbmRunTime
+    nbmFireRunTime = grid_result.nbmFireRunTime
+    gfsRunTime = grid_result.gfsRunTime
+    ecmwfRunTime = grid_result.ecmwfRunTime
+    gefsRunTime = grid_result.gefsRunTime
+    x_rtma = grid_result.x_rtma
+    y_rtma = grid_result.y_rtma
+    rtma_lat = grid_result.rtma_lat
+    rtma_lon = grid_result.rtma_lon
+    x_nbm = grid_result.x_nbm
+    y_nbm = grid_result.y_nbm
+    nbm_lat = grid_result.nbm_lat
+    nbm_lon = grid_result.nbm_lon
+    x_p = grid_result.x_p
+    y_p = grid_result.y_p
+    gfs_lat = grid_result.gfs_lat
+    gfs_lon = grid_result.gfs_lon
+    x_p_eur = grid_result.x_p_eur
+    y_p_eur = grid_result.y_p_eur
+    lats_ecmwf = grid_result.lats_ecmwf
+    lons_ecmwf = grid_result.lons_ecmwf
+    sourceIDX = grid_result.sourceIDX
 
     sourceTimes = dict()
     sourceList = []
