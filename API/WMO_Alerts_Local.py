@@ -206,6 +206,9 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                 seen_geocodes.add(normalized)
                 geocode_entries.append((value_name or None, value))
 
+            if not geocode_entries:
+                geocode_entries.append((None, None))
+
             # Process polygons if available
             has_polygon = False
             for poly_elem in area.findall("cap:polygon" if ns else "polygon", ns):
@@ -229,23 +232,22 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                     try:
                         poly = Polygon(coords)
                         has_polygon = True
-                        # When polygon exists, create only ONE entry per polygon
-                        # Geocodes are not needed since the polygon defines the area
-                        results.append(
-                            (
-                                source_id,
-                                event_text,
-                                description_text,
-                                severity,
-                                effective,
-                                expires,
-                                area_desc,
-                                poly,
-                                cap_link,
-                                "",
-                                "",
+                        for geocode_name, geocode_value in geocode_entries:
+                            results.append(
+                                (
+                                    source_id,
+                                    event_text,
+                                    description_text,
+                                    severity,
+                                    effective,
+                                    expires,
+                                    area_desc,
+                                    poly,
+                                    cap_link,
+                                    geocode_name or "",
+                                    geocode_value or "",
+                                )
                             )
-                        )
                     except Exception as e:
                         logger.warning("Polygon construction failed: %s", e)
                         continue
