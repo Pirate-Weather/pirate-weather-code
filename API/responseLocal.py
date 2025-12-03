@@ -57,10 +57,7 @@ from API.constants.model_const import (
     HRRR,
     NBM,
 )
-from API.constants.shared_const import (
-    INGEST_VERSION_STR,
-    MISSING_DATA,
-)
+from API.constants.shared_const import INGEST_VERSION_STR
 from API.current.metrics import build_current_section
 from API.daily.builder import build_daily_section
 from API.forecast_sources import (
@@ -79,6 +76,7 @@ from API.minutely.builder import build_minutely_block
 from API.request.grid_indexing import ZarrSources, calculate_grid_indexing
 from API.request.preprocess import prepare_initial_request
 from API.utils.geo import _polar_is_all_day
+from API.utils.time_indexing import calculate_time_indexing
 from API.utils.timing import TimingMiddleware
 
 Translations = load_all_translations()
@@ -476,155 +474,23 @@ async def PW_Forecast(
 
     InterPhour[:, DATA_HOURLY["time"]] = hour_array_grib
 
-    # Daily array, 12 to 12
-    # Have to redo the localize because of daylight saving time
-    day_array_grib = np.array(
-        [
-            pytzTZ.localize(
-                datetime.datetime(
-                    year=baseTime.year, month=baseTime.month, day=baseTime.day
-                )
-                + datetime.timedelta(days=i)
-            )
-            .astimezone(utc)
-            .timestamp()
-            for i in range(10)
-        ]
-    ).astype(np.int32)
+    time_indexing = calculate_time_indexing(
+        base_time=baseTime,
+        timezone_localizer=pytzTZ,
+        hour_array_grib=hour_array_grib,
+        time_machine=timeMachine,
+        existing_day_array_grib=day_array_grib,
+    )
 
-    day_array_4am_grib = np.array(
-        [
-            pytzTZ.localize(
-                datetime.datetime(
-                    year=baseTime.year, month=baseTime.month, day=baseTime.day, hour=4
-                )
-                + datetime.timedelta(days=i)
-            )
-            .astimezone(utc)
-            .timestamp()
-            for i in range(10)
-        ]
-    ).astype(np.int32)
-
-    day_array_4pm_grib = np.array(
-        [
-            pytzTZ.localize(
-                datetime.datetime(
-                    year=baseTime.year, month=baseTime.month, day=baseTime.day, hour=16
-                )
-                + datetime.timedelta(days=i)
-            )
-            .astimezone(utc)
-            .timestamp()
-            for i in range(10)
-        ]
-    ).astype(np.int32)
-
-    day_array_5pm_grib = np.array(
-        [
-            pytzTZ.localize(
-                datetime.datetime(
-                    year=baseTime.year, month=baseTime.month, day=baseTime.day, hour=17
-                )
-                + datetime.timedelta(days=i)
-            )
-            .astimezone(utc)
-            .timestamp()
-            for i in range(10)
-        ]
-    ).astype(np.int32)
-
-    day_array_6am_grib = np.array(
-        [
-            pytzTZ.localize(
-                datetime.datetime(
-                    year=baseTime.year, month=baseTime.month, day=baseTime.day, hour=6
-                )
-                + datetime.timedelta(days=i)
-            )
-            .astimezone(utc)
-            .timestamp()
-            for i in range(10)
-        ]
-    ).astype(np.int32)
-
-    day_array_6pm_grib = np.array(
-        [
-            pytzTZ.localize(
-                datetime.datetime(
-                    year=baseTime.year, month=baseTime.month, day=baseTime.day, hour=18
-                )
-                + datetime.timedelta(days=i)
-            )
-            .astimezone(utc)
-            .timestamp()
-            for i in range(10)
-        ]
-    ).astype(np.int32)
-
-    # Which hours map to which days
-    hourlyDayIndex = np.full(len(hour_array_grib), MISSING_DATA)
-    hourlyDay4amIndex = np.full(len(hour_array_grib), MISSING_DATA)
-    hourlyHighIndex = np.full(len(hour_array_grib), MISSING_DATA)
-    hourlyLowIndex = np.full(len(hour_array_grib), MISSING_DATA)
-    hourlyDay4pmIndex = np.full(len(hour_array_grib), MISSING_DATA)
-    hourlyNight4amIndex = np.full(len(hour_array_grib), MISSING_DATA)
-
-    # Zero to 9 to account for the four horus in day 8
-    for d in range(0, 9):
-        hourlyDayIndex[
-            np.where(
-                (hour_array_grib >= day_array_grib[d])
-                & (hour_array_grib < day_array_grib[d + 1])
-            )
-        ] = d
-        hourlyDay4amIndex[
-            np.where(
-                (hour_array_grib >= day_array_4am_grib[d])
-                & (hour_array_grib < day_array_4am_grib[d + 1])
-            )
-        ] = d
-        hourlyDay4pmIndex[
-            np.where(
-                (hour_array_grib >= day_array_4am_grib[d])
-                & (hour_array_grib <= day_array_4pm_grib[d])
-            )
-        ] = d
-        hourlyNight4amIndex[
-            np.where(
-                (hour_array_grib >= day_array_5pm_grib[d])
-                & (hour_array_grib < day_array_4am_grib[d + 1])
-            )
-        ] = d
-        hourlyHighIndex[
-            np.where(
-                (hour_array_grib > day_array_6am_grib[d])
-                & (hour_array_grib <= day_array_6pm_grib[d])
-            )
-        ] = d
-        hourlyLowIndex[
-            np.where(
-                (hour_array_grib > day_array_6pm_grib[d])
-                & (hour_array_grib <= day_array_6am_grib[d + 1])
-            )
-        ] = d
-
-    if not timeMachine:
-        # Replace NaN values with -999 before casting to int to avoid RuntimeWarning
-        hourlyDayIndex = np.nan_to_num(hourlyDayIndex, nan=-999).astype(int)
-        hourlyDay4amIndex = np.nan_to_num(hourlyDay4amIndex, nan=-999).astype(int)
-        hourlyHighIndex = np.nan_to_num(hourlyHighIndex, nan=-999).astype(int)
-        hourlyLowIndex = np.nan_to_num(hourlyLowIndex, nan=-999).astype(int)
-        hourlyDay4pmIndex = np.nan_to_num(hourlyDay4pmIndex, nan=-999).astype(int)
-        hourlyNight4amIndex = np.nan_to_num(hourlyNight4amIndex, nan=-999).astype(int)
-    else:
-        # When running in timemachine mode, don't try to parse through different times, use the current 24h day for everything
-        hourlyDayIndex = np.full(len(hour_array_grib), int(0))
-        hourlyDay4amIndex = np.full(len(hour_array_grib), int(0))
-        hourlyHighIndex = np.full(len(hour_array_grib), int(0))
-        hourlyLowIndex = np.full(len(hour_array_grib), int(0))
-        hourlyDay4pmIndex = np.full(len(hour_array_grib), int(0))
-        hourlyNight4amIndex = np.full(len(hour_array_grib), int(0))
+    day_array_grib = time_indexing.day_array_grib
+    day_array_4am_grib = time_indexing.day_array_4am_grib
+    day_array_5pm_grib = time_indexing.day_array_5pm_grib
+    hourlyDayIndex = time_indexing.hourly_day_index
+    hourlyDay4amIndex = time_indexing.hourly_day_4am_index
+    hourlyHighIndex = time_indexing.hourly_high_index
+    hourlyLowIndex = time_indexing.hourly_low_index
+    hourlyDay4pmIndex = time_indexing.hourly_day_4pm_index
+    hourlyNight4amIndex = time_indexing.hourly_night_4am_index
 
     # +1 to account for the extra 4 hours of summary
     InterSday = np.zeros(shape=(daily_days + 1, 21))
