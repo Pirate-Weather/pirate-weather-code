@@ -73,116 +73,155 @@ def build_daily_section(
     if log_timing:
         log_timing("Daily start")
 
-    mean_results = []
-    sum_results = []
-    max_results = []
-    min_results = []
-    argmax_results = []
-    argmin_results = []
-    high_results = []
-    low_results = []
-    arghigh_results = []
-    arglow_results = []
-    mean_4am_results = []
-    sum_4am_results = []
-    max_4am_results = []
-    mean_day_results = []
-    sum_day_results = []
-    max_day_results = []
-    mean_night_results = []
-    sum_night_results = []
-    max_night_results = []
-    maxPchanceDay = np.zeros((daily_days))
-    max_precip_chance_day = np.zeros((daily_days))
-    max_precip_chance_night = np.zeros((daily_days))
+    def _aggregate_stats(
+        index_array,
+        calc_mean=False,
+        calc_sum=False,
+        calc_max=False,
+        calc_min=False,
+        calc_argmax=False,
+        calc_argmin=False,
+        calc_precip=False,
+    ):
+        res_mean = []
+        res_sum = []
+        res_max = []
+        res_min = []
+        res_argmax = []
+        res_argmin = []
+        res_precip = np.zeros((daily_days))
 
-    masks = [hourlyDayIndex == day_index for day_index in range(daily_days)]
-    for mask in masks:
-        filtered_data = InterPhour[mask]
+        masks = [index_array == day_index for day_index in range(daily_days)]
+        for mIDX, mask in enumerate(masks):
+            filtered_data = InterPhour[mask]
 
-        mean_results.append(np.mean(filtered_data, axis=0))
-        sum_results.append(np.sum(filtered_data, axis=0))
-        max_results.append(np.max(filtered_data, axis=0))
-        min_results.append(np.min(filtered_data, axis=0))
-        maxTime = np.argmax(filtered_data, axis=0)
-        minTime = np.argmin(filtered_data, axis=0)
-        argmax_results.append(filtered_data[maxTime, 0])
-        argmin_results.append(filtered_data[minTime, 0])
+            if calc_mean:
+                res_mean.append(np.mean(filtered_data, axis=0))
+            if calc_sum:
+                res_sum.append(np.sum(filtered_data, axis=0))
+            if calc_max:
+                res_max.append(np.max(filtered_data, axis=0))
+            if calc_min:
+                res_min.append(np.min(filtered_data, axis=0))
+            if calc_argmax:
+                maxTime = np.argmax(filtered_data, axis=0)
+                res_argmax.append(filtered_data[maxTime, 0])
+            if calc_argmin:
+                minTime = np.argmin(filtered_data, axis=0)
+                res_argmin.append(filtered_data[minTime, 0])
+            if calc_precip:
+                dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
+                if dailyTypeCount[0][0] == 0:
+                    if len(dailyTypeCount) == 2:
+                        res_precip[mIDX] = dailyTypeCount[1][0]
+                    else:
+                        res_precip[mIDX] = dailyTypeCount[0][0]
+                else:
+                    res_precip[mIDX] = dailyTypeCount[0][0]
 
-    masks = [hourlyDay4amIndex == day_index for day_index in range(daily_days)]
-    for mIDX, mask in enumerate(masks):
-        filtered_data = InterPhour[mask]
+        return (
+            res_mean,
+            res_sum,
+            res_max,
+            res_min,
+            res_argmax,
+            res_argmin,
+            res_precip,
+        )
 
-        mean_4am_results.append(np.mean(filtered_data, axis=0))
-        sum_4am_results.append(np.sum(filtered_data, axis=0))
-        max_4am_results.append(np.max(filtered_data, axis=0))
+    (
+        mean_results,
+        sum_results,
+        max_results,
+        min_results,
+        argmax_results,
+        argmin_results,
+        _,
+    ) = _aggregate_stats(
+        hourlyDayIndex,
+        calc_mean=True,
+        calc_sum=True,
+        calc_max=True,
+        calc_min=True,
+        calc_argmax=True,
+        calc_argmin=True,
+    )
 
-        dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
+    (
+        mean_4am_results,
+        sum_4am_results,
+        max_4am_results,
+        _,
+        _,
+        _,
+        maxPchanceDay,
+    ) = _aggregate_stats(
+        hourlyDay4amIndex,
+        calc_mean=True,
+        calc_sum=True,
+        calc_max=True,
+        calc_precip=True,
+    )
 
-        if dailyTypeCount[0][0] == 0:
-            if len(dailyTypeCount) == 2:
-                maxPchanceDay[mIDX] = dailyTypeCount[1][0]
-            else:
-                maxPchanceDay[mIDX] = dailyTypeCount[0][0]
+    (
+        mean_day_results,
+        sum_day_results,
+        max_day_results,
+        _,
+        _,
+        _,
+        max_precip_chance_day,
+    ) = _aggregate_stats(
+        hourlyDay4pmIndex,
+        calc_mean=True,
+        calc_sum=True,
+        calc_max=True,
+        calc_precip=True,
+    )
 
-        else:
-            maxPchanceDay[mIDX] = dailyTypeCount[0][0]
+    (
+        mean_night_results,
+        sum_night_results,
+        max_night_results,
+        _,
+        _,
+        _,
+        max_precip_chance_night,
+    ) = _aggregate_stats(
+        hourlyNight4amIndex,
+        calc_mean=True,
+        calc_sum=True,
+        calc_max=True,
+        calc_precip=True,
+    )
 
-    masks = [hourlyDay4pmIndex == day_index for day_index in range(daily_days)]
-    for mIDX, mask in enumerate(masks):
-        filtered_data = InterPhour[mask]
+    (
+        _,
+        _,
+        high_results,
+        _,
+        arghigh_results,
+        _,
+        _,
+    ) = _aggregate_stats(
+        hourlyHighIndex,
+        calc_max=True,
+        calc_argmax=True,
+    )
 
-        mean_day_results.append(np.mean(filtered_data, axis=0))
-        sum_day_results.append(np.sum(filtered_data, axis=0))
-        max_day_results.append(np.max(filtered_data, axis=0))
-
-        dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
-
-        if dailyTypeCount[0][0] == 0:
-            if len(dailyTypeCount) == 2:
-                max_precip_chance_day[mIDX] = dailyTypeCount[1][0]
-            else:
-                max_precip_chance_day[mIDX] = dailyTypeCount[0][0]
-
-        else:
-            max_precip_chance_day[mIDX] = dailyTypeCount[0][0]
-
-    masks = [hourlyNight4amIndex == day_index for day_index in range(daily_days)]
-    for mIDX, mask in enumerate(masks):
-        filtered_data = InterPhour[mask]
-
-        mean_night_results.append(np.mean(filtered_data, axis=0))
-        sum_night_results.append(np.sum(filtered_data, axis=0))
-        max_night_results.append(np.max(filtered_data, axis=0))
-
-        dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
-
-        if dailyTypeCount[0][0] == 0:
-            if len(dailyTypeCount) == 2:
-                max_precip_chance_night[mIDX] = dailyTypeCount[1][0]
-            else:
-                max_precip_chance_night[mIDX] = dailyTypeCount[0][0]
-
-        else:
-            max_precip_chance_night[mIDX] = dailyTypeCount[0][0]
-
-    masks = [hourlyHighIndex == day_index for day_index in range(daily_days)]
-
-    for mask in masks:
-        filtered_data = InterPhour[mask]
-
-        high_results.append(np.max(filtered_data, axis=0))
-        maxTime = np.argmax(filtered_data, axis=0)
-        arghigh_results.append(filtered_data[maxTime, 0])
-
-    masks = [hourlyLowIndex == day_index for day_index in range(daily_days)]
-
-    for mask in masks:
-        filtered_data = InterPhour[mask]
-
-        low_results.append(np.min(filtered_data, axis=0))
-        minTime = np.argmin(filtered_data, axis=0)
-        arglow_results.append(filtered_data[minTime, 0])
+    (
+        _,
+        _,
+        _,
+        low_results,
+        _,
+        arglow_results,
+        _,
+    ) = _aggregate_stats(
+        hourlyLowIndex,
+        calc_min=True,
+        calc_argmin=True,
+    )
 
     InterPday = np.array(mean_results)
     InterPdaySum = np.array(sum_results)
