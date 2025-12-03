@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from API.constants.api_const import PRECIP_IDX, ROUNDING_RULES
+from API.constants.api_const import ROUNDING_RULES
 from API.constants.clip_const import (
     CLIP_CLOUD,
     CLIP_HUMIDITY,
@@ -15,11 +15,9 @@ from API.constants.clip_const import (
     CLIP_WIND,
 )
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
-from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
-
+from API.constants.shared_const import MISSING_DATA
 from API.legacy.hourly import apply_legacy_hourly_text
 from API.PirateText import calculate_text
-from API.utils.precip import dbz_to_rate
 
 
 def build_hourly_block(
@@ -557,7 +555,6 @@ def build_hourly_objects(
             "precipIntensityError": InterPhour[idx, DATA_HOURLY["error"]],
         }
 
-
         if summaryText:
             hourText, hourIcon = calculate_text(hourItem_si, isDay, "hour", icon)
             hourText = translation.translate(["title", hourText])
@@ -616,7 +613,6 @@ def build_hourly_objects(
                 idx, DATA_HOURLY["station_pressure"]
             ]
 
-            
         if tempUnits < 2:
             hourItem["apparentTemperature"] = hourItem["feelsLike"]
 

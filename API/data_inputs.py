@@ -3,7 +3,7 @@ import numpy as np
 from metpy.calc import relative_humidity_from_dewpoint
 
 from API.api_utils import clipLog, estimate_visibility_gultepe_rh_pr_numpy
-from API.constants.clip_const import CLIP_OZONE, CLIP_SMOKE, CLIP_UV
+from API.constants.clip_const import CLIP_OZONE, CLIP_SMOKE
 from API.constants.model_const import (
     ECMWF,
     ERA5,
