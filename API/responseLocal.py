@@ -63,6 +63,11 @@ from API.constants.shared_const import (
 )
 from API.current.metrics import build_current_section
 from API.daily.builder import build_daily_section
+from API.forecast_sources import (
+    add_etopo_source,
+    build_source_metadata,
+    merge_hourly_models,
+)
 from API.hourly.block import build_hourly_block
 from API.io.zarr_reader import update_zarr_store
 from API.legacy.summary import (
@@ -73,7 +78,7 @@ from API.legacy.summary import (
 from API.minutely.builder import build_minutely_block
 from API.request.grid_indexing import ZarrSources, calculate_grid_indexing
 from API.request.preprocess import prepare_initial_request
-from API.utils.geo import _polar_is_all_day, rounder
+from API.utils.geo import _polar_is_all_day
 from API.utils.timing import TimingMiddleware
 
 Translations = load_all_translations()
@@ -353,134 +358,17 @@ async def PW_Forecast(
     dataOut_rtma_ru = grid_result.dataOut_rtma_ru
     WMO_alertDat = grid_result.WMO_alertDat
     ERA5_MERGED = grid_result.era5_merged
-    subhRunTime = grid_result.subhRunTime
-    hrrrhRunTime = grid_result.hrrrhRunTime
-    h2RunTime = grid_result.h2RunTime
-    nbmRunTime = grid_result.nbmRunTime
-    nbmFireRunTime = grid_result.nbmFireRunTime
-    gfsRunTime = grid_result.gfsRunTime
-    ecmwfRunTime = grid_result.ecmwfRunTime
-    gefsRunTime = grid_result.gefsRunTime
-    x_rtma = grid_result.x_rtma
-    y_rtma = grid_result.y_rtma
-    rtma_lat = grid_result.rtma_lat
-    rtma_lon = grid_result.rtma_lon
-    x_p = grid_result.x_p
-    y_p = grid_result.y_p
-    gfs_lat = grid_result.gfs_lat
-    gfs_lon = grid_result.gfs_lon
-    sourceIDX = grid_result.sourceIDX
+    source_metadata = build_source_metadata(
+        grid_result=grid_result,
+        era5_merged=ERA5_MERGED,
+        use_etopo=use_etopo,
+        time_machine=timeMachine,
+    )
 
-    sourceTimes = dict()
-    sourceList = []
-    if use_etopo:
-        sourceList.append("ETOPO1")
-
-    # If ERA5 data was read and merged
-    if isinstance(ERA5_MERGED, np.ndarray):
-        sourceList.append("era5")
-
-    # Timing Check
     if TIMING:
         print("### Sources Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
-    # If point is not in HRRR coverage or HRRR-subh is more than 4 hours old, the fallback to GFS
-    if isinstance(dataOut, np.ndarray):
-        sourceList.append("hrrrsubh")
-        sourceTimes["hrrr_subh"] = rounder(
-            datetime.datetime.fromtimestamp(
-                subhRunTime.astype(int), datetime.UTC
-            ).replace(tzinfo=None)
-        ).strftime("%Y-%m-%d %HZ")
-
-    # Add RTMA_RU to source list if available (only for currently, not time machine)
-    if (isinstance(dataOut_rtma_ru, np.ndarray)) & (not timeMachine):
-        sourceList.append("rtma_ru")
-        rtma_timestamp = datetime.datetime.fromtimestamp(
-            dataOut_rtma_ru[0, 0].astype(int), datetime.UTC
-        ).replace(tzinfo=None)
-        rounded_rtma_time = rounder(rtma_timestamp, to=15)
-        sourceTimes["rtma_ru"] = rounded_rtma_time.strftime("%Y-%m-%d %H:%MZ")
-
-        sourceIDX["rtma_ru"] = {
-            "x": int(x_rtma),
-            "y": int(y_rtma),
-            "lat": round(rtma_lat, 2),
-            "lon": round(((rtma_lon + 180) % 360) - 180, 2),
-        }
-
-    if (isinstance(dataOut_hrrrh, np.ndarray)) & (not timeMachine):
-        sourceList.append("hrrr_0-18")
-        sourceTimes["hrrr_0-18"] = rounder(
-            datetime.datetime.fromtimestamp(
-                hrrrhRunTime.astype(int), datetime.UTC
-            ).replace(tzinfo=None)
-        ).strftime("%Y-%m-%d %HZ")
-    elif (isinstance(dataOut_hrrrh, np.ndarray)) & (timeMachine):
-        sourceList.append("hrrr")
-
-    if (isinstance(dataOut_nbm, np.ndarray)) & (not timeMachine):
-        sourceList.append("nbm")
-        sourceTimes["nbm"] = rounder(
-            datetime.datetime.fromtimestamp(
-                nbmRunTime.astype(int), datetime.UTC
-            ).replace(tzinfo=None)
-        ).strftime("%Y-%m-%d %HZ")
-    elif (isinstance(dataOut_nbm, np.ndarray)) & (timeMachine):
-        sourceList.append("nbm")
-
-    if (isinstance(dataOut_nbmFire, np.ndarray)) & (not timeMachine):
-        sourceList.append("nbm_fire")
-        sourceTimes["nbm_fire"] = rounder(
-            datetime.datetime.fromtimestamp(
-                nbmFireRunTime.astype(int), datetime.UTC
-            ).replace(tzinfo=None)
-        ).strftime("%Y-%m-%d %HZ")
-
-    # Add ECMWF IFS after NBM, before GFS
-    if (isinstance(dataOut_ecmwf, np.ndarray)) and (not timeMachine):
-        sourceList.append("ecmwf_ifs")
-        sourceTimes["ecmwf_ifs"] = rounder(
-            datetime.datetime.fromtimestamp(
-                ecmwfRunTime.astype(int), datetime.UTC
-            ).replace(tzinfo=None)
-        ).strftime("%Y-%m-%d %HZ")
-
-    # If point is not in HRRR coverage or HRRR-hrrrh is more than 16 hours old, the fallback to GFS
-    if isinstance(dataOut_h2, np.ndarray):
-        sourceList.append("hrrr_18-48")
-        # Subtract 18 hours since we're using the 18h time steo
-        sourceTimes["hrrr_18-48"] = rounder(
-            datetime.datetime.fromtimestamp(
-                h2RunTime.astype(int), datetime.UTC
-            ).replace(tzinfo=None)
-            - datetime.timedelta(hours=18)
-        ).strftime("%Y-%m-%d %HZ")
-
-    if isinstance(dataOut_gfs, np.ndarray):
-        sourceTimes["gfs"] = rounder(
-            datetime.datetime.fromtimestamp(
-                gfsRunTime.astype(int), datetime.UTC
-            ).replace(tzinfo=None)
-        ).strftime("%Y-%m-%d %HZ")
-
-        sourceList.append("gfs")
-        sourceIDX["gfs"] = dict()
-        sourceIDX["gfs"]["x"] = int(x_p)
-        sourceIDX["gfs"]["y"] = int(y_p)
-        sourceIDX["gfs"]["lat"] = round(gfs_lat, 2)
-        sourceIDX["gfs"]["lon"] = round(((gfs_lon + 180) % 360) - 180, 2)
-
-    if isinstance(dataOut_gefs, np.ndarray):
-        sourceList.append("gefs")
-        sourceTimes["gefs"] = rounder(
-            datetime.datetime.fromtimestamp(
-                gefsRunTime.astype(int), datetime.UTC
-            ).replace(tzinfo=None)
-        ).strftime("%Y-%m-%d %HZ")
-
-    # Timing Check
     if TIMING:
         print("### ETOPO Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
@@ -500,11 +388,13 @@ async def PW_Forecast(
         ETOPO = 0
 
     if use_etopo:
-        sourceIDX["etopo"] = dict()
-        sourceIDX["etopo"]["x"] = int(x_p_etopo)
-        sourceIDX["etopo"]["y"] = int(y_p_etopo)
-        sourceIDX["etopo"]["lat"] = round(lats_etopo[y_p_etopo], 4)
-        sourceIDX["etopo"]["lon"] = round(lons_etopo[x_p_etopo], 4)
+        add_etopo_source(
+            metadata=source_metadata,
+            x_idx=x_p_etopo,
+            y_idx=y_p_etopo,
+            lat_val=lats_etopo[y_p_etopo],
+            lon_val=lons_etopo[x_p_etopo],
+        )
 
     # Timing Check
     if TIMING:
@@ -519,141 +409,34 @@ async def PW_Forecast(
 
     # Merge hourly models onto a consistent time grid, starting from midnight on the requested day
     # Note that baseTime is the requested time, in TZ aware datetime format
-    # Timing Check
     if TIMING:
         print("Nearest IDX Start")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
-    # HRRR
-    # Since the forecast files are pre-processed, they'll always be hourly and the same length. This avoids interpolation
-    try:  # Add a fallback to GFS if these don't work
-        # HRRR
-        if ("hrrr_0-18" in sourceList) and ("hrrr_18-48" in sourceList):
-            HRRR_StartIDX = nearest_index(dataOut_hrrrh[:, 0], baseDayUTC_Grib)
-            H2_StartIDX = nearest_index(dataOut_h2[:, 0], dataOut_hrrrh[-1, 0]) + 1
+    merge_result = merge_hourly_models(
+        metadata=source_metadata,
+        num_hours=numHours,
+        base_day_utc_grib=baseDayUTC_Grib,
+        data_hrrrh=dataOut_hrrrh if isinstance(dataOut_hrrrh, np.ndarray) else None,
+        data_h2=dataOut_h2 if isinstance(dataOut_h2, np.ndarray) else None,
+        data_nbm=dataOut_nbm if isinstance(dataOut_nbm, np.ndarray) else None,
+        data_nbm_fire=dataOut_nbmFire if isinstance(dataOut_nbmFire, np.ndarray) else None,
+        data_gfs=dataOut_gfs if isinstance(dataOut_gfs, np.ndarray) else None,
+        data_ecmwf=dataOut_ecmwf if isinstance(dataOut_ecmwf, np.ndarray) else None,
+        data_gefs=dataOut_gefs if isinstance(dataOut_gefs, np.ndarray) else None,
+        logger=logger,
+        loc_tag=loc_tag,
+    )
 
-            if (H2_StartIDX < 1) or (HRRR_StartIDX < 2):
-                if "hrrr_18-48" in sourceList:
-                    sourceTimes.pop("hrrr_18-48", None)
-                    sourceList.remove("hrrr_18-48")
-                if "hrrr_0-18" in sourceList:
-                    sourceTimes.pop("hrrr_0-18", None)
-                    sourceList.remove("hrrr_0-18")
-
-                # Log the error
-                logger.error("HRRR data not available for the requested time range.")
-
-            else:
-                HRRR_Merged = np.full((numHours, dataOut_h2.shape[1]), MISSING_DATA)
-                # The 0-18 hour HRRR data (dataOut_hrrrh) has fewer columns than the 18-48 hour data (dataOut_h2)
-                # when in timeMachine mode. Only concatenate the common columns (0-17).
-                common_cols = min(dataOut_hrrrh.shape[1], dataOut_h2.shape[1])
-                # Calculate actual concatenated size dynamically
-                hrrr_rows = len(dataOut_hrrrh) - HRRR_StartIDX
-                h2_rows = len(dataOut_h2) - H2_StartIDX
-                total_rows = min(hrrr_rows + h2_rows, numHours)
-                HRRR_Merged[0:total_rows, 0:common_cols] = np.concatenate(
-                    (
-                        dataOut_hrrrh[HRRR_StartIDX:, 0:common_cols],
-                        dataOut_h2[H2_StartIDX:, 0:common_cols],
-                    ),
-                    axis=0,
-                )[0:total_rows, :]
-
-        # NBM
-        if "nbm" in sourceList:
-            NBM_StartIDX = nearest_index(dataOut_nbm[:, 0], baseDayUTC_Grib)
-
-            if NBM_StartIDX < 1:
-                if "nbm" in sourceList:
-                    sourceList.remove("nbm")
-                if "nbm" in sourceTimes:
-                    sourceTimes.pop("nbm", None)
-                logger.error("NBM data not available for the requested time range.")
-            else:
-                NBM_Merged = np.full((numHours, dataOut_nbm.shape[1]), MISSING_DATA)
-                NBM_EndIDX = min((len(dataOut_nbm), (numHours + NBM_StartIDX)))
-                NBM_Merged[0 : (NBM_EndIDX - NBM_StartIDX), :] = dataOut_nbm[
-                    NBM_StartIDX:NBM_EndIDX, :
-                ]
-
-        # NBM FIre
-        if "nbm_fire" in sourceList:
-            NBM_Fire_StartIDX = nearest_index(dataOut_nbmFire[:, 0], baseDayUTC_Grib)
-
-            if NBM_Fire_StartIDX < 1:
-                if "nbm_fire" in sourceList:
-                    sourceList.remove("nbm_fire")
-                if "nbm_fire" in sourceTimes:
-                    sourceTimes.pop("nbm_fire", None)
-
-                logger.error(
-                    "NBM Fire data not available for the requested time range."
-                )
-            else:
-                NBM_Fire_Merged = np.full(
-                    (numHours, dataOut_nbmFire.shape[1]), MISSING_DATA
-                )
-
-                NBM_Fire_EndIDX = min(
-                    (len(dataOut_nbmFire), (numHours + NBM_Fire_StartIDX))
-                )
-                NBM_Fire_Merged[0 : (NBM_Fire_EndIDX - NBM_Fire_StartIDX), :] = (
-                    dataOut_nbmFire[NBM_Fire_StartIDX:NBM_Fire_EndIDX, :]
-                )
-
-    except Exception:
-        logger.exception(
-            "HRRR or NBM data not available, falling back to GFS %s", loc_tag
-        )
-        if "hrrr_18-48" in sourceTimes:
-            sourceTimes.pop("hrrr_18-48", None)
-        if "nbm_fire" in sourceTimes:
-            sourceTimes.pop("nbm_fire", None)
-        if "nbm" in sourceTimes:
-            sourceTimes.pop("nbm", None)
-        if "hrrr_0-18" in sourceTimes:
-            sourceTimes.pop("hrrr_0-18", None)
-        if "hrrr_subh" in sourceTimes:
-            sourceTimes.pop("hrrr_subh", None)
-
-        if "hrrrsubh" in sourceList:
-            sourceList.remove("hrrrsubh")
-        if "hrrr_0-18" in sourceList:
-            sourceList.remove("hrrr_0-18")
-        if "nbm" in sourceList:
-            sourceList.remove("nbm")
-        if "nbm_fire" in sourceList:
-            sourceList.remove("nbm_fire")
-        if "hrrr_18-48" in sourceList:
-            sourceList.remove("hrrr_18-48")
-
-    # GFS
-    if "gfs" in sourceList:
-        GFS_StartIDX = nearest_index(dataOut_gfs[:, 0], baseDayUTC_Grib)
-        GFS_EndIDX = min((len(dataOut_gfs), (numHours + GFS_StartIDX)))
-        GFS_Merged = np.full((numHours, max(GFS.values()) + 1), MISSING_DATA)
-        GFS_Merged[0 : (GFS_EndIDX - GFS_StartIDX), 0 : dataOut_gfs.shape[1]] = (
-            dataOut_gfs[GFS_StartIDX:GFS_EndIDX, 0 : dataOut_gfs.shape[1]]
-        )
-
-    # ECMWF
-    if "ecmwf_ifs" in sourceList:
-        ECMWF_StartIDX = nearest_index(dataOut_ecmwf[:, 0], baseDayUTC_Grib)
-        ECMWF_EndIDX = min((len(dataOut_ecmwf), (numHours + ECMWF_StartIDX)))
-        ECMWF_Merged = np.full((numHours, max(ECMWF.values()) + 1), MISSING_DATA)
-        ECMWF_Merged[
-            0 : (ECMWF_EndIDX - ECMWF_StartIDX), 0 : dataOut_ecmwf.shape[1]
-        ] = dataOut_ecmwf[ECMWF_StartIDX:ECMWF_EndIDX, 0 : dataOut_ecmwf.shape[1]]
-
-    # GEFS
-    if "gefs" in sourceList:
-        GEFS_StartIDX = nearest_index(dataOut_gefs[:, 0], baseDayUTC_Grib)
-        GEFS_EndIDX = min((len(dataOut_gefs), (numHours + GEFS_StartIDX)))
-        GEFS_Merged = np.full((numHours, dataOut_gefs.shape[1]), MISSING_DATA)
-        GEFS_Merged[0 : (GEFS_EndIDX - GEFS_StartIDX), :] = dataOut_gefs[
-            GEFS_StartIDX:GEFS_EndIDX, :
-        ]
+    HRRR_Merged = merge_result.hrrr
+    NBM_Merged = merge_result.nbm
+    NBM_Fire_Merged = merge_result.nbm_fire
+    GFS_Merged = merge_result.gfs
+    ECMWF_Merged = merge_result.ecmwf
+    GEFS_Merged = merge_result.gefs
+    sourceList = merge_result.metadata.source_list
+    sourceTimes = merge_result.metadata.source_times
+    sourceIDX = merge_result.metadata.source_idx
 
     with timing_tracker.track("Minutely block"):
         (
@@ -1758,24 +1541,3 @@ def initialDataLoad() -> None:
     zarrReady = True
 
     logger.info("Initial data load complete")
-
-
-def nearest_index(a, v):
-    """Find the nearest index in array to value using binary search.
-
-    Slightly faster than a simple linear search for large arrays.
-
-    Args:
-        a: Sorted array
-        v: Value to find
-
-    Returns:
-        Index of nearest value in array
-    """
-    # Find insertion point
-    idx = np.searchsorted(a, v)
-    # Clip so we don’t run off the ends
-    idx = np.clip(idx, 1, len(a) - 1)
-    # Look at neighbors, pick the closer one
-    left, right = a[idx - 1], a[idx]
-    return idx if abs(right - v) < abs(v - left) else idx - 1
