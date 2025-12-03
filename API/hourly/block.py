@@ -23,7 +23,7 @@ from API.constants.text_const import (
     PRECIP_PROB_THRESHOLD,
     WIND_THRESHOLDS,
 )
-from API.PirateText import calculate_text
+from API.legacy.hourly import apply_legacy_hourly_text
 from API.utils.precip import dbz_to_rate
 
 
@@ -37,6 +37,7 @@ def build_hourly_block(
     hourlyDayIndex: np.ndarray,
     baseTimeOffset: float,
     timeMachine: bool,
+    tmExtra: bool,
     prepIntensityUnit: float,
     prepAccumUnit: float,
     windUnit: float,
@@ -72,10 +73,6 @@ def build_hourly_block(
     era5_snow_water_equivalent,
 ):
     """Build hourly output objects and summary text/icon lists."""
-    hourList = []
-    hourList_si = []
-    hourIconList = []
-    hourTextList = []
 
     maxPchanceHour = np.full((len(hour_array_grib), 5), MISSING_DATA)
 
@@ -481,195 +478,27 @@ def build_hourly_block(
                 hourly_display[:, idx_field], decimals
             )
 
-    for idx in range(0, len(hour_array_grib)):
-        if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]:
-            isDay = False
-        elif (
-            hour_array_grib[idx] >= InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]
-            and hour_array_grib[idx]
-            <= InterSday[hourlyDayIndex[idx], DATA_DAY["sunset"]]
-        ):
-            isDay = True
-        elif hour_array_grib[idx] > InterSday[hourlyDayIndex[idx], DATA_DAY["sunset"]]:
-            isDay = False
-
-        if InterPhour[idx, DATA_HOURLY["prob"]] >= PRECIP_PROB_THRESHOLD and (
-            (
-                (
-                    InterPhour[idx, DATA_HOURLY["rain"]]
-                    + InterPhour[idx, DATA_HOURLY["ice"]]
-                )
-                > HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM
-            )
-            or (
-                InterPhour[idx, DATA_HOURLY["snow"]]
-                > HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM
-            )
-        ):
-            hourIcon = PTypeHour[idx]
-            hourText = PTextHour[idx]
-        elif InterPhour[idx, DATA_HOURLY["vis"]] < FOG_THRESHOLD_METERS:
-            hourIcon = "fog"
-            hourText = "Fog"
-        elif InterPhour[idx, DATA_HOURLY["wind"]] > WIND_THRESHOLDS["light"]:
-            hourIcon = "wind"
-            hourText = "Windy"
-        elif InterPhour[idx, DATA_HOURLY["cloud"]] > CLOUD_COVER_THRESHOLDS["cloudy"]:
-            hourIcon = "cloudy"
-            hourText = "Cloudy"
-        elif (
-            InterPhour[idx, DATA_HOURLY["cloud"]]
-            > CLOUD_COVER_THRESHOLDS["partly_cloudy"]
-        ):
-            hourText = "Partly Cloudy"
-
-            if (
-                hour_array_grib[idx]
-                < InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]
-            ):
-                hourIcon = "partly-cloudy-night"
-            elif (
-                hour_array_grib[idx]
-                >= InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]
-                and hour_array_grib[idx]
-                <= InterSday[hourlyDayIndex[idx], DATA_DAY["sunset"]]
-            ):
-                hourIcon = "partly-cloudy-day"
-            elif (
-                hour_array_grib[idx]
-                > InterSday[hourlyDayIndex[idx], DATA_DAY["sunset"]]
-            ):
-                hourIcon = "partly-cloudy-night"
-        else:
-            hourText = "Clear"
-            if (
-                hour_array_grib[idx]
-                < InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]
-            ):
-                hourIcon = "clear-night"
-            elif (
-                hour_array_grib[idx]
-                >= InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]
-                and hour_array_grib[idx]
-                <= InterSday[hourlyDayIndex[idx], DATA_DAY["sunset"]]
-            ):
-                hourIcon = "clear-day"
-            elif (
-                hour_array_grib[idx]
-                > InterSday[hourlyDayIndex[idx], DATA_DAY["sunset"]]
-            ):
-                hourIcon = "clear-night"
-
-        accum_display = (
-            hourly_display[idx, DATA_HOURLY["rain"]]
-            + hourly_display[idx, DATA_HOURLY["snow"]]
-            + hourly_display[idx, DATA_HOURLY["ice"]]
-        )
-
-        hourItem = {
-            "time": int(hour_array_grib[idx])
-            if not np.isnan(hour_array_grib[idx])
-            else 0,
-            "summary": hourText,
-            "icon": hourIcon,
-            "precipIntensity": hourly_display[idx, DATA_HOURLY["intensity"]],
-            "precipProbability": hourly_display[idx, DATA_HOURLY["prob"]],
-            "precipIntensityError": hourly_display[idx, DATA_HOURLY["error"]],
-            "precipAccumulation": accum_display,
-            "precipType": PTypeHour[idx],
-            "rainIntensity": hourly_display[idx, DATA_HOURLY["rain_intensity"]],
-            "snowIntensity": hourly_display[idx, DATA_HOURLY["snow_intensity"]],
-            "iceIntensity": hourly_display[idx, DATA_HOURLY["ice_intensity"]],
-            "temperature": hourly_display[idx, DATA_HOURLY["temp"]],
-            "apparentTemperature": hourly_display[idx, DATA_HOURLY["apparent"]],
-            "dewPoint": hourly_display[idx, DATA_HOURLY["dew"]],
-            "humidity": hourly_display[idx, DATA_HOURLY["humidity"]],
-            "pressure": hourly_display[idx, DATA_HOURLY["pressure"]],
-            "windSpeed": hourly_display[idx, DATA_HOURLY["wind"]],
-            "windGust": hourly_display[idx, DATA_HOURLY["gust"]],
-            "windBearing": int(hourly_display[idx, DATA_HOURLY["bearing"]])
-            if not np.isnan(hourly_display[idx, DATA_HOURLY["bearing"]])
-            else 0,
-            "cloudCover": hourly_display[idx, DATA_HOURLY["cloud"]],
-            "uvIndex": hourly_display[idx, DATA_HOURLY["uv"]],
-            "visibility": hourly_display[idx, DATA_HOURLY["vis"]],
-            "ozone": hourly_display[idx, DATA_HOURLY["ozone"]],
-            "smoke": hourly_display[idx, DATA_HOURLY["smoke"]],
-            "liquidAccumulation": hourly_display[idx, DATA_HOURLY["rain"]],
-            "snowAccumulation": hourly_display[idx, DATA_HOURLY["snow"]],
-            "iceAccumulation": hourly_display[idx, DATA_HOURLY["ice"]],
-            "nearestStormDistance": hourly_display[idx, DATA_HOURLY["storm_dist"]],
-            "nearestStormBearing": int(hourly_display[idx, DATA_HOURLY["storm_dir"]])
-            if not np.isnan(hourly_display[idx, DATA_HOURLY["storm_dir"]])
-            else 0,
-            "fireIndex": hourly_display[idx, DATA_HOURLY["fire"]],
-            "feelsLike": hourly_display[idx, DATA_HOURLY["feels_like"]],
-            "solar": hourly_display[idx, DATA_HOURLY["solar"]],
-            "cape": int(hourly_display[idx, DATA_HOURLY["cape"]])
-            if not np.isnan(hourly_display[idx, DATA_HOURLY["cape"]])
-            else 0,
-        }
-
-        if "stationPressure" in extraVars:
-            hourItem["stationPressure"] = hourly_display[
-                idx, DATA_HOURLY["station_pressure"]
-            ]
-
-        hourItem_si = {
-            "time": int(hour_array_grib[idx]),
-            "temperature": InterPhour[idx, DATA_HOURLY["temp"]],
-            "dewPoint": InterPhour[idx, DATA_HOURLY["dew"]],
-            "humidity": InterPhour[idx, DATA_HOURLY["humidity"]],
-            "windSpeed": InterPhour[idx, DATA_HOURLY["wind"]],
-            "visibility": InterPhour[idx, DATA_HOURLY["vis"]],
-            "cloudCover": InterPhour[idx, DATA_HOURLY["cloud"]],
-            "smoke": InterPhour[idx, DATA_HOURLY["smoke"]],
-            "precipType": PTypeHour[idx],
-            "precipProbability": InterPhour[idx, DATA_HOURLY["prob"]],
-            "cape": InterPhour[idx, DATA_HOURLY["cape"]],
-            "liquidAccumulation": InterPhour[idx, DATA_HOURLY["rain"]],
-            "snowAccumulation": InterPhour[idx, DATA_HOURLY["snow"]],
-            "iceAccumulation": InterPhour[idx, DATA_HOURLY["ice"]],
-            "rainIntensity": InterPhour[idx, DATA_HOURLY["rain_intensity"]],
-            "snowIntensity": InterPhour[idx, DATA_HOURLY["snow_intensity"]],
-            "iceIntensity": InterPhour[idx, DATA_HOURLY["ice_intensity"]],
-            "precipIntensity": InterPhour[idx, DATA_HOURLY["intensity"]],
-            "precipIntensityError": InterPhour[idx, DATA_HOURLY["error"]],
-        }
-
-        try:
-            if summaryText:
-                hourText, hourIcon = calculate_text(
-                    hourItem_si,
-                    isDay,
-                    "hour",
-                    icon,
-                )
-                hourItem["summary"] = translation.translate(["title", hourText])
-                hourItem["icon"] = hourIcon
-
-        except Exception:
-            hourItem["summary"] = hourText
-            hourItem["icon"] = hourIcon
-
-        if summaryText is False:
-            hourItem["summary"] = hourText
-
-        if tempUnits < 2:
-            hourItem["apparentTemperature"] = hourItem["feelsLike"]
-
-        if timeMachine and not summaryText:
-            hourItem["summary"] = hourText
-            hourItem["icon"] = hourIcon
-
-        if timeMachine and not extraVars:
-            hourItem.pop("uvIndex", None)
-            hourItem.pop("ozone", None)
-
-        hourList.append(hourItem)
-        hourList_si.append(hourItem_si)
-        hourIconList.append(hourIcon)
-        hourTextList.append(hourItem["summary"])
+    (
+        hourList,
+        hourList_si,
+        hourIconList,
+        hourTextList,
+    ) = build_hourly_objects(
+        hour_array_grib=hour_array_grib,
+        InterSday=InterSday,
+        hourlyDayIndex=hourlyDayIndex,
+        InterPhour=InterPhour,
+        hourly_display=hourly_display,
+        PTypeHour=PTypeHour,
+        PTextHour=PTextHour,
+        summaryText=summaryText,
+        icon=icon,
+        translation=translation,
+        tempUnits=tempUnits,
+        timeMachine=timeMachine,
+        tmExtra=tmExtra,
+        extraVars=extraVars,
+    )
 
     return (
         hourList,
@@ -857,23 +686,17 @@ def build_hourly_objects(
             "precipIntensityError": InterPhour[idx, DATA_HOURLY["error"]],
         }
 
-        try:
-            if summaryText:
-                hourText, hourIcon = calculate_text(
-                    hourItem_si,
-                    isDay,
-                    "hour",
-                    icon,
-                )
-                hourItem["summary"] = translation.translate(["title", hourText])
-                hourItem["icon"] = hourIcon
-
-        except Exception:
-            hourItem["summary"] = hourText
-            hourItem["icon"] = hourIcon
-
-        if summaryText is False:
-            hourItem["summary"] = hourText
+        hour_summary, hour_icon = apply_legacy_hourly_text(
+            summary_text=summaryText,
+            translation=translation,
+            hour_item_si=hourItem_si,
+            is_day=isDay,
+            icon=icon,
+            fallback_text=hourText,
+            fallback_icon=hourIcon,
+        )
+        hourItem["summary"] = hour_summary
+        hourItem["icon"] = hour_icon
 
         if tempUnits < 2:
             hourItem["apparentTemperature"] = hourItem["feelsLike"]

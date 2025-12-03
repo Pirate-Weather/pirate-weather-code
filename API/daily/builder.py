@@ -25,8 +25,8 @@ from API.constants.text_const import (
     PRECIP_PROB_THRESHOLD,
     WIND_THRESHOLDS,
 )
+from API.legacy.daily import apply_legacy_half_day_text
 from API.PirateDailyText import calculate_day_text
-from API.PirateDayNightText import calculate_half_day_text
 
 
 @dataclass
@@ -751,19 +751,23 @@ def build_daily_section(
             interp_half_day_mean,
         )
 
-        try:
-            if idx < 8 and summaryText:
-                dayIcon, dayText = calculate_half_day_text(
-                    hourList_si[(idx * 24) + 4 : (idx * 24) + 17],
-                    not is_all_night,
-                    str(tz_name),
-                    icon_set=icon,
-                    unit_system=unitSystem,
-                )
-                day_item["summary"] = translation.translate(["sentence", dayText])
-                day_item["icon"] = dayIcon
-        except Exception:
-            logger.exception("DAY HALF DAY TEXT GEN ERROR %s", loc_tag)
+        if idx < 8:
+            day_summary, day_icon = apply_legacy_half_day_text(
+                summary_text=summaryText,
+                translation=translation,
+                hour_list_slice=hourList_si[(idx * 24) + 4 : (idx * 24) + 17],
+                is_day=not is_all_night,
+                tz_name=tz_name,
+                icon_set=icon,
+                unit_system=unitSystem,
+                fallback_text=day_text,
+                fallback_icon=day_icon,
+                logger=logger,
+                loc_tag=loc_tag,
+                phase="DAY HALF DAY",
+            )
+            day_item["summary"] = day_summary
+            day_item["icon"] = day_icon
 
         if version < 2:
             day_item.pop("liquidAccumulation", None)
@@ -804,20 +808,24 @@ def build_daily_section(
             interp_half_night_mean,
         )
 
-        try:
-            if idx < 8 and summaryText:
-                dayIcon, dayText = calculate_half_day_text(
-                    hourList_si[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
-                    is_all_day,
-                    str(tz_name),
-                    icon_set=icon,
-                    unit_system=unitSystem,
-                )
+        if idx < 8:
+            night_summary, night_icon = apply_legacy_half_day_text(
+                summary_text=summaryText,
+                translation=translation,
+                hour_list_slice=hourList_si[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
+                is_day=is_all_day,
+                tz_name=tz_name,
+                icon_set=icon,
+                unit_system=unitSystem,
+                fallback_text=day_text,
+                fallback_icon=day_icon,
+                logger=logger,
+                loc_tag=loc_tag,
+                phase="NIGHT HALF DAY",
+            )
 
-                day_item["summary"] = translation.translate(["sentence", dayText])
-                day_item["icon"] = dayIcon
-        except Exception:
-            logger.exception("NIGHT HALF DAY TEXT GEN ERROR %s", loc_tag)
+            day_item["summary"] = night_summary
+            day_item["icon"] = night_icon
 
         if version < 2:
             day_item.pop("liquidAccumulation", None)

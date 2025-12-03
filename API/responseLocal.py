@@ -1045,6 +1045,7 @@ async def PW_Forecast(
             hourlyDayIndex=hourlyDayIndex,
             baseTimeOffset=baseTimeOffset,
             timeMachine=timeMachine,
+            tmExtra=tmExtra,
             prepIntensityUnit=prepIntensityUnit,
             prepAccumUnit=prepAccumUnit,
             windUnit=windUnit,
