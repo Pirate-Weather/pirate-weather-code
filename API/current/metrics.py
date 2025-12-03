@@ -855,7 +855,7 @@ def build_current_section(
     else:
         InterPcurrent[DATA_CURRENT["fire"]] = MISSING_DATA
 
-    curr_temp_si = InterPcurrent[DATA_CURRENT["temp"]] 
+    curr_temp_si = InterPcurrent[DATA_CURRENT["temp"]]
     curr_dew_si = InterPcurrent[DATA_CURRENT["dew"]]
     curr_wind_si = InterPcurrent[DATA_CURRENT["wind"]]
     curr_vis_si = InterPcurrent[DATA_CURRENT["vis"]]
@@ -872,19 +872,14 @@ def build_current_section(
             (InterPcurrent[DATA_CURRENT["dew"]]) * 9 / 5 + 32, 2
         )
         curr_feels_like_display = np.round(
-            (InterPcurrent[DATA_CURRENT["feels_like"]]) * 9 / 5
-            + 32,
+            (InterPcurrent[DATA_CURRENT["feels_like"]]) * 9 / 5 + 32,
             2,
         )
     else:
         curr_temp_display = np.round(InterPcurrent[DATA_CURRENT["temp"]], 2)
-        curr_apparent_display = np.round(
-            InterPcurrent[DATA_CURRENT["apparent"]], 2
-        )
+        curr_apparent_display = np.round(InterPcurrent[DATA_CURRENT["apparent"]], 2)
         curr_dew_display = np.round(InterPcurrent[DATA_CURRENT["dew"]], 2)
-        curr_feels_like_display = np.round(
-            InterPcurrent[DATA_CURRENT["feels_like"]], 2
-        )
+        curr_feels_like_display = np.round(InterPcurrent[DATA_CURRENT["feels_like"]], 2)
 
     curr_storm_dist_display = np.round(
         InterPcurrent[DATA_CURRENT["storm_dist"]] * visUnits, 2

@@ -14,6 +14,7 @@ from API.constants.model_const import (
     NBM_FIRE_INDEX,
 )
 
+
 def _stack_fields(num_hours, *arrays):
     """
     Stack valid arrays column-wise.
@@ -382,7 +383,7 @@ def prepare_data_inputs(
     error_inputs = _stack_fields(
         num_hours,
         gefs_merged[:, GEFS["error"]] if gefs_merged is not None else None,
-    )    
+    )
 
     return {
         "InterThour_inputs": inter_thour_inputs,

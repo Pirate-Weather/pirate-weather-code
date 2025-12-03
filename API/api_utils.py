@@ -6,7 +6,6 @@ import metpy as mp
 import numpy as np
 
 from API.constants.api_const import APPARENT_TEMP_CONSTS, APPARENT_TEMP_SOLAR_CONSTS
-from API.constants.clip_const import CLIP_TEMP
 from API.constants.shared_const import MISSING_DATA
 
 logger = logging.getLogger(__name__)

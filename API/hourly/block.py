@@ -5,7 +5,6 @@ from __future__ import annotations
 import numpy as np
 
 from API.api_utils import calculate_apparent_temperature
-
 from API.constants.api_const import PRECIP_IDX, ROUNDING_RULES
 from API.constants.clip_const import (
     CLIP_CLOUD,
@@ -274,8 +273,7 @@ def build_hourly_block(
     )
     InterPhour[:, DATA_HOURLY["feels_like"]] = np.choose(
         np.argmin(np.isnan(feels_like_inputs), axis=1), feels_like_inputs.T
-    )   
-
+    )
 
     if station_pressure_inputs is not None:
         InterPhour[:, DATA_HOURLY["station_pressure"]] = np.choose(
@@ -283,7 +281,7 @@ def build_hourly_block(
             station_pressure_inputs.T,
         )
 
-    #### Perform a number of calculations based on the hourly data to get additional metrics 
+    #### Perform a number of calculations based on the hourly data to get additional metrics
 
     # Calculate the apparent temperature
     InterPhour[:, DATA_HOURLY["apparent"]] = calculate_apparent_temperature(
@@ -377,17 +375,21 @@ def build_hourly_block(
     ]
 
     # Convert snow intensity from liquid equivalent to snow depth equivalent
-    snow_intensity_indices = np.where(InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["snow"])[0]
+    snow_intensity_indices = np.where(
+        InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["snow"]
+    )[0]
     if snow_intensity_indices.size > 0:
-            # Convert snow accumulation to intensity using liquid water conversion
-            snow_intensity_si = estimate_snow_height(
-                InterPhour[
-                    snow_intensity_indices, DATA_HOURLY["intensity"]
-                ],  # mm/h of water equivalent
-                InterPhour[snow_intensity_indices, DATA_HOURLY["temp"]],  # Celsius
-                InterPhour[snow_intensity_indices, DATA_HOURLY["wind"]],  # m/s
-            )
-            InterPhour[snow_intensity_indices, DATA_HOURLY["snow_intensity"]] = snow_intensity_si
+        # Convert snow accumulation to intensity using liquid water conversion
+        snow_intensity_si = estimate_snow_height(
+            InterPhour[
+                snow_intensity_indices, DATA_HOURLY["intensity"]
+            ],  # mm/h of water equivalent
+            InterPhour[snow_intensity_indices, DATA_HOURLY["temp"]],  # Celsius
+            InterPhour[snow_intensity_indices, DATA_HOURLY["wind"]],  # m/s
+        )
+        InterPhour[snow_intensity_indices, DATA_HOURLY["snow_intensity"]] = (
+            snow_intensity_si
+        )
 
     # Sleet intensity (direct from intensity for types 2 and 3)
     sleet_mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["ice"]) | (
@@ -564,7 +566,7 @@ def build_hourly_block(
         hourly_display,
         PTypeHour,
         PTextHour,
-        InterPhour
+        InterPhour,
     )
 
 

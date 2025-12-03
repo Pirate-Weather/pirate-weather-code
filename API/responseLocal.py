@@ -467,8 +467,7 @@ async def PW_Forecast(
     )
 
     # Convert temperature columns to Celsius based on model index
-    
-    
+
     if TIMING:
         print("### Sources Start ###")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
