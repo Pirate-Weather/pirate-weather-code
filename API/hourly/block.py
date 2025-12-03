@@ -79,63 +79,42 @@ def build_hourly_block(
 
     maxPchanceHour = np.full((len(hour_array_grib), 5), MISSING_DATA)
 
-    if "nbm" in source_list:
-        InterThour = np.zeros(shape=(len(hour_array), 5))  # Type
-        InterThour[:, 1] = InterThour_inputs["nbm_snow"]
-        InterThour[:, 2] = InterThour_inputs["nbm_ice"]
-        InterThour[:, 3] = InterThour_inputs["nbm_freezing_rain"]
-        InterThour[:, 4] = InterThour_inputs["nbm_rain"]
-        InterThour[InterThour < 0.01] = 0
-        maxPchanceHour[:, 0] = np.argmax(InterThour, axis=1)
-        maxPchanceHour[np.isnan(InterThour[:, 1]), 0] = MISSING_DATA
+    def populate_component_ptype(condition, target_idx, prefix):
+        if not condition():
+            return
+        inter_thour = np.zeros(shape=(len(hour_array), 5))  # Type columns
+        inter_thour[:, 1] = InterThour_inputs[f"{prefix}_snow"]
+        inter_thour[:, 2] = InterThour_inputs[f"{prefix}_ice"]
+        inter_thour[:, 3] = InterThour_inputs[f"{prefix}_freezing_rain"]
+        inter_thour[:, 4] = InterThour_inputs[f"{prefix}_rain"]
+        inter_thour[inter_thour < 0.01] = 0
+        maxPchanceHour[:, target_idx] = np.argmax(inter_thour, axis=1)
+        maxPchanceHour[np.isnan(inter_thour[:, 1]), target_idx] = MISSING_DATA
 
-    if ("hrrr_0-18" in source_list) and ("hrrr_18-48" in source_list):
-        InterThour = np.zeros(shape=(len(hour_array), 5))
-        InterThour[:, 1] = InterThour_inputs["hrrr_snow"]
-        InterThour[:, 2] = InterThour_inputs["hrrr_ice"]
-        InterThour[:, 3] = InterThour_inputs["hrrr_freezing_rain"]
-        InterThour[:, 4] = InterThour_inputs["hrrr_rain"]
-        InterThour[InterThour < 0.01] = 0
-        maxPchanceHour[:, 1] = np.argmax(InterThour, axis=1)
-        maxPchanceHour[np.isnan(InterThour[:, 1]), 1] = MISSING_DATA
-
-    if "ecmwf_ifs" in source_list:
-        ptype_ecmwf_hour = InterThour_inputs["ecmwf_ptype"]
-        ptype_ecmwf_hour = np.round(ptype_ecmwf_hour).astype(int)
+    def populate_mapped_ptype(condition, target_idx, key):
+        if not condition():
+            return
+        ptype_hour = np.round(InterThour_inputs[key]).astype(int)
         conditions = [
-            np.isin(ptype_ecmwf_hour, [5, 6, 9]),
-            np.isin(ptype_ecmwf_hour, [4, 8, 10]),
-            np.isin(ptype_ecmwf_hour, [3, 12]),
-            np.isin(ptype_ecmwf_hour, [1, 2, 7, 11]),
+            np.isin(ptype_hour, [5, 6, 9]),
+            np.isin(ptype_hour, [4, 8, 10]),
+            np.isin(ptype_hour, [3, 12]),
+            np.isin(ptype_hour, [1, 2, 7, 11]),
         ]
         choices = [1, 2, 3, 4]
         mapped_ptype = np.select(conditions, choices, default=0)
-        maxPchanceHour[:, 2] = mapped_ptype
-        maxPchanceHour[np.isnan(ptype_ecmwf_hour), 2] = MISSING_DATA
+        maxPchanceHour[:, target_idx] = mapped_ptype
+        maxPchanceHour[np.isnan(ptype_hour), target_idx] = MISSING_DATA
 
-    if "gefs" in source_list:
-        InterThour = np.zeros(shape=(len(hour_array), 5))
-        InterThour[:, 1] = InterThour_inputs["gefs_snow"]
-        InterThour[:, 2] = InterThour_inputs["gefs_ice"]
-        InterThour[:, 3] = InterThour_inputs["gefs_freezing_rain"]
-        InterThour[:, 4] = InterThour_inputs["gefs_rain"]
-        InterThour[InterThour < 0.01] = 0
-        maxPchanceHour[:, 3] = np.argmax(InterThour, axis=1)
-        maxPchanceHour[np.isnan(InterThour[:, 1]), 3] = MISSING_DATA
-
-    if "era5" in source_list:
-        ptype_era5_hour = InterThour_inputs["era5_ptype"]
-        ptype_era5_hour = np.round(ptype_era5_hour).astype(int)
-        conditions = [
-            np.isin(ptype_era5_hour, [5, 6, 9]),
-            np.isin(ptype_era5_hour, [4, 8, 10]),
-            np.isin(ptype_era5_hour, [3, 12]),
-            np.isin(ptype_era5_hour, [1, 2, 7, 11]),
-        ]
-        choices = [1, 2, 3, 4]
-        mapped_ptype = np.select(conditions, choices, default=0)
-        maxPchanceHour[:, 4] = mapped_ptype
-        maxPchanceHour[np.isnan(ptype_era5_hour), 4] = MISSING_DATA
+    populate_component_ptype(lambda: "nbm" in source_list, 0, "nbm")
+    populate_component_ptype(
+        lambda: ("hrrr_0-18" in source_list) and ("hrrr_18-48" in source_list),
+        1,
+        "hrrr",
+    )
+    populate_mapped_ptype(lambda: "ecmwf_ifs" in source_list, 2, "ecmwf_ptype")
+    populate_component_ptype(lambda: "gefs" in source_list, 3, "gefs")
+    populate_mapped_ptype(lambda: "era5" in source_list, 4, "era5_ptype")
 
     prcipIntensityHour = np.full((len(hour_array_grib), 5), MISSING_DATA)
     nbm_intensity = prcipIntensity_inputs.get("nbm")
