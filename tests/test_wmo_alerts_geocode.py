@@ -731,8 +731,9 @@ def test_extract_canadian_alert_no_duplicates():
     codes for individual municipalities). Each area should produce only ONE result
     when a polygon is present, not one result per geocode.
 
-    This test is based on a real Environment Canada fog advisory that was causing
-    13 duplicate alerts for the same location.
+    This test is based on a real Environment Canada fog advisory. The original
+    bug would create 21 duplicate entries (13 from the first area + 8 from the
+    second area) instead of the expected 2 entries (one per area).
     """
     cap_xml = """<?xml version="1.0" encoding="UTF-8"?>
 <alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">

@@ -206,6 +206,8 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                 seen_geocodes.add(normalized)
                 geocode_entries.append((value_name or None, value))
 
+            # Ensure geocode_entries always has at least one element (None, None)
+            # This allows consistent access to the first element below
             if not geocode_entries:
                 geocode_entries.append((None, None))
 
@@ -233,9 +235,9 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                         poly = Polygon(coords)
                         has_polygon = True
                         # When polygon exists, create only ONE entry per polygon
-                        # Use the first geocode entry for metadata (if any)
-                        first_geocode = geocode_entries[0] if geocode_entries else (None, None)
-                        geocode_name, geocode_value = first_geocode
+                        # Use the first geocode entry for metadata (geocode_entries
+                        # is guaranteed to have at least one element, see lines 209-212)
+                        geocode_name, geocode_value = geocode_entries[0]
                         results.append(
                             (
                                 source_id,
