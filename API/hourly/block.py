@@ -18,6 +18,8 @@ from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
 from API.constants.shared_const import MISSING_DATA
 from API.legacy.hourly import apply_legacy_hourly_text
 from API.PirateText import calculate_text
+from API.PirateTextHelper import estimate_snow_height
+from API.utils.precip import dbz_to_rate
 
 
 def build_hourly_block(
@@ -284,6 +286,48 @@ def build_hourly_block(
             station_pressure_inputs.T,
         )
 
+    # Find snow and liquid precip
+    # Set to zero as baseline
+    InterPhour[:, DATA_HOURLY["rain"]] = 0
+    InterPhour[:, DATA_HOURLY["snow"]] = 0
+    InterPhour[:, DATA_HOURLY["ice"]] = 0
+
+    # Accumulations in liquid equivalent
+    InterPhour[InterPhour[:, DATA_HOURLY["type"]] == 4, DATA_HOURLY["rain"]] = (
+        InterPhour[InterPhour[:, DATA_HOURLY["type"]] == 4, DATA_HOURLY["accum"]]
+    )  # rain
+
+    # Use the new snow height estimation for snow accumulation.
+    # Keep in SI units (mm)
+    snow_indices = np.where(InterPhour[:, DATA_HOURLY["type"]] == 1)[0]
+    if snow_indices.size > 0:
+        # Extract data for all snow events - already in SI units (mm, Celsius, m/s)
+        liquid_mm = InterPhour[snow_indices, DATA_HOURLY["accum"]]
+        temp_c = InterPhour[snow_indices, DATA_HOURLY["temp"]]
+        # windSpeedMps is already calculated as m/s above
+        wind_mps = InterPhour[snow_indices, DATA_HOURLY["wind"]]
+        # Calculate snow height for all snow indices in a vectorized operation (returns mm)
+        snow_mm_values = estimate_snow_height(liquid_mm, temp_c, wind_mps)
+        # Keep in mm (SI units)
+        InterPhour[snow_indices, DATA_HOURLY["snow"]] = snow_mm_values
+
+    InterPhour[
+        (
+            (InterPhour[:, DATA_HOURLY["type"]] == 2)
+            | (InterPhour[:, DATA_HOURLY["type"]] == 3)
+        ),
+        DATA_HOURLY["ice"],
+    ] = (
+        InterPhour[
+            (
+                (InterPhour[:, DATA_HOURLY["type"]] == 2)
+                | (InterPhour[:, DATA_HOURLY["type"]] == 3)
+            ),
+            DATA_HOURLY["accum"],
+        ]
+        * 1
+    )  # Ice
+
     InterPhour[:, DATA_HOURLY["intensity"]] = np.maximum(
         InterPhour[:, DATA_HOURLY["intensity"]], 0
     )
@@ -321,6 +365,20 @@ def build_hourly_block(
     InterPhour[:, DATA_HOURLY["snow_intensity"]] = np.choose(
         np.argmin(np.isnan(snow_intensity_inputs), axis=1), snow_intensity_inputs.T
     )
+
+    # Convert snow intensity from liquid equivalent to snow depth equivalent
+    snow_intensity_indices = np.where(InterPhour[:, DATA_HOURLY["snow_intensity"]] > 0)[0]
+    if snow_intensity_indices.size > 0:
+        liquid_intensity = InterPhour[
+            snow_intensity_indices, DATA_HOURLY["snow_intensity"]
+        ]
+        temp_c = InterPhour[snow_intensity_indices, DATA_HOURLY["temp"]]
+        wind_mps = InterPhour[snow_intensity_indices, DATA_HOURLY["wind"]]
+
+        snow_intensity_values = estimate_snow_height(liquid_intensity, temp_c, wind_mps)
+        InterPhour[
+            snow_intensity_indices, DATA_HOURLY["snow_intensity"]
+        ] = snow_intensity_values
     InterPhour[:, DATA_HOURLY["ice_intensity"]] = np.choose(
         np.argmin(np.isnan(ice_intensity_inputs), axis=1), ice_intensity_inputs.T
     )
