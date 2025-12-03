@@ -19,8 +19,10 @@ UNIX_EPOCH = np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
 def datetime_to_unix_seconds(value: datetime.datetime) -> np.int32:
     """Convert a timezone-aware datetime to unix seconds in UTC."""
     return (
-        np.datetime64(value.astimezone(utc).replace(tzinfo=None)) - UNIX_EPOCH
-    ).astype("timedelta64[s]").astype(np.int32)
+        (np.datetime64(value.astimezone(utc).replace(tzinfo=None)) - UNIX_EPOCH)
+        .astype("timedelta64[s]")
+        .astype(np.int32)
+    )
 
 
 def timedelta_to_seconds(delta: np.timedelta64) -> np.int32:

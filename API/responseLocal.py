@@ -21,7 +21,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import ORJSONResponse
 from metpy.calc import relative_humidity_from_dewpoint
 from pirateweather_translations.dynamic_loader import load_all_translations
-from pytz import utc
 from timezonefinder import TimezoneFinder
 
 from API.alerts import build_alerts
