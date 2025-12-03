@@ -190,7 +190,9 @@ def build_hourly_block(
     )
 
     # Convert humidity to between 0 and 1
-    InterPhour[:, DATA_HOURLY["humidity"]] = InterPhour[:, DATA_HOURLY["humidity"]] * humidUnit
+    InterPhour[:, DATA_HOURLY["humidity"]] = (
+        InterPhour[:, DATA_HOURLY["humidity"]] * humidUnit
+    )
 
     InterPhour[:, DATA_HOURLY["humidity"]] = np.clip(
         InterPhour[:, DATA_HOURLY["humidity"]],
