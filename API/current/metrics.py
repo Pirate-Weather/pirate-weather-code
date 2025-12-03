@@ -153,32 +153,94 @@ def build_current_section(
         and ("hrrr_18-48" in sourceList)
     )
 
-    if "rtma_ru" in sourceList:
-        InterPcurrent[DATA_CURRENT["temp"]] = dataOut_rtma_ru[0, RTMA_RU["temp"]]
-    elif "hrrrsubh" in sourceList:
-        InterPcurrent[DATA_CURRENT["temp"]] = hrrrSubHInterpolation[
-            0, HRRR_SUBH["temp"]
+    def select_value(strategies, default=MISSING_DATA):
+        for predicate, getter in strategies:
+            if predicate():
+                return getter()
+        return default
+
+    def interp_scalar(merged, key):
+        return (
+            merged[currentIDX_hrrrh_A, key] * interpFac1
+            + merged[currentIDX_hrrrh, key] * interpFac2
+        )
+
+    def interp_uv_magnitude(merged, u_key, v_key):
+        return math.sqrt(
+            (
+                merged[currentIDX_hrrrh_A, u_key] * interpFac1
+                + merged[currentIDX_hrrrh, u_key] * interpFac2
+            )
+            ** 2
+            + (
+                merged[currentIDX_hrrrh_A, v_key] * interpFac1
+                + merged[currentIDX_hrrrh, v_key] * interpFac2
+            )
+            ** 2
+        )
+
+    def bearing_from_components(u_val, v_val):
+        return np.rad2deg(np.mod(np.arctan2(u_val, v_val) + np.pi, 2 * np.pi))
+
+    def calculate_ecmwf_relative_humidity():
+        humid_fac1 = relative_humidity_from_dewpoint(
+            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["temp"]] * mp.units.units.degK,
+            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["dew"]] * mp.units.units.degK,
+            phase="auto",
+        ).magnitude
+        humid_fac2 = relative_humidity_from_dewpoint(
+            ECMWF_Merged[currentIDX_hrrrh, ECMWF["temp"]] * mp.units.units.degK,
+            ECMWF_Merged[currentIDX_hrrrh, ECMWF["dew"]] * mp.units.units.degK,
+            phase="auto",
+        ).magnitude
+
+        return (humid_fac1 * interpFac1 + humid_fac2 * interpFac2) * 100 * humidUnit
+
+    def calculate_era5_relative_humidity():
+        humid_fac1 = relative_humidity_from_dewpoint(
+            ERA5_MERGED[currentIDX_hrrrh_A, ERA5["2m_temperature"]]
+            * mp.units.units.degK,
+            ERA5_MERGED[currentIDX_hrrrh_A, ERA5["2m_dewpoint_temperature"]]
+            * mp.units.units.degK,
+            phase="auto",
+        ).magnitude
+        humid_fac2 = relative_humidity_from_dewpoint(
+            ERA5_MERGED[currentIDX_hrrrh, ERA5["2m_temperature"]] * mp.units.units.degK,
+            ERA5_MERGED[currentIDX_hrrrh, ERA5["2m_dewpoint_temperature"]]
+            * mp.units.units.degK,
+            phase="auto",
+        ).magnitude
+
+        return (humid_fac1 * interpFac1 + humid_fac2 * interpFac2) * 100 * humidUnit
+
+    InterPcurrent[DATA_CURRENT["temp"]] = select_value(
+        [
+            (
+                lambda: "rtma_ru" in sourceList,
+                lambda: dataOut_rtma_ru[0, RTMA_RU["temp"]],
+            ),
+            (
+                lambda: "hrrrsubh" in sourceList,
+                lambda: hrrrSubHInterpolation[0, HRRR_SUBH["temp"]],
+            ),
+            (
+                lambda: "nbm" in sourceList,
+                lambda: interp_scalar(NBM_Merged, NBM["temp"]),
+            ),
+            (
+                lambda: "ecmwf_ifs" in sourceList,
+                lambda: interp_scalar(ECMWF_Merged, ECMWF["temp"]),
+            ),
+            (
+                lambda: "gfs" in sourceList,
+                lambda: interp_scalar(GFS_Merged, GFS["temp"]),
+            ),
+            (
+                lambda: "era5" in sourceList,
+                lambda: interp_scalar(ERA5_MERGED, ERA5["2m_temperature"]),
+            ),
         ]
-    elif "nbm" in sourceList:
-        InterPcurrent[DATA_CURRENT["temp"]] = (
-            NBM_Merged[currentIDX_hrrrh_A, NBM["temp"]] * interpFac1
-            + NBM_Merged[currentIDX_hrrrh, NBM["temp"]] * interpFac2
-        )
-    elif "ecmwf_ifs" in sourceList:
-        InterPcurrent[DATA_CURRENT["temp"]] = (
-            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["temp"]] * interpFac1
-            + ECMWF_Merged[currentIDX_hrrrh, ECMWF["temp"]] * interpFac2
-        )
-    elif "gfs" in sourceList:
-        InterPcurrent[DATA_CURRENT["temp"]] = (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["temp"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["temp"]] * interpFac2
-        )
-    elif "era5" in sourceList:
-        InterPcurrent[DATA_CURRENT["temp"]] = (
-            ERA5_MERGED[currentIDX_hrrrh_A, ERA5["2m_temperature"]] * interpFac1
-            + ERA5_MERGED[currentIDX_hrrrh, ERA5["2m_temperature"]] * interpFac2
-        )
+    )
 
     InterPcurrent[DATA_CURRENT["temp"]] = clipLog(
         InterPcurrent[DATA_CURRENT["temp"]],
@@ -187,32 +249,34 @@ def build_current_section(
         "Temperature Current",
     )
 
-    if "rtma_ru" in sourceList:
-        InterPcurrent[DATA_CURRENT["dew"]] = dataOut_rtma_ru[0, RTMA_RU["dew"]]
-    elif "hrrrsubh" in sourceList:
-        InterPcurrent[DATA_CURRENT["dew"]] = hrrrSubHInterpolation[0, HRRR_SUBH["dew"]]
-    elif "nbm" in sourceList:
-        InterPcurrent[DATA_CURRENT["dew"]] = (
-            NBM_Merged[currentIDX_hrrrh_A, NBM["dew"]] * interpFac1
-            + NBM_Merged[currentIDX_hrrrh, NBM["dew"]] * interpFac2
-        )
-    elif "ecmwf_ifs" in sourceList:
-        InterPcurrent[DATA_CURRENT["dew"]] = (
-            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["dew"]] * interpFac1
-            + ECMWF_Merged[currentIDX_hrrrh, ECMWF["dew"]] * interpFac2
-        )
-    elif "gfs" in sourceList:
-        InterPcurrent[DATA_CURRENT["dew"]] = (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["dew"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["dew"]] * interpFac2
-        )
-    elif "era5" in sourceList:
-        InterPcurrent[DATA_CURRENT["dew"]] = (
-            ERA5_MERGED[currentIDX_hrrrh_A, ERA5["2m_dewpoint_temperature"]]
-            * interpFac1
-            + ERA5_MERGED[currentIDX_hrrrh, ERA5["2m_dewpoint_temperature"]]
-            * interpFac2
-        )
+    InterPcurrent[DATA_CURRENT["dew"]] = select_value(
+        [
+            (
+                lambda: "rtma_ru" in sourceList,
+                lambda: dataOut_rtma_ru[0, RTMA_RU["dew"]],
+            ),
+            (
+                lambda: "hrrrsubh" in sourceList,
+                lambda: hrrrSubHInterpolation[0, HRRR_SUBH["dew"]],
+            ),
+            (
+                lambda: "nbm" in sourceList,
+                lambda: interp_scalar(NBM_Merged, NBM["dew"]),
+            ),
+            (
+                lambda: "ecmwf_ifs" in sourceList,
+                lambda: interp_scalar(ECMWF_Merged, ECMWF["dew"]),
+            ),
+            (
+                lambda: "gfs" in sourceList,
+                lambda: interp_scalar(GFS_Merged, GFS["dew"]),
+            ),
+            (
+                lambda: "era5" in sourceList,
+                lambda: interp_scalar(ERA5_MERGED, ERA5["2m_dewpoint_temperature"]),
+            ),
+        ]
+    )
 
     InterPcurrent[DATA_CURRENT["dew"]] = clipLog(
         InterPcurrent[DATA_CURRENT["dew"]],
@@ -221,62 +285,31 @@ def build_current_section(
         "Dewpoint Current",
     )
 
-    if "rtma_ru" in sourceList:
-        InterPcurrent[DATA_CURRENT["humidity"]] = dataOut_rtma_ru[
-            0, RTMA_RU["humidity"]
+    InterPcurrent[DATA_CURRENT["humidity"]] = select_value(
+        [
+            (
+                lambda: "rtma_ru" in sourceList,
+                lambda: dataOut_rtma_ru[0, RTMA_RU["humidity"]],
+            ),
+            (
+                lambda: has_hrrr_merged,
+                lambda: interp_scalar(HRRR_Merged, HRRR["humidity"]) * humidUnit,
+            ),
+            (
+                lambda: "nbm" in sourceList,
+                lambda: interp_scalar(NBM_Merged, NBM["humidity"]) * humidUnit,
+            ),
+            (
+                lambda: "gfs" in sourceList,
+                lambda: interp_scalar(GFS_Merged, GFS["humidity"]) * humidUnit,
+            ),
+            (
+                lambda: "ecmwf_ifs" in sourceList,
+                calculate_ecmwf_relative_humidity,
+            ),
+            (lambda: "era5" in sourceList, calculate_era5_relative_humidity),
         ]
-    elif has_hrrr_merged:
-        InterPcurrent[DATA_CURRENT["humidity"]] = (
-            HRRR_Merged[currentIDX_hrrrh_A, HRRR["humidity"]] * interpFac1
-            + HRRR_Merged[currentIDX_hrrrh, HRRR["humidity"]] * interpFac2
-        ) * humidUnit
-    elif "nbm" in sourceList:
-        InterPcurrent[DATA_CURRENT["humidity"]] = (
-            NBM_Merged[currentIDX_hrrrh_A, NBM["humidity"]] * interpFac1
-            + NBM_Merged[currentIDX_hrrrh, NBM["humidity"]] * interpFac2
-        ) * humidUnit
-    elif "gfs" in sourceList:
-        InterPcurrent[DATA_CURRENT["humidity"]] = (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["humidity"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["humidity"]] * interpFac2
-        ) * humidUnit
-    elif "ecmwf_ifs" in sourceList:
-        ECMWF_humidFac1 = relative_humidity_from_dewpoint(
-            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["temp"]] * mp.units.units.degK,
-            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["dew"]] * mp.units.units.degK,
-            phase="auto",
-        ).magnitude
-        ECMWF_humidFac2 = relative_humidity_from_dewpoint(
-            ECMWF_Merged[currentIDX_hrrrh, ECMWF["temp"]] * mp.units.units.degK,
-            ECMWF_Merged[currentIDX_hrrrh, ECMWF["dew"]] * mp.units.units.degK,
-            phase="auto",
-        ).magnitude
-
-        InterPcurrent[DATA_CURRENT["humidity"]] = (
-            (ECMWF_humidFac1 * interpFac1 + ECMWF_humidFac2 * interpFac2)
-            * 100
-            * humidUnit
-        )
-    elif "era5" in sourceList:
-        ERA5_humidFac1 = relative_humidity_from_dewpoint(
-            ERA5_MERGED[currentIDX_hrrrh_A, ERA5["2m_temperature"]]
-            * mp.units.units.degK,
-            ERA5_MERGED[currentIDX_hrrrh_A, ERA5["2m_dewpoint_temperature"]]
-            * mp.units.units.degK,
-            phase="auto",
-        ).magnitude
-        ERA5_humidFac2 = relative_humidity_from_dewpoint(
-            ERA5_MERGED[currentIDX_hrrrh, ERA5["2m_temperature"]] * mp.units.units.degK,
-            ERA5_MERGED[currentIDX_hrrrh, ERA5["2m_dewpoint_temperature"]]
-            * mp.units.units.degK,
-            phase="auto",
-        ).magnitude
-
-        InterPcurrent[DATA_CURRENT["humidity"]] = (
-            (ERA5_humidFac1 * interpFac1 + ERA5_humidFac2 * interpFac2)
-            * 100
-            * humidUnit
-        )
+    )
 
     InterPcurrent[DATA_CURRENT["humidity"]] = clipLog(
         InterPcurrent[DATA_CURRENT["humidity"]],
@@ -285,28 +318,29 @@ def build_current_section(
         "Humidity Current",
     )
 
-    if has_hrrr_merged:
-        InterPcurrent[DATA_CURRENT["pressure"]] = (
-            HRRR_Merged[currentIDX_hrrrh_A, HRRR["pressure"]] * interpFac1
-            + HRRR_Merged[currentIDX_hrrrh, HRRR["pressure"]] * interpFac2
-        )
-    elif "ecmwf_ifs" in sourceList:
-        InterPcurrent[DATA_CURRENT["pressure"]] = (
-            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["pressure"]] * interpFac1
-            + ECMWF_Merged[currentIDX_hrrrh, ECMWF["pressure"]] * interpFac2
-        )
-    elif "gfs" in sourceList:
-        InterPcurrent[DATA_CURRENT["pressure"]] = (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["pressure"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["pressure"]] * interpFac2
-        )
-    elif "era5" in sourceList:
-        InterPcurrent[DATA_CURRENT["pressure"]] = (
-            ERA5_MERGED[currentIDX_hrrrh_A, ERA5["mean_sea_level_pressure"]]
-            * interpFac1
-            + ERA5_MERGED[currentIDX_hrrrh, ERA5["mean_sea_level_pressure"]]
-            * interpFac2
-        )
+    InterPcurrent[DATA_CURRENT["pressure"]] = select_value(
+        [
+            (
+                lambda: has_hrrr_merged,
+                lambda: interp_scalar(HRRR_Merged, HRRR["pressure"]),
+            ),
+            (
+                lambda: "ecmwf_ifs" in sourceList,
+                lambda: interp_scalar(ECMWF_Merged, ECMWF["pressure"]),
+            ),
+            (
+                lambda: "gfs" in sourceList,
+                lambda: interp_scalar(GFS_Merged, GFS["pressure"]),
+            ),
+            (
+                lambda: "era5" in sourceList,
+                lambda: interp_scalar(
+                    ERA5_MERGED,
+                    ERA5["mean_sea_level_pressure"],
+                ),
+            ),
+        ]
+    )
 
     InterPcurrent[DATA_CURRENT["pressure"]] = clipLog(
         InterPcurrent[DATA_CURRENT["pressure"]],
@@ -315,64 +349,48 @@ def build_current_section(
         "Pressure Current",
     )
 
-    if "rtma_ru" in sourceList:
-        InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
-            dataOut_rtma_ru[0, RTMA_RU["wind_u"]] ** 2
-            + dataOut_rtma_ru[0, RTMA_RU["wind_v"]] ** 2
-        )
-    elif "hrrrsubh" in sourceList:
-        InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
-            hrrrSubHInterpolation[0, HRRR_SUBH["wind_u"]] ** 2
-            + hrrrSubHInterpolation[0, HRRR_SUBH["wind_v"]] ** 2
-        )
-    elif "nbm" in sourceList:
-        InterPcurrent[DATA_CURRENT["wind"]] = (
-            NBM_Merged[currentIDX_hrrrh_A, NBM["wind"]] * interpFac1
-            + NBM_Merged[currentIDX_hrrrh, NBM["wind"]] * interpFac2
-        )
-    elif "ecmwf_ifs" in sourceList:
-        InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
+    InterPcurrent[DATA_CURRENT["wind"]] = select_value(
+        [
             (
-                ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["wind_u"]] * interpFac1
-                + ECMWF_Merged[currentIDX_hrrrh, ECMWF["wind_u"]] * interpFac2
-            )
-            ** 2
-            + (
-                ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["wind_v"]] * interpFac1
-                + ECMWF_Merged[currentIDX_hrrrh, ECMWF["wind_v"]] * interpFac2
-            )
-            ** 2
-        )
-    elif "gfs" in sourceList:
-        InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
+                lambda: "rtma_ru" in sourceList,
+                lambda: math.sqrt(
+                    dataOut_rtma_ru[0, RTMA_RU["wind_u"]] ** 2
+                    + dataOut_rtma_ru[0, RTMA_RU["wind_v"]] ** 2
+                ),
+            ),
             (
-                GFS_Merged[currentIDX_hrrrh_A, GFS["wind_u"]] * interpFac1
-                + GFS_Merged[currentIDX_hrrrh, GFS["wind_u"]] * interpFac2
-            )
-            ** 2
-            + (
-                GFS_Merged[currentIDX_hrrrh_A, GFS["wind_v"]] * interpFac1
-                + GFS_Merged[currentIDX_hrrrh, GFS["wind_v"]] * interpFac2
-            )
-            ** 2
-        )
-    elif "era5" in sourceList:
-        InterPcurrent[DATA_CURRENT["wind"]] = math.sqrt(
+                lambda: "hrrrsubh" in sourceList,
+                lambda: math.sqrt(
+                    hrrrSubHInterpolation[0, HRRR_SUBH["wind_u"]] ** 2
+                    + hrrrSubHInterpolation[0, HRRR_SUBH["wind_v"]] ** 2
+                ),
+            ),
             (
-                ERA5_MERGED[currentIDX_hrrrh_A, ERA5["10m_u_component_of_wind"]]
-                * interpFac1
-                + ERA5_MERGED[currentIDX_hrrrh, ERA5["10m_u_component_of_wind"]]
-                * interpFac2
-            )
-            ** 2
-            + (
-                ERA5_MERGED[currentIDX_hrrrh_A, ERA5["10m_v_component_of_wind"]]
-                * interpFac1
-                + ERA5_MERGED[currentIDX_hrrrh, ERA5["10m_v_component_of_wind"]]
-                * interpFac2
-            )
-            ** 2
-        )
+                lambda: "nbm" in sourceList,
+                lambda: interp_scalar(NBM_Merged, NBM["wind"]),
+            ),
+            (
+                lambda: "ecmwf_ifs" in sourceList,
+                lambda: interp_uv_magnitude(
+                    ECMWF_Merged,
+                    ECMWF["wind_u"],
+                    ECMWF["wind_v"],
+                ),
+            ),
+            (
+                lambda: "gfs" in sourceList,
+                lambda: interp_uv_magnitude(GFS_Merged, GFS["wind_u"], GFS["wind_v"]),
+            ),
+            (
+                lambda: "era5" in sourceList,
+                lambda: interp_uv_magnitude(
+                    ERA5_MERGED,
+                    ERA5["10m_u_component_of_wind"],
+                    ERA5["10m_v_component_of_wind"],
+                ),
+            ),
+        ]
+    )
 
     InterPcurrent[DATA_CURRENT["wind"]] = clipLog(
         InterPcurrent[DATA_CURRENT["wind"]],
@@ -381,31 +399,34 @@ def build_current_section(
         "WindSpeed Current",
     )
 
-    if "rtma_ru" in sourceList:
-        InterPcurrent[DATA_CURRENT["gust"]] = dataOut_rtma_ru[0, RTMA_RU["gust"]]
-    elif "hrrrsubh" in sourceList:
-        InterPcurrent[DATA_CURRENT["gust"]] = hrrrSubHInterpolation[
-            0, HRRR_SUBH["gust"]
-        ]
-    elif "nbm" in sourceList:
-        InterPcurrent[DATA_CURRENT["gust"]] = (
-            NBM_Merged[currentIDX_hrrrh_A, NBM["gust"]] * interpFac1
-            + NBM_Merged[currentIDX_hrrrh, NBM["gust"]] * interpFac2
-        )
-    elif "gfs" in sourceList:
-        InterPcurrent[DATA_CURRENT["gust"]] = (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["gust"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["gust"]] * interpFac2
-        )
-    elif "era5" in sourceList:
-        InterPcurrent[DATA_CURRENT["gust"]] = (
-            ERA5_MERGED[currentIDX_hrrrh_A, ERA5["instantaneous_10m_wind_gust"]]
-            * interpFac1
-            + ERA5_MERGED[currentIDX_hrrrh, ERA5["instantaneous_10m_wind_gust"]]
-            * interpFac2
-        )
-    else:
-        InterPcurrent[DATA_CURRENT["gust"]] = MISSING_DATA
+    InterPcurrent[DATA_CURRENT["gust"]] = select_value(
+        [
+            (
+                lambda: "rtma_ru" in sourceList,
+                lambda: dataOut_rtma_ru[0, RTMA_RU["gust"]],
+            ),
+            (
+                lambda: "hrrrsubh" in sourceList,
+                lambda: hrrrSubHInterpolation[0, HRRR_SUBH["gust"]],
+            ),
+            (
+                lambda: "nbm" in sourceList,
+                lambda: interp_scalar(NBM_Merged, NBM["gust"]),
+            ),
+            (
+                lambda: "gfs" in sourceList,
+                lambda: interp_scalar(GFS_Merged, GFS["gust"]),
+            ),
+            (
+                lambda: "era5" in sourceList,
+                lambda: interp_scalar(
+                    ERA5_MERGED,
+                    ERA5["instantaneous_10m_wind_gust"],
+                ),
+            ),
+        ],
+        default=MISSING_DATA,
+    )
 
     InterPcurrent[DATA_CURRENT["gust"]] = clipLog(
         InterPcurrent[DATA_CURRENT["gust"]],
@@ -492,99 +513,83 @@ def build_current_section(
         InterPcurrent[DATA_CURRENT["prob"]] = InterPminute[0, DATA_MINUTELY["prob"]]
         InterPcurrent[DATA_CURRENT["error"]] = InterPminute[0, DATA_MINUTELY["error"]]
 
-    if "rtma_ru" in sourceList:
-        InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
-            np.mod(
-                np.arctan2(
+    InterPcurrent[DATA_CURRENT["bearing"]] = select_value(
+        [
+            (
+                lambda: "rtma_ru" in sourceList,
+                lambda: bearing_from_components(
                     dataOut_rtma_ru[0, RTMA_RU["wind_u"]],
                     dataOut_rtma_ru[0, RTMA_RU["wind_v"]],
-                )
-                + np.pi,
-                2 * np.pi,
-            )
-        )
-    elif "hrrrsubh" in sourceList:
-        InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
-            np.mod(
-                np.arctan2(
+                ),
+            ),
+            (
+                lambda: "hrrrsubh" in sourceList,
+                lambda: bearing_from_components(
                     hrrrSubHInterpolation[0, HRRR_SUBH["wind_u"]],
                     hrrrSubHInterpolation[0, HRRR_SUBH["wind_v"]],
-                )
-                + np.pi,
-                2 * np.pi,
-            )
-        )
-    elif "nbm" in sourceList:
-        InterPcurrent[DATA_CURRENT["bearing"]] = NBM_Merged[
-            currentIDX_hrrrh, NBM["bearing"]
-        ]
-    elif "ecmwf_ifs" in sourceList:
-        InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
-            np.mod(
-                np.arctan2(
+                ),
+            ),
+            (
+                lambda: "nbm" in sourceList,
+                lambda: NBM_Merged[currentIDX_hrrrh, NBM["bearing"]],
+            ),
+            (
+                lambda: "ecmwf_ifs" in sourceList,
+                lambda: bearing_from_components(
                     ECMWF_Merged[currentIDX_hrrrh, ECMWF["wind_u"]],
                     ECMWF_Merged[currentIDX_hrrrh, ECMWF["wind_v"]],
-                )
-                + np.pi,
-                2 * np.pi,
-            )
-        )
-    elif "gfs" in sourceList:
-        InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
-            np.mod(
-                np.arctan2(
+                ),
+            ),
+            (
+                lambda: "gfs" in sourceList,
+                lambda: bearing_from_components(
                     GFS_Merged[currentIDX_hrrrh, GFS["wind_u"]],
                     GFS_Merged[currentIDX_hrrrh, GFS["wind_v"]],
-                )
-                + np.pi,
-                2 * np.pi,
-            )
-        )
-    elif "era5" in sourceList:
-        InterPcurrent[DATA_CURRENT["bearing"]] = np.rad2deg(
-            np.mod(
-                np.arctan2(
+                ),
+            ),
+            (
+                lambda: "era5" in sourceList,
+                lambda: bearing_from_components(
                     ERA5_MERGED[currentIDX_hrrrh, ERA5["10m_u_component_of_wind"]],
                     ERA5_MERGED[currentIDX_hrrrh, ERA5["10m_v_component_of_wind"]],
-                )
-                + np.pi,
-                2 * np.pi,
-            )
-        )
-    else:
-        InterPcurrent[DATA_CURRENT["bearing"]] = MISSING_DATA
+                ),
+            ),
+        ],
+        default=MISSING_DATA,
+    )
 
-    if "rtma_ru" in sourceList:
-        InterPcurrent[DATA_CURRENT["cloud"]] = (
-            (dataOut_rtma_ru[0, RTMA_RU["cloud"]]) * 0.01
-        )
-    elif "nbm" in sourceList:
-        InterPcurrent[DATA_CURRENT["cloud"]] = (
-            NBM_Merged[currentIDX_hrrrh_A, NBM["cloud"]] * interpFac1
-            + NBM_Merged[currentIDX_hrrrh, NBM["cloud"]] * interpFac2
-        ) * 0.01
-    elif "ecmwf_ifs" in sourceList:
-        InterPcurrent[DATA_CURRENT["cloud"]] = (
-            ECMWF_Merged[currentIDX_hrrrh_A, ECMWF["cloud"]] * interpFac1
-            + ECMWF_Merged[currentIDX_hrrrh, ECMWF["cloud"]] * interpFac2
-        ) * 0.01
-    elif has_hrrr_merged:
-        InterPcurrent[DATA_CURRENT["cloud"]] = (
-            HRRR_Merged[currentIDX_hrrrh_A, HRRR["cloud"]] * interpFac1
-            + HRRR_Merged[currentIDX_hrrrh, HRRR["cloud"]] * interpFac2
-        ) * 0.01
-    elif "gfs" in sourceList:
-        InterPcurrent[DATA_CURRENT["cloud"]] = (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["cloud"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["cloud"]] * interpFac2
-        ) * 0.01
-    elif "era5" in sourceList:
-        InterPcurrent[DATA_CURRENT["cloud"]] = (
-            ERA5_MERGED[currentIDX_hrrrh_A, ERA5["total_cloud_cover"]] * interpFac1
-            + ERA5_MERGED[currentIDX_hrrrh, ERA5["total_cloud_cover"]] * interpFac2
-        )
-    else:
-        InterPcurrent[DATA_CURRENT["cloud"]] = MISSING_DATA
+    InterPcurrent[DATA_CURRENT["cloud"]] = select_value(
+        [
+            (
+                lambda: "rtma_ru" in sourceList,
+                lambda: dataOut_rtma_ru[0, RTMA_RU["cloud"]] * 0.01,
+            ),
+            (
+                lambda: "nbm" in sourceList,
+                lambda: interp_scalar(NBM_Merged, NBM["cloud"]) * 0.01,
+            ),
+            (
+                lambda: "ecmwf_ifs" in sourceList,
+                lambda: interp_scalar(ECMWF_Merged, ECMWF["cloud"]) * 0.01,
+            ),
+            (
+                lambda: has_hrrr_merged,
+                lambda: interp_scalar(HRRR_Merged, HRRR["cloud"]) * 0.01,
+            ),
+            (
+                lambda: "gfs" in sourceList,
+                lambda: interp_scalar(GFS_Merged, GFS["cloud"]) * 0.01,
+            ),
+            (
+                lambda: "era5" in sourceList,
+                lambda: interp_scalar(
+                    ERA5_MERGED,
+                    ERA5["total_cloud_cover"],
+                ),
+            ),
+        ],
+        default=MISSING_DATA,
+    )
 
     InterPcurrent[DATA_CURRENT["cloud"]] = clipLog(
         InterPcurrent[DATA_CURRENT["cloud"]],
@@ -648,56 +653,65 @@ def build_current_section(
         "Station Pressure Current",
     )
 
-    if "rtma_ru" in sourceList:
-        InterPcurrent[DATA_CURRENT["vis"]] = dataOut_rtma_ru[0, RTMA_RU["vis"]]
-        if InterPcurrent[DATA_CURRENT["vis"]] >= 15999:
-            InterPcurrent[DATA_CURRENT["vis"]] = 16090
-    elif "hrrrsubh" in sourceList:
-        InterPcurrent[DATA_CURRENT["vis"]] = hrrrSubHInterpolation[0, HRRR_SUBH["vis"]]
-    elif "nbm" in sourceList:
-        InterPcurrent[DATA_CURRENT["vis"]] = (
-            NBM_Merged[currentIDX_hrrrh_A, NBM["vis"]] * interpFac1
-            + NBM_Merged[currentIDX_hrrrh, NBM["vis"]] * interpFac2
-        )
-    elif has_hrrr_merged:
-        InterPcurrent[DATA_CURRENT["vis"]] = (
-            HRRR_Merged[currentIDX_hrrrh_A, HRRR["vis"]] * interpFac1
-            + HRRR_Merged[currentIDX_hrrrh, HRRR["vis"]] * interpFac2
-        )
-    elif "gfs" in sourceList:
-        InterPcurrent[DATA_CURRENT["vis"]] = (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["vis"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["vis"]] * interpFac2
-        )
-    elif "era5" in sourceList:
-        InterPcurrent[DATA_CURRENT["vis"]] = estimate_visibility_gultepe_rh_pr_numpy(
-            ERA5_MERGED[currentIDX_hrrrh_A, :] * interpFac1
-            + ERA5_MERGED[currentIDX_hrrrh, :] * interpFac2,
-            var_index=ERA5,
-            var_axis=1,
-        )
-
-    else:
-        InterPcurrent[DATA_CURRENT["vis"]] = MISSING_DATA
+    InterPcurrent[DATA_CURRENT["vis"]] = select_value(
+        [
+            (
+                lambda: "rtma_ru" in sourceList,
+                lambda: 16090
+                if dataOut_rtma_ru[0, RTMA_RU["vis"]] >= 15999
+                else dataOut_rtma_ru[0, RTMA_RU["vis"]],
+            ),
+            (
+                lambda: "hrrrsubh" in sourceList,
+                lambda: hrrrSubHInterpolation[0, HRRR_SUBH["vis"]],
+            ),
+            (
+                lambda: "nbm" in sourceList,
+                lambda: interp_scalar(NBM_Merged, NBM["vis"]),
+            ),
+            (
+                lambda: has_hrrr_merged,
+                lambda: interp_scalar(HRRR_Merged, HRRR["vis"]),
+            ),
+            (
+                lambda: "gfs" in sourceList,
+                lambda: interp_scalar(GFS_Merged, GFS["vis"]),
+            ),
+            (
+                lambda: "era5" in sourceList,
+                lambda: estimate_visibility_gultepe_rh_pr_numpy(
+                    ERA5_MERGED[currentIDX_hrrrh_A, :] * interpFac1
+                    + ERA5_MERGED[currentIDX_hrrrh, :] * interpFac2,
+                    var_index=ERA5,
+                    var_axis=1,
+                ),
+            ),
+        ],
+        default=MISSING_DATA,
+    )
 
     InterPcurrent[DATA_CURRENT["vis"]] = np.clip(
         InterPcurrent[DATA_CURRENT["vis"]], CLIP_VIS["min"], CLIP_VIS["max"]
     )
 
-    ozone_value = MISSING_DATA
-    if "gfs" in sourceList:
-        ozone_value = (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["ozone"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["ozone"]] * interpFac2
-        )
-    elif "era5" in sourceList:
-        ozone_value = (
-            ERA5_MERGED[currentIDX_hrrrh_A, ERA5["total_column_ozone"]] * interpFac1
-            + ERA5_MERGED[currentIDX_hrrrh, ERA5["total_column_ozone"]] * interpFac2
-        ) * 46696
-
     InterPcurrent[DATA_CURRENT["ozone"]] = clipLog(
-        ozone_value,
+        select_value(
+            [
+                (
+                    lambda: "gfs" in sourceList,
+                    lambda: interp_scalar(GFS_Merged, GFS["ozone"]),
+                ),
+                (
+                    lambda: "era5" in sourceList,
+                    lambda: interp_scalar(
+                        ERA5_MERGED,
+                        ERA5["total_column_ozone"],
+                    )
+                    * 46696,
+                ),
+            ],
+            default=MISSING_DATA,
+        ),
         CLIP_OZONE["min"],
         CLIP_OZONE["max"],
         "Ozone Current",
@@ -731,32 +745,35 @@ def build_current_section(
     else:
         InterPcurrent[DATA_CURRENT["smoke"]] = MISSING_DATA
 
-    if "hrrrsubh" in sourceList:
-        InterPcurrent[DATA_CURRENT["solar"]] = hrrrSubHInterpolation[
-            0, HRRR_SUBH["solar"]
-        ]
-    elif "nbm" in sourceList:
-        InterPcurrent[DATA_CURRENT["solar"]] = (
-            NBM_Merged[currentIDX_hrrrh_A, NBM["solar"]] * interpFac1
-            + NBM_Merged[currentIDX_hrrrh, NBM["solar"]] * interpFac2
-        )
-    elif has_hrrr_merged:
-        InterPcurrent[DATA_CURRENT["solar"]] = (
-            HRRR_Merged[currentIDX_hrrrh_A, HRRR["solar"]] * interpFac1
-            + HRRR_Merged[currentIDX_hrrrh, HRRR["solar"]] * interpFac2
-        )
-    elif "gfs" in sourceList:
-        InterPcurrent[DATA_CURRENT["solar"]] = (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["solar"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["solar"]] * interpFac2
-        )
-    elif "era5" in sourceList:
-        InterPcurrent[DATA_CURRENT["solar"]] = (
-            ERA5_MERGED[currentIDX_hrrrh_A, ERA5["surface_solar_radiation_downwards"]]
-            * interpFac1
-            + ERA5_MERGED[currentIDX_hrrrh, ERA5["surface_solar_radiation_downwards"]]
-            * interpFac2
-        ) / 3600
+    InterPcurrent[DATA_CURRENT["solar"]] = select_value(
+        [
+            (
+                lambda: "hrrrsubh" in sourceList,
+                lambda: hrrrSubHInterpolation[0, HRRR_SUBH["solar"]],
+            ),
+            (
+                lambda: "nbm" in sourceList,
+                lambda: interp_scalar(NBM_Merged, NBM["solar"]),
+            ),
+            (
+                lambda: has_hrrr_merged,
+                lambda: interp_scalar(HRRR_Merged, HRRR["solar"]),
+            ),
+            (
+                lambda: "gfs" in sourceList,
+                lambda: interp_scalar(GFS_Merged, GFS["solar"]),
+            ),
+            (
+                lambda: "era5" in sourceList,
+                lambda: interp_scalar(
+                    ERA5_MERGED,
+                    ERA5["surface_solar_radiation_downwards"],
+                )
+                / 3600,
+            ),
+        ],
+        default=MISSING_DATA,
+    )
 
     InterPcurrent[DATA_CURRENT["solar"]] = clipLog(
         InterPcurrent[DATA_CURRENT["solar"]],
@@ -765,32 +782,29 @@ def build_current_section(
         "Solar Current",
     )
 
-    if "nbm" in sourceList:
-        InterPcurrent[DATA_CURRENT["cape"]] = (
-            NBM_Merged[currentIDX_hrrrh_A, NBM["cape"]] * interpFac1
-            + NBM_Merged[currentIDX_hrrrh, NBM["cape"]] * interpFac2
-        )
-    elif has_hrrr_merged:
-        InterPcurrent[DATA_CURRENT["cape"]] = (
-            HRRR_Merged[currentIDX_hrrrh_A, HRRR["cape"]] * interpFac1
-            + HRRR_Merged[currentIDX_hrrrh, HRRR["cape"]] * interpFac2
-        )
-    elif "gfs" in sourceList:
-        InterPcurrent[DATA_CURRENT["cape"]] = (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["cape"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["cape"]] * interpFac2
-        )
-    elif "era5" in sourceList:
-        InterPcurrent[DATA_CURRENT["cape"]] = (
-            ERA5_MERGED[
-                currentIDX_hrrrh_A, ERA5["convective_available_potential_energy"]
-            ]
-            * interpFac1
-            + ERA5_MERGED[
-                currentIDX_hrrrh, ERA5["convective_available_potential_energy"]
-            ]
-            * interpFac2
-        )
+    InterPcurrent[DATA_CURRENT["cape"]] = select_value(
+        [
+            (
+                lambda: "nbm" in sourceList,
+                lambda: interp_scalar(NBM_Merged, NBM["cape"]),
+            ),
+            (
+                lambda: has_hrrr_merged,
+                lambda: interp_scalar(HRRR_Merged, HRRR["cape"]),
+            ),
+            (
+                lambda: "gfs" in sourceList,
+                lambda: interp_scalar(GFS_Merged, GFS["cape"]),
+            ),
+            (
+                lambda: "era5" in sourceList,
+                lambda: interp_scalar(
+                    ERA5_MERGED,
+                    ERA5["convective_available_potential_energy"],
+                ),
+            ),
+        ]
+    )
 
     InterPcurrent[DATA_CURRENT["cape"]] = clipLog(
         InterPcurrent[DATA_CURRENT["cape"]],
@@ -806,22 +820,20 @@ def build_current_section(
         InterPcurrent[DATA_CURRENT["solar"]],
     )
 
-    if "nbm" in sourceList:
-        InterPcurrent[DATA_CURRENT["feels_like"]] = (
-            NBM_Merged[currentIDX_hrrrh_A, NBM["apparent"]] * interpFac1
-            + NBM_Merged[currentIDX_hrrrh, NBM["apparent"]] * interpFac2
-        )
-    elif "gfs" in sourceList:
-        InterPcurrent[DATA_CURRENT["feels_like"]] = (
-            GFS_Merged[currentIDX_hrrrh_A, GFS["apparent"]] * interpFac1
-            + GFS_Merged[currentIDX_hrrrh, GFS["apparent"]] * interpFac2
-        )
-    elif timeMachine:
-        InterPcurrent[DATA_CURRENT["feels_like"]] = InterPcurrent[
-            DATA_CURRENT["apparent"]
-        ]
-    else:
-        InterPcurrent[DATA_CURRENT["feels_like"]] = MISSING_DATA
+    InterPcurrent[DATA_CURRENT["feels_like"]] = select_value(
+        [
+            (
+                lambda: "nbm" in sourceList,
+                lambda: interp_scalar(NBM_Merged, NBM["apparent"]),
+            ),
+            (
+                lambda: "gfs" in sourceList,
+                lambda: interp_scalar(GFS_Merged, GFS["apparent"]),
+            ),
+            (lambda: timeMachine, lambda: InterPcurrent[DATA_CURRENT["apparent"]]),
+        ],
+        default=MISSING_DATA,
+    )
 
     InterPcurrent[DATA_CURRENT["feels_like"]] = clipLog(
         InterPcurrent[DATA_CURRENT["feels_like"]],
