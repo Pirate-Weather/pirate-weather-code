@@ -89,9 +89,8 @@ def _extract_polygons_from_cap_test(cap_xml: str, source_id: str, cap_link: str)
                 "cap:areaDesc" if ns else "areaDesc", "", ns
             ).strip()
 
-            # Extract geocode information if present
-            geocode_name = ""
-            geocode_value = ""
+            # Extract geocode information if present (only used when no polygon)
+            geocode_entries = []
             for geocode_elem in area.findall("cap:geocode" if ns else "geocode", ns):
                 value_name = geocode_elem.findtext(
                     "cap:valueName" if ns else "valueName", "", ns
@@ -100,9 +99,7 @@ def _extract_polygons_from_cap_test(cap_xml: str, source_id: str, cap_link: str)
                     "cap:value" if ns else "value", "", ns
                 ).strip()
                 if value_name and value:
-                    geocode_name = value_name
-                    geocode_value = value
-                    break  # Use the first geocode found
+                    geocode_entries.append((value_name, value))
 
             # Process polygons if available
             has_polygon = False
@@ -127,6 +124,8 @@ def _extract_polygons_from_cap_test(cap_xml: str, source_id: str, cap_link: str)
                     try:
                         poly = Polygon(coords)
                         has_polygon = True
+                        # When polygon exists, create only ONE entry per polygon
+                        # Geocodes are not needed since the polygon defines the area
                         results.append(
                             (
                                 source_id,
@@ -138,8 +137,8 @@ def _extract_polygons_from_cap_test(cap_xml: str, source_id: str, cap_link: str)
                                 area_desc,
                                 poly,
                                 cap_link,
-                                geocode_name,
-                                geocode_value,
+                                "",
+                                "",
                             )
                         )
                     except Exception as e:
@@ -147,22 +146,23 @@ def _extract_polygons_from_cap_test(cap_xml: str, source_id: str, cap_link: str)
                         continue
 
             # If no polygon was found but geocode exists, still create an entry
-            if not has_polygon and geocode_name and geocode_value:
-                results.append(
-                    (
-                        source_id,
-                        event_text,
-                        description_text,
-                        severity,
-                        effective,
-                        expires,
-                        area_desc,
-                        None,  # No polygon geometry
-                        cap_link,
-                        geocode_name,
-                        geocode_value,
+            if not has_polygon:
+                for geocode_name, geocode_value in geocode_entries:
+                    results.append(
+                        (
+                            source_id,
+                            event_text,
+                            description_text,
+                            severity,
+                            effective,
+                            expires,
+                            area_desc,
+                            None,  # No polygon geometry
+                            cap_link,
+                            geocode_name,
+                            geocode_value,
+                        )
                     )
-                )
 
     return results
 
@@ -207,8 +207,8 @@ def test_extract_geocode_with_polygon():
     assert result[6] == "Test Area"  # area_desc
     assert result[7] is not None  # polygon (should be a Polygon object)
     assert result[8] == "http://test.com/alert"  # cap_link
-    assert result[9] == "EMMA_ID"  # geocode_name
-    assert result[10] == "IT003"  # geocode_value
+    assert result[9] == ""  # geocode_name (empty when polygon exists)
+    assert result[10] == ""  # geocode_value (empty when polygon exists)
 
 
 def test_extract_geocode_without_polygon():
@@ -287,8 +287,8 @@ def test_extract_no_geocode_with_polygon():
     assert result[10] == ""  # geocode_value (should be empty)
 
 
-def test_extract_multiple_geocodes_uses_first():
-    """Test that when multiple geocodes exist, only the first is used."""
+def test_extract_multiple_geocodes_no_duplicates():
+    """Test that multiple geocodes with polygon produce only one result with no geocode info."""
     cap_xml = """<?xml version="1.0" encoding="UTF-8"?>
 <alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
   <info>
@@ -322,8 +322,9 @@ def test_extract_multiple_geocodes_uses_first():
 
     assert len(results) == 1
     result = results[0]
-    assert result[9] == "EMMA_ID"  # geocode_name (first one)
-    assert result[10] == "IT003"  # geocode_value (first one)
+    # When polygon exists, geocodes are not included
+    assert result[9] == ""  # geocode_name (empty when polygon exists)
+    assert result[10] == ""  # geocode_value (empty when polygon exists)
 
 
 def test_extract_past_urgency_skipped():
@@ -722,3 +723,145 @@ def test_extract_italian_emma_id_alert():
     assert result[7] is None  # No polygon (only geocode)
     assert result[9] == "EMMA_ID"  # geocode_name
     assert result[10] == "IT003"  # geocode_value (Lombardia)
+
+
+def test_extract_canadian_alert_no_duplicates():
+    """Test that Canadian alerts with many geocodes per area don't create duplicates.
+
+    Canadian CAP alerts often have multiple geocodes per area (profile:CAP-CP:Location
+    codes for individual municipalities). Each area should produce only ONE result
+    when a polygon is present, not one result per geocode.
+
+    This test is based on a real Environment Canada fog advisory. The original
+    bug would create 21 duplicate entries (13 from the first area + 8 from the
+    second area) instead of the expected 2 entries (one per area).
+    """
+    cap_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+  <identifier>test-canadian-alert</identifier>
+  <sender>cap-pac@canada.ca</sender>
+  <info>
+    <language>en-CA</language>
+    <event>fog</event>
+    <urgency>Future</urgency>
+    <severity>Moderate</severity>
+    <certainty>Likely</certainty>
+    <effective>2025-12-03T12:10:08-00:00</effective>
+    <expires>2025-12-03T20:31:08-00:00</expires>
+    <headline>yellow advisory - fog - in effect</headline>
+    <description>Visibility will be near zero in fog.</description>
+    <area>
+      <areaDesc>North Coast - inland including Terrace</areaDesc>
+      <polygon>55.28,-128.02 54.54,-127.69 54.23,-128.61 54.07,-129.09 55.28,-128.02</polygon>
+      <geocode>
+        <valueName>layer:EC-MSC-SMC:1.0:CLC</valueName>
+        <value>089210</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949011</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949013</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949018</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949028</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949035</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949039</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949804</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949805</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949807</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949815</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949816</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949844</value>
+      </geocode>
+    </area>
+    <area>
+      <areaDesc>North Coast - inland including Kitimat</areaDesc>
+      <polygon>53.79,-128.89 53.85,-128.93 54.07,-129.09 54.23,-128.61 53.79,-128.89</polygon>
+      <geocode>
+        <valueName>layer:EC-MSC-SMC:1.0:CLC</valueName>
+        <value>089220</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5945006</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949005</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949013</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949020</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949803</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5951031</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5951053</value>
+      </geocode>
+    </area>
+  </info>
+</alert>"""
+
+    results = _extract_polygons_from_cap_test(
+        cap_xml, "ca-msc-en", "https://test.gc.ca/alert.xml"
+    )
+
+    # Should have exactly 2 results (one per area), NOT 21 (one per geocode)
+    assert len(results) == 2, f"Expected 2 results, got {len(results)}"
+
+    # First area
+    assert results[0][0] == "ca-msc-en"  # source_id
+    assert results[0][1] == "yellow advisory - fog - in effect"  # event
+    assert results[0][6] == "North Coast - inland including Terrace"  # area_desc
+    assert results[0][7] is not None  # polygon should exist
+    assert results[0][9] == ""  # geocode_name (empty when polygon exists)
+    assert results[0][10] == ""  # geocode_value (empty when polygon exists)
+
+    # Second area
+    assert results[1][6] == "North Coast - inland including Kitimat"  # area_desc
+    assert results[1][7] is not None  # polygon should exist
+    assert results[1][9] == ""  # geocode_name (empty when polygon exists)
+    assert results[1][10] == ""  # geocode_value (empty when polygon exists)
