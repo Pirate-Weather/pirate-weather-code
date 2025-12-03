@@ -125,6 +125,42 @@ async def calculate_grid_indexing(
     readHRRR = False
     readERA5 = False
 
+    def _get_grid_coords(
+        lat,
+        lon,
+        central_lon_deg,
+        central_lat_deg,
+        std_parallel_deg,
+        semimajor_axis,
+        min_x_grid,
+        min_y_grid,
+        delta,
+        x_min_bound,
+        y_min_bound,
+        x_max_bound,
+        y_max_bound,
+    ):
+        grid_lat, grid_lon, x, y = lambertGridMatch(
+            math.radians(central_lon_deg),
+            math.radians(central_lat_deg),
+            math.radians(std_parallel_deg),
+            semimajor_axis,
+            lat,
+            lon,
+            min_x_grid,
+            min_y_grid,
+            delta,
+        )
+
+        in_bounds = (
+            (x >= x_min_bound)
+            and (y >= y_min_bound)
+            and (x <= x_max_bound)
+            and (y <= y_max_bound)
+        )
+
+        return grid_lat, grid_lon, x, y, in_bounds
+
     if (
         az_lon < -134
         or az_lon > -61
@@ -137,32 +173,23 @@ async def calculate_grid_indexing(
         dataOut_hrrrh = False
         dataOut_h2 = False
     else:
-        central_longitude_hrrr = math.radians(262.5)
-        central_latitude_hrrr = math.radians(38.5)
-        standard_parallel_hrrr = math.radians(38.5)
-        semimajor_axis_hrrr = 6371229
-        hrrr_minX = -2697500
-        hrrr_minY = -1587300
-        hrrr_delta = 3000
-
-        hrrr_lat, hrrr_lon, x_hrrr, y_hrrr = lambertGridMatch(
-            central_longitude_hrrr,
-            central_latitude_hrrr,
-            standard_parallel_hrrr,
-            semimajor_axis_hrrr,
+        hrrr_lat, hrrr_lon, x_hrrr, y_hrrr, hrrr_in_bounds = _get_grid_coords(
             lat,
             lon,
-            hrrr_minX,
-            hrrr_minY,
-            hrrr_delta,
+            262.5,
+            38.5,
+            38.5,
+            6371229,
+            -2697500,
+            -1587300,
+            3000,
+            HRRR_X_MIN,
+            HRRR_Y_MIN,
+            HRRR_X_MAX,
+            HRRR_Y_MAX,
         )
 
-        if (
-            (x_hrrr < HRRR_X_MIN)
-            or (y_hrrr < HRRR_Y_MIN)
-            or (x_hrrr > HRRR_X_MAX)
-            or (y_hrrr > HRRR_Y_MAX)
-        ):
+        if not hrrr_in_bounds:
             dataOut = False
             dataOut_h2 = False
             dataOut_hrrrh = False
@@ -193,32 +220,23 @@ async def calculate_grid_indexing(
         rtma_lat = None
         rtma_lon = None
     else:
-        central_longitude_rtma = math.radians(RTMA_RU_CENTRAL_LONG)
-        central_latitude_rtma = math.radians(RTMA_RU_CENTRAL_LAT)
-        standard_parallel_rtma = math.radians(RTMA_RU_PARALLEL)
-        semimajor_axis_rtma = RTMA_RU_AXIS
-        rtma_minX = RTMA_RU_MIN_X
-        rtma_minY = RTMA_RU_MIN_Y
-        rtma_delta = RTMA_RU_DELTA
-
-        rtma_lat, rtma_lon, x_rtma, y_rtma = lambertGridMatch(
-            central_longitude_rtma,
-            central_latitude_rtma,
-            standard_parallel_rtma,
-            semimajor_axis_rtma,
+        rtma_lat, rtma_lon, x_rtma, y_rtma, rtma_in_bounds = _get_grid_coords(
             lat,
             lon,
-            rtma_minX,
-            rtma_minY,
-            rtma_delta,
+            RTMA_RU_CENTRAL_LONG,
+            RTMA_RU_CENTRAL_LAT,
+            RTMA_RU_PARALLEL,
+            RTMA_RU_AXIS,
+            RTMA_RU_MIN_X,
+            RTMA_RU_MIN_Y,
+            RTMA_RU_DELTA,
+            RTMA_RU_X_MIN,
+            RTMA_RU_Y_MIN,
+            RTMA_RU_X_MAX,
+            RTMA_RU_Y_MAX,
         )
 
-        if (
-            (x_rtma < RTMA_RU_X_MIN)
-            or (y_rtma < RTMA_RU_Y_MIN)
-            or (x_rtma > RTMA_RU_X_MAX)
-            or (y_rtma > RTMA_RU_Y_MAX)
-        ):
+        if not rtma_in_bounds:
             dataOut_rtma_ru = False
         else:
             readRTMA_RU = True
@@ -243,32 +261,23 @@ async def calculate_grid_indexing(
         nbm_lat = None
         nbm_lon = None
     else:
-        central_longitude_nbm = math.radians(265)
-        central_latitude_nbm = math.radians(25)
-        standard_parallel_nbm = math.radians(25.0)
-        semimajor_axis_nbm = 6371200
-        nbm_minX = -3271152.8
-        nbm_minY = -263793.46
-        nbm_delta = 2539.703000
-
-        nbm_lat, nbm_lon, x_nbm, y_nbm = lambertGridMatch(
-            central_longitude_nbm,
-            central_latitude_nbm,
-            standard_parallel_nbm,
-            semimajor_axis_nbm,
+        nbm_lat, nbm_lon, x_nbm, y_nbm, nbm_in_bounds = _get_grid_coords(
             lat,
             lon,
-            nbm_minX,
-            nbm_minY,
-            nbm_delta,
+            265,
+            25,
+            25.0,
+            6371200,
+            -3271152.8,
+            -263793.46,
+            2539.703000,
+            NBM_X_MIN,
+            NBM_Y_MIN,
+            NBM_X_MAX,
+            NBM_Y_MAX,
         )
 
-        if (
-            (x_nbm < NBM_X_MIN)
-            or (y_nbm < NBM_Y_MIN)
-            or (x_nbm > NBM_X_MAX)
-            or (y_nbm > NBM_Y_MAX)
-        ):
+        if not nbm_in_bounds:
             dataOut_nbm = False
             dataOut_nbmFire = False
         else:
