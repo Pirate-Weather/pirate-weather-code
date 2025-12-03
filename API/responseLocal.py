@@ -10,7 +10,6 @@ import datetime
 import logging
 import os
 import platform
-import re
 import sys
 import threading
 from typing import Union
@@ -26,6 +25,7 @@ from pirateweather_translations.dynamic_loader import load_all_translations
 from pytz import utc
 from timezonefinder import TimezoneFinder
 
+from API.alerts import build_alerts
 from API.api_utils import (
     clipLog,
     estimate_visibility_gultepe_rh_pr_numpy,
@@ -1131,154 +1131,17 @@ async def PW_Forecast(
         print("Alert Start")
         print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
 
-    alertDict = []
-    alertList = []
-    now_utc = datetime.datetime.now(datetime.UTC).astimezone(utc)
-
-    # If alerts are requested and in the US
-    try:
-        if (
-            (not timeMachine)
-            and (exAlerts == 0)
-            and (az_Lon > -127)
-            and (az_Lon < -65)
-            and (lat > 24)
-            and (lat < 50)
-        ):
-            # Read in NetCDF
-            # Find NetCDF Point based on alerts grid
-            alerts_lons = np.arange(-127, -65, 0.025)
-            alerts_lats = np.arange(24, 50, 0.025)
-
-            abslat = np.abs(alerts_lats - lat)
-            abslon = np.abs(alerts_lons - az_Lon)
-            alerts_y_p = np.argmin(abslat)
-            alerts_x_p = np.argmin(abslon)
-
-            alertDat = NWS_Alerts_Zarr[alerts_y_p, alerts_x_p]
-
-            if alertDat != "":
-                # Match if any alerts
-                alerts = str(alertDat).split("|")
-                # Loop through each alert
-                for alert in alerts:
-                    # Extract alert details
-                    alertDetails = alert.split("}{")
-
-                    alertOnset = datetime.datetime.strptime(
-                        alertDetails[3], "%Y-%m-%dT%H:%M:%S%z"
-                    ).astimezone(utc)
-                    alertEnd = datetime.datetime.strptime(
-                        alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
-                    ).astimezone(utc)
-
-                    # Format description newlines
-                    alertDescript = alertDetails[1]
-                    # Step 1: Replace double newlines with a single newline
-                    formatted_text = re.sub(r"(?<!\n)\n(?!\n)", " ", alertDescript)
-
-                    # Step 2: Replace remaining single newlines with a space
-                    formatted_text = re.sub(r"\n\n", "\n", formatted_text)
-
-                    alertDict = {
-                        "title": alertDetails[0],
-                        "regions": [s.lstrip() for s in alertDetails[2].split(";")],
-                        "severity": alertDetails[5],
-                        "time": int(
-                            (
-                                alertOnset
-                                - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(utc)
-                            ).total_seconds()
-                        ),
-                        "expires": int(
-                            (
-                                alertEnd
-                                - datetime.datetime(1970, 1, 1, 0, 0, 0).astimezone(utc)
-                            ).total_seconds()
-                        ),
-                        "description": formatted_text,
-                        "uri": alertDetails[6],
-                    }
-                    # Only append if alert has not already expired
-                    if alertEnd is None or alertEnd > now_utc:
-                        alertList.append(dict(alertDict))
-                    else:
-                        logger.debug("Skipping expired NWS alert: %s", alertDetails[0])
-
-    except Exception:
-        logger.exception("An Alert error occurred %s", loc_tag)
-
-    # Process WMO alerts for non-US locations
-    try:
-        if (
-            (not timeMachine)
-            and (exAlerts == 0)
-            and readWMOAlerts
-            and WMO_alertDat is not None
-            and WMO_alertDat != ""
-        ):
-            # WMO alerts use the same grid as was calculated earlier:
-            # wmo_alerts_lats = np.arange(-60, 85, 0.0625)
-            # wmo_alerts_lons = np.arange(-180, 180, 0.0625)
-            # WMO_alertDat was already read at line 2125
-
-            # Match if any alerts
-            wmo_alerts = str(WMO_alertDat).split("~")
-            # Loop through each alert
-            for wmo_alert in wmo_alerts:
-                # Extract alert details
-                # Format: event}{description}{area_desc}{effective}{expires}{severity}{URL
-                wmo_alertDetails = wmo_alert.split("}{")
-                # Ensure there are enough parts to parse basic info, preventing IndexError.
-                if len(wmo_alertDetails) < 3:
-                    continue
-
-                alertEnd = None
-                expires_ts = -999
-                alertOnset = None
-                onset_ts = -999
-                alert_severity = "Unknown"
-                alert_uri = ""
-
-                # Parse times - WMO times are in ISO format
-                if len(wmo_alertDetails) > 3 and wmo_alertDetails[3].strip():
-                    alertOnset = datetime.datetime.strptime(
-                        wmo_alertDetails[3], "%Y-%m-%dT%H:%M:%S%z"
-                    ).astimezone(utc)
-                    onset_ts = int(alertOnset.timestamp())
-
-                if len(wmo_alertDetails) > 4 and wmo_alertDetails[4].strip():
-                    alertEnd = datetime.datetime.strptime(
-                        wmo_alertDetails[4], "%Y-%m-%dT%H:%M:%S%z"
-                    ).astimezone(utc)
-                    expires_ts = int(alertEnd.timestamp())
-
-                if len(wmo_alertDetails) > 5:
-                    alert_severity = wmo_alertDetails[5]
-
-                if len(wmo_alertDetails) > 6:
-                    alert_uri = wmo_alertDetails[6]
-
-                wmo_alertDict = {
-                    "title": wmo_alertDetails[0],
-                    "regions": [
-                        s.lstrip() for s in wmo_alertDetails[2].split(";") if s.strip()
-                    ],
-                    "severity": alert_severity,
-                    "time": onset_ts,
-                    "expires": expires_ts,
-                    "description": wmo_alertDetails[1],
-                    "uri": alert_uri,
-                }
-
-                # Only append if alert has not already expired
-                if alertEnd is None or alertEnd > now_utc:
-                    alertList.append(dict(wmo_alertDict))
-                else:
-                    logger.debug("Skipping expired WMO alert: %s", alertDetails[0])
-
-    except Exception:
-        logger.exception("A WMO Alert error occurred %s", loc_tag)
+    alertList = build_alerts(
+        time_machine=timeMachine,
+        ex_alerts=exAlerts,
+        lat=lat,
+        az_lon=az_Lon,
+        nws_alerts_zarr=NWS_Alerts_Zarr,
+        wmo_alert_data=WMO_alertDat,
+        read_wmo_alerts=readWMOAlerts,
+        logger=logger,
+        loc_tag=loc_tag,
+    )
 
     with timing_tracker.track("Current block"):
         current_section = build_current_section(
