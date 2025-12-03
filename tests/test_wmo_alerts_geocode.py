@@ -722,3 +722,144 @@ def test_extract_italian_emma_id_alert():
     assert result[7] is None  # No polygon (only geocode)
     assert result[9] == "EMMA_ID"  # geocode_name
     assert result[10] == "IT003"  # geocode_value (Lombardia)
+
+
+def test_extract_canadian_alert_no_duplicates():
+    """Test that Canadian alerts with many geocodes per area don't create duplicates.
+
+    Canadian CAP alerts often have multiple geocodes per area (profile:CAP-CP:Location
+    codes for individual municipalities). Each area should produce only ONE result
+    when a polygon is present, not one result per geocode.
+
+    This test is based on a real Environment Canada fog advisory that was causing
+    13 duplicate alerts for the same location.
+    """
+    cap_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+  <identifier>test-canadian-alert</identifier>
+  <sender>cap-pac@canada.ca</sender>
+  <info>
+    <language>en-CA</language>
+    <event>fog</event>
+    <urgency>Future</urgency>
+    <severity>Moderate</severity>
+    <certainty>Likely</certainty>
+    <effective>2025-12-03T12:10:08-00:00</effective>
+    <expires>2025-12-03T20:31:08-00:00</expires>
+    <headline>yellow advisory - fog - in effect</headline>
+    <description>Visibility will be near zero in fog.</description>
+    <area>
+      <areaDesc>North Coast - inland including Terrace</areaDesc>
+      <polygon>55.28,-128.02 54.54,-127.69 54.23,-128.61 54.07,-129.09 55.28,-128.02</polygon>
+      <geocode>
+        <valueName>layer:EC-MSC-SMC:1.0:CLC</valueName>
+        <value>089210</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949011</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949013</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949018</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949028</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949035</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949039</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949804</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949805</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949807</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949815</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949816</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949844</value>
+      </geocode>
+    </area>
+    <area>
+      <areaDesc>North Coast - inland including Kitimat</areaDesc>
+      <polygon>53.79,-128.89 53.85,-128.93 54.07,-129.09 54.23,-128.61 53.79,-128.89</polygon>
+      <geocode>
+        <valueName>layer:EC-MSC-SMC:1.0:CLC</valueName>
+        <value>089220</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5945006</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949005</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949013</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949020</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5949803</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5951031</value>
+      </geocode>
+      <geocode>
+        <valueName>profile:CAP-CP:Location:0.3</valueName>
+        <value>5951053</value>
+      </geocode>
+    </area>
+  </info>
+</alert>"""
+
+    results = _extract_polygons_from_cap_test(
+        cap_xml, "ca-msc-en", "https://test.gc.ca/alert.xml"
+    )
+
+    # Should have exactly 2 results (one per area), NOT 21 (one per geocode)
+    assert len(results) == 2, f"Expected 2 results, got {len(results)}"
+
+    # First area
+    assert results[0][0] == "ca-msc-en"  # source_id
+    assert results[0][1] == "yellow advisory - fog - in effect"  # event
+    assert results[0][6] == "North Coast - inland including Terrace"  # area_desc
+    assert results[0][7] is not None  # polygon should exist
+    assert results[0][9] == "layer:EC-MSC-SMC:1.0:CLC"  # first geocode name
+    assert results[0][10] == "089210"  # first geocode value
+
+    # Second area
+    assert results[1][6] == "North Coast - inland including Kitimat"  # area_desc
+    assert results[1][7] is not None  # polygon should exist
+    assert results[1][9] == "layer:EC-MSC-SMC:1.0:CLC"  # first geocode name
+    assert results[1][10] == "089220"  # first geocode value

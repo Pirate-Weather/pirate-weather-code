@@ -232,22 +232,25 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                     try:
                         poly = Polygon(coords)
                         has_polygon = True
-                        for geocode_name, geocode_value in geocode_entries:
-                            results.append(
-                                (
-                                    source_id,
-                                    event_text,
-                                    description_text,
-                                    severity,
-                                    effective,
-                                    expires,
-                                    area_desc,
-                                    poly,
-                                    cap_link,
-                                    geocode_name or "",
-                                    geocode_value or "",
-                                )
+                        # When polygon exists, create only ONE entry per polygon
+                        # Use the first geocode entry for metadata (if any)
+                        first_geocode = geocode_entries[0] if geocode_entries else (None, None)
+                        geocode_name, geocode_value = first_geocode
+                        results.append(
+                            (
+                                source_id,
+                                event_text,
+                                description_text,
+                                severity,
+                                effective,
+                                expires,
+                                area_desc,
+                                poly,
+                                cap_link,
+                                geocode_name or "",
+                                geocode_value or "",
                             )
+                        )
                     except Exception as e:
                         logger.warning("Polygon construction failed: %s", e)
                         continue
