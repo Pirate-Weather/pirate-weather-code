@@ -277,7 +277,7 @@ async def prepare_initial_request(
     ex_gfs = int("gfs" in exclude_params)
     ex_rtma_ru = int("rtma_ru" in exclude_params)
     ex_ecmwf = int("ecmwf_ifs" in exclude_params)
-    summary_text = not ("summary" in exclude_params)
+    summary_text = "summary" not in exclude_params
     inc_day_night = int("day_night_forecast" in include_params)
 
     if (now_time - utc_time) > datetime.timedelta(hours=25):

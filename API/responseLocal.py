@@ -19,7 +19,7 @@ import metpy as mp
 import numpy as np
 from astral import LocationInfo, moon
 from astral.sun import sun
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import ORJSONResponse
 from metpy.calc import relative_humidity_from_dewpoint
 from pirateweather_translations.dynamic_loader import load_all_translations
@@ -29,7 +29,6 @@ from timezonefinder import TimezoneFinder
 from API.api_utils import (
     clipLog,
     estimate_visibility_gultepe_rh_pr_numpy,
-    fast_nearest_interp,
     replace_nan,
 )
 from API.constants.api_const import (
@@ -37,7 +36,6 @@ from API.constants.api_const import (
     COORDINATE_CONST,
     ETOPO_CONST,
     ROUNDING_RULES,
-    TIME_MACHINE_CONST,
 )
 from API.constants.clip_const import (
     CLIP_OZONE,
@@ -49,27 +47,6 @@ from API.constants.forecast_const import (
     DATA_HOURLY,
     DATA_MINUTELY,
 )
-from API.constants.grid_const import (
-    HRRR_X_MAX,
-    HRRR_X_MIN,
-    HRRR_Y_MAX,
-    HRRR_Y_MIN,
-    NBM_X_MAX,
-    NBM_X_MIN,
-    NBM_Y_MAX,
-    NBM_Y_MIN,
-    RTMA_RU_AXIS,
-    RTMA_RU_CENTRAL_LAT,
-    RTMA_RU_CENTRAL_LONG,
-    RTMA_RU_DELTA,
-    RTMA_RU_MIN_X,
-    RTMA_RU_MIN_Y,
-    RTMA_RU_PARALLEL,
-    RTMA_RU_X_MAX,
-    RTMA_RU_X_MIN,
-    RTMA_RU_Y_MAX,
-    RTMA_RU_Y_MIN,
-)
 
 # Project imports
 from API.constants.model_const import (
@@ -78,21 +55,16 @@ from API.constants.model_const import (
     GEFS,
     GFS,
     HRRR,
-    HRRR_SUBH,
     NBM,
 )
 from API.constants.shared_const import (
-    HISTORY_PERIODS,
     INGEST_VERSION_STR,
-    KELVIN_TO_CELSIUS,
     MISSING_DATA,
 )
-from API.constants.unit_const import country_units
 from API.current.metrics import build_current_section
 from API.daily.builder import build_daily_section
 from API.hourly.block import build_hourly_block
-from API.hourly.builder import initialize_time_grids
-from API.io.zarr_reader import WeatherParallel, update_zarr_store
+from API.io.zarr_reader import update_zarr_store
 from API.legacy.summary import (
     build_daily_summary,
     build_hourly_summary,
@@ -102,7 +74,7 @@ from API.minutely.builder import build_minutely_block
 from API.request.grid_indexing import ZarrSources, calculate_grid_indexing
 from API.request.preprocess import prepare_initial_request
 from API.utils.geo import _polar_is_all_day, rounder
-from API.utils.timing import TimingMiddleware, TimingTracker
+from API.utils.timing import TimingMiddleware
 
 Translations = load_all_translations()
 
@@ -275,15 +247,11 @@ async def PW_Forecast(
     timing_tracker = initial.timing_tracker
     tz_offset = initial.tz_offset
     tz_name = initial.tz_name
-    tzReq = initial.tz_req
     loc_name = initial.loc_name
     icon = initial.icon
     translation = initial.translation
-    extendFlag = initial.extend_flag
     version = initial.version
     tmExtra = initial.tm_extra
-    excludeParams = initial.exclude_params
-    includeParams = initial.include_params
     extraVars = initial.extra_vars
     exCurrently = initial.ex_currently
     exMinutely = initial.ex_minutely
@@ -315,11 +283,9 @@ async def PW_Forecast(
     baseDayUTC = initial.base_day_utc
     baseDayUTC_Grib = initial.base_day_utc_grib
     daily_days = initial.daily_days
-    daily_day_hours = initial.daily_day_hours
     ouputHours = initial.output_hours
     ouputDays = initial.output_days
     minute_array_grib = initial.minute_array_grib
-    minute_array = initial.minute_array
     InterTminute = initial.inter_tminute
     InterPminute = initial.inter_pminute
     InterPhour = initial.inter_phour
@@ -399,18 +365,10 @@ async def PW_Forecast(
     y_rtma = grid_result.y_rtma
     rtma_lat = grid_result.rtma_lat
     rtma_lon = grid_result.rtma_lon
-    x_nbm = grid_result.x_nbm
-    y_nbm = grid_result.y_nbm
-    nbm_lat = grid_result.nbm_lat
-    nbm_lon = grid_result.nbm_lon
     x_p = grid_result.x_p
     y_p = grid_result.y_p
     gfs_lat = grid_result.gfs_lat
     gfs_lon = grid_result.gfs_lon
-    x_p_eur = grid_result.x_p_eur
-    y_p_eur = grid_result.y_p_eur
-    lats_ecmwf = grid_result.lats_ecmwf
-    lons_ecmwf = grid_result.lons_ecmwf
     sourceIDX = grid_result.sourceIDX
 
     sourceTimes = dict()
@@ -1001,338 +959,6 @@ async def PW_Forecast(
         InterSday[i, DATA_DAY["moon_phase"]] = np.round(
             moon_phase_value, ROUNDING_RULES.get("moonPhase", 2)
         )
-
-    # Timing Check
-    if TIMING:
-        print("Interpolation Start")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-
-    # Interpolate for minutely
-    # Concatenate HRRR and HRRR2
-    if "gefs" in sourceList:
-        gefsMinuteInterpolation = np.zeros(
-            (len(minute_array_grib), len(dataOut_gefs[0, :]))
-        )
-    if "gfs" in sourceList:
-        gfsMinuteInterpolation = np.zeros(
-            (len(minute_array_grib), len(dataOut_gfs[0, :]))
-        )
-
-    if "ecmwf_ifs" in sourceList:
-        ecmwfMinuteInterpolation = np.zeros(
-            (len(minute_array_grib), len(dataOut_ecmwf[0, :]))
-        )
-
-    nbmMinuteInterpolation = np.zeros((len(minute_array_grib), 18))
-
-    if "hrrrsubh" in sourceList:
-        hrrrSubHInterpolation = np.zeros((len(minute_array_grib), len(dataOut[0, :])))
-        for i in range(len(dataOut[0, :]) - 1):
-            hrrrSubHInterpolation[:, i + 1] = np.interp(
-                minute_array_grib,
-                dataOut[:, 0].squeeze(),
-                dataOut[:, i + 1],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-
-        # Check for nan, which means SubH is out of range, and fall back to regular HRRR
-        if np.isnan(hrrrSubHInterpolation[1, 1]):
-            hrrrSubHInterpolation[:, HRRR_SUBH["gust"]] = np.interp(
-                minute_array_grib,
-                HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, HRRR["gust"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-            hrrrSubHInterpolation[:, HRRR_SUBH["pressure"]] = np.interp(
-                minute_array_grib,
-                HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, HRRR["pressure"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-            hrrrSubHInterpolation[:, HRRR_SUBH["temp"]] = np.interp(
-                minute_array_grib,
-                HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, HRRR["temp"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-            hrrrSubHInterpolation[:, HRRR_SUBH["dew"]] = np.interp(
-                minute_array_grib,
-                HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, HRRR["dew"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-            hrrrSubHInterpolation[:, HRRR_SUBH["wind_u"]] = np.interp(
-                minute_array_grib,
-                HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, HRRR["wind_u"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-            hrrrSubHInterpolation[:, HRRR_SUBH["wind_v"]] = np.interp(
-                minute_array_grib,
-                HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, HRRR["wind_v"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-            hrrrSubHInterpolation[:, HRRR_SUBH["intensity"]] = np.interp(
-                minute_array_grib,
-                HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, HRRR["intensity"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-            hrrrSubHInterpolation[:, HRRR_SUBH["snow"]] = np.interp(
-                minute_array_grib,
-                HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, HRRR["snow"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-            hrrrSubHInterpolation[:, HRRR_SUBH["ice"]] = np.interp(
-                minute_array_grib,
-                HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, HRRR["ice"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-            hrrrSubHInterpolation[:, HRRR_SUBH["freezing_rain"]] = np.interp(
-                minute_array_grib,
-                HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, HRRR["freezing_rain"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-            hrrrSubHInterpolation[:, HRRR_SUBH["rain"]] = np.interp(
-                minute_array_grib,
-                HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, HRRR["rain"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-            hrrrSubHInterpolation[:, HRRR_SUBH["refc"]] = np.interp(
-                minute_array_grib,
-                HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, HRRR["refc"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-            hrrrSubHInterpolation[:, HRRR_SUBH["solar"]] = np.interp(
-                minute_array_grib,
-                HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, HRRR["solar"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-
-            # Visibility is at a weird index
-            hrrrSubHInterpolation[:, HRRR_SUBH["vis"]] = np.interp(
-                minute_array_grib,
-                HRRR_Merged[:, 0].squeeze(),
-                HRRR_Merged[:, HRRR["vis"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-        if "gefs" in sourceList:
-            gefsMinuteInterpolation[:, GEFS["error"]] = np.interp(
-                minute_array_grib,
-                dataOut_gefs[:, 0].squeeze(),
-                dataOut_gefs[:, GEFS["error"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-
-    else:  # Usse GFS/GEFS
-        if "gefs" in sourceList:
-            for i in range(len(dataOut_gefs[0, :]) - 1):
-                gefsMinuteInterpolation[:, i + 1] = np.interp(
-                    minute_array_grib,
-                    dataOut_gefs[:, 0].squeeze(),
-                    dataOut_gefs[:, i + 1],
-                    left=MISSING_DATA,
-                    right=MISSING_DATA,
-                )
-
-        if "gfs" in sourceList:  # GFS Fallback
-            # This could be optimized by only interpolating the necessary columns
-            for i in range(len(dataOut_gfs[0, :]) - 1):
-                gfsMinuteInterpolation[:, i + 1] = np.interp(
-                    minute_array_grib,
-                    dataOut_gfs[:, 0].squeeze(),
-                    dataOut_gfs[:, i + 1],
-                    left=MISSING_DATA,
-                    right=MISSING_DATA,
-                )
-
-    if "ecmwf_ifs" in sourceList:
-        for i in range(len(dataOut_ecmwf[0, :]) - 1):
-            # Switch to nearest for precipitation type
-            if i + 1 == ECMWF["ptype"]:
-                ecmwfMinuteInterpolation[:, i + 1] = fast_nearest_interp(
-                    minute_array_grib,
-                    dataOut_ecmwf[:, 0].squeeze(),
-                    dataOut_ecmwf[:, i + 1],
-                )
-            else:
-                ecmwfMinuteInterpolation[:, i + 1] = np.interp(
-                    minute_array_grib,
-                    dataOut_ecmwf[:, 0].squeeze(),
-                    dataOut_ecmwf[:, i + 1],
-                    left=MISSING_DATA,
-                    right=MISSING_DATA,
-                )
-
-    if "nbm" in sourceList:
-        for i in [
-            NBM["accum"],
-            NBM["prob"],
-            NBM["rain"],
-            NBM["freezing_rain"],
-            NBM["snow"],
-            NBM["ice"],
-        ]:
-            nbmMinuteInterpolation[:, i] = np.interp(
-                minute_array_grib,
-                dataOut_nbm[:, 0].squeeze(),
-                dataOut_nbm[:, i],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-
-    era5_MinuteInterpolation = np.zeros((len(minute_array_grib), max(ERA5.values())))
-
-    if "era5" in sourceList:
-        for i in [
-            ERA5["large_scale_rain_rate"],
-            ERA5["convective_rain_rate"],
-            ERA5["large_scale_snowfall_rate_water_equivalent"],
-            ERA5["convective_snowfall_rate_water_equivalent"],
-        ]:
-            era5_MinuteInterpolation[:, i] = np.interp(
-                minute_array_grib,
-                ERA5_MERGED[:, 0].squeeze(),
-                ERA5_MERGED[:, i],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
-
-        # Precipitation type should be nearest, not linear
-        era5_MinuteInterpolation[:, ERA5["precipitation_type"]] = fast_nearest_interp(
-            minute_array_grib,
-            ERA5_MERGED[:, 0].squeeze(),
-            ERA5_MERGED[:, ERA5["precipitation_type"]],
-        )
-
-    # Timing Check
-    if TIMING:
-        print("Minutely Start")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
-
-    InterPminute[:, DATA_MINUTELY["time"]] = minute_array_grib
-
-    # "precipProbability"
-    # Use NBM where available, then ECMWF, then GEFS
-    if "nbm" in sourceList:
-        InterPminute[:, DATA_MINUTELY["prob"]] = (
-            nbmMinuteInterpolation[:, NBM["prob"]] * 0.01
-        )
-    elif "ecmwf_ifs" in sourceList:
-        InterPminute[:, DATA_MINUTELY["prob"]] = ecmwfMinuteInterpolation[
-            :, ECMWF["prob"]
-        ]
-    elif "gefs" in sourceList:
-        InterPminute[:, DATA_MINUTELY["prob"]] = gefsMinuteInterpolation[
-            :, GEFS["prob"]
-        ]
-    else:  # Missing (-999) fallback
-        InterPminute[:, DATA_MINUTELY["prob"]] = (
-            np.ones(len(minute_array_grib)) * MISSING_DATA
-        )
-
-    # Less than 5% set to 0
-    InterPminute[
-        InterPminute[:, DATA_MINUTELY["prob"]] < 0.05, DATA_MINUTELY["prob"]
-    ] = 0
-
-    # Precipitation Type
-    # IF HRRR, use that, then NBM, then ECMWF, then GEFS, else GFS
-    if "hrrrsubh" in sourceList:
-        for i in [
-            HRRR_SUBH["snow"],
-            HRRR_SUBH["ice"],
-            HRRR_SUBH["freezing_rain"],
-            HRRR_SUBH["rain"],
-        ]:
-            InterTminute[:, i - 7] = hrrrSubHInterpolation[:, i]
-    elif "nbm" in sourceList:
-        # 14 = Rain (1,2), 15 = Freezing Rain/ Ice (3,4), 16 = Snow (5,6,7), 17 = Ice (8,9)
-        # https://www.nco.ncep.noaa.gov/pmb/docs/grib2/grib2_doc/grib2_table4-201.shtml
-
-        # Snow
-        InterTminute[:, 1] = nbmMinuteInterpolation[:, NBM["snow"]]
-        # Ice
-        InterTminute[:, 2] = nbmMinuteInterpolation[:, NBM["ice"]]
-        # Freezing Rain
-        InterTminute[:, 3] = nbmMinuteInterpolation[:, NBM["freezing_rain"]]
-        # Rain
-        InterTminute[:, 4] = nbmMinuteInterpolation[:, NBM["rain"]]
-    elif "ecmwf_ifs" in sourceList:
-        # ECMWF precipitation type codes:
-        # 0=No precip, 1=Rain, 2=Thunderstorm, 3=Freezing rain, 4=Mixed/ice, 5=Snow,
-        # 6=Wet snow, 7=Mix of rain/snow, 8=Ice pellets, 9=Graupel, 10=Hail,
-        # 11=Drizzle, 12=Freezing drizzle, 255=Missing
-        ptype_ecmwf = ecmwfMinuteInterpolation[:, ECMWF["ptype"]]
-
-        # Map ECMWF ptype to InterTminute columns:
-        # InterTminute[:, 0] = none (not set here, default)
-        # InterTminute[:, 1] = snow (codes 5, 6, 9)
-        # InterTminute[:, 2] = ice/sleet (codes 4, 8, 10)
-        # InterTminute[:, 3] = freezing rain (codes 3, 12)
-        # InterTminute[:, 4] = rain (codes 1, 2, 7, 11)
-
-        InterTminute[:, 1] = np.where(
-            np.isin(ptype_ecmwf, [5, 6, 9]), 1, 0
-        )  # Snow, wet snow, graupel
-        InterTminute[:, 2] = np.where(
-            np.isin(ptype_ecmwf, [4, 8, 10]), 1, 0
-        )  # Mixed/ice, ice pellets, hail
-        InterTminute[:, 3] = np.where(
-            np.isin(ptype_ecmwf, [3, 12]), 1, 0
-        )  # Freezing rain, freezing drizzle
-        InterTminute[:, 4] = np.where(
-            np.isin(ptype_ecmwf, [1, 2, 7, 11]), 1, 0
-        )  # Rain, thunderstorm, rain/snow mix, drizzle
-
-    elif "gefs" in sourceList:
-        for i in [GEFS["snow"], GEFS["ice"], GEFS["freezing_rain"], GEFS["rain"]]:
-            InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
-    elif "gfs" in sourceList:  # GFS Fallback
-        for i in [GFS["snow"], GFS["ice"], GFS["freezing_rain"], GFS["rain"]]:
-            InterTminute[:, i - 11] = gfsMinuteInterpolation[:, i]
-    elif "era5" in sourceList:
-        # ERA5 precipitation type codes:
-        # 0=No precip, 1=Rain, 2=Thunderstorm, 3=Freezing rain, 4=Mixed/ice, 5=Snow,
-        # 6=Wet snow, 7=Mix of rain/snow, 8=Ice pellets, 9=Graupel, 10=Hail,
-        # 11=Drizzle, 12=Freezing drizzle, 255=Missing
-        ptype_era5 = era5_MinuteInterpolation[:, ERA5["precipitation_type"]]
-
-        InterTminute[:, 1] = np.where(
-            np.isin(ptype_era5, [5, 6, 9]), 1, 0
-        )  # Snow, wet snow, graupel
-        InterTminute[:, 2] = np.where(
-            np.isin(ptype_era5, [4, 8, 10]), 1, 0
-        )  # Mixed/ice, ice pellets, hail
-        InterTminute[:, 3] = np.where(
-            np.isin(ptype_era5, [3, 12]), 1, 0
-        )  # Freezing rain, freezing drizzle
-        InterTminute[:, 4] = np.where(
-            np.isin(ptype_era5, [1, 2, 7, 11]), 1, 0
-        )  # Rain, thunderstorm, rain/snow mix, drizzle
 
     def _stack_fields(*arrays):
         valid = [np.asarray(arr) for arr in arrays if arr is not None]

@@ -33,7 +33,7 @@ from API.constants.grid_const import (
     RTMA_RU_Y_MAX,
     RTMA_RU_Y_MIN,
 )
-from API.constants.model_const import ERA5, ECMWF, GEFS, GFS
+from API.constants.model_const import ERA5
 from API.constants.shared_const import HISTORY_PERIODS
 from API.utils.geo import lambertGridMatch
 
