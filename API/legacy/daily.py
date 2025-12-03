@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from typing import Tuple
 
-from API.PirateDayNightText import calculate_half_day_text
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
 from API.constants.text_const import (
     CLOUD_COVER_THRESHOLDS,
@@ -16,6 +15,7 @@ from API.constants.text_const import (
     PRECIP_PROB_THRESHOLD,
     WIND_THRESHOLDS,
 )
+from API.PirateDayNightText import calculate_half_day_text
 
 
 def pick_day_icon_and_summary(

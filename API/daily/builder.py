@@ -16,11 +16,11 @@ from API.constants.api_const import (
 )
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
 from API.constants.shared_const import MISSING_DATA
-from API.PirateDailyText import calculate_day_text
 from API.legacy.daily import (
     apply_legacy_half_day_text,
     pick_day_icon_and_summary,
 )
+from API.PirateDailyText import calculate_day_text
 
 
 @dataclass
