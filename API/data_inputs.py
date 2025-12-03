@@ -1,9 +1,11 @@
-import numpy as np
 import metpy as mp
+import numpy as np
 from metpy.calc import relative_humidity_from_dewpoint
+
 from API.api_utils import clipLog, estimate_visibility_gultepe_rh_pr_numpy
-from API.constants.model_const import ECMWF, ERA5, GEFS, GFS, HRRR, NBM
 from API.constants.clip_const import CLIP_OZONE, CLIP_SMOKE
+from API.constants.model_const import ECMWF, ERA5, GEFS, GFS, HRRR, NBM
+
 
 def _stack_fields(num_hours, *arrays):
     """
@@ -15,15 +17,18 @@ def _stack_fields(num_hours, *arrays):
         return np.full((num_hours, 1), np.nan)
     return np.column_stack(valid)
 
+
 def _wind_speed(u, v):
     if u is None or v is None:
         return None
     return np.sqrt(u**2 + v**2)
 
+
 def _bearing(u, v):
     if u is None or v is None:
         return None
     return np.rad2deg(np.mod(np.arctan2(u, v) + np.pi, 2 * np.pi))
+
 
 def prepare_data_inputs(
     source_list,
@@ -49,7 +54,7 @@ def prepare_data_inputs(
         inter_thour_inputs["nbm_ice"] = nbm_merged[:, NBM["ice"]]
         inter_thour_inputs["nbm_freezing_rain"] = nbm_merged[:, NBM["freezing_rain"]]
         inter_thour_inputs["nbm_rain"] = nbm_merged[:, NBM["rain"]]
-    
+
     if (
         ("hrrr_0-18" in source_list)
         and ("hrrr_18-48" in source_list)
@@ -59,10 +64,10 @@ def prepare_data_inputs(
         inter_thour_inputs["hrrr_ice"] = hrrr_merged[:, HRRR["ice"]]
         inter_thour_inputs["hrrr_freezing_rain"] = hrrr_merged[:, HRRR["freezing_rain"]]
         inter_thour_inputs["hrrr_rain"] = hrrr_merged[:, HRRR["rain"]]
-        
+
     if "ecmwf_ifs" in source_list and ecmwf_merged is not None:
         inter_thour_inputs["ecmwf_ptype"] = ecmwf_merged[:, ECMWF["ptype"]]
-        
+
     if "gefs" in source_list and gefs_merged is not None:
         inter_thour_inputs["gefs_snow"] = gefs_merged[:, GEFS["snow"]]
         inter_thour_inputs["gefs_ice"] = gefs_merged[:, GEFS["ice"]]
@@ -73,7 +78,7 @@ def prepare_data_inputs(
         inter_thour_inputs["gefs_ice"] = gfs_merged[:, GFS["ice"]]
         inter_thour_inputs["gefs_freezing_rain"] = gfs_merged[:, GFS["freezing_rain"]]
         inter_thour_inputs["gefs_rain"] = gfs_merged[:, GFS["rain"]]
-        
+
     if "era5" in source_list and era5_valid:
         inter_thour_inputs["era5_ptype"] = era5_merged[:, ERA5["precipitation_type"]]
 
@@ -81,25 +86,25 @@ def prepare_data_inputs(
     prcip_intensity_inputs = {}
     if "nbm" in source_list and nbm_merged is not None:
         prcip_intensity_inputs["nbm"] = nbm_merged[:, NBM["intensity"]]
-        
+
     if (
         ("hrrr_0-18" in source_list)
         and ("hrrr_18-48" in source_list)
         and (hrrr_merged is not None)
     ):
         prcip_intensity_inputs["hrrr"] = hrrr_merged[:, HRRR["intensity"]] * 3600
-        
+
     if "ecmwf_ifs" in source_list and ecmwf_merged is not None:
         prcip_intensity_inputs["ecmwf"] = ecmwf_merged[:, ECMWF["intensity"]] * 3600
-        
+
     if "gefs" in source_list and gefs_merged is not None:
         prcip_intensity_inputs["gfs_gefs"] = gefs_merged[:, GEFS["accum"]]
     elif "gfs" in source_list and gfs_merged is not None:
         prcip_intensity_inputs["gfs_gefs"] = gfs_merged[:, GFS["intensity"]] * 3600
-        
+
     era5_rain_intensity = None
     era5_snow_water_equivalent = None
-    
+
     if "era5" in source_list and era5_valid:
         prcip_intensity_inputs["era5"] = (
             era5_merged[:, ERA5["large_scale_rain_rate"]]
@@ -156,7 +161,7 @@ def prepare_data_inputs(
             ).magnitude
             * 100
         )
-        
+
     humidity_inputs = _stack_fields(
         num_hours,
         nbm_merged[:, NBM["humidity"]] if nbm_merged is not None else None,
@@ -291,7 +296,7 @@ def prepare_data_inputs(
             "Air quality Hour",
         )
         if hrrr_merged is not None
-        else None
+        else None,
     )
 
     # --- accum_inputs ---
@@ -304,9 +309,7 @@ def prepare_data_inputs(
         else None,
         gefs_merged[:, GEFS["accum"]] if gefs_merged is not None else None,
         gfs_merged[:, GFS["accum"]] if gfs_merged is not None else None,
-        era5_merged[:, ERA5["total_precipitation"]] * 1000
-        if era5_valid
-        else None,
+        era5_merged[:, ERA5["total_precipitation"]] * 1000 if era5_valid else None,
     )
 
     # --- nearstorm_inputs ---
@@ -315,11 +318,11 @@ def prepare_data_inputs(
             num_hours,
             np.maximum(gfs_merged[:, GFS["storm_dist"]], 0)
             if gfs_merged is not None
-            else None
+            else None,
         ),
         "dir": _stack_fields(
             num_hours,
-            gfs_merged[:, GFS["storm_dir"]] if gfs_merged is not None else None
+            gfs_merged[:, GFS["storm_dir"]] if gfs_merged is not None else None,
         ),
     }
 
@@ -336,9 +339,7 @@ def prepare_data_inputs(
         station_pressure_inputs = _stack_fields(
             num_hours,
             gfs_merged[:, GFS["station_pressure"]] if gfs_merged is not None else None,
-            era5_merged[:, ERA5["surface_pressure"]]
-            if era5_valid
-            else None,
+            era5_merged[:, ERA5["surface_pressure"]] if era5_valid else None,
         )
 
     return {

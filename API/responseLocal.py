@@ -14,19 +14,15 @@ import sys
 import threading
 from typing import Union
 
-import metpy as mp
 import numpy as np
 from astral import LocationInfo, moon
 from fastapi import FastAPI, Request
 from fastapi.responses import ORJSONResponse
-from metpy.calc import relative_humidity_from_dewpoint
 from pirateweather_translations.dynamic_loader import load_all_translations
 from timezonefinder import TimezoneFinder
 
 from API.alerts import build_alerts
 from API.api_utils import (
-    clipLog,
-    estimate_visibility_gultepe_rh_pr_numpy,
     replace_nan,
 )
 from API.constants.api_const import (
@@ -34,10 +30,6 @@ from API.constants.api_const import (
     COORDINATE_CONST,
     ETOPO_CONST,
     ROUNDING_RULES,
-)
-from API.constants.clip_const import (
-    CLIP_OZONE,
-    CLIP_SMOKE,
 )
 from API.constants.forecast_const import (
     DATA_CURRENT,
@@ -47,14 +39,6 @@ from API.constants.forecast_const import (
 )
 
 # Project imports
-from API.constants.model_const import (
-    ECMWF,
-    ERA5,
-    GEFS,
-    GFS,
-    HRRR,
-    NBM,
-)
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.current.metrics import build_current_section
 from API.daily.builder import build_daily_section
