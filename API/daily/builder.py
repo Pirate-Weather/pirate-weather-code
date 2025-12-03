@@ -16,17 +16,11 @@ from API.constants.api_const import (
 )
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
 from API.constants.shared_const import MISSING_DATA
-from API.constants.text_const import (
-    CLOUD_COVER_THRESHOLDS,
-    DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
-    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
-    FOG_THRESHOLD_METERS,
-    HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
-    PRECIP_PROB_THRESHOLD,
-    WIND_THRESHOLDS,
-)
 from API.PirateDailyText import calculate_day_text
-from API.PirateDayNightText import calculate_half_day_text
+from API.legacy.daily import (
+    apply_legacy_half_day_text,
+    pick_day_icon_and_summary,
+)
 
 
 @dataclass
@@ -590,72 +584,6 @@ def build_daily_section(
         half_night_display_sum[:, DATA_HOURLY["ice"]], accum_dec
     )
 
-    def _pick_day_icon_and_summary(
-        max_arr,
-        mean_arr,
-        sum_arr,
-        precip_type_arr,
-        precip_text_arr,
-        idx,
-        is_night=False,
-        mode="hourly",
-    ):
-        if mode == "hourly":
-            prob = max_arr[idx, DATA_HOURLY["prob"]]
-            rain = mean_arr[idx, DATA_HOURLY["rain"]]
-            ice = mean_arr[idx, DATA_HOURLY["ice"]]
-            snow = mean_arr[idx, DATA_HOURLY["snow"]]
-            accum_thresh = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
-            precip_type = precip_type_arr[idx]
-            precip_text = precip_text_arr[idx]
-        else:
-            prob = max_arr[idx, DATA_DAY["prob"]]
-            rain = sum_arr[idx, DATA_DAY["rain"]]
-            ice = sum_arr[idx, DATA_DAY["ice"]]
-            snow = sum_arr[idx, DATA_DAY["snow"]]
-            accum_thresh = DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
-            snow_thresh = DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * prepAccumUnit
-            precip_type = precip_type_arr[idx]
-            precip_text = precip_text_arr[idx]
-
-        if prob >= PRECIP_PROB_THRESHOLD and (
-            (mode == "hourly" and ((rain + ice) > accum_thresh or snow > accum_thresh))
-            or (mode == "daily" and ((rain + ice) > accum_thresh or snow > snow_thresh))
-        ):
-            return precip_type, precip_text
-
-        vis_val = (
-            mean_arr[idx, DATA_HOURLY["vis"]]
-            if mode == "hourly"
-            else mean_arr[idx, DATA_DAY["vis"]]
-        )
-        if vis_val < (FOG_THRESHOLD_METERS * visUnits):
-            return "fog", "Fog"
-
-        wind_val = (
-            mean_arr[idx, DATA_HOURLY["wind"]]
-            if mode == "hourly"
-            else mean_arr[idx, DATA_DAY["wind"]]
-        )
-        if wind_val > (WIND_THRESHOLDS["light"] * windUnit):
-            return "wind", "Windy"
-
-        cloud_val = (
-            mean_arr[idx, DATA_HOURLY["cloud"]]
-            if mode == "hourly"
-            else mean_arr[idx, DATA_DAY["cloud"]]
-        )
-        if cloud_val > CLOUD_COVER_THRESHOLDS["cloudy"]:
-            return "cloudy", "Cloudy"
-        if cloud_val > CLOUD_COVER_THRESHOLDS["partly_cloudy"]:
-            return (
-                ("partly-cloudy-night", "Partly Cloudy")
-                if is_night
-                else ("partly-cloudy-day", "Partly Cloudy")
-            )
-
-        return ("clear-night", "Clear") if is_night else ("clear-day", "Clear")
-
     for idx in range(0, daily_days):
 
         def _build_half_day_item(
@@ -726,15 +654,18 @@ def build_daily_section(
 
             return item
 
-        day_icon, day_text = _pick_day_icon_and_summary(
-            interp_half_day_max,
-            interp_half_day_mean,
-            interp_half_day_sum,
-            precip_type_half_day,
-            precip_text_half_day,
-            idx,
+        day_icon, day_text = pick_day_icon_and_summary(
+            max_arr=interp_half_day_max,
+            mean_arr=interp_half_day_mean,
+            sum_arr=interp_half_day_sum,
+            precip_type_arr=precip_type_half_day,
+            precip_text_arr=precip_text_half_day,
+            idx=idx,
             is_night=is_all_night,
             mode="hourly",
+            prep_accum_unit=prepAccumUnit,
+            vis_units=visUnits,
+            wind_unit=windUnit,
         )
 
         day_item = _build_half_day_item(
@@ -751,19 +682,23 @@ def build_daily_section(
             interp_half_day_mean,
         )
 
-        try:
-            if idx < 8 and summaryText:
-                dayIcon, dayText = calculate_half_day_text(
-                    hourList_si[(idx * 24) + 4 : (idx * 24) + 17],
-                    not is_all_night,
-                    str(tz_name),
-                    icon_set=icon,
-                    unit_system=unitSystem,
-                )
-                day_item["summary"] = translation.translate(["sentence", dayText])
-                day_item["icon"] = dayIcon
-        except Exception:
-            logger.exception("DAY HALF DAY TEXT GEN ERROR %s", loc_tag)
+        if idx < 8:
+            day_text, day_icon = apply_legacy_half_day_text(
+                summary_text=summaryText,
+                translation=translation,
+                hour_list_slice=hourList_si[(idx * 24) + 4 : (idx * 24) + 17],
+                is_day=not is_all_night,
+                tz_name=tz_name,
+                icon_set=icon,
+                unit_system=unitSystem,
+                fallback_text=day_item["summary"],
+                fallback_icon=day_item["icon"],
+                logger=logger,
+                loc_tag=loc_tag,
+                phase="DAY HALF DAY",
+            )
+            day_item["summary"] = day_text
+            day_item["icon"] = day_icon
 
         if version < 2:
             day_item.pop("liquidAccumulation", None)
@@ -779,15 +714,18 @@ def build_daily_section(
 
         day_night_list.append(day_item)
 
-        day_icon, day_text = _pick_day_icon_and_summary(
-            interp_half_night_max,
-            interp_half_night_mean,
-            interp_half_night_sum,
-            precip_type_half_night,
-            precip_text_half_night,
-            idx,
+        day_icon, day_text = pick_day_icon_and_summary(
+            max_arr=interp_half_night_max,
+            mean_arr=interp_half_night_mean,
+            sum_arr=interp_half_night_sum,
+            precip_type_arr=precip_type_half_night,
+            precip_text_arr=precip_text_half_night,
+            idx=idx,
             is_night=not is_all_day,
             mode="hourly",
+            prep_accum_unit=prepAccumUnit,
+            vis_units=visUnits,
+            wind_unit=windUnit,
         )
 
         day_item = _build_half_day_item(
@@ -804,20 +742,23 @@ def build_daily_section(
             interp_half_night_mean,
         )
 
-        try:
-            if idx < 8 and summaryText:
-                dayIcon, dayText = calculate_half_day_text(
-                    hourList_si[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
-                    is_all_day,
-                    str(tz_name),
-                    icon_set=icon,
-                    unit_system=unitSystem,
-                )
-
-                day_item["summary"] = translation.translate(["sentence", dayText])
-                day_item["icon"] = dayIcon
-        except Exception:
-            logger.exception("NIGHT HALF DAY TEXT GEN ERROR %s", loc_tag)
+        if idx < 8:
+            day_text, day_icon = apply_legacy_half_day_text(
+                summary_text=summaryText,
+                translation=translation,
+                hour_list_slice=hourList_si[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
+                is_day=is_all_day,
+                tz_name=tz_name,
+                icon_set=icon,
+                unit_system=unitSystem,
+                fallback_text=day_item["summary"],
+                fallback_icon=day_item["icon"],
+                logger=logger,
+                loc_tag=loc_tag,
+                phase="NIGHT HALF DAY",
+            )
+            day_item["summary"] = day_text
+            day_item["icon"] = day_icon
 
         if version < 2:
             day_item.pop("liquidAccumulation", None)
@@ -833,15 +774,18 @@ def build_daily_section(
 
         day_night_list.append(day_item)
 
-        dayIcon, dayText = _pick_day_icon_and_summary(
-            InterPdayMax4am,
-            InterPday4am,
-            InterPdaySum4am,
-            PTypeDay,
-            PTextDay,
-            idx,
+        dayIcon, dayText = pick_day_icon_and_summary(
+            max_arr=InterPdayMax4am,
+            mean_arr=InterPday4am,
+            sum_arr=InterPdaySum4am,
+            precip_type_arr=PTypeDay,
+            precip_text_arr=PTextDay,
+            idx=idx,
             is_night=is_all_night,
             mode="daily",
+            prep_accum_unit=prepAccumUnit,
+            vis_units=visUnits,
+            wind_unit=windUnit,
         )
 
         if dayIcon == "none":
