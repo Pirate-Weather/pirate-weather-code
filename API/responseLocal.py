@@ -564,6 +564,7 @@ async def PW_Forecast(
     inputs = prepare_data_inputs(
         source_list=sourceList,
         nbm_merged=NBM_Merged,
+        nbm_fire_merged=NBM_Fire_Merged,
         hrrr_merged=HRRR_Merged,
         ecmwf_merged=ECMWF_Merged,
         gefs_merged=GEFS_Merged,
@@ -594,6 +595,14 @@ async def PW_Forecast(
     station_pressure_inputs = inputs["station_pressure_inputs"]
     era5_rain_intensity = inputs["era5_rain_intensity"]
     era5_snow_water_equivalent = inputs["era5_snow_water_equivalent"]
+    fire_inputs = inputs["fire_inputs"]
+    feels_like_inputs = inputs["feels_like_inputs"]
+    solar_inputs = inputs["solar_inputs"]
+    cape_inputs = inputs["cape_inputs"]
+    rain_intensity_inputs = inputs["rain_intensity_inputs"]
+    snow_intensity_inputs = inputs["snow_intensity_inputs"]
+    ice_intensity_inputs = inputs["ice_intensity_inputs"]
+    error_inputs = inputs["error_inputs"]
 
     # Generate the hourly forecast section
     with timing_tracker.track("Hourly block"):
@@ -651,6 +660,14 @@ async def PW_Forecast(
             station_pressure_inputs=station_pressure_inputs,
             era5_rain_intensity=era5_rain_intensity,
             era5_snow_water_equivalent=era5_snow_water_equivalent,
+            fire_inputs=fire_inputs,
+            feels_like_inputs=feels_like_inputs,
+            solar_inputs=solar_inputs,
+            cape_inputs=cape_inputs,
+            rain_intensity_inputs=rain_intensity_inputs,
+            snow_intensity_inputs=snow_intensity_inputs,
+            ice_intensity_inputs=ice_intensity_inputs,
+            error_inputs=error_inputs,
         )
 
     pTypeMap = np.array(["none", "snow", "sleet", "sleet", "rain"])

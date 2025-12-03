@@ -3,8 +3,16 @@ import numpy as np
 from metpy.calc import relative_humidity_from_dewpoint
 
 from API.api_utils import clipLog, estimate_visibility_gultepe_rh_pr_numpy
-from API.constants.clip_const import CLIP_OZONE, CLIP_SMOKE
-from API.constants.model_const import ECMWF, ERA5, GEFS, GFS, HRRR, NBM
+from API.constants.clip_const import CLIP_OZONE, CLIP_SMOKE, CLIP_UV
+from API.constants.model_const import (
+    ECMWF,
+    ERA5,
+    GEFS,
+    GFS,
+    HRRR,
+    NBM,
+    NBM_FIRE_INDEX,
+)
 
 
 def _stack_fields(num_hours, *arrays):
@@ -33,6 +41,7 @@ def _bearing(u, v):
 def prepare_data_inputs(
     source_list,
     nbm_merged,
+    nbm_fire_merged,
     hrrr_merged,
     ecmwf_merged,
     gefs_merged,
@@ -342,6 +351,76 @@ def prepare_data_inputs(
             era5_merged[:, ERA5["surface_pressure"]] if era5_valid else None,
         )
 
+    # --- fire_inputs ---
+    fire_inputs = _stack_fields(
+        num_hours,
+        nbm_fire_merged[:, NBM_FIRE_INDEX] if nbm_fire_merged is not None else None,
+    )
+
+    # --- feels_like_inputs ---
+    feels_like_inputs = _stack_fields(
+        num_hours,
+        nbm_merged[:, NBM["apparent"]] if nbm_merged is not None else None,
+        gfs_merged[:, GFS["apparent"]] if gfs_merged is not None else None,
+    )
+
+    # --- solar_inputs ---
+    solar_inputs = _stack_fields(
+        num_hours,
+        nbm_merged[:, NBM["solar"]] if nbm_merged is not None else None,
+        hrrr_merged[:, HRRR["solar"]] if hrrr_merged is not None else None,
+        gfs_merged[:, GFS["solar"]] if gfs_merged is not None else None,
+        era5_merged[:, ERA5["surface_solar_radiation_downwards"]] / 3600
+        if era5_valid
+        else None,
+    )
+
+    # --- cape_inputs ---
+    cape_inputs = _stack_fields(
+        num_hours,
+        nbm_merged[:, NBM["cape"]] if nbm_merged is not None else None,
+        hrrr_merged[:, HRRR["cape"]] if hrrr_merged is not None else None,
+        gfs_merged[:, GFS["cape"]] if gfs_merged is not None else None,
+        era5_merged[:, ERA5["convective_available_potential_energy"]]
+        if era5_valid
+        else None,
+    )
+
+    # --- rain_intensity_inputs ---
+    rain_intensity_inputs = _stack_fields(
+        num_hours,
+        nbm_merged[:, NBM["rain"]] if nbm_merged is not None else None,
+        hrrr_merged[:, HRRR["rain"]] if hrrr_merged is not None else None,
+        gefs_merged[:, GEFS["rain"]] if gefs_merged is not None else None,
+        gfs_merged[:, GFS["rain"]] if gfs_merged is not None else None,
+        era5_rain_intensity if era5_valid else None,
+    )
+
+    # --- snow_intensity_inputs ---
+    snow_intensity_inputs = _stack_fields(
+        num_hours,
+        nbm_merged[:, NBM["snow"]] if nbm_merged is not None else None,
+        hrrr_merged[:, HRRR["snow"]] if hrrr_merged is not None else None,
+        gefs_merged[:, GEFS["snow"]] if gefs_merged is not None else None,
+        gfs_merged[:, GFS["snow"]] if gfs_merged is not None else None,
+        era5_snow_water_equivalent if era5_valid else None,
+    )
+
+    # --- ice_intensity_inputs ---
+    ice_intensity_inputs = _stack_fields(
+        num_hours,
+        nbm_merged[:, NBM["ice"]] if nbm_merged is not None else None,
+        hrrr_merged[:, HRRR["ice"]] if hrrr_merged is not None else None,
+        gefs_merged[:, GEFS["ice"]] if gefs_merged is not None else None,
+        gfs_merged[:, GFS["ice"]] if gfs_merged is not None else None,
+    )
+
+    # --- error_inputs ---
+    error_inputs = _stack_fields(
+        num_hours,
+        gefs_merged[:, GEFS["error"]] if gefs_merged is not None else None,
+    )
+
     return {
         "InterThour_inputs": inter_thour_inputs,
         "prcipIntensity_inputs": prcip_intensity_inputs,
@@ -364,4 +443,12 @@ def prepare_data_inputs(
         "station_pressure_inputs": station_pressure_inputs,
         "era5_rain_intensity": era5_rain_intensity,
         "era5_snow_water_equivalent": era5_snow_water_equivalent,
+        "fire_inputs": fire_inputs,
+        "feels_like_inputs": feels_like_inputs,
+        "solar_inputs": solar_inputs,
+        "cape_inputs": cape_inputs,
+        "rain_intensity_inputs": rain_intensity_inputs,
+        "snow_intensity_inputs": snow_intensity_inputs,
+        "ice_intensity_inputs": ice_intensity_inputs,
+        "error_inputs": error_inputs,
     }

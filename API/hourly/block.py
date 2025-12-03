@@ -16,14 +16,9 @@ from API.constants.clip_const import (
 )
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
 from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
-from API.constants.text_const import (
-    CLOUD_COVER_THRESHOLDS,
-    FOG_THRESHOLD_METERS,
-    HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
-    PRECIP_PROB_THRESHOLD,
-    WIND_THRESHOLDS,
-)
+
 from API.legacy.hourly import apply_legacy_hourly_text
+from API.PirateText import calculate_text
 from API.utils.precip import dbz_to_rate
 
 
@@ -71,6 +66,14 @@ def build_hourly_block(
     station_pressure_inputs,
     era5_rain_intensity,
     era5_snow_water_equivalent,
+    fire_inputs,
+    feels_like_inputs,
+    solar_inputs,
+    cape_inputs,
+    rain_intensity_inputs,
+    snow_intensity_inputs,
+    ice_intensity_inputs,
+    error_inputs,
 ):
     """Build hourly output objects and summary text/icon lists."""
 
@@ -165,19 +168,8 @@ def build_hourly_block(
     InterPhour[InterPhour[:, DATA_HOURLY["prob"]] < 0.05, DATA_HOURLY["prob"]] = 0
     InterPhour[InterPhour[:, DATA_HOURLY["prob"]] == 0, 2] = 0
 
-    ecmwf_prob = prcipProbability_inputs.get("ecmwf")
-    gefs_prob = prcipProbability_inputs.get("gefs")
-    empty_prob = np.full(len(hour_array_grib), np.nan)
-    ecmwf_prob_arr = ecmwf_prob if ecmwf_prob is not None else empty_prob
-    gefs_prob_arr = gefs_prob if gefs_prob is not None else empty_prob
-    InterPhour[:, DATA_HOURLY["error"]] = np.where(
-        ~np.isnan(ecmwf_prob_arr),
-        ecmwf_prob_arr * 1000,
-        np.where(
-            ~np.isnan(gefs_prob_arr),
-            gefs_prob_arr,
-            InterPhour[:, DATA_HOURLY["error"]],
-        ),
+    InterPhour[:, DATA_HOURLY["error"]] = np.choose(
+        np.argmin(np.isnan(error_inputs), axis=1), error_inputs.T
     )
 
     InterPhour[:, DATA_HOURLY["temp"]] = np.choose(
@@ -275,9 +267,18 @@ def build_hourly_block(
     InterPhour[:, DATA_HOURLY["apparent"]] = np.choose(
         np.argmin(np.isnan(apparent_inputs), axis=1), apparent_inputs.T
     )
-    InterPhour[:, DATA_HOURLY["fire"]] = InterPhour[:, DATA_HOURLY["fire"]]
-    InterPhour[:, DATA_HOURLY["solar"]] = InterPhour[:, DATA_HOURLY["solar"]]
-    InterPhour[:, DATA_HOURLY["cape"]] = InterPhour[:, DATA_HOURLY["cape"]]
+    InterPhour[:, DATA_HOURLY["fire"]] = np.choose(
+        np.argmin(np.isnan(fire_inputs), axis=1), fire_inputs.T
+    )
+    InterPhour[:, DATA_HOURLY["solar"]] = np.choose(
+        np.argmin(np.isnan(solar_inputs), axis=1), solar_inputs.T
+    )
+    InterPhour[:, DATA_HOURLY["cape"]] = np.choose(
+        np.argmin(np.isnan(cape_inputs), axis=1), cape_inputs.T
+    )
+    InterPhour[:, DATA_HOURLY["feels_like"]] = np.choose(
+        np.argmin(np.isnan(feels_like_inputs), axis=1), feels_like_inputs.T
+    )
 
     if station_pressure_inputs is not None:
         InterPhour[:, DATA_HOURLY["station_pressure"]] = np.choose(
@@ -316,36 +317,15 @@ def build_hourly_block(
         InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["ice"]] = 0
         InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["prob"]] = 0
 
-    InterPhour[:, DATA_HOURLY["rain_intensity"]] = 0
-    InterPhour[:, DATA_HOURLY["snow_intensity"]] = 0
-    InterPhour[:, DATA_HOURLY["ice_intensity"]] = 0
-
-    if "era5" in source_list and era5_rain_intensity is not None:
-        InterPhour[:, DATA_HOURLY["rain_intensity"]] = era5_rain_intensity
-        era5_snow_intensity_si = era5_snow_water_equivalent
-        InterPhour[:, DATA_HOURLY["snow_intensity"]] = era5_snow_intensity_si
-    else:
-        rain_mask = InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["rain"]
-        InterPhour[rain_mask, DATA_HOURLY["rain_intensity"]] = InterPhour[
-            rain_mask, DATA_HOURLY["intensity"]
-        ]
-
-        snow_mask = InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["snow"]
-        snow_indices = np.where(snow_mask)[0]
-        if snow_indices.size > 0:
-            snow_intensity_si = dbz_to_rate(
-                InterPhour[snow_indices, DATA_HOURLY["intensity"]],
-                np.full(snow_indices.size, "snow", dtype=object),
-                min_dbz=REFC_THRESHOLD,
-            )
-            InterPhour[snow_indices, DATA_HOURLY["snow_intensity"]] = snow_intensity_si
-
-        sleet_mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["ice"]) | (
-            InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["sleet"]
-        )
-        InterPhour[sleet_mask, DATA_HOURLY["ice_intensity"]] = InterPhour[
-            sleet_mask, DATA_HOURLY["intensity"]
-        ]
+    InterPhour[:, DATA_HOURLY["rain_intensity"]] = np.choose(
+        np.argmin(np.isnan(rain_intensity_inputs), axis=1), rain_intensity_inputs.T
+    )
+    InterPhour[:, DATA_HOURLY["snow_intensity"]] = np.choose(
+        np.argmin(np.isnan(snow_intensity_inputs), axis=1), snow_intensity_inputs.T
+    )
+    InterPhour[:, DATA_HOURLY["ice_intensity"]] = np.choose(
+        np.argmin(np.isnan(ice_intensity_inputs), axis=1), ice_intensity_inputs.T
+    )
 
     pTypeMap = np.array(["none", "snow", "sleet", "sleet", "rain"])
     pTextMap = np.array(["None", "Snow", "Sleet", "Sleet", "Rain"])
@@ -549,71 +529,43 @@ def build_hourly_objects(
         else:
             isDay = False
 
-        if InterPhour[idx, DATA_HOURLY["prob"]] >= PRECIP_PROB_THRESHOLD and (
-            (
-                (
-                    InterPhour[idx, DATA_HOURLY["rain"]]
-                    + InterPhour[idx, DATA_HOURLY["ice"]]
-                )
-                > HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM
-            )
-            or (
-                InterPhour[idx, DATA_HOURLY["snow"]]
-                > HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM
-            )
-        ):
-            hourIcon = PTypeHour[idx]
-            hourText = PTextHour[idx]
-        elif InterPhour[idx, DATA_HOURLY["vis"]] < FOG_THRESHOLD_METERS:
-            hourIcon = "fog"
-            hourText = "Fog"
-        elif InterPhour[idx, DATA_HOURLY["wind"]] > WIND_THRESHOLDS["light"]:
-            hourIcon = "wind"
-            hourText = "Windy"
-        elif InterPhour[idx, DATA_HOURLY["cloud"]] > CLOUD_COVER_THRESHOLDS["cloudy"]:
-            hourIcon = "cloudy"
-            hourText = "Cloudy"
-        elif (
-            InterPhour[idx, DATA_HOURLY["cloud"]]
-            > CLOUD_COVER_THRESHOLDS["partly_cloudy"]
-        ):
-            hourText = "Partly Cloudy"
-
-            if (
-                hour_array_grib[idx]
-                < InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]
-            ):
-                hourIcon = "partly-cloudy-night"
-            elif (
-                hour_array_grib[idx]
-                >= InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]
-                and hour_array_grib[idx]
-                <= InterSday[hourlyDayIndex[idx], DATA_DAY["sunset"]]
-            ):
-                hourIcon = "partly-cloudy-day"
-            else:
-                hourIcon = "partly-cloudy-night"
-        else:
-            hourText = "Clear"
-
-            if (
-                hour_array_grib[idx]
-                < InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]
-            ):
-                hourIcon = "clear-night"
-            elif (
-                hour_array_grib[idx]
-                <= InterSday[hourlyDayIndex[idx], DATA_DAY["sunset"]]
-            ):
-                hourIcon = "clear-day"
-            else:
-                hourIcon = "clear-night"
-
         accum_display = (
             hourly_display[idx, DATA_HOURLY["rain"]]
             + hourly_display[idx, DATA_HOURLY["snow"]]
             + hourly_display[idx, DATA_HOURLY["ice"]]
         )
+
+        hourItem_si = {
+            "time": int(hour_array_grib[idx]),
+            "temperature": InterPhour[idx, DATA_HOURLY["temp"]],
+            "dewPoint": InterPhour[idx, DATA_HOURLY["dew"]],
+            "humidity": InterPhour[idx, DATA_HOURLY["humidity"]],
+            "windSpeed": InterPhour[idx, DATA_HOURLY["wind"]],
+            "visibility": InterPhour[idx, DATA_HOURLY["vis"]],
+            "cloudCover": InterPhour[idx, DATA_HOURLY["cloud"]],
+            "smoke": InterPhour[idx, DATA_HOURLY["smoke"]],
+            "precipType": PTypeHour[idx],
+            "precipProbability": InterPhour[idx, DATA_HOURLY["prob"]],
+            "cape": InterPhour[idx, DATA_HOURLY["cape"]],
+            "liquidAccumulation": InterPhour[idx, DATA_HOURLY["rain"]],
+            "snowAccumulation": InterPhour[idx, DATA_HOURLY["snow"]],
+            "iceAccumulation": InterPhour[idx, DATA_HOURLY["ice"]],
+            "rainIntensity": InterPhour[idx, DATA_HOURLY["rain_intensity"]],
+            "snowIntensity": InterPhour[idx, DATA_HOURLY["snow_intensity"]],
+            "iceIntensity": InterPhour[idx, DATA_HOURLY["ice_intensity"]],
+            "precipIntensity": InterPhour[idx, DATA_HOURLY["intensity"]],
+            "precipIntensityError": InterPhour[idx, DATA_HOURLY["error"]],
+        }
+
+
+        if summaryText:
+            hourText, hourIcon = calculate_text(hourItem_si, isDay, "hour", icon)
+            hourText = translation.translate(["title", hourText])
+        else:
+            hourText, hourIcon = apply_legacy_hourly_text(
+                hour_item_si=hourItem_si,
+                is_day=isDay,
+            )
 
         hourItem = {
             "time": int(hour_array_grib[idx])
@@ -664,40 +616,7 @@ def build_hourly_objects(
                 idx, DATA_HOURLY["station_pressure"]
             ]
 
-        hourItem_si = {
-            "time": int(hour_array_grib[idx]),
-            "temperature": InterPhour[idx, DATA_HOURLY["temp"]],
-            "dewPoint": InterPhour[idx, DATA_HOURLY["dew"]],
-            "humidity": InterPhour[idx, DATA_HOURLY["humidity"]],
-            "windSpeed": InterPhour[idx, DATA_HOURLY["wind"]],
-            "visibility": InterPhour[idx, DATA_HOURLY["vis"]],
-            "cloudCover": InterPhour[idx, DATA_HOURLY["cloud"]],
-            "smoke": InterPhour[idx, DATA_HOURLY["smoke"]],
-            "precipType": PTypeHour[idx],
-            "precipProbability": InterPhour[idx, DATA_HOURLY["prob"]],
-            "cape": InterPhour[idx, DATA_HOURLY["cape"]],
-            "liquidAccumulation": InterPhour[idx, DATA_HOURLY["rain"]],
-            "snowAccumulation": InterPhour[idx, DATA_HOURLY["snow"]],
-            "iceAccumulation": InterPhour[idx, DATA_HOURLY["ice"]],
-            "rainIntensity": InterPhour[idx, DATA_HOURLY["rain_intensity"]],
-            "snowIntensity": InterPhour[idx, DATA_HOURLY["snow_intensity"]],
-            "iceIntensity": InterPhour[idx, DATA_HOURLY["ice_intensity"]],
-            "precipIntensity": InterPhour[idx, DATA_HOURLY["intensity"]],
-            "precipIntensityError": InterPhour[idx, DATA_HOURLY["error"]],
-        }
-
-        hour_summary, hour_icon = apply_legacy_hourly_text(
-            summary_text=summaryText,
-            translation=translation,
-            hour_item_si=hourItem_si,
-            is_day=isDay,
-            icon=icon,
-            fallback_text=hourText,
-            fallback_icon=hourIcon,
-        )
-        hourItem["summary"] = hour_summary
-        hourItem["icon"] = hour_icon
-
+            
         if tempUnits < 2:
             hourItem["apparentTemperature"] = hourItem["feelsLike"]
 
