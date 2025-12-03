@@ -111,7 +111,9 @@ def build_source_metadata(
         )
 
     if isinstance(grid_result.dataOut_rtma_ru, np.ndarray) and not time_machine:
-        metadata.add("rtma_ru", time_value=_format_rtma_time(grid_result.dataOut_rtma_ru))
+        metadata.add(
+            "rtma_ru", time_value=_format_rtma_time(grid_result.dataOut_rtma_ru)
+        )
         metadata.source_idx["rtma_ru"] = {
             "x": int(grid_result.x_rtma),
             "y": int(grid_result.y_rtma),
@@ -140,9 +142,7 @@ def build_source_metadata(
         )
 
     if isinstance(grid_result.dataOut_ecmwf, np.ndarray) and not time_machine:
-        metadata.add(
-            "ecmwf_ifs", time_value=_format_run_time(grid_result.ecmwfRunTime)
-        )
+        metadata.add("ecmwf_ifs", time_value=_format_run_time(grid_result.ecmwfRunTime))
 
     if isinstance(grid_result.dataOut_h2, np.ndarray):
         metadata.add(
@@ -196,7 +196,10 @@ def _merge_hrrr_blocks(
     h2_rows = len(data_h2) - h2_start_idx
     total_rows = min(hrrr_rows + h2_rows, num_hours)
     merged[0:total_rows, 0:common_cols] = np.concatenate(
-        (data_hrrrh[hrrr_start_idx:, 0:common_cols], data_h2[h2_start_idx:, 0:common_cols]),
+        (
+            data_hrrrh[hrrr_start_idx:, 0:common_cols],
+            data_h2[h2_start_idx:, 0:common_cols],
+        ),
         axis=0,
     )[0:total_rows, :]
     return merged
@@ -242,9 +245,11 @@ def merge_hourly_models(
     gefs_merged = None
 
     try:
-        if metadata.has_sources("hrrr_0-18", "hrrr_18-48") and isinstance(
-            data_hrrrh, np.ndarray
-        ) and isinstance(data_h2, np.ndarray):
+        if (
+            metadata.has_sources("hrrr_0-18", "hrrr_18-48")
+            and isinstance(data_hrrrh, np.ndarray)
+            and isinstance(data_h2, np.ndarray)
+        ):
             hrrr_start_idx = nearest_index(data_hrrrh[:, 0], base_day_utc_grib)
             h2_start_idx = nearest_index(data_h2[:, 0], data_hrrrh[-1, 0]) + 1
 
@@ -267,20 +272,22 @@ def merge_hourly_models(
                     data_nbm, nbm_start_idx, num_hours, data_nbm.shape[1]
                 )
 
-        if "nbm_fire" in metadata.source_list and isinstance(
-            data_nbm_fire, np.ndarray
-        ):
+        if "nbm_fire" in metadata.source_list and isinstance(data_nbm_fire, np.ndarray):
             nbm_fire_start_idx = nearest_index(data_nbm_fire[:, 0], base_day_utc_grib)
             if nbm_fire_start_idx < 1:
                 metadata.drop("nbm_fire")
-                logger.error("NBM Fire data not available for the requested time range.")
+                logger.error(
+                    "NBM Fire data not available for the requested time range."
+                )
             else:
                 nbm_fire_merged = _merge_simple_source(
                     data_nbm_fire, nbm_fire_start_idx, num_hours, data_nbm_fire.shape[1]
                 )
 
     except Exception:
-        logger.exception("HRRR or NBM data not available, falling back to GFS %s", loc_tag)
+        logger.exception(
+            "HRRR or NBM data not available, falling back to GFS %s", loc_tag
+        )
         metadata.drop("hrrr_18-48")
         metadata.drop("nbm_fire")
         metadata.drop("nbm")

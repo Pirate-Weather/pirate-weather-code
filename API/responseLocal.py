@@ -420,7 +420,9 @@ async def PW_Forecast(
         data_hrrrh=dataOut_hrrrh if isinstance(dataOut_hrrrh, np.ndarray) else None,
         data_h2=dataOut_h2 if isinstance(dataOut_h2, np.ndarray) else None,
         data_nbm=dataOut_nbm if isinstance(dataOut_nbm, np.ndarray) else None,
-        data_nbm_fire=dataOut_nbmFire if isinstance(dataOut_nbmFire, np.ndarray) else None,
+        data_nbm_fire=dataOut_nbmFire
+        if isinstance(dataOut_nbmFire, np.ndarray)
+        else None,
         data_gfs=dataOut_gfs if isinstance(dataOut_gfs, np.ndarray) else None,
         data_ecmwf=dataOut_ecmwf if isinstance(dataOut_ecmwf, np.ndarray) else None,
         data_gefs=dataOut_gefs if isinstance(dataOut_gefs, np.ndarray) else None,
