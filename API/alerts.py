@@ -47,7 +47,7 @@ def build_alerts(
                 loc_tag=loc_tag,
             )
         )
-    except Exception:
+    except (ValueError, IndexError, TypeError, AttributeError):
         logger.exception("An Alert error occurred %s", loc_tag)
 
     try:
@@ -60,7 +60,7 @@ def build_alerts(
                 loc_tag=loc_tag,
             )
         )
-    except Exception:
+    except (ValueError, IndexError, TypeError, AttributeError):
         logger.exception("A WMO Alert error occurred %s", loc_tag)
 
     return alerts
@@ -82,7 +82,7 @@ def _read_nws_alerts(
         alerts_y_p = int(np.argmin(np.abs(NWS_ALERT_LATS - lat)))
         alerts_x_p = int(np.argmin(np.abs(NWS_ALERT_LONS - az_lon)))
         alert_data = alerts_zarr[alerts_y_p, alerts_x_p]
-    except Exception:
+    except (ValueError, IndexError, TypeError):
         logger.exception("Failed to read NWS alerts for %s", loc_tag)
         return []
 
