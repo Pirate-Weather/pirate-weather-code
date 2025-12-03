@@ -17,7 +17,6 @@ from typing import Union
 import metpy as mp
 import numpy as np
 from astral import LocationInfo, moon
-from astral.sun import sun
 from fastapi import FastAPI, Request
 from fastapi.responses import ORJSONResponse
 from metpy.calc import relative_humidity_from_dewpoint
@@ -75,7 +74,7 @@ from API.legacy.summary import (
 from API.minutely.builder import build_minutely_block
 from API.request.grid_indexing import ZarrSources, calculate_grid_indexing
 from API.request.preprocess import prepare_initial_request
-from API.utils.geo import _polar_is_all_day
+from API.utils.solar import calculate_solar_times
 from API.utils.time_indexing import calculate_time_indexing
 from API.utils.timing import TimingMiddleware
 
@@ -507,103 +506,26 @@ async def PW_Forecast(
 
     # Calculate Sunrise, Sunset, Moon Phase
     for i in range(0, daily_days + 1):
-        try:
-            s = sun(
-                loc.observer, date=baseDay + datetime.timedelta(days=i)
-            )  # Use local to get the correct date
-
-            InterSday[i, DATA_DAY["sunrise"]] = (
-                (
-                    np.datetime64(s["sunrise"].astimezone(utc).replace(tzinfo=None))
-                    - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
-                )
-                .astype("timedelta64[s]")
-                .astype(np.int32)
-            )
-            InterSday[i, DATA_DAY["sunset"]] = (
-                (
-                    np.datetime64(s["sunset"].astimezone(utc).replace(tzinfo=None))
-                    - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
-                )
-                .astype("timedelta64[s]")
-                .astype(np.int32)
-            )
-
-            InterSday[i, DATA_DAY["dawn"]] = (
-                (
-                    np.datetime64(s["dawn"].astimezone(utc).replace(tzinfo=None))
-                    - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
-                )
-                .astype("timedelta64[s]")
-                .astype(np.int32)
-            )
-            InterSday[i, DATA_DAY["dusk"]] = (
-                (
-                    np.datetime64(s["dusk"].astimezone(utc).replace(tzinfo=None))
-                    - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
-                )
-                .astype("timedelta64[s]")
-                .astype(np.int32)
-            )
-
-        except ValueError:
-            # If always sunny (polar day) or always dark (polar night) we need to
-            # determine which case applies based on hemisphere and month ranges.
-            # Use boolean operators with explicit grouping to avoid accidental
-            # precedence issues from bitwise operators.
-            # Northern hemisphere: roughly April (4) through September (9) -> polar day
-            # Southern hemisphere: roughly October (10) through March (3) -> polar day
-            if _polar_is_all_day(lat, baseDay.month):
-                # Set sunrise to one second after midnight
-                InterSday[i, DATA_DAY["sunrise"]] = day_array_grib[i] + np.timedelta64(
-                    1, "s"
-                ).astype("timedelta64[s]").astype(np.int32)
-                # Set sunset to one second before midnight the following day
-                InterSday[i, DATA_DAY["sunset"]] = (
-                    day_array_grib[i]
-                    + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
-                    - np.timedelta64(1, "s").astype("timedelta64[s]").astype(np.int32)
-                )
-
-                # Set sunrise to one second after midnight
-                InterSday[i, DATA_DAY["dawn"]] = day_array_grib[i] + np.timedelta64(
-                    1, "s"
-                ).astype("timedelta64[s]").astype(np.int32)
-                # Set sunset to one second before midnight the following day
-                InterSday[i, DATA_DAY["dusk"]] = (
-                    day_array_grib[i]
-                    + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
-                    - np.timedelta64(1, "s").astype("timedelta64[s]").astype(np.int32)
-                )
-
-                is_all_day = True
-            else:
-                # Set sunrise to two seconds before midnight
-                InterSday[i, DATA_DAY["sunrise"]] = (
-                    day_array_grib[i]
-                    + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
-                    - np.timedelta64(2, "s").astype("timedelta64[s]").astype(np.int32)
-                )
-                # Set sunset to one seconds before midnight
-                InterSday[i, DATA_DAY["sunset"]] = (
-                    day_array_grib[i]
-                    + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
-                    - np.timedelta64(1, "s").astype("timedelta64[s]").astype(np.int32)
-                )
-
-                InterSday[i, DATA_DAY["dawn"]] = (
-                    day_array_grib[i]
-                    + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
-                    - np.timedelta64(2, "s").astype("timedelta64[s]").astype(np.int32)
-                )
-                # Set sunset to one seconds before midnight
-                InterSday[i, DATA_DAY["dusk"]] = (
-                    day_array_grib[i]
-                    + np.timedelta64(1, "D").astype("timedelta64[s]").astype(np.int32)
-                    - np.timedelta64(1, "s").astype("timedelta64[s]").astype(np.int32)
-                )
-
-                is_all_night = True
+        (
+            sunrise_value,
+            sunset_value,
+            dawn_value,
+            dusk_value,
+            saw_all_day,
+            saw_all_night,
+        ) = calculate_solar_times(
+            day_index=i,
+            base_day=baseDay,
+            location=loc,
+            day_array_grib=day_array_grib,
+            latitude=lat,
+        )
+        InterSday[i, DATA_DAY["sunrise"]] = sunrise_value
+        InterSday[i, DATA_DAY["sunset"]] = sunset_value
+        InterSday[i, DATA_DAY["dawn"]] = dawn_value
+        InterSday[i, DATA_DAY["dusk"]] = dusk_value
+        is_all_day = is_all_day or saw_all_day
+        is_all_night = is_all_night or saw_all_night
 
         m = moon.phase(baseDay + datetime.timedelta(days=i))
         moon_phase_value = np.clip(m / 27.99, 0.0, 1.0)
