@@ -967,8 +967,6 @@ def build_current_section(
     if log_timing:
         log_timing("Object Start")
 
-
-
     InterPcurrent[DATA_CURRENT["rain_intensity"]] = minuteRainIntensity[0]
     InterPcurrent[DATA_CURRENT["snow_intensity"]] = minuteSnowIntensity[0]
     InterPcurrent[DATA_CURRENT["ice_intensity"]] = minuteSleetIntensity[0]
