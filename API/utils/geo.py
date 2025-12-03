@@ -18,7 +18,7 @@ from API.constants.api_const import (
 from API.constants.grid_const import US_BOUNDING_BOX
 
 
-def get_offset(*, lat, lng, utcTime, tf: TimezoneFinder):
+def get_offset(*, lat, lng, utc_time, tf: TimezoneFinder):
     """
     Get a location's time zone offset from UTC in minutes.
 
