@@ -268,6 +268,11 @@ def build_minutely_block(
     minuteType = [pTypes[maxPchance[idx]] for idx in range(61)]
     precipTypes = np.array(minuteType)
 
+    def zero_small_values(array: np.ndarray) -> np.ndarray:
+        """Clamp near-zero values to zero to reduce floating noise."""
+        array[np.abs(array) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
+        return array
+
     if "hrrrsubh" in source_list:
         temp_arr = hrrrSubHInterpolation[:, HRRR_SUBH["temp"]]
         refc_arr = hrrrSubHInterpolation[:, HRRR_SUBH["refc"]]
@@ -371,16 +376,12 @@ def build_minutely_block(
         InterPminute[:, DATA_MINUTELY["ice_intensity"]], 0
     )
 
-    minuteRainIntensity[np.abs(minuteRainIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
-    minuteSnowIntensity[np.abs(minuteSnowIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
-    minuteSleetIntensity[np.abs(minuteSleetIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = (
-        0.0
-    )
-    minuteProbability[np.abs(minuteProbability) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
-    minuteIntensityError[np.abs(minuteIntensityError) < PRECIP_NOISE_THRESHOLD_MMH] = (
-        0.0
-    )
-    minuteIntensity[np.abs(minuteIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
+    minuteRainIntensity = zero_small_values(minuteRainIntensity)
+    minuteSnowIntensity = zero_small_values(minuteSnowIntensity)
+    minuteSleetIntensity = zero_small_values(minuteSleetIntensity)
+    minuteProbability = zero_small_values(minuteProbability)
+    minuteIntensityError = zero_small_values(minuteIntensityError)
+    minuteIntensity = zero_small_values(minuteIntensity)
 
     zero_type_mask = maxPchance == 0
     minuteRainIntensity[zero_type_mask] = 0.0
