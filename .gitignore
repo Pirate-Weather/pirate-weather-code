@@ -18,3 +18,4 @@ API/read_ERA5.py
 venv/
 .venv/
 .vscode/settings.json
+my_venv/
