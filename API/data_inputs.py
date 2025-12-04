@@ -360,7 +360,7 @@ def prepare_data_inputs(
     # --- error_inputs ---
     error_inputs = _stack_fields(
         num_hours,
-        ecmwf_ifs_merged[:, ECMWF_IFS["error"]]
+        ecmwf_ifs_merged[:, ECMWF["accum_stddev"]] * 1000
         if ecmwf_ifs_merged is not None
         else None,
         gefs_merged[:, GEFS["error"]] if gefs_merged is not None else None,
