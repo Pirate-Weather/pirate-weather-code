@@ -24,73 +24,18 @@ from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
 
 
-def build_hourly_block(
-    *,
+def _populate_max_pchance(
+    hour_array_grib,
+    hour_array,
     source_list,
-    InterPhour: np.ndarray,
-    hour_array_grib: np.ndarray,
-    hour_array: np.ndarray,
-    InterSday: np.ndarray,
-    hourlyDayIndex: np.ndarray,
-    baseTimeOffset: float,
-    timeMachine: bool,
-    tmExtra: bool,
-    prepIntensityUnit: float,
-    prepAccumUnit: float,
-    windUnit: float,
-    visUnits: float,
-    tempUnits: int,
-    humidUnit: float,
-    extraVars,
-    summaryText: bool,
-    icon: str,
-    translation,
-    unitSystem: str,
-    is_all_night: bool,
-    tz_name,
     InterThour_inputs,
-    prcipIntensity_inputs,
-    prcipProbability_inputs,
-    temperature_inputs,
-    dew_inputs,
-    humidity_inputs,
-    pressure_inputs,
-    wind_inputs,
-    gust_inputs,
-    bearing_inputs,
-    cloud_inputs,
-    uv_inputs,
-    vis_inputs,
-    ozone_inputs,
-    smoke_inputs,
-    accum_inputs,
-    nearstorm_inputs,
-    station_pressure_inputs,
-    era5_rain_intensity,
-    era5_snow_water_equivalent,
-    fire_inputs,
-    feels_like_inputs,
-    solar_inputs,
-    cape_inputs,
-    error_inputs,
-    version,
 ):
-    """Build hourly output objects and summary text/icon lists."""
-
     maxPchanceHour = np.full((len(hour_array_grib), 5), MISSING_DATA)
 
     def populate_component_ptype(condition, target_idx, prefix):
-        """
-        Populate maxPchanceHour based on component precipitation types (snow, ice, rain, freezing rain).
-
-        Args:
-            condition (callable): Function returning True if this source should be processed.
-            target_idx (int): Index in maxPchanceHour to populate.
-            prefix (str): Prefix for keys in InterThour_inputs (e.g., 'nbm', 'hrrr').
-        """
         if not condition():
             return
-        inter_thour = np.zeros(shape=(len(hour_array), 5))  # Type columns
+        inter_thour = np.zeros(shape=(len(hour_array), 5))
         inter_thour[:, 1] = InterThour_inputs[f"{prefix}_snow"]
         inter_thour[:, 2] = InterThour_inputs[f"{prefix}_ice"]
         inter_thour[:, 3] = InterThour_inputs[f"{prefix}_freezing_rain"]
@@ -100,14 +45,6 @@ def build_hourly_block(
         maxPchanceHour[np.isnan(inter_thour[:, 1]), target_idx] = MISSING_DATA
 
     def populate_mapped_ptype(condition, target_idx, key):
-        """
-        Populate maxPchanceHour based on a single mapped precipitation type code.
-
-        Args:
-            condition (callable): Function returning True if this source should be processed.
-            target_idx (int): Index in maxPchanceHour to populate.
-            key (str): Key in InterThour_inputs containing the ptype code.
-        """
         if not condition():
             return
         ptype_hour = np.round(InterThour_inputs[key]).astype(int)
@@ -132,6 +69,17 @@ def build_hourly_block(
     populate_component_ptype(lambda: "gefs" in source_list, 3, "gefs")
     populate_mapped_ptype(lambda: "era5" in source_list, 4, "era5_ptype")
 
+    return maxPchanceHour
+
+
+def _calculate_intensity_prob(
+    hour_array_grib,
+    InterPhour,
+    maxPchanceHour,
+    prcipIntensity_inputs,
+    prcipProbability_inputs,
+    prepIntensityUnit,
+):
     prcipIntensityHour = np.full((len(hour_array_grib), 5), MISSING_DATA)
     intensity_sources = [
         ("nbm", 0),
@@ -176,6 +124,31 @@ def build_hourly_block(
     InterPhour[InterPhour[:, DATA_HOURLY["prob"]] < 0.05, DATA_HOURLY["prob"]] = 0
     InterPhour[InterPhour[:, DATA_HOURLY["prob"]] == 0, 2] = 0
 
+
+def _process_input_vars(
+    InterPhour,
+    error_inputs,
+    temperature_inputs,
+    dew_inputs,
+    humidity_inputs,
+    pressure_inputs,
+    wind_inputs,
+    gust_inputs,
+    bearing_inputs,
+    cloud_inputs,
+    uv_inputs,
+    vis_inputs,
+    ozone_inputs,
+    smoke_inputs,
+    accum_inputs,
+    nearstorm_inputs,
+    fire_inputs,
+    solar_inputs,
+    cape_inputs,
+    feels_like_inputs,
+    station_pressure_inputs,
+    humidUnit,
+):
     InterPhour[:, DATA_HOURLY["error"]] = np.choose(
         np.argmin(np.isnan(error_inputs), axis=1), error_inputs.T
     )
@@ -183,7 +156,6 @@ def build_hourly_block(
     InterPhour[:, DATA_HOURLY["temp"]] = np.choose(
         np.argmin(np.isnan(temperature_inputs), axis=1), temperature_inputs.T
     )
-
     InterPhour[:, DATA_HOURLY["temp"]] = clipLog(
         InterPhour[:, DATA_HOURLY["temp"]],
         CLIP_TEMP["min"],
@@ -204,12 +176,9 @@ def build_hourly_block(
     InterPhour[:, DATA_HOURLY["humidity"]] = np.choose(
         np.argmin(np.isnan(humidity_inputs), axis=1), humidity_inputs.T
     )
-
-    # Convert humidity to between 0 and 1
     InterPhour[:, DATA_HOURLY["humidity"]] = (
         InterPhour[:, DATA_HOURLY["humidity"]] * humidUnit
     )
-
     InterPhour[:, DATA_HOURLY["humidity"]] = clipLog(
         InterPhour[:, DATA_HOURLY["humidity"]],
         CLIP_HUMIDITY["min"],
@@ -274,7 +243,6 @@ def build_hourly_block(
         "UV Index Hour",
     )
 
-    # Note: use np clip for visibility since it's often about the PW 16 km max
     InterPhour[:, DATA_HOURLY["vis"]] = np.clip(
         np.choose(np.argmin(np.isnan(vis_inputs), axis=1), vis_inputs.T),
         CLIP_VIS["min"],
@@ -331,39 +299,34 @@ def build_hourly_block(
             station_pressure_inputs.T,
         )
 
-    #### Perform a number of calculations based on the hourly data to get additional metrics
 
-    # Calculate the apparent temperature
+def _calculate_derived_metrics(
+    InterPhour,
+    hourlyDayIndex,
+    baseTimeOffset,
+    timeMachine,
+):
     InterPhour[:, DATA_HOURLY["apparent"]] = calculate_apparent_temperature(
-        InterPhour[:, DATA_HOURLY["temp"]],  # Air temperature in Celsius
-        InterPhour[:, DATA_HOURLY["humidity"]],  # Relative humidity (0.0 to 1.0)
-        InterPhour[:, DATA_HOURLY["wind"]],  # Wind speed in meters per second
-        solar=InterPhour[:, DATA_HOURLY["solar"]],  # Solar radiation in W/m^2
+        InterPhour[:, DATA_HOURLY["temp"]],
+        InterPhour[:, DATA_HOURLY["humidity"]],
+        InterPhour[:, DATA_HOURLY["wind"]],
+        solar=InterPhour[:, DATA_HOURLY["solar"]],
     )
 
-    # Find snow and liquid precip
-    # Set to zero as baseline
     InterPhour[:, DATA_HOURLY["rain"]] = 0
     InterPhour[:, DATA_HOURLY["snow"]] = 0
     InterPhour[:, DATA_HOURLY["ice"]] = 0
 
-    # Accumulations in liquid equivalent
     InterPhour[InterPhour[:, DATA_HOURLY["type"]] == 4, DATA_HOURLY["rain"]] = (
         InterPhour[InterPhour[:, DATA_HOURLY["type"]] == 4, DATA_HOURLY["accum"]]
-    )  # rain
+    )
 
-    # Use the new snow height estimation for snow accumulation.
-    # Keep in SI units (mm)
     snow_indices = np.where(InterPhour[:, DATA_HOURLY["type"]] == 1)[0]
     if snow_indices.size > 0:
-        # Extract data for all snow events - already in SI units (mm, Celsius, m/s)
         liquid_mm = InterPhour[snow_indices, DATA_HOURLY["accum"]]
         temp_c = InterPhour[snow_indices, DATA_HOURLY["temp"]]
-        # windSpeedMps is already calculated as m/s above
         wind_mps = InterPhour[snow_indices, DATA_HOURLY["wind"]]
-        # Calculate snow height for all snow indices in a vectorized operation (returns mm)
         snow_mm_values = estimate_snow_height(liquid_mm, temp_c, wind_mps)
-        # Keep in mm (SI units)
         InterPhour[snow_indices, DATA_HOURLY["snow"]] = snow_mm_values
 
     InterPhour[
@@ -381,7 +344,7 @@ def build_hourly_block(
             DATA_HOURLY["accum"],
         ]
         * 1
-    )  # Ice
+    )
 
     InterPhour[:, DATA_HOURLY["intensity"]] = np.maximum(
         InterPhour[:, DATA_HOURLY["intensity"]], 0
@@ -414,7 +377,6 @@ def build_hourly_block(
         InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["ice"]] = 0
         InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["prob"]] = 0
 
-    # Initialize all to type intensity to zero
     InterPhour[:, DATA_HOURLY["rain_intensity"]] = 0
     InterPhour[:, DATA_HOURLY["snow_intensity"]] = 0
     InterPhour[:, DATA_HOURLY["ice_intensity"]] = 0
@@ -424,24 +386,21 @@ def build_hourly_block(
         rain_mask, DATA_HOURLY["intensity"]
     ]
 
-    # Convert snow intensity from liquid equivalent to snow depth equivalent
     snow_intensity_indices = np.where(
         InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["snow"]
     )[0]
     if snow_intensity_indices.size > 0:
-        # Convert snow accumulation to intensity using liquid water conversion
         snow_intensity_si = estimate_snow_height(
             InterPhour[
                 snow_intensity_indices, DATA_HOURLY["intensity"]
-            ],  # mm/h of water equivalent
-            InterPhour[snow_intensity_indices, DATA_HOURLY["temp"]],  # Celsius
-            InterPhour[snow_intensity_indices, DATA_HOURLY["wind"]],  # m/s
+            ],
+            InterPhour[snow_intensity_indices, DATA_HOURLY["temp"]],
+            InterPhour[snow_intensity_indices, DATA_HOURLY["wind"]],
         )
         InterPhour[snow_intensity_indices, DATA_HOURLY["snow_intensity"]] = (
             snow_intensity_si
         )
 
-    # Sleet intensity (direct from intensity for types 2 and 3)
     sleet_mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["ice"]) | (
         InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["sleet"]
     )
@@ -449,19 +408,19 @@ def build_hourly_block(
         sleet_mask, DATA_HOURLY["intensity"]
     ]
 
-    pTypeMap = np.array(["none", "snow", "sleet", "sleet", "rain"])
-    pTextMap = np.array(["None", "Snow", "Sleet", "Sleet", "Rain"])
-    PTypeHour = pTypeMap[
-        np.nan_to_num(InterPhour[:, DATA_HOURLY["type"]], 0).astype(int)
-    ]
-    PTextHour = pTextMap[
-        np.nan_to_num(InterPhour[:, DATA_HOURLY["type"]], 0).astype(int)
-    ]
+    return dayZeroRain, dayZeroSnow, dayZeroIce
 
-    # Global zeroing
-    InterPhour[((InterPhour >= -0.01) & (InterPhour <= 0.01))] = 0
 
-    # Initialize hourly_display to zero
+def _build_hourly_display(
+    hour_array,
+    InterPhour,
+    tempUnits,
+    windUnit,
+    visUnits,
+    prepIntensityUnit,
+    prepAccumUnit,
+    station_pressure_inputs,
+):
     hourly_display = np.zeros((len(hour_array), max(DATA_HOURLY.values()) + 1))
 
     if tempUnits == 0:
@@ -581,6 +540,133 @@ def build_hourly_block(
             hourly_display[:, idx_field] = np.round(
                 hourly_display[:, idx_field], decimals
             )
+            
+    return hourly_display
+
+
+def build_hourly_block(
+    *,
+    source_list,
+    InterPhour: np.ndarray,
+    hour_array_grib: np.ndarray,
+    hour_array: np.ndarray,
+    InterSday: np.ndarray,
+    hourlyDayIndex: np.ndarray,
+    baseTimeOffset: float,
+    timeMachine: bool,
+    tmExtra: bool,
+    prepIntensityUnit: float,
+    prepAccumUnit: float,
+    windUnit: float,
+    visUnits: float,
+    tempUnits: int,
+    humidUnit: float,
+    extraVars,
+    summaryText: bool,
+    icon: str,
+    translation,
+    unitSystem: str,
+    is_all_night: bool,
+    tz_name,
+    InterThour_inputs,
+    prcipIntensity_inputs,
+    prcipProbability_inputs,
+    temperature_inputs,
+    dew_inputs,
+    humidity_inputs,
+    pressure_inputs,
+    wind_inputs,
+    gust_inputs,
+    bearing_inputs,
+    cloud_inputs,
+    uv_inputs,
+    vis_inputs,
+    ozone_inputs,
+    smoke_inputs,
+    accum_inputs,
+    nearstorm_inputs,
+    station_pressure_inputs,
+    era5_rain_intensity,
+    era5_snow_water_equivalent,
+    fire_inputs,
+    feels_like_inputs,
+    solar_inputs,
+    cape_inputs,
+    error_inputs,
+    version,
+):
+    """Build hourly output objects and summary text/icon lists."""
+
+    maxPchanceHour = _populate_max_pchance(
+        hour_array_grib,
+        hour_array,
+        source_list,
+        InterThour_inputs,
+    )
+
+    _calculate_intensity_prob(
+        hour_array_grib,
+        InterPhour,
+        maxPchanceHour,
+        prcipIntensity_inputs,
+        prcipProbability_inputs,
+        prepIntensityUnit,
+    )
+
+    _process_input_vars(
+        InterPhour,
+        error_inputs,
+        temperature_inputs,
+        dew_inputs,
+        humidity_inputs,
+        pressure_inputs,
+        wind_inputs,
+        gust_inputs,
+        bearing_inputs,
+        cloud_inputs,
+        uv_inputs,
+        vis_inputs,
+        ozone_inputs,
+        smoke_inputs,
+        accum_inputs,
+        nearstorm_inputs,
+        fire_inputs,
+        solar_inputs,
+        cape_inputs,
+        feels_like_inputs,
+        station_pressure_inputs,
+        humidUnit,
+    )
+
+    dayZeroRain, dayZeroSnow, dayZeroIce = _calculate_derived_metrics(
+        InterPhour,
+        hourlyDayIndex,
+        baseTimeOffset,
+        timeMachine,
+    )
+
+    pTypeMap = np.array(["none", "snow", "sleet", "sleet", "rain"])
+    pTextMap = np.array(["None", "Snow", "Sleet", "Sleet", "Rain"])
+    PTypeHour = pTypeMap[
+        np.nan_to_num(InterPhour[:, DATA_HOURLY["type"]], 0).astype(int)
+    ]
+    PTextHour = pTextMap[
+        np.nan_to_num(InterPhour[:, DATA_HOURLY["type"]], 0).astype(int)
+    ]
+
+    # Global zeroing
+    InterPhour[((InterPhour >= -0.01) & (InterPhour <= 0.01))] = 0
+
+    hourly_display = _build_hourly_display(
+        hour_array,
+        InterPhour,
+        tempUnits,
+        windUnit,
+        visUnits,
+        prepIntensityUnit,
+        prepAccumUnit,
+        station_pressure_inputs,
+    )
 
     (
         hourList,
