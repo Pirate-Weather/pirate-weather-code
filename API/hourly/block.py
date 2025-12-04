@@ -8,6 +8,10 @@ from API.api_utils import calculate_apparent_temperature, clipLog
 from API.constants.api_const import PRECIP_IDX, ROUNDING_RULES
 from API.constants.clip_const import (
     CLIP_CLOUD,
+    CLIP_FIRE,
+    CLIP_SOLAR,
+    CLIP_CAPE,
+    CLIP_FEELS_LIKE,
     CLIP_HUMIDITY,
     CLIP_OZONE,
     CLIP_PRESSURE,
