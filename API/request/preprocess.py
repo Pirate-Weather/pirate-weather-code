@@ -152,40 +152,8 @@ class InitialRequestContext:
     num_hours: int
 
 
-async def prepare_initial_request(
-    *,
-    request: Request,
-    location: str,
-    units: Union[str, None],
-    extend: Union[str, None],
-    exclude: Union[str, None],
-    include: Union[str, None],
-    lang: Union[str, None],
-    version: Union[str, None],
-    tmextra: Union[str, None],
-    icon: Union[str, None],
-    extraVars: Union[str, None],
-    tf: TimezoneFinder,
-    translations: dict,
-    timing_enabled: bool,
-    force_now: Union[str, bool, None],
-    logger: logging.Logger,
-    start_time: datetime.datetime,
-) -> InitialRequestContext:
-    """Run the initial request parsing and time grid setup."""
-    stage = os.environ.get("STAGE", "PROD")
-
-    if force_now is False:
-        now_time = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
-    else:
-        now_time = datetime.datetime.fromtimestamp(
-            int(force_now), datetime.UTC
-        ).replace(tzinfo=None)
-        logger.info("Forced Current Time to:")
-        logger.info(now_time)
-
+def _parse_location(location: str):
     location_req = location.split(",")
-
     try:
         lat = float(location_req[0])
         lon_in = float(location_req[1])
@@ -206,13 +174,20 @@ async def prepare_initial_request(
     ):
         raise HTTPException(status_code=400, detail="Invalid Latitude")
 
-    loc_tag = f"[loc={lat:.4f},{az_lon:.4f}]"
-    timing_tracker = TimingTracker(
-        logger=logger,
-        enabled=timing_enabled,
-        prefix=f"{loc_tag} ",
-    )
+    return lat, lon_in, lon, az_lon, location_req
 
+
+def _validate_time(
+    request: Request,
+    location_req: List[str],
+    now_time: datetime.datetime,
+    lat: float,
+    az_lon: float,
+    tf: TimezoneFinder,
+    stage: str,
+    timing_enabled: bool,
+    logger: logging.Logger,
+):
     if len(location_req) == 2:
         if stage == "TIMEMACHINE":
             raise HTTPException(status_code=400, detail="Missing Time Specification")
@@ -225,17 +200,6 @@ async def prepare_initial_request(
         )
 
     time_machine = False
-    if not lang:
-        lang = "en"
-
-    if icon != "pirate":
-        icon = "darksky"
-
-    if lang not in translations:
-        raise HTTPException(status_code=400, detail="Language Not Supported")
-
-    translation = translations[lang]
-
     if (now_time - utc_time) > datetime.timedelta(hours=25):
         if (
             ("localhost" in str(request.url))
@@ -265,20 +229,71 @@ async def prepare_initial_request(
                 logger.debug("Near term timemachine request")
                 logger.debug(now_time - utc_time)
 
-    if timing_enabled:
-        logger.debug("Request process time")
-        logger.debug(
-            datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - start_time
-        )
+    return utc_time, time_machine
 
-    tz_offset_loc = {"lat": lat, "lng": az_lon, "utc_time": utc_time, "tf": tf}
-    tz_offset, tz_name = get_offset(**tz_offset_loc)
-    tz_req = tf.timezone_at(lat=lat, lng=az_lon)
-    loc_name = await asyncio.to_thread(reverse_geocode.get, (lat, az_lon))
 
-    extend_flag = 0 if not extend else int(extend == "hourly")
-    version_val = float(version) if version else 1.0
-    tm_extra = bool(tmextra)
+def _setup_units(units: Union[str, None], loc_name: Dict[str, str]):
+    unit_system = "us"
+    unit_config = {
+        "wind_unit": 2.234,
+        "prep_intensity_unit": 0.0394,
+        "prep_accum_unit": 0.0394,
+        "temp_units": 0,
+        "vis_units": 0.00062137,
+        "humid_unit": 0.01,
+        "elev_unit": 3.28084,
+    }
+
+    if units:
+        if units == "auto":
+            unit_system = country_units.get(loc_name["country_code"], "us").lower()
+        else:
+            unit_system = units[0:2]
+
+        unit_overrides = {
+            "ca": {
+                "wind_unit": 3.600,
+                "prep_intensity_unit": 1,
+                "prep_accum_unit": 0.1,
+                "temp_units": KELVIN_TO_CELSIUS,
+                "vis_units": 0.001,
+                "elev_unit": 1,
+            },
+            "uk": {
+                "wind_unit": 2.234,
+                "prep_intensity_unit": 1,
+                "prep_accum_unit": 0.1,
+                "temp_units": KELVIN_TO_CELSIUS,
+                "vis_units": 0.00062137,
+                "elev_unit": 1,
+            },
+            "si": {
+                "wind_unit": 1,
+                "prep_intensity_unit": 1,
+                "prep_accum_unit": 0.1,
+                "temp_units": KELVIN_TO_CELSIUS,
+                "vis_units": 0.001,
+                "elev_unit": 1,
+            },
+        }
+
+        if unit_system in unit_overrides:
+            unit_config.update(unit_overrides[unit_system])
+        else:
+            unit_system = "us"
+
+    return unit_system, unit_config
+
+
+def _parse_parameters(
+    exclude: Union[str, None],
+    include: Union[str, None],
+    extraVars: Union[str, None],
+    now_time: datetime.datetime,
+    utc_time: datetime.datetime,
+    time_machine: bool,
+    tm_extra: bool,
+):
     exclude_params = exclude or ""
     include_params = include or ""
     extra_vars = extraVars.split(",") if extraVars else []
@@ -313,56 +328,188 @@ async def prepare_initial_request(
     if time_machine:
         ex_alerts = 1
 
-    unit_system = "us"
-    # Default US units
-    unit_config = {
-        "wind_unit": 2.234,
-        "prep_intensity_unit": 0.0394,
-        "prep_accum_unit": 0.0394,
-        "temp_units": 0,
-        "vis_units": 0.00062137,
-        "humid_unit": 0.01,
-        "elev_unit": 3.28084,
-    }
+    return (
+        exclude_params,
+        include_params,
+        extra_vars,
+        ex_currently,
+        ex_minutely,
+        ex_hourly,
+        ex_daily,
+        ex_flags,
+        ex_alerts,
+        ex_nbm,
+        ex_hrrr,
+        ex_gefs,
+        ex_gfs,
+        ex_rtma_ru,
+        ex_ecmwf,
+        summary_text,
+        inc_day_night,
+        read_wmo_alerts,
+    )
 
-    if units:
-        if units == "auto":
-            unit_system = country_units.get(loc_name["country_code"], "us").lower()
-        else:
-            unit_system = units[0:2]
 
-        # Define unit overrides
-        unit_overrides = {
-            "ca": {
-                "wind_unit": 3.600,
-                "prep_intensity_unit": 1,
-                "prep_accum_unit": 0.1,
-                "temp_units": KELVIN_TO_CELSIUS,
-                "vis_units": 0.001,
-                "elev_unit": 1,
-            },
-            "uk": {
-                "wind_unit": 2.234,
-                "prep_intensity_unit": 1,
-                "prep_accum_unit": 0.1,
-                "temp_units": KELVIN_TO_CELSIUS,
-                "vis_units": 0.00062137,
-                "elev_unit": 1,
-            },
-            "si": {
-                "wind_unit": 1,
-                "prep_intensity_unit": 1,
-                "prep_accum_unit": 0.1,
-                "temp_units": KELVIN_TO_CELSIUS,
-                "vis_units": 0.001,
-                "elev_unit": 1,
-            },
-        }
+def _setup_time_grids(
+    time_machine: bool,
+    extend_flag: int,
+    base_time: datetime.datetime,
+    base_day: datetime.datetime,
+    pytz_tz: timezone,
+):
+    if time_machine:
+        daily_days = 1
+        daily_day_hours = 1
+        output_hours = 24
+        output_days = 1
+    else:
+        daily_days = 8
+        daily_day_hours = 5
+        output_hours = 168 if extend_flag else 48
+        output_days = 8
 
-        if unit_system in unit_overrides:
-            unit_config.update(unit_overrides[unit_system])
-        else:
-            unit_system = "us"
+    (
+        minute_array_grib,
+        minute_array,
+        inter_tminute,
+        inter_pminute,
+        inter_phour,
+        hour_array_grib,
+        hour_array,
+        day_array_grib,
+    ) = initialize_time_grids(
+        base_time=base_time,
+        base_day=base_day,
+        daily_days=daily_days,
+        daily_day_hours=daily_day_hours,
+        timezone_localizer=pytz_tz,
+    )
+
+    return (
+        daily_days,
+        daily_day_hours,
+        output_hours,
+        output_days,
+        minute_array_grib,
+        minute_array,
+        inter_tminute,
+        inter_pminute,
+        inter_phour,
+        hour_array_grib,
+        hour_array,
+        day_array_grib,
+    )
+
+
+async def prepare_initial_request(
+    *,
+    request: Request,
+    location: str,
+    units: Union[str, None],
+    extend: Union[str, None],
+    exclude: Union[str, None],
+    include: Union[str, None],
+    lang: Union[str, None],
+    version: Union[str, None],
+    tmextra: Union[str, None],
+    icon: Union[str, None],
+    extraVars: Union[str, None],
+    tf: TimezoneFinder,
+    translations: dict,
+    timing_enabled: bool,
+    force_now: Union[str, bool, None],
+    logger: logging.Logger,
+    start_time: datetime.datetime,
+) -> InitialRequestContext:
+    """Run the initial request parsing and time grid setup."""
+    stage = os.environ.get("STAGE", "PROD")
+
+    if not force_now:
+        now_time = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+    else:
+        now_time = datetime.datetime.fromtimestamp(
+            int(force_now), datetime.UTC
+        ).replace(tzinfo=None)
+        logger.info("Forced Current Time to:")
+        logger.info(now_time)
+
+    lat, lon_in, lon, az_lon, location_req = _parse_location(location)
+
+    loc_tag = f"[loc={lat:.4f},{az_lon:.4f}]"
+    timing_tracker = TimingTracker(
+        logger=logger,
+        enabled=timing_enabled,
+        prefix=f"{loc_tag} ",
+    )
+
+    utc_time, time_machine = _validate_time(
+        request,
+        location_req,
+        now_time,
+        lat,
+        az_lon,
+        tf,
+        stage,
+        timing_enabled,
+        logger,
+    )
+
+    if not lang:
+        lang = "en"
+
+    if icon != "pirate":
+        icon = "darksky"
+
+    if lang not in translations:
+        raise HTTPException(status_code=400, detail="Language Not Supported")
+
+    translation = translations[lang]
+
+    if timing_enabled:
+        logger.debug("Request process time")
+        logger.debug(
+            datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - start_time
+        )
+
+    tz_offset_loc = {"lat": lat, "lng": az_lon, "utc_time": utc_time, "tf": tf}
+    tz_offset, tz_name = get_offset(**tz_offset_loc)
+    tz_req = tf.timezone_at(lat=lat, lng=az_lon)
+    loc_name = await asyncio.to_thread(reverse_geocode.get, (lat, az_lon))
+
+    extend_flag = 0 if not extend else int(extend == "hourly")
+    version_val = float(version) if version else 1.0
+    tm_extra = bool(tmextra)
+
+    (
+        exclude_params,
+        include_params,
+        extra_vars,
+        ex_currently,
+        ex_minutely,
+        ex_hourly,
+        ex_daily,
+        ex_flags,
+        ex_alerts,
+        ex_nbm,
+        ex_hrrr,
+        ex_gefs,
+        ex_gfs,
+        ex_rtma_ru,
+        ex_ecmwf,
+        summary_text,
+        inc_day_night,
+        read_wmo_alerts,
+    ) = _parse_parameters(
+        exclude,
+        include,
+        extraVars,
+        now_time,
+        utc_time,
+        time_machine,
+        tm_extra,
+    )
+
+    unit_system, unit_config = _setup_units(units, loc_name)
 
     wind_unit = unit_config["wind_unit"]
     prep_intensity_unit = unit_config["prep_intensity_unit"]
@@ -403,18 +550,11 @@ async def prepare_initial_request(
         .astype(np.int32)
     )
 
-    if time_machine:
-        daily_days = 1
-        daily_day_hours = 1
-        output_hours = 24
-        output_days = 1
-    else:
-        daily_days = 8
-        daily_day_hours = 5
-        output_hours = 168 if extend_flag else 48
-        output_days = 8
-
     (
+        daily_days,
+        daily_day_hours,
+        output_hours,
+        output_days,
         minute_array_grib,
         minute_array,
         inter_tminute,
@@ -423,12 +563,12 @@ async def prepare_initial_request(
         hour_array_grib,
         hour_array,
         day_array_grib,
-    ) = initialize_time_grids(
-        base_time=base_time,
-        base_day=base_day,
-        daily_days=daily_days,
-        daily_day_hours=daily_day_hours,
-        timezone_localizer=pytz_tz,
+    ) = _setup_time_grids(
+        time_machine,
+        extend_flag,
+        base_time,
+        base_day,
+        pytz_tz,
     )
 
     num_hours = len(hour_array)
