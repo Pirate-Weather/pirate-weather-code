@@ -184,9 +184,6 @@ lons_etopo = np.arange(
 tf = TimezoneFinder(in_memory=True)
 
 
-
-
-
 def convert_data_to_celsius(
     dataOut,
     dataOut_h2,
