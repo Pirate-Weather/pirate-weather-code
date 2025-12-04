@@ -96,8 +96,8 @@ def _diff_nested(a: object, b: object, path: str = "") -> dict:
 def test_local_vs_production():
     client = _get_client()
 
-    # Terrace, BC (54.51634, -128.60345) and Puerto Alegría (-0.96886, -73.74962)
-    for lat, lon in [(54.51634, -128.60345), (-0.96886, -73.74962)]:
+    # Barrie, ON (44.379, -79.702) and Puerto Alegría (-0.96886, -73.74962)
+    for lat, lon in [(44.379, -79.702), (-0.96886, -73.74962)]:
         local_resp = client.get(
             f"/forecast/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast"
         )
