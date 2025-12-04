@@ -858,9 +858,6 @@ async def PW_Forecast(
             loc_tag=loc_tag,
             include_currently=exCurrently != 1,
         )
-
-    ### RETURN ###
-    # Construct the final JSON response object
     ### RETURN ###
     # 16. Construct and return the final JSON response
     returnOBJ = dict()
