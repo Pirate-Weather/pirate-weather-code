@@ -382,7 +382,7 @@ def _get_intensity(
         - rain_intensity: The rain intensity (e.g., precipitation rate).
         - snow_intensity: The snow intensity (e.g., precipitation rate).
         - ice_intensity: The ice intensity (e.g., precipitation rate).
-        - prob: The probability of precipitation 
+        - prob: The probability of precipitation
         - error: The error in the intensity calculation.
     """
 
