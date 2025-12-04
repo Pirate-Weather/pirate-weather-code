@@ -276,9 +276,9 @@ def build_hourly_block(
 
     # Note: use np clip for visibility since it's often about the PW 16 km max
     InterPhour[:, DATA_HOURLY["vis"]] = np.clip(
-        np.choose(
-            np.argmin(np.isnan(vis_inputs), axis=1), vis_inputs.T
-        ), CLIP_VIS["min"], CLIP_VIS["max"]
+        np.choose(np.argmin(np.isnan(vis_inputs), axis=1), vis_inputs.T),
+        CLIP_VIS["min"],
+        CLIP_VIS["max"],
     )
 
     InterPhour[:, DATA_HOURLY["ozone"]] = np.choose(
