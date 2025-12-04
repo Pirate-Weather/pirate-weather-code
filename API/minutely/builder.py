@@ -293,16 +293,6 @@ def _calculate_error(
     elif "gefs" in source_list and gefsMinuteInterpolation is not None:
         error = gefsMinuteInterpolation[:, GEFS["error"]]
 
-    if "gefs" in source_list and gefsMinuteInterpolation is not None:
-        # This logic was in the original code inside the HRRR block but seems to apply generally if GEFS is present?
-        # Wait, looking at original code, it updated gefs error inside HRRR block if gefs was present.
-        # But later it sets error based on ecmwf or gefs.
-        # The logic inside HRRR block:
-        # if "gefs" in source_list and gefsMinuteInterpolation is not None:
-        #    gefsMinuteInterpolation[:, GEFS["error"]] = np.interp(...)
-        # This updates the interpolation array itself.
-        pass
-
     return error
 
 
