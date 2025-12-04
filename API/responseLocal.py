@@ -5376,6 +5376,8 @@ async def PW_Forecast(
 
             # Match if any alerts
             wmo_alerts = str(WMO_alertDat).split("~")
+            # Track seen URIs to avoid duplicate alerts in response
+            seen_wmo_uris = set()
             # Loop through each alert
             for wmo_alert in wmo_alerts:
                 # Extract alert details
@@ -5410,6 +5412,12 @@ async def PW_Forecast(
 
                 if len(wmo_alertDetails) > 6:
                     alert_uri = wmo_alertDetails[6]
+
+                # Skip duplicate alerts (same URI) that may exist in zarr data
+                if alert_uri and alert_uri in seen_wmo_uris:
+                    continue
+                if alert_uri:
+                    seen_wmo_uris.add(alert_uri)
 
                 wmo_alertDict = {
                     "title": wmo_alertDetails[0],
