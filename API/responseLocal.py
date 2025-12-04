@@ -69,7 +69,7 @@ from API.request.grid_indexing import ZarrSources, calculate_grid_indexing
 from API.request.preprocess import prepare_initial_request
 from API.utils.solar import calculate_solar_times
 from API.utils.time_indexing import calculate_time_indexing
-from API.utils.timing import TimingMiddleware
+from API.utils.timing import StepTimer, TimingMiddleware
 
 Translations = load_all_translations()
 
@@ -184,20 +184,7 @@ lons_etopo = np.arange(
 tf = TimezoneFinder(in_memory=True)
 
 
-class StepTimer:
-    """Helper to log timing steps relative to a start time."""
 
-    def __init__(self, start_time: datetime.datetime, enabled: bool = False):
-        self.start_time = start_time
-        self.enabled = enabled
-
-    def log(self, message: str):
-        if self.enabled:
-            print(message)
-            print(
-                datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
-                - self.start_time
-            )
 
 
 def convert_data_to_celsius(
@@ -417,6 +404,7 @@ async def PW_Forecast(
 
     # Calculate grid indices for the requested location to retrieve data from Zarr stores
     # This determines which grid points in the model data correspond to the user's lat/lon
+    # The result contains raw data arrays from each model for the specific location
     grid_result = await calculate_grid_indexing(
         lat=lat,
         lon=lon,
@@ -453,6 +441,8 @@ async def PW_Forecast(
     ERA5_MERGED = grid_result.era5_merged
 
     # Convert temperature columns to Celsius based on model index
+    # This ensures all temperature data is in a consistent unit (Celsius) before further processing
+    # Different models may provide data in Kelvin or other units
     convert_data_to_celsius(
         dataOut,
         dataOut_h2,
@@ -464,6 +454,8 @@ async def PW_Forecast(
         ERA5_MERGED,
     )
 
+    # Build metadata about the data sources used for this forecast
+    # This includes information about which models were used and their timestamps
     source_metadata = build_source_metadata(
         grid_result=grid_result,
         era5_merged=ERA5_MERGED,
@@ -492,6 +484,7 @@ async def PW_Forecast(
         ETOPO = 0
 
     if use_etopo:
+        # Add elevation data to the metadata if ETOPO is enabled
         add_etopo_source(
             metadata=source_metadata,
             x_idx=x_p_etopo,
@@ -512,8 +505,7 @@ async def PW_Forecast(
     # Merge hourly models onto a consistent time grid, starting from midnight on the requested day
     # Note that baseTime is the requested time, in TZ aware datetime format
     # This combines data from multiple weather models (HRRR, GFS, etc.) to create a unified forecast
-    timer.log("Nearest IDX Start")
-
+    # It handles prioritizing higher-resolution models (like HRRR) where available
     merge_result = merge_hourly_models(
         metadata=source_metadata,
         num_hours=numHours,
@@ -542,6 +534,7 @@ async def PW_Forecast(
     sourceIDX = merge_result.metadata.source_idx
 
     # Generate the minutely forecast section (precipitation intensity, etc.)
+    # This uses high-resolution data (like HRRR sub-hourly) to provide minute-by-minute precipitation forecasts
     with timing_tracker.track("Minutely block"):
         (
             InterPminute,
@@ -577,6 +570,7 @@ async def PW_Forecast(
     InterPhour[:, DATA_HOURLY["time"]] = hour_array_grib
 
     # Calculate time indices to align data with the requested time zone and intervals
+    # This ensures that the forecast data corresponds to the correct local time for the user
     time_indexing = calculate_time_indexing(
         base_time=baseTime,
         timezone_localizer=pytzTZ,
@@ -606,7 +600,8 @@ async def PW_Forecast(
     is_all_day = False
     is_all_night = False
 
-    # Calculate Sunrise, Sunset, Moon Phase
+    # Calculate Sunrise, Sunset, Moon Phase for each day in the forecast
+    # This information is used to determine day/night cycles and moon phases
     for i in range(0, daily_days + 1):
         (
             sunrise_value,
@@ -636,6 +631,7 @@ async def PW_Forecast(
         )
 
     # Extract and prepare specific weather variables (temperature, wind, etc.) from the merged model data
+    # This step pulls out the relevant data arrays for each weather variable from the merged dataset
     inputs = prepare_data_inputs(
         source_list=sourceList,
         nbm_merged=NBM_Merged,
@@ -676,6 +672,7 @@ async def PW_Forecast(
     error_inputs = inputs["error_inputs"]
 
     # Generate the hourly forecast section
+    # This constructs the hourly forecast objects, applying unit conversions and formatting
     with timing_tracker.track("Hourly block"):
         (
             hourList,
@@ -744,6 +741,7 @@ async def PW_Forecast(
     pTextMap = np.array(["None", "Snow", "Sleet", "Sleet", "Rain"])
 
     # Generate the daily forecast section
+    # This aggregates hourly data to create daily summaries (high/low temps, total precip, etc.)
     with timing_tracker.track("Daily block"):
         daily_section = build_daily_section(
             InterPhour=InterPhour,
@@ -791,6 +789,7 @@ async def PW_Forecast(
     timer.log("Alert Start")
 
     # Process weather alerts for the location
+    # This checks for active weather alerts from NWS or WMO sources
     alertList = build_alerts(
         time_machine=timeMachine,
         ex_alerts=exAlerts,
@@ -804,6 +803,7 @@ async def PW_Forecast(
     )
 
     # Generate the current weather conditions section
+    # This builds the 'currently' block of the API response, representing the weather right now
     with timing_tracker.track("Current block"):
         current_section = build_current_section(
             sourceList=sourceList,

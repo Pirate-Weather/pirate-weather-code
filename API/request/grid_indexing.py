@@ -36,6 +36,7 @@ from API.constants.grid_const import (
 from API.constants.model_const import ERA5
 from API.constants.shared_const import HISTORY_PERIODS
 from API.utils.geo import lambertGridMatch
+from API.utils.timing import StepTimer
 
 
 @dataclass
@@ -116,6 +117,7 @@ async def calculate_grid_indexing(
     logger: logging.Logger,
 ) -> GridIndexingResult:
     """Compute grid coordinates and pull the zarr slices for the request."""
+    timer = StepTimer(timing_start, timing_enabled)
     sourceIDX = dict()
     readRTMA_RU = False
     readNBM = False
@@ -202,9 +204,7 @@ async def calculate_grid_indexing(
         sourceIDX["hrrr"]["lat"] = round(hrrr_lat, 2)
         sourceIDX["hrrr"]["lon"] = round(((hrrr_lon + 180) % 360) - 180, 2)
 
-    if timing_enabled:
-        print("### RTMA_RU Start ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - timing_start)
+    timer.log("### RTMA_RU Start ###")
 
     if (
         az_lon < -138.3
@@ -242,9 +242,7 @@ async def calculate_grid_indexing(
             readRTMA_RU = True
             dataOut_rtma_ru = None
 
-    if timing_enabled:
-        print("### NBM Start ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - timing_start)
+    timer.log("### NBM Start ###")
 
     if (
         az_lon < -138.3
@@ -281,19 +279,12 @@ async def calculate_grid_indexing(
             dataOut_nbm = False
             dataOut_nbmFire = False
         else:
-            if timing_enabled:
-                print("### NBM Detail Start ###")
-                print(
-                    datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
-                    - timing_start
-                )
+            timer.log("### NBM Detail Start ###")
             readNBM = True
             dataOut_nbm = None
             dataOut_nbmFire = None
 
-    if timing_enabled:
-        print("### GFS/GEFS Start ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - timing_start)
+    timer.log("### GFS/GEFS Start ###")
 
     lats_gfs = np.arange(-90, 90, 0.25)
     lons_gfs = np.arange(0, 360, 0.25)
@@ -316,13 +307,9 @@ async def calculate_grid_indexing(
         readGFS = True
         dataOut_gfs = None
 
-    if timing_enabled:
-        print("### GFS Detail END ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - timing_start)
+    timer.log("### GFS Detail END ###")
 
-    if timing_enabled:
-        print("### ECMWF Detail Start ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - timing_start)
+    timer.log("### ECMWF Detail Start ###")
 
     dataOut_ecmwf = False
     lats_ecmwf = None
@@ -344,13 +331,9 @@ async def calculate_grid_indexing(
         y_p_eur = np.argmin(abslat_ecmwf)
         x_p_eur = np.argmin(abslon_ecmwf)
 
-    if timing_enabled:
-        print("### ECMWF Detail END ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - timing_start)
+    timer.log("### ECMWF Detail END ###")
 
-    if timing_enabled:
-        print("### GEFS Detail Start ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - timing_start)
+    timer.log("### GEFS Detail Start ###")
 
     if ex_gefs == 1:
         dataOut_gefs = False
@@ -360,9 +343,7 @@ async def calculate_grid_indexing(
         readGEFS = True
         dataOut_gefs = None
 
-    if timing_enabled:
-        print("### GEFS Detail Start ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - timing_start)
+    timer.log("### GEFS Detail Start ###")
 
     if readERA5:
         abslat_era5 = np.abs(zarr_sources.era5_data["ERA5_lats"] - lat)

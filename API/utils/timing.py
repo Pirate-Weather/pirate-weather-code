@@ -45,3 +45,21 @@ class TimingTracker:
         duration_ms = (time.perf_counter() - start_time) * 1000
         self.marks[label] = duration_ms
         self.logger.debug("%s%s: %.1f ms", self.prefix, label, duration_ms)
+
+
+class StepTimer:
+    """Helper to log timing steps relative to a start time."""
+
+    def __init__(self, start_time, enabled: bool = False):
+        self.start_time = start_time
+        self.enabled = enabled
+
+    def log(self, message: str):
+        if self.enabled:
+            import datetime
+
+            print(message)
+            print(
+                datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+                - self.start_time
+            )
