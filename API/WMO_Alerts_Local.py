@@ -785,7 +785,7 @@ points_in_polygons = gpd.sjoin(
     gridPointsSeries, wmo_gdf, predicate="within", how="inner"
 )
 
-# Create a formatted string ton save all the relevant in the zarr array
+# Create a formatted string to save all the relevant info in the zarr array
 points_in_polygons["string"] = (
     points_in_polygons["event"].astype(str) + "}"
     "{"
@@ -812,6 +812,12 @@ points_in_polygons["string"] = (
     + "{"
     + points_in_polygons["geocode_value"].astype(str)
 )
+
+# Deduplicate alerts for each grid point by URL
+# This prevents the same alert from appearing multiple times when a grid point
+# falls within multiple overlapping polygon areas from the same CAP message
+# (e.g., Canadian alerts where Barrie's point falls within 8 overlapping area polygons)
+points_in_polygons = points_in_polygons.drop_duplicates(subset=["INDEX", "URL"])
 
 # Combine the formatted strings using "~" as a spacer, since it doesn't seem to be used in CAP messages
 df = points_in_polygons.groupby("INDEX").agg({"string": "~".join}).reset_index()
