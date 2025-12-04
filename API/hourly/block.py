@@ -274,14 +274,11 @@ def build_hourly_block(
         "UV Index Hour",
     )
 
-    InterPhour[:, DATA_HOURLY["vis"]] = np.choose(
-        np.argmin(np.isnan(vis_inputs), axis=1), vis_inputs.T
-    )
-    InterPhour[:, DATA_HOURLY["vis"]] = clipLog(
-        InterPhour[:, DATA_HOURLY["vis"]],
-        CLIP_VIS["min"],
-        CLIP_VIS["max"],
-        "Visibility Hour",
+    # Note: use np clip for visibility since it's often about the PW 16 km max
+    InterPhour[:, DATA_HOURLY["vis"]] = np.clip(
+        np.choose(
+            np.argmin(np.isnan(vis_inputs), axis=1), vis_inputs.T
+        ), CLIP_VIS["min"], CLIP_VIS["max"]
     )
 
     InterPhour[:, DATA_HOURLY["ozone"]] = np.choose(
