@@ -283,14 +283,27 @@ def _process_input_vars(
     InterPhour[:, DATA_HOURLY["fire"]] = np.choose(
         np.argmin(np.isnan(fire_inputs), axis=1), fire_inputs.T
     )
+    InterPhour[:, DATA_HOURLY["fire"]] = np.clip(
+        InterPhour[:, DATA_HOURLY["fire"]], CLIP_FIRE["min"], CLIP_FIRE["max"]
+    )
     InterPhour[:, DATA_HOURLY["solar"]] = np.choose(
         np.argmin(np.isnan(solar_inputs), axis=1), solar_inputs.T
+    )
+    # Clip solar to var range
+    InterPhour[:, DATA_HOURLY["solar"]] = np.clip(
+        InterPhour[:, DATA_HOURLY["solar"]], CLIP_SOLAR["min"], CLIP_SOLAR["max"]
     )
     InterPhour[:, DATA_HOURLY["cape"]] = np.choose(
         np.argmin(np.isnan(cape_inputs), axis=1), cape_inputs.T
     )
+    InterPhour[:, DATA_HOURLY["cape"]] = np.clip(
+        InterPhour[:, DATA_HOURLY["cape"]], CLIP_CAPE["min"], CLIP_CAPE["max"]
+    )   
     InterPhour[:, DATA_HOURLY["feels_like"]] = np.choose(
         np.argmin(np.isnan(feels_like_inputs), axis=1), feels_like_inputs.T
+    )
+    InterPhour[:, DATA_HOURLY["feels_like"]] = np.clip(
+        InterPhour[:, DATA_HOURLY["feels_like"]], CLIP_FEELS_LIKE["min"], CLIP_FEELS_LIKE["max"]
     )
 
     if station_pressure_inputs is not None:
