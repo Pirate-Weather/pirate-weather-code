@@ -7,15 +7,15 @@ import numpy as np
 from API.api_utils import calculate_apparent_temperature, clipLog
 from API.constants.api_const import PRECIP_IDX, ROUNDING_RULES
 from API.constants.clip_const import (
-    CLIP_CLOUD,
-    CLIP_FIRE,
-    CLIP_SOLAR,
     CLIP_CAPE,
+    CLIP_CLOUD,
     CLIP_FEELS_LIKE,
+    CLIP_FIRE,
     CLIP_HUMIDITY,
     CLIP_OZONE,
     CLIP_PRESSURE,
     CLIP_SMOKE,
+    CLIP_SOLAR,
     CLIP_TEMP,
     CLIP_UV,
     CLIP_VIS,
@@ -302,12 +302,14 @@ def _process_input_vars(
     )
     InterPhour[:, DATA_HOURLY["cape"]] = np.clip(
         InterPhour[:, DATA_HOURLY["cape"]], CLIP_CAPE["min"], CLIP_CAPE["max"]
-    )   
+    )
     InterPhour[:, DATA_HOURLY["feels_like"]] = np.choose(
         np.argmin(np.isnan(feels_like_inputs), axis=1), feels_like_inputs.T
     )
     InterPhour[:, DATA_HOURLY["feels_like"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["feels_like"]], CLIP_FEELS_LIKE["min"], CLIP_FEELS_LIKE["max"]
+        InterPhour[:, DATA_HOURLY["feels_like"]],
+        CLIP_FEELS_LIKE["min"],
+        CLIP_FEELS_LIKE["max"],
     )
 
     if station_pressure_inputs is not None:
