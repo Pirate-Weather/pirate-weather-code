@@ -94,19 +94,14 @@ PRECIP_ACCUM_NOISE_THRESHOLD = (
 # Version scheme is: Major.Minor.Patch
 API_VERSION = "V2.8.5"
 
-# Command priorities
-NICE_PRIORITY = 20
-
 # Generic API constants
 MAX_S3_RETRIES = 5
 S3_BASE_DELAY = 1
-S3_MAX_BANDWIDTH = 100000000
-LARGEST_DIR_INIT = -1
 
 # Temperature thresholds
 TEMPERATURE_UNITS_THRESH = {"c": 0, "f": 32}
-TEMP_THRESHOLD_RAIN_C = 274.15
-TEMP_THRESHOLD_SNOW_C = 272.15
+TEMP_THRESHOLD_RAIN_C = 1
+TEMP_THRESHOLD_SNOW_C = -1
 
 # Zarr read retry constants
 MAX_ZARR_READ_RETRIES = 4
