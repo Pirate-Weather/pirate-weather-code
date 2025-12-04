@@ -139,6 +139,7 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
     # We only want to process ONE info block per language to avoid duplicates.
     # Canadian CAP files often have multiple info blocks for the same language.
     seen_languages = set()
+    first_language = None
     info_blocks_count = 0
     skipped_duplicate_lang = 0
     skipped_secondary_lang = 0
@@ -163,13 +164,17 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
             continue
         seen_languages.add(lang)
 
+        # Track the first language seen
+        if first_language is None:
+            first_language = lang
+
         # Only process the first language seen, skip subsequent languages
-        if len(seen_languages) > 1:
+        if lang != first_language:
             skipped_secondary_lang += 1
             logger.debug(
                 "Skipping secondary language '%s' (first was '%s') in %s",
                 lang,
-                next(iter(seen_languages - {lang})),
+                first_language,
                 source_id,
             )
             continue
