@@ -32,217 +32,76 @@ class DailySection:
     day_night_list: list
 
 
-def build_daily_section(
-    *,
-    InterPhour: np.ndarray,
-    hourlyDayIndex: np.ndarray,
-    hourlyDay4amIndex: np.ndarray,
-    hourlyDay4pmIndex: np.ndarray,
-    hourlyNight4amIndex: np.ndarray,
-    hourlyHighIndex: np.ndarray,
-    hourlyLowIndex: np.ndarray,
-    daily_days: int,
-    prepAccumUnit: float,
-    prepIntensityUnit: float,
-    windUnit: float,
-    visUnits: float,
-    tempUnits: float,
-    extraVars,
-    summaryText: bool,
-    translation,
-    is_all_night: bool,
-    is_all_day: bool,
-    tz_name,
-    icon: str,
-    unitSystem: str,
-    version: int,
-    timeMachine: bool,
-    tmExtra: bool,
-    day_array_grib: np.ndarray,
-    day_array_4am_grib: np.ndarray,
-    day_array_5pm_grib: np.ndarray,
-    InterSday: np.ndarray,
-    hourList_si: list,
-    pTypeMap: np.ndarray,
-    pTextMap: np.ndarray,
-    logger,
-    loc_tag: str,
-    log_timing: Optional[Callable[[str], None]] = None,
-) -> DailySection:
-    """Build all daily- and half-day-level objects."""
-    if log_timing:
-        log_timing("Daily start")
+def _aggregate_stats(
+    InterPhour,
+    index_array,
+    daily_days,
+    calc_mean=False,
+    calc_sum=False,
+    calc_max=False,
+    calc_min=False,
+    calc_argmax=False,
+    calc_argmin=False,
+    calc_precip=False,
+):
+    res_mean = []
+    res_sum = []
+    res_max = []
+    res_min = []
+    res_argmax = []
+    res_argmin = []
+    res_precip = np.zeros((daily_days))
 
-    def _aggregate_stats(
-        index_array,
-        calc_mean=False,
-        calc_sum=False,
-        calc_max=False,
-        calc_min=False,
-        calc_argmax=False,
-        calc_argmin=False,
-        calc_precip=False,
-    ):
-        res_mean = []
-        res_sum = []
-        res_max = []
-        res_min = []
-        res_argmax = []
-        res_argmin = []
-        res_precip = np.zeros((daily_days))
+    masks = [index_array == day_index for day_index in range(daily_days)]
+    for mIDX, mask in enumerate(masks):
+        filtered_data = InterPhour[mask]
 
-        masks = [index_array == day_index for day_index in range(daily_days)]
-        for mIDX, mask in enumerate(masks):
-            filtered_data = InterPhour[mask]
-
-            if calc_mean:
-                res_mean.append(np.mean(filtered_data, axis=0))
-            if calc_sum:
-                res_sum.append(np.sum(filtered_data, axis=0))
-            if calc_max:
-                res_max.append(np.max(filtered_data, axis=0))
-            if calc_min:
-                res_min.append(np.min(filtered_data, axis=0))
-            if calc_argmax:
-                maxTime = np.argmax(filtered_data, axis=0)
-                res_argmax.append(filtered_data[maxTime, 0])
-            if calc_argmin:
-                minTime = np.argmin(filtered_data, axis=0)
-                res_argmin.append(filtered_data[minTime, 0])
-            if calc_precip:
-                dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
-                if dailyTypeCount[0][0] == 0:
-                    if len(dailyTypeCount) == 2:
-                        res_precip[mIDX] = dailyTypeCount[1][0]
-                    else:
-                        res_precip[mIDX] = dailyTypeCount[0][0]
+        if calc_mean:
+            res_mean.append(np.mean(filtered_data, axis=0))
+        if calc_sum:
+            res_sum.append(np.sum(filtered_data, axis=0))
+        if calc_max:
+            res_max.append(np.max(filtered_data, axis=0))
+        if calc_min:
+            res_min.append(np.min(filtered_data, axis=0))
+        if calc_argmax:
+            maxTime = np.argmax(filtered_data, axis=0)
+            res_argmax.append(filtered_data[maxTime, 0])
+        if calc_argmin:
+            minTime = np.argmin(filtered_data, axis=0)
+            res_argmin.append(filtered_data[minTime, 0])
+        if calc_precip:
+            dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
+            if dailyTypeCount[0][0] == 0:
+                if len(dailyTypeCount) == 2:
+                    res_precip[mIDX] = dailyTypeCount[1][0]
                 else:
                     res_precip[mIDX] = dailyTypeCount[0][0]
+            else:
+                res_precip[mIDX] = dailyTypeCount[0][0]
 
-        return (
-            res_mean,
-            res_sum,
-            res_max,
-            res_min,
-            res_argmax,
-            res_argmin,
-            res_precip,
-        )
-
-    (
-        mean_results,
-        sum_results,
-        max_results,
-        min_results,
-        argmax_results,
-        argmin_results,
-        _,
-    ) = _aggregate_stats(
-        hourlyDayIndex,
-        calc_mean=True,
-        calc_sum=True,
-        calc_max=True,
-        calc_min=True,
-        calc_argmax=True,
-        calc_argmin=True,
+    return (
+        res_mean,
+        res_sum,
+        res_max,
+        res_min,
+        res_argmax,
+        res_argmin,
+        res_precip,
     )
 
-    (
-        mean_4am_results,
-        sum_4am_results,
-        max_4am_results,
-        _,
-        _,
-        _,
-        maxPchanceDay,
-    ) = _aggregate_stats(
-        hourlyDay4amIndex,
-        calc_mean=True,
-        calc_sum=True,
-        calc_max=True,
-        calc_precip=True,
-    )
 
-    (
-        mean_day_results,
-        sum_day_results,
-        max_day_results,
-        _,
-        _,
-        _,
-        max_precip_chance_day,
-    ) = _aggregate_stats(
-        hourlyDay4pmIndex,
-        calc_mean=True,
-        calc_sum=True,
-        calc_max=True,
-        calc_precip=True,
-    )
-
-    (
-        mean_night_results,
-        sum_night_results,
-        max_night_results,
-        _,
-        _,
-        _,
-        max_precip_chance_night,
-    ) = _aggregate_stats(
-        hourlyNight4amIndex,
-        calc_mean=True,
-        calc_sum=True,
-        calc_max=True,
-        calc_precip=True,
-    )
-
-    (
-        _,
-        _,
-        high_results,
-        _,
-        arghigh_results,
-        _,
-        _,
-    ) = _aggregate_stats(
-        hourlyHighIndex,
-        calc_max=True,
-        calc_argmax=True,
-    )
-
-    (
-        _,
-        _,
-        _,
-        low_results,
-        _,
-        arglow_results,
-        _,
-    ) = _aggregate_stats(
-        hourlyLowIndex,
-        calc_min=True,
-        calc_argmin=True,
-    )
-
-    InterPday = np.array(mean_results)
-    InterPdaySum = np.array(sum_results)
-    InterPdayMax = np.array(max_results)
-    InterPdayMin = np.array(min_results)
-    InterPdayMaxTime = np.array(argmax_results)
-    InterPdayMinTime = np.array(argmin_results)
-    InterPdayHigh = np.array(high_results)
-    InterPdayLow = np.array(low_results)
-    InterPdayHighTime = np.array(arghigh_results)
-    InterPdayLowTime = np.array(arglow_results)
-    InterPday4am = np.array(mean_4am_results)
-    InterPdaySum4am = np.array(sum_4am_results)
-    InterPdayMax4am = np.array(max_4am_results)
-    interp_half_day_sum = np.array(sum_day_results)
-    interp_half_day_mean = np.array(mean_day_results)
-    interp_half_day_max = np.array(max_day_results)
-    interp_half_night_sum = np.array(sum_night_results)
-    interp_half_night_mean = np.array(mean_night_results)
-    interp_half_night_max = np.array(max_night_results)
-
+def _calculate_precip_chance(
+    InterPdaySum,
+    interp_half_day_sum,
+    interp_half_night_sum,
+    maxPchanceDay,
+    max_precip_chance_day,
+    max_precip_chance_night,
+    prepAccumUnit,
+    logger,
+    loc_tag,
+):
     try:
         maxPchanceDay = select_daily_precip_type(
             InterPdaySum, DATA_DAY, maxPchanceDay, PRECIP_IDX, prepAccumUnit
@@ -263,32 +122,36 @@ def build_daily_section(
         )
     except Exception:
         logger.exception("select_daily_precip_type error %s", loc_tag)
+    
+    return maxPchanceDay, max_precip_chance_day, max_precip_chance_night
 
-    day_night_list = []
-    max_precip_chance_day = np.array(max_precip_chance_day).astype(int)
-    precip_type_half_day = pTypeMap[max_precip_chance_day]
-    precip_text_half_day = pTextMap[max_precip_chance_day]
-    max_precip_chance_night = np.array(max_precip_chance_night).astype(int)
-    precip_type_half_night = pTypeMap[max_precip_chance_night]
-    precip_text_half_night = pTextMap[max_precip_chance_night]
 
-    dayList = []
-    dayList_si = []
-    dayIconList = []
-    dayTextList = []
+def _conv_temp(arr, tempUnits):
+    return arr * 9 / 5 + 32 if tempUnits == 0 else arr
 
-    maxPchanceDay = np.array(maxPchanceDay).astype(int)
-    PTypeDay = pTypeMap[maxPchanceDay]
-    PTextDay = pTextMap[maxPchanceDay]
 
-    if log_timing:
-        log_timing("Daily Loop start")
-
-    def _conv_temp(arr):
-        return arr * 9 / 5 + 32 if tempUnits == 0 else arr
-
+def _build_display_data(
+    InterPday,
+    InterPdayHigh,
+    InterPdayLow,
+    InterPdayMin,
+    InterPdayMax,
+    InterPdaySum,
+    interp_half_day_mean,
+    interp_half_day_max,
+    interp_half_day_sum,
+    interp_half_night_mean,
+    interp_half_night_max,
+    interp_half_night_sum,
+    tempUnits,
+    windUnit,
+    visUnits,
+    prepIntensityUnit,
+    prepAccumUnit,
+    extraVars,
+):
     daily_display_mean = InterPday.copy()
-    daily_display_mean[:, DATA_DAY["dew"]] = _conv_temp(InterPday[:, DATA_DAY["dew"]])
+    daily_display_mean[:, DATA_DAY["dew"]] = _conv_temp(InterPday[:, DATA_DAY["dew"]], tempUnits)
     daily_display_mean[:, DATA_DAY["pressure"]] = (
         InterPday[:, DATA_DAY["pressure"]] / 100
     )
@@ -310,34 +173,34 @@ def build_daily_section(
 
     daily_display_high = InterPdayHigh.copy()
     daily_display_high[:, DATA_DAY["temp"]] = _conv_temp(
-        InterPdayHigh[:, DATA_DAY["temp"]]
+        InterPdayHigh[:, DATA_DAY["temp"]], tempUnits
     )
     daily_display_high[:, DATA_DAY["apparent"]] = _conv_temp(
-        InterPdayHigh[:, DATA_DAY["apparent"]]
+        InterPdayHigh[:, DATA_DAY["apparent"]], tempUnits
     )
 
     daily_display_low = InterPdayLow.copy()
     daily_display_low[:, DATA_DAY["temp"]] = _conv_temp(
-        InterPdayLow[:, DATA_DAY["temp"]]
+        InterPdayLow[:, DATA_DAY["temp"]], tempUnits
     )
     daily_display_low[:, DATA_DAY["apparent"]] = _conv_temp(
-        InterPdayLow[:, DATA_DAY["apparent"]]
+        InterPdayLow[:, DATA_DAY["apparent"]], tempUnits
     )
 
     daily_display_min = InterPdayMin.copy()
     daily_display_min[:, DATA_DAY["temp"]] = _conv_temp(
-        InterPdayMin[:, DATA_DAY["temp"]]
+        InterPdayMin[:, DATA_DAY["temp"]], tempUnits
     )
     daily_display_min[:, DATA_DAY["apparent"]] = _conv_temp(
-        InterPdayMin[:, DATA_DAY["apparent"]]
+        InterPdayMin[:, DATA_DAY["apparent"]], tempUnits
     )
 
     daily_display_max = InterPdayMax.copy()
     daily_display_max[:, DATA_DAY["temp"]] = _conv_temp(
-        InterPdayMax[:, DATA_DAY["temp"]]
+        InterPdayMax[:, DATA_DAY["temp"]], tempUnits
     )
     daily_display_max[:, DATA_DAY["apparent"]] = _conv_temp(
-        InterPdayMax[:, DATA_DAY["apparent"]]
+        InterPdayMax[:, DATA_DAY["apparent"]], tempUnits
     )
     daily_display_max[:, DATA_DAY["intensity"]] = (
         InterPdayMax[:, DATA_DAY["intensity"]] * prepIntensityUnit
@@ -365,7 +228,7 @@ def build_daily_section(
 
     half_day_display_mean = interp_half_day_mean.copy()
     half_day_display_mean[:, DATA_HOURLY["dew"]] = _conv_temp(
-        interp_half_day_mean[:, DATA_HOURLY["dew"]]
+        interp_half_day_mean[:, DATA_HOURLY["dew"]], tempUnits
     )
     half_day_display_mean[:, DATA_HOURLY["pressure"]] = (
         interp_half_day_mean[:, DATA_HOURLY["pressure"]] / 100
@@ -419,7 +282,7 @@ def build_daily_section(
 
     half_night_display_mean = interp_half_night_mean.copy()
     half_night_display_mean[:, DATA_HOURLY["dew"]] = _conv_temp(
-        interp_half_night_mean[:, DATA_HOURLY["dew"]]
+        interp_half_night_mean[:, DATA_HOURLY["dew"]], tempUnits
     )
     half_night_display_mean[:, DATA_HOURLY["pressure"]] = (
         interp_half_night_mean[:, DATA_HOURLY["pressure"]] / 100
@@ -481,7 +344,37 @@ def build_daily_section(
         half_night_display_mean[:, DATA_HOURLY["station_pressure"]] = (
             interp_half_night_mean[:, DATA_HOURLY["station_pressure"]] / 100
         )
+        
+    return (
+        daily_display_mean,
+        daily_display_high,
+        daily_display_low,
+        daily_display_min,
+        daily_display_max,
+        daily_display_sum,
+        half_day_display_mean,
+        half_day_display_max,
+        half_day_display_sum,
+        half_night_display_mean,
+        half_night_display_max,
+        half_night_display_sum,
+    )
 
+
+def _apply_rounding(
+    daily_display_mean,
+    daily_display_high,
+    daily_display_low,
+    daily_display_min,
+    daily_display_max,
+    daily_display_sum,
+    half_day_display_mean,
+    half_day_display_max,
+    half_day_display_sum,
+    half_night_display_mean,
+    half_night_display_max,
+    half_night_display_sum,
+):
     daily_mean_rounding_map = {
         DATA_DAY["dew"]: ROUNDING_RULES.get("dewPoint", 2),
         DATA_DAY["pressure"]: ROUNDING_RULES.get("pressure", 2),
@@ -623,76 +516,326 @@ def build_daily_section(
         half_night_display_sum[:, DATA_HOURLY["ice"]], accum_dec
     )
 
+
+def _build_half_day_item(
+    idx,
+    time_val,
+    icon,
+    text,
+    precip_type_val,
+    temp_val,
+    apparent_val,
+    display_mean,
+    display_max,
+    display_sum,
+    interp_mean,
+    extraVars,
+):
+    liquid_accum = display_sum[idx, DATA_HOURLY["rain"]]
+    snow_accum = display_sum[idx, DATA_HOURLY["snow"]]
+    ice_accum = display_sum[idx, DATA_HOURLY["ice"]]
+    precip_accum = liquid_accum + snow_accum + ice_accum
+
+    wind_bearing_val = interp_mean[idx, DATA_HOURLY["bearing"]]
+    wind_bearing = (
+        int(wind_bearing_val) if not np.isnan(wind_bearing_val) else 0
+    )
+    cape_val = interp_mean[idx, DATA_HOURLY["cape"]]
+    cape_int = int(cape_val) if not np.isnan(cape_val) else 0
+
+    item = {
+        "time": int(time_val),
+        "summary": text,
+        "icon": icon,
+        "precipIntensity": display_mean[idx, DATA_HOURLY["intensity"]],
+        "precipIntensityMax": display_max[idx, DATA_HOURLY["intensity"]],
+        "rainIntensity": display_mean[idx, DATA_HOURLY["rain"]],
+        "rainIntensityMax": display_max[idx, DATA_HOURLY["rain"]],
+        "snowIntensity": display_mean[idx, DATA_HOURLY["snow"]],
+        "snowIntensityMax": display_max[idx, DATA_HOURLY["snow"]],
+        "iceIntensity": display_mean[idx, DATA_HOURLY["ice"]],
+        "iceIntensityMax": display_max[idx, DATA_HOURLY["ice"]],
+        "precipProbability": display_max[idx, DATA_HOURLY["prob"]],
+        "precipAccumulation": precip_accum,
+        "precipType": precip_type_val,
+        "temperature": temp_val,
+        "apparentTemperature": apparent_val,
+        "dewPoint": display_mean[idx, DATA_HOURLY["dew"]],
+        "humidity": display_mean[idx, DATA_HOURLY["humidity"]],
+        "pressure": display_mean[idx, DATA_HOURLY["pressure"]],
+        "windSpeed": display_mean[idx, DATA_HOURLY["wind"]],
+        "windGust": display_mean[idx, DATA_HOURLY["gust"]],
+        "windBearing": wind_bearing,
+        "cloudCover": display_mean[idx, DATA_HOURLY["cloud"]],
+        "uvIndex": display_mean[idx, DATA_HOURLY["uv"]],
+        "visibility": display_mean[idx, DATA_HOURLY["vis"]],
+        "ozone": display_mean[idx, DATA_HOURLY["ozone"]],
+        "smoke": display_mean[idx, DATA_HOURLY["smoke"]],
+        "liquidAccumulation": liquid_accum,
+        "snowAccumulation": snow_accum,
+        "iceAccumulation": ice_accum,
+        "fireIndex": display_mean[idx, DATA_HOURLY["fire"]],
+        "solar": display_mean[idx, DATA_HOURLY["solar"]],
+        "cape": cape_int,
+    }
+
+    if "stationPressure" in extraVars:
+        item["stationPressure"] = display_mean[
+            idx, DATA_HOURLY["station_pressure"]
+        ]
+
+    return item
+
+
+def build_daily_section(
+    *,
+    InterPhour: np.ndarray,
+    hourlyDayIndex: np.ndarray,
+    hourlyDay4amIndex: np.ndarray,
+    hourlyDay4pmIndex: np.ndarray,
+    hourlyNight4amIndex: np.ndarray,
+    hourlyHighIndex: np.ndarray,
+    hourlyLowIndex: np.ndarray,
+    daily_days: int,
+    prepAccumUnit: float,
+    prepIntensityUnit: float,
+    windUnit: float,
+    visUnits: float,
+    tempUnits: float,
+    extraVars,
+    summaryText: bool,
+    translation,
+    is_all_night: bool,
+    is_all_day: bool,
+    tz_name,
+    icon: str,
+    unitSystem: str,
+    version: int,
+    timeMachine: bool,
+    tmExtra: bool,
+    day_array_grib: np.ndarray,
+    day_array_4am_grib: np.ndarray,
+    day_array_5pm_grib: np.ndarray,
+    InterSday: np.ndarray,
+    hourList_si: list,
+    pTypeMap: np.ndarray,
+    pTextMap: np.ndarray,
+    logger,
+    loc_tag: str,
+    log_timing: Optional[Callable[[str], None]] = None,
+) -> DailySection:
+    """Build all daily- and half-day-level objects."""
+    if log_timing:
+        log_timing("Daily start")
+
+    (
+        mean_results,
+        sum_results,
+        max_results,
+        min_results,
+        argmax_results,
+        argmin_results,
+        _,
+    ) = _aggregate_stats(
+        InterPhour,
+        hourlyDayIndex,
+        daily_days,
+        calc_mean=True,
+        calc_sum=True,
+        calc_max=True,
+        calc_min=True,
+        calc_argmax=True,
+        calc_argmin=True,
+    )
+
+    (
+        mean_4am_results,
+        sum_4am_results,
+        max_4am_results,
+        _,
+        _,
+        _,
+        maxPchanceDay,
+    ) = _aggregate_stats(
+        InterPhour,
+        hourlyDay4amIndex,
+        daily_days,
+        calc_mean=True,
+        calc_sum=True,
+        calc_max=True,
+        calc_precip=True,
+    )
+
+    (
+        mean_day_results,
+        sum_day_results,
+        max_day_results,
+        _,
+        _,
+        _,
+        max_precip_chance_day,
+    ) = _aggregate_stats(
+        InterPhour,
+        hourlyDay4pmIndex,
+        daily_days,
+        calc_mean=True,
+        calc_sum=True,
+        calc_max=True,
+        calc_precip=True,
+    )
+
+    (
+        mean_night_results,
+        sum_night_results,
+        max_night_results,
+        _,
+        _,
+        _,
+        max_precip_chance_night,
+    ) = _aggregate_stats(
+        InterPhour,
+        hourlyNight4amIndex,
+        daily_days,
+        calc_mean=True,
+        calc_sum=True,
+        calc_max=True,
+        calc_precip=True,
+    )
+
+    (
+        _,
+        _,
+        high_results,
+        _,
+        arghigh_results,
+        _,
+        _,
+    ) = _aggregate_stats(
+        InterPhour,
+        hourlyHighIndex,
+        daily_days,
+        calc_max=True,
+        calc_argmax=True,
+    )
+
+    (
+        _,
+        _,
+        _,
+        low_results,
+        _,
+        arglow_results,
+        _,
+    ) = _aggregate_stats(
+        InterPhour,
+        hourlyLowIndex,
+        daily_days,
+        calc_min=True,
+        calc_argmin=True,
+    )
+
+    InterPday = np.array(mean_results)
+    InterPdaySum = np.array(sum_results)
+    InterPdayMax = np.array(max_results)
+    InterPdayMin = np.array(min_results)
+    InterPdayMaxTime = np.array(argmax_results)
+    InterPdayMinTime = np.array(argmin_results)
+    InterPdayHigh = np.array(high_results)
+    InterPdayLow = np.array(low_results)
+    InterPdayHighTime = np.array(arghigh_results)
+    InterPdayLowTime = np.array(arglow_results)
+    InterPday4am = np.array(mean_4am_results)
+    InterPdaySum4am = np.array(sum_4am_results)
+    InterPdayMax4am = np.array(max_4am_results)
+    interp_half_day_sum = np.array(sum_day_results)
+    interp_half_day_mean = np.array(mean_day_results)
+    interp_half_day_max = np.array(max_day_results)
+    interp_half_night_sum = np.array(sum_night_results)
+    interp_half_night_mean = np.array(mean_night_results)
+    interp_half_night_max = np.array(max_night_results)
+
+    maxPchanceDay, max_precip_chance_day, max_precip_chance_night = _calculate_precip_chance(
+        InterPdaySum,
+        interp_half_day_sum,
+        interp_half_night_sum,
+        maxPchanceDay,
+        max_precip_chance_day,
+        max_precip_chance_night,
+        prepAccumUnit,
+        logger,
+        loc_tag,
+    )
+
+    day_night_list = []
+    max_precip_chance_day = np.array(max_precip_chance_day).astype(int)
+    precip_type_half_day = pTypeMap[max_precip_chance_day]
+    precip_text_half_day = pTextMap[max_precip_chance_day]
+    max_precip_chance_night = np.array(max_precip_chance_night).astype(int)
+    precip_type_half_night = pTypeMap[max_precip_chance_night]
+    precip_text_half_night = pTextMap[max_precip_chance_night]
+
+    dayList = []
+    dayList_si = []
+    dayIconList = []
+    dayTextList = []
+
+    maxPchanceDay = np.array(maxPchanceDay).astype(int)
+    PTypeDay = pTypeMap[maxPchanceDay]
+    PTextDay = pTextMap[maxPchanceDay]
+
+    if log_timing:
+        log_timing("Daily Loop start")
+
+    (
+        daily_display_mean,
+        daily_display_high,
+        daily_display_low,
+        daily_display_min,
+        daily_display_max,
+        daily_display_sum,
+        half_day_display_mean,
+        half_day_display_max,
+        half_day_display_sum,
+        half_night_display_mean,
+        half_night_display_max,
+        half_night_display_sum,
+    ) = _build_display_data(
+        InterPday,
+        InterPdayHigh,
+        InterPdayLow,
+        InterPdayMin,
+        InterPdayMax,
+        InterPdaySum,
+        interp_half_day_mean,
+        interp_half_day_max,
+        interp_half_day_sum,
+        interp_half_night_mean,
+        interp_half_night_max,
+        interp_half_night_sum,
+        tempUnits,
+        windUnit,
+        visUnits,
+        prepIntensityUnit,
+        prepAccumUnit,
+        extraVars,
+    )
+
+    _apply_rounding(
+        daily_display_mean,
+        daily_display_high,
+        daily_display_low,
+        daily_display_min,
+        daily_display_max,
+        daily_display_sum,
+        half_day_display_mean,
+        half_day_display_max,
+        half_day_display_sum,
+        half_night_display_mean,
+        half_night_display_max,
+        half_night_display_sum,
+    )
+
     for idx in range(0, daily_days):
-
-        def _build_half_day_item(
-            idx,
-            time_val,
-            icon,
-            text,
-            precip_type_val,
-            temp_val,
-            apparent_val,
-            display_mean,
-            display_max,
-            display_sum,
-            interp_mean,
-        ):
-            liquid_accum = display_sum[idx, DATA_HOURLY["rain"]]
-            snow_accum = display_sum[idx, DATA_HOURLY["snow"]]
-            ice_accum = display_sum[idx, DATA_HOURLY["ice"]]
-            precip_accum = liquid_accum + snow_accum + ice_accum
-
-            wind_bearing_val = interp_mean[idx, DATA_HOURLY["bearing"]]
-            wind_bearing = (
-                int(wind_bearing_val) if not np.isnan(wind_bearing_val) else 0
-            )
-            cape_val = interp_mean[idx, DATA_HOURLY["cape"]]
-            cape_int = int(cape_val) if not np.isnan(cape_val) else 0
-
-            item = {
-                "time": int(time_val),
-                "summary": text,
-                "icon": icon,
-                "precipIntensity": display_mean[idx, DATA_HOURLY["intensity"]],
-                "precipIntensityMax": display_max[idx, DATA_HOURLY["intensity"]],
-                "rainIntensity": display_mean[idx, DATA_HOURLY["rain"]],
-                "rainIntensityMax": display_max[idx, DATA_HOURLY["rain"]],
-                "snowIntensity": display_mean[idx, DATA_HOURLY["snow"]],
-                "snowIntensityMax": display_max[idx, DATA_HOURLY["snow"]],
-                "iceIntensity": display_mean[idx, DATA_HOURLY["ice"]],
-                "iceIntensityMax": display_max[idx, DATA_HOURLY["ice"]],
-                "precipProbability": display_max[idx, DATA_HOURLY["prob"]],
-                "precipAccumulation": precip_accum,
-                "precipType": precip_type_val,
-                "temperature": temp_val,
-                "apparentTemperature": apparent_val,
-                "dewPoint": display_mean[idx, DATA_HOURLY["dew"]],
-                "humidity": display_mean[idx, DATA_HOURLY["humidity"]],
-                "pressure": display_mean[idx, DATA_HOURLY["pressure"]],
-                "windSpeed": display_mean[idx, DATA_HOURLY["wind"]],
-                "windGust": display_mean[idx, DATA_HOURLY["gust"]],
-                "windBearing": wind_bearing,
-                "cloudCover": display_mean[idx, DATA_HOURLY["cloud"]],
-                "uvIndex": display_mean[idx, DATA_HOURLY["uv"]],
-                "visibility": display_mean[idx, DATA_HOURLY["vis"]],
-                "ozone": display_mean[idx, DATA_HOURLY["ozone"]],
-                "smoke": display_mean[idx, DATA_HOURLY["smoke"]],
-                "liquidAccumulation": liquid_accum,
-                "snowAccumulation": snow_accum,
-                "iceAccumulation": ice_accum,
-                "fireIndex": display_mean[idx, DATA_HOURLY["fire"]],
-                "solar": display_mean[idx, DATA_HOURLY["solar"]],
-                "cape": cape_int,
-            }
-
-            if "stationPressure" in extraVars:
-                item["stationPressure"] = display_mean[
-                    idx, DATA_HOURLY["station_pressure"]
-                ]
-
-            return item
-
         day_icon, day_text = pick_day_icon_and_summary(
             max_arr=interp_half_day_max,
             mean_arr=interp_half_day_mean,
@@ -719,6 +862,7 @@ def build_daily_section(
             half_day_display_max,
             half_day_display_sum,
             interp_half_day_mean,
+            extraVars,
         )
 
         if idx < 8:
@@ -779,6 +923,7 @@ def build_daily_section(
             half_night_display_max,
             half_night_display_sum,
             interp_half_night_mean,
+            extraVars,
         )
 
         if idx < 8:
