@@ -366,6 +366,26 @@ def _get_intensity(
     InterPminute,
     InterPcurrent,
 ):
+    """
+    Calculates the intensity (e.g., precipitation rate) based on available data sources.
+
+    Args:
+        sourceList (list): A list of strings indicating the data sources to consider (e.g., "era5").
+        model_data (dict): A dictionary containing various model data arrays.
+        state (InterpolationState): An object holding interpolation state information.
+        InterPminute: Placeholder for minute-level interpolation data or parameters.
+        InterPcurrent: Placeholder for current-level interpolation data or parameters.
+
+    Returns:
+        float: The calculated intensity values:
+        - intensity: The total intensity (e.g., precipitation rate).
+        - rain_intensity: The rain intensity (e.g., precipitation rate).
+        - snow_intensity: The snow intensity (e.g., precipitation rate).
+        - ice_intensity: The ice intensity (e.g., precipitation rate).
+        - prob: The probability of precipitation 
+        - error: The error in the intensity calculation.
+    """
+
     if "era5" in sourceList:
         era5 = model_data["ERA5_MERGED"]
         intensity = (
@@ -421,9 +441,9 @@ def _get_intensity(
     else:
         return (
             InterPminute[0, DATA_MINUTELY["intensity"]],
-            MISSING_DATA,
-            MISSING_DATA,
-            MISSING_DATA,
+            InterPminute[0, DATA_MINUTELY["rain_intensity"]],
+            InterPminute[0, DATA_MINUTELY["snow_intensity"]],
+            InterPminute[0, DATA_MINUTELY["ice_intensity"]],
             InterPminute[0, DATA_MINUTELY["prob"]],
             InterPminute[0, DATA_MINUTELY["error"]],
         )
