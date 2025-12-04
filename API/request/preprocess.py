@@ -25,7 +25,11 @@ from API.utils.timing import TimingTracker
 
 
 def parse_request_time(
-    time_str: str, now_time: datetime.datetime, lat: float, az_lon: float, tf: TimezoneFinder
+    time_str: str,
+    now_time: datetime.datetime,
+    lat: float,
+    az_lon: float,
+    tf: TimezoneFinder,
 ) -> datetime.datetime:
     """
     Parse the time string from the request URL.
@@ -39,12 +43,16 @@ def parse_request_time(
     if time_str.lstrip("-+").isnumeric():
         val = float(time_str)
         if val > 0:
-            return datetime.datetime.fromtimestamp(val, datetime.UTC).replace(tzinfo=None)
+            return datetime.datetime.fromtimestamp(val, datetime.UTC).replace(
+                tzinfo=None
+            )
         elif val < TIME_MACHINE_CONST["very_negative_threshold"]:
-            return datetime.datetime.fromtimestamp(val, datetime.UTC).replace(tzinfo=None)
+            return datetime.datetime.fromtimestamp(val, datetime.UTC).replace(
+                tzinfo=None
+            )
         elif val < 0:
             return now_time + datetime.timedelta(seconds=val)
-    
+
     # Try parsing as ISO format
     try:
         utc_time = datetime.datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S%z")

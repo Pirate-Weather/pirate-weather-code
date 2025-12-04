@@ -80,7 +80,7 @@ def build_hourly_block(
     def populate_component_ptype(condition, target_idx, prefix):
         """
         Populate maxPchanceHour based on component precipitation types (snow, ice, rain, freezing rain).
-        
+
         Args:
             condition (callable): Function returning True if this source should be processed.
             target_idx (int): Index in maxPchanceHour to populate.
@@ -100,7 +100,7 @@ def build_hourly_block(
     def populate_mapped_ptype(condition, target_idx, key):
         """
         Populate maxPchanceHour based on a single mapped precipitation type code.
-        
+
         Args:
             condition (callable): Function returning True if this source should be processed.
             target_idx (int): Index in maxPchanceHour to populate.
