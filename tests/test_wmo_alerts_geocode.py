@@ -34,7 +34,12 @@ def _cap_text(elem, tag: str, ns: dict) -> str:
 
 
 def _extract_polygons_from_cap_test(cap_xml: str, source_id: str, cap_link: str):
-    """Test version of _extract_polygons_from_cap - copied from WMO_Alerts_Local.py"""
+    """Test version of _extract_polygons_from_cap - synced with WMO_Alerts_Local.py
+
+    NOTE: This function should be kept in sync with the production code in
+    API/WMO_Alerts_Local.py. If you modify this function, update the production
+    code as well, and vice versa.
+    """
     results = []
 
     root = ET.fromstring(cap_xml)
@@ -43,6 +48,8 @@ def _extract_polygons_from_cap_test(cap_xml: str, source_id: str, cap_link: str)
     ns = {"cap": root.tag.split("}")[0].strip("{")} if root.tag.startswith("{") else {}
 
     # --- Skip duplicate languages ---
+    # We only want to process ONE info block per language to avoid duplicates.
+    # Canadian CAP files often have multiple info blocks for the same language.
     seen_languages = set()
 
     for info in root.findall(".//cap:info" if ns else ".//info", ns):
@@ -53,12 +60,14 @@ def _extract_polygons_from_cap_test(cap_xml: str, source_id: str, cap_link: str)
             else "unknown"
         )
 
-        # Use only whatever language is first seen
-        if not seen_languages:
-            seen_languages.add(lang)
-        elif lang not in seen_languages:
-            seen_languages.add(lang)
-            continue  # Skip additional languages
+        # Skip if we've already processed an info block for this language
+        if lang in seen_languages:
+            continue
+        seen_languages.add(lang)
+
+        # Only process the first language seen, skip subsequent languages
+        if len(seen_languages) > 1:
+            continue
 
         urgency = _cap_text(info, "urgency", ns)
         if urgency.lower() == "past":  # handle case-insensitive variants
@@ -89,8 +98,9 @@ def _extract_polygons_from_cap_test(cap_xml: str, source_id: str, cap_link: str)
                 "cap:areaDesc" if ns else "areaDesc", "", ns
             ).strip()
 
-            # Extract geocode information if present (only used when no polygon)
+            # Extract all geocode entries for this area with deduplication
             geocode_entries = []
+            seen_geocodes = set()
             for geocode_elem in area.findall("cap:geocode" if ns else "geocode", ns):
                 value_name = geocode_elem.findtext(
                     "cap:valueName" if ns else "valueName", "", ns
@@ -98,8 +108,14 @@ def _extract_polygons_from_cap_test(cap_xml: str, source_id: str, cap_link: str)
                 value = geocode_elem.findtext(
                     "cap:value" if ns else "value", "", ns
                 ).strip()
-                if value_name and value:
-                    geocode_entries.append((value_name, value))
+                if not value:
+                    continue
+
+                normalized = (value_name.upper(), value.upper())
+                if normalized in seen_geocodes:
+                    continue
+                seen_geocodes.add(normalized)
+                geocode_entries.append((value_name or None, value))
 
             # Process polygons if available
             has_polygon = False
@@ -148,6 +164,8 @@ def _extract_polygons_from_cap_test(cap_xml: str, source_id: str, cap_link: str)
             # If no polygon was found but geocode exists, still create an entry
             if not has_polygon:
                 for geocode_name, geocode_value in geocode_entries:
+                    if not geocode_name or not geocode_value:
+                        continue
                     results.append(
                         (
                             source_id,
@@ -865,3 +883,94 @@ def test_extract_canadian_alert_no_duplicates():
     assert results[1][7] is not None  # polygon should exist
     assert results[1][9] == ""  # geocode_name (empty when polygon exists)
     assert results[1][10] == ""  # geocode_value (empty when polygon exists)
+
+
+def test_extract_duplicate_info_blocks_same_language():
+    """Test that duplicate info blocks with the same language don't create duplicates.
+
+    This test is based on a real Canadian Environment Canada alert pattern where
+    the same info block appears multiple times with the same language (e.g., en-CA).
+    This was causing duplicate alerts to appear in the API output.
+
+    The fix ensures only ONE info block per language is processed, and only the
+    first language encountered is used (to avoid processing both en-CA and fr-CA).
+    """
+    cap_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+  <identifier>test-barrie-alert</identifier>
+  <sender>cap-pac@canada.ca</sender>
+  <info>
+    <language>en-CA</language>
+    <event>Winter Storm Warning</event>
+    <urgency>Future</urgency>
+    <severity>Severe</severity>
+    <certainty>Likely</certainty>
+    <effective>2025-12-03T12:00:00-00:00</effective>
+    <expires>2025-12-03T20:00:00-00:00</expires>
+    <headline>Winter Storm Warning in effect</headline>
+    <description>Heavy snow expected.</description>
+    <area>
+      <areaDesc>Barrie - Orillia</areaDesc>
+      <polygon>44.5,-79.5 44.5,-79.0 44.0,-79.0 44.0,-79.5 44.5,-79.5</polygon>
+      <geocode>
+        <valueName>layer:EC-MSC-SMC:1.0:CLC</valueName>
+        <value>061310</value>
+      </geocode>
+    </area>
+  </info>
+  <info>
+    <language>en-CA</language>
+    <event>Winter Storm Warning</event>
+    <urgency>Future</urgency>
+    <severity>Severe</severity>
+    <certainty>Likely</certainty>
+    <effective>2025-12-03T12:00:00-00:00</effective>
+    <expires>2025-12-03T20:00:00-00:00</expires>
+    <headline>Winter Storm Warning in effect</headline>
+    <description>Heavy snow expected.</description>
+    <area>
+      <areaDesc>Barrie - Orillia</areaDesc>
+      <polygon>44.5,-79.5 44.5,-79.0 44.0,-79.0 44.0,-79.5 44.5,-79.5</polygon>
+      <geocode>
+        <valueName>layer:EC-MSC-SMC:1.0:CLC</valueName>
+        <value>061310</value>
+      </geocode>
+    </area>
+  </info>
+  <info>
+    <language>fr-CA</language>
+    <event>Avertissement de tempête hivernale</event>
+    <urgency>Future</urgency>
+    <severity>Severe</severity>
+    <certainty>Likely</certainty>
+    <effective>2025-12-03T12:00:00-00:00</effective>
+    <expires>2025-12-03T20:00:00-00:00</expires>
+    <headline>Avertissement de tempête hivernale en vigueur</headline>
+    <description>Fortes chutes de neige prévues.</description>
+    <area>
+      <areaDesc>Barrie - Orillia</areaDesc>
+      <polygon>44.5,-79.5 44.5,-79.0 44.0,-79.0 44.0,-79.5 44.5,-79.5</polygon>
+      <geocode>
+        <valueName>layer:EC-MSC-SMC:1.0:CLC</valueName>
+        <value>061310</value>
+      </geocode>
+    </area>
+  </info>
+</alert>"""
+
+    results = _extract_polygons_from_cap_test(
+        cap_xml, "ca-msc-en", "https://test.gc.ca/barrie-alert.xml"
+    )
+
+    # Should have exactly 1 result - only the first en-CA info block should be processed
+    # The second en-CA info block and the fr-CA block should be skipped
+    assert len(results) == 1, f"Expected 1 result, got {len(results)}"
+
+    result = results[0]
+    assert result[0] == "ca-msc-en"  # source_id
+    assert result[1] == "Winter Storm Warning in effect"  # event (headline)
+    assert result[3] == "Severe"  # severity
+    assert result[6] == "Barrie - Orillia"  # area_desc
+    assert result[7] is not None  # polygon should exist
+    assert result[9] == ""  # geocode_name (empty when polygon exists)
+    assert result[10] == ""  # geocode_value (empty when polygon exists)

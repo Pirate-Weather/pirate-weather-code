@@ -136,9 +136,15 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
     ns = {"cap": root.tag.split("}")[0].strip("{")} if root.tag.startswith("{") else {}
 
     # --- Skip duplicate languages ---
+    # We only want to process ONE info block per language to avoid duplicates.
+    # Canadian CAP files often have multiple info blocks for the same language.
     seen_languages = set()
+    info_blocks_count = 0
+    skipped_duplicate_lang = 0
+    skipped_secondary_lang = 0
 
     for info in root.findall(".//cap:info" if ns else ".//info", ns):
+        info_blocks_count += 1
         lang_elem = info.find("cap:language" if ns else "language", ns)
         lang = (
             (lang_elem.text or "").strip().lower()
@@ -146,12 +152,27 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
             else "unknown"
         )
 
-        # Use only whatever language is first seen
-        if not seen_languages:
-            seen_languages.add(lang)
-        elif lang not in seen_languages:
-            seen_languages.add(lang)
-            continue  # Skip additional languages
+        # Skip if we've already processed an info block for this language
+        if lang in seen_languages:
+            skipped_duplicate_lang += 1
+            logger.debug(
+                "Skipping duplicate info block for language '%s' in %s",
+                lang,
+                source_id,
+            )
+            continue
+        seen_languages.add(lang)
+
+        # Only process the first language seen, skip subsequent languages
+        if len(seen_languages) > 1:
+            skipped_secondary_lang += 1
+            logger.debug(
+                "Skipping secondary language '%s' (first was '%s') in %s",
+                lang,
+                next(iter(seen_languages - {lang})),
+                source_id,
+            )
+            continue
 
         urgency = _cap_text(info, "urgency", ns)
         if urgency.lower() == "past":  # handle case-insensitive variants
@@ -273,6 +294,18 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                             geocode_value,
                         )
                     )
+
+    # Log summary stats at debug level for troubleshooting
+    if info_blocks_count > 1:
+        logger.debug(
+            "Processed %s: %d info blocks, %d skipped (duplicate lang), "
+            "%d skipped (secondary lang), %d results",
+            source_id,
+            info_blocks_count,
+            skipped_duplicate_lang,
+            skipped_secondary_lang,
+            len(results),
+        )
 
     return results
 
