@@ -135,11 +135,6 @@ def update_zarr_store(
     stores = ZarrStores()
     ingest_version = INGEST_VERSION_STR
 
-    # Always load GFS
-    gfs_path = os.path.join(save_dir, "GFS.zarr")
-    if os.path.exists(gfs_path):
-        stores.GFS_Zarr = zarr.open(zarr.storage.LocalStore(gfs_path), mode="r")
-        logger.info("Loaded GFS from: %s", gfs_path)
 
     # Load ETOPO on initial run if enabled
     if initial_run and use_etopo:
@@ -151,6 +146,13 @@ def update_zarr_store(
     # Open the Google ERA5 dataset for Dev and TimeMachine
     if stage in ("DEV", "TIMEMACHINE"):
         stores.ERA5_Data = init_ERA5()
+
+    # If TimeMachine, load GFS
+    if stage == "TIMEMACHINE":
+        gfs_path = os.path.join(save_dir, "GFS.zarr")
+        if os.path.exists(gfs_path):
+            stores.GFS_Zarr = zarr.open(zarr.storage.LocalStore(gfs_path), mode="r")
+            logger.info("Loaded GFS from: %s", gfs_path)
 
     if stage in ("DEV", "PROD"):
         local_stores = [
