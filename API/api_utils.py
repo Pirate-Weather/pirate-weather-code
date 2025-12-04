@@ -5,7 +5,11 @@ import logging
 import metpy as mp
 import numpy as np
 
-from API.constants.api_const import APPARENT_TEMP_CONSTS, APPARENT_TEMP_SOLAR_CONSTS
+from API.constants.api_const import (
+    APPARENT_TEMP_CONSTS,
+    APPARENT_TEMP_SOLAR_CONSTS,
+    PRECIP_NOISE_THRESHOLD_MMH,
+)
 from API.constants.shared_const import MISSING_DATA
 
 logger = logging.getLogger(__name__)
@@ -345,3 +349,11 @@ def select_daily_precip_type(
     ]
 
     return maxPchanceDay
+
+
+def zero_small_values(
+    array: np.ndarray, threshold: float = PRECIP_NOISE_THRESHOLD_MMH
+) -> np.ndarray:
+    """Clamp near-zero values to zero to reduce floating noise."""
+    array[np.abs(array) < threshold] = 0.0
+    return array

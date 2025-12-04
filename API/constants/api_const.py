@@ -82,6 +82,8 @@ PRECIP_IDX = {
 PRECIP_NOISE_THRESHOLD_MMH = (
     0.01  # Threshold in mm/h to filter out noise in precipitation intensity
 )
+PRECIP_PROB_NOISE_THRESHOLD = 0.05
+PRECIP_ACCUM_NOISE_THRESHOLD = 0.0005
 
 # API versioning and ingest version constants
 # Version scheme is: Major.Minor.Patch

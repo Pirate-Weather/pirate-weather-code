@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from API.api_utils import calculate_apparent_temperature, clipLog
-from API.constants.api_const import PRECIP_IDX, ROUNDING_RULES
+from API.api_utils import calculate_apparent_temperature, clipLog, zero_small_values
+from API.constants.api_const import (
+    PRECIP_ACCUM_NOISE_THRESHOLD,
+    PRECIP_IDX,
+    PRECIP_NOISE_THRESHOLD_MMH,
+    PRECIP_PROB_NOISE_THRESHOLD,
+    ROUNDING_RULES,
+)
 from API.constants.clip_const import (
     CLIP_CAPE,
     CLIP_CLOUD,
@@ -94,7 +100,6 @@ def _calculate_intensity_prob(
     maxPchanceHour,
     prcipIntensity_inputs,
     prcipProbability_inputs,
-    prepIntensityUnit,
 ):
     """
     Calculate precipitation intensity and probability.
@@ -105,7 +110,6 @@ def _calculate_intensity_prob(
         maxPchanceHour: Maximum precipitation chance for each hour.
         prcipIntensity_inputs: Precipitation intensity inputs.
         prcipProbability_inputs: Precipitation probability inputs.
-        prepIntensityUnit: Precipitation intensity unit.
     """
     prcipIntensityHour = np.full((len(hour_array_grib), 5), MISSING_DATA)
     intensity_sources = [
@@ -122,15 +126,13 @@ def _calculate_intensity_prob(
 
     InterPhour[:, DATA_HOURLY["intensity"]] = (
         np.choose(np.argmin(np.isnan(prcipIntensityHour), axis=1), prcipIntensityHour.T)
-        * prepIntensityUnit
     )
     InterPhour[:, DATA_HOURLY["intensity"]] = np.maximum(
         InterPhour[:, DATA_HOURLY["intensity"]], 0
     )
-    InterPhour[
-        InterPhour[:, DATA_HOURLY["intensity"]] < (0.0005 * prepIntensityUnit),
-        DATA_HOURLY["intensity"],
-    ] = 0
+    InterPhour[:, DATA_HOURLY["intensity"]] = zero_small_values(
+        InterPhour[:, DATA_HOURLY["intensity"]], threshold=PRECIP_NOISE_THRESHOLD_MMH
+    )
     InterPhour[:, DATA_HOURLY["type"]] = np.choose(
         np.argmin(np.isnan(prcipIntensityHour), axis=1), maxPchanceHour.T
     )
@@ -148,7 +150,9 @@ def _calculate_intensity_prob(
     InterPhour[:, DATA_HOURLY["prob"]] = np.clip(
         InterPhour[:, DATA_HOURLY["prob"]], 0, 1
     )
-    InterPhour[InterPhour[:, DATA_HOURLY["prob"]] < 0.05, DATA_HOURLY["prob"]] = 0
+    InterPhour[:, DATA_HOURLY["prob"]] = zero_small_values(
+        InterPhour[:, DATA_HOURLY["prob"]], threshold=PRECIP_PROB_NOISE_THRESHOLD
+    )
     InterPhour[InterPhour[:, DATA_HOURLY["prob"]] == 0, 2] = 0
 
 
@@ -325,6 +329,9 @@ def _process_input_vars(
 
     InterPhour[:, DATA_HOURLY["accum"]] = np.choose(
         np.argmin(np.isnan(accum_inputs), axis=1), accum_inputs.T
+    )
+    InterPhour[:, DATA_HOURLY["accum"]] = zero_small_values(
+        InterPhour[:, DATA_HOURLY["accum"]], threshold=PRECIP_ACCUM_NOISE_THRESHOLD
     )
     InterPhour[:, DATA_HOURLY["storm_dist"]] = np.choose(
         np.argmin(np.isnan(nearstorm_inputs["dist"]), axis=1),
@@ -764,7 +771,6 @@ def build_hourly_block(
         maxPchanceHour,
         prcipIntensity_inputs,
         prcipProbability_inputs,
-        prepIntensityUnit,
     )
 
     _process_input_vars(

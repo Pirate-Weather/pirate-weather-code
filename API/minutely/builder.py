@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
-from API.api_utils import fast_nearest_interp
+from API.api_utils import fast_nearest_interp, zero_small_values
 from API.constants.api_const import (
     PRECIP_IDX,
     PRECIP_NOISE_THRESHOLD_MMH,
@@ -448,17 +448,28 @@ def _process_minute_items(
         InterPminute[:, DATA_MINUTELY["ice_intensity"]], 0
     )
 
-    def zero_small_values(array: np.ndarray) -> np.ndarray:
-        """Clamp near-zero values to zero to reduce floating noise."""
-        array[np.abs(array) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
-        return array
+    minuteSleetIntensity = np.maximum(
+        InterPminute[:, DATA_MINUTELY["ice_intensity"]], 0
+    )
 
-    minuteRainIntensity = zero_small_values(minuteRainIntensity)
-    minuteSnowIntensity = zero_small_values(minuteSnowIntensity)
-    minuteSleetIntensity = zero_small_values(minuteSleetIntensity)
-    minuteProbability = zero_small_values(minuteProbability)
-    minuteIntensityError = zero_small_values(minuteIntensityError)
-    minuteIntensity = zero_small_values(minuteIntensity)
+    minuteRainIntensity = zero_small_values(
+        minuteRainIntensity, threshold=PRECIP_NOISE_THRESHOLD_MMH
+    )
+    minuteSnowIntensity = zero_small_values(
+        minuteSnowIntensity, threshold=PRECIP_NOISE_THRESHOLD_MMH
+    )
+    minuteSleetIntensity = zero_small_values(
+        minuteSleetIntensity, threshold=PRECIP_NOISE_THRESHOLD_MMH
+    )
+    minuteProbability = zero_small_values(
+        minuteProbability, threshold=PRECIP_NOISE_THRESHOLD_MMH
+    )
+    minuteIntensityError = zero_small_values(
+        minuteIntensityError, threshold=PRECIP_NOISE_THRESHOLD_MMH
+    )
+    minuteIntensity = zero_small_values(
+        minuteIntensity, threshold=PRECIP_NOISE_THRESHOLD_MMH
+    )
 
     # If type is none, zero out everything
     # We need to reconstruct maxPchance or pass it in?
