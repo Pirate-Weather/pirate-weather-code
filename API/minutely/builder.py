@@ -22,7 +22,7 @@ from API.utils.precip import dbz_to_rate
 def _interp_gefs(minute_array_grib, gefs_data):
     if gefs_data is None or len(gefs_data) == 0:
         return None
-    
+
     gefsMinuteInterpolation = np.zeros((len(minute_array_grib), len(gefs_data[0, :])))
     for i in range(len(gefs_data[0, :]) - 1):
         gefsMinuteInterpolation[:, i + 1] = np.interp(
@@ -38,7 +38,7 @@ def _interp_gefs(minute_array_grib, gefs_data):
 def _interp_gfs(minute_array_grib, gfs_data):
     if gfs_data is None or len(gfs_data) == 0:
         return None
-        
+
     gfsMinuteInterpolation = np.zeros((len(minute_array_grib), len(gfs_data[0, :])))
     for i in range(len(gfs_data[0, :]) - 1):
         gfsMinuteInterpolation[:, i + 1] = np.interp(
@@ -54,7 +54,7 @@ def _interp_gfs(minute_array_grib, gfs_data):
 def _interp_ecmwf(minute_array_grib, ecmwf_data):
     if ecmwf_data is None or len(ecmwf_data) == 0:
         return None
-        
+
     ecmwfMinuteInterpolation = np.zeros((len(minute_array_grib), len(ecmwf_data[0, :])))
     for i in range(len(ecmwf_data[0, :]) - 1):
         if i + 1 == ECMWF["ptype"]:
@@ -77,7 +77,7 @@ def _interp_ecmwf(minute_array_grib, ecmwf_data):
 def _interp_nbm(minute_array_grib, nbm_data):
     if nbm_data is None:
         return None
-        
+
     nbmMinuteInterpolation = np.zeros((len(minute_array_grib), 18))
     for i in [
         NBM["accum"],
@@ -100,7 +100,7 @@ def _interp_nbm(minute_array_grib, nbm_data):
 def _interp_hrrr(minute_array_grib, hrrr_subh_data, hrrr_merged):
     if hrrr_subh_data is None:
         return None
-        
+
     hrrrSubHInterpolation = np.zeros(
         (len(minute_array_grib), len(hrrr_subh_data[0, :]))
     )
@@ -144,7 +144,7 @@ def _interp_hrrr(minute_array_grib, hrrr_subh_data, hrrr_merged):
 def _interp_era5(minute_array_grib, era5_data):
     if era5_data is None or len(era5_data) == 0:
         return None
-        
+
     era5_MinuteInterpolation = np.zeros((len(minute_array_grib), max(ERA5.values())))
     for i in [
         ERA5["large_scale_rain_rate"],
@@ -176,14 +176,14 @@ def _calculate_prob(
     gefsMinuteInterpolation,
 ):
     InterPminute_prob = np.full(len(minute_array_grib), MISSING_DATA)
-    
+
     if "nbm" in source_list and nbmMinuteInterpolation is not None:
         InterPminute_prob = nbmMinuteInterpolation[:, NBM["prob"]] * 0.01
     elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
         InterPminute_prob = ecmwfMinuteInterpolation[:, ECMWF["prob"]]
     elif "gefs" in source_list and gefsMinuteInterpolation is not None:
         InterPminute_prob = gefsMinuteInterpolation[:, GEFS["prob"]]
-        
+
     InterPminute_prob[InterPminute_prob < 0.05] = 0
     return InterPminute_prob
 
@@ -198,7 +198,7 @@ def _calculate_precip_type_probs(
     era5_MinuteInterpolation,
 ):
     InterTminute = np.zeros((61, 5))
-    
+
     if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
         for i in [
             HRRR_SUBH["snow"],
@@ -230,7 +230,7 @@ def _calculate_precip_type_probs(
         InterTminute[:, 2] = np.where(np.isin(ptype_era5, [4, 8, 10]), 1, 0)
         InterTminute[:, 3] = np.where(np.isin(ptype_era5, [3, 12]), 1, 0)
         InterTminute[:, 4] = np.where(np.isin(ptype_era5, [1, 2, 7, 11]), 1, 0)
-        
+
     return InterTminute
 
 
@@ -245,7 +245,7 @@ def _calculate_intensity(
     era5_MinuteInterpolation,
 ):
     intensity = np.full(len(precipTypes), MISSING_DATA)
-    
+
     if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
         temp_arr = hrrrSubHInterpolation[:, HRRR_SUBH["temp"]]
         refc_arr = hrrrSubHInterpolation[:, HRRR_SUBH["refc"]]
@@ -276,7 +276,7 @@ def _calculate_intensity(
             + era5_MinuteInterpolation[:, ERA5["large_scale_rain_rate"]]
             + era5_MinuteInterpolation[:, ERA5["convective_rain_rate"]]
         ) * 3600
-        
+
     return intensity, precipTypes
 
 
@@ -287,22 +287,22 @@ def _calculate_error(
     gefsMinuteInterpolation,
 ):
     error = np.ones(len(minute_array_grib)) * MISSING_DATA
-    
+
     if "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
         error = ecmwfMinuteInterpolation[:, ECMWF["accum_stddev"]] * 1000
     elif "gefs" in source_list and gefsMinuteInterpolation is not None:
         error = gefsMinuteInterpolation[:, GEFS["error"]]
-        
+
     if "gefs" in source_list and gefsMinuteInterpolation is not None:
-         # This logic was in the original code inside the HRRR block but seems to apply generally if GEFS is present?
-         # Wait, looking at original code, it updated gefs error inside HRRR block if gefs was present.
-         # But later it sets error based on ecmwf or gefs.
-         # The logic inside HRRR block:
-         # if "gefs" in source_list and gefsMinuteInterpolation is not None:
-         #    gefsMinuteInterpolation[:, GEFS["error"]] = np.interp(...)
-         # This updates the interpolation array itself.
-         pass
-         
+        # This logic was in the original code inside the HRRR block but seems to apply generally if GEFS is present?
+        # Wait, looking at original code, it updated gefs error inside HRRR block if gefs was present.
+        # But later it sets error based on ecmwf or gefs.
+        # The logic inside HRRR block:
+        # if "gefs" in source_list and gefsMinuteInterpolation is not None:
+        #    gefsMinuteInterpolation[:, GEFS["error"]] = np.interp(...)
+        # This updates the interpolation array itself.
+        pass
+
     return error
 
 
@@ -345,7 +345,7 @@ def _process_minute_items(
     # We need to reconstruct maxPchance or pass it in?
     # Or just rely on minuteType being 'none'
     zero_type_mask = np.array(minuteType) == "none"
-    
+
     minuteRainIntensity[zero_type_mask] = 0.0
     minuteSnowIntensity[zero_type_mask] = 0.0
     minuteSleetIntensity[zero_type_mask] = 0.0
@@ -375,7 +375,7 @@ def _process_minute_items(
     ]
     if version >= 2:
         minuteKeys += ["rainIntensity", "snowIntensity", "sleetIntensity"]
-        
+
     all_minute_keys = [
         "time",
         "precipIntensity",
@@ -414,7 +414,7 @@ def _process_minute_items(
             float(minuteSleetIntensity[idx]),
         ]
         minuteItems_si.append(dict(zip(all_minute_keys, values_si)))
-        
+
     return minuteItems, minuteItems_si
 
 
@@ -446,19 +446,39 @@ def build_minutely_block(
     InterPminute[:, DATA_MINUTELY["time"]] = minute_array_grib
 
     # Interpolate data sources
-    gefsMinuteInterpolation = _interp_gefs(minute_array_grib, gefs_data) if "gefs" in source_list else None
-    gfsMinuteInterpolation = _interp_gfs(minute_array_grib, gfs_data) if "gfs" in source_list else None
-    ecmwfMinuteInterpolation = _interp_ecmwf(minute_array_grib, ecmwf_data) if "ecmwf_ifs" in source_list else None
-    nbmMinuteInterpolation = _interp_nbm(minute_array_grib, nbm_data) if "nbm" in source_list else None
-    hrrrSubHInterpolation = _interp_hrrr(minute_array_grib, hrrr_subh_data, hrrr_merged) if "hrrrsubh" in source_list else None
-    era5_MinuteInterpolation = _interp_era5(minute_array_grib, era5_data) if "era5" in source_list else None
+    gefsMinuteInterpolation = (
+        _interp_gefs(minute_array_grib, gefs_data) if "gefs" in source_list else None
+    )
+    gfsMinuteInterpolation = (
+        _interp_gfs(minute_array_grib, gfs_data) if "gfs" in source_list else None
+    )
+    ecmwfMinuteInterpolation = (
+        _interp_ecmwf(minute_array_grib, ecmwf_data)
+        if "ecmwf_ifs" in source_list
+        else None
+    )
+    nbmMinuteInterpolation = (
+        _interp_nbm(minute_array_grib, nbm_data) if "nbm" in source_list else None
+    )
+    hrrrSubHInterpolation = (
+        _interp_hrrr(minute_array_grib, hrrr_subh_data, hrrr_merged)
+        if "hrrrsubh" in source_list
+        else None
+    )
+    era5_MinuteInterpolation = (
+        _interp_era5(minute_array_grib, era5_data) if "era5" in source_list else None
+    )
 
     # Handle GEFS error interpolation inside HRRR block logic from original code
     # The original code updated gefsMinuteInterpolation inside the HRRR block.
     # We need to replicate that if it's critical.
     if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
-        if "gefs" in source_list and gefsMinuteInterpolation is not None and gefs_data is not None:
-             gefsMinuteInterpolation[:, GEFS["error"]] = np.interp(
+        if (
+            "gefs" in source_list
+            and gefsMinuteInterpolation is not None
+            and gefs_data is not None
+        ):
+            gefsMinuteInterpolation[:, GEFS["error"]] = np.interp(
                 minute_array_grib,
                 gefs_data[:, 0].squeeze(),
                 gefs_data[:, GEFS["error"]],
@@ -510,7 +530,7 @@ def build_minutely_block(
         era5_MinuteInterpolation,
     )
     InterPminute[:, DATA_MINUTELY["intensity"]] = intensity
-    
+
     # Update minuteType list from updated precipTypes array (for HRRR logic)
     minuteType = precipTypes.tolist()
 

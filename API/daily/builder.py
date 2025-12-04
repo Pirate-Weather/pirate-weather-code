@@ -122,7 +122,7 @@ def _calculate_precip_chance(
         )
     except Exception:
         logger.exception("select_daily_precip_type error %s", loc_tag)
-    
+
     return maxPchanceDay, max_precip_chance_day, max_precip_chance_night
 
 
@@ -151,7 +151,9 @@ def _build_display_data(
     extraVars,
 ):
     daily_display_mean = InterPday.copy()
-    daily_display_mean[:, DATA_DAY["dew"]] = _conv_temp(InterPday[:, DATA_DAY["dew"]], tempUnits)
+    daily_display_mean[:, DATA_DAY["dew"]] = _conv_temp(
+        InterPday[:, DATA_DAY["dew"]], tempUnits
+    )
     daily_display_mean[:, DATA_DAY["pressure"]] = (
         InterPday[:, DATA_DAY["pressure"]] / 100
     )
@@ -344,7 +346,7 @@ def _build_display_data(
         half_night_display_mean[:, DATA_HOURLY["station_pressure"]] = (
             interp_half_night_mean[:, DATA_HOURLY["station_pressure"]] / 100
         )
-        
+
     return (
         daily_display_mean,
         daily_display_high,
@@ -537,9 +539,7 @@ def _build_half_day_item(
     precip_accum = liquid_accum + snow_accum + ice_accum
 
     wind_bearing_val = interp_mean[idx, DATA_HOURLY["bearing"]]
-    wind_bearing = (
-        int(wind_bearing_val) if not np.isnan(wind_bearing_val) else 0
-    )
+    wind_bearing = int(wind_bearing_val) if not np.isnan(wind_bearing_val) else 0
     cape_val = interp_mean[idx, DATA_HOURLY["cape"]]
     cape_int = int(cape_val) if not np.isnan(cape_val) else 0
 
@@ -580,9 +580,7 @@ def _build_half_day_item(
     }
 
     if "stationPressure" in extraVars:
-        item["stationPressure"] = display_mean[
-            idx, DATA_HOURLY["station_pressure"]
-        ]
+        item["stationPressure"] = display_mean[idx, DATA_HOURLY["station_pressure"]]
 
     return item
 
@@ -754,16 +752,18 @@ def build_daily_section(
     interp_half_night_mean = np.array(mean_night_results)
     interp_half_night_max = np.array(max_night_results)
 
-    maxPchanceDay, max_precip_chance_day, max_precip_chance_night = _calculate_precip_chance(
-        InterPdaySum,
-        interp_half_day_sum,
-        interp_half_night_sum,
-        maxPchanceDay,
-        max_precip_chance_day,
-        max_precip_chance_night,
-        prepAccumUnit,
-        logger,
-        loc_tag,
+    maxPchanceDay, max_precip_chance_day, max_precip_chance_night = (
+        _calculate_precip_chance(
+            InterPdaySum,
+            interp_half_day_sum,
+            interp_half_night_sum,
+            maxPchanceDay,
+            max_precip_chance_day,
+            max_precip_chance_night,
+            prepAccumUnit,
+            logger,
+            loc_tag,
+        )
     )
 
     day_night_list = []

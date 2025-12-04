@@ -45,9 +45,9 @@ from API.constants.model_const import (
     RTMA_RU,
 )
 from API.constants.shared_const import MISSING_DATA
+from API.legacy.current import get_legacy_current_summary
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
-from API.legacy.current import get_legacy_current_summary
 
 
 @dataclass
@@ -77,9 +77,7 @@ def _select_value(strategies, default=MISSING_DATA):
 
 
 def _interp_scalar(merged, key, state: InterpolationState):
-    return (
-        merged[state.idx1, key] * state.fac1 + merged[state.idx2, key] * state.fac2
-    )
+    return merged[state.idx1, key] * state.fac1 + merged[state.idx2, key] * state.fac2
 
 
 def _interp_uv_magnitude(merged, u_key, v_key, state: InterpolationState):
@@ -188,9 +186,7 @@ def _get_dew(sourceList, model_data, state: InterpolationState):
             ),
             (
                 lambda: "ecmwf_ifs" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["ECMWF_Merged"], ECMWF["dew"], state
-                ),
+                lambda: _interp_scalar(model_data["ECMWF_Merged"], ECMWF["dew"], state),
             ),
             (
                 lambda: "gfs" in sourceList,
@@ -505,9 +501,7 @@ def _get_cloud(sourceList, model_data, state: InterpolationState):
             ),
             (
                 lambda: model_data["has_hrrr_merged"],
-                lambda: _interp_scalar(
-                    model_data["HRRR_Merged"], HRRR["cloud"], state
-                )
+                lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["cloud"], state)
                 * 0.01,
             ),
             (
@@ -608,9 +602,7 @@ def _get_vis(sourceList, model_data, state: InterpolationState):
             ),
             (
                 lambda: model_data["has_hrrr_merged"],
-                lambda: _interp_scalar(
-                    model_data["HRRR_Merged"], HRRR["vis"], state
-                ),
+                lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["vis"], state),
             ),
             (
                 lambda: "gfs" in sourceList,
@@ -692,9 +684,7 @@ def _get_solar(sourceList, model_data, state: InterpolationState):
             ),
             (
                 lambda: model_data["has_hrrr_merged"],
-                lambda: _interp_scalar(
-                    model_data["HRRR_Merged"], HRRR["solar"], state
-                ),
+                lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["solar"], state),
             ),
             (
                 lambda: "gfs" in sourceList,
@@ -724,9 +714,7 @@ def _get_cape(sourceList, model_data, state: InterpolationState):
             ),
             (
                 lambda: model_data["has_hrrr_merged"],
-                lambda: _interp_scalar(
-                    model_data["HRRR_Merged"], HRRR["cape"], state
-                ),
+                lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["cape"], state),
             ),
             (
                 lambda: "gfs" in sourceList,
@@ -889,9 +877,7 @@ def build_current_section(
         InterPcurrent[DATA_CURRENT["ice_intensity"]],
         InterPcurrent[DATA_CURRENT["prob"]],
         InterPcurrent[DATA_CURRENT["error"]],
-    ) = _get_intensity(
-        sourceList, model_data, state, InterPminute, InterPcurrent
-    )
+    ) = _get_intensity(sourceList, model_data, state, InterPminute, InterPcurrent)
 
     InterPcurrent[DATA_CURRENT["bearing"]] = _get_bearing(sourceList, model_data, state)
     InterPcurrent[DATA_CURRENT["cloud"]] = _get_cloud(sourceList, model_data, state)
@@ -952,9 +938,7 @@ def build_current_section(
         curr_temp_display = np.round(InterPcurrent[DATA_CURRENT["temp"]], 2)
         curr_apparent_display = np.round(InterPcurrent[DATA_CURRENT["apparent"]], 2)
         curr_dew_display = np.round(InterPcurrent[DATA_CURRENT["dew"]], 2)
-        curr_feels_like_display = np.round(
-            InterPcurrent[DATA_CURRENT["feels_like"]], 2
-        )
+        curr_feels_like_display = np.round(InterPcurrent[DATA_CURRENT["feels_like"]], 2)
 
     curr_storm_dist_display = np.round(
         InterPcurrent[DATA_CURRENT["storm_dist"]] * visUnits, 2

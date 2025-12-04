@@ -391,9 +391,7 @@ def _calculate_derived_metrics(
     )[0]
     if snow_intensity_indices.size > 0:
         snow_intensity_si = estimate_snow_height(
-            InterPhour[
-                snow_intensity_indices, DATA_HOURLY["intensity"]
-            ],
+            InterPhour[snow_intensity_indices, DATA_HOURLY["intensity"]],
             InterPhour[snow_intensity_indices, DATA_HOURLY["temp"]],
             InterPhour[snow_intensity_indices, DATA_HOURLY["wind"]],
         )
@@ -540,7 +538,7 @@ def _build_hourly_display(
             hourly_display[:, idx_field] = np.round(
                 hourly_display[:, idx_field], decimals
             )
-            
+
     return hourly_display
 
 

@@ -1,27 +1,28 @@
-
-import pytest
-import numpy as np
 from unittest.mock import MagicMock
+
+import numpy as np
+
+from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
 from API.hourly.block import build_hourly_block
-from API.constants.forecast_const import DATA_HOURLY, DATA_DAY
+
 
 def test_build_hourly_block_structure():
     # Mock inputs
     num_hours = 48
-    
+
     # Mock InterPhour (hours, vars)
     InterPhour = np.zeros((num_hours, max(DATA_HOURLY.values()) + 1))
-    
+
     # Mock arrays
     hour_array_grib = np.arange(num_hours) * 3600
     hour_array = np.arange(num_hours)
-    
+
     # Mock InterSday
     InterSday = np.zeros((2, max(DATA_DAY.values()) + 1))
-    
+
     # Mock indices
     hourlyDayIndex = np.zeros(num_hours, dtype=int)
-    
+
     # Mock inputs dictionaries
     InterThour_inputs = {
         "nbm_snow": np.zeros(num_hours),
@@ -29,7 +30,7 @@ def test_build_hourly_block_structure():
         "nbm_freezing_rain": np.zeros(num_hours),
         "nbm_rain": np.zeros(num_hours),
     }
-    
+
     prcipIntensity_inputs = {}
     prcipProbability_inputs = {}
     temperature_inputs = np.zeros((num_hours, 1))
@@ -45,14 +46,17 @@ def test_build_hourly_block_structure():
     ozone_inputs = np.zeros((num_hours, 1))
     smoke_inputs = np.zeros((num_hours, 1))
     accum_inputs = np.zeros((num_hours, 1))
-    nearstorm_inputs = {"dist": np.zeros((num_hours, 1)), "dir": np.zeros((num_hours, 1))}
+    nearstorm_inputs = {
+        "dist": np.zeros((num_hours, 1)),
+        "dir": np.zeros((num_hours, 1)),
+    }
     station_pressure_inputs = np.zeros((num_hours, 1))
     fire_inputs = np.zeros((num_hours, 1))
     feels_like_inputs = np.zeros((num_hours, 1))
     solar_inputs = np.zeros((num_hours, 1))
     cape_inputs = np.zeros((num_hours, 1))
     error_inputs = np.zeros((num_hours, 1))
-    
+
     kwargs = {
         "source_list": ["nbm"],
         "InterPhour": InterPhour,
@@ -67,7 +71,7 @@ def test_build_hourly_block_structure():
         "prepAccumUnit": 1.0,
         "windUnit": 1.0,
         "visUnits": 1.0,
-        "tempUnits": 1, # Celsius
+        "tempUnits": 1,  # Celsius
         "humidUnit": 1.0,
         "extraVars": [],
         "summaryText": False,
@@ -105,12 +109,24 @@ def test_build_hourly_block_structure():
     }
 
     result = build_hourly_block(**kwargs)
-    
+
     assert isinstance(result, tuple)
     assert len(result) == 11
-    
-    hourList, hourList_si, hourIconList, hourTextList, dayZeroRain, dayZeroSnow, dayZeroIce, hourly_display, PTypeHour, PTextHour, InterPhour_res = result
-    
+
+    (
+        hourList,
+        hourList_si,
+        hourIconList,
+        hourTextList,
+        dayZeroRain,
+        dayZeroSnow,
+        dayZeroIce,
+        hourly_display,
+        PTypeHour,
+        PTextHour,
+        InterPhour_res,
+    ) = result
+
     assert len(hourList) == num_hours
     assert isinstance(hourList[0], dict)
     assert "time" in hourList[0]

@@ -1,9 +1,11 @@
-
-import pytest
 import datetime
 from unittest.mock import MagicMock
-from API.request.preprocess import prepare_initial_request, InitialRequestContext
+
+import pytest
 from timezonefinder import TimezoneFinder
+
+from API.request.preprocess import InitialRequestContext, prepare_initial_request
+
 
 @pytest.mark.asyncio
 async def test_prepare_initial_request_structure():
@@ -51,5 +53,7 @@ async def test_prepare_initial_request_structure():
     assert result.lat == 40.7128
     assert result.lon_in == -74.0060
     assert result.unit_system == "us"
-    assert result.lang == "en" if hasattr(result, "lang") else True # lang might not be in context directly but used for translation
+    assert (
+        result.lang == "en" if hasattr(result, "lang") else True
+    )  # lang might not be in context directly but used for translation
     assert result.translation == translations["en"]
