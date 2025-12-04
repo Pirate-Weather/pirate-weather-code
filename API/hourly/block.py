@@ -34,6 +34,18 @@ def _populate_max_pchance(
     source_list,
     InterThour_inputs,
 ):
+    """
+    Populate maximum precipitation chance for each hour.
+
+    Args:
+        hour_array_grib: GRIB hour array.
+        hour_array: Hour array.
+        source_list: List of data sources.
+        InterThour_inputs: Inputs for hourly interpolation.
+
+    Returns:
+        Array of maximum precipitation chances.
+    """
     maxPchanceHour = np.full((len(hour_array_grib), 5), MISSING_DATA)
 
     def populate_component_ptype(condition, target_idx, prefix):
@@ -84,6 +96,17 @@ def _calculate_intensity_prob(
     prcipProbability_inputs,
     prepIntensityUnit,
 ):
+    """
+    Calculate precipitation intensity and probability.
+
+    Args:
+        hour_array_grib: GRIB hour array.
+        InterPhour: Hourly interpolated data.
+        maxPchanceHour: Maximum precipitation chance for each hour.
+        prcipIntensity_inputs: Precipitation intensity inputs.
+        prcipProbability_inputs: Precipitation probability inputs.
+        prepIntensityUnit: Precipitation intensity unit.
+    """
     prcipIntensityHour = np.full((len(hour_array_grib), 5), MISSING_DATA)
     intensity_sources = [
         ("nbm", 0),
@@ -153,6 +176,33 @@ def _process_input_vars(
     station_pressure_inputs,
     humidUnit,
 ):
+    """
+    Process input variables and populate InterPhour.
+
+    Args:
+        InterPhour: Hourly interpolated data.
+        error_inputs: Error inputs.
+        temperature_inputs: Temperature inputs.
+        dew_inputs: Dew point inputs.
+        humidity_inputs: Humidity inputs.
+        pressure_inputs: Pressure inputs.
+        wind_inputs: Wind speed inputs.
+        gust_inputs: Wind gust inputs.
+        bearing_inputs: Wind bearing inputs.
+        cloud_inputs: Cloud cover inputs.
+        uv_inputs: UV index inputs.
+        vis_inputs: Visibility inputs.
+        ozone_inputs: Ozone inputs.
+        smoke_inputs: Smoke inputs.
+        accum_inputs: Accumulation inputs.
+        nearstorm_inputs: Near storm inputs.
+        fire_inputs: Fire index inputs.
+        solar_inputs: Solar inputs.
+        cape_inputs: CAPE inputs.
+        feels_like_inputs: Feels like temperature inputs.
+        station_pressure_inputs: Station pressure inputs.
+        humidUnit: Humidity unit.
+    """
     InterPhour[:, DATA_HOURLY["error"]] = np.choose(
         np.argmin(np.isnan(error_inputs), axis=1), error_inputs.T
     )
@@ -325,6 +375,18 @@ def _calculate_derived_metrics(
     baseTimeOffset,
     timeMachine,
 ):
+    """
+    Calculate derived metrics like apparent temperature and accumulation.
+
+    Args:
+        InterPhour: Hourly interpolated data.
+        hourlyDayIndex: Hourly day index.
+        baseTimeOffset: Base time offset.
+        timeMachine: Whether this is a time machine request.
+
+    Returns:
+        Tuple containing day zero rain, snow, and ice accumulation.
+    """
     InterPhour[:, DATA_HOURLY["apparent"]] = calculate_apparent_temperature(
         InterPhour[:, DATA_HOURLY["temp"]],
         InterPhour[:, DATA_HOURLY["humidity"]],
@@ -438,6 +500,22 @@ def _build_hourly_display(
     prepAccumUnit,
     station_pressure_inputs,
 ):
+    """
+    Build hourly display data.
+
+    Args:
+        hour_array: Hour array.
+        InterPhour: Hourly interpolated data.
+        tempUnits: Temperature unit.
+        windUnit: Wind speed unit.
+        visUnits: Visibility unit.
+        prepIntensityUnit: Precipitation intensity unit.
+        prepAccumUnit: Precipitation accumulation unit.
+        station_pressure_inputs: Station pressure inputs.
+
+    Returns:
+        Hourly display data array.
+    """
     hourly_display = np.zeros((len(hour_array), max(DATA_HOURLY.values()) + 1))
 
     if tempUnits == 0:
@@ -612,7 +690,66 @@ def build_hourly_block(
     error_inputs,
     version,
 ):
-    """Build hourly output objects and summary text/icon lists."""
+    """
+    Build hourly output objects and summary text/icon lists.
+
+    This function coordinates the calculation of hourly weather data,
+    including precipitation chances, intensity, input variable processing,
+    derived metrics, and final display object construction.
+
+    Args:
+        source_list: List of data sources.
+        InterPhour: Hourly interpolated data.
+        hour_array_grib: GRIB hour array.
+        hour_array: Hour array.
+        InterSday: Daily source data.
+        hourlyDayIndex: Hourly day index.
+        baseTimeOffset: Base time offset.
+        timeMachine: Whether this is a time machine request.
+        tmExtra: Extra time machine parameters.
+        prepIntensityUnit: Precipitation intensity unit.
+        prepAccumUnit: Precipitation accumulation unit.
+        windUnit: Wind speed unit.
+        visUnits: Visibility unit.
+        tempUnits: Temperature unit.
+        humidUnit: Humidity unit.
+        extraVars: Extra variables.
+        summaryText: Whether to generate summary text.
+        icon: Icon set.
+        translation: Translation function.
+        unitSystem: Unit system.
+        is_all_night: Whether the forecast is for all night.
+        tz_name: Timezone name.
+        InterThour_inputs: Inputs for hourly interpolation.
+        prcipIntensity_inputs: Precipitation intensity inputs.
+        prcipProbability_inputs: Precipitation probability inputs.
+        temperature_inputs: Temperature inputs.
+        dew_inputs: Dew point inputs.
+        humidity_inputs: Humidity inputs.
+        pressure_inputs: Pressure inputs.
+        wind_inputs: Wind speed inputs.
+        gust_inputs: Wind gust inputs.
+        bearing_inputs: Wind bearing inputs.
+        cloud_inputs: Cloud cover inputs.
+        uv_inputs: UV index inputs.
+        vis_inputs: Visibility inputs.
+        ozone_inputs: Ozone inputs.
+        smoke_inputs: Smoke inputs.
+        accum_inputs: Accumulation inputs.
+        nearstorm_inputs: Near storm inputs.
+        station_pressure_inputs: Station pressure inputs.
+        era5_rain_intensity: ERA5 rain intensity.
+        era5_snow_water_equivalent: ERA5 snow water equivalent.
+        fire_inputs: Fire index inputs.
+        feels_like_inputs: Feels like temperature inputs.
+        solar_inputs: Solar inputs.
+        cape_inputs: CAPE inputs.
+        error_inputs: Error inputs.
+        version: API version.
+
+    Returns:
+        Tuple containing hourly lists and arrays.
+    """
 
     maxPchanceHour = _populate_max_pchance(
         hour_array_grib,
@@ -741,7 +878,29 @@ def build_hourly_objects(
     extraVars,
     version,
 ):
-    """Create hourly response objects and associated summary/icon lists."""
+    """
+    Create hourly response objects and associated summary/icon lists.
+
+    Args:
+        hour_array_grib: GRIB hour array.
+        InterSday: Daily source data.
+        hourlyDayIndex: Hourly day index.
+        InterPhour: Hourly interpolated data.
+        hourly_display: Hourly display data.
+        PTypeHour: Precipitation type for each hour.
+        PTextHour: Precipitation text for each hour.
+        summaryText: Whether to generate summary text.
+        icon: Icon set.
+        translation: Translation function.
+        tempUnits: Temperature unit.
+        timeMachine: Whether this is a time machine request.
+        tmExtra: Extra time machine parameters.
+        extraVars: Extra variables.
+        version: API version.
+
+    Returns:
+        Tuple containing hour lists and icon/text lists.
+    """
     hourList = []
     hourList_si = []
     hourIconList = []

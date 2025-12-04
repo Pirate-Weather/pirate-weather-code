@@ -20,6 +20,16 @@ from API.utils.precip import dbz_to_rate
 
 
 def _interp_gefs(minute_array_grib, gefs_data):
+    """
+    Interpolate GEFS data to minutely intervals.
+
+    Args:
+        minute_array_grib: Minutely time array.
+        gefs_data: GEFS data array.
+
+    Returns:
+        Interpolated GEFS data.
+    """
     if gefs_data is None or len(gefs_data) == 0:
         return None
 
@@ -36,6 +46,16 @@ def _interp_gefs(minute_array_grib, gefs_data):
 
 
 def _interp_gfs(minute_array_grib, gfs_data):
+    """
+    Interpolate GFS data to minutely intervals.
+
+    Args:
+        minute_array_grib: Minutely time array.
+        gfs_data: GFS data array.
+
+    Returns:
+        Interpolated GFS data.
+    """
     if gfs_data is None or len(gfs_data) == 0:
         return None
 
@@ -52,6 +72,16 @@ def _interp_gfs(minute_array_grib, gfs_data):
 
 
 def _interp_ecmwf(minute_array_grib, ecmwf_data):
+    """
+    Interpolate ECMWF data to minutely intervals.
+
+    Args:
+        minute_array_grib: Minutely time array.
+        ecmwf_data: ECMWF data array.
+
+    Returns:
+        Interpolated ECMWF data.
+    """
     if ecmwf_data is None or len(ecmwf_data) == 0:
         return None
 
@@ -75,6 +105,16 @@ def _interp_ecmwf(minute_array_grib, ecmwf_data):
 
 
 def _interp_nbm(minute_array_grib, nbm_data):
+    """
+    Interpolate NBM data to minutely intervals.
+
+    Args:
+        minute_array_grib: Minutely time array.
+        nbm_data: NBM data array.
+
+    Returns:
+        Interpolated NBM data.
+    """
     if nbm_data is None:
         return None
 
@@ -98,6 +138,17 @@ def _interp_nbm(minute_array_grib, nbm_data):
 
 
 def _interp_hrrr(minute_array_grib, hrrr_subh_data, hrrr_merged):
+    """
+    Interpolate HRRR data to minutely intervals.
+
+    Args:
+        minute_array_grib: Minutely time array.
+        hrrr_subh_data: HRRR sub-hourly data array.
+        hrrr_merged: HRRR merged data array.
+
+    Returns:
+        Interpolated HRRR data.
+    """
     if hrrr_subh_data is None:
         return None
 
@@ -142,6 +193,16 @@ def _interp_hrrr(minute_array_grib, hrrr_subh_data, hrrr_merged):
 
 
 def _interp_era5(minute_array_grib, era5_data):
+    """
+    Interpolate ERA5 data to minutely intervals.
+
+    Args:
+        minute_array_grib: Minutely time array.
+        era5_data: ERA5 data array.
+
+    Returns:
+        Interpolated ERA5 data.
+    """
     if era5_data is None or len(era5_data) == 0:
         return None
 
@@ -175,6 +236,19 @@ def _calculate_prob(
     ecmwfMinuteInterpolation,
     gefsMinuteInterpolation,
 ):
+    """
+    Calculate precipitation probability.
+
+    Args:
+        minute_array_grib: Minutely time array.
+        source_list: List of data sources.
+        nbmMinuteInterpolation: NBM interpolated data.
+        ecmwfMinuteInterpolation: ECMWF interpolated data.
+        gefsMinuteInterpolation: GEFS interpolated data.
+
+    Returns:
+        Array of precipitation probabilities.
+    """
     InterPminute_prob = np.full(len(minute_array_grib), MISSING_DATA)
 
     if "nbm" in source_list and nbmMinuteInterpolation is not None:
@@ -197,6 +271,21 @@ def _calculate_precip_type_probs(
     gfsMinuteInterpolation,
     era5_MinuteInterpolation,
 ):
+    """
+    Calculate precipitation type probabilities.
+
+    Args:
+        source_list: List of data sources.
+        hrrrSubHInterpolation: HRRR sub-hourly interpolated data.
+        nbmMinuteInterpolation: NBM interpolated data.
+        ecmwfMinuteInterpolation: ECMWF interpolated data.
+        gefsMinuteInterpolation: GEFS interpolated data.
+        gfsMinuteInterpolation: GFS interpolated data.
+        era5_MinuteInterpolation: ERA5 interpolated data.
+
+    Returns:
+        Array of precipitation type probabilities.
+    """
     InterTminute = np.zeros((61, 5))
 
     if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
@@ -244,6 +333,22 @@ def _calculate_intensity(
     gfsMinuteInterpolation,
     era5_MinuteInterpolation,
 ):
+    """
+    Calculate precipitation intensity.
+
+    Args:
+        source_list: List of data sources.
+        precipTypes: Array of precipitation types.
+        hrrrSubHInterpolation: HRRR sub-hourly interpolated data.
+        nbmMinuteInterpolation: NBM interpolated data.
+        ecmwfMinuteInterpolation: ECMWF interpolated data.
+        gefsMinuteInterpolation: GEFS interpolated data.
+        gfsMinuteInterpolation: GFS interpolated data.
+        era5_MinuteInterpolation: ERA5 interpolated data.
+
+    Returns:
+        Tuple containing intensity array and updated precipitation types.
+    """
     intensity = np.full(len(precipTypes), MISSING_DATA)
 
     if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
@@ -286,6 +391,18 @@ def _calculate_error(
     ecmwfMinuteInterpolation,
     gefsMinuteInterpolation,
 ):
+    """
+    Calculate precipitation intensity error.
+
+    Args:
+        minute_array_grib: Minutely time array.
+        source_list: List of data sources.
+        ecmwfMinuteInterpolation: ECMWF interpolated data.
+        gefsMinuteInterpolation: GEFS interpolated data.
+
+    Returns:
+        Array of precipitation intensity errors.
+    """
     error = np.ones(len(minute_array_grib)) * MISSING_DATA
 
     if "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
@@ -302,6 +419,18 @@ def _process_minute_items(
     prep_intensity_unit,
     version,
 ):
+    """
+    Process minutely items for output.
+
+    Args:
+        InterPminute: Minutely interpolated data.
+        minuteType: List of precipitation types.
+        prep_intensity_unit: Precipitation intensity unit.
+        version: API version.
+
+    Returns:
+        Tuple containing minute items and SI minute items.
+    """
     minuteTimes = InterPminute[:, DATA_MINUTELY["time"]]
     minuteIntensity = np.maximum(InterPminute[:, DATA_MINUTELY["intensity"]], 0)
     minuteProbability = np.minimum(
@@ -431,7 +560,29 @@ def build_minutely_block(
     list,
     Optional[np.ndarray],
 ]:
-    """Compute minutely interpolations and output objects."""
+    """
+    Compute minutely interpolations and output objects.
+
+    This function coordinates the interpolation of minutely weather data
+    from various sources, calculates probabilities, intensities, and errors,
+    and constructs the final minutely data arrays and lists.
+
+    Args:
+        minute_array_grib: Minutely time array.
+        source_list: List of data sources.
+        hrrr_subh_data: HRRR sub-hourly data.
+        hrrr_merged: HRRR merged data.
+        nbm_data: NBM data.
+        gefs_data: GEFS data.
+        gfs_data: GFS data.
+        ecmwf_data: ECMWF data.
+        era5_data: ERA5 data.
+        prep_intensity_unit: Precipitation intensity unit.
+        version: API version.
+
+    Returns:
+        Tuple containing minutely data arrays and lists.
+    """
     InterPminute = np.full((61, max(DATA_MINUTELY.values()) + 1), MISSING_DATA)
     InterPminute[:, DATA_MINUTELY["time"]] = minute_array_grib
 

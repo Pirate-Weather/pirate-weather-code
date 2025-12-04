@@ -44,6 +44,25 @@ def _aggregate_stats(
     calc_argmin=False,
     calc_precip=False,
 ):
+    """
+    Aggregate statistics for daily data.
+
+    Args:
+        InterPhour: Hourly interpolated data.
+        index_array: Array of indices mapping hours to days.
+        daily_days: Number of days to process.
+        calc_mean: Whether to calculate the mean.
+        calc_sum: Whether to calculate the sum.
+        calc_max: Whether to calculate the maximum.
+        calc_min: Whether to calculate the minimum.
+        calc_argmax: Whether to calculate the index of the maximum.
+        calc_argmin: Whether to calculate the index of the minimum.
+        calc_precip: Whether to calculate precipitation type.
+
+    Returns:
+        Tuple containing lists of aggregated statistics:
+        (mean, sum, max, min, argmax, argmin, precip_type)
+    """
     res_mean = []
     res_sum = []
     res_max = []
@@ -102,6 +121,24 @@ def _calculate_precip_chance(
     logger,
     loc_tag,
 ):
+    """
+    Calculate precipitation chance for day and night periods.
+
+    Args:
+        InterPdaySum: Daily sum of precipitation.
+        interp_half_day_sum: Half-day sum of precipitation.
+        interp_half_night_sum: Half-night sum of precipitation.
+        maxPchanceDay: Maximum precipitation chance for the day.
+        max_precip_chance_day: Maximum precipitation chance for the half-day.
+        max_precip_chance_night: Maximum precipitation chance for the half-night.
+        prepAccumUnit: Precipitation accumulation unit.
+        logger: Logger instance.
+        loc_tag: Location tag for logging.
+
+    Returns:
+        Tuple containing updated precipitation chances:
+        (maxPchanceDay, max_precip_chance_day, max_precip_chance_night)
+    """
     try:
         maxPchanceDay = select_daily_precip_type(
             InterPdaySum, DATA_DAY, maxPchanceDay, PRECIP_IDX, prepAccumUnit
@@ -127,6 +164,16 @@ def _calculate_precip_chance(
 
 
 def _conv_temp(arr, tempUnits):
+    """
+    Convert temperature from Celsius to Fahrenheit if needed.
+
+    Args:
+        arr: Temperature array.
+        tempUnits: Temperature unit (0 for Fahrenheit, 1 for Celsius).
+
+    Returns:
+        Converted temperature array.
+    """
     return arr * 9 / 5 + 32 if tempUnits == 0 else arr
 
 
@@ -150,6 +197,32 @@ def _build_display_data(
     prepAccumUnit,
     extraVars,
 ):
+    """
+    Build display data for daily and half-day periods.
+
+    Args:
+        InterPday: Daily mean data.
+        InterPdayHigh: Daily high data.
+        InterPdayLow: Daily low data.
+        InterPdayMin: Daily minimum data.
+        InterPdayMax: Daily maximum data.
+        InterPdaySum: Daily sum data.
+        interp_half_day_mean: Half-day mean data.
+        interp_half_day_max: Half-day maximum data.
+        interp_half_day_sum: Half-day sum data.
+        interp_half_night_mean: Half-night mean data.
+        interp_half_night_max: Half-night maximum data.
+        interp_half_night_sum: Half-night sum data.
+        tempUnits: Temperature unit.
+        windUnit: Wind speed unit.
+        visUnits: Visibility unit.
+        prepIntensityUnit: Precipitation intensity unit.
+        prepAccumUnit: Precipitation accumulation unit.
+        extraVars: Extra variables to include.
+
+    Returns:
+        Tuple containing processed display data arrays.
+    """
     daily_display_mean = InterPday.copy()
     daily_display_mean[:, DATA_DAY["dew"]] = _conv_temp(
         InterPday[:, DATA_DAY["dew"]], tempUnits
@@ -377,6 +450,23 @@ def _apply_rounding(
     half_night_display_max,
     half_night_display_sum,
 ):
+    """
+    Apply rounding rules to display data.
+
+    Args:
+        daily_display_mean: Daily mean display data.
+        daily_display_high: Daily high display data.
+        daily_display_low: Daily low display data.
+        daily_display_min: Daily minimum display data.
+        daily_display_max: Daily maximum display data.
+        daily_display_sum: Daily sum display data.
+        half_day_display_mean: Half-day mean display data.
+        half_day_display_max: Half-day maximum display data.
+        half_day_display_sum: Half-day sum display data.
+        half_night_display_mean: Half-night mean display data.
+        half_night_display_max: Half-night maximum display data.
+        half_night_display_sum: Half-night sum display data.
+    """
     daily_mean_rounding_map = {
         DATA_DAY["dew"]: ROUNDING_RULES.get("dewPoint", 2),
         DATA_DAY["pressure"]: ROUNDING_RULES.get("pressure", 2),
@@ -533,6 +623,26 @@ def _build_half_day_item(
     interp_mean,
     extraVars,
 ):
+    """
+    Build a single half-day item dictionary.
+
+    Args:
+        idx: Index of the item.
+        time_val: Time value.
+        icon: Icon string.
+        text: Summary text.
+        precip_type_val: Precipitation type.
+        temp_val: Temperature value.
+        apparent_val: Apparent temperature value.
+        display_mean: Mean display data array.
+        display_max: Maximum display data array.
+        display_sum: Sum display data array.
+        interp_mean: Interpolated mean data array.
+        extraVars: Extra variables to include.
+
+    Returns:
+        Dictionary representing the half-day item.
+    """
     liquid_accum = display_sum[idx, DATA_HOURLY["rain"]]
     snow_accum = display_sum[idx, DATA_HOURLY["snow"]]
     ice_accum = display_sum[idx, DATA_HOURLY["ice"]]
@@ -622,7 +732,52 @@ def build_daily_section(
     loc_tag: str,
     log_timing: Optional[Callable[[str], None]] = None,
 ) -> DailySection:
-    """Build all daily- and half-day-level objects."""
+    """
+    Build all daily- and half-day-level objects.
+
+    This function aggregates hourly data into daily and half-day statistics,
+    applies unit conversions and rounding, and constructs the final
+    DailySection object containing the forecast data.
+
+    Args:
+        InterPhour: Hourly interpolated data.
+        hourlyDayIndex: Indices for daily aggregation.
+        hourlyDay4amIndex: Indices for 4am-to-4am aggregation.
+        hourlyDay4pmIndex: Indices for day aggregation.
+        hourlyNight4amIndex: Indices for night aggregation.
+        hourlyHighIndex: Indices for daily high calculation.
+        hourlyLowIndex: Indices for daily low calculation.
+        daily_days: Number of days.
+        prepAccumUnit: Precipitation accumulation unit.
+        prepIntensityUnit: Precipitation intensity unit.
+        windUnit: Wind speed unit.
+        visUnits: Visibility unit.
+        tempUnits: Temperature unit.
+        extraVars: Extra variables.
+        summaryText: Whether to generate summary text.
+        translation: Translation function.
+        is_all_night: Whether the forecast is for all night.
+        is_all_day: Whether the forecast is for all day.
+        tz_name: Timezone name.
+        icon: Icon set.
+        unitSystem: Unit system.
+        version: API version.
+        timeMachine: Whether this is a time machine request.
+        tmExtra: Extra time machine parameters.
+        day_array_grib: Daily GRIB array.
+        day_array_4am_grib: Daily 4am GRIB array.
+        day_array_5pm_grib: Daily 5pm GRIB array.
+        InterSday: Daily source data.
+        hourList_si: Hourly list for SI units.
+        pTypeMap: Precipitation type map.
+        pTextMap: Precipitation text map.
+        logger: Logger instance.
+        loc_tag: Location tag.
+        log_timing: Optional timing logger.
+
+    Returns:
+        DailySection object containing the daily forecast.
+    """
     if log_timing:
         log_timing("Daily start")
 

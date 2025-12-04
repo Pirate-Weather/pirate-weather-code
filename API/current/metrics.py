@@ -70,6 +70,16 @@ class InterpolationState:
 
 
 def _select_value(strategies, default=MISSING_DATA):
+    """
+    Select the first valid value from a list of strategies.
+
+    Args:
+        strategies: List of (predicate, getter) tuples.
+        default: Default value if no strategy matches.
+
+    Returns:
+        Selected value or default.
+    """
     for predicate, getter in strategies:
         if predicate():
             return getter()
@@ -77,10 +87,33 @@ def _select_value(strategies, default=MISSING_DATA):
 
 
 def _interp_scalar(merged, key, state: InterpolationState):
+    """
+    Interpolate scalar value between two time points.
+
+    Args:
+        merged: Merged data array.
+        key: Key for the value in the array.
+        state: Interpolation state.
+
+    Returns:
+        Interpolated value.
+    """
     return merged[state.idx1, key] * state.fac1 + merged[state.idx2, key] * state.fac2
 
 
 def _interp_uv_magnitude(merged, u_key, v_key, state: InterpolationState):
+    """
+    Interpolate UV vector magnitude between two time points.
+
+    Args:
+        merged: Merged data array.
+        u_key: Key for U component.
+        v_key: Key for V component.
+        state: Interpolation state.
+
+    Returns:
+        Interpolated magnitude.
+    """
     return math.sqrt(
         (
             merged[state.idx1, u_key] * state.fac1
@@ -96,12 +129,33 @@ def _interp_uv_magnitude(merged, u_key, v_key, state: InterpolationState):
 
 
 def _bearing_from_components(u_val, v_val):
+    """
+    Calculate wind bearing from U and V components.
+
+    Args:
+        u_val: U component of wind.
+        v_val: V component of wind.
+
+    Returns:
+        Wind bearing in degrees.
+    """
     return np.rad2deg(np.mod(np.arctan2(u_val, v_val) + np.pi, 2 * np.pi))
 
 
 def _calculate_ecmwf_relative_humidity(
     ECMWF_Merged, state: InterpolationState, humidUnit
 ):
+    """
+    Calculate relative humidity from ECMWF data.
+
+    Args:
+        ECMWF_Merged: ECMWF merged data.
+        state: Interpolation state.
+        humidUnit: Humidity unit.
+
+    Returns:
+        Interpolated relative humidity.
+    """
     humid_fac1 = relative_humidity_from_dewpoint(
         ECMWF_Merged[state.idx1, ECMWF["temp"]] * mp.units.units.degC,
         ECMWF_Merged[state.idx1, ECMWF["dew"]] * mp.units.units.degC,
@@ -119,6 +173,17 @@ def _calculate_ecmwf_relative_humidity(
 def _calculate_era5_relative_humidity(
     ERA5_MERGED, state: InterpolationState, humidUnit
 ):
+    """
+    Calculate relative humidity from ERA5 data.
+
+    Args:
+        ERA5_MERGED: ERA5 merged data.
+        state: Interpolation state.
+        humidUnit: Humidity unit.
+
+    Returns:
+        Interpolated relative humidity.
+    """
     humid_fac1 = relative_humidity_from_dewpoint(
         ERA5_MERGED[state.idx1, ERA5["2m_temperature"]] * mp.units.units.degC,
         ERA5_MERGED[state.idx1, ERA5["2m_dewpoint_temperature"]] * mp.units.units.degC,
@@ -134,6 +199,17 @@ def _calculate_era5_relative_humidity(
 
 
 def _get_temp(sourceList, model_data, state: InterpolationState):
+    """
+    Get current temperature from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+
+    Returns:
+        Current temperature.
+    """
     val = _select_value(
         [
             (
@@ -170,6 +246,17 @@ def _get_temp(sourceList, model_data, state: InterpolationState):
 
 
 def _get_dew(sourceList, model_data, state: InterpolationState):
+    """
+    Get current dew point from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+
+    Returns:
+        Current dew point.
+    """
     val = _select_value(
         [
             (
@@ -204,6 +291,18 @@ def _get_dew(sourceList, model_data, state: InterpolationState):
 
 
 def _get_humidity(sourceList, model_data, state: InterpolationState, humidUnit):
+    """
+    Get current humidity from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+        humidUnit: Humidity unit.
+
+    Returns:
+        Current humidity.
+    """
     val = _select_value(
         [
             (
@@ -245,6 +344,17 @@ def _get_humidity(sourceList, model_data, state: InterpolationState, humidUnit):
 
 
 def _get_pressure(sourceList, model_data, state: InterpolationState):
+    """
+    Get current pressure from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+
+    Returns:
+        Current pressure.
+    """
     val = _select_value(
         [
             (
@@ -277,6 +387,17 @@ def _get_pressure(sourceList, model_data, state: InterpolationState):
 
 
 def _get_wind(sourceList, model_data, state: InterpolationState):
+    """
+    Get current wind speed from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+
+    Returns:
+        Current wind speed.
+    """
     val = _select_value(
         [
             (
@@ -327,6 +448,17 @@ def _get_wind(sourceList, model_data, state: InterpolationState):
 
 
 def _get_gust(sourceList, model_data, state: InterpolationState):
+    """
+    Get current wind gust from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+
+    Returns:
+        Current wind gust.
+    """
     val = _select_value(
         [
             (
@@ -450,6 +582,17 @@ def _get_intensity(
 
 
 def _get_bearing(sourceList, model_data, state: InterpolationState):
+    """
+    Get current wind bearing from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+
+    Returns:
+        Current wind bearing.
+    """
     return _select_value(
         [
             (
@@ -501,6 +644,17 @@ def _get_bearing(sourceList, model_data, state: InterpolationState):
 
 
 def _get_cloud(sourceList, model_data, state: InterpolationState):
+    """
+    Get current cloud cover from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+
+    Returns:
+        Current cloud cover.
+    """
     val = _select_value(
         [
             (
@@ -544,6 +698,17 @@ def _get_cloud(sourceList, model_data, state: InterpolationState):
 
 
 def _get_uv(sourceList, model_data, state: InterpolationState):
+    """
+    Get current UV index from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+
+    Returns:
+        Current UV index.
+    """
     if "gfs" in sourceList:
         return clipLog(
             (
@@ -580,6 +745,17 @@ def _get_uv(sourceList, model_data, state: InterpolationState):
 
 
 def _get_station_pressure(sourceList, model_data, state: InterpolationState):
+    """
+    Get current station pressure from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+
+    Returns:
+        Current station pressure.
+    """
     val = MISSING_DATA
     if "rtma_ru" in sourceList:
         val = model_data["dataOut_rtma_ru"][0, RTMA_RU["pressure"]]
@@ -604,6 +780,17 @@ def _get_station_pressure(sourceList, model_data, state: InterpolationState):
 
 
 def _get_vis(sourceList, model_data, state: InterpolationState):
+    """
+    Get current visibility from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+
+    Returns:
+        Current visibility.
+    """
     val = _select_value(
         [
             (
@@ -644,6 +831,17 @@ def _get_vis(sourceList, model_data, state: InterpolationState):
 
 
 def _get_ozone(sourceList, model_data, state: InterpolationState):
+    """
+    Get current ozone from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+
+    Returns:
+        Current ozone.
+    """
     val = _select_value(
         [
             (
@@ -666,6 +864,17 @@ def _get_ozone(sourceList, model_data, state: InterpolationState):
 
 
 def _get_storm(sourceList, model_data, state: InterpolationState):
+    """
+    Get current storm distance and bearing from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+
+    Returns:
+        Tuple of (storm distance, storm bearing).
+    """
     if "gfs" in sourceList:
         dist = np.maximum(
             (
@@ -681,6 +890,17 @@ def _get_storm(sourceList, model_data, state: InterpolationState):
 
 
 def _get_smoke(sourceList, model_data, state: InterpolationState):
+    """
+    Get current smoke from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+
+    Returns:
+        Current smoke.
+    """
     if model_data["has_hrrr_merged"]:
         val = (
             model_data["HRRR_Merged"][state.idx1, HRRR["smoke"]] * state.fac1
@@ -692,6 +912,17 @@ def _get_smoke(sourceList, model_data, state: InterpolationState):
 
 
 def _get_solar(sourceList, model_data, state: InterpolationState):
+    """
+    Get current solar radiation from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+
+    Returns:
+        Current solar radiation.
+    """
     val = _select_value(
         [
             (
@@ -726,6 +957,17 @@ def _get_solar(sourceList, model_data, state: InterpolationState):
 
 
 def _get_cape(sourceList, model_data, state: InterpolationState):
+    """
+    Get current CAPE from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+
+    Returns:
+        Current CAPE.
+    """
     val = _select_value(
         [
             (
@@ -756,6 +998,19 @@ def _get_cape(sourceList, model_data, state: InterpolationState):
 def _get_feels_like(
     sourceList, model_data, state: InterpolationState, timeMachine, apparent
 ):
+    """
+    Get current feels-like temperature from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+        timeMachine: Whether this is a time machine request.
+        apparent: Apparent temperature.
+
+    Returns:
+        Current feels-like temperature.
+    """
     val = _select_value(
         [
             (
@@ -780,6 +1035,17 @@ def _get_feels_like(
 
 
 def _get_fire(sourceList, model_data, state: InterpolationState):
+    """
+    Get current fire index from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+
+    Returns:
+        Current fire index.
+    """
     if "nbm_fire" in sourceList:
         val = (
             model_data["NBM_Fire_Merged"][state.idx1, NBM_FIRE_INDEX] * state.fac1
@@ -837,7 +1103,59 @@ def build_current_section(
     log_timing: Optional[Callable[[str], None]] = None,
     include_currently: bool = True,
 ) -> CurrentSection:
-    """Calculate the currently block and return it alongside the raw array."""
+    """
+    Calculate the currently block and return it alongside the raw array.
+
+    This function coordinates the retrieval of current weather conditions
+    from various sources, interpolates them to the current time, and
+    constructs the CurrentSection object.
+
+    Args:
+        sourceList: List of available sources.
+        hour_array_grib: Hourly time array.
+        minute_array_grib: Minutely time array.
+        InterPminute: Minutely interpolated data.
+        minuteItems: List of minute items.
+        minuteRainIntensity: Minute rain intensity array.
+        minuteSnowIntensity: Minute snow intensity array.
+        minuteSleetIntensity: Minute sleet intensity array.
+        minuteIntensity: Minute intensity array.
+        minuteProbability: Minute probability array.
+        minuteIntensityError: Minute intensity error array.
+        now_time: Current time.
+        utc_time: UTC time.
+        tz_name: Timezone name.
+        lat: Latitude.
+        lon: Longitude.
+        tempUnits: Temperature unit.
+        windUnit: Wind speed unit.
+        visUnits: Visibility unit.
+        prepIntensityUnit: Precipitation intensity unit.
+        prepAccumUnit: Precipitation accumulation unit.
+        humidUnit: Humidity unit.
+        extraVars: Extra variables.
+        summaryText: Whether to generate summary text.
+        icon: Icon set.
+        translation: Translation function.
+        unitSystem: Unit system.
+        version: API version.
+        timeMachine: Whether this is a time machine request.
+        tmExtra: Extra time machine parameters.
+        hrrrSubHInterpolation: HRRR sub-hourly interpolated data.
+        HRRR_Merged: HRRR merged data.
+        NBM_Merged: NBM merged data.
+        ECMWF_Merged: ECMWF merged data.
+        GFS_Merged: GFS merged data.
+        ERA5_MERGED: ERA5 merged data.
+        NBM_Fire_Merged: NBM fire merged data.
+        logger: Logger instance.
+        loc_tag: Location tag.
+        log_timing: Optional timing logger.
+        include_currently: Whether to include the currently block.
+
+    Returns:
+        CurrentSection object containing the current forecast.
+    """
     if log_timing:
         log_timing("Current Start")
 

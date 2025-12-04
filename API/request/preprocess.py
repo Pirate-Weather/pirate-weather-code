@@ -153,6 +153,19 @@ class InitialRequestContext:
 
 
 def _parse_location(location: str):
+    """
+    Parse the location string from the request.
+
+    Args:
+        location: Location string (lat,lon).
+
+    Returns:
+        Tuple containing latitude, input longitude, longitude (0-360),
+        azimuthal longitude (-180-180), and location request parts.
+
+    Raises:
+        HTTPException: If location format is invalid or coordinates are out of bounds.
+    """
     location_req = location.split(",")
     try:
         lat = float(location_req[0])
@@ -188,6 +201,26 @@ def _validate_time(
     timing_enabled: bool,
     logger: logging.Logger,
 ):
+    """
+    Validate and parse the requested time.
+
+    Args:
+        request: FastAPI request object.
+        location_req: Location request parts.
+        now_time: Current time.
+        lat: Latitude.
+        az_lon: Azimuthal longitude.
+        tf: TimezoneFinder instance.
+        stage: Deployment stage.
+        timing_enabled: Whether timing is enabled.
+        logger: Logger instance.
+
+    Returns:
+        Tuple containing UTC time and time machine flag.
+
+    Raises:
+        HTTPException: If time specification is invalid or out of allowed range.
+    """
     if len(location_req) == 2:
         if stage == "TIMEMACHINE":
             raise HTTPException(status_code=400, detail="Missing Time Specification")
@@ -421,7 +454,35 @@ async def prepare_initial_request(
     logger: logging.Logger,
     start_time: datetime.datetime,
 ) -> InitialRequestContext:
-    """Run the initial request parsing and time grid setup."""
+    """
+    Run the initial request parsing and time grid setup.
+
+    This function orchestrates the parsing of request parameters, validation
+    of location and time, setup of units and flags, and initialization of
+    time grids for the forecast.
+
+    Args:
+        request: FastAPI request object.
+        location: Location string.
+        units: Unit system.
+        extend: Extend flag.
+        exclude: Exclude parameters.
+        include: Include parameters.
+        lang: Language code.
+        version: API version.
+        tmextra: Time machine extra flag.
+        icon: Icon set.
+        extraVars: Extra variables.
+        tf: TimezoneFinder instance.
+        translations: Translations dictionary.
+        timing_enabled: Whether timing is enabled.
+        force_now: Forced current time.
+        logger: Logger instance.
+        start_time: Request start time.
+
+    Returns:
+        InitialRequestContext object containing processed request data.
+    """
     stage = os.environ.get("STAGE", "PROD")
 
     if not force_now:
