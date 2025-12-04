@@ -124,8 +124,8 @@ def _calculate_intensity_prob(
         if val is not None:
             prcipIntensityHour[:, idx] = val
 
-    InterPhour[:, DATA_HOURLY["intensity"]] = (
-        np.choose(np.argmin(np.isnan(prcipIntensityHour), axis=1), prcipIntensityHour.T)
+    InterPhour[:, DATA_HOURLY["intensity"]] = np.choose(
+        np.argmin(np.isnan(prcipIntensityHour), axis=1), prcipIntensityHour.T
     )
     InterPhour[:, DATA_HOURLY["intensity"]] = np.maximum(
         InterPhour[:, DATA_HOURLY["intensity"]], 0
