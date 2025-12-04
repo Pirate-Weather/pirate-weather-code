@@ -184,6 +184,22 @@ lons_etopo = np.arange(
 tf = TimezoneFinder(in_memory=True)
 
 
+class StepTimer:
+    """Helper to log timing steps relative to a start time."""
+
+    def __init__(self, start_time: datetime.datetime, enabled: bool = False):
+        self.start_time = start_time
+        self.enabled = enabled
+
+    def log(self, message: str):
+        if self.enabled:
+            print(message)
+            print(
+                datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+                - self.start_time
+            )
+
+
 def convert_data_to_celsius(
     dataOut,
     dataOut_h2,
@@ -197,45 +213,35 @@ def convert_data_to_celsius(
     """
     Converts temperature, dew point, and apparent temperature from Kelvin to Celsius
     for the provided data arrays.
+
+    Args:
+        dataOut: HRRR Sub-Hourly data
+        dataOut_h2: HRRR 6H data
+        dataOut_hrrrh: HRRR Hourly data
+        dataOut_nbm: NBM data
+        dataOut_gfs: GFS data
+        dataOut_ecmwf: ECMWF data
+        dataOut_rtma_ru: RTMA data
+        era5_merged: ERA5 data
     """
-    # HRRR Sub-Hourly
-    if isinstance(dataOut, np.ndarray):
-        dataOut[:, HRRR_SUBH["temp"]] -= KELVIN_TO_CELSIUS
-        dataOut[:, HRRR_SUBH["dew"]] -= KELVIN_TO_CELSIUS
+    # Define mappings for each model: (data_array, model_indices, keys_to_convert)
+    model_mappings = [
+        (dataOut, HRRR_SUBH, ["temp", "dew"]),
+        (dataOut_h2, HRRR, ["temp", "dew"]),
+        (dataOut_hrrrh, HRRR, ["temp", "dew"]),
+        (dataOut_nbm, NBM, ["temp", "dew", "apparent"]),
+        (dataOut_gfs, GFS, ["temp", "dew", "apparent"]),
+        (dataOut_ecmwf, ECMWF, ["temp", "dew"]),
+        (dataOut_rtma_ru, RTMA_RU, ["temp", "dew"]),
+    ]
 
-    # HRRR 6H
-    if isinstance(dataOut_h2, np.ndarray):
-        dataOut_h2[:, HRRR["temp"]] -= KELVIN_TO_CELSIUS
-        dataOut_h2[:, HRRR["dew"]] -= KELVIN_TO_CELSIUS
+    for data_array, indices_dict, keys in model_mappings:
+        if isinstance(data_array, np.ndarray):
+            for key in keys:
+                if key in indices_dict:
+                    data_array[:, indices_dict[key]] -= KELVIN_TO_CELSIUS
 
-    # HRRR Hourly
-    if isinstance(dataOut_hrrrh, np.ndarray):
-        dataOut_hrrrh[:, HRRR["temp"]] -= KELVIN_TO_CELSIUS
-        dataOut_hrrrh[:, HRRR["dew"]] -= KELVIN_TO_CELSIUS
-
-    # NBM
-    if isinstance(dataOut_nbm, np.ndarray):
-        dataOut_nbm[:, NBM["temp"]] -= KELVIN_TO_CELSIUS
-        dataOut_nbm[:, NBM["dew"]] -= KELVIN_TO_CELSIUS
-        dataOut_nbm[:, NBM["apparent"]] -= KELVIN_TO_CELSIUS
-
-    # GFS
-    if isinstance(dataOut_gfs, np.ndarray):
-        dataOut_gfs[:, GFS["temp"]] -= KELVIN_TO_CELSIUS
-        dataOut_gfs[:, GFS["dew"]] -= KELVIN_TO_CELSIUS
-        dataOut_gfs[:, GFS["apparent"]] -= KELVIN_TO_CELSIUS
-
-    # ECMWF
-    if isinstance(dataOut_ecmwf, np.ndarray):
-        dataOut_ecmwf[:, ECMWF["temp"]] -= KELVIN_TO_CELSIUS
-        dataOut_ecmwf[:, ECMWF["dew"]] -= KELVIN_TO_CELSIUS
-
-    # RTMA
-    if isinstance(dataOut_rtma_ru, np.ndarray):
-        dataOut_rtma_ru[:, RTMA_RU["temp"]] -= KELVIN_TO_CELSIUS
-        dataOut_rtma_ru[:, RTMA_RU["dew"]] -= KELVIN_TO_CELSIUS
-
-    # ERA5
+    # ERA5 has different keys
     if isinstance(era5_merged, np.ndarray):
         era5_merged[:, ERA5["2m_temperature"]] -= KELVIN_TO_CELSIUS
         era5_merged[:, ERA5["2m_dewpoint_temperature"]] -= KELVIN_TO_CELSIUS
@@ -302,6 +308,7 @@ async def PW_Forecast(
 
     # Timing Check
     T_Start = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+    timer = StepTimer(T_Start, TIMING)
 
     # Parse request parameters and initialize variables
     # This function handles all the input validation and setup
@@ -392,9 +399,7 @@ async def PW_Forecast(
     ECMWF_Merged = None
     GEFS_Merged = None
 
-    if TIMING:
-        print("### HRRR Start ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+    timer.log("### HRRR Start ###")
 
     zarr_sources = ZarrSources(
         subh=SubH_Zarr,
@@ -468,13 +473,9 @@ async def PW_Forecast(
 
     # Convert temperature columns to Celsius based on model index
 
-    if TIMING:
-        print("### Sources Start ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+    timer.log("### Sources Start ###")
 
-    if TIMING:
-        print("### ETOPO Start ###")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+    timer.log("### ETOPO Start ###")
 
     ## ELEVATION
     abslat = np.abs(lats_etopo - lat)
@@ -500,9 +501,7 @@ async def PW_Forecast(
         )
 
     # Timing Check
-    if TIMING:
-        print("Base Times")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+    timer.log("Base Times")
 
     # Number of hours to start at
     if timeMachine:
@@ -513,9 +512,7 @@ async def PW_Forecast(
     # Merge hourly models onto a consistent time grid, starting from midnight on the requested day
     # Note that baseTime is the requested time, in TZ aware datetime format
     # This combines data from multiple weather models (HRRR, GFS, etc.) to create a unified forecast
-    if TIMING:
-        print("Nearest IDX Start")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+    timer.log("Nearest IDX Start")
 
     merge_result = merge_hourly_models(
         metadata=source_metadata,
@@ -575,9 +572,7 @@ async def PW_Forecast(
     minuteSleetIntensity = InterPminute[:, DATA_MINUTELY["ice_intensity"]]
 
     # Timing Check
-    if TIMING:
-        print("Array start")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+    timer.log("Array start")
 
     InterPhour[:, DATA_HOURLY["time"]] = hour_array_grib
 
@@ -604,9 +599,7 @@ async def PW_Forecast(
     InterSday = np.zeros(shape=(daily_days + 1, 21))
 
     # Timing Check
-    if TIMING:
-        print("Sunrise start")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+    timer.log("Sunrise start")
 
     loc = LocationInfo("name", "region", tz_name, lat, az_Lon)
 
@@ -795,9 +788,7 @@ async def PW_Forecast(
     day_night_list = daily_section.day_night_list
 
     # Timing Check
-    if TIMING:
-        print("Alert Start")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+    timer.log("Alert Start")
 
     # Process weather alerts for the location
     alertList = build_alerts(
@@ -992,9 +983,7 @@ async def PW_Forecast(
         returnOBJ["alerts"] = alertList
 
     # Timing Check
-    if TIMING:
-        print("Final Time")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+    timer.log("Final Time")
 
     if exFlags != 1:
         returnOBJ["flags"] = dict()
@@ -1015,25 +1004,16 @@ async def PW_Forecast(
             returnOBJ["flags"]["nearestSubNational"] = loc_name.get("state") or None
 
     # Timing Check
-    if TIMING:
-        print("Flags Time")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+    timer.log("Flags Time")
 
     # Replace all MISSING_DATA with -999
     returnOBJ = replace_nan(returnOBJ, -999)
 
-    if TIMING:
-        print("Replace NaN Time")
-        print(datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start)
+    timer.log("Replace NaN Time")
 
-        handler_ms = (
-            datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
-        ).total_seconds() * 1000
-
-    else:
-        handler_ms = (
-            datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
-        ).total_seconds() * 1000
+    handler_ms = (
+        datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
+    ).total_seconds() * 1000
 
     return ORJSONResponse(
         content=returnOBJ,
