@@ -75,6 +75,20 @@ def _read_nws_alerts(
     logger: logging.Logger,
     loc_tag: str,
 ) -> List[dict]:
+    """
+    Read and parse NWS alerts for the provided location.
+
+    Args:
+        lat: Latitude of the location.
+        az_lon: Longitude of the location (adjusted).
+        alerts_zarr: Zarr array containing NWS alerts.
+        now_utc: Current UTC time.
+        logger: Logger instance for error reporting.
+        loc_tag: Location tag for logging context.
+
+    Returns:
+        A list of dictionaries representing the NWS alerts.
+    """
     if alerts_zarr is None or not _in_us_bounds(lat, az_lon):
         return []
 
@@ -129,6 +143,19 @@ def _read_wmo_alerts(
     logger: logging.Logger,
     loc_tag: str,
 ) -> List[dict]:
+    """
+    Read and parse WMO alerts for the provided location.
+
+    Args:
+        wmo_alert_data: Raw WMO alert data.
+        read_wmo_alerts: Flag to enable/disable reading WMO alerts.
+        now_utc: Current UTC time.
+        logger: Logger instance for error reporting.
+        loc_tag: Location tag for logging context.
+
+    Returns:
+        A list of dictionaries representing the WMO alerts.
+    """
     if (not read_wmo_alerts) or wmo_alert_data in ("", None):
         return []
 
@@ -167,10 +194,29 @@ def _read_wmo_alerts(
 
 
 def _in_us_bounds(lat: float, az_lon: float) -> bool:
+    """
+    Check if the given coordinates are within the US bounds for NWS alerts.
+
+    Args:
+        lat: Latitude of the location.
+        az_lon: Longitude of the location.
+
+    Returns:
+        True if the location is within the US bounds, False otherwise.
+    """
     return (-127 < az_lon < -65) and (24 < lat < 50)
 
 
 def _parse_alert_time(value: str) -> datetime.datetime | None:
+    """
+    Parse an alert time string into a datetime object.
+
+    Args:
+        value: The time string to parse.
+
+    Returns:
+        A datetime object if parsing is successful, None otherwise.
+    """
     if not value:
         return None
     try:
@@ -180,5 +226,14 @@ def _parse_alert_time(value: str) -> datetime.datetime | None:
 
 
 def _format_alert_description(alert_description: str) -> str:
+    """
+    Format the alert description by normalizing newlines.
+
+    Args:
+        alert_description: The raw alert description string.
+
+    Returns:
+        The formatted alert description string.
+    """
     formatted_text = re.sub(r"(?<!\n)\n(?!\n)", " ", alert_description)
     return re.sub(r"\n\n", "\n", formatted_text)
