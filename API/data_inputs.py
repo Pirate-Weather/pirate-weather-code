@@ -2,8 +2,7 @@ import metpy as mp
 import numpy as np
 from metpy.calc import relative_humidity_from_dewpoint
 
-from API.api_utils import clipLog, estimate_visibility_gultepe_rh_pr_numpy
-from API.constants.clip_const import CLIP_OZONE, CLIP_SMOKE
+from API.api_utils import estimate_visibility_gultepe_rh_pr_numpy
 from API.constants.model_const import (
     ECMWF,
     ERA5,
@@ -277,35 +276,14 @@ def prepare_data_inputs(
     # --- ozone_inputs ---
     ozone_inputs = _stack_fields(
         num_hours,
-        clipLog(
-            gfs_merged[:, GFS["ozone"]],
-            CLIP_OZONE["min"],
-            CLIP_OZONE["max"],
-            "Ozone Hour",
-        )
-        if gfs_merged is not None
-        else None,
-        clipLog(
-            era5_merged[:, ERA5["total_column_ozone"]] * 46696,
-            CLIP_OZONE["min"],
-            CLIP_OZONE["max"],
-            "Ozone Hour",
-        )
-        if era5_valid
-        else None,
+        gfs_merged[:, GFS["ozone"]] if gfs_merged is not None else None,
+        era5_merged[:, ERA5["total_column_ozone"]] * 46696 if era5_valid else None,
     )
 
     # --- smoke_inputs ---
     smoke_inputs = _stack_fields(
         num_hours,
-        clipLog(
-            hrrr_merged[:, HRRR["smoke"]],
-            CLIP_SMOKE["min"],
-            CLIP_SMOKE["max"],
-            "Air quality Hour",
-        )
-        if hrrr_merged is not None
-        else None,
+        hrrr_merged[:, HRRR["smoke"]] if hrrr_merged is not None else None,
     )
 
     # --- accum_inputs ---

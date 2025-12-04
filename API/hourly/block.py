@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from API.api_utils import calculate_apparent_temperature
+from API.api_utils import calculate_apparent_temperature, clipLog
 from API.constants.api_const import PRECIP_IDX, ROUNDING_RULES
 from API.constants.clip_const import (
     CLIP_CLOUD,
     CLIP_HUMIDITY,
+    CLIP_OZONE,
     CLIP_PRESSURE,
+    CLIP_SMOKE,
     CLIP_TEMP,
     CLIP_UV,
     CLIP_VIS,
@@ -182,15 +184,21 @@ def build_hourly_block(
         np.argmin(np.isnan(temperature_inputs), axis=1), temperature_inputs.T
     )
 
-    InterPhour[:, DATA_HOURLY["temp"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["temp"]], CLIP_TEMP["min"], CLIP_TEMP["max"]
+    InterPhour[:, DATA_HOURLY["temp"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["temp"]],
+        CLIP_TEMP["min"],
+        CLIP_TEMP["max"],
+        "Temperature Hour",
     )
 
     InterPhour[:, DATA_HOURLY["dew"]] = np.choose(
         np.argmin(np.isnan(dew_inputs), axis=1), dew_inputs.T
     )
-    InterPhour[:, DATA_HOURLY["dew"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["dew"]], CLIP_TEMP["min"], CLIP_TEMP["max"]
+    InterPhour[:, DATA_HOURLY["dew"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["dew"]],
+        CLIP_TEMP["min"],
+        CLIP_TEMP["max"],
+        "Dew Point Hour",
     )
 
     InterPhour[:, DATA_HOURLY["humidity"]] = np.choose(
@@ -202,33 +210,41 @@ def build_hourly_block(
         InterPhour[:, DATA_HOURLY["humidity"]] * humidUnit
     )
 
-    InterPhour[:, DATA_HOURLY["humidity"]] = np.clip(
+    InterPhour[:, DATA_HOURLY["humidity"]] = clipLog(
         InterPhour[:, DATA_HOURLY["humidity"]],
         CLIP_HUMIDITY["min"],
         CLIP_HUMIDITY["max"],
+        "Humidity Hour",
     )
 
     InterPhour[:, DATA_HOURLY["pressure"]] = np.choose(
         np.argmin(np.isnan(pressure_inputs), axis=1), pressure_inputs.T
     )
-    InterPhour[:, DATA_HOURLY["pressure"]] = np.clip(
+    InterPhour[:, DATA_HOURLY["pressure"]] = clipLog(
         InterPhour[:, DATA_HOURLY["pressure"]],
         CLIP_PRESSURE["min"],
         CLIP_PRESSURE["max"],
+        "Pressure Hour",
     )
 
     InterPhour[:, DATA_HOURLY["wind"]] = np.choose(
         np.argmin(np.isnan(wind_inputs), axis=1), wind_inputs.T
     )
-    InterPhour[:, DATA_HOURLY["wind"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["wind"]], CLIP_WIND["min"], CLIP_WIND["max"]
+    InterPhour[:, DATA_HOURLY["wind"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["wind"]],
+        CLIP_WIND["min"],
+        CLIP_WIND["max"],
+        "Wind Speed Hour",
     )
 
     InterPhour[:, DATA_HOURLY["gust"]] = np.choose(
         np.argmin(np.isnan(gust_inputs), axis=1), gust_inputs.T
     )
-    InterPhour[:, DATA_HOURLY["gust"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["gust"]], CLIP_WIND["min"], CLIP_WIND["max"]
+    InterPhour[:, DATA_HOURLY["gust"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["gust"]],
+        CLIP_WIND["min"],
+        CLIP_WIND["max"],
+        "Wind Gust Hour",
     )
 
     InterPhour[:, DATA_HOURLY["bearing"]] = np.choose(
@@ -241,29 +257,51 @@ def build_hourly_block(
     InterPhour[:, DATA_HOURLY["cloud"]] = np.choose(
         np.argmin(np.isnan(cloud_inputs), axis=1), cloud_inputs.T
     )
-    InterPhour[:, DATA_HOURLY["cloud"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["cloud"]], CLIP_CLOUD["min"], CLIP_CLOUD["max"]
+    InterPhour[:, DATA_HOURLY["cloud"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["cloud"]],
+        CLIP_CLOUD["min"],
+        CLIP_CLOUD["max"],
+        "Cloud Cover Hour",
     )
 
     InterPhour[:, DATA_HOURLY["uv"]] = np.choose(
         np.argmin(np.isnan(uv_inputs), axis=1), uv_inputs.T
     )
-    InterPhour[:, DATA_HOURLY["uv"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["uv"]], CLIP_UV["min"], CLIP_UV["max"]
+    InterPhour[:, DATA_HOURLY["uv"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["uv"]],
+        CLIP_UV["min"],
+        CLIP_UV["max"],
+        "UV Index Hour",
     )
 
     InterPhour[:, DATA_HOURLY["vis"]] = np.choose(
         np.argmin(np.isnan(vis_inputs), axis=1), vis_inputs.T
     )
-    InterPhour[:, DATA_HOURLY["vis"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["vis"]], CLIP_VIS["min"], CLIP_VIS["max"]
+    InterPhour[:, DATA_HOURLY["vis"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["vis"]],
+        CLIP_VIS["min"],
+        CLIP_VIS["max"],
+        "Visibility Hour",
     )
 
     InterPhour[:, DATA_HOURLY["ozone"]] = np.choose(
         np.argmin(np.isnan(ozone_inputs), axis=1), ozone_inputs.T
     )
+    InterPhour[:, DATA_HOURLY["ozone"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["ozone"]],
+        CLIP_OZONE["min"],
+        CLIP_OZONE["max"],
+        "Ozone Hour",
+    )
+
     InterPhour[:, DATA_HOURLY["smoke"]] = np.choose(
         np.argmin(np.isnan(smoke_inputs), axis=1), smoke_inputs.T
+    )
+    InterPhour[:, DATA_HOURLY["smoke"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["smoke"]],
+        CLIP_SMOKE["min"],
+        CLIP_SMOKE["max"],
+        "Air quality Hour",
     )
 
     InterPhour[:, DATA_HOURLY["accum"]] = np.choose(
