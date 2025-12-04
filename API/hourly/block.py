@@ -78,6 +78,14 @@ def build_hourly_block(
     maxPchanceHour = np.full((len(hour_array_grib), 5), MISSING_DATA)
 
     def populate_component_ptype(condition, target_idx, prefix):
+        """
+        Populate maxPchanceHour based on component precipitation types (snow, ice, rain, freezing rain).
+        
+        Args:
+            condition (callable): Function returning True if this source should be processed.
+            target_idx (int): Index in maxPchanceHour to populate.
+            prefix (str): Prefix for keys in InterThour_inputs (e.g., 'nbm', 'hrrr').
+        """
         if not condition():
             return
         inter_thour = np.zeros(shape=(len(hour_array), 5))  # Type columns
@@ -90,6 +98,14 @@ def build_hourly_block(
         maxPchanceHour[np.isnan(inter_thour[:, 1]), target_idx] = MISSING_DATA
 
     def populate_mapped_ptype(condition, target_idx, key):
+        """
+        Populate maxPchanceHour based on a single mapped precipitation type code.
+        
+        Args:
+            condition (callable): Function returning True if this source should be processed.
+            target_idx (int): Index in maxPchanceHour to populate.
+            key (str): Key in InterThour_inputs containing the ptype code.
+        """
         if not condition():
             return
         ptype_hour = np.round(InterThour_inputs[key]).astype(int)
@@ -115,21 +131,17 @@ def build_hourly_block(
     populate_mapped_ptype(lambda: "era5" in source_list, 4, "era5_ptype")
 
     prcipIntensityHour = np.full((len(hour_array_grib), 5), MISSING_DATA)
-    nbm_intensity = prcipIntensity_inputs.get("nbm")
-    if nbm_intensity is not None:
-        prcipIntensityHour[:, 0] = nbm_intensity
-    hrrr_intensity = prcipIntensity_inputs.get("hrrr")
-    if hrrr_intensity is not None:
-        prcipIntensityHour[:, 1] = hrrr_intensity
-    ecmwf_intensity = prcipIntensity_inputs.get("ecmwf")
-    if ecmwf_intensity is not None:
-        prcipIntensityHour[:, 2] = ecmwf_intensity
-    gfs_gefs_intensity = prcipIntensity_inputs.get("gfs_gefs")
-    if gfs_gefs_intensity is not None:
-        prcipIntensityHour[:, 3] = gfs_gefs_intensity
-    era5_intensity = prcipIntensity_inputs.get("era5")
-    if era5_intensity is not None:
-        prcipIntensityHour[:, 4] = era5_intensity
+    intensity_sources = [
+        ("nbm", 0),
+        ("hrrr", 1),
+        ("ecmwf", 2),
+        ("gfs_gefs", 3),
+        ("era5", 4),
+    ]
+    for source_key, idx in intensity_sources:
+        val = prcipIntensity_inputs.get(source_key)
+        if val is not None:
+            prcipIntensityHour[:, idx] = val
 
     InterPhour[:, DATA_HOURLY["intensity"]] = (
         np.choose(np.argmin(np.isnan(prcipIntensityHour), axis=1), prcipIntensityHour.T)
@@ -147,15 +159,11 @@ def build_hourly_block(
     )
 
     prcipProbabilityHour = np.full((len(hour_array_grib), 3), MISSING_DATA)
-    nbm_prob = prcipProbability_inputs.get("nbm")
-    if nbm_prob is not None:
-        prcipProbabilityHour[:, 0] = nbm_prob
-    ecmwf_prob = prcipProbability_inputs.get("ecmwf")
-    if ecmwf_prob is not None:
-        prcipProbabilityHour[:, 1] = ecmwf_prob
-    gefs_prob = prcipProbability_inputs.get("gefs")
-    if gefs_prob is not None:
-        prcipProbabilityHour[:, 2] = gefs_prob
+    prob_sources = [("nbm", 0), ("ecmwf", 1), ("gefs", 2)]
+    for source_key, idx in prob_sources:
+        val = prcipProbability_inputs.get(source_key)
+        if val is not None:
+            prcipProbabilityHour[:, idx] = val
 
     InterPhour[:, DATA_HOURLY["prob"]] = np.choose(
         np.argmin(np.isnan(prcipProbabilityHour), axis=1), prcipProbabilityHour.T

@@ -24,6 +24,55 @@ from API.utils.geo import get_offset
 from API.utils.timing import TimingTracker
 
 
+def parse_request_time(
+    time_str: str, now_time: datetime.datetime, lat: float, az_lon: float, tf: TimezoneFinder
+) -> datetime.datetime:
+    """
+    Parse the time string from the request URL.
+
+    Handles:
+    - Unix timestamps (positive and negative)
+    - Relative time (seconds offset from now)
+    - ISO 8601 strings (with and without timezone)
+    - Local time strings (requires timezone lookup)
+    """
+    if time_str.lstrip("-+").isnumeric():
+        val = float(time_str)
+        if val > 0:
+            return datetime.datetime.fromtimestamp(val, datetime.UTC).replace(tzinfo=None)
+        elif val < TIME_MACHINE_CONST["very_negative_threshold"]:
+            return datetime.datetime.fromtimestamp(val, datetime.UTC).replace(tzinfo=None)
+        elif val < 0:
+            return now_time + datetime.timedelta(seconds=val)
+    
+    # Try parsing as ISO format
+    try:
+        utc_time = datetime.datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S%z")
+        return utc_time.replace(tzinfo=None)
+    except Exception:
+        pass
+
+    try:
+        utc_time = datetime.datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S%Z")
+        return utc_time.replace(tzinfo=None)
+    except Exception:
+        pass
+
+    # Try parsing as local time
+    try:
+        local_time = datetime.datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S")
+        tz_offset_loc_in = {
+            "lat": lat,
+            "lng": az_lon,
+            "utc_time": local_time,
+            "tf": tf,
+        }
+        tz_offset_in, _ = get_offset(**tz_offset_loc_in)
+        return local_time - datetime.timedelta(minutes=tz_offset_in)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid Time Specification")
+
+
 @dataclass
 class InitialRequestContext:
     """Container for the light-weight request processing stage."""
@@ -161,46 +210,7 @@ async def prepare_initial_request(
             raise HTTPException(status_code=400, detail="Missing Time Specification")
         utc_time = now_time
     elif len(location_req) == 3:
-        if location_req[2].lstrip("-+").isnumeric():
-            if float(location_req[2]) > 0:
-                utc_time = datetime.datetime.fromtimestamp(
-                    float(location_req[2]), datetime.UTC
-                ).replace(tzinfo=None)
-            elif float(location_req[2]) < TIME_MACHINE_CONST["very_negative_threshold"]:
-                utc_time = datetime.datetime.fromtimestamp(
-                    float(location_req[2]), datetime.UTC
-                ).replace(tzinfo=None)
-            elif float(location_req[2]) < 0:
-                utc_time = now_time + datetime.timedelta(seconds=float(location_req[2]))
-        else:
-            try:
-                utc_time = datetime.datetime.strptime(
-                    location_req[2], "%Y-%m-%dT%H:%M:%S%z"
-                )
-                utc_time = utc_time.replace(tzinfo=None)
-            except Exception:
-                try:
-                    utc_time = datetime.datetime.strptime(
-                        location_req[2], "%Y-%m-%dT%H:%M:%S%Z"
-                    )
-                    utc_time = utc_time.replace(tzinfo=None)
-                except Exception:
-                    try:
-                        local_time = datetime.datetime.strptime(
-                            location_req[2], "%Y-%m-%dT%H:%M:%S"
-                        )
-                        tz_offset_loc_in = {
-                            "lat": lat,
-                            "lng": az_lon,
-                            "utc_time": local_time,
-                            "tf": tf,
-                        }
-                        tz_offset_in, tz_name = get_offset(**tz_offset_loc_in)
-                        utc_time = local_time - datetime.timedelta(minutes=tz_offset_in)
-                    except Exception:
-                        raise HTTPException(
-                            status_code=400, detail="Invalid Time Specification"
-                        )
+        utc_time = parse_request_time(location_req[2], now_time, lat, az_lon, tf)
     else:
         raise HTTPException(
             status_code=400, detail="Invalid Time or Location Specification"
@@ -296,13 +306,16 @@ async def prepare_initial_request(
         ex_alerts = 1
 
     unit_system = "us"
-    wind_unit = 2.234
-    prep_intensity_unit = 0.0394
-    prep_accum_unit = 0.0394
-    temp_units = 0
-    vis_units = 0.00062137
-    humid_unit = 0.01
-    elev_unit = 3.28084
+    # Default US units
+    unit_config = {
+        "wind_unit": 2.234,
+        "prep_intensity_unit": 0.0394,
+        "prep_accum_unit": 0.0394,
+        "temp_units": 0,
+        "vis_units": 0.00062137,
+        "humid_unit": 0.01,
+        "elev_unit": 3.28084,
+    }
 
     if units:
         if units == "auto":
@@ -310,32 +323,46 @@ async def prepare_initial_request(
         else:
             unit_system = units[0:2]
 
-        if unit_system == "ca":
-            wind_unit = 3.600
-            prep_intensity_unit = 1
-            prep_accum_unit = 0.1
-            temp_units = KELVIN_TO_CELSIUS
-            vis_units = 0.001
-            humid_unit = 0.01
-            elev_unit = 1
-        elif unit_system == "uk":
-            wind_unit = 2.234
-            prep_intensity_unit = 1
-            prep_accum_unit = 0.1
-            temp_units = KELVIN_TO_CELSIUS
-            vis_units = 0.00062137
-            humid_unit = 0.01
-            elev_unit = 1
-        elif unit_system == "si":
-            wind_unit = 1
-            prep_intensity_unit = 1
-            prep_accum_unit = 0.1
-            temp_units = KELVIN_TO_CELSIUS
-            vis_units = 0.001
-            humid_unit = 0.01
-            elev_unit = 1
+        # Define unit overrides
+        unit_overrides = {
+            "ca": {
+                "wind_unit": 3.600,
+                "prep_intensity_unit": 1,
+                "prep_accum_unit": 0.1,
+                "temp_units": KELVIN_TO_CELSIUS,
+                "vis_units": 0.001,
+                "elev_unit": 1,
+            },
+            "uk": {
+                "wind_unit": 2.234,
+                "prep_intensity_unit": 1,
+                "prep_accum_unit": 0.1,
+                "temp_units": KELVIN_TO_CELSIUS,
+                "vis_units": 0.00062137,
+                "elev_unit": 1,
+            },
+            "si": {
+                "wind_unit": 1,
+                "prep_intensity_unit": 1,
+                "prep_accum_unit": 0.1,
+                "temp_units": KELVIN_TO_CELSIUS,
+                "vis_units": 0.001,
+                "elev_unit": 1,
+            },
+        }
+
+        if unit_system in unit_overrides:
+            unit_config.update(unit_overrides[unit_system])
         else:
             unit_system = "us"
+
+    wind_unit = unit_config["wind_unit"]
+    prep_intensity_unit = unit_config["prep_intensity_unit"]
+    prep_accum_unit = unit_config["prep_accum_unit"]
+    temp_units = unit_config["temp_units"]
+    vis_units = unit_config["vis_units"]
+    humid_unit = unit_config["humid_unit"]
+    elev_unit = unit_config["elev_unit"]
 
     weather = WeatherParallel(loc_tag=loc_tag)
     pytz_tz = timezone(tz_req)

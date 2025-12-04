@@ -153,26 +153,20 @@ def update_zarr_store(
         stores.ERA5_Data = init_ERA5()
 
     if stage in ("DEV", "PROD"):
-        _load_local_store(
-            stores, "NWS_Alerts_Zarr", save_dir, "NWS_Alerts.zarr", logger=logger
-        )
-        _load_local_store(stores, "SubH_Zarr", save_dir, "SubH.zarr", logger=logger)
-        _load_local_store(
-            stores, "HRRR_6H_Zarr", save_dir, "HRRR_6H.zarr", logger=logger
-        )
-        _load_local_store(stores, "ECMWF_Zarr", save_dir, "ECMWF.zarr", logger=logger)
-        _load_local_store(stores, "NBM_Zarr", save_dir, "NBM.zarr", logger=logger)
-        _load_local_store(
-            stores, "NBM_Fire_Zarr", save_dir, "NBM_Fire.zarr", logger=logger
-        )
-        _load_local_store(stores, "GEFS_Zarr", save_dir, "GEFS.zarr", logger=logger)
-        _load_local_store(stores, "HRRR_Zarr", save_dir, "HRRR.zarr", logger=logger)
-        _load_local_store(
-            stores, "WMO_Alerts_Zarr", save_dir, "WMO_Alerts.zarr", logger=logger
-        )
-        _load_local_store(
-            stores, "RTMA_RU_Zarr", save_dir, "RTMA_RU.zarr", logger=logger
-        )
+        local_stores = [
+            ("NWS_Alerts_Zarr", "NWS_Alerts.zarr"),
+            ("SubH_Zarr", "SubH.zarr"),
+            ("HRRR_6H_Zarr", "HRRR_6H.zarr"),
+            ("ECMWF_Zarr", "ECMWF.zarr"),
+            ("NBM_Zarr", "NBM.zarr"),
+            ("NBM_Fire_Zarr", "NBM_Fire.zarr"),
+            ("GEFS_Zarr", "GEFS.zarr"),
+            ("HRRR_Zarr", "HRRR.zarr"),
+            ("WMO_Alerts_Zarr", "WMO_Alerts.zarr"),
+            ("RTMA_RU_Zarr", "RTMA_RU.zarr"),
+        ]
+        for attr, fname in local_stores:
+            _load_local_store(stores, attr, save_dir, fname, logger=logger)
 
     if stage in ("TESTING", "TM_TESTING"):
         logger.info("Setting up S3 zarrs")
@@ -199,36 +193,26 @@ def update_zarr_store(
         logger.info("ERA5 Read")
 
         if stage == "TESTING":
-            stores.NWS_Alerts_Zarr = _testing_store(
-                s3, s3_bucket, ingest_version, save_type, "NWS_Alerts", logger=logger
-            )
-            stores.SubH_Zarr = _testing_store(
-                s3, s3_bucket, ingest_version, save_type, "SubH", logger=logger
-            )
-            stores.HRRR_6H_Zarr = _testing_store(
-                s3, s3_bucket, ingest_version, save_type, "HRRR_6H", logger=logger
-            )
-            stores.GEFS_Zarr = _testing_store(
-                s3, s3_bucket, ingest_version, save_type, "GEFS", logger=logger
-            )
-            stores.NBM_Zarr = _testing_store(
-                s3, s3_bucket, ingest_version, save_type, "NBM", logger=logger
-            )
-            stores.NBM_Fire_Zarr = _testing_store(
-                s3, s3_bucket, ingest_version, save_type, "NBM_Fire", logger=logger
-            )
-            stores.HRRR_Zarr = _testing_store(
-                s3, s3_bucket, ingest_version, save_type, "HRRR", logger=logger
-            )
-            stores.WMO_Alerts_Zarr = _testing_store(
-                s3, s3_bucket, ingest_version, save_type, "WMO_Alerts", logger=logger
-            )
-            stores.RTMA_RU_Zarr = _testing_store(
-                s3, s3_bucket, ingest_version, save_type, "RTMA_RU", logger=logger
-            )
-            stores.ECMWF_Zarr = _testing_store(
-                s3, s3_bucket, ingest_version, save_type, "ECMWF", logger=logger
-            )
+            testing_stores = [
+                ("NWS_Alerts_Zarr", "NWS_Alerts"),
+                ("SubH_Zarr", "SubH"),
+                ("HRRR_6H_Zarr", "HRRR_6H"),
+                ("GEFS_Zarr", "GEFS"),
+                ("NBM_Zarr", "NBM"),
+                ("NBM_Fire_Zarr", "NBM_Fire"),
+                ("HRRR_Zarr", "HRRR"),
+                ("WMO_Alerts_Zarr", "WMO_Alerts"),
+                ("RTMA_RU_Zarr", "RTMA_RU"),
+                ("ECMWF_Zarr", "ECMWF"),
+            ]
+            for attr, name in testing_stores:
+                setattr(
+                    stores,
+                    attr,
+                    _testing_store(
+                        s3, s3_bucket, ingest_version, save_type, name, logger=logger
+                    ),
+                )
             if use_etopo:
                 stores.ETOPO_f = _testing_store(
                     s3,
