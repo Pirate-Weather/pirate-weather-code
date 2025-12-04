@@ -135,7 +135,6 @@ def update_zarr_store(
     stores = ZarrStores()
     ingest_version = INGEST_VERSION_STR
 
-
     # Load ETOPO on initial run if enabled
     if initial_run and use_etopo:
         etopo_path = os.path.join(save_dir, "ETOPO_DA_C.zarr")
