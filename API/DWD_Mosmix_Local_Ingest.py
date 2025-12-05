@@ -656,7 +656,7 @@ try:
     response.raise_for_status()  # Raises HTTPError for bad responses (4xx or 5xx)
     with open(os.path.join(tmp_dir, downloaded_kmz_file), "wb") as f:
         for chunk in response.iter_content(chunk_size=8192):
-except requests.exceptions.RequestException as e:
+            f.write(chunk)
     logging.info(
         f"File downloaded successfully to: {os.path.join(tmp_dir, downloaded_kmz_file)}"
     )
