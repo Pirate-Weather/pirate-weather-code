@@ -23,8 +23,8 @@ from timezonefinder import TimezoneFinder
 
 from API.alerts import build_alerts
 from API.api_utils import (
-    replace_nan,
     remove_conditional_fields,
+    replace_nan,
 )
 from API.constants.api_const import (
     API_VERSION,
@@ -230,8 +230,6 @@ def convert_data_to_celsius(
     if isinstance(era5_merged, np.ndarray):
         era5_merged[:, ERA5["2m_temperature"]] -= KELVIN_TO_CELSIUS
         era5_merged[:, ERA5["2m_dewpoint_temperature"]] -= KELVIN_TO_CELSIUS
-
-
 
 
 @app.get("/timemachine/{apikey}/{location}", response_class=ORJSONResponse)
@@ -875,7 +873,9 @@ async def PW_Forecast(
     returnOBJ["elevation"] = int(round(float(ETOPO * elevUnit), 0))
 
     if exCurrently != 1:
-        filtered_currently = remove_conditional_fields(current_section.currently, version, timeMachine, tmExtra)
+        filtered_currently = remove_conditional_fields(
+            current_section.currently, version, timeMachine, tmExtra
+        )
         returnOBJ["currently"] = dict(filtered_currently)
 
     if exMinutely != 1:
@@ -909,7 +909,9 @@ async def PW_Forecast(
             logger=logger,
             loc_tag=loc_tag,
         )
-        filtered_minuteItems = remove_conditional_fields(minuteItems, version, timeMachine, tmExtra)
+        filtered_minuteItems = remove_conditional_fields(
+            minuteItems, version, timeMachine, tmExtra
+        )
 
         returnOBJ["minutely"]["summary"] = minute_summary
         returnOBJ["minutely"]["icon"] = minute_icon
@@ -934,7 +936,9 @@ async def PW_Forecast(
             logger=logger,
             loc_tag=loc_tag,
         )
-        filtered_hourList = remove_conditional_fields(hourList, version, timeMachine, tmExtra)
+        filtered_hourList = remove_conditional_fields(
+            hourList, version, timeMachine, tmExtra
+        )
         returnOBJ["hourly"]["summary"] = hour_summary
         returnOBJ["hourly"]["icon"] = hour_icon
 
@@ -947,7 +951,9 @@ async def PW_Forecast(
 
     if inc_day_night == 1 and not timeMachine:
         returnOBJ["day_night"] = dict()
-        filtered_day_night_list = remove_conditional_fields(day_night_list, version, timeMachine, tmExtra)
+        filtered_day_night_list = remove_conditional_fields(
+            day_night_list, version, timeMachine, tmExtra
+        )
         returnOBJ["day_night"]["data"] = filtered_day_night_list[0 : (ouputDays * 2)]
 
     if exDaily != 1:
@@ -965,7 +971,9 @@ async def PW_Forecast(
             logger=logger,
             loc_tag=loc_tag,
         )
-        filtered_dayList = remove_conditional_fields(dayList, version, timeMachine, tmExtra)
+        filtered_dayList = remove_conditional_fields(
+            dayList, version, timeMachine, tmExtra
+        )
         returnOBJ["daily"]["summary"] = daily_summary
         returnOBJ["daily"]["icon"] = daily_icon
 

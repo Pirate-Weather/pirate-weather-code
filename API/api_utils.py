@@ -358,6 +358,7 @@ def zero_small_values(
     array[np.abs(array) < threshold] = 0.0
     return array
 
+
 def remove_conditional_fields(
     data_list: list,
     version: float,

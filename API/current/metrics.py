@@ -1422,7 +1422,6 @@ def build_current_section(
         except Exception:
             logger.exception("CURRENTLY TEXT GEN ERROR %s", loc_tag)
 
-
     return CurrentSection(
         currently=currently,
         interp_current=InterPcurrent,

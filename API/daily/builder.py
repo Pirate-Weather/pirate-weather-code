@@ -1038,7 +1038,6 @@ def build_daily_section(
             day_item["summary"] = day_text
             day_item["icon"] = day_icon
 
-
         day_night_list.append(day_item)
 
         day_icon, day_text = pick_day_icon_and_summary(
