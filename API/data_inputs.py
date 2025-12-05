@@ -112,9 +112,9 @@ def prepare_data_inputs(
     if "ecmwf_ifs" in source_list and ecmwf_merged is not None:
         prcip_intensity_inputs["ecmwf"] = ecmwf_merged[:, ECMWF["intensity"]] * 3600
 
-    # DWD MOSMIX: accum is in cm, convert to mm/h (intensity) by multiplying by 10
+    # DWD MOSMIX: RR1c is in kg/m^2 = mm (hourly total)
     if "dwd_mosmix" in source_list and dwd_valid:
-        prcip_intensity_inputs["dwd_mosmix"] = dwd_mosmix_merged[:, DWD_MOSMIX["accum"]] * 10
+        prcip_intensity_inputs["dwd_mosmix"] = dwd_mosmix_merged[:, DWD_MOSMIX["accum"]]
 
     if "gefs" in source_list and gefs_merged is not None:
         prcip_intensity_inputs["gfs_gefs"] = gefs_merged[:, GEFS["accum"]]
@@ -324,7 +324,7 @@ def prepare_data_inputs(
         ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
         if ecmwf_merged is not None
         else None,
-        dwd_mosmix_merged[:, DWD_MOSMIX["accum"]] * 10 if dwd_valid else None,  # cm to mm
+        dwd_mosmix_merged[:, DWD_MOSMIX["accum"]] if dwd_valid else None,  # kg/m^2 = mm
         gefs_merged[:, GEFS["accum"]] if gefs_merged is not None else None,
         gfs_merged[:, GFS["accum"]] if gfs_merged is not None else None,
         era5_merged[:, ERA5["total_precipitation"]] * 1000 if era5_valid else None,
