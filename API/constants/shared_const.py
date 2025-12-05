@@ -24,4 +24,5 @@ HISTORY_PERIODS = {
     "GEFS": 48,
     "ECMWF": 48,
     "NBM_Fire": 48,
+    "DWD_MOSMIX": 48,  # DWD MOSMIX has 240 hours (10 days) of forecast
 }
