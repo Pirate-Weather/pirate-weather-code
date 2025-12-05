@@ -8,6 +8,13 @@
 # Author: Alexander Rey
 # Date: June 2025
 
+
+# NOTE: You may ask yourself, why does it require 20 GB of RAM to process a 40 MB KMZ?
+# The issue is that Zarr doesn't nicely support sparse arrays, and the DWD MOSMIX-S is mostly empty
+# As soon as this issue is resolved in Zarr, this script can be optimized further.
+# https://github.com/zarr-developers/zarr-specs/issues/245
+
+
 # %% Import modules
 import io
 import logging
@@ -35,7 +42,7 @@ from sklearn.neighbors import BallTree
 from tqdm import tqdm  # safe to ignore if not using log="tqdm"
 
 from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_utils import FINAL_CHUNK_SIZES
+from API.ingest_utils import CHUNK_SIZES, FINAL_CHUNK_SIZES
 
 # Distance to interpolate stations to grid (km)
 radius_km = 50
@@ -659,29 +666,33 @@ base_time = global_metadata.get("IssueTime", datetime.now(UTC))
 logging.info(f"Base time for this ingest run (from KML metadata): {base_time}")
 
 # --- Check for Updates (Skip if no new data) ---
-final_time_pickle_path = os.path.join(forecast_path, ingest_version, "DWD.time.pickle")
 if save_type == "S3":
-    s3_bucket_name = os.getenv("s3_bucket", "your-s3-bucket")
-    s3_time_pickle_key = os.path.join("ForecastTar_v2", "DWD.time.pickle")
-    try:
-        with s3.open(f"{s3_bucket_name}/{s3_time_pickle_key}", "rb") as f:
+    # Check if the file exists and load it
+    if s3.exists(forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle"):
+        with s3.open(
+            forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle", "rb"
+        ) as f:
             previous_base_time = pickle.load(f)
+
+        # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            logging.info("No new update to DWD found in S3, ending script.")
+            print("No Update to DWD_MOSMIX, ending")
             sys.exit()
-    except FileNotFoundError:
-        logging.info(
-            "Previous DWD time pickle not found in S3, proceeding with ingest."
-        )
-    except Exception as e:
-        logging.error(f"Error checking previous DWD time in S3: {e}. Proceeding.")
+
 else:
-    if os.path.exists(final_time_pickle_path):
-        with open(final_time_pickle_path, "rb") as file:
+    if os.path.exists(forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle"):
+        # Open the file in binary mode
+        with open(
+            forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle", "rb"
+        ) as file:
+            # Deserialize and retrieve the variable from the file
             previous_base_time = pickle.load(file)
+
+        # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            logging.info("No new update to DWD found locally, ending script.")
+            print("No Update to DWD_MOSMIX, ending")
             sys.exit()
+
 
 # --- Step 2: Process Pandas DataFrame ---
 logging.info("\n--- Converting DataFrame to xarray Dataset (point-based) ---")
@@ -703,14 +714,9 @@ df_filled = fill_station_time_series(
 # --- Step 4: Interpolate DWD Point Data to the GFS Grid ---
 logging.info("\n--- Interpolating DWD point data to GFS grid ---")
 gridded_dwd_ds = interpolate_dwd_to_grid_knearest_dask(
-    df_process,
-    api_target_numerical_variables,
-    50,
-    time_col="time",
-    lat_col="latitude",
-    lon_col="longitude",
-    station_col="station_id",
-    log="tqdm",
+    df_filled, api_target_numerical_variables, 50,
+    time_col='time', lat_col='latitude', lon_col='longitude', station_col='station_id',
+    log="tqdm"
 )
 
 
@@ -741,19 +747,29 @@ ds_rename["time"] = time3d
 
 # Set the order correctly
 vars_in = [
-    v for v in api_target_numerical_variables if v in ds_rename.data_vars
+    v for v in zarr_vars if v in ds_rename.data_vars
 ]  # keep only those that exist
 ds_stack = ds_rename[vars_in].to_array(dim="var", name="var")
 
 # Rechunk the data to be more manageable for processing
 ds_chunk = ds_stack.chunk(
     {
-        "var": len(vars_in),
+        "var": 1,
         "stacked_time": len(stacked_timesUnix),
-        "lat": FINAL_CHUNK_SIZES["DWD"],
-        "lon": FINAL_CHUNK_SIZES["DWD"],
+        "lat": CHUNK_SIZES['DWD'],
+        "lon": CHUNK_SIZES['DWD'],
     }
 )
+
+# Interim zarr save of the stacked array. Not necessary for local, but speeds things up on S3
+with ProgressBar():
+    ds_chunk.to_zarr(forecast_process_dir + "/DWD_MOSMIX_stack.zarr", mode="w")
+
+# Read in stacked 4D array back in
+daskVarArrayStackDisk = da.from_zarr(
+    forecast_process_dir + "/DWD_MOSMIX_stack.zarr", component="__xarray_dataarray_variable__"
+)
+
 
 
 # --- Step 5: Save Gridded DWD Dataset to Zarr ---
@@ -765,27 +781,25 @@ if save_type == "S3":
 else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/DWD_MOSMIX.zarr")
 
-with ProgressBar():
-    # 3. Create the zarr array
-    zarr_array = zarr.create_array(
-        store=zarr_store,
-        shape=(
-            len(zarr_vars),
-            len(stacked_timesUnix),
-            ds_chunk.shape[2],
-            ds_chunk.shape[3],
-        ),
-        chunks=(
-            len(zarr_vars),
-            len(stacked_timesUnix),
-            FINAL_CHUNK_SIZES["DWD"],
-            FINAL_CHUNK_SIZES["DWD"],
-        ),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
-    )
 
-    ds_chunk.to_zarr(zarr_array, overwrite=True, compute=True)
+# Create the zarr array
+zarr_array = zarr.create_array(
+    store=zarr_store,
+    shape=(
+        len(zarr_vars),
+        len(stacked_timesUnix),
+        daskVarArrayStackDisk.shape[2],
+        daskVarArrayStackDisk.shape[3],
+    ),
+    chunks=(len(zarr_vars), len(stacked_timesUnix), FINAL_CHUNK_SIZES['DWD'], FINAL_CHUNK_SIZES['DWD']),
+    compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+    dtype="float32",
+)
+
+with ProgressBar():
+    daskVarArrayStackDisk.round(5).rechunk(
+        (len(zarr_vars), len(stacked_timesUnix), FINAL_CHUNK_SIZES['DWD'], FINAL_CHUNK_SIZES['DWD'])
+    ).to_zarr(zarr_array,  overwrite=True, compute=True)
 
 
 if save_type == "S3":
@@ -799,7 +813,7 @@ if save_type == "S3":
     # Upload to S3
     s3.put_file(
         forecast_process_dir + "/DWD_MOSMIX.zarr.zip",
-        forecast_path + "/" + ingest_version + "/ECMWF.zarr.zip",
+        forecast_path + "/" + ingest_version + "/DWD_MOSMIX.zarr.zip",
     )
 
     # Write most recent forecast time
