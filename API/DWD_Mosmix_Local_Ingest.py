@@ -46,7 +46,7 @@ from sklearn.neighbors import BallTree
 from tqdm import tqdm  # safe to ignore if not using log="tqdm"
 
 from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_utils import CHUNK_SIZES, FINAL_CHUNK_SIZES, DWD_RADIUS
+from API.ingest_utils import CHUNK_SIZES, DWD_RADIUS, FINAL_CHUNK_SIZES
 
 # Distance to interpolate stations to grid (km)
 radius_km = DWD_RADIUS
