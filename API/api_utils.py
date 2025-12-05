@@ -1,6 +1,7 @@
 # %% Script to contain the helper functions as part of the API for Pirate Weather
 # Alexander Rey. October 2025
 import logging
+from typing import List, MutableMapping, Union
 
 import metpy as mp
 import numpy as np
@@ -357,3 +358,103 @@ def zero_small_values(
     """Clamp near-zero values to zero to reduce floating noise."""
     array[np.abs(array) < threshold] = 0.0
     return array
+
+
+# Precomputed constants – built once at import time, not every call
+_FIELDS_V_LT_2 = (
+    "cape",
+    "capeMax",
+    "capeMaxTime",
+    "currentDayIce",
+    "currentDayLiquid",
+    "currentDaySnow",
+    "dawnTime",
+    "duskTime",
+    "feelsLike",
+    "fireIndex",
+    "fireIndexMax",
+    "fireIndexMaxTime",
+    "iceAccumulation",
+    "iceIntensity",
+    "iceIntensityMax",
+    "liquidAccumulation",
+    "liquidIntensityMax",
+    "rainIntensity",
+    "rainIntensityMax",
+    "sleetIntensity",
+    "smoke",
+    "smokeMax",
+    "smokeMaxTime",
+    "snowAccumulation",
+    "snowIntensity",
+    "snowIntensityMax",
+    "solar",
+    "solarMax",
+    "solarMaxTime",
+)
+
+_FIELDS_TM_BASIC = (
+    "nearestStormDistance",
+    "nearestStormBearing",
+    "precipProbability",
+    "humidity",
+    "visibility",
+    "uvIndex",
+    "uvIndexTime",
+    "precipIntensityError",
+    "cape",  # overlaps with _FIELDS_V_LT_2
+    "solar",  # overlaps with _FIELDS_V_LT_2
+)
+
+
+DictOrList = Union[MutableMapping, List[MutableMapping]]
+
+
+def remove_conditional_fields(
+    data: DictOrList,
+    version: float,
+    time_machine: bool,
+    tm_extra: bool,
+) -> DictOrList:
+    """Removes output fields based on version and request type.
+
+    This function modifies the input data. It works with either a
+    single dictionary or a list of dictionaries.
+
+    Args:
+        data (DictOrList): The data to filter, a dict or list of dicts.
+        version (float): The API version.
+        time_machine (bool): Whether it's a Time Machine request.
+        tm_extra (bool): Whether extra Time Machine fields are requested.
+
+    Returns:
+        DictOrList: The modified data.
+    """
+    # Build a *set* to avoid duplicate pops ("cape", "solar" overlap)
+    fields_to_remove = set()
+
+    if version < 2:
+        fields_to_remove.update(_FIELDS_V_LT_2)
+
+    if time_machine and not tm_extra:
+        fields_to_remove.update(_FIELDS_TM_BASIC)
+
+    if not fields_to_remove:
+        return data
+
+    # Fast path: list of dicts
+    if isinstance(data, list):
+        for item in data:
+            if not isinstance(item, dict):
+                continue  # skip non-dicts defensively
+            pop = item.pop  # cache bound method to avoid repeated lookups
+            for field in fields_to_remove:
+                pop(field, None)
+    else:
+        # Single dict
+        if isinstance(data, dict):
+            pop = data.pop
+            for field in fields_to_remove:
+                pop(field, None)
+
+    return data

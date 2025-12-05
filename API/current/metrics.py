@@ -1422,29 +1422,6 @@ def build_current_section(
         except Exception:
             logger.exception("CURRENTLY TEXT GEN ERROR %s", loc_tag)
 
-        if version < 2:
-            currently.pop("smoke", None)
-            currently.pop("currentDayIce", None)
-            currently.pop("currentDayLiquid", None)
-            currently.pop("currentDaySnow", None)
-            currently.pop("fireIndex", None)
-            currently.pop("feelsLike", None)
-            currently.pop("solar", None)
-            currently.pop("cape", None)
-            currently.pop("rainIntensity", None)
-            currently.pop("snowIntensity", None)
-            currently.pop("iceIntensity", None)
-
-        if timeMachine and not tmExtra:
-            currently.pop("nearestStormDistance", None)
-            currently.pop("nearestStormBearing", None)
-            currently.pop("precipProbability", None)
-            currently.pop("precipIntensityError", None)
-            currently.pop("humidity", None)
-            currently.pop("uvIndex", None)
-            currently.pop("visibility", None)
-            currently.pop("ozone", None)
-
     return CurrentSection(
         currently=currently,
         interp_current=InterPcurrent,
