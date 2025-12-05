@@ -17,7 +17,7 @@
 
 # NOTE 2: At some point it would be better to include short term (48 hour) historic data here as well
 # This would keep the sources more consistent for the API users, instead of mixing MOSMIX-S forecast and
-# something else for recent past.
+# something else for recent past. Since it's an hourly model, it would be merging the first step from the last 48 runs
 
 # %% Import modules
 import io
