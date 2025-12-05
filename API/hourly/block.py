@@ -52,7 +52,7 @@ def _populate_max_pchance(
     Returns:
         Array of maximum precipitation chances.
     """
-    maxPchanceHour = np.full((len(hour_array_grib), 5), MISSING_DATA)
+    maxPchanceHour = np.full((len(hour_array_grib), 6), MISSING_DATA)
 
     def populate_component_ptype(condition, target_idx, prefix):
         if not condition():
@@ -81,6 +81,41 @@ def _populate_max_pchance(
         maxPchanceHour[:, target_idx] = mapped_ptype
         maxPchanceHour[np.isnan(ptype_hour), target_idx] = MISSING_DATA
 
+    def populate_wmo4677_ptype(condition, target_idx, key):
+        """Map WMO code 4677 (present weather) to precipitation type categories.
+
+        WMO 4677 codes mapping:
+        - 50-59: Drizzle → rain (4)
+        - 60-65: Rain → rain (4)
+        - 66-67: Freezing rain/drizzle → freezing rain (3)
+        - 68-69: Rain/snow mix → rain (4)
+        - 70-75: Snow → snow (1)
+        - 76-79: Ice pellets/graupel → ice (2)
+        - 80-84: Rain showers → rain (4)
+        - 85-90: Snow showers → snow (1)
+        - 91-99: Thunderstorms → rain (4)
+        """
+        if not condition():
+            return
+        ptype_hour = np.round(InterThour_inputs[key]).astype(int)
+        conditions = [
+            # Snow: 70-75, 85-90
+            np.isin(ptype_hour, list(range(70, 76)) + list(range(85, 91))),
+            # Ice: 76-79
+            np.isin(ptype_hour, list(range(76, 80))),
+            # Freezing rain: 66-67
+            np.isin(ptype_hour, [66, 67]),
+            # Rain: 50-65, 68-69, 80-84, 91-99
+            np.isin(
+                ptype_hour,
+                list(range(50, 66)) + [68, 69] + list(range(80, 85)) + list(range(91, 100)),
+            ),
+        ]
+        choices = [1, 2, 3, 4]
+        mapped_ptype = np.select(conditions, choices, default=0)
+        maxPchanceHour[:, target_idx] = mapped_ptype
+        maxPchanceHour[np.isnan(ptype_hour), target_idx] = MISSING_DATA
+
     populate_component_ptype(lambda: "nbm" in source_list, 0, "nbm")
     populate_component_ptype(
         lambda: ("hrrr_0-18" in source_list) and ("hrrr_18-48" in source_list),
@@ -88,8 +123,9 @@ def _populate_max_pchance(
         "hrrr",
     )
     populate_mapped_ptype(lambda: "ecmwf_ifs" in source_list, 2, "ecmwf_ptype")
-    populate_component_ptype(lambda: "gefs" in source_list, 3, "gefs")
-    populate_mapped_ptype(lambda: "era5" in source_list, 4, "era5_ptype")
+    populate_wmo4677_ptype(lambda: "dwd_mosmix" in source_list, 3, "dwd_mosmix_ptype")
+    populate_component_ptype(lambda: "gefs" in source_list, 4, "gefs")
+    populate_mapped_ptype(lambda: "era5" in source_list, 5, "era5_ptype")
 
     return maxPchanceHour
 
