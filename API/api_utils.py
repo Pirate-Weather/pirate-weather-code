@@ -418,7 +418,7 @@ def remove_conditional_fields(
 ) -> DictOrList:
     """
     Remove output fields based on version and request type.
-    Works with either a dict or a list of dicts (in-place).
+    Works with either a dict or a list of dicts, returns the same type.
     """
     # Build a *set* to avoid duplicate pops ("cape", "solar" overlap)
     fields_to_remove = set()
