@@ -1,6 +1,7 @@
 # %% Script to contain the helper functions as part of the API for Pirate Weather
 # Alexander Rey. October 2025
 import logging
+from typing import Iterable, MutableMapping, Union, List
 
 import metpy as mp
 import numpy as np
@@ -358,7 +359,6 @@ def zero_small_values(
     array[np.abs(array) < threshold] = 0.0
     return array
 
-from typing import Iterable, MutableMapping, Union, List
 
 # Precomputed constants – built once at import time, not every call
 _FIELDS_V_LT_2 = (
