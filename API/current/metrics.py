@@ -72,18 +72,21 @@ class InterpolationState:
 
 def _select_value(strategies, default=MISSING_DATA):
     """
-    Select the first valid value from a list of strategies.
+    Select the first valid (non-NaN) value from a list of strategies.
 
     Args:
         strategies: List of (predicate, getter) tuples.
-        default: Default value if no strategy matches.
+        default: Default value if no strategy matches or all return NaN.
 
     Returns:
         Selected value or default.
     """
     for predicate, getter in strategies:
         if predicate():
-            return getter()
+            val = getter()
+            # Check if value is valid (not NaN) before returning
+            if val is not None and not np.isnan(val):
+                return val
     return default
 
 
@@ -1276,6 +1279,10 @@ def build_current_section(
     )
     InterPcurrent[DATA_CURRENT["wind"]] = _get_wind(sourceList, model_data, state)
     InterPcurrent[DATA_CURRENT["gust"]] = _get_gust(sourceList, model_data, state)
+
+    # If gust is missing/invalid, fall back to wind speed
+    if np.isnan(InterPcurrent[DATA_CURRENT["gust"]]):
+        InterPcurrent[DATA_CURRENT["gust"]] = InterPcurrent[DATA_CURRENT["wind"]]
 
     (
         InterPcurrent[DATA_CURRENT["intensity"]],

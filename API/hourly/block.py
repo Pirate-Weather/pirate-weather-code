@@ -307,6 +307,11 @@ def _process_input_vars(
     InterPhour[:, DATA_HOURLY["gust"]] = np.choose(
         np.argmin(np.isnan(gust_inputs), axis=1), gust_inputs.T
     )
+    # If gust is still NaN, fall back to wind speed
+    gust_nan_mask = np.isnan(InterPhour[:, DATA_HOURLY["gust"]])
+    InterPhour[gust_nan_mask, DATA_HOURLY["gust"]] = InterPhour[
+        gust_nan_mask, DATA_HOURLY["wind"]
+    ]
     InterPhour[:, DATA_HOURLY["gust"]] = clipLog(
         InterPhour[:, DATA_HOURLY["gust"]],
         CLIP_WIND["min"],
