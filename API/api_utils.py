@@ -358,79 +358,93 @@ def zero_small_values(
     array[np.abs(array) < threshold] = 0.0
     return array
 
+from typing import Iterable, MutableMapping, Union, List
+
+# Precomputed constants – built once at import time, not every call
+_FIELDS_V_LT_2 = (
+    "cape",
+    "capeMax",
+    "capeMaxTime",
+    "currentDayIce",
+    "currentDayLiquid",
+    "currentDaySnow",
+    "dawnTime",
+    "duskTime",
+    "feelsLike",
+    "fireIndex",
+    "fireIndexMax",
+    "fireIndexMaxTime",
+    "iceAccumulation",
+    "iceIntensity",
+    "iceIntensityMax",
+    "liquidAccumulation",
+    "liquidIntensityMax",
+    "rainIntensity",
+    "rainIntensityMax",
+    "sleetIntensity",
+    "smoke",
+    "smokeMax",
+    "smokeMaxTime",
+    "snowAccumulation",
+    "snowIntensity",
+    "snowIntensityMax",
+    "solar",
+    "solarMax",
+    "solarMaxTime",
+)
+
+_FIELDS_TM_BASIC = (
+    "nearestStormDistance",
+    "nearestStormBearing",
+    "precipProbability",
+    "humidity",
+    "visibility",
+    "uvIndex",
+    "uvIndexTime",
+    "precipIntensityError",
+    "cape",   # overlaps with _FIELDS_V_LT_2
+    "solar",  # overlaps with _FIELDS_V_LT_2
+)
+
+
+DictOrList = Union[MutableMapping, List[MutableMapping]]
+
 
 def remove_conditional_fields(
-    data_list: list,
+    data: DictOrList,
     version: float,
     time_machine: bool,
     tm_extra: bool,
-):
+) -> DictOrList:
     """
     Remove output fields based on version and request type.
+    Works with either a dict or a list of dicts (in-place).
     """
-    fields_to_remove = []
+    # Build a *set* to avoid duplicate pops ("cape", "solar" overlap)
+    fields_to_remove = set()
 
-    # Common fields to remove for older versions
     if version < 2:
-        fields_to_remove.extend(
-            [
-                "cape",
-                "capeMax",
-                "capeMaxTime",
-                "currentDayIce",
-                "currentDayLiquid",
-                "currentDaySnow",
-                "dawnTime",
-                "duskTime",
-                "feelsLike",
-                "fireIndex",
-                "fireIndexMax",
-                "fireIndexMaxTime",
-                "iceAccumulation",
-                "iceIntensity",
-                "iceIntensityMax",
-                "liquidAccumulation",
-                "liquidIntensityMax",
-                "rainIntensity",
-                "rainIntensityMax",
-                "sleetIntensity",
-                "smoke",
-                "smokeMax",
-                "smokeMaxTime",
-                "snowAccumulation",
-                "snowIntensity",
-                "snowIntensityMax",
-                "solar",
-                "solarMax",
-                "solarMaxTime",
-            ]
-        )
+        fields_to_remove.update(_FIELDS_V_LT_2)
 
-    # Remove extra fields for basic Time Machine requests
     if time_machine and not tm_extra:
-        fields_to_remove.extend(
-            [
-                "nearestStormDistance",
-                "nearestStormBearing",
-                "precipProbability",
-                "humidity",
-                "visibility",
-                "uvIndex",
-                "uvIndexTime",
-                "precipIntensityError",
-                "cape",
-                "solar",
-            ]
-        )
+        fields_to_remove.update(_FIELDS_TM_BASIC)
 
-    if fields_to_remove:
-        # If the data list is a list of dictionaries, remove the specified fields
-        if isinstance(data_list, list):
-            for item in data_list:
-                for field in fields_to_remove:
-                    item.pop(field, None)
-        else:
+    if not fields_to_remove:
+        return data
+
+    # Fast path: list of dicts
+    if isinstance(data, list):
+        for item in data:
+            if not isinstance(item, dict):
+                continue  # skip non-dicts defensively
+            pop = item.pop  # cache bound method to avoid repeated lookups
             for field in fields_to_remove:
-                data_list.pop(field, None)
+                pop(field, None)
+    else:
+        # Single dict
+        if isinstance(data, dict):
+            pop = data.pop
+            for field in fields_to_remove:
+                pop(field, None)
 
-    return data_list
+    return data
