@@ -15,6 +15,10 @@
 # https://github.com/zarr-developers/zarr-specs/issues/245
 
 
+# NOTE 2: At some point it would be better to include short term (48 hour) historic data here as well
+# This would keep the sources more consistent for the API users, instead of mixing MOSMIX-S forecast and
+# something else for recent past.
+
 # %% Import modules
 import io
 import logging
