@@ -357,3 +357,79 @@ def zero_small_values(
     """Clamp near-zero values to zero to reduce floating noise."""
     array[np.abs(array) < threshold] = 0.0
     return array
+
+def remove_conditional_fields(
+    data_list: list,
+    version: float,
+    time_machine: bool,
+    tm_extra: bool,
+):
+    """
+    Remove output fields based on version and request type.
+    """
+    fields_to_remove = []
+
+    # Common fields to remove for older versions
+    if version < 2:
+        fields_to_remove.extend(
+            [
+                "cape",
+                "capeMax",
+                "capeMaxTime",
+                "currentDayIce",
+                "currentDayLiquid",
+                "currentDaySnow",
+                "dawnTime",
+                "duskTime",
+                "feelsLike",
+                "fireIndex",
+                "fireIndexMax",
+                "fireIndexMaxTime",
+                "iceAccumulation",
+                "iceIntensity",
+                "iceIntensityMax",
+                "liquidAccumulation",
+                "liquidIntensityMax",
+                "rainIntensity",
+                "rainIntensityMax",
+                "sleetIntensity",
+                "smoke",
+                "smokeMax",
+                "smokeMaxTime",
+                "snowAccumulation",
+                "snowIntensity",
+                "snowIntensityMax",
+                "solar",
+                "solarMax",
+                "solarMaxTime",
+            ]
+        )
+
+    # Remove extra fields for basic Time Machine requests
+    if time_machine and not tm_extra:
+        fields_to_remove.extend(
+            [
+                "nearestStormDistance",
+                "nearestStormBearing",
+                "precipProbability",
+                "humidity",
+                "visibility",
+                "uvIndex",
+                "uvIndexTime",
+                "precipIntensityError",
+                "cape",
+                "solar",
+            ]
+        )
+
+    if fields_to_remove:
+        # If the data list is a list of dictionaries, remove the specified fields
+        if isinstance(data_list, list):
+            for item in data_list:
+                for field in fields_to_remove:
+                    item.pop(field, None)
+        else:
+            for field in fields_to_remove:
+                data_list.pop(field, None)
+
+    return data_list
