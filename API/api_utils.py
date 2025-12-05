@@ -5,9 +5,12 @@ import logging
 import metpy as mp
 import numpy as np
 
-from API.constants.api_const import APPARENT_TEMP_CONSTS, APPARENT_TEMP_SOLAR_CONSTS
-from API.constants.clip_const import CLIP_TEMP
-from API.constants.shared_const import KELVIN_TO_CELSIUS, MISSING_DATA
+from API.constants.api_const import (
+    APPARENT_TEMP_CONSTS,
+    APPARENT_TEMP_SOLAR_CONSTS,
+    PRECIP_NOISE_THRESHOLD_MMH,
+)
+from API.constants.shared_const import MISSING_DATA
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +56,7 @@ def replace_nan(obj, replacement=MISSING_DATA):
         return obj
 
 
-def calculate_apparent_temperature(air_temp, humidity, wind, solar=None):
+def calculate_apparent_temperature(air_temp_c, humidity, wind, solar=None):
     """
     Calculates the apparent temperature based on air temperature, wind speed, humidity and solar radiation if provided.
 
@@ -63,11 +66,8 @@ def calculate_apparent_temperature(air_temp, humidity, wind, solar=None):
     - wind (float): Wind speed in meters per second
 
     Returns:
-    - float: Apparent temperature in Kelvin
+    - float: Apparent temperature in Celsuis
     """
-
-    # Convert air_temp from Kelvin to Celsius for the formula parts that use Celsius
-    air_temp_c = air_temp - KELVIN_TO_CELSIUS
 
     # Calculate water vapor pressure 'e'
     # Ensure humidity is not 0 for calculation, replace with a small non-zero value if needed
@@ -107,16 +107,8 @@ def calculate_apparent_temperature(air_temp, humidity, wind, solar=None):
             + APPARENT_TEMP_SOLAR_CONSTS["const"]
         )
 
-    # Convert back to Kelvin
-    apparent_temp_k = apparent_temp_c + KELVIN_TO_CELSIUS
-
-    # Clip between -90 and 60
-    return clipLog(
-        apparent_temp_k,
-        CLIP_TEMP["min"],
-        CLIP_TEMP["max"],
-        "Apparent Temperature Current",
-    )
+    # Return apparent temperature in Celsius
+    return apparent_temp_c
 
 
 def clipLog(data, min_val, max_val, name):
@@ -235,7 +227,7 @@ def estimate_visibility_gultepe_rh_pr_numpy(
 
     # ------------------- RH via MetPy -------------------
     Rh_frac = _rh_from_td(
-        (T2m * mp.units.units.degK), (Td2m * mp.units.units.degK)
+        (T2m * mp.units.units.degC), (Td2m * mp.units.units.degC)
     ).magnitude
     RH = np.clip(Rh_frac * 100.0, p["rh_min"], p["rh_max"])  # percent
 
@@ -357,3 +349,11 @@ def select_daily_precip_type(
     ]
 
     return maxPchanceDay
+
+
+def zero_small_values(
+    array: np.ndarray, threshold: float = PRECIP_NOISE_THRESHOLD_MMH
+) -> np.ndarray:
+    """Clamp near-zero values to zero to reduce floating noise."""
+    array[np.abs(array) < threshold] = 0.0
+    return array

@@ -7,7 +7,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from API.io import zarr_reader
+
 PW_API = os.environ.get("PW_API")
+if "STAGE" not in os.environ:
+    os.environ["STAGE"] = "TESTING"
+
+STAGE = os.environ.get("STAGE")
 
 # Cache the client to avoid reloading the module multiple times
 _cached_client = None
@@ -20,7 +26,6 @@ def _get_client():
     if _cached_client is not None:
         return _cached_client
 
-    os.environ["STAGE"] = "TESTING"
     os.environ["save_type"] = "S3"
     os.environ.setdefault("useETOPO", "FALSE")
 
@@ -101,6 +106,27 @@ def _check_forecast_structure(data: dict) -> None:
     assert isinstance(first_day.get("temperatureLow"), (int, float))
     assert isinstance(first_day.get("humidity"), (int, float))
     assert 0 <= first_day["humidity"] <= 1
+
+
+@pytest.mark.skipif(not PW_API, reason="PW_API environment variable not set")
+def test_gfs_zip_store_can_be_opened(monkeypatch):
+    save_type = os.environ.get("save_type", "S3")
+    if save_type not in {"S3", "S3Zarr"}:
+        pytest.skip(f"GFS zip store not available for save_type={save_type}")
+
+    stores = zarr_reader.update_zarr_store(
+        initial_run=False,
+        stage=STAGE,
+        save_dir=os.environ.get("save_dir", "/tmp"),
+        use_etopo=False,
+        save_type=save_type,
+        s3_bucket=os.environ.get("s3_bucket", "piratezarr2"),
+        aws_access_key_id=os.environ.get("AWS_KEY", ""),
+        aws_secret_access_key=os.environ.get("AWS_SECRET", ""),
+    )
+
+    assert stores.GFS_Zarr is not None
+    assert stores.GFS_Zarr[:1, :1, :1, :1].size == 1
 
 
 @pytest.mark.skipif(not PW_API, reason="PW_API environment variable not set")
