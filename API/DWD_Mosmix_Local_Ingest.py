@@ -16,24 +16,23 @@ import pickle
 import shutil
 import sys
 import time
-import warnings
 import zipfile
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 import dask.array as da
-from dask.diagnostics import ProgressBar
 import numpy as np
 import pandas as pd
 import requests
 import s3fs
-from tqdm import tqdm  # safe to ignore if not using log="tqdm"
 import xarray as xr
 import zarr
 import zarr.storage
+from dask.diagnostics import ProgressBar
 from metpy.calc import relative_humidity_from_dewpoint
 from metpy.units import units
 from pykml import parser
 from sklearn.neighbors import BallTree
+from tqdm import tqdm  # safe to ignore if not using log="tqdm"
 
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import FINAL_CHUNK_SIZES
@@ -95,6 +94,7 @@ api_target_numerical_variables = [
 # This removes the need for custom vapor-pressure approximations and leverages
 # a tested implementation that supports pint units.
 
+
 def fill_station_time_series(
     df: pd.DataFrame,
     var_cols,
@@ -102,8 +102,8 @@ def fill_station_time_series(
     station_col: str = "station_id",
     max_gap: int | None = None,
     fill_ends: bool = False,
-    log="print",              # "print" | "tqdm" | None
-    print_every=50,           # applies only if log="print"
+    log="print",  # "print" | "tqdm" | None
+    print_every=50,  # applies only if log="print"
 ):
     """
     Interpolates missing values separately for each station over time.
@@ -142,10 +142,12 @@ def fill_station_time_series(
                 s2 = s.copy()
                 s2.index = df_s[time_col]
                 s2 = s2.interpolate(
-                        method="time", limit=max_gap, limit_direction="both")
+                    method="time", limit=max_gap, limit_direction="both"
+                )
             else:
                 s2 = s.interpolate(
-                        method="linear", limit=max_gap, limit_direction="both")
+                    method="linear", limit=max_gap, limit_direction="both"
+                )
 
             if fill_ends:
                 s2 = s2.ffill().bfill()
@@ -329,7 +331,6 @@ def process_dwd_df(df, global_metadata=None):
         xr.Dataset: Point-based xarray Dataset with 'station_id' and 'time' dimensions.
     """
 
-
     # --- Standardize variable names and units from DWD KML to API schema ---
     # Values remain in their original DWD units (Kelvin, Pa, m/s, mm/h) before interpolation.
     if "TTT" in df.columns:
@@ -394,9 +395,9 @@ def interpolate_dwd_to_grid_knearest_dask(
     lon_col="longitude",
     station_col="station_id",
     dtype=np.float32,
-    log="print",            # "print" | "tqdm" | "none"
-    print_every=10,         # used if log="print"
-    time_chunk=24,          # Dask chunk size in time
+    log="print",  # "print" | "tqdm" | "none"
+    print_every=10,  # used if log="print"
+    time_chunk=24,  # Dask chunk size in time
 ):
     """
     Vectorized k-nearest grid interpolation with dense, Dask-backed output.
@@ -496,8 +497,8 @@ def interpolate_dwd_to_grid_knearest_dask(
     _log("Linking rows to neighbour grid cells…")
 
     # Each row maps to k_max neighbours for its station
-    neigh_flat = inds_flat[stn_idx_full]             # (n_rows, k_max)
-    neigh_time = np.repeat(t_idx[:, None], k_max, 1) # (n_rows, k_max)
+    neigh_flat = inds_flat[stn_idx_full]  # (n_rows, k_max)
+    neigh_time = np.repeat(t_idx[:, None], k_max, 1)  # (n_rows, k_max)
 
     # Flatten and filter invalid neighbours
     flat_flat = neigh_flat.ravel()
@@ -576,9 +577,7 @@ downloaded_kmz_file = "MOSMIX_S_LATEST_240.kmz"
 ingest_version = INGEST_VERSION_STR
 
 # Base directory for all processing and output files.
-forecast_process_dir = os.getenv(
-    "forecast_process_dir", "/mnt/nvme/data/DWD"
-)
+forecast_process_dir = os.getenv("forecast_process_dir", "/mnt/nvme/data/DWD")
 # Temporary directory for downloaded files.
 tmp_dir = os.getenv("tmp_dir", os.path.join(forecast_process_dir, "Downloads"))
 # Final destination directory for processed Zarr files.
@@ -695,18 +694,23 @@ df_filled = fill_station_time_series(
     var_cols=api_target_numerical_variables,  # whatever variables you will grid
     time_col="time",
     station_col="station_id",
-    max_gap=None,     # or an integer if you want to limit gap length
+    max_gap=None,  # or an integer if you want to limit gap length
     fill_ends=False,  # or True if you want to fill edges too
-    log="tqdm"
+    log="tqdm",
 )
 
 
 # --- Step 4: Interpolate DWD Point Data to the GFS Grid ---
 logging.info("\n--- Interpolating DWD point data to GFS grid ---")
 gridded_dwd_ds = interpolate_dwd_to_grid_knearest_dask(
-    df_process, api_target_numerical_variables, 50,
-    time_col='time', lat_col='latitude', lon_col='longitude', station_col='station_id',
-    log="tqdm"
+    df_process,
+    api_target_numerical_variables,
+    50,
+    time_col="time",
+    lat_col="latitude",
+    lon_col="longitude",
+    station_col="station_id",
+    log="tqdm",
 )
 
 
@@ -746,11 +750,10 @@ ds_chunk = ds_stack.chunk(
     {
         "var": len(vars_in),
         "stacked_time": len(stacked_timesUnix),
-        "lat": FINAL_CHUNK_SIZES['DWD'],
-        "lon": FINAL_CHUNK_SIZES['DWD'],
+        "lat": FINAL_CHUNK_SIZES["DWD"],
+        "lon": FINAL_CHUNK_SIZES["DWD"],
     }
 )
-
 
 
 # --- Step 5: Save Gridded DWD Dataset to Zarr ---
@@ -772,7 +775,12 @@ with ProgressBar():
             ds_chunk.shape[2],
             ds_chunk.shape[3],
         ),
-        chunks=(len(zarr_vars), len(stacked_timesUnix), FINAL_CHUNK_SIZES['DWD'], FINAL_CHUNK_SIZES['DWD']),
+        chunks=(
+            len(zarr_vars),
+            len(stacked_timesUnix),
+            FINAL_CHUNK_SIZES["DWD"],
+            FINAL_CHUNK_SIZES["DWD"],
+        ),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
         dtype="float32",
     )
