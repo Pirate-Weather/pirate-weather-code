@@ -39,6 +39,7 @@ from API.constants.forecast_const import (
     DATA_MINUTELY,
 )
 from API.constants.model_const import (
+    DWD_MOSMIX,
     ECMWF,
     ERA5,
     GFS,
@@ -124,6 +125,7 @@ NWS_Alerts_Zarr = None
 WMO_Alerts_Zarr = None
 RTMA_RU_Zarr = None
 ERA5_Data = None
+DWD_MOSMIX_Zarr = None
 
 
 setup_logging()
@@ -167,6 +169,7 @@ NWS_Alerts_Zarr = zarr_stores.NWS_Alerts_Zarr
 WMO_Alerts_Zarr = zarr_stores.WMO_Alerts_Zarr
 RTMA_RU_Zarr = zarr_stores.RTMA_RU_Zarr
 ERA5_Data = zarr_stores.ERA5_Data
+DWD_MOSMIX_Zarr = zarr_stores.DWD_MOSMIX_Zarr
 
 logger.info("Initial data load complete")
 
@@ -194,6 +197,7 @@ def convert_data_to_celsius(
     dataOut_ecmwf,
     dataOut_rtma_ru,
     era5_merged,
+    dataOut_dwd_mosmix,
 ):
     """
     Converts temperature, dew point, and apparent temperature from Kelvin to Celsius
@@ -208,6 +212,7 @@ def convert_data_to_celsius(
         dataOut_ecmwf: ECMWF data
         dataOut_rtma_ru: RTMA data
         era5_merged: ERA5 data
+        dataOut_dwd_mosmix: DWD MOSMIX data
     """
     # Define mappings for each model: (data_array, model_indices, keys_to_convert)
     model_mappings = [
@@ -218,6 +223,7 @@ def convert_data_to_celsius(
         (dataOut_gfs, GFS, ["temp", "dew", "apparent"]),
         (dataOut_ecmwf, ECMWF, ["temp", "dew"]),
         (dataOut_rtma_ru, RTMA_RU, ["temp", "dew"]),
+        (dataOut_dwd_mosmix, DWD_MOSMIX, ["temp", "dew"]),
     ]
 
     for data_array, indices_dict, keys in model_mappings:
@@ -299,6 +305,7 @@ async def PW_Forecast(
     global WMO_Alerts_Zarr
     global RTMA_RU_Zarr
     global ERA5_Data
+    global DWD_MOSMIX_Zarr
 
     # Timing Check
     T_Start = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
@@ -392,6 +399,7 @@ async def PW_Forecast(
     GFS_Merged = None
     ECMWF_Merged = None
     GEFS_Merged = None
+    DWD_MOSMIX_Merged = None
 
     timer.log("### HRRR Start ###")
 
@@ -408,6 +416,7 @@ async def PW_Forecast(
         rtma_ru=RTMA_RU_Zarr,
         wmo_alerts=WMO_Alerts_Zarr,
         era5_data=ERA5_Data,
+        dwd_mosmix=DWD_MOSMIX_Zarr,
     )
 
     # 3. Calculate grid indices for the requested location to retrieve data from Zarr stores
@@ -426,6 +435,7 @@ async def PW_Forecast(
         ex_ecmwf=exECMWF,
         ex_gefs=exGEFS,
         ex_rtma_ru=exRTMA_RU,
+        ex_dwd_mosmix=0,  # DWD MOSMIX is always enabled by default
         read_wmo_alerts=readWMOAlerts,
         base_day_utc=baseDayUTC,
         zarr_sources=zarr_sources,
@@ -444,6 +454,7 @@ async def PW_Forecast(
     dataOut_ecmwf = grid_result.dataOut_ecmwf
     dataOut_gefs = grid_result.dataOut_gefs
     dataOut_rtma_ru = grid_result.dataOut_rtma_ru
+    dataOut_dwd_mosmix = grid_result.dataOut_dwd_mosmix
     WMO_alertDat = grid_result.WMO_alertDat
 
     ERA5_MERGED = grid_result.era5_merged
@@ -460,6 +471,7 @@ async def PW_Forecast(
         dataOut_ecmwf,
         dataOut_rtma_ru,
         ERA5_MERGED,
+        dataOut_dwd_mosmix,
     )
 
     # 5. Build metadata about the data sources used for this forecast
@@ -528,6 +540,9 @@ async def PW_Forecast(
         data_gfs=dataOut_gfs if isinstance(dataOut_gfs, np.ndarray) else None,
         data_ecmwf=dataOut_ecmwf if isinstance(dataOut_ecmwf, np.ndarray) else None,
         data_gefs=dataOut_gefs if isinstance(dataOut_gefs, np.ndarray) else None,
+        data_dwd_mosmix=dataOut_dwd_mosmix
+        if isinstance(dataOut_dwd_mosmix, np.ndarray)
+        else None,
         logger=logger,
         loc_tag=loc_tag,
     )
@@ -538,6 +553,7 @@ async def PW_Forecast(
     GFS_Merged = merge_result.gfs
     ECMWF_Merged = merge_result.ecmwf
     GEFS_Merged = merge_result.gefs
+    DWD_MOSMIX_Merged = merge_result.dwd_mosmix
     sourceList = merge_result.metadata.source_list
     sourceTimes = merge_result.metadata.source_times
     sourceIDX = merge_result.metadata.source_idx
@@ -562,6 +578,7 @@ async def PW_Forecast(
             if ("hrrr_0-18" in sourceList and "hrrr_18-48" in sourceList)
             else None,
             nbm_data=dataOut_nbm if "nbm" in sourceList else None,
+            dwd_mosmix_data=DWD_MOSMIX_Merged if "dwd_mosmix" in sourceList else None,
             gefs_data=dataOut_gefs if "gefs" in sourceList else None,
             gfs_data=dataOut_gfs if "gfs" in sourceList else None,
             ecmwf_data=dataOut_ecmwf if "ecmwf_ifs" in sourceList else None,
@@ -646,6 +663,7 @@ async def PW_Forecast(
         nbm_merged=NBM_Merged,
         nbm_fire_merged=NBM_Fire_Merged,
         hrrr_merged=HRRR_Merged,
+        dwd_mosmix_merged=DWD_MOSMIX_Merged,
         ecmwf_merged=ECMWF_Merged,
         gefs_merged=GEFS_Merged,
         gfs_merged=GFS_Merged,
@@ -851,6 +869,7 @@ async def PW_Forecast(
             hrrrSubHInterpolation=hrrrSubHInterpolation,
             HRRR_Merged=HRRR_Merged,
             NBM_Merged=NBM_Merged,
+            DWD_MOSMIX_Merged=DWD_MOSMIX_Merged,
             ECMWF_Merged=ECMWF_Merged,
             GFS_Merged=GFS_Merged,
             ERA5_MERGED=ERA5_MERGED,

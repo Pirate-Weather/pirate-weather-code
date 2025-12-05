@@ -62,6 +62,7 @@ def test_build_current_section_structure():
         "hrrrSubHInterpolation": None,
         "HRRR_Merged": np.zeros((3, 20)),  # Mock merged data
         "NBM_Merged": None,
+        "DWD_MOSMIX_Merged": None,
         "ECMWF_Merged": None,
         "GFS_Merged": None,
         "ERA5_MERGED": None,

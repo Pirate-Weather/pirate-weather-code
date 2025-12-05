@@ -35,6 +35,7 @@ from API.constants.forecast_const import (
     DATA_MINUTELY,
 )
 from API.constants.model_const import (
+    DWD_MOSMIX,
     ECMWF,
     ERA5,
     GFS,
@@ -71,18 +72,21 @@ class InterpolationState:
 
 def _select_value(strategies, default=MISSING_DATA):
     """
-    Select the first valid value from a list of strategies.
+    Select the first valid (non-NaN) value from a list of strategies.
 
     Args:
         strategies: List of (predicate, getter) tuples.
-        default: Default value if no strategy matches.
+        default: Default value if no strategy matches or all return NaN.
 
     Returns:
         Selected value or default.
     """
     for predicate, getter in strategies:
         if predicate():
-            return getter()
+            val = getter()
+            # Check if value is valid (not NaN) before returning
+            if val is not None and not np.isnan(val):
+                return val
     return default
 
 
@@ -225,6 +229,12 @@ def _get_temp(sourceList, model_data, state: InterpolationState):
                 lambda: _interp_scalar(model_data["NBM_Merged"], NBM["temp"], state),
             ),
             (
+                lambda: "dwd_mosmix" in sourceList,
+                lambda: _interp_scalar(
+                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["temp"], state
+                ),
+            ),
+            (
                 lambda: "ecmwf_ifs" in sourceList,
                 lambda: _interp_scalar(
                     model_data["ECMWF_Merged"], ECMWF["temp"], state
@@ -270,6 +280,12 @@ def _get_dew(sourceList, model_data, state: InterpolationState):
             (
                 lambda: "nbm" in sourceList,
                 lambda: _interp_scalar(model_data["NBM_Merged"], NBM["dew"], state),
+            ),
+            (
+                lambda: "dwd_mosmix" in sourceList,
+                lambda: _interp_scalar(
+                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["dew"], state
+                ),
             ),
             (
                 lambda: "ecmwf_ifs" in sourceList,
@@ -322,6 +338,13 @@ def _get_humidity(sourceList, model_data, state: InterpolationState, humidUnit):
                 * humidUnit,
             ),
             (
+                lambda: "dwd_mosmix" in sourceList,
+                lambda: _interp_scalar(
+                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["humidity"], state
+                )
+                * humidUnit,
+            ),
+            (
                 lambda: "gfs" in sourceList,
                 lambda: _interp_scalar(model_data["GFS_Merged"], GFS["humidity"], state)
                 * humidUnit,
@@ -361,6 +384,12 @@ def _get_pressure(sourceList, model_data, state: InterpolationState):
                 lambda: model_data["has_hrrr_merged"],
                 lambda: _interp_scalar(
                     model_data["HRRR_Merged"], HRRR["pressure"], state
+                ),
+            ),
+            (
+                lambda: "dwd_mosmix" in sourceList,
+                lambda: _interp_scalar(
+                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["pressure"], state
                 ),
             ),
             (
@@ -419,6 +448,15 @@ def _get_wind(sourceList, model_data, state: InterpolationState):
                 lambda: _interp_scalar(model_data["NBM_Merged"], NBM["wind"], state),
             ),
             (
+                lambda: "dwd_mosmix" in sourceList,
+                lambda: _interp_uv_magnitude(
+                    model_data["DWD_MOSMIX_Merged"],
+                    DWD_MOSMIX["wind_u"],
+                    DWD_MOSMIX["wind_v"],
+                    state,
+                ),
+            ),
+            (
                 lambda: "ecmwf_ifs" in sourceList,
                 lambda: _interp_uv_magnitude(
                     model_data["ECMWF_Merged"],
@@ -472,6 +510,12 @@ def _get_gust(sourceList, model_data, state: InterpolationState):
             (
                 lambda: "nbm" in sourceList,
                 lambda: _interp_scalar(model_data["NBM_Merged"], NBM["gust"], state),
+            ),
+            (
+                lambda: "dwd_mosmix" in sourceList,
+                lambda: _interp_scalar(
+                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["gust"], state
+                ),
             ),
             (
                 lambda: "gfs" in sourceList,
@@ -614,6 +658,13 @@ def _get_bearing(sourceList, model_data, state: InterpolationState):
                 lambda: model_data["NBM_Merged"][state.idx2, NBM["bearing"]],
             ),
             (
+                lambda: "dwd_mosmix" in sourceList,
+                lambda: _bearing_from_components(
+                    model_data["DWD_MOSMIX_Merged"][state.idx2, DWD_MOSMIX["wind_u"]],
+                    model_data["DWD_MOSMIX_Merged"][state.idx2, DWD_MOSMIX["wind_v"]],
+                ),
+            ),
+            (
                 lambda: "ecmwf_ifs" in sourceList,
                 lambda: _bearing_from_components(
                     model_data["ECMWF_Merged"][state.idx2, ECMWF["wind_u"]],
@@ -664,6 +715,13 @@ def _get_cloud(sourceList, model_data, state: InterpolationState):
             (
                 lambda: "nbm" in sourceList,
                 lambda: _interp_scalar(model_data["NBM_Merged"], NBM["cloud"], state)
+                * 0.01,
+            ),
+            (
+                lambda: "dwd_mosmix" in sourceList,
+                lambda: _interp_scalar(
+                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["cloud"], state
+                )
                 * 0.01,
             ),
             (
@@ -808,6 +866,12 @@ def _get_vis(sourceList, model_data, state: InterpolationState):
                 lambda: _interp_scalar(model_data["NBM_Merged"], NBM["vis"], state),
             ),
             (
+                lambda: "dwd_mosmix" in sourceList,
+                lambda: _interp_scalar(
+                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["vis"], state
+                ),
+            ),
+            (
                 lambda: model_data["has_hrrr_merged"],
                 lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["vis"], state),
             ),
@@ -932,6 +996,12 @@ def _get_solar(sourceList, model_data, state: InterpolationState):
             (
                 lambda: "nbm" in sourceList,
                 lambda: _interp_scalar(model_data["NBM_Merged"], NBM["solar"], state),
+            ),
+            (
+                lambda: "dwd_mosmix" in sourceList,
+                lambda: _interp_scalar(
+                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["solar"], state
+                ),
             ),
             (
                 lambda: model_data["has_hrrr_merged"],
@@ -1094,6 +1164,7 @@ def build_current_section(
     hrrrSubHInterpolation,
     HRRR_Merged,
     NBM_Merged,
+    DWD_MOSMIX_Merged,
     ECMWF_Merged,
     GFS_Merged,
     ERA5_MERGED,
@@ -1186,6 +1257,7 @@ def build_current_section(
         "hrrrSubHInterpolation": hrrrSubHInterpolation,
         "HRRR_Merged": HRRR_Merged,
         "NBM_Merged": NBM_Merged,
+        "DWD_MOSMIX_Merged": DWD_MOSMIX_Merged,
         "ECMWF_Merged": ECMWF_Merged,
         "GFS_Merged": GFS_Merged,
         "ERA5_MERGED": ERA5_MERGED,
@@ -1207,6 +1279,10 @@ def build_current_section(
     )
     InterPcurrent[DATA_CURRENT["wind"]] = _get_wind(sourceList, model_data, state)
     InterPcurrent[DATA_CURRENT["gust"]] = _get_gust(sourceList, model_data, state)
+
+    # If gust is missing/invalid, fall back to wind speed
+    if np.isnan(InterPcurrent[DATA_CURRENT["gust"]]):
+        InterPcurrent[DATA_CURRENT["gust"]] = InterPcurrent[DATA_CURRENT["wind"]]
 
     (
         InterPcurrent[DATA_CURRENT["intensity"]],

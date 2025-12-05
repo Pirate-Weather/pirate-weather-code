@@ -52,6 +52,7 @@ class ZarrSources:
     rtma_ru: Any
     wmo_alerts: Any
     era5_data: Any
+    dwd_mosmix: Any = None
 
 
 @dataclass
@@ -65,6 +66,7 @@ class GridIndexingResult:
     dataOut_ecmwf: Union[np.ndarray, bool]
     dataOut_gefs: Union[np.ndarray, bool]
     dataOut_rtma_ru: Union[np.ndarray, bool]
+    dataOut_dwd_mosmix: Union[np.ndarray, bool]
     era5_merged: Union[np.ndarray, bool]
     subhRunTime: Union[float, None]
     hrrrhRunTime: Union[float, None]
@@ -74,6 +76,7 @@ class GridIndexingResult:
     gfsRunTime: Union[float, None]
     ecmwfRunTime: Union[float, None]
     gefsRunTime: Union[float, None]
+    dwdMosmixRunTime: Union[float, None]
     x_rtma: Union[float, None]
     y_rtma: Union[float, None]
     rtma_lat: Union[float, None]
@@ -90,6 +93,10 @@ class GridIndexingResult:
     y_p_eur: Union[float, None]
     lats_ecmwf: Union[np.ndarray, None]
     lons_ecmwf: Union[np.ndarray, None]
+    x_dwd: Union[float, None]
+    y_dwd: Union[float, None]
+    dwd_lat: Union[float, None]
+    dwd_lon: Union[float, None]
     sourceIDX: dict
     WMO_alertDat: Union[str, None]
 
@@ -108,6 +115,7 @@ async def calculate_grid_indexing(
     ex_ecmwf: int,
     ex_gefs: int,
     ex_rtma_ru: int,
+    ex_dwd_mosmix: int,
     read_wmo_alerts: bool,
     base_day_utc: datetime.datetime,
     zarr_sources: ZarrSources,
@@ -126,6 +134,7 @@ async def calculate_grid_indexing(
     readGEFS = False
     readHRRR = False
     readERA5 = False
+    readDWD_MOSMIX = False
 
     def _get_grid_coords(
         lat,
@@ -343,7 +352,35 @@ async def calculate_grid_indexing(
         readGEFS = True
         dataOut_gefs = None
 
-    timer.log("### GEFS Detail Start ###")
+    timer.log("### GEFS Detail END ###")
+
+    timer.log("### DWD MOSMIX Detail Start ###")
+
+    # DWD MOSMIX uses the same 0.25° GFS grid (interpolated during ingest)
+    # DWD MOSMIX-S stations are located worldwide, with coverage in Europe, USA,
+    # Australia, India, Brazil, Africa and other regions. Some variables like
+    # solar radiation may only be available for European stations.
+    dataOut_dwd_mosmix = False
+    x_dwd = None
+    y_dwd = None
+    dwd_lat = None
+    dwd_lon = None
+    if ex_dwd_mosmix == 1:
+        dataOut_dwd_mosmix = False
+    elif time_machine:
+        dataOut_dwd_mosmix = False
+    elif zarr_sources.dwd_mosmix is None:
+        dataOut_dwd_mosmix = False
+    else:
+        # DWD MOSMIX is interpolated onto the GFS 0.25° grid
+        # Use the same lat/lon coordinates as GFS
+        readDWD_MOSMIX = True
+        x_dwd = x_p
+        y_dwd = y_p
+        dwd_lat = gfs_lat
+        dwd_lon = gfs_lon
+
+    timer.log("### DWD MOSMIX Detail END ###")
 
     if readERA5:
         abslat_era5 = np.abs(zarr_sources.era5_data["ERA5_lats"] - lat)
@@ -394,6 +431,10 @@ async def calculate_grid_indexing(
         zarrTasks["RTMA_RU"] = weather.zarr_read(
             "RTMA_RU", zarr_sources.rtma_ru, x_rtma, y_rtma
         )
+    if readDWD_MOSMIX:
+        zarrTasks["DWD_MOSMIX"] = weather.zarr_read(
+            "DWD_MOSMIX", zarr_sources.dwd_mosmix, x_dwd, y_dwd
+        )
 
     WMO_alertDat = None
     if read_wmo_alerts:
@@ -418,6 +459,7 @@ async def calculate_grid_indexing(
     gfsRunTime = None
     ecmwfRunTime = None
     gefsRunTime = None
+    dwdMosmixRunTime = None
 
     if readHRRR:
         dataOut = zarr_results["SubH"]
@@ -504,6 +546,16 @@ async def calculate_grid_indexing(
     else:
         dataOut_rtma_ru = False
 
+    if readDWD_MOSMIX:
+        dataOut_dwd_mosmix = zarr_results["DWD_MOSMIX"]
+        if dataOut_dwd_mosmix is not False:
+            dwdMosmixRunTime = dataOut_dwd_mosmix[HISTORY_PERIODS["DWD_MOSMIX"], 0]
+            sourceIDX["dwd_mosmix"] = dict()
+            sourceIDX["dwd_mosmix"]["x"] = int(x_dwd)
+            sourceIDX["dwd_mosmix"]["y"] = int(y_dwd)
+            sourceIDX["dwd_mosmix"]["lat"] = round(dwd_lat, 2)
+            sourceIDX["dwd_mosmix"]["lon"] = round(((dwd_lon + 180) % 360) - 180, 2)
+
     return GridIndexingResult(
         dataOut=dataOut,
         dataOut_h2=dataOut_h2,
@@ -514,6 +566,7 @@ async def calculate_grid_indexing(
         dataOut_ecmwf=dataOut_ecmwf,
         dataOut_gefs=dataOut_gefs,
         dataOut_rtma_ru=dataOut_rtma_ru,
+        dataOut_dwd_mosmix=dataOut_dwd_mosmix,
         era5_merged=ERA5_MERGED,
         subhRunTime=subhRunTime,
         hrrrhRunTime=hrrrhRunTime,
@@ -523,6 +576,7 @@ async def calculate_grid_indexing(
         gfsRunTime=gfsRunTime,
         ecmwfRunTime=ecmwfRunTime,
         gefsRunTime=gefsRunTime,
+        dwdMosmixRunTime=dwdMosmixRunTime,
         x_rtma=x_rtma,
         y_rtma=y_rtma,
         rtma_lat=rtma_lat,
@@ -539,6 +593,10 @@ async def calculate_grid_indexing(
         y_p_eur=y_p_eur,
         lats_ecmwf=lats_ecmwf,
         lons_ecmwf=lons_ecmwf,
+        x_dwd=x_dwd,
+        y_dwd=y_dwd,
+        dwd_lat=dwd_lat,
+        dwd_lon=dwd_lon,
         sourceIDX=sourceIDX,
         WMO_alertDat=WMO_alertDat,
     )

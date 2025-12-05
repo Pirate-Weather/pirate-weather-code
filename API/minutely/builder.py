@@ -14,7 +14,16 @@ from API.constants.api_const import (
     TEMP_THRESHOLD_SNOW_C,
 )
 from API.constants.forecast_const import DATA_MINUTELY
-from API.constants.model_const import ECMWF, ERA5, GEFS, GFS, HRRR, HRRR_SUBH, NBM
+from API.constants.model_const import (
+    DWD_MOSMIX,
+    ECMWF,
+    ERA5,
+    GEFS,
+    GFS,
+    HRRR,
+    HRRR_SUBH,
+    NBM,
+)
 from API.constants.shared_const import MISSING_DATA
 from API.utils.precip import dbz_to_rate
 
@@ -229,6 +238,43 @@ def _interp_era5(minute_array_grib, era5_data):
     return era5_MinuteInterpolation
 
 
+def _interp_dwd_mosmix(minute_array_grib, dwd_mosmix_data):
+    """
+    Interpolate DWD MOSMIX data to minutely intervals.
+
+    Args:
+        minute_array_grib: Minutely time array.
+        dwd_mosmix_data: DWD MOSMIX data array.
+
+    Returns:
+        Interpolated DWD MOSMIX data.
+    """
+    if dwd_mosmix_data is None or len(dwd_mosmix_data) == 0:
+        return None
+
+    dwd_mosmix_MinuteInterpolation = np.zeros(
+        (len(minute_array_grib), max(DWD_MOSMIX.values()) + 1)
+    )
+
+    # Interpolate precipitation accumulation
+    dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["accum"]] = np.interp(
+        minute_array_grib,
+        dwd_mosmix_data[:, 0].squeeze(),
+        dwd_mosmix_data[:, DWD_MOSMIX["accum"]],
+        left=MISSING_DATA,
+        right=MISSING_DATA,
+    )
+
+    # Use nearest neighbor for precipitation type (categorical data)
+    dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["ptype"]] = fast_nearest_interp(
+        minute_array_grib,
+        dwd_mosmix_data[:, 0].squeeze(),
+        dwd_mosmix_data[:, DWD_MOSMIX["ptype"]],
+    )
+
+    return dwd_mosmix_MinuteInterpolation
+
+
 def _calculate_prob(
     minute_array_grib,
     source_list,
@@ -266,6 +312,7 @@ def _calculate_precip_type_probs(
     source_list,
     hrrrSubHInterpolation,
     nbmMinuteInterpolation,
+    dwd_mosmix_MinuteInterpolation,
     ecmwfMinuteInterpolation,
     gefsMinuteInterpolation,
     gfsMinuteInterpolation,
@@ -278,6 +325,7 @@ def _calculate_precip_type_probs(
         source_list: List of data sources.
         hrrrSubHInterpolation: HRRR sub-hourly interpolated data.
         nbmMinuteInterpolation: NBM interpolated data.
+        dwd_mosmix_MinuteInterpolation: DWD MOSMIX interpolated data.
         ecmwfMinuteInterpolation: ECMWF interpolated data.
         gefsMinuteInterpolation: GEFS interpolated data.
         gfsMinuteInterpolation: GFS interpolated data.
@@ -301,6 +349,29 @@ def _calculate_precip_type_probs(
         InterTminute[:, 2] = nbmMinuteInterpolation[:, NBM["ice"]]
         InterTminute[:, 3] = nbmMinuteInterpolation[:, NBM["freezing_rain"]]
         InterTminute[:, 4] = nbmMinuteInterpolation[:, NBM["rain"]]
+    elif "dwd_mosmix" in source_list and dwd_mosmix_MinuteInterpolation is not None:
+        # WMO 4677 code mapping for DWD MOSMIX precipitation types
+        ptype_dwd = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["ptype"]]
+        # Snow: codes 70-75, 85-90
+        InterTminute[:, 1] = np.where(
+            np.isin(ptype_dwd, list(range(70, 76)) + list(range(85, 91))), 1, 0
+        )
+        # Ice (sleet): codes 76-79
+        InterTminute[:, 2] = np.where(np.isin(ptype_dwd, list(range(76, 80))), 1, 0)
+        # Freezing rain: codes 66-67
+        InterTminute[:, 3] = np.where(np.isin(ptype_dwd, [66, 67]), 1, 0)
+        # Rain: codes 50-65, 68-69, 80-84, 91-99
+        InterTminute[:, 4] = np.where(
+            np.isin(
+                ptype_dwd,
+                list(range(50, 66))
+                + [68, 69]
+                + list(range(80, 85))
+                + list(range(91, 100)),
+            ),
+            1,
+            0,
+        )
     elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
         ptype_ecmwf = ecmwfMinuteInterpolation[:, ECMWF["ptype"]]
         InterTminute[:, 1] = np.where(np.isin(ptype_ecmwf, [5, 6, 9]), 1, 0)
@@ -328,6 +399,7 @@ def _calculate_intensity(
     precipTypes,
     hrrrSubHInterpolation,
     nbmMinuteInterpolation,
+    dwd_mosmix_MinuteInterpolation,
     ecmwfMinuteInterpolation,
     gefsMinuteInterpolation,
     gfsMinuteInterpolation,
@@ -341,6 +413,7 @@ def _calculate_intensity(
         precipTypes: Array of precipitation types.
         hrrrSubHInterpolation: HRRR sub-hourly interpolated data.
         nbmMinuteInterpolation: NBM interpolated data.
+        dwd_mosmix_MinuteInterpolation: DWD MOSMIX interpolated data.
         ecmwfMinuteInterpolation: ECMWF interpolated data.
         gefsMinuteInterpolation: GEFS interpolated data.
         gfsMinuteInterpolation: GFS interpolated data.
@@ -364,6 +437,9 @@ def _calculate_intensity(
         intensity = dbz_to_rate(refc_arr, precipTypes)
     elif "nbm" in source_list and nbmMinuteInterpolation is not None:
         intensity = nbmMinuteInterpolation[:, NBM["accum"]]
+    elif "dwd_mosmix" in source_list and dwd_mosmix_MinuteInterpolation is not None:
+        # DWD MOSMIX RR1c is in kg/m^2 = mm (hourly accumulation)
+        intensity = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["accum"]]
     elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
         intensity = ecmwfMinuteInterpolation[:, ECMWF["intensity"]] * 3600
     elif "gefs" in source_list and gefsMinuteInterpolation is not None:
@@ -543,6 +619,7 @@ def build_minutely_block(
     hrrr_subh_data: Optional[np.ndarray],
     hrrr_merged: Optional[np.ndarray],
     nbm_data: Optional[np.ndarray],
+    dwd_mosmix_data: Optional[np.ndarray],
     gefs_data: Optional[np.ndarray],
     gfs_data: Optional[np.ndarray],
     ecmwf_data: Optional[np.ndarray],
@@ -572,6 +649,7 @@ def build_minutely_block(
         hrrr_subh_data: HRRR sub-hourly data.
         hrrr_merged: HRRR merged data.
         nbm_data: NBM data.
+        dwd_mosmix_data: DWD MOSMIX data.
         gefs_data: GEFS data.
         gfs_data: GFS data.
         ecmwf_data: ECMWF data.
@@ -608,6 +686,11 @@ def build_minutely_block(
     era5_MinuteInterpolation = (
         _interp_era5(minute_array_grib, era5_data) if "era5" in source_list else None
     )
+    dwd_mosmix_MinuteInterpolation = (
+        _interp_dwd_mosmix(minute_array_grib, dwd_mosmix_data)
+        if "dwd_mosmix" in source_list
+        else None
+    )
 
     # Handle GEFS error interpolation inside HRRR block logic from original code
     # The original code updated gefsMinuteInterpolation inside the HRRR block.
@@ -640,6 +723,7 @@ def build_minutely_block(
         source_list,
         hrrrSubHInterpolation,
         nbmMinuteInterpolation,
+        dwd_mosmix_MinuteInterpolation,
         ecmwfMinuteInterpolation,
         gefsMinuteInterpolation,
         gfsMinuteInterpolation,
@@ -664,6 +748,7 @@ def build_minutely_block(
         precipTypes,
         hrrrSubHInterpolation,
         nbmMinuteInterpolation,
+        dwd_mosmix_MinuteInterpolation,
         ecmwfMinuteInterpolation,
         gefsMinuteInterpolation,
         gfsMinuteInterpolation,

@@ -149,3 +149,24 @@ ERA5 = {
     "convective_available_potential_energy": 17,
     "surface_pressure": 18,
 }
+
+# DWD MOSMIX variable indices
+# These match the zarr_vars order in DWD_Mosmix_Local_Ingest.py:
+# time, TMP_2maboveground, DPT_2maboveground, RH_2maboveground,
+# PRES_meansealevel, UGRD_10maboveground, VGRD_10maboveground,
+# GUST_surface, APCP_surface, TCDC_entireatmosphere, VIS_surface,
+# PTYPE_surface, DSWRF_surface
+DWD_MOSMIX = {
+    "temp": 1,  # TMP_2maboveground (Kelvin)
+    "dew": 2,  # DPT_2maboveground (Kelvin)
+    "humidity": 3,  # RH_2maboveground (percent 0-100)
+    "pressure": 4,  # PRES_meansealevel (Pa)
+    "wind_u": 5,  # UGRD_10maboveground (m/s)
+    "wind_v": 6,  # VGRD_10maboveground (m/s)
+    "gust": 7,  # GUST_surface (m/s)
+    "accum": 8,  # APCP_surface (kg/m^2 = mm, RR1c hourly precipitation)
+    "cloud": 9,  # TCDC_entireatmosphere (percent 0-100)
+    "vis": 10,  # VIS_surface (m)
+    "ptype": 11,  # PTYPE_surface (WMO code 4677)
+    "solar": 12,  # DSWRF_surface (W/m^2)
+}

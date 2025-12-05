@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Union
 
 import numpy as np
 
-from API.constants.model_const import ECMWF, GFS
+from API.constants.model_const import DWD_MOSMIX, ECMWF, GFS
 from API.constants.shared_const import MISSING_DATA
 from API.request.grid_indexing import GridIndexingResult
 from API.utils.geo import rounder
@@ -46,6 +46,7 @@ class MergeResult:
     gfs: Optional[np.ndarray]
     ecmwf: Optional[np.ndarray]
     gefs: Optional[np.ndarray]
+    dwd_mosmix: Optional[np.ndarray]
     metadata: SourceMetadata
 
 
@@ -141,6 +142,11 @@ def build_source_metadata(
             "nbm_fire", time_value=_format_run_time(grid_result.nbmFireRunTime)
         )
 
+    if isinstance(grid_result.dataOut_dwd_mosmix, np.ndarray) and not time_machine:
+        metadata.add(
+            "dwd_mosmix", time_value=_format_run_time(grid_result.dwdMosmixRunTime)
+        )
+
     if isinstance(grid_result.dataOut_ecmwf, np.ndarray) and not time_machine:
         metadata.add("ecmwf_ifs", time_value=_format_run_time(grid_result.ecmwfRunTime))
 
@@ -234,6 +240,7 @@ def merge_hourly_models(
     data_gfs: Optional[np.ndarray],
     data_ecmwf: Optional[np.ndarray],
     data_gefs: Optional[np.ndarray],
+    data_dwd_mosmix: Optional[np.ndarray],
     logger: logging.Logger,
     loc_tag: str,
 ) -> MergeResult:
@@ -243,6 +250,7 @@ def merge_hourly_models(
     gfs_merged = None
     ecmwf_merged = None
     gefs_merged = None
+    dwd_mosmix_merged = None
 
     try:
         if (
@@ -294,6 +302,16 @@ def merge_hourly_models(
         metadata.drop("hrrr_0-18")
         metadata.drop("hrrrsubh", time_key="hrrr_subh")
 
+    if "dwd_mosmix" in metadata.source_list and isinstance(data_dwd_mosmix, np.ndarray):
+        dwd_start_idx = nearest_index(data_dwd_mosmix[:, 0], base_day_utc_grib)
+        dwd_mosmix_merged = _merge_simple_source(
+            data_dwd_mosmix,
+            dwd_start_idx,
+            num_hours,
+            max(DWD_MOSMIX.values()) + 1,
+            source_columns=data_dwd_mosmix.shape[1],
+        )
+
     if "gfs" in metadata.source_list and isinstance(data_gfs, np.ndarray):
         gfs_start_idx = nearest_index(data_gfs[:, 0], base_day_utc_grib)
         gfs_merged = _merge_simple_source(
@@ -327,5 +345,6 @@ def merge_hourly_models(
         gfs=gfs_merged,
         ecmwf=ecmwf_merged,
         gefs=gefs_merged,
+        dwd_mosmix=dwd_mosmix_merged,
         metadata=metadata,
     )

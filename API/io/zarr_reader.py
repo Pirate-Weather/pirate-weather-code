@@ -36,6 +36,7 @@ class ZarrStores:
     WMO_Alerts_Zarr: Optional[Any] = None
     RTMA_RU_Zarr: Optional[Any] = None
     ERA5_Data: Optional[Any] = None
+    DWD_MOSMIX_Zarr: Optional[Any] = None
 
 
 async def get_zarr(store, X, Y):
@@ -167,6 +168,7 @@ def update_zarr_store(
             ("HRRR_Zarr", "HRRR.zarr"),
             ("WMO_Alerts_Zarr", "WMO_Alerts.zarr"),
             ("RTMA_RU_Zarr", "RTMA_RU.zarr"),
+            ("DWD_MOSMIX_Zarr", "DWD_MOSMIX.zarr"),
         ]
         for attr, fname in local_stores:
             _load_local_store(stores, attr, save_dir, fname, logger=logger)
@@ -208,6 +210,7 @@ def update_zarr_store(
                 ("WMO_Alerts_Zarr", "WMO_Alerts"),
                 ("RTMA_RU_Zarr", "RTMA_RU"),
                 ("ECMWF_Zarr", "ECMWF"),
+                ("DWD_MOSMIX_Zarr", "DWD_MOSMIX"),
             ]
             for attr, name in testing_stores:
                 setattr(

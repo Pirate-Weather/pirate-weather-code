@@ -4,6 +4,7 @@ from metpy.calc import relative_humidity_from_dewpoint
 
 from API.api_utils import estimate_visibility_gultepe_rh_pr_numpy
 from API.constants.model_const import (
+    DWD_MOSMIX,
     ECMWF,
     ERA5,
     GEFS,
@@ -42,6 +43,7 @@ def prepare_data_inputs(
     nbm_merged,
     nbm_fire_merged,
     hrrr_merged,
+    dwd_mosmix_merged,
     ecmwf_merged,
     gefs_merged,
     gfs_merged,
@@ -54,6 +56,7 @@ def prepare_data_inputs(
     """
     # Helper to check if ERA5 is valid (it uses isinstance check in original code)
     era5_valid = isinstance(era5_merged, np.ndarray)
+    dwd_valid = isinstance(dwd_mosmix_merged, np.ndarray)
 
     # --- InterThour_inputs ---
     inter_thour_inputs = {}
@@ -75,6 +78,12 @@ def prepare_data_inputs(
 
     if "ecmwf_ifs" in source_list and ecmwf_merged is not None:
         inter_thour_inputs["ecmwf_ptype"] = ecmwf_merged[:, ECMWF["ptype"]]
+
+    # DWD MOSMIX precipitation type (WMO code)
+    if "dwd_mosmix" in source_list and dwd_valid:
+        inter_thour_inputs["dwd_mosmix_ptype"] = dwd_mosmix_merged[
+            :, DWD_MOSMIX["ptype"]
+        ]
 
     if "gefs" in source_list and gefs_merged is not None:
         inter_thour_inputs["gefs_snow"] = gefs_merged[:, GEFS["snow"]]
@@ -104,6 +113,10 @@ def prepare_data_inputs(
 
     if "ecmwf_ifs" in source_list and ecmwf_merged is not None:
         prcip_intensity_inputs["ecmwf"] = ecmwf_merged[:, ECMWF["intensity"]] * 3600
+
+    # DWD MOSMIX: RR1c is in kg/m^2 = mm (hourly total)
+    if "dwd_mosmix" in source_list and dwd_valid:
+        prcip_intensity_inputs["dwd_mosmix"] = dwd_mosmix_merged[:, DWD_MOSMIX["accum"]]
 
     if "gefs" in source_list and gefs_merged is not None:
         prcip_intensity_inputs["gfs_gefs"] = gefs_merged[:, GEFS["accum"]]
@@ -143,6 +156,7 @@ def prepare_data_inputs(
         num_hours,
         nbm_merged[:, NBM["temp"]] if nbm_merged is not None else None,
         hrrr_merged[:, HRRR["temp"]] if hrrr_merged is not None else None,
+        dwd_mosmix_merged[:, DWD_MOSMIX["temp"]] if dwd_valid else None,
         ecmwf_merged[:, ECMWF["temp"]] if ecmwf_merged is not None else None,
         gfs_merged[:, GFS["temp"]] if gfs_merged is not None else None,
         era5_merged[:, ERA5["2m_temperature"]] if era5_valid else None,
@@ -153,6 +167,7 @@ def prepare_data_inputs(
         num_hours,
         nbm_merged[:, NBM["dew"]] if nbm_merged is not None else None,
         hrrr_merged[:, HRRR["dew"]] if hrrr_merged is not None else None,
+        dwd_mosmix_merged[:, DWD_MOSMIX["dew"]] if dwd_valid else None,
         ecmwf_merged[:, ECMWF["dew"]] if ecmwf_merged is not None else None,
         gfs_merged[:, GFS["dew"]] if gfs_merged is not None else None,
         era5_merged[:, ERA5["2m_dewpoint_temperature"]] if era5_valid else None,
@@ -174,6 +189,7 @@ def prepare_data_inputs(
         num_hours,
         nbm_merged[:, NBM["humidity"]] if nbm_merged is not None else None,
         hrrr_merged[:, HRRR["humidity"]] if hrrr_merged is not None else None,
+        dwd_mosmix_merged[:, DWD_MOSMIX["humidity"]] if dwd_valid else None,
         gfs_merged[:, GFS["humidity"]] if gfs_merged is not None else None,
         era5_humidity,
     )
@@ -182,6 +198,7 @@ def prepare_data_inputs(
     pressure_inputs = _stack_fields(
         num_hours,
         hrrr_merged[:, HRRR["pressure"]] if hrrr_merged is not None else None,
+        dwd_mosmix_merged[:, DWD_MOSMIX["pressure"]] if dwd_valid else None,
         ecmwf_merged[:, ECMWF["pressure"]] if ecmwf_merged is not None else None,
         gfs_merged[:, GFS["pressure"]] if gfs_merged is not None else None,
         era5_merged[:, ERA5["mean_sea_level_pressure"]] if era5_valid else None,
@@ -193,6 +210,12 @@ def prepare_data_inputs(
         nbm_merged[:, NBM["wind"]] if nbm_merged is not None else None,
         _wind_speed(hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]])
         if hrrr_merged is not None
+        else None,
+        _wind_speed(
+            dwd_mosmix_merged[:, DWD_MOSMIX["wind_u"]],
+            dwd_mosmix_merged[:, DWD_MOSMIX["wind_v"]],
+        )
+        if dwd_valid
         else None,
         _wind_speed(ecmwf_merged[:, ECMWF["wind_u"]], ecmwf_merged[:, ECMWF["wind_v"]])
         if ecmwf_merged is not None
@@ -213,6 +236,7 @@ def prepare_data_inputs(
         num_hours,
         nbm_merged[:, NBM["gust"]] if nbm_merged is not None else None,
         hrrr_merged[:, HRRR["gust"]] if hrrr_merged is not None else None,
+        dwd_mosmix_merged[:, DWD_MOSMIX["gust"]] if dwd_valid else None,
         gfs_merged[:, GFS["gust"]] if gfs_merged is not None else None,
         era5_merged[:, ERA5["instantaneous_10m_wind_gust"]] if era5_valid else None,
     )
@@ -223,6 +247,12 @@ def prepare_data_inputs(
         nbm_merged[:, NBM["bearing"]] if nbm_merged is not None else None,
         _bearing(hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]])
         if hrrr_merged is not None
+        else None,
+        _bearing(
+            dwd_mosmix_merged[:, DWD_MOSMIX["wind_u"]],
+            dwd_mosmix_merged[:, DWD_MOSMIX["wind_v"]],
+        )
+        if dwd_valid
         else None,
         _bearing(ecmwf_merged[:, ECMWF["wind_u"]], ecmwf_merged[:, ECMWF["wind_v"]])
         if ecmwf_merged is not None
@@ -243,6 +273,7 @@ def prepare_data_inputs(
         num_hours,
         nbm_merged[:, NBM["cloud"]] * 0.01 if nbm_merged is not None else None,
         hrrr_merged[:, HRRR["cloud"]] * 0.01 if hrrr_merged is not None else None,
+        dwd_mosmix_merged[:, DWD_MOSMIX["cloud"]] * 0.01 if dwd_valid else None,
         ecmwf_merged[:, ECMWF["cloud"]] * 0.01 if ecmwf_merged is not None else None,
         gfs_merged[:, GFS["cloud"]] * 0.01 if gfs_merged is not None else None,
         era5_merged[:, ERA5["total_cloud_cover"]] if era5_valid else None,
@@ -267,6 +298,7 @@ def prepare_data_inputs(
         num_hours,
         nbm_merged[:, NBM["vis"]] if nbm_merged is not None else None,
         hrrr_merged[:, HRRR["vis"]] if hrrr_merged is not None else None,
+        dwd_mosmix_merged[:, DWD_MOSMIX["vis"]] if dwd_valid else None,
         gfs_merged[:, GFS["vis"]] if gfs_merged is not None else None,
         estimate_visibility_gultepe_rh_pr_numpy(era5_merged, var_index=ERA5, var_axis=1)
         if era5_valid
@@ -291,6 +323,7 @@ def prepare_data_inputs(
         num_hours,
         nbm_merged[:, NBM["intensity"]] if nbm_merged is not None else None,
         hrrr_merged[:, HRRR["accum"]] if hrrr_merged is not None else None,
+        dwd_mosmix_merged[:, DWD_MOSMIX["accum"]] if dwd_valid else None,  # kg/m^2 = mm
         ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
         if ecmwf_merged is not None
         else None,
@@ -340,6 +373,7 @@ def prepare_data_inputs(
         num_hours,
         nbm_merged[:, NBM["solar"]] if nbm_merged is not None else None,
         hrrr_merged[:, HRRR["solar"]] if hrrr_merged is not None else None,
+        dwd_mosmix_merged[:, DWD_MOSMIX["solar"]] if dwd_valid else None,
         gfs_merged[:, GFS["solar"]] if gfs_merged is not None else None,
         era5_merged[:, ERA5["surface_solar_radiation_downwards"]] / 3600
         if era5_valid
