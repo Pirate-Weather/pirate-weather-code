@@ -578,6 +578,7 @@ async def PW_Forecast(
             if ("hrrr_0-18" in sourceList and "hrrr_18-48" in sourceList)
             else None,
             nbm_data=dataOut_nbm if "nbm" in sourceList else None,
+            dwd_mosmix_data=DWD_MOSMIX_Merged if "dwd_mosmix" in sourceList else None,
             gefs_data=dataOut_gefs if "gefs" in sourceList else None,
             gfs_data=dataOut_gfs if "gfs" in sourceList else None,
             ecmwf_data=dataOut_ecmwf if "ecmwf_ifs" in sourceList else None,
