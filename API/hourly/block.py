@@ -108,7 +108,10 @@ def _populate_max_pchance(
             # Rain: 50-65, 68-69, 80-84, 91-99
             np.isin(
                 ptype_hour,
-                list(range(50, 66)) + [68, 69] + list(range(80, 85)) + list(range(91, 100)),
+                list(range(50, 66))
+                + [68, 69]
+                + list(range(80, 85))
+                + list(range(91, 100)),
             ),
         ]
         choices = [1, 2, 3, 4]

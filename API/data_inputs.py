@@ -81,7 +81,9 @@ def prepare_data_inputs(
 
     # DWD MOSMIX precipitation type (WMO code)
     if "dwd_mosmix" in source_list and dwd_valid:
-        inter_thour_inputs["dwd_mosmix_ptype"] = dwd_mosmix_merged[:, DWD_MOSMIX["ptype"]]
+        inter_thour_inputs["dwd_mosmix_ptype"] = dwd_mosmix_merged[
+            :, DWD_MOSMIX["ptype"]
+        ]
 
     if "gefs" in source_list and gefs_merged is not None:
         inter_thour_inputs["gefs_snow"] = gefs_merged[:, GEFS["snow"]]
