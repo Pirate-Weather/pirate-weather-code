@@ -24,6 +24,7 @@ CHUNK_SIZES = {
     "ECMWF": 100,
     "NBM_Fire": 100,
     "RTMA": 100,
+    "DWD": 100,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -35,6 +36,7 @@ FINAL_CHUNK_SIZES = {
     "ECMWF": 3,
     "NBM_Fire": 5,
     "RTMA": 25,
+    "DWD": 5,
 }
 
 FORECAST_LEAD_RANGES = {

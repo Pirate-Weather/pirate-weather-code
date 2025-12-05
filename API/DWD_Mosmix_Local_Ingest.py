@@ -18,30 +18,28 @@ import sys
 import time
 import warnings
 import zipfile
-from datetime import datetime
+from datetime import datetime, UTC
 
 import dask.array as da
+from dask.diagnostics import ProgressBar
 import numpy as np
 import pandas as pd
 import requests
 import s3fs
+from tqdm import tqdm  # safe to ignore if not using log="tqdm"
 import xarray as xr
 import zarr
 import zarr.storage
 from metpy.calc import relative_humidity_from_dewpoint
 from metpy.units import units
 from pykml import parser
-from scipy.interpolate import griddata
-from scipy.spatial import (
-    cKDTree,
-)
+from sklearn.neighbors import BallTree
 
 from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_utils import CHUNK_SIZES
+from API.ingest_utils import FINAL_CHUNK_SIZES
 
-# Suppress specific warnings that might arise from pandas/xarray operations with NaNs
-warnings.filterwarnings("ignore", "This pattern is interpreted")
-
+# Distance to interpolate stations to grid (km)
+radius_km = 50
 
 # Set up basic logging configuration
 logging.basicConfig(
@@ -67,7 +65,6 @@ zarr_vars = (
     "UGRD_10maboveground",
     "VGRD_10maboveground",
     "GUST_surface",
-    "PRATE_surface",
     "APCP_surface",
     "TCDC_entireatmosphere",
     "VIS_surface",
@@ -77,7 +74,6 @@ zarr_vars = (
 
 # Define the subset of standardized variables that are directly sourced from
 # MOSMIX-S (or calculated from it) and will be actively interpolated onto the grid.
-# PTYPE_surface (string type) will be handled separately.
 api_target_numerical_variables = [
     "TMP_2maboveground",
     "DPT_2maboveground",
@@ -86,8 +82,8 @@ api_target_numerical_variables = [
     "UGRD_10maboveground",
     "VGRD_10maboveground",
     "GUST_surface",
-    "PRATE_surface",
     "APCP_surface",  # Now in cm
+    "PTYPE_surface",
     "TCDC_entireatmosphere",
     "VIS_surface",
     "DSWRF_surface",  # New: calculated from Rad1h
@@ -95,54 +91,78 @@ api_target_numerical_variables = [
 
 
 # --- Core Helper Functions ---
-
-
-def _get_precip_type_from_ww(ww_code):
-    """
-    Determines precipitation type (rain, snow, sleet, or none) from DWD WW code.
-    This is a simplified mapping based on common WMO present weather codes.
-
-    Args:
-        ww_code (int or float): The WW (present weather) code. Can be NaN if missing.
-
-    Returns:
-        str: "rain", "snow", "sleet", or "none".
-    """
-    if np.isnan(ww_code):
-        return "none"
-
-    ww_code = int(ww_code)
-
-    # WMO Present Weather Codes (simplified categories)
-    if 0 <= ww_code <= 49:  # No precipitation, fog, haze, etc.
-        return "none"
-    elif 50 <= ww_code <= 59:  # Drizzle
-        return "rain"
-    elif 60 <= ww_code <= 69:  # Rain
-        if ww_code in [66, 67]:  # Freezing Rain
-            return "sleet"
-        return "rain"
-    elif 70 <= ww_code <= 79:  # Snow, ice pellets
-        if ww_code in [79]:  # Ice Pellets
-            return "sleet"
-        return "snow"
-    elif 80 <= ww_code <= 89:  # Showers
-        if ww_code in [83, 84, 85, 86]:  # Snow/sleet showers
-            return "snow"
-        if ww_code in [87, 88]:  # Hail showers
-            return "sleet"
-        return "rain"
-    elif 90 <= ww_code <= 99:  # Thunderstorms
-        if ww_code in [95, 96, 97, 99]:  # Thunderstorm with hail, ice pellets
-            return "sleet"
-        return "rain"
-
-    return "none"  # Fallback for any unmapped codes
-
-
 # Relative humidity is calculated using MetPy's `relative_humidity_from_dewpoint`.
 # This removes the need for custom vapor-pressure approximations and leverages
 # a tested implementation that supports pint units.
+
+def fill_station_time_series(
+    df: pd.DataFrame,
+    var_cols,
+    time_col: str = "time",
+    station_col: str = "station_id",
+    max_gap: int | None = None,
+    fill_ends: bool = False,
+    log="print",              # "print" | "tqdm" | None
+    print_every=50,           # applies only if log="print"
+):
+    """
+    Interpolates missing values separately for each station over time.
+
+    Progress Monitoring:
+      log="tqdm"  → progress bar over stations
+      log="print" → prints every N stations
+      log=None    → silent
+    """
+    if isinstance(var_cols, str):
+        var_cols = [var_cols]
+
+    # Sort input for deterministic behavior
+    df_sorted = df.sort_values([station_col, time_col]).copy()
+
+    # Unique station groups
+    stations = df_sorted[station_col].unique()
+    n_stations = len(stations)
+
+    if log == "tqdm":
+        station_iter = tqdm(stations, desc="Interpolating stations", unit="stations")
+    else:
+        station_iter = stations
+
+    def _interp_one_station(station_id, idx):
+        df_s = df_sorted.loc[df_sorted[station_col] == station_id]
+
+        for col in var_cols:
+            s = df_s[col]
+
+            # skip if nothing to fill
+            if s.notna().sum() < 2:
+                continue
+
+            if np.issubdtype(df_s[time_col].dtype, np.datetime64):
+                s2 = s.copy()
+                s2.index = df_s[time_col]
+                s2 = s2.interpolate(
+                        method="time", limit=max_gap, limit_direction="both")
+            else:
+                s2 = s.interpolate(
+                        method="linear", limit=max_gap, limit_direction="both")
+
+            if fill_ends:
+                s2 = s2.ffill().bfill()
+
+            df_sorted.loc[df_s.index, col] = s2.to_numpy()
+
+        if log == "print" and idx % print_every == 0:
+            print(f"[{idx}/{n_stations}] Interpolated station {station_id}")
+
+    # Loop stations with progress feedback
+    for i, st in enumerate(station_iter):
+        _interp_one_station(st, i)
+
+    if log == "print":
+        print("Interpolation complete.")
+
+    return df_sorted
 
 
 def parse_mosmix_kml(kml_filepath):
@@ -297,10 +317,9 @@ def parse_mosmix_kml(kml_filepath):
     return df, global_metadata
 
 
-def convert_df_to_xarray(df, global_metadata=None):
+def process_dwd_df(df, global_metadata=None):
     """
-    Converts a Pandas DataFrame (point-based) to an xarray Dataset.
-    Standardizes variable names and units, and calculates derived variables.
+    Processes the DataFrame extracted from DWD MOSMIX KML parsing.
 
     Args:
         df (pd.DataFrame): Input DataFrame from KML parsing.
@@ -309,493 +328,238 @@ def convert_df_to_xarray(df, global_metadata=None):
     Returns:
         xr.Dataset: Point-based xarray Dataset with 'station_id' and 'time' dimensions.
     """
-    if df.empty:
-        logging.error("DataFrame is empty, cannot convert to xarray Dataset.")
-        return xr.Dataset()
 
-    # Create a base xarray Dataset with station_id and time as dimensions
-    # Identify unique station details to become coordinates associated with 'station_id'
-    unique_stations_df = (
-        df[["station_id", "station_name", "longitude", "latitude", "altitude"]]
-        .drop_duplicates(subset=["station_id"])
-        .set_index("station_id")
-    )
-
-    # Identify columns that represent forecast data variables
-    data_vars_cols = [
-        col
-        for col in df.columns
-        if col
-        not in [
-            "station_id",
-            "time",
-            "station_name",
-            "longitude",
-            "latitude",
-            "altitude",
-        ]
-    ]
-
-    # Convert DataFrame to xarray Dataset, setting 'station_id' and 'time' as multi-index
-    ds = df.set_index(["station_id", "time"])[data_vars_cols].to_xarray()
-
-    # Assign static station properties as coordinates to the 'station_id' dimension
-    ds = ds.assign_coords(
-        station_name=(
-            "station_id",
-            unique_stations_df["station_name"].reindex(ds.station_id).values,
-        ),
-        longitude=(
-            "station_id",
-            unique_stations_df["longitude"].reindex(ds.station_id).values,
-        ),
-        latitude=(
-            "station_id",
-            unique_stations_df["latitude"].reindex(ds.station_id).values,
-        ),
-        altitude=(
-            "station_id",
-            unique_stations_df["altitude"].reindex(ds.station_id).values,
-        ),
-    )
 
     # --- Standardize variable names and units from DWD KML to API schema ---
     # Values remain in their original DWD units (Kelvin, Pa, m/s, mm/h) before interpolation.
-    if "TTT" in ds.data_vars:
-        ds["TMP_2maboveground"] = ds["TTT"]
-    if "Td" in ds.data_vars:
-        ds["DPT_2maboveground"] = ds["Td"]
+    if "TTT" in df.columns:
+        df["TMP_2maboveground"] = df["TTT"]
+    if "Td" in df.columns:
+        df["DPT_2maboveground"] = df["Td"]
 
     # Calculate Relative Humidity (RH_2maboveground) from Temperature (TTT) and Dew Point (Td)
-    if "TMP_2maboveground" in ds.data_vars and "DPT_2maboveground" in ds.data_vars:
-        try:
-            # Use MetPy which expects pint quantities. We multiply by units.kelvin
-            # and return the dimensionless magnitude (0-1) scaled to percent (0-100).
-            def _rh_metpy(t, td):
-                t_q = t * units.kelvin
-                td_q = td * units.kelvin
-                rh_q = relative_humidity_from_dewpoint(t_q, td_q)
-                # Convert to percent
-                return (rh_q.magnitude * 100).astype(np.float32)
+    if "TMP_2maboveground" in df.columns and "DPT_2maboveground" in df.columns:
+        # Use MetPy which expects pint quantities. We multiply by units.kelvin
+        # and return the dimensionless magnitude (0-1) scaled to percent (0-100).
+        def _rh_metpy(t, td):
+            t_q = t * units.kelvin
+            td_q = td * units.kelvin
+            rh_q = relative_humidity_from_dewpoint(t_q, td_q)
+            # Convert to percent
+            return (rh_q.magnitude * 100).astype(np.float32)
 
-            ds["RH_2maboveground"] = xr.apply_ufunc(
-                _rh_metpy,
-                ds["TMP_2maboveground"],
-                ds["DPT_2maboveground"],
-                vectorize=True,
-                dask="parallelized",
-                output_dtypes=[np.float32],
-            )
-        except Exception as e:
-            logging.warning(
-                "MetPy RH calculation failed (%s). Filling RH with NaNs.", e
-            )
-            ds["RH_2maboveground"] = (
-                ("station_id", "time"),
-                np.full(
-                    (ds.sizes["station_id"], ds.sizes["time"]), np.nan, dtype=np.float32
-                ),
-            )
-    else:
-        logging.warning(
-            "Warning: Cannot calculate Relative Humidity (RH_2maboveground) due to missing Temperature (TTT) or Dew Point (Td) data. Filling with NaN."
-        )
-        # Initialize RH with NaNs if calculation is not possible
-        ds["RH_2maboveground"] = (
-            ("station_id", "time"),
-            np.full(
-                (ds.sizes["station_id"], ds.sizes["time"]), np.nan, dtype=np.float32
-            ),
-        )
+        df["RH_2maboveground"] = _rh_metpy(
+            df["TMP_2maboveground"].to_numpy(),
+            df["DPT_2maboveground"].to_numpy(),
+        ).astype(np.float32)
 
-    if "PPPP" in ds.data_vars:
-        ds["PRES_meansealevel"] = ds["PPPP"]
+    df["PRES_meansealevel"] = df["PPPP"]
 
     # Calculate U- and V-components of wind from speed (FF) and direction (DD)
-    if "FF" in ds.data_vars and "DD" in ds.data_vars:
-        wind_speed_ms = ds["FF"]
-        # Convert meteorological direction (where wind comes from, 0=N, 90=E)
-        # to mathematical/cartesian direction (where wind goes, 0=E, 90=N) and then to radians.
-        wind_direction_rad = np.deg2rad(270 - ds["DD"])
-        ds["UGRD_10maboveground"] = wind_speed_ms * np.cos(wind_direction_rad)
-        ds["VGRD_10maboveground"] = wind_speed_ms * np.sin(wind_direction_rad)
+    wind_speed_ms = df["FF"]
+    # Convert meteorological direction (where wind comes from, 0=N, 90=E)
+    # to mathematical/cartesian direction (where wind goes, 0=E, 90=N) and then to radians.
+    wind_direction_rad = np.deg2rad(270 - df["DD"])
+    df["UGRD_10maboveground"] = wind_speed_ms * np.cos(wind_direction_rad)
+    df["VGRD_10maboveground"] = wind_speed_ms * np.sin(wind_direction_rad)
 
-    if "FX1" in ds.data_vars:
-        ds["GUST_surface"] = ds["FX1"]
+    df["GUST_surface"] = df["FX1"]
 
-    # Precipitation Rate (RR1c in mm/h) and Accumulated Precipitation (APCP_surface in cm)
-    # MOSMIX-S RR1c is typically 1-hour accumulation.
-    if "RR1c" in ds.data_vars:
-        ds["PRATE_surface"] = ds["RR1c"]  # Keep PRATE in mm/h
-        ds["APCP_surface"] = ds["RR1c"] / 10.0  # Convert RR1c (mm) to APCP_surface (cm)
+    # Accumulated Precipitation (RR1c in Kg/m2)
+    # MOSMIX-S RR1c is 1-hour accumulation.
+    df["APCP_surface"] = df["RR1c"]
 
-    if "N" in ds.data_vars:
-        ds["TCDC_entireatmosphere"] = ds["N"]
-    if "VV" in ds.data_vars:
-        ds["VIS_surface"] = ds["VV"]
+    df["TCDC_entireatmosphere"] = df["N"]
+    df["VIS_surface"] = df["VV"]
 
     # Precipitation Type (WW)
-    if "WW" in ds.data_vars:
-        ds["PTYPE_surface"] = ds["WW"].map(_get_precip_type_from_ww)
+    # From: https://www.nodc.noaa.gov/archive/arc0021/0002199/1.1/data/0-data/HTML/WMO-CODE/WMO4677.HTM
+    df["PTYPE_surface"] = df["ww"]
 
     # Downward Short-Wave Radiation Flux (DSWRF_surface) from Rad1h
     # Rad1h unit is kJ/m^2 (hourly sum). Convert to W/m^2 (Joules per second per square meter).
     # Conversion: (kJ/m^2 * 1000 J/kJ) / 3600 s/hour = J/m^2/s = W/m^2. So, divide by 3.6.
-    if "Rad1h" in ds.data_vars:
-        ds["DSWRF_surface"] = ds["Rad1h"] / 3.6
+    df["DSWRF_surface"] = df["Rad1h"] / 3.6
 
-    # Remove original DWD variables from the dataset after conversion/derivation
-    dwd_original_vars_to_drop = [
-        "PPPP",
-        "TX",
-        "TTT",
-        "Td",
-        "FF",
-        "DD",
-        "FX1",
-        "RR1c",
-        "VV",
-        "N",
-        "WW",
-        "Rad1h",
+    return df
+
+
+def interpolate_dwd_to_grid_knearest_dask(
+    df,
+    var_cols,
+    radius_km,
+    k_max=4,
+    time_col="time",
+    lat_col="latitude",
+    lon_col="longitude",
+    station_col="station_id",
+    dtype=np.float32,
+    log="print",            # "print" | "tqdm" | "none"
+    print_every=10,         # used if log="print"
+    time_chunk=24,          # Dask chunk size in time
+):
+    """
+    Vectorized k-nearest grid interpolation with dense, Dask-backed output.
+
+    Each dataframe row is assigned to up to k_max nearest grid cells
+    within radius_km. Output variables are (time, lat, lon) Dask arrays.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Columns: station_col, time_col, lat_col, lon_col, var_cols.
+        Lat/lon in degrees. Lon assumed in [0, 360) for the GFS grid.
+    var_cols : str or list of str
+        Variables to interpolate.
+    radius_km : float
+        Max radius in km for grid cell to be influenced.
+    k_max : int
+        Maximum number of nearest grid cells per station.
+    time_col, lat_col, lon_col, station_col : str
+        Column names.
+    dtype : numpy dtype
+        Output dtype (np.float32 recommended).
+    log : {"print","tqdm","none"}
+        Logging mode.
+    print_every : int
+        Print frequency if log="print".
+    time_chunk : int
+        Dask chunk size for the time dimension.
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset with dims (time, lat, lon); each data_var is a dense,
+        Dask-backed 3D array.
+    """
+    if isinstance(var_cols, str):
+        var_cols = [var_cols]
+
+    def _log(msg):
+        if log == "print":
+            print(msg)
+
+    # -------------------------------------------------
+    # 0) Define global 0.25° GFS grid
+    # -------------------------------------------------
+    _log("Building 0.25° GFS grid…")
+
+    gfs_lats = np.arange(-90, 90, 0.25)
+    gfs_lons = np.arange(0, 360, 0.25)
+    ny = gfs_lats.size
+    nx = gfs_lons.size
+
+    lon_grid, lat_grid = np.meshgrid(gfs_lons, gfs_lats)
+    grid_coords_deg = np.column_stack([lat_grid.ravel(), lon_grid.ravel()])
+    grid_coords_rad = np.radians(grid_coords_deg)
+
+    # -------------------------------------------------
+    # 1) Station → k-nearest neighbours on grid
+    # -------------------------------------------------
+    _log("Querying k-nearest neighbours for stations…")
+
+    tree = BallTree(grid_coords_rad, metric="haversine")
+
+    station_meta = df.drop_duplicates(subset=station_col)[
+        [station_col, lat_col, lon_col]
     ]
-    for var in dwd_original_vars_to_drop:
-        if var in ds.data_vars:
-            ds = ds.drop_vars(var)
-    # Explicitly drop 'Rh' and 'R101' if they somehow were parsed or created,
-    # as we rely on calculation for RH and R101 is not from MOSMIX-S.
-    if "Rh" in ds.data_vars:
-        ds = ds.drop_vars("Rh")
-    if "R101" in ds.data_vars:
-        ds = ds.drop_vars("R101")
+    station_ids = station_meta[station_col].to_numpy()
+    pts_rad = np.radians(station_meta[[lat_col, lon_col]].to_numpy())
 
-    # Add global metadata as attributes to the Dataset for traceability
-    if global_metadata:
-        attrs_to_add = {}
-        for k, v in global_metadata.items():
-            if isinstance(v, pd.Timestamp):
-                attrs_to_add[k] = v.isoformat()
-            elif isinstance(v, list) and all(
-                isinstance(item, dict)
-                and "referenceTime" in item
-                and isinstance(item["referenceTime"], pd.Timestamp)
-                for item in v
-            ):
-                # Convert list of model dicts (containing timestamps) to Zarr-friendly string representation
-                attrs_to_add[k] = [
-                    {
-                        m_k: (m_v.isoformat() if isinstance(m_v, pd.Timestamp) else m_v)
-                        for m_k, m_v in model.items()
-                    }
-                    for model in v
-                ]
-            else:
-                attrs_to_add[k] = v
-        ds.attrs.update(attrs_to_add)
-    return ds
+    # k_max nearest neighbours per station
+    dist_rad, inds_flat = tree.query(pts_rad, k=k_max)  # (n_stations, k_max)
 
+    radius_rad = radius_km / 6371.0
+    mask = dist_rad <= radius_rad
+    inds_flat = np.where(mask, inds_flat, -1)  # -1 marks "no neighbour within radius"
 
-def save_to_zarr(xarray_dataset, zarr_path):
-    """
-    Saves an xarray Dataset to a Zarr store.
+    station_indexer = {sid: i for i, sid in enumerate(station_ids)}
 
-    Args:
-        xarray_dataset (xr.Dataset): The dataset to save.
-        zarr_path (str): The file path for the Zarr store.
-    """
-    if xarray_dataset.dims:  # Check if dataset is not empty
-        xarray_dataset.to_zarr(zarr_path, mode="w", compute=True)
-        logging.info(f"Data successfully saved to Zarr at: {zarr_path}")
-    else:
-        logging.warning(
-            "Xarray Dataset is empty (no dimensions found), nothing to save to Zarr."
-        )
+    # -------------------------------------------------
+    # 2) Time indexing & sorting
+    # -------------------------------------------------
+    _log("Indexing time dimension…")
 
+    df_sorted = df.sort_values(time_col)
+    unique_times = df_sorted[time_col].drop_duplicates().to_numpy()
+    nt = len(unique_times)
 
-# --- Functions for Gridding and Interpolation ---
+    time_to_idx = {t: i for i, t in enumerate(unique_times)}
+    t_idx = df_sorted[time_col].map(time_to_idx).to_numpy()  # shape (n_rows,)
 
+    stn_full = df_sorted[station_col].to_numpy()
+    stn_idx_full = np.array([station_indexer[s] for s in stn_full], dtype=int)
 
-def load_gfs_grid_coordinates(gfs_zarr_path):
-    """
-    Loads latitude and longitude coordinates from a GFS Zarr dataset.
-    This defines the target grid for interpolation.
+    # -------------------------------------------------
+    # 3) Expand row → neighbour grid indices (vectorized)
+    # -------------------------------------------------
+    _log("Linking rows to neighbour grid cells…")
 
-    Args:
-        gfs_zarr_path (str): Path to an existing GFS Zarr dataset.
+    # Each row maps to k_max neighbours for its station
+    neigh_flat = inds_flat[stn_idx_full]             # (n_rows, k_max)
+    neigh_time = np.repeat(t_idx[:, None], k_max, 1) # (n_rows, k_max)
 
-    Returns:
-        tuple: A tuple containing (gfs_lats, gfs_lons) as NumPy arrays.
-               Exits if the GFS Zarr cannot be loaded.
-    """
-    try:
-        # Open the GFS Zarr dataset, ensuring coordinates are loaded into memory.
-        with xr.open_zarr(gfs_zarr_path, consolidated=False, chunks={}) as gfs_ds:
-            gfs_lats = gfs_ds.latitude.values
-            gfs_lons = gfs_ds.longitude.values
-            logging.info(
-                f"Loaded GFS grid: {len(gfs_lats)} latitudes, {len(gfs_lons)} longitudes."
-            )
-            return gfs_lats, gfs_lons
-    except Exception as e:
-        logging.critical(f"Error loading GFS grid from {gfs_zarr_path}: {e}")
-        sys.exit(1)
+    # Flatten and filter invalid neighbours
+    flat_flat = neigh_flat.ravel()
+    flat_time = neigh_time.ravel()
+    valid = flat_flat >= 0
+    flat_flat = flat_flat[valid]
+    flat_time = flat_time[valid]
 
+    # Grid indices (y, x)
+    iy, ix = np.unravel_index(flat_flat, (ny, nx))
 
-# Helper for numerical interpolation (to be used with xr.apply_ufunc)
-def _interpolate_single_time_slice_numerical(
-    dwd_data_slice_numerical,
-    dwd_spatial_points,
-    gfs_grid_points_flat,
-    gfs_lats_size,
-    gfs_lons_size,
-):
-    """
-    Applies `scipy.interpolate.griddata` for one numerical variable at one time step.
-    This function is designed to be called by `xr.apply_ufunc` for parallel processing.
+    # -------------------------------------------------
+    # 4) Build dense NumPy arrays and wrap them in Dask
+    # -------------------------------------------------
+    _log(f"Building dense Dask arrays for {len(var_cols)} variable(s)…")
 
-    Args:
-        dwd_data_slice_numerical (np.ndarray): 1D array of numerical values for a single time step across DWD stations.
-        dwd_spatial_points (np.ndarray): 2D array of (latitude, longitude) of DWD stations.
-        gfs_grid_points_flat (np.ndarray): Flattened 2D array of (latitude, longitude) for the GFS grid.
-        gfs_lats_size (int): Number of latitudes in the GFS grid.
-        gfs_lons_size (int): Number of longitudes in the GFS grid.
+    data_vars = {}
+    var_iter = tqdm(var_cols, desc="Variables") if log == "tqdm" else var_cols
 
-    Returns:
-        np.ndarray: 2D array (latitude, longitude) of interpolated values for the time slice.
-    """
-    # Filter out NaN values from station data for this specific time slice
-    valid_indices = ~np.isnan(dwd_data_slice_numerical)
+    for col in var_iter:
+        vals = df_sorted[col].to_numpy().astype(dtype)
 
-    # If no valid data points exist for this time slice, return an array of NaNs
-    if not np.any(valid_indices):
-        return np.full((gfs_lats_size, gfs_lons_size), np.nan, dtype=np.float32)
+        # Replicate each row's value across its k_max neighbours
+        vals_rep = np.repeat(vals[:, None], k_max, axis=1).ravel()
+        vals_rep = vals_rep[valid]
 
-    # Get valid station points and their corresponding values for interpolation
-    station_points_for_interp = dwd_spatial_points[valid_indices]
-    values_at_stations = dwd_data_slice_numerical[valid_indices]
+        # Drop NaNs
+        val_mask = ~np.isnan(vals_rep)
+        t_final = flat_time[val_mask]
+        y_final = iy[val_mask]
+        x_final = ix[val_mask]
+        v_final = vals_rep[val_mask]
 
-    # Perform the interpolation using 'nearest' neighbor method.
-    # 'nearest' is chosen for robustness with irregularly spaced points and computational efficiency.
-    interpolated_values_flat = griddata(
-        station_points_for_interp,  # Source points (lat/lon of valid DWD stations)
-        values_at_stations,  # Values at those valid stations
-        gfs_grid_points_flat,  # Target grid points (flat list of lat/lon for GFS grid)
-        method="nearest",  # Interpolation method
-        fill_value=np.nan,  # Fill grid points outside the convex hull of source points with NaN
-    )
+        # Allocate dense array
+        arr = np.full((nt, ny, nx), np.nan, dtype=dtype)
 
-    # Reshape the flat interpolated array back to the 2D grid shape (latitude, longitude)
-    return interpolated_values_flat.reshape(gfs_lats_size, gfs_lons_size)
+        # Advanced indexing: last occurrence in the 1D sequence wins,
+        # which is consistent with df_sorted order (time-sorted, row order).
+        arr[t_final, y_final, x_final] = v_final
 
+        # Wrap in Dask
+        chunk_t = min(time_chunk, nt) if nt > 0 else 1
+        darr = da.from_array(arr, chunks=(chunk_t, ny, nx))
 
-# Helper for categorical (string) interpolation (to be used with xr.apply_ufunc)
-def _interpolate_single_time_slice_categorical(
-    dwd_data_slice_ptype,
-    dwd_spatial_points,
-    gfs_grid_points_flat,
-    gfs_lats_size,
-    gfs_lons_size,
-):
-    """
-    Applies nearest neighbor interpolation for one categorical (string) variable at one time step.
-    Uses `scipy.spatial.cKDTree` for efficient nearest neighbor lookup.
-
-    Args:
-        dwd_data_slice_ptype (np.ndarray): 1D array of string values for a single time step across DWD stations.
-        dwd_spatial_points (np.ndarray): 2D array of (latitude, longitude) of DWD stations.
-        gfs_grid_points_flat (np.ndarray): Flattened 2D array of (latitude, longitude) for the GFS grid.
-        gfs_lats_size (int): Number of latitudes in the GFS grid.
-        gfs_lons_size (int): Number of longitudes in the GFS grid.
-
-    Returns:
-        np.ndarray: 2D array (latitude, longitude) of interpolated string values for the time slice.
-    """
-    # Filter out "none" or empty strings from station data for this time slice to build KDTree only on valid points.
-    valid_indices = (
-        (dwd_data_slice_ptype != "none")
-        & (dwd_data_slice_ptype != "")
-        & (~pd.isna(dwd_data_slice_ptype))
-    )
-
-    # If no valid categorical data points exist, return an array of "none" for the entire grid slice
-    if not np.any(valid_indices):
-        return np.full((gfs_lats_size, gfs_lons_size), "none", dtype=object)
-
-    # Build KDTree using only the valid station points for this time slice
-    station_points_for_kdtree = dwd_spatial_points[valid_indices]
-    kdtree = cKDTree(station_points_for_kdtree)
-
-    # Query the KDTree to find the nearest valid DWD station for each GFS grid point
-    # Returns distances and indices of the nearest neighbors. We only need the indices.
-    _, nearest_indices = kdtree.query(gfs_grid_points_flat, k=1)
-
-    # Get the corresponding precipitation types from the original valid DWD data slice
-    original_valid_types = dwd_data_slice_ptype[valid_indices]
-    nearest_types = original_valid_types[nearest_indices]
-
-    # Reshape the flat array of nearest types back to the 2D grid shape
-    return nearest_types.reshape(gfs_lats_size, gfs_lons_size)
-
-
-def interpolate_dwd_to_grid(
-    dwd_ds_point,
-    gfs_lats,
-    gfs_lons,
-    numerical_variables_to_interpolate,
-    all_zarr_schema_vars,
-):
-    """
-    Orchestrates the interpolation of DWD point data (from stations) onto a GFS-like rectilinear grid.
-    Handles both numerical and categorical (string) variables.
-
-    Args:
-        dwd_ds_point (xr.Dataset): DWD data with 'station_id' and 'time' dimensions.
-        gfs_lats (np.ndarray): Latitude coordinates of the target GFS grid.
-        gfs_lons (np.ndarray): Longitude coordinates of the target GFS grid.
-        numerical_variables_to_interpolate (list): List of numerical variable names to interpolate.
-        all_zarr_schema_vars (tuple): Comprehensive list of all variables expected in the final Zarr schema.
-
-    Returns:
-        xr.Dataset: Gridded DWD data with 'time', 'latitude', 'longitude' dimensions, and interpolated variables.
-    """
-    # Create a meshgrid for the target GFS grid points (for scipy.interpolate.griddata and cKDTree)
-    gfs_lon_grid, gfs_lat_grid = np.meshgrid(gfs_lons, gfs_lats)
-    gfs_grid_points_flat = np.c_[gfs_lat_grid.ravel(), gfs_lon_grid.ravel()]
-
-    # Extract DWD station coordinates (constant for all time steps)
-    dwd_station_lats = dwd_ds_point.latitude.values
-    dwd_station_lons = dwd_ds_point.longitude.values
-    dwd_spatial_points = np.c_[dwd_station_lats, dwd_station_lons]
-
-    # Initialize a new xarray Dataset to store the gridded data.
-    # Its coordinates are the new grid (time, latitude, longitude).
-    gridded_dwd_ds = xr.Dataset(
-        coords={"time": dwd_ds_point.time, "latitude": gfs_lats, "longitude": gfs_lons}
-    )
-
-    # Define optimal chunking for the output gridded data using shared CHUNK_SIZES.
-    # Chunk over time dimension (e.g., 1 time step per chunk) and spatial chunks from CHUNK_SIZES
-    processChunk = CHUNK_SIZES.get("GFS", 50)
-    output_grid_chunk_shape = (1, processChunk, processChunk)
-
-    # --- Interpolate Numerical Variables ---
-    for var_name in numerical_variables_to_interpolate:
-        if var_name in dwd_ds_point.data_vars:
-            logging.info(f"Scheduling interpolation for numerical variable: {var_name}")
-            # Use `xr.apply_ufunc` to apply the `_interpolate_single_time_slice_numerical` function
-            # across each time slice of the input DWD point data in parallel using Dask.
-            gridded_data_var_da = xr.apply_ufunc(
-                _interpolate_single_time_slice_numerical,
-                dwd_ds_point[var_name],  # Input DataArray (station_id, time)
-                input_core_dims=[
-                    ["station_id"]
-                ],  # Function operates on the 'station_id' dimension per time slice
-                output_core_dims=[
-                    ["latitude", "longitude"]
-                ],  # Output has new 'latitude', 'longitude' dimensions
-                exclude_dims={
-                    "station_id"
-                },  # 'station_id' is an internal detail, excluded from output dims
-                dask="parallelized",  # Enable Dask for parallel execution
-                output_dtypes=[
-                    np.float32
-                ],  # Specify the output data type (float for numerical data)
-                kwargs={  # Pass fixed arguments to the helper function
-                    "dwd_spatial_points": dwd_spatial_points,
-                    "gfs_grid_points_flat": gfs_grid_points_flat,
-                    "gfs_lats_size": len(gfs_lats),
-                    "gfs_lons_size": len(gfs_lons),
-                },
-            ).chunk(
-                {
-                    "time": output_grid_chunk_shape[
-                        0
-                    ],  # Rechunk the Dask array after creation
-                    "latitude": output_grid_chunk_shape[1],
-                    "longitude": output_grid_chunk_shape[2],
-                }
-            )
-
-            gridded_dwd_ds[var_name] = gridded_data_var_da
-        else:
-            logging.warning(
-                f"Variable {var_name} not found in DWD data, adding as NaN placeholder to gridded dataset."
-            )
-            # If a numerical variable is missing, add it as a Dask array filled with NaNs
-            gridded_dwd_ds[var_name] = (
-                ("time", "latitude", "longitude"),
-                da.full(
-                    (len(dwd_ds_point.time), len(gfs_lats), len(gfs_lons)),
-                    np.nan,
-                    dtype=np.float32,
-                    chunks=output_grid_chunk_shape,
-                ),
-            )
-
-    # --- Interpolate Categorical (String) Variables like PTYPE_surface ---
-    if "PTYPE_surface" in dwd_ds_point.data_vars:
-        logging.info("Scheduling interpolation for PTYPE_surface (string type)...")
-        # Use `xr.apply_ufunc` for categorical interpolation. Output dtype must be `object` for strings.
-        gridded_ptype_var_da = xr.apply_ufunc(
-            _interpolate_single_time_slice_categorical,
-            dwd_ds_point["PTYPE_surface"],
-            input_core_dims=[["station_id"]],
-            output_core_dims=[["latitude", "longitude"]],
-            exclude_dims={"station_id"},
-            dask="parallelized",
-            output_dtypes=[object],  # Output dtype is `object` for string arrays
-            kwargs={
-                "dwd_spatial_points": dwd_spatial_points,
-                "gfs_grid_points_flat": gfs_grid_points_flat,
-                "gfs_lats_size": len(gfs_lats),
-                "gfs_lons_size": len(gfs_lons),
+        data_vars[col] = xr.DataArray(
+            darr,
+            dims=("time", "lat", "lon"),
+            coords={
+                "time": unique_times,
+                "lat": gfs_lats,
+                "lon": gfs_lons,
             },
-        ).chunk(
-            {
-                "time": output_grid_chunk_shape[0],
-                "latitude": output_grid_chunk_shape[1],
-                "longitude": output_grid_chunk_shape[2],
-            }
+            name=col,
         )
 
-        gridded_dwd_ds["PTYPE_surface"] = gridded_ptype_var_da
-    else:
-        logging.warning(
-            "PTYPE_surface not found in DWD data, adding as 'none' placeholder to gridded dataset."
-        )
-        # If PTYPE_surface is missing, add it as a Dask array filled with "none" strings.
-        gridded_dwd_ds["PTYPE_surface"] = (
-            ("time", "latitude", "longitude"),
-            da.full(
-                (len(dwd_ds_point.time), len(gfs_lats), len(gfs_lons)),
-                "none",
-                dtype=object,
-                chunks=output_grid_chunk_shape,
-            ),
-        )
+    _log("Building xarray.Dataset (dense, dask-backed)…")
 
-    # --- Add Placeholder Variables for All Other Zarr Schema Variables ---
-    # This loop ensures that `gridded_dwd_ds` contains all variables defined in `zarrVars`,
-    # filling with NaNs if they were not directly interpolated from MOSMIX-S data.
-    for var_name in all_zarr_schema_vars:
-        if var_name not in gridded_dwd_ds.data_vars and var_name != "time":
-            logging.info(f"Adding placeholder NaN variable: {var_name}")
-            # Determine appropriate dtype for the placeholder (object for strings, float for numerical)
-            dtype_for_placeholder = (
-                object if var_name == "PTYPE_surface" else np.float32
-            )  # PTYPE is the only string variable in schema
+    ds = xr.Dataset(data_vars=data_vars)
 
-            gridded_dwd_ds[var_name] = (
-                ("time", "latitude", "longitude"),
-                da.full(
-                    (len(dwd_ds_point.time), len(gfs_lats), len(gfs_lons)),
-                    np.nan,
-                    dtype=dtype_for_placeholder,
-                    chunks=output_grid_chunk_shape,
-                ),
-            )
+    _log("Done. Dataset is lazy; ready for .to_zarr() or .compute().")
 
-    return gridded_dwd_ds
+    return ds
 
 
 # --- Main Ingest Execution Block ---
@@ -813,16 +577,12 @@ ingest_version = INGEST_VERSION_STR
 
 # Base directory for all processing and output files.
 forecast_process_dir = os.getenv(
-    "forecast_process_dir", "/home/ubuntu/Weather/Process/DWD"
+    "forecast_process_dir", "/mnt/nvme/data/DWD"
 )
 # Temporary directory for downloaded files.
 tmp_dir = os.getenv("tmp_dir", os.path.join(forecast_process_dir, "Downloads"))
 # Final destination directory for processed Zarr files.
-forecast_path = os.getenv("forecast_path", "/home/ubuntu/Weather/Prod/DWD")
-
-# Path to an existing GFS Zarr file that will be used as the reference grid.
-# This environment variable MUST be set for the script to run correctly.
-gfs_zarr_reference_path = os.getenv("GFS_ZARR_PATH", "/path/to/your/GFS.zarr")
+forecast_path = os.getenv("forecast_path", "/mnt/nvme/data/Prod/DWD")
 
 # Defines where the final Zarr file should be saved: "Download" (local) or "S3" (AWS S3).
 save_type = os.getenv("save_type", "Download")
@@ -892,29 +652,11 @@ if df_data.empty:
     logging.critical("No data extracted from KML/KMZ. Exiting.")
     sys.exit(1)
 
-# --- Ensure unique stations based on latitude and longitude ---
-initial_station_count = df_data["station_id"].nunique()
-df_data_unique_stations = df_data.drop_duplicates(
-    subset=["latitude", "longitude"], keep="first"
-)
-unique_station_count = df_data_unique_stations["station_id"].nunique()
-
-if initial_station_count > unique_station_count:
-    logging.info(
-        f"Removed {initial_station_count - unique_station_count} duplicate stations based on latitude/longitude."
-    )
-    logging.info(
-        f"Proceeding with {unique_station_count} unique stations for interpolation."
-    )
-else:
-    logging.info(
-        "No duplicate stations found based on latitude/longitude in the raw data."
-    )
-
-df_data = df_data_unique_stations
+# Convert longitudes from [-180, 180] to [0, 360] for consistency with GFS grid
+df_data["longitude"] = df_data["longitude"] % 360
 
 # Extract the base time from the KML metadata (IssueTime) for update checks.
-base_time = global_metadata.get("IssueTime", datetime.utcnow())
+base_time = global_metadata.get("IssueTime", datetime.now(UTC))
 logging.info(f"Base time for this ingest run (from KML metadata): {base_time}")
 
 # --- Check for Updates (Skip if no new data) ---
@@ -942,104 +684,139 @@ else:
             logging.info("No new update to DWD found locally, ending script.")
             sys.exit()
 
-# --- Step 2: Convert Pandas DataFrame to xarray Dataset (Point-Based Format) ---
+# --- Step 2: Process Pandas DataFrame ---
 logging.info("\n--- Converting DataFrame to xarray Dataset (point-based) ---")
-dwd_ds_point = convert_df_to_xarray(df_data, global_metadata=global_metadata)
-if not dwd_ds_point.dims:
-    logging.critical("Point-based xarray Dataset is empty after conversion. Exiting.")
-    sys.exit(1)
-logging.info("Point-based DWD Dataset preview:\n%s", dwd_ds_point)
 
-# --- Step 3: Load GFS Grid Coordinates for Target Interpolation Grid ---
-logging.info(f"\n--- Loading GFS grid coordinates from: {gfs_zarr_reference_path} ---")
-gfs_lats, gfs_lons = load_gfs_grid_coordinates(gfs_zarr_reference_path)
-if gfs_lats is None or gfs_lons is None:
-    logging.critical("Failed to load GFS grid coordinates. Exiting.")
-    sys.exit(1)
+df_process = process_dwd_df(df_data)
+
+# Fill missing data per station using time interpolation
+df_filled = fill_station_time_series(
+    df_process,
+    var_cols=api_target_numerical_variables,  # whatever variables you will grid
+    time_col="time",
+    station_col="station_id",
+    max_gap=None,     # or an integer if you want to limit gap length
+    fill_ends=False,  # or True if you want to fill edges too
+    log="tqdm"
+)
+
 
 # --- Step 4: Interpolate DWD Point Data to the GFS Grid ---
 logging.info("\n--- Interpolating DWD point data to GFS grid ---")
-gridded_dwd_ds = interpolate_dwd_to_grid(
-    dwd_ds_point, gfs_lats, gfs_lons, api_target_numerical_variables, zarr_vars
+gridded_dwd_ds = interpolate_dwd_to_grid_knearest_dask(
+    df_process, api_target_numerical_variables, 50,
+    time_col='time', lat_col='latitude', lon_col='longitude', station_col='station_id',
+    log="tqdm"
 )
 
-logging.info("\nGridded DWD Dataset preview (after interpolation):\n%s", gridded_dwd_ds)
-logging.info(f"\nGridded DWD Dataset dimensions: {gridded_dwd_ds.dims}")
-logging.info(
-    f"Gridded DWD Dataset data variables: {list(gridded_dwd_ds.data_vars.keys())}"
+
+# Reformat the dataset to have a stacked time dimension and add a 3D time variable
+# Get the actual stacked times from the concatenated dataset
+unix_epoch = np.datetime64(0, "s")
+one_second = np.timedelta64(1, "s")
+
+stacked_times = gridded_dwd_ds.time.values
+stacked_timesUnix = (stacked_times - unix_epoch) / one_second
+
+# Rename time dimension to match later processing
+ds_rename = gridded_dwd_ds.rename({"time": "stacked_time"})
+
+# Add a 3D time array
+time3d = (
+    ((ds_rename["stacked_time"] - unix_epoch) / np.timedelta64(1, "s"))
+    .astype("float32")  # 1D ('time',)
+    .expand_dims(
+        lat=ds_rename.lat,  # add ('latitude',)
+        lon=ds_rename.lon,
+    )  # add ('longitude',)
+    .transpose("stacked_time", "lat", "lon")  # order dims
 )
+
+# Add the time array to the dataset
+ds_rename["time"] = time3d
+
+# Set the order correctly
+vars_in = [
+    v for v in api_target_numerical_variables if v in ds_rename.data_vars
+]  # keep only those that exist
+ds_stack = ds_rename[vars_in].to_array(dim="var", name="var")
+
+# Rechunk the data to be more manageable for processing
+ds_chunk = ds_stack.chunk(
+    {
+        "var": len(vars_in),
+        "stacked_time": len(stacked_timesUnix),
+        "lat": FINAL_CHUNK_SIZES['DWD'],
+        "lon": FINAL_CHUNK_SIZES['DWD'],
+    }
+)
+
+
 
 # --- Step 5: Save Gridded DWD Dataset to Zarr ---
-gridded_zarr_output_full_path = os.path.join(forecast_process_dir, "DWD_Gridded.zarr")
-logging.info(
-    f"\n--- Saving Gridded xarray Dataset to Zarr: {gridded_zarr_output_full_path} ---"
-)
 
 if save_type == "S3":
-    # Write directly to S3-backed zarr store to match other ingest scripts
-    s3_bucket_name = os.getenv("s3_bucket", "your-s3-bucket")
-    s3_gridded_zarr_key = os.path.join("ForecastTar_v2", "DWD.zarr")
-    s3_url = f"s3://{s3_bucket_name}/{s3_gridded_zarr_key}"
-    zarr_store = zarr.storage.FsspecStore.from_url(
-        s3_url,
-        storage_options={"key": aws_access_key_id, "secret": aws_secret_access_key},
+    zarr_store = zarr.storage.ZipStore(
+        forecast_process_dir + "/DWD_MOSMIX.zarr.zip", mode="a"
     )
-    gridded_dwd_ds.to_zarr(store=zarr_store, mode="w", consolidated=False)
 else:
-    save_to_zarr(gridded_dwd_ds, gridded_zarr_output_full_path)
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/DWD_MOSMIX.zarr")
 
-# --- Step 6: Save Original Station Metadata (for API's 'nearest station' logic) ---
-station_metadata_df = (
-    df_data[["station_id", "station_name", "latitude", "longitude", "altitude"]]
-    .drop_duplicates(subset="station_id")
-    .set_index("station_id")
-)
-station_metadata_path = os.path.join(forecast_process_dir, "DWD_Station_Metadata.json")
-logging.info(f"\n--- Saving original station metadata to: {station_metadata_path} ---")
-station_metadata_df.to_json(station_metadata_path, orient="index")
-logging.info("Station metadata saved.")
+with ProgressBar():
+    # 3. Create the zarr array
+    zarr_array = zarr.create_array(
+        store=zarr_store,
+        shape=(
+            len(zarr_vars),
+            len(stacked_timesUnix),
+            ds_chunk.shape[2],
+            ds_chunk.shape[3],
+        ),
+        chunks=(len(zarr_vars), len(stacked_timesUnix), FINAL_CHUNK_SIZES['DWD'], FINAL_CHUNK_SIZES['DWD']),
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32",
+    )
 
-# --- Step 7: Final Data Transfer (Upload to S3 or Copy Locally) ---
-final_gridded_zarr_target_path = os.path.join(forecast_path, ingest_version, "DWD.zarr")
-final_time_pickle_path_dest = os.path.join(
-    forecast_path, ingest_version, "DWD.time.pickle"
-)
+    ds_chunk.to_zarr(zarr_array, overwrite=True, compute=True)
+
 
 if save_type == "S3":
-    # Upload time pickle and metadata using s3fs helper methods
-    temp_time_pickle_source_path = os.path.join(forecast_process_dir, "DWD.time.pickle")
-    with open(temp_time_pickle_source_path, "wb") as file:
-        pickle.dump(base_time, file)
-    s3.put_file(temp_time_pickle_source_path, f"{s3_bucket_name}/{s3_time_pickle_key}")
+    zarr_store.close()
 
-    # Upload station metadata
+
+# --- Step 6: Upload to S3 or Move to Final Location ---
+
+# %% Upload to S3
+if save_type == "S3":
+    # Upload to S3
     s3.put_file(
-        station_metadata_path,
-        f"{s3_bucket_name}/{os.path.join('ForecastTar_v2', 'DWD_Station_Metadata.json')}",
+        forecast_process_dir + "/DWD_MOSMIX.zarr.zip",
+        forecast_path + "/" + ingest_version + "/ECMWF.zarr.zip",
     )
-    logging.info("All files uploaded to S3.")
-else:
-    # Save and move time pickle to final local path
-    temp_time_pickle_source_path = os.path.join(forecast_process_dir, "DWD.time.pickle")
-    with open(temp_time_pickle_source_path, "wb") as file:
-        pickle.dump(base_time, file)
-    shutil.move(temp_time_pickle_source_path, final_time_pickle_path_dest)
 
-    # Copy gridded Zarr directory to final local path (versioned)
+    # Write most recent forecast time
+    with open(forecast_process_dir + "/DWD_MOSMIX.time.pickle", "wb") as file:
+        # Serialize and write the variable to the file
+        pickle.dump(base_time, file)
+
+else:
+    # Write most recent forecast time
+    with open(forecast_process_dir + "/DWD_MOSMIX.time.pickle", "wb") as file:
+        # Serialize and write the variable to the file
+        pickle.dump(base_time, file)
+
+    shutil.move(
+        forecast_process_dir + "/DWD_MOSMIX.time.pickle",
+        forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle",
+    )
+
+    # Copy the zarr file to the final location
     shutil.copytree(
-        gridded_zarr_output_full_path,
-        final_gridded_zarr_target_path,
+        forecast_process_dir + "/DWD_MOSMIX.zarr",
+        forecast_path + "/" + ingest_version + "/DWD_MOSMIX.zarr",
         dirs_exist_ok=True,
     )
 
-    # Copy station metadata JSON to final local path
-    shutil.copy(
-        station_metadata_path,
-        os.path.join(forecast_path, ingest_version, "DWD_Station_Metadata.json"),
-    )
-    logging.info(
-        f"All files copied locally to {os.path.join(forecast_path, ingest_version)}."
-    )
 
 # --- Final Cleanup ---
 _clear_directory(forecast_process_dir)
