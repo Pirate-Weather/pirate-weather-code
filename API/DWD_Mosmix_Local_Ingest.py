@@ -617,8 +617,8 @@ def _clear_directory(path):
         return
     for entry in os.scandir(path):
         try:
-            if entry.is_dir(follow_symlinks=False):
-                shutil.rmtree(entry.path)
+        except (OSError, PermissionError) as e:
+            logging.warning(f"Could not remove {entry.path} during clear_directory: {e}")
             else:
                 os.remove(entry.path)
         except Exception:
