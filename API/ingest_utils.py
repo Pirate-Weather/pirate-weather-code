@@ -24,6 +24,7 @@ CHUNK_SIZES = {
     "ECMWF": 100,
     "NBM_Fire": 100,
     "RTMA": 100,
+    "DWD": 100,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -35,6 +36,7 @@ FINAL_CHUNK_SIZES = {
     "ECMWF": 3,
     "NBM_Fire": 5,
     "RTMA": 25,
+    "DWD": 5,
 }
 
 FORECAST_LEAD_RANGES = {
@@ -48,6 +50,9 @@ FORECAST_LEAD_RANGES = {
     "ECMWF_IFS_1": list(range(3, 144, 3)),
     "ECMWF_IFS_2": list(range(144, 241, 6)),
 }
+
+# Radius, in km, used for DWD model nearest-neighbor selection
+DWD_RADIUS = 50
 
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
