@@ -154,8 +154,8 @@ def _calculate_intensity_prob(
     intensity_sources = [
         ("nbm", 0),
         ("hrrr", 1),
-        ("ecmwf", 2),
-        ("dwd_mosmix", 3),
+        ("dwd_mosmix", 2),
+        ("ecmwf", 3),
         ("gfs_gefs", 4),
         ("era5", 5),
     ]
