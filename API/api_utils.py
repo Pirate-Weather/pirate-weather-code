@@ -418,7 +418,7 @@ def remove_conditional_fields(
 ) -> DictOrList:
     """Removes output fields based on version and request type.
 
-    This function modifies the input data in-place. It works with either a
+    This function modifies the input data. It works with either a
     single dictionary or a list of dictionaries.
 
     Args:
