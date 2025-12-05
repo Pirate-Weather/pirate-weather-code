@@ -416,11 +416,21 @@ def remove_conditional_fields(
     time_machine: bool,
     tm_extra: bool,
 ) -> DictOrList:
+    """Removes output fields based on version and request type.
+
+    This function modifies the input data in-place. It works with either a
+    single dictionary or a list of dictionaries.
+
+    Args:
+        data (DictOrList): The data to filter, a dict or list of dicts.
+        version (float): The API version.
+        time_machine (bool): Whether it's a Time Machine request.
+        tm_extra (bool): Whether extra Time Machine fields are requested.
+
+    Returns:
+        DictOrList: The modified data.
     """
-    Remove output fields based on version and request type.
-    Works with either a dict or a list of dicts, returns the same type.
-    """
-    # Build a *set* to avoid duplicate pops ("cape", "solar" overlap)
+        # Build a *set* to avoid duplicate pops ("cape", "solar" overlap)
     fields_to_remove = set()
 
     if version < 2:
