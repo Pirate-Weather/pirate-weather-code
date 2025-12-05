@@ -51,6 +51,9 @@ FORECAST_LEAD_RANGES = {
     "ECMWF_IFS_2": list(range(144, 241, 6)),
 }
 
+# Radius, in km, used for DWD model nearest-neighbor selection
+DWD_RADIUS = 50
+
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
 

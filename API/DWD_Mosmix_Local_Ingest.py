@@ -46,10 +46,10 @@ from sklearn.neighbors import BallTree
 from tqdm import tqdm  # safe to ignore if not using log="tqdm"
 
 from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_utils import CHUNK_SIZES, FINAL_CHUNK_SIZES
+from API.ingest_utils import CHUNK_SIZES, FINAL_CHUNK_SIZES, DWD_RADIUS
 
 # Distance to interpolate stations to grid (km)
-radius_km = 50
+radius_km = DWD_RADIUS
 
 # Set up basic logging configuration
 logging.basicConfig(
@@ -118,6 +118,16 @@ def fill_station_time_series(
 ):
     """
     Interpolates missing values separately for each station over time.
+
+    Parameters:
+    - df (pd.DataFrame): The input DataFrame containing station data.
+    - var_cols (list[str]): A list of column names to interpolate.
+    - time_col (str): The name of the time column.
+    - station_col (str): The name of the station identifier column.
+    - max_gap (int | None): The maximum number of consecutive NaNs to fill.
+    - fill_ends (bool): If True, fill NaNs at the beginning and end of series.
+    - log (str): The logging mode ('print', 'tqdm', or None).
+    - print_every (int): Frequency of progress printing if log is 'print'.
 
     Progress Monitoring:
       log="tqdm"  → progress bar over stations
@@ -839,6 +849,12 @@ if save_type == "S3":
     with open(forecast_process_dir + "/DWD_MOSMIX.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
+
+    s3.put_file(
+        forecast_process_dir + "/DWD_MOSMIX.time.pickle",
+        forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle",
+    )
+
 
 else:
     # Write most recent forecast time
