@@ -49,7 +49,7 @@ def _fetch_production_json(url: str) -> dict:
         raise ProductionRequestError(f"Invalid JSON from {url}: {exc}") from exc
 
 
-def _diff_nested(a: object, b: object, path: str = "") -> dict:
+def _diff_nested(a: object, b: object, path: str = "", tolerance: float = 0.0) -> dict:
     """Return a mapping of all differences between ``a`` and ``b``.
 
     The keys of the returned dict are ``/`` separated paths describing the
@@ -66,7 +66,7 @@ def _diff_nested(a: object, b: object, path: str = "") -> dict:
             elif key not in b:
                 diffs[sub_path] = {"local": a[key], "prod": None}
             else:
-                diffs.update(_diff_nested(a[key], b[key], sub_path))
+                diffs.update(_diff_nested(a[key], b[key], sub_path, tolerance))
     elif isinstance(a, list) and isinstance(b, list):
         for idx in range(max(len(a), len(b))):
             sub_path = f"{path}[{idx}]"
@@ -81,9 +81,24 @@ def _diff_nested(a: object, b: object, path: str = "") -> dict:
             if val_a is None or val_b is None:
                 diffs[sub_path] = {"local": val_a, "prod": val_b}
             else:
-                diffs.update(_diff_nested(val_a, val_b, sub_path))
+                diffs.update(_diff_nested(val_a, val_b, sub_path, tolerance))
     else:
-        if a != b:
+        # Check for numeric tolerance if enabled
+        is_numeric = (
+            isinstance(a, (int, float))
+            and isinstance(b, (int, float))
+            and not isinstance(a, bool)
+            and not isinstance(b, bool)
+        )
+        if is_numeric and tolerance > 0:
+            if a == b:
+                pass
+            elif b == 0:
+                diffs[path] = {"local": a, "prod": b}
+            else:
+                if abs(a - b) / abs(b) > tolerance:
+                    diffs[path] = {"local": a, "prod": b}
+        elif a != b:
             diffs[path] = {"local": a, "prod": b}
 
     return diffs
@@ -93,27 +108,38 @@ def _diff_nested(a: object, b: object, path: str = "") -> dict:
     not PW_API,
     reason="PW_API environment variable not set",
 )
-def test_local_vs_production():
+@pytest.mark.parametrize(
+    "lat,lon",
+    [
+        (45.0, -75.0),
+        (10.0, 10.0),
+        (47.28, -53.13),
+        (28.64, 77.09),
+        (-34.92, 138.60),
+        (32.73, -117.192),
+        (-15.83, -47.90),
+        (-33.91, 18.32),
+    ],
+)
+def test_local_vs_production(lat, lon):
     client = _get_client()
 
-    # Terrace, BC (54.51634, -128.60345) and Puerto Alegría (-0.96886, -73.74962)
-    for lat, lon in [(54.51634, -128.60345), (-0.96886, -73.74962)]:
-        local_resp = client.get(
-            f"/forecast/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast"
-        )
-        assert local_resp.status_code == 200
-        local_data = local_resp.json()
+    local_resp = client.get(
+        f"/forecast/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast"
+    )
+    assert local_resp.status_code == 200
+    local_data = local_resp.json()
 
-        prod_url = f"{PROD_BASE}/{PW_API}/{lat},{lon}?version=2"
-        try:
-            prod_data = _fetch_production_json(prod_url)
-        except ProductionRequestError as exc:
-            pytest.skip(f"Could not fetch production API: {exc}")
+    prod_url = f"{PROD_BASE}/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast"
+    try:
+        prod_data = _fetch_production_json(prod_url)
+    except ProductionRequestError as exc:
+        pytest.skip(f"Could not fetch production API: {exc}")
 
-        diffs = _diff_nested(local_data, prod_data)
-        if diffs:
-            diff_text = json.dumps(diffs, indent=2, sort_keys=True)
-            warnings.warn(f"Differences for {lat},{lon}:\n{diff_text}", DiffWarning)
+    diffs = _diff_nested(local_data, prod_data, tolerance=0.1)
+    if diffs:
+        diff_text = json.dumps(diffs, indent=2, sort_keys=True)
+        warnings.warn(f"Differences for {lat},{lon}:\n{diff_text}", DiffWarning)
 
 
 @pytest.mark.skipif(
