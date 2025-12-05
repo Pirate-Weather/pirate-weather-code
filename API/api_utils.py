@@ -430,7 +430,7 @@ def remove_conditional_fields(
     Returns:
         DictOrList: The modified data.
     """
-        # Build a *set* to avoid duplicate pops ("cape", "solar" overlap)
+    # Build a *set* to avoid duplicate pops ("cape", "solar" overlap)
     fields_to_remove = set()
 
     if version < 2:
