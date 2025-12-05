@@ -1,7 +1,7 @@
 # %% Script to contain the helper functions as part of the API for Pirate Weather
 # Alexander Rey. October 2025
 import logging
-from typing import Iterable, MutableMapping, Union, List
+from typing import List, MutableMapping, Union
 
 import metpy as mp
 import numpy as np
@@ -402,7 +402,7 @@ _FIELDS_TM_BASIC = (
     "uvIndex",
     "uvIndexTime",
     "precipIntensityError",
-    "cape",   # overlaps with _FIELDS_V_LT_2
+    "cape",  # overlaps with _FIELDS_V_LT_2
     "solar",  # overlaps with _FIELDS_V_LT_2
 )
 
