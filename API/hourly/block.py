@@ -147,13 +147,14 @@ def _calculate_intensity_prob(
         prcipIntensity_inputs: Precipitation intensity inputs.
         prcipProbability_inputs: Precipitation probability inputs.
     """
-    prcipIntensityHour = np.full((len(hour_array_grib), 5), MISSING_DATA)
+    prcipIntensityHour = np.full((len(hour_array_grib), 6), MISSING_DATA)
     intensity_sources = [
         ("nbm", 0),
         ("hrrr", 1),
         ("ecmwf", 2),
-        ("gfs_gefs", 3),
-        ("era5", 4),
+        ("dwd_mosmix", 3),
+        ("gfs_gefs", 4),
+        ("era5", 5),
     ]
     for source_key, idx in intensity_sources:
         val = prcipIntensity_inputs.get(source_key)

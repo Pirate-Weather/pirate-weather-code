@@ -164,9 +164,9 @@ DWD_MOSMIX = {
     "wind_u": 5,  # UGRD_10maboveground (m/s)
     "wind_v": 6,  # VGRD_10maboveground (m/s)
     "gust": 7,  # GUST_surface (m/s)
-    "accum": 8,  # APCP_surface (kg/m^2 = mm)
+    "accum": 8,  # APCP_surface (cm, converted from kg/m^2 in ingest)
     "cloud": 9,  # TCDC_entireatmosphere (percent 0-100)
     "vis": 10,  # VIS_surface (m)
-    "ptype": 11,  # PTYPE_surface (WMO code)
+    "ptype": 11,  # PTYPE_surface (WMO code 4677)
     "solar": 12,  # DSWRF_surface (W/m^2)
 }
