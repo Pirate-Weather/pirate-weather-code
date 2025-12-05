@@ -714,9 +714,14 @@ df_filled = fill_station_time_series(
 # --- Step 4: Interpolate DWD Point Data to the GFS Grid ---
 logging.info("\n--- Interpolating DWD point data to GFS grid ---")
 gridded_dwd_ds = interpolate_dwd_to_grid_knearest_dask(
-    df_filled, api_target_numerical_variables, 50,
-    time_col='time', lat_col='latitude', lon_col='longitude', station_col='station_id',
-    log="tqdm"
+    df_filled,
+    api_target_numerical_variables,
+    50,
+    time_col="time",
+    lat_col="latitude",
+    lon_col="longitude",
+    station_col="station_id",
+    log="tqdm",
 )
 
 
@@ -756,8 +761,8 @@ ds_chunk = ds_stack.chunk(
     {
         "var": 1,
         "stacked_time": len(stacked_timesUnix),
-        "lat": CHUNK_SIZES['DWD'],
-        "lon": CHUNK_SIZES['DWD'],
+        "lat": CHUNK_SIZES["DWD"],
+        "lon": CHUNK_SIZES["DWD"],
     }
 )
 
@@ -767,9 +772,9 @@ with ProgressBar():
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(
-    forecast_process_dir + "/DWD_MOSMIX_stack.zarr", component="__xarray_dataarray_variable__"
+    forecast_process_dir + "/DWD_MOSMIX_stack.zarr",
+    component="__xarray_dataarray_variable__",
 )
-
 
 
 # --- Step 5: Save Gridded DWD Dataset to Zarr ---
@@ -791,15 +796,25 @@ zarr_array = zarr.create_array(
         daskVarArrayStackDisk.shape[2],
         daskVarArrayStackDisk.shape[3],
     ),
-    chunks=(len(zarr_vars), len(stacked_timesUnix), FINAL_CHUNK_SIZES['DWD'], FINAL_CHUNK_SIZES['DWD']),
+    chunks=(
+        len(zarr_vars),
+        len(stacked_timesUnix),
+        FINAL_CHUNK_SIZES["DWD"],
+        FINAL_CHUNK_SIZES["DWD"],
+    ),
     compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
     dtype="float32",
 )
 
 with ProgressBar():
     daskVarArrayStackDisk.round(5).rechunk(
-        (len(zarr_vars), len(stacked_timesUnix), FINAL_CHUNK_SIZES['DWD'], FINAL_CHUNK_SIZES['DWD'])
-    ).to_zarr(zarr_array,  overwrite=True, compute=True)
+        (
+            len(zarr_vars),
+            len(stacked_timesUnix),
+            FINAL_CHUNK_SIZES["DWD"],
+            FINAL_CHUNK_SIZES["DWD"],
+        )
+    ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
 if save_type == "S3":
