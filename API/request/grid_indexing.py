@@ -357,22 +357,9 @@ async def calculate_grid_indexing(
     timer.log("### DWD MOSMIX Detail Start ###")
 
     # DWD MOSMIX uses the same 0.25° GFS grid (interpolated during ingest)
-    # DWD MOSMIX-S stations cover approximately:
-    # - Latitude: ~35°N to ~72°N (Southern Europe to Scandinavia)
-    # - Longitude: ~-15°W to ~40°E (Atlantic/Canaries to Eastern Europe)
-    # Only enable DWD MOSMIX for locations within this coverage area
-    DWD_LAT_MIN = 35.0
-    DWD_LAT_MAX = 72.0
-    DWD_LON_MIN = -15.0
-    DWD_LON_MAX = 40.0
-
-    dwd_in_bounds = (
-        lat >= DWD_LAT_MIN
-        and lat <= DWD_LAT_MAX
-        and az_lon >= DWD_LON_MIN
-        and az_lon <= DWD_LON_MAX
-    )
-
+    # DWD MOSMIX-S stations are located worldwide, with coverage in Europe, USA,
+    # Australia, India, Brazil, Africa and other regions. Some variables like
+    # solar radiation may only be available for European stations.
     dataOut_dwd_mosmix = False
     x_dwd = None
     y_dwd = None
@@ -383,8 +370,6 @@ async def calculate_grid_indexing(
     elif time_machine:
         dataOut_dwd_mosmix = False
     elif zarr_sources.dwd_mosmix is None:
-        dataOut_dwd_mosmix = False
-    elif not dwd_in_bounds:
         dataOut_dwd_mosmix = False
     else:
         # DWD MOSMIX is interpolated onto the GFS 0.25° grid
