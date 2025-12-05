@@ -496,17 +496,8 @@ def _process_minute_items(
 
     minuteItems = []
     minuteItems_si = []
-    minuteKeys = [
-        "time",
-        "precipIntensity",
-        "precipProbability",
-        "precipIntensityError",
-        "precipType",
-    ]
-    if version >= 2:
-        minuteKeys += ["rainIntensity", "snowIntensity", "sleetIntensity"]
 
-    all_minute_keys = [
+    minuteKeys = [
         "time",
         "precipIntensity",
         "precipProbability",
@@ -524,13 +515,10 @@ def _process_minute_items(
             float(minuteProbability_display[idx]),
             float(minuteIntensityError_display[idx]),
             minuteType[idx],
+            float(minuteRainIntensity_display[idx]),
+            float(minuteSnowIntensity_display[idx]),
+            float(minuteSleetIntensity_display[idx]),
         ]
-        if version >= 2:
-            values += [
-                float(minuteRainIntensity_display[idx]),
-                float(minuteSnowIntensity_display[idx]),
-                float(minuteSleetIntensity_display[idx]),
-            ]
         minuteItems.append(dict(zip(minuteKeys, values)))
 
         values_si = [
@@ -543,7 +531,7 @@ def _process_minute_items(
             float(minuteSnowIntensity[idx]),
             float(minuteSleetIntensity[idx]),
         ]
-        minuteItems_si.append(dict(zip(all_minute_keys, values_si)))
+        minuteItems_si.append(dict(zip(minuteKeys, values_si)))
 
     return minuteItems, minuteItems_si
 

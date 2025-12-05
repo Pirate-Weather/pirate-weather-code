@@ -154,8 +154,10 @@ def update_zarr_store(
             stores.GFS_Zarr = zarr.open(zarr.storage.LocalStore(gfs_path), mode="r")
             logger.info("Loaded GFS from: %s", gfs_path)
 
+    # Use local stores for Dev and Prod
     if stage in ("DEV", "PROD"):
         local_stores = [
+            ("GFS_Zarr", "GFS.zarr"),
             ("NWS_Alerts_Zarr", "NWS_Alerts.zarr"),
             ("SubH_Zarr", "SubH.zarr"),
             ("HRRR_6H_Zarr", "HRRR_6H.zarr"),
@@ -171,6 +173,7 @@ def update_zarr_store(
         for attr, fname in local_stores:
             _load_local_store(stores, attr, save_dir, fname, logger=logger)
 
+    # Use S3 stores for Testing and TM Testing
     if stage in ("TESTING", "TM_TESTING"):
         logger.info("Setting up S3 zarrs")
         if save_type == "S3":

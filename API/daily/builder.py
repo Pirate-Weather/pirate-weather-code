@@ -1038,18 +1038,6 @@ def build_daily_section(
             day_item["summary"] = day_text
             day_item["icon"] = day_icon
 
-        if version < 2:
-            day_item.pop("liquidAccumulation", None)
-            day_item.pop("snowAccumulation", None)
-            day_item.pop("iceAccumulation", None)
-            day_item.pop("fireIndex", None)
-            day_item.pop("feelsLike", None)
-            day_item.pop("solar", None)
-
-        if timeMachine and not tmExtra:
-            day_item.pop("uvIndex", None)
-            day_item.pop("ozone", None)
-
         day_night_list.append(day_item)
 
         day_icon, day_text = pick_day_icon_and_summary(
@@ -1098,18 +1086,6 @@ def build_daily_section(
             )
             day_item["summary"] = day_text
             day_item["icon"] = day_icon
-
-        if version < 2:
-            day_item.pop("liquidAccumulation", None)
-            day_item.pop("snowAccumulation", None)
-            day_item.pop("iceAccumulation", None)
-            day_item.pop("fireIndex", None)
-            day_item.pop("feelsLike", None)
-            day_item.pop("solar", None)
-
-        if timeMachine and not tmExtra:
-            day_item.pop("uvIndex", None)
-            day_item.pop("ozone", None)
 
         day_night_list.append(day_item)
 
@@ -1252,34 +1228,6 @@ def build_daily_section(
                 dayObject["icon"] = dayIcon
         except Exception:
             logger.exception("DAILY TEXT GEN ERROR %s", loc_tag)
-
-        if version < 2:
-            dayObject.pop("dawnTime", None)
-            dayObject.pop("duskTime", None)
-            dayObject.pop("smokeMax", None)
-            dayObject.pop("smokeMaxTime", None)
-            dayObject.pop("liquidAccumulation", None)
-            dayObject.pop("snowAccumulation", None)
-            dayObject.pop("iceAccumulation", None)
-            dayObject.pop("fireIndexMax", None)
-            dayObject.pop("fireIndexMaxTime", None)
-            dayObject.pop("solarMax", None)
-            dayObject.pop("solarMaxTime", None)
-            dayObject.pop("capeMax", None)
-            dayObject.pop("capeMaxTime", None)
-            dayObject.pop("rainIntensity", None)
-            dayObject.pop("snowIntensity", None)
-            dayObject.pop("iceIntensity", None)
-            dayObject.pop("liquidIntensityMax", None)
-            dayObject.pop("snowIntensityMax", None)
-            dayObject.pop("iceIntensityMax", None)
-
-        if timeMachine and not tmExtra:
-            dayObject.pop("precipProbability", None)
-            dayObject.pop("humidity", None)
-            dayObject.pop("uvIndex", None)
-            dayObject.pop("uvIndexTime", None)
-            dayObject.pop("visibility", None)
 
         dayList.append(dayObject)
 
