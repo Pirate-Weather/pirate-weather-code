@@ -6,7 +6,11 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
-from API.api_utils import fast_nearest_interp, zero_small_values
+from API.api_utils import (
+    fast_nearest_interp,
+    map_wmo4677_to_ptype,
+    zero_small_values,
+)
 from API.constants.api_const import (
     PRECIP_IDX,
     PRECIP_NOISE_THRESHOLD_MMH,
@@ -265,6 +269,15 @@ def _interp_dwd_mosmix(minute_array_grib, dwd_mosmix_data):
         right=MISSING_DATA,
     )
 
+    # Interpolate precipitation accumulation
+    dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["temp"]] = np.interp(
+        minute_array_grib,
+        dwd_mosmix_data[:, 0].squeeze(),
+        dwd_mosmix_data[:, DWD_MOSMIX["temp"]],
+        left=MISSING_DATA,
+        right=MISSING_DATA,
+    )
+
     # Use nearest neighbor for precipitation type (categorical data)
     dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["ptype"]] = fast_nearest_interp(
         minute_array_grib,
@@ -350,28 +363,13 @@ def _calculate_precip_type_probs(
         InterTminute[:, 3] = nbmMinuteInterpolation[:, NBM["freezing_rain"]]
         InterTminute[:, 4] = nbmMinuteInterpolation[:, NBM["rain"]]
     elif "dwd_mosmix" in source_list and dwd_mosmix_MinuteInterpolation is not None:
-        # WMO 4677 code mapping for DWD MOSMIX precipitation types
+        # Map WMO 4677 codes to precip-type categories via centralized helper
         ptype_dwd = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["ptype"]]
-        # Snow: codes 70-75, 85-90
-        InterTminute[:, 1] = np.where(
-            np.isin(ptype_dwd, list(range(70, 76)) + list(range(85, 91))), 1, 0
-        )
-        # Ice (sleet): codes 76-79
-        InterTminute[:, 2] = np.where(np.isin(ptype_dwd, list(range(76, 80))), 1, 0)
-        # Freezing rain: codes 66-67
-        InterTminute[:, 3] = np.where(np.isin(ptype_dwd, [66, 67]), 1, 0)
-        # Rain: codes 50-65, 68-69, 80-84, 91-99
-        InterTminute[:, 4] = np.where(
-            np.isin(
-                ptype_dwd,
-                list(range(50, 66))
-                + [68, 69]
-                + list(range(80, 85))
-                + list(range(91, 100)),
-            ),
-            1,
-            0,
-        )
+        mapped = map_wmo4677_to_ptype(np.round(ptype_dwd))
+        InterTminute[:, 1] = (mapped == 1).astype(int)
+        InterTminute[:, 2] = (mapped == 2).astype(int)
+        InterTminute[:, 3] = (mapped == 3).astype(int)
+        InterTminute[:, 4] = (mapped == 4).astype(int)
     elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
         ptype_ecmwf = ecmwfMinuteInterpolation[:, ECMWF["ptype"]]
         InterTminute[:, 1] = np.where(np.isin(ptype_ecmwf, [5, 6, 9]), 1, 0)
@@ -427,7 +425,6 @@ def _calculate_intensity(
     if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
         temp_arr = hrrrSubHInterpolation[:, HRRR_SUBH["temp"]]
         refc_arr = hrrrSubHInterpolation[:, HRRR_SUBH["refc"]]
-
         mask = (precipTypes == "none") & (refc_arr > 0)
         precipTypes[mask] = np.where(
             temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
@@ -439,7 +436,16 @@ def _calculate_intensity(
         intensity = nbmMinuteInterpolation[:, NBM["accum"]]
     elif "dwd_mosmix" in source_list and dwd_mosmix_MinuteInterpolation is not None:
         # DWD MOSMIX RR1c is in kg/m^2 = mm (hourly accumulation)
-        intensity = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["accum"]]
+        intensity = np.nan_to_num(
+            dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["accum"]]
+        )
+        temp_arr = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["temp"]]
+        mask = (precipTypes == "none") & (intensity > 0)
+        precipTypes[mask] = np.where(
+            temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
+            "rain",
+            np.where(temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C, "snow", "sleet"),
+        )
     elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
         intensity = ecmwfMinuteInterpolation[:, ECMWF["intensity"]] * 3600
     elif "gefs" in source_list and gefsMinuteInterpolation is not None:
