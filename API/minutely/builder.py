@@ -6,13 +6,13 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
-from API.api_utils import fast_nearest_interp, map_wmo4677_to_ptype, zero_small_values
-from API.constants.api_const import (
-    PRECIP_IDX,
-    PRECIP_NOISE_THRESHOLD_MMH,
-    TEMP_THRESHOLD_RAIN_C,
-    TEMP_THRESHOLD_SNOW_C,
+from API.api_utils import (
+    fast_nearest_interp,
+    map_wmo4677_to_ptype,
+    precip_types_fallback,
+    zero_small_values,
 )
+from API.constants.api_const import PRECIP_IDX, PRECIP_NOISE_THRESHOLD_MMH
 from API.constants.forecast_const import DATA_MINUTELY
 from API.constants.model_const import (
     DWD_MOSMIX,
@@ -265,6 +265,15 @@ def _interp_dwd_mosmix(minute_array_grib, dwd_mosmix_data):
         right=MISSING_DATA,
     )
 
+    # Interpolate precipitation accumulation
+    dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["temp"]] = np.interp(
+        minute_array_grib,
+        dwd_mosmix_data[:, 0].squeeze(),
+        dwd_mosmix_data[:, DWD_MOSMIX["temp"]],
+        left=MISSING_DATA,
+        right=MISSING_DATA,
+    )
+
     # Use nearest neighbor for precipitation type (categorical data)
     dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["ptype"]] = fast_nearest_interp(
         minute_array_grib,
@@ -412,13 +421,7 @@ def _calculate_intensity(
     if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
         temp_arr = hrrrSubHInterpolation[:, HRRR_SUBH["temp"]]
         refc_arr = hrrrSubHInterpolation[:, HRRR_SUBH["refc"]]
-
-        mask = (precipTypes == "none") & (refc_arr > 0)
-        precipTypes[mask] = np.where(
-            temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
-            "rain",
-            np.where(temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C, "snow", "sleet"),
-        )
+        precipTypes = precip_types_fallback(temp_arr, refc_arr, precipTypes)
         intensity = dbz_to_rate(refc_arr, precipTypes)
     elif "nbm" in source_list and nbmMinuteInterpolation is not None:
         intensity = nbmMinuteInterpolation[:, NBM["accum"]]
@@ -427,12 +430,8 @@ def _calculate_intensity(
         intensity = np.nan_to_num(
             dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["accum"]]
         )
-        mask = (precipTypes == "none") & (intensity > 0)
-        precipTypes[mask] = np.where(
-            temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
-            "rain",
-            np.where(temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C, "snow", "sleet"),
-        )
+        temp_arr = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["temp"]]
+        precipTypes = precip_types_fallback(temp_arr, intensity, precipTypes)
     elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
         intensity = ecmwfMinuteInterpolation[:, ECMWF["intensity"]] * 3600
     elif "gefs" in source_list and gefsMinuteInterpolation is not None:

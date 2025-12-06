@@ -8,6 +8,7 @@ from API.api_utils import (
     calculate_apparent_temperature,
     clipLog,
     map_wmo4677_to_ptype,
+    precip_types_fallback,
     zero_small_values,
 )
 from API.constants.api_const import (
@@ -155,6 +156,12 @@ def _calculate_intensity_prob(
     )
     InterPhour[:, DATA_HOURLY["type"]] = np.choose(
         np.argmin(np.isnan(prcipIntensityHour), axis=1), maxPchanceHour.T
+    )
+
+    InterPhour[:, DATA_HOURLY["type"]] = precip_types_fallback(
+        InterPhour[:, DATA_HOURLY["temp"]],
+        InterPhour[:, DATA_HOURLY["intensity"]],
+        InterPhour[:, DATA_HOURLY["type"]],
     )
 
     prcipProbabilityHour = np.full((len(hour_array_grib), 3), MISSING_DATA)

@@ -10,6 +10,8 @@ from API.constants.api_const import (
     APPARENT_TEMP_CONSTS,
     APPARENT_TEMP_SOLAR_CONSTS,
     PRECIP_NOISE_THRESHOLD_MMH,
+    TEMP_THRESHOLD_RAIN_C,
+    TEMP_THRESHOLD_SNOW_C,
 )
 from API.constants.shared_const import MISSING_DATA
 
@@ -410,6 +412,17 @@ def map_wmo4677_to_ptype(ptype_codes: np.ndarray) -> np.ndarray:
     out[nan_mask] = MISSING_DATA
 
     return out
+
+
+def precip_types_fallback(temp_arr: np.ndarray, precip_arr: np.ndarray, precip_types):
+    mask = (precip_types == "none") & (precip_arr > 0)
+    precip_types[mask] = np.where(
+        temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
+        "rain",
+        np.where(temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C, "snow", "sleet"),
+    )
+
+    return precip_types
 
 
 def zero_small_values(
