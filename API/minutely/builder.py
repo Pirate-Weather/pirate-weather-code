@@ -424,7 +424,9 @@ def _calculate_intensity(
         intensity = nbmMinuteInterpolation[:, NBM["accum"]]
     elif "dwd_mosmix" in source_list and dwd_mosmix_MinuteInterpolation is not None:
         # DWD MOSMIX RR1c is in kg/m^2 = mm (hourly accumulation)
-        intensity = np.nan_to_num(dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["accum"]])
+        intensity = np.nan_to_num(
+            dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["accum"]]
+        )
         mask = (precipTypes == "none") & (intensity > 0)
         precipTypes[mask] = np.where(
             temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
