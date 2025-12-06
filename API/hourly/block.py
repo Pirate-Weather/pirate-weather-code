@@ -91,27 +91,13 @@ def _populate_max_pchance(
         maxPchanceHour[ptype_nan_mask, target_idx] = MISSING_DATA
 
     def populate_wmo4677_ptype(condition, target_idx, key):
-        """Map WMO code 4677 (present weather) to precipitation type categories.
-
-        WMO 4677 codes mapping:
-        - 50-59: Drizzle → rain (4)
-        - 60-65: Rain → rain (4)
-        - 66-67: Freezing rain/drizzle → freezing rain (3)
-        - 68-69: Rain/snow mix → rain (4)
-        - 70-75: Snow → snow (1)
-        - 76-79: Ice pellets/graupel → ice (2)
-        - 80-84: Rain showers → rain (4)
-        - 85-90: Snow showers → snow (1)
-        - 91-99: Thunderstorms → rain (4)
-        """
+        # DWD MOSMIX provides WMO 4677 present-weather codes; mapping is
+        # centralized in `API.api_utils.map_wmo4677_to_ptype` so we don't
+        # duplicate the mapping logic here.
         if not condition():
             return
-        if not condition():
-            return
-        # Round values (keep NaN where present) and map using centralized helper
         ptype_vals = np.round(InterThour_inputs[key])
-        mapped_ptype = map_wmo4677_to_ptype(ptype_vals)
-        maxPchanceHour[:, target_idx] = mapped_ptype
+        maxPchanceHour[:, target_idx] = map_wmo4677_to_ptype(ptype_vals)
 
     populate_component_ptype(lambda: "nbm" in source_list, 0, "nbm")
     populate_component_ptype(

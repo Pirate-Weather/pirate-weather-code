@@ -424,7 +424,7 @@ def _calculate_intensity(
         intensity = nbmMinuteInterpolation[:, NBM["accum"]]
     elif "dwd_mosmix" in source_list and dwd_mosmix_MinuteInterpolation is not None:
         # DWD MOSMIX RR1c is in kg/m^2 = mm (hourly accumulation)
-        intensity = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["accum"]]
+        intensity = np.nan_to_num(dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["accum"]])
     elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
         intensity = ecmwfMinuteInterpolation[:, ECMWF["intensity"]] * 3600
     elif "gefs" in source_list and gefsMinuteInterpolation is not None:
