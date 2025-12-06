@@ -377,11 +377,11 @@ def map_wmo4677_to_ptype(ptype_codes: np.ndarray) -> np.ndarray:
             on the code. This function documents the chosen grouping.
 
     Args:
-            ptype_codes: array-like of numeric WMO 4677 codes (may contain NaN)
+        ptype_codes: array-like of numeric WMO 4677 codes (may contain NaN)
 
-        Returns:
-            np.ndarray of floats (integer category codes as floats) same shape as input
-            with MISSING_DATA where input was NaN.
+    Returns:
+        np.ndarray of floats (integer category codes as floats) same shape as input
+        with MISSING_DATA where input was NaN.
     """
     codes = np.asarray(ptype_codes)
     # Use float dtype so we can store MISSING_DATA (NaN) without conversion errors
@@ -414,7 +414,7 @@ def map_wmo4677_to_ptype(ptype_codes: np.ndarray) -> np.ndarray:
     return out
 
 
-def precip_types_fallback(temp_arr: np.ndarray, precip_arr: np.ndarray, precip_types):
+def precip_types_fallback(temp_arr: np.ndarray, precip_arr: np.ndarray, precip_types: np.ndarray) -> np.ndarray:
     mask = (precip_types == "none") & (precip_arr > 0)
     precip_types[mask] = np.where(
         temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
