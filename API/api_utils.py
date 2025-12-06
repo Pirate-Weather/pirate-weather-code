@@ -377,11 +377,13 @@ def map_wmo4677_to_ptype(ptype_codes: np.ndarray) -> np.ndarray:
     Args:
             ptype_codes: array-like of numeric WMO 4677 codes (may contain NaN)
 
-    Returns:
-            np.ndarray of ints same shape as input with MISSING_DATA where input was NaN.
+        Returns:
+            np.ndarray of floats (integer category codes as floats) same shape as input
+            with MISSING_DATA where input was NaN.
     """
     codes = np.asarray(ptype_codes)
-    out = np.zeros_like(codes, dtype=int)
+    # Use float dtype so we can store MISSING_DATA (NaN) without conversion errors
+    out = np.zeros_like(codes, dtype=float)
 
     nan_mask = np.isnan(codes)
 
@@ -396,7 +398,7 @@ def map_wmo4677_to_ptype(ptype_codes: np.ndarray) -> np.ndarray:
     # Assign categories; order does not matter because groups are disjoint in our choice
     if codes.size > 0:
         vals = codes.copy()
-        vals[nan_mask] = -9999
+        vals[nan_mask] = -999
         vals = vals.astype(int)
 
         out[np.isin(vals, snow_codes)] = 1
