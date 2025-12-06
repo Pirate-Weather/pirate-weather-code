@@ -414,7 +414,9 @@ def map_wmo4677_to_ptype(ptype_codes: np.ndarray) -> np.ndarray:
     return out
 
 
-def precip_types_fallback(temp_arr: np.ndarray, precip_arr: np.ndarray, precip_types: np.ndarray) -> np.ndarray:
+def precip_types_fallback(
+    temp_arr: np.ndarray, precip_arr: np.ndarray, precip_types: np.ndarray
+) -> np.ndarray:
     mask = (precip_types == "none") & (precip_arr > 0)
     precip_types[mask] = np.where(
         temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
