@@ -107,8 +107,8 @@ def _populate_max_pchance(
         1,
         "hrrr",
     )
-    populate_mapped_ptype(lambda: "ecmwf_ifs" in source_list, 2, "ecmwf_ptype")
-    populate_wmo4677_ptype(lambda: "dwd_mosmix" in source_list, 3, "dwd_mosmix_ptype")
+    populate_wmo4677_ptype(lambda: "dwd_mosmix" in source_list, 2, "dwd_mosmix_ptype")
+    populate_mapped_ptype(lambda: "ecmwf_ifs" in source_list, 3, "ecmwf_ptype")
     populate_component_ptype(lambda: "gefs" in source_list, 4, "gefs")
     populate_mapped_ptype(lambda: "era5" in source_list, 5, "era5_ptype")
 
@@ -157,19 +157,6 @@ def _calculate_intensity_prob(
     )
     InterPhour[:, DATA_HOURLY["type"]] = np.choose(
         np.argmin(np.isnan(prcipIntensityHour), axis=1), maxPchanceHour.T
-    )
-
-    mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["none"]) & (
-        InterPhour[:, DATA_HOURLY["intensity"]] > 0
-    )
-    InterPhour[:, DATA_HOURLY["type"]][mask] = np.where(
-        InterPhour[:, DATA_HOURLY["temp"]][mask] >= TEMP_THRESHOLD_RAIN_C,
-        PRECIP_IDX["rain"],
-        np.where(
-            InterPhour[:, DATA_HOURLY["type"]][mask] <= TEMP_THRESHOLD_SNOW_C,
-            PRECIP_IDX["snow"],
-            PRECIP_IDX["sleet"],
-        ),
     )
 
     prcipProbabilityHour = np.full((len(hour_array_grib), 3), MISSING_DATA)
@@ -439,6 +426,21 @@ def _calculate_derived_metrics(
         InterPhour[:, DATA_HOURLY["humidity"]],
         InterPhour[:, DATA_HOURLY["wind"]],
         solar=InterPhour[:, DATA_HOURLY["solar"]],
+    )
+
+    # Apply temperature-based fallback for precipitation type when type is "none" but intensity exists
+    # This handles cases where WMO codes are unmapped or missing
+    mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["none"]) & (
+        InterPhour[:, DATA_HOURLY["intensity"]] > 0
+    )
+    InterPhour[:, DATA_HOURLY["type"]][mask] = np.where(
+        InterPhour[:, DATA_HOURLY["temp"]][mask] >= TEMP_THRESHOLD_RAIN_C,
+        PRECIP_IDX["rain"],
+        np.where(
+            InterPhour[:, DATA_HOURLY["temp"]][mask] <= TEMP_THRESHOLD_SNOW_C,
+            PRECIP_IDX["snow"],
+            PRECIP_IDX["sleet"],
+        ),
     )
 
     InterPhour[:, DATA_HOURLY["rain"]] = 0
