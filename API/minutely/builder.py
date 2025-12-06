@@ -425,6 +425,12 @@ def _calculate_intensity(
     elif "dwd_mosmix" in source_list and dwd_mosmix_MinuteInterpolation is not None:
         # DWD MOSMIX RR1c is in kg/m^2 = mm (hourly accumulation)
         intensity = np.nan_to_num(dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["accum"]])
+        mask = (precipTypes == "none") & (intensity > 0)
+        precipTypes[mask] = np.where(
+            temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
+            "rain",
+            np.where(temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C, "snow", "sleet"),
+        )
     elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
         intensity = ecmwfMinuteInterpolation[:, ECMWF["intensity"]] * 3600
     elif "gefs" in source_list and gefsMinuteInterpolation is not None:
