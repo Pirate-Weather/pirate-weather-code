@@ -107,8 +107,8 @@ def _populate_max_pchance(
         1,
         "hrrr",
     )
-    populate_mapped_ptype(lambda: "ecmwf_ifs" in source_list, 2, "ecmwf_ptype")
-    populate_wmo4677_ptype(lambda: "dwd_mosmix" in source_list, 3, "dwd_mosmix_ptype")
+    populate_wmo4677_ptype(lambda: "dwd_mosmix" in source_list, 2, "dwd_mosmix_ptype")
+    populate_mapped_ptype(lambda: "ecmwf_ifs" in source_list, 3, "ecmwf_ptype")
     populate_component_ptype(lambda: "gefs" in source_list, 4, "gefs")
     populate_mapped_ptype(lambda: "era5" in source_list, 5, "era5_ptype")
 
