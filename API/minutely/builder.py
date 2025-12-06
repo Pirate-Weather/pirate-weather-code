@@ -9,10 +9,14 @@ import numpy as np
 from API.api_utils import (
     fast_nearest_interp,
     map_wmo4677_to_ptype,
-    precip_types_fallback,
     zero_small_values,
 )
-from API.constants.api_const import PRECIP_IDX, PRECIP_NOISE_THRESHOLD_MMH
+from API.constants.api_const import (
+    PRECIP_IDX,
+    PRECIP_NOISE_THRESHOLD_MMH,
+    TEMP_THRESHOLD_RAIN_C,
+    TEMP_THRESHOLD_SNOW_C,
+)
 from API.constants.forecast_const import DATA_MINUTELY
 from API.constants.model_const import (
     DWD_MOSMIX,
@@ -421,7 +425,12 @@ def _calculate_intensity(
     if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
         temp_arr = hrrrSubHInterpolation[:, HRRR_SUBH["temp"]]
         refc_arr = hrrrSubHInterpolation[:, HRRR_SUBH["refc"]]
-        precipTypes = precip_types_fallback(temp_arr, refc_arr, precipTypes)
+        mask = (precipTypes == "none") & (refc_arr > 0)
+        precipTypes[mask] = np.where(
+            temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
+            "rain",
+            np.where(temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C, "snow", "sleet"),
+        )
         intensity = dbz_to_rate(refc_arr, precipTypes)
     elif "nbm" in source_list and nbmMinuteInterpolation is not None:
         intensity = nbmMinuteInterpolation[:, NBM["accum"]]
@@ -431,7 +440,12 @@ def _calculate_intensity(
             dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["accum"]]
         )
         temp_arr = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["temp"]]
-        precipTypes = precip_types_fallback(temp_arr, intensity, precipTypes)
+        mask = (precipTypes == "none") & (intensity > 0)
+        precipTypes[mask] = np.where(
+            temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
+            "rain",
+            np.where(temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C, "snow", "sleet"),
+        )
     elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
         intensity = ecmwfMinuteInterpolation[:, ECMWF["intensity"]] * 3600
     elif "gefs" in source_list and gefsMinuteInterpolation is not None:

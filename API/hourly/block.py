@@ -8,7 +8,6 @@ from API.api_utils import (
     calculate_apparent_temperature,
     clipLog,
     map_wmo4677_to_ptype,
-    precip_types_fallback,
     zero_small_values,
 )
 from API.constants.api_const import (
@@ -17,6 +16,8 @@ from API.constants.api_const import (
     PRECIP_NOISE_THRESHOLD_MMH,
     PRECIP_PROB_NOISE_THRESHOLD,
     ROUNDING_RULES,
+    TEMP_THRESHOLD_RAIN_C,
+    TEMP_THRESHOLD_SNOW_C,
 )
 from API.constants.clip_const import (
     CLIP_CAPE,
@@ -158,10 +159,17 @@ def _calculate_intensity_prob(
         np.argmin(np.isnan(prcipIntensityHour), axis=1), maxPchanceHour.T
     )
 
-    InterPhour[:, DATA_HOURLY["type"]] = precip_types_fallback(
-        InterPhour[:, DATA_HOURLY["temp"]],
-        InterPhour[:, DATA_HOURLY["intensity"]],
-        InterPhour[:, DATA_HOURLY["type"]],
+    mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["none"]) & (
+        InterPhour[:, DATA_HOURLY["intensity"]] > 0
+    )
+    InterPhour[:, DATA_HOURLY["type"]][mask] = np.where(
+        InterPhour[:, DATA_HOURLY["temp"]][mask] >= TEMP_THRESHOLD_RAIN_C,
+        PRECIP_IDX["rain"],
+        np.where(
+            InterPhour[:, DATA_HOURLY["type"]][mask] <= TEMP_THRESHOLD_SNOW_C,
+            PRECIP_IDX["snow"],
+            PRECIP_IDX["sleet"],
+        ),
     )
 
     prcipProbabilityHour = np.full((len(hour_array_grib), 3), MISSING_DATA)

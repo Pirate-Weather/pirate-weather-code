@@ -10,8 +10,6 @@ from API.constants.api_const import (
     APPARENT_TEMP_CONSTS,
     APPARENT_TEMP_SOLAR_CONSTS,
     PRECIP_NOISE_THRESHOLD_MMH,
-    TEMP_THRESHOLD_RAIN_C,
-    TEMP_THRESHOLD_SNOW_C,
 )
 from API.constants.shared_const import MISSING_DATA
 
@@ -391,10 +389,14 @@ def map_wmo4677_to_ptype(ptype_codes: np.ndarray) -> np.ndarray:
 
     # Define code groups (inclusive ranges/lists)
     freezing_codes = [56, 57, 66, 67]
-    ice_codes = list(range(76, 80)) + [87, 88, 89, 90, 96, 97, 98, 99]
+    ice_codes = list(range(76, 80)) + [87, 88, 89, 90, 96, 99]
     snow_codes = list(range(70, 76)) + [83, 84, 85, 86, 93, 94]
     rain_codes = (
-        list(range(50, 66)) + [68, 69] + list(range(80, 85)) + list(range(91, 96))
+        list(range(50, 56))
+        + list(range(58, 65))
+        + [68, 69]
+        + list(range(80, 83))
+        + [91, 92, 95, 97, 98]
     )
 
     # Assign categories; order does not matter because groups are disjoint in our choice
@@ -412,19 +414,6 @@ def map_wmo4677_to_ptype(ptype_codes: np.ndarray) -> np.ndarray:
     out[nan_mask] = MISSING_DATA
 
     return out
-
-
-def precip_types_fallback(
-    temp_arr: np.ndarray, precip_arr: np.ndarray, precip_types: np.ndarray
-) -> np.ndarray:
-    mask = (precip_types == "none") & (precip_arr > 0)
-    precip_types[mask] = np.where(
-        temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
-        "rain",
-        np.where(temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C, "snow", "sleet"),
-    )
-
-    return precip_types
 
 
 def zero_small_values(
