@@ -352,6 +352,62 @@ def select_daily_precip_type(
     return maxPchanceDay
 
 
+def map_wmo4677_to_ptype(ptype_codes: np.ndarray) -> np.ndarray:
+        """
+        Map WMO 4677 present-weather codes (50-99) to internal precip type categories.
+
+        Returns an integer array with the following mapping:
+            0 -> none/other
+            1 -> snow
+            2 -> ice (pellets, hail)
+            3 -> freezing rain/drizzle
+            4 -> rain
+
+        The mapping follows the WMO code ranges and uses conservative grouping:
+            - Freezing drizzle/rain codes (56,57,66,67) -> freezing (3)
+            - Ice pellets / snow grains / hail-related codes (76-79, 87-90, 96-99) -> ice (2)
+            - Snow and snow showers (70-75, 83-86, 93-94) -> snow (1)
+            - Rain and drizzle ranges, plus mixed codes -> rain (4)
+
+        Notes:
+            - Some WMO codes represent mixed precipitation (e.g., rain+snow). Those are
+                mapped to the category most representative for display (rain or snow) depending
+                on the code. This function documents the chosen grouping.
+
+        Args:
+                ptype_codes: array-like of numeric WMO 4677 codes (may contain NaN)
+
+        Returns:
+                np.ndarray of ints same shape as input with MISSING_DATA where input was NaN.
+        """
+        codes = np.asarray(ptype_codes)
+        out = np.zeros_like(codes, dtype=int)
+
+        nan_mask = np.isnan(codes)
+
+        # Define code groups (inclusive ranges/lists)
+        freezing_codes = [56, 57, 66, 67]
+        ice_codes = list(range(76, 80)) + [87, 88, 89, 90, 96, 97, 98, 99]
+        snow_codes = list(range(70, 76)) + [83, 84, 85, 86, 93, 94]
+        rain_codes = list(range(50, 66)) + [68, 69] + list(range(80, 85)) + list(range(91, 96))
+
+        # Assign categories; order does not matter because groups are disjoint in our choice
+        if codes.size > 0:
+                vals = codes.copy()
+                vals[nan_mask] = -9999
+                vals = vals.astype(int)
+
+                out[np.isin(vals, snow_codes)] = 1
+                out[np.isin(vals, ice_codes)] = 2
+                out[np.isin(vals, freezing_codes)] = 3
+                out[np.isin(vals, rain_codes)] = 4
+
+        # Use MISSING_DATA for NaNs
+        out[nan_mask] = MISSING_DATA
+
+        return out
+
+
 def zero_small_values(
     array: np.ndarray, threshold: float = PRECIP_NOISE_THRESHOLD_MMH
 ) -> np.ndarray:

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from API.api_utils import calculate_apparent_temperature, clipLog, zero_small_values
+from API.api_utils import (
+    calculate_apparent_temperature,
+    clipLog,
+    map_wmo4677_to_ptype,
+    zero_small_values,
+)
 from API.constants.api_const import (
     PRECIP_ACCUM_NOISE_THRESHOLD,
     PRECIP_IDX,
@@ -69,7 +74,11 @@ def _populate_max_pchance(
     def populate_mapped_ptype(condition, target_idx, key):
         if not condition():
             return
-        ptype_hour = np.round(InterThour_inputs[key]).astype(int)
+        # Round but keep NaN mask so we don't attempt to cast NaN to int
+        ptype_vals = np.round(InterThour_inputs[key])
+        ptype_nan_mask = np.isnan(ptype_vals)
+        ptype_hour = np.zeros_like(ptype_vals, dtype=int)
+        ptype_hour[~ptype_nan_mask] = ptype_vals[~ptype_nan_mask].astype(int)
         conditions = [
             np.isin(ptype_hour, [5, 6, 9]),
             np.isin(ptype_hour, [4, 8, 10]),
@@ -79,7 +88,7 @@ def _populate_max_pchance(
         choices = [1, 2, 3, 4]
         mapped_ptype = np.select(conditions, choices, default=0)
         maxPchanceHour[:, target_idx] = mapped_ptype
-        maxPchanceHour[np.isnan(ptype_hour), target_idx] = MISSING_DATA
+        maxPchanceHour[ptype_nan_mask, target_idx] = MISSING_DATA
 
     def populate_wmo4677_ptype(condition, target_idx, key):
         """Map WMO code 4677 (present weather) to precipitation type categories.
@@ -97,27 +106,12 @@ def _populate_max_pchance(
         """
         if not condition():
             return
-        ptype_hour = np.round(InterThour_inputs[key]).astype(int)
-        conditions = [
-            # Snow: 70-75, 85-90
-            np.isin(ptype_hour, list(range(70, 76)) + list(range(85, 91))),
-            # Ice: 76-79
-            np.isin(ptype_hour, list(range(76, 80))),
-            # Freezing rain: 66-67
-            np.isin(ptype_hour, [66, 67]),
-            # Rain: 50-65, 68-69, 80-84, 91-99
-            np.isin(
-                ptype_hour,
-                list(range(50, 66))
-                + [68, 69]
-                + list(range(80, 85))
-                + list(range(91, 100)),
-            ),
-        ]
-        choices = [1, 2, 3, 4]
-        mapped_ptype = np.select(conditions, choices, default=0)
+        if not condition():
+            return
+        # Round values (keep NaN where present) and map using centralized helper
+        ptype_vals = np.round(InterThour_inputs[key])
+        mapped_ptype = map_wmo4677_to_ptype(ptype_vals)
         maxPchanceHour[:, target_idx] = mapped_ptype
-        maxPchanceHour[np.isnan(ptype_hour), target_idx] = MISSING_DATA
 
     populate_component_ptype(lambda: "nbm" in source_list, 0, "nbm")
     populate_component_ptype(
