@@ -159,19 +159,6 @@ def _calculate_intensity_prob(
         np.argmin(np.isnan(prcipIntensityHour), axis=1), maxPchanceHour.T
     )
 
-    mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["none"]) & (
-        InterPhour[:, DATA_HOURLY["intensity"]] > 0
-    )
-    InterPhour[:, DATA_HOURLY["type"]][mask] = np.where(
-        InterPhour[:, DATA_HOURLY["temp"]][mask] >= TEMP_THRESHOLD_RAIN_C,
-        PRECIP_IDX["rain"],
-        np.where(
-            InterPhour[:, DATA_HOURLY["temp"]][mask] <= TEMP_THRESHOLD_SNOW_C,
-            PRECIP_IDX["snow"],
-            PRECIP_IDX["sleet"],
-        ),
-    )
-
     prcipProbabilityHour = np.full((len(hour_array_grib), 3), MISSING_DATA)
     prob_sources = [("nbm", 0), ("ecmwf", 1), ("gefs", 2)]
     for source_key, idx in prob_sources:
@@ -439,6 +426,21 @@ def _calculate_derived_metrics(
         InterPhour[:, DATA_HOURLY["humidity"]],
         InterPhour[:, DATA_HOURLY["wind"]],
         solar=InterPhour[:, DATA_HOURLY["solar"]],
+    )
+
+    # Apply temperature-based fallback for precipitation type when type is "none" but intensity exists
+    # This handles cases where WMO codes are unmapped or missing
+    mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["none"]) & (
+        InterPhour[:, DATA_HOURLY["intensity"]] > 0
+    )
+    InterPhour[:, DATA_HOURLY["type"]][mask] = np.where(
+        InterPhour[:, DATA_HOURLY["temp"]][mask] >= TEMP_THRESHOLD_RAIN_C,
+        PRECIP_IDX["rain"],
+        np.where(
+            InterPhour[:, DATA_HOURLY["temp"]][mask] <= TEMP_THRESHOLD_SNOW_C,
+            PRECIP_IDX["snow"],
+            PRECIP_IDX["sleet"],
+        ),
     )
 
     InterPhour[:, DATA_HOURLY["rain"]] = 0
