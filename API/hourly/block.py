@@ -166,7 +166,7 @@ def _calculate_intensity_prob(
         InterPhour[:, DATA_HOURLY["temp"]][mask] >= TEMP_THRESHOLD_RAIN_C,
         PRECIP_IDX["rain"],
         np.where(
-            InterPhour[:, DATA_HOURLY["type"]][mask] <= TEMP_THRESHOLD_SNOW_C,
+            InterPhour[:, DATA_HOURLY["temp"]][mask] <= TEMP_THRESHOLD_SNOW_C,
             PRECIP_IDX["snow"],
             PRECIP_IDX["sleet"],
         ),
