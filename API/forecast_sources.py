@@ -318,7 +318,7 @@ def merge_hourly_models(
             metadata.drop("dwd_mosmix")
         else:
             # Log time alignment for debugging
-            if logger and dwd_start_idx < len(data_dwd_mosmix):
+            if logger:
                 data_time = data_dwd_mosmix[dwd_start_idx, 0]
                 logger.debug(
                     f"DWD MOSMIX merge: start_idx={dwd_start_idx}, "

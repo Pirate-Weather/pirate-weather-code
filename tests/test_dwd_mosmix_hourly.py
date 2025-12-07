@@ -144,21 +144,25 @@ def test_dwd_mosmix_hourly_inputs():
     )
 
     # The first non-NaN value should be from DWD MOSMIX
-    first_temp = temp_inputs[0, np.argmin(np.isnan(temp_inputs[0, :]))]
+    # Use nanmin to get the first valid value (should be at index 0 since only DWD MOSMIX)
+    first_temp = np.nanmin(temp_inputs[0, :])
+    assert not np.isnan(first_temp), "Should have at least one non-NaN temperature"
     assert np.isclose(first_temp, -10.7, atol=0.1), (
         f"First temperature should be -10.7°C from DWD MOSMIX, got {first_temp}°C"
     )
 
     # Verify cloud_inputs uses DWD MOSMIX data (converted to fraction)
     cloud_inputs = inputs["cloud_inputs"]
-    first_cloud = cloud_inputs[0, np.argmin(np.isnan(cloud_inputs[0, :]))]
+    first_cloud = np.nanmin(cloud_inputs[0, :])
+    assert not np.isnan(first_cloud), "Should have at least one non-NaN cloud value"
     assert np.isclose(first_cloud, 0.95, atol=0.01), (
         f"First cloud cover should be 0.95 from DWD MOSMIX, got {first_cloud}"
     )
 
     # Verify vis_inputs uses DWD MOSMIX data
     vis_inputs = inputs["vis_inputs"]
-    first_vis = vis_inputs[0, np.argmin(np.isnan(vis_inputs[0, :]))]
+    first_vis = np.nanmin(vis_inputs[0, :])
+    assert not np.isnan(first_vis), "Should have at least one non-NaN visibility value"
     assert np.isclose(first_vis, 4500.0, atol=1.0), (
         f"First visibility should be 4500m from DWD MOSMIX, got {first_vis}m"
     )
@@ -193,7 +197,8 @@ def test_dwd_mosmix_with_multiple_sources():
 
     # Verify DWD MOSMIX data is used
     temp_inputs = inputs["temperature_inputs"]
-    first_temp = temp_inputs[0, np.argmin(np.isnan(temp_inputs[0, :]))]
+    first_temp = np.nanmin(temp_inputs[0, :])
+    assert not np.isnan(first_temp), "Should have at least one non-NaN temperature"
     assert np.isclose(first_temp, -10.7, atol=0.1), (
         f"Should use DWD MOSMIX temperature (-10.7°C), got {first_temp}°C"
     )
