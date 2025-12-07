@@ -206,26 +206,21 @@ def test_dwd_mosmix_with_multiple_sources():
 def test_dwd_mosmix_timestamp_alignment():
     """Test that DWD MOSMIX data is properly aligned by timestamp, not by index."""
     num_hours = 12
-    base_time = 1700000000  # Midnight
+    base_time = 1700000000  # Arbitrary base time (represents start of day in test)
 
-    # Create DWD MOSMIX data that starts 3 hours AFTER midnight
+    # Create DWD MOSMIX data that starts 3 hours AFTER base_time
     # This simulates a forecast run that doesn't include the first few hours
     dwd_data = np.full((20, max(DWD_MOSMIX.values()) + 1), np.nan)
 
-    # Timestamps start at base_time + 3 hours (3 AM)
+    # Timestamps start at base_time + 3 hours
     offset_hours = 3
-    dwd_data[:, 0] = (
-        np.arange(20) * 3600 + base_time + offset_hours * 3600
-    )  # Hourly data starting at 3 AM
+    dwd_data[:, 0] = np.arange(20) * 3600 + base_time + offset_hours * 3600
 
     # Set temperatures for hours 3-14 (indices 0-11 in dwd_data)
     # Use a simple pattern: -10 - hour_number
     for i in range(12):
         actual_hour = offset_hours + i
         dwd_data[i, DWD_MOSMIX["temp"]] = -10.0 - actual_hour
-
-    # Simulate temperature conversion (already in Celsius for this test)
-    # No conversion needed as we set them in Celsius
 
     # Merge the data
     metadata = SourceMetadata(["dwd_mosmix"], {}, {})

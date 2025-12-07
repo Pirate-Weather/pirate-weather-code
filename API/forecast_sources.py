@@ -337,7 +337,10 @@ def merge_hourly_models(
             for i in range(len(data_dwd_mosmix)):
                 row_time = data_dwd_mosmix[i, 0]
                 # Calculate which output hour this row corresponds to
-                hour_offset = int(round((row_time - base_day_utc_grib) / 3600))
+                # DWD MOSMIX data should be on hourly boundaries, but round to nearest hour
+                # to handle minor timestamp variations (e.g., 3599 seconds = 0.9997 hours)
+                hour_offset_float = (row_time - base_day_utc_grib) / 3600
+                hour_offset = int(round(hour_offset_float))
 
                 # Only copy if within valid output range
                 if 0 <= hour_offset < num_hours:
