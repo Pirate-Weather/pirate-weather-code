@@ -586,7 +586,7 @@ def interpolate_dwd_to_grid_knearest_dask(
 
 def build_grid_to_stations_map(
     df,
-    radius_km=50,
+    radius_km=DWD_RADIUS,
     lat_col="latitude",
     lon_col="longitude",
     station_col="station_id",
@@ -613,7 +613,7 @@ def build_grid_to_stations_map(
     Returns
     -------
     dict
-        A dictionary where keys are (lat_idx, lon_idx) tuples and values are
+        A dictionary where keys are (y_idx, x_idx) tuples and values are
         lists of dicts with station info: [{"id": "...", "name": "...", "lat": ..., "lon": ...}, ...]
     """
 
