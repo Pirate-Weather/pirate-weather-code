@@ -13,6 +13,7 @@ from API.forecast_sources import merge_hourly_models, SourceMetadata
 def test_dwd_mosmix_temperature_conversion():
     """Test that DWD MOSMIX temperature is properly converted from Kelvin to Celsius."""
     # Simulate DWD MOSMIX data with temperature in Kelvin
+    # Using actual Ottawa data: 262.85K for first hour
     num_hours = 10
     dwd_data = np.full((num_hours + 50, max(DWD_MOSMIX.values()) + 1), np.nan)
     
@@ -20,8 +21,9 @@ def test_dwd_mosmix_temperature_conversion():
     base_time = 1700000000
     dwd_data[:, 0] = np.arange(num_hours + 50) * 3600 + base_time
     
-    # Set temperature in Kelvin (262.45 K = -10.7 C)
-    dwd_data[:, DWD_MOSMIX["temp"]] = 262.45
+    # Set temperatures in Kelvin using actual Ottawa data
+    ottawa_temps_k = [262.85, 261.55, 261.25, 261.05, 260.55, 260.45, 259.85, 259.55, 258.85, 258.25]
+    dwd_data[:num_hours, DWD_MOSMIX["temp"]] = ottawa_temps_k
     
     # Set dew point in Kelvin  
     dwd_data[:, DWD_MOSMIX["dew"]] = 260.0
@@ -61,11 +63,17 @@ def test_dwd_mosmix_temperature_conversion():
     assert dwd_merged is not None, "DWD MOSMIX merged data should not be None"
     assert dwd_merged.shape[0] == num_hours, f"Expected {num_hours} hours, got {dwd_merged.shape[0]}"
     
-    # Check temperature is in Celsius (should be -10.7, not 262.45)
+    # Check first temperature is correctly converted: 262.85K - 273.15 = -10.3°C
     temp_celsius = dwd_merged[0, DWD_MOSMIX["temp"]]
     assert not np.isnan(temp_celsius), "Temperature should not be NaN"
-    assert np.isclose(temp_celsius, -10.7, atol=0.1), \
-        f"Temperature should be -10.7°C, got {temp_celsius}°C"
+    assert np.isclose(temp_celsius, -10.3, atol=0.1), \
+        f"Temperature should be -10.3°C (from 262.85K), got {temp_celsius}°C"
+    
+    # Check second temperature: 261.55K - 273.15 = -11.6°C
+    temp_celsius_2 = dwd_merged[1, DWD_MOSMIX["temp"]]
+    assert not np.isnan(temp_celsius_2), "Second temperature should not be NaN"
+    assert np.isclose(temp_celsius_2, -11.6, atol=0.1), \
+        f"Second temperature should be -11.6°C (from 261.55K), got {temp_celsius_2}°C"
     
     # Check cloud cover is in percent (should be 95)
     cloud_pct = dwd_merged[0, DWD_MOSMIX["cloud"]]

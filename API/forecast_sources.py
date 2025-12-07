@@ -304,13 +304,63 @@ def merge_hourly_models(
 
     if "dwd_mosmix" in metadata.source_list and isinstance(data_dwd_mosmix, np.ndarray):
         dwd_start_idx = nearest_index(data_dwd_mosmix[:, 0], base_day_utc_grib)
-        dwd_mosmix_merged = _merge_simple_source(
-            data_dwd_mosmix,
-            dwd_start_idx,
-            num_hours,
-            max(DWD_MOSMIX.values()) + 1,
-            source_columns=data_dwd_mosmix.shape[1],
-        )
+        
+        # Check if we have valid data at the start index
+        if dwd_start_idx >= len(data_dwd_mosmix):
+            logger.warning(
+                f"DWD MOSMIX start index ({dwd_start_idx}) exceeds data length ({len(data_dwd_mosmix)}) {loc_tag}"
+            )
+            metadata.drop("dwd_mosmix")
+        elif dwd_start_idx < 0:
+            logger.warning(f"DWD MOSMIX start index is negative ({dwd_start_idx}) {loc_tag}")
+            metadata.drop("dwd_mosmix")
+        else:
+            # Log time alignment for debugging
+            if logger and dwd_start_idx < len(data_dwd_mosmix):
+                data_time = data_dwd_mosmix[dwd_start_idx, 0]
+                logger.debug(
+                    f"DWD MOSMIX merge: start_idx={dwd_start_idx}, "
+                    f"base_day_utc={base_day_utc_grib}, data_time={data_time}, "
+                    f"diff={(data_time - base_day_utc_grib)/3600:.1f}h {loc_tag}"
+                )
+            
+            dwd_mosmix_merged = _merge_simple_source(
+                data_dwd_mosmix,
+                dwd_start_idx,
+                num_hours,
+                max(DWD_MOSMIX.values()) + 1,
+                source_columns=data_dwd_mosmix.shape[1],
+            )
+            
+            # Log if merged data is mostly NaN (could indicate data quality issues)
+            if dwd_mosmix_merged is not None:
+                non_nan_count = np.count_nonzero(~np.isnan(dwd_mosmix_merged[:, 1:]))
+                total_count = dwd_mosmix_merged[:, 1:].size
+                if total_count > 0:
+                    nan_pct = 100 * (1 - non_nan_count / total_count)
+                    if nan_pct > 90:
+                        logger.warning(
+                            f"DWD MOSMIX merged data is {nan_pct:.1f}% NaN "
+                            f"({non_nan_count}/{total_count} valid) {loc_tag}"
+                        )
+                    # Check if temperature data exists and looks valid (should be in Celsius, typically -50 to 50)
+                    temp_col = DWD_MOSMIX["temp"]
+                    if temp_col < dwd_mosmix_merged.shape[1]:
+                        temps = dwd_mosmix_merged[:, temp_col]
+                        valid_temps = temps[~np.isnan(temps)]
+                        if len(valid_temps) > 0:
+                            temp_mean = np.mean(valid_temps)
+                            # If mean temp is > 100, it's likely still in Kelvin (conversion didn't happen)
+                            if temp_mean > 100:
+                                logger.error(
+                                    f"DWD MOSMIX temperature appears to be in Kelvin "
+                                    f"(mean={temp_mean:.1f}K). Conversion may have failed. {loc_tag}"
+                                )
+                            elif temp_mean < -100:
+                                logger.warning(
+                                    f"DWD MOSMIX temperature is unusually low "
+                                    f"(mean={temp_mean:.1f}C). Possible data issue. {loc_tag}"
+                                )
 
     if "gfs" in metadata.source_list and isinstance(data_gfs, np.ndarray):
         gfs_start_idx = nearest_index(data_gfs[:, 0], base_day_utc_grib)
