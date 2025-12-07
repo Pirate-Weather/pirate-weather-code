@@ -587,7 +587,6 @@ def interpolate_dwd_to_grid_knearest_dask(
 def build_grid_to_stations_map(
     df,
     radius_km=50,
-    time_col="time",
     lat_col="latitude",
     lon_col="longitude",
     station_col="station_id",
@@ -606,7 +605,7 @@ def build_grid_to_stations_map(
         Columns: station_col, station_name_col, lat_col, lon_col
     radius_km : float
         Max radius in km for stations to be associated with a grid cell
-    time_col, lat_col, lon_col, station_col, station_name_col : str
+    lat_col, lon_col, station_col, station_name_col : str
         Column names
     log : {"print","tqdm","none"}
         Logging mode
@@ -854,7 +853,6 @@ logging.info("\n--- Building grid-to-stations mapping ---")
 grid_to_stations_map = build_grid_to_stations_map(
     df_data,  # Use original df_data which has station_name
     radius_km=radius_km,
-    time_col="time",
     lat_col="latitude",
     lon_col="longitude",
     station_col="station_id",
