@@ -363,6 +363,7 @@ async def PW_Forecast(
     exGFS = initial.ex_gfs
     exRTMA_RU = initial.ex_rtma_ru
     exECMWF = initial.ex_ecmwf
+    exDWD_MOSMIX = initial.ex_dwd_mosmix
     inc_day_night = initial.inc_day_night
     summaryText = initial.summary_text
     unitSystem = initial.unit_system
@@ -435,7 +436,7 @@ async def PW_Forecast(
         ex_ecmwf=exECMWF,
         ex_gefs=exGEFS,
         ex_rtma_ru=exRTMA_RU,
-        ex_dwd_mosmix=0,  # DWD MOSMIX is always enabled by default
+        ex_dwd_mosmix=exDWD_MOSMIX,
         read_wmo_alerts=readWMOAlerts,
         base_day_utc=baseDayUTC,
         zarr_sources=zarr_sources,

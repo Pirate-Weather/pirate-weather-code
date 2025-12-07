@@ -549,12 +549,18 @@ async def calculate_grid_indexing(
     if readDWD_MOSMIX:
         dataOut_dwd_mosmix = zarr_results["DWD_MOSMIX"]
         if dataOut_dwd_mosmix is not False:
-            dwdMosmixRunTime = dataOut_dwd_mosmix[HISTORY_PERIODS["DWD_MOSMIX"], 0]
-            sourceIDX["dwd_mosmix"] = dict()
-            sourceIDX["dwd_mosmix"]["x"] = int(x_dwd)
-            sourceIDX["dwd_mosmix"]["y"] = int(y_dwd)
-            sourceIDX["dwd_mosmix"]["lat"] = round(dwd_lat, 2)
-            sourceIDX["dwd_mosmix"]["lon"] = round(((dwd_lon + 180) % 360) - 180, 2)
+            # Check if the data point has any valid (non-NaN) data
+            # DWD zarr files are mostly empty, so we need to verify actual data exists
+            if np.all(np.isnan(dataOut_dwd_mosmix[:, 1:])):
+                # All data is NaN, treat as no data available
+                dataOut_dwd_mosmix = False
+            else:
+                dwdMosmixRunTime = dataOut_dwd_mosmix[HISTORY_PERIODS["DWD_MOSMIX"], 0]
+                sourceIDX["dwd_mosmix"] = dict()
+                sourceIDX["dwd_mosmix"]["x"] = int(x_dwd)
+                sourceIDX["dwd_mosmix"]["y"] = int(y_dwd)
+                sourceIDX["dwd_mosmix"]["lat"] = round(dwd_lat, 2)
+                sourceIDX["dwd_mosmix"]["lon"] = round(((dwd_lon + 180) % 360) - 180, 2)
 
     return GridIndexingResult(
         dataOut=dataOut,

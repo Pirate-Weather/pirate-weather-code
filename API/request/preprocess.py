@@ -119,6 +119,7 @@ class InitialRequestContext:
     ex_gfs: int
     ex_rtma_ru: int
     ex_ecmwf: int
+    ex_dwd_mosmix: int
     inc_day_night: int
     summary_text: bool
     unit_system: str
@@ -343,6 +344,7 @@ def _parse_parameters(
     ex_gfs = int("gfs" in exclude_params)
     ex_rtma_ru = int("rtma_ru" in exclude_params)
     ex_ecmwf = int("ecmwf_ifs" in exclude_params)
+    ex_dwd_mosmix = int("dwd_mosmix" in exclude_params)
     summary_text = "summary" not in exclude_params
     inc_day_night = int("day_night_forecast" in include_params)
 
@@ -353,6 +355,7 @@ def _parse_parameters(
         ex_gefs = 1
         ex_rtma_ru = 1
         ex_ecmwf = 1
+        ex_dwd_mosmix = 1
 
     read_wmo_alerts = not (time_machine or ex_alerts == 1)
 
@@ -360,6 +363,7 @@ def _parse_parameters(
         ex_minutely = 1
     if time_machine:
         ex_alerts = 1
+        ex_dwd_mosmix = 1
 
     return (
         exclude_params,
@@ -377,6 +381,7 @@ def _parse_parameters(
         ex_gfs,
         ex_rtma_ru,
         ex_ecmwf,
+        ex_dwd_mosmix,
         summary_text,
         inc_day_night,
         read_wmo_alerts,
@@ -557,6 +562,7 @@ async def prepare_initial_request(
         ex_gfs,
         ex_rtma_ru,
         ex_ecmwf,
+        ex_dwd_mosmix,
         summary_text,
         inc_day_night,
         read_wmo_alerts,
@@ -669,6 +675,7 @@ async def prepare_initial_request(
         ex_gfs=ex_gfs,
         ex_rtma_ru=ex_rtma_ru,
         ex_ecmwf=ex_ecmwf,
+        ex_dwd_mosmix=ex_dwd_mosmix,
         inc_day_night=inc_day_night,
         summary_text=summary_text,
         unit_system=unit_system,
