@@ -201,3 +201,64 @@ def test_dwd_mosmix_with_multiple_sources():
     assert np.isclose(first_temp, -10.7, atol=0.1), (
         f"Should use DWD MOSMIX temperature (-10.7°C), got {first_temp}°C"
     )
+
+
+def test_dwd_mosmix_timestamp_alignment():
+    """Test that DWD MOSMIX data is properly aligned by timestamp, not by index."""
+    num_hours = 12
+    base_time = 1700000000  # Midnight
+
+    # Create DWD MOSMIX data that starts 3 hours AFTER midnight
+    # This simulates a forecast run that doesn't include the first few hours
+    dwd_data = np.full((20, max(DWD_MOSMIX.values()) + 1), np.nan)
+
+    # Timestamps start at base_time + 3 hours (3 AM)
+    offset_hours = 3
+    dwd_data[:, 0] = (
+        np.arange(20) * 3600 + base_time + offset_hours * 3600
+    )  # Hourly data starting at 3 AM
+
+    # Set temperatures for hours 3-14 (indices 0-11 in dwd_data)
+    # Use a simple pattern: -10 - hour_number
+    for i in range(12):
+        actual_hour = offset_hours + i
+        dwd_data[i, DWD_MOSMIX["temp"]] = -10.0 - actual_hour
+
+    # Simulate temperature conversion (already in Celsius for this test)
+    # No conversion needed as we set them in Celsius
+
+    # Merge the data
+    metadata = SourceMetadata(["dwd_mosmix"], {}, {})
+    logger = logging.getLogger(__name__)
+    merge_result = merge_hourly_models(
+        metadata=metadata,
+        num_hours=num_hours,
+        base_day_utc_grib=base_time,
+        data_hrrrh=None,
+        data_h2=None,
+        data_nbm=None,
+        data_nbm_fire=None,
+        data_gfs=None,
+        data_ecmwf=None,
+        data_gefs=None,
+        data_dwd_mosmix=dwd_data,
+        logger=logger,
+        loc_tag="test_offset",
+    )
+
+    dwd_merged = merge_result.dwd_mosmix
+    assert dwd_merged is not None, "DWD MOSMIX merged data should not be None"
+
+    # Hours 0-2 should be NaN (no data available)
+    for hour in range(offset_hours):
+        temp = dwd_merged[hour, DWD_MOSMIX["temp"]]
+        assert np.isnan(temp), f"Hour {hour} should be NaN (before data starts), got {temp}"
+
+    # Hours 3-11 should have correct temperatures aligned by timestamp
+    for hour in range(offset_hours, num_hours):
+        temp = dwd_merged[hour, DWD_MOSMIX["temp"]]
+        expected_temp = -10.0 - hour
+        assert not np.isnan(temp), f"Hour {hour} should not be NaN"
+        assert np.isclose(temp, expected_temp, atol=0.1), (
+            f"Hour {hour} should be {expected_temp}°C, got {temp}°C"
+        )

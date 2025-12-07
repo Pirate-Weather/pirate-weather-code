@@ -317,21 +317,34 @@ def merge_hourly_models(
             )
             metadata.drop("dwd_mosmix")
         else:
-            # Log time alignment for debugging
+            # Check if the data at start_idx is actually at or after the base_day_utc_grib
             data_time = data_dwd_mosmix[dwd_start_idx, 0]
+            time_diff_hours = (data_time - base_day_utc_grib) / 3600
+
             logger.debug(
                 f"DWD MOSMIX merge: start_idx={dwd_start_idx}, "
                 f"base_day_utc={base_day_utc_grib}, data_time={data_time}, "
-                f"diff={(data_time - base_day_utc_grib) / 3600:.1f}h {loc_tag}"
+                f"diff={time_diff_hours:.1f}h {loc_tag}"
             )
 
-            dwd_mosmix_merged = _merge_simple_source(
-                data_dwd_mosmix,
-                dwd_start_idx,
-                num_hours,
-                max(DWD_MOSMIX.values()) + 1,
-                source_columns=data_dwd_mosmix.shape[1],
+            # If the data starts significantly after the base day, we need to account for the offset
+            # Use timestamp-based alignment instead of index-based copying
+            dwd_mosmix_merged = np.full(
+                (num_hours, max(DWD_MOSMIX.values()) + 1), MISSING_DATA
             )
+
+            # Copy data row by row, aligning by timestamp
+            for i in range(len(data_dwd_mosmix)):
+                row_time = data_dwd_mosmix[i, 0]
+                # Calculate which output hour this row corresponds to
+                hour_offset = int(round((row_time - base_day_utc_grib) / 3600))
+
+                # Only copy if within valid output range
+                if 0 <= hour_offset < num_hours:
+                    copy_columns = data_dwd_mosmix.shape[1]
+                    dwd_mosmix_merged[hour_offset, 0:copy_columns] = data_dwd_mosmix[
+                        i, 0:copy_columns
+                    ]
 
             # Log if merged data is mostly NaN (could indicate data quality issues)
             if dwd_mosmix_merged is not None:
