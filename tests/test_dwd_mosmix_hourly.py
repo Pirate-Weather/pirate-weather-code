@@ -247,7 +247,9 @@ def test_dwd_mosmix_timestamp_alignment():
     # Hours 0-2 should be NaN (no data available)
     for hour in range(offset_hours):
         temp = dwd_merged[hour, DWD_MOSMIX["temp"]]
-        assert np.isnan(temp), f"Hour {hour} should be NaN (before data starts), got {temp}"
+        assert np.isnan(temp), (
+            f"Hour {hour} should be NaN (before data starts), got {temp}"
+        )
 
     # Hours 3-11 should have correct temperatures aligned by timestamp
     for hour in range(offset_hours, num_hours):
