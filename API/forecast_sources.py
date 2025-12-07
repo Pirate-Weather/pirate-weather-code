@@ -304,7 +304,7 @@ def merge_hourly_models(
 
     if "dwd_mosmix" in metadata.source_list and isinstance(data_dwd_mosmix, np.ndarray):
         dwd_start_idx = nearest_index(data_dwd_mosmix[:, 0], base_day_utc_grib)
-        
+
         # Check if we have valid data at the start index
         if dwd_start_idx >= len(data_dwd_mosmix):
             logger.warning(
@@ -312,7 +312,9 @@ def merge_hourly_models(
             )
             metadata.drop("dwd_mosmix")
         elif dwd_start_idx < 0:
-            logger.warning(f"DWD MOSMIX start index is negative ({dwd_start_idx}) {loc_tag}")
+            logger.warning(
+                f"DWD MOSMIX start index is negative ({dwd_start_idx}) {loc_tag}"
+            )
             metadata.drop("dwd_mosmix")
         else:
             # Log time alignment for debugging
@@ -321,9 +323,9 @@ def merge_hourly_models(
                 logger.debug(
                     f"DWD MOSMIX merge: start_idx={dwd_start_idx}, "
                     f"base_day_utc={base_day_utc_grib}, data_time={data_time}, "
-                    f"diff={(data_time - base_day_utc_grib)/3600:.1f}h {loc_tag}"
+                    f"diff={(data_time - base_day_utc_grib) / 3600:.1f}h {loc_tag}"
                 )
-            
+
             dwd_mosmix_merged = _merge_simple_source(
                 data_dwd_mosmix,
                 dwd_start_idx,
@@ -331,7 +333,7 @@ def merge_hourly_models(
                 max(DWD_MOSMIX.values()) + 1,
                 source_columns=data_dwd_mosmix.shape[1],
             )
-            
+
             # Log if merged data is mostly NaN (could indicate data quality issues)
             if dwd_mosmix_merged is not None:
                 non_nan_count = np.count_nonzero(~np.isnan(dwd_mosmix_merged[:, 1:]))
