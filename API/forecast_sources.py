@@ -318,13 +318,12 @@ def merge_hourly_models(
             metadata.drop("dwd_mosmix")
         else:
             # Log time alignment for debugging
-            if logger:
-                data_time = data_dwd_mosmix[dwd_start_idx, 0]
-                logger.debug(
-                    f"DWD MOSMIX merge: start_idx={dwd_start_idx}, "
-                    f"base_day_utc={base_day_utc_grib}, data_time={data_time}, "
-                    f"diff={(data_time - base_day_utc_grib) / 3600:.1f}h {loc_tag}"
-                )
+            data_time = data_dwd_mosmix[dwd_start_idx, 0]
+            logger.debug(
+                f"DWD MOSMIX merge: start_idx={dwd_start_idx}, "
+                f"base_day_utc={base_day_utc_grib}, data_time={data_time}, "
+                f"diff={(data_time - base_day_utc_grib) / 3600:.1f}h {loc_tag}"
+            )
 
             dwd_mosmix_merged = _merge_simple_source(
                 data_dwd_mosmix,
