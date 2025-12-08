@@ -412,6 +412,7 @@ def process_dwd_df(df, global_metadata=None):
 
     return df
 
+
 def interpolate_dwd_to_grid_knearest_dask(
     df,
     var_cols,
@@ -501,7 +502,9 @@ def interpolate_dwd_to_grid_knearest_dask(
 
     radius_rad = radius_km / 6371.0
     mask_nn = dist_rad <= radius_rad
-    inds_flat = np.where(mask_nn, inds_flat, -1)  # -1 marks "no neighbour within radius"
+    inds_flat = np.where(
+        mask_nn, inds_flat, -1
+    )  # -1 marks "no neighbour within radius"
 
     station_indexer = {sid: i for i, sid in enumerate(station_ids)}
 
@@ -531,9 +534,9 @@ def interpolate_dwd_to_grid_knearest_dask(
     _log("Linking rows to neighbour grid cells…")
 
     # Each row maps to k_max neighbours for its station
-    neigh_flat = inds_flat[stn_idx_full]          # (n_rows, k_max)
+    neigh_flat = inds_flat[stn_idx_full]  # (n_rows, k_max)
     neigh_time = np.repeat(t_idx[:, None], k_max, axis=1)  # (n_rows, k_max)
-    neigh_dist = dist_rad[stn_idx_full]           # (n_rows, k_max)
+    neigh_dist = dist_rad[stn_idx_full]  # (n_rows, k_max)
 
     # Flatten and filter invalid neighbours
     flat_flat = neigh_flat.ravel()
@@ -650,8 +653,6 @@ def interpolate_dwd_to_grid_knearest_dask(
     _log("Done. Dataset is lazy; ready for .to_zarr() or .compute().")
 
     return ds
-
-
 
 
 def build_grid_to_stations_map(
