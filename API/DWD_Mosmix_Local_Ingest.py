@@ -567,8 +567,8 @@ def interpolate_dwd_to_grid_knearest_dask(
         d_final = flat_dist[val_mask]
 
         # Allocate dense arrays for values, weights, and weight sums
-        arr = np.full((nt, ny, nx), 0.0, dtype=dtype)
-        weight_sum = np.full((nt, ny, nx), 0.0, dtype=dtype)
+        arr = np.zeros((nt, ny, nx), dtype=dtype)
+        weight_sum = np.zeros((nt, ny, nx), dtype=dtype)
 
         # Use inverse distance weighting to handle multiple stations per grid cell
         # Add small epsilon to avoid division by zero for exact matches

@@ -273,7 +273,8 @@ def test_expected_temperature_pattern_after_fix():
     # OSAKA AIRPORT temps (cooler)
     airport_temps_c = [7.8, 7.3, 6.7, 5.5, 5.1, 4.7, 4.2, 4.4, 5.7, 7.2, 9.1, 10.5]
 
-    # Expected weighted average (assuming equal weighting for simplicity)
+    # Simple average for testing (production uses distance-weighted average)
+    # This test verifies that averaging reduces temperature variability
     expected_avg = [(a + b) / 2 for a, b in zip(osaka_temps_c, airport_temps_c)]
 
     # Calculate temperature changes
