@@ -9,6 +9,7 @@ weather forecasts, and generating API responses.
 import datetime
 import logging
 import os
+import pickle
 import platform
 import sys
 import threading
@@ -126,6 +127,7 @@ WMO_Alerts_Zarr = None
 RTMA_RU_Zarr = None
 ERA5_Data = None
 DWD_MOSMIX_Zarr = None
+DWD_MOSMIX_Stations = None
 
 
 setup_logging()
@@ -170,6 +172,45 @@ WMO_Alerts_Zarr = zarr_stores.WMO_Alerts_Zarr
 RTMA_RU_Zarr = zarr_stores.RTMA_RU_Zarr
 ERA5_Data = zarr_stores.ERA5_Data
 DWD_MOSMIX_Zarr = zarr_stores.DWD_MOSMIX_Zarr
+
+# Load DWD MOSMIX station mapping
+try:
+    from API.constants.shared_const import INGEST_VERSION_STR
+
+    station_map_file = None
+    ingest_version = INGEST_VERSION_STR
+
+    if STAGE in ("DEV", "PROD"):
+        station_map_file = os.path.join(
+            save_dir, ingest_version, "DWD_MOSMIX_stations.pickle"
+        )
+    elif STAGE in ("TESTING", "TM_TESTING"):
+        # For testing stages, try to load from S3
+        if save_type == "S3":
+            try:
+                import s3fs
+
+                s3 = s3fs.S3FileSystem(
+                    anon=True,
+                    asynchronous=False,
+                    endpoint_url="https://api.pirateweather.net/files/",
+                )
+                s3_path = f"{s3_bucket}/{ingest_version}/DWD_MOSMIX_stations.pickle"
+                if s3.exists(s3_path):
+                    with s3.open(s3_path, "rb") as f:
+                        DWD_MOSMIX_Stations = pickle.load(f)
+                        logger.info("Loaded DWD MOSMIX station map from S3")
+            except Exception as e:
+                logger.warning(f"Could not load DWD MOSMIX station map from S3: {e}")
+
+    if station_map_file and os.path.exists(station_map_file):
+        with open(station_map_file, "rb") as f:
+            DWD_MOSMIX_Stations = pickle.load(f)
+            logger.info(f"Loaded DWD MOSMIX station map from: {station_map_file}")
+    elif DWD_MOSMIX_Stations is None:
+        logger.info("DWD MOSMIX station map not found")
+except Exception as e:
+    logger.warning(f"Error loading DWD MOSMIX station map: {e}")
 
 logger.info("Initial data load complete")
 
@@ -306,6 +347,7 @@ async def PW_Forecast(
     global RTMA_RU_Zarr
     global ERA5_Data
     global DWD_MOSMIX_Zarr
+    global DWD_MOSMIX_Stations
 
     # Timing Check
     T_Start = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
@@ -1022,6 +1064,18 @@ async def PW_Forecast(
             returnOBJ["flags"]["nearestCity"] = loc_name.get("city") or None
             returnOBJ["flags"]["nearestCountry"] = loc_name.get("country") or None
             returnOBJ["flags"]["nearestSubNational"] = loc_name.get("state") or None
+
+            # Add DWD MOSMIX stations for this grid cell (if available)
+            if (
+                DWD_MOSMIX_Stations is not None
+                and grid_result.x_dwd is not None
+                and grid_result.y_dwd is not None
+                and "dwd_mosmix" in sourceList
+            ):
+                grid_key = (int(grid_result.y_dwd), int(grid_result.x_dwd))
+                stations_at_grid = DWD_MOSMIX_Stations.get(grid_key, [])
+                if stations_at_grid:
+                    returnOBJ["flags"]["stations"] = stations_at_grid
 
     # Timing Check
     timer.log("Flags Time")

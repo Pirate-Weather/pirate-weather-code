@@ -584,6 +584,116 @@ def interpolate_dwd_to_grid_knearest_dask(
     return ds
 
 
+def build_grid_to_stations_map(
+    df,
+    radius_km=DWD_RADIUS,
+    lat_col="latitude",
+    lon_col="longitude",
+    station_col="station_id",
+    station_name_col="station_name",
+    log="print",
+):
+    """
+    Build a mapping from grid cells to nearby stations within radius.
+
+    For each grid cell in the 0.25° GFS grid, stores a list of stations
+    that contributed data to that cell (i.e., stations within radius_km).
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Columns: station_col, station_name_col, lat_col, lon_col
+    radius_km : float
+        Max radius in km for stations to be associated with a grid cell
+    lat_col, lon_col, station_col, station_name_col : str
+        Column names
+    log : {"print","tqdm","none"}
+        Logging mode
+
+    Returns
+    -------
+    dict
+        A dictionary where keys are (y_idx, x_idx) tuples and values are
+        lists of dicts with station info: [{"id": "...", "name": "...", "lat": ..., "lon": ...}, ...]
+    """
+
+    def _log(msg):
+        if log == "print":
+            print(msg)
+
+    _log("Building grid-to-stations mapping...")
+
+    # Define global 0.25° GFS grid
+    gfs_lats = np.arange(-90, 90, 0.25)
+    gfs_lons = np.arange(0, 360, 0.25)
+    ny = gfs_lats.size
+    nx = gfs_lons.size
+
+    lon_grid, lat_grid = np.meshgrid(gfs_lons, gfs_lats)
+    grid_coords_deg = np.column_stack([lat_grid.ravel(), lon_grid.ravel()])
+    grid_coords_rad = np.radians(grid_coords_deg)
+
+    # Build BallTree for grid cells
+    tree = BallTree(grid_coords_rad, metric="haversine")
+
+    # Get unique stations with metadata
+    station_meta = df.drop_duplicates(subset=station_col)[
+        [station_col, station_name_col, lat_col, lon_col]
+    ]
+
+    # For each station, find all grid cells within radius
+    radius_rad = radius_km / 6371.0
+
+    # Query all grid cells within radius for each station
+    grid_to_stations = {}
+
+    station_iter = (
+        tqdm(
+            station_meta.itertuples(index=False),
+            total=len(station_meta),
+            desc="Mapping stations to grid",
+        )
+        if log == "tqdm"
+        else station_meta.itertuples(index=False)
+    )
+
+    for station in station_iter:
+        station_id = getattr(station, station_col)
+        station_name = getattr(station, station_name_col)
+        station_lat = getattr(station, lat_col)
+        station_lon = getattr(station, lon_col)
+
+        # Convert station coords to radians for query
+        stn_rad = np.radians([[station_lat, station_lon]])
+
+        # Find all grid cells within radius
+        indices = tree.query_radius(stn_rad, r=radius_rad)[0]
+
+        # Convert flat indices to (y, x) grid indices
+        for flat_idx in indices:
+            y_idx, x_idx = np.unravel_index(flat_idx, (ny, nx))
+
+            if (y_idx, x_idx) not in grid_to_stations:
+                grid_to_stations[(y_idx, x_idx)] = []
+
+            # Add station info to this grid cell
+            # Convert longitude back to [-180, 180] for API output
+            output_lon = ((station_lon + 180) % 360) - 180
+
+            grid_to_stations[(y_idx, x_idx)].append(
+                {
+                    "id": station_id,
+                    "name": station_name,
+                    "lat": round(station_lat, 4),
+                    "lon": round(output_lon, 4),
+                }
+            )
+
+    _log(f"Mapped {len(station_meta)} stations to {len(grid_to_stations)} grid cells.")
+
+    return grid_to_stations
+
+
 # --- Main Ingest Execution Block ---
 # This script follows the same top-level script style as other ingest scripts in
 # the repository (no `main()` wrapper). It expects environment variables to be
@@ -738,6 +848,23 @@ gridded_dwd_ds = interpolate_dwd_to_grid_knearest_dask(
     log="tqdm",
 )
 
+# --- Step 4.5: Build Grid-to-Stations Mapping ---
+logging.info("\n--- Building grid-to-stations mapping ---")
+grid_to_stations_map = build_grid_to_stations_map(
+    df_data,  # Use original df_data which has station_name
+    radius_km=radius_km,
+    lat_col="latitude",
+    lon_col="longitude",
+    station_col="station_id",
+    station_name_col="station_name",
+    log="tqdm",
+)
+
+# Save the station map to a pickle file
+station_map_file = os.path.join(forecast_process_dir, "DWD_MOSMIX_stations.pickle")
+with open(station_map_file, "wb") as f:
+    pickle.dump(grid_to_stations_map, f)
+logging.info(f"Station map saved to {station_map_file}")
 
 # Reformat the dataset to have a stacked time dimension and add a 3D time variable
 # Get the actual stacked times from the concatenated dataset
@@ -845,6 +972,12 @@ if save_type == "S3":
         forecast_path + "/" + ingest_version + "/DWD_MOSMIX.zarr.zip",
     )
 
+    # Upload station map
+    s3.put_file(
+        forecast_process_dir + "/DWD_MOSMIX_stations.pickle",
+        forecast_path + "/" + ingest_version + "/DWD_MOSMIX_stations.pickle",
+    )
+
     # Write most recent forecast time
     with open(forecast_process_dir + "/DWD_MOSMIX.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
@@ -865,6 +998,12 @@ else:
     shutil.move(
         forecast_process_dir + "/DWD_MOSMIX.time.pickle",
         forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle",
+    )
+
+    # Copy station map to final location
+    shutil.copy(
+        forecast_process_dir + "/DWD_MOSMIX_stations.pickle",
+        forecast_path + "/" + ingest_version + "/DWD_MOSMIX_stations.pickle",
     )
 
     # Copy the zarr file to the final location
