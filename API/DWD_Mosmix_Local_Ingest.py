@@ -19,6 +19,13 @@
 # This would keep the sources more consistent for the API users, instead of mixing MOSMIX-S forecast and
 # something else for recent past. Since it's an hourly model, it would be merging the first step from the last 48 runs
 
+
+# NOTE 3: Multiple stations can map to the same grid cell (e.g., OSAKA station ID 47772 and
+# OSAKA AIRPORT station ID 47771 are ~10km apart). The interpolation uses inverse distance
+# weighting (IDW) to properly average values from all contributing stations rather than
+# taking just the last value. This prevents temperature jumps and other data artifacts
+# in the API output.
+
 # %% Import modules
 import io
 import logging
@@ -521,12 +528,17 @@ def interpolate_dwd_to_grid_knearest_dask(
     neigh_flat = inds_flat[stn_idx_full]  # (n_rows, k_max)
     neigh_time = np.repeat(t_idx[:, None], k_max, 1)  # (n_rows, k_max)
 
+    # Get distances for each row's neighbours (for inverse distance weighting)
+    neigh_dist = dist_rad[stn_idx_full]  # (n_rows, k_max)
+
     # Flatten and filter invalid neighbours
     flat_flat = neigh_flat.ravel()
     flat_time = neigh_time.ravel()
+    flat_dist = neigh_dist.ravel()
     valid = flat_flat >= 0
     flat_flat = flat_flat[valid]
     flat_time = flat_time[valid]
+    flat_dist = flat_dist[valid]
 
     # Grid indices (y, x)
     iy, ix = np.unravel_index(flat_flat, (ny, nx))
@@ -552,13 +564,25 @@ def interpolate_dwd_to_grid_knearest_dask(
         y_final = iy[val_mask]
         x_final = ix[val_mask]
         v_final = vals_rep[val_mask]
+        d_final = flat_dist[val_mask]
 
-        # Allocate dense array
-        arr = np.full((nt, ny, nx), np.nan, dtype=dtype)
+        # Allocate dense arrays for values, weights, and weight sums
+        arr = np.zeros((nt, ny, nx), dtype=dtype)
+        weight_sum = np.zeros((nt, ny, nx), dtype=dtype)
 
-        # Advanced indexing: last occurrence in the 1D sequence wins,
-        # which is consistent with df_sorted order (time-sorted, row order).
-        arr[t_final, y_final, x_final] = v_final
+        # Use inverse distance weighting to handle multiple stations per grid cell
+        # Add small epsilon to avoid division by zero for exact matches
+        epsilon = 1e-10
+        weights = 1.0 / (d_final + epsilon)
+
+        # Accumulate weighted values and weights using np.add.at for proper handling of duplicates
+        np.add.at(arr, (t_final, y_final, x_final), v_final * weights)
+        np.add.at(weight_sum, (t_final, y_final, x_final), weights)
+
+        # Compute weighted average where we have data
+        valid_cells = weight_sum > 0
+        arr[valid_cells] = arr[valid_cells] / weight_sum[valid_cells]
+        arr[~valid_cells] = np.nan
 
         # Wrap in Dask
         chunk_t = min(time_chunk, nt) if nt > 0 else 1
