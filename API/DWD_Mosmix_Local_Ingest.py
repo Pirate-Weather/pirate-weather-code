@@ -19,6 +19,13 @@
 # This would keep the sources more consistent for the API users, instead of mixing MOSMIX-S forecast and
 # something else for recent past. Since it's an hourly model, it would be merging the first step from the last 48 runs
 
+
+# NOTE 3: Multiple stations can map to the same grid cell (e.g., OSAKA station ID 47772 and
+# OSAKA AIRPORT station ID 47771 are ~10km apart). The interpolation uses inverse distance
+# weighting (IDW) to properly average values from all contributing stations rather than
+# taking just the last value. This prevents temperature jumps and other data artifacts
+# in the API output.
+
 # %% Import modules
 import io
 import logging
