@@ -1056,8 +1056,7 @@ async def PW_Forecast(
         # Calculate distance to nearest station if stations are available
         nearest_station_distance = -999  # Default value when no stations available
         if (
-            version >= 2
-            and DWD_MOSMIX_Stations is not None
+            DWD_MOSMIX_Stations is not None
             and grid_result.x_dwd is not None
             and grid_result.y_dwd is not None
             and "dwd_mosmix" in sourceList
@@ -1066,19 +1065,18 @@ async def PW_Forecast(
             stations_at_grid = DWD_MOSMIX_Stations.get(grid_key, [])
             if stations_at_grid:
                 # Calculate distance to each station and find the minimum
-                min_distance = float("inf")
-                for station in stations_at_grid:
-                    station_lat = station.get("lat")
-                    station_lon = station.get("lon")
-                    if station_lat is not None and station_lon is not None:
-                        distance = haversine_distance(
-                            lat, lon_IN, station_lat, station_lon
-                        )
-                        min_distance = min(min_distance, distance)
-
-                # Convert to integer kilometers, but only if we found a valid station
-                if min_distance != float("inf"):
+                # Performance: Use a generator expression with min() for efficiency
+                distances = (
+                    haversine_distance(lat, lon_IN, station["lat"], station["lon"])
+                    for station in stations_at_grid
+                    if station.get("lat") is not None and station.get("lon") is not None
+                )
+                try:
+                    min_distance = min(distances)
                     nearest_station_distance = int(round(min_distance))
+                except ValueError:
+                    # No valid stations with coordinates
+                    pass
 
         returnOBJ["flags"]["nearest-station"] = nearest_station_distance
         returnOBJ["flags"]["units"] = unitSystem
