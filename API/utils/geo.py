@@ -296,11 +296,10 @@ def is_in_north_america(lat: float, lon: float) -> bool:
         # These are far west of the main continental area
         if lon_normalized < -170.0:
             # Only include Alaska region (north of 50°N)
-            return lat >= 51.0
+            return lat >= 50.0
 
-        # Exclude US Minor Outlying Islands in the Caribbean
-        # Navassa Island (~18.4°N, -75.0°W) is the main one
-        # It's quite small, so we'll use the main bounding box
+        # Note: Small Caribbean territories (e.g., Navassa Island) are within
+        # the main bounding box and are included as part of North America
         return True
 
     return False
