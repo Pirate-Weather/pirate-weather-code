@@ -56,7 +56,7 @@ def prepare_data_inputs(
 ):
     """
     Prepare data inputs for the hourly block.
-    
+
     Args:
         source_list: List of available data sources.
         nbm_merged: NBM merged data array.
@@ -71,14 +71,14 @@ def prepare_data_inputs(
         num_hours: Number of forecast hours.
         lat: Latitude of the forecast location.
         lon: Longitude of the forecast location.
-    
+
     Returns:
         Dictionary containing prepared data inputs for hourly processing.
     """
     # Helper to check if ERA5 is valid (it uses isinstance check in original code)
     era5_valid = isinstance(era5_merged, np.ndarray)
     dwd_valid = isinstance(dwd_mosmix_merged, np.ndarray)
-    
+
     # Determine if we should prioritize ECMWF over DWD MOSMIX
     # For North America, ECMWF should come before DWD MOSMIX
     in_north_america = is_in_north_america(lat, lon)

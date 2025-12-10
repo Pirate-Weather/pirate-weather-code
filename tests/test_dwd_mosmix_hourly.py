@@ -132,6 +132,8 @@ def test_dwd_mosmix_hourly_inputs():
         era5_merged=None,
         extra_vars=[],
         num_hours=num_hours,
+        lat=45.0,  # Arbitrary location for testing
+        lon=-75.0,
     )
 
     # Verify temperature_inputs uses DWD MOSMIX data
@@ -192,6 +194,8 @@ def test_dwd_mosmix_with_multiple_sources():
         era5_merged=None,
         extra_vars=[],
         num_hours=num_hours,
+        lat=45.0,  # Arbitrary location for testing
+        lon=-75.0,
     )
 
     # Verify DWD MOSMIX data is used (should be in first column)
