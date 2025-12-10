@@ -200,7 +200,14 @@ def test_priority_with_all_models_north_america():
 
     # Test with Toronto location
     inputs = prepare_data_inputs(
-        source_list=["nbm", "hrrr_0-18", "hrrr_18-48", "dwd_mosmix", "ecmwf_ifs", "gfs"],
+        source_list=[
+            "nbm",
+            "hrrr_0-18",
+            "hrrr_18-48",
+            "dwd_mosmix",
+            "ecmwf_ifs",
+            "gfs",
+        ],
         nbm_merged=nbm_merged,
         nbm_fire_merged=None,
         hrrr_merged=hrrr_merged,
@@ -221,11 +228,17 @@ def test_priority_with_all_models_north_america():
     # First column should be NBM (20.0)
     assert np.isclose(temp_inputs[0, 0], 20.0, atol=0.1), "First priority should be NBM"
     # Second column should be HRRR (18.0)
-    assert np.isclose(temp_inputs[0, 1], 18.0, atol=0.1), "Second priority should be HRRR"
+    assert np.isclose(temp_inputs[0, 1], 18.0, atol=0.1), (
+        "Second priority should be HRRR"
+    )
     # Third column should be ECMWF (14.0) in North America
-    assert np.isclose(temp_inputs[0, 2], 14.0, atol=0.1), "Third priority should be ECMWF in North America"
+    assert np.isclose(temp_inputs[0, 2], 14.0, atol=0.1), (
+        "Third priority should be ECMWF in North America"
+    )
     # Fourth column should be DWD MOSMIX (12.0)
-    assert np.isclose(temp_inputs[0, 3], 12.0, atol=0.1), "Fourth priority should be DWD MOSMIX"
+    assert np.isclose(temp_inputs[0, 3], 12.0, atol=0.1), (
+        "Fourth priority should be DWD MOSMIX"
+    )
 
 
 def test_priority_with_all_models_europe():
@@ -269,8 +282,12 @@ def test_priority_with_all_models_europe():
 
     # Priority outside North America: DWD MOSMIX > ECMWF > GFS
     # First column should be DWD MOSMIX (12.0)
-    assert np.isclose(temp_inputs[0, 0], 12.0, atol=0.1), "First priority should be DWD MOSMIX in Europe"
+    assert np.isclose(temp_inputs[0, 0], 12.0, atol=0.1), (
+        "First priority should be DWD MOSMIX in Europe"
+    )
     # Second column should be ECMWF (14.0)
-    assert np.isclose(temp_inputs[0, 1], 14.0, atol=0.1), "Second priority should be ECMWF"
+    assert np.isclose(temp_inputs[0, 1], 14.0, atol=0.1), (
+        "Second priority should be ECMWF"
+    )
     # Third column should be GFS (10.0)
     assert np.isclose(temp_inputs[0, 2], 10.0, atol=0.1), "Third priority should be GFS"

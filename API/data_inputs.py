@@ -273,7 +273,9 @@ def prepare_data_inputs(
             _wind_speed(hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]])
             if hrrr_merged is not None
             else None,
-            _wind_speed(ecmwf_merged[:, ECMWF["wind_u"]], ecmwf_merged[:, ECMWF["wind_v"]])
+            _wind_speed(
+                ecmwf_merged[:, ECMWF["wind_u"]], ecmwf_merged[:, ECMWF["wind_v"]]
+            )
             if ecmwf_merged is not None
             else None,
             _wind_speed(
@@ -305,7 +307,9 @@ def prepare_data_inputs(
             )
             if dwd_valid
             else None,
-            _wind_speed(ecmwf_merged[:, ECMWF["wind_u"]], ecmwf_merged[:, ECMWF["wind_v"]])
+            _wind_speed(
+                ecmwf_merged[:, ECMWF["wind_u"]], ecmwf_merged[:, ECMWF["wind_v"]]
+            )
             if ecmwf_merged is not None
             else None,
             _wind_speed(gfs_merged[:, GFS["wind_u"]], gfs_merged[:, GFS["wind_v"]])
@@ -390,7 +394,9 @@ def prepare_data_inputs(
             num_hours,
             nbm_merged[:, NBM["cloud"]] * 0.01 if nbm_merged is not None else None,
             hrrr_merged[:, HRRR["cloud"]] * 0.01 if hrrr_merged is not None else None,
-            ecmwf_merged[:, ECMWF["cloud"]] * 0.01 if ecmwf_merged is not None else None,
+            ecmwf_merged[:, ECMWF["cloud"]] * 0.01
+            if ecmwf_merged is not None
+            else None,
             dwd_mosmix_merged[:, DWD_MOSMIX["cloud"]] * 0.01 if dwd_valid else None,
             gfs_merged[:, GFS["cloud"]] * 0.01 if gfs_merged is not None else None,
             era5_merged[:, ERA5["total_cloud_cover"]] if era5_valid else None,
@@ -401,7 +407,9 @@ def prepare_data_inputs(
             nbm_merged[:, NBM["cloud"]] * 0.01 if nbm_merged is not None else None,
             hrrr_merged[:, HRRR["cloud"]] * 0.01 if hrrr_merged is not None else None,
             dwd_mosmix_merged[:, DWD_MOSMIX["cloud"]] * 0.01 if dwd_valid else None,
-            ecmwf_merged[:, ECMWF["cloud"]] * 0.01 if ecmwf_merged is not None else None,
+            ecmwf_merged[:, ECMWF["cloud"]] * 0.01
+            if ecmwf_merged is not None
+            else None,
             gfs_merged[:, GFS["cloud"]] * 0.01 if gfs_merged is not None else None,
             era5_merged[:, ERA5["total_cloud_cover"]] if era5_valid else None,
         )
@@ -455,7 +463,9 @@ def prepare_data_inputs(
             ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
             if ecmwf_merged is not None
             else None,
-            dwd_mosmix_merged[:, DWD_MOSMIX["accum"]] if dwd_valid else None,  # kg/m^2 = mm
+            dwd_mosmix_merged[:, DWD_MOSMIX["accum"]]
+            if dwd_valid
+            else None,  # kg/m^2 = mm
             gefs_merged[:, GEFS["accum"]] if gefs_merged is not None else None,
             gfs_merged[:, GFS["accum"]] if gfs_merged is not None else None,
             era5_merged[:, ERA5["total_precipitation"]] * 1000 if era5_valid else None,
@@ -465,7 +475,9 @@ def prepare_data_inputs(
             num_hours,
             nbm_merged[:, NBM["intensity"]] if nbm_merged is not None else None,
             hrrr_merged[:, HRRR["accum"]] if hrrr_merged is not None else None,
-            dwd_mosmix_merged[:, DWD_MOSMIX["accum"]] if dwd_valid else None,  # kg/m^2 = mm
+            dwd_mosmix_merged[:, DWD_MOSMIX["accum"]]
+            if dwd_valid
+            else None,  # kg/m^2 = mm
             ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
             if ecmwf_merged is not None
             else None,
