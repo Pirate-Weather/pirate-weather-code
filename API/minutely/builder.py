@@ -770,6 +770,12 @@ def build_minutely_block(
     # Recalculate maxPchance from updated precipTypes to ensure type-specific intensities
     # are distributed correctly when intensity calculation updates the precipitation type
     # (e.g., for DWD MOSMIX temperature-based fallback or HRRR radar-based typing)
+    #
+    # This recalculation is necessary because _calculate_intensity() may update precipTypes
+    # based on temperature when WMO codes indicate "none" but accumulation > 0. Without this
+    # recalculation, the type-specific intensities (rain/snow/ice) would all be zero even
+    # though the total precipIntensity is non-zero.
+    #
     # Note: If precipTypes contains MISSING_DATA (np.nan), it becomes string "nan" in the array
     # and will default to 0 (none) via dict.get(), which is the correct behavior
     ptype_to_idx = PRECIP_IDX.copy()  # Copy the dictionary
