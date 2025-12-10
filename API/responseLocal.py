@@ -70,6 +70,7 @@ from API.legacy.summary import (
 from API.minutely.builder import build_minutely_block
 from API.request.grid_indexing import ZarrSources, calculate_grid_indexing
 from API.request.preprocess import prepare_initial_request
+from API.utils.geo import haversine_distance
 from API.utils.solar import calculate_solar_times
 from API.utils.time_indexing import calculate_time_indexing
 from API.utils.timing import StepTimer, TimingMiddleware
@@ -1051,7 +1052,33 @@ async def PW_Forecast(
         returnOBJ["flags"] = dict()
         returnOBJ["flags"]["sources"] = sourceList
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
-        returnOBJ["flags"]["nearest-station"] = int(0)
+
+        # Calculate distance to nearest station if stations are available
+        nearest_station_distance = -999  # Default value when no stations available
+        if (
+            DWD_MOSMIX_Stations is not None
+            and grid_result.x_dwd is not None
+            and grid_result.y_dwd is not None
+            and "dwd_mosmix" in sourceList
+        ):
+            grid_key = (int(grid_result.y_dwd), int(grid_result.x_dwd))
+            stations_at_grid = DWD_MOSMIX_Stations.get(grid_key, [])
+            if stations_at_grid:
+                # Calculate distance to each station and find the minimum
+                # Performance: Use a generator expression with min() for efficiency
+                distances = (
+                    haversine_distance(lat, lon_IN, station["lat"], station["lon"])
+                    for station in stations_at_grid
+                    if station.get("lat") is not None and station.get("lon") is not None
+                )
+                try:
+                    min_distance = min(distances)
+                    nearest_station_distance = int(round(min_distance))
+                except ValueError:
+                    # No valid stations with coordinates
+                    pass
+
+        returnOBJ["flags"]["nearest-station"] = nearest_station_distance
         returnOBJ["flags"]["units"] = unitSystem
         returnOBJ["flags"]["version"] = API_VERSION
         if version >= 2:
