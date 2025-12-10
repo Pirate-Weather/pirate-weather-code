@@ -8,6 +8,11 @@ BASE_DIR="${BASE_DIR:-/mnt/nvme/data/ProdTest3}"
 REMOTE_BASE="${REMOTE_BASE:-s3:piratezarr2/ForecastTar_v2/v30}"
 READY_FILE="${BASE_DIR}/models_ready"
 
+# Station metadata file (download on first run)
+STATIONS_FILE_NAME="${STATIONS_FILE_NAME:-DWD_MOSMIX_stations.pickle}"
+REMOTE_STATIONS="${REMOTE_STATIONS:-${REMOTE_BASE}/${STATIONS_FILE_NAME}}"
+LOCAL_STATIONS="${LOCAL_STATIONS:-${BASE_DIR}/${STATIONS_FILE_NAME}}"
+
 # Create BASE_DIR if it doesn't exist
 mkdir -p "$BASE_DIR"
 
@@ -29,6 +34,21 @@ first_run=1
 while true; do
   echo "Starting update loop at $(date -Iseconds)"
   loop_ok=1
+
+  # On the very first run, fetch the station metadata file if missing
+  if [ "$first_run" -eq 1 ]; then
+    if [ -f "$LOCAL_STATIONS" ]; then
+      echo "Station metadata file already present at $LOCAL_STATIONS — skipping download."
+    else
+      echo "First run: downloading station metadata file from $REMOTE_STATIONS to $LOCAL_STATIONS..."
+      if ! rclone copyto "$REMOTE_STATIONS" "$LOCAL_STATIONS"; then
+        echo "Failed to download station metadata file: $STATIONS_FILE_NAME"
+        loop_ok=0
+      else
+        echo "Successfully downloaded station metadata file: $LOCAL_STATIONS"
+      fi
+    fi
+  fi
 
   for MODEL in $MODELS; do
     echo "=== Updating $MODEL ==="

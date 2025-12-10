@@ -428,10 +428,11 @@ def interpolate_dwd_to_grid_knearest_dask(
     time_chunk=24,  # Dask chunk size in time
 ):
     """
-    Vectorized k-nearest grid interpolation with dense, Dask-backed output.
+    Vectorized nearest-neighbour grid interpolation with dense, Dask-backed output.
 
     Each dataframe row is assigned to up to k_max nearest grid cells
-    within radius_km. Output variables are (time, lat, lon) Dask arrays.
+    within radius_km. For each (time, lat, lon) grid cell, ONLY THE NEAREST
+    station is used, provided it is within radius_km. Otherwise, the cell is NaN.
 
     Parameters
     ----------
@@ -441,9 +442,9 @@ def interpolate_dwd_to_grid_knearest_dask(
     var_cols : str or list of str
         Variables to interpolate.
     radius_km : float
-        Max radius in km for grid cell to be influenced.
+        Max radius in km for a station to influence a grid cell.
     k_max : int
-        Maximum number of nearest grid cells per station.
+        Maximum number of grid cells to which each station can contribute.
     time_col, lat_col, lon_col, station_col : str
         Column names.
     dtype : numpy dtype
@@ -459,7 +460,8 @@ def interpolate_dwd_to_grid_knearest_dask(
     -------
     xr.Dataset
         Dataset with dims (time, lat, lon); each data_var is a dense,
-        Dask-backed 3D array.
+        Dask-backed 3D array. Each grid cell/time uses the closest station
+        within radius_km, or NaN if none.
     """
     if isinstance(var_cols, str):
         var_cols = [var_cols]
@@ -495,12 +497,14 @@ def interpolate_dwd_to_grid_knearest_dask(
     station_ids = station_meta[station_col].to_numpy()
     pts_rad = np.radians(station_meta[[lat_col, lon_col]].to_numpy())
 
-    # k_max nearest neighbours per station
+    # k_max nearest neighbours per station (in radians)
     dist_rad, inds_flat = tree.query(pts_rad, k=k_max)  # (n_stations, k_max)
 
     radius_rad = radius_km / 6371.0
-    mask = dist_rad <= radius_rad
-    inds_flat = np.where(mask, inds_flat, -1)  # -1 marks "no neighbour within radius"
+    mask_nn = dist_rad <= radius_rad
+    inds_flat = np.where(
+        mask_nn, inds_flat, -1
+    )  # -1 marks "no neighbour within radius"
 
     station_indexer = {sid: i for i, sid in enumerate(station_ids)}
 
@@ -513,11 +517,16 @@ def interpolate_dwd_to_grid_knearest_dask(
     unique_times = df_sorted[time_col].drop_duplicates().to_numpy()
     nt = len(unique_times)
 
+    if nt == 0:
+        return xr.Dataset(
+            coords={"time": unique_times, "lat": gfs_lats, "lon": gfs_lons}
+        )
+
     time_to_idx = {t: i for i, t in enumerate(unique_times)}
     t_idx = df_sorted[time_col].map(time_to_idx).to_numpy()  # shape (n_rows,)
 
     stn_full = df_sorted[station_col].to_numpy()
-    stn_idx_full = np.array([station_indexer[s] for s in stn_full], dtype=int)
+    stn_idx_full = np.array([station_indexer[s] for s in stn_full], dtype=np.int64)
 
     # -------------------------------------------------
     # 3) Expand row → neighbour grid indices (vectorized)
@@ -526,25 +535,87 @@ def interpolate_dwd_to_grid_knearest_dask(
 
     # Each row maps to k_max neighbours for its station
     neigh_flat = inds_flat[stn_idx_full]  # (n_rows, k_max)
-    neigh_time = np.repeat(t_idx[:, None], k_max, 1)  # (n_rows, k_max)
-
-    # Get distances for each row's neighbours (for inverse distance weighting)
+    neigh_time = np.repeat(t_idx[:, None], k_max, axis=1)  # (n_rows, k_max)
     neigh_dist = dist_rad[stn_idx_full]  # (n_rows, k_max)
 
     # Flatten and filter invalid neighbours
     flat_flat = neigh_flat.ravel()
     flat_time = neigh_time.ravel()
     flat_dist = neigh_dist.ravel()
+
     valid = flat_flat >= 0
-    flat_flat = flat_flat[valid]
-    flat_time = flat_time[valid]
-    flat_dist = flat_dist[valid]
+    if not np.any(valid):
+        # No neighbours within radius_km at all
+        ds = xr.Dataset()
+        for col in var_cols:
+            arr = np.full((nt, ny, nx), np.nan, dtype=dtype)
+            darr = da.from_array(arr, chunks=(min(time_chunk, nt), ny, nx))
+            ds[col] = xr.DataArray(
+                darr,
+                dims=("time", "lat", "lon"),
+                coords={"time": unique_times, "lat": gfs_lats, "lon": gfs_lons},
+                name=col,
+            )
+        _log("Done (no valid neighbours within radius; all NaNs).")
+        return ds
+
+    flat_flat = flat_flat[valid].astype(np.int64)
+    flat_time = flat_time[valid].astype(np.int64)
+    flat_dist = flat_dist[valid].astype(np.float32)
 
     # Grid indices (y, x)
     iy, ix = np.unravel_index(flat_flat, (ny, nx))
+    iy = iy.astype(np.int64)
+    ix = ix.astype(np.int64)
+
+    # Linear index for (time, y, x)
+    n_cells = nt * ny * nx
+    linear_index = flat_time * (ny * nx) + iy * nx + ix  # shape (n_valid,)
+
+    # Row indices expanded to neighbours
+    row_idx = np.arange(df_sorted.shape[0], dtype=np.int64)
+    row_idx_rep = np.repeat(row_idx[:, None], k_max, axis=1).ravel()[valid]
 
     # -------------------------------------------------
-    # 4) Build dense NumPy arrays and wrap them in Dask
+    # 4) For each grid cell/time, find the nearest station (single pass)
+    # -------------------------------------------------
+    _log("Computing nearest-station per grid cell/time (argmin)…")
+
+    # Sort candidates by cell index then distance
+    # lexsort uses last key as primary sort key -> primary: linear_index, secondary: flat_dist
+    order = np.lexsort((flat_dist, linear_index))
+    lin_sorted = linear_index[order]
+    dist_sorted = flat_dist[order]
+    row_sorted = row_idx_rep[order]
+
+    # Take the first candidate per unique cell index → nearest station
+    uniq_lin, idx_first = np.unique(lin_sorted, return_index=True)
+    best_lin = uniq_lin
+    best_dist = dist_sorted[idx_first]
+    best_row = row_sorted[idx_first]
+
+    # Enforce radius cutoff in radians
+    mask_radius = best_dist <= radius_rad
+    best_lin = best_lin[mask_radius]
+    best_row = best_row[mask_radius]
+
+    # If still nothing, everything is NaN
+    if best_lin.size == 0:
+        ds = xr.Dataset()
+        for col in var_cols:
+            arr = np.full((nt, ny, nx), np.nan, dtype=dtype)
+            darr = da.from_array(arr, chunks=(min(time_chunk, nt), ny, nx))
+            ds[col] = xr.DataArray(
+                darr,
+                dims=("time", "lat", "lon"),
+                coords={"time": unique_times, "lat": gfs_lats, "lon": gfs_lons},
+                name=col,
+            )
+        _log("Done (no winners within radius; all NaNs).")
+        return ds
+
+    # -------------------------------------------------
+    # 5) Build dense NumPy arrays for each variable and wrap with Dask
     # -------------------------------------------------
     _log(f"Building dense Dask arrays for {len(var_cols)} variable(s)…")
 
@@ -554,35 +625,15 @@ def interpolate_dwd_to_grid_knearest_dask(
     for col in var_iter:
         vals = df_sorted[col].to_numpy().astype(dtype)
 
-        # Replicate each row's value across its k_max neighbours
-        vals_rep = np.repeat(vals[:, None], k_max, axis=1).ravel()
-        vals_rep = vals_rep[valid]
+        # Allocate flattened grid
+        arr_flat = np.full(n_cells, np.nan, dtype=dtype)
 
-        # Drop NaNs
-        val_mask = ~np.isnan(vals_rep)
-        t_final = flat_time[val_mask]
-        y_final = iy[val_mask]
-        x_final = ix[val_mask]
-        v_final = vals_rep[val_mask]
-        d_final = flat_dist[val_mask]
+        # Assign values of chosen rows to their grid cells
+        # Note: if the chosen row's value is NaN, the cell is NaN.
+        arr_flat[best_lin] = vals[best_row]
 
-        # Allocate dense arrays for values, weights, and weight sums
-        arr = np.zeros((nt, ny, nx), dtype=dtype)
-        weight_sum = np.zeros((nt, ny, nx), dtype=dtype)
-
-        # Use inverse distance weighting to handle multiple stations per grid cell
-        # Add small epsilon to avoid division by zero for exact matches
-        epsilon = 1e-10
-        weights = 1.0 / (d_final + epsilon)
-
-        # Accumulate weighted values and weights using np.add.at for proper handling of duplicates
-        np.add.at(arr, (t_final, y_final, x_final), v_final * weights)
-        np.add.at(weight_sum, (t_final, y_final, x_final), weights)
-
-        # Compute weighted average where we have data
-        valid_cells = weight_sum > 0
-        arr[valid_cells] = arr[valid_cells] / weight_sum[valid_cells]
-        arr[~valid_cells] = np.nan
+        # Reshape back to (time, lat, lon)
+        arr = arr_flat.reshape(nt, ny, nx)
 
         # Wrap in Dask
         chunk_t = min(time_chunk, nt) if nt > 0 else 1
@@ -591,11 +642,7 @@ def interpolate_dwd_to_grid_knearest_dask(
         data_vars[col] = xr.DataArray(
             darr,
             dims=("time", "lat", "lon"),
-            coords={
-                "time": unique_times,
-                "lat": gfs_lats,
-                "lon": gfs_lons,
-            },
+            coords={"time": unique_times, "lat": gfs_lats, "lon": gfs_lons},
             name=col,
         )
 
