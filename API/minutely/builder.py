@@ -770,8 +770,9 @@ def build_minutely_block(
     # Recalculate maxPchance from updated precipTypes to ensure type-specific intensities
     # are distributed correctly when intensity calculation updates the precipitation type
     # (e.g., for DWD MOSMIX temperature-based fallback or HRRR radar-based typing)
-    # Note: Both "ice" and "sleet" map to index 2 or 3, and are treated identically in distribution
-    ptype_to_idx = {"none": 0, "snow": 1, "ice": 2, "sleet": 3, "rain": 4, MISSING_DATA: 5}
+    # Build reverse mapping from PRECIP_IDX, adding MISSING_DATA
+    ptype_to_idx = dict(PRECIP_IDX)  # Copy the dictionary
+    ptype_to_idx[MISSING_DATA] = 5  # Add missing data mapping
     maxPchance = np.array([ptype_to_idx.get(ptype, 0) for ptype in precipTypes])
 
     # Calculate Error
