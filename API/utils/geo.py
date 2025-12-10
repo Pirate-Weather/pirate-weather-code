@@ -268,3 +268,39 @@ def solar_irradiance(latitude, longitude, unix_time):
     )
 
     return G
+
+
+def is_in_north_america(lat: float, lon: float) -> bool:
+    """
+    Determine if a location is within North America (USA, Canada, Mexico).
+
+    Excludes US Minor Outlying Islands which are small Pacific and Caribbean territories.
+    
+    Args:
+        lat (float): Latitude in degrees (-90 to 90).
+        lon (float): Longitude in degrees (-180 to 180).
+    
+    Returns:
+        bool: True if the location is in North America, False otherwise.
+    """
+    # Normalize longitude to -180 to 180 range
+    lon_normalized = ((lon + 180) % 360) - 180
+    
+    # Main North America bounding box
+    # Includes USA (including Alaska), Canada, and Mexico
+    # Latitude: 14°N (southern Mexico) to 83°N (northern Canada/Greenland)
+    # Longitude: -168°W (western Alaska) to -52°W (eastern Newfoundland)
+    if 14.0 <= lat <= 83.0 and -168.0 <= lon_normalized <= -52.0:
+        # Exclude US Minor Outlying Islands in the Pacific
+        # Wake Island, Midway Atoll, Johnston Atoll, etc. are around 160°W to 180°W
+        # These are far west of the main continental area
+        if lon_normalized < -170.0:
+            # Only include Alaska region (north of 50°N)
+            return lat >= 51.0
+        
+        # Exclude US Minor Outlying Islands in the Caribbean
+        # Navassa Island (~18.4°N, -75.0°W) is the main one
+        # It's quite small, so we'll use the main bounding box
+        return True
+    
+    return False

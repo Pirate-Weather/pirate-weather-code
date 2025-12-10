@@ -13,6 +13,7 @@ from API.constants.model_const import (
     NBM,
     NBM_FIRE_INDEX,
 )
+from API.utils.geo import is_in_north_america
 
 
 def _stack_fields(num_hours, *arrays):
@@ -50,13 +51,37 @@ def prepare_data_inputs(
     era5_merged,
     extra_vars,
     num_hours,
+    lat,
+    lon,
 ):
     """
     Prepare data inputs for the hourly block.
+    
+    Args:
+        source_list: List of available data sources.
+        nbm_merged: NBM merged data array.
+        nbm_fire_merged: NBM fire merged data array.
+        hrrr_merged: HRRR merged data array.
+        dwd_mosmix_merged: DWD MOSMIX merged data array.
+        ecmwf_merged: ECMWF merged data array.
+        gefs_merged: GEFS merged data array.
+        gfs_merged: GFS merged data array.
+        era5_merged: ERA5 merged data array.
+        extra_vars: List of extra variables to include.
+        num_hours: Number of forecast hours.
+        lat: Latitude of the forecast location.
+        lon: Longitude of the forecast location.
+    
+    Returns:
+        Dictionary containing prepared data inputs for hourly processing.
     """
     # Helper to check if ERA5 is valid (it uses isinstance check in original code)
     era5_valid = isinstance(era5_merged, np.ndarray)
     dwd_valid = isinstance(dwd_mosmix_merged, np.ndarray)
+    
+    # Determine if we should prioritize ECMWF over DWD MOSMIX
+    # For North America, ECMWF should come before DWD MOSMIX
+    in_north_america = is_in_north_america(lat, lon)
 
     # --- InterThour_inputs ---
     inter_thour_inputs = {}
@@ -152,26 +177,51 @@ def prepare_data_inputs(
         prcip_probability_inputs["gefs"] = gefs_merged[:, GEFS["prob"]]
 
     # --- temperature_inputs ---
-    temperature_inputs = _stack_fields(
-        num_hours,
-        nbm_merged[:, NBM["temp"]] if nbm_merged is not None else None,
-        hrrr_merged[:, HRRR["temp"]] if hrrr_merged is not None else None,
-        dwd_mosmix_merged[:, DWD_MOSMIX["temp"]] if dwd_valid else None,
-        ecmwf_merged[:, ECMWF["temp"]] if ecmwf_merged is not None else None,
-        gfs_merged[:, GFS["temp"]] if gfs_merged is not None else None,
-        era5_merged[:, ERA5["2m_temperature"]] if era5_valid else None,
-    )
+    # Priority order depends on location:
+    # - North America: NBM > HRRR > ECMWF > DWD MOSMIX > GFS > ERA5
+    # - Rest of world: NBM > HRRR > DWD MOSMIX > ECMWF > GFS > ERA5
+    if in_north_america:
+        temperature_inputs = _stack_fields(
+            num_hours,
+            nbm_merged[:, NBM["temp"]] if nbm_merged is not None else None,
+            hrrr_merged[:, HRRR["temp"]] if hrrr_merged is not None else None,
+            ecmwf_merged[:, ECMWF["temp"]] if ecmwf_merged is not None else None,
+            dwd_mosmix_merged[:, DWD_MOSMIX["temp"]] if dwd_valid else None,
+            gfs_merged[:, GFS["temp"]] if gfs_merged is not None else None,
+            era5_merged[:, ERA5["2m_temperature"]] if era5_valid else None,
+        )
+    else:
+        temperature_inputs = _stack_fields(
+            num_hours,
+            nbm_merged[:, NBM["temp"]] if nbm_merged is not None else None,
+            hrrr_merged[:, HRRR["temp"]] if hrrr_merged is not None else None,
+            dwd_mosmix_merged[:, DWD_MOSMIX["temp"]] if dwd_valid else None,
+            ecmwf_merged[:, ECMWF["temp"]] if ecmwf_merged is not None else None,
+            gfs_merged[:, GFS["temp"]] if gfs_merged is not None else None,
+            era5_merged[:, ERA5["2m_temperature"]] if era5_valid else None,
+        )
 
     # --- dew_inputs ---
-    dew_inputs = _stack_fields(
-        num_hours,
-        nbm_merged[:, NBM["dew"]] if nbm_merged is not None else None,
-        hrrr_merged[:, HRRR["dew"]] if hrrr_merged is not None else None,
-        dwd_mosmix_merged[:, DWD_MOSMIX["dew"]] if dwd_valid else None,
-        ecmwf_merged[:, ECMWF["dew"]] if ecmwf_merged is not None else None,
-        gfs_merged[:, GFS["dew"]] if gfs_merged is not None else None,
-        era5_merged[:, ERA5["2m_dewpoint_temperature"]] if era5_valid else None,
-    )
+    if in_north_america:
+        dew_inputs = _stack_fields(
+            num_hours,
+            nbm_merged[:, NBM["dew"]] if nbm_merged is not None else None,
+            hrrr_merged[:, HRRR["dew"]] if hrrr_merged is not None else None,
+            ecmwf_merged[:, ECMWF["dew"]] if ecmwf_merged is not None else None,
+            dwd_mosmix_merged[:, DWD_MOSMIX["dew"]] if dwd_valid else None,
+            gfs_merged[:, GFS["dew"]] if gfs_merged is not None else None,
+            era5_merged[:, ERA5["2m_dewpoint_temperature"]] if era5_valid else None,
+        )
+    else:
+        dew_inputs = _stack_fields(
+            num_hours,
+            nbm_merged[:, NBM["dew"]] if nbm_merged is not None else None,
+            hrrr_merged[:, HRRR["dew"]] if hrrr_merged is not None else None,
+            dwd_mosmix_merged[:, DWD_MOSMIX["dew"]] if dwd_valid else None,
+            ecmwf_merged[:, ECMWF["dew"]] if ecmwf_merged is not None else None,
+            gfs_merged[:, GFS["dew"]] if gfs_merged is not None else None,
+            era5_merged[:, ERA5["2m_dewpoint_temperature"]] if era5_valid else None,
+        )
 
     # --- humidity_inputs ---
     era5_humidity = None
@@ -185,6 +235,7 @@ def prepare_data_inputs(
             * 100
         )
 
+    # Note: ECMWF doesn't provide humidity directly, so order is the same
     humidity_inputs = _stack_fields(
         num_hours,
         nbm_merged[:, NBM["humidity"]] if nbm_merged is not None else None,
@@ -195,43 +246,81 @@ def prepare_data_inputs(
     )
 
     # --- pressure_inputs ---
-    pressure_inputs = _stack_fields(
-        num_hours,
-        hrrr_merged[:, HRRR["pressure"]] if hrrr_merged is not None else None,
-        dwd_mosmix_merged[:, DWD_MOSMIX["pressure"]] if dwd_valid else None,
-        ecmwf_merged[:, ECMWF["pressure"]] if ecmwf_merged is not None else None,
-        gfs_merged[:, GFS["pressure"]] if gfs_merged is not None else None,
-        era5_merged[:, ERA5["mean_sea_level_pressure"]] if era5_valid else None,
-    )
+    if in_north_america:
+        pressure_inputs = _stack_fields(
+            num_hours,
+            hrrr_merged[:, HRRR["pressure"]] if hrrr_merged is not None else None,
+            ecmwf_merged[:, ECMWF["pressure"]] if ecmwf_merged is not None else None,
+            dwd_mosmix_merged[:, DWD_MOSMIX["pressure"]] if dwd_valid else None,
+            gfs_merged[:, GFS["pressure"]] if gfs_merged is not None else None,
+            era5_merged[:, ERA5["mean_sea_level_pressure"]] if era5_valid else None,
+        )
+    else:
+        pressure_inputs = _stack_fields(
+            num_hours,
+            hrrr_merged[:, HRRR["pressure"]] if hrrr_merged is not None else None,
+            dwd_mosmix_merged[:, DWD_MOSMIX["pressure"]] if dwd_valid else None,
+            ecmwf_merged[:, ECMWF["pressure"]] if ecmwf_merged is not None else None,
+            gfs_merged[:, GFS["pressure"]] if gfs_merged is not None else None,
+            era5_merged[:, ERA5["mean_sea_level_pressure"]] if era5_valid else None,
+        )
 
     # --- wind_inputs ---
-    wind_inputs = _stack_fields(
-        num_hours,
-        nbm_merged[:, NBM["wind"]] if nbm_merged is not None else None,
-        _wind_speed(hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]])
-        if hrrr_merged is not None
-        else None,
-        _wind_speed(
-            dwd_mosmix_merged[:, DWD_MOSMIX["wind_u"]],
-            dwd_mosmix_merged[:, DWD_MOSMIX["wind_v"]],
+    if in_north_america:
+        wind_inputs = _stack_fields(
+            num_hours,
+            nbm_merged[:, NBM["wind"]] if nbm_merged is not None else None,
+            _wind_speed(hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]])
+            if hrrr_merged is not None
+            else None,
+            _wind_speed(ecmwf_merged[:, ECMWF["wind_u"]], ecmwf_merged[:, ECMWF["wind_v"]])
+            if ecmwf_merged is not None
+            else None,
+            _wind_speed(
+                dwd_mosmix_merged[:, DWD_MOSMIX["wind_u"]],
+                dwd_mosmix_merged[:, DWD_MOSMIX["wind_v"]],
+            )
+            if dwd_valid
+            else None,
+            _wind_speed(gfs_merged[:, GFS["wind_u"]], gfs_merged[:, GFS["wind_v"]])
+            if gfs_merged is not None
+            else None,
+            _wind_speed(
+                era5_merged[:, ERA5["10m_u_component_of_wind"]],
+                era5_merged[:, ERA5["10m_v_component_of_wind"]],
+            )
+            if era5_valid
+            else None,
         )
-        if dwd_valid
-        else None,
-        _wind_speed(ecmwf_merged[:, ECMWF["wind_u"]], ecmwf_merged[:, ECMWF["wind_v"]])
-        if ecmwf_merged is not None
-        else None,
-        _wind_speed(gfs_merged[:, GFS["wind_u"]], gfs_merged[:, GFS["wind_v"]])
-        if gfs_merged is not None
-        else None,
-        _wind_speed(
-            era5_merged[:, ERA5["10m_u_component_of_wind"]],
-            era5_merged[:, ERA5["10m_v_component_of_wind"]],
+    else:
+        wind_inputs = _stack_fields(
+            num_hours,
+            nbm_merged[:, NBM["wind"]] if nbm_merged is not None else None,
+            _wind_speed(hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]])
+            if hrrr_merged is not None
+            else None,
+            _wind_speed(
+                dwd_mosmix_merged[:, DWD_MOSMIX["wind_u"]],
+                dwd_mosmix_merged[:, DWD_MOSMIX["wind_v"]],
+            )
+            if dwd_valid
+            else None,
+            _wind_speed(ecmwf_merged[:, ECMWF["wind_u"]], ecmwf_merged[:, ECMWF["wind_v"]])
+            if ecmwf_merged is not None
+            else None,
+            _wind_speed(gfs_merged[:, GFS["wind_u"]], gfs_merged[:, GFS["wind_v"]])
+            if gfs_merged is not None
+            else None,
+            _wind_speed(
+                era5_merged[:, ERA5["10m_u_component_of_wind"]],
+                era5_merged[:, ERA5["10m_v_component_of_wind"]],
+            )
+            if era5_valid
+            else None,
         )
-        if era5_valid
-        else None,
-    )
 
     # --- gust_inputs ---
+    # Note: ECMWF doesn't provide gust data, so order is the same
     gust_inputs = _stack_fields(
         num_hours,
         nbm_merged[:, NBM["gust"]] if nbm_merged is not None else None,
@@ -242,42 +331,80 @@ def prepare_data_inputs(
     )
 
     # --- bearing_inputs ---
-    bearing_inputs = _stack_fields(
-        num_hours,
-        nbm_merged[:, NBM["bearing"]] if nbm_merged is not None else None,
-        _bearing(hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]])
-        if hrrr_merged is not None
-        else None,
-        _bearing(
-            dwd_mosmix_merged[:, DWD_MOSMIX["wind_u"]],
-            dwd_mosmix_merged[:, DWD_MOSMIX["wind_v"]],
+    if in_north_america:
+        bearing_inputs = _stack_fields(
+            num_hours,
+            nbm_merged[:, NBM["bearing"]] if nbm_merged is not None else None,
+            _bearing(hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]])
+            if hrrr_merged is not None
+            else None,
+            _bearing(ecmwf_merged[:, ECMWF["wind_u"]], ecmwf_merged[:, ECMWF["wind_v"]])
+            if ecmwf_merged is not None
+            else None,
+            _bearing(
+                dwd_mosmix_merged[:, DWD_MOSMIX["wind_u"]],
+                dwd_mosmix_merged[:, DWD_MOSMIX["wind_v"]],
+            )
+            if dwd_valid
+            else None,
+            _bearing(gfs_merged[:, GFS["wind_u"]], gfs_merged[:, GFS["wind_v"]])
+            if gfs_merged is not None
+            else None,
+            _bearing(
+                era5_merged[:, ERA5["10m_u_component_of_wind"]],
+                era5_merged[:, ERA5["10m_v_component_of_wind"]],
+            )
+            if era5_valid
+            else None,
         )
-        if dwd_valid
-        else None,
-        _bearing(ecmwf_merged[:, ECMWF["wind_u"]], ecmwf_merged[:, ECMWF["wind_v"]])
-        if ecmwf_merged is not None
-        else None,
-        _bearing(gfs_merged[:, GFS["wind_u"]], gfs_merged[:, GFS["wind_v"]])
-        if gfs_merged is not None
-        else None,
-        _bearing(
-            era5_merged[:, ERA5["10m_u_component_of_wind"]],
-            era5_merged[:, ERA5["10m_v_component_of_wind"]],
+    else:
+        bearing_inputs = _stack_fields(
+            num_hours,
+            nbm_merged[:, NBM["bearing"]] if nbm_merged is not None else None,
+            _bearing(hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]])
+            if hrrr_merged is not None
+            else None,
+            _bearing(
+                dwd_mosmix_merged[:, DWD_MOSMIX["wind_u"]],
+                dwd_mosmix_merged[:, DWD_MOSMIX["wind_v"]],
+            )
+            if dwd_valid
+            else None,
+            _bearing(ecmwf_merged[:, ECMWF["wind_u"]], ecmwf_merged[:, ECMWF["wind_v"]])
+            if ecmwf_merged is not None
+            else None,
+            _bearing(gfs_merged[:, GFS["wind_u"]], gfs_merged[:, GFS["wind_v"]])
+            if gfs_merged is not None
+            else None,
+            _bearing(
+                era5_merged[:, ERA5["10m_u_component_of_wind"]],
+                era5_merged[:, ERA5["10m_v_component_of_wind"]],
+            )
+            if era5_valid
+            else None,
         )
-        if era5_valid
-        else None,
-    )
 
     # --- cloud_inputs ---
-    cloud_inputs = _stack_fields(
-        num_hours,
-        nbm_merged[:, NBM["cloud"]] * 0.01 if nbm_merged is not None else None,
-        hrrr_merged[:, HRRR["cloud"]] * 0.01 if hrrr_merged is not None else None,
-        dwd_mosmix_merged[:, DWD_MOSMIX["cloud"]] * 0.01 if dwd_valid else None,
-        ecmwf_merged[:, ECMWF["cloud"]] * 0.01 if ecmwf_merged is not None else None,
-        gfs_merged[:, GFS["cloud"]] * 0.01 if gfs_merged is not None else None,
-        era5_merged[:, ERA5["total_cloud_cover"]] if era5_valid else None,
-    )
+    if in_north_america:
+        cloud_inputs = _stack_fields(
+            num_hours,
+            nbm_merged[:, NBM["cloud"]] * 0.01 if nbm_merged is not None else None,
+            hrrr_merged[:, HRRR["cloud"]] * 0.01 if hrrr_merged is not None else None,
+            ecmwf_merged[:, ECMWF["cloud"]] * 0.01 if ecmwf_merged is not None else None,
+            dwd_mosmix_merged[:, DWD_MOSMIX["cloud"]] * 0.01 if dwd_valid else None,
+            gfs_merged[:, GFS["cloud"]] * 0.01 if gfs_merged is not None else None,
+            era5_merged[:, ERA5["total_cloud_cover"]] if era5_valid else None,
+        )
+    else:
+        cloud_inputs = _stack_fields(
+            num_hours,
+            nbm_merged[:, NBM["cloud"]] * 0.01 if nbm_merged is not None else None,
+            hrrr_merged[:, HRRR["cloud"]] * 0.01 if hrrr_merged is not None else None,
+            dwd_mosmix_merged[:, DWD_MOSMIX["cloud"]] * 0.01 if dwd_valid else None,
+            ecmwf_merged[:, ECMWF["cloud"]] * 0.01 if ecmwf_merged is not None else None,
+            gfs_merged[:, GFS["cloud"]] * 0.01 if gfs_merged is not None else None,
+            era5_merged[:, ERA5["total_cloud_cover"]] if era5_valid else None,
+        )
 
     # --- uv_inputs ---
     uv_inputs = _stack_fields(
@@ -294,6 +421,7 @@ def prepare_data_inputs(
     )
 
     # --- vis_inputs ---
+    # Note: ECMWF doesn't provide visibility data, so order is the same
     vis_inputs = _stack_fields(
         num_hours,
         nbm_merged[:, NBM["vis"]] if nbm_merged is not None else None,
@@ -319,18 +447,32 @@ def prepare_data_inputs(
     )
 
     # --- accum_inputs ---
-    accum_inputs = _stack_fields(
-        num_hours,
-        nbm_merged[:, NBM["intensity"]] if nbm_merged is not None else None,
-        hrrr_merged[:, HRRR["accum"]] if hrrr_merged is not None else None,
-        dwd_mosmix_merged[:, DWD_MOSMIX["accum"]] if dwd_valid else None,  # kg/m^2 = mm
-        ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
-        if ecmwf_merged is not None
-        else None,
-        gefs_merged[:, GEFS["accum"]] if gefs_merged is not None else None,
-        gfs_merged[:, GFS["accum"]] if gfs_merged is not None else None,
-        era5_merged[:, ERA5["total_precipitation"]] * 1000 if era5_valid else None,
-    )
+    if in_north_america:
+        accum_inputs = _stack_fields(
+            num_hours,
+            nbm_merged[:, NBM["intensity"]] if nbm_merged is not None else None,
+            hrrr_merged[:, HRRR["accum"]] if hrrr_merged is not None else None,
+            ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
+            if ecmwf_merged is not None
+            else None,
+            dwd_mosmix_merged[:, DWD_MOSMIX["accum"]] if dwd_valid else None,  # kg/m^2 = mm
+            gefs_merged[:, GEFS["accum"]] if gefs_merged is not None else None,
+            gfs_merged[:, GFS["accum"]] if gfs_merged is not None else None,
+            era5_merged[:, ERA5["total_precipitation"]] * 1000 if era5_valid else None,
+        )
+    else:
+        accum_inputs = _stack_fields(
+            num_hours,
+            nbm_merged[:, NBM["intensity"]] if nbm_merged is not None else None,
+            hrrr_merged[:, HRRR["accum"]] if hrrr_merged is not None else None,
+            dwd_mosmix_merged[:, DWD_MOSMIX["accum"]] if dwd_valid else None,  # kg/m^2 = mm
+            ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
+            if ecmwf_merged is not None
+            else None,
+            gefs_merged[:, GEFS["accum"]] if gefs_merged is not None else None,
+            gfs_merged[:, GFS["accum"]] if gfs_merged is not None else None,
+            era5_merged[:, ERA5["total_precipitation"]] * 1000 if era5_valid else None,
+        )
 
     # --- nearstorm_inputs ---
     nearstorm_inputs = {
@@ -369,6 +511,7 @@ def prepare_data_inputs(
     )
 
     # --- solar_inputs ---
+    # Note: ECMWF doesn't provide solar data, so order is the same
     solar_inputs = _stack_fields(
         num_hours,
         nbm_merged[:, NBM["solar"]] if nbm_merged is not None else None,
