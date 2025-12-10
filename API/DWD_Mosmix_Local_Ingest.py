@@ -166,7 +166,11 @@ def fill_station_time_series(
             if s.notna().sum() < 2:
                 continue
 
-            if np.issubdtype(df_s[time_col].dtype, np.datetime64):
+            if col == "PTYPE_surface":
+                s2 = s.interpolate(
+                    method="nearest", limit=max_gap, limit_direction="both"
+                )
+            elif np.issubdtype(df_s[time_col].dtype, np.datetime64):
                 s2 = s.copy()
                 s2.index = df_s[time_col]
                 s2 = s2.interpolate(
@@ -716,7 +720,8 @@ def build_grid_to_stations_map(
     radius_rad = radius_km / 6371.0
 
     # Query all grid cells within radius for each station
-    grid_to_stations = {}
+    # Store closest station: key=(y, x), value=(distance, station_dict)
+    grid_best_match = {}
 
     station_iter = (
         tqdm(
@@ -738,27 +743,33 @@ def build_grid_to_stations_map(
         stn_rad = np.radians([[station_lat, station_lon]])
 
         # Find all grid cells within radius
-        indices = tree.query_radius(stn_rad, r=radius_rad)[0]
+        indices, distances = tree.query_radius(stn_rad, r=radius_rad, return_distance=True)
+
+        # Unwrap arrays (query_radius returns arrays of arrays)
+        indices = indices[0]
+        distances = distances[0]
+
+        # Convert longitude back to [-180, 180] for API output
+        output_lon = ((station_lon + 180) % 360) - 180
+
+        station_info = {
+            "id": station_id,
+            "name": station_name,
+            "lat": round(station_lat, 4),
+            "lon": round(output_lon, 4),
+        }
 
         # Convert flat indices to (y, x) grid indices
-        for flat_idx in indices:
+        for flat_idx, dist in zip(indices, distances):
             y_idx, x_idx = np.unravel_index(flat_idx, (ny, nx))
+            grid_key = (y_idx, x_idx)
 
-            if (y_idx, x_idx) not in grid_to_stations:
-                grid_to_stations[(y_idx, x_idx)] = []
+            # Check if this station is closer than the existing one for this grid cell
+            if grid_key not in grid_best_match or dist < grid_best_match[grid_key][0]:
+                grid_best_match[grid_key] = (dist, station_info)
 
-            # Add station info to this grid cell
-            # Convert longitude back to [-180, 180] for API output
-            output_lon = ((station_lon + 180) % 360) - 180
-
-            grid_to_stations[(y_idx, x_idx)].append(
-                {
-                    "id": station_id,
-                    "name": station_name,
-                    "lat": round(station_lat, 4),
-                    "lon": round(output_lon, 4),
-                }
-            )
+    # Convert best matches to the expected format: keys are (y_idx, x_idx), values are lists of dicts
+    grid_to_stations = {k: [v[1]] for k, v in grid_best_match.items()}
 
     _log(f"Mapped {len(station_meta)} stations to {len(grid_to_stations)} grid cells.")
 
@@ -901,7 +912,7 @@ df_filled = fill_station_time_series(
     time_col="time",
     station_col="station_id",
     max_gap=None,  # or an integer if you want to limit gap length
-    fill_ends=False,  # or True if you want to fill edges too
+    fill_ends=True,  # or True if you want to fill edges too
     log="tqdm",
 )
 

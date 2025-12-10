@@ -252,7 +252,8 @@ def _load_local_store(
         except Exception as exc:  # keep compatibility with ECMWF failure handling
             logger.info("%s not available: %s", attr_name, exc)
             setattr(stores, attr_name, None)
-
+    else:
+        logger.info("%s not found: %s", attr_name, path)
 
 def _testing_store(
     s3: Optional[s3fs.S3FileSystem],
