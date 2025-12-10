@@ -743,7 +743,9 @@ def build_grid_to_stations_map(
         stn_rad = np.radians([[station_lat, station_lon]])
 
         # Find all grid cells within radius
-        indices, distances = tree.query_radius(stn_rad, r=radius_rad, return_distance=True)
+        indices, distances = tree.query_radius(
+            stn_rad, r=radius_rad, return_distance=True
+        )
 
         # Unwrap arrays (query_radius returns arrays of arrays)
         indices = indices[0]

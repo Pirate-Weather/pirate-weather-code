@@ -182,9 +182,7 @@ try:
     ingest_version = INGEST_VERSION_STR
 
     if STAGE in ("DEV", "PROD"):
-        station_map_file = os.path.join(
-            save_dir, "DWD_MOSMIX_stations.pickle"
-        )
+        station_map_file = os.path.join(save_dir, "DWD_MOSMIX_stations.pickle")
     elif STAGE in ("TESTING", "TM_TESTING"):
         # For testing stages, try to load from S3
         if save_type == "S3":

@@ -255,6 +255,7 @@ def _load_local_store(
     else:
         logger.info("%s not found: %s", attr_name, path)
 
+
 def _testing_store(
     s3: Optional[s3fs.S3FileSystem],
     s3_bucket: str,
