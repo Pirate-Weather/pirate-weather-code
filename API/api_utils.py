@@ -419,7 +419,6 @@ def map_wmo4677_to_ptype(
         # Use 5°C as threshold - well above freezing to account for observation errors
         if temperature_c is not None:
             temp_arr = np.asarray(temperature_c)
-            # Ensure shapes are compatible for broadcasting
             try:
                 # This will raise ValueError if shapes are incompatible for broadcasting
                 warm_mask = temp_arr > 5.0
@@ -427,9 +426,15 @@ def map_wmo4677_to_ptype(
                 frozen_precip_mask = (out == 1) | (out == 2) | (out == 3)
                 override_mask = warm_mask & frozen_precip_mask
                 out[override_mask] = 4
-            except ValueError:
+            except ValueError as e:
                 # Shapes incompatible for broadcasting - skip temperature validation
-                pass
+                # This is expected when temperature data is unavailable or mismatched
+                logger.debug(
+                    "Temperature validation skipped due to shape mismatch: %s (codes: %s, temp: %s)",
+                    e,
+                    codes.shape,
+                    temp_arr.shape,
+                )
 
     # Use MISSING_DATA for NaNs
     out[nan_mask] = MISSING_DATA

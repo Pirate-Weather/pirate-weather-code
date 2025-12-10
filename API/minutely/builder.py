@@ -770,9 +770,10 @@ def build_minutely_block(
     # Recalculate maxPchance from updated precipTypes to ensure type-specific intensities
     # are distributed correctly when intensity calculation updates the precipitation type
     # (e.g., for DWD MOSMIX temperature-based fallback or HRRR radar-based typing)
-    # Build reverse mapping from PRECIP_IDX, adding MISSING_DATA
+    # Build reverse mapping from PRECIP_IDX, adding MISSING_DATA at index 5
+    # This matches the pTypes array: ["none", "snow", "sleet", "sleet", "rain", MISSING_DATA]
     ptype_to_idx = dict(PRECIP_IDX)  # Copy the dictionary
-    ptype_to_idx[MISSING_DATA] = 5  # Add missing data mapping
+    ptype_to_idx[MISSING_DATA] = len(PRECIP_IDX)  # Add missing data at next index
     maxPchance = np.array([ptype_to_idx.get(ptype, 0) for ptype in precipTypes])
 
     # Calculate Error

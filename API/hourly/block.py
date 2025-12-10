@@ -104,7 +104,11 @@ def _populate_max_pchance(
         ptype_vals = np.round(InterThour_inputs[key])
         # For DWD MOSMIX, use temperature from temperature_inputs if available
         temp_vals = None
-        if temperature_inputs is not None and temperature_inputs.shape[1] > target_idx:
+        if (
+            temperature_inputs is not None
+            and len(temperature_inputs.shape) > 1
+            and temperature_inputs.shape[1] > target_idx
+        ):
             temp_vals = temperature_inputs[:, target_idx]
         maxPchanceHour[:, target_idx] = map_wmo4677_to_ptype(ptype_vals, temperature_c=temp_vals)
 
