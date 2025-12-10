@@ -10,6 +10,7 @@ from API.constants.api_const import (
     APPARENT_TEMP_CONSTS,
     APPARENT_TEMP_SOLAR_CONSTS,
     PRECIP_NOISE_THRESHOLD_MMH,
+    TEMP_THRESHOLD_WMO_FROZEN_C,
 )
 from API.constants.shared_const import MISSING_DATA
 
@@ -376,7 +377,7 @@ def map_wmo4677_to_ptype(
             mapped to the category most representative for display (rain or snow) depending
             on the code. This function documents the chosen grouping.
         - If temperature_c is provided, snow/ice codes are overridden to rain when
-            temperature is above 5°C (unrealistic for frozen precipitation).
+            temperature is above TEMP_THRESHOLD_WMO_FROZEN_C (unrealistic for frozen precipitation).
 
     Args:
         ptype_codes: array-like of numeric WMO 4677 codes (may contain NaN)
@@ -416,12 +417,12 @@ def map_wmo4677_to_ptype(
         out[np.isin(vals, rain_codes)] = 4
 
         # Temperature validation: Override snow/ice/freezing codes to rain when too warm
-        # Use 5°C as threshold - well above freezing to account for observation errors
+        # Use TEMP_THRESHOLD_WMO_FROZEN_C as threshold - well above freezing to account for observation errors
         if temperature_c is not None:
             temp_arr = np.asarray(temperature_c)
             try:
                 # This will raise ValueError if shapes are incompatible for broadcasting
-                warm_mask = temp_arr > 5.0
+                warm_mask = temp_arr > TEMP_THRESHOLD_WMO_FROZEN_C
                 # Override snow (1), ice (2), and freezing (3) to rain (4) when warm
                 frozen_precip_mask = (out == 1) | (out == 2) | (out == 3)
                 override_mask = warm_mask & frozen_precip_mask

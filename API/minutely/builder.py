@@ -772,7 +772,7 @@ def build_minutely_block(
     # (e.g., for DWD MOSMIX temperature-based fallback or HRRR radar-based typing)
     # Build reverse mapping from PRECIP_IDX, adding MISSING_DATA at index 5
     # This matches the pTypes array: ["none", "snow", "sleet", "sleet", "rain", MISSING_DATA]
-    ptype_to_idx = dict(PRECIP_IDX)  # Copy the dictionary
+    ptype_to_idx = PRECIP_IDX.copy()  # Copy the dictionary
     ptype_to_idx[MISSING_DATA] = len(PRECIP_IDX)  # Add missing data at next index
     maxPchance = np.array([ptype_to_idx.get(ptype, 0) for ptype in precipTypes])
 

@@ -102,6 +102,8 @@ S3_BASE_DELAY = 1
 TEMPERATURE_UNITS_THRESH = {"c": 0, "f": 32}
 TEMP_THRESHOLD_RAIN_C = 1
 TEMP_THRESHOLD_SNOW_C = -1
+# Temperature threshold for WMO code validation - well above freezing to account for observation errors
+TEMP_THRESHOLD_WMO_FROZEN_C = 5.0
 
 # Zarr read retry constants
 MAX_ZARR_READ_RETRIES = 4
