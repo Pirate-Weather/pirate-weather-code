@@ -295,7 +295,9 @@ def is_in_north_america(lat: float, lon: float) -> bool:
         # Wake Island, Midway Atoll, Johnston Atoll, etc. are around 160°W to 180°W
         # These are far west of the main continental area
         if lon_normalized < -170.0:
-            # Only include Alaska region (north of 50°N)
+            # Only include Alaska region (50°N and north)
+            # Alaska's southernmost point is around 51.2°N, but we use 50°N
+            # to ensure coverage of the Aleutian Islands and coastal areas
             return lat >= 50.0
 
         # Note: Small Caribbean territories (e.g., Navassa Island) are within
