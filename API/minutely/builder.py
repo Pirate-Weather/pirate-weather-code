@@ -364,8 +364,10 @@ def _calculate_precip_type_probs(
         InterTminute[:, 4] = nbmMinuteInterpolation[:, NBM["rain"]]
     elif "dwd_mosmix" in source_list and dwd_mosmix_MinuteInterpolation is not None:
         # Map WMO 4677 codes to precip-type categories via centralized helper
+        # Pass temperature for validation to prevent unrealistic frozen precip at warm temps
         ptype_dwd = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["ptype"]]
-        mapped = map_wmo4677_to_ptype(np.round(ptype_dwd))
+        temp_dwd = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["temp"]]
+        mapped = map_wmo4677_to_ptype(np.round(ptype_dwd), temperature_c=temp_dwd)
         InterTminute[:, 1] = (mapped == 1).astype(int)
         InterTminute[:, 2] = (mapped == 2).astype(int)
         InterTminute[:, 3] = (mapped == 3).astype(int)
@@ -748,7 +750,7 @@ def build_minutely_block(
     minuteType = [pTypes[maxPchance[idx]] for idx in range(61)]
     precipTypes = np.array(minuteType)
 
-    # Calculate Intensity (and update precipTypes for HRRR)
+    # Calculate Intensity (and update precipTypes for HRRR/DWD MOSMIX temperature-based fallback)
     intensity, precipTypes = _calculate_intensity(
         source_list,
         precipTypes,
@@ -762,8 +764,14 @@ def build_minutely_block(
     )
     InterPminute[:, DATA_MINUTELY["intensity"]] = intensity
 
-    # Update minuteType list from updated precipTypes array (for HRRR logic)
+    # Update minuteType list from updated precipTypes array (for HRRR/DWD MOSMIX logic)
     minuteType = precipTypes.tolist()
+
+    # Recalculate maxPchance from updated precipTypes to ensure type-specific intensities
+    # are distributed correctly when intensity calculation updates the precipitation type
+    # (e.g., for DWD MOSMIX temperature-based fallback or HRRR radar-based typing)
+    ptype_to_idx = {ptype: idx for idx, ptype in enumerate(["none", "snow", "sleet", "sleet", "rain", MISSING_DATA])}
+    maxPchance = np.array([ptype_to_idx.get(ptype, 0) for ptype in precipTypes])
 
     # Calculate Error
     InterPminute[:, DATA_MINUTELY["error"]] = _calculate_error(

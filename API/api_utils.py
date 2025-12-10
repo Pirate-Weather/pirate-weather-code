@@ -352,7 +352,9 @@ def select_daily_precip_type(
     return maxPchanceDay
 
 
-def map_wmo4677_to_ptype(ptype_codes: np.ndarray) -> np.ndarray:
+def map_wmo4677_to_ptype(
+    ptype_codes: np.ndarray, temperature_c: np.ndarray | None = None
+) -> np.ndarray:
     """
     Map WMO 4677 present-weather codes (50-99) to internal precip type categories.
 
@@ -373,9 +375,12 @@ def map_wmo4677_to_ptype(ptype_codes: np.ndarray) -> np.ndarray:
         - Some WMO codes represent mixed precipitation (e.g., rain+snow). Those are
             mapped to the category most representative for display (rain or snow) depending
             on the code. This function documents the chosen grouping.
+        - If temperature_c is provided, snow/ice codes are overridden to rain when
+            temperature is above 5°C (unrealistic for frozen precipitation).
 
     Args:
         ptype_codes: array-like of numeric WMO 4677 codes (may contain NaN)
+        temperature_c: Optional array of temperatures in Celsius for validation
 
     Returns:
         np.ndarray of floats (integer category codes as floats) same shape as input
@@ -409,6 +414,17 @@ def map_wmo4677_to_ptype(ptype_codes: np.ndarray) -> np.ndarray:
         out[np.isin(vals, ice_codes)] = 2
         out[np.isin(vals, freezing_codes)] = 3
         out[np.isin(vals, rain_codes)] = 4
+
+        # Temperature validation: Override snow/ice/freezing codes to rain when too warm
+        # Use 5°C as threshold - well above freezing to account for observation errors
+        if temperature_c is not None:
+            temp_arr = np.asarray(temperature_c)
+            if temp_arr.shape == codes.shape:
+                warm_mask = temp_arr > 5.0
+                # Override snow (1), ice (2), and freezing (3) to rain (4) when warm
+                frozen_precip_mask = (out == 1) | (out == 2) | (out == 3)
+                override_mask = warm_mask & frozen_precip_mask
+                out[override_mask] = 4
 
     # Use MISSING_DATA for NaNs
     out[nan_mask] = MISSING_DATA

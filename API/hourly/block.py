@@ -46,6 +46,7 @@ def _populate_max_pchance(
     hour_array,
     source_list,
     InterThour_inputs,
+    temperature_inputs,
 ):
     """
     Populate maximum precipitation chance for each hour.
@@ -55,6 +56,7 @@ def _populate_max_pchance(
         hour_array: Hour array.
         source_list: List of data sources.
         InterThour_inputs: Inputs for hourly interpolation.
+        temperature_inputs: Temperature inputs for validation.
 
     Returns:
         Array of maximum precipitation chances.
@@ -96,10 +98,14 @@ def _populate_max_pchance(
         # DWD MOSMIX provides WMO 4677 present-weather codes; mapping is
         # centralized in `API.api_utils.map_wmo4677_to_ptype` so we don't
         # duplicate the mapping logic here.
+        # Pass temperature for validation to prevent unrealistic frozen precip at warm temps
         if not condition():
             return
         ptype_vals = np.round(InterThour_inputs[key])
-        maxPchanceHour[:, target_idx] = map_wmo4677_to_ptype(ptype_vals)
+        # For DWD MOSMIX, use temperature from first column of temperature_inputs
+        # (which should be DWD MOSMIX when it's in source_list)
+        temp_vals = temperature_inputs[:, target_idx] if temperature_inputs.shape[1] > target_idx else None
+        maxPchanceHour[:, target_idx] = map_wmo4677_to_ptype(ptype_vals, temperature_c=temp_vals)
 
     populate_component_ptype(lambda: "nbm" in source_list, 0, "nbm")
     populate_component_ptype(
@@ -805,6 +811,7 @@ def build_hourly_block(
         hour_array,
         source_list,
         InterThour_inputs,
+        temperature_inputs,
     )
 
     _calculate_intensity_prob(
