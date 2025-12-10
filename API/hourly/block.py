@@ -110,7 +110,9 @@ def _populate_max_pchance(
             and temperature_inputs.shape[1] > target_idx
         ):
             temp_vals = temperature_inputs[:, target_idx]
-        maxPchanceHour[:, target_idx] = map_wmo4677_to_ptype(ptype_vals, temperature_c=temp_vals)
+        maxPchanceHour[:, target_idx] = map_wmo4677_to_ptype(
+            ptype_vals, temperature_c=temp_vals
+        )
 
     populate_component_ptype(lambda: "nbm" in source_list, 0, "nbm")
     populate_component_ptype(
