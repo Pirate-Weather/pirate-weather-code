@@ -419,12 +419,17 @@ def map_wmo4677_to_ptype(
         # Use 5°C as threshold - well above freezing to account for observation errors
         if temperature_c is not None:
             temp_arr = np.asarray(temperature_c)
-            if temp_arr.shape == codes.shape:
+            # Ensure shapes are compatible for broadcasting
+            try:
+                # This will raise ValueError if shapes are incompatible
                 warm_mask = temp_arr > 5.0
                 # Override snow (1), ice (2), and freezing (3) to rain (4) when warm
                 frozen_precip_mask = (out == 1) | (out == 2) | (out == 3)
                 override_mask = warm_mask & frozen_precip_mask
                 out[override_mask] = 4
+            except (ValueError, IndexError):
+                # Shapes incompatible - skip temperature validation
+                pass
 
     # Use MISSING_DATA for NaNs
     out[nan_mask] = MISSING_DATA
