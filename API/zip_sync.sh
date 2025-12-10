@@ -94,4 +94,50 @@ while true; do
       fi
     else
       echo "(Subsequent run: throttled to 100 MB/s)"
-      if ! rclone --bwlimit 100M cat "$REMOTE" | bsdtar
+      if ! rclone --bwlimit 100M cat "$REMOTE" | bsdtar -xf - -C "$tmpdir"; then
+        echo "Extraction failed for $MODEL (throttled run)"
+        rm -rf "$tmpdir"
+        loop_ok=0
+        continue
+      fi
+    fi
+
+    mv "$tmpdir" "$version_dir"
+    echo "Created versioned dir: $version_dir"
+
+    # Update symlink atomically
+    (
+      cd "$BASE_DIR" || exit 1
+      ln -sfn "$(basename "$version_dir")" "${MODEL}.zarr"
+    )
+    echo "Updated symlink for $MODEL → $(basename "$version_dir")"
+
+    # Prune old versions (keep only the most recent)
+    (
+      cd "$BASE_DIR" || exit 1
+      old_versions=$(ls -dt "${MODEL}_"[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.zarr 2>/dev/null \
+      | sed '1d' || true)
+      if [ -n "$old_versions" ]; then
+        echo "Pruning old versions for $MODEL:"
+        printf '%s\n' "$old_versions"
+        printf '%s\n' "$old_versions" | xargs -r rm -rf
+      fi
+    )
+
+    # Save current state
+    echo "$remote_info" > "$STATE_FILE"
+  done
+
+  # Mark ready or not based on success
+  if [ "$loop_ok" -eq 1 ]; then
+    echo "Loop completed successfully — marking ready."
+    touch "$READY_FILE"
+  else
+    echo "Loop had failures — clearing ready flag."
+    rm -f "$READY_FILE"
+  fi
+
+  first_run=0
+  echo "Update loop finished. Sleeping 300s..."
+  sleep 300
+done
