@@ -233,8 +233,12 @@ def prepare_data_inputs(
         {
             "nbm": nbm_merged[:, NBM["temp"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["temp"]] if hrrr_merged is not None else None,
-            "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["temp"]] if dwd_valid else None,
-            "ecmwf": ecmwf_merged[:, ECMWF["temp"]] if ecmwf_merged is not None else None,
+            "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["temp"]]
+            if dwd_valid
+            else None,
+            "ecmwf": ecmwf_merged[:, ECMWF["temp"]]
+            if ecmwf_merged is not None
+            else None,
             "gfs": gfs_merged[:, GFS["temp"]] if gfs_merged is not None else None,
             "era5": era5_merged[:, ERA5["2m_temperature"]] if era5_valid else None,
         },
@@ -249,10 +253,16 @@ def prepare_data_inputs(
         {
             "nbm": nbm_merged[:, NBM["dew"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["dew"]] if hrrr_merged is not None else None,
-            "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["dew"]] if dwd_valid else None,
-            "ecmwf": ecmwf_merged[:, ECMWF["dew"]] if ecmwf_merged is not None else None,
+            "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["dew"]]
+            if dwd_valid
+            else None,
+            "ecmwf": ecmwf_merged[:, ECMWF["dew"]]
+            if ecmwf_merged is not None
+            else None,
             "gfs": gfs_merged[:, GFS["dew"]] if gfs_merged is not None else None,
-            "era5": era5_merged[:, ERA5["2m_dewpoint_temperature"]] if era5_valid else None,
+            "era5": era5_merged[:, ERA5["2m_dewpoint_temperature"]]
+            if era5_valid
+            else None,
         },
     )
 
@@ -277,8 +287,12 @@ def prepare_data_inputs(
         "dwd_only",  # DWD-only variable, should be below GFS in North America
         {
             "nbm": nbm_merged[:, NBM["humidity"]] if nbm_merged is not None else None,
-            "hrrr": hrrr_merged[:, HRRR["humidity"]] if hrrr_merged is not None else None,
-            "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["humidity"]] if dwd_valid else None,
+            "hrrr": hrrr_merged[:, HRRR["humidity"]]
+            if hrrr_merged is not None
+            else None,
+            "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["humidity"]]
+            if dwd_valid
+            else None,
             "gfs": gfs_merged[:, GFS["humidity"]] if gfs_merged is not None else None,
             "era5": era5_humidity,
         },
@@ -291,11 +305,19 @@ def prepare_data_inputs(
         lon,
         "standard",
         {
-            "hrrr": hrrr_merged[:, HRRR["pressure"]] if hrrr_merged is not None else None,
-            "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["pressure"]] if dwd_valid else None,
-            "ecmwf": ecmwf_merged[:, ECMWF["pressure"]] if ecmwf_merged is not None else None,
+            "hrrr": hrrr_merged[:, HRRR["pressure"]]
+            if hrrr_merged is not None
+            else None,
+            "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["pressure"]]
+            if dwd_valid
+            else None,
+            "ecmwf": ecmwf_merged[:, ECMWF["pressure"]]
+            if ecmwf_merged is not None
+            else None,
             "gfs": gfs_merged[:, GFS["pressure"]] if gfs_merged is not None else None,
-            "era5": era5_merged[:, ERA5["mean_sea_level_pressure"]] if era5_valid else None,
+            "era5": era5_merged[:, ERA5["mean_sea_level_pressure"]]
+            if era5_valid
+            else None,
         },
     )
 
@@ -483,7 +505,9 @@ def prepare_data_inputs(
             hrrr_merged[:, HRRR["vis"]] if hrrr_merged is not None else None,
             gfs_merged[:, GFS["vis"]] if gfs_merged is not None else None,
             dwd_mosmix_merged[:, DWD_MOSMIX["vis"]] if dwd_valid else None,
-            estimate_visibility_gultepe_rh_pr_numpy(era5_merged, var_index=ERA5, var_axis=1)
+            estimate_visibility_gultepe_rh_pr_numpy(
+                era5_merged, var_index=ERA5, var_axis=1
+            )
             if era5_valid
             else None,
         )
@@ -494,7 +518,9 @@ def prepare_data_inputs(
             hrrr_merged[:, HRRR["vis"]] if hrrr_merged is not None else None,
             dwd_mosmix_merged[:, DWD_MOSMIX["vis"]] if dwd_valid else None,
             gfs_merged[:, GFS["vis"]] if gfs_merged is not None else None,
-            estimate_visibility_gultepe_rh_pr_numpy(era5_merged, var_index=ERA5, var_axis=1)
+            estimate_visibility_gultepe_rh_pr_numpy(
+                era5_merged, var_index=ERA5, var_axis=1
+            )
             if era5_valid
             else None,
         )
