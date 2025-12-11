@@ -432,22 +432,6 @@ def calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=True):
     so2_bp = [0, 92, 197, 485, 800, 1574, 2101, 2620]
     so2_aqi = [0, 50, 100, 150, 200, 300, 400, 500]
 
-    def _calc_aqi_for_pollutant(conc, bp, aqi_vals):
-        if np.isnan(conc):
-            return np.nan
-        if conc <= 0:
-            return 0
-
-        for i in range(len(bp) - 1):
-            if bp[i] <= conc < bp[i + 1]:
-                aqi = ((aqi_vals[i + 1] - aqi_vals[i]) / (bp[i + 1] - bp[i])) * (
-                    conc - bp[i]
-                ) + aqi_vals[i]
-                return aqi
-        return aqi_vals[-1]
-
-    calc_aqi_vec = np.vectorize(_calc_aqi_for_pollutant, otypes=[float])
-
     if use_nowcast:
         pm25_nowcast = calculate_nowcast_concentration(pm25, num_hours=12)
         pm10_nowcast = calculate_nowcast_concentration(pm10, num_hours=12)

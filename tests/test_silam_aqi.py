@@ -23,29 +23,6 @@ PM10_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 O3_BP = [0, 108, 140, 170, 210, 400, 504, 604]
 O3_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
-
-def _calc_aqi_for_pollutant(conc, bp, aqi_vals):
-    """Calculate AQI for a single pollutant using linear interpolation.
-    This is a small scalar helper used by the tests to validate breakpoint
-    interpolation. Kept local to the tests to avoid changing vectorized
-    semantics in `calculate_aqi`.
-    """
-    if np.isnan(conc):
-        return np.nan
-    if conc <= 0:
-        return 0
-
-    for i in range(len(bp) - 1):
-        if bp[i] <= conc < bp[i + 1]:
-            aqi = ((aqi_vals[i + 1] - aqi_vals[i]) / (bp[i + 1] - bp[i])) * (
-                conc - bp[i]
-            ) + aqi_vals[i]
-            return aqi
-
-    # If concentration exceeds highest breakpoint
-    return aqi_vals[-1]
-
-
 class TestNowCastAlgorithm:
     """Tests for the EPA NowCast algorithm."""
 
@@ -127,57 +104,57 @@ class TestAQICalculation:
     def test_aqi_pm25_good(self):
         """Test AQI calculation for good PM2.5 levels (0-12 µg/m³)."""
         # PM2.5 of 6.0 should give AQI of 25
-        aqi = _calc_aqi_for_pollutant(6.0, PM25_BP, PM25_AQI)
+        aqi = np.interp(6.0, PM25_BP, PM25_AQI)
         np.testing.assert_allclose(aqi, 25.0, rtol=0.01)
 
     def test_aqi_pm25_moderate(self):
         """Test AQI calculation for moderate PM2.5 levels (12.1-35.4 µg/m³)."""
         # PM2.5 of 24.0 should give AQI between 50-100
-        aqi = _calc_aqi_for_pollutant(24.0, PM25_BP, PM25_AQI)
+        aqi = np.interp(24.0, PM25_BP, PM25_AQI)
         assert 50 < aqi <= 100
 
     def test_aqi_pm25_unhealthy_sensitive(self):
         """Test AQI for unhealthy for sensitive groups (35.5-55.4 µg/m³)."""
         # PM2.5 of 45.0 should give AQI between 100-150
-        aqi = _calc_aqi_for_pollutant(45.0, PM25_BP, PM25_AQI)
+        aqi = np.interp(45.0, PM25_BP, PM25_AQI)
         assert 100 < aqi <= 150
 
     def test_aqi_pm25_unhealthy(self):
         """Test AQI for unhealthy levels (55.5-150.4 µg/m³)."""
         # PM2.5 of 100.0 should give AQI between 150-200
-        aqi = _calc_aqi_for_pollutant(100.0, PM25_BP, PM25_AQI)
+        aqi = np.interp(100.0, PM25_BP, PM25_AQI)
         assert 150 < aqi <= 200
 
     def test_aqi_pm10_breakpoints(self):
         """Test PM10 AQI calculation at breakpoints."""
         # PM10 of 54 should give AQI of 50
-        aqi = _calc_aqi_for_pollutant(54.0, PM10_BP, PM10_AQI)
+        aqi = np.interp(54.0, PM10_BP, PM10_AQI)
         np.testing.assert_allclose(aqi, 50.0, rtol=0.01)
 
     def test_aqi_zero_concentration(self):
         """Test AQI for zero concentration."""
-        aqi = _calc_aqi_for_pollutant(0.0, PM25_BP, PM25_AQI)
+        aqi = np.interp(0.0, PM25_BP, PM25_AQI)
         assert aqi == 0
 
     def test_aqi_nan_concentration(self):
         """Test AQI for NaN concentration."""
-        aqi = _calc_aqi_for_pollutant(np.nan, PM25_BP, PM25_AQI)
+        aqi = np.interp(np.nan, PM25_BP, PM25_AQI)
         assert np.isnan(aqi)
 
     def test_aqi_exceeds_breakpoints(self):
         """Test AQI for concentration exceeding highest breakpoint."""
         # Very high PM2.5 should return max AQI
-        aqi = _calc_aqi_for_pollutant(600.0, PM25_BP, PM25_AQI)
+        aqi = np.interp(600.0, PM25_BP, PM25_AQI)
         assert aqi == 500
 
     def test_aqi_linear_interpolation(self):
         """Test that AQI interpolation is linear within breakpoints."""
         # PM2.5 at exact breakpoint
-        aqi_at_bp = _calc_aqi_for_pollutant(12.0, PM25_BP, PM25_AQI)
+        aqi_at_bp = np.interp(12.0, PM25_BP, PM25_AQI)
         np.testing.assert_allclose(aqi_at_bp, 50.0, rtol=0.01)
 
         # PM2.5 at midpoint between 0 and 12 should give AQI of 25
-        aqi_mid = _calc_aqi_for_pollutant(6.0, PM25_BP, PM25_AQI)
+        aqi_mid = np.interp(6.0, PM25_BP, PM25_AQI)
         np.testing.assert_allclose(aqi_mid, 25.0, rtol=0.01)
 
 
@@ -186,17 +163,17 @@ class TestAQICategorization:
 
     def test_aqi_good_category(self):
         """AQI 0-50 is Good."""
-        aqi = _calc_aqi_for_pollutant(10.0, PM25_BP, PM25_AQI)
+        aqi = np.interp(10.0, PM25_BP, PM25_AQI)
         assert 0 <= aqi <= 50, "PM2.5 of 10 should be in Good category"
 
     def test_aqi_moderate_category(self):
         """AQI 51-100 is Moderate."""
-        aqi = _calc_aqi_for_pollutant(30.0, PM25_BP, PM25_AQI)
+        aqi = np.interp(30.0, PM25_BP, PM25_AQI)
         assert 50 < aqi <= 100, "PM2.5 of 30 should be in Moderate category"
 
     def test_aqi_unhealthy_sensitive_category(self):
         """AQI 101-150 is Unhealthy for Sensitive Groups."""
-        aqi = _calc_aqi_for_pollutant(50.0, PM25_BP, PM25_AQI)
+        aqi = np.interp(50.0, PM25_BP, PM25_AQI)
         assert 100 < aqi <= 150, "PM2.5 of 50 should be Unhealthy for Sensitive Groups"
 
 
@@ -227,5 +204,5 @@ class TestEdgeCases:
 
     def test_negative_concentration(self):
         """Test AQI with negative concentration (should return 0)."""
-        aqi = _calc_aqi_for_pollutant(-5.0, PM25_BP, PM25_AQI)
+        aqi = np.interp(-5.0, PM25_BP, PM25_AQI)
         assert aqi == 0
