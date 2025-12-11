@@ -417,6 +417,26 @@ def calculate_nowcast_concentration(concentrations, num_hours=12):
     return nowcast_result
 
 
+def trailing_mean(conc, window):
+    """
+    Compute trailing window mean along time axis for array with shape (T, Y, X).
+    If window <= 1 returns conc. Handles NaNs by using nanmean over available points.
+    """
+    if conc is None:
+        return None
+    if window is None or window <= 1:
+        return conc
+
+    T = conc.shape[0]
+    out = np.full_like(conc, np.nan)
+    for t in range(T):
+        start = max(0, t - window + 1)
+        # nanmean handles NaNs and short windows
+        with np.errstate(invalid="ignore"):
+            out[t] = np.nanmean(conc[start : t + 1], axis=0)
+    return out
+
+
 def calculate_aqi(pm25, pm10, o3, no2, so2, co=None, use_nowcast=True):
     """
     Calculate Air Quality Index (AQI) based on EPA standards.
@@ -437,14 +457,42 @@ def calculate_aqi(pm25, pm10, o3, no2, so2, co=None, use_nowcast=True):
         aqi_pm25 = np.interp(pm25_nowcast, PM25_BP, PM25_AQI)
         aqi_pm10 = np.interp(pm10_nowcast, PM10_BP, PM10_AQI)
     else:
-        aqi_pm25 = np.interp(pm25, PM25_BP, PM25_AQI)
-        aqi_pm10 = np.interp(pm10, PM10_BP, PM10_AQI)
+        # When NowCast is disabled, use a 24-hour trailing average for PM2.5/PM10
+        pm25_avg = trailing_mean(pm25, 24)
+        pm10_avg = trailing_mean(pm10, 24)
+        aqi_pm25 = np.interp(pm25_avg, PM25_BP, PM25_AQI)
+        aqi_pm10 = np.interp(pm10_avg, PM10_BP, PM10_AQI)
 
-    aqi_o3 = np.interp(o3, O3_BP, O3_AQI)
-    aqi_no2 = np.interp(no2, NO2_BP, NO2_AQI)
-    aqi_so2 = np.interp(so2, SO2_BP, SO2_AQI)
-    aqi_co = np.interp(co, CO_BP, CO_AQI)
+    # Apply trailing averages appropriate for pollutant averaging windows
+    # EPA AQI uses 8-hour averages for O3 and CO for hourly index values.
+    # Use 1-hour trailing mean for NO2 / SO2 (effectively the instantaneous value).
+    o3_avg = trailing_mean(o3, 8)
+    o3_1h = trailing_mean(o3, 1)
+    co_avg = trailing_mean(co, 8) if co is not None else None
+    no2_avg = trailing_mean(no2, 1) if no2 is not None else None
+    so2_avg = trailing_mean(so2, 1) if so2 is not None else None
 
-    stack = [aqi_pm25, aqi_pm10, aqi_o3, aqi_no2, aqi_so2, aqi_co]
+    def _interp_or_nan(arr, bp, aqi_arr, ref_shape):
+        if arr is None:
+            return np.full(ref_shape, np.nan, dtype=np.float32)
+        return np.interp(arr, bp, aqi_arr)
+
+    ref_shape = aqi_pm25.shape
+    aqi_o3_8h = _interp_or_nan(o3_avg, O3_BP, O3_AQI, ref_shape)
+    aqi_o3_1h = _interp_or_nan(o3_1h, O3_BP, O3_AQI, ref_shape)
+    aqi_no2 = _interp_or_nan(no2_avg, NO2_BP, NO2_AQI, ref_shape)
+    aqi_so2 = _interp_or_nan(so2_avg, SO2_BP, SO2_AQI, ref_shape)
+    aqi_co = _interp_or_nan(co_avg, CO_BP, CO_AQI, ref_shape)
+
+    # Include both 8-hour and 1-hour ozone AQI values (take the max later)
+    stack = [
+        aqi_pm25,
+        aqi_pm10,
+        aqi_o3_8h,
+        aqi_o3_1h,
+        aqi_no2,
+        aqi_so2,
+        aqi_co,
+    ]
 
     return np.nanmax(np.stack(stack, axis=0), axis=0)
