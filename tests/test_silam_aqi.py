@@ -128,7 +128,7 @@ class TestAQICalculation:
         """Test AQI calculation for good PM2.5 levels (0-12 µg/m³)."""
         # PM2.5 of 6.0 should give AQI of 25
         aqi = _calc_aqi_for_pollutant(6.0, PM25_BP, PM25_AQI)
-        assert 0 < aqi <= 50
+        np.testing.assert_allclose(aqi, 25.0, rtol=0.01)
 
     def test_aqi_pm25_moderate(self):
         """Test AQI calculation for moderate PM2.5 levels (12.1-35.4 µg/m³)."""

@@ -451,15 +451,15 @@ def calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=True):
     if use_nowcast:
         pm25_nowcast = calculate_nowcast_concentration(pm25, num_hours=12)
         pm10_nowcast = calculate_nowcast_concentration(pm10, num_hours=12)
-        aqi_pm25 = calc_aqi_vec(pm25_nowcast, pm25_bp, pm25_aqi)
-        aqi_pm10 = calc_aqi_vec(pm10_nowcast, pm10_bp, pm10_aqi)
+        aqi_pm25 = np.interp(pm25_nowcast, pm25_bp, pm25_aqi)
+        aqi_pm10 = np.interp(pm10_nowcast, pm10_bp, pm10_aqi)
     else:
-        aqi_pm25 = calc_aqi_vec(pm25, pm25_bp, pm25_aqi)
-        aqi_pm10 = calc_aqi_vec(pm10, pm10_bp, pm10_aqi)
+        aqi_pm25 = np.interp(pm25, pm25_bp, pm25_aqi)
+        aqi_pm10 = np.interp(pm10, pm10_bp, pm10_aqi)
 
-    aqi_o3 = calc_aqi_vec(o3, o3_bp, o3_aqi)
-    aqi_no2 = calc_aqi_vec(no2, no2_bp, no2_aqi)
-    aqi_so2 = calc_aqi_vec(so2, so2_bp, so2_aqi)
+    aqi_o3 = np.interp(o3, o3_bp, o3_aqi)
+    aqi_no2 = np.interp(no2, no2_bp, no2_aqi)
+    aqi_so2 = np.interp(so2, so2_bp, so2_aqi)
 
     return np.nanmax(
         np.stack([aqi_pm25, aqi_pm10, aqi_o3, aqi_no2, aqi_so2], axis=0), axis=0

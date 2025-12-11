@@ -44,8 +44,8 @@ ingestVersion = INGEST_VERSION_STR
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/home/ubuntu/Weather/SILAM"
 )
-forecast_process_path = forecast_process_dir + "/SILAM_Process"
-tmpDIR = forecast_process_dir + "/Downloads"
+forecast_process_path = os.path.join(forecast_process_dir, "SILAM_Process")
+tmpDIR = os.path.join(forecast_process_dir, "Downloads")
 
 forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/SILAM")
 
@@ -197,7 +197,7 @@ try:
     logger.info(f"Dataset dimensions: {xarray_silam_data.dims}")
     logger.info(f"Available variables: {list(xarray_silam_data.data_vars.keys())}")
 
-except Exception as e:
+except (IOError, OSError, ValueError) as e:
     logger.error(f"Error opening SILAM data via OPeNDAP: {e}")
     logger.info("Attempting fallback URL pattern...")
 
@@ -406,5 +406,5 @@ else:
 shutil.rmtree(forecast_process_dir)
 
 end_time = time.time()
-logger.info(f"Total processing time: {end_time - end_time:.2f} seconds")
+logger.info(f"Total processing time: {end_time - start_time:.2f} seconds")
 logger.info("SILAM ingest script finished successfully.")
