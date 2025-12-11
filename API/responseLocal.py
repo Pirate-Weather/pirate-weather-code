@@ -714,6 +714,8 @@ async def PW_Forecast(
         era5_merged=ERA5_MERGED,
         extra_vars=extraVars,
         num_hours=numHours,
+        lat=lat,
+        lon=lon,
     )
 
     InterThour_inputs = inputs["InterThour_inputs"]
