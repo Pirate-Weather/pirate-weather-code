@@ -214,7 +214,9 @@ class TestCalculateAQI:
         no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)
         so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)
 
-        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=True)
+        # Provide CO test data as well
+        co = np.full((12, 3, 3), 1000.0, dtype=np.float32)
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=True)
 
         # Check shape
         assert aqi.shape == pm25.shape
@@ -232,7 +234,8 @@ class TestCalculateAQI:
         no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)
         so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)
 
-        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+        co = np.full((12, 3, 3), 1000.0, dtype=np.float32)
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=False)
 
         # Check shape
         assert aqi.shape == pm25.shape

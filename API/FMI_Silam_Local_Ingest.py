@@ -319,10 +319,15 @@ so2_data = (
     if "cnc_SO2" in xarray_processed
     else np.full(fallback_shape, np.nan, dtype=np.float32)
 )
+co_data = (
+    xarray_processed["cnc_CO"].values
+    if "cnc_CO" in xarray_processed
+    else np.full(fallback_shape, np.nan, dtype=np.float32)
+)
 
 # Calculate AQI using EPA NowCast algorithm for PM2.5 and PM10
 aqi_values = calculate_aqi(
-    pm25_data, pm10_data, o3_data, no2_data, so2_data, use_nowcast=True
+    pm25_data, pm10_data, o3_data, no2_data, so2_data, co_data, use_nowcast=True
 )
 
 xarray_processed["AQI"] = xr.DataArray(

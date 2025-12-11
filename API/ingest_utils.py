@@ -23,6 +23,8 @@ from API.constants.aqi_const import (
     PM25_BP,
     SO2_AQI,
     SO2_BP,
+    CO_AQI,
+    CO_BP,
 )
 from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
 
@@ -415,7 +417,7 @@ def calculate_nowcast_concentration(concentrations, num_hours=12):
     return nowcast_result
 
 
-def calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=True):
+def calculate_aqi(pm25, pm10, o3, no2, so2, co=None, use_nowcast=True):
     """
     Calculate Air Quality Index (AQI) based on EPA standards.
     Returns the maximum AQI value among all pollutants.
@@ -441,7 +443,8 @@ def calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=True):
     aqi_o3 = np.interp(o3, O3_BP, O3_AQI)
     aqi_no2 = np.interp(no2, NO2_BP, NO2_AQI)
     aqi_so2 = np.interp(so2, SO2_BP, SO2_AQI)
+    aqi_co = np.interp(co, CO_BP, CO_AQI)
 
-    return np.nanmax(
-        np.stack([aqi_pm25, aqi_pm10, aqi_o3, aqi_no2, aqi_so2], axis=0), axis=0
-    )
+    stack = [aqi_pm25, aqi_pm10, aqi_o3, aqi_no2, aqi_so2, aqi_co]
+
+    return np.nanmax(np.stack(stack, axis=0), axis=0)

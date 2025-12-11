@@ -32,3 +32,8 @@ NO2_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 # Breakpoints for 1-hour average SO2 concentrations
 SO2_BP = [0, 92, 197, 485, 800, 1574, 2101, 2620]
 SO2_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
+
+# CO (Carbon Monoxide, µg/m³)
+# Breakpoints for 8-hour average CO concentrations
+CO_BP = [0, 4400, 9400, 12400, 15400, 30400, 40400, 50400]
+CO_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
