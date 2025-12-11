@@ -244,16 +244,16 @@ class TestCalculateAQI:
     def test_aqi_returns_maximum_pollutant(self):
         """Test that AQI returns the maximum AQI across all pollutants."""
         # Create data where PM2.5 has highest AQI
-        pm25 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI ~200
-        pm10 = np.full((12, 3, 3), 50.0, dtype=np.float32)  # AQI ~50
-        o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)  # AQI ~50
-        no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)  # AQI ~40
-        so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)  # AQI ~37
+        pm25 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI = 199.79
+        pm10 = np.full((12, 3, 3), 50.0, dtype=np.float32)  # AQI = 46.30
+        o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)  # AQI = 46.30
+        no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)  # AQI = 40.00
+        so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)  # AQI = 37.86
 
         aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
 
-        # AQI should be dominated by PM2.5 which is ~200
-        assert np.all(aqi[-1] > 150)
+        # AQI should be dominated by PM2.5 which is approximately 199.79
+        np.testing.assert_allclose(aqi[-1], 199.79, rtol=0.01)
 
     def test_aqi_with_zero_concentrations(self):
         """Test AQI calculation with all zero concentrations."""
@@ -345,17 +345,16 @@ class TestCalculateAQI:
     def test_aqi_multiple_high_pollutants(self):
         """Test AQI with multiple pollutants at high levels."""
         # Multiple pollutants at moderate to unhealthy levels
-        pm25 = np.full((12, 3, 3), 40.0, dtype=np.float32)  # AQI ~112
-        pm10 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI ~99
-        o3 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI ~112
-        no2 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI ~75
-        so2 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI ~71
+        pm25 = np.full((12, 3, 3), 40.0, dtype=np.float32)  # AQI = 111.50
+        pm10 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI = 98.68
+        o3 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI = 116.67
+        no2 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI = 75.00
+        so2 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI = 71.43
 
         aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
 
-        # AQI should be around 112 (max of pm25 and o3)
-        assert np.all(aqi[-1] > 100)
-        assert np.all(aqi[-1] <= 150)
+        # AQI should be 116.67 (max of O3)
+        np.testing.assert_allclose(aqi[-1], 116.67, rtol=0.01)
 
     def test_aqi_spatial_variation(self):
         """Test AQI with spatially varying concentrations."""
