@@ -12,6 +12,18 @@ import numpy as np
 import xarray as xr
 from herbie import Path
 
+from API.constants.aqi_const import (
+    NO2_AQI,
+    NO2_BP,
+    O3_AQI,
+    O3_BP,
+    PM10_AQI,
+    PM10_BP,
+    PM25_AQI,
+    PM25_BP,
+    SO2_AQI,
+    SO2_BP,
+)
 from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
 
 # Shared ingest constants
@@ -417,33 +429,18 @@ def calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=True):
     Returns:
         AQI value (0-500+ scale)
     """
-    pm25_bp = [0, 12.0, 35.4, 55.4, 150.4, 250.4, 350.4, 500.4]
-    pm25_aqi = [0, 50, 100, 150, 200, 300, 400, 500]
-
-    pm10_bp = [0, 54, 154, 254, 354, 424, 504, 604]
-    pm10_aqi = [0, 50, 100, 150, 200, 300, 400, 500]
-
-    o3_bp = [0, 108, 140, 170, 210, 400, 504, 604]
-    o3_aqi = [0, 50, 100, 150, 200, 300, 400, 500]
-
-    no2_bp = [0, 100, 188, 677, 1221, 1880, 2350, 2820]
-    no2_aqi = [0, 50, 100, 150, 200, 300, 400, 500]
-
-    so2_bp = [0, 92, 197, 485, 800, 1574, 2101, 2620]
-    so2_aqi = [0, 50, 100, 150, 200, 300, 400, 500]
-
     if use_nowcast:
         pm25_nowcast = calculate_nowcast_concentration(pm25, num_hours=12)
         pm10_nowcast = calculate_nowcast_concentration(pm10, num_hours=12)
-        aqi_pm25 = np.interp(pm25_nowcast, pm25_bp, pm25_aqi)
-        aqi_pm10 = np.interp(pm10_nowcast, pm10_bp, pm10_aqi)
+        aqi_pm25 = np.interp(pm25_nowcast, PM25_BP, PM25_AQI)
+        aqi_pm10 = np.interp(pm10_nowcast, PM10_BP, PM10_AQI)
     else:
-        aqi_pm25 = np.interp(pm25, pm25_bp, pm25_aqi)
-        aqi_pm10 = np.interp(pm10, pm10_bp, pm10_aqi)
+        aqi_pm25 = np.interp(pm25, PM25_BP, PM25_AQI)
+        aqi_pm10 = np.interp(pm10, PM10_BP, PM10_AQI)
 
-    aqi_o3 = np.interp(o3, o3_bp, o3_aqi)
-    aqi_no2 = np.interp(no2, no2_bp, no2_aqi)
-    aqi_so2 = np.interp(so2, so2_bp, so2_aqi)
+    aqi_o3 = np.interp(o3, O3_BP, O3_AQI)
+    aqi_no2 = np.interp(no2, NO2_BP, NO2_AQI)
+    aqi_so2 = np.interp(so2, SO2_BP, SO2_AQI)
 
     return np.nanmax(
         np.stack([aqi_pm25, aqi_pm10, aqi_o3, aqi_no2, aqi_so2], axis=0), axis=0

@@ -10,18 +10,11 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# Import EPA AQI breakpoints from shared constants
+from API.constants.aqi_const import PM10_AQI, PM10_BP, PM25_AQI, PM25_BP
+
 # Import the functions to test from the shared ingest utilities
-from API.ingest_utils import calculate_nowcast_concentration
-
-# EPA AQI breakpoints
-PM25_BP = [0, 12.0, 35.4, 55.4, 150.4, 250.4, 350.4, 500.4]
-PM25_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
-
-PM10_BP = [0, 54, 154, 254, 354, 424, 504, 604]
-PM10_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
-
-O3_BP = [0, 108, 140, 170, 210, 400, 504, 604]
-O3_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
+from API.ingest_utils import calculate_aqi, calculate_nowcast_concentration
 
 
 class TestNowCastAlgorithm:
@@ -207,3 +200,179 @@ class TestEdgeCases:
         """Test AQI with negative concentration (should return 0)."""
         aqi = np.interp(-5.0, PM25_BP, PM25_AQI)
         assert aqi == 0
+
+
+class TestCalculateAQI:
+    """Tests for the calculate_aqi function."""
+
+    def test_aqi_with_nowcast_enabled(self):
+        """Test AQI calculation with NowCast enabled."""
+        # Create test data with 12 time steps
+        pm25 = np.full((12, 3, 3), 25.0, dtype=np.float32)
+        pm10 = np.full((12, 3, 3), 50.0, dtype=np.float32)
+        o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)
+        no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)
+        so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)
+
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=True)
+
+        # Check shape
+        assert aqi.shape == pm25.shape
+        # Check no NaN values
+        assert not np.any(np.isnan(aqi))
+        # Check positive values
+        assert np.all(aqi >= 0)
+
+    def test_aqi_with_nowcast_disabled(self):
+        """Test AQI calculation with NowCast disabled."""
+        # Create test data with 12 time steps
+        pm25 = np.full((12, 3, 3), 25.0, dtype=np.float32)
+        pm10 = np.full((12, 3, 3), 50.0, dtype=np.float32)
+        o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)
+        no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)
+        so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)
+
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+
+        # Check shape
+        assert aqi.shape == pm25.shape
+        # Check no NaN values
+        assert not np.any(np.isnan(aqi))
+        # Check positive values
+        assert np.all(aqi >= 0)
+
+    def test_aqi_returns_maximum_pollutant(self):
+        """Test that AQI returns the maximum AQI across all pollutants."""
+        # Create data where PM2.5 has highest AQI
+        pm25 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI ~200
+        pm10 = np.full((12, 3, 3), 50.0, dtype=np.float32)  # AQI ~50
+        o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)  # AQI ~50
+        no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)  # AQI ~40
+        so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)  # AQI ~37
+
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+
+        # AQI should be dominated by PM2.5 which is ~200
+        assert np.all(aqi[-1] > 150)
+
+    def test_aqi_with_zero_concentrations(self):
+        """Test AQI calculation with all zero concentrations."""
+        pm25 = np.zeros((12, 3, 3), dtype=np.float32)
+        pm10 = np.zeros((12, 3, 3), dtype=np.float32)
+        o3 = np.zeros((12, 3, 3), dtype=np.float32)
+        no2 = np.zeros((12, 3, 3), dtype=np.float32)
+        so2 = np.zeros((12, 3, 3), dtype=np.float32)
+
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+
+        # AQI should be 0 for all zero concentrations
+        assert np.all(aqi == 0)
+
+    def test_aqi_with_nan_values(self):
+        """Test AQI calculation handles NaN values correctly."""
+        pm25 = np.full((12, 3, 3), 25.0, dtype=np.float32)
+        pm25[5, 1, 1] = np.nan
+        pm10 = np.full((12, 3, 3), 50.0, dtype=np.float32)
+        o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)
+        no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)
+        so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)
+
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+
+        # AQI should handle NaN gracefully with nanmax
+        # Most values should not be NaN
+        assert np.sum(~np.isnan(aqi)) > 0
+
+    def test_aqi_good_category_threshold(self):
+        """Test AQI in Good category (0-50)."""
+        # All concentrations in Good range
+        pm25 = np.full((12, 3, 3), 10.0, dtype=np.float32)  # AQI ~42
+        pm10 = np.full((12, 3, 3), 50.0, dtype=np.float32)  # AQI ~50
+        o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)  # AQI ~46
+        no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)  # AQI ~40
+        so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)  # AQI ~38
+
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+
+        # AQI should be in Good category
+        assert np.all(aqi[-1] <= 50)
+
+    def test_aqi_moderate_category_threshold(self):
+        """Test AQI in Moderate category (51-100)."""
+        # PM2.5 in Moderate range
+        pm25 = np.full((12, 3, 3), 30.0, dtype=np.float32)  # AQI ~89
+        pm10 = np.full((12, 3, 3), 50.0, dtype=np.float32)  # AQI ~50
+        o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)  # AQI ~46
+        no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)  # AQI ~40
+        so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)  # AQI ~38
+
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+
+        # AQI should be in Moderate category
+        assert np.all(aqi[-1] > 50)
+        assert np.all(aqi[-1] <= 100)
+
+    def test_aqi_unhealthy_sensitive_category_threshold(self):
+        """Test AQI in Unhealthy for Sensitive Groups category (101-150)."""
+        # PM2.5 in Unhealthy for Sensitive Groups range
+        pm25 = np.full((12, 3, 3), 45.0, dtype=np.float32)  # AQI ~125
+        pm10 = np.full((12, 3, 3), 50.0, dtype=np.float32)  # AQI ~50
+        o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)  # AQI ~46
+        no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)  # AQI ~40
+        so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)  # AQI ~38
+
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+
+        # AQI should be in Unhealthy for Sensitive Groups category
+        assert np.all(aqi[-1] > 100)
+        assert np.all(aqi[-1] <= 150)
+
+    def test_aqi_very_unhealthy_category_threshold(self):
+        """Test AQI in Unhealthy category (151-200)."""
+        # PM2.5 in Unhealthy range
+        pm25 = np.full((12, 3, 3), 100.0, dtype=np.float32)  # AQI ~172
+        pm10 = np.full((12, 3, 3), 50.0, dtype=np.float32)  # AQI ~50
+        o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)  # AQI ~46
+        no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)  # AQI ~40
+        so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)  # AQI ~38
+
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+
+        # AQI should be in Unhealthy category
+        assert np.all(aqi[-1] > 150)
+        assert np.all(aqi[-1] <= 200)
+
+    def test_aqi_multiple_high_pollutants(self):
+        """Test AQI with multiple pollutants at high levels."""
+        # Multiple pollutants at moderate to unhealthy levels
+        pm25 = np.full((12, 3, 3), 40.0, dtype=np.float32)  # AQI ~112
+        pm10 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI ~99
+        o3 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI ~112
+        no2 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI ~75
+        so2 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI ~71
+
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+
+        # AQI should be around 112 (max of pm25 and o3)
+        assert np.all(aqi[-1] > 100)
+        assert np.all(aqi[-1] <= 150)
+
+    def test_aqi_spatial_variation(self):
+        """Test AQI with spatially varying concentrations."""
+        # Create spatially varying PM2.5
+        pm25 = np.zeros((12, 5, 5), dtype=np.float32)
+        for i in range(5):
+            for j in range(5):
+                pm25[:, i, j] = 10 + (i + j) * 5  # Range from 10 to 50
+
+        pm10 = np.full((12, 5, 5), 50.0, dtype=np.float32)
+        o3 = np.full((12, 5, 5), 100.0, dtype=np.float32)
+        no2 = np.full((12, 5, 5), 80.0, dtype=np.float32)
+        so2 = np.full((12, 5, 5), 70.0, dtype=np.float32)
+
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+
+        # AQI should vary spatially
+        assert aqi[-1].min() < aqi[-1].max()
+        # All values should be positive
+        assert np.all(aqi >= 0)
