@@ -26,3 +26,5 @@ jobs:
         run: pytest -v tests/test_rtma_ingest.py
       - name: Run WMO Alerts geocode test
         run: pytest -v tests/test_wmo_alerts_geocode.py
+      - name: Run SILAM Air Quality Index test
+        run: pytest -v tests/test_silam_aqi.py
