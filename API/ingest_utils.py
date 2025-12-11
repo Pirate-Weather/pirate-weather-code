@@ -13,6 +13,8 @@ import xarray as xr
 from herbie import Path
 
 from API.constants.aqi_const import (
+    CO_AQI,
+    CO_BP,
     NO2_AQI,
     NO2_BP,
     O3_AQI,
@@ -23,8 +25,6 @@ from API.constants.aqi_const import (
     PM25_BP,
     SO2_AQI,
     SO2_BP,
-    CO_AQI,
-    CO_BP,
 )
 from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
 
