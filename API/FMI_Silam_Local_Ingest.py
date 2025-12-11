@@ -83,9 +83,10 @@ silam_alt_names = {
 
 
 def get_latest_silam_run():
-    """
-    Determines the latest available SILAM model run time.
-    SILAM air quality data is updated once daily at 00 UTC.
+    """Determines the latest available SILAM model run time.
+
+    SILAM air quality data is updated once daily at 00 UTC. This function
+    accounts for a delay in data availability.
 
     Returns:
         datetime: The latest model run time.
@@ -221,7 +222,7 @@ except (IOError, OSError, ValueError) as e:
             )
             logger.info(f"Successfully opened SILAM from: {alt_url}")
             break
-        except Exception as alt_e:
+        except (IOError, OSError, ValueError) as alt_e:
             logger.warning(f"Failed to open {alt_url}: {alt_e}")
             continue
 
@@ -378,23 +379,25 @@ if saveType == "S3":
     )
     xarray_processed.to_zarr(store=zarr_store, mode="w", consolidated=False)
 
-    # Save time pickle to S3
-    with open(forecast_process_dir + "/SILAM.time.pickle", "wb") as file:
+    # Save time pickle
+    pickle_file_path = os.path.join(forecast_process_dir, "SILAM.time.pickle")
+    with open(pickle_file_path, "wb") as file:
         pickle.dump(origintime, file)
 
     s3.put_file(
-        forecast_process_dir + "/SILAM.time.pickle",
-        forecast_path + "/" + ingestVersion + "/SILAM.time.pickle",
+        pickle_file_path,
+        os.path.join(forecast_path, ingestVersion, "SILAM.time.pickle"),
     )
     logger.info("Uploaded SILAM data to S3.")
 else:
     # Save time pickle locally
-    with open(forecast_process_dir + "/SILAM.time.pickle", "wb") as file:
+    pickle_file_path = os.path.join(forecast_process_dir, "SILAM.time.pickle")
+    with open(pickle_file_path, "wb") as file:
         pickle.dump(origintime, file)
 
     shutil.move(
-        forecast_process_dir + "/SILAM.time.pickle",
-        forecast_path + "/" + ingestVersion + "/SILAM.time.pickle",
+        pickle_file_path,
+        os.path.join(forecast_path, ingestVersion, "SILAM.time.pickle"),
     )
 
     # Copy Zarr to final location
