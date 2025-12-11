@@ -23,6 +23,7 @@ PM10_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 O3_BP = [0, 108, 140, 170, 210, 400, 504, 604]
 O3_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
+
 class TestNowCastAlgorithm:
     """Tests for the EPA NowCast algorithm."""
 
