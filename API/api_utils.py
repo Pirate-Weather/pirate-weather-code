@@ -424,7 +424,7 @@ def map_wmo4677_to_ptype(
                 # This will raise ValueError if shapes are incompatible for broadcasting
                 warm_mask = temp_arr > TEMP_THRESHOLD_WMO_FROZEN_C
                 # Override snow (1), ice (2), and freezing (3) to rain (4) when warm
-                frozen_precip_mask = (out == 1) | (out == 2) | (out == 3)
+                frozen_precip_mask = np.isin(out, [1, 2, 3])
                 override_mask = warm_mask & frozen_precip_mask
                 out[override_mask] = 4
             except ValueError as e:

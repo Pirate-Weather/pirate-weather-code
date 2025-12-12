@@ -24,7 +24,7 @@ CHUNK_SIZES = {
     "ECMWF": 100,
     "NBM_Fire": 100,
     "RTMA": 100,
-    "DWD": 100,
+    "DWD": 50,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -349,3 +349,75 @@ def interp_time_take_blend(
         out = da.concatenate(pieces, axis=VAX)
 
     return out
+
+
+def interpolate_nan_along_axis(
+    arr: da.Array, axis: int, dtype: Optional[str | np.dtype] = None
+) -> da.Array:
+    """
+    Linearly interpolate NaNs along a specified axis of a Dask array.
+
+    The interpolation is applied independently to each slice orthogonal to
+    ``axis``. Slices that are entirely NaN are left unchanged. Only gaps between
+    existing non-NaN values are filled; leading and trailing NaNs remain NaN.
+
+    Args:
+        arr: Input Dask array.
+        axis: Axis along which to interpolate.
+        dtype: Optional dtype for the output. Defaults to ``arr.dtype``.
+
+    Returns:
+        A Dask array with NaNs interpolated along ``axis``.
+    """
+
+    if axis < 0:
+        axis += arr.ndim
+    if axis < 0 or axis >= arr.ndim:
+        raise ValueError("axis is out of bounds for the input array")
+
+    out_dtype = dtype or arr.dtype
+
+    # Ensure the interpolation axis is contained within a single chunk so that
+    # np.apply_along_axis sees the full span for each slice.
+    rechunk_spec = {axis: -1}
+    arr_full_axis = arr.rechunk(rechunk_spec)
+
+    def _interp_nan_1d(values: np.ndarray) -> np.ndarray:
+        # If everything is NaN, return as-is.
+        if np.isnan(values).all():
+            return values
+
+        x = np.arange(values.shape[0])
+        valid = ~np.isnan(values)
+
+        valid_count = valid.sum()
+        # If only one valid point, fill all positions with that value.
+        if valid_count == 1:
+            fill_val = values[valid][0]
+            filled = np.full_like(values, fill_val)
+            return filled
+        # Nothing to interpolate if fewer than two valid points lie within the slice.
+        if valid_count < 2:
+            return values
+
+        filled = values.copy()
+        valid_x = x[valid]
+        valid_y = values[valid]
+
+        needs_fill = ~valid
+        inside = needs_fill & (x >= valid_x[0]) & (x <= valid_x[-1])
+        if inside.any():
+            filled[inside] = np.interp(x[inside], valid_x, valid_y)
+
+        # Fill leading/trailing gaps with nearest available value
+        leading = needs_fill & (x < valid_x[0])
+        trailing = needs_fill & (x > valid_x[-1])
+        if leading.any():
+            filled[leading] = valid_y[0]
+        if trailing.any():
+            filled[trailing] = valid_y[-1]
+        return filled
+
+    return da.apply_along_axis(_interp_nan_1d, axis, arr_full_axis).astype(
+        out_dtype
+    )

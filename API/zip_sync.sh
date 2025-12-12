@@ -20,7 +20,7 @@ mkdir -p "$BASE_DIR"
 [ -f "$READY_FILE" ] && rm -f "$READY_FILE"
 
 # Models to update (space-separated)
-MODELS="NBM HRRR GFS HRRR_6H RTMA_RU GEFS ECMWF NWS_Alerts WMO_Alerts SubH NBM_Fire ETOPO_DA_C"
+MODELS="DWD_MOSMIX NBM HRRR GFS HRRR_6H RTMA_RU GEFS ECMWF NWS_Alerts WMO_Alerts SubH NBM_Fire ETOPO_DA_C"
 
 # Cleanup on exit
 cleanup() {
