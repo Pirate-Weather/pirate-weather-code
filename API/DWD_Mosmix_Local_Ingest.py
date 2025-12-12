@@ -14,17 +14,8 @@
 # As soon as this issue is resolved in Zarr, this script can be optimized further.
 # https://github.com/zarr-developers/zarr-specs/issues/245
 
-
-# NOTE 2: At some point it would be better to include short term (48 hour) historic data here as well
-# This would keep the sources more consistent for the API users, instead of mixing MOSMIX-S forecast and
-# something else for recent past. Since it's an hourly model, it would be merging the first step from the last 48 runs
-
-
-# NOTE 3: Multiple stations can map to the same grid cell (e.g., OSAKA station ID 47772 and
-# OSAKA AIRPORT station ID 47771 are ~10km apart). The interpolation uses inverse distance
-# weighting (IDW) to properly average values from all contributing stations rather than
-# taking just the last value. This prevents temperature jumps and other data artifacts
-# in the API output.
+# NOTE 2: Multiple stations can map to the same grid cell (e.g., OSAKA station ID 47772 and
+# OSAKA AIRPORT station ID 47771 are ~10km apart). This function uses the closest station for interpolation.
 
 # %% Import modules
 import io
@@ -52,8 +43,16 @@ from pykml import parser
 from sklearn.neighbors import BallTree
 from tqdm import tqdm  # safe to ignore if not using log="tqdm"
 
-from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_utils import CHUNK_SIZES, DWD_RADIUS, FINAL_CHUNK_SIZES
+from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
+from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
+from API.ingest_utils import (
+    CHUNK_SIZES,
+    DWD_RADIUS,
+    FINAL_CHUNK_SIZES,
+    interpolate_nan_along_axis,
+    interp_time_take_blend,
+    pad_to_chunk_size,
+)
 
 # Distance to interpolate stations to grid (km)
 radius_km = DWD_RADIUS
@@ -111,93 +110,6 @@ api_target_numerical_variables = [
 # Relative humidity is calculated using MetPy's `relative_humidity_from_dewpoint`.
 # This removes the need for custom vapor-pressure approximations and leverages
 # a tested implementation that supports pint units.
-
-
-def fill_station_time_series(
-    df: pd.DataFrame,
-    var_cols,
-    time_col: str = "time",
-    station_col: str = "station_id",
-    max_gap: int | None = None,
-    fill_ends: bool = False,
-    log="print",  # "print" | "tqdm" | None
-    print_every=50,  # applies only if log="print"
-):
-    """
-    Interpolates missing values separately for each station over time.
-
-    Parameters:
-    - df (pd.DataFrame): The input DataFrame containing station data.
-    - var_cols (list[str]): A list of column names to interpolate.
-    - time_col (str): The name of the time column.
-    - station_col (str): The name of the station identifier column.
-    - max_gap (int | None): The maximum number of consecutive NaNs to fill.
-    - fill_ends (bool): If True, fill NaNs at the beginning and end of series.
-    - log (str): The logging mode ('print', 'tqdm', or None).
-    - print_every (int): Frequency of progress printing if log is 'print'.
-
-    Progress Monitoring:
-      log="tqdm"  → progress bar over stations
-      log="print" → prints every N stations
-      log=None    → silent
-    """
-    if isinstance(var_cols, str):
-        var_cols = [var_cols]
-
-    # Sort input for deterministic behavior
-    df_sorted = df.sort_values([station_col, time_col]).copy()
-
-    # Unique station groups
-    stations = df_sorted[station_col].unique()
-    n_stations = len(stations)
-
-    if log == "tqdm":
-        station_iter = tqdm(stations, desc="Interpolating stations", unit="stations")
-    else:
-        station_iter = stations
-
-    def _interp_one_station(station_id, idx):
-        df_s = df_sorted.loc[df_sorted[station_col] == station_id]
-
-        for col in var_cols:
-            s = df_s[col]
-
-            # skip if nothing to fill
-            if s.notna().sum() < 2:
-                continue
-
-            if col == "PTYPE_surface":
-                s2 = s.interpolate(
-                    method="nearest", limit=max_gap, limit_direction="both"
-                )
-            elif np.issubdtype(df_s[time_col].dtype, np.datetime64):
-                s2 = s.copy()
-                s2.index = df_s[time_col]
-                s2 = s2.interpolate(
-                    method="time", limit=max_gap, limit_direction="both"
-                )
-            else:
-                s2 = s.interpolate(
-                    method="linear", limit=max_gap, limit_direction="both"
-                )
-
-            if fill_ends:
-                s2 = s2.ffill().bfill()
-
-            df_sorted.loc[df_s.index, col] = s2.to_numpy()
-
-        if log == "print" and idx % print_every == 0:
-            print(f"[{idx}/{n_stations}] Interpolated station {station_id}")
-
-    # Loop stations with progress feedback
-    for i, st in enumerate(station_iter):
-        _interp_one_station(st, i)
-
-    if log == "print":
-        print("Interpolation complete.")
-
-    return df_sorted
-
 
 def parse_mosmix_kml(kml_filepath):
     """
@@ -793,10 +705,12 @@ ingest_version = INGEST_VERSION_STR
 
 # Base directory for all processing and output files.
 forecast_process_dir = os.getenv("forecast_process_dir", "/mnt/nvme/data/DWD")
+forecast_process_path = forecast_process_dir + "/DWD_Process"
 # Temporary directory for downloaded files.
 tmp_dir = os.getenv("tmp_dir", os.path.join(forecast_process_dir, "Downloads"))
 # Final destination directory for processed Zarr files.
 forecast_path = os.getenv("forecast_path", "/mnt/nvme/data/Prod/DWD")
+historic_path = os.getenv("historic_path", "/mnt/nvme/data/DWD/Historic")
 
 # Defines where the final Zarr file should be saved: "Download" (local) or "S3" (AWS S3).
 save_type = os.getenv("save_type", "Download")
@@ -840,22 +754,36 @@ os.makedirs(tmp_dir, exist_ok=True)
 # Create the final forecast output directory if saving locally (versioned by ingest).
 if save_type == "Download":
     os.makedirs(os.path.join(forecast_path, ingest_version), exist_ok=True)
+    os.makedirs(historic_path, exist_ok=True)
 
 start_time = time.time()  # Start timer for script execution
 
 # --- Step 1: Download and Parse DWD MOSMIX-S KML/KMZ Data ---
+def download_mosmix_file(url, local_path):
+    """
+    Downloads a MOSMIX file from a URL to a local path.
+    """
+    try:
+        response = requests.get(url, stream=True)
+        # Check if the file exists (404 handling)
+        if response.status_code == 404:
+            logging.warning(f"File not found: {url}")
+            return False
+            
+        response.raise_for_status()
+        with open(local_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        logging.info(f"File downloaded successfully to: {local_path}")
+        return True
+    except Exception as e:
+        logging.warning(f"Error downloading {url}: {e}")
+        return False
+
+# --- Step 1: Download and Parse DWD MOSMIX-S KML/KMZ Data ---
 logging.info(f"\n--- Attempting to download DWD MOSMIX data from: {dwd_mosmix_url} ---")
-try:
-    response = requests.get(dwd_mosmix_url, stream=True)
-    response.raise_for_status()  # Raises HTTPError for bad responses (4xx or 5xx)
-    with open(os.path.join(tmp_dir, downloaded_kmz_file), "wb") as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            f.write(chunk)
-    logging.info(
-        f"File downloaded successfully to: {os.path.join(tmp_dir, downloaded_kmz_file)}"
-    )
-except Exception as e:
-    logging.critical(f"Error downloading DWD data: {e}. Exiting.")
+if not download_mosmix_file(dwd_mosmix_url, os.path.join(tmp_dir, downloaded_kmz_file)):
+    logging.critical("Error downloading latest DWD data. Exiting.")
     sys.exit(1)
 
 logging.info(
@@ -903,34 +831,165 @@ else:
 
 
 # --- Step 2: Process Pandas DataFrame ---
-logging.info("\n--- Converting DataFrame to xarray Dataset (point-based) ---")
+logging.info("\\n--- Converting DataFrame to xarray Dataset (point-based) ---")
 
-df_process = process_dwd_df(df_data)
+def process_and_interpolate_df(df_input):
+    """
+    Wrapper to process DWD DataFrame, optionally temporally interpolate, 
+    and then spatially interpolate to grid.
+    """
+    # 1. Process units and variables
+    df_processed = process_dwd_df(df_input)
+    
+    # 2. Interpolate to Grid
+    gridded_ds = interpolate_dwd_to_grid_knearest_dask(
+        df_processed,
+        var_cols=zarr_vars,
+        radius_km=radius_km,
+        time_col="time",
+        lat_col="latitude",
+        lon_col="longitude",
+        station_col="station_id",
+        log="none" # Reduce noise
+    )
+    
+    return gridded_ds
 
-# Fill missing data per station using time interpolation
-df_filled = fill_station_time_series(
-    df_process,
-    var_cols=api_target_numerical_variables,  # whatever variables you will grid
-    time_col="time",
-    station_col="station_id",
-    max_gap=None,  # or an integer if you want to limit gap length
-    fill_ends=True,  # or True if you want to fill edges too
-    log="tqdm",
-)
 
+# Process the latest forecast
+gridded_dwd_ds_forecast = process_and_interpolate_df(df_data)
 
-# --- Step 4: Interpolate DWD Point Data to the GFS Grid ---
-logging.info("\n--- Interpolating DWD point data to GFS grid ---")
-gridded_dwd_ds = interpolate_dwd_to_grid_knearest_dask(
-    df_filled,
-    api_target_numerical_variables,
-    50,
-    time_col="time",
-    lat_col="latitude",
-    lon_col="longitude",
-    station_col="station_id",
-    log="tqdm",
-)
+# --- Step 3: Historic Data ---
+# Logic to download and process previous runs
+history_period = HISTORY_PERIODS["DWD_MOSMIX"]
+historic_datasets = []
+
+# Loop back through history
+for i in range(history_period, 0, -1):
+    # Calculate target time
+    target_time = base_time - pd.Timedelta(hours=i)
+
+    time_str = target_time.strftime("%Y%m%d%H")
+    
+    # Path for cached Zarr file
+    hist_zarr_filename = f"DWD_Hist_{time_str}.zarr"
+    
+    # Check if cached file exists
+    if save_type == "S3":
+        hist_zarr_path = f"{historic_path}/{hist_zarr_filename}"
+        cached_exists = s3.exists(hist_zarr_path.replace(".zarr", ".done"))
+    else:
+        hist_zarr_path = os.path.join(historic_path, hist_zarr_filename)
+        cached_exists = os.path.exists(hist_zarr_path.replace(".zarr", ".done"))
+        
+    if cached_exists:
+        logging.info(f"Loading cached historic run: {time_str}")
+        try:
+            if save_type == "S3":
+                store = zarr.storage.FsspecStore.from_url(
+                    hist_zarr_path,
+                    storage_options={
+                        "key": aws_access_key_id,
+                        "secret": aws_secret_access_key,
+                    },
+                )
+            else:
+                store = zarr.storage.LocalStore(hist_zarr_path)
+                
+            ds_hist = xr.open_dataset(store, engine="zarr", chunks="auto")
+            historic_datasets.append(ds_hist)
+            continue
+        except Exception as e:
+            logging.warning(f"Error loading cached {hist_zarr_path}: {e}")
+            # Fallback to re-download if load fails? Or just skip?
+            # Let's try to re-process.
+            pass
+            
+            
+    # If not cached, download and process
+    logging.info(f"Processing historic run: {time_str}")
+    
+    # Construct URL for historical file
+    # Pattern: MOSMIX_S_2025121018_240.kmz
+    hist_filename = f"MOSMIX_S_{time_str}_240.kmz"
+    hist_url = f"https://opendata.dwd.de/weather/local_forecasts/mos/MOSMIX_S/all_stations/kml/{hist_filename}"
+    local_hist_path = os.path.join(tmp_dir, hist_filename)
+    
+    # Check if download is needed
+    if not os.path.exists(local_hist_path):
+        if not download_mosmix_file(hist_url, local_hist_path):
+            continue 
+            
+    # Parse the file
+    try:
+        df_hist, _ = parse_mosmix_kml(local_hist_path)
+        if df_hist.empty:
+            continue
+            
+        # Standardize longitudes
+        df_hist["longitude"] = df_hist["longitude"] % 360
+        
+
+        # Files are offset by 1 hour (so T21 forecast is in the T20 file)
+        target_time = target_time.tz_localize(None)
+        target_time = target_time + pd.Timedelta(hours=1)
+        
+        # Filter dataframe to this specific time
+        df_hist_filtered = df_hist[df_hist["time"] == target_time].copy()
+        
+        if df_hist_filtered.empty:
+            logging.warning(f"No data found for target time {target_time} in {hist_filename}")
+            continue
+            
+        # Process this single timestep (no temporal interp needed for single step)
+        ds_hist = process_and_interpolate_df(df_hist_filtered)
+        
+        # Cache the processed dataset
+        logging.info(f"Caching processed run to {hist_zarr_path}")
+        if save_type == "S3":
+            store = zarr.storage.FsspecStore.from_url(
+                hist_zarr_path,
+                storage_options={
+                    "key": aws_access_key_id,
+                    "secret": aws_secret_access_key,
+                },
+                mode="w"
+            )
+        else:
+            store = zarr.storage.LocalStore(hist_zarr_path)
+            
+        ds_hist.to_zarr(store, mode="w", consolidated=False)
+        
+        # Create .done file
+        if save_type == "S3":
+            s3.touch(hist_zarr_path.replace(".zarr", ".done"))
+        else:
+            with open(hist_zarr_path.replace(".zarr", ".done"), "w") as f:
+                f.write("Done")
+        
+        # Re-open lazily to use in current run (avoids memory hogging)
+        ds_hist_lazy = xr.open_dataset(store, engine="zarr", chunks="auto")
+        historic_datasets.append(ds_hist_lazy)
+        
+        # Cleanup
+        os.remove(local_hist_path) 
+        
+    except Exception as e:
+        logging.warning(f"Error processing {hist_filename}: {e}")
+
+# Combine datasets
+if historic_datasets:
+    logging.info(f"Combining {len(historic_datasets)} historic datasets with forecast")
+    # Concatenate historic datasets along time dimension
+    ds_history = xr.concat(historic_datasets, dim="time")
+    
+    # Concatenate history and forecast
+    gridded_dwd_ds = xr.concat([ds_history, gridded_dwd_ds_forecast], dim="time")
+    
+    # Sort by time just in case
+    gridded_dwd_ds = gridded_dwd_ds.sortby("time")
+else:
+    gridded_dwd_ds = gridded_dwd_ds_forecast
 
 # --- Step 4.5: Build Grid-to-Stations Mapping ---
 logging.info("\n--- Building grid-to-stations mapping ---")
@@ -950,15 +1009,24 @@ with open(station_map_file, "wb") as f:
     pickle.dump(grid_to_stations_map, f)
 logging.info(f"Station map saved to {station_map_file}")
 
-# Reformat the dataset to have a stacked time dimension and add a 3D time variable
-# Get the actual stacked times from the concatenated dataset
+# --- Step 5: Temporal Interpolation and Saving ---
+
+# 1. Prepare Target Time Grid (Hourly)
+# Get the range from combined dataset
+min_time = gridded_dwd_ds.time.min().values
+max_time = gridded_dwd_ds.time.max().values
+
+# Create continuous hourly range
+hourly_times = pd.date_range(start=min_time, end=max_time, freq="1h")
+
+# Convert timestamps to Unix seconds for interpolation function
 unix_epoch = np.datetime64(0, "s")
 one_second = np.timedelta64(1, "s")
 
 stacked_times = gridded_dwd_ds.time.values
 stacked_timesUnix = (stacked_times - unix_epoch) / one_second
+hourly_timesUnix = (hourly_times.values - unix_epoch) / one_second
 
-# Rename time dimension to match later processing
 ds_rename = gridded_dwd_ds.rename({"time": "stacked_time"})
 
 # Add a 3D time array
@@ -971,6 +1039,7 @@ time3d = (
     )  # add ('longitude',)
     .transpose("stacked_time", "lat", "lon")  # order dims
 )
+
 
 # Add the time array to the dataset
 ds_rename["time"] = time3d
@@ -993,17 +1062,15 @@ ds_chunk = ds_stack.chunk(
 
 # Interim zarr save of the stacked array. Not necessary for local, but speeds things up on S3
 with ProgressBar():
-    ds_chunk.to_zarr(forecast_process_dir + "/DWD_MOSMIX_stack.zarr", mode="w")
+    ds_chunk.to_zarr(forecast_process_path + "_stack.zarr", mode="w")
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(
-    forecast_process_dir + "/DWD_MOSMIX_stack.zarr",
-    component="__xarray_dataarray_variable__",
+    forecast_process_path + "_stack.zarr", component="__xarray_dataarray_variable__"
 )
 
 
-# --- Step 5: Save Gridded DWD Dataset to Zarr ---
-
+# Create a zarr backed dask array
 if save_type == "S3":
     zarr_store = zarr.storage.ZipStore(
         forecast_process_dir + "/DWD_MOSMIX.zarr.zip", mode="a"
@@ -1012,33 +1079,59 @@ else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/DWD_MOSMIX.zarr")
 
 
-# Create the zarr array
-zarr_array = zarr.create_array(
-    store=zarr_store,
-    shape=(
-        len(zarr_vars),
-        len(stacked_timesUnix),
-        daskVarArrayStackDisk.shape[2],
-        daskVarArrayStackDisk.shape[3],
-    ),
-    chunks=(
-        len(zarr_vars),
-        len(stacked_timesUnix),
-        FINAL_CHUNK_SIZES["DWD"],
-        FINAL_CHUNK_SIZES["DWD"],
-    ),
-    compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-    dtype="float32",
-)
+# Define which variables are integers and need special handling
+int_vars = ["PTYPE_surface"]
+# Find the index of these variables in the zarr_vars list
+int_var_indices = [i for i, v in enumerate(zarr_vars) if v in int_vars]
+
+# 1. Interpolate the stacked array to be hourly along the time axis
+# 2. Pad to chunk size
+# 3. Create the zarr array
+# 4. Rechunk it to match the final array
+# 5. Write it out to the zarr array
 
 with ProgressBar():
-    daskVarArrayStackDisk.round(5).rechunk(
-        (
+    # 1. Interpolate NaNs along the stacked_time axis, leaving all-NaN slices untouched.
+    daskVarArrayStackDiskInterp = interpolate_nan_along_axis(
+        daskVarArrayStackDisk, axis=1
+    ).astype("float32").compute()
+
+    # Preserve integer/categorical variables (e.g., PTYPE) by keeping originals.
+    if int_var_indices:
+        pieces = []
+        prev = 0
+        for idx in sorted(int_var_indices):
+            if idx > prev:
+                pieces.append(daskVarArrayStackDiskInterp[prev:idx])
+            pieces.append(daskVarArrayStackDisk[idx : idx + 1])
+            prev = idx + 1
+        if prev < daskVarArrayStackDisk.shape[0]:
+            pieces.append(daskVarArrayStackDiskInterp[prev:])
+        daskVarArrayStackDiskInterp = da.concatenate(pieces, axis=0)
+
+    # 2. Pad to chunk size
+    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+        daskVarArrayStackDiskInterp, FINAL_CHUNK_SIZES["DWD"]
+    )
+
+    # 3. Create the zarr array
+    zarr_array = zarr.create_array(
+        store=zarr_store,
+        shape=(
             len(zarr_vars),
-            len(stacked_timesUnix),
-            FINAL_CHUNK_SIZES["DWD"],
-            FINAL_CHUNK_SIZES["DWD"],
-        )
+            len(hourly_timesUnix),
+            daskVarArrayStackDiskInterpPad.shape[2],
+            daskVarArrayStackDiskInterpPad.shape[3],
+        ),
+        chunks=(len(zarr_vars), len(hourly_timesUnix), FINAL_CHUNK_SIZES["DWD"], FINAL_CHUNK_SIZES["DWD"]),
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32",
+    )
+
+    # 4. Rechunk it to match the final array
+    # 5. Write it out to the zarr array
+    daskVarArrayStackDiskInterpPad.round(5).rechunk(
+        (len(zarr_vars), len(hourly_timesUnix), FINAL_CHUNK_SIZES["DWD"], FINAL_CHUNK_SIZES["DWD"])
     ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
