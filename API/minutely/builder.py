@@ -743,9 +743,18 @@ def build_minutely_block(
         if not np.any(np.isnan(InterTminute))
         else np.full(len(minute_array_grib), 5)
     )
-    pTypes = ["none", "snow", "sleet", "sleet", "rain", MISSING_DATA]
-    pTypesText = ["Clear", "Snow", "Sleet", "Sleet", "Rain", MISSING_DATA]
-    pTypesIcon = ["clear", "snow", "sleet", "sleet", "rain", MISSING_DATA]
+    # Ensure text/icon/type mappings align and place MISSING_DATA as the final entry
+    pTypes = ["none", "snow", "sleet", "ice", "rain", "mixed", MISSING_DATA]
+    pTypesText = [
+        "Clear",
+        "Snow",
+        "Sleet",
+        "Freezing Rain",
+        "Rain",
+        "Mixed Precipitation",
+        MISSING_DATA,
+    ]
+    pTypesIcon = ["clear", "snow", "sleet", "sleet", "rain", "mixed", MISSING_DATA]
 
     minuteType = [pTypes[maxPchance[idx]] for idx in range(61)]
     precipTypes = np.array(minuteType)
@@ -766,6 +775,9 @@ def build_minutely_block(
 
     # Update minuteType list from updated precipTypes array (for HRRR/DWD MOSMIX logic)
     minuteType = precipTypes.tolist()
+
+    # (minute-level presence flags removed — not used here; responseLocal computes
+    # presence from `maxPchance` and passes compact flags into hourly builder)
 
     # Recalculate maxPchance from updated precipTypes to ensure type-specific intensities
     # are distributed correctly when intensity calculation updates the precipitation type

@@ -751,6 +751,7 @@ def build_hourly_block(
     cape_inputs,
     error_inputs,
     version,
+    minute_presence: dict | None = None,
 ):
     """
     Build hourly output objects and summary text/icon lists.
@@ -861,8 +862,39 @@ def build_hourly_block(
         timeMachine,
     )
 
-    pTypeMap = np.array(["none", "snow", "sleet", "sleet", "rain"])
-    pTextMap = np.array(["None", "Snow", "Sleet", "Sleet", "Rain"])
+    # Mark hours as mixed when all component types are present for that hour.
+    # Use accumulation thresholds to avoid noise-driven mixed flags.
+    try:
+        accum_thresh = PRECIP_ACCUM_NOISE_THRESHOLD
+        mixed_mask = (
+            (InterPhour[:, DATA_HOURLY["rain"]] > accum_thresh)
+            & (InterPhour[:, DATA_HOURLY["snow"]] > accum_thresh)
+            & (InterPhour[:, DATA_HOURLY["ice"]] > accum_thresh)
+        )
+        InterPhour[mixed_mask, DATA_HOURLY["type"]] = PRECIP_IDX["mixed"]
+    except Exception:
+        # Safe no-op on any unexpected shapes/types
+        pass
+
+    # If minute-level presence flags are provided for the current hour, prefer
+    # minute-derived detection for that hour (more accurate for short bursts).
+    if minute_presence is not None:
+        try:
+            idx = int(baseTimeOffset)
+            if (
+                0 <= idx < InterPhour.shape[0]
+                and minute_presence.get("has_rain", False)
+                and minute_presence.get("has_snow", False)
+                and minute_presence.get("has_ice", False)
+            ):
+                InterPhour[idx, DATA_HOURLY["type"]] = PRECIP_IDX["mixed"]
+        except Exception:
+            pass
+
+    pTypeMap = np.array(["none", "snow", "sleet", "ice", "rain", "mixed"])
+    pTextMap = np.array(
+        ["None", "Snow", "Sleet", "Freezing Rain", "Rain", "Mixed Precipitation"]
+    )
     PTypeHour = pTypeMap[
         np.nan_to_num(InterPhour[:, DATA_HOURLY["type"]], 0).astype(int)
     ]
