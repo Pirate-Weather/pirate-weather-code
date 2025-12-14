@@ -872,7 +872,7 @@ def build_hourly_block(
             & (InterPhour[:, DATA_HOURLY["ice"]] > accum_thresh)
         )
         InterPhour[mixed_mask, DATA_HOURLY["type"]] = PRECIP_IDX["mixed"]
-    except Exception:
+    except (IndexError, TypeError, ValueError):
         # Safe no-op on any unexpected shapes/types
         pass
 
@@ -888,7 +888,7 @@ def build_hourly_block(
                 and minute_presence.get("has_ice", False)
             ):
                 InterPhour[idx, DATA_HOURLY["type"]] = PRECIP_IDX["mixed"]
-        except Exception:
+        except (ValueError, IndexError):
             pass
 
     pTypeMap = np.array(["none", "snow", "sleet", "ice", "rain", "mixed"])

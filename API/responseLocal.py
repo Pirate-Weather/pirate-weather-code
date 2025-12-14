@@ -647,7 +647,7 @@ async def PW_Forecast(
                 )
             ),
         }
-    except Exception:
+    except (KeyError, TypeError, ValueError):
         minute_presence = {"has_rain": False, "has_snow": False, "has_ice": False}
 
     # Timing Check
