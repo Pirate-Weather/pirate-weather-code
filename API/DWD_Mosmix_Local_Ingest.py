@@ -49,9 +49,7 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     DWD_RADIUS,
     FINAL_CHUNK_SIZES,
-    interpolate_nan_along_axis,
-    interp_time_take_blend,
-    pad_to_chunk_size,
+    interpolate_temporal_gaps_efficiently,
 )
 
 # Distance to interpolate stations to grid (km)
@@ -704,7 +702,7 @@ downloaded_kmz_file = "MOSMIX_S_LATEST_240.kmz"
 ingest_version = INGEST_VERSION_STR
 
 # Base directory for all processing and output files.
-forecast_process_dir = os.getenv("forecast_process_dir", "/mnt/nvme/data/DWD")
+forecast_process_dir = os.getenv("forecast_process_dir", "/mnt/nvme/data/DWD_MOSMIX")
 forecast_process_path = forecast_process_dir + "/DWD_Process"
 # Temporary directory for downloaded files.
 tmp_dir = os.getenv("tmp_dir", os.path.join(forecast_process_dir, "Downloads"))
@@ -722,8 +720,6 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 s3 = None
 if save_type == "S3":
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-
-# zarr import for S3 stores (imports are at top)
 
 
 # --- Directory Setup and Cleanup ---
@@ -957,7 +953,7 @@ for i in range(history_period, 0, -1):
             )
         else:
             store = zarr.storage.LocalStore(hist_zarr_path)
-            
+
         ds_hist.to_zarr(store, mode="w", consolidated=False)
         
         # Create .done file
@@ -1010,6 +1006,43 @@ with open(station_map_file, "wb") as f:
 logging.info(f"Station map saved to {station_map_file}")
 
 # --- Step 5: Temporal Interpolation and Saving ---
+# Rechunk the data to be more manageable for processing
+gridded_dwd_ds_chunk = gridded_dwd_ds.chunk(
+    {
+        "time": len(gridded_dwd_ds.time),
+        "lat": CHUNK_SIZES["DWD"],
+        "lon": CHUNK_SIZES["DWD"],
+    })
+
+# Strip existing encoding so Zarr writes the new chunks we specified
+for var in gridded_dwd_ds_chunk.variables:
+    if 'chunks' in gridded_dwd_ds_chunk[var].encoding:
+        del gridded_dwd_ds_chunk[var].encoding['chunks']
+    if 'preferred_chunks' in gridded_dwd_ds_chunk[var].encoding:
+        del gridded_dwd_ds_chunk[var].encoding['preferred_chunks']
+
+# Write chunked to disk as interim step
+with ProgressBar():
+    gridded_dwd_ds_chunk.to_zarr(forecast_process_path + "_chunk.zarr", mode="w")
+
+# Read back in as xarray
+ds_chunk_disk = xr.open_zarr(
+    forecast_process_path + "_chunk.zarr", chunks="auto"
+)
+
+# Interpolate max 3 hour gaps
+# Define variables that shouldn't be smoothed linearly (e.g. codes, types)
+nearest_neighbor_vars = ["PTYPE_surface"]
+
+logging.info("Interpolating gaps and extrapolating edges...")
+
+# Apply efficient interpolation
+ds_chunk_disk_interp = interpolate_temporal_gaps_efficiently(
+    ds_chunk_disk,
+    nearest_vars=nearest_neighbor_vars,
+    max_gap_hours=3,
+    time_dim="time"
+)
 
 # 1. Prepare Target Time Grid (Hourly)
 # Get the range from combined dataset
@@ -1023,11 +1056,11 @@ hourly_times = pd.date_range(start=min_time, end=max_time, freq="1h")
 unix_epoch = np.datetime64(0, "s")
 one_second = np.timedelta64(1, "s")
 
-stacked_times = gridded_dwd_ds.time.values
+stacked_times = ds_chunk_disk_interp.time.values
 stacked_timesUnix = (stacked_times - unix_epoch) / one_second
 hourly_timesUnix = (hourly_times.values - unix_epoch) / one_second
 
-ds_rename = gridded_dwd_ds.rename({"time": "stacked_time"})
+ds_rename = ds_chunk_disk_interp.rename({"time": "stacked_time"})
 
 # Add a 3D time array
 time3d = (
@@ -1044,6 +1077,11 @@ time3d = (
 # Add the time array to the dataset
 ds_rename["time"] = time3d
 
+# Set time to nan where TMP_2maboveground is nan
+ds_rename["time"] = ds_rename["time"].where(
+    ~np.isnan(ds_rename["TMP_2maboveground"]), other=np.nan
+)
+
 # Set the order correctly
 vars_in = [
     v for v in zarr_vars if v in ds_rename.data_vars
@@ -1053,20 +1091,11 @@ ds_stack = ds_rename[vars_in].to_array(dim="var", name="var")
 # Rechunk the data to be more manageable for processing
 ds_chunk = ds_stack.chunk(
     {
-        "var": 1,
+        "var": -1,
         "stacked_time": len(stacked_timesUnix),
-        "lat": CHUNK_SIZES["DWD"],
-        "lon": CHUNK_SIZES["DWD"],
+        "lat": FINAL_CHUNK_SIZES["DWD"],
+        "lon": FINAL_CHUNK_SIZES["DWD"],
     }
-)
-
-# Interim zarr save of the stacked array. Not necessary for local, but speeds things up on S3
-with ProgressBar():
-    ds_chunk.to_zarr(forecast_process_path + "_stack.zarr", mode="w")
-
-# Read in stacked 4D array back in
-daskVarArrayStackDisk = da.from_zarr(
-    forecast_process_path + "_stack.zarr", component="__xarray_dataarray_variable__"
 )
 
 
@@ -1079,11 +1108,6 @@ else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/DWD_MOSMIX.zarr")
 
 
-# Define which variables are integers and need special handling
-int_vars = ["PTYPE_surface"]
-# Find the index of these variables in the zarr_vars list
-int_var_indices = [i for i, v in enumerate(zarr_vars) if v in int_vars]
-
 # 1. Interpolate the stacked array to be hourly along the time axis
 # 2. Pad to chunk size
 # 3. Create the zarr array
@@ -1091,54 +1115,20 @@ int_var_indices = [i for i, v in enumerate(zarr_vars) if v in int_vars]
 # 5. Write it out to the zarr array
 
 with ProgressBar():
-    # 1. Interpolate NaNs along the stacked_time axis, leaving all-NaN slices untouched.
-    daskVarArrayStackDiskInterp = interpolate_nan_along_axis(
-        daskVarArrayStackDisk, axis=1
-    ).astype("float32").compute()
-
-    # Preserve integer/categorical variables (e.g., PTYPE) by keeping originals.
-    if int_var_indices:
-        pieces = []
-        prev = 0
-        for idx in sorted(int_var_indices):
-            if idx > prev:
-                pieces.append(daskVarArrayStackDiskInterp[prev:idx])
-            pieces.append(daskVarArrayStackDisk[idx : idx + 1])
-            prev = idx + 1
-        if prev < daskVarArrayStackDisk.shape[0]:
-            pieces.append(daskVarArrayStackDiskInterp[prev:])
-        daskVarArrayStackDiskInterp = da.concatenate(pieces, axis=0)
-
-    # 2. Pad to chunk size
-    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
-        daskVarArrayStackDiskInterp, FINAL_CHUNK_SIZES["DWD"]
-    )
-
-    # 3. Create the zarr array
-    zarr_array = zarr.create_array(
-        store=zarr_store,
-        shape=(
-            len(zarr_vars),
-            len(hourly_timesUnix),
-            daskVarArrayStackDiskInterpPad.shape[2],
-            daskVarArrayStackDiskInterpPad.shape[3],
-        ),
-        chunks=(len(zarr_vars), len(hourly_timesUnix), FINAL_CHUNK_SIZES["DWD"], FINAL_CHUNK_SIZES["DWD"]),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
-    )
-
     # 4. Rechunk it to match the final array
     # 5. Write it out to the zarr array
-    daskVarArrayStackDiskInterpPad.round(5).rechunk(
-        (len(zarr_vars), len(hourly_timesUnix), FINAL_CHUNK_SIZES["DWD"], FINAL_CHUNK_SIZES["DWD"])
-    ).to_zarr(zarr_array, overwrite=True, compute=True)
+    ds_chunk.to_zarr(zarr_store, mode="w")
 
 
 if save_type == "S3":
     zarr_store.close()
 
 
+### Test read back
+# localTest = zarr.open(
+#     forecast_process_dir + "/DWD_MOSMIX.zarr",
+#     mode="r",
+# )
 # --- Step 6: Upload to S3 or Move to Final Location ---
 
 # %% Upload to S3
