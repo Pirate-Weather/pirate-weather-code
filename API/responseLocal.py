@@ -1077,7 +1077,7 @@ async def PW_Forecast(
 
                     # Determine output units: miles for 'us' and 'uk2', otherwise km
                     units_key = (unitSystem or "").lower()
-                    if units_key in ("us", "uk2"):
+                    if units_key in ("us", "uk"):
                         # Convert kilometers to miles using shared constant
                         km_to_miles = CONVERSION_FACTORS.get("km_to_miles", 0.621371)
                         distance_out = min_distance * km_to_miles
