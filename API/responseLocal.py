@@ -1076,9 +1076,7 @@ async def PW_Forecast(
                     )  # in kilometers (haversine_distance returns km)
 
                     # Determine output units: miles for 'us' and 'uk2', otherwise km
-                    units_key = (
-                        (unitSystem or "").lower() if "unitSystem" in locals() else ""
-                    )
+                    units_key = (unitSystem or "").lower()
                     if units_key in ("us", "uk2"):
                         # Convert kilometers to miles using shared constant
                         km_to_miles = CONVERSION_FACTORS.get("km_to_miles", 0.621371)
