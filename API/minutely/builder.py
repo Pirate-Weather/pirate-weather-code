@@ -744,12 +744,12 @@ def build_minutely_block(
         else np.full(len(minute_array_grib), 5)
     )
     # Ensure text/icon/type mappings align and place MISSING_DATA as the final entry
-    pTypes = ["none", "snow", "sleet", "ice", "rain", "mixed", MISSING_DATA]
+    pTypes = ["none", "snow", "ice", "sleet", "rain", "mixed", MISSING_DATA]
     pTypesText = [
         "Clear",
         "Snow",
-        "Sleet",
         "Freezing Rain",
+        "Sleet",
         "Rain",
         "Mixed Precipitation",
         MISSING_DATA,
