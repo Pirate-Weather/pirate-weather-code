@@ -265,9 +265,9 @@ def calculate_precip_text(
         else:
             c_icon = precipType
 
-    if num_types > 2 and total_prep > 0:
+    if (num_types > 2 and total_prep > 0) or precipType == "mixed":
         c_text = "mixed-precipitation"
-    if (rainAccum > 0 or eff_rain_intensity > 0) and precipType == "rain":
+    elif (rainAccum > 0 or eff_rain_intensity > 0) and precipType == "rain":
         if eff_rain_intensity < light_precip_thresh:
             c_text = possible_precip + "very-light-rain"
             if is_pirate_icon and is_possible_precip and isDayTime:
