@@ -5,8 +5,15 @@ import xarray as xr
 from API.ingest_utils import interpolate_temporal_gaps_efficiently
 
 
-def _make_dataset_1d(values):
-    """Create an xr.Dataset with dims (time, y, x) where y and x are size 1."""
+def _make_dataset_1d(values: list[float]) -> xr.Dataset:
+    """Create an xr.Dataset with dims (time, y, x) where y and x are size 1.
+
+    Args:
+        values (list[float]): A list of float values for the data variable.
+
+    Returns:
+        xr.Dataset: A dataset containing one variable 'var' with the provided values.
+    """
     arr = np.array(values, dtype=float).reshape((len(values), 1, 1))
     darr = da.from_array(arr, chunks=arr.shape)
     da_var = xr.DataArray(
