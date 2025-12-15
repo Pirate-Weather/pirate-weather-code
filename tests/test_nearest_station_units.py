@@ -24,13 +24,14 @@ def test_nearest_station_conversion_us_with_sample_data():
         for _, r in df.iterrows()
     ]
 
-    # choose user at the first station (distance 0) and second scenario with a different user
-    user = (float(df.iloc[0].latitude), float(df.iloc[0].longitude))
+    # A user location that is not at a station to test conversion
+    user = (50.0, 12.0)
     km = _compute_nearest_distance_km(user, stations)
     km_to_miles = CONVERSION_FACTORS.get("km_to_miles")
     miles_out = round(km * km_to_miles, 2)
 
-    assert miles_out == round(km * km_to_miles, 2)
+    # Expected: min distance is to Munich (48.1, 11.6), ~213.44 km -> 132.63 miles
+    assert miles_out == 132.63
 
 
 def test_nearest_station_conversion_uk2_with_sample_data():
@@ -42,9 +43,11 @@ def test_nearest_station_conversion_uk2_with_sample_data():
         for _, r in df.iterrows()
     ]
 
-    user = (float(df.iloc[1].latitude), float(df.iloc[1].longitude))
+    # A user location that is not at a station to test conversion
+    user = (53.0, 11.0)
     km = _compute_nearest_distance_km(user, stations)
     km_to_miles = CONVERSION_FACTORS.get("km_to_miles")
     miles_out = round(km * km_to_miles, 2)
 
-    assert miles_out == round(km * km_to_miles, 2)
+    # Expected: min distance is to Hamburg (53.6, 10.0), ~86.3 km -> 53.62 miles
+    assert miles_out == 53.62
