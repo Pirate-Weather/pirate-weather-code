@@ -825,9 +825,9 @@ async def PW_Forecast(
             version=version,
         )
 
-    pTypeMap = np.array(["none", "snow", "sleet", "ice", "rain", "mixed"])
+    pTypeMap = np.array(["none", "snow", "ice", "sleet", "rain", "mixed"])
     pTextMap = np.array(
-        ["None", "Snow", "Sleet", "Freezing Rain", "Rain", "Mixed Precipitation"]
+        ["None", "Snow", "Freezing Rain", "Sleet", "Rain", "Mixed Precipitation"]
     )
 
     # 13. Generate the daily forecast section

@@ -891,9 +891,9 @@ def build_hourly_block(
         except (ValueError, IndexError):
             pass
 
-    pTypeMap = np.array(["none", "snow", "sleet", "ice", "rain", "mixed"])
+    pTypeMap = np.array(["none", "snow", "ice", "sleet", "rain", "mixed"])
     pTextMap = np.array(
-        ["None", "Snow", "Sleet", "Freezing Rain", "Rain", "Mixed Precipitation"]
+        ["None", "Snow", "Freezing Rain", "Sleet", "Rain", "Mixed Precipitation"]
     )
     PTypeHour = pTypeMap[
         np.nan_to_num(InterPhour[:, DATA_HOURLY["type"]], 0).astype(int)
