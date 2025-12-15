@@ -4,7 +4,6 @@
 import re
 import sys
 import time
-from typing import Iterable, Optional, Union
 
 import cartopy.crs as ccrs
 import dask.array as da
@@ -261,7 +260,10 @@ def earth_relative_wind_components(
 
     return ut, vt
 
-def interpolate_temporal_gaps_efficiently(ds_chunked, nearest_vars=None, max_gap_hours=3, time_dim="time"):
+
+def interpolate_temporal_gaps_efficiently(
+    ds_chunked, nearest_vars=None, max_gap_hours=3, time_dim="time"
+):
     """
     Interpolates temporal gaps and extrapolates edges efficiently in a sparse Dask/Xarray dataset.
 
@@ -295,18 +297,13 @@ def interpolate_temporal_gaps_efficiently(ds_chunked, nearest_vars=None, max_gap
 
         # Wrap numpy block in DataArray for convenient Xarray methods
         da_temp = xr.DataArray(
-            block,
-            dims=(time_dim, "y", "x"),
-            coords={time_dim: time_coords}
+            block, dims=(time_dim, "y", "x"), coords={time_dim: time_coords}
         )
 
         # 1. Interpolate Internal Gaps
         # use_coordinate=True ensures we respect actual time steps, not just index count
         filled = da_temp.interpolate_na(
-            dim=time_dim,
-            method=method,
-            limit=max_gap_hours,
-            use_coordinate=True
+            dim=time_dim, method=method, limit=max_gap_hours, use_coordinate=True
         )
 
         # 2. Extrapolate Edges (Nearest Neighbour)
@@ -334,7 +331,7 @@ def interpolate_temporal_gaps_efficiently(ds_chunked, nearest_vars=None, max_gap
             time_coords=time_coords,
             method=interp_method,
             dtype=da_var.dtype,
-            chunks=da_var.chunks
+            chunks=da_var.chunks,
         )
 
         return da_var.copy(data=processed_data)

@@ -44,7 +44,6 @@ from sklearn.neighbors import BallTree
 from tqdm import tqdm  # safe to ignore if not using log="tqdm"
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
-from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     DWD_RADIUS,
@@ -108,6 +107,7 @@ api_target_numerical_variables = [
 # Relative humidity is calculated using MetPy's `relative_humidity_from_dewpoint`.
 # This removes the need for custom vapor-pressure approximations and leverages
 # a tested implementation that supports pint units.
+
 
 def parse_mosmix_kml(kml_filepath):
     """
@@ -754,6 +754,7 @@ if save_type == "Download":
 
 start_time = time.time()  # Start timer for script execution
 
+
 # --- Step 1: Download and Parse DWD MOSMIX-S KML/KMZ Data ---
 def download_mosmix_file(url, local_path):
     """
@@ -765,7 +766,7 @@ def download_mosmix_file(url, local_path):
         if response.status_code == 404:
             logging.warning(f"File not found: {url}")
             return False
-            
+
         response.raise_for_status()
         with open(local_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
@@ -775,6 +776,7 @@ def download_mosmix_file(url, local_path):
     except Exception as e:
         logging.warning(f"Error downloading {url}: {e}")
         return False
+
 
 # --- Step 1: Download and Parse DWD MOSMIX-S KML/KMZ Data ---
 logging.info(f"\n--- Attempting to download DWD MOSMIX data from: {dwd_mosmix_url} ---")
@@ -829,14 +831,15 @@ else:
 # --- Step 2: Process Pandas DataFrame ---
 logging.info("\\n--- Converting DataFrame to xarray Dataset (point-based) ---")
 
+
 def process_and_interpolate_df(df_input):
     """
-    Wrapper to process DWD DataFrame, optionally temporally interpolate, 
+    Wrapper to process DWD DataFrame, optionally temporally interpolate,
     and then spatially interpolate to grid.
     """
     # 1. Process units and variables
     df_processed = process_dwd_df(df_input)
-    
+
     # 2. Interpolate to Grid
     gridded_ds = interpolate_dwd_to_grid_knearest_dask(
         df_processed,
@@ -846,9 +849,9 @@ def process_and_interpolate_df(df_input):
         lat_col="latitude",
         lon_col="longitude",
         station_col="station_id",
-        log="none" # Reduce noise
+        log="none",  # Reduce noise
     )
-    
+
     return gridded_ds
 
 
@@ -866,10 +869,10 @@ for i in range(history_period, 0, -1):
     target_time = base_time - pd.Timedelta(hours=i)
 
     time_str = target_time.strftime("%Y%m%d%H")
-    
+
     # Path for cached Zarr file
     hist_zarr_filename = f"DWD_Hist_{time_str}.zarr"
-    
+
     # Check if cached file exists
     if save_type == "S3":
         hist_zarr_path = f"{historic_path}/{hist_zarr_filename}"
@@ -877,7 +880,7 @@ for i in range(history_period, 0, -1):
     else:
         hist_zarr_path = os.path.join(historic_path, hist_zarr_filename)
         cached_exists = os.path.exists(hist_zarr_path.replace(".zarr", ".done"))
-        
+
     if cached_exists:
         logging.info(f"Loading cached historic run: {time_str}")
         try:
@@ -891,7 +894,7 @@ for i in range(history_period, 0, -1):
                 )
             else:
                 store = zarr.storage.LocalStore(hist_zarr_path)
-                
+
             ds_hist = xr.open_dataset(store, engine="zarr", chunks="auto")
             historic_datasets.append(ds_hist)
             continue
@@ -900,46 +903,46 @@ for i in range(history_period, 0, -1):
             # Fallback to re-download if load fails? Or just skip?
             # Let's try to re-process.
             pass
-            
-            
+
     # If not cached, download and process
     logging.info(f"Processing historic run: {time_str}")
-    
+
     # Construct URL for historical file
     # Pattern: MOSMIX_S_2025121018_240.kmz
     hist_filename = f"MOSMIX_S_{time_str}_240.kmz"
     hist_url = f"https://opendata.dwd.de/weather/local_forecasts/mos/MOSMIX_S/all_stations/kml/{hist_filename}"
     local_hist_path = os.path.join(tmp_dir, hist_filename)
-    
+
     # Check if download is needed
     if not os.path.exists(local_hist_path):
         if not download_mosmix_file(hist_url, local_hist_path):
-            continue 
-            
+            continue
+
     # Parse the file
     try:
         df_hist, _ = parse_mosmix_kml(local_hist_path)
         if df_hist.empty:
             continue
-            
+
         # Standardize longitudes
         df_hist["longitude"] = df_hist["longitude"] % 360
-        
 
         # Files are offset by 1 hour (so T21 forecast is in the T20 file)
         target_time = target_time.tz_localize(None)
         target_time = target_time + pd.Timedelta(hours=1)
-        
+
         # Filter dataframe to this specific time
         df_hist_filtered = df_hist[df_hist["time"] == target_time].copy()
-        
+
         if df_hist_filtered.empty:
-            logging.warning(f"No data found for target time {target_time} in {hist_filename}")
+            logging.warning(
+                f"No data found for target time {target_time} in {hist_filename}"
+            )
             continue
-            
+
         # Process this single timestep (no temporal interp needed for single step)
         ds_hist = process_and_interpolate_df(df_hist_filtered)
-        
+
         # Cache the processed dataset
         logging.info(f"Caching processed run to {hist_zarr_path}")
         if save_type == "S3":
@@ -949,27 +952,27 @@ for i in range(history_period, 0, -1):
                     "key": aws_access_key_id,
                     "secret": aws_secret_access_key,
                 },
-                mode="w"
+                mode="w",
             )
         else:
             store = zarr.storage.LocalStore(hist_zarr_path)
 
         ds_hist.to_zarr(store, mode="w", consolidated=False)
-        
+
         # Create .done file
         if save_type == "S3":
             s3.touch(hist_zarr_path.replace(".zarr", ".done"))
         else:
             with open(hist_zarr_path.replace(".zarr", ".done"), "w") as f:
                 f.write("Done")
-        
+
         # Re-open lazily to use in current run (avoids memory hogging)
         ds_hist_lazy = xr.open_dataset(store, engine="zarr", chunks="auto")
         historic_datasets.append(ds_hist_lazy)
-        
+
         # Cleanup
-        os.remove(local_hist_path) 
-        
+        os.remove(local_hist_path)
+
     except Exception as e:
         logging.warning(f"Error processing {hist_filename}: {e}")
 
@@ -978,10 +981,10 @@ if historic_datasets:
     logging.info(f"Combining {len(historic_datasets)} historic datasets with forecast")
     # Concatenate historic datasets along time dimension
     ds_history = xr.concat(historic_datasets, dim="time")
-    
+
     # Concatenate history and forecast
     gridded_dwd_ds = xr.concat([ds_history, gridded_dwd_ds_forecast], dim="time")
-    
+
     # Sort by time just in case
     gridded_dwd_ds = gridded_dwd_ds.sortby("time")
 else:
@@ -1012,23 +1015,22 @@ gridded_dwd_ds_chunk = gridded_dwd_ds.chunk(
         "time": len(gridded_dwd_ds.time),
         "lat": CHUNK_SIZES["DWD"],
         "lon": CHUNK_SIZES["DWD"],
-    })
+    }
+)
 
 # Strip existing encoding so Zarr writes the new chunks we specified
 for var in gridded_dwd_ds_chunk.variables:
-    if 'chunks' in gridded_dwd_ds_chunk[var].encoding:
-        del gridded_dwd_ds_chunk[var].encoding['chunks']
-    if 'preferred_chunks' in gridded_dwd_ds_chunk[var].encoding:
-        del gridded_dwd_ds_chunk[var].encoding['preferred_chunks']
+    if "chunks" in gridded_dwd_ds_chunk[var].encoding:
+        del gridded_dwd_ds_chunk[var].encoding["chunks"]
+    if "preferred_chunks" in gridded_dwd_ds_chunk[var].encoding:
+        del gridded_dwd_ds_chunk[var].encoding["preferred_chunks"]
 
 # Write chunked to disk as interim step
 with ProgressBar():
     gridded_dwd_ds_chunk.to_zarr(forecast_process_path + "_chunk.zarr", mode="w")
 
 # Read back in as xarray
-ds_chunk_disk = xr.open_zarr(
-    forecast_process_path + "_chunk.zarr", chunks="auto"
-)
+ds_chunk_disk = xr.open_zarr(forecast_process_path + "_chunk.zarr", chunks="auto")
 
 # Interpolate max 3 hour gaps
 # Define variables that shouldn't be smoothed linearly (e.g. codes, types)
@@ -1038,10 +1040,7 @@ logging.info("Interpolating gaps and extrapolating edges...")
 
 # Apply efficient interpolation
 ds_chunk_disk_interp = interpolate_temporal_gaps_efficiently(
-    ds_chunk_disk,
-    nearest_vars=nearest_neighbor_vars,
-    max_gap_hours=3,
-    time_dim="time"
+    ds_chunk_disk, nearest_vars=nearest_neighbor_vars, max_gap_hours=3, time_dim="time"
 )
 
 # 1. Prepare Target Time Grid (Hourly)
