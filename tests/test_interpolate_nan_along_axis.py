@@ -9,7 +9,9 @@ def _make_dataset_1d(values):
     """Create an xr.Dataset with dims (time, y, x) where y and x are size 1."""
     arr = np.array(values, dtype=float).reshape((len(values), 1, 1))
     darr = da.from_array(arr, chunks=arr.shape)
-    da_var = xr.DataArray(darr, dims=("time", "y", "x"), coords={"time": np.arange(len(values))})
+    da_var = xr.DataArray(
+        darr, dims=("time", "y", "x"), coords={"time": np.arange(len(values))}
+    )
     return xr.Dataset({"var": da_var})
 
 
