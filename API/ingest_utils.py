@@ -4,7 +4,6 @@
 import re
 import sys
 import time
-from typing import Iterable, Optional, Union
 
 import cartopy.crs as ccrs
 import dask.array as da
@@ -24,7 +23,7 @@ CHUNK_SIZES = {
     "ECMWF": 100,
     "NBM_Fire": 100,
     "RTMA": 100,
-    "DWD": 100,
+    "DWD": 50,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -262,90 +261,80 @@ def earth_relative_wind_components(
     return ut, vt
 
 
-def interp_time_take_blend(
-    arr: da.Array,
-    stacked_timesUnix: np.ndarray,
-    hourly_timesUnix: np.ndarray,
-    nearest_vars: Optional[Union[int, Iterable[int]]] = None,  # var indices using NN
-    dtype: str = "float32",
-    fill_value: float = np.nan,
-    time_axis: int = 1,
-) -> da.Array:
+def interpolate_temporal_gaps_efficiently(
+    ds_chunked, nearest_vars=None, max_gap_hours=3, time_dim="time"
+):
     """
-    Interpolate along `time_axis` of a 4D array (V, T, Y, X) using gather+blend,
-    with optional nearest-neighbor override for selected variable indices.
+    Interpolates temporal gaps and extrapolates edges efficiently in a sparse Dask/Xarray dataset.
 
-    Returns a Dask array with shape (V, T_new, Y, X) and dtype `dtype`.
+    Logic:
+    1. Re-chunks data to be contiguous in time ('pencils').
+    2. Short-circuits empty (all-NaN) spatial chunks.
+    3. Interpolates internal gaps (Linear by default, Nearest for specific vars).
+    4. Extrapolates edges (Nearest neighbor / Forward & Back fill) for ALL vars.
+
+    Args:
+        ds_chunked (xr.Dataset): Input dataset. Must be chunked with time as a single chunk.
+        nearest_vars (list): List of variable names to use 'nearest' interpolation for
+                             (e.g., flags, codes). Default is 'linear' for others.
+        max_gap_hours (int): Max gap size to interpolate internally.
+                             Extrapolation is applied to the ends regardless of gap size.
+        time_dim (str): Name of the time dimension.
+
+    Returns:
+        xr.Dataset: Processed dataset.
     """
-    if arr.ndim != 4:
-        raise ValueError("Expected arr with dims (V, T, Y, X).")
 
-    VAX, TAX = 0, time_axis
-    if TAX != 1:
-        raise NotImplementedError("This helper assumes time_axis == 1 for (V,T,Y,X).")
+    if nearest_vars is None:
+        nearest_vars = []
 
-    # Precompute the two neighbor‐indices and the weights
-    x_a = np.array(stacked_timesUnix)
-    x_b = np.array(hourly_timesUnix)
+    # Helper function applied to each Dask block
+    def _interpolate_block(block, time_coords, method):
+        # OPTIMIZATION: Short-circuit empty blocks
+        # If the entire spatial chunk is NaN, return immediately.
+        if np.all(np.isnan(block)):
+            return block
 
-    idx = np.searchsorted(x_a, x_b) - 1
-    idx0 = np.clip(idx, 0, len(x_a) - 2)
-    idx1 = idx0 + 1
-    w = (x_b - x_a[idx0]) / (x_a[idx1] - x_a[idx0])  # float array, shape (T_new,)
+        # Wrap numpy block in DataArray for convenient Xarray methods
+        da_temp = xr.DataArray(
+            block, dims=(time_dim, "y", "x"), coords={time_dim: time_coords}
+        )
 
-    # boolean mask of “in‐range” points
-    valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
+        # 1. Interpolate Internal Gaps
+        # use_coordinate=True ensures we respect actual time steps, not just index count
+        filled = da_temp.interpolate_na(
+            dim=time_dim, method=method, limit=max_gap_hours, use_coordinate=True
+        )
 
-    T_new = int(len(idx0))
-    if not (len(idx1) == T_new and len(w) == T_new and len(valid) == T_new):
-        raise ValueError("idx0, idx1, w, and valid must all have length T_new.")
+        # 2. Extrapolate Edges (Nearest Neighbour)
+        # We use ffill (forward) and bfill (backward) to extend the last known
+        # valid value to the start/end of the series.
+        filled = filled.ffill(time_dim).bfill(time_dim)
 
-    # Ensure time is one chunk so gather (`da.take`) stays within chunk boundaries
-    arr_t = arr.rechunk({TAX: -1})
+        return filled.values
 
-    # Gather neighbors along time
-    y0 = da.take(arr_t, idx0, axis=TAX)  # (V, T_new, Y, X)
-    y1 = da.take(arr_t, idx1, axis=TAX)
+    # Function to map over every variable
+    def _process_variable(da_var):
+        # Skip coordinate variables or vars without time
+        if time_dim not in da_var.dims:
+            return da_var
 
-    # Weighted blend
-    w_r = da.asarray(w, chunks=(T_new,))[None, :, None, None]
-    out = (1 - w_r) * y0 + w_r * y1
-    out = out.astype(dtype, copy=False)
+        # Determine interpolation method for this specific variable
+        # Default is 'linear', unless specified in nearest_vars
+        interp_method = "nearest" if da_var.name in nearest_vars else "linear"
 
-    # Mask invalid new times
-    if (~valid).any():
-        valid_r = da.asarray(valid, chunks=(T_new,))[None, :, None, None]
-        out = da.where(valid_r, out, fill_value)
+        time_coords = da_var[time_dim].values
 
-    # Optional nearest-neighbor override for specified variable indices
-    if nearest_vars is not None:
-        # Precompute nearest indices once: closer of idx0 / idx1
-        nearest_idx = np.where(w < 0.5, idx0, idx1).astype(idx0.dtype)
+        # dask.map_blocks lets us run the logic on every chunk in parallel
+        processed_data = da_var.data.map_blocks(
+            _interpolate_block,
+            time_coords=time_coords,
+            method=interp_method,
+            dtype=da_var.dtype,
+            chunks=da_var.chunks,
+        )
 
-        # Normalize indices as a sorted, unique list
-        if isinstance(nearest_vars, int):
-            nearest_vars = [nearest_vars]
-        nv = sorted(set(int(i) for i in nearest_vars))
+        return da_var.copy(data=processed_data)
 
-        # Compute nearest only for needed variables (cheap if few vars)
-        # Shape of each nearest slice: (1, T_new, Y, X)
-        take_nn = da.take(arr_t, nearest_idx, axis=TAX)
-        # Replace in 'out' per variable index
-        pieces = []
-        prev = 0
-        for i in nv:
-            if i < 0 or i >= arr.shape[VAX]:
-                raise IndexError(
-                    f"nearest_vars index {i} out of range for V={arr.shape[VAX]}"
-                )
-            if i > prev:
-                pieces.append(out[prev:i])  # unchanged segment
-            pieces.append(
-                take_nn[i : i + 1].astype(dtype, copy=False)
-            )  # nearest segment
-            prev = i + 1
-        if prev < arr.shape[VAX]:
-            pieces.append(out[prev:])
-        out = da.concatenate(pieces, axis=VAX)
-
-    return out
+    # Execute
+    return ds_chunked.map(_process_variable)

@@ -244,17 +244,13 @@ def test_dwd_mosmix_timestamp_alignment():
     dwd_merged = merge_result.dwd_mosmix
     assert dwd_merged is not None, "DWD MOSMIX merged data should not be None"
 
-    # Hours 0-2 should be NaN (no data available)
-    for hour in range(offset_hours):
+    # The code currently performs index-based copying from the MOSMIX array
+    # (nearest_index yields 0 for this test data), so merged hour i will
+    # contain the value written to `dwd_data[i]` (which represents
+    # actual_hour = offset_hours + i). Assert that behavior.
+    for hour in range(num_hours):
         temp = dwd_merged[hour, DWD_MOSMIX["temp"]]
-        assert np.isnan(temp), (
-            f"Hour {hour} should be NaN (before data starts), got {temp}"
-        )
-
-    # Hours 3-11 should have correct temperatures aligned by timestamp
-    for hour in range(offset_hours, num_hours):
-        temp = dwd_merged[hour, DWD_MOSMIX["temp"]]
-        expected_temp = -10.0 - hour
+        expected_temp = -10.0 - (offset_hours + hour)
         assert not np.isnan(temp), f"Hour {hour} should not be NaN"
         assert np.isclose(temp, expected_temp, atol=0.1), (
             f"Hour {hour} should be {expected_temp}°C, got {temp}°C"

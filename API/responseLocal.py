@@ -182,9 +182,7 @@ try:
     ingest_version = INGEST_VERSION_STR
 
     if STAGE in ("DEV", "PROD"):
-        station_map_file = os.path.join(
-            save_dir, ingest_version, "DWD_MOSMIX_stations.pickle"
-        )
+        station_map_file = os.path.join(save_dir, "DWD_MOSMIX_stations.pickle")
     elif STAGE in ("TESTING", "TM_TESTING"):
         # For testing stages, try to load from S3
         if save_type == "S3":
@@ -1102,7 +1100,9 @@ async def PW_Forecast(
                 grid_key = (int(grid_result.y_dwd), int(grid_result.x_dwd))
                 stations_at_grid = DWD_MOSMIX_Stations.get(grid_key, [])
                 if stations_at_grid:
-                    returnOBJ["flags"]["stations"] = stations_at_grid
+                    returnOBJ["flags"]["sourceIDX"]["dwd_mosmix"] = {
+                        "stations": stations_at_grid
+                    }
 
     # Timing Check
     timer.log("Flags Time")

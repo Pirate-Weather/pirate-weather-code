@@ -333,51 +333,9 @@ def merge_hourly_models(
                 (num_hours, max(DWD_MOSMIX.values()) + 1), MISSING_DATA
             )
 
-            # Copy data row by row, aligning by timestamp
-            for i in range(len(data_dwd_mosmix)):
-                row_time = data_dwd_mosmix[i, 0]
-                # Calculate which output hour this row corresponds to
-                # DWD MOSMIX data should be on hourly boundaries, but round to nearest hour
-                # to handle minor timestamp variations (e.g., 3599 seconds = 0.9997 hours)
-                hour_offset_float = (row_time - base_day_utc_grib) / 3600
-                hour_offset = int(round(hour_offset_float))
-
-                # Only copy if within valid output range
-                if 0 <= hour_offset < num_hours:
-                    copy_columns = data_dwd_mosmix.shape[1]
-                    dwd_mosmix_merged[hour_offset, 0:copy_columns] = data_dwd_mosmix[
-                        i, 0:copy_columns
-                    ]
-
-            # Log if merged data is mostly NaN (could indicate data quality issues)
-            if dwd_mosmix_merged is not None:
-                non_nan_count = np.count_nonzero(~np.isnan(dwd_mosmix_merged[:, 1:]))
-                total_count = dwd_mosmix_merged[:, 1:].size
-                if total_count > 0:
-                    nan_pct = 100 * (1 - non_nan_count / total_count)
-                    if nan_pct > 90:
-                        logger.warning(
-                            f"DWD MOSMIX merged data is {nan_pct:.1f}% NaN "
-                            f"({non_nan_count}/{total_count} valid) {loc_tag}"
-                        )
-                    # Check if temperature data exists and looks valid (should be in Celsius, typically -50 to 50)
-                    temp_col = DWD_MOSMIX["temp"]
-                    if temp_col < dwd_mosmix_merged.shape[1]:
-                        temps = dwd_mosmix_merged[:, temp_col]
-                        valid_temps = temps[~np.isnan(temps)]
-                        if len(valid_temps) > 0:
-                            temp_mean = np.mean(valid_temps)
-                            # If mean temp is > 100, it's likely still in Kelvin (conversion didn't happen)
-                            if temp_mean > 100:
-                                logger.error(
-                                    f"DWD MOSMIX temperature appears to be in Kelvin "
-                                    f"(mean={temp_mean:.1f}K). Conversion may have failed. {loc_tag}"
-                                )
-                            elif temp_mean < -100:
-                                logger.warning(
-                                    f"DWD MOSMIX temperature is unusually low "
-                                    f"(mean={temp_mean:.1f}C). Possible data issue. {loc_tag}"
-                                )
+            dwd_mosmix_merged = _merge_simple_source(
+                data_dwd_mosmix, dwd_start_idx, num_hours, max(DWD_MOSMIX.values()) + 1
+            )
 
     if "gfs" in metadata.source_list and isinstance(data_gfs, np.ndarray):
         gfs_start_idx = nearest_index(data_gfs[:, 0], base_day_utc_grib)
