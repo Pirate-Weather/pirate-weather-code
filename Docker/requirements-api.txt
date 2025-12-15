@@ -1,4 +1,4 @@
-aiobotocore[boto3]==2.26.0
+aiobotocore[boto3]==3.0.0
 astral==3.2
 crc32c==2.8
 dask==2025.11.0
