@@ -29,6 +29,7 @@ from API.api_utils import (
 )
 from API.constants.api_const import (
     API_VERSION,
+    CONVERSION_FACTORS,
     COORDINATE_CONST,
     ETOPO_CONST,
     ROUNDING_RULES,
@@ -1070,8 +1071,21 @@ async def PW_Forecast(
                     if station.get("lat") is not None and station.get("lon") is not None
                 )
                 try:
-                    min_distance = min(distances)
-                    nearest_station_distance = int(round(min_distance))
+                    min_distance = min(
+                        distances
+                    )  # in kilometers (haversine_distance returns km)
+
+                    # Determine output units: miles for 'us' and 'uk2', otherwise km
+                    units_key = (unitSystem or "").lower()
+                    if units_key in ("us", "uk"):
+                        # Convert kilometers to miles using shared constant
+                        km_to_miles = CONVERSION_FACTORS.get("km_to_miles", 0.621371)
+                        distance_out = min_distance * km_to_miles
+                    else:
+                        distance_out = min_distance
+
+                    # Return as float rounded to two decimal places
+                    nearest_station_distance = round(distance_out, 2)
                 except ValueError:
                     # No valid stations with coordinates
                     pass

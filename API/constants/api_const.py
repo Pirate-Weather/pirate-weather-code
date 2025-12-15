@@ -160,6 +160,8 @@ CONVERSION_FACTORS = {
     "cloud_cover_percentage": 0.01,
     "joules_to_watts": 3600,
     "ozone_to_dobson": 46696,
+    # Conversion factor from kilometers to miles
+    "km_to_miles": 0.621371,
 }
 
 # Grouped RTMA_RU visibility constants
