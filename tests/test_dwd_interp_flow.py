@@ -50,9 +50,14 @@ class TestDWDInterpFlow(unittest.TestCase):
 
         ds = xr.Dataset({"var": da_xr})
 
+        # Reindex to the target hourly grid (creates NaNs at missing hours)
+        target_times = pd.date_range("2025-01-01 00:00", "2025-01-01 06:00", freq="1h")
+        ds = ds.reindex({"time": target_times})
+
         # Ensure time is a single chunk in the dask-backed DataArray
         ds = ds.chunk({"time": -1})
 
+        # Interpolate internal gaps and extrapolate edges
         result_ds = interpolate_temporal_gaps_efficiently(ds)
 
         # Extract the computed numpy result for the variable and reshape to
