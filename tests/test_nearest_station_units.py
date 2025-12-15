@@ -1,7 +1,7 @@
 """Tests to ensure nearest-station distance unit conversion works for US/UK units."""
 
-from API.utils.geo import haversine_distance
 from API.constants.api_const import CONVERSION_FACTORS
+from API.utils.geo import haversine_distance
 
 # Reuse the sample station data helper from the DWD station mapping tests.
 from tests.test_dwd_station_mapping import sample_station_data
