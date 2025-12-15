@@ -829,7 +829,7 @@ else:
 
 
 # --- Step 2: Process Pandas DataFrame ---
-logging.info("\\n--- Converting DataFrame to xarray Dataset (point-based) ---")
+logging.info("\n--- Converting DataFrame to xarray Dataset (point-based) ---")
 
 
 def process_and_interpolate_df(df_input):
