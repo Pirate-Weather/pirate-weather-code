@@ -139,12 +139,13 @@ class TestTextGeneration:
 
     def test_ice_precip_text(self):
         """Test that ice (freezing rain) generates correct text."""
+        # Note: sleetAccum parameter handles both sleet and ice accumulation
         text, icon = calculate_precip_text(
             precipType="ice",
             type="hourly",
             rainAccum=0.0,
             snowAccum=0.0,
-            sleetAccum=2.0,
+            sleetAccum=2.0,  # Used for both ice and sleet accumulation
             pop=1.0,
             icon="darksky",
             mode="both",
