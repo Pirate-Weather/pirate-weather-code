@@ -9,23 +9,23 @@ import pandas as pd
 # Add the parent directory to the path so we can import the module
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from API.ingest_utils import interp_time_take_blend
+import xarray as xr
+
+from API.ingest_utils import interpolate_temporal_gaps_efficiently
 
 
 class TestDWDInterpFlow(unittest.TestCase):
     def test_interp_time_take_blend_logic(self):
-        """
-        Verify that interp_time_take_blend correctly interpolates irregular time steps
-        to a regular hourly grid.
+        """Verify that temporal interpolation converts irregular time steps
+        to a regular hourly grid using the new xarray-based utility.
         """
         # 1. Setup Source Data (Irregular)
         # T=0 (0.0), T=3 (10.0), T=6 (20.0) -> Values
         # Times: 0, 3600*3, 3600*6
-        unix_epoch = np.datetime64(0, "s")
         source_times = pd.to_datetime(
             ["2025-01-01 00:00", "2025-01-01 03:00", "2025-01-01 06:00"]
         )
-        source_times_unix = (source_times.values - unix_epoch) / np.timedelta64(1, "s")
+        # (unix conversions not needed for new xarray-based interpolator)
 
         # Array shape: (Var=1, Time=3, Y=1, X=1)
         # Values: 0, 30, 60
@@ -34,30 +34,33 @@ class TestDWDInterpFlow(unittest.TestCase):
 
         # 2. Setup Target Grid (Hourly)
         # 00:00, 01:00, 02:00, 03:00, 04:00, 05:00, 06:00
-        target_times = pd.date_range("2025-01-01 00:00", "2025-01-01 06:00", freq="1h")
-        target_times_unix = (target_times.values - unix_epoch) / np.timedelta64(1, "s")
+        # target hourly times are implied by the interpolator behavior
 
-        # 3. Interpolate
-        result_dask = interp_time_take_blend(
-            data_dask,
-            stacked_timesUnix=source_times_unix,
-            hourly_timesUnix=target_times_unix,
+        # 3. Convert to an xarray Dataset and call the new interpolator
+        # data_dask has shape (var=1, time=3, y=1, x=1) -> extract the single
+        # variable slice as a dask array with dims (time, y, x)
+        var_dask = data_dask[0]
+
+        da_xr = xr.DataArray(
+            var_dask,
+            dims=("time", "y", "x"),
+            coords={"time": source_times, "y": [0], "x": [0]},
+            name="var",
         )
 
-        # 4. Compute and Verify
-        result = result_dask.compute()
+        ds = xr.Dataset({"var": da_xr})
 
-        # Expected shape: (1, 7, 1, 1)
-        self.assertEqual(result.shape, (1, 7, 1, 1))
+        # Ensure time is a single chunk in the dask-backed DataArray
+        ds = ds.chunk({"time": -1})
 
-        # Expected values:
-        # 00:00 -> 0.0
-        # 01:00 -> 10.0 (1/3 of way to 30)
-        # 02:00 -> 20.0 (2/3 of way to 30)
-        # 03:00 -> 30.0
-        # 04:00 -> 40.0 (1/3 of way to 60)
-        # 05:00 -> 50.0
-        # 06:00 -> 60.0
+        result_ds = interpolate_temporal_gaps_efficiently(ds)
+
+        # Extract the computed numpy result for the variable and reshape to
+        # match the original test's expected shape: (var, time, y, x)
+        result = result_ds["var"].data.compute()  # shape (7,1,1)
+        result = result.reshape(1, result.shape[0], 1, 1)
+
+        # Expected hourly values from 00:00 to 06:00
         expected = np.array([0, 10, 20, 30, 40, 50, 60], dtype=np.float32).reshape(
             1, 7, 1, 1
         )
