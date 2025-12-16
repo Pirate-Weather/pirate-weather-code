@@ -224,7 +224,7 @@ def test_priority_with_all_models_north_america():
 
     temp_inputs = inputs["temperature_inputs"]
 
-    # Priority in North America: NBM > HRRR > ECMWF > DWD MOSMIX > GFS
+    # Priority in North America: NBM > HRRR > ECMWF > GFS > DWD MOSMIX
     # First column should be NBM (20.0)
     assert np.isclose(temp_inputs[0, 0], 20.0, atol=0.1), "First priority should be NBM"
     # Second column should be HRRR (18.0)
@@ -235,9 +235,13 @@ def test_priority_with_all_models_north_america():
     assert np.isclose(temp_inputs[0, 2], 14.0, atol=0.1), (
         "Third priority should be ECMWF in North America"
     )
-    # Fourth column should be DWD MOSMIX (12.0)
-    assert np.isclose(temp_inputs[0, 3], 12.0, atol=0.1), (
-        "Fourth priority should be DWD MOSMIX"
+    # Fourth column should be GFS (10.0) in North America
+    assert np.isclose(temp_inputs[0, 3], 10.0, atol=0.1), (
+        "Fourth priority should be GFS in North America"
+    )
+    # Fifth column should be DWD MOSMIX (12.0)
+    assert np.isclose(temp_inputs[0, 4], 12.0, atol=0.1), (
+        "Fifth priority should be DWD MOSMIX"
     )
 
 

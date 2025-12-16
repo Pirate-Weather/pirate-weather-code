@@ -13,10 +13,7 @@ from API.constants.model_const import (
     NBM,
     NBM_FIRE_INDEX,
 )
-from API.utils.source_priority import (
-    should_ecmwf_precede_dwd,
-    should_gfs_precede_dwd_for_var,
-)
+from API.utils.source_priority import should_gfs_precede_dwd
 
 
 def _stack_fields(num_hours, *arrays):
@@ -42,40 +39,37 @@ def _bearing(u, v):
     return np.rad2deg(np.mod(np.arctan2(u, v) + np.pi, 2 * np.pi))
 
 
-def _stack_with_priority(num_hours, lat, lon, variable_type, source_data):
+def _stack_with_priority(num_hours, lat, lon, has_ecmwf, source_data):
     """
-    Stack fields with priority based on location and variable type.
+    Stack fields with priority based on location.
 
     Args:
         num_hours: Number of hours.
         lat: Latitude.
         lon: Longitude.
-        variable_type: "standard" or "dwd_only".
+        has_ecmwf: Whether ECMWF has data for this variable.
         source_data: Dict mapping source names to data arrays.
 
     Returns:
         Stacked array with sources ordered by priority.
     """
-    ecmwf_first = should_ecmwf_precede_dwd(lat, lon)
-    gfs_before_dwd = should_gfs_precede_dwd_for_var(lat, lon, variable_type)
+    gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
 
     # Define the order based on priority rules
-    if variable_type == "dwd_only":
-        # For DWD-only variables, ECMWF is not included
-        if gfs_before_dwd:
-            # North America: ... > GFS > DWD > ERA5
+    if gfs_before_dwd:
+        # North America: ... > ECMWF > GFS > DWD > ERA5
+        if has_ecmwf:
+            order = ["nbm", "hrrr", "ecmwf", "gfs", "dwd_mosmix", "era5"]
+        else:
+            # For variables where ECMWF doesn't have data
             order = ["nbm", "hrrr", "gfs", "dwd_mosmix", "era5"]
-        else:
-            # Rest of world: ... > DWD > GFS > ERA5
-            order = ["nbm", "hrrr", "dwd_mosmix", "gfs", "era5"]
     else:
-        # Standard variables
-        if ecmwf_first:
-            # North America: ... > ECMWF > DWD > GFS > ERA5
-            order = ["nbm", "hrrr", "ecmwf", "dwd_mosmix", "gfs", "era5"]
-        else:
-            # Rest of world: ... > DWD > ECMWF > GFS > ERA5
+        # Rest of world: ... > DWD > ECMWF > GFS > ERA5
+        if has_ecmwf:
             order = ["nbm", "hrrr", "dwd_mosmix", "ecmwf", "gfs", "era5"]
+        else:
+            # For variables where ECMWF doesn't have data
+            order = ["nbm", "hrrr", "dwd_mosmix", "gfs", "era5"]
 
     # Collect arrays in priority order
     arrays = []
@@ -128,8 +122,7 @@ def prepare_data_inputs(
     dwd_valid = isinstance(dwd_mosmix_merged, np.ndarray)
 
     # Determine priority based on location
-    ecmwf_first = should_ecmwf_precede_dwd(lat, lon)
-    gfs_before_dwd_for_dwd_only = should_gfs_precede_dwd_for_var(lat, lon, "dwd_only")
+    gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
 
     # --- InterThour_inputs ---
     inter_thour_inputs = {}
@@ -229,8 +222,8 @@ def prepare_data_inputs(
         num_hours,
         lat,
         lon,
-        "standard",
-        {
+        has_ecmwf=True,  # ECMWF has temperature data
+        source_data={
             "nbm": nbm_merged[:, NBM["temp"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["temp"]] if hrrr_merged is not None else None,
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["temp"]]
@@ -249,8 +242,8 @@ def prepare_data_inputs(
         num_hours,
         lat,
         lon,
-        "standard",
-        {
+        has_ecmwf=True,  # ECMWF has dew point data
+        source_data={
             "nbm": nbm_merged[:, NBM["dew"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["dew"]] if hrrr_merged is not None else None,
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["dew"]]
@@ -284,8 +277,8 @@ def prepare_data_inputs(
         num_hours,
         lat,
         lon,
-        "dwd_only",  # DWD-only variable, should be below GFS in North America
-        {
+        has_ecmwf=False,  # ECMWF does not have this data  # DWD-only variable, should be below GFS in North America
+        source_data={
             "nbm": nbm_merged[:, NBM["humidity"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["humidity"]]
             if hrrr_merged is not None
@@ -303,8 +296,8 @@ def prepare_data_inputs(
         num_hours,
         lat,
         lon,
-        "standard",
-        {
+        has_ecmwf=True,  # ECMWF has this data
+        source_data={
             "hrrr": hrrr_merged[:, HRRR["pressure"]]
             if hrrr_merged is not None
             else None,
@@ -322,7 +315,7 @@ def prepare_data_inputs(
     )
 
     # --- wind_inputs ---
-    if ecmwf_first:
+    if gfs_before_dwd:
         wind_inputs = _stack_fields(
             num_hours,
             nbm_merged[:, NBM["wind"]] if nbm_merged is not None else None,
@@ -382,7 +375,7 @@ def prepare_data_inputs(
     # --- gust_inputs ---
     # Note: ECMWF doesn't provide gust data
     # In North America, DWD MOSMIX should be below GFS for this variable
-    if gfs_before_dwd_for_dwd_only:
+    if gfs_before_dwd:
         gust_inputs = _stack_fields(
             num_hours,
             nbm_merged[:, NBM["gust"]] if nbm_merged is not None else None,
@@ -402,7 +395,7 @@ def prepare_data_inputs(
         )
 
     # --- bearing_inputs ---
-    if ecmwf_first:
+    if gfs_before_dwd:
         bearing_inputs = _stack_fields(
             num_hours,
             nbm_merged[:, NBM["bearing"]] if nbm_merged is not None else None,
@@ -456,7 +449,7 @@ def prepare_data_inputs(
         )
 
     # --- cloud_inputs ---
-    if ecmwf_first:
+    if gfs_before_dwd:
         cloud_inputs = _stack_fields(
             num_hours,
             nbm_merged[:, NBM["cloud"]] * 0.01 if nbm_merged is not None else None,
@@ -498,7 +491,7 @@ def prepare_data_inputs(
     # --- vis_inputs ---
     # Note: ECMWF doesn't provide visibility data
     # In North America, DWD MOSMIX should be below GFS for this variable
-    if gfs_before_dwd_for_dwd_only:
+    if gfs_before_dwd:
         vis_inputs = _stack_fields(
             num_hours,
             nbm_merged[:, NBM["vis"]] if nbm_merged is not None else None,
@@ -539,7 +532,7 @@ def prepare_data_inputs(
     )
 
     # --- accum_inputs ---
-    if ecmwf_first:
+    if gfs_before_dwd:
         accum_inputs = _stack_fields(
             num_hours,
             nbm_merged[:, NBM["intensity"]] if nbm_merged is not None else None,
@@ -609,7 +602,7 @@ def prepare_data_inputs(
     # --- solar_inputs ---
     # Note: ECMWF doesn't provide solar data
     # In North America, DWD MOSMIX should be below GFS for this variable
-    if gfs_before_dwd_for_dwd_only:
+    if gfs_before_dwd:
         solar_inputs = _stack_fields(
             num_hours,
             nbm_merged[:, NBM["solar"]] if nbm_merged is not None else None,
