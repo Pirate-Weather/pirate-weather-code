@@ -1038,6 +1038,10 @@ for var in gridded_dwd_ds_chunk.variables:
 with ProgressBar():
     gridded_dwd_ds_chunk.to_zarr(forecast_process_path + "_chunk.zarr", mode="w")
 
+# Get the range from combined dataset
+min_time = gridded_dwd_ds.time.min().values
+max_time = gridded_dwd_ds.time.max().values
+
 # Delete from memory
 del gridded_dwd_ds_chunk
 del gridded_dwd_ds
@@ -1059,9 +1063,6 @@ ds_chunk_disk_interp = interpolate_temporal_gaps_efficiently(
 )
 
 # 1. Prepare Target Time Grid (Hourly)
-# Get the range from combined dataset
-min_time = gridded_dwd_ds.time.min().values
-max_time = gridded_dwd_ds.time.max().values
 
 # Create continuous hourly range
 hourly_times = pd.date_range(start=min_time, end=max_time, freq="1h")
