@@ -858,6 +858,11 @@ def process_and_interpolate_df(df_input):
 # Process the latest forecast
 gridded_dwd_ds_forecast = process_and_interpolate_df(df_data)
 
+# Chunk
+gridded_dwd_ds_forecast = gridded_dwd_ds_forecast.chunk(
+    chunks={"time": 240, "lat": CHUNK_SIZES["DWD"], "lon": CHUNK_SIZES["DWD"]}
+)
+
 # --- Step 3: Historic Data ---
 # Logic to download and process previous runs
 history_period = HISTORY_PERIODS["DWD_MOSMIX"]
@@ -952,12 +957,16 @@ for i in range(history_period, 0, -1):
                     "key": aws_access_key_id,
                     "secret": aws_secret_access_key,
                 },
-                mode="w",
             )
         else:
             store = zarr.storage.LocalStore(hist_zarr_path)
 
-        ds_hist.to_zarr(store, mode="w", consolidated=False)
+        # Rechunk to process chunks
+        ds_hist_chunk = ds_hist.chunk(
+            chunks={"time": 1, "lat": CHUNK_SIZES["DWD"], "lon": CHUNK_SIZES["DWD"]}
+        )
+
+        ds_hist_chunk.to_zarr(store, mode="w", consolidated=False)
 
         # Create .done file
         if save_type == "S3":
@@ -1029,6 +1038,19 @@ for var in gridded_dwd_ds_chunk.variables:
 with ProgressBar():
     gridded_dwd_ds_chunk.to_zarr(forecast_process_path + "_chunk.zarr", mode="w")
 
+# Get the range from combined dataset
+min_time = gridded_dwd_ds.time.min().values
+max_time = gridded_dwd_ds.time.max().values
+
+# Delete from memory
+del gridded_dwd_ds_chunk
+del gridded_dwd_ds
+del historic_datasets
+try:
+    del ds_history
+except NameError:
+    pass
+
 # Read back in as xarray
 ds_chunk_disk = xr.open_zarr(forecast_process_path + "_chunk.zarr", chunks="auto")
 
@@ -1044,9 +1066,6 @@ ds_chunk_disk_interp = interpolate_temporal_gaps_efficiently(
 )
 
 # 1. Prepare Target Time Grid (Hourly)
-# Get the range from combined dataset
-min_time = gridded_dwd_ds.time.min().values
-max_time = gridded_dwd_ds.time.max().values
 
 # Create continuous hourly range
 hourly_times = pd.date_range(start=min_time, end=max_time, freq="1h")
