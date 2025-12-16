@@ -577,7 +577,8 @@ async def calculate_grid_indexing(
 
                     if (
                         time_diff > datetime.timedelta(days=7)  # Too old
-                        or time_diff < datetime.timedelta(hours=-72)  # Allow up to 72h future
+                        or time_diff
+                        < datetime.timedelta(hours=-72)  # Allow up to 72h future
                     ):
                         # Invalid timestamp, treat as no data available
                         logger.debug(
