@@ -1045,8 +1045,11 @@ max_time = gridded_dwd_ds.time.max().values
 # Delete from memory
 del gridded_dwd_ds_chunk
 del gridded_dwd_ds
-del ds_history
 del historic_datasets
+try:
+    del ds_history
+except NameError:
+    pass
 
 # Read back in as xarray
 ds_chunk_disk = xr.open_zarr(forecast_process_path + "_chunk.zarr", chunks="auto")
