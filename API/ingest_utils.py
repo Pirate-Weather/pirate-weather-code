@@ -23,7 +23,7 @@ CHUNK_SIZES = {
     "ECMWF": 100,
     "NBM_Fire": 100,
     "RTMA": 100,
-    "DWD": 50,
+    "DWD": 100,
 }
 
 FINAL_CHUNK_SIZES = {
