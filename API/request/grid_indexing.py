@@ -591,7 +591,9 @@ async def calculate_grid_indexing(
                         sourceIDX["dwd_mosmix"]["x"] = int(x_dwd)
                         sourceIDX["dwd_mosmix"]["y"] = int(y_dwd)
                         sourceIDX["dwd_mosmix"]["lat"] = round(dwd_lat, 2)
-                        sourceIDX["dwd_mosmix"]["lon"] = round(((dwd_lon + 180) % 360) - 180, 2)
+                        sourceIDX["dwd_mosmix"]["lon"] = round(
+                            ((dwd_lon + 180) % 360) - 180, 2
+                        )
             else:
                 # Data array too short, treat as no data available
                 dataOut_dwd_mosmix = False
