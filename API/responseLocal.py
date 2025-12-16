@@ -196,7 +196,9 @@ try:
                     asynchronous=False,
                     endpoint_url="https://api.pirateweather.net/files/",
                 )
-                s3_path = (f"s3://ForecastTar_v2/{ingest_version}/DWD_MOSMIX_stations.pickle")
+                s3_path = (
+                    f"s3://ForecastTar_v2/{ingest_version}/DWD_MOSMIX_stations.pickle"
+                )
                 if s3.exists(s3_path):
                     with s3.open(s3_path, "rb") as f:
                         DWD_MOSMIX_Stations = pickle.load(f)
