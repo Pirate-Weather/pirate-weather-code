@@ -560,7 +560,8 @@ async def calculate_grid_indexing(
 
                 # Validate the timestamp is valid (not 0, NaN, or unreasonably old/future)
                 # A timestamp of 0 results in "1970-01-01 00Z" which indicates missing data
-                # Future timestamps (more than 6 hours ahead) indicate incorrect data
+                # Note: DWD MOSMIX may show timestamps up to 48 hours in the future when
+                # historical data is unavailable (uses HISTORY_PERIODS offset on forecast-only data)
                 if np.isnan(dwdMosmixRunTime) or dwdMosmixRunTime <= 0:
                     # Invalid timestamp (NaN or zero), treat as no data available
                     logger.debug(
@@ -576,7 +577,7 @@ async def calculate_grid_indexing(
 
                     if (
                         time_diff > datetime.timedelta(days=7)  # Too old
-                        or time_diff < datetime.timedelta(hours=-6)  # Too far in future
+                        or time_diff < datetime.timedelta(hours=-72)  # Allow up to 72h future
                     ):
                         # Invalid timestamp, treat as no data available
                         logger.debug(
