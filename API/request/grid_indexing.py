@@ -557,7 +557,9 @@ async def calculate_grid_indexing(
             elif len(dataOut_dwd_mosmix) > HISTORY_PERIODS["DWD_MOSMIX"]:
                 # Bounds check before accessing the specific index
                 # Negative 1 is because the 19Z forecast contains data starting at hour 1
-                dwdMosmixRunTime = dataOut_dwd_mosmix[HISTORY_PERIODS["DWD_MOSMIX"] -1 , 0]
+                dwdMosmixRunTime = dataOut_dwd_mosmix[
+                    HISTORY_PERIODS["DWD_MOSMIX"] - 1, 0
+                ]
 
                 # Validate the timestamp is valid (not 0, NaN, or unreasonably old/future)
                 # A timestamp of 0 results in "1970-01-01 00Z" which indicates missing data

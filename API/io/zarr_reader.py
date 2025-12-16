@@ -98,10 +98,17 @@ class WeatherParallel(object):
                 if model == "DWD_MOSMIX":
                     # DWD MOSMIX has data saved in a group
                     data_out = await asyncio.to_thread(
-                        lambda: opened_zarr["__xarray_dataarray_variable__"][:, :, y, x,].T
+                        lambda: opened_zarr["__xarray_dataarray_variable__"][
+                            :,
+                            :,
+                            y,
+                            x,
+                        ].T
                     )
                 else:
-                    data_out = await asyncio.to_thread(lambda: opened_zarr[:, :, y, x].T)
+                    data_out = await asyncio.to_thread(
+                        lambda: opened_zarr[:, :, y, x].T
+                    )
 
                 has_missing_data, missing_row = has_interior_nan_holes(data_out.T)
                 if has_missing_data:
