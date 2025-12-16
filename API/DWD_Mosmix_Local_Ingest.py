@@ -1038,6 +1038,12 @@ for var in gridded_dwd_ds_chunk.variables:
 with ProgressBar():
     gridded_dwd_ds_chunk.to_zarr(forecast_process_path + "_chunk.zarr", mode="w")
 
+# Delete from memory
+del gridded_dwd_ds_chunk
+del gridded_dwd_ds
+del ds_history
+del historic_datasets
+
 # Read back in as xarray
 ds_chunk_disk = xr.open_zarr(forecast_process_path + "_chunk.zarr", chunks="auto")
 
