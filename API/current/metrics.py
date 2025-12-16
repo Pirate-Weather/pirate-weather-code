@@ -49,6 +49,7 @@ from API.constants.shared_const import MISSING_DATA
 from API.legacy.current import get_legacy_current_summary
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
+from API.utils.source_priority import should_gfs_precede_dwd
 
 
 @dataclass
@@ -88,6 +89,44 @@ def _select_value(strategies, default=MISSING_DATA):
             if val is not None and not np.isnan(val):
                 return val
     return default
+
+
+def _build_source_strategies(source_map, lat, lon, has_ecmwf=True):
+    """
+    Build source strategies in priority order based on location.
+
+    Args:
+        source_map: Dictionary mapping source names to (predicate, getter) tuples.
+        lat: Latitude.
+        lon: Longitude.
+        has_ecmwf: Whether ECMWF has data for this variable.
+
+    Returns:
+        List of (predicate, getter) tuples in priority order.
+    """
+    gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
+
+    # Define the priority order
+    if gfs_before_dwd:
+        # North America
+        if has_ecmwf:
+            order = ["rtma_ru", "hrrrsubh", "nbm", "hrrr", "ecmwf_ifs", "gfs", "dwd_mosmix", "era5"]
+        else:
+            order = ["rtma_ru", "hrrrsubh", "nbm", "hrrr", "gfs", "dwd_mosmix", "era5"]
+    else:
+        # Rest of world
+        if has_ecmwf:
+            order = ["rtma_ru", "hrrrsubh", "nbm", "hrrr", "dwd_mosmix", "ecmwf_ifs", "gfs", "era5"]
+        else:
+            order = ["rtma_ru", "hrrrsubh", "nbm", "hrrr", "dwd_mosmix", "gfs", "era5"]
+
+    # Build strategies in priority order
+    strategies = []
+    for source in order:
+        if source in source_map:
+            strategies.append(source_map[source])
+
+    return strategies
 
 
 def _interp_scalar(merged, key, state: InterpolationState):
@@ -202,7 +241,7 @@ def _calculate_era5_relative_humidity(
     return (humid_fac1 * state.fac1 + humid_fac2 * state.fac2) * 100 * humidUnit
 
 
-def _get_temp(sourceList, model_data, state: InterpolationState):
+def _get_temp(sourceList, model_data, state: InterpolationState, lat, lon):
     """
     Get current temperature from available sources.
 
@@ -210,48 +249,51 @@ def _get_temp(sourceList, model_data, state: InterpolationState):
         sourceList: List of available sources.
         model_data: Dictionary of model data.
         state: Interpolation state.
+        lat: Latitude.
+        lon: Longitude.
 
     Returns:
         Current temperature.
     """
-    val = _select_value(
-        [
-            (
-                lambda: "rtma_ru" in sourceList,
-                lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["temp"]],
+    source_map = {
+        "rtma_ru": (
+            lambda: "rtma_ru" in sourceList,
+            lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["temp"]],
+        ),
+        "hrrrsubh": (
+            lambda: "hrrrsubh" in sourceList,
+            lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["temp"]],
+        ),
+        "nbm": (
+            lambda: "nbm" in sourceList,
+            lambda: _interp_scalar(model_data["NBM_Merged"], NBM["temp"], state),
+        ),
+        "dwd_mosmix": (
+            lambda: "dwd_mosmix" in sourceList,
+            lambda: _interp_scalar(
+                model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["temp"], state
             ),
-            (
-                lambda: "hrrrsubh" in sourceList,
-                lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["temp"]],
+        ),
+        "ecmwf_ifs": (
+            lambda: "ecmwf_ifs" in sourceList,
+            lambda: _interp_scalar(
+                model_data["ECMWF_Merged"], ECMWF["temp"], state
             ),
-            (
-                lambda: "nbm" in sourceList,
-                lambda: _interp_scalar(model_data["NBM_Merged"], NBM["temp"], state),
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(model_data["GFS_Merged"], GFS["temp"], state),
+        ),
+        "era5": (
+            lambda: "era5" in sourceList,
+            lambda: _interp_scalar(
+                model_data["ERA5_MERGED"], ERA5["2m_temperature"], state
             ),
-            (
-                lambda: "dwd_mosmix" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["temp"], state
-                ),
-            ),
-            (
-                lambda: "ecmwf_ifs" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["ECMWF_Merged"], ECMWF["temp"], state
-                ),
-            ),
-            (
-                lambda: "gfs" in sourceList,
-                lambda: _interp_scalar(model_data["GFS_Merged"], GFS["temp"], state),
-            ),
-            (
-                lambda: "era5" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["ERA5_MERGED"], ERA5["2m_temperature"], state
-                ),
-            ),
-        ]
-    )
+        ),
+    }
+
+    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=True)
+    val = _select_value(strategies)
     return clipLog(val, CLIP_TEMP["min"], CLIP_TEMP["max"], "Temperature Current")
 
 
@@ -1269,7 +1311,7 @@ def build_current_section(
         ),
     }
 
-    InterPcurrent[DATA_CURRENT["temp"]] = _get_temp(sourceList, model_data, state)
+    InterPcurrent[DATA_CURRENT["temp"]] = _get_temp(sourceList, model_data, state, lat, lon_IN)
     InterPcurrent[DATA_CURRENT["dew"]] = _get_dew(sourceList, model_data, state)
     InterPcurrent[DATA_CURRENT["humidity"]] = _get_humidity(
         sourceList, model_data, state, humidUnit
