@@ -77,6 +77,7 @@ PRECIP_IDX = {
     "ice": 2,
     "sleet": 3,
     "rain": 4,
+    "mixed": 5,
 }
 
 PRECIP_NOISE_THRESHOLD_MMH = (

@@ -312,13 +312,13 @@ def select_daily_precip_type(
     Returns:
         The updated `maxPchanceDay` numpy array.
     """
-    # If rain, snow and ice are all present, choose sleet (code 3)
+    # If rain, snow and ice are all present, choose mixed (code 5)
     all_types = (
         (InterPdaySum[:, DATA_DAY["rain"]] > 0)
         & (InterPdaySum[:, DATA_DAY["snow"]] > 0)
         & (InterPdaySum[:, DATA_DAY["ice"]] > 0)
     )
-    maxPchanceDay[all_types] = 3
+    maxPchanceDay[all_types] = PRECIP_IDX["mixed"]
 
     # Use the type with the greatest accumulation as baseline
     precip_accum = np.stack(

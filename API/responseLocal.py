@@ -32,6 +32,7 @@ from API.constants.api_const import (
     CONVERSION_FACTORS,
     COORDINATE_CONST,
     ETOPO_CONST,
+    PRECIP_IDX,
     ROUNDING_RULES,
 )
 from API.constants.forecast_const import (
@@ -633,6 +634,21 @@ async def PW_Forecast(
     minuteSnowIntensity = InterPminute[:, DATA_MINUTELY["snow_intensity"]]
     minuteSleetIntensity = InterPminute[:, DATA_MINUTELY["ice_intensity"]]
 
+    # Compute minute-level presence flags for the current hour from maxPchance
+    try:
+        minute_presence = {
+            "has_rain": bool(np.any(maxPchance == PRECIP_IDX["rain"])),
+            "has_snow": bool(np.any(maxPchance == PRECIP_IDX["snow"])),
+            "has_ice": bool(
+                np.any(
+                    (maxPchance == PRECIP_IDX["ice"])
+                    | (maxPchance == PRECIP_IDX["sleet"])
+                )
+            ),
+        }
+    except (KeyError, TypeError, ValueError):
+        minute_presence = {"has_rain": False, "has_snow": False, "has_ice": False}
+
     # Timing Check
     timer.log("Array start")
 
@@ -804,11 +820,14 @@ async def PW_Forecast(
             solar_inputs=solar_inputs,
             cape_inputs=cape_inputs,
             error_inputs=error_inputs,
+            minute_presence=minute_presence,
             version=version,
         )
 
-    pTypeMap = np.array(["none", "snow", "sleet", "sleet", "rain"])
-    pTextMap = np.array(["None", "Snow", "Sleet", "Sleet", "Rain"])
+    pTypeMap = np.array(["none", "snow", "ice", "sleet", "rain", "mixed"])
+    pTextMap = np.array(
+        ["None", "Snow", "Freezing Rain", "Sleet", "Rain", "Mixed Precipitation"]
+    )
 
     # 13. Generate the daily forecast section
     # This aggregates hourly data to create daily summaries (high/low temps, total precip, etc.)
