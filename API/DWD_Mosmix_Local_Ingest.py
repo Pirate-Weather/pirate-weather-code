@@ -1135,6 +1135,8 @@ else:
 with ProgressBar():
     # 4. Rechunk it to match the final array
     # 5. Write it out to the zarr array
+    # Note that this uses xarray to write instead of dask, which is different than the other files.
+    # Long term, I don't mind the idea of using xarray for writing zarr files as it handles a lot of the metadata.
     ds_chunk.to_zarr(zarr_store, mode="w")
 
 
