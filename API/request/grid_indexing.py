@@ -557,11 +557,39 @@ async def calculate_grid_indexing(
             elif len(dataOut_dwd_mosmix) > HISTORY_PERIODS["DWD_MOSMIX"]:
                 # Bounds check before accessing the specific index
                 dwdMosmixRunTime = dataOut_dwd_mosmix[HISTORY_PERIODS["DWD_MOSMIX"], 0]
-                sourceIDX["dwd_mosmix"] = dict()
-                sourceIDX["dwd_mosmix"]["x"] = int(x_dwd)
-                sourceIDX["dwd_mosmix"]["y"] = int(y_dwd)
-                sourceIDX["dwd_mosmix"]["lat"] = round(dwd_lat, 2)
-                sourceIDX["dwd_mosmix"]["lon"] = round(((dwd_lon + 180) % 360) - 180, 2)
+
+                # Validate the timestamp is valid (not 0, NaN, or unreasonably old/future)
+                # A timestamp of 0 results in "1970-01-01 00Z" which indicates missing data
+                # Future timestamps (more than 6 hours ahead) indicate incorrect data
+                if np.isnan(dwdMosmixRunTime) or dwdMosmixRunTime <= 0:
+                    # Invalid timestamp (NaN or zero), treat as no data available
+                    logger.debug(
+                        f"DWD MOSMIX timestamp invalid (NaN or zero): {dwdMosmixRunTime}"
+                    )
+                    dataOut_dwd_mosmix = False
+                else:
+                    timestamp_dt = datetime.datetime.fromtimestamp(
+                        dwdMosmixRunTime.astype(int), datetime.UTC
+                    ).replace(tzinfo=None)
+                    time_diff = utc_time - timestamp_dt
+
+                    if (
+                        time_diff > datetime.timedelta(days=7)  # Too old
+                        or time_diff < datetime.timedelta(hours=-6)  # Too far in future
+                    ):
+                        # Invalid timestamp, treat as no data available
+                        logger.debug(
+                            f"DWD MOSMIX timestamp invalid (too old/future): "
+                            f"{dwdMosmixRunTime} ({timestamp_dt}), "
+                            f"time_diff={time_diff}"
+                        )
+                        dataOut_dwd_mosmix = False
+                    else:
+                        sourceIDX["dwd_mosmix"] = dict()
+                        sourceIDX["dwd_mosmix"]["x"] = int(x_dwd)
+                        sourceIDX["dwd_mosmix"]["y"] = int(y_dwd)
+                        sourceIDX["dwd_mosmix"]["lat"] = round(dwd_lat, 2)
+                        sourceIDX["dwd_mosmix"]["lon"] = round(((dwd_lon + 180) % 360) - 180, 2)
             else:
                 # Data array too short, treat as no data available
                 dataOut_dwd_mosmix = False
