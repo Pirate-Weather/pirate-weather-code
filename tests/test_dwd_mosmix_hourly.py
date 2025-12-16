@@ -331,10 +331,10 @@ def test_dwd_mosmix_invalid_timestamp_not_in_source_list():
 
 def test_dwd_mosmix_valid_timestamp_in_source_list():
     """Test that DWD MOSMIX with valid timestamp IS added to sourceList."""
-    # Create a valid timestamp (recent)
-    current_time = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
-    recent_time = current_time - datetime.timedelta(hours=2)
-    valid_timestamp = recent_time.timestamp()
+    # Use a fixed timestamp (January 15, 2024, 10:00 UTC)
+    # This is a deterministic value that won't change between test runs
+    fixed_time = datetime.datetime(2024, 1, 15, 10, 0, 0)
+    valid_timestamp = fixed_time.timestamp()
 
     # Create a mock GridIndexingResult with valid timestamp
     grid_result = GridIndexingResult(

@@ -567,6 +567,7 @@ async def calculate_grid_indexing(
                         f"DWD MOSMIX timestamp invalid (NaN or zero): {dwdMosmixRunTime}"
                     )
                     dataOut_dwd_mosmix = False
+                    dwdMosmixRunTime = None
                 else:
                     timestamp_dt = datetime.datetime.fromtimestamp(
                         dwdMosmixRunTime.astype(int), datetime.UTC
@@ -584,6 +585,7 @@ async def calculate_grid_indexing(
                             f"time_diff={time_diff}"
                         )
                         dataOut_dwd_mosmix = False
+                        dwdMosmixRunTime = None
                     else:
                         sourceIDX["dwd_mosmix"] = dict()
                         sourceIDX["dwd_mosmix"]["x"] = int(x_dwd)
