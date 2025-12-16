@@ -956,15 +956,15 @@ for i in range(history_period, 0, -1):
                 storage_options={
                     "key": aws_access_key_id,
                     "secret": aws_secret_access_key,
-                }
+                },
             )
         else:
             store = zarr.storage.LocalStore(hist_zarr_path)
 
         # Rechunk to process chunks
         ds_hist_chunk = ds_hist.chunk(
-                chunks={"time": 1, "lat": CHUNK_SIZES["DWD"], "lon": CHUNK_SIZES["DWD"]}
-            )
+            chunks={"time": 1, "lat": CHUNK_SIZES["DWD"], "lon": CHUNK_SIZES["DWD"]}
+        )
 
         ds_hist_chunk.to_zarr(store, mode="w", consolidated=False)
 
