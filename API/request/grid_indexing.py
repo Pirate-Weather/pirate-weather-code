@@ -404,6 +404,14 @@ async def calculate_grid_indexing(
             - np.datetime64("1970-01-01T00:00:00")
         ).astype(np.int64)
         ERA5_MERGED = np.vstack((unix_times_era5, dataOut_ERA5.values)).T
+
+        # Round the precipitation_type variable to nearest integer
+        # to avoid issues with interpolation producing non-integer values
+        # (0 = rain, 1 = snow, 2 = sleet, etc.)
+        ERA5_MERGED[:, ERA5["precipitation_type"]] = np.rint(
+            ERA5_MERGED[:, ERA5["precipitation_type"]]
+        )
+
     else:
         ERA5_MERGED = False
 
@@ -556,12 +564,49 @@ async def calculate_grid_indexing(
                 dataOut_dwd_mosmix = False
             elif len(dataOut_dwd_mosmix) > HISTORY_PERIODS["DWD_MOSMIX"]:
                 # Bounds check before accessing the specific index
-                dwdMosmixRunTime = dataOut_dwd_mosmix[HISTORY_PERIODS["DWD_MOSMIX"], 0]
-                sourceIDX["dwd_mosmix"] = dict()
-                sourceIDX["dwd_mosmix"]["x"] = int(x_dwd)
-                sourceIDX["dwd_mosmix"]["y"] = int(y_dwd)
-                sourceIDX["dwd_mosmix"]["lat"] = round(dwd_lat, 2)
-                sourceIDX["dwd_mosmix"]["lon"] = round(((dwd_lon + 180) % 360) - 180, 2)
+                # Negative 1 is because the 19Z forecast contains data starting at hour 1
+                dwdMosmixRunTime = dataOut_dwd_mosmix[
+                    HISTORY_PERIODS["DWD_MOSMIX"] - 1, 0
+                ]
+
+                # Validate the timestamp is valid (not 0, NaN, or unreasonably old/future)
+                # A timestamp of 0 results in "1970-01-01 00Z" which indicates missing data
+                # Note: DWD MOSMIX may show timestamps up to 48 hours in the future when
+                # historical data is unavailable (uses HISTORY_PERIODS offset on forecast-only data)
+                if np.isnan(dwdMosmixRunTime) or dwdMosmixRunTime <= 0:
+                    # Invalid timestamp (NaN or zero), treat as no data available
+                    logger.debug(
+                        f"DWD MOSMIX timestamp invalid (NaN or zero): {dwdMosmixRunTime}"
+                    )
+                    dataOut_dwd_mosmix = False
+                    dwdMosmixRunTime = None
+                else:
+                    timestamp_dt = datetime.datetime.fromtimestamp(
+                        dwdMosmixRunTime.astype(int), datetime.UTC
+                    ).replace(tzinfo=None)
+                    time_diff = utc_time - timestamp_dt
+
+                    if (
+                        time_diff > datetime.timedelta(days=7)  # Too old
+                        or time_diff
+                        < datetime.timedelta(hours=-72)  # Allow up to 72h future
+                    ):
+                        # Invalid timestamp, treat as no data available
+                        logger.debug(
+                            f"DWD MOSMIX timestamp invalid (too old/future): "
+                            f"{dwdMosmixRunTime} ({timestamp_dt}), "
+                            f"time_diff={time_diff}"
+                        )
+                        dataOut_dwd_mosmix = False
+                        dwdMosmixRunTime = None
+                    else:
+                        sourceIDX["dwd_mosmix"] = dict()
+                        sourceIDX["dwd_mosmix"]["x"] = int(x_dwd)
+                        sourceIDX["dwd_mosmix"]["y"] = int(y_dwd)
+                        sourceIDX["dwd_mosmix"]["lat"] = round(dwd_lat, 2)
+                        sourceIDX["dwd_mosmix"]["lon"] = round(
+                            ((dwd_lon + 180) % 360) - 180, 2
+                        )
             else:
                 # Data array too short, treat as no data available
                 dataOut_dwd_mosmix = False

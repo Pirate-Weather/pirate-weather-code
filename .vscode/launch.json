@@ -78,6 +78,20 @@
                 "ECCODES_DEFINITION_PATH": "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
             }
         },
+        {
+            "name": "Python: DWD_MOSMIX",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.DWD_Mosmix_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "env": {
+                "save_type": "Download",
+                "forecast_process_dir": "/mnt/nvme/data/DWD_MOSMIX",
+                "forecast_path": "/mnt/nvme/data/ProdTest4/DWD_MOSMIX",
+            }
+        },
 
     ]
 }

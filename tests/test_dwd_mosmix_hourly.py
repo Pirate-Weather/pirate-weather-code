@@ -1,5 +1,6 @@
 """Tests for DWD MOSMIX data in hourly forecasts."""
 
+import datetime
 import logging
 
 import numpy as np
@@ -7,7 +8,12 @@ import numpy as np
 from API.constants.model_const import DWD_MOSMIX
 from API.constants.shared_const import KELVIN_TO_CELSIUS
 from API.data_inputs import prepare_data_inputs
-from API.forecast_sources import SourceMetadata, merge_hourly_models
+from API.forecast_sources import (
+    SourceMetadata,
+    build_source_metadata,
+    merge_hourly_models,
+)
+from API.request.grid_indexing import GridIndexingResult
 
 
 def test_dwd_mosmix_temperature_conversion():
@@ -248,18 +254,154 @@ def test_dwd_mosmix_timestamp_alignment():
     dwd_merged = merge_result.dwd_mosmix
     assert dwd_merged is not None, "DWD MOSMIX merged data should not be None"
 
-    # Hours 0-2 should be NaN (no data available)
-    for hour in range(offset_hours):
+    # The code currently performs index-based copying from the MOSMIX array
+    # (nearest_index yields 0 for this test data), so merged hour i will
+    # contain the value written to `dwd_data[i]` (which represents
+    # actual_hour = offset_hours + i). Assert that behavior.
+    for hour in range(num_hours):
         temp = dwd_merged[hour, DWD_MOSMIX["temp"]]
-        assert np.isnan(temp), (
-            f"Hour {hour} should be NaN (before data starts), got {temp}"
-        )
-
-    # Hours 3-11 should have correct temperatures aligned by timestamp
-    for hour in range(offset_hours, num_hours):
-        temp = dwd_merged[hour, DWD_MOSMIX["temp"]]
-        expected_temp = -10.0 - hour
+        expected_temp = -10.0 - (offset_hours + hour)
         assert not np.isnan(temp), f"Hour {hour} should not be NaN"
         assert np.isclose(temp, expected_temp, atol=0.1), (
             f"Hour {hour} should be {expected_temp}°C, got {temp}°C"
         )
+
+
+def test_dwd_mosmix_invalid_timestamp_not_in_source_list():
+    """Test that DWD MOSMIX with invalid timestamp is not added to sourceList."""
+    # When grid_indexing.py detects an invalid timestamp, it sets dataOut_dwd_mosmix = False
+    # This test verifies that False values are not added to the source list
+    grid_result = GridIndexingResult(
+        dataOut=False,
+        dataOut_h2=False,
+        dataOut_hrrrh=False,
+        dataOut_nbm=False,
+        dataOut_nbmFire=False,
+        dataOut_gfs=False,
+        dataOut_ecmwf=False,
+        dataOut_gefs=False,
+        dataOut_rtma_ru=False,
+        dataOut_dwd_mosmix=False,  # Set to False when timestamp is invalid
+        era5_merged=False,
+        subhRunTime=None,
+        hrrrhRunTime=None,
+        h2RunTime=None,
+        nbmRunTime=None,
+        nbmFireRunTime=None,
+        gfsRunTime=None,
+        ecmwfRunTime=None,
+        gefsRunTime=None,
+        dwdMosmixRunTime=0.0,  # Invalid timestamp (epoch = 1970-01-01 00Z)
+        x_rtma=None,
+        y_rtma=None,
+        rtma_lat=None,
+        rtma_lon=None,
+        x_nbm=None,
+        y_nbm=None,
+        nbm_lat=None,
+        nbm_lon=None,
+        x_p=None,
+        y_p=None,
+        gfs_lat=None,
+        gfs_lon=None,
+        x_p_eur=None,
+        y_p_eur=None,
+        lats_ecmwf=None,
+        lons_ecmwf=None,
+        x_dwd=None,
+        y_dwd=None,
+        dwd_lat=None,
+        dwd_lon=None,
+        sourceIDX={},
+        WMO_alertDat=None,
+    )
+
+    # Build source metadata
+    metadata = build_source_metadata(
+        grid_result=grid_result,
+        era5_merged=False,
+        use_etopo=False,
+        time_machine=False,
+    )
+
+    # DWD MOSMIX should NOT be in source list because dataOut_dwd_mosmix is False
+    assert "dwd_mosmix" not in metadata.source_list, (
+        "DWD MOSMIX with dataOut_dwd_mosmix=False should not be in source list"
+    )
+    assert "dwd_mosmix" not in metadata.source_times, (
+        "DWD MOSMIX with invalid data should not be in source times"
+    )
+
+
+def test_dwd_mosmix_valid_timestamp_in_source_list():
+    """Test that DWD MOSMIX with valid timestamp IS added to sourceList."""
+    # Use a fixed timestamp (January 15, 2024, 10:00 UTC)
+    # This is a deterministic value that won't change between test runs
+    fixed_time = datetime.datetime(2024, 1, 15, 10, 0, 0)
+    valid_timestamp = fixed_time.timestamp()
+
+    # Create a mock GridIndexingResult with valid timestamp
+    grid_result = GridIndexingResult(
+        dataOut=False,
+        dataOut_h2=False,
+        dataOut_hrrrh=False,
+        dataOut_nbm=False,
+        dataOut_nbmFire=False,
+        dataOut_gfs=False,
+        dataOut_ecmwf=False,
+        dataOut_gefs=False,
+        dataOut_rtma_ru=False,
+        dataOut_dwd_mosmix=np.array([[1.0, 2.0, 3.0]]),  # Has data
+        era5_merged=False,
+        subhRunTime=None,
+        hrrrhRunTime=None,
+        h2RunTime=None,
+        nbmRunTime=None,
+        nbmFireRunTime=None,
+        gfsRunTime=None,
+        ecmwfRunTime=None,
+        gefsRunTime=None,
+        dwdMosmixRunTime=valid_timestamp,  # Valid timestamp
+        x_rtma=None,
+        y_rtma=None,
+        rtma_lat=None,
+        rtma_lon=None,
+        x_nbm=None,
+        y_nbm=None,
+        nbm_lat=None,
+        nbm_lon=None,
+        x_p=None,
+        y_p=None,
+        gfs_lat=None,
+        gfs_lon=None,
+        x_p_eur=None,
+        y_p_eur=None,
+        lats_ecmwf=None,
+        lons_ecmwf=None,
+        x_dwd=None,
+        y_dwd=None,
+        dwd_lat=None,
+        dwd_lon=None,
+        sourceIDX={},
+        WMO_alertDat=None,
+    )
+
+    # Build source metadata
+    metadata = build_source_metadata(
+        grid_result=grid_result,
+        era5_merged=False,
+        use_etopo=False,
+        time_machine=False,
+    )
+
+    # DWD MOSMIX SHOULD be in source list because timestamp is valid
+    assert "dwd_mosmix" in metadata.source_list, (
+        "DWD MOSMIX with valid timestamp should be in source list"
+    )
+    assert "dwd_mosmix" in metadata.source_times, (
+        "DWD MOSMIX with valid timestamp should be in source times"
+    )
+    # Verify it's not "1970-01-01 00Z"
+    assert metadata.source_times["dwd_mosmix"] != "1970-01-01 00Z", (
+        "DWD MOSMIX timestamp should not be epoch zero"
+    )

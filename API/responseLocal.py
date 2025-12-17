@@ -29,8 +29,10 @@ from API.api_utils import (
 )
 from API.constants.api_const import (
     API_VERSION,
+    CONVERSION_FACTORS,
     COORDINATE_CONST,
     ETOPO_CONST,
+    PRECIP_IDX,
     ROUNDING_RULES,
 )
 from API.constants.forecast_const import (
@@ -182,9 +184,7 @@ try:
     ingest_version = INGEST_VERSION_STR
 
     if STAGE in ("DEV", "PROD"):
-        station_map_file = os.path.join(
-            save_dir, ingest_version, "DWD_MOSMIX_stations.pickle"
-        )
+        station_map_file = os.path.join(save_dir, "DWD_MOSMIX_stations.pickle")
     elif STAGE in ("TESTING", "TM_TESTING"):
         # For testing stages, try to load from S3
         if save_type == "S3":
@@ -196,7 +196,9 @@ try:
                     asynchronous=False,
                     endpoint_url="https://api.pirateweather.net/files/",
                 )
-                s3_path = f"{s3_bucket}/{ingest_version}/DWD_MOSMIX_stations.pickle"
+                s3_path = (
+                    f"s3://ForecastTar_v2/{ingest_version}/DWD_MOSMIX_stations.pickle"
+                )
                 if s3.exists(s3_path):
                     with s3.open(s3_path, "rb") as f:
                         DWD_MOSMIX_Stations = pickle.load(f)
@@ -636,6 +638,21 @@ async def PW_Forecast(
     minuteSnowIntensity = InterPminute[:, DATA_MINUTELY["snow_intensity"]]
     minuteSleetIntensity = InterPminute[:, DATA_MINUTELY["ice_intensity"]]
 
+    # Compute minute-level presence flags for the current hour from maxPchance
+    try:
+        minute_presence = {
+            "has_rain": bool(np.any(maxPchance == PRECIP_IDX["rain"])),
+            "has_snow": bool(np.any(maxPchance == PRECIP_IDX["snow"])),
+            "has_ice": bool(
+                np.any(
+                    (maxPchance == PRECIP_IDX["ice"])
+                    | (maxPchance == PRECIP_IDX["sleet"])
+                )
+            ),
+        }
+    except (KeyError, TypeError, ValueError):
+        minute_presence = {"has_rain": False, "has_snow": False, "has_ice": False}
+
     # Timing Check
     timer.log("Array start")
 
@@ -809,11 +826,14 @@ async def PW_Forecast(
             solar_inputs=solar_inputs,
             cape_inputs=cape_inputs,
             error_inputs=error_inputs,
+            minute_presence=minute_presence,
             version=version,
         )
 
-    pTypeMap = np.array(["none", "snow", "sleet", "sleet", "rain"])
-    pTextMap = np.array(["None", "Snow", "Sleet", "Sleet", "Rain"])
+    pTypeMap = np.array(["none", "snow", "ice", "sleet", "rain", "mixed"])
+    pTextMap = np.array(
+        ["None", "Snow", "Freezing Rain", "Sleet", "Rain", "Mixed Precipitation"]
+    )
 
     # 13. Generate the daily forecast section
     # This aggregates hourly data to create daily summaries (high/low temps, total precip, etc.)
@@ -1076,8 +1096,21 @@ async def PW_Forecast(
                     if station.get("lat") is not None and station.get("lon") is not None
                 )
                 try:
-                    min_distance = min(distances)
-                    nearest_station_distance = int(round(min_distance))
+                    min_distance = min(
+                        distances
+                    )  # in kilometers (haversine_distance returns km)
+
+                    # Determine output units: miles for 'us' and 'uk2', otherwise km
+                    units_key = (unitSystem or "").lower()
+                    if units_key in ("us", "uk"):
+                        # Convert kilometers to miles using shared constant
+                        km_to_miles = CONVERSION_FACTORS.get("km_to_miles", 0.621371)
+                        distance_out = min_distance * km_to_miles
+                    else:
+                        distance_out = min_distance
+
+                    # Return as float rounded to two decimal places
+                    nearest_station_distance = round(distance_out, 2)
                 except ValueError:
                     # No valid stations with coordinates
                     pass
@@ -1106,7 +1139,9 @@ async def PW_Forecast(
                 grid_key = (int(grid_result.y_dwd), int(grid_result.x_dwd))
                 stations_at_grid = DWD_MOSMIX_Stations.get(grid_key, [])
                 if stations_at_grid:
-                    returnOBJ["flags"]["stations"] = stations_at_grid
+                    returnOBJ["flags"]["sourceIDX"]["dwd_mosmix"] = {
+                        "stations": stations_at_grid
+                    }
 
     # Timing Check
     timer.log("Flags Time")
