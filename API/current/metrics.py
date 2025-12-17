@@ -361,7 +361,7 @@ def _get_dew(sourceList, model_data, state: InterpolationState, lat, lon):
         ),
     }
 
-    strategies = _build_source_strategies(source_map, 0.0, 0.0, has_ecmwf=True)
+    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=True)
     val = _select_value(strategies)
     return clipLog(val, CLIP_TEMP["min"], CLIP_TEMP["max"], "Dewpoint Current")
 

@@ -318,25 +318,29 @@ def prepare_data_inputs(
         lon,
         has_ecmwf=True,  # ECMWF has this data
         source_data={
-            nbm_merged[:, NBM["wind"]] if nbm_merged is not None else None,
-            _wind_speed(hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]])
+            "nbm": nbm_merged[:, NBM["wind"]] if nbm_merged is not None else None,
+            "hrrr": _wind_speed(
+                hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]]
+            )
             if hrrr_merged is not None
             else None,
-            _wind_speed(
+            "dwd_mosmix": _wind_speed(
                 dwd_mosmix_merged[:, DWD_MOSMIX["wind_u"]],
                 dwd_mosmix_merged[:, DWD_MOSMIX["wind_v"]],
             )
             if dwd_valid
             else None,
-            _wind_speed(
+            "ecmwf": _wind_speed(
                 ecmwf_merged[:, ECMWF["wind_u"]], ecmwf_merged[:, ECMWF["wind_v"]]
             )
             if ecmwf_merged is not None
             else None,
-            _wind_speed(gfs_merged[:, GFS["wind_u"]], gfs_merged[:, GFS["wind_v"]])
+            "gfs": _wind_speed(
+                gfs_merged[:, GFS["wind_u"]], gfs_merged[:, GFS["wind_v"]]
+            )
             if gfs_merged is not None
             else None,
-            _wind_speed(
+            "era5": _wind_speed(
                 era5_merged[:, ERA5["10m_u_component_of_wind"]],
                 era5_merged[:, ERA5["10m_v_component_of_wind"]],
             )
@@ -352,11 +356,15 @@ def prepare_data_inputs(
         lon,
         has_ecmwf=False,  # ECMWF doesn't provide gust data
         source_data={
-            nbm_merged[:, NBM["gust"]] if nbm_merged is not None else None,
-            hrrr_merged[:, HRRR["gust"]] if hrrr_merged is not None else None,
-            dwd_mosmix_merged[:, DWD_MOSMIX["gust"]] if dwd_valid else None,
-            gfs_merged[:, GFS["gust"]] if gfs_merged is not None else None,
-            era5_merged[:, ERA5["instantaneous_10m_wind_gust"]] if era5_valid else None,
+            "nbm": nbm_merged[:, NBM["gust"]] if nbm_merged is not None else None,
+            "hrrr": hrrr_merged[:, HRRR["gust"]] if hrrr_merged is not None else None,
+            "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["gust"]]
+            if dwd_valid
+            else None,
+            "gfs": gfs_merged[:, GFS["gust"]] if gfs_merged is not None else None,
+            "era5": era5_merged[:, ERA5["instantaneous_10m_wind_gust"]]
+            if era5_valid
+            else None,
         },
     )
 
@@ -367,23 +375,27 @@ def prepare_data_inputs(
         lon,
         has_ecmwf=True,  # ECMWF has data
         source_data={
-            nbm_merged[:, NBM["bearing"]] if nbm_merged is not None else None,
-            _bearing(hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]])
+            "nbm": nbm_merged[:, NBM["bearing"]] if nbm_merged is not None else None,
+            "hrrr": _bearing(
+                hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]]
+            )
             if hrrr_merged is not None
             else None,
-            _bearing(
+            "dwd_mosmix": _bearing(
                 dwd_mosmix_merged[:, DWD_MOSMIX["wind_u"]],
                 dwd_mosmix_merged[:, DWD_MOSMIX["wind_v"]],
             )
             if dwd_valid
             else None,
-            _bearing(ecmwf_merged[:, ECMWF["wind_u"]], ecmwf_merged[:, ECMWF["wind_v"]])
+            "ecmwf": _bearing(
+                ecmwf_merged[:, ECMWF["wind_u"]], ecmwf_merged[:, ECMWF["wind_v"]]
+            )
             if ecmwf_merged is not None
             else None,
-            _bearing(gfs_merged[:, GFS["wind_u"]], gfs_merged[:, GFS["wind_v"]])
+            "gfs": _bearing(gfs_merged[:, GFS["wind_u"]], gfs_merged[:, GFS["wind_v"]])
             if gfs_merged is not None
             else None,
-            _bearing(
+            "era5": _bearing(
                 era5_merged[:, ERA5["10m_u_component_of_wind"]],
                 era5_merged[:, ERA5["10m_v_component_of_wind"]],
             )
@@ -399,14 +411,22 @@ def prepare_data_inputs(
         lon,
         has_ecmwf=True,  # ECMWF has data
         source_data={
-            nbm_merged[:, NBM["cloud"]] * 0.01 if nbm_merged is not None else None,
-            hrrr_merged[:, HRRR["cloud"]] * 0.01 if hrrr_merged is not None else None,
-            dwd_mosmix_merged[:, DWD_MOSMIX["cloud"]] * 0.01 if dwd_valid else None,
-            ecmwf_merged[:, ECMWF["cloud"]] * 0.01
+            "nbm": nbm_merged[:, NBM["cloud"]] * 0.01
+            if nbm_merged is not None
+            else None,
+            "hrrr": hrrr_merged[:, HRRR["cloud"]] * 0.01
+            if hrrr_merged is not None
+            else None,
+            "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["cloud"]] * 0.01
+            if dwd_valid
+            else None,
+            "ecmwf": ecmwf_merged[:, ECMWF["cloud"]] * 0.01
             if ecmwf_merged is not None
             else None,
-            gfs_merged[:, GFS["cloud"]] * 0.01 if gfs_merged is not None else None,
-            era5_merged[:, ERA5["total_cloud_cover"]] if era5_valid else None,
+            "gfs": gfs_merged[:, GFS["cloud"]] * 0.01
+            if gfs_merged is not None
+            else None,
+            "era5": era5_merged[:, ERA5["total_cloud_cover"]] if era5_valid else None,
         },
     )
 
@@ -431,11 +451,13 @@ def prepare_data_inputs(
         lon,
         has_ecmwf=False,  # ECMWF doesn't provide visibility data
         source_data={
-            nbm_merged[:, NBM["vis"]] if nbm_merged is not None else None,
-            hrrr_merged[:, HRRR["vis"]] if hrrr_merged is not None else None,
-            dwd_mosmix_merged[:, DWD_MOSMIX["vis"]] if dwd_valid else None,
-            gfs_merged[:, GFS["vis"]] if gfs_merged is not None else None,
-            estimate_visibility_gultepe_rh_pr_numpy(
+            "nbm": nbm_merged[:, NBM["vis"]] if nbm_merged is not None else None,
+            "hrrr": hrrr_merged[:, HRRR["vis"]] if hrrr_merged is not None else None,
+            "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["vis"]]
+            if dwd_valid
+            else None,
+            "gfs": gfs_merged[:, GFS["vis"]] if gfs_merged is not None else None,
+            "era5": estimate_visibility_gultepe_rh_pr_numpy(
                 era5_merged, var_index=ERA5, var_axis=1
             )
             if era5_valid
@@ -463,17 +485,19 @@ def prepare_data_inputs(
         lon,
         has_ecmwf=True,  # ECMWF has data
         source_data={
-            nbm_merged[:, NBM["intensity"]] if nbm_merged is not None else None,
-            hrrr_merged[:, HRRR["accum"]] if hrrr_merged is not None else None,
-            dwd_mosmix_merged[:, DWD_MOSMIX["accum"]]
+            "nbm": nbm_merged[:, NBM["intensity"]] if nbm_merged is not None else None,
+            "hrrr": hrrr_merged[:, HRRR["accum"]] if hrrr_merged is not None else None,
+            "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["accum"]]
             if dwd_valid
             else None,  # kg/m^2 = mm
-            ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
+            "ecmwf": ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
             if ecmwf_merged is not None
             else None,
-            gefs_merged[:, GEFS["accum"]] if gefs_merged is not None else None,
-            gfs_merged[:, GFS["accum"]] if gfs_merged is not None else None,
-            era5_merged[:, ERA5["total_precipitation"]] * 1000 if era5_valid else None,
+            "gefs": gefs_merged[:, GEFS["accum"]] if gefs_merged is not None else None,
+            "gfs": gfs_merged[:, GFS["accum"]] if gfs_merged is not None else None,
+            "era5": era5_merged[:, ERA5["total_precipitation"]] * 1000
+            if era5_valid
+            else None,
         },
     )
 
@@ -520,11 +544,13 @@ def prepare_data_inputs(
         lon,
         has_ecmwf=False,  # ECMWF doesn't provide solar data
         source_data={
-            nbm_merged[:, NBM["solar"]] if nbm_merged is not None else None,
-            hrrr_merged[:, HRRR["solar"]] if hrrr_merged is not None else None,
-            dwd_mosmix_merged[:, DWD_MOSMIX["solar"]] if dwd_valid else None,
-            gfs_merged[:, GFS["solar"]] if gfs_merged is not None else None,
-            era5_merged[:, ERA5["surface_solar_radiation_downwards"]] / 3600
+            "nbm": nbm_merged[:, NBM["solar"]] if nbm_merged is not None else None,
+            "hrrr": hrrr_merged[:, HRRR["solar"]] if hrrr_merged is not None else None,
+            "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["solar"]]
+            if dwd_valid
+            else None,
+            "gfs": gfs_merged[:, GFS["solar"]] if gfs_merged is not None else None,
+            "era5": era5_merged[:, ERA5["surface_solar_radiation_downwards"]] / 3600
             if era5_valid
             else None,
         },
