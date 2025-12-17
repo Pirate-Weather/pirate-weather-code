@@ -261,6 +261,94 @@ def earth_relative_wind_components(
     return ut, vt
 
 
+def interp_time_take_blend(
+    arr: da.Array,
+    stacked_timesUnix: np.ndarray,
+    hourly_timesUnix: np.ndarray,
+    nearest_vars: Optional[Union[int, Iterable[int]]] = None,  # var indices using NN
+    dtype: str = "float32",
+    fill_value: float = np.nan,
+    time_axis: int = 1,
+) -> da.Array:
+    """
+    Interpolate along `time_axis` of a 4D array (V, T, Y, X) using gather+blend,
+    with optional nearest-neighbor override for selected variable indices.
+
+    Returns a Dask array with shape (V, T_new, Y, X) and dtype `dtype`.
+    """
+    if arr.ndim != 4:
+        raise ValueError("Expected arr with dims (V, T, Y, X).")
+
+    VAX, TAX = 0, time_axis
+    if TAX != 1:
+        raise NotImplementedError("This helper assumes time_axis == 1 for (V,T,Y,X).")
+
+    # Precompute the two neighbor‐indices and the weights
+    x_a = np.array(stacked_timesUnix)
+    x_b = np.array(hourly_timesUnix)
+
+    idx = np.searchsorted(x_a, x_b) - 1
+    idx0 = np.clip(idx, 0, len(x_a) - 2)
+    idx1 = idx0 + 1
+    w = (x_b - x_a[idx0]) / (x_a[idx1] - x_a[idx0])  # float array, shape (T_new,)
+
+    # boolean mask of “in‐range” points
+    valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
+
+    T_new = int(len(idx0))
+    if not (len(idx1) == T_new and len(w) == T_new and len(valid) == T_new):
+        raise ValueError("idx0, idx1, w, and valid must all have length T_new.")
+
+    # Ensure time is one chunk so gather (`da.take`) stays within chunk boundaries
+    arr_t = arr.rechunk({TAX: -1})
+
+    # Gather neighbors along time
+    y0 = da.take(arr_t, idx0, axis=TAX)  # (V, T_new, Y, X)
+    y1 = da.take(arr_t, idx1, axis=TAX)
+
+    # Weighted blend
+    w_r = da.asarray(w, chunks=(T_new,))[None, :, None, None]
+    out = (1 - w_r) * y0 + w_r * y1
+    out = out.astype(dtype, copy=False)
+
+    # Mask invalid new times
+    if (~valid).any():
+        valid_r = da.asarray(valid, chunks=(T_new,))[None, :, None, None]
+        out = da.where(valid_r, out, fill_value)
+
+    # Optional nearest-neighbor override for specified variable indices
+    if nearest_vars is not None:
+        # Precompute nearest indices once: closer of idx0 / idx1
+        nearest_idx = np.where(w < 0.5, idx0, idx1).astype(idx0.dtype)
+
+        # Normalize indices as a sorted, unique list
+        if isinstance(nearest_vars, int):
+            nearest_vars = [nearest_vars]
+        nv = sorted(set(int(i) for i in nearest_vars))
+
+        # Compute nearest only for needed variables (cheap if few vars)
+        # Shape of each nearest slice: (1, T_new, Y, X)
+        take_nn = da.take(arr_t, nearest_idx, axis=TAX)
+        # Replace in 'out' per variable index
+        pieces = []
+        prev = 0
+        for i in nv:
+            if i < 0 or i >= arr.shape[VAX]:
+                raise IndexError(
+                    f"nearest_vars index {i} out of range for V={arr.shape[VAX]}"
+                )
+            if i > prev:
+                pieces.append(out[prev:i])  # unchanged segment
+            pieces.append(
+                take_nn[i : i + 1].astype(dtype, copy=False)
+            )  # nearest segment
+            prev = i + 1
+        if prev < arr.shape[VAX]:
+            pieces.append(out[prev:])
+        out = da.concatenate(pieces, axis=VAX)
+
+    return out
+
 def interpolate_temporal_gaps_efficiently(
     ds_chunked, nearest_vars=None, max_gap_hours=3, time_dim="time"
 ):
