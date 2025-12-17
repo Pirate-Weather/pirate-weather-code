@@ -271,11 +271,34 @@ def interp_time_take_blend(
     fill_value: float = np.nan,
     time_axis: int = 1,
 ) -> da.Array:
-    """
-    Interpolate along `time_axis` of a 4D array (V, T, Y, X) using gather+blend,
-    with optional nearest-neighbor override for selected variable indices.
+    """Interpolate model data along the time dimension via gather-and-blend.
 
-    Returns a Dask array with shape (V, T_new, Y, X) and dtype `dtype`.
+    The helper assumes the input has shape \(V, T, Y, X\) and that time is
+    the second axis. It gathers the values for the two surrounding stored
+    times using ``da.take``, then linearly blends them using the fractional
+    offset between ``stacked_timesUnix`` and ``hourly_timesUnix``. Points that
+    fall outside the time range defined by ``stacked_timesUnix`` are filled with
+    ``fill_value``. Optionally, a subset of variable indices may be overridden
+    with nearest-neighbor interpolation instead of the blended values.
+
+    Args:
+        arr: Chunked Dask array containing the forecast in \(V, T, Y, X\)
+            order. The time axis must already be a single chunk so gather
+            operations stay within chunk boundaries.
+        stacked_timesUnix: Known source timestamps to interpolate from (monotonic
+            increasing unix seconds).
+        hourly_timesUnix: Desired target timestamps; must lie within the range
+            spanned by ``stacked_timesUnix`` when possible.
+        nearest_vars: Optional variable indices that should use the closer
+            neighbor directly instead of linear blending (e.g., categorical
+            flags). Can be a single index or an iterable.
+        dtype: Output dtype for the interpolated array.
+        fill_value: Value used for times outside the available range.
+        time_axis: Axis index for time (must be 1 in this helper).
+
+    Returns:
+        A dask array shaped \(V, T_new, Y, X\) with interpolated (or overridden)
+        values and ``dtype``.
     """
     if arr.ndim != 4:
         raise ValueError("Expected arr with dims (V, T, Y, X).")
@@ -300,8 +323,14 @@ def interp_time_take_blend(
     if not (len(idx1) == T_new and len(w) == T_new and len(valid) == T_new):
         raise ValueError("idx0, idx1, w, and valid must all have length T_new.")
 
-    # Ensure time is one chunk so gather (`da.take`) stays within chunk boundaries
-    arr_t = arr.rechunk({TAX: -1})
+    # Ensure time axis already fits in one chunk so gather (`da.take`) stays within chunk boundaries
+    time_chunks = arr.chunks[TAX]
+    if len(time_chunks) != 1:
+        raise ValueError(
+            "time axis must be a single chunk; please rechunk with ``arr.rechunk({time_axis: -1})`` "
+            f"before calling (got {len(time_chunks)} chunks)."
+        )
+    arr_t = arr
 
     # Gather neighbors along time
     y0 = da.take(arr_t, idx0, axis=TAX)  # (V, T_new, Y, X)
