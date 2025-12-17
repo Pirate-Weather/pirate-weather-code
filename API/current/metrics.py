@@ -110,13 +110,31 @@ def _build_source_strategies(source_map, lat, lon, has_ecmwf=True):
     if gfs_before_dwd:
         # North America
         if has_ecmwf:
-            order = ["rtma_ru", "hrrrsubh", "nbm", "hrrr", "ecmwf_ifs", "gfs", "dwd_mosmix", "era5"]
+            order = [
+                "rtma_ru",
+                "hrrrsubh",
+                "nbm",
+                "hrrr",
+                "ecmwf_ifs",
+                "gfs",
+                "dwd_mosmix",
+                "era5",
+            ]
         else:
             order = ["rtma_ru", "hrrrsubh", "nbm", "hrrr", "gfs", "dwd_mosmix", "era5"]
     else:
         # Rest of world
         if has_ecmwf:
-            order = ["rtma_ru", "hrrrsubh", "nbm", "hrrr", "dwd_mosmix", "ecmwf_ifs", "gfs", "era5"]
+            order = [
+                "rtma_ru",
+                "hrrrsubh",
+                "nbm",
+                "hrrr",
+                "dwd_mosmix",
+                "ecmwf_ifs",
+                "gfs",
+                "era5",
+            ]
         else:
             order = ["rtma_ru", "hrrrsubh", "nbm", "hrrr", "dwd_mosmix", "gfs", "era5"]
 
@@ -276,9 +294,7 @@ def _get_temp(sourceList, model_data, state: InterpolationState, lat, lon):
         ),
         "ecmwf_ifs": (
             lambda: "ecmwf_ifs" in sourceList,
-            lambda: _interp_scalar(
-                model_data["ECMWF_Merged"], ECMWF["temp"], state
-            ),
+            lambda: _interp_scalar(model_data["ECMWF_Merged"], ECMWF["temp"], state),
         ),
         "gfs": (
             lambda: "gfs" in sourceList,
@@ -1311,7 +1327,9 @@ def build_current_section(
         ),
     }
 
-    InterPcurrent[DATA_CURRENT["temp"]] = _get_temp(sourceList, model_data, state, lat, lon_IN)
+    InterPcurrent[DATA_CURRENT["temp"]] = _get_temp(
+        sourceList, model_data, state, lat, lon_IN
+    )
     InterPcurrent[DATA_CURRENT["dew"]] = _get_dew(sourceList, model_data, state)
     InterPcurrent[DATA_CURRENT["humidity"]] = _get_humidity(
         sourceList, model_data, state, humidUnit

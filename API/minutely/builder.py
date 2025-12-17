@@ -428,10 +428,22 @@ def _calculate_precip_type_probs(
 
     if gfs_before_dwd:
         # North America priority
-        processors = [_process_ecmwf, _process_gfs, _process_dwd_mosmix, _process_gefs, _process_era5]
+        processors = [
+            _process_ecmwf,
+            _process_gfs,
+            _process_dwd_mosmix,
+            _process_gefs,
+            _process_era5,
+        ]
     else:
         # Rest of world priority
-        processors = [_process_dwd_mosmix, _process_ecmwf, _process_gfs, _process_gefs, _process_era5]
+        processors = [
+            _process_dwd_mosmix,
+            _process_ecmwf,
+            _process_gfs,
+            _process_gefs,
+            _process_era5,
+        ]
 
     # Try each processor in priority order
     for processor in processors:
