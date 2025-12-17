@@ -350,6 +350,7 @@ def interp_time_take_blend(
 
     return out
 
+
 def interpolate_temporal_gaps_efficiently(
     ds_chunked, nearest_vars=None, max_gap_hours=3, time_dim="time"
 ):
