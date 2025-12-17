@@ -1,5 +1,5 @@
 # %% Script to contain the helper functions as part of the data ingest for Pirate Weather
-# Alexander Rey. July 17 2025
+# Alexander Rey. July 2025
 
 import re
 import sys
