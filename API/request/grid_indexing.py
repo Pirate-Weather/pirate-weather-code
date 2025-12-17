@@ -408,7 +408,9 @@ async def calculate_grid_indexing(
         # Round the precipitation_type variable to nearest integer
         # to avoid issues with interpolation producing non-integer values
         # (0 = rain, 1 = snow, 2 = sleet, etc.)
-        ERA5_MERGED[:, ERA5['precipitation_type']] = np.rint(ERA5_MERGED[:, ERA5['precipitation_type']])
+        ERA5_MERGED[:, ERA5["precipitation_type"]] = np.rint(
+            ERA5_MERGED[:, ERA5["precipitation_type"]]
+        )
 
     else:
         ERA5_MERGED = False
