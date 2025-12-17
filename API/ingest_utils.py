@@ -4,6 +4,7 @@
 import re
 import sys
 import time
+from typing import Iterable, Optional, Union
 
 import cartopy.crs as ccrs
 import dask.array as da
