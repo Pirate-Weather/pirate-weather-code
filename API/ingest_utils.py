@@ -271,7 +271,7 @@ def interp_time_take_blend(
     fill_value: float = np.nan,
     time_axis: int = 1,
 ) -> da.Array:
-    """Interpolate model data along the time dimension via gather-and-blend.
+    r"""Interpolate model data along the time dimension via gather-and-blend.
 
     The helper assumes the input has shape \(V, T, Y, X\) and that time is
     the second axis. It gathers the values for the two surrounding stored
