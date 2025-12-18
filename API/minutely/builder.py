@@ -30,6 +30,7 @@ from API.constants.model_const import (
 )
 from API.constants.shared_const import MISSING_DATA
 from API.utils.precip import dbz_to_rate
+from API.utils.source_priority import should_gfs_precede_dwd
 
 
 def _interp_gefs(minute_array_grib, gefs_data):
@@ -321,6 +322,47 @@ def _calculate_prob(
     return InterPminute_prob
 
 
+def _process_ecmwf_ptype(ecmwfMinuteInterpolation, InterTminute):
+    """Process ECMWF precipitation type data."""
+    ptype_ecmwf = ecmwfMinuteInterpolation[:, ECMWF["ptype"]]
+    InterTminute[:, 1] = np.where(np.isin(ptype_ecmwf, [5, 6, 9]), 1, 0)
+    InterTminute[:, 2] = np.where(np.isin(ptype_ecmwf, [4, 8, 10]), 1, 0)
+    InterTminute[:, 3] = np.where(np.isin(ptype_ecmwf, [3, 12]), 1, 0)
+    InterTminute[:, 4] = np.where(np.isin(ptype_ecmwf, [1, 2, 7, 11]), 1, 0)
+
+
+def _process_dwd_mosmix_ptype(dwd_mosmix_MinuteInterpolation, InterTminute):
+    """Process DWD MOSMIX precipitation type data with WMO 4677 mapping."""
+    ptype_dwd = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["ptype"]]
+    temp_dwd = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["temp"]]
+    mapped = map_wmo4677_to_ptype(np.round(ptype_dwd), temperature_c=temp_dwd)
+    InterTminute[:, 1] = (mapped == 1).astype(int)
+    InterTminute[:, 2] = (mapped == 2).astype(int)
+    InterTminute[:, 3] = (mapped == 3).astype(int)
+    InterTminute[:, 4] = (mapped == 4).astype(int)
+
+
+def _process_gfs_ptype(gfsMinuteInterpolation, InterTminute):
+    """Process GFS precipitation type data."""
+    for i in [GFS["snow"], GFS["ice"], GFS["freezing_rain"], GFS["rain"]]:
+        InterTminute[:, i - 11] = gfsMinuteInterpolation[:, i]
+
+
+def _process_gefs_ptype(gefsMinuteInterpolation, InterTminute):
+    """Process GEFS precipitation type data."""
+    for i in [GEFS["snow"], GEFS["ice"], GEFS["freezing_rain"], GEFS["rain"]]:
+        InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
+
+
+def _process_era5_ptype(era5_MinuteInterpolation, InterTminute):
+    """Process ERA5 precipitation type data."""
+    ptype_era5 = era5_MinuteInterpolation[:, ERA5["precipitation_type"]]
+    InterTminute[:, 1] = np.where(np.isin(ptype_era5, [5, 6, 9]), 1, 0)
+    InterTminute[:, 2] = np.where(np.isin(ptype_era5, [4, 8, 10]), 1, 0)
+    InterTminute[:, 3] = np.where(np.isin(ptype_era5, [3, 12]), 1, 0)
+    InterTminute[:, 4] = np.where(np.isin(ptype_era5, [1, 2, 7, 11]), 1, 0)
+
+
 def _calculate_precip_type_probs(
     source_list,
     hrrrSubHInterpolation,
@@ -330,6 +372,8 @@ def _calculate_precip_type_probs(
     gefsMinuteInterpolation,
     gfsMinuteInterpolation,
     era5_MinuteInterpolation,
+    lat,
+    lon,
 ):
     """
     Calculate precipitation type probabilities.
@@ -343,12 +387,15 @@ def _calculate_precip_type_probs(
         gefsMinuteInterpolation: GEFS interpolated data.
         gfsMinuteInterpolation: GFS interpolated data.
         era5_MinuteInterpolation: ERA5 interpolated data.
+        lat: Latitude of the location.
+        lon: Longitude of the location.
 
     Returns:
         Array of precipitation type probabilities.
     """
     InterTminute = np.zeros((61, 5))
 
+    # Process high-priority sources first (same for all regions)
     if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
         for i in [
             HRRR_SUBH["snow"],
@@ -357,39 +404,55 @@ def _calculate_precip_type_probs(
             HRRR_SUBH["rain"],
         ]:
             InterTminute[:, i - 7] = hrrrSubHInterpolation[:, i]
-    elif "nbm" in source_list and nbmMinuteInterpolation is not None:
+        return InterTminute
+
+    if "nbm" in source_list and nbmMinuteInterpolation is not None:
         InterTminute[:, 1] = nbmMinuteInterpolation[:, NBM["snow"]]
         InterTminute[:, 2] = nbmMinuteInterpolation[:, NBM["ice"]]
         InterTminute[:, 3] = nbmMinuteInterpolation[:, NBM["freezing_rain"]]
         InterTminute[:, 4] = nbmMinuteInterpolation[:, NBM["rain"]]
-    elif "dwd_mosmix" in source_list and dwd_mosmix_MinuteInterpolation is not None:
-        # Map WMO 4677 codes to precip-type categories via centralized helper
-        # Pass temperature for validation to prevent unrealistic frozen precip at warm temps
-        ptype_dwd = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["ptype"]]
-        temp_dwd = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["temp"]]
-        mapped = map_wmo4677_to_ptype(np.round(ptype_dwd), temperature_c=temp_dwd)
-        InterTminute[:, 1] = (mapped == 1).astype(int)
-        InterTminute[:, 2] = (mapped == 2).astype(int)
-        InterTminute[:, 3] = (mapped == 3).astype(int)
-        InterTminute[:, 4] = (mapped == 4).astype(int)
-    elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
-        ptype_ecmwf = ecmwfMinuteInterpolation[:, ECMWF["ptype"]]
-        InterTminute[:, 1] = np.where(np.isin(ptype_ecmwf, [5, 6, 9]), 1, 0)
-        InterTminute[:, 2] = np.where(np.isin(ptype_ecmwf, [4, 8, 10]), 1, 0)
-        InterTminute[:, 3] = np.where(np.isin(ptype_ecmwf, [3, 12]), 1, 0)
-        InterTminute[:, 4] = np.where(np.isin(ptype_ecmwf, [1, 2, 7, 11]), 1, 0)
-    elif "gefs" in source_list and gefsMinuteInterpolation is not None:
-        for i in [GEFS["snow"], GEFS["ice"], GEFS["freezing_rain"], GEFS["rain"]]:
-            InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
-    elif "gfs" in source_list and gfsMinuteInterpolation is not None:
-        for i in [GFS["snow"], GFS["ice"], GFS["freezing_rain"], GFS["rain"]]:
-            InterTminute[:, i - 11] = gfsMinuteInterpolation[:, i]
-    elif "era5" in source_list and era5_MinuteInterpolation is not None:
-        ptype_era5 = era5_MinuteInterpolation[:, ERA5["precipitation_type"]]
-        InterTminute[:, 1] = np.where(np.isin(ptype_era5, [5, 6, 9]), 1, 0)
-        InterTminute[:, 2] = np.where(np.isin(ptype_era5, [4, 8, 10]), 1, 0)
-        InterTminute[:, 3] = np.where(np.isin(ptype_era5, [3, 12]), 1, 0)
-        InterTminute[:, 4] = np.where(np.isin(ptype_era5, [1, 2, 7, 11]), 1, 0)
+        return InterTminute
+
+    # Determine priority order based on location
+    # In North America: ECMWF > GFS > DWD MOSMIX > GEFS > ERA5
+    # Rest of world: DWD MOSMIX > ECMWF > GFS > GEFS > ERA5
+    gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
+
+    # Try each source in priority order
+    if gfs_before_dwd:
+        # North America priority
+        if "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
+            _process_ecmwf_ptype(ecmwfMinuteInterpolation, InterTminute)
+            return InterTminute
+        if "gfs" in source_list and gfsMinuteInterpolation is not None:
+            _process_gfs_ptype(gfsMinuteInterpolation, InterTminute)
+            return InterTminute
+        if "dwd_mosmix" in source_list and dwd_mosmix_MinuteInterpolation is not None:
+            _process_dwd_mosmix_ptype(dwd_mosmix_MinuteInterpolation, InterTminute)
+            return InterTminute
+        if "gefs" in source_list and gefsMinuteInterpolation is not None:
+            _process_gefs_ptype(gefsMinuteInterpolation, InterTminute)
+            return InterTminute
+        if "era5" in source_list and era5_MinuteInterpolation is not None:
+            _process_era5_ptype(era5_MinuteInterpolation, InterTminute)
+            return InterTminute
+    else:
+        # Rest of world priority
+        if "dwd_mosmix" in source_list and dwd_mosmix_MinuteInterpolation is not None:
+            _process_dwd_mosmix_ptype(dwd_mosmix_MinuteInterpolation, InterTminute)
+            return InterTminute
+        if "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
+            _process_ecmwf_ptype(ecmwfMinuteInterpolation, InterTminute)
+            return InterTminute
+        if "gfs" in source_list and gfsMinuteInterpolation is not None:
+            _process_gfs_ptype(gfsMinuteInterpolation, InterTminute)
+            return InterTminute
+        if "gefs" in source_list and gefsMinuteInterpolation is not None:
+            _process_gefs_ptype(gefsMinuteInterpolation, InterTminute)
+            return InterTminute
+        if "era5" in source_list and era5_MinuteInterpolation is not None:
+            _process_era5_ptype(era5_MinuteInterpolation, InterTminute)
+            return InterTminute
 
     return InterTminute
 
@@ -634,6 +697,8 @@ def build_minutely_block(
     era5_data: Optional[np.ndarray],
     prep_intensity_unit: float,
     version: float,
+    lat: float,
+    lon: float,
 ) -> Tuple[
     np.ndarray,
     np.ndarray,
@@ -664,6 +729,8 @@ def build_minutely_block(
         era5_data: ERA5 data.
         prep_intensity_unit: Precipitation intensity unit.
         version: API version.
+        lat: Latitude of the location.
+        lon: Longitude of the location.
 
     Returns:
         Tuple containing minutely data arrays and lists.
@@ -736,6 +803,8 @@ def build_minutely_block(
         gefsMinuteInterpolation,
         gfsMinuteInterpolation,
         era5_MinuteInterpolation,
+        lat,
+        lon,
     )
 
     maxPchance = (

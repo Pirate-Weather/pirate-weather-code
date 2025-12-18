@@ -631,6 +631,8 @@ async def PW_Forecast(
             era5_data=ERA5_MERGED if isinstance(ERA5_MERGED, np.ndarray) else None,
             prep_intensity_unit=prepIntensityUnit,
             version=version,
+            lat=lat,
+            lon=lon_IN,
         )
     minuteRainIntensity = InterPminute[:, DATA_MINUTELY["rain_intensity"]]
     minuteSnowIntensity = InterPminute[:, DATA_MINUTELY["snow_intensity"]]
@@ -731,6 +733,8 @@ async def PW_Forecast(
         era5_merged=ERA5_MERGED,
         extra_vars=extraVars,
         num_hours=numHours,
+        lat=lat,
+        lon=lon,
     )
 
     InterThour_inputs = inputs["InterThour_inputs"]

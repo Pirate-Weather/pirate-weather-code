@@ -31,6 +31,8 @@ def test_build_minutely_block_structure():
         "era5_data": None,
         "prep_intensity_unit": 1.0,
         "version": 2,
+        "lat": 40.7128,  # New York City
+        "lon": -74.0060,
     }
 
     result = build_minutely_block(**kwargs)
@@ -72,6 +74,8 @@ def test_build_minutely_block_empty():
         "era5_data": None,
         "prep_intensity_unit": 1.0,
         "version": 2,
+        "lat": 40.7128,  # New York City
+        "lon": -74.0060,
     }
 
     result = build_minutely_block(**kwargs)
