@@ -22,4 +22,4 @@ jobs:
       - name: Run pytest
         env:
           PW_API: ${{ secrets.PW_API }}
-        run: pytest -q --ignore=tests/test_rtma_ingest.py --ignore=tests/test_silam_aqi.py
+        run: pytest -q --ignore=tests/test_rtma_ingest.py --ignore=tests/test_dwd_interp_flow.py --ignore=tests/test_interpolate_nan_along_axis.py --ignore=tests/test_silam_aqi.py

@@ -835,7 +835,7 @@ def calculate_half_day_text(
     if overall_avg_pop > 0 and total_precip_accum >= 0.1:
         if total_snow_accum > 0 and total_rain_accum > 0 and total_sleet_accum > 0:
             precip_summary_text = "mixed-precipitation"
-            most_common_overall_precip_type = "sleet"
+            most_common_overall_precip_type = "mixed"
             secondary_precip_condition = (
                 "medium-snow"  # Indicate snow totals are relevant
             )

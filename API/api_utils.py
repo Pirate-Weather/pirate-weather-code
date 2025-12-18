@@ -312,13 +312,13 @@ def select_daily_precip_type(
     Returns:
         The updated `maxPchanceDay` numpy array.
     """
-    # If rain, snow and ice are all present, choose sleet (code 3)
+    # If rain, snow and ice are all present, choose mixed (code 5)
     all_types = (
         (InterPdaySum[:, DATA_DAY["rain"]] > 0)
         & (InterPdaySum[:, DATA_DAY["snow"]] > 0)
         & (InterPdaySum[:, DATA_DAY["ice"]] > 0)
     )
-    maxPchanceDay[all_types] = 3
+    maxPchanceDay[all_types] = PRECIP_IDX["mixed"]
 
     # Use the type with the greatest accumulation as baseline
     precip_accum = np.stack(
@@ -424,7 +424,7 @@ def map_wmo4677_to_ptype(
                 # This will raise ValueError if shapes are incompatible for broadcasting
                 warm_mask = temp_arr > TEMP_THRESHOLD_WMO_FROZEN_C
                 # Override snow (1), ice (2), and freezing (3) to rain (4) when warm
-                frozen_precip_mask = (out == 1) | (out == 2) | (out == 3)
+                frozen_precip_mask = np.isin(out, [1, 2, 3])
                 override_mask = warm_mask & frozen_precip_mask
                 out[override_mask] = 4
             except ValueError as e:

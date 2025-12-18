@@ -258,12 +258,16 @@ def calculate_precip_text(
     ):
         if precipType == "none":
             c_icon = "rain"  # Fallback icon
+        elif precipType == "mixed":
+            c_icon = "mixed"
         elif precipType == "ice":
-            c_icon = "freezing-rain"
+            c_icon = "sleet"
         else:
             c_icon = precipType
 
-    if (rainAccum > 0 or eff_rain_intensity > 0) and precipType == "rain":
+    if (num_types > 2 and total_prep > 0) or precipType == "mixed":
+        c_text = "mixed-precipitation"
+    elif (rainAccum > 0 or eff_rain_intensity > 0) and precipType == "rain":
         if eff_rain_intensity < light_precip_thresh:
             c_text = possible_precip + "very-light-rain"
             if is_pirate_icon and is_possible_precip and isDayTime:

@@ -28,3 +28,7 @@ jobs:
         run: pytest -v tests/test_wmo_alerts_geocode.py
       - name: Run SILAM Air Quality Index test
         run: pytest -v tests/test_silam_aqi.py
+      - name: Run DWD Interp test
+        run: pytest -v tests/test_dwd_interp_flow.py
+      - name: Run DWD NaN Interp test
+        run: pytest -v tests/test_interpolate_nan_along_axis.py

@@ -77,6 +77,7 @@ PRECIP_IDX = {
     "ice": 2,
     "sleet": 3,
     "rain": 4,
+    "mixed": 5,
 }
 
 PRECIP_NOISE_THRESHOLD_MMH = (
@@ -92,7 +93,7 @@ PRECIP_ACCUM_NOISE_THRESHOLD = (
 
 # API versioning and ingest version constants
 # Version scheme is: Major.Minor.Patch
-API_VERSION = "V2.9.0e"
+API_VERSION = "V2.9.0g"
 
 # Generic API constants
 MAX_S3_RETRIES = 5
@@ -160,6 +161,8 @@ CONVERSION_FACTORS = {
     "cloud_cover_percentage": 0.01,
     "joules_to_watts": 3600,
     "ozone_to_dobson": 46696,
+    # Conversion factor from kilometers to miles
+    "km_to_miles": 0.621371,
 }
 
 # Grouped RTMA_RU visibility constants

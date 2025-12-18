@@ -49,6 +49,7 @@ from API.constants.shared_const import MISSING_DATA
 from API.legacy.current import get_legacy_current_summary
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
+from API.utils.source_priority import should_gfs_precede_dwd
 
 
 @dataclass
@@ -88,6 +89,87 @@ def _select_value(strategies, default=MISSING_DATA):
             if val is not None and not np.isnan(val):
                 return val
     return default
+
+
+# Pre-define priority orders for currently block
+_CURRENTLY_ORDER_NA_WITH_ECMWF = [
+    "rtma_ru",
+    "hrrrsubh",
+    "nbm",
+    "hrrr",
+    "ecmwf_ifs",
+    "gfs",
+    "dwd_mosmix",
+    "era5",
+]
+_CURRENTLY_ORDER_NA_NO_ECMWF = [
+    "rtma_ru",
+    "hrrrsubh",
+    "nbm",
+    "hrrr",
+    "gfs",
+    "dwd_mosmix",
+    "era5",
+]
+_CURRENTLY_ORDER_ROW_WITH_ECMWF = [
+    "rtma_ru",
+    "hrrrsubh",
+    "nbm",
+    "hrrr",
+    "dwd_mosmix",
+    "ecmwf_ifs",
+    "gfs",
+    "era5",
+]
+_CURRENTLY_ORDER_ROW_NO_ECMWF = [
+    "rtma_ru",
+    "hrrrsubh",
+    "nbm",
+    "hrrr",
+    "dwd_mosmix",
+    "gfs",
+    "era5",
+]
+
+
+def _build_source_strategies(source_map, lat, lon, has_ecmwf=True):
+    """
+    Build source strategies in priority order based on location.
+
+    Args:
+        source_map: Dictionary mapping source names to (predicate, getter) tuples.
+        lat: Latitude.
+        lon: Longitude.
+        has_ecmwf: Whether ECMWF has data for this variable.
+
+    Returns:
+        List of (predicate, getter) tuples in priority order.
+    """
+    gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
+
+    # Select pre-defined priority order
+    if gfs_before_dwd:
+        # North America
+        order = (
+            _CURRENTLY_ORDER_NA_WITH_ECMWF
+            if has_ecmwf
+            else _CURRENTLY_ORDER_NA_NO_ECMWF
+        )
+    else:
+        # Rest of world
+        order = (
+            _CURRENTLY_ORDER_ROW_WITH_ECMWF
+            if has_ecmwf
+            else _CURRENTLY_ORDER_ROW_NO_ECMWF
+        )
+
+    # Build strategies in priority order
+    strategies = []
+    for source in order:
+        if source in source_map:
+            strategies.append(source_map[source])
+
+    return strategies
 
 
 def _interp_scalar(merged, key, state: InterpolationState):
@@ -202,7 +284,7 @@ def _calculate_era5_relative_humidity(
     return (humid_fac1 * state.fac1 + humid_fac2 * state.fac2) * 100 * humidUnit
 
 
-def _get_temp(sourceList, model_data, state: InterpolationState):
+def _get_temp(sourceList, model_data, state: InterpolationState, lat, lon):
     """
     Get current temperature from available sources.
 
@@ -210,52 +292,53 @@ def _get_temp(sourceList, model_data, state: InterpolationState):
         sourceList: List of available sources.
         model_data: Dictionary of model data.
         state: Interpolation state.
+        lat: Latitude.
+        lon: Longitude.
 
     Returns:
         Current temperature.
     """
-    val = _select_value(
-        [
-            (
-                lambda: "rtma_ru" in sourceList,
-                lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["temp"]],
+    source_map = {
+        "rtma_ru": (
+            lambda: "rtma_ru" in sourceList,
+            lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["temp"]],
+        ),
+        "hrrrsubh": (
+            lambda: "hrrrsubh" in sourceList,
+            lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["temp"]],
+        ),
+        "nbm": (
+            lambda: "nbm" in sourceList,
+            lambda: _interp_scalar(model_data["NBM_Merged"], NBM["temp"], state),
+        ),
+        "dwd_mosmix": (
+            lambda: "dwd_mosmix" in sourceList,
+            lambda: _interp_scalar(
+                model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["temp"], state
             ),
-            (
-                lambda: "hrrrsubh" in sourceList,
-                lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["temp"]],
+        ),
+        "ecmwf_ifs": (
+            lambda: "ecmwf_ifs" in sourceList,
+            lambda: _interp_scalar(model_data["ECMWF_Merged"], ECMWF["temp"], state),
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(model_data["GFS_Merged"], GFS["temp"], state),
+        ),
+        "era5": (
+            lambda: "era5" in sourceList,
+            lambda: _interp_scalar(
+                model_data["ERA5_MERGED"], ERA5["2m_temperature"], state
             ),
-            (
-                lambda: "nbm" in sourceList,
-                lambda: _interp_scalar(model_data["NBM_Merged"], NBM["temp"], state),
-            ),
-            (
-                lambda: "dwd_mosmix" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["temp"], state
-                ),
-            ),
-            (
-                lambda: "ecmwf_ifs" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["ECMWF_Merged"], ECMWF["temp"], state
-                ),
-            ),
-            (
-                lambda: "gfs" in sourceList,
-                lambda: _interp_scalar(model_data["GFS_Merged"], GFS["temp"], state),
-            ),
-            (
-                lambda: "era5" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["ERA5_MERGED"], ERA5["2m_temperature"], state
-                ),
-            ),
-        ]
-    )
+        ),
+    }
+
+    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=True)
+    val = _select_value(strategies)
     return clipLog(val, CLIP_TEMP["min"], CLIP_TEMP["max"], "Temperature Current")
 
 
-def _get_dew(sourceList, model_data, state: InterpolationState):
+def _get_dew(sourceList, model_data, state: InterpolationState, lat, lon):
     """
     Get current dew point from available sources.
 
@@ -267,46 +350,50 @@ def _get_dew(sourceList, model_data, state: InterpolationState):
     Returns:
         Current dew point.
     """
-    val = _select_value(
-        [
-            (
-                lambda: "rtma_ru" in sourceList,
-                lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["dew"]],
+    # Use same source priority logic as temperature (DWD-aware)
+    source_map = {
+        "rtma_ru": (
+            lambda: "rtma_ru" in sourceList,
+            lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["dew"]],
+        ),
+        "hrrrsubh": (
+            lambda: "hrrrsubh" in sourceList,
+            lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["dew"]],
+        ),
+        "nbm": (
+            lambda: "nbm" in sourceList,
+            lambda: _interp_scalar(model_data["NBM_Merged"], NBM["dew"], state),
+        ),
+        "dwd_mosmix": (
+            lambda: "dwd_mosmix" in sourceList,
+            lambda: _interp_scalar(
+                model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["dew"], state
             ),
-            (
-                lambda: "hrrrsubh" in sourceList,
-                lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["dew"]],
+        ),
+        "ecmwf_ifs": (
+            lambda: "ecmwf_ifs" in sourceList,
+            lambda: _interp_scalar(model_data["ECMWF_Merged"], ECMWF["dew"], state),
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(model_data["GFS_Merged"], GFS["dew"], state),
+        ),
+        "era5": (
+            lambda: "era5" in sourceList,
+            lambda: _interp_scalar(
+                model_data["ERA5_MERGED"], ERA5["2m_dewpoint_temperature"], state
             ),
-            (
-                lambda: "nbm" in sourceList,
-                lambda: _interp_scalar(model_data["NBM_Merged"], NBM["dew"], state),
-            ),
-            (
-                lambda: "dwd_mosmix" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["dew"], state
-                ),
-            ),
-            (
-                lambda: "ecmwf_ifs" in sourceList,
-                lambda: _interp_scalar(model_data["ECMWF_Merged"], ECMWF["dew"], state),
-            ),
-            (
-                lambda: "gfs" in sourceList,
-                lambda: _interp_scalar(model_data["GFS_Merged"], GFS["dew"], state),
-            ),
-            (
-                lambda: "era5" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["ERA5_MERGED"], ERA5["2m_dewpoint_temperature"], state
-                ),
-            ),
-        ]
-    )
+        ),
+    }
+
+    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=True)
+    val = _select_value(strategies)
     return clipLog(val, CLIP_TEMP["min"], CLIP_TEMP["max"], "Dewpoint Current")
 
 
-def _get_humidity(sourceList, model_data, state: InterpolationState, humidUnit):
+def _get_humidity(
+    sourceList, model_data, state: InterpolationState, humidUnit, lat, lon
+):
     """
     Get current humidity from available sources.
 
@@ -319,54 +406,53 @@ def _get_humidity(sourceList, model_data, state: InterpolationState, humidUnit):
     Returns:
         Current humidity.
     """
-    val = _select_value(
-        [
-            (
-                lambda: "rtma_ru" in sourceList,
-                lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["humidity"]],
+    source_map = {
+        "rtma_ru": (
+            lambda: "rtma_ru" in sourceList,
+            lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["humidity"]],
+        ),
+        "hrrr": (
+            lambda: model_data["has_hrrr_merged"],
+            lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["humidity"], state)
+            * humidUnit,
+        ),
+        "nbm": (
+            lambda: "nbm" in sourceList,
+            lambda: _interp_scalar(model_data["NBM_Merged"], NBM["humidity"], state)
+            * humidUnit,
+        ),
+        "dwd_mosmix": (
+            lambda: "dwd_mosmix" in sourceList,
+            lambda: _interp_scalar(
+                model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["humidity"], state
+            )
+            * humidUnit,
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(model_data["GFS_Merged"], GFS["humidity"], state)
+            * humidUnit,
+        ),
+        "ecmwf_ifs": (
+            lambda: "ecmwf_ifs" in sourceList,
+            lambda: _calculate_ecmwf_relative_humidity(
+                model_data["ECMWF_Merged"], state, humidUnit
             ),
-            (
-                lambda: model_data["has_hrrr_merged"],
-                lambda: _interp_scalar(
-                    model_data["HRRR_Merged"], HRRR["humidity"], state
-                )
-                * humidUnit,
+        ),
+        "era5": (
+            lambda: "era5" in sourceList,
+            lambda: _calculate_era5_relative_humidity(
+                model_data["ERA5_MERGED"], state, humidUnit
             ),
-            (
-                lambda: "nbm" in sourceList,
-                lambda: _interp_scalar(model_data["NBM_Merged"], NBM["humidity"], state)
-                * humidUnit,
-            ),
-            (
-                lambda: "dwd_mosmix" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["humidity"], state
-                )
-                * humidUnit,
-            ),
-            (
-                lambda: "gfs" in sourceList,
-                lambda: _interp_scalar(model_data["GFS_Merged"], GFS["humidity"], state)
-                * humidUnit,
-            ),
-            (
-                lambda: "ecmwf_ifs" in sourceList,
-                lambda: _calculate_ecmwf_relative_humidity(
-                    model_data["ECMWF_Merged"], state, humidUnit
-                ),
-            ),
-            (
-                lambda: "era5" in sourceList,
-                lambda: _calculate_era5_relative_humidity(
-                    model_data["ERA5_MERGED"], state, humidUnit
-                ),
-            ),
-        ]
-    )
+        ),
+    }
+
+    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=True)
+    val = _select_value(strategies)
     return clipLog(val, CLIP_HUMIDITY["min"], CLIP_HUMIDITY["max"], "Humidity Current")
 
 
-def _get_pressure(sourceList, model_data, state: InterpolationState):
+def _get_pressure(sourceList, model_data, state: InterpolationState, lat, lon):
     """
     Get current pressure from available sources.
 
@@ -378,44 +464,41 @@ def _get_pressure(sourceList, model_data, state: InterpolationState):
     Returns:
         Current pressure.
     """
-    val = _select_value(
-        [
-            (
-                lambda: model_data["has_hrrr_merged"],
-                lambda: _interp_scalar(
-                    model_data["HRRR_Merged"], HRRR["pressure"], state
-                ),
+    source_map = {
+        "hrrr": (
+            lambda: model_data["has_hrrr_merged"],
+            lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["pressure"], state),
+        ),
+        "dwd_mosmix": (
+            lambda: "dwd_mosmix" in sourceList,
+            lambda: _interp_scalar(
+                model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["pressure"], state
             ),
-            (
-                lambda: "dwd_mosmix" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["pressure"], state
-                ),
+        ),
+        "ecmwf_ifs": (
+            lambda: "ecmwf_ifs" in sourceList,
+            lambda: _interp_scalar(
+                model_data["ECMWF_Merged"], ECMWF["pressure"], state
             ),
-            (
-                lambda: "ecmwf_ifs" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["ECMWF_Merged"], ECMWF["pressure"], state
-                ),
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(model_data["GFS_Merged"], GFS["pressure"], state),
+        ),
+        "era5": (
+            lambda: "era5" in sourceList,
+            lambda: _interp_scalar(
+                model_data["ERA5_MERGED"], ERA5["mean_sea_level_pressure"], state
             ),
-            (
-                lambda: "gfs" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["GFS_Merged"], GFS["pressure"], state
-                ),
-            ),
-            (
-                lambda: "era5" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["ERA5_MERGED"], ERA5["mean_sea_level_pressure"], state
-                ),
-            ),
-        ]
-    )
+        ),
+    }
+
+    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=True)
+    val = _select_value(strategies)
     return clipLog(val, CLIP_PRESSURE["min"], CLIP_PRESSURE["max"], "Pressure Current")
 
 
-def _get_wind(sourceList, model_data, state: InterpolationState):
+def _get_wind(sourceList, model_data, state: InterpolationState, lat, lon):
     """
     Get current wind speed from available sources.
 
@@ -427,65 +510,66 @@ def _get_wind(sourceList, model_data, state: InterpolationState):
     Returns:
         Current wind speed.
     """
-    val = _select_value(
-        [
-            (
-                lambda: "rtma_ru" in sourceList,
-                lambda: math.sqrt(
-                    model_data["dataOut_rtma_ru"][0, RTMA_RU["wind_u"]] ** 2
-                    + model_data["dataOut_rtma_ru"][0, RTMA_RU["wind_v"]] ** 2
-                ),
+    source_map = {
+        "rtma_ru": (
+            lambda: "rtma_ru" in sourceList,
+            lambda: math.sqrt(
+                model_data["dataOut_rtma_ru"][0, RTMA_RU["wind_u"]] ** 2
+                + model_data["dataOut_rtma_ru"][0, RTMA_RU["wind_v"]] ** 2
             ),
-            (
-                lambda: "hrrrsubh" in sourceList,
-                lambda: math.sqrt(
-                    model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["wind_u"]] ** 2
-                    + model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["wind_v"]] ** 2
-                ),
+        ),
+        "hrrrsubh": (
+            lambda: "hrrrsubh" in sourceList,
+            lambda: math.sqrt(
+                model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["wind_u"]] ** 2
+                + model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["wind_v"]] ** 2
             ),
-            (
-                lambda: "nbm" in sourceList,
-                lambda: _interp_scalar(model_data["NBM_Merged"], NBM["wind"], state),
+        ),
+        "nbm": (
+            lambda: "nbm" in sourceList,
+            lambda: _interp_scalar(model_data["NBM_Merged"], NBM["wind"], state),
+        ),
+        "dwd_mosmix": (
+            lambda: "dwd_mosmix" in sourceList,
+            lambda: _interp_uv_magnitude(
+                model_data["DWD_MOSMIX_Merged"],
+                DWD_MOSMIX["wind_u"],
+                DWD_MOSMIX["wind_v"],
+                state,
             ),
-            (
-                lambda: "dwd_mosmix" in sourceList,
-                lambda: _interp_uv_magnitude(
-                    model_data["DWD_MOSMIX_Merged"],
-                    DWD_MOSMIX["wind_u"],
-                    DWD_MOSMIX["wind_v"],
-                    state,
-                ),
+        ),
+        "ecmwf_ifs": (
+            lambda: "ecmwf_ifs" in sourceList,
+            lambda: _interp_uv_magnitude(
+                model_data["ECMWF_Merged"],
+                ECMWF["wind_u"],
+                ECMWF["wind_v"],
+                state,
             ),
-            (
-                lambda: "ecmwf_ifs" in sourceList,
-                lambda: _interp_uv_magnitude(
-                    model_data["ECMWF_Merged"],
-                    ECMWF["wind_u"],
-                    ECMWF["wind_v"],
-                    state,
-                ),
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_uv_magnitude(
+                model_data["GFS_Merged"], GFS["wind_u"], GFS["wind_v"], state
             ),
-            (
-                lambda: "gfs" in sourceList,
-                lambda: _interp_uv_magnitude(
-                    model_data["GFS_Merged"], GFS["wind_u"], GFS["wind_v"], state
-                ),
+        ),
+        "era5": (
+            lambda: "era5" in sourceList,
+            lambda: _interp_uv_magnitude(
+                model_data["ERA5_MERGED"],
+                ERA5["10m_u_component_of_wind"],
+                ERA5["10m_v_component_of_wind"],
+                state,
             ),
-            (
-                lambda: "era5" in sourceList,
-                lambda: _interp_uv_magnitude(
-                    model_data["ERA5_MERGED"],
-                    ERA5["10m_u_component_of_wind"],
-                    ERA5["10m_v_component_of_wind"],
-                    state,
-                ),
-            ),
-        ]
-    )
+        ),
+    }
+
+    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=True)
+    val = _select_value(strategies)
     return clipLog(val, CLIP_WIND["min"], CLIP_WIND["max"], "WindSpeed Current")
 
 
-def _get_gust(sourceList, model_data, state: InterpolationState):
+def _get_gust(sourceList, model_data, state: InterpolationState, lat, lon):
     """
     Get current wind gust from available sources.
 
@@ -497,41 +581,41 @@ def _get_gust(sourceList, model_data, state: InterpolationState):
     Returns:
         Current wind gust.
     """
-    val = _select_value(
-        [
-            (
-                lambda: "rtma_ru" in sourceList,
-                lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["gust"]],
+    source_map = {
+        "rtma_ru": (
+            lambda: "rtma_ru" in sourceList,
+            lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["gust"]],
+        ),
+        "hrrrsubh": (
+            lambda: "hrrrsubh" in sourceList,
+            lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["gust"]],
+        ),
+        "nbm": (
+            lambda: "nbm" in sourceList,
+            lambda: _interp_scalar(model_data["NBM_Merged"], NBM["gust"], state),
+        ),
+        "dwd_mosmix": (
+            lambda: "dwd_mosmix" in sourceList,
+            lambda: _interp_scalar(
+                model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["gust"], state
             ),
-            (
-                lambda: "hrrrsubh" in sourceList,
-                lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["gust"]],
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(model_data["GFS_Merged"], GFS["gust"], state),
+        ),
+        "era5": (
+            lambda: "era5" in sourceList,
+            lambda: _interp_scalar(
+                model_data["ERA5_MERGED"],
+                ERA5["instantaneous_10m_wind_gust"],
+                state,
             ),
-            (
-                lambda: "nbm" in sourceList,
-                lambda: _interp_scalar(model_data["NBM_Merged"], NBM["gust"], state),
-            ),
-            (
-                lambda: "dwd_mosmix" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["gust"], state
-                ),
-            ),
-            (
-                lambda: "gfs" in sourceList,
-                lambda: _interp_scalar(model_data["GFS_Merged"], GFS["gust"], state),
-            ),
-            (
-                lambda: "era5" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["ERA5_MERGED"],
-                    ERA5["instantaneous_10m_wind_gust"],
-                    state,
-                ),
-            ),
-        ],
-        default=MISSING_DATA,
-    )
+        ),
+    }
+
+    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=False)
+    val = _select_value(strategies, default=MISSING_DATA)
     return clipLog(val, CLIP_WIND["min"], CLIP_WIND["max"], "Gust Current")
 
 
@@ -625,7 +709,7 @@ def _get_intensity(
         )
 
 
-def _get_bearing(sourceList, model_data, state: InterpolationState):
+def _get_bearing(sourceList, model_data, state: InterpolationState, lat, lon):
     """
     Get current wind bearing from available sources.
 
@@ -637,64 +721,60 @@ def _get_bearing(sourceList, model_data, state: InterpolationState):
     Returns:
         Current wind bearing.
     """
-    return _select_value(
-        [
-            (
-                lambda: "rtma_ru" in sourceList,
-                lambda: _bearing_from_components(
-                    model_data["dataOut_rtma_ru"][0, RTMA_RU["wind_u"]],
-                    model_data["dataOut_rtma_ru"][0, RTMA_RU["wind_v"]],
-                ),
+    source_map = {
+        "rtma_ru": (
+            lambda: "rtma_ru" in sourceList,
+            lambda: _bearing_from_components(
+                model_data["dataOut_rtma_ru"][0, RTMA_RU["wind_u"]],
+                model_data["dataOut_rtma_ru"][0, RTMA_RU["wind_v"]],
             ),
-            (
-                lambda: "hrrrsubh" in sourceList,
-                lambda: _bearing_from_components(
-                    model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["wind_u"]],
-                    model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["wind_v"]],
-                ),
+        ),
+        "hrrrsubh": (
+            lambda: "hrrrsubh" in sourceList,
+            lambda: _bearing_from_components(
+                model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["wind_u"]],
+                model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["wind_v"]],
             ),
-            (
-                lambda: "nbm" in sourceList,
-                lambda: model_data["NBM_Merged"][state.idx2, NBM["bearing"]],
+        ),
+        "nbm": (
+            lambda: "nbm" in sourceList,
+            lambda: model_data["NBM_Merged"][state.idx2, NBM["bearing"]],
+        ),
+        "dwd_mosmix": (
+            lambda: "dwd_mosmix" in sourceList,
+            lambda: _bearing_from_components(
+                model_data["DWD_MOSMIX_Merged"][state.idx2, DWD_MOSMIX["wind_u"]],
+                model_data["DWD_MOSMIX_Merged"][state.idx2, DWD_MOSMIX["wind_v"]],
             ),
-            (
-                lambda: "dwd_mosmix" in sourceList,
-                lambda: _bearing_from_components(
-                    model_data["DWD_MOSMIX_Merged"][state.idx2, DWD_MOSMIX["wind_u"]],
-                    model_data["DWD_MOSMIX_Merged"][state.idx2, DWD_MOSMIX["wind_v"]],
-                ),
+        ),
+        "ecmwf_ifs": (
+            lambda: "ecmwf_ifs" in sourceList,
+            lambda: _bearing_from_components(
+                model_data["ECMWF_Merged"][state.idx2, ECMWF["wind_u"]],
+                model_data["ECMWF_Merged"][state.idx2, ECMWF["wind_v"]],
             ),
-            (
-                lambda: "ecmwf_ifs" in sourceList,
-                lambda: _bearing_from_components(
-                    model_data["ECMWF_Merged"][state.idx2, ECMWF["wind_u"]],
-                    model_data["ECMWF_Merged"][state.idx2, ECMWF["wind_v"]],
-                ),
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _bearing_from_components(
+                model_data["GFS_Merged"][state.idx2, GFS["wind_u"]],
+                model_data["GFS_Merged"][state.idx2, GFS["wind_v"]],
             ),
-            (
-                lambda: "gfs" in sourceList,
-                lambda: _bearing_from_components(
-                    model_data["GFS_Merged"][state.idx2, GFS["wind_u"]],
-                    model_data["GFS_Merged"][state.idx2, GFS["wind_v"]],
-                ),
+        ),
+        "era5": (
+            lambda: "era5" in sourceList,
+            lambda: _bearing_from_components(
+                model_data["ERA5_MERGED"][state.idx2, ERA5["10m_u_component_of_wind"]],
+                model_data["ERA5_MERGED"][state.idx2, ERA5["10m_v_component_of_wind"]],
             ),
-            (
-                lambda: "era5" in sourceList,
-                lambda: _bearing_from_components(
-                    model_data["ERA5_MERGED"][
-                        state.idx2, ERA5["10m_u_component_of_wind"]
-                    ],
-                    model_data["ERA5_MERGED"][
-                        state.idx2, ERA5["10m_v_component_of_wind"]
-                    ],
-                ),
-            ),
-        ],
-        default=MISSING_DATA,
-    )
+        ),
+    }
+
+    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=True)
+    return _select_value(strategies, default=MISSING_DATA)
 
 
-def _get_cloud(sourceList, model_data, state: InterpolationState):
+def _get_cloud(sourceList, model_data, state: InterpolationState, lat, lon):
     """
     Get current cloud cover from available sources.
 
@@ -706,52 +786,50 @@ def _get_cloud(sourceList, model_data, state: InterpolationState):
     Returns:
         Current cloud cover.
     """
-    val = _select_value(
-        [
-            (
-                lambda: "rtma_ru" in sourceList,
-                lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["cloud"]] * 0.01,
+    source_map = {
+        "rtma_ru": (
+            lambda: "rtma_ru" in sourceList,
+            lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["cloud"]] * 0.01,
+        ),
+        "nbm": (
+            lambda: "nbm" in sourceList,
+            lambda: _interp_scalar(model_data["NBM_Merged"], NBM["cloud"], state)
+            * 0.01,
+        ),
+        "dwd_mosmix": (
+            lambda: "dwd_mosmix" in sourceList,
+            lambda: _interp_scalar(
+                model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["cloud"], state
+            )
+            * 0.01,
+        ),
+        "ecmwf_ifs": (
+            lambda: "ecmwf_ifs" in sourceList,
+            lambda: _interp_scalar(model_data["ECMWF_Merged"], ECMWF["cloud"], state)
+            * 0.01,
+        ),
+        "hrrr": (
+            lambda: model_data["has_hrrr_merged"],
+            lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["cloud"], state)
+            * 0.01,
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(model_data["GFS_Merged"], GFS["cloud"], state)
+            * 0.01,
+        ),
+        "era5": (
+            lambda: "era5" in sourceList,
+            lambda: _interp_scalar(
+                model_data["ERA5_MERGED"],
+                ERA5["total_cloud_cover"],
+                state,
             ),
-            (
-                lambda: "nbm" in sourceList,
-                lambda: _interp_scalar(model_data["NBM_Merged"], NBM["cloud"], state)
-                * 0.01,
-            ),
-            (
-                lambda: "dwd_mosmix" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["cloud"], state
-                )
-                * 0.01,
-            ),
-            (
-                lambda: "ecmwf_ifs" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["ECMWF_Merged"], ECMWF["cloud"], state
-                )
-                * 0.01,
-            ),
-            (
-                lambda: model_data["has_hrrr_merged"],
-                lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["cloud"], state)
-                * 0.01,
-            ),
-            (
-                lambda: "gfs" in sourceList,
-                lambda: _interp_scalar(model_data["GFS_Merged"], GFS["cloud"], state)
-                * 0.01,
-            ),
-            (
-                lambda: "era5" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["ERA5_MERGED"],
-                    ERA5["total_cloud_cover"],
-                    state,
-                ),
-            ),
-        ],
-        default=MISSING_DATA,
-    )
+        ),
+    }
+
+    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=True)
+    val = _select_value(strategies, default=MISSING_DATA)
     return clipLog(val, CLIP_CLOUD["min"], CLIP_CLOUD["max"], "Cloud Current")
 
 
@@ -837,7 +915,7 @@ def _get_station_pressure(sourceList, model_data, state: InterpolationState):
     )
 
 
-def _get_vis(sourceList, model_data, state: InterpolationState):
+def _get_vis(sourceList, model_data, state: InterpolationState, lat, lon):
     """
     Get current visibility from available sources.
 
@@ -849,48 +927,48 @@ def _get_vis(sourceList, model_data, state: InterpolationState):
     Returns:
         Current visibility.
     """
-    val = _select_value(
-        [
-            (
-                lambda: "rtma_ru" in sourceList,
-                lambda: 16090
-                if model_data["dataOut_rtma_ru"][0, RTMA_RU["vis"]] >= 15999
-                else model_data["dataOut_rtma_ru"][0, RTMA_RU["vis"]],
+    source_map = {
+        "rtma_ru": (
+            lambda: "rtma_ru" in sourceList,
+            lambda: 16090
+            if model_data["dataOut_rtma_ru"][0, RTMA_RU["vis"]] >= 15999
+            else model_data["dataOut_rtma_ru"][0, RTMA_RU["vis"]],
+        ),
+        "hrrrsubh": (
+            lambda: "hrrrsubh" in sourceList,
+            lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["vis"]],
+        ),
+        "nbm": (
+            lambda: "nbm" in sourceList,
+            lambda: _interp_scalar(model_data["NBM_Merged"], NBM["vis"], state),
+        ),
+        "dwd_mosmix": (
+            lambda: "dwd_mosmix" in sourceList,
+            lambda: _interp_scalar(
+                model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["vis"], state
             ),
-            (
-                lambda: "hrrrsubh" in sourceList,
-                lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["vis"]],
+        ),
+        "hrrr": (
+            lambda: model_data["has_hrrr_merged"],
+            lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["vis"], state),
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(model_data["GFS_Merged"], GFS["vis"], state),
+        ),
+        "era5": (
+            lambda: "era5" in sourceList,
+            lambda: estimate_visibility_gultepe_rh_pr_numpy(
+                model_data["ERA5_MERGED"][state.idx1, :] * state.fac1
+                + model_data["ERA5_MERGED"][state.idx2, :] * state.fac2,
+                var_index=ERA5,
+                var_axis=1,
             ),
-            (
-                lambda: "nbm" in sourceList,
-                lambda: _interp_scalar(model_data["NBM_Merged"], NBM["vis"], state),
-            ),
-            (
-                lambda: "dwd_mosmix" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["vis"], state
-                ),
-            ),
-            (
-                lambda: model_data["has_hrrr_merged"],
-                lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["vis"], state),
-            ),
-            (
-                lambda: "gfs" in sourceList,
-                lambda: _interp_scalar(model_data["GFS_Merged"], GFS["vis"], state),
-            ),
-            (
-                lambda: "era5" in sourceList,
-                lambda: estimate_visibility_gultepe_rh_pr_numpy(
-                    model_data["ERA5_MERGED"][state.idx1, :] * state.fac1
-                    + model_data["ERA5_MERGED"][state.idx2, :] * state.fac2,
-                    var_index=ERA5,
-                    var_axis=1,
-                ),
-            ),
-        ],
-        default=MISSING_DATA,
-    )
+        ),
+    }
+
+    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=False)
+    val = _select_value(strategies, default=MISSING_DATA)
     return np.clip(val, CLIP_VIS["min"], CLIP_VIS["max"])
 
 
@@ -975,7 +1053,7 @@ def _get_smoke(sourceList, model_data, state: InterpolationState):
         return MISSING_DATA
 
 
-def _get_solar(sourceList, model_data, state: InterpolationState):
+def _get_solar(sourceList, model_data, state: InterpolationState, lat, lon):
     """
     Get current solar radiation from available sources.
 
@@ -987,46 +1065,46 @@ def _get_solar(sourceList, model_data, state: InterpolationState):
     Returns:
         Current solar radiation.
     """
-    val = _select_value(
-        [
-            (
-                lambda: "hrrrsubh" in sourceList,
-                lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["solar"]],
+    source_map = {
+        "hrrrsubh": (
+            lambda: "hrrrsubh" in sourceList,
+            lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["solar"]],
+        ),
+        "nbm": (
+            lambda: "nbm" in sourceList,
+            lambda: _interp_scalar(model_data["NBM_Merged"], NBM["solar"], state),
+        ),
+        "dwd_mosmix": (
+            lambda: "dwd_mosmix" in sourceList,
+            lambda: _interp_scalar(
+                model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["solar"], state
             ),
-            (
-                lambda: "nbm" in sourceList,
-                lambda: _interp_scalar(model_data["NBM_Merged"], NBM["solar"], state),
-            ),
-            (
-                lambda: "dwd_mosmix" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["solar"], state
-                ),
-            ),
-            (
-                lambda: model_data["has_hrrr_merged"],
-                lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["solar"], state),
-            ),
-            (
-                lambda: "gfs" in sourceList,
-                lambda: _interp_scalar(model_data["GFS_Merged"], GFS["solar"], state),
-            ),
-            (
-                lambda: "era5" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["ERA5_MERGED"],
-                    ERA5["surface_solar_radiation_downwards"],
-                    state,
-                )
-                / 3600,
-            ),
-        ],
-        default=MISSING_DATA,
-    )
+        ),
+        "hrrr": (
+            lambda: model_data["has_hrrr_merged"],
+            lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["solar"], state),
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(model_data["GFS_Merged"], GFS["solar"], state),
+        ),
+        "era5": (
+            lambda: "era5" in sourceList,
+            lambda: _interp_scalar(
+                model_data["ERA5_MERGED"],
+                ERA5["surface_solar_radiation_downwards"],
+                state,
+            )
+            / 3600,
+        ),
+    }
+
+    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=False)
+    val = _select_value(strategies, default=MISSING_DATA)
     return clipLog(val, CLIP_SOLAR["min"], CLIP_SOLAR["max"], "Solar Current")
 
 
-def _get_cape(sourceList, model_data, state: InterpolationState):
+def _get_cape(sourceList, model_data, state: InterpolationState, lat, lon):
     """
     Get current CAPE from available sources.
 
@@ -1038,30 +1116,31 @@ def _get_cape(sourceList, model_data, state: InterpolationState):
     Returns:
         Current CAPE.
     """
-    val = _select_value(
-        [
-            (
-                lambda: "nbm" in sourceList,
-                lambda: _interp_scalar(model_data["NBM_Merged"], NBM["cape"], state),
+    source_map = {
+        "nbm": (
+            lambda: "nbm" in sourceList,
+            lambda: _interp_scalar(model_data["NBM_Merged"], NBM["cape"], state),
+        ),
+        "hrrr": (
+            lambda: model_data["has_hrrr_merged"],
+            lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["cape"], state),
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(model_data["GFS_Merged"], GFS["cape"], state),
+        ),
+        "era5": (
+            lambda: "era5" in sourceList,
+            lambda: _interp_scalar(
+                model_data["ERA5_MERGED"],
+                ERA5["convective_available_potential_energy"],
+                state,
             ),
-            (
-                lambda: model_data["has_hrrr_merged"],
-                lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["cape"], state),
-            ),
-            (
-                lambda: "gfs" in sourceList,
-                lambda: _interp_scalar(model_data["GFS_Merged"], GFS["cape"], state),
-            ),
-            (
-                lambda: "era5" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["ERA5_MERGED"],
-                    ERA5["convective_available_potential_energy"],
-                    state,
-                ),
-            ),
-        ]
-    )
+        ),
+    }
+
+    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=False)
+    val = _select_value(strategies)
     return clipLog(val, CLIP_CAPE["min"], CLIP_CAPE["max"], "CAPE Current")
 
 
@@ -1269,16 +1348,24 @@ def build_current_section(
         ),
     }
 
-    InterPcurrent[DATA_CURRENT["temp"]] = _get_temp(sourceList, model_data, state)
-    InterPcurrent[DATA_CURRENT["dew"]] = _get_dew(sourceList, model_data, state)
+    InterPcurrent[DATA_CURRENT["temp"]] = _get_temp(
+        sourceList, model_data, state, lat, lon_IN
+    )
+    InterPcurrent[DATA_CURRENT["dew"]] = _get_dew(
+        sourceList, model_data, state, lat, lon_IN
+    )
     InterPcurrent[DATA_CURRENT["humidity"]] = _get_humidity(
-        sourceList, model_data, state, humidUnit
+        sourceList, model_data, state, humidUnit, lat, lon_IN
     )
     InterPcurrent[DATA_CURRENT["pressure"]] = _get_pressure(
-        sourceList, model_data, state
+        sourceList, model_data, state, lat, lon_IN
     )
-    InterPcurrent[DATA_CURRENT["wind"]] = _get_wind(sourceList, model_data, state)
-    InterPcurrent[DATA_CURRENT["gust"]] = _get_gust(sourceList, model_data, state)
+    InterPcurrent[DATA_CURRENT["wind"]] = _get_wind(
+        sourceList, model_data, state, lat, lon_IN
+    )
+    InterPcurrent[DATA_CURRENT["gust"]] = _get_gust(
+        sourceList, model_data, state, lat, lon_IN
+    )
 
     # If gust is missing/invalid, fall back to wind speed
     if np.isnan(InterPcurrent[DATA_CURRENT["gust"]]):
@@ -1293,13 +1380,19 @@ def build_current_section(
         InterPcurrent[DATA_CURRENT["error"]],
     ) = _get_intensity(sourceList, model_data, state, InterPminute, InterPcurrent)
 
-    InterPcurrent[DATA_CURRENT["bearing"]] = _get_bearing(sourceList, model_data, state)
-    InterPcurrent[DATA_CURRENT["cloud"]] = _get_cloud(sourceList, model_data, state)
+    InterPcurrent[DATA_CURRENT["bearing"]] = _get_bearing(
+        sourceList, model_data, state, lat, lon_IN
+    )
+    InterPcurrent[DATA_CURRENT["cloud"]] = _get_cloud(
+        sourceList, model_data, state, lat, lon_IN
+    )
     InterPcurrent[DATA_CURRENT["uv"]] = _get_uv(sourceList, model_data, state)
     InterPcurrent[DATA_CURRENT["station_pressure"]] = _get_station_pressure(
         sourceList, model_data, state
     )
-    InterPcurrent[DATA_CURRENT["vis"]] = _get_vis(sourceList, model_data, state)
+    InterPcurrent[DATA_CURRENT["vis"]] = _get_vis(
+        sourceList, model_data, state, lat, lon_IN
+    )
     InterPcurrent[DATA_CURRENT["ozone"]] = _get_ozone(sourceList, model_data, state)
 
     (
@@ -1308,8 +1401,12 @@ def build_current_section(
     ) = _get_storm(sourceList, model_data, state)
 
     InterPcurrent[DATA_CURRENT["smoke"]] = _get_smoke(sourceList, model_data, state)
-    InterPcurrent[DATA_CURRENT["solar"]] = _get_solar(sourceList, model_data, state)
-    InterPcurrent[DATA_CURRENT["cape"]] = _get_cape(sourceList, model_data, state)
+    InterPcurrent[DATA_CURRENT["solar"]] = _get_solar(
+        sourceList, model_data, state, lat, lon_IN
+    )
+    InterPcurrent[DATA_CURRENT["cape"]] = _get_cape(
+        sourceList, model_data, state, lat, lon_IN
+    )
 
     InterPcurrent[DATA_CURRENT["apparent"]] = calculate_apparent_temperature(
         InterPcurrent[DATA_CURRENT["temp"]],
