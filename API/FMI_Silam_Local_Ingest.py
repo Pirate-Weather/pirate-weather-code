@@ -62,7 +62,9 @@ processChunk = CHUNK_SIZES.get("GFS", 50)
 KG_M3_TO_UG_M3 = 1e9  # Convert kg/m³ to µg/m³
 STANDARD_AIR_DENSITY = 1.225  # kg/m³ at sea level (used as fallback)
 
-# Molar masses for gas species (kg/mole) from SILAM metadata
+# Molar masses (kg/mole)
+MOLAR_MASS_AIR = 0.02897  # kg/mole (dry air)
+# Gas species molar masses from SILAM metadata
 MOLAR_MASS_O3 = 0.048  # kg/mole
 MOLAR_MASS_NO2 = 0.046  # kg/mole
 MOLAR_MASS_SO2 = 0.064  # kg/mole
@@ -125,14 +127,17 @@ def convert_vmr_to_concentration(vmr, air_density, molar_mass):
         Concentration in µg/m³
 
     Formula:
-        concentration (µg/m³) = VMR (mole/mole) * air_density (kg/m³) * molar_mass (kg/mole) * KG_M3_TO_UG_M3
+        concentration (µg/m³) = VMR (mole/mole) * air_density (kg/m³) *
+                                (molar_mass_pollutant / molar_mass_air) * KG_M3_TO_UG_M3
 
     Note: SILAM's vmr_*_gas variables are true volume mixing ratios (mole/mole),
     as confirmed by the SILAM metadata (units: mole/mole, silam_amount_unit: mole).
-    The conversion requires molecular weight to convert from molar to mass basis.
+    The conversion requires both the pollutant's molecular weight and air's molecular weight.
     """
     # Volume mixing ratio conversion to mass concentration
-    return vmr * air_density * molar_mass * KG_M3_TO_UG_M3
+    # VMR is mole_pollutant/mole_air
+    # mass_concentration = VMR * (air_density / molar_mass_air) * molar_mass_pollutant
+    return vmr * air_density * (molar_mass / MOLAR_MASS_AIR) * KG_M3_TO_UG_M3
 
 
 # Create new directory for processing if it does not exist
