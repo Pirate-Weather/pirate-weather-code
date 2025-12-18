@@ -71,18 +71,10 @@ zarrVars = (
     "AQI",  # Air Quality Index (calculated)
 )
 
-# SILAM variable mapping to actual dataset variables
-# PM variables are in kg/m³ and need conversion to µg/m³
-# Gas variables are volume mixing ratios (vmr) that need conversion using air density
-silam_variable_mapping = {
-    "cnc_PM2_5": "cnc_PM2_5",  # kg/m³ -> convert to µg/m³
-    "cnc_PM10": "cnc_PM10",  # kg/m³ -> convert to µg/m³
-    "vmr_O3_gas": "vmr_O3_gas",  # Volume mixing ratio
-    "vmr_NO2_gas": "vmr_NO2_gas",  # Volume mixing ratio
-    "vmr_SO2_gas": "vmr_SO2_gas",  # Volume mixing ratio
-    "vmr_CO_gas": "vmr_CO_gas",  # Volume mixing ratio
-    "air_dens": "air_dens",  # Air density for VMR conversion
-}
+# SILAM variable names and units:
+# - cnc_PM2_5, cnc_PM10: Particulate matter in kg/m³ (need conversion to µg/m³)
+# - vmr_*_gas: Gas species as mass mixing ratios in kg/kg (need conversion using air density)
+# - air_dens: Air density in kg/m³ (used for mass mixing ratio conversions)
 
 
 def get_latest_silam_run():
@@ -110,27 +102,26 @@ def get_latest_silam_run():
     return latest_origintime
 
 
-def convert_vmr_to_concentration(vmr, air_density, molecular_weight):
+def convert_mass_mixing_ratio_to_concentration(mass_mixing_ratio, air_density):
     """
-    Convert volume mixing ratio (VMR) to mass concentration in µg/m³.
+    Convert mass mixing ratio to mass concentration in µg/m³.
 
     Args:
-        vmr: Volume mixing ratio (dimensionless, kg/kg for SILAM)
+        mass_mixing_ratio: Mass mixing ratio in kg/kg (kg pollutant per kg air)
         air_density: Air density in kg/m³
-        molecular_weight: Molecular weight of the gas in g/mol
 
     Returns:
         Concentration in µg/m³
 
     Formula:
-        concentration (µg/m³) = vmr (kg/kg) * air_density (kg/m³) * 1e9 (µg/kg)
+        concentration (µg/m³) = mass_mixing_ratio (kg/kg) * air_density (kg/m³) * 1e9 (µg/kg)
 
-    Note: SILAM's vmr_*_gas variables are actually mass mixing ratios (kg/kg),
-    not true volume mixing ratios.
+    Note: SILAM's vmr_*_gas variables are mass mixing ratios (kg pollutant/kg air),
+    not true volume mixing ratios. The conversion does not require molecular weight.
     """
-    # VMR in SILAM is mass mixing ratio (kg pollutant / kg air)
-    # concentration (µg/m³) = VMR * air_density * 1e9
-    return vmr * air_density * 1e9
+    # Mass mixing ratio conversion to concentration
+    # concentration (µg/m³) = mass_mixing_ratio * air_density * 1e9
+    return mass_mixing_ratio * air_density * 1e9
 
 
 # Create new directory for processing if it does not exist
@@ -328,20 +319,20 @@ else:
         },
     )
 
-# Process gas VMR variables (convert to µg/m³)
-# Molecular weights: O3=48 g/mol, NO2=46 g/mol, SO2=64 g/mol, CO=28 g/mol
+# Process gas mass mixing ratio variables (convert to µg/m³)
+# Note: Molecular weights are listed for reference but not needed for mass mixing ratio conversion
 gas_variables = {
-    "vmr_O3_gas": ("cnc_O3", 48, "Ozone"),
-    "vmr_NO2_gas": ("cnc_NO2", 46, "Nitrogen dioxide"),
-    "vmr_SO2_gas": ("cnc_SO2", 64, "Sulfur dioxide"),
-    "vmr_CO_gas": ("cnc_CO", 28, "Carbon monoxide"),
+    "vmr_O3_gas": ("cnc_O3", "Ozone"),
+    "vmr_NO2_gas": ("cnc_NO2", "Nitrogen dioxide"),
+    "vmr_SO2_gas": ("cnc_SO2", "Sulfur dioxide"),
+    "vmr_CO_gas": ("cnc_CO", "Carbon monoxide"),
 }
 
-for silam_var, (output_var, mol_weight, long_name) in gas_variables.items():
+for silam_var, (output_var, long_name) in gas_variables.items():
     if silam_var in xarray_silam_data:
-        # Convert VMR to concentration in µg/m³
-        xarray_processed[output_var] = convert_vmr_to_concentration(
-            xarray_silam_data[silam_var], air_density, mol_weight
+        # Convert mass mixing ratio to concentration in µg/m³
+        xarray_processed[output_var] = convert_mass_mixing_ratio_to_concentration(
+            xarray_silam_data[silam_var], air_density
         )
         xarray_processed[output_var].attrs["units"] = "µg/m³"
         xarray_processed[output_var].attrs["long_name"] = f"{long_name} concentration"
