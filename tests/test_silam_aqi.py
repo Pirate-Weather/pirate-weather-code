@@ -378,3 +378,229 @@ class TestCalculateAQI:
         assert aqi[-1].min() < aqi[-1].max()
         # All values should be positive
         assert np.all(aqi >= 0)
+
+
+class TestVMRConversion:
+    """Tests for volume mixing ratio (VMR) to concentration conversion."""
+
+    def test_vmr_conversion_basic(self):
+        """Test basic VMR to concentration conversion."""
+        # Import the conversion function from silam_conversion module
+        from API.silam_conversion import (
+            MOLAR_MASS_AIR,
+            MOLAR_MASS_O3,
+            convert_vmr_to_concentration,
+        )
+
+        # Test with known values
+        # VMR of 1 ppm (1e-6 mole/mole) of O3
+        # Air density: 1.225 kg/m³
+        # O3 molar mass: 0.048 kg/mole
+        # Air molar mass: 0.02897 kg/mole
+        vmr = 1e-6  # 1 ppm
+        air_density = 1.225  # kg/m³
+        molar_mass = MOLAR_MASS_O3  # 0.048 kg/mole
+
+        concentration = convert_vmr_to_concentration(vmr, air_density, molar_mass)
+
+        # Expected: 1e-6 * 1.225 * (0.048/0.02897) * 1e9
+        # = 1e-6 * 1.225 * 1.6569 * 1e9 = 2029.7 µg/m³
+        expected = vmr * air_density * (molar_mass / MOLAR_MASS_AIR) * 1e9
+        np.testing.assert_allclose(concentration, expected, rtol=1e-6)
+        # O3 at 1 ppm should be approximately 2030 µg/m³
+        np.testing.assert_allclose(concentration, 2029.7, rtol=0.01)
+
+    def test_vmr_conversion_zero(self):
+        """Test VMR conversion with zero concentration."""
+        from API.silam_conversion import (
+            MOLAR_MASS_CO,
+            convert_vmr_to_concentration,
+        )
+
+        vmr = 0.0
+        air_density = 1.225
+        molar_mass = MOLAR_MASS_CO
+
+        concentration = convert_vmr_to_concentration(vmr, air_density, molar_mass)
+        assert concentration == 0.0
+
+    def test_vmr_conversion_different_gases(self):
+        """Test VMR conversion for different gas species."""
+        from API.silam_conversion import (
+            MOLAR_MASS_AIR,
+            MOLAR_MASS_CO,
+            MOLAR_MASS_NO2,
+            MOLAR_MASS_O3,
+            MOLAR_MASS_SO2,
+            convert_vmr_to_concentration,
+        )
+
+        vmr = 1e-6  # 1 ppm for all gases
+        air_density = 1.225  # kg/m³
+
+        # Test each gas
+        gases = {
+            "O3": MOLAR_MASS_O3,
+            "NO2": MOLAR_MASS_NO2,
+            "SO2": MOLAR_MASS_SO2,
+            "CO": MOLAR_MASS_CO,
+        }
+
+        for gas_name, molar_mass in gases.items():
+            concentration = convert_vmr_to_concentration(vmr, air_density, molar_mass)
+            # Verify the conversion produces a positive value
+            assert concentration > 0
+            # Verify it follows the expected formula
+            expected = vmr * air_density * (molar_mass / MOLAR_MASS_AIR) * 1e9
+            np.testing.assert_allclose(concentration, expected, rtol=1e-6)
+
+    def test_vmr_conversion_with_array(self):
+        """Test VMR conversion with numpy arrays."""
+        from API.silam_conversion import (
+            MOLAR_MASS_O3,
+            convert_vmr_to_concentration,
+        )
+
+        # Create a 3D array of VMR values
+        vmr = np.full((12, 3, 3), 1e-6, dtype=np.float32)  # 1 ppm everywhere
+        air_density = np.full((12, 3, 3), 1.225, dtype=np.float32)
+
+        concentration = convert_vmr_to_concentration(vmr, air_density, MOLAR_MASS_O3)
+
+        # Check shape is preserved
+        assert concentration.shape == vmr.shape
+        # Check all values are approximately 2030 µg/m³
+        np.testing.assert_allclose(concentration, 2029.7, rtol=0.01)
+
+    def test_vmr_conversion_realistic_o3(self):
+        """Test VMR conversion with realistic O3 concentrations."""
+        from API.silam_conversion import (
+            MOLAR_MASS_O3,
+            convert_vmr_to_concentration,
+        )
+
+        # Typical tropospheric O3: 20-100 ppb (20e-9 to 100e-9 mole/mole)
+        vmr_ppb = 50e-9  # 50 ppb
+        air_density = 1.225  # kg/m³
+
+        concentration = convert_vmr_to_concentration(
+            vmr_ppb, air_density, MOLAR_MASS_O3
+        )
+
+        # 50 ppb O3 should be approximately 101.5 µg/m³
+        np.testing.assert_allclose(concentration, 101.5, rtol=0.01)
+
+
+class TestAQIWithVMRConversion:
+    """Integration tests for AQI calculation with VMR-converted concentrations."""
+
+    def test_aqi_with_vmr_converted_gases(self):
+        """Test AQI calculation using VMR-converted gas concentrations."""
+        from API.silam_conversion import (
+            MOLAR_MASS_CO,
+            MOLAR_MASS_NO2,
+            MOLAR_MASS_O3,
+            MOLAR_MASS_SO2,
+            convert_vmr_to_concentration,
+        )
+
+        # Create test data with 12 time steps
+        air_density = np.full((12, 3, 3), 1.225, dtype=np.float32)
+
+        # Simulate moderate air quality conditions
+        # O3: 60 ppb -> ~122 µg/m³ (moderate AQI ~57)
+        vmr_o3 = np.full((12, 3, 3), 60e-9, dtype=np.float32)
+        o3 = convert_vmr_to_concentration(vmr_o3, air_density, MOLAR_MASS_O3)
+
+        # NO2: 40 ppb -> ~75 µg/m³ (good AQI ~38)
+        vmr_no2 = np.full((12, 3, 3), 40e-9, dtype=np.float32)
+        no2 = convert_vmr_to_concentration(vmr_no2, air_density, MOLAR_MASS_NO2)
+
+        # SO2: 30 ppb -> ~79 µg/m³ (good AQI ~43)
+        vmr_so2 = np.full((12, 3, 3), 30e-9, dtype=np.float32)
+        so2 = convert_vmr_to_concentration(vmr_so2, air_density, MOLAR_MASS_SO2)
+
+        # CO: 0.5 ppm -> ~574 µg/m³ (good AQI ~6)
+        vmr_co = np.full((12, 3, 3), 0.5e-6, dtype=np.float32)
+        co = convert_vmr_to_concentration(vmr_co, air_density, MOLAR_MASS_CO)
+
+        # PM values
+        pm25 = np.full((12, 3, 3), 15.0, dtype=np.float32)  # moderate AQI ~58
+        pm10 = np.full((12, 3, 3), 40.0, dtype=np.float32)  # good AQI ~37
+
+        # Calculate AQI
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=False)
+
+        # AQI should be dominated by PM2.5 (moderate range)
+        # With 24h averaging for PM2.5, final AQI should be in moderate range (51-100)
+        assert np.all(aqi[-1] > 0)
+        assert np.all(aqi[-1] < 150)  # Should not reach unhealthy
+        # Check that concentrations were converted properly
+        assert np.all(o3 > 0)
+        assert np.all(no2 > 0)
+        assert np.all(so2 > 0)
+        assert np.all(co > 0)
+
+    def test_aqi_with_high_o3_from_vmr(self):
+        """Test AQI calculation with high O3 levels from VMR."""
+        from API.silam_conversion import (
+            MOLAR_MASS_O3,
+            convert_vmr_to_concentration,
+        )
+
+        # Create test data
+        air_density = np.full((12, 3, 3), 1.225, dtype=np.float32)
+
+        # High O3: 120 ppb -> ~244 µg/m³ (unhealthy for sensitive groups)
+        vmr_o3 = np.full((12, 3, 3), 120e-9, dtype=np.float32)
+        o3 = convert_vmr_to_concentration(vmr_o3, air_density, MOLAR_MASS_O3)
+
+        # Low values for other pollutants
+        pm25 = np.full((12, 3, 3), 5.0, dtype=np.float32)
+        pm10 = np.full((12, 3, 3), 10.0, dtype=np.float32)
+        no2 = np.full((12, 3, 3), 20.0, dtype=np.float32)
+        so2 = np.full((12, 3, 3), 20.0, dtype=np.float32)
+        co = np.full((12, 3, 3), 200.0, dtype=np.float32)
+
+        # Calculate AQI
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=False)
+
+        # AQI should be dominated by O3
+        # O3 at 244 µg/m³ with 8h averaging should give AQI > 100
+        assert np.all(aqi[-1] > 50)  # At least moderate
+        # Verify O3 was converted to expected range
+        np.testing.assert_allclose(o3[0, 0, 0], 244.0, rtol=0.01)
+
+    def test_aqi_spatial_variation_with_vmr(self):
+        """Test AQI with spatially varying VMR values."""
+        from API.silam_conversion import (
+            MOLAR_MASS_O3,
+            convert_vmr_to_concentration,
+        )
+
+        # Create spatially varying O3 VMR
+        vmr_o3 = np.zeros((12, 5, 5), dtype=np.float32)
+        for i in range(5):
+            for j in range(5):
+                # O3 ranging from 20 to 100 ppb
+                vmr_o3[:, i, j] = (20 + (i + j) * 10) * 1e-9
+
+        air_density = np.full((12, 5, 5), 1.225, dtype=np.float32)
+        o3 = convert_vmr_to_concentration(vmr_o3, air_density, MOLAR_MASS_O3)
+
+        # Low values for other pollutants
+        pm25 = np.full((12, 5, 5), 5.0, dtype=np.float32)
+        pm10 = np.full((12, 5, 5), 10.0, dtype=np.float32)
+        no2 = np.full((12, 5, 5), 20.0, dtype=np.float32)
+        so2 = np.full((12, 5, 5), 20.0, dtype=np.float32)
+        co = np.full((12, 5, 5), 200.0, dtype=np.float32)
+
+        # Calculate AQI
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=False)
+
+        # AQI should vary spatially due to O3 variation
+        assert aqi[-1].min() < aqi[-1].max()
+        # O3 concentration should vary spatially
+        assert o3[0].min() < o3[0].max()
+        # All AQI values should be positive
+        assert np.all(aqi >= 0)

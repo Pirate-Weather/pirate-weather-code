@@ -29,6 +29,14 @@ from dask.diagnostics import ProgressBar
 
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import CHUNK_SIZES, calculate_aqi
+from API.silam_conversion import (
+    KG_M3_TO_UG_M3,
+    MOLAR_MASS_CO,
+    MOLAR_MASS_NO2,
+    MOLAR_MASS_O3,
+    MOLAR_MASS_SO2,
+    convert_vmr_to_concentration,
+)
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -58,6 +66,10 @@ s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 # Define the processing chunk size - use GFS chunk sizes as SILAM is global data
 processChunk = CHUNK_SIZES.get("GFS", 50)
 
+# Standard air density constant
+STANDARD_AIR_DENSITY = 1.225  # kg/m³ at sea level (used as fallback)
+
+
 # Define the variables to be saved in the final Zarr store
 # These match the SILAM output variables for air quality
 zarrVars = (
@@ -71,15 +83,10 @@ zarrVars = (
     "AQI",  # Air Quality Index (calculated)
 )
 
-# Alternative SILAM variable names (different SILAM versions may use different names)
-silam_alt_names = {
-    "cnc_PM2_5": ["cnc_PM2_5_gas", "cnc_PM25", "pm2_5", "PM2.5", "pm25"],
-    "cnc_PM10": ["cnc_PM10_gas", "cnc_pm10", "pm10", "PM10"],
-    "cnc_O3": ["cnc_O3_gas", "cnc_o3", "o3", "O3", "ozone"],
-    "cnc_NO2": ["cnc_NO2_gas", "cnc_no2", "no2", "NO2"],
-    "cnc_SO2": ["cnc_SO2_gas", "cnc_so2", "so2", "SO2"],
-    "cnc_CO": ["cnc_CO_gas", "cnc_co", "co", "CO"],
-}
+# SILAM variable names and units:
+# - cnc_PM2_5, cnc_PM10: Particulate matter in kg/m³ (need conversion to µg/m³)
+# - vmr_*_gas: Gas species as volume mixing ratios in mole/mole (need conversion using air density and molar mass)
+# - air_dens: Air density in kg/m³ (used for volume mixing ratio conversions)
 
 
 def get_latest_silam_run():
@@ -105,30 +112,6 @@ def get_latest_silam_run():
         )
 
     return latest_origintime
-
-
-def find_variable(ds, target_var):
-    """
-    Find a variable in the dataset, trying alternative names.
-
-    Args:
-        ds: xarray Dataset
-        target_var: Target variable name
-
-    Returns:
-        str or None: Found variable name, or None if not found
-    """
-    # Check if target var exists directly
-    if target_var in ds.data_vars:
-        return target_var
-
-    # Try alternative names
-    alt_names = silam_alt_names.get(target_var, [])
-    for alt in alt_names:
-        if alt in ds.data_vars:
-            return alt
-
-    return None
 
 
 # Create new directory for processing if it does not exist
@@ -244,30 +227,111 @@ if "lat" in xarray_silam_data.coords:
 if "lon" in xarray_silam_data.coords:
     xarray_silam_data = xarray_silam_data.rename({"lon": "longitude"})
 
-# Process and rename variables to our standard naming convention
-processed_vars = {}
-
-for target_var in zarrVars[1:-1]:  # Skip 'time' and 'AQI' (calculated later)
-    found_var = find_variable(xarray_silam_data, target_var)
-    if found_var:
-        processed_vars[target_var] = xarray_silam_data[found_var]
-        logger.info(f"Found variable {found_var} -> {target_var}")
-    else:
-        logger.warning(
-            f"Variable {target_var} not found in dataset, will be filled with NaN"
-        )
-
 # Create processed dataset
 xarray_processed = xr.Dataset(coords=xarray_silam_data.coords)
 xarray_processed["time"] = xarray_silam_data["time"]
 
-for var_name, var_data in processed_vars.items():
-    xarray_processed[var_name] = var_data
+# Process PM variables (convert from kg/m³ to µg/m³)
+if "cnc_PM2_5" in xarray_silam_data:
+    # Convert kg/m³ to µg/m³: multiply by KG_M3_TO_UG_M3
+    xarray_processed["cnc_PM2_5"] = xarray_silam_data["cnc_PM2_5"] * KG_M3_TO_UG_M3
+    xarray_processed["cnc_PM2_5"].attrs["units"] = "µg/m³"
+    xarray_processed["cnc_PM2_5"].attrs["long_name"] = "PM2.5 concentration"
+    logger.info("Loaded and converted cnc_PM2_5 from kg/m³ to µg/m³")
+else:
+    logger.warning("cnc_PM2_5 not found in dataset")
+    xarray_processed["cnc_PM2_5"] = xr.DataArray(
+        np.full(
+            (
+                len(xarray_processed.time),
+                len(xarray_processed.latitude),
+                len(xarray_processed.longitude),
+            ),
+            np.nan,
+            dtype=np.float32,
+        ),
+        dims=["time", "latitude", "longitude"],
+        coords={
+            "time": xarray_processed.time,
+            "latitude": xarray_processed.latitude,
+            "longitude": xarray_processed.longitude,
+        },
+    )
 
-# Fill missing variables with NaN
-for var in zarrVars[1:-1]:
-    if var not in xarray_processed.data_vars:
-        xarray_processed[var] = xr.DataArray(
+if "cnc_PM10" in xarray_silam_data:
+    # Convert kg/m³ to µg/m³: multiply by KG_M3_TO_UG_M3
+    xarray_processed["cnc_PM10"] = xarray_silam_data["cnc_PM10"] * KG_M3_TO_UG_M3
+    xarray_processed["cnc_PM10"].attrs["units"] = "µg/m³"
+    xarray_processed["cnc_PM10"].attrs["long_name"] = "PM10 concentration"
+    logger.info("Loaded and converted cnc_PM10 from kg/m³ to µg/m³")
+else:
+    logger.warning("cnc_PM10 not found in dataset")
+    xarray_processed["cnc_PM10"] = xr.DataArray(
+        np.full(
+            (
+                len(xarray_processed.time),
+                len(xarray_processed.latitude),
+                len(xarray_processed.longitude),
+            ),
+            np.nan,
+            dtype=np.float32,
+        ),
+        dims=["time", "latitude", "longitude"],
+        coords={
+            "time": xarray_processed.time,
+            "latitude": xarray_processed.latitude,
+            "longitude": xarray_processed.longitude,
+        },
+    )
+
+# Load air density for volume mixing ratio conversions
+if "air_dens" in xarray_silam_data:
+    air_density = xarray_silam_data["air_dens"]
+    logger.info("Loaded air_dens for volume mixing ratio conversions")
+else:
+    # If air density is not available, use standard air density
+    logger.warning(
+        f"air_dens not found, using standard air density of {STANDARD_AIR_DENSITY} kg/m³"
+    )
+    air_density = xr.DataArray(
+        np.full(
+            (
+                len(xarray_processed.time),
+                len(xarray_processed.latitude),
+                len(xarray_processed.longitude),
+            ),
+            STANDARD_AIR_DENSITY,
+            dtype=np.float32,
+        ),
+        dims=["time", "latitude", "longitude"],
+        coords={
+            "time": xarray_processed.time,
+            "latitude": xarray_processed.latitude,
+            "longitude": xarray_processed.longitude,
+        },
+    )
+
+# Process gas volume mixing ratio variables (convert to µg/m³)
+# Using molar masses from SILAM metadata
+gas_variables = {
+    "vmr_O3_gas": ("cnc_O3", MOLAR_MASS_O3, "Ozone"),
+    "vmr_NO2_gas": ("cnc_NO2", MOLAR_MASS_NO2, "Nitrogen dioxide"),
+    "vmr_SO2_gas": ("cnc_SO2", MOLAR_MASS_SO2, "Sulfur dioxide"),
+    "vmr_CO_gas": ("cnc_CO", MOLAR_MASS_CO, "Carbon monoxide"),
+}
+
+for silam_var, (output_var, molar_mass, long_name) in gas_variables.items():
+    if silam_var in xarray_silam_data:
+        # Convert volume mixing ratio to concentration in µg/m³
+        xarray_processed[output_var] = convert_vmr_to_concentration(
+            xarray_silam_data[silam_var], air_density, molar_mass
+        )
+        xarray_processed[output_var].attrs["units"] = "µg/m³"
+        xarray_processed[output_var].attrs["long_name"] = f"{long_name} concentration"
+        logger.info(f"Loaded and converted {silam_var} to {output_var} in µg/m³")
+    else:
+        logger.warning(f"{silam_var} not found in dataset, {output_var} will be NaN")
+        xarray_processed[output_var] = xr.DataArray(
             np.full(
                 (
                     len(xarray_processed.time),
