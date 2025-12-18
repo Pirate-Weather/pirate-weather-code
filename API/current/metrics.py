@@ -102,7 +102,15 @@ _CURRENTLY_ORDER_NA_WITH_ECMWF = [
     "dwd_mosmix",
     "era5",
 ]
-_CURRENTLY_ORDER_NA_NO_ECMWF = ["rtma_ru", "hrrrsubh", "nbm", "hrrr", "gfs", "dwd_mosmix", "era5"]
+_CURRENTLY_ORDER_NA_NO_ECMWF = [
+    "rtma_ru",
+    "hrrrsubh",
+    "nbm",
+    "hrrr",
+    "gfs",
+    "dwd_mosmix",
+    "era5",
+]
 _CURRENTLY_ORDER_ROW_WITH_ECMWF = [
     "rtma_ru",
     "hrrrsubh",
@@ -113,7 +121,15 @@ _CURRENTLY_ORDER_ROW_WITH_ECMWF = [
     "gfs",
     "era5",
 ]
-_CURRENTLY_ORDER_ROW_NO_ECMWF = ["rtma_ru", "hrrrsubh", "nbm", "hrrr", "dwd_mosmix", "gfs", "era5"]
+_CURRENTLY_ORDER_ROW_NO_ECMWF = [
+    "rtma_ru",
+    "hrrrsubh",
+    "nbm",
+    "hrrr",
+    "dwd_mosmix",
+    "gfs",
+    "era5",
+]
 
 
 def _build_source_strategies(source_map, lat, lon, has_ecmwf=True):
@@ -134,10 +150,18 @@ def _build_source_strategies(source_map, lat, lon, has_ecmwf=True):
     # Select pre-defined priority order
     if gfs_before_dwd:
         # North America
-        order = _CURRENTLY_ORDER_NA_WITH_ECMWF if has_ecmwf else _CURRENTLY_ORDER_NA_NO_ECMWF
+        order = (
+            _CURRENTLY_ORDER_NA_WITH_ECMWF
+            if has_ecmwf
+            else _CURRENTLY_ORDER_NA_NO_ECMWF
+        )
     else:
         # Rest of world
-        order = _CURRENTLY_ORDER_ROW_WITH_ECMWF if has_ecmwf else _CURRENTLY_ORDER_ROW_NO_ECMWF
+        order = (
+            _CURRENTLY_ORDER_ROW_WITH_ECMWF
+            if has_ecmwf
+            else _CURRENTLY_ORDER_ROW_NO_ECMWF
+        )
 
     # Build strategies in priority order
     strategies = []

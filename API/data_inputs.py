@@ -65,10 +65,16 @@ def _stack_with_priority(num_hours, lat, lon, has_ecmwf, source_data):
     # Select pre-defined order based on priority rules
     if gfs_before_dwd:
         # North America: ... > ECMWF > GFS > DWD > ERA5
-        order = _PRIORITY_ORDER_NA_WITH_ECMWF if has_ecmwf else _PRIORITY_ORDER_NA_NO_ECMWF
+        order = (
+            _PRIORITY_ORDER_NA_WITH_ECMWF if has_ecmwf else _PRIORITY_ORDER_NA_NO_ECMWF
+        )
     else:
         # Rest of world: ... > DWD > ECMWF > GFS > ERA5
-        order = _PRIORITY_ORDER_ROW_WITH_ECMWF if has_ecmwf else _PRIORITY_ORDER_ROW_NO_ECMWF
+        order = (
+            _PRIORITY_ORDER_ROW_WITH_ECMWF
+            if has_ecmwf
+            else _PRIORITY_ORDER_ROW_NO_ECMWF
+        )
 
     # Collect arrays in priority order
     arrays = []
