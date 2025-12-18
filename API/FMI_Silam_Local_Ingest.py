@@ -29,6 +29,14 @@ from dask.diagnostics import ProgressBar
 
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import CHUNK_SIZES, calculate_aqi
+from API.silam_conversion import (
+    KG_M3_TO_UG_M3,
+    MOLAR_MASS_CO,
+    MOLAR_MASS_NO2,
+    MOLAR_MASS_O3,
+    MOLAR_MASS_SO2,
+    convert_vmr_to_concentration,
+)
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -58,17 +66,9 @@ s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 # Define the processing chunk size - use GFS chunk sizes as SILAM is global data
 processChunk = CHUNK_SIZES.get("GFS", 50)
 
-# Unit conversion constants
-KG_M3_TO_UG_M3 = 1e9  # Convert kg/m³ to µg/m³
+# Standard air density constant
 STANDARD_AIR_DENSITY = 1.225  # kg/m³ at sea level (used as fallback)
 
-# Molar masses (kg/mole)
-MOLAR_MASS_AIR = 0.02897  # kg/mole (dry air)
-# Gas species molar masses from SILAM metadata
-MOLAR_MASS_O3 = 0.048  # kg/mole
-MOLAR_MASS_NO2 = 0.046  # kg/mole
-MOLAR_MASS_SO2 = 0.064  # kg/mole
-MOLAR_MASS_CO = 0.028  # kg/mole
 
 # Define the variables to be saved in the final Zarr store
 # These match the SILAM output variables for air quality
@@ -112,32 +112,6 @@ def get_latest_silam_run():
         )
 
     return latest_origintime
-
-
-def convert_vmr_to_concentration(vmr, air_density, molar_mass):
-    """
-    Convert volume mixing ratio (VMR) to mass concentration in µg/m³.
-
-    Args:
-        vmr: Volume mixing ratio in mole/mole (mole pollutant per mole air)
-        air_density: Air density in kg/m³
-        molar_mass: Molar mass of the pollutant in kg/mole
-
-    Returns:
-        Concentration in µg/m³
-
-    Formula:
-        concentration (µg/m³) = VMR (mole/mole) * air_density (kg/m³) *
-                                (molar_mass_pollutant / molar_mass_air) * KG_M3_TO_UG_M3
-
-    Note: SILAM's vmr_*_gas variables are true volume mixing ratios (mole/mole),
-    as confirmed by the SILAM metadata (units: mole/mole, silam_amount_unit: mole).
-    The conversion requires both the pollutant's molecular weight and air's molecular weight.
-    """
-    # Volume mixing ratio conversion to mass concentration
-    # VMR is mole_pollutant/mole_air
-    # mass_concentration = VMR * (air_density / molar_mass_air) * molar_mass_pollutant
-    return vmr * air_density * (molar_mass / MOLAR_MASS_AIR) * KG_M3_TO_UG_M3
 
 
 # Create new directory for processing if it does not exist
