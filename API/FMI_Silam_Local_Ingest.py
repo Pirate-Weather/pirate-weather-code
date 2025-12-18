@@ -62,6 +62,12 @@ processChunk = CHUNK_SIZES.get("GFS", 50)
 KG_M3_TO_UG_M3 = 1e9  # Convert kg/m³ to µg/m³
 STANDARD_AIR_DENSITY = 1.225  # kg/m³ at sea level (used as fallback)
 
+# Molar masses for gas species (kg/mole) from SILAM metadata
+MOLAR_MASS_O3 = 0.048  # kg/mole
+MOLAR_MASS_NO2 = 0.046  # kg/mole
+MOLAR_MASS_SO2 = 0.064  # kg/mole
+MOLAR_MASS_CO = 0.028  # kg/mole
+
 # Define the variables to be saved in the final Zarr store
 # These match the SILAM output variables for air quality
 zarrVars = (
@@ -77,8 +83,8 @@ zarrVars = (
 
 # SILAM variable names and units:
 # - cnc_PM2_5, cnc_PM10: Particulate matter in kg/m³ (need conversion to µg/m³)
-# - vmr_*_gas: Gas species as mass mixing ratios in kg/kg (need conversion using air density)
-# - air_dens: Air density in kg/m³ (used for mass mixing ratio conversions)
+# - vmr_*_gas: Gas species as volume mixing ratios in mole/mole (need conversion using air density and molar mass)
+# - air_dens: Air density in kg/m³ (used for volume mixing ratio conversions)
 
 
 def get_latest_silam_run():
@@ -106,25 +112,27 @@ def get_latest_silam_run():
     return latest_origintime
 
 
-def convert_mass_mixing_ratio_to_concentration(mass_mixing_ratio, air_density):
+def convert_vmr_to_concentration(vmr, air_density, molar_mass):
     """
-    Convert mass mixing ratio to mass concentration in µg/m³.
+    Convert volume mixing ratio (VMR) to mass concentration in µg/m³.
 
     Args:
-        mass_mixing_ratio: Mass mixing ratio in kg/kg (kg pollutant per kg air)
+        vmr: Volume mixing ratio in mole/mole (mole pollutant per mole air)
         air_density: Air density in kg/m³
+        molar_mass: Molar mass of the pollutant in kg/mole
 
     Returns:
         Concentration in µg/m³
 
     Formula:
-        concentration (µg/m³) = mass_mixing_ratio (kg/kg) * air_density (kg/m³) * KG_M3_TO_UG_M3
+        concentration (µg/m³) = VMR (mole/mole) * air_density (kg/m³) * molar_mass (kg/mole) * KG_M3_TO_UG_M3
 
-    Note: SILAM's vmr_*_gas variables are mass mixing ratios (kg pollutant/kg air),
-    not true volume mixing ratios. The conversion does not require molecular weight.
+    Note: SILAM's vmr_*_gas variables are true volume mixing ratios (mole/mole),
+    as confirmed by the SILAM metadata (units: mole/mole, silam_amount_unit: mole).
+    The conversion requires molecular weight to convert from molar to mass basis.
     """
-    # Mass mixing ratio conversion to concentration
-    return mass_mixing_ratio * air_density * KG_M3_TO_UG_M3
+    # Volume mixing ratio conversion to mass concentration
+    return vmr * air_density * molar_mass * KG_M3_TO_UG_M3
 
 
 # Create new directory for processing if it does not exist
@@ -297,10 +305,10 @@ else:
         },
     )
 
-# Load air density for mass mixing ratio conversions
+# Load air density for volume mixing ratio conversions
 if "air_dens" in xarray_silam_data:
     air_density = xarray_silam_data["air_dens"]
-    logger.info("Loaded air_dens for mass mixing ratio conversions")
+    logger.info("Loaded air_dens for volume mixing ratio conversions")
 else:
     # If air density is not available, use standard air density
     logger.warning(
@@ -324,20 +332,20 @@ else:
         },
     )
 
-# Process gas mass mixing ratio variables (convert to µg/m³)
-# Note: Molecular weights are listed for reference but not needed for mass mixing ratio conversion
+# Process gas volume mixing ratio variables (convert to µg/m³)
+# Using molar masses from SILAM metadata
 gas_variables = {
-    "vmr_O3_gas": ("cnc_O3", "Ozone"),
-    "vmr_NO2_gas": ("cnc_NO2", "Nitrogen dioxide"),
-    "vmr_SO2_gas": ("cnc_SO2", "Sulfur dioxide"),
-    "vmr_CO_gas": ("cnc_CO", "Carbon monoxide"),
+    "vmr_O3_gas": ("cnc_O3", MOLAR_MASS_O3, "Ozone"),
+    "vmr_NO2_gas": ("cnc_NO2", MOLAR_MASS_NO2, "Nitrogen dioxide"),
+    "vmr_SO2_gas": ("cnc_SO2", MOLAR_MASS_SO2, "Sulfur dioxide"),
+    "vmr_CO_gas": ("cnc_CO", MOLAR_MASS_CO, "Carbon monoxide"),
 }
 
-for silam_var, (output_var, long_name) in gas_variables.items():
+for silam_var, (output_var, molar_mass, long_name) in gas_variables.items():
     if silam_var in xarray_silam_data:
-        # Convert mass mixing ratio to concentration in µg/m³
-        xarray_processed[output_var] = convert_mass_mixing_ratio_to_concentration(
-            xarray_silam_data[silam_var], air_density
+        # Convert volume mixing ratio to concentration in µg/m³
+        xarray_processed[output_var] = convert_vmr_to_concentration(
+            xarray_silam_data[silam_var], air_density, molar_mass
         )
         xarray_processed[output_var].attrs["units"] = "µg/m³"
         xarray_processed[output_var].attrs["long_name"] = f"{long_name} concentration"
