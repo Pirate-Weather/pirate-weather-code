@@ -274,7 +274,7 @@ def prepare_data_inputs(
         num_hours,
         lat,
         lon,
-        has_ecmwf=False,  # ECMWF does not have this data  # DWD-only variable, should be below GFS in North America
+        has_ecmwf=False,  # ECMWF does not provide humidity directly
         source_data={
             "nbm": nbm_merged[:, NBM["humidity"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["humidity"]]
