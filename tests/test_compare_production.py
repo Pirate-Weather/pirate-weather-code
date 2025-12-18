@@ -119,6 +119,7 @@ def _diff_nested(a: object, b: object, path: str = "", tolerance: float = 0.0) -
         (32.73, -117.192),
         (-15.83, -47.90),
         (-33.91, 18.32),
+        (61.21, -149.90), # Anchorage, AK
     ],
 )
 def test_local_vs_production(lat, lon):
