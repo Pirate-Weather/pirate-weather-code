@@ -91,6 +91,31 @@ def _select_value(strategies, default=MISSING_DATA):
     return default
 
 
+# Pre-define priority orders for currently block
+_CURRENTLY_ORDER_NA_WITH_ECMWF = [
+    "rtma_ru",
+    "hrrrsubh",
+    "nbm",
+    "hrrr",
+    "ecmwf_ifs",
+    "gfs",
+    "dwd_mosmix",
+    "era5",
+]
+_CURRENTLY_ORDER_NA_NO_ECMWF = ["rtma_ru", "hrrrsubh", "nbm", "hrrr", "gfs", "dwd_mosmix", "era5"]
+_CURRENTLY_ORDER_ROW_WITH_ECMWF = [
+    "rtma_ru",
+    "hrrrsubh",
+    "nbm",
+    "hrrr",
+    "dwd_mosmix",
+    "ecmwf_ifs",
+    "gfs",
+    "era5",
+]
+_CURRENTLY_ORDER_ROW_NO_ECMWF = ["rtma_ru", "hrrrsubh", "nbm", "hrrr", "dwd_mosmix", "gfs", "era5"]
+
+
 def _build_source_strategies(source_map, lat, lon, has_ecmwf=True):
     """
     Build source strategies in priority order based on location.
@@ -106,37 +131,13 @@ def _build_source_strategies(source_map, lat, lon, has_ecmwf=True):
     """
     gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
 
-    # Define the priority order
+    # Select pre-defined priority order
     if gfs_before_dwd:
         # North America
-        if has_ecmwf:
-            order = [
-                "rtma_ru",
-                "hrrrsubh",
-                "nbm",
-                "hrrr",
-                "ecmwf_ifs",
-                "gfs",
-                "dwd_mosmix",
-                "era5",
-            ]
-        else:
-            order = ["rtma_ru", "hrrrsubh", "nbm", "hrrr", "gfs", "dwd_mosmix", "era5"]
+        order = _CURRENTLY_ORDER_NA_WITH_ECMWF if has_ecmwf else _CURRENTLY_ORDER_NA_NO_ECMWF
     else:
         # Rest of world
-        if has_ecmwf:
-            order = [
-                "rtma_ru",
-                "hrrrsubh",
-                "nbm",
-                "hrrr",
-                "dwd_mosmix",
-                "ecmwf_ifs",
-                "gfs",
-                "era5",
-            ]
-        else:
-            order = ["rtma_ru", "hrrrsubh", "nbm", "hrrr", "dwd_mosmix", "gfs", "era5"]
+        order = _CURRENTLY_ORDER_ROW_WITH_ECMWF if has_ecmwf else _CURRENTLY_ORDER_ROW_NO_ECMWF
 
     # Build strategies in priority order
     strategies = []

@@ -39,6 +39,13 @@ def _bearing(u, v):
     return np.rad2deg(np.mod(np.arctan2(u, v) + np.pi, 2 * np.pi))
 
 
+# Pre-define priority orders to avoid recreating lists
+_PRIORITY_ORDER_NA_WITH_ECMWF = ["nbm", "hrrr", "ecmwf", "gfs", "dwd_mosmix", "era5"]
+_PRIORITY_ORDER_NA_NO_ECMWF = ["nbm", "hrrr", "gfs", "dwd_mosmix", "era5"]
+_PRIORITY_ORDER_ROW_WITH_ECMWF = ["nbm", "hrrr", "dwd_mosmix", "ecmwf", "gfs", "era5"]
+_PRIORITY_ORDER_ROW_NO_ECMWF = ["nbm", "hrrr", "dwd_mosmix", "gfs", "era5"]
+
+
 def _stack_with_priority(num_hours, lat, lon, has_ecmwf, source_data):
     """
     Stack fields with priority based on location.
@@ -55,21 +62,13 @@ def _stack_with_priority(num_hours, lat, lon, has_ecmwf, source_data):
     """
     gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
 
-    # Define the order based on priority rules
+    # Select pre-defined order based on priority rules
     if gfs_before_dwd:
         # North America: ... > ECMWF > GFS > DWD > ERA5
-        if has_ecmwf:
-            order = ["nbm", "hrrr", "ecmwf", "gfs", "dwd_mosmix", "era5"]
-        else:
-            # For variables where ECMWF doesn't have data
-            order = ["nbm", "hrrr", "gfs", "dwd_mosmix", "era5"]
+        order = _PRIORITY_ORDER_NA_WITH_ECMWF if has_ecmwf else _PRIORITY_ORDER_NA_NO_ECMWF
     else:
         # Rest of world: ... > DWD > ECMWF > GFS > ERA5
-        if has_ecmwf:
-            order = ["nbm", "hrrr", "dwd_mosmix", "ecmwf", "gfs", "era5"]
-        else:
-            # For variables where ECMWF doesn't have data
-            order = ["nbm", "hrrr", "dwd_mosmix", "gfs", "era5"]
+        order = _PRIORITY_ORDER_ROW_WITH_ECMWF if has_ecmwf else _PRIORITY_ORDER_ROW_NO_ECMWF
 
     # Collect arrays in priority order
     arrays = []
