@@ -58,6 +58,10 @@ s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 # Define the processing chunk size - use GFS chunk sizes as SILAM is global data
 processChunk = CHUNK_SIZES.get("GFS", 50)
 
+# Unit conversion constants
+KG_M3_TO_UG_M3 = 1e9  # Convert kg/m³ to µg/m³
+STANDARD_AIR_DENSITY = 1.225  # kg/m³ at sea level (used as fallback)
+
 # Define the variables to be saved in the final Zarr store
 # These match the SILAM output variables for air quality
 zarrVars = (
@@ -114,14 +118,13 @@ def convert_mass_mixing_ratio_to_concentration(mass_mixing_ratio, air_density):
         Concentration in µg/m³
 
     Formula:
-        concentration (µg/m³) = mass_mixing_ratio (kg/kg) * air_density (kg/m³) * 1e9 (µg/kg)
+        concentration (µg/m³) = mass_mixing_ratio (kg/kg) * air_density (kg/m³) * KG_M3_TO_UG_M3
 
     Note: SILAM's vmr_*_gas variables are mass mixing ratios (kg pollutant/kg air),
     not true volume mixing ratios. The conversion does not require molecular weight.
     """
     # Mass mixing ratio conversion to concentration
-    # concentration (µg/m³) = mass_mixing_ratio * air_density * 1e9
-    return mass_mixing_ratio * air_density * 1e9
+    return mass_mixing_ratio * air_density * KG_M3_TO_UG_M3
 
 
 # Create new directory for processing if it does not exist
@@ -243,8 +246,8 @@ xarray_processed["time"] = xarray_silam_data["time"]
 
 # Process PM variables (convert from kg/m³ to µg/m³)
 if "cnc_PM2_5" in xarray_silam_data:
-    # Convert kg/m³ to µg/m³: multiply by 1e9
-    xarray_processed["cnc_PM2_5"] = xarray_silam_data["cnc_PM2_5"] * 1e9
+    # Convert kg/m³ to µg/m³: multiply by KG_M3_TO_UG_M3
+    xarray_processed["cnc_PM2_5"] = xarray_silam_data["cnc_PM2_5"] * KG_M3_TO_UG_M3
     xarray_processed["cnc_PM2_5"].attrs["units"] = "µg/m³"
     xarray_processed["cnc_PM2_5"].attrs["long_name"] = "PM2.5 concentration"
     logger.info("Loaded and converted cnc_PM2_5 from kg/m³ to µg/m³")
@@ -269,8 +272,8 @@ else:
     )
 
 if "cnc_PM10" in xarray_silam_data:
-    # Convert kg/m³ to µg/m³: multiply by 1e9
-    xarray_processed["cnc_PM10"] = xarray_silam_data["cnc_PM10"] * 1e9
+    # Convert kg/m³ to µg/m³: multiply by KG_M3_TO_UG_M3
+    xarray_processed["cnc_PM10"] = xarray_silam_data["cnc_PM10"] * KG_M3_TO_UG_M3
     xarray_processed["cnc_PM10"].attrs["units"] = "µg/m³"
     xarray_processed["cnc_PM10"].attrs["long_name"] = "PM10 concentration"
     logger.info("Loaded and converted cnc_PM10 from kg/m³ to µg/m³")
@@ -294,13 +297,15 @@ else:
         },
     )
 
-# Load air density for VMR conversions
+# Load air density for mass mixing ratio conversions
 if "air_dens" in xarray_silam_data:
     air_density = xarray_silam_data["air_dens"]
-    logger.info("Loaded air_dens for VMR conversions")
+    logger.info("Loaded air_dens for mass mixing ratio conversions")
 else:
-    # If air density is not available, use standard air density (1.225 kg/m³ at sea level)
-    logger.warning("air_dens not found, using standard air density of 1.225 kg/m³")
+    # If air density is not available, use standard air density
+    logger.warning(
+        f"air_dens not found, using standard air density of {STANDARD_AIR_DENSITY} kg/m³"
+    )
     air_density = xr.DataArray(
         np.full(
             (
@@ -308,7 +313,7 @@ else:
                 len(xarray_processed.latitude),
                 len(xarray_processed.longitude),
             ),
-            1.225,
+            STANDARD_AIR_DENSITY,
             dtype=np.float32,
         ),
         dims=["time", "latitude", "longitude"],
