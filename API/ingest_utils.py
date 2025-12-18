@@ -393,6 +393,7 @@ def interp_time_take_blend(
 
     return out
 
+
 # --- Air quality helpers (NowCast & EPA AQI) ---
 def calculate_nowcast_concentration(concentrations, num_hours=12):
     """
@@ -443,6 +444,7 @@ def calculate_nowcast_concentration(concentrations, num_hours=12):
             )
 
     return nowcast_result
+
 
 def trailing_mean(conc, window):
     """
@@ -523,6 +525,7 @@ def calculate_aqi(pm25, pm10, o3, no2, so2, co=None, use_nowcast=True):
     ]
 
     return np.nanmax(np.stack(stack, axis=0), axis=0)
+
 
 def interpolate_temporal_gaps_efficiently(
     ds_chunked, nearest_vars=None, max_gap_hours=3, time_dim="time"
