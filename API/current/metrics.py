@@ -440,10 +440,6 @@ def _get_pressure(sourceList, model_data, state: InterpolationState, lat, lon):
         Current pressure.
     """
     source_map = {
-        "hrrrsubh": (
-            lambda: "hrrrsubh" in sourceList,
-            lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["pressure"]],
-        ),
         "hrrr": (
             lambda: model_data["has_hrrr_merged"],
             lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["pressure"], state),
