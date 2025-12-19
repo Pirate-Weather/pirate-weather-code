@@ -8,7 +8,7 @@
 # Data source: https://thredds.silam.fmi.fi/thredds/catalog/catalog.html
 #
 # Author: Alexander Rey
-# Date: December 2024
+# Date: December 2025
 
 # %% Import modules
 import logging
@@ -100,16 +100,10 @@ def get_latest_silam_run():
     """
     now_utc = datetime.now(timezone.utc)
 
-    # SILAM updates once daily at 00 UTC
-    # Allow 3 hours for data availability after the 00 UTC run
-    if now_utc.hour >= 3:
-        # Use today's 00 UTC run
-        latest_origintime = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-    else:
-        # Use previous day's 00 UTC run (today's not yet available)
-        latest_origintime = (now_utc - timedelta(days=1)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+    # SILAM updates once daily at 00 UTC with the date being one day behind current time
+    latest_origintime = (now_utc - timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
 
     return latest_origintime
 
@@ -135,11 +129,11 @@ origintime = get_latest_silam_run()
 
 # Construct the OPeNDAP URL for SILAM global forecast
 # SILAM data is available via THREDDS OPeNDAP service
-# Using SILAM version 6.1 (silam_glob06_v6_1) - the latest available version
-# The URL pattern follows: base_url/silam_glob06_v6_1/runs/silam_glob06_v6_1_YYYYMMDDHH.nc
+# Using SILAM version 6.1 (silam_glob_v6_1_sfc) - the latest available version
+# The URL pattern follows: base_url/silam_glob_v6_1_sfc/runs/silam_glob_v6_1_sfc_RUNS_YYYYMMDDHH.nc
 base_opendap_url = "https://thredds.silam.fmi.fi/thredds/dodsC"
-silam_dataset_path = "silam_glob06_v6_1/runs"
-run_filename = f"silam_glob06_v6_1_{origintime.strftime('%Y%m%d%H')}.nc"
+silam_dataset_path = "silam_glob_v6_1_sfc/runs"
+run_filename = f"silam_glob_v6_1_sfc_RUN_{origintime.strftime('%Y%m%d%H')}.nc"
 
 opendap_url = f"{base_opendap_url}/{silam_dataset_path}/{run_filename}"
 
