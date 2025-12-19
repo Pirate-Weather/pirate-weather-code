@@ -23,8 +23,6 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import s3fs
 import xarray as xr
-import zarr
-import zarr.storage
 from dask.diagnostics import ProgressBar
 
 from API.constants.shared_const import INGEST_VERSION_STR
@@ -68,20 +66,6 @@ processChunk = CHUNK_SIZES.get("GFS", 50)
 
 # Standard air density constant
 STANDARD_AIR_DENSITY = 1.225  # kg/m³ at sea level (used as fallback)
-
-
-# Define the variables to be saved in the final Zarr store
-# These match the SILAM output variables for air quality
-zarrVars = (
-    "time",
-    "cnc_PM2_5",  # PM2.5 concentration (µg/m³)
-    "cnc_PM10",  # PM10 concentration (µg/m³)
-    "cnc_O3",  # Ozone concentration (µg/m³)
-    "cnc_NO2",  # Nitrogen dioxide concentration (µg/m³)
-    "cnc_SO2",  # Sulfur dioxide concentration (µg/m³)
-    "cnc_CO",  # Carbon monoxide concentration (µg/m³)
-    "AQI",  # Air Quality Index (calculated)
-)
 
 # SILAM variable names and units:
 # - cnc_PM2_5, cnc_PM10: Particulate matter in kg/m³ (need conversion to µg/m³)
@@ -177,35 +161,8 @@ try:
 
 except (IOError, OSError, ValueError) as e:
     logger.error(f"Error opening SILAM data via OPeNDAP: {e}")
-    logger.info("Attempting fallback URL pattern...")
-
-    # Try alternative URL patterns (including older versions as fallback)
-    alt_urls = [
-        f"{base_opendap_url}/silam_glob06_v6_1/silam_glob06_v6_1_{origintime.strftime('%Y%m%d%H')}.nc",
-        f"{base_opendap_url}/silam_glob06_v6_1/latest.nc",
-        # Fallback to older v5.9 if v6.1 is unavailable
-        f"{base_opendap_url}/silam_glob05_v5_9/runs/silam_glob05_v5_9_{origintime.strftime('%Y%m%d%H')}.nc",
-        f"{base_opendap_url}/silam_glob05_v5_9/silam_glob05_v5_9_{origintime.strftime('%Y%m%d%H')}.nc",
-    ]
-
-    xarray_silam_data = None
-    for alt_url in alt_urls:
-        try:
-            logger.info(f"Trying: {alt_url}")
-            xarray_silam_data = xr.open_dataset(
-                alt_url,
-                engine="netcdf4",
-                chunks={"time": 24, "lat": processChunk, "lon": processChunk},
-            )
-            logger.info(f"Successfully opened SILAM from: {alt_url}")
-            break
-        except (IOError, OSError, ValueError) as alt_e:
-            logger.warning(f"Failed to open {alt_url}: {alt_e}")
-            continue
-
-    if xarray_silam_data is None:
-        logger.critical("Failed to access SILAM data from any URL. Exiting.")
-        sys.exit(1)
+    logger.critical("Failed to access SILAM data. Exiting.")
+    sys.exit(1)
 
 
 # %% Process the SILAM data
@@ -225,88 +182,58 @@ if "lon" in xarray_silam_data.coords:
 xarray_processed = xr.Dataset(coords=xarray_silam_data.coords)
 xarray_processed["time"] = xarray_silam_data["time"]
 
-# Process PM variables (convert from kg/m³ to µg/m³)
-if "cnc_PM2_5" in xarray_silam_data:
-    # Convert kg/m³ to µg/m³: multiply by KG_M3_TO_UG_M3
-    xarray_processed["cnc_PM2_5"] = xarray_silam_data["cnc_PM2_5"] * KG_M3_TO_UG_M3
-    xarray_processed["cnc_PM2_5"].attrs["units"] = "µg/m³"
-    xarray_processed["cnc_PM2_5"].attrs["long_name"] = "PM2.5 concentration"
-    logger.info("Loaded and converted cnc_PM2_5 from kg/m³ to µg/m³")
-else:
-    logger.warning("cnc_PM2_5 not found in dataset")
-    xarray_processed["cnc_PM2_5"] = xr.DataArray(
-        np.full(
-            (
-                len(xarray_processed.time),
-                len(xarray_processed.latitude),
-                len(xarray_processed.longitude),
-            ),
-            np.nan,
-            dtype=np.float32,
-        ),
+
+def _make_nan_dataarray(
+    time_coord, lat_coord, lon_coord, fill=np.nan, dtype=np.float32
+):
+    """Return a 3D DataArray filled with `fill` matching provided coords."""
+    shape = (len(time_coord), len(lat_coord), len(lon_coord))
+    return xr.DataArray(
+        np.full(shape, fill, dtype=dtype),
         dims=["time", "latitude", "longitude"],
-        coords={
-            "time": xarray_processed.time,
-            "latitude": xarray_processed.latitude,
-            "longitude": xarray_processed.longitude,
-        },
+        coords={"time": time_coord, "latitude": lat_coord, "longitude": lon_coord},
     )
 
-if "cnc_PM10" in xarray_silam_data:
-    # Convert kg/m³ to µg/m³: multiply by KG_M3_TO_UG_M3
-    xarray_processed["cnc_PM10"] = xarray_silam_data["cnc_PM10"] * KG_M3_TO_UG_M3
-    xarray_processed["cnc_PM10"].attrs["units"] = "µg/m³"
-    xarray_processed["cnc_PM10"].attrs["long_name"] = "PM10 concentration"
-    logger.info("Loaded and converted cnc_PM10 from kg/m³ to µg/m³")
-else:
-    logger.warning("cnc_PM10 not found in dataset")
-    xarray_processed["cnc_PM10"] = xr.DataArray(
-        np.full(
-            (
-                len(xarray_processed.time),
-                len(xarray_processed.latitude),
-                len(xarray_processed.longitude),
-            ),
-            np.nan,
-            dtype=np.float32,
-        ),
-        dims=["time", "latitude", "longitude"],
-        coords={
-            "time": xarray_processed.time,
-            "latitude": xarray_processed.latitude,
-            "longitude": xarray_processed.longitude,
-        },
-    )
+
+def _process_pm(var_in_name, var_out_name):
+    """Process particulate mass variables (kg/m3 -> µg/m3) or create NaN array."""
+    if var_in_name in xarray_silam_data:
+        xarray_processed[var_out_name] = (
+            xarray_silam_data[var_in_name] * KG_M3_TO_UG_M3
+        ).astype(np.float32)
+        xarray_processed[var_out_name].attrs["units"] = "µg/m³"
+        xarray_processed[var_out_name].attrs["long_name"] = (
+            "PM2.5 concentration" if "2_5" in var_out_name else "PM10 concentration"
+        )
+        logger.info(f"Loaded and converted {var_in_name} from kg/m³ to µg/m³")
+    else:
+        logger.warning(f"{var_in_name} not found in dataset")
+        xarray_processed[var_out_name] = _make_nan_dataarray(
+            xarray_processed.time, xarray_processed.latitude, xarray_processed.longitude
+        )
+
+
+# Process PM variables
+_process_pm("cnc_PM2_5", "cnc_PM2_5")
+_process_pm("cnc_PM10", "cnc_PM10")
 
 # Load air density for volume mixing ratio conversions
 if "air_dens" in xarray_silam_data:
-    air_density = xarray_silam_data["air_dens"]
+    air_density = xarray_silam_data["air_dens"].astype(np.float32)
     logger.info("Loaded air_dens for volume mixing ratio conversions")
 else:
-    # If air density is not available, use standard air density
     logger.warning(
         f"air_dens not found, using standard air density of {STANDARD_AIR_DENSITY} kg/m³"
     )
-    air_density = xr.DataArray(
-        np.full(
-            (
-                len(xarray_processed.time),
-                len(xarray_processed.latitude),
-                len(xarray_processed.longitude),
-            ),
-            STANDARD_AIR_DENSITY,
-            dtype=np.float32,
-        ),
-        dims=["time", "latitude", "longitude"],
-        coords={
-            "time": xarray_processed.time,
-            "latitude": xarray_processed.latitude,
-            "longitude": xarray_processed.longitude,
-        },
+    air_density = _make_nan_dataarray(
+        xarray_processed.time,
+        xarray_processed.latitude,
+        xarray_processed.longitude,
+        fill=STANDARD_AIR_DENSITY,
     )
 
+
 # Process gas volume mixing ratio variables (convert to µg/m³)
-# Using molar masses from SILAM metadata
 gas_variables = {
     "vmr_O3_gas": ("cnc_O3", MOLAR_MASS_O3, "Ozone"),
     "vmr_NO2_gas": ("cnc_NO2", MOLAR_MASS_NO2, "Nitrogen dioxide"),
@@ -316,32 +243,26 @@ gas_variables = {
 
 for silam_var, (output_var, molar_mass, long_name) in gas_variables.items():
     if silam_var in xarray_silam_data:
-        # Convert volume mixing ratio to concentration in µg/m³
         xarray_processed[output_var] = convert_vmr_to_concentration(
             xarray_silam_data[silam_var], air_density, molar_mass
-        )
+        ).astype(np.float32)
         xarray_processed[output_var].attrs["units"] = "µg/m³"
         xarray_processed[output_var].attrs["long_name"] = f"{long_name} concentration"
         logger.info(f"Loaded and converted {silam_var} to {output_var} in µg/m³")
     else:
         logger.warning(f"{silam_var} not found in dataset, {output_var} will be NaN")
-        xarray_processed[output_var] = xr.DataArray(
-            np.full(
-                (
-                    len(xarray_processed.time),
-                    len(xarray_processed.latitude),
-                    len(xarray_processed.longitude),
-                ),
-                np.nan,
-                dtype=np.float32,
-            ),
-            dims=["time", "latitude", "longitude"],
-            coords={
-                "time": xarray_processed.time,
-                "latitude": xarray_processed.latitude,
-                "longitude": xarray_processed.longitude,
-            },
+        xarray_processed[output_var] = _make_nan_dataarray(
+            xarray_processed.time, xarray_processed.latitude, xarray_processed.longitude
         )
+
+
+def _values_or_nan(ds, var_name, fallback_shape):
+    return (
+        ds[var_name].values
+        if var_name in ds
+        else np.full(fallback_shape, np.nan, dtype=np.float32)
+    )
+
 
 # Calculate AQI from pollutant concentrations
 logger.info("Calculating Air Quality Index (AQI) using EPA NowCast...")
@@ -353,36 +274,12 @@ fallback_shape = (
     len(xarray_processed.longitude),
 )
 
-pm25_data = (
-    xarray_processed["cnc_PM2_5"].values
-    if "cnc_PM2_5" in xarray_processed
-    else np.full(fallback_shape, np.nan, dtype=np.float32)
-)
-pm10_data = (
-    xarray_processed["cnc_PM10"].values
-    if "cnc_PM10" in xarray_processed
-    else np.full(fallback_shape, np.nan, dtype=np.float32)
-)
-o3_data = (
-    xarray_processed["cnc_O3"].values
-    if "cnc_O3" in xarray_processed
-    else np.full(fallback_shape, np.nan, dtype=np.float32)
-)
-no2_data = (
-    xarray_processed["cnc_NO2"].values
-    if "cnc_NO2" in xarray_processed
-    else np.full(fallback_shape, np.nan, dtype=np.float32)
-)
-so2_data = (
-    xarray_processed["cnc_SO2"].values
-    if "cnc_SO2" in xarray_processed
-    else np.full(fallback_shape, np.nan, dtype=np.float32)
-)
-co_data = (
-    xarray_processed["cnc_CO"].values
-    if "cnc_CO" in xarray_processed
-    else np.full(fallback_shape, np.nan, dtype=np.float32)
-)
+pm25_data = _values_or_nan(xarray_processed, "cnc_PM2_5", fallback_shape)
+pm10_data = _values_or_nan(xarray_processed, "cnc_PM10", fallback_shape)
+o3_data = _values_or_nan(xarray_processed, "cnc_O3", fallback_shape)
+no2_data = _values_or_nan(xarray_processed, "cnc_NO2", fallback_shape)
+so2_data = _values_or_nan(xarray_processed, "cnc_SO2", fallback_shape)
+co_data = _values_or_nan(xarray_processed, "cnc_CO", fallback_shape)
 
 # Calculate AQI using EPA NowCast algorithm for PM2.5 and PM10
 aqi_values = calculate_aqi(
@@ -425,34 +322,32 @@ logger.info("Saved Zarr data to disk.")
 
 
 # %% Final output handling and cleanup
+# Save the time pickle locally first
+pickle_file_path = os.path.join(forecast_process_dir, "SILAM.time.pickle")
+with open(pickle_file_path, "wb") as file:
+    pickle.dump(origintime, file)
+
 if saveType == "S3":
-    s3_bucket_name = os.getenv("s3_bucket", "your-s3-bucket")
-    s3_zarr_key = os.path.join("ForecastTar_v2", "SILAM.zarr")
-    s3_url = f"s3://{s3_bucket_name}/{s3_zarr_key}"
+    # Zip the Zarr directory and upload the zip to S3 (pattern used by other ingests)
+    zip_base = os.path.join(forecast_process_dir, "SILAM.zarr")
+    # This will create SILAM.zarr.zip in forecast_process_dir
+    shutil.make_archive(zip_base, "zip", forecast_process_path + "_.zarr")
+    zip_path = zip_base + ".zip"
 
-    # Write directly to S3-backed zarr store
-    zarr_store = zarr.storage.FsspecStore.from_url(
-        s3_url,
-        storage_options={"key": aws_access_key_id, "secret": aws_secret_access_key},
+    # Upload the zarr zip and time pickle to S3
+    s3.put_file(
+        zip_path,
+        os.path.join(forecast_path, ingestVersion, "SILAM.zarr.zip"),
     )
-    xarray_processed.to_zarr(store=zarr_store, mode="w", consolidated=False)
-
-    # Save time pickle
-    pickle_file_path = os.path.join(forecast_process_dir, "SILAM.time.pickle")
-    with open(pickle_file_path, "wb") as file:
-        pickle.dump(origintime, file)
 
     s3.put_file(
         pickle_file_path,
         os.path.join(forecast_path, ingestVersion, "SILAM.time.pickle"),
     )
-    logger.info("Uploaded SILAM data to S3.")
-else:
-    # Save time pickle locally
-    pickle_file_path = os.path.join(forecast_process_dir, "SILAM.time.pickle")
-    with open(pickle_file_path, "wb") as file:
-        pickle.dump(origintime, file)
 
+    logger.info("Uploaded SILAM zarr zip and time pickle to S3.")
+else:
+    # Move the time pickle to final local location
     shutil.move(
         pickle_file_path,
         os.path.join(forecast_path, ingestVersion, "SILAM.time.pickle"),
@@ -469,7 +364,16 @@ else:
     )
 
 # Clean up temporary files and directories
-shutil.rmtree(forecast_process_dir)
+try:
+    shutil.rmtree(forecast_process_dir)
+except FileNotFoundError:
+    logger.debug(
+        f"Cleanup directory {forecast_process_dir} not found; nothing to remove."
+    )
+except PermissionError as e:
+    logger.warning(f"Permission denied removing {forecast_process_dir}: {e}")
+except OSError as e:
+    logger.warning(f"OS error while removing {forecast_process_dir}: {e}")
 
 end_time = time.time()
 logger.info(f"Total processing time: {end_time - start_time:.2f} seconds")

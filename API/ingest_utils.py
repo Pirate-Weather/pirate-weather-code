@@ -466,20 +466,24 @@ def trailing_mean(conc, window):
     return out
 
 
-def calculate_aqi(pm25, pm10, o3, no2, so2, co=None, use_nowcast=True):
-    """
-    Calculate Air Quality Index (AQI) based on EPA standards.
-    Returns the maximum AQI value among all pollutants.
+def calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=True):
+    """Calculate Air Quality Index (AQI) based on EPA standards.
+
+    Returns the maximum AQI value among all pollutants for each grid cell and time.
+
     Args:
-        pm25: PM2.5 concentration in µg/m³ (time, lat, lon)
-        pm10: PM10 concentration in µg/m³ (time, lat, lon)
-        o3: Ozone concentration in µg/m³ (time, lat, lon)
-        no2: NO2 concentration in µg/m³ (time, lat, lon)
-        so2: SO2 concentration in µg/m³ (time, lat, lon)
-        use_nowcast: Whether to use EPA NowCast for PM2.5/PM10 (default True)
+        pm25: PM2.5 concentration in µg/m³ (time, lat, lon).
+        pm10: PM10 concentration in µg/m³ (time, lat, lon).
+        o3: Ozone concentration in µg/m³ (time, lat, lon).
+        no2: NO2 concentration in µg/m³ (time, lat, lon).
+        so2: SO2 concentration in µg/m³ (time, lat, lon).
+        co: CO concentration in µg/m³ (time, lat, lon).
+        use_nowcast: Whether to use EPA NowCast for PM2.5/PM10 (default True).
+
     Returns:
-        AQI value (0-500+ scale)
+        A numpy array of AQI values (0-500+ scale) with shape (time, lat, lon).
     """
+
     if use_nowcast:
         pm25_nowcast = calculate_nowcast_concentration(pm25, num_hours=12)
         pm10_nowcast = calculate_nowcast_concentration(pm10, num_hours=12)

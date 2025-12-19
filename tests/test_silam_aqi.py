@@ -252,8 +252,9 @@ class TestCalculateAQI:
         o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)  # AQI = 46.30
         no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)  # AQI = 40.00
         so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)  # AQI = 37.86
+        co = np.zeros((12, 3, 3), dtype=np.float32) # AQI 0
 
-        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=False)
 
         # AQI should be dominated by PM2.5 which is approximately 199.79
         np.testing.assert_allclose(aqi[-1], 199.79, rtol=0.01)
@@ -265,8 +266,9 @@ class TestCalculateAQI:
         o3 = np.zeros((12, 3, 3), dtype=np.float32)
         no2 = np.zeros((12, 3, 3), dtype=np.float32)
         so2 = np.zeros((12, 3, 3), dtype=np.float32)
+        co = np.zeros((12, 3, 3), dtype=np.float32)
 
-        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=False)
 
         # AQI should be 0 for all zero concentrations
         assert np.all(aqi == 0)
@@ -279,8 +281,9 @@ class TestCalculateAQI:
         o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)
         no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)
         so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)
+        co = np.zeros((12, 3, 3), dtype=np.float32)
 
-        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=False)
 
         # AQI should handle NaN gracefully with nanmax
         # Most values should not be NaN
@@ -294,8 +297,9 @@ class TestCalculateAQI:
         o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)  # AQI ~46
         no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)  # AQI ~40
         so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)  # AQI ~38
+        co = np.zeros((12, 3, 3), dtype=np.float32)  # AQI 0
 
-        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=False)
 
         # AQI should be in Good category
         assert np.all(aqi[-1] <= 50)
@@ -308,8 +312,9 @@ class TestCalculateAQI:
         o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)  # AQI ~46
         no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)  # AQI ~40
         so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)  # AQI ~38
+        co = np.zeros((12, 3, 3), dtype=np.float32)  # AQI 0
 
-        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=False)
 
         # AQI should be in Moderate category
         assert np.all(aqi[-1] > 50)
@@ -323,8 +328,9 @@ class TestCalculateAQI:
         o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)  # AQI ~46
         no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)  # AQI ~40
         so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)  # AQI ~38
+        co = np.zeros((12, 3, 3), dtype=np.float32)  # AQI 0
 
-        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=False)
 
         # AQI should be in Unhealthy for Sensitive Groups category
         assert np.all(aqi[-1] > 100)
@@ -338,8 +344,9 @@ class TestCalculateAQI:
         o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)  # AQI ~46
         no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)  # AQI ~40
         so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)  # AQI ~38
+        co = np.zeros((12, 3, 3), dtype=np.float32) # AQI 0
 
-        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=False)
 
         # AQI should be in Unhealthy category
         assert np.all(aqi[-1] > 150)
@@ -353,8 +360,9 @@ class TestCalculateAQI:
         o3 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI = 116.67
         no2 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI = 75.00
         so2 = np.full((12, 3, 3), 150.0, dtype=np.float32)  # AQI = 71.43
+        co = np.zeros((12, 3, 3), dtype=np.float32)  # AQI 0
 
-        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=False)
 
         # AQI should be 116.67 (max of O3)
         np.testing.assert_allclose(aqi[-1], 116.67, rtol=0.01)
@@ -371,8 +379,9 @@ class TestCalculateAQI:
         o3 = np.full((12, 5, 5), 100.0, dtype=np.float32)
         no2 = np.full((12, 5, 5), 80.0, dtype=np.float32)
         so2 = np.full((12, 5, 5), 70.0, dtype=np.float32)
+        co = np.zeros((12, 5, 5), dtype=np.float32)
 
-        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, use_nowcast=False)
+        aqi = calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=False)
 
         # AQI should vary spatially
         assert aqi[-1].min() < aqi[-1].max()
