@@ -252,7 +252,7 @@ class TestCalculateAQI:
         o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)  # AQI = 46.30
         no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)  # AQI = 40.00
         so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)  # AQI = 37.86
-        co = np.zeros((12, 3, 3), dtype=np.float32) # AQI 0
+        co = np.zeros((12, 3, 3), dtype=np.float32)  # AQI 0
 
         aqi = calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=False)
 
@@ -344,7 +344,7 @@ class TestCalculateAQI:
         o3 = np.full((12, 3, 3), 100.0, dtype=np.float32)  # AQI ~46
         no2 = np.full((12, 3, 3), 80.0, dtype=np.float32)  # AQI ~40
         so2 = np.full((12, 3, 3), 70.0, dtype=np.float32)  # AQI ~38
-        co = np.zeros((12, 3, 3), dtype=np.float32) # AQI 0
+        co = np.zeros((12, 3, 3), dtype=np.float32)  # AQI 0
 
         aqi = calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=False)
 
