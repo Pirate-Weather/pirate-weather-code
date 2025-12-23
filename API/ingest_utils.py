@@ -12,6 +12,20 @@ import numpy as np
 import xarray as xr
 from herbie import Path
 
+from API.constants.aqi_const import (
+    CO_AQI,
+    CO_BP,
+    NO2_AQI,
+    NO2_BP,
+    O3_AQI,
+    O3_BP,
+    PM10_AQI,
+    PM10_BP,
+    PM25_AQI,
+    PM25_BP,
+    SO2_AQI,
+    SO2_BP,
+)
 from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
 
 # Shared ingest constants
@@ -378,6 +392,143 @@ def interp_time_take_blend(
         out = da.concatenate(pieces, axis=VAX)
 
     return out
+
+
+# --- Air quality helpers (NowCast & EPA AQI) ---
+def calculate_nowcast_concentration(concentrations, num_hours=12):
+    """
+    Calculate the EPA NowCast weighted concentration for PM2.5 and PM10.
+    The NowCast algorithm weights recent hours more heavily than older hours,
+    making it more responsive to changing air quality conditions than a
+    simple average.
+    Args:
+        concentrations: Array of concentrations with time as the first dimension.
+                       Shape: (time, latitude, longitude)
+        num_hours: Number of hours to use in NowCast calculation (default 12)
+    Returns:
+        NowCast weighted concentration array with same shape as input
+    """
+    if concentrations.shape[0] < 3:
+        return concentrations
+
+    hours_to_use = min(num_hours, concentrations.shape[0])
+    nowcast_result = np.full_like(concentrations, np.nan)
+
+    for t in range(concentrations.shape[0]):
+        start_idx = max(0, t - hours_to_use + 1)
+        window = concentrations[start_idx : t + 1]
+
+        if window.shape[0] < 3:
+            nowcast_result[t] = concentrations[t]
+            continue
+
+        with np.errstate(invalid="ignore", divide="ignore"):
+            c_max = np.nanmax(window, axis=0)
+            c_min = np.nanmin(window, axis=0)
+            c_range = c_max - c_min
+            weight_factor = np.where(
+                c_max > 0, np.maximum(1 - c_range / c_max, 0.5), 0.5
+            )
+
+        num_window_hours = window.shape[0]
+        weights = np.zeros_like(window)
+        for i in range(num_window_hours):
+            hours_ago = num_window_hours - 1 - i
+            weights[i] = weight_factor**hours_ago
+
+        with np.errstate(invalid="ignore"):
+            weighted_sum = np.nansum(window * weights, axis=0)
+            weight_sum = np.nansum(np.where(~np.isnan(window), weights, 0), axis=0)
+            nowcast_result[t] = np.where(
+                weight_sum > 0, weighted_sum / weight_sum, np.nan
+            )
+
+    return nowcast_result
+
+
+def trailing_mean(conc, window):
+    """
+    Compute trailing window mean along time axis for array with shape (T, Y, X).
+    If window <= 1 returns conc. Handles NaNs by using nanmean over available points.
+    """
+    if conc is None:
+        return None
+    if window is None or window <= 1:
+        return conc
+
+    T = conc.shape[0]
+    out = np.full_like(conc, np.nan)
+    for t in range(T):
+        start = max(0, t - window + 1)
+        # nanmean handles NaNs and short windows
+        with np.errstate(invalid="ignore"):
+            out[t] = np.nanmean(conc[start : t + 1], axis=0)
+    return out
+
+
+def calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=True):
+    """Calculate Air Quality Index (AQI) based on EPA standards.
+
+    Returns the maximum AQI value among all pollutants for each grid cell and time.
+
+    Args:
+        pm25: PM2.5 concentration in µg/m³ (time, lat, lon).
+        pm10: PM10 concentration in µg/m³ (time, lat, lon).
+        o3: Ozone concentration in µg/m³ (time, lat, lon).
+        no2: NO2 concentration in µg/m³ (time, lat, lon).
+        so2: SO2 concentration in µg/m³ (time, lat, lon).
+        co: CO concentration in µg/m³ (time, lat, lon).
+        use_nowcast: Whether to use EPA NowCast for PM2.5/PM10 (default True).
+
+    Returns:
+        A numpy array of AQI values (0-500+ scale) with shape (time, lat, lon).
+    """
+
+    if use_nowcast:
+        pm25_nowcast = calculate_nowcast_concentration(pm25, num_hours=12)
+        pm10_nowcast = calculate_nowcast_concentration(pm10, num_hours=12)
+        aqi_pm25 = np.interp(pm25_nowcast, PM25_BP, PM25_AQI)
+        aqi_pm10 = np.interp(pm10_nowcast, PM10_BP, PM10_AQI)
+    else:
+        # When NowCast is disabled, use a 24-hour trailing average for PM2.5/PM10
+        pm25_avg = trailing_mean(pm25, 24)
+        pm10_avg = trailing_mean(pm10, 24)
+        aqi_pm25 = np.interp(pm25_avg, PM25_BP, PM25_AQI)
+        aqi_pm10 = np.interp(pm10_avg, PM10_BP, PM10_AQI)
+
+    # Apply trailing averages appropriate for pollutant averaging windows
+    # EPA AQI uses 8-hour averages for O3 and CO for hourly index values.
+    # Use 1-hour trailing mean for NO2 / SO2 (effectively the instantaneous value).
+    o3_avg = trailing_mean(o3, 8)
+    o3_1h = trailing_mean(o3, 1)
+    co_avg = trailing_mean(co, 8) if co is not None else None
+    no2_avg = trailing_mean(no2, 1) if no2 is not None else None
+    so2_avg = trailing_mean(so2, 1) if so2 is not None else None
+
+    def _interp_or_nan(arr, bp, aqi_arr, ref_shape):
+        if arr is None:
+            return np.full(ref_shape, np.nan, dtype=np.float32)
+        return np.interp(arr, bp, aqi_arr)
+
+    ref_shape = aqi_pm25.shape
+    aqi_o3_8h = _interp_or_nan(o3_avg, O3_BP, O3_AQI, ref_shape)
+    aqi_o3_1h = _interp_or_nan(o3_1h, O3_BP, O3_AQI, ref_shape)
+    aqi_no2 = _interp_or_nan(no2_avg, NO2_BP, NO2_AQI, ref_shape)
+    aqi_so2 = _interp_or_nan(so2_avg, SO2_BP, SO2_AQI, ref_shape)
+    aqi_co = _interp_or_nan(co_avg, CO_BP, CO_AQI, ref_shape)
+
+    # Include both 8-hour and 1-hour ozone AQI values (take the max later)
+    stack = [
+        aqi_pm25,
+        aqi_pm10,
+        aqi_o3_8h,
+        aqi_o3_1h,
+        aqi_no2,
+        aqi_so2,
+        aqi_co,
+    ]
+
+    return np.nanmax(np.stack(stack, axis=0), axis=0)
 
 
 def interpolate_temporal_gaps_efficiently(
