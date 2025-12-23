@@ -576,7 +576,7 @@ def _process_minute_items(
         InterPminute: Minutely interpolated data.
         minuteType: List of precipitation types.
         prep_intensity_unit: Precipitation intensity unit.
-        refc_used: Whether reflecitivity data was used or not in the request.
+        refc_used: Whether reflectivity data was used in the request.
 
     Returns:
         Tuple containing minute items and SI minute items.
@@ -603,24 +603,15 @@ def _process_minute_items(
     )
 
     if not refc_used:
-        minuteRainIntensity = zero_small_values(
-            minuteRainIntensity, threshold=PRECIP_NOISE_THRESHOLD_MMH
-        )
-        minuteSnowIntensity = zero_small_values(
-            minuteSnowIntensity, threshold=PRECIP_NOISE_THRESHOLD_MMH
-        )
-        minuteSleetIntensity = zero_small_values(
-            minuteSleetIntensity, threshold=PRECIP_NOISE_THRESHOLD_MMH
-        )
-        minuteProbability = zero_small_values(
-            minuteProbability, threshold=PRECIP_NOISE_THRESHOLD_MMH
-        )
-        minuteIntensityError = zero_small_values(
-            minuteIntensityError, threshold=PRECIP_NOISE_THRESHOLD_MMH
-        )
-        minuteIntensity = zero_small_values(
-            minuteIntensity, threshold=PRECIP_NOISE_THRESHOLD_MMH
-        )
+        for arr in [
+            minuteRainIntensity,
+            minuteSnowIntensity,
+            minuteSleetIntensity,
+            minuteProbability,
+            minuteIntensityError,
+            minuteIntensity,
+        ]:
+            zero_small_values(arr, threshold=PRECIP_NOISE_THRESHOLD_MMH)
 
     # If type is none, zero out everything
     # We need to reconstruct maxPchance or pass it in?
