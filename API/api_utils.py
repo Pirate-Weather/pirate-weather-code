@@ -84,7 +84,7 @@ def calculate_apparent_temperature(air_temp_c, humidity, wind, solar=None):
         )
     )
 
-    if solar is None:
+    if solar is None or np.isnan(solar):
         # Calculate apparent temperature in Celsius
         apparent_temp_c = (
             air_temp_c
