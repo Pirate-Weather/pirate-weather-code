@@ -919,6 +919,9 @@ def calculate_half_day_text(
     # Correct "medium-none" secondary condition to "medium-precipitation"
     if secondary_precip_condition == "medium-none":
         secondary_precip_condition = "medium-precipitation"
+    # Correct medium-ice secondary condition to "medium-freezing-rain"
+    if secondary_precip_condition == "medium-ice":
+        secondary_precip_condition = "medium-freezing-rain"
 
     # Add snow accumulation range to precip text if applicable
     # Convert mm to display units based on unit_system
