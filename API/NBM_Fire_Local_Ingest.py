@@ -130,7 +130,7 @@ while base_time is False:
         fxx=192,
         product="co",
         verbose=False,
-        priority=["aws", "nomdas"],
+        priority=["aws", "nomads"],
         save_dir=tmp_dir,
     )
     if latestRuns.grib:

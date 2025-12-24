@@ -94,7 +94,7 @@ latest_run = HerbieLatest(
     fxx=240,
     product="pgrb2.0p25",
     verbose=False,
-    priority=["aws"],
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 
@@ -214,7 +214,7 @@ FH_forecastsub = FastHerbie(
     fxx=gfs_file_range,
     product="pgrb2.0p25",
     verbose=False,
-    priority=["aws"],
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 
@@ -274,7 +274,7 @@ FH_forecastUV = FastHerbie(
     fxx=gfs_file_range,
     product="pgrb2b.0p25",
     verbose=False,
-    priority="aws",
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 

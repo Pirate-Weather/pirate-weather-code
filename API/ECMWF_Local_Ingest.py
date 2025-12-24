@@ -96,7 +96,7 @@ latest_run = HerbieLatest(
     fxx=240,
     product="oper",
     verbose=True,
-    priority=["aws"],
+    priority=["aws", "ecmwf"],
     save_dir=tmp_dir,
 )
 
@@ -326,7 +326,7 @@ FH_forecastsub = FastHerbie(
     fxx=ifsFileRange,
     product="oper",
     verbose=False,
-    priority=["aws"],
+    priority=["aws", "ecmwf"],
     save_dir=tmp_dir,
 )
 

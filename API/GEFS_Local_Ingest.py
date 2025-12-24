@@ -95,7 +95,7 @@ latest_run = Herbie_latest(
     product="atmos.25",
     verbose=True,
     member="avg",
-    priority="aws",
+    priority=["aws", "nomads"],
 )
 
 base_time = latest_run.date
@@ -180,7 +180,7 @@ while mem < 30:
         member=mem + 1,
         product="atmos.25",
         verbose=False,
-        priority="aws",
+        priority=["aws", "nomads"],
         save_dir=tmp_dir,
     )
 

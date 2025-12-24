@@ -85,7 +85,7 @@ latest_run = Herbie_latest(
     fxx=[6],
     product="subh",
     verbose=False,
-    priority="aws",
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 
@@ -182,7 +182,7 @@ FH_forecastsub = FastHerbie(
     fxx=hrrr_range1,
     product="subh",
     verbose=False,
-    priority="aws",
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 
