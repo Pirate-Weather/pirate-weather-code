@@ -13,7 +13,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6.0.0
+      - uses: actions/checkout@v6.0.1
       - uses: actions/setup-python@v6.1.0
         with:
           python-version: '3.13'
@@ -26,3 +26,7 @@ jobs:
         run: pytest -v tests/test_rtma_ingest.py
       - name: Run WMO Alerts geocode test
         run: pytest -v tests/test_wmo_alerts_geocode.py
+      - name: Run DWD Interp test
+        run: pytest -v tests/test_dwd_interp_flow.py
+      - name: Run DWD NaN Interp test
+        run: pytest -v tests/test_interpolate_nan_along_axis.py

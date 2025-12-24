@@ -108,7 +108,7 @@ def calculate_summary_text(
             num_precip_days=len(precipitation),
         )
     else:
-        c_icon = "sleet"
+        c_icon = "mixed"
 
     # If there are any days with thunderstorms occurring then calculate the text
     if numThunderstormDays > 0:
@@ -368,8 +368,8 @@ def calculate_precip_summary(
                 text,
             ]
         else:
-            # If the types are not the same then set the icon to sleet and use the mixed precipitation text (as is how Dark Sky did it)
-            c_icon = "sleet"
+            # If the types are not the same then set the icon to mixed and use the mixed precipitation text (as is how Dark Sky did it)
+            c_icon = "mixed"
             precipSummary = ["for-week", "mixed-precipitation"]
 
     return precipSummary, c_icon

@@ -1,4 +1,4 @@
-from API.responseLocal import _polar_is_all_day
+from API.utils.geo import _polar_is_all_day
 
 
 def test_polar_day_night_logic_northern():

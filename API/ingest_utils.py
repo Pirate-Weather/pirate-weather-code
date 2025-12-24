@@ -1,5 +1,5 @@
 # %% Script to contain the helper functions as part of the data ingest for Pirate Weather
-# Alexander Rey. July 17 2025
+# Alexander Rey. July 2025
 
 import re
 import sys
@@ -24,6 +24,7 @@ CHUNK_SIZES = {
     "ECMWF": 100,
     "NBM_Fire": 100,
     "RTMA": 100,
+    "DWD": 100,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -35,6 +36,7 @@ FINAL_CHUNK_SIZES = {
     "ECMWF": 3,
     "NBM_Fire": 5,
     "RTMA": 25,
+    "DWD": 5,
 }
 
 FORECAST_LEAD_RANGES = {
@@ -48,6 +50,9 @@ FORECAST_LEAD_RANGES = {
     "ECMWF_IFS_1": list(range(3, 144, 3)),
     "ECMWF_IFS_2": list(range(144, 241, 6)),
 }
+
+# Radius, in km, used for DWD model nearest-neighbor selection
+DWD_RADIUS = 50
 
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
@@ -266,11 +271,34 @@ def interp_time_take_blend(
     fill_value: float = np.nan,
     time_axis: int = 1,
 ) -> da.Array:
-    """
-    Interpolate along `time_axis` of a 4D array (V, T, Y, X) using gather+blend,
-    with optional nearest-neighbor override for selected variable indices.
+    r"""Interpolate model data along the time dimension via gather-and-blend.
 
-    Returns a Dask array with shape (V, T_new, Y, X) and dtype `dtype`.
+    The helper assumes the input has shape \(V, T, Y, X\) and that time is
+    the second axis. It gathers the values for the two surrounding stored
+    times using ``da.take``, then linearly blends them using the fractional
+    offset between ``stacked_timesUnix`` and ``hourly_timesUnix``. Points that
+    fall outside the time range defined by ``stacked_timesUnix`` are filled with
+    ``fill_value``. Optionally, a subset of variable indices may be overridden
+    with nearest-neighbor interpolation instead of the blended values.
+
+    Args:
+        arr: Chunked Dask array containing the forecast in \(V, T, Y, X\)
+            order. The time axis must already be a single chunk so gather
+            operations stay within chunk boundaries.
+        stacked_timesUnix: Known source timestamps to interpolate from (monotonic
+            increasing unix seconds).
+        hourly_timesUnix: Desired target timestamps; must lie within the range
+            spanned by ``stacked_timesUnix`` when possible.
+        nearest_vars: Optional variable indices that should use the closer
+            neighbor directly instead of linear blending (e.g., categorical
+            flags). Can be a single index or an iterable.
+        dtype: Output dtype for the interpolated array.
+        fill_value: Value used for times outside the available range.
+        time_axis: Axis index for time (must be 1 in this helper).
+
+    Returns:
+        A dask array shaped \(V, T_new, Y, X\) with interpolated (or overridden)
+        values and ``dtype``.
     """
     if arr.ndim != 4:
         raise ValueError("Expected arr with dims (V, T, Y, X).")
@@ -295,8 +323,14 @@ def interp_time_take_blend(
     if not (len(idx1) == T_new and len(w) == T_new and len(valid) == T_new):
         raise ValueError("idx0, idx1, w, and valid must all have length T_new.")
 
-    # Ensure time is one chunk so gather (`da.take`) stays within chunk boundaries
-    arr_t = arr.rechunk({TAX: -1})
+    # Ensure time axis already fits in one chunk so gather (`da.take`) stays within chunk boundaries
+    time_chunks = arr.chunks[TAX]
+    if len(time_chunks) != 1:
+        raise ValueError(
+            "time axis must be a single chunk; please rechunk with ``arr.rechunk({time_axis: -1})`` "
+            f"before calling (got {len(time_chunks)} chunks)."
+        )
+    arr_t = arr
 
     # Gather neighbors along time
     y0 = da.take(arr_t, idx0, axis=TAX)  # (V, T_new, Y, X)
@@ -344,3 +378,82 @@ def interp_time_take_blend(
         out = da.concatenate(pieces, axis=VAX)
 
     return out
+
+
+def interpolate_temporal_gaps_efficiently(
+    ds_chunked, nearest_vars=None, max_gap_hours=3, time_dim="time"
+):
+    """
+    Interpolates temporal gaps and extrapolates edges efficiently in a sparse Dask/Xarray dataset.
+
+    Logic:
+    1. Re-chunks data to be contiguous in time ('pencils').
+    2. Short-circuits empty (all-NaN) spatial chunks.
+    3. Interpolates internal gaps (Linear by default, Nearest for specific vars).
+    4. Extrapolates edges (Nearest neighbor / Forward & Back fill) for ALL vars.
+
+    Args:
+        ds_chunked (xr.Dataset): Input dataset. Must be chunked with time as a single chunk.
+        nearest_vars (list): List of variable names to use 'nearest' interpolation for
+                             (e.g., flags, codes). Default is 'linear' for others.
+        max_gap_hours (int): Max gap size to interpolate internally.
+                             Extrapolation is applied to the ends regardless of gap size.
+        time_dim (str): Name of the time dimension.
+
+    Returns:
+        xr.Dataset: Processed dataset.
+    """
+
+    if nearest_vars is None:
+        nearest_vars = []
+
+    # Helper function applied to each Dask block
+    def _interpolate_block(block, time_coords, method):
+        # OPTIMIZATION: Short-circuit empty blocks
+        # If the entire spatial chunk is NaN, return immediately.
+        if np.all(np.isnan(block)):
+            return block
+
+        # Wrap numpy block in DataArray for convenient Xarray methods
+        da_temp = xr.DataArray(
+            block, dims=(time_dim, "y", "x"), coords={time_dim: time_coords}
+        )
+
+        # 1. Interpolate Internal Gaps
+        # use_coordinate=True ensures we respect actual time steps, not just index count
+        filled = da_temp.interpolate_na(
+            dim=time_dim, method=method, limit=max_gap_hours, use_coordinate=True
+        )
+
+        # 2. Extrapolate Edges (Nearest Neighbour)
+        # We use ffill (forward) and bfill (backward) to extend the last known
+        # valid value to the start/end of the series.
+        filled = filled.ffill(time_dim).bfill(time_dim)
+
+        return filled.values
+
+    # Function to map over every variable
+    def _process_variable(da_var):
+        # Skip coordinate variables or vars without time
+        if time_dim not in da_var.dims:
+            return da_var
+
+        # Determine interpolation method for this specific variable
+        # Default is 'linear', unless specified in nearest_vars
+        interp_method = "nearest" if da_var.name in nearest_vars else "linear"
+
+        time_coords = da_var[time_dim].values
+
+        # dask.map_blocks lets us run the logic on every chunk in parallel
+        processed_data = da_var.data.map_blocks(
+            _interpolate_block,
+            time_coords=time_coords,
+            method=interp_method,
+            dtype=da_var.dtype,
+            chunks=da_var.chunks,
+        )
+
+        return da_var.copy(data=processed_data)
+
+    # Execute
+    return ds_chunked.map(_process_variable)

@@ -77,29 +77,34 @@ PRECIP_IDX = {
     "ice": 2,
     "sleet": 3,
     "rain": 4,
+    "mixed": 5,
 }
 
 PRECIP_NOISE_THRESHOLD_MMH = (
     0.01  # Threshold in mm/h to filter out noise in precipitation intensity
 )
 
+PRECIP_PROB_NOISE_THRESHOLD = (
+    0.05  # Threshold in percentage to filter out noise in precipitation probability
+)
+PRECIP_ACCUM_NOISE_THRESHOLD = (
+    0.0005  # Threshold in mm to filter out noise in precipitation accumulation
+)
+
 # API versioning and ingest version constants
 # Version scheme is: Major.Minor.Patch
-API_VERSION = "V2.8.5"
-
-# Command priorities
-NICE_PRIORITY = 20
+API_VERSION = "V2.9.0"
 
 # Generic API constants
 MAX_S3_RETRIES = 5
 S3_BASE_DELAY = 1
-S3_MAX_BANDWIDTH = 100000000
-LARGEST_DIR_INIT = -1
 
 # Temperature thresholds
 TEMPERATURE_UNITS_THRESH = {"c": 0, "f": 32}
-TEMP_THRESHOLD_RAIN_C = 274.15
-TEMP_THRESHOLD_SNOW_C = 272.15
+TEMP_THRESHOLD_RAIN_C = 1
+TEMP_THRESHOLD_SNOW_C = -1
+# Temperature threshold for WMO code validation - well above freezing to account for observation errors
+TEMP_THRESHOLD_WMO_FROZEN_C = 5.0
 
 # Zarr read retry constants
 MAX_ZARR_READ_RETRIES = 4
@@ -156,6 +161,8 @@ CONVERSION_FACTORS = {
     "cloud_cover_percentage": 0.01,
     "joules_to_watts": 3600,
     "ozone_to_dobson": 46696,
+    # Conversion factor from kilometers to miles
+    "km_to_miles": 0.621371,
 }
 
 # Grouped RTMA_RU visibility constants

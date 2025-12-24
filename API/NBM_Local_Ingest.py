@@ -97,7 +97,7 @@ latest_run = Herbie_latest(
     fxx=[190, 191, 192, 193, 194, 195],
     product="co",
     verbose=False,
-    priority=["aws"],
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 
@@ -219,7 +219,7 @@ FH_forecastsub = FastHerbie(
     fxx=nbm_range,
     product="co",
     verbose=False,
-    priority=["aws"],
+    priority=["aws", "nomads"],
     max_threads=1,
     save_dir=tmp_dir,
 )
@@ -333,7 +333,7 @@ FH_forecastsub = FastHerbie(
     fxx=nbm_range1,
     product="co",
     verbose=False,
-    priority=["aws"],
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 
@@ -365,7 +365,7 @@ FH_forecastsub2 = FastHerbie(
     fxx=nbm_range2,
     product="co",
     verbose=False,
-    priority=["aws"],
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 
@@ -460,7 +460,7 @@ FH_forecastsub = FastHerbie(
     fxx=nbm_range1,
     product="co",
     verbose=False,
-    priority=["aws"],
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 
@@ -491,7 +491,7 @@ FH_forecastsub2 = FastHerbie(
     fxx=nbm_range2,
     product="co",
     verbose=False,
-    priority=["aws"],
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 

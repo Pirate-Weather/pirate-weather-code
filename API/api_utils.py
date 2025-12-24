@@ -1,13 +1,18 @@
 # %% Script to contain the helper functions as part of the API for Pirate Weather
 # Alexander Rey. October 2025
 import logging
+from typing import List, MutableMapping, Union
 
 import metpy as mp
 import numpy as np
 
-from API.constants.api_const import APPARENT_TEMP_CONSTS, APPARENT_TEMP_SOLAR_CONSTS
-from API.constants.clip_const import CLIP_TEMP
-from API.constants.shared_const import KELVIN_TO_CELSIUS, MISSING_DATA
+from API.constants.api_const import (
+    APPARENT_TEMP_CONSTS,
+    APPARENT_TEMP_SOLAR_CONSTS,
+    PRECIP_NOISE_THRESHOLD_MMH,
+    TEMP_THRESHOLD_WMO_FROZEN_C,
+)
+from API.constants.shared_const import MISSING_DATA
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +58,7 @@ def replace_nan(obj, replacement=MISSING_DATA):
         return obj
 
 
-def calculate_apparent_temperature(air_temp, humidity, wind, solar=None):
+def calculate_apparent_temperature(air_temp_c, humidity, wind, solar=None):
     """
     Calculates the apparent temperature based on air temperature, wind speed, humidity and solar radiation if provided.
 
@@ -63,11 +68,8 @@ def calculate_apparent_temperature(air_temp, humidity, wind, solar=None):
     - wind (float): Wind speed in meters per second
 
     Returns:
-    - float: Apparent temperature in Kelvin
+    - float: Apparent temperature in Celsuis
     """
-
-    # Convert air_temp from Kelvin to Celsius for the formula parts that use Celsius
-    air_temp_c = air_temp - KELVIN_TO_CELSIUS
 
     # Calculate water vapor pressure 'e'
     # Ensure humidity is not 0 for calculation, replace with a small non-zero value if needed
@@ -82,7 +84,10 @@ def calculate_apparent_temperature(air_temp, humidity, wind, solar=None):
         )
     )
 
-    if solar is None:
+    if solar is None or np.any(np.isnan(solar)):
+        logger.info(
+            "Solar raditation is not valid. Falling back to using apparent temperature calculations without solar radiation..."
+        )
         # Calculate apparent temperature in Celsius
         apparent_temp_c = (
             air_temp_c
@@ -107,16 +112,8 @@ def calculate_apparent_temperature(air_temp, humidity, wind, solar=None):
             + APPARENT_TEMP_SOLAR_CONSTS["const"]
         )
 
-    # Convert back to Kelvin
-    apparent_temp_k = apparent_temp_c + KELVIN_TO_CELSIUS
-
-    # Clip between -90 and 60
-    return clipLog(
-        apparent_temp_k,
-        CLIP_TEMP["min"],
-        CLIP_TEMP["max"],
-        "Apparent Temperature Current",
-    )
+    # Return apparent temperature in Celsius
+    return apparent_temp_c
 
 
 def clipLog(data, min_val, max_val, name):
@@ -235,7 +232,7 @@ def estimate_visibility_gultepe_rh_pr_numpy(
 
     # ------------------- RH via MetPy -------------------
     Rh_frac = _rh_from_td(
-        (T2m * mp.units.units.degK), (Td2m * mp.units.units.degK)
+        (T2m * mp.units.units.degC), (Td2m * mp.units.units.degC)
     ).magnitude
     RH = np.clip(Rh_frac * 100.0, p["rh_min"], p["rh_max"])  # percent
 
@@ -318,13 +315,12 @@ def select_daily_precip_type(
     Returns:
         The updated `maxPchanceDay` numpy array.
     """
-    # If rain, snow and ice are all present, choose sleet (code 3)
+    # If rain, snow and ice are all present, choose mixed (code 5)
     all_types = (
         (InterPdaySum[:, DATA_DAY["rain"]] > 0)
         & (InterPdaySum[:, DATA_DAY["snow"]] > 0)
         & (InterPdaySum[:, DATA_DAY["ice"]] > 0)
     )
-    maxPchanceDay[all_types] = 3
 
     # Use the type with the greatest accumulation as baseline
     precip_accum = np.stack(
@@ -353,7 +349,208 @@ def select_daily_precip_type(
         "snow"
     ]
     maxPchanceDay[InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit)] = PRECIP_IDX[
-        "ice"
+        "sleet"
     ]
 
+    # If we have all types map the type to mixed
+    maxPchanceDay[all_types] = PRECIP_IDX["mixed"]
+
     return maxPchanceDay
+
+
+def map_wmo4677_to_ptype(
+    ptype_codes: np.ndarray, temperature_c: np.ndarray | None = None
+) -> np.ndarray:
+    """
+    Map WMO 4677 present-weather codes (50-99) to internal precip type categories.
+
+    Returns an integer array with the following mapping:
+        0 -> none/other
+        1 -> snow
+        2 -> ice (pellets, hail)
+        3 -> freezing rain/drizzle
+        4 -> rain
+
+    The mapping follows the WMO code ranges and uses conservative grouping:
+        - Freezing drizzle/rain codes (56,57,66,67) -> freezing (3)
+        - Ice pellets / snow grains / hail-related codes (76-79, 87-90, 96-99) -> ice (2)
+        - Snow and snow showers (70-75, 83-86, 93-94) -> snow (1)
+        - Rain and drizzle ranges, plus mixed codes -> rain (4)
+
+    Notes:
+        - Some WMO codes represent mixed precipitation (e.g., rain+snow). Those are
+            mapped to the category most representative for display (rain or snow) depending
+            on the code. This function documents the chosen grouping.
+        - If temperature_c is provided, snow/ice codes are overridden to rain when
+            temperature is above TEMP_THRESHOLD_WMO_FROZEN_C (unrealistic for frozen precipitation).
+
+    Args:
+        ptype_codes: array-like of numeric WMO 4677 codes (may contain NaN)
+        temperature_c: Optional array of temperatures in Celsius for validation
+
+    Returns:
+        np.ndarray of floats (integer category codes as floats) same shape as input
+        with MISSING_DATA where input was NaN.
+    """
+    codes = np.asarray(ptype_codes)
+    # Use float dtype so we can store MISSING_DATA (NaN) without conversion errors
+    out = np.zeros_like(codes, dtype=float)
+
+    nan_mask = np.isnan(codes)
+
+    # Define code groups (inclusive ranges/lists)
+    freezing_codes = [56, 57, 66, 67]
+    ice_codes = list(range(76, 80)) + [87, 88, 89, 90, 96, 99]
+    snow_codes = list(range(70, 76)) + [83, 84, 85, 86, 93, 94]
+    rain_codes = (
+        list(range(50, 56))
+        + list(range(58, 65))
+        + [68, 69]
+        + list(range(80, 83))
+        + [91, 92, 95, 97, 98]
+    )
+
+    # Assign categories; order does not matter because groups are disjoint in our choice
+    if codes.size > 0:
+        vals = codes.copy()
+        vals[nan_mask] = -999
+        vals = vals.astype(int)
+
+        out[np.isin(vals, snow_codes)] = 1
+        out[np.isin(vals, ice_codes)] = 2
+        out[np.isin(vals, freezing_codes)] = 3
+        out[np.isin(vals, rain_codes)] = 4
+
+        # Temperature validation: Override snow/ice/freezing codes to rain when too warm
+        # Use TEMP_THRESHOLD_WMO_FROZEN_C as threshold - well above freezing to account for observation errors
+        if temperature_c is not None:
+            temp_arr = np.asarray(temperature_c)
+            try:
+                # This will raise ValueError if shapes are incompatible for broadcasting
+                warm_mask = temp_arr > TEMP_THRESHOLD_WMO_FROZEN_C
+                # Override snow (1), ice (2), and freezing (3) to rain (4) when warm
+                frozen_precip_mask = np.isin(out, [1, 2, 3])
+                override_mask = warm_mask & frozen_precip_mask
+                out[override_mask] = 4
+            except ValueError as e:
+                # Shapes incompatible for broadcasting - skip temperature validation
+                # This is expected when temperature data is unavailable or mismatched
+                logger.debug(
+                    "Temperature validation skipped due to shape mismatch: %s (codes: %s, temp: %s)",
+                    e,
+                    codes.shape,
+                    temp_arr.shape,
+                )
+
+    # Use MISSING_DATA for NaNs
+    out[nan_mask] = MISSING_DATA
+
+    return out
+
+
+def zero_small_values(
+    array: np.ndarray, threshold: float = PRECIP_NOISE_THRESHOLD_MMH
+) -> np.ndarray:
+    """Clamp near-zero values to zero to reduce floating noise."""
+    array[np.abs(array) < threshold] = 0.0
+    return array
+
+
+# Precomputed constants – built once at import time, not every call
+_FIELDS_V_LT_2 = (
+    "cape",
+    "capeMax",
+    "capeMaxTime",
+    "currentDayIce",
+    "currentDayLiquid",
+    "currentDaySnow",
+    "dawnTime",
+    "duskTime",
+    "feelsLike",
+    "fireIndex",
+    "fireIndexMax",
+    "fireIndexMaxTime",
+    "iceAccumulation",
+    "iceIntensity",
+    "iceIntensityMax",
+    "liquidAccumulation",
+    "liquidIntensityMax",
+    "rainIntensity",
+    "rainIntensityMax",
+    "sleetIntensity",
+    "smoke",
+    "smokeMax",
+    "smokeMaxTime",
+    "snowAccumulation",
+    "snowIntensity",
+    "snowIntensityMax",
+    "solar",
+    "solarMax",
+    "solarMaxTime",
+)
+
+_FIELDS_TM_BASIC = (
+    "nearestStormDistance",
+    "nearestStormBearing",
+    "precipProbability",
+    "humidity",
+    "visibility",
+    "uvIndex",
+    "uvIndexTime",
+    "precipIntensityError",
+    "cape",  # overlaps with _FIELDS_V_LT_2
+    "solar",  # overlaps with _FIELDS_V_LT_2
+)
+
+
+DictOrList = Union[MutableMapping, List[MutableMapping]]
+
+
+def remove_conditional_fields(
+    data: DictOrList,
+    version: float,
+    time_machine: bool,
+    tm_extra: bool,
+) -> DictOrList:
+    """Removes output fields based on version and request type.
+
+    This function modifies the input data. It works with either a
+    single dictionary or a list of dictionaries.
+
+    Args:
+        data (DictOrList): The data to filter, a dict or list of dicts.
+        version (float): The API version.
+        time_machine (bool): Whether it's a Time Machine request.
+        tm_extra (bool): Whether extra Time Machine fields are requested.
+
+    Returns:
+        DictOrList: The modified data.
+    """
+    # Build a *set* to avoid duplicate pops ("cape", "solar" overlap)
+    fields_to_remove = set()
+
+    if version < 2:
+        fields_to_remove.update(_FIELDS_V_LT_2)
+
+    if time_machine and not tm_extra:
+        fields_to_remove.update(_FIELDS_TM_BASIC)
+
+    if not fields_to_remove:
+        return data
+
+    # Fast path: list of dicts
+    if isinstance(data, list):
+        for item in data:
+            if not isinstance(item, dict):
+                continue  # skip non-dicts defensively
+            pop = item.pop  # cache bound method to avoid repeated lookups
+            for field in fields_to_remove:
+                pop(field, None)
+    else:
+        # Single dict
+        if isinstance(data, dict):
+            pop = data.pop
+            for field in fields_to_remove:
+                pop(field, None)
+
+    return data
