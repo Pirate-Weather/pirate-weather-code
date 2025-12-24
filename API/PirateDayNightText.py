@@ -879,6 +879,10 @@ def calculate_half_day_text(
                 elif total_rain_accum > 0:
                     most_common_overall_precip_type = "rain"
 
+            # If the most common precipitation type is ice change to freezing rain to fix text summary issues
+            if most_common_overall_precip_type == "ice":
+                most_common_overall_precip_type = "freezing-rain"
+
             # Promote to stronger precip if significant accumulation is forecast (thresholds in mm)
             if (
                 total_rain_accum > (DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * 10)
@@ -915,6 +919,9 @@ def calculate_half_day_text(
     # Correct "medium-none" secondary condition to "medium-precipitation"
     if secondary_precip_condition == "medium-none":
         secondary_precip_condition = "medium-precipitation"
+    # Correct medium-ice secondary condition to "medium-freezing-rain"
+    if secondary_precip_condition == "medium-ice":
+        secondary_precip_condition = "medium-freezing-rain"
 
     # Add snow accumulation range to precip text if applicable
     # Convert mm to display units based on unit_system

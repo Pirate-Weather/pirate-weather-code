@@ -321,7 +321,6 @@ def select_daily_precip_type(
         & (InterPdaySum[:, DATA_DAY["snow"]] > 0)
         & (InterPdaySum[:, DATA_DAY["ice"]] > 0)
     )
-    maxPchanceDay[all_types] = PRECIP_IDX["mixed"]
 
     # Use the type with the greatest accumulation as baseline
     precip_accum = np.stack(
@@ -350,8 +349,11 @@ def select_daily_precip_type(
         "snow"
     ]
     maxPchanceDay[InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit)] = PRECIP_IDX[
-        "ice"
+        "sleet"
     ]
+
+    # If we have all types map the type to mixed
+    maxPchanceDay[all_types] = PRECIP_IDX["mixed"]
 
     return maxPchanceDay
 

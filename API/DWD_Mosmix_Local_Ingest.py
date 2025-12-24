@@ -109,7 +109,7 @@ api_target_numerical_variables = [
 # a tested implementation that supports pint units.
 
 
-def parse_mosmix_kml(kml_filepath):
+def parse_mosmix_kml(kml_filepath: str):
     """
     Parses a DWD MOSMIX KML/KMZ file and extracts forecast data into a Pandas DataFrame.
     It reads global forecast time steps and station-specific parameters.
@@ -735,7 +735,7 @@ def _clear_directory(path):
                 shutil.rmtree(entry.path)
             else:
                 os.remove(entry.path)
-        except Exception:
+        except (OSError, PermissionError):
             logging.warning(f"Could not remove {entry.path} during clear_directory.")
 
 
@@ -810,7 +810,7 @@ if save_type == "S3":
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to DWD_MOSMIX, ending")
+            logging.info("No Update to DWD_MOSMIX, ending")
             sys.exit()
 
 else:
@@ -824,7 +824,7 @@ else:
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to DWD_MOSMIX, ending")
+            logging.info("No Update to DWD_MOSMIX, ending")
             sys.exit()
 
 
@@ -903,7 +903,7 @@ for i in range(history_period, 0, -1):
             ds_hist = xr.open_dataset(store, engine="zarr", chunks="auto")
             historic_datasets.append(ds_hist)
             continue
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             logging.warning(f"Error loading cached {hist_zarr_path}: {e}")
             # Fallback to re-download if load fails? Or just skip?
             # Let's try to re-process.
