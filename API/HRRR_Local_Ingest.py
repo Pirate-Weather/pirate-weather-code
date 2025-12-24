@@ -87,7 +87,13 @@ if save_type == "Download":
 T0 = time.time()
 
 latest_run = Herbie_latest(
-    model="hrrr", n=6, freq="1h", fxx=[18], product="sfc", verbose=False, priority="aws"
+    model="hrrr",
+    n=6,
+    freq="1h",
+    fxx=[18],
+    product="sfc",
+    verbose=False,
+    priority=["aws", "google", "nomads"],
 )
 
 base_time = latest_run.date
@@ -189,7 +195,7 @@ FH_forecastsub = FastHerbie(
     fxx=hrrr_range1,
     product="sfc",
     verbose=False,
-    priority="aws",
+    priority=["aws", "google", "nomads"],
     save_dir=tmp_dir,
 )
 
@@ -431,7 +437,7 @@ for i in range(his_period, -1, -1):
         fxx=fxx,
         product="sfc",
         verbose=False,
-        priority=["aws", "nomads"],
+        priority=["aws", "google", "nomads"],
         save_dir=tmp_dir,
     )
 
