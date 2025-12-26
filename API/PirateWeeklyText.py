@@ -609,5 +609,7 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
     # If we somehow have a generic precipitation icon we use rain instead
     if c_icon == "precipitation":
         c_icon = "rain"
+    elif c_icon == "mixed" and icon != "pirate":
+        c_icon = "sleet"
 
     return c_text, c_icon

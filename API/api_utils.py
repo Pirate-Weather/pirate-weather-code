@@ -553,4 +553,24 @@ def remove_conditional_fields(
             for field in fields_to_remove:
                 pop(field, None)
 
+    # For older API versions, downgrade precip types that didn't exist
+    # in v1 responses. Keep internal calculations using 'ice'/'mixed',
+    # but map them to 'sleet' in the final API output when version < 2.
+    if version is not None and version < 2:
+
+        def _downgrade_precip(obj):
+            if isinstance(obj, list):
+                for it in obj:
+                    if not isinstance(it, dict):
+                        continue
+                    val = it.get("precipType")
+                    if isinstance(val, str) and val in ("ice", "mixed"):
+                        it["precipType"] = "sleet"
+            elif isinstance(obj, dict):
+                val = obj.get("precipType")
+                if isinstance(val, str) and val in ("ice", "mixed"):
+                    obj["precipType"] = "sleet"
+
+        _downgrade_precip(data)
+
     return data
