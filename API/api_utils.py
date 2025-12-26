@@ -559,17 +559,15 @@ def remove_conditional_fields(
     if version is not None and version < 2:
 
         def _downgrade_precip(obj):
-            if isinstance(obj, list):
-                for it in obj:
-                    if not isinstance(it, dict):
-                        continue
-                    val = it.get("precipType")
-                    if isinstance(val, str) and val in ("ice", "mixed"):
-                        it["precipType"] = "sleet"
-            elif isinstance(obj, dict):
-                val = obj.get("precipType")
-                if isinstance(val, str) and val in ("ice", "mixed"):
-                    obj["precipType"] = "sleet"
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    if key == "precipType" and isinstance(value, str) and value in ("ice", "mixed"):
+                        obj[key] = "sleet"
+                    elif isinstance(value, (dict, list)): # Only recurse if it's a dict or list
+                        _downgrade_precip(value)
+            elif isinstance(obj, list):
+                for item in obj:
+                    _downgrade_precip(item)
 
         _downgrade_precip(data)
 

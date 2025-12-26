@@ -258,8 +258,8 @@ def calculate_precip_text(
     ):
         if precipType == "none":
             c_icon = "rain"  # Fallback icon
-        elif precipType == "mixed" and is_pirate_icon:
-            c_icon = "mixed"
+        elif precipType == "mixed":
+            c_icon = "mixed" if is_pirate_icon else "sleet"
         elif precipType == "ice":
             c_icon = "sleet"
         else:
