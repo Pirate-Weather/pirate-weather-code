@@ -582,7 +582,7 @@ def calculate_vis_text(
     # If we have strong winds.
     wind_too_strong = False
     # Set smoke to 0 to fix smoke comparisons when smoke is NaN
-    smoke = np.nan_to_num(smoke, 0)
+    smoke = np.nan_to_num(smoke, nan=0)
 
     # If temp, dewPoint or vis are missing, return None appropriately for the mode.
     if any(np.isnan(x) for x in (temp, dewPoint, vis)):
