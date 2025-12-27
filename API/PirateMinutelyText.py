@@ -167,8 +167,8 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
 
         # Ensure the per-type maxima are the true maxima across the minute array
 
-    def _max_from_idx_list(idx_list):
-        return max((minuteArr[i]["precipIntensity"] for i in idx_list), default=0)
+    def _max_from_idx_list(idx_list: list) -> float:
+        return max((minuteArr[i]["precipIntensity"] for i in idx_list), default=0.0)
 
     rainMaxIntensity = _max_from_idx_list(rainIndex)
     snowMaxIntensity = _max_from_idx_list(snowIndex)
