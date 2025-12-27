@@ -166,6 +166,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
             precipIndex.append(idx)
 
         # Ensure the per-type maxima are the true maxima across the minute array
+
     def _max_from_idx_list(idx_list):
         return max((minuteArr[i]["precipIntensity"] for i in idx_list), default=0)
 
