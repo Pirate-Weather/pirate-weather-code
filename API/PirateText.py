@@ -131,7 +131,7 @@ def calculate_text(
             else:
                 c_text = precipText
     # If there is visibility text then use that and join with humidity if it exists
-    elif visText is not None:
+    elif visText is not None and windText is None:
         if humidityText is not None:
             c_text = ["and", visText, humidityText]
         else:
@@ -161,7 +161,7 @@ def calculate_text(
     elif visIcon is not None:
         c_icon = visIcon
     # If wind icon use that
-    elif windIcon is not None:
+    elif windIcon is not None and windIcon is None:
         c_icon = windIcon
     # Otherwise use the sky icon
     else:
