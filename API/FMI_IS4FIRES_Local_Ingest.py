@@ -26,7 +26,6 @@ import xarray as xr
 from dask.diagnostics import ProgressBar
 
 from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_utils import CHUNK_SIZES
 from API.silam_conversion import KG_M3_TO_UG_M3
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -54,8 +53,8 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
-# Define the processing chunk size - use GFS chunk sizes as IS4FIRES is global data
-processChunk = CHUNK_SIZES.get("GFS", 50)
+# Define the processing chunk size - use 50 for IS4FIRES global data (same as GFS)
+processChunk = 50
 
 # IS4FIRES variable names and units:
 # - cnc_PM_FRP: Fire-related particulate matter in kg/m³ (need conversion to µg/m³)
@@ -186,19 +185,18 @@ def _make_nan_dataarray(
 
 # Process PM_FRP variable (Fire-related particulate matter from wildfires)
 # cnc_PM_FRP represents PM2.5 from wildfire smoke
-pm_frp_var = "cnc_PM_FRP"
-if pm_frp_var in xarray_is4fires_data:
+if "cnc_PM_FRP" in xarray_is4fires_data:
     xarray_processed["cnc_PM_FRP"] = (
-        xarray_is4fires_data[pm_frp_var] * KG_M3_TO_UG_M3
+        xarray_is4fires_data["cnc_PM_FRP"] * KG_M3_TO_UG_M3
     ).astype(np.float32)
     xarray_processed["cnc_PM_FRP"].attrs["units"] = "µg/m³"
     xarray_processed["cnc_PM_FRP"].attrs["long_name"] = (
         "Fire-related particulate matter (PM2.5) from wildfire smoke"
     )
     xarray_processed["cnc_PM_FRP"].attrs["source"] = "FMI IS4FIRES v2.0"
-    logger.info(f"Loaded and converted {pm_frp_var} from kg/m³ to µg/m³")
+    logger.info("Loaded and converted cnc_PM_FRP from kg/m³ to µg/m³")
 else:
-    logger.warning(f"{pm_frp_var} not found in dataset")
+    logger.warning("cnc_PM_FRP not found in dataset")
     xarray_processed["cnc_PM_FRP"] = _make_nan_dataarray(
         xarray_processed.time, xarray_processed.latitude, xarray_processed.longitude
     )
