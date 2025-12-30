@@ -158,10 +158,10 @@ def calculate_text(
         else:
             c_icon = precipIcon
     # If visibility icon use that
-    elif visIcon is not None:
+    elif visIcon is not None and windIcon is None:
         c_icon = visIcon
     # If wind icon use that
-    elif windIcon is not None and windIcon is None:
+    elif windIcon is not None:
         c_icon = windIcon
     # Otherwise use the sky icon
     else:
