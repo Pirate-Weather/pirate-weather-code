@@ -259,7 +259,7 @@ def calculate_precip_text(
         if precipType == "none":
             c_icon = "rain"  # Fallback icon
         elif precipType == "mixed":
-            c_icon = "mixed"
+            c_icon = "mixed" if is_pirate_icon else "sleet"
         elif precipType == "ice":
             c_icon = "sleet"
         else:
@@ -581,6 +581,8 @@ def calculate_vis_text(
     mistThresh = MIST_THRESHOLD_METERS
     # If we have strong winds.
     wind_too_strong = False
+    # Set smoke to 0 to fix smoke comparisons when smoke is NaN
+    smoke = np.nan_to_num(smoke, nan=0)
 
     # If temp, dewPoint or vis are missing, return None appropriately for the mode.
     if any(np.isnan(x) for x in (temp, dewPoint, vis)):
