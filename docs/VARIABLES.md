@@ -2,6 +2,15 @@
 
 This document outlines the steps to add a new meteorological variable to an existing weather model within the Pirate Weather codebase and integrate it into the API response. This process involves updating the data ingestion logic and then modifying the API's forecasting logic.
 
+**Note:** The Pirate Weather codebase has been refactored into a modular structure. The main API response logic is now split across multiple modules in the `API/` directory, including:
+- `API/hourly/` - Hourly forecast generation
+- `API/daily/` - Daily forecast aggregation
+- `API/current/` - Current conditions
+- `API/minutely/` - Minutely precipitation forecasts
+- `API/constants/` - Shared constants and configuration
+- `API/utils/` - Utility functions
+- `API/legacy/` - Backward compatibility helpers
+
 ## Phase 1: Modifying the Data Ingestion Script
 
 This phase focuses on ensuring the new variable is retrieved and saved alongside the existing data for a specific model.
@@ -34,73 +43,126 @@ This phase focuses on ensuring the new variable is retrieved and saved alongside
 5.  **Reprocess Existing Data (Important)**:
     * To ensure the API can access the new variable for past model runs, you will likely need to re-run the ingestion script for historical data or for recent model runs that are missing this variable. This will overwrite existing Zarr files with updated versions that include your new data.
 
-## Phase 2: Integrating into the API (`responseLocal.py`)
+## Phase 2: Integrating into the API
 
 This phase involves making the new variable available in the API's forecasting logic and ensuring it appears in the JSON response, with version control.
 
-1.  **Update Zarr Variable Tuples (if applicable)**:
-    * In `API/responseLocal.py`, locate the `zarrVars` tuples (e.g., `GFSzarrVars`, `HRRRHzarrVars`, `NBMzarrVars`). These tuples define the order and names of variables read from the Zarr files.
-    * Add your new variable's internal name to the appropriate tuple, maintaining the correct index.
+1.  **Update Data Constants**:
+    * In `API/constants/forecast_const.py`, locate the appropriate data dictionary (`DATA_HOURLY`, `DATA_CURRENT`, `DATA_MINUTELY`, or `DATA_DAY`). These dictionaries define the column indices for variables in the interpolation arrays.
+    * Add your new variable to the appropriate dictionary with the next available index.
     * **Example**:
-        ```
-        GFSzarrVars = (
-            "time",
-            "VIS_surface",
+        ```python
+        # In API/constants/forecast_const.py
+        DATA_HOURLY = {
+            "time": 0,
+            "type": 1,
             # ... other variables ...
-            "HPBL_surface", # New variable added here
-        )
+            "ice_intensity": 31,
+            "boundary_layer_height": 32,  # New variable added here
+        }
         ```
 
-2.  **Extend Data Arrays (`InterPhour`, `InterPminute`, `InterPcurrent`)**:
-    * Identify which time-series array (hourly, minutely, or currently) your new variable will populate. Most new variables will be hourly.
-    * Increase the size of the relevant `np.zeros` array to accommodate the new column.
-    * Populate the new column with data from your model. This will often involve similar interpolation/selection logic as existing variables (e.g., `np.choose` to pick the best source based on model hierarchy).
-    * **Example (adding to `InterPhour`)**:
+2.  **Extend Data Arrays and Add to Data Inputs**:
+    * The main interpolation arrays (`InterPhour`, `InterPminute`, `InterPcurrent`) are now automatically sized based on the constants in `forecast_const.py`.
+    * Add your new variable to the data preparation logic in `API/data_inputs.py` or `API/forecast_sources.py`:
+        * If it's a simple model variable, add it to the appropriate inputs dictionary in `prepare_data_inputs()` in `API/data_inputs.py`
+        * If it requires special merging logic from multiple models, update `merge_hourly_models()` in `API/forecast_sources.py`
+    * **Example (adding to data inputs)**:
+        ```python
+        # In API/data_inputs.py, within prepare_data_inputs()
+        boundary_layer_inputs = {
+            "gfs": GFS_Merged[:, GFS_IDX_MAP["HPBL"]] if "gfs" in source_list else None,
+            "hrrr": HRRR_Merged[:, HRRR_IDX_MAP["HPBL"]] if "hrrr" in source_list else None,
+            # Add other models as needed
+        }
+        inputs["boundary_layer_inputs"] = boundary_layer_inputs
         ```
-        # Increase the size of InterPhour array by 1 for the new variable
-        InterPhour = np.full((len(hour_array_grib), 27), MISSING_DATA) # Change 27 to 28 for new variable
-
-        # ... existing variable assignments ...
-
-        # Assign the new variable's data
-        # Assuming HPBL is index 26 (if 27 columns initially)
-        if "gfs" in sourceList: # Or relevant source
-            InterPhour[:, 26] = GFS_Merged[:, <HPBL_INDEX_IN_GFS_ZARR_VARS_TUPLE>]
-            # Apply unit conversions or clipping if necessary
-            InterPhour[:, 26] = clipLog(InterPhour[:, 26], min_val, max_val, "HPBL Hour")
-        ```
-    * Ensure units are consistent with other API response variables. Apply conversion factors (`elevUnit`, `tempUnits`, etc.) if needed.
+    * Apply clipping and validation as needed using functions from `API/api_utils.py` (e.g., `clipLog()`)
+    * Ensure units are consistent with other API response variables. Conversion factors are defined in `API/constants/api_const.py`
 
 3.  **Add to API Response Object**:
-    * Locate the dictionary creation for the `hourly` data (`hourItem`), `daily` data (`dayObject`), and `currently` data (`returnOBJ["currently"]`).
-    * Add a new key-value pair for your new variable. Use a descriptive name that will appear in the API JSON response.
-    * **Example (adding to `hourItem`)**:
-        ```
+    * Based on which forecast section your variable belongs to, update the appropriate builder module:
+        * **Hourly**: `API/hourly/block.py` - function `build_hourly_block()` and `build_hourly_objects()`
+        * **Daily**: `API/daily/builder.py` - function `build_daily_section()`
+        * **Currently**: `API/current/metrics.py` - function `build_current_section()`
+        * **Minutely**: `API/minutely/builder.py` - function `build_minutely_block()`
+    
+    * **Example (adding to hourly response in `API/hourly/block.py`)**:
+        ```python
+        # In build_hourly_objects() function
+        # Add the new variable to the hourly item dictionary
         hourItem = {
             "time": int(hour_array_grib[idx]),
             # ... other items ...
-            "planetaryBoundaryLayerHeight": InterPhour[idx, 26], # New item
+            "planetaryBoundaryLayerHeight": hourly_display[idx, DATA_HOURLY["boundary_layer_height"]],
         }
         ```
-    * Repeat this for `dayObject` and `returnOBJ["currently"]` if the variable is relevant for those sections. For daily, you might want `min`, `max`, or `mean` values.
+    
+    * For daily forecasts, you may want to compute aggregates (min, max, mean) using the helper functions in `API/daily/builder.py`
+    * **Example (adding to daily response)**:
+        ```python
+        # In build_daily_section() function
+        # Use _aggregate_stats() to compute daily statistics
+        boundary_layer_stats = _aggregate_stats(
+            InterPhour[:, DATA_HOURLY["boundary_layer_height"]],
+            hourlyDayIndex,
+            daily_days,
+            calc_max=True,
+            calc_mean=True
+        )
+        
+        # Add to daily object
+        dayObject = {
+            "time": int(day_array_grib[d]),
+            # ... other items ...
+            "boundaryLayerHeightMax": boundary_layer_stats[2][d],  # max
+            "boundaryLayerHeightMean": boundary_layer_stats[0][d],  # mean
+        }
+        ```
 
 4.  **Implement Version-Based Exclusion (CRUCIAL)**:
-    * The new data point should *only* be included when the `version` query string is `2` (or a higher specified version), add a conditional check to remove it otherwise. This prevents breaking older clients that might not expect the new field.
-    * **Example (within `hourList` loop, or after `dayList` is populated)**:
-        ```
+    * The new data point should *only* be included when the `version` query string is `2` (or a higher specified version). Add a conditional check in the appropriate builder to remove it otherwise. This prevents breaking older clients that might not expect the new field.
+    * **Example (within hourly builder)**:
+        ```python
+        # In build_hourly_objects() or similar function
         if version < 2:
             hourItem.pop("planetaryBoundaryLayerHeight", None)
         ```
-    * Apply this `pop` logic to all relevant dictionaries (`hourItem`, `dayObject`, `returnOBJ["currently"]`).
+    * Apply this `pop` logic to all relevant response sections (hourly, daily, currently)
 
-5.  **Update Summary/Icon Generation (Optional)**:
-    * If your new variable significantly impacts weather conditions (e.g., a severe weather index), consider integrating it into the `calculate_text`, `calculate_minutely_text`, `calculate_day_text`, or `calculate_weekly_text` functions to affect the `summary` and `icon` fields. This is usually more complex and should only be done if the variable directly influences the 'overall' weather description.
+5.  **Add Rounding Rules (Optional)**:
+    * If your new variable requires specific rounding precision, add it to `ROUNDING_RULES` in `API/constants/api_const.py`
+    * **Example**:
+        ```python
+        ROUNDING_RULES = {
+            # ... existing rules ...
+            "planetaryBoundaryLayerHeight": 0,  # Round to integer meters
+        }
+        ```
+
+6.  **Update Summary/Icon Generation (Optional)**:
+    * If your new variable significantly impacts weather conditions (e.g., a severe weather index), consider integrating it into the text generation functions:
+        * `API/PirateText.py` - `calculate_text()` for hourly/current summaries
+        * `API/PirateMinutelyText.py` - `calculate_minutely_text()` for minutely summaries
+        * `API/PirateDailyText.py` - `calculate_day_text()` for daily summaries
+        * `API/PirateWeeklyText.py` - `calculate_weekly_text()` for weekly summaries
+    * Helper functions are available in `API/PirateTextHelper.py`
+    * This is usually more complex and should only be done if the variable directly influences the 'overall' weather description.
 
 ## Testing
 
 Thorough testing is paramount when adding new variables to ensure data integrity and API stability.
 
-* **Unit Tests**: If applicable, add unit tests for any new helper functions or complex logic introduced for the variable.
+* **Unit Tests**: If applicable, add unit tests for any new helper functions or complex logic introduced for the variable. Tests are located in the `tests/` directory.
 * **Integration Tests**: Modify existing integration tests (e.g., in `tests/test_s3_live.py`) to assert that the new variable appears in the API response and has expected values.
-* **Comparison Tests**: If you have `test_compare_production.py` setup, ensure your changes don't cause unexpected differences for existing fields. You might need to temporarily disable this for the new field until production is updated.
+* **Comparison Tests**: If you have `test_compare_production.py` set up, ensure your changes don't cause unexpected differences for existing fields. You might need to temporarily disable this for the new field until production is updated.
 * **Manual Testing**: Issue cURL requests to your local API with and without the `version=2` (or relevant version) query string to confirm the variable's presence/absence as expected. Check different locations and forecast times.
+* **Linting and Formatting**: Run the linting and formatting tools before submitting:
+    ```bash
+    scripts/lint
+    scripts/format
+    ```
+* **Run Tests**: Execute the test suite to verify no regressions:
+    ```bash
+    pytest
+    ```
