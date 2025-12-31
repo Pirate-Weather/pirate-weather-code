@@ -4,6 +4,48 @@ To integrate a new weather model into the Pirate Weather code, you'll primarily 
 
 An important high level note: One of the key goals of this API is to be efficient and provide fast retrievals, which might explain some of the design choices here (ex. combining all the variables within one chunk, using Dask for many things). The goal is for processing to fit within 16 GB of RAM, and to keep response times under 50 ms.  
 
+**Note:** The Pirate Weather codebase has been refactored into a modular structure. The API response generation is now split across multiple modules:
+
+**Core Orchestration:**
+- `API/responseLocal.py` - Main orchestration, FastAPI endpoints, and request handling
+
+**Forecast Generation Modules:**
+- `API/hourly/block.py` & `API/hourly/builder.py` - Hourly forecast generation and vectorized conversions
+- `API/daily/builder.py` - Daily forecast aggregation with min/max/mean calculations
+- `API/current/metrics.py` - Current conditions section
+- `API/minutely/builder.py` - Minutely precipitation forecasts
+
+**Data Processing:**
+- `API/forecast_sources.py` - Model merging and source priority logic
+- `API/data_inputs.py` - Data preparation and input organization with priority stacking
+- `API/io/zarr_reader.py` - Zarr store management and updates
+- `API/request/preprocess.py` - Request validation and parameter parsing
+- `API/request/grid_indexing.py` - Grid point calculation for different projections
+
+**Configuration & Constants:**
+- `API/constants/forecast_const.py` - Data array indices (DATA_HOURLY, DATA_CURRENT, etc.)
+- `API/constants/model_const.py` - Model identifiers
+- `API/constants/api_const.py` - Conversion factors, rounding rules, coordinate constants
+- `API/constants/clip_const.py` - Value clipping ranges for data validation
+- `API/constants/grid_const.py` - Grid parameters for different models
+
+**Utilities:**
+- `API/utils/time_indexing.py` - Time array calculations and day/night indexing
+- `API/utils/solar.py` - Sunrise/sunset calculations
+- `API/utils/geo.py` - Geographic calculations (haversine distance, etc.)
+- `API/utils/source_priority.py` - Model priority logic based on location
+- `API/api_utils.py` - General utilities (clipping, apparent temperature, etc.)
+
+**Text Generation:**
+- `API/PirateText.py` - Hourly/current summary text
+- `API/PirateDailyText.py` - Daily summary text
+- `API/PirateMinutelyText.py` - Minutely summary text
+- `API/PirateWeeklyText.py` - Weekly summary text
+- `API/PirateTextHelper.py` - Shared text generation utilities
+- `API/legacy/summary.py` - Summary coordination functions
+
+**Important:** The codebase makes extensive use of [NumPy](https://numpy.org/) for efficient array operations. If you're unfamiliar with NumPy, see the [NumPy Guide](NUMPY_GUIDE.md) for common patterns used in Pirate Weather.
+
 Here's a general outline for integrating a new model:
 
 
@@ -29,7 +71,7 @@ This phase focuses on retrieving the raw model data, processing it, and saving i
   
     * Use `Herbie` (or your chosen method) to download GRIB2 (or other format) files for specific forecast hours and variables.
   
-    * Select the necessary meteorological variables (e.g., temperature, precipitation, wind components) and map them to consistent internal names. Refer to `responseLocal.py` to see which variables are used in the API response. It isn't necessary for a model to cover everything, but ideally it should have enough to be consistent for a forecast.
+    * Select the necessary meteorological variables (e.g., temperature, precipitation, wind components) and map them to consistent internal names. Refer to `API/constants/forecast_const.py` to see which variables are used in the API response. It isn't necessary for a model to cover everything, but ideally it should have enough to be consistent for a forecast.
  
     * Process the GRIB2 data using tools like `cfgrib` (often used implicitly by `xarray` with GRIB engines) or `wgrib2` for specific operations if needed. CFGRIB is preferred, but most of the models use `wgrib2` at the moment since it is so efficient. The key processing steps are:
     
@@ -57,46 +99,149 @@ This phase focuses on retrieving the raw model data, processing it, and saving i
 
 This phase involves modifying the API's core logic to load the new model's data and incorporate its forecasts into the API responses.
 
+* **Add Model Constant**:
+
+  * In `API/constants/model_const.py`, add a constant identifier for your new model following the existing pattern.
+  
+  * **Example**:
+    ```python
+    # In API/constants/model_const.py
+    YOUR_MODEL = "your_model_name"
+    ```
+
 * **Declare New Global Zarr Variable**:
 
-  * In `API/responseLocal.py`, declare a new global variable for your model's Zarr store, for example, `YOUR_MODEL_Zarr`.
+  * In `API/responseLocal.py` (or more appropriately in `API/io/zarr_reader.py` if following the modular pattern), declare a new global variable for your model's Zarr store, for example, `YOUR_MODEL_Zarr`.
 
 * **Update `update_zarr_store` Function**:
 
-  * Modify the `update_zarr_store(initialRun)` function to find and open your new model's Zarr file.
+  * Modify the `update_zarr_store(initialRun)` function in `API/io/zarr_reader.py` (or `API/responseLocal.py` depending on code version) to find and open your new model's Zarr file.
 
-  * Add logic to `find_largest_integer_directory` to locate the latest version of your model's Zarr store.
+  * Add logic to locate the latest version of your model's Zarr store (similar to how existing models are handled).
 
-  * Include `zarr.open` calls for your model's Zarr store, similar to `GFS_Zarr = zarr.open(...)`.
+  * Include `zarr.open` calls for your model's Zarr store, similar to existing models.
 
-  * Add `download_if_newer` calls in `initialDataSync` and `dataSync` to ensure your model's data is regularly downloaded and updated.
+  * Add download/sync logic if using S3 or remote storage.
 
 * **Integrate into `PW_Forecast` Endpoint**:
 
-  * **Conditional Data Reading**: In the `PW_Forecast` function, add a flag (e.g., `readYOUR_MODEL = False`) and corresponding `exclude` parameter logic if you want to allow users to exclude your model's data.
+  * **Request Preprocessing**: In `API/request/preprocess.py`, the `prepare_initial_request()` function handles initial request validation and parameter parsing. No changes are typically needed here unless your model requires special request handling.
 
-  * **Grid Matching**: If your model uses a different grid than existing ones (e.g., HRRR's Lambert Conformal vs. GFS's Lat/Lon), you'll need to define a new grid matching function (similar to `lambertGridMatch`) or adapt `y_p`, `x_p` logic for latitude/longitude lookup. This should be fast and not rely on reading the entire grid file to use a KNN match.
+  * **Grid Indexing**: In `API/request/grid_indexing.py`, the `calculate_grid_indexing()` function determines which grid points to read from each model and returns a `GridIndexingResult` object containing the necessary indices.
+  
+    * If your model uses a different grid than existing ones (e.g., a new projection or resolution), you may need to:
+      1. Add grid constants to `API/constants/grid_const.py`
+      2. Add a new grid matching function in `API/request/grid_indexing.py` (similar to `lambertGridMatch` for Lambert Conformal grids)
+      3. Update the `ZarrSources` dataclass to include your model
+    
+    * The grid matching should be fast and not rely on reading the entire grid file. Pre-compute coordinate lookups if needed.
 
-  * **Asynchronous Zarr Read**: Add a new task to the `zarrTasks` dictionary within the `WeatherParallel` class instance to asynchronously read data from your new model's Zarr store.
+  * **Zarr Data Reading**: In `API/responseLocal.py`, within the `PW_Forecast()` function:
+    
+    * Add your model to the `ZarrSources` object instantiation, which groups all zarr stores for grid indexing
+    * The actual zarr data is read asynchronously after grid indices are calculated
+    
+    * **Example**:
+      ```python
+      # In PW_Forecast function
+      zarr_sources = ZarrSources(
+          gfs=GFS_Zarr if not readGFS else None,
+          hrrr=HRRR_Zarr if not readHRRR else None,
+          # ... other models ...
+          your_model=YOUR_MODEL_Zarr if not readYOUR_MODEL else None,
+      )
+      
+      # Grid indexing determines what to read
+      grid_result = calculate_grid_indexing(...)
+      
+      # Data is then read using the calculated indices
+      ```
 
-  * **Source List and Times**: Update `sourceList` and `sourceTimes` to include your new model as a data source.
+  * **Source List and Metadata**: Update the source list logic in `API/forecast_sources.py`:
+    
+    * Add your model to `build_source_metadata()` to track which models are available and their forecast times
+    * This function returns a `SourceMetadata` object with source lists, times, and indices
 
   * **Data Merging and Interpolation**: This is a critical step.
 
-    * Determine where your model fits into the hierarchy (e.g., short-term like HRRR, mid-term like NBM, or global like GFS/GEFS).
+    * **Determine Model Hierarchy**: Decide where your model fits in the priority hierarchy:
+      * Short-term high-resolution (like HRRR): 0-18 hours
+      * Medium-term regional (like NBM): 18-240 hours  
+      * Global long-term (like GFS/GEFS): beyond 240 hours
+      * Specialty models (like DWD MOSMIX for Europe, ECMWF for global high-quality)
 
-    * Modify the hourly and minutely interpolation/merging sections (`InterPhour`, `InterPminute`) to incorporate your model's data. This often involves `np.choose` with `np.argmin(np.isnan(...))` to select the first non-NaN value from a prioritized list of models.
+    * **Update Model Merging**: In `API/forecast_sources.py`, the `merge_hourly_models()` function handles combining multiple model sources with priority logic:
+      
+      ```python
+      # In merge_hourly_models() function
+      # Add your model to the appropriate priority tier
+      # This is a simplified example - actual implementation uses
+      # priority stacking in data_inputs.py with multiple models
+      
+      # Example for a high-resolution short-term model:
+      if "your_model" in source_list:
+          # Temperature merge example using priority fallback
+          # Priority order: HRRR -> Your Model -> GFS
+          merged_temp = np.choose(
+              np.argmin([
+                  np.isnan(hrrr_temp),
+                  np.isnan(your_model_temp),
+                  np.isnan(gfs_temp)
+              ], axis=0),
+              [hrrr_temp, your_model_temp, gfs_temp]
+          )
+      ```
+      
+      **Note**: The actual merging is more complex and handled through the `_stack_with_priority()` function in `API/data_inputs.py`, which considers geographic location and model availability to determine the optimal source hierarchy.
 
-    * Ensure all necessary variables (temperature, humidity, wind, precipitation, etc.) are pulled from your model where it is the primary source or fallback.
+    * **Update Data Inputs**: In `API/data_inputs.py`, the `prepare_data_inputs()` function organizes raw model data into structured inputs for the forecast builders:
+      
+      ```python
+      # In prepare_data_inputs() function
+      # Model constants (GFS, HRRR, etc.) are defined in API/constants/model_const.py
+      temperature_inputs = {
+          "gfs": gfs_merged[:, GFS["temp"]] if "gfs" in source_list else None,
+          "hrrr": hrrr_merged[:, HRRR["temp"]] if "hrrr" in source_list else None,
+          "your_model": your_model_merged[:, YOUR_MODEL["temp"]] if "your_model" in source_list else None,
+          # ... other models
+      }
+      ```
+      
+      **Note**: Add your model's variable indices to `API/constants/model_const.py` following the existing pattern (e.g., `YOUR_MODEL = {"temp": 1, "dew": 2, ...}`)
+    
+    * **Variable Mapping**: Map your model's raw variable names to the standardized names used in `DATA_HOURLY`, `DATA_CURRENT`, etc. (defined in `API/constants/forecast_const.py`)
 
-    * Pay close attention to units and conversions (`windUnit`, `prepIntensityUnit`, `tempUnits`, etc.).
+    * **Unit Conversions**: Apply necessary unit conversions. Conversion factors are defined in `API/constants/api_const.py` (e.g., `CONVERSION_FACTORS`)
 
-  * **Variable Mapping**: Map your model's raw variable names to the standardized names used in the API response (e.g., `TMP_2maboveground` becomes `temperature`).
+    * **Clipping and Validation**: Use utility functions from `API/api_utils.py` for data validation:
+      * `clipLog()` - Log and clip values to valid ranges
+      * Clipping constants are in `API/constants/clip_const.py`
 
-  * **Summary and Icon Generation**: If your model provides unique insights relevant to the `summary` and `icon` fields, integrate its data into the `calculate_text`, `calculate_minutely_text`, `calculate_day_text`, and `calculate_weekly_text` functions.
+  * **Summary and Icon Generation**: If your model provides unique insights relevant to the `summary` and `icon` fields, integrate its data into the text generation functions:
+    
+    * `API/PirateText.py` - `calculate_text()` for hourly/current summaries
+    * `API/PirateMinutelyText.py` - `calculate_minutely_text()` for minutely summaries
+    * `API/PirateDailyText.py` - `calculate_day_text()` for daily summaries
+    * `API/PirateWeeklyText.py` - `calculate_weekly_text()` for weekly summaries
+    * `API/PirateTextHelper.py` - Helper functions for text generation
 
 * **Testing**:
 
-  * Add new tests in the `tests` directory to verify that your model's data is correctly ingested, loaded, and contributes accurately to the API responses. `test_compare_production.py` and `test_s3_live.py` can serve as inspiration.
+  * Add new tests in the `tests/` directory to verify that your model's data is correctly ingested, loaded, and contributes accurately to the API responses.
+  
+  * Existing test files that can serve as templates:
+    * `tests/test_s3_live.py` - Integration tests with live data
+    * `tests/test_compare_production.py` - Production comparison tests
+  
+  * Run linting and formatting:
+    ```bash
+    scripts/lint
+    scripts/format
+    ```
+  
+  * Run the test suite:
+    ```bash
+    pytest
+    ```
 
 This overview provides a roadmap for integrating a new model. Be prepared for iterative testing and debugging, as weather data processing can be complex due to varying grids, units, and data formats.
