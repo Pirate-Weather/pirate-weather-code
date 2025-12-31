@@ -125,7 +125,7 @@ This phase involves modifying the API's core logic to load the new model's data 
 
   * **Request Preprocessing**: In `API/request/preprocess.py`, the `prepare_initial_request()` function handles initial request validation and parameter parsing. No changes are typically needed here unless your model requires special request handling.
 
-  * **Grid Indexing**: In `API/request/grid_indexing.py`, the `calculate_grid_indexing()` function determines which grid points to read from each model.
+  * **Grid Indexing**: In `API/request/grid_indexing.py`, the `calculate_grid_indexing()` function determines which grid points to read from each model and returns a `GridIndexingResult` object containing the necessary indices.
   
     * If your model uses a different grid than existing ones (e.g., a new projection or resolution), you may need to:
       1. Add grid constants to `API/constants/grid_const.py`
@@ -134,10 +134,10 @@ This phase involves modifying the API's core logic to load the new model's data 
     
     * The grid matching should be fast and not rely on reading the entire grid file. Pre-compute coordinate lookups if needed.
 
-  * **Asynchronous Zarr Read**: In `API/responseLocal.py`, within the `PW_Forecast()` function:
+  * **Zarr Data Reading**: In `API/responseLocal.py`, within the `PW_Forecast()` function:
     
-    * Add your model to the `ZarrSources` object instantiation
-    * The zarr reading is handled asynchronously using the framework established in `calculate_grid_indexing()`
+    * Add your model to the `ZarrSources` object instantiation, which groups all zarr stores for grid indexing
+    * The actual zarr data is read asynchronously after grid indices are calculated
     
     * **Example**:
       ```python
@@ -148,6 +148,11 @@ This phase involves modifying the API's core logic to load the new model's data 
           # ... other models ...
           your_model=YOUR_MODEL_Zarr if not readYOUR_MODEL else None,
       )
+      
+      # Grid indexing determines what to read
+      grid_result = calculate_grid_indexing(...)
+      
+      # Data is then read using the calculated indices
       ```
 
   * **Source List and Metadata**: Update the source list logic in `API/forecast_sources.py`:
@@ -168,28 +173,39 @@ This phase involves modifying the API's core logic to load the new model's data 
       ```python
       # In merge_hourly_models() function
       # Add your model to the appropriate priority tier
+      # This is a simplified example - actual implementation uses
+      # priority stacking in data_inputs.py with multiple models
+      
       # Example for a high-resolution short-term model:
       if "your_model" in source_list:
-          # Merge your model data with appropriate priority
-          # Use np.where or np.choose to select between models
-          merged_temp = np.where(
-              np.isnan(hrrr_temp),
-              your_model_temp,
-              hrrr_temp
+          # Temperature merge example using priority fallback
+          # Priority order: HRRR -> Your Model -> GFS
+          merged_temp = np.choose(
+              np.argmin([
+                  np.isnan(hrrr_temp),
+                  np.isnan(your_model_temp),
+                  np.isnan(gfs_temp)
+              ], axis=0),
+              [hrrr_temp, your_model_temp, gfs_temp]
           )
       ```
+      
+      **Note**: The actual merging is more complex and handled through the `_stack_with_priority()` function in `API/data_inputs.py`, which considers geographic location and model availability to determine the optimal source hierarchy.
 
     * **Update Data Inputs**: In `API/data_inputs.py`, the `prepare_data_inputs()` function organizes raw model data into structured inputs for the forecast builders:
       
       ```python
       # In prepare_data_inputs() function
+      # Model constants (GFS, HRRR, etc.) are defined in API/constants/model_const.py
       temperature_inputs = {
-          "gfs": GFS_Merged[:, GFS_TEMP_IDX] if "gfs" in source_list else None,
-          "hrrr": HRRR_Merged[:, HRRR_TEMP_IDX] if "hrrr" in source_list else None,
-          "your_model": YOUR_MODEL_Merged[:, YOUR_MODEL_TEMP_IDX] if "your_model" in source_list else None,
+          "gfs": gfs_merged[:, GFS["temp"]] if "gfs" in source_list else None,
+          "hrrr": hrrr_merged[:, HRRR["temp"]] if "hrrr" in source_list else None,
+          "your_model": your_model_merged[:, YOUR_MODEL["temp"]] if "your_model" in source_list else None,
           # ... other models
       }
       ```
+      
+      **Note**: Add your model's variable indices to `API/constants/model_const.py` following the existing pattern (e.g., `YOUR_MODEL = {"temp": 1, "dew": 2, ...}`)
     
     * **Variable Mapping**: Map your model's raw variable names to the standardized names used in `DATA_HOURLY`, `DATA_CURRENT`, etc. (defined in `API/constants/forecast_const.py`)
 

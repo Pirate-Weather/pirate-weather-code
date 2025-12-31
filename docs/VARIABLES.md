@@ -70,13 +70,17 @@ This phase involves making the new variable available in the API's forecasting l
     * **Example (adding to data inputs)**:
         ```python
         # In API/data_inputs.py, within prepare_data_inputs()
+        # Model constants are defined in API/constants/model_const.py
+        # For example, GFS["temp"] or HRRR["gust"]
+        
         boundary_layer_inputs = {
-            "gfs": GFS_Merged[:, GFS_IDX_MAP["HPBL"]] if "gfs" in source_list else None,
-            "hrrr": HRRR_Merged[:, HRRR_IDX_MAP["HPBL"]] if "hrrr" in source_list else None,
+            "gfs": gfs_merged[:, GFS["boundary_layer"]] if "gfs" in source_list else None,
+            "hrrr": hrrr_merged[:, HRRR["boundary_layer"]] if "hrrr" in source_list else None,
             # Add other models as needed
         }
         inputs["boundary_layer_inputs"] = boundary_layer_inputs
         ```
+    * **Note**: You'll also need to add the new variable index to the model constant dictionaries in `API/constants/model_const.py` (e.g., `GFS["boundary_layer"] = 25`)
     * Apply clipping and validation as needed using functions from `API/api_utils.py` (e.g., `clipLog()`)
     * Ensure units are consistent with other API response variables. Conversion factors are defined in `API/constants/api_const.py`
 
