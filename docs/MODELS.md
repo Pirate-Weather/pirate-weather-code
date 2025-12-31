@@ -5,17 +5,44 @@ To integrate a new weather model into the Pirate Weather code, you'll primarily 
 An important high level note: One of the key goals of this API is to be efficient and provide fast retrievals, which might explain some of the design choices here (ex. combining all the variables within one chunk, using Dask for many things). The goal is for processing to fit within 16 GB of RAM, and to keep response times under 50 ms.  
 
 **Note:** The Pirate Weather codebase has been refactored into a modular structure. The API response generation is now split across multiple modules:
-- `API/responseLocal.py` - Main orchestration and FastAPI endpoints
-- `API/hourly/` - Hourly forecast generation
-- `API/daily/` - Daily forecast aggregation
-- `API/current/` - Current conditions
-- `API/minutely/` - Minutely precipitation forecasts
-- `API/constants/` - Shared constants (forecast indices, model constants, clipping rules)
-- `API/io/` - Zarr reading and data I/O helpers
+
+**Core Orchestration:**
+- `API/responseLocal.py` - Main orchestration, FastAPI endpoints, and request handling
+
+**Forecast Generation Modules:**
+- `API/hourly/block.py` & `API/hourly/builder.py` - Hourly forecast generation and vectorized conversions
+- `API/daily/builder.py` - Daily forecast aggregation with min/max/mean calculations
+- `API/current/metrics.py` - Current conditions section
+- `API/minutely/builder.py` - Minutely precipitation forecasts
+
+**Data Processing:**
 - `API/forecast_sources.py` - Model merging and source priority logic
-- `API/data_inputs.py` - Data preparation and input organization
-- `API/request/` - Request preprocessing and grid indexing
-- `API/utils/` - Utility functions (time indexing, solar calculations, geography)
+- `API/data_inputs.py` - Data preparation and input organization with priority stacking
+- `API/io/zarr_reader.py` - Zarr store management and updates
+- `API/request/preprocess.py` - Request validation and parameter parsing
+- `API/request/grid_indexing.py` - Grid point calculation for different projections
+
+**Configuration & Constants:**
+- `API/constants/forecast_const.py` - Data array indices (DATA_HOURLY, DATA_CURRENT, etc.)
+- `API/constants/model_const.py` - Model identifiers
+- `API/constants/api_const.py` - Conversion factors, rounding rules, coordinate constants
+- `API/constants/clip_const.py` - Value clipping ranges for data validation
+- `API/constants/grid_const.py` - Grid parameters for different models
+
+**Utilities:**
+- `API/utils/time_indexing.py` - Time array calculations and day/night indexing
+- `API/utils/solar.py` - Sunrise/sunset calculations
+- `API/utils/geo.py` - Geographic calculations (haversine distance, etc.)
+- `API/utils/source_priority.py` - Model priority logic based on location
+- `API/api_utils.py` - General utilities (clipping, apparent temperature, etc.)
+
+**Text Generation:**
+- `API/PirateText.py` - Hourly/current summary text
+- `API/PirateDailyText.py` - Daily summary text
+- `API/PirateMinutelyText.py` - Minutely summary text
+- `API/PirateWeeklyText.py` - Weekly summary text
+- `API/PirateTextHelper.py` - Shared text generation utilities
+- `API/legacy/summary.py` - Summary coordination functions
 
 Here's a general outline for integrating a new model:
 
