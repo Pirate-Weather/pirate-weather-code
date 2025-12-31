@@ -44,6 +44,8 @@ An important high level note: One of the key goals of this API is to be efficien
 - `API/PirateTextHelper.py` - Shared text generation utilities
 - `API/legacy/summary.py` - Summary coordination functions
 
+**Important:** The codebase makes extensive use of [NumPy](https://numpy.org/) for efficient array operations. If you're unfamiliar with NumPy, see the [NumPy Guide](NUMPY_GUIDE.md) for common patterns used in Pirate Weather.
+
 Here's a general outline for integrating a new model:
 
 

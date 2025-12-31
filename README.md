@@ -42,7 +42,7 @@ The initial `docker compose up` command will take some time (~1 hour), as the in
 Two docker containers are used for this service, and are both saved in the "[Docker](https://github.com/Pirate-Weather/pirate-weather-code/tree/main/Docker)" folder. `public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm` is the ingest container, and builds WGRIB2 from source in addition to adding several key python packages for processing. `public.ecr.aws/j9v4j3c7/pirate-alpine-zarr` is a smaller container for the API response, and only consists of FastAPI plus some additional dependencies. 
 
 ## Development
-For additional details on contributing to this project, check out the [docs folder](https://github.com/Pirate-Weather/pirate-weather-code/docs). There, we have specific guides on adding a model, adjusting variables, or editing the text summaries
+For additional details on contributing to this project, check out the [docs folder](https://github.com/Pirate-Weather/pirate-weather-code/docs). There, we have specific guides on adding a model, adjusting variables, or editing the text summaries. If you're new to NumPy (used extensively throughout the codebase), see the [NumPy Guide](docs/NUMPY_GUIDE.md) for common patterns and operations.
 
 ### Requirements
 Running a weather API for the entire planet isn't a trivial task, and accordingly, this service requires a pretty hefty set of resources, although I hope to reduce this in the future! At least 32 GB of free (not total) memory are required for the ingest processing, as well as at least 200 GB of working disk space. The docker images are also ARM only at the moment, but there's no technical reason why they shouldn't generate on x64 machines as well. 

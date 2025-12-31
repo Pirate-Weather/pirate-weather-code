@@ -11,6 +11,8 @@ This document outlines the steps to add a new meteorological variable to an exis
 - `API/utils/` - Utility functions
 - `API/legacy/` - Backward compatibility helpers
 
+**Important:** The codebase makes extensive use of [NumPy](https://numpy.org/) for efficient array operations. If you're unfamiliar with NumPy, see the [NumPy Guide](NUMPY_GUIDE.md) for common patterns used in Pirate Weather.
+
 ## Phase 1: Modifying the Data Ingestion Script
 
 This phase focuses on ensuring the new variable is retrieved and saved alongside the existing data for a specific model.
