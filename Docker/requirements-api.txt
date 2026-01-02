@@ -9,7 +9,7 @@ gcsfs==2025.12.0
 metpy==1.7.1
 orjson==3.11.5
 pandas==2.3.3
-pirateweather-translations==1.4.0
+pirateweather-translations==1.4.1
 psutil==5.9.0
 pytz==2025.2
 reverse_geocode==1.6.6
