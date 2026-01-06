@@ -464,7 +464,7 @@ def _calculate_derived_metrics(
     freezing_rain_mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["rain"]) & (
         InterPhour[:, DATA_HOURLY["temp"]] <= TEMP_THRESHOLD_SNOW_C
     )
-    InterPhour[:, DATA_HOURLY["type"]][freezing_rain_mask] = PRECIP_IDX["ice"]
+    InterPhour[freezing_rain_mask, DATA_HOURLY["type"]] = PRECIP_IDX["ice"]
 
     InterPhour[:, DATA_HOURLY["rain"]] = 0
     InterPhour[:, DATA_HOURLY["snow"]] = 0
