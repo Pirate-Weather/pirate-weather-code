@@ -351,6 +351,8 @@ def select_daily_precip_type(
     # For ice accumulation, preserve the distinction between ice (freezing rain)
     # and sleet (ice pellets) by only overriding if the current type is not already
     # ice or sleet. This ensures that the hourly-based determination is preserved.
+    # When defaulting is needed (type is not ice/sleet but ice accumulation exists),
+    # we choose ice (freezing rain) as it's generally more common than sleet globally.
     ice_threshold_mask = InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit)
     not_ice_or_sleet_mask = (maxPchanceDay != PRECIP_IDX["ice"]) & (
         maxPchanceDay != PRECIP_IDX["sleet"]
