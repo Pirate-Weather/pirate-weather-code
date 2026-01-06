@@ -456,7 +456,7 @@ def _calculate_derived_metrics(
         ),
     )
 
-    # Convert rain to ice (freezing rain) when temperature is below -1°C
+    # Convert rain to ice (freezing rain) when temperature is at or below -1°C
     # This handles cases where models report rain but temperature is below freezing
     freezing_rain_mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["rain"]) & (
         InterPhour[:, DATA_HOURLY["temp"]] <= TEMP_THRESHOLD_SNOW_C
