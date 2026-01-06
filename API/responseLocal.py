@@ -186,7 +186,7 @@ try:
     if STAGE in ("DEV", "PROD"):
         station_map_file = os.path.join(save_dir, "DWD_MOSMIX_stations.pickle")
     elif STAGE in ("TESTING", "TM_TESTING"):
-        # For testing stages, try to load from S3
+        # For testing stages, try to load from S3 first
         if save_type == "S3":
             try:
                 import s3fs
@@ -204,16 +204,16 @@ try:
                         DWD_MOSMIX_Stations = pickle.load(f)
                         logger.info("Loaded DWD MOSMIX station map from S3")
             except Exception as e:
-                logger.warning(f"Could not load DWD MOSMIX station map from S3: {e}")
+                logger.debug(f"Could not load DWD MOSMIX station map from S3: {e}")
 
     if station_map_file and os.path.exists(station_map_file):
         with open(station_map_file, "rb") as f:
             DWD_MOSMIX_Stations = pickle.load(f)
             logger.info(f"Loaded DWD MOSMIX station map from: {station_map_file}")
     elif DWD_MOSMIX_Stations is None:
-        logger.info("DWD MOSMIX station map not found")
+        logger.debug("DWD MOSMIX station map not found")
 except Exception as e:
-    logger.warning(f"Error loading DWD MOSMIX station map: {e}")
+    logger.debug(f"Error loading DWD MOSMIX station map: {e}")
 
 logger.info("Initial data load complete")
 
