@@ -456,6 +456,13 @@ def _calculate_derived_metrics(
         ),
     )
 
+    # Convert rain to ice (freezing rain) when temperature is below -1°C
+    # This handles cases where models report rain but temperature is below freezing
+    freezing_rain_mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["rain"]) & (
+        InterPhour[:, DATA_HOURLY["temp"]] <= TEMP_THRESHOLD_SNOW_C
+    )
+    InterPhour[:, DATA_HOURLY["type"]][freezing_rain_mask] = PRECIP_IDX["ice"]
+
     InterPhour[:, DATA_HOURLY["rain"]] = 0
     InterPhour[:, DATA_HOURLY["snow"]] = 0
     InterPhour[:, DATA_HOURLY["ice"]] = 0
@@ -492,6 +499,16 @@ def _calculate_derived_metrics(
     InterPhour[:, DATA_HOURLY["intensity"]] = np.maximum(
         InterPhour[:, DATA_HOURLY["intensity"]], 0
     )
+
+    # When accumulation exists but intensity is very small (especially for ECMWF),
+    # derive intensity from accumulation (accum is mm/h for hourly data)
+    # This handles cases where models provide accumulation but not intensity
+    missing_intensity_mask = (
+        InterPhour[:, DATA_HOURLY["intensity"]] < PRECIP_NOISE_THRESHOLD_MMH
+    ) & (InterPhour[:, DATA_HOURLY["accum"]] > PRECIP_ACCUM_NOISE_THRESHOLD)
+    InterPhour[missing_intensity_mask, DATA_HOURLY["intensity"]] = InterPhour[
+        missing_intensity_mask, DATA_HOURLY["accum"]
+    ]
 
     dayZeroPrepRain = InterPhour[:, DATA_HOURLY["rain"]].copy()
     dayZeroPrepRain[hourlyDayIndex != 0] = 0
