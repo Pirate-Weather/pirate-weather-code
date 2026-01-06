@@ -186,8 +186,7 @@ try:
     if STAGE in ("DEV", "PROD"):
         station_map_file = os.path.join(save_dir, "DWD_MOSMIX_stations.pickle")
     elif STAGE in ("TESTING", "TM_TESTING"):
-        # For testing stages, try to load from S3 first, then fallback to local file
-        station_map_file = os.path.join(save_dir, "DWD_MOSMIX_stations.pickle")
+        # For testing stages, try to load from S3 first
         if save_type == "S3":
             try:
                 import s3fs
