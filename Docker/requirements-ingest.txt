@@ -1,4 +1,4 @@
-aiohttp==3.13.2
+aiohttp==3.13.3
 aiobotocore[boto3]==2.26.0
 bottleneck==1.6.0
 cartopy==0.25.0
