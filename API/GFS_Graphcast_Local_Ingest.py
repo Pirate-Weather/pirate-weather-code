@@ -20,7 +20,12 @@ import zarr.storage
 from dask.diagnostics import ProgressBar
 from herbie import FastHerbie, HerbieLatest, Path
 
-from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
+from API.constants.shared_const import (
+    GRAVITY,
+    HISTORY_PERIODS,
+    INGEST_VERSION_STR,
+    MISSING_DATA,
+)
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -376,8 +381,7 @@ spfh_data = xr.concat(
 ).assign_coords(level=pressure_levels)
 
 # Calculate freezing level (convert HGT to geopotential: z = g * h)
-g = 9.80665  # m/s²
-geopotential_data = hgt_data * g
+geopotential_data = hgt_data * GRAVITY
 
 freezing_level = calculate_freezing_level(
     temperature_levels=temp_data,
@@ -621,7 +625,7 @@ for i in range(his_period, 0, -6):
     ).assign_coords(level=pressure_levels)
 
     # Calculate derived parameters
-    geopotential_data_his = hgt_data_his * g
+    geopotential_data_his = hgt_data_his * GRAVITY
 
     freezing_level_his = calculate_freezing_level(
         temperature_levels=temp_data_his,
