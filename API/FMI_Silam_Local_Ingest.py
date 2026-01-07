@@ -103,8 +103,8 @@ if not os.path.exists(tmpDIR):
     os.makedirs(tmpDIR)
 
 if saveType == "Download":
-    if not os.path.exists(forecast_path + "/" + ingestVersion):
-        os.makedirs(forecast_path + "/" + ingestVersion)
+    if not os.path.exists(os.path.join(forecast_path, ingestVersion)):
+        os.makedirs(os.path.join(forecast_path, ingestVersion))
 
 start_time = time.time()
 

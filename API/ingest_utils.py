@@ -395,7 +395,7 @@ def interp_time_take_blend(
 
 
 # --- Air quality helpers (NowCast & EPA AQI) ---
-def calculate_nowcast_concentration(concentrations, num_hours=12):
+def calculate_nowcast_concentration(concentrations: np.ndarray, num_hours: int = 12) -> np.ndarray:
     """
     Calculate the EPA NowCast weighted concentration for PM2.5 and PM10.
     The NowCast algorithm weights recent hours more heavily than older hours,
@@ -446,7 +446,7 @@ def calculate_nowcast_concentration(concentrations, num_hours=12):
     return nowcast_result
 
 
-def trailing_mean(conc, window):
+def trailing_mean(conc: Optional[np.ndarray], window: int) -> Optional[np.ndarray]:
     """
     Compute trailing window mean along time axis for array with shape (T, Y, X).
     If window <= 1 returns conc. Handles NaNs by using nanmean over available points.
@@ -466,7 +466,7 @@ def trailing_mean(conc, window):
     return out
 
 
-def calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=True):
+def calculate_aqi(pm25: np.ndarray, pm10: np.ndarray, o3: np.ndarray, no2: np.ndarray, so2: np.ndarray, co: np.ndarray, use_nowcast: bool = True) -> np.ndarray:
     """Calculate Air Quality Index (AQI) based on EPA standards.
 
     Returns the maximum AQI value among all pollutants for each grid cell and time.
@@ -501,9 +501,9 @@ def calculate_aqi(pm25, pm10, o3, no2, so2, co, use_nowcast=True):
     # Use 1-hour trailing mean for NO2 / SO2 (effectively the instantaneous value).
     o3_avg = trailing_mean(o3, 8)
     o3_1h = trailing_mean(o3, 1)
-    co_avg = trailing_mean(co, 8) if co is not None else None
-    no2_avg = trailing_mean(no2, 1) if no2 is not None else None
-    so2_avg = trailing_mean(so2, 1) if so2 is not None else None
+    co_avg = trailing_mean(co, 8)
+    no2_avg = trailing_mean(no2, 1)
+    so2_avg = trailing_mean(so2, 1)
 
     def _interp_or_nan(arr, bp, aqi_arr, ref_shape):
         if arr is None:

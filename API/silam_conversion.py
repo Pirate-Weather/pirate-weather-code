@@ -16,7 +16,7 @@ MOLAR_MASS_SO2 = 0.064  # kg/mole
 MOLAR_MASS_CO = 0.028  # kg/mole
 
 
-def convert_vmr_to_concentration(vmr, air_density, molar_mass):
+def convert_vmr_to_concentration(vmr: np.ndarray, air_density: np.ndarray, molar_mass: float) -> np.ndarray:
     """
     Convert volume mixing ratio (VMR) to mass concentration in µg/m³.
 
