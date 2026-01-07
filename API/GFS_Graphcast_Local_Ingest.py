@@ -426,14 +426,6 @@ for i in range(his_period, 0, -6):
         logger.error(sp_out.stderr)
         sys.exit()
 
-    # No UV product for Graphcast historic; skip UV download/merge
-
-    # Run wgrib2
-    sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-    if sp_out.returncode != 0:
-        logger.error(sp_out.stderr)
-        sys.exit()
-
     # Read the netcdf file using xarray (no UV product for Graphcast)
     xarray_his_wgrib_merged = xr.open_dataset(hist_process_path + "_wgrib2_merged.nc")
 

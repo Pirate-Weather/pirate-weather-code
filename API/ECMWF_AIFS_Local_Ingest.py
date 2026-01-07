@@ -846,11 +846,11 @@ if save_type == "S3":
     # Upload to S3
     s3.put_file(
         forecast_process_dir + "/ECMWF_AIFS.zarr.zip",
-        forecast_path + "/" + ingest_version + "/ECMWF.zarr.zip",
+        forecast_path + "/" + ingest_version + "/ECMWF_AIFS.zarr.zip",
     )
     s3.put_file(
         forecast_process_dir + "/ECMWF_AIFS_Maps.zarr.zip",
-        forecast_path + "/" + ingest_version + "/ECMWF_Maps.zarr.zip",
+        forecast_path + "/" + ingest_version + "/ECMWF_AIFS_Maps.zarr.zip",
     )
 
     # Write most recent forecast time
