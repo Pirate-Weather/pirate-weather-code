@@ -16,6 +16,28 @@ INGEST_VERSION_STR = "v30"
 # Convert Kelvin to Celsius
 KELVIN_TO_CELSIUS = 273.15
 
+# Physical constants for atmospheric calculations
+GRAVITY = 9.80665  # Standard gravity (m/s²)
+WATER_VAPOR_GAS_CONSTANT_RATIO = 0.622  # Ratio of gas constants (R_d/R_v)
+
+# Bolton's formula constants for saturation vapor pressure
+BOLTON_CONST = {
+    "base_pressure": 6.112,  # Base saturation vapor pressure (hPa)
+    "temp_coeff": 17.67,  # Temperature coefficient
+    "temp_offset": 243.5,  # Temperature offset (°C)
+}
+
+# Cloud formation constants
+CLOUD_RH_CRITICAL = 0.75  # Critical relative humidity threshold for cloud formation
+CLOUD_RH_EXPONENT = 2  # Exponent for cloud fraction formula
+
+# Freezing level default bounds
+FREEZING_LEVEL_SURFACE = 0.0  # Surface level (m) when all temps below freezing
+FREEZING_LEVEL_HIGH = 15000.0  # High altitude (m) when all temps above freezing
+FREEZING_LEVEL_TEMP_TOLERANCE = (
+    0.01  # Temperature difference tolerance (K) for interpolation
+)
+
 HISTORY_PERIODS = {
     "NBM": 48,
     "HRRR": 48,

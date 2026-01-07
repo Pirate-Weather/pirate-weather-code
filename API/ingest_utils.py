@@ -13,7 +13,20 @@ import numpy as np
 import xarray as xr
 from herbie import Path
 
-from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
+# Import atmospheric calculation constants
+from API.constants.shared_const import (
+    BOLTON_CONST,
+    CLOUD_RH_CRITICAL,
+    CLOUD_RH_EXPONENT,
+    FREEZING_LEVEL_HIGH,
+    FREEZING_LEVEL_SURFACE,
+    FREEZING_LEVEL_TEMP_TOLERANCE,
+    GRAVITY,
+    KELVIN_TO_CELSIUS,
+    MISSING_DATA,
+    REFC_THRESHOLD,
+    WATER_VAPOR_GAS_CONSTANT_RATIO,
+)
 
 # Logging
 logger = logging.getLogger(__name__)
@@ -463,3 +476,145 @@ def interpolate_temporal_gaps_efficiently(
 
     # Execute
     return ds_chunked.map(_process_variable)
+
+
+def calculate_freezing_level(
+    temperature_levels: xr.DataArray,
+    geopotential_levels: xr.DataArray,
+    pressure_levels: list,
+) -> xr.DataArray:
+    """Calculate freezing level height from temperature and geopotential at pressure levels.
+
+    Finds the altitude where temperature = 273.15 K (0°C) using linear interpolation
+    between pressure levels.
+
+    Args:
+        temperature_levels: Temperature at pressure levels (K), shape (step/time, level, lat, lon)
+        geopotential_levels: Geopotential at pressure levels (m²/s²), shape (step/time, level, lat, lon)
+        pressure_levels: List of pressure levels in hPa (e.g., [1000, 925, 850, ...])
+
+    Returns:
+        Freezing level height in meters, shape (step/time, lat, lon)
+    """
+    # Convert geopotential to height (divide by gravity)
+    height_levels = geopotential_levels / GRAVITY  # meters
+
+    # Initialize output with NaN
+    freezing_level = xr.full_like(temperature_levels.isel(level=0, drop=True), np.nan)
+
+    # Loop through adjacent pressure levels to find freezing level
+    # Process from surface to top of atmosphere
+    for i in range(len(pressure_levels) - 1):
+        # Get temperatures and heights at two adjacent levels
+        t_lower = temperature_levels.isel(level=i)
+        t_upper = temperature_levels.isel(level=i + 1)
+        h_lower = height_levels.isel(level=i)
+        h_upper = height_levels.isel(level=i + 1)
+
+        # Check if freezing level is between these two levels
+        # (temperature crosses KELVIN_TO_CELSIUS)
+        crosses = ((t_lower >= KELVIN_TO_CELSIUS) & (t_upper < KELVIN_TO_CELSIUS)) | (
+            (t_lower < KELVIN_TO_CELSIUS) & (t_upper >= KELVIN_TO_CELSIUS)
+        )
+
+        # Linear interpolation where temperature crosses freezing
+        # Only process if there are any crossings to improve performance
+        if crosses.any():
+            # Avoid division by zero
+            temp_diff = t_upper - t_lower
+            # Only interpolate where temp changes significantly
+            valid = np.abs(temp_diff) > FREEZING_LEVEL_TEMP_TOLERANCE
+
+            fraction = xr.where(valid, (KELVIN_TO_CELSIUS - t_lower) / temp_diff, 0)
+            interp_height = h_lower + fraction * (h_upper - h_lower)
+
+            # Update freezing level where it crosses and hasn't been set yet
+            # This ensures we get the first (lowest) crossing
+            freezing_level = xr.where(
+                crosses & np.isnan(freezing_level), interp_height, freezing_level
+            )
+
+    # Handle edge cases where no crossing was found
+    # If all temps are below freezing, set to surface
+    # If all temps are above freezing, set to high altitude
+    all_cold = temperature_levels.min(dim="level") < KELVIN_TO_CELSIUS
+    all_warm = temperature_levels.max(dim="level") >= KELVIN_TO_CELSIUS
+
+    freezing_level = xr.where(
+        np.isnan(freezing_level) & all_cold, FREEZING_LEVEL_SURFACE, freezing_level
+    )
+    freezing_level = xr.where(
+        np.isnan(freezing_level) & all_warm, FREEZING_LEVEL_HIGH, freezing_level
+    )
+
+    return freezing_level
+
+
+def calculate_cloud_cover_from_rh(
+    temperature_levels: xr.DataArray,
+    specific_humidity_levels: xr.DataArray,
+    pressure_levels: list,
+) -> xr.DataArray:
+    """Calculate total cloud cover from relative humidity profiles using simplified Slingo method.
+
+    Computes relative humidity at each pressure level, applies an empirical cloud fraction
+    formula, and integrates vertically to estimate total cloud cover.
+
+    Args:
+        temperature_levels: Temperature at pressure levels (K), shape (step/time, level, lat, lon)
+        specific_humidity_levels: Specific humidity at pressure levels (kg/kg), shape (step/time, level, lat, lon)
+        pressure_levels: List of pressure levels in hPa (e.g., [1000, 925, 850, ...])
+
+    Returns:
+        Total cloud cover (fraction 0-1), shape (step/time, lat, lon)
+    """
+    # Calculate saturation vapor pressure using Bolton's formula
+    # e_s = base_pressure * exp(temp_coeff * (T - KELVIN_TO_CELSIUS) / (T - KELVIN_TO_CELSIUS + temp_offset))
+    T_celsius = temperature_levels - KELVIN_TO_CELSIUS
+    e_sat = BOLTON_CONST["base_pressure"] * np.exp(
+        BOLTON_CONST["temp_coeff"]
+        * T_celsius
+        / (T_celsius + BOLTON_CONST["temp_offset"])
+    )  # hPa
+
+    # Convert specific humidity to mixing ratio
+    # q = w / (1 + w) => w = q / (1 - q)
+    mixing_ratio = specific_humidity_levels / (1 - specific_humidity_levels)
+
+    # Calculate actual vapor pressure
+    # e = (w * P) / (WATER_VAPOR_GAS_CONSTANT_RATIO + w) where P is pressure in hPa
+    pressure_array = xr.DataArray(
+        pressure_levels, dims="level", coords={"level": temperature_levels.level}
+    )
+
+    e_actual = (mixing_ratio * pressure_array) / (
+        WATER_VAPOR_GAS_CONSTANT_RATIO + mixing_ratio
+    )
+
+    # Calculate relative humidity (0-1)
+    rh = e_actual / e_sat
+    rh = xr.where(rh > 1, 1, rh)  # Cap at 100%
+    rh = xr.where(rh < 0, 0, rh)  # Floor at 0%
+
+    # Apply simplified cloud fraction formula based on RH
+    # Cloud fraction increases sigmoidally as RH approaches 100%
+    # Using a simplified version of Xu-Randall (1996)
+    # C = max(0, (RH - RH_crit) / (1 - RH_crit))^CLOUD_RH_EXPONENT
+    cloud_fraction = xr.where(
+        rh > CLOUD_RH_CRITICAL,
+        ((rh - CLOUD_RH_CRITICAL) / (1 - CLOUD_RH_CRITICAL)) ** CLOUD_RH_EXPONENT,
+        0.0,
+    )
+
+    # Vertical integration using random overlap assumption
+    # Total cloud cover = 1 - product(1 - cloud_fraction_i)
+    # This prevents unrealistic 100% cloud cover from multiple layers
+    cloud_free = 1 - cloud_fraction
+    total_cloud_free = cloud_free.prod(dim="level")
+    total_cloud_cover = 1 - total_cloud_free
+
+    # Ensure result is between 0 and 1
+    total_cloud_cover = xr.where(total_cloud_cover < 0, 0, total_cloud_cover)
+    total_cloud_cover = xr.where(total_cloud_cover > 1, 1, total_cloud_cover)
+
+    return total_cloud_cover

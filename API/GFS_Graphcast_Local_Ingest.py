@@ -25,6 +25,8 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    calculate_cloud_cover_from_rh,
+    calculate_freezing_level,
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
@@ -149,6 +151,8 @@ zarr_vars = (
     "UGRD_10maboveground",
     "VGRD_10maboveground",
     "APCP_surface",
+    "freezing_level",
+    "cloud_cover",
 )
 
 #####################################################################################################
@@ -284,6 +288,121 @@ APCP_surface_tmp[120:, :, :] = APCP_surface_tmp[120:, :, :] / 6
 
 xarray_forecast_merged["APCP_surface"].data = APCP_surface_tmp
 
+#####################################################################################################
+# %% Download pressure level data for freezing level and cloud cover calculation
+logger.info("Downloading pressure level data for derived parameters")
+
+# Define pressure levels (in hPa)
+pressure_levels = [1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 50]
+
+# Match strings for pressure level data
+# GFS Graphcast uses TMP, HGT, SPFH at pressure levels
+matchstring_pressure_tmp = (
+    "(:TMP:(1000|925|850|700|600|500|400|300|250|200|150|100|50) mb:)"
+)
+matchstring_pressure_hgt = (
+    "(:HGT:(1000|925|850|700|600|500|400|300|250|200|150|100|50) mb:)"
+)
+matchstring_pressure_spfh = (
+    "(:SPFH:(1000|925|850|700|600|500|400|300|250|200|150|100|50) mb:)"
+)
+
+match_strings_pressure = (
+    matchstring_pressure_tmp
+    + "|"
+    + matchstring_pressure_hgt
+    + "|"
+    + matchstring_pressure_spfh
+)
+
+# Download pressure level data
+FH_pressure = FastHerbie(
+    pd.date_range(start=base_time, periods=1, freq="6h"),
+    model="graphcast",
+    fxx=graphcast_range,
+    product="pgrb2.0p25",
+    verbose=False,
+    priority=["aws"],
+    save_dir=tmp_dir,
+)
+
+FH_pressure.download(match_strings_pressure, verbose=False)
+
+# Create list of downloaded grib files
+grib_list_pressure = [
+    str(Path(x.get_localFilePath(match_strings_pressure)).expand())
+    for x in FH_pressure.file_exists
+]
+
+# Merge into netcdf
+cmd = (
+    "cat "
+    + " ".join(grib_list_pressure)
+    + " | "
+    + f"{wgrib2_path}"
+    + " - "
+    + " -netcdf "
+    + forecast_process_path
+    + "_pressure.nc"
+)
+
+sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+if sp_out.returncode != 0:
+    logger.error(sp_out.stderr)
+    sys.exit()
+
+# Read pressure level data
+xarray_pressure = xr.open_dataset(forecast_process_path + "_pressure.nc")
+
+# Calculate freezing level
+logger.info("Calculating freezing level height")
+# Need to convert variables to match expected format
+# GFS uses "TMP_<level>mb" format, need to stack into DataArray with level dimension
+temp_vars = [f"TMP_{level}mb" for level in pressure_levels]
+hgt_vars = [f"HGT_{level}mb" for level in pressure_levels]
+spfh_vars = [f"SPFH_{level}mb" for level in pressure_levels]
+
+# Stack into DataArrays with level dimension
+temp_data = xr.concat(
+    [xarray_pressure[var] for var in temp_vars], dim="level"
+).assign_coords(level=pressure_levels)
+
+hgt_data = xr.concat(
+    [xarray_pressure[var] for var in hgt_vars], dim="level"
+).assign_coords(level=pressure_levels)
+
+spfh_data = xr.concat(
+    [xarray_pressure[var] for var in spfh_vars], dim="level"
+).assign_coords(level=pressure_levels)
+
+# Calculate freezing level (convert HGT to geopotential: z = g * h)
+g = 9.80665  # m/s²
+geopotential_data = hgt_data * g
+
+freezing_level = calculate_freezing_level(
+    temperature_levels=temp_data,
+    geopotential_levels=geopotential_data,
+    pressure_levels=pressure_levels,
+)
+
+# Calculate cloud cover
+logger.info("Calculating cloud cover from RH profiles")
+cloud_cover = calculate_cloud_cover_from_rh(
+    temperature_levels=temp_data,
+    specific_humidity_levels=spfh_data,
+    pressure_levels=pressure_levels,
+)
+
+# Add derived variables to the forecast dataset
+xarray_forecast_merged["freezing_level"] = freezing_level
+xarray_forecast_merged["cloud_cover"] = cloud_cover
+
+# Clean up
+del xarray_pressure, temp_data, hgt_data, spfh_data, geopotential_data
+os.remove(forecast_process_path + "_pressure.nc")
+
+logger.info("Derived parameter calculation complete")
+
 # %% Save merged and processed xarray dataset to disk using zarr with compression
 
 # PRES_surface not used for Graphcast; no rename needed
@@ -301,6 +420,8 @@ del (
     xarray_wgrib_merged,
     xarray_forecast_merged,
     APCP_surface_tmp,
+    freezing_level,
+    cloud_cover,
 )
 T1 = time.time()
 
@@ -442,6 +563,86 @@ for i in range(his_period, 0, -6):
 
     # Clear memory of temporary inputs
     del xarray_his_wgrib_merged
+
+    ########################################################################
+    ### Download pressure level data for historical freezing level and cloud cover
+    logger.info("Downloading historical pressure level data")
+
+    # Download pressure level data
+    FH_histsub_pressure = FastHerbie(
+        DATES,
+        model="graphcast",
+        fxx=fxx,
+        product="pgrb2.0p25",
+        verbose=False,
+        priority=["aws"],
+        save_dir=tmp_dir,
+    )
+
+    FH_histsub_pressure.download(match_strings_pressure, verbose=False)
+
+    # Create list of downloaded grib files
+    grib_list_pressure_his = [
+        str(Path(x.get_localFilePath(match_strings_pressure)).expand())
+        for x in FH_histsub_pressure.file_exists
+    ]
+
+    # Merge into netcdf
+    cmd = (
+        "cat "
+        + " ".join(grib_list_pressure_his)
+        + " | "
+        + f"{wgrib2_path}"
+        + " - "
+        + " -netcdf "
+        + hist_process_path
+        + "_pressure.nc"
+    )
+
+    sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    if sp_out.returncode != 0:
+        logger.error(sp_out.stderr)
+        sys.exit()
+
+    # Read pressure level data
+    xarray_pressure_his = xr.open_dataset(hist_process_path + "_pressure.nc")
+
+    # Stack into DataArrays
+    temp_data_his = xr.concat(
+        [xarray_pressure_his[var] for var in temp_vars], dim="level"
+    ).assign_coords(level=pressure_levels)
+
+    hgt_data_his = xr.concat(
+        [xarray_pressure_his[var] for var in hgt_vars], dim="level"
+    ).assign_coords(level=pressure_levels)
+
+    spfh_data_his = xr.concat(
+        [xarray_pressure_his[var] for var in spfh_vars], dim="level"
+    ).assign_coords(level=pressure_levels)
+
+    # Calculate derived parameters
+    geopotential_data_his = hgt_data_his * g
+
+    freezing_level_his = calculate_freezing_level(
+        temperature_levels=temp_data_his,
+        geopotential_levels=geopotential_data_his,
+        pressure_levels=pressure_levels,
+    )
+
+    cloud_cover_his = calculate_cloud_cover_from_rh(
+        temperature_levels=temp_data_his,
+        specific_humidity_levels=spfh_data_his,
+        pressure_levels=pressure_levels,
+    )
+
+    # Add to historical dataset
+    xarray_hist_merged["freezing_level"] = freezing_level_his
+    xarray_hist_merged["cloud_cover"] = cloud_cover_his
+
+    # Clean up
+    del xarray_pressure_his, temp_data_his, hgt_data_his, spfh_data_his
+    del geopotential_data_his, freezing_level_his, cloud_cover_his
+    os.remove(hist_process_path + "_pressure.nc")
 
     # PRES_surface not used for Graphcast; skip renaming
 

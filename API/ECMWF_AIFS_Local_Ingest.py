@@ -31,6 +31,7 @@ from API.ingest_utils import (
     FORECAST_LEAD_RANGES,
     VALID_DATA_MAX,
     VALID_DATA_MIN,
+    calculate_freezing_level,
     pad_to_chunk_size,
     validate_grib_stats,
 )
@@ -151,6 +152,7 @@ zarr_vars = (
     "Precipitation_Prob",
     "APCP_Mean",
     "APCP_StdDev",
+    "freezing_level",
 )
 
 
@@ -335,6 +337,78 @@ aifs_mf_msl = xr.open_mfdataset(
 aifs_mf = xr.merge(
     [aifs_mf_2, aifs_mf_10, aifs_mf_surf, aifs_mf_msl], compat="override"
 )
+
+
+#####################################################################################################
+# %% Download pressure level data for freezing level calculation
+logger.info("Downloading pressure level data for freezing level calculation")
+
+# Define pressure levels (in hPa) - using same levels as available in AIFS
+pressure_levels = [1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 50]
+
+# Create match string for temperature and geopotential at pressure levels
+# ECMWF uses "t" for temperature and "z" for geopotential
+matchstring_pressure = "(:(t|z):)"
+
+# Download pressure level data
+FH_pressure = FastHerbie(
+    pd.date_range(start=base_time, periods=1, freq="12h"),
+    model="ifs",
+    fxx=aifs_range,
+    product="oper",
+    verbose=False,
+    priority=["aws", "ecmwf"],
+    save_dir=tmp_dir,
+)
+
+pressure_paths = FH_pressure.download(matchstring_pressure, verbose=False)
+
+# Open pressure level data for each variable separately
+# Temperature at pressure levels
+aifs_temp_pressure = xr.open_mfdataset(
+    pressure_paths,
+    engine="cfgrib",
+    combine="nested",
+    concat_dim="step",
+    decode_timedelta=False,
+    join="outer",
+    coords="minimal",
+    compat="override",
+    backend_kwargs={
+        "filter_by_keys": {"typeOfLevel": "isobaricInhPa", "shortName": "t"}
+    },
+).sortby("step")
+
+# Geopotential at pressure levels
+aifs_z_pressure = xr.open_mfdataset(
+    pressure_paths,
+    engine="cfgrib",
+    combine="nested",
+    concat_dim="step",
+    decode_timedelta=False,
+    join="outer",
+    coords="minimal",
+    compat="override",
+    backend_kwargs={
+        "filter_by_keys": {"typeOfLevel": "isobaricInhPa", "shortName": "z"}
+    },
+).sortby("step")
+
+# Calculate freezing level
+logger.info("Calculating freezing level height")
+freezing_level = calculate_freezing_level(
+    temperature_levels=aifs_temp_pressure["t"],
+    geopotential_levels=aifs_z_pressure["z"],
+    pressure_levels=pressure_levels,
+)
+
+# Add freezing level to the dataset
+aifs_mf["freezing_level"] = freezing_level
+
+# Clean up pressure level data from memory
+del aifs_temp_pressure, aifs_z_pressure
+
+logger.info("Freezing level calculation complete")
 
 
 # %% Merge the ENSO and OPER data
@@ -562,6 +636,62 @@ for i in range(his_period, 1, -12):
         [aifs_his_mf_2, aifs_his_mf_10, aifs_his_mf_surf, aifs_his_mf_msl],
         compat="override",
     )
+
+    ########################################################################
+    ### Download pressure level data for historical freezing level calculation
+    logger.info("Downloading historical pressure level data for freezing level")
+
+    # Download pressure level data for the same time period
+    FH_histsub_pressure = FastHerbie(
+        DATES, model="ifs", fxx=fxx, product="oper", verbose=False, save_dir=tmp_dir
+    )
+
+    pressure_his_paths = FH_histsub_pressure.download(
+        matchstring_pressure, verbose=False
+    )
+
+    # Temperature at pressure levels
+    aifs_his_temp_pressure = xr.open_mfdataset(
+        pressure_his_paths,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        decode_timedelta=False,
+        join="outer",
+        coords="minimal",
+        compat="override",
+        backend_kwargs={
+            "filter_by_keys": {"typeOfLevel": "isobaricInhPa", "shortName": "t"}
+        },
+    ).sortby("step")
+
+    # Geopotential at pressure levels
+    aifs_his_z_pressure = xr.open_mfdataset(
+        pressure_his_paths,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        decode_timedelta=False,
+        join="outer",
+        coords="minimal",
+        compat="override",
+        backend_kwargs={
+            "filter_by_keys": {"typeOfLevel": "isobaricInhPa", "shortName": "z"}
+        },
+    ).sortby("step")
+
+    # Calculate freezing level for historical data
+    freezing_level_his = calculate_freezing_level(
+        temperature_levels=aifs_his_temp_pressure["t"],
+        geopotential_levels=aifs_his_z_pressure["z"],
+        pressure_levels=pressure_levels,
+    )
+
+    # Add freezing level to the historical dataset
+    aifs_his_mf["freezing_level"] = freezing_level_his
+
+    # Clean up
+    del aifs_his_temp_pressure, aifs_his_z_pressure
 
     ########################################################################
     ### Download the enfo data
