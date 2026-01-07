@@ -206,7 +206,7 @@ ens_mf = xr.open_mfdataset(
 ens_mf["tpd"] = ens_mf["tp"].diff(dim="step")
 
 # Set the first difference to the first accumulation
-ens_mf["tpd"][dict(step=0)] = ens_mf["tp"].isel(step=0)
+ens_mf["tpd"] = xr.where(ens_mf.step == ens_mf.step.isel(step=0), ens_mf["tp"].isel(step=0), ens_mf["tpd"])
 
 # AIFS outputs 6-hour accumulations; convert to hourly rate
 ens_mf["tpd"] = ens_mf["tpd"] / 6
@@ -643,7 +643,7 @@ for i in range(his_period, 1, -12):
 
     # Download pressure level data for the same time period
     FH_histsub_pressure = FastHerbie(
-        DATES, model="ifs", fxx=fxx, product="oper", verbose=False, save_dir=tmp_dir
+        DATES, model="aifs", fxx=fxx, product="oper", verbose=False, save_dir=tmp_dir
     )
 
     pressure_his_paths = FH_histsub_pressure.download(
