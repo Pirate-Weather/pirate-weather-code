@@ -206,7 +206,9 @@ ens_mf = xr.open_mfdataset(
 ens_mf["tpd"] = ens_mf["tp"].diff(dim="step")
 
 # Set the first difference to the first accumulation
-ens_mf["tpd"] = xr.where(ens_mf.step == ens_mf.step.isel(step=0), ens_mf["tp"].isel(step=0), ens_mf["tpd"])
+ens_mf["tpd"] = xr.where(
+    ens_mf.step == ens_mf.step.isel(step=0), ens_mf["tp"].isel(step=0), ens_mf["tpd"]
+)
 
 # AIFS outputs 6-hour accumulations; convert to hourly rate
 ens_mf["tpd"] = ens_mf["tpd"] / 6
