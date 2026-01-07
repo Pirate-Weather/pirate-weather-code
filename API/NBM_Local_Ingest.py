@@ -670,9 +670,9 @@ with dask.config.set(**{"array.slicing.split_large_chunks": True}):
         # Check length for errors
 
         if len(daskArray) != len(nbm_range):
-            logger.error(len(daskArray))
-            logger.error(len(nbm_range))
-            logger.error(dask_var)
+            logger.error("daskArray length: %d", len(daskArray))
+            logger.error("nbm_range length: %d", len(nbm_range))
+            logger.error("dask_var: %s", dask_var)
             assert len(daskArray) == len(nbm_range), (
                 "Incorrect number of timesteps! Exiting"
             )
@@ -747,7 +747,7 @@ for i in range(his_period, -1, -1):
                 continue  # If it exists, skip to the next iteration
             except Exception:
                 logger.error("### Historic Data Failure!")
-                logger.exception(traceback.format_exc())
+                logger.exception("Exception processing historic data", exc_info=True)
 
                 # Delete the file if it exists
                 if s3.exists(s3_path):
@@ -769,7 +769,7 @@ for i in range(his_period, -1, -1):
             continue
 
     logger.info(
-        "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        "Downloading: %s", (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
     )
 
     # Create a range of dates for historic data going back 48 hours

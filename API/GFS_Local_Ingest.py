@@ -576,7 +576,7 @@ for i in range(his_period, 0, -6):
                 continue  # If it exists, skip to the next iteration
             except Exception:
                 logger.error("### Historic Data Failure!")
-                logger.exception(traceback.format_exc())
+                logger.exception("Exception processing historic data", exc_info=True)
 
                 # Delete the file if it exists
                 if s3.exists(s3_path):
@@ -934,7 +934,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
                 )
         # Add a fallback in case of a FileNotFoundError
         except FileNotFoundError:
-            logger.info("File not found, adding NaN array for: " + local_ncpath)
+            logger.info("File not found, adding NaN array for: %s", local_ncpath)
             daskVarArrays.append(
                 da.full((6, 721, 1440), MISSING_DATA).rechunk(
                     (6, process_chunk, process_chunk)

@@ -50,9 +50,9 @@ wgrib2_path = os.getenv(
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/mnt/nvme/data/ECMWF_AIFS"
 )
-forecast_process_path = forecast_process_dir + "/ECMWF_AIFS_Process"
-hist_process_path = forecast_process_dir + "/ECMWF_AIFS_Historic"
-tmp_dir = forecast_process_dir + "/Downloads"
+forecast_process_path = os.path.join(forecast_process_dir, "ECMWF_AIFS_Process")
+hist_process_path = os.path.join(forecast_process_dir, "ECMWF_AIFS_Historic")
+tmp_dir = os.path.join(forecast_process_dir, "Downloads")
 
 forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/ECMWF_AIFS")
 historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/ECMWF_AIFS")
@@ -276,6 +276,7 @@ grib_list = [
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+validate_grib_stats(grib_check)
 logger.info("Grib files passed validation, proceeding with processing")
 
 

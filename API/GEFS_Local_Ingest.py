@@ -455,7 +455,7 @@ for i in range(his_period, 0, -6):
             )
             continue
     logger.info(
-        "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        "Downloading: %s", (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
     )
 
     # Create a range of dates for historic data

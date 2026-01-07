@@ -48,9 +48,9 @@ wgrib2_path = os.getenv(
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/mnt/nvme/data/GFS_Graphcast"
 )
-forecast_process_path = forecast_process_dir + "/GFS_Graphcast_Process"
-hist_process_path = forecast_process_dir + "/GFS_Graphcast_Historic"
-tmp_dir = forecast_process_dir + "/Downloads"
+forecast_process_path = os.path.join(forecast_process_dir, "GFS_Graphcast_Process")
+hist_process_path = os.path.join(forecast_process_dir, "GFS_Graphcast_Historic")
+tmp_dir = os.path.join(forecast_process_dir, "Downloads")
 
 forecast_path = os.getenv(
     "forecast_path", default="/mnt/nvme/data/Prod/GFS_Graphcast_Graphcast"
@@ -616,7 +616,7 @@ if save_type == "S3":
         forecast_process_dir + "/GFS_Graphcast.zarr.zip", mode="a", compression=0
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/GFS_Graphcast4.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/GFS_Graphcast.zarr")
 
 
 #
