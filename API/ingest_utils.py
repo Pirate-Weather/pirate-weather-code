@@ -1,6 +1,7 @@
 # %% Script to contain the helper functions as part of the data ingest for Pirate Weather
 # Alexander Rey. July 2025
 
+import logging
 import re
 import sys
 import time
@@ -13,6 +14,10 @@ import xarray as xr
 from herbie import Path
 
 from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
+
+# Logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # Shared ingest constants
 CHUNK_SIZES = {
@@ -49,6 +54,7 @@ FORECAST_LEAD_RANGES = {
     "ECMWF_AIFS": list(range(0, 241, 6)),
     "ECMWF_IFS_1": list(range(3, 144, 3)),
     "ECMWF_IFS_2": list(range(144, 241, 6)),
+    "GFS_GRAPHCAST": list(range(0, 241, 6)),
 }
 
 # Radius, in km, used for DWD model nearest-neighbor selection
@@ -92,7 +98,7 @@ def getGribList(FH_forecastsub, matchStrings):
             for x in FH_forecastsub.file_exists
         ]
     except Exception:
-        print("Download Failure 1, wait 20 seconds and retry")
+        logger.warning("Download Failure 1, wait 20 seconds and retry")
         time.sleep(20)
         FH_forecastsub.download(matchStrings, verbose=False)
         try:
@@ -101,7 +107,7 @@ def getGribList(FH_forecastsub, matchStrings):
                 for x in FH_forecastsub.file_exists
             ]
         except Exception:
-            print("Download Failure 2, wait 20 seconds and retry")
+            logger.warning("Download Failure 2, wait 20 seconds and retry")
             time.sleep(20)
             FH_forecastsub.download(matchStrings, verbose=False)
             try:
@@ -110,7 +116,7 @@ def getGribList(FH_forecastsub, matchStrings):
                     for x in FH_forecastsub.file_exists
                 ]
             except Exception:
-                print("Download Failure 3, wait 20 seconds and retry")
+                logger.warning("Download Failure 3, wait 20 seconds and retry")
                 time.sleep(20)
                 FH_forecastsub.download(matchStrings, verbose=False)
                 try:
@@ -119,7 +125,7 @@ def getGribList(FH_forecastsub, matchStrings):
                         for x in FH_forecastsub.file_exists
                     ]
                 except Exception:
-                    print("Download Failure 4, wait 20 seconds and retry")
+                    logger.warning("Download Failure 4, wait 20 seconds and retry")
                     time.sleep(20)
                     FH_forecastsub.download(matchStrings, verbose=False)
                     try:
@@ -128,7 +134,7 @@ def getGribList(FH_forecastsub, matchStrings):
                             for x in FH_forecastsub.file_exists
                         ]
                     except Exception:
-                        print("Download Failure 5, wait 20 seconds and retry")
+                        logger.warning("Download Failure 5, wait 20 seconds and retry")
                         time.sleep(20)
                         FH_forecastsub.download(matchStrings, verbose=False)
                         try:
@@ -137,7 +143,7 @@ def getGribList(FH_forecastsub, matchStrings):
                                 for x in FH_forecastsub.file_exists
                             ]
                         except Exception:
-                            print("Download Failure 6, Fail")
+                            logger.critical("Download Failure 6, Fail")
                             exit(1)
     return gribList
 
@@ -159,7 +165,7 @@ def validate_grib_stats(gribCheck):
     varNames = re.findall(r"(?m)^(?:[^:]+:){3}([^:]+):", gribCheck.stdout)
     # ensure we found at least one variable
     if not varNames:
-        print("Error: no variables found in GRIB stats output.")
+        logger.error("Error: no variables found in GRIB stats output.")
         sys.exit(10)
 
     # extract forecast lead times (6th field)
@@ -174,17 +180,17 @@ def validate_grib_stats(gribCheck):
     ]
 
     if invalidIdxs:
-        print("Invalid data found in grib files:")
+        logger.error("Invalid data found in grib files:")
         for i in invalidIdxs:
-            print(f"  Variable : {varNames[i]}")
-            print(f"  Time     : {varTimes[i]}")
-            print(f"  Min/Max  : {minValues[i]} / {maxValues[i]}")
-            print("---")
-        print("Exiting due to invalid data in grib files.")
+            logger.error("  Variable : %s", varNames[i])
+            logger.error("  Time     : %s", varTimes[i])
+            logger.error("  Min/Max  : %s / %s", minValues[i], maxValues[i])
+            logger.error("---")
+        logger.error("Exiting due to invalid data in grib files.")
         sys.exit(10)
 
     else:
-        print("All grib files passed validation checks.")
+        logger.info("All grib files passed validation checks.")
         # compute overall min/max for each variable across all times
         varExtremes = {}
         for var, mn, mx in zip(varNames, minValues, maxValues):
@@ -193,9 +199,9 @@ def validate_grib_stats(gribCheck):
             varExtremes[var][1] = max(hi, mx)
 
         # print overall extremes
-        print("Overall min/max for each variable across all times:")
+        logger.info("Overall min/max for each variable across all times:")
         for var, (mn, mx) in varExtremes.items():
-            print(f"  {var}: min={mn}, max={mx}")
+            logger.info("  %s: min=%s, max=%s", var, mn, mx)
 
     # all good
     return True

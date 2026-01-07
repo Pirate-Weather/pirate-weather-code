@@ -2,6 +2,7 @@
 # Alexander Rey, March 2025
 
 # %% Import modules
+import logging
 import os
 
 # os.environ["ECCODES_DEFINITION_PATH"] = (
@@ -12,7 +13,6 @@ import shutil
 import subprocess
 import sys
 import time
-import traceback
 import warnings
 
 import dask.array as da
@@ -37,6 +37,10 @@ from API.ingest_utils import (
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
+
+# Logging setup
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -104,7 +108,7 @@ base_time = latest_run.date
 # Base date for testing
 # base_time = pd.Timestamp("2025-11-05 00:00:00")
 
-print(base_time)
+logger.info(base_time)
 
 
 # Check if this is newer than the current file
@@ -118,7 +122,7 @@ if save_type == "S3":
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to ECMWF, ending")
+            logger.info("No Update to ECMWF, ending")
             sys.exit()
 
 else:
@@ -132,7 +136,7 @@ else:
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to IFS, ending")
+            logger.info("No Update to IFS, ending")
             sys.exit()
 
 zarr_vars = (
@@ -177,11 +181,10 @@ aifs_paths = FH_forecastsub.download("tcc", verbose=False)
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(aifs_range1):
-    print(
-        "Download failed, expected "
-        + str(len(aifs_range1))
-        + " files, but got "
-        + str(len(FH_forecastsub.file_exists))
+    logger.error(
+        "Download failed, expected %d files, but got %d",
+        len(aifs_range1),
+        len(FH_forecastsub.file_exists),
     )
     sys.exit(1)
 
@@ -196,7 +199,7 @@ cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 validate_grib_stats(grib_check)
-print("Grib files passed validation, proceeding with processing")
+logger.info("Grib files passed validation, proceeding with processing")
 
 
 aifs_mf = xr.open_mfdataset(
@@ -246,7 +249,7 @@ cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 validate_grib_stats(grib_check)
-print("Grib files passed validation, proceeding with processing")
+logger.info("Grib files passed validation, proceeding with processing")
 
 
 ens_mf = xr.open_mfdataset(
@@ -342,7 +345,7 @@ grib_list = [
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-print("Grib files passed validation, proceeding with processing")
+logger.info("Grib files passed validation, proceeding with processing")
 
 
 ifs_mf_2 = xr.open_mfdataset(
@@ -473,7 +476,7 @@ del (
 )
 
 T1 = time.time()
-print(T1 - T0)
+logger.info(T1 - T0)
 
 ################################################################################################
 # %% Historic data
@@ -490,7 +493,7 @@ for i in range(his_period, 1, -12):
             + ".zarr"
         )
         if s3.exists(s3_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + s3_path)
+            logger.info("File already exists in S3, skipping download for: %s", s3_path)
             # If the file exists, check that it works
 
             # Try to open and read data from the last variable of the zarr file to check if it has already been saved
@@ -505,8 +508,8 @@ for i in range(his_period, 1, -12):
                 zarr.open(hisCheckStore)[zarr_vars[-1]][-1, -1, -1]
                 continue  # If it exists, skip to the next iteration
             except Exception:
-                print("### Historic Data Failure!")
-                print(traceback.print_exc())
+                logger.error("### Historic Data Failure!")
+                logger.exception("Exception processing historic data", exc_info=True)
 
                 # Delete the file if it exists
                 if s3.exists(s3_path):
@@ -523,11 +526,14 @@ for i in range(his_period, 1, -12):
 
         # Check for a loca done file
         if os.path.exists(local_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + local_path)
+            logger.info(
+                "File already exists in S3, skipping download for: %s", local_path
+            )
             continue
 
-    print(
-        "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+    logger.info(
+        "Downloading: %s",
+        (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"),
     )
 
     # Create a range of dates for historic data going back 48 hours
@@ -551,11 +557,10 @@ for i in range(his_period, 1, -12):
 
     # Check for download length
     if len(FH_histsub.file_exists) != len(fxx):
-        print(
-            "Download failed, expected "
-            + str(len(fxx))
-            + " files but got "
-            + str(len(FH_histsub.file_exists))
+        logger.error(
+            "Download failed, expected %d files but got %d",
+            len(fxx),
+            len(FH_histsub.file_exists),
         )
         sys.exit(1)
 
@@ -570,7 +575,7 @@ for i in range(his_period, 1, -12):
 
     grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
     validate_grib_stats(grib_check)
-    print("Grib files passed validation, proceeding with processing")
+    logger.info("Grib files passed validation, proceeding with processing")
 
     # Created merged xarray object for the ifs data
     ifs_his_mf_10 = xr.open_mfdataset(
@@ -712,11 +717,10 @@ for i in range(his_period, 1, -12):
 
     # Check for download length
     if len(grib_list) != len(aifs_range):
-        print(
-            "Download failed, expected "
-            + str(len(aifs_range))
-            + " files but got "
-            + str(len(FH_histsub.file_exists))
+        logger.error(
+            "Download failed, expected %d files but got %d",
+            len(aifs_range),
+            len(FH_histsub.file_exists),
         )
         sys.exit(1)
 
@@ -725,7 +729,7 @@ for i in range(his_period, 1, -12):
 
     grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
     validate_grib_stats(grib_check)
-    print("Grib files passed validation, proceeding with processing")
+    logger.info("Grib files passed validation, proceeding with processing")
 
     aifs_his_mf = xr.open_mfdataset(
         aifs_his_paths,
@@ -810,7 +814,7 @@ for i in range(his_period, 1, -12):
         with open(done_file, "w") as f:
             f.write("Done")
 
-    print((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
+    logger.info((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
 
 # %% Merge the historic and forecast datasets and then squash using dask
 # Get the s3 paths to the historic data
@@ -1012,7 +1016,7 @@ for z in [0, 3, 5, 6, 7, 8, 9]:
         zarr_array, overwrite=True, compute=True
     )
 
-    print(zarr_vars[z])
+    logger.info(zarr_vars[z])
 
 if save_type == "S3":
     zarr_store_maps.close()
@@ -1067,7 +1071,4 @@ else:
 shutil.rmtree(forecast_process_dir)
 
 T2 = time.time()
-print(T2 - T0)
-
-
-# %% Test Read of local zarr
+logger.info(T2 - T0)

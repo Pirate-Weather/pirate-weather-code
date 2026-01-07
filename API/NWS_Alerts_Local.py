@@ -2,6 +2,7 @@
 # Created on: 2023-01-17
 
 # Import Modules
+import logging
 import os
 import shutil
 import tarfile
@@ -43,6 +44,10 @@ aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+
+# Logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 # Create new directory for processing if it does not exist
@@ -97,7 +102,7 @@ while "pagination" in alertsIN:
     alertsIN = result.json()
     nws_alerts.extend(alertsIN["features"])
 
-    print("AWS Alerts: ", len(nws_alerts))
+    logger.info("AWS Alerts: %d", len(nws_alerts))
 nws_alert_df = pd.DataFrame.from_records(nws_alerts)
 
 nws_alert_df["CAP_ID"] = nws_alert_df["id"]
@@ -196,7 +201,7 @@ float_rows = points_in_polygons[
 ]
 
 # Print the filtered rows
-print(float_rows)
+logger.info(float_rows)
 
 # Combine the formatted strings using "|" as a spacer
 df = points_in_polygons.groupby("INDEX").agg({"string": "|".join}).reset_index()

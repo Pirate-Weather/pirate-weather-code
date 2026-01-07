@@ -25,4 +25,5 @@ HISTORY_PERIODS = {
     "ECMWF": 48,
     "NBM_Fire": 48,
     "DWD_MOSMIX": 48,  # History period offset (like other models)
+    "ECMWF_AIFS": 48,
 }

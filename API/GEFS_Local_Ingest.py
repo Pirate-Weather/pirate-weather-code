@@ -2,13 +2,13 @@
 # Alexander Rey, September 2023
 
 # %% Import modules
+import logging
 import os
 import pickle
 import shutil
 import subprocess
 import sys
 import time
-import traceback
 import warnings
 
 import dask.array as da
@@ -32,6 +32,10 @@ from API.ingest_utils import (
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
+
+# Logging setup
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 # %% Setup paths and parameters
@@ -110,7 +114,7 @@ if save_type == "S3":
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to GEFS, ending")
+            logger.info("No Update to GEFS, ending")
             sys.exit()
 
 else:
@@ -124,11 +128,11 @@ else:
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to GEFS, ending")
+            logger.info("No Update to GEFS, ending")
             sys.exit()
 
 
-print(base_time)
+logger.info(base_time)
 # base_time = pd.Timestamp("2024-02-29 18:00:00")
 
 zarr_vars = (
@@ -186,7 +190,7 @@ while mem < 30:
 
     # Check for download length
     if len(FH_IN.file_exists) != 80:
-        print("Member " + str(mem + 1) + " has not downloaded all files, trying again")
+        logger.warning("Member %d has not downloaded all files, trying again", mem + 1)
         failCount += 1
 
         # Break after 10 failed attempts
@@ -212,7 +216,7 @@ while mem < 30:
     grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
     validate_grib_stats(grib_check)
-    print("Grib files passed validation, proceeding with processing")
+    logger.info("Grib files passed validation, proceeding with processing")
 
     # Create a string to pass to wgrib2 to merge all gribs into one grib
     cmd = (
@@ -231,7 +235,7 @@ while mem < 30:
     # Run wgrib2 to megre all the grib files
     sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
     if sp_out.returncode != 0:
-        print(sp_out.stderr)
+        logger.error(sp_out.stderr)
         sys.exit()
 
     # Fix precip and chunk each member
@@ -415,7 +419,7 @@ for i in range(his_period, 0, -6):
 
         # Check for a done file in S3
         if s3.exists(s3_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + s3_path)
+            logger.info("File already exists in S3, skipping download for: %s", s3_path)
 
             # If the file exists, check that it works
             try:
@@ -429,8 +433,8 @@ for i in range(his_period, 0, -6):
                 zarr.open(hisCheckStore)[probVars[-1]][-1, -1, -1]
                 continue  # If it exists, skip to the next iteration
             except Exception:
-                print("### Historic Data Failure!")
-                print(traceback.print_exc())
+                logger.error("### Historic Data Failure!")
+                logger.exception("Exception processing historic data", exc_info=True)
 
                 # Delete the file if it exists
                 if s3.exists(s3_path):
@@ -446,9 +450,11 @@ for i in range(his_period, 0, -6):
 
         # Check for a loca done file
         if os.path.exists(local_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + local_path)
+            logger.info(
+                "File already exists in S3, skipping download for: %s", local_path
+            )
             continue
-    print(
+    logger.info(
         "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
     )
 
@@ -501,7 +507,7 @@ for i in range(his_period, 0, -6):
         )
 
         validate_grib_stats(grib_check)
-        print("Grib files passed validation, proceeding with processing")
+        logger.info("Grib files passed validation, proceeding with processing")
 
         # Create a string to pass to wgrib2 to merge all gribs into one grib
         cmd = (
@@ -520,7 +526,7 @@ for i in range(his_period, 0, -6):
         # Run wgrib2 to merge all the grib files
         sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
         if sp_out.returncode != 0:
-            print(sp_out.stderr)
+            logger.error(sp_out.stderr)
             sys.exit()
 
         # Open the NetCDF file with xarray to process and compress
@@ -742,7 +748,7 @@ for daskVarIDX, dask_var in enumerate(probVars[:]):
 
     daskVarArrays = []
 
-    print(dask_var)
+    logger.info(dask_var)
 
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
@@ -850,4 +856,4 @@ shutil.rmtree(forecast_process_dir)
 
 # Test Read
 T1 = time.time()
-print(T1 - T0)
+logger.info(T1 - T0)

@@ -822,29 +822,6 @@ zarr_array[:] = gridPoints_XR2
 if save_type == "S3":
     zarr_store.close()
 
-## TEST READ
-# Find the index for 45.6060335,-73.7919091
-# lat = 42.4974694
-# az_Lon = -94.1680158
-
-# alerts_lats = np.arange(-60, 85, 0.0625)
-# alerts_lons = np.arange(-180, 180, 0.0625)
-# abslat = np.abs(alerts_lats - lat)
-# abslon = np.abs(alerts_lons - az_Lon)
-# alerts_y_p = np.argmin(abslat)
-# alerts_x_p = np.argmin(abslon)
-
-# gridPoints_XR2[alerts_y_p, alerts_x_p]
-
-# # Find locations in wmo_gdf where source_id'=='fr-meteofrance-xx'
-# fr_meteofrance_alerts = wmo_gdf.loc[wmo_gdf["source_id"] == "fr-meteofrance-xx"]
-
-# zip_store_read = zarr.storage.ZipStore(
-#     forecast_process_dir + "/WMO_Alerts.zarr.zip", compression=0, mode="r"
-# )
-# alertsReadTest = zarr.open_array(zip_store_read)
-# print(alertsReadTest[alerts_y_p, alerts_x_p])
-
 # Upload to S3
 if save_type == "S3":
     # Upload to S3

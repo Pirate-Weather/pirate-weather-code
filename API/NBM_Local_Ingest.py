@@ -2,6 +2,7 @@
 # Alexander Rey, November 2023
 
 # %% Import modules
+import logging
 import os
 import pickle
 import shutil
@@ -36,6 +37,10 @@ from API.ingest_utils import (
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
+
+# Logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -115,7 +120,7 @@ if save_type == "S3":
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to NBM, ending")
+            logger.info("No Update to NBM, ending")
             sys.exit()
 
 else:
@@ -129,12 +134,12 @@ else:
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to NBM, ending")
+            logger.info("No Update to NBM, ending")
             sys.exit()
 
 # base_time = pd.Timestamp("2024-03-05 16:00")
 # base_time = base_time - pd.Timedelta(1,'h')
-print(base_time)
+logger.info(base_time)
 
 zarr_vars = (
     "time",
@@ -230,7 +235,7 @@ FH_forecastsub.download(match_strings, verbose=False)
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(nbm_range):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range))
         + " files, but got "
@@ -248,7 +253,7 @@ cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
 validate_grib_stats(grib_check)
-print("Grib files passed validation, proceeding with processing")
+logger.info("Grib files passed validation, proceeding with processing")
 
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
@@ -265,7 +270,7 @@ cmd = (
 # Run wgrib2
 sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
 
 # Use wgrib2 to change the order
@@ -281,7 +286,7 @@ cmd2 = (
 )
 spOUT2 = subprocess.run(cmd2, shell=True, capture_output=True, encoding="utf-8")
 if spOUT2.returncode != 0:
-    print(spOUT2.stderr)
+    logger.error(spOUT2.stderr)
     sys.exit()
 os.remove(forecast_process_path + "_wgrib2_merged.grib2")
 
@@ -299,7 +304,7 @@ cmd4 = (
 # Run wgrib2 to rotate winds and save as NetCDF
 spOUT4 = subprocess.run(cmd4, shell=True, capture_output=True, encoding="utf-8")
 if spOUT4.returncode != 0:
-    print(spOUT4.stderr)
+    logger.error(spOUT4.stderr)
     sys.exit()
 os.remove(forecast_process_path + "_wgrib2_merged_order.grib")
 
@@ -343,7 +348,7 @@ FH_forecastsub.download(matchstring_po, verbose=False)
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(nbm_range1):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range1))
         + " files, but got "
@@ -376,7 +381,7 @@ FH_forecastsub2.download(matchstring_po2, verbose=False)
 
 # Check for download length
 if len(FH_forecastsub2.file_exists) != len(nbm_range2):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range2))
         + " files, but got "
@@ -395,7 +400,7 @@ cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
 validate_grib_stats(grib_check)
-print("Grib files passed validation, proceeding with processing")
+logger.info("Grib files passed validation, proceeding with processing")
 
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
@@ -412,7 +417,7 @@ cmd = (
 # Run wgrib2
 sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
 
 
@@ -429,7 +434,7 @@ cmd2 = (
 )
 spOUT2 = subprocess.run(cmd2, shell=True, capture_output=True, encoding="utf-8")
 if spOUT2.returncode != 0:
-    print(spOUT2.stderr)
+    logger.error(spOUT2.stderr)
     sys.exit()
 os.remove(forecast_process_path + "_prob_wgrib2_merged.grib2")
 
@@ -447,7 +452,7 @@ cmd4 = (
 # Run wgrib2 to save as  NetCDF
 spOUT4 = subprocess.run(cmd4, shell=True, capture_output=True, encoding="utf-8")
 if spOUT4.returncode != 0:
-    print(spOUT4.stderr)
+    logger.error(spOUT4.stderr)
     sys.exit()
 os.remove(forecast_process_path + "_prob_wgrib2_merged_order.grib")
 
@@ -470,7 +475,7 @@ FH_forecastsub.download(matchstring_pa, verbose=False)
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(nbm_range1):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range1))
         + " files, but got "
@@ -502,7 +507,7 @@ FH_forecastsub2.download(matchstring_pa2, verbose=False)
 
 # Check for download length
 if len(FH_forecastsub2.file_exists) != len(nbm_range2):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range2))
         + " files, but got "
@@ -521,7 +526,7 @@ cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
 validate_grib_stats(grib_check)
-print("Grib files passed validation, proceeding with processing")
+logger.info("Grib files passed validation, proceeding with processing")
 
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
@@ -538,7 +543,7 @@ cmd = (
 # Run wgrib2
 sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
 
 # Use wgrib2 to change the order
@@ -554,7 +559,7 @@ cmd2 = (
 )
 spOUT2 = subprocess.run(cmd2, shell=True, capture_output=True, encoding="utf-8")
 if spOUT2.returncode != 0:
-    print(spOUT2.stderr)
+    logger.error(spOUT2.stderr)
     sys.exit()
 os.remove(forecast_process_path + "_accum_wgrib2_merged.grib2")
 
@@ -572,7 +577,7 @@ cmd4 = (
 # Run wgrib2 to save as NetCDF
 spOUT4 = subprocess.run(cmd4, shell=True, capture_output=True, encoding="utf-8")
 if spOUT4.returncode != 0:
-    print(spOUT4.stderr)
+    logger.error(spOUT4.stderr)
     sys.exit()
 os.remove(forecast_process_path + "_accum_wgrib2_merged_order.grib")
 
@@ -665,9 +670,9 @@ with dask.config.set(**{"array.slicing.split_large_chunks": True}):
         # Check length for errors
 
         if len(daskArray) != len(nbm_range):
-            print(len(daskArray))
-            print(len(nbm_range))
-            print(dask_var)
+            logger.error(len(daskArray))
+            logger.error(len(nbm_range))
+            logger.error(dask_var)
             assert len(daskArray) == len(nbm_range), (
                 "Incorrect number of timesteps! Exiting"
             )
@@ -706,7 +711,7 @@ os.remove(forecast_process_path + "_prob_wgrib2_merged.nc")
 os.remove(forecast_process_path + "_accum_wgrib2_merged.nc")
 
 T1 = time.time()
-print(T0 - T1)
+logger.info(T0 - T1)
 
 ################################################################################################
 # %% Historic data
@@ -727,7 +732,7 @@ for i in range(his_period, -1, -1):
         )
         # Check for a done file in S3
         if s3.exists(s3_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + s3_path)
+            logger.info("File already exists in S3, skipping download for: " + s3_path)
 
             # If the file exists, check that it works
             try:
@@ -741,8 +746,8 @@ for i in range(his_period, -1, -1):
                 zarr.open(hisCheckStore)[zarr_vars[-1]][-1, -1, -1]
                 continue  # If it exists, skip to the next iteration
             except Exception:
-                print("### Historic Data Failure!")
-                print(traceback.print_exc())
+                logger.error("### Historic Data Failure!")
+                logger.exception(traceback.format_exc())
 
                 # Delete the file if it exists
                 if s3.exists(s3_path):
@@ -758,10 +763,12 @@ for i in range(his_period, -1, -1):
         )
         # Check for a loca done file
         if os.path.exists(local_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + local_path)
+            logger.info(
+                "File already exists in S3, skipping download for: " + local_path
+            )
             continue
 
-    print(
+    logger.info(
         "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
     )
 
@@ -778,7 +785,7 @@ for i in range(his_period, -1, -1):
     # Only want forecast at hour 1- SLightly less accurate than initializing at hour 0 but much avoids precipitation accumulation issues
     fxx = range(1, 2)
 
-    print(DATES)
+    logger.info(DATES)
 
     # Create FastHerbie Object.
     FH_histsub = FastHerbie(
@@ -810,7 +817,7 @@ for i in range(his_period, -1, -1):
     grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
     validate_grib_stats(grib_check)
-    print("Grib files passed validation, proceeding with processing")
+    logger.info("Grib files passed validation, proceeding with processing")
 
     # Use wgrib2 to change the order
     cmd1 = (
@@ -828,7 +835,7 @@ for i in range(his_period, -1, -1):
     )
     spOUT1 = subprocess.run(cmd1, shell=True, capture_output=True, encoding="utf-8")
     if spOUT1.returncode != 0:
-        print(spOUT1.stderr)
+        logger.error(spOUT1.stderr)
         sys.exit()
 
     # Convert to NetCDF
@@ -843,7 +850,7 @@ for i in range(his_period, -1, -1):
     )
     spOUT3 = subprocess.run(cmd3, shell=True, capture_output=True, encoding="utf-8")
     if spOUT3.returncode != 0:
-        print(spOUT3.stderr)
+        logger.error(spOUT3.stderr)
         sys.exit()
 
     # Merge the  xarrays
@@ -898,13 +905,13 @@ for i in range(his_period, -1, -1):
         with open(done_file, "w") as f:
             f.write("Done")
 
-    print((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
+    logger.info((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
 
 
 # %% Merge the historic and forecast datasets and then squash using dask
 #####################################################################################################
 
-print("Merge and interpolate arrays.")
+logger.info("Merge and interpolate arrays.")
 # Get the s3 paths to the historic data
 ncLocalWorking_paths = [
     historic_path
@@ -975,7 +982,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
 
     daskVarArrays = []
 
-    print(dask_var)
+    logger.info(dask_var)
 
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
@@ -991,7 +998,7 @@ daskVarArrayListMergeNaN.to_zarr(
     forecast_process_path + "_stack.zarr", overwrite=True, compute=True
 )
 
-print("Stacked 4D array saved to disk.")
+logger.info("Stacked 4D array saved to disk.")
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
@@ -1040,7 +1047,7 @@ with ProgressBar():
         (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
     ).to_zarr(zarr_array, overwrite=True, compute=True)
 
-print("Interpolate complete")
+logger.info("Interpolate complete")
 
 if save_type == "S3":
     zarr_store.close()
@@ -1090,12 +1097,12 @@ for z in [0, 2, 6, 7, 8, 13, 14, 15, 16, 17]:
         zarr_array, overwrite=True, compute=True
     )
 
-    print(zarr_vars[z])
+    logger.info(zarr_vars[z])
 
 if save_type == "S3":
     zarr_store_maps.close()
 
-print("Map complete")
+logger.info("Map complete")
 
 # %% Upload to S3
 if save_type == "S3":
@@ -1148,4 +1155,4 @@ shutil.rmtree(forecast_process_dir)
 
 # Test Read
 T1 = time.time()
-print(T1 - T0)
+logger.info(T1 - T0)
