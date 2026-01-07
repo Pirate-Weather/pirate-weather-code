@@ -9,7 +9,6 @@ import shutil
 import subprocess
 import sys
 import time
-import traceback
 import warnings
 
 import dask.array as da
