@@ -395,7 +395,9 @@ def interp_time_take_blend(
 
 
 # --- Air quality helpers (NowCast & EPA AQI) ---
-def calculate_nowcast_concentration(concentrations: np.ndarray, num_hours: int = 12) -> np.ndarray:
+def calculate_nowcast_concentration(
+    concentrations: np.ndarray, num_hours: int = 12
+) -> np.ndarray:
     """
     Calculate the EPA NowCast weighted concentration for PM2.5 and PM10.
     The NowCast algorithm weights recent hours more heavily than older hours,
@@ -466,7 +468,15 @@ def trailing_mean(conc: Optional[np.ndarray], window: int) -> Optional[np.ndarra
     return out
 
 
-def calculate_aqi(pm25: np.ndarray, pm10: np.ndarray, o3: np.ndarray, no2: np.ndarray, so2: np.ndarray, co: np.ndarray, use_nowcast: bool = True) -> np.ndarray:
+def calculate_aqi(
+    pm25: np.ndarray,
+    pm10: np.ndarray,
+    o3: np.ndarray,
+    no2: np.ndarray,
+    so2: np.ndarray,
+    co: np.ndarray,
+    use_nowcast: bool = True,
+) -> np.ndarray:
     """Calculate Air Quality Index (AQI) based on EPA standards.
 
     Returns the maximum AQI value among all pollutants for each grid cell and time.

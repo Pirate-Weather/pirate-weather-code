@@ -8,6 +8,15 @@ from pathlib import Path
 
 import numpy as np
 
+from API.silam_conversion import (
+    MOLAR_MASS_AIR,
+    MOLAR_MASS_CO,
+    MOLAR_MASS_NO2,
+    MOLAR_MASS_O3,
+    MOLAR_MASS_SO2,
+    convert_vmr_to_concentration,
+)
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # Import EPA AQI breakpoints from shared constants
@@ -395,11 +404,6 @@ class TestVMRConversion:
     def test_vmr_conversion_basic(self):
         """Test basic VMR to concentration conversion."""
         # Import the conversion function from silam_conversion module
-        from API.silam_conversion import (
-            MOLAR_MASS_AIR,
-            MOLAR_MASS_O3,
-            convert_vmr_to_concentration,
-        )
 
         # Test with known values
         # VMR of 1 ppm (1e-6 mole/mole) of O3
@@ -421,10 +425,6 @@ class TestVMRConversion:
 
     def test_vmr_conversion_zero(self):
         """Test VMR conversion with zero concentration."""
-        from API.silam_conversion import (
-            MOLAR_MASS_CO,
-            convert_vmr_to_concentration,
-        )
 
         vmr = 0.0
         air_density = 1.225
@@ -435,14 +435,6 @@ class TestVMRConversion:
 
     def test_vmr_conversion_different_gases(self):
         """Test VMR conversion for different gas species."""
-        from API.silam_conversion import (
-            MOLAR_MASS_AIR,
-            MOLAR_MASS_CO,
-            MOLAR_MASS_NO2,
-            MOLAR_MASS_O3,
-            MOLAR_MASS_SO2,
-            convert_vmr_to_concentration,
-        )
 
         vmr = 1e-6  # 1 ppm for all gases
         air_density = 1.225  # kg/m³
@@ -455,7 +447,7 @@ class TestVMRConversion:
             "CO": MOLAR_MASS_CO,
         }
 
-        for gas_name, molar_mass in gases.items():
+        for molar_mass in gases.items():
             concentration = convert_vmr_to_concentration(vmr, air_density, molar_mass)
             # Verify the conversion produces a positive value
             assert concentration > 0
@@ -465,10 +457,6 @@ class TestVMRConversion:
 
     def test_vmr_conversion_with_array(self):
         """Test VMR conversion with numpy arrays."""
-        from API.silam_conversion import (
-            MOLAR_MASS_O3,
-            convert_vmr_to_concentration,
-        )
 
         # Create a 3D array of VMR values
         vmr = np.full((12, 3, 3), 1e-6, dtype=np.float32)  # 1 ppm everywhere
@@ -483,10 +471,6 @@ class TestVMRConversion:
 
     def test_vmr_conversion_realistic_o3(self):
         """Test VMR conversion with realistic O3 concentrations."""
-        from API.silam_conversion import (
-            MOLAR_MASS_O3,
-            convert_vmr_to_concentration,
-        )
 
         # Typical tropospheric O3: 20-100 ppb (20e-9 to 100e-9 mole/mole)
         vmr_ppb = 50e-9  # 50 ppb
@@ -505,13 +489,6 @@ class TestAQIWithVMRConversion:
 
     def test_aqi_with_vmr_converted_gases(self):
         """Test AQI calculation using VMR-converted gas concentrations."""
-        from API.silam_conversion import (
-            MOLAR_MASS_CO,
-            MOLAR_MASS_NO2,
-            MOLAR_MASS_O3,
-            MOLAR_MASS_SO2,
-            convert_vmr_to_concentration,
-        )
 
         # Create test data with 12 time steps
         air_density = np.full((12, 3, 3), 1.225, dtype=np.float32)
@@ -552,10 +529,6 @@ class TestAQIWithVMRConversion:
 
     def test_aqi_with_high_o3_from_vmr(self):
         """Test AQI calculation with high O3 levels from VMR."""
-        from API.silam_conversion import (
-            MOLAR_MASS_O3,
-            convert_vmr_to_concentration,
-        )
 
         # Create test data
         air_density = np.full((12, 3, 3), 1.225, dtype=np.float32)
@@ -582,10 +555,6 @@ class TestAQIWithVMRConversion:
 
     def test_aqi_spatial_variation_with_vmr(self):
         """Test AQI with spatially varying VMR values."""
-        from API.silam_conversion import (
-            MOLAR_MASS_O3,
-            convert_vmr_to_concentration,
-        )
 
         # Create spatially varying O3 VMR
         vmr_o3 = np.zeros((12, 5, 5), dtype=np.float32)
