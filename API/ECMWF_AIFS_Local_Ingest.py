@@ -257,8 +257,8 @@ match_strings = (
 
 # Create FastHerbie object
 FH_forecastsub = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="12h"),
-    model="ifs",
+    pd.date_range(start=base_time, periods=1, freq="6h"),
+    model="aifs",
     fxx=aifs_range,
     product="oper",
     verbose=False,
@@ -352,8 +352,8 @@ matchstring_pressure = "(:(t|z):)"
 
 # Download pressure level data
 FH_pressure = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="12h"),
-    model="ifs",
+    pd.date_range(start=base_time, periods=1, freq="6h"),
+    model="aifs",
     fxx=aifs_range,
     product="oper",
     verbose=False,
