@@ -447,7 +447,7 @@ class TestVMRConversion:
             "CO": MOLAR_MASS_CO,
         }
 
-        for name, molar_mass in gases.items():
+        for molar_mass in gases.values():
             concentration = convert_vmr_to_concentration(vmr, air_density, molar_mass)
             # Verify the conversion produces a positive value
             assert concentration > 0
