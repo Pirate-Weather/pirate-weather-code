@@ -673,30 +673,46 @@ def derive_precip_type(
     # Convert levels to Celsius
     temp_levels_c = temp_levels - KELVIN_TO_CELSIUS
 
-    # Compute heights if geopotential available
+    # Compute heights if geopotential available. If `pressure_levels` is
+    # supplied, attach as a coordinate for clarity (non-fatal on mismatch).
     if geopotential_levels is not None:
         height_levels = geopotential_levels / GRAVITY
+        if pressure_levels is not None:
+            try:
+                height_levels = height_levels.assign_coords(
+                    level=("level", pressure_levels)
+                )
+            except Exception:
+                # ignore if coords already set or lengths mismatch
+                pass
     else:
         height_levels = None
 
     # Warm layer detection: any level above 0C
     warm_present = (temp_levels_c > 0).any(dim="level")
 
-    # Approximate warm-layer thickness when heights are available
+    # Approximate warm-layer thickness and base/top heights when heights are available
     warm_thickness = None
+    warm_base = None
     if height_levels is not None:
         warm_heights = height_levels.where(temp_levels_c > 0)
         # max - min across level, result will be NaN where no warm levels
-        warm_thickness = warm_heights.max(dim="level") - warm_heights.min(dim="level")
+        warm_top = warm_heights.max(dim="level")
+        warm_base = warm_heights.min(dim="level")
+        warm_thickness = warm_top - warm_base
 
-    # Freezing rain: warm layer aloft + surface <= 0
+    # Freezing rain: warm layer aloft (sufficient thickness + base above near-surface) + surface <= 0
     fr_mask = mid_mask & warm_present & (temp_surf_c <= 0)
     if warm_thickness is not None:
-        fr_mask = fr_mask & (warm_thickness >= 0)
+        fr_mask = fr_mask & (warm_thickness >= warm_layer_min_m)
+    if warm_base is not None:
+        fr_mask = fr_mask & (warm_base >= near_surface_freeze_m)
     out = xr.where(fr_mask, 2, out)
 
-    # Sleet: warm layer aloft + surface > 0 (falling melted then refreeze)
+    # Sleet: warm layer aloft with surface > 0 and sufficient warm-layer thickness
     sleet_mask = mid_mask & warm_present & (temp_surf_c > 0)
+    if warm_thickness is not None:
+        sleet_mask = sleet_mask & (warm_thickness >= warm_layer_min_m)
     out = xr.where(sleet_mask, 3, out)
 
     # Any remaining mid_mask: snow if surface <=0 else rain
