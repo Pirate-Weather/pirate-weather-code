@@ -170,7 +170,7 @@ aigefs_range = FORECAST_LEAD_RANGES["AIGEFS"]
 FH_forecastsubMembers = []
 mem = 0
 failCount = 0
-while mem < 32:
+while mem < 31:
     FH_IN = FastHerbie(
         pd.date_range(start=base_time, periods=1, freq="6h"),
         model="aigefs",
@@ -284,13 +284,12 @@ new_hourly_time = pd.date_range(
     start=start - pd.Timedelta(his_period, "h"), end=end, freq="h"
 )
 
-# Plus 2 since we start at Hour 3
 stacked_times = np.concatenate(
     (
         pd.date_range(
             start=start - pd.Timedelta(his_period, "h"),
             end=start - pd.Timedelta(1, "h"),
-            freq="3h",
+            freq="6h",
         ),
         xarray_wgrib.time.values,
     )
@@ -302,7 +301,7 @@ stacked_timesUnix = (stacked_times - unix_epoch) / one_second
 hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
 ncLocalWorking_paths = [
-    forecast_process_path + "_xr_m" + str(i) + ".zarr" for i in range(1, 32, 1)
+    forecast_process_path + "_xr_m" + str(i) + ".zarr" for i in range(1, 31, 1)
 ]
 
 # Dask
@@ -328,7 +327,7 @@ daskOutput = dict()
 # Find the probability of precipitation greater than 0.0001 mm/h  across all members
 daskOutput["Precipitation_Prob"] = ((daskArrays["APCP_surface"]) > 0.0001).sum(
     axis=0
-) / 31
+) / daskArrays["APCP_surface"].shape[0]
 
 # Find the standard deviation of precipitation accumulation across all members
 daskOutput["APCP_StdDev"] = daskArrays["APCP_surface"].std(axis=0)
