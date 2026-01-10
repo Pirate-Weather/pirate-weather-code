@@ -67,7 +67,8 @@ FORECAST_LEAD_RANGES = {
     "ECMWF_AIFS": list(range(0, 241, 6)),
     "ECMWF_IFS_1": list(range(3, 144, 3)),
     "ECMWF_IFS_2": list(range(144, 241, 6)),
-    "GFS_GRAPHCAST": list(range(0, 241, 6)),
+    "AIGFS": list(range(0, 241, 6)),
+    "AIGEFS": list(range(0, 241, 6)),
 }
 
 # Radius, in km, used for DWD model nearest-neighbor selection
@@ -618,3 +619,89 @@ def calculate_cloud_cover_from_rh(
     total_cloud_cover = xr.where(total_cloud_cover > 1, 1, total_cloud_cover)
 
     return total_cloud_cover
+
+
+def derive_precip_type(
+    apcp: xr.DataArray,
+    temp_surface: Optional[xr.DataArray] = None,
+    temp_levels: Optional[xr.DataArray] = None,
+    geopotential_levels: Optional[xr.DataArray] = None,
+    pressure_levels: Optional[list] = None,
+    apcp_threshold: float = 0.0001,
+    rain_thresh_c: float = 5.0,
+    snow_thresh_c: float = -10.0,
+    warm_layer_min_m: float = 200.0,
+    near_surface_freeze_m: float = 100.0,
+) -> xr.DataArray:
+    """Derive categorical precip type from precipitation and temperature.
+
+    Returns integer codes: 1=snow, 2=freezing rain, 3=sleet, 4=rain, 0=no/insignificant precip.
+
+    The rules are conservative and tunable via the threshold parameters. Inputs
+    expect temperatures in Kelvin (consistent with other helpers).
+    """
+
+    # Default output: 0 (no precip)
+    out = xr.full_like(apcp, 0).astype("int8")
+
+    # Mask where precipitation is meaningful
+    has_precip = apcp > apcp_threshold
+
+    # Determine surface temperature (use lowest pressure level as proxy if needed)
+    if temp_surface is None and temp_levels is not None:
+        temp_surface = temp_levels.isel(level=0)
+
+    if temp_surface is None:
+        # No temperature info: mark precip as rain conservatively
+        return xr.where(has_precip, 4, out)
+
+    temp_surf_c = temp_surface - KELVIN_TO_CELSIUS
+
+    # Strong-warm/strong-cold shortcuts
+    out = xr.where((temp_surf_c >= rain_thresh_c) & has_precip, 4, out)
+    out = xr.where((temp_surf_c <= snow_thresh_c) & has_precip, 1, out)
+
+    # Remaining points to classify
+    mid_mask = has_precip & (out == 0)
+
+    if temp_levels is None:
+        # Without vertical profile: decide by sign of surface temp
+        out = xr.where(mid_mask & (temp_surf_c > 0), 4, out)
+        out = xr.where(mid_mask & (temp_surf_c <= 0), 1, out)
+        return out
+
+    # Convert levels to Celsius
+    temp_levels_c = temp_levels - KELVIN_TO_CELSIUS
+
+    # Compute heights if geopotential available
+    if geopotential_levels is not None:
+        height_levels = geopotential_levels / GRAVITY
+    else:
+        height_levels = None
+
+    # Warm layer detection: any level above 0C
+    warm_present = (temp_levels_c > 0).any(dim="level")
+
+    # Approximate warm-layer thickness when heights are available
+    warm_thickness = None
+    if height_levels is not None:
+        warm_heights = height_levels.where(temp_levels_c > 0)
+        # max - min across level, result will be NaN where no warm levels
+        warm_thickness = warm_heights.max(dim="level") - warm_heights.min(dim="level")
+
+    # Freezing rain: warm layer aloft + surface <= 0
+    fr_mask = mid_mask & warm_present & (temp_surf_c <= 0)
+    if warm_thickness is not None:
+        fr_mask = fr_mask & (warm_thickness >= 0)
+    out = xr.where(fr_mask, 2, out)
+
+    # Sleet: warm layer aloft + surface > 0 (falling melted then refreeze)
+    sleet_mask = mid_mask & warm_present & (temp_surf_c > 0)
+    out = xr.where(sleet_mask, 3, out)
+
+    # Any remaining mid_mask: snow if surface <=0 else rain
+    remaining = mid_mask & (out == 0)
+    out = xr.where(remaining & (temp_surf_c <= 0), 1, out)
+    out = xr.where(remaining & (temp_surf_c > 0), 4, out)
+
+    return out

@@ -32,6 +32,7 @@ from API.ingest_utils import (
     VALID_DATA_MAX,
     VALID_DATA_MIN,
     calculate_freezing_level,
+    derive_precip_type,
     pad_to_chunk_size,
     validate_grib_stats,
 )
@@ -407,9 +408,6 @@ freezing_level = calculate_freezing_level(
 # Add freezing level to the dataset
 aifs_mf["freezing_level"] = freezing_level
 
-# Clean up pressure level data from memory
-del aifs_temp_pressure, aifs_z_pressure
-
 logger.info("Freezing level calculation complete")
 
 
@@ -437,6 +435,28 @@ xarray_forecast_merged = (
     .drop_vars("step")
 )
 
+# Derive precipitation type (1=snow,2=freezing rain,3=sleet,4=rain)
+try:
+    # choose APCP mean if available, else try model surface precipitation 'tp'
+    if "APCP_Mean" in xarray_forecast_merged.data_vars:
+        apcp_var = xarray_forecast_merged["APCP_Mean"]
+    elif "tp" in xarray_forecast_merged.data_vars:
+        apcp_var = xarray_forecast_merged["tp"]
+    else:
+        apcp_var = None
+
+    xarray_forecast_merged["precip_type"] = derive_precip_type(
+        apcp=apcp_var,
+        temp_surface=xarray_forecast_merged.get("t2m", None),
+        temp_levels=aifs_temp_pressure["t"],
+        geopotential_levels=aifs_z_pressure["z"],
+        pressure_levels=pressure_levels,
+    )
+except Exception:
+    logger.exception("Could not derive precip_type; skipping")
+
+# Clean up pressure level data from memory
+del aifs_temp_pressure, aifs_z_pressure
 
 # Create a new time series for the interpolation target
 start = xarray_forecast_merged.time[0].values
