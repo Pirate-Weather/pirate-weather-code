@@ -25,7 +25,9 @@ def test_snow_tolerance_above_5cm_sets_lower_bound_to_one():
     """
 
     # Use a fixed UTC start time
-    start = int(datetime.datetime(2025, 1, 1, 0, tzinfo=datetime.timezone.utc).timestamp())
+    start = int(
+        datetime.datetime(2025, 1, 1, 0, tzinfo=datetime.timezone.utc).timestamp()
+    )
 
     hours = []
     # First hour: large snow accumulation with very large error
@@ -75,7 +77,9 @@ def test_snow_tolerance_above_5cm_sets_lower_bound_to_one():
             }
         )
 
-    icon, summary = calculate_day_text(hours, is_day_time=True, time_zone="UTC", mode="daily", unit_system="si")
+    icon, summary = calculate_day_text(
+        hours, is_day_time=True, time_zone="UTC", mode="daily", unit_system="si"
+    )
 
     # Find the centimeters range in the nested summary structure
     rng = _find_range_in_structure(summary)
