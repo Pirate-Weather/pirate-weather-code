@@ -928,6 +928,7 @@ def calculate_half_day_text(
 
     # Add snow accumulation range to precip text if applicable
     # Convert mm to display units based on unit_system
+    snow_sentence = None
     if total_snow_accum > 10 or secondary_precip_condition == "medium-snow":
         # Determine snow unit and convert
         if unit_system == "us":
