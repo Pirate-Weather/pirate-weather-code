@@ -14,8 +14,8 @@ psutil==5.9.0
 pytz==2025.2
 reverse_geocode==1.6.6
 s3fs==2025.12.0
-scipy==1.16.3
-timezonefinder==8.2.0
+scipy==1.17.0
+timezonefinder==8.2.1
 typing-inspect==0.9.0
 ujson==5.11.0
 watchfiles==1.1.1
