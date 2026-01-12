@@ -47,7 +47,7 @@ def test_snow_tolerance_above_5cm_sets_lower_bound_to_one():
             "rainIntensity": 0.0,
             "snowIntensity": 0.0,
             "iceIntensity": 0.0,
-            "visibility": 10000,
+            "visibility": 10,
             "smoke": 0.0,
         }
     )
@@ -70,9 +70,7 @@ def test_snow_tolerance_above_5cm_sets_lower_bound_to_one():
                 "rainIntensity": 0.0,
                 "snowIntensity": 0.0,
                 "iceIntensity": 0.0,
-                "liquidAccumulation": 0.0,
-                "iceAccumulation": 0.0,
-                "visibility": 10000,
+                "visibility": 10,
                 "smoke": 0.0,
             }
         )
