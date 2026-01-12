@@ -13,6 +13,7 @@ from API.constants.text_const import (
     DEFAULT_HUMIDITY,
     DEFAULT_POP,
     DEFAULT_VISIBILITY,
+    LESS_THAN_TOLERANCE,
     PRECIP_INTENSITY_THRESHOLDS,
 )
 from API.PirateTextHelper import (
@@ -927,7 +928,6 @@ def calculate_half_day_text(
 
     # Add snow accumulation range to precip text if applicable
     # Convert mm to display units based on unit_system
-    snow_sentence = None
     if total_snow_accum > 10 or secondary_precip_condition == "medium-snow":
         # Determine snow unit and convert
         if unit_system == "us":
@@ -935,11 +935,13 @@ def calculate_half_day_text(
             # Convert mm to inches (1 inch = 25.4 mm)
             snow_accum_display = total_snow_accum / 25.4
             snow_error_display = total_snow_error / 25.4
+            less_than_tolerance = LESS_THAN_TOLERANCE / 25.4
         else:  # si, ca, uk use centimeters
             snow_unit_str = "centimeters"
             # Convert mm to cm
             snow_accum_display = total_snow_accum / 10
             snow_error_display = total_snow_error / 10
+            less_than_tolerance = LESS_THAN_TOLERANCE / 10
 
         # If error data is missing (ERA5, etc.), show exact value without range or "<"
         if not has_any_snow_error_data and snow_accum_display > 0:
@@ -955,6 +957,9 @@ def calculate_half_day_text(
             snow_low_accum = max(
                 0, snow_low_accum
             )  # Snow accumulation cannot be negative
+
+            if snow_max_accum >= less_than_tolerance and snow_low_accum == 0:
+                snow_low_accum = 1
 
             if snow_max_accum > 0:
                 if snow_accum_display == 0:
