@@ -849,7 +849,7 @@ def build_minutely_block(
     minuteType = [pTypes[maxPchance[idx]] for idx in range(61)]
     # Explicitly set dtype to handle strings up to 5 characters (length of "sleet" and "mixed")
     # This prevents truncation when assigning precipitation types later
-    precipTypes = np.array(minuteType, dtype='U5')
+    precipTypes = np.array(minuteType, dtype="U5")
 
     # Calculate Intensity (and update precipTypes for HRRR/DWD MOSMIX temperature-based fallback)
     intensity, precipTypes, refc_used = _calculate_intensity(
