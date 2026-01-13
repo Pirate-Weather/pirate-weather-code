@@ -869,19 +869,19 @@ def calculate_half_day_text(
             # Re-evaluate primary precipType if calculated type has zero accumulation
             if total_snow_accum == 0 and most_common_overall_precip_type == PRECIP_TYPES["snow"]:
                 if total_rain_accum > 0:
-                    most_common_overall_precip_type = "rain"
+                    most_common_overall_precip_type = PRECIP_TYPES["rain"]
                 elif total_sleet_accum > 0:
-                    most_common_overall_precip_type = "sleet"
+                    most_common_overall_precip_type = PRECIP_TYPES["sleet"]
             elif total_rain_accum == 0 and most_common_overall_precip_type == PRECIP_TYPES["rain"]:
                 if total_snow_accum > 0:
-                    most_common_overall_precip_type = "snow"
+                    most_common_overall_precip_type = PRECIP_TYPES["snow"]
                 elif total_sleet_accum > 0:
-                    most_common_overall_precip_type = "sleet"
+                    most_common_overall_precip_type = PRECIP_TYPES["sleet"]
             elif total_sleet_accum == 0 and most_common_overall_precip_type == PRECIP_TYPES["sleet"]:
                 if total_snow_accum > 0:
-                    most_common_overall_precip_type = "snow"
+                    most_common_overall_precip_type = PRECIP_TYPES["snow"]
                 elif total_rain_accum > 0:
-                    most_common_overall_precip_type = "rain"
+                    most_common_overall_precip_type = PRECIP_TYPES["rain"]
 
             # If the most common precipitation type is ice change to freezing rain to fix text summary issues
             if most_common_overall_precip_type == PRECIP_TYPES["ice"]:
