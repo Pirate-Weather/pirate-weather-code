@@ -11,6 +11,7 @@ import numpy as np
 from API.api_utils import select_daily_precip_type
 from API.constants.api_const import (
     PRECIP_IDX,
+    PRECIP_TYPE_DISPLAY,
     PRECIP_TYPES,
     ROUNDING_RULES,
     TEMPERATURE_UNITS_THRESH,
