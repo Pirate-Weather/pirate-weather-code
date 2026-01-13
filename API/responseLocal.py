@@ -832,22 +832,26 @@ async def PW_Forecast(
             version=version,
         )
 
-    pTypeMap = np.array([
-        PRECIP_TYPES["none"],
-        PRECIP_TYPES["snow"],
-        PRECIP_TYPES["ice"],
-        PRECIP_TYPES["sleet"],
-        PRECIP_TYPES["rain"],
-        PRECIP_TYPES["mixed"],
-    ])
-    pTextMap = np.array([
-        PRECIP_TYPE_DISPLAY["none"],
-        PRECIP_TYPE_DISPLAY["snow"],
-        PRECIP_TYPE_DISPLAY["ice"],
-        PRECIP_TYPE_DISPLAY["sleet"],
-        PRECIP_TYPE_DISPLAY["rain"],
-        PRECIP_TYPE_DISPLAY["mixed"],
-    ])
+    pTypeMap = np.array(
+        [
+            PRECIP_TYPES["none"],
+            PRECIP_TYPES["snow"],
+            PRECIP_TYPES["ice"],
+            PRECIP_TYPES["sleet"],
+            PRECIP_TYPES["rain"],
+            PRECIP_TYPES["mixed"],
+        ]
+    )
+    pTextMap = np.array(
+        [
+            PRECIP_TYPE_DISPLAY["none"],
+            PRECIP_TYPE_DISPLAY["snow"],
+            PRECIP_TYPE_DISPLAY["ice"],
+            PRECIP_TYPE_DISPLAY["sleet"],
+            PRECIP_TYPE_DISPLAY["rain"],
+            PRECIP_TYPE_DISPLAY["mixed"],
+        ]
+    )
 
     # 13. Generate the daily forecast section
     # This aggregates hourly data to create daily summaries (high/low temps, total precip, etc.)

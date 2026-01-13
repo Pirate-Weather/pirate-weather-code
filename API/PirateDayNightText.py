@@ -4,8 +4,8 @@ import math
 import numpy as np
 from dateutil import tz
 
-from API.constants.shared_const import MISSING_DATA
 from API.constants.api_const import PRECIP_TYPES
+from API.constants.shared_const import MISSING_DATA
 from API.constants.text_const import (
     CLOUD_COVER_DAILY_THRESHOLDS,
     CLOUD_COVER_THRESHOLDS,
@@ -867,17 +867,26 @@ def calculate_half_day_text(
                     secondary_precip_condition = "medium-rain"
 
             # Re-evaluate primary precipType if calculated type has zero accumulation
-            if total_snow_accum == 0 and most_common_overall_precip_type == PRECIP_TYPES["snow"]:
+            if (
+                total_snow_accum == 0
+                and most_common_overall_precip_type == PRECIP_TYPES["snow"]
+            ):
                 if total_rain_accum > 0:
                     most_common_overall_precip_type = PRECIP_TYPES["rain"]
                 elif total_sleet_accum > 0:
                     most_common_overall_precip_type = PRECIP_TYPES["sleet"]
-            elif total_rain_accum == 0 and most_common_overall_precip_type == PRECIP_TYPES["rain"]:
+            elif (
+                total_rain_accum == 0
+                and most_common_overall_precip_type == PRECIP_TYPES["rain"]
+            ):
                 if total_snow_accum > 0:
                     most_common_overall_precip_type = PRECIP_TYPES["snow"]
                 elif total_sleet_accum > 0:
                     most_common_overall_precip_type = PRECIP_TYPES["sleet"]
-            elif total_sleet_accum == 0 and most_common_overall_precip_type == PRECIP_TYPES["sleet"]:
+            elif (
+                total_sleet_accum == 0
+                and most_common_overall_precip_type == PRECIP_TYPES["sleet"]
+            ):
                 if total_snow_accum > 0:
                     most_common_overall_precip_type = PRECIP_TYPES["snow"]
                 elif total_rain_accum > 0:
@@ -900,7 +909,10 @@ def calculate_half_day_text(
             ):
                 secondary_precip_condition = "medium-" + most_common_overall_precip_type
                 most_common_overall_precip_type = "snow"
-            if total_sleet_accum > 1 and most_common_overall_precip_type != PRECIP_TYPES["sleet"]:
+            if (
+                total_sleet_accum > 1
+                and most_common_overall_precip_type != PRECIP_TYPES["sleet"]
+            ):
                 secondary_precip_condition = "medium-" + most_common_overall_precip_type
                 most_common_overall_precip_type = "sleet"
 

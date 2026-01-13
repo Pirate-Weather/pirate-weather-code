@@ -133,34 +133,52 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
                 "station-offline",
             ], PRECIP_TYPES["none"]
         # If there is rain for the current minute in the array
-        if minute["precipType"] == PRECIP_TYPES["rain"] and minute["precipIntensity"] > 0:
+        if (
+            minute["precipType"] == PRECIP_TYPES["rain"]
+            and minute["precipIntensity"] > 0
+        ):
             # Increase the minutes of precipitation, the precipitation unit and average intensity
             precipMinutes += 1
             rainIndex.append(idx)
             precipIndex.append(idx)
         # If there is snow for the current minute in the array
-        elif minute["precipType"] == PRECIP_TYPES["snow"] and minute["precipIntensity"] > 0:
+        elif (
+            minute["precipType"] == PRECIP_TYPES["snow"]
+            and minute["precipIntensity"] > 0
+        ):
             # Increase the minutes of precipitation, the precipitation unit and average intensity
             precipMinutes += 1
             snowIndex.append(idx)
             precipIndex.append(idx)
         # If there is sleet for the current minute in the array
-        elif minute["precipType"] == PRECIP_TYPES["sleet"] and minute["precipIntensity"] > 0:
+        elif (
+            minute["precipType"] == PRECIP_TYPES["sleet"]
+            and minute["precipIntensity"] > 0
+        ):
             # Increase the minutes of precipitation, the precipitation unit and average intensity
             precipMinutes += 1
             sleetIndex.append(idx)
             precipIndex.append(idx)
-        elif minute["precipType"] == PRECIP_TYPES["none"] and minute["precipIntensity"] > 0:
+        elif (
+            minute["precipType"] == PRECIP_TYPES["none"]
+            and minute["precipIntensity"] > 0
+        ):
             # Increase the minutes of precipitation, the precipitation unit and average intensity
             precipMinutes += 1
             noneIndex.append(idx)
             precipIndex.append(idx)
-        elif minute["precipType"] == PRECIP_TYPES["ice"] and minute["precipIntensity"] > 0:
+        elif (
+            minute["precipType"] == PRECIP_TYPES["ice"]
+            and minute["precipIntensity"] > 0
+        ):
             # Increase the minutes of precipitation, the precipitation unit and average intensity
             precipMinutes += 1
             iceIndex.append(idx)
             precipIndex.append(idx)
-        elif minute["precipType"] == PRECIP_TYPES["hail"] and minute["precipIntensity"] > 0:
+        elif (
+            minute["precipType"] == PRECIP_TYPES["hail"]
+            and minute["precipIntensity"] > 0
+        ):
             # Increase the minutes of precipitation, the precipitation unit and average intensity
             precipMinutes += 1
             hailIndex.append(idx)

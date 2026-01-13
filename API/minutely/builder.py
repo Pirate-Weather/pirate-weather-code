@@ -497,7 +497,11 @@ def _calculate_intensity(
         precipTypes[mask] = np.where(
             temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
             PRECIP_TYPES["rain"],
-            np.where(temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C, PRECIP_TYPES["snow"], PRECIP_TYPES["sleet"]),
+            np.where(
+                temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C,
+                PRECIP_TYPES["snow"],
+                PRECIP_TYPES["sleet"],
+            ),
         )
         intensity = dbz_to_rate(refc_arr, precipTypes)
         refc_used = True
@@ -513,7 +517,11 @@ def _calculate_intensity(
         precipTypes[mask] = np.where(
             temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
             PRECIP_TYPES["rain"],
-            np.where(temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C, PRECIP_TYPES["snow"], PRECIP_TYPES["sleet"]),
+            np.where(
+                temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C,
+                PRECIP_TYPES["snow"],
+                PRECIP_TYPES["sleet"],
+            ),
         )
     elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
         intensity = ecmwfMinuteInterpolation[:, ECMWF["intensity"]] * 3600
