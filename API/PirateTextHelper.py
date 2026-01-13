@@ -4,6 +4,7 @@ from collections import Counter
 
 import numpy as np
 
+from API.constants.api_const import PRECIP_TYPES
 from API.constants.shared_const import KELVIN_TO_CELSIUS
 from API.constants.text_const import (
     CAPE_THRESHOLDS,
@@ -256,18 +257,18 @@ def calculate_precip_text(
         )
         or (total_prep >= precip_icon_threshold and num_types > 1)
     ):
-        if precipType == "none":
-            c_icon = "rain"  # Fallback icon
-        elif precipType == "mixed":
-            c_icon = "mixed" if is_pirate_icon else "sleet"
-        elif precipType == "ice":
-            c_icon = "sleet"
+        if precipType == PRECIP_TYPES["none"]:
+            c_icon = PRECIP_TYPES["rain"]  # Fallback icon
+        elif precipType == PRECIP_TYPES["mixed"]:
+            c_icon = PRECIP_TYPES["mixed"] if is_pirate_icon else PRECIP_TYPES["sleet"]
+        elif precipType == PRECIP_TYPES["ice"]:
+            c_icon = PRECIP_TYPES["sleet"]
         else:
             c_icon = precipType
 
-    if (num_types > 2 and total_prep > 0) or precipType == "mixed":
+    if (num_types > 2 and total_prep > 0) or precipType == PRECIP_TYPES["mixed"]:
         c_text = "mixed-precipitation"
-    elif (rainAccum > 0 or eff_rain_intensity > 0) and precipType == "rain":
+    elif (rainAccum > 0 or eff_rain_intensity > 0) and precipType == PRECIP_TYPES["rain"]:
         if eff_rain_intensity < light_precip_thresh:
             c_text = possible_precip + "very-light-rain"
             if is_pirate_icon and is_possible_precip and isDayTime:
@@ -311,7 +312,7 @@ def calculate_precip_text(
             and rainAccum >= heavy_precip_thresh * num_precip_days * 2
         ):
             c_text = ["and", "medium-rain", "possible-heavy-rain"]
-    elif (snowAccum > 0 or eff_snow_intensity > 0) and precipType == "snow":
+    elif (snowAccum > 0 or eff_snow_intensity > 0) and precipType == PRECIP_TYPES["snow"]:
         if eff_snow_intensity < light_snow_thresh:
             c_text = possible_precip + "very-light-snow"
             if is_pirate_icon and is_possible_precip and isDayTime:
@@ -354,7 +355,7 @@ def calculate_precip_text(
             and eff_snow_intensity >= heavy_snow_thresh
         ):
             c_text = ["and", "medium-snow", "possible-heavy-snow"]
-    elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == "sleet":
+    elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == PRECIP_TYPES["sleet"]:
         if eff_ice_intensity < light_precip_thresh:
             c_text = possible_precip + "very-light-sleet"
             if is_pirate_icon and is_possible_precip and isDayTime:
@@ -398,7 +399,7 @@ def calculate_precip_text(
         ):
             c_text = ["and", "medium-sleet", "possible-heavy-sleet"]
 
-    elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == "ice":
+    elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == PRECIP_TYPES["ice"]:
         if eff_ice_intensity < light_precip_thresh:
             c_text = possible_precip + "very-light-freezing-rain"
             if is_pirate_icon and is_possible_precip and isDayTime:
@@ -441,7 +442,7 @@ def calculate_precip_text(
             and eff_ice_intensity >= heavy_precip_thresh
         ):
             c_text = ["and", "medium-freezing-rain", "possible-heavy-freezing-rain"]
-    elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == "hail":
+    elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == PRECIP_TYPES["hail"]:
         c_text = possible_precip + "hail"
     elif (
         rainAccum > 0
@@ -453,7 +454,7 @@ def calculate_precip_text(
             or (eff_snow_intensity is not None and eff_snow_intensity > 0)
             or (eff_ice_intensity is not None and eff_ice_intensity > 0)
         )
-    ) and precipType == "none":
+    ) and precipType == PRECIP_TYPES["none"]:
         # For unknown precip type, use the maximum of provided per-type intensities if available
         _none_intensity = max(
             [

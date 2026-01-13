@@ -5,6 +5,7 @@ import numpy as np
 from dateutil import tz
 
 from API.constants.shared_const import MISSING_DATA
+from API.constants.api_const import PRECIP_TYPES
 from API.constants.text_const import (
     CLOUD_COVER_DAILY_THRESHOLDS,
     CLOUD_COVER_THRESHOLDS,
@@ -565,7 +566,7 @@ def calculate_half_day_text(
             # missing, fall back to using error directly.
             if (
                 not np.isnan(hour["precipIntensityError"])
-                and hour.get("precipType") == "snow"
+                and hour.get("precipType") == PRECIP_TYPES["snow"]
                 and hour.get("snowAccumulation", 0.0) > 0.0
             ):
                 liquid_error_mm = hour["precipIntensityError"] * 1.0
@@ -866,40 +867,40 @@ def calculate_half_day_text(
                     secondary_precip_condition = "medium-rain"
 
             # Re-evaluate primary precipType if calculated type has zero accumulation
-            if total_snow_accum == 0 and most_common_overall_precip_type == "snow":
+            if total_snow_accum == 0 and most_common_overall_precip_type == PRECIP_TYPES["snow"]:
                 if total_rain_accum > 0:
                     most_common_overall_precip_type = "rain"
                 elif total_sleet_accum > 0:
                     most_common_overall_precip_type = "sleet"
-            elif total_rain_accum == 0 and most_common_overall_precip_type == "rain":
+            elif total_rain_accum == 0 and most_common_overall_precip_type == PRECIP_TYPES["rain"]:
                 if total_snow_accum > 0:
                     most_common_overall_precip_type = "snow"
                 elif total_sleet_accum > 0:
                     most_common_overall_precip_type = "sleet"
-            elif total_sleet_accum == 0 and most_common_overall_precip_type == "sleet":
+            elif total_sleet_accum == 0 and most_common_overall_precip_type == PRECIP_TYPES["sleet"]:
                 if total_snow_accum > 0:
                     most_common_overall_precip_type = "snow"
                 elif total_rain_accum > 0:
                     most_common_overall_precip_type = "rain"
 
             # If the most common precipitation type is ice change to freezing rain to fix text summary issues
-            if most_common_overall_precip_type == "ice":
+            if most_common_overall_precip_type == PRECIP_TYPES["ice"]:
                 most_common_overall_precip_type = "freezing-rain"
 
             # Promote to stronger precip if significant accumulation is forecast (thresholds in mm)
             if (
                 total_rain_accum > (DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * 10)
-                and most_common_overall_precip_type != "rain"
+                and most_common_overall_precip_type != PRECIP_TYPES["rain"]
             ):
                 secondary_precip_condition = "medium-" + most_common_overall_precip_type
                 most_common_overall_precip_type = "rain"
             if (
                 total_snow_accum > (DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * 0.5)
-                and most_common_overall_precip_type != "snow"
+                and most_common_overall_precip_type != PRECIP_TYPES["snow"]
             ):
                 secondary_precip_condition = "medium-" + most_common_overall_precip_type
                 most_common_overall_precip_type = "snow"
-            if total_sleet_accum > 1 and most_common_overall_precip_type != "sleet":
+            if total_sleet_accum > 1 and most_common_overall_precip_type != PRECIP_TYPES["sleet"]:
                 secondary_precip_condition = "medium-" + most_common_overall_precip_type
                 most_common_overall_precip_type = "sleet"
 
@@ -984,7 +985,7 @@ def calculate_half_day_text(
                     ]
 
     if snow_sentence is not None:
-        if most_common_overall_precip_type == "snow":
+        if most_common_overall_precip_type == PRECIP_TYPES["snow"]:
             precip_summary_text = ["parenthetical", precip_summary_text, snow_sentence]
         elif secondary_precip_condition == "medium-snow":
             precip_summary_text = ["parenthetical", precip_summary_text, snow_sentence]

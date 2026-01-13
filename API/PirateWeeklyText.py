@@ -8,6 +8,7 @@ import numpy as np
 from dateutil import tz
 
 from API.constants.shared_const import MISSING_DATA
+from API.constants.api_const import PRECIP_TYPES
 from API.constants.text_const import (
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
@@ -495,7 +496,7 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
         # Data is already in SI units (mm for accumulation, mm/h for intensity)
         if (
             (
-                day["precipType"] == "snow"
+                day["precipType"] == PRECIP_TYPES["snow"]
                 and day["snowAccumulation"] >= DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM
                 and (
                     day["precipProbability"] >= PRECIP_PROB_THRESHOLD
@@ -503,7 +504,7 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
                 )
             )
             or (
-                day["precipType"] == "rain"
+                day["precipType"] == PRECIP_TYPES["rain"]
                 and day["liquidAccumulation"] >= DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
                 and (
                     day["precipProbability"] >= PRECIP_PROB_THRESHOLD
@@ -511,7 +512,7 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
                 )
             )
             or (
-                day["precipType"] == "sleet"
+                day["precipType"] == PRECIP_TYPES["sleet"]
                 and day["iceAccumulation"] >= DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
                 and (
                     day["precipProbability"] >= PRECIP_PROB_THRESHOLD
