@@ -11,6 +11,7 @@ import numpy as np
 from API.api_utils import select_daily_precip_type
 from API.constants.api_const import (
     PRECIP_IDX,
+    PRECIP_TYPES,
     ROUNDING_RULES,
     TEMPERATURE_UNITS_THRESH,
 )
@@ -1103,17 +1104,17 @@ def build_daily_section(
             wind_unit=windUnit,
         )
 
-        if dayIcon == "none":
+        if dayIcon == PRECIP_TYPES["none"]:
             if tempUnits == 0:
                 tempThresh = TEMPERATURE_UNITS_THRESH["f"]
             else:
                 tempThresh = TEMPERATURE_UNITS_THRESH["c"]
 
             if InterPday[idx, DATA_DAY["temp"]] > tempThresh:
-                dayIcon = "rain"
+                dayIcon = PRECIP_TYPES["rain"]
                 dayText = "Rain"
             else:
-                dayIcon = "snow"
+                dayIcon = PRECIP_TYPES["snow"]
                 dayText = "Snow"
 
         temp_high = daily_display_high[idx, DATA_DAY["temp"]]

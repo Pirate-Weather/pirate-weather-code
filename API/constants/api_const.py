@@ -80,6 +80,30 @@ PRECIP_IDX = {
     "mixed": 5,
 }
 
+# Precipitation type string constants
+# Use these instead of hardcoding strings throughout the codebase
+PRECIP_TYPES = {
+    "none": "none",
+    "snow": "snow",
+    "ice": "ice",
+    "sleet": "sleet",
+    "rain": "rain",
+    "mixed": "mixed",
+    "hail": "hail",
+}
+
+# Precipitation type display names for API output and summaries
+# Maps lowercase type keys to their display text
+PRECIP_TYPE_DISPLAY = {
+    "none": "None",
+    "snow": "Snow",
+    "ice": "Freezing Rain",
+    "sleet": "Sleet",
+    "rain": "Rain",
+    "mixed": "Mixed Precipitation",
+    "hail": "Hail",
+}
+
 PRECIP_NOISE_THRESHOLD_MMH = (
     0.01  # Threshold in mm/h to filter out noise in precipitation intensity
 )

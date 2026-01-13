@@ -10,6 +10,7 @@ from API.constants.api_const import (
     DBZ_CONST,
     DBZ_CONVERSION_CONST,
     GLOBE_TEMP_CONST,
+    PRECIP_TYPES,
     WBGT_CONST,
     WBGT_PERCENTAGE_DIVISOR,
 )
@@ -81,7 +82,7 @@ def dbz_to_rate(
     # Initialize rate coefficients for rain
     a_array = np.full_like(dbz_array, DBZ_CONST["rain_a"], dtype=float)
     b_array = np.full_like(dbz_array, DBZ_CONST["rain_b"], dtype=float)
-    snow_mask = precip_type_array == "snow"
+    snow_mask = precip_type_array == PRECIP_TYPES["snow"]
     a_array[snow_mask] = DBZ_CONST["snow_a"]
     b_array[snow_mask] = DBZ_CONST["snow_b"]
 
