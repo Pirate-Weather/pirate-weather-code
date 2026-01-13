@@ -1112,10 +1112,10 @@ def build_daily_section(
 
             if InterPday[idx, DATA_DAY["temp"]] > tempThresh:
                 dayIcon = PRECIP_TYPES["rain"]
-                dayText = "Rain"
+                dayText = PRECIP_TYPE_DISPLAY["rain"]
             else:
                 dayIcon = PRECIP_TYPES["snow"]
-                dayText = "Snow"
+                dayText = PRECIP_TYPE_DISPLAY["snow"]
 
         temp_high = daily_display_high[idx, DATA_DAY["temp"]]
         temp_low = daily_display_low[idx, DATA_DAY["temp"]]

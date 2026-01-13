@@ -831,7 +831,7 @@ def build_minutely_block(
     pTypesIcon = [
         "clear",
         PRECIP_TYPES["snow"],
-        PRECIP_TYPES["sleet"],
+        PRECIP_TYPES["ice"],
         PRECIP_TYPES["sleet"],
         PRECIP_TYPES["rain"],
         PRECIP_TYPES["mixed"],
