@@ -847,10 +847,10 @@ def calculate_half_day_text(
             # Determine primary and secondary precipitation types based on accumulation
             if total_snow_accum > 0:
                 if total_rain_accum > 0 and total_snow_accum > total_rain_accum:
-                    most_common_overall_precip_type = "snow"
+                    most_common_overall_precip_type = PRECIP_TYPES["snow"]
                     secondary_precip_condition = "medium-rain"
                 elif total_rain_accum > 0 and total_snow_accum < total_rain_accum:
-                    most_common_overall_precip_type = "rain"
+                    most_common_overall_precip_type = PRECIP_TYPES["rain"]
                     secondary_precip_condition = "medium-snow"
                 elif total_sleet_accum > 0 and total_snow_accum > total_sleet_accum:
                     most_common_overall_precip_type = PRECIP_TYPES["snow"]
