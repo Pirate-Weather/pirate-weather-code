@@ -1265,7 +1265,7 @@ def calculate_day_text(
         if total_snow_accum > 0 and total_rain_accum > 0 and total_sleet_accum > 0:
             precip_summary_text = "mixed-precipitation"
             most_common_overall_precip_type = (
-                "sleet" if icon_set != "pirate" else "mixed"
+                PRECIP_TYPES["sleet"] if icon_set != "pirate" else PRECIP_TYPES["mixed"]
             )
             secondary_precip_condition = (
                 "medium-snow"  # Indicate snow totals are relevant
@@ -1280,17 +1280,17 @@ def calculate_day_text(
                     most_common_overall_precip_type = "rain"
                     secondary_precip_condition = "medium-snow"
                 elif total_sleet_accum > 0 and total_snow_accum > total_sleet_accum:
-                    most_common_overall_precip_type = "snow"
+                    most_common_overall_precip_type = PRECIP_TYPES["snow"]
                     secondary_precip_condition = "medium-sleet"
                 elif total_sleet_accum > 0 and total_snow_accum < total_sleet_accum:
-                    most_common_overall_precip_type = "sleet"
+                    most_common_overall_precip_type = PRECIP_TYPES["sleet"]
                     secondary_precip_condition = "medium-snow"
             elif total_sleet_accum > 0:
                 if total_rain_accum > 0 and total_rain_accum > total_sleet_accum:
-                    most_common_overall_precip_type = "rain"
+                    most_common_overall_precip_type = PRECIP_TYPES["rain"]
                     secondary_precip_condition = "medium-sleet"
                 elif total_rain_accum > 0 and total_rain_accum < total_sleet_accum:
-                    most_common_overall_precip_type = "sleet"
+                    most_common_overall_precip_type = PRECIP_TYPES["sleet"]
                     secondary_precip_condition = "medium-rain"
 
             # Re-evaluate primary precipType if calculated type has zero accumulation
@@ -1341,7 +1341,7 @@ def calculate_day_text(
                 and most_common_overall_precip_type != PRECIP_TYPES["sleet"]
             ):
                 secondary_precip_condition = "medium-" + most_common_overall_precip_type
-                most_common_overall_precip_type = "sleet"
+                most_common_overall_precip_type = PRECIP_TYPES["sleet"]
 
         # Calculate final precipitation text and icon (all in mm)
         precip_summary_text, precip_icon = calculate_precip_text(
