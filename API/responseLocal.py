@@ -33,6 +33,8 @@ from API.constants.api_const import (
     COORDINATE_CONST,
     ETOPO_CONST,
     PRECIP_IDX,
+    PRECIP_TYPE_DISPLAY,
+    PRECIP_TYPES,
     ROUNDING_RULES,
 )
 from API.constants.forecast_const import (
@@ -830,9 +832,25 @@ async def PW_Forecast(
             version=version,
         )
 
-    pTypeMap = np.array(["none", "snow", "ice", "sleet", "rain", "mixed"])
+    pTypeMap = np.array(
+        [
+            PRECIP_TYPES["none"],
+            PRECIP_TYPES["snow"],
+            PRECIP_TYPES["ice"],
+            PRECIP_TYPES["sleet"],
+            PRECIP_TYPES["rain"],
+            PRECIP_TYPES["mixed"],
+        ]
+    )
     pTextMap = np.array(
-        ["None", "Snow", "Freezing Rain", "Sleet", "Rain", "Mixed Precipitation"]
+        [
+            PRECIP_TYPE_DISPLAY["none"],
+            PRECIP_TYPE_DISPLAY["snow"],
+            PRECIP_TYPE_DISPLAY["ice"],
+            PRECIP_TYPE_DISPLAY["sleet"],
+            PRECIP_TYPE_DISPLAY["rain"],
+            PRECIP_TYPE_DISPLAY["mixed"],
+        ]
     )
 
     # 13. Generate the daily forecast section
