@@ -40,10 +40,13 @@ WBGT_CONST = {
 }
 
 # Grouped DBZ constants
+# Z-R relationships (Z = a * R^b) for converting radar reflectivity (Z) to precipitation rate (R).
 DBZ_CONST = {
+    # Based on the Marshall-Palmer relation for rain.
     "rain_a": 200.0,
     "rain_b": 1.6,
-    "snow_a": 600.0,
+    # Adjusted to provide higher snow rates. The previous value was 600.0.
+    "snow_a": 300.0,
     "snow_b": 2.0,
 }
 
