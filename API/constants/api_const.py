@@ -43,7 +43,7 @@ WBGT_CONST = {
 DBZ_CONST = {
     "rain_a": 200.0,
     "rain_b": 1.6,
-    "snow_a": 600.0,
+    "snow_a": 300.0,
     "snow_b": 2.0,
 }
 
