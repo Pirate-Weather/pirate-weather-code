@@ -49,11 +49,14 @@ def create_nan_filled_tcc_array(reference_data):
     Create a NaN-filled DataArray for the tcc variable to maintain Zarr file shape.
 
     Args:
-        reference_data: xarray Dataset containing reference dimensions and coordinates
+        reference_data (xarray.Dataset): Dataset containing reference dimensions and coordinates.
+            Must contain 't2m' variable and 'step', 'latitude', 'longitude' coordinates.
 
     Returns:
-        xarray DataArray with NaN values matching the reference dimensions
+        xarray.DataArray: DataArray with NaN values matching the reference dimensions
     """
+    if "t2m" not in reference_data:
+        raise ValueError("reference_data must contain 't2m' variable")
     return xr.DataArray(
         np.full_like(reference_data["t2m"].values, np.nan, dtype=np.float32),
         coords={
