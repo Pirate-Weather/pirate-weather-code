@@ -43,32 +43,6 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
-# Helper function to create NaN-filled tcc array
-def create_nan_filled_tcc_array(reference_data):
-    """
-    Create a NaN-filled DataArray for the tcc variable to maintain Zarr file shape.
-
-    Args:
-        reference_data (xarray.Dataset): Dataset containing reference dimensions and coordinates.
-            Must contain 't2m' variable and 'step', 'latitude', 'longitude' coordinates.
-
-    Returns:
-        xarray.DataArray: DataArray with NaN values matching the reference dimensions
-    """
-    if "t2m" not in reference_data:
-        raise ValueError("reference_data must contain 't2m' variable")
-    return xr.DataArray(
-        np.full_like(reference_data["t2m"].values, np.nan, dtype=np.float32),
-        coords={
-            "step": reference_data["step"],
-            "latitude": reference_data["latitude"],
-            "longitude": reference_data["longitude"],
-        },
-        dims=["step", "latitude", "longitude"],
-        name="tcc",
-    )
-
-
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
 
@@ -283,11 +257,20 @@ matchstring_2m = "(:(2d|2t):)"
 matchstring_10m = "(:(10u|10v):)"
 matchstring_ap = "(:(ptype|tprate|tp):)"
 matchstring_sl = "(:(msl):)"
+matchstring_tcc = "(:(tcc):)"
 
 
 # Merge matchstrings for download
 match_strings = (
-    matchstring_2m + "|" + matchstring_10m + "|" + matchstring_ap + "|" + matchstring_sl
+    matchstring_2m
+    + "|"
+    + matchstring_10m
+    + "|"
+    + matchstring_ap
+    + "|"
+    + matchstring_sl
+    + "|"
+    + matchstring_tcc
 )
 
 
@@ -368,18 +351,27 @@ ifs_mf_msl = xr.open_mfdataset(
     backend_kwargs={"filter_by_keys": {"typeOfLevel": "meanSea"}},
 ).sortby("step")
 
+ifs_mf_atm = xr.open_mfdataset(
+    ifs_paths,
+    engine="cfgrib",
+    combine="nested",
+    concat_dim="step",
+    decode_timedelta=False,
+    join="outer",
+    coords="minimal",
+    compat="override",
+    backend_kwargs={"filter_by_keys": {"typeOfLevel": "atmosphere"}},
+).sortby("step")
+
 # Combine the datasets
-ifs_mf = xr.merge([ifs_mf_2, ifs_mf_10, ifs_mf_surf, ifs_mf_msl], compat="override")
+ifs_mf = xr.merge(
+    [ifs_mf_2, ifs_mf_10, ifs_mf_surf, ifs_mf_msl, ifs_mf_atm], compat="override"
+)
 
 
 # %% Merge the IFS and ENSO data
 
-# Create NaN-filled tcc array to maintain Zarr file shape
-tcc_nan = create_nan_filled_tcc_array(ifs_mf)
-
-xarray_forecast_merged = xr.merge(
-    [ifs_mf, xr.Dataset({"tcc": tcc_nan}), xr_ensoOut], compat="override", join="outer"
-)
+xarray_forecast_merged = xr.merge([ifs_mf, xr_ensoOut], compat="override", join="outer")
 
 
 assert len(xarray_forecast_merged.step) == len(ifsFileRange), (
@@ -436,6 +428,8 @@ del (
     ifs_mf_2,
     ifs_mf_10,
     ifs_mf_surf,
+    ifs_mf_msl,
+    ifs_mf_atm,
     ens_mf,
     xr_ensoOut,
 )
@@ -595,9 +589,21 @@ for i in range(his_period, 1, -12):
         backend_kwargs={"filter_by_keys": {"typeOfLevel": "meanSea"}},
     ).sortby("step")
 
+    ifs_his_mf_atm = xr.open_mfdataset(
+        ifs_hisgribs,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        decode_timedelta=False,
+        join="outer",
+        coords="minimal",
+        compat="override",
+        backend_kwargs={"filter_by_keys": {"typeOfLevel": "atmosphere"}},
+    ).sortby("step")
+
     # Combine the datasets
     ifs_his_mf = xr.merge(
-        [ifs_his_mf_2, ifs_his_mf_10, ifs_his_mf_surf, ifs_his_mf_msl],
+        [ifs_his_mf_2, ifs_his_mf_10, ifs_his_mf_surf, ifs_his_mf_msl, ifs_his_mf_atm],
         compat="override",
     )
 
@@ -659,12 +665,9 @@ for i in range(his_period, 1, -12):
     )
 
     ########################################################################
-    # Create NaN-filled tcc array for historic data to maintain Zarr file shape
-    tcc_nan_hist = create_nan_filled_tcc_array(ifs_his_mf)
-
     # Merge the xarray objects
     xarray_hist_merged = xr.merge(
-        [ifs_his_mf, xr.Dataset({"tcc": tcc_nan_hist}), xr_enso_hisOut],
+        [ifs_his_mf, xr_enso_hisOut],
         compat="override",
         join="outer",
     )

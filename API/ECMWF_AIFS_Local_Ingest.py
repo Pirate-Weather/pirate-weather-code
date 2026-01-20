@@ -250,11 +250,20 @@ matchstring_2m = "(:(2d|2t):)"
 matchstring_10m = "(:(10u|10v):)"
 matchstring_ap = "(:(tp):)"
 matchstring_sl = "(:(msl):)"
+matchstring_tcc = "(:(tcc):)"
 
 
 # Merge matchstrings for download
 match_strings = (
-    matchstring_2m + "|" + matchstring_10m + "|" + matchstring_ap + "|" + matchstring_sl
+    matchstring_2m
+    + "|"
+    + matchstring_10m
+    + "|"
+    + matchstring_ap
+    + "|"
+    + matchstring_sl
+    + "|"
+    + matchstring_tcc
 )
 
 
@@ -336,9 +345,21 @@ aifs_mf_msl = xr.open_mfdataset(
     backend_kwargs={"filter_by_keys": {"typeOfLevel": "meanSea"}},
 ).sortby("step")
 
+aifs_mf_atm = xr.open_mfdataset(
+    ifs_paths,
+    engine="cfgrib",
+    combine="nested",
+    concat_dim="step",
+    decode_timedelta=False,
+    join="outer",
+    coords="minimal",
+    compat="override",
+    backend_kwargs={"filter_by_keys": {"typeOfLevel": "atmosphere"}},
+).sortby("step")
+
 # Combine the datasets
 aifs_mf = xr.merge(
-    [aifs_mf_2, aifs_mf_10, aifs_mf_surf, aifs_mf_msl], compat="override"
+    [aifs_mf_2, aifs_mf_10, aifs_mf_surf, aifs_mf_msl, aifs_mf_atm], compat="override"
 )
 
 
@@ -494,6 +515,8 @@ del (
     aifs_mf_2,
     aifs_mf_10,
     aifs_mf_surf,
+    aifs_mf_msl,
+    aifs_mf_atm,
     ens_mf,
     xr_ensoOut,
 )
@@ -653,9 +676,27 @@ for i in range(his_period, 1, -12):
         backend_kwargs={"filter_by_keys": {"typeOfLevel": "meanSea"}},
     ).sortby("step")
 
+    aifs_his_mf_atm = xr.open_mfdataset(
+        aifs_hisgribs,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        decode_timedelta=False,
+        join="outer",
+        coords="minimal",
+        compat="override",
+        backend_kwargs={"filter_by_keys": {"typeOfLevel": "atmosphere"}},
+    ).sortby("step")
+
     # Combine the datasets
     aifs_his_mf = xr.merge(
-        [aifs_his_mf_2, aifs_his_mf_10, aifs_his_mf_surf, aifs_his_mf_msl],
+        [
+            aifs_his_mf_2,
+            aifs_his_mf_10,
+            aifs_his_mf_surf,
+            aifs_his_mf_msl,
+            aifs_his_mf_atm,
+        ],
         compat="override",
     )
 
