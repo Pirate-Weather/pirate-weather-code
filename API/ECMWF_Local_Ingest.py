@@ -428,6 +428,7 @@ del (
     ifs_mf_2,
     ifs_mf_10,
     ifs_mf_surf,
+    ifs_mf_msl,
     ifs_mf_atm,
     ens_mf,
     xr_ensoOut,
