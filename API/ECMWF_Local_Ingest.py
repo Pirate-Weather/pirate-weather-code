@@ -42,6 +42,30 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+
+# Helper function to create NaN-filled tcc array
+def create_nan_filled_tcc_array(reference_data):
+    """
+    Create a NaN-filled DataArray for the tcc variable to maintain Zarr file shape.
+
+    Args:
+        reference_data: xarray Dataset containing reference dimensions and coordinates
+
+    Returns:
+        xarray DataArray with NaN values matching the reference dimensions
+    """
+    return xr.DataArray(
+        np.full_like(reference_data["t2m"].values, np.nan, dtype=np.float32),
+        coords={
+            "step": reference_data["step"],
+            "latitude": reference_data["latitude"],
+            "longitude": reference_data["longitude"],
+        },
+        dims=["step", "latitude", "longitude"],
+        name="tcc",
+    )
+
+
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
 
@@ -348,17 +372,7 @@ ifs_mf = xr.merge([ifs_mf_2, ifs_mf_10, ifs_mf_surf, ifs_mf_msl], compat="overri
 # %% Merge the IFS and ENSO data
 
 # Create NaN-filled tcc array to maintain Zarr file shape
-# Use the same dimensions as ifs_mf
-tcc_nan = xr.DataArray(
-    np.full_like(ifs_mf["t2m"].values, np.nan, dtype=np.float32),
-    coords={
-        "step": ifs_mf["step"],
-        "latitude": ifs_mf["latitude"],
-        "longitude": ifs_mf["longitude"],
-    },
-    dims=["step", "latitude", "longitude"],
-    name="tcc",
-)
+tcc_nan = create_nan_filled_tcc_array(ifs_mf)
 
 xarray_forecast_merged = xr.merge(
     [ifs_mf, xr.Dataset({"tcc": tcc_nan}), xr_ensoOut], compat="override", join="outer"
@@ -643,16 +657,7 @@ for i in range(his_period, 1, -12):
 
     ########################################################################
     # Create NaN-filled tcc array for historic data to maintain Zarr file shape
-    tcc_nan_hist = xr.DataArray(
-        np.full_like(ifs_his_mf["t2m"].values, np.nan, dtype=np.float32),
-        coords={
-            "step": ifs_his_mf["step"],
-            "latitude": ifs_his_mf["latitude"],
-            "longitude": ifs_his_mf["longitude"],
-        },
-        dims=["step", "latitude", "longitude"],
-        name="tcc",
-    )
+    tcc_nan_hist = create_nan_filled_tcc_array(ifs_his_mf)
 
     # Merge the xarray objects
     xarray_hist_merged = xr.merge(
