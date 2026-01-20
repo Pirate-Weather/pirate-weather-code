@@ -42,6 +42,33 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+
+# Helper function to create NaN-filled tcc array
+def create_nan_filled_tcc_array(reference_data):
+    """
+    Create a NaN-filled DataArray for the tcc variable to maintain Zarr file shape.
+
+    Args:
+        reference_data (xarray.Dataset): Dataset containing reference dimensions and coordinates.
+            Must contain 't2m' variable and 'step', 'latitude', 'longitude' coordinates.
+
+    Returns:
+        xarray.DataArray: DataArray with NaN values matching the reference dimensions
+    """
+    if "t2m" not in reference_data:
+        raise ValueError("reference_data must contain 't2m' variable")
+    return xr.DataArray(
+        np.full_like(reference_data["t2m"].values, np.nan, dtype=np.float32),
+        coords={
+            "step": reference_data["step"],
+            "latitude": reference_data["latitude"],
+            "longitude": reference_data["longitude"],
+        },
+        dims=["step", "latitude", "longitude"],
+        name="tcc",
+    )
+
+
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
 
@@ -154,64 +181,6 @@ zarr_vars = (
     "APCP_Mean",
     "APCP_StdDev",
 )
-
-
-#####################################################################################################
-# %% Download AIFS data using Herbie Latest
-# Needed for tcc
-# Find the latest run with 240 hours
-
-
-# Create a range of forecast lead times
-# Go from 1 to 7 to account for the weird prate approach
-aifs_range1 = FORECAST_LEAD_RANGES["ECMWF_AIFS"]
-
-# Create FastHerbie object
-FH_forecastsub = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="12h"),
-    model="aifs",
-    fxx=aifs_range1,
-    product="oper",
-    verbose=False,
-    save_dir=tmp_dir,
-)
-
-# Download the subsets
-aifs_paths = FH_forecastsub.download("tcc", verbose=False)
-
-# Check for download length
-if len(FH_forecastsub.file_exists) != len(aifs_range1):
-    logger.error(
-        "Download failed, expected %d files, but got %d",
-        len(aifs_range1),
-        len(FH_forecastsub.file_exists),
-    )
-    sys.exit(1)
-
-
-# Create list of downloaded grib files
-grib_list = [
-    str(Path(x.get_localFilePath("tcc")).expand()) for x in FH_forecastsub.file_exists
-]
-
-# Perform a check if any data seems to be invalid
-cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
-
-grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-validate_grib_stats(grib_check)
-logger.info("Grib files passed validation, proceeding with processing")
-
-
-aifs_mf = xr.open_mfdataset(
-    aifs_paths,
-    engine="cfgrib",
-    combine="nested",
-    concat_dim="step",
-    decode_timedelta=False,
-    join="outer",
-    coords="minimal",
-    compat="override",
-).sortby("step")
 
 
 #####################################################################################################
@@ -403,16 +372,13 @@ ifs_mf_msl = xr.open_mfdataset(
 ifs_mf = xr.merge([ifs_mf_2, ifs_mf_10, ifs_mf_surf, ifs_mf_msl], compat="override")
 
 
-# %% Merge the IFS, ENSO, and AIFS data
+# %% Merge the IFS and ENSO data
 
-# Reinterpolate the AIFS array to the same times as the IFS arrays
-aifs_mf = aifs_mf.interp(
-    step=ifs_mf.step, method="linear", kwargs={"fill_value": "extrapolate"}
-)
-
+# Create NaN-filled tcc array to maintain Zarr file shape
+tcc_nan = create_nan_filled_tcc_array(ifs_mf)
 
 xarray_forecast_merged = xr.merge(
-    [ifs_mf, aifs_mf, xr_ensoOut], compat="override", join="outer"
+    [ifs_mf, xr.Dataset({"tcc": tcc_nan}), xr_ensoOut], compat="override", join="outer"
 )
 
 
@@ -470,7 +436,6 @@ del (
     ifs_mf_2,
     ifs_mf_10,
     ifs_mf_surf,
-    aifs_mf,
     ens_mf,
     xr_ensoOut,
 )
@@ -694,63 +659,14 @@ for i in range(his_period, 1, -12):
     )
 
     ########################################################################
-    # Save the aifs data
-    # Note: Use a different fxx range for  AIFS data, this is fixed during interp
-    aifs_range = range(0, 13, 6)
-    # Create FastHerbie object
-    FH_histsub = FastHerbie(
-        DATES,
-        model="aifs",
-        fxx=aifs_range,
-        product="oper",
-        verbose=False,
-        save_dir=tmp_dir,
-    )
-
-    # Download the subsets
-    aifs_his_paths = FH_histsub.download("tcc", verbose=False)
-
-    # Create list of downloaded grib files
-    grib_list = [
-        str(Path(x.get_localFilePath("tcc")).expand()) for x in FH_histsub.file_exists
-    ]
-
-    # Check for download length
-    if len(grib_list) != len(aifs_range):
-        logger.error(
-            "Download failed, expected %d files but got %d",
-            len(aifs_range),
-            len(FH_histsub.file_exists),
-        )
-        sys.exit(1)
-
-    # Perform a check if any data seems to be invalid
-    cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
-
-    grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
-    validate_grib_stats(grib_check)
-    logger.info("Grib files passed validation, proceeding with processing")
-
-    aifs_his_mf = xr.open_mfdataset(
-        aifs_his_paths,
-        engine="cfgrib",
-        combine="nested",
-        concat_dim="step",
-        decode_timedelta=False,
-        join="outer",
-        coords="minimal",
-        compat="override",
-    ).sortby("step")
-
-    # Reinterpolate the AIFS array to the same times as the IFS arrays
-    aifs_his_mf = aifs_his_mf.interp(
-        step=ifs_his_mf.step,
-        method="linear",
-    )
+    # Create NaN-filled tcc array for historic data to maintain Zarr file shape
+    tcc_nan_hist = create_nan_filled_tcc_array(ifs_his_mf)
 
     # Merge the xarray objects
     xarray_hist_merged = xr.merge(
-        [ifs_his_mf, aifs_his_mf, xr_enso_hisOut], compat="override", join="outer"
+        [ifs_his_mf, xr.Dataset({"tcc": tcc_nan_hist}), xr_enso_hisOut],
+        compat="override",
+        join="outer",
     )
 
     # Save merged and processed xarray dataset to disk using zarr with compression
