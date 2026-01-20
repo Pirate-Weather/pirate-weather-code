@@ -351,8 +351,22 @@ ifs_mf_msl = xr.open_mfdataset(
     backend_kwargs={"filter_by_keys": {"typeOfLevel": "meanSea"}},
 ).sortby("step")
 
+ifs_mf_atm = xr.open_mfdataset(
+    ifs_paths,
+    engine="cfgrib",
+    combine="nested",
+    concat_dim="step",
+    decode_timedelta=False,
+    join="outer",
+    coords="minimal",
+    compat="override",
+    backend_kwargs={"filter_by_keys": {"typeOfLevel": "atmosphere"}},
+).sortby("step")
+
 # Combine the datasets
-ifs_mf = xr.merge([ifs_mf_2, ifs_mf_10, ifs_mf_surf, ifs_mf_msl], compat="override")
+ifs_mf = xr.merge(
+    [ifs_mf_2, ifs_mf_10, ifs_mf_surf, ifs_mf_msl, ifs_mf_atm], compat="override"
+)
 
 
 # %% Merge the IFS and ENSO data
@@ -414,6 +428,7 @@ del (
     ifs_mf_2,
     ifs_mf_10,
     ifs_mf_surf,
+    ifs_mf_atm,
     ens_mf,
     xr_ensoOut,
 )
@@ -573,9 +588,21 @@ for i in range(his_period, 1, -12):
         backend_kwargs={"filter_by_keys": {"typeOfLevel": "meanSea"}},
     ).sortby("step")
 
+    ifs_his_mf_atm = xr.open_mfdataset(
+        ifs_hisgribs,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        decode_timedelta=False,
+        join="outer",
+        coords="minimal",
+        compat="override",
+        backend_kwargs={"filter_by_keys": {"typeOfLevel": "atmosphere"}},
+    ).sortby("step")
+
     # Combine the datasets
     ifs_his_mf = xr.merge(
-        [ifs_his_mf_2, ifs_his_mf_10, ifs_his_mf_surf, ifs_his_mf_msl],
+        [ifs_his_mf_2, ifs_his_mf_10, ifs_his_mf_surf, ifs_his_mf_msl, ifs_his_mf_atm],
         compat="override",
     )
 
