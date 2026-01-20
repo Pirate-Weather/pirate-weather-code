@@ -357,9 +357,7 @@ ifs_mf = xr.merge([ifs_mf_2, ifs_mf_10, ifs_mf_surf, ifs_mf_msl], compat="overri
 
 # %% Merge the IFS and ENSO data
 
-xarray_forecast_merged = xr.merge(
-    [ifs_mf, xr_ensoOut], compat="override", join="outer"
-)
+xarray_forecast_merged = xr.merge([ifs_mf, xr_ensoOut], compat="override", join="outer")
 
 
 assert len(xarray_forecast_merged.step) == len(ifsFileRange), (
