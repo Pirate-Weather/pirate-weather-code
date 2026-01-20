@@ -690,7 +690,13 @@ for i in range(his_period, 1, -12):
 
     # Combine the datasets
     aifs_his_mf = xr.merge(
-        [aifs_his_mf_2, aifs_his_mf_10, aifs_his_mf_surf, aifs_his_mf_msl, aifs_his_mf_atm],
+        [
+            aifs_his_mf_2,
+            aifs_his_mf_10,
+            aifs_his_mf_surf,
+            aifs_his_mf_msl,
+            aifs_his_mf_atm,
+        ],
         compat="override",
     )
 
