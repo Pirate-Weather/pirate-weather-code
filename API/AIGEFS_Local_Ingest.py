@@ -189,7 +189,8 @@ while mem < 31:
 
         # Break after 10 failed attempts
         if failCount > 10:
-            break
+            logger.error("Failed to download files for member %d after multiple attempts.", mem + 1)
+            sys.exit(1)
 
         continue
 
