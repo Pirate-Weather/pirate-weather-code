@@ -550,7 +550,9 @@ try:
     # Check if surface temperature is available
     temp_surface = xarray_surface.get("TMP_2maboveground", None)
     if temp_surface is None:
-        logger.warning("Surface temperature (TMP_2maboveground) not found, precip type may be less accurate")
+        logger.warning(
+            "Surface temperature (TMP_2maboveground) not found, precip type may be less accurate"
+        )
 
     xarray_forecast_merged["precip_type"] = derive_precip_type(
         apcp=xarray_forecast_merged["APCP_Mean"],
