@@ -276,10 +276,10 @@ APCP_surface_tmp = da.diff(
 )
 
 # Convert 6-hourly to 1-hourly accumulation for precipitation only
-# After hour 120, AIGFS provides 6-hourly accumulation instead of 1-hourly
-# Divide by 6 to get hourly precipitation rate for consistency
+# AIGFS provides all data at 6-hourly intervals (0, 6, 12, 18, ... 240 hours)
+# After diff, we have 6-hour accumulations, so divide by 6 to get hourly rates
 # This only applies to APCP_surface, not other variables
-APCP_surface_tmp[120:, :, :] = APCP_surface_tmp[120:, :, :] / 6
+APCP_surface_tmp = APCP_surface_tmp / 6
 
 xarray_forecast_merged["APCP_surface"].data = APCP_surface_tmp
 
