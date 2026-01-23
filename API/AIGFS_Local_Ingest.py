@@ -275,8 +275,11 @@ APCP_surface_tmp = da.diff(
     prepend=0,
 )
 
-# Convert 6-hourly to 1-hourly
-APCP_surface_tmp[120:, :, :] = APCP_surface_tmp[120:, :, :] / 6
+# Convert 6-hourly to 1-hourly accumulation for precipitation only
+# AIGFS provides all data at 6-hourly intervals (0, 6, 12, 18, ... 240 hours)
+# After diff, we have 6-hour accumulations, so divide by 6 to get hourly rates
+# This only applies to APCP_surface, not other variables
+APCP_surface_tmp = APCP_surface_tmp / 6
 
 xarray_forecast_merged["APCP_surface"].data = APCP_surface_tmp
 
@@ -838,6 +841,10 @@ with ProgressBar():
     )
 
     # 3. Create the zarr array
+    # Use a reasonable time chunk size instead of full time dimension
+    # to avoid creating single large chunks that are inefficient for access
+    # Use min of 240 or the actual time length to handle shorter forecasts
+    time_chunk_size = min(240, len(hourly_timesUnix))
     zarr_array = zarr.create_array(
         store=zarr_store,
         shape=(
@@ -846,7 +853,7 @@ with ProgressBar():
             daskVarArrayStackDiskInterpPad.shape[2],
             daskVarArrayStackDiskInterpPad.shape[3],
         ),
-        chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
+        chunks=(len(zarr_vars), time_chunk_size, final_chunk, final_chunk),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
         dtype="float32",
     )
@@ -854,7 +861,7 @@ with ProgressBar():
     # 4. Rechunk it to match the final array
     # 5. Write it out to the zarr array
     daskVarArrayStackDiskInterpPad.round(5).rechunk(
-        (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
+        (len(zarr_vars), time_chunk_size, final_chunk, final_chunk)
     ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
