@@ -241,10 +241,18 @@ while mem < 31:
         forecast_process_path + "_wgrib2_merged_m" + str(mem + 1) + ".nc"
     )
 
+    # Save coordinates and time from the first member for consistency
+    if mem == 0:
+        first_member_lat = xarray_wgrib["latitude"]
+        first_member_lon = xarray_wgrib["longitude"]
+        first_member_time_min = xarray_wgrib.time.min().values
+        first_member_time_max = xarray_wgrib.time.max().values
+
     # Sometimes there will be weird tiny negative values, set them to zero
     xarray_wgrib["APCP_surface"] = np.maximum(xarray_wgrib["APCP_surface"], 0)
 
-    # Divide by 6 to get hourly accum
+    # Divide by 6 to get hourly accumulation for precipitation only
+    # AIGEFS provides 6-hourly accumulation, convert to hourly rate
     xarray_wgrib["APCP_surface"] = xarray_wgrib["APCP_surface"] / 6
 
     # Get a list of all variables in the dataset
@@ -281,9 +289,9 @@ while mem < 31:
 
     mem += 1
 
-# Create a new time series
-start = xarray_wgrib.time.min().values  # Adjust as necessary
-end = xarray_wgrib.time.max().values  # Adjust as necessary
+# Create a new time series using the first member's time range
+start = first_member_time_min  # Adjust as necessary
+end = first_member_time_max  # Adjust as necessary
 new_hourly_time = pd.date_range(
     start=start - pd.Timedelta(his_period, "h"), end=end, freq="h"
 )
@@ -339,8 +347,8 @@ daskOutput["APCP_StdDev"] = daskArrays["APCP_surface"].std(axis=0)
 # Find the average precipitation accumulation across all members
 daskOutput["APCP_Mean"] = daskArrays["APCP_surface"].mean(axis=0)
 
-# Copy time over
-daskOutput["time"] = daskArrays["time"][1, :]
+# Copy time over (use first member [0] for consistency)
+daskOutput["time"] = daskArrays["time"][0, :]
 
 
 # filters = [BitRound(keepbits=12)]  # Only keep ~ 3 significant digits
@@ -379,11 +387,11 @@ del FH_forecastsubMembers, daskArrays
 # add derived variables (freezing level) and write a single forecast zarr.
 logger.info("Constructing merged forecast xarray dataset from dask outputs")
 
-# Ensure we have coordinate arrays from the last opened member (`xarray_wgrib`)
+# Use coordinate arrays from the first member (saved earlier) for consistency
 coords = {
     "time": ("time", daskOutput["time"]),
-    "latitude": ("latitude", xarray_wgrib["latitude"]),
-    "longitude": ("longitude", xarray_wgrib["longitude"]),
+    "latitude": ("latitude", first_member_lat),
+    "longitude": ("longitude", first_member_lon),
 }
 
 # Create Dataset using DataArray wrappers so dask arrays are preserved lazily
@@ -402,8 +410,8 @@ xarray_forecast_merged = xr.Dataset(
     },
     coords={
         "time": daskOutput["time"],
-        "latitude": xarray_wgrib["latitude"],
-        "longitude": xarray_wgrib["longitude"],
+        "latitude": first_member_lat,
+        "longitude": first_member_lon,
     },
 )
 
@@ -426,6 +434,9 @@ matchstring_pressure_hgt = (
 
 match_strings_pressure = matchstring_pressure_tmp + "|" + matchstring_pressure_hgt
 
+# Also download surface temperature for precipitation type calculation
+matchstring_surface_tmp = "(:TMP:2 m above ground:)"
+
 # Download pressure level data
 FH_pressure = FastHerbie(
     pd.date_range(start=base_time, periods=1, freq="6h"),
@@ -440,10 +451,30 @@ FH_pressure = FastHerbie(
 
 FH_pressure.download(match_strings_pressure, verbose=False)
 
+# Download surface temperature from avg member
+FH_surface = FastHerbie(
+    pd.date_range(start=base_time, periods=1, freq="6h"),
+    model="aigefs",
+    fxx=aigefs_range,
+    product="sfc",
+    verbose=False,
+    member="avg",
+    priority=["nomads"],
+    save_dir=tmp_dir,
+)
+
+FH_surface.download(matchstring_surface_tmp, verbose=False)
+
 # Create list of downloaded grib files
 grib_list_pressure = [
     str(Path(x.get_localFilePath(match_strings_pressure)).expand())
     for x in FH_pressure.file_exists
+]
+
+# Create list of downloaded surface temperature grib files
+grib_list_surface = [
+    str(Path(x.get_localFilePath(matchstring_surface_tmp)).expand())
+    for x in FH_surface.file_exists
 ]
 
 # Merge into netcdf
@@ -463,8 +494,28 @@ if sp_out.returncode != 0:
     logger.error(sp_out.stderr)
     sys.exit()
 
+# Merge surface temperature into netcdf
+cmd_surface = (
+    "cat "
+    + " ".join(grib_list_surface)
+    + " | "
+    + f"{wgrib2_path}"
+    + " - "
+    + " -netcdf "
+    + forecast_process_path
+    + "_surface.nc"
+)
+
+sp_out = subprocess.run(cmd_surface, shell=True, capture_output=True, encoding="utf-8")
+if sp_out.returncode != 0:
+    logger.error(sp_out.stderr)
+    sys.exit()
+
 # Read pressure level data
 xarray_pressure = xr.open_dataset(forecast_process_path + "_pressure.nc")
+
+# Read surface temperature data
+xarray_surface = xr.open_dataset(forecast_process_path + "_surface.nc")
 
 # Calculate freezing level
 logger.info("Calculating freezing level height")
@@ -498,7 +549,7 @@ xarray_forecast_merged["freezing_level"] = freezing_level
 try:
     xarray_forecast_merged["precip_type"] = derive_precip_type(
         apcp=xarray_forecast_merged["APCP_Mean"],
-        temp_surface=None,
+        temp_surface=xarray_surface.get("TMP_2maboveground", None),
         temp_levels=temp_data,
         geopotential_levels=geopotential_data,
         pressure_levels=pressure_levels,
@@ -507,8 +558,9 @@ except Exception:
     logger.exception("Could not derive precip_type; skipping")
 
 # Clean up
-del xarray_pressure, temp_data, hgt_data, geopotential_data
+del xarray_pressure, xarray_surface, temp_data, hgt_data, geopotential_data
 os.remove(forecast_process_path + "_pressure.nc")
+os.remove(forecast_process_path + "_surface.nc")
 
 logger.info("Derived parameter calculation complete")
 
