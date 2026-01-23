@@ -563,13 +563,23 @@ except Exception:
     logger.exception("Could not derive precip_type; skipping")
 
 # Clean up
-del xarray_pressure, temp_data, hgt_data, geopotential_data
+try:
+    del xarray_pressure
+    del temp_data
+    del hgt_data
+    del geopotential_data
+except NameError:
+    pass
+
 if os.path.exists(forecast_process_path + "_pressure.nc"):
     os.remove(forecast_process_path + "_pressure.nc")
 if os.path.exists(forecast_process_path + "_surface.nc"):
     os.remove(forecast_process_path + "_surface.nc")
-if 'xarray_surface' in locals():
+
+try:
     del xarray_surface
+except NameError:
+    pass
 
 logger.info("Derived parameter calculation complete")
 
