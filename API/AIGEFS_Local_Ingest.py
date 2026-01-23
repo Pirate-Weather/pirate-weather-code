@@ -547,9 +547,14 @@ xarray_forecast_merged["freezing_level"] = freezing_level
 
 # Derive precipitation type (1=snow,2=freezing rain,3=sleet,4=rain)
 try:
+    # Check if surface temperature is available
+    temp_surface = xarray_surface.get("TMP_2maboveground", None)
+    if temp_surface is None:
+        logger.warning("Surface temperature (TMP_2maboveground) not found, precip type may be less accurate")
+
     xarray_forecast_merged["precip_type"] = derive_precip_type(
         apcp=xarray_forecast_merged["APCP_Mean"],
-        temp_surface=xarray_surface.get("TMP_2maboveground", None),
+        temp_surface=temp_surface,
         temp_levels=temp_data,
         geopotential_levels=geopotential_data,
         pressure_levels=pressure_levels,
@@ -558,9 +563,13 @@ except Exception:
     logger.exception("Could not derive precip_type; skipping")
 
 # Clean up
-del xarray_pressure, xarray_surface, temp_data, hgt_data, geopotential_data
-os.remove(forecast_process_path + "_pressure.nc")
-os.remove(forecast_process_path + "_surface.nc")
+del xarray_pressure, temp_data, hgt_data, geopotential_data
+if os.path.exists(forecast_process_path + "_pressure.nc"):
+    os.remove(forecast_process_path + "_pressure.nc")
+if os.path.exists(forecast_process_path + "_surface.nc"):
+    os.remove(forecast_process_path + "_surface.nc")
+if 'xarray_surface' in locals():
+    del xarray_surface
 
 logger.info("Derived parameter calculation complete")
 

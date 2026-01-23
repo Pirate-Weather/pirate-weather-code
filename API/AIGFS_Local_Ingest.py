@@ -841,9 +841,10 @@ with ProgressBar():
     )
 
     # 3. Create the zarr array
-    # Use a reasonable time chunk size (240) instead of full time dimension
+    # Use a reasonable time chunk size instead of full time dimension
     # to avoid creating single large chunks that are inefficient for access
-    time_chunk_size = 240
+    # Use min of 240 or the actual time length to handle shorter forecasts
+    time_chunk_size = min(240, len(hourly_timesUnix))
     zarr_array = zarr.create_array(
         store=zarr_store,
         shape=(
