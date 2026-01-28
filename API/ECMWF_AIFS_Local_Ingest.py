@@ -483,7 +483,7 @@ del aifs_temp_pressure, aifs_z_pressure
 start = xarray_forecast_merged.time[0].values
 end = xarray_forecast_merged.time[-1].values
 new_hourly_time = pd.date_range(
-    start=pd.to_datetime(start) - pd.Timedelta(his_period, "h"), end=end, freq="h"
+    start=pd.to_datetime(start) - pd.Timedelta(hours=his_period), end=end, freq="h"
 )
 
 # Get the actual stacked times from the concatenated dataset (to be created later)
@@ -584,7 +584,7 @@ for i in range(his_period, 1, -12):
 
     # Create a range of dates for historic data going back 48 hours
     DATES = pd.date_range(
-        start=base_time - pd.Timedelta(str(i) + "h"),
+        start=base_time - pd.Timedelta(hours=i),
         periods=1,
         freq="6h",
     )
