@@ -296,15 +296,15 @@ while mem < 30:
 start = xarray_wgrib.time.min().values  # Adjust as necessary
 end = xarray_wgrib.time.max().values  # Adjust as necessary
 new_hourly_time = pd.date_range(
-    start=start - pd.Timedelta(hours=his_period), end=end, freq="h"
+    start=start - pd.Timedelta(his_period, "h"), end=end, freq="h"
 )
 
 # Plus 2 since we start at Hour 3
 stacked_times = np.concatenate(
     (
         pd.date_range(
-            start=start - pd.Timedelta(hours=his_period),
-            end=start - pd.Timedelta(hours=1),
+            start=start - pd.Timedelta(his_period, "h"),
+            end=start - pd.Timedelta(1, "h"),
             freq="3h",
         ),
         xarray_wgrib.time.values,
@@ -454,7 +454,7 @@ for i in range(his_period, 0, -6):
 
     # Create a range of dates for historic data
     DATES = pd.date_range(
-        start=base_time - pd.Timedelta(hours=i),
+        start=base_time - pd.Timedelta(str(i) + "h"),
         periods=1,
         freq="6h",
     )

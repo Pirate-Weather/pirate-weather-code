@@ -420,7 +420,7 @@ for i in range(his_period, -1, -1):
     # Since the first hour forecast is used, then the time is an hour behind
     # So data for 18:00 would be the 1st hour of the 17:00 forecast.
     DATES = pd.date_range(
-        start=base_time - pd.Timedelta(hours=i + 1),
+        start=base_time - pd.Timedelta(str(i + 1) + "h"),
         periods=1,
         freq="1h",
     )
