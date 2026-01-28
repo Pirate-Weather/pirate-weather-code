@@ -14,7 +14,6 @@ netCDF4==1.7.4
 numba==0.63.1
 numpy==2.3.3
 nwswx==0.1.2
-pandas==2.3.3
 pyarrow==23.0.0
 pykml==0.2.0
 rioxarray==0.20.0
