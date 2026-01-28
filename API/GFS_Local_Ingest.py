@@ -341,14 +341,14 @@ assert len(xarray_forecast_merged.time) == len(gfs_file_range), (
 start = xarray_forecast_merged.time.min().values  # Adjust as necessary
 end = xarray_forecast_merged.time.max().values  # Adjust as necessary
 new_hourly_time = pd.date_range(
-    start=start - pd.Timedelta(his_period, "h"), end=end, freq="h"
+    start=start - pd.Timedelta(hours=his_period), end=end, freq="h"
 )
 
 stacked_times = np.concatenate(
     (
         pd.date_range(
-            start=start - pd.Timedelta(his_period, "h"),
-            end=start - pd.Timedelta(1, "h"),
+            start=start - pd.Timedelta(hours=his_period),
+            end=start - pd.Timedelta(hours=1),
             freq="h",
         ),
         xarray_forecast_merged.time.values,
@@ -596,7 +596,7 @@ for i in range(his_period, 0, -6):
 
     # Create a range of dates for historic data going back 48 hours
     DATES = pd.date_range(
-        start=base_time - pd.Timedelta(str(i) + "h"),
+        start=base_time - pd.Timedelta(hours=i),
         periods=1,
         freq="6h",
     )
