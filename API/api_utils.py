@@ -10,6 +10,7 @@ from API.constants.api_const import (
     APPARENT_TEMP_CONSTS,
     APPARENT_TEMP_SOLAR_CONSTS,
     PRECIP_NOISE_THRESHOLD_MMH,
+    PRECIP_TYPES,
     TEMP_THRESHOLD_WMO_FROZEN_C,
 )
 from API.constants.shared_const import MISSING_DATA
@@ -575,7 +576,7 @@ def remove_conditional_fields(
                         and isinstance(value, str)
                         and value in ("ice", "mixed")
                     ):
-                        obj[key] = "sleet"
+                        obj[key] = PRECIP_TYPES["sleet"]
                     elif isinstance(
                         value, (dict, list)
                     ):  # Only recurse if it's a dict or list

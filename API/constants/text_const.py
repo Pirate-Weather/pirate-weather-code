@@ -88,3 +88,6 @@ SNOW_DENSITY_CONST = {
     "high_temp_exp_factor2": 1.4,
     "min_density": 50,
 }
+
+# Tolerance to show less-than for snow accumulations in mm
+LESS_THAN_TOLERANCE = 50
