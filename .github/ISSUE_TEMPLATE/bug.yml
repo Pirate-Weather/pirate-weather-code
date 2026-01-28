@@ -44,11 +44,8 @@ body:
     id: log-info
     attributes:
       label: Log Output
-      description: Include any log output within the code blocks.
-      value: |
-        ```
-
-        ```
+      description: Paste logs from the terminal or Python logging output.
+      render: shell
 
   - type: checkboxes
     id: acknowledgements
