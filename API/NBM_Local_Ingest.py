@@ -133,7 +133,7 @@ else:
             sys.exit()
 
 # base_time = pd.Timestamp("2024-03-05 16:00")
-# base_time = base_time - pd.Timedelta(1,'h')
+# base_time = base_time - pd.Timedelta(hours=1)
 print(base_time)
 
 zarr_vars = (
