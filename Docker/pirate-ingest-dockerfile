@@ -36,13 +36,13 @@ RUN apt update && \
                        libaec-dev 					   
 
 # Manual ECCodes
-RUN wget https://confluence.ecmwf.int/download/attachments/45757960/eccodes-2.42.0-Source.tar.gz
-RUN tar xzf eccodes-2.42.0-Source.tar.gz && rm eccodes-2.42.0-Source.tar.gz
+RUN wget https://confluence.ecmwf.int/download/attachments/45757960/eccodes-2.45.0-Source.tar.gz
+RUN tar xzf eccodes-2.42.0-Source.tar.gz && rm eccodes-2.45.0-Source.tar.gz
 
 RUN mkdir /build
 WORKDIR /build
 
-RUN cmake -DCMAKE_INSTALL_PREFIX=/usr/local ../eccodes-2.42.0-Source
+RUN cmake -DCMAKE_INSTALL_PREFIX=/usr/local ../eccodes-2.45.0-Source
 RUN make -j4
 RUN ctest -j4
 RUN make install
