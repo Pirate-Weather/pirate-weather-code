@@ -16,7 +16,7 @@ numpy==2.3.3
 nwswx==0.1.2
 pyarrow==23.0.0
 pykml==0.2.0
-rioxarray==0.21.0
+rioxarray==0.20.0
 s3fs==2026.1.0
 scikit-learn==1.8.0
 tqdm==4.67.2
