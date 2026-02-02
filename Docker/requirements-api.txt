@@ -19,5 +19,5 @@ timezonefinder==8.2.1
 typing-inspect==0.9.0
 ujson==5.11.0
 watchfiles==1.1.1
-xarray==2025.12.0
+xarray==2026.1.0
 zarr[remote]==3.1.5
