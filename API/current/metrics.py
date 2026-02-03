@@ -413,25 +413,33 @@ def _get_humidity(
         ),
         "hrrr": (
             lambda: model_data["has_hrrr_merged"],
-            lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["humidity"], state)
-            * humidUnit,
+            lambda: (
+                _interp_scalar(model_data["HRRR_Merged"], HRRR["humidity"], state)
+                * humidUnit
+            ),
         ),
         "nbm": (
             lambda: "nbm" in sourceList,
-            lambda: _interp_scalar(model_data["NBM_Merged"], NBM["humidity"], state)
-            * humidUnit,
+            lambda: (
+                _interp_scalar(model_data["NBM_Merged"], NBM["humidity"], state)
+                * humidUnit
+            ),
         ),
         "dwd_mosmix": (
             lambda: "dwd_mosmix" in sourceList,
-            lambda: _interp_scalar(
-                model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["humidity"], state
-            )
-            * humidUnit,
+            lambda: (
+                _interp_scalar(
+                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["humidity"], state
+                )
+                * humidUnit
+            ),
         ),
         "gfs": (
             lambda: "gfs" in sourceList,
-            lambda: _interp_scalar(model_data["GFS_Merged"], GFS["humidity"], state)
-            * humidUnit,
+            lambda: (
+                _interp_scalar(model_data["GFS_Merged"], GFS["humidity"], state)
+                * humidUnit
+            ),
         ),
         "ecmwf_ifs": (
             lambda: "ecmwf_ifs" in sourceList,
@@ -793,30 +801,36 @@ def _get_cloud(sourceList, model_data, state: InterpolationState, lat, lon):
         ),
         "nbm": (
             lambda: "nbm" in sourceList,
-            lambda: _interp_scalar(model_data["NBM_Merged"], NBM["cloud"], state)
-            * 0.01,
+            lambda: (
+                _interp_scalar(model_data["NBM_Merged"], NBM["cloud"], state) * 0.01
+            ),
         ),
         "dwd_mosmix": (
             lambda: "dwd_mosmix" in sourceList,
-            lambda: _interp_scalar(
-                model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["cloud"], state
-            )
-            * 0.01,
+            lambda: (
+                _interp_scalar(
+                    model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["cloud"], state
+                )
+                * 0.01
+            ),
         ),
         "ecmwf_ifs": (
             lambda: "ecmwf_ifs" in sourceList,
-            lambda: _interp_scalar(model_data["ECMWF_Merged"], ECMWF["cloud"], state)
-            * 0.01,
+            lambda: (
+                _interp_scalar(model_data["ECMWF_Merged"], ECMWF["cloud"], state) * 0.01
+            ),
         ),
         "hrrr": (
             lambda: model_data["has_hrrr_merged"],
-            lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["cloud"], state)
-            * 0.01,
+            lambda: (
+                _interp_scalar(model_data["HRRR_Merged"], HRRR["cloud"], state) * 0.01
+            ),
         ),
         "gfs": (
             lambda: "gfs" in sourceList,
-            lambda: _interp_scalar(model_data["GFS_Merged"], GFS["cloud"], state)
-            * 0.01,
+            lambda: (
+                _interp_scalar(model_data["GFS_Merged"], GFS["cloud"], state) * 0.01
+            ),
         ),
         "era5": (
             lambda: "era5" in sourceList,
@@ -930,9 +944,11 @@ def _get_vis(sourceList, model_data, state: InterpolationState, lat, lon):
     source_map = {
         "rtma_ru": (
             lambda: "rtma_ru" in sourceList,
-            lambda: 16090
-            if model_data["dataOut_rtma_ru"][0, RTMA_RU["vis"]] >= 15999
-            else model_data["dataOut_rtma_ru"][0, RTMA_RU["vis"]],
+            lambda: (
+                16090
+                if model_data["dataOut_rtma_ru"][0, RTMA_RU["vis"]] >= 15999
+                else model_data["dataOut_rtma_ru"][0, RTMA_RU["vis"]]
+            ),
         ),
         "hrrrsubh": (
             lambda: "hrrrsubh" in sourceList,
@@ -992,12 +1008,14 @@ def _get_ozone(sourceList, model_data, state: InterpolationState):
             ),
             (
                 lambda: "era5" in sourceList,
-                lambda: _interp_scalar(
-                    model_data["ERA5_MERGED"],
-                    ERA5["total_column_ozone"],
-                    state,
-                )
-                * 46696,
+                lambda: (
+                    _interp_scalar(
+                        model_data["ERA5_MERGED"],
+                        ERA5["total_column_ozone"],
+                        state,
+                    )
+                    * 46696
+                ),
             ),
         ],
         default=MISSING_DATA,
@@ -1090,12 +1108,14 @@ def _get_solar(sourceList, model_data, state: InterpolationState, lat, lon):
         ),
         "era5": (
             lambda: "era5" in sourceList,
-            lambda: _interp_scalar(
-                model_data["ERA5_MERGED"],
-                ERA5["surface_solar_radiation_downwards"],
-                state,
-            )
-            / 3600,
+            lambda: (
+                _interp_scalar(
+                    model_data["ERA5_MERGED"],
+                    ERA5["surface_solar_radiation_downwards"],
+                    state,
+                )
+                / 3600
+            ),
         ),
     }
 
