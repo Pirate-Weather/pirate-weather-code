@@ -97,7 +97,7 @@ latest_run = Herbie_latest(
     fxx=[190, 191, 192, 193, 194, 195],
     product="co",
     verbose=False,
-    priority=["aws"],
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 
@@ -133,7 +133,7 @@ else:
             sys.exit()
 
 # base_time = pd.Timestamp("2024-03-05 16:00")
-# base_time = base_time - pd.Timedelta(1,'h')
+# base_time = base_time - pd.Timedelta(hours=1)
 print(base_time)
 
 zarr_vars = (
@@ -219,7 +219,7 @@ FH_forecastsub = FastHerbie(
     fxx=nbm_range,
     product="co",
     verbose=False,
-    priority=["aws"],
+    priority=["aws", "nomads"],
     max_threads=1,
     save_dir=tmp_dir,
 )
@@ -333,7 +333,7 @@ FH_forecastsub = FastHerbie(
     fxx=nbm_range1,
     product="co",
     verbose=False,
-    priority=["aws"],
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 
@@ -365,7 +365,7 @@ FH_forecastsub2 = FastHerbie(
     fxx=nbm_range2,
     product="co",
     verbose=False,
-    priority=["aws"],
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 
@@ -460,7 +460,7 @@ FH_forecastsub = FastHerbie(
     fxx=nbm_range1,
     product="co",
     verbose=False,
-    priority=["aws"],
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 
@@ -491,7 +491,7 @@ FH_forecastsub2 = FastHerbie(
     fxx=nbm_range2,
     product="co",
     verbose=False,
-    priority=["aws"],
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 
@@ -589,16 +589,16 @@ xarray_forecast_base = xr.open_mfdataset(forecast_process_path + "_wgrib2_merged
 start = xarray_forecast_base.time.min().values  # Adjust as necessary
 end = xarray_forecast_base.time.max().values  # Adjust as necessary
 new_hourly_time = pd.date_range(
-    start=start - pd.Timedelta(his_period + 1, "h"),
-    end=start + pd.Timedelta(192, "h"),
+    start=start - pd.Timedelta(hours=his_period + 1),
+    end=start + pd.Timedelta(hours=192),
     freq="h",
 )
 
 stacked_times = np.concatenate(
     (
         pd.date_range(
-            start=start - pd.Timedelta(his_period + 1, "h"),
-            end=start - pd.Timedelta(1, "h"),
+            start=start - pd.Timedelta(hours=his_period + 1),
+            end=start - pd.Timedelta(hours=1),
             freq="h",
         ),
         xarray_forecast_base.time.values,
@@ -769,7 +769,7 @@ for i in range(his_period, -1, -1):
     # Since the first hour forecast is used, then the time is an hour behind
     # So data for 18:00 would be the 1st hour of the 17:00 forecast.
     DATES = pd.date_range(
-        start=base_time - pd.Timedelta(str(i + 1) + "h"),
+        start=base_time - pd.Timedelta(hours=i + 1),
         periods=1,
         freq="1h",
     )

@@ -5,6 +5,7 @@ from operator import itemgetter
 
 import numpy as np
 
+from API.constants.api_const import PRECIP_TYPES
 from API.constants.text_const import CAPE_THRESHOLDS
 from API.PirateTextHelper import calculate_precip_text
 
@@ -111,7 +112,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
     precipMinutes = rainMaxIntensity = snowMaxIntensity = sleetMaxIntensity = (
         noneMaxIntensity
     ) = hailMaxIntensity = iceMaxIntensity = 0
-    first_precip = "none"
+    first_precip = PRECIP_TYPES["none"]
     rainIndex = []
     snowIndex = []
     sleetIndex = []
@@ -130,84 +131,70 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
                 "next-hour-forecast-status",
                 "temporarily-unavailable",
                 "station-offline",
-            ], "none"
+            ], PRECIP_TYPES["none"]
         # If there is rain for the current minute in the array
-        if minute["precipType"] == "rain" and minute["precipIntensity"] > 0:
+        if (
+            minute["precipType"] == PRECIP_TYPES["rain"]
+            and minute["precipIntensity"] > 0
+        ):
             # Increase the minutes of precipitation, the precipitation unit and average intensity
             precipMinutes += 1
-
-            # Set the maxiumum rain intensity
-            if rainMaxIntensity == 0:
-                rainMaxIntensity = minute["precipIntensity"]
-            elif rainMaxIntensity > 0 and minute["precipIntensity"] > rainMaxIntensity:
-                rainMaxIntensity = minute["precipIntensity"]
-
             rainIndex.append(idx)
             precipIndex.append(idx)
         # If there is snow for the current minute in the array
-        elif minute["precipType"] == "snow" and minute["precipIntensity"] > 0:
+        elif (
+            minute["precipType"] == PRECIP_TYPES["snow"]
+            and minute["precipIntensity"] > 0
+        ):
             # Increase the minutes of precipitation, the precipitation unit and average intensity
             precipMinutes += 1
-
-            # Set the maxiumum snow intensity
-            if snowMaxIntensity == 0:
-                snowMaxIntensity = minute["precipIntensity"]
-            elif snowMaxIntensity > 0 and minute["precipIntensity"] > snowMaxIntensity:
-                snowMaxIntensity = minute["precipIntensity"]
-
             snowIndex.append(idx)
             precipIndex.append(idx)
         # If there is sleet for the current minute in the array
-        elif minute["precipType"] == "sleet" and minute["precipIntensity"] > 0:
+        elif (
+            minute["precipType"] == PRECIP_TYPES["sleet"]
+            and minute["precipIntensity"] > 0
+        ):
             # Increase the minutes of precipitation, the precipitation unit and average intensity
             precipMinutes += 1
-
-            # Set the maxiumum sleet intensity
-            if sleetMaxIntensity == 0:
-                sleetMaxIntensity = minute["precipIntensity"]
-            elif (
-                sleetMaxIntensity > 0 and minute["precipIntensity"] > sleetMaxIntensity
-            ):
-                sleetMaxIntensity = minute["precipIntensity"]
-
             sleetIndex.append(idx)
             precipIndex.append(idx)
-        elif minute["precipType"] == "none" and minute["precipIntensity"] > 0:
+        elif (
+            minute["precipType"] == PRECIP_TYPES["none"]
+            and minute["precipIntensity"] > 0
+        ):
             # Increase the minutes of precipitation, the precipitation unit and average intensity
             precipMinutes += 1
-
-            # Set the none maxiumum precipitation intensity
-            if noneMaxIntensity == 0:
-                noneMaxIntensity = minute["precipIntensity"]
-            elif noneMaxIntensity > 0 and minute["precipIntensity"] > noneMaxIntensity:
-                noneMaxIntensity = minute["precipIntensity"]
-
             noneIndex.append(idx)
             precipIndex.append(idx)
-        elif minute["precipType"] == "ice" and minute["precipIntensity"] > 0:
+        elif (
+            minute["precipType"] == PRECIP_TYPES["ice"]
+            and minute["precipIntensity"] > 0
+        ):
             # Increase the minutes of precipitation, the precipitation unit and average intensity
             precipMinutes += 1
-
-            # Set the none maxiumum precipitation intensity
-            if iceMaxIntensity == 0:
-                iceMaxIntensity = minute["precipIntensity"]
-            elif iceMaxIntensity > 0 and minute["precipIntensity"] > iceMaxIntensity:
-                iceMaxIntensity = minute["precipIntensity"]
-
             iceIndex.append(idx)
             precipIndex.append(idx)
-        elif minute["precipType"] == "hail" and minute["precipIntensity"] > 0:
+        elif (
+            minute["precipType"] == PRECIP_TYPES["hail"]
+            and minute["precipIntensity"] > 0
+        ):
             # Increase the minutes of precipitation, the precipitation unit and average intensity
             precipMinutes += 1
-
-            # Set the none maxiumum precipitation intensity
-            if hailMaxIntensity == 0:
-                hailMaxIntensity = minute["precipIntensity"]
-            elif hailMaxIntensity > 0 and minute["precipIntensity"] > hailMaxIntensity:
-                hailMaxIntensity = minute["precipIntensity"]
-
             hailIndex.append(idx)
             precipIndex.append(idx)
+
+        # Ensure the per-type maxima are the true maxima across the minute array
+
+    def _max_from_idx_list(idx_list: list) -> float:
+        return max((minuteArr[i]["precipIntensity"] for i in idx_list), default=0.0)
+
+    rainMaxIntensity = _max_from_idx_list(rainIndex)
+    snowMaxIntensity = _max_from_idx_list(snowIndex)
+    sleetMaxIntensity = _max_from_idx_list(sleetIndex)
+    noneMaxIntensity = _max_from_idx_list(noneIndex)
+    iceMaxIntensity = _max_from_idx_list(iceIndex)
+    hailMaxIntensity = _max_from_idx_list(hailIndex)
 
     # Create an array of the starting times for the precipitation
     starts = []
@@ -239,22 +226,22 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
     # If the array has any values check the minimum against the different precipitation start times and set that as the first precipitaion
     if starts:
         if hailIndex:
-            first_precip = "hail"
+            first_precip = PRECIP_TYPES["hail"]
         elif sleetIndex and sleetIndex[0] == min(starts):
-            first_precip = "sleet"
+            first_precip = PRECIP_TYPES["sleet"]
         elif snowIndex and snowIndex[0] == min(starts):
-            first_precip = "snow"
+            first_precip = PRECIP_TYPES["snow"]
         elif rainIndex and rainIndex[0] == min(starts):
-            first_precip = "rain"
+            first_precip = PRECIP_TYPES["rain"]
         elif noneIndex and noneIndex[0] == min(starts):
-            first_precip = "none"
+            first_precip = PRECIP_TYPES["none"]
         elif iceIndex and iceIndex[0] == min(starts):
-            first_precip = "ice"
+            first_precip = PRECIP_TYPES["ice"]
 
     # If there are more than two precipitation types used the mixed text
     if len(starts) > 2:
         text = "mixed-precipitation"
-        c_icon = "mixed"
+        c_icon = PRECIP_TYPES["mixed"]
     # If there is two precipitation types for the hour
     elif len(starts) == 2:
         # Calculate the precipitation text and icon (all in SI units: mm/h)
@@ -271,11 +258,11 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
             eff_snow_intensity=snowMaxIntensity,
             eff_ice_intensity=sleetMaxIntensity,
         )
-        if first_precip == "hail" and rainIndex:
+        if first_precip == PRECIP_TYPES["hail"] and rainIndex:
             text = [
                 "and",
                 calculate_precip_text(
-                    "rain",
+                    PRECIP_TYPES["rain"],
                     "minute",
                     0,
                     0,
@@ -313,7 +300,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
     # If there if the only one precipitation is sleet
     elif sleetIndex:
         text, c_icon = calculate_precip_text(
-            "sleet",
+            PRECIP_TYPES["sleet"],
             "minute",
             0,
             0,
@@ -426,7 +413,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
             1,
             icon=icon,
             mode="both",
-            eff_rain_intensity=rainMaxIntensity,
+            eff_rain_intensity=noneMaxIntensity,
             eff_snow_intensity=snowMaxIntensity,
             eff_ice_intensity=sleetMaxIntensity,
         )

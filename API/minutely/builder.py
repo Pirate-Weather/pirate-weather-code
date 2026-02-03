@@ -14,6 +14,8 @@ from API.api_utils import (
 from API.constants.api_const import (
     PRECIP_IDX,
     PRECIP_NOISE_THRESHOLD_MMH,
+    PRECIP_TYPE_DISPLAY,
+    PRECIP_TYPES,
     TEMP_THRESHOLD_RAIN_C,
     TEMP_THRESHOLD_SNOW_C,
 )
@@ -486,17 +488,23 @@ def _calculate_intensity(
         Tuple containing intensity array and updated precipitation types.
     """
     intensity = np.full(len(precipTypes), MISSING_DATA)
+    refc_used = False
 
     if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
         temp_arr = hrrrSubHInterpolation[:, HRRR_SUBH["temp"]]
         refc_arr = hrrrSubHInterpolation[:, HRRR_SUBH["refc"]]
-        mask = (precipTypes == "none") & (refc_arr > 0)
+        mask = (precipTypes == PRECIP_TYPES["none"]) & (refc_arr > 0)
         precipTypes[mask] = np.where(
             temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
-            "rain",
-            np.where(temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C, "snow", "sleet"),
+            PRECIP_TYPES["rain"],
+            np.where(
+                temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C,
+                PRECIP_TYPES["snow"],
+                PRECIP_TYPES["sleet"],
+            ),
         )
         intensity = dbz_to_rate(refc_arr, precipTypes)
+        refc_used = True
     elif "nbm" in source_list and nbmMinuteInterpolation is not None:
         intensity = nbmMinuteInterpolation[:, NBM["accum"]]
     elif "dwd_mosmix" in source_list and dwd_mosmix_MinuteInterpolation is not None:
@@ -505,11 +513,15 @@ def _calculate_intensity(
             dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["accum"]]
         )
         temp_arr = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["temp"]]
-        mask = (precipTypes == "none") & (intensity > 0)
+        mask = (precipTypes == PRECIP_TYPES["none"]) & (intensity > 0)
         precipTypes[mask] = np.where(
             temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
-            "rain",
-            np.where(temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C, "snow", "sleet"),
+            PRECIP_TYPES["rain"],
+            np.where(
+                temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C,
+                PRECIP_TYPES["snow"],
+                PRECIP_TYPES["sleet"],
+            ),
         )
     elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
         intensity = ecmwfMinuteInterpolation[:, ECMWF["intensity"]] * 3600
@@ -517,6 +529,7 @@ def _calculate_intensity(
         intensity = gefsMinuteInterpolation[:, GEFS["accum"]]
     elif "gfs" in source_list and gfsMinuteInterpolation is not None:
         intensity = dbz_to_rate(gfsMinuteInterpolation[:, GFS["refc"]], precipTypes)
+        refc_used = True
     elif "era5" in source_list and era5_MinuteInterpolation is not None:
         intensity = (
             era5_MinuteInterpolation[
@@ -529,7 +542,7 @@ def _calculate_intensity(
             + era5_MinuteInterpolation[:, ERA5["convective_rain_rate"]]
         ) * 3600
 
-    return intensity, precipTypes
+    return intensity, precipTypes, refc_used
 
 
 def _calculate_error(
@@ -564,7 +577,7 @@ def _process_minute_items(
     InterPminute,
     minuteType,
     prep_intensity_unit,
-    version,
+    refc_used,
 ):
     """
     Process minutely items for output.
@@ -573,7 +586,7 @@ def _process_minute_items(
         InterPminute: Minutely interpolated data.
         minuteType: List of precipitation types.
         prep_intensity_unit: Precipitation intensity unit.
-        version: API version.
+        refc_used: Whether reflectivity data was used in the request.
 
     Returns:
         Tuple containing minute items and SI minute items.
@@ -599,29 +612,21 @@ def _process_minute_items(
         InterPminute[:, DATA_MINUTELY["ice_intensity"]], 0
     )
 
-    minuteRainIntensity = zero_small_values(
-        minuteRainIntensity, threshold=PRECIP_NOISE_THRESHOLD_MMH
-    )
-    minuteSnowIntensity = zero_small_values(
-        minuteSnowIntensity, threshold=PRECIP_NOISE_THRESHOLD_MMH
-    )
-    minuteSleetIntensity = zero_small_values(
-        minuteSleetIntensity, threshold=PRECIP_NOISE_THRESHOLD_MMH
-    )
-    minuteProbability = zero_small_values(
-        minuteProbability, threshold=PRECIP_NOISE_THRESHOLD_MMH
-    )
-    minuteIntensityError = zero_small_values(
-        minuteIntensityError, threshold=PRECIP_NOISE_THRESHOLD_MMH
-    )
-    minuteIntensity = zero_small_values(
-        minuteIntensity, threshold=PRECIP_NOISE_THRESHOLD_MMH
-    )
+    if not refc_used:
+        for arr in [
+            minuteRainIntensity,
+            minuteSnowIntensity,
+            minuteSleetIntensity,
+            minuteProbability,
+            minuteIntensityError,
+            minuteIntensity,
+        ]:
+            zero_small_values(arr, threshold=PRECIP_NOISE_THRESHOLD_MMH)
 
     # If type is none, zero out everything
     # We need to reconstruct maxPchance or pass it in?
     # Or just rely on minuteType being 'none'
-    zero_type_mask = np.array(minuteType) == "none"
+    zero_type_mask = np.array(minuteType) == PRECIP_TYPES["none"]
 
     minuteRainIntensity[zero_type_mask] = 0.0
     minuteSnowIntensity[zero_type_mask] = 0.0
@@ -813,23 +818,41 @@ def build_minutely_block(
         else np.full(len(minute_array_grib), 5)
     )
     # Ensure text/icon/type mappings align and place MISSING_DATA as the final entry
-    pTypes = ["none", "snow", "ice", "sleet", "rain", "mixed", MISSING_DATA]
-    pTypesText = [
-        "Clear",
-        "Snow",
-        "Freezing Rain",
-        "Sleet",
-        "Rain",
-        "Mixed Precipitation",
+    pTypes = [
+        PRECIP_TYPES["none"],
+        PRECIP_TYPES["snow"],
+        PRECIP_TYPES["ice"],
+        PRECIP_TYPES["sleet"],
+        PRECIP_TYPES["rain"],
+        PRECIP_TYPES["mixed"],
         MISSING_DATA,
     ]
-    pTypesIcon = ["clear", "snow", "sleet", "sleet", "rain", "mixed", MISSING_DATA]
+    pTypesText = [
+        "Clear",
+        PRECIP_TYPE_DISPLAY["snow"],
+        PRECIP_TYPE_DISPLAY["ice"],
+        PRECIP_TYPE_DISPLAY["sleet"],
+        PRECIP_TYPE_DISPLAY["rain"],
+        PRECIP_TYPE_DISPLAY["mixed"],
+        MISSING_DATA,
+    ]
+    pTypesIcon = [
+        "clear",
+        PRECIP_TYPES["snow"],
+        PRECIP_TYPES["ice"],
+        PRECIP_TYPES["sleet"],
+        PRECIP_TYPES["rain"],
+        PRECIP_TYPES["mixed"],
+        MISSING_DATA,
+    ]
 
     minuteType = [pTypes[maxPchance[idx]] for idx in range(61)]
-    precipTypes = np.array(minuteType)
+    # Explicitly set dtype to handle strings up to 5 characters (length of "sleet" and "mixed")
+    # This prevents truncation when assigning precipitation types later
+    precipTypes = np.array(minuteType, dtype="U5")
 
     # Calculate Intensity (and update precipTypes for HRRR/DWD MOSMIX temperature-based fallback)
-    intensity, precipTypes = _calculate_intensity(
+    intensity, precipTypes, refc_used = _calculate_intensity(
         source_list,
         precipTypes,
         hrrrSubHInterpolation,
@@ -897,7 +920,7 @@ def build_minutely_block(
         InterPminute,
         minuteType,
         prep_intensity_unit,
-        version,
+        refc_used,
     )
 
     return (

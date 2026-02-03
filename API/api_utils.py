@@ -10,6 +10,7 @@ from API.constants.api_const import (
     APPARENT_TEMP_CONSTS,
     APPARENT_TEMP_SOLAR_CONSTS,
     PRECIP_NOISE_THRESHOLD_MMH,
+    PRECIP_TYPES,
     TEMP_THRESHOLD_WMO_FROZEN_C,
 )
 from API.constants.shared_const import MISSING_DATA
@@ -84,7 +85,10 @@ def calculate_apparent_temperature(air_temp_c, humidity, wind, solar=None):
         )
     )
 
-    if solar is None:
+    if solar is None or np.any(np.isnan(solar)):
+        logger.info(
+            "Solar raditation is not valid. Falling back to using apparent temperature calculations without solar radiation..."
+        )
         # Calculate apparent temperature in Celsius
         apparent_temp_c = (
             air_temp_c
@@ -318,7 +322,6 @@ def select_daily_precip_type(
         & (InterPdaySum[:, DATA_DAY["snow"]] > 0)
         & (InterPdaySum[:, DATA_DAY["ice"]] > 0)
     )
-    maxPchanceDay[all_types] = PRECIP_IDX["mixed"]
 
     # Use the type with the greatest accumulation as baseline
     precip_accum = np.stack(
@@ -346,9 +349,21 @@ def select_daily_precip_type(
     maxPchanceDay[InterPdaySum[:, DATA_DAY["snow"]] > (5 * prepAccumUnit)] = PRECIP_IDX[
         "snow"
     ]
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit)] = PRECIP_IDX[
-        "ice"
-    ]
+    # For ice accumulation, preserve the distinction between ice (freezing rain)
+    # and sleet (ice pellets) by only overriding if the current type is not already
+    # ice or sleet. This ensures that the hourly-based determination is preserved.
+    # When defaulting is needed (type is not ice/sleet but ice accumulation exists),
+    # we choose ice (freezing rain) as it's generally more common than sleet globally.
+    # If significant ice accumulation exists and type is not already ice/sleet,
+    # default to ice (freezing rain)
+    maxPchanceDay[
+        (InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit))
+        & (maxPchanceDay != PRECIP_IDX["ice"])
+        & (maxPchanceDay != PRECIP_IDX["sleet"])
+    ] = PRECIP_IDX["ice"]
+
+    # If we have all types map the type to mixed
+    maxPchanceDay[all_types] = PRECIP_IDX["mixed"]
 
     return maxPchanceDay
 
@@ -547,5 +562,29 @@ def remove_conditional_fields(
             pop = data.pop
             for field in fields_to_remove:
                 pop(field, None)
+
+    # For older API versions, downgrade precip types that didn't exist
+    # in v1 responses. Keep internal calculations using 'ice'/'mixed',
+    # but map them to 'sleet' in the final API output when version < 2.
+    if version is not None and version < 2:
+
+        def _downgrade_precip(obj):
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    if (
+                        key == "precipType"
+                        and isinstance(value, str)
+                        and value in ("ice", "mixed")
+                    ):
+                        obj[key] = PRECIP_TYPES["sleet"]
+                    elif isinstance(
+                        value, (dict, list)
+                    ):  # Only recurse if it's a dict or list
+                        _downgrade_precip(value)
+            elif isinstance(obj, list):
+                for item in obj:
+                    _downgrade_precip(item)
+
+        _downgrade_precip(data)
 
     return data

@@ -40,10 +40,13 @@ WBGT_CONST = {
 }
 
 # Grouped DBZ constants
+# Z-R relationships (Z = a * R^b) for converting radar reflectivity (Z) to precipitation rate (R).
 DBZ_CONST = {
+    # Based on the Marshall-Palmer relation for rain.
     "rain_a": 200.0,
     "rain_b": 1.6,
-    "snow_a": 600.0,
+    # Adjusted to provide higher snow rates. The previous value was 600.0.
+    "snow_a": 300.0,
     "snow_b": 2.0,
 }
 
@@ -80,6 +83,30 @@ PRECIP_IDX = {
     "mixed": 5,
 }
 
+# Precipitation type string constants
+# Use these instead of hardcoding strings throughout the codebase
+PRECIP_TYPES = {
+    "none": "none",
+    "snow": "snow",
+    "ice": "ice",
+    "sleet": "sleet",
+    "rain": "rain",
+    "mixed": "mixed",
+    "hail": "hail",
+}
+
+# Precipitation type display names for API output and summaries
+# Maps lowercase type keys to their display text
+PRECIP_TYPE_DISPLAY = {
+    "none": "None",
+    "snow": "Snow",
+    "ice": "Freezing Rain",
+    "sleet": "Sleet",
+    "rain": "Rain",
+    "mixed": "Mixed Precipitation",
+    "hail": "Hail",
+}
+
 PRECIP_NOISE_THRESHOLD_MMH = (
     0.01  # Threshold in mm/h to filter out noise in precipitation intensity
 )
@@ -93,7 +120,7 @@ PRECIP_ACCUM_NOISE_THRESHOLD = (
 
 # API versioning and ingest version constants
 # Version scheme is: Major.Minor.Patch
-API_VERSION = "V2.9.0g"
+API_VERSION = "V2.9.2b"
 
 # Generic API constants
 MAX_S3_RETRIES = 5

@@ -1,6 +1,14 @@
 # Updating and Adding Weather Summary Logic
 
-This document provides guidance on how to modify existing weather summary logic and how to introduce entirely new summary descriptions and icons within the Pirate Weather codebase. The core files involved are `API/responseLocal.py` and the various `API/Pirate*Text.py` scripts.
+This document provides guidance on how to modify existing weather summary logic and how to introduce entirely new summary descriptions and icons within the Pirate Weather codebase. The core files involved are `API/responseLocal.py` and the various `API/Pirate*Text.py` scripts, along with helper modules in `API/legacy/` for backward compatibility.
+
+**Note:** The codebase has been modularized with forecast generation split into:
+- `API/hourly/block.py` - Hourly forecast generation
+- `API/daily/builder.py` - Daily forecast aggregation  
+- `API/current/metrics.py` - Current conditions
+- `API/minutely/builder.py` - Minutely precipitation forecasts
+- `API/legacy/summary.py` - Summary text coordination
+- `API/PirateTextHelper.py` - Shared text generation utilities
 
 ## Part 1: Updating Existing Summary Logic
 
@@ -58,7 +66,7 @@ Adding a completely new summary (e.g., "Slightly Breezy" or "Dust Storm") involv
 
     * **Guidance for PR**: In your PR, specify the new `text` key and provide their English translations, and ideally, translations for other supported languages. The translation library is dynamically loaded by `responseLocal.py`.
 
-3.  **Integrate into API Text Generation (`API/Pirate*Text.py` and `API/responseLocal.py`)**:
+3.  **Integrate into API Text Generation (`API/Pirate*Text.py` and Response Builders)**:
 
     * **Modify `calculate_*_text` Function**: In the appropriate text generation file (`API/PirateText.py`, `API/PirateMinutelyText.py`, `API/PirateDailyText.py`, or `API/PirateWeeklyText.py`), add a new `elif` (or `if`, if it's a high-priority condition) block for your new summary.
 
@@ -77,11 +85,18 @@ Adding a completely new summary (e.g., "Slightly Breezy" or "Dust Storm") involv
 
         * **Icon Guidelines**: Please try to stick to the existing icon fields (`clear-day`, `clear-night`, `rain`, `snow`, `sleet`, `wind`, `fog`, `cloudy`, `partly-cloudy-day`, `partly-cloudy-night`, `thunderstorm`, `hail`, `mixed`) and if needed you can add a new icon to be accessible only when the `icon=pirate` query string is included in the API request. A new icon not accessible by the `icon=pirate` query string parameter should only be added if an existing icon does not accurately match the summary you are trying to add.
 
-    * **Update `responseLocal.py` calls (if applicable)**:
+    * **Update Response Builder Integration**:
 
-        * The `responseLocal.py` script calls `calculate_text`, `calculate_minutely_text`, etc., and then uses `translation.translate` to convert the summary text. Because you added your new summary to the `pirateweather-translations` library, this `translate` call will now correctly handle your new summary.
+        * The summary/icon generation is now coordinated through `API/legacy/summary.py` which provides helper functions:
+            * `build_hourly_summary()` - For hourly forecasts
+            * `build_daily_summary()` - For daily forecasts
+            * `build_minutely_summary()` - For minutely forecasts
+        
+        * These functions are called from the respective builders (`API/hourly/block.py`, `API/daily/builder.py`, `API/minutely/builder.py`)
 
-        * No direct code change is usually needed in `responseLocal.py` for *translation* once the translation library is updated. However, if your new summary impacts the logic in `responseLocal.py` directly (e.g., changes how `dayIcon` or `dayText` are determined at a higher level), ensure those parts are also updated.
+        * The `API/responseLocal.py` script orchestrates these calls and uses `translation.translate()` to convert the summary text. Because you added your new summary to the `pirateweather-translations` library, this `translate` call will now correctly handle your new summary.
+
+        * No direct code change is usually needed in `responseLocal.py` or the builders for *translation* once the translation library is updated. However, if your new summary impacts the logic in these files directly (e.g., changes how overall forecast summaries are determined), ensure those parts are also updated.
 
 4.  **Thorough Testing**:
 
@@ -90,3 +105,14 @@ Adding a completely new summary (e.g., "Slightly Breezy" or "Dust Storm") involv
     * Verify both the summary text and the icon are correct in the API response.
 
     * Crucially, test different `lang` query parameters to ensure the translation works as expected for your new summary.
+    
+    * Run the linting and formatting tools:
+        ```bash
+        scripts/lint
+        scripts/format
+        ```
+    
+    * Run the test suite:
+        ```bash
+        pytest
+        ```
