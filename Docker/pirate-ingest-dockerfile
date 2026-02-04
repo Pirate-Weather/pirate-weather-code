@@ -39,6 +39,7 @@ RUN apt-get update && apt-get install -y \
 
 # ----------------------------------------------------------------------
 # Build libaec from source (required for ecCodes >= 2.45)
+# NOTE: This isn't strictly required, and may not be needed at some point
 # ----------------------------------------------------------------------
 WORKDIR /tmp
 
