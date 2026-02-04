@@ -255,7 +255,11 @@ while mem < HGEFS_ENSEMBLE_MEMBERS:
 
     # Chunk and save to zarr
     xarray_wgrib = xarray_wgrib.chunk(
-        chunks={"time": HGEFS_TIMESTEPS, "latitude": process_chunk, "longitude": process_chunk}
+        chunks={
+            "time": HGEFS_TIMESTEPS,
+            "latitude": process_chunk,
+            "longitude": process_chunk,
+        }
     )
 
     xarray_wgrib.to_zarr(
@@ -324,9 +328,9 @@ daskOutput = dict()
 
 # Find the probability of precipitation greater than 0.1 mm/h across all members
 # Using 0.1 mm/h threshold for HGEFS (consistent with GEFS approach)
-daskOutput["Precipitation_Prob"] = (
-    ((daskArrays["APCP_surface"]) > 0.1).sum(axis=0) / HGEFS_ENSEMBLE_MEMBERS
-)
+daskOutput["Precipitation_Prob"] = ((daskArrays["APCP_surface"]) > 0.1).sum(
+    axis=0
+) / HGEFS_ENSEMBLE_MEMBERS
 
 # Find the standard deviation of precipitation accumulation across all members
 daskOutput["APCP_StdDev"] = daskArrays["APCP_surface"].std(axis=0)
@@ -670,7 +674,12 @@ for i in range(his_period, 0, -6):
         preprocess=preprocess,
         combine="nested",
         concat_dim="member",
-        chunks={"member": HGEFS_ENSEMBLE_MEMBERS, "time": 1, "latitude": 100, "longitude": 100},
+        chunks={
+            "member": HGEFS_ENSEMBLE_MEMBERS,
+            "time": 1,
+            "latitude": 100,
+            "longitude": 100,
+        },
         consolidated=False,
     )
 
