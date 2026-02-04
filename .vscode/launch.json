@@ -45,7 +45,7 @@
                 "save_type": "Download",
                 "forecast_process_dir": "/mnt/nvme/data/ECMWF",
                 "forecast_path": "/mnt/nvme/data/Prod/ECMWF",
-                "ECCODES_DEFINITION_PATH": "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+                "ECCODES_DEFINITION_PATH": "/home/ubuntu/eccodes-2.45.0-Source/definitions/"
             }
         },
         {
