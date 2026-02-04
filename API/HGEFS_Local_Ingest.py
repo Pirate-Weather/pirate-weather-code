@@ -229,7 +229,7 @@ while mem < 62:
         + ".nc"
     )
 
-    # Run wgrib2 to megre all the grib files
+    # Run wgrib2 to merge all the grib files
     sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
     if sp_out.returncode != 0:
         logger.error(sp_out.stderr)
@@ -294,7 +294,7 @@ stacked_times = np.concatenate(
         pd.date_range(
             start=start - pd.Timedelta(hours=his_period),
             end=start - pd.Timedelta(hours=1),
-            freq="3h",
+            freq="6h",
         ),
         xarray_wgrib.time.values,
     )
@@ -313,7 +313,7 @@ ncLocalWorking_paths = [
 daskArrays = dict()
 
 
-# Combine NetCDF files into a Dask Array, since it works significantly better than the xarray mfdataset appraoach
+# Combine NetCDF files into a Dask Array, since it works significantly better than the xarray mfdataset approach
 # Note that the chunks
 for dask_var in zarr_vars:
     daskVarArrays = []
@@ -550,7 +550,7 @@ for i in range(his_period, 0, -6):
             + ".zarr"
         )
 
-        # Check for a loca done file
+        # Check for a local done file
         if os.path.exists(local_path.replace(".zarr", ".done")):
             logger.info(
                 "File already exists in S3, skipping download for: %s", local_path
@@ -570,7 +570,7 @@ for i in range(his_period, 0, -6):
 
     # Create a range of forecast lead times
     # Forward looking, so 00Z forecast is from 06Z for 6-hourly data
-    # This is what we want for accumilation variables
+    # This is what we want for accumulation variables
     FH_forecastsubMembers = []
     for mem in range(0, 62):
         FH_forecastsubMembers.append(
@@ -643,7 +643,7 @@ for i in range(his_period, 0, -6):
             xarray_hist_wgrib["APCP_surface"], 0
         )
 
-        # Divide by 6 to get hourly accumilations
+        # Divide by 6 to get hourly accumulations
         xarray_hist_wgrib["APCP_surface"] = xarray_hist_wgrib["APCP_surface"] / 6
 
         # Get a list of all variables in the dataset
