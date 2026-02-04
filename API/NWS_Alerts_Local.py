@@ -288,9 +288,9 @@ points_in_polygons = gp.sjoin(
 # Create a formatted string to save all the relevant in the zarr array
 # Use ALERT_URL if available, otherwise fall back to URL from shapefile
 points_in_polygons["FINAL_URL"] = points_in_polygons.apply(
-    lambda row: row["ALERT_URL"]
-    if pd.notna(row.get("ALERT_URL"))
-    else row.get("URL", ""),
+    lambda row: (
+        row["ALERT_URL"] if pd.notna(row.get("ALERT_URL")) else row.get("URL", "")
+    ),
     axis=1,
 )
 
