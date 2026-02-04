@@ -69,6 +69,7 @@ FORECAST_LEAD_RANGES = {
     "ECMWF_IFS_2": list(range(144, 241, 6)),
     "AIGFS": list(range(0, 241, 6)),
     "AIGEFS": list(range(0, 241, 6)),
+    "HGEFS": list(range(0, 241, 6)),
 }
 
 # Radius, in km, used for DWD model nearest-neighbor selection
