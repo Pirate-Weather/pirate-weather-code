@@ -105,14 +105,35 @@ nws_alert_df["CAP_ID"] = nws_alert_df["id"]
 
 # Download zone to county mapping file (optional, used as fallback)
 # Note: This mapping may not always be needed as affectedZones often contains both
+# Cache the mapping file to avoid downloading on every run
 zone_to_county = {}
 zone_county_url = "https://www.weather.gov/source/gis/Shapefiles/County/bp18mr25.dbf"
-zone_county_path = os.path.join(tmpDIR, "bp18mr25.dbf")
+
+# Use a persistent cache location instead of tmpDIR
+cache_dir = os.path.join(forecast_path, "cache")
+if not os.path.exists(cache_dir):
+    os.makedirs(cache_dir)
+zone_county_path = os.path.join(cache_dir, "bp18mr25.dbf")
+
+# Cache for 30 days - only re-download if file is missing or older than 30 days
+cache_max_age_days = 30
+should_download = True
+
+if os.path.exists(zone_county_path):
+    file_age_seconds = os.path.getmtime(zone_county_path)
+    current_time = pd.Timestamp.now().timestamp()
+    age_days = (current_time - file_age_seconds) / (24 * 3600)
+    if age_days < cache_max_age_days:
+        should_download = False
+        print(f"Using cached zone-to-county mapping (age: {age_days:.1f} days)")
 
 try:
-    r_zone = requests.get(zone_county_url, allow_redirects=True)
-    with open(zone_county_path, "wb") as f:
-        f.write(r_zone.content)
+    if should_download:
+        print("Downloading zone-to-county mapping file...")
+        r_zone = requests.get(zone_county_url, allow_redirects=True)
+        with open(zone_county_path, "wb") as f:
+            f.write(r_zone.content)
+        print("Zone-to-county mapping file downloaded and cached")
 
     # Read the zone to county mapping
     zone_county_gdf = gp.read_file(zone_county_path)
