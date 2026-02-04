@@ -39,6 +39,7 @@ CHUNK_SIZES = {
     "HRRR_6H": 100,
     "GFS": 50,
     "GEFS": 100,
+    "HGEFS": 100,
     "ECMWF": 100,
     "NBM_Fire": 100,
     "RTMA": 100,
@@ -51,6 +52,7 @@ FINAL_CHUNK_SIZES = {
     "HRRR_6H": 5,
     "GFS": 3,
     "GEFS": 3,
+    "HGEFS": 3,
     "ECMWF": 3,
     "NBM_Fire": 5,
     "RTMA": 25,
@@ -69,6 +71,7 @@ FORECAST_LEAD_RANGES = {
     "ECMWF_IFS_2": list(range(144, 241, 6)),
     "AIGFS": list(range(0, 241, 6)),
     "AIGEFS": list(range(0, 241, 6)),
+    "HGEFS": list(range(0, 241, 6)),
 }
 
 # Radius, in km, used for DWD model nearest-neighbor selection

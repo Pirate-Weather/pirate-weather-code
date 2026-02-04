@@ -48,4 +48,5 @@ HISTORY_PERIODS = {
     "NBM_Fire": 48,
     "DWD_MOSMIX": 48,  # History period offset (like other models)
     "ECMWF_AIFS": 48,
+    "HGEFS": 288,  # Use same as GFS since it's based on AIGFS/AIGEFS
 }
