@@ -66,6 +66,12 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
 
+# HGEFS-specific constants
+HGEFS_ENSEMBLE_MEMBERS = 62  # Number of ensemble members (combines GEFS and AIGEFS)
+HGEFS_TIMESTEPS = 41  # Number of forecast timesteps (6-hourly from 0 to 240 hours)
+HGEFS_GRID_LAT = 721  # Latitude grid dimension
+HGEFS_GRID_LON = 1440  # Longitude grid dimension
+
 # Define the processing and history chunk size
 process_chunk = CHUNK_SIZES["HGEFS"]
 
@@ -172,7 +178,7 @@ hgefs_range = FORECAST_LEAD_RANGES["HGEFS"]
 FH_forecastsubMembers = []
 mem = 0
 failCount = 0
-while mem < 62:
+while mem < HGEFS_ENSEMBLE_MEMBERS:
     FH_IN = FastHerbie(
         pd.date_range(start=base_time, periods=1, freq="6h"),
         model="hgefs",
@@ -186,7 +192,7 @@ while mem < 62:
 
     # Check for download length
     # HGEFS has 41 timesteps (0 to 240 hours, every 6 hours)
-    if len(FH_IN.file_exists) != 41:
+    if len(FH_IN.file_exists) != HGEFS_TIMESTEPS:
         logger.warning("Member %d has not downloaded all files, trying again", mem + 1)
         failCount += 1
 
@@ -262,7 +268,7 @@ while mem < 62:
     # )
 
     xarray_wgrib = xarray_wgrib.chunk(
-        chunks={"time": 41, "latitude": process_chunk, "longitude": process_chunk}
+        chunks={"time": HGEFS_TIMESTEPS, "latitude": process_chunk, "longitude": process_chunk}
     )
 
     xarray_wgrib.to_zarr(
@@ -306,7 +312,8 @@ stacked_timesUnix = (stacked_times - unix_epoch) / one_second
 hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
 ncLocalWorking_paths = [
-    forecast_process_path + "_xr_m" + str(i) + ".zarr" for i in range(1, 63, 1)
+    forecast_process_path + "_xr_m" + str(i) + ".zarr"
+    for i in range(1, HGEFS_ENSEMBLE_MEMBERS + 1, 1)
 ]
 
 # Dask
@@ -330,7 +337,9 @@ for dask_var in zarr_vars:
 daskOutput = dict()
 
 # Find the probability of precipitation greater than 0.1 mm/h  across all members
-daskOutput["Precipitation_Prob"] = ((daskArrays["APCP_surface"]) > 0.1).sum(axis=0) / 62
+daskOutput["Precipitation_Prob"] = (
+    ((daskArrays["APCP_surface"]) > 0.1).sum(axis=0) / HGEFS_ENSEMBLE_MEMBERS
+)
 
 # Find the standard deviation of precipitation accumulation across all members
 daskOutput["APCP_StdDev"] = daskArrays["APCP_surface"].std(axis=0)
@@ -358,7 +367,9 @@ for dask_var in probVars:
             compute=True,
         )
     else:
-        daskOutput[dask_var].rechunk((41, process_chunk, process_chunk)).to_zarr(
+        daskOutput[dask_var].rechunk(
+            (HGEFS_TIMESTEPS, process_chunk, process_chunk)
+        ).to_zarr(
             forecast_process_path + "_" + dask_var + ".zarr",
             codecs=[
                 zarr.codecs.BytesCodec(),
@@ -553,7 +564,7 @@ for i in range(his_period, 0, -6):
         # Check for a local done file
         if os.path.exists(local_path.replace(".zarr", ".done")):
             logger.info(
-                "File already exists in S3, skipping download for: %s", local_path
+                "File already exists locally, skipping download for: %s", local_path
             )
             continue
     logger.info(
@@ -572,7 +583,7 @@ for i in range(his_period, 0, -6):
     # Forward looking, so 00Z forecast is from 06Z for 6-hourly data
     # This is what we want for accumulation variables
     FH_forecastsubMembers = []
-    for mem in range(0, 62):
+    for mem in range(0, HGEFS_ENSEMBLE_MEMBERS):
         FH_forecastsubMembers.append(
             FastHerbie(
                 DATES,
@@ -586,7 +597,7 @@ for i in range(his_period, 0, -6):
             )
         )
     # Download the subsets
-    for mem in range(0, 62):
+    for mem in range(0, HGEFS_ENSEMBLE_MEMBERS):
         # Download the subsets
         FH_forecastsubMembers[mem].download(match_strings, verbose=False)
         # Create list of downloaded grib files
@@ -681,13 +692,13 @@ for i in range(his_period, 0, -6):
     xarray_hist_wgrib_merged = xr.open_mfdataset(
         [
             hist_process_path + "_xr_merged_m" + str(mem + 1) + ".zarr"
-            for mem in range(0, 62)
+            for mem in range(0, HGEFS_ENSEMBLE_MEMBERS)
         ],
         engine="zarr",
         preprocess=preprocess,
         combine="nested",
         concat_dim="member",
-        chunks={"member": 62, "time": 1, "latitude": 100, "longitude": 100},
+        chunks={"member": HGEFS_ENSEMBLE_MEMBERS, "time": 1, "latitude": 100, "longitude": 100},
         consolidated=False,
     )
 
@@ -697,7 +708,7 @@ for i in range(his_period, 0, -6):
     # Find the probably of precipitation greater than 0.1 mm/h across all members
     xarray_hist_wgrib_prob["Precipitation_Prob"] = (
         (xarray_hist_wgrib_merged["APCP_surface"]) > 0.1
-    ).sum(dim="member") / 62
+    ).sum(dim="member") / HGEFS_ENSEMBLE_MEMBERS
 
     # Find the standard deviation of precipitation accumulation across all members
     xarray_hist_wgrib_prob["APCP_StdDev"] = xarray_hist_wgrib_merged[
@@ -812,7 +823,7 @@ for daskVarIDX, dask_var in enumerate(probVars[:]):
         daskArrayOut = da.from_array(
             np.tile(
                 np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
-                (1, 721, 1440),
+                (1, HGEFS_GRID_LAT, HGEFS_GRID_LON),
             )
         ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
 
@@ -821,7 +832,11 @@ for daskVarIDX, dask_var in enumerate(probVars[:]):
     else:
         daskVarArraysShape = da.reshape(
             daskVarArraysStack,
-            (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], 721, 1440),
+            (
+                daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1],
+                HGEFS_GRID_LAT,
+                HGEFS_GRID_LON,
+            ),
             merge_chunks=False,
         )
         daskArrayOut = da.concatenate((daskVarArraysShape, daskForecastArray), axis=0)
