@@ -102,6 +102,114 @@ nws_alert_df = pd.DataFrame.from_records(nws_alerts)
 
 nws_alert_df["CAP_ID"] = nws_alert_df["id"]
 
+# Download zone to county mapping file
+zone_county_url = "https://www.weather.gov/source/gis/Shapefiles/County/bp18mr25.dbf"
+zone_county_path = os.path.join(tmpDIR, "bp18mr25.dbf")
+
+try:
+    r_zone = requests.get(zone_county_url, allow_redirects=True)
+    with open(zone_county_path, "wb") as f:
+        f.write(r_zone.content)
+
+    # Read the zone to county mapping
+    zone_county_gdf = gp.read_file(zone_county_path)
+
+    # Create a dictionary mapping zone codes to county codes
+    zone_to_county = {}
+    if "ZONE" in zone_county_gdf.columns and "COUNTYNAME" in zone_county_gdf.columns:
+        for _, row in zone_county_gdf.iterrows():
+            zone = row.get("ZONE", "")
+            county = row.get("COUNTYNAME", "")
+            if zone and county:
+                zone_to_county[zone] = county
+except Exception as e:
+    print(f"Warning: Could not load zone-to-county mapping: {e}")
+    zone_to_county = {}
+
+
+# Function to build user-friendly alert URL
+def build_alert_url(affected_zones, cap_id):
+    """
+    Build a user-friendly alert URL from affectedZones.
+
+    Args:
+        affected_zones: List of zone URLs or string
+        cap_id: Alert CAP ID
+
+    Returns:
+        User-friendly URL string
+    """
+    try:
+        # Handle different formats of affectedZones
+        if pd.isna(affected_zones):
+            return f"https://api.weather.gov/alerts/{cap_id}"
+
+        # Convert to list if it's a string
+        if isinstance(affected_zones, str):
+            zones_list = [affected_zones]
+        else:
+            zones_list = (
+                list(affected_zones)
+                if hasattr(affected_zones, "__iter__")
+                else [str(affected_zones)]
+            )
+
+        # Extract zone codes from URLs (e.g., https://api.weather.gov/zones/forecast/NCZ039 -> NCZ039)
+        zone_codes = []
+        county_codes = []
+
+        for zone_url in zones_list:
+            if isinstance(zone_url, str):
+                # Extract the zone code from the URL
+                parts = zone_url.split("/")
+                if len(parts) > 0:
+                    code = parts[-1]
+                    # Check if it's a zone (ends with Z followed by digits) or county (ends with C followed by digits)
+                    if "Z" in code and code[-3:].isdigit():
+                        zone_codes.append(code)
+                    elif "C" in code and code[-3:].isdigit():
+                        county_codes.append(code)
+
+        # If we don't have a zone, try to extract from first element
+        if not zone_codes and zones_list:
+            first_zone = str(zones_list[0])
+            # Try to extract pattern like NCZ039
+            import re
+
+            match = re.search(r"([A-Z]{2}[ZC]\d{3})", first_zone)
+            if match:
+                code = match.group(1)
+                if "Z" in code:
+                    zone_codes.append(code)
+                elif "C" in code:
+                    county_codes.append(code)
+
+        # If we have a zone, try to find or map to a county
+        if zone_codes:
+            warnzone = zone_codes[0]
+
+            # First, check if we already have a county code
+            if county_codes:
+                warncounty = county_codes[0]
+                return f"https://forecast.weather.gov/showsigwx.php?warnzone={warnzone}&warncounty={warncounty}"
+
+            # Try to map zone to county using the mapping file
+            if warnzone in zone_to_county:
+                warncounty = zone_to_county[warnzone]
+                return f"https://forecast.weather.gov/showsigwx.php?warnzone={warnzone}&warncounty={warncounty}"
+
+    except Exception:
+        pass
+
+    # Fallback to API URL
+    return f"https://api.weather.gov/alerts/{cap_id}"
+
+
+# Add user-friendly URL column
+nws_alert_df["ALERT_URL"] = nws_alert_df.apply(
+    lambda row: build_alert_url(row.get("affectedZones"), row.get("id")), axis=1
+)
+
 # Merge where available
 nws_alert_merged = nws_alert_gdf.merge(
     nws_alert_df.drop_duplicates(subset="CAP_ID"), how="left", on="CAP_ID"
@@ -168,14 +276,15 @@ points_in_polygons = gp.sjoin(
     gridPointsSeries, nws_alert_merged_gdf, predicate="within", how="inner"
 )
 
-# Convert API URLs to user-friendly URLs
-points_in_polygons["URL"] = (
-    points_in_polygons["URL"]
-    .astype(str)
-    .str.replace("api.weather.gov", "www.weather.gov", regex=False)
+# Create a formatted string ton save all the relevant in the zarr array
+# Use ALERT_URL if available, otherwise fall back to URL from shapefile
+points_in_polygons["FINAL_URL"] = points_in_polygons.apply(
+    lambda row: row["ALERT_URL"]
+    if pd.notna(row.get("ALERT_URL"))
+    else row.get("URL", ""),
+    axis=1,
 )
 
-# Create a formatted string to save all the relevant in the zarr array
 points_in_polygons["string"] = (
     points_in_polygons["event"].astype(str) + "}"
     "{"
@@ -194,7 +303,7 @@ points_in_polygons["string"] = (
     + points_in_polygons["severity"].astype(str)
     + "}"
     + "{"
-    + points_in_polygons["URL"].astype(str)
+    + points_in_polygons["FINAL_URL"].astype(str)
 )
 
 
