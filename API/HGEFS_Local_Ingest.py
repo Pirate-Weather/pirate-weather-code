@@ -101,7 +101,6 @@ if save_type == "Download":
 # %% Find the most recent run of the HGEFS model
 T0 = time.time()
 
-s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 latest_run = Herbie_latest(
     model="hgefs",
     n=3,
@@ -157,8 +156,6 @@ probVars = (
     "APCP_Mean",
     "APCP_StdDev",
 )
-
-s3_save_path = "/ForecastProd/HGEFS/HGEFS_Prob_"
 
 #####################################################################################################
 # %% Download forecast data for all 62 members to find percentages
@@ -256,17 +253,7 @@ while mem < HGEFS_ENSEMBLE_MEMBERS:
     # Get a list of all variables in the dataset
     wgribVars = list(xarray_wgrib.data_vars)
 
-    # Define compression and chunking for each variable
-    # Compress to save space
-    # Save the dataset as a nc file with compression
-    # encoding = {
-    #     vname: {"zlib": True, "complevel": 1, "chunksizes": (80, 60, 60)}
-    #     for vname in wgribVars
-    # }
-    # xarray_wgrib.to_netcdf(
-    #     forecast_process_path + "_xr_m" + str(mem + 1) + ".nc", encoding=encoding
-    # )
-
+    # Chunk and save to zarr
     xarray_wgrib = xarray_wgrib.chunk(
         chunks={"time": HGEFS_TIMESTEPS, "latitude": process_chunk, "longitude": process_chunk}
     )
@@ -321,7 +308,6 @@ daskArrays = dict()
 
 
 # Combine NetCDF files into a Dask Array, since it works significantly better than the xarray mfdataset approach
-# Note that the chunks
 for dask_var in zarr_vars:
     daskVarArrays = []
     for local_ncpath in ncLocalWorking_paths:
@@ -336,7 +322,8 @@ for dask_var in zarr_vars:
 # Dict to hold output dask arrays
 daskOutput = dict()
 
-# Find the probability of precipitation greater than 0.1 mm/h  across all members
+# Find the probability of precipitation greater than 0.1 mm/h across all members
+# Using 0.1 mm/h threshold for HGEFS (consistent with GEFS approach)
 daskOutput["Precipitation_Prob"] = (
     ((daskArrays["APCP_surface"]) > 0.1).sum(axis=0) / HGEFS_ENSEMBLE_MEMBERS
 )
@@ -350,12 +337,8 @@ daskOutput["APCP_Mean"] = daskArrays["APCP_surface"].mean(axis=0)
 # Copy time over
 daskOutput["time"] = daskArrays["time"][1, :]
 
-
-# filters = [BitRound(keepbits=12)]  # Only keep ~ 3 significant digits
-# compressor = Blosc(cname="zstd", clevel=1)  # Use zstd compression
-
+# Save probability variables to zarr
 for dask_var in probVars:
-    # with ProgressBar():
     if dask_var == "time":
         daskOutput[dask_var].to_zarr(
             forecast_process_path + "_" + dask_var + ".zarr",
@@ -657,18 +640,7 @@ for i in range(his_period, 0, -6):
         # Divide by 6 to get hourly accumulations
         xarray_hist_wgrib["APCP_surface"] = xarray_hist_wgrib["APCP_surface"] / 6
 
-        # Get a list of all variables in the dataset
-        wgribVars = list(xarray_hist_wgrib.data_vars)
-
-        # Save to NetCDF for prob process
-        # encoding = {
-        #     vname: {"zlib": True, "complevel": 1, "chunksizes": (2, 90, 90)}
-        #     for vname in zarr_vars[1:]
-        # }
-        # xarray_hist_wgrib.to_netcdf(
-        #     hist_process_path + "_xr_merged_m" + str(mem + 1) + ".nc", encoding=encoding
-        # )
-
+        # Chunk and save to zarr
         xarray_wgrib = xarray_hist_wgrib.chunk(
             chunks={"time": 1, "latitude": 100, "longitude": 100}
         )
@@ -725,20 +697,7 @@ for i in range(his_period, 0, -6):
         {"time": 1, "latitude": process_chunk, "longitude": process_chunk}
     )
 
-    # Save the dataset with compression and filters for all variables
-    # Use the same encoding as last time but with larger chuncks to speed up read times
-    # Get a list of all variables in the dataset
-    # compressor = Blosc(cname="lz4", clevel=1)
-    # filters = [BitRound(keepbits=9)]
-
-    # Don't filter time
-    # encoding = {
-    #     vname: {"compressor": compressor, "filters": filters} for vname in probVars[1:]
-    # }
-
-    # Save as zarr for timemachine
-    # with ProgressBar():
-    # Save as Zarr to s3 for Time Machine
+    # Save as Zarr
     if save_type == "S3":
         zarrStore = zarr.storage.FsspecStore.from_url(
             s3_path,
