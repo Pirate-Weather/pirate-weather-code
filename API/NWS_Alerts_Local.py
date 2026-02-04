@@ -3,6 +3,7 @@
 
 # Import Modules
 import os
+import re
 import shutil
 import tarfile
 import xml.etree.ElementTree as ET
@@ -102,7 +103,9 @@ nws_alert_df = pd.DataFrame.from_records(nws_alerts)
 
 nws_alert_df["CAP_ID"] = nws_alert_df["id"]
 
-# Download zone to county mapping file
+# Download zone to county mapping file (optional, used as fallback)
+# Note: This mapping may not always be needed as affectedZones often contains both
+zone_to_county = {}
 zone_county_url = "https://www.weather.gov/source/gis/Shapefiles/County/bp18mr25.dbf"
 zone_county_path = os.path.join(tmpDIR, "bp18mr25.dbf")
 
@@ -114,14 +117,22 @@ try:
     # Read the zone to county mapping
     zone_county_gdf = gp.read_file(zone_county_path)
 
-    # Create a dictionary mapping zone codes to county codes
-    zone_to_county = {}
-    if "ZONE" in zone_county_gdf.columns and "COUNTYNAME" in zone_county_gdf.columns:
-        for _, row in zone_county_gdf.iterrows():
+    # Try to build mapping from available columns
+    # Look for zone codes and county codes in the shapefile
+    for col_name in zone_county_gdf.columns:
+        print(f"Zone-County mapping column: {col_name}")
+
+    # Note: The exact column names may vary. This is a best-effort mapping.
+    # Most alerts will already have both zone and county in affectedZones.
+    if "ZONE" in zone_county_gdf.columns and "FIPS" in zone_county_gdf.columns:
+        # Use FIPS code if available
+        for idx, row in zone_county_gdf.head(100).iterrows():
             zone = row.get("ZONE", "")
-            county = row.get("COUNTYNAME", "")
-            if zone and county:
-                zone_to_county[zone] = county
+            fips = row.get("FIPS", "")
+            if zone and fips:
+                zone_to_county[zone] = fips
+                if idx < 5:  # Debug: print first few mappings
+                    print(f"Zone mapping: {zone} -> {fips}")
 except Exception as e:
     print(f"Warning: Could not load zone-to-county mapping: {e}")
     zone_to_county = {}
@@ -174,8 +185,6 @@ def build_alert_url(affected_zones, cap_id):
         if not zone_codes and zones_list:
             first_zone = str(zones_list[0])
             # Try to extract pattern like NCZ039
-            import re
-
             match = re.search(r"([A-Z]{2}[ZC]\d{3})", first_zone)
             if match:
                 code = match.group(1)
@@ -276,7 +285,7 @@ points_in_polygons = gp.sjoin(
     gridPointsSeries, nws_alert_merged_gdf, predicate="within", how="inner"
 )
 
-# Create a formatted string ton save all the relevant in the zarr array
+# Create a formatted string to save all the relevant in the zarr array
 # Use ALERT_URL if available, otherwise fall back to URL from shapefile
 points_in_polygons["FINAL_URL"] = points_in_polygons.apply(
     lambda row: row["ALERT_URL"]
