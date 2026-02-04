@@ -168,6 +168,13 @@ points_in_polygons = gp.sjoin(
     gridPointsSeries, nws_alert_merged_gdf, predicate="within", how="inner"
 )
 
+# Convert API URLs to user-friendly URLs
+points_in_polygons["URL"] = (
+    points_in_polygons["URL"]
+    .astype(str)
+    .str.replace("api.weather.gov", "www.weather.gov", regex=False)
+)
+
 # Create a formatted string ton save all the relevant in the zarr array
 points_in_polygons["string"] = (
     points_in_polygons["event"].astype(str) + "}"
