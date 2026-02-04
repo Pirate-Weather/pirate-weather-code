@@ -175,7 +175,7 @@ points_in_polygons["URL"] = (
     .str.replace("api.weather.gov", "www.weather.gov", regex=False)
 )
 
-# Create a formatted string ton save all the relevant in the zarr array
+# Create a formatted string to save all the relevant in the zarr array
 points_in_polygons["string"] = (
     points_in_polygons["event"].astype(str) + "}"
     "{"
