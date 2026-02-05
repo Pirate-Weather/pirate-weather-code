@@ -27,7 +27,7 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "justMyCode": true,
-            "python": "/home/ubuntu/PirateIngest_V2/bin/python3.13",
+            "python": "/home/ubuntu/PirateIngest_V3/venv/bin/python3.13",
             "envFile": "${workspaceFolder}/.env",
         },
         {
