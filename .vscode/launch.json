@@ -20,6 +20,17 @@
             "envFile": "${workspaceFolder}/.env",
         },
         {
+            "name": "Python: NWS_Alerts_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.NWS_Alerts_Local",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "python": "/home/ubuntu/PirateIngest_V2/bin/python3.13",
+            "envFile": "${workspaceFolder}/.env",
+        },
+        {
             "name": "Python: WMO_Alerts_Local",
             "type": "debugpy",
             "request": "launch",
