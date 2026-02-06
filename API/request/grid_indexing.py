@@ -521,7 +521,7 @@ async def calculate_grid_indexing(
                     dataOut_nbm = False
                     nbmRunTime = None
                     logger.warning("OLD NBM")
-            except Exception:
+            except (ValueError, TypeError, AttributeError):
                 logger.debug("Failed to parse NBM runtime for freshness check")
 
         sourceIDX["nbm"] = dict()
@@ -541,7 +541,7 @@ async def calculate_grid_indexing(
                     dataOut_nbmFire = False
                     nbmFireRunTime = None
                     logger.warning("OLD NBM_FIRE")
-            except Exception:
+            except (ValueError, TypeError, AttributeError):
                 logger.debug("Failed to parse NBM_FIRE runtime for freshness check")
 
     if readGFS:
@@ -557,7 +557,7 @@ async def calculate_grid_indexing(
                     dataOut_gfs = False
                     gfsRunTime = None
                     logger.warning("OLD GFS")
-            except Exception:
+            except (ValueError, TypeError, AttributeError):
                 logger.debug("Failed to parse GFS runtime for freshness check")
 
     if readECMWF:
@@ -573,11 +573,8 @@ async def calculate_grid_indexing(
                     dataOut_ecmwf = False
                     ecmwfRunTime = None
                     logger.warning("OLD ECMWF")
-            except Exception:
+            except (ValueError, TypeError, AttributeError):
                 logger.debug("Failed to parse ECMWF runtime for freshness check")
-
-        if dataOut_ecmwf is not False:
-            ecmwfRunTime = dataOut_ecmwf[HISTORY_PERIODS["ECMWF"] - 3, 0]
             sourceIDX["ecmwf_ifs"] = dict()
             sourceIDX["ecmwf_ifs"]["x"] = int(x_p_eur)
             sourceIDX["ecmwf_ifs"]["y"] = int(y_p_eur)
@@ -597,7 +594,7 @@ async def calculate_grid_indexing(
                     dataOut_gefs = False
                     gefsRunTime = None
                     logger.warning("OLD GEFS")
-            except Exception:
+            except (ValueError, TypeError, AttributeError):
                 logger.debug("Failed to parse GEFS runtime for freshness check")
         else:
             gefsRunTime = None
