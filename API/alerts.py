@@ -116,6 +116,11 @@ def _read_nws_alerts(
             logger.debug("Skipping NWS alert with invalid times for %s", loc_tag)
             continue
 
+        # Format the alert URL using the NWS MapClient URI format
+        alert_uri = (
+            "https://forecast.weather.gov/MapClick.php?lon={lon}&lat={lat}"
+        ).format(lon=round(az_lon, 3), lat=round(lat, 3))
+
         formatted_text = _format_alert_description(alert_details[1])
         alert_dict = {
             "title": alert_details[0],
@@ -124,7 +129,7 @@ def _read_nws_alerts(
             "time": int(alert_onset.timestamp()),
             "expires": int(alert_end.timestamp()),
             "description": formatted_text,
-            "uri": alert_details[6],
+            "uri": alert_uri,
         }
 
         if alert_end > now_utc:
