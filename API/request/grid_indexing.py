@@ -524,11 +524,12 @@ async def calculate_grid_indexing(
             except (ValueError, TypeError, AttributeError):
                 logger.debug("Failed to parse NBM runtime for freshness check")
 
-        sourceIDX["nbm"] = dict()
-        sourceIDX["nbm"]["x"] = int(x_nbm)
-        sourceIDX["nbm"]["y"] = int(y_nbm)
-        sourceIDX["nbm"]["lat"] = round(nbm_lat, 2)
-        sourceIDX["nbm"]["lon"] = round(((nbm_lon + 180) % 360) - 180, 2)
+        if dataOut_nbm is not False:
+            sourceIDX["nbm"] = dict()
+            sourceIDX["nbm"]["x"] = int(x_nbm)
+            sourceIDX["nbm"]["y"] = int(y_nbm)
+            sourceIDX["nbm"]["lat"] = round(nbm_lat, 2)
+            sourceIDX["nbm"]["lon"] = round(((nbm_lon + 180) % 360) - 180, 2)
 
         if dataOut_nbmFire is not False:
             nbmFireRunTime = dataOut_nbmFire[HISTORY_PERIODS["NBM"] - 6, 0]
@@ -575,6 +576,8 @@ async def calculate_grid_indexing(
                     logger.warning("OLD ECMWF")
             except (ValueError, TypeError, AttributeError):
                 logger.debug("Failed to parse ECMWF runtime for freshness check")
+        
+        if dataOut_ecmwf is not False:
             sourceIDX["ecmwf_ifs"] = dict()
             sourceIDX["ecmwf_ifs"]["x"] = int(x_p_eur)
             sourceIDX["ecmwf_ifs"]["y"] = int(y_p_eur)
