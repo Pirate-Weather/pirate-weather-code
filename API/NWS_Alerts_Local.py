@@ -206,7 +206,7 @@ df = points_in_polygons.groupby("INDEX").agg({"string": "|".join}).reset_index()
 gridPointsSeries = gridPointsSeries.merge(df, on="INDEX", how="left")
 
 # Set empty data as blank
-gridPointsSeries.loc[gridPointsSeries["string"].isna(), ["string"]] = ""
+gridPointsSeries["string"] = gridPointsSeries["string"].fillna("")
 
 # Concert to string
 gridPointsSeries["string"] = gridPointsSeries["string"].astype(str)

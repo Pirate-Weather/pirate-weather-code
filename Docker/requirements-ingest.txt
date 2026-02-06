@@ -8,7 +8,7 @@ dask==2026.1.2
 distributed==2026.1.2
 eccodes==2.45.0
 geopandas==1.1.2
-herbie-data==2026.1.0
+herbie-data @ git+https://github.com/blaylockbk/Herbie.git@05785acdb762f8b22183a93c05f5691c13f5b4f5
 metpy==1.7.1
 netCDF4==1.7.4
 numba==0.63.1
