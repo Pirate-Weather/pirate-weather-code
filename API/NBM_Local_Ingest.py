@@ -45,14 +45,14 @@ wgrib2_path = os.getenv(
 )
 
 forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/home/ubuntu/Weather/Process/NBM"
+    "forecast_process_dir", default="/mnt/nvme/data/NBM"
 )
 forecast_process_path = forecast_process_dir + "/NBM_Process"
 hist_process_path = forecast_process_dir + "/NBM_Historic"
 tmp_dir = forecast_process_dir + "/Downloads"
 
-forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/NBM")
-historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/Hist/NBM")
+forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/NBM")
+historic_path = os.getenv("historic_path", default="/mnt/nvme/data/Hist/NBM")
 
 
 save_type = os.getenv("save_type", default="Download")
