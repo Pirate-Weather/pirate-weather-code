@@ -576,7 +576,7 @@ async def calculate_grid_indexing(
                     logger.warning("OLD ECMWF")
             except (ValueError, TypeError, AttributeError):
                 logger.debug("Failed to parse ECMWF runtime for freshness check")
-        
+
         if dataOut_ecmwf is not False:
             sourceIDX["ecmwf_ifs"] = dict()
             sourceIDX["ecmwf_ifs"]["x"] = int(x_p_eur)
