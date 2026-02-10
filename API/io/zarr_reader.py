@@ -196,6 +196,7 @@ def update_zarr_store(
                 anon=True,
                 asynchronous=False,
                 endpoint_url="https://api.pirateweather.net/files/",
+                skip_instance_cache=True,
             )
             s3.s3.meta.events.register("before-sign.s3.*", _add_custom_header)
         elif save_type == "S3Zarr":

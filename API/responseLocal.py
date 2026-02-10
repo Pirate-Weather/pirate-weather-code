@@ -197,6 +197,7 @@ try:
                     anon=True,
                     asynchronous=False,
                     endpoint_url="https://api.pirateweather.net/files/",
+                    skip_instance_cache=True,
                 )
                 s3_path = (
                     f"s3://ForecastTar_v2/{ingest_version}/DWD_MOSMIX_stations.pickle"
