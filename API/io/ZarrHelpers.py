@@ -1,7 +1,6 @@
 # Helpers for working with Zarr data in the Pirate Weather API
 # Alexander Rey, October 2025
 
-import os
 import random
 import time
 
@@ -13,12 +12,6 @@ from API.constants.api_const import (
     MAX_S3_RETRIES,
     S3_BASE_DELAY,
 )
-
-pw_api_key = os.environ.get("PW_API", "")
-
-
-def _add_custom_header(request, **kwargs):
-    request.headers["apikey"] = pw_api_key
 
 
 class S3ZipStore(zarr.storage.ZipStore):
