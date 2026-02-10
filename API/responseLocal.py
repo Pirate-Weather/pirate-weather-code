@@ -193,12 +193,23 @@ try:
             try:
                 import s3fs
 
+                # Get API key from environment for custom endpoint authentication
+                pw_api_key = os.environ.get("PW_API", "")
+
+                # Custom header injector that works with anonymous requests
+                def _add_custom_header(request, **kwargs):
+                    request.headers["apikey"] = pw_api_key
+
                 s3 = s3fs.S3FileSystem(
                     anon=True,
                     asynchronous=False,
                     endpoint_url="https://api.pirateweather.net/files/",
                     skip_instance_cache=True,
                 )
+                # Register event handler for all request types (not just signed)
+                # Use before-call instead of before-sign to catch anonymous requests
+                s3.s3.meta.events.register("before-call.s3.*", _add_custom_header)
+
                 s3_path = (
                     f"s3://ForecastTar_v2/{ingest_version}/DWD_MOSMIX_stations.pickle"
                 )

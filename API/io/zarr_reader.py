@@ -14,7 +14,7 @@ import zarr
 
 from API.constants.api_const import MAX_ZARR_READ_RETRIES
 from API.constants.shared_const import INGEST_VERSION_STR, MISSING_DATA
-from API.io.ZarrHelpers import _add_custom_header, init_ERA5, setup_testing_zipstore
+from API.io.ZarrHelpers import init_ERA5, setup_testing_zipstore
 
 
 def _default_logger() -> logging.Logger:
@@ -192,13 +192,22 @@ def update_zarr_store(
     if stage in ("TESTING", "TM_TESTING"):
         logger.info("Setting up S3 zarrs")
         if save_type == "S3":
+            # Get API key from environment for custom endpoint authentication
+            pw_api_key = os.environ.get("PW_API", "")
+
+            # Custom header injector that works with anonymous requests
+            def _add_custom_header(request, **kwargs):
+                request.headers["apikey"] = pw_api_key
+
             s3 = s3fs.S3FileSystem(
                 anon=True,
                 asynchronous=False,
                 endpoint_url="https://api.pirateweather.net/files/",
                 skip_instance_cache=True,
             )
-            s3.s3.meta.events.register("before-sign.s3.*", _add_custom_header)
+            # Register event handler for all request types (not just signed)
+            # Use before-call instead of before-sign to catch anonymous requests
+            s3.s3.meta.events.register("before-call.s3.*", _add_custom_header)
         elif save_type == "S3Zarr":
             s3 = s3fs.S3FileSystem(
                 key=aws_access_key_id, secret=aws_secret_access_key, version_aware=True
