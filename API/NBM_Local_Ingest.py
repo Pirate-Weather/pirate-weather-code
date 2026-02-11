@@ -482,7 +482,7 @@ if len(FH_forecastsub.file_exists) != len(nbm_range1):
 gribList1 = getGribList(FH_forecastsub, matchstring_pa)
 
 #####
-# Download PPROB as 6-Hour Accum for hours 036-190
+# Download 6-Hour Accum for hours 036-190
 
 # Create FastHerbie object
 FH_forecastsub2 = FastHerbie(
