@@ -463,7 +463,7 @@ for i in range(his_period, 0, -6):
 
     # Create a range of forecast lead times
     # Forward looking, so 00Z forecast is from 03Z
-    # This is what we want for accumilation variables
+    # This is what we want for accumulation variables
     FH_forecastsubMembers = []
     for mem in range(0, 30):
         FH_forecastsubMembers.append(

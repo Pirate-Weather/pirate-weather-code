@@ -43,10 +43,11 @@ HISTORY_PERIODS = {
     "HRRR": 48,
     "HRRR_6H": 48,
     "GFS": 288,  # GFS has a 12-day history, allowing 10 days of local retrievals. Beyond that is Google ERA5
+    "AIGFS": 48, # Since it's only 6 hours of data, have to go a bit further back to get a full 48 hours of history
     "GEFS": 48,
     "ECMWF": 48,
     "NBM_Fire": 48,
     "DWD_MOSMIX": 48,  # History period offset (like other models)
     "ECMWF_AIFS": 48,
-    "HGEFS": 288,  # Use same as GFS since it's based on AIGFS/AIGEFS
+    "HGEFS": 12,  # HGEFS has a shorter history period on NOMADS
 }
