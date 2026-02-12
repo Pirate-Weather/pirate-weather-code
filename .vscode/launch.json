@@ -45,6 +45,21 @@
             }
         },
         {
+            "name": "Python: NBM_Local",
+            "type": "python",
+            "request": "launch",
+            "module": "API.NBM_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "python": "/home/ubuntu/PirateIngest_V3/venv/bin/python3.13",
+            "env": {
+                "save_type": "Download",
+                "forecast_process_dir": "/mnt/nvme/data/NBM",
+                "forecast_path": "/mnt/nvme/data/Prod/NBM"
+            }
+        },
+        {
             "name": "Python: ECMWF_Local",
             "type": "debugpy",
             "request": "launch",
