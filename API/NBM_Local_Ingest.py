@@ -188,11 +188,13 @@ elif base_time.hour % 6 == 5:
 nbm_range = list(chain(nbm_range1, nbm_range2))
 
 # Define the subset of variables to download as a list of strings
-matchstring_2m = r":((DPT|TMP|APTMP|RH):2 m above ground:.*fcst:nan)"
+matchstring_2m = r":((DPT|TMP|APTMP|RH):2 m above ground:.*fcst:$)"
 matchstring_su = r":((PTYPE):surface:.*)"
-matchstring_10m = r"(:(GUST|WIND|WDIR):10 m above ground:.*fcst:nan)"
-matchstring_pr = r"(:APCP:surface:(0-1|1-2|2-3|3-4|4-5|5-6|6-7|7-8|8-9|9-10|\d*0-\d{1,2}1|\d*1-\d{1,2}2|\d*2-\d{1,2}3|\d*3-\d{1,2}4|\d*4-\d{1,2}5|\d*5-\d{1,2}6|\d*6-\d{1,2}7|\d*7-\d{1,2}8|\d*8-\d{1,2}9|\d*9-\d{1,2}0).*fcst:nan)"
-matchstring_re = r":((TCDC|VIS|DSWRF|CAPE):surface:.*fcst:nan)"  # This gets the correct surface param
+matchstring_10m = r"(:(GUST|WIND|WDIR):10 m above ground:.*fcst:$)"
+matchstring_pr = r"(:APCP:surface:(0-1|1-2|2-3|3-4|4-5|5-6|6-7|7-8|8-9|9-10|\d*0-\d{1,2}1|\d*1-\d{1,2}2|\d*2-\d{1,2}3|\d*3-\d{1,2}4|\d*4-\d{1,2}5|\d*5-\d{1,2}6|\d*6-\d{1,2}7|\d*7-\d{1,2}8|\d*8-\d{1,2}9|\d*9-\d{1,2}0).*fcst:$)"
+matchstring_re = (
+    r":((TCDC|VIS|DSWRF|CAPE):surface:.*fcst:$)"  # This gets the correct surface param
+)
 
 matchstring_pw = r":(PWTHER:)"  # This gets the correct surface param
 
@@ -466,7 +468,7 @@ FH_forecastsub = FastHerbie(
     save_dir=tmp_dir,
 )
 
-matchstring_pa = r"(:APCP:surface:(0-1|1-2|2-3|3-4|4-5|5-6|6-7|7-8|8-9|9-10|\d*0-\d{1,2}1|\d*1-\d{1,2}2|\d*2-\d{1,2}3|\d*3-\d{1,2}4|\d*4-\d{1,2}5|\d*5-\d{1,2}6|\d*6-\d{1,2}7|\d*7-\d{1,2}8|\d*8-\d{1,2}9|\d*9-\d{1,2}0).*fcst:nan)"
+matchstring_pa = r"(:APCP:surface:(0-1|1-2|2-3|3-4|4-5|5-6|6-7|7-8|8-9|9-10|\d*0-\d{1,2}1|\d*1-\d{1,2}2|\d*2-\d{1,2}3|\d*3-\d{1,2}4|\d*4-\d{1,2}5|\d*5-\d{1,2}6|\d*6-\d{1,2}7|\d*7-\d{1,2}8|\d*8-\d{1,2}9|\d*9-\d{1,2}0).*fcst:$)"
 # Download the subsets
 FH_forecastsub.download(matchstring_pa, verbose=False)
 
@@ -484,7 +486,7 @@ if len(FH_forecastsub.file_exists) != len(nbm_range1):
 gribList1 = getGribList(FH_forecastsub, matchstring_pa)
 
 #####
-# Download PPROB as 6-Hour Accum for hours 036-190
+# Download 6-Hour Accum for hours 036-190
 
 # Create FastHerbie object
 FH_forecastsub2 = FastHerbie(
@@ -497,8 +499,8 @@ FH_forecastsub2 = FastHerbie(
     save_dir=tmp_dir,
 )
 
-# Match 6-hour probs
-matchstring_pa2 = r"(:APCP:surface:(0-6|\d*0-\d{1,2}6|\d*1-\d{1,2}7|\d*2-\d{1,2}8|\d*3-\d{1,2}9|\d*4-\d{1,2}0|\d*5-\d{1,2}1|\d*6-\d{1,2}2|\d*7-\d{1,2}3|\d*8-\d{1,2}4|\d*9-\d{1,2}5).*fcst:nan)"
+# Match 6-hour accumulation
+matchstring_pa2 = r"(:APCP:surface:(0-6|\d*0-\d{1,2}6|\d*1-\d{1,2}7|\d*2-\d{1,2}8|\d*3-\d{1,2}9|\d*4-\d{1,2}0|\d*5-\d{1,2}1|\d*6-\d{1,2}2|\d*7-\d{1,2}3|\d*8-\d{1,2}4|\d*9-\d{1,2}5).*fcst:$)"
 # Download the subsets
 FH_forecastsub2.download(matchstring_pa2, verbose=False)
 
@@ -691,10 +693,7 @@ with dask.config.set(**{"array.slicing.split_large_chunks": True}):
             # Save the dataset with compression and filters for all variable
             daskArray.to_zarr(
                 forecast_process_path + "_zarrs/" + dask_var + ".zarr",
-                codecs=[
-                    zarr.codecs.BytesCodec(),
-                    zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-                ],
+                compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
                 overwrite=True,
             )
 
