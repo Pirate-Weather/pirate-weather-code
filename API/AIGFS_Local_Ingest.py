@@ -423,14 +423,6 @@ for i in range(his_period, 0, -6):
 
     xarray_hist_merged = xarray_his_wgrib_merged
 
-    # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time, every 6 hours
-    apcpProc = xarray_hist_merged["APCP_surface"].values
-
-    apcpProcHour = np.diff(apcpProc, axis=0, prepend=0)
-
-    xarray_hist_merged["APCP_surface"] = xarray_hist_merged["APCP_surface"].copy(
-        data=apcpProcHour
-    )
 
     # Clear memory of temporary inputs
     del xarray_his_wgrib_merged
