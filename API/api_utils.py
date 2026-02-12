@@ -10,6 +10,7 @@ from API.constants.api_const import (
     APPARENT_TEMP_CONSTS,
     APPARENT_TEMP_SOLAR_CONSTS,
     PRECIP_NOISE_THRESHOLD_MMH,
+    PRECIP_TYPES,
     TEMP_THRESHOLD_WMO_FROZEN_C,
 )
 from API.constants.shared_const import MISSING_DATA
@@ -348,9 +349,18 @@ def select_daily_precip_type(
     maxPchanceDay[InterPdaySum[:, DATA_DAY["snow"]] > (5 * prepAccumUnit)] = PRECIP_IDX[
         "snow"
     ]
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit)] = PRECIP_IDX[
-        "sleet"
-    ]
+    # For ice accumulation, preserve the distinction between ice (freezing rain)
+    # and sleet (ice pellets) by only overriding if the current type is not already
+    # ice or sleet. This ensures that the hourly-based determination is preserved.
+    # When defaulting is needed (type is not ice/sleet but ice accumulation exists),
+    # we choose ice (freezing rain) as it's generally more common than sleet globally.
+    # If significant ice accumulation exists and type is not already ice/sleet,
+    # default to ice (freezing rain)
+    maxPchanceDay[
+        (InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit))
+        & (maxPchanceDay != PRECIP_IDX["ice"])
+        & (maxPchanceDay != PRECIP_IDX["sleet"])
+    ] = PRECIP_IDX["ice"]
 
     # If we have all types map the type to mixed
     maxPchanceDay[all_types] = PRECIP_IDX["mixed"]
@@ -566,7 +576,7 @@ def remove_conditional_fields(
                         and isinstance(value, str)
                         and value in ("ice", "mixed")
                     ):
-                        obj[key] = "sleet"
+                        obj[key] = PRECIP_TYPES["sleet"]
                     elif isinstance(
                         value, (dict, list)
                     ):  # Only recurse if it's a dict or list

@@ -512,23 +512,72 @@ async def calculate_grid_indexing(
         dataOut_nbmFire = zarr_results["NBM_Fire"]
         if dataOut_nbm is not False:
             nbmRunTime = dataOut_nbm[HISTORY_PERIODS["NBM"], 0]
-        sourceIDX["nbm"] = dict()
-        sourceIDX["nbm"]["x"] = int(x_nbm)
-        sourceIDX["nbm"]["y"] = int(y_nbm)
-        sourceIDX["nbm"]["lat"] = round(nbm_lat, 2)
-        sourceIDX["nbm"]["lon"] = round(((nbm_lon + 180) % 360) - 180, 2)
+            try:
+                timestamp_dt = datetime.datetime.fromtimestamp(
+                    nbmRunTime.astype(int), datetime.UTC
+                ).replace(tzinfo=None)
+                # Exclude hourly NBM if older than 2 days
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=2):
+                    dataOut_nbm = False
+                    nbmRunTime = None
+                    logger.warning("OLD NBM")
+            except (ValueError, TypeError, AttributeError):
+                logger.debug("Failed to parse NBM runtime for freshness check")
+
+        if dataOut_nbm is not False:
+            sourceIDX["nbm"] = dict()
+            sourceIDX["nbm"]["x"] = int(x_nbm)
+            sourceIDX["nbm"]["y"] = int(y_nbm)
+            sourceIDX["nbm"]["lat"] = round(nbm_lat, 2)
+            sourceIDX["nbm"]["lon"] = round(((nbm_lon + 180) % 360) - 180, 2)
+
         if dataOut_nbmFire is not False:
             nbmFireRunTime = dataOut_nbmFire[HISTORY_PERIODS["NBM"] - 6, 0]
+            try:
+                timestamp_dt = datetime.datetime.fromtimestamp(
+                    nbmFireRunTime.astype(int), datetime.UTC
+                ).replace(tzinfo=None)
+                # Exclude 6-hourly NBM Fire if older than 2 days
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=2):
+                    dataOut_nbmFire = False
+                    nbmFireRunTime = None
+                    logger.warning("OLD NBM_FIRE")
+            except (ValueError, TypeError, AttributeError):
+                logger.debug("Failed to parse NBM_FIRE runtime for freshness check")
 
     if readGFS:
         dataOut_gfs = zarr_results["GFS"]
         if dataOut_gfs is not False:
             gfsRunTime = dataOut_gfs[HISTORY_PERIODS["GFS"] - 1, 0]
+            try:
+                timestamp_dt = datetime.datetime.fromtimestamp(
+                    gfsRunTime.astype(int), datetime.UTC
+                ).replace(tzinfo=None)
+                # Exclude 6-hourly GFS if older than 5 days
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                    dataOut_gfs = False
+                    gfsRunTime = None
+                    logger.warning("OLD GFS")
+            except (ValueError, TypeError, AttributeError):
+                logger.debug("Failed to parse GFS runtime for freshness check")
 
     if readECMWF:
         dataOut_ecmwf = zarr_results["ECMWF"]
         if dataOut_ecmwf is not False:
             ecmwfRunTime = dataOut_ecmwf[HISTORY_PERIODS["ECMWF"] - 3, 0]
+            try:
+                timestamp_dt = datetime.datetime.fromtimestamp(
+                    ecmwfRunTime.astype(int), datetime.UTC
+                ).replace(tzinfo=None)
+                # Exclude 12-hourly ECMWF if older than 5 days
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                    dataOut_ecmwf = False
+                    ecmwfRunTime = None
+                    logger.warning("OLD ECMWF")
+            except (ValueError, TypeError, AttributeError):
+                logger.debug("Failed to parse ECMWF runtime for freshness check")
+
+        if dataOut_ecmwf is not False:
             sourceIDX["ecmwf_ifs"] = dict()
             sourceIDX["ecmwf_ifs"]["x"] = int(x_p_eur)
             sourceIDX["ecmwf_ifs"]["y"] = int(y_p_eur)
@@ -537,7 +586,21 @@ async def calculate_grid_indexing(
 
     if readGEFS:
         dataOut_gefs = zarr_results["GEFS"]
-        gefsRunTime = dataOut_gefs[HISTORY_PERIODS["GEFS"] - 3, 0]
+        if dataOut_gefs is not False:
+            try:
+                gefsRunTime = dataOut_gefs[HISTORY_PERIODS["GEFS"] - 3, 0]
+                timestamp_dt = datetime.datetime.fromtimestamp(
+                    gefsRunTime.astype(int), datetime.UTC
+                ).replace(tzinfo=None)
+                # Exclude 6-hourly GEFS if older than 5 days
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                    dataOut_gefs = False
+                    gefsRunTime = None
+                    logger.warning("OLD GEFS")
+            except (ValueError, TypeError, AttributeError):
+                logger.debug("Failed to parse GEFS runtime for freshness check")
+        else:
+            gefsRunTime = None
 
     if readRTMA_RU:
         dataOut_rtma_ru = zarr_results["RTMA_RU"]

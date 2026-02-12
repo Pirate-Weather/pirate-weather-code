@@ -33,6 +33,8 @@ from API.constants.api_const import (
     COORDINATE_CONST,
     ETOPO_CONST,
     PRECIP_IDX,
+    PRECIP_TYPE_DISPLAY,
+    PRECIP_TYPES,
     ROUNDING_RULES,
 )
 from API.constants.forecast_const import (
@@ -186,7 +188,7 @@ try:
     if STAGE in ("DEV", "PROD"):
         station_map_file = os.path.join(save_dir, "DWD_MOSMIX_stations.pickle")
     elif STAGE in ("TESTING", "TM_TESTING"):
-        # For testing stages, try to load from S3
+        # For testing stages, try to load from S3 first
         if save_type == "S3":
             try:
                 import s3fs
@@ -204,16 +206,16 @@ try:
                         DWD_MOSMIX_Stations = pickle.load(f)
                         logger.info("Loaded DWD MOSMIX station map from S3")
             except Exception as e:
-                logger.warning(f"Could not load DWD MOSMIX station map from S3: {e}")
+                logger.debug(f"Could not load DWD MOSMIX station map from S3: {e}")
 
     if station_map_file and os.path.exists(station_map_file):
         with open(station_map_file, "rb") as f:
             DWD_MOSMIX_Stations = pickle.load(f)
             logger.info(f"Loaded DWD MOSMIX station map from: {station_map_file}")
     elif DWD_MOSMIX_Stations is None:
-        logger.info("DWD MOSMIX station map not found")
+        logger.debug("DWD MOSMIX station map not found")
 except Exception as e:
-    logger.warning(f"Error loading DWD MOSMIX station map: {e}")
+    logger.debug(f"Error loading DWD MOSMIX station map: {e}")
 
 logger.info("Initial data load complete")
 
@@ -830,9 +832,25 @@ async def PW_Forecast(
             version=version,
         )
 
-    pTypeMap = np.array(["none", "snow", "ice", "sleet", "rain", "mixed"])
+    pTypeMap = np.array(
+        [
+            PRECIP_TYPES["none"],
+            PRECIP_TYPES["snow"],
+            PRECIP_TYPES["ice"],
+            PRECIP_TYPES["sleet"],
+            PRECIP_TYPES["rain"],
+            PRECIP_TYPES["mixed"],
+        ]
+    )
     pTextMap = np.array(
-        ["None", "Snow", "Freezing Rain", "Sleet", "Rain", "Mixed Precipitation"]
+        [
+            PRECIP_TYPE_DISPLAY["none"],
+            PRECIP_TYPE_DISPLAY["snow"],
+            PRECIP_TYPE_DISPLAY["ice"],
+            PRECIP_TYPE_DISPLAY["sleet"],
+            PRECIP_TYPE_DISPLAY["rain"],
+            PRECIP_TYPE_DISPLAY["mixed"],
+        ]
     )
 
     # 13. Generate the daily forecast section

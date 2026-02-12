@@ -44,15 +44,13 @@ wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
 
-forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/home/ubuntu/Weather/Process/NBM"
-)
+forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/NBM")
 forecast_process_path = forecast_process_dir + "/NBM_Process"
 hist_process_path = forecast_process_dir + "/NBM_Historic"
 tmp_dir = forecast_process_dir + "/Downloads"
 
-forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/NBM")
-historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/Hist/NBM")
+forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/NBM")
+historic_path = os.getenv("historic_path", default="/mnt/nvme/data/Hist/NBM")
 
 
 save_type = os.getenv("save_type", default="Download")
@@ -133,7 +131,7 @@ else:
             sys.exit()
 
 # base_time = pd.Timestamp("2024-03-05 16:00")
-# base_time = base_time - pd.Timedelta(1,'h')
+# base_time = base_time - pd.Timedelta(hours=1)
 print(base_time)
 
 zarr_vars = (
@@ -186,11 +184,13 @@ elif base_time.hour % 6 == 5:
 nbm_range = list(chain(nbm_range1, nbm_range2))
 
 # Define the subset of variables to download as a list of strings
-matchstring_2m = r":((DPT|TMP|APTMP|RH):2 m above ground:.*fcst:nan)"
+matchstring_2m = r":((DPT|TMP|APTMP|RH):2 m above ground:.*fcst:$)"
 matchstring_su = r":((PTYPE):surface:.*)"
-matchstring_10m = r"(:(GUST|WIND|WDIR):10 m above ground:.*fcst:nan)"
-matchstring_pr = r"(:APCP:surface:(0-1|1-2|2-3|3-4|4-5|5-6|6-7|7-8|8-9|9-10|\d*0-\d{1,2}1|\d*1-\d{1,2}2|\d*2-\d{1,2}3|\d*3-\d{1,2}4|\d*4-\d{1,2}5|\d*5-\d{1,2}6|\d*6-\d{1,2}7|\d*7-\d{1,2}8|\d*8-\d{1,2}9|\d*9-\d{1,2}0).*fcst:nan)"
-matchstring_re = r":((TCDC|VIS|DSWRF|CAPE):surface:.*fcst:nan)"  # This gets the correct surface param
+matchstring_10m = r"(:(GUST|WIND|WDIR):10 m above ground:.*fcst:$)"
+matchstring_pr = r"(:APCP:surface:(0-1|1-2|2-3|3-4|4-5|5-6|6-7|7-8|8-9|9-10|\d*0-\d{1,2}1|\d*1-\d{1,2}2|\d*2-\d{1,2}3|\d*3-\d{1,2}4|\d*4-\d{1,2}5|\d*5-\d{1,2}6|\d*6-\d{1,2}7|\d*7-\d{1,2}8|\d*8-\d{1,2}9|\d*9-\d{1,2}0).*fcst:$)"
+matchstring_re = (
+    r":((TCDC|VIS|DSWRF|CAPE):surface:.*fcst:$)"  # This gets the correct surface param
+)
 
 matchstring_pw = r":(PWTHER:)"  # This gets the correct surface param
 
@@ -464,7 +464,7 @@ FH_forecastsub = FastHerbie(
     save_dir=tmp_dir,
 )
 
-matchstring_pa = r"(:APCP:surface:(0-1|1-2|2-3|3-4|4-5|5-6|6-7|7-8|8-9|9-10|\d*0-\d{1,2}1|\d*1-\d{1,2}2|\d*2-\d{1,2}3|\d*3-\d{1,2}4|\d*4-\d{1,2}5|\d*5-\d{1,2}6|\d*6-\d{1,2}7|\d*7-\d{1,2}8|\d*8-\d{1,2}9|\d*9-\d{1,2}0).*fcst:nan)"
+matchstring_pa = r"(:APCP:surface:(0-1|1-2|2-3|3-4|4-5|5-6|6-7|7-8|8-9|9-10|\d*0-\d{1,2}1|\d*1-\d{1,2}2|\d*2-\d{1,2}3|\d*3-\d{1,2}4|\d*4-\d{1,2}5|\d*5-\d{1,2}6|\d*6-\d{1,2}7|\d*7-\d{1,2}8|\d*8-\d{1,2}9|\d*9-\d{1,2}0).*fcst:$)"
 # Download the subsets
 FH_forecastsub.download(matchstring_pa, verbose=False)
 
@@ -482,7 +482,7 @@ if len(FH_forecastsub.file_exists) != len(nbm_range1):
 gribList1 = getGribList(FH_forecastsub, matchstring_pa)
 
 #####
-# Download PPROB as 6-Hour Accum for hours 036-190
+# Download 6-Hour Accum for hours 036-190
 
 # Create FastHerbie object
 FH_forecastsub2 = FastHerbie(
@@ -495,8 +495,8 @@ FH_forecastsub2 = FastHerbie(
     save_dir=tmp_dir,
 )
 
-# Match 6-hour probs
-matchstring_pa2 = r"(:APCP:surface:(0-6|\d*0-\d{1,2}6|\d*1-\d{1,2}7|\d*2-\d{1,2}8|\d*3-\d{1,2}9|\d*4-\d{1,2}0|\d*5-\d{1,2}1|\d*6-\d{1,2}2|\d*7-\d{1,2}3|\d*8-\d{1,2}4|\d*9-\d{1,2}5).*fcst:nan)"
+# Match 6-hour accumulation
+matchstring_pa2 = r"(:APCP:surface:(0-6|\d*0-\d{1,2}6|\d*1-\d{1,2}7|\d*2-\d{1,2}8|\d*3-\d{1,2}9|\d*4-\d{1,2}0|\d*5-\d{1,2}1|\d*6-\d{1,2}2|\d*7-\d{1,2}3|\d*8-\d{1,2}4|\d*9-\d{1,2}5).*fcst:$)"
 # Download the subsets
 FH_forecastsub2.download(matchstring_pa2, verbose=False)
 
@@ -589,16 +589,16 @@ xarray_forecast_base = xr.open_mfdataset(forecast_process_path + "_wgrib2_merged
 start = xarray_forecast_base.time.min().values  # Adjust as necessary
 end = xarray_forecast_base.time.max().values  # Adjust as necessary
 new_hourly_time = pd.date_range(
-    start=start - pd.Timedelta(his_period + 1, "h"),
-    end=start + pd.Timedelta(192, "h"),
+    start=start - pd.Timedelta(hours=his_period + 1),
+    end=start + pd.Timedelta(hours=192),
     freq="h",
 )
 
 stacked_times = np.concatenate(
     (
         pd.date_range(
-            start=start - pd.Timedelta(his_period + 1, "h"),
-            end=start - pd.Timedelta(1, "h"),
+            start=start - pd.Timedelta(hours=his_period + 1),
+            end=start - pd.Timedelta(hours=1),
             freq="h",
         ),
         xarray_forecast_base.time.values,
@@ -689,10 +689,7 @@ with dask.config.set(**{"array.slicing.split_large_chunks": True}):
             # Save the dataset with compression and filters for all variable
             daskArray.to_zarr(
                 forecast_process_path + "_zarrs/" + dask_var + ".zarr",
-                codecs=[
-                    zarr.codecs.BytesCodec(),
-                    zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-                ],
+                compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
                 overwrite=True,
             )
 
@@ -769,7 +766,7 @@ for i in range(his_period, -1, -1):
     # Since the first hour forecast is used, then the time is an hour behind
     # So data for 18:00 would be the 1st hour of the 17:00 forecast.
     DATES = pd.date_range(
-        start=base_time - pd.Timedelta(str(i + 1) + "h"),
+        start=base_time - pd.Timedelta(hours=i + 1),
         periods=1,
         freq="1h",
     )

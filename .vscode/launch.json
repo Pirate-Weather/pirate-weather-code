@@ -20,6 +20,17 @@
             "envFile": "${workspaceFolder}/.env",
         },
         {
+            "name": "Python: NWS_Alerts_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.NWS_Alerts_Local",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "python": "/home/ubuntu/PirateIngest_V3/venv/bin/python3.13",
+            "envFile": "${workspaceFolder}/.env",
+        },
+        {
             "name": "Python: WMO_Alerts_Local",
             "type": "debugpy",
             "request": "launch",
@@ -45,7 +56,7 @@
                 "save_type": "Download",
                 "forecast_process_dir": "/mnt/nvme/data/ECMWF",
                 "forecast_path": "/mnt/nvme/data/Prod/ECMWF",
-                "ECCODES_DEFINITION_PATH": "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+                "ECCODES_DEFINITION_PATH": "/home/ubuntu/eccodes-2.45.0-Source/definitions/"
             }
         },
         {
