@@ -423,7 +423,6 @@ for i in range(his_period, 0, -6):
 
     xarray_hist_merged = xarray_his_wgrib_merged
 
-
     # Clear memory of temporary inputs
     del xarray_his_wgrib_merged
 
