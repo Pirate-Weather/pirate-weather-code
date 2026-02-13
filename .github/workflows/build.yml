@@ -114,11 +114,13 @@ jobs:
           REPOSITORY: pirate-wgrib-python-arm
           IMAGE_TAG: ${{ env.IMAGE_VERSION }}
         run: |
+          docker manifest rm $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG 2>/dev/null || true
           docker manifest create $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
             --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-amd64 \
             --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-arm64
           docker manifest push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
           if [ -n "$RELEASE_VERSION" ]; then
+            docker manifest rm $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION 2>/dev/null || true
             docker manifest create $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION \
               --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-amd64 \
               --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-arm64
@@ -224,11 +226,13 @@ jobs:
           REPOSITORY: pirate-alpine-zarr
           IMAGE_TAG: ${{ env.IMAGE_VERSION }}
         run: |
+          docker manifest rm $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG 2>/dev/null || true
           docker manifest create $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
             --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-amd64 \
             --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-arm64
           docker manifest push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
           if [ -n "$RELEASE_VERSION" ]; then
+            docker manifest rm $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION 2>/dev/null || true
             docker manifest create $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION \
               --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-amd64 \
               --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-arm64
