@@ -1012,7 +1012,7 @@ if save_type == "S3":
         forecast_process_dir + "/GFS.zarr.zip", mode="a", compression=0
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/GFS4.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/GFS.zarr")
 
 
 #
