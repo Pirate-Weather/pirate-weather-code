@@ -18,7 +18,7 @@ import s3fs
 import xarray as xr
 import zarr.storage
 from dask.diagnostics import ProgressBar
-from herbie import FastHerbie, HerbieLatest, Path
+from herbie import FastHerbie, HerbieLatest
 from xrspatial import direction, proximity
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
@@ -26,7 +26,9 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    build_herbie_grib_list,
     interp_time_take_blend,
+    make_herbie_save_dir,
     mask_invalid_data,
     mask_invalid_refc,
     pad_to_chunk_size,
@@ -84,6 +86,8 @@ if save_type == "Download":
     if not os.path.exists(historic_path):
         os.makedirs(historic_path)
 
+herbie_save_dir = make_herbie_save_dir(tmp_dir)
+
 
 T0 = time.time()
 
@@ -95,7 +99,7 @@ latest_run = HerbieLatest(
     product="pgrb2.0p25",
     verbose=False,
     priority=["aws", "google", "nomads"],
-    save_dir=tmp_dir,
+    save_dir=herbie_save_dir,
 )
 
 base_time = latest_run.date
@@ -215,7 +219,7 @@ FH_forecastsub = FastHerbie(
     product="pgrb2.0p25",
     verbose=False,
     priority=["aws", "google", "nomads"],
-    save_dir=tmp_dir,
+    save_dir=herbie_save_dir,
 )
 
 # Download the subsets
@@ -233,10 +237,7 @@ if len(FH_forecastsub.file_exists) != len(gfs_file_range):
 
 
 # Create list of downloaded grib files
-grib_list = [
-    str(Path(x.get_localFilePath(match_strings)).expand())
-    for x in FH_forecastsub.file_exists
-]
+grib_list = build_herbie_grib_list(FH_forecastsub.file_exists, match_strings)
 
 # Perform a check if any data seems to be invalid
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
@@ -275,7 +276,7 @@ FH_forecastUV = FastHerbie(
     product="pgrb2b.0p25",
     verbose=False,
     priority=["aws", "google", "nomads"],
-    save_dir=tmp_dir,
+    save_dir=herbie_save_dir,
 )
 
 # Download UV subsets
@@ -292,10 +293,7 @@ if len(FH_forecastUV.file_exists) != len(gfs_file_range):
 
 
 # Create list of downloaded grib files
-grib_list_uv = [
-    str(Path(x.get_localFilePath(UVmatchString)).expand())
-    for x in FH_forecastUV.file_exists
-]
+grib_list_uv = build_herbie_grib_list(FH_forecastUV.file_exists, UVmatchString)
 
 # Perform a check if any data seems to be invalid
 cmd = "cat " + " ".join(grib_list_uv) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
@@ -612,7 +610,7 @@ for i in range(his_period, 0, -6):
         product="pgrb2.0p25",
         verbose=False,
         priority=["aws", "google", "nomads"],
-        save_dir=tmp_dir,
+        save_dir=herbie_save_dir,
     )
 
     # Download the subsets
@@ -627,10 +625,7 @@ for i in range(his_period, 0, -6):
         sys.exit(1)
 
     # Create list of downloaded grib files
-    grib_list = [
-        str(Path(x.get_localFilePath(match_strings)).expand())
-        for x in FH_histsub.file_exists
-    ]
+    grib_list = build_herbie_grib_list(FH_histsub.file_exists, match_strings)
 
     # Perform a check if any data seems to be invalid
     cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
@@ -666,7 +661,7 @@ for i in range(his_period, 0, -6):
         product="pgrb2b.0p25",
         verbose=False,
         priority=["aws", "google", "nomads"],
-        save_dir=tmp_dir,
+        save_dir=herbie_save_dir,
     )
 
     # Download the subsets
@@ -681,10 +676,7 @@ for i in range(his_period, 0, -6):
         sys.exit(1)
 
     # Create list of downloaded grib files
-    grib_list_uv = [
-        str(Path(x.get_localFilePath(UVmatchString)).expand())
-        for x in FH_histsubUV.file_exists
-    ]
+    grib_list_uv = build_herbie_grib_list(FH_histsubUV.file_exists, UVmatchString)
 
     # Perform a check if any data seems to be invalid
     cmd = (

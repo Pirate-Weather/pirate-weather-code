@@ -1,7 +1,9 @@
 # %% Script to contain the helper functions as part of the data ingest for Pirate Weather
 # Alexander Rey. July 2025
 
+import os
 import re
+import resource
 import sys
 import time
 from typing import Iterable, Optional, Union
@@ -56,6 +58,115 @@ DWD_RADIUS = 50
 
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
+
+
+def tune_nofile_limit(target: int = 65535) -> None:
+    """Increase soft nofile limit when possible to avoid zarr write exhaustion."""
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if hard == resource.RLIM_INFINITY:
+            new_soft = max(soft, target)
+        else:
+            new_soft = min(max(soft, target), hard)
+        if new_soft > soft:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (new_soft, hard))
+            print(f"Raised nofile soft limit from {soft} to {new_soft}")
+    except Exception as exc:
+        print(f"Warning: unable to tune nofile limit: {exc}")
+
+
+def positive_int_env(name: str, default: int) -> int:
+    """Read an integer env var and fall back to a safe positive default."""
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(raw)
+    except ValueError:
+        print(f"Warning: invalid {name}={raw!r}; using {default}")
+        return default
+    if value < 1:
+        print(f"Warning: {name}={value} must be >= 1; using {default}")
+        return default
+    return value
+
+
+def configure_zarr_limits(
+    requested_workers: int, requested_async_concurrency: int
+) -> tuple[int, int]:
+    """Clamp zarr write parallelism so local stores do not exhaust open files."""
+    workers = requested_workers
+    async_concurrency = requested_async_concurrency
+    try:
+        soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft != resource.RLIM_INFINITY:
+            # Reserve descriptor headroom for downloads/netcdf/wgrib IO.
+            fd_budget = max(soft - 256, 1)
+            worker_cap = max(1, fd_budget // 256)
+            async_cap = max(1, fd_budget // 512)
+            workers = min(workers, worker_cap)
+            async_concurrency = min(async_concurrency, async_cap)
+    except Exception as exc:
+        print(f"Warning: unable to read nofile limit for zarr tuning: {exc}")
+
+    async_concurrency = min(async_concurrency, workers)
+    if workers < requested_workers:
+        print(
+            "Clamped zarr_store_workers from "
+            f"{requested_workers} to {workers} based on nofile limits"
+        )
+    if async_concurrency < requested_async_concurrency:
+        print(
+            "Clamped zarr_async_concurrency from "
+            f"{requested_async_concurrency} to {async_concurrency} based on nofile limits"
+        )
+
+    # Local import keeps helper lightweight for non-zarr callers.
+    import zarr
+
+    zarr.config.set({"async.concurrency": async_concurrency})
+    print(
+        f"Configured zarr write parallelism: workers={workers}, "
+        f"async_concurrency={async_concurrency}"
+    )
+    return workers, async_concurrency
+
+
+def make_herbie_save_dir(tmp_dir: str, prefix: str = "herbie") -> str:
+    """Create a per-run Herbie cache directory to avoid path collisions."""
+    save_dir = os.path.join(tmp_dir, f"{prefix}_{int(time.time())}_{os.getpid()}")
+    os.makedirs(save_dir, exist_ok=True)
+    return save_dir
+
+
+def safe_herbie_local_file_path(
+    herbie_obj, search: str, retries: int = 3, retry_sleep_s: float = 0.1
+) -> str:
+    """Resolve a local Herbie path and repair file-vs-dir cache collisions."""
+    attempts = max(1, retries)
+    for attempt in range(attempts):
+        try:
+            return str(Path(herbie_obj.get_localFilePath(search)).expand())
+        except FileExistsError as exc:
+            conflict_path = getattr(exc, "filename", None)
+            if conflict_path and os.path.isfile(conflict_path):
+                print(f"Repairing Herbie cache path collision at: {conflict_path}")
+                os.remove(conflict_path)
+                os.makedirs(conflict_path, exist_ok=True)
+            elif conflict_path and not os.path.exists(conflict_path):
+                os.makedirs(conflict_path, exist_ok=True)
+            else:
+                time.sleep(retry_sleep_s)
+
+            if attempt == attempts - 1:
+                raise
+
+    raise RuntimeError("Unreachable Herbie local path resolution state")
+
+
+def build_herbie_grib_list(file_refs, search: str, retries: int = 3) -> list[str]:
+    """Build a list of local GRIB paths from Herbie file references."""
+    return [
+        safe_herbie_local_file_path(ref, search, retries=retries) for ref in file_refs
+    ]
 
 
 def mask_invalid_data(daskArray, ignoreAxis=None):

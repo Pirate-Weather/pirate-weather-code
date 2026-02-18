@@ -11,6 +11,7 @@ import sys
 import time
 import warnings
 
+import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -22,13 +23,17 @@ from herbie.fast import Herbie_latest
 
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (
+    configure_zarr_limits,
     mask_invalid_data,
     mask_invalid_refc,
     pad_to_chunk_size,
+    positive_int_env,
+    tune_nofile_limit,
     validate_grib_stats,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
+
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -56,8 +61,14 @@ final_chunk = 5
 save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+zarr_store_workers = positive_int_env("zarr_store_workers", 2)
+zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+tune_nofile_limit()
+zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
+    zarr_store_workers, zarr_async_concurrency
+)
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -297,10 +308,15 @@ if len(xarray_forecast_merged.time) != len(hrrr_range1) * 4:
 xarray_forecast_merged = xarray_forecast_merged.chunk(
     chunks={"time": 20, "x": process_chunk, "y": process_chunk}
 )
-xarray_forecast_merged.to_zarr(
-    forecast_process_path + "_xr_merged.zarr", mode="w", consolidated=False
-)
+with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+    xarray_forecast_merged.to_zarr(
+        forecast_process_path + "_xr_merged.zarr",
+        mode="w",
+        consolidated=False,
+        chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+    )
 
+xarray_forecast_merged.close()
 del xarray_forecast_merged
 
 # Remove wgrib2 temp files
@@ -360,9 +376,10 @@ daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
-daskVarArrayListMergeNaN.to_zarr(
-    forecast_process_path + "_stack.zarr", overwrite=True, compute=True
-)
+with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+    daskVarArrayListMergeNaN.to_zarr(
+        forecast_process_path + "_stack.zarr", overwrite=True, compute=True
+    )
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
@@ -394,10 +411,11 @@ zarr_array = zarr.create_array(
 
 
 # with ProgressBar():
-da.rechunk(
-    daskVarArrayStackDisk_main.round(5),
-    (len(zarr_vars), daskVarArrayStackDisk_main.shape[1], final_chunk, final_chunk),
-).to_zarr(zarr_array, compute=True)
+with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+    da.rechunk(
+        daskVarArrayStackDisk_main.round(5),
+        (len(zarr_vars), daskVarArrayStackDisk_main.shape[1], final_chunk, final_chunk),
+    ).to_zarr(zarr_array, compute=True)
 
 if save_type == "S3":
     zarr_store.close()

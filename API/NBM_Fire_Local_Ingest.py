@@ -28,9 +28,12 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    configure_zarr_limits,
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
+    positive_int_env,
+    tune_nofile_limit,
     validate_grib_stats,
 )
 
@@ -46,6 +49,7 @@ def rounder(t):
 
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
+
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -68,8 +72,14 @@ historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/NBM_F
 save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+zarr_store_workers = positive_int_env("zarr_store_workers", 2)
+zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+tune_nofile_limit()
+zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
+    zarr_store_workers, zarr_async_concurrency
+)
 
 
 # Define the processing and history chunk size
@@ -381,30 +391,31 @@ xarray_forecast_base = xarray_forecast_base.drop_vars(
 # Combine NetCDF files into a Dask Array, since it works significantly better than the xarray mfdataset appraoach
 # Note: don't chunk on loading since we don't know how wgrib2 chunked the files. Intead, read the variable into memory and chunk later
 with dask.config.set(**{"array.slicing.split_large_chunks": True}):
-    for dask_var in zarr_vars:
-        daskArray = da.from_array(
-            nc.Dataset(forecast_process_path + "_wgrib2_merged.nc")[dask_var], lock=True
-        )
+    with nc.Dataset(forecast_process_path + "_wgrib2_merged.nc") as forecast_dataset:
+        for dask_var in zarr_vars:
+            daskArray = da.from_array(forecast_dataset[dask_var], lock=True)
 
-        # Rechunk
-        daskArray = daskArray.rechunk(
-            chunks=(len(nbm_range), process_chunk, process_chunk)
-        )
+            # Rechunk
+            daskArray = daskArray.rechunk(
+                chunks=(len(nbm_range), process_chunk, process_chunk)
+            )
 
-        # Save merged and processed xarray dataset to disk using zarr with compression
-        # Define the path to save the zarr dataset
-        # Save the dataset with compression and filters for all variables
-        if dask_var == "time":
-            # Save the dataset without compression and filters for all variable
-            daskArray.to_zarr(
-                forecast_process_path + "_zarrs/" + dask_var + ".zarr", overwrite=True
-            )
-        else:
-            # Save the dataset with compression and filters for all variable
-            daskArray.to_zarr(
-                forecast_process_path + "_zarrs/" + dask_var + ".zarr",
-                overwrite=True,
-            )
+            # Save merged and processed xarray dataset to disk using zarr with compression
+            # Define the path to save the zarr dataset
+            # Save the dataset with compression and filters for all variables
+            with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+                if dask_var == "time":
+                    # Save the dataset without compression and filters for all variable
+                    daskArray.to_zarr(
+                        forecast_process_path + "_zarrs/" + dask_var + ".zarr",
+                        overwrite=True,
+                    )
+                else:
+                    # Save the dataset with compression and filters for all variable
+                    daskArray.to_zarr(
+                        forecast_process_path + "_zarrs/" + dask_var + ".zarr",
+                        overwrite=True,
+                    )
 
 
 # Del to free memory
@@ -561,9 +572,16 @@ for i in range(his_period, 1, -6):
         # Create local Zarr store
         zarrStore = zarr.storage.LocalStore(local_path)
 
-    xarray_his_wgrib.to_zarr(store=zarrStore, mode="w", consolidated=False)
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        xarray_his_wgrib.to_zarr(
+            store=zarrStore,
+            mode="w",
+            consolidated=False,
+            chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+        )
 
     # Clear the xarray dataset from memory
+    xarray_his_wgrib.close()
     del xarray_his_wgrib
 
     # Remove temp file created by wgrib2
@@ -667,9 +685,10 @@ daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
-daskVarArrayListMergeNaN.to_zarr(
-    forecast_process_path + "_stack.zarr", overwrite=True, compute=True
-)
+with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+    daskVarArrayListMergeNaN.to_zarr(
+        forecast_process_path + "_stack.zarr", overwrite=True, compute=True
+    )
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
@@ -722,9 +741,10 @@ zarr_array = zarr.create_array(
 
 # 4. Rechunk it to match the final array
 # 5. Write it out to the zarr array
-daskVarArrayStackDiskInterpPad.round(5).rechunk(
-    (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
-).to_zarr(zarr_array, overwrite=True, compute=True)
+with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+    daskVarArrayStackDiskInterpPad.round(5).rechunk(
+        (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
+    ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
 if save_type == "S3":
