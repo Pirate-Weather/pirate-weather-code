@@ -74,7 +74,11 @@ savePath = os.path.join(forecast_process_dir, "current_all.tar.gz")
 open(savePath, "wb").write(r.content)
 
 tar = tarfile.open(savePath, "r:gz")
-tar.extractall(path=forecast_process_dir)
+# Python 3.14 changes default extract behavior; be explicit and keep compatibility.
+try:
+    tar.extractall(path=forecast_process_dir, filter="data")
+except TypeError:
+    tar.extractall(path=forecast_process_dir)
 tar.close()
 
 # %% Read in KMZ using geopandas
@@ -168,7 +172,7 @@ points_in_polygons = gp.sjoin(
     gridPointsSeries, nws_alert_merged_gdf, predicate="within", how="inner"
 )
 
-# Create a formatted string ton save all the relevant in the zarr array
+# Create a formatted string to save all relevant fields in the zarr array.
 points_in_polygons["string"] = (
     points_in_polygons["event"].astype(str) + "}"
     "{"
@@ -190,16 +194,14 @@ points_in_polygons["string"] = (
     + points_in_polygons["URL"].astype(str)
 )
 
+# Normalize possible null/non-string values before joining grouped strings.
+points_in_polygons["string"] = points_in_polygons["string"].fillna("").astype(str)
+points_in_polygons = points_in_polygons[points_in_polygons["string"] != ""]
 
-float_rows = points_in_polygons[
-    points_in_polygons["string"].apply(lambda x: isinstance(x, float))
-]
-
-# Print the filtered rows
-print(float_rows)
-
-# Combine the formatted strings using "|" as a spacer
-df = points_in_polygons.groupby("INDEX").agg({"string": "|".join}).reset_index()
+# Combine formatted strings using "|" as a separator.
+df = points_in_polygons.groupby("INDEX", as_index=False)["string"].agg(
+    lambda values: "|".join(v for v in values if v)
+)
 
 
 # Merge back into primary geodataframe
