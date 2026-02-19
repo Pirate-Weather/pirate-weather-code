@@ -365,20 +365,15 @@ for dask_var in probVars:
     if dask_var == "time":
         daskOutput[dask_var].to_zarr(
             forecast_process_path + "_" + dask_var + ".zarr",
-            codecs=[
-                zarr.codecs.BytesCodec(),
-                zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            ],
+            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
             overwrite=True,
             compute=True,
         )
     else:
         daskOutput[dask_var].rechunk((80, process_chunk, process_chunk)).to_zarr(
             forecast_process_path + "_" + dask_var + ".zarr",
-            codecs=[
-                zarr.codecs.BytesCodec(),
-                zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            ],
+            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+            dtype="float32",
             overwrite=True,
             compute=True,
         )
