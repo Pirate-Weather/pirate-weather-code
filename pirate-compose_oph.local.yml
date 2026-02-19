@@ -65,7 +65,7 @@ services:
         condition: service_completed_successfully
       ecmwf_ingest:
         condition: service_completed_successfully
-      rtma-ru_ingest:
+      rtma-ru-ingest:
         condition: service_completed_successfully
                                                                                                             
 
@@ -304,7 +304,7 @@ services:
         condition: service_completed_successfully
 
   # RTMA-RU Ingest
-  rtma-ru_ingest:
+  rtma-ru-ingest:
     <<: *dns_defaults
     container_name: pirate-ingest-rtma-ru
     image: pirateingest:latest
