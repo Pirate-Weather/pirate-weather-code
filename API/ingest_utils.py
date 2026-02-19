@@ -62,9 +62,7 @@ VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
 
 
-def run_command(
-    command: str, encoding: str = "utf-8"
-) -> subprocess.CompletedProcess:
+def run_command(command: str, encoding: str = "utf-8") -> subprocess.CompletedProcess:
     """Execute a command string without shell=True, including a single pipe."""
     command = command.strip()
     if not command:
