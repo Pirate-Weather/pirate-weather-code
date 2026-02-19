@@ -1,6 +1,7 @@
 # %% Script to contain the helper functions as part of the data ingest for Pirate Weather
 # Alexander Rey. July 2025
 
+import logging
 import re
 import sys
 import time
@@ -12,7 +13,24 @@ import numpy as np
 import xarray as xr
 from herbie import Path
 
-from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
+# Import atmospheric calculation constants
+from API.constants.shared_const import (
+    BOLTON_CONST,
+    CLOUD_RH_CRITICAL,
+    CLOUD_RH_EXPONENT,
+    FREEZING_LEVEL_HIGH,
+    FREEZING_LEVEL_SURFACE,
+    FREEZING_LEVEL_TEMP_TOLERANCE,
+    GRAVITY,
+    KELVIN_TO_CELSIUS,
+    MISSING_DATA,
+    REFC_THRESHOLD,
+    WATER_VAPOR_GAS_CONSTANT_RATIO,
+)
+
+# Logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # Shared ingest constants
 CHUNK_SIZES = {
@@ -21,6 +39,7 @@ CHUNK_SIZES = {
     "HRRR_6H": 100,
     "GFS": 50,
     "GEFS": 100,
+    "HGEFS": 100,
     "ECMWF": 100,
     "NBM_Fire": 100,
     "RTMA": 100,
@@ -33,6 +52,7 @@ FINAL_CHUNK_SIZES = {
     "HRRR_6H": 5,
     "GFS": 3,
     "GEFS": 3,
+    "HGEFS": 3,
     "ECMWF": 3,
     "NBM_Fire": 5,
     "RTMA": 25,
@@ -49,6 +69,9 @@ FORECAST_LEAD_RANGES = {
     "ECMWF_AIFS": list(range(0, 241, 6)),
     "ECMWF_IFS_1": list(range(3, 144, 3)),
     "ECMWF_IFS_2": list(range(144, 241, 6)),
+    "AIGFS": list(range(0, 241, 6)),
+    "AIGEFS": list(range(0, 241, 6)),
+    "HGEFS": list(range(0, 241, 6)),
 }
 
 # Radius, in km, used for DWD model nearest-neighbor selection
@@ -92,7 +115,7 @@ def getGribList(FH_forecastsub, matchStrings):
             for x in FH_forecastsub.file_exists
         ]
     except Exception:
-        print("Download Failure 1, wait 20 seconds and retry")
+        logger.warning("Download Failure 1, wait 20 seconds and retry")
         time.sleep(20)
         FH_forecastsub.download(matchStrings, verbose=False)
         try:
@@ -101,7 +124,7 @@ def getGribList(FH_forecastsub, matchStrings):
                 for x in FH_forecastsub.file_exists
             ]
         except Exception:
-            print("Download Failure 2, wait 20 seconds and retry")
+            logger.warning("Download Failure 2, wait 20 seconds and retry")
             time.sleep(20)
             FH_forecastsub.download(matchStrings, verbose=False)
             try:
@@ -110,7 +133,7 @@ def getGribList(FH_forecastsub, matchStrings):
                     for x in FH_forecastsub.file_exists
                 ]
             except Exception:
-                print("Download Failure 3, wait 20 seconds and retry")
+                logger.warning("Download Failure 3, wait 20 seconds and retry")
                 time.sleep(20)
                 FH_forecastsub.download(matchStrings, verbose=False)
                 try:
@@ -119,7 +142,7 @@ def getGribList(FH_forecastsub, matchStrings):
                         for x in FH_forecastsub.file_exists
                     ]
                 except Exception:
-                    print("Download Failure 4, wait 20 seconds and retry")
+                    logger.warning("Download Failure 4, wait 20 seconds and retry")
                     time.sleep(20)
                     FH_forecastsub.download(matchStrings, verbose=False)
                     try:
@@ -128,7 +151,7 @@ def getGribList(FH_forecastsub, matchStrings):
                             for x in FH_forecastsub.file_exists
                         ]
                     except Exception:
-                        print("Download Failure 5, wait 20 seconds and retry")
+                        logger.warning("Download Failure 5, wait 20 seconds and retry")
                         time.sleep(20)
                         FH_forecastsub.download(matchStrings, verbose=False)
                         try:
@@ -137,7 +160,7 @@ def getGribList(FH_forecastsub, matchStrings):
                                 for x in FH_forecastsub.file_exists
                             ]
                         except Exception:
-                            print("Download Failure 6, Fail")
+                            logger.critical("Download Failure 6, Fail")
                             exit(1)
     return gribList
 
@@ -159,7 +182,7 @@ def validate_grib_stats(gribCheck):
     varNames = re.findall(r"(?m)^(?:[^:]+:){3}([^:]+):", gribCheck.stdout)
     # ensure we found at least one variable
     if not varNames:
-        print("Error: no variables found in GRIB stats output.")
+        logger.error("Error: no variables found in GRIB stats output.")
         sys.exit(10)
 
     # extract forecast lead times (6th field)
@@ -174,17 +197,17 @@ def validate_grib_stats(gribCheck):
     ]
 
     if invalidIdxs:
-        print("Invalid data found in grib files:")
+        logger.error("Invalid data found in grib files:")
         for i in invalidIdxs:
-            print(f"  Variable : {varNames[i]}")
-            print(f"  Time     : {varTimes[i]}")
-            print(f"  Min/Max  : {minValues[i]} / {maxValues[i]}")
-            print("---")
-        print("Exiting due to invalid data in grib files.")
+            logger.error("  Variable : %s", varNames[i])
+            logger.error("  Time     : %s", varTimes[i])
+            logger.error("  Min/Max  : %s / %s", minValues[i], maxValues[i])
+            logger.error("---")
+        logger.error("Exiting due to invalid data in grib files.")
         sys.exit(10)
 
     else:
-        print("All grib files passed validation checks.")
+        logger.info("All grib files passed validation checks.")
         # compute overall min/max for each variable across all times
         varExtremes = {}
         for var, mn, mx in zip(varNames, minValues, maxValues):
@@ -193,9 +216,9 @@ def validate_grib_stats(gribCheck):
             varExtremes[var][1] = max(hi, mx)
 
         # print overall extremes
-        print("Overall min/max for each variable across all times:")
+        logger.info("Overall min/max for each variable across all times:")
         for var, (mn, mx) in varExtremes.items():
-            print(f"  {var}: min={mn}, max={mx}")
+            logger.info("  %s: min=%s, max=%s", var, mn, mx)
 
     # all good
     return True
@@ -457,3 +480,247 @@ def interpolate_temporal_gaps_efficiently(
 
     # Execute
     return ds_chunked.map(_process_variable)
+
+
+def calculate_freezing_level(
+    temperature_levels: xr.DataArray,
+    geopotential_levels: xr.DataArray,
+    pressure_levels: list,
+) -> xr.DataArray:
+    """Calculate freezing level height from temperature and geopotential at pressure levels.
+
+    Finds the altitude where temperature = 273.15 K (0°C) using linear interpolation
+    between pressure levels.
+
+    Args:
+        temperature_levels: Temperature at pressure levels (K), shape (step/time, level, lat, lon)
+        geopotential_levels: Geopotential at pressure levels (m²/s²), shape (step/time, level, lat, lon)
+        pressure_levels: List of pressure levels in hPa (e.g., [1000, 925, 850, ...])
+
+    Returns:
+        Freezing level height in meters, shape (step/time, lat, lon)
+    """
+    # Convert geopotential to height (divide by gravity)
+    height_levels = geopotential_levels / GRAVITY  # meters
+
+    # Initialize output with NaN
+    freezing_level = xr.full_like(temperature_levels.isel(level=0, drop=True), np.nan)
+
+    # Loop through adjacent pressure levels to find freezing level
+    # Process from surface to top of atmosphere
+    for i in range(len(pressure_levels) - 1):
+        # Get temperatures and heights at two adjacent levels
+        t_lower = temperature_levels.isel(level=i)
+        t_upper = temperature_levels.isel(level=i + 1)
+        h_lower = height_levels.isel(level=i)
+        h_upper = height_levels.isel(level=i + 1)
+
+        # Check if freezing level is between these two levels
+        # (temperature crosses KELVIN_TO_CELSIUS)
+        crosses = ((t_lower >= KELVIN_TO_CELSIUS) & (t_upper < KELVIN_TO_CELSIUS)) | (
+            (t_lower < KELVIN_TO_CELSIUS) & (t_upper >= KELVIN_TO_CELSIUS)
+        )
+
+        # Linear interpolation where temperature crosses freezing
+        # Only process if there are any crossings to improve performance
+        if crosses.any():
+            # Avoid division by zero
+            temp_diff = t_upper - t_lower
+            # Only interpolate where temp changes significantly
+            valid = np.abs(temp_diff) > FREEZING_LEVEL_TEMP_TOLERANCE
+
+            fraction = xr.where(valid, (KELVIN_TO_CELSIUS - t_lower) / temp_diff, 0)
+            interp_height = h_lower + fraction * (h_upper - h_lower)
+
+            # Update freezing level where it crosses and hasn't been set yet
+            # This ensures we get the first (lowest) crossing
+            freezing_level = xr.where(
+                crosses & np.isnan(freezing_level), interp_height, freezing_level
+            )
+
+    # Handle edge cases where no crossing was found
+    # If all temps are below freezing, set to surface
+    # If all temps are above freezing, set to high altitude
+    all_cold = temperature_levels.min(dim="level") < KELVIN_TO_CELSIUS
+    all_warm = temperature_levels.max(dim="level") >= KELVIN_TO_CELSIUS
+
+    freezing_level = xr.where(
+        np.isnan(freezing_level) & all_cold, FREEZING_LEVEL_SURFACE, freezing_level
+    )
+    freezing_level = xr.where(
+        np.isnan(freezing_level) & all_warm, FREEZING_LEVEL_HIGH, freezing_level
+    )
+
+    return freezing_level
+
+
+def calculate_cloud_cover_from_rh(
+    temperature_levels: xr.DataArray,
+    specific_humidity_levels: xr.DataArray,
+    pressure_levels: list,
+) -> xr.DataArray:
+    """Calculate total cloud cover from relative humidity profiles using simplified Slingo method.
+
+    Computes relative humidity at each pressure level, applies an empirical cloud fraction
+    formula, and integrates vertically to estimate total cloud cover.
+
+    Args:
+        temperature_levels: Temperature at pressure levels (K), shape (step/time, level, lat, lon)
+        specific_humidity_levels: Specific humidity at pressure levels (kg/kg), shape (step/time, level, lat, lon)
+        pressure_levels: List of pressure levels in hPa (e.g., [1000, 925, 850, ...])
+
+    Returns:
+        Total cloud cover (fraction 0-1), shape (step/time, lat, lon)
+    """
+    # Calculate saturation vapor pressure using Bolton's formula
+    # e_s = base_pressure * exp(temp_coeff * (T - KELVIN_TO_CELSIUS) / (T - KELVIN_TO_CELSIUS + temp_offset))
+    T_celsius = temperature_levels - KELVIN_TO_CELSIUS
+    e_sat = BOLTON_CONST["base_pressure"] * np.exp(
+        BOLTON_CONST["temp_coeff"]
+        * T_celsius
+        / (T_celsius + BOLTON_CONST["temp_offset"])
+    )  # hPa
+
+    # Convert specific humidity to mixing ratio
+    # q = w / (1 + w) => w = q / (1 - q)
+    mixing_ratio = specific_humidity_levels / (1 - specific_humidity_levels)
+
+    # Calculate actual vapor pressure
+    # e = (w * P) / (WATER_VAPOR_GAS_CONSTANT_RATIO + w) where P is pressure in hPa
+    pressure_array = xr.DataArray(
+        pressure_levels, dims="level", coords={"level": temperature_levels.level}
+    )
+
+    e_actual = (mixing_ratio * pressure_array) / (
+        WATER_VAPOR_GAS_CONSTANT_RATIO + mixing_ratio
+    )
+
+    # Calculate relative humidity (0-1)
+    rh = e_actual / e_sat
+    rh = xr.where(rh > 1, 1, rh)  # Cap at 100%
+    rh = xr.where(rh < 0, 0, rh)  # Floor at 0%
+
+    # Apply simplified cloud fraction formula based on RH
+    # Cloud fraction increases sigmoidally as RH approaches 100%
+    # Using a simplified version of Xu-Randall (1996)
+    # C = max(0, (RH - RH_crit) / (1 - RH_crit))^CLOUD_RH_EXPONENT
+    cloud_fraction = xr.where(
+        rh > CLOUD_RH_CRITICAL,
+        ((rh - CLOUD_RH_CRITICAL) / (1 - CLOUD_RH_CRITICAL)) ** CLOUD_RH_EXPONENT,
+        0.0,
+    )
+
+    # Vertical integration using random overlap assumption
+    # Total cloud cover = 1 - product(1 - cloud_fraction_i)
+    # This prevents unrealistic 100% cloud cover from multiple layers
+    cloud_free = 1 - cloud_fraction
+    total_cloud_free = cloud_free.prod(dim="level")
+    total_cloud_cover = 1 - total_cloud_free
+
+    # Ensure result is between 0 and 1
+    total_cloud_cover = xr.where(total_cloud_cover < 0, 0, total_cloud_cover)
+    total_cloud_cover = xr.where(total_cloud_cover > 1, 1, total_cloud_cover)
+
+    return total_cloud_cover
+
+
+def derive_precip_type(
+    apcp: xr.DataArray,
+    temp_surface: Optional[xr.DataArray] = None,
+    temp_levels: Optional[xr.DataArray] = None,
+    geopotential_levels: Optional[xr.DataArray] = None,
+    pressure_levels: Optional[list] = None,
+    apcp_threshold: float = 0.0001,
+    rain_thresh_c: float = 5.0,
+    snow_thresh_c: float = -10.0,
+    warm_layer_min_m: float = 200.0,
+    near_surface_freeze_m: float = 100.0,
+) -> xr.DataArray:
+    """Derive categorical precip type from precipitation and temperature.
+
+    Returns integer codes: 1=snow, 2=freezing rain, 3=sleet, 4=rain, 0=no/insignificant precip.
+
+    The rules are conservative and tunable via the threshold parameters. Inputs
+    expect temperatures in Kelvin (consistent with other helpers).
+    """
+
+    # Default output: 0 (no precip)
+    out = xr.full_like(apcp, 0).astype("int8")
+
+    # Mask where precipitation is meaningful
+    has_precip = apcp > apcp_threshold
+
+    # Determine surface temperature (use lowest pressure level as proxy if needed)
+    if temp_surface is None and temp_levels is not None:
+        temp_surface = temp_levels.isel(level=0)
+
+    if temp_surface is None:
+        # No temperature info: mark precip as rain conservatively
+        return xr.where(has_precip, 4, out)
+
+    temp_surf_c = temp_surface - KELVIN_TO_CELSIUS
+
+    # Strong-warm/strong-cold shortcuts
+    out = xr.where((temp_surf_c >= rain_thresh_c) & has_precip, 4, out)
+    out = xr.where((temp_surf_c <= snow_thresh_c) & has_precip, 1, out)
+
+    # Remaining points to classify
+    mid_mask = has_precip & (out == 0)
+
+    if temp_levels is None:
+        # Without vertical profile: decide by sign of surface temp
+        out = xr.where(mid_mask & (temp_surf_c > 0), 4, out)
+        out = xr.where(mid_mask & (temp_surf_c <= 0), 1, out)
+        return out
+
+    # Convert levels to Celsius
+    temp_levels_c = temp_levels - KELVIN_TO_CELSIUS
+
+    # Compute heights if geopotential available. If `pressure_levels` is
+    # supplied, attach as a coordinate for clarity (non-fatal on mismatch).
+    if geopotential_levels is not None:
+        height_levels = geopotential_levels / GRAVITY
+        if pressure_levels is not None:
+            try:
+                height_levels = height_levels.assign_coords(
+                    level=("level", pressure_levels)
+                )
+            except Exception:
+                # ignore if coords already set or lengths mismatch
+                pass
+    else:
+        height_levels = None
+
+    # Warm layer detection: any level above 0C
+    warm_present = (temp_levels_c > 0).any(dim="level")
+
+    # Approximate warm-layer thickness and base/top heights when heights are available
+    warm_thickness = None
+    warm_base = None
+    if height_levels is not None:
+        warm_heights = height_levels.where(temp_levels_c > 0)
+        # max - min across level, result will be NaN where no warm levels
+        warm_top = warm_heights.max(dim="level")
+        warm_base = warm_heights.min(dim="level")
+        warm_thickness = warm_top - warm_base
+
+    # Freezing rain: warm layer aloft (sufficient thickness + base above near-surface) + surface <= 0
+    fr_mask = mid_mask & warm_present & (temp_surf_c <= 0)
+    if warm_thickness is not None:
+        fr_mask = fr_mask & (warm_thickness >= warm_layer_min_m)
+    if warm_base is not None:
+        fr_mask = fr_mask & (warm_base >= near_surface_freeze_m)
+    out = xr.where(fr_mask, 2, out)
+
+    # Sleet: warm layer aloft with surface > 0 and sufficient warm-layer thickness
+    sleet_mask = mid_mask & warm_present & (temp_surf_c > 0)
+    if warm_thickness is not None:
+        sleet_mask = sleet_mask & (warm_thickness >= warm_layer_min_m)
+    out = xr.where(sleet_mask, 3, out)
+
+    # Any remaining mid_mask: snow if surface <=0 else rain
+    remaining = mid_mask & (out == 0)
+    out = xr.where(remaining & (temp_surf_c <= 0), 1, out)
+    out = xr.where(remaining & (temp_surf_c > 0), 4, out)
+
+    return out

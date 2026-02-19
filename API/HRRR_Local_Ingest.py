@@ -2,13 +2,13 @@
 # Alexander Rey, November 2023
 
 # %% Import modules
+import logging
 import os
 import pickle
 import shutil
 import subprocess
 import sys
 import time
-import traceback
 import warnings
 
 import dask.array as da
@@ -32,6 +32,10 @@ from API.ingest_utils import (
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
+
+# Logging setup
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -98,7 +102,7 @@ latest_run = Herbie_latest(
 
 base_time = latest_run.date
 
-print(base_time)
+logger.info(base_time)
 # Check if this is newer than the current file
 if save_type == "S3":
     # Check if the file exists and load it
@@ -110,7 +114,7 @@ if save_type == "S3":
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to HRRR, ending")
+            logger.info("No Update to HRRR, ending")
             sys.exit()
 
 else:
@@ -124,7 +128,7 @@ else:
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to HRRR, ending")
+            logger.info("No Update to HRRR, ending")
             sys.exit()
 
 
@@ -205,7 +209,7 @@ FH_forecastsub.download(match_strings, verbose=False)
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(hrrr_range1):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(hrrr_range1))
         + " files but got "
@@ -226,7 +230,7 @@ cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
 validate_grib_stats(grib_check)
-print("Grib files passed validation, proceeding with processing")
+logger.info("Grib files passed validation, proceeding with processing")
 
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
@@ -244,7 +248,7 @@ cmd = (
 # Run wgrib2
 sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
 
 # Check output from wgrib2
@@ -269,7 +273,7 @@ cmd2 = (
 # Run wgrib2 to rotate winds and save as NetCDF
 spOUT2 = subprocess.run(cmd2, shell=True, capture_output=True, encoding="utf-8")
 if spOUT2.returncode != 0:
-    print(spOUT2.stderr)
+    logger.error(spOUT2.stderr)
     sys.exit()
 
 # Check output from wgrib2
@@ -289,7 +293,7 @@ cmd3 = (
 # Run wgrib2 to rotate winds and save as NetCDF
 spOUT3 = subprocess.run(cmd3, shell=True, capture_output=True, encoding="utf-8")
 if spOUT3.returncode != 0:
-    print(spOUT3.stderr)
+    logger.error(spOUT3.stderr)
     sys.exit()
 
 # Check output from wgrib2
@@ -345,7 +349,7 @@ os.remove(forecast_process_path + "_wgrib2_merged.grib2")
 os.remove(forecast_process_path + "_wgrib2_merged.regrid")
 os.remove(forecast_process_path + "_wgrib2_merged.nc")
 
-print("FORECAST COMPLETE")
+logger.info("FORECAST COMPLETE")
 ################################################################################################
 # %%Historic data
 # Create a range of dates for historic data going back 48 hours, which should be enough for the daily forecast
@@ -375,7 +379,7 @@ for i in range(his_period, -1, -1):
             + ".zarr"
         )
         if s3.exists(s3_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + s3_path)
+            logger.info("File already exists in S3, skipping download for: %s", s3_path)
             # If the file exists, check that it works
 
             if s3.exists(s3_path):
@@ -391,8 +395,10 @@ for i in range(his_period, -1, -1):
                     zarr.open(hisCheckStore)[zarr_vars[-1]][-1, -1, -1]
                     continue  # If it exists, skip to the next iteration
                 except Exception:
-                    print("### Historic Data Failure!")
-                    print(traceback.print_exc())
+                    logger.error("### Historic Data Failure!")
+                    logger.exception(
+                        "Exception processing historic data", exc_info=True
+                    )
 
                     # Delete the file if it exists
                     if s3.exists(s3_path):
@@ -409,18 +415,21 @@ for i in range(his_period, -1, -1):
 
         # Check for a loca done file
         if os.path.exists(local_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + local_path)
+            logger.info(
+                "File already exists in S3, skipping download for: %s", local_path
+            )
             continue
 
-    print(
-        "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+    logger.info(
+        "Downloading: %s",
+        (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"),
     )
 
     # Create a range of dates for historic data going back 48 hours
     # Since the first hour forecast is used, then the time is an hour behind
     # So data for 18:00 would be the 1st hour of the 17:00 forecast.
     DATES = pd.date_range(
-        start=base_time - pd.Timedelta(str(i + 1) + "h"),
+        start=base_time - pd.Timedelta(hours=i + 1),
         periods=1,
         freq="1h",
     )
@@ -455,7 +464,7 @@ for i in range(his_period, -1, -1):
     grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
     validate_grib_stats(grib_check)
-    print("Grib files passed validation, proceeding with processing")
+    logger.info("Grib files passed validation, proceeding with processing")
 
     # Use wgrib2 to rotate the wind vectors
     # From https://github.com/blaylockbk/pyBKB_v2/blob/master/demos/HRRR_earthRelative_vs_gridRelative_winds.ipynb
@@ -476,7 +485,7 @@ for i in range(his_period, -1, -1):
     # Run wgrib2 to rotate winds and save as NetCDF
     spOUT2 = subprocess.run(cmd2, shell=True, capture_output=True, encoding="utf-8")
     if spOUT2.returncode != 0:
-        print(spOUT2.stderr)
+        logger.error(spOUT2.stderr)
         sys.exit()
 
     # Convert to NetCDF
@@ -493,7 +502,7 @@ for i in range(his_period, -1, -1):
     # Run wgrib2 to rotate winds and save as NetCDF
     spOUT3 = subprocess.run(cmd3, shell=True, capture_output=True, encoding="utf-8")
     if spOUT3.returncode != 0:
-        print(spOUT3.stderr)
+        logger.error(spOUT3.stderr)
         sys.exit()
 
     # Merge the  xarrays
@@ -533,7 +542,7 @@ for i in range(his_period, -1, -1):
         with open(done_file, "w") as f:
             f.write("Done")
 
-    print((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
+    logger.info((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
 
 # %% Merge the historic and forecast datasets and then squash using dask
 #####################################################################################################
@@ -610,7 +619,7 @@ for dask_var in zarr_vars:
 
     daskVarArrays = []
 
-    print(dask_var)
+    logger.info(dask_var)
 
 
 # Merge the arrays into a single 4D array
@@ -709,7 +718,7 @@ for z in (0, 4, 7, 8, 9, 11, 12, 13, 14, 16, 17):
         zarr_array, overwrite=True, compute=True
     )
 
-    print(zarr_vars[z])
+    logger.info(zarr_vars[z])
 
 if save_type == "S3":
     zarr_store_maps.close()
@@ -766,4 +775,4 @@ shutil.rmtree(forecast_process_dir)
 
 # Test Read
 T1 = time.time()
-print(T1 - T0)
+logger.info(T1 - T0)

@@ -31,17 +31,16 @@ from API.ingest_utils import (
     FORECAST_LEAD_RANGES,
     VALID_DATA_MAX,
     VALID_DATA_MIN,
-    interp_time_take_blend,
+    calculate_freezing_level,
+    derive_precip_type,
     pad_to_chunk_size,
     validate_grib_stats,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
-# Logging setup
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -50,13 +49,15 @@ wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
 
-forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/ECMWF")
-forecast_process_path = forecast_process_dir + "/ECMWF_Process"
-hist_process_path = forecast_process_dir + "/ECMWF_Historic"
-tmp_dir = forecast_process_dir + "/Downloads"
+forecast_process_dir = os.getenv(
+    "forecast_process_dir", default="/mnt/nvme/data/ECMWF_AIFS"
+)
+forecast_process_path = os.path.join(forecast_process_dir, "ECMWF_AIFS_Process")
+hist_process_path = os.path.join(forecast_process_dir, "ECMWF_AIFS_Historic")
+tmp_dir = os.path.join(forecast_process_dir, "Downloads")
 
-forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/ECMWF")
-historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/ECMWF")
+forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/ECMWF_AIFS")
+historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/ECMWF_AIFS")
 
 
 save_type = os.getenv("save_type", default="Download")
@@ -72,7 +73,7 @@ process_chunk = CHUNK_SIZES["ECMWF"]
 # Define the final x/y chunksize
 final_chunk = FINAL_CHUNK_SIZES["ECMWF"]
 
-his_period = HISTORY_PERIODS["ECMWF"]
+his_period = HISTORY_PERIODS["ECMWF_AIFS"]
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -95,9 +96,9 @@ if save_type == "Download":
 T0 = time.time()
 
 latest_run = HerbieLatest(
-    model="ifs",
+    model="aifs",
     n=3,
-    freq="12h",
+    freq="6h",
     fxx=240,
     product="oper",
     verbose=True,
@@ -115,29 +116,29 @@ logger.info(base_time)
 # Check if this is newer than the current file
 if save_type == "S3":
     # Check if the file exists and load it
-    if s3.exists(forecast_path + "/" + ingest_version + "/ECMWF.time.pickle"):
+    if s3.exists(forecast_path + "/" + ingest_version + "/ECMWF_AIFS.time.pickle"):
         with s3.open(
-            forecast_path + "/" + ingest_version + "/ECMWF.time.pickle", "rb"
+            forecast_path + "/" + ingest_version + "/ECMWF_AIFS.time.pickle", "rb"
         ) as f:
             previous_base_time = pickle.load(f)
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            logger.info("No Update to ECMWF, ending")
+            logger.info("No Update to ECMWF AIFS, ending")
             sys.exit()
 
 else:
-    if os.path.exists(forecast_path + "/" + ingest_version + "/ECMWF.time.pickle"):
+    if os.path.exists(forecast_path + "/" + ingest_version + "/ECMWF_AIFS.time.pickle"):
         # Open the file in binary mode
         with open(
-            forecast_path + "/" + ingest_version + "/ECMWF.time.pickle", "rb"
+            forecast_path + "/" + ingest_version + "/ECMWF_AIFS.time.pickle", "rb"
         ) as file:
             # Deserialize and retrieve the variable from the file
             previous_base_time = pickle.load(file)
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            logger.info("No Update to IFS, ending")
+            logger.info("No Update to AIFS, ending")
             sys.exit()
 
 zarr_vars = (
@@ -147,13 +148,12 @@ zarr_vars = (
     "d2m",
     "u10",
     "v10",
-    "tprate",
     "tp",
-    "ptype",
     "tcc",
     "Precipitation_Prob",
     "APCP_Mean",
     "APCP_StdDev",
+    "freezing_level",
 )
 
 
@@ -164,15 +164,13 @@ zarr_vars = (
 
 
 # Create a range of forecast lead times
-ifs_range1 = FORECAST_LEAD_RANGES["ECMWF_IFS_1"]
-ifs_range2 = FORECAST_LEAD_RANGES["ECMWF_IFS_2"]
-ifsFileRange = [*ifs_range1, *ifs_range2]
+aifs_range = FORECAST_LEAD_RANGES["ECMWF_AIFS"]
 
 # Create FastHerbie object
 FH_forecastsub = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="12h"),
-    model="ifs",
-    fxx=ifsFileRange,
+    pd.date_range(start=base_time, periods=1, freq="6h"),
+    model="aifs",
+    fxx=aifs_range,
     product="enfo",
     verbose=False,
     save_dir=tmp_dir,
@@ -208,18 +206,13 @@ ens_mf = xr.open_mfdataset(
 
 ens_mf["tpd"] = ens_mf["tp"].diff(dim="step")
 
-# Set the first difference value to zero
-ens_mf["tpd"][dict(step=0)] = ens_mf["tp"].isel(step=0)
+# Set the first difference to the first accumulation
+ens_mf["tpd"] = xr.where(
+    ens_mf.step == ens_mf.step.isel(step=0), ens_mf["tp"].isel(step=0), ens_mf["tpd"]
+)
 
-# Change the 3 and 6 hour accumulations to hourly
-# Steps 3 to 144 are 3-hourly, the rest are 6 hourly
-first48 = ens_mf.step.isel(step=slice(0, 48))
-mask = ens_mf.step.isin(first48)
-ens_mf = ens_mf.assign(tpd=xr.where(mask, ens_mf.tpd / 3, ens_mf.tpd))
-
-after48 = ens_mf.step.isel(step=slice(48, None))
-mask = ens_mf.step.isin(after48)
-ens_mf = ens_mf.assign(tpd=xr.where(mask, ens_mf.tpd / 6, ens_mf.tpd))
+# AIFS outputs 6-hour accumulations; convert to hourly rate
+ens_mf["tpd"] = ens_mf["tpd"] / 6
 
 # Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
 X3_Precipitation_Prob = (ens_mf["tpd"] > 0.0001).sum(dim="number") / ens_mf.sizes[
@@ -255,7 +248,7 @@ xr_ensoOut = xr.Dataset(
 matchstring_2m = "(:(2d|2t):)"
 
 matchstring_10m = "(:(10u|10v):)"
-matchstring_ap = "(:(ptype|tprate|tp):)"
+matchstring_ap = "(:(tp):)"
 matchstring_sl = "(:(msl):)"
 matchstring_tcc = "(:(tcc):)"
 
@@ -276,9 +269,9 @@ match_strings = (
 
 # Create FastHerbie object
 FH_forecastsub = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="12h"),
-    model="ifs",
-    fxx=ifsFileRange,
+    pd.date_range(start=base_time, periods=1, freq="6h"),
+    model="aifs",
+    fxx=aifs_range,
     product="oper",
     verbose=False,
     priority=["aws", "ecmwf"],
@@ -297,10 +290,11 @@ grib_list = [
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+validate_grib_stats(grib_check)
 logger.info("Grib files passed validation, proceeding with processing")
 
 
-ifs_mf_2 = xr.open_mfdataset(
+aifs_mf_2 = xr.open_mfdataset(
     ifs_paths,
     engine="cfgrib",
     combine="nested",
@@ -313,7 +307,7 @@ ifs_mf_2 = xr.open_mfdataset(
         "filter_by_keys": {"typeOfLevel": "heightAboveGround", "level": [2]}
     },
 ).sortby("step")
-ifs_mf_10 = xr.open_mfdataset(
+aifs_mf_10 = xr.open_mfdataset(
     ifs_paths,
     engine="cfgrib",
     combine="nested",
@@ -327,7 +321,7 @@ ifs_mf_10 = xr.open_mfdataset(
     },
 ).sortby("step")
 
-ifs_mf_surf = xr.open_mfdataset(
+aifs_mf_surf = xr.open_mfdataset(
     ifs_paths,
     engine="cfgrib",
     combine="nested",
@@ -339,7 +333,7 @@ ifs_mf_surf = xr.open_mfdataset(
     backend_kwargs={"filter_by_keys": {"typeOfLevel": "surface"}},
 ).sortby("step")
 
-ifs_mf_msl = xr.open_mfdataset(
+aifs_mf_msl = xr.open_mfdataset(
     ifs_paths,
     engine="cfgrib",
     combine="nested",
@@ -351,7 +345,7 @@ ifs_mf_msl = xr.open_mfdataset(
     backend_kwargs={"filter_by_keys": {"typeOfLevel": "meanSea"}},
 ).sortby("step")
 
-ifs_mf_atm = xr.open_mfdataset(
+aifs_mf_atm = xr.open_mfdataset(
     ifs_paths,
     engine="cfgrib",
     combine="nested",
@@ -364,17 +358,88 @@ ifs_mf_atm = xr.open_mfdataset(
 ).sortby("step")
 
 # Combine the datasets
-ifs_mf = xr.merge(
-    [ifs_mf_2, ifs_mf_10, ifs_mf_surf, ifs_mf_msl, ifs_mf_atm], compat="override"
+aifs_mf = xr.merge(
+    [aifs_mf_2, aifs_mf_10, aifs_mf_surf, aifs_mf_msl, aifs_mf_atm], compat="override"
 )
 
 
-# %% Merge the IFS and ENSO data
+#####################################################################################################
+# %% Download pressure level data for freezing level calculation
+logger.info("Downloading pressure level data for freezing level calculation")
 
-xarray_forecast_merged = xr.merge([ifs_mf, xr_ensoOut], compat="override", join="outer")
+# Define pressure levels (in hPa) - using same levels as available in AIFS
+pressure_levels = [1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 50]
+
+# Create match string for temperature and geopotential at pressure levels
+# ECMWF uses "t" for temperature and "z" for geopotential
+matchstring_pressure = "(:(t|z):)"
+
+# Download pressure level data
+FH_pressure = FastHerbie(
+    pd.date_range(start=base_time, periods=1, freq="6h"),
+    model="aifs",
+    fxx=aifs_range,
+    product="oper",
+    verbose=False,
+    priority=["aws", "ecmwf"],
+    save_dir=tmp_dir,
+)
+
+pressure_paths = FH_pressure.download(matchstring_pressure, verbose=False)
+
+# Open pressure level data for each variable separately
+# Temperature at pressure levels
+aifs_temp_pressure = xr.open_mfdataset(
+    pressure_paths,
+    engine="cfgrib",
+    combine="nested",
+    concat_dim="step",
+    decode_timedelta=False,
+    join="outer",
+    coords="minimal",
+    compat="override",
+    backend_kwargs={
+        "filter_by_keys": {"typeOfLevel": "isobaricInhPa", "shortName": "t"}
+    },
+).sortby("step")
+
+# Geopotential at pressure levels
+aifs_z_pressure = xr.open_mfdataset(
+    pressure_paths,
+    engine="cfgrib",
+    combine="nested",
+    concat_dim="step",
+    decode_timedelta=False,
+    join="outer",
+    coords="minimal",
+    compat="override",
+    backend_kwargs={
+        "filter_by_keys": {"typeOfLevel": "isobaricInhPa", "shortName": "z"}
+    },
+).sortby("step")
+
+# Calculate freezing level
+logger.info("Calculating freezing level height")
+freezing_level = calculate_freezing_level(
+    temperature_levels=aifs_temp_pressure["t"],
+    geopotential_levels=aifs_z_pressure["z"],
+    pressure_levels=pressure_levels,
+)
+
+# Add freezing level to the dataset
+aifs_mf["freezing_level"] = freezing_level
+
+logger.info("Freezing level calculation complete")
 
 
-assert len(xarray_forecast_merged.step) == len(ifsFileRange), (
+# %% Merge the ENSO and OPER data
+
+xarray_forecast_merged = xr.merge(
+    [aifs_mf, xr_ensoOut], compat="override", join="outer"
+)
+
+
+assert len(xarray_forecast_merged.step) == len(aifs_range), (
     "Incorrect number of timesteps! Exiting"
 )
 
@@ -391,6 +456,28 @@ xarray_forecast_merged = (
     .drop_vars("step")
 )
 
+# Derive precipitation type (1=snow,2=freezing rain,3=sleet,4=rain)
+try:
+    # choose APCP mean if available, else try model surface precipitation 'tp'
+    if "APCP_Mean" in xarray_forecast_merged.data_vars:
+        apcp_var = xarray_forecast_merged["APCP_Mean"]
+    elif "tp" in xarray_forecast_merged.data_vars:
+        apcp_var = xarray_forecast_merged["tp"]
+    else:
+        apcp_var = None
+
+    xarray_forecast_merged["precip_type"] = derive_precip_type(
+        apcp=apcp_var,
+        temp_surface=xarray_forecast_merged.get("t2m", None),
+        temp_levels=aifs_temp_pressure["t"],
+        geopotential_levels=aifs_z_pressure["z"],
+        pressure_levels=pressure_levels,
+    )
+except Exception:
+    logger.exception("Could not derive precip_type; skipping")
+
+# Clean up pressure level data from memory
+del aifs_temp_pressure, aifs_z_pressure
 
 # Create a new time series for the interpolation target
 start = xarray_forecast_merged.time[0].values
@@ -424,12 +511,12 @@ with ProgressBar():
 # %% Delete to free memory
 del (
     xarray_forecast_merged,
-    ifs_mf,
-    ifs_mf_2,
-    ifs_mf_10,
-    ifs_mf_surf,
-    ifs_mf_msl,
-    ifs_mf_atm,
+    aifs_mf,
+    aifs_mf_2,
+    aifs_mf_10,
+    aifs_mf_surf,
+    aifs_mf_msl,
+    aifs_mf_atm,
     ens_mf,
     xr_ensoOut,
 )
@@ -447,7 +534,7 @@ for i in range(his_period, 1, -12):
         # S3 Path Setup
         s3_path = (
             historic_path
-            + "/ECMWF_Hist"
+            + "/ECMWF_AIFS_Hist"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -478,7 +565,7 @@ for i in range(his_period, 1, -12):
         # Local Path Setup
         local_path = (
             historic_path
-            + "/ECMWF_Hist"
+            + "/ECMWF_AIFS_Hist"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -499,20 +586,20 @@ for i in range(his_period, 1, -12):
     DATES = pd.date_range(
         start=base_time - pd.Timedelta(hours=i),
         periods=1,
-        freq="12h",
+        freq="6h",
     )
     # Create a range of forecast lead times
     # Go from 1 to 7 to account for the weird prate approach
-    fxx = range(3, 13, 3)
+    fxx = range(0, 13, 6)
 
     # Create FastHerbie Object.
     FH_histsub = FastHerbie(
-        DATES, model="ifs", fxx=fxx, product="oper", verbose=False, save_dir=tmp_dir
+        DATES, model="aifs", fxx=fxx, product="oper", verbose=False, save_dir=tmp_dir
     )
 
     # Download the subsets
     # Start with oper
-    ifs_hisgribs = FH_histsub.download(match_strings, verbose=False)
+    aifs_hisgribs = FH_histsub.download(match_strings, verbose=False)
 
     # Check for download length
     if len(FH_histsub.file_exists) != len(fxx):
@@ -537,8 +624,8 @@ for i in range(his_period, 1, -12):
     logger.info("Grib files passed validation, proceeding with processing")
 
     # Created merged xarray object for the ifs data
-    ifs_his_mf_10 = xr.open_mfdataset(
-        ifs_hisgribs,
+    aifs_his_mf_10 = xr.open_mfdataset(
+        aifs_hisgribs,
         engine="cfgrib",
         combine="nested",
         concat_dim="step",
@@ -551,8 +638,8 @@ for i in range(his_period, 1, -12):
         },
     ).sortby("step")
 
-    ifs_his_mf_2 = xr.open_mfdataset(
-        ifs_hisgribs,
+    aifs_his_mf_2 = xr.open_mfdataset(
+        aifs_hisgribs,
         engine="cfgrib",
         combine="nested",
         concat_dim="step",
@@ -565,8 +652,8 @@ for i in range(his_period, 1, -12):
         },
     ).sortby("step")
 
-    ifs_his_mf_surf = xr.open_mfdataset(
-        ifs_hisgribs,
+    aifs_his_mf_surf = xr.open_mfdataset(
+        aifs_hisgribs,
         engine="cfgrib",
         combine="nested",
         concat_dim="step",
@@ -577,8 +664,8 @@ for i in range(his_period, 1, -12):
         backend_kwargs={"filter_by_keys": {"typeOfLevel": "surface"}},
     ).sortby("step")
 
-    ifs_his_mf_msl = xr.open_mfdataset(
-        ifs_hisgribs,
+    aifs_his_mf_msl = xr.open_mfdataset(
+        aifs_hisgribs,
         engine="cfgrib",
         combine="nested",
         concat_dim="step",
@@ -589,8 +676,8 @@ for i in range(his_period, 1, -12):
         backend_kwargs={"filter_by_keys": {"typeOfLevel": "meanSea"}},
     ).sortby("step")
 
-    ifs_his_mf_atm = xr.open_mfdataset(
-        ifs_hisgribs,
+    aifs_his_mf_atm = xr.open_mfdataset(
+        aifs_hisgribs,
         engine="cfgrib",
         combine="nested",
         concat_dim="step",
@@ -602,16 +689,78 @@ for i in range(his_period, 1, -12):
     ).sortby("step")
 
     # Combine the datasets
-    ifs_his_mf = xr.merge(
-        [ifs_his_mf_2, ifs_his_mf_10, ifs_his_mf_surf, ifs_his_mf_msl, ifs_his_mf_atm],
+    aifs_his_mf = xr.merge(
+        [
+            aifs_his_mf_2,
+            aifs_his_mf_10,
+            aifs_his_mf_surf,
+            aifs_his_mf_msl,
+            aifs_his_mf_atm,
+        ],
         compat="override",
     )
+
+    ########################################################################
+    ### Download pressure level data for historical freezing level calculation
+    logger.info("Downloading historical pressure level data for freezing level")
+
+    # Download pressure level data for the same time period
+    FH_histsub_pressure = FastHerbie(
+        DATES, model="aifs", fxx=fxx, product="oper", verbose=False, save_dir=tmp_dir
+    )
+
+    pressure_his_paths = FH_histsub_pressure.download(
+        matchstring_pressure, verbose=False
+    )
+
+    # Temperature at pressure levels
+    aifs_his_temp_pressure = xr.open_mfdataset(
+        pressure_his_paths,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        decode_timedelta=False,
+        join="outer",
+        coords="minimal",
+        compat="override",
+        backend_kwargs={
+            "filter_by_keys": {"typeOfLevel": "isobaricInhPa", "shortName": "t"}
+        },
+    ).sortby("step")
+
+    # Geopotential at pressure levels
+    aifs_his_z_pressure = xr.open_mfdataset(
+        pressure_his_paths,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        decode_timedelta=False,
+        join="outer",
+        coords="minimal",
+        compat="override",
+        backend_kwargs={
+            "filter_by_keys": {"typeOfLevel": "isobaricInhPa", "shortName": "z"}
+        },
+    ).sortby("step")
+
+    # Calculate freezing level for historical data
+    freezing_level_his = calculate_freezing_level(
+        temperature_levels=aifs_his_temp_pressure["t"],
+        geopotential_levels=aifs_his_z_pressure["z"],
+        pressure_levels=pressure_levels,
+    )
+
+    # Add freezing level to the historical dataset
+    aifs_his_mf["freezing_level"] = freezing_level_his
+
+    # Clean up
+    del aifs_his_temp_pressure, aifs_his_z_pressure
 
     ########################################################################
     ### Download the enfo data
     # Create FastHerbie Object.
     FH_histsub = FastHerbie(
-        DATES, model="ifs", fxx=fxx, product="enfo", verbose=False, save_dir=tmp_dir
+        DATES, model="aifs", fxx=fxx, product="enfo", verbose=False, save_dir=tmp_dir
     )
 
     ens_his_paths = FH_histsub.download(match_string_enfo, verbose=False)
@@ -636,8 +785,8 @@ for i in range(his_period, 1, -12):
         ens_his_mf["tpd"],
     )
 
-    # Change the 3 hour accumulations to hourly
-    ens_his_mf["tpd"] = ens_his_mf["tpd"] / 3
+    # AIFS historic outputs are 6-hour accumulations; convert to hourly
+    ens_his_mf["tpd"] = ens_his_mf["tpd"] / 6
 
     # Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
     X3_Precipitation_Prob_His = (ens_his_mf["tpd"] > 0.0001).sum(
@@ -664,12 +813,9 @@ for i in range(his_period, 1, -12):
         },
     )
 
-    ########################################################################
     # Merge the xarray objects
     xarray_hist_merged = xr.merge(
-        [ifs_his_mf, xr_enso_hisOut],
-        compat="override",
-        join="outer",
+        [aifs_his_mf, xr_enso_hisOut], compat="override", join="outer"
     )
 
     # Save merged and processed xarray dataset to disk using zarr with compression
@@ -739,7 +885,7 @@ for i in range(his_period, 1, -12):
 # Get the s3 paths to the historic data
 ncLocalWorking_paths = [
     historic_path
-    + "/ECMWF_Hist"
+    + "/ECMWF_AIFS_Hist"
     + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
     + ".zarr"
     for i in range(his_period, 1, -12)
@@ -830,62 +976,10 @@ daskVarArrayStackDisk = da.from_zarr(
 # Create a zarr backed dask array
 if save_type == "S3":
     zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/ECMWF.zarr.zip", mode="a"
+        forecast_process_dir + "/ECMWF_AIFS.zarr.zip", mode="a"
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/ECMWF.zarr")
-
-
-# Define which variables are integers and need special handling
-int_vars = ["ptype"]
-# Find the index of these variables in the zarr_vars list
-int_var_indices = [i for i, v in enumerate(zarr_vars) if v in int_vars]
-
-# 1. Interpolate the stacked array to be hourly along the time axis
-# 2. Pad to chunk size
-# 3. Create the zarr array
-# 4. Rechunk it to match the final array
-# 5. Write it out to the zarr array
-
-with ProgressBar():
-    # 1. Interpolate the stacked array to be hourly along the time axis
-    daskVarArrayStackDiskInterp = interp_time_take_blend(
-        daskVarArrayStackDisk,
-        stacked_timesUnix=stacked_timesUnix,
-        hourly_timesUnix=hourly_timesUnix,
-        nearest_vars=int_var_indices,
-        dtype="float32",
-        fill_value=np.nan,
-    )
-
-    # 2. Pad to chunk size
-    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
-        daskVarArrayStackDiskInterp, final_chunk
-    )
-
-    # 3. Create the zarr array
-    zarr_array = zarr.create_array(
-        store=zarr_store,
-        shape=(
-            len(zarr_vars),
-            len(hourly_timesUnix),
-            daskVarArrayStackDiskInterpPad.shape[2],
-            daskVarArrayStackDiskInterpPad.shape[3],
-        ),
-        chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
-    )
-
-    # 4. Rechunk it to match the final array
-    # 5. Write it out to the zarr array
-    daskVarArrayStackDiskInterpPad.round(5).rechunk(
-        (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
-    ).to_zarr(zarr_array, overwrite=True, compute=True)
-
-
-if save_type == "S3":
-    zarr_store.close()
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/ECMWF_AIFS.zarr")
 
 
 # TEST READ
@@ -895,12 +989,10 @@ if save_type == "S3":
 # Rechunk subset of data for maps!
 # Want variables:
 # 0 (time)
-# 3 (TMP)
-# 5 (UGRD)
-# 6 (VGRD)
-# 7 (PRATE)
-# 8 (PACCUM)
-# 9 (PTYPE)
+# 2 (t2m)
+# 4 (u10)
+# 5 (v10)
+# 6 (tp)
 
 # Loop through variables, creating a new one with a name and 36 x 100 x 100 chunks
 # Save -12:24 hours, aka steps 24:60
@@ -911,12 +1003,14 @@ daskVarArrayStackDisk_maps = pad_to_chunk_size(daskVarArrayStackDisk, 100)
 
 if save_type == "S3":
     zarr_store_maps = zarr.storage.ZipStore(
-        forecast_process_dir + "/ECMWF_Maps.zarr.zip", mode="a", compression=0
+        forecast_process_dir + "/ECMWF_AIFS_Maps.zarr.zip", mode="a", compression=0
     )
 else:
-    zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/ECMWF_Maps.zarr")
+    zarr_store_maps = zarr.storage.LocalStore(
+        forecast_process_dir + "/ECMWF_AIFS_Maps.zarr"
+    )
 
-for z in [0, 3, 5, 6, 7, 8, 9]:
+for z in [0, 2, 4, 5, 6]:
     # Create a zarr backed dask array
     zarr_array = zarr.create_array(
         store=zarr_store_maps,
@@ -944,45 +1038,45 @@ if save_type == "S3":
 if save_type == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/ECMWF.zarr.zip",
-        forecast_path + "/" + ingest_version + "/ECMWF.zarr.zip",
+        forecast_process_dir + "/ECMWF_AIFS.zarr.zip",
+        forecast_path + "/" + ingest_version + "/ECMWF_AIFS.zarr.zip",
     )
     s3.put_file(
-        forecast_process_dir + "/ECMWF_Maps.zarr.zip",
-        forecast_path + "/" + ingest_version + "/ECMWF_Maps.zarr.zip",
+        forecast_process_dir + "/ECMWF_AIFS_Maps.zarr.zip",
+        forecast_path + "/" + ingest_version + "/ECMWF_AIFS_Maps.zarr.zip",
     )
 
     # Write most recent forecast time
-    with open(forecast_process_dir + "/ECMWF.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/ECMWF_AIFS.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     s3.put_file(
-        forecast_process_dir + "/ECMWF.time.pickle",
-        forecast_path + "/" + ingest_version + "/ECMWF.time.pickle",
+        forecast_process_dir + "/ECMWF_AIFS.time.pickle",
+        forecast_path + "/" + ingest_version + "/ECMWF_AIFS.time.pickle",
     )
 else:
     # Write most recent forecast time
-    with open(forecast_process_dir + "/ECMWF.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/ECMWF_AIFS.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     shutil.move(
-        forecast_process_dir + "/ECMWF.time.pickle",
-        forecast_path + "/" + ingest_version + "/ECMWF.time.pickle",
+        forecast_process_dir + "/ECMWF_AIFS.time.pickle",
+        forecast_path + "/" + ingest_version + "/ECMWF_AIFS.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
-        forecast_process_dir + "/ECMWF.zarr",
-        forecast_path + "/" + ingest_version + "/ECMWF.zarr",
+        forecast_process_dir + "/ECMWF_AIFS.zarr",
+        forecast_path + "/" + ingest_version + "/ECMWF_AIFS.zarr",
         dirs_exist_ok=True,
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
-        forecast_process_dir + "/ECMWF_Maps.zarr",
-        forecast_path + "/" + ingest_version + "/ECMWF_Maps.zarr",
+        forecast_process_dir + "/ECMWF_AIFS_Maps.zarr",
+        forecast_path + "/" + ingest_version + "/ECMWF_AIFS_Maps.zarr",
         dirs_exist_ok=True,
     )
 
