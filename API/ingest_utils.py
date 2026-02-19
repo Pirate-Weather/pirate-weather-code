@@ -4,6 +4,8 @@
 import os
 import re
 import resource
+import shlex
+import subprocess
 import sys
 import time
 from typing import Iterable, Optional, Union
@@ -58,6 +60,59 @@ DWD_RADIUS = 50
 
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
+
+
+def run_command(
+    command: str, encoding: str = "utf-8"
+) -> subprocess.CompletedProcess:
+    """Execute a command string without shell=True, including a single pipe."""
+    command = command.strip()
+    if not command:
+        raise ValueError("Cannot execute an empty command string")
+
+    if "|" not in command:
+        return subprocess.run(
+            shlex.split(command),
+            capture_output=True,
+            encoding=encoding,
+        )
+
+    left, right = command.split("|", maxsplit=1)
+    left_args = shlex.split(left)
+    right_args = shlex.split(right)
+    if not left_args or not right_args:
+        raise ValueError(f"Invalid piped command: {command!r}")
+
+    left_proc = subprocess.Popen(
+        left_args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        result = subprocess.run(
+            right_args,
+            stdin=left_proc.stdout,
+            capture_output=True,
+            encoding=encoding,
+        )
+    finally:
+        if left_proc.stdout is not None:
+            left_proc.stdout.close()
+
+    _, left_stderr = left_proc.communicate()
+    if left_proc.returncode not in (0, None):
+        left_err_text = left_stderr.decode(encoding, errors="replace")
+        combined_stderr = left_err_text
+        if result.stderr:
+            combined_stderr = f"{combined_stderr}\n{result.stderr}"
+        return subprocess.CompletedProcess(
+            args=result.args,
+            returncode=left_proc.returncode,
+            stdout=result.stdout,
+            stderr=combined_stderr,
+        )
+
+    return result
 
 
 def tune_nofile_limit(target: int = 65535) -> None:

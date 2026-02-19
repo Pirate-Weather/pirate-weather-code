@@ -9,7 +9,6 @@ import os
 # )
 import pickle
 import shutil
-import subprocess
 import sys
 import time
 import traceback
@@ -37,6 +36,7 @@ from API.ingest_utils import (
     interp_time_take_blend,
     pad_to_chunk_size,
     positive_int_env,
+    run_command,
     tune_nofile_limit,
     validate_grib_stats,
 )
@@ -205,7 +205,7 @@ grib_list = [
 # Perform a check if any data seems to be invalid
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+grib_check = run_command(cmd)
 validate_grib_stats(grib_check)
 print("Grib files passed validation, proceeding with processing")
 
@@ -255,7 +255,7 @@ grib_list = [
 # Perform a check if any data seems to be invalid
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+grib_check = run_command(cmd)
 validate_grib_stats(grib_check)
 print("Grib files passed validation, proceeding with processing")
 
@@ -352,7 +352,7 @@ grib_list = [
 # Perform a check if any data seems to be invalid
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+grib_check = run_command(cmd)
 print("Grib files passed validation, proceeding with processing")
 
 
@@ -581,7 +581,7 @@ for i in range(his_period, 1, -12):
     # Perform a check if any data seems to be invalid
     cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
 
-    grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    grib_check = run_command(cmd)
     validate_grib_stats(grib_check)
     print("Grib files passed validation, proceeding with processing")
 
@@ -736,7 +736,7 @@ for i in range(his_period, 1, -12):
     # Perform a check if any data seems to be invalid
     cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
 
-    grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    grib_check = run_command(cmd)
     validate_grib_stats(grib_check)
     print("Grib files passed validation, proceeding with processing")
 

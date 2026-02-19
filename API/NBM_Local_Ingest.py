@@ -36,6 +36,7 @@ from API.ingest_utils import (
     mask_invalid_data,
     pad_to_chunk_size,
     positive_int_env,
+    run_command,
     tune_nofile_limit,
     validate_grib_stats,
 )
@@ -340,7 +341,7 @@ grib_list = getGribList(FH_forecastsub, match_strings)
 stage_start = time.perf_counter()
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+grib_check = run_command(cmd)
 
 validate_grib_stats(grib_check)
 print("Grib files passed validation, proceeding with processing")
@@ -363,7 +364,7 @@ cmd = (
 # Run wgrib2
 stage_start = time.perf_counter()
 substage_start = time.perf_counter()
-sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+sp_out = run_command(cmd)
 if sp_out.returncode != 0:
     print(sp_out.stderr)
     sys.exit()
@@ -383,7 +384,7 @@ cmd2 = (
     + forecast_process_path
     + "_wgrib2_merged_order.grib"
 )
-spOUT2 = subprocess.run(cmd2, shell=True, capture_output=True, encoding="utf-8")
+spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
     print(spOUT2.stderr)
     sys.exit()
@@ -405,7 +406,7 @@ cmd4 = (
 
 # Run wgrib2 to rotate winds and save as NetCDF
 substage_start = time.perf_counter()
-spOUT4 = subprocess.run(cmd4, shell=True, capture_output=True, encoding="utf-8")
+spOUT4 = run_command(cmd4)
 if spOUT4.returncode != 0:
     print(spOUT4.stderr)
     sys.exit()
@@ -519,7 +520,7 @@ grib_list = gribList1 + gribList2
 stage_start = time.perf_counter()
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+grib_check = run_command(cmd)
 
 validate_grib_stats(grib_check)
 print("Grib files passed validation, proceeding with processing")
@@ -542,7 +543,7 @@ cmd = (
 # Run wgrib2
 stage_start = time.perf_counter()
 substage_start = time.perf_counter()
-sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+sp_out = run_command(cmd)
 if sp_out.returncode != 0:
     print(sp_out.stderr)
     sys.exit()
@@ -563,7 +564,7 @@ cmd2 = (
     + forecast_process_path
     + "_prob_wgrib2_merged_order.grib"
 )
-spOUT2 = subprocess.run(cmd2, shell=True, capture_output=True, encoding="utf-8")
+spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
     print(spOUT2.stderr)
     sys.exit()
@@ -585,7 +586,7 @@ cmd4 = (
 
 # Run wgrib2 to save as  NetCDF
 substage_start = time.perf_counter()
-spOUT4 = subprocess.run(cmd4, shell=True, capture_output=True, encoding="utf-8")
+spOUT4 = run_command(cmd4)
 if spOUT4.returncode != 0:
     print(spOUT4.stderr)
     sys.exit()
@@ -677,7 +678,7 @@ grib_list = gribList1 + gribList2
 stage_start = time.perf_counter()
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+grib_check = run_command(cmd)
 
 validate_grib_stats(grib_check)
 print("Grib files passed validation, proceeding with processing")
@@ -700,7 +701,7 @@ cmd = (
 # Run wgrib2
 stage_start = time.perf_counter()
 substage_start = time.perf_counter()
-sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+sp_out = run_command(cmd)
 if sp_out.returncode != 0:
     print(sp_out.stderr)
     sys.exit()
@@ -720,7 +721,7 @@ cmd2 = (
     + forecast_process_path
     + "_accum_wgrib2_merged_order.grib"
 )
-spOUT2 = subprocess.run(cmd2, shell=True, capture_output=True, encoding="utf-8")
+spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
     print(spOUT2.stderr)
     sys.exit()
@@ -742,7 +743,7 @@ cmd4 = (
 
 # Run wgrib2 to save as NetCDF
 substage_start = time.perf_counter()
-spOUT4 = subprocess.run(cmd4, shell=True, capture_output=True, encoding="utf-8")
+spOUT4 = run_command(cmd4)
 if spOUT4.returncode != 0:
     print(spOUT4.stderr)
     sys.exit()
@@ -1009,7 +1010,7 @@ for i in range(his_period, -1, -1):
         + " -s -stats"
     )
 
-    grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    grib_check = run_command(cmd)
 
     validate_grib_stats(grib_check)
     print("Grib files passed validation, proceeding with processing")
@@ -1032,7 +1033,7 @@ for i in range(his_period, -1, -1):
         + hist_process_path
         + "_wgrib2_merged_order.grib"
     )
-    spOUT1 = subprocess.run(cmd1, shell=True, capture_output=True, encoding="utf-8")
+    spOUT1 = run_command(cmd1)
     if spOUT1.returncode != 0:
         print(spOUT1.stderr)
         sys.exit()
@@ -1047,7 +1048,7 @@ for i in range(his_period, -1, -1):
         + hist_process_path
         + "_wgrib_merge.nc"
     )
-    spOUT3 = subprocess.run(cmd3, shell=True, capture_output=True, encoding="utf-8")
+    spOUT3 = run_command(cmd3)
     if spOUT3.returncode != 0:
         print(spOUT3.stderr)
         sys.exit()

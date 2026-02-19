@@ -5,7 +5,6 @@
 import os
 import pickle
 import shutil
-import subprocess
 import sys
 import time
 import traceback
@@ -32,6 +31,7 @@ from API.ingest_utils import (
     mask_invalid_data,
     pad_to_chunk_size,
     positive_int_env,
+    run_command,
     tune_nofile_limit,
     validate_grib_stats,
 )
@@ -221,7 +221,7 @@ while mem < 30:
     # Perform a check if any data seems to be invalid
     cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-    grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    grib_check = run_command(cmd)
 
     validate_grib_stats(grib_check)
     print("Grib files passed validation, proceeding with processing")
@@ -241,7 +241,7 @@ while mem < 30:
     )
 
     # Run wgrib2 to megre all the grib files
-    sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    sp_out = run_command(cmd)
     if sp_out.returncode != 0:
         print(sp_out.stderr)
         sys.exit()
@@ -299,12 +299,11 @@ while mem < 30:
     xarray_wgrib.close()
 
     # Delete the wgrib netcdf to save space
-    subprocess.run(
-        "rm " + forecast_process_path + "_wgrib2_merged_m" + str(mem + 1) + ".nc",
-        shell=True,
-        capture_output=True,
-        encoding="utf-8",
+    forecast_merged_path = (
+        forecast_process_path + "_wgrib2_merged_m" + str(mem + 1) + ".nc"
     )
+    if os.path.exists(forecast_merged_path):
+        os.remove(forecast_merged_path)
 
     mem += 1
 
@@ -511,9 +510,7 @@ for i in range(his_period, 0, -6):
             + " -s -stats"
         )
 
-        grib_check = subprocess.run(
-            cmd, shell=True, capture_output=True, encoding="utf-8"
-        )
+        grib_check = run_command(cmd)
 
         validate_grib_stats(grib_check)
         print("Grib files passed validation, proceeding with processing")
@@ -533,7 +530,7 @@ for i in range(his_period, 0, -6):
         )
 
         # Run wgrib2 to merge all the grib files
-        sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+        sp_out = run_command(cmd)
         if sp_out.returncode != 0:
             print(sp_out.stderr)
             sys.exit()
@@ -589,12 +586,9 @@ for i in range(his_period, 0, -6):
         xarray_hist_wgrib.close()
 
         # Delete the netcdf to save space
-        subprocess.run(
-            "rm " + hist_process_path + "_wgrib2_merged_m" + str(mem + 1) + ".nc",
-            shell=True,
-            capture_output=True,
-            encoding="utf-8",
-        )
+        hist_merged_path = hist_process_path + "_wgrib2_merged_m" + str(mem + 1) + ".nc"
+        if os.path.exists(hist_merged_path):
+            os.remove(hist_merged_path)
 
     # Calculate probabilities and standard deviation for historic data
     # Read the merged netcdf files into xarray using the preprocess function, concatenating along the member dimension

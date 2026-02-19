@@ -6,7 +6,6 @@
 import os
 import pickle
 import shutil
-import subprocess
 import sys
 import time
 import warnings
@@ -28,6 +27,7 @@ from API.ingest_utils import (
     mask_invalid_refc,
     pad_to_chunk_size,
     positive_int_env,
+    run_command,
     tune_nofile_limit,
     validate_grib_stats,
 )
@@ -220,7 +220,7 @@ grib_list = [
 # Perform a check if any data seems to be invalid
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+grib_check = run_command(cmd)
 
 validate_grib_stats(grib_check)
 print("Grib files passed validation, proceeding with processing")
@@ -239,7 +239,7 @@ cmd = (
 )
 
 # Run wgrib2
-sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+sp_out = run_command(cmd)
 if sp_out.returncode != 0:
     print(sp_out.stderr)
     sys.exit()
@@ -261,7 +261,7 @@ cmd2 = (
 )
 
 # Run wgrib2 to rotate winds and save as NetCDF
-spOUT2 = subprocess.run(cmd2, shell=True, capture_output=True, encoding="utf-8")
+spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
     print(spOUT2.stderr)
     sys.exit()
@@ -278,7 +278,7 @@ cmd3 = (
 )
 
 # Run wgrib2 to rotate winds and save as NetCDF
-spOUT3 = subprocess.run(cmd3, shell=True, capture_output=True, encoding="utf-8")
+spOUT3 = run_command(cmd3)
 if spOUT3.returncode != 0:
     print(spOUT3.stderr)
     sys.exit()
