@@ -85,7 +85,7 @@ services:
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: API/GFS_Local_Ingest.py
+    command: ["API/GFS_Local_Ingest.py"]
 
   # NBM Ingest
   nbm_ingest:
