@@ -15,6 +15,7 @@ import time
 import traceback
 import warnings
 
+import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -31,8 +32,12 @@ from API.ingest_utils import (
     FORECAST_LEAD_RANGES,
     VALID_DATA_MAX,
     VALID_DATA_MIN,
+    close_store,
+    configure_zarr_limits,
     interp_time_take_blend,
     pad_to_chunk_size,
+    positive_int_env,
+    tune_nofile_limit,
     validate_grib_stats,
 )
 
@@ -57,8 +62,14 @@ historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/ECMWF
 save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+zarr_store_workers = positive_int_env("zarr_store_workers", 2)
+zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+tune_nofile_limit()
+zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
+    zarr_store_workers, zarr_async_concurrency
+)
 
 
 # Define the processing and history chunk size
@@ -452,12 +463,14 @@ xarray_forecast_merged = xarray_forecast_merged.chunk(
 )
 
 with ProgressBar():
-    xarray_forecast_merged.to_zarr(
-        forecast_process_path + "_merged.zarr",
-        mode="w",
-        consolidated=False,
-        compute=True,
-    )
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        xarray_forecast_merged.to_zarr(
+            forecast_process_path + "_merged.zarr",
+            mode="w",
+            consolidated=False,
+            compute=True,
+            chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+        )
 
 
 # %% Delete to free memory
@@ -788,14 +801,17 @@ for i in range(his_period, 1, -12):
     )
 
     with ProgressBar():
-        xarray_hist_merged.to_zarr(
-            store=zarrStore,
-            mode="w",
-            consolidated=False,
-        )
+        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+            xarray_hist_merged.to_zarr(
+                store=zarrStore,
+                mode="w",
+                consolidated=False,
+                chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+            )
 
     # Clear the xarray dataset from memory
     del xarray_hist_merged
+    close_store(zarrStore)
 
     # Remove temp file created by wgrib2
     # os.remove(hist_process_path + "_wgrib2_merged.nc")
@@ -896,7 +912,12 @@ ds_chunk = ds_stack.chunk(
 
 # Interim zarr save of the stacked array. Not necessary for local, but speeds things up on S3
 with ProgressBar():
-    ds_chunk.to_zarr(forecast_process_path + "_stack.zarr", mode="w")
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        ds_chunk.to_zarr(
+            forecast_process_path + "_stack.zarr",
+            mode="w",
+            chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+        )
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(
@@ -925,44 +946,44 @@ int_var_indices = [i for i, v in enumerate(zarr_vars) if v in int_vars]
 # 5. Write it out to the zarr array
 
 with ProgressBar():
-    # 1. Interpolate the stacked array to be hourly along the time axis
-    daskVarArrayStackDiskInterp = interp_time_take_blend(
-        daskVarArrayStackDisk,
-        stacked_timesUnix=stacked_timesUnix,
-        hourly_timesUnix=hourly_timesUnix,
-        nearest_vars=int_var_indices,
-        dtype="float32",
-        fill_value=np.nan,
-    )
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        # 1. Interpolate the stacked array to be hourly along the time axis
+        daskVarArrayStackDiskInterp = interp_time_take_blend(
+            daskVarArrayStackDisk,
+            stacked_timesUnix=stacked_timesUnix,
+            hourly_timesUnix=hourly_timesUnix,
+            nearest_vars=int_var_indices,
+            dtype="float32",
+            fill_value=np.nan,
+        )
 
-    # 2. Pad to chunk size
-    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
-        daskVarArrayStackDiskInterp, final_chunk
-    )
+        # 2. Pad to chunk size
+        daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+            daskVarArrayStackDiskInterp, final_chunk
+        )
 
-    # 3. Create the zarr array
-    zarr_array = zarr.create_array(
-        store=zarr_store,
-        shape=(
-            len(zarr_vars),
-            len(hourly_timesUnix),
-            daskVarArrayStackDiskInterpPad.shape[2],
-            daskVarArrayStackDiskInterpPad.shape[3],
-        ),
-        chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
-    )
+        # 3. Create the zarr array
+        zarr_array = zarr.create_array(
+            store=zarr_store,
+            shape=(
+                len(zarr_vars),
+                len(hourly_timesUnix),
+                daskVarArrayStackDiskInterpPad.shape[2],
+                daskVarArrayStackDiskInterpPad.shape[3],
+            ),
+            chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
+            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+            dtype="float32",
+        )
 
-    # 4. Rechunk it to match the final array
-    # 5. Write it out to the zarr array
-    daskVarArrayStackDiskInterpPad.round(5).rechunk(
-        (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
-    ).to_zarr(zarr_array, overwrite=True, compute=True)
+        # 4. Rechunk it to match the final array
+        # 5. Write it out to the zarr array
+        daskVarArrayStackDiskInterpPad.round(5).rechunk(
+            (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
+        ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
-if save_type == "S3":
-    zarr_store.close()
+close_store(zarr_store)
 
 
 # TEST READ
@@ -1008,14 +1029,16 @@ for z in [0, 3, 5, 6, 7, 8, 9]:
         dtype="float32",
     )
 
-    da.rechunk(daskVarArrayStackDisk_maps[z, 36:72, :, :], (36, 100, 100)).to_zarr(
-        zarr_array, overwrite=True, compute=True
-    )
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        da.rechunk(daskVarArrayStackDisk_maps[z, 36:72, :, :], (36, 100, 100)).to_zarr(
+            zarr_array,
+            overwrite=True,
+            compute=True,
+        )
 
     print(zarr_vars[z])
 
-if save_type == "S3":
-    zarr_store_maps.close()
+close_store(zarr_store_maps)
 
 # %% Upload to S3
 if save_type == "S3":

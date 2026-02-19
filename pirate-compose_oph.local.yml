@@ -83,6 +83,8 @@ services:
       forecast_path: "/data/Prod/GFS"
       historic_path: "/data/Hist/GFS"
       save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
     command: API/GFS_Local_Ingest.py
 
   # NBM Ingest
@@ -199,6 +201,8 @@ services:
       forecast_path: "/data/Prod/HRRR"
       historic_path: "/data/Hist/HRRR"
       save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
     command: ["API/HRRR_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
@@ -226,6 +230,8 @@ services:
       forecast_path: "/data/Prod/HRRR_6H"
       historic_path: "/data/Hist/HRRR_6H"
       save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
     command: ["API/HRRR_6H_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
@@ -253,6 +259,8 @@ services:
       forecast_path: "/data/Prod/NWS_Alerts"
       historic_path: "/data/Hist/NWS_Alerts"
       save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
     command: ["API/NWS_Alerts_Local.py"]
     depends_on:
       gfs_ingest:
@@ -280,6 +288,8 @@ services:
       forecast_path: "/data/Prod/ECMWF"
       historic_path: "/data/Hist/ECMWF"
       save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
     command: ["API/ECMWF_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
@@ -307,6 +317,8 @@ services:
       forecast_path: "/data/Prod/RTMA-RU"
       historic_path: "/data/Hist/RTMA-RU"
       save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
     command: ["API/RTMA-RU_Local_Ingest.py"]
     depends_on:
       gfs_ingest:

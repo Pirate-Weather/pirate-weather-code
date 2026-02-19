@@ -169,6 +169,13 @@ def build_herbie_grib_list(file_refs, search: str, retries: int = 3) -> list[str
     ]
 
 
+def close_store(store: object) -> None:
+    """Close a zarr-like store if it exposes a close method."""
+    close_fn = getattr(store, "close", None)
+    if callable(close_fn):
+        close_fn()
+
+
 def mask_invalid_data(daskArray, ignoreAxis=None):
     """Masks invalid data in a dask array, ignoring the time dimension."""
     # TODO: Update to mask for each variable according to reasonable values, as opposed to this global mask
