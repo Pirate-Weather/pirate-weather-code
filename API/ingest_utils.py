@@ -69,8 +69,8 @@ FORECAST_LEAD_RANGES = {
     "ECMWF_AIFS": list(range(0, 241, 6)),
     "ECMWF_IFS_1": list(range(3, 144, 3)),
     "ECMWF_IFS_2": list(range(144, 241, 6)),
-    "AIGFS": list(range(0, 241, 6)),
-    "AIGEFS": list(range(0, 241, 6)),
+    "AIGFS": list(range(6, 241, 6)),
+    "AIGEFS": list(range(6, 241, 6)),
     "HGEFS": list(range(0, 241, 6)),
 }
 
