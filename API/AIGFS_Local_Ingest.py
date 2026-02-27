@@ -250,7 +250,7 @@ stacked_times = np.concatenate(
         pd.date_range(
             start=start - pd.Timedelta(hours=his_period),
             end=start - pd.Timedelta(hours=1),
-            freq="h",
+            freq="6h",
         ),
         xarray_forecast_merged.time.values,
     )
@@ -307,7 +307,7 @@ for i in range(his_period, 0, -6):
     if save_type == "S3":
         s3_path = (
             historic_path
-            + "/AIGFS_Hist_v2"
+            + "/AIGFS_Hist"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -337,7 +337,7 @@ for i in range(his_period, 0, -6):
         # Local Path Setup
         local_path = (
             historic_path
-            + "/AIGFS_Hist_v2"
+            + "/AIGFS_Hist"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -478,7 +478,7 @@ for i in range(his_period, 0, -6):
 # Get the s3 paths to the historic data
 ncLocalWorking_paths = [
     historic_path
-    + "/AIGFS_Hist_v2"
+    + "/AIGFS_Hist"
     + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
     + ".zarr"
     for i in range(his_period, 1, -6)
