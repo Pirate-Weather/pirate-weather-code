@@ -85,7 +85,30 @@ def calculate_apparent_temperature(air_temp_c, humidity, wind, solar=None):
         )
     )
 
-    if solar is None or np.any(np.isnan(solar)):
+    def _solar_invalid(solar_val) -> bool:
+        """Return True if `solar_val` should be considered missing/invalid.
+
+        Treats None, empty arrays, any NaN, and explicit MISSING_DATA values as invalid.
+        """
+        if solar_val is None:
+            return True
+        arr = np.asarray(solar_val)
+
+        if arr.size == 0:
+            return True
+        # Any NaN in the array/scalar
+        try:
+            if np.any(np.isnan(arr)):
+                return True
+        except TypeError:
+            # np.isnan may fail on non-numeric types
+            return True
+
+        # If MISSING_DATA check for explicit matches
+        if np.any(arr == MISSING_DATA):
+            return True
+
+    if _solar_invalid(solar):
         logger.info(
             "Solar raditation is not valid. Falling back to using apparent temperature calculations without solar radiation..."
         )

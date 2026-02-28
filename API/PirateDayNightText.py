@@ -729,10 +729,7 @@ def calculate_half_day_text(
             and p_data["num_hours_fog"] >= (min(p_data["period_length"] / 2, 3))
         ):
             vis_periods.append(i)
-        if p_data["num_hours_dry"] >= (min(p_data["period_length"] / 2, 3)):
-            dry_periods.append(i)
-        if p_data["num_hours_humid"] >= (min(p_data["period_length"] / 2, 3)):
-            humid_periods.append(i)
+        # Dry/humid detection intentionally omitted to avoid verbose humidity summaries
 
         # Get cloud level for this period
         _, cloud_level = calculate_cloud_text(p_data["avg_cloud_cover"])
@@ -1135,36 +1132,7 @@ def calculate_half_day_text(
             0,
             mode,
         )
-    if has_dry:
-        dry_only_summary, _, _, _, _ = calculate_period_summary_text(
-            dry_periods,
-            "low-humidity",
-            "dry",
-            all_period_names,
-            [],
-            [],
-            [],
-            [],
-            overall_max_wind,
-            icon_set,
-            0,
-            mode,
-        )
-    if has_humid:
-        humid_only_summary, _, _, _, _ = calculate_period_summary_text(
-            humid_periods,
-            "high-humidity",
-            "humid",
-            all_period_names,
-            [],
-            [],
-            [],
-            [],
-            overall_max_wind,
-            icon_set,
-            0,
-            mode,
-        )
+    # Dry/humid individual summaries removed to keep the top-level summary concise
 
     # Cloud full summary, including potential combinations with wind/dry/humid/vis
     (
@@ -1275,40 +1243,7 @@ def calculate_half_day_text(
             }
         )
 
-    # 4. Dry Humidity - only if not already covered AND (combined by cloud OR cloud is clear)
-    # This ensures dry/humid don't appear as primary condition unless specifically linked or cloud is clear
-    if has_dry and not combined_dry_flag and not cloud_dry_combined_flag:
-        if final_cloud_text == "clear":
-            is_dry_all_day = (
-                len(dry_periods) == len(period_stats) if period_stats else False
-            )
-            candidate_summaries_for_final_assembly.append(
-                {
-                    "type": "dry",
-                    "priority": 3,
-                    "all_day": is_dry_all_day,
-                    "start_idx": dry_periods[0] if dry_periods else -1,
-                    "text": dry_only_summary,
-                    "icon": None,  # Dry/humid don't have dedicated icons, fallback to cloud
-                }
-            )
-
-    # 5. Humid Humidity - only if not already covered AND (combined by cloud OR cloud is clear)
-    if has_humid and not combined_humid_flag and not cloud_humid_combined_flag:
-        if final_cloud_text == "clear":
-            is_humid_all_day = (
-                len(humid_periods) == len(period_stats) if period_stats else False
-            )
-            candidate_summaries_for_final_assembly.append(
-                {
-                    "type": "humid",
-                    "priority": 4,
-                    "all_day": is_humid_all_day,
-                    "start_idx": humid_periods[0] if humid_periods else -1,
-                    "text": humid_only_summary,
-                    "icon": None,  # Dry/humid donon't have dedicated icons, fallback to cloud
-                }
-            )
+    # Removed dry/humid candidate insertion to prevent humidity from appearing as a primary summary
 
     # 6. Cloud Cover - as a fallback if no other primary condition is present
     if (

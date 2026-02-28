@@ -12,7 +12,6 @@ from API.PirateTextHelper import (
     calculate_thunderstorm_text,
     calculate_vis_text,
     calculate_wind_text,
-    humidity_sky_text,
 )
 
 
@@ -117,7 +116,6 @@ def calculate_text(
     )
     thuText, thuIcon = calculate_thunderstorm_text(cape, "both", icon, isDayTime)
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
-    humidityText = humidity_sky_text(temp, humidity)
 
     # If there is precipitation text use that and join with thunderstorm or humidity or wind texts if they exist
     if precipText is not None:
@@ -145,9 +143,6 @@ def calculate_text(
                 c_text = windText
         else:
             c_text = ["and", windText, skyText]
-    # If there is the humidity text then join with the sky text
-    elif humidityText is not None:
-        c_text = ["and", humidityText, skyText]
     else:
         c_text = skyText
 

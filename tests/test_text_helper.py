@@ -55,8 +55,3 @@ def test_estimate_snow_density_and_height_vectorized():
     )
     np.testing.assert_allclose(calculated_heights, expected_heights, rtol=1e-6)
 
-
-def test_humidity_sky_text():
-    assert humidity_sky_text(25, 0.96) == "high-humidity"
-    assert humidity_sky_text(10, 0.1) == "low-humidity"
-    assert humidity_sky_text(15, 0.5) is None
