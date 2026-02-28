@@ -32,6 +32,7 @@ AFTERNOON_START = 12
 EVENING_START = 17
 NIGHT_START = 22
 MAX_HOURS = 25
+DEFAULT_HUMIDITY = 0.5
 
 
 def _value_or_default(value, default):
@@ -751,6 +752,9 @@ def calculate_day_text(
     for hour in hours:
         sanitized_hour = dict(hour)
 
+        sanitized_hour["humidity"] = _value_or_default(
+            sanitized_hour.get("humidity", DEFAULT_HUMIDITY), DEFAULT_HUMIDITY
+        )
         sanitized_hour["visibility"] = _value_or_default(
             sanitized_hour.get("visibility", DEFAULT_VISIBILITY), DEFAULT_VISIBILITY
         )
@@ -1495,7 +1499,7 @@ def calculate_day_text(
 
     # Calculate thunderstorm summary if they don't match precipitation periods
     if has_thunderstorm and not thunderstorms_match_precip:
-        thunderstorm_only_summary, _, _, _, _ = calculate_period_summary_text(
+        thunderstorm_only_summary, _, _ = calculate_period_summary_text(
             thunderstorm_periods,
             thunderstorm_summary_text,
             "precip",  # Use precip type since thunderstorms have same priority
@@ -1512,7 +1516,7 @@ def calculate_day_text(
 
     # Calculate summaries for other conditions. The combination flags for them are local to their calls.
     if has_wind:
-        wind_only_summary, _, _, _, _ = calculate_period_summary_text(
+        wind_only_summary, _, _ = calculate_period_summary_text(
             wind_periods,
             calculate_wind_text(overall_max_wind, icon_set, "summary"),
             "wind",
@@ -1530,7 +1534,7 @@ def calculate_day_text(
             overall_cloud_idx_for_wind=overall_cloud_idx,
         )
     if has_vis:
-        vis_only_summary, _, _, _, _ = calculate_period_summary_text(
+        vis_only_summary, _, _ = calculate_period_summary_text(
             vis_periods,
             calculate_vis_text(
                 overall_min_visibility,
@@ -1557,7 +1561,6 @@ def calculate_day_text(
     (
         cloud_full_summary,
         _,
-        cloud_dry_combined_flag,
         cloud_vis_combined_flag,
     ) = calculate_period_summary_text(
         overall_cloud_idx,  # Pass all period indices for cloud to find its pattern
