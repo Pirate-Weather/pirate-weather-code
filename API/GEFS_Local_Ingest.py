@@ -5,17 +5,18 @@
 import os
 import pickle
 import shutil
-import subprocess
 import sys
 import time
 import traceback
 import warnings
 
+import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
+import zarr
 import zarr.storage
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
@@ -25,9 +26,13 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    configure_zarr_limits,
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
+    positive_int_env,
+    run_command,
+    tune_nofile_limit,
     validate_grib_stats,
 )
 
@@ -53,8 +58,14 @@ historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/GEFS"
 save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+zarr_store_workers = positive_int_env("zarr_store_workers", 2)
+zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+tune_nofile_limit()
+zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
+    zarr_store_workers, zarr_async_concurrency
+)
 
 
 # Define the processing and history chunk size
@@ -172,6 +183,7 @@ gefs_range = FORECAST_LEAD_RANGES["GEFS"]
 FH_forecastsubMembers = []
 mem = 0
 failCount = 0
+forecast_time_values = None
 while mem < 30:
     FH_IN = FastHerbie(
         pd.date_range(start=base_time, periods=1, freq="6h"),
@@ -209,7 +221,7 @@ while mem < 30:
     # Perform a check if any data seems to be invalid
     cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-    grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    grib_check = run_command(cmd)
 
     validate_grib_stats(grib_check)
     print("Grib files passed validation, proceeding with processing")
@@ -229,7 +241,7 @@ while mem < 30:
     )
 
     # Run wgrib2 to megre all the grib files
-    sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    sp_out = run_command(cmd)
     if sp_out.returncode != 0:
         print(sp_out.stderr)
         sys.exit()
@@ -276,25 +288,30 @@ while mem < 30:
         chunks={"time": 80, "latitude": process_chunk, "longitude": process_chunk}
     )
 
-    xarray_wgrib.to_zarr(
-        forecast_process_path + "_xr_m" + str(mem + 1) + ".zarr",
-        consolidated=False,
-        mode="w",
-    )
+    forecast_time_values = xarray_wgrib["time"].values
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        xarray_wgrib.to_zarr(
+            forecast_process_path + "_xr_m" + str(mem + 1) + ".zarr",
+            consolidated=False,
+            mode="w",
+            chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+        )
+    xarray_wgrib.close()
 
     # Delete the wgrib netcdf to save space
-    subprocess.run(
-        "rm " + forecast_process_path + "_wgrib2_merged_m" + str(mem + 1) + ".nc",
-        shell=True,
-        capture_output=True,
-        encoding="utf-8",
+    forecast_merged_path = (
+        forecast_process_path + "_wgrib2_merged_m" + str(mem + 1) + ".nc"
     )
+    if os.path.exists(forecast_merged_path):
+        os.remove(forecast_merged_path)
 
     mem += 1
 
 # Create a new time series
-start = xarray_wgrib.time.min().values  # Adjust as necessary
-end = xarray_wgrib.time.max().values  # Adjust as necessary
+if forecast_time_values is None:
+    raise RuntimeError("GEFS forecast processing did not produce any time values.")
+start = np.min(forecast_time_values)  # Adjust as necessary
+end = np.max(forecast_time_values)  # Adjust as necessary
 new_hourly_time = pd.date_range(
     start=start - pd.Timedelta(his_period, "h"), end=end, freq="h"
 )
@@ -307,7 +324,7 @@ stacked_times = np.concatenate(
             end=start - pd.Timedelta(1, "h"),
             freq="3h",
         ),
-        xarray_wgrib.time.values,
+        forecast_time_values,
     )
 )
 
@@ -363,20 +380,22 @@ daskOutput["time"] = daskArrays["time"][1, :]
 for dask_var in probVars:
     # with ProgressBar():
     if dask_var == "time":
-        daskOutput[dask_var].to_zarr(
-            forecast_process_path + "_" + dask_var + ".zarr",
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            overwrite=True,
-            compute=True,
-        )
+        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+            daskOutput[dask_var].to_zarr(
+                forecast_process_path + "_" + dask_var + ".zarr",
+                compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+                overwrite=True,
+                compute=True,
+            )
     else:
-        daskOutput[dask_var].rechunk((80, process_chunk, process_chunk)).to_zarr(
-            forecast_process_path + "_" + dask_var + ".zarr",
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-            overwrite=True,
-            compute=True,
-        )
+        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+            daskOutput[dask_var].rechunk((80, process_chunk, process_chunk)).to_zarr(
+                forecast_process_path + "_" + dask_var + ".zarr",
+                compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+                dtype="float32",
+                overwrite=True,
+                compute=True,
+            )
 
 
 # %% Delete to free memory
@@ -491,9 +510,7 @@ for i in range(his_period, 0, -6):
             + " -s -stats"
         )
 
-        grib_check = subprocess.run(
-            cmd, shell=True, capture_output=True, encoding="utf-8"
-        )
+        grib_check = run_command(cmd)
 
         validate_grib_stats(grib_check)
         print("Grib files passed validation, proceeding with processing")
@@ -513,7 +530,7 @@ for i in range(his_period, 0, -6):
         )
 
         # Run wgrib2 to merge all the grib files
-        sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+        sp_out = run_command(cmd)
         if sp_out.returncode != 0:
             print(sp_out.stderr)
             sys.exit()
@@ -559,19 +576,19 @@ for i in range(his_period, 0, -6):
             chunks={"time": 2, "latitude": 100, "longitude": 100}
         )
 
-        xarray_wgrib.to_zarr(
-            hist_process_path + "_xr_merged_m" + str(mem + 1) + ".zarr",
-            consolidated=False,
-            mode="w",
-        )
+        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+            xarray_wgrib.to_zarr(
+                hist_process_path + "_xr_merged_m" + str(mem + 1) + ".zarr",
+                consolidated=False,
+                mode="w",
+                chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+            )
+        xarray_hist_wgrib.close()
 
         # Delete the netcdf to save space
-        subprocess.run(
-            "rm " + hist_process_path + "_wgrib2_merged_m" + str(mem + 1) + ".nc",
-            shell=True,
-            capture_output=True,
-            encoding="utf-8",
-        )
+        hist_merged_path = hist_process_path + "_wgrib2_merged_m" + str(mem + 1) + ".nc"
+        if os.path.exists(hist_merged_path):
+            os.remove(hist_merged_path)
 
     # Calculate probabilities and standard deviation for historic data
     # Read the merged netcdf files into xarray using the preprocess function, concatenating along the member dimension
@@ -643,7 +660,14 @@ for i in range(his_period, 0, -6):
         # Create local Zarr store
         zarrStore = zarr.storage.LocalStore(local_path)
 
-    xarray_hist_wgrib_prob.to_zarr(store=zarrStore, mode="w", consolidated=False)
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        xarray_hist_wgrib_prob.to_zarr(
+            store=zarrStore,
+            mode="w",
+            consolidated=False,
+            chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+        )
+    xarray_hist_wgrib_merged.close()
 
     # Clear memory
     del xarray_hist_wgrib_prob, xarray_hist_wgrib, xarray_hist_wgrib_merged
@@ -749,9 +773,10 @@ daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
 # Read in stacked 4D array back in
-daskVarArrayListMergeNaN.to_zarr(
-    forecast_process_path + "_stack.zarr", overwrite=True, compute=True
-)
+with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+    daskVarArrayListMergeNaN.to_zarr(
+        forecast_process_path + "_stack.zarr", overwrite=True, compute=True
+    )
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
@@ -795,9 +820,10 @@ zarr_array = zarr.create_array(
 
 # 4. Rechunk it to match the final array
 # 5. Write it out to the zarr array
-daskVarArrayStackDiskInterpPad.round(5).rechunk(
-    (len(probVars), len(hourly_timesUnix), final_chunk, final_chunk)
-).to_zarr(zarr_array, overwrite=True, compute=True)
+with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+    daskVarArrayStackDiskInterpPad.round(5).rechunk(
+        (len(probVars), len(hourly_timesUnix), final_chunk, final_chunk)
+    ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 # Close the zarr
 if save_type == "S3":
