@@ -74,6 +74,9 @@ from API.legacy.summary import (
 from API.minutely.builder import build_minutely_block
 from API.request.grid_indexing import ZarrSources, calculate_grid_indexing
 from API.request.preprocess import prepare_initial_request
+from API.utils.filtering import apply_block_indices as _apply_block_indices
+from API.utils.filtering import apply_blocks_param as _apply_blocks_param
+from API.utils.filtering import parse_indices as _parse_indices
 from API.utils.geo import haversine_distance
 from API.utils.solar import calculate_solar_times
 from API.utils.time_indexing import calculate_time_indexing
@@ -299,6 +302,10 @@ async def PW_Forecast(
     apikey: Union[str, None] = None,
     icon: Union[str, None] = None,
     extraVars: Union[str, None] = None,
+    blocks: Union[str, None] = None,
+    daily_indices: Union[str, None] = None,
+    hourly_indices: Union[str, None] = None,
+    day_night_indices: Union[str, None] = None,
 ) -> dict:
     """
     Main entry point for the Pirate Weather API forecast.
@@ -334,6 +341,11 @@ async def PW_Forecast(
         apikey: The API key used for the request.
         icon: Icon set to use.
         extraVars: Extra variables to include.
+        blocks: CSV allowlist of blocks to include (currently, minutely, hourly, daily,
+            day_night, alerts, flags). Converted to excludes internally.
+        daily_indices: CSV of non-negative integers selecting items from daily.data.
+        hourly_indices: CSV of non-negative integers selecting items from hourly.data.
+        day_night_indices: CSV of non-negative integers selecting items from day_night.data.
 
     Returns:
         dict: The complete weather forecast JSON object.
@@ -357,6 +369,22 @@ async def PW_Forecast(
     # Timing Check
     T_Start = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
     timer = StepTimer(T_Start, TIMING)
+
+    # Convert blocks allowlist to excludes (backward-compatible with existing exclude param)
+    if blocks is not None:
+        exclude, include = _apply_blocks_param(blocks, exclude, include)
+
+    # Parse index filter params early so format errors are reported before heavy processing
+    _indices_params = {
+        "daily": (daily_indices, "daily_indices"),
+        "hourly": (hourly_indices, "hourly_indices"),
+        "day_night": (day_night_indices, "day_night_indices"),
+    }
+    parsed_indices = {
+        block: _parse_indices(raw, name)
+        for block, (raw, name) in _indices_params.items()
+        if raw is not None
+    }
 
     # 1. Parse request parameters and initialize variables
     # This function handles all the input validation and setup
@@ -1163,6 +1191,10 @@ async def PW_Forecast(
 
     # Timing Check
     timer.log("Flags Time")
+
+    # Apply index filtering as the final response-shaping step
+    for block_name, indices in parsed_indices.items():
+        _apply_block_indices(returnOBJ, block_name, indices)
 
     # Replace all MISSING_DATA with -999
     returnOBJ = replace_nan(returnOBJ, -999)
