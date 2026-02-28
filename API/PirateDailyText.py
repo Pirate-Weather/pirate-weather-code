@@ -496,8 +496,6 @@ def calculate_period_summary_text(
     condition_type,
     all_periods,
     all_wind_periods,
-    all_dry_periods,
-    all_humid_periods,
     all_vis_periods,
     max_wind_speed,
     icon_set,
@@ -520,8 +518,6 @@ def calculate_period_summary_text(
     - condition_type (str): The type of condition ("precip", "cloud", "wind", "vis", "dry", "humid").
     - all_periods (list): List of all period names (e.g., ["today-morning", "today-afternoon"]).
     - all_wind_periods (list): Indices of periods with significant wind.
-    - all_dry_periods (list): Indices of periods with low humidity.
-    - all_humid_periods (list): Indices of periods with high humidity.
     - all_vis_periods (list): Indices of periods with low visibility (fog).
     - max_wind_speed (float): Maximum wind speed across all relevant periods.
     - wind_unit (float): The unit conversion for wind speed.
@@ -537,14 +533,10 @@ def calculate_period_summary_text(
     - tuple: A tuple containing:
         - summary_text (list): The textual representation of the condition for the current day/next 24 hours.
         - wind_condition_combined (bool): True if wind was combined with this condition.
-        - dry_condition_combined (bool): True if dry was combined with this condition.
-        - humid_condition_combined (bool): True if humid was combined with this condition.
         - vis_condition_combined (bool): True if visibility was combined with this condition.
     """
     summary_text = None
     wind_condition_combined = False
-    dry_condition_combined = False
-    humid_condition_combined = False
     vis_condition_combined = False
     current_condition_text = condition_text
 
@@ -581,22 +573,6 @@ def calculate_period_summary_text(
         if all_vis_periods and _are_periods_matching(period_indices, all_vis_periods):
             vis_condition_combined = True
             current_condition_text = ["and", current_condition_text, "fog"]
-        # Don't combine humid/dry with thunderstorms
-        has_thunderstorm = _contains_thunderstorm(current_condition_text)
-        if (
-            all_dry_periods
-            and _are_periods_matching(period_indices, all_dry_periods)
-            and not has_thunderstorm
-        ):
-            dry_condition_combined = True
-            current_condition_text = ["and", current_condition_text, "low-humidity"]
-        if (
-            all_humid_periods
-            and _are_periods_matching(period_indices, all_humid_periods)
-            and not has_thunderstorm
-        ):
-            humid_condition_combined = True
-            current_condition_text = ["and", current_condition_text, "high-humidity"]
     elif condition_type == "wind":
         # Check for combination with cloud cover based on passed in cloud data
         if overall_cloud_idx_for_wind and _are_periods_matching(
@@ -610,15 +586,7 @@ def calculate_period_summary_text(
                 overall_cloud_text,  # "clear"
                 current_condition_text,  # "windy" (e.g., calculate_wind_text result)
             ]
-        # Rest of wind combinations (dry/humid)
-        if all_dry_periods and _are_periods_matching(period_indices, all_dry_periods):
-            dry_condition_combined = True
-            current_condition_text = ["and", current_condition_text, "low-humidity"]
-        if all_humid_periods and _are_periods_matching(
-            period_indices, all_humid_periods
-        ):
-            humid_condition_combined = True
-            current_condition_text = ["and", current_condition_text, "high-humidity"]
+        # (Dry/humid combination intentionally omitted to keep summaries concise)
 
     # Get the base time phrase template (e.g., "during", "starting", "for-day")
     time_phrase_structure = _get_time_phrase(
@@ -720,8 +688,6 @@ def calculate_period_summary_text(
     return (
         summary_text,
         wind_condition_combined,
-        dry_condition_combined,
-        humid_condition_combined,
         vis_condition_combined,
     )
 
@@ -764,8 +730,6 @@ def calculate_day_text(
     # Initialize combination flags to False at the top level, as they track which
     # conditions have been "subsumed" by a higher-priority combined summary.
     combined_vis_flag = False
-    combined_dry_flag = False
-    combined_humid_flag = False
     combined_wind_flag = False
     overall_min_temp_dewpoint_spread = float("inf")
     overall_temp_at_min_spread = 0.0
@@ -1071,8 +1035,6 @@ def calculate_day_text(
     thunderstorm_periods = []
     vis_periods = []
     wind_periods = []
-    humid_periods = []
-    dry_periods = []
     cloud_levels = []
 
     # Initialize overall accumulation and max values for the entire forecast block
@@ -1499,8 +1461,6 @@ def calculate_day_text(
     has_thunderstorm = bool(thunderstorm_periods)
     has_wind = bool(wind_periods)
     has_vis = bool(vis_periods)
-    has_dry = bool(dry_periods)
-    has_humid = bool(humid_periods)
 
     # Calculate thunderstorm text if thunderstorms occur
     thunderstorm_summary_text = None
@@ -1527,8 +1487,6 @@ def calculate_day_text(
     thunderstorm_only_summary = None
     wind_only_summary = None
     vis_only_summary = None
-    dry_only_summary = None
-    humid_only_summary = None
     cloud_full_summary = None
 
     # Calculate summary text for each condition type, passing all relevant periods for combination logic
@@ -1538,8 +1496,6 @@ def calculate_day_text(
         (
             precip_only_summary,
             temp_wind_combined,
-            temp_dry_combined,
-            temp_humid_combined,
             temp_vis_combined,
         ) = calculate_period_summary_text(
             precip_periods,
@@ -1547,8 +1503,6 @@ def calculate_day_text(
             "precip",
             all_period_names,
             wind_periods,
-            dry_periods,
-            humid_periods,
             vis_periods,
             overall_max_wind,
             icon_set,
@@ -1559,8 +1513,6 @@ def calculate_day_text(
         )
         # These flags indicate if the *higher priority* summary (precip) consumed these conditions.
         combined_wind_flag = temp_wind_combined
-        combined_dry_flag = temp_dry_combined
-        combined_humid_flag = temp_humid_combined
         combined_vis_flag = temp_vis_combined
 
     # Calculate thunderstorm summary if they don't match precipitation periods
@@ -1571,8 +1523,6 @@ def calculate_day_text(
             "precip",  # Use precip type since thunderstorms have same priority
             all_period_names,
             wind_periods,
-            dry_periods,
-            humid_periods,
             vis_periods,
             overall_max_wind,
             icon_set,
@@ -1590,8 +1540,6 @@ def calculate_day_text(
             "wind",
             all_period_names,
             [],
-            dry_periods,
-            humid_periods,
             [],  # Wind can combine with dry/humid
             overall_max_wind,
             icon_set,
@@ -1619,8 +1567,6 @@ def calculate_day_text(
             all_period_names,
             [],
             [],
-            [],
-            [],
             overall_max_wind,
             icon_set,
             0,
@@ -1643,8 +1589,6 @@ def calculate_day_text(
         "cloud",
         all_period_names,
         wind_periods,
-        dry_periods,
-        humid_periods,
         vis_periods,
         overall_max_wind,
         icon_set,

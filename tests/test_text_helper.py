@@ -10,7 +10,6 @@ from API.PirateTextHelper import (
     calculate_sky_icon,
     estimate_snow_density,
     estimate_snow_height,
-    humidity_sky_text,
 )
 
 
@@ -54,4 +53,3 @@ def test_estimate_snow_density_and_height_vectorized():
         liquid_mm, temperatures_c, wind_speeds_mps
     )
     np.testing.assert_allclose(calculated_heights, expected_heights, rtol=1e-6)
-

@@ -627,4 +627,3 @@ def test_thunderstorms_dont_combine_with_humidity():
     # Verify humidity doesn't appear in the text
     summary_str = str(summary_text)
     assert "humidity" not in summary_str.lower()
-

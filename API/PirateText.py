@@ -124,23 +124,14 @@ def calculate_text(
         elif windText is not None:
             c_text = ["and", precipText, windText]
         else:
-            if humidityText is not None:
-                c_text = ["and", precipText, humidityText]
-            else:
-                c_text = precipText
+            c_text = precipText
     # If there is visibility text then use that and join with humidity if it exists
     elif visText is not None and windText is None:
-        if humidityText is not None:
-            c_text = ["and", visText, humidityText]
-        else:
-            c_text = visText
+        c_text = visText
     # If there is wind text use that. If the skies are clear then join with humidity text if it exists otherwise just use the wind text
     elif windText is not None:
         if skyText == "clear":
-            if humidityText is not None:
-                c_text = ["and", windText, humidityText]
-            else:
-                c_text = windText
+            c_text = windText
         else:
             c_text = ["and", windText, skyText]
     else:
