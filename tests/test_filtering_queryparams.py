@@ -60,7 +60,15 @@ class TestAllBlocks:
     """Tests for ALL_BLOCKS constant."""
 
     def test_contains_all_expected_blocks(self):
-        expected = {"currently", "minutely", "hourly", "daily", "day_night", "alerts", "flags"}
+        expected = {
+            "currently",
+            "minutely",
+            "hourly",
+            "daily",
+            "day_night",
+            "alerts",
+            "flags",
+        }
         assert ALL_BLOCKS == expected
 
     def test_is_frozenset(self):
