@@ -12,7 +12,6 @@ from API.constants.text_const import (
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM,
     DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
-    DEFAULT_HUMIDITY,
     DEFAULT_POP,
     DEFAULT_VISIBILITY,
     LESS_THAN_TOLERANCE,
@@ -25,7 +24,6 @@ from API.PirateTextHelper import (
     calculate_vis_text,
     calculate_wind_text,
     estimate_snow_height,
-    humidity_sky_text,
     most_common,
 )
 
@@ -503,19 +501,18 @@ def calculate_period_summary_text(
     mode,
     later_conditions,
     today_period_for_later_check,
-    # New parameters for cloud-wind/dry/humid combination
     overall_cloud_text=None,  # Added for wind to combine with cloud
     overall_cloud_idx_for_wind=None,  # Added for wind to combine with cloud
 ):
     """
-    Calculates the textual summary for a specific condition (precip, cloud, wind, vis, dry, humid)
+    Calculates the textual summary for a specific condition (precip, cloud, wind, vis)
     across a set of periods.
     Wind speed is expected in SI units (m/s).
 
     Parameters:
     - period_indices (list): List of indices where the condition is present.
     - condition_text (str): The base text for the condition (e.g., "light-rain", "fog").
-    - condition_type (str): The type of condition ("precip", "cloud", "wind", "vis", "dry", "humid").
+    - condition_type (str): The type of condition ("precip", "cloud", "wind", "vis").
     - all_periods (list): List of all period names (e.g., ["today-morning", "today-afternoon"]).
     - all_wind_periods (list): Indices of periods with significant wind.
     - all_vis_periods (list): Indices of periods with low visibility (fog).
@@ -586,7 +583,6 @@ def calculate_period_summary_text(
                 overall_cloud_text,  # "clear"
                 current_condition_text,  # "windy" (e.g., calculate_wind_text result)
             ]
-        # (Dry/humid combination intentionally omitted to keep summaries concise)
 
     # Get the base time phrase template (e.g., "during", "starting", "for-day")
     time_phrase_structure = _get_time_phrase(
@@ -755,9 +751,6 @@ def calculate_day_text(
     for hour in hours:
         sanitized_hour = dict(hour)
 
-        sanitized_hour["humidity"] = _value_or_default(
-            sanitized_hour.get("humidity", DEFAULT_HUMIDITY), DEFAULT_HUMIDITY
-        )
         sanitized_hour["visibility"] = _value_or_default(
             sanitized_hour.get("visibility", DEFAULT_VISIBILITY), DEFAULT_VISIBILITY
         )
@@ -833,7 +826,6 @@ def calculate_day_text(
             # Initialize an empty data structure for this new unique period name
             standard_periods_data[period_name_for_iter] = {
                 "num_hours_fog": 0,
-                "num_hours_dry": 0,
                 "num_hours_wind": 0,
                 "num_hours_thunderstorm": 0,
                 "rain_accum": 0.0,
@@ -848,7 +840,6 @@ def calculate_day_text(
                 "cloud_cover_sum": 0.0,
                 "max_wind_speed": 0.0,
                 "period_length": 0,
-                "num_hours_humid": 0,
                 "precip_types_in_period": [],
                 "precip_accum_sum": 0.0,
                 "precip_hours_count": 0,
@@ -908,16 +899,6 @@ def calculate_day_text(
                 period_data["min_visibility"], hour["visibility"]
             )
 
-            if (
-                humidity_sky_text(hour["temperature"], hour["humidity"])
-                == "high-humidity"
-            ):
-                period_data["num_hours_humid"] += 1
-            if (
-                humidity_sky_text(hour["temperature"], hour["humidity"])
-                == "low-humidity"
-            ):
-                period_data["num_hours_dry"] += 1
             if (
                 calculate_vis_text(
                     hour["visibility"],
@@ -1118,7 +1099,6 @@ def calculate_day_text(
             and p_data["num_hours_fog"] >= (min(p_data["period_length"] / 2, 3))
         ):
             vis_periods.append(i)
-        # Dry/humid detection intentionally omitted to avoid verbose humidity summaries
 
         # Get cloud level for this period
         _, cloud_level = calculate_cloud_text(p_data["avg_cloud_cover"])
@@ -1454,8 +1434,6 @@ def calculate_day_text(
                 all_period_names[0] = "later-" + all_period_names[0]
                 later_conditions_list.append("wind")
 
-        # Dry/humid 'later' checks removed to reduce verbosity
-
     # Flags to indicate if a condition is present at all in the forecast block
     has_precip = bool(precip_periods) and precip_summary_text is not None
     has_thunderstorm = bool(thunderstorm_periods)
@@ -1540,7 +1518,7 @@ def calculate_day_text(
             "wind",
             all_period_names,
             [],
-            [],  # Wind can combine with dry/humid
+            [],
             overall_max_wind,
             icon_set,
             0,
@@ -1574,14 +1552,12 @@ def calculate_day_text(
             later_conditions_list,
             today_period_for_later_check,
         )
-    # Dry/humid individual summaries removed to keep final summary concise
 
-    # Cloud full summary, including potential combinations with wind/dry/humid/vis
+    # Cloud full summary, including potential combinations with wind/vis
     (
         cloud_full_summary,
         _,
         cloud_dry_combined_flag,
-        cloud_humid_combined_flag,
         cloud_vis_combined_flag,
     ) = calculate_period_summary_text(
         overall_cloud_idx,  # Pass all period indices for cloud to find its pattern
@@ -1684,8 +1660,6 @@ def calculate_day_text(
                 "icon": calculate_wind_text(overall_max_wind, icon_set, "icon"),
             }
         )
-
-    # Dry/humid candidates removed to avoid adding humidity as primary summaries
 
     # 6. Cloud Cover - as a fallback if no other primary condition is present
     if (
