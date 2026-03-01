@@ -58,6 +58,7 @@ def replace_nan(obj, replacement=MISSING_DATA):
     else:
         return obj
 
+
 def _solar_invalid(solar_val) -> bool:
     """Return True if `solar_val` should be considered missing/invalid.
 
