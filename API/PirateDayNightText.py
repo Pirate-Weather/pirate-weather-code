@@ -1168,7 +1168,7 @@ def calculate_half_day_text(
             }
         )
 
-    # 4 . Cloud Cover - as a fallback if no other primary condition is present
+    # 4. Cloud Cover - as a fallback if no other primary condition is present
     if (
         not candidate_summaries_for_final_assembly
     ):  # If no higher-priority conditions are present
