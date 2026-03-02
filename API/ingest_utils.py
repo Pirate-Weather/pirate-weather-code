@@ -3,7 +3,6 @@
 
 import logging
 import re
-import sys
 import time
 from typing import Iterable, Optional, Union
 

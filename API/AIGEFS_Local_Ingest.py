@@ -168,12 +168,12 @@ while mem < 31:
         pd.date_range(start=base_time, periods=1, freq="6h"),
         model="aigefs",
         fxx=aigefs_range,
-        member='mem' + str(mem).zfill(3),
+        member="mem" + str(mem).zfill(3),
         product="sfc",
         verbose=True,
         priority=["aws", "nomads"],
         save_dir=tmp_dir,
-        max_threads=20
+        max_threads=20,
     )
 
     # Check for download length
@@ -187,15 +187,11 @@ while mem < 31:
 
         continue
 
-
     # Download and process the subsets
     FH_IN.download(verbose=True, max_threads=20, overwrite=True)
 
     # Create list of downloaded grib files
-    grib_list = [
-        str(Path(x.get_localFilePath()).expand())
-        for x in FH_IN.file_exists
-    ]
+    grib_list = [str(Path(x.get_localFilePath()).expand()) for x in FH_IN.file_exists]
 
     # Perform a check if any data seems to be invalid
     cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
@@ -462,7 +458,7 @@ for i in range(his_period, 0, -6):
                 DATES,
                 model="aigefs",
                 fxx=[6],
-                member='mem' + str(mem).zfill(3),
+                member="mem" + str(mem).zfill(3),
                 product="sfc",
                 verbose=False,
                 priority=["aws", "nomads"],
@@ -583,7 +579,12 @@ for i in range(his_period, 0, -6):
         preprocess=preprocess,
         combine="nested",
         concat_dim="member",
-        chunks={"member": 30, "time": 1, "latitude": process_chunk, "longitude": process_chunk},
+        chunks={
+            "member": 30,
+            "time": 1,
+            "latitude": process_chunk,
+            "longitude": process_chunk,
+        },
         consolidated=False,
     )
 
@@ -641,7 +642,6 @@ for i in range(his_period, 0, -6):
         done_file = local_path.replace(".zarr", ".done")
         with open(done_file, "w") as f:
             f.write("Done")
-
 
 
 # %% Merge the historic and forecast datasets and then squash using dask
