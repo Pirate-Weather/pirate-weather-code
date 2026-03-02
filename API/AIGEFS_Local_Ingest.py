@@ -105,7 +105,7 @@ latest_run = HerbieLatest(
 )
 
 base_time = latest_run.date
-# base_time = pd.Timestamp("2026-02-26 12:00:00")
+base_time = pd.Timestamp("2026-03-02 06:00:00")
 
 logger.info(base_time)
 
@@ -154,14 +154,14 @@ probVars = (
 # %% Download forecast data for mean and spread products
 
 # Merge matchstrings for download
-match_strings = "(:APCP:surface:)"
+match_strings = ":APCP:surface:"
 
 # Create a range of forecast lead times
 aigefs_range = FORECAST_LEAD_RANGES["AIGEFS"]
 
 
 # Create FastHerbie object for all 30 members
-mem = 0
+mem = 1
 failCount = 0
 while mem < 31:
     FH_IN = FastHerbie(
@@ -173,12 +173,12 @@ while mem < 31:
         verbose=True,
         priority=["aws", "nomads"],
         save_dir=tmp_dir,
-        max_threads=1
+        max_threads=20
     )
 
     # Check for download length
     if len(FH_IN.file_exists) != 40:
-        logger.warning("Member %d has not downloaded all files, trying again", mem + 1)
+        logger.warning("Member %d has not downloaded all files, trying again", mem)
         failCount += 1
 
         # Break after 10 failed attempts
@@ -189,11 +189,11 @@ while mem < 31:
 
 
     # Download and process the subsets
-    FH_IN.download(match_strings, verbose=True, max_threads=1)
+    FH_IN.download(verbose=True, max_threads=20, overwrite=True)
 
     # Create list of downloaded grib files
     grib_list = [
-        str(Path(x.get_localFilePath(match_strings)).expand())
+        str(Path(x.get_localFilePath()).expand())
         for x in FH_IN.file_exists
     ]
 
@@ -202,8 +202,19 @@ while mem < 31:
 
     grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
 
-    validate_grib_stats(grib_check)
-    logger.info("Grib files passed validation, proceeding with processing")
+    val_check = validate_grib_stats(grib_check)
+
+    if not val_check:
+        logger.warning("Member %d has not downloaded all files, trying again", mem)
+        failCount += 1
+
+        # Break after 10 failed attempts
+        if failCount > 10:
+            break
+
+        continue
+    else:
+        logger.info("Grib files passed validation, proceeding with processing")
 
     # Create a string to pass to wgrib2 to merge all gribs into one grib
     cmd = (
@@ -212,6 +223,7 @@ while mem < 31:
         + " | "
         + f"{wgrib2_path}"
         + " - "
+        + '-match ":APCP:surface:" '
         + "-netcdf "
         + forecast_process_path
         + "_wgrib2_merged_m"
@@ -238,12 +250,28 @@ while mem < 31:
     # Get a list of all variables in the dataset
     wgribVars = list(xarray_wgrib.data_vars)
 
+    # Keep only APCP_surface, dropping all other variables to save space and speed up processing
+    # xarray_wgrib = xarray_wgrib[["time", "APCP_surface"]]
+
+    # Check that there are 40 timesteps in the array
+    if xarray_wgrib.dims["time"] != 40:
+        logger.warning("Member %d does not have 40 timesteps, trying again", mem)
+        # Print the number of timesteps for debugging
+        logger.warning("Member %d has %d timesteps", mem, xarray_wgrib.dims["time"])
+        failCount += 1
+
+        # Break after 10 failed attempts
+        if failCount > 10:
+            break
+
+        continue
+
     xarray_wgrib = xarray_wgrib.chunk(
-        chunks={"time": 80, "latitude": process_chunk, "longitude": process_chunk}
+        chunks={"time": 40, "latitude": process_chunk, "longitude": process_chunk}
     )
 
     xarray_wgrib.to_zarr(
-        forecast_process_path + "_xr_m" + str(mem + 1) + ".zarr",
+        forecast_process_path + "_xr_m" + str(mem) + ".zarr",
         consolidated=False,
         mode="w",
     )
@@ -259,7 +287,7 @@ while mem < 31:
     mem += 1
 
     # Pause for 10 seconds to avoid overwhelming NOMADS
-    time.sleep(10)
+    time.sleep(2)
 
 # Create a new time series
 start = xarray_wgrib.time.min().values  # Adjust as necessary
@@ -332,7 +360,7 @@ for dask_var in probVars:
             compute=True,
         )
     else:
-        daskOutput[dask_var].rechunk((80, process_chunk, process_chunk)).to_zarr(
+        daskOutput[dask_var].rechunk((40, process_chunk, process_chunk)).to_zarr(
             forecast_process_path + "_" + dask_var + ".zarr",
             compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
             dtype="float32",
@@ -341,7 +369,6 @@ for dask_var in probVars:
         )
 
 
-# %% Delete to free memory (keep only existing variables)
 # %% Delete to free memory
 del xarray_wgrib, daskOutput, daskArrays
 
@@ -427,9 +454,8 @@ for i in range(his_period, 0, -6):
         freq="6h",
     )
 
-    # Create a range of forecast lead times
-    # Forward looking, so 00Z forecast is from 03Z
-    # This is what we want for accumulation variables
+    ### Find all the model runs
+    FH_forecastsubMembers = []
     for mem in range(1, 31):
         FH_forecastsubMembers.append(
             FastHerbie(
@@ -444,14 +470,16 @@ for i in range(his_period, 0, -6):
             )
         )
 
-    # Download the subsets
-    for mem in range(1, 31):
+    ### Download the members and merge
+    mem = 1
+    failCount = 0
+    while mem < 31:
         # Download the subsets
-        FH_forecastsubMembers[mem].download(match_strings, verbose=False)
+        FH_forecastsubMembers[mem - 1].download(verbose=False, overwrite=True)
         # Create list of downloaded grib files
         grib_list = [
-            str(Path(x.get_localFilePath(match_strings)).expand())
-            for x in FH_forecastsubMembers[mem].file_exists
+            str(Path(x.get_localFilePath()).expand())
+            for x in FH_forecastsubMembers[mem - 1].file_exists
         ]
 
         # Perform a check if any data seems to be invalid
@@ -468,8 +496,18 @@ for i in range(his_period, 0, -6):
             cmd, shell=True, capture_output=True, encoding="utf-8"
         )
 
-        validate_grib_stats(grib_check)
-        logger.info("Grib files passed validation, proceeding with processing")
+        val_check = validate_grib_stats(grib_check)
+        if not val_check:
+            logger.warning("Member %d has not downloaded all files, trying again", mem)
+            failCount += 1
+
+            # Break after 10 failed attempts
+            if failCount > 10:
+                break
+
+            continue
+        else:
+            logger.info("Grib files passed validation, proceeding with processing")
 
         # Create a string to pass to wgrib2 to merge all gribs into one grib
         cmd = (
@@ -478,6 +516,7 @@ for i in range(his_period, 0, -6):
             + " | "
             + f"{wgrib2_path}"
             + " - "
+            + '-match ":APCP:surface:" '
             + "-netcdf "
             + hist_process_path
             + "_wgrib2_merged_m"
@@ -489,18 +528,18 @@ for i in range(his_period, 0, -6):
         sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
         if sp_out.returncode != 0:
             logger.error(sp_out.stderr)
-            sys.exit()
+            failCount += 1
+
+            # Break after 10 failed attempts
+            if failCount > 10:
+                break
+
+            continue
 
         # Open the NetCDF file with xarray to process and compress
         xarray_hist_wgrib = xr.open_dataset(
             hist_process_path + "_wgrib2_merged_m" + str(mem) + ".nc"
         )
-
-        # Change from 3 and 6 hour accumulations to 3 hour accumulations
-        apcp_hist_diff_xr = xarray_hist_wgrib["APCP_surface"].diff(dim="time")
-        xarray_hist_wgrib["APCP_surface"][slice(1, None, 2), :, :] = apcp_hist_diff_xr[
-            slice(0, None, 2), :, :
-        ]
 
         # Sometimes there will be weird negative values, set them to zero
         xarray_hist_wgrib["APCP_surface"] = np.maximum(
@@ -514,7 +553,7 @@ for i in range(his_period, 0, -6):
         wgribVars = list(xarray_hist_wgrib.data_vars)
 
         xarray_wgrib = xarray_hist_wgrib.chunk(
-            chunks={"time": 2, "latitude": 100, "longitude": 100}
+            chunks={"time": 1, "latitude": process_chunk, "longitude": process_chunk}
         )
 
         xarray_wgrib.to_zarr(
@@ -531,7 +570,9 @@ for i in range(his_period, 0, -6):
             encoding="utf-8",
         )
 
-    # Calculate probabilities and standard deviation for historic data
+        mem += 1
+
+    ### Merge all the members together and calculate probabilities and standard deviation
     # Read the merged netcdf files into xarray using the preprocess function, concatenating along the member dimension
     xarray_hist_wgrib_merged = xr.open_mfdataset(
         [
@@ -542,7 +583,7 @@ for i in range(his_period, 0, -6):
         preprocess=preprocess,
         combine="nested",
         concat_dim="member",
-        chunks={"member": 30, "time": 2, "latitude": 100, "longitude": 100},
+        chunks={"member": 30, "time": 1, "latitude": process_chunk, "longitude": process_chunk},
         consolidated=False,
     )
 

@@ -183,7 +183,7 @@ def validate_grib_stats(gribCheck):
     # ensure we found at least one variable
     if not varNames:
         logger.error("Error: no variables found in GRIB stats output.")
-        sys.exit(10)
+        return False
 
     # extract forecast lead times (6th field)
     varTimes = re.findall(r"(?m)^(?:[^:]+:){5}([^:]+):", gribCheck.stdout)
@@ -204,7 +204,9 @@ def validate_grib_stats(gribCheck):
             logger.error("  Min/Max  : %s / %s", minValues[i], maxValues[i])
             logger.error("---")
         logger.error("Exiting due to invalid data in grib files.")
-        sys.exit(10)
+
+        # Return False to indicate validation failure, allowing caller to handle exit or retry logic
+        return False
 
     else:
         logger.info("All grib files passed validation checks.")
