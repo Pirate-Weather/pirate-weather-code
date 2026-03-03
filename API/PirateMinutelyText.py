@@ -253,9 +253,28 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
         c_icon = PRECIP_TYPES["mixed"]
     # If there is two precipitation types for the hour
     elif len(starts) == 2:
+        # When one of the two types is 'none' (unclassified precip) and a specific type
+        # (rain, snow, sleet, ice) is also present, use the specific type for more accurate
+        # text generation. Also combine the intensities of the 'none' and specific-type
+        # minutes so the severity description reflects the full precipitation.
+        text_precip_type = first_precip
+        eff_rain = rainMaxIntensity
+        if first_precip == PRECIP_TYPES["none"]:
+            if rainIndex:
+                text_precip_type = PRECIP_TYPES["rain"]
+                eff_rain = max(rainMaxIntensity, noneMaxIntensity)
+            elif snowIndex:
+                text_precip_type = PRECIP_TYPES["snow"]
+                snowMaxIntensity = max(snowMaxIntensity, noneMaxIntensity)
+            elif sleetIndex:
+                text_precip_type = PRECIP_TYPES["sleet"]
+                sleetMaxIntensity = max(sleetMaxIntensity, noneMaxIntensity)
+            elif iceIndex:
+                text_precip_type = PRECIP_TYPES["ice"]
+                sleetMaxIntensity = max(sleetMaxIntensity, noneMaxIntensity)
         # Calculate the precipitation text and icon (all in SI units: mm/h)
         text, c_icon = calculate_precip_text(
-            first_precip,
+            text_precip_type,
             "minute",
             0,
             0,
@@ -263,7 +282,7 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
             1,
             icon=icon,
             mode="both",
-            eff_rain_intensity=rainMaxIntensity,
+            eff_rain_intensity=eff_rain,
             eff_snow_intensity=snowMaxIntensity,
             eff_ice_intensity=sleetMaxIntensity,
         )

@@ -233,3 +233,57 @@ def test_minutely_thunderstorm_just_below_threshold():
     # Should show normal rain, not thunderstorms
     assert text == ["for-hour", "medium-rain"]
     assert icon == "rain"
+
+
+def test_minutely_heavy_rain_uses_max_intensity():
+    """
+    Test that when rain intensity increases from light to heavy during the hour,
+    the summary uses the maximum (heavy) intensity, not the starting intensity.
+    This covers a real-world scenario where some data sources report 'none' type
+    at low intensities before transitioning to 'rain' type at higher intensities.
+    """
+    # Rain ramps from 1 mm/h to 11 mm/h over 40 minutes, then decreases
+    # Early minutes use 'none' type (common in data sources at low intensity)
+    minute_arr = []
+    for i in range(61):
+        if i <= 40:
+            intensity = 1.0 + 10.0 * i / 40  # 1 → 11 mm/h
+        else:
+            intensity = 11.0 - 10.0 * (i - 40) / 21  # 11 → ~1 mm/h
+        # Data sources often use 'none' for precipitation below mid threshold
+        ptype = "none" if intensity < 2.5 else "rain"
+        minute_arr.append({"precipIntensity": intensity, "precipType": ptype})
+
+    text, icon = calculate_minutely_text(
+        minuteArr=minute_arr,
+        currentText="clear",
+        currentIcon="clear-day",
+        icon="darksky",
+        maxCAPE=0,
+    )
+
+    # Should use "heavy-rain" because max intensity is 11 mm/h (above 10 mm/h threshold)
+    assert text == ["for-hour", "heavy-rain"], f"Expected heavy-rain but got {text}"
+    assert icon == "rain"
+
+
+def test_minutely_none_type_with_rain_uses_rain_text():
+    """
+    Test that when 'none' type precipitation starts before 'rain' type,
+    the summary uses rain-specific text rather than generic 'precipitation'.
+    """
+    # First 20 minutes: 'none' type at low intensity
+    # Next 41 minutes: 'rain' type at moderate intensity
+    minute_arr = [create_minute_with_rain(1.0, "none") for _ in range(20)]
+    minute_arr.extend([create_minute_with_rain(5.0, "rain") for _ in range(41)])
+
+    text, icon = calculate_minutely_text(
+        minuteArr=minute_arr,
+        currentText="clear",
+        currentIcon="clear-day",
+        icon="darksky",
+        maxCAPE=0,
+    )
+
+    # Should use "medium-rain" (5 mm/h), not "medium-precipitation"
+    assert text == ["for-hour", "medium-rain"], f"Expected medium-rain but got {text}"
