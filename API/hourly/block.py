@@ -38,6 +38,7 @@ from API.constants.clip_const import (
 )
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
 from API.constants.shared_const import MISSING_DATA
+from API.constants.text_const import DEFAULT_VISIBILITY
 from API.legacy.hourly import apply_legacy_hourly_text
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
@@ -535,14 +536,6 @@ def _calculate_derived_metrics(
     dayZeroSnow = dayZeroPrepSnow.sum()
     dayZeroIce = dayZeroPrepSleet.sum()
 
-    if not timeMachine:
-        InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["intensity"]] = 0
-        InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["accum"]] = 0
-        InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["rain"]] = 0
-        InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["snow"]] = 0
-        InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["ice"]] = 0
-        InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["prob"]] = 0
-
     InterPhour[:, DATA_HOURLY["rain_intensity"]] = 0
     InterPhour[:, DATA_HOURLY["snow_intensity"]] = 0
     InterPhour[:, DATA_HOURLY["ice_intensity"]] = 0
@@ -955,6 +948,21 @@ def build_hourly_block(
         station_pressure_inputs,
     )
 
+    # Zero out past precipitation in the display data so the API response does not
+    # show precipitation that has already occurred, while keeping the data in
+    # InterPhour so that summary text generators can use the full-day pattern.
+    if not timeMachine:
+        past = int(baseTimeOffset)
+        hourly_display[0:past, DATA_HOURLY["intensity"]] = 0
+        hourly_display[0:past, DATA_HOURLY["accum"]] = 0
+        hourly_display[0:past, DATA_HOURLY["rain"]] = 0
+        hourly_display[0:past, DATA_HOURLY["snow"]] = 0
+        hourly_display[0:past, DATA_HOURLY["ice"]] = 0
+        hourly_display[0:past, DATA_HOURLY["prob"]] = 0
+        hourly_display[0:past, DATA_HOURLY["rain_intensity"]] = 0
+        hourly_display[0:past, DATA_HOURLY["snow_intensity"]] = 0
+        hourly_display[0:past, DATA_HOURLY["ice_intensity"]] = 0
+
     (
         hourList,
         hourList_si,
@@ -977,6 +985,19 @@ def build_hourly_block(
         extraVars=extraVars,
         version=version,
     )
+
+    # Zero out past fog and wind in the SI list used by summary text generators so
+    # that already-elapsed conditions (fog, wind) are not reflected in the day or
+    # day/night forecast summary.  Precipitation data is intentionally left intact
+    # so that the full-day precipitation pattern (e.g. "snow all day") is preserved.
+    # DEFAULT_VISIBILITY (10 000 m) is used for visibility because it represents a
+    # clear-air baseline that will not trigger fog detection in the text generators.
+    # Wind is set to 0.0 so that no "windy" condition is reported for past hours.
+    if not timeMachine:
+        past = int(baseTimeOffset)
+        for i in range(min(past, len(hourList_si))):
+            hourList_si[i]["visibility"] = float(DEFAULT_VISIBILITY)
+            hourList_si[i]["windSpeed"] = 0.0
 
     return (
         hourList,

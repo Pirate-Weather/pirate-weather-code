@@ -1,4 +1,5 @@
 import datetime
+import logging
 import math
 
 import numpy as np
@@ -33,6 +34,8 @@ EVENING_START = 17
 NIGHT_START = 22
 MAX_HOURS = 25
 DEFAULT_HUMIDITY = 0.5
+
+_log = logging.getLogger(__name__)
 
 
 def _value_or_default(value, default):
@@ -719,6 +722,14 @@ def calculate_day_text(
         - c_icon (str): The icon representing the current day/next 24 hours.
         - summary_text (list): The textual representation of the current day/next 24 hours.
     """
+
+    _log.debug(
+        "calculate_day_text called: mode=%s, hours=%d, tz=%s, is_day_time=%s",
+        mode,
+        len(hours),
+        time_zone,
+        is_day_time,
+    )
 
     # Initialize return variables to prevent UnboundLocalError
     final_constructed_summary = None
@@ -1724,7 +1735,11 @@ def calculate_day_text(
             overall_avg_cloud_cover, is_day_time, icon_set
         )
 
-    # print(period_stats)
+    _log.debug(
+        "calculate_day_text result: icon=%s, summary=%s",
+        current_c_icon,
+        final_constructed_summary,
+    )
 
     return current_c_icon, final_constructed_summary
 

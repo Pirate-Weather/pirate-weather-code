@@ -1,5 +1,6 @@
 # %% Script to contain the functions that can be used to generate the minutely text summary of the forecast data for Pirate Weather
 
+import logging
 from itertools import groupby
 from operator import itemgetter
 
@@ -11,6 +12,8 @@ from API.PirateTextHelper import calculate_precip_text
 
 # Number of minutes in an hour
 MINUTES_IN_HOUR = 60
+
+_log = logging.getLogger(__name__)
 
 
 def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
@@ -106,6 +109,12 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
     - c_text (arr): The precipitation summary for the hour.
     - c_icon (str): The icon representing the conditions for the hour.
     """
+
+    _log.debug(
+        "calculate_minutely_text called: minutes=%d, maxCAPE=%s",
+        len(minuteArr),
+        maxCAPE,
+    )
 
     # Variables to use in calculating the minutely summary
     c_icon = c_text = None
@@ -427,6 +436,14 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
     # If we have no icon fallback to the current icon
     if c_icon is None:
         c_icon = currentIcon
+
+    _log.debug(
+        "calculate_minutely_text result: text=%s, icon=%s, rainMax=%.3f, snowMax=%.3f",
+        c_text,
+        c_icon,
+        rainMaxIntensity,
+        snowMaxIntensity,
+    )
 
     # Check for thunderstorms: if CAPE > 2500 and there's precipitation, replace summary with thunderstorm
     if maxCAPE >= CAPE_THRESHOLDS["high"] and precipIndex:
