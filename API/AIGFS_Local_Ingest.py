@@ -29,6 +29,8 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    archive_tmp_zarr_and_upload,
+    download_extract_historic_archive,
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
@@ -309,30 +311,13 @@ for i in range(his_period, 0, -6):
             historic_path
             + "/AIGFS_Hist"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr"
+            + ".zarr.tar.gz"
         )
 
         # Check for a done file in S3
-        if s3.exists(s3_path.replace(".zarr", ".done")):
+        if s3.exists(s3_path.replace(".tar.gz", ".done")):
             logger.info("File already exists in S3, skipping download for: %s", s3_path)
-            # If the file exists, check that it works
-            try:
-                hisCheckStore = zarr.storage.FsspecStore.from_url(
-                    s3_path,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-                zarr.open(hisCheckStore)[zarr_vars[-1]][-1, -1, -1]
-                continue  # If it exists, skip to the next iteration
-            except Exception:
-                logger.error("### Historic Data Failure!")
-                logger.exception("Exception processing historic data", exc_info=True)
-
-                # Delete the file if it exists
-                if s3.exists(s3_path):
-                    s3.rm(s3_path)
+            continue
     else:
         # Local Path Setup
         local_path = (
@@ -431,18 +416,7 @@ for i in range(his_period, 0, -6):
     # Define the path to save the zarr dataset with the run time in the filename
     # format the time following iso8601
 
-    # Save as Zarr to s3 for Time Machine
-    if save_type == "S3":
-        zarrStore = zarr.storage.FsspecStore.from_url(
-            s3_path,
-            storage_options={
-                "key": aws_access_key_id,
-                "secret": aws_secret_access_key,
-            },
-        )
-    else:
-        # Create local Zarr store
-        zarrStore = zarr.storage.LocalStore(local_path)
+    hist_tmp_zarr_path = hist_process_path + "_AIGFS_Hist_TMP.zarr"
 
     # Save the dataset with compression and filters for all variables
     # Use the same encoding as last time but with larger chunks to speed up read times
@@ -453,7 +427,7 @@ for i in range(his_period, 0, -6):
 
     # with ProgressBar():
     xarray_hist_merged.to_zarr(
-        store=zarrStore, mode="w", consolidated=False, encoding=encoding
+        hist_tmp_zarr_path, mode="w", consolidated=False, encoding=encoding
     )
 
     # Clear the xarray dataset from memory
@@ -464,9 +438,14 @@ for i in range(his_period, 0, -6):
 
     # Save a done file to s3 to indicate that the historic data has been processed
     if save_type == "S3":
-        done_file = s3_path.replace(".zarr", ".done")
-        s3.touch(done_file)
+        archive_tmp_zarr_and_upload(
+            tmp_zarr_path=hist_tmp_zarr_path,
+            s3_path=s3_path,
+            archive_member_name="AIGFS_Hist.zarr",
+            s3=s3,
+        )
     else:
+        os.rename(hist_tmp_zarr_path, local_path)
         done_file = local_path.replace(".zarr", ".done")
         with open(done_file, "w") as f:
             f.write("Done")
@@ -476,13 +455,31 @@ for i in range(his_period, 0, -6):
 
 # %% Merge the historic and forecast datasets and then squash using dask
 # Get the s3 paths to the historic data
-ncLocalWorking_paths = [
-    historic_path
-    + "/AIGFS_Hist"
-    + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-    + ".zarr"
-    for i in range(his_period, 1, -6)
-]
+if save_type == "S3":
+    local_temp_dir = forecast_process_path + "_s3_temp_downloads"
+    os.makedirs(local_temp_dir, exist_ok=True)
+
+    ncLocalWorking_paths = []
+    for i in range(his_period, 1, -6):
+        timestamp = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        final_zarr_name = f"AIGFS_Hist{timestamp}.zarr"
+        extracted_path = download_extract_historic_archive(
+            s3=s3,
+            historic_path=historic_path,
+            final_zarr_name=final_zarr_name,
+            extracted_store_name="AIGFS_Hist.zarr",
+            local_temp_dir=local_temp_dir,
+        )
+        if extracted_path is not None:
+            ncLocalWorking_paths.append(extracted_path)
+else:
+    ncLocalWorking_paths = [
+        historic_path
+        + "/AIGFS_Hist"
+        + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        + ".zarr"
+        for i in range(his_period, 1, -6)
+    ]
 
 # Dask Setup
 daskInterpArrays = []
@@ -493,23 +490,9 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
     for local_ncpath in ncLocalWorking_paths:
         # If not found in array, use MISSING_DATA to show missing
         try:
-            if save_type == "S3":
-                daskVarArrays.append(
-                    da.from_zarr(
-                        local_ncpath,
-                        component=dask_var,
-                        inline_array=True,
-                        storage_options={
-                            "key": aws_access_key_id,
-                            "secret": aws_secret_access_key,
-                        },
-                    )
-                )
-
-            else:
-                daskVarArrays.append(
-                    da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
-                )
+            daskVarArrays.append(
+                da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
+            )
         # Add a fallback in case of a FileNotFoundError
         except FileNotFoundError:
             logger.warning("File not found, adding NaN array for: %s", local_ncpath)

@@ -31,8 +31,10 @@ from API.ingest_utils import (
     FORECAST_LEAD_RANGES,
     VALID_DATA_MAX,
     VALID_DATA_MIN,
+    archive_tmp_zarr_and_upload,
     calculate_freezing_level,
     derive_precip_type,
+    download_extract_historic_archive,
     pad_to_chunk_size,
     validate_grib_stats,
 )
@@ -536,30 +538,11 @@ for i in range(his_period, 1, -12):
             historic_path
             + "/ECMWF_AIFS_Hist"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr"
+            + ".zarr.tar.gz"
         )
-        if s3.exists(s3_path.replace(".zarr", ".done")):
+        if s3.exists(s3_path.replace(".tar.gz", ".done")):
             logger.info("File already exists in S3, skipping download for: %s", s3_path)
-            # If the file exists, check that it works
-
-            # Try to open and read data from the last variable of the zarr file to check if it has already been saved
-            try:
-                hisCheckStore = zarr.storage.FsspecStore.from_url(
-                    s3_path,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-                zarr.open(hisCheckStore)[zarr_vars[-1]][-1, -1, -1]
-                continue  # If it exists, skip to the next iteration
-            except Exception:
-                logger.error("### Historic Data Failure!")
-                logger.exception("Exception processing historic data", exc_info=True)
-
-                # Delete the file if it exists
-                if s3.exists(s3_path):
-                    s3.rm(s3_path)
+            continue
 
     else:
         # Local Path Setup
@@ -822,18 +805,7 @@ for i in range(his_period, 1, -12):
     # Define the path to save the zarr dataset with the run time in the filename
     # format the time following iso8601
 
-    # Save as Zarr to s3 for Time Machine
-    if save_type == "S3":
-        zarrStore = zarr.storage.FsspecStore.from_url(
-            s3_path,
-            storage_options={
-                "key": aws_access_key_id,
-                "secret": aws_secret_access_key,
-            },
-        )
-    else:
-        # Create local Zarr store
-        zarrStore = zarr.storage.LocalStore(local_path)
+    hist_tmp_zarr_path = hist_process_path + "_ECMWF_AIFS_Hist_TMP.zarr"
 
     # Save the dataset with compression and filters for all variables
     # Use the same encoding as last time but with larger chunks to speed up read times
@@ -858,7 +830,7 @@ for i in range(his_period, 1, -12):
 
     with ProgressBar():
         xarray_hist_merged.to_zarr(
-            store=zarrStore,
+            hist_tmp_zarr_path,
             mode="w",
             consolidated=False,
         )
@@ -872,9 +844,14 @@ for i in range(his_period, 1, -12):
 
     # Save a done file to s3 to indicate that the historic data has been processed
     if save_type == "S3":
-        done_file = s3_path.replace(".zarr", ".done")
-        s3.touch(done_file)
+        archive_tmp_zarr_and_upload(
+            tmp_zarr_path=hist_tmp_zarr_path,
+            s3_path=s3_path,
+            archive_member_name="ECMWF_AIFS_Hist.zarr",
+            s3=s3,
+        )
     else:
+        os.rename(hist_tmp_zarr_path, local_path)
         done_file = local_path.replace(".zarr", ".done")
         with open(done_file, "w") as f:
             f.write("Done")
@@ -883,29 +860,34 @@ for i in range(his_period, 1, -12):
 
 # %% Merge the historic and forecast datasets and then squash using dask
 # Get the s3 paths to the historic data
-ncLocalWorking_paths = [
-    historic_path
-    + "/ECMWF_AIFS_Hist"
-    + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-    + ".zarr"
-    for i in range(his_period, 1, -12)
-]
+if save_type == "S3":
+    local_temp_dir = forecast_process_path + "_s3_temp_downloads"
+    os.makedirs(local_temp_dir, exist_ok=True)
+
+    ncLocalWorking_paths = []
+    for i in range(his_period, 1, -12):
+        timestamp = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        final_zarr_name = f"ECMWF_AIFS_Hist{timestamp}.zarr"
+        extracted_path = download_extract_historic_archive(
+            s3=s3,
+            historic_path=historic_path,
+            final_zarr_name=final_zarr_name,
+            extracted_store_name="ECMWF_AIFS_Hist.zarr",
+            local_temp_dir=local_temp_dir,
+        )
+        if extracted_path is not None:
+            ncLocalWorking_paths.append(extracted_path)
+else:
+    ncLocalWorking_paths = [
+        historic_path
+        + "/ECMWF_AIFS_Hist"
+        + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        + ".zarr"
+        for i in range(his_period, 1, -12)
+    ]
 
 # Read in the zarr arrays
-if save_type == "S3":
-    hist = [
-        xr.open_zarr(
-            p,
-            consolidated=False,
-            storage_options={
-                "key": aws_access_key_id,
-                "secret": aws_secret_access_key,
-            },
-        )
-        for p in ncLocalWorking_paths
-    ]
-else:
-    hist = [xr.open_zarr(p, consolidated=False) for p in ncLocalWorking_paths]
+hist = [xr.open_zarr(p, consolidated=False) for p in ncLocalWorking_paths]
 
 fcst = xr.open_zarr(f"{forecast_process_path}_merged.zarr", consolidated=False)
 ds = xr.concat(
