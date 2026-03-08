@@ -114,15 +114,14 @@ jobs:
           REPOSITORY: pirate-wgrib-python-arm
           IMAGE_TAG: ${{ env.IMAGE_VERSION }}
         run: |
-          docker manifest create $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
-            --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-amd64 \
-            --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-arm64
-          docker manifest push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+          docker buildx imagetools create -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
+            $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-amd64 \
+            $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-arm64
+            
           if [ -n "$RELEASE_VERSION" ]; then
-            docker manifest create $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION \
-              --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-amd64 \
-              --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-arm64
-            docker manifest push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION
+            docker buildx imagetools create -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION \
+              $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-amd64 \
+              $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-arm64
           fi
 
 #################################################################
@@ -224,15 +223,14 @@ jobs:
           REPOSITORY: pirate-alpine-zarr
           IMAGE_TAG: ${{ env.IMAGE_VERSION }}
         run: |
-          docker manifest create $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
-            --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-amd64 \
-            --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-arm64
-          docker manifest push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+          docker buildx imagetools create -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
+            $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-amd64 \
+            $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-arm64
+            
           if [ -n "$RELEASE_VERSION" ]; then
-            docker manifest create $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION \
-              --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-amd64 \
-              --amend $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-arm64
-            docker manifest push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION
+            docker buildx imagetools create -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION \
+              $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-amd64 \
+              $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-arm64
           fi
 
 #################################################################

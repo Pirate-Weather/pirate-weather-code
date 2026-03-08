@@ -1,5 +1,5 @@
 aiohttp==3.13.3
-aiobotocore[boto3]==3.1.2
+aiobotocore[boto3]==3.2.0
 bottleneck==1.6.0
 cartopy==0.25.0
 cfgrib==0.9.15.1
@@ -11,15 +11,15 @@ geopandas==1.1.2
 herbie-data @ git+https://github.com/blaylockbk/Herbie.git@05785acdb762f8b22183a93c05f5691c13f5b4f5
 metpy==1.7.1
 netCDF4==1.7.4
-numba==0.63.1
+numba==0.64.0
 numpy==2.3.3
 nwswx==0.1.2
-pyarrow==23.0.0
+pyarrow==23.0.1
 pykml==0.2.0
 rioxarray==0.21.0
-s3fs==2026.1.0
+s3fs==2026.2.0
 scikit-learn==1.8.0
 tqdm==4.67.3
 xarray==2025.11.0
-xarray-spatial==0.5.2
+xarray-spatial==0.7.0
 zarr==3.1.5

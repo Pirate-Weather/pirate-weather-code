@@ -170,3 +170,20 @@ DWD_MOSMIX = {
     "ptype": 11,  # PTYPE_surface (WMO code 4677)
     "solar": 12,  # DSWRF_surface (W/m^2)
 }
+
+# Source names that provide forecast data (i.e. not current-conditions-only or elevation).
+# Used to validate that at least one forecast model is available for a request.
+# "hrrr" is the time-machine key for HRRR; "era5" covers historical time-machine requests.
+FORECAST_SOURCES = frozenset(
+    {
+        "hrrr_0-18",
+        "hrrr_18-48",
+        "hrrr",
+        "nbm",
+        "gfs",
+        "ecmwf_ifs",
+        "gefs",
+        "dwd_mosmix",
+        "era5",
+    }
+)

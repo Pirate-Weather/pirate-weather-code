@@ -10,6 +10,8 @@ import sys
 import time
 import warnings
 
+import dask
+
 # Define ECCODES_DEFINITION_PATH env variable for eccodes
 # This is needed in my testing instance- should not be required for the docker image
 # os.environ["ECCODES_DEFINITION_PATH"] = (
@@ -30,9 +32,14 @@ from API.ingest_utils import (
     FINAL_CHUNK_SIZES,
     VALID_DATA_MAX,
     VALID_DATA_MIN,
+    close_store,
+    configure_zarr_limits,
     earth_relative_wind_components,
+    make_herbie_save_dir,
     mask_invalid_data,
     pad_to_chunk_size,
+    positive_int_env,
+    tune_nofile_limit,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -61,8 +68,14 @@ final_chunk = FINAL_CHUNK_SIZES["RTMA"]
 save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+zarr_store_workers = positive_int_env("zarr_store_workers", 2)
+zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+tune_nofile_limit()
+zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
+    zarr_store_workers, zarr_async_concurrency
+)
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -79,6 +92,8 @@ if save_type == "Download":
     if not os.path.exists(forecast_path + "/" + ingest_version):
         os.makedirs(forecast_path + "/" + ingest_version)
 
+herbie_save_dir = make_herbie_save_dir(tmp_dir)
+
 # %% Define base time from the most recent run
 t0 = time.time()
 
@@ -89,7 +104,7 @@ latest_run = Herbie_latest(
     product="anl",
     verbose=True,
     priority=["aws", "nomdas"],
-    save_dir=tmp_dir,
+    save_dir=herbie_save_dir,
 )
 
 base_time = latest_run.date
@@ -146,7 +161,7 @@ fh_analysis = Herbie(
     product="anl",
     verbose=False,
     priority=["aws", "nomdas"],
-    save_dir=tmp_dir,
+    save_dir=herbie_save_dir,
 )
 
 fh_analysis.download(match_strings, verbose=True)
@@ -252,10 +267,11 @@ zarr_array = zarr.create_array(
     dtype="float32",
 )
 
-dask_var_array.to_zarr(zarr_array, overwrite=True, compute=True)
+with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+    dask_var_array.to_zarr(zarr_array, overwrite=True, compute=True)
 
+close_store(zarr_store)
 if save_type == "S3":
-    zarr_store.close()
     logging.info("Zarr zip store closed.")
 
 # %% Upload to S3 or move to final location
