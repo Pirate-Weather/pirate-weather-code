@@ -555,7 +555,7 @@ for i in range(his_period, 0, -6):
         )
 
         xarray_wgrib.to_zarr(
-            hist_process_path + "_xr_merged_" + str(i) +"_m" + str(mem) + ".zarr",
+            hist_process_path + "_xr_merged_" + str(i) + "_m" + str(mem) + ".zarr",
             consolidated=False,
             mode="w",
         )
