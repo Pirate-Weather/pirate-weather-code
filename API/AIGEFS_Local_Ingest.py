@@ -105,7 +105,7 @@ latest_run = HerbieLatest(
 )
 
 base_time = latest_run.date
-base_time = pd.Timestamp("2026-03-02 06:00:00")
+base_time = pd.Timestamp("2026-03-02 12:00:00")
 
 logger.info(base_time)
 
@@ -460,7 +460,7 @@ for i in range(his_period, 0, -6):
                 fxx=[6],
                 member="mem" + str(mem).zfill(3),
                 product="sfc",
-                verbose=False,
+                verbose=True,
                 priority=["aws", "nomads"],
                 save_dir=tmp_dir,
             )
@@ -471,7 +471,7 @@ for i in range(his_period, 0, -6):
     failCount = 0
     while mem < 31:
         # Download the subsets
-        FH_forecastsubMembers[mem - 1].download(verbose=False, overwrite=True)
+        FH_forecastsubMembers[mem - 1].download(verbose=True, overwrite=True)
         # Create list of downloaded grib files
         grib_list = [
             str(Path(x.get_localFilePath()).expand())
@@ -515,7 +515,9 @@ for i in range(his_period, 0, -6):
             + '-match ":APCP:surface:" '
             + "-netcdf "
             + hist_process_path
-            + "_wgrib2_merged_m"
+            + "_wgrib2_merged_"
+            + str(i)
+            + "_m"
             + str(mem)
             + ".nc"
         )
@@ -534,7 +536,7 @@ for i in range(his_period, 0, -6):
 
         # Open the NetCDF file with xarray to process and compress
         xarray_hist_wgrib = xr.open_dataset(
-            hist_process_path + "_wgrib2_merged_m" + str(mem) + ".nc"
+            hist_process_path + "_wgrib2_merged_" + str(i) + "_m" + str(mem) + ".nc"
         )
 
         # Sometimes there will be weird negative values, set them to zero
@@ -553,18 +555,18 @@ for i in range(his_period, 0, -6):
         )
 
         xarray_wgrib.to_zarr(
-            hist_process_path + "_xr_merged_m" + str(mem) + ".zarr",
+            hist_process_path + "_xr_merged_" + str(i) +"_m" + str(mem) + ".zarr",
             consolidated=False,
             mode="w",
         )
 
         # Delete the netcdf to save space
-        subprocess.run(
-            "rm " + hist_process_path + "_wgrib2_merged_m" + str(mem) + ".nc",
-            shell=True,
-            capture_output=True,
-            encoding="utf-8",
-        )
+        # subprocess.run(
+        #     "rm " + hist_process_path + "_wgrib2_merged_" + str(i) + "_m" + str(mem) + ".nc",
+        #     shell=True,
+        #     capture_output=True,
+        #     encoding="utf-8",
+        # )
 
         mem += 1
 
@@ -648,7 +650,7 @@ for i in range(his_period, 0, -6):
 # Get the s3 paths to the historic data
 ncLocalWorking_paths = [
     historic_path
-    + "/AIGEFS_Hist_v2"
+    + "/AIGEFS_HistProb_"
     + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
     + ".zarr"
     for i in range(his_period, 1, -6)
@@ -659,7 +661,7 @@ daskInterpArrays = []
 daskVarArrays = []
 daskVarArrayList = []
 
-for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
+for daskVarIDX, dask_var in enumerate(probVars[:]):
     for local_ncpath in ncLocalWorking_paths:
         # If not found in array, use MISSING_DATA to show missing
         try:
@@ -692,7 +694,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
     daskVarArraysStack = da.stack(daskVarArrays, allow_unknown_chunksizes=True)
 
     daskForecastArray = da.from_zarr(
-        forecast_process_path + "_.zarr", component=dask_var, inline_array=True
+        forecast_process_path + "_" + dask_var + ".zarr", inline_array=True
     )
 
     if dask_var == "time":
