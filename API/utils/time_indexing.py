@@ -189,7 +189,7 @@ def calculate_time_indexing(
         hourly_day_index[mask] = hourly_day_index[idx[mask]]
         # If there are still NaNs (at the beginning), fill with 0.
         hourly_day_index[np.isnan(hourly_day_index)] = 0
-        
+
     return TimeIndexing(
         day_array_grib=day_array_grib,
         day_array_4am_grib=day_array_4am_grib,
