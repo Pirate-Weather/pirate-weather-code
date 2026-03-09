@@ -133,8 +133,8 @@ def test_hourly_possible_thunderstorm_with_precipitation():
     )
 
     # Thunderstorm text should be combined with precipitation
-    # Check exact structure: ['and', 'possible-thunderstorm', 'medium-rain']
-    assert text == "possible-thunderstorm"
+    # Check exact structure: ['and', ['risk-of', 'thunderstorm'], 'medium-rain']
+    assert text == ["risk-of", "thunderstorm"]
     # Icon should be rain when CAPE < 2500
     assert icon == "possible-thunderstorm-day"
 
@@ -338,7 +338,7 @@ def test_daily_thunderstorms_not_joined_with_precipitation():
         [
             "and",
             ["for-day", "medium-rain"],
-            ["during", ["and", "possible-thunderstorm", "medium-wind"], "morning"],
+            ["during", ["and", ["risk-of", "thunderstorm"], "medium-wind"], "morning"],
         ],
     ]
 

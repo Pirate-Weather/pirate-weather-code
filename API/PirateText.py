@@ -121,7 +121,19 @@ def calculate_text(
 
     # If there is precipitation text use that and join with thunderstorm or humidity or wind texts if they exist
     if precipText is not None:
-        if thuText is not None and not (type == "current" and "possible" in thuText):
+        # For current conditions avoid using low-confidence thunderstorm wording.
+        def _thu_is_low_confidence(t):
+            if t is None:
+                return False
+            if isinstance(t, str):
+                return "possible" in t
+            if isinstance(t, list) and len(t) > 0:
+                return t[0] in ("chance-of", "risk-of")
+            return False
+
+        if thuText is not None and not (
+            type == "current" and _thu_is_low_confidence(thuText)
+        ):
             c_text = thuText
         elif windText is not None:
             c_text = ["and", precipText, windText]

@@ -123,7 +123,7 @@ def calculate_summary_text(
         wIcon = ["and", thuText, wIcon]
     # Otherwise show it after the text and use the possible text instead
     elif thuText is not None:
-        wIcon = ["and", wIcon, "possible-thunderstorm"]
+        wIcon = ["and", wIcon, ["risk-of", "thunderstorm"]]
 
     if len(precipitation) == 2:
         if (precipitation[0][1] == "saturday" and precipitation[1][1] == "sunday") or (

@@ -119,8 +119,6 @@ def _get_time_phrase(
     all_periods,
     check_period,
     mode,
-    later_conditions,
-    today_period_for_later_check,
 ):
     """
     Determines the appropriate time phrase (e.g., "during", "starting", "until")
@@ -132,8 +130,6 @@ def _get_time_phrase(
     - all_periods (list): List of all period names (e.g., ["today-morning"]).
     - check_period (int): The starting index for checks (usually 0).
     - mode (str): "daily" or "hour".
-    - later_conditions (list): List of conditions marked as "later".
-    - today_period_for_later_check (str): The name of the current period for 'later' comparison.
 
     Returns:
     - list: The time phrase structure.
@@ -146,15 +142,7 @@ def _get_time_phrase(
         return None
 
     if num_periods == total_periods_available:
-        # Condition spans all available periods: "for-day" or "starting [first_period]" if 'later' applies
-        # The 'later' text only applies if in hourly mode and the first period is marked as 'later'.
-        if (
-            mode == "hour"
-            and "later" in all_periods[0]
-            and condition_type in later_conditions
-        ):
-            return ["starting", all_periods[period_indices[0]]]
-        elif condition_type == "cloud":
+        if condition_type == "cloud":
             # Cloud "for-day" only if it spans a *standard* full day's worth of periods (4 or 5 periods for 24h).
             # This prevents "for-day" for cloud if the forecast window is short (e.g., 2 periods).
             if (
@@ -224,29 +212,6 @@ def _get_time_phrase(
                     "during",
                     ["and", all_periods[start_idx], all_periods[end_idx]],
                 ]
-
-            # Specific "later" check for 2-period conditions
-            if (
-                mode == "hour"  # 'later' only applies in hourly mode
-                and "later"
-                in all_periods[0]  # Check if the first period is indeed "later-"
-                and condition_type in later_conditions
-            ):
-                # If the current summary_text_temp is an "until" pattern and not explicitly "starting"
-                # (which would be overridden by "later")
-                if "until" in summary_text_temp and "starting" not in summary_text_temp:
-                    return [
-                        "starting",
-                        all_periods[start_idx],
-                    ]  # Simplify to "starting"
-                # If it's an "until-starting-again" pattern
-                elif "until-starting-again" in summary_text_temp:
-                    # Original logic combined into "and" for the two parts if 'later' applied.
-                    return [
-                        "and",
-                        ["during", all_periods[start_idx]],
-                        ["during", all_periods[end_idx]],
-                    ]
 
             return summary_text_temp  # Return the determined summary phrase if 'later' didn't apply
 
@@ -346,53 +311,6 @@ def _get_time_phrase(
                         ],
                         ["during", all_periods[end_idx]],
                     ]
-
-            # Apply "later" re-structuring specific to 3-period patterns
-            if (
-                mode == "hour"  # 'later' only applies in hourly mode
-                and "later"
-                in all_periods[0]  # Check if the first period is indeed "later-"
-                and condition_type in later_conditions
-            ):
-                # Restructuring for "until-starting-again" (0,1 and 3) to "and" format
-                if (
-                    len(period_indices) == 3
-                    and start_idx == check_period
-                    and (mid_idx - start_idx) == 1
-                    and end_idx >= 3
-                ):
-                    return [
-                        "and",
-                        [
-                            "starting-continuing-until",
-                            all_periods[start_idx],
-                            all_periods[mid_idx + 1],
-                        ],
-                        ["during", all_periods[end_idx]],
-                    ]
-                # Restructuring for "until-starting-again" (0 and 2,3) to "and" format
-                elif (
-                    len(period_indices) == 3
-                    and start_idx == check_period
-                    and (mid_idx - start_idx) != 1
-                    and mid_idx >= 2
-                ):
-                    return [
-                        "and",
-                        ["during", all_periods[start_idx]],
-                        [
-                            "starting-continuing-until",
-                            all_periods[mid_idx],
-                            all_periods[min(end_idx + 1, total_periods_available - 1)],
-                        ],
-                    ]
-                # For a continuous block where "later" applies, just "starting"
-                elif is_continuous:
-                    return [
-                        "starting-continuing-until",
-                        all_periods[start_idx],
-                        all_periods[min(end_idx + 1, total_periods_available - 1)],
-                    ]
             return summary_text_temp  # Return the determined summary phrase if 'later' didn't apply
 
         # Handle specific patterns for 4 periods (assuming total_periods_available is 5)
@@ -440,42 +358,6 @@ def _get_time_phrase(
                         all_periods[end_idx],
                     ]
 
-            # Apply "later" re-structuring specific to 4-period patterns
-            if (
-                mode == "hour"  # 'later' only applies in hourly mode
-                and "later"
-                in all_periods[0]  # Check if the first period is indeed "later-"
-                and condition_type in later_conditions
-            ):
-                if is_continuous:
-                    return ["starting", all_periods[start_idx]]
-                # Restructuring for [0] and [2,3,4] to "and" format
-                elif (
-                    len(period_indices) == 4
-                    and (period_indices[2] - period_indices[1]) == 1
-                    and (end_idx - period_indices[2]) == 1
-                    and end_idx == 4
-                ):
-                    return [
-                        "and",
-                        ["during", all_periods[start_idx]],
-                        ["starting", all_periods[period_indices[1]]],
-                    ]
-                # Restructuring for [0,1,2] and [4] to "and" format
-                elif (
-                    len(period_indices) == 4
-                    and (end_idx - period_indices[2]) != 1
-                    and end_idx == 4
-                ):
-                    return [
-                        "and",
-                        [
-                            "starting-continuing-until",
-                            all_periods[start_idx],
-                            all_periods[period_indices[2]],
-                        ],
-                        ["starting", all_periods[end_idx]],
-                    ]
             return summary_text_temp  # Return the determined summary phrase if 'later' didn't apply
 
     # Default fallback: combine all individual periods with 'during' and 'and'
@@ -503,8 +385,6 @@ def calculate_period_summary_text(
     icon_set,
     check_period,
     mode,
-    later_conditions,
-    today_period_for_later_check,
     # New parameters for cloud-wind/dry/humid combination
     overall_cloud_text=None,  # Added for wind to combine with cloud
     overall_cloud_idx_for_wind=None,  # Added for wind to combine with cloud
@@ -528,8 +408,6 @@ def calculate_period_summary_text(
     - icon_set (str): Which icon set to use - Dark Sky or Pirate Weather.
     - check_period (int): The current period index being checked (usually 0 for the start).
     - mode (str): Whether the summary is for the day or the next 24h ("daily" or "hour").
-    - later_conditions (list): List of conditions that start later in the first period.
-    - today_period_for_later_check (str): The name of the current period for 'later' comparison.
     - overall_cloud_text (str, optional): The determined overall cloud text (e.g., "clear", "light-clouds").
     - overall_cloud_idx_for_wind (list, optional): The indices of periods where overall_cloud_text is present.
 
@@ -547,6 +425,34 @@ def calculate_period_summary_text(
     humid_condition_combined = False
     vis_condition_combined = False
     current_condition_text = condition_text
+
+    # Local counts used by temporal-modifier heuristics
+    num_periods = len(period_indices) if period_indices is not None else 0
+    total_periods_available = len(all_periods) if all_periods is not None else 0
+
+    # Apply new precip temporal modifiers (occasional, at-times, off-and-on)
+    if condition_type == "precip":
+        # If precipitation doesn't cover all periods, and isn't continuous, choose a modifier
+        if num_periods > 0 and num_periods < total_periods_available:
+            # Determine continuity
+            is_continuous = all(
+                period_indices[i] == period_indices[i - 1] + 1
+                for i in range(1, num_periods)
+            )
+            if not is_continuous:
+                if num_periods <= 2:
+                    current_condition_text = ["occasional", current_condition_text]
+                else:
+                    # Use average gap to detect very sparse/off-and-on patterns
+                    gaps = [
+                        period_indices[i] - period_indices[i - 1]
+                        for i in range(1, num_periods)
+                    ]
+                    avg_gap = sum(gaps) / len(gaps) if gaps else 0
+                    if avg_gap >= 2:
+                        current_condition_text = ["off-and-on", current_condition_text]
+                    else:
+                        current_condition_text = ["at-times", current_condition_text]
 
     # Helper to check if conditions occur in the same set of periods
     def _are_periods_matching(cond_a, cond_b):
@@ -627,8 +533,6 @@ def calculate_period_summary_text(
         all_periods,
         check_period,
         mode,
-        later_conditions,
-        today_period_for_later_check,
     )
 
     if time_phrase_structure is None:
@@ -677,7 +581,13 @@ def calculate_period_summary_text(
     elif phrase_type == "starting":
         summary_text = ["starting", current_condition_text, phrase_args[0]]
     elif phrase_type == "until":
-        summary_text = ["until", current_condition_text, phrase_args[0]]
+        # If the condition started before the current check period, prefer the
+        # "ending" wording (e.g., "rain ending this evening") instead of
+        # "until", which is used for future-ending cases.
+        if period_indices and min(period_indices) < check_period:
+            summary_text = ["ending", current_condition_text, phrase_args[0]]
+        else:
+            summary_text = ["until", current_condition_text, phrase_args[0]]
     elif phrase_type == "starting-continuing-until":
         summary_text = [
             "starting-continuing-until",
@@ -780,11 +690,6 @@ def calculate_day_text(
     curr_date = datetime.datetime.fromtimestamp(hours[0]["time"], zone)
     curr_hour_local = int(curr_date.strftime("%H"))
 
-    # This is used for the "later" check.
-    # It correctly gets the period name for `curr_hour_local - 1` without redundant prefix.
-    today_period_for_later_check = _get_period_name(
-        curr_hour_local - 1, is_today=True, mode=mode
-    )
     # Prepare sanitized copies of the hourly data so modifications in this
     # function do not leak back to the original structures.
     sanitized_hours = []
@@ -876,12 +781,17 @@ def calculate_day_text(
                 "snow_accum": 0.0,
                 "snow_error": 0.0,
                 "has_snow_error_data": False,  # Track if any error data exists
+                "rain_error": 0.0,
+                "has_rain_error_data": False,
+                "sleet_error": 0.0,
+                "has_sleet_error_data": False,
                 "sleet_accum": 0.0,
                 "max_pop": 0.0,
                 "max_rain_intensity": 0.0,
                 "max_snow_intensity": 0.0,
                 "max_ice_intensity": 0.0,
                 "cloud_cover_sum": 0.0,
+                "cloud_cover_vals": [],
                 "max_wind_speed": 0.0,
                 "period_length": 0,
                 "num_hours_humid": 0,
@@ -928,6 +838,10 @@ def calculate_day_text(
 
             period_data["period_length"] += 1
             period_data["cloud_cover_sum"] += hour["cloudCover"]
+            try:
+                period_data["cloud_cover_vals"].append(hour["cloudCover"])
+            except Exception:
+                period_data["cloud_cover_vals"] = [hour["cloudCover"]]
             period_data["max_wind_speed"] = max(
                 period_data["max_wind_speed"], hour["windSpeed"]
             )
@@ -1038,6 +952,24 @@ def calculate_day_text(
                 ):
                     period_data["max_cape_with_precip"] = hour_cape
 
+                # Track precipitation uncertainty/error for accumulations
+                liquid_error_mm = hour.get("precipIntensityError", np.nan)
+                if not (
+                    liquid_error_mm is None
+                    or (
+                        isinstance(liquid_error_mm, float) and np.isnan(liquid_error_mm)
+                    )
+                ):
+                    liquid_error_mm = liquid_error_mm * 1.0
+                    # Add to rain error if rain accumulation present
+                    if hour.get("liquidAccumulation", 0) > 0:
+                        period_data["rain_error"] += liquid_error_mm
+                        period_data["has_rain_error_data"] = True
+                    # Add to sleet/ice error if sleet accumulation present
+                    if hour.get("iceAccumulation", 0) > 0:
+                        period_data["sleet_error"] += liquid_error_mm
+                        period_data["has_sleet_error_data"] = True
+
                 # Count hours with thunderstorms (precipitation + CAPE >= low threshold)
                 thu_text = calculate_thunderstorm_text(hour_cape, "summary")
                 if thu_text is not None:
@@ -1057,6 +989,15 @@ def calculate_day_text(
             p_data["avg_cloud_cover"] = (
                 p_data["cloud_cover_sum"] / p_data["period_length"]
             )
+            # Compute robust per-period median cloud cover when available
+            try:
+                p_data["median_cloud_cover"] = float(
+                    np.median(
+                        p_data.get("cloud_cover_vals", [p_data["avg_cloud_cover"]])
+                    )
+                )
+            except Exception:
+                p_data["median_cloud_cover"] = p_data["avg_cloud_cover"]
             period_stats_list_final.append(p_data)
             final_all_period_names_list.append(period_name)
 
@@ -1081,6 +1022,8 @@ def calculate_day_text(
     total_sleet_accum = 0.0
     total_snow_error = 0.0
     has_any_snow_error_data = False  # Track if any period has error data
+    has_any_rain_error_data = False
+    has_any_sleet_error_data = False
     overall_max_rain_intensity = 0.0
     overall_max_snow_intensity = 0.0
     overall_max_ice_intensity = 0.0
@@ -1094,6 +1037,8 @@ def calculate_day_text(
     overall_max_cape_with_precip = 0.0  # Track max CAPE that occurs with precipitation
 
     overall_most_common_precip = []
+    total_rain_error = 0.0
+    total_sleet_error = 0.0
 
     # Process collected period statistics to determine condition presence and overall totals
     for i, p_data in enumerate(period_stats):
@@ -1119,6 +1064,12 @@ def calculate_day_text(
         ]  # Sum for calculating overall average
         overall_min_visibility = min(overall_min_visibility, p_data["min_visibility"])
         overall_max_smoke = max(overall_max_smoke, p_data["max_smoke"])
+        total_rain_error += p_data.get("rain_error", 0.0)
+        total_sleet_error += p_data.get("sleet_error", 0.0)
+        if p_data.get("has_rain_error_data"):
+            has_any_rain_error_data = True
+        if p_data.get("has_sleet_error_data"):
+            has_any_sleet_error_data = True
 
         # Check if precipitation is significant enough in this period (thresholds in mm)
         is_precip_in_period = (
@@ -1366,152 +1317,110 @@ def calculate_day_text(
     if secondary_precip_condition == "medium-ice":
         secondary_precip_condition = "medium-freezing-rain"
 
-    # Add snow accumulation range to precip text if applicable
-    # Convert mm to display units based on unit_system
-    snow_sentence = None
-    if total_snow_accum > 10 or secondary_precip_condition == "medium-snow":
+    # Show snow, rain or ice (sleet/freezing rain) accumulations parenthetically if significant
+    parenthetical_sentence = None
+    parenthetical_final_sentence = None
+    has_any_error_data = False
+    parenthetical_condition = None
+    accum_display = 0.0
+    error_display = 0.0
+    less_than_tolerance = LESS_THAN_TOLERANCE
+    unit_str = "inches"  # Default to inches
+
+    # Ice/sleet accumulation more than 1mm
+    if total_sleet_accum > 1:
+        parenthetical_condition = (
+            "medium-sleet"
+            if most_common_overall_precip_type == PRECIP_TYPES["sleet"]
+            else "medium-freezing-rain"
+        )
+        has_any_error_data = has_any_sleet_error_data
+        if unit_system == "us":
+            accum_display = total_sleet_accum / 25.4
+            error_display = total_sleet_error / 25.4
+            less_than_tolerance /= 25.4
+        else:
+            unit_str = "millimeters"
+            accum_display = total_sleet_accum
+            error_display = total_sleet_error
+    # Rain accumulation more than 15 mm
+    elif total_rain_accum > 15:
+        parenthetical_condition = "medium-rain"
+        has_any_error_data = has_any_rain_error_data
+        if unit_system == "us":
+            accum_display = total_rain_accum / 25.4
+            error_display = total_rain_error / 25.4
+            less_than_tolerance = LESS_THAN_TOLERANCE / 25.4
+        else:
+            unit_str = "millimeters"
+            accum_display = total_rain_accum
+            error_display = total_rain_error
+    # Snow accumulation more than 1cm (10mm)
+    elif total_snow_accum > 10:
+        parenthetical_condition = "medium-snow"
+        has_any_error_data = has_any_snow_error_data
         # Determine snow unit and convert
         if unit_system == "us":
-            snow_unit_str = "inches"
             # Convert mm to inches (1 inch = 25.4 mm)
-            snow_accum_display = total_snow_accum / 25.4
-            snow_error_display = total_snow_error / 25.4
+            accum_display = total_snow_accum / 25.4
+            error_display = total_snow_error / 25.4
             less_than_tolerance = LESS_THAN_TOLERANCE / 25.4
         else:  # si, ca, uk use centimeters
-            snow_unit_str = "centimeters"
+            unit_str = "centimeters"
             # Convert mm to cm
-            snow_accum_display = total_snow_accum / 10
-            snow_error_display = total_snow_error / 10
+            accum_display = total_snow_accum / 10
+            error_display = total_snow_error / 10
             less_than_tolerance = LESS_THAN_TOLERANCE / 10
 
-        # If error data is missing (ERA5, etc.), show exact value without range or "<"
-        if not has_any_snow_error_data and snow_accum_display > 0:
-            # No error data available - show exact accumulation value
-            snow_sentence = [
-                snow_unit_str,
-                math.ceil(snow_accum_display),
-            ]
-        else:
-            # Error data exists - calculate range
-            snow_low_accum = math.floor(snow_accum_display - (snow_error_display / 2))
-            snow_max_accum = math.ceil(snow_accum_display + (snow_error_display / 2))
-            snow_low_accum = max(
-                0, snow_low_accum
-            )  # Snow accumulation cannot be negative
+    # If error data is missing (ERA5, etc.), show exact value without range or "<"
+    if not has_any_error_data and error_display == 0.0 and accum_display > 0.0:
+        # No error data available - show exact accumulation value
+        parenthetical_sentence = [
+            unit_str,
+            math.ceil(accum_display),
+        ]
+    elif has_any_error_data and error_display > 0.0:
+        # Error data exists - calculate range
+        low_accum = math.floor(accum_display - (error_display / 2))
+        max_accum = math.ceil(accum_display + (error_display / 2))
+        low_accum = max(0, low_accum)  # Snow accumulation cannot be negative
 
-            if snow_max_accum >= less_than_tolerance and snow_low_accum == 0:
-                snow_low_accum = 1
+        if max_accum >= less_than_tolerance and low_accum == 0:
+            low_accum = 1
 
-            if snow_max_accum > 0:
-                if snow_accum_display == 0:
-                    snow_sentence = [
-                        "less-than",
-                        [snow_unit_str, 1],
-                    ]
-                # If error is very small or lower range is 0, use less-than format
-                elif snow_error_display <= 0.01 or snow_low_accum == 0:
-                    snow_sentence = [
-                        "less-than",
-                        [
-                            snow_unit_str,
-                            snow_max_accum,
-                        ],
-                    ]
-                else:
-                    snow_sentence = [
-                        snow_unit_str,
-                        ["range", snow_low_accum, snow_max_accum],
-                    ]
+        if max_accum > 0:
+            if accum_display == 0:
+                parenthetical_sentence = [
+                    "less-than",
+                    [unit_str, 1],
+                ]
+            # If error is very small or lower range is 0, use less-than format
+            elif error_display <= 0.01 or low_accum == 0:
+                parenthetical_sentence = [
+                    "less-than",
+                    [
+                        unit_str,
+                        max_accum,
+                    ],
+                ]
+            else:
+                parenthetical_sentence = [
+                    unit_str,
+                    ["range", low_accum, max_accum],
+                ]
 
-    if snow_sentence is not None:
-        if most_common_overall_precip_type == PRECIP_TYPES["snow"]:
-            precip_summary_text = ["parenthetical", precip_summary_text, snow_sentence]
-        elif secondary_precip_condition == "medium-snow":
-            precip_summary_text = ["parenthetical", precip_summary_text, snow_sentence]
-
+    if parenthetical_sentence is not None:
+        parenthetical_final_sentence = [
+            "parenthetical",
+            parenthetical_condition,
+            parenthetical_sentence,
+        ]
     # Combine primary and secondary precipitation conditions with "and"
     if (
         secondary_precip_condition is not None
         and secondary_precip_condition != "medium-snow"
     ):
         precip_summary_text = ["and", precip_summary_text, secondary_precip_condition]
-
-    # List to track conditions that start "later" in the first period (only for hourly mode)
-    later_conditions_list = []
-
-    # Apply "later" text only when in hourly mode and condition starts later in the first period
-    if (
-        mode == "hour"
-        and all_period_names
-        and all_period_names[0] == today_period_for_later_check
-    ):
-        # Check precip
-        if (
-            precip_periods and precip_periods[0] == 0
-        ):  # This checks if precipitation occurs in the first period.
-            # This handles cases where precipitation starts after the first hour of the period.
-            curr_precip_text_for_first_hour = calculate_precip_text(
-                hours[0]["precipType"],
-                "hourly",
-                hours[0]["liquidAccumulation"],
-                hours[0]["snowAccumulation"],
-                hours[0]["iceAccumulation"],
-                hours[0]["precipProbability"],
-                icon_set,
-                "summary",
-                isDayTime=is_day_time,
-                eff_rain_intensity=hours[0].get("rainIntensity", 0.0),
-                eff_snow_intensity=hours[0].get("snowIntensity", 0.0),
-                eff_ice_intensity=hours[0].get("iceIntensity", 0.0),
-            )
-            if curr_precip_text_for_first_hour is None:
-                all_period_names[0] = "later-" + all_period_names[0]
-                later_conditions_list.append("precip")
-
-        # Check visibility (fog)
-        if vis_periods and vis_periods[0] == 0:
-            if (
-                calculate_vis_text(
-                    hours[0].get("visibility", DEFAULT_VISIBILITY),
-                    hours[0].get("temperature", MISSING_DATA),
-                    hours[0].get("dewPoint", MISSING_DATA),
-                    hours[0].get("windSpeed", MISSING_DATA),
-                    hours[0].get("smoke", 0.0),
-                    icon_set,
-                    "summary",
-                )
-                is None
-                and "later" not in all_period_names[0]
-            ):  # Avoid double "later"
-                all_period_names[0] = "later-" + all_period_names[0]
-                later_conditions_list.append("vis")
-
-        # Check wind
-        if wind_periods and wind_periods[0] == 0:
-            if (
-                calculate_wind_text(hours[0]["windSpeed"], icon_set, "summary") is None
-                and "later" not in all_period_names[0]
-            ):
-                all_period_names[0] = "later-" + all_period_names[0]
-                later_conditions_list.append("wind")
-
-        # Check dry humidity
-        if dry_periods and dry_periods[0] == 0:
-            if (
-                humidity_sky_text(hours[0]["temperature"], hours[0]["humidity"]) is None
-                and "later" not in all_period_names[0]
-            ):
-                all_period_names[0] = "later-" + all_period_names[0]
-                later_conditions_list.append("dry")
-
-        # Check humid humidity
-        if humid_periods and humid_periods[0] == 0:
-            if (
-                humidity_sky_text(hours[0]["temperature"], hours[0]["humidity"]) is None
-                and "later" not in all_period_names[0]
-            ):
-                all_period_names[0] = "later-" + all_period_names[0]
-                later_conditions_list.append("humid")
 
     # Flags to indicate if a condition is present at all in the forecast block
     has_precip = bool(precip_periods) and precip_summary_text is not None
@@ -1573,8 +1482,6 @@ def calculate_day_text(
             icon_set,
             0,
             mode,
-            later_conditions_list,
-            today_period_for_later_check,
         )
         # These flags indicate if the *higher priority* summary (precip) consumed these conditions.
         combined_wind_flag = temp_wind_combined
@@ -1597,8 +1504,6 @@ def calculate_day_text(
             icon_set,
             0,
             mode,
-            later_conditions_list,
-            today_period_for_later_check,
         )
 
     # Calculate summaries for other conditions. The combination flags for them are local to their calls.
@@ -1616,8 +1521,6 @@ def calculate_day_text(
             icon_set,
             0,
             mode,
-            later_conditions_list,
-            today_period_for_later_check,
             # Pass cloud info for wind to combine with clear cloud
             overall_cloud_text=final_cloud_text,
             overall_cloud_idx_for_wind=overall_cloud_idx,
@@ -1644,8 +1547,6 @@ def calculate_day_text(
             icon_set,
             0,
             mode,
-            later_conditions_list,
-            today_period_for_later_check,
         )
     if has_dry:
         dry_only_summary, _, _, _, _ = calculate_period_summary_text(
@@ -1661,8 +1562,6 @@ def calculate_day_text(
             icon_set,
             0,
             mode,
-            later_conditions_list,
-            today_period_for_later_check,
         )
     if has_humid:
         humid_only_summary, _, _, _, _ = calculate_period_summary_text(
@@ -1678,11 +1577,119 @@ def calculate_day_text(
             icon_set,
             0,
             mode,
-            later_conditions_list,
-            today_period_for_later_check,
         )
 
     # Cloud full summary, including potential combinations with wind/dry/humid/vis
+    # Determine cloud trend phrasing using variance and trend metrics.
+    # - Use `to` when overall variance is large (big change across day)
+    # - Use `increasing` / `clearing` when there's a monotonic trend
+    # - Use `generally` for modest variance
+    cloud_condition_text = final_cloud_text
+    try:
+        if period_stats and len(period_stats) >= 2:
+            # Use per-period median cloud cover (robust) for trend detection
+            median_list = [
+                p.get("median_cloud_cover", p["avg_cloud_cover"]) for p in period_stats
+            ]
+            start_val = median_list[0]
+            end_val = median_list[-1]
+            slope = end_val - start_val
+
+            # Compute IQR (robust spread) and median of the period medians
+            q1 = float(np.percentile(median_list, 25))
+            q3 = float(np.percentile(median_list, 75))
+            iqr = q3 - q1
+
+            # Map period endpoint fractions back to textual levels for `to` phrasing
+            start_text, start_level = calculate_cloud_text(start_val)
+            end_text, end_level = calculate_cloud_text(end_val)
+
+            # Tuned heuristics for robust metrics
+            IQR_TO = 0.12  # large IQR -> use 'to' (substantial change across day)
+            IQR_TO_THRESH = 0.25  # very large change -> avoid 'to'
+            IQR_GENERALLY = 0.05  # modest IQR -> 'generally'
+            SLOPE_THRESHOLD = 0.25  # slope magnitude for increasing/clearing
+
+            # Prefer 'to' only when the change is substantial, the endpoint categories differ,
+            # and the categories are adjacent (no skipped levels). Also order lower value first.
+            if (
+                iqr >= IQR_TO
+                and iqr < IQR_TO_THRESH
+                and start_text != end_text
+                and abs(start_level - end_level) == 1
+            ):
+                # Order lower level first so phrasing reads from lower -> higher.
+                if start_level <= end_level:
+                    cloud_condition_text = ["to", start_text, end_text]
+                else:
+                    cloud_condition_text = ["to", end_text, start_text]
+            elif slope >= SLOPE_THRESHOLD:
+                # Show that clouds are increasing and include the representative condition
+                cloud_condition_text = ["increasing", final_cloud_text]
+            elif slope <= -SLOPE_THRESHOLD:
+                cloud_condition_text = ["clearing", final_cloud_text]
+            elif iqr >= IQR_GENERALLY and iqr < IQR_TO:
+                # Use 'generally' only when the day's periods do not mostly map to a single
+                # cloud category. If most periods are the same category, prefer the single
+                # condition (final_cloud_text) instead of 'generally'.
+                per_period_levels = [calculate_cloud_text(v)[1] for v in median_list]
+                most_common_level = most_common(per_period_levels)
+                # If a majority of periods share the same level, don't use 'generally'
+                if per_period_levels.count(most_common_level) >= (
+                    len(per_period_levels) / 2.0
+                ):
+                    cloud_condition_text = final_cloud_text
+                else:
+                    cloud_condition_text = ["generally", final_cloud_text]
+            else:
+                cloud_condition_text = final_cloud_text
+
+            # Decide which period indices should be used when phrasing the cloud condition
+            # - 'to' and 'generally' represent an overall day pattern -> use for-day
+            # - 'increasing'/'clearing' should reference the period it starts in unless it spans all periods
+            if isinstance(cloud_condition_text, list) and cloud_condition_text:
+                ct = cloud_condition_text[0]
+                if ct in ("to", "generally"):
+                    overall_cloud_idx = list(range(len(period_stats)))
+                elif ct in ("increasing", "clearing"):
+                    # Check monotonic across all periods
+                    is_monotonic_inc = all(
+                        median_list[i] <= median_list[i + 1]
+                        for i in range(len(median_list) - 1)
+                    )
+                    is_monotonic_dec = all(
+                        median_list[i] >= median_list[i + 1]
+                        for i in range(len(median_list) - 1)
+                    )
+                    if is_monotonic_inc or is_monotonic_dec:
+                        overall_cloud_idx = list(range(len(period_stats)))
+                    else:
+                        # Find the first period where the trend direction begins
+                        start_idx = 0
+                        for i in range(len(median_list) - 1):
+                            if (
+                                ct == "increasing"
+                                and median_list[i + 1] > median_list[i]
+                            ):
+                                start_idx = i
+                                break
+                            if ct == "clearing" and median_list[i + 1] < median_list[i]:
+                                start_idx = i
+                                break
+                        overall_cloud_idx = [start_idx]
+        else:
+            cloud_condition_text = final_cloud_text
+    except Exception:
+        cloud_condition_text = final_cloud_text
+
+    # Replace the condition with clearing/increasing
+    if isinstance(cloud_condition_text, list) and cloud_condition_text:
+        ct = cloud_condition_text[0]
+        if ct == "clearing":
+            cloud_condition_text = "clearing"
+        elif ct == "increasing":
+            cloud_condition_text = "increasing"
+
     (
         cloud_full_summary,
         _,
@@ -1691,7 +1698,7 @@ def calculate_day_text(
         cloud_vis_combined_flag,
     ) = calculate_period_summary_text(
         overall_cloud_idx,  # Pass all period indices for cloud to find its pattern
-        final_cloud_text,
+        cloud_condition_text,
         "cloud",
         all_period_names,
         wind_periods,
@@ -1702,8 +1709,6 @@ def calculate_day_text(
         icon_set,
         0,
         mode,
-        later_conditions_list,
-        today_period_for_later_check,
     )
     # --- Final Summary Construction Logic: Select top 2 conditions based on priority ---
 
@@ -1872,15 +1877,27 @@ def calculate_day_text(
             break  # Limit to top 2 conditions
 
     # Final summary text construction
+    # Build the main summary block from selected summaries (1 or 2)
     if len(selected_final_summary_texts) == 1:
-        final_constructed_summary = ["sentence", selected_final_summary_texts[0]]
+        combined = selected_final_summary_texts[0]
     elif len(selected_final_summary_texts) == 2:
-        final_constructed_summary = [
-            "sentence",
-            ["and", selected_final_summary_texts[0], selected_final_summary_texts[1]],
+        combined = [
+            "multiple-sentences",
+            selected_final_summary_texts[0],
+            selected_final_summary_texts[1],
         ]
-    else:  # Fallback if no summaries generated (shouldn't happen with cloud fallback)
-        final_constructed_summary = ["for-day", "unavailable"]
+    else:
+        combined = ["for-day", "unavailable"]
+
+    # Append any collected parenthetical sentences as their own sentences,
+    # preserving priority: main summary(s) first, then parenthetical(s).
+    final_constructed_summary = combined
+    if parenthetical_final_sentence is not None:
+        final_constructed_summary = [
+            "multiple-sentences",
+            final_constructed_summary,
+            parenthetical_final_sentence,
+        ]
 
     # Ensure an icon is always returned, defaulting to overall average cloud cover if none set.
     if current_c_icon is None:

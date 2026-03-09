@@ -272,7 +272,11 @@ def calculate_precip_text(
         "rain"
     ]:
         if eff_rain_intensity < light_precip_thresh:
-            c_text = possible_precip + "very-light-rain"
+            c_text = (
+                ["chance-of", "very-light-rain"]
+                if is_possible_precip
+                else "very-light-rain"
+            )
             if is_pirate_icon and is_possible_precip and isDayTime:
                 c_icon = "possible-rain-day"
             elif is_pirate_icon and is_possible_precip and not isDayTime:
@@ -283,7 +287,7 @@ def calculate_precip_text(
             eff_rain_intensity >= light_precip_thresh
             and eff_rain_intensity < mid_precip_thresh
         ):
-            c_text = possible_precip + "light-rain"
+            c_text = ["chance-of", "light-rain"] if is_possible_precip else "light-rain"
             if is_pirate_icon and is_possible_precip and isDayTime:
                 c_icon = "possible-rain-day"
             elif is_pirate_icon and is_possible_precip and not isDayTime:
@@ -294,13 +298,15 @@ def calculate_precip_text(
             eff_rain_intensity >= mid_precip_thresh
             and eff_rain_intensity < heavy_precip_thresh
         ):
-            c_text = possible_precip + "medium-rain"
+            c_text = (
+                ["chance-of", "medium-rain"] if is_possible_precip else "medium-rain"
+            )
             if is_pirate_icon and is_possible_precip and isDayTime:
                 c_icon = "possible-rain-day"
             elif is_pirate_icon and is_possible_precip and not isDayTime:
                 c_icon = "possible-rain-night"
         else:
-            c_text = possible_precip + "heavy-rain"
+            c_text = ["chance-of", "heavy-rain"] if is_possible_precip else "heavy-rain"
             if is_pirate_icon and is_possible_precip and isDayTime:
                 c_icon = "possible-rain-day"
             elif is_pirate_icon and is_possible_precip and not isDayTime:
@@ -313,12 +319,16 @@ def calculate_precip_text(
             and eff_rain_intensity < heavy_precip_thresh
             and rainAccum >= heavy_precip_thresh * num_precip_days * 2
         ):
-            c_text = ["and", "medium-rain", "possible-heavy-rain"]
+            c_text = ["and", "medium-rain", ["chance-of", "heavy-rain"]]
     elif (snowAccum > 0 or eff_snow_intensity > 0) and precipType == PRECIP_TYPES[
         "snow"
     ]:
         if eff_snow_intensity < light_snow_thresh:
-            c_text = possible_precip + "very-light-snow"
+            c_text = (
+                ["chance-of", "very-light-snow"]
+                if is_possible_precip
+                else "very-light-snow"
+            )
             if is_pirate_icon and is_possible_precip and isDayTime:
                 c_icon = "possible-snow-day"
             elif is_pirate_icon and is_possible_precip and not isDayTime:
@@ -329,7 +339,7 @@ def calculate_precip_text(
             eff_snow_intensity >= light_snow_thresh
             and eff_snow_intensity < mid_snow_thresh
         ):
-            c_text = possible_precip + "light-snow"
+            c_text = ["chance-of", "light-snow"] if is_possible_precip else "light-snow"
             if is_pirate_icon and is_possible_precip and isDayTime:
                 c_icon = "possible-snow-day"
             elif is_pirate_icon and is_possible_precip and not isDayTime:
@@ -340,13 +350,15 @@ def calculate_precip_text(
             eff_snow_intensity >= mid_snow_thresh
             and eff_snow_intensity < heavy_snow_thresh
         ):
-            c_text = possible_precip + "medium-snow"
+            c_text = (
+                ["chance-of", "medium-snow"] if is_possible_precip else "medium-snow"
+            )
             if is_pirate_icon and is_possible_precip and isDayTime:
                 c_icon = "possible-snow-day"
             elif is_pirate_icon and is_possible_precip and not isDayTime:
                 c_icon = "possible-snow-night"
         else:
-            c_text = possible_precip + "heavy-snow"
+            c_text = ["chance-of", "heavy-snow"] if is_possible_precip else "heavy-snow"
             if is_pirate_icon and is_possible_precip and isDayTime:
                 c_icon = "possible-snow-day"
             elif is_pirate_icon and is_possible_precip and not isDayTime:
@@ -358,12 +370,16 @@ def calculate_precip_text(
             and snowAccum < (snow_icon_threshold * num_precip_days * 2)
             and eff_snow_intensity >= heavy_snow_thresh
         ):
-            c_text = ["and", "medium-snow", "possible-heavy-snow"]
+            c_text = ["and", "medium-snow", ["chance-of", "heavy-snow"]]
     elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == PRECIP_TYPES[
         "sleet"
     ]:
         if eff_ice_intensity < light_precip_thresh:
-            c_text = possible_precip + "very-light-sleet"
+            c_text = (
+                ["chance-of", "very-light-sleet"]
+                if is_possible_precip
+                else "very-light-sleet"
+            )
             if is_pirate_icon and is_possible_precip and isDayTime:
                 c_icon = "possible-sleet-day"
             elif is_pirate_icon and is_possible_precip and not isDayTime:
@@ -374,7 +390,9 @@ def calculate_precip_text(
             eff_ice_intensity >= light_precip_thresh
             and eff_ice_intensity < mid_precip_thresh
         ):
-            c_text = possible_precip + "light-sleet"
+            c_text = (
+                ["chance-of", "light-sleet"] if is_possible_precip else "light-sleet"
+            )
             if is_pirate_icon and is_possible_precip and isDayTime:
                 c_icon = "possible-sleet-day"
             elif is_pirate_icon and is_possible_precip and not isDayTime:
@@ -385,13 +403,17 @@ def calculate_precip_text(
             eff_ice_intensity >= mid_precip_thresh
             and eff_ice_intensity < heavy_precip_thresh
         ):
-            c_text = possible_precip + "medium-sleet"
+            c_text = (
+                ["chance-of", "medium-sleet"] if is_possible_precip else "medium-sleet"
+            )
             if is_pirate_icon and is_possible_precip and isDayTime:
                 c_icon = "possible-sleet-day"
             elif is_pirate_icon and is_possible_precip and not isDayTime:
                 c_icon = "possible-sleet-night"
         else:
-            c_text = possible_precip + "heavy-sleet"
+            c_text = (
+                ["chance-of", "heavy-sleet"] if is_possible_precip else "heavy-sleet"
+            )
             if is_pirate_icon and is_possible_precip and isDayTime:
                 c_icon = "possible-sleet-day"
             elif is_pirate_icon and is_possible_precip and not isDayTime:
@@ -403,13 +425,17 @@ def calculate_precip_text(
             and sleetAccum < (precip_icon_threshold * num_precip_days * 2)
             and eff_ice_intensity >= heavy_precip_thresh
         ):
-            c_text = ["and", "medium-sleet", "possible-heavy-sleet"]
+            c_text = ["and", "medium-sleet", ["chance-of", "heavy-sleet"]]
 
     elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == PRECIP_TYPES[
         "ice"
     ]:
         if eff_ice_intensity < light_precip_thresh:
-            c_text = possible_precip + "very-light-freezing-rain"
+            c_text = (
+                ["risk-of", "very-light-freezing-rain"]
+                if is_possible_precip
+                else "very-light-freezing-rain"
+            )
             if is_pirate_icon and is_possible_precip and isDayTime:
                 c_icon = "possible-freezing-rain-day"
             elif is_pirate_icon and is_possible_precip and not isDayTime:
@@ -420,7 +446,11 @@ def calculate_precip_text(
             eff_ice_intensity >= light_precip_thresh
             and eff_ice_intensity < mid_precip_thresh
         ):
-            c_text = possible_precip + "light-freezing-rain"
+            c_text = (
+                ["risk-of", "light-freezing-rain"]
+                if is_possible_precip
+                else "light-freezing-rain"
+            )
             if is_pirate_icon and is_possible_precip and isDayTime:
                 c_icon = "possible-freezing-rain-day"
             elif is_pirate_icon and is_possible_precip and not isDayTime:
@@ -431,13 +461,21 @@ def calculate_precip_text(
             eff_ice_intensity >= mid_precip_thresh
             and eff_ice_intensity < heavy_precip_thresh
         ):
-            c_text = possible_precip + "medium-freezing-rain"
+            c_text = (
+                ["risk-of", "medium-freezing-rain"]
+                if is_possible_precip
+                else "medium-freezing-rain"
+            )
             if is_pirate_icon and is_possible_precip and isDayTime:
                 c_icon = "possible-freezing-rain-day"
             elif is_pirate_icon and is_possible_precip and not isDayTime:
                 c_icon = "possible-freezing-rain-night"
         else:
-            c_text = possible_precip + "heavy-freezing-rain"
+            c_text = (
+                ["risk-of", "heavy-freezing-rain"]
+                if is_possible_precip
+                else "heavy-freezing-rain"
+            )
             if is_pirate_icon and is_possible_precip and isDayTime:
                 c_icon = "possible-freezing-rain-day"
             elif is_pirate_icon and is_possible_precip and not isDayTime:
@@ -449,11 +487,15 @@ def calculate_precip_text(
             and sleetAccum < (precip_icon_threshold * num_precip_days * 2)
             and eff_ice_intensity >= heavy_precip_thresh
         ):
-            c_text = ["and", "medium-freezing-rain", "possible-heavy-freezing-rain"]
+            c_text = [
+                "and",
+                "medium-freezing-rain",
+                ["risk-of", "heavy-freezing-rain"],
+            ]
     elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == PRECIP_TYPES[
         "hail"
     ]:
-        c_text = possible_precip + "hail"
+        c_text = ["chance-of", "hail"] if is_possible_precip else "hail"
     elif (
         rainAccum > 0
         or snowAccum > 0
@@ -478,19 +520,35 @@ def calculate_precip_text(
             ]
         )
         if _none_intensity < light_precip_thresh:
-            c_text = possible_precip + "very-light-precipitation"
+            c_text = (
+                ["chance-of", "very-light-precipitation"]
+                if is_possible_precip
+                else "very-light-precipitation"
+            )
         elif (
             _none_intensity >= light_precip_thresh
             and _none_intensity < mid_precip_thresh
         ):
-            c_text = possible_precip + "light-precipitation"
+            c_text = (
+                ["chance-of", "light-precipitation"]
+                if is_possible_precip
+                else "light-precipitation"
+            )
         elif (
             _none_intensity >= mid_precip_thresh
             and _none_intensity < heavy_precip_thresh
         ):
-            c_text = possible_precip + "medium-precipitation"
+            c_text = (
+                ["chance-of", "medium-precipitation"]
+                if is_possible_precip
+                else "medium-precipitation"
+            )
         else:
-            c_text = possible_precip + "heavy-precipitation"
+            c_text = (
+                ["chance-of", "heavy-precipitation"]
+                if is_possible_precip
+                else "heavy-precipitation"
+            )
         if (
             (type == "week" or type == "hourly")
             and (
@@ -499,7 +557,11 @@ def calculate_precip_text(
             )
             and _none_intensity >= heavy_precip_thresh
         ):
-            c_text = ["and", "medium-precipitation", "possible-heavy-precipitation"]
+            c_text = [
+                "and",
+                "medium-precipitation",
+                ["chance-of", "heavy-precipitation"],
+            ]
 
         if is_pirate_icon and is_possible_precip and isDayTime:
             c_icon = "possible-precipitation-day"
@@ -738,8 +800,12 @@ def calculate_thunderstorm_text(cape, mode="both", icon="darksky", is_day=True):
     thuText = None
     thuIcon = None
 
+    # Map instability to textual keys. Use the new `chance-of` phrasing for
+    # lower CAPE values (previously "possible-thunderstorm"). Keep the full
+    # `thunderstorm` text for very high CAPE.
     if CAPE_THRESHOLDS["low"] <= cape < CAPE_THRESHOLDS["high"]:
-        thuText = "possible-thunderstorm"
+        # Keep backward-compatible string key used by templates and tests
+        thuText = ["risk-of", "thunderstorm"]
     elif cape >= CAPE_THRESHOLDS["high"]:
         thuText = "thunderstorm"
 

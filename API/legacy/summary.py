@@ -77,13 +77,18 @@ def build_hourly_summary(
                 icon,
                 unit_system,
             )
+            logger.error("DAILY TEXT GEN TEXT %s hourText=%r", loc_tag, hourText)
             return translation.translate(["sentence", hourText]), hourIcon
         return (
             max(set(hour_text_list), key=hour_text_list.count),
             max(set(hour_icon_list), key=hour_icon_list.count),
         )
     except Exception:
-        logger.exception("TEXT GEN ERROR %s", loc_tag)
+        logger.exception(
+            "DAILY TEXT GEN ERROR %s hourText=%r",
+            loc_tag,
+            locals().get("hourText"),
+        )
         return (
             max(set(hour_text_list), key=hour_text_list.count),
             max(set(hour_icon_list), key=hour_icon_list.count),
@@ -122,7 +127,7 @@ def build_daily_summary(
             max(set(day_icon_list), key=day_icon_list.count),
         )
     except Exception:
-        logger.exception("DAILY SUMMARY TEXT GEN ERROR %s", loc_tag)
+        logger.exception("WEEKLY SUMMARY TEXT GEN ERROR %s", loc_tag)
         return (
             max(set(day_text_list), key=day_text_list.count),
             max(set(day_icon_list), key=day_icon_list.count),
