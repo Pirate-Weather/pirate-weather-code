@@ -388,6 +388,9 @@ def calculate_period_summary_text(
     # New parameters for cloud-wind/dry/humid combination
     overall_cloud_text=None,  # Added for wind to combine with cloud
     overall_cloud_idx_for_wind=None,  # Added for wind to combine with cloud
+    # New precip metrics (hours): total precip hours and max consecutive precip hours
+    precip_hours_total=None,
+    precip_consec_hours=None,
 ):
     """
     Calculates the textual summary for a specific condition (precip, cloud, wind, vis, dry, humid)
@@ -430,29 +433,69 @@ def calculate_period_summary_text(
     num_periods = len(period_indices) if period_indices is not None else 0
     total_periods_available = len(all_periods) if all_periods is not None else 0
 
-    # Apply new precip temporal modifiers (occasional, at-times, off-and-on)
+    # Apply precip temporal modifiers (occasional, at-times, off-and-on, periods-of)
+    # Rules implemented from user's guidance:
+    # - Leave text unchanged for a single period (too complex to prefix)
+    # - If precipitation spans continuous periods: prefer no modifier for long consecutive blocks
+    # - For non-continuous cases:
+    #   * 'occasional' -> short consecutive hours with gaps (consec >=3 and total small)
+    #   * 'periods-of' -> multiple gaps or a large gap (multiple disjoint clusters)
+    #   * 'off-and-on' vs 'at-times' -> based on total precip hours (>=5 => off-and-on else at-times)
     if condition_type == "precip":
-        # If precipitation doesn't cover all periods, and isn't continuous, choose a modifier
-        if num_periods > 0 and num_periods < total_periods_available:
-            # Determine continuity
+        if num_periods > 1:
+            # continuity and gap analysis
             is_continuous = all(
                 period_indices[i] == period_indices[i - 1] + 1
                 for i in range(1, num_periods)
             )
-            if not is_continuous:
-                if num_periods <= 2:
-                    current_condition_text = ["occasional", current_condition_text]
+
+            # compute gaps and simple stats used by heuristics
+            gaps = [period_indices[i] - period_indices[i - 1] for i in range(1, num_periods)]
+            num_large_gaps = sum(1 for g in gaps if g > 1)
+            max_gap = max(gaps) if gaps else 0
+            avg_gap = sum(gaps) / len(gaps) if gaps else 0
+
+            # Thresholds (tunable): consecutive_hours_threshold (strong consecutive),
+            # total_hours_threshold (for distinguishing off-and-on)
+            consecutive_hours_threshold = 4  # treat 4+ consecutive hours as a long block
+            occasional_consec_threshold = 3  # 3+ consecutive with gaps -> occasional
+            total_hours_off_and_on = 5  # total hours >=5 tends toward 'off-and-on'
+
+            if is_continuous:
+                # Prefer no modifier for long consecutive blocks
+                if precip_consec_hours is not None and precip_consec_hours >= consecutive_hours_threshold:
+                    pass
                 else:
-                    # Use average gap to detect very sparse/off-and-on patterns
-                    gaps = [
-                        period_indices[i] - period_indices[i - 1]
-                        for i in range(1, num_periods)
-                    ]
-                    avg_gap = sum(gaps) / len(gaps) if gaps else 0
-                    if avg_gap >= 2:
-                        current_condition_text = ["off-and-on", current_condition_text]
+                    # Short continuous blocks: keep base wording (no temporal prefix)
+                    pass
+            else:
+                # Non-continuous: evaluate a few cases in priority order
+                if precip_hours_total is not None and precip_hours_total <= 2:
+                    # Very little total precipitation -> occasional
+                    current_condition_text = ["occasional", current_condition_text]
+                elif (
+                    precip_consec_hours is not None
+                    and precip_consec_hours >= occasional_consec_threshold
+                    and num_large_gaps >= 1
+                ):
+                    # Short consecutive burst(s) separated by gaps -> occasional
+                    current_condition_text = ["occasional", current_condition_text]
+                elif num_large_gaps >= 2 or (max_gap >= 2 and num_periods >= 3):
+                    # Multiple disjoint clusters or a big gap -> 'periods-of'
+                    current_condition_text = ["periods-of", current_condition_text]
+                else:
+                    # Fall back to distinguishing off-and-on vs at-times via total hours
+                    if precip_hours_total is not None:
+                        if precip_hours_total >= total_hours_off_and_on:
+                            current_condition_text = ["off-and-on", current_condition_text]
+                        else:
+                            current_condition_text = ["at-times", current_condition_text]
                     else:
-                        current_condition_text = ["at-times", current_condition_text]
+                        # No hour metrics available: use average gap heuristic
+                        if avg_gap >= 2:
+                            current_condition_text = ["off-and-on", current_condition_text]
+                        else:
+                            current_condition_text = ["at-times", current_condition_text]
 
     # Helper to check if conditions occur in the same set of periods
     def _are_periods_matching(cond_a, cond_b):
@@ -1412,8 +1455,8 @@ def calculate_day_text(
     if parenthetical_sentence is not None:
         parenthetical_final_sentence = [
             "parenthetical",
-            parenthetical_condition,
             parenthetical_sentence,
+            parenthetical_condition,
         ]
     # Combine primary and secondary precipitation conditions with "and"
     if (
@@ -1460,6 +1503,27 @@ def calculate_day_text(
     cloud_full_summary = None
 
     # Calculate summary text for each condition type, passing all relevant periods for combination logic
+    # Compute precipitation-hour metrics for use in temporal modifiers
+    precip_periods_hours_total = 0
+    precip_periods_max_consec_hours = 0
+    if precip_periods:
+        precip_periods_hours_total = sum(
+            period_stats[i].get("precip_hours_count", 0) for i in precip_periods
+        )
+        # compute max consecutive precip hours across consecutive periods
+        max_consec = 0
+        cur = 0
+        for idx in range(len(period_stats)):
+            if idx in precip_periods:
+                cur += period_stats[idx].get("precip_hours_count", 0)
+            else:
+                if cur > max_consec:
+                    max_consec = cur
+                cur = 0
+        if cur > max_consec:
+            max_consec = cur
+        precip_periods_max_consec_hours = max_consec
+
     if has_precip:
         # Pass all period data lists to allow calculate_period_summary_text to determine internal combinations
         # The combination flags (temp_...) are returned by this call.
@@ -1482,6 +1546,8 @@ def calculate_day_text(
             icon_set,
             0,
             mode,
+            precip_hours_total=precip_periods_hours_total,
+            precip_consec_hours=precip_periods_max_consec_hours,
         )
         # These flags indicate if the *higher priority* summary (precip) consumed these conditions.
         combined_wind_flag = temp_wind_combined
@@ -1491,6 +1557,26 @@ def calculate_day_text(
 
     # Calculate thunderstorm summary if they don't match precipitation periods
     if has_thunderstorm and not thunderstorms_match_precip:
+        # Compute thunderstorm precip-hours metrics for thunderstorm-only summaries
+        thu_periods_hours_total = 0
+        thu_periods_max_consec_hours = 0
+        if thunderstorm_periods:
+            thu_periods_hours_total = sum(
+                period_stats[i].get("precip_hours_count", 0) for i in thunderstorm_periods
+            )
+            max_consec = 0
+            cur = 0
+            for idx in range(len(period_stats)):
+                if idx in thunderstorm_periods:
+                    cur += period_stats[idx].get("precip_hours_count", 0)
+                else:
+                    if cur > max_consec:
+                        max_consec = cur
+                    cur = 0
+            if cur > max_consec:
+                max_consec = cur
+            thu_periods_max_consec_hours = max_consec
+
         thunderstorm_only_summary, _, _, _, _ = calculate_period_summary_text(
             thunderstorm_periods,
             thunderstorm_summary_text,
@@ -1504,6 +1590,8 @@ def calculate_day_text(
             icon_set,
             0,
             mode,
+            precip_hours_total=thu_periods_hours_total,
+            precip_consec_hours=thu_periods_max_consec_hours,
         )
 
     # Calculate summaries for other conditions. The combination flags for them are local to their calls.
