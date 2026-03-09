@@ -11,7 +11,7 @@ orjson==3.11.7
 pandas==3.0.1
 pirateweather-translations==1.4.2
 psutil==5.9.0
-pytz==2025.2
+pytz==2026.1.post1
 reverse_geocode==1.6.6
 s3fs==2026.2.0
 scipy==1.17.1
