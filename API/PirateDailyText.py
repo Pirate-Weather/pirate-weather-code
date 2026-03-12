@@ -9,9 +9,7 @@ from API.constants.shared_const import MISSING_DATA
 from API.constants.text_const import (
     CLOUD_COVER_DAILY_THRESHOLDS,
     CLOUD_COVER_THRESHOLDS,
-    DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM,
-    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
     DEFAULT_HUMIDITY,
     DEFAULT_POP,
     DEFAULT_VISIBILITY,
@@ -1323,26 +1321,6 @@ def calculate_day_text(
             if most_common_overall_precip_type == PRECIP_TYPES["ice"]:
                 most_common_overall_precip_type = "freezing-rain"
 
-            # Promote to stronger precip if significant accumulation is forecast (thresholds in mm)
-            if (
-                total_rain_accum > (DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * 10)
-                and most_common_overall_precip_type != PRECIP_TYPES["rain"]
-            ):
-                secondary_precip_condition = "medium-" + most_common_overall_precip_type
-                most_common_overall_precip_type = "rain"
-            if (
-                total_snow_accum > (DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * 0.5)
-                and most_common_overall_precip_type != PRECIP_TYPES["snow"]
-                and total_snow_accum >= total_rain_accum
-            ):
-                secondary_precip_condition = "medium-" + most_common_overall_precip_type
-                most_common_overall_precip_type = "snow"
-            if (
-                total_sleet_accum > 1
-                and most_common_overall_precip_type != PRECIP_TYPES["sleet"]
-            ):
-                secondary_precip_condition = "medium-" + most_common_overall_precip_type
-                most_common_overall_precip_type = PRECIP_TYPES["sleet"]
 
         # Calculate final precipitation text and icon (all in mm)
         precip_summary_text, precip_icon = calculate_precip_text(
