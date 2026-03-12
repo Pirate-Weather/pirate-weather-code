@@ -906,6 +906,7 @@ def calculate_half_day_text(
             if (
                 total_snow_accum > (DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * 0.5)
                 and most_common_overall_precip_type != PRECIP_TYPES["snow"]
+                and total_snow_accum >= total_rain_accum
             ):
                 secondary_precip_condition = "medium-" + most_common_overall_precip_type
                 most_common_overall_precip_type = "snow"

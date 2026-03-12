@@ -342,13 +342,19 @@ def select_daily_precip_type(
     update_mask = not_all_types & has_precip
     maxPchanceDay[update_mask] = dominant_type[update_mask]
 
-    # Threshold overrides: large accumulations force their respective type
+    # Threshold overrides: large accumulations force their respective type.
+    # Snow override only applies when snow accumulation is at least as large as rain,
+    # preventing snow from overriding a rain-dominant day that also has minor snow.
     maxPchanceDay[InterPdaySum[:, DATA_DAY["rain"]] > (10 * prepAccumUnit)] = (
         PRECIP_IDX["rain"]
     )
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["snow"]] > (5 * prepAccumUnit)] = PRECIP_IDX[
-        "snow"
-    ]
+    maxPchanceDay[
+        (InterPdaySum[:, DATA_DAY["snow"]] > (5 * prepAccumUnit))
+        & (
+            InterPdaySum[:, DATA_DAY["snow"]]
+            >= InterPdaySum[:, DATA_DAY["rain"]]
+        )
+    ] = PRECIP_IDX["snow"]
     # For ice accumulation, preserve the distinction between ice (freezing rain)
     # and sleet (ice pellets) by only overriding if the current type is not already
     # ice or sleet. This ensures that the hourly-based determination is preserved.
