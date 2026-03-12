@@ -350,10 +350,7 @@ def select_daily_precip_type(
     )
     maxPchanceDay[
         (InterPdaySum[:, DATA_DAY["snow"]] > (5 * prepAccumUnit))
-        & (
-            InterPdaySum[:, DATA_DAY["snow"]]
-            >= InterPdaySum[:, DATA_DAY["rain"]]
-        )
+        & (InterPdaySum[:, DATA_DAY["snow"]] >= InterPdaySum[:, DATA_DAY["rain"]])
     ] = PRECIP_IDX["snow"]
     # For ice accumulation, preserve the distinction between ice (freezing rain)
     # and sleet (ice pellets) by only overriding if the current type is not already
