@@ -1321,7 +1321,6 @@ def calculate_day_text(
             if most_common_overall_precip_type == PRECIP_TYPES["ice"]:
                 most_common_overall_precip_type = "freezing-rain"
 
-
         # Calculate final precipitation text and icon (all in mm)
         precip_summary_text, precip_icon = calculate_precip_text(
             most_common_overall_precip_type,

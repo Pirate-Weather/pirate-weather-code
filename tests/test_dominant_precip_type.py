@@ -35,9 +35,7 @@ class TestDominantPrecipType:
             InterPdaySum, DATA_DAY, maxPchanceDay, PRECIP_IDX, prepAccumUnit
         )
 
-        assert result[0] == PRECIP_IDX["rain"], (
-            "Rain-dominant day should be 'rain'"
-        )
+        assert result[0] == PRECIP_IDX["rain"], "Rain-dominant day should be 'rain'"
 
     def test_snow_dominant_over_rain(self):
         """Snow > rain: type should be snow."""
@@ -49,9 +47,7 @@ class TestDominantPrecipType:
             InterPdaySum, DATA_DAY, maxPchanceDay, PRECIP_IDX, prepAccumUnit
         )
 
-        assert result[0] == PRECIP_IDX["snow"], (
-            "Snow-dominant day should be 'snow'"
-        )
+        assert result[0] == PRECIP_IDX["snow"], "Snow-dominant day should be 'snow'"
 
     def test_snow_only(self):
         """Only snow present: type should be snow."""
