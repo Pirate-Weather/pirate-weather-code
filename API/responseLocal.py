@@ -195,7 +195,8 @@ try:
                 import s3fs
 
                 s3 = s3fs.S3FileSystem(
-                    anon=True,
+                    key=os.environ.get("PW_API", ""),
+                    secret="anon",
                     asynchronous=False,
                     endpoint_url="https://api.pirateweather.net/files/",
                 )
