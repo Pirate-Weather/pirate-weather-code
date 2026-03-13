@@ -67,6 +67,7 @@ from API.forecast_sources import (
 )
 from API.hourly.block import build_hourly_block
 from API.io.zarr_reader import update_zarr_store
+from API.io.ZarrHelpers import _add_custom_header
 from API.legacy.summary import (
     build_daily_summary,
     build_hourly_summary,
@@ -195,11 +196,12 @@ try:
                 import s3fs
 
                 s3 = s3fs.S3FileSystem(
-                    key=os.environ.get("PW_API", ""),
-                    secret="anon",
+                    anon=True,
                     asynchronous=False,
                     endpoint_url="https://api.pirateweather.net/files/",
+                    skip_instance_cache=True,
                 )
+                s3.s3.meta.events.register("before-send.s3.*", _add_custom_header)
                 s3_path = (
                     f"s3://ForecastTar_v2/{ingest_version}/DWD_MOSMIX_stations.pickle"
                 )
