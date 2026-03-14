@@ -464,7 +464,11 @@ def calculate_period_summary_text(
                 ]
                 num_large_gaps = sum(1 for g in gaps if g > 1)
 
-            longest_consec_hours = len(max(precip_consec_hours, key=len, default=[])) if precip_consec_hours else 0
+            longest_consec_hours = (
+                len(max(precip_consec_hours, key=len, default=[]))
+                if precip_consec_hours
+                else 0
+            )
 
             # Thresholds (tunable): consecutive_hours_threshold (strong consecutive),
             # total_hours_threshold (for distinguishing off-and-on)
@@ -477,7 +481,10 @@ def calculate_period_summary_text(
             # Prefer using consecutive-hour metrics when available
             if longest_consec_hours is not None:
                 # Long consecutive block with multiple gaps -> periods-of
-                if longest_consec_hours >= consecutive_hours_threshold and len(gaps) > 2:
+                if (
+                    longest_consec_hours >= consecutive_hours_threshold
+                    and len(gaps) > 2
+                ):
                     current_condition_text = ["periods-of", current_condition_text]
                 # Long consecutive block with no large gaps -> periods-of
                 elif (
