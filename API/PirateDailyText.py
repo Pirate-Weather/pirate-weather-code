@@ -464,6 +464,8 @@ def calculate_period_summary_text(
                 ]
                 num_large_gaps = sum(1 for g in gaps if g > 1)
 
+            longest_consec_hours = len(max(precip_consec_hours, key=len, default=[])) if precip_consec_hours else 0
+
             # Thresholds (tunable): consecutive_hours_threshold (strong consecutive),
             # total_hours_threshold (for distinguishing off-and-on)
             consecutive_hours_threshold = (
@@ -473,22 +475,22 @@ def calculate_period_summary_text(
             total_hours_off_and_on = 5  # total hours >=5 tends toward 'off-and-on'
 
             # Prefer using consecutive-hour metrics when available
-            if precip_consec_hours is not None:
+            if longest_consec_hours is not None:
                 # Long consecutive block with multiple gaps -> periods-of
-                if precip_consec_hours >= consecutive_hours_threshold and len(gaps) > 2:
+                if longest_consec_hours >= consecutive_hours_threshold and len(gaps) > 2:
                     current_condition_text = ["periods-of", current_condition_text]
                 # Long consecutive block with no large gaps -> periods-of
                 elif (
-                    precip_consec_hours >= consecutive_hours_threshold
+                    longest_consec_hours >= consecutive_hours_threshold
                     and len(gaps) > 1
                     and num_large_gaps == 0
                 ):
                     current_condition_text = ["periods-of", current_condition_text]
                 # Short consecutive burst(s) with gaps -> occasional
                 elif (
-                    precip_consec_hours >= occasional_consec_threshold
+                    longest_consec_hours >= occasional_consec_threshold
                     and len(gaps) > 0
-                    and precip_consec_hours < consecutive_hours_threshold
+                    and longest_consec_hours < consecutive_hours_threshold
                 ):
                     current_condition_text = ["occasional", current_condition_text]
             else:
