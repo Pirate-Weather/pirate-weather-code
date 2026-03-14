@@ -453,7 +453,7 @@ def calculate_period_summary_text(
                 precip_consec_hours, (list, tuple)
             ):
                 gaps = [
-                    precip_consec_hours[i] - precip_consec_hours[i - 1]
+                    precip_consec_hours[i][0] - precip_consec_hours[i - 1][-1]
                     for i in range(1, len(precip_consec_hours))
                 ]
                 num_large_gaps = sum(1 for g in gaps if g > 5)
