@@ -330,7 +330,7 @@ xarray_forecast_merged["MASSDEN_8maboveground"] = (
 
 
 # Set REFD values < 5 to 0
-xarray_forecast_merged["REFD_1000maboveground"] = mask_invalid_refd(
+xarray_forecast_merged["REFD_1000maboveground"] = mask_invalid_refc(
     xarray_forecast_merged["REFD_1000maboveground"]
 )
 
