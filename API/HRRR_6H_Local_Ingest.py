@@ -173,11 +173,11 @@ matchstring_8m = ":(MASSDEN:8 m above ground:)"
 matchstring_su = (
     ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|VIS|GUST|DSWRF|CAPE):surface:.*hour fcst)"
 )
-matchstring_1000m = "(:REFD:1000 m above ground:)"
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
 matchstring_cl = "(:TCDC:entire atmosphere:.*hour fcst)"
 matchstring_ap = "(:APCP:surface:0-[1-9]*)"
 matchstring_sl = "(:(MSLMA):)"
+matchstring_1000m = "(:REFD:1000 m above ground:)"
 
 # Merge matchstrings for download
 match_strings = (
@@ -187,8 +187,6 @@ match_strings = (
     + "|"
     + matchstring_10m
     + "|"
-    + matchstring_1000m
-    + "|"
     + matchstring_cl
     + "|"
     + matchstring_ap
@@ -196,6 +194,8 @@ match_strings = (
     + matchstring_8m
     + "|"
     + matchstring_sl
+    + "|"
+    + matchstring_1000m
 )
 
 # Create a range of forecast lead times
