@@ -73,7 +73,7 @@ O3_PPB_TO_UG_M3 = O3_PPM_TO_UG_M3 / 1000.0  # ≈ 1.962 µg/m³ per ppb
 def get_latest_aqm_run():
     """Determine the latest available NOAA AQM model run time.
 
-    AQM runs at 06Z and 12Z UTC. Data is typically available ~4.5 hours after
+    AQM runs at 06Z and 12Z UTC. Data is typically available ~5 hours after
     the model run time. Checks in order: today's 12Z, today's 06Z,
     yesterday's 12Z, yesterday's 06Z.
 
@@ -81,7 +81,7 @@ def get_latest_aqm_run():
         datetime: The latest available model run time.
     """
     now_utc = datetime.now(timezone.utc)
-    availability_delay = timedelta(hours=4, minutes=30)
+    availability_delay = timedelta(hours=5)
 
     # Try today and yesterday, from latest to earliest run
     for days_back in [0, 1]:
