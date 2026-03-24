@@ -9,7 +9,7 @@
 # Data source: https://www.nco.ncep.noaa.gov/pmb/products/aqm/
 # NOMADS: https://nomads.ncep.noaa.gov/pub/data/nccf/com/aqm/prod/
 #
-# Model runs: 06Z (72-hour forecast) and 12Z (48-hour forecast)
+# Model runs: 06Z and 12Z (both 72-hour forecasts)
 # Spatial coverage: CONUS only (use SILAM for global coverage)
 #
 # Author: Alexander Rey
@@ -54,11 +54,10 @@ AQM_RUN_HOURS = [12, 6]
 AQM_GRID_IDS = ["148", "227"]
 
 # NOAA AQM variable names in GRIB2 files
-# PMTF: Particulate Matter Fine (PM2.5), units: µg/m³ (already in correct units)
-# OZCON: Ozone Concentration. Units depend on model version:
-#   - Some versions output µg/m³ (no conversion needed)
-#   - Some versions output ppm (require conversion: multiply by O3_PPM_TO_UG_M3)
-# The script checks the GRIB2 units attribute and converts if needed.
+# PMTF: Particulate Matter Fine (PM2.5)
+#   GRIB2 units: "Particulate matter (fine) [10^-6g/m^3]" (= µg/m³, no conversion needed)
+# OZCON: Ozone Concentration
+#   GRIB2 units: "Ozone Concentration [ppb]" — must multiply by O3_PPB_TO_UG_M3
 
 # Ozone unit conversion: ppm → µg/m³ at 25°C, 1 atm
 # O3 molecular weight = 48 g/mol, molar volume at 25°C = 24.465 L/mol
@@ -74,7 +73,7 @@ O3_PPB_TO_UG_M3 = O3_PPM_TO_UG_M3 / 1000.0  # ≈ 1.962 µg/m³ per ppb
 def get_latest_aqm_run():
     """Determine the latest available NOAA AQM model run time.
 
-    AQM runs at 06Z and 12Z UTC. Data is typically available ~2 hours after
+    AQM runs at 06Z and 12Z UTC. Data is typically available ~4.5 hours after
     the model run time. Checks in order: today's 12Z, today's 06Z,
     yesterday's 12Z, yesterday's 06Z.
 
@@ -82,7 +81,7 @@ def get_latest_aqm_run():
         datetime: The latest available model run time.
     """
     now_utc = datetime.now(timezone.utc)
-    availability_delay = timedelta(hours=2)
+    availability_delay = timedelta(hours=4, minutes=30)
 
     # Try today and yesterday, from latest to earliest run
     for days_back in [0, 1]:
@@ -121,6 +120,10 @@ def build_aqm_url(run_time, variable, grid_id):
 def convert_o3_to_ug_m3(da, units):
     """Convert ozone DataArray to µg/m³ if necessary.
 
+    NOAA AQM OZCON is always in ppb ("Ozone Concentration [ppb]"), so this
+    function normally applies the ppb → µg/m³ conversion. The unit string is
+    checked as a safety net in case a future model version changes the units.
+
     Args:
         da: xarray.DataArray of ozone concentrations.
         units: Unit string from GRIB2 metadata.
@@ -130,21 +133,21 @@ def convert_o3_to_ug_m3(da, units):
     """
     units_lower = units.lower().strip()
 
-    if "ppm" in units_lower and "ppb" not in units_lower:
-        logger.info(f"Converting O3 from ppm to µg/m³ (factor={O3_PPM_TO_UG_M3:.1f})")
-        return da * O3_PPM_TO_UG_M3
-    elif "ppb" in units_lower:
+    if "ppb" in units_lower:
         logger.info(f"Converting O3 from ppb to µg/m³ (factor={O3_PPB_TO_UG_M3:.3f})")
         return da * O3_PPB_TO_UG_M3
+    elif "ppm" in units_lower:
+        logger.info(f"Converting O3 from ppm to µg/m³ (factor={O3_PPM_TO_UG_M3:.1f})")
+        return da * O3_PPM_TO_UG_M3
     elif "ug/m" in units_lower or "µg/m" in units_lower or "\u03bcg/m" in units_lower:
         logger.info("O3 already in µg/m³, no conversion needed")
         return da
     else:
-        # Unknown units – assume µg/m³ and log a warning
+        # Unknown units – assume ppb (AQM default) and log a warning
         logger.warning(
-            f"Unknown O3 units '{units}'. Assuming µg/m³; verify against AQM documentation."
+            f"Unknown O3 units '{units}'. Assuming ppb and converting to µg/m³."
         )
-        return da
+        return da * O3_PPB_TO_UG_M3
 
 
 def download_grib2_file(url, dest_path):

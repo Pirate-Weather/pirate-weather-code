@@ -127,6 +127,14 @@ class TestO3UnitConversion:
         result = convert_o3_to_ug_m3(da, "ppb")
         np.testing.assert_allclose(result.values[0], O3_PPB_TO_UG_M3, rtol=1e-5)
 
+    def test_convert_o3_actual_grib2_units_string(self):
+        """convert_o3_to_ug_m3 handles the real GRIB2 unit string 'Ozone Concentration [ppb]'."""
+        import xarray as xr
+
+        da = xr.DataArray(np.array([40.0], dtype=np.float32))
+        result = convert_o3_to_ug_m3(da, "Ozone Concentration [ppb]")
+        np.testing.assert_allclose(result.values[0], 40.0 * O3_PPB_TO_UG_M3, rtol=1e-5)
+
     def test_convert_o3_ug_m3_units_no_change(self):
         """convert_o3_to_ug_m3 should not change values already in µg/m³."""
         import xarray as xr
@@ -135,13 +143,13 @@ class TestO3UnitConversion:
         result = convert_o3_to_ug_m3(da, "ug/m3")
         np.testing.assert_allclose(result.values[0], 100.0, rtol=1e-5)
 
-    def test_convert_o3_unknown_units_passthrough(self):
-        """convert_o3_to_ug_m3 should pass through values with unknown units."""
+    def test_convert_o3_unknown_units_converts_as_ppb(self):
+        """convert_o3_to_ug_m3 should assume ppb and convert for unknown units."""
         import xarray as xr
 
         da = xr.DataArray(np.array([50.0], dtype=np.float32))
         result = convert_o3_to_ug_m3(da, "some_unknown_unit")
-        np.testing.assert_allclose(result.values[0], 50.0, rtol=1e-5)
+        np.testing.assert_allclose(result.values[0], 50.0 * O3_PPB_TO_UG_M3, rtol=1e-5)
 
 
 # ---------------------------------------------------------------------------
