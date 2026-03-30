@@ -1,4 +1,4 @@
-aiohttp==3.13.3
+aiohttp==3.13.4
 aiobotocore[boto3]==3.3.0
 bottleneck==1.6.0
 cartopy==0.25.0
@@ -17,9 +17,9 @@ nwswx==0.1.2
 pyarrow==23.0.1
 pykml==0.2.0
 rioxarray==0.22.0
-s3fs==2026.2.0
+s3fs==2026.3.0
 scikit-learn==1.8.0
 tqdm==4.67.3
 xarray==2026.2.0
-xarray-spatial==0.9.2
+xarray-spatial==0.9.3
 zarr==3.1.6
