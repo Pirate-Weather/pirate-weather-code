@@ -307,7 +307,13 @@ def getGribList(FH_forecastsub, matchStrings):
                                 str(Path(x.get_localFilePath(matchStrings)).expand())
                                 for x in FH_forecastsub.file_exists
                             ]
-                        except (ValueError, OSError, KeyError, IndexError, RuntimeError):
+                        except (
+                            ValueError,
+                            OSError,
+                            KeyError,
+                            IndexError,
+                            RuntimeError,
+                        ):
                             print("Download Failure 6, Fail")
                             exit(1)
     return gribList
