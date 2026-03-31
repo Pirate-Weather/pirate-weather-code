@@ -261,9 +261,6 @@ if sp_out.returncode != 0:
     print(sp_out.stderr)
     sys.exit()
 
-# Check output from wgrib2
-# print(sp_out.stdout)
-
 # Use wgrib2 to rotate the wind vectors
 # From https://github.com/blaylockbk/pyBKB_v2/blob/master/demos/HRRR_earthRelative_vs_gridRelative_winds.ipynb
 lambertRotation = "lambert:262.500000:38.500000:38.500000:38.500000 237.280472:1799:3000.000000 21.138123:1059:3000.000000"
