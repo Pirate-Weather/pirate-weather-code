@@ -9,7 +9,6 @@ import shutil
 import subprocess
 import sys
 import time
-import traceback
 import warnings
 from itertools import chain
 
@@ -30,6 +29,7 @@ from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    check_historic_zarr,
     configure_zarr_limits,
     getGribList,
     interp_time_take_blend,
@@ -39,7 +39,6 @@ from API.ingest_utils import (
     run_command,
     tune_nofile_limit,
     validate_grib_stats,
-    check_historic_zarr,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -932,7 +931,7 @@ for i in range(his_period, -1, -1):
     done_file = zarr_path.replace(".zarr", ".done")
 
     file_exists = False
-    
+
     if save_type == "S3":
         if s3.exists(done_file):
             print(f"File already exists in S3, checking integrity for: {zarr_path}")
@@ -955,7 +954,9 @@ for i in range(his_period, -1, -1):
             print("Integrity check passed, skipping download for: " + zarr_path)
             continue
         else:
-            print("Integrity check failed, file deleted. Redownloading for: " + zarr_path)
+            print(
+                "Integrity check failed, file deleted. Redownloading for: " + zarr_path
+            )
 
     print("Downloading: " + hist_target)
 

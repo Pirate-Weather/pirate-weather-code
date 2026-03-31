@@ -7,7 +7,6 @@ import pickle
 import shutil
 import sys
 import time
-import traceback
 import warnings
 
 import dask
@@ -386,9 +385,9 @@ for i in range(his_period, -1, -1):
     s3_path = zarr_path
     local_path = zarr_path
     done_file = zarr_path.replace(".zarr", ".done")
-    
+
     file_exists = False
-    
+
     if save_type == "S3":
         if s3.exists(done_file):
             print(f"File already exists in S3, checking integrity for: {zarr_path}")
@@ -409,7 +408,9 @@ for i in range(his_period, -1, -1):
             print("Integrity check passed, skipping download for: " + zarr_path)
             continue
         else:
-            print("Integrity check failed, file deleted. Redownloading for: " + zarr_path)
+            print(
+                "Integrity check failed, file deleted. Redownloading for: " + zarr_path
+            )
 
     print(
         "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")

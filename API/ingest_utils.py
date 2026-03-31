@@ -657,6 +657,7 @@ def check_historic_zarr(
     import os
     import shutil
     import traceback
+
     import zarr
 
     try:
@@ -687,7 +688,9 @@ def check_historic_zarr(
         store_vars = set(z.keys())
         expected_set = set(expected_vars)
         if not expected_set.issubset(store_vars):
-            print(f"Missing variables in {zarr_path}. Expected subset {expected_set}, found {store_vars}")
+            print(
+                f"Missing variables in {zarr_path}. Expected subset {expected_set}, found {store_vars}"
+            )
             raise ValueError("Missing variables in Zarr store")
 
         # Check the last variable has data by reading its last value
@@ -705,7 +708,9 @@ def check_historic_zarr(
             if save_type == "S3":
                 import s3fs
 
-                s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+                s3 = s3fs.S3FileSystem(
+                    key=aws_access_key_id, secret=aws_secret_access_key
+                )
                 if s3.exists(zarr_path):
                     s3.rm(zarr_path, recursive=True)
                 done_file = zarr_path.replace(".zarr", ".done")
@@ -721,4 +726,3 @@ def check_historic_zarr(
             print(f"Failed to delete corrupt store {zarr_path}: {e}")
 
         return False
-
