@@ -19,3 +19,4 @@ venv/
 .venv/
 .vscode/settings.json
 my_venv/
+.hrrr.env

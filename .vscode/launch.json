@@ -4,6 +4,7 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
         {
             "name": "Python Debugger: FastAPI",
             "type": "debugpy",
@@ -71,6 +72,31 @@
                 "save_type": "Download",
                 "forecast_process_dir": "/mnt/nvme/data/SubH",
                 "forecast_path": "/mnt/nvme/data/Prod/SubH",
+                "ECCODES_DEFINITION_PATH": "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+            }
+        },
+        {
+            "name": "Python: HRRR_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.HRRR_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "envFile": "${workspaceFolder}/.hrrr.env"
+        },
+        {
+            "name": "Python: HRRR_6H_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.HRRR_6H_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "env": {
+                "save_type": "Download",
+                "forecast_process_dir": "/mnt/nvme/data/HRRR_6H",
+                "forecast_path": "/mnt/nvme/data/Prod/HRRR_6H",
                 "ECCODES_DEFINITION_PATH": "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
             }
         },

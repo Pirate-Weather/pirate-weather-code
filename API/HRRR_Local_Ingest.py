@@ -7,7 +7,6 @@ import pickle
 import shutil
 import sys
 import time
-import traceback
 import warnings
 
 import dask
@@ -25,6 +24,7 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    check_historic_zarr,
     close_store,
     configure_zarr_limits,
     mask_invalid_data,
@@ -157,7 +157,7 @@ zarr_vars = (
     "CRAIN_surface",
     "TCDC_entireatmosphere",
     "MASSDEN_8maboveground",
-    "REFC_entireatmosphere",
+    "REFD_1000maboveground",
     "DSWRF_surface",
     "CAPE_surface",
 )
@@ -176,7 +176,8 @@ matchstring_su = (
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
 matchstring_cl = "(:TCDC:entire atmosphere:.*hour fcst)"
 matchstring_ap = "(:APCP:surface:0-[1-9]*)"
-matchstring_sl = "(:(MSLMA|REFC):)"
+matchstring_sl = "(:(MSLMA):)"
+matchstring_1000m = "(:REFD:1000 m above ground:)"
 
 # Merge matchstrings for download
 match_strings = (
@@ -193,6 +194,8 @@ match_strings = (
     + matchstring_8m
     + "|"
     + matchstring_sl
+    + "|"
+    + matchstring_1000m
 )
 
 # Create a range of forecast lead times
@@ -257,9 +260,6 @@ sp_out = run_command(cmd)
 if sp_out.returncode != 0:
     print(sp_out.stderr)
     sys.exit()
-
-# Check output from wgrib2
-# print(sp_out.stdout)
 
 # Use wgrib2 to rotate the wind vectors
 # From https://github.com/blaylockbk/pyBKB_v2/blob/master/demos/HRRR_earthRelative_vs_gridRelative_winds.ipynb
@@ -326,9 +326,9 @@ xarray_forecast_merged["MASSDEN_8maboveground"] = (
 )
 
 
-# Set REFC values < 5 to 0
-xarray_forecast_merged["REFC_entireatmosphere"] = mask_invalid_refc(
-    xarray_forecast_merged["REFC_entireatmosphere"]
+# Set REFD values < 5 to 0
+xarray_forecast_merged["REFD_1000maboveground"] = mask_invalid_refc(
+    xarray_forecast_merged["REFD_1000maboveground"]
 )
 
 # %% Save merged and processed xarray dataset to disk using zarr with compression
@@ -373,59 +373,41 @@ print("FORECAST COMPLETE")
 for i in range(his_period, -1, -1):
     # Define the path to save the zarr dataset with the run time in the filename
     # format the time following iso8601
-    s3_path = (
+    zarr_path = (
         historic_path
         + "/HRRR_Hist_v2"
         + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
         + ".zarr"
     )
+    s3_path = zarr_path
+    local_path = zarr_path
+    done_file = zarr_path.replace(".zarr", ".done")
 
-    # Try to open the zarr file to check if it has already been saved
+    file_exists = False
+
     if save_type == "S3":
-        # Create the S3 filesystem
-        s3_path = (
-            historic_path
-            + "/HRRR_Hist_v2"
-            + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr"
-        )
-        if s3.exists(s3_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + s3_path)
-            # If the file exists, check that it works
-
-            if s3.exists(s3_path):
-                # Try to open and read data from the last variable of the zarr file to check if it has already been saved
-                try:
-                    hisCheckStore = zarr.storage.FsspecStore.from_url(
-                        s3_path,
-                        storage_options={
-                            "key": aws_access_key_id,
-                            "secret": aws_secret_access_key,
-                        },
-                    )
-                    zarr.open(hisCheckStore)[zarr_vars[-1]][-1, -1, -1]
-                    continue  # If it exists, skip to the next iteration
-                except Exception:
-                    print("### Historic Data Failure!")
-                    print(traceback.print_exc())
-
-                    # Delete the file if it exists
-                    if s3.exists(s3_path):
-                        s3.rm(s3_path)
-
+        if s3.exists(done_file):
+            print(f"File already exists in S3, checking integrity for: {zarr_path}")
+            file_exists = True
     else:
-        # Local Path Setup
-        local_path = (
-            historic_path
-            + "/HRRR_Hist_v2"
-            + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr"
-        )
+        if os.path.exists(done_file):
+            print(f"File already exists locally, checking integrity for: {zarr_path}")
+            file_exists = True
 
-        # Check for a loca done file
-        if os.path.exists(local_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + local_path)
+    if file_exists:
+        if check_historic_zarr(
+            zarr_path,
+            save_type,
+            zarr_vars,
+            aws_access_key_id,
+            aws_secret_access_key,
+        ):
+            print("Integrity check passed, skipping download for: " + zarr_path)
             continue
+        else:
+            print(
+                "Integrity check failed, file deleted. Redownloading for: " + zarr_path
+            )
 
     print(
         "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
@@ -705,7 +687,7 @@ close_store(zarr_store)
 # 9 (PRATE)
 # 11:14 (PTYPE)
 # 16 (MASSDEN)
-# 17 (REFC)
+# 17 (REFD)
 
 # Add padding for map chunking (100x100)
 daskVarArrayStackDisk_maps = pad_to_chunk_size(daskVarArrayStackDisk, 100)

@@ -124,7 +124,7 @@ def tune_nofile_limit(target: int = 65535) -> None:
         if new_soft > soft:
             resource.setrlimit(resource.RLIMIT_NOFILE, (new_soft, hard))
             print(f"Raised nofile soft limit from {soft} to {new_soft}")
-    except Exception as exc:
+    except (ValueError, OSError) as exc:
         print(f"Warning: unable to tune nofile limit: {exc}")
 
 
@@ -157,7 +157,7 @@ def configure_zarr_limits(
             async_cap = max(1, fd_budget // 512)
             workers = min(workers, worker_cap)
             async_concurrency = min(async_concurrency, async_cap)
-    except Exception as exc:
+    except (ValueError, OSError) as exc:
         print(f"Warning: unable to read nofile limit for zarr tuning: {exc}")
 
     async_concurrency = min(async_concurrency, workers)
@@ -262,7 +262,7 @@ def getGribList(FH_forecastsub, matchStrings):
             str(Path(x.get_localFilePath(matchStrings)).expand())
             for x in FH_forecastsub.file_exists
         ]
-    except Exception:
+    except (ValueError, OSError, KeyError, IndexError, RuntimeError):
         print("Download Failure 1, wait 20 seconds and retry")
         time.sleep(20)
         FH_forecastsub.download(matchStrings, verbose=False)
@@ -271,7 +271,7 @@ def getGribList(FH_forecastsub, matchStrings):
                 str(Path(x.get_localFilePath(matchStrings)).expand())
                 for x in FH_forecastsub.file_exists
             ]
-        except Exception:
+        except (ValueError, OSError, KeyError, IndexError, RuntimeError):
             print("Download Failure 2, wait 20 seconds and retry")
             time.sleep(20)
             FH_forecastsub.download(matchStrings, verbose=False)
@@ -280,7 +280,7 @@ def getGribList(FH_forecastsub, matchStrings):
                     str(Path(x.get_localFilePath(matchStrings)).expand())
                     for x in FH_forecastsub.file_exists
                 ]
-            except Exception:
+            except (ValueError, OSError, KeyError, IndexError, RuntimeError):
                 print("Download Failure 3, wait 20 seconds and retry")
                 time.sleep(20)
                 FH_forecastsub.download(matchStrings, verbose=False)
@@ -289,7 +289,7 @@ def getGribList(FH_forecastsub, matchStrings):
                         str(Path(x.get_localFilePath(matchStrings)).expand())
                         for x in FH_forecastsub.file_exists
                     ]
-                except Exception:
+                except (ValueError, OSError, KeyError, IndexError, RuntimeError):
                     print("Download Failure 4, wait 20 seconds and retry")
                     time.sleep(20)
                     FH_forecastsub.download(matchStrings, verbose=False)
@@ -298,7 +298,7 @@ def getGribList(FH_forecastsub, matchStrings):
                             str(Path(x.get_localFilePath(matchStrings)).expand())
                             for x in FH_forecastsub.file_exists
                         ]
-                    except Exception:
+                    except (ValueError, OSError, KeyError, IndexError, RuntimeError):
                         print("Download Failure 5, wait 20 seconds and retry")
                         time.sleep(20)
                         FH_forecastsub.download(matchStrings, verbose=False)
@@ -307,7 +307,13 @@ def getGribList(FH_forecastsub, matchStrings):
                                 str(Path(x.get_localFilePath(matchStrings)).expand())
                                 for x in FH_forecastsub.file_exists
                             ]
-                        except Exception:
+                        except (
+                            ValueError,
+                            OSError,
+                            KeyError,
+                            IndexError,
+                            RuntimeError,
+                        ):
                             print("Download Failure 6, Fail")
                             exit(1)
     return gribList
@@ -628,3 +634,105 @@ def interpolate_temporal_gaps_efficiently(
 
     # Execute
     return ds_chunked.map(_process_variable)
+
+
+def check_historic_zarr(
+    zarr_path: str,
+    save_type: str,
+    expected_vars: tuple,
+    aws_access_key_id: str = "",
+    aws_secret_access_key: str = "",
+) -> bool:
+    """
+    Validates a historic Zarr store.
+
+    Checks that the store exists, can be opened, contains all expected variables,
+    and that data can be read from the last variable.
+    If the store is invalid, it is deleted along with any corresponding .done file.
+
+    Parameters:
+    - zarr_path (str): Path to the Zarr store.
+    - save_type (str): "S3" or "local" / "Download"
+    - expected_vars (tuple): Tuple of expected variable names.
+    - aws_access_key_id (str): AWS access key for S3.
+    - aws_secret_access_key (str): AWS secret key for S3.
+
+    Returns:
+    - bool: True if the store is valid, False otherwise.
+    """
+    import os
+    import shutil
+    import traceback
+
+    import zarr
+
+    s3 = None
+    try:
+        if save_type == "S3":
+            import s3fs
+
+            s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+            if not s3.exists(zarr_path):
+                return False
+
+            store = zarr.storage.FsspecStore.from_url(
+                zarr_path,
+                storage_options={
+                    "key": aws_access_key_id,
+                    "secret": aws_secret_access_key,
+                },
+            )
+        else:
+            if not os.path.exists(zarr_path):
+                return False
+
+            store = zarr.storage.LocalStore(zarr_path)
+
+        # Open the zarr group.
+        z = zarr.open(store, mode="r")
+
+        # Check if all expected variables exist
+        store_vars = set(z.keys())
+        expected_set = set(expected_vars)
+        if not expected_set.issubset(store_vars):
+            print(
+                f"Missing variables in {zarr_path}. Expected subset {expected_set}, found {store_vars}"
+            )
+            raise ValueError("Missing variables in Zarr store")
+
+        # Check the last variable has data by reading its last value
+        last_var = expected_vars[-1]
+        _ = z[last_var][-1, -1, -1]
+
+        return True
+
+    except (
+        ValueError,
+        IndexError,
+        KeyError,
+        zarr.errors.GroupNotFoundError,
+        zarr.errors.PathNotFoundError,
+        zarr.errors.ArrayNotFoundError,
+    ):
+        print(f"### Historic Data Failure for {zarr_path}!")
+        print(traceback.print_exc())
+
+        # Delete the invalid store
+        try:
+            if save_type == "S3":
+                if s3 is not None:
+                    if s3.exists(zarr_path):
+                        s3.rm(zarr_path, recursive=True)
+                    done_file = zarr_path.replace(".zarr", ".done")
+                    if s3.exists(done_file):
+                        s3.rm(done_file)
+            else:
+                if os.path.exists(zarr_path):
+                    shutil.rmtree(zarr_path, ignore_errors=True)
+                done_file = zarr_path.replace(".zarr", ".done")
+                if os.path.exists(done_file):
+                    os.remove(done_file)
+        except OSError as e:
+            print(f"Failed to delete corrupt store {zarr_path}: {e}")
+
+        return False
