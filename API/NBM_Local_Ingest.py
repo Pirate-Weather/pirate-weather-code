@@ -39,6 +39,7 @@ from API.ingest_utils import (
     run_command,
     tune_nofile_limit,
     validate_grib_stats,
+    check_historic_zarr,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -925,40 +926,36 @@ for i in range(his_period, -1, -1):
     hist_iter_start = time.perf_counter()
     _timing_log(f"NBM_HIST {hist_target} start")
 
+    zarr_path = historic_path + "/NBM_Hist" + hist_target + ".zarr"
+    s3_path = zarr_path
+    local_path = zarr_path
+    done_file = zarr_path.replace(".zarr", ".done")
+
+    file_exists = False
+    
     if save_type == "S3":
-        s3_path = historic_path + "/NBM_Hist" + hist_target + ".zarr"
-        # Check for a done file in S3
-        if s3.exists(s3_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + s3_path)
+        if s3.exists(done_file):
+            print(f"File already exists in S3, checking integrity for: {zarr_path}")
             _timing_log(f"NBM_HIST {hist_target} skip (already exists)")
-
-            # If the file exists, check that it works
-            try:
-                hisCheckStore = zarr.storage.FsspecStore.from_url(
-                    s3_path,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-                zarr.open(hisCheckStore)[zarr_vars[-1]][-1, -1, -1]
-                continue  # If it exists, skip to the next iteration
-            except Exception:
-                print("### Historic Data Failure!")
-                print(traceback.print_exc())
-
-                # Delete the file if it exists
-                if s3.exists(s3_path):
-                    s3.rm(s3_path)
-
+            file_exists = True
     else:
-        # Local Path Setup
-        local_path = historic_path + "/NBM_Hist" + hist_target + ".zarr"
-        # Check for a loca done file
-        if os.path.exists(local_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + local_path)
+        if os.path.exists(done_file):
+            print(f"File already exists locally, checking integrity for: {zarr_path}")
             _timing_log(f"NBM_HIST {hist_target} skip (already exists)")
+            file_exists = True
+
+    if file_exists:
+        if check_historic_zarr(
+            zarr_path,
+            save_type,
+            zarr_vars,
+            aws_access_key_id,
+            aws_secret_access_key,
+        ):
+            print("Integrity check passed, skipping download for: " + zarr_path)
             continue
+        else:
+            print("Integrity check failed, file deleted. Redownloading for: " + zarr_path)
 
     print("Downloading: " + hist_target)
 

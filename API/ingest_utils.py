@@ -628,3 +628,97 @@ def interpolate_temporal_gaps_efficiently(
 
     # Execute
     return ds_chunked.map(_process_variable)
+
+
+def check_historic_zarr(
+    zarr_path: str,
+    save_type: str,
+    expected_vars: tuple,
+    aws_access_key_id: str = "",
+    aws_secret_access_key: str = "",
+) -> bool:
+    """
+    Validates a historic Zarr store.
+
+    Checks that the store exists, can be opened, contains all expected variables,
+    and that data can be read from the last variable.
+    If the store is invalid, it is deleted along with any corresponding .done file.
+
+    Args:
+        zarr_path: Path to the Zarr store.
+        save_type: "S3" or "local" / "Download"
+        expected_vars: Tuple of expected variable names.
+        aws_access_key_id: AWS access key for S3.
+        aws_secret_access_key: AWS secret key for S3.
+
+    Returns:
+        True if the store is valid, False otherwise.
+    """
+    import os
+    import shutil
+    import traceback
+    import zarr
+
+    try:
+        if save_type == "S3":
+            import s3fs
+
+            s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+            if not s3.exists(zarr_path):
+                return False
+
+            store = zarr.storage.FsspecStore.from_url(
+                zarr_path,
+                storage_options={
+                    "key": aws_access_key_id,
+                    "secret": aws_secret_access_key,
+                },
+            )
+        else:
+            if not os.path.exists(zarr_path):
+                return False
+
+            store = zarr.storage.LocalStore(zarr_path)
+
+        # Open the zarr group.
+        z = zarr.open(store, mode="r")
+
+        # Check if all expected variables exist
+        store_vars = set(z.keys())
+        expected_set = set(expected_vars)
+        if not expected_set.issubset(store_vars):
+            print(f"Missing variables in {zarr_path}. Expected subset {expected_set}, found {store_vars}")
+            raise ValueError("Missing variables in Zarr store")
+
+        # Check the last variable has data by reading its last value
+        last_var = expected_vars[-1]
+        _ = z[last_var][-1, -1, -1]
+
+        return True
+
+    except Exception:
+        print(f"### Historic Data Failure for {zarr_path}!")
+        print(traceback.print_exc())
+
+        # Delete the invalid store
+        try:
+            if save_type == "S3":
+                import s3fs
+
+                s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+                if s3.exists(zarr_path):
+                    s3.rm(zarr_path, recursive=True)
+                done_file = zarr_path.replace(".zarr", ".done")
+                if s3.exists(done_file):
+                    s3.rm(done_file)
+            else:
+                if os.path.exists(zarr_path):
+                    shutil.rmtree(zarr_path, ignore_errors=True)
+                done_file = zarr_path.replace(".zarr", ".done")
+                if os.path.exists(done_file):
+                    os.remove(done_file)
+        except Exception as e:
+            print(f"Failed to delete corrupt store {zarr_path}: {e}")
+
+        return False
+

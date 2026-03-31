@@ -25,6 +25,7 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    check_historic_zarr,
     close_store,
     configure_zarr_limits,
     mask_invalid_data,
@@ -376,59 +377,39 @@ print("FORECAST COMPLETE")
 for i in range(his_period, -1, -1):
     # Define the path to save the zarr dataset with the run time in the filename
     # format the time following iso8601
-    s3_path = (
+    zarr_path = (
         historic_path
         + "/HRRR_Hist_v2"
         + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
         + ".zarr"
     )
-
-    # Try to open the zarr file to check if it has already been saved
+    s3_path = zarr_path
+    local_path = zarr_path
+    done_file = zarr_path.replace(".zarr", ".done")
+    
+    file_exists = False
+    
     if save_type == "S3":
-        # Create the S3 filesystem
-        s3_path = (
-            historic_path
-            + "/HRRR_Hist_v2"
-            + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr"
-        )
-        if s3.exists(s3_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + s3_path)
-            # If the file exists, check that it works
-
-            if s3.exists(s3_path):
-                # Try to open and read data from the last variable of the zarr file to check if it has already been saved
-                try:
-                    hisCheckStore = zarr.storage.FsspecStore.from_url(
-                        s3_path,
-                        storage_options={
-                            "key": aws_access_key_id,
-                            "secret": aws_secret_access_key,
-                        },
-                    )
-                    zarr.open(hisCheckStore)[zarr_vars[-1]][-1, -1, -1]
-                    continue  # If it exists, skip to the next iteration
-                except Exception:
-                    print("### Historic Data Failure!")
-                    print(traceback.print_exc())
-
-                    # Delete the file if it exists
-                    if s3.exists(s3_path):
-                        s3.rm(s3_path)
-
+        if s3.exists(done_file):
+            print(f"File already exists in S3, checking integrity for: {zarr_path}")
+            file_exists = True
     else:
-        # Local Path Setup
-        local_path = (
-            historic_path
-            + "/HRRR_Hist_v2"
-            + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr"
-        )
+        if os.path.exists(done_file):
+            print(f"File already exists locally, checking integrity for: {zarr_path}")
+            file_exists = True
 
-        # Check for a loca done file
-        if os.path.exists(local_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + local_path)
+    if file_exists:
+        if check_historic_zarr(
+            zarr_path,
+            save_type,
+            zarr_vars,
+            aws_access_key_id,
+            aws_secret_access_key,
+        ):
+            print("Integrity check passed, skipping download for: " + zarr_path)
             continue
+        else:
+            print("Integrity check failed, file deleted. Redownloading for: " + zarr_path)
 
     print(
         "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
