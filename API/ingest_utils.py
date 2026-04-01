@@ -711,7 +711,7 @@ def check_historic_zarr(
         IndexError,
         KeyError,
         zarr.errors.GroupNotFoundError,
-        zarr.errors.PathNotFoundError,
+        zarr.errors.NodeNotFoundError,
         zarr.errors.ArrayNotFoundError,
     ):
         print(f"### Historic Data Failure for {zarr_path}!")
