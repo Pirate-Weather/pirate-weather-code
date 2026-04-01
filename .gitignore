@@ -20,3 +20,4 @@ venv/
 .vscode/settings.json
 my_venv/
 .hrrr.env
+.agents/rules/veenv.md
