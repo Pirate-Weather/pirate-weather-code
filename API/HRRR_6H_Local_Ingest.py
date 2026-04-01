@@ -156,7 +156,7 @@ zarr_vars = (
     "CRAIN_surface",
     "TCDC_entireatmosphere",
     "MASSDEN_8maboveground",
-    "REFC_entireatmosphere",
+    "REFD_1000maboveground",
     "DSWRF_surface",
     "CAPE_surface",
 )
@@ -176,7 +176,8 @@ matchstring_su = (
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
 matchstring_cl = "(:TCDC:entire atmosphere:.*hour fcst)"
 matchstring_ap = "(:APCP:surface:0-[1-9]*)"
-matchstring_sl = "(:(MSLMA|REFC):)"
+matchstring_sl = "(:(MSLMA):)"
+matchstring_1000m = "(:REFD:1000 m above ground:)"
 
 # Merge matchstrings for download
 match_strings = (
@@ -193,6 +194,8 @@ match_strings = (
     + matchstring_8m
     + "|"
     + matchstring_sl
+    + "|"
+    + matchstring_1000m
 )
 
 # Create a range of forecast lead times
@@ -321,9 +324,9 @@ xarray_forecast_merged["MASSDEN_8maboveground"] = (
     xarray_forecast_merged["MASSDEN_8maboveground"] * 1e9
 )
 
-# Set REFC values < 5 to 0
-xarray_forecast_merged["REFC_entireatmosphere"] = mask_invalid_refc(
-    xarray_forecast_merged["REFC_entireatmosphere"]
+# Set REFD values < 5 to 0
+xarray_forecast_merged["REFD_1000maboveground"] = mask_invalid_refc(
+    xarray_forecast_merged["REFD_1000maboveground"]
 )
 
 

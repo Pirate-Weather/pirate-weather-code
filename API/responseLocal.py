@@ -17,7 +17,7 @@ from typing import Union
 
 import numpy as np
 from astral import LocationInfo, moon
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import ORJSONResponse
 from pirateweather_translations.dynamic_loader import load_all_translations
 from timezonefinder import TimezoneFinder
@@ -47,6 +47,7 @@ from API.constants.model_const import (
     DWD_MOSMIX,
     ECMWF,
     ERA5,
+    FORECAST_SOURCES,
     GFS,
     HRRR,
     HRRR_SUBH,
@@ -605,6 +606,18 @@ async def PW_Forecast(
     sourceList = merge_result.metadata.source_list
     sourceTimes = merge_result.metadata.source_times
     sourceIDX = merge_result.metadata.source_idx
+
+    # Validate that at least one forecast model source is available.
+    # RTMA-RU, hrrrsubh, and etopo provide only current/elevation data, not forecasts.
+    # If all forecast sources are excluded or unavailable, return a 400 error.
+    if not any(src in sourceList for src in FORECAST_SOURCES):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No forecast model sources are available for this request. "
+                "At least one forecast model must not be excluded."
+            ),
+        )
 
     # 8. Generate the minutely forecast section (precipitation intensity, etc.)
     # This uses high-resolution data (like HRRR sub-hourly) to provide minute-by-minute precipitation forecasts

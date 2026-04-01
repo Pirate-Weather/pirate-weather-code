@@ -21,12 +21,12 @@ jobs:
 
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5.10.0
+        uses: docker/metadata-action@v6.0.0
         with:
           images: ghcr.io/complianceascode/pirate-ingest
 
       - name: Build Ingest for x64
-        uses: docker/build-push-action@v6.19.2
+        uses: docker/build-push-action@v7.0.0
         with:
           context: .
           file: Docker/pirate-ingest-dockerfile
@@ -44,12 +44,12 @@ jobs:
 
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5.10.0
+        uses: docker/metadata-action@v6.0.0
         with:
           images: ghcr.io/complianceascode/pirate-ingest
 
       - name: Build Ingest for ARM
-        uses: docker/build-push-action@v6.19.2
+        uses: docker/build-push-action@v7.0.0
         with:
           context: .
           file: Docker/pirate-ingest-dockerfile
@@ -67,12 +67,12 @@ jobs:
 
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5.10.0
+        uses: docker/metadata-action@v6.0.0
         with:
           images: ghcr.io/complianceascode/pirate-api
 
       - name: Build API for x64
-        uses: docker/build-push-action@v6.19.2
+        uses: docker/build-push-action@v7.0.0
         with:
           context: .
           file: Docker/pirate-api-dockerfile
@@ -90,12 +90,12 @@ jobs:
 
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5.10.0
+        uses: docker/metadata-action@v6.0.0
         with:
           images: ghcr.io/complianceascode/pirate-api
 
       - name: Build API for ARM
-        uses: docker/build-push-action@v6.19.2
+        uses: docker/build-push-action@v7.0.0
         with:
           context: .
           file: Docker/pirate-api-dockerfile

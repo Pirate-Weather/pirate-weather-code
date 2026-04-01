@@ -8,6 +8,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Optional
 
+import aiobotocore.session as _aio_session
 import numpy as np
 import s3fs
 import zarr
@@ -192,12 +193,20 @@ def update_zarr_store(
     if stage in ("TESTING", "TM_TESTING"):
         logger.info("Setting up S3 zarrs")
         if save_type == "S3":
+            # Create an aiobotocore session and register the apikey hook on
+            # it *before* any client is created.  Session-level registration
+            # propagates to every client the session creates, which avoids a
+            # race condition where the first HeadObject fires before a
+            # client-level hook is active.
+            aio_sess = _aio_session.AioSession()
+            aio_sess.register("before-send.s3", _add_custom_header)
             s3 = s3fs.S3FileSystem(
                 anon=True,
                 asynchronous=False,
                 endpoint_url="https://api.pirateweather.net/files/",
+                skip_instance_cache=True,
+                session=aio_sess,
             )
-            s3.s3.meta.events.register("before-sign.s3.*", _add_custom_header)
         elif save_type == "S3Zarr":
             s3 = s3fs.S3FileSystem(
                 key=aws_access_key_id, secret=aws_secret_access_key, version_aware=True
