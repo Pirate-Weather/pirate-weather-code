@@ -124,7 +124,7 @@ wgrib2_path = os.getenv(
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/mnt/nvme/data/NBM_HI"
 )
-forecast_process_path = forecast_process_dir + "/NBM_GU_Process"
+forecast_process_path = forecast_process_dir + "/NBM_HI_Process"
 hist_process_path = forecast_process_dir + "/NBM_HI_Historic"
 tmp_dir = forecast_process_dir + "/Downloads"
 
@@ -364,7 +364,7 @@ cmd2 = (
     + forecast_process_path
     + "_wgrib2_merged.grib2 "
     + " -ijsmall_grib "
-    + " 1:2345 1:1597 "
+    + " 1:1251 1:801 "
     + forecast_process_path
     + "_wgrib2_merged_order.grib"
 )
@@ -544,7 +544,7 @@ cmd2 = (
     + forecast_process_path
     + "_prob_wgrib2_merged.grib2 "
     + " -ijsmall_grib "
-    + " 1:2345 1:1597 "
+    + " 1:1251 1:801 "
     + forecast_process_path
     + "_prob_wgrib2_merged_order.grib"
 )
@@ -701,7 +701,7 @@ cmd2 = (
     + forecast_process_path
     + "_accum_wgrib2_merged.grib2 "
     + " -ijsmall_grib "
-    + " 1:2345 1:1597 "
+    + " 1:1251 1:801 "
     + forecast_process_path
     + "_accum_wgrib2_merged_order.grib"
 )
@@ -1011,7 +1011,7 @@ for i in range(his_period, -1, -1):
             )
         )
         + " -ijsmall_grib "
-        + " 1:2345 1:1597 "
+        + " 1:1251 1:801 "
         + hist_process_path
         + "_wgrib2_merged_order.grib"
     )
@@ -1185,7 +1185,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
         daskArrayOut = da.from_array(
             np.tile(
                 np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
-                (1, 1597, 2345),
+                (1, 801, 1251),
             )
         ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
 

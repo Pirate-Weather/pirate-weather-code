@@ -373,7 +373,7 @@ cmd2 = (
     + forecast_process_path
     + "_wgrib2_merged.grib2 "
     + " -ijsmall_grib "
-    + " 1:2345 1:1597 "
+    + " 1:725 1:501 "
     + forecast_process_path
     + "_wgrib2_merged_order.grib"
 )
@@ -553,7 +553,7 @@ cmd2 = (
     + forecast_process_path
     + "_prob_wgrib2_merged.grib2 "
     + " -ijsmall_grib "
-    + " 1:2345 1:1597 "
+    + " 1:725 1:501 "
     + forecast_process_path
     + "_prob_wgrib2_merged_order.grib"
 )
@@ -710,7 +710,7 @@ cmd2 = (
     + forecast_process_path
     + "_accum_wgrib2_merged.grib2 "
     + " -ijsmall_grib "
-    + " 1:2345 1:1597 "
+    + " 1:725 1:501 "
     + forecast_process_path
     + "_accum_wgrib2_merged_order.grib"
 )
@@ -1020,7 +1020,7 @@ for i in range(his_period, -1, -1):
             )
         )
         + " -ijsmall_grib "
-        + " 1:2345 1:1597 "
+        + " 1:725 1:501 "
         + hist_process_path
         + "_wgrib2_merged_order.grib"
     )
@@ -1194,7 +1194,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
         daskArrayOut = da.from_array(
             np.tile(
                 np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
-                (1, 1597, 2345),
+                (1, 501, 725),
             )
         ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
 
