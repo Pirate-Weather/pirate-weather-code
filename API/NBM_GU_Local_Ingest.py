@@ -279,13 +279,7 @@ matchstring_re = (
 
 # Merge matchstrings for download
 match_strings = (
-    matchstring_2m
-    + "|"
-    + matchstring_10m
-    + "|"
-    + matchstring_pr
-    + "|"
-    + matchstring_re
+    matchstring_2m + "|" + matchstring_10m + "|" + matchstring_pr + "|" + matchstring_re
 )
 
 
