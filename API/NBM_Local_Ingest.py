@@ -8,7 +8,9 @@ import pickle
 import shutil
 import subprocess
 import sys
+import tarfile
 import time
+import traceback
 import warnings
 from itertools import chain
 
@@ -29,7 +31,6 @@ from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
-    check_historic_zarr,
     configure_zarr_limits,
     getGribList,
     interp_time_take_blend,
@@ -925,38 +926,32 @@ for i in range(his_period, -1, -1):
     hist_iter_start = time.perf_counter()
     _timing_log(f"NBM_HIST {hist_target} start")
 
-    zarr_path = historic_path + "/NBM_Hist" + hist_target + ".zarr"
-    s3_path = zarr_path
-    local_path = zarr_path
-    done_file = zarr_path.replace(".zarr", ".done")
-
-    file_exists = False
-
     if save_type == "S3":
-        if s3.exists(done_file):
-            print(f"File already exists in S3, checking integrity for: {zarr_path}")
+        s3_path = historic_path + "/NBM_Hist_v3" + hist_target + ".zarr.tar.gz"
+        if s3.exists(s3_path.replace(".tar.gz", ".done")):
+            print("File already exists in S3, skipping download for: " + s3_path)
             _timing_log(f"NBM_HIST {hist_target} skip (already exists)")
-            file_exists = True
+            try:
+                hisCheckStore = zarr.storage.FsspecStore.from_url(
+                    s3_path,
+                    storage_options={
+                        "key": aws_access_key_id,
+                        "secret": aws_secret_access_key,
+                    },
+                )
+                zarr.open(hisCheckStore)[zarr_vars[-1]][-1, -1, -1]
+                continue
+            except Exception:
+                print("### Historic Data Failure!")
+                print(traceback.print_exc())
+                if s3.exists(s3_path):
+                    s3.rm(s3_path)
     else:
-        if os.path.exists(done_file):
-            print(f"File already exists locally, checking integrity for: {zarr_path}")
+        local_path = historic_path + "/NBM_Hist_v3" + hist_target + ".zarr"
+        if os.path.exists(local_path.replace(".zarr", ".done")):
+            print("File already exists locally, skipping download for: " + local_path)
             _timing_log(f"NBM_HIST {hist_target} skip (already exists)")
-            file_exists = True
-
-    if file_exists:
-        if check_historic_zarr(
-            zarr_path,
-            save_type,
-            zarr_vars,
-            aws_access_key_id,
-            aws_secret_access_key,
-        ):
-            print("Integrity check passed, skipping download for: " + zarr_path)
             continue
-        else:
-            print(
-                "Integrity check failed, file deleted. Redownloading for: " + zarr_path
-            )
 
     print("Downloading: " + hist_target)
 
@@ -1075,29 +1070,16 @@ for i in range(his_period, -1, -1):
         f"NBM_HIST {hist_target} stage=open_transform elapsed={time.perf_counter() - stage_start:.2f}s"
     )
 
-    # Save merged and processed xarray dataset to disk using zarr
-    # Save as Zarr to s3 for Time Machine
-    if save_type == "S3":
-        zarrStore = zarr.storage.FsspecStore.from_url(
-            s3_path,
-            storage_options={
-                "key": aws_access_key_id,
-                "secret": aws_secret_access_key,
-            },
-        )
-    else:
-        # Create local Zarr store
-        zarrStore = zarr.storage.LocalStore(local_path)
-
     # Limit worker fan-out for local zarr writes to avoid "too many open files".
     stage_start = time.perf_counter()
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         xarray_his_wgrib.chunk(
             chunks={"time": 1, "x": process_chunk, "y": process_chunk}
         ).to_zarr(
-            store=zarrStore,
+            hist_process_path + "_NBM_Hist_TMP.zarr",
             mode="w",
             consolidated=False,
+            compute=True,
             chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
         )
     _timing_log(
@@ -1118,9 +1100,17 @@ for i in range(his_period, -1, -1):
 
     # Save a done file to s3 to indicate that the historic data has been processed
     if save_type == "S3":
-        done_file = s3_path.replace(".zarr", ".done")
+        with tarfile.open(
+            hist_process_path + "_NBM_Hist_TMP.zarr.tar.gz", "w:gz"
+        ) as tar:
+            tar.add(hist_process_path + "_NBM_Hist_TMP.zarr", arcname="NBM_Hist.zarr")
+        s3.put_file(hist_process_path + "_NBM_Hist_TMP.zarr.tar.gz", s3_path)
+        os.remove(hist_process_path + "_NBM_Hist_TMP.zarr.tar.gz")
+        shutil.rmtree(hist_process_path + "_NBM_Hist_TMP.zarr")
+        done_file = s3_path.replace(".tar.gz", ".done")
         s3.touch(done_file)
     else:
+        os.rename(hist_process_path + "_NBM_Hist_TMP.zarr", local_path)
         done_file = local_path.replace(".zarr", ".done")
         with open(done_file, "w") as f:
             f.write("Done")
@@ -1145,13 +1135,41 @@ if hist_processed_count:
 
 print("Merge and interpolate arrays.")
 # Get the s3 paths to the historic data
-ncLocalWorking_paths = [
-    historic_path
-    + "/NBM_Hist"
-    + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-    + ".zarr"
-    for i in range(his_period, -1, -1)
-]
+if save_type == "S3":
+    local_temp_dir = forecast_process_path + "_s3_temp_downloads"
+    os.makedirs(local_temp_dir, exist_ok=True)
+    ncLocalWorking_paths = []
+    for i in range(his_period, -1, -1):
+        timestamp = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        final_zarr_name = f"NBM_Hist_v3{timestamp}.zarr"
+        local_zarr_path = os.path.join(local_temp_dir, final_zarr_name)
+        tar_name = f"{final_zarr_name}.tar.gz"
+        s3_tar_path = f"{historic_path}/{tar_name}"
+        local_tar_path = os.path.join(local_temp_dir, tar_name)
+        extract_dir = os.path.join(local_temp_dir, f"extract_{timestamp}")
+        if not os.path.exists(local_zarr_path):
+            if not s3.exists(s3_tar_path):
+                continue
+            s3.get_file(s3_tar_path, local_tar_path)
+            os.makedirs(extract_dir, exist_ok=True)
+            with tarfile.open(local_tar_path, "r:gz") as tar:
+                tar.extractall(path=extract_dir)
+            extracted_source = os.path.join(extract_dir, "NBM_Hist.zarr")
+            if os.path.exists(extracted_source):
+                shutil.move(extracted_source, local_zarr_path)
+            if os.path.exists(local_tar_path):
+                os.remove(local_tar_path)
+            shutil.rmtree(extract_dir, ignore_errors=True)
+        if os.path.exists(local_zarr_path):
+            ncLocalWorking_paths.append(local_zarr_path)
+else:
+    ncLocalWorking_paths = [
+        historic_path
+        + "/NBM_Hist_v3"
+        + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        + ".zarr"
+        for i in range(his_period, -1, -1)
+    ]
 
 # Dask Setup
 daskInterpArrays = []
@@ -1160,22 +1178,9 @@ daskVarArrayList = []
 
 for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
     for local_ncpath in ncLocalWorking_paths:
-        if save_type == "S3":
-            daskVarArrays.append(
-                da.from_zarr(
-                    local_ncpath,
-                    component=dask_var,
-                    inline_array=True,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-            )
-        else:
-            daskVarArrays.append(
-                da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
-            )
+        daskVarArrays.append(
+            da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
+        )
 
     daskVarArraysStack = da.stack(
         daskVarArrays, allow_unknown_chunksizes=True
