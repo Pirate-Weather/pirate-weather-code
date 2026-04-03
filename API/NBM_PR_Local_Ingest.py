@@ -280,8 +280,6 @@ matchstring_re = (
     r":((TCDC|VIS|DSWRF|CAPE):surface:.*fcst:$)"  # This gets the correct surface param
 )
 
-matchstring_pw = r":(PWTHER:)"  # This gets the correct surface param
-
 # Merge matchstrings for download
 match_strings = (
     matchstring_2m
@@ -293,8 +291,6 @@ match_strings = (
     + matchstring_pr
     + "|"
     + matchstring_re
-    + "|"
-    + matchstring_pw
 )
 
 
@@ -1303,8 +1299,7 @@ _close_store(zarr_store)
 # 6 (WIND)
 # 7 (WDIR)
 # 8 (APCP)
-# 13 (PACCUM)
-# 14:17 (PTYPE)
+# 12 (PACCUM)
 
 # Loop through variables, creating a new one with a name and 36 x 100 x 100 chunks
 # Save -12:24 hours, aka steps 24:60
@@ -1324,7 +1319,7 @@ else:
     zarr_store_maps = zarr.storage.LocalStore(nbm_maps_staged_path)
 
 stage_start = time.perf_counter()
-for z in [0, 2, 6, 7, 8, 13, 14, 15, 16, 17]:
+for z in [0, 2, 6, 7, 8, 12]:
     # Create a zarr backed dask array
     zarr_array = zarr.create_array(
         store=zarr_store_maps,

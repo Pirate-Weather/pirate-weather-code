@@ -239,7 +239,6 @@ zarr_vars = (
     "VIS_surface",
     "PPROB",
     "PACCUM",
-    "DSWRF_surface",
     "CAPE_surface",
 )
 
@@ -271,29 +270,22 @@ elif base_time.hour % 6 == 5:
 nbm_range = list(chain(nbm_range1, nbm_range2))
 
 # Define the subset of variables to download as a list of strings
-matchstring_2m = r":((DPT|TMP|APTMP|RH):2 m above ground:.*fcst:$)"
-matchstring_su = r":((PTYPE):surface:.*)"
+matchstring_2m = r":((DPT|TMP|RH):2 m above ground:.*fcst:$)"
 matchstring_10m = r"(:(GUST|WIND|WDIR):10 m above ground:.*fcst:$)"
 matchstring_pr = r"(:APCP:surface:(0-1|1-2|2-3|3-4|4-5|5-6|6-7|7-8|8-9|9-10|\d*0-\d{1,2}1|\d*1-\d{1,2}2|\d*2-\d{1,2}3|\d*3-\d{1,2}4|\d*4-\d{1,2}5|\d*5-\d{1,2}6|\d*6-\d{1,2}7|\d*7-\d{1,2}8|\d*8-\d{1,2}9|\d*9-\d{1,2}0).*fcst:$)"
 matchstring_re = (
-    r":((TCDC|VIS|DSWRF|CAPE):surface:.*fcst:$)"  # This gets the correct surface param
+    r":((TCDC|VIS|CAPE):surface:.*fcst:$)"  # This gets the correct surface param
 )
-
-matchstring_pw = r":(PWTHER:)"  # This gets the correct surface param
 
 # Merge matchstrings for download
 match_strings = (
     matchstring_2m
-    + "|"
-    + matchstring_su
     + "|"
     + matchstring_10m
     + "|"
     + matchstring_pr
     + "|"
     + matchstring_re
-    + "|"
-    + matchstring_pw
 )
 
 
@@ -1299,11 +1291,10 @@ _close_store(zarr_store)
 # Want variables:
 # 0 (time)
 # 2 (TMP)
-# 6 (WIND)
-# 7 (WDIR)
-# 8 (APCP)
-# 13 (PACCUM)
-# 14:17 (PTYPE)
+# 5 (WIND)
+# 6 (WDIR)
+# 7 (APCP)
+# 11 (PACCUM)
 
 # Loop through variables, creating a new one with a name and 36 x 100 x 100 chunks
 # Save -12:24 hours, aka steps 24:60
@@ -1323,7 +1314,7 @@ else:
     zarr_store_maps = zarr.storage.LocalStore(nbm_maps_staged_path)
 
 stage_start = time.perf_counter()
-for z in [0, 2, 6, 7, 8, 13, 14, 15, 16, 17]:
+for z in [0, 2, 5, 6, 7, 11]:
     # Create a zarr backed dask array
     zarr_array = zarr.create_array(
         store=zarr_store_maps,
