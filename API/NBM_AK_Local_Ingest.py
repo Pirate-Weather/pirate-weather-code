@@ -118,7 +118,7 @@ def _acquire_single_run_lock(lock_path: str):
 ingest_version = INGEST_VERSION_STR
 
 wgrib2_path = os.getenv(
-    "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
+    "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2"
 )
 
 forecast_process_dir = os.getenv(
@@ -341,7 +341,7 @@ grib_list = getGribList(FH_forecastsub, match_strings)
 
 # Perform a check if any data seems to be invalid
 stage_start = time.perf_counter()
-cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
+cmd = f"cat {' '.join(grib_list)} | {wgrib2_path} - -s -stats"
 
 grib_check = run_command(cmd)
 
