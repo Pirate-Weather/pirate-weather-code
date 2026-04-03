@@ -6,7 +6,6 @@ import os
 import pickle
 import shutil
 import sys
-import tarfile
 import time
 import traceback
 import warnings
@@ -29,9 +28,11 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    archive_tmp_zarr_and_upload,
     build_herbie_grib_list,
     close_store,
     configure_zarr_limits,
+    download_extract_historic_archive,
     interp_time_take_blend,
     make_herbie_save_dir,
     mask_invalid_data,
@@ -887,24 +888,12 @@ for i in range(his_period, 0, -6):
 
     # Save a done file to s3 to indicate that the historic data has been processed
     if save_type == "S3":
-        with tarfile.open(
-            hist_process_path + "_GFS_Hist_TMP.zarr.tar.gz", "w:gz"
-        ) as tar:
-            tar.add(hist_process_path + "_GFS_Hist_TMP.zarr", arcname="GFS_Hist.zarr")
-
-        # Upload to S3
-        s3.put_file(
-            hist_process_path + "_GFS_Hist_TMP.zarr.tar.gz",
-            s3_path,
+        archive_tmp_zarr_and_upload(
+            tmp_zarr_path=hist_process_path + "_GFS_Hist_TMP.zarr",
+            s3_path=s3_path,
+            archive_member_name="GFS_Hist.zarr",
+            s3=s3,
         )
-
-        # Remove temp file created by tar
-        os.remove(hist_process_path + "_GFS_Hist_TMP.zarr.tar.gz")
-        # Remove temp dir created by xarray
-        shutil.rmtree(hist_process_path + "_GFS_Hist_TMP.zarr")
-
-        done_file = s3_path.replace(".tar.gz", ".done")
-        s3.touch(done_file)
     else:
         # Move to Local Path
         os.rename(hist_process_path + "_GFS_Hist_TMP.zarr", local_path)
@@ -926,49 +915,16 @@ if save_type == "S3":
     def download_and_extract(timestamp):
         # Names expected locally
         final_zarr_name = f"GFS_Hist_v3{timestamp}.zarr"
-        local_zarr_path = os.path.join(local_temp_dir, final_zarr_name)
-
-        # Names on S3
-        tar_name = f"{final_zarr_name}.tar.gz"
-        s3_tar_path = f"{historic_path}/{tar_name}"
-        local_tar_path = os.path.join(local_temp_dir, tar_name)
-
-        # Unique extraction directory for thread safety
-        extract_dir = os.path.join(local_temp_dir, f"extract_{timestamp}")
-
-        # 1. Skip if we already properly extracted it previously
-        if os.path.exists(local_zarr_path):
-            return local_zarr_path
-
-        # 2. Check if the tarball exists on S3
-        if not s3.exists(s3_tar_path):
-            return None
-
-        # Download the archive
-        s3.get_file(s3_tar_path, local_tar_path)
-
-        # Create the private extraction folder
-        os.makedirs(extract_dir, exist_ok=True)
-
-        # 3. Extract the tarball into the private folder
-        with tarfile.open(local_tar_path, "r:gz") as tar:
-            tar.extractall(path=extract_dir)
-
-        # The extracted folder is named "GFS_Hist.zarr" inside our private dir
-        extracted_source = os.path.join(extract_dir, "GFS_Hist.zarr")
-
-        # 4. Rename and move to the final expected path
-        if os.path.exists(extracted_source):
-            shutil.move(extracted_source, local_zarr_path)
-        else:
+        extracted_path = download_extract_historic_archive(
+            s3=s3,
+            historic_path=historic_path,
+            final_zarr_name=final_zarr_name,
+            extracted_store_name="GFS_Hist.zarr",
+            local_temp_dir=local_temp_dir,
+        )
+        if extracted_path is None:
             tqdm.write(f"Error: GFS_Hist.zarr not found inside archive for {timestamp}")
-
-        # 5. Clean up the tarball and the private extraction folder
-        if os.path.exists(local_tar_path):
-            os.remove(local_tar_path)
-        shutil.rmtree(extract_dir, ignore_errors=True)
-
-        return local_zarr_path if os.path.exists(local_zarr_path) else None
+        return extracted_path
 
     # Generate target timestamps
     timestamps = [

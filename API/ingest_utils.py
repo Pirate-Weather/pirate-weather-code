@@ -5,8 +5,10 @@ import os
 import re
 import resource
 import shlex
+import shutil
 import subprocess
 import sys
+import tarfile
 import time
 from typing import Iterable, Optional, Union
 
@@ -227,6 +229,63 @@ def close_store(store: object) -> None:
     close_fn = getattr(store, "close", None)
     if callable(close_fn):
         close_fn()
+
+
+def archive_tmp_zarr_and_upload(
+    *,
+    tmp_zarr_path: str,
+    s3_path: str,
+    archive_member_name: str,
+    s3,
+) -> None:
+    """Tar/gzip a temporary zarr directory, upload to S3, and write done marker."""
+    tmp_tar_path = f"{tmp_zarr_path}.tar.gz"
+    with tarfile.open(tmp_tar_path, "w:gz") as tar:
+        tar.add(tmp_zarr_path, arcname=archive_member_name)
+
+    s3.put_file(tmp_tar_path, s3_path)
+    if os.path.exists(tmp_tar_path):
+        os.remove(tmp_tar_path)
+    shutil.rmtree(tmp_zarr_path, ignore_errors=True)
+    s3.touch(s3_path.replace(".tar.gz", ".done"))
+
+
+def download_extract_historic_archive(
+    *,
+    s3,
+    historic_path: str,
+    final_zarr_name: str,
+    extracted_store_name: str,
+    local_temp_dir: str,
+) -> Optional[str]:
+    """Ensure a historic archive is downloaded and extracted to a local zarr path."""
+    os.makedirs(local_temp_dir, exist_ok=True)
+    local_zarr_path = os.path.join(local_temp_dir, final_zarr_name)
+    if os.path.exists(local_zarr_path):
+        return local_zarr_path
+
+    tar_name = f"{final_zarr_name}.tar.gz"
+    s3_tar_path = f"{historic_path}/{tar_name}"
+    if not s3.exists(s3_tar_path):
+        return None
+
+    local_tar_path = os.path.join(local_temp_dir, tar_name)
+    timestamp_tag = final_zarr_name.replace(".zarr", "")
+    extract_dir = os.path.join(local_temp_dir, f"extract_{timestamp_tag}")
+
+    s3.get_file(s3_tar_path, local_tar_path)
+    os.makedirs(extract_dir, exist_ok=True)
+    with tarfile.open(local_tar_path, "r:gz") as tar:
+        tar.extractall(path=extract_dir)
+
+    extracted_source = os.path.join(extract_dir, extracted_store_name)
+    if os.path.exists(extracted_source):
+        shutil.move(extracted_source, local_zarr_path)
+
+    if os.path.exists(local_tar_path):
+        os.remove(local_tar_path)
+    shutil.rmtree(extract_dir, ignore_errors=True)
+    return local_zarr_path if os.path.exists(local_zarr_path) else None
 
 
 def mask_invalid_data(daskArray, ignoreAxis=None):

@@ -6,7 +6,6 @@ import os
 import pickle
 import shutil
 import sys
-import tarfile
 import time
 import traceback
 import warnings
@@ -26,8 +25,10 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    archive_tmp_zarr_and_upload,
     close_store,
     configure_zarr_limits,
+    download_extract_historic_archive,
     mask_invalid_data,
     mask_invalid_refc,
     pad_to_chunk_size,
@@ -514,17 +515,12 @@ for i in range(his_period, -1, -1):
 
     # Save a done file to s3 to indicate that the historic data has been processed
     if save_type == "S3":
-        with tarfile.open(
-            hist_process_path + "_HRRR_Hist_TMP.zarr.tar.gz", "w:gz"
-        ) as tar:
-            tar.add(hist_process_path + "_HRRR_Hist_TMP.zarr", arcname="HRRR_Hist.zarr")
-
-        s3.put_file(hist_process_path + "_HRRR_Hist_TMP.zarr.tar.gz", s3_path)
-        os.remove(hist_process_path + "_HRRR_Hist_TMP.zarr.tar.gz")
-        shutil.rmtree(hist_process_path + "_HRRR_Hist_TMP.zarr")
-
-        done_file = s3_path.replace(".tar.gz", ".done")
-        s3.touch(done_file)
+        archive_tmp_zarr_and_upload(
+            tmp_zarr_path=hist_process_path + "_HRRR_Hist_TMP.zarr",
+            s3_path=s3_path,
+            archive_member_name="HRRR_Hist.zarr",
+            s3=s3,
+        )
     else:
         os.rename(hist_process_path + "_HRRR_Hist_TMP.zarr", local_path)
         done_file = local_path.replace(".zarr", ".done")
@@ -543,28 +539,15 @@ if save_type == "S3":
     for i in range(his_period, -1, -1):
         timestamp = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
         final_zarr_name = f"HRRR_Hist_v3{timestamp}.zarr"
-        local_zarr_path = os.path.join(local_temp_dir, final_zarr_name)
-        tar_name = f"{final_zarr_name}.tar.gz"
-        s3_tar_path = f"{historic_path}/{tar_name}"
-        local_tar_path = os.path.join(local_temp_dir, tar_name)
-        extract_dir = os.path.join(local_temp_dir, f"extract_{timestamp}")
-
-        if not os.path.exists(local_zarr_path):
-            if not s3.exists(s3_tar_path):
-                continue
-            s3.get_file(s3_tar_path, local_tar_path)
-            os.makedirs(extract_dir, exist_ok=True)
-            with tarfile.open(local_tar_path, "r:gz") as tar:
-                tar.extractall(path=extract_dir)
-            extracted_source = os.path.join(extract_dir, "HRRR_Hist.zarr")
-            if os.path.exists(extracted_source):
-                shutil.move(extracted_source, local_zarr_path)
-            if os.path.exists(local_tar_path):
-                os.remove(local_tar_path)
-            shutil.rmtree(extract_dir, ignore_errors=True)
-
-        if os.path.exists(local_zarr_path):
-            ncHistWorking_paths.append(local_zarr_path)
+        extracted_path = download_extract_historic_archive(
+            s3=s3,
+            historic_path=historic_path,
+            final_zarr_name=final_zarr_name,
+            extracted_store_name="HRRR_Hist.zarr",
+            local_temp_dir=local_temp_dir,
+        )
+        if extracted_path is not None:
+            ncHistWorking_paths.append(extracted_path)
 else:
     ncHistWorking_paths = [
         historic_path
