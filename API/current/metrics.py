@@ -1137,13 +1137,13 @@ def _get_cape(sourceList, model_data, state: InterpolationState, lat, lon):
         Current CAPE.
     """
     source_map = {
-        "nbm": (
-            lambda: "nbm" in sourceList,
-            lambda: _interp_scalar(model_data["NBM_Merged"], NBM["cape"], state),
-        ),
         "hrrr": (
             lambda: model_data["has_hrrr_merged"],
             lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["cape"], state),
+        ),
+        "nbm": (
+            lambda: "nbm" in sourceList,
+            lambda: _interp_scalar(model_data["NBM_Merged"], NBM["cape"], state),
         ),
         "gfs": (
             lambda: "gfs" in sourceList,
