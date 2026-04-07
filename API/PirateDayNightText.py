@@ -170,7 +170,7 @@ def calculate_period_summary_text(
     - condition_text (str): The base text for the condition (e.g., "light-rain", "fog").
     - condition_type (str): The type of condition ("precip", "cloud", "wind", "vis").
     - all_periods (list): List of all period names (e.g., ["today-morning", "today-afternoon"]).
-    - all_wind_periods (list): Indices of periods with significant wind..
+    - all_wind_periods (list): Indices of periods with significant wind.
     - all_vis_periods (list): Indices of periods with low visibility (fog).
     - max_wind_speed (float): Maximum wind speed across all relevant periods.
     - icon_set (str): Which icon set to use - Dark Sky or Pirate Weather.
