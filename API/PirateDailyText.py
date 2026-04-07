@@ -1477,7 +1477,7 @@ def calculate_day_text(
 
     # Calculate thunderstorm summary if they don't match precipitation periods
     if has_thunderstorm and not thunderstorms_match_precip:
-        thunderstorm_only_summary, _, _, _, _ = calculate_period_summary_text(
+        thunderstorm_only_summary, _, _ = calculate_period_summary_text(
             thunderstorm_periods,
             thunderstorm_summary_text,
             "precip",  # Use precip type since thunderstorms have same priority
@@ -1494,7 +1494,7 @@ def calculate_day_text(
 
     # Calculate summaries for other conditions. The combination flags for them are local to their calls.
     if has_wind:
-        wind_only_summary, _, _, _, _ = calculate_period_summary_text(
+        wind_only_summary, _, _ = calculate_period_summary_text(
             wind_periods,
             calculate_wind_text(overall_max_wind, icon_set, "summary"),
             "wind",
@@ -1512,7 +1512,7 @@ def calculate_day_text(
             overall_cloud_idx_for_wind=overall_cloud_idx,
         )
     if has_vis:
-        vis_only_summary, _, _, _, _ = calculate_period_summary_text(
+        vis_only_summary, _, _ = calculate_period_summary_text(
             vis_periods,
             calculate_vis_text(
                 overall_min_visibility,
@@ -1525,8 +1525,6 @@ def calculate_day_text(
             ),
             "vis",
             all_period_names,
-            [],
-            [],
             [],
             [],
             overall_max_wind,
@@ -1566,8 +1564,7 @@ def calculate_day_text(
     # 0: Precipitation and Thunderstorms (same priority)
     # 1: Visibility (Fog)
     # 2: Wind
-    # 3: Dry/Humid (if combined, or if primary cloud is clear)
-    # 4: Cloud (fallback)
+    # 3: Cloud (fallback)
 
     candidate_summaries_for_final_assembly = []
 
