@@ -338,10 +338,14 @@ def fill_station_gaps(
 
     DWD MOSMIX station data has two common sources of NaN gaps:
 
-    * ``APCP_surface`` (RR1c): DWD MOSMIX omits this parameter for hours with no
-      precipitation forecast, leaving gaps of 5–6 consecutive NaNs in otherwise
-      dry periods.  These are filled with **0** — absence of a precipitation report
-      in a dry MOSMIX run reliably means no precipitation was forecast.
+    * ``APCP_surface`` (RR1c): DWD MOSMIX omits this parameter for some hours,
+      leaving gaps of up to 5–6 consecutive NaNs.  These are filled by **linear
+      interpolation** — between two dry periods (0 → 0) this naturally gives 0;
+      between non-zero values (e.g. 0.5 → 0.1) it provides a physically reasonable
+      estimate rather than incorrectly reporting no precipitation.  After
+      interpolation any remaining NaNs (gaps longer than ``max_gap_hours``) are
+      filled with **0**, since an isolated missing report surrounded by no-rain
+      hours almost certainly means no precipitation was forecast.
     * ``PTYPE_surface`` (ww): categorical precipitation-type code filled by
       forward- then backward-propagation so that the nearest valid code is used.
     * All other continuous variables (temperature, humidity, wind U/V, etc.):
@@ -370,16 +374,18 @@ def fill_station_gaps(
         Column containing the forecast timestamp (used for ordering only).
     max_gap_hours : int
         Maximum number of consecutive NaN timesteps to fill by interpolation
-        for continuous variables.  Gaps longer than this are left as NaN.
+        for continuous variables.  Gaps longer than this are left as NaN
+        (except APCP_surface, where remaining NaNs are zero-filled).
 
     Returns
     -------
     pd.DataFrame
         Copy of *df* with NaN gaps filled.
     """
-    # Columns whose NaNs should be replaced with 0 (DWD MOSMIX omits RR1c
-    # for hours with no precipitation, so NaN reliably means 0 mm).
-    ZERO_FILL_VARS = {"APCP_surface"}
+    # Precipitation column: interpolate first, then zero-fill any remaining NaNs.
+    # Linear interpolation handles both dry-period gaps (0→0 stays 0) and
+    # active-precipitation gaps (e.g. 0.5→0.1 gives a smooth estimate).
+    PRECIP_VARS = {"APCP_surface"}
 
     # Categorical columns: propagate the nearest valid code rather than
     # interpolating, because averaging integer codes is not physically meaningful.
@@ -406,8 +412,15 @@ def fill_station_gaps(
             if not s.isna().any():
                 continue  # no gaps — nothing to do
 
-            if col in ZERO_FILL_VARS:
-                df.loc[sorted_idx, col] = s.fillna(0.0).values
+            if col in PRECIP_VARS:
+                # Interpolate short gaps; zero-fill any remaining NaNs (isolated
+                # missing reports in an otherwise dry period).
+                filled = s.interpolate(
+                    method="linear",
+                    limit=max_gap_hours,
+                    limit_direction="both",
+                ).fillna(0.0)
+                df.loc[sorted_idx, col] = filled.values
             elif col in CATEGORICAL_VARS:
                 # Forward-fill then backward-fill within the station series.
                 # limit= counts consecutive NaN rows; assumes uniform hourly spacing.
