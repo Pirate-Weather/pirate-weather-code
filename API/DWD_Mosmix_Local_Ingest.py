@@ -548,7 +548,9 @@ def interpolate_dwd_to_grid_knearest_dask(
             # Santos Dumont vs Galeao for the Rio de Janeiro grid cell) so that
             # a single missing report does not cause a sudden source switch and
             # temperature jump in the output.
-            val_candidates = vals[row_idx_rep]  # values for all within-radius candidates
+            val_candidates = vals[
+                row_idx_rep
+            ]  # values for all within-radius candidates
             valid_mask = ~np.isnan(val_candidates)
 
             lin_v = linear_index[valid_mask]
