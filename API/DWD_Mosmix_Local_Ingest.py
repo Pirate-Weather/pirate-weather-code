@@ -327,6 +327,97 @@ def process_dwd_df(df, global_metadata=None):
     return df
 
 
+def fill_station_gaps(
+    df,
+    station_col="station_id",
+    time_col="time",
+    max_gap_hours=6,
+):
+    """
+    Fill NaN gaps in each station's time series before spatial gridding.
+
+    DWD MOSMIX station data has two common sources of NaN gaps:
+
+    * ``APCP_surface`` (RR1c): missing for 5–6 consecutive hours in otherwise
+      dry periods.  These are filled with **0** — the meteorological convention
+      for "no precipitation data available".
+    * ``PTYPE_surface`` (ww): categorical precipitation-type code filled by
+      forward- then backward-propagation so that the nearest valid code is used.
+    * All other continuous variables (temperature, humidity, wind U/V, etc.):
+      gaps of up to ``max_gap_hours`` consecutive NaNs are filled by **linear
+      interpolation** within each station's own time series.  Longer gaps are
+      left intact so the merge logic can fall back to GFS/ECMWF for those hours
+      rather than extrapolating unreliably.
+
+    This function is called on the processed DataFrame (after ``process_dwd_df``)
+    but *before* spatial gridding, so that ``interpolate_dwd_to_grid_knearest_dask``
+    always receives hole-free station series and the nearest-station-wins strategy
+    never leaves a grid cell NaN due to a single missing report.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Processed station DataFrame with one row per (station, time) pair.
+    station_col : str
+        Column identifying each station.
+    time_col : str
+        Column containing the forecast timestamp (used for ordering only).
+    max_gap_hours : int
+        Maximum number of consecutive NaN timesteps to fill by interpolation
+        for continuous variables.  Gaps longer than this are left as NaN.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of *df* with NaN gaps filled.
+    """
+    # Columns whose NaNs should be replaced with 0 (missing precipitation report
+    # in a dry period → no precipitation).
+    ZERO_FILL_VARS = {"APCP_surface"}
+
+    # Categorical columns: propagate the nearest valid code rather than
+    # interpolating, because averaging integer codes is not physically meaningful.
+    CATEGORICAL_VARS = {"PTYPE_surface"}
+
+    # Non-data columns: skip entirely.
+    SKIP_COLS = {station_col, time_col, "latitude", "longitude", "altitude"}
+
+    df = df.copy()
+
+    for sid, grp_idx in df.groupby(station_col, sort=False).groups.items():
+        grp = df.loc[grp_idx].sort_values(time_col)
+        sorted_idx = grp.index
+
+        for col in df.columns:
+            if col in SKIP_COLS:
+                continue
+
+            if not pd.api.types.is_float_dtype(df[col]) and col not in CATEGORICAL_VARS:
+                # Leave non-numeric columns (raw DWD strings, etc.) untouched.
+                continue
+
+            s = grp[col]
+            if not s.isna().any():
+                continue  # no gaps — nothing to do
+
+            if col in ZERO_FILL_VARS:
+                df.loc[sorted_idx, col] = s.fillna(0.0).values
+            elif col in CATEGORICAL_VARS:
+                # Forward-fill then backward-fill within the station series.
+                df.loc[sorted_idx, col] = (
+                    s.ffill(limit=max_gap_hours).bfill(limit=max_gap_hours).values
+                )
+            else:
+                # Linear interpolation capped at max_gap_hours consecutive NaNs.
+                df.loc[sorted_idx, col] = s.interpolate(
+                    method="linear",
+                    limit=max_gap_hours,
+                    limit_direction="both",
+                ).values
+
+    return df
+
+
 def interpolate_dwd_to_grid_knearest_dask(
     df,
     var_cols,
@@ -342,16 +433,15 @@ def interpolate_dwd_to_grid_knearest_dask(
     time_chunk=24,  # Dask chunk size in time
 ):
     """
-    Vectorized inverse-distance-weighted (IDW) grid interpolation with dense,
-    Dask-backed output.
+    Vectorized nearest-neighbour grid interpolation with dense, Dask-backed output.
 
-    Each dataframe row is assigned to up to k_max nearest grid cells within
-    radius_km.  For each (time, lat, lon) grid cell and each continuous variable,
-    ALL valid (non-NaN) stations within radius_km contribute, weighted by
-    1/distance, so that a single missing station report does not leave a NaN hole
-    or force an abrupt source switch.  Categorical variables (e.g. PTYPE_surface)
-    use the nearest valid station instead, because averaging integer codes is not
-    physically meaningful.
+    Each dataframe row is assigned to up to k_max nearest grid cells
+    within radius_km. For each (time, lat, lon) grid cell, ONLY THE NEAREST
+    station is used, provided it is within radius_km. Otherwise, the cell is NaN.
+
+    NaN gaps within each station's time series should be filled before calling
+    this function (see ``fill_station_gaps``), so that the nearest station always
+    has a valid value and no abrupt source switches occur.
 
     Parameters
     ----------
@@ -379,9 +469,8 @@ def interpolate_dwd_to_grid_knearest_dask(
     -------
     xr.Dataset
         Dataset with dims (time, lat, lon); each data_var is a dense,
-        Dask-backed 3D array. Each grid cell/time uses the IDW average of all
-        valid stations within radius_km (nearest-valid for categorical vars),
-        or NaN if none.
+        Dask-backed 3D array. Each grid cell/time uses the closest station
+        within radius_km, or NaN if none.
     """
     if isinstance(var_cols, str):
         var_cols = [var_cols]
@@ -497,28 +586,47 @@ def interpolate_dwd_to_grid_knearest_dask(
     row_idx_rep = np.repeat(row_idx[:, None], k_max, axis=1).ravel()[valid]
 
     # -------------------------------------------------
-    # 4) Pre-sort candidates by (linear_index, distance) for nearest-valid lookup
-    #    (used for categorical variables that cannot be meaningfully averaged)
+    # 4) For each grid cell/time, find the nearest station (single pass)
     # -------------------------------------------------
-    _log("Pre-sorting candidates by (cell, distance)…")
+    _log("Computing nearest-station per grid cell/time (argmin)…")
 
+    # Sort candidates by cell index then distance
     # lexsort uses last key as primary sort key -> primary: linear_index, secondary: flat_dist
     order = np.lexsort((flat_dist, linear_index))
     lin_sorted = linear_index[order]
+    dist_sorted = flat_dist[order]
     row_sorted = row_idx_rep[order]
+
+    # Take the first candidate per unique cell index → nearest station
+    uniq_lin, idx_first = np.unique(lin_sorted, return_index=True)
+    best_lin = uniq_lin
+    best_dist = dist_sorted[idx_first]
+    best_row = row_sorted[idx_first]
+
+    # Enforce radius cutoff in radians
+    mask_radius = best_dist <= radius_rad
+    best_lin = best_lin[mask_radius]
+    best_row = best_row[mask_radius]
+
+    # If still nothing, everything is NaN
+    if best_lin.size == 0:
+        ds = xr.Dataset()
+        for col in var_cols:
+            arr = np.full((nt, ny, nx), np.nan, dtype=dtype)
+            darr = da.from_array(arr, chunks=(min(time_chunk, nt), ny, nx))
+            ds[col] = xr.DataArray(
+                darr,
+                dims=("time", "lat", "lon"),
+                coords={"time": unique_times, "lat": gfs_lats, "lon": gfs_lons},
+                name=col,
+            )
+        _log("Done (no winners within radius; all NaNs).")
+        return ds
 
     # -------------------------------------------------
     # 5) Build dense NumPy arrays for each variable and wrap with Dask
     # -------------------------------------------------
     _log(f"Building dense Dask arrays for {len(var_cols)} variable(s)…")
-
-    # Variables that must use nearest-valid-station instead of IDW because
-    # they are categorical codes (averaging integer codes is not meaningful) or
-    # timestamps (the "time" mask variable is tied to TMP validity, not averaged).
-    NEAREST_VALID_VARS = {"PTYPE_surface", "time"}
-
-    # Small constant to prevent division-by-zero in IDW weights.
-    IDW_EPSILON = 1e-10
 
     data_vars = {}
     var_iter = tqdm(var_cols, desc="Variables") if log == "tqdm" else var_cols
@@ -526,51 +634,12 @@ def interpolate_dwd_to_grid_knearest_dask(
     for col in var_iter:
         vals = df_sorted[col].to_numpy().astype(dtype)
 
-        if col in NEAREST_VALID_VARS:
-            # Nearest-valid-station: take the closest non-NaN station per cell/time.
-            # This preserves categorical semantics (e.g. precipitation type codes).
-            val_sorted = vals[row_sorted]
-            valid_mask_sorted = ~np.isnan(val_sorted)
+        # Allocate flattened grid
+        arr_flat = np.full(n_cells, np.nan, dtype=dtype)
 
-            lin_v = lin_sorted[valid_mask_sorted]
-            row_v = row_sorted[valid_mask_sorted]
-
-            arr_flat = np.full(n_cells, np.nan, dtype=dtype)
-            if lin_v.size > 0:
-                uniq_lin_v, idx_first_v = np.unique(lin_v, return_index=True)
-                arr_flat[uniq_lin_v] = vals[row_v[idx_first_v]]
-        else:
-            # Inverse-distance-weighted (IDW) average of ALL valid stations within
-            # the search radius.  Using all valid neighbours instead of only the
-            # nearest prevents NaN holes when the closest station is missing data
-            # for a particular variable / hour (e.g. RR1c gaps, DD gaps).  IDW
-            # also smooths out small differences between nearby stations (e.g.
-            # Santos Dumont vs Galeao for the Rio de Janeiro grid cell) so that
-            # a single missing report does not cause a sudden source switch and
-            # temperature jump in the output.
-            val_candidates = vals[
-                row_idx_rep
-            ]  # values for all within-radius candidates
-            valid_mask = ~np.isnan(val_candidates)
-
-            lin_v = linear_index[valid_mask]
-            dist_v = flat_dist[valid_mask].astype(np.float64)
-            val_v = val_candidates[valid_mask].astype(np.float64)
-            weights_v = 1.0 / (dist_v + IDW_EPSILON)
-
-            weighted_sum = np.zeros(n_cells, dtype=np.float64)
-            weight_total = np.zeros(n_cells, dtype=np.float64)
-
-            # np.add.at correctly accumulates at duplicate indices (multiple
-            # stations contributing to the same grid cell / time step).
-            np.add.at(weighted_sum, lin_v, val_v * weights_v)
-            np.add.at(weight_total, lin_v, weights_v)
-
-            arr_flat = np.where(
-                weight_total > 0,
-                weighted_sum / weight_total,
-                np.nan,
-            ).astype(dtype)
+        # Assign values of chosen rows to their grid cells
+        # Note: if the chosen row's value is NaN, the cell is NaN.
+        arr_flat[best_lin] = vals[best_row]
 
         # Reshape back to (time, lat, lon)
         arr = arr_flat.reshape(nt, ny, nx)
@@ -866,7 +935,12 @@ def process_and_interpolate_df(df_input):
     # 1. Process units and variables
     df_processed = process_dwd_df(df_input)
 
-    # 2. Interpolate to Grid
+    # 2. Fill per-station NaN gaps before gridding so that nearest-station-wins
+    #    always finds a valid value and never leaves a grid cell NaN due to a
+    #    single missing report (e.g. RR1c 5–6 h gaps, DD 3–4 h gaps).
+    df_processed = fill_station_gaps(df_processed)
+
+    # 3. Interpolate to Grid
     gridded_ds = interpolate_dwd_to_grid_knearest_dask(
         df_processed,
         var_cols=zarr_vars,
