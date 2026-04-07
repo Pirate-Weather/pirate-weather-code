@@ -338,16 +338,22 @@ def fill_station_gaps(
 
     DWD MOSMIX station data has two common sources of NaN gaps:
 
-    * ``APCP_surface`` (RR1c): missing for 5–6 consecutive hours in otherwise
-      dry periods.  These are filled with **0** — the meteorological convention
-      for "no precipitation data available".
+    * ``APCP_surface`` (RR1c): DWD MOSMIX omits this parameter for hours with no
+      precipitation forecast, leaving gaps of 5–6 consecutive NaNs in otherwise
+      dry periods.  These are filled with **0** — absence of a precipitation report
+      in a dry MOSMIX run reliably means no precipitation was forecast.
     * ``PTYPE_surface`` (ww): categorical precipitation-type code filled by
       forward- then backward-propagation so that the nearest valid code is used.
     * All other continuous variables (temperature, humidity, wind U/V, etc.):
-      gaps of up to ``max_gap_hours`` consecutive NaNs are filled by **linear
-      interpolation** within each station's own time series.  Longer gaps are
-      left intact so the merge logic can fall back to GFS/ECMWF for those hours
-      rather than extrapolating unreliably.
+      gaps of up to ``max_gap_hours`` consecutive NaN *timesteps* are filled by
+      **linear interpolation** within each station's own time series.  Longer gaps
+      are left intact so the merge logic can fall back to GFS/ECMWF for those
+      hours rather than extrapolating unreliably.
+
+    .. note::
+        ``max_gap_hours`` counts consecutive NaN *rows*, not wall-clock hours.
+        DWD MOSMIX-S produces one row per hour for the first 240 forecast hours,
+        so for that dataset the two are equivalent.
 
     This function is called on the processed DataFrame (after ``process_dwd_df``)
     but *before* spatial gridding, so that ``interpolate_dwd_to_grid_knearest_dask``
@@ -371,8 +377,8 @@ def fill_station_gaps(
     pd.DataFrame
         Copy of *df* with NaN gaps filled.
     """
-    # Columns whose NaNs should be replaced with 0 (missing precipitation report
-    # in a dry period → no precipitation).
+    # Columns whose NaNs should be replaced with 0 (DWD MOSMIX omits RR1c
+    # for hours with no precipitation, so NaN reliably means 0 mm).
     ZERO_FILL_VARS = {"APCP_surface"}
 
     # Categorical columns: propagate the nearest valid code rather than
@@ -392,8 +398,8 @@ def fill_station_gaps(
             if col in SKIP_COLS:
                 continue
 
-            if not pd.api.types.is_float_dtype(df[col]) and col not in CATEGORICAL_VARS:
-                # Leave non-numeric columns (raw DWD strings, etc.) untouched.
+            # Always process categorical vars; skip non-numeric non-categorical cols.
+            if col not in CATEGORICAL_VARS and not pd.api.types.is_float_dtype(df[col]):
                 continue
 
             s = grp[col]
@@ -404,11 +410,13 @@ def fill_station_gaps(
                 df.loc[sorted_idx, col] = s.fillna(0.0).values
             elif col in CATEGORICAL_VARS:
                 # Forward-fill then backward-fill within the station series.
+                # limit= counts consecutive NaN rows; assumes uniform hourly spacing.
                 df.loc[sorted_idx, col] = (
                     s.ffill(limit=max_gap_hours).bfill(limit=max_gap_hours).values
                 )
             else:
-                # Linear interpolation capped at max_gap_hours consecutive NaNs.
+                # Linear interpolation capped at max_gap_hours consecutive NaN rows.
+                # limit_direction="both" also fills NaNs at the start/end of the series.
                 df.loc[sorted_idx, col] = s.interpolate(
                     method="linear",
                     limit=max_gap_hours,
