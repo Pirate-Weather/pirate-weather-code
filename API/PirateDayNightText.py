@@ -1008,6 +1008,8 @@ def calculate_half_day_text(
             calculate_wind_text(overall_max_wind, icon_set, "summary"),
             "wind",
             all_period_names,
+            [],
+            [],
             overall_max_wind,
             icon_set,
             0,
