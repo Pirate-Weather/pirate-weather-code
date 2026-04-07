@@ -213,8 +213,9 @@ try:
         with open(station_map_file, "rb") as f:
             DWD_MOSMIX_Stations = pickle.load(f)
             logger.info(f"Loaded DWD MOSMIX station map from: {station_map_file}")
-    elif DWD_MOSMIX_Stations is None:
-        logger.debug("DWD MOSMIX station map not found")
+    elif station_map_file and DWD_MOSMIX_Stations is None:
+        # File path was configured for this stage but file is missing
+        logger.debug(f"DWD MOSMIX station map not found at: {station_map_file}")
 except Exception as e:
     logger.debug(f"Error loading DWD MOSMIX station map: {e}")
 
