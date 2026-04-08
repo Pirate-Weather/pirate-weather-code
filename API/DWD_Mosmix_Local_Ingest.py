@@ -396,21 +396,31 @@ def fill_station_gaps(
 
     df = df.copy()
 
+    # Pre-compute the subset of columns that need gap-filling so that the
+    # per-station NaN check below is as cheap as possible.
+    fill_cols = [
+        col
+        for col in df.columns
+        if col not in SKIP_COLS
+        and (col in CATEGORICAL_VARS or pd.api.types.is_float_dtype(df[col]))
+    ]
+
+    # Pre-compute a boolean mask: which rows have at least one NaN in a fill column.
+    # Used to quickly skip stations that are already complete.
+    has_any_nan = df[fill_cols].isna().any(axis=1)
+
     for sid, grp_idx in df.groupby(station_col, sort=False).groups.items():
+        # Fast path: skip the station entirely if it has no NaN in any fill column.
+        if not has_any_nan.loc[grp_idx].any():
+            continue
+
         grp = df.loc[grp_idx].sort_values(time_col)
         sorted_idx = grp.index
 
-        for col in df.columns:
-            if col in SKIP_COLS:
-                continue
-
-            # Always process categorical vars; skip non-numeric non-categorical cols.
-            if col not in CATEGORICAL_VARS and not pd.api.types.is_float_dtype(df[col]):
-                continue
-
+        for col in fill_cols:
             s = grp[col]
             if not s.isna().any():
-                continue  # no gaps — nothing to do
+                continue  # no gaps in this column — nothing to do
 
             if col in PRECIP_VARS:
                 # Interpolate short gaps; zero-fill any remaining NaNs (isolated
