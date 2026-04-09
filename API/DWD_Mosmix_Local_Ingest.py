@@ -359,6 +359,13 @@ def fill_station_gaps(
         DWD MOSMIX-S produces one row per hour for the first 240 forecast hours,
         so for that dataset the two are equivalent.
 
+    Not all stations report the full suite of variables — solar radiation is
+    only available for European stations, and wind gusts (FX1) are absent for
+    some networks.  Those absent columns are entirely NaN for the affected
+    stations and represent unavailable data, not gaps to fill.  The function
+    skips any column that is entirely NaN for a given station, and skips the
+    station entirely if all NaN columns fall into that category.
+
     This function is called on the processed DataFrame (after ``process_dwd_df``)
     but *before* spatial gridding, so that ``interpolate_dwd_to_grid_knearest_dask``
     always receives hole-free station series and the nearest-station-wins strategy
@@ -417,10 +424,20 @@ def fill_station_gaps(
         grp = df.loc[grp_idx].sort_values(time_col)
         sorted_idx = grp.index
 
-        for col in fill_cols:
+        # Second fast path: only process columns that have a genuine mix of NaN
+        # and valid values for this station.  Columns where every value is NaN
+        # (e.g. FX1 / solar radiation for non-European stations) represent
+        # unavailable data — they should be left as NaN, not filled.
+        cols_to_fill = [
+            col
+            for col in fill_cols
+            if grp[col].isna().any() and grp[col].notna().any()
+        ]
+        if not cols_to_fill:
+            continue  # all NaN columns are entirely absent — nothing to fill
+
+        for col in cols_to_fill:
             s = grp[col]
-            if not s.isna().any():
-                continue  # no gaps in this column — nothing to do
 
             if col in PRECIP_VARS:
                 # Interpolate short gaps; zero-fill any remaining NaNs (isolated
