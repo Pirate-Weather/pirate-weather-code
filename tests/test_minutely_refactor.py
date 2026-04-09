@@ -146,7 +146,7 @@ def test_build_minutely_dwd_no_rr1c_falls_back_to_ecmwf():
         era5_data=None,
         prep_intensity_unit=1.0,
         version=2,
-        lat=-22.9,   # Rio de Janeiro
+        lat=-22.9,  # Rio de Janeiro
         lon=-43.2,
     )
     InterPminute = result[0]
