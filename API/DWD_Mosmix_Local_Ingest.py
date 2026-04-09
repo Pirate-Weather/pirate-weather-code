@@ -429,9 +429,7 @@ def fill_station_gaps(
         # (e.g. FX1 / solar radiation for non-European stations) represent
         # unavailable data — they should be left as NaN, not filled.
         cols_to_fill = [
-            col
-            for col in fill_cols
-            if grp[col].isna().any() and grp[col].notna().any()
+            col for col in fill_cols if grp[col].isna().any() and grp[col].notna().any()
         ]
         if not cols_to_fill:
             continue  # all NaN columns are entirely absent — nothing to fill
