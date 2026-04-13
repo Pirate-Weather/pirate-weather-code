@@ -421,7 +421,7 @@ def fill_station_gaps(
         if not has_any_nan.loc[grp_idx].any():
             continue
 
-        grp = df.loc[grp_idx].sort_values(time_col)
+        grp = df.loc[grp_idx]
         sorted_idx = grp.index
 
         # Second fast path: only process columns that have a genuine mix of NaN
