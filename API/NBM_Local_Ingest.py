@@ -29,8 +29,9 @@ from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
-    check_historic_zarr,
+    archive_tmp_zarr_and_upload,
     configure_zarr_limits,
+    download_extract_historic_archive,
     getGribList,
     interp_time_take_blend,
     mask_invalid_data,
@@ -925,38 +926,18 @@ for i in range(his_period, -1, -1):
     hist_iter_start = time.perf_counter()
     _timing_log(f"NBM_HIST {hist_target} start")
 
-    zarr_path = historic_path + "/NBM_Hist" + hist_target + ".zarr"
-    s3_path = zarr_path
-    local_path = zarr_path
-    done_file = zarr_path.replace(".zarr", ".done")
-
-    file_exists = False
-
     if save_type == "S3":
-        if s3.exists(done_file):
-            print(f"File already exists in S3, checking integrity for: {zarr_path}")
+        s3_path = historic_path + "/NBM_Hist_v3" + hist_target + ".zarr.tar.gz"
+        if s3.exists(s3_path.replace(".tar.gz", ".done")):
+            print("File already exists in S3, skipping download for: " + s3_path)
             _timing_log(f"NBM_HIST {hist_target} skip (already exists)")
-            file_exists = True
-    else:
-        if os.path.exists(done_file):
-            print(f"File already exists locally, checking integrity for: {zarr_path}")
-            _timing_log(f"NBM_HIST {hist_target} skip (already exists)")
-            file_exists = True
-
-    if file_exists:
-        if check_historic_zarr(
-            zarr_path,
-            save_type,
-            zarr_vars,
-            aws_access_key_id,
-            aws_secret_access_key,
-        ):
-            print("Integrity check passed, skipping download for: " + zarr_path)
             continue
-        else:
-            print(
-                "Integrity check failed, file deleted. Redownloading for: " + zarr_path
-            )
+    else:
+        local_path = historic_path + "/NBM_Hist_v3" + hist_target + ".zarr"
+        if os.path.exists(local_path.replace(".zarr", ".done")):
+            print("File already exists locally, skipping download for: " + local_path)
+            _timing_log(f"NBM_HIST {hist_target} skip (already exists)")
+            continue
 
     print("Downloading: " + hist_target)
 
@@ -1075,29 +1056,16 @@ for i in range(his_period, -1, -1):
         f"NBM_HIST {hist_target} stage=open_transform elapsed={time.perf_counter() - stage_start:.2f}s"
     )
 
-    # Save merged and processed xarray dataset to disk using zarr
-    # Save as Zarr to s3 for Time Machine
-    if save_type == "S3":
-        zarrStore = zarr.storage.FsspecStore.from_url(
-            s3_path,
-            storage_options={
-                "key": aws_access_key_id,
-                "secret": aws_secret_access_key,
-            },
-        )
-    else:
-        # Create local Zarr store
-        zarrStore = zarr.storage.LocalStore(local_path)
-
     # Limit worker fan-out for local zarr writes to avoid "too many open files".
     stage_start = time.perf_counter()
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         xarray_his_wgrib.chunk(
             chunks={"time": 1, "x": process_chunk, "y": process_chunk}
         ).to_zarr(
-            store=zarrStore,
+            hist_process_path + "_NBM_Hist_TMP.zarr",
             mode="w",
             consolidated=False,
+            compute=True,
             chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
         )
     _timing_log(
@@ -1118,9 +1086,14 @@ for i in range(his_period, -1, -1):
 
     # Save a done file to s3 to indicate that the historic data has been processed
     if save_type == "S3":
-        done_file = s3_path.replace(".zarr", ".done")
-        s3.touch(done_file)
+        archive_tmp_zarr_and_upload(
+            tmp_zarr_path=hist_process_path + "_NBM_Hist_TMP.zarr",
+            s3_path=s3_path,
+            archive_member_name="NBM_Hist.zarr",
+            s3=s3,
+        )
     else:
+        os.rename(hist_process_path + "_NBM_Hist_TMP.zarr", local_path)
         done_file = local_path.replace(".zarr", ".done")
         with open(done_file, "w") as f:
             f.write("Done")
@@ -1145,13 +1118,30 @@ if hist_processed_count:
 
 print("Merge and interpolate arrays.")
 # Get the s3 paths to the historic data
-ncLocalWorking_paths = [
-    historic_path
-    + "/NBM_Hist"
-    + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-    + ".zarr"
-    for i in range(his_period, -1, -1)
-]
+if save_type == "S3":
+    local_temp_dir = forecast_process_path + "_s3_temp_downloads"
+    os.makedirs(local_temp_dir, exist_ok=True)
+    ncLocalWorking_paths = []
+    for i in range(his_period, -1, -1):
+        timestamp = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        final_zarr_name = f"NBM_Hist_v3{timestamp}.zarr"
+        extracted_path = download_extract_historic_archive(
+            s3=s3,
+            historic_path=historic_path,
+            final_zarr_name=final_zarr_name,
+            extracted_store_name="NBM_Hist.zarr",
+            local_temp_dir=local_temp_dir,
+        )
+        if extracted_path is not None:
+            ncLocalWorking_paths.append(extracted_path)
+else:
+    ncLocalWorking_paths = [
+        historic_path
+        + "/NBM_Hist_v3"
+        + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        + ".zarr"
+        for i in range(his_period, -1, -1)
+    ]
 
 # Dask Setup
 daskInterpArrays = []
@@ -1160,22 +1150,9 @@ daskVarArrayList = []
 
 for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
     for local_ncpath in ncLocalWorking_paths:
-        if save_type == "S3":
-            daskVarArrays.append(
-                da.from_zarr(
-                    local_ncpath,
-                    component=dask_var,
-                    inline_array=True,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-            )
-        else:
-            daskVarArrays.append(
-                da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
-            )
+        daskVarArrays.append(
+            da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
+        )
 
     daskVarArraysStack = da.stack(
         daskVarArrays, allow_unknown_chunksizes=True
