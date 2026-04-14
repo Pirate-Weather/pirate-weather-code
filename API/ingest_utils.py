@@ -258,7 +258,7 @@ def download_extract_historic_archive(
     extracted_store_name: str,
     local_temp_dir: str,
 ) -> Optional[str]:
-    """Ensure a historic archive is downloaded and extracted to a local zarr path."""
+    """Helper to download and extract a historic archive to a local zarr path."""
     os.makedirs(local_temp_dir, exist_ok=True)
     local_zarr_path = os.path.join(local_temp_dir, final_zarr_name)
     if os.path.exists(local_zarr_path):
