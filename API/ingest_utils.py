@@ -22,15 +22,15 @@ from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
 
 # Shared ingest constants
 CHUNK_SIZES = {
-    "NBM": 100,
-    "HRRR": 100,
-    "HRRR_6H": 100,
-    "GFS": 50,
-    "GEFS": 100,
-    "ECMWF": 100,
-    "NBM_Fire": 100,
-    "RTMA": 100,
-    "DWD": 100,
+    "NBM": 200,
+    "HRRR": 200,
+    "HRRR_6H": 200,
+    "GFS": 100,
+    "GEFS": 200,
+    "ECMWF": 200,
+    "NBM_Fire": 200,
+    "RTMA": 200,
+    "DWD": 200,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -276,7 +276,7 @@ def download_extract_historic_archive(
     s3.get_file(s3_tar_path, local_tar_path)
     os.makedirs(extract_dir, exist_ok=True)
     with tarfile.open(local_tar_path, "r:gz") as tar:
-        tar.extractall(path=extract_dir)
+        tar.extractall(path=extract_dir, filter='data')
 
     extracted_source = os.path.join(extract_dir, extracted_store_name)
     if os.path.exists(extracted_source):

@@ -7,7 +7,6 @@ import pickle
 import shutil
 import sys
 import time
-import traceback
 import warnings
 
 import dask
@@ -428,21 +427,7 @@ for i in range(his_period, 0, -6):
         )
         if s3.exists(s3_path.replace(".tar.gz", ".done")):
             print("File already exists in S3, skipping download for: " + s3_path)
-            try:
-                hisCheckStore = zarr.storage.FsspecStore.from_url(
-                    s3_path,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-                zarr.open(hisCheckStore)[probVars[-1]][-1, -1, -1]
-                continue
-            except Exception:
-                print("### Historic Data Failure!")
-                print(traceback.print_exc())
-                if s3.exists(s3_path):
-                    s3.rm(s3_path)
+            continue
     else:
         local_path = (
             historic_path

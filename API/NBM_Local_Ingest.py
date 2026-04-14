@@ -9,7 +9,6 @@ import shutil
 import subprocess
 import sys
 import time
-import traceback
 import warnings
 from itertools import chain
 
@@ -932,21 +931,7 @@ for i in range(his_period, -1, -1):
         if s3.exists(s3_path.replace(".tar.gz", ".done")):
             print("File already exists in S3, skipping download for: " + s3_path)
             _timing_log(f"NBM_HIST {hist_target} skip (already exists)")
-            try:
-                hisCheckStore = zarr.storage.FsspecStore.from_url(
-                    s3_path,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-                zarr.open(hisCheckStore)[zarr_vars[-1]][-1, -1, -1]
-                continue
-            except Exception:
-                print("### Historic Data Failure!")
-                print(traceback.print_exc())
-                if s3.exists(s3_path):
-                    s3.rm(s3_path)
+            continue
     else:
         local_path = historic_path + "/NBM_Hist_v3" + hist_target + ".zarr"
         if os.path.exists(local_path.replace(".zarr", ".done")):
