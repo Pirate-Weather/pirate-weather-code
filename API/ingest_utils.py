@@ -276,7 +276,7 @@ def download_extract_historic_archive(
     s3.get_file(s3_tar_path, local_tar_path)
     os.makedirs(extract_dir, exist_ok=True)
     with tarfile.open(local_tar_path, "r:gz") as tar:
-        tar.extractall(path=extract_dir, filter='data')
+        tar.extractall(path=extract_dir, filter="data")
 
     extracted_source = os.path.join(extract_dir, extracted_store_name)
     if os.path.exists(extracted_source):
