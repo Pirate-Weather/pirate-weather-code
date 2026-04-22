@@ -900,7 +900,9 @@ if save_type == "S3":
             local_temp_dir=local_temp_dir,
         )
         if extracted_path is None:
-            tqdm.write(f"Error: RDPS_Hist.zarr not found inside archive for {timestamp}")
+            tqdm.write(
+                f"Error: RDPS_Hist.zarr not found inside archive for {timestamp}"
+            )
         return extracted_path
 
     # Generate target timestamps
