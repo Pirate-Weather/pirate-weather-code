@@ -112,7 +112,6 @@ latest_run = HerbieLatest(
     fxx=48,
     product="continental/2.5km",
     verbose=False,
-    priority=["aws", "google", "nomads"],
     save_dir=herbie_save_dir,
 )
 
@@ -211,15 +210,6 @@ match_strings = (
     + "|"
     + matchstring_sl
 )
-
-# INV TESTING
-# import datetime as datetime
-# FastHerbie(pd.date_range(start=pd.to_datetime(datetime.datetime(2023,12,1,0,0,0)), periods=1, freq='1H'),
-#                                  model="gfs", fxx=[237],
-#                                  product="pgrb2.0p25", verbose=True, priority='aws').inventory().search_this.values
-
-# Create a range of forecast lead times
-# Go from 1 to 7 to account for the weird prate approach
 
 hrdps_file_range = FORECAST_LEAD_RANGES["HRDPS"]
 
