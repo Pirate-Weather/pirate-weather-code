@@ -108,8 +108,9 @@ T0 = time.time()
 latest_run = HerbieLatest(
     model="gdps",
     n=3,
-    freq="6h",
+    freq="12h",
     fxx=240,
+    product="15km/grib2/lat_lon",
     verbose=False,
     save_dir=herbie_save_dir,
 )
