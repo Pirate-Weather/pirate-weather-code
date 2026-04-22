@@ -31,6 +31,9 @@ CHUNK_SIZES = {
     "NBM_Fire": 200,
     "RTMA": 200,
     "DWD": 200,
+    "HRDPS": 200,
+    "RDPS": 200,
+    "GDPS": 200,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -43,6 +46,9 @@ FINAL_CHUNK_SIZES = {
     "NBM_Fire": 5,
     "RTMA": 25,
     "DWD": 5,
+    "HRDPS": 3,
+    "RDPS": 3,
+    "GDPS": 3,
 }
 
 FORECAST_LEAD_RANGES = {
@@ -55,6 +61,9 @@ FORECAST_LEAD_RANGES = {
     "ECMWF_AIFS": list(range(0, 241, 6)),
     "ECMWF_IFS_1": list(range(3, 144, 3)),
     "ECMWF_IFS_2": list(range(144, 241, 6)),
+    "HRDPS": list(range(0, 48)),
+    "RDPS": list(range(0, 84)),
+    "GDPS": list(range(0, 240, 3)),
 }
 
 # Radius, in km, used for DWD model nearest-neighbor selection

@@ -53,13 +53,13 @@ wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
 
-forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/GFS")
-forecast_process_path = forecast_process_dir + "/GFS_Process"
-hist_process_path = forecast_process_dir + "/GFS_Historic"
+forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/RDPS")
+forecast_process_path = forecast_process_dir + "/RDPS_Process"
+hist_process_path = forecast_process_dir + "/RDPS_Historic"
 tmp_dir = forecast_process_dir + "/Downloads"
 
-forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/GFS")
-historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/GFS")
+forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/RDPS")
+historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/RDPS")
 
 
 save_type = os.getenv("save_type", default="Download")
@@ -76,12 +76,12 @@ zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
 
 
 # Define the processing and history chunk size
-process_chunk = CHUNK_SIZES["GFS"]
+process_chunk = CHUNK_SIZES["RDPS"]
 
 # Define the final x/y chunksize
-final_chunk = FINAL_CHUNK_SIZES["GFS"]
+final_chunk = FINAL_CHUNK_SIZES["RDPS"]
 
-his_period = HISTORY_PERIODS["GFS"]
+his_period = HISTORY_PERIODS["RDPS"]
 
 # Create new directory for processing if it does not exist
 if not os.path.exists(forecast_process_dir):
@@ -106,13 +106,12 @@ herbie_save_dir = make_herbie_save_dir(tmp_dir)
 T0 = time.time()
 
 latest_run = HerbieLatest(
-    model="gfs",
+    model="rdps",
     n=3,
     freq="6h",
-    fxx=240,
-    product="pgrb2.0p25",
+    fxx=84,
+    product="10km/grib2",
     verbose=False,
-    priority=["aws", "google", "nomads"],
     save_dir=herbie_save_dir,
 )
 
@@ -125,29 +124,29 @@ print(base_time)
 # Check if this is newer than the current file
 if save_type == "S3":
     # Check if the file exists and load it
-    if s3.exists(forecast_path + "/" + ingest_version + "/GFS.time.pickle"):
+    if s3.exists(forecast_path + "/" + ingest_version + "/RDPS.time.pickle"):
         with s3.open(
-            forecast_path + "/" + ingest_version + "/GFS.time.pickle", "rb"
+            forecast_path + "/" + ingest_version + "/RDPS.time.pickle", "rb"
         ) as f:
             previous_base_time = pickle.load(f)
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to GFS, ending")
+            print("No Update to RDPS, ending")
             sys.exit()
 
 else:
-    if os.path.exists(forecast_path + "/" + ingest_version + "/GFS.time.pickle"):
+    if os.path.exists(forecast_path + "/" + ingest_version + "/RDPS.time.pickle"):
         # Open the file in binary mode
         with open(
-            forecast_path + "/" + ingest_version + "/GFS.time.pickle", "rb"
+            forecast_path + "/" + ingest_version + "/RDPS.time.pickle", "rb"
         ) as file:
             # Deserialize and retrieve the variable from the file
             previous_base_time = pickle.load(file)
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to GFS, ending")
+            print("No Update to RDPS, ending")
             sys.exit()
 
 zarr_vars = (
@@ -180,7 +179,7 @@ zarr_vars = (
 
 #####################################################################################################
 # %% Download forecast data using Herbie Latest
-# Find the latest run with 240 hours
+# Find the latest run with 84 hours
 
 
 # Define the subset of variables to download as a list of strings
@@ -215,24 +214,21 @@ match_strings = (
 # INV TESTING
 # import datetime as datetime
 # FastHerbie(pd.date_range(start=pd.to_datetime(datetime.datetime(2023,12,1,0,0,0)), periods=1, freq='1H'),
-#                                  model="gfs", fxx=[237],
-#                                  product="pgrb2.0p25", verbose=True, priority='aws').inventory().search_this.values
+#                                  model="rdps", fxx=[237],
+#                                  product="10km/grib2", verbose=True, priority='aws').inventory().search_this.values
 
 # Create a range of forecast lead times
 # Go from 1 to 7 to account for the weird prate approach
 
-gfs_range1 = FORECAST_LEAD_RANGES["GFS_1"]
-gfs_range2 = FORECAST_LEAD_RANGES["GFS_2"]
-gfs_file_range = [*gfs_range1, *gfs_range2]
+rdps_file_range = FORECAST_LEAD_RANGES["RDPS"]
 
 # Create FastHerbie object
 FH_forecastsub = FastHerbie(
     pd.date_range(start=base_time, periods=1, freq="6h"),
-    model="gfs",
-    fxx=gfs_file_range,
-    product="pgrb2.0p25",
+    model="rdps",
+    fxx=rdps_file_range,
+    product="10km/grib2",
     verbose=False,
-    priority=["aws", "google", "nomads"],
     save_dir=herbie_save_dir,
 )
 
@@ -240,10 +236,10 @@ FH_forecastsub = FastHerbie(
 FH_forecastsub.download(match_strings, verbose=False)
 
 # Check for download length
-if len(FH_forecastsub.file_exists) != len(gfs_file_range):
+if len(FH_forecastsub.file_exists) != len(rdps_file_range):
     print(
         "Download failed, expected "
-        + str(len(gfs_file_range))
+        + str(len(rdps_file_range))
         + " files but got "
         + str(len(FH_forecastsub.file_exists))
     )
@@ -285,11 +281,10 @@ if sp_out.returncode != 0:
 # %% Download and add UV data from the pgrib2b product
 FH_forecastUV = FastHerbie(
     pd.date_range(start=base_time, periods=1, freq="6h"),
-    model="gfs",
-    fxx=gfs_file_range,
-    product="pgrb2b.0p25",
+    model="rdps",
+    fxx=rdps_file_range,
+    product="10km/grib2",
     verbose=False,
-    priority=["aws", "google", "nomads"],
     save_dir=herbie_save_dir,
 )
 
@@ -298,9 +293,11 @@ UVmatchString = ":DUVB:surface:"
 FH_forecastUV.download(UVmatchString, verbose=False)
 
 # Check for download length
-if len(FH_forecastUV.file_exists) != len(gfs_file_range):
+if len(FH_forecastUV.file_exists) != len(rdps_file_range):
     print(
-        "Download failed, expected 160 files but got "
+        "Download failed, expected "
+        + str(len(rdps_file_range))
+        + " files but got "
         + str(len(FH_forecastUV.file_exists))
     )
     sys.exit(1)
@@ -345,7 +342,7 @@ xarray_forecast_merged = xr.merge(
     [xarray_wgrib_merged, xarray_wgribUV_merged], compat="override"
 )
 
-assert len(xarray_forecast_merged.time) == len(gfs_file_range), (
+assert len(xarray_forecast_merged.time) == len(rdps_file_range), (
     "Incorrect number of timesteps! Exiting"
 )
 
@@ -572,7 +569,7 @@ for i in range(his_period, 0, -6):
     if save_type == "S3":
         s3_path = (
             historic_path
-            + "/GFS_Hist_v3"
+            + "/RDPS_Hist_v3"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr.tar.gz"
         )
@@ -585,7 +582,7 @@ for i in range(his_period, 0, -6):
         # Local Path Setup
         local_path = (
             historic_path
-            + "/GFS_Hist_v3"
+            + "/RDPS_Hist_v3"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -612,11 +609,10 @@ for i in range(his_period, 0, -6):
     # Create FastHerbie Object.
     FH_histsub = FastHerbie(
         DATES,
-        model="gfs",
+        model="rdps",
         fxx=fxx,
-        product="pgrb2.0p25",
+        product="10km/grib2",
         verbose=False,
-        priority=["aws", "google", "nomads"],
         save_dir=herbie_save_dir,
     )
 
@@ -663,11 +659,10 @@ for i in range(his_period, 0, -6):
     # Download and add UV data from the pgrib2b product
     FH_histsubUV = FastHerbie(
         DATES,
-        model="gfs",
+        model="rdps",
         fxx=fxx,
-        product="pgrb2b.0p25",
+        product="10km/grib2",
         verbose=False,
-        priority=["aws", "google", "nomads"],
         save_dir=herbie_save_dir,
     )
 
@@ -853,7 +848,7 @@ for i in range(his_period, 0, -6):
 
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         xarray_hist_merged.to_zarr(
-            hist_process_path + "_GFS_Hist_TMP.zarr",
+            hist_process_path + "_RDPS_Hist_TMP.zarr",
             mode="w",
             consolidated=False,
             encoding=encoding,
@@ -871,14 +866,14 @@ for i in range(his_period, 0, -6):
     # Save a done file to s3 to indicate that the historic data has been processed
     if save_type == "S3":
         archive_tmp_zarr_and_upload(
-            tmp_zarr_path=hist_process_path + "_GFS_Hist_TMP.zarr",
+            tmp_zarr_path=hist_process_path + "_RDPS_Hist_TMP.zarr",
             s3_path=s3_path,
-            archive_member_name="GFS_Hist.zarr",
+            archive_member_name="RDPS_Hist.zarr",
             s3=s3,
         )
     else:
         # Move to Local Path
-        os.rename(hist_process_path + "_GFS_Hist_TMP.zarr", local_path)
+        os.rename(hist_process_path + "_RDPS_Hist_TMP.zarr", local_path)
 
         done_file = local_path.replace(".zarr", ".done")
         with open(done_file, "w") as f:
@@ -896,16 +891,16 @@ if save_type == "S3":
     # The function that downloads and extracts a single timestamp
     def download_and_extract(timestamp):
         # Names expected locally
-        final_zarr_name = f"GFS_Hist_v3{timestamp}.zarr"
+        final_zarr_name = f"RDPS_Hist_v3{timestamp}.zarr"
         extracted_path = download_extract_historic_archive(
             s3=s3,
             historic_path=historic_path,
             final_zarr_name=final_zarr_name,
-            extracted_store_name="GFS_Hist.zarr",
+            extracted_store_name="RDPS_Hist.zarr",
             local_temp_dir=local_temp_dir,
         )
         if extracted_path is None:
-            tqdm.write(f"Error: GFS_Hist.zarr not found inside archive for {timestamp}")
+            tqdm.write(f"Error: RDPS_Hist.zarr not found inside archive for {timestamp}")
         return extracted_path
 
     # Generate target timestamps
@@ -931,7 +926,7 @@ if save_type == "S3":
 else:
     ncLocalWorking_paths = [
         historic_path
-        + "/GFS_Hist_v3"
+        + "/RDPS_Hist_v3"
         + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
         + ".zarr"
         for i in range(his_period, 1, -6)
@@ -1036,10 +1031,10 @@ daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 # Create a zarr backed dask array
 if save_type == "S3":
     zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/GFS.zarr.zip", mode="a", compression=0
+        forecast_process_dir + "/RDPS.zarr.zip", mode="a", compression=0
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/GFS.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/RDPS.zarr")
 
 
 #
@@ -1108,10 +1103,10 @@ daskVarArrayStackDisk_maps = pad_to_chunk_size(daskVarArrayStackDisk, 100)
 
 if save_type == "S3":
     zarr_store_maps = zarr.storage.ZipStore(
-        forecast_process_dir + "/GFS_Maps.zarr.zip", mode="a"
+        forecast_process_dir + "/RDPS_Maps.zarr.zip", mode="a"
     )
 else:
-    zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/GFS_Maps.zarr")
+    zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/RDPS_Maps.zarr")
 
 for z in [0, 4, 8, 9, 10, 11, 12, 13, 14, 15, 21]:
     # Create a zarr backed dask array
@@ -1144,45 +1139,45 @@ close_store(zarr_store_maps)
 if save_type == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/GFS.zarr.zip",
-        forecast_path + "/" + ingest_version + "/GFS.zarr.zip",
+        forecast_process_dir + "/RDPS.zarr.zip",
+        forecast_path + "/" + ingest_version + "/RDPS.zarr.zip",
     )
     s3.put_file(
-        forecast_process_dir + "/GFS_Maps.zarr.zip",
-        forecast_path + "/" + ingest_version + "/GFS_Maps.zarr.zip",
+        forecast_process_dir + "/RDPS_Maps.zarr.zip",
+        forecast_path + "/" + ingest_version + "/RDPS_Maps.zarr.zip",
     )
 
     # Write most recent forecast time
-    with open(forecast_process_dir + "/GFS.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/RDPS.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     s3.put_file(
-        forecast_process_dir + "/GFS.time.pickle",
-        forecast_path + "/" + ingest_version + "/GFS.time.pickle",
+        forecast_process_dir + "/RDPS.time.pickle",
+        forecast_path + "/" + ingest_version + "/RDPS.time.pickle",
     )
 else:
     # Write most recent forecast time
-    with open(forecast_process_dir + "/GFS.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/RDPS.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     shutil.move(
-        forecast_process_dir + "/GFS.time.pickle",
-        forecast_path + "/" + ingest_version + "/GFS.time.pickle",
+        forecast_process_dir + "/RDPS.time.pickle",
+        forecast_path + "/" + ingest_version + "/RDPS.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
-        forecast_process_dir + "/GFS.zarr",
-        forecast_path + "/" + ingest_version + "/GFS.zarr",
+        forecast_process_dir + "/RDPS.zarr",
+        forecast_path + "/" + ingest_version + "/RDPS.zarr",
         dirs_exist_ok=True,
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
-        forecast_process_dir + "/GFS_Maps.zarr",
-        forecast_path + "/" + ingest_version + "/GFS_Maps.zarr",
+        forecast_process_dir + "/RDPS_Maps.zarr",
+        forecast_path + "/" + ingest_version + "/RDPS_Maps.zarr",
         dirs_exist_ok=True,
     )
 # Clean up
@@ -1193,5 +1188,5 @@ T1 = time.time()
 print(T1 - T0)
 
 # Test Read
-# G = zarr.open(forecast_path + "/" + ingest_version + "/GFS.zarr", read_only=True)
+# G = zarr.open(forecast_path + "/" + ingest_version + "/RDPS.zarr", read_only=True)
 # G.info
