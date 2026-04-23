@@ -449,9 +449,7 @@ for i in range(his_period, 0, -6):
 
     apcpProcHour = np.diff(apcpProc, axis=0, prepend=0)
 
-    xarray_hist_merged["ACPCP"] = xarray_hist_merged["ACPCP"].copy(
-        data=apcpProcHour
-    )
+    xarray_hist_merged["ACPCP"] = xarray_hist_merged["ACPCP"].copy(data=apcpProcHour)
 
     # Clear memory
     del (apcpProc, apcpProcHour)
