@@ -20,7 +20,6 @@ import zarr.storage
 from dask.diagnostics import ProgressBar
 from herbie import FastHerbie, HerbieLatest
 from tqdm import tqdm
-from xrspatial import direction, proximity
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
 from API.ingest_utils import (
@@ -35,7 +34,6 @@ from API.ingest_utils import (
     interp_time_take_blend,
     make_herbie_save_dir,
     mask_invalid_data,
-    mask_invalid_refc,
     pad_to_chunk_size,
     positive_int_env,
     run_command,
@@ -116,9 +114,6 @@ latest_run = HerbieLatest(
 )
 
 base_time = latest_run.date
-# base_time = pd.Timestamp("2024-03-24 06:00:00Z")
-
-print(base_time)
 
 
 # Check if this is newer than the current file
@@ -151,94 +146,102 @@ else:
 
 zarr_vars = (
     "time",
-    "VIS_surface",
-    "GUST_surface",
-    "PRMSL_meansealevel",
-    "TMP_2maboveground",
-    "DPT_2maboveground",
-    "RH_2maboveground",
-    "APTMP_2maboveground",
-    "UGRD_10maboveground",
-    "VGRD_10maboveground",
-    "PRATE_surface",
-    "APCP_surface",
-    "CSNOW_surface",
-    "CICEP_surface",
-    "CFRZR_surface",
-    "CRAIN_surface",
-    "TOZNE_entireatmosphere_consideredasasinglelayer_",
-    "TCDC_entireatmosphere",
-    "DUVB_surface",
-    "Storm_Distance",
-    "Storm_Direction",
-    "REFC_entireatmosphere",
-    "DSWRF_surface",
-    "CAPE_surface",
-    "PRES_station",
+    "GUST_AGL-10m",
+    "PRMSL_MSL",
+    "TMP_AGL-2m",
+    "DPT_AGL-2m",
+    "RH_AGL-2m",
+    "UGRD_AGL-10m",
+    "VGRD_AGL-10m",
+    "PRATE_Sfc",
+    "APCP_Sfc",
+    "PTYPE_Sfc",
+    "SPRATE_Sfc",
+    "IPRATE_Sfc",
+    "FPRATE_Sfc",
+    "RPRATE_Sfc",
+    "TCDC_Sfc",
+    "DUVB_Sfc",
+    "DSWRF_Sfc",
+    "CAPE_Sfc",
+    "PRES_Sfc",
 )
 
 #####################################################################################################
 # %% Download forecast data using Herbie Latest
-# Find the latest run with 84 hours
+# Find the latest run with 48 hours
 
-
-# Define the subset of variables to download as a list of strings
-matchstring_2m = ":((DPT|TMP|APTMP|RH):2 m above ground:)"
-matchstring_su = (
-    ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|PRES|VIS|GUST|CAPE|PRES):surface:.*hour fcst)"
-)
-matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
-matchstring_oz = "(:TOZNE:)"
-matchstring_cl = "(:(TCDC|REFC):entire atmosphere:.*hour fcst)"
-matchstring_ap = "(:APCP:surface:0-[1-9]*)"
-matchstring_sl = "(:(PRMSL|DSWRF):)"
-
-
-# Merge matchstrings for download
-match_strings = (
-    matchstring_2m
-    + "|"
-    + matchstring_su
-    + "|"
-    + matchstring_10m
-    + "|"
-    + matchstring_oz
-    + "|"
-    + matchstring_cl
-    + "|"
-    + matchstring_ap
-    + "|"
-    + matchstring_sl
-)
+# Define the variables to download as a dictionary of variable and level pairs to match in the grib files
+match_strings = [
+    {"variable": "TMP", "level": "AGL-2m"},
+    {"variable": "DPT", "level": "AGL-2m"},
+    {"variable": "RH", "level": "AGL-2m"},
+    {"variable": "UGRD", "level": "AGL-10m"},
+    {"variable": "VGRD", "level": "AGL-10m"},
+    {"variable": "GUST", "level": "AGL-10m"},
+    {"variable": "APCP", "level": "Sfc"},
+    {"variable": "DMNTPCPNTYPE", "level": "Sfc"},
+    {"variable": "PRATE", "level": "Sfc"},
+    {"variable": "SPRATE", "level": "Sfc"},
+    {"variable": "IPRATE", "level": "Sfc"},
+    {"variable": "FPRATE", "level": "Sfc"},
+    {"variable": "RPRATE", "level": "Sfc"},
+    {"variable": "UVI", "level": "Sfc"},
+    {"variable": "DSWRF", "level": "Sfc"},
+    {"variable": "CAPE", "level": "Sfc"},
+    {"variable": "PRES", "level": "Sfc"},
+    {"variable": "TCDC", "level": "Sfc"},
+    {"variable": "PRMSL", "level": "MSL"},
+]
 
 hrdps_file_range = FORECAST_LEAD_RANGES["HRDPS"]
 
 # Create FastHerbie object
 FH_forecastsub = FastHerbie(
     pd.date_range(start=base_time, periods=1, freq="6h"),
-    model="gfs",
+    model="hrdps",
     fxx=hrdps_file_range,
     product="continental/2.5km",
     verbose=False,
     save_dir=herbie_save_dir,
 )
 
-# Download the subsets
-FH_forecastsub.download(match_strings, verbose=False)
+# CMC models have each variable in a separate file, so we loop through the variables and levels to download each one and then merge them later
+all_files = []
+for g in match_strings:
+    FH = FastHerbie(
+        pd.date_range(start=base_time, periods=1, freq="6h"),
+        model="hrdps",
+        fxx=hrdps_file_range,
+        product="continental/2.5km",
+        variable=g["variable"],
+        level=g["level"],
+        save_dir=herbie_save_dir,
+        verbose=False,
+    )
+    FH.download()
 
-# Check for download length
-if len(FH_forecastsub.file_exists) != len(hrdps_file_range):
+    # Ensure each variable produced the expected number of lead files
+    if len(FH.file_exists) != len(hrdps_file_range):
+        print(
+            f"Download failed for {g['variable']}:{g['level']}, expected "
+            f"{len(hrdps_file_range)} files but got {len(FH.file_exists)}"
+        )
+        sys.exit(1)
+
+    all_files += FH.file_exists
+
+# Deduplicate and sanity-check total files
+all_files = sorted(set(all_files))
+expected_total = len(hrdps_file_range) * len(match_strings)
+if len(all_files) < expected_total:
     print(
-        "Download failed, expected "
-        + str(len(hrdps_file_range))
-        + " files but got "
-        + str(len(FH_forecastsub.file_exists))
+        f"Download incomplete, expected at least {expected_total} files but got {len(all_files)}"
     )
     sys.exit(1)
 
-
-# Create list of downloaded grib files
-grib_list = build_herbie_grib_list(FH_forecastsub.file_exists, match_strings)
+# Create ordered/filtered list of downloaded grib files from collected paths
+grib_list = build_herbie_grib_list(all_files, match_strings)
 
 # Perform a check if any data seems to be invalid
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
@@ -269,72 +272,22 @@ if sp_out.returncode != 0:
     print(sp_out.stderr)
     sys.exit()
 
-# %% Download and add UV data from the pgrib2b product
-FH_forecastUV = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="6h"),
-    model="gfs",
-    fxx=hrdps_file_range,
-    product="continental/2.5km",
-    verbose=False,
-    save_dir=herbie_save_dir,
-)
-
-# Download UV subsets
-UVmatchString = ":DUVB:surface:"
-FH_forecastUV.download(UVmatchString, verbose=False)
-
-# Check for download length
-if len(FH_forecastUV.file_exists) != len(hrdps_file_range):
-    print(
-        "Download failed, expected "
-        + str(len(hrdps_file_range))
-        + " files but got "
-        + str(len(FH_forecastUV.file_exists))
-    )
-    sys.exit(1)
-
-
-# Create list of downloaded grib files
-grib_list_uv = build_herbie_grib_list(FH_forecastUV.file_exists, UVmatchString)
-
-# Perform a check if any data seems to be invalid
-cmd = "cat " + " ".join(grib_list_uv) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
-
-grib_check = run_command(cmd)
-
-validate_grib_stats(grib_check)
-print("Grib files passed validation, proceeding with processing")
-
-# Create a string to pass to wgrib2 to merge all gribs into one netcdf
-cmd = (
-    "cat "
-    + " ".join(grib_list_uv)
-    + " | "
-    + f"{wgrib2_path}"
-    + " - "
-    + " -netcdf "
-    + forecast_process_path
-    + "_wgrib_merged_UV.nc"
-)
-
-# Run wgrib2
-sp_out = run_command(cmd)
-if sp_out.returncode != 0:
-    print(sp_out.stderr)
-    sys.exit()
+# Note: UV (DUVB) is included in the main product for HRDPS; no separate UV download required
 
 # %% Merge the UV data and xarrays
-# Read the netcdf file using xarray
-xarray_wgrib_merged = xr.open_mfdataset(forecast_process_path + "_wgrib2_merged.nc")
-xarray_wgribUV_merged = xr.open_mfdataset(forecast_process_path + "_wgrib_merged_UV.nc")
-
-# Merge the xarray objects
-xarray_forecast_merged = xr.merge(
-    [xarray_wgrib_merged, xarray_wgribUV_merged], compat="override"
-)
+# Read the merged netcdf file using xarray (single combined file)
+xarray_forecast_merged = xr.open_dataset(forecast_process_path + "_wgrib2_merged.nc")
 
 assert len(xarray_forecast_merged.time) == len(hrdps_file_range), (
     "Incorrect number of timesteps! Exiting"
+)
+
+# Determine grid size from merged dataset (supports rotated grids)
+NY = xarray_forecast_merged.dims.get(
+    "latitude", xarray_forecast_merged["latitude"].size
+)
+NX = xarray_forecast_merged.dims.get(
+    "longitude", xarray_forecast_merged["longitude"].size
 )
 
 # Create a new time series
@@ -359,162 +312,18 @@ one_second = np.timedelta64(1, "s")
 stacked_timesUnix = (stacked_times - unix_epoch) / one_second
 hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
-# %% FIX THINGS
-
 # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time
 APCP_surface_tmp = da.diff(
-    xarray_forecast_merged["APCP_surface"],
-    axis=xarray_forecast_merged["APCP_surface"].get_axis_num("time"),
+    xarray_forecast_merged["ACPCP"],
+    axis=xarray_forecast_merged["ACPCP"].get_axis_num("time"),
     prepend=0,
 )
 
-# Convert 3-hourly to 1-hourly
-APCP_surface_tmp[120:, :, :] = APCP_surface_tmp[120:, :, :] / 3
-
-xarray_forecast_merged["APCP_surface"].data = APCP_surface_tmp
-
-# Set REFC values < 5 to 0
-xarray_forecast_merged["REFC_entireatmosphere"] = mask_invalid_refc(
-    xarray_forecast_merged["REFC_entireatmosphere"]
-)
-
-
-# Create a new xarray for storm distance processing using dask
-xarray_forecast_distance = xr.Dataset()
-xarray_forecast_distance["APCP_surface"] = xarray_forecast_merged["APCP_surface"].copy()
-
-xarray_forecast_distance = xarray_forecast_distance.assign_coords(
-    {
-        "time": xarray_forecast_merged.time.data,
-        "latitude": xarray_forecast_merged.latitude.data,
-        "longitude": ((xarray_forecast_merged.longitude + 180) % 360) - 180,
-    }
-)
-
-# Set threshold precp at 2 mm/h
-xarray_forecast_distance["APCP_surface"] = xarray_forecast_distance[
-    "APCP_surface"
-].where(xarray_forecast_distance["APCP_surface"] > 0.2, 0)
-
-distances = []
-directions = []
-
-
-# Find nearest storm distance and direction for first 12 hours
-for t in range(0, 160):
-    distances.append(
-        proximity(
-            xarray_forecast_distance["APCP_surface"].isel(time=t),
-            distance_metric="GREAT_CIRCLE",
-            x="longitude",
-            y="latitude",
-            max_distance=None,
-        )
-    )
-
-    directions.append(
-        direction(
-            xarray_forecast_distance["APCP_surface"].isel(time=t),
-            distance_metric="GREAT_CIRCLE",
-            x="longitude",
-            y="latitude",
-            max_distance=None,
-        )
-    )
-
-
-distanced_stacked = da.stack(distances)
-directions_stacked = da.stack(directions)
-
-distanced_chunked = distanced_stacked.rechunk(160, process_chunk, process_chunk)
-directions_chunked = directions_stacked.rechunk(160, process_chunk, process_chunk)
-
-
-with ProgressBar():
-    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        distanced_chunked.to_zarr(
-            forecast_process_path + "_stormDist.zarr",
-            overwrite=True,
-            compute=True,
-        )
-        directions_chunked.to_zarr(
-            forecast_process_path + "_stormDir.zarr",
-            overwrite=True,
-            compute=True,
-        )
-
-
-# UV is an average from zero to 6, repeating throughout the time series.
-# Correct this to 1-hour average
-# Solar rad follows the same pattern, so we can use the same appraoch.
-accum_vars = ["DUVB_surface", "DSWRF_surface"]
-for accumVar in accum_vars:
-    # Read out hours 1-120, reshape to 6 hour steps
-    uv_proc = (
-        xarray_forecast_merged[accumVar]
-        .isel(time=slice(0, 120))
-        .values.reshape(20, 6, 721, 1440, order="C")
-    )
-
-    n = np.arange(1, 7)
-    n = n[np.newaxis, :, np.newaxis, np.newaxis]
-
-    # Save first step to concatonate later
-    first_step = uv_proc[:, 0, :, :]
-    first_step = first_step[:, np.newaxis, :, :]
-
-    # Create numpy array of processed UV
-    uvProcHour = np.concatenate(
-        (first_step, np.diff(uv_proc, axis=1) * n[:, 1:, :, :] + uv_proc[:, 0:5, :, :]),
-        axis=1,
-    )
-
-    # Reshape back to 3D
-    uvProcHour3D = uvProcHour.reshape(120, 721, 1440, order="C")
-
-    # Read out hours 123, reshape to 6 hour steps
-    uv_proc = (
-        xarray_forecast_merged[accumVar]
-        .isel(time=slice(120, 160))
-        .values.reshape(20, 2, 721, 1440, order="C")
-    )
-
-    n = np.arange(1, 3)
-    n = n[np.newaxis, :, np.newaxis, np.newaxis]
-
-    # Save first step to concatonate later
-    first_step = uv_proc[:, 0, :, :]
-    first_step = first_step[:, np.newaxis, :, :]
-
-    # Create numpy array of processed UV
-    uvProcHour = np.concatenate(
-        (first_step, np.diff(uv_proc, axis=1) * n[:, 1:, :, :] + uv_proc[:, 0:1, :, :]),
-        axis=1,
-    )
-
-    # Reshape back to 3D
-    uvProcHour3DB = uvProcHour.reshape(40, 721, 1440, order="C")
-
-    ### Note- to get index, do this:
-    #             // UVB to etyhemally UV factor 18.9 https://link.springer.com/article/10.1039/b312985c
-    #             // 0.025 m2/W to get the uv index
-    # ['DUVB_surface'] * 0.025 * 18.9
-
-    # Combine and merge back into xarray dataset
-    xarray_forecast_merged[accumVar] = xarray_forecast_merged[accumVar].copy(
-        data=np.concatenate((uvProcHour3D, uvProcHour3DB), axis=0)
-    )
-
-
-# %% Save merged and processed xarray dataset to disk using zarr with compression
-
-# Rename PRES_surface to PRES_station for clarity
-# From here on out, it'll be referred to as PRES_station
-xarray_forecast_merged = xarray_forecast_merged.rename({"PRES_surface": "PRES_station"})
+xarray_forecast_merged["ACPCP"].data = APCP_surface_tmp
 
 # Save the dataset with compression and filters for all variables
 xarray_forecast_merged = xarray_forecast_merged.chunk(
-    chunks={"time": 240, "latitude": process_chunk, "longitude": process_chunk}
+    chunks={"time": 48, "latitude": process_chunk, "longitude": process_chunk}
 )
 with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
     xarray_forecast_merged.to_zarr(
@@ -527,28 +336,12 @@ with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
 
 # %% Delete to free memory
 del (
-    uv_proc,
-    uvProcHour,
-    uvProcHour3D,
-    uvProcHour3DB,
-    n,
-    first_step,
-    xarray_wgrib_merged,
-    xarray_wgribUV_merged,
-    directions,
-    distances,
-    directions_chunked,
-    distanced_chunked,
-    distanced_stacked,
-    directions_stacked,
-    xarray_forecast_distance,
     APCP_surface_tmp,
     xarray_forecast_merged,
 )
 T1 = time.time()
 
 print(T1 - T0)
-os.remove(forecast_process_path + "_wgrib_merged_UV.nc")
 os.remove(forecast_process_path + "_wgrib2_merged.nc")
 
 ################################################################################################
@@ -647,184 +440,21 @@ for i in range(his_period, 0, -6):
         print(sp_out.stderr)
         sys.exit()
 
-    # Download and add UV data from the pgrib2b product
-    FH_histsubUV = FastHerbie(
-        DATES,
-        model="hrdps",
-        fxx=fxx,
-        product="continental/2.5km",
-        verbose=False,
-        save_dir=herbie_save_dir,
-    )
-
-    # Download the subsets
-    FH_histsubUV.download(UVmatchString, verbose=False)
-
-    # Check for download length
-    if len(FH_histsubUV.file_exists) != len(fxx):
-        print(
-            "Download failed, expected 6 files but got "
-            + str(len(FH_histsubUV.file_exists))
-        )
-        sys.exit(1)
-
-    # Create list of downloaded grib files
-    grib_list_uv = build_herbie_grib_list(FH_histsubUV.file_exists, UVmatchString)
-
-    # Perform a check if any data seems to be invalid
-    cmd = (
-        "cat "
-        + " ".join(grib_list_uv)
-        + " | "
-        + f"{wgrib2_path}"
-        + " - "
-        + " -s -stats"
-    )
-
-    grib_check = run_command(cmd)
-
-    validate_grib_stats(grib_check)
-    print("Grib files passed validation, proceeding with processing")
-
-    # Create a string to pass to wgrib2 to merge all gribs into one netcdf
-    cmd = (
-        "cat "
-        + " ".join(grib_list_uv)
-        + " | "
-        + f"{wgrib2_path}"
-        + " - "
-        + " -netcdf "
-        + hist_process_path
-        + "_wgrib2_merged_UV.nc"
-    )
-
-    # Run wgrib2
-    sp_out = run_command(cmd)
-    if sp_out.returncode != 0:
-        print(sp_out.stderr)
-        sys.exit()
-
-    # Merge the UV data and xarrays
-    # Read the netcdf file using xarray
-    xarray_his_wgrib_merged = xr.open_dataset(hist_process_path + "_wgrib2_merged.nc")
-    xarray_his_wgribUV_merged = xr.open_dataset(
-        hist_process_path + "_wgrib2_merged_UV.nc"
-    )
-
-    xarray_hist_merged = xr.merge(
-        [xarray_his_wgrib_merged, xarray_his_wgribUV_merged], compat="override"
-    )
+    # Read the merged netcdf file using xarray (single combined file)
+    xarray_hist_merged = xr.open_dataset(hist_process_path + "_wgrib2_merged.nc")
 
     # Fix things
     # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time, every 6 hours
-    apcpProc = xarray_hist_merged["APCP_surface"].values
+    apcpProc = xarray_hist_merged["ACPCP"].values
 
     apcpProcHour = np.diff(apcpProc, axis=0, prepend=0)
 
-    xarray_hist_merged["APCP_surface"] = xarray_hist_merged["APCP_surface"].copy(
+    xarray_hist_merged["ACPCP"] = xarray_hist_merged["ACPCP"].copy(
         data=apcpProcHour
     )
 
-    # Storm distance and direction
-    xarray_hist_distance = xr.Dataset()
-    xarray_hist_distance["APCP_surface"] = xarray_hist_merged["APCP_surface"].copy()
-
-    xarray_hist_distance = xarray_hist_distance.assign_coords(
-        {
-            "time": xarray_hist_merged.time.data,
-            "latitude": xarray_hist_merged.latitude.data,
-            "longitude": ((xarray_hist_merged.longitude + 180) % 360) - 180,
-        }
-    )
-
-    # Set threshold precp at 2 mm/h
-    xarray_hist_distance["APCP_surface"] = xarray_hist_distance["APCP_surface"].where(
-        xarray_hist_distance["APCP_surface"] > 0.2, 0
-    )
-
-    distances = []
-    directions = []
-
-    # Find nearest storm distance and direction for first 12 hours
-    for t in range(0, 6):
-        distances.append(
-            proximity(
-                xarray_hist_distance["APCP_surface"].isel(time=t),
-                distance_metric="GREAT_CIRCLE",
-                x="longitude",
-                y="latitude",
-                max_distance=None,
-            )
-        )
-
-        directions.append(
-            direction(
-                xarray_hist_distance["APCP_surface"].isel(time=t),
-                distance_metric="GREAT_CIRCLE",
-                x="longitude",
-                y="latitude",
-                max_distance=None,
-            )
-        )
-
-    # Set REFC values < 5 to 0
-    xarray_hist_merged["REFC_entireatmosphere"] = mask_invalid_refc(
-        xarray_hist_merged["REFC_entireatmosphere"]
-    )
-
-    # Copy back to main array
-    # with ProgressBar():
-    xarray_hist_merged["Storm_Distance"] = (
-        ("time", "latitude", "longitude"),
-        da.stack(distances).rechunk((6, process_chunk, process_chunk)).compute(),
-    )
-    xarray_hist_merged["Storm_Direction"] = (
-        ("time", "latitude", "longitude"),
-        da.stack(directions).rechunk((6, process_chunk, process_chunk)).compute(),
-    )
-
-    # UV is an average from zero to 6, repeating throughout the time series.
-    # Correct this to 1-hour average
-
-    # Read out hours 1-120, reshape to 6 hour steps
-    uv_proc = xarray_hist_merged["DUVB_surface"].values
-
-    n = np.arange(1, 7)
-    n = n[:, np.newaxis, np.newaxis]
-
-    # Save first step to concatonate later
-    first_step = uv_proc[0, :, :]
-    first_step = first_step[np.newaxis, :, :]
-
-    # Create numpy array of processed UV
-    uvProcHour = np.concatenate(
-        (first_step, np.diff(uv_proc, axis=0) * n[1:, :, :] + uv_proc[0:5, :, :]),
-        axis=0,
-    )
-
-    # Remove zero values
-    uvProcHour[uvProcHour < 0] = 0
-
-    # (average_series[1:] - average_series[0:-1]) * np.array([2, 3, 4, 5]) +  average_series[0:-1]
-    # From https://math.stackexchange.com/questions/106700/incremental-averaging
-
-    xarray_hist_merged["DUVB_surface"] = xarray_hist_merged["DUVB_surface"].copy(
-        data=uvProcHour
-    )
-
     # Clear memory
-    del (
-        uv_proc,
-        uvProcHour,
-        apcpProc,
-        apcpProcHour,
-        xarray_his_wgrib_merged,
-        xarray_his_wgribUV_merged,
-    )
-
-    # Rename PRES_surface to PRES_station for clarity
-    # From here on out, it'll be referred to as PRES_station
-    xarray_hist_merged = xarray_hist_merged.rename({"PRES_surface": "PRES_station"})
+    del (apcpProc, apcpProcHour)
 
     # Save merged and processed xarray dataset to disk using zarr with compression
     # Define the path to save the zarr dataset with the run time in the filename
@@ -852,7 +482,6 @@ for i in range(his_period, 0, -6):
 
     # Remove temp file created by wgrib2
     os.remove(hist_process_path + "_wgrib2_merged.nc")
-    os.remove(hist_process_path + "_wgrib2_merged_UV.nc")
 
     # Save a done file to s3 to indicate that the historic data has been processed
     if save_type == "S3":
@@ -941,21 +570,16 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
         except FileNotFoundError:
             print("File not found, adding NaN array for: " + local_ncpath)
             daskVarArrays.append(
-                da.full((6, 721, 1440), MISSING_DATA).rechunk(
+                da.full((6, NY, NX), MISSING_DATA).rechunk(
                     (6, process_chunk, process_chunk)
                 )
             )
 
     daskVarArraysStack = da.stack(daskVarArrays, allow_unknown_chunksizes=True)
 
-    if dask_var == "Storm_Distance":
-        daskForecastArray = da.from_zarr(forecast_process_path + "_stormDist.zarr")
-    elif dask_var == "Storm_Direction":
-        daskForecastArray = da.from_zarr(forecast_process_path + "_stormDir.zarr")
-    else:
-        daskForecastArray = da.from_zarr(
-            forecast_process_path + "_.zarr", component=dask_var, inline_array=True
-        )
+    daskForecastArray = da.from_zarr(
+        forecast_process_path + "_.zarr", component=dask_var, inline_array=True
+    )
 
     if dask_var == "time":
         # Create a time array with the same shape
@@ -975,7 +599,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
         daskArrayOut = da.from_array(
             np.tile(
                 np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
-                (1, 721, 1440),
+                (1, NY, NX),
             )
         ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
 
@@ -984,7 +608,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
     else:
         daskVarArraysShape = da.reshape(
             daskVarArraysStack,
-            (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], 721, 1440),
+            (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], NY, NX),
             merge_chunks=False,
         )
         daskArrayOut = da.concatenate((daskVarArraysShape, daskForecastArray), axis=0)
@@ -1004,9 +628,7 @@ daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
 # Mask out invalid data
 # Ignore storm distance, since it can reach very high values that are still correct
-daskVarArrayListMergeNaN = mask_invalid_data(
-    daskVarArrayListMerge, ignoreAxis=[zarr_vars.index("Storm_Distance")]
-)
+daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
 
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
