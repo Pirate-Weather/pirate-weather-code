@@ -166,6 +166,7 @@ zarr_vars = (
     "CAPE_Sfc",
     "PRES_Sfc",
     "LFTX_ISBL_0500",
+    "VVEL_ISBL_0500",
 )
 
 #####################################################################################################
@@ -194,6 +195,7 @@ match_strings = [
     {"variable": "TCDC", "level": "Sfc"},
     {"variable": "PRMSL", "level": "MSL"},
     {"variable": "LFTX", "level": "ISBL_0500"},
+    {"variable": "VVEL", "level": "ISBL_0500"},
 ]
 
 hrdps_file_range = FORECAST_LEAD_RANGES["HRDPS"]
