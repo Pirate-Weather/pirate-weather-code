@@ -165,6 +165,7 @@ zarr_vars = (
     "DSWRF_Sfc",
     "CAPE_Sfc",
     "PRES_Sfc",
+    "LFTX_ISBL_0500"
 )
 
 #####################################################################################################
@@ -192,6 +193,7 @@ match_strings = [
     {"variable": "PRES", "level": "Sfc"},
     {"variable": "TCDC", "level": "Sfc"},
     {"variable": "PRMSL", "level": "MSL"},
+    {"variable": "LFTX", "level": "ISBL_0500"},
 ]
 
 hrdps_file_range = FORECAST_LEAD_RANGES["HRDPS"]
@@ -206,7 +208,7 @@ FH_forecastsub = FastHerbie(
     save_dir=herbie_save_dir,
 )
 
-# CMC models have each variable in a separate file, so we loop through the variables and levels to download each one and then merge them later
+# MSC models have each variable in a separate file, so we loop through the variables and levels to download each one and then merge them later
 all_files = []
 for g in match_strings:
     FH = FastHerbie(
