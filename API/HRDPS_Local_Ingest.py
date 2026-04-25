@@ -161,7 +161,7 @@ zarr_vars = (
     "FPRATE_Sfc",
     "RPRATE_Sfc",
     "TCDC_Sfc",
-    "DUVB_Sfc",
+    "UVI_Sfc",
     "DSWRF_Sfc",
     "CAPE_Sfc",
     "PRES_Sfc",
@@ -276,9 +276,6 @@ if sp_out.returncode != 0:
     print(sp_out.stderr)
     sys.exit()
 
-# Note: UV (DUVB) is included in the main product for HRDPS; no separate UV download required
-
-# %% Merge the UV data and xarrays
 # Read the merged netcdf file using xarray (single combined file)
 xarray_forecast_merged = xr.open_dataset(forecast_process_path + "_wgrib2_merged.nc")
 
@@ -357,7 +354,7 @@ for i in range(his_period, 0, -6):
     if save_type == "S3":
         s3_path = (
             historic_path
-            + "/HRPDS_Hist_v3"
+            + "/HRDPS_Hist_v3"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr.tar.gz"
         )
@@ -370,7 +367,7 @@ for i in range(his_period, 0, -6):
         # Local Path Setup
         local_path = (
             historic_path
-            + "/HRPDS_Hist_v3"
+            + "/HRDPS_Hist_v3"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -471,7 +468,7 @@ for i in range(his_period, 0, -6):
 
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         xarray_hist_merged.to_zarr(
-            hist_process_path + "_HRPDS_Hist_TMP.zarr",
+            hist_process_path + "_HRDPS_Hist_TMP.zarr",
             mode="w",
             consolidated=False,
             encoding=encoding,
@@ -488,14 +485,14 @@ for i in range(his_period, 0, -6):
     # Save a done file to s3 to indicate that the historic data has been processed
     if save_type == "S3":
         archive_tmp_zarr_and_upload(
-            tmp_zarr_path=hist_process_path + "_HRPDS_Hist_TMP.zarr",
+            tmp_zarr_path=hist_process_path + "_HRDPS_Hist_TMP.zarr",
             s3_path=s3_path,
-            archive_member_name="HRPDS_Hist.zarr",
+            archive_member_name="HRDPS_Hist.zarr",
             s3=s3,
         )
     else:
         # Move to Local Path
-        os.rename(hist_process_path + "_HRPDS_Hist_TMP.zarr", local_path)
+        os.rename(hist_process_path + "_HRDPS_Hist_TMP.zarr", local_path)
 
         done_file = local_path.replace(".zarr", ".done")
         with open(done_file, "w") as f:
@@ -513,17 +510,17 @@ if save_type == "S3":
     # The function that downloads and extracts a single timestamp
     def download_and_extract(timestamp):
         # Names expected locally
-        final_zarr_name = f"HRPDS_Hist_v3{timestamp}.zarr"
+        final_zarr_name = f"HRDPS_Hist_v3{timestamp}.zarr"
         extracted_path = download_extract_historic_archive(
             s3=s3,
             historic_path=historic_path,
             final_zarr_name=final_zarr_name,
-            extracted_store_name="HRPDS_Hist.zarr",
+            extracted_store_name="HRDPS_Hist.zarr",
             local_temp_dir=local_temp_dir,
         )
         if extracted_path is None:
             tqdm.write(
-                f"Error: HRPDS_Hist.zarr not found inside archive for {timestamp}"
+                f"Error: HRDPS_Hist.zarr not found inside archive for {timestamp}"
             )
         return extracted_path
 
@@ -550,7 +547,7 @@ if save_type == "S3":
 else:
     ncLocalWorking_paths = [
         historic_path
-        + "/HRPDS_Hist_v3"
+        + "/HRDPS_Hist_v3"
         + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
         + ".zarr"
         for i in range(his_period, 1, -6)
@@ -648,10 +645,10 @@ daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 # Create a zarr backed dask array
 if save_type == "S3":
     zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/HRPDS.zarr.zip", mode="a", compression=0
+        forecast_process_dir + "/HRDPS.zarr.zip", mode="a", compression=0
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/HRPDS.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/HRDPS.zarr")
 
 
 #
@@ -700,110 +697,44 @@ with ProgressBar():
 
 close_store(zarr_store)
 
-# Rechunk subset of data for maps!
-# Want variables:
-# 0 (time)
-# 4 (TMP)
-# 8 (UGRD)
-# 9 (VGRD)
-# 10 (PRATE)
-# 11 (PACCUM)
-# 12:15 (PTYPE)
-# 21 (REFC)
-
-# Loop through variables, creating a new one with a name and 36 x 100 x 100 chunks
-# Save -12:24 hours, aka steps 24:60
-# Create a Zarr array in the store with zstd compression
-
-# Add padding for map chunking (100x100)
-daskVarArrayStackDisk_maps = pad_to_chunk_size(daskVarArrayStackDisk, 100)
-
-if save_type == "S3":
-    zarr_store_maps = zarr.storage.ZipStore(
-        forecast_process_dir + "/HRPDS_Maps.zarr.zip", mode="a"
-    )
-else:
-    zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/HRPDS_Maps.zarr")
-
-for z in [0, 4, 8, 9, 10, 11, 12, 13, 14, 15, 21]:
-    # Create a zarr backed dask array
-    zarr_array = zarr.create_array(
-        store=zarr_store_maps,
-        name=zarr_vars[z],
-        shape=(
-            36,
-            daskVarArrayStackDisk_maps.shape[2],
-            daskVarArrayStackDisk_maps.shape[3],
-        ),
-        chunks=(36, 100, 100),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
-    )
-
-    with ProgressBar():
-        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-            da.rechunk(
-                daskVarArrayStackDisk_maps[z, his_period - 12 : his_period + 24, :, :],
-                (36, 100, 100),
-            ).to_zarr(zarr_array, overwrite=True, compute=True)
-
-    print(zarr_vars[z])
-
-
-close_store(zarr_store_maps)
-
 # %% Upload to S3
 if save_type == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/HRPDS.zarr.zip",
-        forecast_path + "/" + ingest_version + "/HRPDS.zarr.zip",
-    )
-    s3.put_file(
-        forecast_process_dir + "/HRPDS_Maps.zarr.zip",
-        forecast_path + "/" + ingest_version + "/HRPDS_Maps.zarr.zip",
+        forecast_process_dir + "/HRDPS.zarr.zip",
+        forecast_path + "/" + ingest_version + "/HRDPS.zarr.zip",
     )
 
     # Write most recent forecast time
-    with open(forecast_process_dir + "/HRPDS.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/HRDPS.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     s3.put_file(
-        forecast_process_dir + "/HRPDS.time.pickle",
-        forecast_path + "/" + ingest_version + "/HRPDS.time.pickle",
+        forecast_process_dir + "/HRDPS.time.pickle",
+        forecast_path + "/" + ingest_version + "/HRDPS.time.pickle",
     )
 else:
     # Write most recent forecast time
-    with open(forecast_process_dir + "/HRPDS.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/HRDPS.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     shutil.move(
-        forecast_process_dir + "/HRPDS.time.pickle",
-        forecast_path + "/" + ingest_version + "/HRPDS.time.pickle",
+        forecast_process_dir + "/HRDPS.time.pickle",
+        forecast_path + "/" + ingest_version + "/HRDPS.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
-        forecast_process_dir + "/HRPDS.zarr",
-        forecast_path + "/" + ingest_version + "/HRPDS.zarr",
+        forecast_process_dir + "/HRDPS.zarr",
+        forecast_path + "/" + ingest_version + "/HRDPS.zarr",
         dirs_exist_ok=True,
     )
 
-    # Copy the zarr file to the final location
-    shutil.copytree(
-        forecast_process_dir + "/HRPDS_Maps.zarr",
-        forecast_path + "/" + ingest_version + "/HRPDS_Maps.zarr",
-        dirs_exist_ok=True,
-    )
 # Clean up
 shutil.rmtree(forecast_process_dir)
 
 # Timing
 T1 = time.time()
 print(T1 - T0)
-
-# Test Read
-# G = zarr.open(forecast_path + "/" + ingest_version + "/HRDPS.zarr", read_only=True)
-# G.info
