@@ -1,8 +1,8 @@
-aiobotocore[boto3]==3.4.0
+aiobotocore[boto3]==3.5.0
 astral==3.2
 crc32c==2.8
 dask==2026.3.0
-fastapi[standard]==0.135.3
+fastapi[standard]==0.136.1
 fastapi-utils==0.8.0
 fastparquet==2026.3.0
 gcsfs==2026.3.0
@@ -19,5 +19,5 @@ timezonefinder==8.2.2
 typing-inspect==0.9.0
 ujson==5.12.0
 watchfiles==1.1.1
-xarray==2026.2.0
+xarray==2026.4.0
 zarr[remote]==3.1.6
