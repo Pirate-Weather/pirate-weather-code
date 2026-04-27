@@ -315,13 +315,13 @@ hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
 # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time
 APCP_surface_tmp = da.diff(
-    xarray_forecast_merged["ACPCP"],
-    axis=xarray_forecast_merged["ACPCP"].get_axis_num("time"),
+    xarray_forecast_merged["APCP"],
+    axis=xarray_forecast_merged["APCP"].get_axis_num("time"),
     prepend=0,
 )
 
 # Convert 3-hourly to 1-hourly
-APCP_surface_tmp[240:, :, :] = APCP_surface_tmp[240:, :, :] / 3
+APCP_surface_tmp[80:, :, :] = APCP_surface_tmp[80:, :, :] / 3
 
 xarray_forecast_merged["APCP_surface"].data = APCP_surface_tmp
 
@@ -392,7 +392,7 @@ for i in range(his_period, 0, -6):
     )
     # Create a range of forecast lead times
     # Go from 1 to 7 to account for the weird prate approach
-    fxx = range(1, 7)
+    fxx = [3, 6]
 
     # Create FastHerbie Object.
     FH_histsub = FastHerbie(
@@ -449,11 +449,11 @@ for i in range(his_period, 0, -6):
 
     # Fix things
     # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time, every 6 hours
-    apcpProc = xarray_hist_merged["ACPCP"].values
+    apcpProc = xarray_hist_merged["APCP"].values
 
     apcpProcHour = np.diff(apcpProc, axis=0, prepend=0)
 
-    xarray_hist_merged["ACPCP"] = xarray_hist_merged["ACPCP"].copy(data=apcpProcHour)
+    xarray_hist_merged["APCP"] = xarray_hist_merged["APCP"].copy(data=apcpProcHour)
 
     # Clear memory
     del (apcpProc, apcpProcHour)
