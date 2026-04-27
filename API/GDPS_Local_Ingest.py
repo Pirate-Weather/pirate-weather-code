@@ -248,7 +248,7 @@ if len(all_files) < expected_total:
 grib_list = build_herbie_grib_list(all_files, match_strings)
 
 # Perform a check if any data seems to be invalid
-cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
+cmd = f"cat {' '.join(grib_list)} | {wgrib2_path.strip()} - -s -stats"
 
 grib_check = run_command(cmd)
 
@@ -572,9 +572,9 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
         except FileNotFoundError:
             print("File not found, adding NaN array for: " + local_ncpath)
             daskVarArrays.append(
-                da.full((6, NY, NX), MISSING_DATA).rechunk(
-                    (6, process_chunk, process_chunk)
-                )
+da.full((2, NY, NX), MISSING_DATA).rechunk(
+    (2, process_chunk, process_chunk)
+)
             )
 
     daskVarArraysStack = da.stack(daskVarArrays, allow_unknown_chunksizes=True)
