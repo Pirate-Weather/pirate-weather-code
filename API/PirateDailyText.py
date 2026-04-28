@@ -1226,7 +1226,9 @@ def calculate_day_text(
             # Determine dominant ice type (sleet vs freezing rain) and labels for secondary conditions
             if total_frzrain_accum >= total_sleet_accum:
                 dominant_ice_type = PRECIP_TYPES["ice"]
-                ice_as_secondary = "medium-freezing-rain"  # dominant ice as secondary to snow/rain
+                ice_as_secondary = (
+                    "medium-freezing-rain"  # dominant ice as secondary to snow/rain
+                )
                 other_ice_as_secondary = "medium-sleet"  # non-dominant ice as secondary alongside dominant ice
             else:
                 dominant_ice_type = PRECIP_TYPES["sleet"]
