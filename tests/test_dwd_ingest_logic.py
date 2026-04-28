@@ -158,7 +158,9 @@ class TestDWDHistoricLoop(unittest.TestCase):
 
                         # Done file
                         with patch("builtins.open", mock_open()):
-                            with open(hist_zarr_path.replace(".zarr", ".done"), "w") as f:
+                            with open(
+                                hist_zarr_path.replace(".zarr", ".done"), "w"
+                            ) as f:
                                 f.write("Done")
 
                         # Re-open
