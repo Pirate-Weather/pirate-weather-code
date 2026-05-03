@@ -161,6 +161,8 @@ zarr_vars = (
     "REFD_1000maboveground",
     "DSWRF_surface",
     "CAPE_surface",
+    "CIN_surface",
+    "LFTX_500mb_1000mb",
 )
 
 #####################################################################################################
@@ -172,13 +174,14 @@ zarr_vars = (
 matchstring_2m = ":((DPT|TMP|APTMP|RH):2 m above ground:)"
 matchstring_8m = ":(MASSDEN:8 m above ground:)"
 matchstring_su = (
-    ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|VIS|GUST|DSWRF|CAPE):surface:.*hour fcst)"
+    ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|VIS|GUST|DSWRF|CAPE|CIN):surface:.*hour fcst)"
 )
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
 matchstring_cl = "(:TCDC:entire atmosphere:.*hour fcst)"
 matchstring_ap = "(:APCP:surface:0-[1-9]*)"
 matchstring_sl = "(:(MSLMA):)"
 matchstring_1000m = "(:REFD:1000 m above ground:)"
+matchstring_500mb_1000mb = "(:LFTX:500-1000 mb:)"
 
 # Merge matchstrings for download
 match_strings = (
@@ -197,6 +200,8 @@ match_strings = (
     + matchstring_sl
     + "|"
     + matchstring_1000m
+    + "|"
+    + matchstring_500mb_1000mb
 )
 
 # Create a range of forecast lead times
