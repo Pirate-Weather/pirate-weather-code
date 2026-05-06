@@ -349,10 +349,12 @@ def fill_station_gaps(
     * ``PTYPE_surface`` (ww): categorical precipitation-type code filled by
       forward- then backward-propagation so that the nearest valid code is used.
     * All other continuous variables (temperature, humidity, wind U/V, etc.):
-      gaps of up to ``max_gap_hours`` consecutive NaN *timesteps* are filled by
-      **linear interpolation** within each station's own time series.  Longer gaps
-      are left intact so the merge logic can fall back to GFS/ECMWF for those
-      hours rather than extrapolating unreliably.
+            gaps of up to ``max_gap_hours`` consecutive NaN *timesteps* are filled by
+            **linear interpolation** within each station's own time series. If any
+            longer gap is present for a station/variable pair, that entire variable
+            series for that station is replaced with NaN so downstream merge logic can
+            fall back to GFS/ECMWF instead of mixing observed values with an unreliable
+            partially filled segment.
 
     .. note::
         ``max_gap_hours`` counts consecutive NaN *rows*, not wall-clock hours.
@@ -381,8 +383,9 @@ def fill_station_gaps(
         Column containing the forecast timestamp (used for ordering only).
     max_gap_hours : int
         Maximum number of consecutive NaN timesteps to fill by interpolation
-        for continuous variables.  Gaps longer than this are left as NaN
-        (except APCP_surface, where remaining NaNs are zero-filled).
+        for continuous variables. If a longer gap exists, the entire station /
+        variable series is replaced with NaN (except APCP_surface and
+        PTYPE_surface, which retain their special-case handling).
 
     Returns
     -------
@@ -400,6 +403,17 @@ def fill_station_gaps(
 
     # Non-data columns: skip entirely.
     SKIP_COLS = {station_col, time_col, "latitude", "longitude", "altitude"}
+
+    def _has_oversized_nan_gap(series):
+        nan_mask = series.isna().to_numpy()
+        if not nan_mask.any():
+            return False
+
+        padded = np.pad(nan_mask.astype(np.int8), (1, 1))
+        transitions = np.diff(padded)
+        gap_starts = np.flatnonzero(transitions == 1)
+        gap_ends = np.flatnonzero(transitions == -1)
+        return np.any((gap_ends - gap_starts) > max_gap_hours)
 
     df = df.copy()
 
@@ -456,13 +470,16 @@ def fill_station_gaps(
                     s.ffill(limit=max_gap_hours).bfill(limit=max_gap_hours).values
                 )
             else:
-                # Linear interpolation capped at max_gap_hours consecutive NaN rows.
-                # limit_direction="both" also fills NaNs at the start/end of the series.
-                df.loc[sorted_idx, col] = s.interpolate(
-                    method="linear",
-                    limit=max_gap_hours,
-                    limit_direction="both",
-                ).values
+                if _has_oversized_nan_gap(s):
+                    df.loc[sorted_idx, col] = np.nan
+                else:
+                    # Linear interpolation capped at max_gap_hours consecutive NaN rows.
+                    # limit_direction="both" also fills NaNs at the start/end of the series.
+                    df.loc[sorted_idx, col] = s.interpolate(
+                        method="linear",
+                        limit=max_gap_hours,
+                        limit_direction="both",
+                    ).values
 
     return df
 
