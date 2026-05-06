@@ -20,7 +20,9 @@ from API.request.preprocess import (
         ("-3d", datetime.timedelta(days=-3)),
     ],
 )
-def test_parse_request_time_supports_negative_relative_offsets(time_str, expected_delta):
+def test_parse_request_time_supports_negative_relative_offsets(
+    time_str, expected_delta
+):
     now_time = datetime.datetime(2025, 1, 1, 12, 0, 0)
 
     parsed_time = parse_request_time(
