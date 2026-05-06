@@ -6,7 +6,9 @@ import pandas as pd
 
 
 def load_fill_station_gaps():
-    source_path = Path(__file__).resolve().parents[1] / "API" / "DWD_Mosmix_Local_Ingest.py"
+    source_path = (
+        Path(__file__).resolve().parents[1] / "API" / "DWD_Mosmix_Local_Ingest.py"
+    )
     source = source_path.read_text()
     module = ast.parse(source, filename=str(source_path))
 
