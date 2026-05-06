@@ -15,6 +15,7 @@ import sys
 import threading
 from typing import Union
 
+import aiobotocore.session as _aio_session
 import numpy as np
 from astral import LocationInfo, moon
 from fastapi import FastAPI, HTTPException, Request
@@ -67,6 +68,7 @@ from API.forecast_sources import (
 )
 from API.hourly.block import build_hourly_block
 from API.io.zarr_reader import update_zarr_store
+from API.io.ZarrHelpers import _add_custom_header
 from API.legacy.summary import (
     build_daily_summary,
     build_hourly_summary,
@@ -79,6 +81,9 @@ from API.utils.geo import haversine_distance
 from API.utils.solar import calculate_solar_times
 from API.utils.time_indexing import calculate_time_indexing
 from API.utils.timing import StepTimer, TimingMiddleware
+
+
+
 
 Translations = load_all_translations()
 
@@ -194,11 +199,16 @@ try:
             try:
                 import s3fs
 
+                aio_sess = _aio_session.AioSession()
+                aio_sess.register("before-send.s3", _add_custom_header)
                 s3 = s3fs.S3FileSystem(
                     anon=True,
                     asynchronous=False,
                     endpoint_url="https://api.pirateweather.net/files/",
+                    skip_instance_cache=True,
+                    session=aio_sess,
                 )
+
                 s3_path = (
                     f"s3://ForecastTar_v2/{ingest_version}/DWD_MOSMIX_stations.pickle"
                 )
