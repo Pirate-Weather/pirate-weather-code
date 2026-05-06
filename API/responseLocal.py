@@ -82,9 +82,6 @@ from API.utils.solar import calculate_solar_times
 from API.utils.time_indexing import calculate_time_indexing
 from API.utils.timing import StepTimer, TimingMiddleware
 
-
-
-
 Translations = load_all_translations()
 
 lock = threading.Lock()
