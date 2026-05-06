@@ -6,6 +6,7 @@ import asyncio
 import datetime
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Dict, List, Union
 
@@ -37,9 +38,18 @@ def parse_request_time(
     Handles:
     - Unix timestamps (positive and negative)
     - Relative time (seconds offset from now)
+    - Relative negative time with unit suffixes (s, h, d)
     - ISO 8601 strings (with and without timezone)
     - Local time strings (requires timezone lookup)
     """
+    relative_match = re.fullmatch(r"([+-]?\d+(?:\.\d+)?)([shdSHD])", time_str)
+    if relative_match:
+        val = float(relative_match.group(1))
+        unit = relative_match.group(2).lower()
+        if val < 0:
+            unit_seconds = {"s": 1, "h": 3600, "d": 86400}
+            return now_time + datetime.timedelta(seconds=val * unit_seconds[unit])
+
     if time_str.lstrip("-+").isnumeric():
         val = float(time_str)
         if val > 0:
