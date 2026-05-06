@@ -39,11 +39,24 @@ def test_parse_request_time_supports_negative_relative_offsets(
 
 def test_parse_request_time_rejects_overlong_strings():
     now_time = datetime.datetime(2025, 1, 1, 12, 0, 0)
-    overlong_time_str = "2025-01-01T12:00:00+00:00extra"
+    overlong_time_str = "A" * 65
 
     with pytest.raises(HTTPException, match="Invalid Time Specification"):
         parse_request_time(
             time_str=overlong_time_str,
+            now_time=now_time,
+            lat=40.7128,
+            az_lon=-74.0060,
+            tf=TimezoneFinder(in_memory=True),
+        )
+
+
+def test_parse_request_time_rejects_positive_relative_offsets_with_units():
+    now_time = datetime.datetime(2025, 1, 1, 12, 0, 0)
+
+    with pytest.raises(HTTPException, match="Invalid Time Specification"):
+        parse_request_time(
+            time_str="+1h",
             now_time=now_time,
             lat=40.7128,
             az_lon=-74.0060,

@@ -25,6 +25,9 @@ from API.utils.geo import get_offset
 from API.utils.timing import TimingTracker
 
 
+RELATIVE_TIME_UNITS = {"s": 1, "h": 3600, "d": 86400}
+
+
 def parse_request_time(
     time_str: str,
     now_time: datetime.datetime,
@@ -42,16 +45,14 @@ def parse_request_time(
     - ISO 8601 strings (with and without timezone)
     - Local time strings (requires timezone lookup)
     """
-    if len(time_str) >= 30:
+    if len(time_str) >= 64:
         raise HTTPException(status_code=400, detail="Invalid Time Specification")
 
-    relative_match = re.fullmatch(r"([+-]?\d+(?:\.\d+)?)([shdSHD])", time_str)
+    relative_match = re.fullmatch(r"(-\d+(?:\.\d+)?)([shdSHD])", time_str)
     if relative_match:
         val = float(relative_match.group(1))
         unit = relative_match.group(2).lower()
-        if val < 0:
-            unit_seconds = {"s": 1, "h": 3600, "d": 86400}
-            return now_time + datetime.timedelta(seconds=val * unit_seconds[unit])
+        return now_time + datetime.timedelta(seconds=val * RELATIVE_TIME_UNITS[unit])
 
     if time_str.lstrip("-+").isnumeric():
         val = float(time_str)
