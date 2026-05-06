@@ -2,6 +2,7 @@ import datetime
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
 from timezonefinder import TimezoneFinder
 
 from API.request.preprocess import (
@@ -34,6 +35,20 @@ def test_parse_request_time_supports_negative_relative_offsets(
     )
 
     assert parsed_time == now_time + expected_delta
+
+
+def test_parse_request_time_rejects_overlong_strings():
+    now_time = datetime.datetime(2025, 1, 1, 12, 0, 0)
+    overlong_time_str = "2025-01-01T12:00:00+00:00extra"
+
+    with pytest.raises(HTTPException, match="Invalid Time Specification"):
+        parse_request_time(
+            time_str=overlong_time_str,
+            now_time=now_time,
+            lat=40.7128,
+            az_lon=-74.0060,
+            tf=TimezoneFinder(in_memory=True),
+        )
 
 
 @pytest.mark.asyncio

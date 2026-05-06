@@ -42,6 +42,9 @@ def parse_request_time(
     - ISO 8601 strings (with and without timezone)
     - Local time strings (requires timezone lookup)
     """
+    if len(time_str) >= 30:
+        raise HTTPException(status_code=400, detail="Invalid Time Specification")
+
     relative_match = re.fullmatch(r"([+-]?\d+(?:\.\d+)?)([shdSHD])", time_str)
     if relative_match:
         val = float(relative_match.group(1))
