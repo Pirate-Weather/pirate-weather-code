@@ -24,7 +24,6 @@ from API.io.zarr_reader import WeatherParallel
 from API.utils.geo import get_offset
 from API.utils.timing import TimingTracker
 
-
 RELATIVE_TIME_UNITS = {"s": 1, "h": 3600, "d": 86400}
 
 
