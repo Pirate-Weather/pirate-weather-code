@@ -39,7 +39,7 @@ def parse_request_time(
 
     Handles:
     - Unix timestamps (positive and negative)
-    - Relative time (seconds offset from now)
+    - Relative time (seconds offset from now, capped at 25 hours in the past)
     - Relative negative time with unit suffixes (s, h, d)
     - ISO 8601 strings (with and without timezone)
     - Local time strings (requires timezone lookup)
