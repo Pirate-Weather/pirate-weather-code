@@ -1,13 +1,13 @@
 # %% Script to contain the helper functions as part of the data ingest for Pirate Weather
 # Alexander Rey. July 2025
 
+import logging
 import os
 import re
 import resource
 import shlex
 import shutil
 import subprocess
-import sys
 import tarfile
 import time
 from typing import Iterable, Optional, Union
@@ -20,17 +20,8 @@ from herbie import Path
 
 # Import atmospheric calculation constants
 from API.constants.shared_const import (
-    BOLTON_CONST,
-    CLOUD_RH_CRITICAL,
-    CLOUD_RH_EXPONENT,
-    FREEZING_LEVEL_HIGH,
-    FREEZING_LEVEL_SURFACE,
-    FREEZING_LEVEL_TEMP_TOLERANCE,
-    GRAVITY,
-    KELVIN_TO_CELSIUS,
     MISSING_DATA,
     REFC_THRESHOLD,
-    WATER_VAPOR_GAS_CONSTANT_RATIO,
 )
 
 # Logging

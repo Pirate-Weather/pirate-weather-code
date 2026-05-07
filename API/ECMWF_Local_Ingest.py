@@ -479,8 +479,9 @@ for i in range(his_period, 1, -12):
             + ".zarr"
         )
         if os.path.exists(local_path.replace(".zarr", ".done")):
+            logger.info(
                 "File already exists locally, skipping download for: %s", local_path
-            print("File already exists locally, skipping download for: " + local_path)
+            )
             continue
 
     logger.info(

@@ -3,6 +3,7 @@
 
 # %% Import modules
 import fcntl
+import logging
 import os
 import pickle
 import shutil
@@ -43,6 +44,10 @@ from API.ingest_utils import (
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
+
+# Logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 def _timing_log(message: str) -> None:

@@ -39,6 +39,10 @@ from API.ingest_utils import (
     validate_grib_stats,
 )
 
+# Logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 
 def rounder(t):
     if t.minute >= 30:

@@ -35,6 +35,9 @@ from API.ingest_utils import (
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
+# Logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
