@@ -6,11 +6,12 @@ import logging
 import os
 import pickle
 import shutil
-import subprocess
 import sys
 import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 
+import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -18,7 +19,8 @@ import s3fs
 import xarray as xr
 import zarr.storage
 from dask.diagnostics import ProgressBar
-from herbie import FastHerbie, HerbieLatest, Path
+from herbie import FastHerbie, HerbieLatest
+from tqdm import tqdm
 from xrspatial import direction, proximity
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
@@ -26,10 +28,19 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    archive_tmp_zarr_and_upload,
+    build_herbie_grib_list,
+    close_store,
+    configure_zarr_limits,
+    download_extract_historic_archive,
     interp_time_take_blend,
+    make_herbie_save_dir,
     mask_invalid_data,
     mask_invalid_refc,
     pad_to_chunk_size,
+    positive_int_env,
+    run_command,
+    tune_nofile_limit,
     validate_grib_stats,
 )
 
@@ -59,8 +70,14 @@ historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/GFS")
 save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+zarr_store_workers = positive_int_env("zarr_store_workers", 2)
+zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+tune_nofile_limit()
+zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
+    zarr_store_workers, zarr_async_concurrency
+)
 
 
 # Define the processing and history chunk size
@@ -88,6 +105,8 @@ if save_type == "Download":
     if not os.path.exists(historic_path):
         os.makedirs(historic_path)
 
+herbie_save_dir = make_herbie_save_dir(tmp_dir)
+
 
 T0 = time.time()
 
@@ -99,7 +118,7 @@ latest_run = HerbieLatest(
     product="pgrb2.0p25",
     verbose=False,
     priority=["aws", "google", "nomads"],
-    save_dir=tmp_dir,
+    save_dir=herbie_save_dir,
 )
 
 base_time = latest_run.date
@@ -219,7 +238,7 @@ FH_forecastsub = FastHerbie(
     product="pgrb2.0p25",
     verbose=False,
     priority=["aws", "google", "nomads"],
-    save_dir=tmp_dir,
+    save_dir=herbie_save_dir,
 )
 
 # Download the subsets
@@ -237,15 +256,12 @@ if len(FH_forecastsub.file_exists) != len(gfs_file_range):
 
 
 # Create list of downloaded grib files
-grib_list = [
-    str(Path(x.get_localFilePath(match_strings)).expand())
-    for x in FH_forecastsub.file_exists
-]
+grib_list = build_herbie_grib_list(FH_forecastsub.file_exists, match_strings)
 
 # Perform a check if any data seems to be invalid
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+grib_check = run_command(cmd)
 
 # Validate the grib files
 validate_grib_stats(grib_check)
@@ -266,7 +282,7 @@ cmd = (
 
 
 # Run wgrib2
-sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+sp_out = run_command(cmd)
 if sp_out.returncode != 0:
     logger.error(sp_out.stderr)
     sys.exit()
@@ -279,7 +295,7 @@ FH_forecastUV = FastHerbie(
     product="pgrb2b.0p25",
     verbose=False,
     priority=["aws", "google", "nomads"],
-    save_dir=tmp_dir,
+    save_dir=herbie_save_dir,
 )
 
 # Download UV subsets
@@ -296,15 +312,12 @@ if len(FH_forecastUV.file_exists) != len(gfs_file_range):
 
 
 # Create list of downloaded grib files
-grib_list_uv = [
-    str(Path(x.get_localFilePath(UVmatchString)).expand())
-    for x in FH_forecastUV.file_exists
-]
+grib_list_uv = build_herbie_grib_list(FH_forecastUV.file_exists, UVmatchString)
 
 # Perform a check if any data seems to be invalid
 cmd = "cat " + " ".join(grib_list_uv) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
 
-grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+grib_check = run_command(cmd)
 
 validate_grib_stats(grib_check)
 logger.info("Grib files passed validation, proceeding with processing")
@@ -322,7 +335,7 @@ cmd = (
 )
 
 # Run wgrib2
-sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+sp_out = run_command(cmd)
 if sp_out.returncode != 0:
     logger.error(sp_out.stderr)
     sys.exit()
@@ -435,12 +448,17 @@ directions_chunked = directions_stacked.rechunk(160, process_chunk, process_chun
 
 
 with ProgressBar():
-    distanced_chunked.to_zarr(
-        forecast_process_path + "_stormDist.zarr", overwrite=True, compute=True
-    )
-    directions_chunked.to_zarr(
-        forecast_process_path + "_stormDir.zarr", overwrite=True, compute=True
-    )
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        distanced_chunked.to_zarr(
+            forecast_process_path + "_stormDist.zarr",
+            overwrite=True,
+            compute=True,
+        )
+        directions_chunked.to_zarr(
+            forecast_process_path + "_stormDir.zarr",
+            overwrite=True,
+            compute=True,
+        )
 
 
 # UV is an average from zero to 6, repeating throughout the time series.
@@ -515,9 +533,14 @@ xarray_forecast_merged = xarray_forecast_merged.rename({"PRES_surface": "PRES_st
 xarray_forecast_merged = xarray_forecast_merged.chunk(
     chunks={"time": 240, "latitude": process_chunk, "longitude": process_chunk}
 )
-xarray_forecast_merged.to_zarr(
-    forecast_process_path + "_.zarr", mode="w", consolidated=False, compute=True
-)
+with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+    xarray_forecast_merged.to_zarr(
+        forecast_process_path + "_.zarr",
+        mode="w",
+        consolidated=False,
+        compute=True,
+        chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+    )
 
 # %% Delete to free memory
 del (
@@ -554,46 +577,27 @@ for i in range(his_period, 0, -6):
     if save_type == "S3":
         s3_path = (
             historic_path
-            + "/GFS_Hist_v2"
+            + "/GFS_Hist_v3"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr"
+            + ".zarr.tar.gz"
         )
 
         # Check for a done file in S3
-        if s3.exists(s3_path.replace(".zarr", ".done")):
-            logger.info("File already exists in S3, skipping download for: " + s3_path)
-            # If the file exists, check that it works
-            try:
-                hisCheckStore = zarr.storage.FsspecStore.from_url(
-                    s3_path,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-                zarr.open(hisCheckStore)[zarr_vars[-1]][-1, -1, -1]
-                continue  # If it exists, skip to the next iteration
-            except Exception:
-                logger.error("### Historic Data Failure!")
-                logger.exception("Exception processing historic data", exc_info=True)
-
-                # Delete the file if it exists
-                if s3.exists(s3_path):
-                    s3.rm(s3_path)
+        if s3.exists(s3_path.replace(".tar.gz", ".done")):
+            print("File already exists in S3, skipping download for: " + s3_path)
+            continue
     else:
         # Local Path Setup
         local_path = (
             historic_path
-            + "/GFS_Hist_v2"
+            + "/GFS_Hist_v3"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
 
-        # Check for a loca done file
+        # Check for a local done file
         if os.path.exists(local_path.replace(".zarr", ".done")):
-            logger.info(
-                "File already exists in S3, skipping download for: " + local_path
-            )
+            print("File already exists locally, skipping download for: " + local_path)
             continue
 
     logger.info(
@@ -618,7 +622,7 @@ for i in range(his_period, 0, -6):
         product="pgrb2.0p25",
         verbose=False,
         priority=["aws", "google", "nomads"],
-        save_dir=tmp_dir,
+        save_dir=herbie_save_dir,
     )
 
     # Download the subsets
@@ -633,15 +637,12 @@ for i in range(his_period, 0, -6):
         sys.exit(1)
 
     # Create list of downloaded grib files
-    grib_list = [
-        str(Path(x.get_localFilePath(match_strings)).expand())
-        for x in FH_histsub.file_exists
-    ]
+    grib_list = build_herbie_grib_list(FH_histsub.file_exists, match_strings)
 
     # Perform a check if any data seems to be invalid
     cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
 
-    grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    grib_check = run_command(cmd)
 
     validate_grib_stats(grib_check)
     logger.info("Grib files passed validation, proceeding with processing")
@@ -659,7 +660,7 @@ for i in range(his_period, 0, -6):
     )
 
     # Run wgrib2
-    sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    sp_out = run_command(cmd)
     if sp_out.returncode != 0:
         logger.error(sp_out.stderr)
         sys.exit()
@@ -672,7 +673,7 @@ for i in range(his_period, 0, -6):
         product="pgrb2b.0p25",
         verbose=False,
         priority=["aws", "google", "nomads"],
-        save_dir=tmp_dir,
+        save_dir=herbie_save_dir,
     )
 
     # Download the subsets
@@ -687,10 +688,7 @@ for i in range(his_period, 0, -6):
         sys.exit(1)
 
     # Create list of downloaded grib files
-    grib_list_uv = [
-        str(Path(x.get_localFilePath(UVmatchString)).expand())
-        for x in FH_histsubUV.file_exists
-    ]
+    grib_list_uv = build_herbie_grib_list(FH_histsubUV.file_exists, UVmatchString)
 
     # Perform a check if any data seems to be invalid
     cmd = (
@@ -702,7 +700,7 @@ for i in range(his_period, 0, -6):
         + " -s -stats"
     )
 
-    grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    grib_check = run_command(cmd)
 
     validate_grib_stats(grib_check)
     logger.info("Grib files passed validation, proceeding with processing")
@@ -720,7 +718,7 @@ for i in range(his_period, 0, -6):
     )
 
     # Run wgrib2
-    sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    sp_out = run_command(cmd)
     if sp_out.returncode != 0:
         logger.error(sp_out.stderr)
         sys.exit()
@@ -851,19 +849,6 @@ for i in range(his_period, 0, -6):
     # Define the path to save the zarr dataset with the run time in the filename
     # format the time following iso8601
 
-    # Save as Zarr to s3 for Time Machine
-    if save_type == "S3":
-        zarrStore = zarr.storage.FsspecStore.from_url(
-            s3_path,
-            storage_options={
-                "key": aws_access_key_id,
-                "secret": aws_secret_access_key,
-            },
-        )
-    else:
-        # Create local Zarr store
-        zarrStore = zarr.storage.LocalStore(local_path)
-
     # Save the dataset with compression and filters for all variables
     # Use the same encoding as last time but with larger chunks to speed up read times
     # Small fix for PRES_station/ PRES_surface
@@ -871,10 +856,15 @@ for i in range(his_period, 0, -6):
         vname: {"chunks": (6, process_chunk, process_chunk)} for vname in zarr_vars[1:]
     }
 
-    # with ProgressBar():
-    xarray_hist_merged.to_zarr(
-        store=zarrStore, mode="w", consolidated=False, encoding=encoding
-    )
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        xarray_hist_merged.to_zarr(
+            hist_process_path + "_GFS_Hist_TMP.zarr",
+            mode="w",
+            consolidated=False,
+            encoding=encoding,
+            compute=True,
+            chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+        )
 
     # Clear the xarray dataset from memory
     del xarray_hist_merged
@@ -885,9 +875,16 @@ for i in range(his_period, 0, -6):
 
     # Save a done file to s3 to indicate that the historic data has been processed
     if save_type == "S3":
-        done_file = s3_path.replace(".zarr", ".done")
-        s3.touch(done_file)
+        archive_tmp_zarr_and_upload(
+            tmp_zarr_path=hist_process_path + "_GFS_Hist_TMP.zarr",
+            s3_path=s3_path,
+            archive_member_name="GFS_Hist.zarr",
+            s3=s3,
+        )
     else:
+        # Move to Local Path
+        os.rename(hist_process_path + "_GFS_Hist_TMP.zarr", local_path)
+
         done_file = local_path.replace(".zarr", ".done")
         with open(done_file, "w") as f:
             f.write("Done")
@@ -897,13 +894,53 @@ for i in range(his_period, 0, -6):
 
 # %% Merge the historic and forecast datasets and then squash using dask
 # Get the s3 paths to the historic data
-ncLocalWorking_paths = [
-    historic_path
-    + "/GFS_Hist_v2"
-    + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-    + ".zarr"
-    for i in range(his_period, 1, -6)
-]
+if save_type == "S3":
+    local_temp_dir = forecast_process_path + "_s3_temp_downloads"
+    os.makedirs(local_temp_dir, exist_ok=True)
+
+    # The function that downloads and extracts a single timestamp
+    def download_and_extract(timestamp):
+        # Names expected locally
+        final_zarr_name = f"GFS_Hist_v3{timestamp}.zarr"
+        extracted_path = download_extract_historic_archive(
+            s3=s3,
+            historic_path=historic_path,
+            final_zarr_name=final_zarr_name,
+            extracted_store_name="GFS_Hist.zarr",
+            local_temp_dir=local_temp_dir,
+        )
+        if extracted_path is None:
+            tqdm.write(f"Error: GFS_Hist.zarr not found inside archive for {timestamp}")
+        return extracted_path
+
+    # Generate target timestamps
+    timestamps = [
+        (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        for i in range(his_period, 1, -6)
+    ]
+
+    print(f"Phase 1: Downloading and extracting {len(timestamps)} archives...")
+
+    # Execute downloads in parallel
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        results = list(
+            tqdm(
+                executor.map(download_and_extract, timestamps),
+                total=len(timestamps),
+                desc="S3 Archive Sync",
+            )
+        )
+
+    # Filter out the missing files (None values) and keep the valid paths
+    ncLocalWorking_paths = [path for path in results if path is not None]
+else:
+    ncLocalWorking_paths = [
+        historic_path
+        + "/GFS_Hist_v3"
+        + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        + ".zarr"
+        for i in range(his_period, 1, -6)
+    ]
 
 # Dask Setup
 daskInterpArrays = []
@@ -914,23 +951,9 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
     for local_ncpath in ncLocalWorking_paths:
         # If not found in array, use MISSING_DATA to show missing
         try:
-            if save_type == "S3":
-                daskVarArrays.append(
-                    da.from_zarr(
-                        local_ncpath,
-                        component=dask_var,
-                        inline_array=True,
-                        storage_options={
-                            "key": aws_access_key_id,
-                            "secret": aws_secret_access_key,
-                        },
-                    )
-                )
-
-            else:
-                daskVarArrays.append(
-                    da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
-                )
+            daskVarArrays.append(
+                da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
+            )
         # Add a fallback in case of a FileNotFoundError
         except FileNotFoundError:
             logger.info("File not found, adding NaN array for: %s", local_ncpath)
@@ -1005,9 +1028,12 @@ daskVarArrayListMergeNaN = mask_invalid_data(
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
 # with ProgressBar():
-daskVarArrayListMergeNaN.to_zarr(
-    forecast_process_path + "_stack.zarr", overwrite=True, compute=True
-)
+with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+    daskVarArrayListMergeNaN.to_zarr(
+        forecast_process_path + "_stack.zarr",
+        overwrite=True,
+        compute=True,
+    )
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
@@ -1029,43 +1055,43 @@ else:
 # 5. Write it out to the zarr array
 
 with ProgressBar():
-    # 1. Interpolate the stacked array to be hourly along the time axis
-    daskVarArrayStackDiskInterp = interp_time_take_blend(
-        daskVarArrayStackDisk,
-        stacked_timesUnix=stacked_timesUnix,
-        hourly_timesUnix=hourly_timesUnix,
-        dtype="float32",
-        fill_value=np.nan,
-    )
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        # 1. Interpolate the stacked array to be hourly along the time axis
+        daskVarArrayStackDiskInterp = interp_time_take_blend(
+            daskVarArrayStackDisk,
+            stacked_timesUnix=stacked_timesUnix,
+            hourly_timesUnix=hourly_timesUnix,
+            dtype="float32",
+            fill_value=np.nan,
+        )
 
-    # 2. Pad to chunk size
-    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
-        daskVarArrayStackDiskInterp, final_chunk
-    )
+        # 2. Pad to chunk size
+        daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+            daskVarArrayStackDiskInterp, final_chunk
+        )
 
-    # 3. Create the zarr array
-    zarr_array = zarr.create_array(
-        store=zarr_store,
-        shape=(
-            len(zarr_vars),
-            len(hourly_timesUnix),
-            daskVarArrayStackDiskInterpPad.shape[2],
-            daskVarArrayStackDiskInterpPad.shape[3],
-        ),
-        chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
-    )
+        # 3. Create the zarr array
+        zarr_array = zarr.create_array(
+            store=zarr_store,
+            shape=(
+                len(zarr_vars),
+                len(hourly_timesUnix),
+                daskVarArrayStackDiskInterpPad.shape[2],
+                daskVarArrayStackDiskInterpPad.shape[3],
+            ),
+            chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
+            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+            dtype="float32",
+        )
 
-    # 4. Rechunk it to match the final array
-    # 5. Write it out to the zarr array
-    daskVarArrayStackDiskInterpPad.round(5).rechunk(
-        (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
-    ).to_zarr(zarr_array, overwrite=True, compute=True)
+        # 4. Rechunk it to match the final array
+        # 5. Write it out to the zarr array
+        daskVarArrayStackDiskInterpPad.round(5).rechunk(
+            (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
+        ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
-if save_type == "S3":
-    zarr_store.close()
+close_store(zarr_store)
 
 # Rechunk subset of data for maps!
 # Want variables:
@@ -1108,16 +1134,16 @@ for z in [0, 4, 8, 9, 10, 11, 12, 13, 14, 15, 21]:
     )
 
     with ProgressBar():
-        da.rechunk(
-            daskVarArrayStackDisk_maps[z, his_period - 12 : his_period + 24, :, :],
-            (36, 100, 100),
-        ).to_zarr(zarr_array, overwrite=True, compute=True)
+        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+            da.rechunk(
+                daskVarArrayStackDisk_maps[z, his_period - 12 : his_period + 24, :, :],
+                (36, 100, 100),
+            ).to_zarr(zarr_array, overwrite=True, compute=True)
 
     logger.info(zarr_vars[z])
 
 
-if save_type == "S3":
-    zarr_store_maps.close()
+close_store(zarr_store_maps)
 
 # %% Upload to S3
 if save_type == "S3":

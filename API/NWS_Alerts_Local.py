@@ -18,6 +18,12 @@ import zarr
 from zarr.core.dtype import VariableLengthUTF8
 
 from API.constants.shared_const import INGEST_VERSION_STR
+from API.ingest_utils import (
+    close_store,
+    configure_zarr_limits,
+    positive_int_env,
+    tune_nofile_limit,
+)
 
 # %% Setup paths and parameters
 ingestVersion = INGEST_VERSION_STR
@@ -42,8 +48,14 @@ historic_path = os.getenv(
 saveType = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+zarr_store_workers = positive_int_env("zarr_store_workers", 2)
+zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+tune_nofile_limit()
+zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
+    zarr_store_workers, zarr_async_concurrency
+)
 
 # Logging
 logger = logging.getLogger(__name__)
@@ -76,11 +88,15 @@ r = requests.get(warningURL, allow_redirects=True)
 
 # Save to file in tmpDIR
 savePath = os.path.join(forecast_process_dir, "current_all.tar.gz")
-open(savePath, "wb").write(r.content)
+with open(savePath, "wb") as f:
+    f.write(r.content)
 
-tar = tarfile.open(savePath, "r:gz")
-tar.extractall(path=forecast_process_dir)
-tar.close()
+with tarfile.open(savePath, "r:gz") as tar:
+    # Python 3.14 changes default extract behavior; be explicit and keep compatibility.
+    try:
+        tar.extractall(path=forecast_process_dir, filter="data")
+    except TypeError:
+        tar.extractall(path=forecast_process_dir)
 
 # %% Read in KMZ using geopandas
 nws_alert_gdf = gp.read_file(os.path.join(forecast_process_dir, "current_all.shp"))
@@ -173,7 +189,7 @@ points_in_polygons = gp.sjoin(
     gridPointsSeries, nws_alert_merged_gdf, predicate="within", how="inner"
 )
 
-# Create a formatted string ton save all the relevant in the zarr array
+# Create a formatted string to save all relevant fields in the zarr array.
 points_in_polygons["string"] = (
     points_in_polygons["event"].astype(str) + "}"
     "{"
@@ -195,16 +211,14 @@ points_in_polygons["string"] = (
     + points_in_polygons["URL"].astype(str)
 )
 
+# Normalize possible null/non-string values before joining grouped strings.
+points_in_polygons["string"] = points_in_polygons["string"].fillna("").astype(str)
+points_in_polygons = points_in_polygons[points_in_polygons["string"] != ""]
 
-float_rows = points_in_polygons[
-    points_in_polygons["string"].apply(lambda x: isinstance(x, float))
-]
-
-# Print the filtered rows
-logger.info(float_rows)
-
-# Combine the formatted strings using "|" as a spacer
-df = points_in_polygons.groupby("INDEX").agg({"string": "|".join}).reset_index()
+# Combine formatted strings using "|" as a separator.
+df = points_in_polygons.groupby("INDEX", as_index=False)["string"].agg(
+    lambda values: "|".join(v for v in values if v)
+)
 
 
 # Merge back into primary geodataframe
@@ -238,14 +252,11 @@ zarr_array = zarr.create_array(
     shape=gridPoints_XR2.shape,
     dtype=zarr.dtype.VariableLengthUTF8(),
     chunks=(10, 10),
-    overwrite=True,
 )
 
 # Save the data
 zarr_array[:] = gridPoints_XR2
-
-if saveType == "S3":
-    zarr_store.close()
+close_store(zarr_store)
 
 # Test Read
 # zip_store_read = zarr.storage.ZipStore(

@@ -259,6 +259,12 @@ def _interp_dwd_mosmix(minute_array_grib, dwd_mosmix_data):
     if dwd_mosmix_data is None or len(dwd_mosmix_data) == 0:
         return None
 
+    # If the station has no RR1c data at all (accum column entirely NaN or
+    # MISSING_DATA), return None so the elif chain falls through to ECMWF/GFS.
+    accum_col = dwd_mosmix_data[:, DWD_MOSMIX["accum"]]
+    if np.all(np.isnan(accum_col) | (accum_col == MISSING_DATA)):
+        return None
+
     dwd_mosmix_MinuteInterpolation = np.zeros(
         (len(minute_array_grib), max(DWD_MOSMIX.values()) + 1)
     )

@@ -6,6 +6,7 @@ import asyncio
 import datetime
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Dict, List, Union
 
@@ -23,6 +24,8 @@ from API.io.zarr_reader import WeatherParallel
 from API.utils.geo import get_offset
 from API.utils.timing import TimingTracker
 
+RELATIVE_TIME_UNITS = {"s": 1, "h": 3600, "d": 86400}
+
 
 def parse_request_time(
     time_str: str,
@@ -36,10 +39,20 @@ def parse_request_time(
 
     Handles:
     - Unix timestamps (positive and negative)
-    - Relative time (seconds offset from now)
+    - Relative time (seconds offset from now, capped at 25 hours in the past)
+    - Relative negative time with unit suffixes (s, h, d)
     - ISO 8601 strings (with and without timezone)
     - Local time strings (requires timezone lookup)
     """
+    if len(time_str) >= 64:
+        raise HTTPException(status_code=400, detail="Invalid Time Specification")
+
+    relative_match = re.fullmatch(r"(-\d+(?:\.\d+)?)([shdSHD])", time_str)
+    if relative_match:
+        val = float(relative_match.group(1))
+        unit = relative_match.group(2).lower()
+        return now_time + datetime.timedelta(seconds=val * RELATIVE_TIME_UNITS[unit])
+
     if time_str.lstrip("-+").isnumeric():
         val = float(time_str)
         if val > 0:

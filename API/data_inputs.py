@@ -180,7 +180,13 @@ def prepare_data_inputs(
         prcip_intensity_inputs["hrrr"] = hrrr_merged[:, HRRR["intensity"]] * 3600
 
     if "ecmwf_ifs" in source_list and ecmwf_merged is not None:
-        prcip_intensity_inputs["ecmwf"] = ecmwf_merged[:, ECMWF["intensity"]] * 3600
+        # Use the ensemble mean (APCP_Mean) for intensity rather than the
+        # deterministic IFS tprate. The deterministic tprate can be zero or
+        # near-zero even when the ensemble shows significant precipitation,
+        # causing snow accumulation (derived from accum_mean) to appear
+        # without a matching precipIntensity. Using accum_mean * 1000 here
+        # keeps intensity consistent with the accum field (also accum_mean * 1000).
+        prcip_intensity_inputs["ecmwf"] = ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
 
     # DWD MOSMIX: RR1c is in kg/m^2 = mm (hourly total)
     if "dwd_mosmix" in source_list and dwd_valid:

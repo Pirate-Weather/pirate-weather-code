@@ -41,6 +41,37 @@ The initial `docker compose up` command will take some time (~1 hour), as the in
 
 Two docker containers are used for this service, and are both saved in the "[Docker](https://github.com/Pirate-Weather/pirate-weather-code/tree/main/Docker)" folder. `public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm` is the ingest container, and builds WGRIB2 from source in addition to adding several key python packages for processing. `public.ecr.aws/j9v4j3c7/pirate-alpine-zarr` is a smaller container for the API response, and only consists of FastAPI plus some additional dependencies. 
 
+### Local SSD Ingest (No Pirate Weather API Key)
+If your goal is to download and keep as much raw model data locally as possible, use the local Ofelia compose template with `save_type=Download`:
+
+```
+pirate-compose_oph.local.yml
+```
+
+Host mount paths are controlled by environment variables (`PW_WEATHER_ROOT`, `PW_WORK_ROOT`) so this works across machines without editing compose files.
+
+1. Copy the template env file and adjust paths for your machine:
+```
+cp .env.example .env
+```
+
+2. Create storage folders:
+```
+mkdir -p /mnt/pirate-weather/Weather /mnt/pirate-weather/Work
+```
+
+3. Build and run:
+
+```
+docker build -f Docker/pirate-ingest-dockerfile -t pirateingest:latest .
+
+docker compose -f pirate-compose_oph.local.yml up -d
+```
+
+This runs local ingest jobs and writes output under the SSD-backed `Weather` and `Work` folders without requiring `PW_API`.
+
+**Filesystem note (Ubuntu/Linux):** prefer `ext4` for `PW_WEATHER_ROOT` and `PW_WORK_ROOT`. Large ingest runs are significantly faster and more reliable on `ext4` than `NTFS` mounts.
+
 ## Development
 For additional details on contributing to this project, check out the [docs folder](https://github.com/Pirate-Weather/pirate-weather-code/docs). There, we have specific guides on adding a model, adjusting variables, or editing the text summaries. If you're new to NumPy (used extensively throughout the codebase), see the [NumPy Guide](docs/NUMPY_GUIDE.md) for common patterns and operations.
 
@@ -76,7 +107,7 @@ For Option 2:
 git clone https://github.com/Pirate-Weather/pirate-weather-code.git
 
 wget https://files.alexanderrey.ca/api/public/dl/9jMgSLpi
-unzip 9jMgSLpi-d ~/pw-data
+unzip 9jMgSLpi -d ~/pw-data
 
 docker run -d -p 8083:8083 -v ~/pirate-weather-code/API:/app -v ~/pw-data:/tmp -e "STAGE=TESTING" -e "useETOPO=FALSE" -e "TIMING=TRUE" -e "save_type=Download" -e "force_now=1730869200" --workdir=/efs public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:dev responseLocal:app --host 0.0.0.0 --port 8083
 
@@ -97,7 +128,7 @@ The other alternative is to setup a Python environment following the same proces
 git clone https://github.com/Pirate-Weather/pirate-weather-code.git
 
 wget https://files.alexanderrey.ca/api/public/dl/9jMgSLpi
-unzip 9jMgSLpi-d ~/pw-data
+unzip 9jMgSLpi -d ~/pw-data
 
 sudo yum groupinstall 'Development Tools'
 sudo yum install gcc gcc-c++ make

@@ -15,9 +15,10 @@ import sys
 import threading
 from typing import Union
 
+import aiobotocore.session as _aio_session
 import numpy as np
 from astral import LocationInfo, moon
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import ORJSONResponse
 from pirateweather_translations.dynamic_loader import load_all_translations
 from timezonefinder import TimezoneFinder
@@ -47,6 +48,7 @@ from API.constants.model_const import (
     DWD_MOSMIX,
     ECMWF,
     ERA5,
+    FORECAST_SOURCES,
     GFS,
     HRRR,
     HRRR_SUBH,
@@ -66,6 +68,7 @@ from API.forecast_sources import (
 )
 from API.hourly.block import build_hourly_block
 from API.io.zarr_reader import update_zarr_store
+from API.io.ZarrHelpers import _add_custom_header
 from API.legacy.summary import (
     build_daily_summary,
     build_hourly_summary,
@@ -193,11 +196,16 @@ try:
             try:
                 import s3fs
 
+                aio_sess = _aio_session.AioSession()
+                aio_sess.register("before-send.s3", _add_custom_header)
                 s3 = s3fs.S3FileSystem(
                     anon=True,
                     asynchronous=False,
                     endpoint_url="https://api.pirateweather.net/files/",
+                    skip_instance_cache=True,
+                    session=aio_sess,
                 )
+
                 s3_path = (
                     f"s3://ForecastTar_v2/{ingest_version}/DWD_MOSMIX_stations.pickle"
                 )
@@ -212,8 +220,9 @@ try:
         with open(station_map_file, "rb") as f:
             DWD_MOSMIX_Stations = pickle.load(f)
             logger.info(f"Loaded DWD MOSMIX station map from: {station_map_file}")
-    elif DWD_MOSMIX_Stations is None:
-        logger.debug("DWD MOSMIX station map not found")
+    elif station_map_file and DWD_MOSMIX_Stations is None:
+        # File path was configured for this stage but file is missing
+        logger.debug(f"DWD MOSMIX station map not found at: {station_map_file}")
 except Exception as e:
     logger.debug(f"Error loading DWD MOSMIX station map: {e}")
 
@@ -605,6 +614,18 @@ async def PW_Forecast(
     sourceList = merge_result.metadata.source_list
     sourceTimes = merge_result.metadata.source_times
     sourceIDX = merge_result.metadata.source_idx
+
+    # Validate that at least one forecast model source is available.
+    # RTMA-RU, hrrrsubh, and etopo provide only current/elevation data, not forecasts.
+    # If all forecast sources are excluded or unavailable, return a 400 error.
+    if not any(src in sourceList for src in FORECAST_SOURCES):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No forecast model sources are available for this request. "
+                "At least one forecast model must not be excluded."
+            ),
+        )
 
     # 8. Generate the minutely forecast section (precipitation intensity, etc.)
     # This uses high-resolution data (like HRRR sub-hourly) to provide minute-by-minute precipitation forecasts

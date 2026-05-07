@@ -8,6 +8,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Optional
 
+import aiobotocore.session as _aio_session
 import numpy as np
 import s3fs
 import zarr
@@ -114,12 +115,25 @@ class WeatherParallel(object):
 
                 has_missing_data, missing_row = has_interior_nan_holes(data_out.T)
                 if has_missing_data:
-                    self.logger.warning(
-                        "### %s Interpolating missing data (row %s)!",
-                        model,
-                        missing_row,
-                    )
-                    data_out = np.apply_along_axis(_interp_row, 0, data_out)
+                    if model == "DWD_MOSMIX":
+                        # DWD MOSMIX station data may have gaps (e.g. missing station
+                        # reports or the 6-hourly period beyond 240 h). Linearly
+                        # interpolating those gaps flattens the diurnal cycle (e.g.
+                        # temperatures in tropical locations like Rio de Janeiro appear
+                        # averaged/flat). Leave the NaN values intact so the merge
+                        # logic falls back to GFS/ECMWF for those hours instead.
+                        self.logger.debug(
+                            "### %s Has missing data (row %s), leaving NaN for merge fallback",
+                            model,
+                            missing_row,
+                        )
+                    else:
+                        self.logger.warning(
+                            "### %s Interpolating missing data (row %s)!",
+                            model,
+                            missing_row,
+                        )
+                        data_out = np.apply_along_axis(_interp_row, 0, data_out)
 
                 if self.timing_enabled:
                     self.logger.debug("### %s Done! %s", model, self.loc_tag)
@@ -192,12 +206,20 @@ def update_zarr_store(
     if stage in ("TESTING", "TM_TESTING"):
         logger.info("Setting up S3 zarrs")
         if save_type == "S3":
+            # Create an aiobotocore session and register the apikey hook on
+            # it *before* any client is created.  Session-level registration
+            # propagates to every client the session creates, which avoids a
+            # race condition where the first HeadObject fires before a
+            # client-level hook is active.
+            aio_sess = _aio_session.AioSession()
+            aio_sess.register("before-send.s3", _add_custom_header)
             s3 = s3fs.S3FileSystem(
                 anon=True,
                 asynchronous=False,
                 endpoint_url="https://api.pirateweather.net/files/",
+                skip_instance_cache=True,
+                session=aio_sess,
             )
-            s3.s3.meta.events.register("before-sign.s3.*", _add_custom_header)
         elif save_type == "S3Zarr":
             s3 = s3fs.S3FileSystem(
                 key=aws_access_key_id, secret=aws_secret_access_key, version_aware=True

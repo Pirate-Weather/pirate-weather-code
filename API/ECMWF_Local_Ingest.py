@@ -10,11 +10,11 @@ import os
 # )
 import pickle
 import shutil
-import subprocess
 import sys
 import time
 import warnings
 
+import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -31,8 +31,15 @@ from API.ingest_utils import (
     FORECAST_LEAD_RANGES,
     VALID_DATA_MAX,
     VALID_DATA_MIN,
+    archive_tmp_zarr_and_upload,
+    close_store,
+    configure_zarr_limits,
+    download_extract_historic_archive,
     interp_time_take_blend,
     pad_to_chunk_size,
+    positive_int_env,
+    run_command,
+    tune_nofile_limit,
     validate_grib_stats,
 )
 
@@ -62,8 +69,14 @@ historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/ECMWF
 save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+zarr_store_workers = positive_int_env("zarr_store_workers", 2)
+zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+tune_nofile_limit()
+zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
+    zarr_store_workers, zarr_async_concurrency
+)
 
 
 # Define the processing and history chunk size
@@ -190,7 +203,7 @@ grib_list = [
 # Perform a check if any data seems to be invalid
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+grib_check = run_command(cmd)
 validate_grib_stats(grib_check)
 logger.info("Grib files passed validation, proceeding with processing")
 
@@ -296,7 +309,7 @@ grib_list = [
 # Perform a check if any data seems to be invalid
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+grib_check = run_command(cmd)
 logger.info("Grib files passed validation, proceeding with processing")
 
 
@@ -413,12 +426,14 @@ xarray_forecast_merged = xarray_forecast_merged.chunk(
 )
 
 with ProgressBar():
-    xarray_forecast_merged.to_zarr(
-        forecast_process_path + "_merged.zarr",
-        mode="w",
-        consolidated=False,
-        compute=True,
-    )
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        xarray_forecast_merged.to_zarr(
+            forecast_process_path + "_merged.zarr",
+            mode="w",
+            consolidated=False,
+            compute=True,
+            chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+        )
 
 
 # %% Delete to free memory
@@ -444,50 +459,28 @@ logger.info(T1 - T0)
 # 6 hour runs
 for i in range(his_period, 1, -12):
     if save_type == "S3":
-        # S3 Path Setup
         s3_path = (
             historic_path
-            + "/ECMWF_Hist"
+            + "/ECMWF_Hist_v3"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr"
+            + ".zarr.tar.gz"
         )
-        if s3.exists(s3_path.replace(".zarr", ".done")):
-            logger.info("File already exists in S3, skipping download for: %s", s3_path)
-            # If the file exists, check that it works
+        if s3.exists(s3_path.replace(".tar.gz", ".done")):
+            continue
 
-            # Try to open and read data from the last variable of the zarr file to check if it has already been saved
-            try:
-                hisCheckStore = zarr.storage.FsspecStore.from_url(
-                    s3_path,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-                zarr.open(hisCheckStore)[zarr_vars[-1]][-1, -1, -1]
-                continue  # If it exists, skip to the next iteration
-            except Exception:
-                logger.error("### Historic Data Failure!")
-                logger.exception("Exception processing historic data", exc_info=True)
-
-                # Delete the file if it exists
-                if s3.exists(s3_path):
-                    s3.rm(s3_path)
-
+        if s3.exists(s3_path.replace(".tar.gz", ".done")):
+            print("File already exists in S3, skipping download for: " + s3_path)
+            continue
     else:
-        # Local Path Setup
         local_path = (
             historic_path
-            + "/ECMWF_Hist"
+            + "/ECMWF_Hist_v3"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
-
-        # Check for a loca done file
         if os.path.exists(local_path.replace(".zarr", ".done")):
-            logger.info(
-                "File already exists in S3, skipping download for: %s", local_path
-            )
+                "File already exists locally, skipping download for: %s", local_path
+            print("File already exists locally, skipping download for: " + local_path)
             continue
 
     logger.info(
@@ -532,7 +525,7 @@ for i in range(his_period, 1, -12):
     # Perform a check if any data seems to be invalid
     cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
 
-    grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    grib_check = run_command(cmd)
     validate_grib_stats(grib_check)
     logger.info("Grib files passed validation, proceeding with processing")
 
@@ -676,19 +669,6 @@ for i in range(his_period, 1, -12):
     # Define the path to save the zarr dataset with the run time in the filename
     # format the time following iso8601
 
-    # Save as Zarr to s3 for Time Machine
-    if save_type == "S3":
-        zarrStore = zarr.storage.FsspecStore.from_url(
-            s3_path,
-            storage_options={
-                "key": aws_access_key_id,
-                "secret": aws_secret_access_key,
-            },
-        )
-    else:
-        # Create local Zarr store
-        zarrStore = zarr.storage.LocalStore(local_path)
-
     # Save the dataset with compression and filters for all variables
     # Use the same encoding as last time but with larger chunks to speed up read times
 
@@ -711,11 +691,14 @@ for i in range(his_period, 1, -12):
     )
 
     with ProgressBar():
-        xarray_hist_merged.to_zarr(
-            store=zarrStore,
-            mode="w",
-            consolidated=False,
-        )
+        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+            xarray_hist_merged.to_zarr(
+                hist_process_path + "_ECMWF_Hist_TMP.zarr",
+                mode="w",
+                consolidated=False,
+                compute=True,
+                chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+            )
 
     # Clear the xarray dataset from memory
     del xarray_hist_merged
@@ -726,9 +709,14 @@ for i in range(his_period, 1, -12):
 
     # Save a done file to s3 to indicate that the historic data has been processed
     if save_type == "S3":
-        done_file = s3_path.replace(".zarr", ".done")
-        s3.touch(done_file)
+        archive_tmp_zarr_and_upload(
+            tmp_zarr_path=hist_process_path + "_ECMWF_Hist_TMP.zarr",
+            s3_path=s3_path,
+            archive_member_name="ECMWF_Hist.zarr",
+            s3=s3,
+        )
     else:
+        os.rename(hist_process_path + "_ECMWF_Hist_TMP.zarr", local_path)
         done_file = local_path.replace(".zarr", ".done")
         with open(done_file, "w") as f:
             f.write("Done")
@@ -737,29 +725,33 @@ for i in range(his_period, 1, -12):
 
 # %% Merge the historic and forecast datasets and then squash using dask
 # Get the s3 paths to the historic data
-ncLocalWorking_paths = [
-    historic_path
-    + "/ECMWF_Hist"
-    + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-    + ".zarr"
-    for i in range(his_period, 1, -12)
-]
+if save_type == "S3":
+    local_temp_dir = forecast_process_path + "_s3_temp_downloads"
+    os.makedirs(local_temp_dir, exist_ok=True)
+    ncLocalWorking_paths = []
+    for i in range(his_period, 1, -12):
+        timestamp = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        final_zarr_name = f"ECMWF_Hist_v3{timestamp}.zarr"
+        extracted_path = download_extract_historic_archive(
+            s3=s3,
+            historic_path=historic_path,
+            final_zarr_name=final_zarr_name,
+            extracted_store_name="ECMWF_Hist.zarr",
+            local_temp_dir=local_temp_dir,
+        )
+        if extracted_path is not None:
+            ncLocalWorking_paths.append(extracted_path)
+else:
+    ncLocalWorking_paths = [
+        historic_path
+        + "/ECMWF_Hist_v3"
+        + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        + ".zarr"
+        for i in range(his_period, 1, -12)
+    ]
 
 # Read in the zarr arrays
-if save_type == "S3":
-    hist = [
-        xr.open_zarr(
-            p,
-            consolidated=False,
-            storage_options={
-                "key": aws_access_key_id,
-                "secret": aws_secret_access_key,
-            },
-        )
-        for p in ncLocalWorking_paths
-    ]
-else:
-    hist = [xr.open_zarr(p, consolidated=False) for p in ncLocalWorking_paths]
+hist = [xr.open_zarr(p, consolidated=False) for p in ncLocalWorking_paths]
 
 fcst = xr.open_zarr(f"{forecast_process_path}_merged.zarr", consolidated=False)
 ds = xr.concat(
@@ -819,7 +811,12 @@ ds_chunk = ds_stack.chunk(
 
 # Interim zarr save of the stacked array. Not necessary for local, but speeds things up on S3
 with ProgressBar():
-    ds_chunk.to_zarr(forecast_process_path + "_stack.zarr", mode="w")
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        ds_chunk.to_zarr(
+            forecast_process_path + "_stack.zarr",
+            mode="w",
+            chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+        )
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(
@@ -848,44 +845,44 @@ int_var_indices = [i for i, v in enumerate(zarr_vars) if v in int_vars]
 # 5. Write it out to the zarr array
 
 with ProgressBar():
-    # 1. Interpolate the stacked array to be hourly along the time axis
-    daskVarArrayStackDiskInterp = interp_time_take_blend(
-        daskVarArrayStackDisk,
-        stacked_timesUnix=stacked_timesUnix,
-        hourly_timesUnix=hourly_timesUnix,
-        nearest_vars=int_var_indices,
-        dtype="float32",
-        fill_value=np.nan,
-    )
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        # 1. Interpolate the stacked array to be hourly along the time axis
+        daskVarArrayStackDiskInterp = interp_time_take_blend(
+            daskVarArrayStackDisk,
+            stacked_timesUnix=stacked_timesUnix,
+            hourly_timesUnix=hourly_timesUnix,
+            nearest_vars=int_var_indices,
+            dtype="float32",
+            fill_value=np.nan,
+        )
 
-    # 2. Pad to chunk size
-    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
-        daskVarArrayStackDiskInterp, final_chunk
-    )
+        # 2. Pad to chunk size
+        daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+            daskVarArrayStackDiskInterp, final_chunk
+        )
 
-    # 3. Create the zarr array
-    zarr_array = zarr.create_array(
-        store=zarr_store,
-        shape=(
-            len(zarr_vars),
-            len(hourly_timesUnix),
-            daskVarArrayStackDiskInterpPad.shape[2],
-            daskVarArrayStackDiskInterpPad.shape[3],
-        ),
-        chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
-    )
+        # 3. Create the zarr array
+        zarr_array = zarr.create_array(
+            store=zarr_store,
+            shape=(
+                len(zarr_vars),
+                len(hourly_timesUnix),
+                daskVarArrayStackDiskInterpPad.shape[2],
+                daskVarArrayStackDiskInterpPad.shape[3],
+            ),
+            chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
+            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+            dtype="float32",
+        )
 
-    # 4. Rechunk it to match the final array
-    # 5. Write it out to the zarr array
-    daskVarArrayStackDiskInterpPad.round(5).rechunk(
-        (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
-    ).to_zarr(zarr_array, overwrite=True, compute=True)
+        # 4. Rechunk it to match the final array
+        # 5. Write it out to the zarr array
+        daskVarArrayStackDiskInterpPad.round(5).rechunk(
+            (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
+        ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
-if save_type == "S3":
-    zarr_store.close()
+close_store(zarr_store)
 
 
 # TEST READ
@@ -931,14 +928,16 @@ for z in [0, 3, 5, 6, 7, 8, 9]:
         dtype="float32",
     )
 
-    da.rechunk(daskVarArrayStackDisk_maps[z, 36:72, :, :], (36, 100, 100)).to_zarr(
-        zarr_array, overwrite=True, compute=True
-    )
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        da.rechunk(daskVarArrayStackDisk_maps[z, 36:72, :, :], (36, 100, 100)).to_zarr(
+            zarr_array,
+            overwrite=True,
+            compute=True,
+        )
 
     logger.info(zarr_vars[z])
 
-if save_type == "S3":
-    zarr_store_maps.close()
+close_store(zarr_store_maps)
 
 # %% Upload to S3
 if save_type == "S3":

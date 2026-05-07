@@ -1,8 +1,14 @@
 # %% Script to contain the helper functions as part of the data ingest for Pirate Weather
 # Alexander Rey. July 2025
 
-import logging
+import os
 import re
+import resource
+import shlex
+import shutil
+import subprocess
+import sys
+import tarfile
 import time
 from typing import Iterable, Optional, Union
 
@@ -33,16 +39,15 @@ logging.basicConfig(level=logging.INFO)
 
 # Shared ingest constants
 CHUNK_SIZES = {
-    "NBM": 100,
-    "HRRR": 100,
-    "HRRR_6H": 100,
-    "GFS": 50,
-    "GEFS": 100,
-    "HGEFS": 100,
-    "ECMWF": 100,
-    "NBM_Fire": 100,
-    "RTMA": 100,
-    "DWD": 100,
+    "NBM": 200,
+    "HRRR": 200,
+    "HRRR_6H": 200,
+    "GFS": 100,
+    "GEFS": 200,
+    "ECMWF": 200,
+    "NBM_Fire": 200,
+    "RTMA": 200,
+    "DWD": 200,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -80,6 +85,230 @@ VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
 
 
+def run_command(command: str, encoding: str = "utf-8") -> subprocess.CompletedProcess:
+    """Execute a command string without shell=True, including a single pipe."""
+    command = command.strip()
+    if not command:
+        raise ValueError("Cannot execute an empty command string")
+
+    if "|" not in command:
+        return subprocess.run(
+            shlex.split(command),
+            capture_output=True,
+            encoding=encoding,
+        )
+
+    left, right = command.split("|", maxsplit=1)
+    left_args = shlex.split(left)
+    right_args = shlex.split(right)
+    if not left_args or not right_args:
+        raise ValueError(f"Invalid piped command: {command!r}")
+
+    left_proc = subprocess.Popen(
+        left_args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        result = subprocess.run(
+            right_args,
+            stdin=left_proc.stdout,
+            capture_output=True,
+            encoding=encoding,
+        )
+    finally:
+        if left_proc.stdout is not None:
+            left_proc.stdout.close()
+
+    _, left_stderr = left_proc.communicate()
+    if left_proc.returncode not in (0, None):
+        left_err_text = left_stderr.decode(encoding, errors="replace")
+        combined_stderr = left_err_text
+        if result.stderr:
+            combined_stderr = f"{combined_stderr}\n{result.stderr}"
+        return subprocess.CompletedProcess(
+            args=result.args,
+            returncode=left_proc.returncode,
+            stdout=result.stdout,
+            stderr=combined_stderr,
+        )
+
+    return result
+
+
+def tune_nofile_limit(target: int = 65535) -> None:
+    """Increase soft nofile limit when possible to avoid zarr write exhaustion."""
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if hard == resource.RLIM_INFINITY:
+            new_soft = max(soft, target)
+        else:
+            new_soft = min(max(soft, target), hard)
+        if new_soft > soft:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (new_soft, hard))
+            print(f"Raised nofile soft limit from {soft} to {new_soft}")
+    except (ValueError, OSError) as exc:
+        print(f"Warning: unable to tune nofile limit: {exc}")
+
+
+def positive_int_env(name: str, default: int) -> int:
+    """Read an integer env var and fall back to a safe positive default."""
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(raw)
+    except ValueError:
+        print(f"Warning: invalid {name}={raw!r}; using {default}")
+        return default
+    if value < 1:
+        print(f"Warning: {name}={value} must be >= 1; using {default}")
+        return default
+    return value
+
+
+def configure_zarr_limits(
+    requested_workers: int, requested_async_concurrency: int
+) -> tuple[int, int]:
+    """Clamp zarr write parallelism so local stores do not exhaust open files."""
+    workers = requested_workers
+    async_concurrency = requested_async_concurrency
+    try:
+        soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft != resource.RLIM_INFINITY:
+            # Reserve descriptor headroom for downloads/netcdf/wgrib IO.
+            fd_budget = max(soft - 256, 1)
+            worker_cap = max(1, fd_budget // 256)
+            async_cap = max(1, fd_budget // 512)
+            workers = min(workers, worker_cap)
+            async_concurrency = min(async_concurrency, async_cap)
+    except (ValueError, OSError) as exc:
+        print(f"Warning: unable to read nofile limit for zarr tuning: {exc}")
+
+    async_concurrency = min(async_concurrency, workers)
+    if workers < requested_workers:
+        print(
+            "Clamped zarr_store_workers from "
+            f"{requested_workers} to {workers} based on nofile limits"
+        )
+    if async_concurrency < requested_async_concurrency:
+        print(
+            "Clamped zarr_async_concurrency from "
+            f"{requested_async_concurrency} to {async_concurrency} based on nofile limits"
+        )
+
+    # Local import keeps helper lightweight for non-zarr callers.
+    import zarr
+
+    zarr.config.set({"async.concurrency": async_concurrency})
+    print(
+        f"Configured zarr write parallelism: workers={workers}, "
+        f"async_concurrency={async_concurrency}"
+    )
+    return workers, async_concurrency
+
+
+def make_herbie_save_dir(tmp_dir: str, prefix: str = "herbie") -> str:
+    """Create a per-run Herbie cache directory to avoid path collisions."""
+    save_dir = os.path.join(tmp_dir, f"{prefix}_{int(time.time())}_{os.getpid()}")
+    os.makedirs(save_dir, exist_ok=True)
+    return save_dir
+
+
+def safe_herbie_local_file_path(
+    herbie_obj, search: str, retries: int = 3, retry_sleep_s: float = 0.1
+) -> str:
+    """Resolve a local Herbie path and repair file-vs-dir cache collisions."""
+    attempts = max(1, retries)
+    for attempt in range(attempts):
+        try:
+            return str(Path(herbie_obj.get_localFilePath(search)).expand())
+        except FileExistsError as exc:
+            conflict_path = getattr(exc, "filename", None)
+            if conflict_path and os.path.isfile(conflict_path):
+                print(f"Repairing Herbie cache path collision at: {conflict_path}")
+                os.remove(conflict_path)
+                os.makedirs(conflict_path, exist_ok=True)
+            elif conflict_path and not os.path.exists(conflict_path):
+                os.makedirs(conflict_path, exist_ok=True)
+            else:
+                time.sleep(retry_sleep_s)
+
+            if attempt == attempts - 1:
+                raise
+
+    raise RuntimeError("Unreachable Herbie local path resolution state")
+
+
+def build_herbie_grib_list(file_refs, search: str, retries: int = 3) -> list[str]:
+    """Build a list of local GRIB paths from Herbie file references."""
+    return [
+        safe_herbie_local_file_path(ref, search, retries=retries) for ref in file_refs
+    ]
+
+
+def close_store(store: object) -> None:
+    """Close a zarr-like store if it exposes a close method."""
+    close_fn = getattr(store, "close", None)
+    if callable(close_fn):
+        close_fn()
+
+
+def archive_tmp_zarr_and_upload(
+    *,
+    tmp_zarr_path: str,
+    s3_path: str,
+    archive_member_name: str,
+    s3,
+) -> None:
+    """Tar/gzip a temporary zarr directory, upload to S3, and write done marker."""
+    tmp_tar_path = f"{tmp_zarr_path}.tar.gz"
+    with tarfile.open(tmp_tar_path, "w:gz") as tar:
+        tar.add(tmp_zarr_path, arcname=archive_member_name)
+
+    s3.put_file(tmp_tar_path, s3_path)
+    if os.path.exists(tmp_tar_path):
+        os.remove(tmp_tar_path)
+    shutil.rmtree(tmp_zarr_path, ignore_errors=True)
+    s3.touch(s3_path.replace(".tar.gz", ".done"))
+
+
+def download_extract_historic_archive(
+    *,
+    s3,
+    historic_path: str,
+    final_zarr_name: str,
+    extracted_store_name: str,
+    local_temp_dir: str,
+) -> Optional[str]:
+    """Helper to download and extract a historic archive to a local zarr path."""
+    os.makedirs(local_temp_dir, exist_ok=True)
+    local_zarr_path = os.path.join(local_temp_dir, final_zarr_name)
+    if os.path.exists(local_zarr_path):
+        return local_zarr_path
+
+    tar_name = f"{final_zarr_name}.tar.gz"
+    s3_tar_path = f"{historic_path}/{tar_name}"
+    if not s3.exists(s3_tar_path):
+        return None
+
+    local_tar_path = os.path.join(local_temp_dir, tar_name)
+    timestamp_tag = final_zarr_name.replace(".zarr", "")
+    extract_dir = os.path.join(local_temp_dir, f"extract_{timestamp_tag}")
+
+    s3.get_file(s3_tar_path, local_tar_path)
+    os.makedirs(extract_dir, exist_ok=True)
+    with tarfile.open(local_tar_path, "r:gz") as tar:
+        tar.extractall(path=extract_dir, filter="data")
+
+    extracted_source = os.path.join(extract_dir, extracted_store_name)
+    if os.path.exists(extracted_source):
+        shutil.move(extracted_source, local_zarr_path)
+
+    if os.path.exists(local_tar_path):
+        os.remove(local_tar_path)
+    shutil.rmtree(extract_dir, ignore_errors=True)
+    return local_zarr_path if os.path.exists(local_zarr_path) else None
+
+
 def mask_invalid_data(daskArray, ignoreAxis=None):
     """Masks invalid data in a dask array, ignoring the time dimension."""
     # TODO: Update to mask for each variable according to reasonable values, as opposed to this global mask
@@ -113,8 +342,8 @@ def getGribList(FH_forecastsub, matchStrings):
             str(Path(x.get_localFilePath(matchStrings)).expand())
             for x in FH_forecastsub.file_exists
         ]
-    except Exception:
-        logger.warning("Download Failure 1, wait 20 seconds and retry")
+    except (ValueError, OSError, KeyError, IndexError, RuntimeError):
+        print("Download Failure 1, wait 20 seconds and retry")
         time.sleep(20)
         FH_forecastsub.download(matchStrings, verbose=False)
         try:
@@ -122,8 +351,8 @@ def getGribList(FH_forecastsub, matchStrings):
                 str(Path(x.get_localFilePath(matchStrings)).expand())
                 for x in FH_forecastsub.file_exists
             ]
-        except Exception:
-            logger.warning("Download Failure 2, wait 20 seconds and retry")
+        except (ValueError, OSError, KeyError, IndexError, RuntimeError):
+            print("Download Failure 2, wait 20 seconds and retry")
             time.sleep(20)
             FH_forecastsub.download(matchStrings, verbose=False)
             try:
@@ -131,8 +360,8 @@ def getGribList(FH_forecastsub, matchStrings):
                     str(Path(x.get_localFilePath(matchStrings)).expand())
                     for x in FH_forecastsub.file_exists
                 ]
-            except Exception:
-                logger.warning("Download Failure 3, wait 20 seconds and retry")
+            except (ValueError, OSError, KeyError, IndexError, RuntimeError):
+                print("Download Failure 3, wait 20 seconds and retry")
                 time.sleep(20)
                 FH_forecastsub.download(matchStrings, verbose=False)
                 try:
@@ -140,8 +369,8 @@ def getGribList(FH_forecastsub, matchStrings):
                         str(Path(x.get_localFilePath(matchStrings)).expand())
                         for x in FH_forecastsub.file_exists
                     ]
-                except Exception:
-                    logger.warning("Download Failure 4, wait 20 seconds and retry")
+                except (ValueError, OSError, KeyError, IndexError, RuntimeError):
+                    print("Download Failure 4, wait 20 seconds and retry")
                     time.sleep(20)
                     FH_forecastsub.download(matchStrings, verbose=False)
                     try:
@@ -149,8 +378,8 @@ def getGribList(FH_forecastsub, matchStrings):
                             str(Path(x.get_localFilePath(matchStrings)).expand())
                             for x in FH_forecastsub.file_exists
                         ]
-                    except Exception:
-                        logger.warning("Download Failure 5, wait 20 seconds and retry")
+                    except (ValueError, OSError, KeyError, IndexError, RuntimeError):
+                        print("Download Failure 5, wait 20 seconds and retry")
                         time.sleep(20)
                         FH_forecastsub.download(matchStrings, verbose=False)
                         try:
@@ -158,8 +387,14 @@ def getGribList(FH_forecastsub, matchStrings):
                                 str(Path(x.get_localFilePath(matchStrings)).expand())
                                 for x in FH_forecastsub.file_exists
                             ]
-                        except Exception:
-                            logger.critical("Download Failure 6, Fail")
+                        except (
+                            ValueError,
+                            OSError,
+                            KeyError,
+                            IndexError,
+                            RuntimeError,
+                        ):
+                            print("Download Failure 6, Fail")
                             exit(1)
     return gribList
 
@@ -483,245 +718,103 @@ def interpolate_temporal_gaps_efficiently(
     return ds_chunked.map(_process_variable)
 
 
-def calculate_freezing_level(
-    temperature_levels: xr.DataArray,
-    geopotential_levels: xr.DataArray,
-    pressure_levels: list,
-) -> xr.DataArray:
-    """Calculate freezing level height from temperature and geopotential at pressure levels.
+def check_historic_zarr(
+    zarr_path: str,
+    save_type: str,
+    expected_vars: tuple,
+    aws_access_key_id: str = "",
+    aws_secret_access_key: str = "",
+) -> bool:
+    """
+    Validates a historic Zarr store.
 
-    Finds the altitude where temperature = 273.15 K (0°C) using linear interpolation
-    between pressure levels.
+    Checks that the store exists, can be opened, contains all expected variables,
+    and that data can be read from the last variable.
+    If the store is invalid, it is deleted along with any corresponding .done file.
 
-    Args:
-        temperature_levels: Temperature at pressure levels (K), shape (step/time, level, lat, lon)
-        geopotential_levels: Geopotential at pressure levels (m²/s²), shape (step/time, level, lat, lon)
-        pressure_levels: List of pressure levels in hPa (e.g., [1000, 925, 850, ...])
+    Parameters:
+    - zarr_path (str): Path to the Zarr store.
+    - save_type (str): "S3" or "local" / "Download"
+    - expected_vars (tuple): Tuple of expected variable names.
+    - aws_access_key_id (str): AWS access key for S3.
+    - aws_secret_access_key (str): AWS secret key for S3.
 
     Returns:
-        Freezing level height in meters, shape (step/time, lat, lon)
+    - bool: True if the store is valid, False otherwise.
     """
-    # Convert geopotential to height (divide by gravity)
-    height_levels = geopotential_levels / GRAVITY  # meters
+    import os
+    import shutil
+    import traceback
 
-    # Initialize output with NaN
-    freezing_level = xr.full_like(temperature_levels.isel(level=0, drop=True), np.nan)
+    import zarr
 
-    # Loop through adjacent pressure levels to find freezing level
-    # Process from surface to top of atmosphere
-    for i in range(len(pressure_levels) - 1):
-        # Get temperatures and heights at two adjacent levels
-        t_lower = temperature_levels.isel(level=i)
-        t_upper = temperature_levels.isel(level=i + 1)
-        h_lower = height_levels.isel(level=i)
-        h_upper = height_levels.isel(level=i + 1)
+    s3 = None
+    try:
+        if save_type == "S3":
+            import s3fs
 
-        # Check if freezing level is between these two levels
-        # (temperature crosses KELVIN_TO_CELSIUS)
-        crosses = ((t_lower >= KELVIN_TO_CELSIUS) & (t_upper < KELVIN_TO_CELSIUS)) | (
-            (t_lower < KELVIN_TO_CELSIUS) & (t_upper >= KELVIN_TO_CELSIUS)
-        )
+            s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+            if not s3.exists(zarr_path):
+                return False
 
-        # Linear interpolation where temperature crosses freezing
-        # Only process if there are any crossings to improve performance
-        if crosses.any():
-            # Avoid division by zero
-            temp_diff = t_upper - t_lower
-            # Only interpolate where temp changes significantly
-            valid = np.abs(temp_diff) > FREEZING_LEVEL_TEMP_TOLERANCE
-
-            fraction = xr.where(valid, (KELVIN_TO_CELSIUS - t_lower) / temp_diff, 0)
-            interp_height = h_lower + fraction * (h_upper - h_lower)
-
-            # Update freezing level where it crosses and hasn't been set yet
-            # This ensures we get the first (lowest) crossing
-            freezing_level = xr.where(
-                crosses & np.isnan(freezing_level), interp_height, freezing_level
+            store = zarr.storage.FsspecStore.from_url(
+                zarr_path,
+                storage_options={
+                    "key": aws_access_key_id,
+                    "secret": aws_secret_access_key,
+                },
             )
+        else:
+            if not os.path.exists(zarr_path):
+                return False
 
-    # Handle edge cases where no crossing was found
-    # If all temps are below freezing, set to surface
-    # If all temps are above freezing, set to high altitude
-    all_cold = temperature_levels.min(dim="level") < KELVIN_TO_CELSIUS
-    all_warm = temperature_levels.max(dim="level") >= KELVIN_TO_CELSIUS
+            store = zarr.storage.LocalStore(zarr_path)
 
-    freezing_level = xr.where(
-        np.isnan(freezing_level) & all_cold, FREEZING_LEVEL_SURFACE, freezing_level
-    )
-    freezing_level = xr.where(
-        np.isnan(freezing_level) & all_warm, FREEZING_LEVEL_HIGH, freezing_level
-    )
+        # Open the zarr group.
+        z = zarr.open(store, mode="r")
 
-    return freezing_level
+        # Check if all expected variables exist
+        store_vars = set(z.keys())
+        expected_set = set(expected_vars)
+        if not expected_set.issubset(store_vars):
+            print(
+                f"Missing variables in {zarr_path}. Expected subset {expected_set}, found {store_vars}"
+            )
+            raise ValueError("Missing variables in Zarr store")
 
+        # Check the last variable has data by reading its last value
+        last_var = expected_vars[-1]
+        _ = z[last_var][-1, -1, -1]
 
-def calculate_cloud_cover_from_rh(
-    temperature_levels: xr.DataArray,
-    specific_humidity_levels: xr.DataArray,
-    pressure_levels: list,
-) -> xr.DataArray:
-    """Calculate total cloud cover from relative humidity profiles using simplified Slingo method.
+        return True
 
-    Computes relative humidity at each pressure level, applies an empirical cloud fraction
-    formula, and integrates vertically to estimate total cloud cover.
+    except (
+        ValueError,
+        IndexError,
+        KeyError,
+        zarr.errors.GroupNotFoundError,
+        zarr.errors.NodeNotFoundError,
+        zarr.errors.ArrayNotFoundError,
+    ):
+        print(f"### Historic Data Failure for {zarr_path}!")
+        print(traceback.print_exc())
 
-    Args:
-        temperature_levels: Temperature at pressure levels (K), shape (step/time, level, lat, lon)
-        specific_humidity_levels: Specific humidity at pressure levels (kg/kg), shape (step/time, level, lat, lon)
-        pressure_levels: List of pressure levels in hPa (e.g., [1000, 925, 850, ...])
+        # Delete the invalid store
+        try:
+            if save_type == "S3":
+                if s3 is not None:
+                    if s3.exists(zarr_path):
+                        s3.rm(zarr_path, recursive=True)
+                    done_file = zarr_path.replace(".zarr", ".done")
+                    if s3.exists(done_file):
+                        s3.rm(done_file)
+            else:
+                if os.path.exists(zarr_path):
+                    shutil.rmtree(zarr_path, ignore_errors=True)
+                done_file = zarr_path.replace(".zarr", ".done")
+                if os.path.exists(done_file):
+                    os.remove(done_file)
+        except OSError as e:
+            print(f"Failed to delete corrupt store {zarr_path}: {e}")
 
-    Returns:
-        Total cloud cover (fraction 0-1), shape (step/time, lat, lon)
-    """
-    # Calculate saturation vapor pressure using Bolton's formula
-    # e_s = base_pressure * exp(temp_coeff * (T - KELVIN_TO_CELSIUS) / (T - KELVIN_TO_CELSIUS + temp_offset))
-    T_celsius = temperature_levels - KELVIN_TO_CELSIUS
-    e_sat = BOLTON_CONST["base_pressure"] * np.exp(
-        BOLTON_CONST["temp_coeff"]
-        * T_celsius
-        / (T_celsius + BOLTON_CONST["temp_offset"])
-    )  # hPa
-
-    # Convert specific humidity to mixing ratio
-    # q = w / (1 + w) => w = q / (1 - q)
-    mixing_ratio = specific_humidity_levels / (1 - specific_humidity_levels)
-
-    # Calculate actual vapor pressure
-    # e = (w * P) / (WATER_VAPOR_GAS_CONSTANT_RATIO + w) where P is pressure in hPa
-    pressure_array = xr.DataArray(
-        pressure_levels, dims="level", coords={"level": temperature_levels.level}
-    )
-
-    e_actual = (mixing_ratio * pressure_array) / (
-        WATER_VAPOR_GAS_CONSTANT_RATIO + mixing_ratio
-    )
-
-    # Calculate relative humidity (0-1)
-    rh = e_actual / e_sat
-    rh = xr.where(rh > 1, 1, rh)  # Cap at 100%
-    rh = xr.where(rh < 0, 0, rh)  # Floor at 0%
-
-    # Apply simplified cloud fraction formula based on RH
-    # Cloud fraction increases sigmoidally as RH approaches 100%
-    # Using a simplified version of Xu-Randall (1996)
-    # C = max(0, (RH - RH_crit) / (1 - RH_crit))^CLOUD_RH_EXPONENT
-    cloud_fraction = xr.where(
-        rh > CLOUD_RH_CRITICAL,
-        ((rh - CLOUD_RH_CRITICAL) / (1 - CLOUD_RH_CRITICAL)) ** CLOUD_RH_EXPONENT,
-        0.0,
-    )
-
-    # Vertical integration using random overlap assumption
-    # Total cloud cover = 1 - product(1 - cloud_fraction_i)
-    # This prevents unrealistic 100% cloud cover from multiple layers
-    cloud_free = 1 - cloud_fraction
-    total_cloud_free = cloud_free.prod(dim="level")
-    total_cloud_cover = 1 - total_cloud_free
-
-    # Ensure result is between 0 and 1
-    total_cloud_cover = xr.where(total_cloud_cover < 0, 0, total_cloud_cover)
-    total_cloud_cover = xr.where(total_cloud_cover > 1, 1, total_cloud_cover)
-
-    return total_cloud_cover
-
-
-def derive_precip_type(
-    apcp: xr.DataArray,
-    temp_surface: Optional[xr.DataArray] = None,
-    temp_levels: Optional[xr.DataArray] = None,
-    geopotential_levels: Optional[xr.DataArray] = None,
-    pressure_levels: Optional[list] = None,
-    apcp_threshold: float = 0.0001,
-    rain_thresh_c: float = 5.0,
-    snow_thresh_c: float = -10.0,
-    warm_layer_min_m: float = 200.0,
-    near_surface_freeze_m: float = 100.0,
-) -> xr.DataArray:
-    """Derive categorical precip type from precipitation and temperature.
-
-    Returns integer codes: 1=snow, 2=freezing rain, 3=sleet, 4=rain, 0=no/insignificant precip.
-
-    The rules are conservative and tunable via the threshold parameters. Inputs
-    expect temperatures in Kelvin (consistent with other helpers).
-    """
-
-    # Default output: 0 (no precip)
-    out = xr.full_like(apcp, 0).astype("int8")
-
-    # Mask where precipitation is meaningful
-    has_precip = apcp > apcp_threshold
-
-    # Determine surface temperature (use lowest pressure level as proxy if needed)
-    if temp_surface is None and temp_levels is not None:
-        temp_surface = temp_levels.isel(level=0)
-
-    if temp_surface is None:
-        # No temperature info: mark precip as rain conservatively
-        return xr.where(has_precip, 4, out)
-
-    temp_surf_c = temp_surface - KELVIN_TO_CELSIUS
-
-    # Strong-warm/strong-cold shortcuts
-    out = xr.where((temp_surf_c >= rain_thresh_c) & has_precip, 4, out)
-    out = xr.where((temp_surf_c <= snow_thresh_c) & has_precip, 1, out)
-
-    # Remaining points to classify
-    mid_mask = has_precip & (out == 0)
-
-    if temp_levels is None:
-        # Without vertical profile: decide by sign of surface temp
-        out = xr.where(mid_mask & (temp_surf_c > 0), 4, out)
-        out = xr.where(mid_mask & (temp_surf_c <= 0), 1, out)
-        return out
-
-    # Convert levels to Celsius
-    temp_levels_c = temp_levels - KELVIN_TO_CELSIUS
-
-    # Compute heights if geopotential available. If `pressure_levels` is
-    # supplied, attach as a coordinate for clarity (non-fatal on mismatch).
-    if geopotential_levels is not None:
-        height_levels = geopotential_levels / GRAVITY
-        if pressure_levels is not None:
-            try:
-                height_levels = height_levels.assign_coords(
-                    level=("level", pressure_levels)
-                )
-            except Exception:
-                # ignore if coords already set or lengths mismatch
-                pass
-    else:
-        height_levels = None
-
-    # Warm layer detection: any level above 0C
-    warm_present = (temp_levels_c > 0).any(dim="level")
-
-    # Approximate warm-layer thickness and base/top heights when heights are available
-    warm_thickness = None
-    warm_base = None
-    if height_levels is not None:
-        warm_heights = height_levels.where(temp_levels_c > 0)
-        # max - min across level, result will be NaN where no warm levels
-        warm_top = warm_heights.max(dim="level")
-        warm_base = warm_heights.min(dim="level")
-        warm_thickness = warm_top - warm_base
-
-    # Freezing rain: warm layer aloft (sufficient thickness + base above near-surface) + surface <= 0
-    fr_mask = mid_mask & warm_present & (temp_surf_c <= 0)
-    if warm_thickness is not None:
-        fr_mask = fr_mask & (warm_thickness >= warm_layer_min_m)
-    if warm_base is not None:
-        fr_mask = fr_mask & (warm_base >= near_surface_freeze_m)
-    out = xr.where(fr_mask, 2, out)
-
-    # Sleet: warm layer aloft with surface > 0 and sufficient warm-layer thickness
-    sleet_mask = mid_mask & warm_present & (temp_surf_c > 0)
-    if warm_thickness is not None:
-        sleet_mask = sleet_mask & (warm_thickness >= warm_layer_min_m)
-    out = xr.where(sleet_mask, 3, out)
-
-    # Any remaining mid_mask: snow if surface <=0 else rain
-    remaining = mid_mask & (out == 0)
-    out = xr.where(remaining & (temp_surf_c <= 0), 1, out)
-    out = xr.where(remaining & (temp_surf_c > 0), 4, out)
-
-    return out
+        return False

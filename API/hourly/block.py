@@ -552,18 +552,10 @@ def _calculate_derived_metrics(
         rain_mask, DATA_HOURLY["intensity"]
     ]
 
-    snow_intensity_indices = np.where(
-        InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["snow"]
-    )[0]
-    if snow_intensity_indices.size > 0:
-        snow_intensity_si = estimate_snow_height(
-            InterPhour[snow_intensity_indices, DATA_HOURLY["intensity"]],
-            InterPhour[snow_intensity_indices, DATA_HOURLY["temp"]],
-            InterPhour[snow_intensity_indices, DATA_HOURLY["wind"]],
-        )
-        InterPhour[snow_intensity_indices, DATA_HOURLY["snow_intensity"]] = (
-            snow_intensity_si
-        )
+    snow_mask = InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["snow"]
+    InterPhour[snow_mask, DATA_HOURLY["snow_intensity"]] = (
+        InterPhour[snow_mask, DATA_HOURLY["intensity"]] * 10
+    )
 
     sleet_mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["ice"]) | (
         InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["sleet"]
