@@ -339,9 +339,9 @@ for dask_var in zarr_vars:
 daskOutput = dict()
 
 # Find the probability of precipitation greater than 0.1 mm/h  across all members
-daskOutput["Precipitation_Prob"] = (
-    ((daskArrays["APCP_surface"]) > 0.1).sum(axis=0) / AIGEFS_MEMBER_COUNT
-)
+daskOutput["Precipitation_Prob"] = ((daskArrays["APCP_surface"]) > 0.1).sum(
+    axis=0
+) / AIGEFS_MEMBER_COUNT
 
 # Find the standard deviation of precipitation accumulation across all members
 daskOutput["APCP_StdDev"] = daskArrays["APCP_surface"].std(axis=0)
