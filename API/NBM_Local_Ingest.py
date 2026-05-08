@@ -3,6 +3,7 @@
 
 # %% Import modules
 import fcntl
+import logging
 import os
 import pickle
 import shutil
@@ -43,6 +44,10 @@ from API.ingest_utils import (
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
+
+# Logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 def _timing_log(message: str) -> None:
@@ -203,7 +208,7 @@ if save_type == "S3":
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to NBM, ending")
+            logger.info("No Update to NBM, ending")
             sys.exit()
 
 else:
@@ -217,7 +222,7 @@ else:
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to NBM, ending")
+            logger.info("No Update to NBM, ending")
             sys.exit()
 
 # base_time = pd.Timestamp("2024-03-05 16:00")
@@ -326,7 +331,7 @@ _timing_log(
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(nbm_range):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range))
         + " files, but got "
@@ -367,7 +372,7 @@ stage_start = time.perf_counter()
 substage_start = time.perf_counter()
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
 _timing_log(
     f"NBM_FORECAST stage=main_merge_grib elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -387,7 +392,7 @@ cmd2 = (
 )
 spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
-    print(spOUT2.stderr)
+    logger.error(spOUT2.stderr)
     sys.exit()
 _timing_log(
     f"NBM_FORECAST stage=main_reorder_grib elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -409,7 +414,7 @@ cmd4 = (
 substage_start = time.perf_counter()
 spOUT4 = run_command(cmd4)
 if spOUT4.returncode != 0:
-    print(spOUT4.stderr)
+    logger.error(spOUT4.stderr)
     sys.exit()
 os.remove(forecast_process_path + "_wgrib2_merged_order.grib")
 _timing_log(
@@ -465,7 +470,7 @@ _timing_log(
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(nbm_range1):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range1))
         + " files, but got "
@@ -504,7 +509,7 @@ _timing_log(
 
 # Check for download length
 if len(FH_forecastsub2.file_exists) != len(nbm_range2):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range2))
         + " files, but got "
@@ -546,7 +551,7 @@ stage_start = time.perf_counter()
 substage_start = time.perf_counter()
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
 _timing_log(
     f"NBM_FORECAST stage=pprob_merge_grib elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -567,7 +572,7 @@ cmd2 = (
 )
 spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
-    print(spOUT2.stderr)
+    logger.error(spOUT2.stderr)
     sys.exit()
 _timing_log(
     f"NBM_FORECAST stage=pprob_reorder_grib elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -589,7 +594,7 @@ cmd4 = (
 substage_start = time.perf_counter()
 spOUT4 = run_command(cmd4)
 if spOUT4.returncode != 0:
-    print(spOUT4.stderr)
+    logger.error(spOUT4.stderr)
     sys.exit()
 os.remove(forecast_process_path + "_prob_wgrib2_merged_order.grib")
 _timing_log(
@@ -624,7 +629,7 @@ _timing_log(
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(nbm_range1):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range1))
         + " files, but got "
@@ -662,7 +667,7 @@ _timing_log(
 
 # Check for download length
 if len(FH_forecastsub2.file_exists) != len(nbm_range2):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range2))
         + " files, but got "
@@ -704,7 +709,7 @@ stage_start = time.perf_counter()
 substage_start = time.perf_counter()
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
 _timing_log(
     f"NBM_FORECAST stage=paccum_merge_grib elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -724,7 +729,7 @@ cmd2 = (
 )
 spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
-    print(spOUT2.stderr)
+    logger.error(spOUT2.stderr)
     sys.exit()
 _timing_log(
     f"NBM_FORECAST stage=paccum_reorder_grib elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -746,7 +751,7 @@ cmd4 = (
 substage_start = time.perf_counter()
 spOUT4 = run_command(cmd4)
 if spOUT4.returncode != 0:
-    print(spOUT4.stderr)
+    logger.error(spOUT4.stderr)
     sys.exit()
 os.remove(forecast_process_path + "_accum_wgrib2_merged_order.grib")
 _timing_log(
@@ -851,9 +856,9 @@ with dask.config.set(**{"array.slicing.split_large_chunks": True}):
         # Check length for errors
 
         if len(daskArray) != len(nbm_range):
-            print(len(daskArray))
-            print(len(nbm_range))
-            print(dask_var)
+            logger.error("daskArray length: %d", len(daskArray))
+            logger.error("nbm_range length: %d", len(nbm_range))
+            logger.error("dask_var: %s", dask_var)
             assert len(daskArray) == len(nbm_range), (
                 "Incorrect number of timesteps! Exiting"
             )
@@ -909,7 +914,7 @@ _timing_log(
 )
 
 T1 = time.time()
-print(T0 - T1)
+logger.info(T0 - T1)
 
 ################################################################################################
 # %% Historic data
@@ -954,7 +959,7 @@ for i in range(his_period, -1, -1):
     # Only want forecast at hour 1- SLightly less accurate than initializing at hour 0 but much avoids precipitation accumulation issues
     fxx = range(1, 2)
 
-    print(DATES)
+    logger.info(DATES)
 
     # Create FastHerbie Object.
     FH_histsub = FastHerbie(
@@ -1014,7 +1019,7 @@ for i in range(his_period, -1, -1):
     )
     spOUT1 = run_command(cmd1)
     if spOUT1.returncode != 0:
-        print(spOUT1.stderr)
+        logger.error(spOUT1.stderr)
         sys.exit()
 
     # Convert to NetCDF
@@ -1029,7 +1034,7 @@ for i in range(his_period, -1, -1):
     )
     spOUT3 = run_command(cmd3)
     if spOUT3.returncode != 0:
-        print(spOUT3.stderr)
+        logger.error(spOUT3.stderr)
         sys.exit()
     _timing_log(
         f"NBM_HIST {hist_target} stage=wgrib_to_netcdf elapsed={time.perf_counter() - stage_start:.2f}s"
@@ -1116,7 +1121,7 @@ if hist_processed_count:
 # %% Merge the historic and forecast datasets and then squash using dask
 #####################################################################################################
 
-print("Merge and interpolate arrays.")
+logger.info("Merge and interpolate arrays.")
 # Get the s3 paths to the historic data
 if save_type == "S3":
     local_temp_dir = forecast_process_path + "_s3_temp_downloads"
@@ -1195,7 +1200,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
 
     daskVarArrays = []
 
-    print(dask_var)
+    logger.info(dask_var)
 
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
@@ -1215,7 +1220,7 @@ _timing_log(
     f"NBM_FORECAST stage=stack_to_zarr elapsed={time.perf_counter() - stage_start:.2f}s"
 )
 
-print("Stacked 4D array saved to disk.")
+logger.info("Stacked 4D array saved to disk.")
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
@@ -1271,7 +1276,7 @@ with ProgressBar():
         f"NBM_FORECAST stage=interpolate_and_write elapsed={time.perf_counter() - stage_start:.2f}s"
     )
 
-print("Interpolate complete")
+logger.info("Interpolate complete")
 
 _close_store(zarr_store)
 
@@ -1324,14 +1329,14 @@ for z in [0, 2, 6, 7, 8, 13, 14, 15, 16, 17]:
         zarr_array, overwrite=True, compute=True
     )
 
-    print(zarr_vars[z])
+    logger.info(zarr_vars[z])
 
 _close_store(zarr_store_maps)
 _timing_log(
     f"NBM_FORECAST stage=maps_write elapsed={time.perf_counter() - stage_start:.2f}s"
 )
 
-print("Map complete")
+logger.info("Map complete")
 
 # %% Upload to S3
 stage_start = time.perf_counter()
@@ -1387,4 +1392,4 @@ shutil.rmtree(forecast_process_dir)
 
 # Test Read
 T1 = time.time()
-print(T1 - T0)
+logger.info(T1 - T0)
