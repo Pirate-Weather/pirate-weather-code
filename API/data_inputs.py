@@ -44,9 +44,30 @@ _PRIORITY_ORDER_NA_WITH_ECMWF = ["nbm", "hrrr", "ecmwf", "gfs", "dwd_mosmix", "e
 _PRIORITY_ORDER_NA_NO_ECMWF = ["nbm", "hrrr", "gfs", "dwd_mosmix", "era5"]
 _PRIORITY_ORDER_ROW_WITH_ECMWF = ["nbm", "hrrr", "dwd_mosmix", "ecmwf", "gfs", "era5"]
 _PRIORITY_ORDER_ROW_NO_ECMWF = ["nbm", "hrrr", "dwd_mosmix", "gfs", "era5"]
+_PRIORITY_ORDER_AI_NA_WITH_ECMWF = [
+    "gefs",
+    "gfs",
+    "ecmwf",
+    "nbm",
+    "hrrr",
+    "dwd_mosmix",
+    "era5",
+]
+_PRIORITY_ORDER_AI_NA_NO_ECMWF = ["gefs", "gfs", "nbm", "hrrr", "dwd_mosmix", "era5"]
+_PRIORITY_ORDER_AI_ROW_WITH_ECMWF = [
+    "ecmwf",
+    "dwd_mosmix",
+    "gfs",
+    "nbm",
+    "hrrr",
+    "era5",
+]
+_PRIORITY_ORDER_AI_ROW_NO_ECMWF = ["gfs", "dwd_mosmix", "nbm", "hrrr", "era5"]
 
 
-def _stack_with_priority(num_hours, lat, lon, has_ecmwf, source_data):
+def _stack_with_priority(
+    num_hours, lat, lon, has_ecmwf, source_data, *, prioritize_ai_models=False
+):
     """
     Stack fields with priority based on location.
 
@@ -63,7 +84,19 @@ def _stack_with_priority(num_hours, lat, lon, has_ecmwf, source_data):
     gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
 
     # Select pre-defined order based on priority rules
-    if gfs_before_dwd:
+    if prioritize_ai_models and gfs_before_dwd:
+        order = (
+            _PRIORITY_ORDER_AI_NA_WITH_ECMWF
+            if has_ecmwf
+            else _PRIORITY_ORDER_AI_NA_NO_ECMWF
+        )
+    elif prioritize_ai_models and not gfs_before_dwd:
+        order = (
+            _PRIORITY_ORDER_AI_ROW_WITH_ECMWF
+            if has_ecmwf
+            else _PRIORITY_ORDER_AI_ROW_NO_ECMWF
+        )
+    elif gfs_before_dwd:
         # North America: ... > ECMWF > GFS > DWD > ERA5
         order = (
             _PRIORITY_ORDER_NA_WITH_ECMWF if has_ecmwf else _PRIORITY_ORDER_NA_NO_ECMWF
@@ -100,6 +133,7 @@ def prepare_data_inputs(
     num_hours,
     lat,
     lon,
+    prioritize_ai_models=False,
 ):
     """
     Prepare data inputs for the hourly block.
@@ -169,33 +203,46 @@ def prepare_data_inputs(
 
     # --- prcipIntensity_inputs ---
     prcip_intensity_inputs = {}
-    if "nbm" in source_list and nbm_merged is not None:
-        prcip_intensity_inputs["nbm"] = nbm_merged[:, NBM["intensity"]]
-
-    if (
-        ("hrrr_0-18" in source_list)
-        and ("hrrr_18-48" in source_list)
-        and (hrrr_merged is not None)
-    ):
-        prcip_intensity_inputs["hrrr"] = hrrr_merged[:, HRRR["intensity"]] * 3600
-
-    if "ecmwf_ifs" in source_list and ecmwf_merged is not None:
-        # Use the ensemble mean (APCP_Mean) for intensity rather than the
-        # deterministic IFS tprate. The deterministic tprate can be zero or
-        # near-zero even when the ensemble shows significant precipitation,
-        # causing snow accumulation (derived from accum_mean) to appear
-        # without a matching precipIntensity. Using accum_mean * 1000 here
-        # keeps intensity consistent with the accum field (also accum_mean * 1000).
-        prcip_intensity_inputs["ecmwf"] = ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
+    if prioritize_ai_models:
+        if "ecmwf_ifs" in source_list and ecmwf_merged is not None:
+            prcip_intensity_inputs["ecmwf"] = ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
+        if "gefs" in source_list and gefs_merged is not None:
+            prcip_intensity_inputs["gfs_gefs"] = gefs_merged[:, GEFS["accum"]]
+        elif "gfs" in source_list and gfs_merged is not None:
+            prcip_intensity_inputs["gfs_gefs"] = gfs_merged[:, GFS["intensity"]] * 3600
+        if "nbm" in source_list and nbm_merged is not None:
+            prcip_intensity_inputs["nbm"] = nbm_merged[:, NBM["intensity"]]
+        if (
+            ("hrrr_0-18" in source_list)
+            and ("hrrr_18-48" in source_list)
+            and (hrrr_merged is not None)
+        ):
+            prcip_intensity_inputs["hrrr"] = hrrr_merged[:, HRRR["intensity"]] * 3600
+    else:
+        if "nbm" in source_list and nbm_merged is not None:
+            prcip_intensity_inputs["nbm"] = nbm_merged[:, NBM["intensity"]]
+        if (
+            ("hrrr_0-18" in source_list)
+            and ("hrrr_18-48" in source_list)
+            and (hrrr_merged is not None)
+        ):
+            prcip_intensity_inputs["hrrr"] = hrrr_merged[:, HRRR["intensity"]] * 3600
+        if "ecmwf_ifs" in source_list and ecmwf_merged is not None:
+            # Use the ensemble mean (APCP_Mean) for intensity rather than the
+            # deterministic IFS tprate. The deterministic tprate can be zero or
+            # near-zero even when the ensemble shows significant precipitation,
+            # causing snow accumulation (derived from accum_mean) to appear
+            # without a matching precipIntensity. Using accum_mean * 1000 here
+            # keeps intensity consistent with the accum field (also accum_mean * 1000).
+            prcip_intensity_inputs["ecmwf"] = ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
+        if "gefs" in source_list and gefs_merged is not None:
+            prcip_intensity_inputs["gfs_gefs"] = gefs_merged[:, GEFS["accum"]]
+        elif "gfs" in source_list and gfs_merged is not None:
+            prcip_intensity_inputs["gfs_gefs"] = gfs_merged[:, GFS["intensity"]] * 3600
 
     # DWD MOSMIX: RR1c is in kg/m^2 = mm (hourly total)
     if "dwd_mosmix" in source_list and dwd_valid:
         prcip_intensity_inputs["dwd_mosmix"] = dwd_mosmix_merged[:, DWD_MOSMIX["accum"]]
-
-    if "gefs" in source_list and gefs_merged is not None:
-        prcip_intensity_inputs["gfs_gefs"] = gefs_merged[:, GEFS["accum"]]
-    elif "gfs" in source_list and gfs_merged is not None:
-        prcip_intensity_inputs["gfs_gefs"] = gfs_merged[:, GFS["intensity"]] * 3600
 
     era5_rain_intensity = None
     era5_snow_water_equivalent = None
@@ -218,12 +265,20 @@ def prepare_data_inputs(
 
     # --- prcipProbability_inputs ---
     prcip_probability_inputs = {}
-    if "nbm" in source_list and nbm_merged is not None:
-        prcip_probability_inputs["nbm"] = nbm_merged[:, NBM["prob"]] * 0.01
-    if "ecmwf_ifs" in source_list and ecmwf_merged is not None:
-        prcip_probability_inputs["ecmwf"] = ecmwf_merged[:, ECMWF["prob"]]
-    if "gefs" in source_list and gefs_merged is not None:
-        prcip_probability_inputs["gefs"] = gefs_merged[:, GEFS["prob"]]
+    if prioritize_ai_models:
+        if "gefs" in source_list and gefs_merged is not None:
+            prcip_probability_inputs["gefs"] = gefs_merged[:, GEFS["prob"]]
+        if "ecmwf_ifs" in source_list and ecmwf_merged is not None:
+            prcip_probability_inputs["ecmwf"] = ecmwf_merged[:, ECMWF["prob"]]
+        if "nbm" in source_list and nbm_merged is not None:
+            prcip_probability_inputs["nbm"] = nbm_merged[:, NBM["prob"]] * 0.01
+    else:
+        if "nbm" in source_list and nbm_merged is not None:
+            prcip_probability_inputs["nbm"] = nbm_merged[:, NBM["prob"]] * 0.01
+        if "ecmwf_ifs" in source_list and ecmwf_merged is not None:
+            prcip_probability_inputs["ecmwf"] = ecmwf_merged[:, ECMWF["prob"]]
+        if "gefs" in source_list and gefs_merged is not None:
+            prcip_probability_inputs["gefs"] = gefs_merged[:, GEFS["prob"]]
 
     # --- temperature_inputs ---
     temperature_inputs = _stack_with_priority(
@@ -243,6 +298,7 @@ def prepare_data_inputs(
             "gfs": gfs_merged[:, GFS["temp"]] if gfs_merged is not None else None,
             "era5": era5_merged[:, ERA5["2m_temperature"]] if era5_valid else None,
         },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- dew_inputs ---
@@ -265,6 +321,7 @@ def prepare_data_inputs(
             if era5_valid
             else None,
         },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- humidity_inputs ---
@@ -297,6 +354,7 @@ def prepare_data_inputs(
             "gfs": gfs_merged[:, GFS["humidity"]] if gfs_merged is not None else None,
             "era5": era5_humidity,
         },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- pressure_inputs ---
@@ -320,6 +378,7 @@ def prepare_data_inputs(
             if era5_valid
             else None,
         },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- wind inputs ---
@@ -358,6 +417,7 @@ def prepare_data_inputs(
             if era5_valid
             else None,
         },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- gust_inputs ---
@@ -377,6 +437,7 @@ def prepare_data_inputs(
             if era5_valid
             else None,
         },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- bearing_inputs ---
@@ -413,6 +474,7 @@ def prepare_data_inputs(
             if era5_valid
             else None,
         },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- cloud_inputs ---
@@ -439,6 +501,7 @@ def prepare_data_inputs(
             else None,
             "era5": era5_merged[:, ERA5["total_cloud_cover"]] if era5_valid else None,
         },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- uv_inputs ---
@@ -474,6 +537,7 @@ def prepare_data_inputs(
             if era5_valid
             else None,
         },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- ozone_inputs ---
@@ -510,6 +574,7 @@ def prepare_data_inputs(
             if era5_valid
             else None,
         },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- nearstorm_inputs ---
@@ -565,6 +630,7 @@ def prepare_data_inputs(
             if era5_valid
             else None,
         },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- cape_inputs ---

@@ -7,6 +7,7 @@ from timezonefinder import TimezoneFinder
 
 from API.request.preprocess import (
     InitialRequestContext,
+    _parse_parameters,
     parse_request_time,
     prepare_initial_request,
 )
@@ -114,3 +115,21 @@ async def test_prepare_initial_request_structure():
         result.lang == "en" if hasattr(result, "lang") else True
     )  # lang might not be in context directly but used for translation
     assert result.translation == translations["en"]
+
+
+def test_parse_parameters_ai_models_include_and_exclude_priority():
+    now_time = datetime.datetime(2026, 1, 1, 12, 0, 0)
+    result = _parse_parameters(
+        exclude="aigefs",
+        include="aimodels",
+        extraVars=None,
+        now_time=now_time,
+        utc_time=now_time,
+        time_machine=False,
+        tm_extra=False,
+    )
+
+    assert result[16] == 1  # ex_aigefs
+    assert result[17] == 0  # ex_aigfs
+    assert result[18] == 0  # ex_aifs
+    assert result[21] == 1  # inc_aimodels

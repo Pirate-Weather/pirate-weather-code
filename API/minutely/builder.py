@@ -303,6 +303,9 @@ def _calculate_prob(
     nbmMinuteInterpolation,
     ecmwfMinuteInterpolation,
     gefsMinuteInterpolation,
+    lat,
+    lon,
+    prioritize_ai_models=False,
 ):
     """
     Calculate precipitation probability.
@@ -318,6 +321,24 @@ def _calculate_prob(
         Array of precipitation probabilities.
     """
     InterPminute_prob = np.full(len(minute_array_grib), MISSING_DATA)
+
+    if prioritize_ai_models:
+        if should_gfs_precede_dwd(lat, lon):
+            if "gefs" in source_list and gefsMinuteInterpolation is not None:
+                InterPminute_prob = gefsMinuteInterpolation[:, GEFS["prob"]]
+            elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
+                InterPminute_prob = ecmwfMinuteInterpolation[:, ECMWF["prob"]]
+            elif "nbm" in source_list and nbmMinuteInterpolation is not None:
+                InterPminute_prob = nbmMinuteInterpolation[:, NBM["prob"]] * 0.01
+        else:
+            if "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
+                InterPminute_prob = ecmwfMinuteInterpolation[:, ECMWF["prob"]]
+            elif "nbm" in source_list and nbmMinuteInterpolation is not None:
+                InterPminute_prob = nbmMinuteInterpolation[:, NBM["prob"]] * 0.01
+            elif "gefs" in source_list and gefsMinuteInterpolation is not None:
+                InterPminute_prob = gefsMinuteInterpolation[:, GEFS["prob"]]
+        InterPminute_prob[InterPminute_prob < 0.05] = 0
+        return InterPminute_prob
 
     if "nbm" in source_list and nbmMinuteInterpolation is not None:
         InterPminute_prob = nbmMinuteInterpolation[:, NBM["prob"]] * 0.01
@@ -362,6 +383,24 @@ def _process_gefs_ptype(gefsMinuteInterpolation, InterTminute):
         InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
 
 
+def _process_aigefs_ptype_with_temperature(
+    gefsMinuteInterpolation, gfsMinuteInterpolation, InterTminute
+):
+    """Fallback precipitation type for AIGEFS using GFS/AIGFS temperatures."""
+    if gfsMinuteInterpolation is None:
+        return
+    temp = gfsMinuteInterpolation[:, GFS["temp"]]
+    precip_mask = np.nan_to_num(gefsMinuteInterpolation[:, GEFS["accum"]], nan=0.0) > 0
+    precip_mask |= np.nan_to_num(gefsMinuteInterpolation[:, GEFS["prob"]], nan=0.0) > 0
+    InterTminute[:, 1] = (precip_mask & (temp <= TEMP_THRESHOLD_SNOW_C)).astype(int)
+    InterTminute[:, 4] = (precip_mask & (temp >= TEMP_THRESHOLD_RAIN_C)).astype(int)
+    InterTminute[:, 3] = (
+        precip_mask
+        & (temp > TEMP_THRESHOLD_SNOW_C)
+        & (temp < TEMP_THRESHOLD_RAIN_C)
+    ).astype(int)
+
+
 def _process_era5_ptype(era5_MinuteInterpolation, InterTminute):
     """Process ERA5 precipitation type data."""
     ptype_era5 = era5_MinuteInterpolation[:, ERA5["precipitation_type"]]
@@ -382,6 +421,7 @@ def _calculate_precip_type_probs(
     era5_MinuteInterpolation,
     lat,
     lon,
+    prioritize_ai_models=False,
 ):
     """
     Calculate precipitation type probabilities.
@@ -425,6 +465,37 @@ def _calculate_precip_type_probs(
     # In North America: ECMWF > GFS > DWD MOSMIX > GEFS > ERA5
     # Rest of world: DWD MOSMIX > ECMWF > GFS > GEFS > ERA5
     gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
+
+    if prioritize_ai_models:
+        if gfs_before_dwd:
+            if "gefs" in source_list and gefsMinuteInterpolation is not None:
+                has_ptype = not np.all(
+                    np.isnan(
+                        gefsMinuteInterpolation[
+                            :,
+                            [
+                                GEFS["snow"],
+                                GEFS["ice"],
+                                GEFS["freezing_rain"],
+                                GEFS["rain"],
+                            ],
+                        ]
+                    )
+                )
+                if has_ptype:
+                    _process_gefs_ptype(gefsMinuteInterpolation, InterTminute)
+                else:
+                    _process_aigefs_ptype_with_temperature(
+                        gefsMinuteInterpolation, gfsMinuteInterpolation, InterTminute
+                    )
+                return InterTminute
+            if "gfs" in source_list and gfsMinuteInterpolation is not None:
+                _process_gfs_ptype(gfsMinuteInterpolation, InterTminute)
+                return InterTminute
+        else:
+            if "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
+                _process_ecmwf_ptype(ecmwfMinuteInterpolation, InterTminute)
+                return InterTminute
 
     # Try each source in priority order
     if gfs_before_dwd:
@@ -475,6 +546,9 @@ def _calculate_intensity(
     gefsMinuteInterpolation,
     gfsMinuteInterpolation,
     era5_MinuteInterpolation,
+    lat,
+    lon,
+    prioritize_ai_models=False,
 ):
     """
     Calculate precipitation intensity.
@@ -495,6 +569,19 @@ def _calculate_intensity(
     """
     intensity = np.full(len(precipTypes), MISSING_DATA)
     refc_used = False
+
+    if prioritize_ai_models:
+        if should_gfs_precede_dwd(lat, lon):
+            if "gefs" in source_list and gefsMinuteInterpolation is not None:
+                intensity = gefsMinuteInterpolation[:, GEFS["accum"]]
+                return intensity, precipTypes, refc_used
+            if "gfs" in source_list and gfsMinuteInterpolation is not None:
+                intensity = dbz_to_rate(gfsMinuteInterpolation[:, GFS["refc"]], precipTypes)
+                refc_used = True
+                return intensity, precipTypes, refc_used
+        elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
+            intensity = ecmwfMinuteInterpolation[:, ECMWF["intensity"]] * 3600
+            return intensity, precipTypes, refc_used
 
     if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
         temp_arr = hrrrSubHInterpolation[:, HRRR_SUBH["temp"]]
@@ -710,6 +797,7 @@ def build_minutely_block(
     version: float,
     lat: float,
     lon: float,
+    prioritize_ai_models: bool = False,
 ) -> Tuple[
     np.ndarray,
     np.ndarray,
@@ -802,6 +890,9 @@ def build_minutely_block(
         nbmMinuteInterpolation,
         ecmwfMinuteInterpolation,
         gefsMinuteInterpolation,
+        lat,
+        lon,
+        prioritize_ai_models,
     )
 
     # Calculate Precip Type Probs
@@ -816,6 +907,7 @@ def build_minutely_block(
         era5_MinuteInterpolation,
         lat,
         lon,
+        prioritize_ai_models,
     )
 
     maxPchance = (
@@ -868,6 +960,9 @@ def build_minutely_block(
         gefsMinuteInterpolation,
         gfsMinuteInterpolation,
         era5_MinuteInterpolation,
+        lat,
+        lon,
+        prioritize_ai_models,
     )
     InterPminute[:, DATA_MINUTELY["intensity"]] = intensity
 

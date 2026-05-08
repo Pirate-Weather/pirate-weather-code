@@ -295,3 +295,36 @@ def test_priority_with_all_models_europe():
     )
     # Third column should be GFS (10.0)
     assert np.isclose(temp_inputs[0, 2], 10.0, atol=0.1), "Third priority should be GFS"
+
+
+def test_ai_models_prioritized_over_nbm_when_requested():
+    """When AI-model mode is enabled, NA should prioritize GFS/AIGFS above NBM."""
+    num_hours = 3
+    from API.constants.model_const import GFS, NBM
+
+    nbm_merged = np.full((num_hours, max(NBM.values()) + 1), np.nan)
+    nbm_merged[:, 0] = np.arange(num_hours) * 3600
+    nbm_merged[:, NBM["temp"]] = 20.0
+
+    gfs_merged = np.full((num_hours, max(GFS.values()) + 1), np.nan)
+    gfs_merged[:, 0] = np.arange(num_hours) * 3600
+    gfs_merged[:, GFS["temp"]] = 5.0
+
+    inputs = prepare_data_inputs(
+        source_list=["nbm", "gfs"],
+        nbm_merged=nbm_merged,
+        nbm_fire_merged=None,
+        hrrr_merged=None,
+        dwd_mosmix_merged=None,
+        ecmwf_merged=None,
+        gefs_merged=None,
+        gfs_merged=gfs_merged,
+        era5_merged=None,
+        extra_vars=[],
+        num_hours=num_hours,
+        lat=40.7128,
+        lon=-74.0060,
+        prioritize_ai_models=True,
+    )
+
+    assert np.isclose(inputs["temperature_inputs"][0, 0], 5.0, atol=0.1)
