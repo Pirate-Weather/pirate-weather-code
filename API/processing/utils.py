@@ -8,11 +8,11 @@ from typing import Optional, Tuple
 import numpy as np
 from pytz import timezone, utc
 from starlette.middleware.base import BaseHTTPMiddleware
-from timezonefinder import TimezoneFinder
 
 from API.constants.api_const import (
+    DBZ_CONST,
+    DBZ_CONVERSION_CONST,
     DEFAULT_ROUNDING_INTERVAL,
-    ETOPO_CONST,
     GLOBE_TEMP_CONST,
     LAMBERT_CONST,
     SOLAR_CALC_CONST,
@@ -21,14 +21,13 @@ from API.constants.api_const import (
     UNIT_CONVERSION_CONST,
     WBGT_CONST,
     WBGT_PERCENTAGE_DIVISOR,
-    DBZ_CONST,
-    DBZ_CONVERSION_CONST,
 )
 from API.constants.grid_const import US_BOUNDING_BOX
 from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
 
 TIMING = os.environ.get("TIMING", False)
 logger = logging.getLogger("pirate-weather-api")
+
 
 class TimingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
@@ -37,6 +36,7 @@ class TimingMiddleware(BaseHTTPMiddleware):
         total_ms = (time.perf_counter() - start) * 1000
         response.headers["X-Server-Time"] = f"{total_ms:.1f}"
         return response
+
 
 def solar_rad(D_t, lat, t_t):
     """
@@ -75,6 +75,7 @@ def toTimestamp(d):
         Unix timestamp (float)
     """
     return d.timestamp()
+
 
 def get_offset(*, lat, lng, utcTime, tf):
     # tf = TimezoneFinder()
@@ -191,6 +192,7 @@ def _interp_row(row: np.ndarray) -> np.ndarray:
         )
 
     return row
+
 
 def cull(lng, lat):
     """Accepts a list of lat/lng tuples.

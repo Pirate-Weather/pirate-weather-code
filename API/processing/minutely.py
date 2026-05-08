@@ -1,8 +1,9 @@
-import datetime
 import logging
-import numpy as np
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
+import numpy as np
+
+from API.api_utils import fast_nearest_interp  # Using api_utils for now as it was there
 from API.constants.forecast_const import DATA_MINUTELY
 from API.constants.model_const import (
     ECMWF,
@@ -21,9 +22,9 @@ from API.constants.shared_const import (
     TEMP_THRESHOLD_SNOW_C,
 )
 from API.processing.utils import dbz_to_rate
-from API.api_utils import fast_nearest_interp # Using api_utils for now as it was there
 
 logger = logging.getLogger("pirate-weather-api")
+
 
 def process_minutely(
     sourceList: List[str],
@@ -34,11 +35,11 @@ def process_minutely(
     dataOut_gfs: Optional[np.ndarray] = None,
     dataOut_ecmwf: Optional[np.ndarray] = None,
     dataOut_nbm: Optional[np.ndarray] = None,
-    dataOut_hrrr_subh: Optional[np.ndarray] = None, # dataOut in original
+    dataOut_hrrr_subh: Optional[np.ndarray] = None,  # dataOut in original
     HRRR_Merged: Optional[np.ndarray] = None,
     ERA5_MERGED: Optional[np.ndarray] = None,
 ) -> Dict[str, Any]:
-    
+
     # Initialize interpolation arrays
     gefsMinuteInterpolation = None
     gfsMinuteInterpolation = None
@@ -51,7 +52,7 @@ def process_minutely(
         gefsMinuteInterpolation = np.zeros(
             (len(minute_array_grib), len(dataOut_gefs[0, :]))
         )
-    
+
     if "gfs" in sourceList and dataOut_gfs is not None:
         gfsMinuteInterpolation = np.zeros(
             (len(minute_array_grib), len(dataOut_gfs[0, :]))
@@ -62,12 +63,16 @@ def process_minutely(
             (len(minute_array_grib), len(dataOut_ecmwf[0, :]))
         )
 
-    if "nbm" in sourceList: # NBM is always initialized in original code if sourceList check passes, but dataOut_nbm might be needed
+    if (
+        "nbm" in sourceList
+    ):  # NBM is always initialized in original code if sourceList check passes, but dataOut_nbm might be needed
         nbmMinuteInterpolation = np.zeros((len(minute_array_grib), 18))
 
     # Interpolate for minutely
     if "hrrrsubh" in sourceList and dataOut_hrrr_subh is not None:
-        hrrrSubHInterpolation = np.zeros((len(minute_array_grib), len(dataOut_hrrr_subh[0, :])))
+        hrrrSubHInterpolation = np.zeros(
+            (len(minute_array_grib), len(dataOut_hrrr_subh[0, :]))
+        )
         for i in range(len(dataOut_hrrr_subh[0, :]) - 1):
             hrrrSubHInterpolation[:, i + 1] = np.interp(
                 minute_array_grib,
@@ -82,7 +87,7 @@ def process_minutely(
             # Mapping HRRR columns to HRRR_SUBH columns for fallback
             # Note: This assumes HRRR_Merged has the correct columns.
             # The original code manually maps specific columns.
-            
+
             hrrrSubHInterpolation[:, HRRR_SUBH["gust"]] = np.interp(
                 minute_array_grib,
                 HRRR_Merged[:, 0].squeeze(),
@@ -182,8 +187,12 @@ def process_minutely(
                 right=MISSING_DATA,
             )
 
-        if "gefs" in sourceList and gefsMinuteInterpolation is not None and dataOut_gefs is not None:
-             gefsMinuteInterpolation[:, GEFS["error"]] = np.interp(
+        if (
+            "gefs" in sourceList
+            and gefsMinuteInterpolation is not None
+            and dataOut_gefs is not None
+        ):
+            gefsMinuteInterpolation[:, GEFS["error"]] = np.interp(
                 minute_array_grib,
                 dataOut_gefs[:, 0].squeeze(),
                 dataOut_gefs[:, GEFS["error"]],
@@ -191,8 +200,12 @@ def process_minutely(
                 right=MISSING_DATA,
             )
 
-    else: # Use GFS/GEFS
-        if "gefs" in sourceList and gefsMinuteInterpolation is not None and dataOut_gefs is not None:
+    else:  # Use GFS/GEFS
+        if (
+            "gefs" in sourceList
+            and gefsMinuteInterpolation is not None
+            and dataOut_gefs is not None
+        ):
             for i in range(len(dataOut_gefs[0, :]) - 1):
                 gefsMinuteInterpolation[:, i + 1] = np.interp(
                     minute_array_grib,
@@ -202,7 +215,11 @@ def process_minutely(
                     right=MISSING_DATA,
                 )
 
-        if "gfs" in sourceList and gfsMinuteInterpolation is not None and dataOut_gfs is not None:
+        if (
+            "gfs" in sourceList
+            and gfsMinuteInterpolation is not None
+            and dataOut_gfs is not None
+        ):
             for i in range(len(dataOut_gfs[0, :]) - 1):
                 gfsMinuteInterpolation[:, i + 1] = np.interp(
                     minute_array_grib,
@@ -212,7 +229,11 @@ def process_minutely(
                     right=MISSING_DATA,
                 )
 
-    if "ecmwf_ifs" in sourceList and ecmwfMinuteInterpolation is not None and dataOut_ecmwf is not None:
+    if (
+        "ecmwf_ifs" in sourceList
+        and ecmwfMinuteInterpolation is not None
+        and dataOut_ecmwf is not None
+    ):
         for i in range(len(dataOut_ecmwf[0, :]) - 1):
             if i + 1 == ECMWF["ptype"]:
                 ecmwfMinuteInterpolation[:, i + 1] = fast_nearest_interp(
@@ -229,7 +250,11 @@ def process_minutely(
                     right=MISSING_DATA,
                 )
 
-    if "nbm" in sourceList and nbmMinuteInterpolation is not None and dataOut_nbm is not None:
+    if (
+        "nbm" in sourceList
+        and nbmMinuteInterpolation is not None
+        and dataOut_nbm is not None
+    ):
         for i in [
             NBM["accum"],
             NBM["prob"],
@@ -247,7 +272,9 @@ def process_minutely(
             )
 
     if "era5" in sourceList and ERA5_MERGED is not None:
-        era5_MinuteInterpolation = np.zeros((len(minute_array_grib), max(ERA5.values()) + 1)) # +1 to be safe with max index
+        era5_MinuteInterpolation = np.zeros(
+            (len(minute_array_grib), max(ERA5.values()) + 1)
+        )  # +1 to be safe with max index
         for i in [
             ERA5["large_scale_rain_rate"],
             ERA5["convective_rain_rate"],
@@ -269,10 +296,12 @@ def process_minutely(
         )
 
     # InterPminute calculation
-    InterPminute = np.full((len(minute_array_grib), max(DATA_MINUTELY.values()) + 1), MISSING_DATA)
+    InterPminute = np.full(
+        (len(minute_array_grib), max(DATA_MINUTELY.values()) + 1), MISSING_DATA
+    )
     InterPminute[:, DATA_MINUTELY["time"]] = minute_array_grib
-    
-    InterTminute = np.zeros((len(minute_array_grib), 5)) # Type
+
+    InterTminute = np.zeros((len(minute_array_grib), 5))  # Type
 
     # precipProbability
     if "nbm" in sourceList and nbmMinuteInterpolation is not None:
@@ -336,7 +365,7 @@ def process_minutely(
         else np.full(len(minute_array_grib), 5)
     )
     pTypes = ["none", "snow", "sleet", "sleet", "rain", MISSING_DATA]
-    
+
     minuteType = [pTypes[maxPchance[idx]] for idx in range(len(minute_array_grib))]
     precipTypes = np.array(minuteType)
 
@@ -437,9 +466,13 @@ def process_minutely(
     # Noise thresholding
     minuteRainIntensity[np.abs(minuteRainIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
     minuteSnowIntensity[np.abs(minuteSnowIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
-    minuteSleetIntensity[np.abs(minuteSleetIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
+    minuteSleetIntensity[np.abs(minuteSleetIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = (
+        0.0
+    )
     minuteProbability[np.abs(minuteProbability) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
-    minuteIntensityError[np.abs(minuteIntensityError) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
+    minuteIntensityError[np.abs(minuteIntensityError) < PRECIP_NOISE_THRESHOLD_MMH] = (
+        0.0
+    )
     minuteIntensity[np.abs(minuteIntensity) < PRECIP_NOISE_THRESHOLD_MMH] = 0.0
 
     zero_type_mask = maxPchance == 0

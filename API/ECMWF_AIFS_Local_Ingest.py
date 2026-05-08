@@ -33,9 +33,9 @@ from API.ingest_utils import (
     VALID_DATA_MAX,
     VALID_DATA_MIN,
     archive_tmp_zarr_and_upload,
+    close_store,
     configure_zarr_limits,
     download_extract_historic_archive,
-    close_store,
     interp_time_take_blend,
     pad_to_chunk_size,
     positive_int_env,
@@ -253,9 +253,9 @@ X3_Snowfall_Mean = ens_mf["sfd"].mean(dim="number")
 # Use grib types: https://codes.ecmwf.int/grib/format/grib2/ctables/4/201/, 1 is rain, 5 is snow
 X3_pType = xr.where(
     X3_Precipitation_Mean > 0,
-    xr.where(X3_Snowfall_Mean > X3_Precipitation_Mean *0.5 , 5, 1),
-    0)
-
+    xr.where(X3_Snowfall_Mean > X3_Precipitation_Mean * 0.5, 5, 1),
+    0,
+)
 
 
 # Merge into a new xarray dataset
@@ -376,9 +376,7 @@ aifs_mf_atm = xr.open_mfdataset(
 ).sortby("step")
 
 # Combine the datasets
-aifs_mf = xr.merge(
-    [aifs_mf_2, aifs_mf_10, aifs_mf_msl, aifs_mf_atm], compat="override"
-)
+aifs_mf = xr.merge([aifs_mf_2, aifs_mf_10, aifs_mf_msl, aifs_mf_atm], compat="override")
 
 
 # %% Merge the ENSO and OPER data
@@ -421,7 +419,11 @@ hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
 # Chunk and save as zarr
 xarray_forecast_merged = xarray_forecast_merged.chunk(
-    chunks={"time": len(xarray_forecast_merged.time), "latitude": process_chunk, "longitude": process_chunk}
+    chunks={
+        "time": len(xarray_forecast_merged.time),
+        "latitude": process_chunk,
+        "longitude": process_chunk,
+    }
 )
 
 with ProgressBar():
@@ -498,7 +500,6 @@ for i in range(his_period, -1, -6):
     # Only want step 6
     fxx = [6]
 
-
     ## Ensemble
     # Create FastHerbie object
     FH_histsub_ens = FastHerbie(
@@ -525,7 +526,6 @@ for i in range(his_period, -1, -6):
     validate_grib_stats(grib_check)
     logger.info("Grib files passed validation, proceeding with processing")
 
-
     ens_mf_his = xr.open_mfdataset(
         ens_paths_his,
         engine="cfgrib",
@@ -543,9 +543,9 @@ for i in range(his_period, -1, -6):
     ens_mf_his["sfd"] = ens_mf_his["sf"] / 6
 
     # Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
-    X3_Precipitation_Prob_His = (ens_mf_his["tpd"] > 0.0001).sum(dim="number") / ens_mf_his.sizes[
-        "number"
-    ]
+    X3_Precipitation_Prob_His = (ens_mf_his["tpd"] > 0.0001).sum(
+        dim="number"
+    ) / ens_mf_his.sizes["number"]
 
     # Find the standard deviation of precipitation accumulation across all members
     X3_Precipitation_StdDev_His = ens_mf_his["tpd"].std(dim="number")
@@ -561,10 +561,9 @@ for i in range(his_period, -1, -6):
     # Use grib types: https://codes.ecmwf.int/grib/format/grib2/ctables/4/201/, 1 is rain, 5 is snow
     X3_pType_His = xr.where(
         X3_Precipitation_Mean_His > 0,
-        xr.where(X3_Snowfall_Mean_His > X3_Precipitation_Mean_His *0.5 , 5, 1),
-        0)
-
-
+        xr.where(X3_Snowfall_Mean_His > X3_Precipitation_Mean_His * 0.5, 5, 1),
+        0,
+    )
 
     # Merge into a new xarray dataset
     xr_ensoOut_His = xr.Dataset(
@@ -580,8 +579,6 @@ for i in range(his_period, -1, -6):
             "longitude": ens_mf_his["longitude"],
         },
     )
-
-
 
     ## Deterministic
     # Create FastHerbie Object.
@@ -845,8 +842,6 @@ if save_type == "S3":
     )
 else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/ECMWF_AIFS.zarr")
-
-
 
 
 # Define which variables are integers and need special handling

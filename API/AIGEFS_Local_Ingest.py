@@ -22,10 +22,10 @@ from dask.diagnostics import ProgressBar
 from herbie import FastHerbie, HerbieLatest, Path
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
+from API.herbie_custom_templates import register_aws_aigfs_aigefs_templates
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
-    FORECAST_LEAD_RANGES,
     FORECAST_LEAD_RANGES,
     archive_tmp_zarr_and_upload,
     download_extract_historic_archive,
@@ -34,7 +34,6 @@ from API.ingest_utils import (
     pad_to_chunk_size,
     validate_grib_stats,
 )
-from API.herbie_custom_templates import register_aws_aigfs_aigefs_templates
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -178,7 +177,7 @@ while mem < 31:
         product="sfc",
         verbose=False,
         priority=["aws", "nomads"],
-        save_dir=tmp_dir
+        save_dir=tmp_dir,
     )
 
     # Check for download length
