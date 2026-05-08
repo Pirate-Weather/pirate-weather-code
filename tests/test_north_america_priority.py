@@ -297,8 +297,8 @@ def test_priority_with_all_models_europe():
     assert np.isclose(temp_inputs[0, 2], 10.0, atol=0.1), "Third priority should be GFS"
 
 
-def test_ai_models_prioritized_over_nbm_when_requested():
-    """When AI-model mode is enabled, NA should prioritize GFS/AIGFS above NBM."""
+def test_nbm_remains_prioritized_over_gfs_in_north_america():
+    """NBM should remain prioritized over GFS/AIGFS-style data in North America."""
     num_hours = 3
     from API.constants.model_const import GFS, NBM
 
@@ -324,7 +324,6 @@ def test_ai_models_prioritized_over_nbm_when_requested():
         num_hours=num_hours,
         lat=40.7128,
         lon=-74.0060,
-        prioritize_ai_models=True,
     )
 
-    assert np.isclose(inputs["temperature_inputs"][0, 0], 5.0, atol=0.1)
+    assert np.isclose(inputs["temperature_inputs"][0, 0], 20.0, atol=0.1)

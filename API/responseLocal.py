@@ -59,7 +59,11 @@ from API.constants.model_const import (
 )
 
 # Project imports
-from API.constants.shared_const import INGEST_VERSION_STR, KELVIN_TO_CELSIUS
+from API.constants.shared_const import (
+    INGEST_VERSION_STR,
+    KELVIN_TO_CELSIUS,
+    MISSING_DATA,
+)
 from API.current.metrics import build_current_section
 from API.daily.builder import build_daily_section
 from API.data_inputs import prepare_data_inputs
@@ -305,6 +309,27 @@ def convert_data_to_celsius(
     if isinstance(era5_merged, np.ndarray):
         era5_merged[:, ERA5["2m_temperature"]] -= KELVIN_TO_CELSIUS
         era5_merged[:, ERA5["2m_dewpoint_temperature"]] -= KELVIN_TO_CELSIUS
+
+
+def _prefer_ai_with_fallback(ai_data, base_data):
+    """Prefer AI values but fall back to base model values for missing points."""
+    if ai_data is None:
+        return base_data
+    out = np.asarray(ai_data).copy()
+    missing_value_mask = out == MISSING_DATA
+
+    if base_data is not None:
+        base = np.asarray(base_data)
+        base_missing_value_mask = base == MISSING_DATA
+        missing_ai = np.isnan(out) | missing_value_mask
+        valid_base = np.isfinite(base) & ~base_missing_value_mask
+        fallback_mask = missing_ai & valid_base
+        out[fallback_mask] = base[fallback_mask]
+
+    # Preserve time column as-is and normalize remaining missing sentinels.
+    out_data = out[:, 1:]
+    np.putmask(out_data, out_data == MISSING_DATA, np.nan)
+    return out
 
 
 @app.get("/timemachine/{apikey}/{location}", response_class=ORJSONResponse)
@@ -651,15 +676,15 @@ async def PW_Forecast(
     if incAIModels:
         if is_na:
             if merge_result.aigfs is not None:
-                GFS_Merged = merge_result.aigfs
+                GFS_Merged = _prefer_ai_with_fallback(merge_result.aigfs, GFS_Merged)
                 if "gfs" not in merge_result.metadata.source_list:
                     merge_result.metadata.source_list.append("gfs")
             if merge_result.aigefs is not None:
-                GEFS_Merged = merge_result.aigefs
+                GEFS_Merged = _prefer_ai_with_fallback(merge_result.aigefs, GEFS_Merged)
                 if "gefs" not in merge_result.metadata.source_list:
                     merge_result.metadata.source_list.append("gefs")
         elif merge_result.aifs is not None:
-            ECMWF_Merged = merge_result.aifs
+            ECMWF_Merged = _prefer_ai_with_fallback(merge_result.aifs, ECMWF_Merged)
             if "ecmwf_ifs" not in merge_result.metadata.source_list:
                 merge_result.metadata.source_list.append("ecmwf_ifs")
     sourceList = merge_result.metadata.source_list
@@ -707,7 +732,6 @@ async def PW_Forecast(
             version=version,
             lat=lat,
             lon=lon_IN,
-            prioritize_ai_models=bool(incAIModels),
         )
     minuteRainIntensity = InterPminute[:, DATA_MINUTELY["rain_intensity"]]
     minuteSnowIntensity = InterPminute[:, DATA_MINUTELY["snow_intensity"]]
@@ -810,7 +834,6 @@ async def PW_Forecast(
         num_hours=numHours,
         lat=lat,
         lon=lon,
-        prioritize_ai_models=bool(incAIModels),
     )
 
     InterThour_inputs = inputs["InterThour_inputs"]
@@ -1037,7 +1060,6 @@ async def PW_Forecast(
             logger=logger,
             loc_tag=loc_tag,
             include_currently=exCurrently != 1,
-            prioritize_ai_models=bool(incAIModels),
         )
     ### RETURN ###
     # 16. Construct and return the final JSON response
