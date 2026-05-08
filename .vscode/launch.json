@@ -155,6 +155,16 @@
             "envFile": "${workspaceFolder}/.aigfs.env"
         },
         {
+            "name": "Python: AIGEFS_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.AIGEFS_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "envFile": "${workspaceFolder}/.aigefs.env"
+        },
+        {
             "name": "Python: ECMWF_AIFS_Local",
             "type": "debugpy",
             "request": "launch",
