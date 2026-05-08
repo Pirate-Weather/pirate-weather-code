@@ -144,6 +144,16 @@
                 "forecast_path": "/mnt/nvme/data/ProdTest4/DWD_MOSMIX",
             }
         },
+        {
+            "name": "Python: AIGFS_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.AIGFS_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "envFile": "${workspaceFolder}/.aigfs.env"
+        }
 
     ]
 }
