@@ -1,11 +1,6 @@
 # %% Script to test FastHerbie.py to download GFS data
 # Alexander Rey, September 2023
 
-########################################################################################################################
-### NOTE ###
-# This script is non-functional as of May 2026 due to NONADS rate limits. As soon as AIGEFS data is available on AWS, the script should be functional again with minimal changes. The main change will be to the download section, where instead of using FastHerbie to download from NOMADS, the script will need to be updated to download from AWS. The processing steps should remain the same, since the data format is the same. The script is left here for reference and future use.
-
-
 # %% Import modules
 import logging
 import os
@@ -30,6 +25,7 @@ from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISS
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    FORECAST_LEAD_RANGES,
     FORECAST_LEAD_RANGES,
     archive_tmp_zarr_and_upload,
     download_extract_historic_archive,
@@ -180,10 +176,9 @@ while mem < 31:
         fxx=aigefs_range,
         member="mem" + str(mem).zfill(3),
         product="sfc",
-        verbose=True,
+        verbose=False,
         priority=["aws", "nomads"],
-        save_dir=tmp_dir,
-        max_threads=2,
+        save_dir=tmp_dir
     )
 
     # Check for download length
@@ -198,7 +193,7 @@ while mem < 31:
         continue
 
     # Download and process the subsets
-    FH_IN.download(verbose=True, max_threads=2, overwrite=True)
+    FH_IN.download(verbose=False, overwrite=True)
 
     # Create list of downloaded grib files
     grib_list = [str(Path(x.get_localFilePath()).expand()) for x in FH_IN.file_exists]
@@ -292,8 +287,6 @@ while mem < 31:
 
     mem += 1
 
-    # Pause for 10 seconds to avoid overwhelming NOMADS
-    time.sleep(10)
 
 # Create a new time series
 start = base_time  # Adjust as necessary
@@ -302,12 +295,12 @@ new_hourly_time = pd.date_range(
     start=start - pd.Timedelta(hours=his_period), end=end, freq="h"
 )
 
-# Plus 2 since we start at Hour 3
+
 stacked_times = np.concatenate(
     (
         pd.date_range(
             start=start - pd.Timedelta(hours=his_period),
-            end=start - pd.Timedelta(hours=1),
+            end=start,
             freq="6h",
         ),
         xarray_wgrib.time.values,
@@ -398,7 +391,7 @@ def preprocess(ds):
 
 # Note: since these files are only 6 hour segments (aka 2 timesteps instead of 80), all the fancy dask stuff isn't necessary
 # 6 hour runs
-for i in range(his_period, 0, -6):
+for i in range(his_period, -1, -6):
     # s3_path_NC = s3_bucket + '/GEFS/GEFS_HistProb_' + (base_time - pd.Timedelta(hours = i)).strftime('%Y%m%dT%H%M%SZ') + '.nc'
 
     # Try to open the zarr file to check if it has already been saved
@@ -437,7 +430,7 @@ for i in range(his_period, 0, -6):
 
     # Create a range of dates for historic data
     DATES = pd.date_range(
-        start=base_time - pd.Timedelta(hours=i),
+        start=base_time - pd.Timedelta(hours=i) - pd.Timedelta(hours=6),
         periods=1,
         freq="6h",
     )
@@ -452,7 +445,7 @@ for i in range(his_period, 0, -6):
                 fxx=[6],
                 member="mem" + str(mem).zfill(3),
                 product="sfc",
-                verbose=True,
+                verbose=False,
                 priority=["aws", "nomads"],
                 save_dir=tmp_dir,
             )
@@ -463,7 +456,7 @@ for i in range(his_period, 0, -6):
     failCount = 0
     while mem < 31:
         # Download the subsets
-        FH_forecastsubMembers[mem - 1].download(verbose=True, overwrite=True)
+        FH_forecastsubMembers[mem - 1].download(verbose=False)
         # Create list of downloaded grib files
         grib_list = [
             str(Path(x.get_localFilePath()).expand())
@@ -566,7 +559,7 @@ for i in range(his_period, 0, -6):
     # Read the merged netcdf files into xarray using the preprocess function, concatenating along the member dimension
     xarray_hist_wgrib_merged = xr.open_mfdataset(
         [
-            hist_process_path + "_xr_merged_m" + str(mem) + ".zarr"
+            hist_process_path + "_xr_merged_" + str(i) + "_m" + str(mem) + ".zarr"
             for mem in range(1, 31)
         ],
         engine="zarr",
@@ -585,7 +578,7 @@ for i in range(his_period, 0, -6):
     # Create an empty xarray dataset to store the probability of precipitation greater than 1 mm
     xarray_hist_wgrib_prob = xr.Dataset()
 
-    # Find the probably of precipitation greater than 0.1 mm/h across all members
+    # Find the probability of precipitation greater than 0.1 mm/h across all members
     xarray_hist_wgrib_prob["Precipitation_Prob"] = (
         (xarray_hist_wgrib_merged["APCP_surface"]) > 0.1
     ).sum(dim="member") / 30
@@ -643,7 +636,7 @@ if save_type == "S3":
     os.makedirs(local_temp_dir, exist_ok=True)
 
     ncLocalWorking_paths = []
-    for i in range(his_period, 1, -6):
+    for i in range(his_period, -1, -6):
         timestamp = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
         final_zarr_name = f"AIGEFS_HistProb_{timestamp}.zarr"
         extracted_path = download_extract_historic_archive(
@@ -661,7 +654,7 @@ else:
         + "/AIGEFS_HistProb_"
         + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
         + ".zarr"
-        for i in range(his_period, 1, -6)
+        for i in range(his_period, -1, -6)
     ]
 
 # Dask Setup
@@ -756,7 +749,7 @@ if save_type == "S3":
         forecast_process_dir + "/AIGEFS.zarr.zip", mode="a", compression=0
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/AIGEFS.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/AIGEFS2.zarr")
 
 
 #
@@ -785,12 +778,12 @@ with ProgressBar():
     zarr_array = zarr.create_array(
         store=zarr_store,
         shape=(
-            len(zarr_vars),
+            len(probVars),
             len(hourly_timesUnix),
             daskVarArrayStackDiskInterpPad.shape[2],
             daskVarArrayStackDiskInterpPad.shape[3],
         ),
-        chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
+        chunks=(len(probVars), len(hourly_timesUnix), final_chunk, final_chunk),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
         dtype="float32",
     )
@@ -798,14 +791,13 @@ with ProgressBar():
     # 4. Rechunk it to match the final array
     # 5. Write it out to the zarr array
     daskVarArrayStackDiskInterpPad.round(5).rechunk(
-        (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
+        (len(probVars), len(hourly_timesUnix), final_chunk, final_chunk)
     ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
 if save_type == "S3":
     zarr_store.close()
 
-# Maps generation removed for Graphcast ingest (not required)
 
 # %% Upload to S3
 if save_type == "S3":

@@ -190,7 +190,7 @@ FH_forecastsub = FastHerbie(
 )
 
 match_string_enfo = r":((tp|sf):sfc:\d+):"
-ens_paths = FH_forecastsub.download(match_string_enfo, verbose=True)
+ens_paths = FH_forecastsub.download(match_string_enfo, verbose=False)
 
 grib_list = [
     str(Path(x.get_localFilePath(match_string_enfo)).expand())
@@ -511,7 +511,7 @@ for i in range(his_period, -1, -6):
     )
 
     match_string_enfo = r":((tp|sf):sfc:\d+):"
-    ens_paths_his = FH_histsub_ens.download(match_string_enfo, verbose=True)
+    ens_paths_his = FH_histsub_ens.download(match_string_enfo, verbose=False)
 
     grib_list = [
         str(Path(x.get_localFilePath(match_string_enfo)).expand())
