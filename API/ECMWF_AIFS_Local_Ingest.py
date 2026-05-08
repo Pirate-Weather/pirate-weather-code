@@ -338,7 +338,7 @@ aifs_mf_2 = xr.open_mfdataset(
     },
 ).sortby("step")
 aifs_mf_10 = xr.open_mfdataset(
-    ifs_paths,
+    aifs_paths,
     engine="cfgrib",
     combine="nested",
     concat_dim="step",
@@ -352,7 +352,7 @@ aifs_mf_10 = xr.open_mfdataset(
 ).sortby("step")
 
 aifs_mf_msl = xr.open_mfdataset(
-    ifs_paths,
+    aifs_paths,
     engine="cfgrib",
     combine="nested",
     concat_dim="step",
@@ -364,7 +364,7 @@ aifs_mf_msl = xr.open_mfdataset(
 ).sortby("step")
 
 aifs_mf_atm = xr.open_mfdataset(
-    ifs_paths,
+    aifs_paths,
     engine="cfgrib",
     combine="nested",
     concat_dim="step",

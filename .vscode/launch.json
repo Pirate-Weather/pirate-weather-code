@@ -153,7 +153,16 @@
             "cwd": "${workspaceFolder}",
             "justMyCode": true,
             "envFile": "${workspaceFolder}/.aigfs.env"
+        },
+        {
+            "name": "Python: ECMWF_AIFS_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.ECMWF_AIFS_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "envFile": "${workspaceFolder}/.aifs.env"
         }
-
     ]
 }
