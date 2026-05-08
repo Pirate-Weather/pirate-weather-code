@@ -384,14 +384,16 @@ def _process_gefs_ptype(gefsMinuteInterpolation, InterTminute):
 
 
 def _process_aigefs_ptype_with_temperature(
-    gefsMinuteInterpolation, gfsMinuteInterpolation, InterTminute
+    aigefsMinuteInterpolation, gfsMinuteInterpolation, InterTminute
 ):
     """Fallback precipitation type for AIGEFS using GFS/AIGFS temperatures."""
+    # AIGEFS does not expose explicit precip-type channels. When AI ensemble
+    # precipitation is present, classify as snow/rain/sleet using temperature.
     if gfsMinuteInterpolation is None:
         return
     temp = gfsMinuteInterpolation[:, GFS["temp"]]
-    precip_mask = np.nan_to_num(gefsMinuteInterpolation[:, GEFS["accum"]], nan=0.0) > 0
-    precip_mask |= np.nan_to_num(gefsMinuteInterpolation[:, GEFS["prob"]], nan=0.0) > 0
+    precip_mask = np.nan_to_num(aigefsMinuteInterpolation[:, GEFS["accum"]], nan=0.0) > 0
+    precip_mask |= np.nan_to_num(aigefsMinuteInterpolation[:, GEFS["prob"]], nan=0.0) > 0
     InterTminute[:, 1] = (precip_mask & (temp <= TEMP_THRESHOLD_SNOW_C)).astype(int)
     InterTminute[:, 4] = (precip_mask & (temp >= TEMP_THRESHOLD_RAIN_C)).astype(int)
     InterTminute[:, 3] = (
