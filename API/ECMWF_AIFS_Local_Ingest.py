@@ -15,6 +15,7 @@ import sys
 import time
 import warnings
 
+import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -32,8 +33,13 @@ from API.ingest_utils import (
     VALID_DATA_MAX,
     VALID_DATA_MIN,
     archive_tmp_zarr_and_upload,
+    configure_zarr_limits,
     download_extract_historic_archive,
+    close_store,
+    interp_time_take_blend,
     pad_to_chunk_size,
+    positive_int_env,
+    tune_nofile_limit,
     validate_grib_stats,
 )
 
@@ -65,6 +71,14 @@ aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+zarr_store_workers = positive_int_env("zarr_store_workers", 2)
+zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
+
+s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+tune_nofile_limit()
+zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
+    zarr_store_workers, zarr_async_concurrency
+)
 
 
 # Define the processing and history chunk size
@@ -833,57 +847,58 @@ else:
     zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/ECMWF_AIFS.zarr")
 
 
-# TEST READ
-# Z = zarr.storage.LocalStore(forecast_process_dir + "/ECMWF.zarr", read_only='r')
-# Z2 = zarr.open(Z)
 
-# Rechunk subset of data for maps!
-# Want variables:
-# 0 (time)
-# 2 (t2m)
-# 4 (u10)
-# 5 (v10)
-# 6 (tp)
 
-# Loop through variables, creating a new one with a name and 36 x 100 x 100 chunks
-# Save -12:24 hours, aka steps 24:60
-# Create a Zarr array in the store with zstd compression
+# Define which variables are integers and need special handling
+int_vars = ["ptype"]
+# Find the index of these variables in the zarr_vars list
+int_var_indices = [i for i, v in enumerate(zarr_vars) if v in int_vars]
 
-# Add padding for map chunking (100x100)
-daskVarArrayStackDisk_maps = pad_to_chunk_size(daskVarArrayStackDisk, 100)
+# 1. Interpolate the stacked array to be hourly along the time axis
+# 2. Pad to chunk size
+# 3. Create the zarr array
+# 4. Rechunk it to match the final array
+# 5. Write it out to the zarr array
 
-if save_type == "S3":
-    zarr_store_maps = zarr.storage.ZipStore(
-        forecast_process_dir + "/ECMWF_AIFS_Maps.zarr.zip", mode="a", compression=0
-    )
-else:
-    zarr_store_maps = zarr.storage.LocalStore(
-        forecast_process_dir + "/ECMWF_AIFS_Maps.zarr"
-    )
+with ProgressBar():
+    with dask.config.set(scheduler="threads", num_workers=4):
+        # 1. Interpolate the stacked array to be hourly along the time axis
+        daskVarArrayStackDiskInterp = interp_time_take_blend(
+            daskVarArrayStackDisk,
+            stacked_timesUnix=stacked_timesUnix,
+            hourly_timesUnix=hourly_timesUnix,
+            nearest_vars=int_var_indices,
+            dtype="float32",
+            fill_value=np.nan,
+        )
 
-for z in [0, 2, 4, 5, 6]:
-    # Create a zarr backed dask array
-    zarr_array = zarr.create_array(
-        store=zarr_store_maps,
-        name=zarr_vars[z],
-        shape=(
-            36,
-            daskVarArrayStackDisk_maps.shape[2],
-            daskVarArrayStackDisk_maps.shape[3],
-        ),
-        chunks=(36, 100, 100),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
-    )
+        # 2. Pad to chunk size
+        daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+            daskVarArrayStackDiskInterp, final_chunk
+        )
 
-    da.rechunk(daskVarArrayStackDisk_maps[z, 36:72, :, :], (36, 100, 100)).to_zarr(
-        zarr_array, overwrite=True, compute=True
-    )
+        # 3. Create the zarr array
+        zarr_array = zarr.create_array(
+            store=zarr_store,
+            shape=(
+                len(zarr_vars),
+                len(hourly_timesUnix),
+                daskVarArrayStackDiskInterpPad.shape[2],
+                daskVarArrayStackDiskInterpPad.shape[3],
+            ),
+            chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
+            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+            dtype="float32",
+        )
 
-    logger.info(zarr_vars[z])
+        # 4. Rechunk it to match the final array
+        # 5. Write it out to the zarr array
+        daskVarArrayStackDiskInterpPad.round(5).rechunk(
+            (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
+        ).to_zarr(zarr_array, overwrite=True, compute=True)
 
-if save_type == "S3":
-    zarr_store_maps.close()
+
+close_store(zarr_store)
 
 # %% Upload to S3
 if save_type == "S3":
@@ -891,10 +906,6 @@ if save_type == "S3":
     s3.put_file(
         forecast_process_dir + "/ECMWF_AIFS.zarr.zip",
         forecast_path + "/" + ingest_version + "/ECMWF_AIFS.zarr.zip",
-    )
-    s3.put_file(
-        forecast_process_dir + "/ECMWF_AIFS_Maps.zarr.zip",
-        forecast_path + "/" + ingest_version + "/ECMWF_AIFS_Maps.zarr.zip",
     )
 
     # Write most recent forecast time
@@ -921,13 +932,6 @@ else:
     shutil.copytree(
         forecast_process_dir + "/ECMWF_AIFS.zarr",
         forecast_path + "/" + ingest_version + "/ECMWF_AIFS.zarr",
-        dirs_exist_ok=True,
-    )
-
-    # Copy the zarr file to the final location
-    shutil.copytree(
-        forecast_process_dir + "/ECMWF_AIFS_Maps.zarr",
-        forecast_path + "/" + ingest_version + "/ECMWF_AIFS_Maps.zarr",
         dirs_exist_ok=True,
     )
 
