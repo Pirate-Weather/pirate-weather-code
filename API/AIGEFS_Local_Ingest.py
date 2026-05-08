@@ -748,7 +748,7 @@ if save_type == "S3":
         forecast_process_dir + "/AIGEFS.zarr.zip", mode="a", compression=0
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/AIGEFS2.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/AIGEFS.zarr")
 
 
 #
