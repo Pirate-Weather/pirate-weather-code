@@ -745,7 +745,7 @@ if save_type == "S3":
     os.makedirs(local_temp_dir, exist_ok=True)
 
     ncLocalWorking_paths = []
-    for i in range(his_period, 1, -12):
+    for i in range(his_period, -1, -6):
         timestamp = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
         final_zarr_name = f"ECMWF_AIFS_Hist{timestamp}.zarr"
         extracted_path = download_extract_historic_archive(
