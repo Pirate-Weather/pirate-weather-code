@@ -29,7 +29,7 @@ class aigfs:
             "aws": f"https://noaa-nws-graphcastgfs-pds.s3.amazonaws.com/{post_root}.grib2",
             "nomads": f"https://nomads.ncep.noaa.gov/pub/data/nccf/com/aigfs/prod/{post_root}.grib2",
         }
-        self.LOCALFILE = f"{self.get_remoteFileName}"
+        self.LOCALFILE = f"aigfs.t{self.date:%H}z.{self.product}.f{self.fxx:03d}"
         self.IDX_SUFFIX = [".grib2.idx", ".idx"]
 
 

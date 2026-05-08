@@ -485,7 +485,6 @@ else:
     ]
 
 # Dask Setup
-daskInterpArrays = []
 daskVarArrays = []
 daskVarArrayList = []
 
@@ -508,7 +507,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
     daskVarArraysStack = da.stack(daskVarArrays, allow_unknown_chunksizes=True)
 
     daskForecastArray = da.from_zarr(
-        forecast_process_path + "_.zarr", component=dask_var, inline_array=True
+        forecast_process_path + "_forecast.zarr", component=dask_var, inline_array=True
     )
 
     if dask_var == "time":

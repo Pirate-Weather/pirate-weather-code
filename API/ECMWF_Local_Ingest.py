@@ -465,8 +465,6 @@ for i in range(his_period, 1, -12):
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr.tar.gz"
         )
-        if s3.exists(s3_path.replace(".tar.gz", ".done")):
-            continue
 
         if s3.exists(s3_path.replace(".tar.gz", ".done")):
             print("File already exists in S3, skipping download for: " + s3_path)

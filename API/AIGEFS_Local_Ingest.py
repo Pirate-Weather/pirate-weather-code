@@ -73,6 +73,8 @@ process_chunk = CHUNK_SIZES["GEFS"]
 # Define the final x/y chunksize
 final_chunk = FINAL_CHUNK_SIZES["GEFS"]
 
+AIGEFS_MEMBER_COUNT = 30
+
 his_period = HISTORY_PERIODS["AIGEFS"]
 
 # Create new directory for processing if it does not exist
@@ -168,7 +170,7 @@ aigefs_range = FORECAST_LEAD_RANGES["AIGEFS"]
 # Create FastHerbie object for all 30 members
 mem = 1
 failCount = 0
-while mem < 31:
+while mem <= AIGEFS_MEMBER_COUNT:
     FH_IN = FastHerbie(
         pd.date_range(start=base_time, periods=1, freq="6h"),
         model="aigefs",
@@ -312,7 +314,8 @@ stacked_timesUnix = (stacked_times - unix_epoch) / one_second
 hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
 ncLocalWorking_paths = [
-    forecast_process_path + "_xr_m" + str(i) + ".zarr" for i in range(1, 31, 1)
+    forecast_process_path + "_xr_m" + str(i) + ".zarr"
+    for i in range(1, AIGEFS_MEMBER_COUNT + 1)
 ]
 
 # Dask
@@ -336,7 +339,9 @@ for dask_var in zarr_vars:
 daskOutput = dict()
 
 # Find the probability of precipitation greater than 0.1 mm/h  across all members
-daskOutput["Precipitation_Prob"] = ((daskArrays["APCP_surface"]) > 0.1).sum(axis=0) / 30
+daskOutput["Precipitation_Prob"] = (
+    ((daskArrays["APCP_surface"]) > 0.1).sum(axis=0) / AIGEFS_MEMBER_COUNT
+)
 
 # Find the standard deviation of precipitation accumulation across all members
 daskOutput["APCP_StdDev"] = daskArrays["APCP_surface"].std(axis=0)
@@ -436,7 +441,7 @@ for i in range(his_period, -1, -6):
 
     ### Find all the model runs
     FH_forecastsubMembers = []
-    for mem in range(1, 31):
+    for mem in range(1, AIGEFS_MEMBER_COUNT + 1):
         FH_forecastsubMembers.append(
             FastHerbie(
                 DATES,
@@ -453,7 +458,7 @@ for i in range(his_period, -1, -6):
     ### Download the members and merge
     mem = 1
     failCount = 0
-    while mem < 31:
+    while mem <= AIGEFS_MEMBER_COUNT:
         # Download the subsets
         FH_forecastsubMembers[mem - 1].download(verbose=False)
         # Create list of downloaded grib files
@@ -559,14 +564,14 @@ for i in range(his_period, -1, -6):
     xarray_hist_wgrib_merged = xr.open_mfdataset(
         [
             hist_process_path + "_xr_merged_" + str(i) + "_m" + str(mem) + ".zarr"
-            for mem in range(1, 31)
+            for mem in range(1, AIGEFS_MEMBER_COUNT + 1)
         ],
         engine="zarr",
         preprocess=preprocess,
         combine="nested",
         concat_dim="member",
         chunks={
-            "member": 30,
+            "member": AIGEFS_MEMBER_COUNT,
             "time": 1,
             "latitude": process_chunk,
             "longitude": process_chunk,
@@ -580,7 +585,7 @@ for i in range(his_period, -1, -6):
     # Find the probability of precipitation greater than 0.1 mm/h across all members
     xarray_hist_wgrib_prob["Precipitation_Prob"] = (
         (xarray_hist_wgrib_merged["APCP_surface"]) > 0.1
-    ).sum(dim="member") / 30
+    ).sum(dim="member") / AIGEFS_MEMBER_COUNT
 
     # Find the standard deviation of precipitation accumulation across all members
     xarray_hist_wgrib_prob["APCP_StdDev"] = xarray_hist_wgrib_merged[
