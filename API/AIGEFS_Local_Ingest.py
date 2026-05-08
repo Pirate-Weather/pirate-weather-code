@@ -1,6 +1,11 @@
 # %% Script to test FastHerbie.py to download GFS data
 # Alexander Rey, September 2023
 
+########################################################################################################################
+### NOTE ###
+# This script is non-functional as of May 2026 due to NONADS rate limits. As soon as AIGEFS data is available on AWS, the script should be functional again with minimal changes. The main change will be to the download section, where instead of using FastHerbie to download from NOMADS, the script will need to be updated to download from AWS. The processing steps should remain the same, since the data format is the same. The script is left here for reference and future use.
+
+
 # %% Import modules
 import logging
 import os
@@ -107,7 +112,7 @@ latest_run = HerbieLatest(
 )
 
 base_time = latest_run.date
-base_time = pd.Timestamp("2026-03-02 12:00:00")
+base_time = pd.Timestamp("2026-05-06 18:00:00")
 
 logger.info(base_time)
 
@@ -175,22 +180,22 @@ while mem < 31:
         verbose=True,
         priority=["aws", "nomads"],
         save_dir=tmp_dir,
-        max_threads=20,
+        max_threads=2,
     )
 
     # Check for download length
     if len(FH_IN.file_exists) != 40:
-        logger.warning("Member %d has not downloaded all files, trying again", mem)
+        logger.error("Member %d has not downloaded all files, trying again", mem)
         failCount += 1
 
         # Break after 10 failed attempts
-        if failCount > 10:
+        if failCount > 20:
             break
 
         continue
 
     # Download and process the subsets
-    FH_IN.download(verbose=True, max_threads=20, overwrite=True)
+    FH_IN.download(verbose=True, max_threads=2, overwrite=True)
 
     # Create list of downloaded grib files
     grib_list = [str(Path(x.get_localFilePath()).expand()) for x in FH_IN.file_exists]
@@ -203,11 +208,11 @@ while mem < 31:
     val_check = validate_grib_stats(grib_check)
 
     if not val_check:
-        logger.warning("Member %d has not downloaded all files, trying again", mem)
+        logger.error("Member %d failed validation, trying again", mem)
         failCount += 1
 
         # Break after 10 failed attempts
-        if failCount > 10:
+        if failCount > 20:
             break
 
         continue
@@ -285,10 +290,10 @@ while mem < 31:
     mem += 1
 
     # Pause for 10 seconds to avoid overwhelming NOMADS
-    time.sleep(2)
+    time.sleep(10)
 
 # Create a new time series
-start = xarray_wgrib.time.min().values  # Adjust as necessary
+start = base_time  # Adjust as necessary
 end = xarray_wgrib.time.max().values  # Adjust as necessary
 new_hourly_time = pd.date_range(
     start=start - pd.Timedelta(hours=his_period), end=end, freq="h"

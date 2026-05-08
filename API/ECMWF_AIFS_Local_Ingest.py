@@ -148,7 +148,7 @@ zarr_vars = (
     "d2m",
     "u10",
     "v10",
-    "tp",
+    "ptype",
     "tcc",
     "Precipitation_Prob",
     "APCP_Mean",
@@ -157,8 +157,8 @@ zarr_vars = (
 
 
 #####################################################################################################
-# %% Download ENS data using Herbie Latest
-# Needed for tcc
+# %% Download AIFS data using Herbie Latest
+# Start with the ensemble forecast
 # Find the latest run with 240 hours
 
 
@@ -171,13 +171,12 @@ FH_forecastsub = FastHerbie(
     model="aifs",
     fxx=aifs_range,
     product="enfo",
-    verbose=False,
+    verbose=True,
     save_dir=tmp_dir,
 )
 
-
-match_string_enfo = r":(tp:sfc:\d+):"
-ens_paths = FH_forecastsub.download(match_string_enfo, verbose=False)
+match_string_enfo = r":((tp|sf):sfc:\d+):"
+ens_paths = FH_forecastsub.download(match_string_enfo, verbose=True)
 
 grib_list = [
     str(Path(x.get_localFilePath(match_string_enfo)).expand())
@@ -210,8 +209,16 @@ ens_mf["tpd"] = xr.where(
     ens_mf.step == ens_mf.step.isel(step=0), ens_mf["tp"].isel(step=0), ens_mf["tpd"]
 )
 
+ens_mf["sfd"] = ens_mf["sf"].diff(dim="step")
+
+# Set the first difference to the first accumulation
+ens_mf["sfd"] = xr.where(
+    ens_mf.step == ens_mf.step.isel(step=0), ens_mf["sf"].isel(step=0), ens_mf["sfd"]
+)
+
 # AIFS outputs 6-hour accumulations; convert to hourly rate
 ens_mf["tpd"] = ens_mf["tpd"] / 6
+ens_mf["sfd"] = ens_mf["sfd"] / 6
 
 # Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
 X3_Precipitation_Prob = (ens_mf["tpd"] > 0.0001).sum(dim="number") / ens_mf.sizes[
@@ -224,12 +231,26 @@ X3_Precipitation_StdDev = ens_mf["tpd"].std(dim="number")
 # Find the average precipitation accumulation across all members
 X3_Precipitation_Mean = ens_mf["tpd"].mean(dim="number")
 
+# Find the average snowfall accumulation across all members
+X3_Snowfall_Mean = ens_mf["sfd"].mean(dim="number")
+
+# Find the type of precipitation based on the snowfall and total precipitation
+# If mean snow is greater than 50% of total precipitation, classify as snow, else rain, 0 if no precipitation
+# Use grib types: https://codes.ecmwf.int/grib/format/grib2/ctables/4/201/, 1 is rain, 5 is snow
+X3_pType = xr.where(
+    X3_Precipitation_Mean > 0,
+    xr.where(X3_Snowfall_Mean > X3_Precipitation_Mean *0.5 , 5, 1),
+    0)
+
+
+
 # Merge into a new xarray dataset
 xr_ensoOut = xr.Dataset(
     {
         "Precipitation_Prob": X3_Precipitation_Prob,
         "APCP_StdDev": X3_Precipitation_StdDev,
         "APCP_Mean": X3_Precipitation_Mean,
+        "ptype": X3_pType,
     },
     coords={
         "time": ens_mf["step"],
@@ -245,9 +266,7 @@ xr_ensoOut = xr.Dataset(
 # Define the subset of variables to download as a list of strings
 # 2 m level – use ECMWF’s 2t (temperature) and 2d (dew point)
 matchstring_2m = "(:(2d|2t):)"
-
 matchstring_10m = "(:(10u|10v):)"
-matchstring_ap = "(:(tp):)"
 matchstring_sl = "(:(msl):)"
 matchstring_tcc = "(:(tcc):)"
 
@@ -257,8 +276,6 @@ match_strings = (
     matchstring_2m
     + "|"
     + matchstring_10m
-    + "|"
-    + matchstring_ap
     + "|"
     + matchstring_sl
     + "|"
@@ -278,7 +295,7 @@ FH_forecastsub = FastHerbie(
 )
 
 # Download the subsets
-ifs_paths = FH_forecastsub.download(match_strings, verbose=False)
+aifs_paths = FH_forecastsub.download(match_strings, verbose=False)
 
 grib_list = [
     str(Path(x.get_localFilePath(match_strings)).expand())
@@ -294,7 +311,7 @@ logger.info("Grib files passed validation, proceeding with processing")
 
 
 aifs_mf_2 = xr.open_mfdataset(
-    ifs_paths,
+    aifs_paths,
     engine="cfgrib",
     combine="nested",
     concat_dim="step",
@@ -320,18 +337,6 @@ aifs_mf_10 = xr.open_mfdataset(
     },
 ).sortby("step")
 
-aifs_mf_surf = xr.open_mfdataset(
-    ifs_paths,
-    engine="cfgrib",
-    combine="nested",
-    concat_dim="step",
-    decode_timedelta=False,
-    join="outer",
-    coords="minimal",
-    compat="override",
-    backend_kwargs={"filter_by_keys": {"typeOfLevel": "surface"}},
-).sortby("step")
-
 aifs_mf_msl = xr.open_mfdataset(
     ifs_paths,
     engine="cfgrib",
@@ -353,12 +358,12 @@ aifs_mf_atm = xr.open_mfdataset(
     join="outer",
     coords="minimal",
     compat="override",
-    backend_kwargs={"filter_by_keys": {"typeOfLevel": "atmosphere"}},
+    backend_kwargs={"filter_by_keys": {"typeOfLevel": "entireAtmosphere"}},
 ).sortby("step")
 
 # Combine the datasets
 aifs_mf = xr.merge(
-    [aifs_mf_2, aifs_mf_10, aifs_mf_surf, aifs_mf_msl, aifs_mf_atm], compat="override"
+    [aifs_mf_2, aifs_mf_10, aifs_mf_msl, aifs_mf_atm], compat="override"
 )
 
 
@@ -386,11 +391,10 @@ xarray_forecast_merged = (
     .drop_vars("step")
 )
 
-# Create a new time series for the interpolation target
-start = xarray_forecast_merged.time[0].values
+## Create a new time series for the interpolation target
 end = xarray_forecast_merged.time[-1].values
 new_hourly_time = pd.date_range(
-    start=pd.to_datetime(start) - pd.Timedelta(hours=his_period), end=end, freq="h"
+    start=pd.to_datetime(base_time) - pd.Timedelta(hours=his_period), end=end, freq="h"
 )
 
 # Get the actual stacked times from the concatenated dataset (to be created later)
@@ -403,7 +407,7 @@ hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
 # Chunk and save as zarr
 xarray_forecast_merged = xarray_forecast_merged.chunk(
-    chunks={"time": 64, "latitude": process_chunk, "longitude": process_chunk}
+    chunks={"time": len(xarray_forecast_merged.time), "latitude": process_chunk, "longitude": process_chunk}
 )
 
 with ProgressBar():
@@ -421,7 +425,6 @@ del (
     aifs_mf,
     aifs_mf_2,
     aifs_mf_10,
-    aifs_mf_surf,
     aifs_mf_msl,
     aifs_mf_atm,
     ens_mf,
@@ -436,7 +439,7 @@ logger.info(T1 - T0)
 # Loop through the runs and check if they have already been processed to s3
 
 # 6 hour runs
-for i in range(his_period, 1, -12):
+for i in range(his_period, -1, -6):
     if save_type == "S3":
         # S3 Path Setup
         s3_path = (
@@ -471,15 +474,102 @@ for i in range(his_period, 1, -12):
     )
 
     # Create a range of dates for historic data going back 48 hours
+    # Add the extra 6 hours to ensure we get the full 48 hours of data since AIFS outputs 6 hour accumulations
     DATES = pd.date_range(
-        start=base_time - pd.Timedelta(hours=i),
+        start=base_time - pd.Timedelta(hours=i) - pd.Timedelta(hours=6),
         periods=1,
         freq="6h",
     )
     # Create a range of forecast lead times
-    # Go from 1 to 7 to account for the weird prate approach
-    fxx = range(0, 13, 6)
+    # Only want step 6
+    fxx = [6]
 
+
+    ## Ensemble
+    # Create FastHerbie object
+    FH_histsub_ens = FastHerbie(
+        DATES,
+        model="aifs",
+        fxx=fxx,
+        product="enfo",
+        verbose=True,
+        save_dir=tmp_dir,
+    )
+
+    match_string_enfo = r":((tp|sf):sfc:\d+):"
+    ens_paths_his = FH_histsub_ens.download(match_string_enfo, verbose=True)
+
+    grib_list = [
+        str(Path(x.get_localFilePath(match_string_enfo)).expand())
+        for x in FH_histsub_ens.file_exists
+    ]
+
+    # Perform a check if any data seems to be invalid
+    cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
+
+    grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    validate_grib_stats(grib_check)
+    logger.info("Grib files passed validation, proceeding with processing")
+
+
+    ens_mf_his = xr.open_mfdataset(
+        ens_paths_his,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        decode_timedelta=False,
+        join="outer",
+        coords="minimal",
+        compat="override",
+    ).sortby("step")
+
+    # AIFS outputs 6-hour accumulations; convert to hourly rate.
+    # No difference since only one step
+    ens_mf_his["tpd"] = ens_mf_his["tp"] / 6
+    ens_mf_his["sfd"] = ens_mf_his["sf"] / 6
+
+    # Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
+    X3_Precipitation_Prob_His = (ens_mf_his["tpd"] > 0.0001).sum(dim="number") / ens_mf_his.sizes[
+        "number"
+    ]
+
+    # Find the standard deviation of precipitation accumulation across all members
+    X3_Precipitation_StdDev_His = ens_mf_his["tpd"].std(dim="number")
+
+    # Find the average precipitation accumulation across all members
+    X3_Precipitation_Mean_His = ens_mf_his["tpd"].mean(dim="number")
+
+    # Find the average snowfall accumulation across all members
+    X3_Snowfall_Mean_His = ens_mf_his["sfd"].mean(dim="number")
+
+    # Find the type of precipitation based on the snowfall and total precipitation
+    # If mean snow is greater than 50% of total precipitation, classify as snow, else rain, 0 if no precipitation
+    # Use grib types: https://codes.ecmwf.int/grib/format/grib2/ctables/4/201/, 1 is rain, 5 is snow
+    X3_pType_His = xr.where(
+        X3_Precipitation_Mean_His > 0,
+        xr.where(X3_Snowfall_Mean_His > X3_Precipitation_Mean_His *0.5 , 5, 1),
+        0)
+
+
+
+    # Merge into a new xarray dataset
+    xr_ensoOut_His = xr.Dataset(
+        {
+            "Precipitation_Prob": X3_Precipitation_Prob_His,
+            "APCP_StdDev": X3_Precipitation_StdDev_His,
+            "APCP_Mean": X3_Precipitation_Mean_His,
+            "ptype": X3_pType_His,
+        },
+        coords={
+            "time": ens_mf_his["step"],
+            "latitude": ens_mf_his["latitude"],
+            "longitude": ens_mf_his["longitude"],
+        },
+    )
+
+
+
+    ## Deterministic
     # Create FastHerbie Object.
     FH_histsub = FastHerbie(
         DATES, model="aifs", fxx=fxx, product="oper", verbose=False, save_dir=tmp_dir
@@ -540,18 +630,6 @@ for i in range(his_period, 1, -12):
         },
     ).sortby("step")
 
-    aifs_his_mf_surf = xr.open_mfdataset(
-        aifs_hisgribs,
-        engine="cfgrib",
-        combine="nested",
-        concat_dim="step",
-        decode_timedelta=False,
-        join="outer",
-        coords="minimal",
-        compat="override",
-        backend_kwargs={"filter_by_keys": {"typeOfLevel": "surface"}},
-    ).sortby("step")
-
     aifs_his_mf_msl = xr.open_mfdataset(
         aifs_hisgribs,
         engine="cfgrib",
@@ -573,7 +651,7 @@ for i in range(his_period, 1, -12):
         join="outer",
         coords="minimal",
         compat="override",
-        backend_kwargs={"filter_by_keys": {"typeOfLevel": "atmosphere"}},
+        backend_kwargs={"filter_by_keys": {"typeOfLevel": "entireAtmosphere"}},
     ).sortby("step")
 
     # Combine the datasets
@@ -581,73 +659,15 @@ for i in range(his_period, 1, -12):
         [
             aifs_his_mf_2,
             aifs_his_mf_10,
-            aifs_his_mf_surf,
             aifs_his_mf_msl,
             aifs_his_mf_atm,
         ],
         compat="override",
     )
 
-    ########################################################################
-    ### Download the enfo data
-    # Create FastHerbie Object.
-    FH_histsub = FastHerbie(
-        DATES, model="aifs", fxx=fxx, product="enfo", verbose=False, save_dir=tmp_dir
-    )
-
-    ens_his_paths = FH_histsub.download(match_string_enfo, verbose=False)
-
-    ens_his_mf = xr.open_mfdataset(
-        ens_his_paths,
-        engine="cfgrib",
-        combine="nested",
-        concat_dim="step",
-        decode_timedelta=False,
-        join="outer",
-        coords="minimal",
-        compat="override",
-    ).sortby("step")
-
-    ens_his_mf["tpd"] = ens_his_mf["tp"].diff(dim="step")
-
-    # Set the first difference value to the first value
-    ens_his_mf["tpd"] = xr.where(
-        ens_his_mf.step == ens_his_mf.step.isel(step=0),
-        ens_his_mf["tp"].isel(step=0),
-        ens_his_mf["tpd"],
-    )
-
-    # AIFS historic outputs are 6-hour accumulations; convert to hourly
-    ens_his_mf["tpd"] = ens_his_mf["tpd"] / 6
-
-    # Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
-    X3_Precipitation_Prob_His = (ens_his_mf["tpd"] > 0.0001).sum(
-        dim="number"
-    ) / ens_his_mf.sizes["number"]
-
-    # Find the standard deviation of precipitation accumulation across all members
-    X3_Precipitation_StdDev_His = ens_his_mf["tpd"].std(dim="number")
-
-    # Find the average precipitation accumulation across all members
-    X3_Precipitation_Mean_His = ens_his_mf["tpd"].mean(dim="number")
-
-    # Merge into a new xarray dataset
-    xr_enso_hisOut = xr.Dataset(
-        {
-            "Precipitation_Prob": X3_Precipitation_Prob_His,
-            "APCP_StdDev": X3_Precipitation_StdDev_His,
-            "APCP_Mean": X3_Precipitation_Mean_His,
-        },
-        coords={
-            "step": ens_his_mf["step"],
-            "latitude": ens_his_mf["latitude"],
-            "longitude": ens_his_mf["longitude"],
-        },
-    )
-
     # Merge the xarray objects
     xarray_hist_merged = xr.merge(
-        [aifs_his_mf, xr_enso_hisOut], compat="override", join="outer"
+        [aifs_his_mf, xr_ensoOut_His], compat="override", join="outer"
     )
 
     # Save merged and processed xarray dataset to disk using zarr with compression
@@ -674,7 +694,7 @@ for i in range(his_period, 1, -12):
 
     # Chunk and save as zarr
     xarray_hist_merged = xarray_hist_merged.chunk(
-        chunks={"time": 64, "latitude": process_chunk, "longitude": process_chunk}
+        chunks={"time": 1, "latitude": process_chunk, "longitude": process_chunk}
     )
 
     with ProgressBar():
@@ -732,7 +752,7 @@ else:
         + "/ECMWF_AIFS_Hist"
         + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
         + ".zarr"
-        for i in range(his_period, 1, -12)
+        for i in range(his_period, -1, -6)
     ]
 
 # Read in the zarr arrays

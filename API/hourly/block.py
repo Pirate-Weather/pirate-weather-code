@@ -81,6 +81,7 @@ def _populate_max_pchance(
         if not condition():
             return
         # Round but keep NaN mask so we don't attempt to cast NaN to int
+        # Defined here: https://codes.ecmwf.int/grib/format/grib2/ctables/4/201/
         ptype_vals = np.round(InterThour_inputs[key])
         ptype_nan_mask = np.isnan(ptype_vals)
         ptype_hour = np.zeros_like(ptype_vals, dtype=int)

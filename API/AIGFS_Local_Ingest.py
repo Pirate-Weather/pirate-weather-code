@@ -102,7 +102,7 @@ latest_run = HerbieLatest(
     fxx=240,
     product="sfc",
     verbose=False,
-    priority=["nomads"],
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 
@@ -178,7 +178,7 @@ FH_forecastsub = FastHerbie(
     fxx=aigfs_range,
     product="sfc",
     verbose=False,
-    priority=["nomads"],
+    priority=["aws", "nomads"],
     save_dir=tmp_dir,
 )
 
@@ -241,7 +241,7 @@ assert len(xarray_forecast_merged.time) == len(aigfs_range), (
 )
 
 # Create a new time series
-start = xarray_forecast_merged.time.min().values  # Adjust as necessary
+start = base_time  # Adjust as necessary
 end = xarray_forecast_merged.time.max().values  # Adjust as necessary
 new_hourly_time = pd.date_range(
     start=start - pd.Timedelta(hours=his_period), end=end, freq="h"
@@ -251,7 +251,7 @@ stacked_times = np.concatenate(
     (
         pd.date_range(
             start=start - pd.Timedelta(hours=his_period),
-            end=start - pd.Timedelta(hours=1),
+            end=start,
             freq="6h",
         ),
         xarray_forecast_merged.time.values,
@@ -283,7 +283,7 @@ xarray_forecast_merged["APCP_surface"].data = APCP_surface_tmp
 
 # Save the dataset with compression and filters for all variables
 xarray_forecast_merged = xarray_forecast_merged.chunk(
-    chunks={"time": 240, "latitude": process_chunk, "longitude": process_chunk}
+    chunks={"time": -1, "latitude": process_chunk, "longitude": process_chunk}
 )
 xarray_forecast_merged.to_zarr(
     forecast_process_path + "_.zarr", mode="w", consolidated=False, compute=True
@@ -305,7 +305,7 @@ os.remove(forecast_process_path + "_wgrib2_merged.nc")
 # Loop through the runs and check if they have already been processed to s3
 
 # 6 hour runs
-for i in range(his_period, 0, -6):
+for i in range(his_period, -1, -6):
     if save_type == "S3":
         s3_path = (
             historic_path
@@ -330,7 +330,7 @@ for i in range(his_period, 0, -6):
         # Check for a loca done file
         if os.path.exists(local_path.replace(".zarr", ".done")):
             logger.info(
-                "File already exists in S3, skipping download for: %s", local_path
+                "File already exists on disk, skipping download for: %s", local_path
             )
             continue
 
@@ -460,7 +460,7 @@ if save_type == "S3":
     os.makedirs(local_temp_dir, exist_ok=True)
 
     ncLocalWorking_paths = []
-    for i in range(his_period, 1, -6):
+    for i in range(his_period, -1, -6):
         timestamp = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
         final_zarr_name = f"AIGFS_Hist{timestamp}.zarr"
         extracted_path = download_extract_historic_archive(
@@ -478,7 +478,7 @@ else:
         + "/AIGFS_Hist"
         + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
         + ".zarr"
-        for i in range(his_period, 1, -6)
+        for i in range(his_period, -1, -6)
     ]
 
 # Dask Setup
@@ -602,7 +602,7 @@ with ProgressBar():
     # Use a reasonable time chunk size instead of full time dimension
     # to avoid creating single large chunks that are inefficient for access
     # Use min of 240 or the actual time length to handle shorter forecasts
-    time_chunk_size = min(240, len(hourly_timesUnix))
+    time_chunk_size = len(hourly_timesUnix)
     zarr_array = zarr.create_array(
         store=zarr_store,
         shape=(

@@ -61,12 +61,11 @@ FORECAST_LEAD_RANGES = {
     "NBM_FIRE": list(range(6, 192, 6)),
     "HRRR_1H": list(range(1, 19)),
     "HRRR_6H": list(range(18, 49)),
-    "ECMWF_AIFS": list(range(0, 241, 6)),
+    "ECMWF_AIFS": list(range(6, 241, 6)),
     "ECMWF_IFS_1": list(range(3, 144, 3)),
     "ECMWF_IFS_2": list(range(144, 241, 6)),
     "AIGFS": list(range(6, 241, 6)),
     "AIGEFS": list(range(6, 241, 6)),
-    "HGEFS": list(range(0, 241, 6)),
 }
 
 # Radius, in km, used for DWD model nearest-neighbor selection
