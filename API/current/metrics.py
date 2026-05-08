@@ -172,9 +172,7 @@ _CURRENTLY_ORDER_AI_ROW_NO_ECMWF = [
 ]
 
 
-def _build_source_strategies(
-    source_map, lat, lon, has_ecmwf=True, source_list=None
-):
+def _build_source_strategies(source_map, lat, lon, has_ecmwf=True, source_list=None):
     """
     Build source strategies in priority order based on location.
 

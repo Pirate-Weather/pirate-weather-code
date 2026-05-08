@@ -205,7 +205,9 @@ def prepare_data_inputs(
     prcip_intensity_inputs = {}
     if prioritize_ai_models:
         if "ecmwf_ifs" in source_list and ecmwf_merged is not None:
-            prcip_intensity_inputs["ecmwf"] = ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
+            prcip_intensity_inputs["ecmwf"] = (
+                ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
+            )
         # Preserve the legacy key name expected by downstream hourly logic;
         # the value is whichever of GEFS or GFS is available/preferred.
         if "gefs" in source_list and gefs_merged is not None:
@@ -236,7 +238,9 @@ def prepare_data_inputs(
             # causing snow accumulation (derived from accum_mean) to appear
             # without a matching precipIntensity. Using accum_mean * 1000 here
             # keeps intensity consistent with the accum field (also accum_mean * 1000).
-            prcip_intensity_inputs["ecmwf"] = ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
+            prcip_intensity_inputs["ecmwf"] = (
+                ecmwf_merged[:, ECMWF["accum_mean"]] * 1000
+            )
         if "gefs" in source_list and gefs_merged is not None:
             prcip_intensity_inputs["gfs_gefs"] = gefs_merged[:, GEFS["accum"]]
         elif "gfs" in source_list and gfs_merged is not None:

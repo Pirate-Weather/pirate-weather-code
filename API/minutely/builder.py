@@ -392,14 +392,16 @@ def _process_aigefs_ptype_with_temperature(
     if gfsMinuteInterpolation is None:
         return
     temp = gfsMinuteInterpolation[:, GFS["temp"]]
-    precip_mask = np.nan_to_num(aigefsMinuteInterpolation[:, GEFS["accum"]], nan=0.0) > 0
-    precip_mask |= np.nan_to_num(aigefsMinuteInterpolation[:, GEFS["prob"]], nan=0.0) > 0
+    precip_mask = (
+        np.nan_to_num(aigefsMinuteInterpolation[:, GEFS["accum"]], nan=0.0) > 0
+    )
+    precip_mask |= (
+        np.nan_to_num(aigefsMinuteInterpolation[:, GEFS["prob"]], nan=0.0) > 0
+    )
     InterTminute[:, 1] = (precip_mask & (temp <= TEMP_THRESHOLD_SNOW_C)).astype(int)
     InterTminute[:, 4] = (precip_mask & (temp >= TEMP_THRESHOLD_RAIN_C)).astype(int)
     InterTminute[:, 3] = (
-        precip_mask
-        & (temp > TEMP_THRESHOLD_SNOW_C)
-        & (temp < TEMP_THRESHOLD_RAIN_C)
+        precip_mask & (temp > TEMP_THRESHOLD_SNOW_C) & (temp < TEMP_THRESHOLD_RAIN_C)
     ).astype(int)
 
 
@@ -578,7 +580,9 @@ def _calculate_intensity(
                 intensity = gefsMinuteInterpolation[:, GEFS["accum"]]
                 return intensity, precipTypes, refc_used
             if "gfs" in source_list and gfsMinuteInterpolation is not None:
-                intensity = dbz_to_rate(gfsMinuteInterpolation[:, GFS["refc"]], precipTypes)
+                intensity = dbz_to_rate(
+                    gfsMinuteInterpolation[:, GFS["refc"]], precipTypes
+                )
                 refc_used = True
                 return intensity, precipTypes, refc_used
         elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
