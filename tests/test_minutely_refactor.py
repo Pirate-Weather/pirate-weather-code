@@ -1,7 +1,7 @@
 import numpy as np
 
 from API.constants.forecast_const import DATA_MINUTELY
-from API.constants.model_const import DWD_MOSMIX, ECMWF, HRRR, HRRR_SUBH
+from API.constants.model_const import DWD_MOSMIX, ECMWF, GEFS, GFS, HRRR, HRRR_SUBH
 from API.minutely.builder import _interp_dwd_mosmix, build_minutely_block
 
 
@@ -155,3 +155,39 @@ def test_build_minutely_dwd_no_rr1c_falls_back_to_ecmwf():
     assert np.any(precip_intensity > 0), (
         "Expected non-zero precipIntensity from ECMWF fallback when DWD has no RR1c"
     )
+
+
+def test_build_minutely_aigefs_ptype_falls_back_to_temperature():
+    minute_array_grib = np.arange(0, 61 * 60, 60, dtype=float)
+    source_list = ["gefs", "gfs"]
+
+    gefs_data = np.full((61, max(GEFS.values()) + 1), np.nan)
+    gefs_data[:, 0] = minute_array_grib
+    gefs_data[:, GEFS["accum"]] = 0.4
+    gefs_data[:, GEFS["prob"]] = 0.8
+
+    gfs_data = np.full((61, max(GFS.values()) + 1), np.nan)
+    gfs_data[:, 0] = minute_array_grib
+    gfs_data[:, GFS["temp"]] = -5.0
+
+    result = build_minutely_block(
+        minute_array_grib=minute_array_grib,
+        source_list=source_list,
+        hrrr_subh_data=None,
+        hrrr_merged=None,
+        nbm_data=None,
+        dwd_mosmix_data=None,
+        gefs_data=gefs_data,
+        gfs_data=gfs_data,
+        ecmwf_data=None,
+        era5_data=None,
+        prep_intensity_unit=1.0,
+        version=2,
+        lat=45.0,
+        lon=-75.0,
+        prioritize_ai_models=True,
+    )
+
+    InterPminute = result[0]
+    assert np.any(InterPminute[:, DATA_MINUTELY["snow_intensity"]] > 0)
+    assert np.all(InterPminute[:, DATA_MINUTELY["rain_intensity"]] == 0)
