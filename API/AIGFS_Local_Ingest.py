@@ -360,7 +360,7 @@ for i in range(his_period, -1, -6):
         fxx=fxx,
         product="sfc",
         verbose=False,
-        priority=["nomads"],
+        priority=["aws", "nomads"],
         save_dir=tmp_dir,
     )
 
