@@ -36,6 +36,7 @@ from API.ingest_utils import (
     pad_to_chunk_size,
     validate_grib_stats,
 )
+from API.herbie_custom_templates import register_aws_aigfs_aigefs_templates
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -94,6 +95,8 @@ if save_type == "Download":
 
 
 T0 = time.time()
+
+register_aws_aigfs_aigefs_templates()
 
 latest_run = HerbieLatest(
     model="aigfs",
