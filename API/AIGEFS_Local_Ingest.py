@@ -112,7 +112,6 @@ latest_run = HerbieLatest(
 )
 
 base_time = latest_run.date
-base_time = pd.Timestamp("2026-05-06 18:00:00")
 
 logger.info(base_time)
 
