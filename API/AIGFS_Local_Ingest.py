@@ -289,7 +289,7 @@ xarray_forecast_merged = xarray_forecast_merged.chunk(
     chunks={"time": -1, "latitude": process_chunk, "longitude": process_chunk}
 )
 xarray_forecast_merged.to_zarr(
-    forecast_process_path + "_.zarr", mode="w", consolidated=False, compute=True
+    forecast_process_path + "_forecast.zarr", mode="w", consolidated=False, compute=True
 )
 
 # %% Delete to free memory (keep only existing variables)
