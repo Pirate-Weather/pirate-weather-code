@@ -41,7 +41,9 @@ CHUNK_SIZES = {
     "DWD": 200,
     "HRDPS": 200,
     "RDPS": 200,
+    "REPS": 200,
     "GDPS": 200,
+    "GEPS": 200,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -57,7 +59,9 @@ FINAL_CHUNK_SIZES = {
     "DWD": 5,
     "HRDPS": 3,
     "RDPS": 3,
+    "REPS": 3,
     "GDPS": 3,
+    "GEPS": 3,
 }
 
 FORECAST_LEAD_RANGES = {
@@ -74,7 +78,9 @@ FORECAST_LEAD_RANGES = {
     "AIGEFS": list(range(6, 241, 6)),
     "HRDPS": list(range(1, 49)),
     "RDPS": list(range(1, 85)),
+    "REPS": list(range(3, 73, 3)),
     "GDPS": list(range(3, 241, 3)),
+    "GEPS": list(range(3, 241, 3)),
 }
 
 # Radius, in km, used for DWD model nearest-neighbor selection
