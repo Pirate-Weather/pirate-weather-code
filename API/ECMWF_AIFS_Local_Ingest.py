@@ -230,9 +230,11 @@ ens_mf["sfd"] = xr.where(
     ens_mf.step == ens_mf.step.isel(step=0), ens_mf["sf"].isel(step=0), ens_mf["sfd"]
 )
 
-# AIFS outputs 6-hour accumulations; convert to hourly rate
-ens_mf["tpd"] = ens_mf["tpd"] / 6
-ens_mf["sfd"] = ens_mf["sfd"] / 6
+# AIFS ensemble tp and sf are in kg m**-2 (= mm), not meters like IFS.
+# Divide by 6000 (6 hours × 1000 mm/m) to convert mm/6h → m/h so that
+# the downstream * 1000 conversion (m/h → mm/h) yields the correct result.
+ens_mf["tpd"] = ens_mf["tpd"] / 6000
+ens_mf["sfd"] = ens_mf["sfd"] / 6000
 
 # Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
 X3_Precipitation_Prob = (ens_mf["tpd"] > 0.0001).sum(dim="number") / ens_mf.sizes[
@@ -537,10 +539,11 @@ for i in range(his_period, -1, -6):
         compat="override",
     ).sortby("step")
 
-    # AIFS outputs 6-hour accumulations; convert to hourly rate.
-    # No difference since only one step
-    ens_mf_his["tpd"] = ens_mf_his["tp"] / 6
-    ens_mf_his["sfd"] = ens_mf_his["sf"] / 6
+    # AIFS ensemble tp and sf are in kg m**-2 (= mm), not meters like IFS.
+    # Divide by 6000 (6 hours × 1000 mm/m) to convert mm/6h → m/h so that
+    # the downstream * 1000 conversion (m/h → mm/h) yields the correct result.
+    ens_mf_his["tpd"] = ens_mf_his["tp"] / 6000
+    ens_mf_his["sfd"] = ens_mf_his["sf"] / 6000
 
     # Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
     X3_Precipitation_Prob_His = (ens_mf_his["tpd"] > 0.0001).sum(
