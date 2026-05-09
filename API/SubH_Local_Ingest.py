@@ -3,6 +3,7 @@
 # Note that because the hourly script saves the 1-h forecast to S3, this script doesn't have to do this
 
 # %% Import modules
+import logging
 import os
 import pickle
 import shutil
@@ -34,6 +35,9 @@ from API.ingest_utils import (
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
+# Logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -102,7 +106,7 @@ latest_run = Herbie_latest(
 
 base_time = latest_run.date
 
-print(base_time)
+logger.info(base_time)
 
 # Check if this is newer than the current file
 if save_type == "S3":
@@ -115,7 +119,7 @@ if save_type == "S3":
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to SubH, ending")
+            logger.info("No Update to SubH, ending")
             sys.exit()
 
 else:
@@ -129,7 +133,7 @@ else:
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to SubH, ending")
+            logger.info("No Update to SubH, ending")
             sys.exit()
 
 
@@ -202,7 +206,7 @@ FH_forecastsub.download(match_strings, verbose=False)
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(hrrr_range1):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(hrrr_range1))
         + " files but got "
@@ -223,7 +227,7 @@ cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 grib_check = run_command(cmd)
 
 validate_grib_stats(grib_check)
-print("Grib files passed validation, proceeding with processing")
+logger.info("Grib files passed validation, proceeding with processing")
 
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
@@ -241,7 +245,7 @@ cmd = (
 # Run wgrib2
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
 
 # Use wgrib2 to rotate the wind vectors
@@ -263,7 +267,7 @@ cmd2 = (
 # Run wgrib2 to rotate winds and save as NetCDF
 spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
-    print(spOUT2.stderr)
+    logger.error(spOUT2.stderr)
     sys.exit()
 
 # Convert to NetCDF
@@ -280,7 +284,7 @@ cmd3 = (
 # Run wgrib2 to rotate winds and save as NetCDF
 spOUT3 = run_command(cmd3)
 if spOUT3.returncode != 0:
-    print(spOUT3.stderr)
+    logger.error(spOUT3.stderr)
     sys.exit()
 
 
@@ -295,8 +299,10 @@ xarray_forecast_merged["REFC_entireatmosphere"] = mask_invalid_refc(
 )
 
 if len(xarray_forecast_merged.time) != len(hrrr_range1) * 4:
-    print(len(xarray_forecast_merged.time))
-    print(len(hrrr_range1) * 4)
+    logger.info(
+        "len(xarray_forecast_merged.time) = %d", len(xarray_forecast_merged.time)
+    )
+    logger.info("len(hrrr_range1) * 4 = %d", len(hrrr_range1) * 4)
 
     assert len(xarray_forecast_merged.time) == len(hrrr_range1) * 4, (
         "Incorrect number of timesteps! Exiting"
@@ -364,7 +370,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
 
     daskVarArrays = []
 
-    print(dask_var)
+    logger.info(dask_var)
 
 
 # Merge the arrays into a single 4D array
@@ -461,4 +467,4 @@ shutil.rmtree(forecast_process_dir)
 
 # Test Read
 T1 = time.time()
-print(T1 - T0)
+logger.info(T1 - T0)

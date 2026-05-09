@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import numpy as np
 import pandas as pd
@@ -75,7 +75,6 @@ class TestDWDHistoricLoop(unittest.TestCase):
             patch("os.path.exists") as mock_exists,
             patch("zarr.storage.LocalStore") as mock_store,
             patch("xarray.open_dataset") as mock_xr_open,
-            patch("builtins.open", new_callable=MagicMock),
         ):
             # Configure mocks
             def side_effect_exists(path):
@@ -158,8 +157,11 @@ class TestDWDHistoricLoop(unittest.TestCase):
                         ds_hist.to_zarr(store, mode="w", consolidated=False)
 
                         # Done file
-                        with open(hist_zarr_path.replace(".zarr", ".done"), "w") as f:
-                            f.write("Done")
+                        with patch("builtins.open", mock_open()):
+                            with open(
+                                hist_zarr_path.replace(".zarr", ".done"), "w"
+                            ) as f:
+                                f.write("Done")
 
                         # Re-open
                         ds_hist_lazy = mock_xr_open(store, engine="zarr", chunks="auto")
