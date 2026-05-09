@@ -144,14 +144,48 @@ else:
             print("No Update to REPS, ending")
             sys.exit()
 
-zarr_vars = (
+# Ensemble statistics output variables (written to zarr, read by the API)
+probVars = (
     "time",
-    "AFRAIN-SFC",
-    "AICEP-SFC",
-    "APCP-SFC",
-    "ARAIN-SFC",
-    "ASNOW-SFC",
+    "Precipitation_Prob",
+    "APCP_Mean",
+    "APCP_StdDev",
+    "AFRAIN_Mean",
+    "AICEP_Mean",
+    "ARAIN_Mean",
+    "ASNOW_Mean",
 )
+
+# Minimum precipitation rate (mm/h) used for the precipitation probability calculation
+PRECIP_THRESHOLD = 0.1
+
+# Base variable names as produced by wgrib2 for REPS GRIB2 files.
+# REPS stores all ensemble members in a single file; wgrib2 names them
+# VARNAME_SFC (first/control member), VARNAME_SFC.1, VARNAME_SFC.2, etc.
+base_var_names = ["APCP_SFC", "AFRAIN_SFC", "AICEP_SFC", "ARAIN_SFC", "ASNOW_SFC"]
+
+
+def find_member_variables(ds, base_name):
+    """Return all ensemble member variables for *base_name* found in *ds*.
+
+    wgrib2 names members as VARNAME_LEVEL (control/first), VARNAME_LEVEL.1,
+    VARNAME_LEVEL.2, … sorted in ascending member-number order.
+    """
+
+    def member_number(v):
+        suffix = v[len(base_name) + 1 :]
+        return int(suffix) if suffix.isdigit() else -1
+
+    return sorted(
+        [
+            v
+            for v in ds.data_vars
+            if v == base_name
+            or (v.startswith(base_name + ".") and v[len(base_name) + 1 :].isdigit())
+        ],
+        key=member_number,
+    )
+
 
 #####################################################################################################
 # %% Download forecast data using Herbie Latest
@@ -284,21 +318,80 @@ one_second = np.timedelta64(1, "s")
 stacked_timesUnix = (stacked_times - unix_epoch) / one_second
 hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
-# Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time
-APCP_surface_tmp = da.diff(
-    xarray_forecast_merged["APCP"],
-    axis=xarray_forecast_merged["APCP"].get_axis_num("time"),
-    prepend=0,
-)
-
-xarray_forecast_merged["APCP"].data = APCP_surface_tmp
-
-# Save the dataset with compression and filters for all variables
+# Chunk the merged dataset for efficient ensemble processing
 xarray_forecast_merged = xarray_forecast_merged.chunk(
-    chunks={"time": 72, "latitude": process_chunk, "longitude": process_chunk}
+    chunks={
+        "time": len(reps_file_range),
+        "latitude": process_chunk,
+        "longitude": process_chunk,
+    }
 )
+
+# Calculate ensemble statistics for every accumulation variable.
+# REPS stores all members in a single file; wgrib2 outputs them as
+# VARNAME_SFC (control), VARNAME_SFC.1, VARNAME_SFC.2, … per time step.
+stats_vars = {}
+for base_var in base_var_names:
+    member_vars = find_member_variables(xarray_forecast_merged, base_var)
+    if not member_vars:
+        print(f"Warning: no member variables found for {base_var}, skipping")
+        continue
+
+    n_members = len(member_vars)
+    print(f"Processing {base_var}: found {n_members} ensemble members")
+
+    # Stack all members → shape (n_members, n_times, ny, nx)
+    raw_stacked = da.stack(
+        [xarray_forecast_merged[v].data for v in member_vars],
+        axis=0,
+    )
+
+    # REPS stores totals since run start; diff converts to per-step accumulation.
+    # Prepend zeros so the first step equals its own 3-hour accumulation.
+    stacked = da.diff(
+        raw_stacked, axis=1, prepend=da.zeros_like(raw_stacked[:, :1, :, :])
+    )
+
+    # Divide by 3 to convert 3-hourly accumulation to mm/h
+    stacked = stacked / 3
+
+    # Clamp negatives that can arise from the diff at boundaries
+    stacked = da.maximum(stacked, 0)
+
+    # Mean across all members for every accumulation variable
+    var_prefix = base_var.split("_")[0]  # e.g. "APCP", "AFRAIN", …
+    stats_vars[f"{var_prefix}_Mean"] = stacked.mean(axis=0)
+
+    # APCP only: standard deviation and precipitation probability
+    if var_prefix == "APCP":
+        stats_vars["APCP_StdDev"] = stacked.std(axis=0)
+        stats_vars["Precipitation_Prob"] = (stacked > PRECIP_THRESHOLD).sum(
+            axis=0
+        ) / n_members
+
+# Build an xarray Dataset from the ensemble statistics
+stats_ds = xr.Dataset(
+    {
+        key: xr.DataArray(val, dims=["time", "latitude", "longitude"])
+        for key, val in stats_vars.items()
+    },
+    coords={
+        "time": xarray_forecast_merged["time"],
+        "latitude": xarray_forecast_merged["latitude"],
+        "longitude": xarray_forecast_merged["longitude"],
+    },
+)
+
+stats_ds = stats_ds.chunk(
+    chunks={
+        "time": len(reps_file_range),
+        "latitude": process_chunk,
+        "longitude": process_chunk,
+    }
+)
+
 with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-    xarray_forecast_merged.to_zarr(
+    stats_ds.to_zarr(
         forecast_process_path + "_.zarr",
         mode="w",
         consolidated=False,
@@ -307,10 +400,7 @@ with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
     )
 
 # %% Delete to free memory
-del (
-    APCP_surface_tmp,
-    xarray_forecast_merged,
-)
+del xarray_forecast_merged, stats_vars, stats_ds
 T1 = time.time()
 
 print(T1 - T0)
@@ -415,30 +505,62 @@ for i in range(his_period, 0, -6):
     # Read the merged netcdf file using xarray (single combined file)
     xarray_hist_merged = xr.open_dataset(hist_process_path + "_wgrib2_merged.nc")
 
-    # Fix things
-    # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time, every 6 hours
-    apcpProc = xarray_hist_merged["APCP"].values
+    # Chunk for efficient ensemble processing
+    xarray_hist_merged = xarray_hist_merged.chunk(
+        chunks={"time": 6, "latitude": process_chunk, "longitude": process_chunk}
+    )
 
-    apcpProcHour = np.diff(apcpProc, axis=0, prepend=0)
+    # Calculate ensemble statistics for historic data (same approach as forecast)
+    hist_stats_vars = {}
+    for base_var in base_var_names:
+        member_vars = find_member_variables(xarray_hist_merged, base_var)
+        if not member_vars:
+            continue
 
-    xarray_hist_merged["APCP"] = xarray_hist_merged["APCP"].copy(data=apcpProcHour)
+        n_members = len(member_vars)
 
-    # Clear memory
-    del (apcpProc, apcpProcHour)
+        raw_stacked = da.stack(
+            [xarray_hist_merged[v].data for v in member_vars],
+            axis=0,
+        )
 
-    # Save merged and processed xarray dataset to disk using zarr with compression
-    # Define the path to save the zarr dataset with the run time in the filename
-    # format the time following iso8601
+        stacked = da.diff(
+            raw_stacked, axis=1, prepend=da.zeros_like(raw_stacked[:, :1, :, :])
+        )
+        stacked = stacked / 3
+        stacked = da.maximum(stacked, 0)
 
-    # Save the dataset with compression and filters for all variables
-    # Use the same encoding as last time but with larger chunks to speed up read times
-    # Small fix for PRES_station/ PRES_surface
+        var_prefix = base_var.split("_")[0]
+        hist_stats_vars[f"{var_prefix}_Mean"] = stacked.mean(axis=0)
+
+        if var_prefix == "APCP":
+            hist_stats_vars["APCP_StdDev"] = stacked.std(axis=0)
+            hist_stats_vars["Precipitation_Prob"] = (stacked > PRECIP_THRESHOLD).sum(
+                axis=0
+            ) / n_members
+
+    hist_stats_ds = xr.Dataset(
+        {
+            key: xr.DataArray(val, dims=["time", "latitude", "longitude"])
+            for key, val in hist_stats_vars.items()
+        },
+        coords={
+            "time": xarray_hist_merged["time"],
+            "latitude": xarray_hist_merged["latitude"],
+            "longitude": xarray_hist_merged["longitude"],
+        },
+    )
+
+    hist_stats_ds = hist_stats_ds.chunk(
+        chunks={"time": 6, "latitude": process_chunk, "longitude": process_chunk}
+    )
+
     encoding = {
-        vname: {"chunks": (6, process_chunk, process_chunk)} for vname in zarr_vars[1:]
+        vname: {"chunks": (6, process_chunk, process_chunk)} for vname in probVars[1:]
     }
 
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        xarray_hist_merged.to_zarr(
+        hist_stats_ds.to_zarr(
             hist_process_path + "_REPS_Hist_TMP.zarr",
             mode="w",
             consolidated=False,
@@ -448,7 +570,7 @@ for i in range(his_period, 0, -6):
         )
 
     # Clear the xarray dataset from memory
-    del xarray_hist_merged
+    del xarray_hist_merged, hist_stats_vars, hist_stats_ds
 
     # Remove temp file created by wgrib2
     os.remove(hist_process_path + "_wgrib2_merged.nc")
@@ -529,7 +651,7 @@ daskInterpArrays = []
 daskVarArrays = []
 daskVarArrayList = []
 
-for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
+for daskVarIDX, dask_var in enumerate(probVars[:]):
     for local_ncpath in ncLocalWorking_paths:
         # If not found in array, use MISSING_DATA to show missing
         try:
@@ -649,12 +771,12 @@ with ProgressBar():
         zarr_array = zarr.create_array(
             store=zarr_store,
             shape=(
-                len(zarr_vars),
+                len(probVars),
                 len(hourly_timesUnix),
                 daskVarArrayStackDiskInterpPad.shape[2],
                 daskVarArrayStackDiskInterpPad.shape[3],
             ),
-            chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
+            chunks=(len(probVars), len(hourly_timesUnix), final_chunk, final_chunk),
             compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
             dtype="float32",
         )
@@ -662,7 +784,7 @@ with ProgressBar():
         # 4. Rechunk it to match the final array
         # 5. Write it out to the zarr array
         daskVarArrayStackDiskInterpPad.round(5).rechunk(
-            (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
+            (len(probVars), len(hourly_timesUnix), final_chunk, final_chunk)
         ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
