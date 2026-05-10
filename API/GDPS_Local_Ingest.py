@@ -146,13 +146,13 @@ else:
 
 zarr_vars = (
     "time",
-    "GUST_AGL-10m",
+    "GUST_AGL_10m",
     "PRMSL_MSL",
-    "TMP_AGL-2m",
-    "DPT_AGL-2m",
-    "RH_AGL-2m",
-    "UGRD_AGL-10m",
-    "VGRD_AGL-10m",
+    "TMP_AGL_2m",
+    "DPT_AGL_2m",
+    "RH_AGL_2m",
+    "UGRD_AGL_10m",
+    "VGRD_AGL_10m",
     "PRATE_Sfc",
     "APCP_Sfc",
     "PTYPE_Sfc",
@@ -321,7 +321,7 @@ APCP_surface_tmp = da.diff(
 )
 
 # Convert 3-hourly to 1-hourly
-APCP_surface_tmp[80:, :, :] = APCP_surface_tmp[80:, :, :] / 3
+APCP_surface_tmp = APCP_surface_tmp / 3
 
 xarray_forecast_merged["APCP_surface"].data = APCP_surface_tmp
 
@@ -410,7 +410,7 @@ for i in range(his_period, 0, -6):
     # Check for download length
     if len(FH_histsub.file_exists) != len(fxx):
         print(
-            "Download failed, expected 6 files but got "
+            f"Download failed, expected {len(fxx)} files but got "
             + str(len(FH_histsub.file_exists))
         )
         sys.exit(1)
@@ -419,7 +419,7 @@ for i in range(his_period, 0, -6):
     grib_list = build_herbie_grib_list(FH_histsub.file_exists, match_strings)
 
     # Perform a check if any data seems to be invalid
-    cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
+    cmd = f"cat {' '.join(grib_list)} | {wgrib2_path.strip()} - -s -stats"
 
     grib_check = run_command(cmd)
 
@@ -572,8 +572,8 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
         except FileNotFoundError:
             print("File not found, adding NaN array for: " + local_ncpath)
             daskVarArrays.append(
-                da.full((2, NY, NX), MISSING_DATA).rechunk(
-                    (2, process_chunk, process_chunk)
+                da.full((len(fxx), NY, NX), MISSING_DATA).rechunk(
+                    (len(fxx), process_chunk, process_chunk)
                 )
             )
 

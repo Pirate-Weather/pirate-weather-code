@@ -465,7 +465,7 @@ for i in range(his_period, 0, -6):
     # Check for download length
     if len(FH_histsub.file_exists) != len(fxx):
         print(
-            "Download failed, expected 6 files but got "
+            f"Download failed, expected {len(fxx)} files but got "
             + str(len(FH_histsub.file_exists))
         )
         sys.exit(1)

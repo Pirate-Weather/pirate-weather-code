@@ -250,7 +250,7 @@ if len(all_files) < expected_total:
 grib_list = build_herbie_grib_list(all_files, match_strings)
 
 # Perform a check if any data seems to be invalid
-cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
+cmd = f"cat {' '.join(grib_list)} | {wgrib2_path.strip()} - -s -stats"
 
 grib_check = run_command(cmd)
 
@@ -450,7 +450,7 @@ for i in range(his_period, 0, -6):
     )
     # Create a range of forecast lead times
     # Go from 1 to 7 to account for the weird prate approach
-    fxx = range(1, 7)
+    fxx = [3, 6]
 
     # Create FastHerbie Object.
     FH_histsub = FastHerbie(
@@ -468,7 +468,7 @@ for i in range(his_period, 0, -6):
     # Check for download length
     if len(FH_histsub.file_exists) != len(fxx):
         print(
-            "Download failed, expected 6 files but got "
+            f"Download failed, expected {len(fxx)} files but got "
             + str(len(FH_histsub.file_exists))
         )
         sys.exit(1)

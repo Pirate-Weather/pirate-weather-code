@@ -248,7 +248,7 @@ if len(all_files) < expected_total:
 grib_list = build_herbie_grib_list(all_files, match_strings)
 
 # Perform a check if any data seems to be invalid
-cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
+cmd = f"cat {' '.join(grib_list)} | {wgrib2_path.strip()} - -s -stats"
 
 grib_check = run_command(cmd)
 
