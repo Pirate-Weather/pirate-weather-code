@@ -70,6 +70,9 @@ def test_dwd_mosmix_temperature_conversion():
         data_ecmwf=None,
         data_gefs=None,
         data_dwd_mosmix=dwd_data,
+        data_aigfs=None,
+        data_aigefs=None,
+        data_aifs=None,
         logger=logger,
         loc_tag="test",
     )
@@ -247,6 +250,9 @@ def test_dwd_mosmix_timestamp_alignment():
         data_ecmwf=None,
         data_gefs=None,
         data_dwd_mosmix=dwd_data,
+        data_aigfs=None,
+        data_aigefs=None,
+        data_aifs=None,
         logger=logger,
         loc_tag="test_offset",
     )
@@ -282,6 +288,9 @@ def test_dwd_mosmix_invalid_timestamp_not_in_source_list():
         dataOut_gefs=False,
         dataOut_rtma_ru=False,
         dataOut_dwd_mosmix=False,  # Set to False when timestamp is invalid
+        dataOut_aigfs=False,
+        dataOut_aigefs=False,
+        dataOut_aifs=False,
         era5_merged=False,
         subhRunTime=None,
         hrrrhRunTime=None,
@@ -292,6 +301,9 @@ def test_dwd_mosmix_invalid_timestamp_not_in_source_list():
         ecmwfRunTime=None,
         gefsRunTime=None,
         dwdMosmixRunTime=0.0,  # Invalid timestamp (epoch = 1970-01-01 00Z)
+        aigfsRunTime=None,
+        aigefsRunTime=None,
+        aifsRunTime=None,
         x_rtma=None,
         y_rtma=None,
         rtma_lat=None,
@@ -352,6 +364,9 @@ def test_dwd_mosmix_valid_timestamp_in_source_list():
         dataOut_gefs=False,
         dataOut_rtma_ru=False,
         dataOut_dwd_mosmix=np.array([[1.0, 2.0, 3.0]]),  # Has data
+        dataOut_aigfs=False,
+        dataOut_aigefs=False,
+        dataOut_aifs=False,
         era5_merged=False,
         subhRunTime=None,
         hrrrhRunTime=None,
@@ -362,6 +377,9 @@ def test_dwd_mosmix_valid_timestamp_in_source_list():
         ecmwfRunTime=None,
         gefsRunTime=None,
         dwdMosmixRunTime=valid_timestamp,  # Valid timestamp
+        aigfsRunTime=None,
+        aigefsRunTime=None,
+        aifsRunTime=None,
         x_rtma=None,
         y_rtma=None,
         rtma_lat=None,

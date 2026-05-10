@@ -3,6 +3,7 @@
 # Alexander Rey, April 2024
 
 # %% Import modules
+import logging
 import os
 import pickle
 import shutil
@@ -37,6 +38,10 @@ from API.ingest_utils import (
     tune_nofile_limit,
     validate_grib_stats,
 )
+
+# Logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 def rounder(t):
@@ -149,16 +154,16 @@ while base_time is False:
     else:
         most_recent_time = most_recent_time - timedelta(hours=6)
         failCount = failCount + 1
-        print(failCount)
+        logger.info("failCount=%d", failCount)
 
         if failCount == 2:
-            print("No recent runs")
+            logger.error("No recent runs")
             exit(1)
 
 
 # base_time = pd.Timestamp("2024-03-05 16:00")
 # base_time = base_time - pd.Timedelta(hours=1)
-print(base_time)
+logger.info(base_time)
 
 # Check if this is newer than the current file
 if save_type == "S3":
@@ -171,7 +176,7 @@ if save_type == "S3":
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to NBM_Fire, ending")
+            logger.info("No Update to NBM_Fire, ending")
             sys.exit()
 
 else:
@@ -185,7 +190,7 @@ else:
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to NBM_Fire, ending")
+            logger.info("No Update to NBM_Fire, ending")
             sys.exit()
 
 zarr_vars = ("time", "FOSINDX_surface")
@@ -225,7 +230,7 @@ try:
         for x in FH_forecastsub.file_exists
     ]
 except Exception:
-    print("Download Failure 1, wait 20 seconds and retry")
+    logger.error("Download Failure 1, wait 20 seconds and retry")
     time.sleep(20)
     FH_forecastsub.download(match_strings, verbose=False)
     try:
@@ -234,7 +239,7 @@ except Exception:
             for x in FH_forecastsub.file_exists
         ]
     except Exception:
-        print("Download Failure 2, wait 20 seconds and retry")
+        logger.error("Download Failure 2, wait 20 seconds and retry")
         time.sleep(20)
         FH_forecastsub.download(match_strings, verbose=False)
         try:
@@ -243,7 +248,7 @@ except Exception:
                 for x in FH_forecastsub.file_exists
             ]
         except Exception:
-            print("Download Failure 3, wait 20 seconds and retry")
+            logger.error("Download Failure 3, wait 20 seconds and retry")
             time.sleep(20)
             FH_forecastsub.download(match_strings, verbose=False)
             try:
@@ -252,7 +257,7 @@ except Exception:
                     for x in FH_forecastsub.file_exists
                 ]
             except Exception:
-                print("Download Failure 4, wait 20 seconds and retry")
+                logger.error("Download Failure 4, wait 20 seconds and retry")
                 time.sleep(20)
                 FH_forecastsub.download(match_strings, verbose=False)
                 try:
@@ -261,7 +266,7 @@ except Exception:
                         for x in FH_forecastsub.file_exists
                     ]
                 except Exception:
-                    print("Download Failure 5, wait 20 seconds and retry")
+                    logger.error("Download Failure 5, wait 20 seconds and retry")
                     time.sleep(20)
                     FH_forecastsub.download(match_strings, verbose=False)
                     try:
@@ -270,12 +275,12 @@ except Exception:
                             for x in FH_forecastsub.file_exists
                         ]
                     except Exception:
-                        print("Download Failure 6, Fail")
+                        logger.error("Download Failure 6, Fail")
                         exit(1)
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(nbm_range):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range))
         + " files, but got "
@@ -290,7 +295,7 @@ cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 grib_check = run_command(cmd)
 
 validate_grib_stats(grib_check)
-print("Grib files passed validation, proceeding with processing")
+logger.info("Grib files passed validation, proceeding with processing")
 
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
@@ -307,7 +312,7 @@ cmd = (
 # Run wgrib2
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
 
 # Check output from wgrib2
@@ -326,7 +331,7 @@ cmd2 = (
 )
 spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
-    print(spOUT2.stderr)
+    logger.error(spOUT2.stderr)
     sys.exit()
 os.remove(forecast_process_path + "_wgrib2_merged.grib2")
 
@@ -344,7 +349,7 @@ cmd4 = (
 # Run wgrib2 to rotate winds and save as NetCDF
 spOUT4 = run_command(cmd4)
 if spOUT4.returncode != 0:
-    print(spOUT4.stderr)
+    logger.error(spOUT4.stderr)
     sys.exit()
 
 os.remove(forecast_process_path + "_wgrib2_merged_order.grib")
@@ -426,7 +431,7 @@ del daskArray, xarray_forecast_base
 os.remove(forecast_process_path + "_wgrib2_merged.nc")
 
 T1 = time.time()
-print(T0 - T1)
+logger.info(T0 - T1)
 
 ################################################################################################
 # %%Historic data
@@ -459,8 +464,9 @@ for i in range(his_period, 1, -6):
             print("File already exists locally, skipping download for: " + local_path)
             continue
 
-    print(
-        "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+    logger.info(
+        "Downloading: %s",
+        (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"),
     )
 
     # Create a range of dates for historic data going back 48 hours
@@ -501,7 +507,7 @@ for i in range(his_period, 1, -6):
     grib_check = run_command(cmd)
 
     validate_grib_stats(grib_check)
-    print("Grib files passed validation, proceeding with processing")
+    logger.info("Grib files passed validation, proceeding with processing")
 
     # Use wgrib2 to change the order
     cmd1 = (
@@ -515,7 +521,7 @@ for i in range(his_period, 1, -6):
     )
     spOUT1 = run_command(cmd1)
     if spOUT1.returncode != 0:
-        print(spOUT1.stderr)
+        logger.error(spOUT1.stderr)
         sys.exit()
 
     # Convert to NetCDF
@@ -530,7 +536,7 @@ for i in range(his_period, 1, -6):
     )
     spOUT3 = run_command(cmd3)
     if spOUT3.returncode != 0:
-        print(spOUT3.stderr)
+        logger.error(spOUT3.stderr)
         sys.exit()
 
     # Merge the  xarrays
@@ -569,7 +575,7 @@ for i in range(his_period, 1, -6):
         with open(done_file, "w") as f:
             f.write("Done")
 
-    print((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
+    logger.info((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
 
 
 # %% Merge the historic and forecast datasets and then squash using dask
@@ -647,7 +653,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
 
     daskVarArrays = []
 
-    print(dask_var)
+    logger.info(dask_var)
 
 
 # Merge the arrays into a single 4D array

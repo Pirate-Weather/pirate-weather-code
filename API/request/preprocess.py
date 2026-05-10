@@ -6,6 +6,7 @@ import asyncio
 import datetime
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Dict, List, Union
 
@@ -23,6 +24,8 @@ from API.io.zarr_reader import WeatherParallel
 from API.utils.geo import get_offset
 from API.utils.timing import TimingTracker
 
+RELATIVE_TIME_UNITS = {"s": 1, "h": 3600, "d": 86400}
+
 
 def parse_request_time(
     time_str: str,
@@ -36,10 +39,20 @@ def parse_request_time(
 
     Handles:
     - Unix timestamps (positive and negative)
-    - Relative time (seconds offset from now)
+    - Relative time (seconds offset from now, capped at 25 hours in the past)
+    - Relative negative time with unit suffixes (s, h, d)
     - ISO 8601 strings (with and without timezone)
     - Local time strings (requires timezone lookup)
     """
+    if len(time_str) >= 64:
+        raise HTTPException(status_code=400, detail="Invalid Time Specification")
+
+    relative_match = re.fullmatch(r"(-\d+(?:\.\d+)?)([shdSHD])", time_str)
+    if relative_match:
+        val = float(relative_match.group(1))
+        unit = relative_match.group(2).lower()
+        return now_time + datetime.timedelta(seconds=val * RELATIVE_TIME_UNITS[unit])
+
     if time_str.lstrip("-+").isnumeric():
         val = float(time_str)
         if val > 0:
@@ -120,7 +133,11 @@ class InitialRequestContext:
     ex_rtma_ru: int
     ex_ecmwf: int
     ex_dwd_mosmix: int
+    ex_aigefs: int
+    ex_aigfs: int
+    ex_aifs: int
     inc_day_night: int
+    inc_aimodels: int
     summary_text: bool
     unit_system: str
     wind_unit: float
@@ -345,8 +362,12 @@ def _parse_parameters(
     ex_rtma_ru = int("rtma_ru" in exclude_params)
     ex_ecmwf = int("ecmwf_ifs" in exclude_params)
     ex_dwd_mosmix = int("dwd_mosmix" in exclude_params)
+    ex_aigefs = int("aigefs" in exclude_params)
+    ex_aigfs = int("aigfs" in exclude_params)
+    ex_aifs = int("aifs" in exclude_params)
     summary_text = "summary" not in exclude_params
     inc_day_night = int("day_night_forecast" in include_params)
+    inc_aimodels = int("aimodels" in include_params)
 
     if (now_time - utc_time) > datetime.timedelta(hours=25):
         ex_nbm = 1
@@ -382,8 +403,12 @@ def _parse_parameters(
         ex_rtma_ru,
         ex_ecmwf,
         ex_dwd_mosmix,
+        ex_aigefs,
+        ex_aigfs,
+        ex_aifs,
         summary_text,
         inc_day_night,
+        inc_aimodels,
         read_wmo_alerts,
     )
 
@@ -563,8 +588,12 @@ async def prepare_initial_request(
         ex_rtma_ru,
         ex_ecmwf,
         ex_dwd_mosmix,
+        ex_aigefs,
+        ex_aigfs,
+        ex_aifs,
         summary_text,
         inc_day_night,
+        inc_aimodels,
         read_wmo_alerts,
     ) = _parse_parameters(
         exclude,
@@ -676,7 +705,11 @@ async def prepare_initial_request(
         ex_rtma_ru=ex_rtma_ru,
         ex_ecmwf=ex_ecmwf,
         ex_dwd_mosmix=ex_dwd_mosmix,
+        ex_aigefs=ex_aigefs,
+        ex_aigfs=ex_aigfs,
+        ex_aifs=ex_aifs,
         inc_day_night=inc_day_night,
+        inc_aimodels=inc_aimodels,
         summary_text=summary_text,
         unit_system=unit_system,
         wind_unit=wind_unit,

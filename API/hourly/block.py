@@ -81,6 +81,7 @@ def _populate_max_pchance(
         if not condition():
             return
         # Round but keep NaN mask so we don't attempt to cast NaN to int
+        # Defined here: https://codes.ecmwf.int/grib/format/grib2/ctables/4/201/
         ptype_vals = np.round(InterThour_inputs[key])
         ptype_nan_mask = np.isnan(ptype_vals)
         ptype_hour = np.zeros_like(ptype_vals, dtype=int)
@@ -552,18 +553,10 @@ def _calculate_derived_metrics(
         rain_mask, DATA_HOURLY["intensity"]
     ]
 
-    snow_intensity_indices = np.where(
-        InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["snow"]
-    )[0]
-    if snow_intensity_indices.size > 0:
-        snow_intensity_si = estimate_snow_height(
-            InterPhour[snow_intensity_indices, DATA_HOURLY["intensity"]],
-            InterPhour[snow_intensity_indices, DATA_HOURLY["temp"]],
-            InterPhour[snow_intensity_indices, DATA_HOURLY["wind"]],
-        )
-        InterPhour[snow_intensity_indices, DATA_HOURLY["snow_intensity"]] = (
-            snow_intensity_si
-        )
+    snow_mask = InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["snow"]
+    InterPhour[snow_mask, DATA_HOURLY["snow_intensity"]] = (
+        InterPhour[snow_mask, DATA_HOURLY["intensity"]] * 10
+    )
 
     sleet_mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["ice"]) | (
         InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["sleet"]
