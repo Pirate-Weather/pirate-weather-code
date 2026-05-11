@@ -655,7 +655,7 @@ def interpolate_dwd_to_grid_knearest_dask(
     # exactly the same distance from the same grid cell at the same time.
     station_ids_full = df_sorted[station_col].astype(str).to_numpy()
     station_sort_key = pd.to_numeric(station_ids_full, errors="coerce")
-    if np.isnan(station_sort_key).any():
+    if pd.isna(station_sort_key).any():
         station_sort_key = station_ids_full
     station_sort_rep = np.repeat(station_sort_key[:, None], k_max, axis=1).ravel()[
         valid
