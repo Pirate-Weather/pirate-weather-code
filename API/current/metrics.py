@@ -1606,9 +1606,7 @@ def build_current_section(
         InterPcurrent[DATA_CURRENT["ice_intensity"]],
         InterPcurrent[DATA_CURRENT["prob"]],
         InterPcurrent[DATA_CURRENT["error"]],
-    ) = _get_intensity(
-        sourceList, model_data, state, InterPminute, InterPcurrent
-    )
+    ) = _get_intensity(sourceList, model_data, state, InterPminute, InterPcurrent)
 
     InterPcurrent[DATA_CURRENT["bearing"]] = _get_bearing(
         sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
@@ -1616,27 +1614,21 @@ def build_current_section(
     InterPcurrent[DATA_CURRENT["cloud"]] = _get_cloud(
         sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
-    InterPcurrent[DATA_CURRENT["uv"]] = _get_uv(
-        sourceList, model_data, state
-    )
+    InterPcurrent[DATA_CURRENT["uv"]] = _get_uv(sourceList, model_data, state)
     InterPcurrent[DATA_CURRENT["station_pressure"]] = _get_station_pressure(
         sourceList, model_data, state
     )
     InterPcurrent[DATA_CURRENT["vis"]] = _get_vis(
         sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
-    InterPcurrent[DATA_CURRENT["ozone"]] = _get_ozone(
-        sourceList, model_data, state
-    )
+    InterPcurrent[DATA_CURRENT["ozone"]] = _get_ozone(sourceList, model_data, state)
 
     (
         InterPcurrent[DATA_CURRENT["storm_dist"]],
         InterPcurrent[DATA_CURRENT["storm_dir"]],
     ) = _get_storm(sourceList, model_data, state)
 
-    InterPcurrent[DATA_CURRENT["smoke"]] = _get_smoke(
-        sourceList, model_data, state
-    )
+    InterPcurrent[DATA_CURRENT["smoke"]] = _get_smoke(sourceList, model_data, state)
     InterPcurrent[DATA_CURRENT["solar"]] = _get_solar(
         sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
@@ -1659,9 +1651,7 @@ def build_current_section(
         InterPcurrent[DATA_CURRENT["apparent"]],
     )
 
-    InterPcurrent[DATA_CURRENT["fire"]] = _get_fire(
-        sourceList, model_data, state
-    )
+    InterPcurrent[DATA_CURRENT["fire"]] = _get_fire(sourceList, model_data, state)
 
     curr_temp_si = InterPcurrent[DATA_CURRENT["temp"]]
     curr_dew_si = InterPcurrent[DATA_CURRENT["dew"]]
