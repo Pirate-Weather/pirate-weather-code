@@ -188,6 +188,7 @@ def _build_source_strategies(
         lat: Latitude.
         lon: Longitude.
         has_ecmwf: Whether ECMWF has data for this variable.
+        prioritize_ai_models: Whether to prioritize AI model sources in the stacking order.
 
     Returns:
         List of (predicate, getter) tuples in priority order.
