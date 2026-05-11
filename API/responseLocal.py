@@ -732,6 +732,7 @@ async def PW_Forecast(
             version=version,
             lat=lat,
             lon=lon_IN,
+            prioritize_ai_models=bool(incAIModels),
         )
     minuteRainIntensity = InterPminute[:, DATA_MINUTELY["rain_intensity"]]
     minuteSnowIntensity = InterPminute[:, DATA_MINUTELY["snow_intensity"]]
@@ -834,6 +835,7 @@ async def PW_Forecast(
         num_hours=numHours,
         lat=lat,
         lon=lon,
+        prioritize_ai_models=bool(incAIModels),
     )
 
     InterThour_inputs = inputs["InterThour_inputs"]
@@ -1060,6 +1062,7 @@ async def PW_Forecast(
             logger=logger,
             loc_tag=loc_tag,
             include_currently=exCurrently != 1,
+            prioritize_ai_models=bool(incAIModels),
         )
     ### RETURN ###
     # 16. Construct and return the final JSON response

@@ -77,6 +77,7 @@ def _stack_with_priority(
         lon: Longitude.
         has_ecmwf: Whether ECMWF has data for this variable.
         source_data: Dict mapping source names to data arrays.
+        prioritize_ai_models: Whether to prioritize AI model sources in the stacking order.
 
     Returns:
         Stacked array with sources ordered by priority.
@@ -152,6 +153,7 @@ def prepare_data_inputs(
         num_hours: Number of forecast hours.
         lat: Latitude of the forecast location.
         lon: Longitude of the forecast location.
+        prioritize_ai_models: Whether to prioritize AI model sources in the stacking order.
 
     Returns:
         Dictionary containing prepared data inputs for hourly processing.
