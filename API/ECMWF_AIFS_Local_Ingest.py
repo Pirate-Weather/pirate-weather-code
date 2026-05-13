@@ -588,7 +588,13 @@ for i in range(his_period, -1, -6):
     ## Deterministic
     # Create FastHerbie Object.
     FH_histsub = FastHerbie(
-        DATES, model="aifs", fxx=fxx, product="oper", verbose=False, priority=["aws", "ecmwf"], save_dir=tmp_dir
+        DATES,
+        model="aifs",
+        fxx=fxx,
+        product="oper",
+        verbose=False,
+        priority=["aws", "ecmwf"],
+        save_dir=tmp_dir,
     )
 
     # Download the subsets
