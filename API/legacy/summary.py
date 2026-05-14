@@ -36,14 +36,10 @@ def build_minutely_summary(
             )
             minute_translate = translation.translate(["sentence", minute_text])
         except Exception:
-            logger.exception("CURRENTLY TEXT GEN ERROR %s", loc_tag)
+            logger.exception("MINUTELY TEXT GEN ERROR %s", loc_tag)
         return minute_translate, minute_icon
-
-    try:
-        dominant = int(Counter(max_p_chance).most_common(1)[0][0])
-        return p_types_text[dominant], p_types_icon[dominant]
-    except Exception:
-        logger.exception("MINUTELY TEXT GEN ERROR %s", loc_tag)
+    # If not summary_text, return the most common text/icon from the minute items
+    else:
         dominant = int(Counter(max_p_chance).most_common(1)[0][0])
         return p_types_text[dominant], p_types_icon[dominant]
 
