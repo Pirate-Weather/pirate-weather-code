@@ -29,11 +29,15 @@ def build_minutely_summary(
 ) -> Tuple[str, str]:
     """Compute minutely summary/icon text."""
     if summary_text:
-        max_cape = max(inter_p_current, inter_p_hour)
-        minute_text, minute_icon = calculate_minutely_text(
-            minute_items_si, current_text, current_icon, icon, max_cape
-        )
-        return translation.translate(["sentence", minute_text]), minute_icon
+        try:
+            max_cape = max(inter_p_current, inter_p_hour)
+            minute_text, minute_icon = calculate_minutely_text(
+                minute_items_si, current_text, current_icon, icon, max_cape
+            )
+            minute_translate = translation.translate(["sentence", minute_text])
+        except Exception:
+            logger.exception("CURRENTLY TEXT GEN ERROR %s", loc_tag)
+        return minute_translate, minute_icon
 
     try:
         dominant = int(Counter(max_p_chance).most_common(1)[0][0])

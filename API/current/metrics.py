@@ -1809,14 +1809,17 @@ def build_current_section(
     currently_si["iceAccumulation"] = 0
 
     current_summary_key = None
-    # Always calculate text for translation, even if not used in currently block, to ensure translation keys are generated for all scenarios.
-    currentText, currentIcon = calculate_text(
-        currently_si,
-        currentDay,
-        "current",
-        icon,
-    )
-    current_summary_key = currentText  # This is used for minutely.
+    try:
+        # Always calculate text for translation, even if not used in currently block, to ensure translation keys are generated for all scenarios.
+        currentText, currentIcon = calculate_text(
+            currently_si,
+            currentDay,
+            "current",
+            icon,
+        )
+        current_summary_key = currentText # This is used for minutely 
+    except Exception:
+        logger.exception("CURRENTLY TEXT GEN ERROR %s", loc_tag)
 
     if include_currently:
         try:
