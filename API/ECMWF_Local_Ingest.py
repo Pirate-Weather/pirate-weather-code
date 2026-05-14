@@ -152,6 +152,7 @@ def download_ecmwf_with_azure_fallback(dates, fxx, product, search):
     logger.info("ECMWF %s download succeeded from Azure fallback", product)
     return fh, paths, grib_list
 
+
 # %% Define base time from the most recent run
 T0 = time.time()
 
