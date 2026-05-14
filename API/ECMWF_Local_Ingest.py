@@ -583,7 +583,7 @@ for i in range(his_period, 1, -12):
         join="outer",
         coords="minimal",
         compat="override",
-        backend_kwargs={"filter_by_keys": {"typeOfLevel": "atmosphere"}},
+        backend_kwargs={"filter_by_keys": {"typeOfLevel": "entireAtmosphere"}},
     ).sortby("step")
 
     # Combine the datasets
