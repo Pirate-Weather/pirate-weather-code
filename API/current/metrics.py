@@ -1816,7 +1816,7 @@ def build_current_section(
         "current",
         icon,
     )
-    current_summary_key = currentText # This is used for minuetly 
+    current_summary_key = currentText  # This is used for minuetly
 
     if include_currently:
         try:
