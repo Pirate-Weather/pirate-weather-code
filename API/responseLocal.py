@@ -1105,7 +1105,7 @@ async def PW_Forecast(
             current_text=(
                 current_section.summary_key
                 or current_section.currently.get("summary", "")
-            ),
+            ),  # This takes the summary from the summary_key variable if available, which has formatted text.
             current_icon=current_section.currently.get("icon", ""),
             icon=icon,
             max_p_chance=maxPchance,
