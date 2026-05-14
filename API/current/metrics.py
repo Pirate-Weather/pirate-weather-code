@@ -1817,7 +1817,7 @@ def build_current_section(
             "current",
             icon,
         )
-        current_summary_key = currentText  # This is used for minutely
+        current_summary_key = currentText  # current_summary_key is used for minutely text generation.
     except Exception:
         logger.exception("CURRENTLY TEXT GEN ERROR %s", loc_tag)
 
