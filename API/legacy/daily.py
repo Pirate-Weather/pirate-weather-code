@@ -117,6 +117,7 @@ def apply_legacy_half_day_text(
     phase: str,
 ) -> Tuple[str, str]:
     """Apply PirateDayNightText for a half-day period when enabled."""
+    # This has been supplemented by pick_day_icon_and_summary, but is kept because I'm afraid to remove it
     if not summary_text:
         return fallback_text, fallback_icon
 
