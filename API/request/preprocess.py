@@ -336,6 +336,35 @@ def _setup_units(units: Union[str, None], loc_name: Dict[str, str]):
     return unit_system, unit_config
 
 
+def _parse_timemachine_days(request: Request, time_machine: bool) -> int:
+    """Parse and validate the optional timemachine days query parameter."""
+    if not time_machine:
+        return 1
+
+    raw_days = request.query_params.get("days")
+    if raw_days is None:
+        return 1
+
+    try:
+        days = int(raw_days)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid days parameter. Expected an integer between 1 and 7.",
+        ) from exc
+
+    if days < 1 or days > TIME_MACHINE_CONST["max_days"]:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid days parameter. Expected an integer between 1 and "
+                f"{TIME_MACHINE_CONST['max_days']}."
+            ),
+        )
+
+    return days
+
+
 def _parse_parameters(
     exclude: Union[str, None],
     include: Union[str, None],
@@ -419,12 +448,13 @@ def _setup_time_grids(
     base_time: datetime.datetime,
     base_day: datetime.datetime,
     pytz_tz: timezone,
+    timemachine_days: int = 1,
 ):
     if time_machine:
-        daily_days = 1
+        daily_days = timemachine_days
         daily_day_hours = 1
-        output_hours = 24
-        output_days = 1
+        output_hours = timemachine_days * 24
+        output_days = timemachine_days
     else:
         daily_days = 8
         daily_day_hours = 5
@@ -566,6 +596,7 @@ async def prepare_initial_request(
     tz_offset, tz_name = get_offset(**tz_offset_loc)
     tz_req = tf.timezone_at(lat=lat, lng=az_lon)
     loc_name = await asyncio.to_thread(reverse_geocode.get, (lat, az_lon))
+    timemachine_days = _parse_timemachine_days(request, time_machine)
 
     extend_flag = 0 if not extend else int(extend == "hourly")
     version_val = float(version) if version else 1.0
@@ -665,6 +696,7 @@ async def prepare_initial_request(
         base_time,
         base_day,
         pytz_tz,
+        timemachine_days,
     )
 
     num_hours = len(hour_array)
