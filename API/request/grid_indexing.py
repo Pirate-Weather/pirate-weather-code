@@ -110,6 +110,35 @@ class GridIndexingResult:
     WMO_alertDat: Union[str, None]
 
 
+def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours: int):
+    """Load the ERA5 point slice needed for the requested hourly grid."""
+    abslat_era5 = np.abs(era5_data["ERA5_lats"] - lat)
+    abslon_era5 = np.abs(era5_data["ERA5_lons"] - lon)
+    y_p = np.argmin(abslat_era5)
+    x_p = np.argmin(abslon_era5)
+    t_p = np.argmin(
+        np.abs(era5_data["ERA5_times"] - np.datetime64(base_day_utc.replace(tzinfo=None)))
+    )
+    dataOut_ERA5_xr = era5_data["dsERA5"][ERA5.keys()].isel(
+        latitude=y_p, longitude=x_p, time=slice(t_p, t_p + num_hours)
+    )
+    dataOut_ERA5 = xr.concat(
+        [dataOut_ERA5_xr[var] for var in ERA5.keys()], dim="variable"
+    )
+    unix_times_era5 = (
+        dataOut_ERA5_xr["time"].astype("datetime64[s]")
+        - np.datetime64("1970-01-01T00:00:00")
+    ).astype(np.int64)
+    era5_merged = np.vstack((unix_times_era5, dataOut_ERA5.values)).T
+
+    # Round the precipitation_type variable to nearest integer
+    # to avoid issues with interpolation producing non-integer values.
+    era5_merged[:, ERA5["precipitation_type"]] = np.rint(
+        era5_merged[:, ERA5["precipitation_type"]]
+    )
+    return era5_merged
+
+
 async def calculate_grid_indexing(
     *,
     lat: float,
@@ -131,6 +160,7 @@ async def calculate_grid_indexing(
     inc_aimodels: int,
     read_wmo_alerts: bool,
     base_day_utc: datetime.datetime,
+    num_hours: int,
     zarr_sources: ZarrSources,
     weather,
     timing_start: datetime.datetime,
@@ -422,33 +452,12 @@ async def calculate_grid_indexing(
     timer.log("### AI Models Detail END ###")
 
     if readERA5:
-        abslat_era5 = np.abs(zarr_sources.era5_data["ERA5_lats"] - lat)
-        abslon_era5 = np.abs(zarr_sources.era5_data["ERA5_lons"] - lon)
-        y_p = np.argmin(abslat_era5)
-        x_p = np.argmin(abslon_era5)
-        t_p = np.argmin(
-            np.abs(
-                zarr_sources.era5_data["ERA5_times"]
-                - np.datetime64(base_day_utc.replace(tzinfo=None))
-            )
-        )
-        dataOut_ERA5_xr = zarr_sources.era5_data["dsERA5"][ERA5.keys()].isel(
-            latitude=y_p, longitude=x_p, time=slice(t_p, t_p + 25)
-        )
-        dataOut_ERA5 = xr.concat(
-            [dataOut_ERA5_xr[var] for var in ERA5.keys()], dim="variable"
-        )
-        unix_times_era5 = (
-            dataOut_ERA5_xr["time"].astype("datetime64[s]")
-            - np.datetime64("1970-01-01T00:00:00")
-        ).astype(np.int64)
-        ERA5_MERGED = np.vstack((unix_times_era5, dataOut_ERA5.values)).T
-
-        # Round the precipitation_type variable to nearest integer
-        # to avoid issues with interpolation producing non-integer values
-        # (0 = rain, 1 = snow, 2 = sleet, etc.)
-        ERA5_MERGED[:, ERA5["precipitation_type"]] = np.rint(
-            ERA5_MERGED[:, ERA5["precipitation_type"]]
+        ERA5_MERGED = _load_era5_slice(
+            zarr_sources.era5_data,
+            lat=lat,
+            lon=lon,
+            base_day_utc=base_day_utc,
+            num_hours=num_hours,
         )
 
     else:

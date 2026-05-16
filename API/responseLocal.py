@@ -548,6 +548,7 @@ async def PW_Forecast(
         inc_aimodels=incAIModels,
         read_wmo_alerts=readWMOAlerts,
         base_day_utc=baseDayUTC,
+        num_hours=numHours,
         zarr_sources=zarr_sources,
         weather=weather,
         timing_start=T_Start,
@@ -765,6 +766,7 @@ async def PW_Forecast(
         timezone_localizer=pytzTZ,
         hour_array_grib=hour_array_grib,
         time_machine=timeMachine,
+        daily_days=daily_days,
         existing_day_array_grib=day_array_grib,
     )
 

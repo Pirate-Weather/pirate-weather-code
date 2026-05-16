@@ -8,6 +8,7 @@ from timezonefinder import TimezoneFinder
 from API.request.preprocess import (
     InitialRequestContext,
     _parse_parameters,
+    _parse_timemachine_days,
     parse_request_time,
     prepare_initial_request,
 )
@@ -133,3 +134,65 @@ def test_parse_parameters_ai_models_include_and_exclude_priority():
     assert result[17] == 0  # ex_aigfs
     assert result[18] == 0  # ex_aifs
     assert result[21] == 1  # inc_aimodels
+
+
+def test_parse_timemachine_days_defaults_to_one_for_non_timemachine():
+    request = MagicMock()
+    request.query_params = {"days": "5"}
+
+    assert _parse_timemachine_days(request, time_machine=False) == 1
+
+
+def test_parse_timemachine_days_accepts_valid_days_range():
+    request = MagicMock()
+    request.query_params = {"days": "7"}
+
+    assert _parse_timemachine_days(request, time_machine=True) == 7
+
+
+@pytest.mark.parametrize("days_value", ["0", "8", "abc"])
+def test_parse_timemachine_days_rejects_invalid_values(days_value):
+    request = MagicMock()
+    request.query_params = {"days": days_value}
+
+    with pytest.raises(HTTPException, match="Invalid days parameter"):
+        _parse_timemachine_days(request, time_machine=True)
+
+
+@pytest.mark.asyncio
+async def test_prepare_initial_request_timemachine_uses_days_query_param():
+    request = MagicMock()
+    request.url = "http://localhost/timemachine/apikey/40.7128,-74.0060,1704067200?days=3"
+    request.query_params = {"days": "3"}
+    location = "40.7128,-74.0060,1704067200"
+    tf = TimezoneFinder(in_memory=True)
+    translations = {"en": {"title": "Forecast"}}
+    logger = MagicMock()
+    force_now = str(1735689600)
+
+    result = await prepare_initial_request(
+        request=request,
+        location=location,
+        units="us",
+        extend=None,
+        exclude=None,
+        include=None,
+        lang="en",
+        version=None,
+        tmextra=None,
+        icon="pirate",
+        extraVars=None,
+        tf=tf,
+        translations=translations,
+        timing_enabled=False,
+        force_now=force_now,
+        logger=logger,
+        start_time=datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
+    )
+
+    assert isinstance(result, InitialRequestContext)
+    assert result.time_machine is True
+    assert result.daily_days == 3
+    assert result.output_days == 3
+    assert result.output_hours == 72
+    assert len(result.hour_array) == 73

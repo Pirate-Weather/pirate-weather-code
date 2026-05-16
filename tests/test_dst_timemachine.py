@@ -185,6 +185,24 @@ def test_time_indexing_timemachine_mode_dst_fall_back():
     )
 
 
+def test_time_indexing_timemachine_multi_day_assigns_multiple_day_buckets():
+    """Multi-day time-machine requests should map hours into distinct day buckets."""
+    hour_array_grib = _make_hour_array_grib(SPRING_FORWARD_DATE, hours=73)
+    result = calculate_time_indexing(
+        base_time=SPRING_FORWARD_DATE,
+        timezone_localizer=EASTERN,
+        hour_array_grib=hour_array_grib,
+        time_machine=True,
+        daily_days=3,
+    )
+
+    unique_buckets = np.unique(result.hourly_day_index)
+
+    assert np.all(np.diff(result.hourly_day_index) >= 0)
+    assert np.array_equal(unique_buckets, np.array([0, 1, 2]))
+    assert np.all((result.hourly_day_index >= 0) & (result.hourly_day_index <= 2))
+
+
 # ---------------------------------------------------------------------------
 # Integration tests – timemachine HTTP endpoint with DST transition dates
 # These require live S3 data and are skipped when PW_API is not set.
