@@ -162,7 +162,9 @@ def test_parse_timemachine_days_rejects_invalid_values(days_value):
 @pytest.mark.asyncio
 async def test_prepare_initial_request_timemachine_uses_days_query_param():
     request = MagicMock()
-    request.url = "http://localhost/timemachine/apikey/40.7128,-74.0060,1704067200?days=3"
+    request.url = (
+        "http://localhost/timemachine/apikey/40.7128,-74.0060,1704067200?days=3"
+    )
     request.query_params = {"days": "3"}
     location = "40.7128,-74.0060,1704067200"
     tf = TimezoneFinder(in_memory=True)

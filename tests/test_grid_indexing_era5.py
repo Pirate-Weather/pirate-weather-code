@@ -11,7 +11,10 @@ def test_load_era5_slice_uses_requested_num_hours():
     hours = 60
     requested_hours = 49
     times = np.array(
-        [np.datetime64("2024-01-01T00:00:00") + np.timedelta64(hour, "h") for hour in range(hours)]
+        [
+            np.datetime64("2024-01-01T00:00:00") + np.timedelta64(hour, "h")
+            for hour in range(hours)
+        ]
     )
     latitudes = np.array([40.0])
     longitudes = np.array([286.0])
@@ -46,7 +49,13 @@ def test_load_era5_slice_uses_requested_num_hours():
     np.testing.assert_array_equal(
         result[:, 0],
         np.array(
-            [int((time - np.datetime64("1970-01-01T00:00:00")) / np.timedelta64(1, "s")) for time in times[:requested_hours]],
+            [
+                int(
+                    (time - np.datetime64("1970-01-01T00:00:00"))
+                    / np.timedelta64(1, "s")
+                )
+                for time in times[:requested_hours]
+            ],
             dtype=np.int64,
         ),
     )

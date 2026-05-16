@@ -73,7 +73,10 @@ def test_prepare_data_inputs_normalizes_short_era5_series_to_num_hours():
     assert inputs["temperature_inputs"].shape[0] == num_hours
     assert inputs["era5_rain_intensity"].shape == (num_hours,)
 
-    assert np.allclose(inputs["InterThour_inputs"]["era5_ptype"][:source_hours], np.arange(source_hours))
+    assert np.allclose(
+        inputs["InterThour_inputs"]["era5_ptype"][:source_hours],
+        np.arange(source_hours),
+    )
     assert np.isnan(inputs["InterThour_inputs"]["era5_ptype"][source_hours:]).all()
     assert np.isnan(inputs["temperature_inputs"][source_hours:, 0]).all()
     assert np.isnan(inputs["era5_rain_intensity"][source_hours:]).all()

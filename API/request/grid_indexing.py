@@ -117,7 +117,9 @@ def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours:
     y_p = np.argmin(abslat_era5)
     x_p = np.argmin(abslon_era5)
     t_p = np.argmin(
-        np.abs(era5_data["ERA5_times"] - np.datetime64(base_day_utc.replace(tzinfo=None)))
+        np.abs(
+            era5_data["ERA5_times"] - np.datetime64(base_day_utc.replace(tzinfo=None))
+        )
     )
     dataOut_ERA5_xr = era5_data["dsERA5"][ERA5.keys()].isel(
         latitude=y_p, longitude=x_p, time=slice(t_p, t_p + num_hours)

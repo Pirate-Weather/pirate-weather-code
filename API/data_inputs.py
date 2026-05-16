@@ -17,7 +17,6 @@ from API.constants.model_const import (
 )
 from API.utils.source_priority import should_gfs_precede_dwd
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -54,7 +53,9 @@ def _normalize_length(num_hours, values, *, label: str | None = None):
     )
 
     target_shape = (num_hours, *array.shape[1:])
-    result = np.full(target_shape, np.nan, dtype=np.result_type(array.dtype, np.float64))
+    result = np.full(
+        target_shape, np.nan, dtype=np.result_type(array.dtype, np.float64)
+    )
     copy_len = min(num_hours, array.shape[0])
     result[:copy_len] = array[:copy_len]
     return result
