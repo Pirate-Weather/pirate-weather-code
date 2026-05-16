@@ -35,7 +35,9 @@ class DailySection:
     day_night_list: list
 
 
-def _get_night_window_end(day_array_4am_grib: np.ndarray, idx: int, start_time: int) -> int:
+def _get_night_window_end(
+    day_array_4am_grib: np.ndarray, idx: int, start_time: int
+) -> int:
     """Return the closing 4am boundary for a night window.
 
     Test fixtures may only provide `daily_days` boundaries rather than the
