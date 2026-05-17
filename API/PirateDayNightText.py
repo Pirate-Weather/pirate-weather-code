@@ -145,6 +145,14 @@ def _get_time_phrase(
         # Single period: "during [period_name]"
         return ["during", all_periods[period_indices[0]]]
 
+    # Day/night windows should usually collapse to one or two logical periods.
+    # If a malformed or DST-shifted slice produces more, emit a valid combined
+    # "during" phrase instead of returning None.
+    combined_periods = all_periods[period_indices[-1]]
+    for idx in reversed(period_indices[:-1]):
+        combined_periods = ["and", all_periods[idx], combined_periods]
+    return ["during", combined_periods]
+
 
 def calculate_period_summary_text(
     period_indices,

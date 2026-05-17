@@ -49,6 +49,10 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+ECMWF_PRIMARY_PRIORITY = ["aws", "ecmwf"]
+ECMWF_LATEST_PRIORITY = ["aws", "azure", "ecmwf"]
+ECMWF_AZURE_FALLBACK_PRIORITY = ["azure", "ecmwf"]
+
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -104,6 +108,51 @@ if save_type == "Download":
     if not os.path.exists(historic_path):
         os.makedirs(historic_path)
 
+
+def download_ecmwf_with_azure_fallback(dates, fxx, product, search):
+    """Download ECMWF GRIB subsets from AWS first, then retry from Azure on failure."""
+
+    def _attempt_download(priority, overwrite=False):
+        fh = FastHerbie(
+            dates,
+            model="ifs",
+            fxx=fxx,
+            product=product,
+            verbose=False,
+            priority=priority,
+            save_dir=tmp_dir,
+        )
+        paths = fh.download(search, verbose=False, overwrite=overwrite, max_threads=6)
+        if len(fh.file_exists) != len(fxx) or len(paths) != len(fxx):
+            raise RuntimeError(
+                f"expected {len(fxx)} {product} files, "
+                f"found {len(fh.file_exists)} and downloaded {len(paths)}"
+            )
+
+        grib_list = [
+            str(Path(x.get_localFilePath(search)).expand()) for x in fh.file_exists
+        ]
+        cmd = "cat " + " ".join(grib_list) + f" | {wgrib2_path.rstrip()} - -s -stats"
+        grib_check = run_command(cmd)
+        validate_grib_stats(grib_check)
+        return fh, paths, grib_list
+
+    try:
+        return _attempt_download(ECMWF_PRIMARY_PRIORITY)
+    except Exception:
+        logger.exception(
+            "ECMWF %s download from AWS/ECMWF failed; retrying from Azure",
+            product,
+        )
+
+    fh, paths, grib_list = _attempt_download(
+        ECMWF_AZURE_FALLBACK_PRIORITY,
+        overwrite=True,
+    )
+    logger.info("ECMWF %s download succeeded from Azure fallback", product)
+    return fh, paths, grib_list
+
+
 # %% Define base time from the most recent run
 T0 = time.time()
 
@@ -114,7 +163,7 @@ latest_run = HerbieLatest(
     fxx=240,
     product="oper",
     verbose=True,
-    priority=["aws", "ecmwf"],
+    priority=ECMWF_LATEST_PRIORITY,
     save_dir=tmp_dir,
 )
 
@@ -181,30 +230,13 @@ ifs_range1 = FORECAST_LEAD_RANGES["ECMWF_IFS_1"]
 ifs_range2 = FORECAST_LEAD_RANGES["ECMWF_IFS_2"]
 ifsFileRange = [*ifs_range1, *ifs_range2]
 
-# Create FastHerbie object
-FH_forecastsub = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="12h"),
-    model="ifs",
-    fxx=ifsFileRange,
-    product="enfo",
-    verbose=False,
-    save_dir=tmp_dir,
-)
-
-
 match_string_enfo = r":(tp:sfc:\d+):"
-ens_paths = FH_forecastsub.download(match_string_enfo, verbose=False)
-
-grib_list = [
-    str(Path(x.get_localFilePath(match_string_enfo)).expand())
-    for x in FH_forecastsub.file_exists
-]
-
-# Perform a check if any data seems to be invalid
-cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
-
-grib_check = run_command(cmd)
-validate_grib_stats(grib_check)
+_, ens_paths, _ = download_ecmwf_with_azure_fallback(
+    pd.date_range(start=base_time, periods=1, freq="12h"),
+    ifsFileRange,
+    "enfo",
+    match_string_enfo,
+)
 logger.info("Grib files passed validation, proceeding with processing")
 
 
@@ -287,29 +319,12 @@ match_strings = (
 )
 
 
-# Create FastHerbie object
-FH_forecastsub = FastHerbie(
+_, ifs_paths, _ = download_ecmwf_with_azure_fallback(
     pd.date_range(start=base_time, periods=1, freq="12h"),
-    model="ifs",
-    fxx=ifsFileRange,
-    product="oper",
-    verbose=False,
-    priority=["aws", "ecmwf"],
-    save_dir=tmp_dir,
+    ifsFileRange,
+    "oper",
+    match_strings,
 )
-
-# Download the subsets
-ifs_paths = FH_forecastsub.download(match_strings, verbose=False)
-
-grib_list = [
-    str(Path(x.get_localFilePath(match_strings)).expand())
-    for x in FH_forecastsub.file_exists
-]
-
-# Perform a check if any data seems to be invalid
-cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
-
-grib_check = run_command(cmd)
 logger.info("Grib files passed validation, proceeding with processing")
 
 
@@ -373,7 +388,7 @@ ifs_mf_atm = xr.open_mfdataset(
     join="outer",
     coords="minimal",
     compat="override",
-    backend_kwargs={"filter_by_keys": {"typeOfLevel": "atmosphere"}},
+    backend_kwargs={"filter_by_keys": {"typeOfLevel": "entireAtmosphere"}},
 ).sortby("step")
 
 # Combine the datasets
@@ -498,34 +513,12 @@ for i in range(his_period, 1, -12):
     fxx = range(3, 13, 3)
 
     # Create FastHerbie Object.
-    FH_histsub = FastHerbie(
-        DATES, model="ifs", fxx=fxx, product="oper", verbose=False, save_dir=tmp_dir
+    _, ifs_hisgribs, _ = download_ecmwf_with_azure_fallback(
+        DATES,
+        fxx,
+        "oper",
+        match_strings,
     )
-
-    # Download the subsets
-    # Start with oper
-    ifs_hisgribs = FH_histsub.download(match_strings, verbose=False)
-
-    # Check for download length
-    if len(FH_histsub.file_exists) != len(fxx):
-        logger.error(
-            "Download failed, expected %d files but got %d",
-            len(fxx),
-            len(FH_histsub.file_exists),
-        )
-        sys.exit(1)
-
-    # Create list of downloaded grib files
-    grib_list = [
-        str(Path(x.get_localFilePath(match_strings)).expand())
-        for x in FH_histsub.file_exists
-    ]
-
-    # Perform a check if any data seems to be invalid
-    cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
-
-    grib_check = run_command(cmd)
-    validate_grib_stats(grib_check)
     logger.info("Grib files passed validation, proceeding with processing")
 
     # Created merged xarray object for the ifs data
@@ -590,7 +583,7 @@ for i in range(his_period, 1, -12):
         join="outer",
         coords="minimal",
         compat="override",
-        backend_kwargs={"filter_by_keys": {"typeOfLevel": "atmosphere"}},
+        backend_kwargs={"filter_by_keys": {"typeOfLevel": "entireAtmosphere"}},
     ).sortby("step")
 
     # Combine the datasets
@@ -602,11 +595,12 @@ for i in range(his_period, 1, -12):
     ########################################################################
     ### Download the enfo data
     # Create FastHerbie Object.
-    FH_histsub = FastHerbie(
-        DATES, model="ifs", fxx=fxx, product="enfo", verbose=False, save_dir=tmp_dir
+    _, ens_his_paths, _ = download_ecmwf_with_azure_fallback(
+        DATES,
+        fxx,
+        "enfo",
+        match_string_enfo,
     )
-
-    ens_his_paths = FH_histsub.download(match_string_enfo, verbose=False)
 
     ens_his_mf = xr.open_mfdataset(
         ens_his_paths,

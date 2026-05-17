@@ -548,6 +548,7 @@ async def PW_Forecast(
         inc_aimodels=incAIModels,
         read_wmo_alerts=readWMOAlerts,
         base_day_utc=baseDayUTC,
+        num_hours=numHours,
         zarr_sources=zarr_sources,
         weather=weather,
         timing_start=T_Start,
@@ -732,6 +733,7 @@ async def PW_Forecast(
             version=version,
             lat=lat,
             lon=lon_IN,
+            prioritize_ai_models=bool(incAIModels),
         )
     minuteRainIntensity = InterPminute[:, DATA_MINUTELY["rain_intensity"]]
     minuteSnowIntensity = InterPminute[:, DATA_MINUTELY["snow_intensity"]]
@@ -764,6 +766,7 @@ async def PW_Forecast(
         timezone_localizer=pytzTZ,
         hour_array_grib=hour_array_grib,
         time_machine=timeMachine,
+        daily_days=daily_days,
         existing_day_array_grib=day_array_grib,
     )
 
@@ -834,6 +837,7 @@ async def PW_Forecast(
         num_hours=numHours,
         lat=lat,
         lon=lon,
+        prioritize_ai_models=bool(incAIModels),
     )
 
     InterThour_inputs = inputs["InterThour_inputs"]
@@ -1060,6 +1064,7 @@ async def PW_Forecast(
             logger=logger,
             loc_tag=loc_tag,
             include_currently=exCurrently != 1,
+            prioritize_ai_models=bool(incAIModels),
         )
     ### RETURN ###
     # 16. Construct and return the final JSON response
@@ -1102,7 +1107,7 @@ async def PW_Forecast(
             current_text=(
                 current_section.summary_key
                 or current_section.currently.get("summary", "")
-            ),
+            ),  # This takes the summary from the summary_key variable if available, which has formatted text.
             current_icon=current_section.currently.get("icon", ""),
             icon=icon,
             max_p_chance=maxPchance,
