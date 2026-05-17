@@ -13,7 +13,7 @@ def get_period(hour):
     return "night"
 
 
-def test_dst(start_date, label):
+def run_dst(start_date, label):
     print(f"\n--- {label} ---")
     tz = pytz.timezone("US/Eastern")
     start_dt = tz.localize(datetime.strptime(start_date, "%Y-%m-%d"))
@@ -32,5 +32,5 @@ def test_dst(start_date, label):
         )
 
 
-test_dst("2024-03-10", "Spring Forward (2024-03-10)")
-test_dst("2024-11-03", "Fall Back (2024-11-03)")
+run_dst("2024-03-10", "Spring Forward (2024-03-10)")
+run_dst("2024-11-03", "Fall Back (2024-11-03)")
