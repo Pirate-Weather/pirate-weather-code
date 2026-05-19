@@ -137,3 +137,32 @@ def test_too_many_hours_returns_unavailable():
 
     assert icon == "none"
     assert summary == "unavailable"
+
+
+def test_half_day_three_period_precip_summary_stays_valid():
+    """A stray three-period condition should still produce a usable summary."""
+    zone = tz.gettz("UTC")
+    base = datetime.datetime(2025, 11, 10, 3, 0, tzinfo=zone)
+    hours = [make_hour(base)]
+
+    for hour_offset in range(1, 15):
+        hours.append(
+            make_hour(
+                base + datetime.timedelta(hours=hour_offset),
+                rainIntensity=1.0,
+                liquidAccumulation=1.0,
+                precipProbability=0.8,
+                precipType="rain",
+                cloudCover=0.8,
+            )
+        )
+
+    icon, summary = calculate_half_day_text(
+        hours, True, "UTC", mode="hour", icon_set="darksky"
+    )
+
+    assert icon == "rain"
+    assert summary != "unavailable"
+    assert "light-rain" in str(summary)
+    assert "morning" in str(summary)
+    assert "evening" in str(summary)

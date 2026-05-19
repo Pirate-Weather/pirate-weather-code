@@ -651,14 +651,24 @@ def interpolate_dwd_to_grid_knearest_dask(
     row_idx = np.arange(df_sorted.shape[0], dtype=np.int64)
     row_idx_rep = np.repeat(row_idx[:, None], k_max, axis=1).ravel()[valid]
 
+    # Use station_id as a deterministic final tie-breaker when two stations are
+    # exactly the same distance from the same grid cell at the same time.
+    station_ids_full = df_sorted[station_col].astype(str).to_numpy()
+    station_sort_key = pd.to_numeric(station_ids_full, errors="coerce")
+    if pd.isna(station_sort_key).any():
+        station_sort_key = station_ids_full
+    station_sort_rep = np.repeat(station_sort_key[:, None], k_max, axis=1).ravel()[
+        valid
+    ]
+
     # -------------------------------------------------
     # 4) For each grid cell/time, find the nearest station (single pass)
     # -------------------------------------------------
     _log("Computing nearest-station per grid cell/time (argmin)…")
 
-    # Sort candidates by cell index then distance
-    # lexsort uses last key as primary sort key -> primary: linear_index, secondary: flat_dist
-    order = np.lexsort((flat_dist, linear_index))
+    # Sort candidates by cell index, then distance, then station_id.
+    # lexsort uses the last key as the primary sort key.
+    order = np.lexsort((station_sort_rep, flat_dist, linear_index))
     lin_sorted = linear_index[order]
     dist_sorted = flat_dist[order]
     row_sorted = row_idx_rep[order]

@@ -18,6 +18,15 @@ from API.constants.text_const import (
 from API.PirateDayNightText import calculate_half_day_text
 
 
+def select_hour_window(hour_list, *, start_time: int, end_time: int) -> list:
+    """Return hourly entries in the half-open interval [start_time, end_time)."""
+    return [
+        hour
+        for hour in hour_list
+        if start_time <= hour.get("time", start_time - 1) < end_time
+    ]
+
+
 def pick_day_icon_and_summary(
     *,
     max_arr,
@@ -108,6 +117,7 @@ def apply_legacy_half_day_text(
     phase: str,
 ) -> Tuple[str, str]:
     """Apply PirateDayNightText for a half-day period when enabled."""
+    # This has been supplemented by pick_day_icon_and_summary, but is kept because I'm afraid to remove it
     if not summary_text:
         return fallback_text, fallback_icon
 
