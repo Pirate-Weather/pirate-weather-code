@@ -1,3 +1,5 @@
+import logging
+
 import metpy as mp
 import numpy as np
 from metpy.calc import relative_humidity_from_dewpoint
@@ -15,16 +17,55 @@ from API.constants.model_const import (
 )
 from API.utils.source_priority import should_gfs_precede_dwd
 
+logger = logging.getLogger(__name__)
+
 
 def _stack_fields(num_hours, *arrays):
     """
     Stack valid arrays column-wise.
     If no valid arrays are provided, return a column of NaNs of length num_hours.
     """
-    valid = [np.asarray(arr) for arr in arrays if arr is not None]
+    valid = [
+        _normalize_length(num_hours, arr, label=f"stack_fields[{idx}]")
+        for idx, arr in enumerate(arrays)
+        if arr is not None
+    ]
     if not valid:
         return np.full((num_hours, 1), np.nan)
     return np.column_stack(valid)
+
+
+def _normalize_length(num_hours, values, *, label: str | None = None):
+    """Pad or truncate an array-like value to the requested hour count."""
+    array = np.asarray(values)
+
+    if array.ndim == 0:
+        return np.full(num_hours, array, dtype=np.result_type(array.dtype, np.float64))
+
+    if array.shape[0] == num_hours:
+        return array
+
+    logger.warning(
+        "Normalizing data input length for %s from %s to %s hours; upstream fetch should match request length.",
+        label or "unnamed input",
+        array.shape[0],
+        num_hours,
+    )
+
+    target_shape = (num_hours, *array.shape[1:])
+    result = np.full(
+        target_shape, np.nan, dtype=np.result_type(array.dtype, np.float64)
+    )
+    copy_len = min(num_hours, array.shape[0])
+    result[:copy_len] = array[:copy_len]
+    return result
+
+
+def _normalize_mapping_lengths(num_hours, values_by_key):
+    """Normalize all non-null arrays in a mapping to the requested hour count."""
+    for key, values in values_by_key.items():
+        if values is not None:
+            values_by_key[key] = _normalize_length(num_hours, values, label=key)
 
 
 def _wind_speed(u, v):
@@ -77,6 +118,7 @@ def _stack_with_priority(
         lon: Longitude.
         has_ecmwf: Whether ECMWF has data for this variable.
         source_data: Dict mapping source names to data arrays.
+        prioritize_ai_models: Whether to prioritize AI model sources in the stacking order.
 
     Returns:
         Stacked array with sources ordered by priority.
@@ -152,6 +194,7 @@ def prepare_data_inputs(
         num_hours: Number of forecast hours.
         lat: Latitude of the forecast location.
         lon: Longitude of the forecast location.
+        prioritize_ai_models: Whether to prioritize AI model sources in the stacking order.
 
     Returns:
         Dictionary containing prepared data inputs for hourly processing.
@@ -200,6 +243,8 @@ def prepare_data_inputs(
 
     if "era5" in source_list and era5_valid:
         inter_thour_inputs["era5_ptype"] = era5_merged[:, ERA5["precipitation_type"]]
+
+    _normalize_mapping_lengths(num_hours, inter_thour_inputs)
 
     # --- prcipIntensity_inputs ---
     prcip_intensity_inputs = {}
@@ -269,6 +314,18 @@ def prepare_data_inputs(
             + era5_merged[:, ERA5["convective_snowfall_rate_water_equivalent"]]
         ) * 3600
 
+    _normalize_mapping_lengths(num_hours, prcip_intensity_inputs)
+    era5_rain_intensity = (
+        _normalize_length(num_hours, era5_rain_intensity)
+        if era5_rain_intensity is not None
+        else None
+    )
+    era5_snow_water_equivalent = (
+        _normalize_length(num_hours, era5_snow_water_equivalent)
+        if era5_snow_water_equivalent is not None
+        else None
+    )
+
     # --- prcipProbability_inputs ---
     prcip_probability_inputs = {}
     if prioritize_ai_models:
@@ -285,6 +342,8 @@ def prepare_data_inputs(
             prcip_probability_inputs["ecmwf"] = ecmwf_merged[:, ECMWF["prob"]]
         if "gefs" in source_list and gefs_merged is not None:
             prcip_probability_inputs["gefs"] = gefs_merged[:, GEFS["prob"]]
+
+    _normalize_mapping_lengths(num_hours, prcip_probability_inputs)
 
     # --- temperature_inputs ---
     temperature_inputs = _stack_with_priority(
