@@ -38,6 +38,9 @@ class ZarrStores:
     RTMA_RU_Zarr: Optional[Any] = None
     ERA5_Data: Optional[Any] = None
     DWD_MOSMIX_Zarr: Optional[Any] = None
+    AIGFS_Zarr: Optional[Any] = None
+    AIGEFS_Zarr: Optional[Any] = None
+    ECMWF_AIFS_Zarr: Optional[Any] = None
 
 
 async def get_zarr(store, X, Y):
@@ -115,12 +118,25 @@ class WeatherParallel(object):
 
                 has_missing_data, missing_row = has_interior_nan_holes(data_out.T)
                 if has_missing_data:
-                    self.logger.warning(
-                        "### %s Interpolating missing data (row %s)!",
-                        model,
-                        missing_row,
-                    )
-                    data_out = np.apply_along_axis(_interp_row, 0, data_out)
+                    if model == "DWD_MOSMIX":
+                        # DWD MOSMIX station data may have gaps (e.g. missing station
+                        # reports or the 6-hourly period beyond 240 h). Linearly
+                        # interpolating those gaps flattens the diurnal cycle (e.g.
+                        # temperatures in tropical locations like Rio de Janeiro appear
+                        # averaged/flat). Leave the NaN values intact so the merge
+                        # logic falls back to GFS/ECMWF for those hours instead.
+                        self.logger.debug(
+                            "### %s Has missing data (row %s), leaving NaN for merge fallback",
+                            model,
+                            missing_row,
+                        )
+                    else:
+                        self.logger.warning(
+                            "### %s Interpolating missing data (row %s)!",
+                            model,
+                            missing_row,
+                        )
+                        data_out = np.apply_along_axis(_interp_row, 0, data_out)
 
                 if self.timing_enabled:
                     self.logger.debug("### %s Done! %s", model, self.loc_tag)
@@ -185,6 +201,9 @@ def update_zarr_store(
             ("WMO_Alerts_Zarr", "WMO_Alerts.zarr"),
             ("RTMA_RU_Zarr", "RTMA_RU.zarr"),
             ("DWD_MOSMIX_Zarr", "DWD_MOSMIX.zarr"),
+            ("AIGFS_Zarr", "AIGFS.zarr"),
+            ("AIGEFS_Zarr", "AIGEFS.zarr"),
+            ("ECMWF_AIFS_Zarr", "ECMWF_AIFS.zarr"),
         ]
         for attr, fname in local_stores:
             _load_local_store(stores, attr, save_dir, fname, logger=logger)
@@ -235,6 +254,9 @@ def update_zarr_store(
                 ("RTMA_RU_Zarr", "RTMA_RU"),
                 ("ECMWF_Zarr", "ECMWF"),
                 ("DWD_MOSMIX_Zarr", "DWD_MOSMIX"),
+                ("AIGFS_Zarr", "AIGFS"),
+                ("AIGEFS_Zarr", "AIGEFS"),
+                ("ECMWF_AIFS_Zarr", "ECMWF_AIFS"),
             ]
             for attr, name in testing_stores:
                 setattr(

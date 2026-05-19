@@ -35,7 +35,7 @@ from API.constants.grid_const import (
 )
 from API.constants.model_const import ERA5
 from API.constants.shared_const import HISTORY_PERIODS
-from API.utils.geo import lambertGridMatch
+from API.utils.geo import is_in_north_america, lambertGridMatch
 from API.utils.timing import StepTimer
 
 
@@ -53,6 +53,9 @@ class ZarrSources:
     wmo_alerts: Any
     era5_data: Any
     dwd_mosmix: Any = None
+    aigfs: Any = None
+    aigefs: Any = None
+    ecmwf_aifs: Any = None
 
 
 @dataclass
@@ -67,6 +70,9 @@ class GridIndexingResult:
     dataOut_gefs: Union[np.ndarray, bool]
     dataOut_rtma_ru: Union[np.ndarray, bool]
     dataOut_dwd_mosmix: Union[np.ndarray, bool]
+    dataOut_aigfs: Union[np.ndarray, bool]
+    dataOut_aigefs: Union[np.ndarray, bool]
+    dataOut_aifs: Union[np.ndarray, bool]
     era5_merged: Union[np.ndarray, bool]
     subhRunTime: Union[float, None]
     hrrrhRunTime: Union[float, None]
@@ -77,6 +83,9 @@ class GridIndexingResult:
     ecmwfRunTime: Union[float, None]
     gefsRunTime: Union[float, None]
     dwdMosmixRunTime: Union[float, None]
+    aigfsRunTime: Union[float, None]
+    aigefsRunTime: Union[float, None]
+    aifsRunTime: Union[float, None]
     x_rtma: Union[float, None]
     y_rtma: Union[float, None]
     rtma_lat: Union[float, None]
@@ -101,6 +110,37 @@ class GridIndexingResult:
     WMO_alertDat: Union[str, None]
 
 
+def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours: int):
+    """Load the ERA5 point slice needed for the requested hourly grid."""
+    abslat_era5 = np.abs(era5_data["ERA5_lats"] - lat)
+    abslon_era5 = np.abs(era5_data["ERA5_lons"] - lon)
+    y_p = np.argmin(abslat_era5)
+    x_p = np.argmin(abslon_era5)
+    t_p = np.argmin(
+        np.abs(
+            era5_data["ERA5_times"] - np.datetime64(base_day_utc.replace(tzinfo=None))
+        )
+    )
+    dataOut_ERA5_xr = era5_data["dsERA5"][ERA5.keys()].isel(
+        latitude=y_p, longitude=x_p, time=slice(t_p, t_p + num_hours)
+    )
+    dataOut_ERA5 = xr.concat(
+        [dataOut_ERA5_xr[var] for var in ERA5.keys()], dim="variable"
+    )
+    unix_times_era5 = (
+        dataOut_ERA5_xr["time"].astype("datetime64[s]")
+        - np.datetime64("1970-01-01T00:00:00")
+    ).astype(np.int64)
+    era5_merged = np.vstack((unix_times_era5, dataOut_ERA5.values)).T
+
+    # Round the precipitation_type variable to nearest integer
+    # to avoid issues with interpolation producing non-integer values.
+    era5_merged[:, ERA5["precipitation_type"]] = np.rint(
+        era5_merged[:, ERA5["precipitation_type"]]
+    )
+    return era5_merged
+
+
 async def calculate_grid_indexing(
     *,
     lat: float,
@@ -116,8 +156,13 @@ async def calculate_grid_indexing(
     ex_gefs: int,
     ex_rtma_ru: int,
     ex_dwd_mosmix: int,
+    ex_aigfs: int,
+    ex_aigefs: int,
+    ex_aifs: int,
+    inc_aimodels: int,
     read_wmo_alerts: bool,
     base_day_utc: datetime.datetime,
+    num_hours: int,
     zarr_sources: ZarrSources,
     weather,
     timing_start: datetime.datetime,
@@ -135,6 +180,9 @@ async def calculate_grid_indexing(
     readHRRR = False
     readERA5 = False
     readDWD_MOSMIX = False
+    readAIGFS = False
+    readAIGEFS = False
+    readAIFS = False
 
     def _get_grid_coords(
         lat,
@@ -382,34 +430,36 @@ async def calculate_grid_indexing(
 
     timer.log("### DWD MOSMIX Detail END ###")
 
-    if readERA5:
-        abslat_era5 = np.abs(zarr_sources.era5_data["ERA5_lats"] - lat)
-        abslon_era5 = np.abs(zarr_sources.era5_data["ERA5_lons"] - lon)
-        y_p = np.argmin(abslat_era5)
-        x_p = np.argmin(abslon_era5)
-        t_p = np.argmin(
-            np.abs(
-                zarr_sources.era5_data["ERA5_times"]
-                - np.datetime64(base_day_utc.replace(tzinfo=None))
-            )
-        )
-        dataOut_ERA5_xr = zarr_sources.era5_data["dsERA5"][ERA5.keys()].isel(
-            latitude=y_p, longitude=x_p, time=slice(t_p, t_p + 25)
-        )
-        dataOut_ERA5 = xr.concat(
-            [dataOut_ERA5_xr[var] for var in ERA5.keys()], dim="variable"
-        )
-        unix_times_era5 = (
-            dataOut_ERA5_xr["time"].astype("datetime64[s]")
-            - np.datetime64("1970-01-01T00:00:00")
-        ).astype(np.int64)
-        ERA5_MERGED = np.vstack((unix_times_era5, dataOut_ERA5.values)).T
+    timer.log("### AI Models Detail Start ###")
 
-        # Round the precipitation_type variable to nearest integer
-        # to avoid issues with interpolation producing non-integer values
-        # (0 = rain, 1 = snow, 2 = sleet, etc.)
-        ERA5_MERGED[:, ERA5["precipitation_type"]] = np.rint(
-            ERA5_MERGED[:, ERA5["precipitation_type"]]
+    ai_models_requested = bool(inc_aimodels) and not time_machine
+    is_na = is_in_north_america(lat, az_lon)
+
+    if ai_models_requested and is_na:
+        if ex_aigfs != 1 and zarr_sources.aigfs is not None:
+            readAIGFS = True
+        if ex_aigefs != 1 and zarr_sources.aigefs is not None:
+            readAIGEFS = True
+    elif ai_models_requested and not is_na:
+        if ex_aifs != 1 and zarr_sources.ecmwf_aifs is not None:
+            if x_p_eur is None or y_p_eur is None:
+                lats_ecmwf = np.arange(90, -90, -0.25)
+                lons_ecmwf = np.arange(-180, 180, 0.25)
+                abslat_ecmwf = np.abs(lats_ecmwf - lat)
+                abslon_ecmwf = np.abs(lons_ecmwf - az_lon)
+                y_p_eur = np.argmin(abslat_ecmwf)
+                x_p_eur = np.argmin(abslon_ecmwf)
+            readAIFS = True
+
+    timer.log("### AI Models Detail END ###")
+
+    if readERA5:
+        ERA5_MERGED = _load_era5_slice(
+            zarr_sources.era5_data,
+            lat=lat,
+            lon=lon,
+            base_day_utc=base_day_utc,
+            num_hours=num_hours,
         )
 
     else:
@@ -443,6 +493,14 @@ async def calculate_grid_indexing(
         zarrTasks["DWD_MOSMIX"] = weather.zarr_read(
             "DWD_MOSMIX", zarr_sources.dwd_mosmix, x_dwd, y_dwd
         )
+    if readAIGFS:
+        zarrTasks["AIGFS"] = weather.zarr_read("AIGFS", zarr_sources.aigfs, x_p, y_p)
+    if readAIGEFS:
+        zarrTasks["AIGEFS"] = weather.zarr_read("AIGEFS", zarr_sources.aigefs, x_p, y_p)
+    if readAIFS:
+        zarrTasks["ECMWF_AIFS"] = weather.zarr_read(
+            "ECMWF_AIFS", zarr_sources.ecmwf_aifs, x_p_eur, y_p_eur
+        )
 
     WMO_alertDat = None
     if read_wmo_alerts:
@@ -468,6 +526,9 @@ async def calculate_grid_indexing(
     ecmwfRunTime = None
     gefsRunTime = None
     dwdMosmixRunTime = None
+    aigfsRunTime = None
+    aigefsRunTime = None
+    aifsRunTime = None
 
     if readHRRR:
         dataOut = zarr_results["SubH"]
@@ -674,6 +735,57 @@ async def calculate_grid_indexing(
                 # Data array too short, treat as no data available
                 dataOut_dwd_mosmix = False
 
+    if readAIGFS:
+        dataOut_aigfs = zarr_results["AIGFS"]
+        if dataOut_aigfs is not False:
+            try:
+                aigfsRunTime = dataOut_aigfs[HISTORY_PERIODS["AIGFS"] - 1, 0]
+                timestamp_dt = datetime.datetime.fromtimestamp(
+                    aigfsRunTime.astype(int), datetime.UTC
+                ).replace(tzinfo=None)
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                    dataOut_aigfs = False
+                    aigfsRunTime = None
+                    logger.warning("OLD AIGFS")
+            except (ValueError, TypeError, AttributeError):
+                logger.debug("Failed to parse AIGFS runtime for freshness check")
+    else:
+        dataOut_aigfs = False
+
+    if readAIGEFS:
+        dataOut_aigefs = zarr_results["AIGEFS"]
+        if dataOut_aigefs is not False:
+            try:
+                aigefsRunTime = dataOut_aigefs[HISTORY_PERIODS["AIGEFS"] - 1, 0]
+                timestamp_dt = datetime.datetime.fromtimestamp(
+                    aigefsRunTime.astype(int), datetime.UTC
+                ).replace(tzinfo=None)
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                    dataOut_aigefs = False
+                    aigefsRunTime = None
+                    logger.warning("OLD AIGEFS")
+            except (ValueError, TypeError, AttributeError):
+                logger.debug("Failed to parse AIGEFS runtime for freshness check")
+    else:
+        dataOut_aigefs = False
+
+    if readAIFS:
+        dataOut_aifs = zarr_results["ECMWF_AIFS"]
+        if dataOut_aifs is not False:
+            try:
+                aifsRunTime = dataOut_aifs[HISTORY_PERIODS["ECMWF_AIFS"] - 1, 0]
+                timestamp_dt = datetime.datetime.fromtimestamp(
+                    aifsRunTime.astype(int), datetime.UTC
+                ).replace(tzinfo=None)
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                    dataOut_aifs = False
+                    aifsRunTime = None
+                    logger.warning("OLD ECMWF_AIFS")
+            except (ValueError, TypeError, AttributeError):
+                logger.debug("Failed to parse ECMWF_AIFS runtime for freshness check")
+    else:
+        dataOut_aifs = False
+
     return GridIndexingResult(
         dataOut=dataOut,
         dataOut_h2=dataOut_h2,
@@ -685,6 +797,9 @@ async def calculate_grid_indexing(
         dataOut_gefs=dataOut_gefs,
         dataOut_rtma_ru=dataOut_rtma_ru,
         dataOut_dwd_mosmix=dataOut_dwd_mosmix,
+        dataOut_aigfs=dataOut_aigfs,
+        dataOut_aigefs=dataOut_aigefs,
+        dataOut_aifs=dataOut_aifs,
         era5_merged=ERA5_MERGED,
         subhRunTime=subhRunTime,
         hrrrhRunTime=hrrrhRunTime,
@@ -695,6 +810,9 @@ async def calculate_grid_indexing(
         ecmwfRunTime=ecmwfRunTime,
         gefsRunTime=gefsRunTime,
         dwdMosmixRunTime=dwdMosmixRunTime,
+        aigfsRunTime=aigfsRunTime,
+        aigefsRunTime=aigefsRunTime,
+        aifsRunTime=aifsRunTime,
         x_rtma=x_rtma,
         y_rtma=y_rtma,
         rtma_lat=rtma_lat,

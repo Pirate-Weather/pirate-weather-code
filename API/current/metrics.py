@@ -130,9 +130,56 @@ _CURRENTLY_ORDER_ROW_NO_ECMWF = [
     "gfs",
     "era5",
 ]
+_CURRENTLY_ORDER_AI_NA_WITH_ECMWF = [
+    "gfs",
+    "gefs",
+    "ecmwf_ifs",
+    "rtma_ru",
+    "hrrrsubh",
+    "nbm",
+    "hrrr",
+    "dwd_mosmix",
+    "era5",
+]
+_CURRENTLY_ORDER_AI_NA_NO_ECMWF = [
+    "gfs",
+    "gefs",
+    "rtma_ru",
+    "hrrrsubh",
+    "nbm",
+    "hrrr",
+    "dwd_mosmix",
+    "era5",
+]
+_CURRENTLY_ORDER_AI_ROW_WITH_ECMWF = [
+    "ecmwf_ifs",
+    "rtma_ru",
+    "hrrrsubh",
+    "nbm",
+    "hrrr",
+    "dwd_mosmix",
+    "gfs",
+    "era5",
+]
+_CURRENTLY_ORDER_AI_ROW_NO_ECMWF = [
+    "gfs",
+    "rtma_ru",
+    "hrrrsubh",
+    "nbm",
+    "hrrr",
+    "dwd_mosmix",
+    "era5",
+]
 
 
-def _build_source_strategies(source_map, lat, lon, has_ecmwf=True):
+def _build_source_strategies(
+    source_map,
+    lat,
+    lon,
+    has_ecmwf=True,
+    *,
+    prioritize_ai_models=False,
+):
     """
     Build source strategies in priority order based on location.
 
@@ -141,6 +188,7 @@ def _build_source_strategies(source_map, lat, lon, has_ecmwf=True):
         lat: Latitude.
         lon: Longitude.
         has_ecmwf: Whether ECMWF has data for this variable.
+        prioritize_ai_models: Whether to prioritize AI model sources in the stacking order.
 
     Returns:
         List of (predicate, getter) tuples in priority order.
@@ -148,7 +196,19 @@ def _build_source_strategies(source_map, lat, lon, has_ecmwf=True):
     gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
 
     # Select pre-defined priority order
-    if gfs_before_dwd:
+    if prioritize_ai_models and gfs_before_dwd:
+        order = (
+            _CURRENTLY_ORDER_AI_NA_WITH_ECMWF
+            if has_ecmwf
+            else _CURRENTLY_ORDER_AI_NA_NO_ECMWF
+        )
+    elif prioritize_ai_models and not gfs_before_dwd:
+        order = (
+            _CURRENTLY_ORDER_AI_ROW_WITH_ECMWF
+            if has_ecmwf
+            else _CURRENTLY_ORDER_AI_ROW_NO_ECMWF
+        )
+    elif gfs_before_dwd:
         # North America
         order = (
             _CURRENTLY_ORDER_NA_WITH_ECMWF
@@ -284,7 +344,14 @@ def _calculate_era5_relative_humidity(
     return (humid_fac1 * state.fac1 + humid_fac2 * state.fac2) * 100 * humidUnit
 
 
-def _get_temp(sourceList, model_data, state: InterpolationState, lat, lon):
+def _get_temp(
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    lat,
+    lon,
+    prioritize_ai_models=False,
+):
     """
     Get current temperature from available sources.
 
@@ -333,12 +400,25 @@ def _get_temp(sourceList, model_data, state: InterpolationState, lat, lon):
         ),
     }
 
-    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=True)
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=True,
+        prioritize_ai_models=prioritize_ai_models,
+    )
     val = _select_value(strategies)
     return clipLog(val, CLIP_TEMP["min"], CLIP_TEMP["max"], "Temperature Current")
 
 
-def _get_dew(sourceList, model_data, state: InterpolationState, lat, lon):
+def _get_dew(
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    lat,
+    lon,
+    prioritize_ai_models=False,
+):
     """
     Get current dew point from available sources.
 
@@ -386,13 +466,25 @@ def _get_dew(sourceList, model_data, state: InterpolationState, lat, lon):
         ),
     }
 
-    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=True)
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=True,
+        prioritize_ai_models=prioritize_ai_models,
+    )
     val = _select_value(strategies)
     return clipLog(val, CLIP_TEMP["min"], CLIP_TEMP["max"], "Dewpoint Current")
 
 
 def _get_humidity(
-    sourceList, model_data, state: InterpolationState, humidUnit, lat, lon
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    humidUnit,
+    lat,
+    lon,
+    prioritize_ai_models=False,
 ):
     """
     Get current humidity from available sources.
@@ -455,12 +547,25 @@ def _get_humidity(
         ),
     }
 
-    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=True)
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=True,
+        prioritize_ai_models=prioritize_ai_models,
+    )
     val = _select_value(strategies)
     return clipLog(val, CLIP_HUMIDITY["min"], CLIP_HUMIDITY["max"], "Humidity Current")
 
 
-def _get_pressure(sourceList, model_data, state: InterpolationState, lat, lon):
+def _get_pressure(
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    lat,
+    lon,
+    prioritize_ai_models=False,
+):
     """
     Get current pressure from available sources.
 
@@ -501,12 +606,25 @@ def _get_pressure(sourceList, model_data, state: InterpolationState, lat, lon):
         ),
     }
 
-    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=True)
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=True,
+        prioritize_ai_models=prioritize_ai_models,
+    )
     val = _select_value(strategies)
     return clipLog(val, CLIP_PRESSURE["min"], CLIP_PRESSURE["max"], "Pressure Current")
 
 
-def _get_wind(sourceList, model_data, state: InterpolationState, lat, lon):
+def _get_wind(
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    lat,
+    lon,
+    prioritize_ai_models=False,
+):
     """
     Get current wind speed from available sources.
 
@@ -572,12 +690,25 @@ def _get_wind(sourceList, model_data, state: InterpolationState, lat, lon):
         ),
     }
 
-    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=True)
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=True,
+        prioritize_ai_models=prioritize_ai_models,
+    )
     val = _select_value(strategies)
     return clipLog(val, CLIP_WIND["min"], CLIP_WIND["max"], "WindSpeed Current")
 
 
-def _get_gust(sourceList, model_data, state: InterpolationState, lat, lon):
+def _get_gust(
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    lat,
+    lon,
+    prioritize_ai_models=False,
+):
     """
     Get current wind gust from available sources.
 
@@ -622,7 +753,13 @@ def _get_gust(sourceList, model_data, state: InterpolationState, lat, lon):
         ),
     }
 
-    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=False)
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=False,
+        prioritize_ai_models=prioritize_ai_models,
+    )
     val = _select_value(strategies, default=MISSING_DATA)
     return clipLog(val, CLIP_WIND["min"], CLIP_WIND["max"], "Gust Current")
 
@@ -717,7 +854,14 @@ def _get_intensity(
         )
 
 
-def _get_bearing(sourceList, model_data, state: InterpolationState, lat, lon):
+def _get_bearing(
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    lat,
+    lon,
+    prioritize_ai_models=False,
+):
     """
     Get current wind bearing from available sources.
 
@@ -778,11 +922,24 @@ def _get_bearing(sourceList, model_data, state: InterpolationState, lat, lon):
         ),
     }
 
-    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=True)
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=True,
+        prioritize_ai_models=prioritize_ai_models,
+    )
     return _select_value(strategies, default=MISSING_DATA)
 
 
-def _get_cloud(sourceList, model_data, state: InterpolationState, lat, lon):
+def _get_cloud(
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    lat,
+    lon,
+    prioritize_ai_models=False,
+):
     """
     Get current cloud cover from available sources.
 
@@ -842,7 +999,13 @@ def _get_cloud(sourceList, model_data, state: InterpolationState, lat, lon):
         ),
     }
 
-    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=True)
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=True,
+        prioritize_ai_models=prioritize_ai_models,
+    )
     val = _select_value(strategies, default=MISSING_DATA)
     return clipLog(val, CLIP_CLOUD["min"], CLIP_CLOUD["max"], "Cloud Current")
 
@@ -929,7 +1092,14 @@ def _get_station_pressure(sourceList, model_data, state: InterpolationState):
     )
 
 
-def _get_vis(sourceList, model_data, state: InterpolationState, lat, lon):
+def _get_vis(
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    lat,
+    lon,
+    prioritize_ai_models=False,
+):
     """
     Get current visibility from available sources.
 
@@ -983,7 +1153,13 @@ def _get_vis(sourceList, model_data, state: InterpolationState, lat, lon):
         ),
     }
 
-    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=False)
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=False,
+        prioritize_ai_models=prioritize_ai_models,
+    )
     val = _select_value(strategies, default=MISSING_DATA)
     return np.clip(val, CLIP_VIS["min"], CLIP_VIS["max"])
 
@@ -1071,7 +1247,14 @@ def _get_smoke(sourceList, model_data, state: InterpolationState):
         return MISSING_DATA
 
 
-def _get_solar(sourceList, model_data, state: InterpolationState, lat, lon):
+def _get_solar(
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    lat,
+    lon,
+    prioritize_ai_models=False,
+):
     """
     Get current solar radiation from available sources.
 
@@ -1119,12 +1302,25 @@ def _get_solar(sourceList, model_data, state: InterpolationState, lat, lon):
         ),
     }
 
-    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=False)
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=False,
+        prioritize_ai_models=prioritize_ai_models,
+    )
     val = _select_value(strategies, default=MISSING_DATA)
     return clipLog(val, CLIP_SOLAR["min"], CLIP_SOLAR["max"], "Solar Current")
 
 
-def _get_cape(sourceList, model_data, state: InterpolationState, lat, lon):
+def _get_cape(
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    lat,
+    lon,
+    prioritize_ai_models=False,
+):
     """
     Get current CAPE from available sources.
 
@@ -1159,7 +1355,13 @@ def _get_cape(sourceList, model_data, state: InterpolationState, lat, lon):
         ),
     }
 
-    strategies = _build_source_strategies(source_map, lat, lon, has_ecmwf=False)
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=False,
+        prioritize_ai_models=prioritize_ai_models,
+    )
     val = _select_value(strategies)
     return clipLog(val, CLIP_CAPE["min"], CLIP_CAPE["max"], "CAPE Current")
 
@@ -1272,6 +1474,7 @@ def build_current_section(
     loc_tag: str,
     log_timing: Optional[Callable[[str], None]] = None,
     include_currently: bool = True,
+    prioritize_ai_models: bool = False,
 ) -> CurrentSection:
     """
     Calculate the currently block and return it alongside the raw array.
@@ -1369,22 +1572,28 @@ def build_current_section(
     }
 
     InterPcurrent[DATA_CURRENT["temp"]] = _get_temp(
-        sourceList, model_data, state, lat, lon_IN
+        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
     InterPcurrent[DATA_CURRENT["dew"]] = _get_dew(
-        sourceList, model_data, state, lat, lon_IN
+        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
     InterPcurrent[DATA_CURRENT["humidity"]] = _get_humidity(
-        sourceList, model_data, state, humidUnit, lat, lon_IN
+        sourceList,
+        model_data,
+        state,
+        humidUnit,
+        lat,
+        lon_IN,
+        prioritize_ai_models,
     )
     InterPcurrent[DATA_CURRENT["pressure"]] = _get_pressure(
-        sourceList, model_data, state, lat, lon_IN
+        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
     InterPcurrent[DATA_CURRENT["wind"]] = _get_wind(
-        sourceList, model_data, state, lat, lon_IN
+        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
     InterPcurrent[DATA_CURRENT["gust"]] = _get_gust(
-        sourceList, model_data, state, lat, lon_IN
+        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
 
     # If gust is missing/invalid, fall back to wind speed
@@ -1401,17 +1610,17 @@ def build_current_section(
     ) = _get_intensity(sourceList, model_data, state, InterPminute, InterPcurrent)
 
     InterPcurrent[DATA_CURRENT["bearing"]] = _get_bearing(
-        sourceList, model_data, state, lat, lon_IN
+        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
     InterPcurrent[DATA_CURRENT["cloud"]] = _get_cloud(
-        sourceList, model_data, state, lat, lon_IN
+        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
     InterPcurrent[DATA_CURRENT["uv"]] = _get_uv(sourceList, model_data, state)
     InterPcurrent[DATA_CURRENT["station_pressure"]] = _get_station_pressure(
         sourceList, model_data, state
     )
     InterPcurrent[DATA_CURRENT["vis"]] = _get_vis(
-        sourceList, model_data, state, lat, lon_IN
+        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
     InterPcurrent[DATA_CURRENT["ozone"]] = _get_ozone(sourceList, model_data, state)
 
@@ -1422,10 +1631,10 @@ def build_current_section(
 
     InterPcurrent[DATA_CURRENT["smoke"]] = _get_smoke(sourceList, model_data, state)
     InterPcurrent[DATA_CURRENT["solar"]] = _get_solar(
-        sourceList, model_data, state, lat, lon_IN
+        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
     InterPcurrent[DATA_CURRENT["cape"]] = _get_cape(
-        sourceList, model_data, state, lat, lon_IN
+        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
 
     InterPcurrent[DATA_CURRENT["apparent"]] = calculate_apparent_temperature(
@@ -1600,16 +1809,23 @@ def build_current_section(
     currently_si["iceAccumulation"] = 0
 
     current_summary_key = None
+    try:
+        # Always calculate text for translation, even if not used in currently block, to ensure translation keys are generated for all scenarios.
+        currentText, currentIcon = calculate_text(
+            currently_si,
+            currentDay,
+            "current",
+            icon,
+        )
+        current_summary_key = (
+            currentText  # current_summary_key is used for minutely text generation.
+        )
+    except Exception:
+        logger.exception("CURRENTLY TEXT GEN ERROR %s", loc_tag)
+
     if include_currently:
         try:
             if summaryText:
-                currentText, currentIcon = calculate_text(
-                    currently_si,
-                    currentDay,
-                    "current",
-                    icon,
-                )
-                current_summary_key = currentText
                 currently["summary"] = translation.translate(["title", currentText])
                 currently["icon"] = currentIcon
         except Exception:

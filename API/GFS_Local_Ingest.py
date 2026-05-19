@@ -2,6 +2,7 @@
 # Alexander Rey, September 2023
 
 # %% Import modules
+import logging
 import os
 import pickle
 import shutil
@@ -44,6 +45,10 @@ from API.ingest_utils import (
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
+
+# Logging setup
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -119,7 +124,7 @@ latest_run = HerbieLatest(
 base_time = latest_run.date
 # base_time = pd.Timestamp("2024-03-24 06:00:00Z")
 
-print(base_time)
+logger.info(base_time)
 
 
 # Check if this is newer than the current file
@@ -133,7 +138,7 @@ if save_type == "S3":
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to GFS, ending")
+            logger.info("No Update to GFS, ending")
             sys.exit()
 
 else:
@@ -147,7 +152,7 @@ else:
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to GFS, ending")
+            logger.info("No Update to GFS, ending")
             sys.exit()
 
 zarr_vars = (
@@ -244,7 +249,7 @@ FH_forecastsub.download(match_strings, verbose=False)
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(gfs_file_range):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(gfs_file_range))
         + " files but got "
@@ -263,7 +268,7 @@ grib_check = run_command(cmd)
 
 # Validate the grib files
 validate_grib_stats(grib_check)
-print("Grib validation complete, no errors found.")
+logger.info("Grib validation complete, no errors found.")
 
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
@@ -282,7 +287,7 @@ cmd = (
 # Run wgrib2
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
 
 # %% Download and add UV data from the pgrib2b product
@@ -302,7 +307,7 @@ FH_forecastUV.download(UVmatchString, verbose=False)
 
 # Check for download length
 if len(FH_forecastUV.file_exists) != len(gfs_file_range):
-    print(
+    logger.error(
         "Download failed, expected 160 files but got "
         + str(len(FH_forecastUV.file_exists))
     )
@@ -318,7 +323,7 @@ cmd = "cat " + " ".join(grib_list_uv) + " | " + f"{wgrib2_path}" + " - " + " -s 
 grib_check = run_command(cmd)
 
 validate_grib_stats(grib_check)
-print("Grib files passed validation, proceeding with processing")
+logger.info("Grib files passed validation, proceeding with processing")
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
 cmd = (
@@ -335,7 +340,7 @@ cmd = (
 # Run wgrib2
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
 
 # %% Merge the UV data and xarrays
@@ -356,14 +361,14 @@ assert len(xarray_forecast_merged.time) == len(gfs_file_range), (
 start = xarray_forecast_merged.time.min().values  # Adjust as necessary
 end = xarray_forecast_merged.time.max().values  # Adjust as necessary
 new_hourly_time = pd.date_range(
-    start=start - pd.Timedelta(his_period, "h"), end=end, freq="h"
+    start=start - pd.Timedelta(hours=his_period), end=end, freq="h"
 )
 
 stacked_times = np.concatenate(
     (
         pd.date_range(
-            start=start - pd.Timedelta(his_period, "h"),
-            end=start - pd.Timedelta(1, "h"),
+            start=start - pd.Timedelta(hours=his_period),
+            end=start - pd.Timedelta(hours=1),
             freq="h",
         ),
         xarray_forecast_merged.time.values,
@@ -562,7 +567,7 @@ del (
 )
 T1 = time.time()
 
-print(T1 - T0)
+logger.info(T1 - T0)
 os.remove(forecast_process_path + "_wgrib_merged_UV.nc")
 os.remove(forecast_process_path + "_wgrib2_merged.nc")
 
@@ -598,13 +603,13 @@ for i in range(his_period, 0, -6):
             print("File already exists locally, skipping download for: " + local_path)
             continue
 
-    print(
+    logger.info(
         "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
     )
 
     # Create a range of dates for historic data going back 48 hours
     DATES = pd.date_range(
-        start=base_time - pd.Timedelta(str(i) + "h"),
+        start=base_time - pd.Timedelta(hours=i),
         periods=1,
         freq="6h",
     )
@@ -628,7 +633,7 @@ for i in range(his_period, 0, -6):
 
     # Check for download length
     if len(FH_histsub.file_exists) != len(fxx):
-        print(
+        logger.error(
             "Download failed, expected 6 files but got "
             + str(len(FH_histsub.file_exists))
         )
@@ -643,7 +648,7 @@ for i in range(his_period, 0, -6):
     grib_check = run_command(cmd)
 
     validate_grib_stats(grib_check)
-    print("Grib files passed validation, proceeding with processing")
+    logger.info("Grib files passed validation, proceeding with processing")
 
     # Create a string to pass to wgrib2 to merge all gribs into one netcdf
     cmd = (
@@ -660,7 +665,7 @@ for i in range(his_period, 0, -6):
     # Run wgrib2
     sp_out = run_command(cmd)
     if sp_out.returncode != 0:
-        print(sp_out.stderr)
+        logger.error(sp_out.stderr)
         sys.exit()
 
     # Download and add UV data from the pgrib2b product
@@ -679,7 +684,7 @@ for i in range(his_period, 0, -6):
 
     # Check for download length
     if len(FH_histsubUV.file_exists) != len(fxx):
-        print(
+        logger.error(
             "Download failed, expected 6 files but got "
             + str(len(FH_histsubUV.file_exists))
         )
@@ -701,7 +706,7 @@ for i in range(his_period, 0, -6):
     grib_check = run_command(cmd)
 
     validate_grib_stats(grib_check)
-    print("Grib files passed validation, proceeding with processing")
+    logger.info("Grib files passed validation, proceeding with processing")
 
     # Create a string to pass to wgrib2 to merge all gribs into one netcdf
     cmd = (
@@ -718,7 +723,7 @@ for i in range(his_period, 0, -6):
     # Run wgrib2
     sp_out = run_command(cmd)
     if sp_out.returncode != 0:
-        print(sp_out.stderr)
+        logger.error(sp_out.stderr)
         sys.exit()
 
     # Merge the UV data and xarrays
@@ -887,7 +892,7 @@ for i in range(his_period, 0, -6):
         with open(done_file, "w") as f:
             f.write("Done")
 
-    print((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
+    logger.info((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
 
 
 # %% Merge the historic and forecast datasets and then squash using dask
@@ -954,7 +959,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
             )
         # Add a fallback in case of a FileNotFoundError
         except FileNotFoundError:
-            print("File not found, adding NaN array for: " + local_ncpath)
+            logger.info("File not found, adding NaN array for: %s", local_ncpath)
             daskVarArrays.append(
                 da.full((6, 721, 1440), MISSING_DATA).rechunk(
                     (6, process_chunk, process_chunk)
@@ -1012,7 +1017,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
 
     daskVarArrays = []
 
-    print(dask_var)
+    logger.info(dask_var)
 
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
@@ -1138,7 +1143,7 @@ for z in [0, 4, 8, 9, 10, 11, 12, 13, 14, 15, 21]:
                 (36, 100, 100),
             ).to_zarr(zarr_array, overwrite=True, compute=True)
 
-    print(zarr_vars[z])
+    logger.info(zarr_vars[z])
 
 
 close_store(zarr_store_maps)
@@ -1193,7 +1198,7 @@ shutil.rmtree(forecast_process_dir)
 
 # Timing
 T1 = time.time()
-print(T1 - T0)
+logger.info(T1 - T0)
 
 # Test Read
 # G = zarr.open(forecast_path + "/" + ingest_version + "/GFS.zarr", read_only=True)

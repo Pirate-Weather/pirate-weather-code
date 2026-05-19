@@ -327,6 +327,163 @@ def process_dwd_df(df, global_metadata=None):
     return df
 
 
+def fill_station_gaps(
+    df,
+    station_col="station_id",
+    time_col="time",
+    max_gap_hours=6,
+):
+    """
+    Fill NaN gaps in each station's time series before spatial gridding.
+
+    DWD MOSMIX station data has two common sources of NaN gaps:
+
+    * ``APCP_surface`` (RR1c): DWD MOSMIX omits this parameter for some hours,
+      leaving gaps of up to 5–6 consecutive NaNs.  These are filled by **linear
+      interpolation** — between two dry periods (0 → 0) this naturally gives 0;
+      between non-zero values (e.g. 0.5 → 0.1) it provides a physically reasonable
+      estimate rather than incorrectly reporting no precipitation.  After
+      interpolation any remaining NaNs (gaps longer than ``max_gap_hours``) are
+      filled with **0**, since an isolated missing report surrounded by no-rain
+      hours almost certainly means no precipitation was forecast.
+    * ``PTYPE_surface`` (ww): categorical precipitation-type code filled by
+      forward- then backward-propagation so that the nearest valid code is used.
+    * All other continuous variables (temperature, humidity, wind U/V, etc.):
+            gaps of up to ``max_gap_hours`` consecutive NaN *timesteps* are filled by
+            **linear interpolation** within each station's own time series. If any
+            longer gap is present for a station/variable pair, that entire variable
+            series for that station is replaced with NaN so downstream merge logic can
+            fall back to GFS/ECMWF instead of mixing observed values with an unreliable
+            partially filled segment.
+
+    .. note::
+        ``max_gap_hours`` counts consecutive NaN *rows*, not wall-clock hours.
+        DWD MOSMIX-S produces one row per hour for the first 240 forecast hours,
+        so for that dataset the two are equivalent.
+
+    Not all stations report the full suite of variables — solar radiation is
+    only available for European stations, and wind gusts (FX1) are absent for
+    some networks.  Those absent columns are entirely NaN for the affected
+    stations and represent unavailable data, not gaps to fill.  The function
+    skips any column that is entirely NaN for a given station, and skips the
+    station entirely if all NaN columns fall into that category.
+
+    This function is called on the processed DataFrame (after ``process_dwd_df``)
+    but *before* spatial gridding, so that ``interpolate_dwd_to_grid_knearest_dask``
+    always receives hole-free station series and the nearest-station-wins strategy
+    never leaves a grid cell NaN due to a single missing report.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Processed station DataFrame with one row per (station, time) pair.
+    station_col : str
+        Column identifying each station.
+    time_col : str
+        Column containing the forecast timestamp (used for ordering only).
+    max_gap_hours : int
+        Maximum number of consecutive NaN timesteps to fill by interpolation
+        for continuous variables. If a longer gap exists, the entire station /
+        variable series is replaced with NaN (except APCP_surface and
+        PTYPE_surface, which retain their special-case handling).
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of *df* with NaN gaps filled.
+    """
+    # Precipitation column: interpolate first, then zero-fill any remaining NaNs.
+    # Linear interpolation handles both dry-period gaps (0→0 stays 0) and
+    # active-precipitation gaps (e.g. 0.5→0.1 gives a smooth estimate).
+    PRECIP_VARS = {"APCP_surface"}
+
+    # Categorical columns: propagate the nearest valid code rather than
+    # interpolating, because averaging integer codes is not physically meaningful.
+    CATEGORICAL_VARS = {"PTYPE_surface"}
+
+    # Non-data columns: skip entirely.
+    SKIP_COLS = {station_col, time_col, "latitude", "longitude", "altitude"}
+
+    def _has_oversized_nan_gap(series):
+        nan_mask = series.isna().to_numpy()
+        if not nan_mask.any():
+            return False
+
+        padded = np.pad(nan_mask.astype(np.int8), (1, 1))
+        transitions = np.diff(padded)
+        gap_starts = np.flatnonzero(transitions == 1)
+        gap_ends = np.flatnonzero(transitions == -1)
+        return np.any((gap_ends - gap_starts) > max_gap_hours)
+
+    df = df.copy()
+
+    # Pre-compute the subset of columns that need gap-filling so that the
+    # per-station NaN check below is as cheap as possible.
+    fill_cols = [
+        col
+        for col in df.columns
+        if col not in SKIP_COLS
+        and (col in CATEGORICAL_VARS or pd.api.types.is_float_dtype(df[col]))
+    ]
+
+    # Pre-compute a boolean mask: which rows have at least one NaN in a fill column.
+    # Used to quickly skip stations that are already complete.
+    has_any_nan = df[fill_cols].isna().any(axis=1)
+
+    for sid, grp_idx in df.groupby(station_col, sort=False).groups.items():
+        # Fast path: skip the station entirely if it has no NaN in any fill column.
+        if not has_any_nan.loc[grp_idx].any():
+            continue
+
+        grp = df.loc[grp_idx]
+        sorted_idx = grp.index
+
+        # Second fast path: only process columns that have a genuine mix of NaN
+        # and valid values for this station.  Columns where every value is NaN
+        # (e.g. FX1 / solar radiation for non-European stations) represent
+        # unavailable data — they should be left as NaN, not filled.
+        # Compute NaN counts for all fill columns in one vectorised pass instead
+        # of calling .isna() column-by-column (≈2.5× faster per station).
+        nan_counts = grp[fill_cols].isna().sum()
+        cols_to_fill = nan_counts[
+            (nan_counts > 0) & (nan_counts < len(grp))
+        ].index.tolist()
+        if not cols_to_fill:
+            continue  # all NaN columns are entirely absent — nothing to fill
+
+        for col in cols_to_fill:
+            s = grp[col]
+
+            if col in PRECIP_VARS:
+                # Interpolate short gaps; zero-fill any remaining NaNs (isolated
+                # missing reports in an otherwise dry period).
+                filled = s.interpolate(
+                    method="linear",
+                    limit=max_gap_hours,
+                    limit_direction="both",
+                ).fillna(0.0)
+                df.loc[sorted_idx, col] = filled.values
+            elif col in CATEGORICAL_VARS:
+                # Forward-fill then backward-fill within the station series.
+                # limit= counts consecutive NaN rows; assumes uniform hourly spacing.
+                df.loc[sorted_idx, col] = (
+                    s.ffill(limit=max_gap_hours).bfill(limit=max_gap_hours).values
+                )
+            else:
+                if _has_oversized_nan_gap(s):
+                    df.loc[sorted_idx, col] = np.nan
+                else:
+                    # Linear interpolation capped at max_gap_hours consecutive NaN rows.
+                    # limit_direction="both" also fills NaNs at the start/end of the series.
+                    df.loc[sorted_idx, col] = s.interpolate(
+                        method="linear",
+                        limit=max_gap_hours,
+                        limit_direction="both",
+                    ).values
+
+    return df
+
+
 def interpolate_dwd_to_grid_knearest_dask(
     df,
     var_cols,
@@ -347,6 +504,10 @@ def interpolate_dwd_to_grid_knearest_dask(
     Each dataframe row is assigned to up to k_max nearest grid cells
     within radius_km. For each (time, lat, lon) grid cell, ONLY THE NEAREST
     station is used, provided it is within radius_km. Otherwise, the cell is NaN.
+
+    NaN gaps within each station's time series should be filled before calling
+    this function (see ``fill_station_gaps``), so that the nearest station always
+    has a valid value and no abrupt source switches occur.
 
     Parameters
     ----------
@@ -490,14 +651,24 @@ def interpolate_dwd_to_grid_knearest_dask(
     row_idx = np.arange(df_sorted.shape[0], dtype=np.int64)
     row_idx_rep = np.repeat(row_idx[:, None], k_max, axis=1).ravel()[valid]
 
+    # Use station_id as a deterministic final tie-breaker when two stations are
+    # exactly the same distance from the same grid cell at the same time.
+    station_ids_full = df_sorted[station_col].astype(str).to_numpy()
+    station_sort_key = pd.to_numeric(station_ids_full, errors="coerce")
+    if pd.isna(station_sort_key).any():
+        station_sort_key = station_ids_full
+    station_sort_rep = np.repeat(station_sort_key[:, None], k_max, axis=1).ravel()[
+        valid
+    ]
+
     # -------------------------------------------------
     # 4) For each grid cell/time, find the nearest station (single pass)
     # -------------------------------------------------
     _log("Computing nearest-station per grid cell/time (argmin)…")
 
-    # Sort candidates by cell index then distance
-    # lexsort uses last key as primary sort key -> primary: linear_index, secondary: flat_dist
-    order = np.lexsort((flat_dist, linear_index))
+    # Sort candidates by cell index, then distance, then station_id.
+    # lexsort uses the last key as the primary sort key.
+    order = np.lexsort((station_sort_rep, flat_dist, linear_index))
     lin_sorted = linear_index[order]
     dist_sorted = flat_dist[order]
     row_sorted = row_idx_rep[order]
@@ -840,7 +1011,12 @@ def process_and_interpolate_df(df_input):
     # 1. Process units and variables
     df_processed = process_dwd_df(df_input)
 
-    # 2. Interpolate to Grid
+    # 2. Fill per-station NaN gaps before gridding so that nearest-station-wins
+    #    always finds a valid value and never leaves a grid cell NaN due to a
+    #    single missing report (e.g. RR1c 5–6 h gaps, DD 3–4 h gaps).
+    df_processed = fill_station_gaps(df_processed)
+
+    # 3. Interpolate to Grid
     gridded_ds = interpolate_dwd_to_grid_knearest_dask(
         df_processed,
         var_cols=zarr_vars,

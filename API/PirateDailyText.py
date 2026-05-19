@@ -836,6 +836,7 @@ def calculate_day_text(
                 "snow_error": 0.0,
                 "has_snow_error_data": False,  # Track if any error data exists
                 "sleet_accum": 0.0,
+                "frzrain_accum": 0.0,
                 "max_pop": 0.0,
                 "max_rain_intensity": 0.0,
                 "max_snow_intensity": 0.0,
@@ -958,7 +959,10 @@ def calculate_day_text(
                     )
                 period_data["snow_error"] += estimated_snow_error_mm
                 period_data["has_snow_error_data"] = True
-            period_data["sleet_accum"] += hour["iceAccumulation"]
+            if hour["precipType"] == PRECIP_TYPES["ice"]:
+                period_data["frzrain_accum"] += hour["iceAccumulation"]
+            elif hour["precipType"] == PRECIP_TYPES["sleet"]:
+                period_data["sleet_accum"] += hour["iceAccumulation"]
 
             if (
                 hour["liquidAccumulation"] > 0
@@ -1024,6 +1028,7 @@ def calculate_day_text(
     total_rain_accum = 0.0
     total_snow_accum = 0.0
     total_sleet_accum = 0.0
+    total_frzrain_accum = 0.0
     total_snow_error = 0.0
     has_any_snow_error_data = False  # Track if any period has error data
     overall_max_rain_intensity = 0.0
@@ -1046,6 +1051,7 @@ def calculate_day_text(
         total_rain_accum += p_data["rain_accum"]
         total_snow_accum += p_data["snow_accum"]
         total_sleet_accum += p_data["sleet_accum"]
+        total_frzrain_accum += p_data["frzrain_accum"]
         total_snow_error += p_data["snow_error"]
         if p_data["has_snow_error_data"]:
             has_any_snow_error_data = True
@@ -1070,6 +1076,7 @@ def calculate_day_text(
             p_data["snow_accum"] > PRECIP_INTENSITY_THRESHOLDS["mid"]
             or p_data["rain_accum"] > DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM
             or p_data["sleet_accum"] > DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM
+            or p_data["frzrain_accum"] > DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM
         )
         if is_precip_in_period:
             precip_periods.append(i)
@@ -1199,11 +1206,15 @@ def calculate_day_text(
     precip_icon = None
     secondary_precip_condition = None
 
-    total_precip_accum = total_rain_accum + total_snow_accum + total_sleet_accum
+    total_precip_accum = (
+        total_rain_accum + total_snow_accum + total_sleet_accum + total_frzrain_accum
+    )
+    # Combined ice accumulation (sleet + freezing rain) used for mixed/threshold checks
+    total_ice_accum = total_sleet_accum + total_frzrain_accum
 
     # Calculate overall precipitation text and icon if significant precipitation occurs (threshold in mm)
     if overall_avg_pop > 0 and total_precip_accum >= 0.1:
-        if total_snow_accum > 0 and total_rain_accum > 0 and total_sleet_accum > 0:
+        if total_snow_accum > 0 and total_rain_accum > 0 and total_ice_accum > 0:
             precip_summary_text = "mixed-precipitation"
             most_common_overall_precip_type = (
                 PRECIP_TYPES["sleet"] if icon_set != "pirate" else PRECIP_TYPES["mixed"]
@@ -1212,6 +1223,18 @@ def calculate_day_text(
                 "medium-snow"  # Indicate snow totals are relevant
             )
         else:
+            # Determine dominant ice type (sleet vs freezing rain) and labels for secondary conditions
+            if total_frzrain_accum >= total_sleet_accum:
+                dominant_ice_type = PRECIP_TYPES["ice"]
+                ice_as_secondary = (
+                    "medium-freezing-rain"  # dominant ice as secondary to snow/rain
+                )
+                other_ice_as_secondary = "medium-sleet"  # non-dominant ice as secondary alongside dominant ice
+            else:
+                dominant_ice_type = PRECIP_TYPES["sleet"]
+                ice_as_secondary = "medium-sleet"
+                other_ice_as_secondary = "medium-freezing-rain"
+
             # Determine primary and secondary precipitation types based on accumulation
             if total_snow_accum > 0:
                 if total_rain_accum > 0 and total_snow_accum > total_rain_accum:
@@ -1220,19 +1243,24 @@ def calculate_day_text(
                 elif total_rain_accum > 0 and total_snow_accum < total_rain_accum:
                     most_common_overall_precip_type = PRECIP_TYPES["rain"]
                     secondary_precip_condition = "medium-snow"
-                elif total_sleet_accum > 0 and total_snow_accum > total_sleet_accum:
+                elif total_ice_accum > 0 and total_snow_accum > total_ice_accum:
                     most_common_overall_precip_type = PRECIP_TYPES["snow"]
-                    secondary_precip_condition = "medium-sleet"
-                elif total_sleet_accum > 0 and total_snow_accum < total_sleet_accum:
-                    most_common_overall_precip_type = PRECIP_TYPES["sleet"]
+                    secondary_precip_condition = ice_as_secondary
+                elif total_ice_accum > 0 and total_snow_accum < total_ice_accum:
+                    most_common_overall_precip_type = dominant_ice_type
                     secondary_precip_condition = "medium-snow"
-            elif total_sleet_accum > 0:
-                if total_rain_accum > 0 and total_rain_accum > total_sleet_accum:
+            elif total_ice_accum > 0:
+                if total_rain_accum > 0 and total_rain_accum > total_ice_accum:
                     most_common_overall_precip_type = PRECIP_TYPES["rain"]
-                    secondary_precip_condition = "medium-sleet"
-                elif total_rain_accum > 0 and total_rain_accum < total_sleet_accum:
-                    most_common_overall_precip_type = PRECIP_TYPES["sleet"]
+                    secondary_precip_condition = ice_as_secondary
+                elif total_rain_accum > 0 and total_rain_accum < total_ice_accum:
+                    most_common_overall_precip_type = dominant_ice_type
                     secondary_precip_condition = "medium-rain"
+                elif total_sleet_accum > 0 and total_frzrain_accum > 0:
+                    # Both sleet and freezing rain on the same day (with or without rain);
+                    # this branch is reached when there is no rain or rain == total_ice_accum
+                    most_common_overall_precip_type = dominant_ice_type
+                    secondary_precip_condition = other_ice_as_secondary
 
             # Re-evaluate primary precipType if calculated type has zero accumulation
             if (
@@ -1241,28 +1269,24 @@ def calculate_day_text(
             ):
                 if total_rain_accum > 0:
                     most_common_overall_precip_type = PRECIP_TYPES["rain"]
-                elif total_sleet_accum > 0:
-                    most_common_overall_precip_type = PRECIP_TYPES["sleet"]
+                elif total_ice_accum > 0:
+                    most_common_overall_precip_type = dominant_ice_type
             elif (
                 total_rain_accum == 0
                 and most_common_overall_precip_type == PRECIP_TYPES["rain"]
             ):
                 if total_snow_accum > 0:
                     most_common_overall_precip_type = PRECIP_TYPES["snow"]
-                elif total_sleet_accum > 0:
-                    most_common_overall_precip_type = PRECIP_TYPES["sleet"]
-            elif (
-                total_sleet_accum == 0
-                and most_common_overall_precip_type == PRECIP_TYPES["sleet"]
+                elif total_ice_accum > 0:
+                    most_common_overall_precip_type = dominant_ice_type
+            elif total_ice_accum == 0 and most_common_overall_precip_type in (
+                PRECIP_TYPES["sleet"],
+                PRECIP_TYPES["ice"],
             ):
                 if total_snow_accum > 0:
                     most_common_overall_precip_type = PRECIP_TYPES["snow"]
                 elif total_rain_accum > 0:
                     most_common_overall_precip_type = PRECIP_TYPES["rain"]
-
-            # If the most common precipitation type is ice change to freezing rain to fix text summary issues
-            if most_common_overall_precip_type == PRECIP_TYPES["ice"]:
-                most_common_overall_precip_type = "freezing-rain"
 
         # Calculate final precipitation text and icon (all in mm)
         precip_summary_text, precip_icon = calculate_precip_text(
@@ -1270,7 +1294,7 @@ def calculate_day_text(
             "hourly",  # This is a fixed parameter as per original code
             total_rain_accum,
             total_snow_accum,
-            total_sleet_accum,
+            total_ice_accum,
             overall_avg_pop if overall_avg_pop != -999 else 1,
             icon_set,
             "both",
