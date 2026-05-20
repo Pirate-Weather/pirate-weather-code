@@ -680,14 +680,29 @@ async def PW_Forecast(
                 GFS_Merged = _prefer_ai_with_fallback(merge_result.aigfs, GFS_Merged)
                 if "gfs" not in merge_result.metadata.source_list:
                     merge_result.metadata.source_list.append("gfs")
+            elif merge_result.aifs is not None:
+                # AIGFS excluded/unavailable in NA: fall back to AIFS
+                ECMWF_Merged = _prefer_ai_with_fallback(merge_result.aifs, ECMWF_Merged)
+                if "ecmwf_ifs" not in merge_result.metadata.source_list:
+                    merge_result.metadata.source_list.append("ecmwf_ifs")
             if merge_result.aigefs is not None:
                 GEFS_Merged = _prefer_ai_with_fallback(merge_result.aigefs, GEFS_Merged)
                 if "gefs" not in merge_result.metadata.source_list:
                     merge_result.metadata.source_list.append("gefs")
-        elif merge_result.aifs is not None:
-            ECMWF_Merged = _prefer_ai_with_fallback(merge_result.aifs, ECMWF_Merged)
-            if "ecmwf_ifs" not in merge_result.metadata.source_list:
-                merge_result.metadata.source_list.append("ecmwf_ifs")
+        else:
+            if merge_result.aifs is not None:
+                ECMWF_Merged = _prefer_ai_with_fallback(merge_result.aifs, ECMWF_Merged)
+                if "ecmwf_ifs" not in merge_result.metadata.source_list:
+                    merge_result.metadata.source_list.append("ecmwf_ifs")
+            elif merge_result.aigfs is not None:
+                # AIFS excluded/unavailable outside NA: fall back to AIGFS
+                GFS_Merged = _prefer_ai_with_fallback(merge_result.aigfs, GFS_Merged)
+                if "gfs" not in merge_result.metadata.source_list:
+                    merge_result.metadata.source_list.append("gfs")
+            if merge_result.aigefs is not None:
+                GEFS_Merged = _prefer_ai_with_fallback(merge_result.aigefs, GEFS_Merged)
+                if "gefs" not in merge_result.metadata.source_list:
+                    merge_result.metadata.source_list.append("gefs")
     sourceList = merge_result.metadata.source_list
     sourceTimes = merge_result.metadata.source_times
     sourceIDX = merge_result.metadata.source_idx

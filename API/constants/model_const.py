@@ -213,7 +213,7 @@ FORECAST_SOURCES = frozenset(
         "dwd_mosmix",
         "aigfs",
         "aigefs",
-        "aifs",
+        "ecmwf_aifs",
         "era5",
     }
 )
