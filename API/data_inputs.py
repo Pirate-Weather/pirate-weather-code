@@ -85,7 +85,7 @@ _PRIORITY_ORDER_NA_WITH_ECMWF = ["nbm", "hrrr", "ecmwf", "gfs", "dwd_mosmix", "e
 _PRIORITY_ORDER_NA_NO_ECMWF = ["nbm", "hrrr", "gfs", "dwd_mosmix", "era5"]
 _PRIORITY_ORDER_ROW_WITH_ECMWF = ["nbm", "hrrr", "dwd_mosmix", "ecmwf", "gfs", "era5"]
 _PRIORITY_ORDER_ROW_NO_ECMWF = ["nbm", "hrrr", "dwd_mosmix", "gfs", "era5"]
-_PRIORITY_ORDER_AI_NA_WITH_ECMWF = [
+_PRIORITY_ORDER_AI_NA = [
     "gefs",
     "gfs",
     "ecmwf",
@@ -94,8 +94,7 @@ _PRIORITY_ORDER_AI_NA_WITH_ECMWF = [
     "dwd_mosmix",
     "era5",
 ]
-_PRIORITY_ORDER_AI_NA_NO_ECMWF = ["gefs", "gfs", "nbm", "hrrr", "dwd_mosmix", "era5"]
-_PRIORITY_ORDER_AI_ROW_WITH_ECMWF = [
+_PRIORITY_ORDER_AI_ROW = [
     "ecmwf",
     "dwd_mosmix",
     "gfs",
@@ -103,7 +102,6 @@ _PRIORITY_ORDER_AI_ROW_WITH_ECMWF = [
     "hrrr",
     "era5",
 ]
-_PRIORITY_ORDER_AI_ROW_NO_ECMWF = ["gfs", "dwd_mosmix", "nbm", "hrrr", "era5"]
 
 
 def _stack_with_priority(
@@ -127,17 +125,9 @@ def _stack_with_priority(
 
     # Select pre-defined order based on priority rules
     if prioritize_ai_models and gfs_before_dwd:
-        order = (
-            _PRIORITY_ORDER_AI_NA_WITH_ECMWF
-            if has_ecmwf
-            else _PRIORITY_ORDER_AI_NA_NO_ECMWF
-        )
+        order = _PRIORITY_ORDER_AI_NA
     elif prioritize_ai_models and not gfs_before_dwd:
-        order = (
-            _PRIORITY_ORDER_AI_ROW_WITH_ECMWF
-            if has_ecmwf
-            else _PRIORITY_ORDER_AI_ROW_NO_ECMWF
-        )
+        order = _PRIORITY_ORDER_AI_ROW
     elif gfs_before_dwd:
         # North America: ... > ECMWF > GFS > DWD > ERA5
         order = (

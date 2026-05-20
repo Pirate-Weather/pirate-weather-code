@@ -188,7 +188,7 @@ def build_source_metadata(
         metadata.add("aigefs", time_value=_format_run_time(grid_result.aigefsRunTime))
 
     if isinstance(grid_result.dataOut_aifs, np.ndarray):
-        metadata.add("aifs", time_value=_format_run_time(grid_result.aifsRunTime))
+        metadata.add("ecmwf_aifs", time_value=_format_run_time(grid_result.aifsRunTime))
 
     return metadata
 
@@ -451,7 +451,7 @@ def merge_hourly_models(
         aigefs_start_idx = nearest_index(data_aigefs[:, 0], base_day_utc_grib)
         aigefs_merged = _merge_aigefs_as_gefs(data_aigefs, aigefs_start_idx, num_hours)
 
-    if "aifs" in metadata.source_list and isinstance(data_aifs, np.ndarray):
+    if "ecmwf_aifs" in metadata.source_list and isinstance(data_aifs, np.ndarray):
         aifs_start_idx = nearest_index(data_aifs[:, 0], base_day_utc_grib)
         aifs_merged = _merge_aifs_as_ecmwf(data_aifs, aifs_start_idx, num_hours)
 

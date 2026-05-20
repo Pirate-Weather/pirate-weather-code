@@ -130,28 +130,18 @@ _CURRENTLY_ORDER_ROW_NO_ECMWF = [
     "gfs",
     "era5",
 ]
-_CURRENTLY_ORDER_AI_NA_WITH_ECMWF = [
+_CURRENTLY_ORDER_AI_NA = [
+    "rtma_ru",
+    "hrrrsubh",
+    "nbm",
+    "hrrr",
     "gfs",
     "gefs",
     "ecmwf_ifs",
-    "rtma_ru",
-    "hrrrsubh",
-    "nbm",
-    "hrrr",
     "dwd_mosmix",
     "era5",
 ]
-_CURRENTLY_ORDER_AI_NA_NO_ECMWF = [
-    "gfs",
-    "gefs",
-    "rtma_ru",
-    "hrrrsubh",
-    "nbm",
-    "hrrr",
-    "dwd_mosmix",
-    "era5",
-]
-_CURRENTLY_ORDER_AI_ROW_WITH_ECMWF = [
+_CURRENTLY_ORDER_AI_ROW = [
     "ecmwf_ifs",
     "rtma_ru",
     "hrrrsubh",
@@ -159,15 +149,6 @@ _CURRENTLY_ORDER_AI_ROW_WITH_ECMWF = [
     "hrrr",
     "dwd_mosmix",
     "gfs",
-    "era5",
-]
-_CURRENTLY_ORDER_AI_ROW_NO_ECMWF = [
-    "gfs",
-    "rtma_ru",
-    "hrrrsubh",
-    "nbm",
-    "hrrr",
-    "dwd_mosmix",
     "era5",
 ]
 
@@ -197,17 +178,9 @@ def _build_source_strategies(
 
     # Select pre-defined priority order
     if prioritize_ai_models and gfs_before_dwd:
-        order = (
-            _CURRENTLY_ORDER_AI_NA_WITH_ECMWF
-            if has_ecmwf
-            else _CURRENTLY_ORDER_AI_NA_NO_ECMWF
-        )
+        order = _CURRENTLY_ORDER_AI_NA
     elif prioritize_ai_models and not gfs_before_dwd:
-        order = (
-            _CURRENTLY_ORDER_AI_ROW_WITH_ECMWF
-            if has_ecmwf
-            else _CURRENTLY_ORDER_AI_ROW_NO_ECMWF
-        )
+        order = _CURRENTLY_ORDER_AI_ROW
     elif gfs_before_dwd:
         # North America
         order = (

@@ -393,7 +393,7 @@ def _parse_parameters(
     ex_dwd_mosmix = int("dwd_mosmix" in exclude_params)
     ex_aigefs = int("aigefs" in exclude_params)
     ex_aigfs = int("aigfs" in exclude_params)
-    ex_aifs = int("aifs" in exclude_params)
+    ex_aifs = int("ecmwf_aifs" in exclude_params)
     summary_text = "summary" not in exclude_params
     inc_day_night = int("day_night_forecast" in include_params)
     inc_aimodels = int("aimodels" in include_params)
