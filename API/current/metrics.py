@@ -131,13 +131,13 @@ _CURRENTLY_ORDER_ROW_NO_ECMWF = [
     "era5",
 ]
 _CURRENTLY_ORDER_AI_NA = [
-    "gfs",
-    "gefs",
-    "ecmwf_ifs",
     "rtma_ru",
     "hrrrsubh",
     "nbm",
     "hrrr",
+    "gfs",
+    "gefs",
+    "ecmwf_ifs",
     "dwd_mosmix",
     "era5",
 ]
