@@ -42,8 +42,8 @@ updates:
       time: "13:00"
       timezone: "America/Toronto"
     cooldown:
-      # Delay updates for approximately 6 months to allow developers time to support latest version
-      default-days: 183
+      # Delay updates for approximately 90 days (which is the maximum)
+      default-days: 90
     assignees:
       - "alexander0042"
     open-pull-requests-limit: 100
