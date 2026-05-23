@@ -905,6 +905,13 @@ def _get_bearing(
                 model_data["DWD_MOSMIX_Merged"][state.idx2, DWD_MOSMIX["wind_v"]],
             ),
         ),
+        "ecmwf_aifs": (
+            lambda: "ecmwf_aifs" in sourceList,
+            lambda: _bearing_from_components(
+                model_data["ECMWF_Merged"][state.idx2, ECMWF["wind_u"]],
+                model_data["ECMWF_Merged"][state.idx2, ECMWF["wind_v"]],
+            ),
+        ),
         "ecmwf_ifs": (
             lambda: "ecmwf_ifs" in sourceList,
             lambda: _bearing_from_components(
