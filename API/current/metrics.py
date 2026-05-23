@@ -952,9 +952,7 @@ def _get_cloud(
         ),
         "ecmwf_ifs": (
             lambda: "ecmwf_ifs" in sourceList,
-            lambda: (
-                _interp_scalar(model_data["ECMWF_Merged"], ECMWF["cloud"], state)
-            ),
+            lambda: _interp_scalar(model_data["ECMWF_Merged"], ECMWF["cloud"], state),
         ),
         "hrrr": (
             lambda: model_data["has_hrrr_merged"],
