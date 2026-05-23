@@ -944,10 +944,16 @@ def _get_cloud(
                 * 0.01
             ),
         ),
+        "ecmwf_aifs": (
+            lambda: "ecmwf_aifs" in sourceList,
+            lambda: (
+                _interp_scalar(model_data["ECMWF_Merged"], ECMWF["cloud"], state) * 0.01
+            ),
+        ),
         "ecmwf_ifs": (
             lambda: "ecmwf_ifs" in sourceList,
             lambda: (
-                _interp_scalar(model_data["ECMWF_Merged"], ECMWF["cloud"], state) * 0.01
+                _interp_scalar(model_data["ECMWF_Merged"], ECMWF["cloud"], state)
             ),
         ),
         "hrrr": (
