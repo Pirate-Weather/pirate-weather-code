@@ -548,7 +548,7 @@ def prepare_data_inputs(
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["cloud"]] * 0.01
             if dwd_valid
             else None,
-            "ecmwf": ecmwf_merged[:, ECMWF["cloud"]] * 0.01
+            "ecmwf": ecmwf_merged[:, ECMWF["cloud"]]
             if ecmwf_merged is not None
             else None,
             "gfs": gfs_merged[:, GFS["cloud"]] * 0.01
