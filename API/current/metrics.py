@@ -361,6 +361,10 @@ def _get_temp(
                 model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["temp"], state
             ),
         ),
+        "ecmwf_aifs": (
+            lambda: "ecmwf_aifs" in sourceList,
+            lambda: _interp_scalar(model_data["ECMWF_Merged"], ECMWF["temp"], state),
+        ),
         "ecmwf_ifs": (
             lambda: "ecmwf_ifs" in sourceList,
             lambda: _interp_scalar(model_data["ECMWF_Merged"], ECMWF["temp"], state),
@@ -426,6 +430,10 @@ def _get_dew(
             lambda: _interp_scalar(
                 model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["dew"], state
             ),
+        ),
+        "ecmwf_aifs": (
+            lambda: "ecmwf_aifs" in sourceList,
+            lambda: _interp_scalar(model_data["ECMWF_Merged"], ECMWF["dew"], state),
         ),
         "ecmwf_ifs": (
             lambda: "ecmwf_ifs" in sourceList,
@@ -510,6 +518,12 @@ def _get_humidity(
                 * humidUnit
             ),
         ),
+        "ecmwf_aifs": (
+            lambda: "ecmwf_aifs" in sourceList,
+            lambda: _calculate_ecmwf_relative_humidity(
+                model_data["ECMWF_Merged"], state, humidUnit
+            ),
+        ),
         "ecmwf_ifs": (
             lambda: "ecmwf_ifs" in sourceList,
             lambda: _calculate_ecmwf_relative_humidity(
@@ -563,6 +577,12 @@ def _get_pressure(
             lambda: "dwd_mosmix" in sourceList,
             lambda: _interp_scalar(
                 model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["pressure"], state
+            ),
+        ),
+        "ecmwf_aifs": (
+            lambda: "ecmwf_aifs" in sourceList,
+            lambda: _interp_scalar(
+                model_data["ECMWF_Merged"], ECMWF["pressure"], state
             ),
         ),
         "ecmwf_ifs": (
@@ -638,6 +658,15 @@ def _get_wind(
                 model_data["DWD_MOSMIX_Merged"],
                 DWD_MOSMIX["wind_u"],
                 DWD_MOSMIX["wind_v"],
+                state,
+            ),
+        ),
+        "ecmwf_aifs": (
+            lambda: "ecmwf_aifs" in sourceList,
+            lambda: _interp_uv_magnitude(
+                model_data["ECMWF_Merged"],
+                ECMWF["wind_u"],
+                ECMWF["wind_v"],
                 state,
             ),
         ),
