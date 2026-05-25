@@ -265,6 +265,7 @@ ens_mf = ens_mf.assign(tpd=xr.where(mask, ens_mf.tpd / 3, ens_mf.tpd))
 after48 = ens_mf.step.isel(step=slice(48, None))
 mask = ens_mf.step.isin(after48)
 ens_mf = ens_mf.assign(tpd=xr.where(mask, ens_mf.tpd / 6, ens_mf.tpd))
+ens_mf["tcc"] = ens_mf["tcc"] * 100  # Convert from 0-1 to 0-100 for consistency with AIFS data
 
 # Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
 X3_Precipitation_Prob = (ens_mf["tpd"] > 0.0001).sum(dim="number") / ens_mf.sizes[
@@ -624,6 +625,7 @@ for i in range(his_period, 1, -12):
 
     # Change the 3 hour accumulations to hourly
     ens_his_mf["tpd"] = ens_his_mf["tpd"] / 3
+    ens_his_mf["tcc"] = ens_his_mf["tcc"] * 100  # Convert from 0-1 to 0-100 for consistency with AIFS data
 
     # Find the probability of precipitation greater than 0.1 mm/h (0.0001) m/h across all members
     X3_Precipitation_Prob_His = (ens_his_mf["tpd"] > 0.0001).sum(
