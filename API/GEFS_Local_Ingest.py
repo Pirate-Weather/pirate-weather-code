@@ -713,6 +713,7 @@ for daskVarIDX, dask_var in enumerate(probVars[:]):
 
         # Get times as numpy
         npCatTimes = daskCatTimes.compute()
+        # Check that the times are aligned with the expected stacked times
         validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
 
         daskArrayOut = da.from_array(
