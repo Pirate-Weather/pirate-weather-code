@@ -31,8 +31,9 @@ def test_build_hourly_block_structure():
         "nbm_rain": np.zeros(num_hours),
     }
 
-    prcipIntensity_inputs = {}
-    prcipProbability_inputs = {}
+    prcipIntensity_inputs = np.full((num_hours, 1), np.nan)
+    prcipProbability_inputs = np.full((num_hours, 1), np.nan)
+    prcipType_inputs = np.full((num_hours, 1), np.nan)
     temperature_inputs = np.zeros((num_hours, 1))
     dew_inputs = np.zeros((num_hours, 1))
     humidity_inputs = np.zeros((num_hours, 1))
@@ -83,6 +84,7 @@ def test_build_hourly_block_structure():
         "InterThour_inputs": InterThour_inputs,
         "prcipIntensity_inputs": prcipIntensity_inputs,
         "prcipProbability_inputs": prcipProbability_inputs,
+        "prcipType_inputs": prcipType_inputs,
         "temperature_inputs": temperature_inputs,
         "dew_inputs": dew_inputs,
         "humidity_inputs": humidity_inputs,

@@ -2,7 +2,8 @@
 
 import numpy as np
 
-from API.constants.model_const import DWD_MOSMIX, ECMWF
+from API.constants.api_const import PRECIP_IDX
+from API.constants.model_const import DWD_MOSMIX, ECMWF, GEFS, NBM
 from API.data_inputs import prepare_data_inputs
 from API.utils.geo import is_in_north_america
 
@@ -327,3 +328,68 @@ def test_nbm_remains_prioritized_over_gfs_in_north_america():
     )
 
     assert np.isclose(inputs["temperature_inputs"][0, 0], 20.0, atol=0.1)
+
+
+def test_precip_intensity_priority_matches_north_america_stack_order():
+    num_hours = 4
+
+    dwd_merged = np.full((num_hours, max(DWD_MOSMIX.values()) + 1), np.nan)
+    dwd_merged[:, DWD_MOSMIX["accum"]] = 1.0
+    dwd_merged[:, DWD_MOSMIX["ptype"]] = 1.0
+    dwd_merged[:, DWD_MOSMIX["temp"]] = 5.0
+
+    ecmwf_merged = np.full((num_hours, max(ECMWF.values()) + 1), np.nan)
+    ecmwf_merged[:, ECMWF["accum_mean"]] = 0.002
+    ecmwf_merged[:, ECMWF["ptype"]] = 1.0
+
+    inputs = prepare_data_inputs(
+        source_list=["dwd_mosmix", "ecmwf_ifs"],
+        nbm_merged=None,
+        nbm_fire_merged=None,
+        hrrr_merged=None,
+        dwd_mosmix_merged=dwd_merged,
+        ecmwf_merged=ecmwf_merged,
+        gefs_merged=None,
+        gfs_merged=None,
+        era5_merged=None,
+        extra_vars=[],
+        num_hours=num_hours,
+        lat=40.7128,
+        lon=-74.0060,
+    )
+
+    assert np.isclose(inputs["prcipIntensity_inputs"][0, 0], 2.0, atol=0.01)
+    assert inputs["prcipType_inputs"][0, 0] == PRECIP_IDX["rain"]
+    assert np.isclose(inputs["prcipIntensity_inputs"][0, 1], 1.0, atol=0.01)
+
+
+def test_precip_probability_priority_prefers_gefs_for_ai_models_in_north_america():
+    num_hours = 4
+
+    nbm_merged = np.full((num_hours, max(NBM.values()) + 1), np.nan)
+    nbm_merged[:, NBM["prob"]] = 20.0
+
+    ecmwf_merged = np.full((num_hours, max(ECMWF.values()) + 1), np.nan)
+    ecmwf_merged[:, ECMWF["prob"]] = 0.4
+
+    gefs_merged = np.full((num_hours, max(GEFS.values()) + 1), np.nan)
+    gefs_merged[:, GEFS["prob"]] = 0.8
+
+    inputs = prepare_data_inputs(
+        source_list=["nbm", "ecmwf_ifs", "gefs"],
+        nbm_merged=nbm_merged,
+        nbm_fire_merged=None,
+        hrrr_merged=None,
+        dwd_mosmix_merged=None,
+        ecmwf_merged=ecmwf_merged,
+        gefs_merged=gefs_merged,
+        gfs_merged=None,
+        era5_merged=None,
+        extra_vars=[],
+        num_hours=num_hours,
+        lat=40.7128,
+        lon=-74.0060,
+        prioritize_ai_models=True,
+    )
+
+    assert np.isclose(inputs["prcipProbability_inputs"][0, 0], 0.8, atol=0.01)
