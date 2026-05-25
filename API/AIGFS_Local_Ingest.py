@@ -35,8 +35,8 @@ from API.ingest_utils import (
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
-    validate_stacked_time_alignment,
     validate_grib_stats,
+    validate_stacked_time_alignment,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")

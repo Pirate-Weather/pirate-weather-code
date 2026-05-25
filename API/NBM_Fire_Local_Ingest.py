@@ -36,8 +36,8 @@ from API.ingest_utils import (
     positive_int_env,
     run_command,
     tune_nofile_limit,
-    validate_stacked_time_alignment,
     validate_grib_stats,
+    validate_stacked_time_alignment,
 )
 
 # Logging
