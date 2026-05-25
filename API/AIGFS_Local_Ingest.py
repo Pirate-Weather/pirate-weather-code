@@ -35,6 +35,7 @@ from API.ingest_utils import (
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
+    validate_stacked_time_alignment,
     validate_grib_stats,
 )
 
@@ -524,6 +525,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
 
         # Get times as numpy
         npCatTimes = daskCatTimes.compute()
+        validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
 
         daskArrayOut = da.from_array(
             np.tile(

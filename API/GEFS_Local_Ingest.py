@@ -35,6 +35,7 @@ from API.ingest_utils import (
     positive_int_env,
     run_command,
     tune_nofile_limit,
+    validate_stacked_time_alignment,
     validate_grib_stats,
 )
 
@@ -712,6 +713,7 @@ for daskVarIDX, dask_var in enumerate(probVars[:]):
 
         # Get times as numpy
         npCatTimes = daskCatTimes.compute()
+        validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
 
         daskArrayOut = da.from_array(
             np.tile(

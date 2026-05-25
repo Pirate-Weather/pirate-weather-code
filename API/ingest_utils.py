@@ -629,6 +629,35 @@ def interp_time_take_blend(
     return out
 
 
+def validate_stacked_time_alignment(
+    stacked_times_unix: np.ndarray,
+    concatenated_times_unix: np.ndarray,
+    tolerance_seconds: float = 300,
+) -> None:
+    """Ensure concatenated stored times stay close to the expected stacked times."""
+    expected_times = np.asarray(stacked_times_unix, dtype=np.float64).reshape(-1)
+    actual_times = np.asarray(concatenated_times_unix, dtype=np.float64).reshape(-1)
+
+    if expected_times.shape != actual_times.shape:
+        raise ValueError(
+            "Time alignment check failed due to shape mismatch: "
+            f"expected {expected_times.shape}, got {actual_times.shape}."
+        )
+
+    time_deltas = np.abs(expected_times - actual_times)
+    mismatched_indices = np.flatnonzero(time_deltas > tolerance_seconds)
+    if mismatched_indices.size:
+        first_idx = int(mismatched_indices[0])
+        raise ValueError(
+            "Time alignment check failed: "
+            f"{mismatched_indices.size} timestamps differ by more than "
+            f"{tolerance_seconds} seconds. First mismatch at index {first_idx}: "
+            f"expected={expected_times[first_idx]}, "
+            f"actual={actual_times[first_idx]}, "
+            f"delta={time_deltas[first_idx]}."
+        )
+
+
 def interpolate_temporal_gaps_efficiently(
     ds_chunked, nearest_vars=None, max_gap_hours=3, time_dim="time"
 ):
