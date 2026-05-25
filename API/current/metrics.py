@@ -142,6 +142,7 @@ def _build_source_strategies(
     lat,
     lon,
     *,
+    has_ecmwf=None,
     prioritize_ai_models=False,
 ):
     """
@@ -151,6 +152,7 @@ def _build_source_strategies(
         source_map: Dictionary mapping source names to (predicate, getter) tuples.
         lat: Latitude.
         lon: Longitude.
+        has_ecmwf: Backward-compatible no-op flag retained for existing callers.
         prioritize_ai_models: Whether to prioritize AI model sources in the stacking order.
 
     Returns:
