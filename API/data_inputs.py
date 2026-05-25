@@ -412,9 +412,7 @@ def prepare_data_inputs(
             "nbm": _component_precip_type(
                 nbm_merged[:, NBM["snow"]] if nbm_merged is not None else None,
                 nbm_merged[:, NBM["ice"]] if nbm_merged is not None else None,
-                nbm_merged[:, NBM["freezing_rain"]]
-                if nbm_merged is not None
-                else None,
+                nbm_merged[:, NBM["freezing_rain"]] if nbm_merged is not None else None,
                 nbm_merged[:, NBM["rain"]] if nbm_merged is not None else None,
             )
             if "nbm" in source_list
@@ -440,9 +438,7 @@ def prepare_data_inputs(
             if "dwd_mosmix" in source_list and dwd_valid
             else None,
             "ecmwf": _map_grib_precip_type(
-                ecmwf_merged[:, ECMWF["ptype"]]
-                if ecmwf_merged is not None
-                else None
+                ecmwf_merged[:, ECMWF["ptype"]] if ecmwf_merged is not None else None
             )
             if "ecmwf_ifs" in source_list
             else None,
@@ -459,9 +455,7 @@ def prepare_data_inputs(
             "gfs": _component_precip_type(
                 gfs_merged[:, GFS["snow"]] if gfs_merged is not None else None,
                 gfs_merged[:, GFS["ice"]] if gfs_merged is not None else None,
-                gfs_merged[:, GFS["freezing_rain"]]
-                if gfs_merged is not None
-                else None,
+                gfs_merged[:, GFS["freezing_rain"]] if gfs_merged is not None else None,
                 gfs_merged[:, GFS["rain"]] if gfs_merged is not None else None,
             )
             if "gfs" in source_list and gfs_merged is not None

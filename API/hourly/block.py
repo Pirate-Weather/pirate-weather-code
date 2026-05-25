@@ -7,7 +7,6 @@ import numpy as np
 from API.api_utils import (
     calculate_apparent_temperature,
     clipLog,
-    map_wmo4677_to_ptype,
     zero_small_values,
 )
 from API.constants.api_const import (
@@ -37,7 +36,6 @@ from API.constants.clip_const import (
     CLIP_WIND,
 )
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
-from API.constants.shared_const import MISSING_DATA
 from API.legacy.hourly import apply_legacy_hourly_text
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height

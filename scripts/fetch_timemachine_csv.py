@@ -196,9 +196,7 @@ def load_points(csv_path: Path, tf: TimezoneFinder) -> list[Point]:
         if not reader.fieldnames:
             raise ValueError("CSV file is missing a header row.")
 
-        lat_column = detect_column(
-            reader.fieldnames, ("lat", "latitude", "slatitude")
-        )
+        lat_column = detect_column(reader.fieldnames, ("lat", "latitude", "slatitude"))
         lon_column = detect_column(
             reader.fieldnames,
             ("lon", "lng", "longitude", "long", "slongitude", "slongitud"),
