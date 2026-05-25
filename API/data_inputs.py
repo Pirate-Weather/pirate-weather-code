@@ -664,7 +664,6 @@ def prepare_data_inputs(
         num_hours,
         lat,
         lon,
-        has_ecmwf=True,  # ECMWF has data
         source_data={
             "nbm": nbm_merged[:, NBM["cloud"]] * 0.01
             if nbm_merged is not None
