@@ -660,17 +660,6 @@ def prepare_data_inputs(
     )
 
     # --- cloud_inputs ---
-    ecmwf_cloud = None
-
-    # Normalize ECMWF cloud cover to the 0-1 range for consistency with other sources.
-    # When the ECMWF source is AIFS, cloud cover is provided in the 0-100% range and must be converted.
-    # Other ECMWF cloud values are already expected to be in the 0-1 range and are used directly.
-    if ecmwf_merged is not None:
-        if "ecmwf_aifs" in source_list:
-            ecmwf_cloud = ecmwf_merged[:, ECMWF["cloud"]] * 0.01
-        else:
-            ecmwf_cloud = ecmwf_merged[:, ECMWF["cloud"]]
-
     cloud_inputs = _stack_with_priority(
         num_hours,
         lat,
@@ -685,7 +674,9 @@ def prepare_data_inputs(
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["cloud"]] * 0.01
             if dwd_valid
             else None,
-            "ecmwf": ecmwf_cloud,
+            "ecmwf": ecmwf_merged[:, ECMWF["cloud"]] * 0.01
+            if ecmwf_merged is not None
+            else None,
             "gfs": gfs_merged[:, GFS["cloud"]] * 0.01
             if gfs_merged is not None
             else None,
