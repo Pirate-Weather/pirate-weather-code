@@ -36,6 +36,7 @@ from API.ingest_utils import (
     run_command,
     tune_nofile_limit,
     validate_grib_stats,
+    validate_stacked_time_alignment,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -712,6 +713,8 @@ for daskVarIDX, dask_var in enumerate(probVars[:]):
 
         # Get times as numpy
         npCatTimes = daskCatTimes.compute()
+        # Check that the times are aligned with the expected stacked times
+        validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
 
         daskArrayOut = da.from_array(
             np.tile(

@@ -396,6 +396,9 @@ ifs_mf = xr.merge(
     [ifs_mf_2, ifs_mf_10, ifs_mf_surf, ifs_mf_msl, ifs_mf_atm], compat="override"
 )
 
+# Convert from 0-1 to 0-100 for consistency with AIFS data
+ifs_mf["tcc"] = ifs_mf["tcc"] * 100
+
 
 # %% Merge the IFS and ENSO data
 
@@ -591,6 +594,9 @@ for i in range(his_period, 1, -12):
         [ifs_his_mf_2, ifs_his_mf_10, ifs_his_mf_surf, ifs_his_mf_msl, ifs_his_mf_atm],
         compat="override",
     )
+
+    # Convert from 0-1 to 0-100 for consistency with AIFS data
+    ifs_his_mf["tcc"] = ifs_his_mf["tcc"] * 100
 
     ########################################################################
     ### Download the enfo data

@@ -7,7 +7,6 @@ import numpy as np
 from API.api_utils import (
     calculate_apparent_temperature,
     clipLog,
-    map_wmo4677_to_ptype,
     zero_small_values,
 )
 from API.constants.api_const import (
@@ -37,104 +36,15 @@ from API.constants.clip_const import (
     CLIP_WIND,
 )
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
-from API.constants.shared_const import MISSING_DATA
 from API.legacy.hourly import apply_legacy_hourly_text
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
 
 
-def _populate_max_pchance(
-    hour_array_grib,
-    hour_array,
-    source_list,
-    InterThour_inputs,
-    temperature_inputs,
-):
-    """
-    Populate maximum precipitation chance for each hour.
-
-    Args:
-        hour_array_grib: GRIB hour array.
-        hour_array: Hour array.
-        source_list: List of data sources.
-        InterThour_inputs: Inputs for hourly interpolation.
-        temperature_inputs: Temperature inputs for validation.
-
-    Returns:
-        Array of maximum precipitation chances.
-    """
-    maxPchanceHour = np.full((len(hour_array_grib), 6), MISSING_DATA)
-
-    def populate_component_ptype(condition, target_idx, prefix):
-        if not condition():
-            return
-        inter_thour = np.zeros(shape=(len(hour_array), 5))
-        inter_thour[:, 1] = InterThour_inputs[f"{prefix}_snow"]
-        inter_thour[:, 2] = InterThour_inputs[f"{prefix}_ice"]
-        inter_thour[:, 3] = InterThour_inputs[f"{prefix}_freezing_rain"]
-        inter_thour[:, 4] = InterThour_inputs[f"{prefix}_rain"]
-        inter_thour[inter_thour < 0.01] = 0
-        maxPchanceHour[:, target_idx] = np.argmax(inter_thour, axis=1)
-        maxPchanceHour[np.isnan(inter_thour[:, 1]), target_idx] = MISSING_DATA
-
-    def populate_mapped_ptype(condition, target_idx, key):
-        if not condition():
-            return
-        # Round but keep NaN mask so we don't attempt to cast NaN to int
-        # Defined here: https://codes.ecmwf.int/grib/format/grib2/ctables/4/201/
-        ptype_vals = np.round(InterThour_inputs[key])
-        ptype_nan_mask = np.isnan(ptype_vals)
-        ptype_hour = np.zeros_like(ptype_vals, dtype=int)
-        ptype_hour[~ptype_nan_mask] = ptype_vals[~ptype_nan_mask].astype(int)
-        conditions = [
-            np.isin(ptype_hour, [5, 6, 9]),
-            np.isin(ptype_hour, [4, 8, 10]),
-            np.isin(ptype_hour, [3, 12]),
-            np.isin(ptype_hour, [1, 2, 7, 11]),
-        ]
-        choices = [1, 2, 3, 4]
-        mapped_ptype = np.select(conditions, choices, default=0)
-        maxPchanceHour[:, target_idx] = mapped_ptype
-        maxPchanceHour[ptype_nan_mask, target_idx] = MISSING_DATA
-
-    def populate_wmo4677_ptype(condition, target_idx, key):
-        # DWD MOSMIX provides WMO 4677 present-weather codes; mapping is
-        # centralized in `API.api_utils.map_wmo4677_to_ptype` so we don't
-        # duplicate the mapping logic here.
-        # Pass temperature for validation to prevent unrealistic frozen precip at warm temps
-        if not condition():
-            return
-        ptype_vals = np.round(InterThour_inputs[key])
-        # For DWD MOSMIX, use temperature from temperature_inputs if available
-        temp_vals = None
-        if (
-            temperature_inputs is not None
-            and len(temperature_inputs.shape) > 1
-            and temperature_inputs.shape[1] > target_idx
-        ):
-            temp_vals = temperature_inputs[:, target_idx]
-        maxPchanceHour[:, target_idx] = map_wmo4677_to_ptype(
-            ptype_vals, temperature_c=temp_vals
-        )
-
-    populate_component_ptype(lambda: "nbm" in source_list, 0, "nbm")
-    populate_component_ptype(
-        lambda: ("hrrr_0-18" in source_list) and ("hrrr_18-48" in source_list),
-        1,
-        "hrrr",
-    )
-    populate_wmo4677_ptype(lambda: "dwd_mosmix" in source_list, 2, "dwd_mosmix_ptype")
-    populate_mapped_ptype(lambda: "ecmwf_ifs" in source_list, 3, "ecmwf_ptype")
-    populate_component_ptype(lambda: "gefs" in source_list, 4, "gefs")
-    populate_mapped_ptype(lambda: "era5" in source_list, 5, "era5_ptype")
-
-    return maxPchanceHour
-
-
 def _calculate_intensity_prob(
     hour_array_grib,
     InterPhour,
-    maxPchanceHour,
+    prcipType_inputs,
     prcipIntensity_inputs,
     prcipProbability_inputs,
 ):
@@ -144,26 +54,12 @@ def _calculate_intensity_prob(
     Args:
         hour_array_grib: GRIB hour array.
         InterPhour: Hourly interpolated data.
-        maxPchanceHour: Maximum precipitation chance for each hour.
+        prcipType_inputs: Precipitation type inputs.
         prcipIntensity_inputs: Precipitation intensity inputs.
         prcipProbability_inputs: Precipitation probability inputs.
     """
-    prcipIntensityHour = np.full((len(hour_array_grib), 6), MISSING_DATA)
-    intensity_sources = [
-        ("nbm", 0),
-        ("hrrr", 1),
-        ("dwd_mosmix", 2),
-        ("ecmwf", 3),
-        ("gfs_gefs", 4),
-        ("era5", 5),
-    ]
-    for source_key, idx in intensity_sources:
-        val = prcipIntensity_inputs.get(source_key)
-        if val is not None:
-            prcipIntensityHour[:, idx] = val
-
     InterPhour[:, DATA_HOURLY["intensity"]] = np.choose(
-        np.argmin(np.isnan(prcipIntensityHour), axis=1), prcipIntensityHour.T
+        np.argmin(np.isnan(prcipIntensity_inputs), axis=1), prcipIntensity_inputs.T
     )
     InterPhour[:, DATA_HOURLY["intensity"]] = np.maximum(
         InterPhour[:, DATA_HOURLY["intensity"]], 0
@@ -172,18 +68,12 @@ def _calculate_intensity_prob(
         InterPhour[:, DATA_HOURLY["intensity"]], threshold=PRECIP_NOISE_THRESHOLD_MMH
     )
     InterPhour[:, DATA_HOURLY["type"]] = np.choose(
-        np.argmin(np.isnan(prcipIntensityHour), axis=1), maxPchanceHour.T
+        np.argmin(np.isnan(prcipIntensity_inputs), axis=1), prcipType_inputs.T
     )
 
-    prcipProbabilityHour = np.full((len(hour_array_grib), 3), MISSING_DATA)
-    prob_sources = [("nbm", 0), ("ecmwf", 1), ("gefs", 2)]
-    for source_key, idx in prob_sources:
-        val = prcipProbability_inputs.get(source_key)
-        if val is not None:
-            prcipProbabilityHour[:, idx] = val
-
     InterPhour[:, DATA_HOURLY["prob"]] = np.choose(
-        np.argmin(np.isnan(prcipProbabilityHour), axis=1), prcipProbabilityHour.T
+        np.argmin(np.isnan(prcipProbability_inputs), axis=1),
+        prcipProbability_inputs.T,
     )
     InterPhour[:, DATA_HOURLY["prob"]] = np.clip(
         InterPhour[:, DATA_HOURLY["prob"]], 0, 1
@@ -744,6 +634,7 @@ def build_hourly_block(
     InterThour_inputs,
     prcipIntensity_inputs,
     prcipProbability_inputs,
+    prcipType_inputs,
     temperature_inputs,
     dew_inputs,
     humidity_inputs,
@@ -830,18 +721,10 @@ def build_hourly_block(
         Tuple containing hourly lists and arrays.
     """
 
-    maxPchanceHour = _populate_max_pchance(
-        hour_array_grib,
-        hour_array,
-        source_list,
-        InterThour_inputs,
-        temperature_inputs,
-    )
-
     _calculate_intensity_prob(
         hour_array_grib,
         InterPhour,
-        maxPchanceHour,
+        prcipType_inputs,
         prcipIntensity_inputs,
         prcipProbability_inputs,
     )

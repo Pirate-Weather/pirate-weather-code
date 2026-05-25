@@ -36,6 +36,7 @@ from API.ingest_utils import (
     mask_invalid_data,
     pad_to_chunk_size,
     validate_grib_stats,
+    validate_stacked_time_alignment,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -330,7 +331,7 @@ for i in range(his_period, -1, -6):
             + ".zarr"
         )
 
-        # Check for a loca done file
+        # Check for a local done file
         if os.path.exists(local_path.replace(".zarr", ".done")):
             logger.info(
                 "File already exists on disk, skipping download for: %s", local_path
@@ -524,6 +525,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
 
         # Get times as numpy
         npCatTimes = daskCatTimes.compute()
+        validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
 
         daskArrayOut = da.from_array(
             np.tile(

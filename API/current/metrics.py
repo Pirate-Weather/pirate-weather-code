@@ -91,8 +91,10 @@ def _select_value(strategies, default=MISSING_DATA):
     return default
 
 
-# Pre-define priority orders for currently block
-_CURRENTLY_ORDER_NA_WITH_ECMWF = [
+# Pre-define priority orders for currently block.
+# Metrics without ECMWF entries reuse the same order and simply skip sources
+# that are not present in their source_map.
+_CURRENTLY_ORDER_NA = [
     "rtma_ru",
     "hrrrsubh",
     "nbm",
@@ -103,16 +105,7 @@ _CURRENTLY_ORDER_NA_WITH_ECMWF = [
     "dwd_mosmix",
     "era5",
 ]
-_CURRENTLY_ORDER_NA_NO_ECMWF = [
-    "rtma_ru",
-    "hrrrsubh",
-    "nbm",
-    "hrrr",
-    "gfs",
-    "dwd_mosmix",
-    "era5",
-]
-_CURRENTLY_ORDER_ROW_WITH_ECMWF = [
+_CURRENTLY_ORDER_ROW = [
     "rtma_ru",
     "hrrrsubh",
     "nbm",
@@ -120,15 +113,6 @@ _CURRENTLY_ORDER_ROW_WITH_ECMWF = [
     "dwd_mosmix",
     "ecmwf_aifs",
     "ecmwf_ifs",
-    "gfs",
-    "era5",
-]
-_CURRENTLY_ORDER_ROW_NO_ECMWF = [
-    "rtma_ru",
-    "hrrrsubh",
-    "nbm",
-    "hrrr",
-    "dwd_mosmix",
     "gfs",
     "era5",
 ]
@@ -161,8 +145,8 @@ def _build_source_strategies(
     source_map,
     lat,
     lon,
-    has_ecmwf=True,
     *,
+    has_ecmwf=None,
     prioritize_ai_models=False,
 ):
     """
@@ -172,7 +156,7 @@ def _build_source_strategies(
         source_map: Dictionary mapping source names to (predicate, getter) tuples.
         lat: Latitude.
         lon: Longitude.
-        has_ecmwf: Whether ECMWF has data for this variable.
+        has_ecmwf: Backward-compatible no-op flag retained for existing callers.
         prioritize_ai_models: Whether to prioritize AI model sources in the stacking order.
 
     Returns:
@@ -187,18 +171,10 @@ def _build_source_strategies(
         order = _CURRENTLY_ORDER_AI_ROW
     elif gfs_before_dwd:
         # North America
-        order = (
-            _CURRENTLY_ORDER_NA_WITH_ECMWF
-            if has_ecmwf
-            else _CURRENTLY_ORDER_NA_NO_ECMWF
-        )
+        order = _CURRENTLY_ORDER_NA
     else:
         # Rest of world
-        order = (
-            _CURRENTLY_ORDER_ROW_WITH_ECMWF
-            if has_ecmwf
-            else _CURRENTLY_ORDER_ROW_NO_ECMWF
-        )
+        order = _CURRENTLY_ORDER_ROW
 
     # Build strategies in priority order
     strategies = []

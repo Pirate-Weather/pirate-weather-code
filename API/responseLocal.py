@@ -858,6 +858,7 @@ async def PW_Forecast(
     InterThour_inputs = inputs["InterThour_inputs"]
     prcipIntensity_inputs = inputs["prcipIntensity_inputs"]
     prcipProbability_inputs = inputs["prcipProbability_inputs"]
+    prcipType_inputs = inputs["prcipType_inputs"]
     temperature_inputs = inputs["temperature_inputs"]
     dew_inputs = inputs["dew_inputs"]
     humidity_inputs = inputs["humidity_inputs"]
@@ -922,6 +923,7 @@ async def PW_Forecast(
             InterThour_inputs=InterThour_inputs,
             prcipIntensity_inputs=prcipIntensity_inputs,
             prcipProbability_inputs=prcipProbability_inputs,
+            prcipType_inputs=prcipType_inputs,
             temperature_inputs=temperature_inputs,
             dew_inputs=dew_inputs,
             humidity_inputs=humidity_inputs,
