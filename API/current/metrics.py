@@ -99,7 +99,6 @@ _CURRENTLY_ORDER_NA = [
     "hrrrsubh",
     "nbm",
     "hrrr",
-    "ecmwf_aifs",
     "ecmwf_ifs",
     "gfs",
     "dwd_mosmix",
@@ -111,7 +110,6 @@ _CURRENTLY_ORDER_ROW = [
     "nbm",
     "hrrr",
     "dwd_mosmix",
-    "ecmwf_aifs",
     "ecmwf_ifs",
     "gfs",
     "era5",
@@ -123,13 +121,11 @@ _CURRENTLY_ORDER_AI_NA = [
     "hrrr",
     "gfs",
     "gefs",
-    "ecmwf_aifs",
     "ecmwf_ifs",
     "dwd_mosmix",
     "era5",
 ]
 _CURRENTLY_ORDER_AI_ROW = [
-    "ecmwf_aifs",
     "ecmwf_ifs",
     "rtma_ru",
     "hrrrsubh",
@@ -337,10 +333,6 @@ def _get_temp(
                 model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["temp"], state
             ),
         ),
-        "ecmwf_aifs": (
-            lambda: "ecmwf_aifs" in sourceList,
-            lambda: _interp_scalar(model_data["ECMWF_Merged"], ECMWF["temp"], state),
-        ),
         "ecmwf_ifs": (
             lambda: "ecmwf_ifs" in sourceList,
             lambda: _interp_scalar(model_data["ECMWF_Merged"], ECMWF["temp"], state),
@@ -406,10 +398,6 @@ def _get_dew(
             lambda: _interp_scalar(
                 model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["dew"], state
             ),
-        ),
-        "ecmwf_aifs": (
-            lambda: "ecmwf_aifs" in sourceList,
-            lambda: _interp_scalar(model_data["ECMWF_Merged"], ECMWF["dew"], state),
         ),
         "ecmwf_ifs": (
             lambda: "ecmwf_ifs" in sourceList,
@@ -494,12 +482,6 @@ def _get_humidity(
                 * humidUnit
             ),
         ),
-        "ecmwf_aifs": (
-            lambda: "ecmwf_aifs" in sourceList,
-            lambda: _calculate_ecmwf_relative_humidity(
-                model_data["ECMWF_Merged"], state, humidUnit
-            ),
-        ),
         "ecmwf_ifs": (
             lambda: "ecmwf_ifs" in sourceList,
             lambda: _calculate_ecmwf_relative_humidity(
@@ -553,12 +535,6 @@ def _get_pressure(
             lambda: "dwd_mosmix" in sourceList,
             lambda: _interp_scalar(
                 model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["pressure"], state
-            ),
-        ),
-        "ecmwf_aifs": (
-            lambda: "ecmwf_aifs" in sourceList,
-            lambda: _interp_scalar(
-                model_data["ECMWF_Merged"], ECMWF["pressure"], state
             ),
         ),
         "ecmwf_ifs": (
@@ -634,15 +610,6 @@ def _get_wind(
                 model_data["DWD_MOSMIX_Merged"],
                 DWD_MOSMIX["wind_u"],
                 DWD_MOSMIX["wind_v"],
-                state,
-            ),
-        ),
-        "ecmwf_aifs": (
-            lambda: "ecmwf_aifs" in sourceList,
-            lambda: _interp_uv_magnitude(
-                model_data["ECMWF_Merged"],
-                ECMWF["wind_u"],
-                ECMWF["wind_v"],
                 state,
             ),
         ),
@@ -881,13 +848,6 @@ def _get_bearing(
                 model_data["DWD_MOSMIX_Merged"][state.idx2, DWD_MOSMIX["wind_v"]],
             ),
         ),
-        "ecmwf_aifs": (
-            lambda: "ecmwf_aifs" in sourceList,
-            lambda: _bearing_from_components(
-                model_data["ECMWF_Merged"][state.idx2, ECMWF["wind_u"]],
-                model_data["ECMWF_Merged"][state.idx2, ECMWF["wind_v"]],
-            ),
-        ),
         "ecmwf_ifs": (
             lambda: "ecmwf_ifs" in sourceList,
             lambda: _bearing_from_components(
@@ -960,15 +920,11 @@ def _get_cloud(
                 * 0.01
             ),
         ),
-        "ecmwf_aifs": (
-            lambda: "ecmwf_aifs" in sourceList,
+        "ecmwf_ifs": (
+            lambda: "ecmwf_ifs" in sourceList,
             lambda: (
                 _interp_scalar(model_data["ECMWF_Merged"], ECMWF["cloud"], state) * 0.01
             ),
-        ),
-        "ecmwf_ifs": (
-            lambda: "ecmwf_ifs" in sourceList,
-            lambda: _interp_scalar(model_data["ECMWF_Merged"], ECMWF["cloud"], state),
         ),
         "hrrr": (
             lambda: model_data["has_hrrr_merged"],
