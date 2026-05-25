@@ -43,7 +43,7 @@ RUN apt-get update && apt-get install -y \
 # ----------------------------------------------------------------------
 WORKDIR /tmp
 
-RUN git clone https://gitlab.dkrz.de/k202009/libaec.git && \
+RUN git clone https://github.com/Deutsches-Klimarechenzentrum/libaec.git && \
     cd libaec && \
     mkdir build && \
     cd build && \
