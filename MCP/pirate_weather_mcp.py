@@ -32,8 +32,15 @@ except ImportError:  # pragma: no cover - compatibility with the official MCP SD
 DEFAULT_BASE_URL = "http://127.0.0.1:8083"
 ROUTE_API_KEY = "mcp-proxy"
 DEFAULT_TEST_LOCATION = (45.4215, -75.6972)
+DEFAULT_MCP_HOST = "127.0.0.1"
+DEFAULT_MCP_PORT = 8000
+DEFAULT_MCP_PATH = "/mcp"
 
 mcp = FastMCP("Pirate Weather", version=__version__)
+app = mcp.http_app(
+    path=os.environ.get("PW_MCP_PATH", DEFAULT_MCP_PATH),
+    transport="streamable-http",
+)
 
 
 def _base_url() -> str:
@@ -369,15 +376,24 @@ def get_subscription_status() -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the Pirate Weather FastMCP proxy server."
+        description="Run the Pirate Weather FastMCP proxy server with Uvicorn."
     )
     parser.add_argument(
-        "--transport",
-        default=os.environ.get("PW_MCP_TRANSPORT", "stdio"),
-        help="FastMCP transport to use, typically stdio, sse, or streamable-http.",
+        "--host",
+        default=os.environ.get("PW_MCP_HOST", DEFAULT_MCP_HOST),
+        help="Host interface for the MCP HTTP server.",
+    )
+    parser.add_argument(
+        "--port",
+        default=int(os.environ.get("PW_MCP_PORT", str(DEFAULT_MCP_PORT))),
+        type=int,
+        help="Port for the MCP HTTP server.",
     )
     args = parser.parse_args()
-    mcp.run(transport=args.transport)
+
+    import uvicorn
+
+    uvicorn.run("MCP.pirate_weather_mcp:app", host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
