@@ -4,6 +4,7 @@ crc32c==2.8
 dask==2026.3.0
 fastapi[standard]==0.136.1
 fastapi-utils==0.8.0
+fastmcp==3.3.1
 fastparquet==2026.5.0
 gcsfs==2026.4.0
 metpy==1.7.1
