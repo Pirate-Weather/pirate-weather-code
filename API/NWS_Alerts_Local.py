@@ -2,6 +2,7 @@
 # Created on: 2023-01-17
 
 # Import Modules
+import logging
 import os
 import shutil
 import tarfile
@@ -55,6 +56,10 @@ tune_nofile_limit()
 zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
     zarr_store_workers, zarr_async_concurrency
 )
+
+# Logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 # Create new directory for processing if it does not exist
@@ -113,7 +118,7 @@ while "pagination" in alertsIN:
     alertsIN = result.json()
     nws_alerts.extend(alertsIN["features"])
 
-    print("AWS Alerts: ", len(nws_alerts))
+    logger.info("AWS Alerts: %d", len(nws_alerts))
 nws_alert_df = pd.DataFrame.from_records(nws_alerts)
 
 nws_alert_df["CAP_ID"] = nws_alert_df["id"]

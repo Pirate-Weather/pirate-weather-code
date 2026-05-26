@@ -6,6 +6,7 @@ import asyncio
 import datetime
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Dict, List, Union
 
@@ -23,6 +24,8 @@ from API.io.zarr_reader import WeatherParallel
 from API.utils.geo import get_offset
 from API.utils.timing import TimingTracker
 
+RELATIVE_TIME_UNITS = {"s": 1, "h": 3600, "d": 86400}
+
 
 def parse_request_time(
     time_str: str,
@@ -36,10 +39,20 @@ def parse_request_time(
 
     Handles:
     - Unix timestamps (positive and negative)
-    - Relative time (seconds offset from now)
+    - Relative time (seconds offset from now, capped at 25 hours in the past)
+    - Relative negative time with unit suffixes (s, h, d)
     - ISO 8601 strings (with and without timezone)
     - Local time strings (requires timezone lookup)
     """
+    if len(time_str) >= 64:
+        raise HTTPException(status_code=400, detail="Invalid Time Specification")
+
+    relative_match = re.fullmatch(r"(-\d+(?:\.\d+)?)([shdSHD])", time_str)
+    if relative_match:
+        val = float(relative_match.group(1))
+        unit = relative_match.group(2).lower()
+        return now_time + datetime.timedelta(seconds=val * RELATIVE_TIME_UNITS[unit])
+
     if time_str.lstrip("-+").isnumeric():
         val = float(time_str)
         if val > 0:
@@ -120,7 +133,11 @@ class InitialRequestContext:
     ex_rtma_ru: int
     ex_ecmwf: int
     ex_dwd_mosmix: int
+    ex_aigefs: int
+    ex_aigfs: int
+    ex_aifs: int
     inc_day_night: int
+    inc_aimodels: int
     summary_text: bool
     unit_system: str
     wind_unit: float
@@ -319,6 +336,35 @@ def _setup_units(units: Union[str, None], loc_name: Dict[str, str]):
     return unit_system, unit_config
 
 
+def _parse_timemachine_days(request: Request, time_machine: bool) -> int:
+    """Parse and validate the optional timemachine days query parameter."""
+    if not time_machine:
+        return 1
+
+    raw_days = request.query_params.get("days")
+    if raw_days is None:
+        return 1
+
+    try:
+        days = int(raw_days)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid days parameter. Expected an integer between 1 and 7.",
+        ) from exc
+
+    if days < 1 or days > TIME_MACHINE_CONST["max_days"]:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid days parameter. Expected an integer between 1 and "
+                f"{TIME_MACHINE_CONST['max_days']}."
+            ),
+        )
+
+    return days
+
+
 def _parse_parameters(
     exclude: Union[str, None],
     include: Union[str, None],
@@ -345,8 +391,12 @@ def _parse_parameters(
     ex_rtma_ru = int("rtma_ru" in exclude_params)
     ex_ecmwf = int("ecmwf_ifs" in exclude_params)
     ex_dwd_mosmix = int("dwd_mosmix" in exclude_params)
+    ex_aigefs = int("aigefs" in exclude_params)
+    ex_aigfs = int("aigfs" in exclude_params)
+    ex_aifs = int("ecmwf_aifs" in exclude_params)
     summary_text = "summary" not in exclude_params
     inc_day_night = int("day_night_forecast" in include_params)
+    inc_aimodels = int("aimodels" in include_params)
 
     if (now_time - utc_time) > datetime.timedelta(hours=25):
         ex_nbm = 1
@@ -382,8 +432,12 @@ def _parse_parameters(
         ex_rtma_ru,
         ex_ecmwf,
         ex_dwd_mosmix,
+        ex_aigefs,
+        ex_aigfs,
+        ex_aifs,
         summary_text,
         inc_day_night,
+        inc_aimodels,
         read_wmo_alerts,
     )
 
@@ -394,12 +448,13 @@ def _setup_time_grids(
     base_time: datetime.datetime,
     base_day: datetime.datetime,
     pytz_tz: timezone,
+    timemachine_days: int = 1,
 ):
     if time_machine:
-        daily_days = 1
+        daily_days = timemachine_days
         daily_day_hours = 1
-        output_hours = 24
-        output_days = 1
+        output_hours = timemachine_days * 24
+        output_days = timemachine_days
     else:
         daily_days = 8
         daily_day_hours = 5
@@ -541,6 +596,7 @@ async def prepare_initial_request(
     tz_offset, tz_name = get_offset(**tz_offset_loc)
     tz_req = tf.timezone_at(lat=lat, lng=az_lon)
     loc_name = await asyncio.to_thread(reverse_geocode.get, (lat, az_lon))
+    timemachine_days = _parse_timemachine_days(request, time_machine)
 
     extend_flag = 0 if not extend else int(extend == "hourly")
     version_val = float(version) if version else 1.0
@@ -563,8 +619,12 @@ async def prepare_initial_request(
         ex_rtma_ru,
         ex_ecmwf,
         ex_dwd_mosmix,
+        ex_aigefs,
+        ex_aigfs,
+        ex_aifs,
         summary_text,
         inc_day_night,
+        inc_aimodels,
         read_wmo_alerts,
     ) = _parse_parameters(
         exclude,
@@ -636,6 +696,7 @@ async def prepare_initial_request(
         base_time,
         base_day,
         pytz_tz,
+        timemachine_days,
     )
 
     num_hours = len(hour_array)
@@ -676,7 +737,11 @@ async def prepare_initial_request(
         ex_rtma_ru=ex_rtma_ru,
         ex_ecmwf=ex_ecmwf,
         ex_dwd_mosmix=ex_dwd_mosmix,
+        ex_aigefs=ex_aigefs,
+        ex_aigfs=ex_aigfs,
+        ex_aifs=ex_aifs,
         inc_day_night=inc_day_night,
+        inc_aimodels=inc_aimodels,
         summary_text=summary_text,
         unit_system=unit_system,
         wind_unit=wind_unit,

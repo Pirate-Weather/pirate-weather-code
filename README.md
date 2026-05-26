@@ -123,29 +123,7 @@ In either case, the dockerfiles to build the underlying images are [available](h
 This setup disables all the file updating processes within the response script and reads the data directly from the Zarr zip stores, focusing on the response. 
 
 #### VirtualEnv
-The other alternative is to setup a Python environment following the same process the dockerfile does. On Amazon Linux, this involves installing Node.js (I used the [nvm approach](https://nodejs.org/en/download/package-manager)), then following these steps for Pirate Weather:
-```
-git clone https://github.com/Pirate-Weather/pirate-weather-code.git
-
-wget https://files.alexanderrey.ca/api/public/dl/9jMgSLpi
-unzip 9jMgSLpi -d ~/pw-data
-
-sudo yum groupinstall 'Development Tools'
-sudo yum install gcc gcc-c++ make
-sudo yum install libffi-devel unzip rsync
-sudo yum install python3.12 python3.12-devel
-
-python3.13 -m venv "PirateWeather"
-source ~/.virtualenvs/PirateWeather/bin/activate
-
-pip install -r  ~/pirate-weather-code/Docker/requirements-api.txt
-export save_type=Download
-export TIMING=True
-export STAGE=TESTING
-export force_now=1730869200
-
-python3.12 ~/pirate-weather-code/responseLocal.py
-```
+The other alternative is to setup a Python environment following the same process the dockerfile does. There's now a [handy script for this](https://github.com/Pirate-Weather/pirate-weather-code/blob/dev/scripts/setup_ingest_test_env) in the repository, which runs assuming that `python3.14`, `python3.14-dev`, and `build-essentials` are installed on the system. It's been tested on Ubuntu, but should work on other distributions. 
 
 **Notes:**
 - The `force_now` environmental variable tells the script to pretend that it is currently this time in order to avoid switching to historic mode;

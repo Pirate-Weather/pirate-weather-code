@@ -3,12 +3,12 @@
 # Alexander Rey, April 2024
 
 # %% Import modules
+import logging
 import os
 import pickle
 import shutil
 import sys
 import time
-import traceback
 import warnings
 from datetime import datetime, timedelta
 
@@ -27,7 +27,9 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    archive_tmp_zarr_and_upload,
     configure_zarr_limits,
+    download_extract_historic_archive,
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
@@ -35,7 +37,12 @@ from API.ingest_utils import (
     run_command,
     tune_nofile_limit,
     validate_grib_stats,
+    validate_stacked_time_alignment,
 )
+
+# Logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 def rounder(t):
@@ -148,16 +155,16 @@ while base_time is False:
     else:
         most_recent_time = most_recent_time - timedelta(hours=6)
         failCount = failCount + 1
-        print(failCount)
+        logger.info("failCount=%d", failCount)
 
         if failCount == 2:
-            print("No recent runs")
+            logger.error("No recent runs")
             exit(1)
 
 
 # base_time = pd.Timestamp("2024-03-05 16:00")
 # base_time = base_time - pd.Timedelta(hours=1)
-print(base_time)
+logger.info(base_time)
 
 # Check if this is newer than the current file
 if save_type == "S3":
@@ -170,7 +177,7 @@ if save_type == "S3":
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to NBM_Fire, ending")
+            logger.info("No Update to NBM_Fire, ending")
             sys.exit()
 
 else:
@@ -184,7 +191,7 @@ else:
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to NBM_Fire, ending")
+            logger.info("No Update to NBM_Fire, ending")
             sys.exit()
 
 zarr_vars = ("time", "FOSINDX_surface")
@@ -224,7 +231,7 @@ try:
         for x in FH_forecastsub.file_exists
     ]
 except Exception:
-    print("Download Failure 1, wait 20 seconds and retry")
+    logger.error("Download Failure 1, wait 20 seconds and retry")
     time.sleep(20)
     FH_forecastsub.download(match_strings, verbose=False)
     try:
@@ -233,7 +240,7 @@ except Exception:
             for x in FH_forecastsub.file_exists
         ]
     except Exception:
-        print("Download Failure 2, wait 20 seconds and retry")
+        logger.error("Download Failure 2, wait 20 seconds and retry")
         time.sleep(20)
         FH_forecastsub.download(match_strings, verbose=False)
         try:
@@ -242,7 +249,7 @@ except Exception:
                 for x in FH_forecastsub.file_exists
             ]
         except Exception:
-            print("Download Failure 3, wait 20 seconds and retry")
+            logger.error("Download Failure 3, wait 20 seconds and retry")
             time.sleep(20)
             FH_forecastsub.download(match_strings, verbose=False)
             try:
@@ -251,7 +258,7 @@ except Exception:
                     for x in FH_forecastsub.file_exists
                 ]
             except Exception:
-                print("Download Failure 4, wait 20 seconds and retry")
+                logger.error("Download Failure 4, wait 20 seconds and retry")
                 time.sleep(20)
                 FH_forecastsub.download(match_strings, verbose=False)
                 try:
@@ -260,7 +267,7 @@ except Exception:
                         for x in FH_forecastsub.file_exists
                     ]
                 except Exception:
-                    print("Download Failure 5, wait 20 seconds and retry")
+                    logger.error("Download Failure 5, wait 20 seconds and retry")
                     time.sleep(20)
                     FH_forecastsub.download(match_strings, verbose=False)
                     try:
@@ -269,12 +276,12 @@ except Exception:
                             for x in FH_forecastsub.file_exists
                         ]
                     except Exception:
-                        print("Download Failure 6, Fail")
+                        logger.error("Download Failure 6, Fail")
                         exit(1)
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(nbm_range):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range))
         + " files, but got "
@@ -289,7 +296,7 @@ cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 grib_check = run_command(cmd)
 
 validate_grib_stats(grib_check)
-print("Grib files passed validation, proceeding with processing")
+logger.info("Grib files passed validation, proceeding with processing")
 
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
@@ -306,7 +313,7 @@ cmd = (
 # Run wgrib2
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
 
 # Check output from wgrib2
@@ -325,7 +332,7 @@ cmd2 = (
 )
 spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
-    print(spOUT2.stderr)
+    logger.error(spOUT2.stderr)
     sys.exit()
 os.remove(forecast_process_path + "_wgrib2_merged.grib2")
 
@@ -343,7 +350,7 @@ cmd4 = (
 # Run wgrib2 to rotate winds and save as NetCDF
 spOUT4 = run_command(cmd4)
 if spOUT4.returncode != 0:
-    print(spOUT4.stderr)
+    logger.error(spOUT4.stderr)
     sys.exit()
 
 os.remove(forecast_process_path + "_wgrib2_merged_order.grib")
@@ -425,7 +432,7 @@ del daskArray, xarray_forecast_base
 os.remove(forecast_process_path + "_wgrib2_merged.nc")
 
 T1 = time.time()
-print(T0 - T1)
+logger.info(T0 - T1)
 
 ################################################################################################
 # %%Historic data
@@ -440,47 +447,27 @@ for i in range(his_period, 1, -6):
     if save_type == "S3":
         s3_path = (
             historic_path
-            + "/NBM_Fire_Hist"
+            + "/NBM_Fire_Hist_v3"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr"
+            + ".zarr.tar.gz"
         )
-
-        if s3.exists(s3_path.replace(".zarr", ".done")):
+        if s3.exists(s3_path.replace(".tar.gz", ".done")):
             print("File already exists in S3, skipping download for: " + s3_path)
-            # If the file exists, check that it works
-            try:
-                hisCheckStore = zarr.storage.FsspecStore.from_url(
-                    s3_path,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-                zarr.open(hisCheckStore)[zarr_vars[-1]][-1, -1, -1]
-                continue  # If it exists, skip to the next iteration
-            except Exception:
-                print("### Historic Data Failure!")
-                print(traceback.print_exc())
-
-                # Delete the file if it exists
-                if s3.exists(s3_path):
-                    s3.rm(s3_path)
+            continue
     else:
-        # Local Path Setup
         local_path = (
             historic_path
-            + "/NBM_Fire_Hist"
+            + "/NBM_Fire_Hist_v3"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
-
-        # Check for a loca done file
         if os.path.exists(local_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + local_path)
+            print("File already exists locally, skipping download for: " + local_path)
             continue
 
-    print(
-        "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+    logger.info(
+        "Downloading: %s",
+        (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"),
     )
 
     # Create a range of dates for historic data going back 48 hours
@@ -521,7 +508,7 @@ for i in range(his_period, 1, -6):
     grib_check = run_command(cmd)
 
     validate_grib_stats(grib_check)
-    print("Grib files passed validation, proceeding with processing")
+    logger.info("Grib files passed validation, proceeding with processing")
 
     # Use wgrib2 to change the order
     cmd1 = (
@@ -535,7 +522,7 @@ for i in range(his_period, 1, -6):
     )
     spOUT1 = run_command(cmd1)
     if spOUT1.returncode != 0:
-        print(spOUT1.stderr)
+        logger.error(spOUT1.stderr)
         sys.exit()
 
     # Convert to NetCDF
@@ -550,33 +537,19 @@ for i in range(his_period, 1, -6):
     )
     spOUT3 = run_command(cmd3)
     if spOUT3.returncode != 0:
-        print(spOUT3.stderr)
+        logger.error(spOUT3.stderr)
         sys.exit()
 
     # Merge the  xarrays
     # Read the netcdf file using xarray
     xarray_his_wgrib = xr.open_dataset(hist_process_path + "_wgrib_merge.nc")
 
-    # Save merged and processed xarray dataset to disk using zarr
-    # No chunking since only one time step
-    # Save as Zarr to s3 for Time Machine
-    if save_type == "S3":
-        zarrStore = zarr.storage.FsspecStore.from_url(
-            s3_path,
-            storage_options={
-                "key": aws_access_key_id,
-                "secret": aws_secret_access_key,
-            },
-        )
-    else:
-        # Create local Zarr store
-        zarrStore = zarr.storage.LocalStore(local_path)
-
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         xarray_his_wgrib.to_zarr(
-            store=zarrStore,
+            hist_process_path + "_NBM_Fire_Hist_TMP.zarr",
             mode="w",
             consolidated=False,
+            compute=True,
             chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
         )
 
@@ -591,25 +564,47 @@ for i in range(his_period, 1, -6):
 
     # Save a done file to s3 to indicate that the historic data has been processed
     if save_type == "S3":
-        done_file = s3_path.replace(".zarr", ".done")
-        s3.touch(done_file)
+        archive_tmp_zarr_and_upload(
+            tmp_zarr_path=hist_process_path + "_NBM_Fire_Hist_TMP.zarr",
+            s3_path=s3_path,
+            archive_member_name="NBM_Fire_Hist.zarr",
+            s3=s3,
+        )
     else:
+        os.rename(hist_process_path + "_NBM_Fire_Hist_TMP.zarr", local_path)
         done_file = local_path.replace(".zarr", ".done")
         with open(done_file, "w") as f:
             f.write("Done")
 
-    print((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
+    logger.info((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
 
 
 # %% Merge the historic and forecast datasets and then squash using dask
 #####################################################################################################
-ncLocalWorking_paths = [
-    historic_path
-    + "/NBM_Fire_Hist"
-    + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-    + ".zarr"
-    for i in range(his_period, 1, -6)
-]
+if save_type == "S3":
+    local_temp_dir = forecast_process_path + "_s3_temp_downloads"
+    os.makedirs(local_temp_dir, exist_ok=True)
+    ncLocalWorking_paths = []
+    for i in range(his_period, 1, -6):
+        timestamp = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        final_zarr_name = f"NBM_Fire_Hist_v3{timestamp}.zarr"
+        extracted_path = download_extract_historic_archive(
+            s3=s3,
+            historic_path=historic_path,
+            final_zarr_name=final_zarr_name,
+            extracted_store_name="NBM_Fire_Hist.zarr",
+            local_temp_dir=local_temp_dir,
+        )
+        if extracted_path is not None:
+            ncLocalWorking_paths.append(extracted_path)
+else:
+    ncLocalWorking_paths = [
+        historic_path
+        + "/NBM_Fire_Hist_v3"
+        + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        + ".zarr"
+        for i in range(his_period, 1, -6)
+    ]
 
 # Dask Setup
 daskInterpArrays = []
@@ -618,22 +613,9 @@ daskVarArrayList = []
 
 for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
     for local_ncpath in ncLocalWorking_paths:
-        if save_type == "S3":
-            daskVarArrays.append(
-                da.from_zarr(
-                    local_ncpath,
-                    component=dask_var,
-                    inline_array=True,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-            )
-        else:
-            daskVarArrays.append(
-                da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
-            )
+        daskVarArrays.append(
+            da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
+        )
 
     daskVarArraysStack = da.stack(
         daskVarArrays, allow_unknown_chunksizes=True
@@ -651,6 +633,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
 
         # Get times as numpy
         npCatTimes = daskCatTimes.compute()
+        validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
 
         daskArrayOut = da.from_array(
             np.tile(
@@ -672,7 +655,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
 
     daskVarArrays = []
 
-    print(dask_var)
+    logger.info(dask_var)
 
 
 # Merge the arrays into a single 4D array

@@ -14,8 +14,12 @@ API/KongRedia.py
 .idea/
 
 API/read_ERA5.py
-.env
+*.env
 venv/
 .venv/
+.venvs/
+.build/
+temp_venv/
 .vscode/settings.json
 my_venv/
+.agents/rules/veenv.md

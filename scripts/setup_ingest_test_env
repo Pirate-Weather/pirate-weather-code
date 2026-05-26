@@ -1,0 +1,284 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BUILD_ROOT="${PW_INGEST_BUILD_ROOT:-${ROOT_DIR}/.build/ingest-test}"
+TOOLCHAIN_PREFIX="${PW_INGEST_TOOLCHAIN_PREFIX:-${BUILD_ROOT}/toolchain}"
+NCEPLIBS_PREFIX="${PW_INGEST_NCEPLIBS_PREFIX:-${BUILD_ROOT}/NCEPLIBS_build}"
+WGRIB2_PREFIX="${PW_INGEST_WGRIB2_PREFIX:-${BUILD_ROOT}/wgrib2_build}"
+VENV_DIR="${PW_INGEST_VENV:-${1:-${ROOT_DIR}/.venvs/ingest-test}}"
+FORCE_REBUILD="${PW_INGEST_FORCE:-0}"
+PYTHON_BIN="${PW_INGEST_PYTHON_BIN:-python3.14}"
+
+LIBAEC_REPO="https://github.com/Deutsches-Klimarechenzentrum/libaec.git"
+ECCODES_VERSION="2.47.0"
+ECCODES_TARBALL_URL="https://confluence.ecmwf.int/download/attachments/45757960/eccodes-${ECCODES_VERSION}-Source.tar.gz"
+WGRIB2_VERSION="3.8.0"
+WGRIB2_TARBALL_URL="https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v${WGRIB2_VERSION}.tar.gz"
+HERBIE_URL="git+https://github.com/blaylockbk/Herbie.git"
+CFGRIB_VERSION="0.9.15.1"
+
+if command -v nproc >/dev/null 2>&1; then
+    JOBS="${PW_INGEST_JOBS:-$(nproc)}"
+else
+    JOBS="${PW_INGEST_JOBS:-4}"
+fi
+
+log() {
+    printf '[setup_ingest_test_env] %s\n' "$*"
+}
+
+require_command() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        printf 'Missing required command: %s\n' "$1" >&2
+        exit 1
+    fi
+}
+
+require_python_314() {
+    local python_version
+
+    python_version="$(${PYTHON_BIN} -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+    if [[ "${python_version}" != "3.14" ]]; then
+        printf 'Expected Python 3.14 from %s, got %s\n' "${PYTHON_BIN}" "${python_version}" >&2
+        exit 1
+    fi
+}
+
+clean_if_forced() {
+    if [[ "${FORCE_REBUILD}" == "1" && -e "$1" ]]; then
+        rm -rf "$1"
+    fi
+}
+
+prepare_dirs() {
+    mkdir -p "${BUILD_ROOT}" "${ROOT_DIR}/.venvs"
+    mkdir -p "${BUILD_ROOT}/src" "${BUILD_ROOT}/downloads"
+}
+
+configure_env() {
+    export ECCODES_DIR="${TOOLCHAIN_PREFIX}"
+    export ECCODES_PYTHON_USE_FINDLIBS=1
+    export CMAKE_PREFIX_PATH="${NCEPLIBS_PREFIX}:${TOOLCHAIN_PREFIX}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
+    export LD_LIBRARY_PATH="${TOOLCHAIN_PREFIX}/lib:${TOOLCHAIN_PREFIX}/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    export PATH="${WGRIB2_PREFIX}/bin:${PATH}"
+    export wgrib2_path="${WGRIB2_PREFIX}/bin/wgrib2 "
+}
+
+build_libaec() {
+    local src_dir="${BUILD_ROOT}/src/libaec"
+    local build_dir="${BUILD_ROOT}/libaec-build"
+    local stamp_file="${BUILD_ROOT}/.libaec-built"
+
+    if [[ -f "${stamp_file}" ]]; then
+        log "libaec already built"
+        return
+    fi
+
+    clean_if_forced "${src_dir}"
+    clean_if_forced "${build_dir}"
+
+    if [[ ! -d "${src_dir}/.git" ]]; then
+        log "Cloning libaec"
+        git clone --depth 1 "${LIBAEC_REPO}" "${src_dir}"
+    fi
+
+    log "Building libaec"
+    cmake -S "${src_dir}" -B "${build_dir}" -DCMAKE_INSTALL_PREFIX="${TOOLCHAIN_PREFIX}"
+    cmake --build "${build_dir}" --parallel "${JOBS}"
+    cmake --install "${build_dir}"
+    touch "${stamp_file}"
+}
+
+build_eccodes() {
+    local tarball="${BUILD_ROOT}/downloads/eccodes-${ECCODES_VERSION}.tar.gz"
+    local src_dir="${BUILD_ROOT}/src/eccodes-${ECCODES_VERSION}-Source"
+    local build_dir="${BUILD_ROOT}/eccodes-build"
+    local stamp_file="${BUILD_ROOT}/.eccodes-${ECCODES_VERSION}-built"
+
+    if [[ -f "${stamp_file}" ]]; then
+        log "ecCodes ${ECCODES_VERSION} already built"
+        return
+    fi
+
+    clean_if_forced "${src_dir}"
+    clean_if_forced "${build_dir}"
+
+    if [[ ! -f "${tarball}" ]]; then
+        log "Downloading ecCodes ${ECCODES_VERSION} source"
+        wget -O "${tarball}" "${ECCODES_TARBALL_URL}"
+    fi
+
+    if [[ ! -d "${src_dir}" ]]; then
+        log "Extracting ecCodes ${ECCODES_VERSION} source"
+        tar -xzf "${tarball}" -C "${BUILD_ROOT}/src"
+    fi
+
+    log "Building ecCodes ${ECCODES_VERSION}"
+    cmake -S "${src_dir}" -B "${build_dir}" -DCMAKE_INSTALL_PREFIX="${TOOLCHAIN_PREFIX}" -DENABLE_AEC=ON
+    cmake --build "${build_dir}" --parallel "${JOBS}"
+    ctest --test-dir "${build_dir}" -j "${JOBS}"
+    cmake --install "${build_dir}"
+    touch "${stamp_file}"
+}
+
+build_nceplibs_ip() {
+    local src_dir="${BUILD_ROOT}/src/NCEPLIBS-ip"
+    local build_dir="${src_dir}/build"
+    local stamp_file="${BUILD_ROOT}/.nceplibs-ip-built"
+
+    if [[ -f "${stamp_file}" ]]; then
+        log "NCEPLIBS-ip already built"
+        return
+    fi
+
+    clean_if_forced "${src_dir}"
+
+    if [[ ! -d "${src_dir}/.git" ]]; then
+        log "Cloning NCEPLIBS-ip"
+        git clone --depth 1 https://github.com/NOAA-EMC/NCEPLIBS-ip "${src_dir}"
+    fi
+
+    log "Building NCEPLIBS-ip"
+    cmake -S "${src_dir}" -B "${build_dir}" -DCMAKE_INSTALL_PREFIX="${NCEPLIBS_PREFIX}" -DOPENMP=ON
+    cmake --build "${build_dir}" --parallel "${JOBS}"
+    cmake --install "${build_dir}"
+    touch "${stamp_file}"
+}
+
+build_wgrib2() {
+    local tarball="${BUILD_ROOT}/downloads/wgrib2-${WGRIB2_VERSION}.tar.gz"
+    local src_dir="${BUILD_ROOT}/src/wgrib2-${WGRIB2_VERSION}"
+    local extract_root="${BUILD_ROOT}/src/wgrib2"
+    local extracted_dir="${extract_root}/wgrib2-${WGRIB2_VERSION}"
+    local stamp_file="${BUILD_ROOT}/.wgrib2-${WGRIB2_VERSION}-built"
+
+    if [[ -f "${stamp_file}" ]]; then
+        log "wgrib2 ${WGRIB2_VERSION} already built"
+        return
+    fi
+
+    clean_if_forced "${src_dir}"
+    clean_if_forced "${extract_root}"
+    clean_if_forced "${WGRIB2_PREFIX}"
+
+    if [[ ! -f "${tarball}" ]]; then
+        log "Downloading wgrib2 ${WGRIB2_VERSION} source"
+        wget -q -O "${tarball}" "${WGRIB2_TARBALL_URL}"
+    fi
+
+    if [[ ! -d "${src_dir}" ]]; then
+        if [[ ! -d "${extracted_dir}" ]]; then
+            log "Extracting wgrib2 ${WGRIB2_VERSION} source"
+            mkdir -p "${extract_root}"
+            tar -xf "${tarball}" -C "${extract_root}"
+        fi
+
+        mv "${extracted_dir}" "${src_dir}"
+    fi
+
+    log "Building wgrib2 ${WGRIB2_VERSION}"
+    cmake --fresh -S "${src_dir}" -B "${src_dir}" \
+        -DCMAKE_INSTALL_PREFIX="${WGRIB2_PREFIX}" \
+        -DCMAKE_PREFIX_PATH="${NCEPLIBS_PREFIX};${TOOLCHAIN_PREFIX}" \
+        -DUSE_NETCDF=ON \
+        -DUSE_OPENMP=ON \
+        -DUSE_IPOLATES=ON \
+        -DUSE_AEC=ON
+    cmake --build "${src_dir}" --parallel "${JOBS}"
+    cmake --install "${src_dir}"
+    touch "${stamp_file}"
+}
+
+setup_venv() {
+    local core_requirements="${BUILD_ROOT}/requirements-ingest-core.txt"
+    local api_requirements="${ROOT_DIR}/Docker/requirements-api.txt"
+    local venv_python_version
+
+    clean_if_forced "${VENV_DIR}"
+
+    if [[ ! -d "${VENV_DIR}" ]]; then
+        log "Creating virtual environment at ${VENV_DIR}"
+        "${PYTHON_BIN}" -m venv "${VENV_DIR}"
+    fi
+
+    venv_python_version="$("${VENV_DIR}/bin/python" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+    if [[ "${venv_python_version}" != "3.14" ]]; then
+        printf 'Existing virtual environment at %s uses Python %s; delete it or rerun with PW_INGEST_FORCE=1\n' "${VENV_DIR}" "${venv_python_version}" >&2
+        exit 1
+    fi
+
+    # shellcheck disable=SC1090
+    source "${VENV_DIR}/bin/activate"
+
+    configure_env
+
+    log "Installing Python dependencies"
+    python -m pip install --upgrade pip
+    grep -v -E '^(cfgrib==|eccodes==|git\+https://github.com/blaylockbk/Herbie.git$)' "${ROOT_DIR}/Docker/requirements-ingest.txt" > "${core_requirements}"
+    python -m pip install -r "${core_requirements}"
+    python -m pip install -r "${api_requirements}"
+    python -m pip install pytest
+    python -m pip install --no-deps "${HERBIE_URL}"
+    python -m pip install --no-deps "cfgrib==${CFGRIB_VERSION}"
+    python -m pip install cffi findlibs
+    python -m pip uninstall -y eccodes eccodeslib eckitlib || true
+    python -m pip install --no-deps --no-binary eccodes "eccodes==${ECCODES_VERSION}"
+
+    log "Validating Python ecCodes binding"
+    python -m eccodes selfcheck
+    [[ "$(python -c 'import eccodes; print(eccodes.codes_get_api_version())')" == "${ECCODES_VERSION}" ]]
+}
+
+write_activate_helper() {
+    local helper_path="${VENV_DIR}/bin/activate-pirate-ingest"
+
+    cat > "${helper_path}" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+source "${VENV_DIR}/bin/activate"
+export ECCODES_DIR="${TOOLCHAIN_PREFIX}"
+export ECCODES_PYTHON_USE_FINDLIBS=1
+export CMAKE_PREFIX_PATH="${NCEPLIBS_PREFIX}:${TOOLCHAIN_PREFIX}\${CMAKE_PREFIX_PATH:+:\$CMAKE_PREFIX_PATH}"
+export LD_LIBRARY_PATH="${TOOLCHAIN_PREFIX}/lib:${TOOLCHAIN_PREFIX}/lib64\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
+export PATH="${WGRIB2_PREFIX}/bin:\$PATH"
+export wgrib2_path="${WGRIB2_PREFIX}/bin/wgrib2 "
+exec "\$SHELL"
+EOF
+
+    chmod +x "${helper_path}"
+}
+
+run_final_checks() {
+    configure_env
+    log "Validating wgrib2 binary"
+    "${WGRIB2_PREFIX}/bin/wgrib2" -version
+}
+
+main() {
+    require_command cmake
+    require_command ctest
+    require_command git
+    require_command gfortran
+    require_command make
+    require_command "${PYTHON_BIN}"
+    require_command tar
+    require_command wget
+    require_python_314
+
+    prepare_dirs
+    build_libaec
+    build_eccodes
+    build_nceplibs_ip
+    build_wgrib2
+    setup_venv
+    write_activate_helper
+    run_final_checks
+
+    log "Setup complete"
+    log "Activate with: source ${VENV_DIR}/bin/activate && export ECCODES_DIR=${TOOLCHAIN_PREFIX} && export ECCODES_PYTHON_USE_FINDLIBS=1 && export LD_LIBRARY_PATH=${TOOLCHAIN_PREFIX}/lib:${TOOLCHAIN_PREFIX}/lib64:\${LD_LIBRARY_PATH:-} && export CMAKE_PREFIX_PATH=${NCEPLIBS_PREFIX}:${TOOLCHAIN_PREFIX}:\${CMAKE_PREFIX_PATH:-} && export PATH=${WGRIB2_PREFIX}/bin:\$PATH"
+    log "Or run: ${VENV_DIR}/bin/activate-pirate-ingest"
+}
+
+main "$@"

@@ -4,6 +4,7 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
         {
             "name": "Python Debugger: FastAPI",
             "type": "debugpy",
@@ -16,7 +17,11 @@
                 "--workers", "1",
             ],
             "jinja": true,
-            "python": "/home/ubuntu/PirateResponse/bin/python3.13",
+            "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
+            "env": {
+                "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${env:PATH}"
+            },
             "envFile": "${workspaceFolder}/.env",
         },
         {
@@ -27,7 +32,11 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "justMyCode": true,
-            "python": "/home/ubuntu/PirateIngest_V3/venv/bin/python3.13",
+            "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
+            "env": {
+                "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${env:PATH}"
+            },
             "envFile": "${workspaceFolder}/.env",
         },
         {
@@ -38,10 +47,30 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "justMyCode": true,
+            "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
             "env": {
+                "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${env:PATH}",
                 "save_type": "Download",
                 "forecast_process_dir": "/mnt/nvme/data/WMO_Alerts",
                 "forecast_path": "/mnt/nvme/data/Prod/WMO_Alerts"
+            }
+        },
+        {
+            "name": "Python: NBM_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.NBM_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
+            "env": {
+                "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${env:PATH}",
+                "save_type": "Download",
+                "forecast_process_dir": "/mnt/nvme/data/NBM",
+                "forecast_path": "/mnt/nvme/data/Prod/NBM"
             }
         },
         {
@@ -51,13 +80,13 @@
             "module": "API.ECMWF_Local_Ingest",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
             "justMyCode": true,
             "env": {
-                "save_type": "Download",
-                "forecast_process_dir": "/mnt/nvme/data/ECMWF",
-                "forecast_path": "/mnt/nvme/data/Prod/ECMWF",
-                "ECCODES_DEFINITION_PATH": "/home/ubuntu/eccodes-2.45.0-Source/definitions/"
-            }
+                "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${env:PATH}"
+            },
+            "envFile": "${workspaceFolder}/.ecmwf.env"
         },
         {
             "name": "Python: SubH_Local",
@@ -67,10 +96,94 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "justMyCode": true,
+            "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
             "env": {
+                "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${env:PATH}",
                 "save_type": "Download",
                 "forecast_process_dir": "/mnt/nvme/data/SubH",
                 "forecast_path": "/mnt/nvme/data/Prod/SubH",
+                "ECCODES_DEFINITION_PATH": "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
+            }
+        },
+        {
+            "name": "Python: HRRR_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.HRRR_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
+            "env": {
+                "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${env:PATH}"
+            },
+            "envFile": "${workspaceFolder}/.hrrr.env"
+        },
+        {
+            "name": "Python: GFS_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.GFS_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "purpose": [
+                "debug-in-terminal"
+            ],
+            "justMyCode": true,
+            "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
+            "env": {
+                "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${workspaceFolder}/.build/ingest-test/wgrib2_build/bin:${env:PATH}",
+                "ECCODES_DIR": "${workspaceFolder}/.build/ingest-test/toolchain",
+                "ECCODES_PYTHON_USE_FINDLIBS": "1",
+                "LD_LIBRARY_PATH": "${workspaceFolder}/.build/ingest-test/toolchain/lib:${workspaceFolder}/.build/ingest-test/toolchain/lib64:${env:LD_LIBRARY_PATH}",
+                "CMAKE_PREFIX_PATH": "${workspaceFolder}/.build/ingest-test/NCEPLIBS_build:${workspaceFolder}/.build/ingest-test/toolchain:${env:CMAKE_PREFIX_PATH}",
+                "PYDEVD_WARN_EVALUATION_TIMEOUT": "300",
+                "wgrib2_path": "${workspaceFolder}/.build/ingest-test/wgrib2_build/bin/wgrib2 "
+            },
+            "envFile": "${workspaceFolder}/.gfs.env"
+        },
+        {
+            "name": "Python: GEFS_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.GEFS_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "purpose": [
+                "debug-in-terminal"
+            ],
+            "justMyCode": true,
+            "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
+            "env": {
+                "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${workspaceFolder}/.build/ingest-test/wgrib2_build/bin:${env:PATH}",
+                "ECCODES_DIR": "${workspaceFolder}/.build/ingest-test/toolchain",
+                "ECCODES_PYTHON_USE_FINDLIBS": "1",
+                "LD_LIBRARY_PATH": "${workspaceFolder}/.build/ingest-test/toolchain/lib:${workspaceFolder}/.build/ingest-test/toolchain/lib64:${env:LD_LIBRARY_PATH}",
+                "CMAKE_PREFIX_PATH": "${workspaceFolder}/.build/ingest-test/NCEPLIBS_build:${workspaceFolder}/.build/ingest-test/toolchain:${env:CMAKE_PREFIX_PATH}",
+                "PYDEVD_WARN_EVALUATION_TIMEOUT": "300",
+                "wgrib2_path": "${workspaceFolder}/.build/ingest-test/wgrib2_build/bin/wgrib2 "
+            },
+            "envFile": "${workspaceFolder}/.gfs.env"
+        },
+        {
+            "name": "Python: HRRR_6H_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.HRRR_6H_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
+            "env": {
+                "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${env:PATH}",
+                "save_type": "Download",
+                "forecast_process_dir": "/mnt/nvme/data/HRRR_6H",
+                "forecast_path": "/mnt/nvme/data/Prod/HRRR_6H",
                 "ECCODES_DEFINITION_PATH": "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
             }
         },
@@ -82,7 +195,10 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "justMyCode": true,
+            "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
             "env": {
+                "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${env:PATH}",
                 "save_type": "Download",
                 "forecast_process_dir": "/mnt/nvme/data/RTMA_RU",
                 "forecast_path": "/mnt/nvme/data/Prod/RTMA_RU",
@@ -97,12 +213,59 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "justMyCode": true,
+            "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
             "env": {
+                "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${env:PATH}",
                 "save_type": "Download",
                 "forecast_process_dir": "/mnt/nvme/data/DWD_MOSMIX",
                 "forecast_path": "/mnt/nvme/data/ProdTest4/DWD_MOSMIX",
             }
         },
-
+        {
+            "name": "Python: AIGFS_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.AIGFS_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
+            "env": {
+                "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${env:PATH}"
+            },
+            "envFile": "${workspaceFolder}/.aigfs.env"
+        },
+        {
+            "name": "Python: AIGEFS_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.AIGEFS_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
+            "env": {
+                "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${env:PATH}"
+            },
+            "envFile": "${workspaceFolder}/.aigefs.env"
+        },
+        {
+            "name": "Python: ECMWF_AIFS_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.ECMWF_AIFS_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true,
+            "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
+            "env": {
+                "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${env:PATH}"
+            },
+            "envFile": "${workspaceFolder}/.aifs.env"
+        }
     ]
 }

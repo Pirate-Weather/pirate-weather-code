@@ -1,12 +1,14 @@
 # %% Script to contain the helper functions as part of the data ingest for Pirate Weather
 # Alexander Rey. July 2025
 
+import logging
 import os
 import re
 import resource
 import shlex
+import shutil
 import subprocess
-import sys
+import tarfile
 import time
 from typing import Iterable, Optional, Union
 
@@ -16,19 +18,27 @@ import numpy as np
 import xarray as xr
 from herbie import Path
 
-from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
+# Import atmospheric calculation constants
+from API.constants.shared_const import (
+    MISSING_DATA,
+    REFC_THRESHOLD,
+)
+
+# Logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # Shared ingest constants
 CHUNK_SIZES = {
-    "NBM": 100,
-    "HRRR": 100,
-    "HRRR_6H": 100,
-    "GFS": 50,
-    "GEFS": 100,
-    "ECMWF": 100,
-    "NBM_Fire": 100,
-    "RTMA": 100,
-    "DWD": 100,
+    "NBM": 200,
+    "HRRR": 200,
+    "HRRR_6H": 200,
+    "GFS": 100,
+    "GEFS": 200,
+    "ECMWF": 200,
+    "NBM_Fire": 200,
+    "RTMA": 200,
+    "DWD": 200,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -37,6 +47,7 @@ FINAL_CHUNK_SIZES = {
     "HRRR_6H": 5,
     "GFS": 3,
     "GEFS": 3,
+    "HGEFS": 3,
     "ECMWF": 3,
     "NBM_Fire": 5,
     "RTMA": 25,
@@ -50,9 +61,11 @@ FORECAST_LEAD_RANGES = {
     "NBM_FIRE": list(range(6, 192, 6)),
     "HRRR_1H": list(range(1, 19)),
     "HRRR_6H": list(range(18, 49)),
-    "ECMWF_AIFS": list(range(0, 241, 6)),
+    "ECMWF_AIFS": list(range(6, 241, 6)),
     "ECMWF_IFS_1": list(range(3, 144, 3)),
     "ECMWF_IFS_2": list(range(144, 241, 6)),
+    "AIGFS": list(range(6, 241, 6)),
+    "AIGEFS": list(range(6, 241, 6)),
 }
 
 # Radius, in km, used for DWD model nearest-neighbor selection
@@ -124,7 +137,7 @@ def tune_nofile_limit(target: int = 65535) -> None:
         if new_soft > soft:
             resource.setrlimit(resource.RLIMIT_NOFILE, (new_soft, hard))
             print(f"Raised nofile soft limit from {soft} to {new_soft}")
-    except Exception as exc:
+    except (ValueError, OSError) as exc:
         print(f"Warning: unable to tune nofile limit: {exc}")
 
 
@@ -157,7 +170,7 @@ def configure_zarr_limits(
             async_cap = max(1, fd_budget // 512)
             workers = min(workers, worker_cap)
             async_concurrency = min(async_concurrency, async_cap)
-    except Exception as exc:
+    except (ValueError, OSError) as exc:
         print(f"Warning: unable to read nofile limit for zarr tuning: {exc}")
 
     async_concurrency = min(async_concurrency, workers)
@@ -229,6 +242,63 @@ def close_store(store: object) -> None:
         close_fn()
 
 
+def archive_tmp_zarr_and_upload(
+    *,
+    tmp_zarr_path: str,
+    s3_path: str,
+    archive_member_name: str,
+    s3,
+) -> None:
+    """Tar/gzip a temporary zarr directory, upload to S3, and write done marker."""
+    tmp_tar_path = f"{tmp_zarr_path}.tar.gz"
+    with tarfile.open(tmp_tar_path, "w:gz") as tar:
+        tar.add(tmp_zarr_path, arcname=archive_member_name)
+
+    s3.put_file(tmp_tar_path, s3_path)
+    if os.path.exists(tmp_tar_path):
+        os.remove(tmp_tar_path)
+    shutil.rmtree(tmp_zarr_path, ignore_errors=True)
+    s3.touch(s3_path.replace(".tar.gz", ".done"))
+
+
+def download_extract_historic_archive(
+    *,
+    s3,
+    historic_path: str,
+    final_zarr_name: str,
+    extracted_store_name: str,
+    local_temp_dir: str,
+) -> Optional[str]:
+    """Helper to download and extract a historic archive to a local zarr path."""
+    os.makedirs(local_temp_dir, exist_ok=True)
+    local_zarr_path = os.path.join(local_temp_dir, final_zarr_name)
+    if os.path.exists(local_zarr_path):
+        return local_zarr_path
+
+    tar_name = f"{final_zarr_name}.tar.gz"
+    s3_tar_path = f"{historic_path}/{tar_name}"
+    if not s3.exists(s3_tar_path):
+        return None
+
+    local_tar_path = os.path.join(local_temp_dir, tar_name)
+    timestamp_tag = final_zarr_name.replace(".zarr", "")
+    extract_dir = os.path.join(local_temp_dir, f"extract_{timestamp_tag}")
+
+    s3.get_file(s3_tar_path, local_tar_path)
+    os.makedirs(extract_dir, exist_ok=True)
+    with tarfile.open(local_tar_path, "r:gz") as tar:
+        tar.extractall(path=extract_dir, filter="data")
+
+    extracted_source = os.path.join(extract_dir, extracted_store_name)
+    if os.path.exists(extracted_source):
+        shutil.move(extracted_source, local_zarr_path)
+
+    if os.path.exists(local_tar_path):
+        os.remove(local_tar_path)
+    shutil.rmtree(extract_dir, ignore_errors=True)
+    return local_zarr_path if os.path.exists(local_zarr_path) else None
+
+
 def mask_invalid_data(daskArray, ignoreAxis=None):
     """Masks invalid data in a dask array, ignoring the time dimension."""
     # TODO: Update to mask for each variable according to reasonable values, as opposed to this global mask
@@ -262,7 +332,7 @@ def getGribList(FH_forecastsub, matchStrings):
             str(Path(x.get_localFilePath(matchStrings)).expand())
             for x in FH_forecastsub.file_exists
         ]
-    except Exception:
+    except (ValueError, OSError, KeyError, IndexError, RuntimeError):
         print("Download Failure 1, wait 20 seconds and retry")
         time.sleep(20)
         FH_forecastsub.download(matchStrings, verbose=False)
@@ -271,7 +341,7 @@ def getGribList(FH_forecastsub, matchStrings):
                 str(Path(x.get_localFilePath(matchStrings)).expand())
                 for x in FH_forecastsub.file_exists
             ]
-        except Exception:
+        except (ValueError, OSError, KeyError, IndexError, RuntimeError):
             print("Download Failure 2, wait 20 seconds and retry")
             time.sleep(20)
             FH_forecastsub.download(matchStrings, verbose=False)
@@ -280,7 +350,7 @@ def getGribList(FH_forecastsub, matchStrings):
                     str(Path(x.get_localFilePath(matchStrings)).expand())
                     for x in FH_forecastsub.file_exists
                 ]
-            except Exception:
+            except (ValueError, OSError, KeyError, IndexError, RuntimeError):
                 print("Download Failure 3, wait 20 seconds and retry")
                 time.sleep(20)
                 FH_forecastsub.download(matchStrings, verbose=False)
@@ -289,7 +359,7 @@ def getGribList(FH_forecastsub, matchStrings):
                         str(Path(x.get_localFilePath(matchStrings)).expand())
                         for x in FH_forecastsub.file_exists
                     ]
-                except Exception:
+                except (ValueError, OSError, KeyError, IndexError, RuntimeError):
                     print("Download Failure 4, wait 20 seconds and retry")
                     time.sleep(20)
                     FH_forecastsub.download(matchStrings, verbose=False)
@@ -298,7 +368,7 @@ def getGribList(FH_forecastsub, matchStrings):
                             str(Path(x.get_localFilePath(matchStrings)).expand())
                             for x in FH_forecastsub.file_exists
                         ]
-                    except Exception:
+                    except (ValueError, OSError, KeyError, IndexError, RuntimeError):
                         print("Download Failure 5, wait 20 seconds and retry")
                         time.sleep(20)
                         FH_forecastsub.download(matchStrings, verbose=False)
@@ -307,7 +377,13 @@ def getGribList(FH_forecastsub, matchStrings):
                                 str(Path(x.get_localFilePath(matchStrings)).expand())
                                 for x in FH_forecastsub.file_exists
                             ]
-                        except Exception:
+                        except (
+                            ValueError,
+                            OSError,
+                            KeyError,
+                            IndexError,
+                            RuntimeError,
+                        ):
                             print("Download Failure 6, Fail")
                             exit(1)
     return gribList
@@ -330,8 +406,8 @@ def validate_grib_stats(gribCheck):
     varNames = re.findall(r"(?m)^(?:[^:]+:){3}([^:]+):", gribCheck.stdout)
     # ensure we found at least one variable
     if not varNames:
-        print("Error: no variables found in GRIB stats output.")
-        sys.exit(10)
+        logger.error("Error: no variables found in GRIB stats output.")
+        return False
 
     # extract forecast lead times (6th field)
     varTimes = re.findall(r"(?m)^(?:[^:]+:){5}([^:]+):", gribCheck.stdout)
@@ -345,17 +421,19 @@ def validate_grib_stats(gribCheck):
     ]
 
     if invalidIdxs:
-        print("Invalid data found in grib files:")
+        logger.error("Invalid data found in grib files:")
         for i in invalidIdxs:
-            print(f"  Variable : {varNames[i]}")
-            print(f"  Time     : {varTimes[i]}")
-            print(f"  Min/Max  : {minValues[i]} / {maxValues[i]}")
-            print("---")
-        print("Exiting due to invalid data in grib files.")
-        sys.exit(10)
+            logger.error("  Variable : %s", varNames[i])
+            logger.error("  Time     : %s", varTimes[i])
+            logger.error("  Min/Max  : %s / %s", minValues[i], maxValues[i])
+            logger.error("---")
+        logger.error("Exiting due to invalid data in grib files.")
+
+        # Return False to indicate validation failure, allowing caller to handle exit or retry logic
+        return False
 
     else:
-        print("All grib files passed validation checks.")
+        logger.info("All grib files passed validation checks.")
         # compute overall min/max for each variable across all times
         varExtremes = {}
         for var, mn, mx in zip(varNames, minValues, maxValues):
@@ -364,9 +442,9 @@ def validate_grib_stats(gribCheck):
             varExtremes[var][1] = max(hi, mx)
 
         # print overall extremes
-        print("Overall min/max for each variable across all times:")
+        logger.info("Overall min/max for each variable across all times:")
         for var, (mn, mx) in varExtremes.items():
-            print(f"  {var}: min={mn}, max={mx}")
+            logger.info("  %s: min=%s, max=%s", var, mn, mx)
 
     # all good
     return True
@@ -551,6 +629,35 @@ def interp_time_take_blend(
     return out
 
 
+def validate_stacked_time_alignment(
+    stacked_times_unix: np.ndarray,
+    concatenated_times_unix: np.ndarray,
+    tolerance_seconds: float = 300,
+) -> None:
+    """Ensure concatenated stored times stay close to the expected stacked times."""
+    expected_times = np.asarray(stacked_times_unix, dtype=np.float64).reshape(-1)
+    actual_times = np.asarray(concatenated_times_unix, dtype=np.float64).reshape(-1)
+
+    if expected_times.shape != actual_times.shape:
+        raise ValueError(
+            "Time alignment check failed due to shape mismatch: "
+            f"expected {expected_times.shape}, got {actual_times.shape}."
+        )
+
+    time_deltas = np.abs(expected_times - actual_times)
+    mismatched_indices = np.flatnonzero(time_deltas > tolerance_seconds)
+    if mismatched_indices.size:
+        first_idx = int(mismatched_indices[0])
+        raise ValueError(
+            "Time alignment check failed: "
+            f"{mismatched_indices.size} timestamps differ by more than "
+            f"{tolerance_seconds} seconds. First mismatch at index {first_idx}: "
+            f"expected={expected_times[first_idx]}, "
+            f"actual={actual_times[first_idx]}, "
+            f"delta={time_deltas[first_idx]}."
+        )
+
+
 def interpolate_temporal_gaps_efficiently(
     ds_chunked, nearest_vars=None, max_gap_hours=3, time_dim="time"
 ):
@@ -628,3 +735,105 @@ def interpolate_temporal_gaps_efficiently(
 
     # Execute
     return ds_chunked.map(_process_variable)
+
+
+def check_historic_zarr(
+    zarr_path: str,
+    save_type: str,
+    expected_vars: tuple,
+    aws_access_key_id: str = "",
+    aws_secret_access_key: str = "",
+) -> bool:
+    """
+    Validates a historic Zarr store.
+
+    Checks that the store exists, can be opened, contains all expected variables,
+    and that data can be read from the last variable.
+    If the store is invalid, it is deleted along with any corresponding .done file.
+
+    Parameters:
+    - zarr_path (str): Path to the Zarr store.
+    - save_type (str): "S3" or "local" / "Download"
+    - expected_vars (tuple): Tuple of expected variable names.
+    - aws_access_key_id (str): AWS access key for S3.
+    - aws_secret_access_key (str): AWS secret key for S3.
+
+    Returns:
+    - bool: True if the store is valid, False otherwise.
+    """
+    import os
+    import shutil
+    import traceback
+
+    import zarr
+
+    s3 = None
+    try:
+        if save_type == "S3":
+            import s3fs
+
+            s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+            if not s3.exists(zarr_path):
+                return False
+
+            store = zarr.storage.FsspecStore.from_url(
+                zarr_path,
+                storage_options={
+                    "key": aws_access_key_id,
+                    "secret": aws_secret_access_key,
+                },
+            )
+        else:
+            if not os.path.exists(zarr_path):
+                return False
+
+            store = zarr.storage.LocalStore(zarr_path)
+
+        # Open the zarr group.
+        z = zarr.open(store, mode="r")
+
+        # Check if all expected variables exist
+        store_vars = set(z.keys())
+        expected_set = set(expected_vars)
+        if not expected_set.issubset(store_vars):
+            print(
+                f"Missing variables in {zarr_path}. Expected subset {expected_set}, found {store_vars}"
+            )
+            raise ValueError("Missing variables in Zarr store")
+
+        # Check the last variable has data by reading its last value
+        last_var = expected_vars[-1]
+        _ = z[last_var][-1, -1, -1]
+
+        return True
+
+    except (
+        ValueError,
+        IndexError,
+        KeyError,
+        zarr.errors.GroupNotFoundError,
+        zarr.errors.NodeNotFoundError,
+        zarr.errors.ArrayNotFoundError,
+    ):
+        print(f"### Historic Data Failure for {zarr_path}!")
+        print(traceback.print_exc())
+
+        # Delete the invalid store
+        try:
+            if save_type == "S3":
+                if s3 is not None:
+                    if s3.exists(zarr_path):
+                        s3.rm(zarr_path, recursive=True)
+                    done_file = zarr_path.replace(".zarr", ".done")
+                    if s3.exists(done_file):
+                        s3.rm(done_file)
+            else:
+                if os.path.exists(zarr_path):
+                    shutil.rmtree(zarr_path, ignore_errors=True)
+                done_file = zarr_path.replace(".zarr", ".done")
+                if os.path.exists(done_file):
+                    os.remove(done_file)
+        except OSError as e:
+            print(f"Failed to delete corrupt store {zarr_path}: {e}")
+
+        return False

@@ -17,6 +17,8 @@ PROD_TIMEMACHINE_BASE = "https://api.pirateweather.net/timemachine"
 TIMEMACHINE_TEST_LOCATION = (45.4215, -75.6972)  # Ottawa, Canada
 TIMEMACHINE_TEST_DATE = datetime.datetime(2020, 6, 15, tzinfo=datetime.UTC)
 TIMEMACHINE_TIMESTAMP = int(TIMEMACHINE_TEST_DATE.timestamp())
+TIMEMACHINE_DST_TEST_LOCATION = (45.0, -75.0)  # Near Ottawa, DST boundary case
+TIMEMACHINE_DST_TIMESTAMP = 1741463176  # 2025-03-08 19:46:16 UTC
 
 
 class ProductionRequestError(Exception):
@@ -127,12 +129,12 @@ def test_local_vs_production(lat, lon):
     client = _get_client()
 
     local_resp = client.get(
-        f"/forecast/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast"
+        f"/forecast/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast,aimodels"
     )
     assert local_resp.status_code == 200
     local_data = local_resp.json()
 
-    prod_url = f"{PROD_BASE}/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast"
+    prod_url = f"{PROD_BASE}/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast,aimodels"
     try:
         prod_data = _fetch_production_json(prod_url)
     except ProductionRequestError as exc:
@@ -169,5 +171,34 @@ def test_timemachine_vs_production():
         diff_text = json.dumps(diffs, indent=2, sort_keys=True)
         warnings.warn(
             f"Timemachine differences for {lat},{lon} at {timestamp}:\n{diff_text}",
+            DiffWarning,
+        )
+
+
+@pytest.mark.skipif(
+    not PW_API,
+    reason="PW_API environment variable not set",
+)
+def test_timemachine_dst_vs_production():
+    client = _get_client()
+
+    lat, lon = TIMEMACHINE_DST_TEST_LOCATION
+    timestamp = TIMEMACHINE_DST_TIMESTAMP
+
+    local_resp = client.get(f"/timemachine/{PW_API}/{lat},{lon},{timestamp}?version=2")
+    assert local_resp.status_code == 200
+    local_data = local_resp.json()
+
+    prod_url = f"{PROD_TIMEMACHINE_BASE}/{PW_API}/{lat},{lon},{timestamp}?version=2"
+    try:
+        prod_data = _fetch_production_json(prod_url)
+    except ProductionRequestError as exc:  # pragma: no cover - network failure
+        pytest.skip(f"Could not fetch production API: {exc}")
+
+    diffs = _diff_nested(local_data, prod_data)
+    if diffs:
+        diff_text = json.dumps(diffs, indent=2, sort_keys=True)
+        warnings.warn(
+            f"Timemachine DST differences for {lat},{lon} at {timestamp}:\n{diff_text}",
             DiffWarning,
         )

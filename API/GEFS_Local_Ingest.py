@@ -2,12 +2,12 @@
 # Alexander Rey, September 2023
 
 # %% Import modules
+import logging
 import os
 import pickle
 import shutil
 import sys
 import time
-import traceback
 import warnings
 
 import dask
@@ -26,7 +26,9 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    archive_tmp_zarr_and_upload,
     configure_zarr_limits,
+    download_extract_historic_archive,
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
@@ -34,9 +36,14 @@ from API.ingest_utils import (
     run_command,
     tune_nofile_limit,
     validate_grib_stats,
+    validate_stacked_time_alignment,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
+
+# Logging setup
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 # %% Setup paths and parameters
@@ -121,7 +128,7 @@ if save_type == "S3":
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to GEFS, ending")
+            logger.info("No Update to GEFS, ending")
             sys.exit()
 
 else:
@@ -135,11 +142,11 @@ else:
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to GEFS, ending")
+            logger.info("No Update to GEFS, ending")
             sys.exit()
 
 
-print(base_time)
+logger.info(base_time)
 # base_time = pd.Timestamp("2024-02-29 18:00:00")
 
 zarr_vars = (
@@ -198,7 +205,7 @@ while mem < 30:
 
     # Check for download length
     if len(FH_IN.file_exists) != 80:
-        print("Member " + str(mem + 1) + " has not downloaded all files, trying again")
+        logger.warning("Member %d has not downloaded all files, trying again", mem + 1)
         failCount += 1
 
         # Break after 10 failed attempts
@@ -224,7 +231,7 @@ while mem < 30:
     grib_check = run_command(cmd)
 
     validate_grib_stats(grib_check)
-    print("Grib files passed validation, proceeding with processing")
+    logger.info("Grib files passed validation, proceeding with processing")
 
     # Create a string to pass to wgrib2 to merge all gribs into one grib
     cmd = (
@@ -243,7 +250,7 @@ while mem < 30:
     # Run wgrib2 to megre all the grib files
     sp_out = run_command(cmd)
     if sp_out.returncode != 0:
-        print(sp_out.stderr)
+        logger.error(sp_out.stderr)
         sys.exit()
 
     # Fix precip and chunk each member
@@ -313,15 +320,15 @@ if forecast_time_values is None:
 start = np.min(forecast_time_values)  # Adjust as necessary
 end = np.max(forecast_time_values)  # Adjust as necessary
 new_hourly_time = pd.date_range(
-    start=start - pd.Timedelta(his_period, "h"), end=end, freq="h"
+    start=start - pd.Timedelta(hours=his_period), end=end, freq="h"
 )
 
 # Plus 2 since we start at Hour 3
 stacked_times = np.concatenate(
     (
         pd.date_range(
-            start=start - pd.Timedelta(his_period, "h"),
-            end=start - pd.Timedelta(1, "h"),
+            start=start - pd.Timedelta(hours=his_period),
+            end=start - pd.Timedelta(hours=1),
             freq="3h",
         ),
         forecast_time_values,
@@ -417,65 +424,41 @@ def preprocess(ds):
 for i in range(his_period, 0, -6):
     # s3_path_NC = s3_bucket + '/GEFS/GEFS_HistProb_' + (base_time - pd.Timedelta(hours = i)).strftime('%Y%m%dT%H%M%SZ') + '.nc'
 
-    # Try to open the zarr file to check if it has already been saved
     if save_type == "S3":
-        # Create the S3 filesystem
         s3_path = (
             historic_path
-            + "/GEFS_HistProb_"
+            + "/GEFS_HistProb_v3_"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr"
+            + ".zarr.tar.gz"
         )
-
-        # Check for a done file in S3
-        if s3.exists(s3_path.replace(".zarr", ".done")):
+        if s3.exists(s3_path.replace(".tar.gz", ".done")):
             print("File already exists in S3, skipping download for: " + s3_path)
-
-            # If the file exists, check that it works
-            try:
-                hisCheckStore = zarr.storage.FsspecStore.from_url(
-                    s3_path,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-                zarr.open(hisCheckStore)[probVars[-1]][-1, -1, -1]
-                continue  # If it exists, skip to the next iteration
-            except Exception:
-                print("### Historic Data Failure!")
-                print(traceback.print_exc())
-
-                # Delete the file if it exists
-                if s3.exists(s3_path):
-                    s3.rm(s3_path)
+            continue
     else:
-        # Local Path Setup
         local_path = (
             historic_path
-            + "/GEFS_HistProb_"
+            + "/GEFS_HistProb_v3_"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
-
-        # Check for a loca done file
         if os.path.exists(local_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + local_path)
+            print("File already exists locally, skipping download for: " + local_path)
             continue
+
     print(
         "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
     )
 
     # Create a range of dates for historic data
     DATES = pd.date_range(
-        start=base_time - pd.Timedelta(str(i) + "h"),
+        start=base_time - pd.Timedelta(hours=i),
         periods=1,
         freq="6h",
     )
 
     # Create a range of forecast lead times
     # Forward looking, so 00Z forecast is from 03Z
-    # This is what we want for accumilation variables
+    # This is what we want for accumulation variables
     FH_forecastsubMembers = []
     for mem in range(0, 30):
         FH_forecastsubMembers.append(
@@ -513,7 +496,7 @@ for i in range(his_period, 0, -6):
         grib_check = run_command(cmd)
 
         validate_grib_stats(grib_check)
-        print("Grib files passed validation, proceeding with processing")
+        logger.info("Grib files passed validation, proceeding with processing")
 
         # Create a string to pass to wgrib2 to merge all gribs into one grib
         cmd = (
@@ -532,7 +515,7 @@ for i in range(his_period, 0, -6):
         # Run wgrib2 to merge all the grib files
         sp_out = run_command(cmd)
         if sp_out.returncode != 0:
-            print(sp_out.stderr)
+            logger.error(sp_out.stderr)
             sys.exit()
 
         # Open the NetCDF file with xarray to process and compress
@@ -645,26 +628,12 @@ for i in range(his_period, 0, -6):
     #     vname: {"compressor": compressor, "filters": filters} for vname in probVars[1:]
     # }
 
-    # Save as zarr for timemachine
-    # with ProgressBar():
-    # Save as Zarr to s3 for Time Machine
-    if save_type == "S3":
-        zarrStore = zarr.storage.FsspecStore.from_url(
-            s3_path,
-            storage_options={
-                "key": aws_access_key_id,
-                "secret": aws_secret_access_key,
-            },
-        )
-    else:
-        # Create local Zarr store
-        zarrStore = zarr.storage.LocalStore(local_path)
-
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         xarray_hist_wgrib_prob.to_zarr(
-            store=zarrStore,
+            hist_process_path + "_GEFS_Hist_TMP.zarr",
             mode="w",
             consolidated=False,
+            compute=True,
             chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
         )
     xarray_hist_wgrib_merged.close()
@@ -674,22 +643,44 @@ for i in range(his_period, 0, -6):
 
     # Save a done file to s3 to indicate that the historic data has been processed
     if save_type == "S3":
-        done_file = s3_path.replace(".zarr", ".done")
-        s3.touch(done_file)
+        archive_tmp_zarr_and_upload(
+            tmp_zarr_path=hist_process_path + "_GEFS_Hist_TMP.zarr",
+            s3_path=s3_path,
+            archive_member_name="GEFS_Hist.zarr",
+            s3=s3,
+        )
     else:
+        os.rename(hist_process_path + "_GEFS_Hist_TMP.zarr", local_path)
         done_file = local_path.replace(".zarr", ".done")
         with open(done_file, "w") as f:
             f.write("Done")
 
 #####################################################################################################
 # %% Merge the historic and forecast datasets and then squash using dask
-ncLocalWorking_paths = [
-    historic_path
-    + "/GEFS_HistProb_"
-    + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-    + ".zarr"
-    for i in range(his_period, 0, -6)
-]
+if save_type == "S3":
+    local_temp_dir = forecast_process_path + "_s3_temp_downloads"
+    os.makedirs(local_temp_dir, exist_ok=True)
+    ncLocalWorking_paths = []
+    for i in range(his_period, 0, -6):
+        timestamp = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        final_zarr_name = f"GEFS_HistProb_v3_{timestamp}.zarr"
+        extracted_path = download_extract_historic_archive(
+            s3=s3,
+            historic_path=historic_path,
+            final_zarr_name=final_zarr_name,
+            extracted_store_name="GEFS_Hist.zarr",
+            local_temp_dir=local_temp_dir,
+        )
+        if extracted_path is not None:
+            ncLocalWorking_paths.append(extracted_path)
+else:
+    ncLocalWorking_paths = [
+        historic_path
+        + "/GEFS_HistProb_v3_"
+        + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        + ".zarr"
+        for i in range(his_period, 0, -6)
+    ]
 
 # Dask Setup
 daskInterpArrays = []
@@ -698,22 +689,9 @@ daskVarArrayList = []
 
 for daskVarIDX, dask_var in enumerate(probVars[:]):
     for local_ncpath in ncLocalWorking_paths:
-        if save_type == "S3":
-            daskVarArrays.append(
-                da.from_zarr(
-                    local_ncpath,
-                    component=dask_var,
-                    inline_array=True,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-            )
-        else:
-            daskVarArrays.append(
-                da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
-            )
+        daskVarArrays.append(
+            da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
+        )
 
     daskVarArraysStack = da.stack(daskVarArrays, allow_unknown_chunksizes=True)
 
@@ -735,6 +713,8 @@ for daskVarIDX, dask_var in enumerate(probVars[:]):
 
         # Get times as numpy
         npCatTimes = daskCatTimes.compute()
+        # Check that the times are aligned with the expected stacked times
+        validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
 
         daskArrayOut = da.from_array(
             np.tile(
@@ -761,7 +741,7 @@ for daskVarIDX, dask_var in enumerate(probVars[:]):
 
     daskVarArrays = []
 
-    print(dask_var)
+    logger.info(dask_var)
 
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
@@ -871,4 +851,4 @@ shutil.rmtree(forecast_process_dir)
 
 # Test Read
 T1 = time.time()
-print(T1 - T0)
+logger.info(T1 - T0)

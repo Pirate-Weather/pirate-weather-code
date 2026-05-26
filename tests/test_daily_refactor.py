@@ -4,6 +4,7 @@ import numpy as np
 
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
 from API.daily.builder import DailySection, build_daily_section
+from API.legacy.daily import select_hour_window
 
 
 def test_build_daily_section_structure():
@@ -88,3 +89,15 @@ def test_build_daily_section_structure():
     assert len(result.day_list_si) == daily_days
     assert isinstance(result.day_list[0], dict)
     assert "time" in result.day_list[0]
+
+
+def test_select_hour_window_uses_timestamp_boundaries_across_dst():
+    hour_list_si = [{"time": ts} for ts in range(0, 49 * 3600, 3600)]
+
+    selected = select_hour_window(
+        hour_list_si,
+        start_time=5 * 3600,
+        end_time=17 * 3600,
+    )
+
+    assert [hour["time"] for hour in selected] == list(range(5 * 3600, 17 * 3600, 3600))

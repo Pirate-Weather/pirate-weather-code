@@ -15,10 +15,10 @@ import sys
 import threading
 from typing import Union
 
+import aiobotocore.session as _aio_session
 import numpy as np
 from astral import LocationInfo, moon
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import ORJSONResponse
+from fastapi import FastAPI, HTTPException, Request, Response
 from pirateweather_translations.dynamic_loader import load_all_translations
 from timezonefinder import TimezoneFinder
 
@@ -44,8 +44,10 @@ from API.constants.forecast_const import (
     DATA_MINUTELY,
 )
 from API.constants.model_const import (
+    AIGFS,
     DWD_MOSMIX,
     ECMWF,
+    ECMWF_AIFS,
     ERA5,
     FORECAST_SOURCES,
     GFS,
@@ -56,7 +58,11 @@ from API.constants.model_const import (
 )
 
 # Project imports
-from API.constants.shared_const import INGEST_VERSION_STR, KELVIN_TO_CELSIUS
+from API.constants.shared_const import (
+    INGEST_VERSION_STR,
+    KELVIN_TO_CELSIUS,
+    MISSING_DATA,
+)
 from API.current.metrics import build_current_section
 from API.daily.builder import build_daily_section
 from API.data_inputs import prepare_data_inputs
@@ -67,6 +73,7 @@ from API.forecast_sources import (
 )
 from API.hourly.block import build_hourly_block
 from API.io.zarr_reader import update_zarr_store
+from API.io.ZarrHelpers import _add_custom_header
 from API.legacy.summary import (
     build_daily_summary,
     build_hourly_summary,
@@ -75,7 +82,10 @@ from API.legacy.summary import (
 from API.minutely.builder import build_minutely_block
 from API.request.grid_indexing import ZarrSources, calculate_grid_indexing
 from API.request.preprocess import prepare_initial_request
-from API.utils.geo import haversine_distance
+from API.utils.filtering import apply_block_indices as _apply_block_indices
+from API.utils.filtering import apply_blocks_param as _apply_blocks_param
+from API.utils.filtering import parse_indices as _parse_indices
+from API.utils.geo import haversine_distance, is_in_north_america
 from API.utils.solar import calculate_solar_times
 from API.utils.time_indexing import calculate_time_indexing
 from API.utils.timing import StepTimer, TimingMiddleware
@@ -134,6 +144,9 @@ RTMA_RU_Zarr = None
 ERA5_Data = None
 DWD_MOSMIX_Zarr = None
 DWD_MOSMIX_Stations = None
+AIGFS_Zarr = None
+AIGEFS_Zarr = None
+ECMWF_AIFS_Zarr = None
 
 
 setup_logging()
@@ -178,6 +191,9 @@ WMO_Alerts_Zarr = zarr_stores.WMO_Alerts_Zarr
 RTMA_RU_Zarr = zarr_stores.RTMA_RU_Zarr
 ERA5_Data = zarr_stores.ERA5_Data
 DWD_MOSMIX_Zarr = zarr_stores.DWD_MOSMIX_Zarr
+AIGFS_Zarr = zarr_stores.AIGFS_Zarr
+AIGEFS_Zarr = zarr_stores.AIGEFS_Zarr
+ECMWF_AIFS_Zarr = zarr_stores.ECMWF_AIFS_Zarr
 
 # Load DWD MOSMIX station mapping
 try:
@@ -194,11 +210,16 @@ try:
             try:
                 import s3fs
 
+                aio_sess = _aio_session.AioSession()
+                aio_sess.register("before-send.s3", _add_custom_header)
                 s3 = s3fs.S3FileSystem(
                     anon=True,
                     asynchronous=False,
                     endpoint_url="https://api.pirateweather.net/files/",
+                    skip_instance_cache=True,
+                    session=aio_sess,
                 )
+
                 s3_path = (
                     f"s3://ForecastTar_v2/{ingest_version}/DWD_MOSMIX_stations.pickle"
                 )
@@ -213,8 +234,9 @@ try:
         with open(station_map_file, "rb") as f:
             DWD_MOSMIX_Stations = pickle.load(f)
             logger.info(f"Loaded DWD MOSMIX station map from: {station_map_file}")
-    elif DWD_MOSMIX_Stations is None:
-        logger.debug("DWD MOSMIX station map not found")
+    elif station_map_file and DWD_MOSMIX_Stations is None:
+        # File path was configured for this stage but file is missing
+        logger.debug(f"DWD MOSMIX station map not found at: {station_map_file}")
 except Exception as e:
     logger.debug(f"Error loading DWD MOSMIX station map: {e}")
 
@@ -245,6 +267,8 @@ def convert_data_to_celsius(
     dataOut_rtma_ru,
     era5_merged,
     dataOut_dwd_mosmix,
+    dataOut_aigfs,
+    dataOut_aifs,
 ):
     """
     Converts temperature, dew point, and apparent temperature from Kelvin to Celsius
@@ -260,6 +284,8 @@ def convert_data_to_celsius(
         dataOut_rtma_ru: RTMA data
         era5_merged: ERA5 data
         dataOut_dwd_mosmix: DWD MOSMIX data
+        dataOut_aigfs: AIGFS data
+        dataOut_aifs: ECMWF AIFS data
     """
     # Define mappings for each model: (data_array, model_indices, keys_to_convert)
     model_mappings = [
@@ -271,6 +297,8 @@ def convert_data_to_celsius(
         (dataOut_ecmwf, ECMWF, ["temp", "dew"]),
         (dataOut_rtma_ru, RTMA_RU, ["temp", "dew"]),
         (dataOut_dwd_mosmix, DWD_MOSMIX, ["temp", "dew"]),
+        (dataOut_aigfs, AIGFS, ["temp"]),
+        (dataOut_aifs, ECMWF_AIFS, ["temp", "dew"]),
     ]
 
     for data_array, indices_dict, keys in model_mappings:
@@ -285,10 +313,32 @@ def convert_data_to_celsius(
         era5_merged[:, ERA5["2m_dewpoint_temperature"]] -= KELVIN_TO_CELSIUS
 
 
-@app.get("/timemachine/{apikey}/{location}", response_class=ORJSONResponse)
-@app.get("/forecast/{apikey}/{location}", response_class=ORJSONResponse)
+def _prefer_ai_with_fallback(ai_data, base_data):
+    """Prefer AI values but fall back to base model values for missing points."""
+    if ai_data is None:
+        return base_data
+    out = np.asarray(ai_data).copy()
+    missing_value_mask = out == MISSING_DATA
+
+    if base_data is not None:
+        base = np.asarray(base_data)
+        base_missing_value_mask = base == MISSING_DATA
+        missing_ai = np.isnan(out) | missing_value_mask
+        valid_base = np.isfinite(base) & ~base_missing_value_mask
+        fallback_mask = missing_ai & valid_base
+        out[fallback_mask] = base[fallback_mask]
+
+    # Preserve time column as-is and normalize remaining missing sentinels.
+    out_data = out[:, 1:]
+    np.putmask(out_data, out_data == MISSING_DATA, np.nan)
+    return out
+
+
+@app.get("/timemachine/{apikey}/{location}")
+@app.get("/forecast/{apikey}/{location}")
 async def PW_Forecast(
     request: Request,
+    response: Response,
     location: str,
     units: Union[str, None] = None,
     extend: Union[str, None] = None,
@@ -300,6 +350,10 @@ async def PW_Forecast(
     apikey: Union[str, None] = None,
     icon: Union[str, None] = None,
     extraVars: Union[str, None] = None,
+    blocks: Union[str, None] = None,
+    daily_indices: Union[str, None] = None,
+    hourly_indices: Union[str, None] = None,
+    day_night_indices: Union[str, None] = None,
 ) -> dict:
     """
     Main entry point for the Pirate Weather API forecast.
@@ -335,6 +389,11 @@ async def PW_Forecast(
         apikey: The API key used for the request.
         icon: Icon set to use.
         extraVars: Extra variables to include.
+        blocks: CSV allowlist of blocks to include (currently, minutely, hourly, daily,
+            day_night, alerts, flags). Converted to excludes internally.
+        daily_indices: CSV of non-negative integers selecting items from daily.data.
+        hourly_indices: CSV of non-negative integers selecting items from hourly.data.
+        day_night_indices: CSV of non-negative integers selecting items from day_night.data.
 
     Returns:
         dict: The complete weather forecast JSON object.
@@ -354,10 +413,29 @@ async def PW_Forecast(
     global ERA5_Data
     global DWD_MOSMIX_Zarr
     global DWD_MOSMIX_Stations
+    global AIGFS_Zarr
+    global AIGEFS_Zarr
+    global ECMWF_AIFS_Zarr
 
     # Timing Check
     T_Start = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
     timer = StepTimer(T_Start, TIMING)
+
+    # Convert blocks allowlist to excludes (backward-compatible with existing exclude param)
+    if blocks is not None:
+        exclude, include = _apply_blocks_param(blocks, exclude, include)
+
+    # Parse index filter params early so format errors are reported before heavy processing
+    _indices_params = {
+        "daily": (daily_indices, "daily_indices"),
+        "hourly": (hourly_indices, "hourly_indices"),
+        "day_night": (day_night_indices, "day_night_indices"),
+    }
+    parsed_indices = {
+        block: _parse_indices(raw, name)
+        for block, (raw, name) in _indices_params.items()
+        if raw is not None
+    }
 
     # 1. Parse request parameters and initialize variables
     # This function handles all the input validation and setup
@@ -412,6 +490,10 @@ async def PW_Forecast(
     exRTMA_RU = initial.ex_rtma_ru
     exECMWF = initial.ex_ecmwf
     exDWD_MOSMIX = initial.ex_dwd_mosmix
+    exAIGEFS = initial.ex_aigefs
+    exAIGFS = initial.ex_aigfs
+    exAIFS = initial.ex_aifs
+    incAIModels = initial.inc_aimodels
     inc_day_night = initial.inc_day_night
     summaryText = initial.summary_text
     unitSystem = initial.unit_system
@@ -466,6 +548,9 @@ async def PW_Forecast(
         wmo_alerts=WMO_Alerts_Zarr,
         era5_data=ERA5_Data,
         dwd_mosmix=DWD_MOSMIX_Zarr,
+        aigfs=AIGFS_Zarr,
+        aigefs=AIGEFS_Zarr,
+        ecmwf_aifs=ECMWF_AIFS_Zarr,
     )
 
     # 3. Calculate grid indices for the requested location to retrieve data from Zarr stores
@@ -485,8 +570,13 @@ async def PW_Forecast(
         ex_gefs=exGEFS,
         ex_rtma_ru=exRTMA_RU,
         ex_dwd_mosmix=exDWD_MOSMIX,
+        ex_aigfs=exAIGFS,
+        ex_aigefs=exAIGEFS,
+        ex_aifs=exAIFS,
+        inc_aimodels=incAIModels,
         read_wmo_alerts=readWMOAlerts,
         base_day_utc=baseDayUTC,
+        num_hours=numHours,
         zarr_sources=zarr_sources,
         weather=weather,
         timing_start=T_Start,
@@ -504,6 +594,9 @@ async def PW_Forecast(
     dataOut_gefs = grid_result.dataOut_gefs
     dataOut_rtma_ru = grid_result.dataOut_rtma_ru
     dataOut_dwd_mosmix = grid_result.dataOut_dwd_mosmix
+    dataOut_aigfs = grid_result.dataOut_aigfs
+    dataOut_aigefs = grid_result.dataOut_aigefs
+    dataOut_aifs = grid_result.dataOut_aifs
     WMO_alertDat = grid_result.WMO_alertDat
 
     ERA5_MERGED = grid_result.era5_merged
@@ -521,6 +614,8 @@ async def PW_Forecast(
         dataOut_rtma_ru,
         ERA5_MERGED,
         dataOut_dwd_mosmix,
+        dataOut_aigfs,
+        dataOut_aifs,
     )
 
     # 5. Build metadata about the data sources used for this forecast
@@ -592,6 +687,9 @@ async def PW_Forecast(
         data_dwd_mosmix=dataOut_dwd_mosmix
         if isinstance(dataOut_dwd_mosmix, np.ndarray)
         else None,
+        data_aigfs=dataOut_aigfs if isinstance(dataOut_aigfs, np.ndarray) else None,
+        data_aigefs=dataOut_aigefs if isinstance(dataOut_aigefs, np.ndarray) else None,
+        data_aifs=dataOut_aifs if isinstance(dataOut_aifs, np.ndarray) else None,
         logger=logger,
         loc_tag=loc_tag,
     )
@@ -603,6 +701,36 @@ async def PW_Forecast(
     ECMWF_Merged = merge_result.ecmwf
     GEFS_Merged = merge_result.gefs
     DWD_MOSMIX_Merged = merge_result.dwd_mosmix
+    is_na = is_in_north_america(lat, lon_IN)
+    if incAIModels:
+        if is_na:
+            if merge_result.aigfs is not None:
+                GFS_Merged = _prefer_ai_with_fallback(merge_result.aigfs, GFS_Merged)
+                if "gfs" not in merge_result.metadata.source_list:
+                    merge_result.metadata.source_list.append("gfs")
+            elif merge_result.aifs is not None:
+                # AIGFS excluded/unavailable in NA: fall back to AIFS
+                ECMWF_Merged = _prefer_ai_with_fallback(merge_result.aifs, ECMWF_Merged)
+                if "ecmwf_ifs" not in merge_result.metadata.source_list:
+                    merge_result.metadata.source_list.append("ecmwf_ifs")
+            if merge_result.aigefs is not None:
+                GEFS_Merged = _prefer_ai_with_fallback(merge_result.aigefs, GEFS_Merged)
+                if "gefs" not in merge_result.metadata.source_list:
+                    merge_result.metadata.source_list.append("gefs")
+        else:
+            if merge_result.aifs is not None:
+                ECMWF_Merged = _prefer_ai_with_fallback(merge_result.aifs, ECMWF_Merged)
+                if "ecmwf_ifs" not in merge_result.metadata.source_list:
+                    merge_result.metadata.source_list.append("ecmwf_ifs")
+            elif merge_result.aigfs is not None:
+                # AIFS excluded/unavailable outside NA: fall back to AIGFS
+                GFS_Merged = _prefer_ai_with_fallback(merge_result.aigfs, GFS_Merged)
+                if "gfs" not in merge_result.metadata.source_list:
+                    merge_result.metadata.source_list.append("gfs")
+            if merge_result.aigefs is not None:
+                GEFS_Merged = _prefer_ai_with_fallback(merge_result.aigefs, GEFS_Merged)
+                if "gefs" not in merge_result.metadata.source_list:
+                    merge_result.metadata.source_list.append("gefs")
     sourceList = merge_result.metadata.source_list
     sourceTimes = merge_result.metadata.source_times
     sourceIDX = merge_result.metadata.source_idx
@@ -640,14 +768,15 @@ async def PW_Forecast(
             else None,
             nbm_data=dataOut_nbm if "nbm" in sourceList else None,
             dwd_mosmix_data=DWD_MOSMIX_Merged if "dwd_mosmix" in sourceList else None,
-            gefs_data=dataOut_gefs if "gefs" in sourceList else None,
-            gfs_data=dataOut_gfs if "gfs" in sourceList else None,
-            ecmwf_data=dataOut_ecmwf if "ecmwf_ifs" in sourceList else None,
+            gefs_data=GEFS_Merged if "gefs" in sourceList else None,
+            gfs_data=GFS_Merged if "gfs" in sourceList else None,
+            ecmwf_data=ECMWF_Merged if "ecmwf_ifs" in sourceList else None,
             era5_data=ERA5_MERGED if isinstance(ERA5_MERGED, np.ndarray) else None,
             prep_intensity_unit=prepIntensityUnit,
             version=version,
             lat=lat,
             lon=lon_IN,
+            prioritize_ai_models=bool(incAIModels),
         )
     minuteRainIntensity = InterPminute[:, DATA_MINUTELY["rain_intensity"]]
     minuteSnowIntensity = InterPminute[:, DATA_MINUTELY["snow_intensity"]]
@@ -680,6 +809,7 @@ async def PW_Forecast(
         timezone_localizer=pytzTZ,
         hour_array_grib=hour_array_grib,
         time_machine=timeMachine,
+        daily_days=daily_days,
         existing_day_array_grib=day_array_grib,
     )
 
@@ -750,11 +880,13 @@ async def PW_Forecast(
         num_hours=numHours,
         lat=lat,
         lon=lon,
+        prioritize_ai_models=bool(incAIModels),
     )
 
     InterThour_inputs = inputs["InterThour_inputs"]
     prcipIntensity_inputs = inputs["prcipIntensity_inputs"]
     prcipProbability_inputs = inputs["prcipProbability_inputs"]
+    prcipType_inputs = inputs["prcipType_inputs"]
     temperature_inputs = inputs["temperature_inputs"]
     dew_inputs = inputs["dew_inputs"]
     humidity_inputs = inputs["humidity_inputs"]
@@ -819,6 +951,7 @@ async def PW_Forecast(
             InterThour_inputs=InterThour_inputs,
             prcipIntensity_inputs=prcipIntensity_inputs,
             prcipProbability_inputs=prcipProbability_inputs,
+            prcipType_inputs=prcipType_inputs,
             temperature_inputs=temperature_inputs,
             dew_inputs=dew_inputs,
             humidity_inputs=humidity_inputs,
@@ -976,6 +1109,7 @@ async def PW_Forecast(
             logger=logger,
             loc_tag=loc_tag,
             include_currently=exCurrently != 1,
+            prioritize_ai_models=bool(incAIModels),
         )
     ### RETURN ###
     # 16. Construct and return the final JSON response
@@ -1018,7 +1152,7 @@ async def PW_Forecast(
             current_text=(
                 current_section.summary_key
                 or current_section.currently.get("summary", "")
-            ),
+            ),  # This takes the summary from the summary_key variable if available, which has formatted text.
             current_icon=current_section.currently.get("icon", ""),
             icon=icon,
             max_p_chance=maxPchance,
@@ -1177,6 +1311,10 @@ async def PW_Forecast(
     # Timing Check
     timer.log("Flags Time")
 
+    # Apply index filtering as the final response-shaping step
+    for block_name, indices in parsed_indices.items():
+        _apply_block_indices(returnOBJ, block_name, indices)
+
     # Replace all MISSING_DATA with -999
     returnOBJ = replace_nan(returnOBJ, -999)
 
@@ -1186,20 +1324,17 @@ async def PW_Forecast(
         datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
     ).total_seconds() * 1000
 
-    return ORJSONResponse(
-        content=returnOBJ,
-        headers={
-            "X-Node-ID": platform.node(),
-            "X-Handler-Time": f"{handler_ms:.1f}",
-            "X-Response-Time": str(
-                (
-                    datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
-                ).total_seconds()
-                * 1000
-            ),
-            "Cache-Control": "max-age=900, must-revalidate",
-        },
+    response.headers["X-Node-ID"] = platform.node()
+    response.headers["X-Handler-Time"] = f"{handler_ms:.1f}"
+    response.headers["X-Response-Time"] = str(
+        (
+            datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
+        ).total_seconds()
+        * 1000
     )
+    response.headers["Cache-Control"] = "max-age=900, must-revalidate"
+
+    return returnOBJ
 
 
 if __name__ == "__main__":

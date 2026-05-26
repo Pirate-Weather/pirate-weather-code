@@ -3,13 +3,13 @@
 
 # %% Import modules
 import fcntl
+import logging
 import os
 import pickle
 import shutil
 import subprocess
 import sys
 import time
-import traceback
 import warnings
 from itertools import chain
 
@@ -30,7 +30,9 @@ from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    archive_tmp_zarr_and_upload,
     configure_zarr_limits,
+    download_extract_historic_archive,
     getGribList,
     interp_time_take_blend,
     mask_invalid_data,
@@ -39,9 +41,14 @@ from API.ingest_utils import (
     run_command,
     tune_nofile_limit,
     validate_grib_stats,
+    validate_stacked_time_alignment,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
+
+# Logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 def _timing_log(message: str) -> None:
@@ -202,7 +209,7 @@ if save_type == "S3":
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to NBM, ending")
+            logger.info("No Update to NBM, ending")
             sys.exit()
 
 else:
@@ -216,7 +223,7 @@ else:
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to NBM, ending")
+            logger.info("No Update to NBM, ending")
             sys.exit()
 
 # base_time = pd.Timestamp("2024-03-05 16:00")
@@ -325,7 +332,7 @@ _timing_log(
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(nbm_range):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range))
         + " files, but got "
@@ -366,7 +373,7 @@ stage_start = time.perf_counter()
 substage_start = time.perf_counter()
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
 _timing_log(
     f"NBM_FORECAST stage=main_merge_grib elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -386,7 +393,7 @@ cmd2 = (
 )
 spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
-    print(spOUT2.stderr)
+    logger.error(spOUT2.stderr)
     sys.exit()
 _timing_log(
     f"NBM_FORECAST stage=main_reorder_grib elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -408,7 +415,7 @@ cmd4 = (
 substage_start = time.perf_counter()
 spOUT4 = run_command(cmd4)
 if spOUT4.returncode != 0:
-    print(spOUT4.stderr)
+    logger.error(spOUT4.stderr)
     sys.exit()
 os.remove(forecast_process_path + "_wgrib2_merged_order.grib")
 _timing_log(
@@ -464,7 +471,7 @@ _timing_log(
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(nbm_range1):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range1))
         + " files, but got "
@@ -503,7 +510,7 @@ _timing_log(
 
 # Check for download length
 if len(FH_forecastsub2.file_exists) != len(nbm_range2):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range2))
         + " files, but got "
@@ -545,7 +552,7 @@ stage_start = time.perf_counter()
 substage_start = time.perf_counter()
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
 _timing_log(
     f"NBM_FORECAST stage=pprob_merge_grib elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -566,7 +573,7 @@ cmd2 = (
 )
 spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
-    print(spOUT2.stderr)
+    logger.error(spOUT2.stderr)
     sys.exit()
 _timing_log(
     f"NBM_FORECAST stage=pprob_reorder_grib elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -588,7 +595,7 @@ cmd4 = (
 substage_start = time.perf_counter()
 spOUT4 = run_command(cmd4)
 if spOUT4.returncode != 0:
-    print(spOUT4.stderr)
+    logger.error(spOUT4.stderr)
     sys.exit()
 os.remove(forecast_process_path + "_prob_wgrib2_merged_order.grib")
 _timing_log(
@@ -623,7 +630,7 @@ _timing_log(
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(nbm_range1):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range1))
         + " files, but got "
@@ -661,7 +668,7 @@ _timing_log(
 
 # Check for download length
 if len(FH_forecastsub2.file_exists) != len(nbm_range2):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(nbm_range2))
         + " files, but got "
@@ -703,7 +710,7 @@ stage_start = time.perf_counter()
 substage_start = time.perf_counter()
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
 _timing_log(
     f"NBM_FORECAST stage=paccum_merge_grib elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -723,7 +730,7 @@ cmd2 = (
 )
 spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
-    print(spOUT2.stderr)
+    logger.error(spOUT2.stderr)
     sys.exit()
 _timing_log(
     f"NBM_FORECAST stage=paccum_reorder_grib elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -745,7 +752,7 @@ cmd4 = (
 substage_start = time.perf_counter()
 spOUT4 = run_command(cmd4)
 if spOUT4.returncode != 0:
-    print(spOUT4.stderr)
+    logger.error(spOUT4.stderr)
     sys.exit()
 os.remove(forecast_process_path + "_accum_wgrib2_merged_order.grib")
 _timing_log(
@@ -850,9 +857,9 @@ with dask.config.set(**{"array.slicing.split_large_chunks": True}):
         # Check length for errors
 
         if len(daskArray) != len(nbm_range):
-            print(len(daskArray))
-            print(len(nbm_range))
-            print(dask_var)
+            logger.error("daskArray length: %d", len(daskArray))
+            logger.error("nbm_range length: %d", len(nbm_range))
+            logger.error("dask_var: %s", dask_var)
             assert len(daskArray) == len(nbm_range), (
                 "Incorrect number of timesteps! Exiting"
             )
@@ -908,7 +915,7 @@ _timing_log(
 )
 
 T1 = time.time()
-print(T0 - T1)
+logger.info(T0 - T1)
 
 ################################################################################################
 # %% Historic data
@@ -926,37 +933,15 @@ for i in range(his_period, -1, -1):
     _timing_log(f"NBM_HIST {hist_target} start")
 
     if save_type == "S3":
-        s3_path = historic_path + "/NBM_Hist" + hist_target + ".zarr"
-        # Check for a done file in S3
-        if s3.exists(s3_path.replace(".zarr", ".done")):
+        s3_path = historic_path + "/NBM_Hist_v3" + hist_target + ".zarr.tar.gz"
+        if s3.exists(s3_path.replace(".tar.gz", ".done")):
             print("File already exists in S3, skipping download for: " + s3_path)
             _timing_log(f"NBM_HIST {hist_target} skip (already exists)")
-
-            # If the file exists, check that it works
-            try:
-                hisCheckStore = zarr.storage.FsspecStore.from_url(
-                    s3_path,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-                zarr.open(hisCheckStore)[zarr_vars[-1]][-1, -1, -1]
-                continue  # If it exists, skip to the next iteration
-            except Exception:
-                print("### Historic Data Failure!")
-                print(traceback.print_exc())
-
-                # Delete the file if it exists
-                if s3.exists(s3_path):
-                    s3.rm(s3_path)
-
+            continue
     else:
-        # Local Path Setup
-        local_path = historic_path + "/NBM_Hist" + hist_target + ".zarr"
-        # Check for a loca done file
+        local_path = historic_path + "/NBM_Hist_v3" + hist_target + ".zarr"
         if os.path.exists(local_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + local_path)
+            print("File already exists locally, skipping download for: " + local_path)
             _timing_log(f"NBM_HIST {hist_target} skip (already exists)")
             continue
 
@@ -975,7 +960,7 @@ for i in range(his_period, -1, -1):
     # Only want forecast at hour 1- SLightly less accurate than initializing at hour 0 but much avoids precipitation accumulation issues
     fxx = range(1, 2)
 
-    print(DATES)
+    logger.info(DATES)
 
     # Create FastHerbie Object.
     FH_histsub = FastHerbie(
@@ -1035,7 +1020,7 @@ for i in range(his_period, -1, -1):
     )
     spOUT1 = run_command(cmd1)
     if spOUT1.returncode != 0:
-        print(spOUT1.stderr)
+        logger.error(spOUT1.stderr)
         sys.exit()
 
     # Convert to NetCDF
@@ -1050,7 +1035,7 @@ for i in range(his_period, -1, -1):
     )
     spOUT3 = run_command(cmd3)
     if spOUT3.returncode != 0:
-        print(spOUT3.stderr)
+        logger.error(spOUT3.stderr)
         sys.exit()
     _timing_log(
         f"NBM_HIST {hist_target} stage=wgrib_to_netcdf elapsed={time.perf_counter() - stage_start:.2f}s"
@@ -1077,29 +1062,16 @@ for i in range(his_period, -1, -1):
         f"NBM_HIST {hist_target} stage=open_transform elapsed={time.perf_counter() - stage_start:.2f}s"
     )
 
-    # Save merged and processed xarray dataset to disk using zarr
-    # Save as Zarr to s3 for Time Machine
-    if save_type == "S3":
-        zarrStore = zarr.storage.FsspecStore.from_url(
-            s3_path,
-            storage_options={
-                "key": aws_access_key_id,
-                "secret": aws_secret_access_key,
-            },
-        )
-    else:
-        # Create local Zarr store
-        zarrStore = zarr.storage.LocalStore(local_path)
-
     # Limit worker fan-out for local zarr writes to avoid "too many open files".
     stage_start = time.perf_counter()
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         xarray_his_wgrib.chunk(
             chunks={"time": 1, "x": process_chunk, "y": process_chunk}
         ).to_zarr(
-            store=zarrStore,
+            hist_process_path + "_NBM_Hist_TMP.zarr",
             mode="w",
             consolidated=False,
+            compute=True,
             chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
         )
     _timing_log(
@@ -1120,9 +1092,14 @@ for i in range(his_period, -1, -1):
 
     # Save a done file to s3 to indicate that the historic data has been processed
     if save_type == "S3":
-        done_file = s3_path.replace(".zarr", ".done")
-        s3.touch(done_file)
+        archive_tmp_zarr_and_upload(
+            tmp_zarr_path=hist_process_path + "_NBM_Hist_TMP.zarr",
+            s3_path=s3_path,
+            archive_member_name="NBM_Hist.zarr",
+            s3=s3,
+        )
     else:
+        os.rename(hist_process_path + "_NBM_Hist_TMP.zarr", local_path)
         done_file = local_path.replace(".zarr", ".done")
         with open(done_file, "w") as f:
             f.write("Done")
@@ -1145,15 +1122,32 @@ if hist_processed_count:
 # %% Merge the historic and forecast datasets and then squash using dask
 #####################################################################################################
 
-print("Merge and interpolate arrays.")
+logger.info("Merge and interpolate arrays.")
 # Get the s3 paths to the historic data
-ncLocalWorking_paths = [
-    historic_path
-    + "/NBM_Hist"
-    + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-    + ".zarr"
-    for i in range(his_period, -1, -1)
-]
+if save_type == "S3":
+    local_temp_dir = forecast_process_path + "_s3_temp_downloads"
+    os.makedirs(local_temp_dir, exist_ok=True)
+    ncLocalWorking_paths = []
+    for i in range(his_period, -1, -1):
+        timestamp = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        final_zarr_name = f"NBM_Hist_v3{timestamp}.zarr"
+        extracted_path = download_extract_historic_archive(
+            s3=s3,
+            historic_path=historic_path,
+            final_zarr_name=final_zarr_name,
+            extracted_store_name="NBM_Hist.zarr",
+            local_temp_dir=local_temp_dir,
+        )
+        if extracted_path is not None:
+            ncLocalWorking_paths.append(extracted_path)
+else:
+    ncLocalWorking_paths = [
+        historic_path
+        + "/NBM_Hist_v3"
+        + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        + ".zarr"
+        for i in range(his_period, -1, -1)
+    ]
 
 # Dask Setup
 daskInterpArrays = []
@@ -1162,22 +1156,9 @@ daskVarArrayList = []
 
 for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
     for local_ncpath in ncLocalWorking_paths:
-        if save_type == "S3":
-            daskVarArrays.append(
-                da.from_zarr(
-                    local_ncpath,
-                    component=dask_var,
-                    inline_array=True,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-            )
-        else:
-            daskVarArrays.append(
-                da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
-            )
+        daskVarArrays.append(
+            da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
+        )
 
     daskVarArraysStack = da.stack(
         daskVarArrays, allow_unknown_chunksizes=True
@@ -1199,6 +1180,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
 
         # Get times as numpy
         npCatTimes = daskCatTimes.compute()
+        validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
 
         daskArrayOut = da.from_array(
             np.tile(
@@ -1220,7 +1202,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
 
     daskVarArrays = []
 
-    print(dask_var)
+    logger.info(dask_var)
 
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
@@ -1240,7 +1222,7 @@ _timing_log(
     f"NBM_FORECAST stage=stack_to_zarr elapsed={time.perf_counter() - stage_start:.2f}s"
 )
 
-print("Stacked 4D array saved to disk.")
+logger.info("Stacked 4D array saved to disk.")
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
@@ -1296,7 +1278,7 @@ with ProgressBar():
         f"NBM_FORECAST stage=interpolate_and_write elapsed={time.perf_counter() - stage_start:.2f}s"
     )
 
-print("Interpolate complete")
+logger.info("Interpolate complete")
 
 _close_store(zarr_store)
 
@@ -1349,14 +1331,14 @@ for z in [0, 2, 6, 7, 8, 13, 14, 15, 16, 17]:
         zarr_array, overwrite=True, compute=True
     )
 
-    print(zarr_vars[z])
+    logger.info(zarr_vars[z])
 
 _close_store(zarr_store_maps)
 _timing_log(
     f"NBM_FORECAST stage=maps_write elapsed={time.perf_counter() - stage_start:.2f}s"
 )
 
-print("Map complete")
+logger.info("Map complete")
 
 # %% Upload to S3
 stage_start = time.perf_counter()
@@ -1412,4 +1394,4 @@ shutil.rmtree(forecast_process_dir)
 
 # Test Read
 T1 = time.time()
-print(T1 - T0)
+logger.info(T1 - T0)
