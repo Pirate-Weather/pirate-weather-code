@@ -69,11 +69,16 @@ except ImportError:  # pragma: no cover - compatibility with the official MCP SD
     from mcp.server.fastmcp import FastMCP
 
 
+# Internal Pirate Weather API target used by MCP tools.
 DEFAULT_BASE_URL = "http://127.0.0.1:8083"
 ROUTE_API_KEY = "mcp-proxy"
 DEFAULT_TEST_LOCATION = (45.4215, -75.6972)
+
+# MCP server listener defaults used by main().
 DEFAULT_MCP_HOST = "127.0.0.1"
 DEFAULT_MCP_PORT = 8000
+
+# Public streamable HTTP endpoint defaults used by FastMCP.
 DEFAULT_MCP_PATH = "/mcp"
 DEFAULT_MCP_PUBLIC_URL = ""
 
@@ -227,7 +232,7 @@ def _split_public_url(public_url: str | None) -> SplitResult | None:
         return None
 
     parsed = urlsplit(public_url.rstrip("/"))
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         msg = "PW_MCP_PUBLIC_URL must be an absolute http(s) URL, such as https://mcp.pirateweather.net/mcp"
         raise ValueError(msg)
     return parsed
