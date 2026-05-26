@@ -90,3 +90,131 @@ def test_public_url_requires_absolute_http_url(mcp_module):
         mcp_module.PublicUrlMiddleware(
             lambda scope, receive, send: None, "mcp.pirateweather.net/mcp"
         )
+
+
+def test_historical_weather_omits_false_tmextra(mcp_module, monkeypatch):
+    captured = {}
+
+    def fake_request_forecast(**kwargs):
+        captured.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(mcp_module, "_request_forecast", fake_request_forecast)
+
+    assert mcp_module.get_historical_weather(
+        latitude=45.4215,
+        longitude=-75.6972,
+        time="1730869200",
+        tmextra=False,
+    ) == {"ok": True}
+    assert captured["tmextra"] is None
+
+    mcp_module.get_historical_weather(
+        latitude=45.4215,
+        longitude=-75.6972,
+        time="1730869200",
+        tmextra=True,
+    )
+    assert captured["tmextra"] == 1
+
+
+def test_with_iso_times_adds_time_iso_after_numeric_time(mcp_module):
+    result = mcp_module._with_iso_times(
+        {
+            "time": 1730869200,
+            "summary": "Clear",
+            "nested": [
+                {"time": 1730872800, "summary": "Still clear"},
+                {"time": "not-a-unix-time"},
+            ],
+        }
+    )
+
+    assert list(result) == ["time", "timeISO", "summary", "nested"]
+    assert result["timeISO"] == "2024-11-06T05:00:00+00:00"
+    assert list(result["nested"][0]) == ["time", "timeISO", "summary"]
+    assert result["nested"][0]["timeISO"] == "2024-11-06T06:00:00+00:00"
+    assert "timeISO" not in result["nested"][1]
+
+
+def test_get_forecast_returns_near_term_forecast_alerts_and_summary_text(
+    mcp_module, monkeypatch
+):
+    captured = {}
+
+    def fake_request_forecast(**kwargs):
+        captured.update(kwargs)
+        return {
+            "latitude": 45.4215,
+            "longitude": -75.6972,
+            "timezone": "America/Toronto",
+            "offset": -4,
+            "currently": {
+                "time": 1730869200,
+                "summary": "Clear",
+                "icon": "clear-day",
+                "temperature": 12,
+            },
+            "minutely": {"summary": "No precipitation", "icon": "clear-day"},
+            "hourly": {
+                "summary": "Clear for the hour",
+                "icon": "clear-day",
+                "data": [
+                    {"time": 1730869200, "summary": "Clear this hour"},
+                    {"time": 1730872800, "summary": "Clear next hour"},
+                ],
+            },
+            "daily": {
+                "summary": "Clear throughout the day",
+                "icon": "clear-day",
+                "data": [
+                    {"time": 1730851200, "summary": "Clear today"},
+                    {"time": 1730937600, "summary": "Clear tomorrow"},
+                ],
+            },
+            "alerts": [{"title": "Wind Advisory"}],
+            "flags": {"units": "si"},
+        }
+
+    monkeypatch.setattr(mcp_module, "_request_forecast", fake_request_forecast)
+
+    result = mcp_module.get_forecast(
+        latitude=45.4215,
+        longitude=-75.6972,
+        units="si",
+        lang="en",
+    )
+
+    assert captured["version"] == 2
+    assert captured["blocks"] == "currently,minutely,hourly,daily,alerts,flags"
+    assert captured["hourly_indices"] == "0,1"
+    assert captured["daily_indices"] == "0,1"
+    assert result["currently"]["summary"] == "Clear"
+    assert result["currently"]["timeISO"] == "2024-11-06T05:00:00+00:00"
+    assert result["this_hour"] == {
+        "time": 1730869200,
+        "timeISO": "2024-11-06T05:00:00+00:00",
+        "summary": "Clear this hour",
+    }
+    assert result["next_hour"] == {
+        "time": 1730872800,
+        "timeISO": "2024-11-06T06:00:00+00:00",
+        "summary": "Clear next hour",
+    }
+    assert result["today"] == {
+        "time": 1730851200,
+        "timeISO": "2024-11-06T00:00:00+00:00",
+        "summary": "Clear today",
+    }
+    assert result["tomorrow"] == {
+        "time": 1730937600,
+        "timeISO": "2024-11-07T00:00:00+00:00",
+        "summary": "Clear tomorrow",
+    }
+    assert result["alerts"] == [{"title": "Wind Advisory"}]
+    assert result["summary_text"] == {
+        "currently": {"summary": "Clear", "icon": "clear-day"},
+        "minutely": {"summary": "No precipitation", "icon": "clear-day"},
+        "hourly": {"summary": "Clear for the hour", "icon": "clear-day"},
+        "daily": {"summary": "Clear throughout the day", "icon": "clear-day"},
+    }
