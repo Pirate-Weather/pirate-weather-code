@@ -20,12 +20,12 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from MCP import __version__
-from MCP.resources import EXAMPLE_USAGE, FORECAST_BLOCK_METADATA
-
 try:
     from fastmcp import FastMCP
 except ImportError:  # pragma: no cover - compatibility with the official MCP SDK
+    from mcp.server.fastmcp import FastMCP
+
+from MCP.resources import EXAMPLE_USAGE, FORECAST_BLOCK_METADATA
     from mcp.server.fastmcp import FastMCP
 
 
