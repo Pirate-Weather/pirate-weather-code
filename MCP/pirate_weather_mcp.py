@@ -127,11 +127,14 @@ def _default_port(scheme: str) -> int:
     return 443 if scheme == "https" else 80
 
 
-def _replace_host_header(headers: list[tuple[bytes, bytes]], host: str) -> list[tuple[bytes, bytes]]:
+def _replace_host_header(
+    headers: list[tuple[bytes, bytes]], host: str
+) -> list[tuple[bytes, bytes]]:
     host_bytes = host.encode("latin-1")
     next_headers = [(key, value) for key, value in headers if key.lower() != b"host"]
     next_headers.append((b"host", host_bytes))
     return next_headers
+
 
 mcp = FastMCP("Pirate Weather", version=__version__)
 app = mcp.http_app(

@@ -87,4 +87,6 @@ def test_public_url_middleware_ignores_unconfigured_origin(mcp_module):
 
 def test_public_url_requires_absolute_http_url(mcp_module):
     with pytest.raises(ValueError, match="absolute http"):
-        mcp_module.PublicUrlMiddleware(lambda scope, receive, send: None, "mcp.pirateweather.net/mcp")
+        mcp_module.PublicUrlMiddleware(
+            lambda scope, receive, send: None, "mcp.pirateweather.net/mcp"
+        )
