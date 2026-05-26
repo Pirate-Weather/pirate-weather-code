@@ -18,8 +18,7 @@ from typing import Union
 import aiobotocore.session as _aio_session
 import numpy as np
 from astral import LocationInfo, moon
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import ORJSONResponse
+from fastapi import FastAPI, HTTPException, Request, Response
 from pirateweather_translations.dynamic_loader import load_all_translations
 from timezonefinder import TimezoneFinder
 
@@ -335,10 +334,11 @@ def _prefer_ai_with_fallback(ai_data, base_data):
     return out
 
 
-@app.get("/timemachine/{apikey}/{location}", response_class=ORJSONResponse)
-@app.get("/forecast/{apikey}/{location}", response_class=ORJSONResponse)
+@app.get("/timemachine/{apikey}/{location}")
+@app.get("/forecast/{apikey}/{location}")
 async def PW_Forecast(
     request: Request,
+    response: Response,
     location: str,
     units: Union[str, None] = None,
     extend: Union[str, None] = None,
@@ -1324,20 +1324,17 @@ async def PW_Forecast(
         datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
     ).total_seconds() * 1000
 
-    return ORJSONResponse(
-        content=returnOBJ,
-        headers={
-            "X-Node-ID": platform.node(),
-            "X-Handler-Time": f"{handler_ms:.1f}",
-            "X-Response-Time": str(
-                (
-                    datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
-                ).total_seconds()
-                * 1000
-            ),
-            "Cache-Control": "max-age=900, must-revalidate",
-        },
+    response.headers["X-Node-ID"] = platform.node()
+    response.headers["X-Handler-Time"] = f"{handler_ms:.1f}"
+    response.headers["X-Response-Time"] = str(
+        (
+            datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
+        ).total_seconds()
+        * 1000
     )
+    response.headers["Cache-Control"] = "max-age=900, must-revalidate"
+
+    return returnOBJ
 
 
 if __name__ == "__main__":
