@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FastMCP proxy for a local Pirate Weather responseLocal API server.
+"""FastMCP proxy for a local Pirate Weather API server.
 
 Run the main API separately, for example:
 
@@ -7,7 +7,45 @@ Run the main API separately, for example:
 
 Then start this MCP server:
 
-    PW_MCP_BASE_URL=http://127.0.0.1:8083 python -m MCP.pirate_weather_mcp
+    PW_MCP_BASE_URL=http://127.0.0.1:8083 \
+    PW_MCP_PUBLIC_URL=https://mcp.pirateweather.net/mcp \
+    python -m MCP.pirate_weather_mcp --port 8084
+
+Environment variables:
+
+    PW_MCP_BASE_URL
+        Internal base URL for the Pirate Weather API that this MCP proxy calls
+        when a tool needs forecast data. In production this should usually stay
+        on the private loopback interface, for example http://127.0.0.1:8083.
+        This is not the public MCP URL clients connect to.
+
+    PW_MCP_HOST
+        Interface the MCP HTTP server binds to when run through this module's
+        main() entrypoint. The default is 127.0.0.1 so a reverse proxy can
+        expose it safely. Use 0.0.0.0 only when the container or host network
+        boundary is already controlling access.
+
+    PW_MCP_PORT
+        Port the MCP HTTP server listens on when run through this module's
+        main() entrypoint. If nginx/Caddy forwards public MCP traffic to
+        127.0.0.1:8084, set this to 8084 or pass --port 8084.
+
+    PW_MCP_PATH
+        HTTP path mounted by FastMCP for streamable HTTP traffic. The default
+        is /mcp. The reverse proxy should forward the same path unless it is
+        intentionally rewriting paths.
+
+    PW_MCP_PUBLIC_URL
+        Absolute external URL for the MCP endpoint, for example
+        https://mcp.pirateweather.net/mcp. Set this when the MCP server is
+        behind a reverse proxy so generated redirects/protocol URLs do not
+        fall back to the internal upstream such as http://127.0.0.1:8084/mcp.
+
+    PW_MCP_FORWARDED_ALLOW_IPS
+        Comma-separated proxy IPs whose X-Forwarded-* headers Uvicorn should
+        trust when run through this module's main() entrypoint. The default is
+        127.0.0.1, matching a local reverse proxy. Use * only if the server is
+        protected from direct untrusted traffic.
 """
 
 from __future__ import annotations
@@ -17,7 +55,7 @@ import json
 import os
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import SplitResult, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from MCP import __version__
@@ -29,17 +67,83 @@ except ImportError:  # pragma: no cover - compatibility with the official MCP SD
     from mcp.server.fastmcp import FastMCP
 
 
+# Internal Pirate Weather API target used by MCP tools.
 DEFAULT_BASE_URL = "http://127.0.0.1:8083"
 ROUTE_API_KEY = "mcp-proxy"
 DEFAULT_TEST_LOCATION = (45.4215, -75.6972)
+
+# MCP server listener defaults used by main().
 DEFAULT_MCP_HOST = "127.0.0.1"
 DEFAULT_MCP_PORT = 8000
+
+# Public streamable HTTP endpoint defaults used by FastMCP.
 DEFAULT_MCP_PATH = "/mcp"
+DEFAULT_MCP_PUBLIC_URL = ""
+
+
+class PublicUrlMiddleware:
+    """Force generated absolute URLs to use the public MCP origin when configured."""
+
+    def __init__(self, app: Any, public_url: str | None = None) -> None:
+        self.app = app
+        self.public_url = _split_public_url(public_url)
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope["type"] not in {"http", "websocket"}:
+            await self.app(scope, receive, send)
+            return
+
+        public_url = self.public_url
+        if public_url is None:
+            await self.app(scope, receive, send)
+            return
+
+        forwarded_scope = dict(scope)
+        forwarded_scope["scheme"] = public_url.scheme
+        forwarded_scope["server"] = (
+            public_url.hostname,
+            public_url.port or _default_port(public_url.scheme),
+        )
+        forwarded_scope["headers"] = _replace_host_header(
+            scope.get("headers", []),
+            public_url.netloc,
+        )
+
+        await self.app(forwarded_scope, receive, send)
+
+
+def _split_public_url(public_url: str | None) -> SplitResult | None:
+    if not public_url:
+        return None
+
+    parsed = urlsplit(public_url.rstrip("/"))
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        msg = "PW_MCP_PUBLIC_URL must be an absolute http(s) URL, such as https://mcp.pirateweather.net/mcp"
+        raise ValueError(msg)
+    return parsed
+
+
+def _default_port(scheme: str) -> int:
+    return 443 if scheme == "https" else 80
+
+
+def _replace_host_header(
+    headers: list[tuple[bytes, bytes]], host: str
+) -> list[tuple[bytes, bytes]]:
+    host_bytes = host.encode("latin-1")
+    next_headers = [(key, value) for key, value in headers if key.lower() != b"host"]
+    next_headers.append((b"host", host_bytes))
+    return next_headers
+
 
 mcp = FastMCP("Pirate Weather", version=__version__)
 app = mcp.http_app(
     path=os.environ.get("PW_MCP_PATH", DEFAULT_MCP_PATH),
     transport="streamable-http",
+)
+app = PublicUrlMiddleware(
+    app,
+    os.environ.get("PW_MCP_PUBLIC_URL", DEFAULT_MCP_PUBLIC_URL),
 )
 
 
@@ -389,11 +493,22 @@ def main() -> None:
         type=int,
         help="Port for the MCP HTTP server.",
     )
+    parser.add_argument(
+        "--forwarded-allow-ips",
+        default=os.environ.get("PW_MCP_FORWARDED_ALLOW_IPS", "127.0.0.1"),
+        help="Comma-separated proxy IPs whose forwarded headers Uvicorn should trust.",
+    )
     args = parser.parse_args()
 
     import uvicorn
 
-    uvicorn.run("MCP.pirate_weather_mcp:app", host=args.host, port=args.port)
+    uvicorn.run(
+        "MCP.pirate_weather_mcp:app",
+        host=args.host,
+        port=args.port,
+        proxy_headers=True,
+        forwarded_allow_ips=args.forwarded_allow_ips,
+    )
 
 
 if __name__ == "__main__":
