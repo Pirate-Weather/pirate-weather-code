@@ -22,6 +22,7 @@ from API.constants.unit_const import country_units
 from API.hourly.builder import initialize_time_grids
 from API.io.zarr_reader import WeatherParallel
 from API.utils.geo import get_offset
+from API.utils.offline_geocode import geocode_city_country
 from API.utils.timing import TimingTracker
 
 RELATIVE_TIME_UNITS = {"s": 1, "h": 3600, "d": 86400}
@@ -184,12 +185,17 @@ def _parse_location(location: str):
     Raises:
         HTTPException: If location format is invalid or coordinates are out of bounds.
     """
-    location_req = location.split(",")
+    location_req = [part.strip() for part in location.split(",")]
     try:
         lat = float(location_req[0])
         lon_in = float(location_req[1])
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Location Specification")
+        if len(location_req) not in {2, 3}:
+            raise HTTPException(
+                status_code=400, detail="Invalid Location Specification"
+            )
+        lat, lon_in = geocode_city_country(location_req[0], location_req[1])
+        location_req = [str(lat), str(lon_in), *location_req[2:]]
 
     lon = lon_in % COORDINATE_CONST["longitude_max"]  # 0-360
     az_lon = (
