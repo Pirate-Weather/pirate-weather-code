@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FastMCP proxy for a local Pirate Weather responseLocal API server.
+"""FastMCP proxy for a local Pirate Weather API server.
 
 Run the main API separately, for example:
 
