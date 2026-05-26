@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FastMCP proxy for a local Pirate Weather responseLocal API server.
+"""FastMCP proxy for a local Pirate Weather API server.
 
 Run the main API separately, for example:
 
@@ -7,7 +7,45 @@ Run the main API separately, for example:
 
 Then start this MCP server:
 
-    PW_MCP_BASE_URL=http://127.0.0.1:8083 python -m MCP.pirate_weather_mcp
+    PW_MCP_BASE_URL=http://127.0.0.1:8083 \
+    PW_MCP_PUBLIC_URL=https://mcp.pirateweather.net/mcp \
+    python -m MCP.pirate_weather_mcp --port 8084
+
+Environment variables:
+
+    PW_MCP_BASE_URL
+        Internal base URL for the Pirate Weather API that this MCP proxy calls
+        when a tool needs forecast data. In production this should usually stay
+        on the private loopback interface, for example http://127.0.0.1:8083.
+        This is not the public MCP URL clients connect to.
+
+    PW_MCP_HOST
+        Interface the MCP HTTP server binds to when run through this module's
+        main() entrypoint. The default is 127.0.0.1 so a reverse proxy can
+        expose it safely. Use 0.0.0.0 only when the container or host network
+        boundary is already controlling access.
+
+    PW_MCP_PORT
+        Port the MCP HTTP server listens on when run through this module's
+        main() entrypoint. If nginx/Caddy forwards public MCP traffic to
+        127.0.0.1:8084, set this to 8084 or pass --port 8084.
+
+    PW_MCP_PATH
+        HTTP path mounted by FastMCP for streamable HTTP traffic. The default
+        is /mcp. The reverse proxy should forward the same path unless it is
+        intentionally rewriting paths.
+
+    PW_MCP_PUBLIC_URL
+        Absolute external URL for the MCP endpoint, for example
+        https://mcp.pirateweather.net/mcp. Set this when the MCP server is
+        behind a reverse proxy so generated redirects/protocol URLs do not
+        fall back to the internal upstream such as http://127.0.0.1:8084/mcp.
+
+    PW_MCP_FORWARDED_ALLOW_IPS
+        Comma-separated proxy IPs whose X-Forwarded-* headers Uvicorn should
+        trust when run through this module's main() entrypoint. The default is
+        127.0.0.1, matching a local reverse proxy. Use * only if the server is
+        protected from direct untrusted traffic.
 """
 
 from __future__ import annotations
@@ -15,10 +53,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from typing import Any
+from typing import Annotated, Any, Literal
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import SplitResult, urlencode, urlsplit
 from urllib.request import Request, urlopen
+
+from pydantic import Field
 
 from MCP import __version__
 from MCP.resources import EXAMPLE_USAGE, FORECAST_BLOCK_METADATA
@@ -35,11 +75,185 @@ DEFAULT_TEST_LOCATION = (45.4215, -75.6972)
 DEFAULT_MCP_HOST = "127.0.0.1"
 DEFAULT_MCP_PORT = 8000
 DEFAULT_MCP_PATH = "/mcp"
+DEFAULT_MCP_PUBLIC_URL = ""
+
+UnitSystem = Literal["auto", "us", "si", "ca", "uk", "uk2"]
+LanguageCode = Literal[
+    "ar",
+    "az",
+    "be",
+    "bg",
+    "bn",
+    "bs",
+    "ca",
+    "cs",
+    "cy",
+    "da",
+    "de",
+    "el",
+    "en",
+    "eo",
+    "es",
+    "et",
+    "fa",
+    "fi",
+    "fr",
+    "ga",
+    "gd",
+    "he",
+    "hi",
+    "hr",
+    "hu",
+    "id",
+    "is",
+    "it",
+    "ja",
+    "ka",
+    "kn",
+    "ko",
+    "kw",
+    "lv",
+    "ml",
+    "mr",
+    "nl",
+    "no",
+    "pa",
+    "pl",
+    "pt",
+    "ro",
+    "ru",
+    "sk",
+    "sl",
+    "sr",
+    "sv",
+    "ta",
+    "te",
+    "tet",
+    "tr",
+    "uk",
+    "ur",
+    "vi",
+    "x-pig-latin",
+    "zh",
+    "zh-tw",
+]
+
+Latitude = Annotated[
+    float, Field(ge=-90, le=90, description="Latitude in decimal degrees.")
+]
+Longitude = Annotated[
+    float,
+    Field(ge=-180, le=360, description="Longitude in decimal degrees."),
+]
+Units = Annotated[
+    UnitSystem | None,
+    Field(
+        description=(
+            "Measurement system. Allowed values: auto (choose by country), us "
+            "(F, mph, inches, miles), si (C, m/s, mm, km), ca (C, km/h, mm, km), "
+            "uk/uk2 (C, mph, mm, miles). Defaults to us."
+        ),
+    ),
+]
+Language = Annotated[
+    LanguageCode | None,
+    Field(
+        description=(
+            "Text summary language code. Allowed values: ar, az, be, bg, bn, bs, ca, cs, "
+            "cy, da, de, el, en, eo, es, et, fa, fi, fr, ga, gd, he, hi, hr, hu, "
+            "id, is, it, ja, ka, kn, ko, kw, lv, ml, mr, nl, no, pa, pl, pt, ro, "
+            "ru, sk, sl, sr, sv, ta, te, tet, tr, uk, ur, vi, x-pig-latin, zh, "
+            "zh-tw. Defaults to en."
+        ),
+    ),
+]
+HistoricalTime = Annotated[
+    str,
+    Field(
+        description=(
+            "Requested time for a time-machine request. Use one of: UNIX timestamp "
+            "seconds as a string, e.g. '1730869200'; ISO local time "
+            "'YYYY-MM-DDTHH:MM:SS', interpreted at the requested coordinates; ISO "
+            "with numeric UTC offset 'YYYY-MM-DDTHH:MM:SS+0000'; or a negative "
+            "relative offset from now using s, h, or d, e.g. '-6h' or '-2d'. "
+            "Future times more than one hour ahead are rejected."
+        ),
+    ),
+]
+TimeMachineExtra = Annotated[
+    bool,
+    Field(
+        description=(
+            "When true, include extra time-machine fields in the response where "
+            "available. This is a boolean flag, not a numeric value, and has no units."
+        ),
+    ),
+]
+
+
+class PublicUrlMiddleware:
+    """Force generated absolute URLs to use the public MCP origin when configured."""
+
+    def __init__(self, app: Any, public_url: str | None = None) -> None:
+        self.app = app
+        self.public_url = _split_public_url(public_url)
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope["type"] not in {"http", "websocket"}:
+            await self.app(scope, receive, send)
+            return
+
+        public_url = self.public_url
+        if public_url is None:
+            await self.app(scope, receive, send)
+            return
+
+        forwarded_scope = dict(scope)
+        forwarded_scope["scheme"] = public_url.scheme
+        forwarded_scope["server"] = (
+            public_url.hostname,
+            public_url.port or _default_port(public_url.scheme),
+        )
+        forwarded_scope["headers"] = _replace_host_header(
+            scope.get("headers", []),
+            public_url.netloc,
+        )
+
+        await self.app(forwarded_scope, receive, send)
+
+
+def _split_public_url(public_url: str | None) -> SplitResult | None:
+    if not public_url:
+        return None
+
+    parsed = urlsplit(public_url.rstrip("/"))
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        msg = "PW_MCP_PUBLIC_URL must be an absolute http(s) URL, such as https://mcp.pirateweather.net/mcp"
+        raise ValueError(msg)
+    return parsed
+
+
+def _default_port(scheme: str) -> int:
+    return 443 if scheme == "https" else 80
+
+
+def _replace_host_header(
+    headers: list[tuple[bytes, bytes]], host: str
+) -> list[tuple[bytes, bytes]]:
+    host_bytes = host.encode("latin-1")
+    next_headers = [(key, value) for key, value in headers if key.lower() != b"host"]
+    next_headers.append((b"host", host_bytes))
+    return next_headers
+
 
 mcp = FastMCP("Pirate Weather", version=__version__)
 app = mcp.http_app(
     path=os.environ.get("PW_MCP_PATH", DEFAULT_MCP_PATH),
     transport="streamable-http",
+)
+app = PublicUrlMiddleware(
+    app,
+    os.environ.get("PW_MCP_PUBLIC_URL", DEFAULT_MCP_PUBLIC_URL),
 )
 
 
@@ -137,11 +351,10 @@ def tool_usage_examples() -> str:
 
 @mcp.tool()
 def get_current_weather(
-    latitude: float,
-    longitude: float,
-    units: str | None = None,
-    lang: str | None = None,
-    version: int | None = 2,
+    latitude: Latitude,
+    longitude: Longitude,
+    units: Units = None,
+    lang: Language = None,
 ) -> dict[str, Any]:
     """Return the current weather block for a latitude and longitude."""
     return _forecast_block(
@@ -150,18 +363,26 @@ def get_current_weather(
         longitude=longitude,
         units=units,
         lang=lang,
-        version=version,
+        version=2,
     )
 
 
 @mcp.tool()
 def get_hourly_forecast(
-    latitude: float,
-    longitude: float,
-    hours: int = 24,
-    units: str | None = None,
-    lang: str | None = None,
-    version: int | None = 2,
+    latitude: Latitude,
+    longitude: Longitude,
+    hours: Annotated[
+        int,
+        Field(
+            ge=1,
+            description=(
+                "Number of hourly entries to return. Values above 48 request the "
+                "extended hourly forecast when the upstream API has it available."
+            ),
+        ),
+    ] = 24,
+    units: Units = None,
+    lang: Language = None,
 ) -> dict[str, Any]:
     """Return the hourly forecast block, optionally limited to the first N hours."""
     return _forecast_block(
@@ -170,7 +391,7 @@ def get_hourly_forecast(
         longitude=longitude,
         units=units,
         lang=lang,
-        version=version,
+        version=2,
         extend="hourly" if hours > 48 else None,
         hourly_indices=_csv_indices(hours),
     )
@@ -178,11 +399,10 @@ def get_hourly_forecast(
 
 @mcp.tool()
 def get_minutely_forecast(
-    latitude: float,
-    longitude: float,
-    units: str | None = None,
-    lang: str | None = None,
-    version: int | None = 2,
+    latitude: Latitude,
+    longitude: Longitude,
+    units: Units = None,
+    lang: Language = None,
 ) -> dict[str, Any]:
     """Return the minute-by-minute precipitation forecast block."""
     return _forecast_block(
@@ -191,17 +411,16 @@ def get_minutely_forecast(
         longitude=longitude,
         units=units,
         lang=lang,
-        version=version,
+        version=2,
     )
 
 
 @mcp.tool()
 def get_tomorrow_forecast(
-    latitude: float,
-    longitude: float,
-    units: str | None = None,
-    lang: str | None = None,
-    version: int | None = 2,
+    latitude: Latitude,
+    longitude: Longitude,
+    units: Units = None,
+    lang: Language = None,
 ) -> dict[str, Any]:
     """Return tomorrow's daily forecast entry."""
     return _forecast_block(
@@ -210,19 +429,21 @@ def get_tomorrow_forecast(
         longitude=longitude,
         units=units,
         lang=lang,
-        version=version,
+        version=2,
         daily_indices="1",
     )
 
 
 @mcp.tool()
 def get_daily_forecast(
-    latitude: float,
-    longitude: float,
-    days: int = 7,
-    units: str | None = None,
-    lang: str | None = None,
-    version: int | None = 2,
+    latitude: Latitude,
+    longitude: Longitude,
+    days: Annotated[
+        int,
+        Field(ge=1, le=7, description="Number of daily forecast entries to return."),
+    ] = 7,
+    units: Units = None,
+    lang: Language = None,
 ) -> dict[str, Any]:
     """Return the daily forecast block, optionally limited to the first N days."""
     return _forecast_block(
@@ -231,18 +452,17 @@ def get_daily_forecast(
         longitude=longitude,
         units=units,
         lang=lang,
-        version=version,
+        version=2,
         daily_indices=_csv_indices(days),
     )
 
 
 @mcp.tool()
 def get_alerts(
-    latitude: float,
-    longitude: float,
-    units: str | None = None,
-    lang: str | None = None,
-    version: int | None = 2,
+    latitude: Latitude,
+    longitude: Longitude,
+    units: Units = None,
+    lang: Language = None,
 ) -> dict[str, Any]:
     """Return weather alerts for a latitude and longitude."""
     return _forecast_block(
@@ -251,39 +471,37 @@ def get_alerts(
         longitude=longitude,
         units=units,
         lang=lang,
-        version=version,
+        version=2,
     )
 
 
 @mcp.tool()
 def get_historical_weather(
-    latitude: float,
-    longitude: float,
-    time: str,
-    units: str | None = None,
-    lang: str | None = None,
-    version: int | None = 2,
-    tmextra: int | None = None,
+    latitude: Latitude,
+    longitude: Longitude,
+    time: HistoricalTime,
+    units: Units = None,
+    lang: Language = None,
+    tmextra: TimeMachineExtra = False,
 ) -> dict[str, Any]:
-    """Return a time-machine weather response for a UNIX timestamp, ISO date, or relative time."""
+    """Return a time-machine weather response for a specific historical time."""
     return _request_forecast(
         latitude=latitude,
         longitude=longitude,
         time=time,
         units=units,
         lang=lang,
-        version=version,
-        tmextra=tmextra,
+        version=2,
+        tmextra=1 if tmextra else None,
     )
 
 
 @mcp.tool()
 def get_weather_summary(
-    latitude: float,
-    longitude: float,
-    units: str | None = None,
-    lang: str | None = None,
-    version: int | None = 2,
+    latitude: Latitude,
+    longitude: Longitude,
+    units: Units = None,
+    lang: Language = None,
 ) -> dict[str, Any]:
     """Return concise current, minutely, hourly, and daily weather summaries."""
     forecast = _request_forecast(
@@ -291,7 +509,7 @@ def get_weather_summary(
         longitude=longitude,
         units=units,
         lang=lang,
-        version=version,
+        version=2,
     )
     if forecast.get("ok") is False:
         return forecast
@@ -339,6 +557,7 @@ def test_api_connection(
         latitude=latitude,
         longitude=longitude,
         blocks="currently",
+        version=2,
         timeout=timeout,
     )
     if response.get("ok") is False:
@@ -389,11 +608,22 @@ def main() -> None:
         type=int,
         help="Port for the MCP HTTP server.",
     )
+    parser.add_argument(
+        "--forwarded-allow-ips",
+        default=os.environ.get("PW_MCP_FORWARDED_ALLOW_IPS", "127.0.0.1"),
+        help="Comma-separated proxy IPs whose forwarded headers Uvicorn should trust.",
+    )
     args = parser.parse_args()
 
     import uvicorn
 
-    uvicorn.run("MCP.pirate_weather_mcp:app", host=args.host, port=args.port)
+    uvicorn.run(
+        "MCP.pirate_weather_mcp:app",
+        host=args.host,
+        port=args.port,
+        proxy_headers=True,
+        forwarded_allow_ips=args.forwarded_allow_ips,
+    )
 
 
 if __name__ == "__main__":
