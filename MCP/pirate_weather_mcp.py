@@ -72,7 +72,6 @@ def _request_forecast(
     if query:
         url = f"{url}?{query}"
 
-    request = Request(url, headers={"Accept": "application/json"})
     try:
         with urlopen(request, timeout=timeout) as response:
             body = response.read().decode("utf-8")
@@ -84,7 +83,10 @@ def _request_forecast(
         except json.JSONDecodeError:
             detail = body
         return {"ok": False, "status": exc.code, "error": detail}
+    except json.JSONDecodeError as exc:
+        return {"ok": False, "error": f"Invalid JSON response: {exc}"}
     except (OSError, URLError) as exc:
+        return {"ok": False, "error": str(exc)}
         return {"ok": False, "error": str(exc)}
 
 
