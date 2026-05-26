@@ -85,36 +85,32 @@ def calculate_apparent_temperature(air_temp_c, humidity, wind, solar=None):
         )
     )
 
-    if solar is None or np.any(np.isnan(solar)):
-        logger.info(
-            "Solar raditation is not valid. Falling back to using apparent temperature calculations without solar radiation..."
-        )
-        # Calculate apparent temperature in Celsius
-        apparent_temp_c = (
-            air_temp_c
-            + APPARENT_TEMP_CONSTS["humidity_factor"] * e
-            - APPARENT_TEMP_CONSTS["wind_factor"] * wind
-            + APPARENT_TEMP_CONSTS["const"]
-        )
-    else:
-        # Calculate the effective solar term 'q' used in the apparent temperature formula.
-        # The model's `solar` value is Downward Short-Wave Radiation Flux in W/m^2.
-        # `q_factor` scales that irradiance to the empirical Q used in the formula
-        # (for example q_factor=0.1 reduces the raw W/m^2 to a smaller effective value).
-        # Tuning `q_factor` controls how strongly solar irradiance influences apparent temp.
-        q = solar * APPARENT_TEMP_SOLAR_CONSTS["q_factor"]
+    # Non-solar formula (used for hours/elements where solar is unavailable)
+    apparent_no_solar = (
+        air_temp_c
+        + APPARENT_TEMP_CONSTS["humidity_factor"] * e
+        - APPARENT_TEMP_CONSTS["wind_factor"] * wind
+        + APPARENT_TEMP_CONSTS["const"]
+    )
 
-        # Calculate apparent temperature in Celsius using solar radiation
-        apparent_temp_c = (
-            air_temp_c
-            + APPARENT_TEMP_SOLAR_CONSTS["humidity_factor"] * e
-            - APPARENT_TEMP_SOLAR_CONSTS["wind_factor"] * wind
-            + (APPARENT_TEMP_SOLAR_CONSTS["solar_factor"] * q) / (wind + 10)
-            + APPARENT_TEMP_SOLAR_CONSTS["const"]
-        )
+    if solar is None:
+        return apparent_no_solar
 
-    # Return apparent temperature in Celsius
-    return apparent_temp_c
+    # Solar formula (used where solar is a valid, non-NaN value)
+    # The model's `solar` value is Downward Short-Wave Radiation Flux in W/m^2.
+    # `q_factor` scales that irradiance to the empirical Q used in the formula.
+    q = solar * APPARENT_TEMP_SOLAR_CONSTS["q_factor"]
+    apparent_solar = (
+        air_temp_c
+        + APPARENT_TEMP_SOLAR_CONSTS["humidity_factor"] * e
+        - APPARENT_TEMP_SOLAR_CONSTS["wind_factor"] * wind
+        + (APPARENT_TEMP_SOLAR_CONSTS["solar_factor"] * q) / (wind + 10)
+        + APPARENT_TEMP_SOLAR_CONSTS["const"]
+    )
+
+    # Select per-element: use solar formula where solar is valid, non-solar where NaN.
+    # np.where handles both scalar and array inputs uniformly.
+    return np.where(np.isnan(solar), apparent_no_solar, apparent_solar)
 
 
 def clipLog(data, min_val, max_val, name):
@@ -342,13 +338,6 @@ def select_daily_precip_type(
     update_mask = not_all_types & has_precip
     maxPchanceDay[update_mask] = dominant_type[update_mask]
 
-    # Threshold overrides: large accumulations force their respective type
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["rain"]] > (10 * prepAccumUnit)] = (
-        PRECIP_IDX["rain"]
-    )
-    maxPchanceDay[InterPdaySum[:, DATA_DAY["snow"]] > (5 * prepAccumUnit)] = PRECIP_IDX[
-        "snow"
-    ]
     # For ice accumulation, preserve the distinction between ice (freezing rain)
     # and sleet (ice pellets) by only overriding if the current type is not already
     # ice or sleet. This ensures that the hourly-based determination is preserved.

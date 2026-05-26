@@ -9,8 +9,6 @@ from API.constants.shared_const import MISSING_DATA
 from API.constants.text_const import (
     CLOUD_COVER_DAILY_THRESHOLDS,
     CLOUD_COVER_THRESHOLDS,
-    DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
-    DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
     DEFAULT_HUMIDITY,
     DEFAULT_POP,
     DEFAULT_VISIBILITY,
@@ -24,7 +22,6 @@ from API.PirateTextHelper import (
     calculate_vis_text,
     calculate_wind_text,
     estimate_snow_height,
-    humidity_sky_text,
     most_common,
 )
 
@@ -148,6 +145,14 @@ def _get_time_phrase(
         # Single period: "during [period_name]"
         return ["during", all_periods[period_indices[0]]]
 
+    # Day/night windows should usually collapse to one or two logical periods.
+    # If a malformed or DST-shifted slice produces more, emit a valid combined
+    # "during" phrase instead of returning None.
+    combined_periods = all_periods[period_indices[-1]]
+    for idx in reversed(period_indices[:-1]):
+        combined_periods = ["and", all_periods[idx], combined_periods]
+    return ["during", combined_periods]
+
 
 def calculate_period_summary_text(
     period_indices,
@@ -155,29 +160,25 @@ def calculate_period_summary_text(
     condition_type,
     all_periods,
     all_wind_periods,
-    all_dry_periods,
-    all_humid_periods,
     all_vis_periods,
     max_wind_speed,
     icon_set,
     check_period,
     mode,
-    # New parameters for cloud-wind/dry/humid combination
+    # New parameters for cloud-wind combination
     overall_cloud_text=None,  # Added for wind to combine with cloud
     overall_cloud_idx_for_wind=None,  # Added for wind to combine with cloud
 ):
     """
-    Calculates the textual summary for a specific condition (precip, cloud, wind, vis, dry, humid)
+    Calculates the textual summary for a specific condition (precip, cloud, wind, vis)
     across a set of periods.
 
     Parameters:
     - period_indices (list): List of indices where the condition is present.
     - condition_text (str): The base text for the condition (e.g., "light-rain", "fog").
-    - condition_type (str): The type of condition ("precip", "cloud", "wind", "vis", "dry", "humid").
+    - condition_type (str): The type of condition ("precip", "cloud", "wind", "vis").
     - all_periods (list): List of all period names (e.g., ["today-morning", "today-afternoon"]).
     - all_wind_periods (list): Indices of periods with significant wind.
-    - all_dry_periods (list): Indices of periods with low humidity.
-    - all_humid_periods (list): Indices of periods with high humidity.
     - all_vis_periods (list): Indices of periods with low visibility (fog).
     - max_wind_speed (float): Maximum wind speed across all relevant periods.
     - icon_set (str): Which icon set to use - Dark Sky or Pirate Weather.
@@ -190,14 +191,10 @@ def calculate_period_summary_text(
     - tuple: A tuple containing:
         - summary_text (list): The textual representation of the condition for the current day/next 24 hours.
         - wind_condition_combined (bool): True if wind was combined with this condition.
-        - dry_condition_combined (bool): True if dry was combined with this condition.
-        - humid_condition_combined (bool): True if humid was combined with this condition.
         - vis_condition_combined (bool): True if visibility was combined with this condition.
     """
     summary_text = None
     wind_condition_combined = False
-    dry_condition_combined = False
-    humid_condition_combined = False
     vis_condition_combined = False
     current_condition_text = condition_text
 
@@ -222,7 +219,6 @@ def calculate_period_summary_text(
         return False
 
     # Check for accompanying conditions that can be combined with the primary condition
-    # Dry and Humid should not combine with Fog (vis) or Thunderstorms
     if condition_type == "precip" or condition_type == "cloud":
         if all_wind_periods and _are_periods_matching(period_indices, all_wind_periods):
             wind_condition_combined = True
@@ -234,22 +230,6 @@ def calculate_period_summary_text(
         if all_vis_periods and _are_periods_matching(period_indices, all_vis_periods):
             vis_condition_combined = True
             current_condition_text = ["and", current_condition_text, "fog"]
-        # Don't combine humid/dry with thunderstorms
-        has_thunderstorm = _contains_thunderstorm(current_condition_text)
-        if (
-            all_dry_periods
-            and _are_periods_matching(period_indices, all_dry_periods)
-            and not has_thunderstorm
-        ):
-            dry_condition_combined = True
-            current_condition_text = ["and", current_condition_text, "low-humidity"]
-        if (
-            all_humid_periods
-            and _are_periods_matching(period_indices, all_humid_periods)
-            and not has_thunderstorm
-        ):
-            humid_condition_combined = True
-            current_condition_text = ["and", current_condition_text, "high-humidity"]
     elif condition_type == "wind":
         # Check for combination with cloud cover based on passed in cloud data
         if overall_cloud_idx_for_wind and _are_periods_matching(
@@ -263,15 +243,6 @@ def calculate_period_summary_text(
                 overall_cloud_text,  # "clear"
                 current_condition_text,  # "windy" (e.g., calculate_wind_text result)
             ]
-        # Rest of wind combinations (dry/humid)
-        if all_dry_periods and _are_periods_matching(period_indices, all_dry_periods):
-            dry_condition_combined = True
-            current_condition_text = ["and", current_condition_text, "low-humidity"]
-        if all_humid_periods and _are_periods_matching(
-            period_indices, all_humid_periods
-        ):
-            humid_condition_combined = True
-            current_condition_text = ["and", current_condition_text, "high-humidity"]
 
     # Get the base time phrase template (e.g., "during", "starting", "for-day")
     time_phrase_structure = _get_time_phrase(
@@ -283,7 +254,7 @@ def calculate_period_summary_text(
     )
 
     if time_phrase_structure is None:
-        return None, False, False, False, False
+        return None, False, False
 
     phrase_type = time_phrase_structure[0]
     phrase_args = time_phrase_structure[1:]
@@ -297,8 +268,6 @@ def calculate_period_summary_text(
     return (
         summary_text,
         wind_condition_combined,
-        dry_condition_combined,
-        humid_condition_combined,
         vis_condition_combined,
     )
 
@@ -342,8 +311,6 @@ def calculate_half_day_text(
     # Initialize combination flags to False at the top level, as they track which
     # conditions have been "subsumed" by a higher-priority combined summary.
     combined_vis_flag = False
-    combined_dry_flag = False
-    combined_humid_flag = False
     combined_wind_flag = False
     overall_min_temp_dewpoint_spread = float("inf")
     overall_temp_at_min_spread = 0.0
@@ -442,7 +409,6 @@ def calculate_half_day_text(
             # Initialize an empty data structure for this new unique period name
             standard_periods_data[period_name_for_iter] = {
                 "num_hours_fog": 0,
-                "num_hours_dry": 0,
                 "num_hours_wind": 0,
                 "num_hours_thunderstorm": 0,
                 "rain_accum": 0.0,
@@ -450,6 +416,7 @@ def calculate_half_day_text(
                 "snow_error": 0.0,
                 "has_snow_error_data": False,  # Track if any error data exists
                 "sleet_accum": 0.0,
+                "frzrain_accum": 0.0,
                 "max_pop": 0.0,
                 "max_rain_intensity": 0.0,
                 "max_snow_intensity": 0.0,
@@ -457,7 +424,6 @@ def calculate_half_day_text(
                 "cloud_cover_sum": 0.0,
                 "max_wind_speed": 0.0,
                 "period_length": 0,
-                "num_hours_humid": 0,
                 "precip_types_in_period": [],
                 "precip_accum_sum": 0.0,
                 "precip_hours_count": 0,
@@ -516,17 +482,6 @@ def calculate_half_day_text(
             period_data["min_visibility"] = min(
                 period_data["min_visibility"], hour["visibility"]
             )
-
-            if (
-                humidity_sky_text(hour["temperature"], hour["humidity"])
-                == "high-humidity"
-            ):
-                period_data["num_hours_humid"] += 1
-            if (
-                humidity_sky_text(hour["temperature"], hour["humidity"])
-                == "low-humidity"
-            ):
-                period_data["num_hours_dry"] += 1
             if (
                 calculate_vis_text(
                     hour["visibility"],
@@ -584,7 +539,10 @@ def calculate_half_day_text(
                     )
                 period_data["snow_error"] += estimated_snow_error_mm
                 period_data["has_snow_error_data"] = True
-            period_data["sleet_accum"] += hour["iceAccumulation"]
+            if hour["precipType"] == PRECIP_TYPES["ice"]:
+                period_data["frzrain_accum"] += hour["iceAccumulation"]
+            elif hour["precipType"] == PRECIP_TYPES["sleet"]:
+                period_data["sleet_accum"] += hour["iceAccumulation"]
 
             if (
                 hour["liquidAccumulation"] > 0
@@ -644,14 +602,13 @@ def calculate_half_day_text(
     thunderstorm_periods = []
     vis_periods = []
     wind_periods = []
-    humid_periods = []
-    dry_periods = []
     cloud_levels = []
 
     # Initialize overall accumulation and max values for the entire forecast block
     total_rain_accum = 0.0
     total_snow_accum = 0.0
     total_sleet_accum = 0.0
+    total_frzrain_accum = 0.0
     total_snow_error = 0.0
     has_any_snow_error_data = False  # Track if any period has error data
     overall_max_rain_intensity = 0.0
@@ -674,6 +631,7 @@ def calculate_half_day_text(
         total_rain_accum += p_data["rain_accum"]
         total_snow_accum += p_data["snow_accum"]
         total_sleet_accum += p_data["sleet_accum"]
+        total_frzrain_accum += p_data["frzrain_accum"]
         total_snow_error += p_data["snow_error"]
         if p_data["has_snow_error_data"]:
             has_any_snow_error_data = True
@@ -698,6 +656,7 @@ def calculate_half_day_text(
             p_data["snow_accum"] > PRECIP_INTENSITY_THRESHOLDS["mid"]
             or p_data["rain_accum"] > PRECIP_THRESH
             or p_data["sleet_accum"] > PRECIP_THRESH
+            or p_data["frzrain_accum"] > PRECIP_THRESH
         )
         if is_precip_in_period:
             precip_periods.append(i)
@@ -729,10 +688,6 @@ def calculate_half_day_text(
             and p_data["num_hours_fog"] >= (min(p_data["period_length"] / 2, 3))
         ):
             vis_periods.append(i)
-        if p_data["num_hours_dry"] >= (min(p_data["period_length"] / 2, 3)):
-            dry_periods.append(i)
-        if p_data["num_hours_humid"] >= (min(p_data["period_length"] / 2, 3)):
-            humid_periods.append(i)
 
         # Get cloud level for this period
         _, cloud_level = calculate_cloud_text(p_data["avg_cloud_cover"])
@@ -831,11 +786,15 @@ def calculate_half_day_text(
     precip_icon = None
     secondary_precip_condition = None
 
-    total_precip_accum = total_rain_accum + total_snow_accum + total_sleet_accum
+    total_precip_accum = (
+        total_rain_accum + total_snow_accum + total_sleet_accum + total_frzrain_accum
+    )
+    # Combined ice accumulation (sleet + freezing rain) used for mixed/threshold checks
+    total_ice_accum = total_sleet_accum + total_frzrain_accum
 
     # Calculate overall precipitation text and icon if significant precipitation occurs (threshold in mm)
     if overall_avg_pop > 0 and total_precip_accum >= 0.1:
-        if total_snow_accum > 0 and total_rain_accum > 0 and total_sleet_accum > 0:
+        if total_snow_accum > 0 and total_rain_accum > 0 and total_ice_accum > 0:
             precip_summary_text = "mixed-precipitation"
             most_common_overall_precip_type = (
                 PRECIP_TYPES["sleet"] if icon_set != "pirate" else PRECIP_TYPES["mixed"]
@@ -844,6 +803,18 @@ def calculate_half_day_text(
                 "medium-snow"  # Indicate snow totals are relevant
             )
         else:
+            # Determine dominant ice type (sleet vs freezing rain) and labels for secondary conditions
+            if total_frzrain_accum >= total_sleet_accum:
+                dominant_ice_type = PRECIP_TYPES["ice"]
+                ice_as_secondary = (
+                    "medium-freezing-rain"  # dominant ice as secondary to snow/rain
+                )
+                other_ice_as_secondary = "medium-sleet"  # non-dominant ice as secondary alongside dominant ice
+            else:
+                dominant_ice_type = PRECIP_TYPES["sleet"]
+                ice_as_secondary = "medium-sleet"
+                other_ice_as_secondary = "medium-freezing-rain"
+
             # Determine primary and secondary precipitation types based on accumulation
             if total_snow_accum > 0:
                 if total_rain_accum > 0 and total_snow_accum > total_rain_accum:
@@ -852,19 +823,24 @@ def calculate_half_day_text(
                 elif total_rain_accum > 0 and total_snow_accum < total_rain_accum:
                     most_common_overall_precip_type = PRECIP_TYPES["rain"]
                     secondary_precip_condition = "medium-snow"
-                elif total_sleet_accum > 0 and total_snow_accum > total_sleet_accum:
+                elif total_ice_accum > 0 and total_snow_accum > total_ice_accum:
                     most_common_overall_precip_type = PRECIP_TYPES["snow"]
-                    secondary_precip_condition = "medium-sleet"
-                elif total_sleet_accum > 0 and total_snow_accum < total_sleet_accum:
-                    most_common_overall_precip_type = PRECIP_TYPES["sleet"]
+                    secondary_precip_condition = ice_as_secondary
+                elif total_ice_accum > 0 and total_snow_accum < total_ice_accum:
+                    most_common_overall_precip_type = dominant_ice_type
                     secondary_precip_condition = "medium-snow"
-            elif total_sleet_accum > 0:
-                if total_rain_accum > 0 and total_rain_accum > total_sleet_accum:
+            elif total_ice_accum > 0:
+                if total_rain_accum > 0 and total_rain_accum > total_ice_accum:
                     most_common_overall_precip_type = PRECIP_TYPES["rain"]
-                    secondary_precip_condition = "medium-sleet"
-                elif total_rain_accum > 0 and total_rain_accum < total_sleet_accum:
-                    most_common_overall_precip_type = PRECIP_TYPES["sleet"]
+                    secondary_precip_condition = ice_as_secondary
+                elif total_rain_accum > 0 and total_rain_accum < total_ice_accum:
+                    most_common_overall_precip_type = dominant_ice_type
                     secondary_precip_condition = "medium-rain"
+                elif total_sleet_accum > 0 and total_frzrain_accum > 0:
+                    # Both sleet and freezing rain on the same day (with or without rain);
+                    # this branch is reached when there is no rain or rain == total_ice_accum
+                    most_common_overall_precip_type = dominant_ice_type
+                    secondary_precip_condition = other_ice_as_secondary
 
             # Re-evaluate primary precipType if calculated type has zero accumulation
             if (
@@ -873,48 +849,24 @@ def calculate_half_day_text(
             ):
                 if total_rain_accum > 0:
                     most_common_overall_precip_type = PRECIP_TYPES["rain"]
-                elif total_sleet_accum > 0:
-                    most_common_overall_precip_type = PRECIP_TYPES["sleet"]
+                elif total_ice_accum > 0:
+                    most_common_overall_precip_type = dominant_ice_type
             elif (
                 total_rain_accum == 0
                 and most_common_overall_precip_type == PRECIP_TYPES["rain"]
             ):
                 if total_snow_accum > 0:
                     most_common_overall_precip_type = PRECIP_TYPES["snow"]
-                elif total_sleet_accum > 0:
-                    most_common_overall_precip_type = PRECIP_TYPES["sleet"]
-            elif (
-                total_sleet_accum == 0
-                and most_common_overall_precip_type == PRECIP_TYPES["sleet"]
+                elif total_ice_accum > 0:
+                    most_common_overall_precip_type = dominant_ice_type
+            elif total_ice_accum == 0 and most_common_overall_precip_type in (
+                PRECIP_TYPES["sleet"],
+                PRECIP_TYPES["ice"],
             ):
                 if total_snow_accum > 0:
                     most_common_overall_precip_type = PRECIP_TYPES["snow"]
                 elif total_rain_accum > 0:
                     most_common_overall_precip_type = PRECIP_TYPES["rain"]
-
-            # If the most common precipitation type is ice change to freezing rain to fix text summary issues
-            if most_common_overall_precip_type == PRECIP_TYPES["ice"]:
-                most_common_overall_precip_type = "freezing-rain"
-
-            # Promote to stronger precip if significant accumulation is forecast (thresholds in mm)
-            if (
-                total_rain_accum > (DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM * 10)
-                and most_common_overall_precip_type != PRECIP_TYPES["rain"]
-            ):
-                secondary_precip_condition = "medium-" + most_common_overall_precip_type
-                most_common_overall_precip_type = "rain"
-            if (
-                total_snow_accum > (DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM * 0.5)
-                and most_common_overall_precip_type != PRECIP_TYPES["snow"]
-            ):
-                secondary_precip_condition = "medium-" + most_common_overall_precip_type
-                most_common_overall_precip_type = "snow"
-            if (
-                total_sleet_accum > 1
-                and most_common_overall_precip_type != PRECIP_TYPES["sleet"]
-            ):
-                secondary_precip_condition = "medium-" + most_common_overall_precip_type
-                most_common_overall_precip_type = PRECIP_TYPES["sleet"]
 
         # Calculate final precipitation text and icon (all in mm)
         precip_summary_text, precip_icon = calculate_precip_text(
@@ -922,7 +874,7 @@ def calculate_half_day_text(
             "hourly",  # This is a fixed parameter as per original code
             total_rain_accum,
             total_snow_accum,
-            total_sleet_accum,
+            total_ice_accum,
             overall_avg_pop if overall_avg_pop != -999 else 1,
             icon_set,
             "both",
@@ -1014,8 +966,6 @@ def calculate_half_day_text(
     has_thunderstorm = bool(thunderstorm_periods)
     has_wind = bool(wind_periods)
     has_vis = bool(vis_periods)
-    has_dry = bool(dry_periods)
-    has_humid = bool(humid_periods)
 
     # Calculate thunderstorm text if thunderstorms occur
     thunderstorm_summary_text = None
@@ -1042,8 +992,6 @@ def calculate_half_day_text(
     thunderstorm_only_summary = None
     wind_only_summary = None
     vis_only_summary = None
-    dry_only_summary = None
-    humid_only_summary = None
     cloud_full_summary = None
 
     # Calculate summary text for each condition type, passing all relevant periods for combination logic
@@ -1053,8 +1001,6 @@ def calculate_half_day_text(
         (
             precip_only_summary,
             temp_wind_combined,
-            temp_dry_combined,
-            temp_humid_combined,
             temp_vis_combined,
         ) = calculate_period_summary_text(
             precip_periods,
@@ -1062,8 +1008,6 @@ def calculate_half_day_text(
             "precip",
             all_period_names,
             wind_periods,
-            dry_periods,
-            humid_periods,
             vis_periods,
             overall_max_wind,
             icon_set,
@@ -1072,20 +1016,16 @@ def calculate_half_day_text(
         )
         # These flags indicate if the *higher priority* summary (precip) consumed these conditions.
         combined_wind_flag = temp_wind_combined
-        combined_dry_flag = temp_dry_combined
-        combined_humid_flag = temp_humid_combined
         combined_vis_flag = temp_vis_combined
 
     # Calculate thunderstorm summary if they don't match precipitation periods
     if has_thunderstorm and not thunderstorms_match_precip:
-        thunderstorm_only_summary, _, _, _, _ = calculate_period_summary_text(
+        thunderstorm_only_summary, _, _ = calculate_period_summary_text(
             thunderstorm_periods,
             thunderstorm_summary_text,
             "precip",  # Use precip type since thunderstorms have same priority
             all_period_names,
             wind_periods,
-            dry_periods,
-            humid_periods,
             vis_periods,
             overall_max_wind,
             icon_set,
@@ -1095,15 +1035,13 @@ def calculate_half_day_text(
 
     # Calculate summaries for other conditions. The combination flags for them are local to their calls.
     if has_wind:
-        wind_only_summary, _, _, _, _ = calculate_period_summary_text(
+        wind_only_summary, _, _ = calculate_period_summary_text(
             wind_periods,
             calculate_wind_text(overall_max_wind, icon_set, "summary"),
             "wind",
             all_period_names,
             [],
-            dry_periods,
-            humid_periods,
-            [],  # Wind can combine with dry/humid
+            [],
             overall_max_wind,
             icon_set,
             0,
@@ -1113,7 +1051,7 @@ def calculate_half_day_text(
             overall_cloud_idx_for_wind=overall_cloud_idx,
         )
     if has_vis:
-        vis_only_summary, _, _, _, _ = calculate_period_summary_text(
+        vis_only_summary, _, _ = calculate_period_summary_text(
             vis_periods,
             calculate_vis_text(
                 overall_min_visibility,
@@ -1128,50 +1066,16 @@ def calculate_half_day_text(
             all_period_names,
             [],
             [],
-            [],
-            [],
-            overall_max_wind,
-            icon_set,
-            0,
-            mode,
-        )
-    if has_dry:
-        dry_only_summary, _, _, _, _ = calculate_period_summary_text(
-            dry_periods,
-            "low-humidity",
-            "dry",
-            all_period_names,
-            [],
-            [],
-            [],
-            [],
-            overall_max_wind,
-            icon_set,
-            0,
-            mode,
-        )
-    if has_humid:
-        humid_only_summary, _, _, _, _ = calculate_period_summary_text(
-            humid_periods,
-            "high-humidity",
-            "humid",
-            all_period_names,
-            [],
-            [],
-            [],
-            [],
             overall_max_wind,
             icon_set,
             0,
             mode,
         )
 
-    # Cloud full summary, including potential combinations with wind/dry/humid/vis
+    # Cloud full summary, including potential combinations with wind/vis
     (
         cloud_full_summary,
         _,
-        cloud_dry_combined_flag,
-        cloud_humid_combined_flag,
         cloud_vis_combined_flag,
     ) = calculate_period_summary_text(
         overall_cloud_idx,  # Pass all period indices for cloud to find its pattern
@@ -1179,8 +1083,6 @@ def calculate_half_day_text(
         "cloud",
         all_period_names,
         wind_periods,
-        dry_periods,
-        humid_periods,
         vis_periods,
         overall_max_wind,
         icon_set,
@@ -1197,8 +1099,7 @@ def calculate_half_day_text(
     # 0: Precipitation and Thunderstorms (same priority)
     # 1: Visibility (Fog)
     # 2: Wind
-    # 3: Dry/Humid (if combined, or if primary cloud is clear)
-    # 4: Cloud (fallback)
+    # 3: Cloud (fallback)
 
     candidate_summaries_for_final_assembly = []
 
@@ -1275,42 +1176,7 @@ def calculate_half_day_text(
             }
         )
 
-    # 4. Dry Humidity - only if not already covered AND (combined by cloud OR cloud is clear)
-    # This ensures dry/humid don't appear as primary condition unless specifically linked or cloud is clear
-    if has_dry and not combined_dry_flag and not cloud_dry_combined_flag:
-        if final_cloud_text == "clear":
-            is_dry_all_day = (
-                len(dry_periods) == len(period_stats) if period_stats else False
-            )
-            candidate_summaries_for_final_assembly.append(
-                {
-                    "type": "dry",
-                    "priority": 3,
-                    "all_day": is_dry_all_day,
-                    "start_idx": dry_periods[0] if dry_periods else -1,
-                    "text": dry_only_summary,
-                    "icon": None,  # Dry/humid don't have dedicated icons, fallback to cloud
-                }
-            )
-
-    # 5. Humid Humidity - only if not already covered AND (combined by cloud OR cloud is clear)
-    if has_humid and not combined_humid_flag and not cloud_humid_combined_flag:
-        if final_cloud_text == "clear":
-            is_humid_all_day = (
-                len(humid_periods) == len(period_stats) if period_stats else False
-            )
-            candidate_summaries_for_final_assembly.append(
-                {
-                    "type": "humid",
-                    "priority": 4,
-                    "all_day": is_humid_all_day,
-                    "start_idx": humid_periods[0] if humid_periods else -1,
-                    "text": humid_only_summary,
-                    "icon": None,  # Dry/humid donon't have dedicated icons, fallback to cloud
-                }
-            )
-
-    # 6. Cloud Cover - as a fallback if no other primary condition is present
+    # 4. Cloud Cover - as a fallback if no other primary condition is present
     if (
         not candidate_summaries_for_final_assembly
     ):  # If no higher-priority conditions are present
@@ -1320,7 +1186,7 @@ def calculate_half_day_text(
         candidate_summaries_for_final_assembly.append(
             {
                 "type": "cloud",
-                "priority": 5,
+                "priority": 3,
                 "all_day": is_cloud_all_day,
                 "start_idx": 0,  # Cloud is always "present" from the start of the forecast
                 "text": cloud_full_summary,

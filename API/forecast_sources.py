@@ -5,7 +5,15 @@ from typing import Dict, List, Optional, Union
 
 import numpy as np
 
-from API.constants.model_const import DWD_MOSMIX, ECMWF, GFS
+from API.constants.model_const import (
+    AIGEFS,
+    AIGFS,
+    DWD_MOSMIX,
+    ECMWF,
+    ECMWF_AIFS,
+    GEFS,
+    GFS,
+)
 from API.constants.shared_const import MISSING_DATA
 from API.request.grid_indexing import GridIndexingResult
 from API.utils.geo import rounder
@@ -47,6 +55,9 @@ class MergeResult:
     ecmwf: Optional[np.ndarray]
     gefs: Optional[np.ndarray]
     dwd_mosmix: Optional[np.ndarray]
+    aigfs: Optional[np.ndarray]
+    aigefs: Optional[np.ndarray]
+    aifs: Optional[np.ndarray]
     metadata: SourceMetadata
 
 
@@ -170,7 +181,70 @@ def build_source_metadata(
     if isinstance(grid_result.dataOut_gefs, np.ndarray):
         metadata.add("gefs", time_value=_format_run_time(grid_result.gefsRunTime))
 
+    if isinstance(grid_result.dataOut_aigfs, np.ndarray):
+        metadata.add("aigfs", time_value=_format_run_time(grid_result.aigfsRunTime))
+
+    if isinstance(grid_result.dataOut_aigefs, np.ndarray):
+        metadata.add("aigefs", time_value=_format_run_time(grid_result.aigefsRunTime))
+
+    if isinstance(grid_result.dataOut_aifs, np.ndarray):
+        metadata.add("ecmwf_aifs", time_value=_format_run_time(grid_result.aifsRunTime))
+
     return metadata
+
+
+def _merge_aigfs_as_gfs(
+    data_aigfs: np.ndarray, start_idx: int, num_hours: int
+) -> np.ndarray:
+    merged = np.full((num_hours, max(GFS.values()) + 1), MISSING_DATA)
+    end_idx = min(len(data_aigfs), num_hours + start_idx)
+    src = data_aigfs[start_idx:end_idx, :]
+    rows = end_idx - start_idx
+    merged[:rows, 0] = src[:, 0]
+    merged[:rows, GFS["pressure"]] = src[:, AIGFS["pressure"]]
+    merged[:rows, GFS["temp"]] = src[:, AIGFS["temp"]]
+    merged[:rows, GFS["wind_u"]] = src[:, AIGFS["wind_u"]]
+    merged[:rows, GFS["wind_v"]] = src[:, AIGFS["wind_v"]]
+    merged[:rows, GFS["accum"]] = src[:, AIGFS["accum"]]
+    merged[:rows, GFS["intensity"]] = src[:, AIGFS["accum"]]
+    return merged
+
+
+def _merge_aigefs_as_gefs(
+    data_aigefs: np.ndarray, start_idx: int, num_hours: int
+) -> np.ndarray:
+    merged = np.full((num_hours, max(GEFS.values()) + 1), MISSING_DATA)
+    end_idx = min(len(data_aigefs), num_hours + start_idx)
+    src = data_aigefs[start_idx:end_idx, :]
+    rows = end_idx - start_idx
+    merged[:rows, 0] = src[:, 0]
+    merged[:rows, GEFS["prob"]] = src[:, AIGEFS["prob"]]
+    merged[:rows, GEFS["accum"]] = src[:, AIGEFS["accum"]]
+    merged[:rows, GEFS["error"]] = src[:, AIGEFS["error"]]
+    return merged
+
+
+def _merge_aifs_as_ecmwf(
+    data_aifs: np.ndarray, start_idx: int, num_hours: int
+) -> np.ndarray:
+    merged = np.full((num_hours, max(ECMWF.values()) + 1), MISSING_DATA)
+    end_idx = min(len(data_aifs), num_hours + start_idx)
+    src = data_aifs[start_idx:end_idx, :]
+    rows = end_idx - start_idx
+    merged[:rows, 0] = src[:, 0]
+    merged[:rows, ECMWF["pressure"]] = src[:, ECMWF_AIFS["pressure"]]
+    merged[:rows, ECMWF["temp"]] = src[:, ECMWF_AIFS["temp"]]
+    merged[:rows, ECMWF["dew"]] = src[:, ECMWF_AIFS["dew"]]
+    merged[:rows, ECMWF["wind_u"]] = src[:, ECMWF_AIFS["wind_u"]]
+    merged[:rows, ECMWF["wind_v"]] = src[:, ECMWF_AIFS["wind_v"]]
+    merged[:rows, ECMWF["ptype"]] = src[:, ECMWF_AIFS["ptype"]]
+    merged[:rows, ECMWF["cloud"]] = src[:, ECMWF_AIFS["cloud"]]
+    merged[:rows, ECMWF["prob"]] = src[:, ECMWF_AIFS["prob"]]
+    merged[:rows, ECMWF["accum_mean"]] = src[:, ECMWF_AIFS["accum_mean"]]
+    merged[:rows, ECMWF["accum_stddev"]] = src[:, ECMWF_AIFS["accum_stddev"]]
+    merged[:rows, ECMWF["accum"]] = src[:, ECMWF_AIFS["accum_mean"]]
+    merged[:rows, ECMWF["intensity"]] = src[:, ECMWF_AIFS["accum_mean"]]
+    return merged
 
 
 def add_etopo_source(
@@ -241,6 +315,9 @@ def merge_hourly_models(
     data_ecmwf: Optional[np.ndarray],
     data_gefs: Optional[np.ndarray],
     data_dwd_mosmix: Optional[np.ndarray],
+    data_aigfs: Optional[np.ndarray],
+    data_aigefs: Optional[np.ndarray],
+    data_aifs: Optional[np.ndarray],
     logger: logging.Logger,
     loc_tag: str,
 ) -> MergeResult:
@@ -251,6 +328,9 @@ def merge_hourly_models(
     ecmwf_merged = None
     gefs_merged = None
     dwd_mosmix_merged = None
+    aigfs_merged = None
+    aigefs_merged = None
+    aifs_merged = None
 
     try:
         if (
@@ -363,6 +443,18 @@ def merge_hourly_models(
             data_gefs, gefs_start_idx, num_hours, data_gefs.shape[1]
         )
 
+    if "aigfs" in metadata.source_list and isinstance(data_aigfs, np.ndarray):
+        aigfs_start_idx = nearest_index(data_aigfs[:, 0], base_day_utc_grib)
+        aigfs_merged = _merge_aigfs_as_gfs(data_aigfs, aigfs_start_idx, num_hours)
+
+    if "aigefs" in metadata.source_list and isinstance(data_aigefs, np.ndarray):
+        aigefs_start_idx = nearest_index(data_aigefs[:, 0], base_day_utc_grib)
+        aigefs_merged = _merge_aigefs_as_gefs(data_aigefs, aigefs_start_idx, num_hours)
+
+    if "ecmwf_aifs" in metadata.source_list and isinstance(data_aifs, np.ndarray):
+        aifs_start_idx = nearest_index(data_aifs[:, 0], base_day_utc_grib)
+        aifs_merged = _merge_aifs_as_ecmwf(data_aifs, aifs_start_idx, num_hours)
+
     return MergeResult(
         hrrr=hrrr_merged,
         nbm=nbm_merged,
@@ -371,5 +463,8 @@ def merge_hourly_models(
         ecmwf=ecmwf_merged,
         gefs=gefs_merged,
         dwd_mosmix=dwd_mosmix_merged,
+        aigfs=aigfs_merged,
+        aigefs=aigefs_merged,
+        aifs=aifs_merged,
         metadata=metadata,
     )

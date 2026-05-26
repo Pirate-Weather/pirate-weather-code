@@ -21,6 +21,7 @@ from API.constants.shared_const import MISSING_DATA
 from API.legacy.daily import (
     apply_legacy_half_day_text,
     pick_day_icon_and_summary,
+    select_hour_window,
 )
 from API.PirateDailyText import calculate_day_text
 
@@ -32,6 +33,19 @@ class DailySection:
     day_icon_list: list
     day_text_list: list
     day_night_list: list
+
+
+def _get_night_window_end(
+    day_array_4am_grib: np.ndarray, idx: int, start_time: int
+) -> int:
+    """Return the closing 4am boundary for a night window.
+
+    Test fixtures may only provide `daily_days` boundaries rather than the
+    next-day 4am marker required by the legacy night summary window.
+    """
+    if idx + 1 < len(day_array_4am_grib):
+        return int(day_array_4am_grib[idx + 1])
+    return start_time + (11 * 3600)
 
 
 def _aggregate_stats(
@@ -1026,7 +1040,11 @@ def build_daily_section(
             day_text, day_icon = apply_legacy_half_day_text(
                 summary_text=summaryText,
                 translation=translation,
-                hour_list_slice=hourList_si[(idx * 24) + 4 : (idx * 24) + 17],
+                hour_list_slice=select_hour_window(
+                    hourList_si,
+                    start_time=int(day_array_4am_grib[idx]),
+                    end_time=int(day_array_5pm_grib[idx]),
+                ),
                 is_day=not is_all_night,
                 tz_name=tz_name,
                 icon_set=icon,
@@ -1072,10 +1090,17 @@ def build_daily_section(
         )
 
         if idx < 8:
+            night_start_time = int(day_array_5pm_grib[idx])
             day_text, day_icon = apply_legacy_half_day_text(
                 summary_text=summaryText,
                 translation=translation,
-                hour_list_slice=hourList_si[(idx * 24) + 17 : ((idx + 1) * 24) + 4],
+                hour_list_slice=select_hour_window(
+                    hourList_si,
+                    start_time=night_start_time,
+                    end_time=_get_night_window_end(
+                        day_array_4am_grib, idx, night_start_time
+                    ),
+                ),
                 is_day=is_all_day,
                 tz_name=tz_name,
                 icon_set=icon,

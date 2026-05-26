@@ -2,12 +2,12 @@
 # Alexander Rey, November 2023
 
 # %% Import modules
+import logging
 import os
 import pickle
 import shutil
 import sys
 import time
-import traceback
 import warnings
 
 import dask
@@ -25,8 +25,10 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    archive_tmp_zarr_and_upload,
     close_store,
     configure_zarr_limits,
+    download_extract_historic_archive,
     mask_invalid_data,
     mask_invalid_refc,
     pad_to_chunk_size,
@@ -37,6 +39,10 @@ from API.ingest_utils import (
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
+
+# Logging setup
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -109,7 +115,7 @@ latest_run = Herbie_latest(
 
 base_time = latest_run.date
 
-print(base_time)
+logger.info(base_time)
 # Check if this is newer than the current file
 if save_type == "S3":
     # Check if the file exists and load it
@@ -121,7 +127,7 @@ if save_type == "S3":
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to HRRR, ending")
+            logger.info("No Update to HRRR, ending")
             sys.exit()
 
 else:
@@ -135,7 +141,7 @@ else:
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to HRRR, ending")
+            logger.info("No Update to HRRR, ending")
             sys.exit()
 
 
@@ -157,7 +163,7 @@ zarr_vars = (
     "CRAIN_surface",
     "TCDC_entireatmosphere",
     "MASSDEN_8maboveground",
-    "REFC_entireatmosphere",
+    "REFD_1000maboveground",
     "DSWRF_surface",
     "CAPE_surface",
 )
@@ -176,7 +182,8 @@ matchstring_su = (
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
 matchstring_cl = "(:TCDC:entire atmosphere:.*hour fcst)"
 matchstring_ap = "(:APCP:surface:0-[1-9]*)"
-matchstring_sl = "(:(MSLMA|REFC):)"
+matchstring_sl = "(:(MSLMA):)"
+matchstring_1000m = "(:REFD:1000 m above ground:)"
 
 # Merge matchstrings for download
 match_strings = (
@@ -193,6 +200,8 @@ match_strings = (
     + matchstring_8m
     + "|"
     + matchstring_sl
+    + "|"
+    + matchstring_1000m
 )
 
 # Create a range of forecast lead times
@@ -216,7 +225,7 @@ FH_forecastsub.download(match_strings, verbose=False)
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(hrrr_range1):
-    print(
+    logger.error(
         "Download failed, expected "
         + str(len(hrrr_range1))
         + " files but got "
@@ -237,7 +246,7 @@ cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 grib_check = run_command(cmd)
 
 validate_grib_stats(grib_check)
-print("Grib files passed validation, proceeding with processing")
+logger.info("Grib files passed validation, proceeding with processing")
 
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
@@ -255,11 +264,8 @@ cmd = (
 # Run wgrib2
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
-
-# Check output from wgrib2
-# print(sp_out.stdout)
 
 # Use wgrib2 to rotate the wind vectors
 # From https://github.com/blaylockbk/pyBKB_v2/blob/master/demos/HRRR_earthRelative_vs_gridRelative_winds.ipynb
@@ -280,7 +286,7 @@ cmd2 = (
 # Run wgrib2 to rotate winds and save as NetCDF
 spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
-    print(spOUT2.stderr)
+    logger.error(spOUT2.stderr)
     sys.exit()
 
 # Check output from wgrib2
@@ -300,7 +306,7 @@ cmd3 = (
 # Run wgrib2 to rotate winds and save as NetCDF
 spOUT3 = run_command(cmd3)
 if spOUT3.returncode != 0:
-    print(spOUT3.stderr)
+    logger.error(spOUT3.stderr)
     sys.exit()
 
 # Check output from wgrib2
@@ -326,9 +332,9 @@ xarray_forecast_merged["MASSDEN_8maboveground"] = (
 )
 
 
-# Set REFC values < 5 to 0
-xarray_forecast_merged["REFC_entireatmosphere"] = mask_invalid_refc(
-    xarray_forecast_merged["REFC_entireatmosphere"]
+# Set REFD values < 5 to 0
+xarray_forecast_merged["REFD_1000maboveground"] = mask_invalid_refc(
+    xarray_forecast_merged["REFD_1000maboveground"]
 )
 
 # %% Save merged and processed xarray dataset to disk using zarr with compression
@@ -360,7 +366,7 @@ os.remove(forecast_process_path + "_wgrib2_merged.grib2")
 os.remove(forecast_process_path + "_wgrib2_merged.regrid")
 os.remove(forecast_process_path + "_wgrib2_merged.nc")
 
-print("FORECAST COMPLETE")
+logger.info("FORECAST COMPLETE")
 ################################################################################################
 # %%Historic data
 # Create a range of dates for historic data going back 48 hours, which should be enough for the daily forecast
@@ -371,71 +377,38 @@ print("FORECAST COMPLETE")
 
 # Hourly Runs- hisperiod to 1, since the 0th hour run is needed (ends up being basetime -1H since using the 1h forecast)
 for i in range(his_period, -1, -1):
-    # Define the path to save the zarr dataset with the run time in the filename
-    # format the time following iso8601
-    s3_path = (
-        historic_path
-        + "/HRRR_Hist_v2"
-        + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-        + ".zarr"
-    )
-
-    # Try to open the zarr file to check if it has already been saved
     if save_type == "S3":
-        # Create the S3 filesystem
         s3_path = (
             historic_path
-            + "/HRRR_Hist_v2"
+            + "/HRRR_Hist_v3"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr"
+            + ".zarr.tar.gz"
         )
-        if s3.exists(s3_path.replace(".zarr", ".done")):
+
+        if s3.exists(s3_path.replace(".tar.gz", ".done")):
             print("File already exists in S3, skipping download for: " + s3_path)
-            # If the file exists, check that it works
-
-            if s3.exists(s3_path):
-                # Try to open and read data from the last variable of the zarr file to check if it has already been saved
-                try:
-                    hisCheckStore = zarr.storage.FsspecStore.from_url(
-                        s3_path,
-                        storage_options={
-                            "key": aws_access_key_id,
-                            "secret": aws_secret_access_key,
-                        },
-                    )
-                    zarr.open(hisCheckStore)[zarr_vars[-1]][-1, -1, -1]
-                    continue  # If it exists, skip to the next iteration
-                except Exception:
-                    print("### Historic Data Failure!")
-                    print(traceback.print_exc())
-
-                    # Delete the file if it exists
-                    if s3.exists(s3_path):
-                        s3.rm(s3_path)
-
+            continue
     else:
-        # Local Path Setup
         local_path = (
             historic_path
-            + "/HRRR_Hist_v2"
+            + "/HRRR_Hist_v3"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
-
-        # Check for a loca done file
         if os.path.exists(local_path.replace(".zarr", ".done")):
-            print("File already exists in S3, skipping download for: " + local_path)
+            print("File already exists locally, skipping download for: " + local_path)
             continue
 
-    print(
-        "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+    logger.info(
+        "Downloading: %s",
+        (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"),
     )
 
     # Create a range of dates for historic data going back 48 hours
     # Since the first hour forecast is used, then the time is an hour behind
     # So data for 18:00 would be the 1st hour of the 17:00 forecast.
     DATES = pd.date_range(
-        start=base_time - pd.Timedelta(str(i + 1) + "h"),
+        start=base_time - pd.Timedelta(hours=i + 1),
         periods=1,
         freq="1h",
     )
@@ -470,7 +443,7 @@ for i in range(his_period, -1, -1):
     grib_check = run_command(cmd)
 
     validate_grib_stats(grib_check)
-    print("Grib files passed validation, proceeding with processing")
+    logger.info("Grib files passed validation, proceeding with processing")
 
     # Use wgrib2 to rotate the wind vectors
     # From https://github.com/blaylockbk/pyBKB_v2/blob/master/demos/HRRR_earthRelative_vs_gridRelative_winds.ipynb
@@ -491,7 +464,7 @@ for i in range(his_period, -1, -1):
     # Run wgrib2 to rotate winds and save as NetCDF
     spOUT2 = run_command(cmd2)
     if spOUT2.returncode != 0:
-        print(spOUT2.stderr)
+        logger.error(spOUT2.stderr)
         sys.exit()
 
     # Convert to NetCDF
@@ -508,39 +481,24 @@ for i in range(his_period, -1, -1):
     # Run wgrib2 to rotate winds and save as NetCDF
     spOUT3 = run_command(cmd3)
     if spOUT3.returncode != 0:
-        print(spOUT3.stderr)
+        logger.error(spOUT3.stderr)
         sys.exit()
 
     # Merge the  xarrays
     # Read the netcdf file using xarray
     xarray_his_wgrib = xr.open_dataset(hist_process_path + "_wgrib_merge.nc")
 
-    # Save merged and processed xarray dataset to disk using zarr with compression
-    # Save the dataset with compression and filters for all variables
-    # Save as Zarr to s3 for Time Machine
-    if save_type == "S3":
-        zarrStore = zarr.storage.FsspecStore.from_url(
-            s3_path,
-            storage_options={
-                "key": aws_access_key_id,
-                "secret": aws_secret_access_key,
-            },
-        )
-    else:
-        # Create local Zarr store
-        zarrStore = zarr.storage.LocalStore(local_path)
-
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         xarray_his_wgrib.to_zarr(
-            store=zarrStore,
+            hist_process_path + "_HRRR_Hist_TMP.zarr",
             mode="w",
             consolidated=False,
+            compute=True,
             chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
         )
 
     # Clear the xarray dataset from memory
     del xarray_his_wgrib
-    close_store(zarrStore)
 
     # Remove temp file created by wgrib2
     os.remove(hist_process_path + "_wgrib_merge.regrid")
@@ -548,25 +506,47 @@ for i in range(his_period, -1, -1):
 
     # Save a done file to s3 to indicate that the historic data has been processed
     if save_type == "S3":
-        done_file = s3_path.replace(".zarr", ".done")
-        s3.touch(done_file)
+        archive_tmp_zarr_and_upload(
+            tmp_zarr_path=hist_process_path + "_HRRR_Hist_TMP.zarr",
+            s3_path=s3_path,
+            archive_member_name="HRRR_Hist.zarr",
+            s3=s3,
+        )
     else:
+        os.rename(hist_process_path + "_HRRR_Hist_TMP.zarr", local_path)
         done_file = local_path.replace(".zarr", ".done")
         with open(done_file, "w") as f:
             f.write("Done")
 
-    print((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
+    logger.info((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
 
 # %% Merge the historic and forecast datasets and then squash using dask
 #####################################################################################################
 # Get the s3 paths to the historic data
-ncHistWorking_paths = [
-    historic_path
-    + "/HRRR_Hist_v2"
-    + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-    + ".zarr"
-    for i in range(his_period, -1, -1)
-]
+if save_type == "S3":
+    local_temp_dir = forecast_process_path + "_s3_temp_downloads"
+    os.makedirs(local_temp_dir, exist_ok=True)
+    ncHistWorking_paths = []
+    for i in range(his_period, -1, -1):
+        timestamp = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        final_zarr_name = f"HRRR_Hist_v3{timestamp}.zarr"
+        extracted_path = download_extract_historic_archive(
+            s3=s3,
+            historic_path=historic_path,
+            final_zarr_name=final_zarr_name,
+            extracted_store_name="HRRR_Hist.zarr",
+            local_temp_dir=local_temp_dir,
+        )
+        if extracted_path is not None:
+            ncHistWorking_paths.append(extracted_path)
+else:
+    ncHistWorking_paths = [
+        historic_path
+        + "/HRRR_Hist_v3"
+        + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        + ".zarr"
+        for i in range(his_period, -1, -1)
+    ]
 
 # Dask Setup
 daskInterpArrays = []
@@ -575,22 +555,9 @@ daskVarArrayList = []
 
 for dask_var in zarr_vars:
     for local_ncpath in ncHistWorking_paths:
-        if save_type == "S3":
-            daskVarArrays.append(
-                da.from_zarr(
-                    local_ncpath,
-                    component=dask_var,
-                    inline_array=True,
-                    storage_options={
-                        "key": aws_access_key_id,
-                        "secret": aws_secret_access_key,
-                    },
-                )
-            )
-        else:
-            daskVarArrays.append(
-                da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
-            )
+        daskVarArrays.append(
+            da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
+        )
     # Stack historic
     daskVarArraysStack = da.stack(daskVarArrays)
 
@@ -632,7 +599,7 @@ for dask_var in zarr_vars:
 
     daskVarArrays = []
 
-    print(dask_var)
+    logger.info(dask_var)
 
 
 # Merge the arrays into a single 4D array
@@ -705,7 +672,7 @@ close_store(zarr_store)
 # 9 (PRATE)
 # 11:14 (PTYPE)
 # 16 (MASSDEN)
-# 17 (REFC)
+# 17 (REFD)
 
 # Add padding for map chunking (100x100)
 daskVarArrayStackDisk_maps = pad_to_chunk_size(daskVarArrayStackDisk, 100)
@@ -742,7 +709,7 @@ for z in (0, 4, 7, 8, 9, 11, 12, 13, 14, 16, 17):
             compute=True,
         )
 
-    print(zarr_vars[z])
+    logger.info(zarr_vars[z])
 
 close_store(zarr_store_maps)
 
@@ -798,4 +765,4 @@ shutil.rmtree(forecast_process_dir)
 
 # Test Read
 T1 = time.time()
-print(T1 - T0)
+logger.info(T1 - T0)

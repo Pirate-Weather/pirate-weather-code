@@ -78,6 +78,12 @@ GEFS = {
     "rain": 7,
 }
 
+AIGEFS = {
+    "prob": 1,
+    "accum": 2,
+    "error": 3,
+}
+
 ECMWF = {
     "pressure": 1,
     "temp": 2,
@@ -170,3 +176,44 @@ DWD_MOSMIX = {
     "ptype": 11,  # PTYPE_surface (WMO code 4677)
     "solar": 12,  # DSWRF_surface (W/m^2)
 }
+
+AIGFS = {
+    "pressure": 1,
+    "temp": 2,
+    "wind_u": 3,
+    "wind_v": 4,
+    "accum": 5,
+}
+
+ECMWF_AIFS = {
+    "pressure": 1,
+    "temp": 2,
+    "dew": 3,
+    "wind_u": 4,
+    "wind_v": 5,
+    "ptype": 6,
+    "cloud": 7,
+    "prob": 8,
+    "accum_mean": 9,
+    "accum_stddev": 10,
+}
+
+# Source names that provide forecast data (i.e. not current-conditions-only or elevation).
+# Used to validate that at least one forecast model is available for a request.
+# "hrrr" is the time-machine key for HRRR; "era5" covers historical time-machine requests.
+FORECAST_SOURCES = frozenset(
+    {
+        "hrrr_0-18",
+        "hrrr_18-48",
+        "hrrr",
+        "nbm",
+        "gfs",
+        "ecmwf_ifs",
+        "gefs",
+        "dwd_mosmix",
+        "aigfs",
+        "aigefs",
+        "ecmwf_aifs",
+        "era5",
+    }
+)

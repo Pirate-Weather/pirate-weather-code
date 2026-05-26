@@ -74,6 +74,7 @@ def calculate_time_indexing(
     timezone_localizer,
     hour_array_grib: np.ndarray,
     time_machine: bool,
+    daily_days: int = 1,
     existing_day_array_grib: np.ndarray | None = None,
 ) -> TimeIndexing:
     """Create day arrays and map each hour to the correct day bucket."""
@@ -100,7 +101,7 @@ def calculate_time_indexing(
         base_time=base_time, timezone_localizer=timezone_localizer, hour=18
     )
 
-    if time_machine:
+    if time_machine and daily_days == 1:
         zero_index = np.full(len(hour_array_grib), int(0))
         return TimeIndexing(
             day_array_grib=day_array_grib,
@@ -180,6 +181,17 @@ def calculate_time_indexing(
             include_end=True,
             value=d,
         )
+
+    # Replace missing values by forward-filling from the last valid day index.
+    # This handles hours that fall outside the expected day ranges, ensuring they are assigned to the most recent valid day index rather than being left as missing.
+    # For DST
+    if np.any(np.isnan(hourly_day_index)):
+        mask = np.isnan(hourly_day_index)
+        idx = np.where(~mask, np.arange(len(hourly_day_index)), 0)
+        np.maximum.accumulate(idx, out=idx)
+        hourly_day_index[mask] = hourly_day_index[idx[mask]]
+        # If there are still NaNs (at the beginning), fill with 0.
+        hourly_day_index[np.isnan(hourly_day_index)] = 0
 
     return TimeIndexing(
         day_array_grib=day_array_grib,
