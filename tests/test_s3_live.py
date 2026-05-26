@@ -3,6 +3,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlencode
 
 import pytest
 from fastapi.testclient import TestClient
@@ -155,3 +156,73 @@ def test_live_s3_forecast_blocks(location):
     assert data["longitude"] == pytest.approx(lon, abs=0.5)
 
     _check_forecast_structure(data)
+
+
+@pytest.mark.skipif(not PW_API, reason="PW_API environment variable not set")
+@pytest.mark.parametrize(
+    ("params", "expected_present", "expected_absent", "expected_lengths"),
+    [
+        (
+            {"blocks": "currently,hourly"},
+            {"currently", "hourly"},
+            {"minutely", "daily", "day_night", "alerts", "flags"},
+            {},
+        ),
+        (
+            {"blocks": "hourly", "hourly_indices": "0,1,2"},
+            {"hourly"},
+            {"currently", "minutely", "daily", "day_night", "alerts", "flags"},
+            {"hourly": 3},
+        ),
+        (
+            {
+                "blocks": "daily,day_night",
+                "daily_indices": "0,1",
+                "day_night_indices": "0,1",
+            },
+            {"daily", "day_night"},
+            {"currently", "minutely", "hourly", "alerts", "flags"},
+            {"daily": 2, "day_night": 2},
+        ),
+        (
+            {
+                "blocks": "currently,hourly,daily,day_night,flags",
+                "hourly_indices": "0,1",
+                "daily_indices": "0,1",
+                "day_night_indices": "0,1",
+            },
+            {"currently", "hourly", "daily", "day_night", "flags"},
+            {"minutely", "alerts"},
+            {"hourly": 2, "daily": 2, "day_night": 2},
+        ),
+    ],
+)
+def test_live_s3_forecast_filtering_queryparams(
+    params, expected_present, expected_absent, expected_lengths
+):
+    client = _get_client()
+
+    lat, lon = (45.0, -75.0)
+    query_string = urlencode(params)
+    response = client.get(f"/forecast/{PW_API}/{lat},{lon}?{query_string}")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["latitude"] == pytest.approx(lat, abs=0.5)
+    assert data["longitude"] == pytest.approx(lon, abs=0.5)
+
+    for block_name in expected_present:
+        assert block_name in data
+
+    for block_name in expected_absent:
+        assert block_name not in data
+
+    if "currently" in data:
+        assert isinstance(data["currently"].get("time"), int)
+
+    if "flags" in data:
+        assert isinstance(data["flags"].get("units"), str)
+
+    for block_name, expected_length in expected_lengths.items():
+        assert block_name in data
+        assert len(data[block_name]["data"]) == expected_length

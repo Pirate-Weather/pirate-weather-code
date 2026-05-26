@@ -219,6 +219,7 @@ setup_venv() {
     grep -v -E '^(cfgrib==|eccodes==|git\+https://github.com/blaylockbk/Herbie.git$)' "${ROOT_DIR}/Docker/requirements-ingest.txt" > "${core_requirements}"
     python -m pip install -r "${core_requirements}"
     python -m pip install -r "${api_requirements}"
+    python -m pip install pytest
     python -m pip install --no-deps "${HERBIE_URL}"
     python -m pip install --no-deps "cfgrib==${CFGRIB_VERSION}"
     python -m pip install cffi findlibs
