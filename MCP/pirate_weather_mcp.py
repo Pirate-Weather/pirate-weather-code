@@ -501,6 +501,68 @@ def get_historical_weather(
     )
 
 
+def _summary_text(block: Any) -> dict[str, Any]:
+    if not isinstance(block, dict):
+        return {"summary": None, "icon": None}
+    return {
+        "summary": block.get("summary"),
+        "icon": block.get("icon"),
+    }
+
+
+@mcp.tool()
+def get_forecast(
+    latitude: Latitude,
+    longitude: Longitude,
+    units: Units = None,
+    lang: Language = None,
+) -> dict[str, Any]:
+    """Return current conditions, near-term forecasts, alerts, and summary text."""
+    forecast = _request_forecast(
+        latitude=latitude,
+        longitude=longitude,
+        units=units,
+        lang=lang,
+        version=2,
+        blocks="currently,minutely,hourly,daily,alerts,flags",
+        hourly_indices="0,1",
+        daily_indices="0,1",
+    )
+    if forecast.get("ok") is False:
+        return forecast
+
+    currently = forecast.get("currently") or {}
+    minutely = forecast.get("minutely") or {}
+    hourly = forecast.get("hourly") or {}
+    daily = forecast.get("daily") or {}
+    hourly_data = hourly.get("data") if isinstance(hourly, dict) else None
+    daily_data = daily.get("data") if isinstance(daily, dict) else None
+    this_hour = hourly_data[0] if hourly_data else None
+    next_hour = hourly_data[1] if hourly_data and len(hourly_data) > 1 else None
+    today = daily_data[0] if daily_data else None
+    tomorrow = daily_data[1] if daily_data and len(daily_data) > 1 else None
+
+    return {
+        "latitude": forecast.get("latitude"),
+        "longitude": forecast.get("longitude"),
+        "timezone": forecast.get("timezone"),
+        "offset": forecast.get("offset"),
+        "currently": currently,
+        "this_hour": this_hour,
+        "next_hour": next_hour,
+        "today": today,
+        "tomorrow": tomorrow,
+        "alerts": forecast.get("alerts", []),
+        "summary_text": {
+            "currently": _summary_text(currently),
+            "minutely": _summary_text(minutely),
+            "hourly": _summary_text(hourly),
+            "daily": _summary_text(daily),
+        },
+        "flags": forecast.get("flags"),
+    }
+
+
 @mcp.tool()
 def get_weather_summary(
     latitude: Latitude,

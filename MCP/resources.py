@@ -5,6 +5,20 @@ from __future__ import annotations
 from typing import Any
 
 FORECAST_BLOCK_METADATA: dict[str, Any] = {
+    "forecast": {
+        "tool": "get_forecast",
+        "description": "Compact forecast response with current conditions, this hour, next hour, today, tomorrow, alerts, and summary text.",
+        "returned_fields": [
+            "currently",
+            "this_hour",
+            "next_hour",
+            "today",
+            "tomorrow",
+            "alerts",
+            "summary_text",
+            "flags",
+        ],
+    },
     "currently": {
         "tool": "get_current_weather",
         "description": "Current conditions for the requested point.",
@@ -119,6 +133,11 @@ FORECAST_BLOCK_METADATA: dict[str, Any] = {
 }
 
 EXAMPLE_USAGE: list[dict[str, Any]] = [
+    {
+        "name": "Current forecast, next hour, tomorrow, and alerts",
+        "tool": "get_forecast",
+        "arguments": {"latitude": 45.4215, "longitude": -75.6972, "units": "ca"},
+    },
     {
         "name": "Current weather in Ottawa",
         "tool": "get_current_weather",

@@ -116,3 +116,69 @@ def test_historical_weather_omits_false_tmextra(mcp_module, monkeypatch):
         tmextra=True,
     )
     assert captured["tmextra"] == 1
+
+
+def test_get_forecast_returns_near_term_forecast_alerts_and_summary_text(
+    mcp_module, monkeypatch
+):
+    captured = {}
+
+    def fake_request_forecast(**kwargs):
+        captured.update(kwargs)
+        return {
+            "latitude": 45.4215,
+            "longitude": -75.6972,
+            "timezone": "America/Toronto",
+            "offset": -4,
+            "currently": {
+                "time": 1730869200,
+                "summary": "Clear",
+                "icon": "clear-day",
+                "temperature": 12,
+            },
+            "minutely": {"summary": "No precipitation", "icon": "clear-day"},
+            "hourly": {
+                "summary": "Clear for the hour",
+                "icon": "clear-day",
+                "data": [
+                    {"time": 1730869200, "summary": "Clear this hour"},
+                    {"time": 1730872800, "summary": "Clear next hour"},
+                ],
+            },
+            "daily": {
+                "summary": "Clear throughout the day",
+                "icon": "clear-day",
+                "data": [
+                    {"time": 1730851200, "summary": "Clear today"},
+                    {"time": 1730937600, "summary": "Clear tomorrow"},
+                ],
+            },
+            "alerts": [{"title": "Wind Advisory"}],
+            "flags": {"units": "si"},
+        }
+
+    monkeypatch.setattr(mcp_module, "_request_forecast", fake_request_forecast)
+
+    result = mcp_module.get_forecast(
+        latitude=45.4215,
+        longitude=-75.6972,
+        units="si",
+        lang="en",
+    )
+
+    assert captured["version"] == 2
+    assert captured["blocks"] == "currently,minutely,hourly,daily,alerts,flags"
+    assert captured["hourly_indices"] == "0,1"
+    assert captured["daily_indices"] == "0,1"
+    assert result["currently"]["summary"] == "Clear"
+    assert result["this_hour"] == {"time": 1730869200, "summary": "Clear this hour"}
+    assert result["next_hour"] == {"time": 1730872800, "summary": "Clear next hour"}
+    assert result["today"] == {"time": 1730851200, "summary": "Clear today"}
+    assert result["tomorrow"] == {"time": 1730937600, "summary": "Clear tomorrow"}
+    assert result["alerts"] == [{"title": "Wind Advisory"}]
+    assert result["summary_text"] == {
+        "currently": {"summary": "Clear", "icon": "clear-day"},
+        "minutely": {"summary": "No precipitation", "icon": "clear-day"},
+        "hourly": {"summary": "Clear for the hour", "icon": "clear-day"},
+        "daily": {"summary": "Clear throughout the day", "icon": "clear-day"},
+    }
