@@ -142,7 +142,12 @@ EXAMPLE_USAGE: list[dict[str, Any]] = [
     {
         "name": "Daily forecast for a week",
         "tool": "get_daily_forecast",
-        "arguments": {"latitude": 51.5072, "longitude": -0.1276, "days": 7, "units": "uk2"},
+        "arguments": {
+            "latitude": 51.5072,
+            "longitude": -0.1276,
+            "days": 7,
+            "units": "uk2",
+        },
     },
     {
         "name": "Historical weather by UNIX timestamp",

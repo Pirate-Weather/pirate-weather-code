@@ -65,7 +65,9 @@ def _request_forecast(
     **params: Any,
 ) -> dict[str, Any]:
     query = urlencode(_clean_params(params), doseq=False)
-    url = f"{_base_url()}/forecast/{ROUTE_API_KEY}/{_location(latitude, longitude, time)}"
+    url = (
+        f"{_base_url()}/forecast/{ROUTE_API_KEY}/{_location(latitude, longitude, time)}"
+    )
     if query:
         url = f"{url}?{query}"
 
@@ -363,7 +365,9 @@ def get_subscription_status() -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the Pirate Weather FastMCP proxy server.")
+    parser = argparse.ArgumentParser(
+        description="Run the Pirate Weather FastMCP proxy server."
+    )
     parser.add_argument(
         "--transport",
         default=os.environ.get("PW_MCP_TRANSPORT", "stdio"),
