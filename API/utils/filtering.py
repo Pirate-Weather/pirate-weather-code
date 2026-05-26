@@ -87,12 +87,12 @@ def apply_blocks_param(
     all_excludes = existing_excludes | blocks_to_exclude
     new_exclude = ",".join(all_excludes) if all_excludes else None
 
-    # day_night is added to include when explicitly requested.
-    new_include = include
+    existing_includes = set(include.split(",") if include else [])
     if "day_night" in requested:
-        existing_includes = set(include.split(",") if include else [])
         existing_includes.add("day_night_forecast")
-        new_include = ",".join(existing_includes)
+    else:
+        existing_includes.discard("day_night_forecast")
+    new_include = ",".join(existing_includes) if existing_includes else None
 
     return new_exclude, new_include
 
