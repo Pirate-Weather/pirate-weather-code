@@ -20,12 +20,12 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from MCP import __version__
+from MCP.resources import EXAMPLE_USAGE, FORECAST_BLOCK_METADATA
+
 try:
     from fastmcp import FastMCP
 except ImportError:  # pragma: no cover - compatibility with the official MCP SDK
-    from mcp.server.fastmcp import FastMCP
-
-from MCP.resources import EXAMPLE_USAGE, FORECAST_BLOCK_METADATA
     from mcp.server.fastmcp import FastMCP
 
 
@@ -72,6 +72,7 @@ def _request_forecast(
     if query:
         url = f"{url}?{query}"
 
+    request = Request(url, headers={"Accept": "application/json"})
     try:
         with urlopen(request, timeout=timeout) as response:
             body = response.read().decode("utf-8")
@@ -86,7 +87,6 @@ def _request_forecast(
     except json.JSONDecodeError as exc:
         return {"ok": False, "error": f"Invalid JSON response: {exc}"}
     except (OSError, URLError) as exc:
-        return {"ok": False, "error": str(exc)}
         return {"ok": False, "error": str(exc)}
 
 
@@ -135,18 +135,7 @@ def get_current_weather(
     units: str | None = None,
     lang: str | None = None,
     version: int | None = 2,
-    """Return the current weather block for a latitude and longitude.
-
-    Parameters:
-    - latitude (float): Latitude of the location.
-    - longitude (float): Longitude of the location.
-    - units (str | None): Unit system to use (e.g., "us", "si", "ca", "uk2").
-    - lang (str | None): Language for text summaries.
-    - version (int | None): API version to use.
-
-    Returns:
-    - dict[str, Any]: The current weather forecast block.
-    """
+) -> dict[str, Any]:
     """Return the current weather block for a latitude and longitude."""
     return _forecast_block(
         "currently",
