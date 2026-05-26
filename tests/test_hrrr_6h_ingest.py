@@ -10,7 +10,6 @@ import zarr
 
 from API.constants.shared_const import INGEST_VERSION_STR
 
-
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "API" / "HRRR_6H_Local_Ingest.py"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_VAR_COUNT = 20
@@ -71,7 +70,9 @@ def test_hrrr_6h_ingest_produces_zarr():
         assert zarr_array.shape[0] == EXPECTED_VAR_COUNT, (
             f"Expected {EXPECTED_VAR_COUNT} variables, got shape {zarr_array.shape}"
         )
-        assert zarr_array.shape[1] > 0, f"Expected time dimension > 0, got {zarr_array.shape}"
+        assert zarr_array.shape[1] > 0, (
+            f"Expected time dimension > 0, got {zarr_array.shape}"
+        )
         assert zarr_array.shape[2] > 0 and zarr_array.shape[3] > 0, (
             f"Expected non-empty spatial dimensions, got {zarr_array.shape}"
         )
