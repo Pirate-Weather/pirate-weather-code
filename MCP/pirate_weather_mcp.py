@@ -20,6 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from MCP import __version__
 from MCP.resources import EXAMPLE_USAGE, FORECAST_BLOCK_METADATA
 
 try:
@@ -32,7 +33,7 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8083"
 ROUTE_API_KEY = "mcp-proxy"
 DEFAULT_TEST_LOCATION = (45.4215, -75.6972)
 
-mcp = FastMCP("Pirate Weather")
+mcp = FastMCP("Pirate Weather", version=__version__)
 
 
 def _base_url() -> str:
