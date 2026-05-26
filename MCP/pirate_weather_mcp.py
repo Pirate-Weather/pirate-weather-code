@@ -135,7 +135,18 @@ def get_current_weather(
     units: str | None = None,
     lang: str | None = None,
     version: int | None = 2,
-) -> dict[str, Any]:
+    """Return the current weather block for a latitude and longitude.
+
+    Parameters:
+    - latitude (float): Latitude of the location.
+    - longitude (float): Longitude of the location.
+    - units (str | None): Unit system to use (e.g., "us", "si", "ca", "uk2").
+    - lang (str | None): Language for text summaries.
+    - version (int | None): API version to use.
+
+    Returns:
+    - dict[str, Any]: The current weather forecast block.
+    """
     """Return the current weather block for a latitude and longitude."""
     return _forecast_block(
         "currently",
