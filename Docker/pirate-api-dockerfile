@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir -r /app/requirements-api.txt
 
 # Copy the run scripts from the API directory (relative to the build context)
 COPY API /app/API
+COPY MCP /app/MCP
 
 ENTRYPOINT ["uvicorn"]
 
