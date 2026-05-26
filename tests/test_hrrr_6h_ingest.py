@@ -6,6 +6,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
 import zarr
 
 from API.constants.shared_const import INGEST_VERSION_STR
@@ -13,6 +14,7 @@ from API.constants.shared_const import INGEST_VERSION_STR
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "API" / "HRRR_6H_Local_Ingest.py"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_VAR_COUNT = 20
+LOCAL_TEST_ENV_VAR = "PW_RUN_LOCAL_INGEST_TESTS"
 
 
 def _build_pythonpath(env: dict[str, str]) -> str:
@@ -21,6 +23,13 @@ def _build_pythonpath(env: dict[str, str]) -> str:
     return repo_root if not existing_path else repo_root + os.pathsep + existing_path
 
 
+@pytest.mark.skipif(
+    os.getenv(LOCAL_TEST_ENV_VAR) != "1",
+    reason=(
+        "HRRR_6H live ingest test requires a local wgrib2-enabled environment; "
+        f"set {LOCAL_TEST_ENV_VAR}=1 to run it"
+    ),
+)
 def test_hrrr_6h_ingest_produces_zarr():
     """Run the live HRRR_6H ingest script and verify it writes a readable zarr."""
     with tempfile.TemporaryDirectory() as tmpdir:
