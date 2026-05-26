@@ -117,7 +117,7 @@ def _split_public_url(public_url: str | None) -> SplitResult | None:
         return None
 
     parsed = urlsplit(public_url.rstrip("/"))
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         msg = "PW_MCP_PUBLIC_URL must be an absolute http(s) URL, such as https://mcp.pirateweather.net/mcp"
         raise ValueError(msg)
     return parsed
