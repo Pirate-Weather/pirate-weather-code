@@ -127,7 +127,9 @@ class TestApplyBlocksParam:
         assert "currently" in excluded
 
     def test_no_day_night_in_include_when_not_requested(self):
-        _, new_include = apply_blocks_param("currently,hourly", None, "day_night_forecast,some_other_flag")
+        _, new_include = apply_blocks_param(
+            "currently,hourly", None, "day_night_forecast,some_other_flag"
+        )
         assert new_include is not None
         parts = new_include.split(",")
         assert "day_night_forecast" not in parts
