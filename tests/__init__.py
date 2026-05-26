@@ -7,7 +7,6 @@ import os as _os
 import warnings as _warnings
 from pathlib import Path as _Path
 
-
 _ENV_DEFAULT_KEYS = frozenset({"PW_API", "AWS_KEY", "AWS_SECRET", "s3_bucket"})
 
 
@@ -29,11 +28,7 @@ def _load_env_defaults() -> None:
 
         key, value = line.split("=", 1)
         key = key.strip()
-        if (
-            not key
-            or key not in _ENV_DEFAULT_KEYS
-            or key in _os.environ
-        ):
+        if not key or key not in _ENV_DEFAULT_KEYS or key in _os.environ:
             continue
 
         _os.environ[key] = value.strip().strip('"').strip("'")
