@@ -51,6 +51,7 @@ Environment variables:
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 from typing import Annotated, Any, Literal
@@ -283,6 +284,32 @@ def _location(latitude: float, longitude: float, time: str | int | None = None) 
     return location
 
 
+def _iso_from_unix_time(value: Any) -> str | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+
+    try:
+        return datetime.datetime.fromtimestamp(value, datetime.UTC).isoformat()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def _with_iso_times(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_with_iso_times(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    next_value: dict[str, Any] = {}
+    for key, item in value.items():
+        next_value[key] = _with_iso_times(item)
+        if key == "time":
+            time_iso = _iso_from_unix_time(item)
+            if time_iso is not None:
+                next_value["timeISO"] = time_iso
+    return next_value
+
+
 def _request_forecast(
     *,
     latitude: float,
@@ -302,7 +329,7 @@ def _request_forecast(
     try:
         with urlopen(request, timeout=timeout) as response:
             body = response.read().decode("utf-8")
-            return json.loads(body)
+            return _with_iso_times(json.loads(body))
     except HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         try:
@@ -320,14 +347,16 @@ def _forecast_block(block: str, **kwargs: Any) -> dict[str, Any]:
     forecast = _request_forecast(blocks=block, **kwargs)
     if forecast.get("ok") is False:
         return forecast
-    return {
-        "latitude": forecast.get("latitude"),
-        "longitude": forecast.get("longitude"),
-        "timezone": forecast.get("timezone"),
-        "offset": forecast.get("offset"),
-        block: forecast.get(block),
-        "flags": forecast.get("flags"),
-    }
+    return _with_iso_times(
+        {
+            "latitude": forecast.get("latitude"),
+            "longitude": forecast.get("longitude"),
+            "timezone": forecast.get("timezone"),
+            "offset": forecast.get("offset"),
+            block: forecast.get(block),
+            "flags": forecast.get("flags"),
+        }
+    )
 
 
 @mcp.resource(
@@ -542,25 +571,27 @@ def get_forecast(
     today = daily_data[0] if daily_data else None
     tomorrow = daily_data[1] if daily_data and len(daily_data) > 1 else None
 
-    return {
-        "latitude": forecast.get("latitude"),
-        "longitude": forecast.get("longitude"),
-        "timezone": forecast.get("timezone"),
-        "offset": forecast.get("offset"),
-        "currently": currently,
-        "this_hour": this_hour,
-        "next_hour": next_hour,
-        "today": today,
-        "tomorrow": tomorrow,
-        "alerts": forecast.get("alerts", []),
-        "summary_text": {
-            "currently": _summary_text(currently),
-            "minutely": _summary_text(minutely),
-            "hourly": _summary_text(hourly),
-            "daily": _summary_text(daily),
-        },
-        "flags": forecast.get("flags"),
-    }
+    return _with_iso_times(
+        {
+            "latitude": forecast.get("latitude"),
+            "longitude": forecast.get("longitude"),
+            "timezone": forecast.get("timezone"),
+            "offset": forecast.get("offset"),
+            "currently": currently,
+            "this_hour": this_hour,
+            "next_hour": next_hour,
+            "today": today,
+            "tomorrow": tomorrow,
+            "alerts": forecast.get("alerts", []),
+            "summary_text": {
+                "currently": _summary_text(currently),
+                "minutely": _summary_text(minutely),
+                "hourly": _summary_text(hourly),
+                "daily": _summary_text(daily),
+            },
+            "flags": forecast.get("flags"),
+        }
+    )
 
 
 @mcp.tool()
@@ -585,32 +616,34 @@ def get_weather_summary(
     minutely = forecast.get("minutely") or {}
     hourly = forecast.get("hourly") or {}
     daily = forecast.get("daily") or {}
-    return {
-        "latitude": forecast.get("latitude"),
-        "longitude": forecast.get("longitude"),
-        "timezone": forecast.get("timezone"),
-        "current": {
-            "time": currently.get("time"),
-            "summary": currently.get("summary"),
-            "icon": currently.get("icon"),
-            "temperature": currently.get("temperature"),
-            "apparentTemperature": currently.get("apparentTemperature"),
-            "precipProbability": currently.get("precipProbability"),
-        },
-        "minutely": {
-            "summary": minutely.get("summary"),
-            "icon": minutely.get("icon"),
-        },
-        "hourly": {
-            "summary": hourly.get("summary"),
-            "icon": hourly.get("icon"),
-        },
-        "daily": {
-            "summary": daily.get("summary"),
-            "icon": daily.get("icon"),
-        },
-        "alerts": forecast.get("alerts", []),
-    }
+    return _with_iso_times(
+        {
+            "latitude": forecast.get("latitude"),
+            "longitude": forecast.get("longitude"),
+            "timezone": forecast.get("timezone"),
+            "current": {
+                "time": currently.get("time"),
+                "summary": currently.get("summary"),
+                "icon": currently.get("icon"),
+                "temperature": currently.get("temperature"),
+                "apparentTemperature": currently.get("apparentTemperature"),
+                "precipProbability": currently.get("precipProbability"),
+            },
+            "minutely": {
+                "summary": minutely.get("summary"),
+                "icon": minutely.get("icon"),
+            },
+            "hourly": {
+                "summary": hourly.get("summary"),
+                "icon": hourly.get("icon"),
+            },
+            "daily": {
+                "summary": daily.get("summary"),
+                "icon": daily.get("icon"),
+            },
+            "alerts": forecast.get("alerts", []),
+        }
+    )
 
 
 @mcp.tool()
@@ -634,14 +667,16 @@ def test_api_connection(
             "error": response.get("error"),
             "status": response.get("status"),
         }
-    return {
-        "ok": True,
-        "base_url": _base_url(),
-        "latitude": response.get("latitude"),
-        "longitude": response.get("longitude"),
-        "timezone": response.get("timezone"),
-        "has_currently": "currently" in response,
-    }
+    return _with_iso_times(
+        {
+            "ok": True,
+            "base_url": _base_url(),
+            "latitude": response.get("latitude"),
+            "longitude": response.get("longitude"),
+            "timezone": response.get("timezone"),
+            "has_currently": "currently" in response,
+        }
+    )
 
 
 @mcp.tool()
@@ -650,14 +685,16 @@ def get_subscription_status() -> dict[str, Any]:
 
     The local responseLocal API does not expose quota or subscription metadata.
     """
-    return {
-        "ok": True,
-        "base_url": _base_url(),
-        "route_api_key": ROUTE_API_KEY,
-        "subscription_metadata_available": False,
-        "message": "responseLocal does not expose subscription or quota metadata.",
-        "connection": test_api_connection(),
-    }
+    return _with_iso_times(
+        {
+            "ok": True,
+            "base_url": _base_url(),
+            "route_api_key": ROUTE_API_KEY,
+            "subscription_metadata_available": False,
+            "message": "responseLocal does not expose subscription or quota metadata.",
+            "connection": test_api_connection(),
+        }
+    )
 
 
 def main() -> None:

@@ -118,6 +118,25 @@ def test_historical_weather_omits_false_tmextra(mcp_module, monkeypatch):
     assert captured["tmextra"] == 1
 
 
+def test_with_iso_times_adds_time_iso_after_numeric_time(mcp_module):
+    result = mcp_module._with_iso_times(
+        {
+            "time": 1730869200,
+            "summary": "Clear",
+            "nested": [
+                {"time": 1730872800, "summary": "Still clear"},
+                {"time": "not-a-unix-time"},
+            ],
+        }
+    )
+
+    assert list(result) == ["time", "timeISO", "summary", "nested"]
+    assert result["timeISO"] == "2024-11-06T05:00:00+00:00"
+    assert list(result["nested"][0]) == ["time", "timeISO", "summary"]
+    assert result["nested"][0]["timeISO"] == "2024-11-06T06:00:00+00:00"
+    assert "timeISO" not in result["nested"][1]
+
+
 def test_get_forecast_returns_near_term_forecast_alerts_and_summary_text(
     mcp_module, monkeypatch
 ):
@@ -171,10 +190,27 @@ def test_get_forecast_returns_near_term_forecast_alerts_and_summary_text(
     assert captured["hourly_indices"] == "0,1"
     assert captured["daily_indices"] == "0,1"
     assert result["currently"]["summary"] == "Clear"
-    assert result["this_hour"] == {"time": 1730869200, "summary": "Clear this hour"}
-    assert result["next_hour"] == {"time": 1730872800, "summary": "Clear next hour"}
-    assert result["today"] == {"time": 1730851200, "summary": "Clear today"}
-    assert result["tomorrow"] == {"time": 1730937600, "summary": "Clear tomorrow"}
+    assert result["currently"]["timeISO"] == "2024-11-06T05:00:00+00:00"
+    assert result["this_hour"] == {
+        "time": 1730869200,
+        "timeISO": "2024-11-06T05:00:00+00:00",
+        "summary": "Clear this hour",
+    }
+    assert result["next_hour"] == {
+        "time": 1730872800,
+        "timeISO": "2024-11-06T06:00:00+00:00",
+        "summary": "Clear next hour",
+    }
+    assert result["today"] == {
+        "time": 1730851200,
+        "timeISO": "2024-11-06T00:00:00+00:00",
+        "summary": "Clear today",
+    }
+    assert result["tomorrow"] == {
+        "time": 1730937600,
+        "timeISO": "2024-11-07T00:00:00+00:00",
+        "summary": "Clear tomorrow",
+    }
     assert result["alerts"] == [{"title": "Wind Advisory"}]
     assert result["summary_text"] == {
         "currently": {"summary": "Clear", "icon": "clear-day"},
