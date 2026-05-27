@@ -3,7 +3,8 @@ from unittest.mock import MagicMock
 import numpy as np
 
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
-from API.hourly.block import build_hourly_block, calculate_fosberg_fire_index
+from API.hourly.block import build_hourly_block
+from API.utils.fire import calculate_fosberg_fire_index
 
 
 def test_build_hourly_block_structure():

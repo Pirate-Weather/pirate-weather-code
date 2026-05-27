@@ -39,6 +39,7 @@ from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
 from API.legacy.hourly import apply_legacy_hourly_text
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
+from API.utils.fire import calculate_fosberg_fire_index
 
 
 def _calculate_intensity_prob(
@@ -461,47 +462,6 @@ def _calculate_derived_metrics(
     ]
 
     return dayZeroRain, dayZeroSnow, dayZeroIce
-
-
-def calculate_fosberg_fire_index(
-    temperature_c: np.ndarray, humidity_fraction: np.ndarray, wind_speed_ms: np.ndarray
-) -> np.ndarray:
-    """Calculate Fosberg Fire Weather Index using SI inputs."""
-    # Formula source:
-    # https://a.atmos.washington.edu/wrfrt/descript/definitions/fosbergindex.html
-    temp_f = (np.asarray(temperature_c) * 9 / 5) + 32
-    rh = np.clip(np.asarray(humidity_fraction) * 100, 0, 100)
-    wind_mph = np.maximum(np.asarray(wind_speed_ms) * 2.2369362921, 0)
-
-    fire_index = np.full(temp_f.shape, np.nan, dtype=float)
-    valid = np.isfinite(temp_f) & np.isfinite(rh) & np.isfinite(wind_mph)
-    if not np.any(valid):
-        return fire_index
-
-    fuel_moisture = np.full(temp_f.shape, np.nan, dtype=float)
-    low_rh = valid & (rh < 10)
-    mid_rh = valid & (rh >= 10) & (rh <= 50)
-    high_rh = valid & (rh > 50)
-
-    fuel_moisture[low_rh] = (
-        0.03229 + 0.281073 * rh[low_rh] - 0.000578 * rh[low_rh] * temp_f[low_rh]
-    )
-    fuel_moisture[mid_rh] = 2.22749 + 0.160107 * rh[mid_rh] - 0.014784 * temp_f[mid_rh]
-    fuel_moisture[high_rh] = (
-        21.0606
-        + 0.005565 * rh[high_rh] ** 2
-        - 0.00035 * rh[high_rh] * temp_f[high_rh]
-        - 0.483199 * rh[high_rh]
-    )
-
-    eta = (
-        1
-        - 2 * (fuel_moisture / 30)
-        + 1.5 * (fuel_moisture / 30) ** 2
-        - 0.5 * (fuel_moisture / 30) ** 3
-    )
-    fire_index[valid] = eta[valid] * np.sqrt(1 + wind_mph[valid] ** 2) / 0.3002
-    return np.clip(fire_index, CLIP_FIRE["min"], CLIP_FIRE["max"])
 
 
 def _build_hourly_display(

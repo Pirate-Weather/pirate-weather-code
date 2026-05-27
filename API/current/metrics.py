@@ -44,10 +44,10 @@ from API.constants.model_const import (
     RTMA_RU,
 )
 from API.constants.shared_const import MISSING_DATA
-from API.hourly.block import calculate_fosberg_fire_index
 from API.legacy.current import get_legacy_current_summary
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
+from API.utils.fire import calculate_fosberg_fire_index
 from API.utils.source_priority import should_gfs_precede_dwd
 
 
