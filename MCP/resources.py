@@ -127,7 +127,7 @@ FORECAST_BLOCK_METADATA: dict[str, Any] = {
         ],
     },
     "flags": {
-        "description": "Response metadata including units, version, and source metadata.",
+        "description": "Response metadata including units and source metadata.",
         "returned_with_block_tools": True,
     },
 }
@@ -142,6 +142,11 @@ EXAMPLE_USAGE: list[dict[str, Any]] = [
         "name": "Current weather in Ottawa",
         "tool": "get_current_weather",
         "arguments": {"latitude": 45.4215, "longitude": -75.6972, "units": "ca"},
+    },
+    {
+        "name": "Current weather by city and country",
+        "tool": "get_current_weather",
+        "arguments": {"city": "Ottawa", "country": "Canada", "units": "ca"},
     },
     {
         "name": "Next 12 hourly forecasts",

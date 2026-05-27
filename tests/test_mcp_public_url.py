@@ -1,5 +1,7 @@
 import asyncio
 import importlib
+import inspect
+import json
 import sys
 import types
 
@@ -185,7 +187,7 @@ def test_get_forecast_returns_near_term_forecast_alerts_and_summary_text(
         lang="en",
     )
 
-    assert captured["version"] == 2
+    assert "version" not in captured
     assert captured["blocks"] == "currently,minutely,hourly,daily,alerts,flags"
     assert captured["hourly_indices"] == "0,1"
     assert captured["daily_indices"] == "0,1"
@@ -218,3 +220,55 @@ def test_get_forecast_returns_near_term_forecast_alerts_and_summary_text(
         "hourly": {"summary": "Clear for the hour", "icon": "clear-day"},
         "daily": {"summary": "Clear throughout the day", "icon": "clear-day"},
     }
+
+
+def test_city_country_location_is_forwarded_to_api(mcp_module, monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return json.dumps({"ok": True}).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setenv("PW_MCP_BASE_URL", "http://api.local")
+    monkeypatch.setattr(mcp_module, "urlopen", fake_urlopen)
+
+    assert mcp_module._request_forecast(
+        city="New York",
+        country="US",
+    ) == {"ok": True}
+
+    assert captured["url"] == (
+        "http://api.local/forecast/mcp-proxy/New%20York,US?version=2"
+    )
+
+
+def test_public_tool_signatures_do_not_expose_version(mcp_module):
+    tool_names = [
+        "get_alerts",
+        "get_current_weather",
+        "get_daily_forecast",
+        "get_forecast",
+        "get_historical_weather",
+        "get_hourly_forecast",
+        "get_minutely_forecast",
+        "get_tomorrow_forecast",
+        "get_weather_summary",
+        "test_api_connection",
+    ]
+
+    for tool_name in tool_names:
+        assert (
+            "version"
+            not in inspect.signature(getattr(mcp_module, tool_name)).parameters
+        )

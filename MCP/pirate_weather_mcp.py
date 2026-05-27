@@ -56,7 +56,7 @@ import json
 import os
 from typing import Annotated, Any, Literal
 from urllib.error import HTTPError, URLError
-from urllib.parse import SplitResult, urlencode, urlsplit
+from urllib.parse import SplitResult, quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from pydantic import Field
@@ -72,6 +72,7 @@ except ImportError:  # pragma: no cover - compatibility with the official MCP SD
 
 # Internal Pirate Weather API target used by MCP tools.
 DEFAULT_BASE_URL = "http://127.0.0.1:8083"
+DEFAULT_API_VERSION = 2
 ROUTE_API_KEY = "mcp-proxy"
 DEFAULT_TEST_LOCATION = (45.4215, -75.6972)
 
@@ -195,6 +196,11 @@ TimeMachineExtra = Annotated[
         ),
     ),
 ]
+City = Annotated[str | None, Field(description="City name to geocode.")]
+Country = Annotated[
+    str | None,
+    Field(description="Country name or code used with city geocoding."),
+]
 
 
 class PublicUrlMiddleware:
@@ -277,8 +283,21 @@ def _csv_indices(count: int, start: int = 0) -> str | None:
     return ",".join(str(i) for i in range(start, start + count))
 
 
-def _location(latitude: float, longitude: float, time: str | int | None = None) -> str:
-    location = f"{latitude},{longitude}"
+def _location(
+    *,
+    latitude: Latitude | None = None,
+    longitude: Longitude | None = None,
+    city: str | None = None,
+    country: str | None = None,
+    time: str | int | None = None,
+) -> str | None:
+    if latitude is not None and longitude is not None:
+        location = f"{latitude},{longitude}"
+    elif city and country:
+        location = f"{city},{country}"
+    else:
+        return None
+
     if time is not None:
         location = f"{location},{time}"
     return location
@@ -312,16 +331,33 @@ def _with_iso_times(value: Any) -> Any:
 
 def _request_forecast(
     *,
-    latitude: float,
-    longitude: float,
+    latitude: Latitude | None = None,
+    longitude: Longitude | None = None,
+    city: str | None = None,
+    country: str | None = None,
     time: str | int | None = None,
     timeout: float = 30.0,
     **params: Any,
 ) -> dict[str, Any]:
-    query = urlencode(_clean_params(params), doseq=False)
-    url = (
-        f"{_base_url()}/forecast/{ROUTE_API_KEY}/{_location(latitude, longitude, time)}"
+    location = _location(
+        latitude=latitude,
+        longitude=longitude,
+        city=city,
+        country=country,
+        time=time,
     )
+    if location is None:
+        return {
+            "ok": False,
+            "status": 400,
+            "error": "Provide either latitude and longitude, or city and country.",
+        }
+
+    query = urlencode(
+        _clean_params({"version": DEFAULT_API_VERSION, **params}), doseq=False
+    )
+    path_location = quote(location, safe=",")
+    url = f"{_base_url()}/forecast/{ROUTE_API_KEY}/{path_location}"
     if query:
         url = f"{url}?{query}"
 
@@ -385,26 +421,31 @@ def tool_usage_examples() -> str:
 
 @mcp.tool()
 def get_current_weather(
-    latitude: Latitude,
-    longitude: Longitude,
+    latitude: Latitude | None = None,
+    longitude: Longitude | None = None,
+    city: City = None,
+    country: Country = None,
     units: Units = None,
     lang: Language = None,
 ) -> dict[str, Any]:
-    """Return the current weather block for a latitude and longitude."""
+    """Return the current weather block for coordinates or a city/country pair."""
     return _forecast_block(
         "currently",
         latitude=latitude,
         longitude=longitude,
+        city=city,
+        country=country,
         units=units,
         lang=lang,
-        version=2,
     )
 
 
 @mcp.tool()
 def get_hourly_forecast(
-    latitude: Latitude,
-    longitude: Longitude,
+    latitude: Latitude | None = None,
+    longitude: Longitude | None = None,
+    city: City = None,
+    country: Country = None,
     hours: Annotated[
         int,
         Field(
@@ -423,9 +464,10 @@ def get_hourly_forecast(
         "hourly",
         latitude=latitude,
         longitude=longitude,
+        city=city,
+        country=country,
         units=units,
         lang=lang,
-        version=2,
         extend="hourly" if hours > 48 else None,
         hourly_indices=_csv_indices(hours),
     )
@@ -433,8 +475,10 @@ def get_hourly_forecast(
 
 @mcp.tool()
 def get_minutely_forecast(
-    latitude: Latitude,
-    longitude: Longitude,
+    latitude: Latitude | None = None,
+    longitude: Longitude | None = None,
+    city: City = None,
+    country: Country = None,
     units: Units = None,
     lang: Language = None,
 ) -> dict[str, Any]:
@@ -443,16 +487,19 @@ def get_minutely_forecast(
         "minutely",
         latitude=latitude,
         longitude=longitude,
+        city=city,
+        country=country,
         units=units,
         lang=lang,
-        version=2,
     )
 
 
 @mcp.tool()
 def get_tomorrow_forecast(
-    latitude: Latitude,
-    longitude: Longitude,
+    latitude: Latitude | None = None,
+    longitude: Longitude | None = None,
+    city: City = None,
+    country: Country = None,
     units: Units = None,
     lang: Language = None,
 ) -> dict[str, Any]:
@@ -461,17 +508,20 @@ def get_tomorrow_forecast(
         "daily",
         latitude=latitude,
         longitude=longitude,
+        city=city,
+        country=country,
         units=units,
         lang=lang,
-        version=2,
         daily_indices="1",
     )
 
 
 @mcp.tool()
 def get_daily_forecast(
-    latitude: Latitude,
-    longitude: Longitude,
+    latitude: Latitude | None = None,
+    longitude: Longitude | None = None,
+    city: City = None,
+    country: Country = None,
     days: Annotated[
         int,
         Field(ge=1, le=7, description="Number of daily forecast entries to return."),
@@ -484,36 +534,42 @@ def get_daily_forecast(
         "daily",
         latitude=latitude,
         longitude=longitude,
+        city=city,
+        country=country,
         units=units,
         lang=lang,
-        version=2,
         daily_indices=_csv_indices(days),
     )
 
 
 @mcp.tool()
 def get_alerts(
-    latitude: Latitude,
-    longitude: Longitude,
+    latitude: Latitude | None = None,
+    longitude: Longitude | None = None,
+    city: City = None,
+    country: Country = None,
     units: Units = None,
     lang: Language = None,
 ) -> dict[str, Any]:
-    """Return weather alerts for a latitude and longitude."""
+    """Return weather alerts for coordinates or a city/country pair."""
     return _forecast_block(
         "alerts",
         latitude=latitude,
         longitude=longitude,
+        city=city,
+        country=country,
         units=units,
         lang=lang,
-        version=2,
     )
 
 
 @mcp.tool()
 def get_historical_weather(
-    latitude: Latitude,
-    longitude: Longitude,
     time: HistoricalTime,
+    latitude: Latitude | None = None,
+    longitude: Longitude | None = None,
+    city: City = None,
+    country: Country = None,
     units: Units = None,
     lang: Language = None,
     tmextra: TimeMachineExtra = False,
@@ -522,10 +578,11 @@ def get_historical_weather(
     return _request_forecast(
         latitude=latitude,
         longitude=longitude,
+        city=city,
+        country=country,
         time=time,
         units=units,
         lang=lang,
-        version=2,
         tmextra=1 if tmextra else None,
     )
 
@@ -541,8 +598,10 @@ def _summary_text(block: Any) -> dict[str, Any]:
 
 @mcp.tool()
 def get_forecast(
-    latitude: Latitude,
-    longitude: Longitude,
+    latitude: Latitude | None = None,
+    longitude: Longitude | None = None,
+    city: City = None,
+    country: Country = None,
     units: Units = None,
     lang: Language = None,
 ) -> dict[str, Any]:
@@ -550,9 +609,10 @@ def get_forecast(
     forecast = _request_forecast(
         latitude=latitude,
         longitude=longitude,
+        city=city,
+        country=country,
         units=units,
         lang=lang,
-        version=2,
         blocks="currently,minutely,hourly,daily,alerts,flags",
         hourly_indices="0,1",
         daily_indices="0,1",
@@ -596,8 +656,10 @@ def get_forecast(
 
 @mcp.tool()
 def get_weather_summary(
-    latitude: Latitude,
-    longitude: Longitude,
+    latitude: Latitude | None = None,
+    longitude: Longitude | None = None,
+    city: City = None,
+    country: Country = None,
     units: Units = None,
     lang: Language = None,
 ) -> dict[str, Any]:
@@ -605,9 +667,10 @@ def get_weather_summary(
     forecast = _request_forecast(
         latitude=latitude,
         longitude=longitude,
+        city=city,
+        country=country,
         units=units,
         lang=lang,
-        version=2,
     )
     if forecast.get("ok") is False:
         return forecast
@@ -657,7 +720,6 @@ def test_api_connection(
         latitude=latitude,
         longitude=longitude,
         blocks="currently",
-        version=2,
         timeout=timeout,
     )
     if response.get("ok") is False:
