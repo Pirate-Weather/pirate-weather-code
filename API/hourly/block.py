@@ -486,9 +486,7 @@ def calculate_fosberg_fire_index(
     fuel_moisture[low_rh] = (
         0.03229 + 0.281073 * rh[low_rh] - 0.000578 * rh[low_rh] * temp_f[low_rh]
     )
-    fuel_moisture[mid_rh] = (
-        2.22749 + 0.160107 * rh[mid_rh] - 0.014784 * temp_f[mid_rh]
-    )
+    fuel_moisture[mid_rh] = 2.22749 + 0.160107 * rh[mid_rh] - 0.014784 * temp_f[mid_rh]
     fuel_moisture[high_rh] = (
         21.0606
         + 0.005565 * rh[high_rh] ** 2
