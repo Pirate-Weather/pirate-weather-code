@@ -13,7 +13,6 @@ from API.constants.model_const import (
     GFS,
     HRRR,
     NBM,
-    NBM_FIRE_INDEX,
 )
 from API.utils.source_priority import should_gfs_precede_dwd
 
@@ -780,10 +779,7 @@ def prepare_data_inputs(
         )
 
     # --- fire_inputs ---
-    fire_inputs = _stack_fields(
-        num_hours,
-        nbm_fire_merged[:, NBM_FIRE_INDEX] if nbm_fire_merged is not None else None,
-    )
+    fire_inputs = np.full((num_hours, 1), np.nan)
 
     # --- feels_like_inputs ---
     feels_like_inputs = _stack_fields(

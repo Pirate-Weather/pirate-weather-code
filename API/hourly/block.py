@@ -39,6 +39,7 @@ from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
 from API.legacy.hourly import apply_legacy_hourly_text
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
+from API.utils.fire import calculate_fosberg_fire_index
 
 
 def _calculate_intensity_prob(
@@ -332,6 +333,11 @@ def _calculate_derived_metrics(
         InterPhour[:, DATA_HOURLY["humidity"]],
         InterPhour[:, DATA_HOURLY["wind"]],
         solar=InterPhour[:, DATA_HOURLY["solar"]],
+    )
+    InterPhour[:, DATA_HOURLY["fire"]] = calculate_fosberg_fire_index(
+        InterPhour[:, DATA_HOURLY["temp"]],
+        InterPhour[:, DATA_HOURLY["humidity"]],
+        InterPhour[:, DATA_HOURLY["wind"]],
     )
 
     # Apply temperature-based fallback for precipitation type when type is "none" but intensity exists
