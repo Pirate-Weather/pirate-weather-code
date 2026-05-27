@@ -565,9 +565,9 @@ def get_alerts(
 
 @mcp.tool()
 def get_historical_weather(
+    time: HistoricalTime,
     latitude: Latitude | None = None,
     longitude: Longitude | None = None,
-    time: HistoricalTime | None = None,
     city: City = None,
     country: Country = None,
     units: Units = None,
@@ -575,8 +575,6 @@ def get_historical_weather(
     tmextra: TimeMachineExtra = False,
 ) -> dict[str, Any]:
     """Return a time-machine weather response for a specific historical time."""
-    if time is None:
-        return {"ok": False, "status": 400, "error": "Provide a historical time."}
     return _request_forecast(
         latitude=latitude,
         longitude=longitude,
