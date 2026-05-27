@@ -72,6 +72,7 @@ except ImportError:  # pragma: no cover - compatibility with the official MCP SD
 
 # Internal Pirate Weather API target used by MCP tools.
 DEFAULT_BASE_URL = "http://127.0.0.1:8083"
+DEFAULT_API_VERSION = 2
 ROUTE_API_KEY = "mcp-proxy"
 DEFAULT_TEST_LOCATION = (45.4215, -75.6972)
 
@@ -352,7 +353,9 @@ def _request_forecast(
             "error": "Provide either latitude and longitude, or city and country.",
         }
 
-    query = urlencode(_clean_params(params), doseq=False)
+    query = urlencode(
+        _clean_params({"version": DEFAULT_API_VERSION, **params}), doseq=False
+    )
     path_location = quote(location, safe=",")
     url = f"{_base_url()}/forecast/{ROUTE_API_KEY}/{path_location}"
     if query:
@@ -434,7 +437,6 @@ def get_current_weather(
         country=country,
         units=units,
         lang=lang,
-        version=2,
     )
 
 
@@ -466,7 +468,6 @@ def get_hourly_forecast(
         country=country,
         units=units,
         lang=lang,
-        version=2,
         extend="hourly" if hours > 48 else None,
         hourly_indices=_csv_indices(hours),
     )
@@ -490,7 +491,6 @@ def get_minutely_forecast(
         country=country,
         units=units,
         lang=lang,
-        version=2,
     )
 
 
@@ -512,7 +512,6 @@ def get_tomorrow_forecast(
         country=country,
         units=units,
         lang=lang,
-        version=2,
         daily_indices="1",
     )
 
@@ -539,7 +538,6 @@ def get_daily_forecast(
         country=country,
         units=units,
         lang=lang,
-        version=2,
         daily_indices=_csv_indices(days),
     )
 
@@ -562,7 +560,6 @@ def get_alerts(
         country=country,
         units=units,
         lang=lang,
-        version=2,
     )
 
 
@@ -588,7 +585,6 @@ def get_historical_weather(
         time=time,
         units=units,
         lang=lang,
-        version=2,
         tmextra=1 if tmextra else None,
     )
 
@@ -619,7 +615,6 @@ def get_forecast(
         country=country,
         units=units,
         lang=lang,
-        version=2,
         blocks="currently,minutely,hourly,daily,alerts,flags",
         hourly_indices="0,1",
         daily_indices="0,1",
@@ -678,7 +673,6 @@ def get_weather_summary(
         country=country,
         units=units,
         lang=lang,
-        version=2,
     )
     if forecast.get("ok") is False:
         return forecast
@@ -728,7 +722,6 @@ def test_api_connection(
         latitude=latitude,
         longitude=longitude,
         blocks="currently",
-        version=2,
         timeout=timeout,
     )
     if response.get("ok") is False:

@@ -127,7 +127,7 @@ FORECAST_BLOCK_METADATA: dict[str, Any] = {
         ],
     },
     "flags": {
-        "description": "Response metadata including units, version, and source metadata.",
+        "description": "Response metadata including units and source metadata.",
         "returned_with_block_tools": True,
     },
 }
