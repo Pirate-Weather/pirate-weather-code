@@ -59,10 +59,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
-from fastapi import HTTPException
 from pydantic import Field
 
-from API.utils.offline_geocode import geocode_city_country
 from MCP import __version__
 from MCP.resources import EXAMPLE_USAGE, FORECAST_BLOCK_METADATA
 
@@ -284,25 +282,21 @@ def _csv_indices(count: int, start: int = 0) -> str | None:
     return ",".join(str(i) for i in range(start, start + count))
 
 
-def _resolve_location(
+def _location(
     *,
     latitude: Latitude | None = None,
     longitude: Longitude | None = None,
     city: str | None = None,
     country: str | None = None,
-) -> tuple[float, float]:
+    time: str | int | None = None,
+) -> str | None:
     if latitude is not None and longitude is not None:
-        return latitude, longitude
-    if city and country:
-        return geocode_city_country(city, country)
-    raise HTTPException(
-        status_code=400,
-        detail="Provide either latitude and longitude, or city and country.",
-    )
+        location = f"{latitude},{longitude}"
+    elif city and country:
+        location = f"{city},{country}"
+    else:
+        return None
 
-
-def _location(latitude: float, longitude: float, time: str | int | None = None) -> str:
-    location = f"{latitude},{longitude}"
     if time is not None:
         location = f"{location},{time}"
     return location
@@ -344,21 +338,22 @@ def _request_forecast(
     timeout: float = 30.0,
     **params: Any,
 ) -> dict[str, Any]:
-    try:
-        resolved_latitude, resolved_longitude = _resolve_location(
-            latitude=latitude,
-            longitude=longitude,
-            city=city,
-            country=country,
-        )
-    except HTTPException as exc:
-        return {"ok": False, "status": exc.status_code, "error": exc.detail}
+    location = _location(
+        latitude=latitude,
+        longitude=longitude,
+        city=city,
+        country=country,
+        time=time,
+    )
+    if location is None:
+        return {
+            "ok": False,
+            "status": 400,
+            "error": "Provide either latitude and longitude, or city and country.",
+        }
 
     query = urlencode(_clean_params(params), doseq=False)
-    path_location = quote(
-        _location(resolved_latitude, resolved_longitude, time),
-        safe=",",
-    )
+    path_location = quote(location, safe=",")
     url = f"{_base_url()}/forecast/{ROUTE_API_KEY}/{path_location}"
     if query:
         url = f"{url}?{query}"

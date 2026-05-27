@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import json
 import sys
 import types
 
@@ -218,3 +219,35 @@ def test_get_forecast_returns_near_term_forecast_alerts_and_summary_text(
         "hourly": {"summary": "Clear for the hour", "icon": "clear-day"},
         "daily": {"summary": "Clear throughout the day", "icon": "clear-day"},
     }
+
+
+def test_city_country_location_is_forwarded_to_api(mcp_module, monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return json.dumps({"ok": True}).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setenv("PW_MCP_BASE_URL", "http://api.local")
+    monkeypatch.setattr(mcp_module, "urlopen", fake_urlopen)
+
+    assert mcp_module._request_forecast(
+        city="New York",
+        country="US",
+        version=2,
+    ) == {"ok": True}
+
+    assert captured["url"] == (
+        "http://api.local/forecast/mcp-proxy/New%20York,US?version=2"
+    )
