@@ -144,6 +144,11 @@ EXAMPLE_USAGE: list[dict[str, Any]] = [
         "arguments": {"latitude": 45.4215, "longitude": -75.6972, "units": "ca"},
     },
     {
+        "name": "Current weather by city and country",
+        "tool": "get_current_weather",
+        "arguments": {"city": "Ottawa", "country": "Canada", "units": "ca"},
+    },
+    {
         "name": "Next 12 hourly forecasts",
         "tool": "get_hourly_forecast",
         "arguments": {
