@@ -18,7 +18,6 @@ from API.api_utils import (
 from API.constants.clip_const import (
     CLIP_CAPE,
     CLIP_CLOUD,
-    CLIP_FIRE,
     CLIP_HUMIDITY,
     CLIP_OZONE,
     CLIP_PRESSURE,
@@ -42,10 +41,10 @@ from API.constants.model_const import (
     HRRR,
     HRRR_SUBH,
     NBM,
-    NBM_FIRE_INDEX,
     RTMA_RU,
 )
 from API.constants.shared_const import MISSING_DATA
+from API.hourly.block import calculate_fosberg_fire_index
 from API.legacy.current import get_legacy_current_summary
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
@@ -1354,26 +1353,32 @@ def _get_feels_like(
     )
 
 
-def _get_fire(sourceList, model_data, state: InterpolationState):
+def _get_fire(temp_c, humidity_fraction, wind_speed_ms):
     """
-    Get current fire index from available sources.
+    Get current fire index from derived current weather fields.
 
     Args:
-        sourceList: List of available sources.
-        model_data: Dictionary of model data.
-        state: Interpolation state.
+        temp_c: Current temperature in Celsius.
+        humidity_fraction: Current relative humidity fraction [0, 1].
+        wind_speed_ms: Current wind speed in m/s.
 
     Returns:
         Current fire index.
     """
-    if "nbm_fire" in sourceList:
-        val = (
-            model_data["NBM_Fire_Merged"][state.idx1, NBM_FIRE_INDEX] * state.fac1
-            + model_data["NBM_Fire_Merged"][state.idx2, NBM_FIRE_INDEX] * state.fac2
-        )
-        return clipLog(val, CLIP_FIRE["min"], CLIP_FIRE["max"], "Fire index Current")
-    else:
+    if (
+        not np.isfinite(temp_c)
+        or not np.isfinite(humidity_fraction)
+        or not np.isfinite(wind_speed_ms)
+    ):
         return MISSING_DATA
+    fire_index = calculate_fosberg_fire_index(
+        np.array([temp_c]),
+        np.array([humidity_fraction]),
+        np.array([wind_speed_ms]),
+    )[0]
+    if np.isnan(fire_index):
+        return MISSING_DATA
+    return float(fire_index)
 
 
 def build_current_section(
@@ -1601,7 +1606,11 @@ def build_current_section(
         InterPcurrent[DATA_CURRENT["apparent"]],
     )
 
-    InterPcurrent[DATA_CURRENT["fire"]] = _get_fire(sourceList, model_data, state)
+    InterPcurrent[DATA_CURRENT["fire"]] = _get_fire(
+        InterPcurrent[DATA_CURRENT["temp"]],
+        InterPcurrent[DATA_CURRENT["humidity"]],
+        InterPcurrent[DATA_CURRENT["wind"]],
+    )
 
     curr_temp_si = InterPcurrent[DATA_CURRENT["temp"]]
     curr_dew_si = InterPcurrent[DATA_CURRENT["dew"]]
