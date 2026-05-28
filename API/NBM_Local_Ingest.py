@@ -1059,6 +1059,12 @@ for i in range(his_period, -1, -1):
     # Add PACCUM
     xarray_his_wgrib["PACCUM"] = xarray_his_wgrib["APCP_surface"]
 
+    # PWTHER is not used by the API and is intermittently absent from NBM v5 grib
+    # files. Fill the slot with NaN values so the downstream array shape is preserved.
+    xarray_his_wgrib["PWTHER_surfaceMreserved"] = xr.full_like(
+        xarray_his_wgrib["TMP_2maboveground"], fill_value=np.nan
+    )
+
     # Drop raw ptypes
     xarray_his_wgrib = xarray_his_wgrib.drop_vars(
         ["APCP_prob_GT_0D254_prob_fcst_255_255_surface"]
