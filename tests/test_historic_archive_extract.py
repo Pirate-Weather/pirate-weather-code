@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 import zarr
 
+pytest.importorskip("herbie")
+
 from API.ingest_utils import download_extract_historic_archive
 
 
