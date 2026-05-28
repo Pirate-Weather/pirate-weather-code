@@ -12,6 +12,7 @@ import tarfile
 import time
 from typing import Iterable, Optional, Union
 
+import cartopy.crs as ccrs
 import dask.array as da
 import numpy as np
 import xarray as xr
@@ -547,8 +548,6 @@ def earth_relative_wind_components(
         A tuple containing two numpy arrays: the earth-relative u-component (ut)
         and v-component (vt) of the wind.
     """
-    import cartopy.crs as ccrs
-
     data_crs = ugrd.metpy_crs.metpy.cartopy_crs
 
     x = ugrd.x.values
