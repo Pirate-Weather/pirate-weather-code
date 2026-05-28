@@ -290,9 +290,10 @@ matchstring_re = (
     r":((TCDC|VIS|DSWRF|CAPE):surface:.*fcst:$)"  # This gets the correct surface param
 )
 
-matchstring_pw = r":(PWTHER:)"  # This gets the correct surface param
-
 # Merge matchstrings for download
+# Note: PWTHER (predominant weather) is intentionally excluded here because NBM v5 drops
+# the variable intermittently. It is not used by the API so we fill it with NaN values
+# during processing to keep the array shape unchanged.
 match_strings = (
     matchstring_2m
     + "|"
@@ -303,8 +304,6 @@ match_strings = (
     + matchstring_pr
     + "|"
     + matchstring_re
-    + "|"
-    + matchstring_pw
 )
 
 
@@ -847,6 +846,12 @@ with dask.config.set(**{"array.slicing.split_large_chunks": True}):
             daskArray = xarray_forecast["PACCUM"].data
 
             del xarray_forecast
+
+        elif dask_var == "PWTHER_surfaceMreserved":
+            # PWTHER is not used by the API and is intermittently absent from NBM v5 grib
+            # files. Fill the slot with NaN values so the downstream array shape is preserved.
+            ref_shape = ncForecast["TMP_2maboveground"].shape
+            daskArray = da.full(ref_shape, np.nan, dtype=np.float32)
 
         else:
             daskArray = da.from_array(
