@@ -188,7 +188,7 @@ match_strings = [
     {"variable": "TotalCloudCover", "level": "Sfc"},
     {"variable": "CIN", "level": "Sfc"},
     {"variable": "Pressure", "level": "MSL"},
-    {"variable": "VerticalVelocity", "level": "Isbl_0500"},
+    {"variable": "VerticalVelocity", "level": "Isbl-0500"},
     {"variable": "KIndex", "level": "Sfc"},
 ]
 
