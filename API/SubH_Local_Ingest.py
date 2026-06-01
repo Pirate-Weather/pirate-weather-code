@@ -150,7 +150,7 @@ zarr_vars = (
     "CICEP_surface",
     "CFRZR_surface",
     "CRAIN_surface",
-    "REFC_entireatmosphere",
+    "REFD_1000maboveground",
     "APCP_surface",
     "VIS_surface",
     "SPFH_2maboveground",
@@ -171,7 +171,7 @@ matchstring_su = (
     ":((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST|DSWRF):surface:.*min fcst)"
 )
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*min fcst)"
-matchstring_sl = "(:(REFC):)"
+matchstring_1000m = "(:REFD:1000 m above ground:)"
 matchstring_ap = "(:APCP:surface:)"
 
 # Merge matchstrings for download
@@ -182,7 +182,7 @@ match_strings = (
     + "|"
     + matchstring_10m
     + "|"
-    + matchstring_sl
+    + matchstring_1000m
     + "|"
     + matchstring_ap
 )
@@ -293,9 +293,9 @@ if spOUT3.returncode != 0:
 xarray_forecast_merged = xr.open_mfdataset(forecast_process_path + "_wgrib2_merged.nc")
 
 
-# Set REFC values < 5 to 0
-xarray_forecast_merged["REFC_entireatmosphere"] = mask_invalid_refc(
-    xarray_forecast_merged["REFC_entireatmosphere"]
+# Set REFD values < 5 to 0
+xarray_forecast_merged["REFD_1000maboveground"] = mask_invalid_refc(
+    xarray_forecast_merged["REFD_1000maboveground"]
 )
 
 if len(xarray_forecast_merged.time) != len(hrrr_range1) * 4:
