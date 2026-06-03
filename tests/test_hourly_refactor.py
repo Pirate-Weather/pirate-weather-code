@@ -4,6 +4,7 @@ import numpy as np
 
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
 from API.hourly.block import build_hourly_block
+from API.utils.fire import calculate_fosberg_fire_index
 
 
 def test_build_hourly_block_structure():
@@ -132,3 +133,13 @@ def test_build_hourly_block_structure():
     assert len(hourList) == num_hours
     assert isinstance(hourList[0], dict)
     assert "time" in hourList[0]
+
+
+def test_calculate_fosberg_fire_index_from_si_inputs():
+    values = calculate_fosberg_fire_index(
+        np.array([30.0]),
+        np.array([0.5]),
+        np.array([5.0]),
+    )
+
+    assert np.isclose(values[0], 19.56673537, atol=1e-6)

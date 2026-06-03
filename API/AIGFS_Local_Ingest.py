@@ -473,6 +473,7 @@ if save_type == "S3":
             final_zarr_name=final_zarr_name,
             extracted_store_name="AIGFS_Hist.zarr",
             local_temp_dir=local_temp_dir,
+            expected_vars=zarr_vars,
         )
         if extracted_path is not None:
             ncLocalWorking_paths.append(extracted_path)

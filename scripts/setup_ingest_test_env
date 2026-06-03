@@ -7,6 +7,7 @@ BUILD_ROOT="${PW_INGEST_BUILD_ROOT:-${ROOT_DIR}/.build/ingest-test}"
 TOOLCHAIN_PREFIX="${PW_INGEST_TOOLCHAIN_PREFIX:-${BUILD_ROOT}/toolchain}"
 NCEPLIBS_PREFIX="${PW_INGEST_NCEPLIBS_PREFIX:-${BUILD_ROOT}/NCEPLIBS_build}"
 WGRIB2_PREFIX="${PW_INGEST_WGRIB2_PREFIX:-${BUILD_ROOT}/wgrib2_build}"
+PGEOCODE_DATA_DIR="${PW_INGEST_PGEOCODE_DATA_DIR:-${BUILD_ROOT}/pgeocode_data}"
 VENV_DIR="${PW_INGEST_VENV:-${1:-${ROOT_DIR}/.venvs/ingest-test}}"
 FORCE_REBUILD="${PW_INGEST_FORCE:-0}"
 PYTHON_BIN="${PW_INGEST_PYTHON_BIN:-python3.14}"
@@ -18,6 +19,7 @@ WGRIB2_VERSION="3.8.0"
 WGRIB2_TARBALL_URL="https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v${WGRIB2_VERSION}.tar.gz"
 HERBIE_URL="git+https://github.com/blaylockbk/Herbie.git"
 CFGRIB_VERSION="0.9.15.1"
+PGEOCODE_COUNTRIES="${PW_INGEST_PGEOCODE_COUNTRIES:-ad ar as at au ax az bd be bg bm br by ca ch cl co cr cy cz de dk do dz ee es fi fm fo fr gb gf gg gl gp gt gu hr ht hu ie im in is it je jp kr li lk lt lu lv mc md mh mk mp mq mt mw mx my nc nl no nz pe ph pk pl pm pr pt pw re ro rs ru se sg si sj sk sm th tr ua us uy va vi wf yt za}"
 
 if command -v nproc >/dev/null 2>&1; then
     JOBS="${PW_INGEST_JOBS:-$(nproc)}"
@@ -54,7 +56,7 @@ clean_if_forced() {
 
 prepare_dirs() {
     mkdir -p "${BUILD_ROOT}" "${ROOT_DIR}/.venvs"
-    mkdir -p "${BUILD_ROOT}/src" "${BUILD_ROOT}/downloads"
+    mkdir -p "${BUILD_ROOT}/src" "${BUILD_ROOT}/downloads" "${PGEOCODE_DATA_DIR}"
 }
 
 configure_env() {
@@ -64,6 +66,7 @@ configure_env() {
     export LD_LIBRARY_PATH="${TOOLCHAIN_PREFIX}/lib:${TOOLCHAIN_PREFIX}/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
     export PATH="${WGRIB2_PREFIX}/bin:${PATH}"
     export wgrib2_path="${WGRIB2_PREFIX}/bin/wgrib2 "
+    export PGEOCODE_DATA_DIR
 }
 
 build_libaec() {
@@ -231,6 +234,23 @@ setup_venv() {
     [[ "$(python -c 'import eccodes; print(eccodes.codes_get_api_version())')" == "${ECCODES_VERSION}" ]]
 }
 
+download_geocode_data() {
+    configure_env
+    mkdir -p "${PGEOCODE_DATA_DIR}"
+
+    log "Downloading pgeocode data to ${PGEOCODE_DATA_DIR}"
+    PGEOCODE_COUNTRIES="${PGEOCODE_COUNTRIES}" python - <<'PY'
+import os
+
+import pgeocode
+
+countries = os.environ["PGEOCODE_COUNTRIES"].split()
+for country in countries:
+    pgeocode.Nominatim(country)
+print(f"Cached pgeocode data for {len(countries)} countries")
+PY
+}
+
 write_activate_helper() {
     local helper_path="${VENV_DIR}/bin/activate-pirate-ingest"
 
@@ -244,6 +264,7 @@ export CMAKE_PREFIX_PATH="${NCEPLIBS_PREFIX}:${TOOLCHAIN_PREFIX}\${CMAKE_PREFIX_
 export LD_LIBRARY_PATH="${TOOLCHAIN_PREFIX}/lib:${TOOLCHAIN_PREFIX}/lib64\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
 export PATH="${WGRIB2_PREFIX}/bin:\$PATH"
 export wgrib2_path="${WGRIB2_PREFIX}/bin/wgrib2 "
+export PGEOCODE_DATA_DIR="${PGEOCODE_DATA_DIR}"
 exec "\$SHELL"
 EOF
 
@@ -273,11 +294,12 @@ main() {
     build_nceplibs_ip
     build_wgrib2
     setup_venv
+    download_geocode_data
     write_activate_helper
     run_final_checks
 
     log "Setup complete"
-    log "Activate with: source ${VENV_DIR}/bin/activate && export ECCODES_DIR=${TOOLCHAIN_PREFIX} && export ECCODES_PYTHON_USE_FINDLIBS=1 && export LD_LIBRARY_PATH=${TOOLCHAIN_PREFIX}/lib:${TOOLCHAIN_PREFIX}/lib64:\${LD_LIBRARY_PATH:-} && export CMAKE_PREFIX_PATH=${NCEPLIBS_PREFIX}:${TOOLCHAIN_PREFIX}:\${CMAKE_PREFIX_PATH:-} && export PATH=${WGRIB2_PREFIX}/bin:\$PATH"
+    log "Activate with: source ${VENV_DIR}/bin/activate && export ECCODES_DIR=${TOOLCHAIN_PREFIX} && export ECCODES_PYTHON_USE_FINDLIBS=1 && export LD_LIBRARY_PATH=${TOOLCHAIN_PREFIX}/lib:${TOOLCHAIN_PREFIX}/lib64:\${LD_LIBRARY_PATH:-} && export CMAKE_PREFIX_PATH=${NCEPLIBS_PREFIX}:${TOOLCHAIN_PREFIX}:\${CMAKE_PREFIX_PATH:-} && export PATH=${WGRIB2_PREFIX}/bin:\$PATH && export PGEOCODE_DATA_DIR=${PGEOCODE_DATA_DIR}"
     log "Or run: ${VENV_DIR}/bin/activate-pirate-ingest"
 }
 
