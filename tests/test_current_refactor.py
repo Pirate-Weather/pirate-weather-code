@@ -2,7 +2,8 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-from API.current.metrics import CurrentSection, build_current_section
+from API.constants.shared_const import MISSING_DATA
+from API.current.metrics import CurrentSection, _get_fire, build_current_section
 
 
 def test_build_current_section_structure():
@@ -81,3 +82,12 @@ def test_build_current_section_structure():
     # In this case, 150 is exactly between 100 and 200.
     # The logic in build_current_section handles this.
     assert result.currently["time"] == 150
+
+
+def test_get_fire_derived_from_si_inputs():
+    value = _get_fire(30.0, 0.5, 5.0)
+    assert np.isclose(value, 19.56673537, atol=1e-6)
+
+
+def test_get_fire_returns_missing_when_input_missing():
+    assert np.isnan(_get_fire(MISSING_DATA, 0.5, 5.0))

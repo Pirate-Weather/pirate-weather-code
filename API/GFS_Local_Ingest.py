@@ -42,6 +42,7 @@ from API.ingest_utils import (
     run_command,
     tune_nofile_limit,
     validate_grib_stats,
+    validate_stacked_time_alignment,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -68,6 +69,12 @@ historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/GFS")
 
 
 save_type = os.getenv("save_type", default="Download")
+force_update = os.getenv("force_update", default="").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 zarr_store_workers = positive_int_env("zarr_store_workers", 2)
@@ -137,7 +144,7 @@ if save_type == "S3":
             previous_base_time = pickle.load(f)
 
         # Compare timestamps and download if the S3 object is more recent
-        if previous_base_time >= base_time:
+        if not force_update and previous_base_time >= base_time:
             logger.info("No Update to GFS, ending")
             sys.exit()
 
@@ -151,9 +158,12 @@ else:
             previous_base_time = pickle.load(file)
 
         # Compare timestamps and download if the S3 object is more recent
-        if previous_base_time >= base_time:
+        if not force_update and previous_base_time >= base_time:
             logger.info("No Update to GFS, ending")
             sys.exit()
+
+if force_update:
+    logger.info("force_update enabled, bypassing No Update check")
 
 zarr_vars = (
     "time",
@@ -908,6 +918,7 @@ if save_type == "S3":
             final_zarr_name=final_zarr_name,
             extracted_store_name="GFS_Hist.zarr",
             local_temp_dir=local_temp_dir,
+            expected_vars=zarr_vars,
         )
         if extracted_path is None:
             tqdm.write(f"Error: GFS_Hist.zarr not found inside archive for {timestamp}")
@@ -988,6 +999,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
 
         # Get times as numpy
         npCatTimes = daskCatTimes.compute()
+        validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
 
         daskArrayOut = da.from_array(
             np.tile(
