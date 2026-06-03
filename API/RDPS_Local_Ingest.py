@@ -162,7 +162,7 @@ zarr_vars = (
     "CAPE_Sfc",
     "Pressure_Sfc",
     "CIN_Sfc",
-    "VerticalVelocity_Isbl_0500",
+    "VerticalVelocity_IsbL_0500",
     "KIndex_Sfc",
 )
 
@@ -188,7 +188,7 @@ match_strings = [
     {"variable": "TotalCloudCover", "level": "Sfc"},
     {"variable": "CIN", "level": "Sfc"},
     {"variable": "Pressure", "level": "MSL"},
-    {"variable": "VerticalVelocity", "level": "Isbl-0500"},
+    {"variable": "VerticalVelocity", "level": "IsbL-0500"},
     {"variable": "KIndex", "level": "Sfc"},
 ]
 
@@ -312,12 +312,12 @@ hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
 # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time
 APCP_surface_tmp = da.diff(
-    xarray_forecast_merged["APCP"],
-    axis=xarray_forecast_merged["APCP"].get_axis_num("time"),
+    xarray_forecast_merged["Precip_Accum_Sfc"],
+    axis=xarray_forecast_merged["Precip_Accum_Sfc"].get_axis_num("time"),
     prepend=0,
 )
 
-xarray_forecast_merged["APCP"].data = APCP_surface_tmp
+xarray_forecast_merged["Precip_Accum_Sfc"].data = APCP_surface_tmp
 
 # Save the dataset with compression and filters for all variables
 xarray_forecast_merged = xarray_forecast_merged.chunk(
@@ -443,11 +443,11 @@ for i in range(his_period, 0, -6):
 
     # Fix things
     # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time, every 6 hours
-    apcpProc = xarray_hist_merged["APCP"].values
+    apcpProc = xarray_hist_merged["Precip_Accum_Sfc"].values
 
     apcpProcHour = np.diff(apcpProc, axis=0, prepend=0)
 
-    xarray_hist_merged["APCP"] = xarray_hist_merged["APCP"].copy(data=apcpProcHour)
+    xarray_hist_merged["Precip_Accum_Sfc"] = xarray_hist_merged["Precip_Accum_Sfc"].copy(data=apcpProcHour)
 
     # Clear memory
     del (apcpProc, apcpProcHour)

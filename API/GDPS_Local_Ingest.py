@@ -108,7 +108,7 @@ latest_run = HerbieLatest(
     n=3,
     freq="12h",
     fxx=240,
-    product="15km/grib2/lat_lon",
+    product="15km",
     verbose=False,
     save_dir=herbie_save_dir,
 )
@@ -162,7 +162,7 @@ zarr_vars = (
     "CAPE_Sfc",
     "Pressure_Sfc",
     "CIN_Sfc",
-    "VerticalVelocity_Isbl_0500",
+    "VerticalVelocity_IsbL_0500",
     "KIndex_Sfc",
 )
 
@@ -188,7 +188,7 @@ match_strings = [
     {"variable": "TotalCloudCover", "level": "Sfc"},
     {"variable": "CIN", "level": "Sfc"},
     {"variable": "Pressure", "level": "MSL"},
-    {"variable": "VerticalVelocity", "level": "Isbl-0500"},
+    {"variable": "VerticalVelocity", "level": "IsbL-0500"},
     {"variable": "KIndex", "level": "Sfc"},
 ]
 
@@ -199,7 +199,7 @@ FH_forecastsub = FastHerbie(
     pd.date_range(start=base_time, periods=1, freq="12h"),
     model="gdps",
     fxx=gdps_file_range,
-    product="15km/grib2/lat_lon",
+    product="15km",
     verbose=False,
     save_dir=herbie_save_dir,
 )
@@ -211,7 +211,7 @@ for g in match_strings:
         pd.date_range(start=base_time, periods=1, freq="12h"),
         model="gdps",
         fxx=gdps_file_range,
-        product="15km/grib2/lat_lon",
+        product="15km",
         variable=g["variable"],
         level=g["level"],
         save_dir=herbie_save_dir,
@@ -309,15 +309,15 @@ hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
 # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time
 APCP_surface_tmp = da.diff(
-    xarray_forecast_merged["APCP"],
-    axis=xarray_forecast_merged["APCP"].get_axis_num("time"),
+    xarray_forecast_merged["Precip_Accum_Sfc"],
+    axis=xarray_forecast_merged["Precip_Accum_Sfc"].get_axis_num("time"),
     prepend=0,
 )
 
 # Convert 3-hourly to 1-hourly
 APCP_surface_tmp = APCP_surface_tmp / 3
 
-xarray_forecast_merged["APCP_surface"].data = APCP_surface_tmp
+xarray_forecast_merged["Precip_Accum_Sfc"].data = APCP_surface_tmp
 
 # Save the dataset with compression and filters for all variables
 xarray_forecast_merged = xarray_forecast_merged.chunk(
@@ -393,7 +393,7 @@ for i in range(his_period, 0, -6):
         DATES,
         model="gdps",
         fxx=fxx,
-        product="15km/grib2/lat_lon",
+        product="15km",
         verbose=False,
         save_dir=herbie_save_dir,
     )
@@ -443,11 +443,11 @@ for i in range(his_period, 0, -6):
 
     # Fix things
     # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time, every 6 hours
-    apcpProc = xarray_hist_merged["APCP"].values
+    apcpProc = xarray_hist_merged["Precip_Accum_Sfc"].values
 
     apcpProcHour = np.diff(apcpProc, axis=0, prepend=0)
 
-    xarray_hist_merged["APCP"] = xarray_hist_merged["APCP"].copy(data=apcpProcHour)
+    xarray_hist_merged["Precip_Accum_Sfc"] = xarray_hist_merged["Precip_Accum_Sfc"].copy(data=apcpProcHour)
 
     # Clear memory
     del (apcpProc, apcpProcHour)
