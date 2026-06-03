@@ -4,6 +4,7 @@ import numpy as np
 
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
 from API.hourly.block import build_hourly_block
+from API.utils.fire import calculate_fosberg_fire_index
 
 
 def test_build_hourly_block_structure():
@@ -31,8 +32,9 @@ def test_build_hourly_block_structure():
         "nbm_rain": np.zeros(num_hours),
     }
 
-    prcipIntensity_inputs = {}
-    prcipProbability_inputs = {}
+    prcipIntensity_inputs = np.full((num_hours, 1), np.nan)
+    prcipProbability_inputs = np.full((num_hours, 1), np.nan)
+    prcipType_inputs = np.full((num_hours, 1), np.nan)
     temperature_inputs = np.zeros((num_hours, 1))
     dew_inputs = np.zeros((num_hours, 1))
     humidity_inputs = np.zeros((num_hours, 1))
@@ -83,6 +85,7 @@ def test_build_hourly_block_structure():
         "InterThour_inputs": InterThour_inputs,
         "prcipIntensity_inputs": prcipIntensity_inputs,
         "prcipProbability_inputs": prcipProbability_inputs,
+        "prcipType_inputs": prcipType_inputs,
         "temperature_inputs": temperature_inputs,
         "dew_inputs": dew_inputs,
         "humidity_inputs": humidity_inputs,
@@ -130,3 +133,13 @@ def test_build_hourly_block_structure():
     assert len(hourList) == num_hours
     assert isinstance(hourList[0], dict)
     assert "time" in hourList[0]
+
+
+def test_calculate_fosberg_fire_index_from_si_inputs():
+    values = calculate_fosberg_fire_index(
+        np.array([30.0]),
+        np.array([0.5]),
+        np.array([5.0]),
+    )
+
+    assert np.isclose(values[0], 19.56673537, atol=1e-6)

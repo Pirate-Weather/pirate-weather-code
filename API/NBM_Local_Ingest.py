@@ -41,6 +41,7 @@ from API.ingest_utils import (
     run_command,
     tune_nofile_limit,
     validate_grib_stats,
+    validate_stacked_time_alignment,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -289,9 +290,10 @@ matchstring_re = (
     r":((TCDC|VIS|DSWRF|CAPE):surface:.*fcst:$)"  # This gets the correct surface param
 )
 
-matchstring_pw = r":(PWTHER:)"  # This gets the correct surface param
-
 # Merge matchstrings for download
+# Note: PWTHER (predominant weather) is intentionally excluded here because NBM v5 drops
+# the variable intermittently. It is not used by the API so we fill it with NaN values
+# during processing to keep the array shape unchanged.
 match_strings = (
     matchstring_2m
     + "|"
@@ -302,8 +304,6 @@ match_strings = (
     + matchstring_pr
     + "|"
     + matchstring_re
-    + "|"
-    + matchstring_pw
 )
 
 
@@ -847,6 +847,12 @@ with dask.config.set(**{"array.slicing.split_large_chunks": True}):
 
             del xarray_forecast
 
+        elif dask_var == "PWTHER_surfaceMreserved":
+            # PWTHER is not used by the API and is intermittently absent from NBM v5 grib
+            # files. Fill the slot with NaN values so the downstream array shape is preserved.
+            ref_shape = ncForecast["TMP_2maboveground"].shape
+            daskArray = da.full(ref_shape, np.nan, dtype=np.float32)
+
         else:
             daskArray = da.from_array(
                 ncForecast[dask_var],
@@ -1053,6 +1059,12 @@ for i in range(his_period, -1, -1):
     # Add PACCUM
     xarray_his_wgrib["PACCUM"] = xarray_his_wgrib["APCP_surface"]
 
+    # PWTHER is not used by the API and is intermittently absent from NBM v5 grib
+    # files. Fill the slot with NaN values so the downstream array shape is preserved.
+    xarray_his_wgrib["PWTHER_surfaceMreserved"] = xr.full_like(
+        xarray_his_wgrib["TMP_2maboveground"], fill_value=np.nan
+    )
+
     # Drop raw ptypes
     xarray_his_wgrib = xarray_his_wgrib.drop_vars(
         ["APCP_prob_GT_0D254_prob_fcst_255_255_surface"]
@@ -1136,6 +1148,7 @@ if save_type == "S3":
             final_zarr_name=final_zarr_name,
             extracted_store_name="NBM_Hist.zarr",
             local_temp_dir=local_temp_dir,
+            expected_vars=zarr_vars,
         )
         if extracted_path is not None:
             ncLocalWorking_paths.append(extracted_path)
@@ -1179,6 +1192,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
 
         # Get times as numpy
         npCatTimes = daskCatTimes.compute()
+        validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
 
         daskArrayOut = da.from_array(
             np.tile(

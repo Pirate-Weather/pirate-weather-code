@@ -276,6 +276,39 @@ def archive_tmp_zarr_and_upload(
     s3.touch(s3_path.replace(".tar.gz", ".done"))
 
 
+def _delete_historic_archive_from_s3(s3, s3_tar_path: str) -> None:
+    """Delete a historic zarr archive and its completion marker from S3."""
+    s3_zarr_path = s3_tar_path.removesuffix(".tar.gz")
+    for path in (
+        s3_tar_path,
+        s3_zarr_path,
+        s3_tar_path.replace(".tar.gz", ".done"),
+    ):
+        if s3.exists(path):
+            s3.rm(path, recursive=True)
+
+
+def _validate_historic_zarr_variables(
+    zarr_path: str,
+    expected_vars: Iterable[str] | None,
+) -> None:
+    """Validate that a local historic zarr contains every expected variable."""
+    if expected_vars is None:
+        return
+
+    import zarr
+
+    z = zarr.open(zarr_path, mode="r")
+    store_vars = set(z.keys())
+    expected_set = set(expected_vars)
+    missing_vars = sorted(expected_set - store_vars)
+    if missing_vars:
+        raise ValueError(
+            f"Missing variables in extracted historic zarr {zarr_path}: "
+            f"{missing_vars}. Found variables: {sorted(store_vars)}"
+        )
+
+
 def download_extract_historic_archive(
     *,
     s3,
@@ -283,15 +316,24 @@ def download_extract_historic_archive(
     final_zarr_name: str,
     extracted_store_name: str,
     local_temp_dir: str,
+    expected_vars: Iterable[str] | None = None,
 ) -> Optional[str]:
     """Helper to download and extract a historic archive to a local zarr path."""
     os.makedirs(local_temp_dir, exist_ok=True)
     local_zarr_path = os.path.join(local_temp_dir, final_zarr_name)
-    if os.path.exists(local_zarr_path):
-        return local_zarr_path
 
     tar_name = f"{final_zarr_name}.tar.gz"
     s3_tar_path = f"{historic_path}/{tar_name}"
+
+    if os.path.exists(local_zarr_path):
+        try:
+            _validate_historic_zarr_variables(local_zarr_path, expected_vars)
+        except Exception:
+            shutil.rmtree(local_zarr_path, ignore_errors=True)
+            _delete_historic_archive_from_s3(s3, s3_tar_path)
+            raise
+        return local_zarr_path
+
     if not s3.exists(s3_tar_path):
         return None
 
@@ -299,18 +341,27 @@ def download_extract_historic_archive(
     timestamp_tag = final_zarr_name.replace(".zarr", "")
     extract_dir = os.path.join(local_temp_dir, f"extract_{timestamp_tag}")
 
-    s3.get_file(s3_tar_path, local_tar_path)
-    os.makedirs(extract_dir, exist_ok=True)
-    with tarfile.open(local_tar_path, "r:gz") as tar:
-        tar.extractall(path=extract_dir, filter="data")
+    try:
+        s3.get_file(s3_tar_path, local_tar_path)
+        os.makedirs(extract_dir, exist_ok=True)
+        with tarfile.open(local_tar_path, "r:gz") as tar:
+            tar.extractall(path=extract_dir, filter="data")
 
-    extracted_source = os.path.join(extract_dir, extracted_store_name)
-    if os.path.exists(extracted_source):
-        shutil.move(extracted_source, local_zarr_path)
+        extracted_source = os.path.join(extract_dir, extracted_store_name)
+        if os.path.exists(extracted_source):
+            shutil.move(extracted_source, local_zarr_path)
 
-    if os.path.exists(local_tar_path):
-        os.remove(local_tar_path)
-    shutil.rmtree(extract_dir, ignore_errors=True)
+        if os.path.exists(local_zarr_path):
+            _validate_historic_zarr_variables(local_zarr_path, expected_vars)
+    except Exception:
+        shutil.rmtree(local_zarr_path, ignore_errors=True)
+        _delete_historic_archive_from_s3(s3, s3_tar_path)
+        raise
+    finally:
+        if os.path.exists(local_tar_path):
+            os.remove(local_tar_path)
+        shutil.rmtree(extract_dir, ignore_errors=True)
+
     return local_zarr_path if os.path.exists(local_zarr_path) else None
 
 
@@ -642,6 +693,35 @@ def interp_time_take_blend(
         out = da.concatenate(pieces, axis=VAX)
 
     return out
+
+
+def validate_stacked_time_alignment(
+    stacked_times_unix: np.ndarray,
+    concatenated_times_unix: np.ndarray,
+    tolerance_seconds: float = 300,
+) -> None:
+    """Ensure concatenated stored times stay close to the expected stacked times."""
+    expected_times = np.asarray(stacked_times_unix, dtype=np.float64).reshape(-1)
+    actual_times = np.asarray(concatenated_times_unix, dtype=np.float64).reshape(-1)
+
+    if expected_times.shape != actual_times.shape:
+        raise ValueError(
+            "Time alignment check failed due to shape mismatch: "
+            f"expected {expected_times.shape}, got {actual_times.shape}."
+        )
+
+    time_deltas = np.abs(expected_times - actual_times)
+    mismatched_indices = np.flatnonzero(time_deltas > tolerance_seconds)
+    if mismatched_indices.size:
+        first_idx = int(mismatched_indices[0])
+        raise ValueError(
+            "Time alignment check failed: "
+            f"{mismatched_indices.size} timestamps differ by more than "
+            f"{tolerance_seconds} seconds. First mismatch at index {first_idx}: "
+            f"expected={expected_times[first_idx]}, "
+            f"actual={actual_times[first_idx]}, "
+            f"delta={time_deltas[first_idx]}."
+        )
 
 
 def interpolate_temporal_gaps_efficiently(
