@@ -149,7 +149,7 @@ COORDINATE_CONST = {
 TIME_MACHINE_CONST = {
     "threshold_hours": 25,
     "very_negative_threshold": -100000,
-    "max_days": 7,
+    "max_days": 8,
 }
 
 # Filename constants
