@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import math
 import datetime
 import logging
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -343,7 +343,9 @@ def _setup_units(units: Union[str, None], loc_name: Dict[str, str]):
     return unit_system, unit_config
 
 
-def _parse_timemachine_range(request: Request, time_machine: bool) -> tuple[int, int, int]:
+def _parse_timemachine_range(
+    request: Request, time_machine: bool
+) -> tuple[int, int, int]:
     """Parse and validate optional timemachine days/hours query parameters.
 
     Returns:
