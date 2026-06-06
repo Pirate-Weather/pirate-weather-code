@@ -238,7 +238,6 @@ zarr_vars = (
     "APCP_surface",
     "TCDC_surface",
     "VIS_surface",
-    "PWTHER_surfaceMreserved",
     "PPROB",
     "PACCUM",
     "PTYPE_prob_GE_1_LT_2_prob_fcst_1_1_surface",
@@ -285,8 +284,6 @@ matchstring_re = (
     r":((TCDC|VIS|DSWRF|CAPE):surface:.*fcst:$)"  # This gets the correct surface param
 )
 
-matchstring_pw = r":(PWTHER:)"  # This gets the correct surface param
-
 # Merge matchstrings for download
 match_strings = (
     matchstring_2m
@@ -298,8 +295,6 @@ match_strings = (
     + matchstring_pr
     + "|"
     + matchstring_re
-    + "|"
-    + matchstring_pw
 )
 
 
