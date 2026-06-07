@@ -7,6 +7,7 @@ from timezonefinder import TimezoneFinder
 
 from API.request.preprocess import (
     InitialRequestContext,
+    _parse_location,
     _parse_parameters,
     _parse_timemachine_days,
     parse_request_time,
@@ -64,6 +65,34 @@ def test_parse_request_time_rejects_positive_relative_offsets_with_units():
             az_lon=-74.0060,
             tf=TimezoneFinder(in_memory=True),
         )
+
+
+def test_parse_location_accepts_city_country_pair(monkeypatch):
+    def fake_geocode(city, country):
+        assert city == "New York"
+        assert country == "US"
+        return 40.7128, -74.006
+
+    monkeypatch.setattr("API.request.preprocess.geocode_city_country", fake_geocode)
+
+    lat, lon_in, lon, az_lon, location_req = _parse_location("New York,US")
+
+    assert lat == 40.7128
+    assert lon_in == -74.006
+    assert lon == pytest.approx(285.994)
+    assert az_lon == pytest.approx(-74.006)
+    assert location_req == ["40.7128", "-74.006"]
+
+
+def test_parse_location_accepts_city_country_time_pair(monkeypatch):
+    monkeypatch.setattr(
+        "API.request.preprocess.geocode_city_country",
+        lambda city, country: (48.8566, 2.3522),
+    )
+
+    *_, location_req = _parse_location("Paris,France,1704067200")
+
+    assert location_req == ["48.8566", "2.3522", "1704067200"]
 
 
 @pytest.mark.asyncio

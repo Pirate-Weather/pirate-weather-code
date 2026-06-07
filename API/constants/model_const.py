@@ -110,7 +110,7 @@ NBM = {
     "accum": 8,
     "cloud": 9,
     "vis": 10,
-    "weather": 11,
+    "unused": 11,
     "prob": 12,
     "intensity": 13,
     "rain": 14,
@@ -213,7 +213,7 @@ FORECAST_SOURCES = frozenset(
         "dwd_mosmix",
         "aigfs",
         "aigefs",
-        "aifs",
+        "ecmwf_aifs",
         "era5",
     }
 )

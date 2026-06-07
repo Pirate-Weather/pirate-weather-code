@@ -397,6 +397,9 @@ ifs_mf = xr.merge(
     [ifs_mf_2, ifs_mf_10, ifs_mf_surf, ifs_mf_msl, ifs_mf_atm], compat="override"
 )
 
+# Convert from 0-1 to 0-100 for consistency with AIFS data
+ifs_mf["tcc"] = ifs_mf["tcc"] * 100
+
 
 # %% Merge the IFS and ENSO data
 
@@ -593,6 +596,9 @@ for i in range(his_period, 1, -12):
         compat="override",
     )
 
+    # Convert from 0-1 to 0-100 for consistency with AIFS data
+    ifs_his_mf["tcc"] = ifs_his_mf["tcc"] * 100
+
     ########################################################################
     ### Download the enfo data
     # Create FastHerbie Object.
@@ -732,6 +738,7 @@ if save_type == "S3":
             final_zarr_name=final_zarr_name,
             extracted_store_name="ECMWF_Hist.zarr",
             local_temp_dir=local_temp_dir,
+            expected_vars=zarr_vars,
         )
         if extracted_path is not None:
             ncLocalWorking_paths.append(extracted_path)

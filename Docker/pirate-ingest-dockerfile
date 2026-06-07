@@ -5,7 +5,7 @@
 # Available versions: ftp://ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/
 # ======================================================================
 
-FROM python:3.13
+FROM python:3.14.5
 
 ENV DEBIAN_FRONTEND=noninteractive \
     CC=gcc \
@@ -15,7 +15,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONPATH=/app \
     CMAKE_PREFIX_PATH=/usr/local \
     LD_LIBRARY_PATH=/usr/local/lib \
-    ECCODES_DIR=/usr/local
+    ECCODES_DIR=/usr/local \
+    ECCODES_PYTHON_USE_FINDLIBS=1
 
 # ----------------------------------------------------------------------
 # System dependencies (NO system ecCodes, NO system libaec)
@@ -39,11 +40,10 @@ RUN apt-get update && apt-get install -y \
 
 # ----------------------------------------------------------------------
 # Build libaec from source (required for ecCodes >= 2.45)
-# NOTE: This isn't strictly required, and may not be needed at some point
 # ----------------------------------------------------------------------
 WORKDIR /tmp
 
-RUN git clone https://gitlab.dkrz.de/k202009/libaec.git && \
+RUN git clone https://github.com/Deutsches-Klimarechenzentrum/libaec.git && \
     cd libaec && \
     mkdir build && \
     cd build && \
@@ -53,13 +53,13 @@ RUN git clone https://gitlab.dkrz.de/k202009/libaec.git && \
     ldconfig
 
 # ----------------------------------------------------------------------
-# Build ecCodes 2.45.0 WITH AEC
+# Build ecCodes 2.47.0 WITH AEC
 # ----------------------------------------------------------------------
 WORKDIR /tmp
 
-RUN wget https://confluence.ecmwf.int/download/attachments/45757960/eccodes-2.45.0-Source.tar.gz && \
-    tar xzf eccodes-2.45.0-Source.tar.gz && \
-    rm eccodes-2.45.0-Source.tar.gz
+RUN wget https://confluence.ecmwf.int/download/attachments/45757960/eccodes-2.47.0-Source.tar.gz && \
+    tar xzf eccodes-2.47.0-Source.tar.gz && \
+    rm eccodes-2.47.0-Source.tar.gz
 
 RUN mkdir /tmp/eccodes-build
 WORKDIR /tmp/eccodes-build
@@ -67,7 +67,7 @@ WORKDIR /tmp/eccodes-build
 RUN cmake \
     -DCMAKE_INSTALL_PREFIX=/usr/local \
     -DENABLE_AEC=ON \
-    ../eccodes-2.45.0-Source && \
+    ../eccodes-2.47.0-Source && \
     make -j4 && \
     ctest -j4 && \
     make install && \
@@ -93,12 +93,12 @@ RUN cmake --install NCEPLIBS-ip/build
 # wgrib2
 # ----------------------------------------------------------------------
 RUN wget -q -O /build/wgrib2.tgz \
-    https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v3.7.0.tar.gz
+    https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v3.8.0.tar.gz
 
 RUN mkdir /build/wgrib2 && \
     tar -xf /build/wgrib2.tgz -C /build/wgrib2
 
-WORKDIR /build/wgrib2/wgrib2-3.7.0
+WORKDIR /build/wgrib2/wgrib2-3.8.0
 
 RUN cmake --fresh \
     -DCMAKE_INSTALL_PREFIX="/build/wgrib2_build" \
@@ -119,7 +119,15 @@ WORKDIR /app
 COPY Docker/requirements-ingest.txt requirements-ingest.txt
 
 RUN python3 -m pip install --upgrade pip && \
-    python3 -m pip install -r requirements-ingest.txt --no-binary eccodes
+    grep -v -E '^(cfgrib==|eccodes==|git\+https://github.com/blaylockbk/Herbie.git$)' requirements-ingest.txt > requirements-ingest-core.txt && \
+    python3 -m pip install -r requirements-ingest-core.txt && \
+    python3 -m pip install --no-deps git+https://github.com/blaylockbk/Herbie.git && \
+    python3 -m pip install --no-deps cfgrib==0.9.15.1 && \
+    python3 -m pip install cffi findlibs && \
+    python3 -m pip uninstall -y eccodes eccodeslib eckitlib && \
+    python3 -m pip install --no-deps --no-binary eccodes eccodes==2.47.0 && \
+    python3 -m eccodes selfcheck && \
+    [ "$(python3 -c 'import eccodes; print(eccodes.codes_get_api_version())')" = "2.47.0" ]
 
 # ----------------------------------------------------------------------
 # App code

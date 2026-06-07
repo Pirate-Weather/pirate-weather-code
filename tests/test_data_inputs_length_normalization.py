@@ -68,8 +68,9 @@ def test_prepare_data_inputs_normalizes_short_era5_series_to_num_hours():
     )
 
     assert inputs["InterThour_inputs"]["era5_ptype"].shape == (num_hours,)
-    assert inputs["prcipIntensity_inputs"]["era5"].shape == (num_hours,)
-    assert inputs["prcipProbability_inputs"] == {}
+    assert inputs["prcipIntensity_inputs"].shape == (num_hours, 1)
+    assert inputs["prcipProbability_inputs"].shape == (num_hours, 1)
+    assert inputs["prcipType_inputs"].shape == (num_hours, 1)
     assert inputs["temperature_inputs"].shape[0] == num_hours
     assert inputs["era5_rain_intensity"].shape == (num_hours,)
 
