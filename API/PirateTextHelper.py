@@ -7,13 +7,17 @@ from API.constants.api_const import PRECIP_TYPES
 from API.constants.shared_const import KELVIN_TO_CELSIUS
 from API.constants.text_const import (
     CAPE_THRESHOLDS,
+    CIN_THRESHOLDS,
     CLOUD_COVER_THRESHOLDS,
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
     FOG_THRESHOLD_METERS,
     HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    KI_THRESHOLDS,
+    LI_THRESHOLDS,
     LIQUID_DENSITY_CONVERSION,
+    MAX_DEWPOINT_DEPRESSION_FOR_STORM,
     MIST_THRESHOLD_METERS,
     PRECIP_INTENSITY_THRESHOLDS,
     PRECIP_PROB_THRESHOLD,
@@ -22,6 +26,7 @@ from API.constants.text_const import (
     SNOW_INTENSITY_THRESHOLDS,
     TEMP_DEWPOINT_SPREAD_FOR_FOG,
     TEMP_DEWPOINT_SPREAD_FOR_MIST,
+    VV_THRESHOLDS,
     WIND_THRESHOLDS,
 )
 
@@ -687,27 +692,160 @@ def calculate_sky_text(cloudCover, isDayTime, icon="darksky", mode="both"):
         return skyText, skyIcon
 
 
-def calculate_thunderstorm_text(cape, mode="both", icon="darksky", is_day=True):
-    """
-    Calculates the thunderstorm text based on CAPE values.
+def calculate_thunderstorm_text(
+    cape,
+    mode="both",
+    icon="darksky",
+    is_day=True,
+    lifted_index=None,
+    cin=None,
+    vertical_velocity=None,
+    k_index=None,
+    dewpoint=None,
+    temperature=None,
+):
+    """Calculates thunderstorm text and icon using multiple atmospheric stability indices.
 
-    Parameters:
-    - cape (float) -  The CAPE (Convective available potential energy)
-    - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the thunderstorm will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
-    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
-    - is_day (bool): Whether it is day or night time
+    Any single primary indicator (CAPE, Lifted Index, K Index) can independently
+    trigger a thunderstorm signal.  The strongest signal across all available
+    indicators is then modulated by suppression factors (CIN, low moisture) and
+    an enhancement factor (strong upward vertical velocity).
+
+    The decision logic follows four stages:
+
+    1. **Primary indicators** — CAPE, LI, and K Index each independently produce
+       a level-0 (none), level-1 (possible-thunderstorm), or level-2 (thunderstorm)
+       signal based on their own thresholds.  The maximum level from any indicator
+       is used.
+    2. **CIN suppression** — A strong atmospheric cap (very negative CIN) fully
+       suppresses the signal; a moderate cap downgrades it by one level.
+    3. **Moisture check** — When the temperature is above 0 °C (to preserve
+       thundersnow detection), a large temperature–dewpoint spread indicates a dry
+       airmass and suppresses the signal entirely.
+    4. **Vertical velocity enhancement** — Strong forced ascent (omega ≤
+       ``VV_THRESHOLDS["strong_upward"]``) promotes a *possible-thunderstorm*
+       signal to a full *thunderstorm*.
+
+    Args:
+        cape (float): Convective Available Potential Energy in J/kg.
+        mode (str): Return mode.  ``"both"`` returns ``(text, icon)``; ``"summary"``
+            returns only the text string; ``"icon"`` returns only the icon string.
+        icon (str): Icon set to use — ``"darksky"`` or ``"pirate"``.
+        is_day (bool): Whether it is currently daytime. Controls day/night pirate
+            icon variants.
+        lifted_index (float | None): Lifted Index in K.  More negative values
+            indicate greater instability.  Pass ``None`` when not available.
+        cin (float | None): Convective Inhibition in J/kg (negative by convention).
+            Pass ``None`` when not available.
+        vertical_velocity (float | None): Vertical velocity (omega) in Pa/s.
+            Negative values indicate upward motion.  Pass ``None`` when not available.
+        k_index (float | None): K Index in K (°C equivalent).  Higher values
+            indicate greater thunderstorm potential.  Pass ``None`` when not available.
+        dewpoint (float | None): 2 m dewpoint temperature in °C.  Used with
+            *temperature* to check atmospheric moisture.  Pass ``None`` when not
+            available.
+        temperature (float | None): 2 m air temperature in °C.  Used together
+            with *dewpoint* for the moisture suppression check.  Pass ``None``
+            when not available.
 
     Returns:
-    - str | None: The textual representation of the thunderstorm
-    - str | None: The icon representation of the thunderstorm
+        tuple[str | None, str | None]: ``(text, icon)`` when *mode* is ``"both"``.
+        str | None: Summary text only when *mode* is ``"summary"``.
+        str | None: Icon only when *mode* is ``"icon"``.
     """
     thuText = None
     thuIcon = None
 
-    if CAPE_THRESHOLDS["low"] <= cape < CAPE_THRESHOLDS["high"]:
-        thuText = "possible-thunderstorm"
-    elif cape >= CAPE_THRESHOLDS["high"]:
+    # ------------------------------------------------------------------
+    # 1. Primary instability indicators
+    #    Each indicator independently produces a 0/1/2 level signal.
+    #    Level 0 = no signal, 1 = possible-thunderstorm, 2 = thunderstorm
+    # ------------------------------------------------------------------
+
+    # CAPE — convective available potential energy
+    cape_level = 0
+    if not np.isnan(cape):
+        if cape >= CAPE_THRESHOLDS["high"]:
+            cape_level = 2
+        elif cape >= CAPE_THRESHOLDS["low"]:
+            cape_level = 1
+
+    # Lifted Index — more negative means more unstable
+    li_level = 0
+    if lifted_index is not None and not np.isnan(lifted_index):
+        if lifted_index <= LI_THRESHOLDS["thunderstorm"]:
+            li_level = 2
+        elif lifted_index <= LI_THRESHOLDS["possible"]:
+            li_level = 1
+
+    # K Index — integrates low-level moisture and mid-level lapse rate
+    ki_level = 0
+    if k_index is not None and not np.isnan(k_index):
+        if k_index >= KI_THRESHOLDS["thunderstorm"]:
+            ki_level = 2
+        elif k_index >= KI_THRESHOLDS["possible"]:
+            ki_level = 1
+
+    # Use the strongest signal from any available indicator
+    max_level = max(cape_level, li_level, ki_level)
+
+    if max_level == 0:
+        return (None, None) if mode == "both" else None
+
+    # ------------------------------------------------------------------
+    # 2. CIN suppression
+    #    A strong atmospheric cap inhibits convection regardless of instability.
+    #    CIN values are negative; more negative = stronger cap.
+    # ------------------------------------------------------------------
+    if cin is not None and not np.isnan(cin):
+        if cin <= CIN_THRESHOLDS["suppressed"]:
+            # Very strong cap: fully suppress the thunderstorm signal
+            max_level = 0
+        elif cin <= CIN_THRESHOLDS["moderate"]:
+            # Moderate cap: downgrade one level (thunderstorm → possible, possible → none)
+            max_level = max(0, max_level - 1)
+
+    if max_level == 0:
+        return (None, None) if mode == "both" else None
+
+    # ------------------------------------------------------------------
+    # 3. Moisture check (above-freezing only)
+    #    A very large temperature–dewpoint spread indicates a dry airmass.
+    #    This check is skipped below 0 °C to allow thundersnow detection.
+    # ------------------------------------------------------------------
+    if (
+        dewpoint is not None
+        and temperature is not None
+        and not np.isnan(dewpoint)
+        and not np.isnan(temperature)
+        and temperature > 0
+        and (temperature - dewpoint) > MAX_DEWPOINT_DEPRESSION_FOR_STORM
+    ):
+        max_level = 0
+
+    if max_level == 0:
+        return (None, None) if mode == "both" else None
+
+    # ------------------------------------------------------------------
+    # 4. Vertical velocity enhancement
+    #    Strong forced ascent confirms a marginal possible-thunderstorm signal
+    #    and upgrades it to a full thunderstorm.
+    # ------------------------------------------------------------------
+    if (
+        max_level == 1
+        and vertical_velocity is not None
+        and not np.isnan(vertical_velocity)
+        and vertical_velocity <= VV_THRESHOLDS["strong_upward"]
+    ):
+        max_level = 2
+
+    # ------------------------------------------------------------------
+    # 5. Map level to text and icon
+    # ------------------------------------------------------------------
+    if max_level == 2:
         thuText = "thunderstorm"
+    elif max_level == 1:
+        thuText = "possible-thunderstorm"
 
     if thuText == "thunderstorm":
         thuIcon = "thunderstorm"

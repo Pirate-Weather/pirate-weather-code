@@ -85,6 +85,12 @@ def calculate_text(
     # If dewPoint exists in the hour object then use it otherwise -999
     dewPoint = hourObject.get("dewPoint", MISSING_DATA)
 
+    # Additional stability/moisture indices for thunderstorm detection
+    liftedIndex = hourObject.get("liftedIndex", None)
+    cin = hourObject.get("cin", None)
+    verticalVelocity = hourObject.get("verticalVelocity", None)
+    kIndex = hourObject.get("kIndex", None)
+
     # If we missing or incomplete data then return clear icon/text instead of calculating
     if all(np.isnan(v) for v in (temp, wind, vis, cloudCover, humidity, dewPoint)):
         return "unavailable", "none"
@@ -114,7 +120,18 @@ def calculate_text(
     visText, visIcon = calculate_vis_text(
         vis, temp, dewPoint, wind, smoke, icon, "both"
     )
-    thuText, thuIcon = calculate_thunderstorm_text(cape, "both", icon, isDayTime)
+    thuText, thuIcon = calculate_thunderstorm_text(
+        cape,
+        "both",
+        icon,
+        isDayTime,
+        lifted_index=liftedIndex,
+        cin=cin,
+        vertical_velocity=verticalVelocity,
+        k_index=kIndex,
+        dewpoint=dewPoint,
+        temperature=temp,
+    )
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
 
     # If there is precipitation text use that and join with wind texts if they exist

@@ -431,6 +431,11 @@ def calculate_half_day_text(
                 "min_visibility": float("inf"),  # Initialize for visibility
                 "max_smoke": 0.0,  # Initialize for smoke
                 "max_cape_with_precip": 0.0,  # Initialize for thunderstorms
+                "min_li_with_precip": None,  # Most-unstable (minimum) Lifted Index during precip
+                "max_cin_with_precip": None,  # Least-inhibiting (maximum) CIN during precip
+                "max_ki_with_precip": None,  # Maximum K Index during precip
+                "temp_at_max_instability": None,  # Temperature at hour of peak CAPE
+                "dewpoint_at_max_instability": None,  # Dewpoint at hour of peak CAPE
             }
 
         # Stop generating period names if we have enough for a full 24-hour cycle (e.g., 5 periods)
@@ -560,17 +565,54 @@ def calculate_half_day_text(
                     + hour["iceAccumulation"]
                 )
 
-                # Track CAPE when there is precipitation
+                # Track stability indices when there is precipitation
                 hour_cape = hour.get("cape", MISSING_DATA)
+                hour_li = hour.get("liftedIndex", None)
+                hour_cin = hour.get("cin", None)
+                hour_ki = hour.get("kIndex", None)
+                hour_temp = hour.get("temperature", None)
+                hour_dew = hour.get("dewPoint", None)
 
-                if (
-                    hour_cape != MISSING_DATA
-                    and hour_cape > period_data["max_cape_with_precip"]
-                ):
+                if not np.isnan(hour_cape) and hour_cape > period_data["max_cape_with_precip"]:
                     period_data["max_cape_with_precip"] = hour_cape
+                    # Record conditions at peak instability for the moisture check
+                    period_data["temp_at_max_instability"] = hour_temp
+                    period_data["dewpoint_at_max_instability"] = hour_dew
 
-                # Count hours with thunderstorms (precipitation + CAPE >= low threshold)
-                thu_text = calculate_thunderstorm_text(hour_cape, "summary")
+                # Most-unstable (minimum) Lifted Index
+                if hour_li is not None and not np.isnan(hour_li):
+                    if (
+                        period_data["min_li_with_precip"] is None
+                        or hour_li < period_data["min_li_with_precip"]
+                    ):
+                        period_data["min_li_with_precip"] = hour_li
+
+                # Least-inhibiting (maximum/least-negative) CIN
+                if hour_cin is not None and not np.isnan(hour_cin):
+                    if (
+                        period_data["max_cin_with_precip"] is None
+                        or hour_cin > period_data["max_cin_with_precip"]
+                    ):
+                        period_data["max_cin_with_precip"] = hour_cin
+
+                # Maximum K Index
+                if hour_ki is not None and not np.isnan(hour_ki):
+                    if (
+                        period_data["max_ki_with_precip"] is None
+                        or hour_ki > period_data["max_ki_with_precip"]
+                    ):
+                        period_data["max_ki_with_precip"] = hour_ki
+
+                # Count hours with thunderstorms using all available stability indices
+                thu_text = calculate_thunderstorm_text(
+                    hour_cape,
+                    "summary",
+                    lifted_index=hour_li,
+                    cin=hour_cin,
+                    k_index=hour_ki,
+                    dewpoint=hour_dew,
+                    temperature=hour_temp,
+                )
                 if thu_text is not None:
                     period_data["num_hours_thunderstorm"] += 1
 
@@ -622,6 +664,11 @@ def calculate_half_day_text(
     overall_min_visibility = float("inf")  # Initialize for visibility
     overall_max_smoke = 0.0
     overall_max_cape_with_precip = 0.0  # Track max CAPE that occurs with precipitation
+    overall_min_li_with_precip = None
+    overall_max_cin_with_precip = None
+    overall_max_ki_with_precip = None
+    overall_temp_at_max_instability = None
+    overall_dewpoint_at_max_instability = None
 
     overall_most_common_precip = []
 
@@ -665,9 +712,32 @@ def calculate_half_day_text(
             overall_precip_hours_count += p_data["precip_hours_count"]
             overall_precip_accum_sum += p_data["precip_accum_sum"]
 
-            # Track max CAPE that occurs with precipitation
+            # Track max CAPE and associated stability indices with precipitation
             if p_data["max_cape_with_precip"] > overall_max_cape_with_precip:
                 overall_max_cape_with_precip = p_data["max_cape_with_precip"]
+                overall_temp_at_max_instability = p_data["temp_at_max_instability"]
+                overall_dewpoint_at_max_instability = p_data["dewpoint_at_max_instability"]
+
+            if p_data["min_li_with_precip"] is not None:
+                if (
+                    overall_min_li_with_precip is None
+                    or p_data["min_li_with_precip"] < overall_min_li_with_precip
+                ):
+                    overall_min_li_with_precip = p_data["min_li_with_precip"]
+
+            if p_data["max_cin_with_precip"] is not None:
+                if (
+                    overall_max_cin_with_precip is None
+                    or p_data["max_cin_with_precip"] > overall_max_cin_with_precip
+                ):
+                    overall_max_cin_with_precip = p_data["max_cin_with_precip"]
+
+            if p_data["max_ki_with_precip"] is not None:
+                if (
+                    overall_max_ki_with_precip is None
+                    or p_data["max_ki_with_precip"] > overall_max_ki_with_precip
+                ):
+                    overall_max_ki_with_precip = p_data["max_ki_with_precip"]
 
         # Check if thunderstorms are significant in this period
         # Thunderstorms require both precipitation and sufficient atmospheric instability
@@ -973,9 +1043,15 @@ def calculate_half_day_text(
     thunderstorms_match_precip = False
 
     if has_thunderstorm:
-        # Use max CAPE that occurred with precipitation
+        # Use peak instability values that occurred with precipitation
         thunderstorm_summary_text, thunderstorm_icon = calculate_thunderstorm_text(
-            overall_max_cape_with_precip, "both"
+            overall_max_cape_with_precip,
+            "both",
+            lifted_index=overall_min_li_with_precip,
+            cin=overall_max_cin_with_precip,
+            k_index=overall_max_ki_with_precip,
+            dewpoint=overall_dewpoint_at_max_instability,
+            temperature=overall_temp_at_max_instability,
         )
         # Check if thunderstorm periods match precipitation periods exactly
         if sorted(thunderstorm_periods) == sorted(precip_periods):
