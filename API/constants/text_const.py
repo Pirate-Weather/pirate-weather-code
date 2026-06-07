@@ -68,13 +68,13 @@ CAPE_THRESHOLDS = {
 
 # Lifted Index thresholds (K) — more negative = more unstable
 LI_THRESHOLDS = {
-    "possible": -3,    # Marginally unstable; isolated thunderstorms possible
+    "possible": -3,  # Marginally unstable; isolated thunderstorms possible
     "thunderstorm": -6,  # Very unstable; thunderstorms likely
 }
 
 # Convective Inhibition thresholds (J/kg, negative by convention)
 CIN_THRESHOLDS = {
-    "moderate": -50,    # Moderate cap; reduces but does not prevent convection
+    "moderate": -50,  # Moderate cap; reduces but does not prevent convection
     "suppressed": -200,  # Strong cap; suppresses convection
 }
 
@@ -86,7 +86,7 @@ VV_THRESHOLDS = {
 # K Index thresholds (°C / K equivalent)
 # K = (T850 − T500) + Td850 − (T700 − Td700)
 KI_THRESHOLDS = {
-    "possible": 20,    # Isolated thunderstorms possible
+    "possible": 20,  # Isolated thunderstorms possible
     "thunderstorm": 35,  # Numerous thunderstorms likely
 }
 

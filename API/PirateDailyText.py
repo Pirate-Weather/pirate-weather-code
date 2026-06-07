@@ -993,7 +993,10 @@ def calculate_day_text(
                 hour_temp = hour.get("temperature", None)
                 hour_dew = hour.get("dewPoint", None)
 
-                if not np.isnan(hour_cape) and hour_cape > period_data["max_cape_with_precip"]:
+                if (
+                    not np.isnan(hour_cape)
+                    and hour_cape > period_data["max_cape_with_precip"]
+                ):
                     period_data["max_cape_with_precip"] = hour_cape
                     # Record conditions at peak instability for the moisture check
                     period_data["temp_at_max_instability"] = hour_temp
@@ -1136,7 +1139,9 @@ def calculate_day_text(
             if p_data["max_cape_with_precip"] > overall_max_cape_with_precip:
                 overall_max_cape_with_precip = p_data["max_cape_with_precip"]
                 overall_temp_at_max_instability = p_data["temp_at_max_instability"]
-                overall_dewpoint_at_max_instability = p_data["dewpoint_at_max_instability"]
+                overall_dewpoint_at_max_instability = p_data[
+                    "dewpoint_at_max_instability"
+                ]
 
             if p_data["min_li_with_precip"] is not None:
                 if (
