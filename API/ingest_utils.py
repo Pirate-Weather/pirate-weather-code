@@ -39,6 +39,10 @@ CHUNK_SIZES = {
     "NBM_Fire": 200,
     "RTMA": 200,
     "DWD": 200,
+    "NBM_AK": 200,
+    "NBM_GU": 200,
+    "NBM_HI": 200,
+    "NBM_PR": 200,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -52,6 +56,10 @@ FINAL_CHUNK_SIZES = {
     "NBM_Fire": 5,
     "RTMA": 25,
     "DWD": 5,
+    "NBM_AK": 3,
+    "NBM_GU": 3,
+    "NBM_HI": 3,
+    "NBM_PR": 3,
 }
 
 FORECAST_LEAD_RANGES = {
