@@ -271,9 +271,8 @@ if sp_out.returncode != 0:
 # Read the merged netcdf file using xarray (single combined file)
 xarray_forecast_merged = xr.open_dataset(forecast_process_path + "_wgrib2_merged.nc")
 
-assert len(xarray_forecast_merged.time) == len(hrdps_file_range), (
-    "Incorrect number of timesteps! Exiting"
-)
+if len(xarray_forecast_merged.time) != len(hrdps_file_range):
+    raise ValueError("Incorrect number of timesteps! Exiting")
 
 # Determine grid size from merged dataset (supports rotated grids)
 NY = xarray_forecast_merged.dims.get(
