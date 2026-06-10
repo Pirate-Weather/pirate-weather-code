@@ -2,6 +2,7 @@
 # Alexander Rey, April 2026
 
 # %% Import modules
+import logging
 import os
 import pickle
 import shutil
@@ -42,6 +43,10 @@ from API.ingest_utils import (
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
+
+# Logging setup
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -127,7 +132,7 @@ if save_type == "S3":
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to GDPS, ending")
+            logger.info("No Update to GDPS, ending")
             sys.exit()
 
 else:
@@ -141,7 +146,7 @@ else:
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            print("No Update to GDPS, ending")
+            logger.info("No Update to GDPS, ending")
             sys.exit()
 
 zarr_vars = (
@@ -221,9 +226,12 @@ for g in match_strings:
 
     # Ensure each variable produced the expected number of lead files
     if len(FH.file_exists) != len(gdps_file_range):
-        print(
-            f"Download failed for {g['variable']}:{g['level']}, expected "
-            f"{len(gdps_file_range)} files but got {len(FH.file_exists)}"
+        logger.error(
+            "Download failed for %s:%s, expected %s files but got %s",
+            g["variable"],
+            g["level"],
+            len(match_strings),
+            len(FH.file_exists),
         )
         sys.exit(1)
 
@@ -233,7 +241,7 @@ for g in match_strings:
 all_files = sorted(set(all_files))
 expected_total = len(gdps_file_range) * len(match_strings)
 if len(all_files) < expected_total:
-    print(
+    logger.error(
         f"Download incomplete, expected at least {expected_total} files but got {len(all_files)}"
     )
     sys.exit(1)
@@ -248,7 +256,7 @@ grib_check = run_command(cmd)
 
 # Validate the grib files
 validate_grib_stats(grib_check)
-print("Grib validation complete, no errors found.")
+logger.info("Grib validation complete, no errors found.")
 
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
@@ -267,7 +275,7 @@ cmd = (
 # Run wgrib2
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
-    print(sp_out.stderr)
+    logger.error(sp_out.stderr)
     sys.exit()
 
 # Read the merged netcdf file using xarray (single combined file)
@@ -338,7 +346,7 @@ del (
 )
 T1 = time.time()
 
-print(T1 - T0)
+logger.info(T1 - T0)
 os.remove(forecast_process_path + "_wgrib2_merged.nc")
 
 ################################################################################################
@@ -357,7 +365,7 @@ for i in range(his_period, 0, -6):
 
         # Check for a done file in S3
         if s3.exists(s3_path.replace(".tar.gz", ".done")):
-            print("File already exists in S3, skipping download for: " + s3_path)
+            logger.info("File already exists in S3, skipping download for: %s", s3_path)
             continue
     else:
         # Local Path Setup
@@ -370,11 +378,14 @@ for i in range(his_period, 0, -6):
 
         # Check for a local done file
         if os.path.exists(local_path.replace(".zarr", ".done")):
-            print("File already exists locally, skipping download for: " + local_path)
+            logger.info(
+                "File already exists locally, skipping download for: %s", local_path
+            )
             continue
 
-    print(
-        "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+    logger.info(
+        "Downloading: %s",
+        (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"),
     )
 
     # Create a range of dates for historic data going back 240 hours
@@ -402,9 +413,10 @@ for i in range(his_period, 0, -6):
 
     # Check for download length
     if len(FH_histsub.file_exists) != len(fxx):
-        print(
-            f"Download failed, expected {len(fxx)} files but got "
-            + str(len(FH_histsub.file_exists))
+        logger.error(
+            "Download failed, expected %s files but got %s",
+            len(fxx),
+            len(FH_histsub.file_exists),
         )
         sys.exit(1)
 
@@ -417,7 +429,7 @@ for i in range(his_period, 0, -6):
     grib_check = run_command(cmd)
 
     validate_grib_stats(grib_check)
-    print("Grib files passed validation, proceeding with processing")
+    logger.info("Grib files passed validation, proceeding with processing")
 
     # Create a string to pass to wgrib2 to merge all gribs into one netcdf
     cmd = (
@@ -434,7 +446,7 @@ for i in range(his_period, 0, -6):
     # Run wgrib2
     sp_out = run_command(cmd)
     if sp_out.returncode != 0:
-        print(sp_out.stderr)
+        logger.error(sp_out.stderr)
         sys.exit()
 
     # Read the merged netcdf file using xarray (single combined file)
@@ -496,7 +508,7 @@ for i in range(his_period, 0, -6):
         with open(done_file, "w") as f:
             f.write("Done")
 
-    print((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
+    logger.info((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
 
 
 # %% Merge the historic and forecast datasets and then squash using dask
@@ -528,7 +540,7 @@ if save_type == "S3":
         for i in range(his_period, 1, -6)
     ]
 
-    print(f"Phase 1: Downloading and extracting {len(timestamps)} archives...")
+    logger.info("Phase 1: Downloading and extracting %s archives...", len(timestamps))
 
     # Execute downloads in parallel
     with ThreadPoolExecutor(max_workers=12) as executor:
@@ -565,7 +577,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
             )
         # Add a fallback in case of a FileNotFoundError
         except FileNotFoundError:
-            print("File not found, adding NaN array for: " + local_ncpath)
+            logger.warning("File not found, adding NaN array for: %s", local_ncpath)
             daskVarArrays.append(
                 da.full((len(fxx), NY, NX), MISSING_DATA).rechunk(
                     (len(fxx), process_chunk, process_chunk)
@@ -618,7 +630,7 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
 
     daskVarArrays = []
 
-    print(dask_var)
+    logger.info(dask_var)
 
 # Merge the arrays into a single 4D array
 daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
@@ -735,4 +747,4 @@ shutil.rmtree(forecast_process_dir)
 
 # Timing
 T1 = time.time()
-print(T1 - T0)
+logger.info(T1 - T0)
