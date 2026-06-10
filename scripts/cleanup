@@ -1,2 +1,4 @@
+#!/usr/bin/env bash
+
 git fetch --prune
 git branch --no-merged | egrep -v "(^\*|master|dev)" | xargs git branch -D
