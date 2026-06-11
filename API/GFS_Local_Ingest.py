@@ -1,7 +1,12 @@
-# %% Script to test FastHerbie.py to download GFS data
-# Alexander Rey, September 2023
+"""GFS Local Data Ingestion Script
 
-# %% Import modules
+Downloads, processes, and stores GFS forecast and historic data using wgrib2,
+Herbie, and xarray. Generates hourly interpolated datasets with multiple variables.
+
+Author: Alexander Rey
+Date: September 2023
+"""
+
 import logging
 import os
 import pickle
@@ -58,6 +63,16 @@ from API.ingest_utils import (
     validate_stacked_time_alignment,
 )
 from API.utils.storm_proc import compute_storm_fields_from_apcp_dataarray
+from API.ingest_grib_utils import (
+    quote_path,
+    cat_gribs,
+    output_path,
+    run_checked,
+    has_records,
+    awk_path,
+    deaverage_historic_duvb_hourly,
+    download_and_validate_gfs_subset,
+)
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -65,42 +80,59 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# %% Setup paths and parameters
-ingest_version = INGEST_VERSION_STR
+# ============================================================================
+# Constants
+# ============================================================================
+# Grid dimensions for GFS 0.25° global grid
+GRID_LAT = 721
+GRID_LON = 1440
+# Time dimensions
+FORECAST_TIME_STEPS = 160
+HISTORIC_TIME_STEPS = 6
+MAP_TIME_STEPS = 36
+MAP_CHUNK_SIZE = 100
+# Zarr store settings
+DEFAULT_ZARR_WORKERS = 12
+DEFAULT_ZARR_CONCURRENCY = 12
+DEFAULT_HERBIE_RETRIES = 5
+DEFAULT_HERBIE_RETRY_SLEEP = 20
 
-# Note that when running the docker container, this should be: "/build/wgrib2_build/bin/wgrib2 "
+# ============================================================================
+# Environment Configuration
+# ============================================================================
+
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
 
+# Paths
 forecast_process_dir = os.getenv("forecast_process_dir", default="/home/reya/Weather/GFS")
-forecast_process_path = forecast_process_dir + "/GFS_Process"
-hist_process_path = forecast_process_dir + "/GFS_Historic"
-tmp_dir = forecast_process_dir + "/Downloads"
+forecast_process_path = os.path.join(forecast_process_dir, "GFS_Process")
+hist_process_path = os.path.join(forecast_process_dir, "GFS_Historic")
+tmp_dir = os.path.join(forecast_process_dir, "Downloads")
 
 forecast_path = os.getenv("forecast_path", default="/home/reya/Weather/Prod/GFS")
 historic_path = os.getenv("historic_path", default="/home/reya/Weather/GFS")
 
+ingest_version = INGEST_VERSION_STR
 
+# Save and upload settings
 save_type = os.getenv("save_type", default="Download")
-no_upload = os.getenv("NO_UPLOAD", os.getenv("no_upload", "")).lower() in (
-    "1",
-    "true",
-    "yes",
-    "on",
-)
-force_update = os.getenv("force_update", default="").lower() in (
-    "1",
-    "true",
-    "yes",
-    "on",
-)
+
+def _parse_bool_env(value: str) -> bool:
+    """Parse environment variable as boolean."""
+    return value.lower() in ("1", "true", "yes", "on")
+
+no_upload = _parse_bool_env(os.getenv("NO_UPLOAD", os.getenv("no_upload", "")))
+force_update = _parse_bool_env(os.getenv("force_update", ""))
+
+# AWS/S3 settings
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
-zarr_store_workers = positive_int_env("zarr_store_workers", 4)
-zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 4)
-herbie_download_retries = positive_int_env("herbie_download_retries", 5)
-herbie_retry_sleep_seconds = positive_int_env("herbie_retry_sleep_seconds", 20)
+zarr_store_workers = positive_int_env("zarr_store_workers", DEFAULT_ZARR_WORKERS)
+zarr_async_concurrency = positive_int_env("zarr_async_concurrency", DEFAULT_ZARR_CONCURRENCY)
+herbie_download_retries = positive_int_env("herbie_download_retries", DEFAULT_HERBIE_RETRIES)
+herbie_retry_sleep_seconds = positive_int_env("herbie_retry_sleep_seconds", DEFAULT_HERBIE_RETRY_SLEEP)
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 tune_nofile_limit()
@@ -136,6 +168,9 @@ if save_type == "Download":
 
 herbie_save_dir = make_herbie_save_dir(tmp_dir)
 
+################################################################################################
+# Forecast Data Processing
+################################################################################################
 
 T0 = time.time()
 
@@ -267,157 +302,39 @@ gfs_forecast_hours = [*gfs_range_1, *gfs_range_2]
 wgrib2_exe = wgrib2_path.strip()
 
 
-def quote_path(path: str) -> str:
-    """Shell-quote a file path."""
-    return shlex.quote(str(path))
-
-
-def cat_gribs(grib_files: list[str]) -> str:
-    """Build a quoted cat command for a list of GRIB files."""
-    return "cat " + " ".join(quote_path(path) for path in grib_files)
-
-
-def output_path(suffix: str) -> str:
-    """Create a consistent output path from forecast_process_path."""
-    return f"{forecast_process_path}_{suffix}"
-
-
-def run_checked(cmd: str, description: str):
-    """Run a shell command and exit on failure."""
-    sp_out = run_command(cmd)
-
-    if sp_out.returncode != 0:
-        logger.error("%s failed.", description)
-        logger.error(sp_out.stderr)
-        sys.exit(1)
-
-    return sp_out
-
-
-def has_records(path: str) -> bool:
-    """Return True if an inventory file exists and is non-empty."""
-    return os.path.exists(path) and os.path.getsize(path) > 0
-
-
-def awk_path(path: str) -> str:
-    """Escape a path for use inside a double-quoted awk string."""
-    return path.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def deaverage_historic_duvb_hourly(duvb_dataarray: xr.DataArray) -> xr.DataArray:
-    """Convert cumulative historic DUVB averages into hourly values."""
-    uv_proc = duvb_dataarray.values
-    n = np.arange(1, 7)
-    n = n[:, np.newaxis, np.newaxis]
-
-    first_step = uv_proc[0, :, :]
-    first_step = first_step[np.newaxis, :, :]
-
-    uv_proc_hour = np.concatenate(
-        (first_step, np.diff(uv_proc, axis=0) * n[1:, :, :] + uv_proc[0:5, :, :]),
-        axis=0,
-    )
-
-    uv_proc_hour[uv_proc_hour < 0] = 0
-    return duvb_dataarray.copy(data=uv_proc_hour)
-
-
-def download_and_validate_gfs_subset(
-    *,
-    product: str,
-    search,
-    dataset_name: str,
-    run_date=None,
-    forecast_hours=None,
-    priority=None,
-    save_dir=None,
-) -> list[str]:
-    """Download a GFS subset, validate file count, and run wgrib2 stats checks."""
-    if run_date is None:
-        run_date = base_time
-    if forecast_hours is None:
-        forecast_hours = gfs_forecast_hours
-    if priority is None:
-        priority = ["aws", "google", "nomads"]
-    if save_dir is None:
-        save_dir = herbie_save_dir
-
-    run_date_dt = cast(datetime, pd.Timestamp(run_date).to_pydatetime())
-    herbie_dates: list[datetime] = [run_date_dt]
-
-    herbie_obj = FastHerbie(
-        herbie_dates,
-        model="gfs",
-        fxx=forecast_hours,
-        product=product,
-        verbose=False,
-        priority=priority,
-        save_dir=save_dir,
-    )
-
-    download_herbie_with_retry(
-        herbie_obj=herbie_obj,
-        search=search,
-        expected_count=len(forecast_hours),
-        dataset_name=dataset_name,
-        retries=herbie_download_retries,
-        retry_sleep_s=herbie_retry_sleep_seconds,
-    )
-
-    downloaded_count = len(herbie_obj.file_exists)
-    expected_count = len(forecast_hours)
-
-    if downloaded_count != expected_count:
-        logger.error(
-            "Download failed for %s: expected %s files but got %s.",
-            dataset_name,
-            expected_count,
-            downloaded_count,
-        )
-        sys.exit(1)
-
-    grib_files = build_herbie_grib_list(herbie_obj.file_exists, search)
-
-    cmd_stats = (
-        f"{cat_gribs(grib_files)} | "
-        f"{quote_path(wgrib2_exe)} - -s -stats"
-    )
-
-    grib_check = run_checked(cmd_stats, f"{dataset_name} GRIB validation")
-    validate_grib_stats(grib_check)
-
-    logger.info("%s passed GRIB validation.", dataset_name)
-
-    return grib_files
-
-
 pgrb2_grib_files = download_and_validate_gfs_subset(
     product="pgrb2.0p25",
     search=match_strings,
     dataset_name="GFS forecast pgrb2.0p25",
+    base_time=base_time,
+    wgrib2_exe=wgrib2_exe,
+    gfs_forecast_hours=gfs_forecast_hours,
+    herbie_save_dir=herbie_save_dir,
+    herbie_download_retries=herbie_download_retries,
+    herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
 )
 
 
 # %% File names
 
-pgrb2_merged_grib = output_path("pgrb2_0p25_merged.grib")
+pgrb2_merged_grib = output_path(forecast_process_path, "pgrb2_0p25_merged.grib")
 
-apcp_norm_grib = output_path("apcp_norm.grib")
-apcp_rate_grib = output_path("apcp_rate_mmhr.grib")
-apcp_rate_nc4 = output_path("apcp_rate_mmhr.nc4")
+apcp_norm_grib = output_path(forecast_process_path, "apcp_norm.grib")
+apcp_rate_grib = output_path(forecast_process_path, "apcp_rate_mmhr.grib")
+apcp_rate_nc4 = output_path(forecast_process_path, "apcp_rate_mmhr.nc4")
 
-apcp_dt1_inv = output_path("apcp_dt1.inv")
-apcp_dt3_inv = output_path("apcp_dt3.inv")
-apcp_dt_other_inv = output_path("apcp_dt_other.inv")
+apcp_dt1_inv = output_path(forecast_process_path, "apcp_dt1.inv")
+apcp_dt3_inv = output_path(forecast_process_path, "apcp_dt3.inv")
+apcp_dt_other_inv = output_path(forecast_process_path, "apcp_dt_other.inv")
 
-dswrf_norm_grib = output_path("dswrf_norm.grib")
-dswrf_norm_nc4 = output_path("dswrf_norm.nc4")
+dswrf_norm_grib = output_path(forecast_process_path, "dswrf_norm.grib")
+dswrf_norm_nc4 = output_path(forecast_process_path, "dswrf_norm.nc4")
 
-other_fields_nc4 = output_path("other_fields.nc4")
+other_fields_nc4 = output_path(forecast_process_path, "other_fields.nc4")
 
-duvb_merged_grib = output_path("duvb_merged.grib")
-duvb_merged_nc4 = output_path("duvb_merged.nc4")
-duvb_norm_grib = output_path("duvb_norm.grib")
+duvb_merged_grib = output_path(forecast_process_path, "duvb_merged.grib")
+duvb_merged_nc4 = output_path(forecast_process_path, "duvb_merged.nc4")
+duvb_norm_grib = output_path(forecast_process_path, "duvb_norm.grib")
 
 
 # Clean old intermediate/output files that may be appended to or regenerated.
@@ -586,6 +503,12 @@ duvb_grib_files = download_and_validate_gfs_subset(
     product="pgrb2b.0p25",
     search=duvb_match_string,
     dataset_name="GFS forecast pgrb2b.0p25 DUVB",
+    base_time=base_time,
+    wgrib2_exe=wgrib2_exe,
+    gfs_forecast_hours=gfs_forecast_hours,
+    herbie_save_dir=herbie_save_dir,
+    herbie_download_retries=herbie_download_retries,
+    herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
 )
 
 
@@ -737,43 +660,54 @@ del (
 T1 = time.time()
 
 logger.info(T1 - T0)
-os.remove(forecast_process_path + "_wgrib_merged_UV.nc")
-os.remove(forecast_process_path + "_wgrib2_merged.nc")
+
+# Remove forecast intermediate GRIB/NetCDF/inventory artifacts.
+for path in [
+    pgrb2_merged_grib,
+    apcp_norm_grib,
+    apcp_rate_grib,
+    apcp_rate_nc4,
+    apcp_dt1_inv,
+    apcp_dt3_inv,
+    apcp_dt_other_inv,
+    dswrf_norm_grib,
+    dswrf_norm_nc4,
+    other_fields_nc4,
+    duvb_merged_grib,
+    duvb_merged_nc4,
+    duvb_norm_grib,
+]:
+    if os.path.exists(path):
+        os.remove(path)
 
 ################################################################################################
-# %% Historic data
-# Loop through the runs and check if they have already been processed to s3
+# Historic Data Processing
+# Loop through historical runs (6-hour intervals) and process if not already done
+################################################################################################
 
-# 6 hour runs
-for i in range(his_period, 0, -6):
+HISTORICAL_FORECAST_HOURS = range(1, 7)
+
+for hours_offset in range(his_period, 0, -6):
     if save_type == "S3":
-        s3_path = (
-            historic_path
-            + "/GFS_Hist_v3"
-            + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr.tar.gz"
-        )
+        timestamp = (base_time - pd.Timedelta(hours=hours_offset)).strftime("%Y%m%dT%H%M%SZ")
+        s3_path = f"{historic_path}/GFS_Hist_v3{timestamp}.zarr.tar.gz"
 
         # Check for a done file in S3
         if s3.exists(s3_path.replace(".tar.gz", ".done")):
-            print("File already exists in S3, skipping download for: " + s3_path)
+            logger.info("S3 file exists, skipping: %s", s3_path)
             continue
     else:
         # Local Path Setup
-        local_path = (
-            historic_path
-            + "/GFS_Hist_v3"
-            + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr"
-        )
+        timestamp = (base_time - pd.Timedelta(hours=hours_offset)).strftime("%Y%m%dT%H%M%SZ")
+        local_path = f"{historic_path}/GFS_Hist_v3{timestamp}.zarr"
 
         # Check for a local done file
         if os.path.exists(local_path.replace(".zarr", ".done")):
-            print("File already exists locally, skipping download for: " + local_path)
+            logger.info("Local file exists, skipping: %s", local_path)
             continue
 
-    hist_run_date = base_time - pd.Timedelta(hours=i)
-    hist_forecast_hours = range(1, 7)
+    hist_run_date = base_time - pd.Timedelta(hours=hours_offset)
+    hist_forecast_hours = HISTORICAL_FORECAST_HOURS
 
     hist_pgrb2_merged_grib = hist_process_path + "_wgrib2_merged.grib"
     hist_apcp_norm_grib = hist_process_path + "_apcp_norm.grib"
@@ -785,9 +719,7 @@ for i in range(his_period, 0, -6):
     hist_duvb_norm_grib = hist_process_path + "_duvb_norm.grib"
     hist_pgrb2_uv_merged_nc4 = hist_process_path + "_wgrib2_merged_UV.nc4"
 
-    logger.info(
-        "Downloading: " + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-    )
+    logger.info("Downloading historic data: %s", timestamp)
 
     # Create a range of dates for historic data going back 48 hours
     grib_list = download_and_validate_gfs_subset(
@@ -796,6 +728,12 @@ for i in range(his_period, 0, -6):
         dataset_name="GFS historic pgrb2.0p25",
         run_date=hist_run_date,
         forecast_hours=hist_forecast_hours,
+        base_time=base_time,
+        wgrib2_exe=wgrib2_exe,
+        gfs_forecast_hours=gfs_forecast_hours,
+        herbie_save_dir=herbie_save_dir,
+        herbie_download_retries=herbie_download_retries,
+        herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
     )
 
     cmd_merge_hist_pgrb2 = (
@@ -861,6 +799,12 @@ for i in range(his_period, 0, -6):
         dataset_name="GFS historic pgrb2b.0p25 DUVB",
         run_date=hist_run_date,
         forecast_hours=hist_forecast_hours,
+        base_time=base_time,
+        wgrib2_exe=wgrib2_exe,
+        gfs_forecast_hours=gfs_forecast_hours,
+        herbie_save_dir=herbie_save_dir,
+        herbie_download_retries=herbie_download_retries,
+        herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
     )
 
     cmd_merge_hist_pgrb2_uv = (
@@ -1014,11 +958,12 @@ for i in range(his_period, 0, -6):
         with open(done_file, "w") as f:
             f.write("Done")
 
-    logger.info((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
+    logger.info("Completed historic data processing: %s", timestamp)
 
 
-# %% Merge the historic and forecast datasets and then squash using dask
-# Get the s3 paths to the historic data
+################################################################################################
+# Merge Historic and Forecast Datasets
+################################################################################################
 if save_type == "S3":
     local_temp_dir = forecast_process_path + "_s3_temp_downloads"
     os.makedirs(local_temp_dir, exist_ok=True)
@@ -1041,11 +986,11 @@ if save_type == "S3":
 
     # Generate target timestamps
     timestamps = [
-        (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-        for i in range(his_period, 1, -6)
+        (base_time - pd.Timedelta(hours=hours_offset)).strftime("%Y%m%dT%H%M%SZ")
+        for hours_offset in range(his_period, 1, -6)
     ]
 
-    print(f"Phase 1: Downloading and extracting {len(timestamps)} archives...")
+    logger.info("Downloading and extracting %d archives from S3...", len(timestamps))
 
     # Execute downloads in parallel
     with ThreadPoolExecutor(max_workers=12) as executor:
@@ -1058,112 +1003,106 @@ if save_type == "S3":
         )
 
     # Filter out the missing files (None values) and keep the valid paths
-    ncLocalWorking_paths = [path for path in results if path is not None]
+    historic_zarr_paths = [path for path in results if path is not None]
 else:
-    ncLocalWorking_paths = [
-        historic_path
-        + "/GFS_Hist_v3"
-        + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-        + ".zarr"
-        for i in range(his_period, 1, -6)
+    historic_zarr_paths = [
+        f"{historic_path}/GFS_Hist_v3{(base_time - pd.Timedelta(hours=hours_offset)).strftime('%Y%m%dT%H%M%SZ')}.zarr"
+        for hours_offset in range(his_period, 1, -6)
     ]
 
 # Dask Setup
-daskInterpArrays = []
-daskVarArrays = []
-daskVarArrayList = []
+dask_var_arrays_list = []
+dask_interp_arrays = []
 
-for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
-    for local_ncpath in ncLocalWorking_paths:
+for var_idx, dask_var in enumerate(zarr_vars[:]):
+    for historic_zarr_path in historic_zarr_paths:
         # If not found in array, use MISSING_DATA to show missing
         try:
-            daskVarArrays.append(
-                da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
+            dask_var_arrays_list.append(
+                da.from_zarr(historic_zarr_path, component=dask_var, inline_array=True)
             )
         # Add a fallback in case of a FileNotFoundError
         except FileNotFoundError:
-            logger.info("File not found, adding NaN array for: %s", local_ncpath)
-            daskVarArrays.append(
-                da.full((6, 721, 1440), MISSING_DATA).rechunk(
-                    (6, process_chunk, process_chunk)
+            logger.info("File not found, adding NaN array for: %s", historic_zarr_path)
+            dask_var_arrays_list.append(
+                da.full((HISTORIC_TIME_STEPS, GRID_LAT, GRID_LON), MISSING_DATA).rechunk(
+                    (HISTORIC_TIME_STEPS, process_chunk, process_chunk)
                 )
             )
 
-    daskVarArraysStack = da.stack(daskVarArrays, allow_unknown_chunksizes=True)
+    dask_var_arrays_stacked = da.stack(dask_var_arrays_list, allow_unknown_chunksizes=True)
 
     if dask_var == "Storm_Distance":
-        daskForecastArray = da.from_zarr(forecast_process_path + "_stormDist.zarr")
+        dask_forecast_array = da.from_zarr(forecast_process_path + "_stormDist.zarr")
     elif dask_var == "Storm_Direction":
-        daskForecastArray = da.from_zarr(forecast_process_path + "_stormDir.zarr")
+        dask_forecast_array = da.from_zarr(forecast_process_path + "_stormDir.zarr")
     else:
-        daskForecastArray = da.from_zarr(
+        dask_forecast_array = da.from_zarr(
             forecast_process_path + "_.zarr", component=dask_var, inline_array=True
         )
 
     if dask_var == "time":
         # Create a time array with the same shape
         # This is because multiple steps are stored in each file
-        daskVarArraysShape = da.reshape(
-            daskVarArraysStack,
-            (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], 1),
+        dask_var_arrays_reshaped = da.reshape(
+            dask_var_arrays_stacked,
+            (dask_var_arrays_stacked.shape[0] * dask_var_arrays_stacked.shape[1], 1),
             merge_chunks=False,
         )
-        daskCatTimes = da.concatenate(
-            (da.squeeze(daskVarArraysShape), daskForecastArray), axis=0
+        dask_times_concatenated = da.concatenate(
+            (da.squeeze(dask_var_arrays_reshaped), dask_forecast_array), axis=0
         ).astype("float32")
 
         # Get times as numpy
-        npCatTimes = daskCatTimes.compute()
-        validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
+        times_array = dask_times_concatenated.compute()
+        validate_stacked_time_alignment(stacked_timesUnix, times_array)
 
-        daskArrayOut = da.from_array(
+        output_array = da.from_array(
             np.tile(
-                np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
-                (1, 721, 1440),
+                np.expand_dims(np.expand_dims(times_array, axis=1), axis=1),
+                (1, GRID_LAT, GRID_LON),
             )
         ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
 
-        daskVarArrayList.append(daskArrayOut)
+        dask_interp_arrays.append(output_array)
 
     else:
-        daskVarArraysShape = da.reshape(
-            daskVarArraysStack,
-            (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], 721, 1440),
+        dask_var_arrays_reshaped = da.reshape(
+            dask_var_arrays_stacked,
+            (dask_var_arrays_stacked.shape[0] * dask_var_arrays_stacked.shape[1], GRID_LAT, GRID_LON),
             merge_chunks=False,
         )
-        daskArrayOut = da.concatenate((daskVarArraysShape, daskForecastArray), axis=0)
+        output_array = da.concatenate((dask_var_arrays_reshaped, dask_forecast_array), axis=0)
 
-        daskVarArrayList.append(
-            daskArrayOut[:, :, :]
+        dask_interp_arrays.append(
+            output_array[:, :, :]
             .rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
             .astype("float32")
         )
 
-    daskVarArrays = []
-
-    logger.info(dask_var)
+    dask_var_arrays_list = []
+    logger.info("Processed variable: %s", dask_var)
 
 # Merge the arrays into a single 4D array
-daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
+merged_arrays = da.stack(dask_interp_arrays, axis=0)
 
 # Mask out invalid data
 # Ignore storm distance, since it can reach very high values that are still correct
-daskVarArrayListMergeNaN = mask_invalid_data(
-    daskVarArrayListMerge, ignoreAxis=[zarr_vars.index("Storm_Distance")]
+merged_arrays_masked = mask_invalid_data(
+    merged_arrays, ignoreAxis=[zarr_vars.index("Storm_Distance")]
 )
 
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
-# with ProgressBar():
 with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-    daskVarArrayListMergeNaN.to_zarr(
+    merged_arrays_masked.to_zarr(
         forecast_process_path + "_stack.zarr",
         overwrite=True,
         compute=True,
     )
 
 # Read in stacked 4D array back in
-daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
+stacked_array_disk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
 # Create a zarr backed dask array
 if save_type == "S3":
@@ -1184,8 +1123,8 @@ else:
 with ProgressBar():
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         # 1. Interpolate the stacked array to be hourly along the time axis
-        daskVarArrayStackDiskInterp = interp_time_take_blend(
-            daskVarArrayStackDisk,
+        stacked_array_interp = interp_time_take_blend(
+            stacked_array_disk,
             stacked_timesUnix=stacked_timesUnix,
             hourly_timesUnix=hourly_timesUnix,
             dtype="float32",
@@ -1193,8 +1132,8 @@ with ProgressBar():
         )
 
         # 2. Pad to chunk size
-        daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
-            daskVarArrayStackDiskInterp, final_chunk
+        stacked_array_padded = pad_to_chunk_size(
+            stacked_array_interp, final_chunk
         )
 
         # 3. Create the zarr array
@@ -1203,8 +1142,8 @@ with ProgressBar():
             shape=(
                 len(zarr_vars),
                 len(hourly_timesUnix),
-                daskVarArrayStackDiskInterpPad.shape[2],
-                daskVarArrayStackDiskInterpPad.shape[3],
+                stacked_array_padded.shape[2],
+                stacked_array_padded.shape[3],
             ),
             chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
             compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
@@ -1213,30 +1152,23 @@ with ProgressBar():
 
         # 4. Rechunk it to match the final array
         # 5. Write it out to the zarr array
-        daskVarArrayStackDiskInterpPad.round(5).rechunk(
+        stacked_array_padded.round(5).rechunk(
             (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
         ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
 close_store(zarr_store)
 
-# Rechunk subset of data for maps!
-# Want variables:
-# 0 (time)
-# 4 (TMP)
-# 8 (UGRD)
-# 9 (VGRD)
-# 10 (PRATE)
-# 11 (PACCUM)
-# 12:15 (PTYPE)
-# 21 (REFC)
+# Rechunk map data for faster web access
+# Variables included: time(0), TMP(4), UGRD(8), VGRD(9), PRATE(10), PACCUM(11),
+#                     CRAIN(12), CICEP(13), CSNOW(14), CFRZR(15), REFC(21)
+# Map extent: -12 to +24 hours (36 hours total)
+# Map chunk size: 100x100 pixels for fast tiling
 
-# Loop through variables, creating a new one with a name and 36 x 100 x 100 chunks
-# Save -12:24 hours, aka steps 24:60
-# Create a Zarr array in the store with zstd compression
+MAP_VAR_INDICES = [0, 4, 8, 9, 10, 11, 12, 13, 14, 15, 21]
 
 # Add padding for map chunking (100x100)
-daskVarArrayStackDisk_maps = pad_to_chunk_size(daskVarArrayStackDisk, 100)
+stacked_array_maps = pad_to_chunk_size(stacked_array_disk, MAP_CHUNK_SIZE)
 
 if save_type == "S3":
     zarr_store_maps = zarr.storage.ZipStore(
@@ -1245,17 +1177,17 @@ if save_type == "S3":
 else:
     zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/GFS_Maps.zarr")
 
-for z in [0, 4, 8, 9, 10, 11, 12, 13, 14, 15, 21]:
+for var_idx in MAP_VAR_INDICES:
     # Create a zarr backed dask array
     zarr_array = zarr.create_array(
         store=zarr_store_maps,
-        name=zarr_vars[z],
+        name=zarr_vars[var_idx],
         shape=(
-            36,
-            daskVarArrayStackDisk_maps.shape[2],
-            daskVarArrayStackDisk_maps.shape[3],
+            MAP_TIME_STEPS,
+            stacked_array_maps.shape[2],
+            stacked_array_maps.shape[3],
         ),
-        chunks=(36, 100, 100),
+        chunks=(MAP_TIME_STEPS, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
         dtype="float32",
     )
@@ -1263,11 +1195,11 @@ for z in [0, 4, 8, 9, 10, 11, 12, 13, 14, 15, 21]:
     with ProgressBar():
         with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
             da.rechunk(
-                daskVarArrayStackDisk_maps[z, his_period - 12 : his_period + 24, :, :],
-                (36, 100, 100),
+                stacked_array_maps[var_idx, his_period - 12 : his_period + 24, :, :],
+                (MAP_TIME_STEPS, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE),
             ).to_zarr(zarr_array, overwrite=True, compute=True)
 
-    logger.info(zarr_vars[z])
+    logger.info("Created map data for %s", zarr_vars[var_idx])
 
 
 close_store(zarr_store_maps)
