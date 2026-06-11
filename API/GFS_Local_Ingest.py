@@ -24,10 +24,10 @@ import dask.array as da
 from dotenv import find_dotenv, load_dotenv
 
 dotenv_path = find_dotenv(usecwd=True)
-print("dotenv path:", dotenv_path)
+logger.info("dotenv path: %s", dotenv_path)
 
 loaded = load_dotenv(dotenv_path, override=True)
-print("loaded:", loaded)
+logger.info("loaded: %s", loaded)
 
 import numpy as np
 import pandas as pd
