@@ -23,6 +23,7 @@ def _haversine_distance_m(lat1, lon1, lat2, lon2):
         np.sin(dlat / 2) ** 2
         + np.cos(lat1_rad) * np.cos(lat2_rad) * np.sin(dlon / 2) ** 2
     )
+    a = np.clip(a, 0.0, 1.0)
     c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
     return earth_radius_m * c
 
