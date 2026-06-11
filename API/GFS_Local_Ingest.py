@@ -83,6 +83,12 @@ historic_path = os.getenv("historic_path", default="/home/reya/Weather/GFS")
 
 
 save_type = os.getenv("save_type", default="Download")
+no_upload = os.getenv("NO_UPLOAD", os.getenv("no_upload", "")).lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 force_update = os.getenv("force_update", default="").lower() in (
     "1",
     "true",
@@ -583,16 +589,6 @@ duvb_grib_files = download_and_validate_gfs_subset(
 )
 
 
-cmd_duvb_to_nc4 = (
-    f"{cat_gribs(duvb_grib_files)} | "
-    f"{quote_path(wgrib2_exe)} - "
-    "-nc4 "
-    f"-netcdf {quote_path(duvb_merged_nc4)}"
-)
-
-run_checked(cmd_duvb_to_nc4, "Convert DUVB GRIB files to NetCDF")
-
-
 cmd_merge_duvb = (
     f"{cat_gribs(duvb_grib_files)} | "
     f"{quote_path(wgrib2_exe)} - "
@@ -609,6 +605,15 @@ cmd_norm_duvb = (
 )
 
 run_checked(cmd_norm_duvb, "Normalize DUVB")
+
+
+cmd_duvb_to_nc4 = (
+    f"{quote_path(wgrib2_exe)} {quote_path(duvb_norm_grib)} "
+    "-nc4 "
+    f"-netcdf {quote_path(duvb_merged_nc4)}"
+)
+
+run_checked(cmd_duvb_to_nc4, "Convert DUVB normalized GRIB to NetCDF")
 
 
 # %% Merge NetCDF datasets with xarray
@@ -772,12 +777,12 @@ for i in range(his_period, 0, -6):
 
     hist_pgrb2_merged_grib = hist_process_path + "_wgrib2_merged.grib"
     hist_apcp_norm_grib = hist_process_path + "_apcp_norm.grib"
-    hist_apcp_rate_grib = hist_process_path + "_apcp_rate_mmhr.grib"
     hist_apcp_rate_nc4 = hist_process_path + "_apcp_rate_mmhr.nc4"
     hist_dswrf_norm_grib = hist_process_path + "_dswrf_norm.grib"
     hist_dswrf_norm_nc4 = hist_process_path + "_dswrf_norm.nc4"
     hist_other_fields_nc4 = hist_process_path + "_other_fields.nc4"
     hist_pgrb2_uv_merged_grib = hist_process_path + "_wgrib2_merged_UV.grib"
+    hist_duvb_norm_grib = hist_process_path + "_duvb_norm.grib"
     hist_pgrb2_uv_merged_nc4 = hist_process_path + "_wgrib2_merged_UV.nc4"
 
     logger.info(
@@ -810,17 +815,8 @@ for i in range(his_period, 0, -6):
 
     run_checked(cmd_norm_hist_apcp, "Normalize historic APCP")
 
-    cmd_hist_apcp_to_rate = (
-        f"{quote_path(wgrib2_exe)} {quote_path(hist_apcp_norm_grib)} "
-        "-set_grib_type c1 "
-        "-rpn '6:/' "
-        f"-grib_out {quote_path(hist_apcp_rate_grib)}"
-    )
-
-    run_checked(cmd_hist_apcp_to_rate, "Convert historic APCP accumulations to mm/hr")
-
     cmd_hist_apcp_rate_to_nc4 = (
-        f"{quote_path(wgrib2_exe)} {quote_path(hist_apcp_rate_grib)} "
+        f"{quote_path(wgrib2_exe)} {quote_path(hist_apcp_norm_grib)} "
         "-nc4 "
         f"-netcdf {quote_path(hist_apcp_rate_nc4)}"
     )
@@ -878,15 +874,23 @@ for i in range(his_period, 0, -6):
         "Merge historic GFS pgrb2b.0p25 DUVB GRIB files",
     )
 
-    cmd_hist_duvb_to_nc4 = (
+    cmd_norm_hist_duvb = (
         f"{quote_path(wgrib2_exe)} {quote_path(hist_pgrb2_uv_merged_grib)} "
+        "-set_grib_type c1 "
+        f"-ncep_norm {quote_path(hist_duvb_norm_grib)}"
+    )
+
+    run_checked(cmd_norm_hist_duvb, "Normalize historic DUVB")
+
+    cmd_hist_duvb_to_nc4 = (
+        f"{quote_path(wgrib2_exe)} {quote_path(hist_duvb_norm_grib)} "
         "-nc4 "
         f"-netcdf {quote_path(hist_pgrb2_uv_merged_nc4)}"
     )
 
     run_checked(
         cmd_hist_duvb_to_nc4,
-        "Convert historic DUVB GRIB files to NetCDF",
+        "Convert historic DUVB normalized GRIB to NetCDF",
     )
 
     # Merge the UV data and xarrays
@@ -980,22 +984,28 @@ for i in range(his_period, 0, -6):
     # Remove temp file created by wgrib2
     os.remove(hist_pgrb2_merged_grib)
     os.remove(hist_apcp_norm_grib)
-    os.remove(hist_apcp_rate_grib)
     os.remove(hist_apcp_rate_nc4)
     os.remove(hist_dswrf_norm_grib)
     os.remove(hist_dswrf_norm_nc4)
     os.remove(hist_other_fields_nc4)
     os.remove(hist_pgrb2_uv_merged_grib)
+    os.remove(hist_duvb_norm_grib)
     os.remove(hist_pgrb2_uv_merged_nc4)
 
     # Save a done file to s3 to indicate that the historic data has been processed
     if save_type == "S3":
-        archive_tmp_zarr_and_upload(
-            tmp_zarr_path=hist_process_path + "_GFS_Hist_TMP.zarr",
-            s3_path=s3_path,
-            archive_member_name="GFS_Hist.zarr",
-            s3=s3,
-        )
+        if no_upload:
+            logger.info(
+                "NO_UPLOAD enabled, skipping historic S3 archive upload: %s", s3_path
+            )
+            shutil.rmtree(hist_process_path + "_GFS_Hist_TMP.zarr", ignore_errors=True)
+        else:
+            archive_tmp_zarr_and_upload(
+                tmp_zarr_path=hist_process_path + "_GFS_Hist_TMP.zarr",
+                s3_path=s3_path,
+                archive_member_name="GFS_Hist.zarr",
+                s3=s3,
+            )
     else:
         # Move to Local Path
         os.rename(hist_process_path + "_GFS_Hist_TMP.zarr", local_path)
@@ -1264,25 +1274,27 @@ close_store(zarr_store_maps)
 
 # %% Upload to S3
 if save_type == "S3":
-    # Upload to S3
-    s3.put_file(
-        forecast_process_dir + "/GFS.zarr.zip",
-        forecast_path + "/" + ingest_version + "/GFS.zarr.zip",
-    )
-    s3.put_file(
-        forecast_process_dir + "/GFS_Maps.zarr.zip",
-        forecast_path + "/" + ingest_version + "/GFS_Maps.zarr.zip",
-    )
-
     # Write most recent forecast time
     with open(forecast_process_dir + "/GFS.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
+    if no_upload:
+        logger.info("NO_UPLOAD enabled, skipping forecast S3 publish")
+    else:
+        # Upload to S3
+        s3.put_file(
+            forecast_process_dir + "/GFS.zarr.zip",
+            forecast_path + "/" + ingest_version + "/GFS.zarr.zip",
+        )
+        s3.put_file(
+            forecast_process_dir + "/GFS_Maps.zarr.zip",
+            forecast_path + "/" + ingest_version + "/GFS_Maps.zarr.zip",
+        )
 
-    s3.put_file(
-        forecast_process_dir + "/GFS.time.pickle",
-        forecast_path + "/" + ingest_version + "/GFS.time.pickle",
-    )
+        s3.put_file(
+            forecast_process_dir + "/GFS.time.pickle",
+            forecast_path + "/" + ingest_version + "/GFS.time.pickle",
+        )
 else:
     # Write most recent forecast time
     with open(forecast_process_dir + "/GFS.time.pickle", "wb") as file:
@@ -1308,7 +1320,10 @@ else:
         dirs_exist_ok=True,
     )
 # Clean up
-shutil.rmtree(forecast_process_dir)
+if no_upload:
+    logger.info("NO_UPLOAD enabled, skipping cleanup of %s", forecast_process_dir)
+else:
+    shutil.rmtree(forecast_process_dir)
 
 # Timing
 T1 = time.time()
