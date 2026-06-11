@@ -70,7 +70,6 @@ from API.ingest_grib_utils import (
     run_checked,
     has_records,
     awk_path,
-    deaverage_historic_duvb_hourly,
     download_and_validate_gfs_subset,
 )
 
@@ -604,7 +603,7 @@ xarray_forecast_merged["DUVB_surface"] = xarray_forecast_merged["DUVB_surface"].
 distanced_stacked, directions_stacked = compute_storm_fields_from_apcp_dataarray(
     apcp_dataarray=xarray_forecast_merged["APCP_surface"],
     threshold=0.2,
-    max_distance_m=250000,
+    max_distance_m=None,
 )
 
 distanced_chunked = distanced_stacked.rechunk((160, process_chunk, process_chunk))
@@ -881,12 +880,6 @@ for hours_offset in range(his_period, 0, -6):
     xarray_hist_merged["Storm_Direction"] = (
         ("time", "latitude", "longitude"),
         storm_direction_hist.rechunk((6, process_chunk, process_chunk)).compute(),
-    )
-
-    # Historic DUVB is still corrected from cumulative averages to hourly values.
-    # The raw field is sourced from the wgrib2-generated NetCDF above.
-    xarray_hist_merged["DUVB_surface"] = deaverage_historic_duvb_hourly(
-        xarray_hist_merged["DUVB_surface"]
     )
 
     # Clear memory

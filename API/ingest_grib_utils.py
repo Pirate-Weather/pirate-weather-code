@@ -108,37 +108,6 @@ def awk_path(path: str) -> str:
     return path.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def deaverage_historic_duvb_hourly(duvb_dataarray: xr.DataArray) -> xr.DataArray:
-    """Convert cumulative historic DUVB averages into hourly values.
-    
-    Deaccumulates DUVB (downward UV-B radiation) from 6-hour cumulative
-    averages stored in the GFS historic data.
-    
-    Args:
-        duvb_dataarray: Input xarray DataArray with shape (6, lat, lon)
-        
-    Returns:
-        xarray DataArray with hourly DUVB values
-    """
-    uv_values = duvb_dataarray.values
-    # Deaccumulation multipliers for each time step
-    time_multipliers = np.arange(1, 7)
-    time_multipliers = time_multipliers[:, np.newaxis, np.newaxis]
-
-    first_timestep = uv_values[0, :, :]
-    first_timestep = first_timestep[np.newaxis, :, :]
-
-    # Deaccumulate: diff * multiplier + first value
-    uv_hourly = np.concatenate(
-        (first_timestep, np.diff(uv_values, axis=0) * time_multipliers[1:, :, :] + uv_values[0:5, :, :]),
-        axis=0,
-    )
-
-    # Ensure no negative values
-    uv_hourly[uv_hourly < 0] = 0
-    return duvb_dataarray.copy(data=uv_hourly)
-
-
 def download_and_validate_gfs_subset(
     *,
     product: str,
