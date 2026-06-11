@@ -24,6 +24,8 @@ jobs:
           pip install pytest
       - name: Run RTMA-RU ingest test
         run: pytest -v tests/test_rtma_ingest.py
+      - name: Run ingest utils download retry test
+        run: pytest -v tests/test_ingest_utils_download_retry.py
       - name: Run WMO Alerts geocode test
         run: pytest -v tests/test_wmo_alerts_geocode.py
       - name: Run DWD Interp test
