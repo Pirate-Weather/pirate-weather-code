@@ -42,7 +42,9 @@ def _bearing_deg(lat1, lon1, lat2, lon2):
     return (np.degrees(np.arctan2(x, y)) + 360) % 360
 
 
-def _storm_fields_for_slice(apcp_slice, lat_values, lon_values, threshold, max_distance_m):
+def _storm_fields_for_slice(
+    apcp_slice, lat_values, lon_values, threshold, max_distance_m
+):
     """Compute nearest-storm distance and direction for one 2D precipitation slice."""
     storm_mask = np.isfinite(apcp_slice) & (apcp_slice > threshold)
 
@@ -139,13 +141,9 @@ def compute_storm_fields_from_apcp_dataarray(
     # Position indices that restore the original longitude order.
     longitude_restore_index = np.argsort(longitude_sort_index)
 
-    apcp_normalized = (
-        apcp_dataarray
-        .assign_coords(
-            longitude=("longitude", longitude_normalized)
-        )
-        .isel(longitude=longitude_sort_index)
-    )
+    apcp_normalized = apcp_dataarray.assign_coords(
+        longitude=("longitude", longitude_normalized)
+    ).isel(longitude=longitude_sort_index)
 
     storm_fields = compute_storm_distance_direction(
         apcp_data=apcp_normalized.data,
@@ -167,16 +165,12 @@ def compute_storm_fields_from_apcp_dataarray(
         dims=apcp_normalized.dims,
     )
 
-    distance_original = (
-        distance_sorted
-        .isel(longitude=longitude_restore_index)
-        .assign_coords(longitude=("longitude", longitude_original))
-    )
+    distance_original = distance_sorted.isel(
+        longitude=longitude_restore_index
+    ).assign_coords(longitude=("longitude", longitude_original))
 
-    direction_original = (
-        direction_sorted
-        .isel(longitude=longitude_restore_index)
-        .assign_coords(longitude=("longitude", longitude_original))
-    )
+    direction_original = direction_sorted.isel(
+        longitude=longitude_restore_index
+    ).assign_coords(longitude=("longitude", longitude_original))
 
     return distance_original.data, direction_original.data

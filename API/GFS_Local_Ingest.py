@@ -99,7 +99,9 @@ wgrib2_path = os.getenv(
 )
 
 # Paths
-forecast_process_dir = os.getenv("forecast_process_dir", default="/home/reya/Weather/GFS")
+forecast_process_dir = os.getenv(
+    "forecast_process_dir", default="/home/reya/Weather/GFS"
+)
 forecast_process_path = os.path.join(forecast_process_dir, "GFS_Process")
 hist_process_path = os.path.join(forecast_process_dir, "GFS_Historic")
 tmp_dir = os.path.join(forecast_process_dir, "Downloads")
@@ -112,9 +114,11 @@ ingest_version = INGEST_VERSION_STR
 # Save and upload settings
 save_type = os.getenv("save_type", default="Download")
 
+
 def _parse_bool_env(value: str) -> bool:
     """Parse environment variable as boolean."""
     return value.lower() in ("1", "true", "yes", "on")
+
 
 no_upload = _parse_bool_env(os.getenv("NO_UPLOAD", os.getenv("no_upload", "")))
 force_update = _parse_bool_env(os.getenv("force_update", ""))
@@ -123,9 +127,15 @@ force_update = _parse_bool_env(os.getenv("force_update", ""))
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 zarr_store_workers = positive_int_env("zarr_store_workers", DEFAULT_ZARR_WORKERS)
-zarr_async_concurrency = positive_int_env("zarr_async_concurrency", DEFAULT_ZARR_CONCURRENCY)
-herbie_download_retries = positive_int_env("herbie_download_retries", DEFAULT_HERBIE_RETRIES)
-herbie_retry_sleep_seconds = positive_int_env("herbie_retry_sleep_seconds", DEFAULT_HERBIE_RETRY_SLEEP)
+zarr_async_concurrency = positive_int_env(
+    "zarr_async_concurrency", DEFAULT_ZARR_CONCURRENCY
+)
+herbie_download_retries = positive_int_env(
+    "herbie_download_retries", DEFAULT_HERBIE_RETRIES
+)
+herbie_retry_sleep_seconds = positive_int_env(
+    "herbie_retry_sleep_seconds", DEFAULT_HERBIE_RETRY_SLEEP
+)
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 tune_nofile_limit()
@@ -377,14 +387,14 @@ run_checked(cmd_norm_apcp, "Normalize APCP")
 awk_prog = (
     "{ "
     "ftime = $6; "
-    "split(ftime, p, \" \"); "
-    "split(p[1], h, \"-\"); "
-    "if (p[3] != \"acc\" || p[4] != \"fcst\") next; "
+    'split(ftime, p, " "); '
+    'split(p[1], h, "-"); '
+    'if (p[3] != "acc" || p[4] != "fcst") next; '
     "dt = h[2] - h[1]; "
-    "if (p[2] == \"day\") dt = dt * 24; "
-    f"if (dt == 1) print > \"{awk_path(apcp_dt1_inv)}\"; "
-    f"else if (dt == 3) print > \"{awk_path(apcp_dt3_inv)}\"; "
-    f"else print > \"{awk_path(apcp_dt_other_inv)}\"; "
+    'if (p[2] == "day") dt = dt * 24; '
+    f'if (dt == 1) print > "{awk_path(apcp_dt1_inv)}"; '
+    f'else if (dt == 3) print > "{awk_path(apcp_dt3_inv)}"; '
+    f'else print > "{awk_path(apcp_dt_other_inv)}"; '
     "}"
 )
 
@@ -682,7 +692,9 @@ HISTORICAL_FORECAST_HOURS = range(1, 7)
 
 for hours_offset in range(his_period, 0, -6):
     if save_type == "S3":
-        timestamp = (base_time - pd.Timedelta(hours=hours_offset)).strftime("%Y%m%dT%H%M%SZ")
+        timestamp = (base_time - pd.Timedelta(hours=hours_offset)).strftime(
+            "%Y%m%dT%H%M%SZ"
+        )
         s3_path = f"{historic_path}/GFS_Hist_v3{timestamp}.zarr.tar.gz"
 
         # Check for a done file in S3
@@ -691,7 +703,9 @@ for hours_offset in range(his_period, 0, -6):
             continue
     else:
         # Local Path Setup
-        timestamp = (base_time - pd.Timedelta(hours=hours_offset)).strftime("%Y%m%dT%H%M%SZ")
+        timestamp = (base_time - pd.Timedelta(hours=hours_offset)).strftime(
+            "%Y%m%dT%H%M%SZ"
+        )
         local_path = f"{historic_path}/GFS_Hist_v3{timestamp}.zarr"
 
         # Check for a local done file
@@ -769,7 +783,9 @@ for hours_offset in range(his_period, 0, -6):
         f"-netcdf {quote_path(hist_dswrf_norm_nc4)}"
     )
 
-    run_checked(cmd_hist_dswrf_to_nc4, "Convert historic DSWRF normalized GRIB to NetCDF")
+    run_checked(
+        cmd_hist_dswrf_to_nc4, "Convert historic DSWRF normalized GRIB to NetCDF"
+    )
 
     cmd_hist_other_fields_to_nc4 = (
         f"{quote_path(wgrib2_exe)} {quote_path(hist_pgrb2_merged_grib)} "
@@ -849,15 +865,15 @@ for hours_offset in range(his_period, 0, -6):
 
     # Fix things
     # Historic APCP has already been deaccumulated by wgrib2.
-    xarray_hist_merged["APCP_surface"] = xarray_hist_merged["APCP_surface"].clip(
-        min=0
-    )
+    xarray_hist_merged["APCP_surface"] = xarray_hist_merged["APCP_surface"].clip(min=0)
 
     # Storm distance and direction
-    storm_distance_hist, storm_direction_hist = compute_storm_fields_from_apcp_dataarray(
-        apcp_dataarray=xarray_hist_merged["APCP_surface"],
-        threshold=0.2,
-        max_distance_m=None,
+    storm_distance_hist, storm_direction_hist = (
+        compute_storm_fields_from_apcp_dataarray(
+            apcp_dataarray=xarray_hist_merged["APCP_surface"],
+            threshold=0.2,
+            max_distance_m=None,
+        )
     )
 
     # Set REFC values < 5 to 0
@@ -1012,12 +1028,14 @@ for var_idx, dask_var in enumerate(zarr_vars[:]):
         except FileNotFoundError:
             logger.info("File not found, adding NaN array for: %s", historic_zarr_path)
             dask_var_arrays_list.append(
-                da.full((HISTORIC_TIME_STEPS, GRID_LAT, GRID_LON), MISSING_DATA).rechunk(
-                    (HISTORIC_TIME_STEPS, process_chunk, process_chunk)
-                )
+                da.full(
+                    (HISTORIC_TIME_STEPS, GRID_LAT, GRID_LON), MISSING_DATA
+                ).rechunk((HISTORIC_TIME_STEPS, process_chunk, process_chunk))
             )
 
-    dask_var_arrays_stacked = da.stack(dask_var_arrays_list, allow_unknown_chunksizes=True)
+    dask_var_arrays_stacked = da.stack(
+        dask_var_arrays_list, allow_unknown_chunksizes=True
+    )
 
     if dask_var == "Storm_Distance":
         dask_forecast_array = da.from_zarr(forecast_process_path + "_stormDist.zarr")
@@ -1056,10 +1074,16 @@ for var_idx, dask_var in enumerate(zarr_vars[:]):
     else:
         dask_var_arrays_reshaped = da.reshape(
             dask_var_arrays_stacked,
-            (dask_var_arrays_stacked.shape[0] * dask_var_arrays_stacked.shape[1], GRID_LAT, GRID_LON),
+            (
+                dask_var_arrays_stacked.shape[0] * dask_var_arrays_stacked.shape[1],
+                GRID_LAT,
+                GRID_LON,
+            ),
             merge_chunks=False,
         )
-        output_array = da.concatenate((dask_var_arrays_reshaped, dask_forecast_array), axis=0)
+        output_array = da.concatenate(
+            (dask_var_arrays_reshaped, dask_forecast_array), axis=0
+        )
 
         dask_interp_arrays.append(
             output_array[:, :, :]
@@ -1119,9 +1143,7 @@ with ProgressBar():
         )
 
         # 2. Pad to chunk size
-        stacked_array_padded = pad_to_chunk_size(
-            stacked_array_interp, final_chunk
-        )
+        stacked_array_padded = pad_to_chunk_size(stacked_array_interp, final_chunk)
 
         # 3. Create the zarr array
         zarr_array = zarr.create_array(

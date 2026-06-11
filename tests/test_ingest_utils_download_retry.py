@@ -21,7 +21,9 @@ class _FakeHerbie:
 
 
 @pytest.mark.parametrize("retry_sleep_s", [1])
-def test_download_retry_retries_until_local_files_exist(tmp_path, monkeypatch, retry_sleep_s):
+def test_download_retry_retries_until_local_files_exist(
+    tmp_path, monkeypatch, retry_sleep_s
+):
     f1 = tmp_path / "f1.grib2"
     f2 = tmp_path / "f2.grib2"
 

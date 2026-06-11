@@ -186,10 +186,7 @@ def download_and_validate_gfs_subset(
 
     grib_files = build_herbie_grib_list(herbie_obj.file_exists, search)
 
-    cmd_stats = (
-        f"{cat_gribs(grib_files)} | "
-        f"{quote_path(wgrib2_exe)} - -s -stats"
-    )
+    cmd_stats = f"{cat_gribs(grib_files)} | {quote_path(wgrib2_exe)} - -s -stats"
 
     grib_check = run_checked(cmd_stats, f"{dataset_name} GRIB validation")
     validate_grib_stats(grib_check)
