@@ -173,7 +173,7 @@ def build_pairs(
 
         pairs[var_name] = VarPair(
             left_get=left_arr.left_get,
-            right_get=right_arr.left_get,
+            right_get=right_arr.right_get,
             t_size=t_size,
             y_size=y_size,
             x_size=x_size,
