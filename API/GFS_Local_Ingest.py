@@ -6,24 +6,22 @@ Herbie, and xarray. Generates hourly interpolated datasets with multiple variabl
 Author: Alexander Rey
 Date: September 2023
 """
+# ruff: noqa: E402  # dotenv must be loaded before downstream imports
 
 import logging
 import os
 import pickle
-import shlex
 import shutil
 import sys
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
-from typing import cast
 
 import dask
 import dask.array as da
 
 # Env setup
-from dotenv import load_dotenv, find_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 dotenv_path = find_dotenv(usecwd=True)
 print("dotenv path:", dotenv_path)
@@ -37,16 +35,24 @@ import s3fs
 import xarray as xr
 import zarr.storage
 from dask.diagnostics import ProgressBar
-from herbie import FastHerbie, HerbieLatest
+from herbie import HerbieLatest
 from tqdm import tqdm
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
+from API.ingest_grib_utils import (
+    awk_path,
+    cat_gribs,
+    download_and_validate_gfs_subset,
+    has_records,
+    output_path,
+    quote_path,
+    run_checked,
+)
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
     archive_tmp_zarr_and_upload,
-    build_herbie_grib_list,
     close_store,
     configure_zarr_limits,
     download_extract_historic_archive,
@@ -56,22 +62,10 @@ from API.ingest_utils import (
     mask_invalid_refc,
     pad_to_chunk_size,
     positive_int_env,
-    run_command,
     tune_nofile_limit,
-    download_herbie_with_retry,
-    validate_grib_stats,
     validate_stacked_time_alignment,
 )
 from API.utils.storm_proc import compute_storm_fields_from_apcp_dataarray
-from API.ingest_grib_utils import (
-    quote_path,
-    cat_gribs,
-    output_path,
-    run_checked,
-    has_records,
-    awk_path,
-    download_and_validate_gfs_subset,
-)
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 

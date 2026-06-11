@@ -21,7 +21,6 @@ from typing import Callable
 import numpy as np
 import zarr
 
-
 DEFAULT_GFS_VAR_ORDER = [
     "time",
     "VIS_surface",

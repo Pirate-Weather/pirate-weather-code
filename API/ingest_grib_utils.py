@@ -10,31 +10,28 @@ import logging
 import os
 import shlex
 import sys
-from typing import cast
 from datetime import datetime
+from typing import cast
 
-import numpy as np
 import pandas as pd
-import xarray as xr
 from herbie import FastHerbie
 
 from API.ingest_utils import (
     build_herbie_grib_list,
-    run_command,
     download_herbie_with_retry,
+    run_command,
     validate_grib_stats,
 )
-
 
 logger = logging.getLogger(__name__)
 
 
 def quote_path(path: str) -> str:
     """Shell-quote a file path for safe use in shell commands.
-    
+
     Args:
         path: File path to quote
-        
+
     Returns:
         Shell-quoted path string
     """
@@ -43,10 +40,10 @@ def quote_path(path: str) -> str:
 
 def cat_gribs(grib_files: list[str]) -> str:
     """Build a shell command to concatenate GRIB files.
-    
+
     Args:
         grib_files: List of GRIB file paths
-        
+
     Returns:
         Shell cat command with quoted paths
     """
@@ -55,11 +52,11 @@ def cat_gribs(grib_files: list[str]) -> str:
 
 def output_path(forecast_process_path: str, suffix: str) -> str:
     """Create output file path with consistent naming convention.
-    
+
     Args:
         forecast_process_path: Base path for forecast processing
         suffix: File suffix to append (e.g., 'pgrb2_0p25_merged.grib')
-        
+
     Returns:
         Full output path: {forecast_process_path}_{suffix}
     """
@@ -68,11 +65,11 @@ def output_path(forecast_process_path: str, suffix: str) -> str:
 
 def run_checked(cmd: str, description: str):
     """Execute shell command and exit on failure.
-    
+
     Args:
         cmd: Shell command to execute
         description: Human-readable description for logging
-        
+
     Raises:
         SystemExit: If command returns non-zero exit code
     """
@@ -86,10 +83,10 @@ def run_checked(cmd: str, description: str):
 
 def has_records(path: str) -> bool:
     """Check if inventory file exists and contains records.
-    
+
     Args:
         path: Path to inventory file
-        
+
     Returns:
         True if file exists and is non-empty
     """
@@ -98,10 +95,10 @@ def has_records(path: str) -> bool:
 
 def awk_path(path: str) -> str:
     """Escape a path for safe use inside double-quoted awk strings.
-    
+
     Args:
         path: Path to escape
-        
+
     Returns:
         Escaped path string
     """
@@ -125,7 +122,7 @@ def download_and_validate_gfs_subset(
     save_dir=None,
 ) -> list[str]:
     """Download a GFS subset, validate file count, and run wgrib2 stats checks.
-    
+
     Args:
         product: GRIB product name (e.g., 'pgrb2.0p25')
         search: Search pattern for variables to download
@@ -140,7 +137,7 @@ def download_and_validate_gfs_subset(
         forecast_hours: Override default forecast hours
         priority: Source priority for Herbie downloads
         save_dir: Override default save directory
-        
+
     Returns:
         List of downloaded GRIB file paths
     """
