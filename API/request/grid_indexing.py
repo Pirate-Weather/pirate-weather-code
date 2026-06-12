@@ -474,9 +474,6 @@ async def calculate_grid_indexing(
         zarrTasks["HRRR"] = weather.zarr_read("HRRR", zarr_sources.hrrr, x_hrrr, y_hrrr)
     if readNBM:
         zarrTasks["NBM"] = weather.zarr_read("NBM", zarr_sources.nbm, x_nbm, y_nbm)
-        zarrTasks["NBM_Fire"] = weather.zarr_read(
-            "NBM_Fire", zarr_sources.nbm_fire, x_nbm, y_nbm
-        )
     if readGFS:
         zarrTasks["GFS"] = weather.zarr_read("GFS", zarr_sources.gfs, x_p, y_p)
     if readECMWF:
@@ -570,7 +567,7 @@ async def calculate_grid_indexing(
 
     if readNBM:
         dataOut_nbm = zarr_results["NBM"]
-        dataOut_nbmFire = zarr_results["NBM_Fire"]
+        dataOut_nbmFire = False
         if dataOut_nbm is not False:
             nbmRunTime = dataOut_nbm[HISTORY_PERIODS["NBM"], 0]
             try:
@@ -591,20 +588,6 @@ async def calculate_grid_indexing(
             sourceIDX["nbm"]["y"] = int(y_nbm)
             sourceIDX["nbm"]["lat"] = round(nbm_lat, 2)
             sourceIDX["nbm"]["lon"] = round(((nbm_lon + 180) % 360) - 180, 2)
-
-        if dataOut_nbmFire is not False:
-            nbmFireRunTime = dataOut_nbmFire[HISTORY_PERIODS["NBM"] - 6, 0]
-            try:
-                timestamp_dt = datetime.datetime.fromtimestamp(
-                    nbmFireRunTime.astype(int), datetime.UTC
-                ).replace(tzinfo=None)
-                # Exclude 6-hourly NBM Fire if older than 2 days
-                if (utc_time - timestamp_dt) > datetime.timedelta(days=2):
-                    dataOut_nbmFire = False
-                    nbmFireRunTime = None
-                    logger.warning("OLD NBM_FIRE")
-            except (ValueError, TypeError, AttributeError):
-                logger.debug("Failed to parse NBM_FIRE runtime for freshness check")
 
     if readGFS:
         dataOut_gfs = zarr_results["GFS"]

@@ -41,6 +41,96 @@ The initial `docker compose up` command will take some time (~1 hour), as the in
 
 Two docker containers are used for this service, and are both saved in the "[Docker](https://github.com/Pirate-Weather/pirate-weather-code/tree/main/Docker)" folder. `public.ecr.aws/j9v4j3c7/pirate-wgrib-python-arm` is the ingest container, and builds WGRIB2 from source in addition to adding several key python packages for processing. `public.ecr.aws/j9v4j3c7/pirate-alpine-zarr` is a smaller container for the API response, and only consists of FastAPI plus some additional dependencies. 
 
+### MCP Server
+
+Pirate Weather also exposes a hosted MCP server for apps and agents that support remote streamable HTTP MCP servers. Add it to your MCP client using:
+
+```
+https://mcp.pirateweather.net/mcp?apikey=<APIKEY>
+```
+
+Replace `<APIKEY>` with your Pirate Weather API key. The MCP tools use Pirate Weather API version 2 responses and add a `timeISO` field next to returned UNIX `time` fields for easier reading.
+
+The available tools are:
+
+- `get_forecast`: Best default tool for most weather questions. Returns current conditions, this hour, next hour, today, tomorrow, alerts, summary text, and response flags in one compact response.
+- `get_current_weather`: Use when you only need the current conditions block for a point.
+- `get_hourly_forecast`: Use for a specific number of hourly forecast entries. The `hours` argument controls how many entries are returned.
+- `get_minutely_forecast`: Use for minute-by-minute precipitation information.
+- `get_tomorrow_forecast`: Use when you only need tomorrow's daily forecast entry.
+- `get_daily_forecast`: Use for multiple daily forecast entries. The `days` argument controls how many entries are returned.
+- `get_alerts`: Use when you only need active weather alerts for a point.
+- `get_historical_weather`: Use for time-machine requests. The `time` argument accepts UNIX timestamp seconds, ISO timestamps, or negative relative offsets such as `-6h` and `-2d`.
+- `get_weather_summary`: Use for a concise summary-only response covering current, minutely, hourly, daily, and alerts.
+- `test_api_connection`: Use to check whether the configured upstream Pirate Weather API is reachable.
+- `get_subscription_status`: Reports MCP proxy status. The local response API does not expose quota or subscription metadata.
+
+Most forecast tools accept `units` and `lang`. Supported units are `auto`, `us`, `si`, `ca`, `uk`, and `uk2`; if omitted, the API defaults to `us`. Language defaults to `en`.
+
+#### Adding the MCP server to clients
+
+ChatGPT:
+
+1. Open ChatGPT settings and go to Apps/Connectors.
+2. If required by your plan or workspace, enable developer mode for custom MCP apps/connectors.
+3. Add a custom MCP connector/app with the remote server URL:
+```
+https://mcp.pirateweather.net/mcp?apikey=<APIKEY>
+```
+4. Connect or enable the app in a conversation, then ask for Pirate Weather data. In ChatGPT, connected apps can usually be invoked from the `+` menu, "More", or by mentioning the app in the prompt.
+
+OpenAI docs: [Apps in ChatGPT](https://help.openai.com/en/articles/11487775-connectors-in-chatgpt), [ChatGPT developer mode](https://platform.openai.com/docs/developer-mode), and [MCP server integration notes](https://platform.openai.com/docs/mcp).
+
+Gemini:
+
+Gemini CLI supports remote MCP servers using the streamable HTTP transport. Add Pirate Weather with:
+
+```
+gemini mcp add --transport http pirate-weather "https://mcp.pirateweather.net/mcp?apikey=<APIKEY>"
+```
+
+You can also add it to `~/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "pirate-weather": {
+      "httpUrl": "https://mcp.pirateweather.net/mcp?apikey=<APIKEY>"
+    }
+  }
+}
+```
+
+Check the connection with:
+
+```
+gemini mcp list
+```
+
+Gemini CLI docs: [MCP servers with Gemini CLI](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md) and [Gemini CLI configuration](https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md).
+
+Claude:
+
+For Claude.ai or Claude Desktop with remote connectors:
+
+1. Open Customize > Connectors.
+2. Add a custom connector.
+3. Enter:
+```
+https://mcp.pirateweather.net/mcp?apikey=<APIKEY>
+```
+4. Enable the connector in the conversation from the connectors/tools menu.
+
+For Team and Enterprise plans, an owner may need to add the custom connector first from Organization settings > Connectors before members can connect it.
+
+For Claude Code, add the same remote HTTP server with:
+
+```
+claude mcp add --transport http pirate-weather "https://mcp.pirateweather.net/mcp?apikey=<APIKEY>"
+```
+
+Claude docs: [Custom connectors using remote MCP](https://support.anthropic.com/en/articles/11175166-getting-started-with-custom-integrations-using-remote-mcp), [Building custom connectors via remote MCP](https://support.anthropic.com/en/articles/11503834-building-custom-integrations-via-remote-mcp-servers), and [Claude Code MCP setup](https://docs.anthropic.com/en/docs/claude-code/mcp).
+
 ### Local SSD Ingest (No Pirate Weather API Key)
 If your goal is to download and keep as much raw model data locally as possible, use the local Ofelia compose template with `save_type=Download`:
 
@@ -123,29 +213,7 @@ In either case, the dockerfiles to build the underlying images are [available](h
 This setup disables all the file updating processes within the response script and reads the data directly from the Zarr zip stores, focusing on the response. 
 
 #### VirtualEnv
-The other alternative is to setup a Python environment following the same process the dockerfile does. On Amazon Linux, this involves installing Node.js (I used the [nvm approach](https://nodejs.org/en/download/package-manager)), then following these steps for Pirate Weather:
-```
-git clone https://github.com/Pirate-Weather/pirate-weather-code.git
-
-wget https://files.alexanderrey.ca/api/public/dl/9jMgSLpi
-unzip 9jMgSLpi -d ~/pw-data
-
-sudo yum groupinstall 'Development Tools'
-sudo yum install gcc gcc-c++ make
-sudo yum install libffi-devel unzip rsync
-sudo yum install python3.12 python3.12-devel
-
-python3.13 -m venv "PirateWeather"
-source ~/.virtualenvs/PirateWeather/bin/activate
-
-pip install -r  ~/pirate-weather-code/Docker/requirements-api.txt
-export save_type=Download
-export TIMING=True
-export STAGE=TESTING
-export force_now=1730869200
-
-python3.12 ~/pirate-weather-code/responseLocal.py
-```
+The other alternative is to setup a Python environment following the same process the dockerfile does. There's now a [handy script for this](https://github.com/Pirate-Weather/pirate-weather-code/blob/dev/scripts/setup_ingest_test_env) in the repository, which runs assuming that `python3.14`, `python3.14-dev`, and `build-essentials` are installed on the system. It's been tested on Ubuntu, but should work on other distributions. 
 
 **Notes:**
 - The `force_now` environmental variable tells the script to pretend that it is currently this time in order to avoid switching to historic mode;

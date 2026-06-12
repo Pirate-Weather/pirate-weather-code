@@ -120,7 +120,7 @@ PRECIP_ACCUM_NOISE_THRESHOLD = (
 
 # API versioning and ingest version constants
 # Version scheme is: Major.Minor.Patch
-API_VERSION = "V2.9.5"
+API_VERSION = "V2.9.6"
 
 # Generic API constants
 MAX_S3_RETRIES = 5
@@ -149,7 +149,7 @@ COORDINATE_CONST = {
 TIME_MACHINE_CONST = {
     "threshold_hours": 25,
     "very_negative_threshold": -100000,
-    "max_days": 7,
+    "max_days": 8,
 }
 
 # Filename constants

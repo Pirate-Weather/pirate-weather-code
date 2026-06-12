@@ -17,6 +17,9 @@ API/read_ERA5.py
 *.env
 venv/
 .venv/
+.venvs/
+.build/
+temp_venv/
 .vscode/settings.json
 my_venv/
 .agents/rules/veenv.md

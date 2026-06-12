@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from API.constants.unit_const import country_units
 from API.hourly.builder import initialize_time_grids
 from API.io.zarr_reader import WeatherParallel
 from API.utils.geo import get_offset
+from API.utils.offline_geocode import geocode_city_country
 from API.utils.timing import TimingTracker
 
 RELATIVE_TIME_UNITS = {"s": 1, "h": 3600, "d": 86400}
@@ -184,12 +186,17 @@ def _parse_location(location: str):
     Raises:
         HTTPException: If location format is invalid or coordinates are out of bounds.
     """
-    location_req = location.split(",")
+    location_req = [part.strip() for part in location.split(",")]
     try:
         lat = float(location_req[0])
         lon_in = float(location_req[1])
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Location Specification")
+        if len(location_req) not in {2, 3}:
+            raise HTTPException(
+                status_code=400, detail="Invalid Location Specification"
+            )
+        lat, lon_in = geocode_city_country(location_req[0], location_req[1])
+        location_req = [str(lat), str(lon_in), *location_req[2:]]
 
     lon = lon_in % COORDINATE_CONST["longitude_max"]  # 0-360
     az_lon = (
@@ -336,33 +343,72 @@ def _setup_units(units: Union[str, None], loc_name: Dict[str, str]):
     return unit_system, unit_config
 
 
-def _parse_timemachine_days(request: Request, time_machine: bool) -> int:
-    """Parse and validate the optional timemachine days query parameter."""
+def _parse_timemachine_range(
+    request: Request, time_machine: bool
+) -> tuple[int, int, int]:
+    """Parse and validate optional timemachine days/hours query parameters.
+
+    Returns:
+        tuple[int, int, int]: (requested_days, requested_hours, grid_days)
+            requested_days controls daily/day_night output length.
+            requested_hours controls hourly output length.
+            grid_days ensures enough backing data is loaded for hourly slicing.
+    """
     if not time_machine:
-        return 1
+        return 1, 24, 1
 
     raw_days = request.query_params.get("days")
     if raw_days is None:
-        return 1
+        days = 1
+    else:
+        try:
+            days = int(raw_days)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Invalid days parameter. Expected an integer between 1 and "
+                    f"{TIME_MACHINE_CONST['max_days']}."
+                ),
+            ) from exc
 
-    try:
-        days = int(raw_days)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid days parameter. Expected an integer between 1 and 7.",
-        ) from exc
+        if days < 1 or days > TIME_MACHINE_CONST["max_days"]:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Invalid days parameter. Expected an integer between 1 and "
+                    f"{TIME_MACHINE_CONST['max_days']}."
+                ),
+            )
 
-    if days < 1 or days > TIME_MACHINE_CONST["max_days"]:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Invalid days parameter. Expected an integer between 1 and "
-                f"{TIME_MACHINE_CONST['max_days']}."
-            ),
-        )
+    max_hours = TIME_MACHINE_CONST["max_days"] * 24
+    raw_hours = request.query_params.get("hours")
+    if raw_hours is None:
+        hours = days * 24
+    else:
+        try:
+            hours = int(raw_hours)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Invalid hours parameter. Expected an integer between 1 and "
+                    f"{max_hours}."
+                ),
+            ) from exc
 
-    return days
+        if hours < 1 or hours > max_hours:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Invalid hours parameter. Expected an integer between 1 and "
+                    f"{max_hours}."
+                ),
+            )
+
+    grid_days = max(days, math.ceil(hours / 24))
+
+    return days, hours, grid_days
 
 
 def _parse_parameters(
@@ -393,7 +439,7 @@ def _parse_parameters(
     ex_dwd_mosmix = int("dwd_mosmix" in exclude_params)
     ex_aigefs = int("aigefs" in exclude_params)
     ex_aigfs = int("aigfs" in exclude_params)
-    ex_aifs = int("aifs" in exclude_params)
+    ex_aifs = int("ecmwf_aifs" in exclude_params)
     summary_text = "summary" not in exclude_params
     inc_day_night = int("day_night_forecast" in include_params)
     inc_aimodels = int("aimodels" in include_params)
@@ -449,12 +495,13 @@ def _setup_time_grids(
     base_day: datetime.datetime,
     pytz_tz: timezone,
     timemachine_days: int = 1,
+    timemachine_output_hours: int = 24,
 ):
     if time_machine:
         daily_days = timemachine_days
         daily_day_hours = 1
-        output_hours = timemachine_days * 24
-        output_days = timemachine_days
+        output_hours = timemachine_output_hours
+        output_days = min(timemachine_days, TIME_MACHINE_CONST["max_days"])
     else:
         daily_days = 8
         daily_day_hours = 5
@@ -596,7 +643,9 @@ async def prepare_initial_request(
     tz_offset, tz_name = get_offset(**tz_offset_loc)
     tz_req = tf.timezone_at(lat=lat, lng=az_lon)
     loc_name = await asyncio.to_thread(reverse_geocode.get, (lat, az_lon))
-    timemachine_days = _parse_timemachine_days(request, time_machine)
+    timemachine_days, timemachine_hours, timemachine_grid_days = (
+        _parse_timemachine_range(request, time_machine)
+    )
 
     extend_flag = 0 if not extend else int(extend == "hourly")
     version_val = float(version) if version else 1.0
@@ -696,8 +745,12 @@ async def prepare_initial_request(
         base_time,
         base_day,
         pytz_tz,
-        timemachine_days,
+        timemachine_grid_days,
+        timemachine_hours,
     )
+
+    if time_machine:
+        output_days = timemachine_days
 
     num_hours = len(hour_array)
 

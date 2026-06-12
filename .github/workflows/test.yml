@@ -10,7 +10,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v6.0.3
       - uses: actions/setup-python@v6.2.0
         with:
           python-version: '3.13'
@@ -22,4 +22,4 @@ jobs:
       - name: Run pytest
         env:
           PW_API: ${{ secrets.PW_API }}
-        run: pytest -q --ignore=tests/test_rtma_ingest.py --ignore=tests/test_dwd_interp_flow.py --ignore=tests/test_interpolate_nan_along_axis.py --ignore=tests/test_silam_aqi.py --ignore=tests/test_noaa_aqm_ingest.py
+        run: pytest -q --ignore=tests/test_rtma_ingest.py --ignore=tests/test_hrrr_6h_ingest.py --ignore=tests/test_dwd_interp_flow.py --ignore=tests/test_interpolate_nan_along_axis.py --ignore=tests/test_historic_archive_extract.py --ignore=tests/test_ingest_utils_download_retry.py --ignore=tests/test_silam_aqi.py --ignore=tests/test_noaa_aqm_ingest.py

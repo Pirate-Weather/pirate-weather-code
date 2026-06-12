@@ -18,7 +18,6 @@ from API.api_utils import (
 from API.constants.clip_const import (
     CLIP_CAPE,
     CLIP_CLOUD,
-    CLIP_FIRE,
     CLIP_HUMIDITY,
     CLIP_OZONE,
     CLIP_PRESSURE,
@@ -42,13 +41,13 @@ from API.constants.model_const import (
     HRRR,
     HRRR_SUBH,
     NBM,
-    NBM_FIRE_INDEX,
     RTMA_RU,
 )
 from API.constants.shared_const import MISSING_DATA
 from API.legacy.current import get_legacy_current_summary
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
+from API.utils.fire import calculate_fosberg_fire_index
 from API.utils.source_priority import should_gfs_precede_dwd
 
 
@@ -91,8 +90,10 @@ def _select_value(strategies, default=MISSING_DATA):
     return default
 
 
-# Pre-define priority orders for currently block
-_CURRENTLY_ORDER_NA_WITH_ECMWF = [
+# Pre-define priority orders for currently block.
+# Metrics without ECMWF entries reuse the same order and simply skip sources
+# that are not present in their source_map.
+_CURRENTLY_ORDER_NA = [
     "rtma_ru",
     "hrrrsubh",
     "nbm",
@@ -102,16 +103,7 @@ _CURRENTLY_ORDER_NA_WITH_ECMWF = [
     "dwd_mosmix",
     "era5",
 ]
-_CURRENTLY_ORDER_NA_NO_ECMWF = [
-    "rtma_ru",
-    "hrrrsubh",
-    "nbm",
-    "hrrr",
-    "gfs",
-    "dwd_mosmix",
-    "era5",
-]
-_CURRENTLY_ORDER_ROW_WITH_ECMWF = [
+_CURRENTLY_ORDER_ROW = [
     "rtma_ru",
     "hrrrsubh",
     "nbm",
@@ -121,37 +113,18 @@ _CURRENTLY_ORDER_ROW_WITH_ECMWF = [
     "gfs",
     "era5",
 ]
-_CURRENTLY_ORDER_ROW_NO_ECMWF = [
+_CURRENTLY_ORDER_AI_NA = [
     "rtma_ru",
     "hrrrsubh",
     "nbm",
     "hrrr",
-    "dwd_mosmix",
-    "gfs",
-    "era5",
-]
-_CURRENTLY_ORDER_AI_NA_WITH_ECMWF = [
     "gfs",
     "gefs",
     "ecmwf_ifs",
-    "rtma_ru",
-    "hrrrsubh",
-    "nbm",
-    "hrrr",
     "dwd_mosmix",
     "era5",
 ]
-_CURRENTLY_ORDER_AI_NA_NO_ECMWF = [
-    "gfs",
-    "gefs",
-    "rtma_ru",
-    "hrrrsubh",
-    "nbm",
-    "hrrr",
-    "dwd_mosmix",
-    "era5",
-]
-_CURRENTLY_ORDER_AI_ROW_WITH_ECMWF = [
+_CURRENTLY_ORDER_AI_ROW = [
     "ecmwf_ifs",
     "rtma_ru",
     "hrrrsubh",
@@ -159,15 +132,6 @@ _CURRENTLY_ORDER_AI_ROW_WITH_ECMWF = [
     "hrrr",
     "dwd_mosmix",
     "gfs",
-    "era5",
-]
-_CURRENTLY_ORDER_AI_ROW_NO_ECMWF = [
-    "gfs",
-    "rtma_ru",
-    "hrrrsubh",
-    "nbm",
-    "hrrr",
-    "dwd_mosmix",
     "era5",
 ]
 
@@ -176,8 +140,8 @@ def _build_source_strategies(
     source_map,
     lat,
     lon,
-    has_ecmwf=True,
     *,
+    has_ecmwf=None,
     prioritize_ai_models=False,
 ):
     """
@@ -187,7 +151,7 @@ def _build_source_strategies(
         source_map: Dictionary mapping source names to (predicate, getter) tuples.
         lat: Latitude.
         lon: Longitude.
-        has_ecmwf: Whether ECMWF has data for this variable.
+        has_ecmwf: Backward-compatible no-op flag retained for existing callers.
         prioritize_ai_models: Whether to prioritize AI model sources in the stacking order.
 
     Returns:
@@ -197,31 +161,15 @@ def _build_source_strategies(
 
     # Select pre-defined priority order
     if prioritize_ai_models and gfs_before_dwd:
-        order = (
-            _CURRENTLY_ORDER_AI_NA_WITH_ECMWF
-            if has_ecmwf
-            else _CURRENTLY_ORDER_AI_NA_NO_ECMWF
-        )
+        order = _CURRENTLY_ORDER_AI_NA
     elif prioritize_ai_models and not gfs_before_dwd:
-        order = (
-            _CURRENTLY_ORDER_AI_ROW_WITH_ECMWF
-            if has_ecmwf
-            else _CURRENTLY_ORDER_AI_ROW_NO_ECMWF
-        )
+        order = _CURRENTLY_ORDER_AI_ROW
     elif gfs_before_dwd:
         # North America
-        order = (
-            _CURRENTLY_ORDER_NA_WITH_ECMWF
-            if has_ecmwf
-            else _CURRENTLY_ORDER_NA_NO_ECMWF
-        )
+        order = _CURRENTLY_ORDER_NA
     else:
         # Rest of world
-        order = (
-            _CURRENTLY_ORDER_ROW_WITH_ECMWF
-            if has_ecmwf
-            else _CURRENTLY_ORDER_ROW_NO_ECMWF
-        )
+        order = _CURRENTLY_ORDER_ROW
 
     # Build strategies in priority order
     strategies = []
@@ -1405,26 +1353,32 @@ def _get_feels_like(
     )
 
 
-def _get_fire(sourceList, model_data, state: InterpolationState):
+def _get_fire(temp_c, humidity_fraction, wind_speed_ms):
     """
-    Get current fire index from available sources.
+    Get current fire index from derived current weather fields.
 
     Args:
-        sourceList: List of available sources.
-        model_data: Dictionary of model data.
-        state: Interpolation state.
+        temp_c: Current temperature in Celsius.
+        humidity_fraction: Current relative humidity fraction [0, 1].
+        wind_speed_ms: Current wind speed in m/s.
 
     Returns:
         Current fire index.
     """
-    if "nbm_fire" in sourceList:
-        val = (
-            model_data["NBM_Fire_Merged"][state.idx1, NBM_FIRE_INDEX] * state.fac1
-            + model_data["NBM_Fire_Merged"][state.idx2, NBM_FIRE_INDEX] * state.fac2
-        )
-        return clipLog(val, CLIP_FIRE["min"], CLIP_FIRE["max"], "Fire index Current")
-    else:
+    if (
+        not np.isfinite(temp_c)
+        or not np.isfinite(humidity_fraction)
+        or not np.isfinite(wind_speed_ms)
+    ):
         return MISSING_DATA
+    fire_index = calculate_fosberg_fire_index(
+        np.array([temp_c]),
+        np.array([humidity_fraction]),
+        np.array([wind_speed_ms]),
+    )[0]
+    if np.isnan(fire_index):
+        return MISSING_DATA
+    return float(fire_index)
 
 
 def build_current_section(
@@ -1652,7 +1606,11 @@ def build_current_section(
         InterPcurrent[DATA_CURRENT["apparent"]],
     )
 
-    InterPcurrent[DATA_CURRENT["fire"]] = _get_fire(sourceList, model_data, state)
+    InterPcurrent[DATA_CURRENT["fire"]] = _get_fire(
+        InterPcurrent[DATA_CURRENT["temp"]],
+        InterPcurrent[DATA_CURRENT["humidity"]],
+        InterPcurrent[DATA_CURRENT["wind"]],
+    )
 
     curr_temp_si = InterPcurrent[DATA_CURRENT["temp"]]
     curr_dew_si = InterPcurrent[DATA_CURRENT["dew"]]
