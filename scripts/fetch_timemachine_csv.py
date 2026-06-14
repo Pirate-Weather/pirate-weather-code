@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Fetch local Pirate Weather timemachine responses for CSV points."""
 
+# Example: start local API in background
+# cd /home/ubuntu/pwcode_nov/pirate-weather-code && nohup "/home/ubuntu/pwcode_nov/pirate-weather-code/.venvs/ingest-test/bin/python3.14" -m uvicorn API.responseLocal:app --host 0.0.0.0 --port 8081 --workers 12 --env-file /home/ubuntu/pwcode_nov/pirate-weather-code/.env > uvicorn_local.log 2>&1 & echo $!
+#
+# Example: run timemachine CSV fetch in background
+# cd /home/ubuntu/pwcode_nov/pirate-weather-code && nohup /home/ubuntu/pwcode_nov/pirate-weather-code/.venvs/ingest-test/bin/python3.14 scripts/fetch_timemachine_csv.py /mnt/efs/scripts/SiteCodes_2026_05_16.csv --api-base http://localhost:8081 --api-key abc123 --workers 12 --start-date 2024-01-01 --end-date 2026-05-25 --output-dir /mnt/nvme/data/tm_out/ > fetch_timemachine.log 2>&1 & echo $!
+
 from __future__ import annotations
 
 import argparse
@@ -19,17 +25,17 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from timezonefinder import TimezoneFinder
 
 DEFAULT_START_DATE = dt.date(2024, 1, 1)
-DEFAULT_END_DATE = dt.date(2026, 5, 1)
+DEFAULT_END_DATE = dt.date(2026, 5, 25)
 DEFAULT_API_BASE = "http://localhost:8081"
 DEFAULT_API_KEY = "abc123"
 DEFAULT_DAYS = 2
-MAX_TIME_MACHINE_DAYS = 32
+MAX_TIME_MACHINE_DAYS = 8
+MAX_TIME_MACHINE_HOURS = MAX_TIME_MACHINE_DAYS * 24
 DEFAULT_QUERY_PARAMS = {
     "version": "2",
     "units": "us",
     "timemachine": "1",
     "tmextra": "1",
-    "exclude": "currently",
 }
 
 
@@ -100,6 +106,15 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Number of timemachine days to request per API call "
             f"(1-{MAX_TIME_MACHINE_DAYS})."
+        ),
+    )
+    parser.add_argument(
+        "--hours",
+        type=int,
+        default=None,
+        help=(
+            "Optional number of timemachine hours to request per API call "
+            f"(1-{MAX_TIME_MACHINE_HOURS})."
         ),
     )
     parser.add_argument(
@@ -265,12 +280,15 @@ def build_request_url(
     point: Point,
     unix_time: int,
     days: int,
+    hours: int | None,
 ) -> str:
     path = (
         f"{api_base.rstrip('/')}/forecast/{parse.quote(api_key)}/"
         f"{point.lat},{point.lon},{unix_time}"
     )
     query_params = {**DEFAULT_QUERY_PARAMS, "days": str(days)}
+    if hours is not None:
+        query_params["hours"] = str(hours)
     query = parse.urlencode(query_params)
     return f"{path}?{query}"
 
@@ -395,6 +413,7 @@ def create_request_jobs(
                         point,
                         unix_time,
                         args.days,
+                        args.hours,
                     ),
                 )
             )
@@ -563,6 +582,14 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+    if args.hours is not None and (
+        args.hours < 1 or args.hours > MAX_TIME_MACHINE_HOURS
+    ):
+        print(
+            f"hours must be between 1 and {MAX_TIME_MACHINE_HOURS}",
+            file=sys.stderr,
+        )
+        return 2
     if args.workers < 1:
         print("workers must be at least 1", file=sys.stderr)
         return 2
@@ -600,7 +627,9 @@ def main() -> int:
     print(
         "Starting fetch run "
         f"for {len(points)} points across {len(dates)} dates "
-        f"({total_requests} requests, workers={args.workers}, skipped={skipped})."
+        f"({total_requests} requests, days={args.days}, "
+        f"hours={args.hours if args.hours is not None else 'default'}, "
+        f"workers={args.workers}, skipped={skipped})."
     )
 
     job_iter = iter(jobs)
