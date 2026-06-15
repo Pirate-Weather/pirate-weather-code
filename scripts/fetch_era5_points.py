@@ -9,13 +9,13 @@ import datetime as dt
 import shutil
 import sys
 from collections.abc import Iterator
-from dask.diagnostics import ProgressBar
 from dataclasses import dataclass
 from pathlib import Path
 
 import dask
 import numpy as np
 import xarray as xr
+from dask.diagnostics import ProgressBar
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
