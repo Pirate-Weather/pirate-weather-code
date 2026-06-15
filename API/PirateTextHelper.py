@@ -383,12 +383,6 @@ def calculate_precip_text(
                 c_icon = "possible-sleet-night"
             elif icon == "pirate":
                 c_icon = "heavy-sleet"
-        if (
-            (type == "week" or type == "hourly")
-            and sleetAccum < (precip_icon_threshold * num_precip_days * 2)
-            and eff_ice_intensity >= heavy_precip_thresh
-        ):
-            c_text = ["and", "medium-sleet", "possible-heavy-sleet"]
 
     elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == PRECIP_TYPES[
         "ice"
