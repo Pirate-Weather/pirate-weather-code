@@ -305,13 +305,6 @@ def calculate_precip_text(
                 c_icon = "possible-rain-night"
             elif icon == "pirate":
                 c_icon = "heavy-rain"
-        if (  # This handles the case where over a week or multiple days there is heavy rain but each day individually does not meet the heavy threshold
-            # Some additional tweaking of this logic may be needed based on testing
-            (type == "minute" or type == "week")
-            and eff_rain_intensity < heavy_precip_thresh
-            and rainAccum >= heavy_precip_thresh * num_precip_days * 2
-        ):
-            c_text = ["and", "medium-rain", "possible-heavy-rain"]
     elif (snowAccum > 0 or eff_snow_intensity > 0) and precipType == PRECIP_TYPES[
         "snow"
     ]:
@@ -351,12 +344,6 @@ def calculate_precip_text(
                 c_icon = "possible-snow-night"
             elif icon == "pirate":
                 c_icon = "heavy-snow"
-        if (
-            (type == "week" or type == "hourly")
-            and snowAccum < (snow_icon_threshold * num_precip_days * 2)
-            and eff_snow_intensity >= heavy_snow_thresh
-        ):
-            c_text = ["and", "medium-snow", "possible-heavy-snow"]
     elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == PRECIP_TYPES[
         "sleet"
     ]:
@@ -442,12 +429,6 @@ def calculate_precip_text(
                 c_icon = "possible-freezing-rain-night"
             elif icon == "pirate":
                 c_icon = "heavy-freezing-rain"
-        if (
-            (type == "week" or type == "hourly")
-            and sleetAccum < (precip_icon_threshold * num_precip_days * 2)
-            and eff_ice_intensity >= heavy_precip_thresh
-        ):
-            c_text = ["and", "medium-freezing-rain", "possible-heavy-freezing-rain"]
     elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == PRECIP_TYPES[
         "hail"
     ]:
@@ -489,15 +470,6 @@ def calculate_precip_text(
             c_text = possible_precip + "medium-precipitation"
         else:
             c_text = possible_precip + "heavy-precipitation"
-        if (
-            (type == "week" or type == "hourly")
-            and (
-                (rainAccum + sleetAccum) < (precip_icon_threshold * 2)
-                or snowAccum < (snow_icon_threshold * 2)
-            )
-            and _none_intensity >= heavy_precip_thresh
-        ):
-            c_text = ["and", "medium-precipitation", "possible-heavy-precipitation"]
 
         if is_pirate_icon and is_possible_precip and isDayTime:
             c_icon = "possible-precipitation-day"
