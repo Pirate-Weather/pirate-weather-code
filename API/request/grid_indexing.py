@@ -6,6 +6,7 @@ import asyncio
 import datetime
 import logging
 import math
+import time
 from dataclasses import dataclass
 from typing import Any, Union
 
@@ -128,9 +129,9 @@ def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours:
         [dataOut_ERA5_xr[var] for var in ERA5.keys()], dim="variable"
     )
     unix_times_era5 = (
-        dataOut_ERA5_xr["time"].astype("datetime64[s]")
+        era5_data["ERA5_times"][t_p : t_p + num_hours].astype("datetime64[s]")
         - np.datetime64("1970-01-01T00:00:00")
-    ).astype(np.int64)
+    ).astype(np.int64)  # Use cached time
     era5_merged = np.vstack((unix_times_era5, dataOut_ERA5.values)).T
 
     # Round the precipitation_type variable to nearest integer
@@ -139,6 +140,22 @@ def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours:
         era5_merged[:, ERA5["precipitation_type"]]
     )
     return era5_merged
+
+
+def _era5_cache_stats(era5_data) -> dict[str, int] | None:
+    cache_store = era5_data.get("ERA5_cache_store") if era5_data else None
+    if cache_store is None or not hasattr(cache_store, "cache_stats"):
+        return None
+    return cache_store.cache_stats()
+
+
+def _cache_stats_delta(
+    before: dict[str, int] | None,
+    after: dict[str, int] | None,
+) -> dict[str, int] | None:
+    if before is None or after is None:
+        return None
+    return {key: after.get(key, 0) - before.get(key, 0) for key in after}
 
 
 async def calculate_grid_indexing(
@@ -454,13 +471,37 @@ async def calculate_grid_indexing(
     timer.log("### AI Models Detail END ###")
 
     if readERA5:
-        ERA5_MERGED = _load_era5_slice(
-            zarr_sources.era5_data,
-            lat=lat,
-            lon=lon,
-            base_day_utc=base_day_utc,
-            num_hours=num_hours,
-        )
+        era5_read_start = time.perf_counter()
+        cache_stats_before = _era5_cache_stats(zarr_sources.era5_data)
+        try:
+            ERA5_MERGED = _load_era5_slice(
+                zarr_sources.era5_data,
+                lat=lat,
+                lon=lon,
+                base_day_utc=base_day_utc,
+                num_hours=num_hours,
+            )
+        finally:
+            if timing_enabled:
+                elapsed_ms = (time.perf_counter() - era5_read_start) * 1000
+                cache_delta = _cache_stats_delta(
+                    cache_stats_before,
+                    _era5_cache_stats(zarr_sources.era5_data),
+                )
+                if cache_delta is None:
+                    logger.info("ERA5 read: %.1f ms", elapsed_ms)
+                else:
+                    reads = cache_delta["hits"] + cache_delta["misses"]
+                    hit_rate = 100 * cache_delta["hits"] / reads if reads else 0
+                    logger.info(
+                        "ERA5 read: %.1f ms cache_hits=%d cache_misses=%d "
+                        "evictions=%d hit_rate=%.1f%%",
+                        elapsed_ms,
+                        cache_delta["hits"],
+                        cache_delta["misses"],
+                        cache_delta["evictions"],
+                        hit_rate,
+                    )
 
     else:
         ERA5_MERGED = False

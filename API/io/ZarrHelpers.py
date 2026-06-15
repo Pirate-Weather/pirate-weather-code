@@ -8,6 +8,8 @@ import time
 import s3fs
 import xarray as xr
 import zarr
+from zarr.experimental.cache_store import CacheStore
+from zarr.storage import FsspecStore, LocalStore
 
 from API.constants.api_const import (
     MAX_S3_RETRIES,
@@ -15,6 +17,11 @@ from API.constants.api_const import (
 )
 
 pw_api_key = os.environ.get("PW_API", "")
+
+ERA5_ZARR_URL = "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
+ERA5_DASK_CHUNKS = {"time": 24}
+ERA5_CACHE_VERSION = "cache-store-v1"
+ERA5_CACHE_MAX_SIZE = 200 * 1024**3
 
 
 def _add_custom_header(request, **kwargs):
@@ -128,13 +135,42 @@ def setup_testing_zipstore(s3, s3_bucket, ingest_version, save_type, model_name)
 
 
 # Function to initialize in ERA5 xarray dataset
-def init_ERA5():
-    # Open the ERA5 dataset from Google Cloud
-    dsERA5 = xr.open_zarr(
-        "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3",
-        chunks={"time": 25},
-        storage_options=dict(token="anon"),
-    )
+def init_ERA5(cache_dir: str):
+    """Open local ERA5 or Google ERA5 through the persistent object cache."""
+    cache_dir = os.path.abspath(os.path.expanduser(cache_dir))
+    local_zarr_path = os.environ.get("ERA5_ZARR_PATH")
+    if local_zarr_path:
+        local_zarr_path = os.path.abspath(os.path.expanduser(local_zarr_path))
+        dsERA5 = xr.open_zarr(
+            local_zarr_path,
+            chunks=ERA5_DASK_CHUNKS,
+            consolidated=True,
+        )
+        cache_store = None
+        source = local_zarr_path
+    else:
+        object_cache_dir = os.path.join(cache_dir, ERA5_CACHE_VERSION)
+        source_store = FsspecStore.from_url(
+            ERA5_ZARR_URL,
+            storage_options={
+                "token": "anon",
+                "skip_instance_cache": True,
+            },
+            read_only=True,
+        )
+        cache_store = CacheStore(
+            store=source_store,
+            cache_store=LocalStore(object_cache_dir),
+            max_age_seconds="infinity",
+            max_size=ERA5_CACHE_MAX_SIZE,
+            cache_set_data=False,
+        )
+
+        dsERA5 = xr.open_zarr(
+            cache_store,
+            chunks=ERA5_DASK_CHUNKS,
+        )
+        source = ERA5_ZARR_URL
 
     ERA5_lats = dsERA5["latitude"].values
     ERA5_lons = dsERA5["longitude"].values
@@ -145,6 +181,9 @@ def init_ERA5():
         "ERA5_lats": ERA5_lats,
         "ERA5_lons": ERA5_lons,
         "ERA5_times": ERA5_times,
+        "ERA5_cache_dir": cache_dir,
+        "ERA5_cache_store": cache_store,
+        "ERA5_source": source,
     }
 
     return ERA5_Data
