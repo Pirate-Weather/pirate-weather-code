@@ -169,6 +169,7 @@ zarr_vars = (
     "CIN_Sfc",
     "VerticalVelocity_IsbL_0500",
     "KIndex_Sfc",
+    "O3_EAtm"
 )
 
 #####################################################################################################
@@ -195,6 +196,7 @@ match_strings = [
     {"variable": "Pressure", "level": "MSL"},
     {"variable": "VerticalVelocity", "level": "IsbL-0500"},
     {"variable": "KIndex", "level": "Sfc"},
+    {"variable": "O3", "level": "EAtm"},
 ]
 
 gdps_file_range = FORECAST_LEAD_RANGES["GDPS"]
