@@ -21,7 +21,20 @@ pw_api_key = os.environ.get("PW_API", "")
 ERA5_ZARR_URL = "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
 ERA5_DASK_CHUNKS = {"time": 24}
 ERA5_CACHE_VERSION = "cache-store-v1"
-ERA5_CACHE_MAX_SIZE = 200 * 1024**3
+ERA5_CACHE_MAX_SIZE = 20 * 1024**3
+ERA5_CACHE_DIR_DEFAULT = "ERA5_cache"
+
+
+def _get_era5_cache_max_size() -> int:
+    """Get ERA5 cache max size from env var (bytes), defaulting to 20 GiB."""
+    env_value = os.environ.get("ERA5_CACHE_MAX_SIZE")
+    if not env_value:
+        return ERA5_CACHE_MAX_SIZE
+    try:
+        max_size = int(env_value)
+    except ValueError:
+        return ERA5_CACHE_MAX_SIZE
+    return max_size if max_size > 0 else ERA5_CACHE_MAX_SIZE
 
 
 def _add_custom_header(request, **kwargs):
@@ -135,8 +148,9 @@ def setup_testing_zipstore(s3, s3_bucket, ingest_version, save_type, model_name)
 
 
 # Function to initialize in ERA5 xarray dataset
-def init_ERA5(cache_dir: str):
+def init_ERA5(cache_dir: str | None = None):
     """Open Google ERA5 through the persistent object cache."""
+    cache_dir = os.environ.get("ERA5_CACHE_DIR", cache_dir or ERA5_CACHE_DIR_DEFAULT)
     cache_dir = os.path.abspath(os.path.expanduser(cache_dir))
     object_cache_dir = os.path.join(cache_dir, ERA5_CACHE_VERSION)
     source_store = FsspecStore.from_url(
@@ -151,7 +165,7 @@ def init_ERA5(cache_dir: str):
         store=source_store,
         cache_store=LocalStore(object_cache_dir),
         max_age_seconds="infinity",
-        max_size=ERA5_CACHE_MAX_SIZE,
+        max_size=_get_era5_cache_max_size(),
         cache_set_data=False,
     )
 

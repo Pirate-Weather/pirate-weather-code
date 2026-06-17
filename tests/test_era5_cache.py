@@ -60,6 +60,55 @@ def test_init_era5_uses_zarr_cache_store(tmp_path):
     assert result["ERA5_source"] == ERA5_ZARR_URL
 
 
+def test_init_era5_honors_cache_max_size_env(tmp_path, monkeypatch):
+    dataset = {
+        "latitude": MagicMock(values=[90.0]),
+        "longitude": MagicMock(values=[0.0]),
+        "time": MagicMock(values=["2024-01-01T00:00:00"]),
+    }
+    source_store = object()
+    local_store = object()
+    cache_store = object()
+    cache_dir = tmp_path / "era5-cache"
+    custom_cache_size = 5 * 1024**3
+    monkeypatch.setenv("ERA5_CACHE_MAX_SIZE", str(custom_cache_size))
+
+    with (
+        patch("API.io.ZarrHelpers.FsspecStore.from_url", return_value=source_store),
+        patch("API.io.ZarrHelpers.LocalStore", return_value=local_store),
+        patch("API.io.ZarrHelpers.CacheStore", return_value=cache_store) as cache,
+        patch("API.io.ZarrHelpers.xr.open_zarr", return_value=dataset),
+    ):
+        init_ERA5(str(cache_dir))
+
+    assert cache.call_args.kwargs["max_size"] == custom_cache_size
+
+
+def test_init_era5_honors_cache_dir_env(tmp_path, monkeypatch):
+    dataset = {
+        "latitude": MagicMock(values=[90.0]),
+        "longitude": MagicMock(values=[0.0]),
+        "time": MagicMock(values=["2024-01-01T00:00:00"]),
+    }
+    source_store = object()
+    local_store = object()
+    cache_store = object()
+    requested_cache_dir = tmp_path / "requested-cache"
+    env_cache_dir = tmp_path / "env-cache"
+    monkeypatch.setenv("ERA5_CACHE_DIR", str(env_cache_dir))
+
+    with (
+        patch("API.io.ZarrHelpers.FsspecStore.from_url", return_value=source_store),
+        patch("API.io.ZarrHelpers.LocalStore", return_value=local_store) as local,
+        patch("API.io.ZarrHelpers.CacheStore", return_value=cache_store),
+        patch("API.io.ZarrHelpers.xr.open_zarr", return_value=dataset),
+    ):
+        result = init_ERA5(str(requested_cache_dir))
+
+    local.assert_called_once_with(str(env_cache_dir / ERA5_CACHE_VERSION))
+    assert result["ERA5_cache_dir"] == str(env_cache_dir)
+
+
 def test_zarr_cache_store_reuses_local_cached_chunks(tmp_path):
     source_store = LocalStore(tmp_path / "source")
     source_array = zarr.create_array(

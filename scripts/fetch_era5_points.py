@@ -21,7 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from API.constants.model_const import ERA5  # noqa: E402
+from API.constants.model_const import ERA5_SOURCE_VARS  # noqa: E402
 
 DEFAULT_SOURCE = "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
 TIME_CHUNK_HOURS = 24
@@ -211,7 +211,9 @@ def build_daily_dataset(
     start = np.datetime64(target_date.isoformat(), "ns")
     stop = start + np.timedelta64(TIME_CHUNK_HOURS, "h")
     expected_times = np.arange(start, stop, np.timedelta64(1, "h"))
-    day = source[list(ERA5)].sel(time=slice(start, stop - np.timedelta64(1, "h")))
+    day = source[list(ERA5_SOURCE_VARS)].sel(
+        time=slice(start, stop - np.timedelta64(1, "h"))
+    )
 
     actual_times = day["time"].values.astype("datetime64[ns]")
     if not np.array_equal(actual_times, expected_times):
@@ -227,7 +229,8 @@ def build_daily_dataset(
     )
 
     data_vars = {
-        name: selected[name].transpose("time", "latitude", "longitude") for name in ERA5
+        name: selected[name].transpose("time", "latitude", "longitude")
+        for name in ERA5_SOURCE_VARS
     }
     result = xr.Dataset(
         data_vars=data_vars,
@@ -285,7 +288,7 @@ def write_points_zarr(
     if workers < 1:
         raise ValueError("--workers must be at least 1.")
 
-    missing_variables = set(ERA5) - set(source.data_vars)
+    missing_variables = set(ERA5_SOURCE_VARS) - set(source.data_vars)
     if missing_variables:
         missing = ", ".join(sorted(missing_variables))
         raise ValueError(f"ERA5 source is missing required variables: {missing}")
@@ -301,7 +304,7 @@ def write_points_zarr(
     longitude_chunk = min(spatial_chunk, longitude_count)
     encoding = {
         name: {"chunks": (TIME_CHUNK_HOURS, latitude_chunk, longitude_chunk)}
-        for name in ERA5
+        for name in ERA5_SOURCE_VARS
     }
     created_utc = dt.datetime.now(dt.UTC).isoformat()
     with ProgressBar():
