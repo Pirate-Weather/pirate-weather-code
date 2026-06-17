@@ -891,7 +891,6 @@ for hours_offset in range(his_period, 0, -6):
             "longitude": process_chunk,
         }
     )
-    
 
     # Clear memory
     del (
