@@ -736,10 +736,7 @@ def main() -> int:
     print(
         "Starting fetch run "
         f"for {len(points)} points across {len(dates)} dates "
-        f"({total_requests} requests, frequency={args.request_frequency}, "
-        f"days={args.days}, "
         f"hours={args.hours if args.hours is not None else 'default'}, "
-        f"workers={args.workers}, skipped={skipped})."
     )
 
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
