@@ -518,7 +518,8 @@ async def calculate_grid_indexing(
         era5_read_start = time.perf_counter()
         cache_stats_before = _era5_cache_stats(zarr_sources.era5_data)
         try:
-            ERA5_MERGED = _load_era5_slice(
+            ERA5_MERGED = await asyncio.to_thread(
+                _load_era5_slice,
                 zarr_sources.era5_data,
                 lat=lat,
                 lon=lon,
