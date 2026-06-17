@@ -34,10 +34,12 @@ from API.constants.grid_const import (
     RTMA_RU_Y_MAX,
     RTMA_RU_Y_MIN,
 )
-from API.constants.model_const import ERA5
+from API.constants.model_const import ERA5, ERA5_SOURCE_VARS
 from API.constants.shared_const import HISTORY_PERIODS
 from API.utils.geo import is_in_north_america, lambertGridMatch
 from API.utils.timing import StepTimer
+
+ERA5_PRECIP_PROB_THRESHOLD_M = 0.0001  # m, matching ERA5 total_precipitation units
 
 
 @dataclass
@@ -122,17 +124,59 @@ def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours:
             era5_data["ERA5_times"] - np.datetime64(base_day_utc.replace(tzinfo=None))
         )
     )
-    dataOut_ERA5_xr = era5_data["dsERA5"][ERA5.keys()].isel(
+
+    precip_amount_var = "total_precipitation"
+    if precip_amount_var not in era5_data["dsERA5"]:
+        raise KeyError(f"Expected ERA5 precipitation variable '{precip_amount_var}'")
+
+    dataOut_ERA5_xr = era5_data["dsERA5"][list(ERA5_SOURCE_VARS)].isel(
         latitude=y_p, longitude=x_p, time=slice(t_p, t_p + num_hours)
     )
     dataOut_ERA5 = xr.concat(
-        [dataOut_ERA5_xr[var] for var in ERA5.keys()], dim="variable"
+        [dataOut_ERA5_xr[var] for var in ERA5_SOURCE_VARS], dim="variable"
     )
     unix_times_era5 = (
         era5_data["ERA5_times"][t_p : t_p + num_hours].astype("datetime64[s]")
         - np.datetime64("1970-01-01T00:00:00")
     ).astype(np.int64)  # Use cached time
     era5_merged = np.vstack((unix_times_era5, dataOut_ERA5.values)).T
+
+    n_lat = era5_data["ERA5_lats"].size
+    n_lon = era5_data["ERA5_lons"].size
+    y_indices = np.arange(max(y_p - 1, 0), min(y_p + 2, n_lat))
+    x_indices = np.array([(x_p - 1) % n_lon, x_p, (x_p + 1) % n_lon])
+
+    precip_window = (
+        era5_data["dsERA5"][precip_amount_var]
+        .isel(
+            time=slice(t_p, t_p + num_hours),
+            latitude=y_indices,
+            longitude=x_indices,
+        )
+        .transpose("time", "latitude", "longitude")
+        .values
+    )
+
+    # Estimate precipitation probability as the percentage of valid cells in the
+    # 3x3 neighbourhood exceeding the measurable-precipitation threshold.
+    # The threshold units must match total_precipitation units.
+    valid = np.isfinite(precip_window)
+    hits = valid & (precip_window > ERA5_PRECIP_PROB_THRESHOLD_M)
+    denom = valid.sum(axis=(1, 2))
+    hit_count = hits.sum(axis=(1, 2))
+    precip_prob = np.divide(
+        100.0 * hit_count,
+        denom,
+        out=np.zeros(num_hours, dtype=float),
+        where=denom > 0,
+    )
+
+    if precip_prob.shape[0] != era5_merged.shape[0]:
+        raise ValueError(
+            "ERA5 precipitation probability length does not match point slice length"
+        )
+
+    era5_merged = np.column_stack((era5_merged, precip_prob))
 
     # Round the precipitation_type variable to nearest integer
     # to avoid issues with interpolation producing non-integer values.
