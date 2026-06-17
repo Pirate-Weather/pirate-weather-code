@@ -1010,7 +1010,7 @@ def build_hourly_objects(
             "fireIndex": hourly_display[idx, DATA_HOURLY["fire"]],
             "feelsLike": hourly_display[idx, DATA_HOURLY["feels_like"]],
             "solar": hourly_display[idx, DATA_HOURLY["solar"]],
-            "cape": _nan_to_int_or_nan(hourly_display[idx, DATA_HOURLY["cape"]])
+            "cape": _nan_to_int_or_nan(hourly_display[idx, DATA_HOURLY["cape"]]),
         }
 
         if "stationPressure" in extraVars:
