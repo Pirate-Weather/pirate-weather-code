@@ -1672,7 +1672,7 @@ def build_current_section(
     curr_cape_display = (
         int(np.round(InterPcurrent[DATA_CURRENT["cape"]], 0))
         if not np.isnan(InterPcurrent[DATA_CURRENT["cape"]])
-        else 0
+        else np.nan
     )
 
     dayZeroIce = float(np.round(dayZeroIce * prepAccumUnit, 4))

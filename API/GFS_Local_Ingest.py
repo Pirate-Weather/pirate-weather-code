@@ -883,6 +883,16 @@ for hours_offset in range(his_period, 0, -6):
         storm_direction_hist.rechunk((6, process_chunk, process_chunk)).compute(),
     )
 
+    # Rechunk the rest of the variables in the merged dataset to the processing chunk size
+    xarray_hist_merged = xarray_hist_merged.chunk(
+        {
+            "time": 6,
+            "latitude": process_chunk,
+            "longitude": process_chunk,
+        }
+    )
+    
+
     # Clear memory
     del (
         ds_other_fields,
