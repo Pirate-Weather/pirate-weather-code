@@ -136,41 +136,30 @@ def setup_testing_zipstore(s3, s3_bucket, ingest_version, save_type, model_name)
 
 # Function to initialize in ERA5 xarray dataset
 def init_ERA5(cache_dir: str):
-    """Open local ERA5 or Google ERA5 through the persistent object cache."""
+    """Open Google ERA5 through the persistent object cache."""
     cache_dir = os.path.abspath(os.path.expanduser(cache_dir))
-    local_zarr_path = os.environ.get("ERA5_ZARR_PATH")
-    if local_zarr_path:
-        local_zarr_path = os.path.abspath(os.path.expanduser(local_zarr_path))
-        dsERA5 = xr.open_zarr(
-            local_zarr_path,
-            chunks=ERA5_DASK_CHUNKS,
-            consolidated=True,
-        )
-        cache_store = None
-        source = local_zarr_path
-    else:
-        object_cache_dir = os.path.join(cache_dir, ERA5_CACHE_VERSION)
-        source_store = FsspecStore.from_url(
-            ERA5_ZARR_URL,
-            storage_options={
-                "token": "anon",
-                "skip_instance_cache": True,
-            },
-            read_only=True,
-        )
-        cache_store = CacheStore(
-            store=source_store,
-            cache_store=LocalStore(object_cache_dir),
-            max_age_seconds="infinity",
-            max_size=ERA5_CACHE_MAX_SIZE,
-            cache_set_data=False,
-        )
+    object_cache_dir = os.path.join(cache_dir, ERA5_CACHE_VERSION)
+    source_store = FsspecStore.from_url(
+        ERA5_ZARR_URL,
+        storage_options={
+            "token": "anon",
+            "skip_instance_cache": True,
+        },
+        read_only=True,
+    )
+    cache_store = CacheStore(
+        store=source_store,
+        cache_store=LocalStore(object_cache_dir),
+        max_age_seconds="infinity",
+        max_size=ERA5_CACHE_MAX_SIZE,
+        cache_set_data=False,
+    )
 
-        dsERA5 = xr.open_zarr(
-            cache_store,
-            chunks=ERA5_DASK_CHUNKS,
-        )
-        source = ERA5_ZARR_URL
+    dsERA5 = xr.open_zarr(
+        cache_store,
+        chunks=ERA5_DASK_CHUNKS,
+    )
+    source = ERA5_ZARR_URL
 
     ERA5_lats = dsERA5["latitude"].values
     ERA5_lons = dsERA5["longitude"].values
