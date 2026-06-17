@@ -167,7 +167,7 @@ def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours:
     precip_prob = np.divide(
         100.0 * hit_count,
         denom,
-        out=np.zeros(num_hours, dtype=float),
+        out=np.zeros_like(denom, dtype=float),
         where=denom > 0,
     )
 
