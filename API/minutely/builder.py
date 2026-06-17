@@ -222,7 +222,9 @@ def _interp_era5(minute_array_grib, era5_data):
     if era5_data is None or len(era5_data) == 0:
         return None
 
-    era5_MinuteInterpolation = np.zeros((len(minute_array_grib), max(ERA5.values())))
+    era5_MinuteInterpolation = np.zeros(
+        (len(minute_array_grib), max(ERA5.values()) + 1)
+    )
     for i in [
         ERA5["large_scale_rain_rate"],
         ERA5["convective_rain_rate"],
@@ -241,6 +243,13 @@ def _interp_era5(minute_array_grib, era5_data):
         minute_array_grib,
         era5_data[:, 0].squeeze(),
         era5_data[:, ERA5["precipitation_type"]],
+    )
+    era5_MinuteInterpolation[:, ERA5["prob"]] = np.interp(
+        minute_array_grib,
+        era5_data[:, 0].squeeze(),
+        era5_data[:, ERA5["prob"]],
+        left=MISSING_DATA,
+        right=MISSING_DATA,
     )
     return era5_MinuteInterpolation
 
@@ -303,6 +312,7 @@ def _calculate_prob(
     nbmMinuteInterpolation,
     ecmwfMinuteInterpolation,
     gefsMinuteInterpolation,
+    era5_MinuteInterpolation,
     lat,
     lon,
     prioritize_ai_models=False,
@@ -316,6 +326,7 @@ def _calculate_prob(
         nbmMinuteInterpolation: NBM interpolated data.
         ecmwfMinuteInterpolation: ECMWF interpolated data.
         gefsMinuteInterpolation: GEFS interpolated data.
+        era5_MinuteInterpolation: ERA5 interpolated data.
 
     Returns:
         Array of precipitation probabilities.
@@ -330,6 +341,8 @@ def _calculate_prob(
                 InterPminute_prob = ecmwfMinuteInterpolation[:, ECMWF["prob"]]
             elif "nbm" in source_list and nbmMinuteInterpolation is not None:
                 InterPminute_prob = nbmMinuteInterpolation[:, NBM["prob"]] * 0.01
+            elif "era5" in source_list and era5_MinuteInterpolation is not None:
+                InterPminute_prob = era5_MinuteInterpolation[:, ERA5["prob"]] * 0.01
         else:
             if "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
                 InterPminute_prob = ecmwfMinuteInterpolation[:, ECMWF["prob"]]
@@ -337,6 +350,8 @@ def _calculate_prob(
                 InterPminute_prob = nbmMinuteInterpolation[:, NBM["prob"]] * 0.01
             elif "gefs" in source_list and gefsMinuteInterpolation is not None:
                 InterPminute_prob = gefsMinuteInterpolation[:, GEFS["prob"]]
+            elif "era5" in source_list and era5_MinuteInterpolation is not None:
+                InterPminute_prob = era5_MinuteInterpolation[:, ERA5["prob"]] * 0.01
         InterPminute_prob[InterPminute_prob < 0.05] = 0
         return InterPminute_prob
 
@@ -346,6 +361,8 @@ def _calculate_prob(
         InterPminute_prob = ecmwfMinuteInterpolation[:, ECMWF["prob"]]
     elif "gefs" in source_list and gefsMinuteInterpolation is not None:
         InterPminute_prob = gefsMinuteInterpolation[:, GEFS["prob"]]
+    elif "era5" in source_list and era5_MinuteInterpolation is not None:
+        InterPminute_prob = era5_MinuteInterpolation[:, ERA5["prob"]] * 0.01
 
     InterPminute_prob[InterPminute_prob < 0.05] = 0
     return InterPminute_prob
@@ -896,6 +913,7 @@ def build_minutely_block(
         nbmMinuteInterpolation,
         ecmwfMinuteInterpolation,
         gefsMinuteInterpolation,
+        era5_MinuteInterpolation,
         lat,
         lon,
         prioritize_ai_models,

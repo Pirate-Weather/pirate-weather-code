@@ -510,7 +510,7 @@ def _apply_rounding(
         if decimals == 0:
             daily_display_mean[:, idx_field] = np.round(
                 daily_display_mean[:, idx_field]
-            ).astype(int)
+            )
         else:
             daily_display_mean[:, idx_field] = np.round(
                 daily_display_mean[:, idx_field], decimals
@@ -596,7 +596,7 @@ def _apply_rounding(
     def _apply_rounding_to(arr, rounding_map):
         for idx_field, decimals in rounding_map.items():
             if decimals == 0:
-                arr[:, idx_field] = np.round(arr[:, idx_field]).astype(int)
+                arr[:, idx_field] = np.round(arr[:, idx_field])
             else:
                 arr[:, idx_field] = np.round(arr[:, idx_field], decimals)
 
