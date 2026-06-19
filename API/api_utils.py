@@ -231,37 +231,8 @@ def estimate_visibility_gultepe_rh_pr_numpy(
     Rh_frac = _rh_from_td(
         (T2m * mp.units.units.degC), (Td2m * mp.units.units.degC)
     ).magnitude
-    RH = np.clip(Rh_frac * 100.0, p["rh_min"], p["rh_max"])  # percent
-
-    # RH → VIS (Gültepe RH fits)
-    fit = (p["rh_fit"] or "FRAM").upper()
-    if fit == "AIRS2":
-        vis_rh = -0.0177 * (RH**2) + 1.462 * RH + 30.8
-    else:  # FRAM
-        vis_rh = -41.5 * np.log(RH) + 192.3
-
-    beta_rh = 3 / vis_rh
-
-    # ------------------- PRR → VIS (Gültepe Table 2) -------------------
-    def _vis_from_pr_gultepe(prr_mm_h: np.ndarray) -> np.ndarray:
-        """Apply rain-type thresholds and Table 2 percentile fits."""
-        pr = np.clip(prr_mm_h, 0.0, np.inf)
-        out = np.full(pr.shape, MISSING_DATA, dtype=float)
-
-        heavy = pr > p["pr_moderate_max"]  # > 7.6 mm/h
-        moderate = (pr >= p["pr_light_max"]) & (pr <= p["pr_moderate_max"])  # 2.6–7.6
-        light = pr < p["pr_light_max"]  # < 2.6
-
-        # Heavy rain → 5th percentile fit: 0.45*PR^0.394 + 2.28
-        out[heavy] = -0.45 * np.power(pr[heavy], 0.394) + 2.28
-
-        # Moderate rain → 50th percentile fit: 2.65*PR^0.256 + 7.65
-        out[moderate] = -2.65 * np.power(pr[moderate], 0.256) + 7.65
-
-        # Light rain → 95th percentile fit: 863.26*PR^0.003 + 874.19
-        out[light] = -863.26 * np.power(pr[light], 0.003) + 874.19
-
-        return out
+    # ... (keep the MetPy RH computation as-is) ...
+    RH = np.clip(Rh_frac * 100.0, p["rh_min"], p["rh_max"])
 
     if use_precip:
         ls_rain = pick("large_scale_rain_rate")
@@ -270,23 +241,89 @@ def estimate_visibility_gultepe_rh_pr_numpy(
             ls_rain = np.zeros(n_time)
         if cv_rain is None:
             cv_rain = np.zeros(n_time)
-
-        prr_mm_h = mmh(ls_rain + cv_rain)
-        vis_pr = _vis_from_pr_gultepe(prr_mm_h)
-
-        beta_pr = 3 / vis_pr
+        pr_mm_hr: np.ndarray | None = (ls_rain + cv_rain) * 3600.0  # m/s → mm/hr
     else:
-        beta_pr = np.zeros(n_time)
-    # Add the beta factors and convert back to vis
-    beta = beta_rh + beta_pr
-    vis = 3 / beta
+        pr_mm_hr = None
 
-    # Clamp & return
-    vis = np.atleast_1d(np.array(vis, dtype=float))
-    np.clip(vis, p["vis_min_km"], p["vis_max_km"], out=vis)
-    vis = vis * 1000  # Return in m
+    vis = estimate_visibility_from_rh_pr(
+        RH,
+        pr_mm_hr,
+        which_rh_fit=p["rh_fit"],
+        rh_min=p["rh_min"],
+        rh_max=p["rh_max"],
+        vis_min_km=p["vis_min_km"],
+        vis_max_km=p["vis_max_km"],
+    )
 
+    vis = np.atleast_1d(vis.astype(float))
     return vis[0] if vis.size == 1 else vis
+
+
+def estimate_visibility_from_rh_pr(
+    rh_percent: np.ndarray,
+    pr_mm_hr: np.ndarray | None = None,
+    which_rh_fit: str = "FRAM",
+    rh_min: float = 30.0,
+    rh_max: float = 100.0,
+    vis_min_km: float = 0.05,
+    vis_max_km: float = 16.09344,
+) -> np.ndarray:
+    """
+    Estimate visibility (m) from relative humidity and precipitation rate.
+
+    Vectorised over arbitrary array shapes — suitable for both single-point
+    time series and full spatial grids (time * lat * lon).
+
+    Uses the Gültepe & Milbrandt (2010) FRAM or AIRS2 fit for RH→visibility
+    and the Table 2 piecewise power-law for rain rate→visibility, then combines
+    the two extinction contributions via the Koschmieder equation (β = 3/V).
+
+    Args:
+        rh_percent: Relative humidity in % (clamped to rh_min-rh_max).
+        pr_mm_hr: Precipitation rate in mm/hr. Pass None to omit the
+            precipitation contribution. Negative values are treated as zero.
+        which_rh_fit: "FRAM" (Gültepe Eq. 2, default) or "AIRS2" (Eq. 3).
+        rh_min: Lower clamp for RH (default 30 %).
+        rh_max: Upper clamp for RH (default 100 %).
+        vis_min_km: Minimum output visibility in km (default 0.05 = 50 m).
+        vis_max_km: Maximum output visibility in km (default 16.09344 = 10 mi).
+
+    Returns:
+        Visibility in metres, same shape as ``rh_percent``, dtype float32.
+    """
+    RH = np.clip(np.asarray(rh_percent, dtype=np.float64), rh_min, rh_max)
+
+    fit = (which_rh_fit or "FRAM").upper()
+    if fit == "AIRS2":
+        vis_rh = -0.0177 * (RH**2) + 1.462 * RH + 30.8  # km
+    elif fit == "RUC":
+        vis_rh = 60.0 * np.exp(-0.025 * (RH - 30.0))
+    else:  # FRAM (default)
+        vis_rh = -41.5 * np.log(RH) + 192.3  # km
+
+    beta_rh = 3.0 / vis_rh
+
+    if pr_mm_hr is not None:
+        pr = np.clip(np.asarray(pr_mm_hr, dtype=np.float64), 0.0, None)
+        # Piecewise rain-rate parameterisation (Gültepe & Milbrandt 2010, Table 2):
+        #   heavy    (> 7.6 mm/hr): 5th-percentile fit
+        #   moderate (2.6–7.6):     50th-percentile fit
+        #   light    (< 2.6):       95th-percentile fit (~874 km at zero rate)
+        vis_pr = np.where(
+            pr > 7.6,
+            np.maximum(-0.45 * np.power(pr, 0.394) + 2.28, 0.05),
+            np.where(
+                pr >= 2.6,
+                np.maximum(-2.65 * np.power(pr, 0.256) + 7.65, 0.05),
+                -863.26 * np.power(pr, 0.003) + 874.19,
+            ),
+        )
+        beta_pr = 3.0 / np.maximum(vis_pr, 0.05)
+    else:
+        beta_pr = 0.0
+
+    vis_km = np.clip(3.0 / (beta_rh + beta_pr), vis_min_km, vis_max_km)
+    return (vis_km * 1000.0).astype(np.float32)
 
 
 def select_daily_precip_type(

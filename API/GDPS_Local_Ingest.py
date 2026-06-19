@@ -22,6 +22,7 @@ from dask.diagnostics import ProgressBar
 from herbie import FastHerbie, HerbieLatest
 from tqdm import tqdm
 
+from API.api_utils import estimate_visibility_from_rh_pr
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
 from API.ingest_utils import (
     CHUNK_SIZES,
@@ -41,6 +42,7 @@ from API.ingest_utils import (
     tune_nofile_limit,
     validate_grib_stats,
 )
+from API.utils.storm_proc import compute_storm_fields_from_apcp_dataarray
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -170,6 +172,9 @@ zarr_vars = (
     "VerticalVelocity_IsbL_0500",
     "KIndex_Sfc",
     "O3_EAtm",
+    "Storm_Distance",
+    "Storm_Direction",
+    "Visibility_Sfc",
 )
 
 #####################################################################################################
@@ -328,6 +333,52 @@ APCP_surface_tmp = APCP_surface_tmp / 3
 
 xarray_forecast_merged["Precip_Accum_Sfc"].data = APCP_surface_tmp
 
+# Clip precipitation to >= 0
+xarray_forecast_merged["Precip_Accum_Sfc"].data = da.clip(
+    xarray_forecast_merged["Precip_Accum_Sfc"].data, 0, None
+)
+
+# Compute nearest storm distance and direction
+distanced_stacked, directions_stacked = compute_storm_fields_from_apcp_dataarray(
+    apcp_dataarray=xarray_forecast_merged["Precip_Accum_Sfc"],
+    threshold=0.2,
+    max_distance_m=None,
+)
+
+n_forecast_steps = len(gdps_file_range)
+distanced_chunked = distanced_stacked.rechunk(
+    (n_forecast_steps, process_chunk, process_chunk)
+)
+directions_chunked = directions_stacked.rechunk(
+    (n_forecast_steps, process_chunk, process_chunk)
+)
+
+with ProgressBar():
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        distanced_chunked.to_zarr(
+            forecast_process_path + "_stormDist.zarr",
+            overwrite=True,
+            compute=True,
+        )
+        directions_chunked.to_zarr(
+            forecast_process_path + "_stormDir.zarr",
+            overwrite=True,
+            compute=True,
+        )
+
+# Compute visibility from RH and precipitation rate (Gültepe & Milbrandt 2010, RUC fit)
+vis_fc = estimate_visibility_from_rh_pr(
+    rh_percent=xarray_forecast_merged["RelativeHumidity_AGL_2m"].values,
+    pr_mm_hr=xarray_forecast_merged["Precip_Accum_Sfc"].values,
+    which_rh_fit="RUC",
+)
+
+xarray_forecast_merged["Visibility_Sfc"] = xr.DataArray(
+    vis_fc.astype(np.float32),
+    dims=xarray_forecast_merged["RelativeHumidity_AGL_2m"].dims,
+    coords=xarray_forecast_merged["RelativeHumidity_AGL_2m"].coords,
+)
+
 # Save the dataset with compression and filters for all variables
 xarray_forecast_merged = xarray_forecast_merged.chunk(
     chunks={"time": 240, "latitude": process_chunk, "longitude": process_chunk}
@@ -344,7 +395,10 @@ with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
 # %% Delete to free memory
 del (
     APCP_surface_tmp,
+    distanced_stacked,
+    directions_stacked,
     xarray_forecast_merged,
+    vis_fc,
 )
 T1 = time.time()
 
@@ -464,8 +518,44 @@ for i in range(his_period, 0, -6):
         "Precip_Accum_Sfc"
     ].copy(data=apcpProcHour)
 
+    # Clip precipitation to >= 0
+    xarray_hist_merged["Precip_Accum_Sfc"] = xarray_hist_merged[
+        "Precip_Accum_Sfc"
+    ].clip(min=0)
+
+    # Compute nearest storm distance and direction
+    storm_distance_hist, storm_direction_hist = (
+        compute_storm_fields_from_apcp_dataarray(
+            apcp_dataarray=xarray_hist_merged["Precip_Accum_Sfc"],
+            threshold=0.2,
+            max_distance_m=None,
+        )
+    )
+    xarray_hist_merged["Storm_Distance"] = (
+        ("time", "latitude", "longitude"),
+        storm_distance_hist.rechunk((len(fxx), process_chunk, process_chunk)).compute(),
+    )
+    xarray_hist_merged["Storm_Direction"] = (
+        ("time", "latitude", "longitude"),
+        storm_direction_hist.rechunk(
+            (len(fxx), process_chunk, process_chunk)
+        ).compute(),
+    )
+
+    # Compute visibility from RH and precipitation rate (Gültepe & Milbrandt 2010, RUC fit)
+    vis_h = estimate_visibility_from_rh_pr(
+        rh_percent=xarray_hist_merged["RelativeHumidity_AGL_2m"].values,
+        pr_mm_hr=xarray_hist_merged["Precip_Accum_Sfc"].values,
+        which_rh_fit="RUC",
+    )
+    xarray_hist_merged["Visibility_Sfc"] = xr.DataArray(
+        vis_h.astype(np.float32),
+        dims=xarray_hist_merged["RelativeHumidity_AGL_2m"].dims,
+        coords=xarray_hist_merged["RelativeHumidity_AGL_2m"].coords,
+    )
+
     # Clear memory
-    del (apcpProc, apcpProcHour)
+    del (apcpProc, apcpProcHour, vis_h)
 
     # Save merged and processed xarray dataset to disk using zarr with compression
     # Define the path to save the zarr dataset with the run time in the filename
@@ -588,9 +678,14 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
 
     daskVarArraysStack = da.stack(daskVarArrays, allow_unknown_chunksizes=True)
 
-    daskForecastArray = da.from_zarr(
-        forecast_process_path + "_.zarr", component=dask_var, inline_array=True
-    )
+    if dask_var == "Storm_Distance":
+        daskForecastArray = da.from_zarr(forecast_process_path + "_stormDist.zarr")
+    elif dask_var == "Storm_Direction":
+        daskForecastArray = da.from_zarr(forecast_process_path + "_stormDir.zarr")
+    else:
+        daskForecastArray = da.from_zarr(
+            forecast_process_path + "_.zarr", component=dask_var, inline_array=True
+        )
 
     if dask_var == "time":
         # Create a time array with the same shape
@@ -639,7 +734,9 @@ daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
 
 # Mask out invalid data
 # Ignore storm distance, since it can reach very high values that are still correct
-daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
+daskVarArrayListMergeNaN = mask_invalid_data(
+    daskVarArrayListMerge, ignoreAxis=[zarr_vars.index("Storm_Distance")]
+)
 
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
