@@ -310,3 +310,9 @@ ROUNDING_RULES = {
     "capeMaxTime": 0,
     "smokeMaxTime": 0,
 }
+
+U_REF = {
+    "GDPS": 2.0,  # Reference wind speed for GDPS visibility estimation (m/s)
+    "HRDPS": 1.5,  # Reference wind speed for HRDPS visibility estimation (m/s)
+    "RDPS": 1.5,  # Reference wind speed for RDPS visibility estimation (m/s)
+}

@@ -23,6 +23,7 @@ from herbie import FastHerbie, HerbieLatest
 from tqdm import tqdm
 
 from API.api_utils import estimate_visibility_from_rh_pr
+from API.constants.api_const import U_REF
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
 from API.ingest_utils import (
     CHUNK_SIZES,
@@ -157,8 +158,7 @@ zarr_vars = (
     "AirTemp_AGL_2m",
     "DewPoint_AGL_2m",
     "RelativeHumidity_AGL_2m",
-    "WindU_AGL_10m",
-    "WindV_AGL_10m",
+    "WindSpeed_AGL_10m",
     "PrecipRate_Sfc",
     "Precip_Accum_Sfc",
     "PrecipType_Instant_Sfc",
@@ -182,8 +182,7 @@ match_strings = [
     {"variable": "AirTemp", "level": "AGL-2m"},
     {"variable": "DewPoint", "level": "AGL-2m"},
     {"variable": "RelativeHumidity", "level": "AGL-2m"},
-    {"variable": "WindU", "level": "AGL-10m"},
-    {"variable": "WindV", "level": "AGL-10m"},
+    {"variable": "WindSpeed", "level": "AGL-10m"},
     {"variable": "WindGust", "level": "AGL-10m"},
     {"variable": "PrecipRate", "level": "Sfc"},
     {"variable": "Precip-Accum", "level": "Sfc"},
@@ -328,11 +327,15 @@ APCP_surface_tmp = da.diff(
 
 xarray_forecast_merged["Precip_Accum_Sfc"].data = APCP_surface_tmp
 
-# Compute visibility from RH and precipitation rate (Gültepe & Milbrandt 2010, RUC fit)
+# Compute visibility from RH and precipitation rate (Gültepe & Milbrandt 2010, FRAM fit)
 vis_fc = estimate_visibility_from_rh_pr(
     rh_percent=xarray_forecast_merged["RelativeHumidity_AGL_2m"].values,
     pr_mm_hr=xarray_forecast_merged["Precip_Accum_Sfc"].values,
-    which_rh_fit="RUC",
+    wind_speed_ms=xarray_forecast_merged["WindSpeed_AGL_10m"].values,
+    which_rh_fit="FRAM",
+    u_ref=U_REF[
+        "RDPS"
+    ],  # Reference wind speed for scaling (can be tuned based on typical conditions)
 )
 
 xarray_forecast_merged["Visibility_Sfc"] = xr.DataArray(
@@ -476,11 +479,15 @@ for i in range(his_period, 0, -6):
         "Precip_Accum_Sfc"
     ].copy(data=apcpProcHour)
 
-    # Compute visibility from RH and precipitation rate (Gültepe & Milbrandt 2010, RUC fit)
+    # Compute visibility from RH and precipitation rate (Gültepe & Milbrandt 2010, FRAM fit)
     vis_h = estimate_visibility_from_rh_pr(
         rh_percent=xarray_hist_merged["RelativeHumidity_AGL_2m"].values,
         pr_mm_hr=xarray_hist_merged["Precip_Accum_Sfc"].values,
-        which_rh_fit="RUC",
+        wind_speed_ms=xarray_hist_merged["WindSpeed_AGL_10m"].values,
+        which_rh_fit="FRAM",
+        u_ref=U_REF[
+            "RDPS"
+        ],  # Reference wind speed for scaling (can be tuned based on typical conditions)
     )
 
     xarray_hist_merged["Visibility_Sfc"] = xr.DataArray(

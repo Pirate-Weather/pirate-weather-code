@@ -262,66 +262,66 @@ def estimate_visibility_gultepe_rh_pr_numpy(
 def estimate_visibility_from_rh_pr(
     rh_percent: np.ndarray,
     pr_mm_hr: np.ndarray | None = None,
+    wind_speed_ms: np.ndarray | None = None,
     which_rh_fit: str = "FRAM",
     rh_min: float = 30.0,
     rh_max: float = 100.0,
     vis_min_km: float = 0.05,
     vis_max_km: float = 16.09344,
+    u_ref: float = 2.0,
 ) -> np.ndarray:
-    """
-    Estimate visibility (m) from relative humidity and precipitation rate.
-
-    Vectorised over arbitrary array shapes — suitable for both single-point
-    time series and full spatial grids (time * lat * lon).
-
-    Uses the Gültepe & Milbrandt (2010) FRAM or AIRS2 fit for RH→visibility
-    and the Table 2 piecewise power-law for rain rate→visibility, then combines
-    the two extinction contributions via the Koschmieder equation (β = 3/V).
+    """Estimate visibility (m) from RH, precipitation, and optional wind speed.
 
     Args:
         rh_percent: Relative humidity in % (clamped to rh_min-rh_max).
-        pr_mm_hr: Precipitation rate in mm/hr. Pass None to omit the
-            precipitation contribution. Negative values are treated as zero.
-        which_rh_fit: "FRAM" (Gültepe Eq. 2, default) or "AIRS2" (Eq. 3).
-        rh_min: Lower clamp for RH (default 30 %).
-        rh_max: Upper clamp for RH (default 100 %).
-        vis_min_km: Minimum output visibility in km (default 0.05 = 50 m).
-        vis_max_km: Maximum output visibility in km (default 16.09344 = 10 mi).
-
-    Returns:
-        Visibility in metres, same shape as ``rh_percent``, dtype float32.
+        pr_mm_hr: Precipitation rate in mm/hr. None omits precipitation.
+        wind_speed_ms: Wind speed in m/s. None omits wind adjustment.
+        which_rh_fit: "FRAM" (default), "AIRS2", or "RUC".
+        rh_min, rh_max: Clamping limits for RH.
+        vis_min_km, vis_max_km: Minimum/Maximum visibility output in km.
+        u_ref: Reference wind speed (m/s) at which the RH-driven extinction
+          begins to significantly clear due to mixing.
     """
     RH = np.clip(np.asarray(rh_percent, dtype=np.float64), rh_min, rh_max)
 
+    # 1. Compute baseline visibility from RH
     fit = (which_rh_fit or "FRAM").upper()
     if fit == "AIRS2":
-        vis_rh = -0.0177 * (RH**2) + 1.462 * RH + 30.8  # km
+        vis_rh = -0.0177 * (RH**2) + 1.462 * RH + 30.8
     elif fit == "RUC":
         vis_rh = 60.0 * np.exp(-0.025 * (RH - 30.0))
     else:  # FRAM (default)
-        vis_rh = -41.5 * np.log(RH) + 192.3  # km
+        vis_rh = -41.5 * np.log(RH) + 192.3
 
-    beta_rh = 3.0 / vis_rh
+    beta_rh = 3.0 / np.maximum(vis_rh, 0.05)
 
+    # 2. Apply Wind Speed Scaling to the RH extinction
+    # If wind is high, we decrease the extinction (beta), improving visibility.
+    # If wind is near 0, beta remains high.
+    if wind_speed_ms is not None:
+        u = np.clip(np.asarray(wind_speed_ms, dtype=np.float64), 0.0, None)
+        # Scaling factor: approaches 0.1 (high visibility) at strong winds,
+        # and 1.0 (baseline low visibility) at zero wind.
+        wind_factor = 0.1 + 0.9 * np.exp(-u / u_ref)
+        beta_rh = beta_rh * wind_factor
+
+    # 3. Compute baseline visibility from precipitation
     if pr_mm_hr is not None:
         pr = np.clip(np.asarray(pr_mm_hr, dtype=np.float64), 0.0, None)
-        # Piecewise rain-rate parameterisation (Gültepe & Milbrandt 2010, Table 2):
-        #   heavy    (> 7.6 mm/hr): 5th-percentile fit
-        #   moderate (2.6–7.6):     50th-percentile fit
-        #   light    (< 2.6):       95th-percentile fit (~874 km at zero rate)
         vis_pr = np.where(
             pr > 7.6,
             np.maximum(-0.45 * np.power(pr, 0.394) + 2.28, 0.05),
             np.where(
                 pr >= 2.6,
                 np.maximum(-2.65 * np.power(pr, 0.256) + 7.65, 0.05),
-                -863.26 * np.power(pr, 0.003) + 874.19,
+                np.maximum(-863.26 * np.power(pr, 0.003) + 874.19, 0.05),
             ),
         )
         beta_pr = 3.0 / np.maximum(vis_pr, 0.05)
     else:
         beta_pr = 0.0
 
+    # 4. Combine extinctions using the Koschmieder equation
     vis_km = np.clip(3.0 / (beta_rh + beta_pr), vis_min_km, vis_max_km)
     return (vis_km * 1000.0).astype(np.float32)
 
