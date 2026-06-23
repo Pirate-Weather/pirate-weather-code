@@ -154,7 +154,10 @@ ERA5 = {
     "surface_solar_radiation_downwards": 16,
     "convective_available_potential_energy": 17,
     "surface_pressure": 18,
+    "prob": 19,
 }
+
+ERA5_SOURCE_VARS = tuple(var for var in ERA5 if var != "prob")
 
 # DWD MOSMIX variable indices
 # These match the zarr_vars order in DWD_Mosmix_Local_Ingest.py:

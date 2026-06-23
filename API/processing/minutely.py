@@ -39,7 +39,6 @@ def process_minutely(
     HRRR_Merged: Optional[np.ndarray] = None,
     ERA5_MERGED: Optional[np.ndarray] = None,
 ) -> Dict[str, Any]:
-
     # Initialize interpolation arrays
     gefsMinuteInterpolation = None
     gfsMinuteInterpolation = None
@@ -294,6 +293,13 @@ def process_minutely(
             ERA5_MERGED[:, 0].squeeze(),
             ERA5_MERGED[:, ERA5["precipitation_type"]],
         )
+        era5_MinuteInterpolation[:, ERA5["prob"]] = np.interp(
+            minute_array_grib,
+            ERA5_MERGED[:, 0].squeeze(),
+            ERA5_MERGED[:, ERA5["prob"]],
+            left=MISSING_DATA,
+            right=MISSING_DATA,
+        )
 
     # InterPminute calculation
     InterPminute = np.full(
@@ -316,6 +322,10 @@ def process_minutely(
         InterPminute[:, DATA_MINUTELY["prob"]] = gefsMinuteInterpolation[
             :, GEFS["prob"]
         ]
+    elif "era5" in sourceList and era5_MinuteInterpolation is not None:
+        InterPminute[:, DATA_MINUTELY["prob"]] = (
+            era5_MinuteInterpolation[:, ERA5["prob"]] * 0.01
+        )
     else:
         InterPminute[:, DATA_MINUTELY["prob"]] = (
             np.ones(len(minute_array_grib)) * MISSING_DATA

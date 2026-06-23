@@ -29,6 +29,7 @@ DEFAULT_END_DATE = dt.date(2026, 5, 25)
 DEFAULT_API_BASE = "http://localhost:8081"
 DEFAULT_API_KEY = "abc123"
 DEFAULT_DAYS = 2
+DEFAULT_TIMEOUT_SECONDS = 240.0
 MAX_TIME_MACHINE_DAYS = 8
 MAX_TIME_MACHINE_HOURS = MAX_TIME_MACHINE_DAYS * 24
 DEFAULT_QUERY_PARAMS = {
@@ -56,17 +57,24 @@ class RequestJob:
     date_count: int
     point: Point
     target_date: dt.date
+    target_hour: int
     unix_time: int
     output_path: Path
     url: str
     attempt_number: int = 1
 
 
+class RequestAttemptError(RuntimeError):
+    def __init__(self, message: str, duration_seconds: float) -> None:
+        super().__init__(message)
+        self.duration_seconds = duration_seconds
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Loop through a CSV of latitude/longitude points, request Pirate "
-            "Weather timemachine data for each day at 12:00 local time, and "
+            "Weather timemachine data for each day at 00:00 local time, and "
             "save JSON responses to disk."
         )
     )
@@ -118,10 +126,28 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--exclude",
+        default=None,
+        help=(
+            "Optional comma-separated response blocks to exclude, "
+            "for example --exclude=summary."
+        ),
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
-        default=120.0,
+        default=DEFAULT_TIMEOUT_SECONDS,
         help="Per-request timeout in seconds.",
+    )
+    parser.add_argument(
+        "--request-frequency",
+        choices=("daily", "hourly"),
+        default="daily",
+        help=(
+            "Request cadence per point across the date range: "
+            "'daily' sends one request at local midnight, 'hourly' sends 24 "
+            "requests per day at local hour boundaries."
+        ),
     )
     parser.add_argument(
         "--pause-seconds",
@@ -261,17 +287,21 @@ def load_points(csv_path: Path, tf: TimezoneFinder) -> list[Point]:
 
 
 def local_noon_unix(target_date: dt.date, timezone_name: str) -> int:
+    return local_hour_unix(target_date, 12, timezone_name)
+
+
+def local_hour_unix(target_date: dt.date, hour: int, timezone_name: str) -> int:
     try:
         timezone = ZoneInfo(timezone_name)
     except ZoneInfoNotFoundError:
         timezone = ZoneInfo("UTC")
 
-    local_noon = dt.datetime.combine(
+    local_time = dt.datetime.combine(
         target_date,
-        dt.time(hour=12, minute=0, second=0),
+        dt.time(hour=hour, minute=0, second=0),
         tzinfo=timezone,
     )
-    return int(local_noon.timestamp())
+    return int(local_time.timestamp())
 
 
 def build_request_url(
@@ -281,6 +311,7 @@ def build_request_url(
     unix_time: int,
     days: int,
     hours: int | None,
+    exclude: str | None = None,
 ) -> str:
     path = (
         f"{api_base.rstrip('/')}/forecast/{parse.quote(api_key)}/"
@@ -289,6 +320,8 @@ def build_request_url(
     query_params = {**DEFAULT_QUERY_PARAMS, "days": str(days)}
     if hours is not None:
         query_params["hours"] = str(hours)
+    if exclude:
+        query_params["exclude"] = exclude
     query = parse.urlencode(query_params)
     return f"{path}?{query}"
 
@@ -347,12 +380,12 @@ def append_jsonl(path: Path, payload: dict) -> None:
         handle.write("\n")
 
 
-def fetch_json(url: str, timeout: float) -> tuple[int, dict]:
+def fetch_json(url: str, timeout: float) -> tuple[int, dict, int]:
     req = request.Request(url, headers={"Accept": "application/json"})
     with request.urlopen(req, timeout=timeout) as response:
         status_code = response.getcode()
-        body = response.read().decode("utf-8")
-    return status_code, json.loads(body)
+        body = response.read()
+    return status_code, json.loads(body), len(body)
 
 
 def create_request_jobs(
@@ -366,57 +399,66 @@ def create_request_jobs(
 ) -> list[RequestJob]:
     jobs: list[RequestJob] = []
     skipped = 0
+    hours_for_frequency = [0] if args.request_frequency == "daily" else list(range(24))
+    request_count_per_day = len(hours_for_frequency)
+    total_slots = len(dates) * request_count_per_day
 
-    for point_index, point in enumerate(points, start=1):
-        for day_index, target_date in enumerate(dates, start=1):
-            unix_time = local_noon_unix(target_date, point.timezone_name)
-            output_path = (
-                point_output_dir(args.output_dir, point)
-                / f"{target_date.isoformat()}.json"
-            )
-            progress_payload = build_progress_payload(
-                args=args,
-                started_at=started_at,
-                point=point,
-                point_index=point_index,
-                point_count=len(points),
-                target_date=target_date,
-                day_index=day_index,
-                date_count=len(dates),
-                completed=0,
-                failed=0,
-                skipped=skipped,
-                total_requests=total_requests,
-                output_path=output_path,
-            )
+    for day_index, target_date in enumerate(dates, start=1):
+        for hour_offset, hour in enumerate(hours_for_frequency, start=1):
+            for point_index, point in enumerate(points, start=1):
+                slot_index = ((day_index - 1) * request_count_per_day) + hour_offset
+                unix_time = local_hour_unix(target_date, hour, point.timezone_name)
+                if args.request_frequency == "hourly":
+                    filename = f"{target_date.isoformat()}T{hour:02d}00.json"
+                else:
+                    filename = f"{target_date.isoformat()}.json"
+                output_path = point_output_dir(args.output_dir, point) / filename
 
-            if output_path.exists() and not args.overwrite:
-                skipped += 1
-                progress_payload["skipped"] = skipped
-                progress_payload["status"] = "skipped-existing"
-                write_progress(progress_path, progress_payload)
-                continue
-
-            jobs.append(
-                RequestJob(
+                progress_payload = build_progress_payload(
+                    args=args,
+                    started_at=started_at,
+                    point=point,
                     point_index=point_index,
                     point_count=len(points),
-                    day_index=day_index,
-                    date_count=len(dates),
-                    point=point,
                     target_date=target_date,
-                    unix_time=unix_time,
+                    day_index=slot_index,
+                    date_count=total_slots,
+                    completed=0,
+                    failed=0,
+                    skipped=skipped,
+                    total_requests=total_requests,
                     output_path=output_path,
-                    url=build_request_url(
-                        args.api_base,
-                        args.api_key,
-                        point,
-                        unix_time,
-                        args.days,
-                        args.hours,
-                    ),
                 )
-            )
+
+                if output_path.exists() and not args.overwrite:
+                    skipped += 1
+                    progress_payload["skipped"] = skipped
+                    progress_payload["status"] = "skipped-existing"
+                    write_progress(progress_path, progress_payload)
+                    continue
+
+                jobs.append(
+                    RequestJob(
+                        point_index=point_index,
+                        point_count=len(points),
+                        day_index=slot_index,
+                        date_count=total_slots,
+                        point=point,
+                        target_date=target_date,
+                        target_hour=hour,
+                        unix_time=unix_time,
+                        output_path=output_path,
+                        url=build_request_url(
+                            args.api_base,
+                            args.api_key,
+                            point,
+                            unix_time,
+                            args.days,
+                            args.hours,
+                            args.exclude,
+                        ),
+                    )
+                )
 
     if skipped > 0 and skipped % 25 == 0:
         print_progress(started_at, 0, 0, skipped, total_requests)
@@ -424,9 +466,35 @@ def create_request_jobs(
     return jobs
 
 
-def process_job(job: RequestJob, timeout: float) -> tuple[RequestJob, int, dict]:
-    status_code, payload = fetch_json(job.url, timeout=timeout)
-    return job, status_code, payload
+def group_jobs_by_time_slot(jobs: list[RequestJob]) -> Iterable[list[RequestJob]]:
+    batch: list[RequestJob] = []
+    current_slot: tuple[dt.date, int] | None = None
+
+    for job in jobs:
+        slot = (job.target_date, job.target_hour)
+        if batch and slot != current_slot:
+            yield batch
+            batch = []
+        current_slot = slot
+        batch.append(job)
+
+    if batch:
+        yield batch
+
+
+def process_job(
+    job: RequestJob,
+    timeout: float,
+) -> tuple[RequestJob, int, dict, float, int]:
+    request_started_at = time.perf_counter()
+    try:
+        status_code, payload, response_bytes = fetch_json(job.url, timeout=timeout)
+    except Exception as exc:
+        duration_seconds = time.perf_counter() - request_started_at
+        raise RequestAttemptError(str(exc), duration_seconds) from exc
+
+    duration_seconds = time.perf_counter() - request_started_at
+    return job, status_code, payload, duration_seconds, response_bytes
 
 
 def enqueue_retry(
@@ -450,6 +518,7 @@ def enqueue_retry(
         date_count=job.date_count,
         point=job.point,
         target_date=job.target_date,
+        target_hour=job.target_hour,
         unix_time=job.unix_time,
         output_path=job.output_path,
         url=job.url,
@@ -497,9 +566,16 @@ def drain_completed_futures(
             total_requests=total_requests,
             output_path=job.output_path,
         )
+        request_duration_seconds = None
 
         try:
-            _, status_code, payload = future.result(timeout=timeout)
+            (
+                _,
+                status_code,
+                payload,
+                request_duration_seconds,
+                response_bytes,
+            ) = future.result(timeout=timeout)
             if status_code != 200:
                 raise RuntimeError(f"Unexpected HTTP status {status_code}")
             save_json(job.output_path, payload)
@@ -509,8 +585,39 @@ def drain_completed_futures(
             progress_payload["completed"] = completed
             progress_payload["status"] = "completed"
             progress_payload["attempt"] = job.attempt_number
+            progress_payload["request_duration_seconds"] = round(
+                request_duration_seconds, 3
+            )
+            progress_payload["response_bytes"] = response_bytes
             write_progress(progress_path, progress_payload)
+            request_rate = (
+                60 / request_duration_seconds
+                if request_duration_seconds > 0
+                else float("inf")
+            )
+            print(
+                "REQUEST completed "
+                f"point={job.point.label} date={job.target_date.isoformat()} "
+                f"hour={job.target_hour:02d} attempt={job.attempt_number} "
+                f"status={status_code} duration={request_duration_seconds:.3f}s "
+                f"rate={request_rate:.2f}/min response_bytes={response_bytes}",
+                flush=True,
+            )
         except Exception as exc:
+            if isinstance(exc, RequestAttemptError):
+                request_duration_seconds = exc.duration_seconds
+            if request_duration_seconds is not None:
+                progress_payload["request_duration_seconds"] = round(
+                    request_duration_seconds, 3
+                )
+                print(
+                    "REQUEST failed "
+                    f"point={job.point.label} date={job.target_date.isoformat()} "
+                    f"hour={job.target_hour:02d} attempt={job.attempt_number} "
+                    f"duration={request_duration_seconds:.3f}s error={exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
             if enqueue_retry(
                 executor=executor,
                 pending_futures=pending_futures,
@@ -537,6 +644,7 @@ def drain_completed_futures(
                 "unix_time": job.unix_time,
                 "url": job.url,
                 "attempts": job.attempt_number,
+                "request_duration_seconds": request_duration_seconds,
                 "error": str(exc),
             }
             append_jsonl(failures_path, failure_record)
@@ -608,7 +716,8 @@ def main() -> int:
         return 2
 
     dates = list(date_range(args.start_date, args.end_date))
-    total_requests = len(points) * len(dates)
+    requests_per_day = 1 if args.request_frequency == "daily" else 24
+    total_requests = len(points) * len(dates) * requests_per_day
     progress_path = args.output_dir / "progress.json"
     failures_path = args.output_dir / "failures.jsonl"
     started_at = dt.datetime.now(dt.UTC)
@@ -627,47 +736,31 @@ def main() -> int:
     print(
         "Starting fetch run "
         f"for {len(points)} points across {len(dates)} dates "
-        f"({total_requests} requests, days={args.days}, "
         f"hours={args.hours if args.hours is not None else 'default'}, "
-        f"workers={args.workers}, skipped={skipped})."
     )
 
-    job_iter = iter(jobs)
-    pending_futures = {}
-
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
-        while len(pending_futures) < args.workers:
-            try:
-                job = next(job_iter)
-            except StopIteration:
-                break
-            pending_futures[executor.submit(process_job, job, args.timeout)] = job
-            if args.pause_seconds > 0:
-                time.sleep(args.pause_seconds)
-
-        while pending_futures:
-            completed, failed = drain_completed_futures(
-                executor=executor,
-                pending_futures=pending_futures,
-                timeout=args.timeout,
-                failures_path=failures_path,
-                progress_path=progress_path,
-                args=args,
-                started_at=started_at,
-                total_requests=total_requests,
-                completed=completed,
-                failed=failed,
-                skipped=skipped,
-            )
-
-            while len(pending_futures) < args.workers:
-                try:
-                    job = next(job_iter)
-                except StopIteration:
-                    break
+        for batch in group_jobs_by_time_slot(jobs):
+            pending_futures = {}
+            for job in batch:
                 pending_futures[executor.submit(process_job, job, args.timeout)] = job
                 if args.pause_seconds > 0:
                     time.sleep(args.pause_seconds)
+
+            while pending_futures:
+                completed, failed = drain_completed_futures(
+                    executor=executor,
+                    pending_futures=pending_futures,
+                    timeout=args.timeout,
+                    failures_path=failures_path,
+                    progress_path=progress_path,
+                    args=args,
+                    started_at=started_at,
+                    total_requests=total_requests,
+                    completed=completed,
+                    failed=failed,
+                    skipped=skipped,
+                )
 
     print_progress(started_at, completed, failed, skipped, total_requests, final=True)
     return 0 if failed == 0 else 1
@@ -683,15 +776,17 @@ def print_progress(
     final: bool = False,
 ) -> None:
     processed = completed + failed + skipped
+    attempted = completed + failed
+    requests_to_fetch = max(total_requests - skipped, 0)
     elapsed_seconds = max((dt.datetime.now(dt.UTC) - started_at).total_seconds(), 1e-6)
-    rate = processed / elapsed_seconds
-    remaining = max(total_requests - processed, 0)
-    eta_seconds = int(remaining / rate) if rate > 0 else -1
+    rate = attempted * 60 / elapsed_seconds
+    remaining = max(requests_to_fetch - attempted, 0)
+    eta_seconds = int(remaining / rate * 60) if rate > 0 else -1
     eta_text = format_eta(eta_seconds) if eta_seconds >= 0 else "unknown"
     prefix = "Finished" if final else "Progress"
     print(
         f"{prefix}: processed={processed}/{total_requests} completed={completed} "
-        f"failed={failed} skipped={skipped} rate={rate:.2f}/s eta={eta_text}"
+        f"failed={failed} skipped={skipped} rate={rate:.2f}/min eta={eta_text}"
     )
 
 
