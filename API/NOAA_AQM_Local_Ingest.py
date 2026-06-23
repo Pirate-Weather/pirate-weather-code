@@ -32,7 +32,7 @@ import xarray as xr
 from dask.diagnostics import ProgressBar
 
 from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_utils import CHUNK_SIZES, calculate_aqi
+from API.ingest_utils import CHUNK_SIZES
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -277,288 +277,241 @@ def extract_time_series(da, var_name, origintime):
     return da.astype(np.float32)
 
 
-# %% Main execution block
-if __name__ == "__main__":
-    # %% Setup paths and parameters
-    ingestVersion = INGEST_VERSION_STR
+# %% Setup paths and parameters
+ingestVersion = INGEST_VERSION_STR
 
-    forecast_process_dir = os.getenv(
-        "forecast_process_dir", default="/home/ubuntu/Weather/NOAA_AQM"
-    )
-    forecast_process_path = os.path.join(forecast_process_dir, "NOAA_AQM_Process")
-    tmpDIR = os.path.join(forecast_process_dir, "Downloads")
+forecast_process_dir = os.getenv(
+    "forecast_process_dir", default="/home/ubuntu/Weather/NOAA_AQM"
+)
+forecast_process_path = os.path.join(forecast_process_dir, "NOAA_AQM_Process")
+tmpDIR = os.path.join(forecast_process_dir, "Downloads")
 
-    forecast_path = os.getenv(
-        "forecast_path", default="/home/ubuntu/Weather/Prod/NOAA_AQM"
-    )
+forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/NOAA_AQM")
 
-    saveType = os.getenv("save_type", default="Download")
-    aws_access_key_id = os.environ.get("AWS_KEY", "")
-    aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+saveType = os.getenv("save_type", default="Download")
+aws_access_key_id = os.environ.get("AWS_KEY", "")
+aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
-    # Define the processing chunk size - use HRRR chunk sizes as AQM is CONUS data
-    processChunk = CHUNK_SIZES.get("HRRR", 100)
+# Define the processing chunk size - use HRRR chunk sizes as AQM is CONUS data
+processChunk = CHUNK_SIZES.get("HRRR", 100)
 
-    # Create new directory for processing if it does not exist
-    if not os.path.exists(forecast_process_dir):
-        os.makedirs(forecast_process_dir)
-    else:
-        shutil.rmtree(forecast_process_dir)
-        os.makedirs(forecast_process_dir)
+# Create new directory for processing if it does not exist
+if not os.path.exists(forecast_process_dir):
+    os.makedirs(forecast_process_dir)
+else:
+    shutil.rmtree(forecast_process_dir)
+    os.makedirs(forecast_process_dir)
 
-    if not os.path.exists(tmpDIR):
-        os.makedirs(tmpDIR)
+if not os.path.exists(tmpDIR):
+    os.makedirs(tmpDIR)
 
-    if saveType == "Download":
-        if not os.path.exists(os.path.join(forecast_path, ingestVersion)):
-            os.makedirs(os.path.join(forecast_path, ingestVersion))
+if saveType == "Download":
+    if not os.path.exists(os.path.join(forecast_path, ingestVersion)):
+        os.makedirs(os.path.join(forecast_path, ingestVersion))
 
-    start_time = time.time()
+start_time = time.time()
 
-    # Get the latest model run time
-    origintime = get_latest_aqm_run()
-    logger.info(f"Latest AQM run time: {origintime}")
+# Get the latest model run time
+origintime = get_latest_aqm_run()
+logger.info(f"Latest AQM run time: {origintime}")
 
-    # Check if this is newer than the current file
-    if saveType == "S3":
-        if s3.exists(forecast_path + "/" + ingestVersion + "/NOAA_AQM.time.pickle"):
-            with s3.open(
-                forecast_path + "/" + ingestVersion + "/NOAA_AQM.time.pickle", "rb"
-            ) as f:
-                previous_base_time = pickle.load(f)
-            if previous_base_time >= origintime:
-                logger.info("No Update to NOAA_AQM, ending")
-                sys.exit()
-    else:
-        if os.path.exists(
-            forecast_path + "/" + ingestVersion + "/NOAA_AQM.time.pickle"
-        ):
-            with open(
-                forecast_path + "/" + ingestVersion + "/NOAA_AQM.time.pickle", "rb"
-            ) as file:
-                previous_base_time = pickle.load(file)
-            if previous_base_time >= origintime:
-                logger.info("No Update to NOAA_AQM, ending")
-                sys.exit()
+# Check if this is newer than the current file
+if saveType == "S3":
+    if s3.exists(forecast_path + "/" + ingestVersion + "/NOAA_AQM.time.pickle"):
+        with s3.open(
+            forecast_path + "/" + ingestVersion + "/NOAA_AQM.time.pickle", "rb"
+        ) as f:
+            previous_base_time = pickle.load(f)
+        if previous_base_time >= origintime:
+            logger.info("No Update to NOAA_AQM, ending")
+            sys.exit()
+else:
+    if os.path.exists(forecast_path + "/" + ingestVersion + "/NOAA_AQM.time.pickle"):
+        with open(
+            forecast_path + "/" + ingestVersion + "/NOAA_AQM.time.pickle", "rb"
+        ) as file:
+            previous_base_time = pickle.load(file)
+        if previous_base_time >= origintime:
+            logger.info("No Update to NOAA_AQM, ending")
+            sys.exit()
 
-    # %% Download AQM GRIB2 files from NOMADS
-    # Try each possible grid ID until a download succeeds
-    pm25_grib_path = None
-    o3_grib_path = None
+# %% Download AQM GRIB2 files from NOMADS
+# Try each possible grid ID until a download succeeds
+pm25_grib_path = None
+o3_grib_path = None
 
-    for grid_id in AQM_GRID_IDS:
-        if pm25_grib_path is None:
-            pm25_url = build_aqm_url(origintime, "pm25", grid_id)
-            pm25_local = os.path.join(tmpDIR, f"aqm_pm25_{grid_id}.grib2")
-            if download_grib2_file(pm25_url, pm25_local):
-                pm25_grib_path = pm25_local
-                logger.info(f"PM2.5 GRIB2 downloaded (grid={grid_id})")
-
-        if o3_grib_path is None:
-            o3_url = build_aqm_url(origintime, "o3", grid_id)
-            o3_local = os.path.join(tmpDIR, f"aqm_o3_{grid_id}.grib2")
-            if download_grib2_file(o3_url, o3_local):
-                o3_grib_path = o3_local
-                logger.info(f"O3 GRIB2 downloaded (grid={grid_id})")
-
-        if pm25_grib_path and o3_grib_path:
-            break
-
-    if pm25_grib_path is None and o3_grib_path is None:
-        logger.critical("Failed to download any AQM data from NOMADS. Exiting.")
-        sys.exit(1)
-
+for grid_id in AQM_GRID_IDS:
     if pm25_grib_path is None:
-        logger.warning("PM2.5 GRIB2 download failed; PM2.5 will be NaN.")
+        pm25_url = build_aqm_url(origintime, "pm25", grid_id)
+        pm25_local = os.path.join(tmpDIR, f"aqm_pm25_{grid_id}.grib2")
+        if download_grib2_file(pm25_url, pm25_local):
+            pm25_grib_path = pm25_local
+            logger.info(f"PM2.5 GRIB2 downloaded (grid={grid_id})")
+
     if o3_grib_path is None:
-        logger.warning("O3 GRIB2 download failed; O3 will be NaN.")
+        o3_url = build_aqm_url(origintime, "o3", grid_id)
+        o3_local = os.path.join(tmpDIR, f"aqm_o3_{grid_id}.grib2")
+        if download_grib2_file(o3_url, o3_local):
+            o3_grib_path = o3_local
+            logger.info(f"O3 GRIB2 downloaded (grid={grid_id})")
 
-    # %% Read and process GRIB2 data
-    # PM2.5 processing (units: µg/m³)
-    pm25_da = None
-    if pm25_grib_path:
-        pm25_da, pm25_units = read_grib2_variable(
-            pm25_grib_path, ["pmtf", "mpm2p5", "PMTF", "pm2p5", "unknownl", "unknown"]
-        )
-        if pm25_da is not None:
-            logger.info(
-                f"PM2.5: shape={pm25_da.shape}, units='{pm25_units}', "
-                f"range=[{float(pm25_da.min().values):.2f}, "
-                f"{float(pm25_da.max().values):.2f}]"
-            )
+    if pm25_grib_path and o3_grib_path:
+        break
 
-    # O3 processing (convert to µg/m³ if needed)
-    o3_da = None
-    if o3_grib_path:
-        o3_da, o3_units = read_grib2_variable(
-            o3_grib_path, ["ozcon", "o3c", "OZCON", "o3", "unknownl", "unknown"]
-        )
-        if o3_da is not None:
-            o3_da = convert_o3_to_ug_m3(o3_da, o3_units)
-            logger.info(
-                f"O3: shape={o3_da.shape}, "
-                f"range=[{float(o3_da.min().values):.2f}, "
-                f"{float(o3_da.max().values):.2f}] µg/m³"
-            )
+if pm25_grib_path is None and o3_grib_path is None:
+    logger.critical("Failed to download any AQM data from NOMADS. Exiting.")
+    sys.exit(1)
 
-    # %% Build a unified time-indexed xarray Dataset
-    pm25_ts = extract_time_series(pm25_da, "PM2.5", origintime)
-    o3_ts = extract_time_series(o3_da, "O3", origintime)
+if pm25_grib_path is None:
+    logger.warning("PM2.5 GRIB2 download failed; PM2.5 will be NaN.")
+if o3_grib_path is None:
+    logger.warning("O3 GRIB2 download failed; O3 will be NaN.")
 
-    # Use whichever successfully-loaded DataArray to define grid coordinates
-    reference_da = pm25_ts if pm25_ts is not None else o3_ts
-    if reference_da is None:
-        logger.critical("No usable AQM data available after processing. Exiting.")
-        sys.exit(1)
-
-    time_coord = reference_da["time"]
-    lat_coord = reference_da["latitude"]
-    lon_coord = reference_da["longitude"]
-    fallback_shape = (len(time_coord), len(lat_coord), len(lon_coord))
-
-    def _nan_dataarray(fill=np.nan):
-        """Return a NaN-filled DataArray matching the AQM grid."""
-        return xr.DataArray(
-            np.full(fallback_shape, fill, dtype=np.float32),
-            dims=["time", "latitude", "longitude"],
-            coords={
-                "time": time_coord,
-                "latitude": lat_coord,
-                "longitude": lon_coord,
-            },
+# %% Read and process GRIB2 data
+# PM2.5 processing (units: µg/m³)
+pm25_da = None
+if pm25_grib_path:
+    pm25_da, pm25_units = read_grib2_variable(
+        pm25_grib_path, ["pmtf", "mpm2p5", "PMTF", "pm2p5", "unknownl", "unknown"]
+    )
+    if pm25_da is not None:
+        logger.info(
+            f"PM2.5: shape={pm25_da.shape}, units='{pm25_units}', "
+            f"range=[{float(pm25_da.min().values):.2f}, "
+            f"{float(pm25_da.max().values):.2f}]"
         )
 
-    xarray_processed = xr.Dataset(
-        coords={"time": time_coord, "latitude": lat_coord, "longitude": lon_coord}
+# O3 processing (convert to µg/m³)
+o3_da = None
+if o3_grib_path:
+    o3_da, o3_units = read_grib2_variable(
+        o3_grib_path, ["ozcon", "o3c", "OZCON", "o3", "unknownl", "unknown"]
     )
+    if o3_da is not None:
+        o3_da = convert_o3_to_ug_m3(o3_da, o3_units)
+        logger.info(
+            f"O3: shape={o3_da.shape}, "
+            f"range=[{float(o3_da.min().values):.2f}, "
+            f"{float(o3_da.max().values):.2f}] µg/m³"
+        )
 
-    # PM2.5
-    if pm25_ts is not None:
-        xarray_processed["cnc_PM2_5"] = pm25_ts
-        xarray_processed["cnc_PM2_5"].attrs["units"] = "µg/m³"
-        xarray_processed["cnc_PM2_5"].attrs["long_name"] = "PM2.5 concentration"
-        xarray_processed["cnc_PM2_5"].attrs["source"] = "NOAA AQM (AQFC)"
-    else:
-        logger.warning("PM2.5 data unavailable; filling with NaN")
-        xarray_processed["cnc_PM2_5"] = _nan_dataarray()
+# %% Build a unified time-indexed xarray Dataset
+pm25_ts = extract_time_series(pm25_da, "PM2.5", origintime)
+o3_ts = extract_time_series(o3_da, "O3", origintime)
 
-    # O3
-    if o3_ts is not None:
-        xarray_processed["cnc_O3"] = o3_ts
-        xarray_processed["cnc_O3"].attrs["units"] = "µg/m³"
-        xarray_processed["cnc_O3"].attrs["long_name"] = "Ozone concentration"
-        xarray_processed["cnc_O3"].attrs["source"] = "NOAA AQM (AQFC)"
-    else:
-        logger.warning("O3 data unavailable; filling with NaN")
-        xarray_processed["cnc_O3"] = _nan_dataarray()
+# Use whichever successfully-loaded DataArray to define grid coordinates
+reference_da = pm25_ts if pm25_ts is not None else o3_ts
+if reference_da is None:
+    logger.critical("No usable AQM data available after processing. Exiting.")
+    sys.exit(1)
 
-    # %% Calculate AQI from PM2.5 and O3
-    # NOTE: NOAA AQM provides only PM2.5 and Ozone. The AQI calculated here is
-    # limited to these two pollutants; NO2, SO2 and CO are left as NaN. For
-    # globally-complete AQI (including all EPA pollutants), combine this data
-    # with SILAM concentrations (NO2, SO2, CO) at the API level.
-    logger.info(
-        "Calculating Air Quality Index (AQI) from PM2.5 and O3 (NO2/SO2/CO unavailable)…"
-    )
+time_coord = reference_da["time"]
+lat_coord = reference_da["latitude"]
+lon_coord = reference_da["longitude"]
+fallback_shape = (len(time_coord), len(lat_coord), len(lon_coord))
 
-    pm25_data = xarray_processed["cnc_PM2_5"].values
-    o3_data = xarray_processed["cnc_O3"].values
-    nan_data = np.full(fallback_shape, np.nan, dtype=np.float32)
 
-    aqi_values = calculate_aqi(
-        pm25_data,
-        nan_data,  # PM10 not provided by AQM
-        o3_data,
-        nan_data,  # NO2 not provided by AQM
-        nan_data,  # SO2 not provided by AQM
-        nan_data,  # CO not provided by AQM
-        use_nowcast=True,
-    )
-
-    xarray_processed["AQI"] = xr.DataArray(
-        aqi_values.astype(np.float32),
+def _nan_dataarray(fill=np.nan):
+    """Return a NaN-filled DataArray matching the AQM grid."""
+    return xr.DataArray(
+        np.full(fallback_shape, fill, dtype=np.float32),
         dims=["time", "latitude", "longitude"],
         coords={
             "time": time_coord,
             "latitude": lat_coord,
             "longitude": lon_coord,
         },
-        attrs={
-            "long_name": "Air Quality Index (PM2.5 and O3 only)",
-            "units": "1",
-            "method": "EPA NowCast for PM2.5; 8-hour average for O3",
-            "note": (
-                "AQI is based only on PM2.5 and O3 from NOAA AQM. "
-                "For full AQI (including NO2/SO2/CO), combine with SILAM concentrations."
-            ),
-        },
-    )
-    logger.info("AQI calculation complete")
-
-    # %% Save the processed data to Zarr
-    xarray_processed = xarray_processed.chunk(
-        chunks={
-            "time": xarray_processed.time.size,
-            "latitude": processChunk,
-            "longitude": processChunk,
-        }
     )
 
-    logger.info(f"Saving processed data to: {forecast_process_path}_.zarr")
 
-    with ProgressBar():
-        xarray_processed.to_zarr(
-            forecast_process_path + "_.zarr", mode="w", consolidated=False, compute=True
-        )
-    logger.info("Saved Zarr data to disk.")
+xarray_processed = xr.Dataset(
+    coords={"time": time_coord, "latitude": lat_coord, "longitude": lon_coord}
+)
 
-    # %% Final output handling and cleanup
-    pickle_file_path = os.path.join(forecast_process_dir, "NOAA_AQM.time.pickle")
-    with open(pickle_file_path, "wb") as file:
-        pickle.dump(origintime, file)
+# PM2.5
+if pm25_ts is not None:
+    xarray_processed["cnc_PM2_5"] = pm25_ts
+    xarray_processed["cnc_PM2_5"].attrs["units"] = "µg/m³"
+    xarray_processed["cnc_PM2_5"].attrs["long_name"] = "PM2.5 concentration"
+    xarray_processed["cnc_PM2_5"].attrs["source"] = "NOAA AQM (AQFC)"
+else:
+    logger.warning("PM2.5 data unavailable; filling with NaN")
+    xarray_processed["cnc_PM2_5"] = _nan_dataarray()
 
-    if saveType == "S3":
-        zip_base = os.path.join(forecast_process_dir, "NOAA_AQM.zarr")
-        shutil.make_archive(zip_base, "zip", forecast_process_path + "_.zarr")
-        zip_path = zip_base + ".zip"
+# O3
+if o3_ts is not None:
+    xarray_processed["cnc_O3"] = o3_ts
+    xarray_processed["cnc_O3"].attrs["units"] = "µg/m³"
+    xarray_processed["cnc_O3"].attrs["long_name"] = "Ozone concentration"
+    xarray_processed["cnc_O3"].attrs["source"] = "NOAA AQM (AQFC)"
+else:
+    logger.warning("O3 data unavailable; filling with NaN")
+    xarray_processed["cnc_O3"] = _nan_dataarray()
 
-        s3.put_file(
-            zip_path,
-            os.path.join(forecast_path, ingestVersion, "NOAA_AQM.zarr.zip"),
-        )
-        s3.put_file(
-            pickle_file_path,
-            os.path.join(forecast_path, ingestVersion, "NOAA_AQM.time.pickle"),
-        )
-        logger.info("Uploaded NOAA_AQM zarr zip and time pickle to S3.")
-    else:
-        shutil.move(
-            pickle_file_path,
-            os.path.join(forecast_path, ingestVersion, "NOAA_AQM.time.pickle"),
-        )
-        shutil.copytree(
-            forecast_process_path + "_.zarr",
-            forecast_path + "/" + ingestVersion + "/NOAA_AQM.zarr",
-            dirs_exist_ok=True,
-        )
-        logger.info(
-            f"Saved NOAA_AQM data locally to {forecast_path}/{ingestVersion}/NOAA_AQM.zarr"
-        )
+# %% Save the processed data to Zarr
+xarray_processed = xarray_processed.chunk(
+    chunks={
+        "time": xarray_processed.time.size,
+        "latitude": processChunk,
+        "longitude": processChunk,
+    }
+)
 
-    # Cleanup
-    try:
-        shutil.rmtree(forecast_process_dir)
-    except FileNotFoundError:
-        logger.debug(
-            f"Cleanup directory {forecast_process_dir} not found; nothing to remove."
-        )
-    except PermissionError as e:
-        logger.warning(f"Permission denied removing {forecast_process_dir}: {e}")
-    except OSError as e:
-        logger.warning(f"OS error while removing {forecast_process_dir}: {e}")
+logger.info(f"Saving processed data to: {forecast_process_path}_.zarr")
 
-    end_time = time.time()
-    logger.info(f"Total processing time: {end_time - start_time:.2f} seconds")
-    logger.info("NOAA AQM ingest script finished successfully.")
+with ProgressBar():
+    xarray_processed.to_zarr(
+        forecast_process_path + "_.zarr", mode="w", consolidated=False, compute=True
+    )
+logger.info("Saved Zarr data to disk.")
+
+# %% Final output handling and cleanup
+pickle_file_path = os.path.join(forecast_process_dir, "NOAA_AQM.time.pickle")
+with open(pickle_file_path, "wb") as file:
+    pickle.dump(origintime, file)
+
+if saveType == "S3":
+    zip_base = os.path.join(forecast_process_dir, "NOAA_AQM.zarr")
+    shutil.make_archive(zip_base, "zip", forecast_process_path + "_.zarr")
+    zip_path = zip_base + ".zip"
+
+    s3.put_file(
+        zip_path,
+        os.path.join(forecast_path, ingestVersion, "NOAA_AQM.zarr.zip"),
+    )
+    s3.put_file(
+        pickle_file_path,
+        os.path.join(forecast_path, ingestVersion, "NOAA_AQM.time.pickle"),
+    )
+    logger.info("Uploaded NOAA_AQM zarr zip and time pickle to S3.")
+else:
+    shutil.move(
+        pickle_file_path,
+        os.path.join(forecast_path, ingestVersion, "NOAA_AQM.time.pickle"),
+    )
+    shutil.copytree(
+        forecast_process_path + "_.zarr",
+        forecast_path + "/" + ingestVersion + "/NOAA_AQM.zarr",
+        dirs_exist_ok=True,
+    )
+    logger.info(
+        f"Saved NOAA_AQM data locally to {forecast_path}/{ingestVersion}/NOAA_AQM.zarr"
+    )
+
+# Cleanup
+try:
+    shutil.rmtree(forecast_process_dir)
+except FileNotFoundError:
+    logger.debug(
+        f"Cleanup directory {forecast_process_dir} not found; nothing to remove."
+    )
+except PermissionError as e:
+    logger.warning(f"Permission denied removing {forecast_process_dir}: {e}")
+except OSError as e:
+    logger.warning(f"OS error while removing {forecast_process_dir}: {e}")
+
+end_time = time.time()
+logger.info(f"Total processing time: {end_time - start_time:.2f} seconds")
+logger.info("NOAA AQM ingest script finished successfully.")

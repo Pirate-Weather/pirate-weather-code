@@ -26,7 +26,7 @@ import xarray as xr
 from dask.diagnostics import ProgressBar
 
 from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_utils import CHUNK_SIZES, calculate_aqi
+from API.ingest_utils import CHUNK_SIZES
 from API.silam_conversion import (
     KG_M3_TO_UG_M3,
     MOLAR_MASS_CO,
@@ -264,9 +264,6 @@ def _values_or_nan(ds, var_name, fallback_shape):
     )
 
 
-# Calculate AQI from pollutant concentrations
-logger.info("Calculating Air Quality Index (AQI) using EPA NowCast...")
-
 # Create fallback shape for missing data (3D: time, latitude, longitude)
 fallback_shape = (
     len(xarray_processed.time),
@@ -280,28 +277,6 @@ o3_data = _values_or_nan(xarray_processed, "cnc_O3", fallback_shape)
 no2_data = _values_or_nan(xarray_processed, "cnc_NO2", fallback_shape)
 so2_data = _values_or_nan(xarray_processed, "cnc_SO2", fallback_shape)
 co_data = _values_or_nan(xarray_processed, "cnc_CO", fallback_shape)
-
-# Calculate AQI using EPA NowCast algorithm for PM2.5 and PM10
-aqi_values = calculate_aqi(
-    pm25_data, pm10_data, o3_data, no2_data, so2_data, co_data, use_nowcast=True
-)
-
-xarray_processed["AQI"] = xr.DataArray(
-    aqi_values.astype(np.float32),
-    dims=["time", "latitude", "longitude"],
-    coords={
-        "time": xarray_processed.time,
-        "latitude": xarray_processed.latitude,
-        "longitude": xarray_processed.longitude,
-    },
-    attrs={
-        "long_name": "Air Quality Index",
-        "units": "1",
-        "method": "EPA NowCast for PM2.5/PM10",
-    },
-)
-
-logger.info("AQI calculation complete (using EPA NowCast for PM2.5/PM10)")
 
 # %% Save the processed data to Zarr
 xarray_processed = xarray_processed.chunk(
