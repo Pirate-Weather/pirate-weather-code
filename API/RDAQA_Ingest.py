@@ -8,16 +8,15 @@ import os
 import pickle
 import shutil
 import sys
-import time
 import warnings
 from datetime import datetime, timedelta, timezone
-from urllib.request import urlopen, urllib
+from urllib.request import urllib, urlopen
 
+import dask.array as da
 import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
-import dask.array as da
 import zarr.storage
 from dask.diagnostics import ProgressBar
 
@@ -100,13 +99,13 @@ def convert_to_ug_m3(da, var_name):
         logger.info(f"Converting {var_name} from kg/m³ to µg/m³")
         return da * KG_M3_TO_UG_M3
     elif var_name == "O3":
-        logger.info(f"Converting O3 from ppb to µg/m³")
+        logger.info("Converting O3 from ppb to µg/m³")
         return da * O3_PPB_TO_UG_M3
     elif var_name == "NO2":
-        logger.info(f"Converting NO2 from ppb to µg/m³")
+        logger.info("Converting NO2 from ppb to µg/m³")
         return da * NO2_PPB_TO_UG_M3
     elif var_name == "SO2":
-        logger.info(f"Converting SO2 from ppb to µg/m³")
+        logger.info("Converting SO2 from ppb to µg/m³")
         return da * SO2_PPB_TO_UG_M3
     return da
 
@@ -248,7 +247,7 @@ else:
         os.path.join(forecast_path, ingest_version, "RDAQA.zarr"),
         dirs_exist_ok=True,
     )
-    logger.info(f"Saved RDAQA datasets to local environment.")
+    logger.info("Saved RDAQA datasets to local environment.")
 
 try:
     shutil.rmtree(forecast_process_dir)
