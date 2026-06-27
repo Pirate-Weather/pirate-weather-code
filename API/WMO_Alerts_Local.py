@@ -557,7 +557,7 @@ def geocode_to_polygon(
         return None
 
     # For EMMA_ID, try MeteoAlarm geocodes first (most accurate)
-    if geocode_name in SUPPORTED_GEOCODES and geocode_name is not None:
+    if meteoalarm_gdf is not None and geocode_name in SUPPORTED_GEOCODES:
         try:
             # MeteoAlarm geocodes may have different field names, try common ones
             # Typically they use "emma_id", "EMMA_ID", "geocode", or similar
