@@ -31,7 +31,7 @@ import s3fs
 import xarray as xr
 from dask.diagnostics import ProgressBar
 
-from API.constants.shared_const import INGEST_VERSION_STR
+from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
 from API.ingest_utils import CHUNK_SIZES
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -66,6 +66,7 @@ O3_PPM_TO_UG_M3 = 48.0 / 24.465 * 1000.0  # ≈ 1962 µg/m³ per ppm
 # Ozone unit conversion: ppb → µg/m³ at 25°C, 1 atm
 O3_PPB_TO_UG_M3 = O3_PPM_TO_UG_M3 / 1000.0  # ≈ 1.962 µg/m³ per ppb
 
+his_period = HISTORY_PERIODS.get("AQM")
 
 # %% Pure helper functions (importable for testing)
 
@@ -511,6 +512,176 @@ except PermissionError as e:
     logger.warning(f"Permission denied removing {forecast_process_dir}: {e}")
 except OSError as e:
     logger.warning(f"OS error while removing {forecast_process_dir}: {e}")
+
+################################################################################################
+# %% Historic data
+hist_process_path = os.path.join(forecast_process_dir, "NOAA_AQM_Historic")
+
+# Loop through previous hours to gather historical data points
+for i in range(his_period, 0, -1):
+    # Determine the target historical timestamp
+    hist_time = origintime - timedelta(hours=i)
+    timestamp_str = hist_time.strftime("%Y%m%dT%H%M%SZ")
+
+    if saveType == "S3":
+        s3_path = os.path.join(
+            forecast_path, "NOAA_AQM_Hist", f"NOAA_AQM_Hist_{timestamp_str}.zarr.zip"
+        )
+        s3_done_path = s3_path.replace(".zarr.zip", ".done")
+        if s3.exists(s3_done_path):
+            logger.info(
+                f"File already exists in S3, skipping download for: {timestamp_str}"
+            )
+            continue
+    else:
+        local_hist_dir = os.path.join(forecast_path, "NOAA_AQM_Hist")
+        os.makedirs(local_hist_dir, exist_ok=True)
+        local_path = os.path.join(local_hist_dir, f"NOAA_AQM_Hist_{timestamp_str}.zarr")
+        if os.path.exists(local_path + ".done"):
+            logger.info(
+                f"File already exists locally, skipping download for: {timestamp_str}"
+            )
+            continue
+
+    logger.info(f"Processing historical AQM data for timestamp: {timestamp_str}")
+
+    pm25_hist_ts = None
+    o3_hist_ts = None
+
+    # Try downloading from available grid IDs
+    for grid_id in AQM_GRID_IDS:
+        # 1. Process PM2.5 for this historical hour
+        if pm25_hist_ts is None:
+            pm25_url = build_aqm_url(hist_time, "pm25", grid_id)
+            pm25_local = os.path.join(
+                tmpDIR, f"hist_aqm_pm25_{timestamp_str}_{grid_id}.grib2"
+            )
+            if download_grib2_file(pm25_url, pm25_local):
+                pm25_da, pm25_units = read_grib2_variable(
+                    pm25_local,
+                    ["pmtf", "mpm2p5", "PMTF", "pm2p5", "unknownl", "unknown"],
+                )
+                pm25_hist_ts = extract_time_series(pm25_da, "PM2.5", hist_time)
+                try:
+                    os.remove(pm25_local)
+                except OSError:
+                    pass
+
+        # 2. Process O3 for this historical hour
+        if o3_hist_ts is None:
+            o3_url = build_aqm_url(hist_time, "o3", grid_id)
+            o3_local = os.path.join(
+                tmpDIR, f"hist_aqm_o3_{timestamp_str}_{grid_id}.grib2"
+            )
+            if download_grib2_file(o3_url, o3_local):
+                o3_da, o3_units = read_grib2_variable(
+                    o3_local, ["ozcon", "o3c", "OZCON", "o3", "unknownl", "unknown"]
+                )
+                if o3_da is not None:
+                    o3_da = convert_o3_to_ug_m3(o3_da, o3_units)
+                o3_hist_ts = extract_time_series(o3_da, "O3", hist_time)
+                try:
+                    os.remove(o3_local)
+                except OSError:
+                    pass
+
+        if pm25_hist_ts is not None and o3_hist_ts is not None:
+            break
+
+    # If both downloads failed for this hour, skip to prevent bad array definitions
+    if pm25_hist_ts is None and o3_hist_ts is None:
+        logger.warning(
+            f"No valid AQM data could be fetched for historical hour {timestamp_str}. Skipping."
+        )
+        continue
+
+    # Use whichever loaded DataArray is valid to map coordinates
+    ref_hist_da = pm25_hist_ts if pm25_hist_ts is not None else o3_hist_ts
+
+    # Slice or select only the specific hour matching hist_time if the file contains multiple steps
+    try:
+        if pm25_hist_ts is not None:
+            pm25_hist_ts = pm25_hist_ts.sel(time=hist_time, method="nearest")
+        if o3_hist_ts is not None:
+            o3_hist_ts = o3_hist_ts.sel(time=hist_time, method="nearest")
+    except Exception as e:
+        logger.warning(
+            f"Failed coordinate alignment selection for hour {timestamp_str}: {e}"
+        )
+
+    # Initialize a clean target dataset matching the structure generated in live cycles
+    xarray_hist_processed = xr.Dataset(
+        coords={
+            "time": np.array([hist_time.replace(tzinfo=None)], dtype="datetime64[ns]"),
+            "latitude": ref_hist_da["latitude"],
+            "longitude": ref_hist_da["longitude"],
+        }
+    )
+
+    # Assign datasets or fill with fallback NaNs if missing
+    if pm25_hist_ts is not None:
+        xarray_hist_processed["cnc_PM2_5"] = pm25_hist_ts.expand_dims("time")
+    else:
+        xarray_hist_processed["cnc_PM2_5"] = xr.DataArray(
+            np.full(
+                (1, len(ref_hist_da["latitude"]), len(ref_hist_da["longitude"])),
+                np.nan,
+                dtype=np.float32,
+            ),
+            dims=["time", "latitude", "longitude"],
+        )
+
+    if o3_hist_ts is not None:
+        xarray_hist_processed["cnc_O3"] = o3_hist_ts.expand_dims("time")
+    else:
+        xarray_hist_processed["cnc_O3"] = xr.DataArray(
+            np.full(
+                (1, len(ref_hist_da["latitude"]), len(ref_hist_da["longitude"])),
+                np.nan,
+                dtype=np.float32,
+            ),
+            dims=["time", "latitude", "longitude"],
+        )
+
+    # Apply standard chunk constraints
+    xarray_hist_processed = xarray_hist_processed.chunk(
+        chunks={
+            "time": 1,
+            "latitude": processChunk,
+            "longitude": processChunk,
+        }
+    )
+
+    # Export structured hour dataset to a temporary Zarr directory
+    hist_zarr_path = os.path.join(
+        forecast_process_dir, f"NOAA_AQM_Hist_{timestamp_str}_TMP.zarr"
+    )
+    xarray_hist_processed.to_zarr(
+        hist_zarr_path, mode="w", consolidated=False, compute=True
+    )
+
+    # Move to deployment destination and establish track signatures
+    if saveType == "S3":
+        zip_export_path = hist_zarr_path.replace("_TMP.zarr", "")
+        shutil.make_archive(zip_export_path, "zip", hist_zarr_path)
+        s3.put_file(zip_export_path + ".zip", s3_path)
+
+        # Write S3 signaling .done file
+        tmp_done = os.path.join(tmpDIR, f"{timestamp_str}.done")
+        with open(tmp_done, "w") as f:
+            f.write("Done")
+        s3.put_file(tmp_done, s3_done_path)
+        os.remove(tmp_done)
+    else:
+        final_local_path = os.path.join(
+            forecast_path, "NOAA_AQM_Hist", f"NOAA_AQM_Hist_{timestamp_str}.zarr"
+        )
+        shutil.copytree(hist_zarr_path, final_local_path, dirs_exist_ok=True)
+        with open(final_local_path + ".done", "w") as f:
+            f.write("Done")
+
+    # Clean up processing directory for the hour
+    shutil.rmtree(hist_zarr_path)
 
 end_time = time.time()
 logger.info(f"Total processing time: {end_time - start_time:.2f} seconds")

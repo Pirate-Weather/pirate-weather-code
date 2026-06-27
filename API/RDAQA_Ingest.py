@@ -8,6 +8,7 @@ import os
 import pickle
 import shutil
 import sys
+import time
 import warnings
 from datetime import datetime, timedelta, timezone
 from urllib.request import urllib, urlopen
@@ -20,7 +21,7 @@ import xarray as xr
 import zarr.storage
 from dask.diagnostics import ProgressBar
 
-from API.constants.shared_const import INGEST_VERSION_STR
+from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
 from API.ingest_utils import CHUNK_SIZES, FINAL_CHUNK_SIZES, close_store
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -176,6 +177,7 @@ zarr_store = zarr.storage.DirectoryStore(zarr_store_path)
 
 process_chunk = CHUNK_SIZES.get("RDAQA", 250)
 final_chunk = FINAL_CHUNK_SIZES.get("RDAQA", 500)
+his_period = HISTORY_PERIODS.get("RDAQA", 24)
 
 zarr_output_vars = ["time"] + RDAQA_VARS
 
@@ -199,6 +201,7 @@ time_da_broadcasted = da.broadcast_to(
     time_da, (1, len(time_unix), sample_da.shape[0], sample_da.shape[1])
 )
 dask_variable_list.append(time_da_broadcasted)
+start_time = time.time()
 
 for var in RDAQA_VARS:
     if var in downloaded_datasets:
@@ -253,3 +256,138 @@ try:
     shutil.rmtree(forecast_process_dir)
 except Exception:
     pass
+
+################################################################################################
+# %% Historic data
+
+# Loop through previous hours to download and cache historical single-hour datasets
+for i in range(his_period, 0, -1):
+    hist_time = base_time - timedelta(hours=i)
+    timestamp_str = hist_time.strftime("%Y%m%dT%H%M%SZ")
+
+    if save_type == "S3":
+        s3_path = os.path.join(
+            forecast_path, "RDAQA_Hist", f"RDAQA_Hist_{timestamp_str}.zarr.zip"
+        )
+        s3_done_path = s3_path.replace(".zarr.zip", ".done")
+        if s3.exists(s3_done_path):
+            logger.info(
+                f"File already exists in S3, skipping download for: {timestamp_str}"
+            )
+            continue
+    else:
+        local_hist_dir = os.path.join(forecast_path, "RDAQA_Hist")
+        os.makedirs(local_hist_dir, exist_ok=True)
+        local_path = os.path.join(local_hist_dir, f"RDAQA_Hist_{timestamp_str}.zarr")
+        if os.path.exists(local_path + ".done"):
+            logger.info(
+                f"File already exists locally, skipping download for: {timestamp_str}"
+            )
+            continue
+
+    logger.info(f"Processing historical data for timestamp: {timestamp_str}")
+
+    hist_datasets = {}
+    for var in RDAQA_VARS:
+        url = build_rdaqa_url(hist_time, var)
+        local_grib = os.path.join(tmp_dir, f"hist_{timestamp_str}_{var}.grib2")
+
+        if download_rdaqa_file(url, local_grib):
+            try:
+                ds = xr.open_dataset(local_grib, engine="cfgrib")
+                grib_var_name = list(ds.data_vars)[0]
+                da_var = ds[grib_var_name].astype(np.float32)
+
+                # Maintain unit conversions consistent with live forecasting
+                da_converted = convert_to_ug_m3(da_var, var)
+                hist_datasets[var] = da_converted
+
+                # Cleanup immediate raw files
+                os.remove(local_grib)
+            except Exception as e:
+                logger.error(
+                    f"Error reading historical variable {var} for {timestamp_str}: {e}"
+                )
+
+    if not hist_datasets:
+        logger.warning(
+            f"No valid variables parsed for historical hour {timestamp_str}. Skipping."
+        )
+        continue
+
+    # Create temporary single-hour Zarr file structure
+    hist_zarr_path = os.path.join(
+        forecast_process_dir, f"RDAQA_Hist_{timestamp_str}_TMP.zarr"
+    )
+    hist_store = zarr.storage.DirectoryStore(hist_zarr_path)
+
+    hist_zarr_array = zarr.create_array(
+        store=hist_store,
+        shape=(
+            len(zarr_output_vars),
+            1,
+            sample_da.shape[0],
+            sample_da.shape[1],
+        ),
+        chunks=(1, 1, final_chunk, final_chunk),
+        dtype=np.float32,
+        overwrite=True,
+    )
+
+    hist_dask_list = []
+    hist_time_unix = np.array(
+        [int(pd.Timestamp(hist_time).timestamp())], dtype=np.int64
+    )
+    h_time_da = da.from_array(hist_time_unix, chunks=(1,)).reshape(1, 1, 1, 1)
+    h_time_broadcasted = da.broadcast_to(
+        h_time_da, (1, 1, sample_da.shape[0], sample_da.shape[1])
+    )
+    hist_dask_list.append(h_time_broadcasted)
+
+    for var in RDAQA_VARS:
+        if var in hist_datasets:
+            v_data = da.from_array(
+                hist_datasets[var].values, chunks=(process_chunk, process_chunk)
+            )
+            v_data = v_data.reshape(1, 1, sample_da.shape[0], sample_da.shape[1])
+        else:
+            v_data = da.full(
+                (1, 1, sample_da.shape[0], sample_da.shape[1]), np.nan, dtype=np.float32
+            )
+        hist_dask_list.append(v_data)
+
+    hist_stacked_dask = da.concatenate(hist_dask_list, axis=0)
+
+    # Write to cached historical storage
+    hist_stacked_dask.rechunk(
+        (len(zarr_output_vars), 1, final_chunk, final_chunk)
+    ).to_zarr(hist_zarr_array, overwrite=True, compute=True)
+
+    close_store(hist_store)
+
+    # Finalize target deployment and create tracking markers (.done)
+    if save_type == "S3":
+        zip_export_path = hist_zarr_path.replace("_TMP.zarr", "")
+        shutil.make_archive(zip_export_path, "zip", hist_zarr_path)
+        s3.put_file(zip_export_path + ".zip", s3_path)
+
+        # Write S3 signaling .done file
+        tmp_done = os.path.join(tmp_dir, f"{timestamp_str}.done")
+        with open(tmp_done, "w") as f:
+            f.write("Done")
+        s3.put_file(tmp_done, s3_done_path)
+        os.remove(tmp_done)
+    else:
+        final_local_path = os.path.join(
+            forecast_path, "RDAQA_Hist", f"RDAQA_Hist_{timestamp_str}.zarr"
+        )
+        shutil.copytree(hist_zarr_path, final_local_path, dirs_exist_ok=True)
+        with open(final_local_path + ".done", "w") as f:
+            f.write("Done")
+
+    # Clean up processing directory for the hour
+    shutil.rmtree(hist_zarr_path)
+
+end_time = time.time()
+logger.info(f"Total processing time: {end_time - start_time:.2f} seconds")
+logger.info("RDAQA ingest script finished successfully.")

@@ -28,4 +28,6 @@ HISTORY_PERIODS = {
     "NBM_Fire": 48,
     "DWD_MOSMIX": 48,  # History period offset (like other models)
     "ECMWF_AIFS": 48,
-}
+    "AQM": 24,  # Store last 24 hours of AQM data to calculate US EPA AQI values
+    "RDAQA": 24,  # Store last 24 hours of RDAQA data to calculate US EPA AQI values
+}  # Note: SILAM and IS4FIRES are not included since they are behind real-time and include observations in their forecasts
