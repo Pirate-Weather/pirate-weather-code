@@ -602,9 +602,7 @@ def _build_hourly_display(
 
     for idx_field, decimals in hourly_rounding_map.items():
         if decimals == 0:
-            hourly_display[:, idx_field] = np.round(
-                hourly_display[:, idx_field]
-            ).astype(int)
+            hourly_display[:, idx_field] = np.round(hourly_display[:, idx_field])
         else:
             hourly_display[:, idx_field] = np.round(
                 hourly_display[:, idx_field], decimals
@@ -921,6 +919,9 @@ def build_hourly_objects(
     hourIconList = []
     hourTextList = []
 
+    def _nan_to_int_or_nan(value):
+        return int(value) if not np.isnan(value) else np.nan
+
     for idx in range(0, len(hour_array_grib)):
         if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]:
             isDay = False
@@ -991,11 +992,11 @@ def build_hourly_objects(
             "pressure": hourly_display[idx, DATA_HOURLY["pressure"]],
             "windSpeed": hourly_display[idx, DATA_HOURLY["wind"]],
             "windGust": hourly_display[idx, DATA_HOURLY["gust"]],
-            "windBearing": int(hourly_display[idx, DATA_HOURLY["bearing"]])
-            if not np.isnan(hourly_display[idx, DATA_HOURLY["bearing"]])
-            else 0,
+            "windBearing": _nan_to_int_or_nan(
+                hourly_display[idx, DATA_HOURLY["bearing"]]
+            ),
             "cloudCover": hourly_display[idx, DATA_HOURLY["cloud"]],
-            "uvIndex": hourly_display[idx, DATA_HOURLY["uv"]],
+            "uvIndex": _nan_to_int_or_nan(hourly_display[idx, DATA_HOURLY["uv"]]),
             "visibility": hourly_display[idx, DATA_HOURLY["vis"]],
             "ozone": hourly_display[idx, DATA_HOURLY["ozone"]],
             "smoke": hourly_display[idx, DATA_HOURLY["smoke"]],
@@ -1003,15 +1004,13 @@ def build_hourly_objects(
             "snowAccumulation": hourly_display[idx, DATA_HOURLY["snow"]],
             "iceAccumulation": hourly_display[idx, DATA_HOURLY["ice"]],
             "nearestStormDistance": hourly_display[idx, DATA_HOURLY["storm_dist"]],
-            "nearestStormBearing": int(hourly_display[idx, DATA_HOURLY["storm_dir"]])
-            if not np.isnan(hourly_display[idx, DATA_HOURLY["storm_dir"]])
-            else 0,
+            "nearestStormBearing": _nan_to_int_or_nan(
+                hourly_display[idx, DATA_HOURLY["storm_dir"]]
+            ),
             "fireIndex": hourly_display[idx, DATA_HOURLY["fire"]],
             "feelsLike": hourly_display[idx, DATA_HOURLY["feels_like"]],
             "solar": hourly_display[idx, DATA_HOURLY["solar"]],
-            "cape": int(hourly_display[idx, DATA_HOURLY["cape"]])
-            if not np.isnan(hourly_display[idx, DATA_HOURLY["cape"]])
-            else 0,
+            "cape": _nan_to_int_or_nan(hourly_display[idx, DATA_HOURLY["cape"]]),
         }
 
         if "stationPressure" in extraVars:

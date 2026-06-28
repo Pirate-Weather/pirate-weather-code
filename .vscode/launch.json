@@ -13,7 +13,7 @@
             "args": [
                 "API.responseLocal:app",
                 "--host", "0.0.0.0",
-                "--port", "8081",
+                "--port", "8082",
                 "--workers", "1",
             ],
             "jinja": true,
@@ -137,7 +137,8 @@
                 "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
                 "CMAKE_PREFIX_PATH": "${workspaceFolder}/.build/ingest-test/NCEPLIBS_build:${workspaceFolder}/.build/ingest-test/toolchain:${env:CMAKE_PREFIX_PATH}",
                 "PYDEVD_WARN_EVALUATION_TIMEOUT": "300",
-                "historic_path": "s3://piratezarr2/Hist_v2/GFS"
+                "historic_path": "s3://piratezarr2/Hist_v2/GFS",
+                "forecast_process_dir": "/mnt/nvme/data/GFS"
             },
             "envFile": "${workspaceFolder}/.env"
         },

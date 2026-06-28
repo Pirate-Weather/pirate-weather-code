@@ -47,6 +47,7 @@ def test_prepare_data_inputs_normalizes_short_era5_series_to_num_hours():
     era5_merged[:, ERA5["downward_uv_radiation_at_the_surface"]] = 100.0
     era5_merged[:, ERA5["total_column_ozone"]] = 0.25
     era5_merged[:, ERA5["total_precipitation"]] = 0.001
+    era5_merged[:, ERA5["prob"]] = 75.0
     era5_merged[:, ERA5["surface_solar_radiation_downwards"]] = 120.0
     era5_merged[:, ERA5["convective_available_potential_energy"]] = 50.0
     era5_merged[:, ERA5["surface_pressure"]] = 100000.0
@@ -79,5 +80,7 @@ def test_prepare_data_inputs_normalizes_short_era5_series_to_num_hours():
         np.arange(source_hours),
     )
     assert np.isnan(inputs["InterThour_inputs"]["era5_ptype"][source_hours:]).all()
+    assert np.allclose(inputs["prcipProbability_inputs"][:source_hours, 0], 0.75)
+    assert np.isnan(inputs["prcipProbability_inputs"][source_hours:, 0]).all()
     assert np.isnan(inputs["temperature_inputs"][source_hours:, 0]).all()
     assert np.isnan(inputs["era5_rain_intensity"][source_hours:]).all()

@@ -398,6 +398,9 @@ def prepare_data_inputs(
             "gefs": gefs_merged[:, GEFS["prob"]]
             if "gefs" in source_list and gefs_merged is not None
             else None,
+            "era5": era5_merged[:, ERA5["prob"]] * 0.01
+            if "era5" in source_list and era5_valid
+            else None,
         },
         prioritize_ai_models=prioritize_ai_models,
     )

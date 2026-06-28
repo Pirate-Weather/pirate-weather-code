@@ -3,6 +3,8 @@ from unittest.mock import MagicMock
 import numpy as np
 
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
+from API.constants.model_const import ERA5
+from API.data_inputs import prepare_data_inputs
 from API.hourly.block import build_hourly_block
 from API.utils.fire import calculate_fosberg_fire_index
 
@@ -133,6 +135,97 @@ def test_build_hourly_block_structure():
     assert len(hourList) == num_hours
     assert isinstance(hourList[0], dict)
     assert "time" in hourList[0]
+
+
+def test_build_hourly_block_outputs_era5_precip_probability():
+    num_hours = 3
+    InterPhour = np.zeros((num_hours, max(DATA_HOURLY.values()) + 1))
+    hour_array_grib = np.arange(num_hours) * 3600
+    hour_array = np.arange(num_hours)
+    InterSday = np.zeros((1, max(DATA_DAY.values()) + 1))
+    hourlyDayIndex = np.zeros(num_hours, dtype=int)
+
+    era5_merged = np.zeros((num_hours, max(ERA5.values()) + 1))
+    era5_merged[:, ERA5["prob"]] = np.array([0.0, 56.0, 100.0])
+    era5_merged[:, ERA5["mean_sea_level_pressure"]] = 101325.0
+    era5_merged[:, ERA5["surface_pressure"]] = 100000.0
+
+    inputs = prepare_data_inputs(
+        source_list=["era5"],
+        nbm_merged=None,
+        nbm_fire_merged=None,
+        hrrr_merged=None,
+        dwd_mosmix_merged=None,
+        ecmwf_merged=None,
+        gefs_merged=None,
+        gfs_merged=None,
+        era5_merged=era5_merged,
+        extra_vars=[],
+        num_hours=num_hours,
+        lat=40.0,
+        lon=-75.0,
+    )
+
+    result = build_hourly_block(
+        source_list=["era5"],
+        InterPhour=InterPhour,
+        hour_array_grib=hour_array_grib,
+        hour_array=hour_array,
+        InterSday=InterSday,
+        hourlyDayIndex=hourlyDayIndex,
+        baseTimeOffset=0,
+        timeMachine=True,
+        tmExtra=False,
+        prepIntensityUnit=1.0,
+        prepAccumUnit=1.0,
+        windUnit=1.0,
+        visUnits=1.0,
+        tempUnits=1,
+        humidUnit=1.0,
+        extraVars=[],
+        summaryText=False,
+        icon="default",
+        translation=MagicMock(),
+        unitSystem="si",
+        is_all_night=False,
+        tz_name="UTC",
+        InterThour_inputs=inputs["InterThour_inputs"],
+        prcipIntensity_inputs=inputs["prcipIntensity_inputs"],
+        prcipProbability_inputs=inputs["prcipProbability_inputs"],
+        prcipType_inputs=inputs["prcipType_inputs"],
+        temperature_inputs=inputs["temperature_inputs"],
+        dew_inputs=inputs["dew_inputs"],
+        humidity_inputs=inputs["humidity_inputs"],
+        pressure_inputs=inputs["pressure_inputs"],
+        wind_inputs=inputs["wind_inputs"],
+        gust_inputs=inputs["gust_inputs"],
+        bearing_inputs=inputs["bearing_inputs"],
+        cloud_inputs=inputs["cloud_inputs"],
+        uv_inputs=inputs["uv_inputs"],
+        vis_inputs=inputs["vis_inputs"],
+        ozone_inputs=inputs["ozone_inputs"],
+        smoke_inputs=inputs["smoke_inputs"],
+        accum_inputs=inputs["accum_inputs"],
+        nearstorm_inputs=inputs["nearstorm_inputs"],
+        station_pressure_inputs=inputs["station_pressure_inputs"],
+        era5_rain_intensity=None,
+        era5_snow_water_equivalent=None,
+        fire_inputs=inputs["fire_inputs"],
+        feels_like_inputs=inputs["feels_like_inputs"],
+        solar_inputs=inputs["solar_inputs"],
+        cape_inputs=inputs["cape_inputs"],
+        error_inputs=inputs["error_inputs"],
+        version=2,
+    )
+
+    hourList = result[0]
+    hourly_display = result[7]
+
+    assert [hour["precipProbability"] for hour in hourList] == [0.0, 0.56, 1.0]
+    np.testing.assert_allclose(
+        hourly_display[:, DATA_HOURLY["prob"]],
+        np.array([0.0, 0.56, 1.0]),
+    )
 
 
 def test_calculate_fosberg_fire_index_from_si_inputs():
