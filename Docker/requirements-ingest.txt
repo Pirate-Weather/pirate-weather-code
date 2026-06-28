@@ -18,8 +18,8 @@ pyarrow==24.0.0
 python-dotenv==1.2.2
 pykml==0.2.0
 rioxarray==0.22.0
-s3fs==2026.4.0
+s3fs==2026.6.0
 scikit-learn==1.9.0
-tqdm==4.68.2
+tqdm==4.68.3
 xarray==2026.4.0
 zarr==3.2.1
