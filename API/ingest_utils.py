@@ -211,6 +211,76 @@ def make_herbie_save_dir(tmp_dir: str, prefix: str = "herbie") -> str:
     return save_dir
 
 
+def download_herbie_with_retry(
+    herbie_obj,
+    search: str,
+    expected_count: int,
+    dataset_name: str,
+    retries: int,
+    retry_sleep_s: int,
+) -> None:
+    """Retry transient Herbie download failures and enforce expected file count."""
+    attempts = max(1, retries)
+    for attempt in range(1, attempts + 1):
+        try:
+            # Overwrite on retries to avoid keeping partial/corrupt files.
+            herbie_obj.download(
+                search,
+                verbose=False,
+                overwrite=(attempt > 1),
+            )
+
+            matched_refs = list(herbie_obj.file_exists)
+            matched_count = len(matched_refs)
+            if matched_count != expected_count:
+                raise RuntimeError(
+                    f"Expected {expected_count} {dataset_name} references "
+                    f"but got {matched_count}"
+                )
+
+            # Herbie can report matched references even when local downloads fail;
+            # verify every expected local GRIB path is present and non-empty.
+            local_paths = build_herbie_grib_list(matched_refs, search)
+            valid_local_paths = [
+                p for p in local_paths if os.path.isfile(p) and os.path.getsize(p) > 0
+            ]
+
+            if len(valid_local_paths) == expected_count:
+                if attempt > 1:
+                    logger.info(
+                        "%s download succeeded on retry %d/%d",
+                        dataset_name,
+                        attempt,
+                        attempts,
+                    )
+                return
+
+            missing_count = expected_count - len(valid_local_paths)
+            raise RuntimeError(
+                f"Expected {expected_count} downloaded {dataset_name} files but found "
+                f"{len(valid_local_paths)} valid local files (missing {missing_count})"
+            )
+        except Exception as exc:
+            if attempt == attempts:
+                logger.exception(
+                    "%s download failed after %d attempts",
+                    dataset_name,
+                    attempts,
+                )
+                raise
+
+            sleep_s = retry_sleep_s * attempt
+            logger.warning(
+                "%s download attempt %d/%d failed (%s). Retrying in %ss",
+                dataset_name,
+                attempt,
+                attempts,
+                exc,
+                sleep_s,
+            )
+            time.sleep(sleep_s)
+
+
 def safe_herbie_local_file_path(
     herbie_obj, search: str, retries: int = 3, retry_sleep_s: float = 0.1
 ) -> str:

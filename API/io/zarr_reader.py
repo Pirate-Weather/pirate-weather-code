@@ -177,7 +177,11 @@ def update_zarr_store(
 
     # Open the Google ERA5 dataset for Dev and TimeMachine
     if stage in ("DEV", "TIMEMACHINE"):
-        stores.ERA5_Data = init_ERA5()
+        era5_cache_dir = os.environ.get(
+            "ERA5_CACHE_DIR", os.path.join(save_dir, "ERA5_cache")
+        )
+        stores.ERA5_Data = init_ERA5(era5_cache_dir)
+        logger.info("ERA5 disk cache: %s", era5_cache_dir)
 
     # If TimeMachine, load GFS
     if stage == "TIMEMACHINE":
@@ -237,9 +241,12 @@ def update_zarr_store(
             s3, s3_bucket, ingest_version, save_type, "GFS"
         )
         stores.GFS_Zarr = zarr.open(gfs_store, mode="r")
-        stores.ERA5_Data = init_ERA5()
+        era5_cache_dir = os.environ.get(
+            "ERA5_CACHE_DIR", os.path.join(save_dir, "ERA5_cache")
+        )
+        stores.ERA5_Data = init_ERA5(era5_cache_dir)
         logger.info("GFS Read")
-        logger.info("ERA5 Read")
+        logger.info("ERA5 Read; disk cache: %s", era5_cache_dir)
 
         if stage == "TESTING":
             testing_stores = [

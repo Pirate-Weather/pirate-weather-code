@@ -70,6 +70,17 @@ from zarr.core.dtype import VariableLengthUTF8
 
 from API.constants.shared_const import INGEST_VERSION_STR
 
+# List of supported geocodes
+SUPPORTED_GEOCODES = {
+    "EMMA_ID",
+    "NUTS3",
+    "NUTS2",
+    "WARNCELL",
+    "FIPS",
+    "WARNCELLID",
+    "CISORP",
+}
+
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 METEOALARM_ALIASES_PATH = os.path.join(DATA_DIR, "meteoalarm_aliases.csv")
 METEOALARM_GEOJSON_PATH = os.path.join(DATA_DIR, "meteoalarm_geocodes.json")
@@ -303,7 +314,7 @@ def find_cap_expires(item, ns):
 # Async HTTP helpers
 # -------------------------------
 DEFAULT_TIMEOUT = 30
-MAX_CONCURRENCY = 20  # tune between 8–32
+MAX_CONCURRENCY = 20  # tune between 8-32
 MAX_RETRIES = 3
 BACKOFF_BASE = 0.6
 
@@ -546,9 +557,7 @@ def geocode_to_polygon(
         return None
 
     # For EMMA_ID, try MeteoAlarm geocodes first (most accurate)
-    if (
-        geocode_name == "EMMA_ID" or geocode_name == "NUTS3"
-    ) and meteoalarm_gdf is not None:
+    if meteoalarm_gdf is not None and geocode_name in SUPPORTED_GEOCODES:
         try:
             # MeteoAlarm geocodes may have different field names, try common ones
             # Typically they use "emma_id", "EMMA_ID", "geocode", or similar
