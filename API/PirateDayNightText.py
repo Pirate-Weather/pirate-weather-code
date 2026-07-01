@@ -14,6 +14,7 @@ from API.constants.text_const import (
     DEFAULT_VISIBILITY,
     LESS_THAN_TOLERANCE,
     PRECIP_INTENSITY_THRESHOLDS,
+    PRECIP_PROB_THRESHOLD,
 )
 from API.PirateTextHelper import (
     calculate_precip_text,
@@ -562,12 +563,13 @@ def calculate_half_day_text(
 
                 # Track CAPE when there is precipitation
                 hour_cape = hour.get("cape", MISSING_DATA)
+                hour_pop = hour.get("precipProbability", DEFAULT_POP)
 
                 if (
                     hour_cape != MISSING_DATA
-                    and hour_cape > period_data["max_cape_with_precip"]
+                    and hour_pop >= PRECIP_PROB_THRESHOLD
                 ):
-                    period_data["max_cape_with_precip"] = hour_cape
+                    period_data["max_cape_with_precip"] = max(period_data["max_cape_with_precip"], hour_cape)
 
                 # Count hours with thunderstorms (precipitation + CAPE >= low threshold)
                 thu_text = calculate_thunderstorm_text(hour_cape, "summary")
