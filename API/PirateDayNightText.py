@@ -565,11 +565,10 @@ def calculate_half_day_text(
                 hour_cape = hour.get("cape", MISSING_DATA)
                 hour_pop = hour.get("precipProbability", DEFAULT_POP)
 
-                if (
-                    hour_cape != MISSING_DATA
-                    and hour_pop >= PRECIP_PROB_THRESHOLD
-                ):
-                    period_data["max_cape_with_precip"] = max(period_data["max_cape_with_precip"], hour_cape)
+                if hour_cape != MISSING_DATA and hour_pop >= PRECIP_PROB_THRESHOLD:
+                    period_data["max_cape_with_precip"] = max(
+                        period_data["max_cape_with_precip"], hour_cape
+                    )
 
                 # Count hours with thunderstorms (precipitation + CAPE >= low threshold)
                 thu_text = calculate_thunderstorm_text(hour_cape, "summary")
