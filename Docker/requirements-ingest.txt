@@ -11,7 +11,7 @@ geopandas==1.1.4
 git+https://github.com/blaylockbk/Herbie.git
 metpy==1.7.1
 netCDF4==1.7.4
-numba==0.65.1
+numba==0.66.0
 numpy==2.3.3
 nwswx==0.1.2
 pyarrow==24.0.0
