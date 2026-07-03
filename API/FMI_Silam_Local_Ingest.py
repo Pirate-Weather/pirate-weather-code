@@ -21,6 +21,7 @@ import warnings
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
+import requests
 import s3fs
 import xarray as xr
 from dask.diagnostics import ProgressBar
@@ -48,12 +49,12 @@ logger = logging.getLogger(__name__)
 ingestVersion = INGEST_VERSION_STR
 
 forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/home/ubuntu/Weather/SILAM"
+    "forecast_process_dir", default="/mnt/nvme/data/SILAM"
 )
 forecast_process_path = os.path.join(forecast_process_dir, "SILAM_Process")
 tmpDIR = os.path.join(forecast_process_dir, "Downloads")
 
-forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/SILAM")
+forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/SILAM")
 
 saveType = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
@@ -111,17 +112,21 @@ start_time = time.time()
 # Get the latest model run time
 origintime = get_latest_silam_run()
 
-# Construct the OPeNDAP URL for SILAM global forecast
-# SILAM data is available via THREDDS OPeNDAP service
+# Construct the download URL for SILAM global forecast
+# SILAM data is available via THREDDS fileServer (plain HTTP) service, which
+# is used here instead of OPeNDAP so the full NetCDF file is downloaded to
+# local disk before being opened with xarray. This avoids flaky/slow remote
+# reads over OPeNDAP and lets us retry the download independently of xarray.
 # Using SILAM version 6.1 (silam_glob_v6_1_sfc) - the latest available version
-# The URL pattern follows: base_url/silam_glob_v6_1_sfc/runs/silam_glob_v6_1_sfc_RUNS_YYYYMMDDHH.nc
-base_opendap_url = "https://thredds.silam.fmi.fi/thredds/dodsC"
-silam_dataset_path = "silam_glob_v6_1_sfc/runs"
-run_filename = f"silam_glob_v6_1_sfc_RUN_{origintime.strftime('%Y%m%d%H')}.nc"
+base_fileserver_url = "https://thredds.silam.fmi.fi/thredds/fileServer"
+silam_dataset_path = "silam_glob_v6_1_sfc/files"
+run_filename = f"silam_glob_v6_1_sfc_RUN_{origintime.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+run_filename = f"SILAM-AQ-sfc-glob_v6_1_{origintime.strftime('%Y%m%d%H.nc4')}"
 
-opendap_url = f"{base_opendap_url}/{silam_dataset_path}/{run_filename}"
+download_url = f"{base_fileserver_url}/{silam_dataset_path}/{run_filename}"
+local_nc_path = os.path.join(tmpDIR, "SILAM_latest.nc")
 
-logger.info(f"Attempting to access SILAM data from: {opendap_url}")
+logger.info(f"Attempting to download SILAM data from: {download_url}")
 logger.info(f"Model run time: {origintime}")
 
 # Check if this is newer than the current file
@@ -145,22 +150,63 @@ else:
             sys.exit()
 
 
-# %% Load the SILAM data via OPeNDAP
+# %% Download the SILAM NetCDF file to disk, then load it with xarray
+def download_silam_file(url: str, local_path: str, max_retries: int = 3) -> bool:
+    """Downloads the SILAM NetCDF file from THREDDS to a local path.
+
+    Args:
+        url: The fileServer URL of the NetCDF file to download.
+        local_path: The local filesystem path to save the file to.
+        max_retries: Number of attempts before giving up.
+
+    Returns:
+        True if the download succeeded, False otherwise.
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            with requests.get(url, stream=True, timeout=120) as response:
+                if response.status_code == 404:
+                    logger.warning(f"File not found: {url}")
+                    return False
+                response.raise_for_status()
+                with open(local_path, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            f.write(chunk)
+            logger.info(f"Downloaded SILAM file to: {local_path}")
+            return True
+        except (requests.RequestException, IOError, OSError) as e:
+            logger.warning(f"Attempt {attempt}/{max_retries} failed downloading {url}: {e}")
+            if os.path.exists(local_path):
+                try:
+                    os.remove(local_path)
+                except OSError:
+                    pass
+            if attempt < max_retries:
+                time.sleep(5)
+
+    return False
+
+
+if not download_silam_file(download_url, local_nc_path):
+    logger.critical(f"Failed to download SILAM data from {download_url}. Exiting.")
+    sys.exit(1)
+
 try:
-    # Open the dataset via OPeNDAP
+    # Open the downloaded NetCDF file from local disk
     # SILAM data has dimensions: time, height (usually surface level), lat, lon
     xarray_silam_data = xr.open_dataset(
-        opendap_url,
+        local_nc_path,
         engine="netcdf4",
         chunks={"time": 24, "lat": processChunk, "lon": processChunk},
     )
 
-    logger.info("Successfully opened SILAM dataset via OPeNDAP")
+    logger.info("Successfully opened SILAM dataset from local file")
     logger.info(f"Dataset dimensions: {xarray_silam_data.dims}")
     logger.info(f"Available variables: {list(xarray_silam_data.data_vars.keys())}")
 
 except (IOError, OSError, ValueError) as e:
-    logger.error(f"Error opening SILAM data via OPeNDAP: {e}")
+    logger.error(f"Error opening local SILAM NetCDF file: {e}")
     logger.critical("Failed to access SILAM data. Exiting.")
     sys.exit(1)
 
