@@ -238,9 +238,7 @@ def process_silam_file(local_nc_path: str) -> xr.Dataset:
             ).astype(np.float32)
             xarray_processed[var_out_name].attrs["units"] = "µg/m³"
             xarray_processed[var_out_name].attrs["long_name"] = (
-                "PM2.5 concentration"
-                if "2_5" in var_out_name
-                else "PM10 concentration"
+                "PM2.5 concentration" if "2_5" in var_out_name else "PM10 concentration"
             )
             logger.info(f"Loaded and converted {var_in_name} from kg/m³ to µg/m³")
         else:
