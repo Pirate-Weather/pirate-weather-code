@@ -48,9 +48,7 @@ logger = logging.getLogger(__name__)
 # %% Setup paths and parameters
 ingestVersion = INGEST_VERSION_STR
 
-forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/mnt/nvme/data/SILAM"
-)
+forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/SILAM")
 forecast_process_path = os.path.join(forecast_process_dir, "SILAM_Process")
 tmpDIR = os.path.join(forecast_process_dir, "Downloads")
 
@@ -176,7 +174,9 @@ def download_silam_file(url: str, local_path: str, max_retries: int = 3) -> bool
             logger.info(f"Downloaded SILAM file to: {local_path}")
             return True
         except (requests.RequestException, IOError, OSError) as e:
-            logger.warning(f"Attempt {attempt}/{max_retries} failed downloading {url}: {e}")
+            logger.warning(
+                f"Attempt {attempt}/{max_retries} failed downloading {url}: {e}"
+            )
             if os.path.exists(local_path):
                 try:
                     os.remove(local_path)
