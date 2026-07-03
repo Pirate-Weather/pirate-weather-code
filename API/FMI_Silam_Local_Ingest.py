@@ -337,10 +337,13 @@ else:
 
 os.makedirs(tmpDIR, exist_ok=True)
 os.makedirs(hist_process_path, exist_ok=True)
+if saveType == "S3":
+    s3.mkdirs(historic_path, exist_ok=True)
+else:
+    os.makedirs(historic_path, exist_ok=True)
 
 if saveType == "Download":
     os.makedirs(os.path.join(forecast_path, ingestVersion), exist_ok=True)
-    os.makedirs(historic_path, exist_ok=True)
 
 start_time = time.time()
 

@@ -54,7 +54,7 @@ CHUNK_SIZES = {
     "RTMA": 200,
     "DWD": 200,
     "RDAQA": 250,
-    "SILAM": 100,
+    "SILAM": 200,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -69,7 +69,7 @@ FINAL_CHUNK_SIZES = {
     "RTMA": 25,
     "DWD": 5,
     "RDAQA": 500,
-    "SILAM": 3,
+    "SILAM": 5,
 }
 
 FORECAST_LEAD_RANGES = {
