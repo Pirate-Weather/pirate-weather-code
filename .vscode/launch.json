@@ -263,6 +263,25 @@
                 "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${env:PATH}"
             },
             "envFile": "${workspaceFolder}/.aifs.env"
+        },
+        {
+            "name": "Python: FMI_SILAM_Local",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "API.FMI_Silam_Local_Ingest",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "purpose": [
+                "debug-in-terminal"
+            ],
+            "justMyCode": true,
+            "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
+            "env": {
+                "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "CMAKE_PREFIX_PATH": "${workspaceFolder}/.build/ingest-test/NCEPLIBS_build:${workspaceFolder}/.build/ingest-test/toolchain:${env:CMAKE_PREFIX_PATH}",
+                "PYDEVD_WARN_EVALUATION_TIMEOUT": "300",
+            },
+            "envFile": "${workspaceFolder}/.env"
         }
     ]
 }
