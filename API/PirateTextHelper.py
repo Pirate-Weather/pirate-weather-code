@@ -653,7 +653,9 @@ def calculate_sky_text(cloudCover, isDayTime, icon="darksky", mode="both"):
         return skyText, skyIcon
 
 
-def calculate_thunderstorm_text(cape, mode="both", pop=1.0, icon="darksky", is_day=True):
+def calculate_thunderstorm_text(
+    cape, mode="both", pop=1.0, icon="darksky", is_day=True
+):
     """
     Calculates the thunderstorm text based on CAPE values.
 

@@ -990,7 +990,9 @@ def calculate_day_text(
                         period_data["max_cape_with_precip"], hour_cape
                     )
                     # Count hours with thunderstorms (precipitation + CAPE >= low threshold)
-                    thu_text = calculate_thunderstorm_text(hour_cape, "summary", pop=hour_pop)
+                    thu_text = calculate_thunderstorm_text(
+                        hour_cape, "summary", pop=hour_pop
+                    )
                     if thu_text is not None:
                         period_data["num_hours_thunderstorm"] += 1
 
