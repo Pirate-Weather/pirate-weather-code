@@ -653,12 +653,13 @@ def calculate_sky_text(cloudCover, isDayTime, icon="darksky", mode="both"):
         return skyText, skyIcon
 
 
-def calculate_thunderstorm_text(cape, mode="both", icon="darksky", is_day=True):
+def calculate_thunderstorm_text(cape, mode="both", pop=1.0, icon="darksky", is_day=True):
     """
     Calculates the thunderstorm text based on CAPE values.
 
     Parameters:
     - cape (float) -  The CAPE (Convective available potential energy)
+    - pop (float) - The precipitation probability (0.0 to 1.0)
     - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the thunderstorm will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
     - is_day (bool): Whether it is day or night time
@@ -673,7 +674,10 @@ def calculate_thunderstorm_text(cape, mode="both", icon="darksky", is_day=True):
     if CAPE_THRESHOLDS["low"] <= cape < CAPE_THRESHOLDS["high"]:
         thuText = "possible-thunderstorm"
     elif cape >= CAPE_THRESHOLDS["high"]:
-        thuText = "thunderstorm"
+        if pop < PRECIP_PROB_THRESHOLD:
+            thuText = "possible-thunderstorm"
+        else:
+            thuText = "thunderstorm"
 
     if thuText == "thunderstorm":
         thuIcon = "thunderstorm"

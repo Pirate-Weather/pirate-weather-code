@@ -114,7 +114,7 @@ def calculate_text(
     visText, visIcon = calculate_vis_text(
         vis, temp, dewPoint, wind, smoke, icon, "both"
     )
-    thuText, thuIcon = calculate_thunderstorm_text(cape, "both", icon, isDayTime)
+    thuText, thuIcon = calculate_thunderstorm_text(cape, mode="both", pop=pop, icon=icon, is_day=isDayTime)
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
 
     # If there is precipitation text use that and join with wind texts if they exist
