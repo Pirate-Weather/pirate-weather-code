@@ -1456,7 +1456,7 @@ def calculate_day_text(
     if has_thunderstorm:
         # Use max CAPE that occurred with precipitation
         thunderstorm_summary_text, thunderstorm_icon = calculate_thunderstorm_text(
-            overall_max_cape_with_precip, "both"
+            overall_max_cape_with_precip, "both", pop=overall_avg_pop 
         )
         # Check if thunderstorm periods match precipitation periods exactly
         if sorted(thunderstorm_periods) == sorted(precip_periods):
