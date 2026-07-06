@@ -32,8 +32,7 @@ VALID_DATA_MAX = 120000
 
 DEFAULT_ZARR_PATH = "/home/reya/Weather/Prod/IS4FIRES/v30/IS4FIRES.zarr"
 DEFAULT_OPENDAP_URL = (
-    "https://thredds.silam.fmi.fi/thredds/dodsC/"
-    "i4f20-fc/IS4FIRES-fc_best.ncd.html"
+    "https://thredds.silam.fmi.fi/thredds/dodsC/i4f20-fc/IS4FIRES-fc_best.ncd.html"
 )
 
 ZARR_VARS = ("time", "cnc_PM_FRP")

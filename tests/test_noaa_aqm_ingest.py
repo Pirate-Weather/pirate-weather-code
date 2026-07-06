@@ -13,8 +13,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
-
-from API.ingest_utils import calculate_aqi
 from API.NOAA_AQM_Local_Ingest import (
     AQM_NOMADS_BASE,
     AQM_RUN_HOURS,
@@ -24,6 +22,8 @@ from API.NOAA_AQM_Local_Ingest import (
     convert_o3_to_ug_m3,
     get_latest_aqm_run,
 )
+
+from API.ingest_utils import calculate_aqi
 
 AQM_SCRIPT = Path(__file__).resolve().parents[1] / "API" / "NOAA_AQM_Local_Ingest.py"
 

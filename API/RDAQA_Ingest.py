@@ -85,9 +85,7 @@ def build_rdaqa_url(run_time, variable):
     filename = (
         f"{yyyymmdd}T{hh}Z_MSC_RDAQA-Prelim_{variable}_Sfc_RLatLon0.09_PT0H.grib2"
     )
-    return (
-        f"{RDAQA_BASE_URL}/{yyyymmdd}/WXO-DD/model_rdaqa/10km/{hh}/{filename}"
-    )
+    return f"{RDAQA_BASE_URL}/{yyyymmdd}/WXO-DD/model_rdaqa/10km/{hh}/{filename}"
 
 
 def download_rdaqa_file(url, dest_path):

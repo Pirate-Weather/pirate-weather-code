@@ -42,7 +42,9 @@ class raqdps:
         if self.level not in _LEVELS:
             raise ValueError(f"Unsupported RAQDPS level: {self.level}")
 
-        self.DESCRIPTION = "Canada's Regional Air Quality Deterministic Prediction System (RAQDPS)"
+        self.DESCRIPTION = (
+            "Canada's Regional Air Quality Deterministic Prediction System (RAQDPS)"
+        )
         self.DETAILS = {
             "Datamart product description": "https://eccc-msc.github.io/open-data/msc-data/nwp_raqdps/readme_raqdps-datamart_en/",
         }

@@ -65,9 +65,7 @@ forecast_process_path = os.path.join(forecast_process_dir, "IS4FIRES_Process")
 hist_process_path = os.path.join(forecast_process_dir, "IS4FIRES_Historic")
 tmpDIR = os.path.join(forecast_process_dir, "Downloads")
 
-forecast_path = os.getenv(
-    "forecast_path", default="/home/reya/Weather/Prod/IS4FIRES"
-)
+forecast_path = os.getenv("forecast_path", default="/home/reya/Weather/Prod/IS4FIRES")
 historic_path = os.getenv(
     "historic_path", default="/home/reya/Weather/History/IS4FIRES"
 )
@@ -408,9 +406,7 @@ for hours_offset in range(hisPeriod, 0, -HISTORIC_STEP_HOURS):
     else:
         local_path = f"{historic_path}/IS4FIRES_Hist_v3{timestamp}.zarr"
         if os.path.exists(local_path.replace(".zarr", ".done")):
-            logger.info(
-                "Historic IS4FIRES file already exists locally: %s", local_path
-            )
+            logger.info("Historic IS4FIRES file already exists locally: %s", local_path)
             continue
 
     hist_url = build_is4fires_download_url(hist_start)
