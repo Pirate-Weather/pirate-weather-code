@@ -1,12 +1,12 @@
 aiobotocore[boto3]==3.7.0
 astral==3.2
 crc32c==2.8
-dask==2026.6.0
-fastapi[standard]==0.138.2
+dask==2026.7.0
+fastapi[standard]==0.139.0
 fastapi-utils==0.8.0
-fastmcp==3.4.2
+fastmcp==3.4.3
 fastparquet==2026.5.0
-gcsfs==2026.6.0
+gcsfs==2026.7.0
 metpy==1.7.1
 orjson==3.11.9
 pandas==3.0.3
