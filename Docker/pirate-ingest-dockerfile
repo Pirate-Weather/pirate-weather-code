@@ -106,7 +106,8 @@ RUN cmake --fresh \
     -DUSE_NETCDF=ON \
     -DUSE_OPENMP=ON \
     -DUSE_IPOLATES=ON \
-    -DUSE_AEC=ON
+    -DUSE_AEC=ON \
+    -DENABLE_JPG=ON
 
 RUN cmake --build . --parallel 4
 RUN cmake --install .

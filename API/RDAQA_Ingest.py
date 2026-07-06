@@ -11,7 +11,7 @@ import sys
 import time
 import warnings
 from datetime import datetime, timedelta, timezone
-from urllib.request import urllib, urlopen
+from urllib.request import Request, urlopen
 
 import dask.array as da
 import numpy as np
@@ -60,7 +60,7 @@ def get_latest_rdaqa_run():
 
         url = build_rdaqa_url(test_time, "O3")
         try:
-            req = urllib.request.Request(url, method="HEAD")
+            req = Request(url, method="HEAD")
             with urlopen(req) as response:
                 if response.status == 200:
                     logger.info(f"Found latest valid RDAQA runtime at: {test_time}")
@@ -113,10 +113,10 @@ def convert_to_ug_m3(da, var_name):
 
 ingest_version = INGEST_VERSION_STR
 
-forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/RDAQA")
+forecast_process_dir = os.getenv("forecast_process_dir", default="/home/reya/Weather")
 forecast_process_path = os.path.join(forecast_process_dir, "RDAQA_Process")
 tmp_dir = os.path.join(forecast_process_dir, "Downloads")
-forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/RDAQA")
+forecast_path = os.getenv("forecast_path", default="/home/reya/Weather/Prod")
 save_type = os.getenv("save_type", default="Download")
 
 if os.path.exists(forecast_process_dir):

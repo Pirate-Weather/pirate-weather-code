@@ -155,7 +155,7 @@ build_wgrib2() {
     local src_dir="${BUILD_ROOT}/src/wgrib2-${WGRIB2_VERSION}"
     local extract_root="${BUILD_ROOT}/src/wgrib2"
     local extracted_dir="${extract_root}/wgrib2-${WGRIB2_VERSION}"
-    local stamp_file="${BUILD_ROOT}/.wgrib2-${WGRIB2_VERSION}-built"
+    local stamp_file="${BUILD_ROOT}/.wgrib2-${WGRIB2_VERSION}-jpg-built"
 
     if [[ -f "${stamp_file}" ]]; then
         log "wgrib2 ${WGRIB2_VERSION} already built"
@@ -188,7 +188,8 @@ build_wgrib2() {
         -DUSE_NETCDF=ON \
         -DUSE_OPENMP=ON \
         -DUSE_IPOLATES=ON \
-        -DUSE_AEC=ON
+        -DUSE_AEC=ON \
+        -DENABLE_JPG=ON
     cmake --build "${src_dir}" --parallel "${JOBS}"
     cmake --install "${src_dir}"
     touch "${stamp_file}"
