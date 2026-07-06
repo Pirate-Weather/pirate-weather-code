@@ -278,6 +278,10 @@
             "python": "${workspaceFolder}/.venvs/ingest-test/bin/python",
             "env": {
                 "VIRTUAL_ENV": "${workspaceFolder}/.venvs/ingest-test",
+                "PATH": "${workspaceFolder}/.venvs/ingest-test/bin:${env:PATH}",
+                "ECCODES_DIR": "${workspaceFolder}/.build/ingest-test/toolchain",
+                "ECCODES_PYTHON_USE_FINDLIBS": "1",
+                "LD_LIBRARY_PATH": "${workspaceFolder}/.build/ingest-test/toolchain/lib:${workspaceFolder}/.build/ingest-test/toolchain/lib64:${env:LD_LIBRARY_PATH}",
                 "CMAKE_PREFIX_PATH": "${workspaceFolder}/.build/ingest-test/NCEPLIBS_build:${workspaceFolder}/.build/ingest-test/toolchain:${env:CMAKE_PREFIX_PATH}",
                 "PYDEVD_WARN_EVALUATION_TIMEOUT": "300",
             },

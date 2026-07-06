@@ -16,7 +16,6 @@ import cartopy.crs as ccrs
 import dask.array as da
 import numpy as np
 import xarray as xr
-from herbie import Path
 
 # Import atmospheric calculation constants
 from API.constants.aqi_const import (
@@ -295,6 +294,8 @@ def safe_herbie_local_file_path(
     herbie_obj, search: str, retries: int = 3, retry_sleep_s: float = 0.1
 ) -> str:
     """Resolve a local Herbie path and repair file-vs-dir cache collisions."""
+    from herbie import Path
+
     attempts = max(1, retries)
     for attempt in range(attempts):
         try:

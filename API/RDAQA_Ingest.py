@@ -15,7 +15,6 @@ from urllib.request import Request, urlopen
 
 import dask.array as da
 import numpy as np
-import pandas as pd
 import s3fs
 import xarray as xr
 import zarr.storage
@@ -33,7 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # %% Constants
-RDAQA_BASE_URL = "https://dd.weather.gc.ca/today/model_rdaqa/10km"
+RDAQA_BASE_URL = "https://dd.weather.gc.ca"
 RDAQA_VARS = ["PM2.5", "PM10", "NO2", "O3", "SO2"]
 
 # Molecular volume of an ideal gas at 25°C and 1 atm is ~24.465 Liters/mol
@@ -79,7 +78,9 @@ def build_rdaqa_url(run_time, variable):
     filename = (
         f"{yyyymmdd}T{hh}Z_MSC_RDAQA-Prelim_{variable}_Sfc_RLatLon0.09_PT0H.grib2"
     )
-    return f"{RDAQA_BASE_URL}/{hh}/{filename}"
+    return (
+        f"{RDAQA_BASE_URL}/{yyyymmdd}/WXO-DD/model_rdaqa/10km/{hh}/{filename}"
+    )
 
 
 def download_rdaqa_file(url, dest_path):
@@ -113,7 +114,7 @@ def convert_to_ug_m3(da, var_name):
 
 ingest_version = INGEST_VERSION_STR
 
-forecast_process_dir = os.getenv("forecast_process_dir", default="/home/reya/Weather")
+forecast_process_dir = os.getenv("forecast_process_dir", default="/home/reya/Weather/RDAQA")
 forecast_process_path = os.path.join(forecast_process_dir, "RDAQA_Process")
 tmp_dir = os.path.join(forecast_process_dir, "Downloads")
 forecast_path = os.getenv("forecast_path", default="/home/reya/Weather/Prod")
@@ -155,7 +156,7 @@ for var in RDAQA_VARS:
 
     if download_rdaqa_file(url, local_grib):
         try:
-            ds = xr.open_dataset(local_grib, engine="cfgrib")
+            ds = xr.open_dataset(local_grib, engine="cfgrib", decode_times=False)
             grib_var_name = list(ds.data_vars)[0]
             da_var = ds[grib_var_name].astype(np.float32)
 
@@ -170,10 +171,10 @@ if not downloaded_datasets:
     sys.exit(1)
 
 sample_da = list(downloaded_datasets.values())[0]
-time_unix = np.array([int(pd.Timestamp(base_time).timestamp())], dtype=np.int64)
+time_unix = np.array([int(base_time.timestamp())], dtype=np.int64)
 
 zarr_store_path = forecast_process_path + ".zarr"
-zarr_store = zarr.storage.DirectoryStore(zarr_store_path)
+zarr_store = zarr.storage.LocalStore(zarr_store_path)
 
 process_chunk = CHUNK_SIZES.get("RDAQA", 250)
 final_chunk = FINAL_CHUNK_SIZES.get("RDAQA", 500)
@@ -252,11 +253,6 @@ else:
     )
     logger.info("Saved RDAQA datasets to local environment.")
 
-try:
-    shutil.rmtree(forecast_process_dir)
-except Exception:
-    pass
-
 ################################################################################################
 # %% Historic data
 
@@ -294,7 +290,7 @@ for i in range(his_period, 0, -1):
 
         if download_rdaqa_file(url, local_grib):
             try:
-                ds = xr.open_dataset(local_grib, engine="cfgrib")
+                ds = xr.open_dataset(local_grib, engine="cfgrib", decode_times=False)
                 grib_var_name = list(ds.data_vars)[0]
                 da_var = ds[grib_var_name].astype(np.float32)
 
@@ -319,7 +315,7 @@ for i in range(his_period, 0, -1):
     hist_zarr_path = os.path.join(
         forecast_process_dir, f"RDAQA_Hist_{timestamp_str}_TMP.zarr"
     )
-    hist_store = zarr.storage.DirectoryStore(hist_zarr_path)
+    hist_store = zarr.storage.LocalStore(hist_zarr_path)
 
     hist_zarr_array = zarr.create_array(
         store=hist_store,
@@ -335,9 +331,7 @@ for i in range(his_period, 0, -1):
     )
 
     hist_dask_list = []
-    hist_time_unix = np.array(
-        [int(pd.Timestamp(hist_time).timestamp())], dtype=np.int64
-    )
+    hist_time_unix = np.array([int(hist_time.timestamp())], dtype=np.int64)
     h_time_da = da.from_array(hist_time_unix, chunks=(1,)).reshape(1, 1, 1, 1)
     h_time_broadcasted = da.broadcast_to(
         h_time_da, (1, 1, sample_da.shape[0], sample_da.shape[1])
@@ -391,3 +385,8 @@ for i in range(his_period, 0, -1):
 end_time = time.time()
 logger.info(f"Total processing time: {end_time - start_time:.2f} seconds")
 logger.info("RDAQA ingest script finished successfully.")
+
+try:
+    shutil.rmtree(forecast_process_dir)
+except Exception:
+    pass
