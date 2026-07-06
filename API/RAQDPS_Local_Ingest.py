@@ -212,14 +212,6 @@ def variable_zarr_path(root_path, variable):
     return os.path.join(root_path, variable_store_name(variable))
 
 
-def is_variable_zarr_store(root_path):
-    """Return True when a path uses the variable-separated intermediate layout."""
-    return os.path.isdir(root_path) and all(
-        os.path.exists(variable_zarr_path(root_path, variable))
-        for variable in RAQDPS_OUTPUT_VARS
-    )
-
-
 def build_variable_arrays(time_slices, valid_times, reference_shape):
     """Convert time-slice dictionaries to separate dask arrays per variable."""
     unix_times = np.array([int(valid_time.timestamp()) for valid_time in valid_times])
@@ -276,14 +268,8 @@ def write_variable_zarrs(variable_arrays, root_path, time_chunks):
 
 
 def read_intermediate_variable(root_path, variable):
-    """Read one variable from a new or legacy RAQDPS intermediate Zarr store."""
-    variable_path = variable_zarr_path(root_path, variable)
-    if os.path.exists(variable_path):
-        return da.from_zarr(variable_path, inline_array=True)
-
-    legacy_stack = da.from_zarr(root_path, inline_array=True)
-    variable_index = RAQDPS_OUTPUT_VARS.index(variable)
-    return legacy_stack[variable_index]
+    """Read one variable from a variable-separated RAQDPS intermediate store."""
+    return da.from_zarr(variable_zarr_path(root_path, variable), inline_array=True)
 
 
 def expand_time_array(time_array, reference_shape):
@@ -413,37 +399,19 @@ def process_historic_hour(valid_time, reference_shape):
         s3_done_path = s3_path.replace(".zarr.zip", ".done")
         if s3.exists(s3_done_path):
             logger.info("Historic RAQDPS file already exists in S3: %s", timestamp_str)
-            historic_zarr_path = download_extract_historic_zip(
-                s3, s3_path, local_temp_historic_dir
-            )
-            if historic_zarr_path is not None and is_variable_zarr_store(
-                historic_zarr_path
-            ):
-                return historic_zarr_path
-            logger.info(
-                "Regenerating legacy historic RAQDPS store in variable layout: %s",
-                timestamp_str,
-            )
+            return download_extract_historic_zip(s3, s3_path, local_temp_historic_dir)
     else:
         local_path = os.path.join(historic_path, f"RAQDPS_Hist_{timestamp_str}.zarr")
         if os.path.exists(local_path + ".done"):
             logger.info(
                 "Historic RAQDPS file already exists locally: %s", timestamp_str
             )
-            if is_variable_zarr_store(local_path):
-                return local_path
             if os.path.exists(local_path):
-                logger.info(
-                    "Regenerating legacy historic RAQDPS store in variable layout: %s",
-                    timestamp_str,
-                )
-            else:
-                logger.warning(
-                    "Historic done marker exists, but zarr is missing: %s", local_path
-                )
-            shutil.rmtree(local_path, ignore_errors=True)
-            if os.path.exists(local_path + ".done"):
-                os.remove(local_path + ".done")
+                return local_path
+            logger.warning(
+                "Historic done marker exists, but zarr is missing: %s", local_path
+            )
+            return None
 
     run_time, forecast_hour = history_run_for_valid_time(valid_time)
     logger.info(
