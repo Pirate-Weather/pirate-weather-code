@@ -10,6 +10,7 @@ import shutil
 import sys
 import time
 import warnings
+import zipfile
 from datetime import datetime, timedelta, timezone
 from urllib.request import Request, urlopen
 
@@ -21,7 +22,13 @@ import zarr.storage
 from dask.diagnostics import ProgressBar
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
-from API.ingest_utils import CHUNK_SIZES, FINAL_CHUNK_SIZES, close_store
+from API.ingest_utils import (
+    CHUNK_SIZES,
+    FINAL_CHUNK_SIZES,
+    close_store,
+    mask_invalid_data,
+    pad_to_chunk_size,
+)
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -112,12 +119,52 @@ def convert_to_ug_m3(da, var_name):
     return da
 
 
+def download_extract_historic_zip(s3, s3_zip_path, local_temp_dir):
+    """Download and extract an existing RDAQA historic zip archive."""
+    os.makedirs(local_temp_dir, exist_ok=True)
+    local_zarr_path = os.path.join(
+        local_temp_dir, os.path.basename(s3_zip_path).removesuffix(".zip")
+    )
+
+    if os.path.exists(local_zarr_path):
+        return local_zarr_path
+
+    if not s3.exists(s3_zip_path):
+        logger.warning(
+            "Historic done marker exists, but archive is missing: %s", s3_zip_path
+        )
+        return None
+
+    local_zip_path = os.path.join(local_temp_dir, os.path.basename(s3_zip_path))
+    extract_dir = local_zarr_path + "_extract"
+
+    try:
+        s3.get_file(s3_zip_path, local_zip_path)
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        os.makedirs(extract_dir, exist_ok=True)
+
+        with zipfile.ZipFile(local_zip_path) as zip_file:
+            zip_file.extractall(extract_dir)
+
+        shutil.move(extract_dir, local_zarr_path)
+        return local_zarr_path
+    finally:
+        if os.path.exists(local_zip_path):
+            os.remove(local_zip_path)
+        shutil.rmtree(extract_dir, ignore_errors=True)
+
+
 ingest_version = INGEST_VERSION_STR
 
-forecast_process_dir = os.getenv("forecast_process_dir", default="/home/reya/Weather/RDAQA")
+forecast_process_dir = os.getenv(
+    "forecast_process_dir", default="/home/reya/Weather/RDAQA"
+)
 forecast_process_path = os.path.join(forecast_process_dir, "RDAQA_Process")
 tmp_dir = os.path.join(forecast_process_dir, "Downloads")
 forecast_path = os.getenv("forecast_path", default="/home/reya/Weather/Prod")
+historic_path = os.getenv(
+    "historic_path", default=os.path.join(forecast_path, "RDAQA_Hist")
+)
 save_type = os.getenv("save_type", default="Download")
 
 if os.path.exists(forecast_process_dir):
@@ -173,7 +220,7 @@ if not downloaded_datasets:
 sample_da = list(downloaded_datasets.values())[0]
 time_unix = np.array([int(base_time.timestamp())], dtype=np.int64)
 
-zarr_store_path = forecast_process_path + ".zarr"
+zarr_store_path = forecast_process_path + "_forecast.zarr"
 zarr_store = zarr.storage.LocalStore(zarr_store_path)
 
 process_chunk = CHUNK_SIZES.get("RDAQA", 250)
@@ -190,7 +237,7 @@ zarr_array = zarr.create_array(
         sample_da.shape[0],
         sample_da.shape[1],
     ),
-    chunks=(1, 1, final_chunk, final_chunk),
+    chunks=(1, len(time_unix), final_chunk, final_chunk),
     dtype=np.float32,
     overwrite=True,
 )
@@ -221,64 +268,49 @@ final_stacked_dask = da.concatenate(dask_variable_list, axis=0)
 logger.info("Writing normalized µg/m³ arrays directly to Zarr...")
 with ProgressBar():
     final_stacked_dask.rechunk(
-        (len(zarr_output_vars), 1, final_chunk, final_chunk)
+        (len(zarr_output_vars), len(time_unix), final_chunk, final_chunk)
     ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 close_store(zarr_store)
-
-pickle_file_path = os.path.join(tmp_dir, "RDAQA.time.pickle")
-with open(pickle_file_path, "wb") as f:
-    pickle.dump(base_time, f)
-
-if save_type == "S3":
-    shutil.make_archive(forecast_process_path, "zip", zarr_store_path)
-    s3.put_file(
-        forecast_process_path + ".zip",
-        os.path.join(forecast_path, ingest_version, "RDAQA.zarr.zip"),
-    )
-    s3.put_file(
-        pickle_file_path,
-        os.path.join(forecast_path, ingest_version, "RDAQA.time.pickle"),
-    )
-    logger.info("S3 target deployment complete.")
-else:
-    shutil.move(
-        pickle_file_path,
-        os.path.join(forecast_path, ingest_version, "RDAQA.time.pickle"),
-    )
-    shutil.copytree(
-        zarr_store_path,
-        os.path.join(forecast_path, ingest_version, "RDAQA.zarr"),
-        dirs_exist_ok=True,
-    )
-    logger.info("Saved RDAQA datasets to local environment.")
 
 ################################################################################################
 # %% Historic data
 
 # Loop through previous hours to download and cache historical single-hour datasets
+historic_zarr_paths = []
+local_temp_historic_dir = os.path.join(forecast_process_dir, "Historic_Downloads")
+
 for i in range(his_period, 0, -1):
     hist_time = base_time - timedelta(hours=i)
     timestamp_str = hist_time.strftime("%Y%m%dT%H%M%SZ")
 
     if save_type == "S3":
-        s3_path = os.path.join(
-            forecast_path, "RDAQA_Hist", f"RDAQA_Hist_{timestamp_str}.zarr.zip"
-        )
+        s3_path = os.path.join(historic_path, f"RDAQA_Hist_{timestamp_str}.zarr.zip")
         s3_done_path = s3_path.replace(".zarr.zip", ".done")
         if s3.exists(s3_done_path):
             logger.info(
                 f"File already exists in S3, skipping download for: {timestamp_str}"
             )
+            extracted_path = download_extract_historic_zip(
+                s3, s3_path, local_temp_historic_dir
+            )
+            if extracted_path is not None:
+                historic_zarr_paths.append(extracted_path)
             continue
     else:
-        local_hist_dir = os.path.join(forecast_path, "RDAQA_Hist")
+        local_hist_dir = historic_path
         os.makedirs(local_hist_dir, exist_ok=True)
         local_path = os.path.join(local_hist_dir, f"RDAQA_Hist_{timestamp_str}.zarr")
         if os.path.exists(local_path + ".done"):
             logger.info(
                 f"File already exists locally, skipping download for: {timestamp_str}"
             )
+            if os.path.exists(local_path):
+                historic_zarr_paths.append(local_path)
+            else:
+                logger.warning(
+                    "Historic done marker exists, but zarr is missing: %s", local_path
+                )
             continue
 
     logger.info(f"Processing historical data for timestamp: {timestamp_str}")
@@ -364,6 +396,7 @@ for i in range(his_period, 0, -1):
         zip_export_path = hist_zarr_path.replace("_TMP.zarr", "")
         shutil.make_archive(zip_export_path, "zip", hist_zarr_path)
         s3.put_file(zip_export_path + ".zip", s3_path)
+        historic_zarr_paths.append(hist_zarr_path)
 
         # Write S3 signaling .done file
         tmp_done = os.path.join(tmp_dir, f"{timestamp_str}.done")
@@ -373,14 +406,97 @@ for i in range(his_period, 0, -1):
         os.remove(tmp_done)
     else:
         final_local_path = os.path.join(
-            forecast_path, "RDAQA_Hist", f"RDAQA_Hist_{timestamp_str}.zarr"
+            historic_path, f"RDAQA_Hist_{timestamp_str}.zarr"
         )
         shutil.copytree(hist_zarr_path, final_local_path, dirs_exist_ok=True)
         with open(final_local_path + ".done", "w") as f:
             f.write("Done")
+        historic_zarr_paths.append(final_local_path)
 
-    # Clean up processing directory for the hour
-    shutil.rmtree(hist_zarr_path)
+        # Clean up processing directory for the hour
+        shutil.rmtree(hist_zarr_path)
+
+# %% Merge historic and forecast datasets into final stacked zarr
+logger.info("Merging historic and current RDAQA datasets before production save.")
+
+dask_arrays = []
+for historic_zarr_path in historic_zarr_paths:
+    try:
+        dask_arrays.append(da.from_zarr(historic_zarr_path, inline_array=True))
+    except (FileNotFoundError, KeyError):
+        logger.info("Missing historic zarr: %s", historic_zarr_path)
+
+dask_arrays.append(da.from_zarr(zarr_store_path, inline_array=True))
+merged_arrays = da.concatenate(dask_arrays, axis=1).astype("float32")
+merged_arrays_masked = mask_invalid_data(merged_arrays)
+
+# Write out to disk. This intermediate step avoids memory overflow.
+merged_arrays_masked.to_zarr(
+    forecast_process_path + "_stack.zarr",
+    overwrite=True,
+    compute=True,
+)
+
+stacked_array_disk = da.from_zarr(forecast_process_path + "_stack.zarr")
+stacked_array_padded = pad_to_chunk_size(stacked_array_disk, final_chunk)
+
+if save_type == "S3":
+    final_zarr_path = os.path.join(forecast_process_dir, "RDAQA.zarr.zip")
+    zarr_store = zarr.storage.ZipStore(final_zarr_path, mode="a", compression=0)
+else:
+    final_zarr_path = os.path.join(forecast_process_dir, "RDAQA.zarr")
+    zarr_store = zarr.storage.LocalStore(final_zarr_path)
+
+zarr_array = zarr.create_array(
+    store=zarr_store,
+    shape=stacked_array_padded.shape,
+    chunks=(
+        len(zarr_output_vars),
+        stacked_array_padded.shape[1],
+        final_chunk,
+        final_chunk,
+    ),
+    dtype=np.float32,
+    overwrite=True,
+)
+
+with ProgressBar():
+    stacked_array_padded.round(5).rechunk(
+        (
+            len(zarr_output_vars),
+            stacked_array_padded.shape[1],
+            final_chunk,
+            final_chunk,
+        )
+    ).to_zarr(zarr_array, overwrite=True, compute=True)
+
+close_store(zarr_store)
+
+pickle_file_path = os.path.join(tmp_dir, "RDAQA.time.pickle")
+with open(pickle_file_path, "wb") as f:
+    pickle.dump(base_time, f)
+
+if save_type == "S3":
+    s3.put_file(
+        final_zarr_path,
+        os.path.join(forecast_path, ingest_version, "RDAQA.zarr.zip"),
+    )
+    s3.put_file(
+        pickle_file_path,
+        os.path.join(forecast_path, ingest_version, "RDAQA.time.pickle"),
+    )
+    logger.info("S3 target deployment complete.")
+else:
+    shutil.move(
+        pickle_file_path,
+        os.path.join(forecast_path, ingest_version, "RDAQA.time.pickle"),
+    )
+    shutil.copytree(
+        final_zarr_path,
+        os.path.join(forecast_path, ingest_version, "RDAQA.zarr"),
+        dirs_exist_ok=True,
+    )
+    logger.info("Saved RDAQA datasets to local environment.")
 
 end_time = time.time()
 logger.info(f"Total processing time: {end_time - start_time:.2f} seconds")

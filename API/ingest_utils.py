@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tarfile
 import time
+from pathlib import Path
 from typing import Iterable, Optional, Union
 
 import cartopy.crs as ccrs
@@ -53,7 +54,9 @@ CHUNK_SIZES = {
     "RTMA": 200,
     "DWD": 200,
     "RDAQA": 250,
+    "RAQDPS": 250,
     "SILAM": 200,
+    "IS4FIRES": 200,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -67,8 +70,10 @@ FINAL_CHUNK_SIZES = {
     "NBM_Fire": 5,
     "RTMA": 25,
     "DWD": 5,
-    "RDAQA": 500,
+    "RDAQA": 25,
+    "RAQDPS": 25,
     "SILAM": 5,
+    "IS4FIRES": 5,
 }
 
 FORECAST_LEAD_RANGES = {
