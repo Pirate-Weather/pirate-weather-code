@@ -1,7 +1,7 @@
 # %% Script to contain the helper functions as part of the API for Pirate Weather
 # Alexander Rey. October 2025
 import logging
-from typing import List, MutableMapping, Union
+from typing import List, MutableMapping, Optional, Union
 
 import metpy as mp
 import numpy as np
@@ -13,9 +13,128 @@ from API.constants.api_const import (
     PRECIP_TYPES,
     TEMP_THRESHOLD_WMO_FROZEN_C,
 )
+from API.constants.aqi_const import (
+    CO_AQI,
+    CO_BP,
+    NO2_AQI,
+    NO2_BP,
+    O3_AQI,
+    O3_BP,
+    PM10_AQI,
+    PM10_BP,
+    PM25_AQI,
+    PM25_BP,
+    SO2_AQI,
+    SO2_BP,
+)
 from API.constants.shared_const import MISSING_DATA
 
 logger = logging.getLogger(__name__)
+
+
+def calculate_nowcast_concentration(
+    concentrations: np.ndarray, num_hours: int = 12
+) -> np.ndarray:
+    """Calculate EPA NowCast weighted concentration for PM2.5 and PM10."""
+    if concentrations.shape[0] < 3:
+        return concentrations
+
+    hours_to_use = min(num_hours, concentrations.shape[0])
+    nowcast_result = np.full_like(concentrations, np.nan)
+
+    for t in range(concentrations.shape[0]):
+        start_idx = max(0, t - hours_to_use + 1)
+        window = concentrations[start_idx : t + 1]
+
+        if window.shape[0] < 3:
+            nowcast_result[t] = concentrations[t]
+            continue
+
+        with np.errstate(invalid="ignore", divide="ignore"):
+            c_max = np.nanmax(window, axis=0)
+            c_min = np.nanmin(window, axis=0)
+            c_range = c_max - c_min
+            weight_factor = np.where(c_max > 0, np.maximum(1 - c_range / c_max, 0.5), 0.5)
+
+        num_window_hours = window.shape[0]
+        weights = np.zeros_like(window)
+        for i in range(num_window_hours):
+            hours_ago = num_window_hours - 1 - i
+            weights[i] = weight_factor**hours_ago
+
+        with np.errstate(invalid="ignore"):
+            weighted_sum = np.nansum(window * weights, axis=0)
+            weight_sum = np.nansum(np.where(~np.isnan(window), weights, 0), axis=0)
+            nowcast_result[t] = np.where(weight_sum > 0, weighted_sum / weight_sum, np.nan)
+
+    return nowcast_result
+
+
+def trailing_mean(conc: Optional[np.ndarray], window: int) -> Optional[np.ndarray]:
+    """Compute trailing-window mean along time axis for array shape (time, lat, lon)."""
+    if conc is None:
+        return None
+    if window is None or window <= 1:
+        return conc
+
+    t_size = conc.shape[0]
+    out = np.full_like(conc, np.nan)
+    for t in range(t_size):
+        start = max(0, t - window + 1)
+        with np.errstate(invalid="ignore"):
+            out[t] = np.nanmean(conc[start : t + 1], axis=0)
+    return out
+
+
+def calculate_aqi(
+    pm25: np.ndarray,
+    pm10: np.ndarray,
+    o3: np.ndarray,
+    no2: np.ndarray,
+    so2: np.ndarray,
+    co: np.ndarray,
+    use_nowcast: bool = True,
+) -> np.ndarray:
+    """Calculate EPA AQI as max AQI across supported pollutants."""
+    if use_nowcast:
+        pm25_nowcast = calculate_nowcast_concentration(pm25, num_hours=12)
+        pm10_nowcast = calculate_nowcast_concentration(pm10, num_hours=12)
+        aqi_pm25 = np.interp(pm25_nowcast, PM25_BP, PM25_AQI)
+        aqi_pm10 = np.interp(pm10_nowcast, PM10_BP, PM10_AQI)
+    else:
+        pm25_avg = trailing_mean(pm25, 24)
+        pm10_avg = trailing_mean(pm10, 24)
+        aqi_pm25 = np.interp(pm25_avg, PM25_BP, PM25_AQI)
+        aqi_pm10 = np.interp(pm10_avg, PM10_BP, PM10_AQI)
+
+    o3_avg = trailing_mean(o3, 8)
+    o3_1h = trailing_mean(o3, 1)
+    co_avg = trailing_mean(co, 8)
+    no2_avg = trailing_mean(no2, 1)
+    so2_avg = trailing_mean(so2, 1)
+
+    def _interp_or_nan(arr, bp, aqi_arr, ref_shape):
+        if arr is None:
+            return np.full(ref_shape, np.nan, dtype=np.float32)
+        return np.interp(arr, bp, aqi_arr)
+
+    ref_shape = aqi_pm25.shape
+    aqi_o3_8h = _interp_or_nan(o3_avg, O3_BP, O3_AQI, ref_shape)
+    aqi_o3_1h = _interp_or_nan(o3_1h, O3_BP, O3_AQI, ref_shape)
+    aqi_no2 = _interp_or_nan(no2_avg, NO2_BP, NO2_AQI, ref_shape)
+    aqi_so2 = _interp_or_nan(so2_avg, SO2_BP, SO2_AQI, ref_shape)
+    aqi_co = _interp_or_nan(co_avg, CO_BP, CO_AQI, ref_shape)
+
+    stack = [
+        aqi_pm25,
+        aqi_pm10,
+        aqi_o3_8h,
+        aqi_o3_1h,
+        aqi_no2,
+        aqi_so2,
+        aqi_co,
+    ]
+    return np.nanmax(np.stack(stack, axis=0), axis=0)
 
 
 def fast_nearest_interp(xi, x, y):

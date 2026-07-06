@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from API.ingest_utils import calculate_aqi
+from API.api_utils import calculate_aqi
 
 RAQDPS_AQ_INDEX = {
     "pm2_5": 1,
