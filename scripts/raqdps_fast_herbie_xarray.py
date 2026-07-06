@@ -189,9 +189,7 @@ def parse_run_time(value: str | None) -> datetime | None:
     """Parse an optional ISO-like UTC run time string."""
     if value is None:
         return None
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(
-        timezone.utc
-    )
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
 def main() -> None:
