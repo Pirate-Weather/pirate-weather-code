@@ -190,6 +190,15 @@ def build_source_metadata(
     if isinstance(grid_result.dataOut_aifs, np.ndarray):
         metadata.add("ecmwf_aifs", time_value=_format_run_time(grid_result.aifsRunTime))
 
+    if isinstance(grid_result.dataOut_raqdps, np.ndarray):
+        metadata.add("raqdps", time_value=_format_run_time(grid_result.raqdpsRunTime))
+
+    if isinstance(grid_result.dataOut_silam, np.ndarray):
+        metadata.add("silam", time_value=_format_run_time(grid_result.silamRunTime))
+
+    if isinstance(grid_result.dataOut_is4fires, np.ndarray):
+        metadata.add("is4fires", time_value=_format_run_time(grid_result.is4firesRunTime))
+
     return metadata
 
 

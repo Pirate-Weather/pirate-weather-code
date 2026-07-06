@@ -162,7 +162,25 @@ def test_parse_parameters_ai_models_include_and_exclude_priority():
     assert result[16] == 1  # ex_aigefs
     assert result[17] == 0  # ex_aigfs
     assert result[18] == 0  # ex_aifs
-    assert result[21] == 1  # inc_aimodels
+    assert result[24] == 1  # inc_aimodels
+
+
+def test_parse_parameters_air_quality_flags():
+    now_time = datetime.datetime(2026, 1, 1, 12, 0, 0)
+    result = _parse_parameters(
+        exclude="raqdps,silam,is4fires",
+        include="airqualitydetails",
+        extraVars=None,
+        now_time=now_time,
+        utc_time=now_time,
+        time_machine=False,
+        tm_extra=False,
+    )
+
+    assert result[19] == 1  # ex_raqdps
+    assert result[20] == 1  # ex_silam
+    assert result[21] == 1  # ex_is4fires
+    assert result[25] == 1  # inc_airqualitydetails
 
 
 def test_parse_timemachine_range_defaults_for_non_timemachine():

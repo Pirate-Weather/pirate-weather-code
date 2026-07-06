@@ -247,6 +247,7 @@ def prepare_data_inputs(
     gefs_merged,
     gfs_merged,
     era5_merged,
+    is4fires_merged=None,
     extra_vars,
     num_hours,
     lat,
@@ -266,6 +267,7 @@ def prepare_data_inputs(
         gefs_merged: GEFS merged data array.
         gfs_merged: GFS merged data array.
         era5_merged: ERA5 merged data array.
+        is4fires_merged: IS4FIRES merged smoke data array.
         extra_vars: List of extra variables to include.
         num_hours: Number of forecast hours.
         lat: Latitude of the forecast location.
@@ -733,6 +735,7 @@ def prepare_data_inputs(
     smoke_inputs = _stack_fields(
         num_hours,
         hrrr_merged[:, HRRR["smoke"]] if hrrr_merged is not None else None,
+        is4fires_merged[:, 1] if is4fires_merged is not None else None,
     )
 
     # --- accum_inputs ---

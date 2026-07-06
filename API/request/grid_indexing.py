@@ -59,6 +59,9 @@ class ZarrSources:
     aigfs: Any = None
     aigefs: Any = None
     ecmwf_aifs: Any = None
+    raqdps: Any = None
+    silam: Any = None
+    is4fires: Any = None
 
 
 @dataclass
@@ -76,6 +79,9 @@ class GridIndexingResult:
     dataOut_aigfs: Union[np.ndarray, bool]
     dataOut_aigefs: Union[np.ndarray, bool]
     dataOut_aifs: Union[np.ndarray, bool]
+    dataOut_raqdps: Union[np.ndarray, bool]
+    dataOut_silam: Union[np.ndarray, bool]
+    dataOut_is4fires: Union[np.ndarray, bool]
     era5_merged: Union[np.ndarray, bool]
     subhRunTime: Union[float, None]
     hrrrhRunTime: Union[float, None]
@@ -89,6 +95,9 @@ class GridIndexingResult:
     aigfsRunTime: Union[float, None]
     aigefsRunTime: Union[float, None]
     aifsRunTime: Union[float, None]
+    raqdpsRunTime: Union[float, None]
+    silamRunTime: Union[float, None]
+    is4firesRunTime: Union[float, None]
     x_rtma: Union[float, None]
     y_rtma: Union[float, None]
     rtma_lat: Union[float, None]
@@ -220,6 +229,9 @@ async def calculate_grid_indexing(
     ex_aigfs: int,
     ex_aigefs: int,
     ex_aifs: int,
+    ex_raqdps: int,
+    ex_silam: int,
+    ex_is4fires: int,
     inc_aimodels: int,
     read_wmo_alerts: bool,
     base_day_utc: datetime.datetime,
@@ -244,6 +256,9 @@ async def calculate_grid_indexing(
     readAIGFS = False
     readAIGEFS = False
     readAIFS = False
+    readRAQDPS = False
+    readSILAM = False
+    readIS4FIRES = False
 
     def _get_grid_coords(
         lat,
@@ -514,6 +529,35 @@ async def calculate_grid_indexing(
 
     timer.log("### AI Models Detail END ###")
 
+    timer.log("### Air Quality Detail Start ###")
+
+    if (not time_machine) and zarr_sources.raqdps is not None and ex_raqdps != 1:
+        readRAQDPS = True
+        sourceIDX["raqdps"] = {
+            "x": int(x_p),
+            "y": int(y_p),
+            "lat": round(float(gfs_lat), 2),
+            "lon": round(((float(gfs_lon) + 180) % 360) - 180, 2),
+        }
+    if (not time_machine) and zarr_sources.silam is not None and ex_silam != 1:
+        readSILAM = True
+        sourceIDX["silam"] = {
+            "x": int(x_p),
+            "y": int(y_p),
+            "lat": round(float(gfs_lat), 2),
+            "lon": round(((float(gfs_lon) + 180) % 360) - 180, 2),
+        }
+    if (not time_machine) and zarr_sources.is4fires is not None and ex_is4fires != 1:
+        readIS4FIRES = True
+        sourceIDX["is4fires"] = {
+            "x": int(x_p),
+            "y": int(y_p),
+            "lat": round(float(gfs_lat), 2),
+            "lon": round(((float(gfs_lon) + 180) % 360) - 180, 2),
+        }
+
+    timer.log("### Air Quality Detail END ###")
+
     if readERA5:
         era5_read_start = time.perf_counter()
         cache_stats_before = _era5_cache_stats(zarr_sources.era5_data)
@@ -583,6 +627,14 @@ async def calculate_grid_indexing(
     if readAIFS:
         zarrTasks["ECMWF_AIFS"] = weather.zarr_read(
             "ECMWF_AIFS", zarr_sources.ecmwf_aifs, x_p_eur, y_p_eur
+        )
+    if readRAQDPS:
+        zarrTasks["RAQDPS"] = weather.zarr_read("RAQDPS", zarr_sources.raqdps, x_p, y_p)
+    if readSILAM:
+        zarrTasks["SILAM"] = weather.zarr_read("SILAM", zarr_sources.silam, x_p, y_p)
+    if readIS4FIRES:
+        zarrTasks["IS4FIRES"] = weather.zarr_read(
+            "IS4FIRES", zarr_sources.is4fires, x_p, y_p
         )
 
     WMO_alertDat = None
@@ -855,6 +907,31 @@ async def calculate_grid_indexing(
     else:
         dataOut_aifs = False
 
+    dataOut_raqdps = False
+    if readRAQDPS:
+        dataOut_raqdps = zarr_results["RAQDPS"]
+
+    dataOut_silam = False
+    if readSILAM:
+        dataOut_silam = zarr_results["SILAM"]
+
+    dataOut_is4fires = False
+    if readIS4FIRES:
+        dataOut_is4fires = zarr_results["IS4FIRES"]
+
+    def _run_time_or_none(data_out: Union[np.ndarray, bool], history_key: str):
+        if not isinstance(data_out, np.ndarray):
+            return None
+        idx = min(max(HISTORY_PERIODS[history_key] - 1, 0), len(data_out) - 1)
+        try:
+            return data_out[idx, 0]
+        except Exception:
+            return None
+
+    raqdpsRunTime = _run_time_or_none(dataOut_raqdps, "RAQDPS")
+    silamRunTime = _run_time_or_none(dataOut_silam, "SILAM")
+    is4firesRunTime = _run_time_or_none(dataOut_is4fires, "IS4FIRES")
+
     return GridIndexingResult(
         dataOut=dataOut,
         dataOut_h2=dataOut_h2,
@@ -869,7 +946,10 @@ async def calculate_grid_indexing(
         dataOut_aigfs=dataOut_aigfs,
         dataOut_aigefs=dataOut_aigefs,
         dataOut_aifs=dataOut_aifs,
-        era5_merged=ERA5_MERGED,
+        dataOut_raqdps=dataOut_raqdps,
+        dataOut_silam=dataOut_silam,
+        dataOut_is4fires=dataOut_is4fires,
+        era5_merged=era5_merged,
         subhRunTime=subhRunTime,
         hrrrhRunTime=hrrrhRunTime,
         h2RunTime=h2RunTime,
@@ -882,6 +962,9 @@ async def calculate_grid_indexing(
         aigfsRunTime=aigfsRunTime,
         aigefsRunTime=aigefsRunTime,
         aifsRunTime=aifsRunTime,
+        raqdpsRunTime=raqdpsRunTime,
+        silamRunTime=silamRunTime,
+        is4firesRunTime=is4firesRunTime,
         x_rtma=x_rtma,
         y_rtma=y_rtma,
         rtma_lat=rtma_lat,

@@ -41,6 +41,9 @@ class ZarrStores:
     AIGFS_Zarr: Optional[Any] = None
     AIGEFS_Zarr: Optional[Any] = None
     ECMWF_AIFS_Zarr: Optional[Any] = None
+    RAQDPS_Zarr: Optional[Any] = None
+    SILAM_Zarr: Optional[Any] = None
+    IS4FIRES_Zarr: Optional[Any] = None
 
 
 async def get_zarr(store, X, Y):
@@ -208,6 +211,9 @@ def update_zarr_store(
             ("AIGFS_Zarr", "AIGFS.zarr"),
             ("AIGEFS_Zarr", "AIGEFS.zarr"),
             ("ECMWF_AIFS_Zarr", "ECMWF_AIFS.zarr"),
+            ("RAQDPS_Zarr", "RAQDPS.zarr"),
+            ("SILAM_Zarr", "SILAM.zarr"),
+            ("IS4FIRES_Zarr", "IS4FIRES.zarr"),
         ]
         for attr, fname in local_stores:
             _load_local_store(stores, attr, save_dir, fname, logger=logger)
@@ -264,6 +270,9 @@ def update_zarr_store(
                 ("AIGFS_Zarr", "AIGFS"),
                 ("AIGEFS_Zarr", "AIGEFS"),
                 ("ECMWF_AIFS_Zarr", "ECMWF_AIFS"),
+                ("RAQDPS_Zarr", "RAQDPS"),
+                ("SILAM_Zarr", "SILAM"),
+                ("IS4FIRES_Zarr", "IS4FIRES"),
             ]
             for attr, name in testing_stores:
                 setattr(

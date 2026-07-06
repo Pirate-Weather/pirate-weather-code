@@ -85,6 +85,12 @@ from API.request.preprocess import prepare_initial_request
 from API.utils.filtering import apply_block_indices as _apply_block_indices
 from API.utils.filtering import apply_blocks_param as _apply_blocks_param
 from API.utils.filtering import parse_indices as _parse_indices
+from API.utils.air_quality import (
+    build_air_quality_series,
+    enrich_current_with_air_quality,
+    enrich_daily_with_air_quality,
+    enrich_hourly_with_air_quality,
+)
 from API.utils.geo import haversine_distance, is_in_north_america
 from API.utils.solar import calculate_solar_times
 from API.utils.time_indexing import calculate_time_indexing
@@ -147,6 +153,9 @@ DWD_MOSMIX_Stations = None
 AIGFS_Zarr = None
 AIGEFS_Zarr = None
 ECMWF_AIFS_Zarr = None
+RAQDPS_Zarr = None
+SILAM_Zarr = None
+IS4FIRES_Zarr = None
 
 
 setup_logging()
@@ -194,6 +203,9 @@ DWD_MOSMIX_Zarr = zarr_stores.DWD_MOSMIX_Zarr
 AIGFS_Zarr = zarr_stores.AIGFS_Zarr
 AIGEFS_Zarr = zarr_stores.AIGEFS_Zarr
 ECMWF_AIFS_Zarr = zarr_stores.ECMWF_AIFS_Zarr
+RAQDPS_Zarr = zarr_stores.RAQDPS_Zarr
+SILAM_Zarr = zarr_stores.SILAM_Zarr
+IS4FIRES_Zarr = zarr_stores.IS4FIRES_Zarr
 
 # Load DWD MOSMIX station mapping
 try:
@@ -416,6 +428,9 @@ async def PW_Forecast(
     global AIGFS_Zarr
     global AIGEFS_Zarr
     global ECMWF_AIFS_Zarr
+    global RAQDPS_Zarr
+    global SILAM_Zarr
+    global IS4FIRES_Zarr
 
     # Timing Check
     T_Start = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
@@ -493,7 +508,11 @@ async def PW_Forecast(
     exAIGEFS = initial.ex_aigefs
     exAIGFS = initial.ex_aigfs
     exAIFS = initial.ex_aifs
+    exRAQDPS = initial.ex_raqdps
+    exSILAM = initial.ex_silam
+    exIS4FIRES = initial.ex_is4fires
     incAIModels = initial.inc_aimodels
+    incAirQualityDetails = initial.inc_airqualitydetails
     inc_day_night = initial.inc_day_night
     summaryText = initial.summary_text
     unitSystem = initial.unit_system
@@ -551,6 +570,9 @@ async def PW_Forecast(
         aigfs=AIGFS_Zarr,
         aigefs=AIGEFS_Zarr,
         ecmwf_aifs=ECMWF_AIFS_Zarr,
+        raqdps=RAQDPS_Zarr,
+        silam=SILAM_Zarr,
+        is4fires=IS4FIRES_Zarr,
     )
 
     # 3. Calculate grid indices for the requested location to retrieve data from Zarr stores
@@ -573,6 +595,9 @@ async def PW_Forecast(
         ex_aigfs=exAIGFS,
         ex_aigefs=exAIGEFS,
         ex_aifs=exAIFS,
+        ex_raqdps=exRAQDPS,
+        ex_silam=exSILAM,
+        ex_is4fires=exIS4FIRES,
         inc_aimodels=incAIModels,
         read_wmo_alerts=readWMOAlerts,
         base_day_utc=baseDayUTC,
@@ -597,6 +622,9 @@ async def PW_Forecast(
     dataOut_aigfs = grid_result.dataOut_aigfs
     dataOut_aigefs = grid_result.dataOut_aigefs
     dataOut_aifs = grid_result.dataOut_aifs
+    dataOut_raqdps = grid_result.dataOut_raqdps
+    dataOut_silam = grid_result.dataOut_silam
+    dataOut_is4fires = grid_result.dataOut_is4fires
     WMO_alertDat = grid_result.WMO_alertDat
 
     ERA5_MERGED = grid_result.era5_merged
@@ -876,6 +904,7 @@ async def PW_Forecast(
         gefs_merged=GEFS_Merged,
         gfs_merged=GFS_Merged,
         era5_merged=ERA5_MERGED,
+        is4fires_merged=dataOut_is4fires if isinstance(dataOut_is4fires, np.ndarray) else None,
         extra_vars=extraVars,
         num_hours=numHours,
         lat=lat,
@@ -1044,6 +1073,25 @@ async def PW_Forecast(
     dayTextList = daily_section.day_text_list
     day_night_list = daily_section.day_night_list
 
+    if version >= 2:
+        aq_series = build_air_quality_series(
+            hour_array_grib=hour_array_grib,
+            data_raqdps=dataOut_raqdps,
+            data_silam=dataOut_silam,
+        )
+        enrich_hourly_with_air_quality(
+            hour_list=hourList,
+            aq_series=aq_series,
+            include_details=bool(incAirQualityDetails),
+        )
+        enrich_daily_with_air_quality(
+            day_list=dayList,
+            hour_list=hourList,
+            hourly_day_index=hourlyDayIndex,
+            aq_series=aq_series,
+            include_details=bool(incAirQualityDetails),
+        )
+
     # Timing Check
     timer.log("Alert Start")
 
@@ -1110,6 +1158,14 @@ async def PW_Forecast(
             loc_tag=loc_tag,
             include_currently=exCurrently != 1,
             prioritize_ai_models=bool(incAIModels),
+        )
+
+    if version >= 2:
+        enrich_current_with_air_quality(
+            currently=current_section.currently,
+            hour_array_grib=hour_array_grib,
+            aq_series=aq_series,
+            include_details=bool(incAirQualityDetails),
         )
     ### RETURN ###
     # 16. Construct and return the final JSON response
