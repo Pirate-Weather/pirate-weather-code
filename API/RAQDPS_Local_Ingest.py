@@ -55,8 +55,10 @@ from API.raqdps_utils import (
     as_float32_array,
     candidate_raqdps_runs,
     convert_to_ug_m3,
+    herbie_naive_utc,
     history_run_for_valid_time,
     history_valid_times,
+    normalize_utc,
 )  # noqa: E402
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -104,7 +106,7 @@ history_period = HISTORY_PERIODS["RAQDPS"]
 def build_herbie(run_time, variable, forecast_hour, *, verbose=False):
     """Create a Herbie object for one RAQDPS field."""
     return Herbie(
-        run_time,
+        herbie_naive_utc(run_time),
         model="raqdps",
         product="10km/grib2",
         fxx=forecast_hour,
@@ -259,7 +261,9 @@ def download_extract_historic_zip(s3_filesystem, s3_zip_path, local_temp_dir):
         return local_zarr_path
 
     if not s3_filesystem.exists(s3_zip_path):
-        logger.warning("Historic marker exists, but archive is missing: %s", s3_zip_path)
+        logger.warning(
+            "Historic marker exists, but archive is missing: %s", s3_zip_path
+        )
         return None
 
     local_zip_path = os.path.join(local_temp_dir, os.path.basename(s3_zip_path))
@@ -298,16 +302,17 @@ def prepare_directories():
 def already_processed(base_time):
     """Return True if the published RAQDPS store is already current."""
     time_pickle_path = os.path.join(forecast_path, ingest_version, "RAQDPS.time.pickle")
+    base_time = normalize_utc(base_time)
 
     if save_type == "S3":
         if s3.exists(time_pickle_path):
             with s3.open(time_pickle_path, "rb") as f:
-                return pickle.load(f) >= base_time
+                return normalize_utc(pickle.load(f)) >= base_time
         return False
 
     if os.path.exists(time_pickle_path):
         with open(time_pickle_path, "rb") as f:
-            return pickle.load(f) >= base_time
+            return normalize_utc(pickle.load(f)) >= base_time
     return False
 
 
@@ -323,7 +328,9 @@ def process_forecast(base_time):
         valid_time = base_time + timedelta(hours=forecast_hour)
 
         if fields is None:
-            logger.warning("Skipping missing RAQDPS forecast hour: f%03d", forecast_hour)
+            logger.warning(
+                "Skipping missing RAQDPS forecast hour: f%03d", forecast_hour
+            )
             continue
 
         if reference_shape is None:
@@ -362,10 +369,14 @@ def process_historic_hour(valid_time, reference_shape):
     else:
         local_path = os.path.join(historic_path, f"RAQDPS_Hist_{timestamp_str}.zarr")
         if os.path.exists(local_path + ".done"):
-            logger.info("Historic RAQDPS file already exists locally: %s", timestamp_str)
+            logger.info(
+                "Historic RAQDPS file already exists locally: %s", timestamp_str
+            )
             if os.path.exists(local_path):
                 return local_path
-            logger.warning("Historic done marker exists, but zarr is missing: %s", local_path)
+            logger.warning(
+                "Historic done marker exists, but zarr is missing: %s", local_path
+            )
             return None
 
     run_time, forecast_hour = history_run_for_valid_time(valid_time)

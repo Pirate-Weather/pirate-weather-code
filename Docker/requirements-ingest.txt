@@ -12,8 +12,9 @@ git+https://github.com/blaylockbk/Herbie.git
 metpy==1.7.1
 netCDF4==1.7.4
 numba==0.65.1
-numpy==2.3.3
+numpy==2.3.5
 nwswx==0.1.2
+pandas==3.0.3
 pyarrow==24.0.0
 python-dotenv==1.2.2
 pykml==0.2.0

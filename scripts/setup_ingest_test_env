@@ -275,7 +275,13 @@ EOF
 run_final_checks() {
     configure_env
     log "Validating wgrib2 binary"
+    set +e
     "${WGRIB2_PREFIX}/bin/wgrib2" -version
+    local wgrib2_status=$?
+    set -e
+    if [[ "${wgrib2_status}" != "0" && "${wgrib2_status}" != "8" ]]; then
+        return "${wgrib2_status}"
+    fi
 }
 
 main() {

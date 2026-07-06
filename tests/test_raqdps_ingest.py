@@ -16,8 +16,10 @@ from API.raqdps_utils import (
     build_raqdps_url,
     candidate_raqdps_runs,
     convert_to_ug_m3,
+    herbie_naive_utc,
     history_run_for_valid_time,
     history_valid_times,
+    normalize_utc,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +61,16 @@ def test_candidate_raqdps_runs_are_recent_cycles():
         datetime(2026, 7, 5, 12, tzinfo=timezone.utc),
         datetime(2026, 7, 5, 0, tzinfo=timezone.utc),
     ]
+
+
+def test_raqdps_time_helpers_normalize_aware_and_naive_utc():
+    """Herbie gets naive UTC while ingest logic keeps aware UTC datetimes."""
+    aware_time = datetime(2026, 7, 6, 8, 30, tzinfo=timezone.utc)
+    naive_time = datetime(2026, 7, 6, 8, 30)
+
+    assert normalize_utc(naive_time) == datetime(2026, 7, 6, 8, tzinfo=timezone.utc)
+    assert herbie_naive_utc(aware_time) == datetime(2026, 7, 6, 8)
+    assert herbie_naive_utc(naive_time) == datetime(2026, 7, 6, 8)
 
 
 def test_history_run_for_valid_time_prefers_smallest_0_to_12h_lead():

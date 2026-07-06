@@ -33,6 +33,11 @@ def normalize_utc(dt: datetime) -> datetime:
     return dt.replace(minute=0, second=0, microsecond=0)
 
 
+def herbie_naive_utc(dt: datetime) -> datetime:
+    """Return a timezone-naive UTC datetime for Herbie internals."""
+    return normalize_utc(dt).replace(tzinfo=None)
+
+
 def build_raqdps_filename(
     run_time: datetime,
     variable: str,
@@ -62,7 +67,9 @@ def build_raqdps_url(
     )
 
 
-def candidate_raqdps_runs(now: datetime | None = None, count: int = 8) -> list[datetime]:
+def candidate_raqdps_runs(
+    now: datetime | None = None, count: int = 8
+) -> list[datetime]:
     """Return recent 00/12 UTC RAQDPS run candidates, newest first."""
     if now is None:
         now = datetime.now(timezone.utc)
