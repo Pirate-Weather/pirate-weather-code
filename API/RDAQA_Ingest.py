@@ -201,13 +201,13 @@ for var in RDAQA_VARS:
 
     if download_rdaqa_file(url, local_grib):
         try:
-            ds = xr.open_dataset(local_grib, engine="cfgrib", decode_times=False)
-            grib_var_name = list(ds.data_vars)[0]
-            da_var = ds[grib_var_name].astype(np.float32)
+            with xr.open_dataset(local_grib, engine="cfgrib", decode_times=False) as ds:
+                grib_var_name = list(ds.data_vars)[0]
+                da_var = ds[grib_var_name].astype(np.float32)
 
-            # Perform unit normalization here
-            da_converted = convert_to_ug_m3(da_var, var)
-            downloaded_datasets[var] = da_converted
+                # Perform unit normalization here
+                da_converted = convert_to_ug_m3(da_var, var)
+                downloaded_datasets[var] = da_converted
         except Exception as e:
             logger.error(f"Error reading dataset variable {var}: {e}")
 
