@@ -242,9 +242,9 @@ def write_variable_zarrs(variable_arrays, root_path, time_chunks):
         with dask.config.set(
             scheduler="threads",
             num_workers=zarr_store_workers,
-            # Keep Dask's internal Zarr write chunks aligned with the on-disk
-            # CHUNK_SIZES chunks to avoid unsafe auto-rechunk warnings.
-            array__chunk_size=process_chunk_bytes,
+            # Keep Dask's internal Zarr write chunks at least as large as one
+            # on-disk Zarr chunk to avoid unsafe auto-rechunk warnings.
+            array__chunk_size=time_chunks * process_chunk_bytes,
         ):
             for variable in RAQDPS_OUTPUT_VARS:
                 variable_array = variable_arrays[variable]
