@@ -19,6 +19,7 @@ RAQDPS_HISTORY_MERGE_HOURS = 12
 # Molecular volume of an ideal gas at 25°C and 1 atm is ~24.465 L/mol.
 MOLAR_VOLUME_25C = 24.465
 KG_M3_TO_UG_M3 = 1e9
+MOL_MOL_TO_PPB = 1e9
 O3_PPB_TO_UG_M3 = 48.00 / MOLAR_VOLUME_25C
 NO2_PPB_TO_UG_M3 = 46.01 / MOLAR_VOLUME_25C
 SO2_PPB_TO_UG_M3 = 64.06 / MOLAR_VOLUME_25C
@@ -101,11 +102,11 @@ def convert_to_ug_m3(values, variable: str):
     if variable in {"PM2.5", "PM10"}:
         return values * KG_M3_TO_UG_M3
     if variable == "O3":
-        return values * O3_PPB_TO_UG_M3
+        return values * MOL_MOL_TO_PPB * O3_PPB_TO_UG_M3
     if variable == "NO2":
-        return values * NO2_PPB_TO_UG_M3
+        return values * MOL_MOL_TO_PPB * NO2_PPB_TO_UG_M3
     if variable == "SO2":
-        return values * SO2_PPB_TO_UG_M3
+        return values * MOL_MOL_TO_PPB * SO2_PPB_TO_UG_M3
     return values
 
 

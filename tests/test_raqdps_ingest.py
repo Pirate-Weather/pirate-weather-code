@@ -9,6 +9,7 @@ import numpy as np
 from API.raqdps_herbie_template import raqdps
 from API.raqdps_utils import (
     KG_M3_TO_UG_M3,
+    MOL_MOL_TO_PPB,
     NO2_PPB_TO_UG_M3,
     O3_PPB_TO_UG_M3,
     SO2_PPB_TO_UG_M3,
@@ -103,9 +104,15 @@ def test_raqdps_unit_conversions():
     values = np.array([1.0], dtype=np.float32)
     np.testing.assert_allclose(convert_to_ug_m3(values, "PM2.5"), KG_M3_TO_UG_M3)
     np.testing.assert_allclose(convert_to_ug_m3(values, "PM10"), KG_M3_TO_UG_M3)
-    np.testing.assert_allclose(convert_to_ug_m3(values, "O3"), O3_PPB_TO_UG_M3)
-    np.testing.assert_allclose(convert_to_ug_m3(values, "NO2"), NO2_PPB_TO_UG_M3)
-    np.testing.assert_allclose(convert_to_ug_m3(values, "SO2"), SO2_PPB_TO_UG_M3)
+    np.testing.assert_allclose(
+        convert_to_ug_m3(values, "O3"), MOL_MOL_TO_PPB * O3_PPB_TO_UG_M3
+    )
+    np.testing.assert_allclose(
+        convert_to_ug_m3(values, "NO2"), MOL_MOL_TO_PPB * NO2_PPB_TO_UG_M3
+    )
+    np.testing.assert_allclose(
+        convert_to_ug_m3(values, "SO2"), MOL_MOL_TO_PPB * SO2_PPB_TO_UG_M3
+    )
 
 
 def test_herbie_template_sets_raqdps_source():

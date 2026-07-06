@@ -101,6 +101,7 @@ zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
 process_chunk = CHUNK_SIZES["RAQDPS"]
 final_chunk = FINAL_CHUNK_SIZES["RAQDPS"]
 history_period = HISTORY_PERIODS["RAQDPS"]
+process_chunk_bytes = process_chunk * process_chunk * np.dtype(np.float32).itemsize
 
 
 def build_herbie(run_time, variable, forecast_hour, *, verbose=False):
@@ -201,17 +202,30 @@ def load_raqdps_time_slice(run_time, forecast_hour):
     return fields, reference_shape
 
 
-def stack_time_slices(time_slices, valid_times, reference_shape):
-    """Convert time-slice dictionaries to a stacked dask array."""
-    lat_count, lon_count = reference_shape
-    unix_times = np.array([int(valid_time.timestamp()) for valid_time in valid_times])
+def variable_store_name(variable):
+    """Return the child Zarr store name for an intermediate RAQDPS variable."""
+    return f"{variable.replace('.', '_')}.zarr"
 
-    dask_variable_list = []
-    time_array = da.from_array(unix_times.astype(np.float32), chunks=(len(unix_times),))
-    time_array = time_array.reshape(1, len(unix_times), 1, 1)
-    dask_variable_list.append(
-        da.broadcast_to(time_array, (1, len(unix_times), lat_count, lon_count))
+
+def variable_zarr_path(root_path, variable):
+    """Return the path for one variable in a variable-separated RAQDPS store."""
+    return os.path.join(root_path, variable_store_name(variable))
+
+
+def is_variable_zarr_store(root_path):
+    """Return True when a path uses the variable-separated intermediate layout."""
+    return os.path.isdir(root_path) and all(
+        os.path.exists(variable_zarr_path(root_path, variable))
+        for variable in RAQDPS_OUTPUT_VARS
     )
+
+
+def build_variable_arrays(time_slices, valid_times, reference_shape):
+    """Convert time-slice dictionaries to separate dask arrays per variable."""
+    unix_times = np.array([int(valid_time.timestamp()) for valid_time in valid_times])
+    variable_arrays = {
+        "time": da.from_array(unix_times.astype(np.float32), chunks=(len(unix_times),))
+    }
 
     for variable in RAQDPS_VARIABLES:
         arrays = []
@@ -222,32 +236,66 @@ def stack_time_slices(time_slices, valid_times, reference_shape):
                 values = np.full(reference_shape, np.nan, dtype=np.float32)
             arrays.append(da.from_array(values, chunks=(process_chunk, process_chunk)))
 
-        variable_array = da.stack(arrays, axis=0).reshape(
-            1, len(valid_times), lat_count, lon_count
-        )
-        dask_variable_list.append(variable_array)
+        variable_arrays[variable] = da.stack(arrays, axis=0).astype("float32")
 
-    return da.concatenate(dask_variable_list, axis=0).astype("float32")
+    return variable_arrays
 
 
-def write_stacked_zarr(stacked_array, zarr_path, time_chunks):
-    """Write a stacked `(variable, time, y, x)` dask array to a Zarr array."""
-    store = zarr.storage.LocalStore(zarr_path)
-    zarr_array = zarr.create_array(
-        store=store,
-        shape=stacked_array.shape,
-        chunks=(len(RAQDPS_OUTPUT_VARS), time_chunks, final_chunk, final_chunk),
-        dtype=np.float32,
-        overwrite=True,
-    )
+def write_variable_zarrs(variable_arrays, root_path, time_chunks):
+    """Write separate intermediate Zarr arrays for each RAQDPS variable."""
+    shutil.rmtree(root_path, ignore_errors=True)
+    os.makedirs(root_path, exist_ok=True)
 
     with ProgressBar():
-        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-            stacked_array.rechunk(
-                (len(RAQDPS_OUTPUT_VARS), time_chunks, final_chunk, final_chunk)
-            ).to_zarr(zarr_array, overwrite=True, compute=True)
+        with dask.config.set(
+            scheduler="threads",
+            num_workers=zarr_store_workers,
+            # Keep Dask's internal Zarr write chunks aligned with the on-disk
+            # CHUNK_SIZES chunks to avoid unsafe auto-rechunk warnings.
+            array__chunk_size=process_chunk_bytes,
+        ):
+            for variable in RAQDPS_OUTPUT_VARS:
+                variable_array = variable_arrays[variable]
+                chunks = (
+                    (time_chunks,)
+                    if variable == "time"
+                    else (time_chunks, process_chunk, process_chunk)
+                )
+                store = zarr.storage.LocalStore(variable_zarr_path(root_path, variable))
+                zarr_array = zarr.create_array(
+                    store=store,
+                    shape=variable_array.shape,
+                    chunks=chunks,
+                    dtype=np.float32,
+                    overwrite=True,
+                )
+                variable_array.rechunk(chunks).to_zarr(
+                    zarr_array, overwrite=True, compute=True
+                )
+                close_store(store)
 
-    close_store(store)
+
+def read_intermediate_variable(root_path, variable):
+    """Read one variable from a new or legacy RAQDPS intermediate Zarr store."""
+    variable_path = variable_zarr_path(root_path, variable)
+    if os.path.exists(variable_path):
+        return da.from_zarr(variable_path, inline_array=True)
+
+    legacy_stack = da.from_zarr(root_path, inline_array=True)
+    variable_index = RAQDPS_OUTPUT_VARS.index(variable)
+    return legacy_stack[variable_index]
+
+
+def expand_time_array(time_array, reference_shape):
+    """Expand a 1D intermediate time array to the final 3D grid shape."""
+    if time_array.ndim == 3:
+        return time_array
+
+    lat_count, lon_count = reference_shape
+    return da.broadcast_to(
+        time_array.reshape(time_array.shape[0], 1, 1),
+        (time_array.shape[0], lat_count, lon_count),
+    )
 
 
 def download_extract_historic_zip(s3_filesystem, s3_zip_path, local_temp_dir):
@@ -350,9 +398,9 @@ def process_forecast(base_time):
     if not time_slices or reference_shape is None:
         raise RuntimeError("No valid RAQDPS forecast hours were processed")
 
-    forecast_stack = stack_time_slices(time_slices, valid_times, reference_shape)
+    forecast_arrays = build_variable_arrays(time_slices, valid_times, reference_shape)
     forecast_zarr_path = forecast_process_path + "_forecast.zarr"
-    write_stacked_zarr(forecast_stack, forecast_zarr_path, len(valid_times))
+    write_variable_zarrs(forecast_arrays, forecast_zarr_path, len(valid_times))
     return forecast_zarr_path, reference_shape
 
 
@@ -365,19 +413,37 @@ def process_historic_hour(valid_time, reference_shape):
         s3_done_path = s3_path.replace(".zarr.zip", ".done")
         if s3.exists(s3_done_path):
             logger.info("Historic RAQDPS file already exists in S3: %s", timestamp_str)
-            return download_extract_historic_zip(s3, s3_path, local_temp_historic_dir)
+            historic_zarr_path = download_extract_historic_zip(
+                s3, s3_path, local_temp_historic_dir
+            )
+            if historic_zarr_path is not None and is_variable_zarr_store(
+                historic_zarr_path
+            ):
+                return historic_zarr_path
+            logger.info(
+                "Regenerating legacy historic RAQDPS store in variable layout: %s",
+                timestamp_str,
+            )
     else:
         local_path = os.path.join(historic_path, f"RAQDPS_Hist_{timestamp_str}.zarr")
         if os.path.exists(local_path + ".done"):
             logger.info(
                 "Historic RAQDPS file already exists locally: %s", timestamp_str
             )
-            if os.path.exists(local_path):
+            if is_variable_zarr_store(local_path):
                 return local_path
-            logger.warning(
-                "Historic done marker exists, but zarr is missing: %s", local_path
-            )
-            return None
+            if os.path.exists(local_path):
+                logger.info(
+                    "Regenerating legacy historic RAQDPS store in variable layout: %s",
+                    timestamp_str,
+                )
+            else:
+                logger.warning(
+                    "Historic done marker exists, but zarr is missing: %s", local_path
+                )
+            shutil.rmtree(local_path, ignore_errors=True)
+            if os.path.exists(local_path + ".done"):
+                os.remove(local_path + ".done")
 
     run_time, forecast_hour = history_run_for_valid_time(valid_time)
     logger.info(
@@ -400,11 +466,11 @@ def process_historic_hour(valid_time, reference_shape):
         )
         return None
 
-    hist_stack = stack_time_slices([fields], [valid_time], reference_shape)
+    hist_arrays = build_variable_arrays([fields], [valid_time], reference_shape)
     hist_tmp_path = os.path.join(
         forecast_process_dir, f"RAQDPS_Hist_{timestamp_str}_TMP.zarr"
     )
-    write_stacked_zarr(hist_stack, hist_tmp_path, 1)
+    write_variable_zarrs(hist_arrays, hist_tmp_path, 1)
 
     if save_type == "S3":
         zip_export_path = hist_tmp_path.replace("_TMP.zarr", "")
@@ -436,24 +502,51 @@ def process_historic(base_time, reference_shape):
     return historic_zarr_paths
 
 
-def merge_and_publish(base_time, historic_zarr_paths, forecast_zarr_path):
+def merge_and_publish(
+    base_time, historic_zarr_paths, forecast_zarr_path, reference_shape
+):
     """Merge historic and forecast arrays and publish the final RAQDPS store."""
     logger.info("Merging historic and forecast RAQDPS datasets.")
 
-    dask_arrays = []
+    intermediate_paths = []
     for historic_zarr_path in historic_zarr_paths:
-        try:
-            dask_arrays.append(da.from_zarr(historic_zarr_path, inline_array=True))
-        except (FileNotFoundError, KeyError):
+        if os.path.exists(historic_zarr_path):
+            intermediate_paths.append(historic_zarr_path)
+        else:
             logger.info("Missing historic RAQDPS zarr: %s", historic_zarr_path)
 
-    dask_arrays.append(da.from_zarr(forecast_zarr_path, inline_array=True))
-    merged_arrays = da.concatenate(dask_arrays, axis=1).astype("float32")
+    intermediate_paths.append(forecast_zarr_path)
+
+    dask_variable_list = []
+    for variable in RAQDPS_OUTPUT_VARS:
+        variable_time_arrays = []
+        for intermediate_path in intermediate_paths:
+            variable_array = read_intermediate_variable(intermediate_path, variable)
+            if variable == "time":
+                variable_array = expand_time_array(variable_array, reference_shape)
+            variable_time_arrays.append(variable_array)
+
+        merged_variable = da.concatenate(variable_time_arrays, axis=0).reshape(
+            1,
+            sum(variable_array.shape[0] for variable_array in variable_time_arrays),
+            reference_shape[0],
+            reference_shape[1],
+        )
+        dask_variable_list.append(merged_variable)
+
+    merged_arrays = da.concatenate(dask_variable_list, axis=0).astype("float32")
     merged_arrays_masked = mask_invalid_data(merged_arrays)
 
     stack_path = forecast_process_path + "_stack.zarr"
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        merged_arrays_masked.to_zarr(stack_path, overwrite=True, compute=True)
+        merged_arrays_masked.rechunk(
+            (
+                len(RAQDPS_OUTPUT_VARS),
+                merged_arrays_masked.shape[1],
+                process_chunk,
+                process_chunk,
+            )
+        ).to_zarr(stack_path, overwrite=True, compute=True)
 
     stacked_array_disk = da.from_zarr(stack_path)
     stacked_array_padded = pad_to_chunk_size(stacked_array_disk, final_chunk)
@@ -537,7 +630,9 @@ def main():
     try:
         forecast_zarr_path, reference_shape = process_forecast(base_time)
         historic_zarr_paths = process_historic(base_time, reference_shape)
-        merge_and_publish(base_time, historic_zarr_paths, forecast_zarr_path)
+        merge_and_publish(
+            base_time, historic_zarr_paths, forecast_zarr_path, reference_shape
+        )
     finally:
         try:
             shutil.rmtree(forecast_process_dir)
