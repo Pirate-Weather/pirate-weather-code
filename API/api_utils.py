@@ -54,7 +54,9 @@ def calculate_nowcast_concentration(
             c_max = np.nanmax(window, axis=0)
             c_min = np.nanmin(window, axis=0)
             c_range = c_max - c_min
-            weight_factor = np.where(c_max > 0, np.maximum(1 - c_range / c_max, 0.5), 0.5)
+            weight_factor = np.where(
+                c_max > 0, np.maximum(1 - c_range / c_max, 0.5), 0.5
+            )
 
         num_window_hours = window.shape[0]
         weights = np.zeros_like(window)
@@ -65,7 +67,9 @@ def calculate_nowcast_concentration(
         with np.errstate(invalid="ignore"):
             weighted_sum = np.nansum(window * weights, axis=0)
             weight_sum = np.nansum(np.where(~np.isnan(window), weights, 0), axis=0)
-            nowcast_result[t] = np.where(weight_sum > 0, weighted_sum / weight_sum, np.nan)
+            nowcast_result[t] = np.where(
+                weight_sum > 0, weighted_sum / weight_sum, np.nan
+            )
 
     return nowcast_result
 
