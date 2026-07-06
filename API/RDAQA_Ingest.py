@@ -320,7 +320,9 @@ for i in range(his_period, 0, -1):
 
         if download_rdaqa_file(url, local_grib):
             try:
-                with xr.open_dataset(local_grib, engine="cfgrib", decode_times=False) as ds:
+                with xr.open_dataset(
+                    local_grib, engine="cfgrib", decode_times=False
+                ) as ds:
                     grib_var_name = list(ds.data_vars)[0]
                     da_var = ds[grib_var_name].astype(np.float32)
 
