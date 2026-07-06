@@ -67,7 +67,7 @@ def get_latest_rdaqa_run():
         url = build_rdaqa_url(test_time, "O3")
         try:
             req = Request(url, method="HEAD")
-            with urlopen(req) as response:
+            with urlopen(req, timeout=10) as response:
                 if response.status == 200:
                     logger.info(f"Found latest valid RDAQA runtime at: {test_time}")
                     return test_time
