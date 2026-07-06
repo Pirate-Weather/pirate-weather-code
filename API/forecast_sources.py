@@ -197,7 +197,9 @@ def build_source_metadata(
         metadata.add("silam", time_value=_format_run_time(grid_result.silamRunTime))
 
     if isinstance(grid_result.dataOut_is4fires, np.ndarray):
-        metadata.add("is4fires", time_value=_format_run_time(grid_result.is4firesRunTime))
+        metadata.add(
+            "is4fires", time_value=_format_run_time(grid_result.is4firesRunTime)
+        )
 
     return metadata
 

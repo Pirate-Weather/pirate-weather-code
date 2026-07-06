@@ -61,7 +61,9 @@ def build_air_quality_series(
     data_silam: Any,
 ) -> dict[str, np.ndarray]:
     """Build hourly AQ series with RAQDPS prioritized over SILAM."""
-    pm25_raqdps = _aligned_series(hour_array_grib, data_raqdps, RAQDPS_AQ_INDEX["pm2_5"])
+    pm25_raqdps = _aligned_series(
+        hour_array_grib, data_raqdps, RAQDPS_AQ_INDEX["pm2_5"]
+    )
     pm25_silam = _aligned_series(hour_array_grib, data_silam, SILAM_AQ_INDEX["pm2_5"])
     pm25 = np.where(~np.isnan(pm25_raqdps), pm25_raqdps, pm25_silam)
 
@@ -89,9 +91,9 @@ def build_air_quality_series(
     no2_3d = no2[:, np.newaxis, np.newaxis]
     so2_3d = so2[:, np.newaxis, np.newaxis]
     co_3d = co[:, np.newaxis, np.newaxis]
-    aqi = calculate_aqi(pm25_3d, pm10_3d, o3_3d, no2_3d, so2_3d, co_3d, use_nowcast=True)[
-        :, 0, 0
-    ]
+    aqi = calculate_aqi(
+        pm25_3d, pm10_3d, o3_3d, no2_3d, so2_3d, co_3d, use_nowcast=True
+    )[:, 0, 0]
 
     return {
         "usEpaAqi": aqi.astype(np.float32),
@@ -143,7 +145,9 @@ def enrich_daily_with_air_quality(
     if not day_list or not hour_list:
         return
 
-    hour_times = np.array([int(item.get("time", 0)) for item in hour_list], dtype=np.int64)
+    hour_times = np.array(
+        [int(item.get("time", 0)) for item in hour_list], dtype=np.int64
+    )
 
     for day_idx, day_item in enumerate(day_list):
         mask = hourly_day_index[: len(hour_times)] == day_idx

@@ -949,7 +949,7 @@ async def calculate_grid_indexing(
         dataOut_raqdps=dataOut_raqdps,
         dataOut_silam=dataOut_silam,
         dataOut_is4fires=dataOut_is4fires,
-        era5_merged=era5_merged,
+        era5_merged=ERA5_MERGED,
         subhRunTime=subhRunTime,
         hrrrhRunTime=hrrrhRunTime,
         h2RunTime=h2RunTime,

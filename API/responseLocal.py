@@ -82,15 +82,15 @@ from API.legacy.summary import (
 from API.minutely.builder import build_minutely_block
 from API.request.grid_indexing import ZarrSources, calculate_grid_indexing
 from API.request.preprocess import prepare_initial_request
-from API.utils.filtering import apply_block_indices as _apply_block_indices
-from API.utils.filtering import apply_blocks_param as _apply_blocks_param
-from API.utils.filtering import parse_indices as _parse_indices
 from API.utils.air_quality import (
     build_air_quality_series,
     enrich_current_with_air_quality,
     enrich_daily_with_air_quality,
     enrich_hourly_with_air_quality,
 )
+from API.utils.filtering import apply_block_indices as _apply_block_indices
+from API.utils.filtering import apply_blocks_param as _apply_blocks_param
+from API.utils.filtering import parse_indices as _parse_indices
 from API.utils.geo import haversine_distance, is_in_north_america
 from API.utils.solar import calculate_solar_times
 from API.utils.time_indexing import calculate_time_indexing
@@ -904,7 +904,9 @@ async def PW_Forecast(
         gefs_merged=GEFS_Merged,
         gfs_merged=GFS_Merged,
         era5_merged=ERA5_MERGED,
-        is4fires_merged=dataOut_is4fires if isinstance(dataOut_is4fires, np.ndarray) else None,
+        is4fires_merged=dataOut_is4fires
+        if isinstance(dataOut_is4fires, np.ndarray)
+        else None,
         extra_vars=extraVars,
         num_hours=numHours,
         lat=lat,

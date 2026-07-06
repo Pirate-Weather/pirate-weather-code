@@ -247,12 +247,12 @@ def prepare_data_inputs(
     gefs_merged,
     gfs_merged,
     era5_merged,
-    is4fires_merged=None,
     extra_vars,
     num_hours,
     lat,
     lon,
     prioritize_ai_models=False,
+    is4fires_merged=None,
 ):
     """
     Prepare data inputs for the hourly block.
