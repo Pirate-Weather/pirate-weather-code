@@ -283,7 +283,7 @@ for i in range(his_period, 0, -1):
     timestamp_str = hist_time.strftime("%Y%m%dT%H%M%SZ")
 
     if save_type == "S3":
-        s3_path = os.path.join(historic_path, f"RDAQA_Hist_{timestamp_str}.zarr.zip")
+        s3_path = f"{historic_path}/RDAQA_Hist_{timestamp_str}.zarr.zip"
         s3_done_path = s3_path.replace(".zarr.zip", ".done")
         if s3.exists(s3_done_path):
             logger.info(
