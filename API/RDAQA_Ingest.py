@@ -320,13 +320,13 @@ for i in range(his_period, 0, -1):
 
         if download_rdaqa_file(url, local_grib):
             try:
-                ds = xr.open_dataset(local_grib, engine="cfgrib", decode_times=False)
-                grib_var_name = list(ds.data_vars)[0]
-                da_var = ds[grib_var_name].astype(np.float32)
+                with xr.open_dataset(local_grib, engine="cfgrib", decode_times=False) as ds:
+                    grib_var_name = list(ds.data_vars)[0]
+                    da_var = ds[grib_var_name].astype(np.float32)
 
-                # Maintain unit conversions consistent with live forecasting
-                da_converted = convert_to_ug_m3(da_var, var)
-                hist_datasets[var] = da_converted
+                    # Maintain unit conversions consistent with live forecasting
+                    da_converted = convert_to_ug_m3(da_var, var)
+                    hist_datasets[var] = da_converted
 
                 # Cleanup immediate raw files
                 os.remove(local_grib)
