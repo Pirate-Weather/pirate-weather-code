@@ -14,11 +14,13 @@
 import logging
 import os
 import pickle
+import re
 import shutil
 import sys
 import time
 import warnings
 from datetime import datetime, timedelta, timezone
+from xml.etree import ElementTree
 
 import dask
 import dask.array as da
@@ -70,7 +72,7 @@ forecast_process_path = os.path.join(forecast_process_dir, "SILAM_Process")
 hist_process_path = os.path.join(forecast_process_dir, "SILAM_Historic")
 tmpDIR = os.path.join(forecast_process_dir, "Downloads")
 
-forecast_path = os.getenv("forecast_path", default="/home/reya/Weather/Prod/SILAM")
+forecast_path = os.getenv("forecast_path", default="/home/reya/Weather/Prod")
 historic_path = os.getenv("historic_path", default="/home/reya/Weather/History/SILAM")
 
 saveType = os.getenv("save_type", default="Download")
@@ -111,24 +113,61 @@ zarr_vars = (
 # - air_dens: Air density in kg/m³ (used for volume mixing ratio conversions)
 
 base_fileserver_url = "https://thredds.silam.fmi.fi/thredds/fileServer"
+base_catalog_url = "https://thredds.silam.fmi.fi/thredds/catalog"
 silam_dataset_path = "silam_glob_v6_1_sfc/files"
+silam_filename_pattern = re.compile(r"SILAM-AQ-sfc-glob_v6_1_(\d{10})\.nc4$")
 
 
 def get_latest_silam_run():
-    """Determines the latest available SILAM model run time.
+    """Determines the latest available SILAM model run time from THREDDS.
 
-    SILAM air quality data is updated once daily at 00 UTC. This function
-    accounts for a delay in data availability.
+    SILAM availability can lag behind wall-clock time, so inspect the server
+    catalog and choose the newest listed SILAM forecast file rather than
+    assuming a fixed delay.
 
     Returns:
         datetime: The latest model run time.
     """
-    now_utc = datetime.now(timezone.utc)
+    catalog_urls = (
+        f"{base_catalog_url}/{silam_dataset_path}/catalog.xml",
+        f"{base_catalog_url}/{silam_dataset_path}/latest.xml",
+    )
 
-    # SILAM updates once daily at 00 UTC with the date being one day behind current time
-    latest_origintime = (now_utc - timedelta(days=1)).replace(
+    for catalog_url in catalog_urls:
+        try:
+            response = requests.get(catalog_url, timeout=30)
+            response.raise_for_status()
+            catalog = ElementTree.fromstring(response.content)
+        except (ElementTree.ParseError, requests.RequestException) as e:
+            logger.warning(f"Unable to read SILAM catalog {catalog_url}: {e}")
+            continue
+
+        run_times = []
+        for dataset in catalog.iter():
+            for dataset_value in (dataset.get("name", ""), dataset.get("urlPath", "")):
+                match = silam_filename_pattern.search(dataset_value)
+                if match:
+                    run_times.append(
+                        datetime.strptime(match.group(1), "%Y%m%d%H").replace(
+                            tzinfo=timezone.utc
+                        )
+                    )
+
+        if run_times:
+            latest_origintime = max(run_times)
+            logger.info(
+                f"Latest SILAM run from server catalog {catalog_url}: "
+                f"{latest_origintime}"
+            )
+            return latest_origintime
+
+        logger.warning(f"No SILAM run files found in catalog {catalog_url}")
+
+    # Fall back to the previous fixed-delay behavior if the catalog is unavailable.
+    latest_origintime = (datetime.now(timezone.utc) - timedelta(days=1)).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
+    logger.warning(f"Falling back to estimated SILAM run time: {latest_origintime}")
 
     return latest_origintime
 
