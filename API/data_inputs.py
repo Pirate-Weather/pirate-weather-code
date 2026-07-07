@@ -934,9 +934,7 @@ def prepare_aq_inputs(
     # 100 m to avoid division by near-zero denominators.
     if silam_smoke_frp is not None:
         if silam_blh is not None:
-            blh = np.where(
-                np.isnan(silam_blh), 1000.0, np.maximum(silam_blh, 100.0)
-            )
+            blh = np.where(np.isnan(silam_blh), 1000.0, np.maximum(silam_blh, 100.0))
         else:
             blh = np.full(num_hours, 1000.0)
         smoke_frp_m3 = silam_smoke_frp / blh

@@ -1600,7 +1600,10 @@ def build_current_section(
         smoke_frp = aq_inputs.get("smoke_frp")
         if smoke_frp is not None and len(smoke_frp) > 0 and not np.isnan(smoke_frp[0]):
             InterPcurrent[DATA_CURRENT["smoke"]] = clipLog(
-                float(smoke_frp[0]), CLIP_SMOKE["min"], CLIP_SMOKE["max"], "Smoke Current"
+                float(smoke_frp[0]),
+                CLIP_SMOKE["min"],
+                CLIP_SMOKE["max"],
+                "Smoke Current",
             )
     InterPcurrent[DATA_CURRENT["solar"]] = _get_solar(
         sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
