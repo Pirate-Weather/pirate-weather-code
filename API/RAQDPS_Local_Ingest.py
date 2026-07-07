@@ -102,6 +102,13 @@ process_chunk = CHUNK_SIZES["RAQDPS"]
 final_chunk = FINAL_CHUNK_SIZES["RAQDPS"]
 history_period = HISTORY_PERIODS["RAQDPS"]
 process_chunk_bytes = process_chunk * process_chunk * np.dtype(np.float32).itemsize
+RAQDPS_TIME_PICKLE = "RAQDPS.time.pickle"
+RAQDPS_LAT_LON_PICKLE = "RAQDPS.lat_lon.pickle"
+
+
+def published_path(filename):
+    """Return the published output path for one RAQDPS sidecar file."""
+    return os.path.join(forecast_path, ingest_version, filename)
 
 
 def build_herbie(run_time, variable, forecast_hour, *, verbose=False):
@@ -170,10 +177,41 @@ def read_raqdps_grib(local_grib_path, variable):
         ds.close()
 
 
-def load_raqdps_time_slice(run_time, forecast_hour):
+def read_raqdps_lat_lon(local_grib_path, expected_shape):
+    """Read RAQDPS grid latitude/longitude arrays from one GRIB2 file."""
+    ds = xr.open_dataset(local_grib_path, engine="cfgrib", decode_times=False)
+    try:
+        lat_name = "latitude" if "latitude" in ds.coords else "lat"
+        lon_name = "longitude" if "longitude" in ds.coords else "lon"
+        if lat_name not in ds.coords or lon_name not in ds.coords:
+            raise KeyError("RAQDPS GRIB missing latitude/longitude coordinates")
+
+        latitude = as_float32_array(ds[lat_name].values)
+        longitude = as_float32_array(ds[lon_name].values)
+
+        if latitude.ndim == 1 and longitude.ndim == 1:
+            longitude, latitude = np.meshgrid(longitude, latitude)
+
+        if latitude.shape != expected_shape or longitude.shape != expected_shape:
+            raise ValueError(
+                "RAQDPS coordinate shape mismatch: "
+                f"lat={latitude.shape} lon={longitude.shape} expected={expected_shape}"
+            )
+
+        return {
+            "latitude": latitude,
+            "longitude": longitude,
+            "shape": expected_shape,
+        }
+    finally:
+        ds.close()
+
+
+def load_raqdps_time_slice(run_time, forecast_hour, *, include_lat_lon=False):
     """Download/read all configured variables for one valid RAQDPS hour."""
     fields = {}
     reference_shape = None
+    lat_lon_lookup = None
 
     for variable in RAQDPS_VARIABLES:
         local_grib_path = download_raqdps_file(run_time, variable, forecast_hour)
@@ -196,9 +234,23 @@ def load_raqdps_time_slice(run_time, forecast_hour):
         if reference_shape is None:
             reference_shape = values.shape
 
+        if include_lat_lon and lat_lon_lookup is None:
+            try:
+                lat_lon_lookup = read_raqdps_lat_lon(local_grib_path, values.shape)
+            except Exception as e:
+                logger.warning(
+                    "Unable to read RAQDPS lat/lon from %s: %s",
+                    local_grib_path,
+                    e,
+                )
+
     if reference_shape is None:
+        if include_lat_lon:
+            return None, None, None
         return None, None
 
+    if include_lat_lon:
+        return fields, reference_shape, lat_lon_lookup
     return fields, reference_shape
 
 
@@ -335,18 +387,27 @@ def prepare_directories():
 
 def already_processed(base_time):
     """Return True if the published RAQDPS store is already current."""
-    time_pickle_path = os.path.join(forecast_path, ingest_version, "RAQDPS.time.pickle")
+    time_pickle_path = published_path(RAQDPS_TIME_PICKLE)
+    lat_lon_pickle_path = published_path(RAQDPS_LAT_LON_PICKLE)
     base_time = normalize_utc(base_time)
 
     if save_type == "S3":
         if s3.exists(time_pickle_path):
             with s3.open(time_pickle_path, "rb") as f:
-                return normalize_utc(pickle.load(f)) >= base_time
+                is_current = normalize_utc(pickle.load(f)) >= base_time
+            if is_current and not s3.exists(lat_lon_pickle_path):
+                logger.info("RAQDPS time is current, but lat/lon pickle is missing.")
+                return False
+            return is_current
         return False
 
     if os.path.exists(time_pickle_path):
         with open(time_pickle_path, "rb") as f:
-            return normalize_utc(pickle.load(f)) >= base_time
+            is_current = normalize_utc(pickle.load(f)) >= base_time
+        if is_current and not os.path.exists(lat_lon_pickle_path):
+            logger.info("RAQDPS time is current, but lat/lon pickle is missing.")
+            return False
+        return is_current
     return False
 
 
@@ -356,9 +417,18 @@ def process_forecast(base_time):
     time_slices = []
     valid_times = []
     reference_shape = None
+    lat_lon_lookup = None
 
     for forecast_hour in RAQDPS_FORECAST_HOURS:
-        fields, slice_shape = load_raqdps_time_slice(base_time, forecast_hour)
+        slice_lat_lon = None
+        if lat_lon_lookup is None:
+            fields, slice_shape, slice_lat_lon = load_raqdps_time_slice(
+                base_time,
+                forecast_hour,
+                include_lat_lon=True,
+            )
+        else:
+            fields, slice_shape = load_raqdps_time_slice(base_time, forecast_hour)
         valid_time = base_time + timedelta(hours=forecast_hour)
 
         if fields is None:
@@ -378,16 +448,21 @@ def process_forecast(base_time):
             )
             continue
 
+        if lat_lon_lookup is None and slice_lat_lon is not None:
+            lat_lon_lookup = slice_lat_lon
+
         time_slices.append(fields)
         valid_times.append(valid_time)
 
     if not time_slices or reference_shape is None:
         raise RuntimeError("No valid RAQDPS forecast hours were processed")
+    if lat_lon_lookup is None:
+        raise RuntimeError("No valid RAQDPS lat/lon grid was read")
 
     forecast_arrays = build_variable_arrays(time_slices, valid_times, reference_shape)
     forecast_zarr_path = forecast_process_path + "_forecast.zarr"
     write_variable_zarrs(forecast_arrays, forecast_zarr_path, len(valid_times))
-    return forecast_zarr_path, reference_shape
+    return forecast_zarr_path, reference_shape, lat_lon_lookup
 
 
 def process_historic_hour(valid_time, reference_shape):
@@ -471,7 +546,7 @@ def process_historic(base_time, reference_shape):
 
 
 def merge_and_publish(
-    base_time, historic_zarr_paths, forecast_zarr_path, reference_shape
+    base_time, historic_zarr_paths, forecast_zarr_path, reference_shape, lat_lon_lookup
 ):
     """Merge historic and forecast arrays and publish the final RAQDPS store."""
     logger.info("Merging historic and forecast RAQDPS datasets.")
@@ -552,9 +627,13 @@ def merge_and_publish(
 
     close_store(zarr_store)
 
-    pickle_file_path = os.path.join(tmp_dir, "RAQDPS.time.pickle")
-    with open(pickle_file_path, "wb") as f:
+    time_pickle_file_path = os.path.join(tmp_dir, RAQDPS_TIME_PICKLE)
+    with open(time_pickle_file_path, "wb") as f:
         pickle.dump(base_time, f)
+
+    lat_lon_pickle_file_path = os.path.join(tmp_dir, RAQDPS_LAT_LON_PICKLE)
+    with open(lat_lon_pickle_file_path, "wb") as f:
+        pickle.dump(lat_lon_lookup, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     if save_type == "S3":
         s3.put_file(
@@ -562,14 +641,22 @@ def merge_and_publish(
             os.path.join(forecast_path, ingest_version, "RAQDPS.zarr.zip"),
         )
         s3.put_file(
-            pickle_file_path,
-            os.path.join(forecast_path, ingest_version, "RAQDPS.time.pickle"),
+            time_pickle_file_path,
+            published_path(RAQDPS_TIME_PICKLE),
+        )
+        s3.put_file(
+            lat_lon_pickle_file_path,
+            published_path(RAQDPS_LAT_LON_PICKLE),
         )
         logger.info("RAQDPS S3 target deployment complete.")
     else:
         shutil.move(
-            pickle_file_path,
-            os.path.join(forecast_path, ingest_version, "RAQDPS.time.pickle"),
+            time_pickle_file_path,
+            published_path(RAQDPS_TIME_PICKLE),
+        )
+        shutil.move(
+            lat_lon_pickle_file_path,
+            published_path(RAQDPS_LAT_LON_PICKLE),
         )
         shutil.copytree(
             final_zarr_path,
@@ -596,10 +683,16 @@ def main():
         sys.exit()
 
     try:
-        forecast_zarr_path, reference_shape = process_forecast(base_time)
+        forecast_zarr_path, reference_shape, lat_lon_lookup = process_forecast(
+            base_time
+        )
         historic_zarr_paths = process_historic(base_time, reference_shape)
         merge_and_publish(
-            base_time, historic_zarr_paths, forecast_zarr_path, reference_shape
+            base_time,
+            historic_zarr_paths,
+            forecast_zarr_path,
+            reference_shape,
+            lat_lon_lookup,
         )
     finally:
         try:
