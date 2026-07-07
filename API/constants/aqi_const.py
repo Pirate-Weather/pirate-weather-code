@@ -24,7 +24,7 @@ import numpy as np
 
 # ---------------------------------------------------------------------------
 # EPA averaging helpers
-# NowCast for PM2.5; 24-hour rolling mean for PM10; 8-hour rolling mean for O3/CO.
+# NowCast for PM2.5 and PM10; 8-hour rolling mean for O3/CO.
 # References:
 #   - EPA NowCast: https://usepa.servicenowservices.com/airnow?id=kb_article_view&sys_id=bb8b65ef1b06bc10028420eae54bcb98
 #   - EPA AQI Technical Assistance Document (Sept 2018)
@@ -412,14 +412,23 @@ def compute_aqi_array(
     if system == "EPA":
         # Apply EPA-mandated averaging periods before the breakpoint lookup
         pm25_calc = nowcast_pm(pm25_v)
-        pm10_calc = rolling_mean(pm10_v, window=24)
+        pm10_calc = nowcast_pm(pm10_v)
         o3_calc = rolling_mean(o3_v, window=8)
         co_calc = rolling_mean(co_v, window=8)
         # NO2 and SO2 use 1-hour (instantaneous) averages
         no2_calc = no2_v
         so2_calc = so2_v
+    elif system == "AQHI":
+        # AQHI uses 3-hour rolling averages for PM2.5, O3, NO2
+        pm25_calc = rolling_mean(pm25_v, window=3)
+        o3_calc = rolling_mean(o3_v, window=3)
+        no2_calc = rolling_mean(no2_v, window=3)
+        # Not used in AQHI but we still pass them through for consistency
+        pm10_calc = pm10_v
+        so2_calc = so2_v
+        co_calc = co_v
     else:
-        # AQHI / CAQI use raw hourly concentrations
+        # CAQI use raw hourly concentrations
         pm25_calc = pm25_v
         pm10_calc = pm10_v
         o3_calc = o3_v

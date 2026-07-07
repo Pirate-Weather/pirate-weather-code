@@ -1,3 +1,0 @@
-nohup: ignoring input
-Starting fetch run for 91 points across 860 dates (78260 requests, frequency=daily, days=8, hours=48, workers=12, skipped=72).
-REQUEST completed point=1 date=2024-03-16 hour=00 attempt=1 status=200 duration=29.867s rate=2.01/min response_bytes=55080
