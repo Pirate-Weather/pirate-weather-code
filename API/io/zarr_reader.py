@@ -45,7 +45,6 @@ class ZarrStores:
     RAQDPS_Zarr: Optional[Any] = None
     SILAM_Zarr: Optional[Any] = None
     RAQDPS_LatLon: Optional[Any] = None
-    SILAM_LatLon: Optional[Any] = None
 
 
 async def get_zarr(store, X, Y):
@@ -303,11 +302,8 @@ def _load_aq_lat_lon_pickles(
     *,
     logger: logging.Logger,
 ) -> None:
-    """Load RAQDPS and SILAM lat/lon pickle files when available."""
-    for attr, fname in (
-        ("RAQDPS_LatLon", "RAQDPS.lat_lon.pickle"),
-        ("SILAM_LatLon", "SILAM.lat_lon.pickle"),
-    ):
+    """Load AQ model lat/lon pickle files when available."""
+    for attr, fname in (("RAQDPS_LatLon", "RAQDPS.lat_lon.pickle"),):
         path = os.path.join(save_dir, fname)
         if os.path.exists(path):
             try:

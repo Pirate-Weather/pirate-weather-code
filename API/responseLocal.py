@@ -150,7 +150,6 @@ ECMWF_AIFS_Zarr = None
 RAQDPS_Zarr = None
 SILAM_Zarr = None
 RAQDPS_LatLon = None
-SILAM_LatLon = None
 
 
 setup_logging()
@@ -201,7 +200,6 @@ ECMWF_AIFS_Zarr = zarr_stores.ECMWF_AIFS_Zarr
 RAQDPS_Zarr = zarr_stores.RAQDPS_Zarr
 SILAM_Zarr = zarr_stores.SILAM_Zarr
 RAQDPS_LatLon = zarr_stores.RAQDPS_LatLon
-SILAM_LatLon = zarr_stores.SILAM_LatLon
 
 # Load DWD MOSMIX station mapping
 try:
@@ -427,7 +425,6 @@ async def PW_Forecast(
     global RAQDPS_Zarr
     global SILAM_Zarr
     global RAQDPS_LatLon
-    global SILAM_LatLon
 
     # Timing Check
     T_Start = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
@@ -569,7 +566,6 @@ async def PW_Forecast(
         raqdps=RAQDPS_Zarr,
         silam=SILAM_Zarr,
         raqdps_lat_lon=RAQDPS_LatLon,
-        silam_lat_lon=SILAM_LatLon,
     )
 
     # 3. Calculate grid indices for the requested location to retrieve data from Zarr stores

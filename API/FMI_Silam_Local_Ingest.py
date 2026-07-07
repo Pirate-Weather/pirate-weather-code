@@ -681,16 +681,6 @@ pickle_file_path = os.path.join(forecast_process_dir, "SILAM.time.pickle")
 with open(pickle_file_path, "wb") as file:
     pickle.dump(origintime, file)
 
-# Save lat/lon lookup arrays so the API can do nearest-grid lookups at runtime.
-# Store 1D arrays of latitude and longitude coordinate values.
-silam_lat_lon = {
-    "latitude": xarray_forecast_processed.latitude.values.astype(np.float32),
-    "longitude": xarray_forecast_processed.longitude.values.astype(np.float32),
-}
-lat_lon_pickle_path = os.path.join(forecast_process_dir, "SILAM.lat_lon.pickle")
-with open(lat_lon_pickle_path, "wb") as file:
-    pickle.dump(silam_lat_lon, file)
-
 if saveType == "S3":
     s3.put_file(
         forecast_process_dir + "/SILAM.zarr.zip",
@@ -707,21 +697,11 @@ if saveType == "S3":
         os.path.join(forecast_path, ingestVersion, "SILAM.time.pickle"),
     )
 
-    s3.put_file(
-        lat_lon_pickle_path,
-        os.path.join(forecast_path, ingestVersion, "SILAM.lat_lon.pickle"),
-    )
-
     logger.info("Uploaded SILAM zarrs and time pickle to S3.")
 else:
     shutil.move(
         pickle_file_path,
         os.path.join(forecast_path, ingestVersion, "SILAM.time.pickle"),
-    )
-
-    shutil.move(
-        lat_lon_pickle_path,
-        os.path.join(forecast_path, ingestVersion, "SILAM.lat_lon.pickle"),
     )
 
     shutil.copytree(

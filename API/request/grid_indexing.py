@@ -40,6 +40,41 @@ from API.utils.geo import is_in_north_america, lambertGridMatch
 from API.utils.timing import StepTimer
 
 ERA5_PRECIP_PROB_THRESHOLD_M = 0.0001  # m, matching ERA5 total_precipitation units
+SILAM_LAT_START = -89.6
+SILAM_LON_START = -179.8
+SILAM_GRID_DELTA = 0.2
+SILAM_LAT_COUNT = 897
+SILAM_LON_COUNT = 1800
+
+
+def _nearest_regular_grid_index(
+    value: float,
+    start: float,
+    delta: float,
+    count: int,
+) -> int:
+    """Return the nearest bounded index on a regular one-dimensional grid."""
+    index = math.floor(((value - start) / delta) + 0.5)
+    return max(0, min(count - 1, index))
+
+
+def _silam_grid_coords(lat: float, az_lon: float) -> tuple[int, int, float, float]:
+    """Return x/y and nearest gridpoint coordinates for the SILAM global grid."""
+    y_silam = _nearest_regular_grid_index(
+        lat,
+        SILAM_LAT_START,
+        SILAM_GRID_DELTA,
+        SILAM_LAT_COUNT,
+    )
+    x_silam = _nearest_regular_grid_index(
+        az_lon,
+        SILAM_LON_START,
+        SILAM_GRID_DELTA,
+        SILAM_LON_COUNT,
+    )
+    silam_lat = SILAM_LAT_START + y_silam * SILAM_GRID_DELTA
+    silam_lon = SILAM_LON_START + x_silam * SILAM_GRID_DELTA
+    return x_silam, y_silam, silam_lat, silam_lon
 
 
 @dataclass
@@ -62,7 +97,6 @@ class ZarrSources:
     raqdps: Any = None
     silam: Any = None
     raqdps_lat_lon: Any = None
-    silam_lat_lon: Any = None
 
 
 @dataclass
@@ -567,23 +601,13 @@ async def calculate_grid_indexing(
         except Exception as exc:
             logger.debug("RAQDPS grid lookup failed: %s", exc)
 
-    # SILAM: Global air quality model; uses a regular lat/lon grid (1D arrays).
-    if (
-        ex_silam != 1
-        and zarr_sources.silam is not None
-        and zarr_sources.silam_lat_lon is not None
-    ):
+    # SILAM: Global air quality model; uses a regular 0.2° lat/lon grid.
+    if ex_silam != 1 and zarr_sources.silam is not None:
         try:
-            silam_lats = zarr_sources.silam_lat_lon["latitude"]
-            silam_lons = zarr_sources.silam_lat_lon["longitude"]
-            y_silam = int(np.argmin(np.abs(silam_lats - lat)))
-            # SILAM longitude convention: use lon (0-360) if all values > 0, else az_lon
-            if np.min(silam_lons) >= 0:
-                x_silam = int(np.argmin(np.abs(silam_lons - lon)))
-            else:
-                x_silam = int(np.argmin(np.abs(silam_lons - az_lon)))
-            silam_lat_val = float(silam_lats[y_silam])
-            silam_lon_val = float(silam_lons[x_silam])
+            x_silam, y_silam, silam_lat_val, silam_lon_val = _silam_grid_coords(
+                lat,
+                az_lon,
+            )
             readSILAM = True
         except Exception as exc:
             logger.debug("SILAM grid lookup failed: %s", exc)
@@ -944,14 +968,6 @@ async def calculate_grid_indexing(
     dataOut_silam = False
     raqdpsRunTime = None
     silamRunTime = None
-    x_raqdps = None
-    y_raqdps = None
-    raqdps_lat_val = None
-    raqdps_lon_val = None
-    x_silam = None
-    y_silam = None
-    silam_lat_val = None
-    silam_lon_val = None
 
     if "RAQDPS" in zarr_results:
         dataOut_raqdps = zarr_results["RAQDPS"]
