@@ -16,13 +16,8 @@ RAQDPS_OUTPUT_VARS = ("time",) + RAQDPS_VARIABLES
 RAQDPS_FORECAST_HOURS = tuple(range(73))
 RAQDPS_HISTORY_MERGE_HOURS = 12
 
-# Molecular volume of an ideal gas at 25°C and 1 atm is ~24.465 L/mol.
-MOLAR_VOLUME_25C = 24.465
 KG_M3_TO_UG_M3 = 1e9
 MOL_MOL_TO_PPB = 1e9
-O3_PPB_TO_UG_M3 = 48.00 / MOLAR_VOLUME_25C
-NO2_PPB_TO_UG_M3 = 46.01 / MOLAR_VOLUME_25C
-SO2_PPB_TO_UG_M3 = 64.06 / MOLAR_VOLUME_25C
 
 
 def normalize_utc(dt: datetime) -> datetime:
@@ -97,17 +92,26 @@ def history_valid_times(base_time: datetime, hours: int) -> list[datetime]:
     return [base_time - timedelta(hours=offset) for offset in range(hours, 0, -1)]
 
 
-def convert_to_ug_m3(values, variable: str):
-    """Convert RAQDPS native pollutant units to µg/m³."""
+def convert_to_output_units(values, variable: str):
+    """Convert RAQDPS native pollutant units to output units.
+
+    Particulate matter remains mass concentration in µg/m³. Gaseous species are
+    stored as ppb rather than mass concentration.
+    """
     if variable in {"PM2.5", "PM10"}:
         return values * KG_M3_TO_UG_M3
-    if variable == "O3":
-        return values * MOL_MOL_TO_PPB * O3_PPB_TO_UG_M3
-    if variable == "NO2":
-        return values * MOL_MOL_TO_PPB * NO2_PPB_TO_UG_M3
-    if variable == "SO2":
-        return values * MOL_MOL_TO_PPB * SO2_PPB_TO_UG_M3
+    if variable in {"O3", "NO2", "SO2"}:
+        return values * MOL_MOL_TO_PPB
     return values
+
+
+def output_units_for_variable(variable: str) -> str | None:
+    """Return the RAQDPS output unit label for a pollutant variable."""
+    if variable in {"PM2.5", "PM10"}:
+        return "µg m-3"
+    if variable in {"O3", "NO2", "SO2"}:
+        return "ppb"
+    return None
 
 
 def as_float32_array(values) -> np.ndarray:

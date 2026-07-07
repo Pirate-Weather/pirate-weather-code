@@ -10,17 +10,15 @@ from API.raqdps_herbie_template import raqdps
 from API.raqdps_utils import (
     KG_M3_TO_UG_M3,
     MOL_MOL_TO_PPB,
-    NO2_PPB_TO_UG_M3,
-    O3_PPB_TO_UG_M3,
-    SO2_PPB_TO_UG_M3,
     build_raqdps_filename,
     build_raqdps_url,
     candidate_raqdps_runs,
-    convert_to_ug_m3,
+    convert_to_output_units,
     herbie_naive_utc,
     history_run_for_valid_time,
     history_valid_times,
     normalize_utc,
+    output_units_for_variable,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -100,19 +98,22 @@ def test_history_valid_times_exclude_base_time():
 
 
 def test_raqdps_unit_conversions():
-    """RAQDPS native units should normalize to µg/m³ like RDAQA."""
+    """RAQDPS native units should keep gases as ppb outputs."""
     values = np.array([1.0], dtype=np.float32)
-    np.testing.assert_allclose(convert_to_ug_m3(values, "PM2.5"), KG_M3_TO_UG_M3)
-    np.testing.assert_allclose(convert_to_ug_m3(values, "PM10"), KG_M3_TO_UG_M3)
-    np.testing.assert_allclose(
-        convert_to_ug_m3(values, "O3"), MOL_MOL_TO_PPB * O3_PPB_TO_UG_M3
-    )
-    np.testing.assert_allclose(
-        convert_to_ug_m3(values, "NO2"), MOL_MOL_TO_PPB * NO2_PPB_TO_UG_M3
-    )
-    np.testing.assert_allclose(
-        convert_to_ug_m3(values, "SO2"), MOL_MOL_TO_PPB * SO2_PPB_TO_UG_M3
-    )
+    np.testing.assert_allclose(convert_to_output_units(values, "PM2.5"), KG_M3_TO_UG_M3)
+    np.testing.assert_allclose(convert_to_output_units(values, "PM10"), KG_M3_TO_UG_M3)
+    np.testing.assert_allclose(convert_to_output_units(values, "O3"), MOL_MOL_TO_PPB)
+    np.testing.assert_allclose(convert_to_output_units(values, "NO2"), MOL_MOL_TO_PPB)
+    np.testing.assert_allclose(convert_to_output_units(values, "SO2"), MOL_MOL_TO_PPB)
+
+
+def test_raqdps_output_unit_labels():
+    """RAQDPS output metadata should label gases as ppb."""
+    assert output_units_for_variable("PM2.5") == "µg m-3"
+    assert output_units_for_variable("PM10") == "µg m-3"
+    assert output_units_for_variable("O3") == "ppb"
+    assert output_units_for_variable("NO2") == "ppb"
+    assert output_units_for_variable("SO2") == "ppb"
 
 
 def test_herbie_template_sets_raqdps_source():

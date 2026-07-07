@@ -1,6 +1,6 @@
 # %% Regional Air Quality Deterministic Prediction System (RAQDPS) Ingest Script
 # ruff: noqa: E402
-# Downloads ECCC RAQDPS forecasts with Herbie, normalizes pollutant units, and
+# Downloads ECCC RAQDPS forecasts with Herbie, normalizes pollutant output units, and
 # publishes a 48-hour history plus 72-hour forecast Zarr store.
 
 # %% Import modules
@@ -54,7 +54,7 @@ from API.raqdps_utils import (
     RAQDPS_VARIABLES,
     as_float32_array,
     candidate_raqdps_runs,
-    convert_to_ug_m3,
+    convert_to_output_units,
     herbie_naive_utc,
     history_run_for_valid_time,
     history_valid_times,
@@ -160,12 +160,12 @@ def download_raqdps_file(run_time, variable, forecast_hour):
 
 
 def read_raqdps_grib(local_grib_path, variable):
-    """Read and normalize one RAQDPS GRIB2 field to a float32 numpy array."""
+    """Read one RAQDPS GRIB2 field in configured output units as float32."""
     ds = xr.open_dataset(local_grib_path, engine="cfgrib", decode_times=False)
     try:
         grib_var_name = list(ds.data_vars)[0]
         data_array = ds[grib_var_name].astype(np.float32)
-        return as_float32_array(convert_to_ug_m3(data_array, variable).values)
+        return as_float32_array(convert_to_output_units(data_array, variable).values)
     finally:
         ds.close()
 
