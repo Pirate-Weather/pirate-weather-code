@@ -18,8 +18,9 @@ from API.constants.api_const import MAX_ZARR_READ_RETRIES
 from API.constants.shared_const import INGEST_VERSION_STR, MISSING_DATA
 from API.io.ZarrHelpers import _add_custom_header, init_ERA5, setup_testing_zipstore
 
-
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+DATA_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"
+)
 
 
 def _default_logger() -> logging.Logger:
@@ -310,7 +311,6 @@ def update_zarr_store(
 
             # Load AQ model lat/lon pickles
             _load_aq_lat_lon_pickles(stores, save_dir, logger=logger)
-
 
     logger.info("Zarr stores loaded")
     return stores
