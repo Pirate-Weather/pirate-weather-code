@@ -252,6 +252,7 @@ AQHI_BETA_O3 = 0.000537  # O3  coefficient (µg/m³)
 AQHI_BETA_NO2 = 0.000871  # NO2 coefficient (µg/m³)
 AQHI_BETA_PM25 = 0.000487  # PM2.5 coefficient (µg/m³)
 AQHI_SCALE = 10.0 / 10.4
+AQHI_MAX = 15.0
 
 
 def compute_aqhi(
@@ -259,10 +260,7 @@ def compute_aqhi(
     o3_ppb: float = float("nan"),
     no2_ppb: float = float("nan"),
 ) -> float:
-    """Compute Canadian AQHI (1–10+ scale, capped at 10 for the 'high risk' band).
-
-    Returns an unbounded float; display logic should show 10+ above 10.
-    """
+    """Compute Canadian AQHI (1–10+ scale, capped at 15)."""
     # Convert gases from ppb to µg/m³
     o3_ug = o3_ppb * PPB_O3_TO_UG_M3 if not math.isnan(o3_ppb) else float("nan")
     no2_ug = no2_ppb * PPB_NO2_TO_UG_M3 if not math.isnan(no2_ppb) else float("nan")
@@ -285,7 +283,7 @@ def compute_aqhi(
 
     aqhi = AQHI_SCALE * total * 100.0
     # Scale to familiar 1–10 range (10+ is "very high risk")
-    return round(aqhi, 1)
+    return round(min(aqhi, AQHI_MAX), 1)
 
 
 # ---------------------------------------------------------------------------

@@ -72,6 +72,11 @@ class TestAQHI:
         aqhi = compute_aqhi(pm25_ug=50.0, o3_ppb=200.0, no2_ppb=100.0)
         assert aqhi >= 7
 
+    def test_extreme_concentrations_cap_aqhi_at_15(self):
+        """Extreme concentrations should not report AQHI above 15."""
+        aqhi = compute_aqhi(pm25_ug=5000.0, o3_ppb=5000.0, no2_ppb=5000.0)
+        assert aqhi == 15.0
+
     def test_nan_inputs_return_nan(self):
         """All NaN → NaN."""
         aqhi = compute_aqhi()

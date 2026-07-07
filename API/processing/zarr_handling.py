@@ -59,7 +59,7 @@ class WeatherParallel(object):
         data_out = False
         return data_out
 
-    async def zarr_read_max_square(self, model, opened_zarr, x, y, square_size=5):
+    async def zarr_read_max_square(self, model, opened_zarr, x, y, square_size=3):
         if TIMING:
             logger.debug(f"### {model} Reading max square!")
             logger.debug(datetime.datetime.now(datetime.UTC).replace(tzinfo=None))
