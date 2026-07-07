@@ -83,6 +83,8 @@ zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
 processChunk = CHUNK_SIZES["SILAM"]
 finalChunk = FINAL_CHUNK_SIZES["SILAM"]
 hisPeriod = HISTORY_PERIODS["SILAM"]
+MAP_TIME_STEPS = 36
+MAP_CHUNK_SIZE = 100
 
 HISTORIC_STEP_HOURS = 24
 KG_M3_TO_UG_M3 = 1e9
@@ -100,6 +102,7 @@ zarr_vars = (
     "cnc_SO2",
     "cnc_CO",
 )
+MAP_VAR_INDICES = list(range(len(zarr_vars)))
 
 # SILAM variable names and units:
 # - cnc_PM2_5, cnc_PM10: Particulate matter in kg/m³ (need conversion to µg/m³)
@@ -635,6 +638,46 @@ with ProgressBar():
 
 close_store(zarr_store)
 
+# Rechunk map data for faster web access.
+# Mirrors the GFS map zarr layout: one named array per variable, with all map
+# times in a single time chunk and 100x100 spatial chunks for fast tile reads.
+# Map extent: -12 to +24 hours around the forecast origin (36 hours total).
+stacked_array_maps = pad_to_chunk_size(stacked_array_disk, MAP_CHUNK_SIZE)
+
+if saveType == "S3":
+    zarr_store_maps = zarr.storage.ZipStore(
+        forecast_process_dir + "/SILAM_Maps.zarr.zip", mode="a"
+    )
+else:
+    zarr_store_maps = zarr.storage.LocalStore(
+        forecast_process_dir + "/SILAM_Maps.zarr"
+    )
+
+for var_idx in MAP_VAR_INDICES:
+    zarr_array = zarr.create_array(
+        store=zarr_store_maps,
+        name=zarr_vars[var_idx],
+        shape=(
+            MAP_TIME_STEPS,
+            stacked_array_maps.shape[2],
+            stacked_array_maps.shape[3],
+        ),
+        chunks=(MAP_TIME_STEPS, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE),
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32",
+    )
+
+    with ProgressBar():
+        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+            da.rechunk(
+                stacked_array_maps[var_idx, hisPeriod - 12 : hisPeriod + 24, :, :],
+                (MAP_TIME_STEPS, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE),
+            ).to_zarr(zarr_array, overwrite=True, compute=True)
+
+    logger.info("Created SILAM map data for %s", zarr_vars[var_idx])
+
+close_store(zarr_store_maps)
+
 # %% Final output handling and cleanup
 pickle_file_path = os.path.join(forecast_process_dir, "SILAM.time.pickle")
 with open(pickle_file_path, "wb") as file:
@@ -647,11 +690,16 @@ if saveType == "S3":
     )
 
     s3.put_file(
+        forecast_process_dir + "/SILAM_Maps.zarr.zip",
+        os.path.join(forecast_path, ingestVersion, "SILAM_Maps.zarr.zip"),
+    )
+
+    s3.put_file(
         pickle_file_path,
         os.path.join(forecast_path, ingestVersion, "SILAM.time.pickle"),
     )
 
-    logger.info("Uploaded SILAM zarr zip and time pickle to S3.")
+    logger.info("Uploaded SILAM zarrs and time pickle to S3.")
 else:
     shutil.move(
         pickle_file_path,
@@ -663,8 +711,15 @@ else:
         forecast_path + "/" + ingestVersion + "/SILAM.zarr",
         dirs_exist_ok=True,
     )
+
+    shutil.copytree(
+        forecast_process_dir + "/SILAM_Maps.zarr",
+        forecast_path + "/" + ingestVersion + "/SILAM_Maps.zarr",
+        dirs_exist_ok=True,
+    )
     logger.info(
-        f"Saved SILAM data locally to {forecast_path}/{ingestVersion}/SILAM.zarr"
+        f"Saved SILAM data locally to {forecast_path}/{ingestVersion}/SILAM.zarr "
+        f"and {forecast_path}/{ingestVersion}/SILAM_Maps.zarr"
     )
 
 # Clean up temporary files and directories
