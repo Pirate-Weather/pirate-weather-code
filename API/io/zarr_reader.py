@@ -19,6 +19,9 @@ from API.constants.shared_const import INGEST_VERSION_STR, MISSING_DATA
 from API.io.ZarrHelpers import _add_custom_header, init_ERA5, setup_testing_zipstore
 
 
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+
+
 def _default_logger() -> logging.Logger:
     return logging.getLogger(__name__)
 
@@ -305,6 +308,10 @@ def update_zarr_store(
                     logger=logger,
                 )
 
+            # Load AQ model lat/lon pickles
+            _load_aq_lat_lon_pickles(stores, save_dir, logger=logger)
+
+
     logger.info("Zarr stores loaded")
     return stores
 
@@ -317,7 +324,7 @@ def _load_aq_lat_lon_pickles(
 ) -> None:
     """Load AQ model lat/lon pickle files when available."""
     for attr, fname in (("RAQDPS_LatLon", "RAQDPS.lat_lon.pickle"),):
-        path = os.path.join(save_dir, fname)
+        path = os.path.join(DATA_DIR, fname)
         if os.path.exists(path):
             try:
                 with open(path, "rb") as fh:

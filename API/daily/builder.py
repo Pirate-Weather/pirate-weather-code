@@ -1238,19 +1238,20 @@ def build_daily_section(
         }
 
         if version >= 2:
+            aqi_col = DATA_HOURLY["aqi"]
             aqi_mean = (
-                daily_display_mean[idx, DATA_DAY["aqi"]]
-                if DATA_DAY["aqi"] < daily_display_mean.shape[1]
+                daily_display_mean[idx, aqi_col]
+                if aqi_col < daily_display_mean.shape[1]
                 else np.nan
             )
             aqi_max = (
-                daily_display_max[idx, DATA_DAY["aqi"]]
-                if DATA_DAY["aqi"] < daily_display_max.shape[1]
+                daily_display_max[idx, aqi_col]
+                if aqi_col < daily_display_max.shape[1]
                 else np.nan
             )
             aqi_min = (
-                InterPdayMin[idx, DATA_DAY["aqi"]]
-                if DATA_DAY["aqi"] < InterPdayMin.shape[1]
+                InterPdayMin[idx, aqi_col]
+                if aqi_col < InterPdayMin.shape[1]
                 else np.nan
             )
             dayObject["airQualityIndex"] = (
@@ -1260,8 +1261,8 @@ def build_daily_section(
                 int(round(float(aqi_max))) if not np.isnan(aqi_max) else np.nan
             )
             aqi_max_time_raw = (
-                InterPdayMaxTime[idx, DATA_DAY["aqi"]]
-                if DATA_DAY["aqi"] < InterPdayMaxTime.shape[1]
+                InterPdayMaxTime[idx, aqi_col]
+                if aqi_col < InterPdayMaxTime.shape[1]
                 else np.nan
             )
             dayObject["airQualityIndexMaxTime"] = (
@@ -1273,8 +1274,8 @@ def build_daily_section(
                 int(round(float(aqi_min))) if not np.isnan(aqi_min) else np.nan
             )
             aqi_min_time_raw = (
-                InterPdayMinTime[idx, DATA_DAY["aqi"]]
-                if DATA_DAY["aqi"] < InterPdayMinTime.shape[1]
+                InterPdayMinTime[idx, aqi_col]
+                if aqi_col < InterPdayMinTime.shape[1]
                 else np.nan
             )
             dayObject["airQualityIndexMinTime"] = (
