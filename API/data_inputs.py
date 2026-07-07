@@ -13,6 +13,8 @@ from API.constants.model_const import (
     GFS,
     HRRR,
     NBM,
+    RAQDPS,
+    SILAM,
 )
 from API.utils.source_priority import should_gfs_precede_dwd
 
@@ -857,4 +859,75 @@ def prepare_data_inputs(
         "solar_inputs": solar_inputs,
         "cape_inputs": cape_inputs,
         "error_inputs": error_inputs,
+    }
+
+
+def prepare_aq_inputs(
+    num_hours,
+    dataOut_raqdps,
+    dataOut_silam,
+    hour_array_grib,
+):
+    """Prepare air-quality concentration arrays aligned to the request hour grid.
+
+    Returns a dict with keys: pm25, pm10, o3, no2, so2, co.
+    Each value is a 1-D numpy array of length ``num_hours`` in the model's native
+    units (µg/m³ for PM; ppb for gases).  Missing values are NaN.
+
+    Priority: RAQDPS > SILAM per pollutant.
+    RAQDPS does not have CO; it falls back to SILAM CO unconditionally.
+    """
+    nan_row = np.full(num_hours, np.nan)
+
+    def _extract(data, var_idx):
+        """Extract ``var_idx`` column from a zarr read result and align to ``hour_array_grib``."""
+        if not isinstance(data, np.ndarray):
+            return None
+        try:
+            col = data[:, var_idx].astype(float)
+            # Time column is column 0 (unix seconds); match to hour_array_grib
+            time_col = data[:, 0].astype(float)
+            out = np.full(num_hours, np.nan)
+            for hi, t in enumerate(hour_array_grib):
+                diff = np.abs(time_col - float(t))
+                best = np.argmin(diff)
+                if diff[best] <= 1800:  # within 30 min
+                    out[hi] = col[best]
+            return out
+        except Exception:
+            return None
+
+    raqdps_pm25 = _extract(dataOut_raqdps, RAQDPS["pm25"])
+    raqdps_pm10 = _extract(dataOut_raqdps, RAQDPS["pm10"])
+    raqdps_no2 = _extract(dataOut_raqdps, RAQDPS["no2"])
+    raqdps_o3 = _extract(dataOut_raqdps, RAQDPS["o3"])
+    raqdps_so2 = _extract(dataOut_raqdps, RAQDPS["so2"])
+
+    silam_pm25 = _extract(dataOut_silam, SILAM["pm25"])
+    silam_pm10 = _extract(dataOut_silam, SILAM["pm10"])
+    silam_no2 = _extract(dataOut_silam, SILAM["no2"])
+    silam_o3 = _extract(dataOut_silam, SILAM["o3"])
+    silam_so2 = _extract(dataOut_silam, SILAM["so2"])
+    silam_co = _extract(dataOut_silam, SILAM["co"])
+
+    def _prefer(primary, fallback):
+        """Return primary where not-NaN, else fallback."""
+        if primary is None and fallback is None:
+            return nan_row.copy()
+        if primary is None:
+            return fallback.copy() if fallback is not None else nan_row.copy()
+        if fallback is None:
+            return primary.copy()
+        out = primary.copy()
+        nan_mask = np.isnan(out)
+        out[nan_mask] = fallback[nan_mask]
+        return out
+
+    return {
+        "pm25": _prefer(raqdps_pm25, silam_pm25),
+        "pm10": _prefer(raqdps_pm10, silam_pm10),
+        "o3": _prefer(raqdps_o3, silam_o3),
+        "no2": _prefer(raqdps_no2, silam_no2),
+        "so2": _prefer(raqdps_so2, silam_so2),
+        "co": _prefer(None, silam_co),  # RAQDPS has no CO; SILAM only
     }

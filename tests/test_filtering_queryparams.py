@@ -174,3 +174,76 @@ class TestApplyBlockIndices:
         obj = {"daily": {"data": []}}
         apply_block_indices(obj, "daily", [])
         assert obj["daily"]["data"] == []
+
+
+class TestAQFieldFiltering:
+    """Tests for AQ field visibility via remove_conditional_fields."""
+
+    def _make_aq_item(self):
+        return {
+            "temperature": 20.0,
+            "airQualityIndex": 42,
+            "pm25": 10.0,
+            "pm10": 20.0,
+            "ozoneConcentration": 30.0,
+            "no2Concentration": 5.0,
+            "so2Concentration": 2.0,
+            "coConcentration": 100.0,
+            "smoke": 0.1,
+        }
+
+    def test_version_lt2_hides_aqi(self):
+        from API.api_utils import remove_conditional_fields
+
+        item = self._make_aq_item()
+        remove_conditional_fields(item, version=1, time_machine=False, tm_extra=False)
+        assert "airQualityIndex" not in item
+
+    def test_version_gte2_keeps_aqi(self):
+        from API.api_utils import remove_conditional_fields
+
+        item = self._make_aq_item()
+        remove_conditional_fields(item, version=2, time_machine=False, tm_extra=False)
+        assert "airQualityIndex" in item
+
+    def test_detail_fields_hidden_without_flag(self):
+        from API.api_utils import remove_conditional_fields
+
+        item = self._make_aq_item()
+        remove_conditional_fields(
+            item, version=2, time_machine=False, tm_extra=False, inc_airqualitydetails=0
+        )
+        assert "pm25" not in item
+        assert "pm10" not in item
+        assert "ozoneConcentration" not in item
+
+    def test_detail_fields_present_with_flag(self):
+        from API.api_utils import remove_conditional_fields
+
+        item = self._make_aq_item()
+        remove_conditional_fields(
+            item, version=2, time_machine=False, tm_extra=False, inc_airqualitydetails=1
+        )
+        assert "pm25" in item
+        assert "ozoneConcentration" in item
+
+    def test_version_lt2_and_details_flag_both_active(self):
+        """version<2 should hide AQI even when inc_airqualitydetails=1."""
+        from API.api_utils import remove_conditional_fields
+
+        item = self._make_aq_item()
+        remove_conditional_fields(
+            item, version=1, time_machine=False, tm_extra=False, inc_airqualitydetails=1
+        )
+        assert "airQualityIndex" not in item
+        # Detail fields are also hidden because version<2 is a superset hide
+        # (airQualityIndex is in _FIELDS_V_LT_2)
+
+    def test_non_aq_fields_unaffected(self):
+        from API.api_utils import remove_conditional_fields
+
+        item = self._make_aq_item()
+        remove_conditional_fields(
+            item, version=2, time_machine=False, tm_extra=False, inc_airqualitydetails=0
+        )
+        assert "temperature" in item

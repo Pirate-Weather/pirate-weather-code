@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import pickle
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -41,6 +42,10 @@ class ZarrStores:
     AIGFS_Zarr: Optional[Any] = None
     AIGEFS_Zarr: Optional[Any] = None
     ECMWF_AIFS_Zarr: Optional[Any] = None
+    RAQDPS_Zarr: Optional[Any] = None
+    SILAM_Zarr: Optional[Any] = None
+    RAQDPS_LatLon: Optional[Any] = None
+    SILAM_LatLon: Optional[Any] = None
 
 
 async def get_zarr(store, X, Y):
@@ -208,9 +213,14 @@ def update_zarr_store(
             ("AIGFS_Zarr", "AIGFS.zarr"),
             ("AIGEFS_Zarr", "AIGEFS.zarr"),
             ("ECMWF_AIFS_Zarr", "ECMWF_AIFS.zarr"),
+            ("RAQDPS_Zarr", "RAQDPS.zarr"),
+            ("SILAM_Zarr", "SILAM.zarr"),
         ]
         for attr, fname in local_stores:
             _load_local_store(stores, attr, save_dir, fname, logger=logger)
+
+        # Load AQ model lat/lon pickles
+        _load_aq_lat_lon_pickles(stores, save_dir, logger=logger)
 
     # Use S3 stores for Testing and TM Testing
     if stage in ("TESTING", "TM_TESTING"):
@@ -285,6 +295,27 @@ def update_zarr_store(
 
     logger.info("Zarr stores loaded")
     return stores
+
+
+def _load_aq_lat_lon_pickles(
+    stores: ZarrStores,
+    save_dir: str,
+    *,
+    logger: logging.Logger,
+) -> None:
+    """Load RAQDPS and SILAM lat/lon pickle files when available."""
+    for attr, fname in (
+        ("RAQDPS_LatLon", "RAQDPS.lat_lon.pickle"),
+        ("SILAM_LatLon", "SILAM.lat_lon.pickle"),
+    ):
+        path = os.path.join(save_dir, fname)
+        if os.path.exists(path):
+            try:
+                with open(path, "rb") as fh:
+                    setattr(stores, attr, pickle.load(fh))
+                logger.info("Loaded %s from: %s", attr, path)
+            except Exception as exc:
+                logger.warning("Could not load %s: %s", attr, exc)
 
 
 def _load_local_store(

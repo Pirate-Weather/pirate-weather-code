@@ -59,6 +59,10 @@ class ZarrSources:
     aigfs: Any = None
     aigefs: Any = None
     ecmwf_aifs: Any = None
+    raqdps: Any = None
+    silam: Any = None
+    raqdps_lat_lon: Any = None
+    silam_lat_lon: Any = None
 
 
 @dataclass
@@ -111,6 +115,19 @@ class GridIndexingResult:
     dwd_lon: Union[float, None]
     sourceIDX: dict
     WMO_alertDat: Union[str, None]
+    # Air quality model outputs
+    dataOut_raqdps: Union[np.ndarray, bool] = False
+    dataOut_silam: Union[np.ndarray, bool] = False
+    raqdpsRunTime: Union[float, None] = None
+    silamRunTime: Union[float, None] = None
+    x_raqdps: Union[float, None] = None
+    y_raqdps: Union[float, None] = None
+    raqdps_lat: Union[float, None] = None
+    raqdps_lon: Union[float, None] = None
+    x_silam: Union[float, None] = None
+    y_silam: Union[float, None] = None
+    silam_lat: Union[float, None] = None
+    silam_lon: Union[float, None] = None
 
 
 def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours: int):
@@ -220,15 +237,17 @@ async def calculate_grid_indexing(
     ex_aigfs: int,
     ex_aigefs: int,
     ex_aifs: int,
-    inc_aimodels: int,
-    read_wmo_alerts: bool,
-    base_day_utc: datetime.datetime,
-    num_hours: int,
-    zarr_sources: ZarrSources,
-    weather,
-    timing_start: datetime.datetime,
-    timing_enabled: bool,
-    logger: logging.Logger,
+    ex_raqdps: int = 0,
+    ex_silam: int = 0,
+    inc_aimodels: int = 0,
+    read_wmo_alerts: bool = True,
+    base_day_utc: datetime.datetime = None,
+    num_hours: int = 0,
+    zarr_sources: ZarrSources = None,
+    weather=None,
+    timing_start: datetime.datetime = None,
+    timing_enabled: bool = False,
+    logger: logging.Logger = None,
 ) -> GridIndexingResult:
     """Compute grid coordinates and pull the zarr slices for the request."""
     timer = StepTimer(timing_start, timing_enabled)
@@ -514,6 +533,63 @@ async def calculate_grid_indexing(
 
     timer.log("### AI Models Detail END ###")
 
+    timer.log("### AQ Models Detail Start ###")
+
+    readRAQDPS = False
+    readSILAM = False
+    x_raqdps = None
+    y_raqdps = None
+    raqdps_lat_val = None
+    raqdps_lon_val = None
+    x_silam = None
+    y_silam = None
+    silam_lat_val = None
+    silam_lon_val = None
+
+    # RAQDPS: Canadian regional air quality model; uses a rotated lat-lon 2D grid.
+    # Available only when the lat/lon pickle has been loaded.
+    if (
+        ex_raqdps != 1
+        and zarr_sources.raqdps is not None
+        and zarr_sources.raqdps_lat_lon is not None
+    ):
+        try:
+            raqdps_lats_2d = zarr_sources.raqdps_lat_lon["latitude"]
+            raqdps_lons_2d = zarr_sources.raqdps_lat_lon["longitude"]
+            # Nearest-grid search on a 2D rotated grid using Euclidean distance
+            dist = np.sqrt((raqdps_lats_2d - lat) ** 2 + (raqdps_lons_2d - lon) ** 2)
+            yx = np.unravel_index(np.argmin(dist), dist.shape)
+            y_raqdps = int(yx[0])
+            x_raqdps = int(yx[1])
+            raqdps_lat_val = float(raqdps_lats_2d[y_raqdps, x_raqdps])
+            raqdps_lon_val = float(raqdps_lons_2d[y_raqdps, x_raqdps])
+            readRAQDPS = True
+        except Exception as exc:
+            logger.debug("RAQDPS grid lookup failed: %s", exc)
+
+    # SILAM: Global air quality model; uses a regular lat/lon grid (1D arrays).
+    if (
+        ex_silam != 1
+        and zarr_sources.silam is not None
+        and zarr_sources.silam_lat_lon is not None
+    ):
+        try:
+            silam_lats = zarr_sources.silam_lat_lon["latitude"]
+            silam_lons = zarr_sources.silam_lat_lon["longitude"]
+            y_silam = int(np.argmin(np.abs(silam_lats - lat)))
+            # SILAM longitude convention: use lon (0-360) if all values > 0, else az_lon
+            if np.min(silam_lons) >= 0:
+                x_silam = int(np.argmin(np.abs(silam_lons - lon)))
+            else:
+                x_silam = int(np.argmin(np.abs(silam_lons - az_lon)))
+            silam_lat_val = float(silam_lats[y_silam])
+            silam_lon_val = float(silam_lons[x_silam])
+            readSILAM = True
+        except Exception as exc:
+            logger.debug("SILAM grid lookup failed: %s", exc)
+
+    timer.log("### AQ Models Detail END ###")
+
     if readERA5:
         era5_read_start = time.perf_counter()
         cache_stats_before = _era5_cache_stats(zarr_sources.era5_data)
@@ -583,6 +659,14 @@ async def calculate_grid_indexing(
     if readAIFS:
         zarrTasks["ECMWF_AIFS"] = weather.zarr_read(
             "ECMWF_AIFS", zarr_sources.ecmwf_aifs, x_p_eur, y_p_eur
+        )
+    if readRAQDPS:
+        zarrTasks["RAQDPS"] = weather.zarr_read(
+            "RAQDPS", zarr_sources.raqdps, x_raqdps, y_raqdps
+        )
+    if readSILAM:
+        zarrTasks["SILAM"] = weather.zarr_read(
+            "SILAM", zarr_sources.silam, x_silam, y_silam
         )
 
     WMO_alertDat = None
@@ -855,6 +939,50 @@ async def calculate_grid_indexing(
     else:
         dataOut_aifs = False
 
+    # --- AQ model results ---
+    dataOut_raqdps = False
+    dataOut_silam = False
+    raqdpsRunTime = None
+    silamRunTime = None
+    x_raqdps = None
+    y_raqdps = None
+    raqdps_lat_val = None
+    raqdps_lon_val = None
+    x_silam = None
+    y_silam = None
+    silam_lat_val = None
+    silam_lon_val = None
+
+    if "RAQDPS" in zarr_results:
+        dataOut_raqdps = zarr_results["RAQDPS"]
+        if isinstance(dataOut_raqdps, np.ndarray):
+            try:
+                raqdpsRunTime = float(dataOut_raqdps[0, 0])
+                timestamp_dt = datetime.datetime.fromtimestamp(
+                    int(raqdpsRunTime), datetime.UTC
+                ).replace(tzinfo=None)
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                    dataOut_raqdps = False
+                    raqdpsRunTime = None
+                    logger.warning("OLD RAQDPS")
+            except (ValueError, TypeError, AttributeError):
+                logger.debug("Failed to parse RAQDPS runtime for freshness check")
+
+    if "SILAM" in zarr_results:
+        dataOut_silam = zarr_results["SILAM"]
+        if isinstance(dataOut_silam, np.ndarray):
+            try:
+                silamRunTime = float(dataOut_silam[0, 0])
+                timestamp_dt = datetime.datetime.fromtimestamp(
+                    int(silamRunTime), datetime.UTC
+                ).replace(tzinfo=None)
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                    dataOut_silam = False
+                    silamRunTime = None
+                    logger.warning("OLD SILAM")
+            except (ValueError, TypeError, AttributeError):
+                logger.debug("Failed to parse SILAM runtime for freshness check")
+
     return GridIndexingResult(
         dataOut=dataOut,
         dataOut_h2=dataOut_h2,
@@ -904,4 +1032,16 @@ async def calculate_grid_indexing(
         dwd_lon=dwd_lon,
         sourceIDX=sourceIDX,
         WMO_alertDat=WMO_alertDat,
+        dataOut_raqdps=dataOut_raqdps,
+        dataOut_silam=dataOut_silam,
+        raqdpsRunTime=raqdpsRunTime,
+        silamRunTime=silamRunTime,
+        x_raqdps=x_raqdps,
+        y_raqdps=y_raqdps,
+        raqdps_lat=raqdps_lat_val,
+        raqdps_lon=raqdps_lon_val,
+        x_silam=x_silam,
+        y_silam=y_silam,
+        silam_lat=silam_lat_val,
+        silam_lon=silam_lon_val,
     )

@@ -32,6 +32,14 @@ DATA_CURRENT = {
     "rain_intensity": 24,
     "snow_intensity": 25,
     "ice_intensity": 26,
+    # Air quality slots (version >= 2 only)
+    "pm25": 27,
+    "pm10": 28,
+    "o3": 29,
+    "no2": 30,
+    "so2": 31,
+    "co": 32,
+    "aqi": 33,
 }
 
 # Minutely comumn indexes
@@ -81,6 +89,14 @@ DATA_HOURLY = {
     "rain_intensity": 29,
     "snow_intensity": 30,
     "ice_intensity": 31,
+    # Air quality slots (version >= 2 only)
+    "pm25": 32,
+    "pm10": 33,
+    "o3": 34,
+    "no2": 35,
+    "so2": 36,
+    "co": 37,
+    "aqi": 38,
 }
 
 # Daily column indexes
@@ -117,6 +133,8 @@ DATA_DAY = {
     "rain_intensity": 29,
     "snow_intensity": 30,
     "ice_intensity": 31,
+    # Air quality slots (version >= 2 only)
+    "aqi": 32,
 }
 
 DATA_TIMEMACHINE = {
