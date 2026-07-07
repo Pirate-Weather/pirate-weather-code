@@ -19,20 +19,6 @@ import numpy as np
 import xarray as xr
 
 # Import atmospheric calculation constants
-from API.constants.aqi_const import (
-    CO_AQI,
-    CO_BP,
-    NO2_AQI,
-    NO2_BP,
-    O3_AQI,
-    O3_BP,
-    PM10_AQI,
-    PM10_BP,
-    PM25_AQI,
-    PM25_BP,
-    SO2_AQI,
-    SO2_BP,
-)
 from API.constants.shared_const import (
     MISSING_DATA,
     REFC_THRESHOLD,
