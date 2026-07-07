@@ -59,6 +59,58 @@ class WeatherParallel(object):
         data_out = False
         return data_out
 
+    async def zarr_read_max_square(self, model, opened_zarr, x, y, square_size=5):
+        if TIMING:
+            logger.debug(f"### {model} Reading max square!")
+            logger.debug(datetime.datetime.now(datetime.UTC).replace(tzinfo=None))
+
+        err_count = 0
+        data_out = False
+        radius = square_size // 2
+        while err_count < MAX_ZARR_READ_RETRIES:
+            try:
+                y_start = max(0, y - radius)
+                y_end = min(opened_zarr.shape[-2], y + radius + 1)
+                x_start = max(0, x - radius)
+                x_end = min(opened_zarr.shape[-1], x + radius + 1)
+
+                data_out = await asyncio.to_thread(
+                    lambda: (
+                        np.nanmax(
+                            opened_zarr[:, :, y_start:y_end, x_start:x_end],
+                            axis=(-2, -1),
+                        ).T
+                    )
+                )
+
+                has_missing_data, missing_row = has_interior_nan_holes(data_out.T)
+                if has_missing_data:
+                    logger.warning(
+                        f"### {model} Interpolating missing data (row {missing_row})!"
+                    )
+
+                    if TIMING:
+                        logger.debug(
+                            f"### {model} Missing data at: {np.argwhere(np.isnan(data_out))}"
+                        )
+
+                    data_out = np.apply_along_axis(_interp_row, 0, data_out)
+
+                if TIMING:
+                    logger.debug(f"### {model} Done!")
+                    logger.debug(
+                        datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+                    )
+                return data_out
+
+            except Exception:
+                logger.exception("### %s Failure! %s", model, self.loc_tag)
+                err_count += 1
+
+        logger.error("### %s Failure! %s", model, self.loc_tag)
+        data_out = False
+        return data_out
+
 
 async def get_zarr(store, X, Y):
     """Asynchronously retrieve zarr data at given coordinates.

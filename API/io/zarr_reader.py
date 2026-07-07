@@ -158,6 +158,49 @@ class WeatherParallel(object):
         data_out = False
         return data_out
 
+    async def zarr_read_max_square(self, model, opened_zarr, x, y, square_size=5):
+        if self.timing_enabled:
+            self.logger.debug("### %s Reading max square! %s", model, self.loc_tag)
+        err_count = 0
+        data_out = False
+        radius = square_size // 2
+        while err_count < MAX_ZARR_READ_RETRIES:
+            try:
+                y_start = max(0, y - radius)
+                y_end = min(opened_zarr.shape[-2], y + radius + 1)
+                x_start = max(0, x - radius)
+                x_end = min(opened_zarr.shape[-1], x + radius + 1)
+
+                data_out = await asyncio.to_thread(
+                    lambda: (
+                        np.nanmax(
+                            opened_zarr[:, :, y_start:y_end, x_start:x_end],
+                            axis=(-2, -1),
+                        ).T
+                    )
+                )
+
+                has_missing_data, missing_row = has_interior_nan_holes(data_out.T)
+                if has_missing_data:
+                    self.logger.warning(
+                        "### %s Interpolating missing data (row %s)!",
+                        model,
+                        missing_row,
+                    )
+                    data_out = np.apply_along_axis(_interp_row, 0, data_out)
+
+                if self.timing_enabled:
+                    self.logger.debug("### %s Done! %s", model, self.loc_tag)
+                return data_out
+
+            except Exception:
+                self.logger.exception("### %s Failure! %s", model, self.loc_tag)
+                err_count += 1
+
+        self.logger.error("### %s Failure! %s", model, self.loc_tag)
+        data_out = False
+        return data_out
+
 
 def update_zarr_store(
     initial_run: bool,

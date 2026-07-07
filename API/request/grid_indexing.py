@@ -746,11 +746,11 @@ async def calculate_grid_indexing(
             "ECMWF_AIFS", zarr_sources.ecmwf_aifs, x_p_eur, y_p_eur
         )
     if readRAQDPS:
-        zarrTasks["RAQDPS"] = weather.zarr_read(
+        zarrTasks["RAQDPS"] = weather.zarr_read_max_square(
             "RAQDPS", zarr_sources.raqdps, x_raqdps, y_raqdps
         )
     if readSILAM:
-        zarrTasks["SILAM"] = weather.zarr_read(
+        zarrTasks["SILAM"] = weather.zarr_read_max_square(
             "SILAM", zarr_sources.silam, x_silam, y_silam
         )
 
@@ -1034,7 +1034,7 @@ async def calculate_grid_indexing(
         dataOut_raqdps = zarr_results["RAQDPS"]
         if isinstance(dataOut_raqdps, np.ndarray):
             try:
-                raqdpsRunTime = float(dataOut_raqdps[0, 0])
+                raqdpsRunTime = float(dataOut_raqdps[HISTORY_PERIODS["RAQDPS"] - 1, 0])
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     int(raqdpsRunTime), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1049,7 +1049,7 @@ async def calculate_grid_indexing(
         dataOut_silam = zarr_results["SILAM"]
         if isinstance(dataOut_silam, np.ndarray):
             try:
-                silamRunTime = float(dataOut_silam[0, 0])
+                silamRunTime = float(dataOut_silam[HISTORY_PERIODS["SILAM"] - 1, 0])
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     int(silamRunTime), datetime.UTC
                 ).replace(tzinfo=None)
