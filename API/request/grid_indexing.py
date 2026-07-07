@@ -12,6 +12,7 @@ from typing import Any, Union
 
 import numpy as np
 import xarray as xr
+from scipy.spatial import cKDTree
 
 from API.constants.grid_const import (
     HRRR_X_MAX,
@@ -45,6 +46,69 @@ SILAM_LON_START = -179.8
 SILAM_GRID_DELTA = 0.2
 SILAM_LAT_COUNT = 897
 SILAM_LON_COUNT = 1800
+
+
+def _normalize_longitude_180(lon):
+    """Normalize longitude values to [-180, 180)."""
+    return ((np.asarray(lon, dtype=float) + 180.0) % 360.0) - 180.0
+
+
+def _lat_lon_to_unit_xyz(lat, lon) -> np.ndarray:
+    """Convert latitude/longitude degrees to unit-sphere XYZ coordinates."""
+    lat_rad = np.deg2rad(np.asarray(lat, dtype=float))
+    lon_rad = np.deg2rad(_normalize_longitude_180(lon))
+    cos_lat = np.cos(lat_rad)
+    return np.column_stack(
+        [
+            np.ravel(cos_lat * np.cos(lon_rad)),
+            np.ravel(cos_lat * np.sin(lon_rad)),
+            np.ravel(np.sin(lat_rad)),
+        ]
+    )
+
+
+def _raqdps_lookup_cache(lat_lon_grid: Any) -> dict[str, Any]:
+    """Return a cached spherical KD-tree for the RAQDPS rotated lat/lon grid."""
+    if isinstance(lat_lon_grid, dict):
+        cache = lat_lon_grid.get("_lookup_cache")
+        if cache is not None:
+            return cache
+
+    latitude = np.asarray(lat_lon_grid["latitude"], dtype=float)
+    longitude = _normalize_longitude_180(lat_lon_grid["longitude"])
+    if latitude.shape != longitude.shape:
+        raise ValueError(
+            "RAQDPS latitude/longitude shape mismatch: "
+            f"lat={latitude.shape} lon={longitude.shape}"
+        )
+
+    cache = {
+        "tree": cKDTree(_lat_lon_to_unit_xyz(latitude, longitude)),
+        "shape": latitude.shape,
+        "latitude": latitude,
+        "longitude": longitude,
+    }
+    if isinstance(lat_lon_grid, dict):
+        lat_lon_grid["_lookup_cache"] = cache
+    return cache
+
+
+def _nearest_raqdps_grid_coords(
+    lat: float,
+    lon: float,
+    lat_lon_grid: Any,
+) -> tuple[int, int, float, float]:
+    """Return x/y and nearest geographic coordinates for the RAQDPS 2-D grid."""
+    cache = _raqdps_lookup_cache(lat_lon_grid)
+    target_xyz = _lat_lon_to_unit_xyz(np.array([lat]), np.array([lon]))
+    _, flat_idx = cache["tree"].query(target_xyz, k=1)
+    y_raqdps, x_raqdps = np.unravel_index(int(flat_idx[0]), cache["shape"])
+    return (
+        int(x_raqdps),
+        int(y_raqdps),
+        float(cache["latitude"][y_raqdps, x_raqdps]),
+        float(cache["longitude"][y_raqdps, x_raqdps]),
+    )
 
 
 def _nearest_regular_grid_index(
@@ -588,15 +652,12 @@ async def calculate_grid_indexing(
         and zarr_sources.raqdps_lat_lon is not None
     ):
         try:
-            raqdps_lats_2d = zarr_sources.raqdps_lat_lon["latitude"]
-            raqdps_lons_2d = zarr_sources.raqdps_lat_lon["longitude"]
-            # Nearest-grid search on a 2D rotated grid using Euclidean distance
-            dist = np.sqrt((raqdps_lats_2d - lat) ** 2 + (raqdps_lons_2d - lon) ** 2)
-            yx = np.unravel_index(np.argmin(dist), dist.shape)
-            y_raqdps = int(yx[0])
-            x_raqdps = int(yx[1])
-            raqdps_lat_val = float(raqdps_lats_2d[y_raqdps, x_raqdps])
-            raqdps_lon_val = float(raqdps_lons_2d[y_raqdps, x_raqdps])
+            (
+                x_raqdps,
+                y_raqdps,
+                raqdps_lat_val,
+                raqdps_lon_val,
+            ) = _nearest_raqdps_grid_coords(lat, lon, zarr_sources.raqdps_lat_lon)
             readRAQDPS = True
         except Exception as exc:
             logger.debug("RAQDPS grid lookup failed: %s", exc)
