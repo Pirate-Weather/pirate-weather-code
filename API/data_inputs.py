@@ -870,12 +870,14 @@ def prepare_aq_inputs(
 ):
     """Prepare air-quality concentration arrays aligned to the request hour grid.
 
-    Returns a dict with keys: pm25, pm10, o3, no2, so2, co.
+    Returns a dict with keys: pm25, pm10, o3, no2, so2, co, smoke_frp.
     Each value is a 1-D numpy array of length ``num_hours`` in the model's native
     units (µg/m³ for PM; ppb for gases).  Missing values are NaN.
 
     Priority: RAQDPS > SILAM per pollutant.
     RAQDPS does not have CO; it falls back to SILAM CO unconditionally.
+    ``smoke_frp`` is SILAM PM_FRP_column (column smoke from fires); used as a
+    lower-priority smoke source after HRRR.
     """
     nan_row = np.full(num_hours, np.nan)
 
@@ -909,6 +911,7 @@ def prepare_aq_inputs(
     silam_o3 = _extract(dataOut_silam, SILAM["o3"])
     silam_so2 = _extract(dataOut_silam, SILAM["so2"])
     silam_co = _extract(dataOut_silam, SILAM["co"])
+    silam_smoke_frp = _extract(dataOut_silam, SILAM["pm_frp_column"])
 
     def _prefer(primary, fallback):
         """Return primary where not-NaN, else fallback."""
@@ -930,4 +933,5 @@ def prepare_aq_inputs(
         "no2": _prefer(raqdps_no2, silam_no2),
         "so2": _prefer(raqdps_so2, silam_so2),
         "co": _prefer(None, silam_co),  # RAQDPS has no CO; SILAM only
+        "smoke_frp": silam_smoke_frp if silam_smoke_frp is not None else nan_row.copy(),
     }

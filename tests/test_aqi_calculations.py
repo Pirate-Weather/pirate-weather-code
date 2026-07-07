@@ -12,6 +12,8 @@ from API.constants.aqi_const import (
     compute_aqi_for_unit_system,
     compute_caqi,
     compute_epa_aqi,
+    nowcast_pm,
+    rolling_mean,
 )
 from API.data_inputs import prepare_aq_inputs
 
@@ -149,12 +151,17 @@ class TestAQIArray:
         assert len(result) == n
 
     def test_nan_propagates(self):
+        # For the US EPA system, NowCast requires at least 2 of the 3 most-recent
+        # hours to be valid.  In a 3-element array starting with NaN:
+        #   index 0: window=[NaN]             → only 1 valid in recent window → NaN
+        #   index 1: window=[10.0, NaN]       → 1 valid in recent-3  → NaN
+        #   index 2: window=[20.0, 10.0, NaN] → 2 valid in recent-3  → valid AQI
         pm25 = np.array([np.nan, 10.0, 20.0])
         result = compute_aqi_array(
             "us", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None
         )
         assert np.isnan(result[0])
-        assert not np.isnan(result[1])
+        assert not np.isnan(result[2])
 
     def test_all_none_inputs_returns_empty(self):
         result = compute_aqi_array(
@@ -288,3 +295,138 @@ class TestPrepareAQInputs:
         result = prepare_aq_inputs(n, False, False, hours)
         for key in ("pm25", "pm10", "o3", "no2", "so2", "co"):
             assert np.all(np.isnan(result[key]))
+
+    def test_smoke_frp_extracted_from_silam(self):
+        """smoke_frp key should be present and contain SILAM PM_FRP_column values."""
+        from API.constants.model_const import SILAM
+
+        n = 24
+        hours = self._hour_array(n)
+        silam_data = _make_zarr_data(
+            n,
+            SILAM,
+            hours,
+            {
+                "pm25": np.full(n, 5.0),
+                "pm10": np.full(n, 10.0),
+                "no2": np.full(n, 3.0),
+                "o3": np.full(n, 8.0),
+                "so2": np.full(n, 1.0),
+                "co": np.full(n, 100.0),
+                "pm_frp_column": np.full(n, 42.0),
+            },
+        )
+        result = prepare_aq_inputs(n, False, silam_data, hours)
+        assert "smoke_frp" in result
+        assert np.nanmean(result["smoke_frp"]) == pytest.approx(42.0, abs=1.0)
+
+    def test_smoke_frp_nans_when_silam_absent(self):
+        """When SILAM is unavailable, smoke_frp should be all-NaN."""
+        n = 24
+        hours = self._hour_array(n)
+        result = prepare_aq_inputs(n, False, False, hours)
+        assert "smoke_frp" in result
+        assert np.all(np.isnan(result["smoke_frp"]))
+
+
+# ---------------------------------------------------------------------------
+# EPA averaging helpers
+# ---------------------------------------------------------------------------
+
+
+class TestNowcastPM:
+    """Unit tests for the EPA NowCast algorithm."""
+
+    def test_constant_series_returns_same_value(self):
+        """Constant concentrations → NowCast equals that concentration."""
+        conc = np.full(24, 20.0)
+        result = nowcast_pm(conc)
+        # From index 2 onwards at least 2 of 3 most-recent are valid
+        assert not np.isnan(result[2])
+        assert result[2] == pytest.approx(20.0, abs=0.01)
+
+    def test_all_nan_returns_nan(self):
+        conc = np.full(10, np.nan)
+        result = nowcast_pm(conc)
+        assert np.all(np.isnan(result))
+
+    def test_requires_two_of_three_recent(self):
+        """With only 1 valid reading in the 3-hour window, result should be NaN."""
+        conc = np.array([np.nan, np.nan, 10.0])
+        result = nowcast_pm(conc)
+        # index 2: window = [10.0, NaN, NaN] → 1 valid → NaN
+        assert np.isnan(result[2])
+
+    def test_two_valid_recent_hours_computes(self):
+        """With 2 valid readings in the 3-hour window, result should be valid."""
+        conc = np.array([np.nan, 10.0, 20.0])
+        result = nowcast_pm(conc)
+        # index 2: window = [20.0, 10.0, NaN] → 2 valid → valid NowCast
+        assert not np.isnan(result[2])
+
+    def test_output_length_matches_input(self):
+        conc = np.linspace(5.0, 50.0, 48)
+        result = nowcast_pm(conc)
+        assert len(result) == 48
+
+
+class TestRollingMean:
+    """Unit tests for the backward-looking rolling mean."""
+
+    def test_8h_constant_series(self):
+        """8-hour mean of constant series equals that constant."""
+        conc = np.full(24, 15.0)
+        result = rolling_mean(conc, window=8)
+        assert np.allclose(result, 15.0)
+
+    def test_24h_window(self):
+        """24-hour mean converges correctly."""
+        conc = np.arange(1.0, 49.0)  # values 1..48
+        result = rolling_mean(conc, window=24)
+        # At index 23 (24th hour), mean of 1..24 = 12.5
+        assert result[23] == pytest.approx(12.5, abs=0.01)
+
+    def test_all_nan_returns_nan(self):
+        conc = np.full(10, np.nan)
+        result = rolling_mean(conc, window=8)
+        assert np.all(np.isnan(result))
+
+    def test_partial_nan_uses_valid_values(self):
+        """NaN values within the window should be ignored."""
+        conc = np.array([10.0, np.nan, 20.0, np.nan, 30.0])
+        result = rolling_mean(conc, window=8)
+        # At index 4: valid values in window = [10.0, 20.0, 30.0], mean = 20.0
+        assert result[4] == pytest.approx(20.0, abs=0.01)
+
+    def test_output_length_matches_input(self):
+        conc = np.random.rand(48)
+        result = rolling_mean(conc, window=8)
+        assert len(result) == 48
+
+
+class TestEPAAveragingInArray:
+    """Integration tests confirming EPA averaging is applied in compute_aqi_array."""
+
+    def test_epa_uses_nowcast_not_instantaneous(self):
+        """With a spike followed by low values, NowCast should damp the spike."""
+        # 12 hours of low PM2.5 followed by a spike at hour 12
+        conc = np.concatenate([np.full(12, 5.0), [200.0]])
+        result = compute_aqi_array(
+            "us", pm25=conc, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        # Last value should reflect NowCast (weighted avg) not raw spike
+        assert not np.isnan(result[-1])
+        # Raw spike (200 µg/m³) → EPA AQI ~250; NowCast should be lower
+        raw_aqi = compute_aqi_for_unit_system("us", pm25_ug=200.0)
+        assert result[-1] < raw_aqi
+
+    def test_caqi_uses_instantaneous(self):
+        """For CAQI (uk/si), instantaneous values should be used."""
+        conc = np.array([5.0, 5.0, 200.0])
+        result = compute_aqi_array(
+            "uk", pm25=conc, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        # CAQI at index 2 should reflect the raw 200 µg/m³ concentration
+        assert not np.isnan(result[2])
+        assert result[2] >= 75  # 200 µg/m³ PM2.5 → CAQI ≥ 75 (very high)
+

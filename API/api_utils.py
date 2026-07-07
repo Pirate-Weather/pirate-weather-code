@@ -460,6 +460,8 @@ _FIELDS_V_LT_2 = (
     "airQualityIndex",
     "airQualityIndexMax",
     "airQualityIndexMaxTime",
+    "airQualityIndexMin",
+    "airQualityIndexMinTime",
     "cape",
     "capeMax",
     "capeMaxTime",

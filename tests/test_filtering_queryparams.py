@@ -183,6 +183,10 @@ class TestAQFieldFiltering:
         return {
             "temperature": 20.0,
             "airQualityIndex": 42,
+            "airQualityIndexMax": 80,
+            "airQualityIndexMaxTime": 1700000000,
+            "airQualityIndexMin": 20,
+            "airQualityIndexMinTime": 1700003600,
             "pm25": 10.0,
             "pm10": 20.0,
             "ozoneConcentration": 30.0,
@@ -199,12 +203,28 @@ class TestAQFieldFiltering:
         remove_conditional_fields(item, version=1, time_machine=False, tm_extra=False)
         assert "airQualityIndex" not in item
 
+    def test_version_lt2_hides_aqi_min(self):
+        from API.api_utils import remove_conditional_fields
+
+        item = self._make_aq_item()
+        remove_conditional_fields(item, version=1, time_machine=False, tm_extra=False)
+        assert "airQualityIndexMin" not in item
+        assert "airQualityIndexMinTime" not in item
+
     def test_version_gte2_keeps_aqi(self):
         from API.api_utils import remove_conditional_fields
 
         item = self._make_aq_item()
         remove_conditional_fields(item, version=2, time_machine=False, tm_extra=False)
         assert "airQualityIndex" in item
+
+    def test_version_gte2_keeps_aqi_min(self):
+        from API.api_utils import remove_conditional_fields
+
+        item = self._make_aq_item()
+        remove_conditional_fields(item, version=2, time_machine=False, tm_extra=False)
+        assert "airQualityIndexMin" in item
+        assert "airQualityIndexMinTime" in item
 
     def test_detail_fields_hidden_without_flag(self):
         from API.api_utils import remove_conditional_fields

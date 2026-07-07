@@ -936,6 +936,15 @@ async def PW_Forecast(
         dataOut_silam=dataOut_silam,
         hour_array_grib=hour_array_grib,
     )
+
+    # Extend smoke_inputs with SILAM PM_FRP_column as a lower-priority fallback
+    # (HRRR smoke wins when available; SILAM fire smoke fills NaN gaps).
+    silam_smoke_frp = aq_inputs.get("smoke_frp")
+    if silam_smoke_frp is not None and not np.all(np.isnan(silam_smoke_frp)):
+        smoke_inputs = np.column_stack(
+            [smoke_inputs, silam_smoke_frp.reshape(-1, 1)]
+        )
+
     # This constructs the hourly forecast objects, applying unit conversions and formatting
     with timing_tracker.track("Hourly block"):
         (

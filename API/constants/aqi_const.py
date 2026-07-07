@@ -23,6 +23,98 @@ import math
 import numpy as np
 
 # ---------------------------------------------------------------------------
+# EPA averaging helpers
+# NowCast for PM2.5; 24-hour rolling mean for PM10; 8-hour rolling mean for O3/CO.
+# References:
+#   - EPA NowCast: https://usepa.servicenowservices.com/airnow?id=kb_article_view&sys_id=bb8b65ef1b06bc10028420eae54bcb98
+#   - EPA AQI Technical Assistance Document (Sept 2018)
+# ---------------------------------------------------------------------------
+
+
+def nowcast_pm(conc: np.ndarray) -> np.ndarray:
+    """Apply EPA NowCast algorithm to an hourly PM2.5 or PM10 concentration array.
+
+    NowCast is a weighted average over up to 12 previous hours.  The weight factor
+    is derived from the ratio of minimum to maximum concentration in the window.
+
+    Validity rule: at least 2 of the 3 most-recent hours must contain valid data;
+    otherwise the output for that hour is NaN.
+
+    Args:
+        conc: 1-D array of hourly concentrations (µg/m³), chronological order
+              (index 0 = earliest hour, last index = most-recent hour).
+              NaN indicates missing/invalid data.
+
+    Returns:
+        1-D float64 array of the same length as *conc*.
+    """
+    n = len(conc)
+    out = np.full(n, np.nan, dtype=np.float64)
+
+    for i in range(n):
+        # Build window of up to 12 hours, newest first
+        start = max(0, i - 11)
+        window = conc[start : i + 1][::-1]  # newest = index 0
+
+        # Validity check: at least 2 of the 3 most-recent hours must be valid
+        recent_valid = np.sum(~np.isnan(window[:3]))
+        if recent_valid < 2:
+            continue
+
+        valid_mask = ~np.isnan(window)
+        if not np.any(valid_mask):
+            continue
+
+        valid_conc = window[valid_mask]
+        max_c = float(np.max(valid_conc))
+        min_c = float(np.min(valid_conc))
+
+        # Weight factor: bounded at [0.5, 1.0]
+        if max_c == 0.0:
+            w = 1.0
+        else:
+            w = max(min_c / max_c, 0.5)
+
+        total_weight = 0.0
+        weighted_sum = 0.0
+        for j, c in enumerate(window):
+            if not math.isnan(c):
+                wi = w**j
+                total_weight += wi
+                weighted_sum += wi * float(c)
+
+        if total_weight > 0.0:
+            out[i] = weighted_sum / total_weight
+
+    return out
+
+
+def rolling_mean(conc: np.ndarray, window: int) -> np.ndarray:
+    """Compute a backward-looking rolling mean ignoring NaN values.
+
+    At least one valid observation in the window is required; otherwise the
+    output for that hour is NaN.
+
+    Args:
+        conc:   1-D array of hourly concentrations, chronological order.
+        window: Number of hours to include (e.g., 8 for O3/CO, 24 for PM10).
+
+    Returns:
+        1-D float64 array of the same length as *conc*.
+    """
+    n = len(conc)
+    out = np.full(n, np.nan, dtype=np.float64)
+
+    for i in range(n):
+        start = max(0, i - window + 1)
+        segment = conc[start : i + 1]
+        valid = segment[~np.isnan(segment)]
+        if len(valid) > 0:
+            out[i] = float(np.mean(valid))
+
+    return out
+
+# ---------------------------------------------------------------------------
 # EPA AQI breakpoints (concentrations in µg/m³)
 # The model stores O3, NO2, SO2, CO in ppb; convert before lookup.
 # ---------------------------------------------------------------------------
@@ -273,6 +365,17 @@ def compute_aqi_array(
 ) -> np.ndarray:
     """Vectorised AQI computation over hourly arrays.
 
+    For the US EPA system the appropriate EPA averaging periods are applied
+    before the breakpoint lookup:
+      - PM2.5: NowCast (12-hour weighted average)
+      - PM10:  24-hour rolling mean
+      - O3:    8-hour rolling mean
+      - CO:    8-hour rolling mean
+      - NO2, SO2: 1-hour (no additional averaging)
+
+    For AQHI (CA) and CAQI (UK/SI) the raw hourly concentrations are used
+    since those indices are designed for hourly values.
+
     All input arrays should have the same length (num_hours); None entries are
     treated as fully-missing for that pollutant.
 
@@ -303,15 +406,35 @@ def compute_aqi_array(
     so2_v = _get(so2)
     co_v = _get(co)
 
+    system = AQI_SYSTEM_MAP.get(unit_system, "EPA")
+
+    if system == "EPA":
+        # Apply EPA-mandated averaging periods before the breakpoint lookup
+        pm25_calc = nowcast_pm(pm25_v)
+        pm10_calc = rolling_mean(pm10_v, window=24)
+        o3_calc = rolling_mean(o3_v, window=8)
+        co_calc = rolling_mean(co_v, window=8)
+        # NO2 and SO2 use 1-hour (instantaneous) averages
+        no2_calc = no2_v
+        so2_calc = so2_v
+    else:
+        # AQHI / CAQI use raw hourly concentrations
+        pm25_calc = pm25_v
+        pm10_calc = pm10_v
+        o3_calc = o3_v
+        no2_calc = no2_v
+        so2_calc = so2_v
+        co_calc = co_v
+
     result = np.full(n, np.nan, dtype=np.float32)
     for i in range(n):
         result[i] = compute_aqi_for_unit_system(
             unit_system,
-            float(pm25_v[i]),
-            float(pm10_v[i]),
-            float(o3_v[i]),
-            float(no2_v[i]),
-            float(so2_v[i]),
-            float(co_v[i]),
+            float(pm25_calc[i]),
+            float(pm10_calc[i]),
+            float(o3_calc[i]),
+            float(no2_calc[i]),
+            float(so2_calc[i]),
+            float(co_calc[i]),
         )
     return result
