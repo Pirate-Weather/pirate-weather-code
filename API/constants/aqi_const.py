@@ -114,6 +114,7 @@ def rolling_mean(conc: np.ndarray, window: int) -> np.ndarray:
 
     return out
 
+
 # ---------------------------------------------------------------------------
 # EPA AQI breakpoints (concentrations in µg/m³)
 # The model stores O3, NO2, SO2, CO in ppb; convert before lookup.

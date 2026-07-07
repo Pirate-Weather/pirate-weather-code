@@ -429,4 +429,3 @@ class TestEPAAveragingInArray:
         # CAQI at index 2 should reflect the raw 200 µg/m³ concentration
         assert not np.isnan(result[2])
         assert result[2] >= 75  # 200 µg/m³ PM2.5 → CAQI ≥ 75 (very high)
-
