@@ -95,7 +95,11 @@ def open_raqdps_variable(
 
     from herbie import FastHerbie
 
-    from API.raqdps_utils import convert_to_ug_m3, herbie_naive_utc
+    from API.raqdps_utils import (
+        convert_to_output_units,
+        herbie_naive_utc,
+        output_units_for_variable,
+    )
 
     if run_time is None:
         run_time = latest_raqdps_run(save_dir=save_dir)
@@ -124,11 +128,15 @@ def open_raqdps_variable(
 
     grib_var_name = next(iter(ds.data_vars))
     data_array = ds[grib_var_name].astype("float32")
-    converted = convert_to_ug_m3(data_array, variable) if convert_units else data_array
+    converted = (
+        convert_to_output_units(data_array, variable) if convert_units else data_array
+    )
     converted.name = variable
     converted.attrs.update(ds[grib_var_name].attrs)
     if convert_units:
-        converted.attrs["units"] = "µg m-3"
+        output_units = output_units_for_variable(variable)
+        if output_units is not None:
+            converted.attrs["units"] = output_units
     converted.attrs["raqdps_native_variable"] = grib_var_name
 
     return converted.to_dataset()

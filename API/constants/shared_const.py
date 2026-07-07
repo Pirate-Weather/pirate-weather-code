@@ -32,5 +32,4 @@ HISTORY_PERIODS = {
     "ECMWF_AIFS": 48,
     "RAQDPS": 48,  # Store last 48 hours of RAQDPS data for historic AQI lookbacks
     "SILAM": 48,  # Store last 48 hours of SILAM data for historic AQI lookbacks
-    "IS4FIRES": 48,  # Store last 48 hours of IS4FIRES wildfire smoke data.
 }

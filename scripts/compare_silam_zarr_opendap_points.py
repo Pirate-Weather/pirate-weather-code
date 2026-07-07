@@ -27,11 +27,8 @@ import zarr
 from xarray.coding.variables import SerializationWarning
 
 KG_M3_TO_UG_M3 = 1e9
-MOLAR_MASS_AIR = 0.02897
-MOLAR_MASS_O3 = 0.048
-MOLAR_MASS_NO2 = 0.046
-MOLAR_MASS_SO2 = 0.064
-MOLAR_MASS_CO = 0.028
+KG_M2_TO_UG_M2 = 1e9
+MOL_MOL_TO_PPB = 1e9
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
 
@@ -45,6 +42,8 @@ ZARR_VARS = (
     "time",
     "cnc_PM2_5",
     "cnc_PM10",
+    "PM_FRP_column",
+    "BLH",
     "cnc_O3",
     "cnc_NO2",
     "cnc_SO2",
@@ -54,17 +53,12 @@ ZARR_VARS = (
 SOURCE_VARS = {
     "cnc_PM2_5": "cnc_PM2_5",
     "cnc_PM10": "cnc_PM10",
+    "PM_FRP_column": "PM_FRP_column",
+    "BLH": "BLH",
     "cnc_O3": "vmr_O3_gas",
     "cnc_NO2": "vmr_NO2_gas",
     "cnc_SO2": "vmr_SO2_gas",
     "cnc_CO": "vmr_CO_gas",
-}
-
-GAS_MOLAR_MASSES = {
-    "cnc_O3": MOLAR_MASS_O3,
-    "cnc_NO2": MOLAR_MASS_NO2,
-    "cnc_SO2": MOLAR_MASS_SO2,
-    "cnc_CO": MOLAR_MASS_CO,
 }
 
 
@@ -231,22 +225,16 @@ def source_scalar(ds: xr.Dataset, var_name: str, t: int, y: int, x: int) -> floa
 
     if var_name in ("cnc_PM2_5", "cnc_PM10"):
         converted = np.float32(raw * KG_M3_TO_UG_M3)
+    elif var_name == "PM_FRP_column":
+        converted = np.float32(raw * KG_M2_TO_UG_M2)
+    elif var_name == "BLH":
+        converted = np.float32(raw)
     else:
-        air_density = np.float32(
-            scalar_dataarray(ds["air_dens"].isel(time=t, lat=y, lon=x))
-        )
-        converted = np.float32(
-            raw
-            * air_density
-            * (GAS_MOLAR_MASSES[var_name] / MOLAR_MASS_AIR)
-            * KG_M3_TO_UG_M3
-        )
+        converted = np.float32(raw * MOL_MOL_TO_PPB)
 
-    if (
-        not np.isfinite(converted)
-        or converted < VALID_DATA_MIN
-        or converted > VALID_DATA_MAX
-    ):
+    if not np.isfinite(converted) or converted < VALID_DATA_MIN:
+        return math.nan
+    if var_name != "PM_FRP_column" and converted > VALID_DATA_MAX:
         return math.nan
     return float(np.float32(np.round(converted, 5)))
 
@@ -279,9 +267,6 @@ def compare_random_points(args: argparse.Namespace) -> int:
         raise KeyError(
             f"OPeNDAP dataset is missing required variables: {missing_source}"
         )
-    if any(var in GAS_MOLAR_MASSES for var in args.variables) and "air_dens" not in ds:
-        raise KeyError("OPeNDAP dataset is missing required air_dens variable")
-
     time_matches = build_time_matches(
         zarr_array,
         ds["time"].values,
