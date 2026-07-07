@@ -179,13 +179,21 @@ def update_zarr_store(
             stores.ETOPO_f = zarr.open(zarr.storage.LocalStore(etopo_path), mode="r")
             logger.info("Loaded ETOPO from: %s", etopo_path)
 
+    skip_era5 = str(os.getenv("SKIP_ERA5", "False")).lower() not in {
+        "0",
+        "false",
+        "no",
+    }
+
     # Open the Google ERA5 dataset for Dev and TimeMachine
-    if stage in ("DEV", "TIMEMACHINE"):
+    if stage in ("DEV", "TIMEMACHINE") and not skip_era5:
         era5_cache_dir = os.environ.get(
             "ERA5_CACHE_DIR", os.path.join(save_dir, "ERA5_cache")
         )
         stores.ERA5_Data = init_ERA5(era5_cache_dir)
         logger.info("ERA5 disk cache: %s", era5_cache_dir)
+    elif stage in ("DEV", "TIMEMACHINE"):
+        logger.info("Skipping ERA5 initialization because SKIP_ERA5 is enabled")
 
     # If TimeMachine, load GFS
     if stage == "TIMEMACHINE":
@@ -250,12 +258,15 @@ def update_zarr_store(
             s3, s3_bucket, ingest_version, save_type, "GFS"
         )
         stores.GFS_Zarr = zarr.open(gfs_store, mode="r")
-        era5_cache_dir = os.environ.get(
-            "ERA5_CACHE_DIR", os.path.join(save_dir, "ERA5_cache")
-        )
-        stores.ERA5_Data = init_ERA5(era5_cache_dir)
         logger.info("GFS Read")
-        logger.info("ERA5 Read; disk cache: %s", era5_cache_dir)
+        if skip_era5:
+            logger.info("Skipping ERA5 initialization because SKIP_ERA5 is enabled")
+        else:
+            era5_cache_dir = os.environ.get(
+                "ERA5_CACHE_DIR", os.path.join(save_dir, "ERA5_cache")
+            )
+            stores.ERA5_Data = init_ERA5(era5_cache_dir)
+            logger.info("ERA5 Read; disk cache: %s", era5_cache_dir)
 
         if stage == "TESTING":
             testing_stores = [
@@ -273,6 +284,8 @@ def update_zarr_store(
                 ("AIGFS_Zarr", "AIGFS"),
                 ("AIGEFS_Zarr", "AIGEFS"),
                 ("ECMWF_AIFS_Zarr", "ECMWF_AIFS"),
+                ("RAQDPS_Zarr", "RAQDPS"),
+                ("SILAM_Zarr", "SILAM"),
             ]
             for attr, name in testing_stores:
                 setattr(
