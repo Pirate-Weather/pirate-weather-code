@@ -56,7 +56,6 @@ CHUNK_SIZES = {
     "RDAQA": 250,
     "RAQDPS": 250,
     "SILAM": 200,
-    "IS4FIRES": 200,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -73,7 +72,6 @@ FINAL_CHUNK_SIZES = {
     "RDAQA": 25,
     "RAQDPS": 25,
     "SILAM": 5,
-    "IS4FIRES": 5,
 }
 
 FORECAST_LEAD_RANGES = {
@@ -875,79 +873,6 @@ def trailing_mean(conc: Optional[np.ndarray], window: int) -> Optional[np.ndarra
         with np.errstate(invalid="ignore"):
             out[t] = np.nanmean(conc[start : t + 1], axis=0)
     return out
-
-
-def calculate_aqi(
-    pm25: np.ndarray,
-    pm10: np.ndarray,
-    o3: np.ndarray,
-    no2: np.ndarray,
-    so2: np.ndarray,
-    co: np.ndarray,
-    use_nowcast: bool = True,
-) -> np.ndarray:
-    """Calculate Air Quality Index (AQI) based on EPA standards.
-
-    Returns the maximum AQI value among all pollutants for each grid cell and time.
-
-    Args:
-        pm25: PM2.5 concentration in µg/m³ (time, lat, lon).
-        pm10: PM10 concentration in µg/m³ (time, lat, lon).
-        o3: Ozone concentration in µg/m³ (time, lat, lon).
-        no2: NO2 concentration in µg/m³ (time, lat, lon).
-        so2: SO2 concentration in µg/m³ (time, lat, lon).
-        co: CO concentration in µg/m³ (time, lat, lon).
-        use_nowcast: Whether to use EPA NowCast for PM2.5/PM10 (default True).
-
-    Returns:
-        A numpy array of AQI values (0-500+ scale) with shape (time, lat, lon).
-    """
-
-    if use_nowcast:
-        pm25_nowcast = calculate_nowcast_concentration(pm25, num_hours=12)
-        pm10_nowcast = calculate_nowcast_concentration(pm10, num_hours=12)
-        aqi_pm25 = np.interp(pm25_nowcast, PM25_BP, PM25_AQI)
-        aqi_pm10 = np.interp(pm10_nowcast, PM10_BP, PM10_AQI)
-    else:
-        # When NowCast is disabled, use a 24-hour trailing average for PM2.5/PM10
-        pm25_avg = trailing_mean(pm25, 24)
-        pm10_avg = trailing_mean(pm10, 24)
-        aqi_pm25 = np.interp(pm25_avg, PM25_BP, PM25_AQI)
-        aqi_pm10 = np.interp(pm10_avg, PM10_BP, PM10_AQI)
-
-    # Apply trailing averages appropriate for pollutant averaging windows
-    # EPA AQI uses 8-hour averages for O3 and CO for hourly index values.
-    # Use 1-hour trailing mean for NO2 / SO2 (effectively the instantaneous value).
-    o3_avg = trailing_mean(o3, 8)
-    o3_1h = trailing_mean(o3, 1)
-    co_avg = trailing_mean(co, 8)
-    no2_avg = trailing_mean(no2, 1)
-    so2_avg = trailing_mean(so2, 1)
-
-    def _interp_or_nan(arr, bp, aqi_arr, ref_shape):
-        if arr is None:
-            return np.full(ref_shape, np.nan, dtype=np.float32)
-        return np.interp(arr, bp, aqi_arr)
-
-    ref_shape = aqi_pm25.shape
-    aqi_o3_8h = _interp_or_nan(o3_avg, O3_BP, O3_AQI, ref_shape)
-    aqi_o3_1h = _interp_or_nan(o3_1h, O3_BP, O3_AQI, ref_shape)
-    aqi_no2 = _interp_or_nan(no2_avg, NO2_BP, NO2_AQI, ref_shape)
-    aqi_so2 = _interp_or_nan(so2_avg, SO2_BP, SO2_AQI, ref_shape)
-    aqi_co = _interp_or_nan(co_avg, CO_BP, CO_AQI, ref_shape)
-
-    # Include both 8-hour and 1-hour ozone AQI values (take the max later)
-    stack = [
-        aqi_pm25,
-        aqi_pm10,
-        aqi_o3_8h,
-        aqi_o3_1h,
-        aqi_no2,
-        aqi_so2,
-        aqi_co,
-    ]
-
-    return np.nanmax(np.stack(stack, axis=0), axis=0)
 
 
 def interpolate_temporal_gaps_efficiently(

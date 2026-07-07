@@ -45,14 +45,6 @@ from API.ingest_utils import (
     positive_int_env,
     tune_nofile_limit,
 )
-from API.silam_conversion import (
-    KG_M3_TO_UG_M3,
-    MOLAR_MASS_CO,
-    MOLAR_MASS_NO2,
-    MOLAR_MASS_O3,
-    MOLAR_MASS_SO2,
-    convert_vmr_to_concentration,
-)
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -92,14 +84,17 @@ processChunk = CHUNK_SIZES["SILAM"]
 finalChunk = FINAL_CHUNK_SIZES["SILAM"]
 hisPeriod = HISTORY_PERIODS["SILAM"]
 
-# Standard air density constant
-STANDARD_AIR_DENSITY = 1.225  # kg/m³ at sea level (used as fallback)
 HISTORIC_STEP_HOURS = 24
+KG_M3_TO_UG_M3 = 1e9
+KG_M2_TO_UG_M2 = 1e9
+MOL_MOL_TO_PPB = 1e9
 
 zarr_vars = (
     "time",
     "cnc_PM2_5",
     "cnc_PM10",
+    "PM_FRP_column",
+    "BLH",
     "cnc_O3",
     "cnc_NO2",
     "cnc_SO2",
@@ -108,14 +103,20 @@ zarr_vars = (
 
 # SILAM variable names and units:
 # - cnc_PM2_5, cnc_PM10: Particulate matter in kg/m³ (need conversion to µg/m³)
+# - PM_FRP_column: Fire PM column in kg/m² (need conversion to µg/m²)
+# - BLH: Boundary layer height in m
 # - vmr_*_gas: Gas species as volume mixing ratios in mole/mole
-#   (need conversion using air density and molar mass)
-# - air_dens: Air density in kg/m³ (used for volume mixing ratio conversions)
+#   (need conversion to ppb)
 
 base_fileserver_url = "https://thredds.silam.fmi.fi/thredds/fileServer"
 base_catalog_url = "https://thredds.silam.fmi.fi/thredds/catalog"
 silam_dataset_path = "silam_glob_v6_1_sfc/files"
 silam_filename_pattern = re.compile(r"SILAM-AQ-sfc-glob_v6_1_(\d{10})\.nc4$")
+
+
+def convert_vmr_to_ppb(vmr):
+    """Convert volume mixing ratio in mole/mole to ppb."""
+    return vmr * MOL_MOL_TO_PPB
 
 
 def get_latest_silam_run():
@@ -292,40 +293,52 @@ def process_silam_file(local_nc_path: str) -> xr.Dataset:
     _process_pm("cnc_PM2_5", "cnc_PM2_5")
     _process_pm("cnc_PM10", "cnc_PM10")
 
-    # Load air density for volume mixing ratio conversions
-    if "air_dens" in xarray_silam_data:
-        air_density = xarray_silam_data["air_dens"].astype(np.float32)
-        logger.info("Loaded air_dens for volume mixing ratio conversions")
+    if "PM_FRP_column" in xarray_silam_data:
+        xarray_processed["PM_FRP_column"] = (
+            xarray_silam_data["PM_FRP_column"] * KG_M2_TO_UG_M2
+        ).astype(np.float32)
+        xarray_processed["PM_FRP_column"].attrs["units"] = "µg/m²"
+        xarray_processed["PM_FRP_column"].attrs["long_name"] = "Total PM_FRP column"
+        logger.info("Loaded and converted PM_FRP_column from kg/m² to µg/m²")
     else:
-        logger.warning(
-            "air_dens not found, using standard air density of "
-            f"{STANDARD_AIR_DENSITY} kg/m³"
-        )
-        air_density = _make_nan_dataarray(
+        logger.warning("PM_FRP_column not found in dataset")
+        xarray_processed["PM_FRP_column"] = _make_nan_dataarray(
             xarray_processed.time,
             xarray_processed.latitude,
             xarray_processed.longitude,
-            fill=STANDARD_AIR_DENSITY,
         )
 
-    # Process gas volume mixing ratio variables (convert to µg/m³)
+    if "BLH" in xarray_silam_data:
+        xarray_processed["BLH"] = xarray_silam_data["BLH"].astype(np.float32)
+        xarray_processed["BLH"].attrs["units"] = "m"
+        xarray_processed["BLH"].attrs["long_name"] = "Boundary layer height"
+        logger.info("Loaded BLH in m")
+    else:
+        logger.warning("BLH not found in dataset")
+        xarray_processed["BLH"] = _make_nan_dataarray(
+            xarray_processed.time,
+            xarray_processed.latitude,
+            xarray_processed.longitude,
+        )
+
+    # Process gas volume mixing ratio variables (convert to ppb)
     gas_variables = {
-        "vmr_O3_gas": ("cnc_O3", MOLAR_MASS_O3, "Ozone"),
-        "vmr_NO2_gas": ("cnc_NO2", MOLAR_MASS_NO2, "Nitrogen dioxide"),
-        "vmr_SO2_gas": ("cnc_SO2", MOLAR_MASS_SO2, "Sulfur dioxide"),
-        "vmr_CO_gas": ("cnc_CO", MOLAR_MASS_CO, "Carbon monoxide"),
+        "vmr_O3_gas": ("cnc_O3", "Ozone"),
+        "vmr_NO2_gas": ("cnc_NO2", "Nitrogen dioxide"),
+        "vmr_SO2_gas": ("cnc_SO2", "Sulfur dioxide"),
+        "vmr_CO_gas": ("cnc_CO", "Carbon monoxide"),
     }
 
-    for silam_var, (output_var, molar_mass, long_name) in gas_variables.items():
+    for silam_var, (output_var, long_name) in gas_variables.items():
         if silam_var in xarray_silam_data:
-            xarray_processed[output_var] = convert_vmr_to_concentration(
-                xarray_silam_data[silam_var], air_density, molar_mass
+            xarray_processed[output_var] = convert_vmr_to_ppb(
+                xarray_silam_data[silam_var]
             ).astype(np.float32)
-            xarray_processed[output_var].attrs["units"] = "µg/m³"
+            xarray_processed[output_var].attrs["units"] = "ppb"
             xarray_processed[output_var].attrs["long_name"] = (
-                f"{long_name} concentration"
+                f"{long_name} volume mixing ratio"
             )
-            logger.info(f"Loaded and converted {silam_var} to {output_var} in µg/m³")
+            logger.info(f"Loaded and converted {silam_var} to {output_var} in ppb")
         else:
             logger.warning(
                 f"{silam_var} not found in dataset, {output_var} will be NaN"
@@ -574,7 +587,9 @@ for dask_var in zarr_vars:
 
 # Merge the arrays into a single 4D array
 merged_arrays = da.stack(dask_interp_arrays, axis=0)
-merged_arrays_masked = mask_invalid_data(merged_arrays)
+merged_arrays_masked = mask_invalid_data(
+    merged_arrays, ignoreAxis=[zarr_vars.index("PM_FRP_column")]
+)
 
 # Write out to disk. This intermediate step avoids memory overflow.
 with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):

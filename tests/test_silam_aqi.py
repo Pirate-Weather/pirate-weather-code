@@ -8,15 +8,6 @@ from pathlib import Path
 
 import numpy as np
 
-from API.silam_conversion import (
-    MOLAR_MASS_AIR,
-    MOLAR_MASS_CO,
-    MOLAR_MASS_NO2,
-    MOLAR_MASS_O3,
-    MOLAR_MASS_SO2,
-    convert_vmr_to_concentration,
-)
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # Import EPA AQI breakpoints from shared constants
@@ -24,6 +15,18 @@ from API.constants.aqi_const import PM10_AQI, PM10_BP, PM25_AQI, PM25_BP
 
 # Import the functions to test from the shared ingest utilities
 from API.ingest_utils import calculate_aqi, calculate_nowcast_concentration
+
+KG_M3_TO_UG_M3 = 1e9
+MOLAR_MASS_AIR = 0.02897
+MOLAR_MASS_O3 = 0.048
+MOLAR_MASS_NO2 = 0.046
+MOLAR_MASS_SO2 = 0.064
+MOLAR_MASS_CO = 0.028
+
+
+def convert_vmr_to_concentration(vmr, air_density, molar_mass):
+    """Convert volume mixing ratio in mole/mole to µg/m³."""
+    return vmr * air_density * (molar_mass / MOLAR_MASS_AIR) * KG_M3_TO_UG_M3
 
 
 class TestNowCastAlgorithm:
@@ -403,8 +406,6 @@ class TestVMRConversion:
 
     def test_vmr_conversion_basic(self):
         """Test basic VMR to concentration conversion."""
-        # Import the conversion function from silam_conversion module
-
         # Test with known values
         # VMR of 1 ppm (1e-6 mole/mole) of O3
         # Air density: 1.225 kg/m³
