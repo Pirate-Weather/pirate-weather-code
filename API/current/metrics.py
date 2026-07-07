@@ -1594,6 +1594,14 @@ def build_current_section(
     ) = _get_storm(sourceList, model_data, state)
 
     InterPcurrent[DATA_CURRENT["smoke"]] = _get_smoke(sourceList, model_data, state)
+    # If HRRR smoke is unavailable, fall back to SILAM PM_FRP_column smoke
+    # (already converted to µg/m³ in prepare_aq_inputs).
+    if np.isnan(InterPcurrent[DATA_CURRENT["smoke"]]) and aq_inputs is not None:
+        smoke_frp = aq_inputs.get("smoke_frp")
+        if smoke_frp is not None and len(smoke_frp) > 0 and not np.isnan(smoke_frp[0]):
+            InterPcurrent[DATA_CURRENT["smoke"]] = clipLog(
+                float(smoke_frp[0]), CLIP_SMOKE["min"], CLIP_SMOKE["max"], "Smoke Current"
+            )
     InterPcurrent[DATA_CURRENT["solar"]] = _get_solar(
         sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )

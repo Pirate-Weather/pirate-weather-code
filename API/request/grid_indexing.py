@@ -98,10 +98,26 @@ def _nearest_raqdps_grid_coords(
     lon: float,
     lat_lon_grid: Any,
 ) -> tuple[int, int, float, float]:
-    """Return x/y and nearest geographic coordinates for the RAQDPS 2-D grid."""
+    """Return x/y and nearest geographic coordinates for the RAQDPS 2-D grid.
+
+    Raises ``ValueError`` if the query point is further than
+    ``_RAQDPS_MAX_GRID_DISTANCE`` from the nearest grid point, indicating
+    the location is outside the RAQDPS regional domain.
+    """
+    # Maximum chord distance (unit-sphere Euclidean) between the query point
+    # and the nearest RAQDPS grid point before the location is considered
+    # outside the model domain.  ~0.020 ≈ 127 km / ~1.14° arc, well above
+    # the ~7 km half-diagonal of a 10 km grid cell.
+    _RAQDPS_MAX_GRID_DISTANCE = 0.020
+
     cache = _raqdps_lookup_cache(lat_lon_grid)
     target_xyz = _lat_lon_to_unit_xyz(np.array([lat]), np.array([lon]))
-    _, flat_idx = cache["tree"].query(target_xyz, k=1)
+    dist, flat_idx = cache["tree"].query(target_xyz, k=1)
+    if float(dist[0]) > _RAQDPS_MAX_GRID_DISTANCE:
+        raise ValueError(
+            f"Location ({lat:.3f}, {lon:.3f}) is outside the RAQDPS domain "
+            f"(nearest grid point chord distance {float(dist[0]):.4f} > {_RAQDPS_MAX_GRID_DISTANCE})"
+        )
     y_raqdps, x_raqdps = np.unravel_index(int(flat_idx[0]), cache["shape"])
     return (
         int(x_raqdps),

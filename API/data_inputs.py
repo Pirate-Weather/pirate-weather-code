@@ -876,8 +876,9 @@ def prepare_aq_inputs(
 
     Priority: RAQDPS > SILAM per pollutant.
     RAQDPS does not have CO; it falls back to SILAM CO unconditionally.
-    ``smoke_frp`` is SILAM PM_FRP_column (column smoke from fires); used as a
-    lower-priority smoke source after HRRR.
+    ``smoke_frp`` is SILAM PM_FRP_column divided by BLH to convert from the
+    stored column-burden units (µg/m²) to a near-surface concentration (µg/m³).
+    It is used as a lower-priority smoke source after HRRR.
     """
     nan_row = np.full(num_hours, np.nan)
 
@@ -912,6 +913,7 @@ def prepare_aq_inputs(
     silam_so2 = _extract(dataOut_silam, SILAM["so2"])
     silam_co = _extract(dataOut_silam, SILAM["co"])
     silam_smoke_frp = _extract(dataOut_silam, SILAM["pm_frp_column"])
+    silam_blh = _extract(dataOut_silam, SILAM["blh"])
 
     def _prefer(primary, fallback):
         """Return primary where not-NaN, else fallback."""
@@ -926,6 +928,21 @@ def prepare_aq_inputs(
         out[nan_mask] = fallback[nan_mask]
         return out
 
+    # Convert PM_FRP_column from µg/m² (column burden) to µg/m³ (near-surface
+    # concentration) by dividing by the boundary layer height.  When BLH is
+    # NaN a neutral 1000 m is used; valid-but-small values are clamped to
+    # 100 m to avoid division by near-zero denominators.
+    if silam_smoke_frp is not None:
+        if silam_blh is not None:
+            blh = np.where(
+                np.isnan(silam_blh), 1000.0, np.maximum(silam_blh, 100.0)
+            )
+        else:
+            blh = np.full(num_hours, 1000.0)
+        smoke_frp_m3 = silam_smoke_frp / blh
+    else:
+        smoke_frp_m3 = nan_row.copy()
+
     return {
         "pm25": _prefer(raqdps_pm25, silam_pm25),
         "pm10": _prefer(raqdps_pm10, silam_pm10),
@@ -933,5 +950,5 @@ def prepare_aq_inputs(
         "no2": _prefer(raqdps_no2, silam_no2),
         "so2": _prefer(raqdps_so2, silam_so2),
         "co": _prefer(None, silam_co),  # RAQDPS has no CO; SILAM only
-        "smoke_frp": silam_smoke_frp if silam_smoke_frp is not None else nan_row.copy(),
+        "smoke_frp": smoke_frp_m3,
     }

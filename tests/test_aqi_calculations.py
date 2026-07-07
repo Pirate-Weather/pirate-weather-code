@@ -302,10 +302,62 @@ class TestPrepareAQInputs:
             assert np.all(np.isnan(result[key]))
 
     def test_smoke_frp_extracted_from_silam(self):
-        """smoke_frp key should be present and contain SILAM PM_FRP_column values."""
+        """smoke_frp should be PM_FRP_column divided by BLH (µg/m² → µg/m³)."""
         from API.constants.model_const import SILAM
 
         n = 24
+        hours = self._hour_array(n)
+        # PM_FRP_column = 2000 µg/m², BLH = 500 m → expected smoke_frp = 4 µg/m³
+        silam_data = _make_zarr_data(
+            n,
+            SILAM,
+            hours,
+            {
+                "pm25": np.full(n, 5.0),
+                "pm10": np.full(n, 10.0),
+                "no2": np.full(n, 3.0),
+                "o3": np.full(n, 8.0),
+                "so2": np.full(n, 1.0),
+                "co": np.full(n, 100.0),
+                "pm_frp_column": np.full(n, 2000.0),
+                "blh": np.full(n, 500.0),
+            },
+        )
+        result = prepare_aq_inputs(n, False, silam_data, hours)
+        assert "smoke_frp" in result
+        assert np.nanmean(result["smoke_frp"]) == pytest.approx(4.0, abs=0.1)
+
+    def test_smoke_frp_uses_default_blh_when_blh_missing(self):
+        """When BLH is NaN or absent, smoke_frp should use a 1000 m neutral default."""
+        from API.constants.model_const import SILAM
+
+        n = 24
+        hours = self._hour_array(n)
+        # BLH column not provided → extracted as NaN → default 1000 m applied
+        silam_data = _make_zarr_data(
+            n,
+            SILAM,
+            hours,
+            {
+                "pm25": np.full(n, 5.0),
+                "pm10": np.full(n, 10.0),
+                "no2": np.full(n, 3.0),
+                "o3": np.full(n, 8.0),
+                "so2": np.full(n, 1.0),
+                "co": np.full(n, 100.0),
+                "pm_frp_column": np.full(n, 5000.0),
+            },
+        )
+        result = prepare_aq_inputs(n, False, silam_data, hours)
+        assert "smoke_frp" in result
+        # 5000 µg/m² / 1000 m (NaN BLH → neutral 1000 m default) = 5.0 µg/m³
+        assert np.nanmean(result["smoke_frp"]) == pytest.approx(5.0, abs=0.1)
+
+    def test_smoke_frp_enforces_minimum_blh(self):
+        """Valid BLH values below 100 m should be clamped to 100 m."""
+        from API.constants.model_const import SILAM
+
+        n = 4
         hours = self._hour_array(n)
         silam_data = _make_zarr_data(
             n,
@@ -318,12 +370,13 @@ class TestPrepareAQInputs:
                 "o3": np.full(n, 8.0),
                 "so2": np.full(n, 1.0),
                 "co": np.full(n, 100.0),
-                "pm_frp_column": np.full(n, 42.0),
+                "pm_frp_column": np.full(n, 1000.0),
+                "blh": np.full(n, 10.0),  # valid but < 100 m → clamped to 100 m
             },
         )
         result = prepare_aq_inputs(n, False, silam_data, hours)
-        assert "smoke_frp" in result
-        assert np.nanmean(result["smoke_frp"]) == pytest.approx(42.0, abs=1.0)
+        # 1000 µg/m² / 100 m (clamped) = 10.0 µg/m³
+        assert np.nanmean(result["smoke_frp"]) == pytest.approx(10.0, abs=0.1)
 
     def test_smoke_frp_nans_when_silam_absent(self):
         """When SILAM is unavailable, smoke_frp should be all-NaN."""
