@@ -649,9 +649,7 @@ if saveType == "S3":
         forecast_process_dir + "/SILAM_Maps.zarr.zip", mode="a"
     )
 else:
-    zarr_store_maps = zarr.storage.LocalStore(
-        forecast_process_dir + "/SILAM_Maps.zarr"
-    )
+    zarr_store_maps = zarr.storage.LocalStore(forecast_process_dir + "/SILAM_Maps.zarr")
 
 for var_idx in MAP_VAR_INDICES:
     zarr_array = zarr.create_array(
