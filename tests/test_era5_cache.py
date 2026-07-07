@@ -139,6 +139,7 @@ def test_zarr_cache_store_reuses_local_cached_chunks(tmp_path):
 
 def test_update_zarr_store_uses_shared_cache_under_save_dir(tmp_path, monkeypatch):
     monkeypatch.delenv("ERA5_CACHE_DIR", raising=False)
+    monkeypatch.delenv("SKIP_ERA5", raising=False)
 
     with (
         patch("API.io.zarr_reader.init_ERA5", return_value={}) as init_era5,
@@ -161,6 +162,7 @@ def test_update_zarr_store_uses_shared_cache_under_save_dir(tmp_path, monkeypatc
 def test_update_zarr_store_honors_era5_cache_dir(tmp_path, monkeypatch):
     cache_dir = tmp_path / "shared-era5"
     monkeypatch.setenv("ERA5_CACHE_DIR", str(cache_dir))
+    monkeypatch.delenv("SKIP_ERA5", raising=False)
 
     with (
         patch("API.io.zarr_reader.init_ERA5", return_value={}) as init_era5,
@@ -178,3 +180,51 @@ def test_update_zarr_store_honors_era5_cache_dir(tmp_path, monkeypatch):
         )
 
     init_era5.assert_called_once_with(str(cache_dir))
+
+
+def test_update_zarr_store_skips_era5_when_env_enabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("SKIP_ERA5", "true")
+
+    with (
+        patch("API.io.zarr_reader.init_ERA5") as init_era5,
+        patch("API.io.zarr_reader._load_local_store"),
+    ):
+        stores = zarr_reader.update_zarr_store(
+            False,
+            stage="DEV",
+            save_dir=str(tmp_path),
+            use_etopo=False,
+            save_type="Local",
+            s3_bucket="",
+            aws_access_key_id="",
+            aws_secret_access_key="",
+        )
+
+    init_era5.assert_not_called()
+    assert stores.ERA5_Data is None
+
+
+def test_update_zarr_store_skips_era5_for_testing_when_env_enabled(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("SKIP_ERA5", "1")
+
+    with (
+        patch("API.io.zarr_reader.init_ERA5") as init_era5,
+        patch("API.io.zarr_reader.setup_testing_zipstore", return_value=object()),
+        patch("API.io.zarr_reader.zarr.open", return_value="gfs"),
+    ):
+        stores = zarr_reader.update_zarr_store(
+            False,
+            stage="TM_TESTING",
+            save_dir=str(tmp_path),
+            use_etopo=False,
+            save_type="Local",
+            s3_bucket="",
+            aws_access_key_id="",
+            aws_secret_access_key="",
+        )
+
+    init_era5.assert_not_called()
+    assert stores.GFS_Zarr == "gfs"
+    assert stores.ERA5_Data is None

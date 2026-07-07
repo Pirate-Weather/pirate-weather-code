@@ -18,3 +18,15 @@ CLIP_FEELS_LIKE = {"min": -60, "max": 60}
 CLIP_GLOBAL = {"min": -1000, "max": 500000}
 CLIP_SOLAR = {"min": 0, "max": 10000}
 CLIP_CAPE = {"min": 0, "max": 10000}
+
+# Air quality concentration clip bounds
+# PM2.5 and PM10 in µg/m³
+CLIP_PM25 = {"min": 0, "max": 1000}
+CLIP_PM10 = {"min": 0, "max": 2000}
+# Gaseous pollutants in ppb
+CLIP_O3_PPB = {"min": 0, "max": 500}
+CLIP_NO2_PPB = {"min": 0, "max": 2000}
+CLIP_SO2_PPB = {"min": 0, "max": 2500}
+CLIP_CO_PPB = {"min": 0, "max": 100000}
+# AQI (unitless, 0-500)
+CLIP_AQI = {"min": 0, "max": 500}
