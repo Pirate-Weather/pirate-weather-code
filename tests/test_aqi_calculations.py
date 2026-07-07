@@ -15,7 +15,6 @@ from API.constants.aqi_const import (
 )
 from API.data_inputs import prepare_aq_inputs
 
-
 # ---------------------------------------------------------------------------
 # EPA AQI tests
 # ---------------------------------------------------------------------------
@@ -144,17 +143,23 @@ class TestAQIArray:
     def test_returns_correct_length(self):
         n = 10
         pm25 = np.full(n, 15.0)
-        result = compute_aqi_array("us", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None)
+        result = compute_aqi_array(
+            "us", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
         assert len(result) == n
 
     def test_nan_propagates(self):
         pm25 = np.array([np.nan, 10.0, 20.0])
-        result = compute_aqi_array("us", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None)
+        result = compute_aqi_array(
+            "us", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
         assert np.isnan(result[0])
         assert not np.isnan(result[1])
 
     def test_all_none_inputs_returns_empty(self):
-        result = compute_aqi_array("us", pm25=None, pm10=None, o3=None, no2=None, so2=None, co=None)
+        result = compute_aqi_array(
+            "us", pm25=None, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
         assert len(result) == 0
 
 
@@ -188,10 +193,29 @@ class TestPrepareAQInputs:
         hours = self._hour_array(n)
 
         raqdps_data = _make_zarr_data(
-            n, RAQDPS, hours, {"pm25": np.full(n, 30.0), "pm10": np.full(n, 40.0), "no2": np.full(n, 10.0), "o3": np.full(n, 20.0), "so2": np.full(n, 5.0)}
+            n,
+            RAQDPS,
+            hours,
+            {
+                "pm25": np.full(n, 30.0),
+                "pm10": np.full(n, 40.0),
+                "no2": np.full(n, 10.0),
+                "o3": np.full(n, 20.0),
+                "so2": np.full(n, 5.0),
+            },
         )
         silam_data = _make_zarr_data(
-            n, SILAM, hours, {"pm25": np.full(n, 99.0), "pm10": np.full(n, 99.0), "no2": np.full(n, 99.0), "o3": np.full(n, 99.0), "so2": np.full(n, 99.0), "co": np.full(n, 99.0)}
+            n,
+            SILAM,
+            hours,
+            {
+                "pm25": np.full(n, 99.0),
+                "pm10": np.full(n, 99.0),
+                "no2": np.full(n, 99.0),
+                "o3": np.full(n, 99.0),
+                "so2": np.full(n, 99.0),
+                "co": np.full(n, 99.0),
+            },
         )
 
         result = prepare_aq_inputs(n, raqdps_data, silam_data, hours)
@@ -206,7 +230,17 @@ class TestPrepareAQInputs:
         hours = self._hour_array(n)
 
         silam_data = _make_zarr_data(
-            n, SILAM, hours, {"pm25": np.full(n, 15.0), "pm10": np.full(n, 25.0), "no2": np.full(n, 8.0), "o3": np.full(n, 35.0), "so2": np.full(n, 3.0), "co": np.full(n, 200.0)}
+            n,
+            SILAM,
+            hours,
+            {
+                "pm25": np.full(n, 15.0),
+                "pm10": np.full(n, 25.0),
+                "no2": np.full(n, 8.0),
+                "o3": np.full(n, 35.0),
+                "so2": np.full(n, 3.0),
+                "co": np.full(n, 200.0),
+            },
         )
 
         result = prepare_aq_inputs(n, False, silam_data, hours)
@@ -220,10 +254,29 @@ class TestPrepareAQInputs:
         n = 24
         hours = self._hour_array(n)
         raqdps_data = _make_zarr_data(
-            n, RAQDPS, hours, {"pm25": np.full(n, 5.0), "pm10": np.full(n, 10.0), "no2": np.full(n, 3.0), "o3": np.full(n, 8.0), "so2": np.full(n, 1.0)}
+            n,
+            RAQDPS,
+            hours,
+            {
+                "pm25": np.full(n, 5.0),
+                "pm10": np.full(n, 10.0),
+                "no2": np.full(n, 3.0),
+                "o3": np.full(n, 8.0),
+                "so2": np.full(n, 1.0),
+            },
         )
         silam_data = _make_zarr_data(
-            n, SILAM, hours, {"pm25": np.full(n, 5.0), "pm10": np.full(n, 10.0), "no2": np.full(n, 3.0), "o3": np.full(n, 8.0), "so2": np.full(n, 1.0), "co": np.full(n, 300.0)}
+            n,
+            SILAM,
+            hours,
+            {
+                "pm25": np.full(n, 5.0),
+                "pm10": np.full(n, 10.0),
+                "no2": np.full(n, 3.0),
+                "o3": np.full(n, 8.0),
+                "so2": np.full(n, 1.0),
+                "co": np.full(n, 300.0),
+            },
         )
         result = prepare_aq_inputs(n, raqdps_data, silam_data, hours)
         assert np.nanmean(result["co"]) == pytest.approx(300.0, abs=5.0)
