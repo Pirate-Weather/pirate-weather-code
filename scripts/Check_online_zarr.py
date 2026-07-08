@@ -1,4 +1,4 @@
-#%% Scratch notebook to view a zip zarr on S3
+# %% Scratch notebook to view a zip zarr on S3
 
 # # Open a zipped Zarr store from S3 using s3fs + AWS keys
 #
@@ -15,12 +15,9 @@ import os
 import pandas as pd
 import s3fs
 import zarr
-import numpy as np
 from dotenv import load_dotenv
 
 from API.io.ZarrHelpers import setup_testing_zipstore
-from API.constants.shared_const import INGEST_VERSION_STR
-
 
 # %%
 # ---- Load .env ----
@@ -79,15 +76,15 @@ opened_zarr = zarr.open(store, mode="r")
 opened_zarr2 = zarr.open(store2, mode="r")
 
 
-#%% Test read
-data = opened_zarr[1,24*10:24*11,500,500]
+# %% Test read
+data = opened_zarr[1, 24 * 10 : 24 * 11, 500, 500]
 print(data)
 
-data2 = opened_zarr2[1,:,500,500]
+data2 = opened_zarr2[1, :, 500, 500]
 print(data2)
 
 
-#%% Print unix time as datetimes
-unixTime = opened_zarr[0,24*10:24*11,500,500]
+# %% Print unix time as datetimes
+unixTime = opened_zarr[0, 24 * 10 : 24 * 11, 500, 500]
 
-print(pd.to_datetime(unixTime, unit='s'))
+print(pd.to_datetime(unixTime, unit="s"))
