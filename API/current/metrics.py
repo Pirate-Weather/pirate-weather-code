@@ -15,7 +15,7 @@ from API.api_utils import (
     clipLog,
     estimate_visibility_gultepe_rh_pr_numpy,
 )
-from API.constants.aqi_const import compute_aqi_array, compute_aqi_for_unit_system
+from API.constants.aqi_const import compute_aqi_array
 from API.constants.clip_const import (
     CLIP_AQI,
     CLIP_CAPE,

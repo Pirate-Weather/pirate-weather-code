@@ -407,7 +407,9 @@ class TestPrepareAQInputs:
         base = 1752004800.0  # July 8, 2026 18:00:00 UTC (near problem range)
 
         # Request timestamps at :30 offset (simulating UTC+5:30 or UTC-3:30)
-        request_hours = np.array([base + i * 3600 + 1800 for i in range(n)], dtype=float)
+        request_hours = np.array(
+            [base + i * 3600 + 1800 for i in range(n)], dtype=float
+        )
 
         # SILAM timestamps stored as float32 (whole hours, with rounding errors)
         silam_hours_f32 = np.array(
