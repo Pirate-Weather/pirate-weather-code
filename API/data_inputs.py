@@ -888,13 +888,21 @@ def prepare_aq_inputs(
             return None
         try:
             col = data[:, var_idx].astype(float)
-            # Time column is column 0 (unix seconds); match to hour_array_grib
+            # Time column is column 0 (unix seconds); match to hour_array_grib.
+            # SILAM timestamps are stored as float32 (±64 s rounding at ~1.75e9).
+            # Locations in fractional UTC-offset timezones (e.g. UTC±3:30, UTC+5:30)
+            # produce request timestamps that are exactly 1800 s from the nearest
+            # SILAM hour.  Float32 rounding can push the stored SILAM timestamp
+            # ~64 s away, making diff > 1800 for ~44 % of hours.
+            # Using a tolerance of one full SILAM time-step (3600 s) ensures the
+            # nearest available hour is always matched while still rejecting gaps
+            # larger than one hour.
             time_col = data[:, 0].astype(float)
             out = np.full(num_hours, np.nan)
             for hi, t in enumerate(hour_array_grib):
                 diff = np.abs(time_col - float(t))
                 best = np.argmin(diff)
-                if diff[best] <= 1800:  # within 30 min
+                if diff[best] < 3600:  # within one SILAM time-step (1 h)
                     out[hi] = col[best]
             return out
         except Exception:
