@@ -222,11 +222,25 @@ def download_herbie_with_retry(
     for attempt in range(1, attempts + 1):
         try:
             # Overwrite on retries to avoid keeping partial/corrupt files.
-            herbie_obj.download(
+            downloaded = herbie_obj.download(
                 search,
                 verbose=False,
                 overwrite=(attempt > 1),
             )
+
+            downloaded_paths = []
+            if downloaded is not None:
+                if not isinstance(downloaded, list):
+                    downloaded = [downloaded]
+                downloaded_paths = [
+                    str(Path(path).expanduser()) for path in downloaded if path
+                ]
+
+                if len(downloaded_paths) != expected_count:
+                    raise RuntimeError(
+                        f"Expected {expected_count} downloaded {dataset_name} paths "
+                        f"but got {len(downloaded_paths)}"
+                    )
 
             matched_refs = list(herbie_obj.file_exists)
             matched_count = len(matched_refs)
@@ -238,7 +252,9 @@ def download_herbie_with_retry(
 
             # Herbie can report matched references even when local downloads fail;
             # verify every expected local GRIB path is present and non-empty.
-            local_paths = build_herbie_grib_list(matched_refs, search)
+            local_paths = downloaded_paths or build_herbie_grib_list(
+                matched_refs, search
+            )
             valid_local_paths = [
                 p for p in local_paths if os.path.isfile(p) and os.path.getsize(p) > 0
             ]

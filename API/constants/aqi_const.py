@@ -244,13 +244,12 @@ def compute_epa_aqi(
 # Canadian AQHI
 # Formula: AQHI = (10/10.4) * sum(e^(beta_i * C_i) - 1) * 100
 # where beta coefficients are from Health Canada (2008).
-# C_i are 3-hour rolling averages in µg/m³ — we use instantaneous values.
+# C_i are 3-hour rolling averages in µg/m³ for PM2.5 and ppb for NO2 and O3
 # Reference: https://www.canada.ca/en/environment-climate-change/services/air-quality-health-index/
 # ---------------------------------------------------------------------------
-
-AQHI_BETA_O3 = 0.000537  # O3  coefficient (µg/m³)
-AQHI_BETA_NO2 = 0.000871  # NO2 coefficient (µg/m³)
-AQHI_BETA_PM25 = 0.000487  # PM2.5 coefficient (µg/m³)
+AQHI_BETA_O3 = 0.000537  # Coefficient expects ppb
+AQHI_BETA_NO2 = 0.000871  # Coefficient expects ppb
+AQHI_BETA_PM25 = 0.000487  # Coefficient expects µg/m³
 AQHI_SCALE = 10.0 / 10.4
 AQHI_MAX = 15.0
 
@@ -262,17 +261,17 @@ def compute_aqhi(
 ) -> float:
     """Compute Canadian AQHI (1–10+ scale, capped at 15)."""
     # Convert gases from ppb to µg/m³
-    o3_ug = o3_ppb * PPB_O3_TO_UG_M3 if not math.isnan(o3_ppb) else float("nan")
-    no2_ug = no2_ppb * PPB_NO2_TO_UG_M3 if not math.isnan(no2_ppb) else float("nan")
+    o3 = o3_ppb if not math.isnan(o3_ppb) else float("nan")
+    no2 = no2_ppb if not math.isnan(no2_ppb) else float("nan")
     pm25 = pm25_ug if not math.isnan(pm25_ug) else float("nan")
 
     total = 0.0
     count = 0
-    if not math.isnan(o3_ug):
-        total += math.exp(AQHI_BETA_O3 * o3_ug) - 1
+    if not math.isnan(o3):
+        total += math.exp(AQHI_BETA_O3 * o3) - 1
         count += 1
-    if not math.isnan(no2_ug):
-        total += math.exp(AQHI_BETA_NO2 * no2_ug) - 1
+    if not math.isnan(no2):
+        total += math.exp(AQHI_BETA_NO2 * no2) - 1
         count += 1
     if not math.isnan(pm25):
         total += math.exp(AQHI_BETA_PM25 * pm25) - 1

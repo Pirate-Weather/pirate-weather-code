@@ -1050,7 +1050,7 @@ async def calculate_grid_indexing(
         dataOut_raqdps = zarr_results["RAQDPS"]
         if isinstance(dataOut_raqdps, np.ndarray):
             try:
-                raqdpsRunTime = float(dataOut_raqdps[HISTORY_PERIODS["RAQDPS"] - 1, 0])
+                raqdpsRunTime = float(dataOut_raqdps[HISTORY_PERIODS["RAQDPS"], 0])
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     int(raqdpsRunTime), datetime.UTC
                 ).replace(tzinfo=None)

@@ -386,6 +386,59 @@ class TestPrepareAQInputs:
         assert "smoke_frp" in result
         assert np.all(np.isnan(result["smoke_frp"]))
 
+    def test_fractional_timezone_30min_offset_matches(self):
+        """SILAM timestamps stored as float32 have ±64 s rounding at ~1.75e9.
+
+        Locations with 30-minute UTC offsets (India UTC+5:30, Newfoundland UTC-3:30,
+        Adelaide UTC+9:30) produce request timestamps that are exactly 1800 s from
+        the nearest SILAM hour.  Float32 rounding can push stored SILAM timestamps
+        ~64 s away, making diff > 1800 for roughly half of hours.  The tolerance
+        was raised to < 3600 s so that all hours match correctly.
+        """
+        import struct
+
+        from API.constants.model_const import SILAM
+
+        def float32_round(v):
+            b = struct.pack("f", v)
+            return struct.unpack("f", b)[0]
+
+        n = 48
+        base = 1752004800.0  # July 8, 2026 18:00:00 UTC (near problem range)
+
+        # Request timestamps at :30 offset (simulating UTC+5:30 or UTC-3:30)
+        request_hours = np.array(
+            [base + i * 3600 + 1800 for i in range(n)], dtype=float
+        )
+
+        # SILAM timestamps stored as float32 (whole hours, with rounding errors)
+        silam_hours_f32 = np.array(
+            [float32_round(base + i * 3600) for i in range(n)], dtype=float
+        )
+
+        silam_data = _make_zarr_data(
+            n,
+            SILAM,
+            silam_hours_f32,
+            {
+                "pm25": np.full(n, 10.0),
+                "pm10": np.full(n, 20.0),
+                "no2": np.full(n, 5.0),
+                "o3": np.full(n, 30.0),
+                "so2": np.full(n, 2.0),
+                "co": np.full(n, 150.0),
+            },
+        )
+
+        result = prepare_aq_inputs(n, False, silam_data, request_hours)
+
+        # All hours must match; none should be NaN despite the float32 rounding
+        assert not np.any(np.isnan(result["pm25"])), (
+            "Some hours returned NaN for 30-min UTC-offset timestamps with "
+            "float32-rounded SILAM times; tolerance is too tight"
+        )
+        assert np.nanmean(result["pm25"]) == pytest.approx(10.0, abs=0.1)
+
 
 # ---------------------------------------------------------------------------
 # EPA averaging helpers

@@ -29,6 +29,7 @@ from API.ingest_utils import (
     archive_tmp_zarr_and_upload,
     configure_zarr_limits,
     download_extract_historic_archive,
+    download_herbie_with_retry,
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
@@ -44,6 +45,9 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 # Logging setup
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+DEFAULT_HERBIE_RETRIES = 5
+DEFAULT_HERBIE_RETRY_SLEEP = 20
 
 
 # %% Setup paths and parameters
@@ -67,6 +71,12 @@ aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 zarr_store_workers = positive_int_env("zarr_store_workers", 2)
 zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
+herbie_download_retries = positive_int_env(
+    "herbie_download_retries", DEFAULT_HERBIE_RETRIES
+)
+herbie_retry_sleep_seconds = positive_int_env(
+    "herbie_retry_sleep_seconds", DEFAULT_HERBIE_RETRY_SLEEP
+)
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 tune_nofile_limit()
@@ -216,8 +226,15 @@ while mem < 30:
 
     FH_forecastsubMembers.append(FH_IN)
 
-    # Download and process the subsets
-    FH_forecastsubMembers[mem].download(match_strings, verbose=False)
+    # Download and process the subsets with retry
+    download_herbie_with_retry(
+        herbie_obj=FH_forecastsubMembers[mem],
+        search=match_strings,
+        expected_count=len(gefs_range),
+        dataset_name=f"GEFS member {mem + 1} forecast",
+        retries=herbie_download_retries,
+        retry_sleep_s=herbie_retry_sleep_seconds,
+    )
 
     # Create list of downloaded grib files
     grib_list = [
@@ -476,7 +493,14 @@ for i in range(his_period, 0, -6):
     # Download the subsets
     for mem in range(0, 30):
         # Download the subsets
-        FH_forecastsubMembers[mem].download(match_strings, verbose=False)
+        download_herbie_with_retry(
+            herbie_obj=FH_forecastsubMembers[mem],
+            search=match_strings,
+            expected_count=2,
+            dataset_name=f"GEFS member {mem + 1} historic",
+            retries=herbie_download_retries,
+            retry_sleep_s=herbie_retry_sleep_seconds,
+        )
         # Create list of downloaded grib files
         grib_list = [
             str(Path(x.get_localFilePath(match_strings)).expand())

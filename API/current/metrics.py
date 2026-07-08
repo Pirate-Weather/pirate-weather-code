@@ -15,7 +15,7 @@ from API.api_utils import (
     clipLog,
     estimate_visibility_gultepe_rh_pr_numpy,
 )
-from API.constants.aqi_const import compute_aqi_for_unit_system
+from API.constants.aqi_const import compute_aqi_array
 from API.constants.clip_const import (
     CLIP_AQI,
     CLIP_CAPE,
@@ -1636,33 +1636,37 @@ def build_current_section(
     # Populate AQ concentration fields from aq_inputs (version >= 2)
     if aq_inputs is not None:
 
-        def _fill_curr_aq(col_key, src_key, clip_min, clip_max):
+        def _fill_curr_aq(col_key, src_key, clip_min, clip_max, curr_idx):
             arr = aq_inputs.get(src_key)
             if arr is not None and len(arr) > 0:
-                val = float(arr[0]) if not np.isnan(arr[0]) else float("nan")
+                # Use the current-hour index so values reflect the current time,
+                # not the start of the local day (arr[0]).
+                i = min(curr_idx, len(arr) - 1)
+                val = float(arr[i]) if not np.isnan(arr[i]) else float("nan")
                 InterPcurrent[DATA_CURRENT[col_key]] = np.clip(val, clip_min, clip_max)
 
-        _fill_curr_aq("pm25", "pm25", CLIP_PM25["min"], CLIP_PM25["max"])
-        _fill_curr_aq("pm10", "pm10", CLIP_PM10["min"], CLIP_PM10["max"])
-        _fill_curr_aq("o3", "o3", CLIP_O3_PPB["min"], CLIP_O3_PPB["max"])
-        _fill_curr_aq("no2", "no2", CLIP_NO2_PPB["min"], CLIP_NO2_PPB["max"])
-        _fill_curr_aq("so2", "so2", CLIP_SO2_PPB["min"], CLIP_SO2_PPB["max"])
-        _fill_curr_aq("co", "co", CLIP_CO_PPB["min"], CLIP_CO_PPB["max"])
+        _fill_curr_aq("pm25", "pm25", CLIP_PM25["min"], CLIP_PM25["max"], idx2)
+        _fill_curr_aq("pm10", "pm10", CLIP_PM10["min"], CLIP_PM10["max"], idx2)
+        _fill_curr_aq("o3", "o3", CLIP_O3_PPB["min"], CLIP_O3_PPB["max"], idx2)
+        _fill_curr_aq("no2", "no2", CLIP_NO2_PPB["min"], CLIP_NO2_PPB["max"], idx2)
+        _fill_curr_aq("so2", "so2", CLIP_SO2_PPB["min"], CLIP_SO2_PPB["max"], idx2)
+        _fill_curr_aq("co", "co", CLIP_CO_PPB["min"], CLIP_CO_PPB["max"], idx2)
 
         try:
-            pm25_val = InterPcurrent[DATA_CURRENT["pm25"]]
-            pm10_val = InterPcurrent[DATA_CURRENT["pm10"]]
-            o3_val = InterPcurrent[DATA_CURRENT["o3"]]
-            no2_val = InterPcurrent[DATA_CURRENT["no2"]]
-            so2_val = InterPcurrent[DATA_CURRENT["so2"]]
-            aqi_val = compute_aqi_for_unit_system(
+            # Compute AQI using the same averaged approach as the hourly block
+            # (NowCast for EPA PM2.5/PM10, rolling means for O3/CO, etc.) so
+            # that the currently AQI is consistent with the hourly AQI values.
+            aqi_arr = compute_aqi_array(
                 unit_system=unitSystem,
-                pm25_ug=float(pm25_val) if not np.isnan(pm25_val) else float("nan"),
-                pm10_ug=float(pm10_val) if not np.isnan(pm10_val) else float("nan"),
-                o3_ppb=float(o3_val) if not np.isnan(o3_val) else float("nan"),
-                no2_ppb=float(no2_val) if not np.isnan(no2_val) else float("nan"),
-                so2_ppb=float(so2_val) if not np.isnan(so2_val) else float("nan"),
+                pm25=aq_inputs.get("pm25"),
+                pm10=aq_inputs.get("pm10"),
+                o3=aq_inputs.get("o3"),
+                no2=aq_inputs.get("no2"),
+                so2=aq_inputs.get("so2"),
+                co=aq_inputs.get("co"),
             )
+            curr_aqi_idx = min(idx2, len(aqi_arr) - 1)
+            aqi_val = float(aqi_arr[curr_aqi_idx]) if len(aqi_arr) > 0 else float("nan")
             if not np.isnan(aqi_val):
                 InterPcurrent[DATA_CURRENT["aqi"]] = np.clip(
                     aqi_val, CLIP_AQI["min"], CLIP_AQI["max"]

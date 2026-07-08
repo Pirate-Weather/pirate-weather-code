@@ -40,9 +40,25 @@ def calculate_solar_times(
 ) -> tuple[np.int32, np.int32, np.int32, np.int32, bool, bool]:
     """Return sunrise, sunset, dawn, dusk in unix seconds plus polar flags."""
     try:
-        solar_times = sun(
-            location.observer, date=base_day + datetime.timedelta(days=day_index)
-        )
+        solar_date = base_day + datetime.timedelta(days=day_index)
+
+        solar_times = sun(location.observer, date=solar_date)
+
+        # If polar/edge-case ordering is weird, clamp twilight bounds to the day.
+        if solar_times["dawn"] > solar_times["sunrise"]:
+            solar_times["dawn"] = datetime.datetime.combine(
+                solar_date + datetime.timedelta(seconds=1),
+                datetime.time.min,
+                tzinfo=solar_times["sunrise"].tzinfo,
+            )
+
+        if solar_times["dusk"] < solar_times["sunset"]:
+            solar_times["dusk"] = datetime.datetime.combine(
+                solar_date + datetime.timedelta(days=1) - datetime.timedelta(seconds=1),
+                datetime.time.min,
+                tzinfo=solar_times["sunset"].tzinfo,
+            )
+
         return (
             datetime_to_unix_seconds(solar_times["sunrise"]),
             datetime_to_unix_seconds(solar_times["sunset"]),
