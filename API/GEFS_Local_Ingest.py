@@ -226,7 +226,7 @@ while mem < 30:
 
     FH_forecastsubMembers.append(FH_IN)
 
-    # Download and process the subsets
+    # Download and process the subsets with retry
     download_herbie_with_retry(
         herbie_obj=FH_forecastsubMembers[mem],
         search=match_strings,
