@@ -122,8 +122,8 @@ def rolling_mean(conc: np.ndarray, window: int) -> np.ndarray:
 
 # PM2.5 (Fine Particulate Matter, µg/m³)
 # Breakpoints for 24-hour average PM2.5 concentrations
-PM25_BP = [0, 12.0, 35.4, 55.4, 150.4, 250.4, 350.4, 500.4]
-PM25_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
+PM25_BP = [0, 9.0, 35.4, 55.4, 125.4, 225.4, 325.4]
+PM25_AQI = [0, 50, 100, 150, 200, 300, 500]
 
 # PM10 (Coarse Particulate Matter, µg/m³)
 # Breakpoints for 24-hour average PM10 concentrations
