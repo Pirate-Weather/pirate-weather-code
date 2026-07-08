@@ -13,6 +13,12 @@ import time
 import warnings
 from itertools import chain
 
+# Env setup
+from dotenv import find_dotenv, load_dotenv
+
+dotenv_path = find_dotenv(usecwd=True)
+loaded = load_dotenv(dotenv_path, override=True)
+
 import dask
 import dask.array as da
 import netCDF4 as nc
@@ -196,7 +202,7 @@ latest_run = Herbie_latest(
 )
 
 base_time = latest_run.date
-# base_time = pd.Timestamp("2025-07-03 17:00:00")
+#base_time = pd.Timestamp("2026-07-08 09:00:00")
 
 # Check if this is newer than the current file
 if save_type == "S3":
