@@ -233,7 +233,7 @@ def download_herbie_with_retry(
                 if not isinstance(downloaded, list):
                     downloaded = [downloaded]
                 downloaded_paths = [
-                    str(Path(path).expand()) for path in downloaded if path
+                    str(Path(path).expanduser()) for path in downloaded if path
                 ]
 
                 if len(downloaded_paths) != expected_count:
