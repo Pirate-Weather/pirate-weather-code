@@ -452,7 +452,9 @@ logger.info("Saved forecast Zarr data to disk.")
 for hours_offset in range(hisPeriod, 0, -HISTORIC_STEP_HOURS):
     hist_start = origintime - timedelta(hours=hours_offset)
     hist_end = hist_start + timedelta(hours=HISTORIC_STEP_HOURS)
-    + timedelta(hours=1)  # Add an hour since SILAM goes from hour 1 to hour 24 for each run,
+    +timedelta(
+        hours=1
+    )  # Add an hour since SILAM goes from hour 1 to hour 24 for each run,
     # so hour 24 needs to included
 
     timestamp = hist_start.strftime("%Y%m%dT%H%M%SZ")
