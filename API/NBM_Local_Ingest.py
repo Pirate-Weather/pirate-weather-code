@@ -43,7 +43,7 @@ from API.ingest_utils import (
     validate_stacked_time_alignment,
 )
 
-# Env setup required before importing Herbie
+# Env setup required before importing Herbie for ECCodes paths
 dotenv_path = find_dotenv(usecwd=True)
 loaded = load_dotenv(dotenv_path, override=True)
 
