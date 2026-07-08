@@ -13,12 +13,6 @@ import time
 import warnings
 from itertools import chain
 
-# Env setup
-from dotenv import find_dotenv, load_dotenv
-
-dotenv_path = find_dotenv(usecwd=True)
-loaded = load_dotenv(dotenv_path, override=True)
-
 import dask
 import dask.array as da
 import netCDF4 as nc
@@ -29,8 +23,7 @@ import xarray as xr
 import zarr
 import zarr.storage
 from dask.diagnostics import ProgressBar
-from herbie import FastHerbie
-from herbie.fast import Herbie_latest
+from dotenv import find_dotenv, load_dotenv
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
 from API.ingest_utils import (
@@ -49,6 +42,13 @@ from API.ingest_utils import (
     validate_grib_stats,
     validate_stacked_time_alignment,
 )
+
+# Env setup required before importing Herbie
+dotenv_path = find_dotenv(usecwd=True)
+loaded = load_dotenv(dotenv_path, override=True)
+
+from herbie import FastHerbie  # noqa: E402
+from herbie.fast import Herbie_latest  # noqa: E402
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
