@@ -1065,7 +1065,7 @@ async def calculate_grid_indexing(
         dataOut_silam = zarr_results["SILAM"]
         if isinstance(dataOut_silam, np.ndarray):
             try:
-                silamRunTime = float(dataOut_silam[HISTORY_PERIODS["SILAM"] - 2, 0])
+                silamRunTime = float(dataOut_silam[HISTORY_PERIODS["SILAM"] - 1, 0])
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     int(silamRunTime), datetime.UTC
                 ).replace(tzinfo=None)
