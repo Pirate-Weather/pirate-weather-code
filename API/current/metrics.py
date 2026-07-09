@@ -1667,7 +1667,9 @@ def build_current_section(
             if len(aqi_arr) > 0:
                 aqi_idx1 = min(idx1, len(aqi_arr) - 1)
                 aqi_idx2 = min(idx2, len(aqi_arr) - 1)
-                aqi_val = float(aqi_arr[aqi_idx1]) * fac1 + float(aqi_arr[aqi_idx2]) * fac2
+                aqi_val = (
+                    float(aqi_arr[aqi_idx1]) * fac1 + float(aqi_arr[aqi_idx2]) * fac2
+                )
             else:
                 aqi_val = float("nan")
             if not np.isnan(aqi_val):
