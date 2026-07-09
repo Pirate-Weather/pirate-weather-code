@@ -305,13 +305,6 @@ def calculate_precip_text(
                 c_icon = "possible-rain-night"
             elif icon == "pirate":
                 c_icon = "heavy-rain"
-        if (  # This handles the case where over a week or multiple days there is heavy rain but each day individually does not meet the heavy threshold
-            # Some additional tweaking of this logic may be needed based on testing
-            (type == "minute" or type == "week")
-            and eff_rain_intensity < heavy_precip_thresh
-            and rainAccum >= heavy_precip_thresh * num_precip_days * 2
-        ):
-            c_text = ["and", "medium-rain", "possible-heavy-rain"]
     elif (snowAccum > 0 or eff_snow_intensity > 0) and precipType == PRECIP_TYPES[
         "snow"
     ]:
@@ -351,12 +344,6 @@ def calculate_precip_text(
                 c_icon = "possible-snow-night"
             elif icon == "pirate":
                 c_icon = "heavy-snow"
-        if (
-            (type == "week" or type == "hourly")
-            and snowAccum < (snow_icon_threshold * num_precip_days * 2)
-            and eff_snow_intensity >= heavy_snow_thresh
-        ):
-            c_text = ["and", "medium-snow", "possible-heavy-snow"]
     elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == PRECIP_TYPES[
         "sleet"
     ]:
@@ -396,12 +383,6 @@ def calculate_precip_text(
                 c_icon = "possible-sleet-night"
             elif icon == "pirate":
                 c_icon = "heavy-sleet"
-        if (
-            (type == "week" or type == "hourly")
-            and sleetAccum < (precip_icon_threshold * num_precip_days * 2)
-            and eff_ice_intensity >= heavy_precip_thresh
-        ):
-            c_text = ["and", "medium-sleet", "possible-heavy-sleet"]
 
     elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == PRECIP_TYPES[
         "ice"
@@ -442,12 +423,6 @@ def calculate_precip_text(
                 c_icon = "possible-freezing-rain-night"
             elif icon == "pirate":
                 c_icon = "heavy-freezing-rain"
-        if (
-            (type == "week" or type == "hourly")
-            and sleetAccum < (precip_icon_threshold * num_precip_days * 2)
-            and eff_ice_intensity >= heavy_precip_thresh
-        ):
-            c_text = ["and", "medium-freezing-rain", "possible-heavy-freezing-rain"]
     elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == PRECIP_TYPES[
         "hail"
     ]:
@@ -489,15 +464,6 @@ def calculate_precip_text(
             c_text = possible_precip + "medium-precipitation"
         else:
             c_text = possible_precip + "heavy-precipitation"
-        if (
-            (type == "week" or type == "hourly")
-            and (
-                (rainAccum + sleetAccum) < (precip_icon_threshold * 2)
-                or snowAccum < (snow_icon_threshold * 2)
-            )
-            and _none_intensity >= heavy_precip_thresh
-        ):
-            c_text = ["and", "medium-precipitation", "possible-heavy-precipitation"]
 
         if is_pirate_icon and is_possible_precip and isDayTime:
             c_icon = "possible-precipitation-day"
@@ -687,7 +653,9 @@ def calculate_sky_text(cloudCover, isDayTime, icon="darksky", mode="both"):
         return skyText, skyIcon
 
 
-def calculate_thunderstorm_text(cape, mode="both", icon="darksky", is_day=True):
+def calculate_thunderstorm_text(
+    cape, mode="both", icon="darksky", is_day=True, pop=1.0
+):
     """
     Calculates the thunderstorm text based on CAPE values.
 
@@ -696,6 +664,7 @@ def calculate_thunderstorm_text(cape, mode="both", icon="darksky", is_day=True):
     - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the thunderstorm will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
     - is_day (bool): Whether it is day or night time
+    - pop (float) - The precipitation probability (0.0 to 1.0)
 
     Returns:
     - str | None: The textual representation of the thunderstorm
@@ -704,10 +673,19 @@ def calculate_thunderstorm_text(cape, mode="both", icon="darksky", is_day=True):
     thuText = None
     thuIcon = None
 
+    try:
+        if pop is None or np.isnan(pop):
+            pop = 1.0
+    except TypeError:
+        pop = 1.0
+
     if CAPE_THRESHOLDS["low"] <= cape < CAPE_THRESHOLDS["high"]:
         thuText = "possible-thunderstorm"
     elif cape >= CAPE_THRESHOLDS["high"]:
-        thuText = "thunderstorm"
+        if pop < PRECIP_PROB_THRESHOLD:
+            thuText = "possible-thunderstorm"
+        else:
+            thuText = "thunderstorm"
 
     if thuText == "thunderstorm":
         thuIcon = "thunderstorm"

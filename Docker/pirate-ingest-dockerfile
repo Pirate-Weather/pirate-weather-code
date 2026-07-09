@@ -5,7 +5,7 @@
 # Available versions: ftp://ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/
 # ======================================================================
 
-FROM python:3.14.5
+FROM python:3.14.6
 
 ENV DEBIAN_FRONTEND=noninteractive \
     CC=gcc \
@@ -36,6 +36,7 @@ RUN apt-get update && apt-get install -y \
     libnetcdf-dev \
     libhdf5-dev \
     libgdal-dev \
+    libopenjp2-7-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ----------------------------------------------------------------------
@@ -53,7 +54,7 @@ RUN git clone https://github.com/Deutsches-Klimarechenzentrum/libaec.git && \
     ldconfig
 
 # ----------------------------------------------------------------------
-# Build ecCodes 2.47.0 WITH AEC
+# Build ecCodes 2.47.0 WITH AEC and JPEG2000 support
 # ----------------------------------------------------------------------
 WORKDIR /tmp
 
@@ -67,11 +68,14 @@ WORKDIR /tmp/eccodes-build
 RUN cmake \
     -DCMAKE_INSTALL_PREFIX=/usr/local \
     -DENABLE_AEC=ON \
+    -DENABLE_JPG=ON \
+    -DENABLE_JPG_LIBOPENJPEG=ON \
     ../eccodes-2.47.0-Source && \
     make -j4 && \
     ctest -j4 && \
     make install && \
-    ldconfig
+    ldconfig && \
+    ldd /usr/local/lib/libeccodes.so | grep libopenjp2
 
 # ----------------------------------------------------------------------
 # NCEPLIBS-ip
@@ -106,7 +110,8 @@ RUN cmake --fresh \
     -DUSE_NETCDF=ON \
     -DUSE_OPENMP=ON \
     -DUSE_IPOLATES=ON \
-    -DUSE_AEC=ON
+    -DUSE_AEC=ON \
+    -DENABLE_JPG=ON
 
 RUN cmake --build . --parallel 4
 RUN cmake --install .

@@ -13,6 +13,8 @@ from API.constants.model_const import (
     GFS,
     HRRR,
     NBM,
+    RAQDPS,
+    SILAM,
 )
 from API.utils.source_priority import should_gfs_precede_dwd
 
@@ -397,6 +399,9 @@ def prepare_data_inputs(
             else None,
             "gefs": gefs_merged[:, GEFS["prob"]]
             if "gefs" in source_list and gefs_merged is not None
+            else None,
+            "era5": era5_merged[:, ERA5["prob"]] * 0.01
+            if "era5" in source_list and era5_valid
             else None,
         },
         prioritize_ai_models=prioritize_ai_models,
@@ -854,4 +859,102 @@ def prepare_data_inputs(
         "solar_inputs": solar_inputs,
         "cape_inputs": cape_inputs,
         "error_inputs": error_inputs,
+    }
+
+
+def prepare_aq_inputs(
+    num_hours,
+    dataOut_raqdps,
+    dataOut_silam,
+    hour_array_grib,
+):
+    """Prepare air-quality concentration arrays aligned to the request hour grid.
+
+    Returns a dict with keys: pm25, pm10, o3, no2, so2, co, smoke_frp.
+    Each value is a 1-D numpy array of length ``num_hours`` in the model's native
+    units (µg/m³ for PM; ppb for gases).  Missing values are NaN.
+
+    Priority: RAQDPS > SILAM per pollutant.
+    RAQDPS does not have CO; it falls back to SILAM CO unconditionally.
+    ``smoke_frp`` is SILAM PM_FRP_column divided by BLH to convert from the
+    stored column-burden units (µg/m²) to a near-surface concentration (µg/m³).
+    It is used as a lower-priority smoke source after HRRR.
+    """
+    nan_row = np.full(num_hours, np.nan)
+
+    def _extract(data, var_idx):
+        """Extract ``var_idx`` column from a zarr read result and align to ``hour_array_grib``."""
+        if not isinstance(data, np.ndarray):
+            return None
+        try:
+            col = data[:, var_idx].astype(float)
+            # Time column is column 0 (unix seconds); match to hour_array_grib.
+            # SILAM timestamps are stored as float32 (±64 s rounding at ~1.75e9).
+            # Locations in fractional UTC-offset timezones (e.g. UTC±3:30, UTC+5:30)
+            # produce request timestamps that are exactly 1800 s from the nearest
+            # SILAM hour.  Float32 rounding can push the stored SILAM timestamp
+            # ~64 s away, making diff > 1800 for ~44 % of hours.
+            # Using a tolerance of one full SILAM time-step (3600 s) ensures the
+            # nearest available hour is always matched while still rejecting gaps
+            # larger than one hour.
+            time_col = data[:, 0].astype(float)
+            out = np.full(num_hours, np.nan)
+            for hi, t in enumerate(hour_array_grib):
+                diff = np.abs(time_col - float(t))
+                best = np.argmin(diff)
+                if diff[best] < 3600:  # within one SILAM time-step (1 h)
+                    out[hi] = col[best]
+            return out
+        except Exception:
+            return None
+
+    raqdps_pm25 = _extract(dataOut_raqdps, RAQDPS["pm25"])
+    raqdps_pm10 = _extract(dataOut_raqdps, RAQDPS["pm10"])
+    raqdps_no2 = _extract(dataOut_raqdps, RAQDPS["no2"])
+    raqdps_o3 = _extract(dataOut_raqdps, RAQDPS["o3"])
+    raqdps_so2 = _extract(dataOut_raqdps, RAQDPS["so2"])
+
+    silam_pm25 = _extract(dataOut_silam, SILAM["pm25"])
+    silam_pm10 = _extract(dataOut_silam, SILAM["pm10"])
+    silam_no2 = _extract(dataOut_silam, SILAM["no2"])
+    silam_o3 = _extract(dataOut_silam, SILAM["o3"])
+    silam_so2 = _extract(dataOut_silam, SILAM["so2"])
+    silam_co = _extract(dataOut_silam, SILAM["co"])
+    silam_smoke_frp = _extract(dataOut_silam, SILAM["pm_frp_column"])
+    silam_blh = _extract(dataOut_silam, SILAM["blh"])
+
+    def _prefer(primary, fallback):
+        """Return primary where not-NaN, else fallback."""
+        if primary is None and fallback is None:
+            return nan_row.copy()
+        if primary is None:
+            return fallback.copy() if fallback is not None else nan_row.copy()
+        if fallback is None:
+            return primary.copy()
+        out = primary.copy()
+        nan_mask = np.isnan(out)
+        out[nan_mask] = fallback[nan_mask]
+        return out
+
+    # Convert PM_FRP_column from µg/m² (column burden) to µg/m³ (near-surface
+    # concentration) by dividing by the boundary layer height.  When BLH is
+    # NaN a neutral 1000 m is used; valid-but-small values are clamped to
+    # 500 m to avoid division by near-zero denominators.
+    if silam_smoke_frp is not None:
+        if silam_blh is not None:
+            blh = np.where(np.isnan(silam_blh), 1000.0, np.maximum(silam_blh, 500.0))
+        else:
+            blh = np.full(num_hours, 1000.0)
+        smoke_frp_m3 = silam_smoke_frp / blh
+    else:
+        smoke_frp_m3 = nan_row.copy()
+
+    return {
+        "pm25": _prefer(raqdps_pm25, silam_pm25),
+        "pm10": _prefer(raqdps_pm10, silam_pm10),
+        "o3": _prefer(raqdps_o3, silam_o3),
+        "no2": _prefer(raqdps_no2, silam_no2),
+        "so2": _prefer(raqdps_so2, silam_so2),
+        "co": _prefer(None, silam_co),  # RAQDPS has no CO; SILAM only
+        "smoke_frp": smoke_frp_m3,
     }

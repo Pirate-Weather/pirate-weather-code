@@ -10,13 +10,13 @@ import shutil
 import subprocess
 import tarfile
 import time
+from pathlib import Path
 from typing import Iterable, Optional, Union
 
 import cartopy.crs as ccrs
 import dask.array as da
 import numpy as np
 import xarray as xr
-from herbie import Path
 
 # Import atmospheric calculation constants
 from API.constants.shared_const import (
@@ -39,6 +39,9 @@ CHUNK_SIZES = {
     "NBM_Fire": 200,
     "RTMA": 200,
     "DWD": 200,
+    "RDAQA": 250,
+    "RAQDPS": 250,
+    "SILAM": 200,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -52,6 +55,9 @@ FINAL_CHUNK_SIZES = {
     "NBM_Fire": 5,
     "RTMA": 25,
     "DWD": 5,
+    "RDAQA": 25,
+    "RAQDPS": 25,
+    "SILAM": 5,
 }
 
 FORECAST_LEAD_RANGES = {
@@ -203,10 +209,98 @@ def make_herbie_save_dir(tmp_dir: str, prefix: str = "herbie") -> str:
     return save_dir
 
 
+def download_herbie_with_retry(
+    herbie_obj,
+    search: str,
+    expected_count: int,
+    dataset_name: str,
+    retries: int,
+    retry_sleep_s: int,
+) -> None:
+    """Retry transient Herbie download failures and enforce expected file count."""
+    attempts = max(1, retries)
+    for attempt in range(1, attempts + 1):
+        try:
+            # Overwrite on retries to avoid keeping partial/corrupt files.
+            downloaded = herbie_obj.download(
+                search,
+                verbose=False,
+                overwrite=(attempt > 1),
+            )
+
+            downloaded_paths = []
+            if downloaded is not None:
+                if not isinstance(downloaded, list):
+                    downloaded = [downloaded]
+                downloaded_paths = [
+                    str(Path(path).expanduser()) for path in downloaded if path
+                ]
+
+                if len(downloaded_paths) != expected_count:
+                    raise RuntimeError(
+                        f"Expected {expected_count} downloaded {dataset_name} paths "
+                        f"but got {len(downloaded_paths)}"
+                    )
+
+            matched_refs = list(herbie_obj.file_exists)
+            matched_count = len(matched_refs)
+            if matched_count != expected_count:
+                raise RuntimeError(
+                    f"Expected {expected_count} {dataset_name} references "
+                    f"but got {matched_count}"
+                )
+
+            # Herbie can report matched references even when local downloads fail;
+            # verify every expected local GRIB path is present and non-empty.
+            local_paths = downloaded_paths or build_herbie_grib_list(
+                matched_refs, search
+            )
+            valid_local_paths = [
+                p for p in local_paths if os.path.isfile(p) and os.path.getsize(p) > 0
+            ]
+
+            if len(valid_local_paths) == expected_count:
+                if attempt > 1:
+                    logger.info(
+                        "%s download succeeded on retry %d/%d",
+                        dataset_name,
+                        attempt,
+                        attempts,
+                    )
+                return
+
+            missing_count = expected_count - len(valid_local_paths)
+            raise RuntimeError(
+                f"Expected {expected_count} downloaded {dataset_name} files but found "
+                f"{len(valid_local_paths)} valid local files (missing {missing_count})"
+            )
+        except Exception as exc:
+            if attempt == attempts:
+                logger.exception(
+                    "%s download failed after %d attempts",
+                    dataset_name,
+                    attempts,
+                )
+                raise
+
+            sleep_s = retry_sleep_s * attempt
+            logger.warning(
+                "%s download attempt %d/%d failed (%s). Retrying in %ss",
+                dataset_name,
+                attempt,
+                attempts,
+                exc,
+                sleep_s,
+            )
+            time.sleep(sleep_s)
+
+
 def safe_herbie_local_file_path(
     herbie_obj, search: str, retries: int = 3, retry_sleep_s: float = 0.1
 ) -> str:
     """Resolve a local Herbie path and repair file-vs-dir cache collisions."""
+    from herbie import Path
+
     attempts = max(1, retries)
     for attempt in range(attempts):
         try:
@@ -707,6 +801,80 @@ def validate_stacked_time_alignment(
             f"actual={actual_times[first_idx]}, "
             f"delta={time_deltas[first_idx]}."
         )
+
+
+# --- Air quality helpers (NowCast & EPA AQI) ---
+def calculate_nowcast_concentration(
+    concentrations: np.ndarray, num_hours: int = 12
+) -> np.ndarray:
+    """
+    Calculate the EPA NowCast weighted concentration for PM2.5 and PM10.
+    The NowCast algorithm weights recent hours more heavily than older hours,
+    making it more responsive to changing air quality conditions than a
+    simple average.
+    Args:
+        concentrations: Array of concentrations with time as the first dimension.
+                       Shape: (time, latitude, longitude)
+        num_hours: Number of hours to use in NowCast calculation (default 12)
+    Returns:
+        NowCast weighted concentration array with same shape as input
+    """
+    if concentrations.shape[0] < 3:
+        return concentrations
+
+    hours_to_use = min(num_hours, concentrations.shape[0])
+    nowcast_result = np.full_like(concentrations, np.nan)
+
+    for t in range(concentrations.shape[0]):
+        start_idx = max(0, t - hours_to_use + 1)
+        window = concentrations[start_idx : t + 1]
+
+        if window.shape[0] < 3:
+            nowcast_result[t] = concentrations[t]
+            continue
+
+        with np.errstate(invalid="ignore", divide="ignore"):
+            c_max = np.nanmax(window, axis=0)
+            c_min = np.nanmin(window, axis=0)
+            c_range = c_max - c_min
+            weight_factor = np.where(
+                c_max > 0, np.maximum(1 - c_range / c_max, 0.5), 0.5
+            )
+
+        num_window_hours = window.shape[0]
+        weights = np.zeros_like(window)
+        for i in range(num_window_hours):
+            hours_ago = num_window_hours - 1 - i
+            weights[i] = weight_factor**hours_ago
+
+        with np.errstate(invalid="ignore"):
+            weighted_sum = np.nansum(window * weights, axis=0)
+            weight_sum = np.nansum(np.where(~np.isnan(window), weights, 0), axis=0)
+            nowcast_result[t] = np.where(
+                weight_sum > 0, weighted_sum / weight_sum, np.nan
+            )
+
+    return nowcast_result
+
+
+def trailing_mean(conc: Optional[np.ndarray], window: int) -> Optional[np.ndarray]:
+    """
+    Compute trailing window mean along time axis for array with shape (T, Y, X).
+    If window <= 1 returns conc. Handles NaNs by using nanmean over available points.
+    """
+    if conc is None:
+        return None
+    if window is None or window <= 1:
+        return conc
+
+    T = conc.shape[0]
+    out = np.full_like(conc, np.nan)
+    for t in range(T):
+        start = max(0, t - window + 1)
+        # nanmean handles NaNs and short windows
+        with np.errstate(invalid="ignore"):
+            out[t] = np.nanmean(conc[start : t + 1], axis=0)
+    return out
 
 
 def interpolate_temporal_gaps_efficiently(

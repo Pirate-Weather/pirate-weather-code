@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import pickle
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -16,6 +17,10 @@ import zarr
 from API.constants.api_const import MAX_ZARR_READ_RETRIES
 from API.constants.shared_const import INGEST_VERSION_STR, MISSING_DATA
 from API.io.ZarrHelpers import _add_custom_header, init_ERA5, setup_testing_zipstore
+
+DATA_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"
+)
 
 
 def _default_logger() -> logging.Logger:
@@ -41,6 +46,9 @@ class ZarrStores:
     AIGFS_Zarr: Optional[Any] = None
     AIGEFS_Zarr: Optional[Any] = None
     ECMWF_AIFS_Zarr: Optional[Any] = None
+    RAQDPS_Zarr: Optional[Any] = None
+    SILAM_Zarr: Optional[Any] = None
+    RAQDPS_LatLon: Optional[Any] = None
 
 
 async def get_zarr(store, X, Y):
@@ -150,6 +158,49 @@ class WeatherParallel(object):
         data_out = False
         return data_out
 
+    async def zarr_read_max_square(self, model, opened_zarr, x, y, square_size=3):
+        if self.timing_enabled:
+            self.logger.debug("### %s Reading max square! %s", model, self.loc_tag)
+        err_count = 0
+        data_out = False
+        radius = square_size // 2
+        while err_count < MAX_ZARR_READ_RETRIES:
+            try:
+                y_start = max(0, y - radius)
+                y_end = min(opened_zarr.shape[-2], y + radius + 1)
+                x_start = max(0, x - radius)
+                x_end = min(opened_zarr.shape[-1], x + radius + 1)
+
+                data_out = await asyncio.to_thread(
+                    lambda: (
+                        np.nanmax(
+                            opened_zarr[:, :, y_start:y_end, x_start:x_end],
+                            axis=(-2, -1),
+                        ).T
+                    )
+                )
+
+                has_missing_data, missing_row = has_interior_nan_holes(data_out.T)
+                if has_missing_data:
+                    self.logger.warning(
+                        "### %s Interpolating missing data (row %s)!",
+                        model,
+                        missing_row,
+                    )
+                    data_out = np.apply_along_axis(_interp_row, 0, data_out)
+
+                if self.timing_enabled:
+                    self.logger.debug("### %s Done! %s", model, self.loc_tag)
+                return data_out
+
+            except Exception:
+                self.logger.exception("### %s Failure! %s", model, self.loc_tag)
+                err_count += 1
+
+        self.logger.error("### %s Failure! %s", model, self.loc_tag)
+        data_out = False
+        return data_out
+
 
 def update_zarr_store(
     initial_run: bool,
@@ -175,9 +226,21 @@ def update_zarr_store(
             stores.ETOPO_f = zarr.open(zarr.storage.LocalStore(etopo_path), mode="r")
             logger.info("Loaded ETOPO from: %s", etopo_path)
 
+    skip_era5 = str(os.getenv("SKIP_ERA5", "False")).lower() not in {
+        "0",
+        "false",
+        "no",
+    }
+
     # Open the Google ERA5 dataset for Dev and TimeMachine
-    if stage in ("DEV", "TIMEMACHINE"):
-        stores.ERA5_Data = init_ERA5()
+    if stage in ("DEV", "TIMEMACHINE") and not skip_era5:
+        era5_cache_dir = os.environ.get(
+            "ERA5_CACHE_DIR", os.path.join(save_dir, "ERA5_cache")
+        )
+        stores.ERA5_Data = init_ERA5(era5_cache_dir)
+        logger.info("ERA5 disk cache: %s", era5_cache_dir)
+    elif stage in ("DEV", "TIMEMACHINE"):
+        logger.info("Skipping ERA5 initialization because SKIP_ERA5 is enabled")
 
     # If TimeMachine, load GFS
     if stage == "TIMEMACHINE":
@@ -204,9 +267,14 @@ def update_zarr_store(
             ("AIGFS_Zarr", "AIGFS.zarr"),
             ("AIGEFS_Zarr", "AIGEFS.zarr"),
             ("ECMWF_AIFS_Zarr", "ECMWF_AIFS.zarr"),
+            ("RAQDPS_Zarr", "RAQDPS.zarr"),
+            ("SILAM_Zarr", "SILAM.zarr"),
         ]
         for attr, fname in local_stores:
             _load_local_store(stores, attr, save_dir, fname, logger=logger)
+
+        # Load AQ model lat/lon pickles
+        _load_aq_lat_lon_pickles(stores, save_dir, logger=logger)
 
     # Use S3 stores for Testing and TM Testing
     if stage in ("TESTING", "TM_TESTING"):
@@ -237,9 +305,15 @@ def update_zarr_store(
             s3, s3_bucket, ingest_version, save_type, "GFS"
         )
         stores.GFS_Zarr = zarr.open(gfs_store, mode="r")
-        stores.ERA5_Data = init_ERA5()
         logger.info("GFS Read")
-        logger.info("ERA5 Read")
+        if skip_era5:
+            logger.info("Skipping ERA5 initialization because SKIP_ERA5 is enabled")
+        else:
+            era5_cache_dir = os.environ.get(
+                "ERA5_CACHE_DIR", os.path.join(save_dir, "ERA5_cache")
+            )
+            stores.ERA5_Data = init_ERA5(era5_cache_dir)
+            logger.info("ERA5 Read; disk cache: %s", era5_cache_dir)
 
         if stage == "TESTING":
             testing_stores = [
@@ -257,6 +331,8 @@ def update_zarr_store(
                 ("AIGFS_Zarr", "AIGFS"),
                 ("AIGEFS_Zarr", "AIGEFS"),
                 ("ECMWF_AIFS_Zarr", "ECMWF_AIFS"),
+                ("RAQDPS_Zarr", "RAQDPS"),
+                ("SILAM_Zarr", "SILAM"),
             ]
             for attr, name in testing_stores:
                 setattr(
@@ -276,8 +352,29 @@ def update_zarr_store(
                     logger=logger,
                 )
 
+            # Load AQ model lat/lon pickles
+            _load_aq_lat_lon_pickles(stores, save_dir, logger=logger)
+
     logger.info("Zarr stores loaded")
     return stores
+
+
+def _load_aq_lat_lon_pickles(
+    stores: ZarrStores,
+    save_dir: str,
+    *,
+    logger: logging.Logger,
+) -> None:
+    """Load AQ model lat/lon pickle files when available."""
+    for attr, fname in (("RAQDPS_LatLon", "RAQDPS.lat_lon.pickle"),):
+        path = os.path.join(DATA_DIR, fname)
+        if os.path.exists(path):
+            try:
+                with open(path, "rb") as fh:
+                    setattr(stores, attr, pickle.load(fh))
+                logger.info("Loaded %s from: %s", attr, path)
+            except Exception as exc:
+                logger.warning("Could not load %s: %s", attr, exc)
 
 
 def _load_local_store(

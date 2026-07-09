@@ -510,7 +510,7 @@ def _apply_rounding(
         if decimals == 0:
             daily_display_mean[:, idx_field] = np.round(
                 daily_display_mean[:, idx_field]
-            ).astype(int)
+            )
         else:
             daily_display_mean[:, idx_field] = np.round(
                 daily_display_mean[:, idx_field], decimals
@@ -596,7 +596,7 @@ def _apply_rounding(
     def _apply_rounding_to(arr, rounding_map):
         for idx_field, decimals in rounding_map.items():
             if decimals == 0:
-                arr[:, idx_field] = np.round(arr[:, idx_field]).astype(int)
+                arr[:, idx_field] = np.round(arr[:, idx_field])
             else:
                 arr[:, idx_field] = np.round(arr[:, idx_field], decimals)
 
@@ -747,6 +747,8 @@ def build_daily_section(
     logger,
     loc_tag: str,
     log_timing: Optional[Callable[[str], None]] = None,
+    aq_inputs=None,
+    inc_airqualitydetails: int = 0,
 ) -> DailySection:
     """
     Build all daily- and half-day-level objects.
@@ -1234,6 +1236,53 @@ def build_daily_section(
             "capeMax": InterPdayMax[idx, DATA_DAY["cape"]],
             "capeMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["cape"]]),
         }
+
+        if version >= 2:
+            aqi_col = DATA_HOURLY["aqi"]
+            aqi_mean = (
+                daily_display_mean[idx, aqi_col]
+                if aqi_col < daily_display_mean.shape[1]
+                else np.nan
+            )
+            aqi_max = (
+                daily_display_max[idx, aqi_col]
+                if aqi_col < daily_display_max.shape[1]
+                else np.nan
+            )
+            aqi_min = (
+                InterPdayMin[idx, aqi_col]
+                if aqi_col < InterPdayMin.shape[1]
+                else np.nan
+            )
+            dayObject["airQualityIndex"] = (
+                int(round(float(aqi_mean))) if not np.isnan(aqi_mean) else np.nan
+            )
+            dayObject["airQualityIndexMax"] = (
+                int(round(float(aqi_max))) if not np.isnan(aqi_max) else np.nan
+            )
+            aqi_max_time_raw = (
+                InterPdayMaxTime[idx, aqi_col]
+                if aqi_col < InterPdayMaxTime.shape[1]
+                else np.nan
+            )
+            dayObject["airQualityIndexMaxTime"] = (
+                int(aqi_max_time_raw)
+                if not np.isnan(aqi_max_time_raw)
+                else MISSING_DATA
+            )
+            dayObject["airQualityIndexMin"] = (
+                int(round(float(aqi_min))) if not np.isnan(aqi_min) else np.nan
+            )
+            aqi_min_time_raw = (
+                InterPdayMinTime[idx, aqi_col]
+                if aqi_col < InterPdayMinTime.shape[1]
+                else np.nan
+            )
+            dayObject["airQualityIndexMinTime"] = (
+                int(aqi_min_time_raw)
+                if not np.isnan(aqi_min_time_raw)
+                else MISSING_DATA
+            )
 
         if "stationPressure" in extraVars:
             dayObject["stationPressure"] = daily_display_mean[

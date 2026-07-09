@@ -15,13 +15,21 @@ from API.api_utils import (
     clipLog,
     estimate_visibility_gultepe_rh_pr_numpy,
 )
+from API.constants.aqi_const import compute_aqi_array
 from API.constants.clip_const import (
+    CLIP_AQI,
     CLIP_CAPE,
     CLIP_CLOUD,
+    CLIP_CO_PPB,
     CLIP_HUMIDITY,
+    CLIP_NO2_PPB,
+    CLIP_O3_PPB,
     CLIP_OZONE,
+    CLIP_PM10,
+    CLIP_PM25,
     CLIP_PRESSURE,
     CLIP_SMOKE,
+    CLIP_SO2_PPB,
     CLIP_SOLAR,
     CLIP_TEMP,
     CLIP_UV,
@@ -1429,6 +1437,8 @@ def build_current_section(
     log_timing: Optional[Callable[[str], None]] = None,
     include_currently: bool = True,
     prioritize_ai_models: bool = False,
+    aq_inputs=None,
+    inc_airqualitydetails: int = 0,
 ) -> CurrentSection:
     """
     Calculate the currently block and return it alongside the raw array.
@@ -1584,6 +1594,17 @@ def build_current_section(
     ) = _get_storm(sourceList, model_data, state)
 
     InterPcurrent[DATA_CURRENT["smoke"]] = _get_smoke(sourceList, model_data, state)
+    # If HRRR smoke is unavailable, fall back to SILAM PM_FRP_column smoke
+    # (already converted to µg/m³ in prepare_aq_inputs).
+    if np.isnan(InterPcurrent[DATA_CURRENT["smoke"]]) and aq_inputs is not None:
+        smoke_frp = aq_inputs.get("smoke_frp")
+        if smoke_frp is not None and len(smoke_frp) > 0 and not np.isnan(smoke_frp[0]):
+            InterPcurrent[DATA_CURRENT["smoke"]] = clipLog(
+                float(smoke_frp[0]),
+                CLIP_SMOKE["min"],
+                CLIP_SMOKE["max"],
+                "Smoke Current",
+            )
     InterPcurrent[DATA_CURRENT["solar"]] = _get_solar(
         sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
@@ -1611,6 +1632,52 @@ def build_current_section(
         InterPcurrent[DATA_CURRENT["humidity"]],
         InterPcurrent[DATA_CURRENT["wind"]],
     )
+
+    # Populate AQ concentration fields from aq_inputs (version >= 2)
+    if aq_inputs is not None:
+        # Linear interpolation between hours 0 and 1
+        def _fill_curr_aq(col_key, src_key, clip_min, clip_max):
+            arr = aq_inputs.get(src_key)
+            if arr is not None and len(arr) > 0:
+                i1 = min(idx1, len(arr) - 1)
+                i2 = min(idx2, len(arr) - 1)
+                val = float(arr[i1]) * fac1 + float(arr[i2]) * fac2
+                InterPcurrent[DATA_CURRENT[col_key]] = np.clip(val, clip_min, clip_max)
+
+        _fill_curr_aq("pm25", "pm25", CLIP_PM25["min"], CLIP_PM25["max"])
+        _fill_curr_aq("pm10", "pm10", CLIP_PM10["min"], CLIP_PM10["max"])
+        _fill_curr_aq("o3", "o3", CLIP_O3_PPB["min"], CLIP_O3_PPB["max"])
+        _fill_curr_aq("no2", "no2", CLIP_NO2_PPB["min"], CLIP_NO2_PPB["max"])
+        _fill_curr_aq("so2", "so2", CLIP_SO2_PPB["min"], CLIP_SO2_PPB["max"])
+        _fill_curr_aq("co", "co", CLIP_CO_PPB["min"], CLIP_CO_PPB["max"])
+
+        try:
+            # Compute AQI using the same averaged approach as the hourly block
+            # (NowCast for EPA PM2.5/PM10, rolling means for O3/CO, etc.) so
+            # that the currently AQI is consistent with the hourly AQI values.
+            aqi_arr = compute_aqi_array(
+                unit_system=unitSystem,
+                pm25=aq_inputs.get("pm25"),
+                pm10=aq_inputs.get("pm10"),
+                o3=aq_inputs.get("o3"),
+                no2=aq_inputs.get("no2"),
+                so2=aq_inputs.get("so2"),
+                co=aq_inputs.get("co"),
+            )
+            if len(aqi_arr) > 0:
+                aqi_idx1 = min(idx1, len(aqi_arr) - 1)
+                aqi_idx2 = min(idx2, len(aqi_arr) - 1)
+                aqi_val = (
+                    float(aqi_arr[aqi_idx1]) * fac1 + float(aqi_arr[aqi_idx2]) * fac2
+                )
+            else:
+                aqi_val = float("nan")
+            if not np.isnan(aqi_val):
+                InterPcurrent[DATA_CURRENT["aqi"]] = np.clip(
+                    aqi_val, CLIP_AQI["min"], CLIP_AQI["max"]
+                )
+        except Exception:
+            pass
 
     curr_temp_si = InterPcurrent[DATA_CURRENT["temp"]]
     curr_dew_si = InterPcurrent[DATA_CURRENT["dew"]]
@@ -1672,7 +1739,7 @@ def build_current_section(
     curr_cape_display = (
         int(np.round(InterPcurrent[DATA_CURRENT["cape"]], 0))
         if not np.isnan(InterPcurrent[DATA_CURRENT["cape"]])
-        else 0
+        else np.nan
     )
 
     dayZeroIce = float(np.round(dayZeroIce * prepAccumUnit, 4))
@@ -1732,6 +1799,24 @@ def build_current_section(
     currently["currentDaySnow"] = dayZeroSnow
     currently["solar"] = curr_solar_display
     currently["cape"] = curr_cape_display
+
+    if version >= 2:
+        curr_aqi_raw = InterPcurrent[DATA_CURRENT["aqi"]]
+        currently["airQualityIndex"] = (
+            int(round(float(curr_aqi_raw))) if not np.isnan(curr_aqi_raw) else np.nan
+        )
+        if inc_airqualitydetails:
+
+            def _curr_aq_val(col_key, decimals=1):
+                v = InterPcurrent[DATA_CURRENT[col_key]]
+                return float(round(float(v), decimals)) if not np.isnan(v) else np.nan
+
+            currently["pm25"] = _curr_aq_val("pm25")
+            currently["pm10"] = _curr_aq_val("pm10")
+            currently["ozoneConcentration"] = _curr_aq_val("o3")
+            currently["no2Concentration"] = _curr_aq_val("no2")
+            currently["so2Concentration"] = _curr_aq_val("so2")
+            currently["coConcentration"] = _curr_aq_val("co")
 
     if "stationPressure" in extraVars:
         currently["stationPressure"] = curr_station_pressure_display

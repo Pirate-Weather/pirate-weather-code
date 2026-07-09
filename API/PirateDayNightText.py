@@ -14,6 +14,7 @@ from API.constants.text_const import (
     DEFAULT_VISIBILITY,
     LESS_THAN_TOLERANCE,
     PRECIP_INTENSITY_THRESHOLDS,
+    PRECIP_PROB_THRESHOLD,
 )
 from API.PirateTextHelper import (
     calculate_precip_text,
@@ -562,17 +563,18 @@ def calculate_half_day_text(
 
                 # Track CAPE when there is precipitation
                 hour_cape = hour.get("cape", MISSING_DATA)
+                hour_pop = hour.get("precipProbability", DEFAULT_POP)
 
-                if (
-                    hour_cape != MISSING_DATA
-                    and hour_cape > period_data["max_cape_with_precip"]
-                ):
-                    period_data["max_cape_with_precip"] = hour_cape
-
-                # Count hours with thunderstorms (precipitation + CAPE >= low threshold)
-                thu_text = calculate_thunderstorm_text(hour_cape, "summary")
-                if thu_text is not None:
-                    period_data["num_hours_thunderstorm"] += 1
+                if hour_cape != MISSING_DATA and hour_pop >= PRECIP_PROB_THRESHOLD:
+                    period_data["max_cape_with_precip"] = max(
+                        period_data["max_cape_with_precip"], hour_cape
+                    )
+                    # Count hours with thunderstorms (precipitation + CAPE >= low threshold)
+                    thu_text = calculate_thunderstorm_text(
+                        hour_cape, "summary", pop=hour_pop
+                    )
+                    if thu_text is not None:
+                        period_data["num_hours_thunderstorm"] += 1
 
     # Finalize `period_stats` list by only including periods that actually have data,
     # and in the correct order determined by `all_period_names_in_forecast_order`.
@@ -975,7 +977,7 @@ def calculate_half_day_text(
     if has_thunderstorm:
         # Use max CAPE that occurred with precipitation
         thunderstorm_summary_text, thunderstorm_icon = calculate_thunderstorm_text(
-            overall_max_cape_with_precip, "both"
+            overall_max_cape_with_precip, "both", pop=overall_avg_pop
         )
         # Check if thunderstorm periods match precipitation periods exactly
         if sorted(thunderstorm_periods) == sorted(precip_periods):

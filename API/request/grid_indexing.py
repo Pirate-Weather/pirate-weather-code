@@ -6,11 +6,13 @@ import asyncio
 import datetime
 import logging
 import math
+import time
 from dataclasses import dataclass
 from typing import Any, Union
 
 import numpy as np
 import xarray as xr
+from scipy.spatial import cKDTree
 
 from API.constants.grid_const import (
     HRRR_X_MAX,
@@ -33,10 +35,126 @@ from API.constants.grid_const import (
     RTMA_RU_Y_MAX,
     RTMA_RU_Y_MIN,
 )
-from API.constants.model_const import ERA5
+from API.constants.model_const import ERA5, ERA5_SOURCE_VARS
 from API.constants.shared_const import HISTORY_PERIODS
 from API.utils.geo import is_in_north_america, lambertGridMatch
 from API.utils.timing import StepTimer
+
+ERA5_PRECIP_PROB_THRESHOLD_M = 0.0001  # m, matching ERA5 total_precipitation units
+SILAM_LAT_START = -89.6
+SILAM_LON_START = -179.8
+SILAM_GRID_DELTA = 0.2
+SILAM_LAT_COUNT = 897
+SILAM_LON_COUNT = 1800
+
+
+def _normalize_longitude_180(lon):
+    """Normalize longitude values to [-180, 180)."""
+    return ((np.asarray(lon, dtype=float) + 180.0) % 360.0) - 180.0
+
+
+def _lat_lon_to_unit_xyz(lat, lon) -> np.ndarray:
+    """Convert latitude/longitude degrees to unit-sphere XYZ coordinates."""
+    lat_rad = np.deg2rad(np.asarray(lat, dtype=float))
+    lon_rad = np.deg2rad(_normalize_longitude_180(lon))
+    cos_lat = np.cos(lat_rad)
+    return np.column_stack(
+        [
+            np.ravel(cos_lat * np.cos(lon_rad)),
+            np.ravel(cos_lat * np.sin(lon_rad)),
+            np.ravel(np.sin(lat_rad)),
+        ]
+    )
+
+
+def _raqdps_lookup_cache(lat_lon_grid: Any) -> dict[str, Any]:
+    """Return a cached spherical KD-tree for the RAQDPS rotated lat/lon grid."""
+    if isinstance(lat_lon_grid, dict):
+        cache = lat_lon_grid.get("_lookup_cache")
+        if cache is not None:
+            return cache
+
+    latitude = np.asarray(lat_lon_grid["latitude"], dtype=float)
+    longitude = _normalize_longitude_180(lat_lon_grid["longitude"])
+    if latitude.shape != longitude.shape:
+        raise ValueError(
+            "RAQDPS latitude/longitude shape mismatch: "
+            f"lat={latitude.shape} lon={longitude.shape}"
+        )
+
+    cache = {
+        "tree": cKDTree(_lat_lon_to_unit_xyz(latitude, longitude)),
+        "shape": latitude.shape,
+        "latitude": latitude,
+        "longitude": longitude,
+    }
+    if isinstance(lat_lon_grid, dict):
+        lat_lon_grid["_lookup_cache"] = cache
+    return cache
+
+
+def _nearest_raqdps_grid_coords(
+    lat: float,
+    lon: float,
+    lat_lon_grid: Any,
+) -> tuple[int, int, float, float]:
+    """Return x/y and nearest geographic coordinates for the RAQDPS 2-D grid.
+
+    Raises ``ValueError`` if the query point is further than
+    ``_RAQDPS_MAX_GRID_DISTANCE`` from the nearest grid point, indicating
+    the location is outside the RAQDPS regional domain.
+    """
+    # Maximum chord distance (unit-sphere Euclidean) between the query point
+    # and the nearest RAQDPS grid point before the location is considered
+    # outside the model domain.  ~0.020 ≈ 127 km / ~1.14° arc, well above
+    # the ~7 km half-diagonal of a 10 km grid cell.
+    _RAQDPS_MAX_GRID_DISTANCE = 0.020
+
+    cache = _raqdps_lookup_cache(lat_lon_grid)
+    target_xyz = _lat_lon_to_unit_xyz(np.array([lat]), np.array([lon]))
+    dist, flat_idx = cache["tree"].query(target_xyz, k=1)
+    if float(dist[0]) > _RAQDPS_MAX_GRID_DISTANCE:
+        raise ValueError(
+            f"Location ({lat:.3f}, {lon:.3f}) is outside the RAQDPS domain "
+            f"(nearest grid point chord distance {float(dist[0]):.4f} > {_RAQDPS_MAX_GRID_DISTANCE})"
+        )
+    y_raqdps, x_raqdps = np.unravel_index(int(flat_idx[0]), cache["shape"])
+    return (
+        int(x_raqdps),
+        int(y_raqdps),
+        float(cache["latitude"][y_raqdps, x_raqdps]),
+        float(cache["longitude"][y_raqdps, x_raqdps]),
+    )
+
+
+def _nearest_regular_grid_index(
+    value: float,
+    start: float,
+    delta: float,
+    count: int,
+) -> int:
+    """Return the nearest bounded index on a regular one-dimensional grid."""
+    index = math.floor(((value - start) / delta) + 0.5)
+    return max(0, min(count - 1, index))
+
+
+def _silam_grid_coords(lat: float, az_lon: float) -> tuple[int, int, float, float]:
+    """Return x/y and nearest gridpoint coordinates for the SILAM global grid."""
+    y_silam = _nearest_regular_grid_index(
+        lat,
+        SILAM_LAT_START,
+        SILAM_GRID_DELTA,
+        SILAM_LAT_COUNT,
+    )
+    x_silam = _nearest_regular_grid_index(
+        az_lon,
+        SILAM_LON_START,
+        SILAM_GRID_DELTA,
+        SILAM_LON_COUNT,
+    )
+    silam_lat = SILAM_LAT_START + y_silam * SILAM_GRID_DELTA
+    silam_lon = SILAM_LON_START + x_silam * SILAM_GRID_DELTA
+    return x_silam, y_silam, silam_lat, silam_lon
 
 
 @dataclass
@@ -56,6 +174,9 @@ class ZarrSources:
     aigfs: Any = None
     aigefs: Any = None
     ecmwf_aifs: Any = None
+    raqdps: Any = None
+    silam: Any = None
+    raqdps_lat_lon: Any = None
 
 
 @dataclass
@@ -108,6 +229,19 @@ class GridIndexingResult:
     dwd_lon: Union[float, None]
     sourceIDX: dict
     WMO_alertDat: Union[str, None]
+    # Air quality model outputs
+    dataOut_raqdps: Union[np.ndarray, bool] = False
+    dataOut_silam: Union[np.ndarray, bool] = False
+    raqdpsRunTime: Union[float, None] = None
+    silamRunTime: Union[float, None] = None
+    x_raqdps: Union[float, None] = None
+    y_raqdps: Union[float, None] = None
+    raqdps_lat: Union[float, None] = None
+    raqdps_lon: Union[float, None] = None
+    x_silam: Union[float, None] = None
+    y_silam: Union[float, None] = None
+    silam_lat: Union[float, None] = None
+    silam_lon: Union[float, None] = None
 
 
 def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours: int):
@@ -121,17 +255,59 @@ def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours:
             era5_data["ERA5_times"] - np.datetime64(base_day_utc.replace(tzinfo=None))
         )
     )
-    dataOut_ERA5_xr = era5_data["dsERA5"][ERA5.keys()].isel(
+
+    precip_amount_var = "total_precipitation"
+    if precip_amount_var not in era5_data["dsERA5"]:
+        raise KeyError(f"Expected ERA5 precipitation variable '{precip_amount_var}'")
+
+    dataOut_ERA5_xr = era5_data["dsERA5"][list(ERA5_SOURCE_VARS)].isel(
         latitude=y_p, longitude=x_p, time=slice(t_p, t_p + num_hours)
     )
     dataOut_ERA5 = xr.concat(
-        [dataOut_ERA5_xr[var] for var in ERA5.keys()], dim="variable"
+        [dataOut_ERA5_xr[var] for var in ERA5_SOURCE_VARS], dim="variable"
     )
     unix_times_era5 = (
-        dataOut_ERA5_xr["time"].astype("datetime64[s]")
+        era5_data["ERA5_times"][t_p : t_p + num_hours].astype("datetime64[s]")
         - np.datetime64("1970-01-01T00:00:00")
-    ).astype(np.int64)
+    ).astype(np.int64)  # Use cached time
     era5_merged = np.vstack((unix_times_era5, dataOut_ERA5.values)).T
+
+    n_lat = era5_data["ERA5_lats"].size
+    n_lon = era5_data["ERA5_lons"].size
+    y_indices = np.arange(max(y_p - 1, 0), min(y_p + 2, n_lat))
+    x_indices = np.array([(x_p - 1) % n_lon, x_p, (x_p + 1) % n_lon])
+
+    precip_window = (
+        era5_data["dsERA5"][precip_amount_var]
+        .isel(
+            time=slice(t_p, t_p + num_hours),
+            latitude=y_indices,
+            longitude=x_indices,
+        )
+        .transpose("time", "latitude", "longitude")
+        .values
+    )
+
+    # Estimate precipitation probability as the percentage of valid cells in the
+    # 3x3 neighbourhood exceeding the measurable-precipitation threshold.
+    # The threshold units must match total_precipitation units.
+    valid = np.isfinite(precip_window)
+    hits = valid & (precip_window > ERA5_PRECIP_PROB_THRESHOLD_M)
+    denom = valid.sum(axis=(1, 2))
+    hit_count = hits.sum(axis=(1, 2))
+    precip_prob = np.divide(
+        100.0 * hit_count,
+        denom,
+        out=np.zeros_like(denom, dtype=float),
+        where=denom > 0,
+    )
+
+    if precip_prob.shape[0] != era5_merged.shape[0]:
+        raise ValueError(
+            "ERA5 precipitation probability length does not match point slice length"
+        )
+
+    era5_merged = np.column_stack((era5_merged, precip_prob))
 
     # Round the precipitation_type variable to nearest integer
     # to avoid issues with interpolation producing non-integer values.
@@ -139,6 +315,22 @@ def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours:
         era5_merged[:, ERA5["precipitation_type"]]
     )
     return era5_merged
+
+
+def _era5_cache_stats(era5_data) -> dict[str, int] | None:
+    cache_store = era5_data.get("ERA5_cache_store") if era5_data else None
+    if cache_store is None or not hasattr(cache_store, "cache_stats"):
+        return None
+    return cache_store.cache_stats()
+
+
+def _cache_stats_delta(
+    before: dict[str, int] | None,
+    after: dict[str, int] | None,
+) -> dict[str, int] | None:
+    if before is None or after is None:
+        return None
+    return {key: after.get(key, 0) - before.get(key, 0) for key in after}
 
 
 async def calculate_grid_indexing(
@@ -159,15 +351,17 @@ async def calculate_grid_indexing(
     ex_aigfs: int,
     ex_aigefs: int,
     ex_aifs: int,
-    inc_aimodels: int,
-    read_wmo_alerts: bool,
-    base_day_utc: datetime.datetime,
-    num_hours: int,
-    zarr_sources: ZarrSources,
-    weather,
-    timing_start: datetime.datetime,
-    timing_enabled: bool,
-    logger: logging.Logger,
+    ex_raqdps: int = 0,
+    ex_silam: int = 0,
+    inc_aimodels: int = 0,
+    read_wmo_alerts: bool = True,
+    base_day_utc: datetime.datetime = None,
+    num_hours: int = 0,
+    zarr_sources: ZarrSources = None,
+    weather=None,
+    timing_start: datetime.datetime = None,
+    timing_enabled: bool = False,
+    logger: logging.Logger = None,
 ) -> GridIndexingResult:
     """Compute grid coordinates and pull the zarr slices for the request."""
     timer = StepTimer(timing_start, timing_enabled)
@@ -453,14 +647,83 @@ async def calculate_grid_indexing(
 
     timer.log("### AI Models Detail END ###")
 
+    timer.log("### AQ Models Detail Start ###")
+
+    readRAQDPS = False
+    readSILAM = False
+    x_raqdps = None
+    y_raqdps = None
+    raqdps_lat_val = None
+    raqdps_lon_val = None
+    x_silam = None
+    y_silam = None
+    silam_lat_val = None
+    silam_lon_val = None
+
+    # RAQDPS: Canadian regional air quality model; uses a rotated lat-lon 2D grid.
+    # Available only when the lat/lon pickle has been loaded.
+    if (
+        ex_raqdps != 1
+        and zarr_sources.raqdps is not None
+        and zarr_sources.raqdps_lat_lon is not None
+    ):
+        try:
+            (
+                x_raqdps,
+                y_raqdps,
+                raqdps_lat_val,
+                raqdps_lon_val,
+            ) = _nearest_raqdps_grid_coords(lat, lon, zarr_sources.raqdps_lat_lon)
+            readRAQDPS = True
+        except Exception as exc:
+            logger.debug("RAQDPS grid lookup failed: %s", exc)
+
+    # SILAM: Global air quality model; uses a regular 0.2° lat/lon grid.
+    if ex_silam != 1 and zarr_sources.silam is not None:
+        try:
+            x_silam, y_silam, silam_lat_val, silam_lon_val = _silam_grid_coords(
+                lat,
+                az_lon,
+            )
+            readSILAM = True
+        except Exception as exc:
+            logger.debug("SILAM grid lookup failed: %s", exc)
+
+    timer.log("### AQ Models Detail END ###")
+
     if readERA5:
-        ERA5_MERGED = _load_era5_slice(
-            zarr_sources.era5_data,
-            lat=lat,
-            lon=lon,
-            base_day_utc=base_day_utc,
-            num_hours=num_hours,
-        )
+        era5_read_start = time.perf_counter()
+        cache_stats_before = _era5_cache_stats(zarr_sources.era5_data)
+        try:
+            ERA5_MERGED = await asyncio.to_thread(
+                _load_era5_slice,
+                zarr_sources.era5_data,
+                lat=lat,
+                lon=lon,
+                base_day_utc=base_day_utc,
+                num_hours=num_hours,
+            )
+        finally:
+            if timing_enabled:
+                elapsed_ms = (time.perf_counter() - era5_read_start) * 1000
+                cache_delta = _cache_stats_delta(
+                    cache_stats_before,
+                    _era5_cache_stats(zarr_sources.era5_data),
+                )
+                if cache_delta is None:
+                    logger.info("ERA5 read: %.1f ms", elapsed_ms)
+                else:
+                    reads = cache_delta["hits"] + cache_delta["misses"]
+                    hit_rate = 100 * cache_delta["hits"] / reads if reads else 0
+                    logger.info(
+                        "ERA5 read: %.1f ms cache_hits=%d cache_misses=%d "
+                        "evictions=%d hit_rate=%.1f%%",
+                        elapsed_ms,
+                        cache_delta["hits"],
+                        cache_delta["misses"],
+                        cache_delta["evictions"],
+                        hit_rate,
+                    )
 
     else:
         ERA5_MERGED = False
@@ -497,6 +760,14 @@ async def calculate_grid_indexing(
     if readAIFS:
         zarrTasks["ECMWF_AIFS"] = weather.zarr_read(
             "ECMWF_AIFS", zarr_sources.ecmwf_aifs, x_p_eur, y_p_eur
+        )
+    if readRAQDPS:
+        zarrTasks["RAQDPS"] = weather.zarr_read_max_square(
+            "RAQDPS", zarr_sources.raqdps, x_raqdps, y_raqdps
+        )
+    if readSILAM:
+        zarrTasks["SILAM"] = weather.zarr_read_max_square(
+            "SILAM", zarr_sources.silam, x_silam, y_silam
         )
 
     WMO_alertDat = None
@@ -769,6 +1040,42 @@ async def calculate_grid_indexing(
     else:
         dataOut_aifs = False
 
+    # --- AQ model results ---
+    dataOut_raqdps = False
+    dataOut_silam = False
+    raqdpsRunTime = None
+    silamRunTime = None
+
+    if "RAQDPS" in zarr_results:
+        dataOut_raqdps = zarr_results["RAQDPS"]
+        if isinstance(dataOut_raqdps, np.ndarray):
+            try:
+                raqdpsRunTime = float(dataOut_raqdps[HISTORY_PERIODS["RAQDPS"], 0])
+                timestamp_dt = datetime.datetime.fromtimestamp(
+                    int(raqdpsRunTime), datetime.UTC
+                ).replace(tzinfo=None)
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                    dataOut_raqdps = False
+                    raqdpsRunTime = None
+                    logger.warning("OLD RAQDPS")
+            except (ValueError, TypeError, AttributeError):
+                logger.debug("Failed to parse RAQDPS runtime for freshness check")
+
+    if "SILAM" in zarr_results:
+        dataOut_silam = zarr_results["SILAM"]
+        if isinstance(dataOut_silam, np.ndarray):
+            try:
+                silamRunTime = float(dataOut_silam[HISTORY_PERIODS["SILAM"] - 1, 0])
+                timestamp_dt = datetime.datetime.fromtimestamp(
+                    int(silamRunTime), datetime.UTC
+                ).replace(tzinfo=None)
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                    dataOut_silam = False
+                    silamRunTime = None
+                    logger.warning("OLD SILAM")
+            except (ValueError, TypeError, AttributeError):
+                logger.debug("Failed to parse SILAM runtime for freshness check")
+
     return GridIndexingResult(
         dataOut=dataOut,
         dataOut_h2=dataOut_h2,
@@ -818,4 +1125,16 @@ async def calculate_grid_indexing(
         dwd_lon=dwd_lon,
         sourceIDX=sourceIDX,
         WMO_alertDat=WMO_alertDat,
+        dataOut_raqdps=dataOut_raqdps,
+        dataOut_silam=dataOut_silam,
+        raqdpsRunTime=raqdpsRunTime,
+        silamRunTime=silamRunTime,
+        x_raqdps=x_raqdps,
+        y_raqdps=y_raqdps,
+        raqdps_lat=raqdps_lat_val,
+        raqdps_lon=raqdps_lon_val,
+        x_silam=x_silam,
+        y_silam=y_silam,
+        silam_lat=silam_lat_val,
+        silam_lon=silam_lon_val,
     )

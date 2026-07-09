@@ -457,6 +457,11 @@ def zero_small_values(
 
 # Precomputed constants – built once at import time, not every call
 _FIELDS_V_LT_2 = (
+    "airQualityIndex",
+    "airQualityIndexMax",
+    "airQualityIndexMaxTime",
+    "airQualityIndexMin",
+    "airQualityIndexMinTime",
     "cape",
     "capeMax",
     "capeMaxTime",
@@ -488,6 +493,28 @@ _FIELDS_V_LT_2 = (
     "solarMaxTime",
 )
 
+# AQ detail fields are only included when inc_airqualitydetails=1
+_FIELDS_AQ_DETAILS = (
+    "pm25",
+    "pm25Max",
+    "pm25MaxTime",
+    "pm10",
+    "pm10Max",
+    "pm10MaxTime",
+    "ozoneConcentration",
+    "ozoneConcentrationMax",
+    "ozoneConcentrationMaxTime",
+    "no2Concentration",
+    "no2ConcentrationMax",
+    "no2ConcentrationMaxTime",
+    "so2Concentration",
+    "so2ConcentrationMax",
+    "so2ConcentrationMaxTime",
+    "coConcentration",
+    "coConcentrationMax",
+    "coConcentrationMaxTime",
+)
+
 _FIELDS_TM_BASIC = (
     "nearestStormDistance",
     "nearestStormBearing",
@@ -510,6 +537,7 @@ def remove_conditional_fields(
     version: float,
     time_machine: bool,
     tm_extra: bool,
+    inc_airqualitydetails: int = 0,
 ) -> DictOrList:
     """Removes output fields based on version and request type.
 
@@ -521,6 +549,7 @@ def remove_conditional_fields(
         version (float): The API version.
         time_machine (bool): Whether it's a Time Machine request.
         tm_extra (bool): Whether extra Time Machine fields are requested.
+        inc_airqualitydetails (int): Whether to include AQ detail fields (0 or 1).
 
     Returns:
         DictOrList: The modified data.
@@ -533,6 +562,9 @@ def remove_conditional_fields(
 
     if time_machine and not tm_extra:
         fields_to_remove.update(_FIELDS_TM_BASIC)
+
+    if not inc_airqualitydetails:
+        fields_to_remove.update(_FIELDS_AQ_DETAILS)
 
     if not fields_to_remove:
         return data

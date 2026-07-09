@@ -91,6 +91,67 @@ def test_build_daily_section_structure():
     assert "time" in result.day_list[0]
 
 
+def test_daily_air_quality_index_uses_hourly_aqi_column():
+    daily_days = 1
+    hours_per_day = 24
+    InterPhour = np.zeros((hours_per_day, max(DATA_HOURLY.values()) + 1))
+    InterPhour[:, DATA_HOURLY["time"]] = np.arange(hours_per_day) * 3600
+    InterPhour[:, DATA_HOURLY["pm25"]] = 1
+    InterPhour[:, DATA_HOURLY["aqi"]] = 10
+    InterPhour[7, DATA_HOURLY["aqi"]] = 120
+
+    hourlyDayIndex = np.zeros(hours_per_day, dtype=int)
+    day_array_grib = np.array([0])
+    day_array_4am_grib = np.array([4 * 3600])
+    day_array_5pm_grib = np.array([17 * 3600])
+    hourList_si = [
+        {"time": i * 3600, "icon": "clear-day", "summary": "Clear"}
+        for i in range(hours_per_day + 48)
+    ]
+
+    result = build_daily_section(
+        InterPhour=InterPhour,
+        hourlyDayIndex=hourlyDayIndex,
+        hourlyDay4amIndex=hourlyDayIndex,
+        hourlyDay4pmIndex=hourlyDayIndex,
+        hourlyNight4amIndex=hourlyDayIndex,
+        hourlyHighIndex=hourlyDayIndex,
+        hourlyLowIndex=hourlyDayIndex,
+        daily_days=daily_days,
+        prepAccumUnit=1.0,
+        prepIntensityUnit=1.0,
+        windUnit=1.0,
+        visUnits=1.0,
+        tempUnits=1.0,
+        extraVars=[],
+        summaryText=False,
+        translation=MagicMock(),
+        is_all_night=False,
+        is_all_day=False,
+        tz_name="UTC",
+        icon="default",
+        unitSystem="si",
+        version=2,
+        timeMachine=False,
+        tmExtra=False,
+        day_array_grib=day_array_grib,
+        day_array_4am_grib=day_array_4am_grib,
+        day_array_5pm_grib=day_array_5pm_grib,
+        InterSday=np.zeros((daily_days, max(DATA_DAY.values()) + 1)),
+        hourList_si=hourList_si,
+        pTypeMap=np.array(["none", "rain", "snow", "sleet", "ice"]),
+        pTextMap=np.array(["None", "Rain", "Snow", "Sleet", "Ice"]),
+        logger=MagicMock(),
+        loc_tag="test_loc",
+    )
+
+    day = result.day_list[0]
+    assert day["airQualityIndex"] == 15
+    assert day["airQualityIndexMax"] == 120
+    assert day["airQualityIndexMaxTime"] == 7 * 3600
+    assert day["airQualityIndexMin"] == 10
+
+
 def test_select_hour_window_uses_timestamp_boundaries_across_dst():
     hour_list_si = [{"time": ts} for ts in range(0, 49 * 3600, 3600)]
 

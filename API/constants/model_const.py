@@ -154,7 +154,10 @@ ERA5 = {
     "surface_solar_radiation_downwards": 16,
     "convective_available_potential_energy": 17,
     "surface_pressure": 18,
+    "prob": 19,
 }
+
+ERA5_SOURCE_VARS = tuple(var for var in ERA5 if var != "prob")
 
 # DWD MOSMIX variable indices
 # These match the zarr_vars order in DWD_Mosmix_Local_Ingest.py:
@@ -196,6 +199,34 @@ ECMWF_AIFS = {
     "prob": 8,
     "accum_mean": 9,
     "accum_stddev": 10,
+}
+
+# RAQDPS (Regional Air Quality Deterministic Prediction System) variable indices.
+# Matches the stacked-zarr output order from RAQDPS_Local_Ingest.py:
+# RAQDPS_OUTPUT_VARS = ("time", "PM2.5", "PM10", "NO2", "O3", "SO2")
+RAQDPS = {
+    "time": 0,
+    "pm25": 1,
+    "pm10": 2,
+    "no2": 3,
+    "o3": 4,
+    "so2": 5,
+}
+
+# SILAM (System for Integrated modeLling of Atmospheric coMposition) variable indices.
+# Matches the stacked-zarr output order from FMI_Silam_Local_Ingest.py:
+# zarr_vars = ("time", "cnc_PM2_5", "cnc_PM10", "PM_FRP_column", "BLH",
+#              "cnc_O3", "cnc_NO2", "cnc_SO2", "cnc_CO")
+SILAM = {
+    "time": 0,
+    "pm25": 1,
+    "pm10": 2,
+    "pm_frp_column": 3,
+    "blh": 4,
+    "o3": 5,
+    "no2": 6,
+    "so2": 7,
+    "co": 8,
 }
 
 # Source names that provide forecast data (i.e. not current-conditions-only or elevation).

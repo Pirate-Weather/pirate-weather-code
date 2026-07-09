@@ -245,3 +245,80 @@ This phase involves modifying the API's core logic to load the new model's data 
     ```
 
 This overview provides a roadmap for integrating a new model. Be prepared for iterative testing and debugging, as weather data processing can be complex due to varying grids, units, and data formats.
+---
+
+## Air Quality Models
+
+### RAQDPS (Regional Air Quality Deterministic Prediction System)
+
+**Coverage**: Canada and contiguous United States (regional, ~10 km resolution).
+
+**Variables provided** (in native zarr output order):
+
+| Index | Variable | Unit |
+|-------|----------|------|
+| 0 | time (Unix epoch) | s |
+| 1 | PM2.5 | µg/m³ |
+| 2 | PM10 | µg/m³ |
+| 3 | NO2 | ppb |
+| 4 | O3 | ppb |
+| 5 | SO2 | ppb |
+
+**Grid**: Rotated lat-lon 2-D grid. Nearest-neighbour lookup uses `RAQDPS.lat_lon.pickle` (keys: `latitude`, `longitude`, both 2-D arrays; optional `shape`).
+
+**Exclude flag**: `exclude=raqdps`
+
+**Priority**: Preferred over SILAM when available for the requested location.
+
+---
+
+### SILAM (System for Integrated modeLling of Atmospheric coMposition)
+
+**Coverage**: Global.
+
+**Variables provided** (in native zarr output order):
+
+| Index | Variable | Unit |
+|-------|----------|------|
+| 0 | time (Unix epoch) | s |
+| 1 | PM2.5 (`cnc_PM2_5`) | µg/m³ |
+| 2 | PM10 (`cnc_PM10`) | µg/m³ |
+| 3 | PM_FRP_column | – |
+| 4 | BLH | m |
+| 5 | O3 (`cnc_O3`) | ppb |
+| 6 | NO2 (`cnc_NO2`) | ppb |
+| 7 | SO2 (`cnc_SO2`) | ppb |
+| 8 | CO (`cnc_CO`) | ppb |
+
+**Grid**: Regular lat/lon 1-D grid. Nearest-neighbour lookup uses `SILAM.lat_lon.pickle` (keys: `latitude`, `longitude`, both 1-D arrays).
+
+**Exclude flag**: `exclude=silam`
+
+**Priority**: Global fallback when RAQDPS does not cover the location.
+
+**Note**: SILAM is the only source for CO (`coConcentration`). RAQDPS does not publish CO.
+
+---
+
+### AQI Calculation
+
+Air quality index values are computed at response time from pollutant concentrations. The index system depends on the `units` query parameter:
+
+| `units` value | AQI system |
+|---------------|-----------|
+| `us` (default) | US EPA AQI (0–500+ scale) |
+| `ca` | Canadian AQHI (1–10+ scale, uses PM2.5 / O3 / NO2) |
+| `uk` or `si` | EU CAQI (0–100+ scale) |
+
+Gas concentrations stored internally in **ppb** are converted to µg/m³ before applying EPA / CAQI breakpoints.
+
+---
+
+### Request Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `exclude=raqdps` | Skip RAQDPS; SILAM will be used as fallback |
+| `exclude=silam` | Skip SILAM |
+| `exclude=raqdps,silam` | Exclude all AQ models; no AQ fields in response |
+| `include=airqualitydetails` | Add per-pollutant concentration fields (PM2.5, PM10, O3, NO2, SO2, CO) to the response |
