@@ -939,10 +939,10 @@ def prepare_aq_inputs(
     # Convert PM_FRP_column from µg/m² (column burden) to µg/m³ (near-surface
     # concentration) by dividing by the boundary layer height.  When BLH is
     # NaN a neutral 1000 m is used; valid-but-small values are clamped to
-    # 100 m to avoid division by near-zero denominators.
+    # 500 m to avoid division by near-zero denominators.
     if silam_smoke_frp is not None:
         if silam_blh is not None:
-            blh = np.where(np.isnan(silam_blh), 1000.0, np.maximum(silam_blh, 100.0))
+            blh = np.where(np.isnan(silam_blh), 1000.0, np.maximum(silam_blh, 500.0))
         else:
             blh = np.full(num_hours, 1000.0)
         smoke_frp_m3 = silam_smoke_frp / blh

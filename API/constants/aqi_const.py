@@ -132,9 +132,11 @@ PM10_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
 # O3 (Ozone, µg/m³) — EPA breakpoints converted to µg/m³ (1 ppm O3 ≈ 1996 µg/m³ @ 25°C)
 # Breakpoints for 8-hour average ozone concentrations
-# Todo: Need to split these breakpoints into 8-hour and 1-hour ranges for EPA AQI calculation.
-O3_BP = [0, 108, 140, 170, 210, 400, 504, 604]
-O3_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
+O3_8H_BP = [0, 55, 71, 86, 106, 201]
+O3_8H_AQI = [0, 50, 100, 150, 200, 300]
+# Breakpoints for 1-hour average ozone concentrations
+O3_1H_BP = [125, 165, 205, 405, 505, 605]
+O3_1H_AQI = [100, 150, 200, 300, 400, 500]
 
 # NO2 (Nitrogen Dioxide, ppb) — EPA breakpoints
 # Breakpoints for 1-hour average NO2 concentrations
@@ -211,7 +213,8 @@ def _epa_sub_index(conc_ug: float, bp: list, aqi_vals: list) -> float:
 def compute_epa_aqi(
     pm25_ug: float = float("nan"),
     pm10_ug: float = float("nan"),
-    o3_ppb: float = float("nan"),
+    o3_8h_ppb: float = float("nan"),
+    o3_1h_ppb: float = float("nan"),
     no2_ppb: float = float("nan"),
     so2_ppb: float = float("nan"),
     co_ppb: float = float("nan"),
@@ -220,16 +223,32 @@ def compute_epa_aqi(
 
     Pollutant concentrations should be in model-native units:
       pm25_ug, pm10_ug → µg/m³
-      o3_ppb, no2_ppb, so2_ppb, co_ppb → ppb
+      o3_8h_ppb, o3_1h_ppb, no2_ppb, so2_ppb, co_ppb → ppb
     """
     sub_indices = []
+
+    o3_sub = float("nan")
+
+    # 8-hour ozone
+    if not math.isnan(o3_8h_ppb):
+        o3_sub = _epa_sub_index(o3_8h_ppb, O3_8H_BP, O3_8H_AQI)
+
+    # 1-hour ozone only applies when 8-hour AQI > 100
+    if (
+        not math.isnan(o3_1h_ppb)
+        and not math.isnan(o3_sub)
+        and o3_sub > 100
+    ):
+        o3_1h_sub = _epa_sub_index(o3_1h_ppb, O3_1H_BP, O3_1H_AQI)
+        if not math.isnan(o3_1h_sub):
+            o3_sub = max(o3_sub, o3_1h_sub)
 
     if not math.isnan(pm25_ug):
         sub_indices.append(_epa_sub_index(pm25_ug, PM25_BP, PM25_AQI))
     if not math.isnan(pm10_ug):
         sub_indices.append(_epa_sub_index(pm10_ug, PM10_BP, PM10_AQI))
-    if not math.isnan(o3_ppb):
-        sub_indices.append(_epa_sub_index(o3_ppb * PPB_O3_TO_UG_M3, O3_BP, O3_AQI))
+    if not math.isnan(o3_sub):
+        sub_indices.append(o3_sub)
     if not math.isnan(no2_ppb):
         sub_indices.append(_epa_sub_index(no2_ppb, NO2_BP, NO2_AQI))
     if not math.isnan(so2_ppb):
@@ -416,6 +435,7 @@ def compute_aqi_array(
         # NO2 and SO2 use 1-hour (instantaneous) averages
         no2_calc = no2_v
         so2_calc = so2_v
+        o3_1h_calc = o3_v
     elif system == "AQHI":
         # AQHI uses 3-hour rolling averages for PM2.5, O3, NO2
         pm25_calc = rolling_mean(pm25_v, window=3)
@@ -436,13 +456,24 @@ def compute_aqi_array(
 
     result = np.full(n, np.nan, dtype=np.float32)
     for i in range(n):
-        result[i] = compute_aqi_for_unit_system(
-            unit_system,
-            float(pm25_calc[i]),
-            float(pm10_calc[i]),
-            float(o3_calc[i]),
-            float(no2_calc[i]),
-            float(so2_calc[i]),
-            float(co_calc[i]),
-        )
+        if system == "EPA":
+            result[i] = compute_epa_aqi(
+                pm25_ug=float(pm25_calc[i]),
+                pm10_ug=float(pm10_calc[i]),
+                o3_8h_ppb=float(o3_calc[i]),
+                o3_1h_ppb=float(o3_1h_calc[i]),
+                no2_ppb=float(no2_calc[i]),
+                so2_ppb=float(so2_calc[i]),
+                co_ppb=float(co_calc[i]),
+            )
+        else:
+            result[i] = compute_aqi_for_unit_system(
+                unit_system,
+                float(pm25_calc[i]),
+                float(pm10_calc[i]),
+                float(o3_calc[i]),
+                float(no2_calc[i]),
+                float(so2_calc[i]),
+                float(co_calc[i]),
+            )
     return result
