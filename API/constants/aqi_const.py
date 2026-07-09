@@ -234,11 +234,7 @@ def compute_epa_aqi(
         o3_sub = _epa_sub_index(o3_8h_ppb, O3_8H_BP, O3_8H_AQI)
 
     # 1-hour ozone only applies when 8-hour AQI > 100
-    if (
-        not math.isnan(o3_1h_ppb)
-        and not math.isnan(o3_sub)
-        and o3_sub > 100
-    ):
+    if not math.isnan(o3_1h_ppb) and not math.isnan(o3_sub) and o3_sub > 100:
         o3_1h_sub = _epa_sub_index(o3_1h_ppb, O3_1H_BP, O3_1H_AQI)
         if not math.isnan(o3_1h_sub):
             o3_sub = max(o3_sub, o3_1h_sub)
