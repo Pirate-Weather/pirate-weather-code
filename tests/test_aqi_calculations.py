@@ -354,7 +354,7 @@ class TestPrepareAQInputs:
         assert np.nanmean(result["smoke_frp"]) == pytest.approx(5.0, abs=0.1)
 
     def test_smoke_frp_enforces_minimum_blh(self):
-        """Valid BLH values below 100 m should be clamped to 100 m."""
+        """Valid BLH values below 500 m should be clamped to 500 m."""
         from API.constants.model_const import SILAM
 
         n = 4
@@ -371,12 +371,12 @@ class TestPrepareAQInputs:
                 "so2": np.full(n, 1.0),
                 "co": np.full(n, 100.0),
                 "pm_frp_column": np.full(n, 1000.0),
-                "blh": np.full(n, 10.0),  # valid but < 100 m → clamped to 100 m
+                "blh": np.full(n, 10.0),  # valid but < 500 m → clamped to 500 m
             },
         )
         result = prepare_aq_inputs(n, False, silam_data, hours)
-        # 1000 µg/m² / 100 m (clamped) = 10.0 µg/m³
-        assert np.nanmean(result["smoke_frp"]) == pytest.approx(10.0, abs=0.1)
+        # 1000 µg/m² / 500 m (clamped) = 2.0 µg/m³
+        assert np.nanmean(result["smoke_frp"]) == pytest.approx(2.0, abs=0.1)
 
     def test_smoke_frp_nans_when_silam_absent(self):
         """When SILAM is unavailable, smoke_frp should be all-NaN."""
