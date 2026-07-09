@@ -1636,6 +1636,7 @@ def build_current_section(
     # Populate AQ concentration fields from aq_inputs (version >= 2)
     if aq_inputs is not None:
 
+        # Interpolate between hours 0 and 1
         def _fill_curr_aq(col_key, src_key, clip_min, clip_max):
             arr = aq_inputs.get(src_key)
             if arr is not None and len(arr) > 0:
