@@ -797,7 +797,7 @@ def build_hourly_block(
                 o3=InterPhour[:, DATA_HOURLY["o3"]],
                 no2=InterPhour[:, DATA_HOURLY["no2"]],
                 so2=InterPhour[:, DATA_HOURLY["so2"]],
-                co=None,
+                co=InterPhour[:, DATA_HOURLY["co"]],
             )
             InterPhour[:, DATA_HOURLY["aqi"]] = np.clip(
                 aqi_arr, CLIP_AQI["min"], CLIP_AQI["max"]

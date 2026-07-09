@@ -54,8 +54,8 @@ def calculate_solar_times(
 
         if solar_times["dusk"] < solar_times["sunset"]:
             solar_times["dusk"] = datetime.datetime.combine(
-                solar_date + datetime.timedelta(days=1) - datetime.timedelta(seconds=1),
-                datetime.time.min,
+                solar_date,
+                datetime.time.max,
                 tzinfo=solar_times["sunset"].tzinfo,
             )
 

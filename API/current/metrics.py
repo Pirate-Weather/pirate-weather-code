@@ -1635,22 +1635,21 @@ def build_current_section(
 
     # Populate AQ concentration fields from aq_inputs (version >= 2)
     if aq_inputs is not None:
-
-        def _fill_curr_aq(col_key, src_key, clip_min, clip_max, curr_idx):
+        # Linear interpolation between hours 0 and 1
+        def _fill_curr_aq(col_key, src_key, clip_min, clip_max):
             arr = aq_inputs.get(src_key)
             if arr is not None and len(arr) > 0:
-                # Use the current-hour index so values reflect the current time,
-                # not the start of the local day (arr[0]).
-                i = min(curr_idx, len(arr) - 1)
-                val = float(arr[i]) if not np.isnan(arr[i]) else float("nan")
+                i1 = min(idx1, len(arr) - 1)
+                i2 = min(idx2, len(arr) - 1)
+                val = float(arr[i1]) * fac1 + float(arr[i2]) * fac2
                 InterPcurrent[DATA_CURRENT[col_key]] = np.clip(val, clip_min, clip_max)
 
-        _fill_curr_aq("pm25", "pm25", CLIP_PM25["min"], CLIP_PM25["max"], idx2)
-        _fill_curr_aq("pm10", "pm10", CLIP_PM10["min"], CLIP_PM10["max"], idx2)
-        _fill_curr_aq("o3", "o3", CLIP_O3_PPB["min"], CLIP_O3_PPB["max"], idx2)
-        _fill_curr_aq("no2", "no2", CLIP_NO2_PPB["min"], CLIP_NO2_PPB["max"], idx2)
-        _fill_curr_aq("so2", "so2", CLIP_SO2_PPB["min"], CLIP_SO2_PPB["max"], idx2)
-        _fill_curr_aq("co", "co", CLIP_CO_PPB["min"], CLIP_CO_PPB["max"], idx2)
+        _fill_curr_aq("pm25", "pm25", CLIP_PM25["min"], CLIP_PM25["max"])
+        _fill_curr_aq("pm10", "pm10", CLIP_PM10["min"], CLIP_PM10["max"])
+        _fill_curr_aq("o3", "o3", CLIP_O3_PPB["min"], CLIP_O3_PPB["max"])
+        _fill_curr_aq("no2", "no2", CLIP_NO2_PPB["min"], CLIP_NO2_PPB["max"])
+        _fill_curr_aq("so2", "so2", CLIP_SO2_PPB["min"], CLIP_SO2_PPB["max"])
+        _fill_curr_aq("co", "co", CLIP_CO_PPB["min"], CLIP_CO_PPB["max"])
 
         try:
             # Compute AQI using the same averaged approach as the hourly block
@@ -1665,8 +1664,14 @@ def build_current_section(
                 so2=aq_inputs.get("so2"),
                 co=aq_inputs.get("co"),
             )
-            curr_aqi_idx = min(idx2, len(aqi_arr) - 1)
-            aqi_val = float(aqi_arr[curr_aqi_idx]) if len(aqi_arr) > 0 else float("nan")
+            if len(aqi_arr) > 0:
+                aqi_idx1 = min(idx1, len(aqi_arr) - 1)
+                aqi_idx2 = min(idx2, len(aqi_arr) - 1)
+                aqi_val = (
+                    float(aqi_arr[aqi_idx1]) * fac1 + float(aqi_arr[aqi_idx2]) * fac2
+                )
+            else:
+                aqi_val = float("nan")
             if not np.isnan(aqi_val):
                 InterPcurrent[DATA_CURRENT["aqi"]] = np.clip(
                     aqi_val, CLIP_AQI["min"], CLIP_AQI["max"]

@@ -241,7 +241,6 @@ def process_silam_file(local_nc_path: str) -> xr.Dataset:
         xarray_silam_data = xr.open_dataset(
             local_nc_path,
             engine="netcdf4",
-            chunks={"time": 24, "lat": processChunk, "lon": processChunk},
         )
 
         logger.info("Successfully opened SILAM dataset from local file")
@@ -384,11 +383,8 @@ def save_processed_zarr(xarray_processed: xr.Dataset, zarr_path: str) -> None:
 
 
 # Create new directory for processing if it does not exist
-if not os.path.exists(forecast_process_dir):
-    os.makedirs(forecast_process_dir)
-else:
-    shutil.rmtree(forecast_process_dir)
-    os.makedirs(forecast_process_dir)
+shutil.rmtree(forecast_process_dir, ignore_errors=True)
+os.makedirs(forecast_process_dir, exist_ok=True)
 
 os.makedirs(tmpDIR, exist_ok=True)
 os.makedirs(hist_process_path, exist_ok=True)
@@ -451,11 +447,7 @@ logger.info("Saved forecast Zarr data to disk.")
 # using the same dask stacking approach used by GFS/HRRR.
 for hours_offset in range(hisPeriod, 0, -HISTORIC_STEP_HOURS):
     hist_start = origintime - timedelta(hours=hours_offset)
-    hist_end = hist_start + timedelta(hours=HISTORIC_STEP_HOURS)
-    +timedelta(
-        hours=1
-    )  # Add an hour since SILAM goes from hour 1 to hour 24 for each run,
-    # so hour 24 needs to included
+    hist_end = hist_start + timedelta(hours=HISTORIC_STEP_HOURS + 1)
 
     timestamp = hist_start.strftime("%Y%m%dT%H%M%SZ")
 
@@ -570,13 +562,10 @@ for dask_var in zarr_vars:
             "float32"
         )
 
-        times_array = dask_times_concatenated.compute()
-        output_array = da.from_array(
-            np.tile(
-                np.expand_dims(np.expand_dims(times_array, axis=1), axis=1),
-                (1, lat_count, lon_count),
-            )
-        ).rechunk((len(times_array), processChunk, processChunk))
+        output_array = da.broadcast_to(
+            dask_times_concatenated[:, None, None],
+            (dask_times_concatenated.shape[0], lat_count, lon_count),
+        ).rechunk((dask_times_concatenated.shape[0], processChunk, processChunk))
         dask_interp_arrays.append(output_array)
     else:
         dask_data_arrays = dask_var_arrays_list + [dask_forecast_array]

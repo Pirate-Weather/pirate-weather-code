@@ -1057,15 +1057,13 @@ for var_idx, dask_var in enumerate(zarr_vars[:]):
             (da.squeeze(dask_var_arrays_reshaped), dask_forecast_array), axis=0
         ).astype("float32")
 
-        # Get times as numpy
-        times_array = dask_times_concatenated.compute()
-        validate_stacked_time_alignment(stacked_timesUnix, times_array)
+        validate_stacked_time_alignment(
+            stacked_timesUnix, dask_times_concatenated.compute()
+        )
 
-        output_array = da.from_array(
-            np.tile(
-                np.expand_dims(np.expand_dims(times_array, axis=1), axis=1),
-                (1, GRID_LAT, GRID_LON),
-            )
+        output_array = da.broadcast_to(
+            dask_times_concatenated[:, None, None],
+            (dask_times_concatenated.shape[0], GRID_LAT, GRID_LON),
         ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
 
         dask_interp_arrays.append(output_array)
