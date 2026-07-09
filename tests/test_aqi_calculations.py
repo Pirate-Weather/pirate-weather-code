@@ -29,8 +29,8 @@ class TestEPAAQI:
         assert 0 <= aqi <= 50
 
     def test_moderate_pm25(self):
-        """PM2.5 around 12.5 µg/m³ sits near AQI 50 boundary."""
-        aqi = compute_epa_aqi(pm25_ug=12.0)
+        """PM2.5 around 9.0 µg/m³ sits near AQI 50 boundary."""
+        aqi = compute_epa_aqi(pm25_ug=9.0)
         assert 0 <= aqi <= 50
 
     def test_unhealthy_pm25(self):
