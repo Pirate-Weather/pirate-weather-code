@@ -599,7 +599,7 @@ def _build_hourly_display(
         DATA_HOURLY["prob"]: ROUNDING_RULES.get("precipProbability", 2),
         DATA_HOURLY["humidity"]: ROUNDING_RULES.get("humidity", 2),
         DATA_HOURLY["cloud"]: ROUNDING_RULES.get("cloudCover", 2),
-        DATA_HOURLY["uv"]: ROUNDING_RULES.get("uvIndex", 0),
+        DATA_HOURLY["uv"]: ROUNDING_RULES.get("uvIndex", 2),
         DATA_HOURLY["ozone"]: ROUNDING_RULES.get("ozone", 2),
         DATA_HOURLY["smoke"]: ROUNDING_RULES.get("smoke", 2),
         DATA_HOURLY["fire"]: ROUNDING_RULES.get("fireIndex", 2),
@@ -1045,7 +1045,7 @@ def build_hourly_objects(
                 hourly_display[idx, DATA_HOURLY["bearing"]]
             ),
             "cloudCover": hourly_display[idx, DATA_HOURLY["cloud"]],
-            "uvIndex": _nan_to_int_or_nan(hourly_display[idx, DATA_HOURLY["uv"]]),
+            "uvIndex": hourly_display[idx, DATA_HOURLY["uv"]],
             "visibility": hourly_display[idx, DATA_HOURLY["vis"]],
             "ozone": hourly_display[idx, DATA_HOURLY["ozone"]],
             "smoke": hourly_display[idx, DATA_HOURLY["smoke"]],
