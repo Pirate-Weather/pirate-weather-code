@@ -374,7 +374,7 @@ def download_extract_historic_zip(s3_filesystem, s3_zip_path, local_temp_dir):
 def prepare_directories():
     """Reset processing directories and ensure output roots exist."""
     if os.path.exists(forecast_process_dir):
-        shutil.rmtree(forecast_process_dir)
+        shutil.rmtree(forecast_process_dir, ignore_errors=True)
     os.makedirs(tmp_dir, exist_ok=True)
     os.makedirs(local_temp_historic_dir, exist_ok=True)
 
