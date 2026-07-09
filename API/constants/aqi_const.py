@@ -132,20 +132,21 @@ PM10_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
 # O3 (Ozone, µg/m³) — EPA breakpoints converted to µg/m³ (1 ppm O3 ≈ 1996 µg/m³ @ 25°C)
 # Breakpoints for 8-hour average ozone concentrations
+# Todo: Need to split these breakpoints into 8-hour and 1-hour ranges for EPA AQI calculation.
 O3_BP = [0, 108, 140, 170, 210, 400, 504, 604]
 O3_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
-# NO2 (Nitrogen Dioxide, µg/m³) — EPA breakpoints converted to µg/m³ (1 ppb ≈ 1.88 µg/m³)
+# NO2 (Nitrogen Dioxide, ppb) — EPA breakpoints
 # Breakpoints for 1-hour average NO2 concentrations
-NO2_BP = [0, 100, 188, 677, 1221, 1880, 2350, 2820]
+NO2_BP = [0, 53, 100, 360, 649, 1249, 1649, 2049]
 NO2_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
-# SO2 (Sulfur Dioxide, µg/m³) — EPA breakpoints converted to µg/m³ (1 ppb ≈ 2.62 µg/m³)
+# SO2 (Sulfur Dioxide, ppb) — EPA breakpoints
 # Breakpoints for 1-hour average SO2 concentrations
-SO2_BP = [0, 92, 197, 485, 800, 1574, 2101, 2620]
+SO2_BP = [0, 35, 75, 185, 304, 604, 804, 1004]
 SO2_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
-# CO (Carbon Monoxide, µg/m³) — EPA breakpoints converted to µg/m³ (1 ppb ≈ 1.15 µg/m³)
+# CO (Carbon Monoxide, ppb) — EPA breakpoints
 # Breakpoints for 8-hour average CO concentrations
 CO_BP = [0, 4400, 9400, 12400, 15400, 30400, 40400, 50400]
 CO_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
@@ -230,11 +231,11 @@ def compute_epa_aqi(
     if not math.isnan(o3_ppb):
         sub_indices.append(_epa_sub_index(o3_ppb * PPB_O3_TO_UG_M3, O3_BP, O3_AQI))
     if not math.isnan(no2_ppb):
-        sub_indices.append(_epa_sub_index(no2_ppb * PPB_NO2_TO_UG_M3, NO2_BP, NO2_AQI))
+        sub_indices.append(_epa_sub_index(no2_ppb, NO2_BP, NO2_AQI))
     if not math.isnan(so2_ppb):
-        sub_indices.append(_epa_sub_index(so2_ppb * PPB_SO2_TO_UG_M3, SO2_BP, SO2_AQI))
+        sub_indices.append(_epa_sub_index(so2_ppb, SO2_BP, SO2_AQI))
     if not math.isnan(co_ppb):
-        sub_indices.append(_epa_sub_index(co_ppb * PPB_CO_TO_UG_M3, CO_BP, CO_AQI))
+        sub_indices.append(_epa_sub_index(co_ppb, CO_BP, CO_AQI))
 
     valid = [v for v in sub_indices if not math.isnan(v)]
     return float(max(valid)) if valid else float("nan")
