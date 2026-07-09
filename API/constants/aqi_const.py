@@ -132,10 +132,10 @@ PM10_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
 # O3 (Ozone, µg/m³) — EPA breakpoints converted to µg/m³ (1 ppm O3 ≈ 1996 µg/m³ @ 25°C)
 # Breakpoints for 8-hour average ozone concentrations
-O3_8H_BP = [0, 55, 71, 86, 106, 201]
+O3_8H_BP = [0, 54, 70, 85, 105, 200]
 O3_8H_AQI = [0, 50, 100, 150, 200, 300]
 # Breakpoints for 1-hour average ozone concentrations
-O3_1H_BP = [125, 165, 205, 405, 505, 605]
+O3_1H_BP = [124, 164, 204, 404, 504, 604]
 O3_1H_AQI = [100, 150, 200, 300, 400, 500]
 
 # NO2 (Nitrogen Dioxide, ppb) — EPA breakpoints
@@ -233,8 +233,8 @@ def compute_epa_aqi(
     if not math.isnan(o3_8h_ppb):
         o3_sub = _epa_sub_index(o3_8h_ppb, O3_8H_BP, O3_8H_AQI)
 
-    # 1-hour ozone only applies when 8-hour AQI > 100
-    if not math.isnan(o3_1h_ppb) and not math.isnan(o3_sub) and o3_sub > 100:
+    # 1-hour ozone only applies when 8-hour AQI > 100 and concentration is at least the minimum breakpoint
+    if not math.isnan(o3_1h_ppb) and not math.isnan(o3_sub) and o3_sub > 100 and o3_1h_ppb >= O3_1H_BP[0]:
         o3_1h_sub = _epa_sub_index(o3_1h_ppb, O3_1H_BP, O3_1H_AQI)
         if not math.isnan(o3_1h_sub):
             o3_sub = max(o3_sub, o3_1h_sub)
