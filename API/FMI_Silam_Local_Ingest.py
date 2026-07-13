@@ -139,7 +139,8 @@ def get_latest_silam_run():
 
     for catalog_url in catalog_urls:
         try:
-            response = requests.get(catalog_url, timeout=30)
+            headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"}
+            response = requests.get(catalog_url, headers=headers, timeout=30)
             response.raise_for_status()
             catalog = ElementTree.fromstring(response.content)
         except (ElementTree.ParseError, requests.RequestException) as e:
@@ -168,7 +169,8 @@ def get_latest_silam_run():
         logger.warning(f"No SILAM run files found in catalog {catalog_url}")
 
     # Fall back to the previous fixed-delay behavior if the catalog is unavailable.
-    latest_origintime = (datetime.now(timezone.utc) - timedelta(days=1)).replace(
+    # Use a two day delay to ensure files are available when the script runs.
+    latest_origintime = (datetime.now(timezone.utc) - timedelta(days=2)).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
     logger.warning(f"Falling back to estimated SILAM run time: {latest_origintime}")
