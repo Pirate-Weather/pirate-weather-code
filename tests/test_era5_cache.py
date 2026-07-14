@@ -1,7 +1,9 @@
+import os
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import zarr
+from zarr.core.sync import sync
 from zarr.experimental.cache_store import CacheStore
 from zarr.storage import LocalStore
 
@@ -11,6 +13,7 @@ from API.io.ZarrHelpers import (
     ERA5_CACHE_VERSION,
     ERA5_DASK_CHUNKS,
     ERA5_ZARR_URL,
+    DiskAwareCacheStore,
     init_ERA5,
 )
 
@@ -32,7 +35,9 @@ def test_init_era5_uses_zarr_cache_store(tmp_path):
             return_value=source_store,
         ) as from_url,
         patch("API.io.ZarrHelpers.LocalStore", return_value=local_store) as local,
-        patch("API.io.ZarrHelpers.CacheStore", return_value=cache_store) as cache,
+        patch(
+            "API.io.ZarrHelpers.DiskAwareCacheStore", return_value=cache_store
+        ) as cache,
         patch("API.io.ZarrHelpers.xr.open_zarr", return_value=dataset) as open_zarr,
     ):
         result = init_ERA5(str(cache_dir))
@@ -76,7 +81,9 @@ def test_init_era5_honors_cache_max_size_env(tmp_path, monkeypatch):
     with (
         patch("API.io.ZarrHelpers.FsspecStore.from_url", return_value=source_store),
         patch("API.io.ZarrHelpers.LocalStore", return_value=local_store),
-        patch("API.io.ZarrHelpers.CacheStore", return_value=cache_store) as cache,
+        patch(
+            "API.io.ZarrHelpers.DiskAwareCacheStore", return_value=cache_store
+        ) as cache,
         patch("API.io.ZarrHelpers.xr.open_zarr", return_value=dataset),
     ):
         init_ERA5(str(cache_dir))
@@ -100,7 +107,7 @@ def test_init_era5_honors_cache_dir_env(tmp_path, monkeypatch):
     with (
         patch("API.io.ZarrHelpers.FsspecStore.from_url", return_value=source_store),
         patch("API.io.ZarrHelpers.LocalStore", return_value=local_store) as local,
-        patch("API.io.ZarrHelpers.CacheStore", return_value=cache_store),
+        patch("API.io.ZarrHelpers.DiskAwareCacheStore", return_value=cache_store),
         patch("API.io.ZarrHelpers.xr.open_zarr", return_value=dataset),
     ):
         result = init_ERA5(str(requested_cache_dir))
@@ -135,6 +142,34 @@ def test_zarr_cache_store_reuses_local_cached_chunks(tmp_path):
     assert cache_store.cache_info()["max_size"] == ERA5_CACHE_MAX_SIZE
     assert stats_after_first_read["misses"] > 0
     assert stats_after_second_read["hits"] > stats_after_first_read["hits"]
+
+
+def test_disk_aware_cache_store_prunes_existing_cache_files(tmp_path):
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    source_store = LocalStore(source_root)
+    cache_root = tmp_path / "cache"
+    cache_root.mkdir()
+    old_cache_file = cache_root / "old"
+    new_cache_file = cache_root / "new"
+    old_cache_file.write_bytes(b"a" * 7)
+    new_cache_file.write_bytes(b"b" * 7)
+    os.utime(old_cache_file, (1, 1))
+    os.utime(new_cache_file, (2, 2))
+
+    cache_store = DiskAwareCacheStore(
+        store=source_store.with_read_only(True),
+        cache_store=LocalStore(cache_root),
+        max_age_seconds="infinity",
+        max_size=10,
+        cache_set_data=False,
+    )
+
+    sync(cache_store.get("missing", None))
+
+    assert cache_store.cache_info()["current_size"] == 7
+    assert not old_cache_file.exists()
+    assert new_cache_file.exists()
 
 
 def test_update_zarr_store_uses_shared_cache_under_save_dir(tmp_path, monkeypatch):

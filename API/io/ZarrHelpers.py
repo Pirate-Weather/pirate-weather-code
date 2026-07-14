@@ -25,6 +25,82 @@ ERA5_CACHE_MAX_SIZE = 20 * 1024**3
 ERA5_CACHE_DIR_DEFAULT = "ERA5_cache"
 
 
+class DiskAwareCacheStore(CacheStore):
+    """CacheStore that counts existing disk cache entries before enforcing size."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._disk_state_loaded = False
+
+    async def _load_existing_cache_state(self) -> None:
+        if self._disk_state_loaded:
+            return
+
+        async with self._state.lock:
+            if self._disk_state_loaded:
+                return
+
+            if not self._cache.supports_listing or not hasattr(self._cache, "getsize"):
+                self._disk_state_loaded = True
+                return
+
+            entries = []
+            async for key in self._cache.list():
+                try:
+                    size = await self._cache.getsize(key)
+                except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
+                    continue
+
+                if self.max_size is not None and size > self.max_size:
+                    await self._cache.delete(key)
+                    self._state.evictions += 1
+                    continue
+
+                entries.append((self._cache_entry_sort_key(key), key, size))
+
+            for _, key, size in sorted(entries):
+                self._state.cache_order[key] = None
+                self._state.current_size += size
+                self._state.key_sizes[key] = size
+                self._state.key_insert_times[key] = time.monotonic()
+
+            if self.max_size is not None:
+                while (
+                    self._state.current_size > self.max_size and self._state.cache_order
+                ):
+                    lru_key = next(iter(self._state.cache_order))
+                    await self._evict_key(lru_key)
+
+            self._disk_state_loaded = True
+
+    def _cache_entry_sort_key(self, key: str) -> tuple[float, str]:
+        root = getattr(self._cache, "root", None)
+        if root is None:
+            return (0, key)
+
+        try:
+            return ((root / key).stat().st_mtime, key)
+        except (FileNotFoundError, NotADirectoryError, OSError):
+            return (0, key)
+
+    async def get(self, key, prototype, byte_range=None):
+        await self._load_existing_cache_state()
+        return await super().get(key, prototype, byte_range)
+
+    async def set(self, key, value) -> None:
+        await self._load_existing_cache_state()
+        await super().set(key, value)
+
+    async def delete(self, key: str) -> None:
+        await self._load_existing_cache_state()
+        await super().delete(key)
+
+    def with_read_only(self, read_only: bool = False):
+        store = super().with_read_only(read_only)
+        store._disk_state_loaded = self._disk_state_loaded
+        return store
+
+
 def _get_era5_cache_max_size() -> int:
     """Get ERA5 cache max size from env var (bytes), defaulting to 20 GiB."""
     env_value = os.environ.get("ERA5_CACHE_MAX_SIZE")
@@ -161,7 +237,7 @@ def init_ERA5(cache_dir: str | None = None):
         },
         read_only=True,
     )
-    cache_store = CacheStore(
+    cache_store = DiskAwareCacheStore(
         store=source_store,
         cache_store=LocalStore(object_cache_dir),
         max_age_seconds="infinity",
