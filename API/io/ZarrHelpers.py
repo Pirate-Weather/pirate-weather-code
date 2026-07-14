@@ -119,9 +119,8 @@ class DiskCacheStore(Store):
         key_ranges: Iterable[tuple[str, ByteRequest | None]],
     ) -> list[Buffer | None]:
         import asyncio
-        tasks = [
-            self.get(key, prototype, byte_range) for key, byte_range in key_ranges
-        ]
+
+        tasks = [self.get(key, prototype, byte_range) for key, byte_range in key_ranges]
         return list(await asyncio.gather(*tasks))
 
     async def set(self, key: str, value: Buffer) -> None:
