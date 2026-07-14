@@ -233,6 +233,9 @@ setup_venv() {
     log "Validating Python ecCodes binding"
     python -m eccodes selfcheck
     [[ "$(python -c 'import eccodes; print(eccodes.codes_get_api_version())')" == "${ECCODES_VERSION}" ]]
+
+    log "Validating Python diskcache dependency"
+    python -c 'import diskcache; print(diskcache.__version__)'
 }
 
 download_geocode_data() {

@@ -4,12 +4,22 @@
 import os
 import random
 import time
+from collections.abc import AsyncIterator, Iterable
+from dataclasses import dataclass
+from typing import Any
 
 import s3fs
 import xarray as xr
 import zarr
-from zarr.experimental.cache_store import CacheStore
-from zarr.storage import FsspecStore, LocalStore
+from zarr.abc.store import (
+    ByteRequest,
+    OffsetByteRequest,
+    RangeByteRequest,
+    Store,
+    SuffixByteRequest,
+)
+from zarr.core.buffer import Buffer, BufferPrototype
+from zarr.storage import FsspecStore
 
 from API.constants.api_const import (
     MAX_S3_RETRIES,
@@ -23,6 +33,155 @@ ERA5_DASK_CHUNKS = {"time": 24}
 ERA5_CACHE_VERSION = "cache-store-v1"
 ERA5_CACHE_MAX_SIZE = 20 * 1024**3
 ERA5_CACHE_DIR_DEFAULT = "ERA5_cache"
+
+
+@dataclass
+class _DiskCacheStats:
+    hits: int = 0
+    misses: int = 0
+
+
+class DiskCacheStore(Store):
+    """Read-through Zarr store with a persistent diskcache byte quota."""
+
+    supports_writes = False
+    supports_deletes = False
+    supports_listing = True
+    supports_partial_writes = False
+    supports_consolidated_metadata = True
+
+    def __init__(
+        self,
+        store: Store,
+        *,
+        cache_dir: str,
+        size_limit: int,
+        read_only: bool = True,
+        cache: Any | None = None,
+        stats: _DiskCacheStats | None = None,
+    ) -> None:
+        super().__init__(read_only=read_only)
+        if cache is None:
+            from diskcache import Cache
+
+            cache = Cache(
+                cache_dir,
+                size_limit=size_limit,
+                eviction_policy="least-recently-used",
+            )
+        self._store = store
+        self._cache = cache
+        self._cache_dir = cache_dir
+        self._size_limit = size_limit
+        self._stats = stats or _DiskCacheStats()
+
+    def __eq__(self, value: object) -> bool:
+        return isinstance(value, type(self)) and self._store == value._store
+
+    def with_read_only(self, read_only: bool = False):
+        return type(self)(
+            self._store.with_read_only(read_only),
+            cache_dir=self._cache_dir,
+            size_limit=self._size_limit,
+            read_only=read_only,
+            cache=self._cache,
+            stats=self._stats,
+        )
+
+    async def get(
+        self,
+        key: str,
+        prototype: BufferPrototype,
+        byte_range: ByteRequest | None = None,
+    ) -> Buffer | None:
+        cached_bytes = self._cache.get(key)
+        if cached_bytes is not None:
+            self._stats.hits += 1
+            return prototype.buffer.from_bytes(
+                _slice_cached_bytes(cached_bytes, byte_range)
+            )
+
+        self._stats.misses += 1
+        result = await self._store.get(key, prototype)
+        if result is None:
+            self._cache.pop(key, None)
+            return None
+
+        value = result.to_bytes()
+        if len(value) <= self._size_limit:
+            self._cache.set(key, value)
+            self._cache.cull()
+        return prototype.buffer.from_bytes(_slice_cached_bytes(value, byte_range))
+
+    async def get_partial_values(
+        self,
+        prototype: BufferPrototype,
+        key_ranges: Iterable[tuple[str, ByteRequest | None]],
+    ) -> list[Buffer | None]:
+        import asyncio
+
+        tasks = [self.get(key, prototype, byte_range) for key, byte_range in key_ranges]
+        return list(await asyncio.gather(*tasks))
+
+    async def set(self, key: str, value: Buffer) -> None:
+        raise NotImplementedError("DiskCacheStore is read-only")
+
+    async def delete(self, key: str) -> None:
+        raise NotImplementedError("DiskCacheStore is read-only")
+
+    async def exists(self, key: str) -> bool:
+        return await self._store.exists(key)
+
+    def list(self) -> AsyncIterator[str]:
+        return self._store.list()
+
+    def list_prefix(self, prefix: str) -> AsyncIterator[str]:
+        return self._store.list_prefix(prefix)
+
+    def list_dir(self, prefix: str) -> AsyncIterator[str]:
+        return self._store.list_dir(prefix)
+
+    async def getsize(self, key: str) -> int:
+        return await self._store.getsize(key)
+
+    async def getsize_prefix(self, prefix: str) -> int:
+        return await self._store.getsize_prefix(prefix)
+
+    def cache_info(self) -> dict[str, Any]:
+        return {
+            "cache_store_type": type(self._cache).__name__,
+            "max_size": self._size_limit,
+            "current_size": self._cache.volume(),
+            "cached_keys": len(self._cache),
+        }
+
+    def cache_stats(self) -> dict[str, Any]:
+        total_requests = self._stats.hits + self._stats.misses
+        hit_rate = self._stats.hits / total_requests if total_requests > 0 else 0.0
+        return {
+            "hits": self._stats.hits,
+            "misses": self._stats.misses,
+            "evictions": 0,
+            "total_requests": total_requests,
+            "hit_rate": hit_rate,
+        }
+
+    def close(self) -> None:
+        self._cache.close()
+        self._store.close()
+        super().close()
+
+
+def _slice_cached_bytes(value: bytes, byte_range: ByteRequest | None) -> bytes:
+    if byte_range is None:
+        return value
+    if isinstance(byte_range, RangeByteRequest):
+        return value[byte_range.start : byte_range.end]
+    if isinstance(byte_range, OffsetByteRequest):
+        return value[byte_range.offset :]
+    if isinstance(byte_range, SuffixByteRequest):
+        return value[-byte_range.suffix :]
+    raise TypeError(f"Unexpected byte_range, got {byte_range}.")
 
 
 def _get_era5_cache_max_size() -> int:
@@ -161,12 +320,10 @@ def init_ERA5(cache_dir: str | None = None):
         },
         read_only=True,
     )
-    cache_store = CacheStore(
+    cache_store = DiskCacheStore(
         store=source_store,
-        cache_store=LocalStore(object_cache_dir),
-        max_age_seconds="infinity",
-        max_size=_get_era5_cache_max_size(),
-        cache_set_data=False,
+        cache_dir=object_cache_dir,
+        size_limit=_get_era5_cache_max_size(),
     )
 
     dsERA5 = xr.open_zarr(

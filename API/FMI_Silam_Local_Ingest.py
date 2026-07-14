@@ -11,6 +11,7 @@
 # Date: December 2025
 
 # %% Import modules
+import gc
 import logging
 import os
 import pickle
@@ -103,6 +104,23 @@ zarr_vars = (
     "cnc_CO",
 )
 MAP_VAR_INDICES = list(range(len(zarr_vars)))
+
+silam_source_vars = (
+    "cnc_PM2_5",
+    "cnc_PM10",
+    "PM_FRP_column",
+    "BLH",
+    "vmr_O3_gas",
+    "vmr_NO2_gas",
+    "vmr_SO2_gas",
+    "vmr_CO_gas",
+)
+
+silam_open_chunks = {
+    "time": HISTORIC_STEP_HOURS + 1,
+    "lat": processChunk,
+    "lon": processChunk,
+}
 
 # SILAM variable names and units:
 # - cnc_PM2_5, cnc_PM10: Particulate matter in kg/m³ (need conversion to µg/m³)
@@ -233,14 +251,26 @@ def _make_nan_dataarray(
     )
 
 
-def process_silam_file(local_nc_path: str) -> xr.Dataset:
+def process_silam_file(
+    local_nc_path: str,
+    time_slice: slice | None = None,
+) -> xr.Dataset:
     """Open and convert a SILAM NetCDF file to the standard processed dataset."""
     try:
         # Open the downloaded NetCDF file from local disk
         # SILAM data has dimensions: time, height (usually surface level), lat, lon
+        with xr.open_dataset(local_nc_path, engine="netcdf4", decode_cf=False) as meta:
+            drop_variables = [
+                var_name
+                for var_name in meta.data_vars
+                if var_name not in silam_source_vars
+            ]
+
         xarray_silam_data = xr.open_dataset(
             local_nc_path,
             engine="netcdf4",
+            chunks=silam_open_chunks,
+            drop_variables=drop_variables,
         )
 
         logger.info("Successfully opened SILAM dataset from local file")
@@ -262,6 +292,9 @@ def process_silam_file(local_nc_path: str) -> xr.Dataset:
         xarray_silam_data = xarray_silam_data.rename({"lat": "latitude"})
     if "lon" in xarray_silam_data.coords:
         xarray_silam_data = xarray_silam_data.rename({"lon": "longitude"})
+
+    if time_slice is not None:
+        xarray_silam_data = xarray_silam_data.sel(time=time_slice)
 
     # Create processed dataset
     xarray_processed = xr.Dataset(
@@ -440,6 +473,12 @@ except (OSError, ValueError):
 logger.info(f"Saving processed forecast data to: {forecast_process_path}_.zarr")
 xarray_forecast_processed = convert_time_coord_to_unix(xarray_processed)
 save_processed_zarr(xarray_forecast_processed, forecast_process_path + "_.zarr")
+lat_count = xarray_forecast_processed.sizes["latitude"]
+lon_count = xarray_forecast_processed.sizes["longitude"]
+xarray_forecast_processed.close()
+xarray_processed.close()
+del xarray_forecast_processed, xarray_processed
+gc.collect()
 logger.info("Saved forecast Zarr data to disk.")
 
 # %% Historic data
@@ -471,16 +510,16 @@ for hours_offset in range(hisPeriod, 0, -HISTORIC_STEP_HOURS):
         continue
 
     try:
-        xarray_hist_processed = process_silam_file(hist_nc_path)
+        slice_end = hist_end - timedelta(seconds=1)
+        xarray_hist_processed = process_silam_file(
+            hist_nc_path,
+            time_slice=slice(
+                hist_start.replace(tzinfo=None), slice_end.replace(tzinfo=None)
+            ),
+        )
     except (OSError, ValueError):
         logger.warning("Skipping unreadable historic SILAM run: %s", timestamp)
         continue
-
-    # Keep only the non-overlapping historic valid-time slice for this run.
-    slice_end = hist_end - timedelta(seconds=1)
-    xarray_hist_processed = xarray_hist_processed.sel(
-        time=slice(hist_start.replace(tzinfo=None), slice_end.replace(tzinfo=None))
-    )
 
     if xarray_hist_processed.sizes.get("time", 0) == 0:
         logger.warning("No historic SILAM times found for slice: %s", timestamp)
@@ -537,8 +576,6 @@ else:
         )
     ]
 
-lat_count = xarray_forecast_processed.sizes["latitude"]
-lon_count = xarray_forecast_processed.sizes["longitude"]
 dask_var_arrays_list = []
 dask_interp_arrays = []
 
