@@ -4,12 +4,22 @@
 import os
 import random
 import time
+from collections.abc import AsyncIterator, Iterable
+from dataclasses import dataclass
+from typing import Any
 
 import s3fs
 import xarray as xr
 import zarr
-from zarr.experimental.cache_store import CacheStore
-from zarr.storage import FsspecStore, LocalStore
+from zarr.abc.store import (
+    ByteRequest,
+    OffsetByteRequest,
+    RangeByteRequest,
+    Store,
+    SuffixByteRequest,
+)
+from zarr.core.buffer import Buffer, BufferPrototype
+from zarr.storage import FsspecStore
 
 from API.constants.api_const import (
     MAX_S3_RETRIES,
@@ -25,80 +35,152 @@ ERA5_CACHE_MAX_SIZE = 20 * 1024**3
 ERA5_CACHE_DIR_DEFAULT = "ERA5_cache"
 
 
-class DiskAwareCacheStore(CacheStore):
-    """CacheStore that counts existing disk cache entries before enforcing size."""
+@dataclass
+class _DiskCacheStats:
+    hits: int = 0
+    misses: int = 0
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._disk_state_loaded = False
 
-    async def _load_existing_cache_state(self) -> None:
-        if self._disk_state_loaded:
-            return
+class DiskCacheStore(Store):
+    """Read-through Zarr store with a persistent diskcache byte quota."""
 
-        async with self._state.lock:
-            if self._disk_state_loaded:
-                return
+    supports_writes = False
+    supports_deletes = False
+    supports_listing = True
+    supports_partial_writes = False
+    supports_consolidated_metadata = True
 
-            if not self._cache.supports_listing or not hasattr(self._cache, "getsize"):
-                self._disk_state_loaded = True
-                return
+    def __init__(
+        self,
+        store: Store,
+        *,
+        cache_dir: str,
+        size_limit: int,
+        read_only: bool = True,
+        cache: Any | None = None,
+        stats: _DiskCacheStats | None = None,
+    ) -> None:
+        super().__init__(read_only=read_only)
+        if cache is None:
+            from diskcache import Cache
 
-            entries = []
-            async for key in self._cache.list():
-                try:
-                    size = await self._cache.getsize(key)
-                except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
-                    continue
+            cache = Cache(
+                cache_dir,
+                size_limit=size_limit,
+                eviction_policy="least-recently-used",
+            )
+        self._store = store
+        self._cache = cache
+        self._cache_dir = cache_dir
+        self._size_limit = size_limit
+        self._stats = stats or _DiskCacheStats()
 
-                if self.max_size is not None and size > self.max_size:
-                    await self._cache.delete(key)
-                    self._state.evictions += 1
-                    continue
-
-                entries.append((self._cache_entry_sort_key(key), key, size))
-
-            for _, key, size in sorted(entries):
-                self._state.cache_order[key] = None
-                self._state.current_size += size
-                self._state.key_sizes[key] = size
-                self._state.key_insert_times[key] = time.monotonic()
-
-            if self.max_size is not None:
-                while (
-                    self._state.current_size > self.max_size and self._state.cache_order
-                ):
-                    lru_key = next(iter(self._state.cache_order))
-                    await self._evict_key(lru_key)
-
-            self._disk_state_loaded = True
-
-    def _cache_entry_sort_key(self, key: str) -> tuple[float, str]:
-        root = getattr(self._cache, "root", None)
-        if root is None:
-            return (0, key)
-
-        try:
-            return ((root / key).stat().st_mtime, key)
-        except (FileNotFoundError, NotADirectoryError, OSError):
-            return (0, key)
-
-    async def get(self, key, prototype, byte_range=None):
-        await self._load_existing_cache_state()
-        return await super().get(key, prototype, byte_range)
-
-    async def set(self, key, value) -> None:
-        await self._load_existing_cache_state()
-        await super().set(key, value)
-
-    async def delete(self, key: str) -> None:
-        await self._load_existing_cache_state()
-        await super().delete(key)
+    def __eq__(self, value: object) -> bool:
+        return isinstance(value, type(self)) and self._store == value._store
 
     def with_read_only(self, read_only: bool = False):
-        store = super().with_read_only(read_only)
-        store._disk_state_loaded = self._disk_state_loaded
-        return store
+        return type(self)(
+            self._store.with_read_only(read_only),
+            cache_dir=self._cache_dir,
+            size_limit=self._size_limit,
+            read_only=read_only,
+            cache=self._cache,
+            stats=self._stats,
+        )
+
+    async def get(
+        self,
+        key: str,
+        prototype: BufferPrototype,
+        byte_range: ByteRequest | None = None,
+    ) -> Buffer | None:
+        cached_bytes = self._cache.get(key)
+        if cached_bytes is not None:
+            self._stats.hits += 1
+            return prototype.buffer.from_bytes(
+                _slice_cached_bytes(cached_bytes, byte_range)
+            )
+
+        self._stats.misses += 1
+        result = await self._store.get(key, prototype)
+        if result is None:
+            self._cache.pop(key, None)
+            return None
+
+        value = result.to_bytes()
+        if len(value) <= self._size_limit:
+            self._cache.set(key, value)
+            self._cache.cull()
+        return prototype.buffer.from_bytes(_slice_cached_bytes(value, byte_range))
+
+    async def get_partial_values(
+        self,
+        prototype: BufferPrototype,
+        key_ranges: Iterable[tuple[str, ByteRequest | None]],
+    ) -> list[Buffer | None]:
+        return [
+            await self.get(key, prototype, byte_range) for key, byte_range in key_ranges
+        ]
+
+    async def set(self, key: str, value: Buffer) -> None:
+        raise NotImplementedError("DiskCacheStore is read-only")
+
+    async def delete(self, key: str) -> None:
+        raise NotImplementedError("DiskCacheStore is read-only")
+
+    async def exists(self, key: str) -> bool:
+        return await self._store.exists(key)
+
+    def list(self) -> AsyncIterator[str]:
+        return self._store.list()
+
+    def list_prefix(self, prefix: str) -> AsyncIterator[str]:
+        return self._store.list_prefix(prefix)
+
+    def list_dir(self, prefix: str) -> AsyncIterator[str]:
+        return self._store.list_dir(prefix)
+
+    async def getsize(self, key: str) -> int:
+        return await self._store.getsize(key)
+
+    async def getsize_prefix(self, prefix: str) -> int:
+        return await self._store.getsize_prefix(prefix)
+
+    def cache_info(self) -> dict[str, Any]:
+        return {
+            "cache_store_type": type(self._cache).__name__,
+            "max_size": self._size_limit,
+            "current_size": self._cache.volume(),
+            "cached_keys": len(self._cache),
+        }
+
+    def cache_stats(self) -> dict[str, Any]:
+        total_requests = self._stats.hits + self._stats.misses
+        hit_rate = self._stats.hits / total_requests if total_requests > 0 else 0.0
+        return {
+            "hits": self._stats.hits,
+            "misses": self._stats.misses,
+            "evictions": 0,
+            "total_requests": total_requests,
+            "hit_rate": hit_rate,
+        }
+
+    def close(self) -> None:
+        self._cache.close()
+        self._store.close()
+        super().close()
+
+
+def _slice_cached_bytes(value: bytes, byte_range: ByteRequest | None) -> bytes:
+    if byte_range is None:
+        return value
+    if isinstance(byte_range, RangeByteRequest):
+        return value[byte_range.start : byte_range.end]
+    if isinstance(byte_range, OffsetByteRequest):
+        return value[byte_range.offset :]
+    if isinstance(byte_range, SuffixByteRequest):
+        return value[-byte_range.suffix :]
+    raise TypeError(f"Unexpected byte_range, got {byte_range}.")
 
 
 def _get_era5_cache_max_size() -> int:
@@ -237,12 +319,10 @@ def init_ERA5(cache_dir: str | None = None):
         },
         read_only=True,
     )
-    cache_store = DiskAwareCacheStore(
+    cache_store = DiskCacheStore(
         store=source_store,
-        cache_store=LocalStore(object_cache_dir),
-        max_age_seconds="infinity",
-        max_size=_get_era5_cache_max_size(),
-        cache_set_data=False,
+        cache_dir=object_cache_dir,
+        size_limit=_get_era5_cache_max_size(),
     )
 
     dsERA5 = xr.open_zarr(

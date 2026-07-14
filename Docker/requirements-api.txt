@@ -2,6 +2,7 @@ aiobotocore[boto3]==3.7.0
 astral==3.2
 crc32c==2.8
 dask==2026.7.0
+diskcache==5.6.3
 fastapi[standard]==0.139.0
 fastapi-utils==0.8.0
 fastmcp==3.4.4
