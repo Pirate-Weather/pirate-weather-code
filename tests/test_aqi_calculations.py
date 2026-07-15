@@ -307,7 +307,7 @@ class TestPrepareAQInputs:
 
         n = 24
         hours = self._hour_array(n)
-        # PM_FRP_column = 2000 µg/m², BLH = 500 m → expected smoke_frp = 4 µg/m³
+        # PM_FRP_column = 2000 µg/m², BLH = 1000 m → expected smoke_frp = 2 µg/m³
         silam_data = _make_zarr_data(
             n,
             SILAM,
@@ -320,12 +320,12 @@ class TestPrepareAQInputs:
                 "so2": np.full(n, 1.0),
                 "co": np.full(n, 100.0),
                 "pm_frp_column": np.full(n, 2000.0),
-                "blh": np.full(n, 500.0),
+                "blh": np.full(n, 1000.0),
             },
         )
         result = prepare_aq_inputs(n, False, silam_data, hours)
         assert "smoke_frp" in result
-        assert np.nanmean(result["smoke_frp"]) == pytest.approx(4.0, abs=0.1)
+        assert np.nanmean(result["smoke_frp"]) == pytest.approx(2.0, abs=0.1)
 
     def test_smoke_frp_uses_default_blh_when_blh_missing(self):
         """When BLH is NaN or absent, smoke_frp should use a 1000 m neutral default."""
