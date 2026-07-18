@@ -20,15 +20,23 @@ from API.constants.api_const import (
     TEMP_THRESHOLD_RAIN_C,
     TEMP_THRESHOLD_SNOW_C,
 )
+from API.constants.aqi_const import compute_aqi_array
 from API.constants.clip_const import (
+    CLIP_AQI,
     CLIP_CAPE,
     CLIP_CLOUD,
+    CLIP_CO_PPB,
     CLIP_FEELS_LIKE,
     CLIP_FIRE,
     CLIP_HUMIDITY,
+    CLIP_NO2_PPB,
+    CLIP_O3_PPB,
     CLIP_OZONE,
+    CLIP_PM10,
+    CLIP_PM25,
     CLIP_PRESSURE,
     CLIP_SMOKE,
+    CLIP_SO2_PPB,
     CLIP_SOLAR,
     CLIP_TEMP,
     CLIP_UV,
@@ -591,7 +599,7 @@ def _build_hourly_display(
         DATA_HOURLY["prob"]: ROUNDING_RULES.get("precipProbability", 2),
         DATA_HOURLY["humidity"]: ROUNDING_RULES.get("humidity", 2),
         DATA_HOURLY["cloud"]: ROUNDING_RULES.get("cloudCover", 2),
-        DATA_HOURLY["uv"]: ROUNDING_RULES.get("uvIndex", 0),
+        DATA_HOURLY["uv"]: ROUNDING_RULES.get("uvIndex", 2),
         DATA_HOURLY["ozone"]: ROUNDING_RULES.get("ozone", 2),
         DATA_HOURLY["smoke"]: ROUNDING_RULES.get("smoke", 2),
         DATA_HOURLY["fire"]: ROUNDING_RULES.get("fireIndex", 2),
@@ -662,6 +670,8 @@ def build_hourly_block(
     cape_inputs,
     error_inputs,
     version,
+    aq_inputs=None,
+    inc_airqualitydetails: int = 0,
     minute_presence: dict | None = None,
 ):
     """
@@ -757,6 +767,43 @@ def build_hourly_block(
         station_pressure_inputs,
         humidUnit,
     )
+
+    # Populate AQ columns from aq_inputs (version >= 2 only)
+    if aq_inputs is not None:
+        try:
+            num_rows = InterPhour.shape[0]
+
+            def _fill_aq_col(col_key, src_key, clip_min, clip_max):
+                vals = aq_inputs.get(src_key)
+                if vals is not None:
+                    arr = np.asarray(vals, dtype=float)
+                    n = min(len(arr), num_rows)
+                    InterPhour[:n, DATA_HOURLY[col_key]] = np.clip(
+                        arr[:n], clip_min, clip_max
+                    )
+
+            _fill_aq_col("pm25", "pm25", CLIP_PM25["min"], CLIP_PM25["max"])
+            _fill_aq_col("pm10", "pm10", CLIP_PM10["min"], CLIP_PM10["max"])
+            _fill_aq_col("o3", "o3", CLIP_O3_PPB["min"], CLIP_O3_PPB["max"])
+            _fill_aq_col("no2", "no2", CLIP_NO2_PPB["min"], CLIP_NO2_PPB["max"])
+            _fill_aq_col("so2", "so2", CLIP_SO2_PPB["min"], CLIP_SO2_PPB["max"])
+            _fill_aq_col("co", "co", CLIP_CO_PPB["min"], CLIP_CO_PPB["max"])
+
+            # Compute AQI from pollutant concentrations
+            aqi_arr = compute_aqi_array(
+                unit_system=unitSystem,
+                pm25=InterPhour[:, DATA_HOURLY["pm25"]],
+                pm10=InterPhour[:, DATA_HOURLY["pm10"]],
+                o3=InterPhour[:, DATA_HOURLY["o3"]],
+                no2=InterPhour[:, DATA_HOURLY["no2"]],
+                so2=InterPhour[:, DATA_HOURLY["so2"]],
+                co=InterPhour[:, DATA_HOURLY["co"]],
+            )
+            InterPhour[:, DATA_HOURLY["aqi"]] = np.clip(
+                aqi_arr, CLIP_AQI["min"], CLIP_AQI["max"]
+            )
+        except Exception:
+            pass  # AQ computation is non-fatal; leave columns as MISSING_DATA
 
     dayZeroRain, dayZeroSnow, dayZeroIce = _calculate_derived_metrics(
         InterPhour,
@@ -856,6 +903,7 @@ def build_hourly_block(
         tmExtra=tmExtra,
         extraVars=extraVars,
         version=version,
+        inc_airqualitydetails=inc_airqualitydetails,
     )
 
     return (
@@ -890,6 +938,7 @@ def build_hourly_objects(
     tmExtra: bool,
     extraVars,
     version,
+    inc_airqualitydetails: int = 0,
 ):
     """
     Create hourly response objects and associated summary/icon lists.
@@ -996,7 +1045,7 @@ def build_hourly_objects(
                 hourly_display[idx, DATA_HOURLY["bearing"]]
             ),
             "cloudCover": hourly_display[idx, DATA_HOURLY["cloud"]],
-            "uvIndex": _nan_to_int_or_nan(hourly_display[idx, DATA_HOURLY["uv"]]),
+            "uvIndex": hourly_display[idx, DATA_HOURLY["uv"]],
             "visibility": hourly_display[idx, DATA_HOURLY["vis"]],
             "ozone": hourly_display[idx, DATA_HOURLY["ozone"]],
             "smoke": hourly_display[idx, DATA_HOURLY["smoke"]],
@@ -1017,6 +1066,38 @@ def build_hourly_objects(
             hourItem["stationPressure"] = hourly_display[
                 idx, DATA_HOURLY["station_pressure"]
             ]
+
+        if version >= 2:
+            # AQI is always included for v2+; detail pollutants gated on inc_airqualitydetails
+            aqi_val = InterPhour[idx, DATA_HOURLY["aqi"]]
+            hourItem["airQualityIndex"] = (
+                int(round(float(aqi_val))) if not np.isnan(aqi_val) else np.nan
+            )
+            if inc_airqualitydetails:
+                pm25_val = InterPhour[idx, DATA_HOURLY["pm25"]]
+                pm10_val = InterPhour[idx, DATA_HOURLY["pm10"]]
+                o3_val = InterPhour[idx, DATA_HOURLY["o3"]]
+                no2_val = InterPhour[idx, DATA_HOURLY["no2"]]
+                so2_val = InterPhour[idx, DATA_HOURLY["so2"]]
+                co_val = InterPhour[idx, DATA_HOURLY["co"]]
+                hourItem["pm25"] = (
+                    float(round(pm25_val, 1)) if not np.isnan(pm25_val) else np.nan
+                )
+                hourItem["pm10"] = (
+                    float(round(pm10_val, 1)) if not np.isnan(pm10_val) else np.nan
+                )
+                hourItem["ozoneConcentration"] = (
+                    float(round(o3_val, 1)) if not np.isnan(o3_val) else np.nan
+                )
+                hourItem["no2Concentration"] = (
+                    float(round(no2_val, 1)) if not np.isnan(no2_val) else np.nan
+                )
+                hourItem["so2Concentration"] = (
+                    float(round(so2_val, 1)) if not np.isnan(so2_val) else np.nan
+                )
+                hourItem["coConcentration"] = (
+                    float(round(co_val, 1)) if not np.isnan(co_val) else np.nan
+                )
 
         if version < 2:
             # Before version 2, apparentTemperature and feelsLike were the same

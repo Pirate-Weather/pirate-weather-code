@@ -990,14 +990,11 @@ def calculate_day_text(
                         period_data["max_cape_with_precip"], hour_cape
                     )
                     # Count hours with thunderstorms (precipitation + CAPE >= low threshold)
-                    thu_text = calculate_thunderstorm_text(hour_cape, "summary")
+                    thu_text = calculate_thunderstorm_text(
+                        hour_cape, "summary", pop=hour_pop
+                    )
                     if thu_text is not None:
                         period_data["num_hours_thunderstorm"] += 1
-
-                # Count hours with thunderstorms (precipitation + CAPE >= low threshold)
-                thu_text = calculate_thunderstorm_text(hour_cape, "summary")
-                if thu_text is not None:
-                    period_data["num_hours_thunderstorm"] += 1
 
     # Finalize `period_stats` list by only including periods that actually have data,
     # and in the correct order determined by `all_period_names_in_forecast_order`.
@@ -1459,7 +1456,7 @@ def calculate_day_text(
     if has_thunderstorm:
         # Use max CAPE that occurred with precipitation
         thunderstorm_summary_text, thunderstorm_icon = calculate_thunderstorm_text(
-            overall_max_cape_with_precip, "both"
+            overall_max_cape_with_precip, "both", pop=overall_avg_pop
         )
         # Check if thunderstorm periods match precipitation periods exactly
         if sorted(thunderstorm_periods) == sorted(precip_periods):

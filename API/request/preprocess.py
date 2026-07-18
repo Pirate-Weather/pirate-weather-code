@@ -138,8 +138,11 @@ class InitialRequestContext:
     ex_aigefs: int
     ex_aigfs: int
     ex_aifs: int
+    ex_raqdps: int
+    ex_silam: int
     inc_day_night: int
     inc_aimodels: int
+    inc_airqualitydetails: int
     summary_text: bool
     unit_system: str
     wind_unit: float
@@ -440,9 +443,12 @@ def _parse_parameters(
     ex_aigefs = int("aigefs" in exclude_params)
     ex_aigfs = int("aigfs" in exclude_params)
     ex_aifs = int("ecmwf_aifs" in exclude_params)
+    ex_raqdps = int("raqdps" in exclude_params)
+    ex_silam = int("silam" in exclude_params)
     summary_text = "summary" not in exclude_params
     inc_day_night = int("day_night_forecast" in include_params)
     inc_aimodels = int("aimodels" in include_params)
+    inc_airqualitydetails = int("airqualitydetails" in include_params)
 
     if (now_time - utc_time) > datetime.timedelta(hours=25):
         ex_nbm = 1
@@ -481,9 +487,12 @@ def _parse_parameters(
         ex_aigefs,
         ex_aigfs,
         ex_aifs,
+        ex_raqdps,
+        ex_silam,
         summary_text,
         inc_day_night,
         inc_aimodels,
+        inc_airqualitydetails,
         read_wmo_alerts,
     )
 
@@ -671,9 +680,12 @@ async def prepare_initial_request(
         ex_aigefs,
         ex_aigfs,
         ex_aifs,
+        ex_raqdps,
+        ex_silam,
         summary_text,
         inc_day_night,
         inc_aimodels,
+        inc_airqualitydetails,
         read_wmo_alerts,
     ) = _parse_parameters(
         exclude,
@@ -793,8 +805,11 @@ async def prepare_initial_request(
         ex_aigefs=ex_aigefs,
         ex_aigfs=ex_aigfs,
         ex_aifs=ex_aifs,
+        ex_raqdps=ex_raqdps,
+        ex_silam=ex_silam,
         inc_day_night=inc_day_night,
         inc_aimodels=inc_aimodels,
+        inc_airqualitydetails=inc_airqualitydetails,
         summary_text=summary_text,
         unit_system=unit_system,
         wind_unit=wind_unit,

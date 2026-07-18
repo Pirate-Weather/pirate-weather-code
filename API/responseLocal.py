@@ -65,7 +65,7 @@ from API.constants.shared_const import (
 )
 from API.current.metrics import build_current_section
 from API.daily.builder import build_daily_section
-from API.data_inputs import prepare_data_inputs
+from API.data_inputs import prepare_aq_inputs, prepare_data_inputs
 from API.forecast_sources import (
     add_etopo_source,
     build_source_metadata,
@@ -147,6 +147,9 @@ DWD_MOSMIX_Stations = None
 AIGFS_Zarr = None
 AIGEFS_Zarr = None
 ECMWF_AIFS_Zarr = None
+RAQDPS_Zarr = None
+SILAM_Zarr = None
+RAQDPS_LatLon = None
 
 
 setup_logging()
@@ -194,6 +197,9 @@ DWD_MOSMIX_Zarr = zarr_stores.DWD_MOSMIX_Zarr
 AIGFS_Zarr = zarr_stores.AIGFS_Zarr
 AIGEFS_Zarr = zarr_stores.AIGEFS_Zarr
 ECMWF_AIFS_Zarr = zarr_stores.ECMWF_AIFS_Zarr
+RAQDPS_Zarr = zarr_stores.RAQDPS_Zarr
+SILAM_Zarr = zarr_stores.SILAM_Zarr
+RAQDPS_LatLon = zarr_stores.RAQDPS_LatLon
 
 # Load DWD MOSMIX station mapping
 try:
@@ -416,6 +422,9 @@ async def PW_Forecast(
     global AIGFS_Zarr
     global AIGEFS_Zarr
     global ECMWF_AIFS_Zarr
+    global RAQDPS_Zarr
+    global SILAM_Zarr
+    global RAQDPS_LatLon
 
     # Timing Check
     T_Start = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
@@ -494,6 +503,9 @@ async def PW_Forecast(
     exAIGFS = initial.ex_aigfs
     exAIFS = initial.ex_aifs
     incAIModels = initial.inc_aimodels
+    exRAQDPS = initial.ex_raqdps
+    exSILAM = initial.ex_silam
+    incAirQualityDetails = initial.inc_airqualitydetails
     inc_day_night = initial.inc_day_night
     summaryText = initial.summary_text
     unitSystem = initial.unit_system
@@ -551,6 +563,9 @@ async def PW_Forecast(
         aigfs=AIGFS_Zarr,
         aigefs=AIGEFS_Zarr,
         ecmwf_aifs=ECMWF_AIFS_Zarr,
+        raqdps=RAQDPS_Zarr,
+        silam=SILAM_Zarr,
+        raqdps_lat_lon=RAQDPS_LatLon,
     )
 
     # 3. Calculate grid indices for the requested location to retrieve data from Zarr stores
@@ -573,6 +588,8 @@ async def PW_Forecast(
         ex_aigfs=exAIGFS,
         ex_aigefs=exAIGEFS,
         ex_aifs=exAIFS,
+        ex_raqdps=exRAQDPS,
+        ex_silam=exSILAM,
         inc_aimodels=incAIModels,
         read_wmo_alerts=readWMOAlerts,
         base_day_utc=baseDayUTC,
@@ -598,6 +615,8 @@ async def PW_Forecast(
     dataOut_aigefs = grid_result.dataOut_aigefs
     dataOut_aifs = grid_result.dataOut_aifs
     WMO_alertDat = grid_result.WMO_alertDat
+    dataOut_raqdps = grid_result.dataOut_raqdps
+    dataOut_silam = grid_result.dataOut_silam
 
     ERA5_MERGED = grid_result.era5_merged
 
@@ -910,7 +929,20 @@ async def PW_Forecast(
     cape_inputs = inputs["cape_inputs"]
     error_inputs = inputs["error_inputs"]
 
-    # 12. Generate the hourly forecast section
+    # Prepare air-quality concentration arrays (RAQDPS / SILAM)
+    aq_inputs = prepare_aq_inputs(
+        num_hours=numHours,
+        dataOut_raqdps=dataOut_raqdps,
+        dataOut_silam=dataOut_silam,
+        hour_array_grib=hour_array_grib,
+    )
+
+    # Extend smoke_inputs with SILAM PM_FRP_column as a lower-priority fallback
+    # (HRRR smoke wins when available; SILAM fire smoke fills NaN gaps).
+    silam_smoke_frp = aq_inputs.get("smoke_frp")
+    if silam_smoke_frp is not None and not np.all(np.isnan(silam_smoke_frp)):
+        smoke_inputs = np.column_stack([smoke_inputs, silam_smoke_frp.reshape(-1, 1)])
+
     # This constructs the hourly forecast objects, applying unit conversions and formatting
     with timing_tracker.track("Hourly block"):
         (
@@ -974,6 +1006,8 @@ async def PW_Forecast(
             solar_inputs=solar_inputs,
             cape_inputs=cape_inputs,
             error_inputs=error_inputs,
+            aq_inputs=aq_inputs,
+            inc_airqualitydetails=incAirQualityDetails,
             minute_presence=minute_presence,
             version=version,
         )
@@ -1036,8 +1070,9 @@ async def PW_Forecast(
             pTextMap=pTextMap,
             logger=logger,
             loc_tag=loc_tag,
+            aq_inputs=aq_inputs,
+            inc_airqualitydetails=incAirQualityDetails,
         )
-
     dayList = daily_section.day_list
     dayList_si = daily_section.day_list_si
     dayIconList = daily_section.day_icon_list
@@ -1110,6 +1145,8 @@ async def PW_Forecast(
             loc_tag=loc_tag,
             include_currently=exCurrently != 1,
             prioritize_ai_models=bool(incAIModels),
+            aq_inputs=aq_inputs,
+            inc_airqualitydetails=incAirQualityDetails,
         )
     ### RETURN ###
     # 16. Construct and return the final JSON response
@@ -1126,7 +1163,11 @@ async def PW_Forecast(
 
     if exCurrently != 1:
         filtered_currently = remove_conditional_fields(
-            current_section.currently, version, timeMachine, tmExtra
+            current_section.currently,
+            version,
+            timeMachine,
+            tmExtra,
+            inc_airqualitydetails=incAirQualityDetails,
         )
         returnOBJ["currently"] = dict(filtered_currently)
 
@@ -1162,7 +1203,11 @@ async def PW_Forecast(
             loc_tag=loc_tag,
         )
         filtered_minuteItems = remove_conditional_fields(
-            minuteItems, version, timeMachine, tmExtra
+            minuteItems,
+            version,
+            timeMachine,
+            tmExtra,
+            inc_airqualitydetails=incAirQualityDetails,
         )
 
         returnOBJ["minutely"]["summary"] = minute_summary
@@ -1189,7 +1234,11 @@ async def PW_Forecast(
             loc_tag=loc_tag,
         )
         filtered_hourList = remove_conditional_fields(
-            hourList, version, timeMachine, tmExtra
+            hourList,
+            version,
+            timeMachine,
+            tmExtra,
+            inc_airqualitydetails=incAirQualityDetails,
         )
         returnOBJ["hourly"]["summary"] = hour_summary
         returnOBJ["hourly"]["icon"] = hour_icon
@@ -1204,7 +1253,11 @@ async def PW_Forecast(
     if inc_day_night == 1 and not timeMachine:
         returnOBJ["day_night"] = dict()
         filtered_day_night_list = remove_conditional_fields(
-            day_night_list, version, timeMachine, tmExtra
+            day_night_list,
+            version,
+            timeMachine,
+            tmExtra,
+            inc_airqualitydetails=incAirQualityDetails,
         )
         returnOBJ["day_night"]["data"] = filtered_day_night_list[0 : (ouputDays * 2)]
 
@@ -1224,7 +1277,11 @@ async def PW_Forecast(
             loc_tag=loc_tag,
         )
         filtered_dayList = remove_conditional_fields(
-            dayList, version, timeMachine, tmExtra
+            dayList,
+            version,
+            timeMachine,
+            tmExtra,
+            inc_airqualitydetails=incAirQualityDetails,
         )
         returnOBJ["daily"]["summary"] = daily_summary
         returnOBJ["daily"]["icon"] = daily_icon

@@ -13,6 +13,11 @@ STATIONS_FILE_NAME="${STATIONS_FILE_NAME:-DWD_MOSMIX_stations.pickle}"
 REMOTE_STATIONS="${REMOTE_STATIONS:-${REMOTE_BASE}/${STATIONS_FILE_NAME}}"
 LOCAL_STATIONS="${LOCAL_STATIONS:-${BASE_DIR}/${STATIONS_FILE_NAME}}"
 
+# Additional non-Zarr support files to keep in sync (space-separated)
+SUPPORT_FILES="
+  RAQDPS.lat_lon.pickle
+"
+
 # Create BASE_DIR if it doesn't exist
 mkdir -p "$BASE_DIR"
 
@@ -34,7 +39,9 @@ MODELS="
   NBM
   NBM_Fire
   NWS_Alerts
+  RAQDPS
   RTMA_RU
+  SILAM
   SubH
   WMO_Alerts
 "
@@ -66,6 +73,52 @@ while true; do
       fi
     fi
   fi
+
+  for SUPPORT_FILE in $SUPPORT_FILES; do
+    echo "=== Updating $SUPPORT_FILE ==="
+
+    REMOTE="${REMOTE_BASE}/${SUPPORT_FILE}"
+    LOCAL_FILE="${BASE_DIR}/${SUPPORT_FILE}"
+    STATE_FILE="${BASE_DIR}/${SUPPORT_FILE}.state"
+
+    # Get remote file info (size, date, path)
+    if ! remote_info=$(rclone lsl "$REMOTE" 2>/dev/null); then
+      echo "Remote support file not found or inaccessible: $SUPPORT_FILE"
+      loop_ok=0
+      continue
+    fi
+
+    # Load last known info
+    last_info=""
+    [ -f "$STATE_FILE" ] && last_info=$(cat "$STATE_FILE")
+
+    # Skip if unchanged and present locally
+    if [ "$remote_info" = "$last_info" ] && [ -f "$LOCAL_FILE" ]; then
+      echo "No change detected for $SUPPORT_FILE"
+      continue
+    fi
+
+    echo "Remote changed for $SUPPORT_FILE — downloading..."
+
+    tmpfile=$(mktemp "${LOCAL_FILE}.tmp.XXXXXX") || {
+      echo "Failed to create temp file for $SUPPORT_FILE"
+      loop_ok=0
+      continue
+    }
+
+    if ! rclone copyto "$REMOTE" "$tmpfile"; then
+      echo "Download failed for $SUPPORT_FILE"
+      rm -f "$tmpfile"
+      loop_ok=0
+      continue
+    fi
+
+    mv "$tmpfile" "$LOCAL_FILE"
+    echo "Updated support file: $LOCAL_FILE"
+
+    # Save current state
+    echo "$remote_info" > "$STATE_FILE"
+  done
 
   for MODEL in $MODELS; do
     echo "=== Updating $MODEL ==="
