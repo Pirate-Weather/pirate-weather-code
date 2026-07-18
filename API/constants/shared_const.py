@@ -30,6 +30,10 @@ HISTORY_PERIODS = {
     "NBM_Fire": 48,
     "DWD_MOSMIX": 48,  # History period offset (like other models)
     "ECMWF_AIFS": 48,
+    "NBM_AK": 48,
+    "NBM_GU": 48,
+    "NBM_HI": 48,
+    "NBM_PR": 48,
     "RAQDPS": 48,  # Store last 48 hours of RAQDPS data for historic AQI lookbacks
     "SILAM": 48,  # Store last 48 hours of SILAM data for historic AQI lookbacks
 }
