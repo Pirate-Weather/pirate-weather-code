@@ -136,7 +136,7 @@ if save_type == "S3":
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
             logger.info("No Update to GDPS, ending")
-            sys.exit()
+            raise
 
 else:
     if os.path.exists(forecast_path + "/" + ingest_version + "/GDPS.time.pickle"):
@@ -150,7 +150,7 @@ else:
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
             logger.info("No Update to GDPS, ending")
-            sys.exit()
+            raise
 
 zarr_vars = (
     "time",
@@ -282,7 +282,7 @@ cmd = (
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
     logger.error(sp_out.stderr)
-    sys.exit()
+    raise
 
 # Read the merged netcdf file using xarray (single combined file)
 xarray_forecast_merged = xr.open_dataset(forecast_process_path + "_wgrib2_merged.nc")
@@ -506,7 +506,7 @@ for i in range(his_period, 0, -6):
     sp_out = run_command(cmd)
     if sp_out.returncode != 0:
         logger.error(sp_out.stderr)
-        sys.exit()
+        raise
 
     # Read the merged netcdf file using xarray (single combined file)
     xarray_hist_merged = xr.open_dataset(hist_process_path + "_wgrib2_merged.nc")
@@ -525,6 +525,8 @@ for i in range(his_period, 0, -6):
     xarray_hist_merged["Precip_Accum_Sfc"] = xarray_hist_merged[
         "Precip_Accum_Sfc"
     ].clip(min=0)
+
+    xarray_hist_merged["Precip_Accum_Sfc"] = xarray_hist_merged["Precip_Accum_Sfc"] / 3
 
     # Compute nearest storm distance and direction
     storm_distance_hist, storm_direction_hist = (

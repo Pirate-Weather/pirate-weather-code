@@ -135,7 +135,7 @@ if save_type == "S3":
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
             logger.info("No Update to HRDPS, ending")
-            sys.exit()
+            raise
 
 else:
     if os.path.exists(forecast_path + "/" + ingest_version + "/HRDPS.time.pickle"):
@@ -149,7 +149,7 @@ else:
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
             logger.info("No Update to HRDPS, ending")
-            sys.exit()
+            raise
 
 zarr_vars = (
     "time",
@@ -275,7 +275,7 @@ cmd = (
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
     logger.error(sp_out.stderr)
-    sys.exit()
+    raise
 
 # Read the merged netcdf file using xarray (single combined file)
 xarray_forecast_merged = xr.open_dataset(forecast_process_path + "_wgrib2_merged.nc")
@@ -315,17 +315,17 @@ hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
 # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time
 APCP_surface_tmp = da.diff(
-    xarray_forecast_merged["APCP"],
-    axis=xarray_forecast_merged["APCP"].get_axis_num("time"),
+    xarray_forecast_merged["APCP_Sfc"].data,
+    axis=xarray_forecast_merged["APCP_Sfc"].get_axis_num("time"),
     prepend=0,
 )
 
-xarray_forecast_merged["APCP"].data = APCP_surface_tmp
+xarray_forecast_merged["APCP_Sfc"].data = APCP_surface_tmp
 
 # Compute visibility from RH and precipitation rate (Gültepe & Milbrandt 2010, FRAM fit)
 vis_fc = estimate_visibility_from_rh_pr(
     rh_percent=xarray_forecast_merged["RH_AGL_2m"].values,
-    pr_mm_hr=xarray_forecast_merged["ACPC_Sfc"].values,
+    pr_mm_hr=xarray_forecast_merged["APCP_Sfc"].values,
     wind_speed_ms=xarray_forecast_merged["WIND_AGL_10m"].values,
     which_rh_fit="FRAM",
     u_ref=U_REF[
@@ -459,23 +459,23 @@ for i in range(his_period, 0, -6):
     sp_out = run_command(cmd)
     if sp_out.returncode != 0:
         logger.error(sp_out.stderr)
-        sys.exit()
+        raise
 
     # Read the merged netcdf file using xarray (single combined file)
     xarray_hist_merged = xr.open_dataset(hist_process_path + "_wgrib2_merged.nc")
 
     # Fix things
     # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time, every 6 hours
-    apcpProc = xarray_hist_merged["APCP"].values
+    apcpProc = xarray_hist_merged["APCP_Sfc"].values
 
     apcpProcHour = np.diff(apcpProc, axis=0, prepend=0)
 
-    xarray_hist_merged["APCP"] = xarray_hist_merged["APCP"].copy(data=apcpProcHour)
+    xarray_hist_merged["APCP_Sfc"] = xarray_hist_merged["APCP_Sfc"].copy(data=apcpProcHour)
 
     # Compute visibility from RH and precipitation rate (Gültepe & Milbrandt 2010, FRAM fit)
     vis_h = estimate_visibility_from_rh_pr(
         rh_percent=xarray_hist_merged["RH_AGL_2m"].values,
-        pr_mm_hr=xarray_hist_merged["ACPC_Sfc"].values,
+        pr_mm_hr=xarray_hist_merged["APCP_Sfc"].values,
         wind_speed_ms=xarray_hist_merged["WIND_AGL_10m"].values,
         which_rh_fit="FRAM",
         u_ref=U_REF[

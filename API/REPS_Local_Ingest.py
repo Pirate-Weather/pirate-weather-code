@@ -133,7 +133,7 @@ if save_type == "S3":
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
             logger.info("No Update to REPS, ending")
-            sys.exit()
+            raise
 
 else:
     if os.path.exists(forecast_path + "/" + ingest_version + "/REPS.time.pickle"):
@@ -147,7 +147,7 @@ else:
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
             logger.info("No Update to REPS, ending")
-            sys.exit()
+            raise
 
 # Ensemble statistics output variables (written to zarr, read by the API)
 probVars = (
@@ -284,7 +284,7 @@ cmd = (
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
     logger.error(sp_out.stderr)
-    sys.exit()
+    raise
 
 # Note: UV (DUVB) is included in the main product for REPS; no separate UV download required
 
@@ -511,7 +511,7 @@ for i in range(his_period, 0, -6):
     sp_out = run_command(cmd)
     if sp_out.returncode != 0:
         logger.error(sp_out.stderr)
-        sys.exit()
+        raise
 
     # Read the merged netcdf file using xarray (single combined file)
     xarray_hist_merged = xr.open_dataset(hist_process_path + "_wgrib2_merged.nc")

@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-git fetch --prune
-git branch --no-merged | egrep -v "(^\*|master|dev)" | xargs git branch -D
+git fetch --prune && git branch -vv | awk '/: gone]/ {print $1}' | xargs -r git branch -d
