@@ -129,12 +129,12 @@ def test_local_vs_production(lat, lon):
     client = _get_client()
 
     local_resp = client.get(
-        f"/forecast/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast,aimodels"
+        f"/forecast/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast,aimodels,airqualitydetails"
     )
     assert local_resp.status_code == 200
     local_data = local_resp.json()
 
-    prod_url = f"{PROD_BASE}/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast,aimodels"
+    prod_url = f"{PROD_BASE}/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast,aimodels,airqualitydetails"
     try:
         prod_data = _fetch_production_json(prod_url)
     except ProductionRequestError as exc:

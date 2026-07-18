@@ -190,6 +190,34 @@ def build_source_metadata(
     if isinstance(grid_result.dataOut_aifs, np.ndarray):
         metadata.add("ecmwf_aifs", time_value=_format_run_time(grid_result.aifsRunTime))
 
+    if isinstance(grid_result.dataOut_raqdps, np.ndarray):
+        metadata.add("raqdps", time_value=_format_run_time(grid_result.raqdpsRunTime))
+        if grid_result.x_raqdps is not None and grid_result.y_raqdps is not None:
+            metadata.source_idx["raqdps"] = {
+                "x": int(grid_result.x_raqdps),
+                "y": int(grid_result.y_raqdps),
+                "lat": round(float(grid_result.raqdps_lat), 2)
+                if grid_result.raqdps_lat is not None
+                else None,
+                "lon": round(float(grid_result.raqdps_lon), 2)
+                if grid_result.raqdps_lon is not None
+                else None,
+            }
+
+    if isinstance(grid_result.dataOut_silam, np.ndarray):
+        metadata.add("silam", time_value=_format_run_time(grid_result.silamRunTime))
+        if grid_result.x_silam is not None and grid_result.y_silam is not None:
+            metadata.source_idx["silam"] = {
+                "x": int(grid_result.x_silam),
+                "y": int(grid_result.y_silam),
+                "lat": round(float(grid_result.silam_lat), 2)
+                if grid_result.silam_lat is not None
+                else None,
+                "lon": round(float(grid_result.silam_lon), 2)
+                if grid_result.silam_lon is not None
+                else None,
+            }
+
     return metadata
 
 

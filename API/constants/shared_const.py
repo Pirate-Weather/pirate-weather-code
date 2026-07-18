@@ -20,7 +20,9 @@ HISTORY_PERIODS = {
     "NBM": 48,
     "HRRR": 48,
     "HRRR_6H": 48,
-    "GFS": 288,  # GFS has a 12-day history, allowing 10 days of local retrievals. Beyond that is Google ERA5
+    # GFS has a 12-day history, allowing 10 days of local retrievals.
+    # Beyond that is Google ERA5.
+    "GFS": 288,
     "AIGFS": 48,
     "AIGEFS": 48,
     "GEFS": 48,
@@ -32,4 +34,6 @@ HISTORY_PERIODS = {
     "NBM_GU": 48,
     "NBM_HI": 48,
     "NBM_PR": 48,
+    "RAQDPS": 48,  # Store last 48 hours of RAQDPS data for historic AQI lookbacks
+    "SILAM": 48,  # Store last 48 hours of SILAM data for historic AQI lookbacks
 }

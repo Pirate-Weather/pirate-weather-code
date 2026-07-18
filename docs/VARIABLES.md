@@ -172,3 +172,59 @@ Thorough testing is paramount when adding new variables to ensure data integrity
     ```bash
     pytest
     ```
+---
+
+## Air Quality Fields
+
+Air quality data requires `version=2` (or higher) in the request. The top-level AQI field is present by default when AQ model data is available. Per-pollutant concentration fields are gated behind `include=airqualitydetails`.
+
+### Summary field (version ≥ 2)
+
+| Field | Sections | Description |
+|-------|----------|-------------|
+| `airQualityIndex` | currently, hourly, daily | Numeric AQI value. Scale depends on unit system (see below). Integer. |
+| `airQualityIndexMax` | daily | Daily maximum AQI. |
+| `airQualityIndexMaxTime` | daily | Unix timestamp of daily AQI peak. |
+
+### Detail fields (`include=airqualitydetails`, version ≥ 2)
+
+| Field | Sections | Unit | Description |
+|-------|----------|------|-------------|
+| `pm25` | currently, hourly | µg/m³ | PM2.5 concentration. |
+| `pm25Max` | daily | µg/m³ | Daily max PM2.5. |
+| `pm25MaxTime` | daily | Unix s | Time of daily max PM2.5. |
+| `pm10` | currently, hourly | µg/m³ | PM10 concentration. |
+| `pm10Max` | daily | µg/m³ | Daily max PM10. |
+| `pm10MaxTime` | daily | Unix s | Time of daily max PM10. |
+| `ozoneConcentration` | currently, hourly | ppb | O3 concentration. |
+| `ozoneConcentrationMax` | daily | ppb | Daily max O3. |
+| `ozoneConcentrationMaxTime` | daily | Unix s | Time of daily max O3. |
+| `no2Concentration` | currently, hourly | ppb | NO2 concentration. |
+| `no2ConcentrationMax` | daily | ppb | Daily max NO2. |
+| `no2ConcentrationMaxTime` | daily | Unix s | Time of daily max NO2. |
+| `so2Concentration` | currently, hourly | ppb | SO2 concentration. |
+| `so2ConcentrationMax` | daily | ppb | Daily max SO2. |
+| `so2ConcentrationMaxTime` | daily | Unix s | Time of daily max SO2. |
+| `coConcentration` | currently, hourly | ppb | CO concentration (SILAM only). |
+| `coConcentrationMax` | daily | ppb | Daily max CO. |
+| `coConcentrationMaxTime` | daily | Unix s | Time of daily max CO. |
+
+### AQI system selection
+
+| `units` query parameter | AQI system |
+|------------------------|-----------|
+| `us` (default) | US EPA AQI, 0–500+ scale |
+| `ca` | Canadian AQHI, 1–10+ scale |
+| `uk` or `si` | EU CAQI, 0–100+ scale |
+
+### Model priority
+
+1. **RAQDPS** (regional, Canada + CONUS) is preferred when available.
+2. **SILAM** (global) is used as a fallback.
+3. If both models are excluded (`exclude=raqdps,silam`) all AQ fields are absent.
+
+CO (`coConcentration`) is sourced exclusively from SILAM. RAQDPS does not publish CO.
+
+### Flags
+
+When AQ data is loaded, `flags.sources` and `flags.sourceTimes` will include `raqdps` and/or `silam` entries with their respective model run timestamps.

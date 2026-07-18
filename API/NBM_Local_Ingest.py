@@ -23,8 +23,7 @@ import xarray as xr
 import zarr
 import zarr.storage
 from dask.diagnostics import ProgressBar
-from herbie import FastHerbie
-from herbie.fast import Herbie_latest
+from dotenv import find_dotenv, load_dotenv
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
 from API.ingest_utils import (
@@ -43,6 +42,13 @@ from API.ingest_utils import (
     validate_grib_stats,
     validate_stacked_time_alignment,
 )
+
+# Env setup required before importing Herbie for ECCodes paths
+dotenv_path = find_dotenv(usecwd=True)
+loaded = load_dotenv(dotenv_path, override=True)
+
+from herbie import FastHerbie  # noqa: E402
+from herbie.fast import Herbie_latest  # noqa: E402
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -196,7 +202,7 @@ latest_run = Herbie_latest(
 )
 
 base_time = latest_run.date
-# base_time = pd.Timestamp("2025-07-03 17:00:00")
+# base_time = pd.Timestamp("2026-07-08 09:00:00")
 
 # Check if this is newer than the current file
 if save_type == "S3":

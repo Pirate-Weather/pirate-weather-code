@@ -20,9 +20,10 @@ updates:
         - "minor"         # an array, possible values being minor, patch and major
         - "patch"
     ignore:
-      # Dependabot should not update numpy and eccodes
+      # Dependabot should not update numpy, eccodes and xarray
       - dependency-name: "numpy"
       - dependency-name: "eccodes"
+      - dependency-name: "xarray"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
