@@ -470,7 +470,9 @@ for i in range(his_period, 0, -6):
 
     apcpProcHour = np.diff(apcpProc, axis=0, prepend=0)
 
-    xarray_hist_merged["APCP_Sfc"] = xarray_hist_merged["APCP_Sfc"].copy(data=apcpProcHour)
+    xarray_hist_merged["APCP_Sfc"] = xarray_hist_merged["APCP_Sfc"].copy(
+        data=apcpProcHour
+    )
 
     # Compute visibility from RH and precipitation rate (Gültepe & Milbrandt 2010, FRAM fit)
     vis_h = estimate_visibility_from_rh_pr(
