@@ -965,8 +965,9 @@ def prepare_aq_inputs(
 
         # --- Weight using surface PM2.5 ----------------------------------------
         if silam_pm25 is not None:
+            has_pm25 = np.isfinite(silam_pm25)
             weight = np.clip(silam_pm25 / 25.0, 0.10, 1.0)
-            smoke = raw_smoke * weight
+            weighted_smoke = raw_smoke * weight
 
             # --- Final cap -----------------------------------------------------
             max_factor = np.where(
@@ -983,7 +984,11 @@ def prepare_aq_inputs(
                 ),
             )
 
-            smoke = np.minimum(smoke, np.maximum(silam_pm25 * max_factor, 10.0))
+            capped_smoke = np.minimum(
+                weighted_smoke,
+                np.maximum(silam_pm25 * max_factor, 10.0),
+            )
+            smoke = np.where(has_pm25, capped_smoke, raw_smoke)
 
         else:
             smoke = raw_smoke
