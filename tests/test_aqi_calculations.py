@@ -307,7 +307,10 @@ class TestPrepareAQInputs:
 
         n = 24
         hours = self._hour_array(n)
-        # PM_FRP_column = 2000 µg/m², BLH = 1000 m → expected smoke_frp = 2 µg/m³
+        # PM_FRP_column = 2000 µg/m², BLH = 1000 m, PM2.5 = 5 µg/m³
+        # Effective plume depth = 3000 m, weighting = 0.20
+        # Raw smoke = 2000 / 3000 = 0.67 µg/m³
+        # Expected smoke_frp ≈ 0.13 µg/m³
         silam_data = _make_zarr_data(
             n,
             SILAM,
@@ -325,15 +328,15 @@ class TestPrepareAQInputs:
         )
         result = prepare_aq_inputs(n, False, silam_data, hours)
         assert "smoke_frp" in result
-        assert np.nanmean(result["smoke_frp"]) == pytest.approx(2.0, abs=0.1)
+        assert np.nanmean(result["smoke_frp"]) == pytest.approx(0.1, abs=0.1)
 
     def test_smoke_frp_uses_default_blh_when_blh_missing(self):
-        """When BLH is NaN or absent, smoke_frp should use a 1000 m neutral default."""
+        """When BLH is NaN or absent, smoke_frp should use a 3000 m neutral default."""
         from API.constants.model_const import SILAM
 
         n = 24
         hours = self._hour_array(n)
-        # BLH column not provided → extracted as NaN → default 1000 m applied
+        # BLH column not provided → extracted as NaN → default 3000 m applied
         silam_data = _make_zarr_data(
             n,
             SILAM,
@@ -350,11 +353,13 @@ class TestPrepareAQInputs:
         )
         result = prepare_aq_inputs(n, False, silam_data, hours)
         assert "smoke_frp" in result
-        # 5000 µg/m² / 1000 m (NaN BLH → neutral 1000 m default) = 5.0 µg/m³
-        assert np.nanmean(result["smoke_frp"]) == pytest.approx(5.0, abs=0.1)
+        # PM_FRP_column = 5000 µg/m², BLH = NaN (default 3000 m), PM2.5 = 5 µg/m³
+        # Raw smoke = 5000 / 3000 = 1.67 µg/m³
+        # Expected smoke_frp ≈ 0.33 µg/m³
+        assert np.nanmean(result["smoke_frp"]) == pytest.approx(0.3, abs=0.1)
 
     def test_smoke_frp_enforces_minimum_blh(self):
-        """Valid BLH values below 1000 m should be clamped to 1000 m."""
+        """Valid BLH values below 2000 m should be clamped to 2000 m."""
         from API.constants.model_const import SILAM
 
         n = 4
@@ -371,12 +376,14 @@ class TestPrepareAQInputs:
                 "so2": np.full(n, 1.0),
                 "co": np.full(n, 100.0),
                 "pm_frp_column": np.full(n, 1000.0),
-                "blh": np.full(n, 10.0),  # valid but < 1000 m → clamped to 1000 m
+                "blh": np.full(n, 10.0),  # valid but < 2000 m → clamped to 2000 m
             },
         )
         result = prepare_aq_inputs(n, False, silam_data, hours)
-        # 1000 µg/m² / 1000 m (clamped) = 1.0 µg/m³
-        assert np.nanmean(result["smoke_frp"]) == pytest.approx(1.0, abs=0.1)
+        # PM_FRP_column = 1000 µg/m², BLH = 200 m (minimum effective depth = 2000 m), PM2.5 = 5 µg/m³
+        # Raw smoke = 1000 / 2000 = 0.50 µg/m³
+        # Expected smoke_frp ≈ 0.10 µg/m³
+        assert np.nanmean(result["smoke_frp"]) == pytest.approx(0.1, abs=0.1)
 
     def test_smoke_frp_nans_when_silam_absent(self):
         """When SILAM is unavailable, smoke_frp should be all-NaN."""
