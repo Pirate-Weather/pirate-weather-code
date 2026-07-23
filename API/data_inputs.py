@@ -951,7 +951,6 @@ def prepare_aq_inputs(
     # smoke" field comparable to HRRR, not a physically exact conversion.
 
     if silam_smoke_frp is not None:
-
         # --- Effective plume depth ---------------------------------------------
         if silam_blh is not None:
             effective_depth = np.where(
@@ -971,11 +970,14 @@ def prepare_aq_inputs(
 
             # --- Final cap -----------------------------------------------------
             max_factor = np.where(
-                silam_pm25 < 5.0, 2.0,
+                silam_pm25 < 5.0,
+                2.0,
                 np.where(
-                    silam_pm25 < 15.0, 3.0,
+                    silam_pm25 < 15.0,
+                    3.0,
                     np.where(
-                        silam_pm25 < 35.0, 4.0,
+                        silam_pm25 < 35.0,
+                        4.0,
                         5.0,
                     ),
                 ),
