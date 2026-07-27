@@ -7,7 +7,7 @@
 extend-select = ["I", "E", "W"]
 # Ignore long line errors for now to avoid failing the linter. We'll address line-length
 # cleanups in a follow-up stage if you want stricter enforcement.
-ignore = ["E501"]
+ignore = ["E501", "N999"]
 # Provide a more permissive line length so automated formatting has more room.
 [lint.pycodestyle]
 max-line-length = 120
