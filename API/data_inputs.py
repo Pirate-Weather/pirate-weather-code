@@ -936,16 +936,65 @@ def prepare_aq_inputs(
         out[nan_mask] = fallback[nan_mask]
         return out
 
-    # Convert PM_FRP_column from µg/m² (column burden) to µg/m³ (near-surface
-    # concentration) by dividing by the boundary layer height.  When BLH is
-    # NaN a neutral 1000 m is used; valid-but-small values are clamped to
-    # 1000 m to avoid division by near-zero denominators.
+    # Estimate near-surface smoke concentration from SILAM PM_FRP column.
+    #
+    # PM_FRP_column is a vertically integrated fire PM burden (µg/m²), not a
+    # surface concentration. Since the vertical distribution is unavailable in
+    # the surface product, we approximate a surface concentration by:
+    #
+    #   1. Dividing by an effective plume depth (rather than BLH alone).
+    #   2. Scaling according to the modeled surface PM2.5.
+    #   3. Capping the result relative to PM2.5 to avoid unrealistic cases where
+    #      estimated smoke greatly exceeds the total surface particulate mass.
+    #
+    # This is an empirical approximation intended to produce a stable "surface
+    # smoke" field comparable to HRRR, not a physically exact conversion.
+
     if silam_smoke_frp is not None:
+        # --- Effective plume depth ---------------------------------------------
         if silam_blh is not None:
-            blh = np.where(np.isnan(silam_blh), 1000.0, np.maximum(silam_blh, 1000.0))
+            effective_depth = np.where(
+                np.isnan(silam_blh),
+                3000.0,
+                np.clip(silam_blh * 3.0, 2000.0, 6000.0),
+            )
         else:
-            blh = np.full(num_hours, 1000.0)
-        smoke_frp_m3 = silam_smoke_frp / blh
+            effective_depth = np.full(num_hours, 3000.0)
+
+        raw_smoke = silam_smoke_frp / effective_depth
+
+        # --- Weight using surface PM2.5 ----------------------------------------
+        if silam_pm25 is not None:
+            has_pm25 = np.isfinite(silam_pm25)
+            weight = np.clip(silam_pm25 / 25.0, 0.10, 1.0)
+            weighted_smoke = raw_smoke * weight
+
+            # --- Final cap -----------------------------------------------------
+            max_factor = np.where(
+                silam_pm25 < 5.0,
+                2.0,
+                np.where(
+                    silam_pm25 < 15.0,
+                    3.0,
+                    np.where(
+                        silam_pm25 < 35.0,
+                        4.0,
+                        5.0,
+                    ),
+                ),
+            )
+
+            capped_smoke = np.minimum(
+                weighted_smoke,
+                np.maximum(silam_pm25 * max_factor, 10.0),
+            )
+            smoke = np.where(has_pm25, capped_smoke, raw_smoke)
+
+        else:
+            smoke = raw_smoke
+
+        smoke_frp_m3 = smoke
+
     else:
         smoke_frp_m3 = nan_row.copy()
 
