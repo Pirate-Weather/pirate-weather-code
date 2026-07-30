@@ -11,6 +11,12 @@ import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 
+# Env setup
+from dotenv import find_dotenv, load_dotenv
+
+dotenv_path = find_dotenv(usecwd=True)
+loaded = load_dotenv(dotenv_path, override=True)
+
 import dask
 import dask.array as da
 import numpy as np
@@ -19,18 +25,22 @@ import s3fs
 import xarray as xr
 import zarr.storage
 from dask.diagnostics import ProgressBar
-from herbie import FastHerbie, HerbieLatest
+from herbie import HerbieLatest
 from tqdm import tqdm
 
 from API.api_utils import estimate_visibility_from_rh_pr
 from API.constants.api_const import U_REF
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
+from API.ingest_grib_utils import (
+    cat_gribs,
+    download_and_validate_gfs_subset,
+    quote_path,
+)
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
     archive_tmp_zarr_and_upload,
-    build_herbie_grib_list,
     close_store,
     configure_zarr_limits,
     download_extract_historic_archive,
@@ -41,7 +51,6 @@ from API.ingest_utils import (
     positive_int_env,
     run_command,
     tune_nofile_limit,
-    validate_grib_stats,
 )
 from API.utils.storm_proc import compute_storm_fields_from_apcp_dataarray
 
@@ -73,6 +82,8 @@ aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 zarr_store_workers = positive_int_env("zarr_store_workers", 2)
 zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
+herbie_download_retries = positive_int_env("herbie_download_retries", 5)
+herbie_retry_sleep_seconds = positive_int_env("herbie_retry_sleep_seconds", 20)
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 tune_nofile_limit()
@@ -204,46 +215,34 @@ match_strings = [
     {"variable": "KIndex", "level": "Sfc"},
     {"variable": "O3", "level": "EAtm"},
 ]
-
-gdps_file_range = FORECAST_LEAD_RANGES["GDPS"]
-
-# Create FastHerbie object
-FH_forecastsub = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="12h"),
-    model="gdps",
-    fxx=gdps_file_range,
-    product="15km",
-    verbose=False,
-    save_dir=herbie_save_dir,
-)
+# Range should be 1 hour through hours 84, then 3 hourly
+gdps_range_1 = FORECAST_LEAD_RANGES["GDPS_1"]
+gdps_range_2 = FORECAST_LEAD_RANGES["GDPS_2"]
+gdps_file_range = [*gdps_range_1, *gdps_range_2]
 
 # MSC models have each variable in a separate file, so we loop through the variables and levels to download each one and then merge them later
 all_files = []
 for g in match_strings:
-    FH = FastHerbie(
-        pd.date_range(start=base_time, periods=1, freq="12h"),
+    grib_files = download_and_validate_gfs_subset(
         model="gdps",
-        fxx=gdps_file_range,
         product="15km",
-        variable=g["variable"],
-        level=g["level"],
-        save_dir=herbie_save_dir,
-        verbose=False,
+        search=None,
+        dataset_name=f"GDPS forecast {g['variable']}:{g['level']}",
+        base_time=base_time,
+        wgrib2_exe=wgrib2_path.strip(),
+        forecast_hours=gdps_file_range,
+        herbie_save_dir=herbie_save_dir,
+        herbie_download_retries=herbie_download_retries,
+        herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
+        herbie_kwargs={"variable": g["variable"], "level": g["level"]},
     )
-    FH.download()
 
-    # Ensure each variable produced the expected number of lead files
-    if len(FH.file_exists) != len(gdps_file_range):
-        logger.error(
-            "Download failed for %s:%s, expected %s files but got %s",
-            g["variable"],
-            g["level"],
-            len(match_strings),
-            len(FH.file_exists),
-        )
-        sys.exit(1)
+    all_files += grib_files
 
-    all_files += FH.file_exists
+    # Log that the download was completed for this variable and level
+    logger.info(
+        f"Download completed for GDPS forecast {g['variable']}:{g['level']}, {len(grib_files)} files downloaded."
+    )
 
 # Deduplicate and sanity-check total files
 all_files = sorted(set(all_files))
@@ -254,29 +253,15 @@ if len(all_files) < expected_total:
     )
     sys.exit(1)
 
-# Create ordered/filtered list of downloaded grib files from collected paths
-grib_list = build_herbie_grib_list(all_files, match_strings)
-
-# Perform a check if any data seems to be invalid
-cmd = f"cat {' '.join(grib_list)} | {wgrib2_path.strip()} - -s -stats"
-
-grib_check = run_command(cmd)
-
-# Validate the grib files
-validate_grib_stats(grib_check)
-logger.info("Grib validation complete, no errors found.")
+# Create ordered list of downloaded grib files from collected paths
+grib_list = all_files
 
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
 cmd = (
-    "cat "
-    + " ".join(grib_list)
-    + " | "
-    + f"{wgrib2_path}"
-    + " - "
-    + " -netcdf "
-    + forecast_process_path
-    + "_wgrib2_merged.nc"
+    f"{cat_gribs(grib_list)} | "
+    f"{quote_path(wgrib2_path.strip())} - "
+    f"-netcdf {quote_path(forecast_process_path + '_wgrib2_merged.nc')}"
 )
 
 
@@ -449,59 +434,30 @@ for i in range(his_period, 0, -6):
         (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"),
     )
 
-    # Create a range of dates for historic data going back 240 hours
-    DATES = pd.date_range(
-        start=base_time - pd.Timedelta(str(i) + "h"),
-        periods=1,
-        freq="12h",
-    )
     # Create a range of forecast lead times
     # Go from 1 to 7 to account for the weird prate approach
     fxx = [3, 6]
 
-    # Create FastHerbie Object.
-    FH_histsub = FastHerbie(
-        DATES,
+    grib_list = download_and_validate_gfs_subset(
         model="gdps",
-        fxx=fxx,
         product="15km",
-        verbose=False,
+        search=match_strings,
+        dataset_name="GDPS historic",
+        run_date=base_time - pd.Timedelta(str(i) + "h"),
+        forecast_hours=fxx,
+        base_time=base_time,
+        wgrib2_exe=wgrib2_path.strip(),
+        herbie_save_dir=herbie_save_dir,
+        herbie_download_retries=herbie_download_retries,
+        herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
         save_dir=herbie_save_dir,
     )
 
-    # Download the subsets
-    FH_histsub.download(match_strings, verbose=False)
-
-    # Check for download length
-    if len(FH_histsub.file_exists) != len(fxx):
-        logger.error(
-            "Download failed, expected %s files but got %s",
-            len(fxx),
-            len(FH_histsub.file_exists),
-        )
-        sys.exit(1)
-
-    # Create list of downloaded grib files
-    grib_list = build_herbie_grib_list(FH_histsub.file_exists, match_strings)
-
-    # Perform a check if any data seems to be invalid
-    cmd = f"cat {' '.join(grib_list)} | {wgrib2_path.strip()} - -s -stats"
-
-    grib_check = run_command(cmd)
-
-    validate_grib_stats(grib_check)
-    logger.info("Grib files passed validation, proceeding with processing")
-
     # Create a string to pass to wgrib2 to merge all gribs into one netcdf
     cmd = (
-        "cat "
-        + " ".join(grib_list)
-        + " | "
-        + f"{wgrib2_path}"
-        + " - "
-        + " -netcdf "
-        + hist_process_path
-        + "_wgrib2_merged.nc"
+        f"{cat_gribs(grib_list)} | "
+        f"{quote_path(wgrib2_path.strip())} - "
+        f"-netcdf {quote_path(hist_process_path + '_wgrib2_merged.nc')}"
     )
 
     # Run wgrib2

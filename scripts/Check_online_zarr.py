@@ -59,21 +59,21 @@ store = setup_testing_zipstore(
     s3_bucket=S3_BUCKET,
     ingest_version=INGEST_VERSION,
     save_type=SAVE_TYPE,
-    model_name="GFS",
+    model_name="SILAM",
 )
 
-store2 = setup_testing_zipstore(
-    s3=s3,
-    s3_bucket=S3_BUCKET,
-    ingest_version=INGEST_VERSION,
-    save_type=SAVE_TYPE,
-    model_name="NBM",
-)
+# store2 = setup_testing_zipstore(
+#     s3=s3,
+#     s3_bucket=S3_BUCKET,
+#     ingest_version=INGEST_VERSION,
+#     save_type=SAVE_TYPE,
+#     model_name="NBM",
+# )
 # %%
 # ---- Open Zarr ----
 
 opened_zarr = zarr.open(store, mode="r")
-opened_zarr2 = zarr.open(store2, mode="r")
+# opened_zarr2 = zarr.open(store2, mode="r")
 
 
 # %% Test read
@@ -86,5 +86,6 @@ print(data2)
 
 # %% Print unix time as datetimes
 unixTime = opened_zarr[0, 24 * 10 : 24 * 11, 500, 500]
+unixTime = opened_zarr[0, 24 * 0 : 24 * 1, 500, 500]
 
 print(pd.to_datetime(unixTime, unit="s"))

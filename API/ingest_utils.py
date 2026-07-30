@@ -11,7 +11,7 @@ import subprocess
 import tarfile
 import time
 from pathlib import Path
-from typing import Iterable, Optional, Union
+from typing import Any, Iterable, Optional, Union
 
 import cartopy.crs as ccrs
 import dask.array as da
@@ -73,7 +73,8 @@ FINAL_CHUNK_SIZES = {
 FORECAST_LEAD_RANGES = {
     "GFS_1": list(range(1, 121)),
     "GFS_2": list(range(123, 241, 3)),
-    "GEFS": list(range(3, 241, 3)),
+    "GDPS_1": list(range(1, 84, 1)),
+    "GDPS_2": list(range(84, 241, 3)),
     "NBM_FIRE": list(range(6, 192, 6)),
     "HRRR_1H": list(range(1, 19)),
     "HRRR_6H": list(range(18, 49)),
@@ -85,7 +86,6 @@ FORECAST_LEAD_RANGES = {
     "HRDPS": list(range(1, 49)),
     "RDPS": list(range(1, 85)),
     "REPS": list(range(3, 73, 3)),
-    "GDPS": list(range(3, 241, 3)),
     "GEPS": list(range(3, 241, 3)),
 }
 
@@ -226,22 +226,22 @@ def make_herbie_save_dir(tmp_dir: str, prefix: str = "herbie") -> str:
 
 def download_herbie_with_retry(
     herbie_obj,
-    search: str,
     expected_count: int,
     dataset_name: str,
     retries: int,
     retry_sleep_s: int,
+    search: Any = None,
 ) -> None:
     """Retry transient Herbie download failures and enforce expected file count."""
     attempts = max(1, retries)
     for attempt in range(1, attempts + 1):
         try:
             # Overwrite on retries to avoid keeping partial/corrupt files.
-            downloaded = herbie_obj.download(
-                search,
-                verbose=False,
-                overwrite=(attempt > 1),
-            )
+            download_kwargs = {"verbose": False, "overwrite": attempt > 1}
+            if search is None:
+                downloaded = herbie_obj.download(**download_kwargs)
+            else:
+                downloaded = herbie_obj.download(search, **download_kwargs)
 
             downloaded_paths = []
             if downloaded is not None:
@@ -311,7 +311,7 @@ def download_herbie_with_retry(
 
 
 def safe_herbie_local_file_path(
-    herbie_obj, search: str, retries: int = 3, retry_sleep_s: float = 0.1
+    herbie_obj, search: Any = None, retries: int = 3, retry_sleep_s: float = 0.1
 ) -> str:
     """Resolve a local Herbie path and repair file-vs-dir cache collisions."""
     from herbie import Path
@@ -337,7 +337,7 @@ def safe_herbie_local_file_path(
     raise RuntimeError("Unreachable Herbie local path resolution state")
 
 
-def build_herbie_grib_list(file_refs, search: str, retries: int = 3) -> list[str]:
+def build_herbie_grib_list(file_refs, search: Any = None, retries: int = 3) -> list[str]:
     """Build a list of local GRIB paths from Herbie file references."""
     return [
         safe_herbie_local_file_path(ref, search, retries=retries) for ref in file_refs

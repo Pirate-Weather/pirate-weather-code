@@ -189,7 +189,8 @@ build_wgrib2() {
         -DUSE_OPENMP=ON \
         -DUSE_IPOLATES=ON \
         -DUSE_AEC=ON \
-        -DENABLE_JPG=ON
+        -DENABLE_JPG=ON \
+        -DUSE_G2CLIB_LOW=ON
     cmake --build "${src_dir}" --parallel "${JOBS}"
     cmake --install "${src_dir}"
     touch "${stamp_file}"
