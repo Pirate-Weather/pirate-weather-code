@@ -237,7 +237,7 @@ def download_herbie_with_retry(
     for attempt in range(1, attempts + 1):
         try:
             # Overwrite on retries to avoid keeping partial/corrupt files.
-            download_kwargs = {"verbose": False, "overwrite": attempt > 1}
+            download_kwargs = {"verbose": True, "overwrite": attempt > 1}
             if search is None:
                 downloaded = herbie_obj.download(**download_kwargs)
             else:
@@ -549,7 +549,7 @@ def getGribList(FH_forecastsub, matchStrings):
     return gribList
 
 
-def validate_grib_stats(gribCheck):
+def validate_grib_stats(gribCheck, excluded_variables: Iterable[str] | None = None):
     """
     Inspect gribCheck.stdout (from `wgrib2 … -stats`) for min/max values,
     print any out-of-range records, and exit(10) if invalid data is found.
@@ -558,9 +558,16 @@ def validate_grib_stats(gribCheck):
       - gribCheck.stdout: the full stdout string
       - globals: VALID_DATA_MIN, VALID_DATA_MAX
     """
+    excluded_variables = set(excluded_variables or [])
+
     # extract all mins and maxs
-    minValues = [float(m) for m in re.findall(r"min=([-\d\.eE]+)", gribCheck.stdout)]
-    maxValues = [float(M) for M in re.findall(r"max=([-\d\.eE]+)", gribCheck.stdout)]
+    number_pattern = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+    minValues = [
+        float(m) for m in re.findall(rf"min=({number_pattern})", gribCheck.stdout)
+    ]
+    maxValues = [
+        float(M) for M in re.findall(rf"max=({number_pattern})", gribCheck.stdout)
+    ]
 
     # extract variable names (4th field)
     varNames = re.findall(r"(?m)^(?:[^:]+:){3}([^:]+):", gribCheck.stdout)
@@ -576,8 +583,9 @@ def validate_grib_stats(gribCheck):
     # TODO: This would be better if we checked against a dictionary of valid ranges defined per variable
     invalidIdxs = [
         i
-        for i, (mn, mx) in enumerate(zip(minValues, maxValues))
-        if mn < VALID_DATA_MIN or mx > VALID_DATA_MAX
+        for i, (var, mn, mx) in enumerate(zip(varNames, minValues, maxValues))
+        if var not in excluded_variables
+        and (mn < VALID_DATA_MIN or mx > VALID_DATA_MAX)
     ]
 
     if invalidIdxs:

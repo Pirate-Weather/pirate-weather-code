@@ -124,6 +124,8 @@ def download_and_validate_gfs_subset(
     save_dir=None,
     path_search=None,
     expected_count: int | None = None,
+    expected_forecast_hours: list[int] | None = None,
+    excluded_stats_variables: list[str] | None = None,
     herbie_kwargs: dict[str, Any] | None = None,
 ) -> list[str]:
     """Download a model GRIB subset, validate file count, and run wgrib2 checks.
@@ -146,6 +148,10 @@ def download_and_validate_gfs_subset(
         save_dir: Override default save directory
         path_search: Optional search pattern used to resolve local Herbie paths.
         expected_count: Optional expected local file count.
+        expected_forecast_hours: Optional forecast hours expected to be available when
+            this differs from the requested forecast hours.
+        excluded_stats_variables: Optional GRIB variable names to skip in generic
+            min/max stats validation.
         herbie_kwargs: Additional model-specific ``FastHerbie`` keyword arguments.
 
     Returns:
@@ -183,7 +189,7 @@ def download_and_validate_gfs_subset(
     herbie_obj = FastHerbie(herbie_dates, **fast_herbie_kwargs)
 
     if expected_count is None:
-        expected_count = len(forecast_hours)
+        expected_count = len(expected_forecast_hours or forecast_hours)
 
     download_herbie_with_retry(
         herbie_obj=herbie_obj,
@@ -210,7 +216,7 @@ def download_and_validate_gfs_subset(
     cmd_stats = f"{cat_gribs(grib_files)} | {quote_path(wgrib2_exe)} - -s -stats"
 
     grib_check = run_checked(cmd_stats, f"{dataset_name} GRIB validation")
-    validate_grib_stats(grib_check)
+    validate_grib_stats(grib_check, excluded_variables=excluded_stats_variables)
 
     logger.info("%s passed GRIB validation.", dataset_name)
 

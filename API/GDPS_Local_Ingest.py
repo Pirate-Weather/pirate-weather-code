@@ -173,6 +173,7 @@ zarr_vars = (
     "DewPoint_AGL_2m",
     "RelativeHumidity_AGL_2m",
     "WindSpeed_AGL_10m",
+    "WindDir_AGL_10m",
     "PrecipRate_Sfc",
     "Precip_Accum_Sfc",
     "PrecipType_Instant_Sfc",
@@ -200,6 +201,7 @@ match_strings = [
     {"variable": "DewPoint", "level": "AGL-2m"},
     {"variable": "RelativeHumidity", "level": "AGL-2m"},
     {"variable": "WindSpeed", "level": "AGL-10m"},
+    {"variable": "WindDir", "level": "AGL-10m"},
     {"variable": "WindGust", "level": "AGL-10m"},
     {"variable": "PrecipRate", "level": "Sfc"},
     {"variable": "Precip-Accum", "level": "Sfc"},
@@ -215,14 +217,38 @@ match_strings = [
     {"variable": "KIndex", "level": "Sfc"},
     {"variable": "O3", "level": "EAtm"},
 ]
-# Range should be 1 hour through hours 84, then 3 hourly
+# Range should be 1 hour through hour 83, then 3 hourly through hour 240.
 gdps_range_1 = FORECAST_LEAD_RANGES["GDPS_1"]
 gdps_range_2 = FORECAST_LEAD_RANGES["GDPS_2"]
 gdps_file_range = [*gdps_range_1, *gdps_range_2]
+gdps_reduced_file_range = [
+    hour
+    for hour in gdps_file_range
+    if hour % 3 == 0 and (hour <= 168 or hour % 6 == 0)
+]
+gdps_3_hour_file_range = [hour for hour in gdps_file_range if hour % 3 == 0]
+gdps_expected_forecast_hours = {
+    ("PrecipType-Instant", "Sfc"): gdps_reduced_file_range,
+    ("CAPE", "Sfc"): gdps_reduced_file_range,
+    ("CIN", "Sfc"): gdps_reduced_file_range,
+    ("KIndex", "Sfc"): gdps_reduced_file_range,
+    ("VerticalVelocity", "IsbL-0500"): gdps_3_hour_file_range,
+}
+gdps_excluded_stats_variables = {
+    ("DownwardShortwaveRadiationFlux-Accum", "Sfc"): ["DSWRF"],
+    ("CIN", "Sfc"): ["CIN"],
+}
 
 # MSC models have each variable in a separate file, so we loop through the variables and levels to download each one and then merge them later
 all_files = []
+expected_total = 0
 for g in match_strings:
+    expected_forecast_hours = gdps_expected_forecast_hours.get(
+        (g["variable"], g["level"]), gdps_file_range
+    )
+    excluded_stats_variables = gdps_excluded_stats_variables.get(
+        (g["variable"], g["level"])
+    )
     grib_files = download_and_validate_gfs_subset(
         model="gdps",
         product="15km",
@@ -231,22 +257,29 @@ for g in match_strings:
         base_time=base_time,
         wgrib2_exe=wgrib2_path.strip(),
         forecast_hours=gdps_file_range,
+        expected_forecast_hours=expected_forecast_hours,
+        excluded_stats_variables=excluded_stats_variables,
         herbie_save_dir=herbie_save_dir,
         herbie_download_retries=herbie_download_retries,
         herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
-        herbie_kwargs={"variable": g["variable"], "level": g["level"]},
+        herbie_kwargs={
+            "variable": g["variable"],
+            "level": g["level"],
+            "verbose": True,
+        },
     )
 
     all_files += grib_files
+    expected_total += len(expected_forecast_hours)
 
     # Log that the download was completed for this variable and level
     logger.info(
-        f"Download completed for GDPS forecast {g['variable']}:{g['level']}, {len(grib_files)} files downloaded."
+        f"Download completed for GDPS forecast {g['variable']}:{g['level']}, "
+        f"{len(grib_files)} files downloaded."
     )
 
 # Deduplicate and sanity-check total files
 all_files = sorted(set(all_files))
-expected_total = len(gdps_file_range) * len(match_strings)
 if len(all_files) < expected_total:
     logger.error(
         f"Download incomplete, expected at least {expected_total} files but got {len(all_files)}"

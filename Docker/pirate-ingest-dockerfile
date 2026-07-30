@@ -13,8 +13,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
-    CMAKE_PREFIX_PATH=/usr/local \
-    LD_LIBRARY_PATH=/usr/local/lib \
+    CMAKE_PREFIX_PATH=/build/NCEPLIBS_build:/usr/local \
+    LD_LIBRARY_PATH=/build/NCEPLIBS_build/lib:/build/NCEPLIBS_build/lib64:/usr/local/lib \
     ECCODES_DIR=/usr/local \
     ECCODES_PYTHON_USE_FINDLIBS=1
 
