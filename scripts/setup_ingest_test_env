@@ -13,6 +13,7 @@ FORCE_REBUILD="${PW_INGEST_FORCE:-0}"
 PYTHON_BIN="${PW_INGEST_PYTHON_BIN:-python3.14}"
 
 LIBAEC_REPO="https://github.com/Deutsches-Klimarechenzentrum/libaec.git"
+NCEPLIBS_G2C_REPO="https://github.com/NOAA-EMC/NCEPLIBS-g2c.git"
 ECCODES_VERSION="2.47.0"
 ECCODES_TARBALL_URL="https://confluence.ecmwf.int/download/attachments/45757960/eccodes-${ECCODES_VERSION}-Source.tar.gz"
 WGRIB2_VERSION="3.8.0"
@@ -150,12 +151,41 @@ build_nceplibs_ip() {
     touch "${stamp_file}"
 }
 
+build_nceplibs_g2c() {
+    local src_dir="${BUILD_ROOT}/src/NCEPLIBS-g2c"
+    local build_dir="${src_dir}/build"
+    local stamp_file="${BUILD_ROOT}/.nceplibs-g2c-built"
+
+    if [[ -f "${stamp_file}" ]]; then
+        log "NCEPLIBS-g2c already built"
+        return
+    fi
+
+    clean_if_forced "${src_dir}"
+
+    if [[ ! -d "${src_dir}/.git" ]]; then
+        log "Cloning NCEPLIBS-g2c"
+        git clone --depth 1 "${NCEPLIBS_G2C_REPO}" "${src_dir}"
+    fi
+
+    log "Building NCEPLIBS-g2c"
+    cmake -S "${src_dir}" -B "${build_dir}" \
+        -DCMAKE_INSTALL_PREFIX="${NCEPLIBS_PREFIX}" \
+        -DCMAKE_PREFIX_PATH="${TOOLCHAIN_PREFIX};${NCEPLIBS_PREFIX}" \
+        -DUSE_Jasper=OFF \
+        -DUSE_OpenJPEG=ON
+    cmake --build "${build_dir}" --parallel "${JOBS}"
+    ctest --test-dir "${build_dir}" -j "${JOBS}"
+    cmake --install "${build_dir}"
+    touch "${stamp_file}"
+}
+
 build_wgrib2() {
     local tarball="${BUILD_ROOT}/downloads/wgrib2-${WGRIB2_VERSION}.tar.gz"
     local src_dir="${BUILD_ROOT}/src/wgrib2-${WGRIB2_VERSION}"
     local extract_root="${BUILD_ROOT}/src/wgrib2"
     local extracted_dir="${extract_root}/wgrib2-${WGRIB2_VERSION}"
-    local stamp_file="${BUILD_ROOT}/.wgrib2-${WGRIB2_VERSION}-jpg-built"
+    local stamp_file="${BUILD_ROOT}/.wgrib2-${WGRIB2_VERSION}-g2c-built"
 
     if [[ -f "${stamp_file}" ]]; then
         log "wgrib2 ${WGRIB2_VERSION} already built"
@@ -303,6 +333,7 @@ main() {
     build_libaec
     build_eccodes
     build_nceplibs_ip
+    build_nceplibs_g2c
     build_wgrib2
     setup_venv
     download_geocode_data

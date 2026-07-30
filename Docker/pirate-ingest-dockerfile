@@ -37,6 +37,8 @@ RUN apt-get update && apt-get install -y \
     libhdf5-dev \
     libgdal-dev \
     libopenjp2-7-dev \
+    libpng-dev \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ----------------------------------------------------------------------
@@ -94,6 +96,25 @@ RUN cmake --build NCEPLIBS-ip/build --parallel 4
 RUN cmake --install NCEPLIBS-ip/build
 
 # ----------------------------------------------------------------------
+# NCEPLIBS-g2c
+# ----------------------------------------------------------------------
+WORKDIR /build
+
+RUN git clone https://github.com/NOAA-EMC/NCEPLIBS-g2c.git
+
+RUN cmake \
+    -DCMAKE_INSTALL_PREFIX=/build/NCEPLIBS_build \
+    -DCMAKE_PREFIX_PATH="/usr/local;/build/NCEPLIBS_build" \
+    -DUSE_Jasper=OFF \
+    -DUSE_OpenJPEG=ON \
+    -S NCEPLIBS-g2c \
+    -B NCEPLIBS-g2c/build
+
+RUN cmake --build NCEPLIBS-g2c/build --parallel 4
+RUN ctest --test-dir NCEPLIBS-g2c/build -j4
+RUN cmake --install NCEPLIBS-g2c/build
+
+# ----------------------------------------------------------------------
 # wgrib2
 # ----------------------------------------------------------------------
 RUN wget -q -O /build/wgrib2.tgz \
@@ -111,7 +132,8 @@ RUN cmake --fresh \
     -DUSE_OPENMP=ON \
     -DUSE_IPOLATES=ON \
     -DUSE_AEC=ON \
-    -DENABLE_JPG=ON
+    -DENABLE_JPG=ON \
+    -DUSE_G2CLIB_LOW=ON
 
 RUN cmake --build . --parallel 4
 RUN cmake --install .
