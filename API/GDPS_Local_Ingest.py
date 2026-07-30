@@ -113,11 +113,13 @@ T0 = time.time()
 
 latest_run = HerbieLatest(
     model="gdps",
-    n=3,
-    freq="12h",
+    priority=["msc"],
+    periods=7,
     fxx=240,
     product="15km",
-    verbose=False,
+    verbose=True,
+    variable="AirTemp",
+    level="AGL-2m",
     save_dir=herbie_save_dir,
 )
 
