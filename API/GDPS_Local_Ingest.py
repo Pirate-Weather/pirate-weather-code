@@ -11,6 +11,33 @@ import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 
+import re
+
+# import os
+# from pathlib import Path
+#
+# defs = Path("/mnt/c/Users/REYA/Documents/Repo/pirate-weather-code/.build/ingest-test/toolchain/share/eccodes/definitions")
+# samples = Path("/mnt/c/Users/REYA/Documents/Repo/pirate-weather-code/.build/ingest-test/toolchain/share/eccodes/samples")
+#
+# print("defs exists:", defs.exists())
+# print("boot exists:", (defs / "boot.def").exists())
+# print("boot readable:", (defs / "boot.def").read_text()[:20])
+# print("samples exists:", samples.exists())
+# print("GRIB2 sample exists:", (samples / "GRIB2.tmpl").exists())
+#
+# os.environ["ECCODES_DIR"] = "/mnt/c/Users/REYA/Documents/Repo/pirate-weather-code/.build/ingest-test/toolchain"
+# os.environ["ECCODES_DEFINITION_PATH"] = str(defs)
+# os.environ["ECCODES_SAMPLES_PATH"] = str(samples)
+# os.environ["ECCODES_PYTHON_USE_FINDLIBS"] = "1"
+#
+# import eccodes
+#
+# print("api:", eccodes.codes_get_api_version())
+#
+# h = eccodes.codes_grib_new_from_samples("GRIB2")
+# print("sample handle:", h)
+# eccodes.codes_release(h)
+
 # Env setup
 from dotenv import find_dotenv, load_dotenv
 
@@ -84,6 +111,9 @@ zarr_store_workers = positive_int_env("zarr_store_workers", 2)
 zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 herbie_download_retries = positive_int_env("herbie_download_retries", 5)
 herbie_retry_sleep_seconds = positive_int_env("herbie_retry_sleep_seconds", 20)
+skip_gdps_wgrib2_validation = os.getenv(
+    "skip_gdps_wgrib2_validation", "true"
+).lower() in {"1", "true", "yes", "on"}
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 tune_nofile_limit()
@@ -259,6 +289,7 @@ for g in match_strings:
         forecast_hours=gdps_file_range,
         expected_forecast_hours=expected_forecast_hours,
         excluded_stats_variables=excluded_stats_variables,
+        skip_wgrib2_validation=skip_gdps_wgrib2_validation,
         herbie_save_dir=herbie_save_dir,
         herbie_download_retries=herbie_download_retries,
         herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
@@ -290,9 +321,15 @@ if len(all_files) < expected_total:
 grib_list = all_files
 
 
+# Sort the list
+grib_list_sort = sorted(
+    grib_list,
+    key=lambda f: int(re.search(r"_PT(\d+)H", str(f)).group(1)),
+)
+
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
 cmd = (
-    f"{cat_gribs(grib_list)} | "
+    f"{cat_gribs(grib_list_sort)} | "
     f"{quote_path(wgrib2_path.strip())} - "
     f"-netcdf {quote_path(forecast_process_path + '_wgrib2_merged.nc')}"
 )
@@ -303,6 +340,7 @@ sp_out = run_command(cmd)
 if sp_out.returncode != 0:
     logger.error(sp_out.stderr)
     raise
+
 
 # Read the merged netcdf file using xarray (single combined file)
 xarray_forecast_merged = xr.open_dataset(forecast_process_path + "_wgrib2_merged.nc")
@@ -339,6 +377,16 @@ unix_epoch = np.datetime64(0, "s")
 one_second = np.timedelta64(1, "s")
 stacked_timesUnix = (stacked_times - unix_epoch) / one_second
 hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
+
+
+#TODO:
+# DeAccumulate APCP
+# Change 3-hourly to 1-hourly APCP
+# Daccum DownwardShortwaveRadiationFlux
+# Check for 3 hourly DownwardShortwaveRadiationFlux issues
+# Something about UVIndex
+# During merge, ensure nan gets interpoalted over
+
 
 # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time
 APCP_surface_tmp = da.diff(
@@ -483,6 +531,7 @@ for i in range(his_period, 0, -6):
         herbie_save_dir=herbie_save_dir,
         herbie_download_retries=herbie_download_retries,
         herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
+        skip_wgrib2_validation=skip_gdps_wgrib2_validation,
         save_dir=herbie_save_dir,
     )
 
