@@ -90,11 +90,11 @@ class TestAQHI:
 
 class TestCAQI:
     def test_low_pollutants_return_low_caqi(self):
-        caqi = compute_caqi(pm25_ug=5.0, pm10_ug=10.0, o3_ppb=20.0, no2_ppb=10.0)
-        assert 0 <= caqi <= 25
+        caqi = compute_caqi(pm25_ug=5.0, pm10_ug=10.0, o3_ppb=20.0, no2_ppb=5.0, so2_ppb=8.0)
+        assert 0 <= caqi <= 20
 
     def test_high_pollutants_return_high_caqi(self):
-        caqi = compute_caqi(pm25_ug=80.0, pm10_ug=100.0, o3_ppb=300.0, no2_ppb=200.0)
+        caqi = compute_caqi(pm25_ug=80.0, pm10_ug=100.0, o3_ppb=300.0, no2_ppb=200.0, so2_ppb=90.0)
         assert caqi >= 75
 
     def test_nan_inputs_return_nan(self):
