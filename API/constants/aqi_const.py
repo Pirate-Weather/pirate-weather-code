@@ -319,7 +319,7 @@ def compute_caqi(
     no2_ppb: float = float("nan"),
     so2_ppb: float = float("nan"),
 ) -> float:
-    """Compute EU Common Air Quality Index (0–100+ scale).
+    """Compute the European Air Quality Index (EAQI) on the legacy CAQI scale.
 
     Returns the maximum sub-index across available pollutants.
     """
@@ -374,8 +374,8 @@ def compute_aqi_for_unit_system(
         return compute_epa_aqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, co_ppb)
     elif system == "AQHI":
         return compute_aqhi(pm25_ug, o3_ppb, no2_ppb)
-    else:  # CAQI
-        return compute_caqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb)
+    else:  # EAQI
+        return compute_caqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb)
 
 
 def compute_aqi_array(
@@ -452,7 +452,7 @@ def compute_aqi_array(
         so2_calc = so2_v
         co_calc = co_v
     else:
-        # EAQI use raw hourly concentrations
+        # EAQI uses raw hourly concentrations
         pm25_calc = pm25_v
         pm10_calc = pm10_v
         o3_calc = o3_v
