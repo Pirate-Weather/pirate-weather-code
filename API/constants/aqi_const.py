@@ -163,15 +163,16 @@ PPB_SO2_TO_UG_M3 = 2.62  # 1 ppb SO2 ≈ 2.62  µg/m³
 PPB_CO_TO_UG_M3 = 1.145  # 1 ppb CO  ≈ 1.145 µg/m³
 
 # ---------------------------------------------------------------------------
-# EU CAQI breakpoints (µg/m³ for all species)
-# Reference: https://www.airqualitynow.eu/about_indices_definition.php
+# Normalized EU EAQI breakpoints (µg/m³ for all species)
+# Reference: https://airindex.eea.europa.eu/AQI/index.html
 # Roadside index uses the same ranges as background for the species we expose.
 # ---------------------------------------------------------------------------
-CAQI_PM25_BP = [0, 15, 30, 55, 110]
-CAQI_PM10_BP = [0, 25, 50, 90, 180]
-CAQI_O3_BP = [0, 60, 120, 180, 240]  # µg/m³
-CAQI_NO2_BP = [0, 50, 100, 200, 400]  # µg/m³
-CAQI_INDEX = [0, 25, 50, 75, 100]  # CAQI 0–100
+EAQI_PM25_BP = [0, 5, 15, 50, 90, 140]
+EAQI_PM10_BP = [0, 15, 45, 120, 195, 270]
+EAQI_O3_BP = [0, 60, 100, 120, 160, 180]  # µg/m³
+EAQI_NO2_BP = [0, 10, 25, 60, 100, 150]  # µg/m³
+EAQI_SO2_BP = [0, 20, 40, 125, 190, 275]  # µg/m³
+EAQI_INDEX = [0, 20, 40, 60, 80, 100]  # EAQI 0–100
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -316,23 +317,27 @@ def compute_caqi(
     pm10_ug: float = float("nan"),
     o3_ppb: float = float("nan"),
     no2_ppb: float = float("nan"),
+    so2_ppb: float = float("nan"),
 ) -> float:
-    """Compute EU Common Air Quality Index (0–100+ scale).
+    """Compute the European Air Quality Index (EAQI) on the legacy CAQI scale.
 
     Returns the maximum sub-index across available pollutants.
     """
     o3_ug = o3_ppb * PPB_O3_TO_UG_M3 if not math.isnan(o3_ppb) else float("nan")
     no2_ug = no2_ppb * PPB_NO2_TO_UG_M3 if not math.isnan(no2_ppb) else float("nan")
+    so2_ug = so2_ppb * PPB_SO2_TO_UG_M3 if not math.isnan(so2_ppb) else float("nan")
 
     sub_indices = []
     if not math.isnan(pm25_ug):
-        sub_indices.append(_aqi_from_breakpoints(pm25_ug, CAQI_PM25_BP, CAQI_INDEX))
+        sub_indices.append(_aqi_from_breakpoints(pm25_ug, EAQI_PM25_BP, EAQI_INDEX))
     if not math.isnan(pm10_ug):
-        sub_indices.append(_aqi_from_breakpoints(pm10_ug, CAQI_PM10_BP, CAQI_INDEX))
+        sub_indices.append(_aqi_from_breakpoints(pm10_ug, EAQI_PM10_BP, EAQI_INDEX))
     if not math.isnan(o3_ug):
-        sub_indices.append(_aqi_from_breakpoints(o3_ug, CAQI_O3_BP, CAQI_INDEX))
+        sub_indices.append(_aqi_from_breakpoints(o3_ug, EAQI_O3_BP, EAQI_INDEX))
     if not math.isnan(no2_ug):
-        sub_indices.append(_aqi_from_breakpoints(no2_ug, CAQI_NO2_BP, CAQI_INDEX))
+        sub_indices.append(_aqi_from_breakpoints(no2_ug, EAQI_NO2_BP, EAQI_INDEX))
+    if not math.isnan(so2_ug):
+        sub_indices.append(_aqi_from_breakpoints(so2_ug, EAQI_SO2_BP, EAQI_INDEX))
 
     valid = [v for v in sub_indices if not math.isnan(v)]
     return float(max(valid)) if valid else float("nan")
@@ -369,8 +374,8 @@ def compute_aqi_for_unit_system(
         return compute_epa_aqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, co_ppb)
     elif system == "AQHI":
         return compute_aqhi(pm25_ug, o3_ppb, no2_ppb)
-    else:  # CAQI
-        return compute_caqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb)
+    else:  # EAQI
+        return compute_caqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb)
 
 
 def compute_aqi_array(
@@ -447,7 +452,7 @@ def compute_aqi_array(
         so2_calc = so2_v
         co_calc = co_v
     else:
-        # CAQI use raw hourly concentrations
+        # EAQI uses raw hourly concentrations
         pm25_calc = pm25_v
         pm10_calc = pm10_v
         o3_calc = o3_v
