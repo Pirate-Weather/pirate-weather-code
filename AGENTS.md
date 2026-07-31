@@ -18,3 +18,5 @@ Run the test suite using `pytest` before submitting changes:
 pytest
 ```
 
+When editing code, add comments or docstrings for non-obvious logic where helpful.
+

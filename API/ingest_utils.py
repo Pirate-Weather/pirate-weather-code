@@ -218,8 +218,8 @@ def configure_zarr_limits(
 
 
 def make_herbie_save_dir(tmp_dir: str, prefix: str = "herbie") -> str:
-    """Create a per-run Herbie cache directory to avoid path collisions."""
-    save_dir = os.path.join(tmp_dir, f"{prefix}_{int(time.time())}_{os.getpid()}")
+    """Create a stable Herbie cache directory."""
+    save_dir = os.path.join(tmp_dir, prefix)
     os.makedirs(save_dir, exist_ok=True)
     return save_dir
 
