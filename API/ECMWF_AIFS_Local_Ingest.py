@@ -201,7 +201,9 @@ grib_list = [
 # Perform a check if any data seems to be invalid
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+grib_check = subprocess.run(
+    cmd, shell=True, capture_output=True, encoding="utf-8", check=False
+)
 validate_grib_stats(grib_check)
 logger.info("Grib files passed validation, proceeding with processing")
 
@@ -322,7 +324,9 @@ grib_list = [
 # Perform a check if any data seems to be invalid
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+grib_check = subprocess.run(
+    cmd, shell=True, capture_output=True, encoding="utf-8", check=False
+)
 validate_grib_stats(grib_check)
 logger.info("Grib files passed validation, proceeding with processing")
 
@@ -526,7 +530,9 @@ for i in range(his_period, -1, -6):
     # Perform a check if any data seems to be invalid
     cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-    grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    grib_check = subprocess.run(
+        cmd, shell=True, capture_output=True, encoding="utf-8", check=False
+    )
     validate_grib_stats(grib_check)
     logger.info("Grib files passed validation, proceeding with processing")
 
@@ -619,7 +625,9 @@ for i in range(his_period, -1, -6):
     # Perform a check if any data seems to be invalid
     cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
 
-    grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    grib_check = subprocess.run(
+        cmd, shell=True, capture_output=True, encoding="utf-8", check=False
+    )
     validate_grib_stats(grib_check)
     logger.info("Grib files passed validation, proceeding with processing")
 
@@ -867,42 +875,41 @@ int_var_indices = [i for i, v in enumerate(zarr_vars) if v in int_vars]
 # 4. Rechunk it to match the final array
 # 5. Write it out to the zarr array
 
-with ProgressBar():
-    with dask.config.set(scheduler="threads", num_workers=4):
-        # 1. Interpolate the stacked array to be hourly along the time axis
-        daskVarArrayStackDiskInterp = interp_time_take_blend(
-            daskVarArrayStackDisk,
-            stacked_timesUnix=stacked_timesUnix,
-            hourly_timesUnix=hourly_timesUnix,
-            nearest_vars=int_var_indices,
-            dtype="float32",
-            fill_value=np.nan,
-        )
+with ProgressBar(), dask.config.set(scheduler="threads", num_workers=4):
+    # 1. Interpolate the stacked array to be hourly along the time axis
+    daskVarArrayStackDiskInterp = interp_time_take_blend(
+        daskVarArrayStackDisk,
+        stacked_timesUnix=stacked_timesUnix,
+        hourly_timesUnix=hourly_timesUnix,
+        nearest_vars=int_var_indices,
+        dtype="float32",
+        fill_value=np.nan,
+    )
 
-        # 2. Pad to chunk size
-        daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
-            daskVarArrayStackDiskInterp, final_chunk
-        )
+    # 2. Pad to chunk size
+    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+        daskVarArrayStackDiskInterp, final_chunk
+    )
 
-        # 3. Create the zarr array
-        zarr_array = zarr.create_array(
-            store=zarr_store,
-            shape=(
-                len(zarr_vars),
-                len(hourly_timesUnix),
-                daskVarArrayStackDiskInterpPad.shape[2],
-                daskVarArrayStackDiskInterpPad.shape[3],
-            ),
-            chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
+    # 3. Create the zarr array
+    zarr_array = zarr.create_array(
+        store=zarr_store,
+        shape=(
+            len(zarr_vars),
+            len(hourly_timesUnix),
+            daskVarArrayStackDiskInterpPad.shape[2],
+            daskVarArrayStackDiskInterpPad.shape[3],
+        ),
+        chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32",
+    )
 
-        # 4. Rechunk it to match the final array
-        # 5. Write it out to the zarr array
-        daskVarArrayStackDiskInterpPad.round(5).rechunk(
-            (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
-        ).to_zarr(zarr_array, overwrite=True, compute=True)
+    # 4. Rechunk it to match the final array
+    # 5. Write it out to the zarr array
+    daskVarArrayStackDiskInterpPad.round(5).rechunk(
+        (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
+    ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
 close_store(zarr_store)

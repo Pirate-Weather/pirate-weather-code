@@ -135,7 +135,7 @@ if save_type == "S3":
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
             logger.info("No Update to HRDPS, ending")
-            raise
+            sys.exit(0)
 
 else:
     if os.path.exists(forecast_path + "/" + ingest_version + "/HRDPS.time.pickle"):
@@ -149,7 +149,7 @@ else:
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
             logger.info("No Update to HRDPS, ending")
-            raise
+            sys.exit(0)
 
 zarr_vars = (
     "time",
@@ -275,7 +275,7 @@ cmd = (
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
     logger.error(sp_out.stderr)
-    raise
+    sys.exit(1)
 
 # Read the merged netcdf file using xarray (single combined file)
 xarray_forecast_merged = xr.open_dataset(forecast_process_path + "_wgrib2_merged.nc")
@@ -459,7 +459,7 @@ for i in range(his_period, 0, -6):
     sp_out = run_command(cmd)
     if sp_out.returncode != 0:
         logger.error(sp_out.stderr)
-        raise
+        sys.exit(1)
 
     # Read the merged netcdf file using xarray (single combined file)
     xarray_hist_merged = xr.open_dataset(hist_process_path + "_wgrib2_merged.nc")
@@ -697,41 +697,43 @@ else:
 # 4. Rechunk it to match the final array
 # 5. Write it out to the zarr array
 
-with ProgressBar():
-    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        # 1. Interpolate the stacked array to be hourly along the time axis
-        daskVarArrayStackDiskInterp = interp_time_take_blend(
-            daskVarArrayStackDisk,
-            stacked_timesUnix=stacked_timesUnix,
-            hourly_timesUnix=hourly_timesUnix,
-            dtype="float32",
-            fill_value=np.nan,
-        )
+with (
+    ProgressBar(),
+    dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
+):
+    # 1. Interpolate the stacked array to be hourly along the time axis
+    daskVarArrayStackDiskInterp = interp_time_take_blend(
+        daskVarArrayStackDisk,
+        stacked_timesUnix=stacked_timesUnix,
+        hourly_timesUnix=hourly_timesUnix,
+        dtype="float32",
+        fill_value=np.nan,
+    )
 
-        # 2. Pad to chunk size
-        daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
-            daskVarArrayStackDiskInterp, final_chunk
-        )
+    # 2. Pad to chunk size
+    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+        daskVarArrayStackDiskInterp, final_chunk
+    )
 
-        # 3. Create the zarr array
-        zarr_array = zarr.create_array(
-            store=zarr_store,
-            shape=(
-                len(zarr_vars),
-                len(hourly_timesUnix),
-                daskVarArrayStackDiskInterpPad.shape[2],
-                daskVarArrayStackDiskInterpPad.shape[3],
-            ),
-            chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
+    # 3. Create the zarr array
+    zarr_array = zarr.create_array(
+        store=zarr_store,
+        shape=(
+            len(zarr_vars),
+            len(hourly_timesUnix),
+            daskVarArrayStackDiskInterpPad.shape[2],
+            daskVarArrayStackDiskInterpPad.shape[3],
+        ),
+        chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32",
+    )
 
-        # 4. Rechunk it to match the final array
-        # 5. Write it out to the zarr array
-        daskVarArrayStackDiskInterpPad.round(5).rechunk(
-            (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
-        ).to_zarr(zarr_array, overwrite=True, compute=True)
+    # 4. Rechunk it to match the final array
+    # 5. Write it out to the zarr array
+    daskVarArrayStackDiskInterpPad.round(5).rechunk(
+        (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
+    ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
 close_store(zarr_store)

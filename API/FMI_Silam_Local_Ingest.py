@@ -653,16 +653,18 @@ zarr_array = zarr.create_array(
     dtype="float32",
 )
 
-with ProgressBar():
-    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        stacked_array_padded.round(5).rechunk(
-            (
-                len(zarr_vars),
-                stacked_array_padded.shape[1],
-                finalChunk,
-                finalChunk,
-            )
-        ).to_zarr(zarr_array, overwrite=True, compute=True)
+with (
+    ProgressBar(),
+    dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
+):
+    stacked_array_padded.round(5).rechunk(
+        (
+            len(zarr_vars),
+            stacked_array_padded.shape[1],
+            finalChunk,
+            finalChunk,
+        )
+    ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 close_store(zarr_store)
 
@@ -693,12 +695,14 @@ for var_idx in MAP_VAR_INDICES:
         dtype="float32",
     )
 
-    with ProgressBar():
-        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-            da.rechunk(
-                stacked_array_maps[var_idx, hisPeriod - 12 : hisPeriod + 24, :, :],
-                (MAP_TIME_STEPS, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE),
-            ).to_zarr(zarr_array, overwrite=True, compute=True)
+    with (
+        ProgressBar(),
+        dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
+    ):
+        da.rechunk(
+            stacked_array_maps[var_idx, hisPeriod - 12 : hisPeriod + 24, :, :],
+            (MAP_TIME_STEPS, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE),
+        ).to_zarr(zarr_array, overwrite=True, compute=True)
 
     logger.info("Created SILAM map data for %s", zarr_vars[var_idx])
 

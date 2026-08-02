@@ -6,8 +6,7 @@ from API.ingest_utils import validate_grib_stats
 def test_validate_grib_stats_accepts_signed_scientific_notation():
     grib_check = SimpleNamespace(
         stdout=(
-            "1:0:d=2026073000:DSWRF:surface:81 hour fcst:"
-            "min=0 max=3.576e+03 avg=123\n"
+            "1:0:d=2026073000:DSWRF:surface:81 hour fcst:min=0 max=3.576e+03 avg=123\n"
         )
     )
 
@@ -17,8 +16,7 @@ def test_validate_grib_stats_accepts_signed_scientific_notation():
 def test_validate_grib_stats_skips_excluded_variables():
     grib_check = SimpleNamespace(
         stdout=(
-            "1:0:d=2026073000:DSWRF:surface:81 hour fcst:"
-            "min=0 max=323200000 avg=123\n"
+            "1:0:d=2026073000:DSWRF:surface:81 hour fcst:min=0 max=323200000 avg=123\n"
         )
     )
 

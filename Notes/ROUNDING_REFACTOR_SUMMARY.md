@@ -83,10 +83,8 @@ half_night_temp_high = np.round(half_night_temp_high_kelvin * temp_conversion, 2
 for d in range(numDays):
     dailyDataItem["temperatureHigh"] = daily_temp_high[d]  # Pre-converted
     # ... [11 more direct accesses]
-    
-    half_day_item = _build_half_day_item(
-        d, half_day_temp_high, half_day_temp_low, ...
-    )
+
+    half_day_item = _build_half_day_item(d, half_day_temp_high, half_day_temp_low, ...)
 ```
 
 **Fields optimized (12 per period × 3 = 36 total):**
@@ -100,16 +98,24 @@ for d in range(numDays):
 # Pre-calculate all unit conversions for currently block - Lines ~5935-5965
 # Temperature conversions
 if tempUnits == 0:
-    curr_temp_display = np.round((InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS) * 9 / 5 + 32, 2)
-    curr_apparent_display = np.round((InterPcurrent[DATA_CURRENT["apparent"]] - KELVIN_TO_CELSIUS) * 9 / 5 + 32, 2)
+    curr_temp_display = np.round(
+        (InterPcurrent[DATA_CURRENT["temp"]] - KELVIN_TO_CELSIUS) * 9 / 5 + 32, 2
+    )
+    curr_apparent_display = np.round(
+        (InterPcurrent[DATA_CURRENT["apparent"]] - KELVIN_TO_CELSIUS) * 9 / 5 + 32, 2
+    )
     # ... [2 more temperature fields]
 else:
     curr_temp_display = np.round(InterPcurrent[DATA_CURRENT["temp"]] - tempUnits, 2)
     # ... [3 more Celsius fields]
 
 # Other unit conversions
-curr_storm_dist_display = np.round(InterPcurrent[DATA_CURRENT["storm_dist"]] * visUnits, 2)
-curr_rain_intensity_display = np.round(InterPcurrent[DATA_CURRENT["rain_intensity"]] * prepIntensityUnit, 2)
+curr_storm_dist_display = np.round(
+    InterPcurrent[DATA_CURRENT["storm_dist"]] * visUnits, 2
+)
+curr_rain_intensity_display = np.round(
+    InterPcurrent[DATA_CURRENT["rain_intensity"]] * prepIntensityUnit, 2
+)
 # ... [8 more field conversions]
 ```
 

@@ -80,8 +80,8 @@ opened_zarr = zarr.open(store, mode="r")
 data = opened_zarr[1, 24 * 10 : 24 * 11, 500, 500]
 print(data)
 
-data2 = opened_zarr2[1, :, 500, 500]
-print(data2)
+# data2 = opened_zarr2[1, :, 500, 500]
+# print(data2)
 
 
 # %% Print unix time as datetimes

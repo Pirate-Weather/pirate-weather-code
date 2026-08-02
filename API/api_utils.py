@@ -1,7 +1,7 @@
 # %% Script to contain the helper functions as part of the API for Pirate Weather
 # Alexander Rey. October 2025
 import logging
-from typing import List, MutableMapping, Union
+from collections.abc import MutableMapping
 
 import metpy as mp
 import numpy as np
@@ -566,7 +566,7 @@ _FIELDS_TM_BASIC = (
 )
 
 
-DictOrList = Union[MutableMapping, List[MutableMapping]]
+DictOrList = MutableMapping | list[MutableMapping]
 
 
 def remove_conditional_fields(

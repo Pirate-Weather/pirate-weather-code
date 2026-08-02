@@ -9,7 +9,6 @@ import math
 import os
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Union
 
 import numpy as np
 import reverse_geocode
@@ -57,11 +56,7 @@ def parse_request_time(
 
     if time_str.lstrip("-+").isnumeric():
         val = float(time_str)
-        if val > 0:
-            return datetime.datetime.fromtimestamp(val, datetime.UTC).replace(
-                tzinfo=None
-            )
-        elif val < TIME_MACHINE_CONST["very_negative_threshold"]:
+        if val > 0 or val < TIME_MACHINE_CONST["very_negative_threshold"]:
             return datetime.datetime.fromtimestamp(val, datetime.UTC).replace(
                 tzinfo=None
             )
@@ -72,16 +67,15 @@ def parse_request_time(
     try:
         utc_time = datetime.datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S%z")
         return utc_time.replace(tzinfo=None)
-    except Exception:
+    except (ValueError, TypeError):
         pass
 
     try:
         utc_time = datetime.datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S%Z")
         return utc_time.replace(tzinfo=None)
-    except Exception:
+    except (ValueError, TypeError):
         pass
 
-    # Try parsing as local time
     try:
         local_time = datetime.datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S")
         tz_offset_loc_in = {
@@ -92,8 +86,10 @@ def parse_request_time(
         }
         tz_offset_in, _ = get_offset(**tz_offset_loc_in)
         return local_time - datetime.timedelta(minutes=tz_offset_in)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Time Specification")
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(
+            status_code=400, detail="Invalid Time Specification"
+        ) from exc
 
 
 @dataclass
@@ -113,7 +109,7 @@ class InitialRequestContext:
     tz_offset: float
     tz_name: timezone
     tz_req: str
-    loc_name: Dict[str, str]
+    loc_name: dict[str, str]
     icon: str
     translation: dict
     extend_flag: int
@@ -121,7 +117,7 @@ class InitialRequestContext:
     tm_extra: bool
     exclude_params: str
     include_params: str
-    extra_vars: List[str]
+    extra_vars: list[str]
     ex_currently: int
     ex_minutely: int
     ex_hourly: int
@@ -193,7 +189,7 @@ def _parse_location(location: str):
     try:
         lat = float(location_req[0])
         lon_in = float(location_req[1])
-    except Exception:
+    except (ValueError, IndexError):
         if len(location_req) not in {2, 3}:
             raise HTTPException(
                 status_code=400, detail="Invalid Location Specification"
@@ -220,7 +216,7 @@ def _parse_location(location: str):
 
 def _validate_time(
     request: Request,
-    location_req: List[str],
+    location_req: list[str],
     now_time: datetime.datetime,
     lat: float,
     az_lon: float,
@@ -283,17 +279,16 @@ def _validate_time(
             )
     elif (now_time - utc_time) < datetime.timedelta(
         hours=TIME_MACHINE_CONST["threshold_hours"]
-    ):
-        if "timemachine" in str(request.url):
-            time_machine = True
-            if timing_enabled:
-                logger.debug("Near term timemachine request")
-                logger.debug(now_time - utc_time)
+    ) and "timemachine" in str(request.url):
+        time_machine = True
+        if timing_enabled:
+            logger.debug("Near term timemachine request")
+            logger.debug(now_time - utc_time)
 
     return utc_time, time_machine
 
 
-def _setup_units(units: Union[str, None], loc_name: Dict[str, str]):
+def _setup_units(units: str | None, loc_name: dict[str, str]):
     unit_system = "us"
     unit_config = {
         "wind_unit": 2.234,
@@ -415,9 +410,9 @@ def _parse_timemachine_range(
 
 
 def _parse_parameters(
-    exclude: Union[str, None],
-    include: Union[str, None],
-    extraVars: Union[str, None],
+    exclude: str | None,
+    include: str | None,
+    extraVars: str | None,
     now_time: datetime.datetime,
     utc_time: datetime.datetime,
     time_machine: bool,
@@ -554,19 +549,19 @@ async def prepare_initial_request(
     *,
     request: Request,
     location: str,
-    units: Union[str, None],
-    extend: Union[str, None],
-    exclude: Union[str, None],
-    include: Union[str, None],
-    lang: Union[str, None],
-    version: Union[str, None],
-    tmextra: Union[str, None],
-    icon: Union[str, None],
-    extraVars: Union[str, None],
+    units: str | None,
+    extend: str | None,
+    exclude: str | None,
+    include: str | None,
+    lang: str | None,
+    version: str | None,
+    tmextra: str | None,
+    icon: str | None,
+    extraVars: str | None,
     tf: TimezoneFinder,
     translations: dict,
     timing_enabled: bool,
-    force_now: Union[str, bool, None],
+    force_now: str | bool | None,
     logger: logging.Logger,
     start_time: datetime.datetime,
 ) -> InitialRequestContext:
@@ -730,13 +725,9 @@ async def prepare_initial_request(
     base_day = base_time.replace(hour=0, minute=0, second=0, microsecond=0)
     base_day_utc = base_day.astimezone(utc)
     base_day_utc_grib = (
-        (
-            np.datetime64(base_day.astimezone(utc).replace(tzinfo=None))
-            - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
-        )
-        .astype("timedelta64[s]")
-        .astype(np.int32)
-    )
+        np.datetime64(base_day.astimezone(utc).replace(tzinfo=None))
+        - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0)),
+    ).astype("timedelta64[s]").astype(np.int32)
 
     (
         daily_days,

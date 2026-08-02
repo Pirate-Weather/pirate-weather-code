@@ -254,7 +254,7 @@ ens_mf = xr.open_mfdataset(
 ens_mf["tpd"] = ens_mf["tp"].diff(dim="step")
 
 # Set the first difference value to zero
-ens_mf["tpd"][dict(step=0)] = ens_mf["tp"].isel(step=0)
+ens_mf["tpd"][{"step": 0}] = ens_mf["tp"].isel(step=0)
 
 # Change the 3 and 6 hour accumulations to hourly
 # Steps 3 to 144 are 3-hourly, the rest are 6 hourly
@@ -443,15 +443,17 @@ xarray_forecast_merged = xarray_forecast_merged.chunk(
     chunks={"time": 64, "latitude": process_chunk, "longitude": process_chunk}
 )
 
-with ProgressBar():
-    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        xarray_forecast_merged.to_zarr(
-            forecast_process_path + "_merged.zarr",
-            mode="w",
-            consolidated=False,
-            compute=True,
-            chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
-        )
+with (
+    ProgressBar(),
+    dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
+):
+    xarray_forecast_merged.to_zarr(
+        forecast_process_path + "_merged.zarr",
+        mode="w",
+        consolidated=False,
+        compute=True,
+        chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+    )
 
 
 # %% Delete to free memory
@@ -689,15 +691,17 @@ for i in range(his_period, 1, -12):
         chunks={"time": 64, "latitude": process_chunk, "longitude": process_chunk}
     )
 
-    with ProgressBar():
-        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-            xarray_hist_merged.to_zarr(
-                hist_process_path + "_ECMWF_Hist_TMP.zarr",
-                mode="w",
-                consolidated=False,
-                compute=True,
-                chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
-            )
+    with (
+        ProgressBar(),
+        dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
+    ):
+        xarray_hist_merged.to_zarr(
+            hist_process_path + "_ECMWF_Hist_TMP.zarr",
+            mode="w",
+            consolidated=False,
+            compute=True,
+            chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+        )
 
     # Clear the xarray dataset from memory
     del xarray_hist_merged
@@ -810,13 +814,15 @@ ds_chunk = ds_stack.chunk(
 )
 
 # Interim zarr save of the stacked array. Not necessary for local, but speeds things up on S3
-with ProgressBar():
-    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        ds_chunk.to_zarr(
-            forecast_process_path + "_stack.zarr",
-            mode="w",
-            chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
-        )
+with (
+    ProgressBar(),
+    dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
+):
+    ds_chunk.to_zarr(
+        forecast_process_path + "_stack.zarr",
+        mode="w",
+        chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+    )
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(
@@ -844,42 +850,44 @@ int_var_indices = [i for i, v in enumerate(zarr_vars) if v in int_vars]
 # 4. Rechunk it to match the final array
 # 5. Write it out to the zarr array
 
-with ProgressBar():
-    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        # 1. Interpolate the stacked array to be hourly along the time axis
-        daskVarArrayStackDiskInterp = interp_time_take_blend(
-            daskVarArrayStackDisk,
-            stacked_timesUnix=stacked_timesUnix,
-            hourly_timesUnix=hourly_timesUnix,
-            nearest_vars=int_var_indices,
-            dtype="float32",
-            fill_value=np.nan,
-        )
+with (
+    ProgressBar(),
+    dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
+):
+    # 1. Interpolate the stacked array to be hourly along the time axis
+    daskVarArrayStackDiskInterp = interp_time_take_blend(
+        daskVarArrayStackDisk,
+        stacked_timesUnix=stacked_timesUnix,
+        hourly_timesUnix=hourly_timesUnix,
+        nearest_vars=int_var_indices,
+        dtype="float32",
+        fill_value=np.nan,
+    )
 
-        # 2. Pad to chunk size
-        daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
-            daskVarArrayStackDiskInterp, final_chunk
-        )
+    # 2. Pad to chunk size
+    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+        daskVarArrayStackDiskInterp, final_chunk
+    )
 
-        # 3. Create the zarr array
-        zarr_array = zarr.create_array(
-            store=zarr_store,
-            shape=(
-                len(zarr_vars),
-                len(hourly_timesUnix),
-                daskVarArrayStackDiskInterpPad.shape[2],
-                daskVarArrayStackDiskInterpPad.shape[3],
-            ),
-            chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
+    # 3. Create the zarr array
+    zarr_array = zarr.create_array(
+        store=zarr_store,
+        shape=(
+            len(zarr_vars),
+            len(hourly_timesUnix),
+            daskVarArrayStackDiskInterpPad.shape[2],
+            daskVarArrayStackDiskInterpPad.shape[3],
+        ),
+        chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32",
+    )
 
-        # 4. Rechunk it to match the final array
-        # 5. Write it out to the zarr array
-        daskVarArrayStackDiskInterpPad.round(5).rechunk(
-            (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
-        ).to_zarr(zarr_array, overwrite=True, compute=True)
+    # 4. Rechunk it to match the final array
+    # 5. Write it out to the zarr array
+    daskVarArrayStackDiskInterpPad.round(5).rechunk(
+        (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
+    ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
 close_store(zarr_store)

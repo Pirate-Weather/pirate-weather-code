@@ -905,7 +905,7 @@ def prepare_aq_inputs(
                 if diff[best] < 3600:  # within one SILAM time-step (1 h)
                     out[hi] = col[best]
             return out
-        except Exception:
+        except (IndexError, ValueError, TypeError):
             return None
 
     raqdps_pm25 = _extract(dataOut_raqdps, RAQDPS["pm25"])

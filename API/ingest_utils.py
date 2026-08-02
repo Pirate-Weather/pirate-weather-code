@@ -8,10 +8,12 @@ import resource
 import shlex
 import shutil
 import subprocess
+import sys
 import tarfile
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable, Optional, Union
+from typing import Any
 
 import cartopy.crs as ccrs
 import dask.array as da
@@ -107,6 +109,7 @@ def run_command(command: str, encoding: str = "utf-8") -> subprocess.CompletedPr
             shlex.split(command),
             capture_output=True,
             encoding=encoding,
+            check=False,
         )
 
     left, right = command.split("|", maxsplit=1)
@@ -126,6 +129,7 @@ def run_command(command: str, encoding: str = "utf-8") -> subprocess.CompletedPr
             stdin=left_proc.stdout,
             capture_output=True,
             encoding=encoding,
+            check=False,
         )
     finally:
         if left_proc.stdout is not None:
@@ -337,7 +341,9 @@ def safe_herbie_local_file_path(
     raise RuntimeError("Unreachable Herbie local path resolution state")
 
 
-def build_herbie_grib_list(file_refs, search: Any = None, retries: int = 3) -> list[str]:
+def build_herbie_grib_list(
+    file_refs, search: Any = None, retries: int = 3
+) -> list[str]:
     """Build a list of local GRIB paths from Herbie file references."""
     return [
         safe_herbie_local_file_path(ref, search, retries=retries) for ref in file_refs
@@ -411,7 +417,7 @@ def download_extract_historic_archive(
     extracted_store_name: str,
     local_temp_dir: str,
     expected_vars: Iterable[str] | None = None,
-) -> Optional[str]:
+) -> str | None:
     """Helper to download and extract a historic archive to a local zarr path."""
     os.makedirs(local_temp_dir, exist_ok=True)
     local_zarr_path = os.path.join(local_temp_dir, final_zarr_name)
@@ -545,7 +551,7 @@ def getGribList(FH_forecastsub, matchStrings):
                             RuntimeError,
                         ):
                             print("Download Failure 6, Fail")
-                            exit(1)
+                            sys.exit(1)
     return gribList
 
 
@@ -683,7 +689,7 @@ def interp_time_take_blend(
     arr: da.Array,
     stacked_timesUnix: np.ndarray,
     hourly_timesUnix: np.ndarray,
-    nearest_vars: Optional[Union[int, Iterable[int]]] = None,  # var indices using NN
+    nearest_vars: int | Iterable[int] | None = None,  # var indices using NN
     dtype: str = "float32",
     fill_value: float = np.nan,
     time_axis: int = 1,
@@ -736,7 +742,7 @@ def interp_time_take_blend(
     # boolean mask of “in‐range” points
     valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
 
-    T_new = int(len(idx0))
+    T_new = len(idx0)
     if not (len(idx1) == T_new and len(w) == T_new and len(valid) == T_new):
         raise ValueError("idx0, idx1, w, and valid must all have length T_new.")
 
@@ -771,7 +777,7 @@ def interp_time_take_blend(
         # Normalize indices as a sorted, unique list
         if isinstance(nearest_vars, int):
             nearest_vars = [nearest_vars]
-        nv = sorted(set(int(i) for i in nearest_vars))
+        nv = sorted({int(i) for i in nearest_vars})
 
         # Compute nearest only for needed variables (cheap if few vars)
         # Shape of each nearest slice: (1, T_new, Y, X)
@@ -880,7 +886,7 @@ def calculate_nowcast_concentration(
     return nowcast_result
 
 
-def trailing_mean(conc: Optional[np.ndarray], window: int) -> Optional[np.ndarray]:
+def trailing_mean(conc: np.ndarray | None, window: int) -> np.ndarray | None:
     """
     Compute trailing window mean along time axis for array with shape (T, Y, X).
     If window <= 1 returns conc. Handles NaNs by using nanmean over available points.

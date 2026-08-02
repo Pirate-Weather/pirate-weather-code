@@ -85,9 +85,8 @@ else:
 if not os.path.exists(tmp_dir):
     os.makedirs(tmp_dir)
 
-if save_type == "Download":
-    if not os.path.exists(forecast_path + "/" + ingest_version):
-        os.makedirs(forecast_path + "/" + ingest_version)
+if save_type == "Download" and not os.path.exists(forecast_path + "/" + ingest_version):
+    os.makedirs(forecast_path + "/" + ingest_version)
 
 # %% Define base time from the most recent run
 # base_time = pd.Timestamp("2023-07-01 00:00")

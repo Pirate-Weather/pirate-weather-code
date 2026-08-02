@@ -5,44 +5,12 @@
 import logging
 import os
 import pickle
+import re
 import shutil
 import sys
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-
-import re
-
-# import os
-# from pathlib import Path
-#
-# defs = Path("/mnt/c/Users/REYA/Documents/Repo/pirate-weather-code/.build/ingest-test/toolchain/share/eccodes/definitions")
-# samples = Path("/mnt/c/Users/REYA/Documents/Repo/pirate-weather-code/.build/ingest-test/toolchain/share/eccodes/samples")
-#
-# print("defs exists:", defs.exists())
-# print("boot exists:", (defs / "boot.def").exists())
-# print("boot readable:", (defs / "boot.def").read_text()[:20])
-# print("samples exists:", samples.exists())
-# print("GRIB2 sample exists:", (samples / "GRIB2.tmpl").exists())
-#
-# os.environ["ECCODES_DIR"] = "/mnt/c/Users/REYA/Documents/Repo/pirate-weather-code/.build/ingest-test/toolchain"
-# os.environ["ECCODES_DEFINITION_PATH"] = str(defs)
-# os.environ["ECCODES_SAMPLES_PATH"] = str(samples)
-# os.environ["ECCODES_PYTHON_USE_FINDLIBS"] = "1"
-#
-# import eccodes
-#
-# print("api:", eccodes.codes_get_api_version())
-#
-# h = eccodes.codes_grib_new_from_samples("GRIB2")
-# print("sample handle:", h)
-# eccodes.codes_release(h)
-
-# Env setup
-from dotenv import find_dotenv, load_dotenv
-
-dotenv_path = find_dotenv(usecwd=True)
-loaded = load_dotenv(dotenv_path, override=True)
 
 import dask
 import dask.array as da
@@ -52,12 +20,10 @@ import s3fs
 import xarray as xr
 import zarr.storage
 from dask.diagnostics import ProgressBar
-from herbie import HerbieLatest
+from dotenv import find_dotenv, load_dotenv
 from tqdm import tqdm
 
-from API.api_utils import estimate_visibility_from_rh_pr
-from API.constants.api_const import U_REF
-from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
+from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
 from API.ingest_grib_utils import (
     cat_gribs,
     download_and_validate_gfs_subset,
@@ -79,7 +45,11 @@ from API.ingest_utils import (
     run_command,
     tune_nofile_limit,
 )
-from API.utils.storm_proc import compute_storm_fields_from_apcp_dataarray
+
+dotenv_path = find_dotenv(usecwd=True)
+loaded = load_dotenv(dotenv_path, override=True)
+
+from herbie import HerbieLatest  # noqa: E402
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -179,7 +149,7 @@ if save_type == "S3":
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
             logger.info("No Update to GDPS, ending")
-            raise
+            sys.exit(0)
 
 else:
     if os.path.exists(forecast_path + "/" + ingest_version + "/GDPS.time.pickle"):
@@ -193,7 +163,7 @@ else:
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
             logger.info("No Update to GDPS, ending")
-            raise
+            sys.exit(0)
 
 zarr_vars = (
     "time",
@@ -249,9 +219,7 @@ gdps_range_1 = FORECAST_LEAD_RANGES["GDPS_1"]
 gdps_range_2 = FORECAST_LEAD_RANGES["GDPS_2"]
 gdps_file_range = [*gdps_range_1, *gdps_range_2]
 gdps_reduced_file_range = [
-    hour
-    for hour in gdps_file_range
-    if hour % 3 == 0 and (hour <= 168 or hour % 6 == 0)
+    hour for hour in gdps_file_range if hour % 3 == 0 and (hour <= 168 or hour % 6 == 0)
 ]
 gdps_3_hour_file_range = [hour for hour in gdps_file_range if hour % 3 == 0]
 gdps_expected_forecast_hours = {
@@ -336,10 +304,10 @@ cmd = (
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
     logger.error(sp_out.stderr)
-    raise
+    sys.exit(1)
 
 
-#%% Read the merged netcdf file using xarray (single combined file)
+# %% Read the merged netcdf file using xarray (single combined file)
 xarray_forecast_merged = xr.open_dataset(forecast_process_path + "_wgrib2_merged.nc")
 
 if len(xarray_forecast_merged.time) != len(gdps_file_range):
@@ -376,7 +344,7 @@ stacked_timesUnix = (stacked_times - unix_epoch) / one_second
 hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
 
-#TODO:
+# TODO:
 # Daccum DownwardShortwaveRadiationFlux
 # Check for 3 hourly DownwardShortwaveRadiationFlux issues
 # Something about UVIndex
@@ -392,8 +360,7 @@ APCP_surface_tmp = da.diff(
 
 # Using the difference between times in the xarray, convert from 3-hourly to 1-hourly
 forecast_time_steps = (
-    xarray_forecast_merged.time.diff("time")
-    / np.timedelta64(1, "h")
+    xarray_forecast_merged.time.diff("time") / np.timedelta64(1, "h")
 ).values.astype("float32")
 forecast_time_steps = np.insert(forecast_time_steps, 0, forecast_time_steps[0])
 APCP_surface_tmp = APCP_surface_tmp / forecast_time_steps[:, None, None]
@@ -478,7 +445,9 @@ for i in range(his_period, 0, -12):
             (g["variable"], g["level"]), gdps_file_range
         )
 
-        expected_forecast_hours = [hour for hour in expected_forecast_hours if hour <= 12]
+        expected_forecast_hours = [
+            hour for hour in expected_forecast_hours if hour <= 12
+        ]
 
         grib_files = download_and_validate_gfs_subset(
             model="gdps",
@@ -528,7 +497,7 @@ for i in range(his_period, 0, -12):
     sp_out = run_command(cmd)
     if sp_out.returncode != 0:
         logger.error(sp_out.stderr)
-        raise
+        sys.exit(1)
 
     # Read the merged netcdf file using xarray (single combined file)
     xarray_hist_merged = xr.open_dataset(hist_process_path + "_wgrib2_merged.nc")
@@ -539,15 +508,13 @@ for i in range(his_period, 0, -12):
 
     apcpProcHour = np.diff(apcpProc, axis=0, prepend=0)
 
-    xarray_hist_merged["APCP_surface"] = xarray_hist_merged[
-        "APCP_surface"
-    ].copy(data=apcpProcHour)
+    xarray_hist_merged["APCP_surface"] = xarray_hist_merged["APCP_surface"].copy(
+        data=apcpProcHour
+    )
 
     # Clip precipitation to >= 0
-    xarray_hist_merged["APCP_surface"] = xarray_hist_merged[
-        "APCP_surface"
-    ].clip(min=0)
-    
+    xarray_hist_merged["APCP_surface"] = xarray_hist_merged["APCP_surface"].clip(min=0)
+
     # Clear memory
     del (apcpProc, apcpProcHour)
 
@@ -561,7 +528,6 @@ for i in range(his_period, 0, -12):
     encoding = {
         vname: {"chunks": (12, process_chunk, process_chunk)} for vname in zarr_vars[1:]
     }
-
 
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         xarray_hist_merged.to_zarr(
@@ -663,7 +629,6 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
             da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
         )
 
-
     daskVarArraysStack = da.stack(daskVarArrays, allow_unknown_chunksizes=True)
 
     daskForecastArray = da.from_zarr(
@@ -721,13 +686,15 @@ daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
 
 # Write out to disk
 # This intermediate step is necessary to avoid memory overflow
-with ProgressBar():
-    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        daskVarArrayListMergeNaN.to_zarr(
-            forecast_process_path + "_stack.zarr",
-            overwrite=True,
-            compute=True,
-        )
+with (
+    ProgressBar(),
+    dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
+):
+    daskVarArrayListMergeNaN.to_zarr(
+        forecast_process_path + "_stack.zarr",
+        overwrite=True,
+        compute=True,
+    )
 
 # Read in stacked 4D array back in
 daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
@@ -748,41 +715,43 @@ else:
 # 4. Rechunk it to match the final array
 # 5. Write it out to the zarr array
 
-with ProgressBar():
-    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        # 1. Interpolate the stacked array to be hourly along the time axis
-        daskVarArrayStackDiskInterp = interp_time_take_blend(
-            daskVarArrayStackDisk,
-            stacked_timesUnix=stacked_timesUnix,
-            hourly_timesUnix=hourly_timesUnix,
-            dtype="float32",
-            fill_value=np.nan,
-        )
+with (
+    ProgressBar(),
+    dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
+):
+    # 1. Interpolate the stacked array to be hourly along the time axis
+    daskVarArrayStackDiskInterp = interp_time_take_blend(
+        daskVarArrayStackDisk,
+        stacked_timesUnix=stacked_timesUnix,
+        hourly_timesUnix=hourly_timesUnix,
+        dtype="float32",
+        fill_value=np.nan,
+    )
 
-        # 2. Pad to chunk size
-        daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
-            daskVarArrayStackDiskInterp, final_chunk
-        )
+    # 2. Pad to chunk size
+    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+        daskVarArrayStackDiskInterp, final_chunk
+    )
 
-        # 3. Create the zarr array
-        zarr_array = zarr.create_array(
-            store=zarr_store,
-            shape=(
-                len(zarr_vars),
-                len(hourly_timesUnix),
-                daskVarArrayStackDiskInterpPad.shape[2],
-                daskVarArrayStackDiskInterpPad.shape[3],
-            ),
-            chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
+    # 3. Create the zarr array
+    zarr_array = zarr.create_array(
+        store=zarr_store,
+        shape=(
+            len(zarr_vars),
+            len(hourly_timesUnix),
+            daskVarArrayStackDiskInterpPad.shape[2],
+            daskVarArrayStackDiskInterpPad.shape[3],
+        ),
+        chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32",
+    )
 
-        # 4. Rechunk it to match the final array
-        # 5. Write it out to the zarr array
-        daskVarArrayStackDiskInterpPad.round(5).rechunk(
-            (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
-        ).to_zarr(zarr_array, overwrite=True, compute=True)
+    # 4. Rechunk it to match the final array
+    # 5. Write it out to the zarr array
+    daskVarArrayStackDiskInterpPad.round(5).rechunk(
+        (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
+    ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
 close_store(zarr_store)
