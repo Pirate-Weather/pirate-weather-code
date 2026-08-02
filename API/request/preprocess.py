@@ -725,9 +725,13 @@ async def prepare_initial_request(
     base_day = base_time.replace(hour=0, minute=0, second=0, microsecond=0)
     base_day_utc = base_day.astimezone(utc)
     base_day_utc_grib = (
-        np.datetime64(base_day.astimezone(utc).replace(tzinfo=None))
-        - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0)),
-    ).astype("timedelta64[s]").astype(np.int32)
+        (
+            np.datetime64(base_day.astimezone(utc).replace(tzinfo=None))
+            - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
+        )
+        .astype("timedelta64[s]")
+        .astype(np.int32)
+    )
 
     (
         daily_days,
