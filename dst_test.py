@@ -16,7 +16,7 @@ def get_period(hour):
 def run_dst(start_date, label):
     print(f"\n--- {label} ---")
     tz = pytz.timezone("US/Eastern")
-    start_dt = tz.localize(datetime.strptime(start_date, "%Y-%m-%d").astimezone(tz))
+    start_dt = tz.localize(datetime.strptime(start_date, "%Y-%m-%d"))
 
     # Generate 72 hours using UTC offsets to handle DST transitions correctly
     times_utc = [start_dt.astimezone(pytz.utc) + timedelta(hours=i) for i in range(72)]
