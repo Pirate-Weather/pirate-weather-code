@@ -23,7 +23,6 @@ updates:
       # Dependabot should not update numpy, eccodes and xarray
       - dependency-name: "numpy"
       - dependency-name: "eccodes"
-      - dependency-name: "xarray"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
