@@ -1414,7 +1414,8 @@ def build_current_section(
     translation,
     icon: str,
     unitSystem: str,
-    version: int,
+    aqiSystem: str | None = None,
+    version: int = 1,
     timeMachine: bool,
     tmExtra: bool,
     lat: float,
@@ -1656,7 +1657,7 @@ def build_current_section(
             # (NowCast for EPA PM2.5/PM10, rolling means for O3/CO, etc.) so
             # that the currently AQI is consistent with the hourly AQI values.
             aqi_arr = compute_aqi_array(
-                unit_system=unitSystem,
+                unit_system=aqiSystem if aqiSystem is not None else unitSystem,
                 pm25=aq_inputs.get("pm25"),
                 pm10=aq_inputs.get("pm10"),
                 o3=aq_inputs.get("o3"),

@@ -145,6 +145,7 @@ class InitialRequestContext:
     inc_airqualitydetails: int
     summary_text: bool
     unit_system: str
+    aqi_system: str
     wind_unit: float
     prep_intensity_unit: float
     prep_accum_unit: float
@@ -699,6 +700,16 @@ async def prepare_initial_request(
 
     unit_system, unit_config = _setup_units(units, loc_name)
 
+    # Parse aqiunits override: ca → AQHI, us → EPA, eu → CAQI.
+    # Falls back to the unit-based AQI system when the value is absent or invalid.
+    _VALID_AQI_UNITS = {"ca", "us", "eu"}
+    _AQI_UNITS_MAP = {"ca": "ca", "us": "us", "eu": "si"}
+    raw_aqiunits = request.query_params.get("aqiunits")
+    if raw_aqiunits and raw_aqiunits.lower() in _VALID_AQI_UNITS:
+        aqi_system = _AQI_UNITS_MAP[raw_aqiunits.lower()]
+    else:
+        aqi_system = unit_system
+
     wind_unit = unit_config["wind_unit"]
     prep_intensity_unit = unit_config["prep_intensity_unit"]
     prep_accum_unit = unit_config["prep_accum_unit"]
@@ -812,6 +823,7 @@ async def prepare_initial_request(
         inc_airqualitydetails=inc_airqualitydetails,
         summary_text=summary_text,
         unit_system=unit_system,
+        aqi_system=aqi_system,
         wind_unit=wind_unit,
         prep_intensity_unit=prep_intensity_unit,
         prep_accum_unit=prep_accum_unit,
