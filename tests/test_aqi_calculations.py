@@ -547,3 +547,53 @@ class TestEPAAveragingInArray:
         # CAQI at index 2 should reflect the raw 200 µg/m³ concentration
         assert not np.isnan(result[2])
         assert result[2] >= 75  # 200 µg/m³ PM2.5 → CAQI ≥ 75 (very high)
+
+
+class TestAQIUnitsQueryParam:
+    """Tests for the aqiunits query-parameter override logic."""
+
+    def test_eu_aqiunits_uses_caqi(self):
+        """aqiunits=eu should produce CAQI values (same as si/uk unit system)."""
+        pm25 = np.full(3, 50.0)
+        result_eu = compute_aqi_array(
+            "si", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        # eu maps to "si" unit system in AQI_SYSTEM_MAP → CAQI
+        assert not np.any(np.isnan(result_eu))
+
+    def test_ca_aqiunits_uses_aqhi(self):
+        """aqiunits=ca should produce AQHI values (same as ca unit system)."""
+        pm25 = np.full(3, 50.0)
+        result_ca = compute_aqi_array(
+            "ca", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        assert not np.any(np.isnan(result_ca))
+        # AQHI is on a 1–15 scale; EPA AQI for 50 µg/m³ would be ~133
+        # AQHI should be much lower than EPA for the same concentration
+        result_us = compute_aqi_array(
+            "us", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        assert float(result_ca[-1]) < float(result_us[-1])
+
+    def test_us_aqiunits_uses_epa(self):
+        """aqiunits=us should produce EPA AQI (same as us unit system)."""
+        pm25 = np.full(12, 50.0)
+        result_us = compute_aqi_array(
+            "us", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        # First hour may be NaN due to NowCast requiring 2 valid hours
+        assert not np.any(np.isnan(result_us[1:]))
+        # EPA AQI for 50 µg/m³ PM2.5 (NowCast-averaged) should be > 100
+        assert float(result_us[-1]) > 100
+
+    def test_eu_and_si_produce_same_result(self):
+        """aqiunits=eu maps to 'si' which uses CAQI — results should be identical."""
+        pm25 = np.array([10.0, 20.0, 30.0])
+        result_si = compute_aqi_array(
+            "si", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        result_uk = compute_aqi_array(
+            "uk", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        # Both si and uk use CAQI — results should be identical
+        np.testing.assert_array_equal(result_si, result_uk)
