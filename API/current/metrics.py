@@ -1415,7 +1415,7 @@ def build_current_section(
     icon: str,
     unitSystem: str,
     aqiSystem: str | None = None,
-    version: int = 1,
+    version: int,
     timeMachine: bool,
     tmExtra: bool,
     lat: float,
