@@ -685,6 +685,105 @@ def earth_relative_wind_components(
     return ut, vt
 
 
+def interp_time_map_blocks_nan(
+    arr: da.Array,
+    stacked_timesUnix: np.ndarray,
+    hourly_timesUnix: np.ndarray,
+    nearest_vars: Optional[Union[int, Iterable[int]]] = None,
+    dtype: str = "float32",
+    fill_value: float = np.nan,
+    time_axis: int = 1,
+) -> da.Array:
+    if arr.ndim != 4:
+        raise ValueError("Expected arr with dims (V, T, Y, X).")
+    if time_axis != 1:
+        raise NotImplementedError("This helper assumes time_axis == 1 for (V,T,Y,X).")
+    if len(arr.chunks[time_axis]) != 1:
+        raise ValueError("time axis must be a single chunk before interpolating.")
+
+    x_source = np.asarray(stacked_timesUnix, dtype=np.float64).reshape(-1)
+    x_target = np.asarray(hourly_timesUnix, dtype=np.float64).reshape(-1)
+    if arr.shape[time_axis] != len(x_source):
+        raise ValueError(
+            f"arr time length {arr.shape[time_axis]} does not match "
+            f"stacked_timesUnix length {len(x_source)}."
+        )
+
+    if nearest_vars is None:
+        nearest_vars_set = set()
+    elif isinstance(nearest_vars, int):
+        nearest_vars_set = {nearest_vars}
+    else:
+        nearest_vars_set = {int(i) for i in nearest_vars}
+
+    def interp_block(block, block_info=None):
+        var_start = 0
+        if block_info is not None:
+            var_start = block_info[0]["array-location"][0][0]
+
+        out = np.full(
+            (block.shape[0], len(x_target), block.shape[2], block.shape[3]),
+            fill_value,
+            dtype=dtype,
+        )
+        n_points = block.shape[2] * block.shape[3]
+
+        for local_var_idx in range(block.shape[0]):
+            global_var_idx = var_start + local_var_idx
+            values = block[local_var_idx].reshape(block.shape[1], n_points).astype(
+                np.float64, copy=False
+            )
+            valid = np.isfinite(values)
+            valid_patterns, pattern_idx = np.unique(
+                valid.T, axis=0, return_inverse=True
+            )
+            var_out = out[local_var_idx].reshape(len(x_target), n_points)
+
+            for valid_pattern_idx, valid_pattern in enumerate(valid_patterns):
+                cols = np.flatnonzero(pattern_idx == valid_pattern_idx)
+                if not valid_pattern.any():
+                    continue
+
+                valid_times = x_source[valid_pattern]
+                valid_values = values[valid_pattern][:, cols]
+                target_in_range = (x_target >= valid_times[0]) & (
+                    x_target <= valid_times[-1]
+                )
+                if not target_in_range.any():
+                    continue
+
+                if global_var_idx in nearest_vars_set or len(valid_times) == 1:
+                    insert_at = np.searchsorted(valid_times, x_target[target_in_range])
+                    left_idx = np.clip(insert_at - 1, 0, len(valid_times) - 1)
+                    right_idx = np.clip(insert_at, 0, len(valid_times) - 1)
+                    left_dist = np.abs(x_target[target_in_range] - valid_times[left_idx])
+                    right_dist = np.abs(valid_times[right_idx] - x_target[target_in_range])
+                    nearest_idx = np.where(left_dist <= right_dist, left_idx, right_idx)
+                    var_out[np.ix_(target_in_range, cols)] = valid_values[nearest_idx]
+                    continue
+
+                insert_at = np.searchsorted(
+                    valid_times, x_target[target_in_range], side="right"
+                )
+                left_idx = np.clip(insert_at - 1, 0, len(valid_times) - 2)
+                right_idx = left_idx + 1
+                left_times = valid_times[left_idx]
+                right_times = valid_times[right_idx]
+                weights = (x_target[target_in_range] - left_times) / (
+                    right_times - left_times
+                )
+                interp_values = (
+                    (1 - weights[:, None]) * valid_values[left_idx]
+                    + weights[:, None] * valid_values[right_idx]
+                )
+                var_out[np.ix_(target_in_range, cols)] = interp_values
+
+        return out
+
+    chunks = (arr.chunks[0], (len(x_target),), arr.chunks[2], arr.chunks[3])
+    return arr.map_blocks(interp_block, dtype=dtype, chunks=chunks)
+
+
 def interp_time_take_blend(
     arr: da.Array,
     stacked_timesUnix: np.ndarray,

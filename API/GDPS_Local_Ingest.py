@@ -37,7 +37,7 @@ from API.ingest_utils import (
     close_store,
     configure_zarr_limits,
     download_extract_historic_archive,
-    interp_time_take_blend,
+    interp_time_map_blocks_nan,
     make_herbie_save_dir,
     mask_invalid_data,
     pad_to_chunk_size,
@@ -715,37 +715,37 @@ else:
 # 4. Rechunk it to match the final array
 # 5. Write it out to the zarr array
 
-with (
-    ProgressBar(),
-    dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
-):
-    # 1. Interpolate the stacked array to be hourly along the time axis
-    daskVarArrayStackDiskInterp = interp_time_take_blend(
-        daskVarArrayStackDisk,
-        stacked_timesUnix=stacked_timesUnix,
-        hourly_timesUnix=hourly_timesUnix,
-        dtype="float32",
-        fill_value=np.nan,
-    )
+with ProgressBar():
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        # 1. Interpolate the stacked array to be hourly along the time axis
+        daskVarArrayStackDiskInterp = interp_time_map_blocks_nan(
+            daskVarArrayStackDisk,
+            stacked_timesUnix=stacked_timesUnix,
+            hourly_timesUnix=hourly_timesUnix,
+            dtype="float32",
+            fill_value=np.nan,
+            nearest_vars=[zarr_vars.index("PTYPE_surface")],
+        )
 
     # 2. Pad to chunk size
     daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
         daskVarArrayStackDiskInterp, final_chunk
     )
 
-    # 3. Create the zarr array
-    zarr_array = zarr.create_array(
-        store=zarr_store,
-        shape=(
-            len(zarr_vars),
-            len(hourly_timesUnix),
-            daskVarArrayStackDiskInterpPad.shape[2],
-            daskVarArrayStackDiskInterpPad.shape[3],
-        ),
-        chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
-    )
+        # 3. Create the zarr array
+        zarr_array = zarr.create_array(
+            store=zarr_store,
+            shape=(
+                len(zarr_vars),
+                len(hourly_timesUnix),
+                daskVarArrayStackDiskInterpPad.shape[2],
+                daskVarArrayStackDiskInterpPad.shape[3],
+            ),
+            chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
+            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+            dtype="float32",
+            overwrite=True
+        )
 
     # 4. Rechunk it to match the final array
     # 5. Write it out to the zarr array
