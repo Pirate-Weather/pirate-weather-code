@@ -4,6 +4,7 @@ Supports three AQI systems:
   - US EPA AQI  (unit_system="us")
   - Canadian AQHI (unit_system="ca")
   - EU CAQI     (unit_system="uk" or "si")
+  - WHO Guidelines     (aqiunit="who")
 
 All input concentrations use the model-native units:
   - PM2.5, PM10: µg/m³
@@ -356,6 +357,47 @@ def compute_caqi(
     valid = [v for v in sub_indices if not math.isnan(v)]
     return float(max(valid)) if valid else float("nan")
 
+# ---------------------------------------------------------------------------
+# WHO Guidelines
+# ---------------------------------------------------------------------------
+
+def compute_who_aqi(
+    pm25_ug: float = float("nan"),
+    pm10_ug: float = float("nan"),
+    o3_ppb: float = float("nan"),
+    no2_ppb: float = float("nan"),
+    so2_ppb: float = float("nan"),
+    co_ppb: float = float("nan"),
+) -> float:
+    """Compute WHO Guidelines AQI as the maximum sub-index across available pollutants.
+
+    Pollutant concentrations should be in model-native units:
+      pm25_ug, pm10_ug → µg/m³
+      o3_ppb, no2_ppb, so2_ppb, co_ppb → ppb
+    """
+
+    o3_ug = o3_ppb * PPB_O3_TO_UG_M3 if not math.isnan(o3_ppb) else float("nan")
+    no2_ug = no2_ppb * PPB_NO2_TO_UG_M3 if not math.isnan(no2_ppb) else float("nan")
+    so2_ug = so2_ppb * PPB_SO2_TO_UG_M3 if not math.isnan(so2_ppb) else float("nan")
+    co_ug = co_ppb * PPB_CO_TO_UG_M3 if not math.isnan(co_ppb) else float("nan")
+
+    sub_indices = []
+    if not math.isnan(o3_ppb):
+        o3_sub = _aqi_from_breakpoints(o3_ppb, WHO_O3_BP, WHO_INDEX)
+    if not math.isnan(pm25_ug):
+        sub_indices.append(_aqi_from_breakpoints(pm25_ug, WHO_PM25_BP, WHO_INDEX))
+    if not math.isnan(pm10_ug):
+        sub_indices.append(_aqi_from_breakpoints(pm10_ug, WHO_PM10_BP, WHO_INDEX))
+    if not math.isnan(no2_ug):
+        sub_indices.append(_aqi_from_breakpoints(no2_ug, WHO_NO2_BP, WHO_INDEX))
+    if not math.isnan(so2_ug):
+        sub_indices.append(_aqi_from_breakpoints(so2_ug, WHO_SO2_BP, WHO_INDEX))
+    if not math.isnan(co_ug):
+        sub_indices.append(_aqi_from_breakpoints(co_ug, WHO_CO_BP, WHO_INDEX))
+
+    valid = [v for v in sub_indices if not math.isnan(v)]
+    return float(max(valid)) if valid else float("nan")
+
 
 # ---------------------------------------------------------------------------
 # Unified dispatcher
@@ -367,6 +409,7 @@ AQI_SYSTEM_MAP = {
     "ca": "AQHI",
     "uk": "CAQI",
     "si": "CAQI",
+    "who": "WHO",
 }
 
 
@@ -388,6 +431,8 @@ def compute_aqi_for_unit_system(
         return compute_epa_aqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, co_ppb)
     elif system == "AQHI":
         return compute_aqhi(pm25_ug, o3_ppb, no2_ppb)
+    elif system == "WHO":
+        return compute_who(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, co_ppb)
     else:  # EAQI
         return compute_caqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb)
 
@@ -405,13 +450,12 @@ def compute_aqi_array(
 
     For the US EPA system the appropriate EPA averaging periods are applied
     before the breakpoint lookup:
-      - PM2.5: NowCast (12-hour weighted average)
-      - PM10:  24-hour rolling mean
-      - O3:    8-hour rolling mean
+      - PM2.5, PM10: NowCast (12-hour weighted average)
+      - O3:    8-hour and 1-hour rolling mean
       - CO:    8-hour rolling mean
       - NO2, SO2: 1-hour (no additional averaging)
 
-    For AQHI (CA) and CAQI (UK/SI) the raw hourly concentrations are used
+    For EAQI (UK/SI) the raw hourly concentrations are used
     since those indices are designed for hourly values.
 
     All input arrays should have the same length (num_hours); None entries are
