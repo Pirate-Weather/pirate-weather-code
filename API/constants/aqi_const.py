@@ -5,7 +5,6 @@ Supports three AQI systems:
   - Canadian AQHI (unit_system="ca")
   - EU CAQI     (unit_system="si")
   - UK DAQI      (unit_system="uk")
-  - WHO Guidelines     (aqiunit="who")
 
 All input concentrations use the model-native units:
   - PM2.5, PM10: µg/m³
@@ -175,19 +174,6 @@ EAQI_O3_BP = [0, 60, 100, 120, 160, 180]  # µg/m³
 EAQI_NO2_BP = [0, 10, 25, 60, 100, 150]  # µg/m³
 EAQI_SO2_BP = [0, 20, 40, 125, 190, 275]  # µg/m³
 EAQI_INDEX = [0, 20, 40, 60, 80, 100]  # EAQI 0–100
-
-# ---------------------------------------------------------------------------
-# Air Quality Index based on WHO 2021 Air Quality Guideline concentrations and is not an official WHO AQI.
-# Tiers: [0, 25 (Annual AQG), 50 (24h AQG), 100 (IT-4), 150 (IT-3), 200 (IT-2), 250 (IT-1)]
-# Reference: https://iris.who.int/server/api/core/bitstreams/b729bbc4-7032-4799-898e-d112faa16f22/content
-# ---------------------------------------------------------------------------
-WHO_PM25_BP = [0, 5, 15, 25, 37.5, 50, 75]  # µg/m³ (Annual & 24h)
-WHO_PM10_BP = [0, 15, 45, 50, 75, 100, 150]  # µg/m³ (Annual & 24h)
-WHO_O3_BP = [0, 60, 100, 120, 160, 200, 240]  # µg/m³ (Peak & 8h)
-WHO_NO2_BP = [0, 10, 25, 50, 120, 200, 300]  # µg/m³ (Annual, 24h, 1h)
-WHO_SO2_BP = [0, 20, 40, 50, 120, 500, 1000]  # µg/m³ (24h & 10-min)
-WHO_CO_BP = [0, 2000, 4000, 10000, 35000, 100000, 150000]  # µg/m³ (24h, 8h, 1h, 15-min)
-WHO_INDEX = [0, 25, 50, 100, 150, 200, 250]  # Custom WHO Index scale
 
 # ---------------------------------------------------------------------------
 # UK DAQI breakpoints (µg/m³ for all species)
@@ -381,49 +367,6 @@ def compute_caqi(
 
 
 # ---------------------------------------------------------------------------
-# WHO Guidelines
-# ---------------------------------------------------------------------------
-
-
-def compute_who_aqi(
-    pm25_ug: float = float("nan"),
-    pm10_ug: float = float("nan"),
-    o3_ppb: float = float("nan"),
-    no2_ppb: float = float("nan"),
-    so2_ppb: float = float("nan"),
-    co_ppb: float = float("nan"),
-) -> float:
-    """Compute WHO Guidelines AQI as the maximum sub-index across available pollutants.
-
-    Pollutant concentrations should be in model-native units:
-      pm25_ug, pm10_ug → µg/m³
-      o3_ppb, no2_ppb, so2_ppb, co_ppb → ppb
-    """
-
-    o3_ug = o3_ppb * PPB_O3_TO_UG_M3 if not math.isnan(o3_ppb) else float("nan")
-    no2_ug = no2_ppb * PPB_NO2_TO_UG_M3 if not math.isnan(no2_ppb) else float("nan")
-    so2_ug = so2_ppb * PPB_SO2_TO_UG_M3 if not math.isnan(so2_ppb) else float("nan")
-    co_ug = co_ppb * PPB_CO_TO_UG_M3 if not math.isnan(co_ppb) else float("nan")
-
-    sub_indices = []
-    if not math.isnan(o3_ug):
-        sub_indices.append(_aqi_from_breakpoints(o3_ug, WHO_O3_BP, WHO_INDEX))
-    if not math.isnan(pm25_ug):
-        sub_indices.append(_aqi_from_breakpoints(pm25_ug, WHO_PM25_BP, WHO_INDEX))
-    if not math.isnan(pm10_ug):
-        sub_indices.append(_aqi_from_breakpoints(pm10_ug, WHO_PM10_BP, WHO_INDEX))
-    if not math.isnan(no2_ug):
-        sub_indices.append(_aqi_from_breakpoints(no2_ug, WHO_NO2_BP, WHO_INDEX))
-    if not math.isnan(so2_ug):
-        sub_indices.append(_aqi_from_breakpoints(so2_ug, WHO_SO2_BP, WHO_INDEX))
-    if not math.isnan(co_ug):
-        sub_indices.append(_aqi_from_breakpoints(co_ug, WHO_CO_BP, WHO_INDEX))
-
-    valid = [v for v in sub_indices if not math.isnan(v)]
-    return float(max(valid)) if valid else float("nan")
-
-
-# ---------------------------------------------------------------------------
 # UK DAQI
 # ---------------------------------------------------------------------------
 
@@ -442,7 +385,7 @@ def compute_daqi(
       - PM2.5, PM10: 24-hour rolling mean
       - O3: 8-hour rolling mean
       - NO2: 1-hour (no additional averaging)
-      - SO2: 15-minute rolling mean
+      - SO2: 1-hour (no additional averaging)
 
     Pollutant concentrations should be in model-native units:
       pm25_ug, pm10_ug → µg/m³
@@ -452,10 +395,6 @@ def compute_daqi(
     o3_ug = o3_ppb * PPB_O3_TO_UG_M3 if not math.isnan(o3_ppb) else float("nan")
     no2_ug = no2_ppb * PPB_NO2_TO_UG_M3 if not math.isnan(no2_ppb) else float("nan")
     so2_ug = so2_ppb * PPB_SO2_TO_UG_M3 if not math.isnan(so2_ppb) else float("nan")
-
-    print(
-        f"Computing DAQI with pm25={pm25_ug}, pm10={pm10_ug}, o3={o3_ug}, no2={no2_ug}, so2={so2_ug}"
-    )
 
     sub_indices = []
     if not math.isnan(o3_ug):
@@ -483,7 +422,6 @@ AQI_SYSTEM_MAP = {
     "ca": "AQHI",
     "uk": "DAQI",
     "si": "CAQI",
-    "who": "WHO",
 }
 
 
@@ -505,8 +443,6 @@ def compute_aqi_for_unit_system(
         return compute_epa_aqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, co_ppb)
     elif system == "AQHI":
         return compute_aqhi(pm25_ug, o3_ppb, no2_ppb)
-    elif system == "WHO":
-        return compute_who_aqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, co_ppb)
     elif system == "DAQI":
         return compute_daqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb)
     else:  # EAQI

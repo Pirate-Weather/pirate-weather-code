@@ -13,7 +13,6 @@ from API.constants.aqi_const import (
     compute_caqi,
     compute_daqi,
     compute_epa_aqi,
-    compute_who_aqi,
     nowcast_pm,
     rolling_mean,
 )
@@ -126,48 +125,12 @@ class TestDAQI:
         daqi = compute_daqi(
             pm25_ug=80.0, pm10_ug=100.0, o3_ppb=300.0, no2_ppb=200.0, so2_ppb=90.0
         )
-        assert daqi >= 8
+        assert daqi == 10
 
     def test_nan_inputs_return_nan(self):
         """All-NaN inputs should return NaN."""
         daqi = compute_daqi()
         assert math.isnan(daqi)
-
-
-# ---------------------------------------------------------------------------
-# WHO tests
-# ---------------------------------------------------------------------------
-
-
-class TestWHOAQI:
-    def test_clean_air_returns_low_who_aqi(self):
-        """Low pollutant concentrations should yield an index of 25."""
-        who_aqi = compute_who_aqi(
-            pm25_ug=5.0,
-            pm10_ug=10.0,
-            o3_ppb=20.0,
-            no2_ppb=5.0,
-            so2_ppb=7.0,
-            co_ppb=100.0,
-        )
-        assert who_aqi == 25
-
-    def test_high_pollutants_return_high_who_aqi(self):
-        """Elevated concentrations should push WHO AQI to its maximum value (250)."""
-        who_aqi = compute_who_aqi(
-            pm25_ug=80.0,
-            pm10_ug=100.0,
-            o3_ppb=300.0,
-            no2_ppb=200.0,
-            so2_ppb=90.0,
-            co_ppb=1000.0,
-        )
-        assert who_aqi == 250
-
-    def test_nan_inputs_return_nan(self):
-        """All-NaN inputs should return NaN."""
-        who_aqi = compute_who_aqi()
-        assert math.isnan(who_aqi)
 
 
 # ---------------------------------------------------------------------------
@@ -692,7 +655,7 @@ class TestAQIUnitsQueryParam:
         assert float(result_us[-1]) > 100
 
     def test_uk_aqiunits_uses_who(self):
-        """aqiunits=uk should produce WHO AQI (same as who unit system)."""
+        """aqiunits=uk should produce DAQI (same as uk unit system)."""
         pm25 = np.full(3, 50.0)
         result_uk = compute_aqi_array(
             "uk", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None
@@ -701,13 +664,3 @@ class TestAQIUnitsQueryParam:
         assert not np.any(np.isnan(result_uk))
         # DAQI for 50 µg/m³ PM2.5 should be 6
         assert float(result_uk[-1]) == 6
-
-    def test_who_aqiunits_uses_who(self):
-        """aqiunits=who should produce WHO AQI (same as who unit system)."""
-        pm25 = np.full(3, 50.0)
-        result_who = compute_aqi_array(
-            "who", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None
-        )
-        assert not np.any(np.isnan(result_who))
-        # WHO AQI for 50 µg/m³ PM2.5 should be 200
-        assert float(result_who[-1]) == 200
