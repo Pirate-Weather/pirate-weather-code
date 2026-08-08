@@ -3,7 +3,8 @@
 Supports three AQI systems:
   - US EPA AQI  (unit_system="us")
   - Canadian AQHI (unit_system="ca")
-  - EU CAQI     (unit_system="uk" or "si")
+  - EU CAQI     (unit_system="si")
+  - UK DAQI      (unit_system="uk")
 
 All input concentrations use the model-native units:
   - PM2.5, PM10: µg/m³
@@ -14,6 +15,7 @@ References:
     - EPA AQI Breakpoints: https://www.airnow.gov/sites/default/files/2020-05/aqi-technical-assistance-document-sept2018.pdf
     - Health Canada AQHI: https://www.canada.ca/en/environment-climate-change/services/air-quality-health-index.html
     - EU CAQI: https://www.airqualitynow.eu/about_indices_definition.php
+    - UK DAQI: https://aqihub.info/indices/uk
 """
 
 from __future__ import annotations
@@ -165,7 +167,6 @@ PPB_CO_TO_UG_M3 = 1.145  # 1 ppb CO  ≈ 1.145 µg/m³
 # ---------------------------------------------------------------------------
 # Normalized EU EAQI breakpoints (µg/m³ for all species)
 # Reference: https://airindex.eea.europa.eu/AQI/index.html
-# Roadside index uses the same ranges as background for the species we expose.
 # ---------------------------------------------------------------------------
 EAQI_PM25_BP = [0, 5, 15, 50, 90, 140]
 EAQI_PM10_BP = [0, 15, 45, 120, 195, 270]
@@ -173,6 +174,17 @@ EAQI_O3_BP = [0, 60, 100, 120, 160, 180]  # µg/m³
 EAQI_NO2_BP = [0, 10, 25, 60, 100, 150]  # µg/m³
 EAQI_SO2_BP = [0, 20, 40, 125, 190, 275]  # µg/m³
 EAQI_INDEX = [0, 20, 40, 60, 80, 100]  # EAQI 0–100
+
+# ---------------------------------------------------------------------------
+# UK DAQI breakpoints (µg/m³ for all species)
+# Reference: https://aqihub.info/indices/uk
+# ---------------------------------------------------------------------------
+DAQI_PM25_BP = [0, 12, 24, 36, 42, 48, 54, 59, 65, 71]
+DAQI_PM10_BP = [0, 17, 34, 51, 59, 67, 76, 84, 92, 101]
+DAQI_O3_BP = [0, 34, 67, 101, 121, 141, 161, 188, 214, 241]  # µg/m³
+DAQI_NO2_BP = [0, 68, 135, 201, 268, 335, 401, 468, 535, 601]  # µg/m³
+DAQI_SO2_BP = [0, 89, 178, 267, 355, 444, 533, 711, 888, 1065]  # µg/m³
+DAQI_INDEX = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]  # DAQI 1–10
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -200,6 +212,17 @@ def _aqi_from_breakpoints(conc: float, bp: list, aqi_vals: list) -> float:
             )
     # Above top breakpoint → cap at maximum
     return float(aqi_vals[-1])
+
+
+def _index_from_breakpoints(conc: float, bp: list, aqi_vals: list) -> float:
+    """Return the sub-index AQI value for *conc* using the given breakpoint tables."""
+    if math.isnan(conc) or conc < 0:
+        return float("nan")
+    for i in range(len(bp) - 1, -1, -1):
+        if conc >= bp[i]:
+            return aqi_vals[i]
+    # Below lowest breakpoint → return minimum AQI
+    return aqi_vals[0]
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +367,52 @@ def compute_caqi(
 
 
 # ---------------------------------------------------------------------------
+# UK DAQI
+# ---------------------------------------------------------------------------
+
+
+def compute_daqi(
+    pm25_ug: float = float("nan"),
+    pm10_ug: float = float("nan"),
+    o3_ppb: float = float("nan"),
+    no2_ppb: float = float("nan"),
+    so2_ppb: float = float("nan"),
+) -> float:
+    """Compute DAQI AQI as the maximum sub-index across available pollutants.
+
+    For the DAQI system the appropriate averaging periods are applied
+    before the breakpoint lookup:
+      - PM2.5, PM10: 24-hour rolling mean
+      - O3: 8-hour rolling mean
+      - NO2: 1-hour (no additional averaging)
+      - SO2: 1-hour (no additional averaging)
+
+    Pollutant concentrations should be in model-native units:
+      pm25_ug, pm10_ug → µg/m³
+      o3_ppb, no2_ppb, so2_ppb, co_ppb → ppb
+    """
+
+    o3_ug = o3_ppb * PPB_O3_TO_UG_M3 if not math.isnan(o3_ppb) else float("nan")
+    no2_ug = no2_ppb * PPB_NO2_TO_UG_M3 if not math.isnan(no2_ppb) else float("nan")
+    so2_ug = so2_ppb * PPB_SO2_TO_UG_M3 if not math.isnan(so2_ppb) else float("nan")
+
+    sub_indices = []
+    if not math.isnan(o3_ug):
+        sub_indices.append(_index_from_breakpoints(o3_ug, DAQI_O3_BP, DAQI_INDEX))
+    if not math.isnan(pm25_ug):
+        sub_indices.append(_index_from_breakpoints(pm25_ug, DAQI_PM25_BP, DAQI_INDEX))
+    if not math.isnan(pm10_ug):
+        sub_indices.append(_index_from_breakpoints(pm10_ug, DAQI_PM10_BP, DAQI_INDEX))
+    if not math.isnan(no2_ug):
+        sub_indices.append(_index_from_breakpoints(no2_ug, DAQI_NO2_BP, DAQI_INDEX))
+    if not math.isnan(so2_ug):
+        sub_indices.append(_index_from_breakpoints(so2_ug, DAQI_SO2_BP, DAQI_INDEX))
+
+    valid = [v for v in sub_indices if not math.isnan(v)]
+    return float(max(valid)) if valid else float("nan")
+
+
+# ---------------------------------------------------------------------------
 # Unified dispatcher
 # ---------------------------------------------------------------------------
 
@@ -351,7 +420,7 @@ def compute_caqi(
 AQI_SYSTEM_MAP = {
     "us": "EPA",
     "ca": "AQHI",
-    "uk": "CAQI",
+    "uk": "DAQI",
     "si": "CAQI",
 }
 
@@ -374,6 +443,8 @@ def compute_aqi_for_unit_system(
         return compute_epa_aqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, co_ppb)
     elif system == "AQHI":
         return compute_aqhi(pm25_ug, o3_ppb, no2_ppb)
+    elif system == "DAQI":
+        return compute_daqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb)
     else:  # EAQI
         return compute_caqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb)
 
@@ -391,13 +462,12 @@ def compute_aqi_array(
 
     For the US EPA system the appropriate EPA averaging periods are applied
     before the breakpoint lookup:
-      - PM2.5: NowCast (12-hour weighted average)
-      - PM10:  24-hour rolling mean
-      - O3:    8-hour rolling mean
+      - PM2.5, PM10: NowCast (12-hour weighted average)
+      - O3:    8-hour and 1-hour rolling mean
       - CO:    8-hour rolling mean
       - NO2, SO2: 1-hour (no additional averaging)
 
-    For AQHI (CA) and CAQI (UK/SI) the raw hourly concentrations are used
+    For EAQI (SI) the raw hourly concentrations are used
     since those indices are designed for hourly values.
 
     All input arrays should have the same length (num_hours); None entries are
@@ -432,33 +502,32 @@ def compute_aqi_array(
 
     system = AQI_SYSTEM_MAP.get(unit_system, "EPA")
 
+    # Default to raw values (no averaging)
+    pm25_calc = pm25_v
+    pm10_calc = pm10_v
+    o3_calc = o3_v
+    no2_calc = no2_v
+    so2_calc = so2_v
+    co_calc = co_v
+
+    # Override with system-specific averaging where applicable
     if system == "EPA":
         # Apply EPA-mandated averaging periods before the breakpoint lookup
         pm25_calc = nowcast_pm(pm25_v)
         pm10_calc = nowcast_pm(pm10_v)
         o3_calc = rolling_mean(o3_v, window=8)
         co_calc = rolling_mean(co_v, window=8)
-        # NO2 and SO2 use 1-hour (instantaneous) averages
-        no2_calc = no2_v
-        so2_calc = so2_v
         o3_1h_calc = o3_v
     elif system == "AQHI":
         # AQHI uses 3-hour rolling averages for PM2.5, O3, NO2
         pm25_calc = rolling_mean(pm25_v, window=3)
         o3_calc = rolling_mean(o3_v, window=3)
         no2_calc = rolling_mean(no2_v, window=3)
-        # Not used in AQHI but we still pass them through for consistency
-        pm10_calc = pm10_v
-        so2_calc = so2_v
-        co_calc = co_v
-    else:
-        # EAQI uses raw hourly concentrations
-        pm25_calc = pm25_v
-        pm10_calc = pm10_v
-        o3_calc = o3_v
-        no2_calc = no2_v
-        so2_calc = so2_v
-        co_calc = co_v
+    elif system == "DAQI":
+        # DAQI uses 24-hour rolling averages for PM2.5 and PM10, 8-hour for O3, and 15-minute for SO2
+        pm25_calc = rolling_mean(pm25_v, window=24)
+        pm10_calc = rolling_mean(pm10_v, window=24)
+        o3_calc = rolling_mean(o3_v, window=8)
 
     result = np.full(n, np.nan, dtype=np.float32)
     for i in range(n):

@@ -702,8 +702,8 @@ async def prepare_initial_request(
 
     # Parse aqiunits override: ca → AQHI, us → EPA, eu → CAQI.
     # Falls back to the unit-based AQI system when the value is absent or invalid.
-    _VALID_AQI_UNITS = {"ca", "us", "eu"}
-    _AQI_UNITS_MAP = {"ca": "ca", "us": "us", "eu": "si"}
+    _VALID_AQI_UNITS = {"ca", "us", "eu", "uk"}
+    _AQI_UNITS_MAP = {"ca": "ca", "us": "us", "eu": "si", "uk": "uk"}
     raw_aqiunits = request.query_params.get("aqiunits")
     if raw_aqiunits and raw_aqiunits.lower() in _VALID_AQI_UNITS:
         aqi_system = _AQI_UNITS_MAP[raw_aqiunits.lower()]
