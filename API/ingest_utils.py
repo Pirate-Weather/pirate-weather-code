@@ -689,7 +689,7 @@ def interp_time_map_blocks_nan(
     arr: da.Array,
     stacked_timesUnix: np.ndarray,
     hourly_timesUnix: np.ndarray,
-    nearest_vars: Optional[Union[int, Iterable[int]]] = None,
+    nearest_vars: int | Iterable[int] | None = None,
     dtype: str = "float32",
     fill_value: float = np.nan,
     time_axis: int = 1,
@@ -730,8 +730,10 @@ def interp_time_map_blocks_nan(
 
         for local_var_idx in range(block.shape[0]):
             global_var_idx = var_start + local_var_idx
-            values = block[local_var_idx].reshape(block.shape[1], n_points).astype(
-                np.float64, copy=False
+            values = (
+                block[local_var_idx]
+                .reshape(block.shape[1], n_points)
+                .astype(np.float64, copy=False)
             )
             valid = np.isfinite(values)
             valid_patterns, pattern_idx = np.unique(
@@ -756,8 +758,12 @@ def interp_time_map_blocks_nan(
                     insert_at = np.searchsorted(valid_times, x_target[target_in_range])
                     left_idx = np.clip(insert_at - 1, 0, len(valid_times) - 1)
                     right_idx = np.clip(insert_at, 0, len(valid_times) - 1)
-                    left_dist = np.abs(x_target[target_in_range] - valid_times[left_idx])
-                    right_dist = np.abs(valid_times[right_idx] - x_target[target_in_range])
+                    left_dist = np.abs(
+                        x_target[target_in_range] - valid_times[left_idx]
+                    )
+                    right_dist = np.abs(
+                        valid_times[right_idx] - x_target[target_in_range]
+                    )
                     nearest_idx = np.where(left_dist <= right_dist, left_idx, right_idx)
                     var_out[np.ix_(target_in_range, cols)] = valid_values[nearest_idx]
                     continue
@@ -772,10 +778,9 @@ def interp_time_map_blocks_nan(
                 weights = (x_target[target_in_range] - left_times) / (
                     right_times - left_times
                 )
-                interp_values = (
-                    (1 - weights[:, None]) * valid_values[left_idx]
-                    + weights[:, None] * valid_values[right_idx]
-                )
+                interp_values = (1 - weights[:, None]) * valid_values[
+                    left_idx
+                ] + weights[:, None] * valid_values[right_idx]
                 var_out[np.ix_(target_in_range, cols)] = interp_values
 
         return out

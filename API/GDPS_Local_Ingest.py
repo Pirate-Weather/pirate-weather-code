@@ -732,20 +732,20 @@ with ProgressBar():
         daskVarArrayStackDiskInterp, final_chunk
     )
 
-        # 3. Create the zarr array
-        zarr_array = zarr.create_array(
-            store=zarr_store,
-            shape=(
-                len(zarr_vars),
-                len(hourly_timesUnix),
-                daskVarArrayStackDiskInterpPad.shape[2],
-                daskVarArrayStackDiskInterpPad.shape[3],
-            ),
-            chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-            overwrite=True
-        )
+    # 3. Create the zarr array
+    zarr_array = zarr.create_array(
+        store=zarr_store,
+        shape=(
+            len(zarr_vars),
+            len(hourly_timesUnix),
+            daskVarArrayStackDiskInterpPad.shape[2],
+            daskVarArrayStackDiskInterpPad.shape[3],
+        ),
+        chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32",
+        overwrite=True,
+    )
 
     # 4. Rechunk it to match the final array
     # 5. Write it out to the zarr array

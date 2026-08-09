@@ -645,7 +645,8 @@ def build_hourly_block(
     icon: str,
     translation,
     unitSystem: str,
-    is_all_night: bool,
+    aqiSystem: str | None = None,
+    is_all_night: bool = False,
     tz_name,
     InterThour_inputs,
     prcipIntensity_inputs,
@@ -795,7 +796,7 @@ def build_hourly_block(
 
             # Compute AQI from pollutant concentrations
             aqi_arr = compute_aqi_array(
-                unit_system=unitSystem,
+                unit_system=aqiSystem if aqiSystem is not None else unitSystem,
                 pm25=InterPhour[:, DATA_HOURLY["pm25"]],
                 pm10=InterPhour[:, DATA_HOURLY["pm10"]],
                 o3=InterPhour[:, DATA_HOURLY["o3"]],

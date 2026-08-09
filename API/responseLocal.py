@@ -484,6 +484,7 @@ async def PW_Forecast(
     inc_day_night = initial.inc_day_night
     summaryText = initial.summary_text
     unitSystem = initial.unit_system
+    aqiSystem = initial.aqi_system
     windUnit = initial.wind_unit
     prepIntensityUnit = initial.prep_intensity_unit
     prepAccumUnit = initial.prep_accum_unit
@@ -952,6 +953,7 @@ async def PW_Forecast(
             icon=icon,
             translation=translation,
             unitSystem=unitSystem,
+            aqiSystem=aqiSystem,
             is_all_night=is_all_night,
             tz_name=tz_name,
             InterThour_inputs=InterThour_inputs,
@@ -1097,6 +1099,7 @@ async def PW_Forecast(
             translation=translation,
             icon=icon,
             unitSystem=unitSystem,
+            aqiSystem=aqiSystem,
             version=version,
             timeMachine=timeMachine,
             tmExtra=tmExtra,

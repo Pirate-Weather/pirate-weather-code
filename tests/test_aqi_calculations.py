@@ -11,6 +11,7 @@ from API.constants.aqi_const import (
     compute_aqi_array,
     compute_aqi_for_unit_system,
     compute_caqi,
+    compute_daqi,
     compute_epa_aqi,
     nowcast_pm,
     rolling_mean,
@@ -107,6 +108,32 @@ class TestCAQI:
 
 
 # ---------------------------------------------------------------------------
+# DAQI tests
+# ---------------------------------------------------------------------------
+
+
+class TestDAQI:
+    def test_clean_air_returns_low_daqi(self):
+        """Low pollutant concentrations should yield an index in the 'Low' band (1–3)."""
+        daqi = compute_daqi(
+            pm25_ug=5.0, pm10_ug=10.0, o3_ppb=20.0, no2_ppb=5.0, so2_ppb=7.0
+        )
+        assert 1 <= daqi <= 3
+
+    def test_high_pollutants_return_high_daqi(self):
+        """Elevated concentrations should push DAQI into 'Very High' (10)."""
+        daqi = compute_daqi(
+            pm25_ug=80.0, pm10_ug=100.0, o3_ppb=300.0, no2_ppb=200.0, so2_ppb=90.0
+        )
+        assert daqi == 10
+
+    def test_nan_inputs_return_nan(self):
+        """All-NaN inputs should return NaN."""
+        daqi = compute_daqi()
+        assert math.isnan(daqi)
+
+
+# ---------------------------------------------------------------------------
 # Unit-system dispatch tests
 # ---------------------------------------------------------------------------
 
@@ -117,7 +144,7 @@ class TestAQISystemDispatch:
         [
             ("us", "EPA"),
             ("ca", "AQHI"),
-            ("uk", "CAQI"),
+            ("uk", "DAQI"),
             ("si", "CAQI"),
             ("unknown", "EPA"),  # default
         ],
@@ -143,6 +170,13 @@ class TestAQISystemDispatch:
             "si", pm25_ug=20.0, pm10_ug=40.0, o3_ppb=60.0, no2_ppb=30.0
         )
         assert abs(dispatched - caqi) < 1e-6
+
+    def test_uk_returns_daqi_value(self):
+        daqi = compute_daqi(pm25_ug=20.0, pm10_ug=40.0, o3_ppb=60.0, no2_ppb=30.0)
+        dispatched = compute_aqi_for_unit_system(
+            "uk", pm25_ug=20.0, pm10_ug=40.0, o3_ppb=60.0, no2_ppb=30.0
+        )
+        assert abs(dispatched - daqi) < 1e-6
 
 
 # ---------------------------------------------------------------------------
@@ -543,11 +577,90 @@ class TestEPAAveragingInArray:
         assert result[-1] < raw_aqi
 
     def test_caqi_uses_instantaneous(self):
-        """For CAQI (uk/si), instantaneous values should be used."""
+        """For CAQI (si), instantaneous values should be used."""
         conc = np.array([5.0, 5.0, 200.0])
         result = compute_aqi_array(
-            "uk", pm25=conc, pm10=None, o3=None, no2=None, so2=None, co=None
+            "si", pm25=conc, pm10=None, o3=None, no2=None, so2=None, co=None
         )
         # CAQI at index 2 should reflect the raw 200 µg/m³ concentration
         assert not np.isnan(result[2])
         assert result[2] >= 75  # 200 µg/m³ PM2.5 → CAQI ≥ 75 (very high)
+
+
+class TestDAQIAveragingInArray:
+    """Tests confirming rolling means are applied before DAQI breakpoint lookup."""
+
+    def test_daqi_pm25_uses_24h_rolling_mean(self):
+        """A single PM2.5 spike should be smoothed out by the 24h rolling mean."""
+        # 23 hours of low PM2.5 (5 µg/m³) + 1 hour spike (80 µg/m³)
+        conc = np.concatenate([np.full(23, 5.0), [80.0]])
+        result = compute_aqi_array(
+            "uk", pm25=conc, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+
+        # 24h mean = (23*5 + 80)/24 = 8.125 µg/m³ -> Band 1 (Low)
+        assert result[-1] == 1
+
+        # Raw instantaneous 80 µg/m³ would be Band 10 (Very High)
+        raw_daqi = compute_daqi(pm25_ug=80.0)
+        assert raw_daqi == 10
+
+    def test_daqi_o3_uses_8h_rolling_mean(self):
+        """O3 should use an 8-hour rolling mean."""
+        # 7 hours low (10 ppb) + 1 hour high (100 ppb)
+        conc = np.concatenate([np.full(7, 6.0), [105.0]])
+        result = compute_aqi_array(
+            "uk", pm25=None, pm10=None, o3=conc, no2=None, so2=None, co=None
+        )
+
+        # 8h mean = (7*10 + 200)/8 = 36.6765 µg/m³ -> Band 2 (Low)
+        assert result[-1] == 2
+
+
+class TestAQIUnitsQueryParam:
+    """Tests for the aqiunits query-parameter override logic."""
+
+    def test_eu_aqiunits_uses_caqi(self):
+        """aqiunits=eu should produce CAQI values (same as si unit system)."""
+        pm25 = np.full(3, 50.0)
+        result_eu = compute_aqi_array(
+            "si", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        # eu maps to "si" unit system in AQI_SYSTEM_MAP → CAQI
+        assert not np.any(np.isnan(result_eu))
+
+    def test_ca_aqiunits_uses_aqhi(self):
+        """aqiunits=ca should produce AQHI values (same as ca unit system)."""
+        pm25 = np.full(3, 50.0)
+        result_ca = compute_aqi_array(
+            "ca", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        assert not np.any(np.isnan(result_ca))
+        # AQHI is on a 1–15 scale; EPA AQI for 50 µg/m³ would be ~133
+        # AQHI should be much lower than EPA for the same concentration
+        result_us = compute_aqi_array(
+            "us", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        assert float(result_ca[-1]) < float(result_us[-1])
+
+    def test_us_aqiunits_uses_epa(self):
+        """aqiunits=us should produce EPA AQI (same as us unit system)."""
+        pm25 = np.full(12, 50.0)
+        result_us = compute_aqi_array(
+            "us", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        # First hour may be NaN due to NowCast requiring 2 valid hours
+        assert not np.any(np.isnan(result_us[1:]))
+        # EPA AQI for 50 µg/m³ PM2.5 (NowCast-averaged) should be > 100
+        assert float(result_us[-1]) > 100
+
+    def test_uk_aqiunits_uses_who(self):
+        """aqiunits=uk should produce DAQI (same as uk unit system)."""
+        pm25 = np.full(3, 50.0)
+        result_uk = compute_aqi_array(
+            "uk", pm25=pm25, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        # DAQI (UK) is on a 1–10 scale
+        assert not np.any(np.isnan(result_uk))
+        # DAQI for 50 µg/m³ PM2.5 should be 6
+        assert float(result_uk[-1]) == 6
