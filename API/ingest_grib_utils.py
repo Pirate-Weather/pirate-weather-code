@@ -222,7 +222,8 @@ def download_and_validate_gfs_subset(
     cmd_stats = f"{cat_gribs(grib_files)} | {quote_path(wgrib2_exe)} - -s -stats"
 
     grib_check = run_checked(cmd_stats, f"{dataset_name} GRIB validation")
-    validate_grib_stats(grib_check, excluded_variables=excluded_stats_variables)
+    if not validate_grib_stats(grib_check, excluded_variables=excluded_stats_variables):
+        raise RuntimeError(f"{dataset_name} failed GRIB validation.")
 
     logger.info("%s passed GRIB validation.", dataset_name)
 

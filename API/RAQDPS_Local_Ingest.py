@@ -10,7 +10,7 @@ import pickle
 import shutil
 import sys
 import time
-import urllib
+import urllib.error
 import warnings
 import zipfile
 from datetime import timedelta
@@ -172,6 +172,8 @@ def read_raqdps_grib(local_grib_path, variable):
     ds = xr.open_dataset(local_grib_path, engine="cfgrib", decode_times=False)
     try:
         grib_var_name = next(iter(ds.data_vars))
+        if grib_var_name is None:
+            raise ValueError(f"No data variables found in GRIB file: {local_grib_path}")
         data_array = ds[grib_var_name].astype(np.float32)
         return as_float32_array(convert_to_output_units(data_array, variable).values)
     finally:

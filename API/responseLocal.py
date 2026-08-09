@@ -213,6 +213,7 @@ try:
         # For testing stages, try to load from S3 first
         try:
             import s3fs
+            from botocore.exceptions import BotoCoreError, ClientError
 
             aio_sess = _aio_session.AioSession()
             aio_sess.register("before-send.s3", _add_custom_header)
@@ -229,7 +230,14 @@ try:
                 with s3.open(s3_path, "rb") as f:
                     DWD_MOSMIX_Stations = pickle.load(f)
                     logger.info("Loaded DWD MOSMIX station map from S3")
-        except (ImportError, OSError, pickle.UnpicklingError) as e:
+        except (
+            ImportError,
+            OSError,
+            pickle.UnpicklingError,
+            EOFError,
+            BotoCoreError,
+            ClientError,
+        ) as e:
             logger.debug(f"Could not load DWD MOSMIX station map from S3: {e}")
 
     if station_map_file and os.path.exists(station_map_file):

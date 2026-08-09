@@ -65,6 +65,7 @@ import numpy as np
 import pandas as pd
 import s3fs
 import zarr
+from pyogrio.errors import PyogrioError
 from shapely.geometry import Polygon
 from zarr.core.dtype import VariableLengthUTF8
 
@@ -515,7 +516,7 @@ def load_meteoalarm_geocodes() -> gpd.GeoDataFrame | None:
         gdf = _apply_meteoalarm_aliases(gdf, METEOALARM_ALIASES_PATH)
         logger.info("MeteoAlarm geocodes ready (CRS: %s)", gdf.crs)
         return gdf
-    except (OSError, pd.errors.PyDriverError, ValueError) as e:
+    except (OSError, PyogrioError, ValueError) as e:
         logger.warning("Could not load MeteoAlarm geocodes: %s", e)
         return None
 

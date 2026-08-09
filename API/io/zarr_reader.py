@@ -193,7 +193,7 @@ class WeatherParallel:
                     self.logger.debug("### %s Done! %s", model, self.loc_tag)
                 return data_out
 
-            except (OSError, IndexError, ValueError, TypeError):
+            except (OSError, IndexError, ValueError, TypeError, zarr.errors.ZarrError):
                 self.logger.exception("### %s Failure! %s", model, self.loc_tag)
                 err_count += 1
 
@@ -373,7 +373,7 @@ def _load_aq_lat_lon_pickles(
                 with open(path, "rb") as fh:
                     setattr(stores, attr, pickle.load(fh))
                 logger.info("Loaded %s from: %s", attr, path)
-            except (OSError, pickle.UnpicklingError) as exc:
+            except (OSError, EOFError, pickle.UnpicklingError) as exc:
                 logger.warning("Could not load %s: %s", attr, exc)
 
 
