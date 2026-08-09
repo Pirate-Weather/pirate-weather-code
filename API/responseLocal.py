@@ -105,7 +105,7 @@ save_dir = os.getenv("save_dir", default="/tmp")
 use_etopo = str(os.getenv("use_etopo", "True")).lower() not in {"0", "false", "no"}
 TIMING = str(os.environ.get("TIMING", "0")).lower() not in {"0", "false", "no"}
 
-force_now = os.getenv("force_now", default=False)  # noqa: PLW1508
+force_now = os.getenv("force_now", "").lower() in {"1", "true", "yes", "on"}
 
 
 def setup_logging():

@@ -24,7 +24,7 @@ from API.constants.api_const import (
 from API.constants.grid_const import US_BOUNDING_BOX
 from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
 
-TIMING = os.environ.get("TIMING", False)  # noqa: PLW1508
+TIMING = os.getenv("TIMING", "").lower() in {"1", "true", "yes", "on"}
 logger = logging.getLogger("pirate-weather-api")
 
 
