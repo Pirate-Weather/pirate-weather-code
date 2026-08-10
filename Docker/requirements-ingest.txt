@@ -1,5 +1,5 @@
 aiohttp==3.14.3
-aiobotocore[boto3]==3.8.0
+aiobotocore[boto3]==3.9.0
 bottleneck==1.6.0
 cartopy==0.25.0
 cfgrib==0.9.15.1
