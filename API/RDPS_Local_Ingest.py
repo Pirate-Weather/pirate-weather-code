@@ -22,8 +22,6 @@ from dask.diagnostics import ProgressBar
 from herbie import FastHerbie, HerbieLatest
 from tqdm import tqdm
 
-from API.api_utils import estimate_visibility_from_rh_pr
-from API.constants.api_const import U_REF
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
 from API.ingest_utils import (
     CHUNK_SIZES,
@@ -170,7 +168,6 @@ zarr_vars = (
     "CIN_Sfc",
     "VerticalVelocity_IsbL_0500",
     "KIndex_Sfc",
-    "Visibility_Sfc",
 )
 
 #####################################################################################################
@@ -327,23 +324,6 @@ APCP_surface_tmp = da.diff(
 
 xarray_forecast_merged["Precip_Accum_Sfc"].data = APCP_surface_tmp
 
-# Compute visibility from RH and precipitation rate (Gültepe & Milbrandt 2010, FRAM fit)
-vis_fc = estimate_visibility_from_rh_pr(
-    rh_percent=xarray_forecast_merged["RelativeHumidity_AGL_2m"].values,
-    pr_mm_hr=xarray_forecast_merged["Precip_Accum_Sfc"].values,
-    wind_speed_ms=xarray_forecast_merged["WindSpeed_AGL_10m"].values,
-    which_rh_fit="FRAM",
-    u_ref=U_REF[
-        "RDPS"
-    ],  # Reference wind speed for scaling (can be tuned based on typical conditions)
-)
-
-xarray_forecast_merged["Visibility_Sfc"] = xr.DataArray(
-    vis_fc.astype(np.float32),
-    dims=xarray_forecast_merged["RelativeHumidity_AGL_2m"].dims,
-    coords=xarray_forecast_merged["RelativeHumidity_AGL_2m"].coords,
-)
-
 # Save the dataset with compression and filters for all variables
 xarray_forecast_merged = xarray_forecast_merged.chunk(
     chunks={"time": 84, "latitude": process_chunk, "longitude": process_chunk}
@@ -358,11 +338,7 @@ with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
     )
 
 # %% Delete to free memory
-del (
-    APCP_surface_tmp,
-    xarray_forecast_merged,
-    vis_fc,
-)
+del (APCP_surface_tmp, xarray_forecast_merged)
 T1 = time.time()
 
 logger.info(T1 - T0)
@@ -479,25 +455,8 @@ for i in range(his_period, 0, -6):
         "Precip_Accum_Sfc"
     ].copy(data=apcpProcHour)
 
-    # Compute visibility from RH and precipitation rate (Gültepe & Milbrandt 2010, FRAM fit)
-    vis_h = estimate_visibility_from_rh_pr(
-        rh_percent=xarray_hist_merged["RelativeHumidity_AGL_2m"].values,
-        pr_mm_hr=xarray_hist_merged["Precip_Accum_Sfc"].values,
-        wind_speed_ms=xarray_hist_merged["WindSpeed_AGL_10m"].values,
-        which_rh_fit="FRAM",
-        u_ref=U_REF[
-            "RDPS"
-        ],  # Reference wind speed for scaling (can be tuned based on typical conditions)
-    )
-
-    xarray_hist_merged["Visibility_Sfc"] = xr.DataArray(
-        vis_h.astype(np.float32),
-        dims=xarray_hist_merged["RelativeHumidity_AGL_2m"].dims,
-        coords=xarray_hist_merged["RelativeHumidity_AGL_2m"].coords,
-    )
-
     # Clear memory
-    del (apcpProc, apcpProcHour, vis_h)
+    del (apcpProc, apcpProcHour)
 
     # Save merged and processed xarray dataset to disk using zarr with compression
     # Define the path to save the zarr dataset with the run time in the filename
