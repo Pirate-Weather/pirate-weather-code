@@ -331,6 +331,64 @@ def compute_aqhi(
 
 
 # ---------------------------------------------------------------------------
+# Hong Kong AQHI
+# Formula: AQHI = %AR = %ARNO2 + %ARSO2 + %ARO3 + %ARPM
+# where beta coefficients are from the Hong Kong Environmental Protection Department.
+# C_i are 3-hour rolling averages in µg/m³ for PM2.5, PM10, SO2, NO2 and O3
+# Reference: https://www.aqhi.gov.hk/en.html
+# ---------------------------------------------------------------------------
+HK_AQHI_BETA_O3 = 0.0005116328  # Coefficient expects µg/m³
+HK_AQHI_BETA_NO2 = 0.0004462559  # Coefficient expects µg/m³
+HK_AQHI_BETA_PM25 = 0.0002180567  # Coefficient expects µg/m³
+HK_AQHI_BETA_PM10 = 0.0002821751  # Coefficient expects µg/m³
+HK_AQHI_BETA_SO2 = 0.0001393235  # Coefficient expects µg/m³
+HK_AR_BP = [1.89, 3.77, 5.65, 7.53, 9.42, 11.30, 12.92, 15.08, 17.23, 19.38]
+HK_AQHI = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+
+
+def compute_hk_aqhi(
+    pm25_ug: float = float("nan"),
+    pm10_ug: float = float("nan"),
+    o3_ppb: float = float("nan"),
+    no2_ppb: float = float("nan"),
+    so2_ppb: float = float("nan"),
+) -> float:
+    """Compute Hong Kong AQHI (1–10+ scale, capped at 11)."""
+    # Convert gases from ppb to µg/m³
+    o3 = o3_ppb * PPB_O3_TO_UG_M3 if not math.isnan(o3_ppb) else float("nan")
+    no2 = no2_ppb * PPB_NO2_TO_UG_M3 if not math.isnan(no2_ppb) else float("nan")
+    so2 = so2_ppb * PPB_SO2_TO_UG_M3 if not math.isnan(so2_ppb) else float("nan")
+    pm25 = pm25_ug if not math.isnan(pm25_ug) else float("nan")
+    pm10 = pm10_ug if not math.isnan(pm10_ug) else float("nan")
+
+    pm_ar = 0.0
+    count = 0
+    if not math.isnan(o3):
+        o3_ar = (math.exp(HK_AQHI_BETA_O3 * o3) - 1) * 100
+        count += 1
+    if not math.isnan(no2):
+        no2_ar = (math.exp(HK_AQHI_BETA_NO2 * no2) - 1) * 100
+        count += 1
+    if not math.isnan(so2):
+        so2_ar = (math.exp(HK_AQHI_BETA_SO2 * so2) - 1) * 100
+        count += 1
+    if not math.isnan(pm25):
+        pm25_ar = (math.exp(HK_AQHI_BETA_PM25 * pm25) - 1) * 100
+    if not math.isnan(pm10):
+        pm10_ar = (math.exp(HK_AQHI_BETA_PM10 * pm10) - 1) * 100
+
+    if not math.isnan(pm25) or not math.isnan(pm10):
+        pm_ar += max(pm25_ar, pm10_ar)
+        count += 1
+    if count == 0:
+        return float("nan")
+
+    ar_total = o3_ar + no2_ar + so2_ar + pm_ar
+    # Scale to familiar 1–10 range (10+ is "very high risk")
+    return _index_from_breakpoints(ar_total, HK_AR_BP, HK_AQHI)
+
+
+# ---------------------------------------------------------------------------
 # EU CAQI
 # ---------------------------------------------------------------------------
 
