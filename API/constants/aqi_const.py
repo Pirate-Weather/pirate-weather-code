@@ -342,7 +342,7 @@ HK_AQHI_BETA_NO2 = 0.0004462559  # Coefficient expects µg/m³
 HK_AQHI_BETA_PM25 = 0.0002180567  # Coefficient expects µg/m³
 HK_AQHI_BETA_PM10 = 0.0002821751  # Coefficient expects µg/m³
 HK_AQHI_BETA_SO2 = 0.0001393235  # Coefficient expects µg/m³
-HK_AR_BP = [1.89, 3.77, 5.65, 7.53, 9.42, 11.30, 12.92, 15.08, 17.23, 19.38]
+HK_AR_BP = [0, 1.89, 3.77, 5.65, 7.53, 9.42, 11.30, 12.92, 15.08, 17.23, 19.38]
 HK_AQHI = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
 
@@ -360,6 +360,10 @@ def compute_hk_aqhi(
     so2 = so2_ppb * PPB_SO2_TO_UG_M3 if not math.isnan(so2_ppb) else float("nan")
     pm25 = pm25_ug if not math.isnan(pm25_ug) else float("nan")
     pm10 = pm10_ug if not math.isnan(pm10_ug) else float("nan")
+
+    # Default PM Variables to NaN
+    pm25_ar = float("nan")
+    pm10_ar = float("nan")
 
     pm_ar = 0.0
     count = 0
@@ -480,6 +484,7 @@ AQI_SYSTEM_MAP = {
     "ca": "AQHI",
     "uk": "DAQI",
     "si": "CAQI",
+    "hk": "HK_AQHI",
 }
 
 
@@ -503,6 +508,8 @@ def compute_aqi_for_unit_system(
         return compute_aqhi(pm25_ug, o3_ppb, no2_ppb)
     elif system == "DAQI":
         return compute_daqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb)
+    elif system == "HK_AQHI":
+        return compute_hk_aqhi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb)
     else:  # EAQI
         return compute_caqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb)
 
@@ -586,6 +593,13 @@ def compute_aqi_array(
         pm25_calc = rolling_mean(pm25_v, window=24)
         pm10_calc = rolling_mean(pm10_v, window=24)
         o3_calc = rolling_mean(o3_v, window=8)
+    elif system == "HK_AQHI":
+        # Hong Kong AQHI uses 3-hour rolling averages for PM2.5, PM10, O3, NO2, SO2
+        pm25_calc = rolling_mean(pm25_v, window=3)
+        pm10_calc = rolling_mean(pm10_v, window=3)
+        o3_calc = rolling_mean(o3_v, window=3)
+        no2_calc = rolling_mean(no2_v, window=3)
+        so2_calc = rolling_mean(so2_v, window=3)
 
     result = np.full(n, np.nan, dtype=np.float32)
     for i in range(n):

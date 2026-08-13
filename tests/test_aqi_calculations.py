@@ -13,6 +13,7 @@ from API.constants.aqi_const import (
     compute_caqi,
     compute_daqi,
     compute_epa_aqi,
+    compute_hk_aqhi,
     nowcast_pm,
     rolling_mean,
 )
@@ -58,7 +59,7 @@ class TestEPAAQI:
 
 
 # ---------------------------------------------------------------------------
-# AQHI tests
+# Canadian AQHI tests
 # ---------------------------------------------------------------------------
 
 
@@ -81,6 +82,32 @@ class TestAQHI:
     def test_nan_inputs_return_nan(self):
         """All NaN → NaN."""
         aqhi = compute_aqhi()
+        assert math.isnan(aqhi)
+
+# ---------------------------------------------------------------------------
+# Hong Kong AQHI tests
+# ---------------------------------------------------------------------------
+
+
+class TestHK_AQHI:
+    def test_clean_air_returns_low_hk_aqhi(self):
+        """Very low concentrations → AQHI close to 1."""
+        aqhi = compute_hk_aqhi(pm25_ug=2.0, pm10_ug=5.0, o3_ppb=10.0, no2_ppb=5.0, so2_ppb=1.0)
+        assert aqhi == 1
+
+    def test_high_concentrations_return_high_hk_aqhi(self):
+        """Elevated O3/NO2 should push AQHI above 7."""
+        aqhi = compute_hk_aqhi(pm25_ug=35.0, pm10_ug=65.0, o3_ppb=40.0, no2_ppb=5.0, so2_ppb=150.0)
+        assert aqhi == 7
+
+    def test_extreme_concentrations_cap_aqhi_at_11(self):
+        """Extreme concentrations should not report AQHI above 11."""
+        aqhi = compute_hk_aqhi(pm25_ug=5000.0, pm10_ug=5000.0, o3_ppb=5000.0, no2_ppb=5000.0, so2_ppb=5000.0)
+        assert aqhi == 11.0
+
+    def test_nan_inputs_return_nan(self):
+        """All NaN → NaN."""
+        aqhi = compute_hk_aqhi()
         assert math.isnan(aqhi)
 
 
@@ -146,6 +173,7 @@ class TestAQISystemDispatch:
             ("ca", "AQHI"),
             ("uk", "DAQI"),
             ("si", "CAQI"),
+            ("hk", "HK_AQHI"),
             ("unknown", "EPA"),  # default
         ],
     )
@@ -177,6 +205,14 @@ class TestAQISystemDispatch:
             "uk", pm25_ug=20.0, pm10_ug=40.0, o3_ppb=60.0, no2_ppb=30.0
         )
         assert abs(dispatched - daqi) < 1e-6
+
+    def test_hk_returns_hk_aqhi_value(self):
+        hk_aqhi = compute_hk_aqhi(pm25_ug=20.0, pm10_ug=40.0, o3_ppb=60.0, no2_ppb=30.0, so2_ppb=10.0)
+        dispatched = compute_aqi_for_unit_system(
+            "hk", pm25_ug=20.0, pm10_ug=40.0, o3_ppb=60.0, no2_ppb=30.0, so2_ppb=10.0
+        )
+        assert abs(dispatched - hk_aqhi) < 1e-6
+
 
 
 # ---------------------------------------------------------------------------
