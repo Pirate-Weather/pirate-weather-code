@@ -12,11 +12,11 @@ geopandas==1.1.4
 git+https://github.com/blaylockbk/Herbie.git
 metpy==1.7.1
 netCDF4==1.7.4
-numba==0.66.0
+numba==0.67.0
 numpy==2.3.3
 nwswx==0.1.2
-pandas==3.0.3
-pyarrow==25.0.0
+pandas==3.0.5
+pyarrow==25.0.1
 python-dotenv==1.2.2
 pykml==0.2.0
 rioxarray==0.23.0
