@@ -1078,7 +1078,9 @@ def compute_aqi_for_unit_system(
     """
     system = AQI_SYSTEM_MAP.get(unit_system, "EPA")
     if system == "EPA":
-        return compute_epa_aqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, so2_ppb, co_ppb)
+        return compute_epa_aqi(
+            pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, so2_ppb, co_ppb
+        )
     elif system == "AQHI":
         return compute_aqhi(pm25_ug, o3_ppb, no2_ppb)
     elif system == "DAQI":
