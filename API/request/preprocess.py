@@ -713,7 +713,6 @@ async def prepare_initial_request(
         "id",
         "cn",
         "my",
-        "tw",
         "vn",
     }
     _AQI_UNITS_MAP = {
@@ -727,7 +726,6 @@ async def prepare_initial_request(
         "id": "id",
         "cn": "cn",
         "my": "my",
-        "tw": "tw",
         "vn": "vn",
     }
     raw_aqiunits = request.query_params.get("aqiunits")

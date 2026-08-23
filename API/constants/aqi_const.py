@@ -11,7 +11,6 @@ Supports three AQI systems:
   - Indonesia ISPU (aqisystem="id")
   - China AQI (aqisystem="cn")
   - Malaysia API (aqisystem="my")
-  - Taiwan AQI (aqisystem="tw")
   - Vietnam VN_AQI (aqisystem="vn")
 
 All input concentrations use the model-native units:
@@ -30,7 +29,6 @@ References:
     - Indonesia ISPU: https://aqihub.info/indices/indonesia
     - China AQI: https://aqihub.info/indices/china
     - Malaysia API: https://aqihub.info/indices/malaysia
-    - Taiwan AQI: https://aqihub.info/indices/taiwan
     - Vietnam VN_AQI: https://aqihub.info/indices/vietnam
 """
 
@@ -265,19 +263,6 @@ API_NO2_BP = [0, 106, 178, 249, 320, 642]
 API_SO2_BP = [0, 134, 172, 210, 249, 500]
 API_CO_BP = [0, 3000, 4000, 5000, 6000, 12000]
 API_INDEX = [0, 50, 100, 200, 300, 500]  # API 0–500
-
-# ---------------------------------------------------------------------------
-# Taiwan AQI breakpoints (µg/m³ for PM and ppb for NO2 and SO2 and ppm for CO and O3)
-# Reference: https://aqihub.info/indices/taiwan
-# ---------------------------------------------------------------------------
-TAQI_PM25_BP = [0, 15.4, 35.4, 54.4, 150.4, 250.4, 500.4]
-TAQI_PM10_BP = [0, 50, 100, 254, 354, 424, 604]
-TAQI_O3_1H_BP = [0, 0, 124, 164, 204, 404, 604]
-TAQI_O3_8H_BP = [0, 54, 70, 85, 105, 200, 200]
-TAQI_NO2_BP = [0, 30, 100, 360, 649, 1249, 2049]
-TAQI_SO2_BP = [0, 20, 75, 185, 304, 604, 605]
-TAQI_CO_BP = [0, 4400, 9400, 12400, 15400, 30400, 60400]
-TAQI_INDEX = [0, 50, 100, 150, 200, 300, 500]  # Taiwan 0–500
 
 # ---------------------------------------------------------------------------
 # Vietnam VN_AQI breakpoints (µg/m³ for all species)
@@ -918,63 +903,6 @@ def compute_api(
 
 
 # ---------------------------------------------------------------------------
-# Taiwan AQI
-# ---------------------------------------------------------------------------
-
-
-def compute_taiwan_aqi(
-    pm25_ug: float = float("nan"),
-    pm10_ug: float = float("nan"),
-    o3_8h_ppb: float = float("nan"),
-    o3_1h_ppb: float = float("nan"),
-    no2_ppb: float = float("nan"),
-    so2_ppb: float = float("nan"),
-    co_ppb: float = float("nan"),
-) -> float:
-    """Compute Taiwan AQI as the maximum sub-index across available pollutants."""
-    sub_indices = []
-
-    # Initialize all sub-index values to NaN
-    o3_sub = float("nan")
-    sub_1h = float("nan")
-    sub_8h = float("nan")
-
-    # 1. Calculate 8-hour sub-index (valid up to AQI 300)
-    if not math.isnan(o3_8h_ppb):
-        # 8-hr table caps at 200 ppb (AQI 300)
-        sub_8h = _aqi_from_breakpoints(o3_8h_ppb, TAQI_O3_8H_BP, TAQI_INDEX)
-
-    # 2. Calculate 1-hour sub-index (only evaluated if >= 125 ppb / AQI >= 101)
-    if not math.isnan(o3_1h_ppb) and o3_1h_ppb >= 125.0:
-        sub_1h = _aqi_from_breakpoints(o3_1h_ppb, TAQI_O3_1H_BP, TAQI_INDEX)
-
-    # 3. Handle threshold boundaries
-    # If 8-hour AQI is >= 301, force fallback to 1-hour
-    if sub_8h > 300:
-        o3_sub = sub_1h if not math.isnan(sub_1h) else 300.0
-    else:
-        # Return max of available sub-indices
-        o3_valid = [v for v in (sub_1h, sub_8h) if not math.isnan(v)]
-        o3_sub = max(o3_valid) if o3_valid else float("nan")
-
-    if not math.isnan(pm25_ug):
-        sub_indices.append(_aqi_from_breakpoints(pm25_ug, TAQI_PM25_BP, TAQI_INDEX))
-    if not math.isnan(pm10_ug):
-        sub_indices.append(_aqi_from_breakpoints(pm10_ug, TAQI_PM10_BP, TAQI_INDEX))
-    if not math.isnan(o3_sub):
-        sub_indices.append(o3_sub)
-    if not math.isnan(no2_ppb):
-        sub_indices.append(_aqi_from_breakpoints(no2_ppb, TAQI_NO2_BP, TAQI_INDEX))
-    if not math.isnan(so2_ppb):
-        sub_indices.append(_aqi_from_breakpoints(so2_ppb, TAQI_SO2_BP, TAQI_INDEX))
-    if not math.isnan(co_ppb):
-        sub_indices.append(_aqi_from_breakpoints(co_ppb, TAQI_CO_BP, TAQI_INDEX))
-
-    valid = [v for v in sub_indices if not math.isnan(v)]
-    return float(max(valid)) if valid else float("nan")
-
-
-# ---------------------------------------------------------------------------
 # Vietnam VN_AQI
 # ---------------------------------------------------------------------------
 
@@ -1058,7 +986,6 @@ AQI_SYSTEM_MAP = {
     "id": "ISPU",
     "cn": "CHINA_AQI",
     "my": "API",
-    "tw": "TAQI",
     "vn": "VN_AQI",
 }
 
@@ -1107,10 +1034,6 @@ def compute_aqi_for_unit_system(
             so2_ppb,
             co_ppb,
             co_ppb,
-        )
-    elif system == "TAQI":
-        return compute_taiwan_aqi(
-            pm25_ug, pm10_ug, o3_ppb, o3_ppb, no2_ppb, so2_ppb, co_ppb
         )
     elif system == "VN_AQI":
         return compute_vn_aqi(
@@ -1237,16 +1160,6 @@ def compute_aqi_array(
         no2_calc = np.round(no2_v, 0)
         so2_calc = np.round(so2_v, 0)
         co_calc = np.round(co_v, 0)
-    elif system == "TAQI":
-        # Taiwan AQI uses 24-hour rolling averages for PM2.5, PM10, 8-hour for O3, and 1-hour for NO2, SO2, CO
-        # For PM2.5, round to 1 decimal place; for PM10, O3, NO2, SO2, CO round to whole numbers
-        pm25_calc = np.round(rolling_mean(pm25_v, window=24), 1)
-        pm10_calc = np.round(rolling_mean(pm10_v, window=24), 0)
-        o3_8h_calc = np.round(rolling_mean(o3_v, window=8), 0)
-        o3_calc = np.round(rolling_mean(o3_v, window=1), 0)
-        no2_calc = np.round(rolling_mean(no2_v, window=24), 0)
-        so2_calc = np.round(rolling_mean(so2_v, window=24), 0)
-        co_calc = np.round(rolling_mean(co_v, window=24), 0)
     elif system == "VN_AQI":
         # Vietnam AQI uses nowcast for PM2.5, PM10, 8-hour for O3, and 1-hour for NO2, SO2, CO
         # For all pollutants, round to whole numbers
@@ -1283,16 +1196,6 @@ def compute_aqi_array(
                 no2_1h_ppb=float(no2_calc[i]),
                 so2_1h_ppb=float(so2_calc[i]),
                 co_1h_ppb=float(co_calc[i]),
-            )
-        elif system == "TAQI":
-            result[i] = compute_taiwan_aqi(
-                pm25_ug=float(pm25_calc[i]),
-                pm10_ug=float(pm10_calc[i]),
-                o3_8h_ppb=float(o3_8h_calc[i]),
-                o3_1h_ppb=float(o3_calc[i]),
-                no2_ppb=float(no2_calc[i]),
-                so2_ppb=float(so2_calc[i]),
-                co_ppb=float(co_calc[i]),
             )
         elif system == "VN_AQI":
             result[i] = compute_vn_aqi(

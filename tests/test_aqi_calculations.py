@@ -19,7 +19,6 @@ from API.constants.aqi_const import (
     compute_hk_aqhi,
     compute_iaqi,
     compute_ispu,
-    compute_taiwan_aqi,
     compute_vn_aqi,
     nowcast_pm,
     rolling_mean,
@@ -345,41 +344,6 @@ class TestMalaysiaAPI:
     def test_nan_inputs_return_nan(self):
         api = compute_api()
         assert math.isnan(api)
-
-
-# ---------------------------------------------------------------------------
-# Taiwan AQI tests
-# ---------------------------------------------------------------------------
-
-
-class TestTaiwanAQI:
-    def test_low_pollutants_return_low_aqi(self):
-        taqi = compute_taiwan_aqi(
-            pm25_ug=10.0,
-            pm10_ug=20.0,
-            o3_8h_ppb=30.0,
-            o3_1h_ppb=30.0,
-            no2_ppb=10.0,
-            so2_ppb=10.0,
-            co_ppb=1000.0,
-        )
-        assert 0 <= taqi <= 100
-
-    def test_high_pollutants_return_high_aqi(self):
-        taqi = compute_taiwan_aqi(
-            pm25_ug=200.0,
-            pm10_ug=400.0,
-            o3_8h_ppb=150.0,
-            o3_1h_ppb=300.0,
-            no2_ppb=1000.0,
-            so2_ppb=500.0,
-            co_ppb=40000.0,
-        )
-        assert taqi >= 200
-
-    def test_nan_inputs_return_nan(self):
-        taqi = compute_taiwan_aqi()
-        assert math.isnan(taqi)
 
 
 # ---------------------------------------------------------------------------
@@ -1012,18 +976,6 @@ class TestChinaAveragingInArray:
         )
         raw_china = compute_china_aqi(pm25_ug=250.0)
         assert result[-1] < raw_china
-
-
-class TestTaiwanAveragingInArray:
-    """Tests confirming Taiwan AQI mixed averaging behavior is applied."""
-
-    def test_taiwan_pm25_uses_24h_rolling_mean(self):
-        conc = np.concatenate([np.full(23, 5.0), [200.0]])
-        result = compute_aqi_array(
-            "tw", pm25=conc, pm10=None, o3=None, no2=None, so2=None, co=None
-        )
-        raw_taqi = compute_taiwan_aqi(pm25_ug=200.0)
-        assert result[-1] < raw_taqi
 
 
 class TestVNAQIAveragingInArray:
