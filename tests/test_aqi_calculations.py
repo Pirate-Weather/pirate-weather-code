@@ -7,13 +7,20 @@ import pytest
 
 from API.constants.aqi_const import (
     AQI_SYSTEM_MAP,
+    compute_api,
     compute_aqhi,
     compute_aqi_array,
     compute_aqi_for_unit_system,
+    compute_aqih,
     compute_caqi,
+    compute_china_aqi,
     compute_daqi,
     compute_epa_aqi,
     compute_hk_aqhi,
+    compute_iaqi,
+    compute_ispu,
+    compute_taiwan_aqi,
+    compute_vn_aqi,
     nowcast_pm,
     rolling_mean,
 )
@@ -172,6 +179,245 @@ class TestDAQI:
 
 
 # ---------------------------------------------------------------------------
+# Ireland AQIH tests
+# ---------------------------------------------------------------------------
+
+
+class TestAQIH:
+    def test_clean_air_returns_low_aqih(self):
+        """Low pollutant concentrations should yield an index in the 'Low' band (1–3)."""
+        aqih = compute_aqih(
+            pm25_ug=5.0, pm10_ug=10.0, o3_ppb=20.0, no2_ppb=5.0, so2_ppb=7.0
+        )
+        assert 1 <= aqih <= 3
+
+    def test_high_pollutants_return_high_aqih(self):
+        """Elevated concentrations should push AQIH into upper bands."""
+        aqih = compute_aqih(
+            pm25_ug=80.0, pm10_ug=100.0, o3_ppb=300.0, no2_ppb=200.0, so2_ppb=90.0
+        )
+        assert aqih >= 8
+
+    def test_so2_breakpoints_differ_from_daqi(self):
+        """AQIH uses distinct SO2 breakpoints compared to UK DAQI."""
+        aqih = compute_aqih(so2_ppb=30.0)
+        daqi = compute_daqi(so2_ppb=30.0)
+        assert aqih != daqi
+
+    def test_nan_inputs_return_nan(self):
+        """All-NaN inputs should return NaN."""
+        aqih = compute_aqih()
+        assert math.isnan(aqih)
+
+
+# ---------------------------------------------------------------------------
+# Israel IAQI tests
+# ---------------------------------------------------------------------------
+
+
+class TestIAQI:
+    def test_clean_air_returns_high_best_side_value(self):
+        """IAQI returns 100 for best air and decreases as pollution increases."""
+        iaqi = compute_iaqi(
+            pm25_ug=2.0,
+            pm10_ug=5.0,
+            o3_ppb=5.0,
+            no2_ppb=5.0,
+            so2_ppb=5.0,
+            co_ppb=100.0,
+        )
+        assert iaqi >= 75
+
+    def test_high_pollutants_return_negative_value(self):
+        """Severe pollution should push IAQI below zero on its inverted scale."""
+        iaqi = compute_iaqi(
+            pm25_ug=500.0,
+            pm10_ug=500.0,
+            o3_ppb=1000.0,
+            no2_ppb=2000.0,
+            so2_ppb=2000.0,
+            co_ppb=200000.0,
+        )
+        assert iaqi < 0
+
+    def test_nan_inputs_return_nan(self):
+        iaqi = compute_iaqi()
+        assert math.isnan(iaqi)
+
+
+# ---------------------------------------------------------------------------
+# Indonesia ISPU tests
+# ---------------------------------------------------------------------------
+
+
+class TestISPU:
+    def test_low_pollutants_return_low_ispu(self):
+        ispu = compute_ispu(
+            pm25_ug=5.0, pm10_ug=10.0, o3_ppb=5.0, no2_ppb=5.0, so2_ppb=5.0, co_ppb=10.0
+        )
+        assert 0 <= ispu <= 50
+
+    def test_high_pollutants_return_high_ispu(self):
+        ispu = compute_ispu(
+            pm25_ug=250.0,
+            pm10_ug=420.0,
+            o3_ppb=500.0,
+            no2_ppb=1000.0,
+            so2_ppb=500.0,
+            co_ppb=50000.0,
+        )
+        assert ispu >= 200
+
+    def test_nan_inputs_return_nan(self):
+        ispu = compute_ispu()
+        assert math.isnan(ispu)
+
+
+# ---------------------------------------------------------------------------
+# China AQI tests
+# ---------------------------------------------------------------------------
+
+
+class TestChinaAQI:
+    def test_low_pollutants_return_low_aqi(self):
+        china = compute_china_aqi(
+            pm25_ug=10.0,
+            pm10_ug=20.0,
+            o3_8h_ppb=20.0,
+            o3_1h_ppb=20.0,
+            no2_1h_ppb=10.0,
+            no2_24h_ppb=10.0,
+            so2_1h_ppb=5.0,
+            so2_24h_ppb=5.0,
+            co_1h_ppb=500.0,
+            co_24h_ppb=500.0,
+        )
+        assert 0 <= china <= 100
+
+    def test_high_pollutants_return_high_aqi(self):
+        china = compute_china_aqi(
+            pm25_ug=250.0,
+            pm10_ug=420.0,
+            o3_8h_ppb=300.0,
+            o3_1h_ppb=500.0,
+            no2_1h_ppb=1200.0,
+            no2_24h_ppb=1000.0,
+            so2_1h_ppb=800.0,
+            so2_24h_ppb=800.0,
+            co_1h_ppb=90000.0,
+            co_24h_ppb=60000.0,
+        )
+        assert china >= 200
+
+    def test_nan_inputs_return_nan(self):
+        china = compute_china_aqi()
+        assert math.isnan(china)
+
+
+# ---------------------------------------------------------------------------
+# Malaysia API tests
+# ---------------------------------------------------------------------------
+
+
+class TestMalaysiaAPI:
+    def test_low_pollutants_return_low_api(self):
+        api = compute_api(
+            pm25_ug=20.0,
+            pm10_ug=30.0,
+            o3_ppb=20.0,
+            no2_ppb=20.0,
+            so2_ppb=20.0,
+            co_ppb=1000.0,
+        )
+        assert 0 <= api <= 50
+
+    def test_high_pollutants_return_high_api(self):
+        api = compute_api(
+            pm25_ug=300.0,
+            pm10_ug=400.0,
+            o3_ppb=300.0,
+            no2_ppb=400.0,
+            so2_ppb=300.0,
+            co_ppb=9000.0,
+        )
+        assert api >= 200
+
+    def test_nan_inputs_return_nan(self):
+        api = compute_api()
+        assert math.isnan(api)
+
+
+# ---------------------------------------------------------------------------
+# Taiwan AQI tests
+# ---------------------------------------------------------------------------
+
+
+class TestTaiwanAQI:
+    def test_low_pollutants_return_low_aqi(self):
+        taqi = compute_taiwan_aqi(
+            pm25_ug=10.0,
+            pm10_ug=20.0,
+            o3_8h_ppb=30.0,
+            o3_1h_ppb=30.0,
+            no2_ppb=10.0,
+            so2_ppb=10.0,
+            co_ppb=1000.0,
+        )
+        assert 0 <= taqi <= 100
+
+    def test_high_pollutants_return_high_aqi(self):
+        taqi = compute_taiwan_aqi(
+            pm25_ug=200.0,
+            pm10_ug=400.0,
+            o3_8h_ppb=150.0,
+            o3_1h_ppb=300.0,
+            no2_ppb=1000.0,
+            so2_ppb=500.0,
+            co_ppb=40000.0,
+        )
+        assert taqi >= 200
+
+    def test_nan_inputs_return_nan(self):
+        taqi = compute_taiwan_aqi()
+        assert math.isnan(taqi)
+
+
+# ---------------------------------------------------------------------------
+# Vietnam VN_AQI tests
+# ---------------------------------------------------------------------------
+
+
+class TestVNAQI:
+    def test_low_pollutants_return_low_aqi(self):
+        vn = compute_vn_aqi(
+            pm25_ug=10.0,
+            pm10_ug=20.0,
+            o3_8h_ppb=20.0,
+            o3_1h_ppb=20.0,
+            no2_ppb=5.0,
+            so2_ppb=5.0,
+            co_ppb=1000.0,
+        )
+        assert 0 <= vn <= 100
+
+    def test_high_pollutants_return_high_aqi(self):
+        vn = compute_vn_aqi(
+            pm25_ug=250.0,
+            pm10_ug=450.0,
+            o3_8h_ppb=300.0,
+            o3_1h_ppb=500.0,
+            no2_ppb=2000.0,
+            so2_ppb=1000.0,
+            co_ppb=80000.0,
+        )
+        assert vn >= 200
+
+    def test_nan_inputs_return_nan(self):
+        vn = compute_vn_aqi()
+        assert math.isnan(vn)
+
+
+# ---------------------------------------------------------------------------
 # Unit-system dispatch tests
 # ---------------------------------------------------------------------------
 
@@ -185,6 +431,13 @@ class TestAQISystemDispatch:
             ("uk", "DAQI"),
             ("si", "CAQI"),
             ("hk", "HK_AQHI"),
+            ("ie", "AQIH"),
+            ("il", "IAQI"),
+            ("id", "ISPU"),
+            ("cn", "CHINA_AQI"),
+            ("my", "API"),
+            ("tw", "TAQI"),
+            ("vn", "VN_AQI"),
             ("unknown", "EPA"),  # default
         ],
     )
@@ -225,6 +478,53 @@ class TestAQISystemDispatch:
             "hk", pm25_ug=20.0, pm10_ug=40.0, o3_ppb=60.0, no2_ppb=30.0, so2_ppb=10.0
         )
         assert abs(dispatched - hk_aqhi) < 1e-6
+
+    def test_ie_returns_aqih_value(self):
+        aqih = compute_aqih(pm25_ug=20.0, pm10_ug=40.0, o3_ppb=60.0, no2_ppb=30.0)
+        dispatched = compute_aqi_for_unit_system(
+            "ie", pm25_ug=20.0, pm10_ug=40.0, o3_ppb=60.0, no2_ppb=30.0
+        )
+        assert abs(dispatched - aqih) < 1e-6
+
+    def test_id_returns_ispu_value(self):
+        ispu = compute_ispu(
+            pm25_ug=20.0,
+            pm10_ug=40.0,
+            o3_ppb=60.0,
+            no2_ppb=30.0,
+            so2_ppb=10.0,
+            co_ppb=500.0,
+        )
+        dispatched = compute_aqi_for_unit_system(
+            "id",
+            pm25_ug=20.0,
+            pm10_ug=40.0,
+            o3_ppb=60.0,
+            no2_ppb=30.0,
+            so2_ppb=10.0,
+            co_ppb=500.0,
+        )
+        assert abs(dispatched - ispu) < 1e-6
+
+    def test_my_returns_api_value(self):
+        api = compute_api(
+            pm25_ug=20.0,
+            pm10_ug=40.0,
+            o3_ppb=60.0,
+            no2_ppb=30.0,
+            so2_ppb=10.0,
+            co_ppb=500.0,
+        )
+        dispatched = compute_aqi_for_unit_system(
+            "my",
+            pm25_ug=20.0,
+            pm10_ug=40.0,
+            o3_ppb=60.0,
+            no2_ppb=30.0,
+            so2_ppb=10.0,
+            co_ppb=500.0,
+        )
+        assert abs(dispatched - api) < 1e-6
 
 
 # ---------------------------------------------------------------------------
@@ -665,6 +965,79 @@ class TestDAQIAveragingInArray:
         assert result[-1] == 2
 
 
+class TestAQIHAveragingInArray:
+    """Tests confirming AQIH uses DAQI-like averaging windows."""
+
+    def test_aqih_pm25_uses_24h_rolling_mean(self):
+        conc = np.concatenate([np.full(23, 5.0), [80.0]])
+        result = compute_aqi_array(
+            "ie", pm25=conc, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        assert result[-1] == 1
+
+
+class TestIAQIAveragingInArray:
+    """Tests confirming IAQI mixed averaging behavior is applied."""
+
+    def test_iaqi_pm25_uses_24h_rolling_mean(self):
+        conc = np.concatenate([np.full(23, 5.0), [200.0]])
+        result = compute_aqi_array(
+            "il", pm25=conc, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        raw_iaqi = compute_iaqi(pm25_ug=200.0)
+        # Because IAQI is inverted (higher is better), averaging should keep result above
+        # the raw single-hour spike value.
+        assert result[-1] > raw_iaqi
+
+
+class TestISPUAveragingInArray:
+    """Tests confirming ISPU applies 24h rolling means and rounding."""
+
+    def test_ispu_pm25_uses_24h_rolling_mean(self):
+        conc = np.concatenate([np.full(23, 5.0), [250.0]])
+        result = compute_aqi_array(
+            "id", pm25=conc, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        raw_ispu = compute_ispu(pm25_ug=250.0)
+        assert result[-1] < raw_ispu
+
+
+class TestChinaAveragingInArray:
+    """Tests confirming China AQI rolling windows are applied."""
+
+    def test_china_pm25_uses_24h_rolling_mean(self):
+        conc = np.concatenate([np.full(23, 5.0), [250.0]])
+        result = compute_aqi_array(
+            "cn", pm25=conc, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        raw_china = compute_china_aqi(pm25_ug=250.0)
+        assert result[-1] < raw_china
+
+
+class TestTaiwanAveragingInArray:
+    """Tests confirming Taiwan AQI mixed averaging behavior is applied."""
+
+    def test_taiwan_pm25_uses_24h_rolling_mean(self):
+        conc = np.concatenate([np.full(23, 5.0), [200.0]])
+        result = compute_aqi_array(
+            "tw", pm25=conc, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        raw_taqi = compute_taiwan_aqi(pm25_ug=200.0)
+        assert result[-1] < raw_taqi
+
+
+class TestVNAQIAveragingInArray:
+    """Tests confirming Vietnam VN_AQI mixed averaging behavior is applied."""
+
+    def test_vn_aqi_pm25_uses_nowcast(self):
+        conc = np.concatenate([np.full(12, 5.0), [250.0]])
+        result = compute_aqi_array(
+            "vn", pm25=conc, pm10=None, o3=None, no2=None, so2=None, co=None
+        )
+        raw_vn = compute_vn_aqi(pm25_ug=250.0)
+        assert result[-1] < raw_vn
+
+
 class TestAQIUnitsQueryParam:
     """Tests for the aqiunits query-parameter override logic."""
 
@@ -702,7 +1075,7 @@ class TestAQIUnitsQueryParam:
         # EPA AQI for 50 µg/m³ PM2.5 (NowCast-averaged) should be > 100
         assert float(result_us[-1]) > 100
 
-    def test_uk_aqiunits_uses_who(self):
+    def test_uk_aqiunits_uses_daqi(self):
         """aqiunits=uk should produce DAQI (same as uk unit system)."""
         pm25 = np.full(3, 50.0)
         result_uk = compute_aqi_array(

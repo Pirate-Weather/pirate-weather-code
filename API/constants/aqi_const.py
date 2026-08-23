@@ -6,6 +6,7 @@ Supports three AQI systems:
   - EU CAQI     (unit_system="si")
   - UK DAQI      (unit_system="uk")
   - Hong Kong AQHI (aqisystem="hk")
+  - Ireland AQIH (aqisystem="ie")
   - Israel AQHI (aqisystem="il")
   - Indonesia ISPU (aqisystem="id")
   - China AQI (aqisystem="cn")
@@ -24,6 +25,7 @@ References:
     - EU CAQI: https://www.airqualitynow.eu/about_indices_definition.php
     - UK DAQI: https://aqihub.info/indices/uk
     - Hong Kong AQHI: https://www.aqhi.gov.hk/en.html
+    - Ireland AQIH: https://aqihub.info/indices/ireland
     - Israel AQI: https://aqihub.info/indices/israel
     - Indonesia ISPU: https://aqihub.info/indices/indonesia
     - China AQI: https://aqihub.info/indices/china
@@ -161,8 +163,12 @@ NO2_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
 # SO2 (Sulfur Dioxide, ppb) — EPA breakpoints
 # Breakpoints for 1-hour average SO2 concentrations
-SO2_BP = [0, 35, 75, 185, 304, 604, 804, 1004]
-SO2_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
+# EPA SO2 Breakpoints
+SO2_BP = [0, 35, 75, 185, 304]
+SO2_AQI = [0, 50, 100, 150, 200]
+
+SO2_24H_BP = [305, 604, 804, 1004]
+SO2_24H_AQI = [201, 300, 400, 500]
 
 # CO (Carbon Monoxide, ppb) — EPA breakpoints
 # Breakpoints for 8-hour average CO concentrations
@@ -341,13 +347,14 @@ def compute_epa_aqi(
     o3_1h_ppb: float = float("nan"),
     no2_ppb: float = float("nan"),
     so2_ppb: float = float("nan"),
+    so2_24h_ppb: float = float("nan"),
     co_ppb: float = float("nan"),
 ) -> float:
     """Compute US EPA AQI as the maximum sub-index across available pollutants.
 
     Pollutant concentrations should be in model-native units:
       pm25_ug, pm10_ug → µg/m³
-      o3_8h_ppb, o3_1h_ppb, no2_ppb, so2_ppb, co_ppb → ppb
+      o3_8h_ppb, o3_1h_ppb, no2_ppb, so2_ppb, so2_24h_ppb, co_ppb → ppb
     """
     sub_indices = []
 
@@ -368,6 +375,16 @@ def compute_epa_aqi(
         if not math.isnan(o3_1h_sub):
             o3_sub = max(o3_sub, o3_1h_sub)
 
+    # SO2 logic: Try 1-hour breakpoint first; if > 200 (or > 304 ppb), fall back to 24-hour average
+    so2_sub = float("nan")
+    if not math.isnan(so2_ppb):
+        so2_sub = _epa_sub_index(so2_ppb, SO2_BP, SO2_AQI)
+
+    if (math.isnan(so2_sub) or so2_sub > 200) and not math.isnan(so2_24h_ppb):
+        so2_24h_sub = _epa_sub_index(so2_24h_ppb, SO2_24H_BP, SO2_24H_AQI)
+        if not math.isnan(so2_24h_sub):
+            so2_sub = so2_24h_sub
+
     if not math.isnan(pm25_ug):
         sub_indices.append(_epa_sub_index(pm25_ug, PM25_BP, PM25_AQI))
     if not math.isnan(pm10_ug):
@@ -376,8 +393,8 @@ def compute_epa_aqi(
         sub_indices.append(o3_sub)
     if not math.isnan(no2_ppb):
         sub_indices.append(_epa_sub_index(no2_ppb, NO2_BP, NO2_AQI))
-    if not math.isnan(so2_ppb):
-        sub_indices.append(_epa_sub_index(so2_ppb, SO2_BP, SO2_AQI))
+    if not math.isnan(so2_sub):
+        sub_indices.append(so2_sub)
     if not math.isnan(co_ppb):
         sub_indices.append(_epa_sub_index(co_ppb, CO_BP, CO_AQI))
 
@@ -465,7 +482,12 @@ def compute_hk_aqhi(
     pm25_ar = float("nan")
     pm10_ar = float("nan")
 
+    # Initialize all AR values to 0.0, so that if a pollutant is missing, it contributes 0 to the total AR
     pm_ar = 0.0
+    o3_ar = 0.0
+    no2_ar = 0.0
+    so2_ar = 0.0
+
     count = 0
     if not math.isnan(o3):
         o3_ar = (math.exp(HK_AQHI_BETA_O3 * o3) - 1) * 100
@@ -482,7 +504,7 @@ def compute_hk_aqhi(
         pm10_ar = (math.exp(HK_AQHI_BETA_PM10 * pm10) - 1) * 100
 
     if not math.isnan(pm25) or not math.isnan(pm10):
-        pm_ar += max(pm25_ar, pm10_ar)
+        pm_ar += np.nanmax([pm25_ar, pm10_ar])
         count += 1
     if count == 0:
         return float("nan")
@@ -661,7 +683,14 @@ def compute_iaqi(
         sub_indices.append(_aqi_from_breakpoints(co_mg, IAQI_CO_BP, IAQI_INDEX))
 
     valid = [v for v in sub_indices if not math.isnan(v)]
-    return 100 - float(max(valid)) if valid else float("nan")
+    # Israel AQI is defined as 100 to -400 (100 is best, 400 is worst), so we subtract the maximum sub-index from 100 to get the final AQI value.
+    worst_sub_index = float(max(valid)) if valid else float("nan")
+
+    return (
+        float(100 - worst_sub_index)
+        if not math.isnan(worst_sub_index)
+        else float("nan")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -905,7 +934,10 @@ def compute_taiwan_aqi(
     """Compute Taiwan AQI as the maximum sub-index across available pollutants."""
     sub_indices = []
 
+    # Initialize all sub-index values to NaN
     o3_sub = float("nan")
+    sub_1h = float("nan")
+    sub_8h = float("nan")
 
     # 1. Calculate 8-hour sub-index (valid up to AQI 300)
     if not math.isnan(o3_8h_ppb):
@@ -970,7 +1002,10 @@ def compute_vn_aqi(
     so2_ug = so2_ppb * PPB_SO2_TO_UG_M3 if not math.isnan(so2_ppb) else float("nan")
     co_ug = co_ppb * PPB_CO_TO_UG_M3 if not math.isnan(co_ppb) else float("nan")
 
+    # Initialize all sub-indices to NaN
     o3_sub = float("nan")
+    sub_1h = float("nan")
+    sub_8h = float("nan")
 
     # 1. Calculate 8-hour sub-index (valid up to AQI 200)
     if not math.isnan(o3_8h_ug):
@@ -1043,7 +1078,7 @@ def compute_aqi_for_unit_system(
     """
     system = AQI_SYSTEM_MAP.get(unit_system, "EPA")
     if system == "EPA":
-        return compute_epa_aqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, co_ppb)
+        return compute_epa_aqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, so2_ppb, co_ppb)
     elif system == "AQHI":
         return compute_aqhi(pm25_ug, o3_ppb, no2_ppb)
     elif system == "DAQI":
@@ -1056,6 +1091,29 @@ def compute_aqi_for_unit_system(
         return compute_ispu(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, co_ppb)
     elif system == "API":
         return compute_api(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, co_ppb)
+    elif system == "IAQI":
+        return compute_iaqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, co_ppb)
+    elif system == "CHINA_AQI":
+        return compute_china_aqi(
+            pm25_ug,
+            pm10_ug,
+            o3_ppb,
+            o3_ppb,
+            no2_ppb,
+            no2_ppb,
+            so2_ppb,
+            so2_ppb,
+            co_ppb,
+            co_ppb,
+        )
+    elif system == "TAQI":
+        return compute_taiwan_aqi(
+            pm25_ug, pm10_ug, o3_ppb, o3_ppb, no2_ppb, so2_ppb, co_ppb
+        )
+    elif system == "VN_AQI":
+        return compute_vn_aqi(
+            pm25_ug, pm10_ug, o3_ppb, o3_ppb, no2_ppb, so2_ppb, co_ppb
+        )
     else:  # EAQI
         return compute_caqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb)
 
@@ -1128,6 +1186,7 @@ def compute_aqi_array(
         pm10_calc = nowcast_pm(pm10_v)
         o3_calc = rolling_mean(o3_v, window=8)
         co_calc = rolling_mean(co_v, window=8)
+        so2_24h_calc = rolling_mean(so2_v, window=24)
         o3_1h_calc = o3_v
     elif system == "AQHI":
         # AQHI uses 3-hour rolling averages for PM2.5, O3, NO2
@@ -1154,12 +1213,12 @@ def compute_aqi_array(
     elif system == "ISPU":
         # Indonesia ISPU uses 24-hour rolling averages
         # PM2.5 is rounded to 1 decimal place, PM10, O3, NO2, SO2, CO are rounded to whole numbers
-        pm25_calc = round(rolling_mean(pm25_v, window=24), 1)
-        pm10_calc = round(rolling_mean(pm10_v, window=24), 0)
-        o3_calc = round(rolling_mean(o3_v, window=24), 0)
-        co_calc = round(rolling_mean(co_v, window=24), 0)
-        so2_calc = round(rolling_mean(so2_v, window=24), 0)
-        no2_calc = round(rolling_mean(no2_v, window=24), 0)
+        pm25_calc = np.round(rolling_mean(pm25_v, window=24), 1)
+        pm10_calc = np.round(rolling_mean(pm10_v, window=24), 0)
+        o3_calc = np.round(rolling_mean(o3_v, window=24), 0)
+        co_calc = np.round(rolling_mean(co_v, window=24), 0)
+        so2_calc = np.round(rolling_mean(so2_v, window=24), 0)
+        no2_calc = np.round(rolling_mean(no2_v, window=24), 0)
     elif system == "CHINA_AQI":
         # China AQI uses 24-hour rolling averages for PM2.5, PM10, NO2, SO2, CO and 8-hour rolling average for O3
         pm25_calc = rolling_mean(pm25_v, window=24)
@@ -1170,32 +1229,32 @@ def compute_aqi_array(
         co_24_calc = rolling_mean(co_v, window=24)
     elif system == "API":
         # Malayia rounds everything to nearest whole number
-        pm25_calc = round(pm25_v, 0)
-        pm10_calc = round(pm10_v, 0)
-        o3_calc = round(o3_v, 0)
-        no2_calc = round(no2_v, 0)
-        so2_calc = round(so2_v, 0)
-        co_calc = round(co_v, 0)
+        pm25_calc = np.round(pm25_v, 0)
+        pm10_calc = np.round(pm10_v, 0)
+        o3_calc = np.round(o3_v, 0)
+        no2_calc = np.round(no2_v, 0)
+        so2_calc = np.round(so2_v, 0)
+        co_calc = np.round(co_v, 0)
     elif system == "TAQI":
         # Taiwan AQI uses 24-hour rolling averages for PM2.5, PM10, 8-hour for O3, and 1-hour for NO2, SO2, CO
         # For PM2.5, round to 1 decimal place; for PM10, O3, NO2, SO2, CO round to whole numbers
-        pm25_calc = round(rolling_mean(pm25_v, window=24), 1)
-        pm10_calc = round(rolling_mean(pm10_v, window=24), 0)
-        o3_8h_calc = round(rolling_mean(o3_v, window=8), 0)
-        o3_1h_calc = round(rolling_mean(o3_v, window=1), 0)
-        no2_calc = round(rolling_mean(no2_v, window=24), 0)
-        so2_calc = round(rolling_mean(so2_v, window=24), 0)
-        co_calc = round(rolling_mean(co_v, window=24), 0)
+        pm25_calc = np.round(rolling_mean(pm25_v, window=24), 1)
+        pm10_calc = np.round(rolling_mean(pm10_v, window=24), 0)
+        o3_8h_calc = np.round(rolling_mean(o3_v, window=8), 0)
+        o3_calc = np.round(rolling_mean(o3_v, window=1), 0)
+        no2_calc = np.round(rolling_mean(no2_v, window=24), 0)
+        so2_calc = np.round(rolling_mean(so2_v, window=24), 0)
+        co_calc = np.round(rolling_mean(co_v, window=24), 0)
     elif system == "VN_AQI":
         # Vietnam AQI uses nowcast for PM2.5, PM10, 8-hour for O3, and 1-hour for NO2, SO2, CO
         # For all pollutants, round to whole numbers
-        pm25_calc = round(nowcast_pm(pm25_v), 0)
-        pm10_calc = round(nowcast_pm(pm10_v), 0)
-        o3_8h_calc = round(rolling_mean(o3_v, window=8), 0)
-        o3_calc = round(o3_v, 0)
-        no2_calc = round(no2_v, 0)
-        so2_calc = round(so2_v, 0)
-        co_calc = round(co_v, 0)
+        pm25_calc = np.round(nowcast_pm(pm25_v), 0)
+        pm10_calc = np.round(nowcast_pm(pm10_v), 0)
+        o3_8h_calc = np.round(rolling_mean(o3_v, window=8), 0)
+        o3_calc = np.round(o3_v, 0)
+        no2_calc = np.round(no2_v, 0)
+        so2_calc = np.round(so2_v, 0)
+        co_calc = np.round(co_v, 0)
 
     result = np.full(n, np.nan, dtype=np.float32)
     for i in range(n):
@@ -1207,6 +1266,7 @@ def compute_aqi_array(
                 o3_1h_ppb=float(o3_1h_calc[i]),
                 no2_ppb=float(no2_calc[i]),
                 so2_ppb=float(so2_calc[i]),
+                so2_24h_ppb=float(so2_24h_calc[i]),
                 co_ppb=float(co_calc[i]),
             )
         elif system == "CHINA_AQI":
@@ -1214,7 +1274,7 @@ def compute_aqi_array(
                 pm25_ug=float(pm25_calc[i]),
                 pm10_ug=float(pm10_calc[i]),
                 o3_8h_ppb=float(o3_8h_calc[i]),
-                o3_1h_ppb=float(o3_1h_calc[i]),
+                o3_1h_ppb=float(o3_calc[i]),
                 no2_24h_ppb=float(no2_24_calc[i]),
                 so2_24h_ppb=float(so2_24_calc[i]),
                 co_24h_ppb=float(co_24_calc[i]),
