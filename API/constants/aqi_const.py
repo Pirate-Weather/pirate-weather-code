@@ -1079,7 +1079,7 @@ def compute_aqi_for_unit_system(
     system = AQI_SYSTEM_MAP.get(unit_system, "EPA")
     if system == "EPA":
         return compute_epa_aqi(
-            pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, so2_ppb, co_ppb
+            pm25_ug, pm10_ug, o3_ppb, o3_ppb, no2_ppb, so2_ppb, so2_ppb, co_ppb
         )
     elif system == "AQHI":
         return compute_aqhi(pm25_ug, o3_ppb, no2_ppb)
@@ -1283,6 +1283,16 @@ def compute_aqi_array(
                 no2_1h_ppb=float(no2_calc[i]),
                 so2_1h_ppb=float(so2_calc[i]),
                 co_1h_ppb=float(co_calc[i]),
+            )
+        elif system == "TAQI":
+            result[i] = compute_taiwan_aqi(
+                pm25_ug=float(pm25_calc[i]),
+                pm10_ug=float(pm10_calc[i]),
+                o3_8h_ppb=float(o3_8h_calc[i]),
+                o3_1h_ppb=float(o3_calc[i]),
+                no2_ppb=float(no2_calc[i]),
+                so2_ppb=float(so2_calc[i]),
+                co_ppb=float(co_calc[i]),
             )
         elif system == "VN_AQI":
             result[i] = compute_vn_aqi(

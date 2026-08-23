@@ -700,10 +700,36 @@ async def prepare_initial_request(
 
     unit_system, unit_config = _setup_units(units, loc_name)
 
-    # Parse aqiunits override: ca → AQHI, us → EPA, eu → CAQI.
+    # Parse aqiunits override: ca → AQHI, us → EPA, eu → CAQI, uk → DAQI, hk → HK_AQHI, ie → AQIH, il → Israel AQI, id → ISPU, cn → China AQI, my → API, tw → Taiwan AQI, vn → VN_AQI.
     # Falls back to the unit-based AQI system when the value is absent or invalid.
-    _VALID_AQI_UNITS = {"ca", "us", "eu", "uk", "hk"}
-    _AQI_UNITS_MAP = {"ca": "ca", "us": "us", "eu": "si", "uk": "uk", "hk": "hk"}
+    _VALID_AQI_UNITS = {
+        "ca",
+        "us",
+        "eu",
+        "uk",
+        "hk",
+        "ie",
+        "il",
+        "id",
+        "cn",
+        "my",
+        "tw",
+        "vn",
+    }
+    _AQI_UNITS_MAP = {
+        "ca": "ca",
+        "us": "us",
+        "eu": "si",
+        "uk": "uk",
+        "hk": "hk",
+        "ie": "ie",
+        "il": "il",
+        "id": "id",
+        "cn": "cn",
+        "my": "my",
+        "tw": "tw",
+        "vn": "vn",
+    }
     raw_aqiunits = request.query_params.get("aqiunits")
     if raw_aqiunits and raw_aqiunits.lower() in _VALID_AQI_UNITS:
         aqi_system = _AQI_UNITS_MAP[raw_aqiunits.lower()]
