@@ -380,11 +380,11 @@ def compute_epa_aqi(
     if not math.isnan(so2_ppb):
         so2_sub = _epa_sub_index(so2_ppb, SO2_BP, SO2_AQI)
 
-    if (math.isnan(so2_sub) or so2_sub > 200) and not math.isnan(so2_24h_ppb):
+    use_24h = math.isnan(so2_ppb) or so2_ppb > SO2_BP[-1]
+    if use_24h and not math.isnan(so2_24h_ppb) and so2_24h_ppb >= SO2_24H_BP[0]:
         so2_24h_sub = _epa_sub_index(so2_24h_ppb, SO2_24H_BP, SO2_24H_AQI)
         if not math.isnan(so2_24h_sub):
-            so2_sub = so2_24h_sub
-
+            so2_sub = so2_24h_sub if math.isnan(so2_sub) else max(so2_sub, so2_24h_sub)
     if not math.isnan(pm25_ug):
         sub_indices.append(_epa_sub_index(pm25_ug, PM25_BP, PM25_AQI))
     if not math.isnan(pm10_ug):
