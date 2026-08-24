@@ -1684,8 +1684,9 @@ def build_current_section(
                     InterPcurrent[DATA_CURRENT["aqi"]] = np.clip(
                         aqi_val, CLIP_AQI["min"], CLIP_AQI["max"]
                     )
-        except Exception:
-            pass
+        except (ValueError, TypeError, KeyError, IndexError) as exc:
+            # Current AQI computation is non-fatal; log for observability
+            logger.debug("Current AQI computation failed: %s", exc)
 
     curr_temp_si = InterPcurrent[DATA_CURRENT["temp"]]
     curr_dew_si = InterPcurrent[DATA_CURRENT["dew"]]

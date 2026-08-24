@@ -814,8 +814,9 @@ def build_hourly_block(
                 InterPhour[:, DATA_HOURLY["aqi"]] = np.clip(
                     aqi_arr, CLIP_AQI["min"], CLIP_AQI["max"]
                 )
-        except Exception:
-            pass  # AQ computation is non-fatal; leave columns as MISSING_DATA
+        except (ValueError, TypeError, KeyError, IndexError) as exc:
+            # Current AQI computation is non-fatal; log for observability
+            logger.debug("Current AQI computation failed: %s", exc)
 
     dayZeroRain, dayZeroSnow, dayZeroIce = _calculate_derived_metrics(
         InterPhour,
