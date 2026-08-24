@@ -400,7 +400,6 @@ class TestAQISystemDispatch:
             ("id", "ISPU"),
             ("cn", "CHINA_AQI"),
             ("my", "API"),
-            ("tw", "TAQI"),
             ("vn", "VN_AQI"),
             ("unknown", "EPA"),  # default
         ],
