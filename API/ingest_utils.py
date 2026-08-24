@@ -8,10 +8,12 @@ import resource
 import shlex
 import shutil
 import subprocess
+import sys
 import tarfile
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, Optional, Union
+from typing import Any
 
 import cartopy.crs as ccrs
 import dask.array as da
@@ -39,6 +41,11 @@ CHUNK_SIZES = {
     "NBM_Fire": 200,
     "RTMA": 200,
     "DWD": 200,
+    "HRDPS": 200,
+    "RDPS": 200,
+    "REPS": 200,
+    "GDPS": 200,
+    "GEPS": 200,
     "RDAQA": 250,
     "RAQDPS": 250,
     "SILAM": 200,
@@ -55,6 +62,11 @@ FINAL_CHUNK_SIZES = {
     "NBM_Fire": 5,
     "RTMA": 25,
     "DWD": 5,
+    "HRDPS": 3,
+    "RDPS": 3,
+    "REPS": 3,
+    "GDPS": 3,
+    "GEPS": 3,
     "RDAQA": 25,
     "RAQDPS": 25,
     "SILAM": 5,
@@ -63,7 +75,8 @@ FINAL_CHUNK_SIZES = {
 FORECAST_LEAD_RANGES = {
     "GFS_1": list(range(1, 121)),
     "GFS_2": list(range(123, 241, 3)),
-    "GEFS": list(range(3, 241, 3)),
+    "GDPS_1": list(range(1, 84, 1)),
+    "GDPS_2": list(range(84, 241, 3)),
     "NBM_FIRE": list(range(6, 192, 6)),
     "HRRR_1H": list(range(1, 19)),
     "HRRR_6H": list(range(18, 49)),
@@ -72,6 +85,10 @@ FORECAST_LEAD_RANGES = {
     "ECMWF_IFS_2": list(range(144, 241, 6)),
     "AIGFS": list(range(6, 241, 6)),
     "AIGEFS": list(range(6, 241, 6)),
+    "HRDPS": list(range(1, 49)),
+    "RDPS": list(range(1, 85)),
+    "REPS": list(range(3, 73, 3)),
+    "GEPS": list(range(3, 241, 3)),
 }
 
 # Radius, in km, used for DWD model nearest-neighbor selection
@@ -92,6 +109,7 @@ def run_command(command: str, encoding: str = "utf-8") -> subprocess.CompletedPr
             shlex.split(command),
             capture_output=True,
             encoding=encoding,
+            check=False,
         )
 
     left, right = command.split("|", maxsplit=1)
@@ -111,6 +129,7 @@ def run_command(command: str, encoding: str = "utf-8") -> subprocess.CompletedPr
             stdin=left_proc.stdout,
             capture_output=True,
             encoding=encoding,
+            check=False,
         )
     finally:
         if left_proc.stdout is not None:
@@ -203,30 +222,30 @@ def configure_zarr_limits(
 
 
 def make_herbie_save_dir(tmp_dir: str, prefix: str = "herbie") -> str:
-    """Create a per-run Herbie cache directory to avoid path collisions."""
-    save_dir = os.path.join(tmp_dir, f"{prefix}_{int(time.time())}_{os.getpid()}")
+    """Create a stable Herbie cache directory."""
+    save_dir = os.path.join(tmp_dir, prefix)
     os.makedirs(save_dir, exist_ok=True)
     return save_dir
 
 
 def download_herbie_with_retry(
     herbie_obj,
-    search: str,
     expected_count: int,
     dataset_name: str,
     retries: int,
     retry_sleep_s: int,
+    search: Any = None,
 ) -> None:
     """Retry transient Herbie download failures and enforce expected file count."""
     attempts = max(1, retries)
     for attempt in range(1, attempts + 1):
         try:
             # Overwrite on retries to avoid keeping partial/corrupt files.
-            downloaded = herbie_obj.download(
-                search,
-                verbose=False,
-                overwrite=(attempt > 1),
-            )
+            download_kwargs = {"verbose": True, "overwrite": attempt > 1}
+            if search is None:
+                downloaded = herbie_obj.download(**download_kwargs)
+            else:
+                downloaded = herbie_obj.download(search, **download_kwargs)
 
             downloaded_paths = []
             if downloaded is not None:
@@ -296,7 +315,7 @@ def download_herbie_with_retry(
 
 
 def safe_herbie_local_file_path(
-    herbie_obj, search: str, retries: int = 3, retry_sleep_s: float = 0.1
+    herbie_obj, search: Any = None, retries: int = 3, retry_sleep_s: float = 0.1
 ) -> str:
     """Resolve a local Herbie path and repair file-vs-dir cache collisions."""
     from herbie import Path
@@ -322,7 +341,9 @@ def safe_herbie_local_file_path(
     raise RuntimeError("Unreachable Herbie local path resolution state")
 
 
-def build_herbie_grib_list(file_refs, search: str, retries: int = 3) -> list[str]:
+def build_herbie_grib_list(
+    file_refs, search: Any = None, retries: int = 3
+) -> list[str]:
     """Build a list of local GRIB paths from Herbie file references."""
     return [
         safe_herbie_local_file_path(ref, search, retries=retries) for ref in file_refs
@@ -396,7 +417,7 @@ def download_extract_historic_archive(
     extracted_store_name: str,
     local_temp_dir: str,
     expected_vars: Iterable[str] | None = None,
-) -> Optional[str]:
+) -> str | None:
     """Helper to download and extract a historic archive to a local zarr path."""
     os.makedirs(local_temp_dir, exist_ok=True)
     local_zarr_path = os.path.join(local_temp_dir, final_zarr_name)
@@ -530,11 +551,11 @@ def getGribList(FH_forecastsub, matchStrings):
                             RuntimeError,
                         ):
                             print("Download Failure 6, Fail")
-                            exit(1)
+                            sys.exit(1)
     return gribList
 
 
-def validate_grib_stats(gribCheck):
+def validate_grib_stats(gribCheck, excluded_variables: Iterable[str] | None = None):
     """
     Inspect gribCheck.stdout (from `wgrib2 … -stats`) for min/max values,
     print any out-of-range records, and exit(10) if invalid data is found.
@@ -543,9 +564,16 @@ def validate_grib_stats(gribCheck):
       - gribCheck.stdout: the full stdout string
       - globals: VALID_DATA_MIN, VALID_DATA_MAX
     """
+    excluded_variables = set(excluded_variables or [])
+
     # extract all mins and maxs
-    minValues = [float(m) for m in re.findall(r"min=([-\d\.eE]+)", gribCheck.stdout)]
-    maxValues = [float(M) for M in re.findall(r"max=([-\d\.eE]+)", gribCheck.stdout)]
+    number_pattern = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+    minValues = [
+        float(m) for m in re.findall(rf"min=({number_pattern})", gribCheck.stdout)
+    ]
+    maxValues = [
+        float(M) for M in re.findall(rf"max=({number_pattern})", gribCheck.stdout)
+    ]
 
     # extract variable names (4th field)
     varNames = re.findall(r"(?m)^(?:[^:]+:){3}([^:]+):", gribCheck.stdout)
@@ -561,8 +589,9 @@ def validate_grib_stats(gribCheck):
     # TODO: This would be better if we checked against a dictionary of valid ranges defined per variable
     invalidIdxs = [
         i
-        for i, (mn, mx) in enumerate(zip(minValues, maxValues))
-        if mn < VALID_DATA_MIN or mx > VALID_DATA_MAX
+        for i, (var, mn, mx) in enumerate(zip(varNames, minValues, maxValues))
+        if var not in excluded_variables
+        and (mn < VALID_DATA_MIN or mx > VALID_DATA_MAX)
     ]
 
     if invalidIdxs:
@@ -656,11 +685,115 @@ def earth_relative_wind_components(
     return ut, vt
 
 
+def interp_time_map_blocks_nan(
+    arr: da.Array,
+    stacked_timesUnix: np.ndarray,
+    hourly_timesUnix: np.ndarray,
+    nearest_vars: int | Iterable[int] | None = None,
+    dtype: str = "float32",
+    fill_value: float = np.nan,
+    time_axis: int = 1,
+) -> da.Array:
+    if arr.ndim != 4:
+        raise ValueError("Expected arr with dims (V, T, Y, X).")
+    if time_axis != 1:
+        raise NotImplementedError("This helper assumes time_axis == 1 for (V,T,Y,X).")
+    if len(arr.chunks[time_axis]) != 1:
+        raise ValueError("time axis must be a single chunk before interpolating.")
+
+    x_source = np.asarray(stacked_timesUnix, dtype=np.float64).reshape(-1)
+    x_target = np.asarray(hourly_timesUnix, dtype=np.float64).reshape(-1)
+    if arr.shape[time_axis] != len(x_source):
+        raise ValueError(
+            f"arr time length {arr.shape[time_axis]} does not match "
+            f"stacked_timesUnix length {len(x_source)}."
+        )
+
+    if nearest_vars is None:
+        nearest_vars_set = set()
+    elif isinstance(nearest_vars, int):
+        nearest_vars_set = {nearest_vars}
+    else:
+        nearest_vars_set = {int(i) for i in nearest_vars}
+
+    def interp_block(block, block_info=None):
+        var_start = 0
+        if block_info is not None:
+            var_start = block_info[0]["array-location"][0][0]
+
+        out = np.full(
+            (block.shape[0], len(x_target), block.shape[2], block.shape[3]),
+            fill_value,
+            dtype=dtype,
+        )
+        n_points = block.shape[2] * block.shape[3]
+
+        for local_var_idx in range(block.shape[0]):
+            global_var_idx = var_start + local_var_idx
+            values = (
+                block[local_var_idx]
+                .reshape(block.shape[1], n_points)
+                .astype(np.float64, copy=False)
+            )
+            valid = np.isfinite(values)
+            valid_patterns, pattern_idx = np.unique(
+                valid.T, axis=0, return_inverse=True
+            )
+            var_out = out[local_var_idx].reshape(len(x_target), n_points)
+
+            for valid_pattern_idx, valid_pattern in enumerate(valid_patterns):
+                cols = np.flatnonzero(pattern_idx == valid_pattern_idx)
+                if not valid_pattern.any():
+                    continue
+
+                valid_times = x_source[valid_pattern]
+                valid_values = values[valid_pattern][:, cols]
+                target_in_range = (x_target >= valid_times[0]) & (
+                    x_target <= valid_times[-1]
+                )
+                if not target_in_range.any():
+                    continue
+
+                if global_var_idx in nearest_vars_set or len(valid_times) == 1:
+                    insert_at = np.searchsorted(valid_times, x_target[target_in_range])
+                    left_idx = np.clip(insert_at - 1, 0, len(valid_times) - 1)
+                    right_idx = np.clip(insert_at, 0, len(valid_times) - 1)
+                    left_dist = np.abs(
+                        x_target[target_in_range] - valid_times[left_idx]
+                    )
+                    right_dist = np.abs(
+                        valid_times[right_idx] - x_target[target_in_range]
+                    )
+                    nearest_idx = np.where(left_dist <= right_dist, left_idx, right_idx)
+                    var_out[np.ix_(target_in_range, cols)] = valid_values[nearest_idx]
+                    continue
+
+                insert_at = np.searchsorted(
+                    valid_times, x_target[target_in_range], side="right"
+                )
+                left_idx = np.clip(insert_at - 1, 0, len(valid_times) - 2)
+                right_idx = left_idx + 1
+                left_times = valid_times[left_idx]
+                right_times = valid_times[right_idx]
+                weights = (x_target[target_in_range] - left_times) / (
+                    right_times - left_times
+                )
+                interp_values = (1 - weights[:, None]) * valid_values[
+                    left_idx
+                ] + weights[:, None] * valid_values[right_idx]
+                var_out[np.ix_(target_in_range, cols)] = interp_values
+
+        return out
+
+    chunks = (arr.chunks[0], (len(x_target),), arr.chunks[2], arr.chunks[3])
+    return arr.map_blocks(interp_block, dtype=dtype, chunks=chunks)
+
+
 def interp_time_take_blend(
     arr: da.Array,
     stacked_timesUnix: np.ndarray,
     hourly_timesUnix: np.ndarray,
-    nearest_vars: Optional[Union[int, Iterable[int]]] = None,  # var indices using NN
+    nearest_vars: int | Iterable[int] | None = None,  # var indices using NN
     dtype: str = "float32",
     fill_value: float = np.nan,
     time_axis: int = 1,
@@ -713,7 +846,7 @@ def interp_time_take_blend(
     # boolean mask of “in‐range” points
     valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
 
-    T_new = int(len(idx0))
+    T_new = len(idx0)
     if not (len(idx1) == T_new and len(w) == T_new and len(valid) == T_new):
         raise ValueError("idx0, idx1, w, and valid must all have length T_new.")
 
@@ -748,7 +881,7 @@ def interp_time_take_blend(
         # Normalize indices as a sorted, unique list
         if isinstance(nearest_vars, int):
             nearest_vars = [nearest_vars]
-        nv = sorted(set(int(i) for i in nearest_vars))
+        nv = sorted({int(i) for i in nearest_vars})
 
         # Compute nearest only for needed variables (cheap if few vars)
         # Shape of each nearest slice: (1, T_new, Y, X)
@@ -857,7 +990,7 @@ def calculate_nowcast_concentration(
     return nowcast_result
 
 
-def trailing_mean(conc: Optional[np.ndarray], window: int) -> Optional[np.ndarray]:
+def trailing_mean(conc: np.ndarray | None, window: int) -> np.ndarray | None:
     """
     Compute trailing window mean along time axis for array with shape (T, Y, X).
     If window <= 1 returns conc. Handles NaNs by using nanmean over available points.

@@ -4,13 +4,14 @@ from pathlib import Path
 
 def _find_call_keywords(tree, function_name):
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            if node.func.id == function_name:
-                return {
-                    keyword.arg: keyword.value
-                    for keyword in node.keywords
-                    if keyword.arg
-                }
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == function_name
+        ):
+            return {
+                keyword.arg: keyword.value for keyword in node.keywords if keyword.arg
+            }
     raise AssertionError(f"{function_name} call not found in responseLocal.py")
 
 

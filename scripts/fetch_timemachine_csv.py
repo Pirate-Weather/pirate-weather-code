@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Fetch local Pirate Weather timemachine responses for CSV points."""
 
 # Example: start local API in background
@@ -15,13 +14,15 @@ import datetime as dt
 import json
 import sys
 import time
+from collections.abc import Iterable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 from urllib import parse, request
+from urllib.error import URLError
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from requests import HTTPError
 from timezonefinder import TimezoneFinder
 
 DEFAULT_START_DATE = dt.date(2024, 1, 1)
@@ -489,7 +490,7 @@ def process_job(
     request_started_at = time.perf_counter()
     try:
         status_code, payload, response_bytes = fetch_json(job.url, timeout=timeout)
-    except Exception as exc:
+    except (URLError, HTTPError, TimeoutError, OSError, json.JSONDecodeError) as exc:
         duration_seconds = time.perf_counter() - request_started_at
         raise RequestAttemptError(str(exc), duration_seconds) from exc
 
@@ -603,7 +604,7 @@ def drain_completed_futures(
                 f"rate={request_rate:.2f}/min response_bytes={response_bytes}",
                 flush=True,
             )
-        except Exception as exc:
+        except (RequestAttemptError, RuntimeError, OSError) as exc:
             if isinstance(exc, RequestAttemptError):
                 request_duration_seconds = exc.duration_seconds
             if request_duration_seconds is not None:
@@ -711,7 +712,7 @@ def main() -> int:
     tf = TimezoneFinder(in_memory=True)
     try:
         points = load_points(args.csv_path, tf)
-    except Exception as exc:
+    except (OSError, ValueError) as exc:
         print(f"Failed to load CSV: {exc}", file=sys.stderr)
         return 2
 

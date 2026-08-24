@@ -49,11 +49,9 @@ class aigefs:
         }
 
         if self.product is None:
-            self.product = list(self.PRODUCTS)[0]
+            self.product = next(iter(self.PRODUCTS))
 
-        if self.member == 0:
-            self.member = "mem000"
-        elif self.member == "control":
+        if self.member == 0 or self.member == "control":
             self.member = "mem000"
         elif isinstance(self.member, int):
             self.member = f"mem{self.member:03d}"
@@ -71,8 +69,8 @@ class aigefs:
             }
 
         valid_members = {
-            "pres": [f"mem{i:03d}" for i in range(0, 31)] + ["control", "spr", "avg"],
-            "sfc": [f"mem{i:03d}" for i in range(0, 31)] + ["control", "spr", "avg"],
+            "pres": [f"mem{i:03d}" for i in range(31)] + ["control", "spr", "avg"],
+            "sfc": [f"mem{i:03d}" for i in range(31)] + ["control", "spr", "avg"],
         }
 
         filepath = filepaths.get(self.product)

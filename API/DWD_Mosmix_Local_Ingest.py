@@ -59,6 +59,8 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
+logger = logging.getLogger(__name__)
+
 
 # Define KML and DWD namespaces for easier parsing of the XML structure.
 # These namespaces are crucial for correctly locating elements within the KML file.
@@ -135,7 +137,7 @@ def parse_mosmix_kml(kml_filepath: str):
                 None,
             )
             if kml_content is None:
-                logging.error(f"Error: No KML file found inside {kml_filepath}.")
+                logger.error(f"Error: No KML file found inside {kml_filepath}.")
                 raise ValueError(f"Error: No KML file found inside {kml_filepath}.")
             root = parser.parse(io.BytesIO(kml_content)).getroot()
     else:
@@ -162,7 +164,7 @@ def parse_mosmix_kml(kml_filepath: str):
         f"./{KML_NAMESPACE}Document/{KML_NAMESPACE}ExtendedData/{DWD_NAMESPACE}ProductDefinition/{DWD_NAMESPACE}ForecastTimeSteps/{DWD_NAMESPACE}TimeStep"
     )
     if not time_step_elements:
-        logging.error("Error: No global forecast time steps found in KML Document.")
+        logger.error("Error: No global forecast time steps found in KML Document.")
         raise ValueError("Error: No global forecast time steps found in KML Document.")
 
     for ts_elem in time_step_elements:
@@ -175,7 +177,7 @@ def parse_mosmix_kml(kml_filepath: str):
         .sort_values()
         .tolist()
     )
-    logging.info(f"Found {len(global_forecast_times)} global forecast time steps.")
+    logger.info(f"Found {len(global_forecast_times)} global forecast time steps.")
 
     # Iterate through Placemarks to extract station-specific data
     for placemark in root.findall(f".//{KML_NAMESPACE}Placemark"):
@@ -203,14 +205,14 @@ def parse_mosmix_kml(kml_filepath: str):
                 lat = float(coords[1])
                 alt = float(coords[2]) if len(coords) > 2 else 0.0
             except ValueError:
-                logging.warning(
+                logger.warning(
                     f"Warning: Could not parse coordinates for station ID {station_id}: {coordinates_elem.text}. Setting to NaN."
                 )
                 lon, lat, alt = np.nan, np.nan, np.nan
 
         extended_data_pm = placemark.find(f"{KML_NAMESPACE}ExtendedData")
         if extended_data_pm is None:
-            logging.warning(
+            logger.warning(
                 f"Warning: No ExtendedData found for station ID {station_id}. Skipping."
             )
             continue
@@ -232,7 +234,7 @@ def parse_mosmix_kml(kml_filepath: str):
                 if len(param_values) == len(global_forecast_times):
                     station_forecast_data[element_name] = param_values
                 else:
-                    logging.warning(
+                    logger.warning(
                         f"Warning: Mismatch in number of values for '{element_name}' for station {station_id}. Skipping parameter."
                     )
 
@@ -430,7 +432,7 @@ def fill_station_gaps(
     # Used to quickly skip stations that are already complete.
     has_any_nan = df[fill_cols].isna().any(axis=1)
 
-    for sid, grp_idx in df.groupby(station_col, sort=False).groups.items():
+    for grp_idx in df.groupby(station_col, sort=False).groups.values():
         # Fast path: skip the station entirely if it has no NaN in any fill column.
         if not has_any_nan.loc[grp_idx].any():
             continue
@@ -907,7 +909,7 @@ def _clear_directory(path):
             else:
                 os.remove(entry.path)
         except (OSError, PermissionError):
-            logging.warning(f"Could not remove {entry.path} during clear_directory.")
+            logger.warning(f"Could not remove {entry.path} during clear_directory.")
 
 
 if os.path.exists(forecast_process_dir):
@@ -935,32 +937,31 @@ def download_mosmix_file(url, local_path):
         response = requests.get(url, stream=True)
         # Check if the file exists (404 handling)
         if response.status_code == 404:
-            logging.warning(f"File not found: {url}")
+            logger.warning(f"File not found: {url}")
             return False
 
         response.raise_for_status()
         with open(local_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-        logging.info(f"File downloaded successfully to: {local_path}")
+            f.writelines(response.iter_content(chunk_size=8192))
+        logger.info(f"File downloaded successfully to: {local_path}")
         return True
-    except Exception as e:
-        logging.warning(f"Error downloading {url}: {e}")
+    except (requests.RequestException, OSError) as e:
+        logger.warning(f"Error downloading {url}: {e}")
         return False
 
 
 # --- Step 1: Download and Parse DWD MOSMIX-S KML/KMZ Data ---
-logging.info(f"\n--- Attempting to download DWD MOSMIX data from: {dwd_mosmix_url} ---")
+logger.info(f"\n--- Attempting to download DWD MOSMIX data from: {dwd_mosmix_url} ---")
 if not download_mosmix_file(dwd_mosmix_url, os.path.join(tmp_dir, downloaded_kmz_file)):
-    logging.critical("Error downloading latest DWD data. Exiting.")
+    logger.critical("Error downloading latest DWD data. Exiting.")
     sys.exit(1)
 
-logging.info(
+logger.info(
     f"\n--- Reading and Parsing KML from {os.path.join(tmp_dir, downloaded_kmz_file)} ---"
 )
 df_data, global_metadata = parse_mosmix_kml(os.path.join(tmp_dir, downloaded_kmz_file))
 if df_data.empty:
-    logging.critical("No data extracted from KML/KMZ. Exiting.")
+    logger.critical("No data extracted from KML/KMZ. Exiting.")
     sys.exit(1)
 
 # Convert longitudes from [-180, 180] to [0, 360] for consistency with GFS grid
@@ -968,7 +969,7 @@ df_data["longitude"] = df_data["longitude"] % 360
 
 # Extract the base time from the KML metadata (IssueTime) for update checks.
 base_time = global_metadata.get("IssueTime", datetime.now(UTC))
-logging.info(f"Base time for this ingest run (from KML metadata): {base_time}")
+logger.info(f"Base time for this ingest run (from KML metadata): {base_time}")
 
 # --- Check for Updates (Skip if no new data) ---
 if save_type == "S3":
@@ -981,7 +982,7 @@ if save_type == "S3":
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            logging.info("No Update to DWD_MOSMIX, ending")
+            logger.info("No Update to DWD_MOSMIX, ending")
             sys.exit()
 
 else:
@@ -995,12 +996,12 @@ else:
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            logging.info("No Update to DWD_MOSMIX, ending")
+            logger.info("No Update to DWD_MOSMIX, ending")
             sys.exit()
 
 
 # --- Step 2: Process Pandas DataFrame ---
-logging.info("\n--- Converting DataFrame to xarray Dataset (point-based) ---")
+logger.info("\n--- Converting DataFrame to xarray Dataset (point-based) ---")
 
 
 def process_and_interpolate_df(df_input):
@@ -1063,7 +1064,7 @@ for i in range(history_period, 0, -1):
         cached_exists = os.path.exists(hist_zarr_path.replace(".zarr", ".done"))
 
     if cached_exists:
-        logging.info(f"Loading cached historic run: {time_str}")
+        logger.info(f"Loading cached historic run: {time_str}")
         try:
             if save_type == "S3":
                 store = zarr.storage.FsspecStore.from_url(
@@ -1080,13 +1081,12 @@ for i in range(history_period, 0, -1):
             historic_datasets.append(ds_hist)
             continue
         except requests.exceptions.RequestException as e:
-            logging.warning(f"Error loading cached {hist_zarr_path}: {e}")
+            logger.warning(f"Error loading cached {hist_zarr_path}: {e}")
             # Fallback to re-download if load fails? Or just skip?
             # Let's try to re-process.
-            pass
 
     # If not cached, download and process
-    logging.info(f"Processing historic run: {time_str}")
+    logger.info(f"Processing historic run: {time_str}")
 
     # Construct URL for historical file
     # Pattern: MOSMIX_S_2025121018_240.kmz
@@ -1095,9 +1095,10 @@ for i in range(history_period, 0, -1):
     local_hist_path = os.path.join(tmp_dir, hist_filename)
 
     # Check if download is needed
-    if not os.path.exists(local_hist_path):
-        if not download_mosmix_file(hist_url, local_hist_path):
-            continue
+    if not os.path.exists(local_hist_path) and not download_mosmix_file(
+        hist_url, local_hist_path
+    ):
+        continue
 
     # Parse the file
     try:
@@ -1116,7 +1117,7 @@ for i in range(history_period, 0, -1):
         df_hist_filtered = df_hist[df_hist["time"] == target_time].copy()
 
         if df_hist_filtered.empty:
-            logging.warning(
+            logger.warning(
                 f"No data found for target time {target_time} in {hist_filename}"
             )
             continue
@@ -1125,7 +1126,7 @@ for i in range(history_period, 0, -1):
         ds_hist = process_and_interpolate_df(df_hist_filtered)
 
         # Cache the processed dataset
-        logging.info(f"Caching processed run to {hist_zarr_path}")
+        logger.info(f"Caching processed run to {hist_zarr_path}")
         if save_type == "S3":
             store = zarr.storage.FsspecStore.from_url(
                 hist_zarr_path,
@@ -1158,12 +1159,20 @@ for i in range(history_period, 0, -1):
         # Cleanup
         os.remove(local_hist_path)
 
-    except Exception as e:
-        logging.warning(f"Error processing {hist_filename}: {e}")
+    except (
+        # KML / Parsing / Dataframe errors
+        KeyError,
+        ValueError,
+        TypeError,
+        # Zarr, S3 & OS I/O errors
+        OSError,
+        zarr.errors.ZarrError,
+    ) as e:
+        logger.warning(f"Error processing {hist_filename}: {e}")
 
 # Combine datasets
 if historic_datasets:
-    logging.info(f"Combining {len(historic_datasets)} historic datasets with forecast")
+    logger.info(f"Combining {len(historic_datasets)} historic datasets with forecast")
     # Concatenate historic datasets along time dimension
     ds_history = xr.concat(historic_datasets, dim="time")
 
@@ -1176,7 +1185,7 @@ else:
     gridded_dwd_ds = gridded_dwd_ds_forecast
 
 # --- Step 4.5: Build Grid-to-Stations Mapping ---
-logging.info("\n--- Building grid-to-stations mapping ---")
+logger.info("\n--- Building grid-to-stations mapping ---")
 grid_to_stations_map = build_grid_to_stations_map(
     df_data,  # Use original df_data which has station_name
     radius_km=radius_km,
@@ -1191,7 +1200,7 @@ grid_to_stations_map = build_grid_to_stations_map(
 station_map_file = os.path.join(forecast_process_dir, "DWD_MOSMIX_stations.pickle")
 with open(station_map_file, "wb") as f:
     pickle.dump(grid_to_stations_map, f)
-logging.info(f"Station map saved to {station_map_file}")
+logger.info(f"Station map saved to {station_map_file}")
 
 # --- Step 5: Temporal Interpolation and Saving ---
 # Rechunk the data to be more manageable for processing
@@ -1234,7 +1243,7 @@ ds_chunk_disk = xr.open_zarr(forecast_process_path + "_chunk.zarr", chunks="auto
 # Define variables that shouldn't be smoothed linearly (e.g. codes, types)
 nearest_neighbor_vars = ["PTYPE_surface"]
 
-logging.info("Interpolating gaps and extrapolating edges...")
+logger.info("Interpolating gaps and extrapolating edges...")
 
 # Apply efficient interpolation
 ds_chunk_disk_interp = interpolate_temporal_gaps_efficiently(
@@ -1382,4 +1391,4 @@ _clear_directory(forecast_process_dir)
 _clear_directory(tmp_dir)
 
 end_time = time.time()  # End timer
-logging.info(f"\nTotal script execution time: {end_time - start_time:.2f} seconds")
+logger.info(f"\nTotal script execution time: {end_time - start_time:.2f} seconds")

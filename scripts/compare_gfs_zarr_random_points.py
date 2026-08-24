@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Compare two GFS Zarr forecasts at random points.
 
 This utility samples random (variable, time, latitude, longitude) points from two
@@ -14,9 +13,9 @@ from __future__ import annotations
 import argparse
 import math
 import random
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 import zarr
@@ -185,7 +184,7 @@ def build_pairs(
     return pairs
 
 
-def scalar(value: np.ndarray | np.generic | float | int) -> float:
+def scalar(value: np.ndarray | np.generic | float) -> float:
     if isinstance(value, np.ndarray):
         return float(value.item())
     return float(value)

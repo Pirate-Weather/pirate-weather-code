@@ -47,6 +47,7 @@ def test_hrrr_6h_ingest_produces_zarr():
             capture_output=True,
             text=True,
             timeout=1800,
+            check=False,
         )
 
         assert result.returncode == 0, (

@@ -41,6 +41,7 @@ def test_rtma_script_runs():
             capture_output=True,
             text=True,
             timeout=600,  # 10 minute timeout
+            check=False,
         )
 
         # Print stdout and stderr for debugging if needed
@@ -141,6 +142,7 @@ def test_rtma_script_python_check():
         [sys.executable, "-m", "py_compile", str(rtma_script_path)],
         capture_output=True,
         text=True,
+        check=False,
     )
 
     assert result.returncode == 0, f"Script failed to compile: {result.stderr}"

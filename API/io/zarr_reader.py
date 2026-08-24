@@ -7,7 +7,7 @@ import logging
 import os
 import pickle
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import aiobotocore.session as _aio_session
 import numpy as np
@@ -29,26 +29,26 @@ def _default_logger() -> logging.Logger:
 
 @dataclass
 class ZarrStores:
-    ETOPO_f: Optional[Any] = None
-    SubH_Zarr: Optional[Any] = None
-    HRRR_6H_Zarr: Optional[Any] = None
-    GFS_Zarr: Optional[Any] = None
-    ECMWF_Zarr: Optional[Any] = None
-    NBM_Zarr: Optional[Any] = None
-    NBM_Fire_Zarr: Optional[Any] = None
-    GEFS_Zarr: Optional[Any] = None
-    HRRR_Zarr: Optional[Any] = None
-    NWS_Alerts_Zarr: Optional[Any] = None
-    WMO_Alerts_Zarr: Optional[Any] = None
-    RTMA_RU_Zarr: Optional[Any] = None
-    ERA5_Data: Optional[Any] = None
-    DWD_MOSMIX_Zarr: Optional[Any] = None
-    AIGFS_Zarr: Optional[Any] = None
-    AIGEFS_Zarr: Optional[Any] = None
-    ECMWF_AIFS_Zarr: Optional[Any] = None
-    RAQDPS_Zarr: Optional[Any] = None
-    SILAM_Zarr: Optional[Any] = None
-    RAQDPS_LatLon: Optional[Any] = None
+    ETOPO_f: Any | None = None
+    SubH_Zarr: Any | None = None
+    HRRR_6H_Zarr: Any | None = None
+    GFS_Zarr: Any | None = None
+    ECMWF_Zarr: Any | None = None
+    NBM_Zarr: Any | None = None
+    NBM_Fire_Zarr: Any | None = None
+    GEFS_Zarr: Any | None = None
+    HRRR_Zarr: Any | None = None
+    NWS_Alerts_Zarr: Any | None = None
+    WMO_Alerts_Zarr: Any | None = None
+    RTMA_RU_Zarr: Any | None = None
+    ERA5_Data: Any | None = None
+    DWD_MOSMIX_Zarr: Any | None = None
+    AIGFS_Zarr: Any | None = None
+    AIGEFS_Zarr: Any | None = None
+    ECMWF_AIFS_Zarr: Any | None = None
+    RAQDPS_Zarr: Any | None = None
+    SILAM_Zarr: Any | None = None
+    RAQDPS_LatLon: Any | None = None
 
 
 async def get_zarr(store, X, Y):
@@ -56,7 +56,7 @@ async def get_zarr(store, X, Y):
     return store[:, :, X, Y]
 
 
-def has_interior_nan_holes(arr: np.ndarray) -> tuple[bool, Optional[int]]:
+def has_interior_nan_holes(arr: np.ndarray) -> tuple[bool, int | None]:
     """Detect an interior block of NaNs in a 2D array."""
     mask = np.isnan(arr)
     padded = np.pad(mask, ((0, 0), (1, 1)), constant_values=False)
@@ -86,14 +86,14 @@ def _interp_row(row: np.ndarray) -> np.ndarray:
     return row
 
 
-class WeatherParallel(object):
+class WeatherParallel:
     """Helper class for parallel zarr reading operations."""
 
     def __init__(
         self,
         loc_tag: str = "",
         *,
-        logger: Optional[logging.Logger] = None,
+        logger: logging.Logger | None = None,
         timing_enabled: bool = False,
     ):
         self.loc_tag = loc_tag
@@ -172,9 +172,9 @@ class WeatherParallel(object):
                 x_end = min(opened_zarr.shape[-1], x + radius + 1)
 
                 data_out = await asyncio.to_thread(
-                    lambda: (
+                    lambda z=opened_zarr, ys=y_start, ye=y_end, xs=x_start, xe=x_end: (
                         np.nanmax(
-                            opened_zarr[:, :, y_start:y_end, x_start:x_end],
+                            z[:, :, ys:ye, xs:xe],
                             axis=(-2, -1),
                         ).T
                     )
@@ -193,7 +193,7 @@ class WeatherParallel(object):
                     self.logger.debug("### %s Done! %s", model, self.loc_tag)
                 return data_out
 
-            except Exception:
+            except (OSError, IndexError, ValueError, TypeError, zarr.errors.ZarrError):
                 self.logger.exception("### %s Failure! %s", model, self.loc_tag)
                 err_count += 1
 
@@ -212,7 +212,7 @@ def update_zarr_store(
     s3_bucket: str,
     aws_access_key_id: str,
     aws_secret_access_key: str,
-    logger: Optional[logging.Logger] = None,
+    logger: logging.Logger | None = None,
 ) -> ZarrStores:
     """Load zarr data stores from static file paths."""
     logger = logger or _default_logger()
@@ -373,7 +373,7 @@ def _load_aq_lat_lon_pickles(
                 with open(path, "rb") as fh:
                     setattr(stores, attr, pickle.load(fh))
                 logger.info("Loaded %s from: %s", attr, path)
-            except Exception as exc:
+            except (OSError, EOFError, pickle.UnpicklingError) as exc:
                 logger.warning("Could not load %s: %s", attr, exc)
 
 
@@ -392,7 +392,10 @@ def _load_local_store(
                 stores, attr_name, zarr.open(zarr.storage.LocalStore(path), mode="r")
             )
             logger.info("Loaded %s from: %s", attr_name, path)
-        except Exception as exc:  # keep compatibility with ECMWF failure handling
+        except (
+            zarr.errors.ZarrError,
+            OSError,
+        ) as exc:  # keep compatibility with ECMWF failure handling
             logger.info("%s not available: %s", attr_name, exc)
             setattr(stores, attr_name, None)
     else:
@@ -400,7 +403,7 @@ def _load_local_store(
 
 
 def _testing_store(
-    s3: Optional[s3fs.S3FileSystem],
+    s3: s3fs.S3FileSystem | None,
     s3_bucket: str,
     ingest_version: str,
     save_type: str,

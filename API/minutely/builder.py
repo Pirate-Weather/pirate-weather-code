@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
-
 import numpy as np
 
 from API.api_utils import (
@@ -807,21 +805,21 @@ def _process_minute_items(
 def build_minutely_block(
     *,
     minute_array_grib: np.ndarray,
-    source_list: List[str],
-    hrrr_subh_data: Optional[np.ndarray],
-    hrrr_merged: Optional[np.ndarray],
-    nbm_data: Optional[np.ndarray],
-    dwd_mosmix_data: Optional[np.ndarray],
-    gefs_data: Optional[np.ndarray],
-    gfs_data: Optional[np.ndarray],
-    ecmwf_data: Optional[np.ndarray],
-    era5_data: Optional[np.ndarray],
+    source_list: list[str],
+    hrrr_subh_data: np.ndarray | None,
+    hrrr_merged: np.ndarray | None,
+    nbm_data: np.ndarray | None,
+    dwd_mosmix_data: np.ndarray | None,
+    gefs_data: np.ndarray | None,
+    gfs_data: np.ndarray | None,
+    ecmwf_data: np.ndarray | None,
+    era5_data: np.ndarray | None,
     prep_intensity_unit: float,
     version: float,
     lat: float,
     lon: float,
     prioritize_ai_models: bool = False,
-) -> Tuple[
+) -> tuple[
     np.ndarray,
     np.ndarray,
     list,
@@ -829,7 +827,7 @@ def build_minutely_block(
     np.ndarray,
     list,
     list,
-    Optional[np.ndarray],
+    np.ndarray | None,
 ]:
     """
     Compute minutely interpolations and output objects.
@@ -892,19 +890,22 @@ def build_minutely_block(
     # Handle GEFS error interpolation inside HRRR block logic from original code
     # The original code updated gefsMinuteInterpolation inside the HRRR block.
     # We need to replicate that if it's critical.
-    if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
-        if (
+    if (
+        "hrrrsubh" in source_list
+        and hrrrSubHInterpolation is not None
+        and (
             "gefs" in source_list
             and gefsMinuteInterpolation is not None
             and gefs_data is not None
-        ):
-            gefsMinuteInterpolation[:, GEFS["error"]] = np.interp(
-                minute_array_grib,
-                gefs_data[:, 0].squeeze(),
-                gefs_data[:, GEFS["error"]],
-                left=MISSING_DATA,
-                right=MISSING_DATA,
-            )
+        )
+    ):
+        gefsMinuteInterpolation[:, GEFS["error"]] = np.interp(
+            minute_array_grib,
+            gefs_data[:, 0].squeeze(),
+            gefs_data[:, GEFS["error"]],
+            left=MISSING_DATA,
+            right=MISSING_DATA,
+        )
 
     # Calculate Probability
     InterPminute[:, DATA_MINUTELY["prob"]] = _calculate_prob(

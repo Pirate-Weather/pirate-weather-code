@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 
 from API.api_utils import (
@@ -48,6 +50,8 @@ from API.legacy.hourly import apply_legacy_hourly_text
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
 from API.utils.fire import calculate_fosberg_fire_index
+
+logger = logging.getLogger(__name__)
 
 
 def _calculate_intensity_prob(
@@ -803,8 +807,9 @@ def build_hourly_block(
             InterPhour[:, DATA_HOURLY["aqi"]] = np.clip(
                 aqi_arr, CLIP_AQI["min"], CLIP_AQI["max"]
             )
-        except Exception:
-            pass  # AQ computation is non-fatal; leave columns as MISSING_DATA
+        except (ValueError, TypeError, KeyError, IndexError) as exc:
+            # AQ computation is non-fatal; log for observability and fallback to MISSING_DATA
+            logger.debug("Air quality computation skipped/failed: %s", exc)
 
     dayZeroRain, dayZeroSnow, dayZeroIce = _calculate_derived_metrics(
         InterPhour,
@@ -972,7 +977,7 @@ def build_hourly_objects(
     def _nan_to_int_or_nan(value):
         return int(value) if not np.isnan(value) else np.nan
 
-    for idx in range(0, len(hour_array_grib)):
+    for idx in range(len(hour_array_grib)):
         if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]:
             isDay = False
         elif (
@@ -1072,7 +1077,7 @@ def build_hourly_objects(
             # AQI is always included for v2+; detail pollutants gated on inc_airqualitydetails
             aqi_val = InterPhour[idx, DATA_HOURLY["aqi"]]
             hourItem["airQualityIndex"] = (
-                int(round(float(aqi_val))) if not np.isnan(aqi_val) else np.nan
+                round(float(aqi_val)) if not np.isnan(aqi_val) else np.nan
             )
             if inc_airqualitydetails:
                 pm25_val = InterPhour[idx, DATA_HOURLY["pm25"]]

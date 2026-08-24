@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 import metpy as mp
 import numpy as np
@@ -65,7 +65,7 @@ class CurrentSection:
 
     currently: dict
     interp_current: np.ndarray
-    summary_key: Optional[str] = None
+    summary_key: str | None = None
 
 
 @dataclass
@@ -1435,7 +1435,7 @@ def build_current_section(
     NBM_Fire_Merged,
     logger,
     loc_tag: str,
-    log_timing: Optional[Callable[[str], None]] = None,
+    log_timing: Callable[[str], None] | None = None,
     include_currently: bool = True,
     prioritize_ai_models: bool = False,
     aq_inputs=None,
@@ -1677,8 +1677,9 @@ def build_current_section(
                 InterPcurrent[DATA_CURRENT["aqi"]] = np.clip(
                     aqi_val, CLIP_AQI["min"], CLIP_AQI["max"]
                 )
-        except Exception:
-            pass
+        except (ValueError, TypeError, KeyError, IndexError) as exc:
+            # Current AQI computation is non-fatal; log for observability
+            logger.debug("Current AQI computation failed: %s", exc)
 
     curr_temp_si = InterPcurrent[DATA_CURRENT["temp"]]
     curr_dew_si = InterPcurrent[DATA_CURRENT["dew"]]
@@ -1763,7 +1764,7 @@ def build_current_section(
 
     InterPcurrent[((InterPcurrent > -0.01) & (InterPcurrent < 0.01))] = 0
 
-    currently = dict()
+    currently = {}
     currently["time"] = int(minute_array_grib[0])
     currently["summary"] = cText
     currently["icon"] = cIcon
@@ -1804,7 +1805,7 @@ def build_current_section(
     if version >= 2:
         curr_aqi_raw = InterPcurrent[DATA_CURRENT["aqi"]]
         currently["airQualityIndex"] = (
-            int(round(float(curr_aqi_raw))) if not np.isnan(curr_aqi_raw) else np.nan
+            round(float(curr_aqi_raw)) if not np.isnan(curr_aqi_raw) else np.nan
         )
         if inc_airqualitydetails:
 

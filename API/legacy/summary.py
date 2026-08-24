@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from typing import Tuple
 
 from API.PirateDailyText import calculate_day_text
 from API.PirateMinutelyText import calculate_minutely_text
@@ -26,7 +25,7 @@ def build_minutely_summary(
     p_types_icon,
     logger: logging.Logger,
     loc_tag: str,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Compute minutely summary/icon text."""
     if summary_text:
         try:
@@ -59,7 +58,7 @@ def build_hourly_summary(
     base_time_offset_int: int,
     logger: logging.Logger,
     loc_tag: str,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Compute hourly summary/icon text."""
     if time_machine:
         return (
@@ -103,7 +102,7 @@ def build_daily_summary(
     time_machine: bool,
     logger: logging.Logger,
     loc_tag: str,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Compute daily summary/icon text."""
     if time_machine:
         return (

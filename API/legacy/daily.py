@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Tuple
 
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
 from API.constants.text_const import (
@@ -40,7 +39,7 @@ def pick_day_icon_and_summary(
     prep_accum_unit: float,
     vis_units: float,
     wind_unit: float,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Select the icon/summary for daily or half-day entries using legacy rules."""
     if mode == "hourly":
         prob = max_arr[idx, DATA_HOURLY["prob"]]
@@ -115,7 +114,7 @@ def apply_legacy_half_day_text(
     logger: logging.Logger,
     loc_tag: str,
     phase: str,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Apply PirateDayNightText for a half-day period when enabled."""
     # This has been supplemented by pick_day_icon_and_summary, but is kept because I'm afraid to remove it
     if not summary_text:

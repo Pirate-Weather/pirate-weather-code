@@ -178,7 +178,7 @@ def test_nearest_station_empty_list():
             min_distance = min(min_distance, distance)
 
         if min_distance != float("inf"):
-            nearest_station_distance = int(round(min_distance))
+            nearest_station_distance = round(min_distance)
 
     assert nearest_station_distance == -999, (
         "Should return -999 when no stations available"
@@ -193,7 +193,7 @@ def test_distance_rounding():
     station_lat, station_lon = 52.5, 13.55
 
     distance = haversine_distance(user_lat, user_lon, station_lat, station_lon)
-    rounded_distance = int(round(distance))
+    rounded_distance = round(distance)
 
     # Should round to nearest integer
     assert isinstance(rounded_distance, int), "Distance should be an integer"

@@ -202,7 +202,9 @@ while mem <= AIGEFS_MEMBER_COUNT:
     # Perform a check if any data seems to be invalid
     cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-    grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    grib_check = subprocess.run(
+        cmd, shell=True, capture_output=True, encoding="utf-8", check=False
+    )
 
     val_check = validate_grib_stats(grib_check)
 
@@ -234,7 +236,9 @@ while mem <= AIGEFS_MEMBER_COUNT:
     )
 
     # Run wgrib2 to megre all the grib files
-    sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    sp_out = subprocess.run(
+        cmd, shell=True, capture_output=True, encoding="utf-8", check=False
+    )
     if sp_out.returncode != 0:
         logger.error(sp_out.stderr)
         sys.exit()
@@ -284,6 +288,7 @@ while mem <= AIGEFS_MEMBER_COUNT:
         shell=True,
         capture_output=True,
         encoding="utf-8",
+        check=False,
     )
 
     mem += 1
@@ -319,7 +324,7 @@ ncLocalWorking_paths = [
 ]
 
 # Dask
-daskArrays = dict()
+daskArrays = {}
 
 
 # Combine NetCDF files into a Dask Array, since it works significantly better than the xarray mfdataset appraoach
@@ -336,7 +341,7 @@ for dask_var in zarr_vars:
 
 
 # Dict to hold output dask arrays
-daskOutput = dict()
+daskOutput = {}
 
 # Find the probability of precipitation greater than 0.1 mm/h  across all members
 daskOutput["Precipitation_Prob"] = ((daskArrays["APCP_surface"]) > 0.1).sum(
@@ -478,7 +483,7 @@ for i in range(his_period, -1, -6):
         )
 
         grib_check = subprocess.run(
-            cmd, shell=True, capture_output=True, encoding="utf-8"
+            cmd, shell=True, capture_output=True, encoding="utf-8", check=False
         )
 
         val_check = validate_grib_stats(grib_check)
@@ -512,7 +517,9 @@ for i in range(his_period, -1, -6):
         )
 
         # Run wgrib2 to merge all the grib files
-        sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+        sp_out = subprocess.run(
+            cmd, shell=True, capture_output=True, encoding="utf-8", check=False
+        )
         if sp_out.returncode != 0:
             logger.error(sp_out.stderr)
             failCount += 1
