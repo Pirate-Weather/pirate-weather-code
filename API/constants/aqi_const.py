@@ -5,13 +5,13 @@ Supports three AQI systems:
   - Canadian AQHI (unit_system="ca")
   - EU CAQI     (unit_system="si")
   - UK DAQI      (unit_system="uk")
-  - Hong Kong AQHI (aqisystem="hk")
-  - Ireland AQIH (aqisystem="ie")
-  - Israel AQHI (aqisystem="il")
-  - Indonesia ISPU (aqisystem="id")
-  - China AQI (aqisystem="cn")
-  - Malaysia API (aqisystem="my")
-  - Vietnam VN_AQI (aqisystem="vn")
+  - Hong Kong AQHI (aqiunits="hk")
+  - Ireland AQIH (aqiunits="ie")
+  - Israel AQHI (aqiunits="il")
+  - Indonesia ISPU (aqiunits="id")
+  - China AQI (aqiunits="cn")
+  - Malaysia API (aqiunits="my")
+  - Vietnam VN_AQI (aqiunits="vn")
 
 All input concentrations use the model-native units:
   - PM2.5, PM10: µg/m³
