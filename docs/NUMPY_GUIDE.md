@@ -93,19 +93,15 @@ A common pattern in Pirate Weather is selecting the best available data source:
 # Select first non-NaN value from prioritized models
 # Priority: HRRR -> NBM -> GFS
 merged_temp = np.choose(
-    np.argmin([
-        np.isnan(hrrr_temp),
-        np.isnan(nbm_temp),
-        np.isnan(gfs_temp)
-    ], axis=0),
-    [hrrr_temp, nbm_temp, gfs_temp]
+    np.argmin([np.isnan(hrrr_temp), np.isnan(nbm_temp), np.isnan(gfs_temp)], axis=0),
+    [hrrr_temp, nbm_temp, gfs_temp],
 )
 
 # Using np.where for two sources
 final_temp = np.where(
     np.isnan(hrrr_temp),  # condition
-    gfs_temp,              # value if True
-    hrrr_temp              # value if False
+    gfs_temp,  # value if True
+    hrrr_temp,  # value if False
 )
 ```
 
@@ -195,10 +191,10 @@ num_hours, num_variables = InterPhour.shape
    ```python
    # Slow - Python loop
    for i in range(len(temps)):
-       temps[i] = temps[i] * 9/5 + 32
-   
+       temps[i] = temps[i] * 9 / 5 + 32
+
    # Fast - Vectorized
-   temps = temps * 9/5 + 32
+   temps = temps * 9 / 5 + 32
    ```
 
 2. **Pre-allocate arrays**: Create arrays with `np.zeros()` or `np.full()` instead of growing them

@@ -29,6 +29,7 @@ from API.constants.clip_const import (
     CLIP_FEELS_LIKE,
     CLIP_FIRE,
     CLIP_HUMIDITY,
+    CLIP_IL_AQI,
     CLIP_NO2_PPB,
     CLIP_O3_PPB,
     CLIP_OZONE,
@@ -641,7 +642,8 @@ def build_hourly_block(
     icon: str,
     translation,
     unitSystem: str,
-    is_all_night: bool,
+    aqiSystem: str | None = None,
+    is_all_night: bool = False,
     tz_name,
     InterThour_inputs,
     prcipIntensity_inputs,
@@ -791,7 +793,7 @@ def build_hourly_block(
 
             # Compute AQI from pollutant concentrations
             aqi_arr = compute_aqi_array(
-                unit_system=unitSystem,
+                unit_system=aqiSystem if aqiSystem is not None else unitSystem,
                 pm25=InterPhour[:, DATA_HOURLY["pm25"]],
                 pm10=InterPhour[:, DATA_HOURLY["pm10"]],
                 o3=InterPhour[:, DATA_HOURLY["o3"]],
@@ -799,9 +801,15 @@ def build_hourly_block(
                 so2=InterPhour[:, DATA_HOURLY["so2"]],
                 co=InterPhour[:, DATA_HOURLY["co"]],
             )
-            InterPhour[:, DATA_HOURLY["aqi"]] = np.clip(
-                aqi_arr, CLIP_AQI["min"], CLIP_AQI["max"]
-            )
+            # Israel AQI has a scale of -400 to 100, so we need to clip it differently than the standard AQI scale of 0-500.
+            if aqiSystem == "il":
+                InterPhour[:, DATA_HOURLY["aqi"]] = np.clip(
+                    aqi_arr, CLIP_IL_AQI["min"], CLIP_IL_AQI["max"]
+                )
+            else:
+                InterPhour[:, DATA_HOURLY["aqi"]] = np.clip(
+                    aqi_arr, CLIP_AQI["min"], CLIP_AQI["max"]
+                )
         except Exception:
             pass  # AQ computation is non-fatal; leave columns as MISSING_DATA
 

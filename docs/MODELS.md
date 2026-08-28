@@ -177,18 +177,16 @@ This phase involves modifying the API's core logic to load the new model's data 
       # Add your model to the appropriate priority tier
       # This is a simplified example - actual implementation uses
       # priority stacking in data_inputs.py with multiple models
-      
+
       # Example for a high-resolution short-term model:
       if "your_model" in source_list:
           # Temperature merge example using priority fallback
           # Priority order: HRRR -> Your Model -> GFS
           merged_temp = np.choose(
-              np.argmin([
-                  np.isnan(hrrr_temp),
-                  np.isnan(your_model_temp),
-                  np.isnan(gfs_temp)
-              ], axis=0),
-              [hrrr_temp, your_model_temp, gfs_temp]
+              np.argmin(
+                  [np.isnan(hrrr_temp), np.isnan(your_model_temp), np.isnan(gfs_temp)], axis=0
+              ),
+              [hrrr_temp, your_model_temp, gfs_temp],
           )
       ```
       
@@ -202,7 +200,9 @@ This phase involves modifying the API's core logic to load the new model's data 
       temperature_inputs = {
           "gfs": gfs_merged[:, GFS["temp"]] if "gfs" in source_list else None,
           "hrrr": hrrr_merged[:, HRRR["temp"]] if "hrrr" in source_list else None,
-          "your_model": your_model_merged[:, YOUR_MODEL["temp"]] if "your_model" in source_list else None,
+          "your_model": your_model_merged[:, YOUR_MODEL["temp"]]
+          if "your_model" in source_list
+          else None,
           # ... other models
       }
       ```

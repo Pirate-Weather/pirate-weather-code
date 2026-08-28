@@ -22,6 +22,7 @@ from API.constants.clip_const import (
     CLIP_CLOUD,
     CLIP_CO_PPB,
     CLIP_HUMIDITY,
+    CLIP_IL_AQI,
     CLIP_NO2_PPB,
     CLIP_O3_PPB,
     CLIP_OZONE,
@@ -1414,6 +1415,7 @@ def build_current_section(
     translation,
     icon: str,
     unitSystem: str,
+    aqiSystem: str | None = None,
     version: int,
     timeMachine: bool,
     tmExtra: bool,
@@ -1656,7 +1658,7 @@ def build_current_section(
             # (NowCast for EPA PM2.5/PM10, rolling means for O3/CO, etc.) so
             # that the currently AQI is consistent with the hourly AQI values.
             aqi_arr = compute_aqi_array(
-                unit_system=unitSystem,
+                unit_system=aqiSystem if aqiSystem is not None else unitSystem,
                 pm25=aq_inputs.get("pm25"),
                 pm10=aq_inputs.get("pm10"),
                 o3=aq_inputs.get("o3"),
@@ -1673,9 +1675,15 @@ def build_current_section(
             else:
                 aqi_val = float("nan")
             if not np.isnan(aqi_val):
-                InterPcurrent[DATA_CURRENT["aqi"]] = np.clip(
-                    aqi_val, CLIP_AQI["min"], CLIP_AQI["max"]
-                )
+                # Israel AQI has a scale of -400 to 100, so we need to clip it differently than the standard AQI scale of 0-500.
+                if aqiSystem == "il":
+                    InterPcurrent[DATA_CURRENT["aqi"]] = np.clip(
+                        aqi_val, CLIP_IL_AQI["min"], CLIP_IL_AQI["max"]
+                    )
+                else:
+                    InterPcurrent[DATA_CURRENT["aqi"]] = np.clip(
+                        aqi_val, CLIP_AQI["min"], CLIP_AQI["max"]
+                    )
         except Exception:
             pass
 
