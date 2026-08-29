@@ -1,5 +1,5 @@
-# %% URMA Rapid Update Processing script using Dask, FastHerbie, and MetPy
-# Alexander Rey, September 2025
+# %% URMA Processing script using Dask, FastHerbie, and MetPy
+# Alexander Rey, August 2026
 
 # %% Import modules
 import logging
