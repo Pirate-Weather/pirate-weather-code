@@ -58,9 +58,7 @@ logging.basicConfig(
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
 
-historic_process_dir = os.getenv(
-    "forecast_process_dir", default="/mnt/nvme/data/URMA"
-)
+historic_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/URMA")
 tmp_dir = historic_process_dir + "/Downloads"
 
 historic_path = os.getenv("historic_path", default="/mnt/nvme/data/Prod/URMA")
@@ -94,8 +92,7 @@ else:
 if not os.path.exists(tmp_dir):
     os.makedirs(tmp_dir)
 
-if save_type == "Download" and not os.path.exists(
-    historic_path + "/" + ingest_version):
+if save_type == "Download" and not os.path.exists(historic_path + "/" + ingest_version):
     os.makedirs(historic_path + "/" + ingest_version)
 
 herbie_save_dir = make_herbie_save_dir(tmp_dir)
@@ -161,7 +158,6 @@ match_strings = (
 )
 # Historical loop to download the last his_period hours of URMA data, starting from base_time
 for i in range(his_period, -1, -1):
-
     timestamp_str = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
 
     if save_type == "S3":
@@ -183,7 +179,6 @@ for i in range(his_period, -1, -1):
         periods=1,
         freq="1h",
     )
-
 
     fh_analysis = Herbie(
         DATES[0],
@@ -227,9 +222,10 @@ for i in range(his_period, -1, -1):
     xarray_analysis_merged["u10"].data = u_earth
     xarray_analysis_merged["v10"].data = v_earth
 
-
     # Drop time as a coordinate
-    model_UNIX_time = xarray_analysis_merged.time.data.astype("datetime64[s]").astype(int)
+    model_UNIX_time = xarray_analysis_merged.time.data.astype("datetime64[s]").astype(
+        int
+    )
     xarray_analysis_merged = xarray_analysis_merged.reset_coords("time", drop=True)
 
     # Add a new data variables for time
@@ -252,7 +248,6 @@ for i in range(his_period, -1, -1):
             if np.issubdtype(ds_clip.dtype, np.number):
                 mask = (ds_clip >= VALID_DATA_MIN) & (ds_clip <= VALID_DATA_MAX)
                 xarray_analysis_merged[var] = ds_clip.where(mask)  # out-of-range → NaN
-
 
     # Drop the sh2 variable as we no longer need it
     xarray_analysis_merged = xarray_analysis_merged.drop_vars("sh2")
@@ -304,7 +299,7 @@ for i in range(his_period, -1, -1):
     if save_type == "S3":
         logger.info("Zarr zip store closed.")
 
-    # Save a done file to s3 to indicate that the historic data has been processed
+        # Save a done file to s3 to indicate that the historic data has been processed
         if save_type == "S3":
             archive_tmp_zarr_and_upload(
                 tmp_zarr_path=historic_path + "/URMA_Hist_TMP.zarr.zip",
@@ -372,9 +367,11 @@ for dask_var in zarr_vars:
 
         dask_var_array_list.append(daskArrayOut)
     else:
-        daskArrayOut = dask_var_arrays_stack.squeeze(axis=1).rechunk(
-            (len(ncHistWorking_paths), process_chunk, process_chunk)
-        ).astype("float32")
+        daskArrayOut = (
+            dask_var_arrays_stack.squeeze(axis=1)
+            .rechunk((len(ncHistWorking_paths), process_chunk, process_chunk))
+            .astype("float32")
+        )
 
         dask_var_array_list.append(daskArrayOut)
 
