@@ -161,12 +161,12 @@ for i in range(his_period, -1, -1):
     timestamp_str = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
 
     if save_type == "S3":
-        s3_path = f"{historic_path}/URMA_Hist_v1_{timestamp_str}.zarr.tar.gz"
+        s3_path = f"{historic_path}/URMA_Hist_{timestamp_str}.zarr.tar.gz"
         if s3.exists(s3_path.replace(".tar.gz", ".done")):
             logger.info("File already exists in S3, skipping: %s", s3_path)
             continue
     else:
-        local_path = f"{historic_path}/URMA_Hist_v1_{timestamp_str}.zarr"
+        local_path = f"{historic_path}/URMA_Hist_{timestamp_str}.zarr"
         if os.path.exists(local_path.replace(".zarr", ".done")):
             logger.info("File already exists locally, skipping: %s", local_path)
             continue
