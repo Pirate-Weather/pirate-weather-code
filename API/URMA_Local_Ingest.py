@@ -10,7 +10,7 @@ import sys
 import time
 import warnings
 
-import dask as da
+import dask.array as da
 
 # Define ECCODES_DEFINITION_PATH env variable for eccodes
 # This is needed in my testing instance- should not be required for the docker image
@@ -264,11 +264,11 @@ for i in range(his_period, -1, -1):
         .transpose("var", "time", "y", "x")
     )
 
-    # Mask out invalid data
-    dask_var_array = mask_invalid_data(xarray_analysis_stack)
+    # Apply invalid data masking directly across the dataset data variables
+    xarray_analysis_merged = mask_invalid_data(xarray_analysis_merged)
 
-    # Add padding to the zarr store
-    dask_var_array = pad_to_chunk_size(dask_var_array, final_chunk)
+    # Add padding to spatial dimensions (y, x) on the dataset level if required
+    xarray_analysis_merged = pad_to_chunk_size(xarray_analysis_merged, final_chunk)
 
     # Create a zarr backed dask array
     if save_type == "S3":
@@ -278,22 +278,25 @@ for i in range(his_period, -1, -1):
     else:
         zarr_store = zarr.storage.LocalStore(historic_path + "/URMA_Hist_TMP.zarr")
 
-    # Create zarr array
-    zarr_array = zarr.create_array(
-        store=zarr_store,
-        shape=(
-            len(zarr_vars),
-            1,
-            dask_var_array.shape[2],
-            dask_var_array.shape[3],
-        ),
-        chunks=(len(zarr_vars), 1, final_chunk, final_chunk),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
+    # Select your variables and add the 1-length time dimension to each
+    ds_out = (
+        xarray_analysis_merged[vars_in]
+        .expand_dims("time")
+        .chunk({"time": 1, "y": final_chunk, "x": final_chunk})
     )
 
-    with da.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        dask_var_array.to_zarr(zarr_array, overwrite=True, compute=True)
+    # Xarray natively writes a Zarr GROUP with named variable keys (e.g., store/t2m)
+    ds_out.to_zarr(
+        zarr_store,
+        mode="w",
+        encoding={
+            var: {
+                "compressor": zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+                "dtype": "float32",
+            }
+            for var in vars_in
+        },
+    )
 
     close_store(zarr_store)
     if save_type == "S3":
@@ -344,38 +347,72 @@ else:
 dask_var_array_list = []
 
 for dask_var in zarr_vars:
+    # Component reads the named variable dataset key (e.g., store/t2m, store/time)
     daskVarArrays = [
         da.from_zarr(local_path, component=dask_var, inline_array=True)
         for local_path in ncHistWorking_paths
     ]
 
-    # Stack along time dimension (axis 0)
+    # Stacking produces shape: (n_files, 1, y, x)
     dask_var_arrays_stack = da.stack(daskVarArrays, axis=0)
 
     if dask_var == "time":
-        # Compute exact time matrix dimensions
-        np_cat_times = dask_var_arrays_stack[:, 0, 0].compute()
-        ny, nx = daskVarArrays[0].shape[1], daskVarArrays[0].shape[2]
+        # Index [:, 0, 0, 0] strips time-dim-1, y, and x to yield a 1D vector (n_files,)
+        np_cat_times = dask_var_arrays_stack[:, 0, 0, 0].compute()
+        ny, nx = daskVarArrays[0].shape[-2], daskVarArrays[0].shape[-1]
 
-        daskArrayOut = da.from_array(
+        # Expand twice: (n_files,) -> (n_files, 1, 1) -> Tile to (n_files, ny, nx)
+        dask_array_out = da.from_array(
             np.tile(
-                np.expand_dims(np.expand_dims(np_cat_times, axis=1), axis=1),
+                np_cat_times[:, np.newaxis, np.newaxis],
                 (1, ny, nx),
             )
         ).rechunk((len(np_cat_times), process_chunk, process_chunk))
 
-        dask_var_array_list.append(daskArrayOut)
+        dask_var_array_list.append(dask_array_out)
     else:
-        daskArrayOut = (
+        # Squeeze out axis=1 (the 1-length time dimension) to leave (n_files, y, x)
+        dask_array_out = (
             dask_var_arrays_stack.squeeze(axis=1)
             .rechunk((len(ncHistWorking_paths), process_chunk, process_chunk))
             .astype("float32")
         )
 
-        dask_var_array_list.append(daskArrayOut)
+        dask_var_array_list.append(dask_array_out)
 
 # Merge variables into a single 4D array (var, time, y, x)
 dask_var_array_list_merge = da.stack(dask_var_array_list, axis=0)
+
+# Save to Production Path
+if save_type == "S3":
+    s3.put_file(
+        historic_process_dir + "/URMA_Hist.zarr.zip",
+        historic_path + "/" + ingest_version + "/URMA_Hist.zarr.zip",
+    )
+    logger.info("Final Zarr zip file uploaded to S3.")
+
+    with open(historic_process_dir + "/URMA_Hist.time.pickle", "wb") as file:
+        pickle.dump(base_time, file)
+    s3.put_file(
+        historic_process_dir + "/URMA_Hist.time.pickle",
+        historic_path + "/" + ingest_version + "/URMA_Hist.time.pickle",
+    )
+    logger.info("Time pickle file uploaded to S3.")
+
+else:
+    with open(historic_process_dir + "/URMA_Hist.time.pickle", "wb") as file:
+        pickle.dump(base_time, file)
+    shutil.move(
+        historic_process_dir + "/URMA_Hist.time.pickle",
+        historic_path + "/" + ingest_version + "/URMA_Hist.time.pickle",
+    )
+    shutil.copytree(
+        historic_process_dir + "/URMA_Hist.zarr",
+        historic_path + "/" + ingest_version + "/URMA_Hist.zarr",
+        dirs_exist_ok=True,
+    )
+    logger.info("Final Zarr and time pickle files moved to local storage.")
+
 
 # Clean up
 shutil.rmtree(historic_process_dir)
