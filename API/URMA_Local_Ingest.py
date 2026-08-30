@@ -264,25 +264,24 @@ for i in range(his_period, -1, -1):
         .transpose("var", "time", "y", "x")
     )
 
-    # Apply invalid data masking directly across the dataset data variables
-    xarray_analysis_merged = mask_invalid_data(xarray_analysis_merged)
+    # Apply invalid data masking to the stacked (var, time, y, x) Dask array
+    dask_var_array = mask_invalid_data(xarray_analysis_stack.data)
 
-    # Add padding to spatial dimensions (y, x) on the dataset level if required
-    xarray_analysis_merged = pad_to_chunk_size(xarray_analysis_merged, final_chunk)
+    # Add padding to the spatial dimensions
+    dask_var_array = pad_to_chunk_size(dask_var_array, final_chunk).rechunk(
+        (len(vars_in), 1, final_chunk, final_chunk)
+    )
 
-    # Create a zarr backed dask array
-    if save_type == "S3":
-        zarr_store = zarr.storage.ZipStore(
-            historic_path + "/URMA_Hist_TMP.zarr.zip", mode="a", compression=0
-        )
-    else:
-        zarr_store = zarr.storage.LocalStore(historic_path + "/URMA_Hist_TMP.zarr")
+    # Historic archives contain a directory-backed Zarr group.
+    zarr_store = zarr.storage.LocalStore(historic_path + "/URMA_Hist_TMP.zarr")
 
-    # Select your variables and add the 1-length time dimension to each
-    ds_out = (
-        xarray_analysis_merged[vars_in]
-        .expand_dims("time")
-        .chunk({"time": 1, "y": final_chunk, "x": final_chunk})
+    # Preserve the named variables used by the history merge while publishing
+    # the masked and padded Dask data.
+    ds_out = xr.Dataset(
+        {
+            var: (("step", "y", "x"), dask_var_array[var_index])
+            for var_index, var in enumerate(vars_in)
+        }
     )
 
     # Xarray natively writes a Zarr GROUP with named variable keys (e.g., store/t2m)
@@ -300,9 +299,8 @@ for i in range(his_period, -1, -1):
 
     close_store(zarr_store)
     if save_type == "S3":
-        logger.info("Zarr zip store closed.")
         archive_tmp_zarr_and_upload(
-            tmp_zarr_path=historic_path + "/URMA_Hist_TMP.zarr.zip",
+            tmp_zarr_path=historic_path + "/URMA_Hist_TMP.zarr",
             s3_path=s3_path,
             archive_member_name="URMA_Hist.zarr",
             s3=s3,
@@ -329,7 +327,7 @@ if save_type == "S3":
             s3=s3,
             historic_path=historic_path,
             final_zarr_name=final_zarr_name,
-            extracted_store_name="URMA.zarr",
+            extracted_store_name="URMA_Hist.zarr",
             local_temp_dir=local_temp_dir,
             expected_vars=zarr_vars,
         )
@@ -383,10 +381,15 @@ for dask_var in zarr_vars:
 # Merge variables into a single 4D array (var, time, y, x)
 dask_var_array_list_merge = da.stack(dask_var_array_list, axis=0)
 
+# Materialize the merged history before publishing it.
+final_zarr_path = historic_process_dir + "/URMA_Hist.zarr"
+dask_var_array_list_merge.to_zarr(final_zarr_path, overwrite=True, compute=True)
+
 # Save to Production Path
 if save_type == "S3":
+    shutil.make_archive(final_zarr_path, "zip", final_zarr_path)
     s3.put_file(
-        historic_process_dir + "/URMA_Hist.zarr.zip",
+        final_zarr_path + ".zip",
         historic_path + "/" + ingest_version + "/URMA_Hist.zarr.zip",
     )
     logger.info("Final Zarr zip file uploaded to S3.")
@@ -407,7 +410,7 @@ else:
         historic_path + "/" + ingest_version + "/URMA_Hist.time.pickle",
     )
     shutil.copytree(
-        historic_process_dir + "/URMA_Hist.zarr",
+        final_zarr_path,
         historic_path + "/" + ingest_version + "/URMA_Hist.zarr",
         dirs_exist_ok=True,
     )
