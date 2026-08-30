@@ -298,20 +298,19 @@ for i in range(his_period, -1, -1):
     close_store(zarr_store)
     if save_type == "S3":
         logger.info("Zarr zip store closed.")
-
-        # Save a done file to s3 to indicate that the historic data has been processed
-        if save_type == "S3":
-            archive_tmp_zarr_and_upload(
-                tmp_zarr_path=historic_path + "/URMA_Hist_TMP.zarr.zip",
-                s3_path=s3_path,
-                archive_member_name="URMA_Hist.zarr",
-                s3=s3,
-            )
-        else:
-            os.rename(historic_path + "/URMA_Hist_TMP.zarr.zip", local_path)
-            done_file = local_path.replace(".zarr", ".done")
-            with open(done_file, "w") as f:
-                f.write("Done")
+        archive_tmp_zarr_and_upload(
+            tmp_zarr_path=historic_path + "/URMA_Hist_TMP.zarr.zip",
+            s3_path=s3_path,
+            archive_member_name="URMA_Hist.zarr",
+            s3=s3,
+        )
+    else:
+        if os.path.exists(local_path):
+            shutil.rmtree(local_path)
+        os.rename(historic_path + "/URMA_Hist_TMP.zarr", local_path)
+        done_file = local_path.replace(".zarr", ".done")
+        with open(done_file, "w") as f:
+            f.write("Done")
 
 # %% Upload to S3 or move to final location
 
