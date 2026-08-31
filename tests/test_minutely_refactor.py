@@ -39,13 +39,13 @@ def test_build_minutely_block_structure():
 
     (
         InterPminute,
-        InterTminute,
+        _,
         minuteItems,
-        minuteItems_si,
-        maxPchance,
-        pTypesText,
-        pTypesIcon,
-        hrrrSubHInterpolation,
+        _,
+        _,
+        _,
+        _,
+        _,
     ) = result
 
     assert isinstance(InterPminute, np.ndarray)

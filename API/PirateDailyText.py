@@ -186,10 +186,7 @@ def _get_time_phrase(
                 start_idx == check_period + 2
                 and end_idx == 3
                 and total_periods_available == 4
-            ):
-                summary_text_temp = ["starting", all_periods[start_idx]]
-            # Starts in the 4th period and continues to the 5th (total 5 periods)
-            elif (
+            ) or (
                 start_idx == check_period + 3
                 and end_idx == 4
                 and total_periods_available == 5
@@ -256,10 +253,7 @@ def _get_time_phrase(
                 start_idx == check_period + 1
                 and end_idx == 3
                 and total_periods_available == 4
-            ):
-                summary_text_temp = ["starting", all_periods[start_idx]]
-            # Starts in the 3rd period and continuous for 3 periods (total 5 periods)
-            elif (
+            ) or (
                 start_idx == check_period + 2
                 and end_idx == 4
                 and total_periods_available == 5
@@ -1088,8 +1082,9 @@ def calculate_day_text(
             overall_precip_accum_sum += p_data["precip_accum_sum"]
 
             # Track max CAPE that occurs with precipitation
-            if p_data["max_cape_with_precip"] > overall_max_cape_with_precip:
-                overall_max_cape_with_precip = p_data["max_cape_with_precip"]
+            overall_max_cape_with_precip = max(
+                overall_max_cape_with_precip, p_data["max_cape_with_precip"]
+            )
 
         # Check if thunderstorms are significant in this period
         # Thunderstorms require both precipitation and sufficient atmospheric instability
@@ -1370,11 +1365,11 @@ def calculate_day_text(
                         ["range", snow_low_accum, snow_max_accum],
                     ]
 
-    if snow_sentence is not None:
-        if most_common_overall_precip_type == PRECIP_TYPES["snow"]:
-            precip_summary_text = ["parenthetical", precip_summary_text, snow_sentence]
-        elif secondary_precip_condition == "medium-snow":
-            precip_summary_text = ["parenthetical", precip_summary_text, snow_sentence]
+    if snow_sentence is not None and (
+        most_common_overall_precip_type == PRECIP_TYPES["snow"]
+        or secondary_precip_condition == "medium-snow"
+    ):
+        precip_summary_text = ["parenthetical", precip_summary_text, snow_sentence]
 
     # Combine primary and secondary precipitation conditions with "and"
     if (
@@ -1416,8 +1411,10 @@ def calculate_day_text(
                 later_conditions_list.append("precip")
 
         # Check visibility (fog)
-        if vis_periods and vis_periods[0] == 0:
-            if (
+        if (
+            vis_periods
+            and vis_periods[0] == 0
+            and (
                 calculate_vis_text(
                     hours[0].get("visibility", DEFAULT_VISIBILITY),
                     hours[0].get("temperature", MISSING_DATA),
@@ -1429,18 +1426,22 @@ def calculate_day_text(
                 )
                 is None
                 and "later" not in all_period_names[0]
-            ):  # Avoid double "later"
-                all_period_names[0] = "later-" + all_period_names[0]
-                later_conditions_list.append("vis")
+            )
+        ):  # Avoid double "later"
+            all_period_names[0] = "later-" + all_period_names[0]
+            later_conditions_list.append("vis")
 
         # Check wind
-        if wind_periods and wind_periods[0] == 0:
-            if (
+        if (
+            wind_periods
+            and wind_periods[0] == 0
+            and (
                 calculate_wind_text(hours[0]["windSpeed"], icon_set, "summary") is None
                 and "later" not in all_period_names[0]
-            ):
-                all_period_names[0] = "later-" + all_period_names[0]
-                later_conditions_list.append("wind")
+            )
+        ):
+            all_period_names[0] = "later-" + all_period_names[0]
+            later_conditions_list.append("wind")
 
     # Flags to indicate if a condition is present at all in the forecast block
     has_precip = bool(precip_periods) and precip_summary_text is not None
@@ -1565,7 +1566,7 @@ def calculate_day_text(
     (
         cloud_full_summary,
         _,
-        cloud_vis_combined_flag,
+        _,
     ) = calculate_period_summary_text(
         overall_cloud_idx,  # Pass all period indices for cloud to find its pattern
         final_cloud_text,
@@ -1672,7 +1673,7 @@ def calculate_day_text(
         not candidate_summaries_for_final_assembly
     ):  # If no higher-priority conditions are present
         is_cloud_all_day = (
-            len(period_stats) == len(period_stats) if period_stats else False
+            len(overall_cloud_idx) == len(period_stats) if period_stats else False
         )  # True if any periods exist
         candidate_summaries_for_final_assembly.append(
             {

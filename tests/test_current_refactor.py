@@ -162,7 +162,7 @@ def test_build_current_section_interpolates_current_aq_inputs():
     assert result.interp_current[DATA_CURRENT["pm25"]] == 15.0
     assert result.currently["pm25"] == 15.0
     assert result.interp_current[DATA_CURRENT["aqi"]] == expected_aqi
-    assert result.currently["airQualityIndex"] == int(round(float(expected_aqi)))
+    assert result.currently["airQualityIndex"] == round(float(expected_aqi))
 
 
 def test_get_fire_derived_from_si_inputs():
