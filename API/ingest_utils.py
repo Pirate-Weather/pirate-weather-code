@@ -12,12 +12,14 @@ import sys
 import tarfile
 import time
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
 import cartopy.crs as ccrs
 import dask.array as da
 import numpy as np
+import requests
 import xarray as xr
 
 # Import atmospheric calculation constants
@@ -228,6 +230,160 @@ def make_herbie_save_dir(tmp_dir: str, prefix: str = "herbie") -> str:
     return save_dir
 
 
+def configure_herbie_request_timeouts(request_timeout_s: int | None = None) -> None:
+    """Patch Herbie's availability probes so stalled sockets cannot hang ingest."""
+    if request_timeout_s is None:
+        request_timeout_s = positive_int_env("herbie_request_timeout_seconds", 120)
+
+    from herbie.core import Herbie
+
+    if getattr(Herbie, "_pirate_weather_request_timeout_s", None) == request_timeout_s:
+        return
+
+    def _check_grib_with_timeout(self, url: str, min_content_length: int = 10) -> bool:
+        try:
+            head = requests.head(url, timeout=(10, request_timeout_s))
+        except requests.RequestException:
+            return False
+
+        if not head.ok:
+            return False
+        content_length = head.headers.get("Content-Length")
+        return content_length is not None and int(content_length) > min_content_length
+
+    def _check_idx_with_timeout(
+        self, url: str, verbose: bool = False
+    ) -> tuple[bool, str | None]:
+        for suffix in self.IDX_SUFFIX:
+            if Path(url).suffix in {".grb", ".grib", ".grb2", ".grib2"}:
+                idx_url = url.rsplit(".", maxsplit=1)[0] + suffix
+            else:
+                idx_url = url + suffix
+
+            try:
+                if "blob.core.windows.net" in idx_url:
+                    dl_url = (
+                        "https://planetarycomputer.microsoft.com/api/sas/v1/sign?href="
+                        + idx_url
+                    )
+                    response = requests.get(dl_url, timeout=(10, request_timeout_s))
+                    idx_url = response.json()["href"]
+                idx_exists = requests.head(
+                    idx_url, timeout=(10, request_timeout_s)
+                ).ok
+            except requests.RequestException as exc:
+                idx_exists = False
+                if verbose:
+                    print(
+                        f"Unable to get index file from {idx_url} "
+                        f"due to error {exc}"
+                    )
+
+            if verbose:
+                print(f"Herbie index URL: {idx_url}")
+                print(f"Herbie index exists: {idx_exists}")
+            if idx_exists:
+                return idx_exists, idx_url
+
+        return False, None
+
+    Herbie._check_grib = _check_grib_with_timeout
+    Herbie._check_idx = _check_idx_with_timeout
+    Herbie._pirate_weather_request_timeout_s = request_timeout_s
+
+
+def _is_remote_url(path_or_url: Any) -> bool:
+    return str(path_or_url).startswith(("http://", "https://"))
+
+
+def _download_full_herbie_file(
+    herbie_ref,
+    *,
+    overwrite: bool,
+    request_timeout_s: int,
+    chunk_size: int = 1024 * 1024,
+) -> str:
+    """Download a full Herbie GRIB with request timeouts and atomic replacement."""
+    out_file = Path(herbie_ref.get_localFilePath(None)).expanduser()
+    if out_file.exists() and out_file.stat().st_size > 0 and not overwrite:
+        return str(out_file)
+
+    grib_source = getattr(herbie_ref, "grib", None)
+    if grib_source is None:
+        raise RuntimeError(f"GRIB2 file not found: {herbie_ref!r}")
+
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp_file = out_file.with_name(f"{out_file.name}.tmp.{os.getpid()}")
+    if tmp_file.exists():
+        tmp_file.unlink()
+
+    try:
+        if _is_remote_url(grib_source):
+            with requests.get(
+                str(grib_source),
+                stream=True,
+                timeout=(10, request_timeout_s),
+            ) as response:
+                response.raise_for_status()
+                with open(tmp_file, "wb") as file:
+                    for chunk in response.iter_content(chunk_size=chunk_size):
+                        if chunk:
+                            file.write(chunk)
+        else:
+            source_path = Path(grib_source).expanduser()
+            if source_path.resolve() == out_file.resolve():
+                if out_file.exists() and out_file.stat().st_size > 0:
+                    return str(out_file)
+                raise RuntimeError(f"Local GRIB file is empty or missing: {out_file}")
+            shutil.copyfile(source_path, tmp_file)
+
+        if not tmp_file.exists() or tmp_file.stat().st_size == 0:
+            raise RuntimeError(f"Downloaded empty GRIB file: {out_file}")
+
+        tmp_file.replace(out_file)
+        return str(out_file)
+    except Exception:
+        if tmp_file.exists():
+            tmp_file.unlink()
+        raise
+
+
+def _download_full_herbie_files(
+    herbie_obj,
+    *,
+    overwrite: bool,
+    max_threads: int,
+    request_timeout_s: int,
+) -> list[str]:
+    """Download full-file Herbie refs without relying on Herbie's no-timeout downloader."""
+    refs = list(herbie_obj.file_exists)
+    downloaded_paths: list[str] = []
+    threads = min(len(refs), max_threads)
+    if threads < 1:
+        return downloaded_paths
+
+    logger.info(
+        "Downloading %d full Herbie files with %d threads and %ss read timeout.",
+        len(refs),
+        threads,
+        request_timeout_s,
+    )
+    with ThreadPoolExecutor(max_workers=threads) as executor:
+        futures = [
+            executor.submit(
+                _download_full_herbie_file,
+                ref,
+                overwrite=overwrite,
+                request_timeout_s=request_timeout_s,
+            )
+            for ref in refs
+        ]
+        for future in as_completed(futures):
+            downloaded_paths.append(future.result())
+
+    return downloaded_paths
+
+
 def download_herbie_with_retry(
     herbie_obj,
     expected_count: int,
@@ -243,7 +399,14 @@ def download_herbie_with_retry(
             # Overwrite on retries to avoid keeping partial/corrupt files.
             download_kwargs = {"verbose": True, "overwrite": attempt > 1}
             if search is None:
-                downloaded = herbie_obj.download(**download_kwargs)
+                downloaded = _download_full_herbie_files(
+                    herbie_obj,
+                    overwrite=download_kwargs["overwrite"],
+                    max_threads=positive_int_env("herbie_download_threads", 20),
+                    request_timeout_s=positive_int_env(
+                        "herbie_request_timeout_seconds", 120
+                    ),
+                )
             else:
                 downloaded = herbie_obj.download(search, **download_kwargs)
 

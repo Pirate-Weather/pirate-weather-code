@@ -9,7 +9,7 @@ diskcache==5.6.3
 distributed==2026.8.0
 eccodes==2.47.0
 geopandas==1.1.4
-git+https://github.com/blaylockbk/Herbie.git
+git+https://github.com/blaylockbk/Herbie.git@0e27359f2426e0ed4e2c24351ab834636f120ef9
 metpy==1.7.1
 netCDF4==1.7.4
 numba==0.67.0

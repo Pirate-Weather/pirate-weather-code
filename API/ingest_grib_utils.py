@@ -10,6 +10,7 @@ import logging
 import os
 import shlex
 import sys
+import time
 from datetime import datetime
 from typing import Any, cast
 
@@ -18,7 +19,9 @@ from herbie import FastHerbie
 
 from API.ingest_utils import (
     build_herbie_grib_list,
+    configure_herbie_request_timeouts,
     download_herbie_with_retry,
+    positive_int_env,
     run_command,
     validate_grib_stats,
 )
@@ -174,6 +177,8 @@ def download_and_validate_gfs_subset(
     if path_search is None:
         path_search = search
 
+    configure_herbie_request_timeouts()
+
     run_date_dt = cast(datetime, pd.Timestamp(run_date).to_pydatetime())
     herbie_dates: list[datetime] = [run_date_dt]
 
@@ -183,24 +188,51 @@ def download_and_validate_gfs_subset(
         "product": product,
         "verbose": False,
         "save_dir": save_dir,
+        "max_threads":positive_int_env("herbie_download_threads", 20),
     }
     if priority is not None:
         fast_herbie_kwargs["priority"] = priority
     fast_herbie_kwargs.update(herbie_kwargs)
 
-    herbie_obj = FastHerbie(herbie_dates, **fast_herbie_kwargs)
-
     if expected_count is None:
         expected_count = len(expected_forecast_hours or forecast_hours)
 
-    download_herbie_with_retry(
-        herbie_obj=herbie_obj,
-        search=search,
-        expected_count=expected_count,
-        dataset_name=dataset_name,
-        retries=herbie_download_retries,
-        retry_sleep_s=herbie_retry_sleep_seconds,
-    )
+    attempts = max(1, herbie_download_retries)
+    herbie_obj = None
+    for attempt in range(1, attempts + 1):
+        try:
+            herbie_obj = FastHerbie(herbie_dates, **fast_herbie_kwargs)
+            download_herbie_with_retry(
+                herbie_obj=herbie_obj,
+                search=search,
+                expected_count=expected_count,
+                dataset_name=dataset_name,
+                retries=1,
+                retry_sleep_s=herbie_retry_sleep_seconds,
+            )
+            break
+        except Exception as exc:
+            if attempt == attempts:
+                logger.exception(
+                    "%s download failed after %d attempts",
+                    dataset_name,
+                    attempts,
+                )
+                raise
+
+            sleep_s = herbie_retry_sleep_seconds * attempt
+            logger.warning(
+                "%s download attempt %d/%d failed (%s). Retrying in %ss",
+                dataset_name,
+                attempt,
+                attempts,
+                exc,
+                sleep_s,
+            )
+            time.sleep(sleep_s)
+
+    if herbie_obj is None:
+        raise RuntimeError(f"{dataset_name} download did not create a Herbie object.")
 
     downloaded_count = len(herbie_obj.file_exists)
 

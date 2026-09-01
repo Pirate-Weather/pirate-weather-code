@@ -35,6 +35,7 @@ from API.ingest_utils import (
     FORECAST_LEAD_RANGES,
     archive_tmp_zarr_and_upload,
     close_store,
+    configure_herbie_request_timeouts,
     configure_zarr_limits,
     download_extract_historic_archive,
     interp_time_map_blocks_nan,
@@ -48,6 +49,8 @@ from API.ingest_utils import (
 
 dotenv_path = find_dotenv(usecwd=True)
 loaded = load_dotenv(dotenv_path, override=True)
+
+configure_herbie_request_timeouts()
 
 from herbie import HerbieLatest  # noqa: E402
 
@@ -92,6 +95,22 @@ zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
 )
 
 
+def clean_process_dir_preserving_downloads(process_dir: str, downloads_dir: str) -> None:
+    """Clean GDPS process artifacts while preserving the Herbie download cache."""
+    os.makedirs(process_dir, exist_ok=True)
+    downloads_path = os.path.abspath(downloads_dir)
+
+    for entry in os.scandir(process_dir):
+        if os.path.abspath(entry.path) == downloads_path:
+            continue
+        if entry.is_dir(follow_symlinks=False):
+            shutil.rmtree(entry.path)
+        else:
+            os.remove(entry.path)
+
+    os.makedirs(downloads_dir, exist_ok=True)
+
+
 # Define the processing and history chunk size
 process_chunk = CHUNK_SIZES["GDPS"]
 
@@ -100,16 +119,7 @@ final_chunk = FINAL_CHUNK_SIZES["GDPS"]
 
 his_period = HISTORY_PERIODS["GDPS"]
 
-# Create new directory for processing if it does not exist
-if not os.path.exists(forecast_process_dir):
-    os.makedirs(forecast_process_dir)
-else:
-    # If it does exist, remove it
-    shutil.rmtree(forecast_process_dir)
-    os.makedirs(forecast_process_dir)
-
-if not os.path.exists(tmp_dir):
-    os.makedirs(tmp_dir)
+clean_process_dir_preserving_downloads(forecast_process_dir, tmp_dir)
 
 if save_type == "Download":
     if not os.path.exists(forecast_path + "/" + ingest_version):
@@ -127,7 +137,7 @@ latest_run = HerbieLatest(
     priority=["msc"],
     periods=7,
     fxx=240,
-    product="15km",
+    product="15km/grib2/lat_lon",
     verbose=True,
     variable="AirTemp",
     level="AGL-2m",
