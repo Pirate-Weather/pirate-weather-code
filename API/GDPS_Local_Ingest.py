@@ -95,7 +95,9 @@ zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
 )
 
 
-def clean_process_dir_preserving_downloads(process_dir: str, downloads_dir: str) -> None:
+def clean_process_dir_preserving_downloads(
+    process_dir: str, downloads_dir: str
+) -> None:
     """Clean GDPS process artifacts while preserving the Herbie download cache."""
     os.makedirs(process_dir, exist_ok=True)
     downloads_path = os.path.abspath(downloads_dir)
@@ -757,11 +759,44 @@ with ProgressBar():
         overwrite=True,
     )
 
-    # 4. Rechunk it to match the final array
-    # 5. Write it out to the zarr array
-    daskVarArrayStackDiskInterpPad.round(5).rechunk(
-        (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
-    ).to_zarr(zarr_array, overwrite=True, compute=True)
+    # 4. Write source-aligned spatial tiles. A single whole-array rechunk to the
+    # final 3x3 spatial chunks builds a very large store graph and retains too
+    # much memory during execution.
+    source_y = daskVarArrayStackDiskInterp.shape[2]
+    source_x = daskVarArrayStackDiskInterp.shape[3]
+    target_y = zarr_array.shape[2]
+    target_x = zarr_array.shape[3]
+    y_starts = range(0, target_y, process_chunk)
+    x_starts = range(0, target_x, process_chunk)
+
+    for y_start in tqdm(y_starts, desc="Writing GDPS.zarr rows"):
+        y_stop = min(y_start + process_chunk, target_y)
+        y_source_stop = min(y_stop, source_y)
+        for x_start in x_starts:
+            x_stop = min(x_start + process_chunk, target_x)
+            x_source_stop = min(x_stop, source_x)
+
+            with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+                tile = daskVarArrayStackDiskInterp[
+                    :, :, y_start:y_source_stop, x_start:x_source_stop
+                ].compute()
+
+            tile = np.round(tile, 5).astype("float32", copy=False)
+            if tile.shape[2] != y_stop - y_start or tile.shape[3] != x_stop - x_start:
+                padded_tile = np.full(
+                    (
+                        tile.shape[0],
+                        tile.shape[1],
+                        y_stop - y_start,
+                        x_stop - x_start,
+                    ),
+                    np.nan,
+                    dtype="float32",
+                )
+                padded_tile[:, :, : tile.shape[2], : tile.shape[3]] = tile
+                tile = padded_tile
+
+            zarr_array[:, :, y_start:y_stop, x_start:x_stop] = tile
 
 
 close_store(zarr_store)

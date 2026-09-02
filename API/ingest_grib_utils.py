@@ -188,7 +188,7 @@ def download_and_validate_gfs_subset(
         "product": product,
         "verbose": False,
         "save_dir": save_dir,
-        "max_threads":positive_int_env("herbie_download_threads", 20),
+        "max_threads": positive_int_env("herbie_download_threads", 20),
     }
     if priority is not None:
         fast_herbie_kwargs["priority"] = priority

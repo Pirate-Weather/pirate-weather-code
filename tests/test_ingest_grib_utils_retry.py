@@ -25,9 +25,7 @@ def test_download_subset_rebuilds_fast_herbie_between_retries(tmp_path, monkeypa
             else:
                 self.file_exists = [_FakeRef(str(f1)), _FakeRef(str(f2))]
 
-    def _fake_download_herbie_with_retry(
-        *, herbie_obj, expected_count, **_kwargs
-    ):
+    def _fake_download_herbie_with_retry(*, herbie_obj, expected_count, **_kwargs):
         if len(herbie_obj.file_exists) != expected_count:
             raise RuntimeError("missing availability refs")
         f1.write_text("ok", encoding="utf-8")
@@ -39,7 +37,9 @@ def test_download_subset_rebuilds_fast_herbie_between_retries(tmp_path, monkeypa
         "download_herbie_with_retry",
         _fake_download_herbie_with_retry,
     )
-    monkeypatch.setattr(ingest_grib_utils, "configure_herbie_request_timeouts", lambda: None)
+    monkeypatch.setattr(
+        ingest_grib_utils, "configure_herbie_request_timeouts", lambda: None
+    )
     monkeypatch.setattr(ingest_grib_utils.time, "sleep", lambda _seconds: None)
 
     paths = ingest_grib_utils.download_and_validate_gfs_subset(

@@ -268,16 +268,11 @@ def configure_herbie_request_timeouts(request_timeout_s: int | None = None) -> N
                     )
                     response = requests.get(dl_url, timeout=(10, request_timeout_s))
                     idx_url = response.json()["href"]
-                idx_exists = requests.head(
-                    idx_url, timeout=(10, request_timeout_s)
-                ).ok
+                idx_exists = requests.head(idx_url, timeout=(10, request_timeout_s)).ok
             except requests.RequestException as exc:
                 idx_exists = False
                 if verbose:
-                    print(
-                        f"Unable to get index file from {idx_url} "
-                        f"due to error {exc}"
-                    )
+                    print(f"Unable to get index file from {idx_url} due to error {exc}")
 
             if verbose:
                 print(f"Herbie index URL: {idx_url}")
@@ -856,16 +851,21 @@ def interp_time_map_blocks_nan(
     dtype: str = "float32",
     fill_value: float = np.nan,
     time_axis: int = 1,
+    max_columns_per_batch: int = 4096,
 ) -> da.Array:
+    """Interpolate along time while ignoring NaNs with bounded block memory."""
     if arr.ndim != 4:
         raise ValueError("Expected arr with dims (V, T, Y, X).")
     if time_axis != 1:
         raise NotImplementedError("This helper assumes time_axis == 1 for (V,T,Y,X).")
     if len(arr.chunks[time_axis]) != 1:
         raise ValueError("time axis must be a single chunk before interpolating.")
+    if max_columns_per_batch < 1:
+        raise ValueError("max_columns_per_batch must be positive.")
 
     x_source = np.asarray(stacked_timesUnix, dtype=np.float64).reshape(-1)
     x_target = np.asarray(hourly_timesUnix, dtype=np.float64).reshape(-1)
+    target_count = len(x_target)
     if arr.shape[time_axis] != len(x_source):
         raise ValueError(
             f"arr time length {arr.shape[time_axis]} does not match "
@@ -885,7 +885,7 @@ def interp_time_map_blocks_nan(
             var_start = block_info[0]["array-location"][0][0]
 
         out = np.full(
-            (block.shape[0], len(x_target), block.shape[2], block.shape[3]),
+            (block.shape[0], target_count, block.shape[2], block.shape[3]),
             fill_value,
             dtype=dtype,
         )
@@ -893,58 +893,68 @@ def interp_time_map_blocks_nan(
 
         for local_var_idx in range(block.shape[0]):
             global_var_idx = var_start + local_var_idx
-            values = (
-                block[local_var_idx]
-                .reshape(block.shape[1], n_points)
-                .astype(np.float64, copy=False)
-            )
-            valid = np.isfinite(values)
-            valid_patterns, pattern_idx = np.unique(
-                valid.T, axis=0, return_inverse=True
-            )
-            var_out = out[local_var_idx].reshape(len(x_target), n_points)
+            use_nearest = global_var_idx in nearest_vars_set
+            values = block[local_var_idx].reshape(block.shape[1], n_points)
+            var_out = out[local_var_idx].reshape(target_count, n_points)
 
-            for valid_pattern_idx, valid_pattern in enumerate(valid_patterns):
-                cols = np.flatnonzero(pattern_idx == valid_pattern_idx)
-                if not valid_pattern.any():
-                    continue
-
-                valid_times = x_source[valid_pattern]
-                valid_values = values[valid_pattern][:, cols]
-                target_in_range = (x_target >= valid_times[0]) & (
-                    x_target <= valid_times[-1]
+            for batch_start in range(0, n_points, max_columns_per_batch):
+                batch_stop = min(batch_start + max_columns_per_batch, n_points)
+                batch_values = values[:, batch_start:batch_stop]
+                valid = np.isfinite(batch_values)
+                valid_patterns, pattern_idx = np.unique(
+                    valid.T, axis=0, return_inverse=True
                 )
-                if not target_in_range.any():
-                    continue
+                batch_out = var_out[:, batch_start:batch_stop]
 
-                if global_var_idx in nearest_vars_set or len(valid_times) == 1:
-                    insert_at = np.searchsorted(valid_times, x_target[target_in_range])
-                    left_idx = np.clip(insert_at - 1, 0, len(valid_times) - 1)
-                    right_idx = np.clip(insert_at, 0, len(valid_times) - 1)
-                    left_dist = np.abs(
-                        x_target[target_in_range] - valid_times[left_idx]
+                for valid_pattern_idx, valid_pattern in enumerate(valid_patterns):
+                    local_cols = np.flatnonzero(pattern_idx == valid_pattern_idx)
+                    if not valid_pattern.any():
+                        continue
+
+                    valid_times = x_source[valid_pattern]
+                    target_in_range = (x_target >= valid_times[0]) & (
+                        x_target <= valid_times[-1]
                     )
-                    right_dist = np.abs(
-                        valid_times[right_idx] - x_target[target_in_range]
-                    )
-                    nearest_idx = np.where(left_dist <= right_dist, left_idx, right_idx)
-                    var_out[np.ix_(target_in_range, cols)] = valid_values[nearest_idx]
-                    continue
+                    if not target_in_range.any():
+                        continue
 
-                insert_at = np.searchsorted(
-                    valid_times, x_target[target_in_range], side="right"
-                )
-                left_idx = np.clip(insert_at - 1, 0, len(valid_times) - 2)
-                right_idx = left_idx + 1
-                left_times = valid_times[left_idx]
-                right_times = valid_times[right_idx]
-                weights = (x_target[target_in_range] - left_times) / (
-                    right_times - left_times
-                )
-                interp_values = (1 - weights[:, None]) * valid_values[
-                    left_idx
-                ] + weights[:, None] * valid_values[right_idx]
-                var_out[np.ix_(target_in_range, cols)] = interp_values
+                    target_indices = np.flatnonzero(target_in_range)
+                    valid_values = batch_values[valid_pattern][:, local_cols]
+
+                    if use_nearest or len(valid_times) == 1:
+                        insert_at = np.searchsorted(
+                            valid_times, x_target[target_indices]
+                        )
+                        left_idx = np.clip(insert_at - 1, 0, len(valid_times) - 1)
+                        right_idx = np.clip(insert_at, 0, len(valid_times) - 1)
+                        left_dist = np.abs(
+                            x_target[target_indices] - valid_times[left_idx]
+                        )
+                        right_dist = np.abs(
+                            valid_times[right_idx] - x_target[target_indices]
+                        )
+                        nearest_idx = np.where(
+                            left_dist <= right_dist, left_idx, right_idx
+                        )
+                        batch_out[np.ix_(target_indices, local_cols)] = valid_values[
+                            nearest_idx
+                        ]
+                        continue
+
+                    insert_at = np.searchsorted(
+                        valid_times, x_target[target_indices], side="right"
+                    )
+                    left_idx = np.clip(insert_at - 1, 0, len(valid_times) - 2)
+                    right_idx = left_idx + 1
+                    left_times = valid_times[left_idx]
+                    right_times = valid_times[right_idx]
+                    weights = (x_target[target_indices] - left_times) / (
+                        right_times - left_times
+                    )
+                    interp_values = (1 - weights[:, None]) * valid_values[
+                        left_idx
+                    ] + weights[:, None] * valid_values[right_idx]
+                    batch_out[np.ix_(target_indices, local_cols)] = interp_values
 
         return out
 
