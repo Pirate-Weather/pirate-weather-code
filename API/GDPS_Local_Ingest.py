@@ -113,6 +113,24 @@ def clean_process_dir_preserving_downloads(
     os.makedirs(downloads_dir, exist_ok=True)
 
 
+def deaccumulate_accumulated_field(dataset: xr.Dataset, variable_name: str) -> da.Array:
+    """Convert a total accumulated field into nonnegative per-hour increments."""
+    variable = dataset[variable_name]
+    time_axis = variable.get_axis_num("time")
+    field_data = da.asarray(variable.data)
+    deaccumulated = da.diff(field_data, axis=time_axis, prepend=0)
+
+    time_steps = (dataset.time.diff("time") / np.timedelta64(1, "h")).values.astype(
+        "float32"
+    )
+    time_steps = np.insert(time_steps, 0, time_steps[0])
+    broadcast_shape = [1] * variable.ndim
+    broadcast_shape[time_axis] = len(time_steps)
+    deaccumulated = deaccumulated / time_steps.reshape(broadcast_shape)
+
+    return da.clip(deaccumulated, 0, None)
+
+
 # Define the processing and history chunk size
 process_chunk = CHUNK_SIZES["GDPS"]
 
@@ -357,32 +375,16 @@ hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
 
 # TODO:
-# Daccum DownwardShortwaveRadiationFlux
 # Check for 3 hourly DownwardShortwaveRadiationFlux issues
 # Something about UVIndex
 # During merge, ensure nan gets interpoalted over
 
 
-# Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time
-APCP_surface_tmp = da.diff(
-    xarray_forecast_merged["APCP_surface"],
-    axis=xarray_forecast_merged["APCP_surface"].get_axis_num("time"),
-    prepend=0,
-)
-
-# Using the difference between times in the xarray, convert from 3-hourly to 1-hourly
-forecast_time_steps = (
-    xarray_forecast_merged.time.diff("time") / np.timedelta64(1, "h")
-).values.astype("float32")
-forecast_time_steps = np.insert(forecast_time_steps, 0, forecast_time_steps[0])
-APCP_surface_tmp = APCP_surface_tmp / forecast_time_steps[:, None, None]
-
-xarray_forecast_merged["APCP_surface"].data = APCP_surface_tmp
-
-# Clip precipitation to >= 0
-xarray_forecast_merged["APCP_surface"].data = da.clip(
-    xarray_forecast_merged["APCP_surface"].data, 0, None
-)
+# Convert accumulated fields from total accumulations to per-hour increments.
+for accumulated_var in ("APCP_surface", "DSWRF_surface"):
+    xarray_forecast_merged[accumulated_var].data = deaccumulate_accumulated_field(
+        xarray_forecast_merged, accumulated_var
+    )
 
 
 # Save the dataset with compression and filters for all variables
@@ -399,10 +401,7 @@ with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
     )
 
 # %% Delete to free memory
-del (
-    APCP_surface_tmp,
-    xarray_forecast_merged,
-)
+del (xarray_forecast_merged,)
 T1 = time.time()
 
 logger.info(T1 - T0)
@@ -514,21 +513,11 @@ for i in range(his_period, 0, -12):
     # Read the merged netcdf file using xarray (single combined file)
     xarray_hist_merged = xr.open_dataset(hist_process_path + "_wgrib2_merged.nc")
 
-    # Fix things
-    # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time, every 6 hours
-    apcpProc = xarray_hist_merged["APCP_surface"].values
-
-    apcpProcHour = np.diff(apcpProc, axis=0, prepend=0)
-
-    xarray_hist_merged["APCP_surface"] = xarray_hist_merged["APCP_surface"].copy(
-        data=apcpProcHour
-    )
-
-    # Clip precipitation to >= 0
-    xarray_hist_merged["APCP_surface"] = xarray_hist_merged["APCP_surface"].clip(min=0)
-
-    # Clear memory
-    del (apcpProc, apcpProcHour)
+    # Convert accumulated fields from total accumulations to per-hour increments.
+    for accumulated_var in ("APCP_surface", "DSWRF_surface"):
+        xarray_hist_merged[accumulated_var].data = deaccumulate_accumulated_field(
+            xarray_hist_merged, accumulated_var
+        )
 
     # Save merged and processed xarray dataset to disk using zarr with compression
     # Define the path to save the zarr dataset with the run time in the filename
