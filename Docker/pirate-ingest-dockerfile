@@ -5,7 +5,7 @@
 # Available versions: ftp://ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/
 # ======================================================================
 
-FROM python:3.14.6
+FROM python:3.14.7
 
 ENV DEBIAN_FRONTEND=noninteractive \
     CC=gcc \
