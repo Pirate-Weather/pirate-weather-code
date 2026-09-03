@@ -100,6 +100,42 @@ VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
 
 
+def deaccumulate_energy_to_flux(
+    values: da.Array | np.ndarray,
+    times: np.ndarray,
+    time_axis: int = 0,
+) -> da.Array:
+    """Convert accumulated energy into nonnegative interval-average flux.
+
+    The first accumulation interval is assumed to have the same duration as
+    the first interval represented in ``times``. This matches forecast series
+    that begin at their first positive lead time.
+    """
+    times = np.asarray(times)
+    if times.ndim != 1:
+        raise ValueError("times must be one-dimensional.")
+    if len(times) < 2:
+        raise ValueError("At least two times are required for de-accumulation.")
+
+    time_deltas_seconds = (np.diff(times) / np.timedelta64(1, "s")).astype("float64")
+    if not np.all(np.isfinite(time_deltas_seconds)) or np.any(time_deltas_seconds <= 0):
+        raise ValueError("times must be finite and strictly increasing.")
+
+    interval_seconds = np.insert(time_deltas_seconds, 0, time_deltas_seconds[0])
+    accumulated = da.asarray(values)
+    normalized_time_axis = time_axis % accumulated.ndim
+    if accumulated.shape[normalized_time_axis] != len(times):
+        raise ValueError(
+            "values time-axis length must match the number of entries in times."
+        )
+
+    broadcast_shape = [1] * accumulated.ndim
+    broadcast_shape[normalized_time_axis] = len(interval_seconds)
+    increments = da.diff(accumulated, axis=normalized_time_axis, prepend=0)
+    flux = increments / interval_seconds.reshape(broadcast_shape)
+    return da.maximum(flux, 0)
+
+
 def run_command(command: str, encoding: str = "utf-8") -> subprocess.CompletedProcess:
     """Execute a command string without shell=True, including a single pipe."""
     command = command.strip()

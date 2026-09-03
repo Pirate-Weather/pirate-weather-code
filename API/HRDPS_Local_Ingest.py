@@ -19,28 +19,40 @@ import s3fs
 import xarray as xr
 import zarr.storage
 from dask.diagnostics import ProgressBar
-from herbie import FastHerbie, HerbieLatest
+from dotenv import find_dotenv, load_dotenv
 from tqdm import tqdm
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
+from API.ingest_grib_utils import (
+    cat_gribs,
+    download_and_validate_gfs_subset,
+    quote_path,
+)
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
     archive_tmp_zarr_and_upload,
-    build_herbie_grib_list,
     close_store,
+    configure_herbie_request_timeouts,
     configure_zarr_limits,
+    deaccumulate_energy_to_flux,
     download_extract_historic_archive,
-    interp_time_take_blend,
+    interp_time_map_blocks_nan,
     make_herbie_save_dir,
     mask_invalid_data,
     pad_to_chunk_size,
     positive_int_env,
     run_command,
     tune_nofile_limit,
-    validate_grib_stats,
 )
+
+dotenv_path = find_dotenv(usecwd=True)
+loaded = load_dotenv(dotenv_path, override=True)
+
+configure_herbie_request_timeouts()
+
+from herbie import HerbieLatest  # noqa: E402
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -70,12 +82,35 @@ aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 zarr_store_workers = positive_int_env("zarr_store_workers", 2)
 zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
+herbie_download_retries = positive_int_env("herbie_download_retries", 5)
+herbie_retry_sleep_seconds = positive_int_env("herbie_retry_sleep_seconds", 20)
+skip_hrdps_wgrib2_validation = os.getenv(
+    "skip_hrdps_wgrib2_validation", "true"
+).lower() in {"1", "true", "yes", "on"}
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 tune_nofile_limit()
 zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
     zarr_store_workers, zarr_async_concurrency
 )
+
+
+def clean_process_dir_preserving_downloads(
+    process_dir: str, downloads_dir: str
+) -> None:
+    """Clean HRDPS artifacts while preserving the Herbie download cache."""
+    os.makedirs(process_dir, exist_ok=True)
+    downloads_path = os.path.abspath(downloads_dir)
+
+    for entry in os.scandir(process_dir):
+        if os.path.abspath(entry.path) == downloads_path:
+            continue
+        if entry.is_dir(follow_symlinks=False):
+            shutil.rmtree(entry.path)
+        else:
+            os.remove(entry.path)
+
+    os.makedirs(downloads_dir, exist_ok=True)
 
 
 # Define the processing and history chunk size
@@ -85,17 +120,9 @@ process_chunk = CHUNK_SIZES["HRDPS"]
 final_chunk = FINAL_CHUNK_SIZES["HRDPS"]
 
 his_period = HISTORY_PERIODS["HRDPS"]
+HISTORIC_ARCHIVE_VERSION = "v4"
 
-# Create new directory for processing if it does not exist
-if not os.path.exists(forecast_process_dir):
-    os.makedirs(forecast_process_dir)
-else:
-    # If it does exist, remove it
-    shutil.rmtree(forecast_process_dir)
-    os.makedirs(forecast_process_dir)
-
-if not os.path.exists(tmp_dir):
-    os.makedirs(tmp_dir)
+clean_process_dir_preserving_downloads(forecast_process_dir, tmp_dir)
 
 if save_type == "Download":
     if not os.path.exists(forecast_path + "/" + ingest_version):
@@ -110,11 +137,13 @@ T0 = time.time()
 
 latest_run = HerbieLatest(
     model="hrdps",
-    n=3,
-    freq="6h",
+    priority=["msc"],
+    periods=7,
     fxx=48,
-    product="continental/2.5km",
+    product="continental",
     verbose=False,
+    variable="TMP",
+    level="AGL-2m",
     save_dir=herbie_save_dir,
 )
 
@@ -151,22 +180,23 @@ else:
 
 zarr_vars = (
     "time",
-    "GUST_AGL_10m",
-    "PRMSL_MSL",
-    "TMP_AGL_2m",
-    "DPT_AGL_2m",
-    "RH_AGL_2m",
-    "WIND_AGL_10m",
-    "PRATE_Sfc",
-    "APCP_Sfc",
-    "PTYPE_Sfc",
-    "TCDC_Sfc",
-    "UVIndex_Sfc",
-    "DSWRF_Sfc",
-    "CAPE_Sfc",
-    "PRES_Sfc",
-    "LFTX_ISBL_0500",
-    "VVEL_ISBL_0500",
+    "GUST_10maboveground",
+    "PRMSL_meansealevel",
+    "TMP_2maboveground",
+    "DPT_2maboveground",
+    "RH_2maboveground",
+    "WIND_10maboveground",
+    "WDIR_10maboveground",
+    "PRATE_surface",
+    "APCP_surface",
+    "PTYPE_surface",
+    "TCDC_surface",
+    "UVI_surface",
+    "DSWRF_surface",
+    "CAPE_surface",
+    "PRES_surface",
+    "LFTX_500mb",
+    "VVEL_500mb",
 )
 
 #####################################################################################################
@@ -179,6 +209,7 @@ match_strings = [
     {"variable": "DPT", "level": "AGL-2m"},
     {"variable": "RH", "level": "AGL-2m"},
     {"variable": "WIND", "level": "AGL-10m"},
+    {"variable": "WDIR", "level": "AGL-10m"},
     {"variable": "GUST", "level": "AGL-10m"},
     {"variable": "APCP", "level": "Sfc"},
     {"variable": "PTYPE", "level": "Sfc"},
@@ -195,76 +226,56 @@ match_strings = [
 
 hrdps_file_range = FORECAST_LEAD_RANGES["HRDPS"]
 
-# Create FastHerbie object
-FH_forecastsub = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="6h"),
-    model="hrdps",
-    fxx=hrdps_file_range,
-    product="continental/2.5km",
-    verbose=False,
-    save_dir=herbie_save_dir,
-)
-
 # MSC models have each variable in a separate file, so we loop through the variables and levels to download each one and then merge them later
 all_files = []
+expected_total = 0
 for g in match_strings:
-    FH = FastHerbie(
-        pd.date_range(start=base_time, periods=1, freq="6h"),
+    grib_files = download_and_validate_gfs_subset(
         model="hrdps",
-        fxx=hrdps_file_range,
-        product="continental/2.5km",
-        variable=g["variable"],
-        level=g["level"],
-        save_dir=herbie_save_dir,
-        verbose=False,
+        product="continental",
+        search=None,
+        dataset_name=f"HRDPS forecast {g['variable']}:{g['level']}",
+        base_time=base_time,
+        wgrib2_exe=wgrib2_path.strip(),
+        forecast_hours=hrdps_file_range,
+        expected_forecast_hours=hrdps_file_range,
+        skip_wgrib2_validation=skip_hrdps_wgrib2_validation,
+        herbie_save_dir=herbie_save_dir,
+        herbie_download_retries=herbie_download_retries,
+        herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
+        herbie_kwargs={
+            "variable": g["variable"],
+            "level": g["level"],
+            "verbose": True,
+        },
     )
-    FH.download()
 
-    # Ensure each variable produced the expected number of lead files
-    if len(FH.file_exists) != len(hrdps_file_range):
-        logger.error(
-            "Download failed for %s:%s, expected %s files but got %s",
-            g["variable"],
-            g["level"],
-            len(match_strings),
-            len(FH.file_exists),
-        )
-        sys.exit(1)
+    all_files += grib_files
+    expected_total += len(hrdps_file_range)
 
-    all_files += FH.file_exists
+    logger.info(
+        "Download completed for HRDPS forecast %s:%s, %s files downloaded.",
+        g["variable"],
+        g["level"],
+        len(grib_files),
+    )
 
 # Deduplicate and sanity-check total files
 all_files = sorted(set(all_files))
-expected_total = len(hrdps_file_range) * len(match_strings)
 if len(all_files) < expected_total:
     logger.error(
         f"Download incomplete, expected at least {expected_total} files but got {len(all_files)}"
     )
     sys.exit(1)
 
-# Create ordered/filtered list of downloaded grib files from collected paths
-grib_list = build_herbie_grib_list(all_files, match_strings)
-
-# Perform a check if any data seems to be invalid
-cmd = f"cat {' '.join(grib_list)} | {wgrib2_path.strip()} - -s -stats"
-
-grib_check = run_command(cmd)
-
-# Validate the grib files
-validate_grib_stats(grib_check)
-logger.info("Grib validation complete, no errors found.")
-
+# Create ordered list of downloaded GRIB files from collected paths.
+grib_list = all_files
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
 cmd = (
-    "cat "
-    + " ".join(grib_list)
-    + " | "
-    + f"{wgrib2_path}"
-    + " - "
-    + " -netcdf "
-    + forecast_process_path
-    + "_wgrib2_merged.nc"
+    f"{cat_gribs(grib_list)} | "
+    f"{quote_path(wgrib2_path.strip())} - "
+    f"-netcdf {quote_path(forecast_process_path + '_wgrib2_merged.nc')}"
 )
 
 
@@ -280,13 +291,10 @@ xarray_forecast_merged = xr.open_dataset(forecast_process_path + "_wgrib2_merged
 if len(xarray_forecast_merged.time) != len(hrdps_file_range):
     raise ValueError("Incorrect number of timesteps! Exiting")
 
-# Determine grid size from merged dataset (supports rotated grids)
-NY = xarray_forecast_merged.dims.get(
-    "latitude", xarray_forecast_merged["latitude"].size
-)
-NX = xarray_forecast_merged.dims.get(
-    "longitude", xarray_forecast_merged["longitude"].size
-)
+# HRDPS latitude and longitude are 2-D coordinates over the y/x grid.
+# Reading either coordinate's size would return the product of both axes.
+spatial_dims = xarray_forecast_merged["TMP_2maboveground"].dims[-2:]
+NY, NX = (xarray_forecast_merged.sizes[dim] for dim in spatial_dims)
 
 # Create a new time series
 start = xarray_forecast_merged.time.min().values  # Adjust as necessary
@@ -312,16 +320,24 @@ hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
 # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time
 APCP_surface_tmp = da.diff(
-    xarray_forecast_merged["APCP_Sfc"].data,
-    axis=xarray_forecast_merged["APCP_Sfc"].get_axis_num("time"),
+    xarray_forecast_merged["APCP_surface"].data,
+    axis=xarray_forecast_merged["APCP_surface"].get_axis_num("time"),
     prepend=0,
 )
 
-xarray_forecast_merged["APCP_Sfc"].data = APCP_surface_tmp
+xarray_forecast_merged["APCP_surface"].data = APCP_surface_tmp
+
+# DSWRF is total accumulated energy in J/m^2. Convert each interval to its
+# average flux in W/m^2 before the global validity mask is applied.
+xarray_forecast_merged["DSWRF_surface"].data = deaccumulate_energy_to_flux(
+    xarray_forecast_merged["DSWRF_surface"].data,
+    xarray_forecast_merged.time.values,
+    time_axis=xarray_forecast_merged["DSWRF_surface"].get_axis_num("time"),
+)
 
 # Save the dataset with compression and filters for all variables
 xarray_forecast_merged = xarray_forecast_merged.chunk(
-    chunks={"time": 48, "latitude": process_chunk, "longitude": process_chunk}
+    chunks={"time": 48, "x": process_chunk, "y": process_chunk}
 )
 with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
     xarray_forecast_merged.to_zarr(
@@ -348,7 +364,7 @@ for i in range(his_period, 0, -6):
     if save_type == "S3":
         s3_path = (
             historic_path
-            + "/HRDPS_Hist_v3"
+            + f"/HRDPS_Hist_{HISTORIC_ARCHIVE_VERSION}"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr.tar.gz"
         )
@@ -361,7 +377,7 @@ for i in range(his_period, 0, -6):
         # Local Path Setup
         local_path = (
             historic_path
-            + "/HRDPS_Hist_v3"
+            + f"/HRDPS_Hist_{HISTORIC_ARCHIVE_VERSION}"
             + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr"
         )
@@ -378,57 +394,55 @@ for i in range(his_period, 0, -6):
         (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"),
     )
 
-    # Create a range of dates for historic data going back 48 hours
-    DATES = pd.date_range(
-        start=base_time - pd.Timedelta(str(i) + "h"),
-        periods=1,
-        freq="6h",
-    )
-    # Create a range of forecast lead times
-    # Go from 1 to 7 to account for the weird prate approach
-    fxx = range(1, 7)
+    hist_run_date = base_time - pd.Timedelta(hours=i)
+    historic_forecast_hours = list(range(1, 7))
+    all_files = []
+    expected_total = 0
 
-    # Create FastHerbie Object.
-    FH_histsub = FastHerbie(
-        DATES,
-        model="hrdps",
-        fxx=fxx,
-        product="continental/2.5km",
-        verbose=False,
-        save_dir=herbie_save_dir,
-    )
+    for g in match_strings:
+        grib_files = download_and_validate_gfs_subset(
+            model="hrdps",
+            product="continental",
+            search=None,
+            dataset_name=f"HRDPS historic {g['variable']}:{g['level']}",
+            base_time=hist_run_date,
+            wgrib2_exe=wgrib2_path.strip(),
+            forecast_hours=historic_forecast_hours,
+            expected_forecast_hours=historic_forecast_hours,
+            skip_wgrib2_validation=skip_hrdps_wgrib2_validation,
+            herbie_save_dir=herbie_save_dir,
+            herbie_download_retries=herbie_download_retries,
+            herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
+            herbie_kwargs={
+                "variable": g["variable"],
+                "level": g["level"],
+                "verbose": True,
+            },
+        )
+        all_files += grib_files
+        expected_total += len(historic_forecast_hours)
 
-    # Download the subsets
-    FH_histsub.download(match_strings, verbose=False)
+        logger.info(
+            "Download completed for HRDPS historic %s:%s, %s files downloaded.",
+            g["variable"],
+            g["level"],
+            len(grib_files),
+        )
 
-    # Check for download length
-    if len(FH_histsub.file_exists) != len(fxx):
+    grib_list = sorted(set(all_files))
+    if len(grib_list) < expected_total:
         logger.error(
-            "Download failed, expected 6 files but got %s", len(FH_histsub.file_exists)
+            "Historic download incomplete, expected at least %s files but got %s",
+            expected_total,
+            len(grib_list),
         )
         sys.exit(1)
 
-    # Create list of downloaded grib files
-    grib_list = build_herbie_grib_list(FH_histsub.file_exists, match_strings)
-
-    # Perform a check if any data seems to be invalid
-    cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
-
-    grib_check = run_command(cmd)
-
-    validate_grib_stats(grib_check)
-    logger.info("Grib files passed validation, proceeding with processing")
-
     # Create a string to pass to wgrib2 to merge all gribs into one netcdf
     cmd = (
-        "cat "
-        + " ".join(grib_list)
-        + " | "
-        + f"{wgrib2_path}"
-        + " - "
-        + " -netcdf "
-        + hist_process_path
-        + "_wgrib2_merged.nc"
+        f"{cat_gribs(grib_list)} | "
+        f"{quote_path(wgrib2_path.strip())} - "
+        f"-netcdf {quote_path(hist_process_path + '_wgrib2_merged.nc')}"
     )
 
     # Run wgrib2
@@ -442,12 +456,25 @@ for i in range(his_period, 0, -6):
 
     # Fix things
     # Fix precipitation accumulation timing to account for everything being a total accumulation from zero to time, every 6 hours
-    apcpProc = xarray_hist_merged["APCP_Sfc"].values
+    apcpProc = xarray_hist_merged["APCP_surface"].values
 
     apcpProcHour = np.diff(apcpProc, axis=0, prepend=0)
 
-    xarray_hist_merged["APCP_Sfc"] = xarray_hist_merged["APCP_Sfc"].copy(
+    xarray_hist_merged["APCP_surface"] = xarray_hist_merged["APCP_surface"].copy(
         data=apcpProcHour
+    )
+
+    xarray_hist_merged["DSWRF_surface"] = xarray_hist_merged["DSWRF_surface"].copy(
+        data=deaccumulate_energy_to_flux(
+            xarray_hist_merged["DSWRF_surface"].data,
+            xarray_hist_merged.time.values,
+            time_axis=xarray_hist_merged["DSWRF_surface"].get_axis_num("time"),
+        )
+    )
+    # Keep the transformed variable aligned with the archive encoding so Dask
+    # can write each Zarr chunk from one source chunk.
+    xarray_hist_merged["DSWRF_surface"] = xarray_hist_merged["DSWRF_surface"].chunk(
+        {"time": 6, "y": process_chunk, "x": process_chunk}
     )
 
     # Clear memory
@@ -508,7 +535,7 @@ if save_type == "S3":
     # The function that downloads and extracts a single timestamp
     def download_and_extract(timestamp):
         # Names expected locally
-        final_zarr_name = f"HRDPS_Hist_v3{timestamp}.zarr"
+        final_zarr_name = f"HRDPS_Hist_{HISTORIC_ARCHIVE_VERSION}{timestamp}.zarr"
         extracted_path = download_extract_historic_archive(
             s3=s3,
             historic_path=historic_path,
@@ -545,7 +572,7 @@ if save_type == "S3":
 else:
     ncLocalWorking_paths = [
         historic_path
-        + "/HRDPS_Hist_v3"
+        + f"/HRDPS_Hist_{HISTORIC_ARCHIVE_VERSION}"
         + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
         + ".zarr"
         for i in range(his_period, 1, -6)
@@ -590,14 +617,9 @@ for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
             (da.squeeze(daskVarArraysShape), daskForecastArray), axis=0
         ).astype("float32")
 
-        # Get times as numpy
-        npCatTimes = daskCatTimes.compute()
-
-        daskArrayOut = da.from_array(
-            np.tile(
-                np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
-                (1, NY, NX),
-            )
+        daskArrayOut = da.broadcast_to(
+            daskCatTimes[:, None, None],
+            (len(stacked_timesUnix), NY, NX),
         ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
 
         daskVarArrayList.append(daskArrayOut)
@@ -656,18 +678,17 @@ else:
 # 4. Rechunk it to match the final array
 # 5. Write it out to the zarr array
 
-with (
-    ProgressBar(),
-    dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
-):
-    # 1. Interpolate the stacked array to be hourly along the time axis
-    daskVarArrayStackDiskInterp = interp_time_take_blend(
-        daskVarArrayStackDisk,
-        stacked_timesUnix=stacked_timesUnix,
-        hourly_timesUnix=hourly_timesUnix,
-        dtype="float32",
-        fill_value=np.nan,
-    )
+with ProgressBar():
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        # 1. Interpolate the stacked array to be hourly along the time axis
+        daskVarArrayStackDiskInterp = interp_time_map_blocks_nan(
+            daskVarArrayStackDisk,
+            stacked_timesUnix=stacked_timesUnix,
+            hourly_timesUnix=hourly_timesUnix,
+            dtype="float32",
+            fill_value=np.nan,
+            nearest_vars=[zarr_vars.index("PTYPE_surface")],
+        )
 
     # 2. Pad to chunk size
     daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
@@ -686,13 +707,46 @@ with (
         chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
         dtype="float32",
+        overwrite=True,
     )
 
-    # 4. Rechunk it to match the final array
-    # 5. Write it out to the zarr array
-    daskVarArrayStackDiskInterpPad.round(5).rechunk(
-        (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
-    ).to_zarr(zarr_array, overwrite=True, compute=True)
+    # 4. Write source-aligned tiles to avoid the large graph created by an
+    # all-at-once rechunk to final spatial chunks.
+    source_y = daskVarArrayStackDiskInterp.shape[2]
+    source_x = daskVarArrayStackDiskInterp.shape[3]
+    target_y = zarr_array.shape[2]
+    target_x = zarr_array.shape[3]
+    y_starts = range(0, target_y, process_chunk)
+    x_starts = range(0, target_x, process_chunk)
+
+    for y_start in tqdm(y_starts, desc="Writing HRDPS.zarr rows"):
+        y_stop = min(y_start + process_chunk, target_y)
+        y_source_stop = min(y_stop, source_y)
+        for x_start in x_starts:
+            x_stop = min(x_start + process_chunk, target_x)
+            x_source_stop = min(x_stop, source_x)
+
+            with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+                tile = daskVarArrayStackDiskInterp[
+                    :, :, y_start:y_source_stop, x_start:x_source_stop
+                ].compute()
+
+            tile = np.round(tile, 5).astype("float32", copy=False)
+            if tile.shape[2] != y_stop - y_start or tile.shape[3] != x_stop - x_start:
+                padded_tile = np.full(
+                    (
+                        tile.shape[0],
+                        tile.shape[1],
+                        y_stop - y_start,
+                        x_stop - x_start,
+                    ),
+                    np.nan,
+                    dtype="float32",
+                )
+                padded_tile[:, :, : tile.shape[2], : tile.shape[3]] = tile
+                tile = padded_tile
+
+            zarr_array[:, :, y_start:y_stop, x_start:x_stop] = tile
 
 
 close_store(zarr_store)
@@ -733,7 +787,7 @@ else:
     )
 
 # Clean up
-shutil.rmtree(forecast_process_dir)
+clean_process_dir_preserving_downloads(forecast_process_dir, tmp_dir)
 
 # Timing
 T1 = time.time()
