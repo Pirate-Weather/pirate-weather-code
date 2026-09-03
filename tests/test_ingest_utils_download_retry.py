@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 import pytest
 
 from API import ingest_utils
@@ -5,7 +7,7 @@ from API import ingest_utils
 
 class _FakeHeadResponse:
     ok = True
-    headers = {"Content-Length": "11"}
+    headers: ClassVar[dict[str, str]] = {"Content-Length": "11"}
 
 
 class _FakeRef:
