@@ -357,10 +357,10 @@
             "envFile": "${workspaceFolder}/.env"
         },
         {
-            "name": "Python: GDPS_Local",
+            "name": "Python: GEPS_Local",
             "type": "debugpy",
             "request": "launch",
-            "module": "API.GDPS_Local_Ingest",
+            "module": "API.GEPS_Local_Ingest",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "purpose": [
@@ -377,7 +377,7 @@
                 "LD_LIBRARY_PATH": "/home/ubuntu/pwcode_nov/pirate-weather-code/.build/ingest-test/NCEPLIBS_build/lib:/home/ubuntu/pwcode_nov/pirate-weather-code/.build/ingest-test/NCEPLIBS_build/lib64:/home/ubuntu/pwcode_nov/pirate-weather-code/.build/ingest-test/toolchain/lib:/home/ubuntu/pwcode_nov/pirate-weather-code/.build/ingest-test/toolchain/lib64:${env:LD_LIBRARY_PATH}",
                 "CMAKE_PREFIX_PATH": "${workspaceFolder}/.build/ingest-test/NCEPLIBS_build:${workspaceFolder}/.build/ingest-test/toolchain:${env:CMAKE_PREFIX_PATH}",
                 "PYDEVD_WARN_EVALUATION_TIMEOUT": "300",
-                "forecast_process_dir": "/mnt/nvme/data/Process/GDPS",
+                "forecast_process_dir": "/mnt/nvme/data/Process/GEPS",
             },
             "envFile": "${workspaceFolder}/.env"
         },

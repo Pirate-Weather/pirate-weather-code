@@ -1,10 +1,11 @@
-# %% Script to test FastHerbie.py to download GEPS data
+# %% Script to download GEPS data
 # Alexander Rey, April 2026
 
 # %% Import modules
 import logging
 import os
 import pickle
+import re
 import shutil
 import sys
 import time
@@ -19,28 +20,39 @@ import s3fs
 import xarray as xr
 import zarr.storage
 from dask.diagnostics import ProgressBar
-from herbie import FastHerbie, HerbieLatest
+from dotenv import find_dotenv, load_dotenv
 from tqdm import tqdm
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
+from API.ingest_grib_utils import (
+    cat_gribs,
+    download_and_validate_gfs_subset,
+    quote_path,
+)
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
     archive_tmp_zarr_and_upload,
-    build_herbie_grib_list,
     close_store,
+    configure_herbie_request_timeouts,
     configure_zarr_limits,
     download_extract_historic_archive,
-    interp_time_take_blend,
+    interp_time_map_blocks_nan,
     make_herbie_save_dir,
     mask_invalid_data,
     pad_to_chunk_size,
     positive_int_env,
     run_command,
     tune_nofile_limit,
-    validate_grib_stats,
 )
+
+dotenv_path = find_dotenv(usecwd=True)
+loaded = load_dotenv(dotenv_path, override=True)
+
+configure_herbie_request_timeouts()
+
+from herbie import HerbieLatest  # noqa: E402
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -70,12 +82,43 @@ aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 zarr_store_workers = positive_int_env("zarr_store_workers", 2)
 zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
+herbie_download_retries = positive_int_env("herbie_download_retries", 5)
+herbie_retry_sleep_seconds = positive_int_env("herbie_retry_sleep_seconds", 20)
+skip_geps_wgrib2_validation = os.getenv(
+    "skip_geps_wgrib2_validation", "true"
+).lower() in {"1", "true", "yes", "on"}
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 tune_nofile_limit()
 zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
     zarr_store_workers, zarr_async_concurrency
 )
+
+
+def clean_process_dir_preserving_downloads(
+    process_dir: str, downloads_dir: str
+) -> None:
+    """Clean GEPS process artifacts while preserving the Herbie download cache."""
+    os.makedirs(process_dir, exist_ok=True)
+    downloads_path = os.path.abspath(downloads_dir)
+
+    for entry in os.scandir(process_dir):
+        if os.path.abspath(entry.path) == downloads_path:
+            continue
+        if entry.is_dir(follow_symlinks=False):
+            shutil.rmtree(entry.path)
+        else:
+            os.remove(entry.path)
+
+    os.makedirs(downloads_dir, exist_ok=True)
+
+
+def forecast_hour_sort_key(path: str) -> tuple[int, str]:
+    """Sort MSC GRIB files by forecast lead hour, then path for deterministic merges."""
+    match = re.search(r"_PT(\d+)H", str(path))
+    if match is None:
+        return (0, str(path))
+    return (int(match.group(1)), str(path))
 
 
 # Define the processing and history chunk size
@@ -86,16 +129,7 @@ final_chunk = FINAL_CHUNK_SIZES["GEPS"]
 
 his_period = HISTORY_PERIODS["GEPS"]
 
-# Create new directory for processing if it does not exist
-if not os.path.exists(forecast_process_dir):
-    os.makedirs(forecast_process_dir)
-else:
-    # If it does exist, remove it
-    shutil.rmtree(forecast_process_dir)
-    os.makedirs(forecast_process_dir)
-
-if not os.path.exists(tmp_dir):
-    os.makedirs(tmp_dir)
+clean_process_dir_preserving_downloads(forecast_process_dir, tmp_dir)
 
 if save_type == "Download":
     if not os.path.exists(forecast_path + "/" + ingest_version):
@@ -110,10 +144,12 @@ T0 = time.time()
 
 latest_run = HerbieLatest(
     model="geps",
-    n=3,
-    freq="12h",
+    priority=["msc"],
+    periods=7,
     fxx=240,
     product="geps-raw",
+    variable="APCP",
+    level="SFC_0",
     verbose=False,
     save_dir=herbie_save_dir,
 )
@@ -167,17 +203,34 @@ PRECIP_THRESHOLD = 0.1
 # Base variable names as produced by wgrib2 for GEPS GRIB2 files.
 # GEPS stores all ensemble members in a single file; wgrib2 names them
 # VARNAME_SFC (first/control member), VARNAME_SFC.1, VARNAME_SFC.2, etc.
-base_var_names = ["APCP_SFC", "AFRAIN_SFC", "AICEP_SFC", "ARAIN_SFC", "ASNOW_SFC"]
+base_var_name_aliases = {
+    "APCP": ["APCP_SFC"],
+    "AFRAIN": ["AFRAIN_SFC", "FPRATE_surface"],
+    "AICEP": ["AICEP_SFC", "IPRATE_surface"],
+    "ARAIN": ["ARAIN_SFC", "RPRATE_surface"],
+    "ASNOW": ["ASNOW_SFC", "SPRATE_surface"],
+}
 
 
 def find_member_variables(ds, base_name):
     """Return all ensemble member variables for *base_name* found in *ds*.
 
     wgrib2 names members as VARNAME_LEVEL (control/first), VARNAME_LEVEL.1,
-    VARNAME_LEVEL.2, … sorted in ascending member-number order.
+    VARNAME_LEVEL.2, or extended ensemble names sorted in member-number order.
     """
+    var_prefix = base_name.split("_", maxsplit=1)[0]
+    extended_control_name = f"{var_prefix}_ENS_EQ_lowMres_ctl_surface"
+    extended_member_pattern = re.compile(
+        rf"^{re.escape(var_prefix)}_MMMENS_EQ_(\d+)_surface$"
+    )
 
     def member_number(v):
+        if v == extended_control_name:
+            return -1
+        extended_match = extended_member_pattern.match(v)
+        if extended_match is not None:
+            return int(extended_match.group(1))
+
         suffix = v[len(base_name) + 1 :]
         return int(suffix) if suffix.isdigit() else -1
 
@@ -187,6 +240,8 @@ def find_member_variables(ds, base_name):
             for v in ds.data_vars
             if v == base_name
             or (v.startswith(base_name + ".") and v[len(base_name) + 1 :].isdigit())
+            or v == extended_control_name
+            or extended_member_pattern.match(v) is not None
         ],
         key=member_number,
     )
@@ -198,85 +253,64 @@ def find_member_variables(ds, base_name):
 
 # Define the variables to download as a dictionary of variable and level pairs to match in the grib files
 match_strings = [
-    {"variable": "AFRAIN", "level": "SFC"},
-    {"variable": "AICEP", "level": "SFC"},
-    {"variable": "APCP", "level": "SFC"},
-    {"variable": "ARAIN", "level": "SFC"},
-    {"variable": "ASNOW", "level": "SFC"},
+    {"variable": "AFRAIN", "level": "SFC_0"},
+    {"variable": "AICEP", "level": "SFC_0"},
+    {"variable": "APCP", "level": "SFC_0"},
+    {"variable": "ARAIN", "level": "SFC_0"},
+    {"variable": "ASNOW", "level": "SFC_0"},
 ]
 
 geps_file_range = FORECAST_LEAD_RANGES["GEPS"]
 
-# Create FastHerbie object
-FH_forecastsub = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="12h"),
-    model="geps",
-    fxx=geps_file_range,
-    product="geps-raw",
-    verbose=False,
-    save_dir=herbie_save_dir,
-)
-
 # MSC models have each variable in a separate file, so we loop through the variables and levels to download each one and then merge them later
 all_files = []
+expected_total = 0
 for g in match_strings:
-    FH = FastHerbie(
-        pd.date_range(start=base_time, periods=1, freq="12h"),
+    grib_files = download_and_validate_gfs_subset(
         model="geps",
-        fxx=geps_file_range,
         product="geps-raw",
-        variable=g["variable"],
-        level=g["level"],
-        save_dir=herbie_save_dir,
-        verbose=False,
+        search=None,
+        dataset_name=f"GEPS forecast {g['variable']}:{g['level']}",
+        base_time=base_time,
+        wgrib2_exe=wgrib2_path.strip(),
+        forecast_hours=geps_file_range,
+        priority=["msc"],
+        skip_wgrib2_validation=skip_geps_wgrib2_validation,
+        herbie_save_dir=herbie_save_dir,
+        herbie_download_retries=herbie_download_retries,
+        herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
+        herbie_kwargs={
+            "variable": g["variable"],
+            "level": g["level"],
+            "verbose": False,
+        },
     )
-    FH.download()
 
-    # Ensure each variable produced the expected number of lead files
-    if len(FH.file_exists) != len(geps_file_range):
-        logger.error(
-            "Download failed for %s:%s, expected %s files but got %s",
-            g["variable"],
-            g["level"],
-            len(match_strings),
-            len(FH.file_exists),
-        )
-        sys.exit(1)
+    all_files += grib_files
+    expected_total += len(geps_file_range)
 
-    all_files += FH.file_exists
+    logger.info(
+        f"Download completed for GEPS forecast {g['variable']}:{g['level']}, "
+        f"{len(grib_files)} files downloaded."
+    )
 
 # Deduplicate and sanity-check total files
 all_files = sorted(set(all_files))
-expected_total = len(geps_file_range) * len(match_strings)
 if len(all_files) < expected_total:
     logger.error(
         f"Download incomplete, expected at least {expected_total} files but got {len(all_files)}"
     )
     sys.exit(1)
 
-# Create ordered/filtered list of downloaded grib files from collected paths
-grib_list = build_herbie_grib_list(all_files, match_strings)
-
-# Perform a check if any data seems to be invalid
-cmd = f"cat {' '.join(grib_list)} | {wgrib2_path.strip()} - -s -stats"
-
-grib_check = run_command(cmd)
-
-# Validate the grib files
-validate_grib_stats(grib_check)
-logger.info("Grib validation complete, no errors found.")
+# Create ordered list of downloaded grib files from collected paths
+grib_list = sorted(all_files, key=forecast_hour_sort_key)
 
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf
 cmd = (
-    "cat "
-    + " ".join(grib_list)
-    + " | "
-    + f"{wgrib2_path}"
-    + " - "
-    + " -netcdf "
-    + forecast_process_path
-    + "_wgrib2_merged.nc"
+    f"{cat_gribs(grib_list)} | "
+    f"{quote_path(wgrib2_path.strip())} - "
+    f"-set_ext_name 1 -netcdf {quote_path(forecast_process_path + '_wgrib2_merged.nc')}"
 )
 
 
@@ -307,19 +341,8 @@ new_hourly_time = pd.date_range(
     start=start - pd.Timedelta(his_period, "h"), end=end, freq="h"
 )
 
-stacked_times = np.concatenate(
-    (
-        pd.date_range(
-            start=start - pd.Timedelta(his_period, "h"),
-            end=start - pd.Timedelta(1, "h"),
-            freq="h",
-        ),
-        xarray_forecast_merged.time.values,
-    )
-)
 unix_epoch = np.datetime64(0, "s")
 one_second = np.timedelta64(1, "s")
-stacked_timesUnix = (stacked_times - unix_epoch) / one_second
 hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
 # Chunk the merged dataset for efficient ensemble processing
@@ -335,14 +358,21 @@ xarray_forecast_merged = xarray_forecast_merged.chunk(
 # GEPS stores all members in a single file; wgrib2 outputs them as
 # VARNAME_SFC (control), VARNAME_SFC.1, VARNAME_SFC.2, … per time step.
 stats_vars = {}
-for base_var in base_var_names:
-    member_vars = find_member_variables(xarray_forecast_merged, base_var)
+for var_prefix, base_var_candidates in base_var_name_aliases.items():
+    member_vars = []
+    found_base_var = None
+    for base_var in base_var_candidates:
+        member_vars = find_member_variables(xarray_forecast_merged, base_var)
+        if member_vars:
+            found_base_var = base_var
+            break
+
     if not member_vars:
-        logger.warning("No member variables found for %s, skipping", base_var)
+        logger.warning("No member variables found for %s, skipping", var_prefix)
         continue
 
     n_members = len(member_vars)
-    logger.info("Processing %s: found %s ensemble members", base_var, n_members)
+    logger.info("Processing %s: found %s ensemble members", found_base_var, n_members)
 
     # Stack all members → shape (n_members, n_times, ny, nx)
     raw_stacked = da.stack(
@@ -363,7 +393,6 @@ for base_var in base_var_names:
     stacked = da.maximum(stacked, 0)
 
     # Mean across all members for every accumulation variable
-    var_prefix = base_var.split("_")[0]  # e.g. "APCP", "AFRAIN", …
     stats_vars[f"{var_prefix}_Mean"] = stacked.mean(axis=0)
 
     # APCP only: standard deviation and precipitation probability
@@ -414,8 +443,8 @@ os.remove(forecast_process_path + "_wgrib2_merged.nc")
 # %% Historic data
 # Loop through the runs and check if they have already been processed to s3
 
-# 6 hour runs
-for i in range(his_period, 0, -6):
+# 12 hour runs
+for i in range(his_period, 0, -12):
     if save_type == "S3":
         s3_path = (
             historic_path
@@ -449,59 +478,50 @@ for i in range(his_period, 0, -6):
         (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"),
     )
 
-    # Create a range of dates for historic data going back 240 hours
-    DATES = pd.date_range(
-        start=base_time - pd.Timedelta(str(i) + "h"),
-        periods=1,
-        freq="12h",
-    )
+    hist_run_date = base_time - pd.Timedelta(hours=i)
+
     # Create a range of forecast lead times
     # Go from 1 to 7 to account for the weird prate approach
     fxx = [3, 6]
 
-    # Create FastHerbie Object.
-    FH_histsub = FastHerbie(
-        DATES,
-        model="geps",
-        fxx=fxx,
-        product="geps-raw",
-        verbose=False,
-        save_dir=herbie_save_dir,
-    )
-
-    # Download the subsets
-    FH_histsub.download(match_strings, verbose=False)
-
-    # Check for download length
-    if len(FH_histsub.file_exists) != len(fxx):
-        logger.error(
-            "Download failed, expected %s files but got %s",
-            len(fxx),
-            len(FH_histsub.file_exists),
+    all_files = []
+    for g in match_strings:
+        grib_files = download_and_validate_gfs_subset(
+            model="geps",
+            product="geps-raw",
+            search=None,
+            dataset_name=f"GEPS historic {g['variable']}:{g['level']}",
+            base_time=base_time,
+            run_date=hist_run_date,
+            wgrib2_exe=wgrib2_path.strip(),
+            forecast_hours=fxx,
+            priority=["msc"],
+            skip_wgrib2_validation=skip_geps_wgrib2_validation,
+            herbie_save_dir=herbie_save_dir,
+            herbie_download_retries=herbie_download_retries,
+            herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
+            herbie_kwargs={
+                "variable": g["variable"],
+                "level": g["level"],
+                "verbose": False,
+            },
         )
-        sys.exit(1)
 
-    # Create list of downloaded grib files
-    grib_list = build_herbie_grib_list(FH_histsub.file_exists, match_strings)
+        all_files += grib_files
 
-    # Perform a check if any data seems to be invalid
-    cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
+        logger.info(
+            f"Download completed for GEPS historic {g['variable']}:{g['level']}, "
+            f"{len(grib_files)} files downloaded."
+        )
 
-    grib_check = run_command(cmd)
-
-    validate_grib_stats(grib_check)
-    logger.info("Grib files passed validation, proceeding with processing")
+    # Create ordered list of downloaded grib files from collected paths
+    grib_list = sorted(set(all_files), key=forecast_hour_sort_key)
 
     # Create a string to pass to wgrib2 to merge all gribs into one netcdf
     cmd = (
-        "cat "
-        + " ".join(grib_list)
-        + " | "
-        + f"{wgrib2_path}"
-        + " - "
-        + " -netcdf "
-        + hist_process_path
-        + "_wgrib2_merged.nc"
+        f"{cat_gribs(grib_list)} | "
+        f"{quote_path(wgrib2_path.strip())} - "
+        f"-set_ext_name 1 -netcdf {quote_path(hist_process_path + '_wgrib2_merged.nc')}"
     )
 
     # Run wgrib2
@@ -520,8 +540,13 @@ for i in range(his_period, 0, -6):
 
     # Calculate ensemble statistics for historic data (same approach as forecast)
     hist_stats_vars = {}
-    for base_var in base_var_names:
-        member_vars = find_member_variables(xarray_hist_merged, base_var)
+    for var_prefix, base_var_candidates in base_var_name_aliases.items():
+        member_vars = []
+        for base_var in base_var_candidates:
+            member_vars = find_member_variables(xarray_hist_merged, base_var)
+            if member_vars:
+                break
+
         if not member_vars:
             continue
 
@@ -538,7 +563,6 @@ for i in range(his_period, 0, -6):
         stacked = stacked / 3
         stacked = da.maximum(stacked, 0)
 
-        var_prefix = base_var.split("_")[0]
         hist_stats_vars[f"{var_prefix}_Mean"] = stacked.mean(axis=0)
 
         if var_prefix == "APCP":
@@ -628,7 +652,7 @@ if save_type == "S3":
     # Generate target timestamps
     timestamps = [
         (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-        for i in range(his_period, 1, -6)
+        for i in range(his_period, 0, -12)
     ]
 
     logger.info("Phase 1: Downloading and extracting %s archives...", len(timestamps))
@@ -651,15 +675,15 @@ else:
         + "/GEPS_Hist_v3"
         + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
         + ".zarr"
-        for i in range(his_period, 1, -6)
+        for i in range(his_period, 0, -12)
     ]
 
 # Dask Setup
-daskInterpArrays = []
 daskVarArrays = []
 daskVarArrayList = []
+source_timesUnix = None
 
-for daskVarIDX, dask_var in enumerate(probVars[:]):
+for dask_var in probVars[:]:
     for local_ncpath in ncLocalWorking_paths:
         # If not found in array, use MISSING_DATA to show missing
         try:
@@ -695,17 +719,22 @@ for daskVarIDX, dask_var in enumerate(probVars[:]):
 
         # Get times as numpy
         npCatTimes = daskCatTimes.compute()
+        source_timesUnix = np.asarray(npCatTimes, dtype="float64")
+        source_time_count = len(source_timesUnix)
 
         daskArrayOut = da.from_array(
             np.tile(
                 np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
                 (1, NY, NX),
             )
-        ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
+        ).rechunk((source_time_count, process_chunk, process_chunk))
 
         daskVarArrayList.append(daskArrayOut)
 
     else:
+        if source_timesUnix is None:
+            raise ValueError("time variable must be processed before forecast fields.")
+        source_time_count = len(source_timesUnix)
         daskVarArraysShape = da.reshape(
             daskVarArraysStack,
             (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], NY, NX),
@@ -715,7 +744,7 @@ for daskVarIDX, dask_var in enumerate(probVars[:]):
 
         daskVarArrayList.append(
             daskArrayOut[:, :, :]
-            .rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
+            .rechunk((source_time_count, process_chunk, process_chunk))
             .astype("float32")
         )
 
@@ -759,18 +788,16 @@ else:
 # 4. Rechunk it to match the final array
 # 5. Write it out to the zarr array
 
-with (
-    ProgressBar(),
-    dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
-):
-    # 1. Interpolate the stacked array to be hourly along the time axis
-    daskVarArrayStackDiskInterp = interp_time_take_blend(
-        daskVarArrayStackDisk,
-        stacked_timesUnix=stacked_timesUnix,
-        hourly_timesUnix=hourly_timesUnix,
-        dtype="float32",
-        fill_value=np.nan,
-    )
+with ProgressBar():
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        # 1. Interpolate the stacked array to be hourly along the time axis
+        daskVarArrayStackDiskInterp = interp_time_map_blocks_nan(
+            daskVarArrayStackDisk,
+            stacked_timesUnix=source_timesUnix,
+            hourly_timesUnix=hourly_timesUnix,
+            dtype="float32",
+            fill_value=np.nan,
+        )
 
     # 2. Pad to chunk size
     daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
@@ -789,13 +816,47 @@ with (
         chunks=(len(probVars), len(hourly_timesUnix), final_chunk, final_chunk),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
         dtype="float32",
+        overwrite=True,
     )
 
-    # 4. Rechunk it to match the final array
-    # 5. Write it out to the zarr array
-    daskVarArrayStackDiskInterpPad.round(5).rechunk(
-        (len(probVars), len(hourly_timesUnix), final_chunk, final_chunk)
-    ).to_zarr(zarr_array, overwrite=True, compute=True)
+    # 4. Write source-aligned spatial tiles. A single whole-array rechunk to the
+    # final 3x3 spatial chunks builds a very large store graph and retains too
+    # much memory during execution.
+    source_y = daskVarArrayStackDiskInterp.shape[2]
+    source_x = daskVarArrayStackDiskInterp.shape[3]
+    target_y = zarr_array.shape[2]
+    target_x = zarr_array.shape[3]
+    y_starts = range(0, target_y, process_chunk)
+    x_starts = range(0, target_x, process_chunk)
+
+    for y_start in tqdm(y_starts, desc="Writing GEPS.zarr rows"):
+        y_stop = min(y_start + process_chunk, target_y)
+        y_source_stop = min(y_stop, source_y)
+        for x_start in x_starts:
+            x_stop = min(x_start + process_chunk, target_x)
+            x_source_stop = min(x_stop, source_x)
+
+            with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+                tile = daskVarArrayStackDiskInterp[
+                    :, :, y_start:y_source_stop, x_start:x_source_stop
+                ].compute()
+
+            tile = np.round(tile, 5).astype("float32", copy=False)
+            if tile.shape[2] != y_stop - y_start or tile.shape[3] != x_stop - x_start:
+                padded_tile = np.full(
+                    (
+                        tile.shape[0],
+                        tile.shape[1],
+                        y_stop - y_start,
+                        x_stop - x_start,
+                    ),
+                    np.nan,
+                    dtype="float32",
+                )
+                padded_tile[:, :, : tile.shape[2], : tile.shape[3]] = tile
+                tile = padded_tile
+
+            zarr_array[:, :, y_start:y_stop, x_start:x_stop] = tile
 
 
 close_store(zarr_store)
@@ -836,7 +897,8 @@ else:
     )
 
 # Clean up
-shutil.rmtree(forecast_process_dir)
+#shutil.rmtree(forecast_process_dir)
+clean_process_dir_preserving_downloads(forecast_process_dir, tmp_dir)
 
 # Timing
 T1 = time.time()

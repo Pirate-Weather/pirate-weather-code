@@ -90,7 +90,7 @@ FORECAST_LEAD_RANGES = {
     "HRDPS": list(range(1, 49)),
     "RDPS": list(range(1, 85)),
     "REPS": list(range(3, 73, 3)),
-    "GEPS": list(range(3, 241, 3)),
+    "GEPS": [*range(3, 193, 3), *range(198, 241, 6)],
 }
 
 # Radius, in km, used for DWD model nearest-neighbor selection
