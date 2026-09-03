@@ -15,6 +15,7 @@ from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import cartopy.crs as ccrs
 import dask.array as da
@@ -297,7 +298,10 @@ def configure_herbie_request_timeouts(request_timeout_s: int | None = None) -> N
                 idx_url = url + suffix
 
             try:
-                if "blob.core.windows.net" in idx_url:
+                hostname = (urlparse(idx_url).hostname or "").lower()
+                if hostname == "blob.core.windows.net" or hostname.endswith(
+                    ".blob.core.windows.net"
+                ):
                     dl_url = (
                         "https://planetarycomputer.microsoft.com/api/sas/v1/sign?href="
                         + idx_url
