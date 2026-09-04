@@ -101,6 +101,36 @@ VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
 
 
+def deaccumulate_to_hourly_rate(
+    values: da.Array | np.ndarray,
+    forecast_hours: Iterable[float],
+    time_axis: int = 0,
+) -> da.Array:
+    """Convert run-total accumulations to nonnegative hourly rates."""
+    forecast_hours = np.asarray(tuple(forecast_hours), dtype="float64")
+    if forecast_hours.ndim != 1 or len(forecast_hours) == 0:
+        raise ValueError("forecast_hours must be a nonempty one-dimensional sequence.")
+
+    interval_hours = np.diff(np.insert(forecast_hours, 0, 0.0))
+    if not np.all(np.isfinite(interval_hours)) or np.any(interval_hours <= 0):
+        raise ValueError(
+            "forecast_hours must be finite, positive, and strictly increasing."
+        )
+
+    accumulated = da.asarray(values)
+    normalized_time_axis = time_axis % accumulated.ndim
+    if accumulated.shape[normalized_time_axis] != len(forecast_hours):
+        raise ValueError(
+            "values time-axis length must match the number of forecast hours."
+        )
+
+    broadcast_shape = [1] * accumulated.ndim
+    broadcast_shape[normalized_time_axis] = len(interval_hours)
+    increments = da.diff(accumulated, axis=normalized_time_axis, prepend=0)
+    hourly_rate = increments / interval_hours.reshape(broadcast_shape)
+    return da.maximum(hourly_rate, 0)
+
+
 def deaccumulate_energy_to_flux(
     values: da.Array | np.ndarray,
     times: np.ndarray,

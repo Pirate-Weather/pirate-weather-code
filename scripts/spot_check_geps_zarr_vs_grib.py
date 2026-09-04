@@ -37,7 +37,6 @@ ZARR_VARS = (
 )
 
 GEPS_SOURCE_HOURS = (*range(3, 193, 3), *range(198, 241, 6))
-GEPS_ACCUMULATION_HOURS = 3
 PRECIP_THRESHOLD = 0.1
 
 
@@ -369,8 +368,7 @@ def source_statistic(
 ) -> float:
     """Rebuild one GEPS output statistic at a raw forecast source hour.
 
-    This deliberately mirrors GEPS_Local_Ingest.py: every difference is divided
-    by three hours, including the six-hour source intervals after hour 192.
+    Each difference is divided by its actual adjacent source interval.
     """
     current = source_members(run_dir, base_time, spec.grib_token, hour, y, x)
     previous_hour = previous_source_hour(hour)
@@ -385,7 +383,8 @@ def source_statistic(
             f"{current.shape[0]} versus {previous.shape[0]}"
         )
 
-    per_hour = np.maximum(current - previous, 0) / GEPS_ACCUMULATION_HOURS
+    interval_hours = hour if previous_hour is None else hour - previous_hour
+    per_hour = np.maximum(current - previous, 0) / interval_hours
     if spec.statistic == "mean":
         return float(per_hour.mean())
     if spec.statistic == "stddev":
@@ -779,7 +778,8 @@ def main() -> None:
     print(f"Check points: {points}")
     print(
         "Source statistics de-accumulate each member from the prior GEPS source hour, "
-        "clamp negatives, then divide by 3 to match GEPS_Local_Ingest.py."
+        "then divide by the adjacent interval (3 hours through lead 192 and 6 hours "
+        "thereafter) before clamping negatives."
     )
     print()
 

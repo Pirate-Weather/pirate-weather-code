@@ -37,6 +37,7 @@ from API.ingest_utils import (
     close_store,
     configure_herbie_request_timeouts,
     configure_zarr_limits,
+    deaccumulate_to_hourly_rate,
     download_extract_historic_archive,
     interp_time_map_blocks_nan,
     make_herbie_save_dir,
@@ -85,7 +86,7 @@ zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 herbie_download_retries = positive_int_env("herbie_download_retries", 5)
 herbie_retry_sleep_seconds = positive_int_env("herbie_retry_sleep_seconds", 20)
 skip_geps_wgrib2_validation = os.getenv(
-    "skip_geps_wgrib2_validation", "true"
+    "skip_geps_wgrib2_validation", "false"
 ).lower() in {"1", "true", "yes", "on"}
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
@@ -380,17 +381,13 @@ for var_prefix, base_var_candidates in base_var_name_aliases.items():
         axis=0,
     )
 
-    # GEPS stores totals since run start; diff converts to per-step accumulation.
-    # Prepend zeros so the first step equals its own 3-hour accumulation.
-    stacked = da.diff(
-        raw_stacked, axis=1, prepend=da.zeros_like(raw_stacked[:, :1, :, :])
+    # GEPS stores totals since run start. Normalize each difference by its
+    # corresponding lead interval (3 hours through 192, then 6 hours).
+    stacked = deaccumulate_to_hourly_rate(
+        raw_stacked,
+        geps_file_range,
+        time_axis=1,
     )
-
-    # Divide by 3 to convert 3-hourly accumulation to mm/h
-    stacked = stacked / 3
-
-    # Clamp negatives that can arise from the diff at boundaries
-    stacked = da.maximum(stacked, 0)
 
     # Mean across all members for every accumulation variable
     stats_vars[f"{var_prefix}_Mean"] = stacked.mean(axis=0)
@@ -557,11 +554,11 @@ for i in range(his_period, 0, -12):
             axis=0,
         )
 
-        stacked = da.diff(
-            raw_stacked, axis=1, prepend=da.zeros_like(raw_stacked[:, :1, :, :])
+        stacked = deaccumulate_to_hourly_rate(
+            raw_stacked,
+            fxx,
+            time_axis=1,
         )
-        stacked = stacked / 3
-        stacked = da.maximum(stacked, 0)
 
         hist_stats_vars[f"{var_prefix}_Mean"] = stacked.mean(axis=0)
 
