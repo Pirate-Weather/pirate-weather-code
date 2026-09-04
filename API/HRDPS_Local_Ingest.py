@@ -709,6 +709,12 @@ with ProgressBar():
         dtype="float32",
         overwrite=True,
     )
+    logger.info(
+        "Final HRDPS Zarr created with shape=%s chunks=%s dtype=%s",
+        zarr_array.shape,
+        zarr_array.chunks,
+        zarr_array.dtype,
+    )
 
     # 4. Write source-aligned tiles to avoid the large graph created by an
     # all-at-once rechunk to final spatial chunks.
