@@ -56,7 +56,7 @@ import logging
 import os
 import shutil
 import sys
-from typing import Dict, Iterable, List, Optional, Tuple
+from collections.abc import Iterable
 from xml.etree import ElementTree as ET
 
 import aiohttp
@@ -65,6 +65,7 @@ import numpy as np
 import pandas as pd
 import s3fs
 import zarr
+from pyogrio.errors import PyogrioError
 from shapely.geometry import Polygon
 from zarr.core.dtype import VariableLengthUTF8
 
@@ -199,8 +200,8 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
             ).strip()
 
             # Extract all geocode entries for this area
-            geocode_entries: List[Tuple[Optional[str], Optional[str]]] = []
-            seen_geocodes: set[Tuple[str, str]] = set()
+            geocode_entries: list[tuple[str | None, str | None]] = []
+            seen_geocodes: set[tuple[str, str]] = set()
             for geocode_elem in area.findall("cap:geocode" if ns else "geocode", ns):
                 value_name = geocode_elem.findtext(
                     "cap:valueName" if ns else "valueName", "", ns
@@ -257,7 +258,7 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
                                 "",
                             )
                         )
-                    except Exception as e:
+                    except (ValueError, TypeError) as e:
                         logger.warning("Polygon construction failed: %s", e)
                         continue
 
@@ -325,7 +326,7 @@ class HttpError(Exception):
 
 async def _fetch_json(
     session: aiohttp.ClientSession, url: str, timeout: float = DEFAULT_TIMEOUT
-) -> Dict:
+) -> dict:
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             async with asyncio.timeout(timeout):
@@ -333,7 +334,7 @@ async def _fetch_json(
                     if resp.status != 200:
                         raise HttpError(f"{url} -> {resp.status}")
                     return await resp.json()
-        except Exception:
+        except (aiohttp.ClientError, asyncio.TimeoutError, HttpError):
             if attempt == MAX_RETRIES:
                 raise
             await asyncio.sleep(BACKOFF_BASE * attempt)
@@ -341,7 +342,7 @@ async def _fetch_json(
 
 async def _fetch_text(
     session: aiohttp.ClientSession, url: str, timeout: float = DEFAULT_TIMEOUT
-) -> Optional[str]:
+) -> str | None:
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             async with asyncio.timeout(timeout):
@@ -349,7 +350,7 @@ async def _fetch_text(
                     if resp.status != 200:
                         raise HttpError(f"{url} -> {resp.status}")
                     return await resp.text()
-        except Exception:
+        except (aiohttp.ClientError, asyncio.TimeoutError, HttpError):
             if attempt == MAX_RETRIES:
                 return None
             await asyncio.sleep(BACKOFF_BASE * attempt)
@@ -358,7 +359,7 @@ async def _fetch_text(
 # -------------------------------
 # Parsing helpers
 # -------------------------------
-def _find_feed_namespaces(feed_bytes: bytes) -> Dict[str, str]:
+def _find_feed_namespaces(feed_bytes: bytes) -> dict[str, str]:
     ns = {}
     for event, elem in ET.iterparse(io.BytesIO(feed_bytes), events=("start-ns",)):
         prefix, uri = elem
@@ -366,7 +367,7 @@ def _find_feed_namespaces(feed_bytes: bytes) -> Dict[str, str]:
     return ns
 
 
-def _rss_item_links_and_guids(feed_content: bytes) -> List[Tuple[str, Optional[str]]]:
+def _rss_item_links_and_guids(feed_content: bytes) -> list[tuple[str, str | None]]:
     try:
         root = ET.fromstring(feed_content)
     except ET.ParseError:
@@ -396,7 +397,7 @@ def _apply_meteoalarm_aliases(
 
     try:
         alias_df = pd.read_csv(alias_csv_path, dtype=str)
-    except Exception as exc:
+    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
         logger.warning(
             "Could not read MeteoAlarm alias CSV %s: %s", alias_csv_path, exc
         )
@@ -439,7 +440,7 @@ def _apply_meteoalarm_aliases(
     normalized_upper = normalized_codes.str.upper()
     existing_codes = {code for code in normalized_upper if code}
 
-    new_rows: List[pd.DataFrame] = []
+    new_rows: list[pd.DataFrame] = []
     added_features = 0
 
     # Optional alias metadata columns
@@ -490,7 +491,7 @@ def _apply_meteoalarm_aliases(
     return gpd.GeoDataFrame(combined, geometry=gdf.geometry.name, crs=gdf.crs)
 
 
-def load_meteoalarm_geocodes() -> Optional[gpd.GeoDataFrame]:
+def load_meteoalarm_geocodes() -> gpd.GeoDataFrame | None:
     """
     Load MeteoAlarm geocodes packaged with the repository.
 
@@ -515,7 +516,7 @@ def load_meteoalarm_geocodes() -> Optional[gpd.GeoDataFrame]:
         gdf = _apply_meteoalarm_aliases(gdf, METEOALARM_ALIASES_PATH)
         logger.info("MeteoAlarm geocodes ready (CRS: %s)", gdf.crs)
         return gdf
-    except Exception as e:
+    except (OSError, PyogrioError, ValueError) as e:
         logger.warning("Could not load MeteoAlarm geocodes: %s", e)
         return None
 
@@ -523,8 +524,8 @@ def load_meteoalarm_geocodes() -> Optional[gpd.GeoDataFrame]:
 def geocode_to_polygon(
     geocode_value: str,
     geocode_name: str,
-    meteoalarm_gdf: Optional[gpd.GeoDataFrame] = None,
-) -> Optional[Polygon]:
+    meteoalarm_gdf: gpd.GeoDataFrame | None = None,
+) -> Polygon | None:
     """
     Convert a geocode to a polygon geometry.
 
@@ -569,7 +570,7 @@ def geocode_to_polygon(
                     geocode_value,
                 )
                 return match.geometry.iloc[0]
-        except Exception as e:
+        except (KeyError, IndexError) as e:
             logger.warning("Error matching EMMA_ID in MeteoAlarm geocodes: %s", e)
 
     # Log unsupported geocode types for future analysis
@@ -600,7 +601,7 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
         connector=connector, raise_for_status=False
     ) as session:
         sources_data = await _fetch_json(session, sources_url, timeout)
-        sources: Iterable[Dict] = sources_data.get("sources", [])
+        sources: Iterable[dict] = sources_data.get("sources", [])
 
         # Pull the “current alerts” list once
         wmo_all = (
@@ -626,7 +627,7 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
             "mo-smg-xx",
         }
 
-        source_ids: List[str] = []
+        source_ids: list[str] = []
         for entry in sources:
             src = entry.get("source", {})
             sid = src.get("sourceId")
@@ -638,8 +639,8 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
             if sid in current_agencies:
                 source_ids.append(sid)
 
-        rows: List[Dict[str, Optional[str]]] = []
-        geometries: List[Polygon] = []
+        rows: list[dict[str, str | None]] = []
+        geometries: list[Polygon] = []
 
         async def process_feed(sid: str):
             feed_url = f"{base_url}/v2/cap-alerts/{sid}/rss.xml"
@@ -658,10 +659,9 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
                     continue
                 if guid and guid in current_ids:
                     filtered.append(link)
-                elif guid:
+                elif guid and any(guid in cid for cid in current_ids):
                     # guard against feeds where guid differs slightly
-                    if any(guid in cid for cid in current_ids):
-                        filtered.append(link)
+                    filtered.append(link)
 
             # Fetch all CAP XMLs for this feed concurrently
             async def fetch_and_extract(cap_link: str):
@@ -675,7 +675,13 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
             for coro in asyncio.as_completed(tasks):
                 try:
                     poly_entries = await coro
-                except Exception:
+                except (
+                    aiohttp.ClientError,
+                    asyncio.TimeoutError,
+                    ET.ParseError,
+                    HttpError,
+                ) as e:
+                    logger.warning("Failed extracting CAP polygons from task: %s", e)
                     continue
                 for (
                     src_id,

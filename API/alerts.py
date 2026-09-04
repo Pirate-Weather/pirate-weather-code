@@ -5,7 +5,7 @@ Alert reading helpers for Pirate Weather API responses.
 import datetime
 import logging
 import re
-from typing import Any, List
+from typing import Any
 
 import numpy as np
 from pytz import utc
@@ -26,7 +26,7 @@ def build_alerts(
     read_wmo_alerts: bool,
     logger: logging.Logger,
     loc_tag: str,
-) -> List[dict]:
+) -> list[dict]:
     """
     Read any matching NWS or WMO alerts for the provided location.
     """
@@ -34,7 +34,7 @@ def build_alerts(
         return []
 
     now_utc = datetime.datetime.now(datetime.UTC).astimezone(utc)
-    alerts: List[dict] = []
+    alerts: list[dict] = []
 
     try:
         alerts.extend(
@@ -74,7 +74,7 @@ def _read_nws_alerts(
     now_utc: datetime.datetime,
     logger: logging.Logger,
     loc_tag: str,
-) -> List[dict]:
+) -> list[dict]:
     """
     Read and parse NWS alerts for the provided location.
 
@@ -103,7 +103,7 @@ def _read_nws_alerts(
     if alert_data in ("", None):
         return []
 
-    alert_list: List[dict] = []
+    alert_list: list[dict] = []
     for raw_alert in str(alert_data).split("|"):
         alert_details = raw_alert.split("}{")
         if len(alert_details) < 7:
@@ -117,9 +117,7 @@ def _read_nws_alerts(
             continue
 
         # Format the alert URL using the NWS MapClient URI format
-        alert_uri = (
-            "https://forecast.weather.gov/MapClick.php?lon={lon}&lat={lat}"
-        ).format(lon=round(az_lon, 3), lat=round(lat, 3))
+        alert_uri = f"https://forecast.weather.gov/MapClick.php?lon={round(az_lon, 3)}&lat={round(lat, 3)}"
 
         formatted_text = _format_alert_description(alert_details[1])
         alert_dict = {
@@ -147,7 +145,7 @@ def _read_wmo_alerts(
     now_utc: datetime.datetime,
     logger: logging.Logger,
     loc_tag: str,
-) -> List[dict]:
+) -> list[dict]:
     """
     Read and parse WMO alerts for the provided location.
 
@@ -164,7 +162,7 @@ def _read_wmo_alerts(
     if (not read_wmo_alerts) or wmo_alert_data in ("", None):
         return []
 
-    alert_list: List[dict] = []
+    alert_list: list[dict] = []
     for raw_alert in str(wmo_alert_data).split("~"):
         alert_details = raw_alert.split("}{")
         if len(alert_details) < 3:

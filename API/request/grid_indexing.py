@@ -8,7 +8,7 @@ import logging
 import math
 import time
 from dataclasses import dataclass
-from typing import Any, Union
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -181,67 +181,67 @@ class ZarrSources:
 
 @dataclass
 class GridIndexingResult:
-    dataOut: Union[np.ndarray, bool]
-    dataOut_h2: Union[np.ndarray, bool]
-    dataOut_hrrrh: Union[np.ndarray, bool]
-    dataOut_nbm: Union[np.ndarray, bool]
-    dataOut_nbmFire: Union[np.ndarray, bool]
-    dataOut_gfs: Union[np.ndarray, bool]
-    dataOut_ecmwf: Union[np.ndarray, bool]
-    dataOut_gefs: Union[np.ndarray, bool]
-    dataOut_rtma_ru: Union[np.ndarray, bool]
-    dataOut_dwd_mosmix: Union[np.ndarray, bool]
-    dataOut_aigfs: Union[np.ndarray, bool]
-    dataOut_aigefs: Union[np.ndarray, bool]
-    dataOut_aifs: Union[np.ndarray, bool]
-    era5_merged: Union[np.ndarray, bool]
-    subhRunTime: Union[float, None]
-    hrrrhRunTime: Union[float, None]
-    h2RunTime: Union[float, None]
-    nbmRunTime: Union[float, None]
-    nbmFireRunTime: Union[float, None]
-    gfsRunTime: Union[float, None]
-    ecmwfRunTime: Union[float, None]
-    gefsRunTime: Union[float, None]
-    dwdMosmixRunTime: Union[float, None]
-    aigfsRunTime: Union[float, None]
-    aigefsRunTime: Union[float, None]
-    aifsRunTime: Union[float, None]
-    x_rtma: Union[float, None]
-    y_rtma: Union[float, None]
-    rtma_lat: Union[float, None]
-    rtma_lon: Union[float, None]
-    x_nbm: Union[float, None]
-    y_nbm: Union[float, None]
-    nbm_lat: Union[float, None]
-    nbm_lon: Union[float, None]
-    x_p: Union[float, None]
-    y_p: Union[float, None]
-    gfs_lat: Union[float, None]
-    gfs_lon: Union[float, None]
-    x_p_eur: Union[float, None]
-    y_p_eur: Union[float, None]
-    lats_ecmwf: Union[np.ndarray, None]
-    lons_ecmwf: Union[np.ndarray, None]
-    x_dwd: Union[float, None]
-    y_dwd: Union[float, None]
-    dwd_lat: Union[float, None]
-    dwd_lon: Union[float, None]
+    dataOut: np.ndarray | bool
+    dataOut_h2: np.ndarray | bool
+    dataOut_hrrrh: np.ndarray | bool
+    dataOut_nbm: np.ndarray | bool
+    dataOut_nbmFire: np.ndarray | bool
+    dataOut_gfs: np.ndarray | bool
+    dataOut_ecmwf: np.ndarray | bool
+    dataOut_gefs: np.ndarray | bool
+    dataOut_rtma_ru: np.ndarray | bool
+    dataOut_dwd_mosmix: np.ndarray | bool
+    dataOut_aigfs: np.ndarray | bool
+    dataOut_aigefs: np.ndarray | bool
+    dataOut_aifs: np.ndarray | bool
+    era5_merged: np.ndarray | bool
+    subhRunTime: float | None
+    hrrrhRunTime: float | None
+    h2RunTime: float | None
+    nbmRunTime: float | None
+    nbmFireRunTime: float | None
+    gfsRunTime: float | None
+    ecmwfRunTime: float | None
+    gefsRunTime: float | None
+    dwdMosmixRunTime: float | None
+    aigfsRunTime: float | None
+    aigefsRunTime: float | None
+    aifsRunTime: float | None
+    x_rtma: float | None
+    y_rtma: float | None
+    rtma_lat: float | None
+    rtma_lon: float | None
+    x_nbm: float | None
+    y_nbm: float | None
+    nbm_lat: float | None
+    nbm_lon: float | None
+    x_p: float | None
+    y_p: float | None
+    gfs_lat: float | None
+    gfs_lon: float | None
+    x_p_eur: float | None
+    y_p_eur: float | None
+    lats_ecmwf: np.ndarray | None
+    lons_ecmwf: np.ndarray | None
+    x_dwd: float | None
+    y_dwd: float | None
+    dwd_lat: float | None
+    dwd_lon: float | None
     sourceIDX: dict
-    WMO_alertDat: Union[str, None]
+    WMO_alertDat: str | None
     # Air quality model outputs
-    dataOut_raqdps: Union[np.ndarray, bool] = False
-    dataOut_silam: Union[np.ndarray, bool] = False
-    raqdpsRunTime: Union[float, None] = None
-    silamRunTime: Union[float, None] = None
-    x_raqdps: Union[float, None] = None
-    y_raqdps: Union[float, None] = None
-    raqdps_lat: Union[float, None] = None
-    raqdps_lon: Union[float, None] = None
-    x_silam: Union[float, None] = None
-    y_silam: Union[float, None] = None
-    silam_lat: Union[float, None] = None
-    silam_lon: Union[float, None] = None
+    dataOut_raqdps: np.ndarray | bool = False
+    dataOut_silam: np.ndarray | bool = False
+    raqdpsRunTime: float | None = None
+    silamRunTime: float | None = None
+    x_raqdps: float | None = None
+    y_raqdps: float | None = None
+    raqdps_lat: float | None = None
+    raqdps_lon: float | None = None
+    x_silam: float | None = None
+    y_silam: float | None = None
+    silam_lat: float | None = None
+    silam_lon: float | None = None
 
 
 def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours: int):
@@ -355,17 +355,17 @@ async def calculate_grid_indexing(
     ex_silam: int = 0,
     inc_aimodels: int = 0,
     read_wmo_alerts: bool = True,
-    base_day_utc: datetime.datetime = None,
+    base_day_utc: datetime.datetime | None = None,
     num_hours: int = 0,
     zarr_sources: ZarrSources = None,
     weather=None,
-    timing_start: datetime.datetime = None,
+    timing_start: datetime.datetime | None = None,
     timing_enabled: bool = False,
-    logger: logging.Logger = None,
+    logger: logging.Logger | None = None,
 ) -> GridIndexingResult:
     """Compute grid coordinates and pull the zarr slices for the request."""
     timer = StepTimer(timing_start, timing_enabled)
-    sourceIDX = dict()
+    sourceIDX = {}
     readRTMA_RU = False
     readNBM = False
     readGFS = False
@@ -449,7 +449,7 @@ async def calculate_grid_indexing(
         else:
             readHRRR = True
 
-        sourceIDX["hrrr"] = dict()
+        sourceIDX["hrrr"] = {}
         sourceIDX["hrrr"]["x"] = int(x_hrrr)
         sourceIDX["hrrr"]["y"] = int(y_hrrr)
         sourceIDX["hrrr"]["lat"] = round(hrrr_lat, 2)
@@ -567,11 +567,7 @@ async def calculate_grid_indexing(
     lons_ecmwf = None
     x_p_eur = None
     y_p_eur = None
-    if ex_ecmwf == 1:
-        dataOut_ecmwf = False
-    elif time_machine:
-        dataOut_ecmwf = False
-    elif zarr_sources.ecmwf is None:
+    if ex_ecmwf == 1 or time_machine or zarr_sources.ecmwf is None:
         dataOut_ecmwf = False
     else:
         readECMWF = True
@@ -586,9 +582,7 @@ async def calculate_grid_indexing(
 
     timer.log("### GEFS Detail Start ###")
 
-    if ex_gefs == 1:
-        dataOut_gefs = False
-    elif time_machine:
+    if ex_gefs == 1 or time_machine:
         dataOut_gefs = False
     else:
         readGEFS = True
@@ -607,11 +601,7 @@ async def calculate_grid_indexing(
     y_dwd = None
     dwd_lat = None
     dwd_lon = None
-    if ex_dwd_mosmix == 1:
-        dataOut_dwd_mosmix = False
-    elif time_machine:
-        dataOut_dwd_mosmix = False
-    elif zarr_sources.dwd_mosmix is None:
+    if ex_dwd_mosmix == 1 or time_machine or zarr_sources.dwd_mosmix is None:
         dataOut_dwd_mosmix = False
     else:
         # DWD MOSMIX is interpolated onto the GFS 0.25° grid
@@ -675,7 +665,7 @@ async def calculate_grid_indexing(
                 raqdps_lon_val,
             ) = _nearest_raqdps_grid_coords(lat, lon, zarr_sources.raqdps_lat_lon)
             readRAQDPS = True
-        except Exception as exc:
+        except (IndexError, KeyError, ValueError, TypeError, AttributeError) as exc:
             logger.debug("RAQDPS grid lookup failed: %s", exc)
 
     # SILAM: Global air quality model; uses a regular 0.2° lat/lon grid.
@@ -686,7 +676,7 @@ async def calculate_grid_indexing(
                 az_lon,
             )
             readSILAM = True
-        except Exception as exc:
+        except (IndexError, KeyError, ValueError, TypeError, AttributeError) as exc:
             logger.debug("SILAM grid lookup failed: %s", exc)
 
     timer.log("### AQ Models Detail END ###")
@@ -728,7 +718,7 @@ async def calculate_grid_indexing(
     else:
         ERA5_MERGED = False
 
-    zarrTasks = dict()
+    zarrTasks = {}
     if readHRRR:
         zarrTasks["SubH"] = weather.zarr_read("SubH", zarr_sources.subh, x_hrrr, y_hrrr)
         zarrTasks["HRRR_6H"] = weather.zarr_read(
@@ -854,7 +844,7 @@ async def calculate_grid_indexing(
                 logger.debug("Failed to parse NBM runtime for freshness check")
 
         if dataOut_nbm is not False:
-            sourceIDX["nbm"] = dict()
+            sourceIDX["nbm"] = {}
             sourceIDX["nbm"]["x"] = int(x_nbm)
             sourceIDX["nbm"]["y"] = int(y_nbm)
             sourceIDX["nbm"]["lat"] = round(nbm_lat, 2)
@@ -893,7 +883,7 @@ async def calculate_grid_indexing(
                 logger.debug("Failed to parse ECMWF runtime for freshness check")
 
         if dataOut_ecmwf is not False:
-            sourceIDX["ecmwf_ifs"] = dict()
+            sourceIDX["ecmwf_ifs"] = {}
             sourceIDX["ecmwf_ifs"]["x"] = int(x_p_eur)
             sourceIDX["ecmwf_ifs"]["y"] = int(y_p_eur)
             sourceIDX["ecmwf_ifs"]["lat"] = round(lats_ecmwf[y_p_eur], 2)
@@ -978,7 +968,7 @@ async def calculate_grid_indexing(
                         dataOut_dwd_mosmix = False
                         dwdMosmixRunTime = None
                     else:
-                        sourceIDX["dwd_mosmix"] = dict()
+                        sourceIDX["dwd_mosmix"] = {}
                         sourceIDX["dwd_mosmix"]["x"] = int(x_dwd)
                         sourceIDX["dwd_mosmix"]["y"] = int(y_dwd)
                         sourceIDX["dwd_mosmix"]["lat"] = round(dwd_lat, 2)

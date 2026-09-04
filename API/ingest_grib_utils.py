@@ -10,15 +10,18 @@ import logging
 import os
 import shlex
 import sys
+import time
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 
 import pandas as pd
 from herbie import FastHerbie
 
 from API.ingest_utils import (
     build_herbie_grib_list,
+    configure_herbie_request_timeouts,
     download_herbie_with_retry,
+    positive_int_env,
     run_command,
     validate_grib_stats,
 )
@@ -108,35 +111,53 @@ def awk_path(path: str) -> str:
 def download_and_validate_gfs_subset(
     *,
     product: str,
-    search,
     dataset_name: str,
     base_time: pd.Timestamp,
     wgrib2_exe: str,
-    gfs_forecast_hours: list[int],
     herbie_save_dir: str,
     herbie_download_retries: int,
     herbie_retry_sleep_seconds: int,
+    model: str = "gfs",
+    search=None,
+    gfs_forecast_hours: list[int] | None = None,
+    default_forecast_hours: list[int] | None = None,
     run_date=None,
-    forecast_hours=None,
+    forecast_hours: list[int] | None = None,
     priority=None,
     save_dir=None,
+    path_search=None,
+    expected_count: int | None = None,
+    expected_forecast_hours: list[int] | None = None,
+    excluded_stats_variables: list[str] | None = None,
+    skip_wgrib2_validation: bool = False,
+    herbie_kwargs: dict[str, Any] | None = None,
 ) -> list[str]:
-    """Download a GFS subset, validate file count, and run wgrib2 stats checks.
+    """Download a model GRIB subset, validate file count, and run wgrib2 checks.
 
     Args:
+        model: Herbie model identifier (e.g., 'gfs', 'gdps').
         product: GRIB product name (e.g., 'pgrb2.0p25')
-        search: Search pattern for variables to download
+        search: Optional search pattern passed to ``Herbie.download``.
         dataset_name: Human-readable name for dataset
         base_time: Base forecast time
         wgrib2_exe: Path to wgrib2 executable
-        gfs_forecast_hours: Default forecast hours
+        gfs_forecast_hours: Backward-compatible default forecast hours for GFS callers.
         herbie_save_dir: Directory to save Herbie downloads
         herbie_download_retries: Number of retries for Herbie downloads
         herbie_retry_sleep_seconds: Sleep time between retries
+        default_forecast_hours: Model-agnostic default forecast hours.
         run_date: Override base_time with specific date
         forecast_hours: Override default forecast hours
         priority: Source priority for Herbie downloads
         save_dir: Override default save directory
+        path_search: Optional search pattern used to resolve local Herbie paths.
+        expected_count: Optional expected local file count.
+        expected_forecast_hours: Optional forecast hours expected to be available when
+            this differs from the requested forecast hours.
+        excluded_stats_variables: Optional GRIB variable names to skip in generic
+            min/max stats validation.
+        skip_wgrib2_validation: Skip the ``wgrib2 -s -stats`` validation step.
+        herbie_kwargs: Additional model-specific ``FastHerbie`` keyword arguments.
 
     Returns:
         List of downloaded GRIB file paths
@@ -144,36 +165,76 @@ def download_and_validate_gfs_subset(
     if run_date is None:
         run_date = base_time
     if forecast_hours is None:
-        forecast_hours = gfs_forecast_hours
+        forecast_hours = default_forecast_hours or gfs_forecast_hours
+    if forecast_hours is None:
+        raise ValueError("forecast_hours or default_forecast_hours must be provided.")
     if priority is None:
-        priority = ["aws", "google", "nomads"]
+        priority = ["aws", "google", "nomads"] if model == "gfs" else None
     if save_dir is None:
         save_dir = herbie_save_dir
+    if herbie_kwargs is None:
+        herbie_kwargs = {}
+    if path_search is None:
+        path_search = search
+
+    configure_herbie_request_timeouts()
 
     run_date_dt = cast(datetime, pd.Timestamp(run_date).to_pydatetime())
     herbie_dates: list[datetime] = [run_date_dt]
 
-    herbie_obj = FastHerbie(
-        herbie_dates,
-        model="gfs",
-        fxx=forecast_hours,
-        product=product,
-        verbose=False,
-        priority=priority,
-        save_dir=save_dir,
-    )
+    fast_herbie_kwargs: dict[str, Any] = {
+        "model": model,
+        "fxx": forecast_hours,
+        "product": product,
+        "verbose": False,
+        "save_dir": save_dir,
+        "max_threads": positive_int_env("herbie_download_threads", 20),
+    }
+    if priority is not None:
+        fast_herbie_kwargs["priority"] = priority
+    fast_herbie_kwargs.update(herbie_kwargs)
 
-    download_herbie_with_retry(
-        herbie_obj=herbie_obj,
-        search=search,
-        expected_count=len(forecast_hours),
-        dataset_name=dataset_name,
-        retries=herbie_download_retries,
-        retry_sleep_s=herbie_retry_sleep_seconds,
-    )
+    if expected_count is None:
+        expected_count = len(expected_forecast_hours or forecast_hours)
+
+    attempts = max(1, herbie_download_retries)
+    herbie_obj = None
+    for attempt in range(1, attempts + 1):
+        try:
+            herbie_obj = FastHerbie(herbie_dates, **fast_herbie_kwargs)
+            download_herbie_with_retry(
+                herbie_obj=herbie_obj,
+                search=search,
+                expected_count=expected_count,
+                dataset_name=dataset_name,
+                retries=1,
+                retry_sleep_s=herbie_retry_sleep_seconds,
+            )
+            break
+        except Exception as exc:
+            if attempt == attempts:
+                logger.exception(
+                    "%s download failed after %d attempts",
+                    dataset_name,
+                    attempts,
+                )
+                raise
+
+            sleep_s = herbie_retry_sleep_seconds * attempt
+            logger.warning(
+                "%s download attempt %d/%d failed (%s). Retrying in %ss",
+                dataset_name,
+                attempt,
+                attempts,
+                exc,
+                sleep_s,
+            )
+            time.sleep(sleep_s)
+
+    if herbie_obj is None:
+        raise RuntimeError(f"{dataset_name} download did not create a Herbie object.")
 
     downloaded_count = len(herbie_obj.file_exists)
-    expected_count = len(forecast_hours)
 
     if downloaded_count != expected_count:
         logger.error(
@@ -184,12 +245,17 @@ def download_and_validate_gfs_subset(
         )
         sys.exit(1)
 
-    grib_files = build_herbie_grib_list(herbie_obj.file_exists, search)
+    grib_files = build_herbie_grib_list(herbie_obj.file_exists, path_search)
+
+    if skip_wgrib2_validation:
+        logger.info("%s skipped GRIB validation.", dataset_name)
+        return grib_files
 
     cmd_stats = f"{cat_gribs(grib_files)} | {quote_path(wgrib2_exe)} - -s -stats"
 
     grib_check = run_checked(cmd_stats, f"{dataset_name} GRIB validation")
-    validate_grib_stats(grib_check)
+    if not validate_grib_stats(grib_check, excluded_variables=excluded_stats_variables):
+        raise RuntimeError(f"{dataset_name} failed GRIB validation.")
 
     logger.info("%s passed GRIB validation.", dataset_name)
 

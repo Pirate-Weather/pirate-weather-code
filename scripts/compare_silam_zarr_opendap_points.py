@@ -137,7 +137,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def normalize_opendap_url(url: str) -> str:
-    return url[:-5] if url.endswith(".html") else url
+    return url.removesuffix(".html")
 
 
 def unix_seconds(values: np.ndarray) -> np.ndarray:

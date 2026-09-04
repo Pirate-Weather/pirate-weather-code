@@ -8,14 +8,19 @@ import resource
 import shlex
 import shutil
 import subprocess
+import sys
 import tarfile
 import time
+from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Iterable, Optional, Union
+from typing import Any
+from urllib.parse import urlparse
 
 import cartopy.crs as ccrs
 import dask.array as da
 import numpy as np
+import requests
 import xarray as xr
 
 # Import atmospheric calculation constants
@@ -39,6 +44,11 @@ CHUNK_SIZES = {
     "NBM_Fire": 200,
     "RTMA": 200,
     "DWD": 200,
+    "HRDPS": 200,
+    "RDPS": 200,
+    "REPS": 200,
+    "GDPS": 200,
+    "GEPS": 200,
     "RDAQA": 250,
     "RAQDPS": 250,
     "SILAM": 200,
@@ -56,6 +66,11 @@ FINAL_CHUNK_SIZES = {
     "NBM_Fire": 5,
     "RTMA": 25,
     "DWD": 5,
+    "HRDPS": 3,
+    "RDPS": 3,
+    "REPS": 3,
+    "GDPS": 3,
+    "GEPS": 3,
     "RDAQA": 25,
     "RAQDPS": 25,
     "SILAM": 5,
@@ -65,7 +80,8 @@ FINAL_CHUNK_SIZES = {
 FORECAST_LEAD_RANGES = {
     "GFS_1": list(range(1, 121)),
     "GFS_2": list(range(123, 241, 3)),
-    "GEFS": list(range(3, 241, 3)),
+    "GDPS_1": list(range(1, 84, 1)),
+    "GDPS_2": list(range(84, 241, 3)),
     "NBM_FIRE": list(range(6, 192, 6)),
     "HRRR_1H": list(range(1, 19)),
     "HRRR_6H": list(range(18, 49)),
@@ -74,6 +90,10 @@ FORECAST_LEAD_RANGES = {
     "ECMWF_IFS_2": list(range(144, 241, 6)),
     "AIGFS": list(range(6, 241, 6)),
     "AIGEFS": list(range(6, 241, 6)),
+    "HRDPS": list(range(1, 49)),
+    "RDPS": list(range(1, 85)),
+    "REPS": list(range(3, 73, 3)),
+    "GEPS": [*range(3, 193, 3), *range(198, 241, 6)],
 }
 
 # Radius, in km, used for DWD model nearest-neighbor selection
@@ -81,6 +101,72 @@ DWD_RADIUS = 50
 
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
+
+
+def deaccumulate_to_hourly_rate(
+    values: da.Array | np.ndarray,
+    forecast_hours: Iterable[float],
+    time_axis: int = 0,
+) -> da.Array:
+    """Convert run-total accumulations to nonnegative hourly rates."""
+    forecast_hours = np.asarray(tuple(forecast_hours), dtype="float64")
+    if forecast_hours.ndim != 1 or len(forecast_hours) == 0:
+        raise ValueError("forecast_hours must be a nonempty one-dimensional sequence.")
+
+    interval_hours = np.diff(np.insert(forecast_hours, 0, 0.0))
+    if not np.all(np.isfinite(interval_hours)) or np.any(interval_hours <= 0):
+        raise ValueError(
+            "forecast_hours must be finite, positive, and strictly increasing."
+        )
+
+    accumulated = da.asarray(values)
+    normalized_time_axis = time_axis % accumulated.ndim
+    if accumulated.shape[normalized_time_axis] != len(forecast_hours):
+        raise ValueError(
+            "values time-axis length must match the number of forecast hours."
+        )
+
+    broadcast_shape = [1] * accumulated.ndim
+    broadcast_shape[normalized_time_axis] = len(interval_hours)
+    increments = da.diff(accumulated, axis=normalized_time_axis, prepend=0)
+    hourly_rate = increments / interval_hours.reshape(broadcast_shape)
+    return da.maximum(hourly_rate, 0)
+
+
+def deaccumulate_energy_to_flux(
+    values: da.Array | np.ndarray,
+    times: np.ndarray,
+    time_axis: int = 0,
+) -> da.Array:
+    """Convert accumulated energy into nonnegative interval-average flux.
+
+    The first accumulation interval is assumed to have the same duration as
+    the first interval represented in ``times``. This matches forecast series
+    that begin at their first positive lead time.
+    """
+    times = np.asarray(times)
+    if times.ndim != 1:
+        raise ValueError("times must be one-dimensional.")
+    if len(times) < 2:
+        raise ValueError("At least two times are required for de-accumulation.")
+
+    time_deltas_seconds = (np.diff(times) / np.timedelta64(1, "s")).astype("float64")
+    if not np.all(np.isfinite(time_deltas_seconds)) or np.any(time_deltas_seconds <= 0):
+        raise ValueError("times must be finite and strictly increasing.")
+
+    interval_seconds = np.insert(time_deltas_seconds, 0, time_deltas_seconds[0])
+    accumulated = da.asarray(values)
+    normalized_time_axis = time_axis % accumulated.ndim
+    if accumulated.shape[normalized_time_axis] != len(times):
+        raise ValueError(
+            "values time-axis length must match the number of entries in times."
+        )
+
+    broadcast_shape = [1] * accumulated.ndim
+    broadcast_shape[normalized_time_axis] = len(interval_seconds)
+    increments = da.diff(accumulated, axis=normalized_time_axis, prepend=0)
+    flux = increments / interval_seconds.reshape(broadcast_shape)
+    return da.maximum(flux, 0)
 
 
 def run_command(command: str, encoding: str = "utf-8") -> subprocess.CompletedProcess:
@@ -94,6 +180,7 @@ def run_command(command: str, encoding: str = "utf-8") -> subprocess.CompletedPr
             shlex.split(command),
             capture_output=True,
             encoding=encoding,
+            check=False,
         )
 
     left, right = command.split("|", maxsplit=1)
@@ -113,6 +200,7 @@ def run_command(command: str, encoding: str = "utf-8") -> subprocess.CompletedPr
             stdin=left_proc.stdout,
             capture_output=True,
             encoding=encoding,
+            check=False,
         )
     finally:
         if left_proc.stdout is not None:
@@ -205,30 +293,189 @@ def configure_zarr_limits(
 
 
 def make_herbie_save_dir(tmp_dir: str, prefix: str = "herbie") -> str:
-    """Create a per-run Herbie cache directory to avoid path collisions."""
-    save_dir = os.path.join(tmp_dir, f"{prefix}_{int(time.time())}_{os.getpid()}")
+    """Create a stable Herbie cache directory."""
+    save_dir = os.path.join(tmp_dir, prefix)
     os.makedirs(save_dir, exist_ok=True)
     return save_dir
 
 
+def configure_herbie_request_timeouts(request_timeout_s: int | None = None) -> None:
+    """Patch Herbie's availability probes so stalled sockets cannot hang ingest."""
+    if request_timeout_s is None:
+        request_timeout_s = positive_int_env("herbie_request_timeout_seconds", 120)
+
+    from herbie.core import Herbie
+
+    if getattr(Herbie, "_pirate_weather_request_timeout_s", None) == request_timeout_s:
+        return
+
+    def _check_grib_with_timeout(self, url: str, min_content_length: int = 10) -> bool:
+        try:
+            head = requests.head(url, timeout=(10, request_timeout_s))
+        except requests.RequestException:
+            return False
+
+        if not head.ok:
+            return False
+        content_length = head.headers.get("Content-Length")
+        return content_length is not None and int(content_length) > min_content_length
+
+    def _check_idx_with_timeout(
+        self, url: str, verbose: bool = False
+    ) -> tuple[bool, str | None]:
+        for suffix in self.IDX_SUFFIX:
+            if Path(url).suffix in {".grb", ".grib", ".grb2", ".grib2"}:
+                idx_url = url.rsplit(".", maxsplit=1)[0] + suffix
+            else:
+                idx_url = url + suffix
+
+            try:
+                hostname = (urlparse(idx_url).hostname or "").lower()
+                if hostname == "blob.core.windows.net" or hostname.endswith(
+                    ".blob.core.windows.net"
+                ):
+                    dl_url = (
+                        "https://planetarycomputer.microsoft.com/api/sas/v1/sign?href="
+                        + idx_url
+                    )
+                    response = requests.get(dl_url, timeout=(10, request_timeout_s))
+                    idx_url = response.json()["href"]
+                idx_exists = requests.head(idx_url, timeout=(10, request_timeout_s)).ok
+            except requests.RequestException as exc:
+                idx_exists = False
+                if verbose:
+                    print(f"Unable to get index file from {idx_url} due to error {exc}")
+
+            if verbose:
+                print(f"Herbie index URL: {idx_url}")
+                print(f"Herbie index exists: {idx_exists}")
+            if idx_exists:
+                return idx_exists, idx_url
+
+        return False, None
+
+    Herbie._check_grib = _check_grib_with_timeout
+    Herbie._check_idx = _check_idx_with_timeout
+    Herbie._pirate_weather_request_timeout_s = request_timeout_s
+
+
+def _is_remote_url(path_or_url: Any) -> bool:
+    return str(path_or_url).startswith(("http://", "https://"))
+
+
+def _download_full_herbie_file(
+    herbie_ref,
+    *,
+    overwrite: bool,
+    request_timeout_s: int,
+    chunk_size: int = 1024 * 1024,
+) -> str:
+    """Download a full Herbie GRIB with request timeouts and atomic replacement."""
+    out_file = Path(herbie_ref.get_localFilePath(None)).expanduser()
+    if out_file.exists() and out_file.stat().st_size > 0 and not overwrite:
+        return str(out_file)
+
+    grib_source = getattr(herbie_ref, "grib", None)
+    if grib_source is None:
+        raise RuntimeError(f"GRIB2 file not found: {herbie_ref!r}")
+
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp_file = out_file.with_name(f"{out_file.name}.tmp.{os.getpid()}")
+    if tmp_file.exists():
+        tmp_file.unlink()
+
+    try:
+        if _is_remote_url(grib_source):
+            with requests.get(
+                str(grib_source),
+                stream=True,
+                timeout=(10, request_timeout_s),
+            ) as response:
+                response.raise_for_status()
+                with open(tmp_file, "wb") as file:
+                    for chunk in response.iter_content(chunk_size=chunk_size):
+                        if chunk:
+                            file.write(chunk)
+        else:
+            source_path = Path(grib_source).expanduser()
+            if source_path.resolve() == out_file.resolve():
+                if out_file.exists() and out_file.stat().st_size > 0:
+                    return str(out_file)
+                raise RuntimeError(f"Local GRIB file is empty or missing: {out_file}")
+            shutil.copyfile(source_path, tmp_file)
+
+        if not tmp_file.exists() or tmp_file.stat().st_size == 0:
+            raise RuntimeError(f"Downloaded empty GRIB file: {out_file}")
+
+        tmp_file.replace(out_file)
+        return str(out_file)
+    except Exception:
+        if tmp_file.exists():
+            tmp_file.unlink()
+        raise
+
+
+def _download_full_herbie_files(
+    herbie_obj,
+    *,
+    overwrite: bool,
+    max_threads: int,
+    request_timeout_s: int,
+) -> list[str]:
+    """Download full-file Herbie refs without relying on Herbie's no-timeout downloader."""
+    refs = list(herbie_obj.file_exists)
+    downloaded_paths: list[str] = []
+    threads = min(len(refs), max_threads)
+    if threads < 1:
+        return downloaded_paths
+
+    logger.info(
+        "Downloading %d full Herbie files with %d threads and %ss read timeout.",
+        len(refs),
+        threads,
+        request_timeout_s,
+    )
+    with ThreadPoolExecutor(max_workers=threads) as executor:
+        futures = [
+            executor.submit(
+                _download_full_herbie_file,
+                ref,
+                overwrite=overwrite,
+                request_timeout_s=request_timeout_s,
+            )
+            for ref in refs
+        ]
+        for future in as_completed(futures):
+            downloaded_paths.append(future.result())
+
+    return downloaded_paths
+
+
 def download_herbie_with_retry(
     herbie_obj,
-    search: str,
     expected_count: int,
     dataset_name: str,
     retries: int,
     retry_sleep_s: int,
+    search: Any = None,
 ) -> None:
     """Retry transient Herbie download failures and enforce expected file count."""
     attempts = max(1, retries)
     for attempt in range(1, attempts + 1):
         try:
             # Overwrite on retries to avoid keeping partial/corrupt files.
-            downloaded = herbie_obj.download(
-                search,
-                verbose=False,
-                overwrite=(attempt > 1),
-            )
+            download_kwargs = {"verbose": True, "overwrite": attempt > 1}
+            if search is None:
+                downloaded = _download_full_herbie_files(
+                    herbie_obj,
+                    overwrite=download_kwargs["overwrite"],
+                    max_threads=positive_int_env("herbie_download_threads", 20),
+                    request_timeout_s=positive_int_env(
+                        "herbie_request_timeout_seconds", 120
+                    ),
+                )
+            else:
+                downloaded = herbie_obj.download(search, **download_kwargs)
 
             downloaded_paths = []
             if downloaded is not None:
@@ -298,7 +545,7 @@ def download_herbie_with_retry(
 
 
 def safe_herbie_local_file_path(
-    herbie_obj, search: str, retries: int = 3, retry_sleep_s: float = 0.1
+    herbie_obj, search: Any = None, retries: int = 3, retry_sleep_s: float = 0.1
 ) -> str:
     """Resolve a local Herbie path and repair file-vs-dir cache collisions."""
     from herbie import Path
@@ -324,7 +571,9 @@ def safe_herbie_local_file_path(
     raise RuntimeError("Unreachable Herbie local path resolution state")
 
 
-def build_herbie_grib_list(file_refs, search: str, retries: int = 3) -> list[str]:
+def build_herbie_grib_list(
+    file_refs, search: Any = None, retries: int = 3
+) -> list[str]:
     """Build a list of local GRIB paths from Herbie file references."""
     return [
         safe_herbie_local_file_path(ref, search, retries=retries) for ref in file_refs
@@ -398,7 +647,7 @@ def download_extract_historic_archive(
     extracted_store_name: str,
     local_temp_dir: str,
     expected_vars: Iterable[str] | None = None,
-) -> Optional[str]:
+) -> str | None:
     """Helper to download and extract a historic archive to a local zarr path."""
     os.makedirs(local_temp_dir, exist_ok=True)
     local_zarr_path = os.path.join(local_temp_dir, final_zarr_name)
@@ -532,11 +781,11 @@ def getGribList(FH_forecastsub, matchStrings):
                             RuntimeError,
                         ):
                             print("Download Failure 6, Fail")
-                            exit(1)
+                            sys.exit(1)
     return gribList
 
 
-def validate_grib_stats(gribCheck):
+def validate_grib_stats(gribCheck, excluded_variables: Iterable[str] | None = None):
     """
     Inspect gribCheck.stdout (from `wgrib2 … -stats`) for min/max values,
     print any out-of-range records, and exit(10) if invalid data is found.
@@ -545,9 +794,16 @@ def validate_grib_stats(gribCheck):
       - gribCheck.stdout: the full stdout string
       - globals: VALID_DATA_MIN, VALID_DATA_MAX
     """
+    excluded_variables = set(excluded_variables or [])
+
     # extract all mins and maxs
-    minValues = [float(m) for m in re.findall(r"min=([-\d\.eE]+)", gribCheck.stdout)]
-    maxValues = [float(M) for M in re.findall(r"max=([-\d\.eE]+)", gribCheck.stdout)]
+    number_pattern = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+    minValues = [
+        float(m) for m in re.findall(rf"min=({number_pattern})", gribCheck.stdout)
+    ]
+    maxValues = [
+        float(M) for M in re.findall(rf"max=({number_pattern})", gribCheck.stdout)
+    ]
 
     # extract variable names (4th field)
     varNames = re.findall(r"(?m)^(?:[^:]+:){3}([^:]+):", gribCheck.stdout)
@@ -563,8 +819,9 @@ def validate_grib_stats(gribCheck):
     # TODO: This would be better if we checked against a dictionary of valid ranges defined per variable
     invalidIdxs = [
         i
-        for i, (mn, mx) in enumerate(zip(minValues, maxValues))
-        if mn < VALID_DATA_MIN or mx > VALID_DATA_MAX
+        for i, (var, mn, mx) in enumerate(zip(varNames, minValues, maxValues))
+        if var not in excluded_variables
+        and (mn < VALID_DATA_MIN or mx > VALID_DATA_MAX)
     ]
 
     if invalidIdxs:
@@ -658,11 +915,130 @@ def earth_relative_wind_components(
     return ut, vt
 
 
+def interp_time_map_blocks_nan(
+    arr: da.Array,
+    stacked_timesUnix: np.ndarray,
+    hourly_timesUnix: np.ndarray,
+    nearest_vars: int | Iterable[int] | None = None,
+    dtype: str = "float32",
+    fill_value: float = np.nan,
+    time_axis: int = 1,
+    max_columns_per_batch: int = 4096,
+) -> da.Array:
+    """Interpolate along time while ignoring NaNs with bounded block memory."""
+    if arr.ndim != 4:
+        raise ValueError("Expected arr with dims (V, T, Y, X).")
+    if time_axis != 1:
+        raise NotImplementedError("This helper assumes time_axis == 1 for (V,T,Y,X).")
+    if len(arr.chunks[time_axis]) != 1:
+        raise ValueError("time axis must be a single chunk before interpolating.")
+    if max_columns_per_batch < 1:
+        raise ValueError("max_columns_per_batch must be positive.")
+
+    x_source = np.asarray(stacked_timesUnix, dtype=np.float64).reshape(-1)
+    x_target = np.asarray(hourly_timesUnix, dtype=np.float64).reshape(-1)
+    target_count = len(x_target)
+    if arr.shape[time_axis] != len(x_source):
+        raise ValueError(
+            f"arr time length {arr.shape[time_axis]} does not match "
+            f"stacked_timesUnix length {len(x_source)}."
+        )
+
+    if nearest_vars is None:
+        nearest_vars_set = set()
+    elif isinstance(nearest_vars, int):
+        nearest_vars_set = {nearest_vars}
+    else:
+        nearest_vars_set = {int(i) for i in nearest_vars}
+
+    def interp_block(block, block_info=None):
+        var_start = 0
+        if block_info is not None:
+            var_start = block_info[0]["array-location"][0][0]
+
+        out = np.full(
+            (block.shape[0], target_count, block.shape[2], block.shape[3]),
+            fill_value,
+            dtype=dtype,
+        )
+        n_points = block.shape[2] * block.shape[3]
+
+        for local_var_idx in range(block.shape[0]):
+            global_var_idx = var_start + local_var_idx
+            use_nearest = global_var_idx in nearest_vars_set
+            values = block[local_var_idx].reshape(block.shape[1], n_points)
+            var_out = out[local_var_idx].reshape(target_count, n_points)
+
+            for batch_start in range(0, n_points, max_columns_per_batch):
+                batch_stop = min(batch_start + max_columns_per_batch, n_points)
+                batch_values = values[:, batch_start:batch_stop]
+                valid = np.isfinite(batch_values)
+                valid_patterns, pattern_idx = np.unique(
+                    valid.T, axis=0, return_inverse=True
+                )
+                batch_out = var_out[:, batch_start:batch_stop]
+
+                for valid_pattern_idx, valid_pattern in enumerate(valid_patterns):
+                    local_cols = np.flatnonzero(pattern_idx == valid_pattern_idx)
+                    if not valid_pattern.any():
+                        continue
+
+                    valid_times = x_source[valid_pattern]
+                    target_in_range = (x_target >= valid_times[0]) & (
+                        x_target <= valid_times[-1]
+                    )
+                    if not target_in_range.any():
+                        continue
+
+                    target_indices = np.flatnonzero(target_in_range)
+                    valid_values = batch_values[valid_pattern][:, local_cols]
+
+                    if use_nearest or len(valid_times) == 1:
+                        insert_at = np.searchsorted(
+                            valid_times, x_target[target_indices]
+                        )
+                        left_idx = np.clip(insert_at - 1, 0, len(valid_times) - 1)
+                        right_idx = np.clip(insert_at, 0, len(valid_times) - 1)
+                        left_dist = np.abs(
+                            x_target[target_indices] - valid_times[left_idx]
+                        )
+                        right_dist = np.abs(
+                            valid_times[right_idx] - x_target[target_indices]
+                        )
+                        nearest_idx = np.where(
+                            left_dist <= right_dist, left_idx, right_idx
+                        )
+                        batch_out[np.ix_(target_indices, local_cols)] = valid_values[
+                            nearest_idx
+                        ]
+                        continue
+
+                    insert_at = np.searchsorted(
+                        valid_times, x_target[target_indices], side="right"
+                    )
+                    left_idx = np.clip(insert_at - 1, 0, len(valid_times) - 2)
+                    right_idx = left_idx + 1
+                    left_times = valid_times[left_idx]
+                    right_times = valid_times[right_idx]
+                    weights = (x_target[target_indices] - left_times) / (
+                        right_times - left_times
+                    )
+                    interp_values = (1 - weights[:, None]) * valid_values[
+                        left_idx
+                    ] + weights[:, None] * valid_values[right_idx]
+                    batch_out[np.ix_(target_indices, local_cols)] = interp_values
+
+        return out
+
+    chunks = (arr.chunks[0], (len(x_target),), arr.chunks[2], arr.chunks[3])
+    return arr.map_blocks(interp_block, dtype=dtype, chunks=chunks)
+
+
 def interp_time_take_blend(
     arr: da.Array,
     stacked_timesUnix: np.ndarray,
     hourly_timesUnix: np.ndarray,
-    nearest_vars: Optional[Union[int, Iterable[int]]] = None,  # var indices using NN
+    nearest_vars: int | Iterable[int] | None = None,  # var indices using NN
     dtype: str = "float32",
     fill_value: float = np.nan,
     time_axis: int = 1,
@@ -715,7 +1091,7 @@ def interp_time_take_blend(
     # boolean mask of “in‐range” points
     valid = (x_b >= x_a[0]) & (x_b <= x_a[-1])  # shape (T_new,)
 
-    T_new = int(len(idx0))
+    T_new = len(idx0)
     if not (len(idx1) == T_new and len(w) == T_new and len(valid) == T_new):
         raise ValueError("idx0, idx1, w, and valid must all have length T_new.")
 
@@ -750,7 +1126,7 @@ def interp_time_take_blend(
         # Normalize indices as a sorted, unique list
         if isinstance(nearest_vars, int):
             nearest_vars = [nearest_vars]
-        nv = sorted(set(int(i) for i in nearest_vars))
+        nv = sorted({int(i) for i in nearest_vars})
 
         # Compute nearest only for needed variables (cheap if few vars)
         # Shape of each nearest slice: (1, T_new, Y, X)
@@ -859,7 +1235,7 @@ def calculate_nowcast_concentration(
     return nowcast_result
 
 
-def trailing_mean(conc: Optional[np.ndarray], window: int) -> Optional[np.ndarray]:
+def trailing_mean(conc: np.ndarray | None, window: int) -> np.ndarray | None:
     """
     Compute trailing window mean along time axis for array with shape (T, Y, X).
     If window <= 1 returns conc. Handles NaNs by using nanmean over available points.

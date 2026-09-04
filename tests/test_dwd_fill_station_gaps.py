@@ -16,7 +16,7 @@ def load_fill_station_gaps():
         if isinstance(node, ast.FunctionDef) and node.name == "fill_station_gaps":
             function_module = ast.Module(body=[node], type_ignores=[])
             namespace = {"np": np, "pd": pd}
-            exec(compile(function_module, str(source_path), "exec"), namespace)
+            exec(compile(function_module, str(source_path), "exec"), namespace)  # noqa: S102
             return namespace["fill_station_gaps"]
 
     raise AssertionError("fill_station_gaps not found")

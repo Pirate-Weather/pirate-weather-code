@@ -122,7 +122,7 @@ class TestTextGeneration:
     def test_mixed_precip_text(self):
         """Test that mixed precipitation generates correct text."""
         # When num_types > 2, should generate "mixed-precipitation"
-        text, icon = calculate_precip_text(
+        text, _ = calculate_precip_text(
             precipType="mixed",
             type="hourly",
             rainAccum=1.0,
@@ -140,7 +140,7 @@ class TestTextGeneration:
     def test_ice_precip_text(self):
         """Test that ice (freezing rain) generates correct text."""
         # Note: sleetAccum parameter handles both sleet and ice accumulation
-        text, icon = calculate_precip_text(
+        text, _ = calculate_precip_text(
             precipType="ice",
             type="hourly",
             rainAccum=0.0,
@@ -157,7 +157,7 @@ class TestTextGeneration:
 
     def test_sleet_precip_text(self):
         """Test that sleet generates correct text."""
-        text, icon = calculate_precip_text(
+        text, _ = calculate_precip_text(
             precipType="sleet",
             type="hourly",
             rainAccum=0.0,
@@ -175,7 +175,7 @@ class TestTextGeneration:
     def test_mixed_overrides_individual_types(self):
         """Test that mixed precipitation text is not overridden by individual types."""
         # When precipType is rain but num_types > 2, should still be mixed
-        text, icon = calculate_precip_text(
+        text, _ = calculate_precip_text(
             precipType="mixed",  # Set to mixed
             type="hourly",
             rainAccum=1.0,

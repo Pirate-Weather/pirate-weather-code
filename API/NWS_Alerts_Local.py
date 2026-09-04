@@ -133,7 +133,7 @@ ns = {"ns": "urn:oasis:names:tc:emergency:cap:1.2"}
 # print(list(nws_alert_merged.columns.values))
 
 # Call the NWS API for any missing alerts
-for row in range(0, len(nws_alert_merged)):
+for row in range(len(nws_alert_merged)):
     if pd.isna(nws_alert_merged.loc[row, "headline"]):
         try:
             response = requests.get(
@@ -159,7 +159,7 @@ for row in range(0, len(nws_alert_merged)):
                 ".//ns:info/ns:severity", namespaces=ns
             ).text
 
-        except Exception:
+        except (requests.RequestException, ET.ParseError, AttributeError):
             nws_alert_merged.loc[row, "headline"] = nws_alert_merged.loc[
                 row, "PROD_TYPE"
             ]

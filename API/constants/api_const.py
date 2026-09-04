@@ -119,8 +119,8 @@ PRECIP_ACCUM_NOISE_THRESHOLD = (
 )
 
 # API versioning and ingest version constants
-# Version scheme is: Major.Minor.Patch
-API_VERSION = "V2.10.0b1"
+# Version scheme is: Major.Minor.Patch using semantic versioning
+API_VERSION = "V2.10.0b2"
 
 # Generic API constants
 MAX_S3_RETRIES = 5
@@ -331,4 +331,10 @@ ROUNDING_RULES = {
     "coConcentration": 1,
     "coConcentrationMax": 1,
     "coConcentrationMaxTime": 0,
+}
+
+U_REF = {
+    "GDPS": 2.0,  # Reference wind speed for GDPS visibility estimation (m/s)
+    "HRDPS": 1.5,  # Reference wind speed for HRDPS visibility estimation (m/s)
+    "RDPS": 1.5,  # Reference wind speed for RDPS visibility estimation (m/s)
 }

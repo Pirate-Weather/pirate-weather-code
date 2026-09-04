@@ -77,7 +77,7 @@ def test_snow_tolerance_above_5cm_sets_lower_bound_to_one():
             }
         )
 
-    icon, summary = calculate_day_text(
+    _, summary = calculate_day_text(
         hours, is_day_time=True, time_zone="UTC", mode="daily", unit_system="si"
     )
 
