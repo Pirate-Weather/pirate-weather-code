@@ -50,6 +50,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
+logger = logging.getLogger(__name__)
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -88,9 +89,8 @@ else:
 if not os.path.exists(tmp_dir):
     os.makedirs(tmp_dir)
 
-if save_type == "Download":
-    if not os.path.exists(forecast_path + "/" + ingest_version):
-        os.makedirs(forecast_path + "/" + ingest_version)
+if save_type == "Download" and not os.path.exists(forecast_path + "/" + ingest_version):
+    os.makedirs(forecast_path + "/" + ingest_version)
 
 herbie_save_dir = make_herbie_save_dir(tmp_dir)
 
@@ -108,7 +108,7 @@ latest_run = Herbie_latest(
 )
 
 base_time = latest_run.date
-logging.info(f"Checking for new RTMA_RU data for base time: {base_time}")
+logger.info(f"Checking for new RTMA_RU data for base time: {base_time}")
 
 # Check if this is newer than the current file
 if save_type == "S3":
@@ -118,7 +118,7 @@ if save_type == "S3":
         ) as f:
             previous_base_time = pickle.load(f)
         if previous_base_time >= base_time:
-            logging.info("No Update to RTMA_RU, ending")
+            logger.info("No Update to RTMA_RU, ending")
             sys.exit()
 
 else:
@@ -128,7 +128,7 @@ else:
         ) as file:
             previous_base_time = pickle.load(file)
         if previous_base_time >= base_time:
-            logging.info("No Update to RTMA_RU, ending")
+            logger.info("No Update to RTMA_RU, ending")
             sys.exit()
 
 
@@ -166,7 +166,7 @@ fh_analysis = Herbie(
 
 fh_analysis.download(match_strings, verbose=True)
 
-logging.info("RTMA_RU GRIB file downloaded successfully.")
+logger.info("RTMA_RU GRIB file downloaded successfully.")
 
 xarray_herbie_list = fh_analysis.xarray(match_strings)
 
@@ -272,7 +272,7 @@ with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
 
 close_store(zarr_store)
 if save_type == "S3":
-    logging.info("Zarr zip store closed.")
+    logger.info("Zarr zip store closed.")
 
 # %% Upload to S3 or move to final location
 
@@ -282,7 +282,7 @@ if save_type == "S3":
         forecast_process_dir + "/RTMA_RU.zarr.zip",
         forecast_path + "/" + ingest_version + "/RTMA_RU.zarr.zip",
     )
-    logging.info("Final Zarr zip file uploaded to S3.")
+    logger.info("Final Zarr zip file uploaded to S3.")
 
     with open(forecast_process_dir + "/RTMA_RU.time.pickle", "wb") as file:
         pickle.dump(base_time, file)
@@ -290,7 +290,7 @@ if save_type == "S3":
         forecast_process_dir + "/RTMA_RU.time.pickle",
         forecast_path + "/" + ingest_version + "/RTMA_RU.time.pickle",
     )
-    logging.info("Time pickle file uploaded to S3.")
+    logger.info("Time pickle file uploaded to S3.")
 
 else:
     with open(forecast_process_dir + "/RTMA_RU.time.pickle", "wb") as file:
@@ -304,13 +304,13 @@ else:
         forecast_path + "/" + ingest_version + "/RTMA_RU.zarr",
         dirs_exist_ok=True,
     )
-    logging.info("Final Zarr and time pickle files moved to local storage.")
+    logger.info("Final Zarr and time pickle files moved to local storage.")
 
 
 # Clean up
 shutil.rmtree(forecast_process_dir)
-logging.info("Cleaning up temporary processing directories.")
+logger.info("Cleaning up temporary processing directories.")
 
 # Test Read
 t1 = time.time()
-logging.info(f"Total script execution time: {t1 - t0:.2f} seconds.")
+logger.info(f"Total script execution time: {t1 - t0:.2f} seconds.")

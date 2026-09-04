@@ -1,7 +1,6 @@
 import datetime
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Union
 
 import numpy as np
 
@@ -21,23 +20,23 @@ from API.utils.geo import rounder
 
 @dataclass
 class SourceMetadata:
-    source_list: List[str]
-    source_times: Dict[str, str]
-    source_idx: Dict[str, dict]
+    source_list: list[str]
+    source_times: dict[str, str]
+    source_idx: dict[str, dict]
 
     def add(
         self,
         source: str,
         *,
-        time_value: Optional[str] = None,
-        time_key: Optional[str] = None,
+        time_value: str | None = None,
+        time_key: str | None = None,
     ) -> None:
         if source not in self.source_list:
             self.source_list.append(source)
         if time_value is not None:
             self.source_times[time_key or source] = time_value
 
-    def drop(self, source: str, *, time_key: Optional[str] = None) -> None:
+    def drop(self, source: str, *, time_key: str | None = None) -> None:
         if source in self.source_list:
             self.source_list.remove(source)
         self.source_times.pop(time_key or source, None)
@@ -48,16 +47,16 @@ class SourceMetadata:
 
 @dataclass
 class MergeResult:
-    hrrr: Optional[np.ndarray]
-    nbm: Optional[np.ndarray]
-    nbm_fire: Optional[np.ndarray]
-    gfs: Optional[np.ndarray]
-    ecmwf: Optional[np.ndarray]
-    gefs: Optional[np.ndarray]
-    dwd_mosmix: Optional[np.ndarray]
-    aigfs: Optional[np.ndarray]
-    aigefs: Optional[np.ndarray]
-    aifs: Optional[np.ndarray]
+    hrrr: np.ndarray | None
+    nbm: np.ndarray | None
+    nbm_fire: np.ndarray | None
+    gfs: np.ndarray | None
+    ecmwf: np.ndarray | None
+    gefs: np.ndarray | None
+    dwd_mosmix: np.ndarray | None
+    aigfs: np.ndarray | None
+    aigefs: np.ndarray | None
+    aifs: np.ndarray | None
     metadata: SourceMetadata
 
 
@@ -70,12 +69,12 @@ def nearest_index(a, v) -> int:
 
 
 def _format_run_time(
-    run_time: Optional[Union[float, np.generic]],
+    run_time: float | np.generic | None,
     *,
     offset_hours: int = 0,
-    round_to: Optional[int] = None,
+    round_to: int | None = None,
     fmt: str = "%Y-%m-%d %HZ",
-) -> Optional[str]:
+) -> str | None:
     if run_time is None:
         return None
 
@@ -88,7 +87,7 @@ def _format_run_time(
     return rounded.strftime(fmt)
 
 
-def _format_rtma_time(data_out_rtma: np.ndarray) -> Optional[str]:
+def _format_rtma_time(data_out_rtma: np.ndarray) -> str | None:
     if not isinstance(data_out_rtma, np.ndarray):
         return None
 
@@ -102,7 +101,7 @@ def _format_rtma_time(data_out_rtma: np.ndarray) -> Optional[str]:
 def build_source_metadata(
     *,
     grid_result: GridIndexingResult,
-    era5_merged: Union[np.ndarray, bool],
+    era5_merged: np.ndarray | bool,
     use_etopo: bool,
     time_machine: bool,
 ) -> SourceMetadata:
@@ -319,7 +318,7 @@ def _merge_simple_source(
     num_hours: int,
     target_columns: int,
     *,
-    source_columns: Optional[int] = None,
+    source_columns: int | None = None,
 ) -> np.ndarray:
     merged = np.full((num_hours, target_columns), MISSING_DATA)
     end_idx = min(len(data), num_hours + start_idx)
@@ -335,17 +334,17 @@ def merge_hourly_models(
     metadata: SourceMetadata,
     num_hours: int,
     base_day_utc_grib,
-    data_hrrrh: Optional[np.ndarray],
-    data_h2: Optional[np.ndarray],
-    data_nbm: Optional[np.ndarray],
-    data_nbm_fire: Optional[np.ndarray],
-    data_gfs: Optional[np.ndarray],
-    data_ecmwf: Optional[np.ndarray],
-    data_gefs: Optional[np.ndarray],
-    data_dwd_mosmix: Optional[np.ndarray],
-    data_aigfs: Optional[np.ndarray],
-    data_aigefs: Optional[np.ndarray],
-    data_aifs: Optional[np.ndarray],
+    data_hrrrh: np.ndarray | None,
+    data_h2: np.ndarray | None,
+    data_nbm: np.ndarray | None,
+    data_nbm_fire: np.ndarray | None,
+    data_gfs: np.ndarray | None,
+    data_ecmwf: np.ndarray | None,
+    data_gefs: np.ndarray | None,
+    data_dwd_mosmix: np.ndarray | None,
+    data_aigfs: np.ndarray | None,
+    data_aigefs: np.ndarray | None,
+    data_aifs: np.ndarray | None,
     logger: logging.Logger,
     loc_tag: str,
 ) -> MergeResult:

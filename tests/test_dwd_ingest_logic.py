@@ -78,9 +78,7 @@ class TestDWDHistoricLoop(unittest.TestCase):
         ):
             # Configure mocks
             def side_effect_exists(path):
-                if "DWD_Hist_2025121016.done" in path:  # i=2 (18-2=16), CACHE HIT
-                    return True
-                return False  # Default no file
+                return "DWD_Hist_2025121016.done" in path
 
             mock_exists.side_effect = side_effect_exists
 
@@ -157,11 +155,11 @@ class TestDWDHistoricLoop(unittest.TestCase):
                         ds_hist.to_zarr(store, mode="w", consolidated=False)
 
                         # Done file
-                        with patch("builtins.open", mock_open()):
-                            with open(
-                                hist_zarr_path.replace(".zarr", ".done"), "w"
-                            ) as f:
-                                f.write("Done")
+                        with (
+                            patch("builtins.open", mock_open()),
+                            open(hist_zarr_path.replace(".zarr", ".done"), "w") as f,
+                        ):
+                            f.write("Done")
 
                         # Re-open
                         ds_hist_lazy = mock_xr_open(store, engine="zarr", chunks="auto")

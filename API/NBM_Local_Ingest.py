@@ -111,7 +111,7 @@ def _acquire_single_run_lock(lock_path: str):
     parent = os.path.dirname(lock_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    lock_file = open(lock_path, "w")
+    lock_file = open(lock_path, "w")  # noqa: SIM115
     try:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Print all HRRR SubH times for one variable at an x/y grid point.
 
 When REFD_1000maboveground is selected, also print its converted
