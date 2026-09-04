@@ -2,8 +2,8 @@
 
 The HRDPS ingest writes a root 4D Zarr array with dimensions
 (variable, time, y, x). This script rebuilds source values from the matching
-Herbie GRIB cache, including APCP de-accumulation, validity masking, and the
-NaN-aware temporal interpolation used by the production ingest.
+Herbie GRIB cache, including APCP and DSWRF de-accumulation, validity masking,
+and the NaN-aware temporal interpolation used by the production ingest.
 """
 
 from __future__ import annotations
@@ -801,7 +801,7 @@ def main() -> None:
     print(f"Check points: {points}")
     print(
         "APCP target values are de-accumulated; DSWRF target values are "
-        "de-accumulated and converted from J/m^2 to W/m^2."
+        "de-accumulated per elapsed second and converted from J/m^2 to W/m^2."
     )
     print(
         f"Values outside [{VALID_DATA_MIN}, {VALID_DATA_MAX}] become NaN before interpolation."

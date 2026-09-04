@@ -2,8 +2,8 @@
 
 The GDPS ingest writes a root 4D Zarr array with dimensions
 (variable, time, latitude, longitude). This script compares selected final
-values to cached Herbie GRIB2 files and focuses on the temporal interpolation
-step used to create hourly output.
+values to cached Herbie GRIB2 files, including per-hour de-accumulation and the
+temporal interpolation used to create hourly output.
 """
 
 from __future__ import annotations
@@ -55,6 +55,9 @@ GDPS_REDUCED_FILE_HOURS = [
     hour for hour in GDPS_FILE_HOURS if hour % 3 == 0 and (hour <= 168 or hour % 6 == 0)
 ]
 GDPS_3_HOUR_FILE_HOURS = [hour for hour in GDPS_FILE_HOURS if hour % 3 == 0]
+VALID_DATA_MIN = -100
+VALID_DATA_MAX = 120000
+SECONDS_PER_HOUR = 3600
 
 
 @dataclass(frozen=True)
@@ -65,6 +68,8 @@ class VariableSpec:
     grib_token: str
     source_hours: tuple[int, ...]
     nearest: bool = False
+    deaccumulate: bool = False
+    energy_to_flux: bool = False
 
 
 VARIABLE_SPECS = {
@@ -90,13 +95,18 @@ VARIABLE_SPECS = {
         "PRATE_surface", "PrecipRate_Sfc", tuple(GDPS_FILE_HOURS)
     ),
     "APCP_surface": VariableSpec(
-        "APCP_surface", "Precip-Accum_Sfc", tuple(GDPS_FILE_HOURS)
+        "APCP_surface",
+        "Precip-Accum_Sfc",
+        tuple(GDPS_FILE_HOURS),
+        deaccumulate=True,
     ),
     "UVI_surface": VariableSpec("UVI_surface", "UVIndex_Sfc", tuple(GDPS_FILE_HOURS)),
     "DSWRF_surface": VariableSpec(
         "DSWRF_surface",
         "DownwardShortwaveRadiationFlux-Accum_Sfc",
         tuple(GDPS_FILE_HOURS),
+        deaccumulate=True,
+        energy_to_flux=True,
     ),
     "PRES_surface": VariableSpec(
         "PRES_surface", "Pressure_Sfc", tuple(GDPS_FILE_HOURS)
@@ -172,7 +182,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--variables",
-        default="PTYPE_surface,APCP_surface,UVI_surface",
+        default="PTYPE_surface,APCP_surface,UVI_surface,DSWRF_surface",
         help="Comma-separated final GDPS variables to check.",
     )
     parser.add_argument(
@@ -192,7 +202,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--detail-vars",
-        default="PTYPE_surface,APCP_surface,UVI_surface",
+        default="PTYPE_surface,APCP_surface,UVI_surface,DSWRF_surface",
         help="Comma-separated variables to print as point detail tables.",
     )
     parser.add_argument(
@@ -398,7 +408,7 @@ def raw_grib_value(
     """Read the raw GRIB value transformed into the final Zarr source units."""
     path = grib_file_path(run_dir, base_time, spec, hour)
     current = float(load_grib_values(str(path))[y, x])
-    if spec.zarr_name != "APCP_surface":
+    if not spec.deaccumulate:
         return current
 
     previous_hours = [
@@ -412,7 +422,8 @@ def raw_grib_value(
         previous = float(load_grib_values(str(previous_path))[y, x])
 
     time_step = hour - previous_hour
-    return max((current - previous) / time_step, 0.0)
+    divisor = time_step * SECONDS_PER_HOUR if spec.energy_to_flux else time_step
+    return max((current - previous) / divisor, 0.0)
 
 
 def stored_expected(value: float) -> float:
@@ -420,6 +431,13 @@ def stored_expected(value: float) -> float:
     if math.isnan(value):
         return value
     return float(np.float32(np.round(value, 5)))
+
+
+def mask_source_value(value: float) -> float:
+    """Apply the global validity mask used before GDPS interpolation."""
+    if not math.isfinite(value) or value < VALID_DATA_MIN or value > VALID_DATA_MAX:
+        return math.nan
+    return value
 
 
 def compare_values(
@@ -489,7 +507,9 @@ def expected_nan_aware_value(
             key=lambda source_hour: (abs(source_hour - hour), source_hour),
         )
         for source_hour in source_by_distance:
-            value = raw_grib_value(run_dir, base_time, spec, source_hour, y, x)
+            value = mask_source_value(
+                raw_grib_value(run_dir, base_time, spec, source_hour, y, x)
+            )
             if is_finite(value):
                 return value
         return math.nan
@@ -537,7 +557,9 @@ def nearest_finite_source_value(
 ) -> tuple[int, float] | None:
     """Return the first finite source value from ordered candidate hours."""
     for source_hour in candidate_hours:
-        value = raw_grib_value(run_dir, base_time, spec, source_hour, y, x)
+        value = mask_source_value(
+            raw_grib_value(run_dir, base_time, spec, source_hour, y, x)
+        )
         if is_finite(value):
             return source_hour, value
     return None
@@ -559,8 +581,12 @@ def expected_interpolated_value(
         )
 
     left_hour, right_hour = bracket
-    left_value = raw_grib_value(run_dir, base_time, spec, left_hour, y, x)
-    right_value = raw_grib_value(run_dir, base_time, spec, right_hour, y, x)
+    left_value = mask_source_value(
+        raw_grib_value(run_dir, base_time, spec, left_hour, y, x)
+    )
+    right_value = mask_source_value(
+        raw_grib_value(run_dir, base_time, spec, right_hour, y, x)
+    )
 
     if not is_finite(left_value) or not is_finite(right_value):
         return expected_nan_aware_value(run_dir, base_time, spec, hour, y, x)
@@ -798,8 +824,9 @@ def print_continuous_point_table(
     print()
     print(f"{variable} point table y={y} x={x}")
     print(
-        "hour valid_time           target_grib_value left_hour left_grib_value "
-        "right_hour right_grib_value zarr_value expected_value abs_diff status"
+        "hour valid_time           target_grib_value ingest_source_value left_hour "
+        "left_grib_value right_hour right_grib_value zarr_value expected_value "
+        "abs_diff status"
     )
     for hour in hours:
         time_index = forecast_offset + hour
@@ -814,13 +841,16 @@ def print_continuous_point_table(
             if exact_hour is not None
             else math.nan
         )
+        ingest_source_value = mask_source_value(target_grib_value)
 
         if exact_hour is not None:
             left_hour = exact_hour
             right_hour = exact_hour
-            left_grib_value = target_grib_value
-            right_grib_value = target_grib_value
-            expected_value = stored_expected(target_grib_value)
+            left_grib_value = ingest_source_value
+            right_grib_value = ingest_source_value
+            expected_value = stored_expected(
+                expected_nan_aware_value(run_dir, base_time, spec, hour, y, x)
+            )
         elif bracket is None:
             left_hour = None
             right_hour = None
@@ -829,9 +859,11 @@ def print_continuous_point_table(
             expected_value = math.nan
         else:
             left_hour, right_hour = bracket
-            left_grib_value = raw_grib_value(run_dir, base_time, spec, left_hour, y, x)
-            right_grib_value = raw_grib_value(
-                run_dir, base_time, spec, right_hour, y, x
+            left_grib_value = mask_source_value(
+                raw_grib_value(run_dir, base_time, spec, left_hour, y, x)
+            )
+            right_grib_value = mask_source_value(
+                raw_grib_value(run_dir, base_time, spec, right_hour, y, x)
             )
             expected_value = stored_expected(
                 expected_interpolated_value(run_dir, base_time, spec, hour, y, x)
@@ -852,7 +884,8 @@ def print_continuous_point_table(
 
         print(
             f"{hour:>4d} {valid_time:%Y-%m-%d %H:%M} "
-            f"{target_grib_value:>17.8g} {left_hour_text:>9s} "
+            f"{target_grib_value:>17.8g} {ingest_source_value:>19.8g} "
+            f"{left_hour_text:>9s} "
             f"{left_grib_value:>15.8g} {right_hour_text:>10s} "
             f"{right_grib_value:>16.8g} {zarr_value:>10.8g} "
             f"{expected_value:>14.8g} {diff:>8.3g} {status}"
@@ -904,14 +937,15 @@ def run_source_checks(
             for y, x in points:
                 zarr_value = float(root[var_index, time_index, y, x])
                 raw_value = raw_grib_value(run_dir, base_time, spec, hour, y, x)
-                if is_finite(raw_value):
-                    expected_value = stored_expected(raw_value)
+                source_value = mask_source_value(raw_value)
+                if is_finite(source_value):
+                    expected_value = stored_expected(source_value)
                     note = ""
                 else:
                     expected_value = stored_expected(
                         expected_nan_aware_value(run_dir, base_time, spec, hour, y, x)
                     )
-                    note = "raw_source_nan_filled_by_interp"
+                    note = "masked_source_filled_by_interp"
                 passed, diff = compare_values(zarr_value, expected_value, tolerance)
                 results.append(
                     CheckResult(
@@ -1036,6 +1070,14 @@ def main() -> None:
     for point in selected_points:
         print(f"Selected point: y={point.y} x={point.x} ({point.note})")
     print(f"Check points: {points}")
+    print(
+        "APCP target values are de-accumulated per elapsed hour; DSWRF target "
+        "values are de-accumulated per elapsed second and converted from J/m^2 "
+        "to W/m^2."
+    )
+    print(
+        f"Values outside [{VALID_DATA_MIN}, {VALID_DATA_MAX}] become NaN before interpolation."
+    )
     print()
 
     time_passed = check_time_axis(

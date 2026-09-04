@@ -37,6 +37,7 @@ from API.ingest_utils import (
     close_store,
     configure_herbie_request_timeouts,
     configure_zarr_limits,
+    deaccumulate_energy_to_flux,
     download_extract_historic_archive,
     interp_time_map_blocks_nan,
     make_herbie_save_dir,
@@ -374,17 +375,18 @@ stacked_timesUnix = (stacked_times - unix_epoch) / one_second
 hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
 
-# TODO:
-# Check for 3 hourly DownwardShortwaveRadiationFlux issues
-# Something about UVIndex
-# During merge, ensure nan gets interpoalted over
+# Convert precipitation totals to nonnegative hourly amounts.
+xarray_forecast_merged["APCP_surface"].data = deaccumulate_accumulated_field(
+    xarray_forecast_merged, "APCP_surface"
+)
 
-
-# Convert accumulated fields from total accumulations to per-hour increments.
-for accumulated_var in ("APCP_surface", "DSWRF_surface"):
-    xarray_forecast_merged[accumulated_var].data = deaccumulate_accumulated_field(
-        xarray_forecast_merged, accumulated_var
-    )
+# DSWRF is accumulated energy in J/m^2. Convert each interval to its average
+# flux in W/m^2 so it matches the solar-radiation contract used by other models.
+xarray_forecast_merged["DSWRF_surface"].data = deaccumulate_energy_to_flux(
+    xarray_forecast_merged["DSWRF_surface"].data,
+    xarray_forecast_merged.time.values,
+    time_axis=xarray_forecast_merged["DSWRF_surface"].get_axis_num("time"),
+)
 
 
 # Save the dataset with compression and filters for all variables
@@ -513,11 +515,17 @@ for i in range(his_period, 0, -12):
     # Read the merged netcdf file using xarray (single combined file)
     xarray_hist_merged = xr.open_dataset(hist_process_path + "_wgrib2_merged.nc")
 
-    # Convert accumulated fields from total accumulations to per-hour increments.
-    for accumulated_var in ("APCP_surface", "DSWRF_surface"):
-        xarray_hist_merged[accumulated_var].data = deaccumulate_accumulated_field(
-            xarray_hist_merged, accumulated_var
-        )
+    # Convert precipitation totals to nonnegative hourly amounts.
+    xarray_hist_merged["APCP_surface"].data = deaccumulate_accumulated_field(
+        xarray_hist_merged, "APCP_surface"
+    )
+
+    # Keep historic DSWRF in the same W/m^2 units as the forecast data.
+    xarray_hist_merged["DSWRF_surface"].data = deaccumulate_energy_to_flux(
+        xarray_hist_merged["DSWRF_surface"].data,
+        xarray_hist_merged.time.values,
+        time_axis=xarray_hist_merged["DSWRF_surface"].get_axis_num("time"),
+    )
 
     # Save merged and processed xarray dataset to disk using zarr with compression
     # Define the path to save the zarr dataset with the run time in the filename
