@@ -369,8 +369,10 @@ for var_prefix, base_var_candidates in base_var_name_aliases.items():
             break
 
     if not member_vars:
-        logger.warning("No member variables found for %s, skipping", var_prefix)
-        continue
+        raise RuntimeError(
+            f"No ensemble member variables found for required GEPS variable "
+            f"{var_prefix}; tried aliases: {', '.join(base_var_candidates)}"
+        )
 
     n_members = len(member_vars)
     logger.info("Processing %s: found %s ensemble members", found_base_var, n_members)
