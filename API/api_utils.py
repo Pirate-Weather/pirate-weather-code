@@ -9,6 +9,7 @@ import numpy as np
 from API.constants.api_const import (
     APPARENT_TEMP_CONSTS,
     APPARENT_TEMP_SOLAR_CONSTS,
+    PRECIP_IDX,
     PRECIP_NOISE_THRESHOLD_MMH,
     PRECIP_TYPES,
     TEMP_THRESHOLD_WMO_FROZEN_C,
@@ -480,6 +481,152 @@ def map_wmo4677_to_ptype(
 
     # Use MISSING_DATA for NaNs
     out[nan_mask] = MISSING_DATA
+
+    return out
+
+
+def map_canadian_precip_type_to_ptype(
+    ptype_codes: np.ndarray | None = None,
+) -> np.ndarray:
+    """
+    Map Canadian precipitation type codes to internal precip type categories.
+
+    Returns an integer array with the following mapping:
+        0 -> none/other
+        1 -> snow
+        2 -> ice (pellets, hail)
+        3 -> freezing rain/drizzle
+        4 -> rain
+        5 -> mixed (snow + rain + ice)
+
+    The mapping follows the Canadian code ranges and uses conservative grouping:
+        - Freezing drizzle/rain codes (3, 8) -> freezing (3)
+        - Ice pellets / hail-related codes (4, 9) -> ice (2)
+        - Snow and snow showers (5) -> snow (1)
+        - Rain and drizzle ranges (1, 7) -> rain (4)
+        - Mixed precipitation codes (2) -> mixed (5)
+
+    Args:
+        ptype_codes: array-like of numeric Canadian precipitation codes (may contain NaN)
+
+    Returns:
+        np.ndarray: Array of mapped precipitation type categories.
+    """
+    codes = np.asarray(ptype_codes)
+    # Use float dtype so we can store MISSING_DATA (NaN) without conversion errors
+    out = np.zeros_like(codes, dtype=float)
+
+    nan_mask = np.isnan(codes)
+
+    freezing_codes = [3, 8]
+    ice_codes = [4, 9]
+    snow_codes = [5]
+    rain_codes = [1, 7]
+    mixed_codes = [2]
+
+    # Assign categories; order does not matter because groups are disjoint in our choice
+    if codes.size > 0:
+        vals = codes.copy()
+        vals[nan_mask] = -999
+        vals = vals.astype(int)
+
+        out[np.isin(vals, snow_codes)] = 1
+        out[np.isin(vals, ice_codes)] = 2
+        out[np.isin(vals, freezing_codes)] = 3
+        out[np.isin(vals, rain_codes)] = 4
+        out[np.isin(vals, mixed_codes)] = 5
+
+    # Use MISSING_DATA for NaNs
+    out[nan_mask] = MISSING_DATA
+
+    return out
+
+
+def map_ensemble_precip_rates_to_ptype(
+    rain: np.ndarray | None = None,
+    ice: np.ndarray | None = None,
+    freezing_rain: np.ndarray | None = None,
+    snow: np.ndarray | None = None,
+    *,
+    threshold: float = 0.1,
+) -> np.ndarray:
+    """Map ensemble precipitation component rates to the internal precipitation type.
+
+    GEPS and REPS do not provide a categorical type field; they provide rate fields for
+    rain, ice pellets, freezing rain, and snow. We classify by the strongest rate, but
+    if more than one channel exceeds the threshold we fall back to mixed precipitation.
+
+    The companion mapping is:
+        rain -> PRECIP_IDX["rain"]
+        snow -> PRECIP_IDX["snow"]
+        freezing_rain -> PRECIP_IDX["ice"]
+        ice -> PRECIP_IDX["sleet"]
+    """
+    arrays = {
+        "rain": np.asarray(rain, dtype=float) if rain is not None else np.zeros(0),
+        "ice": np.asarray(ice, dtype=float) if ice is not None else np.zeros(0),
+        "freezing_rain": (
+            np.asarray(freezing_rain, dtype=float)
+            if freezing_rain is not None
+            else np.zeros(0)
+        ),
+        "snow": np.asarray(snow, dtype=float) if snow is not None else np.zeros(0),
+    }
+
+    if (
+        not arrays["rain"].size
+        and not arrays["ice"].size
+        and not arrays["freezing_rain"].size
+        and not arrays["snow"].size
+    ):
+        return np.array([], dtype=float)
+
+    n_hours = max(len(v) for v in arrays.values() if len(v) > 0)
+    component_matrix = np.zeros((n_hours, 4), dtype=float)
+    component_matrix[:, 0] = (
+        np.zeros(n_hours)
+        if not arrays["snow"].size
+        else np.resize(arrays["snow"], n_hours)
+    )
+    component_matrix[:, 1] = (
+        np.zeros(n_hours)
+        if not arrays["ice"].size
+        else np.resize(arrays["ice"], n_hours)
+    )
+    component_matrix[:, 2] = (
+        np.zeros(n_hours)
+        if not arrays["freezing_rain"].size
+        else np.resize(arrays["freezing_rain"], n_hours)
+    )
+    component_matrix[:, 3] = (
+        np.zeros(n_hours)
+        if not arrays["rain"].size
+        else np.resize(arrays["rain"], n_hours)
+    )
+
+    strong_count = (component_matrix > threshold).sum(axis=1)
+    out = np.full(n_hours, np.nan, dtype=float)
+
+    mixed_mask = strong_count > 1
+    out[mixed_mask] = PRECIP_IDX["mixed"]
+
+    strong_mask = strong_count == 1
+    if np.any(strong_mask):
+        strongest_idx = np.argmax(component_matrix, axis=1)
+        strongest_idx = np.where(strong_mask, strongest_idx, 0)
+        component_map = {
+            0: PRECIP_IDX["snow"],
+            1: PRECIP_IDX["sleet"],
+            2: PRECIP_IDX["ice"],
+            3: PRECIP_IDX["rain"],
+        }
+        out[strong_mask] = np.array(
+            [component_map[int(i)] for i in strongest_idx[strong_mask]]
+        )
+
+    no_precip_mask = strong_count == 0
+    if np.any(no_precip_mask):
+        out[no_precip_mask] = PRECIP_IDX["none"]
 
     return out
 
