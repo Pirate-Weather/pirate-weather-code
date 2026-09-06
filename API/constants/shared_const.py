@@ -37,4 +37,7 @@ HISTORY_PERIODS = {
     "REPS": 48,
     "RAQDPS": 48,  # Store last 48 hours of RAQDPS data for historic AQI lookbacks
     "SILAM": 48,  # Store last 48 hours of SILAM data for historic AQI lookbacks
+    # URMA has roughly 12 days of history, allowing 10 days of local retrievals.
+    # URMA data has a 6 hour delay, so account for that in the history period to keep consistency with GFS.
+    "URMA": 282,
 }

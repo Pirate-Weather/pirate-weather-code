@@ -52,6 +52,7 @@ CHUNK_SIZES = {
     "RDAQA": 250,
     "RAQDPS": 250,
     "SILAM": 200,
+    "URMA": 200,
 }
 
 FINAL_CHUNK_SIZES = {
@@ -74,6 +75,7 @@ FINAL_CHUNK_SIZES = {
     "RDAQA": 25,
     "RAQDPS": 25,
     "SILAM": 5,
+    "URMA": 25,
 }
 
 FORECAST_LEAD_RANGES = {
