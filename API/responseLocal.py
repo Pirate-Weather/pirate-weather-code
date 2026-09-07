@@ -49,7 +49,9 @@ from API.constants.model_const import (
     ECMWF_AIFS,
     ERA5,
     FORECAST_SOURCES,
+    GDPS,
     GFS,
+    HRDPS,
     HRRR,
     HRRR_SUBH,
     NBM,
@@ -136,6 +138,10 @@ ECMWF_Zarr = None
 NBM_Zarr = None
 NBM_Fire_Zarr = None
 GEFS_Zarr = None
+HRDPS_Zarr = None
+GDPS_Zarr = None
+GEPS_Zarr = None
+REPS_Zarr = None
 HRRR_Zarr = None
 NWS_Alerts_Zarr = None
 WMO_Alerts_Zarr = None
@@ -187,6 +193,10 @@ ECMWF_Zarr = zarr_stores.ECMWF_Zarr
 NBM_Zarr = zarr_stores.NBM_Zarr
 NBM_Fire_Zarr = zarr_stores.NBM_Fire_Zarr
 GEFS_Zarr = zarr_stores.GEFS_Zarr
+HRDPS_Zarr = zarr_stores.HRDPS_Zarr
+GDPS_Zarr = zarr_stores.GDPS_Zarr
+GEPS_Zarr = zarr_stores.GEPS_Zarr
+REPS_Zarr = zarr_stores.REPS_Zarr
 HRRR_Zarr = zarr_stores.HRRR_Zarr
 NWS_Alerts_Zarr = zarr_stores.NWS_Alerts_Zarr
 WMO_Alerts_Zarr = zarr_stores.WMO_Alerts_Zarr
@@ -279,6 +289,8 @@ def convert_data_to_celsius(
     dataOut_dwd_mosmix,
     dataOut_aigfs,
     dataOut_aifs,
+    dataOut_hrdps,
+    dataOut_gdps,
 ):
     """
     Converts temperature, dew point, and apparent temperature from Kelvin to Celsius
@@ -309,6 +321,8 @@ def convert_data_to_celsius(
         (dataOut_dwd_mosmix, DWD_MOSMIX, ["temp", "dew"]),
         (dataOut_aigfs, AIGFS, ["temp"]),
         (dataOut_aifs, ECMWF_AIFS, ["temp", "dew"]),
+        (dataOut_hrdps, HRDPS, ["temp", "dew"]),
+        (dataOut_gdps, GDPS, ["temp", "dew"]),
     ]
 
     for data_array, indices_dict, keys in model_mappings:
@@ -526,6 +540,10 @@ async def PW_Forecast(
     GFS_Merged = None
     ECMWF_Merged = None
     GEFS_Merged = None
+    HRDPS_Merged = None
+    GDPS_Merged = None
+    GEPS_Merged = None
+    REPS_Merged = None
     DWD_MOSMIX_Merged = None
 
     timer.log("### HRRR Start ###")
@@ -540,6 +558,10 @@ async def PW_Forecast(
         gfs=GFS_Zarr,
         ecmwf=ECMWF_Zarr,
         gefs=GEFS_Zarr,
+        hrdps=HRDPS_Zarr,
+        gdps=GDPS_Zarr,
+        geps=GEPS_Zarr,
+        reps=REPS_Zarr,
         rtma_ru=RTMA_RU_Zarr,
         wmo_alerts=WMO_Alerts_Zarr,
         era5_data=ERA5_Data,
@@ -593,6 +615,10 @@ async def PW_Forecast(
     dataOut_gfs = grid_result.dataOut_gfs
     dataOut_ecmwf = grid_result.dataOut_ecmwf
     dataOut_gefs = grid_result.dataOut_gefs
+    dataOut_hrdps = grid_result.dataOut_hrdps
+    dataOut_gdps = grid_result.dataOut_gdps
+    dataOut_geps = grid_result.dataOut_geps
+    dataOut_reps = grid_result.dataOut_reps
     dataOut_rtma_ru = grid_result.dataOut_rtma_ru
     dataOut_dwd_mosmix = grid_result.dataOut_dwd_mosmix
     dataOut_aigfs = grid_result.dataOut_aigfs
@@ -619,6 +645,8 @@ async def PW_Forecast(
         dataOut_dwd_mosmix,
         dataOut_aigfs,
         dataOut_aifs,
+        dataOut_hrdps,
+        dataOut_gdps,
     )
 
     # 5. Build metadata about the data sources used for this forecast
@@ -686,6 +714,10 @@ async def PW_Forecast(
         data_gfs=dataOut_gfs if isinstance(dataOut_gfs, np.ndarray) else None,
         data_ecmwf=dataOut_ecmwf if isinstance(dataOut_ecmwf, np.ndarray) else None,
         data_gefs=dataOut_gefs if isinstance(dataOut_gefs, np.ndarray) else None,
+        data_hrdps=dataOut_hrdps if isinstance(dataOut_hrdps, np.ndarray) else None,
+        data_gdps=dataOut_gdps if isinstance(dataOut_gdps, np.ndarray) else None,
+        data_geps=dataOut_geps if isinstance(dataOut_geps, np.ndarray) else None,
+        data_reps=dataOut_reps if isinstance(dataOut_reps, np.ndarray) else None,
         data_dwd_mosmix=dataOut_dwd_mosmix
         if isinstance(dataOut_dwd_mosmix, np.ndarray)
         else None,
@@ -702,6 +734,10 @@ async def PW_Forecast(
     GFS_Merged = merge_result.gfs
     ECMWF_Merged = merge_result.ecmwf
     GEFS_Merged = merge_result.gefs
+    HRDPS_Merged = merge_result.hrdps
+    GDPS_Merged = merge_result.gdps
+    GEPS_Merged = merge_result.geps
+    REPS_Merged = merge_result.reps
     DWD_MOSMIX_Merged = merge_result.dwd_mosmix
     is_na = is_in_north_america(lat, lon_IN)
     if incAIModels:
@@ -883,6 +919,10 @@ async def PW_Forecast(
         lat=lat,
         lon=lon,
         prioritize_ai_models=bool(incAIModels),
+        hrdps_merged=HRDPS_Merged,
+        reps_merged=REPS_Merged,
+        gdps_merged=GDPS_Merged,
+        geps_merged=GEPS_Merged,
     )
 
     InterThour_inputs = inputs["InterThour_inputs"]

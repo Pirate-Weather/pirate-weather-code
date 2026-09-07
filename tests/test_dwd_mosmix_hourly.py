@@ -73,6 +73,10 @@ def test_dwd_mosmix_temperature_conversion():
         data_aigfs=None,
         data_aigefs=None,
         data_aifs=None,
+        data_hrdps=None,
+        data_gdps=None,
+        data_geps=None,
+        data_reps=None,
         logger=logger,
         loc_tag="test",
     )
@@ -253,6 +257,10 @@ def test_dwd_mosmix_timestamp_alignment():
         data_aigfs=None,
         data_aigefs=None,
         data_aifs=None,
+        data_hrdps=None,
+        data_gdps=None,
+        data_geps=None,
+        data_reps=None,
         logger=logger,
         loc_tag="test_offset",
     )
@@ -326,6 +334,14 @@ def test_dwd_mosmix_invalid_timestamp_not_in_source_list():
         dwd_lon=None,
         sourceIDX={},
         WMO_alertDat=None,
+        dataOut_hrdps=None,
+        dataOut_gdps=None,
+        dataOut_geps=None,
+        dataOut_reps=None,
+        hrdpsRunTime=None,
+        gdpsRunTime=None,
+        gepsRunTime=None,
+        repsRunTime=None,
     )
 
     # Build source metadata
@@ -402,6 +418,14 @@ def test_dwd_mosmix_valid_timestamp_in_source_list():
         dwd_lon=None,
         sourceIDX={},
         WMO_alertDat=None,
+        dataOut_hrdps=None,
+        dataOut_gdps=None,
+        dataOut_geps=None,
+        dataOut_reps=None,
+        hrdpsRunTime=None,
+        gdpsRunTime=None,
+        gepsRunTime=None,
+        repsRunTime=None,
     )
 
     # Build source metadata

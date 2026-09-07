@@ -57,6 +57,7 @@ from API.legacy.current import get_legacy_current_summary
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
 from API.utils.fire import calculate_fosberg_fire_index
+from API.utils.geo import is_in_canada
 from API.utils.source_priority import should_gfs_precede_dwd
 
 
@@ -102,6 +103,21 @@ def _select_value(strategies, default=MISSING_DATA):
 # Pre-define priority orders for currently block.
 # Metrics without ECMWF entries reuse the same order and simply skip sources
 # that are not present in their source_map.
+_CURRENTLY_ORDER_CANADA = [
+    "rtma_ru",
+    "hrrrsubh",
+    "hrdps",
+    "reps",
+    "gdps",
+    "geps",
+    "nbm",
+    "hrrr",
+    "ecmwf_ifs",
+    "gfs",
+    "gefs",
+    "dwd_mosmix",
+    "era5",
+]
 _CURRENTLY_ORDER_NA = [
     "rtma_ru",
     "hrrrsubh",
@@ -109,8 +125,13 @@ _CURRENTLY_ORDER_NA = [
     "hrrr",
     "ecmwf_ifs",
     "gfs",
+    "gefs",
     "dwd_mosmix",
     "era5",
+    "hrdps",
+    "gdps",
+    "geps",
+    "reps",
 ]
 _CURRENTLY_ORDER_ROW = [
     "rtma_ru",
@@ -120,7 +141,12 @@ _CURRENTLY_ORDER_ROW = [
     "dwd_mosmix",
     "ecmwf_ifs",
     "gfs",
+    "gefs",
     "era5",
+    "hrdps",
+    "gdps",
+    "geps",
+    "reps",
 ]
 _CURRENTLY_ORDER_AI_NA = [
     "rtma_ru",
@@ -132,6 +158,10 @@ _CURRENTLY_ORDER_AI_NA = [
     "ecmwf_ifs",
     "dwd_mosmix",
     "era5",
+    "hrdps",
+    "gdps",
+    "geps",
+    "reps",
 ]
 _CURRENTLY_ORDER_AI_ROW = [
     "ecmwf_ifs",
@@ -141,7 +171,12 @@ _CURRENTLY_ORDER_AI_ROW = [
     "hrrr",
     "dwd_mosmix",
     "gfs",
+    "gefs",
     "era5",
+    "hrdps",
+    "gdps",
+    "geps",
+    "reps",
 ]
 
 
@@ -166,19 +201,22 @@ def _build_source_strategies(
     Returns:
         List of (predicate, getter) tuples in priority order.
     """
-    gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
-
-    # Select pre-defined priority order
-    if prioritize_ai_models and gfs_before_dwd:
-        order = _CURRENTLY_ORDER_AI_NA
-    elif prioritize_ai_models and not gfs_before_dwd:
-        order = _CURRENTLY_ORDER_AI_ROW
-    elif gfs_before_dwd:
-        # North America
-        order = _CURRENTLY_ORDER_NA
+    if is_in_canada(lat, lon):
+        order = _CURRENTLY_ORDER_CANADA
     else:
-        # Rest of world
-        order = _CURRENTLY_ORDER_ROW
+        gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
+
+        # Select pre-defined priority order
+        if prioritize_ai_models and gfs_before_dwd:
+            order = _CURRENTLY_ORDER_AI_NA
+        elif prioritize_ai_models and not gfs_before_dwd:
+            order = _CURRENTLY_ORDER_AI_ROW
+        elif gfs_before_dwd:
+            # North America
+            order = _CURRENTLY_ORDER_NA
+        else:
+            # Rest of world
+            order = _CURRENTLY_ORDER_ROW
 
     # Build strategies in priority order
     strategies = []

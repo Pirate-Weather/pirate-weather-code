@@ -37,6 +37,10 @@ class ZarrStores:
     NBM_Zarr: Any | None = None
     NBM_Fire_Zarr: Any | None = None
     GEFS_Zarr: Any | None = None
+    HRDPS_Zarr: Any | None = None
+    GDPS_Zarr: Any | None = None
+    GEPS_Zarr: Any | None = None
+    REPS_Zarr: Any | None = None
     HRRR_Zarr: Any | None = None
     NWS_Alerts_Zarr: Any | None = None
     WMO_Alerts_Zarr: Any | None = None
@@ -260,6 +264,10 @@ def update_zarr_store(
             ("NBM_Zarr", "NBM.zarr"),
             ("NBM_Fire_Zarr", "NBM_Fire.zarr"),
             ("GEFS_Zarr", "GEFS.zarr"),
+            ("HRDPS_Zarr", "HRDPS.zarr"),
+            ("GDPS_Zarr", "GDPS.zarr"),
+            ("GEPS_Zarr", "GEPS.zarr"),
+            ("REPS_Zarr", "REPS.zarr"),
             ("HRRR_Zarr", "HRRR.zarr"),
             ("WMO_Alerts_Zarr", "WMO_Alerts.zarr"),
             ("RTMA_RU_Zarr", "RTMA_RU.zarr"),
@@ -321,6 +329,10 @@ def update_zarr_store(
                 ("SubH_Zarr", "SubH"),
                 ("HRRR_6H_Zarr", "HRRR_6H"),
                 ("GEFS_Zarr", "GEFS"),
+                ("HRDPS_Zarr", "HRDPS"),
+                ("GDPS_Zarr", "GDPS"),
+                ("GEPS_Zarr", "GEPS"),
+                ("REPS_Zarr", "REPS"),
                 ("NBM_Zarr", "NBM"),
                 ("NBM_Fire_Zarr", "NBM_Fire"),
                 ("HRRR_Zarr", "HRRR"),

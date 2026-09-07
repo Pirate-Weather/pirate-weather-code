@@ -229,6 +229,70 @@ SILAM = {
     "co": 8,
 }
 
+# Canadian Model variable indices
+HRDPS = {
+    "gust": 1,
+    "pressure": 2,
+    "temp": 3,
+    "dew": 4,
+    "rh": 5,
+    "wind": 6,
+    "wind_dir": 7,
+    "intensity": 8,
+    "accum": 9,
+    "ptype": 10,
+    "cloud": 11,
+    "uv": 12,
+    "solar": 13,
+    "cape": 14,
+    "station_pressure": 15,
+    "lifted_index": 16,
+    "vertical_velocity": 17,
+}
+
+GDPS = {
+    "temp": 1,
+    "dew": 2,
+    "rh": 3,
+    "wind": 4,
+    "wind_dir": 5,
+    "gust": 6,
+    "intensity": 7,
+    "accum": 8,
+    "uv": 9,
+    "solar": 10,
+    "station_pressure": 11,
+    "cloud": 12,
+    "pressure": 13,
+    "ozone": 14,
+    "type": 15,
+    "cape": 16,
+    "cin": 17,
+    "vertical_velocity": 18,
+    "k_index": 19,
+}
+
+# Ensamble variable indices
+REPS = {
+    "prob": 1,
+    "accum": 2,
+    "error": 3,
+    "freezing_rain": 4,
+    "ice": 5,
+    "rain": 6,
+    "snow": 7,
+}
+
+GEPS = {
+    "prob": 1,
+    "accum": 2,
+    "error": 3,
+    "freezing_rain": 4,
+    "ice": 5,
+    "rain": 6,
+    "snow": 7,
+}
+
 # Source names that provide forecast data (i.e. not current-conditions-only or elevation).
 # Used to validate that at least one forecast model is available for a request.
 # "hrrr" is the time-machine key for HRRR; "era5" covers historical time-machine requests.
@@ -241,6 +305,10 @@ FORECAST_SOURCES = frozenset(
         "gfs",
         "ecmwf_ifs",
         "gefs",
+        "hrdps",
+        "gdps",
+        "geps",
+        "reps",
         "dwd_mosmix",
         "aigfs",
         "aigefs",
