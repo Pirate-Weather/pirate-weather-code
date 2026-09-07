@@ -645,7 +645,7 @@ async def calculate_grid_indexing(
             try:
                 # Build GDPS lat/lon arrays (90 -> -90, -180 -> 179.85)
                 lats_gdps = np.linspace(90.0, -90.0, 1201)
-                lons_gdps = np.linspace(-180.0, 180.0 - 0.15, 2400)
+                lons_gdps = np.linspace(0, 360.0 - 0.15, 2400)
 
                 # Convert input lon to 0..360 for GDPS indexing
                 target_lon_360 = (az_lon + 360.0) % 360.0
