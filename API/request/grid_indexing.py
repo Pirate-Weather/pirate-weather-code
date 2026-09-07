@@ -1073,7 +1073,7 @@ async def calculate_grid_indexing(
                 sourceIDX["gdps"]["x"] = int(x_gdps)
                 sourceIDX["gdps"]["y"] = int(y_gdps)
                 sourceIDX["gdps"]["lat"] = round(gdps_lat, 2)
-                sourceIDX["gdps"]["lon"] = round(gdps_lon, 2)
+                sourceIDX["gdps"]["lon"] = round(((gdps_lon + 180) % 360) - 180, 2)
     else:
         dataOut_gdps = False
 
@@ -1081,7 +1081,7 @@ async def calculate_grid_indexing(
         dataOut_geps = zarr_results["GEPS"]
         if dataOut_geps is not False:
             try:
-                gepsRunTime = dataOut_geps[HISTORY_PERIODS["GEPS"] - 1, 0]
+                gepsRunTime = dataOut_geps[HISTORY_PERIODS["GEPS"] - 3, 0]
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     gepsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1096,7 +1096,7 @@ async def calculate_grid_indexing(
                 sourceIDX["geps"]["x"] = int(x_geps)
                 sourceIDX["geps"]["y"] = int(y_geps)
                 sourceIDX["geps"]["lat"] = round(geps_lat, 2)
-                sourceIDX["geps"]["lon"] = round(geps_lon, 2)
+                sourceIDX["geps"]["lon"] = round(((geps_lon + 180) % 360) - 180, 2)
     else:
         dataOut_geps = False
 
