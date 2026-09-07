@@ -4,18 +4,28 @@ import metpy as mp
 import numpy as np
 from metpy.calc import relative_humidity_from_dewpoint
 
-from API.api_utils import estimate_visibility_gultepe_rh_pr_numpy, map_wmo4677_to_ptype
+from API.api_utils import (
+    estimate_visibility_gultepe_rh_pr_numpy,
+    map_canadian_precip_type_to_ptype,
+    map_ensemble_precip_rates_to_ptype,
+    map_wmo4677_to_ptype,
+)
 from API.constants.model_const import (
     DWD_MOSMIX,
     ECMWF,
     ERA5,
+    GDPS,
     GEFS,
+    GEPS,
     GFS,
+    HRDPS,
     HRRR,
     NBM,
     RAQDPS,
+    REPS,
     SILAM,
 )
+from API.utils.geo import is_in_canada
 from API.utils.source_priority import should_gfs_precede_dwd
 
 logger = logging.getLogger(__name__)
@@ -83,8 +93,47 @@ def _bearing(u, v):
 
 # Pre-define priority orders to avoid recreating lists.
 # Variables without ECMWF data reuse the same order and skip missing entries.
-_PRIORITY_ORDER_NA = ["nbm", "hrrr", "ecmwf", "gfs", "dwd_mosmix", "era5"]
-_PRIORITY_ORDER_ROW = ["nbm", "hrrr", "dwd_mosmix", "ecmwf", "gfs", "era5"]
+# Canadian models are treated as the highest forecast priority inside Canada,
+# but fall below the global GFS/GEFS band in the US and outside Canada.
+_CANADA_PRIORITY_ORDER = [
+    "hrdps",
+    "reps",
+    "gdps",
+    "geps",
+    "nbm",
+    "hrrr",
+    "ecmwf",
+    "gfs",
+    "gefs",
+    "dwd_mosmix",
+    "era5",
+]
+_PRIORITY_ORDER_NA = [
+    "nbm",
+    "hrrr",
+    "ecmwf",
+    "gfs",
+    "gefs",
+    "dwd_mosmix",
+    "era5",
+    "hrdps",
+    "gdps",
+    "geps",
+    "reps",
+]
+_PRIORITY_ORDER_ROW = [
+    "nbm",
+    "hrrr",
+    "dwd_mosmix",
+    "ecmwf",
+    "gfs",
+    "gefs",
+    "era5",
+    "hrdps",
+    "gdps",
+    "geps",
+    "reps",
+]
 _PRIORITY_ORDER_AI_NA = [
     "gefs",
     "gfs",
@@ -93,13 +142,35 @@ _PRIORITY_ORDER_AI_NA = [
     "hrrr",
     "dwd_mosmix",
     "era5",
+    "hrdps",
+    "gdps",
+    "geps",
+    "reps",
 ]
 _PRIORITY_ORDER_AI_ROW = [
     "ecmwf",
     "dwd_mosmix",
     "gfs",
+    "gefs",
     "nbm",
     "hrrr",
+    "era5",
+    "hrdps",
+    "gdps",
+    "geps",
+    "reps",
+]
+_CANADA_PRECIP_PRIORITY_ORDER = [
+    "reps",
+    "geps",
+    "hrdps",
+    "gdps",
+    "nbm",
+    "hrrr",
+    "ecmwf",
+    "gefs",
+    "gfs",
+    "dwd_mosmix",
     "era5",
 ]
 _PRECIP_PRIORITY_ORDER_NA = [
@@ -110,6 +181,10 @@ _PRECIP_PRIORITY_ORDER_NA = [
     "gfs",
     "dwd_mosmix",
     "era5",
+    "geps",
+    "reps",
+    "hrdps",
+    "gdps",
 ]
 _PRECIP_PRIORITY_ORDER_ROW = [
     "nbm",
@@ -119,6 +194,10 @@ _PRECIP_PRIORITY_ORDER_ROW = [
     "gefs",
     "gfs",
     "era5",
+    "geps",
+    "reps",
+    "hrdps",
+    "gdps",
 ]
 _PRECIP_PRIORITY_ORDER_AI_NA = [
     "gefs",
@@ -128,6 +207,10 @@ _PRECIP_PRIORITY_ORDER_AI_NA = [
     "hrrr",
     "dwd_mosmix",
     "era5",
+    "geps",
+    "reps",
+    "hrdps",
+    "gdps",
 ]
 _PRECIP_PRIORITY_ORDER_AI_ROW = [
     "ecmwf",
@@ -137,6 +220,10 @@ _PRECIP_PRIORITY_ORDER_AI_ROW = [
     "nbm",
     "hrrr",
     "era5",
+    "geps",
+    "reps",
+    "hrdps",
+    "gdps",
 ]
 
 
@@ -192,16 +279,19 @@ def _map_grib_precip_type(ptype_values):
 def _stack_precip_with_priority(
     num_hours, lat, lon, source_data, *, prioritize_ai_models=False
 ):
-    gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
-
-    if prioritize_ai_models and gfs_before_dwd:
-        order = _PRECIP_PRIORITY_ORDER_AI_NA
-    elif prioritize_ai_models and not gfs_before_dwd:
-        order = _PRECIP_PRIORITY_ORDER_AI_ROW
-    elif gfs_before_dwd:
-        order = _PRECIP_PRIORITY_ORDER_NA
+    if is_in_canada(lat, lon):
+        order = _CANADA_PRECIP_PRIORITY_ORDER
     else:
-        order = _PRECIP_PRIORITY_ORDER_ROW
+        gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
+
+        if prioritize_ai_models and gfs_before_dwd:
+            order = _PRECIP_PRIORITY_ORDER_AI_NA
+        elif prioritize_ai_models and not gfs_before_dwd:
+            order = _PRECIP_PRIORITY_ORDER_AI_ROW
+        elif gfs_before_dwd:
+            order = _PRECIP_PRIORITY_ORDER_NA
+        else:
+            order = _PRECIP_PRIORITY_ORDER_ROW
 
     return _stack_in_order(num_hours, order, source_data)
 
@@ -222,19 +312,22 @@ def _stack_with_priority(
     Returns:
         Stacked array with sources ordered by priority.
     """
-    gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
-
-    # Select pre-defined order based on priority rules
-    if prioritize_ai_models and gfs_before_dwd:
-        order = _PRIORITY_ORDER_AI_NA
-    elif prioritize_ai_models and not gfs_before_dwd:
-        order = _PRIORITY_ORDER_AI_ROW
-    elif gfs_before_dwd:
-        # North America: ... > ECMWF > GFS > DWD > ERA5
-        order = _PRIORITY_ORDER_NA
+    if is_in_canada(lat, lon):
+        order = _CANADA_PRIORITY_ORDER
     else:
-        # Rest of world: ... > DWD > ECMWF > GFS > ERA5
-        order = _PRIORITY_ORDER_ROW
+        gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
+
+        # Select pre-defined order based on priority rules
+        if prioritize_ai_models and gfs_before_dwd:
+            order = _PRIORITY_ORDER_AI_NA
+        elif prioritize_ai_models and not gfs_before_dwd:
+            order = _PRIORITY_ORDER_AI_ROW
+        elif gfs_before_dwd:
+            # North America: ... > ECMWF > GFS > DWD > ERA5
+            order = _PRIORITY_ORDER_NA
+        else:
+            # Rest of world: ... > DWD > ECMWF > GFS > ERA5
+            order = _PRIORITY_ORDER_ROW
 
     return _stack_in_order(num_hours, order, source_data)
 
@@ -254,6 +347,11 @@ def prepare_data_inputs(
     lat,
     lon,
     prioritize_ai_models=False,
+    *,
+    hrdps_merged=None,
+    reps_merged=None,
+    gdps_merged=None,
+    geps_merged=None,
 ):
     """
     Prepare data inputs for the hourly block.
@@ -334,6 +432,12 @@ def prepare_data_inputs(
             and (hrrr_merged is not None)
         )
         else None,
+        "hrdps": hrdps_merged[:, HRDPS["intensity"]] * 3600
+        if "hrdps" in source_list and hrdps_merged is not None
+        else None,
+        "gdps": gdps_merged[:, GDPS["intensity"]] * 3600
+        if "gdps" in source_list and gdps_merged is not None
+        else None,
         "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["accum"]]
         if "dwd_mosmix" in source_list and dwd_valid
         else None,
@@ -397,6 +501,12 @@ def prepare_data_inputs(
             "ecmwf": ecmwf_merged[:, ECMWF["prob"]]
             if "ecmwf_ifs" in source_list and ecmwf_merged is not None
             else None,
+            "geps": geps_merged[:, GEPS["prob"]] * 0.01
+            if "geps" in source_list and geps_merged is not None
+            else None,
+            "reps": reps_merged[:, REPS["prob"]] * 0.01
+            if "reps" in source_list and reps_merged is not None
+            else None,
             "gefs": gefs_merged[:, GEFS["prob"]]
             if "gefs" in source_list and gefs_merged is not None
             else None,
@@ -435,6 +545,16 @@ def prepare_data_inputs(
                 and (hrrr_merged is not None)
             )
             else None,
+            "hrdps": map_canadian_precip_type_to_ptype(
+                np.round(hrdps_merged[:, HRDPS["ptype"]]),
+            )
+            if "hrdps" in source_list and hrdps_merged is not None
+            else None,
+            "gdps": map_canadian_precip_type_to_ptype(
+                np.round(gdps_merged[:, GDPS["type"]]),
+            )
+            if "gdps" in source_list and gdps_merged is not None
+            else None,
             "dwd_mosmix": map_wmo4677_to_ptype(
                 np.round(dwd_mosmix_merged[:, DWD_MOSMIX["ptype"]]),
                 temperature_c=dwd_mosmix_merged[:, DWD_MOSMIX["temp"]],
@@ -445,6 +565,30 @@ def prepare_data_inputs(
                 ecmwf_merged[:, ECMWF["ptype"]] if ecmwf_merged is not None else None
             )
             if "ecmwf_ifs" in source_list
+            else None,
+            "geps": map_ensemble_precip_rates_to_ptype(
+                rain=geps_merged[:, GEPS["rain"]] if geps_merged is not None else None,
+                ice=geps_merged[:, GEPS["ice"]] if geps_merged is not None else None,
+                freezing_rain=(
+                    geps_merged[:, GEPS["freezing_rain"]]
+                    if geps_merged is not None
+                    else None
+                ),
+                snow=geps_merged[:, GEPS["snow"]] if geps_merged is not None else None,
+            )
+            if "geps" in source_list and geps_merged is not None
+            else None,
+            "reps": map_ensemble_precip_rates_to_ptype(
+                rain=reps_merged[:, REPS["rain"]] if reps_merged is not None else None,
+                ice=reps_merged[:, REPS["ice"]] if reps_merged is not None else None,
+                freezing_rain=(
+                    reps_merged[:, REPS["freezing_rain"]]
+                    if reps_merged is not None
+                    else None
+                ),
+                snow=reps_merged[:, REPS["snow"]] if reps_merged is not None else None,
+            )
+            if "reps" in source_list and reps_merged is not None
             else None,
             "gefs": _component_precip_type(
                 gefs_merged[:, GEFS["snow"]] if gefs_merged is not None else None,
@@ -481,6 +625,10 @@ def prepare_data_inputs(
         source_data={
             "nbm": nbm_merged[:, NBM["temp"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["temp"]] if hrrr_merged is not None else None,
+            "hrdps": hrdps_merged[:, HRDPS["temp"]]
+            if hrdps_merged is not None
+            else None,
+            "gdps": gdps_merged[:, GDPS["temp"]] if gdps_merged is not None else None,
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["temp"]]
             if dwd_valid
             else None,
@@ -501,6 +649,10 @@ def prepare_data_inputs(
         source_data={
             "nbm": nbm_merged[:, NBM["dew"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["dew"]] if hrrr_merged is not None else None,
+            "hrdps": hrdps_merged[:, HRDPS["dew"]]
+            if hrdps_merged is not None
+            else None,
+            "gdps": gdps_merged[:, GDPS["dew"]] if gdps_merged is not None else None,
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["dew"]]
             if dwd_valid
             else None,
@@ -538,6 +690,8 @@ def prepare_data_inputs(
             "hrrr": hrrr_merged[:, HRRR["humidity"]]
             if hrrr_merged is not None
             else None,
+            "hrdps": hrdps_merged[:, HRDPS["rh"]] if hrdps_merged is not None else None,
+            "gdps": gdps_merged[:, GDPS["rh"]] if gdps_merged is not None else None,
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["humidity"]]
             if dwd_valid
             else None,
@@ -555,6 +709,12 @@ def prepare_data_inputs(
         source_data={
             "hrrr": hrrr_merged[:, HRRR["pressure"]]
             if hrrr_merged is not None
+            else None,
+            "hrdps": hrdps_merged[:, HRDPS["pressure"]]
+            if hrdps_merged is not None
+            else None,
+            "gdps": gdps_merged[:, GDPS["pressure"]]
+            if gdps_merged is not None
             else None,
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["pressure"]]
             if dwd_valid
@@ -582,6 +742,10 @@ def prepare_data_inputs(
             )
             if hrrr_merged is not None
             else None,
+            "hrdps": hrdps_merged[:, HRDPS["wind"]]
+            if hrdps_merged is not None
+            else None,
+            "gdps": gdps_merged[:, GDPS["wind"]] if gdps_merged is not None else None,
             "dwd_mosmix": _wind_speed(
                 dwd_mosmix_merged[:, DWD_MOSMIX["wind_u"]],
                 dwd_mosmix_merged[:, DWD_MOSMIX["wind_v"]],
@@ -616,6 +780,10 @@ def prepare_data_inputs(
         source_data={
             "nbm": nbm_merged[:, NBM["gust"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["gust"]] if hrrr_merged is not None else None,
+            "hrdps": hrdps_merged[:, HRDPS["gust"]]
+            if hrdps_merged is not None
+            else None,
+            "gdps": gdps_merged[:, GDPS["gust"]] if gdps_merged is not None else None,
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["gust"]]
             if dwd_valid
             else None,
@@ -638,6 +806,12 @@ def prepare_data_inputs(
                 hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]]
             )
             if hrrr_merged is not None
+            else None,
+            "hrdps": hrdps_merged[:, HRDPS["wind_dir"]]
+            if hrdps_merged is not None
+            else None,
+            "gdps": gdps_merged[:, GDPS["wind_dir"]]
+            if gdps_merged is not None
             else None,
             "dwd_mosmix": _bearing(
                 dwd_mosmix_merged[:, DWD_MOSMIX["wind_u"]],
@@ -675,6 +849,12 @@ def prepare_data_inputs(
             "hrrr": hrrr_merged[:, HRRR["cloud"]] * 0.01
             if hrrr_merged is not None
             else None,
+            "hrdps": hrdps_merged[:, HRDPS["cloud"]] * 0.01
+            if hrdps_merged is not None
+            else None,
+            "gdps": gdps_merged[:, GDPS["cloud"]] * 0.01
+            if gdps_merged is not None
+            else None,
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["cloud"]] * 0.01
             if dwd_valid
             else None,
@@ -693,6 +873,8 @@ def prepare_data_inputs(
     uv_inputs = _stack_fields(
         num_hours,
         (gfs_merged[:, GFS["uv"]] * 18.9 * 0.025) if gfs_merged is not None else None,
+        (hrdps_merged[:, HRDPS["uv"]]) if hrdps_merged is not None else None,
+        (gdps_merged[:, GDPS["uv"]]) if gdps_merged is not None else None,
         (
             era5_merged[:, ERA5["downward_uv_radiation_at_the_surface"]]
             / 3600
@@ -728,6 +910,7 @@ def prepare_data_inputs(
     ozone_inputs = _stack_fields(
         num_hours,
         gfs_merged[:, GFS["ozone"]] if gfs_merged is not None else None,
+        gdps_merged[:, GDPS["ozone"]] if gdps_merged is not None else None,
         era5_merged[:, ERA5["total_column_ozone"]] * 46696 if era5_valid else None,
     )
 
@@ -745,6 +928,10 @@ def prepare_data_inputs(
         source_data={
             "nbm": nbm_merged[:, NBM["intensity"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["accum"]] if hrrr_merged is not None else None,
+            "hrdps": hrdps_merged[:, HRDPS["accum"]]
+            if hrdps_merged is not None
+            else None,
+            "gdps": gdps_merged[:, GDPS["accum"]] if gdps_merged is not None else None,
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["accum"]]
             if dwd_valid
             else None,  # kg/m^2 = mm
@@ -752,6 +939,8 @@ def prepare_data_inputs(
             if ecmwf_merged is not None
             else None,
             "gefs": gefs_merged[:, GEFS["accum"]] if gefs_merged is not None else None,
+            "geps": geps_merged[:, GEPS["accum"]] if geps_merged is not None else None,
+            "reps": reps_merged[:, REPS["accum"]] if reps_merged is not None else None,
             "gfs": gfs_merged[:, GFS["accum"]] if gfs_merged is not None else None,
             "era5": era5_merged[:, ERA5["total_precipitation"]] * 1000
             if era5_valid
@@ -781,6 +970,12 @@ def prepare_data_inputs(
             num_hours,
             gfs_merged[:, GFS["station_pressure"]] if gfs_merged is not None else None,
             era5_merged[:, ERA5["surface_pressure"]] if era5_valid else None,
+            hrdps_merged[:, HRDPS["station_pressure"]]
+            if hrdps_merged is not None
+            else None,
+            gdps_merged[:, GDPS["station_pressure"]]
+            if gdps_merged is not None
+            else None,
         )
 
     # --- fire_inputs ---
@@ -801,6 +996,10 @@ def prepare_data_inputs(
         source_data={
             "nbm": nbm_merged[:, NBM["solar"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["solar"]] if hrrr_merged is not None else None,
+            "hrdps": hrdps_merged[:, HRDPS["solar"]]
+            if hrdps_merged is not None
+            else None,
+            "gdps": gdps_merged[:, GDPS["solar"]] if gdps_merged is not None else None,
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["solar"]]
             if dwd_valid
             else None,
@@ -817,6 +1016,8 @@ def prepare_data_inputs(
         num_hours,
         nbm_merged[:, NBM["cape"]] if nbm_merged is not None else None,
         hrrr_merged[:, HRRR["cape"]] if hrrr_merged is not None else None,
+        hrdps_merged[:, HRDPS["cape"]] if hrdps_merged is not None else None,
+        gdps_merged[:, GDPS["cape"]] if gdps_merged is not None else None,
         gfs_merged[:, GFS["cape"]] if gfs_merged is not None else None,
         era5_merged[:, ERA5["convective_available_potential_energy"]]
         if era5_valid
@@ -830,6 +1031,8 @@ def prepare_data_inputs(
         if ecmwf_merged is not None
         else None,
         gefs_merged[:, GEFS["error"]] if gefs_merged is not None else None,
+        geps_merged[:, GEPS["error"]] if geps_merged is not None else None,
+        reps_merged[:, REPS["error"]] if reps_merged is not None else None,
     )
 
     return {

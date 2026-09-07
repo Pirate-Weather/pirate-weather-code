@@ -305,3 +305,9 @@ def is_in_north_america(lat: float, lon: float) -> bool:
         return True
 
     return False
+
+
+def is_in_canada(lat: float, lon: float) -> bool:
+    """Determine if a location falls within the Canadian landmass."""
+    lon_normalized = ((lon + 180) % 360) - 180
+    return 41.7 <= lat <= 83.0 and -141.0 <= lon_normalized <= -52.0

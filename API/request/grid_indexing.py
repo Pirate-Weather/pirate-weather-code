@@ -67,19 +67,20 @@ def _lat_lon_to_unit_xyz(lat, lon) -> np.ndarray:
     )
 
 
-def _raqdps_lookup_cache(lat_lon_grid: Any) -> dict[str, Any]:
-    """Return a cached spherical KD-tree for the RAQDPS rotated lat/lon grid."""
+def _lat_lon_grid_lookup_cache(lat_lon_grid: Any) -> dict[str, Any]:
+    """Return a cached spherical KD-tree for a 2-D curved/rotated grid."""
     if isinstance(lat_lon_grid, dict):
         cache = lat_lon_grid.get("_lookup_cache")
         if cache is not None:
             return cache
 
     latitude = np.asarray(lat_lon_grid["latitude"], dtype=float)
+    # Ensure longitudes are normalized to -180..180 matching target coords
     longitude = _normalize_longitude_180(lat_lon_grid["longitude"])
+
     if latitude.shape != longitude.shape:
         raise ValueError(
-            "RAQDPS latitude/longitude shape mismatch: "
-            f"lat={latitude.shape} lon={longitude.shape}"
+            f"Latitude/Longitude shape mismatch: lat={latitude.shape} lon={longitude.shape}"
         )
 
     cache = {
@@ -93,37 +94,31 @@ def _raqdps_lookup_cache(lat_lon_grid: Any) -> dict[str, Any]:
     return cache
 
 
-def _nearest_raqdps_grid_coords(
+def _nearest_2d_grid_coords(
     lat: float,
     lon: float,
     lat_lon_grid: Any,
+    max_distance: float = 0.020,
+    model_name: str = "2D",
 ) -> tuple[int, int, float, float]:
-    """Return x/y and nearest geographic coordinates for the RAQDPS 2-D grid.
-
-    Raises ``ValueError`` if the query point is further than
-    ``_RAQDPS_MAX_GRID_DISTANCE`` from the nearest grid point, indicating
-    the location is outside the RAQDPS regional domain.
-    """
-    # Maximum chord distance (unit-sphere Euclidean) between the query point
-    # and the nearest RAQDPS grid point before the location is considered
-    # outside the model domain.  ~0.020 ≈ 127 km / ~1.14° arc, well above
-    # the ~7 km half-diagonal of a 10 km grid cell.
-    _RAQDPS_MAX_GRID_DISTANCE = 0.020
-
-    cache = _raqdps_lookup_cache(lat_lon_grid)
+    """Return x/y and nearest geographic coordinates for a 2D projected or rotated grid."""
+    cache = _lat_lon_grid_lookup_cache(lat_lon_grid)
     target_xyz = _lat_lon_to_unit_xyz(np.array([lat]), np.array([lon]))
+
     dist, flat_idx = cache["tree"].query(target_xyz, k=1)
-    if float(dist[0]) > _RAQDPS_MAX_GRID_DISTANCE:
+
+    if float(dist[0]) > max_distance:
         raise ValueError(
-            f"Location ({lat:.3f}, {lon:.3f}) is outside the RAQDPS domain "
-            f"(nearest grid point chord distance {float(dist[0]):.4f} > {_RAQDPS_MAX_GRID_DISTANCE})"
+            f"Location ({lat:.3f}, {lon:.3f}) is outside the {model_name} domain "
+            f"(nearest grid point chord distance {float(dist[0]):.4f} > {max_distance})"
         )
-    y_raqdps, x_raqdps = np.unravel_index(int(flat_idx[0]), cache["shape"])
+
+    y_idx, x_idx = np.unravel_index(int(flat_idx[0]), cache["shape"])
     return (
-        int(x_raqdps),
-        int(y_raqdps),
-        float(cache["latitude"][y_raqdps, x_raqdps]),
-        float(cache["longitude"][y_raqdps, x_raqdps]),
+        int(x_idx),
+        int(y_idx),
+        float(cache["latitude"][y_idx, x_idx]),
+        float(cache["longitude"][y_idx, x_idx]),
     )
 
 
@@ -167,9 +162,13 @@ class ZarrSources:
     gfs: Any
     ecmwf: Any
     gefs: Any
-    rtma_ru: Any
-    wmo_alerts: Any
-    era5_data: Any
+    hrdps: Any = None
+    gdps: Any = None
+    geps: Any = None
+    reps: Any = None
+    rtma_ru: Any = None
+    wmo_alerts: Any = None
+    era5_data: Any = None
     dwd_mosmix: Any = None
     aigfs: Any = None
     aigefs: Any = None
@@ -189,6 +188,10 @@ class GridIndexingResult:
     dataOut_gfs: np.ndarray | bool
     dataOut_ecmwf: np.ndarray | bool
     dataOut_gefs: np.ndarray | bool
+    dataOut_hrdps: np.ndarray | bool
+    dataOut_gdps: np.ndarray | bool
+    dataOut_geps: np.ndarray | bool
+    dataOut_reps: np.ndarray | bool
     dataOut_rtma_ru: np.ndarray | bool
     dataOut_dwd_mosmix: np.ndarray | bool
     dataOut_aigfs: np.ndarray | bool
@@ -203,6 +206,10 @@ class GridIndexingResult:
     gfsRunTime: float | None
     ecmwfRunTime: float | None
     gefsRunTime: float | None
+    hrdpsRunTime: float | None
+    gdpsRunTime: float | None
+    gepsRunTime: float | None
+    repsRunTime: float | None
     dwdMosmixRunTime: float | None
     aigfsRunTime: float | None
     aigefsRunTime: float | None
@@ -227,6 +234,15 @@ class GridIndexingResult:
     y_dwd: float | None
     dwd_lat: float | None
     dwd_lon: float | None
+    # Canadian / ensemble grid coordinates
+    x_gdps: float | None
+    y_gdps: float | None
+    gdps_lat: float | None
+    gdps_lon: float | None
+    x_geps: float | None
+    y_geps: float | None
+    geps_lat: float | None
+    geps_lon: float | None
     sourceIDX: dict
     WMO_alertDat: str | None
     # Air quality model outputs
@@ -371,6 +387,10 @@ async def calculate_grid_indexing(
     readGFS = False
     readECMWF = False
     readGEFS = False
+    readHRDPS = False
+    readGDPS = False
+    readGEPS = False
+    readREPS = False
     readHRRR = False
     readERA5 = False
     readDWD_MOSMIX = False
@@ -546,6 +566,15 @@ async def calculate_grid_indexing(
     gfs_lat = lats_gfs[y_p]
     gfs_lon = lons_gfs[x_p]
 
+    x_hrdps = None
+    y_hrdps = None
+    hrdps_lat = None
+    hrdps_lon = None
+    x_reps = None
+    y_reps = None
+    reps_lat = None
+    reps_lon = None
+
     if (now_time - utc_time) > datetime.timedelta(hours=10 * 24):
         dataOut_gfs = False
         readERA5 = True
@@ -589,6 +618,85 @@ async def calculate_grid_indexing(
         dataOut_gefs = None
 
     timer.log("### GEFS Detail END ###")
+
+    timer.log("### Canadian Models Detail Start ###")
+
+    dataOut_hrdps = False
+    dataOut_gdps = False
+    dataOut_geps = False
+    dataOut_reps = False
+    if not time_machine:
+        if zarr_sources.hrdps is not None:
+            try:
+                (
+                    x_hrdps,
+                    y_hrdps,
+                    hrdps_lat,
+                    hrdps_lon,
+                ) = _nearest_2d_grid_coords(
+                    lat, lon, zarr_sources.hrdps, max_distance=0.005, model_name="HRDPS"
+                )
+                readHRDPS = True
+                dataOut_hrdps = None
+            except (IndexError, KeyError, ValueError, TypeError, AttributeError) as exc:
+                logger.debug("HRDPS grid lookup failed: %s", exc)
+        # GDPS is a regular lat/lon grid: 2400 x 1201 @ 0.15° resolution
+        if zarr_sources.gdps is not None:
+            try:
+                # Build GDPS lat/lon arrays (90 -> -90, -180 -> 179.85)
+                lats_gdps = np.linspace(90.0, -90.0, 1201)
+                lons_gdps = np.linspace(0, 360.0 - 0.15, 2400)
+
+                # Convert input lon to 0..360 for GDPS indexing
+                target_lon_360 = (az_lon + 360.0) % 360.0
+
+                abslat = np.abs(lats_gdps - lat)
+                abslon = np.abs(lons_gdps - target_lon_360)
+                y_gdps = int(np.argmin(abslat))
+                x_gdps = int(np.argmin(abslon))
+                gdps_lat = float(lats_gdps[y_gdps])
+                gdps_lon = float(lons_gdps[x_gdps])
+                readGDPS = True
+                dataOut_gdps = None
+            except (IndexError, KeyError, ValueError, TypeError, AttributeError) as exc:
+                logger.debug("GDPS grid lookup failed: %s", exc)
+        if zarr_sources.gdps is not None:
+            # If the above block didn't set coords, ensure read flags set
+            readGDPS = True
+            dataOut_gdps = None
+        if zarr_sources.geps is not None:
+            try:
+                # GEPS: 720 x 361, 0.5° resolution, lon 0..359.5, lat -90..90
+                lats_geps = np.linspace(-90.0, 90.0, 361)
+                lons_geps = np.linspace(0.0, 360.0 - 0.5, 720)
+                # Convert input lon to 0..360 for GEPS indexing
+                lon360 = (az_lon + 360.0) % 360.0
+                abslat = np.abs(lats_geps - lat)
+                abslon = np.abs(lons_geps - lon360)
+                y_geps = int(np.argmin(abslat))
+                x_geps = int(np.argmin(abslon))
+                geps_lat = float(lats_geps[y_geps])
+                geps_lon = float(lons_geps[x_geps])
+                readGEPS = True
+                dataOut_geps = None
+            except (IndexError, KeyError, ValueError, TypeError, AttributeError) as exc:
+                logger.debug("GEPS grid lookup failed: %s", exc)
+        if zarr_sources.reps is not None:
+            try:
+                (
+                    x_reps,
+                    y_reps,
+                    reps_lat,
+                    reps_lon,
+                ) = _nearest_2d_grid_coords(
+                    lat, lon, zarr_sources.reps, max_distance=0.020, model_name="REPS"
+                )
+                readREPS = True
+                dataOut_reps = None
+            except (IndexError, KeyError, ValueError, TypeError, AttributeError) as exc:
+                logger.debug("REPS grid lookup failed: %s", exc)
+
+    timer.log("### Canadian Models Detail END ###")
 
     timer.log("### DWD MOSMIX Detail Start ###")
 
@@ -663,7 +771,13 @@ async def calculate_grid_indexing(
                 y_raqdps,
                 raqdps_lat_val,
                 raqdps_lon_val,
-            ) = _nearest_raqdps_grid_coords(lat, lon, zarr_sources.raqdps_lat_lon)
+            ) = _nearest_2d_grid_coords(
+                lat,
+                lon,
+                zarr_sources.raqdps_lat_lon,
+                max_distance=0.020,
+                model_name="RAQDPS",
+            )
             readRAQDPS = True
         except (IndexError, KeyError, ValueError, TypeError, AttributeError) as exc:
             logger.debug("RAQDPS grid lookup failed: %s", exc)
@@ -735,6 +849,16 @@ async def calculate_grid_indexing(
         )
     if readGEFS:
         zarrTasks["GEFS"] = weather.zarr_read("GEFS", zarr_sources.gefs, x_p, y_p)
+    if readHRDPS:
+        zarrTasks["HRDPS"] = weather.zarr_read(
+            "HRDPS", zarr_sources.hrdps, x_hrdps, y_hrdps
+        )
+    if readGDPS:
+        zarrTasks["GDPS"] = weather.zarr_read("GDPS", zarr_sources.gdps, x_p, y_p)
+    if readGEPS:
+        zarrTasks["GEPS"] = weather.zarr_read("GEPS", zarr_sources.geps, x_p, y_p)
+    if readREPS:
+        zarrTasks["REPS"] = weather.zarr_read("REPS", zarr_sources.reps, x_reps, y_reps)
     if readRTMA_RU:
         zarrTasks["RTMA_RU"] = weather.zarr_read(
             "RTMA_RU", zarr_sources.rtma_ru, x_rtma, y_rtma
@@ -783,6 +907,10 @@ async def calculate_grid_indexing(
     gfsRunTime = None
     ecmwfRunTime = None
     gefsRunTime = None
+    hrdpsRunTime = None
+    gdpsRunTime = None
+    gepsRunTime = None
+    repsRunTime = None
     dwdMosmixRunTime = None
     aigfsRunTime = None
     aigefsRunTime = None
@@ -906,6 +1034,98 @@ async def calculate_grid_indexing(
                 logger.debug("Failed to parse GEFS runtime for freshness check")
         else:
             gefsRunTime = None
+
+    if readHRDPS:
+        dataOut_hrdps = zarr_results["HRDPS"]
+        if dataOut_hrdps is not False:
+            try:
+                hrdpsRunTime = dataOut_hrdps[HISTORY_PERIODS["HRDPS"] - 1, 0]
+                timestamp_dt = datetime.datetime.fromtimestamp(
+                    hrdpsRunTime.astype(int), datetime.UTC
+                ).replace(tzinfo=None)
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                    dataOut_hrdps = False
+                    hrdpsRunTime = None
+                    logger.warning("OLD HRDPS")
+            except (ValueError, TypeError, AttributeError):
+                logger.debug("Failed to parse HRDPS runtime for freshness check")
+            else:
+                sourceIDX["hrdps"] = {}
+                sourceIDX["hrdps"]["x"] = int(x_hrdps)
+                sourceIDX["hrdps"]["y"] = int(y_hrdps)
+                sourceIDX["hrdps"]["lat"] = round(hrdps_lat, 2)
+                sourceIDX["hrdps"]["lon"] = round(((hrdps_lon + 180) % 360) - 180, 2)
+    else:
+        dataOut_hrdps = False
+
+    if readGDPS:
+        dataOut_gdps = zarr_results["GDPS"]
+        if dataOut_gdps is not False:
+            try:
+                gdpsRunTime = dataOut_gdps[HISTORY_PERIODS["GDPS"] - 1, 0]
+                timestamp_dt = datetime.datetime.fromtimestamp(
+                    gdpsRunTime.astype(int), datetime.UTC
+                ).replace(tzinfo=None)
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                    dataOut_gdps = False
+                    gdpsRunTime = None
+                    logger.warning("OLD GDPS")
+            except (ValueError, TypeError, AttributeError):
+                logger.debug("Failed to parse GDPS runtime for freshness check")
+            else:
+                sourceIDX["gdps"] = {}
+                sourceIDX["gdps"]["x"] = int(x_gdps)
+                sourceIDX["gdps"]["y"] = int(y_gdps)
+                sourceIDX["gdps"]["lat"] = round(gdps_lat, 2)
+                sourceIDX["gdps"]["lon"] = round(gdps_lon, 2)
+    else:
+        dataOut_gdps = False
+
+    if readGEPS:
+        dataOut_geps = zarr_results["GEPS"]
+        if dataOut_geps is not False:
+            try:
+                gepsRunTime = dataOut_geps[HISTORY_PERIODS["GEPS"] - 1, 0]
+                timestamp_dt = datetime.datetime.fromtimestamp(
+                    gepsRunTime.astype(int), datetime.UTC
+                ).replace(tzinfo=None)
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                    dataOut_geps = False
+                    gepsRunTime = None
+                    logger.warning("OLD GEPS")
+            except (ValueError, TypeError, AttributeError):
+                logger.debug("Failed to parse GEPS runtime for freshness check")
+            else:
+                sourceIDX["geps"] = {}
+                sourceIDX["geps"]["x"] = int(x_geps)
+                sourceIDX["geps"]["y"] = int(y_geps)
+                sourceIDX["geps"]["lat"] = round(geps_lat, 2)
+                sourceIDX["geps"]["lon"] = round(geps_lon, 2)
+    else:
+        dataOut_geps = False
+
+    if readREPS:
+        dataOut_reps = zarr_results["REPS"]
+        if dataOut_reps is not False:
+            try:
+                repsRunTime = dataOut_reps[HISTORY_PERIODS["REPS"] - 1, 0]
+                timestamp_dt = datetime.datetime.fromtimestamp(
+                    repsRunTime.astype(int), datetime.UTC
+                ).replace(tzinfo=None)
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                    dataOut_reps = False
+                    repsRunTime = None
+                    logger.warning("OLD REPS")
+            except (ValueError, TypeError, AttributeError):
+                logger.debug("Failed to parse REPS runtime for freshness check")
+            else:
+                sourceIDX["reps"] = {}
+                sourceIDX["reps"]["x"] = int(x_reps)
+                sourceIDX["reps"]["y"] = int(y_reps)
+                sourceIDX["reps"]["lat"] = round(reps_lat, 2)
+                sourceIDX["reps"]["lon"] = round(((reps_lon + 180) % 360) - 180, 2)
+    else:
+        dataOut_reps = False
 
     if readRTMA_RU:
         dataOut_rtma_ru = zarr_results["RTMA_RU"]
@@ -1075,6 +1295,10 @@ async def calculate_grid_indexing(
         dataOut_gfs=dataOut_gfs,
         dataOut_ecmwf=dataOut_ecmwf,
         dataOut_gefs=dataOut_gefs,
+        dataOut_hrdps=dataOut_hrdps,
+        dataOut_gdps=dataOut_gdps,
+        dataOut_geps=dataOut_geps,
+        dataOut_reps=dataOut_reps,
         dataOut_rtma_ru=dataOut_rtma_ru,
         dataOut_dwd_mosmix=dataOut_dwd_mosmix,
         dataOut_aigfs=dataOut_aigfs,
@@ -1089,6 +1313,10 @@ async def calculate_grid_indexing(
         gfsRunTime=gfsRunTime,
         ecmwfRunTime=ecmwfRunTime,
         gefsRunTime=gefsRunTime,
+        hrdpsRunTime=hrdpsRunTime,
+        gdpsRunTime=gdpsRunTime,
+        gepsRunTime=gepsRunTime,
+        repsRunTime=repsRunTime,
         dwdMosmixRunTime=dwdMosmixRunTime,
         aigfsRunTime=aigfsRunTime,
         aigefsRunTime=aigefsRunTime,
@@ -1113,6 +1341,14 @@ async def calculate_grid_indexing(
         y_dwd=y_dwd,
         dwd_lat=dwd_lat,
         dwd_lon=dwd_lon,
+        x_gdps=locals().get("x_gdps", None),
+        y_gdps=locals().get("y_gdps", None),
+        gdps_lat=locals().get("gdps_lat", None),
+        gdps_lon=locals().get("gdps_lon", None),
+        x_geps=locals().get("x_geps", None),
+        y_geps=locals().get("y_geps", None),
+        geps_lat=locals().get("geps_lat", None),
+        geps_lon=locals().get("geps_lon", None),
         sourceIDX=sourceIDX,
         WMO_alertDat=WMO_alertDat,
         dataOut_raqdps=dataOut_raqdps,

@@ -4,8 +4,74 @@ import numpy as np
 
 from API.constants.api_const import PRECIP_IDX
 from API.constants.model_const import DWD_MOSMIX, ECMWF, GEFS, NBM
+from API.current.metrics import _build_source_strategies
 from API.data_inputs import prepare_data_inputs
 from API.utils.geo import is_in_north_america
+
+
+def test_current_source_priority_canada_uses_canadian_models_above_global_models():
+    """Canadian current sources should keep local RTMA/SubH first and Canadian models next."""
+    source_map = {
+        "rtma_ru": (lambda: True, lambda: 1.0),
+        "hrrrsubh": (lambda: True, lambda: 2.0),
+        "hrdps": (lambda: True, lambda: 3.0),
+        "reps": (lambda: True, lambda: 4.0),
+        "gdps": (lambda: True, lambda: 5.0),
+        "geps": (lambda: True, lambda: 6.0),
+        "nbm": (lambda: True, lambda: 7.0),
+        "hrrr": (lambda: True, lambda: 8.0),
+        "ecmwf_ifs": (lambda: True, lambda: 9.0),
+        "gfs": (lambda: True, lambda: 10.0),
+        "gefs": (lambda: True, lambda: 11.0),
+        "dwd_mosmix": (lambda: True, lambda: 12.0),
+        "era5": (lambda: True, lambda: 13.0),
+    }
+
+    strategies = _build_source_strategies(source_map, 56.0, -106.0)
+    order = [
+        next(name for name, value in source_map.items() if value is strategy)
+        for strategy in strategies
+    ]
+
+    assert order[:6] == [
+        "rtma_ru",
+        "hrrrsubh",
+        "hrdps",
+        "reps",
+        "gdps",
+        "geps",
+    ]
+    assert order.index("hrdps") < order.index("nbm")
+    assert order.index("gfs") > order.index("hrdps")
+
+
+def test_current_source_priority_us_keeps_canadian_models_below_global_models():
+    """The US should still keep Canadian forecast models lower than the primary global stack."""
+    source_map = {
+        "rtma_ru": (lambda: True, lambda: 1.0),
+        "hrrrsubh": (lambda: True, lambda: 2.0),
+        "nbm": (lambda: True, lambda: 3.0),
+        "hrrr": (lambda: True, lambda: 4.0),
+        "ecmwf_ifs": (lambda: True, lambda: 5.0),
+        "gfs": (lambda: True, lambda: 6.0),
+        "gefs": (lambda: True, lambda: 7.0),
+        "dwd_mosmix": (lambda: True, lambda: 8.0),
+        "era5": (lambda: True, lambda: 9.0),
+        "hrdps": (lambda: True, lambda: 10.0),
+        "gdps": (lambda: True, lambda: 11.0),
+        "geps": (lambda: True, lambda: 12.0),
+        "reps": (lambda: True, lambda: 13.0),
+    }
+
+    strategies = _build_source_strategies(source_map, 40.7128, -74.0060)
+    order = [
+        next(name for name, value in source_map.items() if value is strategy)
+        for strategy in strategies
+    ]
+
+    assert order.index("gfs") < order.index("hrdps")
+    assert order.index("gefs") < order.index("hrdps")
+    assert order.index("hrdps") < order.index("reps")
 
 
 def test_is_in_north_america_usa():

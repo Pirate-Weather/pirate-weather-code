@@ -20,7 +20,9 @@ from API.raqdps_utils import (
     normalize_utc,
     output_units_for_variable,
 )
-from API.request.grid_indexing import _nearest_raqdps_grid_coords
+from API.request.grid_indexing import (
+    _nearest_2d_grid_coords,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RAQDPS_SCRIPT = REPO_ROOT / "API" / "RAQDPS_Local_Ingest.py"
@@ -148,10 +150,8 @@ def test_raqdps_nearest_grid_wraps_antimeridian_and_caches_tree():
         "longitude": np.array([[179.8, -170.0]]),
     }
 
-    x_idx, y_idx, grid_lat, grid_lon = _nearest_raqdps_grid_coords(
-        0.0,
-        -179.9,
-        lat_lon_grid,
+    x_idx, y_idx, grid_lat, grid_lon = _nearest_2d_grid_coords(
+        0.0, -179.9, lat_lon_grid, max_distance=0.020, model_name="RAQDPS"
     )
 
     assert (x_idx, y_idx) == (0, 0)
@@ -159,7 +159,9 @@ def test_raqdps_nearest_grid_wraps_antimeridian_and_caches_tree():
     assert grid_lon == 179.8
     cache = lat_lon_grid["_lookup_cache"]
 
-    _nearest_raqdps_grid_coords(0.0, -179.9, lat_lon_grid)
+    _nearest_2d_grid_coords(
+        0.0, -179.9, lat_lon_grid, max_distance=0.020, model_name="RAQDPS"
+    )
 
     assert lat_lon_grid["_lookup_cache"] is cache
 
@@ -178,10 +180,8 @@ def test_raqdps_nearest_grid_uses_spherical_distance_at_high_latitudes():
         "longitude": np.array([[0.5, 0.0]]),
     }
 
-    x_idx, y_idx, grid_lat, grid_lon = _nearest_raqdps_grid_coords(
-        80.0,
-        0.0,
-        lat_lon_grid,
+    x_idx, y_idx, grid_lat, grid_lon = _nearest_2d_grid_coords(
+        80.0, 0.0, lat_lon_grid, max_distance=0.020, model_name="RAQDPS"
     )
 
     assert (x_idx, y_idx) == (0, 0)
@@ -199,4 +199,6 @@ def test_raqdps_outside_domain_raises():
     }
     # Query in the tropics — far outside the small two-cell test domain
     with pytest.raises(ValueError, match="outside the RAQDPS domain"):
-        _nearest_raqdps_grid_coords(0.0, 0.0, lat_lon_grid)
+        _nearest_2d_grid_coords(
+            0.0, 0.0, lat_lon_grid, max_distance=0.020, model_name="RAQDPS"
+        )
