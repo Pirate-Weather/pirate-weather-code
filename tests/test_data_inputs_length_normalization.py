@@ -176,7 +176,7 @@ def test_prepare_data_inputs_includes_canadian_model_fields():
     assert np.allclose(inputs["solar_inputs"][:, 0], hrdps_merged[:, HRDPS["solar"]])
     assert np.allclose(inputs["cape_inputs"][:, 0], hrdps_merged[:, HRDPS["cape"]])
     assert np.allclose(
-        inputs["prcipProbability_inputs"][:, 0], geps_merged[:, GEPS["prob"]]
+        inputs["prcipProbability_inputs"][:, 0], reps_merged[:, REPS["prob"]]
     )
     assert np.allclose(inputs["accum_inputs"][:, 0], hrdps_merged[:, HRDPS["accum"]])
     expected_hrdps_ptype = map_canadian_precip_type_to_ptype(
@@ -191,27 +191,6 @@ def test_convert_data_to_celsius_handles_canadian_models():
     hrdps[:, HRDPS["dew"]] = 288.15
 
     gdps = np.full((3, max(GDPS.values()) + 1), np.nan)
-    gdps[:, GDPS["temp"]] = 300.15
-    gdps[:, GDPS["dew"]] = 293.15
-
-    convert_data_to_celsius(
-        dataOut=None,
-        dataOut_h2=None,
-        dataOut_hrrrh=None,
-        dataOut_nbm=None,
-        dataOut_gfs=None,
-        dataOut_ecmwf=None,
-        dataOut_rtma_ru=None,
-        era5_merged=None,
-        dataOut_dwd_mosmix=None,
-        dataOut_aigfs=None,
-        dataOut_aifs=None,
-        dataOut_hrdps=hrdps,
-        dataOut_gdps=gdps,
-    )
-
-    hrdps[:, HRDPS["temp"]] = 295.15
-    hrdps[:, HRDPS["dew"]] = 288.15
     gdps[:, GDPS["temp"]] = 300.15
     gdps[:, GDPS["dew"]] = 293.15
 

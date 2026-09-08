@@ -342,6 +342,14 @@ def test_dwd_mosmix_invalid_timestamp_not_in_source_list():
         gdpsRunTime=None,
         gepsRunTime=None,
         repsRunTime=None,
+        x_gdps=None,
+        y_gdps=None,
+        gdps_lat=None,
+        gdps_lon=None,
+        x_geps=None,
+        y_geps=None,
+        geps_lat=None,
+        geps_lon=None,
     )
 
     # Build source metadata
@@ -426,6 +434,14 @@ def test_dwd_mosmix_valid_timestamp_in_source_list():
         gdpsRunTime=None,
         gepsRunTime=None,
         repsRunTime=None,
+        x_gdps=None,
+        y_gdps=None,
+        gdps_lat=None,
+        gdps_lon=None,
+        x_geps=None,
+        y_geps=None,
+        geps_lat=None,
+        geps_lon=None,
     )
 
     # Build source metadata

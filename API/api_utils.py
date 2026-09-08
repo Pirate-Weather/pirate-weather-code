@@ -503,8 +503,7 @@ def map_canadian_precip_type_to_ptype(
         - Freezing drizzle/rain codes (3, 8) -> freezing (3)
         - Ice pellets / hail-related codes (4, 9) -> ice (2)
         - Snow and snow showers (5) -> snow (1)
-        - Rain and drizzle ranges (1, 7) -> rain (4)
-        - Mixed precipitation codes (2) -> mixed (5)
+        - Rain and drizzle ranges (1, 2, 7) -> rain (4)
 
     Args:
         ptype_codes: array-like of numeric Canadian precipitation codes (may contain NaN)
@@ -521,8 +520,7 @@ def map_canadian_precip_type_to_ptype(
     freezing_codes = [3, 8]
     ice_codes = [4, 9]
     snow_codes = [5]
-    rain_codes = [1, 7]
-    mixed_codes = [2]
+    rain_codes = [1, 2, 7]
 
     # Assign categories; order does not matter because groups are disjoint in our choice
     if codes.size > 0:
@@ -530,11 +528,10 @@ def map_canadian_precip_type_to_ptype(
         vals[nan_mask] = -999
         vals = vals.astype(int)
 
-        out[np.isin(vals, snow_codes)] = 1
-        out[np.isin(vals, ice_codes)] = 2
-        out[np.isin(vals, freezing_codes)] = 3
-        out[np.isin(vals, rain_codes)] = 4
-        out[np.isin(vals, mixed_codes)] = 5
+        out[np.isin(vals, snow_codes)] = PRECIP_IDX["snow"]
+        out[np.isin(vals, ice_codes)] = PRECIP_IDX["sleet"]
+        out[np.isin(vals, freezing_codes)] = PRECIP_IDX["ice"]
+        out[np.isin(vals, rain_codes)] = PRECIP_IDX["rain"]
 
     # Use MISSING_DATA for NaNs
     out[nan_mask] = MISSING_DATA
@@ -608,7 +605,7 @@ def map_ensemble_precip_rates_to_ptype(
     out = np.full(n_hours, np.nan, dtype=float)
 
     mixed_mask = strong_count > 1
-    out[mixed_mask] = PRECIP_IDX["mixed"]
+    out[mixed_mask] = PRECIP_IDX["sleet"]
 
     strong_mask = strong_count == 1
     if np.any(strong_mask):
@@ -627,6 +624,10 @@ def map_ensemble_precip_rates_to_ptype(
     no_precip_mask = strong_count == 0
     if np.any(no_precip_mask):
         out[no_precip_mask] = PRECIP_IDX["none"]
+
+    # Rows with no valid component data are missing, not precipitation-free.
+    all_nan_mask = np.all(np.isnan(component_matrix), axis=1)
+    out[all_nan_mask] = MISSING_DATA
 
     return out
 

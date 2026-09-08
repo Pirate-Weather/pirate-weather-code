@@ -1185,18 +1185,18 @@ async def calculate_grid_indexing(
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     hrdpsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
-                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                if (utc_time - timestamp_dt) > datetime.timedelta(hours=16):
                     dataOut_hrdps = False
                     hrdpsRunTime = None
                     logger.warning("OLD HRDPS")
             except (ValueError, TypeError, AttributeError):
                 logger.debug("Failed to parse HRDPS runtime for freshness check")
-            else:
-                sourceIDX["hrdps"] = {}
-                sourceIDX["hrdps"]["x"] = int(x_hrdps)
-                sourceIDX["hrdps"]["y"] = int(y_hrdps)
-                sourceIDX["hrdps"]["lat"] = round(hrdps_lat, 2)
-                sourceIDX["hrdps"]["lon"] = round(((hrdps_lon + 180) % 360) - 180, 2)
+        if dataOut_hrdps is not False:
+            sourceIDX["hrdps"] = {}
+            sourceIDX["hrdps"]["x"] = int(x_hrdps)
+            sourceIDX["hrdps"]["y"] = int(y_hrdps)
+            sourceIDX["hrdps"]["lat"] = round(hrdps_lat, 2)
+            sourceIDX["hrdps"]["lon"] = round(((hrdps_lon + 180) % 360) - 180, 2)
     else:
         dataOut_hrdps = False
 
@@ -1214,12 +1214,12 @@ async def calculate_grid_indexing(
                     logger.warning("OLD GDPS")
             except (ValueError, TypeError, AttributeError):
                 logger.debug("Failed to parse GDPS runtime for freshness check")
-            else:
-                sourceIDX["gdps"] = {}
-                sourceIDX["gdps"]["x"] = int(x_gdps)
-                sourceIDX["gdps"]["y"] = int(y_gdps)
-                sourceIDX["gdps"]["lat"] = round(gdps_lat, 2)
-                sourceIDX["gdps"]["lon"] = round(((gdps_lon + 180) % 360) - 180, 2)
+        if dataOut_gdps is not False:
+            sourceIDX["gdps"] = {}
+            sourceIDX["gdps"]["x"] = int(x_gdps)
+            sourceIDX["gdps"]["y"] = int(y_gdps)
+            sourceIDX["gdps"]["lat"] = round(gdps_lat, 2)
+            sourceIDX["gdps"]["lon"] = round(((gdps_lon + 180) % 360) - 180, 2)
     else:
         dataOut_gdps = False
 
@@ -1237,12 +1237,12 @@ async def calculate_grid_indexing(
                     logger.warning("OLD GEPS")
             except (ValueError, TypeError, AttributeError):
                 logger.debug("Failed to parse GEPS runtime for freshness check")
-            else:
-                sourceIDX["geps"] = {}
-                sourceIDX["geps"]["x"] = int(x_geps)
-                sourceIDX["geps"]["y"] = int(y_geps)
-                sourceIDX["geps"]["lat"] = round(geps_lat, 2)
-                sourceIDX["geps"]["lon"] = round(((geps_lon + 180) % 360) - 180, 2)
+        if dataOut_geps is not False:
+            sourceIDX["geps"] = {}
+            sourceIDX["geps"]["x"] = int(x_geps)
+            sourceIDX["geps"]["y"] = int(y_geps)
+            sourceIDX["geps"]["lat"] = round(geps_lat, 2)
+            sourceIDX["geps"]["lon"] = round(((geps_lon + 180) % 360) - 180, 2)
     else:
         dataOut_geps = False
 
@@ -1250,22 +1250,22 @@ async def calculate_grid_indexing(
         dataOut_reps = zarr_results["REPS"]
         if dataOut_reps is not False:
             try:
-                repsRunTime = dataOut_reps[HISTORY_PERIODS["REPS"] - 1, 0]
+                repsRunTime = dataOut_reps[HISTORY_PERIODS["REPS"] - 3, 0]
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     repsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
-                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                if (utc_time - timestamp_dt) > datetime.timedelta(hours=46):
                     dataOut_reps = False
                     repsRunTime = None
                     logger.warning("OLD REPS")
             except (ValueError, TypeError, AttributeError):
                 logger.debug("Failed to parse REPS runtime for freshness check")
-            else:
-                sourceIDX["reps"] = {}
-                sourceIDX["reps"]["x"] = int(x_reps)
-                sourceIDX["reps"]["y"] = int(y_reps)
-                sourceIDX["reps"]["lat"] = round(reps_lat, 2)
-                sourceIDX["reps"]["lon"] = round(((reps_lon + 180) % 360) - 180, 2)
+        if dataOut_reps is not False:
+            sourceIDX["reps"] = {}
+            sourceIDX["reps"]["x"] = int(x_reps)
+            sourceIDX["reps"]["y"] = int(y_reps)
+            sourceIDX["reps"]["lat"] = round(reps_lat, 2)
+            sourceIDX["reps"]["lon"] = round(((reps_lon + 180) % 360) - 180, 2)
     else:
         dataOut_reps = False
 

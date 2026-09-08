@@ -144,7 +144,7 @@ class TestEnsemblePrecipSelection:
         )
 
     def test_multiple_high_rates_return_mixed(self):
-        """Multiple intensive precipitation types should be collapsed to mixed."""
+        """Multiple intensive precipitation types should be collapsed to sleet."""
         result = map_ensemble_precip_rates_to_ptype(
             rain=np.array([2.0, 0.0]),
             ice=np.array([0.0, 1.5]),
@@ -153,8 +153,8 @@ class TestEnsemblePrecipSelection:
             threshold=0.1,
         )
 
-        assert result.tolist() == [PRECIP_IDX["mixed"], PRECIP_IDX["mixed"]], (
-            "If multiple precipitation types are strong, classify as mixed"
+        assert result.tolist() == [PRECIP_IDX["sleet"], PRECIP_IDX["sleet"]], (
+            "If multiple precipitation types are strong, classify as sleet"
         )
 
 

@@ -39,13 +39,26 @@ from API.utils.precip import dbz_to_rate
 from API.utils.source_priority import should_gfs_precede_dwd
 
 
-def _interp_cmc(minute_array_grib, model_data):
+def _interp_cmc(minute_array_grib, model_data, categorical_columns=()):
     """Interpolate a CMC model array to the minutely time grid."""
     if model_data is None or len(model_data) == 0:
         return None
 
+    # Standardize integer or sequence inputs into a set for fast lookup
+    if isinstance(categorical_columns, int):
+        cat_cols = {categorical_columns}
+    else:
+        cat_cols = set(categorical_columns)
+
     interpolation = np.zeros((len(minute_array_grib), model_data.shape[1]))
     for column in range(1, model_data.shape[1]):
+        if column in cat_cols:
+            interpolation[:, column] = fast_nearest_interp(
+                minute_array_grib,
+                model_data[:, 0].squeeze(),
+                model_data[:, column],
+            )
+            continue
         interpolation[:, column] = np.interp(
             minute_array_grib,
             model_data[:, 0].squeeze(),
@@ -994,7 +1007,9 @@ def build_minutely_block(
         else None
     )
     gdpsMinuteInterpolation = (
-        _interp_cmc(minute_array_grib, gdps_data) if "gdps" in source_list else None
+        _interp_cmc(minute_array_grib, gdps_data, categorical_columns=(GDPS["type"]))
+        if "gdps" in source_list
+        else None
     )
     gepsMinuteInterpolation = (
         _interp_cmc(minute_array_grib, geps_data) if "geps" in source_list else None
