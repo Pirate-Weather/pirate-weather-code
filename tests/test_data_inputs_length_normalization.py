@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from API.api_utils import map_canadian_precip_type_to_ptype
+from API.api_utils import map_ensemble_precip_rates_to_ptype
 from API.constants.model_const import ERA5, GDPS, GEPS, HRDPS, REPS
 from API.data_inputs import _normalize_length, prepare_data_inputs
 from API.responseLocal import convert_data_to_celsius
@@ -179,10 +179,13 @@ def test_prepare_data_inputs_includes_canadian_model_fields():
         inputs["prcipProbability_inputs"][:, 0], reps_merged[:, REPS["prob"]]
     )
     assert np.allclose(inputs["accum_inputs"][:, 0], hrdps_merged[:, HRDPS["accum"]])
-    expected_hrdps_ptype = map_canadian_precip_type_to_ptype(
-        np.round(hrdps_merged[:, HRDPS["ptype"]])
+    expected_reps_ptype = map_ensemble_precip_rates_to_ptype(
+        rain=reps_merged[:, REPS["rain"]],
+        freezing_rain=reps_merged[:, REPS["freezing_rain"]],
+        ice=reps_merged[:, REPS["ice"]],
+        snow=reps_merged[:, REPS["snow"]],
     )
-    assert np.allclose(inputs["prcipType_inputs"][:, 0], expected_hrdps_ptype)
+    assert np.allclose(inputs["prcipType_inputs"][:, 0], expected_reps_ptype)
 
 
 def test_convert_data_to_celsius_handles_canadian_models():

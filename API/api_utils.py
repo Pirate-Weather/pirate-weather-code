@@ -494,14 +494,13 @@ def map_canadian_precip_type_to_ptype(
     Returns an integer array with the following mapping:
         0 -> none/other
         1 -> snow
-        2 -> ice (pellets, hail)
-        3 -> freezing rain/drizzle
+        3 -> ice (pellets, hail)
+        2 -> freezing rain/drizzle
         4 -> rain
-        5 -> mixed (snow + rain + ice)
 
     The mapping follows the Canadian code ranges and uses conservative grouping:
-        - Freezing drizzle/rain codes (3, 8) -> freezing (3)
-        - Ice pellets / hail-related codes (4, 9) -> ice (2)
+        - Freezing drizzle/rain codes (3, 8) -> freezing (2)
+        - Ice pellets / hail-related codes (4, 9) -> ice (3)
         - Snow and snow showers (5) -> snow (1)
         - Rain and drizzle ranges (1, 2, 7) -> rain (4)
 
@@ -545,7 +544,7 @@ def map_ensemble_precip_rates_to_ptype(
     freezing_rain: np.ndarray | None = None,
     snow: np.ndarray | None = None,
     *,
-    threshold: float = 0.1,
+    threshold: float = 0.5,
 ) -> np.ndarray:
     """Map ensemble precipitation component rates to the internal precipitation type.
 
