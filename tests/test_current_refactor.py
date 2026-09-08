@@ -4,8 +4,36 @@ import numpy as np
 
 from API.constants.aqi_const import compute_aqi_array
 from API.constants.forecast_const import DATA_CURRENT
+from API.constants.model_const import HRDPS, NBM
 from API.constants.shared_const import MISSING_DATA
-from API.current.metrics import CurrentSection, _get_fire, build_current_section
+from API.current.metrics import (
+    CurrentSection,
+    InterpolationState,
+    _get_fire,
+    _get_temp,
+    build_current_section,
+)
+
+
+def test_current_temperature_prefers_hrdps_over_nbm_in_canada():
+    hrdps = np.full((2, max(HRDPS.values()) + 1), np.nan)
+    nbm = np.full((2, max(NBM.values()) + 1), np.nan)
+    hrdps[:, HRDPS["temp"]] = 5.0
+    nbm[:, NBM["temp"]] = 10.0
+    model_data = {
+        "HRDPS_Merged": hrdps,
+        "NBM_Merged": nbm,
+    }
+
+    value = _get_temp(
+        ["hrdps", "nbm"],
+        model_data,
+        InterpolationState(idx1=0, idx2=1, fac1=0.5, fac2=0.5),
+        49.2827,
+        -123.1207,
+    )
+
+    assert value == 5.0
 
 
 def test_build_current_section_structure():

@@ -501,6 +501,10 @@ async def calculate_grid_indexing(
     ex_aigfs: int,
     ex_aigefs: int,
     ex_aifs: int,
+    ex_hrdps: int = 0,
+    ex_gdps: int = 0,
+    ex_geps: int = 0,
+    ex_reps: int = 0,
     ex_raqdps: int = 0,
     ex_silam: int = 0,
     inc_aimodels: int = 0,
@@ -760,7 +764,7 @@ async def calculate_grid_indexing(
     dataOut_geps = False
     dataOut_reps = False
     if not time_machine:
-        if zarr_sources.hrdps is not None:
+        if ex_hrdps != 1 and zarr_sources.hrdps is not None:
             try:
                 (
                     x_hrdps,
@@ -779,7 +783,7 @@ async def calculate_grid_indexing(
             except (IndexError, KeyError, ValueError, TypeError, AttributeError) as exc:
                 logger.debug("HRDPS grid lookup failed: %s", exc)
         # GDPS is a regular lat/lon grid: 2400 x 1201 @ 0.15° resolution
-        if zarr_sources.gdps is not None:
+        if ex_gdps != 1 and zarr_sources.gdps is not None:
             try:
                 # Build GDPS lat/lon arrays (-90 -> 90, -180 -> 179.85)
                 lats_gdps = np.linspace(-90.0, 90.0, 1201)
@@ -798,7 +802,7 @@ async def calculate_grid_indexing(
                 dataOut_gdps = None
             except (IndexError, KeyError, ValueError, TypeError, AttributeError) as exc:
                 logger.debug("GDPS grid lookup failed: %s", exc)
-        if zarr_sources.geps is not None:
+        if ex_geps != 1 and zarr_sources.geps is not None:
             try:
                 # GEPS: 720 x 361, 0.5° resolution, lon 0..359.5, lat -90..90
                 lats_geps = np.linspace(-90.0, 90.0, 361)
@@ -815,7 +819,7 @@ async def calculate_grid_indexing(
                 dataOut_geps = None
             except (IndexError, KeyError, ValueError, TypeError, AttributeError) as exc:
                 logger.debug("GEPS grid lookup failed: %s", exc)
-        if zarr_sources.reps is not None:
+        if ex_reps != 1 and zarr_sources.reps is not None:
             try:
                 (
                     x_reps,

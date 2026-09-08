@@ -405,7 +405,9 @@ async def PW_Forecast(
         location: The location string (lat,lon).
         units: Unit system (us, si, ca, uk2).
         extend: Extend hourly forecast (hourly).
-        exclude: Blocks to exclude (currently, minutely, hourly, daily, alerts, flags).
+        exclude: Blocks or model sources to exclude. CMC sources accept the group
+            aliases ``cmc``/``cmcmodels`` or the individual names ``hrdps``,
+            ``gdps``, ``geps``, and ``reps``.
         include: Blocks to include (overrides exclude).
         lang: Language for text summaries.
         version: API version.
@@ -502,6 +504,10 @@ async def PW_Forecast(
     incAIModels = initial.inc_aimodels
     exRAQDPS = initial.ex_raqdps
     exSILAM = initial.ex_silam
+    exHRDPS = initial.ex_hrdps
+    exGDPS = initial.ex_gdps
+    exGEPS = initial.ex_geps
+    exREPS = initial.ex_reps
     incAirQualityDetails = initial.inc_airqualitydetails
     inc_day_night = initial.inc_day_night
     summaryText = initial.summary_text
@@ -594,6 +600,10 @@ async def PW_Forecast(
         ex_aigfs=exAIGFS,
         ex_aigefs=exAIGEFS,
         ex_aifs=exAIFS,
+        ex_hrdps=exHRDPS,
+        ex_gdps=exGDPS,
+        ex_geps=exGEPS,
+        ex_reps=exREPS,
         ex_raqdps=exRAQDPS,
         ex_silam=exSILAM,
         inc_aimodels=incAIModels,
@@ -810,6 +820,9 @@ async def PW_Forecast(
             gfs_data=GFS_Merged if "gfs" in sourceList else None,
             ecmwf_data=ECMWF_Merged if "ecmwf_ifs" in sourceList else None,
             era5_data=ERA5_MERGED if isinstance(ERA5_MERGED, np.ndarray) else None,
+            gdps_data=GDPS_Merged if "gdps" in sourceList else None,
+            geps_data=GEPS_Merged if "geps" in sourceList else None,
+            reps_data=REPS_Merged if "reps" in sourceList else None,
             prep_intensity_unit=prepIntensityUnit,
             version=version,
             lat=lat,
@@ -1166,6 +1179,8 @@ async def PW_Forecast(
             GFS_Merged=GFS_Merged,
             ERA5_MERGED=ERA5_MERGED,
             NBM_Fire_Merged=NBM_Fire_Merged,
+            HRDPS_Merged=HRDPS_Merged,
+            GDPS_Merged=GDPS_Merged,
             logger=logger,
             loc_tag=loc_tag,
             include_currently=exCurrently != 1,

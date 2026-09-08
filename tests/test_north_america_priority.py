@@ -3,7 +3,7 @@
 import numpy as np
 
 from API.constants.api_const import PRECIP_IDX
-from API.constants.model_const import DWD_MOSMIX, ECMWF, GEFS, NBM
+from API.constants.model_const import DWD_MOSMIX, ECMWF, GDPS, GEFS, GEPS, GFS, NBM
 from API.current.metrics import _build_source_strategies
 from API.data_inputs import prepare_data_inputs
 from API.utils.geo import is_in_north_america
@@ -71,7 +71,66 @@ def test_current_source_priority_us_keeps_canadian_models_below_global_models():
 
     assert order.index("gfs") < order.index("hrdps")
     assert order.index("gefs") < order.index("hrdps")
+    assert order.index("gefs") < order.index("gdps")
+    assert order.index("gdps") < order.index("hrdps")
     assert order.index("hrdps") < order.index("reps")
+
+
+def test_hourly_us_uses_gdps_geps_after_gfs_gefs():
+    num_hours = 3
+    gfs = np.full((num_hours, max(GFS.values()) + 1), np.nan)
+    gdps = np.full((num_hours, max(GDPS.values()) + 1), np.nan)
+    gefs = np.full((num_hours, max(GEFS.values()) + 1), np.nan)
+    geps = np.full((num_hours, max(GEPS.values()) + 1), np.nan)
+    gfs[:, GFS["temp"]] = 10.0
+    gdps[:, GDPS["temp"]] = 20.0
+    gefs[:, GEFS["prob"]] = 0.4
+    geps[:, GEPS["prob"]] = 0.7
+
+    inputs = prepare_data_inputs(
+        source_list=["gfs", "gefs", "gdps", "geps"],
+        nbm_merged=None,
+        nbm_fire_merged=None,
+        hrrr_merged=None,
+        dwd_mosmix_merged=None,
+        ecmwf_merged=None,
+        gefs_merged=gefs,
+        gfs_merged=gfs,
+        era5_merged=None,
+        extra_vars=[],
+        num_hours=num_hours,
+        lat=40.7128,
+        lon=-74.0060,
+        gdps_merged=gdps,
+        geps_merged=geps,
+    )
+
+    assert np.all(inputs["temperature_inputs"][:, 0] == 10.0)
+    assert np.all(inputs["temperature_inputs"][:, 1] == 20.0)
+    assert np.all(inputs["prcipProbability_inputs"][:, 0] == 0.4)
+    assert np.all(inputs["prcipProbability_inputs"][:, 1] == 0.7)
+
+
+def test_ai_priority_applies_inside_canada():
+    source_map = {
+        "hrdps": (lambda: True, lambda: 1.0),
+        "gdps": (lambda: True, lambda: 2.0),
+        "nbm": (lambda: True, lambda: 3.0),
+        "gfs": (lambda: True, lambda: 4.0),
+        "gefs": (lambda: True, lambda: 5.0),
+    }
+
+    strategies = _build_source_strategies(
+        source_map, 49.2827, -123.1207, prioritize_ai_models=True
+    )
+    order = [
+        next(name for name, value in source_map.items() if value is strategy)
+        for strategy in strategies
+    ]
+
+    assert order[:2] == ["gefs", "gfs"]
+    assert order.index("gfs") < order.index("nbm")
+    assert order.index("nbm") < order.index("hrdps")
 
 
 def test_is_in_north_america_usa():

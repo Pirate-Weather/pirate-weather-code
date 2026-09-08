@@ -136,6 +136,10 @@ class InitialRequestContext:
     ex_aifs: int
     ex_raqdps: int
     ex_silam: int
+    ex_hrdps: int
+    ex_gdps: int
+    ex_geps: int
+    ex_reps: int
     inc_day_night: int
     inc_aimodels: int
     inc_airqualitydetails: int
@@ -421,6 +425,12 @@ def _parse_parameters(
 ):
     exclude_params = exclude or ""
     include_params = include or ""
+    excluded = {
+        item.strip().lower() for item in exclude_params.split(",") if item.strip()
+    }
+    included = {
+        item.strip().lower() for item in include_params.split(",") if item.strip()
+    }
     extra_vars = extraVars.split(",") if extraVars else []
 
     ex_currently = int("currently" in exclude_params)
@@ -441,10 +451,21 @@ def _parse_parameters(
     ex_aifs = int("ecmwf_aifs" in exclude_params)
     ex_raqdps = int("raqdps" in exclude_params)
     ex_silam = int("silam" in exclude_params)
+    exclude_cmc = bool({"cmc", "cmcmodels"} & excluded)
+    ex_hrdps = int(exclude_cmc or "hrdps" in excluded)
+    ex_gdps = int(exclude_cmc or "gdps" in excluded)
+    ex_geps = int(exclude_cmc or "geps" in excluded)
+    ex_reps = int(exclude_cmc or "reps" in excluded)
     summary_text = "summary" not in exclude_params
     inc_day_night = int("day_night_forecast" in include_params)
-    inc_aimodels = int("aimodels" in include_params)
+    inc_aimodels = int("aimodels" in included)
     inc_airqualitydetails = int("airqualitydetails" in include_params)
+
+    if inc_aimodels:
+        ex_hrdps = 1
+        ex_gdps = 1
+        ex_geps = 1
+        ex_reps = 1
 
     if (now_time - utc_time) > datetime.timedelta(hours=25):
         ex_nbm = 1
@@ -490,6 +511,10 @@ def _parse_parameters(
         inc_aimodels,
         inc_airqualitydetails,
         read_wmo_alerts,
+        ex_hrdps,
+        ex_gdps,
+        ex_geps,
+        ex_reps,
     )
 
 
@@ -683,6 +708,10 @@ async def prepare_initial_request(
         inc_aimodels,
         inc_airqualitydetails,
         read_wmo_alerts,
+        ex_hrdps,
+        ex_gdps,
+        ex_geps,
+        ex_reps,
     ) = _parse_parameters(
         exclude,
         include,
@@ -837,6 +866,10 @@ async def prepare_initial_request(
         ex_aifs=ex_aifs,
         ex_raqdps=ex_raqdps,
         ex_silam=ex_silam,
+        ex_hrdps=ex_hrdps,
+        ex_gdps=ex_gdps,
+        ex_geps=ex_geps,
+        ex_reps=ex_reps,
         inc_day_night=inc_day_night,
         inc_aimodels=inc_aimodels,
         inc_airqualitydetails=inc_airqualitydetails,

@@ -114,11 +114,11 @@ _PRIORITY_ORDER_NA = [
     "ecmwf",
     "gfs",
     "gefs",
+    "gdps",
+    "geps",
     "dwd_mosmix",
     "era5",
     "hrdps",
-    "gdps",
-    "geps",
     "reps",
 ]
 _PRIORITY_ORDER_ROW = [
@@ -128,23 +128,23 @@ _PRIORITY_ORDER_ROW = [
     "ecmwf",
     "gfs",
     "gefs",
-    "era5",
-    "hrdps",
     "gdps",
     "geps",
+    "era5",
+    "hrdps",
     "reps",
 ]
 _PRIORITY_ORDER_AI_NA = [
     "gefs",
     "gfs",
+    "gdps",
+    "geps",
     "ecmwf",
     "nbm",
     "hrrr",
     "dwd_mosmix",
     "era5",
     "hrdps",
-    "gdps",
-    "geps",
     "reps",
 ]
 _PRIORITY_ORDER_AI_ROW = [
@@ -152,12 +152,12 @@ _PRIORITY_ORDER_AI_ROW = [
     "dwd_mosmix",
     "gfs",
     "gefs",
+    "gdps",
+    "geps",
     "nbm",
     "hrrr",
     "era5",
     "hrdps",
-    "gdps",
-    "geps",
     "reps",
 ]
 _CANADA_PRECIP_PRIORITY_ORDER = [
@@ -179,12 +179,12 @@ _PRECIP_PRIORITY_ORDER_NA = [
     "ecmwf",
     "gefs",
     "gfs",
+    "geps",
+    "gdps",
     "dwd_mosmix",
     "era5",
-    "geps",
     "reps",
     "hrdps",
-    "gdps",
 ]
 _PRECIP_PRIORITY_ORDER_ROW = [
     "nbm",
@@ -193,37 +193,37 @@ _PRECIP_PRIORITY_ORDER_ROW = [
     "ecmwf",
     "gefs",
     "gfs",
-    "era5",
     "geps",
+    "gdps",
+    "era5",
     "reps",
     "hrdps",
-    "gdps",
 ]
 _PRECIP_PRIORITY_ORDER_AI_NA = [
     "gefs",
     "gfs",
+    "geps",
+    "gdps",
     "ecmwf",
     "nbm",
     "hrrr",
     "dwd_mosmix",
     "era5",
-    "geps",
     "reps",
     "hrdps",
-    "gdps",
 ]
 _PRECIP_PRIORITY_ORDER_AI_ROW = [
     "ecmwf",
     "dwd_mosmix",
     "gefs",
     "gfs",
+    "geps",
+    "gdps",
     "nbm",
     "hrrr",
     "era5",
-    "geps",
     "reps",
     "hrdps",
-    "gdps",
 ]
 
 
@@ -279,7 +279,7 @@ def _map_grib_precip_type(ptype_values):
 def _stack_precip_with_priority(
     num_hours, lat, lon, source_data, *, prioritize_ai_models=False
 ):
-    if is_in_canada(lat, lon):
+    if is_in_canada(lat, lon) and not prioritize_ai_models:
         order = _CANADA_PRECIP_PRIORITY_ORDER
     else:
         gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
@@ -312,7 +312,7 @@ def _stack_with_priority(
     Returns:
         Stacked array with sources ordered by priority.
     """
-    if is_in_canada(lat, lon):
+    if is_in_canada(lat, lon) and not prioritize_ai_models:
         order = _CANADA_PRIORITY_ORDER
     else:
         gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
