@@ -48,6 +48,43 @@ SILAM_LAT_COUNT = 897
 SILAM_LON_COUNT = 1800
 
 
+@dataclass(frozen=True)
+class RotatedLatLonGrid:
+    """Describe a CMC rotated latitude/longitude grid."""
+
+    north_pole_latitude: float
+    north_pole_longitude: float
+    first_latitude: float
+    first_longitude: float
+    latitude_increment: float
+    longitude_increment: float
+    latitude_count: int
+    longitude_count: int
+
+
+# CMC rotated-grid definitions from the HRDPS continental and REPS 10 km GRIB products.
+HRDPS_ROTATED_GRID = RotatedLatLonGrid(
+    north_pole_latitude=36.08852,
+    north_pole_longitude=65.305142,
+    first_latitude=-12.302501,
+    first_longitude=345.17878,
+    latitude_increment=0.0225,
+    longitude_increment=0.0225,
+    latitude_count=1290,
+    longitude_count=2540,
+)
+REPS_ROTATED_GRID = RotatedLatLonGrid(
+    north_pole_latitude=25.64728,
+    north_pole_longitude=89.555534,
+    first_latitude=-50.760002,
+    first_longitude=312.289478,
+    latitude_increment=0.09,
+    longitude_increment=0.09,
+    latitude_count=960,
+    longitude_count=908,
+)
+
+
 def _normalize_longitude_180(lon):
     """Normalize longitude values to [-180, 180)."""
     return ((np.asarray(lon, dtype=float) + 180.0) % 360.0) - 180.0
@@ -131,6 +168,103 @@ def _nearest_regular_grid_index(
     """Return the nearest bounded index on a regular one-dimensional grid."""
     index = math.floor(((value - start) / delta) + 0.5)
     return max(0, min(count - 1, index))
+
+
+def _rotated_to_geographic(
+    latitude: float, longitude: float, grid: RotatedLatLonGrid
+) -> tuple[float, float]:
+    """Convert a CMC rotated-grid coordinate to geographic latitude/longitude."""
+    rotated_latitude = math.radians(latitude)
+    rotated_longitude = math.radians(longitude)
+    pole_latitude = math.radians(grid.north_pole_latitude)
+    pole_longitude = math.radians(grid.north_pole_longitude)
+
+    geographic_latitude = math.asin(
+        math.sin(rotated_latitude) * math.sin(pole_latitude)
+        + math.cos(rotated_latitude)
+        * math.cos(pole_latitude)
+        * math.cos(rotated_longitude)
+    )
+    longitude_offset = math.atan2(
+        -math.cos(rotated_latitude) * math.sin(rotated_longitude),
+        math.sin(rotated_latitude) * math.cos(pole_latitude)
+        - math.cos(rotated_latitude)
+        * math.sin(pole_latitude)
+        * math.cos(rotated_longitude),
+    )
+    geographic_longitude = pole_longitude + longitude_offset
+
+    return (
+        math.degrees(geographic_latitude),
+        (math.degrees(geographic_longitude) + 180.0) % 360.0 - 180.0,
+    )
+
+
+def _nearest_rotated_grid_coords(
+    latitude: float,
+    longitude: float,
+    grid: RotatedLatLonGrid,
+    *,
+    max_distance: float,
+    model_name: str,
+) -> tuple[int, int, float, float]:
+    """Return the nearest CMC rotated-grid point for a geographic location."""
+    geographic_latitude = math.radians(latitude)
+    geographic_longitude = math.radians(longitude)
+    pole_latitude = math.radians(grid.north_pole_latitude)
+    pole_longitude = math.radians(grid.north_pole_longitude)
+    longitude_offset = geographic_longitude - pole_longitude
+
+    rotated_latitude = math.degrees(
+        math.asin(
+            math.sin(geographic_latitude) * math.sin(pole_latitude)
+            + math.cos(geographic_latitude)
+            * math.cos(pole_latitude)
+            * math.cos(longitude_offset)
+        )
+    )
+    rotated_longitude = (
+        math.degrees(
+            math.atan2(
+                -math.cos(geographic_latitude) * math.sin(longitude_offset),
+                math.sin(geographic_latitude) * math.cos(pole_latitude)
+                - math.cos(geographic_latitude)
+                * math.sin(pole_latitude)
+                * math.cos(longitude_offset),
+            )
+        )
+        % 360.0
+    )
+    rotated_longitude += 360.0 * round(
+        (grid.first_longitude - rotated_longitude) / 360.0
+    )
+
+    x_index = math.floor(
+        (rotated_longitude - grid.first_longitude) / grid.longitude_increment + 0.5
+    )
+    y_index = math.floor(
+        (rotated_latitude - grid.first_latitude) / grid.latitude_increment + 0.5
+    )
+    if not (0 <= x_index < grid.longitude_count and 0 <= y_index < grid.latitude_count):
+        raise ValueError(
+            f"Location ({latitude:.3f}, {longitude:.3f}) is outside the {model_name} domain"
+        )
+
+    grid_latitude, grid_longitude = _rotated_to_geographic(
+        grid.first_latitude + y_index * grid.latitude_increment,
+        grid.first_longitude + x_index * grid.longitude_increment,
+        grid,
+    )
+    target_xyz = _lat_lon_to_unit_xyz(np.array([latitude]), np.array([longitude]))[0]
+    grid_xyz = _lat_lon_to_unit_xyz(
+        np.array([grid_latitude]), np.array([grid_longitude])
+    )[0]
+    if float(np.linalg.norm(target_xyz - grid_xyz)) > max_distance:
+        raise ValueError(
+            f"Location ({latitude:.3f}, {longitude:.3f}) is outside the {model_name} domain"
+        )
+
+    return x_index, y_index, grid_latitude, grid_longitude
 
 
 def _silam_grid_coords(lat: float, az_lon: float) -> tuple[int, int, float, float]:
@@ -633,8 +767,12 @@ async def calculate_grid_indexing(
                     y_hrdps,
                     hrdps_lat,
                     hrdps_lon,
-                ) = _nearest_2d_grid_coords(
-                    lat, lon, zarr_sources.hrdps, max_distance=0.005, model_name="HRDPS"
+                ) = _nearest_rotated_grid_coords(
+                    lat,
+                    lon,
+                    HRDPS_ROTATED_GRID,
+                    max_distance=0.005,
+                    model_name="HRDPS",
                 )
                 readHRDPS = True
                 dataOut_hrdps = None
@@ -684,8 +822,12 @@ async def calculate_grid_indexing(
                     y_reps,
                     reps_lat,
                     reps_lon,
-                ) = _nearest_2d_grid_coords(
-                    lat, lon, zarr_sources.reps, max_distance=0.020, model_name="REPS"
+                ) = _nearest_rotated_grid_coords(
+                    lat,
+                    lon,
+                    REPS_ROTATED_GRID,
+                    max_distance=0.020,
+                    model_name="REPS",
                 )
                 readREPS = True
                 dataOut_reps = None
