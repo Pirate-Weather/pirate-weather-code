@@ -538,6 +538,13 @@ for i in range(his_period, 0, -12):
         vname: {"chunks": (12, process_chunk, process_chunk)} for vname in zarr_vars[1:]
     }
 
+    # Dask's diff operation used during de-accumulation creates a one-item
+    # leading time chunk. Align all arrays with the requested Zarr chunks so
+    # parallel writes never target the same Zarr chunk.
+    xarray_hist_merged = xarray_hist_merged.chunk(
+        chunks={"time": 12, "latitude": process_chunk, "longitude": process_chunk}
+    )
+
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         xarray_hist_merged.to_zarr(
             hist_process_path + "_GDPS_Hist_TMP.zarr",

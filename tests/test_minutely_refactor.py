@@ -1,7 +1,16 @@
 import numpy as np
 
 from API.constants.forecast_const import DATA_MINUTELY
-from API.constants.model_const import DWD_MOSMIX, ECMWF, GEFS, GFS, HRRR, HRRR_SUBH
+from API.constants.model_const import (
+    DWD_MOSMIX,
+    ECMWF,
+    GEFS,
+    GFS,
+    HRRR,
+    HRRR_SUBH,
+    NBM,
+    REPS,
+)
 from API.minutely.builder import _interp_dwd_mosmix, build_minutely_block
 
 
@@ -191,3 +200,88 @@ def test_build_minutely_aigefs_ptype_falls_back_to_temperature():
     InterPminute = result[0]
     assert np.any(InterPminute[:, DATA_MINUTELY["snow_intensity"]] > 0)
     assert np.all(InterPminute[:, DATA_MINUTELY["rain_intensity"]] == 0)
+
+
+def test_build_minutely_ai_models_override_hrrr_subh_and_nbm():
+    minute_array_grib = np.arange(0, 61 * 60, 60, dtype=float)
+
+    hrrr_subh_data = np.zeros((61, max(HRRR_SUBH.values()) + 1))
+    hrrr_subh_data[:, 0] = minute_array_grib
+    hrrr_subh_data[:, HRRR_SUBH["temp"]] = 10.0
+    hrrr_subh_data[:, HRRR_SUBH["rain"]] = 1.0
+    hrrr_subh_data[:, HRRR_SUBH["refc"]] = 30.0
+
+    nbm_data = np.zeros((61, max(NBM.values()) + 1))
+    nbm_data[:, 0] = minute_array_grib
+    nbm_data[:, NBM["accum"]] = 9.0
+    nbm_data[:, NBM["prob"]] = 10.0
+    nbm_data[:, NBM["rain"]] = 1.0
+
+    gefs_data = np.zeros((61, max(GEFS.values()) + 1))
+    gefs_data[:, 0] = minute_array_grib
+    gefs_data[:, GEFS["accum"]] = 0.5
+    gefs_data[:, GEFS["prob"]] = 0.8
+    gefs_data[:, GEFS["error"]] = 0.3
+    gefs_data[:, GEFS["snow"]] = 1.0
+
+    result = build_minutely_block(
+        minute_array_grib=minute_array_grib,
+        source_list=["hrrrsubh", "nbm", "gefs"],
+        hrrr_subh_data=hrrr_subh_data,
+        hrrr_merged=None,
+        nbm_data=nbm_data,
+        dwd_mosmix_data=None,
+        gefs_data=gefs_data,
+        gfs_data=None,
+        ecmwf_data=None,
+        era5_data=None,
+        prep_intensity_unit=1.0,
+        version=2,
+        lat=49.2827,
+        lon=-123.1207,
+        prioritize_ai_models=True,
+    )
+
+    minute = result[0]
+    assert np.allclose(minute[:, DATA_MINUTELY["intensity"]], 0.5)
+    assert np.allclose(minute[:, DATA_MINUTELY["prob"]], 0.8)
+    assert np.allclose(minute[:, DATA_MINUTELY["error"]], 0.3)
+    assert np.all(minute[:, DATA_MINUTELY["snow_intensity"]] > 0)
+    assert np.all(minute[:, DATA_MINUTELY["rain_intensity"]] == 0)
+
+
+def test_build_minutely_canada_uses_reps_probability_and_nbm_precipitation():
+    minute_array_grib = np.arange(0, 61 * 60, 60, dtype=float)
+
+    nbm_data = np.zeros((61, max(NBM.values()) + 1))
+    nbm_data[:, 0] = minute_array_grib
+    nbm_data[:, NBM["prob"]] = 35.0
+    nbm_data[:, NBM["accum"]] = 1.25
+    nbm_data[:, NBM["rain"]] = 1.0
+
+    reps_data = np.zeros((61, max(REPS.values()) + 1))
+    reps_data[:, 0] = minute_array_grib
+    reps_data[:, REPS["prob"]] = 0.8
+
+    result = build_minutely_block(
+        minute_array_grib=minute_array_grib,
+        source_list=["reps", "nbm"],
+        hrrr_subh_data=None,
+        hrrr_merged=None,
+        nbm_data=nbm_data,
+        dwd_mosmix_data=None,
+        gefs_data=None,
+        gfs_data=None,
+        ecmwf_data=None,
+        era5_data=None,
+        reps_data=reps_data,
+        prep_intensity_unit=1.0,
+        version=2,
+        lat=49.2827,
+        lon=-123.1207,
+    )
+
+    minute = result[0]
+    assert np.allclose(minute[:, DATA_MINUTELY["prob"]], 0.8)
+    assert np.allclose(minute[:, DATA_MINUTELY["intensity"]], 1.25)
+    assert np.all(minute[:, DATA_MINUTELY["rain_intensity"]] > 0)
