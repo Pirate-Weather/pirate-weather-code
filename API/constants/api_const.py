@@ -120,7 +120,7 @@ PRECIP_ACCUM_NOISE_THRESHOLD = (
 
 # API versioning and ingest version constants
 # Version scheme is: Major.Minor.Patch using semantic versioning
-API_VERSION = "V2.10.0b2"
+API_VERSION = "V2.10.0"
 
 # Generic API constants
 MAX_S3_RETRIES = 5
