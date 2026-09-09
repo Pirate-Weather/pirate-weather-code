@@ -251,6 +251,33 @@ def test_gribstream_request_pins_rtma_ru_run(monkeypatch):
     ]
 
 
+def test_projection_import_does_not_require_timezone_dependencies():
+    """The ingest comparison should not require API-only timezone packages."""
+    source = """
+import builtins
+
+real_import = builtins.__import__
+
+def reject_timezone_imports(name, *args, **kwargs):
+    if name.split('.', 1)[0] in {'pytz', 'timezonefinder'}:
+        raise ModuleNotFoundError(name)
+    return real_import(name, *args, **kwargs)
+
+builtins.__import__ = reject_timezone_imports
+from API.utils.geo import lambertGridMatch
+assert callable(lambertGridMatch)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", source],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.skipif(
     not os.getenv(GRIBSTREAM_API_KEY_ENV_VAR),
     reason=f"set {GRIBSTREAM_API_KEY_ENV_VAR} to run the GribStream comparison",
