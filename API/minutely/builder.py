@@ -549,29 +549,12 @@ def _calculate_precip_type_probs(
     """
     InterTminute = np.zeros((61, 5))
 
-    # Process high-priority sources first (same for all regions)
-    if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
-        for i in [
-            HRRR_SUBH["snow"],
-            HRRR_SUBH["ice"],
-            HRRR_SUBH["freezing_rain"],
-            HRRR_SUBH["rain"],
-        ]:
-            InterTminute[:, i - 7] = hrrrSubHInterpolation[:, i]
-        return InterTminute
-
-    if "nbm" in source_list and nbmMinuteInterpolation is not None:
-        InterTminute[:, 1] = nbmMinuteInterpolation[:, NBM["snow"]]
-        InterTminute[:, 2] = nbmMinuteInterpolation[:, NBM["ice"]]
-        InterTminute[:, 3] = nbmMinuteInterpolation[:, NBM["freezing_rain"]]
-        InterTminute[:, 4] = nbmMinuteInterpolation[:, NBM["rain"]]
-        return InterTminute
-
     # Determine priority order based on location
     # In North America: ECMWF > GFS > DWD MOSMIX > GEFS > ERA5
     # Rest of world: DWD MOSMIX > ECMWF > GFS > GEFS > ERA5
     gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
 
+    # AI models override all conventional sources for supported elements.
     if prioritize_ai_models:
         if gfs_before_dwd:
             if "gefs" in source_list and gefsMinuteInterpolation is not None:
@@ -602,6 +585,24 @@ def _calculate_precip_type_probs(
             if "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
                 _process_ecmwf_ptype(ecmwfMinuteInterpolation, InterTminute)
                 return InterTminute
+
+    # Process high-priority conventional sources next (same for all regions).
+    if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
+        for i in [
+            HRRR_SUBH["snow"],
+            HRRR_SUBH["ice"],
+            HRRR_SUBH["freezing_rain"],
+            HRRR_SUBH["rain"],
+        ]:
+            InterTminute[:, i - 7] = hrrrSubHInterpolation[:, i]
+        return InterTminute
+
+    if "nbm" in source_list and nbmMinuteInterpolation is not None:
+        InterTminute[:, 1] = nbmMinuteInterpolation[:, NBM["snow"]]
+        InterTminute[:, 2] = nbmMinuteInterpolation[:, NBM["ice"]]
+        InterTminute[:, 3] = nbmMinuteInterpolation[:, NBM["freezing_rain"]]
+        InterTminute[:, 4] = nbmMinuteInterpolation[:, NBM["rain"]]
+        return InterTminute
 
     # Try each source in priority order
     if gfs_before_dwd:
@@ -773,6 +774,7 @@ def _calculate_error(
     repsMinuteInterpolation,
     lat,
     lon,
+    prioritize_ai_models=False,
 ):
     """
     Calculate precipitation intensity error.
@@ -782,11 +784,21 @@ def _calculate_error(
         source_list: List of data sources.
         ecmwfMinuteInterpolation: ECMWF interpolated data.
         gefsMinuteInterpolation: GEFS interpolated data.
+        prioritize_ai_models: Whether AI model output should take precedence.
 
     Returns:
         Array of precipitation intensity errors.
     """
     error = np.ones(len(minute_array_grib)) * MISSING_DATA
+
+    if prioritize_ai_models:
+        if should_gfs_precede_dwd(lat, lon):
+            if "gefs" in source_list and gefsMinuteInterpolation is not None:
+                return gefsMinuteInterpolation[:, GEFS["error"]]
+            if "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
+                return ecmwfMinuteInterpolation[:, ECMWF["accum_stddev"]] * 1000
+        elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
+            return ecmwfMinuteInterpolation[:, ECMWF["accum_stddev"]] * 1000
 
     if (
         is_in_canada(lat, lon)
@@ -1158,6 +1170,7 @@ def build_minutely_block(
         repsMinuteInterpolation,
         lat,
         lon,
+        prioritize_ai_models,
     )
 
     # Distribute intensity to specific types
