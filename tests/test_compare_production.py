@@ -12,7 +12,7 @@ from tests.test_s3_live import _get_client
 
 PW_API = os.environ.get("PW_API")
 PROD_BASE = "https://api.pirateweather.net/forecast"
-PROD_TIMEMACHINE_BASE = "https://api.pirateweather.net/timemachine"
+PROD_TIMEMACHINE_BASE = "https://timemachine.pirateweather.net/forecast"
 
 TIMEMACHINE_TEST_LOCATION = (45.4215, -75.6972)  # Ottawa, Canada
 TIMEMACHINE_TEST_DATE = datetime.datetime(2020, 6, 15, tzinfo=datetime.UTC)
