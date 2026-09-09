@@ -7,7 +7,9 @@ import os as _os
 import warnings as _warnings
 from pathlib import Path as _Path
 
-_ENV_DEFAULT_KEYS = frozenset({"PW_API", "AWS_KEY", "AWS_SECRET", "s3_bucket"})
+_ENV_DEFAULT_KEYS = frozenset(
+    {"PW_API", "AWS_KEY", "AWS_SECRET", "GRIBSTREAM_API_KEY", "s3_bucket"}
+)
 
 
 class DiffWarning(UserWarning):
