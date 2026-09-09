@@ -6,6 +6,8 @@ import numpy as np
 
 from API.api_utils import (
     fast_nearest_interp,
+    map_canadian_precip_type_to_ptype,
+    map_ensemble_precip_rates_to_ptype,
     map_wmo4677_to_ptype,
     zero_small_values,
 )
@@ -22,15 +24,49 @@ from API.constants.model_const import (
     DWD_MOSMIX,
     ECMWF,
     ERA5,
+    GDPS,
     GEFS,
+    GEPS,
     GFS,
     HRRR,
     HRRR_SUBH,
     NBM,
+    REPS,
 )
 from API.constants.shared_const import MISSING_DATA
+from API.utils.geo import is_in_canada
 from API.utils.precip import dbz_to_rate
 from API.utils.source_priority import should_gfs_precede_dwd
+
+
+def _interp_cmc(minute_array_grib, model_data, categorical_columns=()):
+    """Interpolate a CMC model array to the minutely time grid."""
+    if model_data is None or len(model_data) == 0:
+        return None
+
+    # Standardize integer or sequence inputs into a set for fast lookup
+    if isinstance(categorical_columns, int):
+        cat_cols = {categorical_columns}
+    else:
+        cat_cols = set(categorical_columns)
+
+    interpolation = np.zeros((len(minute_array_grib), model_data.shape[1]))
+    for column in range(1, model_data.shape[1]):
+        if column in cat_cols:
+            interpolation[:, column] = fast_nearest_interp(
+                minute_array_grib,
+                model_data[:, 0].squeeze(),
+                model_data[:, column],
+            )
+            continue
+        interpolation[:, column] = np.interp(
+            minute_array_grib,
+            model_data[:, 0].squeeze(),
+            model_data[:, column],
+            left=MISSING_DATA,
+            right=MISSING_DATA,
+        )
+    return interpolation
 
 
 def _interp_gefs(minute_array_grib, gefs_data):
@@ -310,6 +346,8 @@ def _calculate_prob(
     nbmMinuteInterpolation,
     ecmwfMinuteInterpolation,
     gefsMinuteInterpolation,
+    gepsMinuteInterpolation,
+    repsMinuteInterpolation,
     era5_MinuteInterpolation,
     lat,
     lon,
@@ -331,6 +369,22 @@ def _calculate_prob(
     """
     InterPminute_prob = np.full(len(minute_array_grib), MISSING_DATA)
 
+    if is_in_canada(lat, lon) and not prioritize_ai_models:
+        if "reps" in source_list and repsMinuteInterpolation is not None:
+            InterPminute_prob = repsMinuteInterpolation[:, REPS["prob"]]
+        elif "geps" in source_list and gepsMinuteInterpolation is not None:
+            InterPminute_prob = gepsMinuteInterpolation[:, GEPS["prob"]]
+        elif "nbm" in source_list and nbmMinuteInterpolation is not None:
+            InterPminute_prob = nbmMinuteInterpolation[:, NBM["prob"]] * 0.01
+        elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
+            InterPminute_prob = ecmwfMinuteInterpolation[:, ECMWF["prob"]]
+        elif "gefs" in source_list and gefsMinuteInterpolation is not None:
+            InterPminute_prob = gefsMinuteInterpolation[:, GEFS["prob"]]
+        elif "era5" in source_list and era5_MinuteInterpolation is not None:
+            InterPminute_prob = era5_MinuteInterpolation[:, ERA5["prob"]] * 0.01
+        InterPminute_prob[InterPminute_prob < 0.05] = 0
+        return InterPminute_prob
+
     if prioritize_ai_models:
         if should_gfs_precede_dwd(lat, lon):
             if "gefs" in source_list and gefsMinuteInterpolation is not None:
@@ -339,6 +393,8 @@ def _calculate_prob(
                 InterPminute_prob = ecmwfMinuteInterpolation[:, ECMWF["prob"]]
             elif "nbm" in source_list and nbmMinuteInterpolation is not None:
                 InterPminute_prob = nbmMinuteInterpolation[:, NBM["prob"]] * 0.01
+            elif "geps" in source_list and gepsMinuteInterpolation is not None:
+                InterPminute_prob = gepsMinuteInterpolation[:, GEPS["prob"]]
             elif "era5" in source_list and era5_MinuteInterpolation is not None:
                 InterPminute_prob = era5_MinuteInterpolation[:, ERA5["prob"]] * 0.01
         else:
@@ -348,6 +404,8 @@ def _calculate_prob(
                 InterPminute_prob = nbmMinuteInterpolation[:, NBM["prob"]] * 0.01
             elif "gefs" in source_list and gefsMinuteInterpolation is not None:
                 InterPminute_prob = gefsMinuteInterpolation[:, GEFS["prob"]]
+            elif "geps" in source_list and gepsMinuteInterpolation is not None:
+                InterPminute_prob = gepsMinuteInterpolation[:, GEPS["prob"]]
             elif "era5" in source_list and era5_MinuteInterpolation is not None:
                 InterPminute_prob = era5_MinuteInterpolation[:, ERA5["prob"]] * 0.01
         InterPminute_prob[InterPminute_prob < 0.05] = 0
@@ -359,6 +417,8 @@ def _calculate_prob(
         InterPminute_prob = ecmwfMinuteInterpolation[:, ECMWF["prob"]]
     elif "gefs" in source_list and gefsMinuteInterpolation is not None:
         InterPminute_prob = gefsMinuteInterpolation[:, GEFS["prob"]]
+    elif "geps" in source_list and gepsMinuteInterpolation is not None:
+        InterPminute_prob = gepsMinuteInterpolation[:, GEPS["prob"]]
     elif "era5" in source_list and era5_MinuteInterpolation is not None:
         InterPminute_prob = era5_MinuteInterpolation[:, ERA5["prob"]] * 0.01
 
@@ -396,6 +456,31 @@ def _process_gefs_ptype(gefsMinuteInterpolation, InterTminute):
     """Process GEFS precipitation type data."""
     for i in [GEFS["snow"], GEFS["ice"], GEFS["freezing_rain"], GEFS["rain"]]:
         InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
+
+
+def _set_ptype_categories(mapped_ptype, InterTminute):
+    """Populate categorical precipitation columns from mapped type codes."""
+    for precip_type in range(1, 5):
+        InterTminute[:, precip_type] = (mapped_ptype == precip_type).astype(int)
+
+
+def _process_gdps_ptype(gdpsMinuteInterpolation, InterTminute):
+    """Process GDPS categorical precipitation type data."""
+    mapped = map_canadian_precip_type_to_ptype(
+        np.round(gdpsMinuteInterpolation[:, GDPS["type"]])
+    )
+    _set_ptype_categories(mapped, InterTminute)
+
+
+def _process_geps_ptype(gepsMinuteInterpolation, InterTminute):
+    """Process GEPS ensemble precipitation component data."""
+    mapped = map_ensemble_precip_rates_to_ptype(
+        rain=gepsMinuteInterpolation[:, GEPS["rain"]],
+        ice=gepsMinuteInterpolation[:, GEPS["ice"]],
+        freezing_rain=gepsMinuteInterpolation[:, GEPS["freezing_rain"]],
+        snow=gepsMinuteInterpolation[:, GEPS["snow"]],
+    )
+    _set_ptype_categories(mapped, InterTminute)
 
 
 def _process_aigefs_ptype_with_temperature(
@@ -437,6 +522,8 @@ def _calculate_precip_type_probs(
     ecmwfMinuteInterpolation,
     gefsMinuteInterpolation,
     gfsMinuteInterpolation,
+    gdpsMinuteInterpolation,
+    gepsMinuteInterpolation,
     era5_MinuteInterpolation,
     lat,
     lon,
@@ -462,29 +549,12 @@ def _calculate_precip_type_probs(
     """
     InterTminute = np.zeros((61, 5))
 
-    # Process high-priority sources first (same for all regions)
-    if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
-        for i in [
-            HRRR_SUBH["snow"],
-            HRRR_SUBH["ice"],
-            HRRR_SUBH["freezing_rain"],
-            HRRR_SUBH["rain"],
-        ]:
-            InterTminute[:, i - 7] = hrrrSubHInterpolation[:, i]
-        return InterTminute
-
-    if "nbm" in source_list and nbmMinuteInterpolation is not None:
-        InterTminute[:, 1] = nbmMinuteInterpolation[:, NBM["snow"]]
-        InterTminute[:, 2] = nbmMinuteInterpolation[:, NBM["ice"]]
-        InterTminute[:, 3] = nbmMinuteInterpolation[:, NBM["freezing_rain"]]
-        InterTminute[:, 4] = nbmMinuteInterpolation[:, NBM["rain"]]
-        return InterTminute
-
     # Determine priority order based on location
     # In North America: ECMWF > GFS > DWD MOSMIX > GEFS > ERA5
     # Rest of world: DWD MOSMIX > ECMWF > GFS > GEFS > ERA5
     gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
 
+    # AI models override all conventional sources for supported elements.
     if prioritize_ai_models:
         if gfs_before_dwd:
             if "gefs" in source_list and gefsMinuteInterpolation is not None:
@@ -516,6 +586,24 @@ def _calculate_precip_type_probs(
                 _process_ecmwf_ptype(ecmwfMinuteInterpolation, InterTminute)
                 return InterTminute
 
+    # Process high-priority conventional sources next (same for all regions).
+    if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
+        for i in [
+            HRRR_SUBH["snow"],
+            HRRR_SUBH["ice"],
+            HRRR_SUBH["freezing_rain"],
+            HRRR_SUBH["rain"],
+        ]:
+            InterTminute[:, i - 7] = hrrrSubHInterpolation[:, i]
+        return InterTminute
+
+    if "nbm" in source_list and nbmMinuteInterpolation is not None:
+        InterTminute[:, 1] = nbmMinuteInterpolation[:, NBM["snow"]]
+        InterTminute[:, 2] = nbmMinuteInterpolation[:, NBM["ice"]]
+        InterTminute[:, 3] = nbmMinuteInterpolation[:, NBM["freezing_rain"]]
+        InterTminute[:, 4] = nbmMinuteInterpolation[:, NBM["rain"]]
+        return InterTminute
+
     # Try each source in priority order
     if gfs_before_dwd:
         # North America priority
@@ -530,6 +618,12 @@ def _calculate_precip_type_probs(
             return InterTminute
         if "gefs" in source_list and gefsMinuteInterpolation is not None:
             _process_gefs_ptype(gefsMinuteInterpolation, InterTminute)
+            return InterTminute
+        if "gdps" in source_list and gdpsMinuteInterpolation is not None:
+            _process_gdps_ptype(gdpsMinuteInterpolation, InterTminute)
+            return InterTminute
+        if "geps" in source_list and gepsMinuteInterpolation is not None:
+            _process_geps_ptype(gepsMinuteInterpolation, InterTminute)
             return InterTminute
         if "era5" in source_list and era5_MinuteInterpolation is not None:
             _process_era5_ptype(era5_MinuteInterpolation, InterTminute)
@@ -548,6 +642,12 @@ def _calculate_precip_type_probs(
         if "gefs" in source_list and gefsMinuteInterpolation is not None:
             _process_gefs_ptype(gefsMinuteInterpolation, InterTminute)
             return InterTminute
+        if "gdps" in source_list and gdpsMinuteInterpolation is not None:
+            _process_gdps_ptype(gdpsMinuteInterpolation, InterTminute)
+            return InterTminute
+        if "geps" in source_list and gepsMinuteInterpolation is not None:
+            _process_geps_ptype(gepsMinuteInterpolation, InterTminute)
+            return InterTminute
         if "era5" in source_list and era5_MinuteInterpolation is not None:
             _process_era5_ptype(era5_MinuteInterpolation, InterTminute)
             return InterTminute
@@ -564,6 +664,8 @@ def _calculate_intensity(
     ecmwfMinuteInterpolation,
     gefsMinuteInterpolation,
     gfsMinuteInterpolation,
+    gdpsMinuteInterpolation,
+    gepsMinuteInterpolation,
     era5_MinuteInterpolation,
     lat,
     lon,
@@ -644,6 +746,10 @@ def _calculate_intensity(
     elif "gfs" in source_list and gfsMinuteInterpolation is not None:
         intensity = dbz_to_rate(gfsMinuteInterpolation[:, GFS["refc"]], precipTypes)
         refc_used = True
+    elif "gdps" in source_list and gdpsMinuteInterpolation is not None:
+        intensity = gdpsMinuteInterpolation[:, GDPS["intensity"]] * 3600
+    elif "geps" in source_list and gepsMinuteInterpolation is not None:
+        intensity = gepsMinuteInterpolation[:, GEPS["accum"]]
     elif "era5" in source_list and era5_MinuteInterpolation is not None:
         intensity = (
             era5_MinuteInterpolation[
@@ -664,6 +770,11 @@ def _calculate_error(
     source_list,
     ecmwfMinuteInterpolation,
     gefsMinuteInterpolation,
+    gepsMinuteInterpolation,
+    repsMinuteInterpolation,
+    lat,
+    lon,
+    prioritize_ai_models=False,
 ):
     """
     Calculate precipitation intensity error.
@@ -673,16 +784,34 @@ def _calculate_error(
         source_list: List of data sources.
         ecmwfMinuteInterpolation: ECMWF interpolated data.
         gefsMinuteInterpolation: GEFS interpolated data.
+        prioritize_ai_models: Whether AI model output should take precedence.
 
     Returns:
         Array of precipitation intensity errors.
     """
     error = np.ones(len(minute_array_grib)) * MISSING_DATA
 
-    if "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
+    if prioritize_ai_models:
+        if should_gfs_precede_dwd(lat, lon):
+            if "gefs" in source_list and gefsMinuteInterpolation is not None:
+                return gefsMinuteInterpolation[:, GEFS["error"]]
+            if "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
+                return ecmwfMinuteInterpolation[:, ECMWF["accum_stddev"]] * 1000
+        elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
+            return ecmwfMinuteInterpolation[:, ECMWF["accum_stddev"]] * 1000
+
+    if (
+        is_in_canada(lat, lon)
+        and "reps" in source_list
+        and repsMinuteInterpolation is not None
+    ):
+        error = repsMinuteInterpolation[:, REPS["error"]]
+    elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
         error = ecmwfMinuteInterpolation[:, ECMWF["accum_stddev"]] * 1000
     elif "gefs" in source_list and gefsMinuteInterpolation is not None:
         error = gefsMinuteInterpolation[:, GEFS["error"]]
+    elif "geps" in source_list and gepsMinuteInterpolation is not None:
+        error = gepsMinuteInterpolation[:, GEPS["error"]]
 
     return error
 
@@ -819,6 +948,9 @@ def build_minutely_block(
     lat: float,
     lon: float,
     prioritize_ai_models: bool = False,
+    gdps_data: np.ndarray | None = None,
+    geps_data: np.ndarray | None = None,
+    reps_data: np.ndarray | None = None,
 ) -> tuple[
     np.ndarray,
     np.ndarray,
@@ -886,6 +1018,17 @@ def build_minutely_block(
         if "dwd_mosmix" in source_list
         else None
     )
+    gdpsMinuteInterpolation = (
+        _interp_cmc(minute_array_grib, gdps_data, categorical_columns=(GDPS["type"]))
+        if "gdps" in source_list
+        else None
+    )
+    gepsMinuteInterpolation = (
+        _interp_cmc(minute_array_grib, geps_data) if "geps" in source_list else None
+    )
+    repsMinuteInterpolation = (
+        _interp_cmc(minute_array_grib, reps_data) if "reps" in source_list else None
+    )
 
     # Handle GEFS error interpolation inside HRRR block logic from original code
     # The original code updated gefsMinuteInterpolation inside the HRRR block.
@@ -914,6 +1057,8 @@ def build_minutely_block(
         nbmMinuteInterpolation,
         ecmwfMinuteInterpolation,
         gefsMinuteInterpolation,
+        gepsMinuteInterpolation,
+        repsMinuteInterpolation,
         era5_MinuteInterpolation,
         lat,
         lon,
@@ -929,6 +1074,8 @@ def build_minutely_block(
         ecmwfMinuteInterpolation,
         gefsMinuteInterpolation,
         gfsMinuteInterpolation,
+        gdpsMinuteInterpolation,
+        gepsMinuteInterpolation,
         era5_MinuteInterpolation,
         lat,
         lon,
@@ -984,6 +1131,8 @@ def build_minutely_block(
         ecmwfMinuteInterpolation,
         gefsMinuteInterpolation,
         gfsMinuteInterpolation,
+        gdpsMinuteInterpolation,
+        gepsMinuteInterpolation,
         era5_MinuteInterpolation,
         lat,
         lon,
@@ -1017,6 +1166,11 @@ def build_minutely_block(
         source_list,
         ecmwfMinuteInterpolation,
         gefsMinuteInterpolation,
+        gepsMinuteInterpolation,
+        repsMinuteInterpolation,
+        lat,
+        lon,
+        prioritize_ai_models,
     )
 
     # Distribute intensity to specific types

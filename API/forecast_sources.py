@@ -10,8 +10,12 @@ from API.constants.model_const import (
     DWD_MOSMIX,
     ECMWF,
     ECMWF_AIFS,
+    GDPS,
     GEFS,
+    GEPS,
     GFS,
+    HRDPS,
+    REPS,
 )
 from API.constants.shared_const import MISSING_DATA
 from API.request.grid_indexing import GridIndexingResult
@@ -53,6 +57,10 @@ class MergeResult:
     gfs: np.ndarray | None
     ecmwf: np.ndarray | None
     gefs: np.ndarray | None
+    hrdps: np.ndarray | None
+    gdps: np.ndarray | None
+    geps: np.ndarray | None
+    reps: np.ndarray | None
     dwd_mosmix: np.ndarray | None
     aigfs: np.ndarray | None
     aigefs: np.ndarray | None
@@ -179,6 +187,18 @@ def build_source_metadata(
 
     if isinstance(grid_result.dataOut_gefs, np.ndarray):
         metadata.add("gefs", time_value=_format_run_time(grid_result.gefsRunTime))
+
+    if isinstance(grid_result.dataOut_hrdps, np.ndarray):
+        metadata.add("hrdps", time_value=_format_run_time(grid_result.hrdpsRunTime))
+
+    if isinstance(grid_result.dataOut_gdps, np.ndarray):
+        metadata.add("gdps", time_value=_format_run_time(grid_result.gdpsRunTime))
+
+    if isinstance(grid_result.dataOut_geps, np.ndarray):
+        metadata.add("geps", time_value=_format_run_time(grid_result.gepsRunTime))
+
+    if isinstance(grid_result.dataOut_reps, np.ndarray):
+        metadata.add("reps", time_value=_format_run_time(grid_result.repsRunTime))
 
     if isinstance(grid_result.dataOut_aigfs, np.ndarray):
         metadata.add("aigfs", time_value=_format_run_time(grid_result.aigfsRunTime))
@@ -341,6 +361,10 @@ def merge_hourly_models(
     data_gfs: np.ndarray | None,
     data_ecmwf: np.ndarray | None,
     data_gefs: np.ndarray | None,
+    data_hrdps: np.ndarray | None,
+    data_gdps: np.ndarray | None,
+    data_geps: np.ndarray | None,
+    data_reps: np.ndarray | None,
     data_dwd_mosmix: np.ndarray | None,
     data_aigfs: np.ndarray | None,
     data_aigefs: np.ndarray | None,
@@ -354,6 +378,10 @@ def merge_hourly_models(
     gfs_merged = None
     ecmwf_merged = None
     gefs_merged = None
+    hrdps_merged = None
+    gdps_merged = None
+    geps_merged = None
+    reps_merged = None
     dwd_mosmix_merged = None
     aigfs_merged = None
     aigefs_merged = None
@@ -470,6 +498,46 @@ def merge_hourly_models(
             data_gefs, gefs_start_idx, num_hours, data_gefs.shape[1]
         )
 
+    if "hrdps" in metadata.source_list and isinstance(data_hrdps, np.ndarray):
+        hrdps_start_idx = nearest_index(data_hrdps[:, 0], base_day_utc_grib)
+        hrdps_merged = _merge_simple_source(
+            data_hrdps,
+            hrdps_start_idx,
+            num_hours,
+            max(HRDPS.values()) + 1,
+            source_columns=data_hrdps.shape[1],
+        )
+
+    if "gdps" in metadata.source_list and isinstance(data_gdps, np.ndarray):
+        gdps_start_idx = nearest_index(data_gdps[:, 0], base_day_utc_grib)
+        gdps_merged = _merge_simple_source(
+            data_gdps,
+            gdps_start_idx,
+            num_hours,
+            max(GDPS.values()) + 1,
+            source_columns=data_gdps.shape[1],
+        )
+
+    if "geps" in metadata.source_list and isinstance(data_geps, np.ndarray):
+        geps_start_idx = nearest_index(data_geps[:, 0], base_day_utc_grib)
+        geps_merged = _merge_simple_source(
+            data_geps,
+            geps_start_idx,
+            num_hours,
+            max(GEPS.values()) + 1,
+            source_columns=data_geps.shape[1],
+        )
+
+    if "reps" in metadata.source_list and isinstance(data_reps, np.ndarray):
+        reps_start_idx = nearest_index(data_reps[:, 0], base_day_utc_grib)
+        reps_merged = _merge_simple_source(
+            data_reps,
+            reps_start_idx,
+            num_hours,
+            max(REPS.values()) + 1,
+            source_columns=data_reps.shape[1],
+        )
+
     if "aigfs" in metadata.source_list and isinstance(data_aigfs, np.ndarray):
         aigfs_start_idx = nearest_index(data_aigfs[:, 0], base_day_utc_grib)
         aigfs_merged = _merge_aigfs_as_gfs(data_aigfs, aigfs_start_idx, num_hours)
@@ -489,6 +557,10 @@ def merge_hourly_models(
         gfs=gfs_merged,
         ecmwf=ecmwf_merged,
         gefs=gefs_merged,
+        hrdps=hrdps_merged,
+        gdps=gdps_merged,
+        geps=geps_merged,
+        reps=reps_merged,
         dwd_mosmix=dwd_mosmix_merged,
         aigfs=aigfs_merged,
         aigefs=aigefs_merged,

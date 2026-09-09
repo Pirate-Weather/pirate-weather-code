@@ -46,7 +46,9 @@ from API.constants.model_const import (
     DWD_MOSMIX,
     ECMWF,
     ERA5,
+    GDPS,
     GFS,
+    HRDPS,
     HRRR,
     HRRR_SUBH,
     NBM,
@@ -57,6 +59,7 @@ from API.legacy.current import get_legacy_current_summary
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
 from API.utils.fire import calculate_fosberg_fire_index
+from API.utils.geo import is_in_canada
 from API.utils.source_priority import should_gfs_precede_dwd
 
 
@@ -102,6 +105,21 @@ def _select_value(strategies, default=MISSING_DATA):
 # Pre-define priority orders for currently block.
 # Metrics without ECMWF entries reuse the same order and simply skip sources
 # that are not present in their source_map.
+_CURRENTLY_ORDER_CANADA = [
+    "rtma_ru",
+    "hrrrsubh",
+    "hrdps",
+    "reps",
+    "gdps",
+    "geps",
+    "nbm",
+    "hrrr",
+    "ecmwf_ifs",
+    "gfs",
+    "gefs",
+    "dwd_mosmix",
+    "era5",
+]
 _CURRENTLY_ORDER_NA = [
     "rtma_ru",
     "hrrrsubh",
@@ -109,8 +127,13 @@ _CURRENTLY_ORDER_NA = [
     "hrrr",
     "ecmwf_ifs",
     "gfs",
+    "gefs",
+    "gdps",
+    "geps",
     "dwd_mosmix",
     "era5",
+    "hrdps",
+    "reps",
 ]
 _CURRENTLY_ORDER_ROW = [
     "rtma_ru",
@@ -120,18 +143,27 @@ _CURRENTLY_ORDER_ROW = [
     "dwd_mosmix",
     "ecmwf_ifs",
     "gfs",
+    "gefs",
+    "gdps",
+    "geps",
     "era5",
+    "hrdps",
+    "reps",
 ]
 _CURRENTLY_ORDER_AI_NA = [
+    "gefs",
+    "gfs",
+    "ecmwf_ifs",
     "rtma_ru",
     "hrrrsubh",
     "nbm",
     "hrrr",
-    "gfs",
-    "gefs",
-    "ecmwf_ifs",
+    "gdps",
+    "geps",
     "dwd_mosmix",
     "era5",
+    "hrdps",
+    "reps",
 ]
 _CURRENTLY_ORDER_AI_ROW = [
     "ecmwf_ifs",
@@ -141,7 +173,12 @@ _CURRENTLY_ORDER_AI_ROW = [
     "hrrr",
     "dwd_mosmix",
     "gfs",
+    "gefs",
+    "gdps",
+    "geps",
     "era5",
+    "hrdps",
+    "reps",
 ]
 
 
@@ -166,19 +203,22 @@ def _build_source_strategies(
     Returns:
         List of (predicate, getter) tuples in priority order.
     """
-    gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
-
-    # Select pre-defined priority order
-    if prioritize_ai_models and gfs_before_dwd:
-        order = _CURRENTLY_ORDER_AI_NA
-    elif prioritize_ai_models and not gfs_before_dwd:
-        order = _CURRENTLY_ORDER_AI_ROW
-    elif gfs_before_dwd:
-        # North America
-        order = _CURRENTLY_ORDER_NA
+    if is_in_canada(lat, lon) and not prioritize_ai_models:
+        order = _CURRENTLY_ORDER_CANADA
     else:
-        # Rest of world
-        order = _CURRENTLY_ORDER_ROW
+        gfs_before_dwd = should_gfs_precede_dwd(lat, lon)
+
+        # Select pre-defined priority order
+        if prioritize_ai_models and gfs_before_dwd:
+            order = _CURRENTLY_ORDER_AI_NA
+        elif prioritize_ai_models and not gfs_before_dwd:
+            order = _CURRENTLY_ORDER_AI_ROW
+        elif gfs_before_dwd:
+            # North America
+            order = _CURRENTLY_ORDER_NA
+        else:
+            # Rest of world
+            order = _CURRENTLY_ORDER_ROW
 
     # Build strategies in priority order
     strategies = []
@@ -331,6 +371,14 @@ def _get_temp(
             lambda: "hrrrsubh" in sourceList,
             lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["temp"]],
         ),
+        "hrdps": (
+            lambda: "hrdps" in sourceList,
+            lambda: _interp_scalar(model_data["HRDPS_Merged"], HRDPS["temp"], state),
+        ),
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: _interp_scalar(model_data["GDPS_Merged"], GDPS["temp"], state),
+        ),
         "nbm": (
             lambda: "nbm" in sourceList,
             lambda: _interp_scalar(model_data["NBM_Merged"], NBM["temp"], state),
@@ -396,6 +444,14 @@ def _get_dew(
         "hrrrsubh": (
             lambda: "hrrrsubh" in sourceList,
             lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["dew"]],
+        ),
+        "hrdps": (
+            lambda: "hrdps" in sourceList,
+            lambda: _interp_scalar(model_data["HRDPS_Merged"], HRDPS["dew"], state),
+        ),
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: _interp_scalar(model_data["GDPS_Merged"], GDPS["dew"], state),
         ),
         "nbm": (
             lambda: "nbm" in sourceList,
@@ -465,6 +521,19 @@ def _get_humidity(
             lambda: (
                 _interp_scalar(model_data["HRRR_Merged"], HRRR["humidity"], state)
                 * humidUnit
+            ),
+        ),
+        "hrdps": (
+            lambda: "hrdps" in sourceList,
+            lambda: (
+                _interp_scalar(model_data["HRDPS_Merged"], HRDPS["rh"], state)
+                * humidUnit
+            ),
+        ),
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: (
+                _interp_scalar(model_data["GDPS_Merged"], GDPS["rh"], state) * humidUnit
             ),
         ),
         "nbm": (
@@ -539,6 +608,16 @@ def _get_pressure(
             lambda: model_data["has_hrrr_merged"],
             lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["pressure"], state),
         ),
+        "hrdps": (
+            lambda: "hrdps" in sourceList,
+            lambda: _interp_scalar(
+                model_data["HRDPS_Merged"], HRDPS["pressure"], state
+            ),
+        ),
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: _interp_scalar(model_data["GDPS_Merged"], GDPS["pressure"], state),
+        ),
         "dwd_mosmix": (
             lambda: "dwd_mosmix" in sourceList,
             lambda: _interp_scalar(
@@ -607,6 +686,14 @@ def _get_wind(
                 model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["wind_u"]] ** 2
                 + model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["wind_v"]] ** 2
             ),
+        ),
+        "hrdps": (
+            lambda: "hrdps" in sourceList,
+            lambda: _interp_scalar(model_data["HRDPS_Merged"], HRDPS["wind"], state),
+        ),
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: _interp_scalar(model_data["GDPS_Merged"], GDPS["wind"], state),
         ),
         "nbm": (
             lambda: "nbm" in sourceList,
@@ -685,6 +772,14 @@ def _get_gust(
         "hrrrsubh": (
             lambda: "hrrrsubh" in sourceList,
             lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["gust"]],
+        ),
+        "hrdps": (
+            lambda: "hrdps" in sourceList,
+            lambda: _interp_scalar(model_data["HRDPS_Merged"], HRDPS["gust"], state),
+        ),
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: _interp_scalar(model_data["GDPS_Merged"], GDPS["gust"], state),
         ),
         "nbm": (
             lambda: "nbm" in sourceList,
@@ -845,6 +940,16 @@ def _get_bearing(
                 model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["wind_v"]],
             ),
         ),
+        "hrdps": (
+            lambda: "hrdps" in sourceList,
+            lambda: _interp_scalar(
+                model_data["HRDPS_Merged"], HRDPS["wind_dir"], state
+            ),
+        ),
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: _interp_scalar(model_data["GDPS_Merged"], GDPS["wind_dir"], state),
+        ),
         "nbm": (
             lambda: "nbm" in sourceList,
             lambda: model_data["NBM_Merged"][state.idx2, NBM["bearing"]],
@@ -912,6 +1017,18 @@ def _get_cloud(
         "rtma_ru": (
             lambda: "rtma_ru" in sourceList,
             lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["cloud"]] * 0.01,
+        ),
+        "hrdps": (
+            lambda: "hrdps" in sourceList,
+            lambda: (
+                _interp_scalar(model_data["HRDPS_Merged"], HRDPS["cloud"], state) * 0.01
+            ),
+        ),
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: (
+                _interp_scalar(model_data["GDPS_Merged"], GDPS["cloud"], state) * 0.01
+            ),
         ),
         "nbm": (
             lambda: "nbm" in sourceList,
@@ -1228,6 +1345,14 @@ def _get_solar(
             lambda: "hrrrsubh" in sourceList,
             lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["solar"]],
         ),
+        "hrdps": (
+            lambda: "hrdps" in sourceList,
+            lambda: _interp_scalar(model_data["HRDPS_Merged"], HRDPS["solar"], state),
+        ),
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: _interp_scalar(model_data["GDPS_Merged"], GDPS["solar"], state),
+        ),
         "nbm": (
             lambda: "nbm" in sourceList,
             lambda: _interp_scalar(model_data["NBM_Merged"], NBM["solar"], state),
@@ -1290,6 +1415,14 @@ def _get_cape(
         Current CAPE.
     """
     source_map = {
+        "hrdps": (
+            lambda: "hrdps" in sourceList,
+            lambda: _interp_scalar(model_data["HRDPS_Merged"], HRDPS["cape"], state),
+        ),
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: _interp_scalar(model_data["GDPS_Merged"], GDPS["cape"], state),
+        ),
         "nbm": (
             lambda: "nbm" in sourceList,
             lambda: _interp_scalar(model_data["NBM_Merged"], NBM["cape"], state),
@@ -1441,6 +1574,8 @@ def build_current_section(
     prioritize_ai_models: bool = False,
     aq_inputs=None,
     inc_airqualitydetails: int = 0,
+    HRDPS_Merged=None,
+    GDPS_Merged=None,
 ) -> CurrentSection:
     """
     Calculate the currently block and return it alongside the raw array.
@@ -1530,6 +1665,8 @@ def build_current_section(
         "GFS_Merged": GFS_Merged,
         "ERA5_MERGED": ERA5_MERGED,
         "NBM_Fire_Merged": NBM_Fire_Merged,
+        "HRDPS_Merged": HRDPS_Merged,
+        "GDPS_Merged": GDPS_Merged,
         "has_hrrr_merged": (
             HRRR_Merged is not None
             and ("hrrr_0-18" in sourceList)
