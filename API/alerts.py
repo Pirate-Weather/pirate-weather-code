@@ -238,5 +238,4 @@ def _format_alert_description(alert_description: str) -> str:
     Returns:
         The formatted alert description string.
     """
-    formatted_text = re.sub(r"(?<!\n)\n(?!\n)", " ", alert_description)
-    return re.sub(r"\n\n", "\n", formatted_text)
+    return re.sub(r"(?<!\n)\n(?!\n)", " ", alert_description)
