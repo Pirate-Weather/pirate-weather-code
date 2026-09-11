@@ -870,19 +870,26 @@ def prepare_data_inputs(
     )
 
     # --- uv_inputs ---
-    uv_inputs = _stack_fields(
+    uv_inputs = _stack_with_priority(
         num_hours,
-        (gfs_merged[:, GFS["uv"]] * 18.9 * 0.025) if gfs_merged is not None else None,
-        (hrdps_merged[:, HRDPS["uv"]]) if hrdps_merged is not None else None,
-        (gdps_merged[:, GDPS["uv"]]) if gdps_merged is not None else None,
-        (
-            era5_merged[:, ERA5["downward_uv_radiation_at_the_surface"]]
-            / 3600
-            * 40
-            * 0.0025
-        )
-        if era5_valid
-        else None,
+        lat,
+        lon,
+        source_data={
+            "hrdps": hrdps_merged[:, HRDPS["uv"]] if hrdps_merged is not None else None,
+            "gdps": gdps_merged[:, GDPS["uv"]] if gdps_merged is not None else None,
+            "gfs": (gfs_merged[:, GFS["uv"]] * 18.9 * 0.025)
+            if gfs_merged is not None
+            else None,
+            "era5": (
+                era5_merged[:, ERA5["downward_uv_radiation_at_the_surface"]]
+                / 3600
+                * 40
+                * 0.0025
+            )
+            if era5_valid
+            else None,
+        },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- vis_inputs ---
@@ -907,11 +914,18 @@ def prepare_data_inputs(
     )
 
     # --- ozone_inputs ---
-    ozone_inputs = _stack_fields(
+    ozone_inputs = _stack_with_priority(
         num_hours,
-        gfs_merged[:, GFS["ozone"]] if gfs_merged is not None else None,
-        gdps_merged[:, GDPS["ozone"]] if gdps_merged is not None else None,
-        era5_merged[:, ERA5["total_column_ozone"]] * 46696 if era5_valid else None,
+        lat,
+        lon,
+        source_data={
+            "gdps": gdps_merged[:, GDPS["ozone"]] if gdps_merged is not None else None,
+            "gfs": gfs_merged[:, GFS["ozone"]] if gfs_merged is not None else None,
+            "era5": era5_merged[:, ERA5["total_column_ozone"]] * 46696
+            if era5_valid
+            else None,
+        },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- smoke_inputs ---

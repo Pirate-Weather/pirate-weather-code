@@ -4,13 +4,15 @@ import numpy as np
 
 from API.constants.aqi_const import compute_aqi_array
 from API.constants.forecast_const import DATA_CURRENT
-from API.constants.model_const import HRDPS, NBM
+from API.constants.model_const import GDPS, GFS, HRDPS, NBM
 from API.constants.shared_const import MISSING_DATA
 from API.current.metrics import (
     CurrentSection,
     InterpolationState,
     _get_fire,
+    _get_ozone,
     _get_temp,
+    _get_uv,
     build_current_section,
 )
 
@@ -34,6 +36,29 @@ def test_current_temperature_prefers_hrdps_over_nbm_in_canada():
     )
 
     assert value == 5.0
+
+
+def test_current_canada_prioritizes_canadian_uv_and_ozone_over_gfs():
+    hrdps = np.full((2, max(HRDPS.values()) + 1), np.nan)
+    gdps = np.full((2, max(GDPS.values()) + 1), np.nan)
+    gfs = np.full((2, max(GFS.values()) + 1), np.nan)
+    hrdps[:, HRDPS["uv"]] = 7.0
+    gdps[:, GDPS["uv"]] = 6.0
+    gdps[:, GDPS["ozone"]] = 350.0
+    gfs[:, GFS["uv"]] = 9.0 / (18.9 * 0.025)
+    gfs[:, GFS["ozone"]] = 300.0
+    model_data = {
+        "HRDPS_Merged": hrdps,
+        "GDPS_Merged": gdps,
+        "GFS_Merged": gfs,
+    }
+    state = InterpolationState(idx1=0, idx2=1, fac1=0.5, fac2=0.5)
+
+    uv = _get_uv(["gfs", "hrdps", "gdps"], model_data, state, 45.4215, -75.6972)
+    ozone = _get_ozone(["gfs", "hrdps", "gdps"], model_data, state, 45.4215, -75.6972)
+
+    assert uv == 7.0
+    assert ozone == 350.0
 
 
 def test_build_current_section_structure():
