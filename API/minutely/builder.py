@@ -665,6 +665,7 @@ def _calculate_intensity(
     gefsMinuteInterpolation,
     gfsMinuteInterpolation,
     gdpsMinuteInterpolation,
+    repsMinuteInterpolation,
     gepsMinuteInterpolation,
     era5_MinuteInterpolation,
     lat,
@@ -748,8 +749,20 @@ def _calculate_intensity(
         refc_used = True
     elif "gdps" in source_list and gdpsMinuteInterpolation is not None:
         intensity = gdpsMinuteInterpolation[:, GDPS["intensity"]] * 3600
+    elif "reps" in source_list and gepsMinuteInterpolation is not None:
+        intensity = (
+            repsMinuteInterpolation[:, REPS["rain"]]
+            + repsMinuteInterpolation[:, REPS["snow"]]
+            + repsMinuteInterpolation[:, REPS["ice"]]
+            + repsMinuteInterpolation[:, REPS["freezing_rain"]]
+        )
     elif "geps" in source_list and gepsMinuteInterpolation is not None:
-        intensity = gepsMinuteInterpolation[:, GEPS["accum"]]
+        intensity = (
+            gepsMinuteInterpolation[:, GEPS["rain"]]
+            + gepsMinuteInterpolation[:, GEPS["snow"]]
+            + gepsMinuteInterpolation[:, GEPS["ice"]]
+            + gepsMinuteInterpolation[:, GEPS["freezing_rain"]]
+        )
     elif "era5" in source_list and era5_MinuteInterpolation is not None:
         intensity = (
             era5_MinuteInterpolation[
@@ -1132,6 +1145,7 @@ def build_minutely_block(
         gefsMinuteInterpolation,
         gfsMinuteInterpolation,
         gdpsMinuteInterpolation,
+        repsMinuteInterpolation,
         gepsMinuteInterpolation,
         era5_MinuteInterpolation,
         lat,
