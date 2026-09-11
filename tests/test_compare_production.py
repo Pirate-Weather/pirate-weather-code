@@ -40,10 +40,10 @@ def _fetch_production_json(url: str) -> dict:
     """
 
     try:
-        with urlopen(url, timeout=10) as response:
+        with urlopen(url, timeout=60) as response:
             payload = response.read()
-    except URLError as exc:  # pragma: no cover - network failure
-        raise ProductionRequestError(f"Request to {url} failed: {exc}") from exc
+    except (URLError, TimeoutError) as exc:  # pragma: no cover - network failure
+        raise ProductionRequestError(f"Production request failed: {exc}") from exc
 
     try:
         return json.loads(payload.decode("utf-8"))
