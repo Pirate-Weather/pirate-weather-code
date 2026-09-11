@@ -1068,6 +1068,9 @@ async def calculate_grid_indexing(
             and (dataOut_hrrrh is not False)
         ):
             subhRunTime = dataOut[0, 0]
+            # Freshness check for HRRR 0-18h
+            # HRRR subhourly has 18 hours of data
+            # We exclude after 4 hours since its primarily used for the minutely section
             if (
                 utc_time
                 - datetime.datetime.fromtimestamp(
@@ -1076,20 +1079,25 @@ async def calculate_grid_indexing(
             ) > datetime.timedelta(hours=4):
                 dataOut = False
             hrrrhRunTime = dataOut_hrrrh[HISTORY_PERIODS["HRRR"], 0]
+            # Freshness check for HRRR 0-18h
+            # The general rule is to exclude models after roughy 70% of their hours has past
+            # HRRR has 18 hours of data so exclude if 13 hours stale
             if (
                 utc_time
                 - datetime.datetime.fromtimestamp(
                     hrrrhRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
-            ) > datetime.timedelta(hours=16):
+            ) > datetime.timedelta(hours=13):
                 dataOut_hrrrh = False
             h2RunTime = dataOut_h2[0, 0]
+            # Freshness check for HRRR 18-48h
+            # HRRR 18-48 has 48 hours of data so exclude if 34 hours stale
             if (
                 utc_time
                 - datetime.datetime.fromtimestamp(
                     h2RunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
-            ) > datetime.timedelta(hours=46):
+            ) > datetime.timedelta(hours=34):
                 dataOut_h2 = False
         else:
             dataOut = False
@@ -1105,8 +1113,9 @@ async def calculate_grid_indexing(
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     nbmRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
-                # Exclude hourly NBM if older than 2 days
-                if (utc_time - timestamp_dt) > datetime.timedelta(days=2):
+                # Freshness check for NBM
+                # NBM has data for the full 7 day period so exclude after 5 days stale
+                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
                     dataOut_nbm = False
                     nbmRunTime = None
                     logger.warning("OLD NBM")
@@ -1128,7 +1137,8 @@ async def calculate_grid_indexing(
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     gfsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
-                # Exclude 6-hourly GFS if older than 5 days
+                # Freshness check for GFS
+                # GFS has data for the full 7 day period so exclude after 5 days stale
                 if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
                     dataOut_gfs = False
                     gfsRunTime = None
@@ -1144,7 +1154,8 @@ async def calculate_grid_indexing(
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     ecmwfRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
-                # Exclude 12-hourly ECMWF if older than 5 days
+                # Freshness check for ECMWF
+                # ECMWF has data for the full 7 day period so exclude after 5 days stale
                 if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
                     dataOut_ecmwf = False
                     ecmwfRunTime = None
@@ -1167,7 +1178,8 @@ async def calculate_grid_indexing(
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     gefsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
-                # Exclude 6-hourly GEFS if older than 5 days
+                # Freshness check for GEFS
+                # GEFS has data for the full 7 day period so exclude after 5 days stale
                 if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
                     dataOut_gefs = False
                     gefsRunTime = None
@@ -1185,7 +1197,9 @@ async def calculate_grid_indexing(
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     hrdpsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
-                if (utc_time - timestamp_dt) > datetime.timedelta(hours=16):
+                # Freshness check for HRDPS
+                # HRDPS has 48 hours of data so exclude if 34 hours stale
+                if (utc_time - timestamp_dt) > datetime.timedelta(hours=34):
                     dataOut_hrdps = False
                     hrdpsRunTime = None
                     logger.warning("OLD HRDPS")
@@ -1208,6 +1222,8 @@ async def calculate_grid_indexing(
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     gdpsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
+                # Freshness check for GDPS
+                # GDPS has data for the full 7 day period so exclude after 5 days stale
                 if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
                     dataOut_gdps = False
                     gdpsRunTime = None
@@ -1231,6 +1247,8 @@ async def calculate_grid_indexing(
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     gepsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
+                # Freshness check for GEPS
+                # GEPS has data for the full 7 day period so exclude after 5 days stale
                 if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
                     dataOut_geps = False
                     gepsRunTime = None
@@ -1254,7 +1272,9 @@ async def calculate_grid_indexing(
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     repsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
-                if (utc_time - timestamp_dt) > datetime.timedelta(hours=46):
+                # Freshness check for REPS
+                # REPS has 84 hours of data so exclude if 59 hours stale
+                if (utc_time - timestamp_dt) > datetime.timedelta(hours=59):
                     dataOut_reps = False
                     repsRunTime = None
                     logger.warning("OLD REPS")
@@ -1273,6 +1293,8 @@ async def calculate_grid_indexing(
         dataOut_rtma_ru = zarr_results["RTMA_RU"]
         if dataOut_rtma_ru is not False:
             rtma_ru_time = dataOut_rtma_ru[0, 0]
+            # Freshness check for RTMA-RU
+            # RTMA-RU is an analytical model with no forecast so exclude if one hour stale
             if (
                 utc_time
                 - datetime.datetime.fromtimestamp(
@@ -1316,8 +1338,10 @@ async def calculate_grid_indexing(
                     ).replace(tzinfo=None)
                     time_diff = utc_time - timestamp_dt
 
+                    # Freshness check for DWD MOSMIX
+                    # DWD MOSMIX has data for the full 7 day period so exclude after 5 days stale
                     if (
-                        time_diff > datetime.timedelta(days=7)  # Too old
+                        time_diff > datetime.timedelta(days=5)  # Too old
                         or time_diff
                         < datetime.timedelta(hours=-72)  # Allow up to 72h future
                     ):
@@ -1349,6 +1373,8 @@ async def calculate_grid_indexing(
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     aigfsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
+                # Freshness check for AIGFS
+                # AIGFS has data for the full 7 day period so exclude after 5 days stale
                 if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
                     dataOut_aigfs = False
                     aigfsRunTime = None
@@ -1366,6 +1392,8 @@ async def calculate_grid_indexing(
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     aigefsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
+                # Freshness check for AIGEFS
+                # AIGEFS has data for the full 7 day period so exclude after 5 days stale
                 if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
                     dataOut_aigefs = False
                     aigefsRunTime = None
@@ -1383,6 +1411,8 @@ async def calculate_grid_indexing(
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     aifsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
+                # Freshness check for ECMWF AIFS
+                # ECMWF AIFS has data for the full 7 day period so exclude after 5 days stale
                 if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
                     dataOut_aifs = False
                     aifsRunTime = None
@@ -1406,7 +1436,9 @@ async def calculate_grid_indexing(
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     int(raqdpsRunTime), datetime.UTC
                 ).replace(tzinfo=None)
-                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                # Freshness check for RAQDPS
+                # RAQDPS has 72 hours of data so exclude if 51 hours stale
+                if (utc_time - timestamp_dt) > datetime.timedelta(hours=51):
                     dataOut_raqdps = False
                     raqdpsRunTime = None
                     logger.warning("OLD RAQDPS")
@@ -1421,7 +1453,9 @@ async def calculate_grid_indexing(
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     int(silamRunTime), datetime.UTC
                 ).replace(tzinfo=None)
-                if (utc_time - timestamp_dt) > datetime.timedelta(days=5):
+                # Freshness check for SILAM
+                # SILAM has 168 hours of data so exclude if 118 hours stale
+                if (utc_time - timestamp_dt) > datetime.timedelta(hours=118):
                     dataOut_silam = False
                     silamRunTime = None
                     logger.warning("OLD SILAM")
