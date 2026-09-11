@@ -450,6 +450,22 @@ def prepare_data_inputs(
         "gfs": gfs_merged[:, GFS["intensity"]] * 3600
         if "gfs" in source_list and gfs_merged is not None
         else None,
+        "reps": (
+            reps_merged[:, REPS["rain"]]
+            + reps_merged[:, REPS["snow"]]
+            + reps_merged[:, REPS["ice"]]
+            + reps_merged[:, REPS["freezing_rain"]]
+        )
+        if "reps" in source_list and reps_merged is not None
+        else None,
+        "geps": (
+            geps_merged[:, GEPS["rain"]]
+            + geps_merged[:, GEPS["snow"]]
+            + geps_merged[:, GEPS["ice"]]
+            + geps_merged[:, GEPS["freezing_rain"]]
+        )
+        if "geps" in source_list and geps_merged is not None
+        else None,
     }
 
     era5_rain_intensity = None
