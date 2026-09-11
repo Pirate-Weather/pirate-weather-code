@@ -3,7 +3,16 @@
 import numpy as np
 
 from API.constants.api_const import PRECIP_IDX
-from API.constants.model_const import DWD_MOSMIX, ECMWF, GDPS, GEFS, GEPS, GFS, NBM
+from API.constants.model_const import (
+    DWD_MOSMIX,
+    ECMWF,
+    GDPS,
+    GEFS,
+    GEPS,
+    GFS,
+    HRDPS,
+    NBM,
+)
 from API.current.metrics import _build_source_strategies
 from API.data_inputs import prepare_data_inputs
 from API.utils.geo import is_in_north_america
@@ -109,6 +118,39 @@ def test_hourly_us_uses_gdps_geps_after_gfs_gefs():
     assert np.all(inputs["temperature_inputs"][:, 1] == 20.0)
     assert np.all(inputs["prcipProbability_inputs"][:, 0] == 0.4)
     assert np.all(inputs["prcipProbability_inputs"][:, 1] == 0.7)
+
+
+def test_hourly_canada_prioritizes_canadian_uv_and_ozone_over_gfs():
+    num_hours = 3
+    gfs = np.full((num_hours, max(GFS.values()) + 1), np.nan)
+    hrdps = np.full((num_hours, max(HRDPS.values()) + 1), np.nan)
+    gdps = np.full((num_hours, max(GDPS.values()) + 1), np.nan)
+    gfs[:, GFS["uv"]] = 9.0 / (18.9 * 0.025)
+    gfs[:, GFS["ozone"]] = 300.0
+    hrdps[:, HRDPS["uv"]] = 7.0
+    gdps[:, GDPS["uv"]] = 6.0
+    gdps[:, GDPS["ozone"]] = 350.0
+
+    inputs = prepare_data_inputs(
+        source_list=["gfs", "hrdps", "gdps"],
+        nbm_merged=None,
+        nbm_fire_merged=None,
+        hrrr_merged=None,
+        dwd_mosmix_merged=None,
+        ecmwf_merged=None,
+        gefs_merged=None,
+        gfs_merged=gfs,
+        era5_merged=None,
+        extra_vars=[],
+        num_hours=num_hours,
+        lat=45.4215,
+        lon=-75.6972,
+        hrdps_merged=hrdps,
+        gdps_merged=gdps,
+    )
+
+    assert np.all(inputs["uv_inputs"][:, 0] == 7.0)
+    assert np.all(inputs["ozone_inputs"][:, 0] == 350.0)
 
 
 def test_ai_priority_applies_inside_canada():
