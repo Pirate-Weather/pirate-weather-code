@@ -951,7 +951,7 @@ def prepare_data_inputs(
     )
 
     # --- accum_inputs ---
-    accum_inputs = _stack_with_priority(
+    accum_inputs = _stack_precip_with_priority(
         num_hours,
         lat,
         lon,
