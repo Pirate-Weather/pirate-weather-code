@@ -956,7 +956,7 @@ def prepare_data_inputs(
         lat,
         lon,
         source_data={
-            "nbm": nbm_merged[:, NBM["intensity"]] if nbm_merged is not None else None,
+            "nbm": nbm_merged[:, NBM["accum"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["accum"]] if hrrr_merged is not None else None,
             "hrdps": hrdps_merged[:, HRDPS["accum"]]
             if hrdps_merged is not None

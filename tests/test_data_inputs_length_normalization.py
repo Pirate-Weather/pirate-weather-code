@@ -178,7 +178,15 @@ def test_prepare_data_inputs_includes_canadian_model_fields():
     assert np.allclose(
         inputs["prcipProbability_inputs"][:, 0], reps_merged[:, REPS["prob"]]
     )
-    assert np.allclose(inputs["accum_inputs"][:, 0], hrdps_merged[:, HRDPS["accum"]])
+    assert np.allclose(
+        inputs["accum_inputs"][:, 0],
+        (
+            reps_merged[:, REPS["rain"]]
+            + reps_merged[:, REPS["freezing_rain"]]
+            + reps_merged[:, REPS["ice"]]
+            + reps_merged[:, REPS["snow"]]
+        ),
+    )
     expected_reps_ptype = map_ensemble_precip_rates_to_ptype(
         rain=reps_merged[:, REPS["rain"]],
         freezing_rain=reps_merged[:, REPS["freezing_rain"]],
