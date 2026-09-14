@@ -450,6 +450,22 @@ def prepare_data_inputs(
         "gfs": gfs_merged[:, GFS["intensity"]] * 3600
         if "gfs" in source_list and gfs_merged is not None
         else None,
+        "reps": (
+            reps_merged[:, REPS["rain"]]
+            + reps_merged[:, REPS["snow"]]
+            + reps_merged[:, REPS["ice"]]
+            + reps_merged[:, REPS["freezing_rain"]]
+        )
+        if "reps" in source_list and reps_merged is not None
+        else None,
+        "geps": (
+            geps_merged[:, GEPS["rain"]]
+            + geps_merged[:, GEPS["snow"]]
+            + geps_merged[:, GEPS["ice"]]
+            + geps_merged[:, GEPS["freezing_rain"]]
+        )
+        if "geps" in source_list and geps_merged is not None
+        else None,
     }
 
     era5_rain_intensity = None
@@ -870,19 +886,26 @@ def prepare_data_inputs(
     )
 
     # --- uv_inputs ---
-    uv_inputs = _stack_fields(
+    uv_inputs = _stack_with_priority(
         num_hours,
-        (gfs_merged[:, GFS["uv"]] * 18.9 * 0.025) if gfs_merged is not None else None,
-        (hrdps_merged[:, HRDPS["uv"]]) if hrdps_merged is not None else None,
-        (gdps_merged[:, GDPS["uv"]]) if gdps_merged is not None else None,
-        (
-            era5_merged[:, ERA5["downward_uv_radiation_at_the_surface"]]
-            / 3600
-            * 40
-            * 0.0025
-        )
-        if era5_valid
-        else None,
+        lat,
+        lon,
+        source_data={
+            "hrdps": hrdps_merged[:, HRDPS["uv"]] if hrdps_merged is not None else None,
+            "gdps": gdps_merged[:, GDPS["uv"]] if gdps_merged is not None else None,
+            "gfs": (gfs_merged[:, GFS["uv"]] * 18.9 * 0.025)
+            if gfs_merged is not None
+            else None,
+            "era5": (
+                era5_merged[:, ERA5["downward_uv_radiation_at_the_surface"]]
+                / 3600
+                * 40
+                * 0.0025
+            )
+            if era5_valid
+            else None,
+        },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- vis_inputs ---
@@ -907,11 +930,18 @@ def prepare_data_inputs(
     )
 
     # --- ozone_inputs ---
-    ozone_inputs = _stack_fields(
+    ozone_inputs = _stack_with_priority(
         num_hours,
-        gfs_merged[:, GFS["ozone"]] if gfs_merged is not None else None,
-        gdps_merged[:, GDPS["ozone"]] if gdps_merged is not None else None,
-        era5_merged[:, ERA5["total_column_ozone"]] * 46696 if era5_valid else None,
+        lat,
+        lon,
+        source_data={
+            "gdps": gdps_merged[:, GDPS["ozone"]] if gdps_merged is not None else None,
+            "gfs": gfs_merged[:, GFS["ozone"]] if gfs_merged is not None else None,
+            "era5": era5_merged[:, ERA5["total_column_ozone"]] * 46696
+            if era5_valid
+            else None,
+        },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- smoke_inputs ---
@@ -921,12 +951,12 @@ def prepare_data_inputs(
     )
 
     # --- accum_inputs ---
-    accum_inputs = _stack_with_priority(
+    accum_inputs = _stack_precip_with_priority(
         num_hours,
         lat,
         lon,
         source_data={
-            "nbm": nbm_merged[:, NBM["intensity"]] if nbm_merged is not None else None,
+            "nbm": nbm_merged[:, NBM["accum"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["accum"]] if hrrr_merged is not None else None,
             "hrdps": hrdps_merged[:, HRDPS["accum"]]
             if hrdps_merged is not None

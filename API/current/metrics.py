@@ -1084,7 +1084,14 @@ def _get_cloud(
     return clipLog(val, CLIP_CLOUD["min"], CLIP_CLOUD["max"], "Cloud Current")
 
 
-def _get_uv(sourceList, model_data, state: InterpolationState):
+def _get_uv(
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    lat,
+    lon,
+    prioritize_ai_models=False,
+):
     """
     Get current UV index from available sources.
 
@@ -1092,43 +1099,54 @@ def _get_uv(sourceList, model_data, state: InterpolationState):
         sourceList: List of available sources.
         model_data: Dictionary of model data.
         state: Interpolation state.
+        lat: Latitude.
+        lon: Longitude.
+        prioritize_ai_models: Whether to prioritize AI model sources.
 
     Returns:
         Current UV index.
     """
-    if "gfs" in sourceList:
-        return clipLog(
-            (
-                model_data["GFS_Merged"][state.idx1, GFS["uv"]] * state.fac1
-                + model_data["GFS_Merged"][state.idx2, GFS["uv"]] * state.fac2
-            )
-            * 18.9
-            * 0.025,
-            CLIP_UV["min"],
-            CLIP_UV["max"],
-            "UV Current",
-        )
-    elif "era5" in sourceList:
-        return clipLog(
-            (
-                model_data["ERA5_MERGED"][
-                    state.idx1, ERA5["downward_uv_radiation_at_the_surface"]
-                ]
-                * state.fac1
-                + model_data["ERA5_MERGED"][
-                    state.idx2, ERA5["downward_uv_radiation_at_the_surface"]
-                ]
-                * state.fac2
-            )
-            / 3600
-            * 40
-            * 0.0025,
-            CLIP_UV["min"],
-            CLIP_UV["max"],
-            "UV Current",
-        )
-    else:
-        return MISSING_DATA
+    source_map = {
+        "hrdps": (
+            lambda: "hrdps" in sourceList,
+            lambda: _interp_scalar(model_data["HRDPS_Merged"], HRDPS["uv"], state),
+        ),
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: _interp_scalar(model_data["GDPS_Merged"], GDPS["uv"], state),
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: (
+                _interp_scalar(model_data["GFS_Merged"], GFS["uv"], state)
+                * 18.9
+                * 0.025
+            ),
+        ),
+        "era5": (
+            lambda: "era5" in sourceList,
+            lambda: (
+                _interp_scalar(
+                    model_data["ERA5_MERGED"],
+                    ERA5["downward_uv_radiation_at_the_surface"],
+                    state,
+                )
+                / 3600
+                * 40
+                * 0.0025
+            ),
+        ),
+    }
+
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=False,
+        prioritize_ai_models=prioritize_ai_models,
+    )
+    val = _select_value(strategies, default=MISSING_DATA)
+    return clipLog(val, CLIP_UV["min"], CLIP_UV["max"], "UV Current")
 
 
 def _get_station_pressure(sourceList, model_data, state: InterpolationState):
@@ -1238,7 +1256,14 @@ def _get_vis(
     return np.clip(val, CLIP_VIS["min"], CLIP_VIS["max"])
 
 
-def _get_ozone(sourceList, model_data, state: InterpolationState):
+def _get_ozone(
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    lat,
+    lon,
+    prioritize_ai_models=False,
+):
     """
     Get current ozone from available sources.
 
@@ -1246,30 +1271,43 @@ def _get_ozone(sourceList, model_data, state: InterpolationState):
         sourceList: List of available sources.
         model_data: Dictionary of model data.
         state: Interpolation state.
+        lat: Latitude.
+        lon: Longitude.
+        prioritize_ai_models: Whether to prioritize AI model sources.
 
     Returns:
         Current ozone.
     """
-    val = _select_value(
-        [
-            (
-                lambda: "gfs" in sourceList,
-                lambda: _interp_scalar(model_data["GFS_Merged"], GFS["ozone"], state),
+    source_map = {
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: _interp_scalar(model_data["GDPS_Merged"], GDPS["ozone"], state),
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(model_data["GFS_Merged"], GFS["ozone"], state),
+        ),
+        "era5": (
+            lambda: "era5" in sourceList,
+            lambda: (
+                _interp_scalar(
+                    model_data["ERA5_MERGED"],
+                    ERA5["total_column_ozone"],
+                    state,
+                )
+                * 46696
             ),
-            (
-                lambda: "era5" in sourceList,
-                lambda: (
-                    _interp_scalar(
-                        model_data["ERA5_MERGED"],
-                        ERA5["total_column_ozone"],
-                        state,
-                    )
-                    * 46696
-                ),
-            ),
-        ],
-        default=MISSING_DATA,
+        ),
+    }
+
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=False,
+        prioritize_ai_models=prioritize_ai_models,
     )
+    val = _select_value(strategies, default=MISSING_DATA)
     return clipLog(val, CLIP_OZONE["min"], CLIP_OZONE["max"], "Ozone Current")
 
 
@@ -1718,14 +1756,18 @@ def build_current_section(
     InterPcurrent[DATA_CURRENT["cloud"]] = _get_cloud(
         sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
-    InterPcurrent[DATA_CURRENT["uv"]] = _get_uv(sourceList, model_data, state)
+    InterPcurrent[DATA_CURRENT["uv"]] = _get_uv(
+        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
+    )
     InterPcurrent[DATA_CURRENT["station_pressure"]] = _get_station_pressure(
         sourceList, model_data, state
     )
     InterPcurrent[DATA_CURRENT["vis"]] = _get_vis(
         sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
-    InterPcurrent[DATA_CURRENT["ozone"]] = _get_ozone(sourceList, model_data, state)
+    InterPcurrent[DATA_CURRENT["ozone"]] = _get_ozone(
+        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
+    )
 
     (
         InterPcurrent[DATA_CURRENT["storm_dist"]],

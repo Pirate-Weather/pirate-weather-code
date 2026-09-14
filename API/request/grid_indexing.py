@@ -1273,8 +1273,8 @@ async def calculate_grid_indexing(
                     repsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
                 # Freshness check for REPS
-                # REPS has 84 hours of data so exclude if 59 hours stale
-                if (utc_time - timestamp_dt) > datetime.timedelta(hours=59):
+                # REPS has 72 hours of data so exclude if 51 hours stale
+                if (utc_time - timestamp_dt) > datetime.timedelta(hours=51):
                     dataOut_reps = False
                     repsRunTime = None
                     logger.warning("OLD REPS")
