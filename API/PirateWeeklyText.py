@@ -524,36 +524,24 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
             precipitation = True
             precipitationDays.append([idx, weekday, day])
             avgPop += day["precipProbability"]
-            if max_rain_intensity == 0:
-                max_rain_intensity = day.get(
-                    "rainIntensityMax", day.get("liquidIntensityMax", 0)
-                )
-            elif (
+            if max_rain_intensity == 0 or (
                 day.get("rainIntensityMax", day.get("liquidIntensityMax", 0))
                 > max_rain_intensity
             ):
                 max_rain_intensity = day.get(
                     "rainIntensityMax", day.get("liquidIntensityMax", 0)
                 )
-            if max_snow_intensity == 0:
+            if max_snow_intensity == 0 or day["snowIntensityMax"] > max_snow_intensity:
                 max_snow_intensity = day["snowIntensityMax"]
-            elif day["snowIntensityMax"] > max_snow_intensity:
-                max_snow_intensity = day["snowIntensityMax"]
-            if max_ice_intensity == 0:
-                max_ice_intensity = day["iceIntensityMax"]
-            elif day["iceIntensityMax"] > max_ice_intensity:
+            if max_ice_intensity == 0 or day["iceIntensityMax"] > max_ice_intensity:
                 max_ice_intensity = day["iceIntensityMax"]
 
         # Determine the highest temperature of the week and record the index in the array, the day it occured on, and the temperature (in Celsius)
-        if not highTemp:
-            highTemp = [idx, weekday, day["temperatureHigh"]]
-        elif day["temperatureHigh"] > highTemp[2]:
+        if not highTemp or day["temperatureHigh"] > highTemp[2]:
             highTemp = [idx, weekday, day["temperatureHigh"]]
 
         # Determine the lowest temperature of the week and record the index in the array, the day it occured on, and the temperature (in Celsius)
-        if not lowTemp:
-            lowTemp = [idx, weekday, day["temperatureHigh"]]
-        elif day["temperatureHigh"] < lowTemp[2]:
+        if not lowTemp or day["temperatureHigh"] < lowTemp[2]:
             lowTemp = [idx, weekday, day["temperatureHigh"]]
 
     if len(precipitationDays) > 0:

@@ -86,6 +86,25 @@ preferences within our organization.
 * **Code formatter:**  Ruff - Enforces consistent formatting automatically.
 * **Linter:**  Ruff - Identifies potential issues and style violations.
 
+## Review Noise
+
+Do not comment on:
+
+- Import ordering handled by Ruff.
+- Formatting handled automatically by Ruff.
+- Line wrapping within Ruff's configured limits.
+- Minor naming differences when they are consistent with nearby code.
+- Legacy style inconsistencies outside the scope of the current pull request.
+- Suggestions that would require a large refactor without a clear functional benefit.
+
+## Pirate Weather Conventions
+
+- Use metric units internally except for wind speed which is metres per second.
+- Do not hardcode conversion factors; use shared utilities.
+- Weather thresholds should be declared as named constants. Shared thresholds should live in the `constants` folder rather than being duplicated across modules.
+- Preserve backwards compatibility for API responses. Any new items to the API response should be behind the version=2 query string or the include query string.
+- Avoid changing summary text without considering the translation module for localization. The summary condition breakpoints can be changed to better represent the condition.
+
 # Example
 ```python
 
@@ -94,10 +113,13 @@ from collections import Counter
 import math
 
 # Cloud Cover Thresholds 
-cloudyThreshold = 0.875
-mostlyCloudyThreshold = 0.625
-partlyCloudyThreshold = 0.375
-mostlyClearThreshold = 0.125
+CLOUD_COVER_DAILY_THRESHOLDS = {
+    "cloudy": 1.0,
+    "mostly_cloudy": 0.75,
+    "partly_cloudy": 0.50,
+    "mostly_clear": 0.25,
+    "clear": 0.0,
+}
 
 # Precipitation Intensity Thresholds (mm/h liquid equivalent)
 LIGHT_PRECIP_MM_PER_HOUR = 0.4
@@ -137,20 +159,20 @@ def calculate_wind_text(wind, wind_unit, icon="darksky", mode="both"):
     wind_text = None
     wind_icon = None
 
-    light_wind_thresh = 6.7056 * wind_unit
-    mid_wind_thresh = 10 * wind_unit
-    heavy_wind_thresh = 17.8816 * wind_unit
+    LIGHT_WIND_THRESH = 6.7056 * wind_unit
+    MID_WIND_THRESH = 10 * wind_unit
+    HEAVY_WIND_THRESH = 17.8816 * wind_unit
 
-    if wind >= light_wind_thresh and wind < mid_wind_thresh:
+    if wind >= LIGHT_WIND_THRESH and wind < MID_WIND_THRESH:
         wind_text = "light-wind"
         if icon == "pirate":
             wind_icon = "breezy"
         else:
             wind_icon = "wind"
-    elif wind >= mid_wind_thresh and wind < heavy_wind_thresh:
+    elif wind >= MID_WIND_THRESH and wind < HEAVY_WIND_THRESH:
         wind_text = "medium-wind"
         wind_icon = "wind"
-    elif wind >= heavy_wind_thresh:
+    elif wind >= HEAVY_WIND_THRESH:
         wind_text = "heavy-wind"
         if icon == "pirate":
             wind_icon = "dangerous-wind"

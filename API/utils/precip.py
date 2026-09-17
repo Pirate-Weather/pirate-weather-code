@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 
 from API.constants.api_const import (
@@ -38,9 +36,9 @@ def calculate_globe_temperature(
 def calculate_wbgt(
     temperature: float,
     humidity: float,
-    wind_speed: Optional[float] = None,
-    solar_radiation: Optional[float] = None,
-    globe_temperature: Optional[float] = None,
+    wind_speed: float | None = None,
+    solar_radiation: float | None = None,
+    globe_temperature: float | None = None,
     in_sun: bool = False,
 ) -> float:
     """Calculate the Wet-Bulb Globe Temperature (WBGT)."""

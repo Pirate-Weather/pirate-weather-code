@@ -1,7 +1,7 @@
 # %% Script to contain the helper functions as part of the API for Pirate Weather
 # Alexander Rey. October 2025
 import logging
-from typing import List, MutableMapping, Union
+from collections.abc import MutableMapping
 
 import metpy as mp
 import numpy as np
@@ -9,6 +9,7 @@ import numpy as np
 from API.constants.api_const import (
     APPARENT_TEMP_CONSTS,
     APPARENT_TEMP_SOLAR_CONSTS,
+    PRECIP_IDX,
     PRECIP_NOISE_THRESHOLD_MMH,
     PRECIP_TYPES,
     TEMP_THRESHOLD_WMO_FROZEN_C,
@@ -231,37 +232,8 @@ def estimate_visibility_gultepe_rh_pr_numpy(
     Rh_frac = _rh_from_td(
         (T2m * mp.units.units.degC), (Td2m * mp.units.units.degC)
     ).magnitude
-    RH = np.clip(Rh_frac * 100.0, p["rh_min"], p["rh_max"])  # percent
-
-    # RH → VIS (Gültepe RH fits)
-    fit = (p["rh_fit"] or "FRAM").upper()
-    if fit == "AIRS2":
-        vis_rh = -0.0177 * (RH**2) + 1.462 * RH + 30.8
-    else:  # FRAM
-        vis_rh = -41.5 * np.log(RH) + 192.3
-
-    beta_rh = 3 / vis_rh
-
-    # ------------------- PRR → VIS (Gültepe Table 2) -------------------
-    def _vis_from_pr_gultepe(prr_mm_h: np.ndarray) -> np.ndarray:
-        """Apply rain-type thresholds and Table 2 percentile fits."""
-        pr = np.clip(prr_mm_h, 0.0, np.inf)
-        out = np.full(pr.shape, MISSING_DATA, dtype=float)
-
-        heavy = pr > p["pr_moderate_max"]  # > 7.6 mm/h
-        moderate = (pr >= p["pr_light_max"]) & (pr <= p["pr_moderate_max"])  # 2.6–7.6
-        light = pr < p["pr_light_max"]  # < 2.6
-
-        # Heavy rain → 5th percentile fit: 0.45*PR^0.394 + 2.28
-        out[heavy] = -0.45 * np.power(pr[heavy], 0.394) + 2.28
-
-        # Moderate rain → 50th percentile fit: 2.65*PR^0.256 + 7.65
-        out[moderate] = -2.65 * np.power(pr[moderate], 0.256) + 7.65
-
-        # Light rain → 95th percentile fit: 863.26*PR^0.003 + 874.19
-        out[light] = -863.26 * np.power(pr[light], 0.003) + 874.19
-
-        return out
+    # ... (keep the MetPy RH computation as-is) ...
+    RH = np.clip(Rh_frac * 100.0, p["rh_min"], p["rh_max"])
 
     if use_precip:
         ls_rain = pick("large_scale_rain_rate")
@@ -270,23 +242,89 @@ def estimate_visibility_gultepe_rh_pr_numpy(
             ls_rain = np.zeros(n_time)
         if cv_rain is None:
             cv_rain = np.zeros(n_time)
-
-        prr_mm_h = mmh(ls_rain + cv_rain)
-        vis_pr = _vis_from_pr_gultepe(prr_mm_h)
-
-        beta_pr = 3 / vis_pr
+        pr_mm_hr: np.ndarray | None = (ls_rain + cv_rain) * 3600.0  # m/s → mm/hr
     else:
-        beta_pr = np.zeros(n_time)
-    # Add the beta factors and convert back to vis
-    beta = beta_rh + beta_pr
-    vis = 3 / beta
+        pr_mm_hr = None
 
-    # Clamp & return
-    vis = np.atleast_1d(np.array(vis, dtype=float))
-    np.clip(vis, p["vis_min_km"], p["vis_max_km"], out=vis)
-    vis = vis * 1000  # Return in m
+    vis = estimate_visibility_from_rh_pr(
+        RH,
+        pr_mm_hr,
+        which_rh_fit=p["rh_fit"],
+        rh_min=p["rh_min"],
+        rh_max=p["rh_max"],
+        vis_min_km=p["vis_min_km"],
+        vis_max_km=p["vis_max_km"],
+    )
 
+    vis = np.atleast_1d(vis.astype(float))
     return vis[0] if vis.size == 1 else vis
+
+
+def estimate_visibility_from_rh_pr(
+    rh_percent: np.ndarray,
+    pr_mm_hr: np.ndarray | None = None,
+    wind_speed_ms: np.ndarray | None = None,
+    which_rh_fit: str = "FRAM",
+    rh_min: float = 30.0,
+    rh_max: float = 100.0,
+    vis_min_km: float = 0.05,
+    vis_max_km: float = 16.09344,
+    u_ref: float = 2.0,
+) -> np.ndarray:
+    """Estimate visibility (m) from RH, precipitation, and optional wind speed.
+
+    Args:
+        rh_percent: Relative humidity in % (clamped to rh_min-rh_max).
+        pr_mm_hr: Precipitation rate in mm/hr. None omits precipitation.
+        wind_speed_ms: Wind speed in m/s. None omits wind adjustment.
+        which_rh_fit: "FRAM" (default), "AIRS2", or "RUC".
+        rh_min, rh_max: Clamping limits for RH.
+        vis_min_km, vis_max_km: Minimum/Maximum visibility output in km.
+        u_ref: Reference wind speed (m/s) at which the RH-driven extinction
+          begins to significantly clear due to mixing.
+    """
+    RH = np.clip(np.asarray(rh_percent, dtype=np.float64), rh_min, rh_max)
+
+    # 1. Compute baseline visibility from RH
+    fit = (which_rh_fit or "FRAM").upper()
+    if fit == "AIRS2":
+        vis_rh = -0.0177 * (RH**2) + 1.462 * RH + 30.8
+    elif fit == "RUC":
+        vis_rh = 60.0 * np.exp(-0.025 * (RH - 30.0))
+    else:  # FRAM (default)
+        vis_rh = -41.5 * np.log(RH) + 192.3
+
+    beta_rh = 3.0 / np.maximum(vis_rh, 0.05)
+
+    # 2. Apply Wind Speed Scaling to the RH extinction
+    # If wind is high, we decrease the extinction (beta), improving visibility.
+    # If wind is near 0, beta remains high.
+    if wind_speed_ms is not None:
+        u = np.clip(np.asarray(wind_speed_ms, dtype=np.float64), 0.0, None)
+        # Scaling factor: approaches 0.1 (high visibility) at strong winds,
+        # and 1.0 (baseline low visibility) at zero wind.
+        wind_factor = 0.1 + 0.9 * np.exp(-u / u_ref)
+        beta_rh = beta_rh * wind_factor
+
+    # 3. Compute baseline visibility from precipitation
+    if pr_mm_hr is not None:
+        pr = np.clip(np.asarray(pr_mm_hr, dtype=np.float64), 0.0, None)
+        vis_pr = np.where(
+            pr > 7.6,
+            np.maximum(-0.45 * np.power(pr, 0.394) + 2.28, 0.05),
+            np.where(
+                pr >= 2.6,
+                np.maximum(-2.65 * np.power(pr, 0.256) + 7.65, 0.05),
+                np.maximum(-863.26 * np.power(pr, 0.003) + 874.19, 0.05),
+            ),
+        )
+        beta_pr = 3.0 / np.maximum(vis_pr, 0.05)
+    else:
+        beta_pr = 0.0
+
+    # 4. Combine extinctions using the Koschmieder equation
+    vis_km = np.clip(3.0 / (beta_rh + beta_pr), vis_min_km, vis_max_km)
+    return (vis_km * 1000.0).astype(np.float32)
 
 
 def select_daily_precip_type(
@@ -447,6 +485,152 @@ def map_wmo4677_to_ptype(
     return out
 
 
+def map_canadian_precip_type_to_ptype(
+    ptype_codes: np.ndarray | None = None,
+) -> np.ndarray:
+    """
+    Map Canadian precipitation type codes to internal precip type categories.
+
+    Returns an integer array with the following mapping:
+        0 -> none/other
+        1 -> snow
+        3 -> ice (pellets, hail)
+        2 -> freezing rain/drizzle
+        4 -> rain
+
+    The mapping follows the Canadian code ranges and uses conservative grouping:
+        - Freezing drizzle/rain codes (3, 8) -> freezing (2)
+        - Ice pellets / hail-related codes (4, 9) -> ice (3)
+        - Snow and snow showers (5) -> snow (1)
+        - Rain and drizzle ranges (1, 2, 7) -> rain (4)
+
+    Args:
+        ptype_codes: array-like of numeric Canadian precipitation codes (may contain NaN)
+
+    Returns:
+        np.ndarray: Array of mapped precipitation type categories.
+    """
+    codes = np.asarray(ptype_codes)
+    # Use float dtype so we can store MISSING_DATA (NaN) without conversion errors
+    out = np.zeros_like(codes, dtype=float)
+
+    nan_mask = np.isnan(codes)
+
+    freezing_codes = [3, 8]
+    ice_codes = [4, 9]
+    snow_codes = [5]
+    rain_codes = [1, 2, 7]
+
+    # Assign categories; order does not matter because groups are disjoint in our choice
+    if codes.size > 0:
+        vals = codes.copy()
+        vals[nan_mask] = -999
+        vals = vals.astype(int)
+
+        out[np.isin(vals, snow_codes)] = PRECIP_IDX["snow"]
+        out[np.isin(vals, ice_codes)] = PRECIP_IDX["sleet"]
+        out[np.isin(vals, freezing_codes)] = PRECIP_IDX["ice"]
+        out[np.isin(vals, rain_codes)] = PRECIP_IDX["rain"]
+
+    # Use MISSING_DATA for NaNs
+    out[nan_mask] = MISSING_DATA
+
+    return out
+
+
+def map_ensemble_precip_rates_to_ptype(
+    rain: np.ndarray | None = None,
+    ice: np.ndarray | None = None,
+    freezing_rain: np.ndarray | None = None,
+    snow: np.ndarray | None = None,
+    *,
+    threshold: float = 0.5,
+) -> np.ndarray:
+    """Map ensemble precipitation component rates to the internal precipitation type.
+
+    GEPS and REPS do not provide a categorical type field; they provide rate fields for
+    rain, ice pellets, freezing rain, and snow. We classify by the strongest rate, but
+    if more than one channel exceeds the threshold we fall back to mixed precipitation.
+
+    The companion mapping is:
+        rain -> PRECIP_IDX["rain"]
+        snow -> PRECIP_IDX["snow"]
+        freezing_rain -> PRECIP_IDX["ice"]
+        ice -> PRECIP_IDX["sleet"]
+    """
+    arrays = {
+        "rain": np.asarray(rain, dtype=float) if rain is not None else np.zeros(0),
+        "ice": np.asarray(ice, dtype=float) if ice is not None else np.zeros(0),
+        "freezing_rain": (
+            np.asarray(freezing_rain, dtype=float)
+            if freezing_rain is not None
+            else np.zeros(0)
+        ),
+        "snow": np.asarray(snow, dtype=float) if snow is not None else np.zeros(0),
+    }
+
+    if (
+        not arrays["rain"].size
+        and not arrays["ice"].size
+        and not arrays["freezing_rain"].size
+        and not arrays["snow"].size
+    ):
+        return np.array([], dtype=float)
+
+    n_hours = max(len(v) for v in arrays.values() if len(v) > 0)
+    component_matrix = np.zeros((n_hours, 4), dtype=float)
+    component_matrix[:, 0] = (
+        np.zeros(n_hours)
+        if not arrays["snow"].size
+        else np.resize(arrays["snow"], n_hours)
+    )
+    component_matrix[:, 1] = (
+        np.zeros(n_hours)
+        if not arrays["ice"].size
+        else np.resize(arrays["ice"], n_hours)
+    )
+    component_matrix[:, 2] = (
+        np.zeros(n_hours)
+        if not arrays["freezing_rain"].size
+        else np.resize(arrays["freezing_rain"], n_hours)
+    )
+    component_matrix[:, 3] = (
+        np.zeros(n_hours)
+        if not arrays["rain"].size
+        else np.resize(arrays["rain"], n_hours)
+    )
+
+    strong_count = (component_matrix > threshold).sum(axis=1)
+    out = np.full(n_hours, np.nan, dtype=float)
+
+    mixed_mask = strong_count > 1
+    out[mixed_mask] = PRECIP_IDX["sleet"]
+
+    strong_mask = strong_count == 1
+    if np.any(strong_mask):
+        strongest_idx = np.argmax(component_matrix, axis=1)
+        strongest_idx = np.where(strong_mask, strongest_idx, 0)
+        component_map = {
+            0: PRECIP_IDX["snow"],
+            1: PRECIP_IDX["sleet"],
+            2: PRECIP_IDX["ice"],
+            3: PRECIP_IDX["rain"],
+        }
+        out[strong_mask] = np.array(
+            [component_map[int(i)] for i in strongest_idx[strong_mask]]
+        )
+
+    no_precip_mask = strong_count == 0
+    if np.any(no_precip_mask):
+        out[no_precip_mask] = PRECIP_IDX["none"]
+
+    # Rows with no valid component data are missing, not precipitation-free.
+    all_nan_mask = np.all(np.isnan(component_matrix), axis=1)
+    out[all_nan_mask] = MISSING_DATA
+
+    return out
+
+
 def zero_small_values(
     array: np.ndarray, threshold: float = PRECIP_NOISE_THRESHOLD_MMH
 ) -> np.ndarray:
@@ -529,7 +713,7 @@ _FIELDS_TM_BASIC = (
 )
 
 
-DictOrList = Union[MutableMapping, List[MutableMapping]]
+DictOrList = MutableMapping | list[MutableMapping]
 
 
 def remove_conditional_fields(

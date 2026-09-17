@@ -100,7 +100,9 @@ This phase involves making the new variable available in the API's forecasting l
         hourItem = {
             "time": int(hour_array_grib[idx]),
             # ... other items ...
-            "planetaryBoundaryLayerHeight": hourly_display[idx, DATA_HOURLY["boundary_layer_height"]],
+            "planetaryBoundaryLayerHeight": hourly_display[
+                idx, DATA_HOURLY["boundary_layer_height"]
+            ],
         }
         ```
     
@@ -114,9 +116,9 @@ This phase involves making the new variable available in the API's forecasting l
             hourlyDayIndex,
             daily_days,
             calc_max=True,
-            calc_mean=True
+            calc_mean=True,
         )
-        
+
         # Add to daily object
         dayObject = {
             "time": int(day_array_grib[d]),

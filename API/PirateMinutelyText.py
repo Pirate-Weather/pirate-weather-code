@@ -432,17 +432,22 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
     if maxCAPE >= CAPE_THRESHOLDS["high"] and precipIndex:
         # Replace precipitation summary with thunderstorm summary
         # Keep the same timing structure but replace the precipitation type with "thunderstorm"
-        if c_text and isinstance(c_text, list) and len(c_text) >= 2:
-            # Extract the timing part and replace precipitation text with thunderstorm
-            if c_text[0] in (
+        if (
+            c_text
+            and isinstance(c_text, list)
+            and len(c_text) >= 2
+            and c_text[0]
+            in (
                 "stopping-in",
                 "for-hour",
                 "stopping-then-starting-later",
                 "starting-in",
                 "starting-then-stopping-later",
-            ):
-                # Replace the precipitation text (second element) with "thunderstorm"
-                c_text[1] = "thunderstorm"
+            )
+        ):
+            # Extract the timing part and replace precipitation text with thunderstorm
+            # Replace the precipitation text (second element) with "thunderstorm"
+            c_text[1] = "thunderstorm"
         c_icon = "thunderstorm"
 
     return c_text, c_icon

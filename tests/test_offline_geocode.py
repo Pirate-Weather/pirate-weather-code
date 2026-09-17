@@ -26,7 +26,9 @@ def test_geocode_city_country_rejects_nan_coordinates(monkeypatch):
 
     class FakeResult:
         empty = False
-        iloc = [FakeRow(latitude=math.nan, longitude=math.nan)]
+
+        def __init__(self):
+            self.iloc = [FakeRow(latitude=math.nan, longitude=math.nan)]
 
     class FakeNominatim:
         def query_location(self, city, top_k=1):

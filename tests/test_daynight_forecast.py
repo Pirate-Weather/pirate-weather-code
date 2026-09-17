@@ -103,7 +103,7 @@ def test_precipitation_pirate_possible_day_and_night_icons():
         precipType="rain",
     )
 
-    icon_day, summary_day = calculate_half_day_text(
+    icon_day, _ = calculate_half_day_text(
         [hour_day], True, "UTC", mode="hour", icon_set="pirate"
     )
     assert icon_day == "possible-rain-day"
@@ -118,7 +118,7 @@ def test_precipitation_pirate_possible_day_and_night_icons():
         precipType="rain",
     )
 
-    icon_night, summary_night = calculate_half_day_text(
+    icon_night, _ = calculate_half_day_text(
         [hour_night], False, "UTC", mode="hour", icon_set="pirate"
     )
     assert icon_night == "possible-rain-night"

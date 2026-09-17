@@ -45,7 +45,7 @@ def test_snow_range_with_error_si_units():
     # This should result in 2.4cm ± 1.2cm = range of 1-4 cm (floor/ceil applied)
     hours = [create_hour_with_snow(1.0, 0.05, i * 3600) for i in range(24)]
 
-    icon, summary = calculate_day_text(
+    _, summary = calculate_day_text(
         hours,
         is_day_time=True,
         time_zone="UTC",
@@ -62,13 +62,16 @@ def test_snow_range_with_error_si_units():
     def find_snow_sentence(obj):
         if isinstance(obj, list):
             for item in obj:
-                if isinstance(item, list) and len(item) >= 2:
-                    if (
+                if (
+                    isinstance(item, list)
+                    and len(item) >= 2
+                    and (
                         item[0] == "centimeters"
                         and isinstance(item[1], list)
                         and item[1][0] == "range"
-                    ):
-                        return item
+                    )
+                ):
+                    return item
                 result = find_snow_sentence(item)
                 if result:
                     return result
@@ -96,7 +99,7 @@ def test_snow_range_without_error_si_units():
     # With error = 0 (ECMWF/GEFS), should show "< 3 cm" format
     hours = [create_hour_with_snow(1.0, 0.0, i * 3600) for i in range(24)]
 
-    icon, summary = calculate_day_text(
+    _, summary = calculate_day_text(
         hours,
         is_day_time=True,
         time_zone="UTC",
@@ -112,14 +115,14 @@ def test_snow_range_without_error_si_units():
     def find_less_than_sentence(obj):
         if isinstance(obj, list):
             for i, item in enumerate(obj):
-                if item == "less-than" and i + 1 < len(obj):
-                    next_item = obj[i + 1]
-                    if (
-                        isinstance(next_item, list)
-                        and len(next_item) >= 2
-                        and next_item[0] == "centimeters"
-                    ):
-                        return obj[i:]  # Return from "less-than" onwards
+                if (
+                    item == "less-than"
+                    and i + 1 < len(obj)
+                    and isinstance(obj[i + 1], list)
+                    and len(obj[i + 1]) >= 2
+                    and obj[i + 1][0] == "centimeters"
+                ):
+                    return obj[i:]  # Return from "less-than" onwards
                 result = find_less_than_sentence(item)
                 if result:
                     return result
@@ -144,7 +147,7 @@ def test_snow_range_with_error_us_units():
     # This converts to ~2.4 inches total ± ~1.2 inches error = range with floor/ceil applied
     hours = [create_hour_with_snow(2.54, 0.127, i * 3600) for i in range(24)]
 
-    icon, summary = calculate_day_text(
+    _, summary = calculate_day_text(
         hours,
         is_day_time=True,
         time_zone="UTC",
@@ -160,13 +163,16 @@ def test_snow_range_with_error_us_units():
     def find_snow_sentence(obj):
         if isinstance(obj, list):
             for item in obj:
-                if isinstance(item, list) and len(item) >= 2:
-                    if (
+                if (
+                    isinstance(item, list)
+                    and len(item) >= 2
+                    and (
                         item[0] == "inches"
                         and isinstance(item[1], list)
                         and item[1][0] == "range"
-                    ):
-                        return item
+                    )
+                ):
+                    return item
                 result = find_snow_sentence(item)
                 if result:
                     return result
@@ -193,7 +199,7 @@ def test_snow_small_accumulation_with_error():
     # This should result in 1.2cm ± 0.72cm = range of 0-2 cm, which becomes "< 2 cm"
     hours = [create_hour_with_snow(0.5, 0.3, i * 3600) for i in range(24)]
 
-    icon, summary = calculate_day_text(
+    _, summary = calculate_day_text(
         hours,
         is_day_time=True,
         time_zone="UTC",
@@ -210,18 +216,22 @@ def test_snow_small_accumulation_with_error():
         if isinstance(obj, list):
             for i, item in enumerate(obj):
                 # Check for less-than format
-                if item == "less-than" and i + 1 < len(obj):
-                    next_item = obj[i + 1]
-                    if (
-                        isinstance(next_item, list)
-                        and len(next_item) >= 2
-                        and next_item[0] == "centimeters"
-                    ):
-                        return obj[i:]
+                if (
+                    item == "less-than"
+                    and i + 1 < len(obj)
+                    and isinstance(obj[i + 1], list)
+                    and len(obj[i + 1]) >= 2
+                    and obj[i + 1][0] == "centimeters"
+                ):
+                    return obj[i:]
                 # Check for range format
-                if isinstance(item, list) and len(item) >= 2:
-                    if item[0] == "centimeters" and isinstance(item[1], list):
-                        return item
+                if (
+                    isinstance(item, list)
+                    and len(item) >= 2
+                    and item[0] == "centimeters"
+                    and isinstance(item[1], list)
+                ):
+                    return item
                 result = find_snow_sentence(item)
                 if result:
                     return result
@@ -255,7 +265,7 @@ def test_snow_exact_value_when_error_missing():
     # With missing error data, should show exact value "3 cm" (not range or <)
     hours = [create_hour_with_snow(1.0, np.nan, i * 3600) for i in range(24)]
 
-    icon, summary = calculate_day_text(
+    _, summary = calculate_day_text(
         hours,
         is_day_time=True,
         time_zone="UTC",
@@ -271,14 +281,14 @@ def test_snow_exact_value_when_error_missing():
     def find_exact_value_sentence(obj):
         if isinstance(obj, list):
             for item in obj:
-                if isinstance(item, list) and len(item) >= 2:
-                    # Look for ["centimeters", <number>] (exact value, not range or less-than)
-                    if (
-                        item[0] == "centimeters"
-                        and isinstance(item[1], (int, float))
-                        and not isinstance(item[1], list)
-                    ):
-                        return item
+                if (
+                    isinstance(item, list)
+                    and len(item) >= 2
+                    and item[0] == "centimeters"
+                    and isinstance(item[1], (int, float))
+                    and not isinstance(item[1], list)
+                ):
+                    return item
                 result = find_exact_value_sentence(item)
                 if result:
                     return result

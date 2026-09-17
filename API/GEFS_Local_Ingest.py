@@ -362,7 +362,7 @@ ncLocalWorking_paths = [
 ]
 
 # Dask
-daskArrays = dict()
+daskArrays = {}
 
 
 # Combine NetCDF files into a Dask Array, since it works significantly better than the xarray mfdataset appraoach
@@ -379,7 +379,7 @@ for dask_var in zarr_vars:
 
 
 # Dict to hold output dask arrays
-daskOutput = dict()
+daskOutput = {}
 
 # Find the probability of precipitation greater than 0.1 mm/h  across all members
 daskOutput["Precipitation_Prob"] = ((daskArrays["APCP_surface"]) > 0.1).sum(axis=0) / 30
@@ -477,7 +477,7 @@ for i in range(his_period, 0, -6):
     # Forward looking, so 00Z forecast is from 03Z
     # This is what we want for accumulation variables
     FH_forecastsubMembers = []
-    for mem in range(0, 30):
+    for mem in range(30):
         FH_forecastsubMembers.append(
             FastHerbie(
                 DATES,
@@ -491,7 +491,7 @@ for i in range(his_period, 0, -6):
             )
         )
     # Download the subsets
-    for mem in range(0, 30):
+    for mem in range(30):
         # Download the subsets
         download_herbie_with_retry(
             herbie_obj=FH_forecastsubMembers[mem],
@@ -602,7 +602,7 @@ for i in range(his_period, 0, -6):
     xarray_hist_wgrib_merged = xr.open_mfdataset(
         [
             hist_process_path + "_xr_merged_m" + str(mem + 1) + ".zarr"
-            for mem in range(0, 30)
+            for mem in range(30)
         ],
         engine="zarr",
         preprocess=preprocess,

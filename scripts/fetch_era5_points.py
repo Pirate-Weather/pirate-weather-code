@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Fetch Pirate Weather's required ERA5 variables for CSV points into Zarr."""
 
 from __future__ import annotations
@@ -307,35 +306,34 @@ def write_points_zarr(
         for name in ERA5_SOURCE_VARS
     }
     created_utc = dt.datetime.now(dt.UTC).isoformat()
-    with ProgressBar():
-        with dask.config.set(scheduler="threads", num_workers=workers):
-            for day_index, target_date in enumerate(date_range(start_date, end_date)):
-                daily = build_daily_dataset(
-                    source,
-                    points,
-                    latitude_indices,
-                    longitude_indices,
-                    target_date,
-                ).load()
-                daily.attrs["source"] = source_url
-                daily.attrs["created_utc"] = created_utc
+    with ProgressBar(), dask.config.set(scheduler="threads", num_workers=workers):
+        for day_index, target_date in enumerate(date_range(start_date, end_date)):
+            daily = build_daily_dataset(
+                source,
+                points,
+                latitude_indices,
+                longitude_indices,
+                target_date,
+            ).load()
+            daily.attrs["source"] = source_url
+            daily.attrs["created_utc"] = created_utc
 
-                if day_index == 0:
-                    daily.to_zarr(
-                        output_path,
-                        mode="w",
-                        encoding=encoding,
-                        consolidated=True,
-                        zarr_format=3,
-                    )
-                else:
-                    daily.to_zarr(
-                        output_path,
-                        mode="a",
-                        append_dim="time",
-                        consolidated=True,
-                        zarr_format=3,
-                    )
+            if day_index == 0:
+                daily.to_zarr(
+                    output_path,
+                    mode="w",
+                    encoding=encoding,
+                    consolidated=True,
+                    zarr_format=3,
+                )
+            else:
+                daily.to_zarr(
+                    output_path,
+                    mode="a",
+                    append_dim="time",
+                    consolidated=True,
+                    zarr_format=3,
+                )
                 # print(
                 #     f"Wrote {target_date.isoformat()} "
                 #     f"({TIME_CHUNK_HOURS} hours, {latitude_count} latitudes, "

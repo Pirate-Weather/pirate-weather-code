@@ -141,7 +141,7 @@ def _extract_polygons_from_cap_test(cap_xml: str, source_id: str, cap_link: str)
                                 "",
                             )
                         )
-                    except Exception as e:
+                    except ValueError as e:
                         print(f"Polygon construction failed: {e}")
                         continue
 
@@ -424,7 +424,7 @@ def _load_local_meteoalarm_geocodes():
                         gdf = gpd.GeoDataFrame(
                             combined, geometry=gdf.geometry.name, crs=gdf.crs
                         )
-        except Exception:
+        except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError, KeyError):
             pass  # Ignore alias errors
 
     return gdf
@@ -445,7 +445,7 @@ def _geocode_to_polygon_test(geocode_value, geocode_name, meteoalarm_gdf):
             match = meteoalarm_gdf[meteoalarm_gdf["code"] == geocode_value]
             if not match.empty:
                 return match.geometry.iloc[0]
-        except Exception:
+        except (KeyError, IndexError, AttributeError):
             pass
 
     return None

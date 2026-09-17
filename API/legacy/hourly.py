@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Tuple
-
 from API.constants.text_const import (
     CLOUD_COVER_THRESHOLDS,
     FOG_THRESHOLD_METERS,
@@ -17,7 +15,7 @@ def apply_legacy_hourly_text(
     *,
     hour_item_si,
     is_day: bool,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Apply PirateText hourly text/icon generation when requested."""
 
     # Explicit logic from block.py

@@ -163,6 +163,47 @@ def test_parse_parameters_ai_models_include_and_exclude_priority():
     assert result[17] == 0  # ex_aigfs
     assert result[18] == 0  # ex_aifs
     assert result[23] == 1  # inc_aimodels
+    assert result[26:30] == (1, 1, 1, 1)  # CMC models are excluded for AI mode
+
+
+@pytest.mark.parametrize("group_name", ["cmc", "cmcmodels"])
+def test_parse_parameters_excludes_cmc_group(group_name):
+    now_time = datetime.datetime(2026, 1, 1, 12, 0, 0)
+    result = _parse_parameters(
+        exclude=group_name,
+        include=None,
+        extraVars=None,
+        now_time=now_time,
+        utc_time=now_time,
+        time_machine=False,
+        tm_extra=False,
+    )
+
+    assert result[26:30] == (1, 1, 1, 1)
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        ("hrdps", (1, 0, 0, 0)),
+        ("gdps", (0, 1, 0, 0)),
+        ("geps", (0, 0, 1, 0)),
+        ("reps", (0, 0, 0, 1)),
+    ],
+)
+def test_parse_parameters_excludes_individual_cmc_model(model, expected):
+    now_time = datetime.datetime(2026, 1, 1, 12, 0, 0)
+    result = _parse_parameters(
+        exclude=model,
+        include=None,
+        extraVars=None,
+        now_time=now_time,
+        utc_time=now_time,
+        time_machine=False,
+        tm_extra=False,
+    )
+
+    assert result[26:30] == expected
 
 
 def test_parse_parameters_aq_exclude_raqdps():

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 
 from API.api_utils import (
@@ -29,6 +31,7 @@ from API.constants.clip_const import (
     CLIP_FEELS_LIKE,
     CLIP_FIRE,
     CLIP_HUMIDITY,
+    CLIP_IL_AQI,
     CLIP_NO2_PPB,
     CLIP_O3_PPB,
     CLIP_OZONE,
@@ -48,6 +51,8 @@ from API.legacy.hourly import apply_legacy_hourly_text
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
 from API.utils.fire import calculate_fosberg_fire_index
+
+logger = logging.getLogger(__name__)
 
 
 def _calculate_intensity_prob(
@@ -599,7 +604,7 @@ def _build_hourly_display(
         DATA_HOURLY["prob"]: ROUNDING_RULES.get("precipProbability", 2),
         DATA_HOURLY["humidity"]: ROUNDING_RULES.get("humidity", 2),
         DATA_HOURLY["cloud"]: ROUNDING_RULES.get("cloudCover", 2),
-        DATA_HOURLY["uv"]: ROUNDING_RULES.get("uvIndex", 0),
+        DATA_HOURLY["uv"]: ROUNDING_RULES.get("uvIndex", 2),
         DATA_HOURLY["ozone"]: ROUNDING_RULES.get("ozone", 2),
         DATA_HOURLY["smoke"]: ROUNDING_RULES.get("smoke", 2),
         DATA_HOURLY["fire"]: ROUNDING_RULES.get("fireIndex", 2),
@@ -641,7 +646,8 @@ def build_hourly_block(
     icon: str,
     translation,
     unitSystem: str,
-    is_all_night: bool,
+    aqiSystem: str | None = None,
+    is_all_night: bool = False,
     tz_name,
     InterThour_inputs,
     prcipIntensity_inputs,
@@ -791,7 +797,7 @@ def build_hourly_block(
 
             # Compute AQI from pollutant concentrations
             aqi_arr = compute_aqi_array(
-                unit_system=unitSystem,
+                unit_system=aqiSystem if aqiSystem is not None else unitSystem,
                 pm25=InterPhour[:, DATA_HOURLY["pm25"]],
                 pm10=InterPhour[:, DATA_HOURLY["pm10"]],
                 o3=InterPhour[:, DATA_HOURLY["o3"]],
@@ -799,11 +805,18 @@ def build_hourly_block(
                 so2=InterPhour[:, DATA_HOURLY["so2"]],
                 co=InterPhour[:, DATA_HOURLY["co"]],
             )
-            InterPhour[:, DATA_HOURLY["aqi"]] = np.clip(
-                aqi_arr, CLIP_AQI["min"], CLIP_AQI["max"]
-            )
-        except Exception:
-            pass  # AQ computation is non-fatal; leave columns as MISSING_DATA
+            # Israel AQI has a scale of -400 to 100, so we need to clip it differently than the standard AQI scale of 0-500.
+            if aqiSystem == "il":
+                InterPhour[:, DATA_HOURLY["aqi"]] = np.clip(
+                    aqi_arr, CLIP_IL_AQI["min"], CLIP_IL_AQI["max"]
+                )
+            else:
+                InterPhour[:, DATA_HOURLY["aqi"]] = np.clip(
+                    aqi_arr, CLIP_AQI["min"], CLIP_AQI["max"]
+                )
+        except (ValueError, TypeError, KeyError, IndexError) as exc:
+            # Current AQI computation is non-fatal; log for observability
+            logger.debug("Current AQI computation failed: %s", exc)
 
     dayZeroRain, dayZeroSnow, dayZeroIce = _calculate_derived_metrics(
         InterPhour,
@@ -971,7 +984,7 @@ def build_hourly_objects(
     def _nan_to_int_or_nan(value):
         return int(value) if not np.isnan(value) else np.nan
 
-    for idx in range(0, len(hour_array_grib)):
+    for idx in range(len(hour_array_grib)):
         if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]:
             isDay = False
         elif (
@@ -1045,7 +1058,7 @@ def build_hourly_objects(
                 hourly_display[idx, DATA_HOURLY["bearing"]]
             ),
             "cloudCover": hourly_display[idx, DATA_HOURLY["cloud"]],
-            "uvIndex": _nan_to_int_or_nan(hourly_display[idx, DATA_HOURLY["uv"]]),
+            "uvIndex": hourly_display[idx, DATA_HOURLY["uv"]],
             "visibility": hourly_display[idx, DATA_HOURLY["vis"]],
             "ozone": hourly_display[idx, DATA_HOURLY["ozone"]],
             "smoke": hourly_display[idx, DATA_HOURLY["smoke"]],
@@ -1071,7 +1084,7 @@ def build_hourly_objects(
             # AQI is always included for v2+; detail pollutants gated on inc_airqualitydetails
             aqi_val = InterPhour[idx, DATA_HOURLY["aqi"]]
             hourItem["airQualityIndex"] = (
-                int(round(float(aqi_val))) if not np.isnan(aqi_val) else np.nan
+                round(float(aqi_val)) if not np.isnan(aqi_val) else np.nan
             )
             if inc_airqualitydetails:
                 pm25_val = InterPhour[idx, DATA_HOURLY["pm25"]]

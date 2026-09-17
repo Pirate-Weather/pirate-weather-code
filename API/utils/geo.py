@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import datetime
 import math
-
-from pytz import timezone, utc
-from timezonefinder import TimezoneFinder
+from typing import TYPE_CHECKING
 
 from API.constants.api_const import (
     DEFAULT_ROUNDING_INTERVAL,
@@ -16,6 +14,9 @@ from API.constants.api_const import (
     UNIT_CONVERSION_CONST,
 )
 from API.constants.grid_const import US_BOUNDING_BOX
+
+if TYPE_CHECKING:
+    from timezonefinder import TimezoneFinder
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -71,6 +72,8 @@ def get_offset(*, lat, lng, utc_time, tf: TimezoneFinder):
             offset_minutes: The time zone offset from UTC in minutes.
             tz_target: The pytz timezone object for the location.
     """
+
+    from pytz import timezone, utc
 
     today = utc_time
     tz_target = timezone(tf.timezone_at(lng=lng, lat=lat))
@@ -305,3 +308,9 @@ def is_in_north_america(lat: float, lon: float) -> bool:
         return True
 
     return False
+
+
+def is_in_canada(lat: float, lon: float) -> bool:
+    """Determine if a location falls within the Canadian landmass."""
+    lon_normalized = ((lon + 180) % 360) - 180
+    return 41.7 <= lat <= 83.0 and -141.0 <= lon_normalized <= -52.0

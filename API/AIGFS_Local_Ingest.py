@@ -208,7 +208,9 @@ grib_list = [
 # Perform a check if any data seems to be invalid
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+grib_check = subprocess.run(
+    cmd, shell=True, capture_output=True, encoding="utf-8", check=False
+)
 
 # Validate the grib files
 validate_grib_stats(grib_check)
@@ -229,7 +231,9 @@ cmd = (
 
 
 # Run wgrib2
-sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+sp_out = subprocess.run(
+    cmd, shell=True, capture_output=True, encoding="utf-8", check=False
+)
 if sp_out.returncode != 0:
     logger.error(sp_out.stderr)
     sys.exit()
@@ -384,7 +388,9 @@ for i in range(his_period, -1, -6):
     # Perform a check if any data seems to be invalid
     cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
 
-    grib_check = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    grib_check = subprocess.run(
+        cmd, shell=True, capture_output=True, encoding="utf-8", check=False
+    )
 
     validate_grib_stats(grib_check)
     logger.info("Grib files passed validation, proceeding with processing")
@@ -402,7 +408,9 @@ for i in range(his_period, -1, -6):
     )
 
     # Run wgrib2
-    sp_out = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    sp_out = subprocess.run(
+        cmd, shell=True, capture_output=True, encoding="utf-8", check=False
+    )
     if sp_out.returncode != 0:
         logger.error(sp_out.stderr)
         sys.exit()

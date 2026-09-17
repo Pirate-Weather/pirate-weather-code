@@ -10,6 +10,7 @@ import pickle
 import shutil
 import sys
 import time
+import urllib.error
 import warnings
 import zipfile
 from datetime import timedelta
@@ -25,17 +26,17 @@ os.environ.setdefault(
     f"{DEFAULT_ECCODES_DIR / 'lib'}:{DEFAULT_ECCODES_DIR / 'lib64'}",
 )
 
-import dask  # noqa: E402
-import dask.array as da  # noqa: E402
-import herbie.models as herbie_model_templates  # noqa: E402
-import numpy as np  # noqa: E402
-import s3fs  # noqa: E402
-import xarray as xr  # noqa: E402
-import zarr.storage  # noqa: E402
-from dask.diagnostics import ProgressBar  # noqa: E402
-from herbie import Herbie  # noqa: E402
+import dask
+import dask.array as da
+import herbie.models as herbie_model_templates
+import numpy as np
+import s3fs
+import xarray as xr
+import zarr.storage
+from dask.diagnostics import ProgressBar
+from herbie import Herbie
 
-from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR  # noqa: E402
+from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -45,8 +46,8 @@ from API.ingest_utils import (
     pad_to_chunk_size,
     positive_int_env,
     tune_nofile_limit,
-)  # noqa: E402
-from API.raqdps_herbie_template import raqdps  # noqa: E402
+)
+from API.raqdps_herbie_template import raqdps
 from API.raqdps_utils import (
     RAQDPS_FORECAST_HOURS,
     RAQDPS_LEVEL,
@@ -59,7 +60,7 @@ from API.raqdps_utils import (
     history_run_for_valid_time,
     history_valid_times,
     normalize_utc,
-)  # noqa: E402
+)
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 warnings.filterwarnings("ignore", "In a future version")
@@ -131,7 +132,7 @@ def get_latest_raqdps_run():
     for candidate in candidate_raqdps_runs(count=10):
         try:
             h = build_herbie(candidate, "O3", 72)
-        except Exception as e:
+        except (FileNotFoundError, urllib.error.URLError, urllib.error.HTTPError) as e:
             logger.warning("Unable to probe RAQDPS run %s: %s", candidate, e)
             continue
 
@@ -155,7 +156,7 @@ def download_raqdps_file(run_time, variable, forecast_hour):
             )
             return None
         return h.download(verbose=False, errors="raise")
-    except Exception as e:
+    except (FileNotFoundError, urllib.error.URLError, urllib.error.HTTPError) as e:
         logger.warning(
             "Failed RAQDPS download for run=%s variable=%s f%03d: %s",
             run_time,
@@ -170,7 +171,9 @@ def read_raqdps_grib(local_grib_path, variable):
     """Read one RAQDPS GRIB2 field in configured output units as float32."""
     ds = xr.open_dataset(local_grib_path, engine="cfgrib", decode_times=False)
     try:
-        grib_var_name = list(ds.data_vars)[0]
+        grib_var_name = next(iter(ds.data_vars))
+        if grib_var_name is None:
+            raise ValueError(f"No data variables found in GRIB file: {local_grib_path}")
         data_array = ds[grib_var_name].astype(np.float32)
         return as_float32_array(convert_to_output_units(data_array, variable).values)
     finally:
@@ -220,7 +223,7 @@ def load_raqdps_time_slice(run_time, forecast_hour, *, include_lat_lon=False):
 
         try:
             values = read_raqdps_grib(local_grib_path, variable)
-        except Exception as e:
+        except (OSError, ValueError, KeyError) as e:
             logger.error(
                 "Error reading RAQDPS variable=%s run=%s f%03d: %s",
                 variable,
@@ -237,7 +240,7 @@ def load_raqdps_time_slice(run_time, forecast_hour, *, include_lat_lon=False):
         if include_lat_lon and lat_lon_lookup is None:
             try:
                 lat_lon_lookup = read_raqdps_lat_lon(local_grib_path, values.shape)
-            except Exception as e:
+            except (OSError, ValueError, KeyError) as e:
                 logger.warning(
                     "Unable to read RAQDPS lat/lon from %s: %s",
                     local_grib_path,
@@ -290,33 +293,35 @@ def write_variable_zarrs(variable_arrays, root_path, time_chunks):
     shutil.rmtree(root_path, ignore_errors=True)
     os.makedirs(root_path, exist_ok=True)
 
-    with ProgressBar():
-        with dask.config.set(
+    with (
+        ProgressBar(),
+        dask.config.set(
             scheduler="threads",
             num_workers=zarr_store_workers,
             # Keep Dask's internal Zarr write chunks at least as large as one
             # on-disk Zarr chunk to avoid unsafe auto-rechunk warnings.
             array__chunk_size=time_chunks * process_chunk_bytes,
-        ):
-            for variable in RAQDPS_OUTPUT_VARS:
-                variable_array = variable_arrays[variable]
-                chunks = (
-                    (time_chunks,)
-                    if variable == "time"
-                    else (time_chunks, process_chunk, process_chunk)
-                )
-                store = zarr.storage.LocalStore(variable_zarr_path(root_path, variable))
-                zarr_array = zarr.create_array(
-                    store=store,
-                    shape=variable_array.shape,
-                    chunks=chunks,
-                    dtype=np.float32,
-                    overwrite=True,
-                )
-                variable_array.rechunk(chunks).to_zarr(
-                    zarr_array, overwrite=True, compute=True
-                )
-                close_store(store)
+        ),
+    ):
+        for variable in RAQDPS_OUTPUT_VARS:
+            variable_array = variable_arrays[variable]
+            chunks = (
+                (time_chunks,)
+                if variable == "time"
+                else (time_chunks, process_chunk, process_chunk)
+            )
+            store = zarr.storage.LocalStore(variable_zarr_path(root_path, variable))
+            zarr_array = zarr.create_array(
+                store=store,
+                shape=variable_array.shape,
+                chunks=chunks,
+                dtype=np.float32,
+                overwrite=True,
+            )
+            variable_array.rechunk(chunks).to_zarr(
+                zarr_array, overwrite=True, compute=True
+            )
+            close_store(store)
 
 
 def read_intermediate_variable(root_path, variable):
@@ -614,16 +619,18 @@ def merge_and_publish(
         overwrite=True,
     )
 
-    with ProgressBar():
-        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-            stacked_array_padded.round(5).rechunk(
-                (
-                    len(RAQDPS_OUTPUT_VARS),
-                    stacked_array_padded.shape[1],
-                    final_chunk,
-                    final_chunk,
-                )
-            ).to_zarr(zarr_array, overwrite=True, compute=True)
+    with (
+        ProgressBar(),
+        dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
+    ):
+        stacked_array_padded.round(5).rechunk(
+            (
+                len(RAQDPS_OUTPUT_VARS),
+                stacked_array_padded.shape[1],
+                final_chunk,
+                final_chunk,
+            )
+        ).to_zarr(zarr_array, overwrite=True, compute=True)
 
     close_store(zarr_store)
 
@@ -697,8 +704,12 @@ def main():
     finally:
         try:
             shutil.rmtree(forecast_process_dir)
-        except Exception:
-            pass
+        except OSError as e:
+            logger.warning(
+                "Failed to clean up temporary directory %s: %s",
+                forecast_process_dir,
+                e,
+            )
 
     end_time = time.time()
     logger.info("Total processing time: %.2f seconds", end_time - start_time)

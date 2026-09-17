@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime
-from typing import Tuple
 
 import numpy as np
 from pytz import utc
@@ -19,7 +18,7 @@ def initialize_time_grids(
     daily_days: int,
     daily_day_hours: int,
     timezone_localizer,
-) -> Tuple[
+) -> tuple[
     np.ndarray,
     np.ndarray,
     np.ndarray,
@@ -66,7 +65,9 @@ def initialize_time_grids(
         [
             timezone_localizer.localize(
                 datetime.datetime(
-                    year=base_time.year, month=base_time.month, day=base_time.day
+                    year=base_time.year,
+                    month=base_time.month,
+                    day=base_time.day,
                 )
                 + datetime.timedelta(days=i)
             )

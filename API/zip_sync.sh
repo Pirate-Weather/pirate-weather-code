@@ -32,14 +32,18 @@ MODELS="
   ECMWF
   ECMWF_AIFS
   ETOPO_DA_C
+  GDPS
   GEFS
+  GEPS
   GFS
+  HRDPS
   HRRR
   HRRR_6H
   NBM
   NBM_Fire
   NWS_Alerts
   RAQDPS
+  REPS
   RTMA_RU
   SILAM
   SubH

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Open RAQDPS GRIB2 files with Herbie FastHerbie as xarray datasets.
 
 This module is intended for interactive workbook/notebook testing. Example:
@@ -15,9 +14,9 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -124,7 +123,7 @@ def open_raqdps_variable(
     )
 
     if isinstance(ds, list):
-        raise ValueError(f"Expected one RAQDPS hypercube for {variable}, got {len(ds)}")
+        raise TypeError(f"Expected one RAQDPS hypercube for {variable}, got {len(ds)}")
 
     grib_var_name = next(iter(ds.data_vars))
     data_array = ds[grib_var_name].astype("float32")

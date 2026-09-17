@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+git fetch --prune
+current_branch="$(git branch --show-current)"
+git for-each-ref --format='%(refname:short) %(upstream:track)' refs/heads |
+  while read -r branch track; do
+    if [[ "$track" == "[gone]" && "$branch" != "$current_branch" ]]; then
+      git branch -d -- "$branch"
+    fi
+  done

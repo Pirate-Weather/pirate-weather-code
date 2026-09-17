@@ -30,3 +30,4 @@ CLIP_SO2_PPB = {"min": 0, "max": 2500}
 CLIP_CO_PPB = {"min": 0, "max": 100000}
 # AQI (unitless, 0-500)
 CLIP_AQI = {"min": 0, "max": 500}
+CLIP_IL_AQI = {"min": -400, "max": 100}  # Israel AQHI (unitless, -400 to 100)

@@ -13,7 +13,6 @@ import pickle
 import platform
 import sys
 import threading
-from typing import Union
 
 import aiobotocore.session as _aio_session
 import numpy as np
@@ -50,7 +49,9 @@ from API.constants.model_const import (
     ECMWF_AIFS,
     ERA5,
     FORECAST_SOURCES,
+    GDPS,
     GFS,
+    HRDPS,
     HRRR,
     HRRR_SUBH,
     NBM,
@@ -106,7 +107,7 @@ save_dir = os.getenv("save_dir", default="/tmp")
 use_etopo = str(os.getenv("use_etopo", "True")).lower() not in {"0", "false", "no"}
 TIMING = str(os.environ.get("TIMING", "0")).lower() not in {"0", "false", "no"}
 
-force_now = os.getenv("force_now", default=False)
+force_now = os.getenv("force_now", "").lower() in {"1", "true", "yes", "on"}
 
 
 def setup_logging():
@@ -137,6 +138,10 @@ ECMWF_Zarr = None
 NBM_Zarr = None
 NBM_Fire_Zarr = None
 GEFS_Zarr = None
+HRDPS_Zarr = None
+GDPS_Zarr = None
+GEPS_Zarr = None
+REPS_Zarr = None
 HRRR_Zarr = None
 NWS_Alerts_Zarr = None
 WMO_Alerts_Zarr = None
@@ -188,6 +193,10 @@ ECMWF_Zarr = zarr_stores.ECMWF_Zarr
 NBM_Zarr = zarr_stores.NBM_Zarr
 NBM_Fire_Zarr = zarr_stores.NBM_Fire_Zarr
 GEFS_Zarr = zarr_stores.GEFS_Zarr
+HRDPS_Zarr = zarr_stores.HRDPS_Zarr
+GDPS_Zarr = zarr_stores.GDPS_Zarr
+GEPS_Zarr = zarr_stores.GEPS_Zarr
+REPS_Zarr = zarr_stores.REPS_Zarr
 HRRR_Zarr = zarr_stores.HRRR_Zarr
 NWS_Alerts_Zarr = zarr_stores.NWS_Alerts_Zarr
 WMO_Alerts_Zarr = zarr_stores.WMO_Alerts_Zarr
@@ -212,29 +221,34 @@ try:
         station_map_file = os.path.join(save_dir, "DWD_MOSMIX_stations.pickle")
     elif STAGE in ("TESTING", "TM_TESTING"):
         # For testing stages, try to load from S3 first
-        if save_type == "S3":
-            try:
-                import s3fs
+        try:
+            import s3fs
+            from botocore.exceptions import BotoCoreError, ClientError
 
-                aio_sess = _aio_session.AioSession()
-                aio_sess.register("before-send.s3", _add_custom_header)
-                s3 = s3fs.S3FileSystem(
-                    anon=True,
-                    asynchronous=False,
-                    endpoint_url="https://api.pirateweather.net/files/",
-                    skip_instance_cache=True,
-                    session=aio_sess,
-                )
+            aio_sess = _aio_session.AioSession()
+            aio_sess.register("before-send.s3", _add_custom_header)
+            s3 = s3fs.S3FileSystem(
+                anon=True,
+                asynchronous=False,
+                endpoint_url="https://api.pirateweather.net/files/",
+                skip_instance_cache=True,
+                session=aio_sess,
+            )
 
-                s3_path = (
-                    f"s3://ForecastTar_v2/{ingest_version}/DWD_MOSMIX_stations.pickle"
-                )
-                if s3.exists(s3_path):
-                    with s3.open(s3_path, "rb") as f:
-                        DWD_MOSMIX_Stations = pickle.load(f)
-                        logger.info("Loaded DWD MOSMIX station map from S3")
-            except Exception as e:
-                logger.debug(f"Could not load DWD MOSMIX station map from S3: {e}")
+            s3_path = f"s3://ForecastTar_v2/{ingest_version}/DWD_MOSMIX_stations.pickle"
+            if s3.exists(s3_path):
+                with s3.open(s3_path, "rb") as f:
+                    DWD_MOSMIX_Stations = pickle.load(f)
+                    logger.info("Loaded DWD MOSMIX station map from S3")
+        except (
+            ImportError,
+            OSError,
+            pickle.UnpicklingError,
+            EOFError,
+            BotoCoreError,
+            ClientError,
+        ) as e:
+            logger.debug(f"Could not load DWD MOSMIX station map from S3: {e}")
 
     if station_map_file and os.path.exists(station_map_file):
         with open(station_map_file, "rb") as f:
@@ -243,7 +257,7 @@ try:
     elif station_map_file and DWD_MOSMIX_Stations is None:
         # File path was configured for this stage but file is missing
         logger.debug(f"DWD MOSMIX station map not found at: {station_map_file}")
-except Exception as e:
+except (OSError, pickle.UnpicklingError) as e:
     logger.debug(f"Error loading DWD MOSMIX station map: {e}")
 
 logger.info("Initial data load complete")
@@ -275,6 +289,8 @@ def convert_data_to_celsius(
     dataOut_dwd_mosmix,
     dataOut_aigfs,
     dataOut_aifs,
+    dataOut_hrdps,
+    dataOut_gdps,
 ):
     """
     Converts temperature, dew point, and apparent temperature from Kelvin to Celsius
@@ -305,6 +321,8 @@ def convert_data_to_celsius(
         (dataOut_dwd_mosmix, DWD_MOSMIX, ["temp", "dew"]),
         (dataOut_aigfs, AIGFS, ["temp"]),
         (dataOut_aifs, ECMWF_AIFS, ["temp", "dew"]),
+        (dataOut_hrdps, HRDPS, ["temp", "dew"]),
+        (dataOut_gdps, GDPS, ["temp", "dew"]),
     ]
 
     for data_array, indices_dict, keys in model_mappings:
@@ -346,20 +364,20 @@ async def PW_Forecast(
     request: Request,
     response: Response,
     location: str,
-    units: Union[str, None] = None,
-    extend: Union[str, None] = None,
-    exclude: Union[str, None] = None,
-    include: Union[str, None] = None,
-    lang: Union[str, None] = None,
-    version: Union[str, None] = None,
-    tmextra: Union[str, None] = None,
-    apikey: Union[str, None] = None,
-    icon: Union[str, None] = None,
-    extraVars: Union[str, None] = None,
-    blocks: Union[str, None] = None,
-    daily_indices: Union[str, None] = None,
-    hourly_indices: Union[str, None] = None,
-    day_night_indices: Union[str, None] = None,
+    units: str | None = None,
+    extend: str | None = None,
+    exclude: str | None = None,
+    include: str | None = None,
+    lang: str | None = None,
+    version: str | None = None,
+    tmextra: str | None = None,
+    apikey: str | None = None,
+    icon: str | None = None,
+    extraVars: str | None = None,
+    blocks: str | None = None,
+    daily_indices: str | None = None,
+    hourly_indices: str | None = None,
+    day_night_indices: str | None = None,
 ) -> dict:
     """
     Main entry point for the Pirate Weather API forecast.
@@ -387,7 +405,9 @@ async def PW_Forecast(
         location: The location string (lat,lon).
         units: Unit system (us, si, ca, uk2).
         extend: Extend hourly forecast (hourly).
-        exclude: Blocks to exclude (currently, minutely, hourly, daily, alerts, flags).
+        exclude: Blocks or model sources to exclude. CMC sources accept the group
+            aliases ``cmc``/``cmcmodels`` or the individual names ``hrdps``,
+            ``gdps``, ``geps``, and ``reps``.
         include: Blocks to include (overrides exclude).
         lang: Language for text summaries.
         version: API version.
@@ -404,27 +424,6 @@ async def PW_Forecast(
     Returns:
         dict: The complete weather forecast JSON object.
     """
-    global ETOPO_f
-    global SubH_Zarr
-    global HRRR_6H_Zarr
-    global GFS_Zarr
-    global ECMWF_Zarr
-    global NBM_Zarr
-    global NBM_Fire_Zarr
-    global GEFS_Zarr
-    global HRRR_Zarr
-    global NWS_Alerts_Zarr
-    global WMO_Alerts_Zarr
-    global RTMA_RU_Zarr
-    global ERA5_Data
-    global DWD_MOSMIX_Zarr
-    global DWD_MOSMIX_Stations
-    global AIGFS_Zarr
-    global AIGEFS_Zarr
-    global ECMWF_AIFS_Zarr
-    global RAQDPS_Zarr
-    global SILAM_Zarr
-    global RAQDPS_LatLon
 
     # Timing Check
     T_Start = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
@@ -505,10 +504,15 @@ async def PW_Forecast(
     incAIModels = initial.inc_aimodels
     exRAQDPS = initial.ex_raqdps
     exSILAM = initial.ex_silam
+    exHRDPS = initial.ex_hrdps
+    exGDPS = initial.ex_gdps
+    exGEPS = initial.ex_geps
+    exREPS = initial.ex_reps
     incAirQualityDetails = initial.inc_airqualitydetails
     inc_day_night = initial.inc_day_night
     summaryText = initial.summary_text
     unitSystem = initial.unit_system
+    aqiSystem = initial.aqi_system
     windUnit = initial.wind_unit
     prepIntensityUnit = initial.prep_intensity_unit
     prepAccumUnit = initial.prep_accum_unit
@@ -527,7 +531,7 @@ async def PW_Forecast(
     ouputHours = initial.output_hours
     ouputDays = initial.output_days
     minute_array_grib = initial.minute_array_grib
-    InterTminute = initial.inter_tminute
+    _ = initial.inter_tminute
     InterPminute = initial.inter_pminute
     InterPhour = initial.inter_phour
     hour_array_grib = initial.hour_array_grib
@@ -542,6 +546,10 @@ async def PW_Forecast(
     GFS_Merged = None
     ECMWF_Merged = None
     GEFS_Merged = None
+    HRDPS_Merged = None
+    GDPS_Merged = None
+    GEPS_Merged = None
+    REPS_Merged = None
     DWD_MOSMIX_Merged = None
 
     timer.log("### HRRR Start ###")
@@ -556,6 +564,10 @@ async def PW_Forecast(
         gfs=GFS_Zarr,
         ecmwf=ECMWF_Zarr,
         gefs=GEFS_Zarr,
+        hrdps=HRDPS_Zarr,
+        gdps=GDPS_Zarr,
+        geps=GEPS_Zarr,
+        reps=REPS_Zarr,
         rtma_ru=RTMA_RU_Zarr,
         wmo_alerts=WMO_Alerts_Zarr,
         era5_data=ERA5_Data,
@@ -588,6 +600,10 @@ async def PW_Forecast(
         ex_aigfs=exAIGFS,
         ex_aigefs=exAIGEFS,
         ex_aifs=exAIFS,
+        ex_hrdps=exHRDPS,
+        ex_gdps=exGDPS,
+        ex_geps=exGEPS,
+        ex_reps=exREPS,
         ex_raqdps=exRAQDPS,
         ex_silam=exSILAM,
         inc_aimodels=incAIModels,
@@ -609,6 +625,10 @@ async def PW_Forecast(
     dataOut_gfs = grid_result.dataOut_gfs
     dataOut_ecmwf = grid_result.dataOut_ecmwf
     dataOut_gefs = grid_result.dataOut_gefs
+    dataOut_hrdps = grid_result.dataOut_hrdps
+    dataOut_gdps = grid_result.dataOut_gdps
+    dataOut_geps = grid_result.dataOut_geps
+    dataOut_reps = grid_result.dataOut_reps
     dataOut_rtma_ru = grid_result.dataOut_rtma_ru
     dataOut_dwd_mosmix = grid_result.dataOut_dwd_mosmix
     dataOut_aigfs = grid_result.dataOut_aigfs
@@ -635,6 +655,8 @@ async def PW_Forecast(
         dataOut_dwd_mosmix,
         dataOut_aigfs,
         dataOut_aifs,
+        dataOut_hrdps,
+        dataOut_gdps,
     )
 
     # 5. Build metadata about the data sources used for this forecast
@@ -664,8 +686,7 @@ async def PW_Forecast(
     else:
         ETOPO = 0
 
-    if ETOPO < 0:
-        ETOPO = 0
+    ETOPO = max(ETOPO, 0)
 
     if use_etopo:
         # Add elevation data to the metadata if ETOPO is enabled
@@ -703,6 +724,10 @@ async def PW_Forecast(
         data_gfs=dataOut_gfs if isinstance(dataOut_gfs, np.ndarray) else None,
         data_ecmwf=dataOut_ecmwf if isinstance(dataOut_ecmwf, np.ndarray) else None,
         data_gefs=dataOut_gefs if isinstance(dataOut_gefs, np.ndarray) else None,
+        data_hrdps=dataOut_hrdps if isinstance(dataOut_hrdps, np.ndarray) else None,
+        data_gdps=dataOut_gdps if isinstance(dataOut_gdps, np.ndarray) else None,
+        data_geps=dataOut_geps if isinstance(dataOut_geps, np.ndarray) else None,
+        data_reps=dataOut_reps if isinstance(dataOut_reps, np.ndarray) else None,
         data_dwd_mosmix=dataOut_dwd_mosmix
         if isinstance(dataOut_dwd_mosmix, np.ndarray)
         else None,
@@ -719,6 +744,10 @@ async def PW_Forecast(
     GFS_Merged = merge_result.gfs
     ECMWF_Merged = merge_result.ecmwf
     GEFS_Merged = merge_result.gefs
+    HRDPS_Merged = merge_result.hrdps
+    GDPS_Merged = merge_result.gdps
+    GEPS_Merged = merge_result.geps
+    REPS_Merged = merge_result.reps
     DWD_MOSMIX_Merged = merge_result.dwd_mosmix
     is_na = is_in_north_america(lat, lon_IN)
     if incAIModels:
@@ -771,7 +800,7 @@ async def PW_Forecast(
     with timing_tracker.track("Minutely block"):
         (
             InterPminute,
-            InterTminute,
+            _,
             minuteItems,
             minuteItems_si,
             maxPchance,
@@ -791,6 +820,9 @@ async def PW_Forecast(
             gfs_data=GFS_Merged if "gfs" in sourceList else None,
             ecmwf_data=ECMWF_Merged if "ecmwf_ifs" in sourceList else None,
             era5_data=ERA5_MERGED if isinstance(ERA5_MERGED, np.ndarray) else None,
+            gdps_data=GDPS_Merged if "gdps" in sourceList else None,
+            geps_data=GEPS_Merged if "geps" in sourceList else None,
+            reps_data=REPS_Merged if "reps" in sourceList else None,
             prep_intensity_unit=prepIntensityUnit,
             version=version,
             lat=lat,
@@ -855,7 +887,7 @@ async def PW_Forecast(
 
     # 10. Calculate Sunrise, Sunset, Moon Phase for each day in the forecast
     # This information is used to determine day/night cycles and moon phases
-    for i in range(0, daily_days + 1):
+    for i in range(daily_days + 1):
         (
             sunrise_value,
             sunset_value,
@@ -900,6 +932,10 @@ async def PW_Forecast(
         lat=lat,
         lon=lon,
         prioritize_ai_models=bool(incAIModels),
+        hrdps_merged=HRDPS_Merged,
+        reps_merged=REPS_Merged,
+        gdps_merged=GDPS_Merged,
+        geps_merged=GEPS_Merged,
     )
 
     InterThour_inputs = inputs["InterThour_inputs"]
@@ -953,9 +989,9 @@ async def PW_Forecast(
             dayZeroRain,
             dayZeroSnow,
             dayZeroIce,
-            hourly_display,
-            PTypeHour,
-            PTextHour,
+            _,
+            _,
+            _,
             InterPhour,
         ) = build_hourly_block(
             source_list=sourceList,
@@ -978,6 +1014,7 @@ async def PW_Forecast(
             icon=icon,
             translation=translation,
             unitSystem=unitSystem,
+            aqiSystem=aqiSystem,
             is_all_night=is_all_night,
             tz_name=tz_name,
             InterThour_inputs=InterThour_inputs,
@@ -1123,6 +1160,7 @@ async def PW_Forecast(
             translation=translation,
             icon=icon,
             unitSystem=unitSystem,
+            aqiSystem=aqiSystem,
             version=version,
             timeMachine=timeMachine,
             tmExtra=tmExtra,
@@ -1141,6 +1179,8 @@ async def PW_Forecast(
             GFS_Merged=GFS_Merged,
             ERA5_MERGED=ERA5_MERGED,
             NBM_Fire_Merged=NBM_Fire_Merged,
+            HRDPS_Merged=HRDPS_Merged,
+            GDPS_Merged=GDPS_Merged,
             logger=logger,
             loc_tag=loc_tag,
             include_currently=exCurrently != 1,
@@ -1153,7 +1193,7 @@ async def PW_Forecast(
 
     # Timing Check
     timer.log("Return Time")
-    returnOBJ = dict()
+    returnOBJ = {}
 
     returnOBJ["latitude"] = round(float(lat), 4)
     returnOBJ["longitude"] = round(float(lon_IN), 4)
@@ -1172,7 +1212,7 @@ async def PW_Forecast(
         returnOBJ["currently"] = dict(filtered_currently)
 
     if exMinutely != 1:
-        returnOBJ["minutely"] = dict()
+        returnOBJ["minutely"] = {}
         current_cape = float(
             np.nan_to_num(
                 current_section.interp_current[DATA_CURRENT["cape"]],
@@ -1215,7 +1255,7 @@ async def PW_Forecast(
         returnOBJ["minutely"]["data"] = filtered_minuteItems
 
     if exHourly != 1:
-        returnOBJ["hourly"] = dict()
+        returnOBJ["hourly"] = {}
         # Compute int conversion once for reuse
         base_time_offset_int = int(baseTimeOffset)
         hour_summary, hour_icon = build_hourly_summary(
@@ -1251,7 +1291,7 @@ async def PW_Forecast(
             ]
 
     if inc_day_night == 1 and not timeMachine:
-        returnOBJ["day_night"] = dict()
+        returnOBJ["day_night"] = {}
         filtered_day_night_list = remove_conditional_fields(
             day_night_list,
             version,
@@ -1262,7 +1302,7 @@ async def PW_Forecast(
         returnOBJ["day_night"]["data"] = filtered_day_night_list[0 : (ouputDays * 2)]
 
     if exDaily != 1:
-        returnOBJ["daily"] = dict()
+        returnOBJ["daily"] = {}
         daily_summary, daily_icon = build_daily_summary(
             summary_text=summaryText,
             translation=translation,
@@ -1295,7 +1335,7 @@ async def PW_Forecast(
     timer.log("Final Time")
 
     if exFlags != 1:
-        returnOBJ["flags"] = dict()
+        returnOBJ["flags"] = {}
         returnOBJ["flags"]["sources"] = sourceList
         returnOBJ["flags"]["sourceTimes"] = sourceTimes
 

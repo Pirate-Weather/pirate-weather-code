@@ -40,6 +40,18 @@ from API.ingest_utils import (
     validate_stacked_time_alignment,
 )
 
+MAX_RETRIES = 6
+RETRY_DELAY = 20
+
+# Specific exceptions expected during file status checks or downloads
+RETRYABLE_EXCEPTIONS = (
+    AttributeError,
+    TypeError,
+    ValueError,
+    OSError,
+    RuntimeError,
+)
+
 # Logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -134,7 +146,13 @@ else:
 
 # Create a new datetime object with the most recent hour
 most_recent_time = datetime(
-    current_time.year, current_time.month, current_time.day, recent_hour, 0, 0
+    current_time.year,
+    current_time.month,
+    current_time.day,
+    recent_hour,
+    0,
+    0,
+    tzinfo=datetime.timezone.utc,
 )
 
 # Select the most recent 0,6,12,18 run
@@ -159,7 +177,7 @@ while base_time is False:
 
         if failCount == 2:
             logger.error("No recent runs")
-            exit(1)
+            sys.exit(1)
 
 
 # base_time = pd.Timestamp("2024-03-05 16:00")
@@ -225,59 +243,30 @@ FH_forecastsub = FastHerbie(
 FH_forecastsub.download(match_strings, verbose=False)
 
 # Create list of downloaded grib files
-try:
-    grib_list = [
-        str(Path(x.get_localFilePath(match_strings)).expand())
-        for x in FH_forecastsub.file_exists
-    ]
-except Exception:
-    logger.error("Download Failure 1, wait 20 seconds and retry")
-    time.sleep(20)
-    FH_forecastsub.download(match_strings, verbose=False)
+grib_list = None
+
+for attempt in range(1, MAX_RETRIES + 1):
     try:
         grib_list = [
             str(Path(x.get_localFilePath(match_strings)).expand())
             for x in FH_forecastsub.file_exists
         ]
-    except Exception:
-        logger.error("Download Failure 2, wait 20 seconds and retry")
-        time.sleep(20)
-        FH_forecastsub.download(match_strings, verbose=False)
-        try:
-            grib_list = [
-                str(Path(x.get_localFilePath(match_strings)).expand())
-                for x in FH_forecastsub.file_exists
-            ]
-        except Exception:
-            logger.error("Download Failure 3, wait 20 seconds and retry")
-            time.sleep(20)
-            FH_forecastsub.download(match_strings, verbose=False)
+        break  # Success! Exit loop early.
+    except RETRYABLE_EXCEPTIONS as e:
+        if attempt < MAX_RETRIES:
+            logger.error(
+                f"Download Failure {attempt} ({e}), waiting {RETRY_DELAY}s and retrying..."
+            )
+            time.sleep(RETRY_DELAY)
             try:
-                grib_list = [
-                    str(Path(x.get_localFilePath(match_strings)).expand())
-                    for x in FH_forecastsub.file_exists
-                ]
-            except Exception:
-                logger.error("Download Failure 4, wait 20 seconds and retry")
-                time.sleep(20)
                 FH_forecastsub.download(match_strings, verbose=False)
-                try:
-                    grib_list = [
-                        str(Path(x.get_localFilePath(match_strings)).expand())
-                        for x in FH_forecastsub.file_exists
-                    ]
-                except Exception:
-                    logger.error("Download Failure 5, wait 20 seconds and retry")
-                    time.sleep(20)
-                    FH_forecastsub.download(match_strings, verbose=False)
-                    try:
-                        grib_list = [
-                            str(Path(x.get_localFilePath(match_strings)).expand())
-                            for x in FH_forecastsub.file_exists
-                        ]
-                    except Exception:
-                        logger.error("Download Failure 6, Fail")
-                        exit(1)
+            except RETRYABLE_EXCEPTIONS as download_err:
+                logger.warning(
+                    f"Download trigger failed on attempt {attempt}: {download_err}"
+                )
+        else:
+            logger.error(f"Download Failure {attempt}, Fail")
+            sys.exit(1)
 
 # Check for download length
 if len(FH_forecastsub.file_exists) != len(nbm_range):
@@ -397,32 +386,34 @@ xarray_forecast_base = xarray_forecast_base.drop_vars(
 
 # Combine NetCDF files into a Dask Array, since it works significantly better than the xarray mfdataset appraoach
 # Note: don't chunk on loading since we don't know how wgrib2 chunked the files. Intead, read the variable into memory and chunk later
-with dask.config.set(**{"array.slicing.split_large_chunks": True}):
-    with nc.Dataset(forecast_process_path + "_wgrib2_merged.nc") as forecast_dataset:
-        for dask_var in zarr_vars:
-            daskArray = da.from_array(forecast_dataset[dask_var], lock=True)
+with (
+    dask.config.set(**{"array.slicing.split_large_chunks": True}),
+    nc.Dataset(forecast_process_path + "_wgrib2_merged.nc") as forecast_dataset,
+):
+    for dask_var in zarr_vars:
+        daskArray = da.from_array(forecast_dataset[dask_var], lock=True)
 
-            # Rechunk
-            daskArray = daskArray.rechunk(
-                chunks=(len(nbm_range), process_chunk, process_chunk)
-            )
+        # Rechunk
+        daskArray = daskArray.rechunk(
+            chunks=(len(nbm_range), process_chunk, process_chunk)
+        )
 
-            # Save merged and processed xarray dataset to disk using zarr with compression
-            # Define the path to save the zarr dataset
-            # Save the dataset with compression and filters for all variables
-            with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-                if dask_var == "time":
-                    # Save the dataset without compression and filters for all variable
-                    daskArray.to_zarr(
-                        forecast_process_path + "_zarrs/" + dask_var + ".zarr",
-                        overwrite=True,
-                    )
-                else:
-                    # Save the dataset with compression and filters for all variable
-                    daskArray.to_zarr(
-                        forecast_process_path + "_zarrs/" + dask_var + ".zarr",
-                        overwrite=True,
-                    )
+        # Save merged and processed xarray dataset to disk using zarr with compression
+        # Define the path to save the zarr dataset
+        # Save the dataset with compression and filters for all variables
+        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+            if dask_var == "time":
+                # Save the dataset without compression and filters for all variable
+                daskArray.to_zarr(
+                    forecast_process_path + "_zarrs/" + dask_var + ".zarr",
+                    overwrite=True,
+                )
+            else:
+                # Save the dataset with compression and filters for all variable
+                daskArray.to_zarr(
+                    forecast_process_path + "_zarrs/" + dask_var + ".zarr",
+                    overwrite=True,
+                )
 
 
 # Del to free memory

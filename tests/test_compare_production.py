@@ -12,7 +12,7 @@ from tests.test_s3_live import _get_client
 
 PW_API = os.environ.get("PW_API")
 PROD_BASE = "https://api.pirateweather.net/forecast"
-PROD_TIMEMACHINE_BASE = "https://api.pirateweather.net/timemachine"
+PROD_TIMEMACHINE_BASE = "https://timemachine.pirateweather.net/forecast"
 
 TIMEMACHINE_TEST_LOCATION = (45.4215, -75.6972)  # Ottawa, Canada
 TIMEMACHINE_TEST_DATE = datetime.datetime(2020, 6, 15, tzinfo=datetime.UTC)
@@ -40,10 +40,10 @@ def _fetch_production_json(url: str) -> dict:
     """
 
     try:
-        with urlopen(url, timeout=10) as response:
+        with urlopen(url, timeout=60) as response:
             payload = response.read()
-    except URLError as exc:  # pragma: no cover - network failure
-        raise ProductionRequestError(f"Request to {url} failed: {exc}") from exc
+    except (URLError, TimeoutError) as exc:  # pragma: no cover - network failure
+        raise ProductionRequestError(f"Production request failed: {exc}") from exc
 
     try:
         return json.loads(payload.decode("utf-8"))
@@ -129,12 +129,12 @@ def test_local_vs_production(lat, lon):
     client = _get_client()
 
     local_resp = client.get(
-        f"/forecast/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast,aimodels,airqualitydetails"
+        f"/forecast/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast,airqualitydetails"
     )
     assert local_resp.status_code == 200
     local_data = local_resp.json()
 
-    prod_url = f"{PROD_BASE}/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast,aimodels,airqualitydetails"
+    prod_url = f"{PROD_BASE}/{PW_API}/{lat},{lon}?version=2&include=day_night_forecast,airqualitydetails"
     try:
         prod_data = _fetch_production_json(prod_url)
     except ProductionRequestError as exc:

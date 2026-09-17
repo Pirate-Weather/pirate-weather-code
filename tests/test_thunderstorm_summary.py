@@ -162,7 +162,7 @@ def test_currently_hourly_no_thunderstorm_without_precipitation():
         "iceAccumulation": 0.0,
     }
 
-    text, icon = calculate_text(
+    text, _ = calculate_text(
         hourObject=hour_object,
         isDayTime=True,
         type="current",
@@ -199,7 +199,7 @@ def test_currently_hourly_no_thunderstorm_low_cape():
         "iceAccumulation": 0.0,
     }
 
-    text, icon = calculate_text(
+    text, _ = calculate_text(
         hourObject=hour_object,
         isDayTime=True,
         type="current",
@@ -323,7 +323,7 @@ def test_daily_thunderstorms_not_joined_with_precipitation():
             }
         )
 
-    icon, summary_text = calculate_day_text(
+    _, summary_text = calculate_day_text(
         hours=hours,
         is_day_time=True,
         time_zone="UTC",

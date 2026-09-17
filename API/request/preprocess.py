@@ -9,7 +9,6 @@ import math
 import os
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Union
 
 import numpy as np
 import reverse_geocode
@@ -57,11 +56,7 @@ def parse_request_time(
 
     if time_str.lstrip("-+").isnumeric():
         val = float(time_str)
-        if val > 0:
-            return datetime.datetime.fromtimestamp(val, datetime.UTC).replace(
-                tzinfo=None
-            )
-        elif val < TIME_MACHINE_CONST["very_negative_threshold"]:
+        if val > 0 or val < TIME_MACHINE_CONST["very_negative_threshold"]:
             return datetime.datetime.fromtimestamp(val, datetime.UTC).replace(
                 tzinfo=None
             )
@@ -72,16 +67,15 @@ def parse_request_time(
     try:
         utc_time = datetime.datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S%z")
         return utc_time.replace(tzinfo=None)
-    except Exception:
+    except (ValueError, TypeError):
         pass
 
     try:
         utc_time = datetime.datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S%Z")
         return utc_time.replace(tzinfo=None)
-    except Exception:
+    except (ValueError, TypeError):
         pass
 
-    # Try parsing as local time
     try:
         local_time = datetime.datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S")
         tz_offset_loc_in = {
@@ -92,8 +86,10 @@ def parse_request_time(
         }
         tz_offset_in, _ = get_offset(**tz_offset_loc_in)
         return local_time - datetime.timedelta(minutes=tz_offset_in)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Time Specification")
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(
+            status_code=400, detail="Invalid Time Specification"
+        ) from exc
 
 
 @dataclass
@@ -113,7 +109,7 @@ class InitialRequestContext:
     tz_offset: float
     tz_name: timezone
     tz_req: str
-    loc_name: Dict[str, str]
+    loc_name: dict[str, str]
     icon: str
     translation: dict
     extend_flag: int
@@ -121,7 +117,7 @@ class InitialRequestContext:
     tm_extra: bool
     exclude_params: str
     include_params: str
-    extra_vars: List[str]
+    extra_vars: list[str]
     ex_currently: int
     ex_minutely: int
     ex_hourly: int
@@ -140,11 +136,16 @@ class InitialRequestContext:
     ex_aifs: int
     ex_raqdps: int
     ex_silam: int
+    ex_hrdps: int
+    ex_gdps: int
+    ex_geps: int
+    ex_reps: int
     inc_day_night: int
     inc_aimodels: int
     inc_airqualitydetails: int
     summary_text: bool
     unit_system: str
+    aqi_system: str
     wind_unit: float
     prep_intensity_unit: float
     prep_accum_unit: float
@@ -193,7 +194,7 @@ def _parse_location(location: str):
     try:
         lat = float(location_req[0])
         lon_in = float(location_req[1])
-    except Exception:
+    except (ValueError, IndexError):
         if len(location_req) not in {2, 3}:
             raise HTTPException(
                 status_code=400, detail="Invalid Location Specification"
@@ -220,7 +221,7 @@ def _parse_location(location: str):
 
 def _validate_time(
     request: Request,
-    location_req: List[str],
+    location_req: list[str],
     now_time: datetime.datetime,
     lat: float,
     az_lon: float,
@@ -283,17 +284,16 @@ def _validate_time(
             )
     elif (now_time - utc_time) < datetime.timedelta(
         hours=TIME_MACHINE_CONST["threshold_hours"]
-    ):
-        if "timemachine" in str(request.url):
-            time_machine = True
-            if timing_enabled:
-                logger.debug("Near term timemachine request")
-                logger.debug(now_time - utc_time)
+    ) and "timemachine" in str(request.url):
+        time_machine = True
+        if timing_enabled:
+            logger.debug("Near term timemachine request")
+            logger.debug(now_time - utc_time)
 
     return utc_time, time_machine
 
 
-def _setup_units(units: Union[str, None], loc_name: Dict[str, str]):
+def _setup_units(units: str | None, loc_name: dict[str, str]):
     unit_system = "us"
     unit_config = {
         "wind_unit": 2.234,
@@ -415,9 +415,9 @@ def _parse_timemachine_range(
 
 
 def _parse_parameters(
-    exclude: Union[str, None],
-    include: Union[str, None],
-    extraVars: Union[str, None],
+    exclude: str | None,
+    include: str | None,
+    extraVars: str | None,
     now_time: datetime.datetime,
     utc_time: datetime.datetime,
     time_machine: bool,
@@ -425,6 +425,12 @@ def _parse_parameters(
 ):
     exclude_params = exclude or ""
     include_params = include or ""
+    excluded = {
+        item.strip().lower() for item in exclude_params.split(",") if item.strip()
+    }
+    included = {
+        item.strip().lower() for item in include_params.split(",") if item.strip()
+    }
     extra_vars = extraVars.split(",") if extraVars else []
 
     ex_currently = int("currently" in exclude_params)
@@ -445,10 +451,21 @@ def _parse_parameters(
     ex_aifs = int("ecmwf_aifs" in exclude_params)
     ex_raqdps = int("raqdps" in exclude_params)
     ex_silam = int("silam" in exclude_params)
+    exclude_cmc = bool({"cmc", "cmcmodels"} & excluded)
+    ex_hrdps = int(exclude_cmc or "hrdps" in excluded)
+    ex_gdps = int(exclude_cmc or "gdps" in excluded)
+    ex_geps = int(exclude_cmc or "geps" in excluded)
+    ex_reps = int(exclude_cmc or "reps" in excluded)
     summary_text = "summary" not in exclude_params
     inc_day_night = int("day_night_forecast" in include_params)
-    inc_aimodels = int("aimodels" in include_params)
+    inc_aimodels = int("aimodels" in included)
     inc_airqualitydetails = int("airqualitydetails" in include_params)
+
+    if inc_aimodels:
+        ex_hrdps = 1
+        ex_gdps = 1
+        ex_geps = 1
+        ex_reps = 1
 
     if (now_time - utc_time) > datetime.timedelta(hours=25):
         ex_nbm = 1
@@ -494,6 +511,10 @@ def _parse_parameters(
         inc_aimodels,
         inc_airqualitydetails,
         read_wmo_alerts,
+        ex_hrdps,
+        ex_gdps,
+        ex_geps,
+        ex_reps,
     )
 
 
@@ -554,19 +575,19 @@ async def prepare_initial_request(
     *,
     request: Request,
     location: str,
-    units: Union[str, None],
-    extend: Union[str, None],
-    exclude: Union[str, None],
-    include: Union[str, None],
-    lang: Union[str, None],
-    version: Union[str, None],
-    tmextra: Union[str, None],
-    icon: Union[str, None],
-    extraVars: Union[str, None],
+    units: str | None,
+    extend: str | None,
+    exclude: str | None,
+    include: str | None,
+    lang: str | None,
+    version: str | None,
+    tmextra: str | None,
+    icon: str | None,
+    extraVars: str | None,
     tf: TimezoneFinder,
     translations: dict,
     timing_enabled: bool,
-    force_now: Union[str, bool, None],
+    force_now: str | bool | None,
     logger: logging.Logger,
     start_time: datetime.datetime,
 ) -> InitialRequestContext:
@@ -687,6 +708,10 @@ async def prepare_initial_request(
         inc_aimodels,
         inc_airqualitydetails,
         read_wmo_alerts,
+        ex_hrdps,
+        ex_gdps,
+        ex_geps,
+        ex_reps,
     ) = _parse_parameters(
         exclude,
         include,
@@ -698,6 +723,40 @@ async def prepare_initial_request(
     )
 
     unit_system, unit_config = _setup_units(units, loc_name)
+
+    # Parse aqiunits override: ca → AQHI, us → EPA, eu → CAQI, uk → DAQI, hk → HK_AQHI, ie → AQIH, il → Israel AQI, id → ISPU, cn → China AQI, my → API, tw → Taiwan AQI, vn → VN_AQI.
+    # Falls back to the unit-based AQI system when the value is absent or invalid.
+    _VALID_AQI_UNITS = {
+        "ca",
+        "us",
+        "eu",
+        "uk",
+        "hk",
+        "ie",
+        "il",
+        "id",
+        "cn",
+        "my",
+        "vn",
+    }
+    _AQI_UNITS_MAP = {
+        "ca": "ca",
+        "us": "us",
+        "eu": "si",
+        "uk": "uk",
+        "hk": "hk",
+        "ie": "ie",
+        "il": "il",
+        "id": "id",
+        "cn": "cn",
+        "my": "my",
+        "vn": "vn",
+    }
+    raw_aqiunits = request.query_params.get("aqiunits")
+    if raw_aqiunits and raw_aqiunits.lower() in _VALID_AQI_UNITS:
+        aqi_system = _AQI_UNITS_MAP[raw_aqiunits.lower()]
+    else:
+        aqi_system = unit_system
 
     wind_unit = unit_config["wind_unit"]
     prep_intensity_unit = unit_config["prep_intensity_unit"]
@@ -807,11 +866,16 @@ async def prepare_initial_request(
         ex_aifs=ex_aifs,
         ex_raqdps=ex_raqdps,
         ex_silam=ex_silam,
+        ex_hrdps=ex_hrdps,
+        ex_gdps=ex_gdps,
+        ex_geps=ex_geps,
+        ex_reps=ex_reps,
         inc_day_night=inc_day_night,
         inc_aimodels=inc_aimodels,
         inc_airqualitydetails=inc_airqualitydetails,
         summary_text=summary_text,
         unit_system=unit_system,
+        aqi_system=aqi_system,
         wind_unit=wind_unit,
         prep_intensity_unit=prep_intensity_unit,
         prep_accum_unit=prep_accum_unit,

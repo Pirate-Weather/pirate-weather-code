@@ -10,7 +10,7 @@ from API.processing.utils import TIMING, _interp_row, has_interior_nan_holes
 logger = logging.getLogger("pirate-weather-api")
 
 
-class WeatherParallel(object):
+class WeatherParallel:
     """Helper class for parallel zarr reading operations."""
 
     def __init__(self, loc_tag: str = "") -> None:
@@ -75,9 +75,9 @@ class WeatherParallel(object):
                 x_end = min(opened_zarr.shape[-1], x + radius + 1)
 
                 data_out = await asyncio.to_thread(
-                    lambda: (
+                    lambda z=opened_zarr, ys=y_start, ye=y_end, xs=x_start, xe=x_end: (
                         np.nanmax(
-                            opened_zarr[:, :, y_start:y_end, x_start:x_end],
+                            z[:, :, ys:ye, xs:xe],
                             axis=(-2, -1),
                         ).T
                     )
@@ -86,12 +86,16 @@ class WeatherParallel(object):
                 has_missing_data, missing_row = has_interior_nan_holes(data_out.T)
                 if has_missing_data:
                     logger.warning(
-                        f"### {model} Interpolating missing data (row {missing_row})!"
+                        "### %s Interpolating missing data (row %s)!",
+                        model,
+                        missing_row,
                     )
 
                     if TIMING:
                         logger.debug(
-                            f"### {model} Missing data at: {np.argwhere(np.isnan(data_out))}"
+                            "### %s Missing data at: %s",
+                            model,
+                            np.argwhere(np.isnan(data_out)),
                         )
 
                     data_out = np.apply_along_axis(_interp_row, 0, data_out)
@@ -103,7 +107,12 @@ class WeatherParallel(object):
                     )
                 return data_out
 
-            except Exception:
+            except (
+                OSError,
+                IndexError,
+                ValueError,
+                TypeError,
+            ):
                 logger.exception("### %s Failure! %s", model, self.loc_tag)
                 err_count += 1
 

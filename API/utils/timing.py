@@ -6,7 +6,6 @@ import logging
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Dict
 
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -29,7 +28,7 @@ class TimingTracker:
     logger: logging.Logger
     enabled: bool = False
     prefix: str = ""
-    marks: Dict[str, float] = field(default_factory=dict)
+    marks: dict[str, float] = field(default_factory=dict)
 
     @contextmanager
     def track(self, label: str):

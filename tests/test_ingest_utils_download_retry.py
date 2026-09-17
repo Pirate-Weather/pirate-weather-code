@@ -1,11 +1,19 @@
+from typing import ClassVar
+
 import pytest
 
 from API import ingest_utils
 
 
+class _FakeHeadResponse:
+    ok = True
+    headers: ClassVar[dict[str, str]] = {"Content-Length": "11"}
+
+
 class _FakeRef:
-    def __init__(self, path):
+    def __init__(self, path, grib="https://example.test/file.grib2"):
         self._path = path
+        self.grib = grib
 
     def get_localFilePath(self, _search):
         return self._path
@@ -56,6 +64,81 @@ def test_download_retry_retries_until_local_files_exist(
     )
 
     assert herbie.download_calls == 2
+
+
+def test_configure_herbie_request_timeouts_patches_availability_heads(monkeypatch):
+    from herbie.core import Herbie
+
+    original_check_grib = Herbie._check_grib
+    original_check_idx = Herbie._check_idx
+    original_timeout = getattr(Herbie, "_pirate_weather_request_timeout_s", None)
+    monkeypatch.delattr(Herbie, "_pirate_weather_request_timeout_s", raising=False)
+
+    calls = []
+
+    def _fake_head(url, *, timeout):
+        calls.append((url, timeout))
+        return _FakeHeadResponse()
+
+    monkeypatch.setattr(ingest_utils.requests, "head", _fake_head)
+
+    try:
+        ingest_utils.configure_herbie_request_timeouts(request_timeout_s=7)
+        assert Herbie._check_grib(object(), "https://example.test/file.grib2")
+    finally:
+        Herbie._check_grib = original_check_grib
+        Herbie._check_idx = original_check_idx
+        if original_timeout is None:
+            if hasattr(Herbie, "_pirate_weather_request_timeout_s"):
+                delattr(Herbie, "_pirate_weather_request_timeout_s")
+        else:
+            Herbie._pirate_weather_request_timeout_s = original_timeout
+
+    assert calls == [("https://example.test/file.grib2", (10, 7))]
+
+
+def test_download_retry_full_file_downloads_use_request_timeout(tmp_path, monkeypatch):
+    grib_path = tmp_path / "f1.grib2"
+    ref = _FakeRef(str(grib_path))
+    herbie = _FakeHerbie([ref])
+
+    def _unexpected_download(*_args, **_kwargs):
+        raise AssertionError("full-file downloads should not use Herbie.download")
+
+    class _FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, chunk_size):
+            assert chunk_size == 1024 * 1024
+            return [b"grib", b"data"]
+
+    def _fake_get(url, *, stream, timeout):
+        assert url == ref.grib
+        assert stream is True
+        assert timeout == (10, 120)
+        return _FakeResponse()
+
+    herbie.download = _unexpected_download
+    monkeypatch.setattr(ingest_utils.requests, "get", _fake_get)
+
+    ingest_utils.download_herbie_with_retry(
+        herbie_obj=herbie,
+        search=None,
+        expected_count=1,
+        dataset_name="test",
+        retries=1,
+        retry_sleep_s=1,
+    )
+
+    assert grib_path.read_bytes() == b"gribdata"
+    assert herbie.download_calls == 0
 
 
 def test_download_retry_raises_after_exhausting_attempts(tmp_path, monkeypatch):

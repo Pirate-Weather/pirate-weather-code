@@ -56,7 +56,12 @@ def _make_hour_array_grib(base_date: datetime.datetime, hours: int = 200) -> np.
     """
     epoch = datetime.datetime(1970, 1, 1, 0, 0, 0)
     base_utc = datetime.datetime(
-        base_date.year, base_date.month, base_date.day, 0, 0, 0
+        base_date.year,
+        base_date.month,
+        base_date.day,
+        0,
+        0,
+        0,
     )
     return np.array(
         [

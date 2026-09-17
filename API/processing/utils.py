@@ -3,7 +3,6 @@ import logging
 import math
 import os
 import time
-from typing import Optional, Tuple
 
 import numpy as np
 from pytz import timezone, utc
@@ -25,7 +24,7 @@ from API.constants.api_const import (
 from API.constants.grid_const import US_BOUNDING_BOX
 from API.constants.shared_const import MISSING_DATA, REFC_THRESHOLD
 
-TIMING = os.environ.get("TIMING", False)
+TIMING = os.getenv("TIMING", "").lower() in {"1", "true", "yes", "on"}
 logger = logging.getLogger("pirate-weather-api")
 
 
@@ -59,8 +58,7 @@ def solar_rad(D_t, lat, t_t):
     ) * math.cos(solar_hour)
     R_s = r * (S_0 / d**2) * cos_theta
 
-    if R_s < 0:
-        R_s = 0
+    R_s = max(R_s, 0)
 
     return R_s
 
@@ -127,7 +125,7 @@ def _polar_is_all_day(lat_val: float, month_val: int) -> bool:
     )
 
 
-def has_interior_nan_holes(arr: np.ndarray) -> Tuple[bool, Optional[int]]:
+def has_interior_nan_holes(arr: np.ndarray) -> tuple[bool, int | None]:
     """
     Detect an interior block of NaNs in a 2D array.
 

@@ -37,7 +37,10 @@ def _build_day_array(
     days: int = 10,
 ) -> np.ndarray:
     base = datetime.datetime(
-        year=base_time.year, month=base_time.month, day=base_time.day, hour=hour
+        year=base_time.year,
+        month=base_time.month,
+        day=base_time.day,
+        hour=hour,
     )
     return np.array(
         [
@@ -102,7 +105,7 @@ def calculate_time_indexing(
     )
 
     if time_machine and daily_days == 1:
-        zero_index = np.full(len(hour_array_grib), int(0))
+        zero_index = np.full(len(hour_array_grib), 0)
         return TimeIndexing(
             day_array_grib=day_array_grib,
             day_array_4am_grib=day_array_4am_grib,
@@ -126,7 +129,7 @@ def calculate_time_indexing(
     hourly_night_4am_index = np.full(len(hour_array_grib), MISSING_DATA)
 
     # Zero to 9 to account for the four hours in day 8
-    for d in range(0, 9):
+    for d in range(9):
         _assign_range(
             hourly_day_index,
             hour_array_grib,

@@ -25,7 +25,7 @@ def run_dst(start_date, label):
     slices = [(4, 17), (17, 28), (28, 41), (41, 52)]
     for start, end in slices:
         subset = times_local[start:end]
-        periods = sorted(list(set(get_period(t.hour) for t in subset)))
+        periods = sorted({get_period(t.hour) for t in subset})
         times_str = f"{subset[0].strftime('%H:%M')} ({subset[0].strftime('%Z')}) to {subset[-1].strftime('%H:%M')} ({subset[-1].strftime('%Z')})"
         print(
             f"Slice [{start}:{end}]: {times_str} | Periods ({len(periods)}): {', '.join(periods)}"

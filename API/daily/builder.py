@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 import numpy as np
 
@@ -85,7 +85,7 @@ def _aggregate_stats(
     res_min = []
     res_argmax = []
     res_argmin = []
-    res_precip = np.zeros((daily_days))
+    res_precip = np.zeros(daily_days)
 
     masks = [index_array == day_index for day_index in range(daily_days)]
     for mIDX, mask in enumerate(masks):
@@ -746,7 +746,7 @@ def build_daily_section(
     pTextMap: np.ndarray,
     logger,
     loc_tag: str,
-    log_timing: Optional[Callable[[str], None]] = None,
+    log_timing: Callable[[str], None] | None = None,
     aq_inputs=None,
     inc_airqualitydetails: int = 0,
 ) -> DailySection:
@@ -1008,7 +1008,7 @@ def build_daily_section(
         half_night_display_sum,
     )
 
-    for idx in range(0, daily_days):
+    for idx in range(daily_days):
         day_icon, day_text = pick_day_icon_and_summary(
             max_arr=interp_half_day_max,
             mean_arr=interp_half_day_mean,
@@ -1255,10 +1255,10 @@ def build_daily_section(
                 else np.nan
             )
             dayObject["airQualityIndex"] = (
-                int(round(float(aqi_mean))) if not np.isnan(aqi_mean) else np.nan
+                round(float(aqi_mean)) if not np.isnan(aqi_mean) else np.nan
             )
             dayObject["airQualityIndexMax"] = (
-                int(round(float(aqi_max))) if not np.isnan(aqi_max) else np.nan
+                round(float(aqi_max)) if not np.isnan(aqi_max) else np.nan
             )
             aqi_max_time_raw = (
                 InterPdayMaxTime[idx, aqi_col]
@@ -1271,7 +1271,7 @@ def build_daily_section(
                 else MISSING_DATA
             )
             dayObject["airQualityIndexMin"] = (
-                int(round(float(aqi_min))) if not np.isnan(aqi_min) else np.nan
+                round(float(aqi_min)) if not np.isnan(aqi_min) else np.nan
             )
             aqi_min_time_raw = (
                 InterPdayMinTime[idx, aqi_col]

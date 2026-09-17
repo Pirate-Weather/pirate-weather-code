@@ -120,16 +120,16 @@ def test_build_hourly_block_structure():
 
     (
         hourList,
-        hourList_si,
-        hourIconList,
-        hourTextList,
-        dayZeroRain,
-        dayZeroSnow,
-        dayZeroIce,
-        hourly_display,
-        PTypeHour,
-        PTextHour,
-        InterPhour_res,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
     ) = result
 
     assert len(hourList) == num_hours

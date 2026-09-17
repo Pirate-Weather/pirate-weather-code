@@ -9,7 +9,7 @@ This test file ensures that:
 
 import numpy as np
 
-from API.api_utils import select_daily_precip_type
+from API.api_utils import map_ensemble_precip_rates_to_ptype, select_daily_precip_type
 from API.constants.api_const import PRECIP_IDX
 from API.PirateTextHelper import calculate_precip_text
 
@@ -116,13 +116,55 @@ class TestMixedPrecipDetection:
         assert result[0] == PRECIP_IDX["rain"], "Should be rain type"
 
 
+class TestEnsemblePrecipSelection:
+    """Test GEPS/REPS precipitation type selection from rate components."""
+
+    def test_highest_rate_wins(self):
+        """The strongest precipitation component should determine the type."""
+        rain = np.array([0.0, 0.0, 2.0, 0.0])
+        ice = np.array([0.0, 3.0, 0.0, 0.0])
+        freezing_rain = np.array([0.0, 0.0, 0.0, 1.0])
+        snow = np.array([4.0, 0.0, 0.0, 0.0])
+
+        result = map_ensemble_precip_rates_to_ptype(
+            rain=rain,
+            ice=ice,
+            freezing_rain=freezing_rain,
+            snow=snow,
+            threshold=0.1,
+        )
+
+        assert result.tolist() == [
+            PRECIP_IDX["snow"],
+            PRECIP_IDX["sleet"],
+            PRECIP_IDX["rain"],
+            PRECIP_IDX["ice"],
+        ], (
+            "Highest component intensity should win when only one type is above threshold"
+        )
+
+    def test_multiple_high_rates_return_mixed(self):
+        """Multiple intensive precipitation types should be collapsed to sleet."""
+        result = map_ensemble_precip_rates_to_ptype(
+            rain=np.array([2.0, 0.0]),
+            ice=np.array([0.0, 1.5]),
+            freezing_rain=np.array([1.5, 0.0]),
+            snow=np.array([1.2, 2.0]),
+            threshold=0.1,
+        )
+
+        assert result.tolist() == [PRECIP_IDX["sleet"], PRECIP_IDX["sleet"]], (
+            "If multiple precipitation types are strong, classify as sleet"
+        )
+
+
 class TestTextGeneration:
     """Test text generation for ice and mixed types."""
 
     def test_mixed_precip_text(self):
         """Test that mixed precipitation generates correct text."""
         # When num_types > 2, should generate "mixed-precipitation"
-        text, icon = calculate_precip_text(
+        text, _ = calculate_precip_text(
             precipType="mixed",
             type="hourly",
             rainAccum=1.0,
@@ -140,7 +182,7 @@ class TestTextGeneration:
     def test_ice_precip_text(self):
         """Test that ice (freezing rain) generates correct text."""
         # Note: sleetAccum parameter handles both sleet and ice accumulation
-        text, icon = calculate_precip_text(
+        text, _ = calculate_precip_text(
             precipType="ice",
             type="hourly",
             rainAccum=0.0,
@@ -157,7 +199,7 @@ class TestTextGeneration:
 
     def test_sleet_precip_text(self):
         """Test that sleet generates correct text."""
-        text, icon = calculate_precip_text(
+        text, _ = calculate_precip_text(
             precipType="sleet",
             type="hourly",
             rainAccum=0.0,
@@ -175,7 +217,7 @@ class TestTextGeneration:
     def test_mixed_overrides_individual_types(self):
         """Test that mixed precipitation text is not overridden by individual types."""
         # When precipType is rain but num_types > 2, should still be mixed
-        text, icon = calculate_precip_text(
+        text, _ = calculate_precip_text(
             precipType="mixed",  # Set to mixed
             type="hourly",
             rainAccum=1.0,

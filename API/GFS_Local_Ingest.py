@@ -605,18 +605,20 @@ distanced_chunked = distanced_stacked.rechunk((160, process_chunk, process_chunk
 directions_chunked = directions_stacked.rechunk((160, process_chunk, process_chunk))
 
 
-with ProgressBar():
-    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        distanced_chunked.to_zarr(
-            forecast_process_path + "_stormDist.zarr",
-            overwrite=True,
-            compute=True,
-        )
-        directions_chunked.to_zarr(
-            forecast_process_path + "_stormDir.zarr",
-            overwrite=True,
-            compute=True,
-        )
+with (
+    ProgressBar(),
+    dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
+):
+    distanced_chunked.to_zarr(
+        forecast_process_path + "_stormDist.zarr",
+        overwrite=True,
+        compute=True,
+    )
+    directions_chunked.to_zarr(
+        forecast_process_path + "_stormDir.zarr",
+        overwrite=True,
+        compute=True,
+    )
 
 
 # %% Save merged and processed xarray dataset to disk using zarr with compression
@@ -1128,39 +1130,41 @@ else:
 # 4. Rechunk it to match the final array
 # 5. Write it out to the zarr array
 
-with ProgressBar():
-    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        # 1. Interpolate the stacked array to be hourly along the time axis
-        stacked_array_interp = interp_time_take_blend(
-            stacked_array_disk,
-            stacked_timesUnix=stacked_timesUnix,
-            hourly_timesUnix=hourly_timesUnix,
-            dtype="float32",
-            fill_value=np.nan,
-        )
+with (
+    ProgressBar(),
+    dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
+):
+    # 1. Interpolate the stacked array to be hourly along the time axis
+    stacked_array_interp = interp_time_take_blend(
+        stacked_array_disk,
+        stacked_timesUnix=stacked_timesUnix,
+        hourly_timesUnix=hourly_timesUnix,
+        dtype="float32",
+        fill_value=np.nan,
+    )
 
-        # 2. Pad to chunk size
-        stacked_array_padded = pad_to_chunk_size(stacked_array_interp, final_chunk)
+    # 2. Pad to chunk size
+    stacked_array_padded = pad_to_chunk_size(stacked_array_interp, final_chunk)
 
-        # 3. Create the zarr array
-        zarr_array = zarr.create_array(
-            store=zarr_store,
-            shape=(
-                len(zarr_vars),
-                len(hourly_timesUnix),
-                stacked_array_padded.shape[2],
-                stacked_array_padded.shape[3],
-            ),
-            chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
+    # 3. Create the zarr array
+    zarr_array = zarr.create_array(
+        store=zarr_store,
+        shape=(
+            len(zarr_vars),
+            len(hourly_timesUnix),
+            stacked_array_padded.shape[2],
+            stacked_array_padded.shape[3],
+        ),
+        chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32",
+    )
 
-        # 4. Rechunk it to match the final array
-        # 5. Write it out to the zarr array
-        stacked_array_padded.round(5).rechunk(
-            (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
-        ).to_zarr(zarr_array, overwrite=True, compute=True)
+    # 4. Rechunk it to match the final array
+    # 5. Write it out to the zarr array
+    stacked_array_padded.round(5).rechunk(
+        (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
+    ).to_zarr(zarr_array, overwrite=True, compute=True)
 
 
 close_store(zarr_store)
@@ -1198,12 +1202,14 @@ for var_idx in MAP_VAR_INDICES:
         dtype="float32",
     )
 
-    with ProgressBar():
-        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-            da.rechunk(
-                stacked_array_maps[var_idx, his_period - 12 : his_period + 24, :, :],
-                (MAP_TIME_STEPS, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE),
-            ).to_zarr(zarr_array, overwrite=True, compute=True)
+    with (
+        ProgressBar(),
+        dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
+    ):
+        da.rechunk(
+            stacked_array_maps[var_idx, his_period - 12 : his_period + 24, :, :],
+            (MAP_TIME_STEPS, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE),
+        ).to_zarr(zarr_array, overwrite=True, compute=True)
 
     logger.info("Created map data for %s", zarr_vars[var_idx])
 
