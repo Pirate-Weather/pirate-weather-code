@@ -102,7 +102,9 @@ t0 = time.time()
 
 latest_run = Herbie_latest(
     model="urma",
-    n=5,
+    # URMA is typically published several hours after its valid time. Search
+    # far enough back to cover that delay instead of assuming a recent file.
+    n=12,
     product="anl",
     verbose=True,
     priority=["aws", "nomdas"],
