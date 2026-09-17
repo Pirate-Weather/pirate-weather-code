@@ -262,16 +262,17 @@ for i in range(his_period, -1, -1):
         xarray_analysis_merged[vars_in]
         .to_stacked_array(new_dim="var", sample_dims=["y", "x"])
         .expand_dims("time", axis=1)
-        .chunk(chunks={"var": -1, "time": 1, "x": final_chunk, "y": final_chunk})
+        .chunk(chunks={"var": -1, "time": 1, "x": process_chunk, "y": process_chunk})
         .transpose("var", "time", "y", "x")
     )
 
     # Apply invalid data masking to the stacked (var, time, y, x) Dask array
     dask_var_array = mask_invalid_data(xarray_analysis_stack.data)
 
-    # Add padding to the spatial dimensions
+    # Preserve the final-grid padding while avoiding tens of thousands of tiny
+    # files in each hourly store. The merged history is also chunked this way.
     dask_var_array = pad_to_chunk_size(dask_var_array, final_chunk).rechunk(
-        (len(vars_in), 1, final_chunk, final_chunk)
+        (len(vars_in), 1, process_chunk, process_chunk)
     )
 
     # Historic archives contain a directory-backed Zarr group.
