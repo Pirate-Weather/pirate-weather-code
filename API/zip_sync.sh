@@ -47,6 +47,7 @@ MODELS="
   RTMA_RU
   SILAM
   SubH
+  URMA_Hist
   WMO_Alerts
 "
 
