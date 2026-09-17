@@ -98,3 +98,18 @@ def test_download_extract_historic_archive_deletes_s3_archive_on_missing_vars(tm
     assert not archive_path.exists()
     assert not done_path.exists()
     assert not (local_temp_dir / final_zarr_name).exists()
+
+
+def test_download_extract_historic_archive_rejects_remote_local_temp_dir(tmp_path):
+    historic_path = tmp_path / "historic"
+    historic_path.mkdir()
+
+    with pytest.raises(ValueError, match="must be a local filesystem path"):
+        download_extract_historic_archive(
+            s3=FakeS3(),
+            historic_path=str(historic_path),
+            final_zarr_name="Model_Hist_v320260528T000000Z.zarr",
+            extracted_store_name="Model_Hist.zarr",
+            local_temp_dir="s3://example-bucket/temporary-downloads",
+            expected_vars=("time",),
+        )

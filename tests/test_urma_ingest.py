@@ -165,6 +165,18 @@ def urma_ingest_output() -> tuple[Path, Path]:
     return zarr_path, time_pickle_path
 
 
+def test_urma_uses_separate_forecast_and_historic_destinations():
+    """Publish merged output normally while retaining hourly history separately."""
+    script_path = Path(__file__).resolve().parents[1] / "API" / "URMA_Local_Ingest.py"
+    source = script_path.read_text(encoding="utf-8")
+
+    assert (
+        's3_path = f"{historic_path}/URMA_Hist_{timestamp_str}.zarr.tar.gz"' in source
+    )
+    assert 'forecast_path + "/" + ingest_version + "/URMA_Hist.zarr.zip"' in source
+    assert 'forecast_path + "/" + ingest_version + "/URMA_Hist.time.pickle"' in source
+
+
 @pytest.mark.skipif(
     not os.getenv(GRIBSTREAM_API_KEY_ENV_VAR),
     reason=f"set {GRIBSTREAM_API_KEY_ENV_VAR} to run the GribStream comparison",

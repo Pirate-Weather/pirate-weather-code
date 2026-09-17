@@ -454,6 +454,7 @@
                 "CMAKE_PREFIX_PATH": "${workspaceFolder}/.build/ingest-test/NCEPLIBS_build:${workspaceFolder}/.build/ingest-test/toolchain:${env:CMAKE_PREFIX_PATH}",
                 "PYDEVD_WARN_EVALUATION_TIMEOUT": "300",
                 "forecast_process_dir": "/mnt/nvme/data/Process/URMA",
+                "historic_path": "s3://piratezarr2/Hist_v2/URMA"
             },
             "envFile": "${workspaceFolder}/.env"
         },
