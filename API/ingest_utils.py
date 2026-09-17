@@ -884,6 +884,41 @@ def pad_to_chunk_size(dask_array: da.Array, final_chunk: int) -> da.Array:
     return dask_array
 
 
+def broadcast_times_to_grid(
+    times: np.ndarray, ny: int, nx: int, spatial_chunk: int
+) -> da.Array:
+    """Lazily broadcast one timestamp per timestep across a spatial grid.
+
+    Args:
+        times: One-dimensional array of timestamps.
+        ny: Number of grid rows.
+        nx: Number of grid columns.
+        spatial_chunk: Chunk size for both spatial dimensions.
+
+    Returns:
+        A lazily broadcast Dask array with shape ``(time, y, x)``.
+
+    Raises:
+        ValueError: If the timestamps are not one-dimensional or any output
+            dimension or chunk size is not positive.
+    """
+    times = np.asarray(times)
+    if times.ndim != 1:
+        raise ValueError("times must be one-dimensional")
+    if len(times) < 1 or ny < 1 or nx < 1 or spatial_chunk < 1:
+        raise ValueError("time and spatial dimensions and chunk size must be positive")
+
+    time_column = da.from_array(
+        times[:, np.newaxis, np.newaxis],
+        chunks=(len(times), 1, 1),
+    )
+    return da.broadcast_to(
+        time_column,
+        (len(times), ny, nx),
+        chunks=(len(times), spatial_chunk, spatial_chunk),
+    )
+
+
 def earth_relative_wind_components(
     ugrd: xr.DataArray, vgrd: xr.DataArray
 ) -> tuple[

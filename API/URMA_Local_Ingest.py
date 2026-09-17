@@ -34,6 +34,7 @@ from API.ingest_utils import (
     VALID_DATA_MAX,
     VALID_DATA_MIN,
     archive_tmp_zarr_and_upload,
+    broadcast_times_to_grid,
     close_store,
     configure_zarr_limits,
     download_extract_historic_archive,
@@ -116,9 +117,9 @@ logger.info(f"Checking for new URMA data for base time: {base_time}")
 
 # Check if this is newer than the current file
 if save_type == "S3":
-    if s3.exists(historic_path + "/" + ingest_version + "/URMA.time.pickle"):
+    if s3.exists(historic_path + "/" + ingest_version + "/URMA_Hist.time.pickle"):
         with s3.open(
-            historic_path + "/" + ingest_version + "/URMA.time.pickle", "rb"
+            historic_path + "/" + ingest_version + "/URMA_Hist.time.pickle", "rb"
         ) as f:
             previous_base_time = pickle.load(f)
         if previous_base_time >= base_time:
@@ -126,9 +127,9 @@ if save_type == "S3":
             sys.exit()
 
 else:
-    if os.path.exists(historic_path + "/" + ingest_version + "/URMA.time.pickle"):
+    if os.path.exists(historic_path + "/" + ingest_version + "/URMA_Hist.time.pickle"):
         with open(
-            historic_path + "/" + ingest_version + "/URMA.time.pickle", "rb"
+            historic_path + "/" + ingest_version + "/URMA_Hist.time.pickle", "rb"
         ) as file:
             previous_base_time = pickle.load(file)
         if previous_base_time >= base_time:
@@ -345,48 +346,90 @@ else:
         for i in range(his_period, -1, -1)
     ]
 
-dask_var_array_list = []
+logger.info(
+    "Starting final URMA merge from %d hourly stores.", len(ncHistWorking_paths)
+)
 
-for dask_var in zarr_vars:
-    # Component reads the named variable dataset key (e.g., store/t2m, store/time)
-    daskVarArrays = [
-        da.from_zarr(local_path, component=dask_var, inline_array=True)
-        for local_path in ncHistWorking_paths
-    ]
+if not ncHistWorking_paths:
+    raise RuntimeError("No hourly URMA stores are available for the final merge")
 
-    # Stacking produces shape: (n_files, 1, y, x)
-    dask_var_arrays_stack = da.stack(daskVarArrays, axis=0)
+first_hour = zarr.open_array(
+    ncHistWorking_paths[0],
+    path=zarr_vars[0],
+    mode="r",
+)
+ny, nx = first_hour.shape[-2:]
 
+# Create the final array before building the per-variable graphs. Writing one
+# variable at a time bounds scheduler memory for the full 283-hour merge.
+final_zarr_path = historic_process_dir + "/URMA_Hist.zarr"
+final_zarr = zarr.open_array(
+    final_zarr_path,
+    mode="w",
+    shape=(len(zarr_vars), len(ncHistWorking_paths), ny, nx),
+    chunks=(1, len(ncHistWorking_paths), process_chunk, process_chunk),
+    dtype="float32",
+)
+logger.info(
+    "Writing final URMA merge with shape %s and chunks %s.",
+    final_zarr.shape,
+    final_zarr.chunks,
+)
+
+for var_index, dask_var in enumerate(zarr_vars):
     if dask_var == "time":
-        # Index [:, 0, 0, 0] strips time-dim-1, y, and x to yield a 1D vector (n_files,)
-        np_cat_times = dask_var_arrays_stack[:, 0, 0, 0].compute()
-        ny, nx = daskVarArrays[0].shape[-2], daskVarArrays[0].shape[-1]
+        # Read one scalar from each store instead of constructing spatial Dask
+        # graphs merely to extract their timestamps.
+        np_cat_times = np.asarray(
+            [
+                zarr.open_array(local_path, path=dask_var, mode="r")[0, 0, 0]
+                for local_path in ncHistWorking_paths
+            ],
+            dtype="float32",
+        )
 
-        # Expand twice: (n_files,) -> (n_files, 1, 1) -> Tile to (n_files, ny, nx)
-        dask_array_out = da.from_array(
-            np.tile(
-                np_cat_times[:, np.newaxis, np.newaxis],
-                (1, ny, nx),
-            )
-        ).rechunk((len(np_cat_times), process_chunk, process_chunk))
-
-        dask_var_array_list.append(dask_array_out)
+        dask_array_out = broadcast_times_to_grid(
+            np_cat_times,
+            ny,
+            nx,
+            process_chunk,
+        )
     else:
-        # Squeeze out axis=1 (the 1-length time dimension) to leave (n_files, y, x)
+        # Stacking produces shape (n_files, 1, y, x); remove the singleton
+        # dimension before writing this variable's final array region.
+        dask_var_arrays_stack = da.stack(
+            [
+                da.from_zarr(local_path, component=dask_var, inline_array=True)
+                for local_path in ncHistWorking_paths
+            ],
+            axis=0,
+        )
         dask_array_out = (
             dask_var_arrays_stack.squeeze(axis=1)
             .rechunk((len(ncHistWorking_paths), process_chunk, process_chunk))
             .astype("float32")
         )
 
-        dask_var_array_list.append(dask_array_out)
+    da.store(
+        dask_array_out[np.newaxis, ...],
+        final_zarr,
+        regions=(
+            slice(var_index, var_index + 1),
+            slice(None),
+            slice(None),
+            slice(None),
+        ),
+        compute=True,
+    )
+    logger.info(
+        "Merged URMA variable %s (%d/%d).",
+        dask_var,
+        var_index + 1,
+        len(zarr_vars),
+    )
 
-# Merge variables into a single 4D array (var, time, y, x)
-dask_var_array_list_merge = da.stack(dask_var_array_list, axis=0)
-
-# Materialize the merged history before publishing it.
-final_zarr_path = historic_process_dir + "/URMA_Hist.zarr"
-dask_var_array_list_merge.to_zarr(final_zarr_path, overwrite=True, compute=True)
+close_store(final_zarr.store)
+logger.info("Final URMA merge completed: %s", final_zarr_path)
 
 # Save to Production Path
 if save_type == "S3":
