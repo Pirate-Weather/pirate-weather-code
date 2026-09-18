@@ -650,6 +650,11 @@ def download_extract_historic_archive(
     expected_vars: Iterable[str] | None = None,
 ) -> str | None:
     """Helper to download and extract a historic archive to a local zarr path."""
+    if "://" in local_temp_dir:
+        raise ValueError(
+            f"local_temp_dir must be a local filesystem path, got {local_temp_dir!r}"
+        )
+
     os.makedirs(local_temp_dir, exist_ok=True)
     local_zarr_path = os.path.join(local_temp_dir, final_zarr_name)
 

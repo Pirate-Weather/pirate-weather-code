@@ -61,9 +61,10 @@ ingest_version = INGEST_VERSION_STR
 
 historic_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/URMA")
 tmp_dir = historic_process_dir + "/Downloads"
+hist_process_path = historic_process_dir + "/URMA_Historic"
 
+forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/URMA")
 historic_path = os.getenv("historic_path", default="/mnt/nvme/data/Prod/URMA")
-hist_process_path = historic_path + "/URMA_Historic"
 
 # Define the processing and final chunk size
 process_chunk = CHUNK_SIZES["URMA"]
@@ -93,8 +94,9 @@ else:
 if not os.path.exists(tmp_dir):
     os.makedirs(tmp_dir)
 
-if save_type == "Download" and not os.path.exists(historic_path + "/" + ingest_version):
-    os.makedirs(historic_path + "/" + ingest_version)
+if save_type == "Download":
+    os.makedirs(historic_path, exist_ok=True)
+    os.makedirs(forecast_path + "/" + ingest_version, exist_ok=True)
 
 herbie_save_dir = make_herbie_save_dir(tmp_dir)
 
@@ -117,9 +119,9 @@ logger.info(f"Checking for new URMA data for base time: {base_time}")
 
 # Check if this is newer than the current file
 if save_type == "S3":
-    if s3.exists(historic_path + "/" + ingest_version + "/URMA_Hist.time.pickle"):
+    if s3.exists(forecast_path + "/" + ingest_version + "/URMA_Hist.time.pickle"):
         with s3.open(
-            historic_path + "/" + ingest_version + "/URMA_Hist.time.pickle", "rb"
+            forecast_path + "/" + ingest_version + "/URMA_Hist.time.pickle", "rb"
         ) as f:
             previous_base_time = pickle.load(f)
         if previous_base_time >= base_time:
@@ -127,9 +129,9 @@ if save_type == "S3":
             sys.exit()
 
 else:
-    if os.path.exists(historic_path + "/" + ingest_version + "/URMA_Hist.time.pickle"):
+    if os.path.exists(forecast_path + "/" + ingest_version + "/URMA_Hist.time.pickle"):
         with open(
-            historic_path + "/" + ingest_version + "/URMA_Hist.time.pickle", "rb"
+            forecast_path + "/" + ingest_version + "/URMA_Hist.time.pickle", "rb"
         ) as file:
             previous_base_time = pickle.load(file)
         if previous_base_time >= base_time:
@@ -277,7 +279,8 @@ for i in range(his_period, -1, -1):
     )
 
     # Historic archives contain a directory-backed Zarr group.
-    zarr_store = zarr.storage.LocalStore(historic_path + "/URMA_Hist_TMP.zarr")
+    hourly_tmp_zarr_path = hist_process_path + "_URMA_Hist_TMP.zarr"
+    zarr_store = zarr.storage.LocalStore(hourly_tmp_zarr_path)
 
     # Preserve the named variables used by the history merge while publishing
     # the masked and padded Dask data.
@@ -304,7 +307,7 @@ for i in range(his_period, -1, -1):
     close_store(zarr_store)
     if save_type == "S3":
         archive_tmp_zarr_and_upload(
-            tmp_zarr_path=historic_path + "/URMA_Hist_TMP.zarr",
+            tmp_zarr_path=hourly_tmp_zarr_path,
             s3_path=s3_path,
             archive_member_name="URMA_Hist.zarr",
             s3=s3,
@@ -312,7 +315,7 @@ for i in range(his_period, -1, -1):
     else:
         if os.path.exists(local_path):
             shutil.rmtree(local_path)
-        os.rename(historic_path + "/URMA_Hist_TMP.zarr", local_path)
+        shutil.move(hourly_tmp_zarr_path, local_path)
         done_file = local_path.replace(".zarr", ".done")
         with open(done_file, "w") as f:
             f.write("Done")
@@ -436,7 +439,7 @@ if save_type == "S3":
     shutil.make_archive(final_zarr_path, "zip", final_zarr_path)
     s3.put_file(
         final_zarr_path + ".zip",
-        historic_path + "/" + ingest_version + "/URMA_Hist.zarr.zip",
+        forecast_path + "/" + ingest_version + "/URMA_Hist.zarr.zip",
     )
     logger.info("Final Zarr zip file uploaded to S3.")
 
@@ -444,7 +447,7 @@ if save_type == "S3":
         pickle.dump(base_time, file)
     s3.put_file(
         historic_process_dir + "/URMA_Hist.time.pickle",
-        historic_path + "/" + ingest_version + "/URMA_Hist.time.pickle",
+        forecast_path + "/" + ingest_version + "/URMA_Hist.time.pickle",
     )
     logger.info("Time pickle file uploaded to S3.")
 
@@ -453,11 +456,11 @@ else:
         pickle.dump(base_time, file)
     shutil.move(
         historic_process_dir + "/URMA_Hist.time.pickle",
-        historic_path + "/" + ingest_version + "/URMA_Hist.time.pickle",
+        forecast_path + "/" + ingest_version + "/URMA_Hist.time.pickle",
     )
     shutil.copytree(
         final_zarr_path,
-        historic_path + "/" + ingest_version + "/URMA_Hist.zarr",
+        forecast_path + "/" + ingest_version + "/URMA_Hist.zarr",
         dirs_exist_ok=True,
     )
     logger.info("Final Zarr and time pickle files moved to local storage.")

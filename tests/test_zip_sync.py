@@ -22,6 +22,11 @@ def test_zip_sync_includes_cmc_models():
     assert CMC_MODELS <= _configured_models()
 
 
+def test_zip_sync_includes_urma_history():
+    """The merged URMA historical archive should be synchronized normally."""
+    assert "URMA_Hist" in _configured_models()
+
+
 def test_zip_sync_has_valid_shell_syntax():
     """The synchronization script should remain valid POSIX shell syntax."""
     result = subprocess.run(
