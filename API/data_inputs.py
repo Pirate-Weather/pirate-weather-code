@@ -1072,7 +1072,7 @@ def prepare_data_inputs(
     # --- convective_inhibition_inputs ---
     convective_inhibition_inputs = _stack_fields(
         num_hours,
-        gdps_merged[:, GDPS["convective_inhibition"]]
+        gdps_merged[:, GDPS["cin"]]
         if gdps_merged is not None
         else None,
     )
