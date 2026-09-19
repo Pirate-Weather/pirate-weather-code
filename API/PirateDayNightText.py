@@ -610,6 +610,7 @@ def calculate_half_day_text(
                     thu_text = calculate_thunderstorm_text(
                         hour_cape,
                         "summary",
+                        pop=hour_pop
                         lifted_index=hour_li,
                         cin=hour_cin,
                         k_index=hour_ki,
@@ -1048,9 +1049,9 @@ def calculate_half_day_text(
     if has_thunderstorm:
         # Use peak instability values that occurred with precipitation
         thunderstorm_summary_text, thunderstorm_icon = calculate_thunderstorm_text(
-            overall_max_cape_with_precip, "both"
             overall_max_cape_with_precip,
             "both",
+            pop=overall_avg_pop
             lifted_index=overall_min_li_with_precip,
             cin=overall_max_cin_with_precip,
             k_index=overall_max_ki_with_precip,

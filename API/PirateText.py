@@ -122,9 +122,10 @@ def calculate_text(
     )
     thuText, thuIcon = calculate_thunderstorm_text(
         cape,
-        "both",
-        icon,
-        isDayTime,
+        mode="both",
+        pop=pop,
+        icon=icon,
+        is_day=isDayTime
         lifted_index=liftedIndex,
         cin=cin,
         vertical_velocity=verticalVelocity,

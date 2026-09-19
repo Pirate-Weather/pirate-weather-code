@@ -690,11 +690,6 @@ def calculate_day_text(
     mode="daily",
     icon_set="darksky",
     unit_system="si",
-    min_li_with_precip: None,  # Most-unstable (minimum) Lifted Index during precip
-    max_cin_with_precip: None,  # Least-inhibiting (maximum) CIN during precip
-    max_ki_with_precip: None,  # Maximum K Index during precip
-    temp_at_max_instability: None,  # Temperature at hour of peak CAPE
-    dewpoint_at_max_instability: None,  # Dewpoint at hour of peak CAPE
 ):
     """
     Calculates the daily or next 24-hour weather summary text.
@@ -851,6 +846,11 @@ def calculate_day_text(
                 "min_visibility": float("inf"),  # Initialize for visibility
                 "max_smoke": 0.0,  # Initialize for smoke
                 "max_cape_with_precip": 0.0,  # Initialize for thunderstorms
+                "min_li_with_precip": None,  # Most-unstable (minimum) Lifted Index during precip
+                "max_cin_with_precip": None,  # Least-inhibiting (maximum) CIN during precip
+                "max_ki_with_precip": None,  # Maximum K Index during precip
+                "temp_at_max_instability": None,  # Temperature at hour of peak CAPE
+                "dewpoint_at_max_instability": None,  # Dewpoint at hour of peak CAPE
             }
 
         # Stop generating period names if we have enough for a full 24-hour cycle (e.g., 5 periods)
@@ -1025,12 +1025,13 @@ def calculate_day_text(
                     thu_text = calculate_thunderstorm_text(
                         hour_cape,
                         "summary",
+                        pop=hour_pop
                         lifted_index=hour_li,
                         cin=hour_cin,
                         k_index=hour_ki,
                         dewpoint=hour_dew,
                         temperature=hour_temp,
-                )
+                    )
 
                     if thu_text is not None:
                         period_data["num_hours_thunderstorm"] += 1
@@ -1533,6 +1534,7 @@ def calculate_day_text(
             overall_max_cape_with_precip, "both"
             overall_max_cape_with_precip,
             "both",
+            pop=overall_avg_pop
             lifted_index=overall_min_li_with_precip,
             cin=overall_max_cin_with_precip,
             k_index=overall_max_ki_with_precip,
