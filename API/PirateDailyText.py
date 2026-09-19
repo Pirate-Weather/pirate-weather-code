@@ -1025,7 +1025,7 @@ def calculate_day_text(
                     thu_text = calculate_thunderstorm_text(
                         hour_cape,
                         "summary",
-                        pop=hour_pop
+                        pop=hour_pop,
                         lifted_index=hour_li,
                         cin=hour_cin,
                         k_index=hour_ki,
