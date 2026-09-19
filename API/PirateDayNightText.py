@@ -1051,7 +1051,7 @@ def calculate_half_day_text(
         thunderstorm_summary_text, thunderstorm_icon = calculate_thunderstorm_text(
             overall_max_cape_with_precip,
             "both",
-            pop=overall_avg_pop
+            pop=overall_avg_pop,
             lifted_index=overall_min_li_with_precip,
             cin=overall_max_cin_with_precip,
             k_index=overall_max_ki_with_precip,

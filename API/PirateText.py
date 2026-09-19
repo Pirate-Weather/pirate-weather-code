@@ -125,7 +125,7 @@ def calculate_text(
         mode="both",
         pop=pop,
         icon=icon,
-        is_day=isDayTime
+        is_day=isDayTime,
         lifted_index=liftedIndex,
         cin=cin,
         vertical_velocity=verticalVelocity,
