@@ -1531,7 +1531,6 @@ def calculate_day_text(
     if has_thunderstorm:
         # Use peak instability values that occurred with precipitation
         thunderstorm_summary_text, thunderstorm_icon = calculate_thunderstorm_text(
-            overall_max_cape_with_precip, "both"
             overall_max_cape_with_precip,
             "both",
             pop=overall_avg_pop,
