@@ -30,6 +30,7 @@ from API.constants.text_const import (
     WIND_THRESHOLDS,
 )
 
+
 def most_common(lst):
     """
     Finds the most common icon to use as the icon
@@ -766,8 +767,8 @@ def calculate_thunderstorm_text(
         max_level = 2
 
     # ------------------------------------------------------------------
-    # Global PoP Check: 
-    # If any indicator suggests a full thunderstorm, but the chance 
+    # Global PoP Check:
+    # If any indicator suggests a full thunderstorm, but the chance
     # of precipitation is too low, downgrade it to a possible-thunderstorm.
     # ------------------------------------------------------------------
     if max_level == 2 and pop < PRECIP_PROB_THRESHOLD:

@@ -331,6 +331,10 @@ ROUNDING_RULES = {
     "coConcentration": 1,
     "coConcentrationMax": 1,
     "coConcentrationMaxTime": 0,
+    "liftedIndex": 0,
+    "kIndex": 0,
+    "verticalVelocity": 0,
+    "convectiveInhibition": 0,
 }
 
 U_REF = {

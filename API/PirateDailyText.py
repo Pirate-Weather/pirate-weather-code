@@ -998,28 +998,37 @@ def calculate_day_text(
                     period_data["dewpoint_at_max_instability"] = hour_dew
 
                     # Most-unstable (minimum) Lifted Index
-                    if hour_li is not None and not np.isnan(hour_li):
-                        if (
+                    if (
+                        hour_li is not None
+                        and not np.isnan(hour_li)
+                        and (
                             period_data["min_li_with_precip"] is None
                             or hour_li < period_data["min_li_with_precip"]
-                        ):
-                            period_data["min_li_with_precip"] = hour_li
+                        )
+                    ):
+                        period_data["min_li_with_precip"] = hour_li
 
                     # Least-inhibiting (maximum/least-negative) CIN
-                    if hour_cin is not None and not np.isnan(hour_cin):
-                        if (
+                    if (
+                        hour_cin is not None
+                        and not np.isnan(hour_cin)
+                        and (
                             period_data["max_cin_with_precip"] is None
                             or hour_cin > period_data["max_cin_with_precip"]
-                        ):
-                            period_data["max_cin_with_precip"] = hour_cin
+                        )
+                    ):
+                        period_data["max_cin_with_precip"] = hour_cin
 
                     # Maximum K Index
-                    if hour_ki is not None and not np.isnan(hour_ki):
-                        if (
+                    if (
+                        hour_ki is not None
+                        and not np.isnan(hour_ki)
+                        and (
                             period_data["max_ki_with_precip"] is None
                             or hour_ki > period_data["max_ki_with_precip"]
-                        ):
-                            period_data["max_ki_with_precip"] = hour_ki
+                        )
+                    ):
+                        period_data["max_ki_with_precip"] = hour_ki
 
                     # Count hours with thunderstorms using all available stability indices
                     thu_text = calculate_thunderstorm_text(
@@ -1139,26 +1148,23 @@ def calculate_day_text(
             overall_temp_at_max_instability = p_data["temp_at_max_instability"]
             overall_dewpoint_at_max_instability = p_data["dewpoint_at_max_instability"]
 
-            if p_data["min_li_with_precip"] is not None:
-                if (
-                    overall_min_li_with_precip is None
-                    or p_data["min_li_with_precip"] < overall_min_li_with_precip
-                ):
-                    overall_min_li_with_precip = p_data["min_li_with_precip"]
+            if p_data["min_li_with_precip"] is not None and (
+                overall_min_li_with_precip is None
+                or p_data["min_li_with_precip"] < overall_min_li_with_precip
+            ):
+                overall_min_li_with_precip = p_data["min_li_with_precip"]
 
-            if p_data["max_cin_with_precip"] is not None:
-                if (
-                    overall_max_cin_with_precip is None
-                    or p_data["max_cin_with_precip"] > overall_max_cin_with_precip
-                ):
-                    overall_max_cin_with_precip = p_data["max_cin_with_precip"]
+            if p_data["max_cin_with_precip"] is not None and (
+                overall_max_cin_with_precip is None
+                or p_data["max_cin_with_precip"] > overall_max_cin_with_precip
+            ):
+                overall_max_cin_with_precip = p_data["max_cin_with_precip"]
 
-            if p_data["max_ki_with_precip"] is not None:
-                if (
-                    overall_max_ki_with_precip is None
-                    or p_data["max_ki_with_precip"] > overall_max_ki_with_precip
-                ):
-                    overall_max_ki_with_precip = p_data["max_ki_with_precip"]
+            if p_data["max_ki_with_precip"] is not None and (
+                overall_max_ki_with_precip is None
+                or p_data["max_ki_with_precip"] > overall_max_ki_with_precip
+            ):
+                overall_max_ki_with_precip = p_data["max_ki_with_precip"]
 
         # Check if thunderstorms are significant in this period
         # Thunderstorms require both precipitation and sufficient atmospheric instability

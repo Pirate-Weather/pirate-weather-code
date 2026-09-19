@@ -964,6 +964,10 @@ async def PW_Forecast(
     solar_inputs = inputs["solar_inputs"]
     cape_inputs = inputs["cape_inputs"]
     error_inputs = inputs["error_inputs"]
+    lifted_index_inputs = inputs["lifted_index_inputs"]
+    vertical_velocity_inputs = inputs["vertical_velocity_inputs"]
+    convective_inhibition_inputs = inputs["convective_inhibition_inputs"]
+    k_index_inputs = inputs["k_index_inputs"]
 
     # Prepare air-quality concentration arrays (RAQDPS / SILAM)
     aq_inputs = prepare_aq_inputs(
@@ -1043,6 +1047,10 @@ async def PW_Forecast(
             solar_inputs=solar_inputs,
             cape_inputs=cape_inputs,
             error_inputs=error_inputs,
+            lifted_index_inputs=lifted_index_inputs,
+            vertical_velocity_inputs=vertical_velocity_inputs,
+            convective_inhibition_inputs=convective_inhibition_inputs,
+            k_index_inputs=k_index_inputs,
             aq_inputs=aq_inputs,
             inc_airqualitydetails=incAirQualityDetails,
             minute_presence=minute_presence,

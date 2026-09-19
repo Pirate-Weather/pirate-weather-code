@@ -186,6 +186,7 @@ matchstring_cl = "(:TCDC:entire atmosphere:.*hour fcst)"
 matchstring_ap = "(:APCP:surface:0-[1-9]*)"
 matchstring_sl = "(:(MSLMA):)"
 matchstring_1000m = "(:REFD:1000 m above ground:)"
+matchstring_500mb_1000mb = "(:LFTX:500-1000 mb:)"
 
 # Merge matchstrings for download
 match_strings = (

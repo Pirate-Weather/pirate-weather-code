@@ -1561,6 +1561,178 @@ def _get_fire(temp_c, humidity_fraction, wind_speed_ms):
     return float(fire_index)
 
 
+def _get_lifted_index(
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    lat,
+    lon,
+    prioritize_ai_models=False,
+):
+    """
+    Get current lifted index from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+        lat: Latitude.
+        lon: Longitude.
+        prioritize_ai_models: Whether to prioritize AI model sources.
+
+    Returns:
+        Current lifted index.
+    """
+    source_map = {
+        "hrdps": (
+            lambda: "hrdps" in sourceList,
+            lambda: _interp_scalar(
+                model_data["HRDPS_Merged"], HRDPS["lifted_index"], state
+            ),
+        ),
+    }
+
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=False,
+        prioritize_ai_models=prioritize_ai_models,
+    )
+    val = _select_value(strategies)
+    return val
+
+
+def _get_vertical_velocity(
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    lat,
+    lon,
+    prioritize_ai_models=False,
+):
+    """
+    Get current vertical velocity from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+        lat: Latitude.
+        lon: Longitude.
+        prioritize_ai_models: Whether to prioritize AI model sources.
+
+    Returns:
+        Current vertical velocity.
+    """
+    source_map = {
+        "hrdps": (
+            lambda: "hrdps" in sourceList,
+            lambda: _interp_scalar(
+                model_data["HRDPS_Merged"], HRDPS["vertical_velocity"], state
+            ),
+        ),
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: _interp_scalar(
+                model_data["GDPS_Merged"], GDPS["vertical_velocity"], state
+            ),
+        ),
+    }
+
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=False,
+        prioritize_ai_models=prioritize_ai_models,
+    )
+    val = _select_value(strategies)
+    return val
+
+
+def _get_convective_inhibition(
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    lat,
+    lon,
+    prioritize_ai_models=False,
+):
+    """
+    Get current convective inhibition from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+        lat: Latitude.
+        lon: Longitude.
+        prioritize_ai_models: Whether to prioritize AI model sources.
+
+    Returns:
+        Current convective inhibition.
+    """
+    source_map = {
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: _interp_scalar(
+                model_data["GDPS_Merged"], GDPS["convective_inhibition"], state
+            ),
+        ),
+    }
+
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=False,
+        prioritize_ai_models=prioritize_ai_models,
+    )
+    val = _select_value(strategies)
+    return val
+
+
+def _get_k_index(
+    sourceList,
+    model_data,
+    state: InterpolationState,
+    lat,
+    lon,
+    prioritize_ai_models=False,
+):
+    """
+    Get current K index from available sources.
+
+    Args:
+        sourceList: List of available sources.
+        model_data: Dictionary of model data.
+        state: Interpolation state.
+        lat: Latitude.
+        lon: Longitude.
+        prioritize_ai_models: Whether to prioritize AI model sources.
+
+    Returns:
+        Current K index.
+    """
+    source_map = {
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: _interp_scalar(model_data["GDPS_Merged"], GDPS["k_index"], state),
+        ),
+    }
+
+    strategies = _build_source_strategies(
+        source_map,
+        lat,
+        lon,
+        has_ecmwf=False,
+        prioritize_ai_models=prioritize_ai_models,
+    )
+    val = _select_value(strategies)
+    return val
+
+
 def build_current_section(
     *,
     sourceList,
@@ -1814,6 +1986,19 @@ def build_current_section(
         InterPcurrent[DATA_CURRENT["wind"]],
     )
 
+    InterPcurrent[DATA_CURRENT["lifted_index"]] = _get_lifted_index(
+        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
+    )
+    InterPcurrent[DATA_CURRENT["k_index"]] = _get_k_index(
+        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
+    )
+    InterPcurrent[DATA_CURRENT["vertical_velocity"]] = _get_vertical_velocity(
+        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
+    )
+    InterPcurrent[DATA_CURRENT["convective_inhibition"]] = _get_convective_inhibition(
+        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
+    )
+
     # Populate AQ concentration fields from aq_inputs (version >= 2)
     if aq_inputs is not None:
         # Linear interpolation between hours 0 and 1
@@ -1929,6 +2114,26 @@ def build_current_section(
         if not np.isnan(InterPcurrent[DATA_CURRENT["cape"]])
         else np.nan
     )
+    curr_lifted_index_display = (
+        int(np.round(InterPcurrent[DATA_CURRENT["lifted_index"]], 0))
+        if not np.isnan(InterPcurrent[DATA_CURRENT["lifted_index"]])
+        else np.nan
+    )
+    curr_k_index_display = (
+        int(np.round(InterPcurrent[DATA_CURRENT["k_index"]], 0))
+        if not np.isnan(InterPcurrent[DATA_CURRENT["k_index"]])
+        else np.nan
+    )
+    curr_vertical_velocity_display = (
+        int(np.round(InterPcurrent[DATA_CURRENT["vertical_velocity"]], 0))
+        if not np.isnan(InterPcurrent[DATA_CURRENT["vertical_velocity"]])
+        else np.nan
+    )
+    curr_convective_inhibition_display = (
+        int(np.round(InterPcurrent[DATA_CURRENT["convective_inhibition"]], 0))
+        if not np.isnan(InterPcurrent[DATA_CURRENT["convective_inhibition"]])
+        else np.nan
+    )
 
     dayZeroIce = float(np.round(dayZeroIce * prepAccumUnit, 4))
     dayZeroRain = float(np.round(dayZeroRain * prepAccumUnit, 4))
@@ -1987,6 +2192,10 @@ def build_current_section(
     currently["currentDaySnow"] = dayZeroSnow
     currently["solar"] = curr_solar_display
     currently["cape"] = curr_cape_display
+    currently["liftedIndex"] = curr_lifted_index_display
+    currently["kIndex"] = curr_k_index_display
+    currently["verticalVelocity"] = curr_vertical_velocity_display
+    currently["convectiveInhibition"] = curr_convective_inhibition_display
 
     if version >= 2:
         curr_aqi_raw = InterPcurrent[DATA_CURRENT["aqi"]]

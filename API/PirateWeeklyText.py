@@ -96,21 +96,30 @@ def calculate_summary_text(
 
         # Most-unstable (minimum) Lifted Index across precipitation days
         day_li = day[2].get("liftedIndexMin")
-        if day_li is not None and not np.isnan(day_li):
-            if minLi is None or day_li < minLi:
-                minLi = day_li
+        if (
+            day_li is not None
+            and not np.isnan(day_li)
+            and (minLi is None or day_li < minLi)
+        ):
+            minLi = day_li
 
         # Least-inhibiting (maximum/least-negative) CIN across precipitation days
         day_cin = day[2].get("cinMax")
-        if day_cin is not None and not np.isnan(day_cin):
-            if maxCin is None or day_cin > maxCin:
-                maxCin = day_cin
+        if (
+            day_cin is not None
+            and not np.isnan(day_cin)
+            and (maxCin is None or day_cin > maxCin)
+        ):
+            maxCin = day_cin
 
         # Maximum K Index across precipitation days
         day_ki = day[2].get("kIndexMax")
-        if day_ki is not None and not np.isnan(day_ki):
-            if maxKi is None or day_ki > maxKi:
-                maxKi = day_ki
+        if (
+            day_ki is not None
+            and not np.isnan(day_ki)
+            and (maxKi is None or day_ki > maxKi)
+        ):
+            maxKi = day_ki
 
         # Calculate the number of days with thunderstorms forecasted
         if day[2]["icon"] == "thunderstorm":
