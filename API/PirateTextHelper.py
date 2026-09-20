@@ -7,13 +7,17 @@ from API.constants.api_const import PRECIP_TYPES
 from API.constants.shared_const import KELVIN_TO_CELSIUS
 from API.constants.text_const import (
     CAPE_THRESHOLDS,
+    CIN_THRESHOLDS,
     CLOUD_COVER_THRESHOLDS,
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
     FOG_THRESHOLD_METERS,
     HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    KI_THRESHOLDS,
+    LI_THRESHOLDS,
     LIQUID_DENSITY_CONVERSION,
+    MAX_DEWPOINT_DEPRESSION_FOR_STORM,
     MIST_THRESHOLD_METERS,
     PRECIP_INTENSITY_THRESHOLDS,
     PRECIP_PROB_THRESHOLD,
@@ -22,6 +26,7 @@ from API.constants.text_const import (
     SNOW_INTENSITY_THRESHOLDS,
     TEMP_DEWPOINT_SPREAD_FOR_FOG,
     TEMP_DEWPOINT_SPREAD_FOR_MIST,
+    VV_THRESHOLDS,
     WIND_THRESHOLDS,
 )
 
@@ -654,38 +659,128 @@ def calculate_sky_text(cloudCover, isDayTime, icon="darksky", mode="both"):
 
 
 def calculate_thunderstorm_text(
-    cape, mode="both", icon="darksky", is_day=True, pop=1.0
+    cape,
+    pop=None,
+    mode="both",
+    icon="darksky",
+    is_day=True,
+    lifted_index=None,
+    cin=None,
+    vertical_velocity=None,
+    k_index=None,
+    dewpoint=None,
+    temperature=None,
 ):
-    """
-    Calculates the thunderstorm text based on CAPE values.
+    """Calculates thunderstorm text and icon using atmospheric stability indices and PoP.
 
-    Parameters:
-    - cape (float) -  The CAPE (Convective available potential energy)
-    - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the thunderstorm will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
-    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
-    - is_day (bool): Whether it is day or night time
-    - pop (float) - The precipitation probability (0.0 to 1.0)
+    Args:
+        cape (float): Convective Available Potential Energy in J/kg.
+        pop (float | None): Probability of Precipitation (0.0 to 1.0). Defaults to 1.0 if None.
+        mode (str): Return mode. "both" returns (text, icon); "summary" returns text; "icon" returns icon.
+        icon (str): Icon set to use — "darksky" or "pirate".
+        is_day (bool): Whether it is currently daytime (controls pirate icon variants).
+        lifted_index (float | None): Lifted Index in K. Pass None when unavailable.
+        cin (float | None): Convective Inhibition in J/kg (negative by convention). Pass None when unavailable.
+        vertical_velocity (float | None): Vertical velocity (omega) in Pa/s. Pass None when unavailable.
+        k_index (float | None): K Index in K (°C equivalent). Pass None when unavailable.
+        dewpoint (float | None): 2 m dewpoint temperature in °C. Pass None when unavailable.
+        temperature (float | None): 2 m air temperature in °C. Pass None when unavailable.
 
     Returns:
-    - str | None: The textual representation of the thunderstorm
-    - str | None: The icon representation of the thunderstorm
+        tuple[str | None, str | None] | str | None: Thunderstorm text, icon, or both depending on mode.
     """
     thuText = None
     thuIcon = None
 
+    # Handle PoP defaulting
     try:
         if pop is None or np.isnan(pop):
             pop = 1.0
     except TypeError:
         pop = 1.0
 
-    if CAPE_THRESHOLDS["low"] <= cape < CAPE_THRESHOLDS["high"]:
+    # ------------------------------------------------------------------
+    # 1. Primary instability indicators
+    # ------------------------------------------------------------------
+    cape_level = 0
+    if not np.isnan(cape):
+        if cape >= CAPE_THRESHOLDS["high"]:
+            cape_level = 2
+        elif cape >= CAPE_THRESHOLDS["low"]:
+            cape_level = 1
+
+    li_level = 0
+    if lifted_index is not None and not np.isnan(lifted_index):
+        if lifted_index <= LI_THRESHOLDS["thunderstorm"]:
+            li_level = 2
+        elif lifted_index <= LI_THRESHOLDS["possible"]:
+            li_level = 1
+
+    ki_level = 0
+    if k_index is not None and not np.isnan(k_index):
+        if k_index >= KI_THRESHOLDS["thunderstorm"]:
+            ki_level = 2
+        elif k_index >= KI_THRESHOLDS["possible"]:
+            ki_level = 1
+
+    max_level = max(cape_level, li_level, ki_level)
+    if max_level == 0:
+        return (None, None) if mode == "both" else None
+
+    # ------------------------------------------------------------------
+    # 2. CIN suppression
+    # ------------------------------------------------------------------
+    if cin is not None and not np.isnan(cin):
+        if cin <= CIN_THRESHOLDS["suppressed"]:
+            max_level = 0
+        elif cin <= CIN_THRESHOLDS["moderate"]:
+            max_level = max(0, max_level - 1)
+
+    if max_level == 0:
+        return (None, None) if mode == "both" else None
+
+    # ------------------------------------------------------------------
+    # 3. Moisture check (above-freezing only)
+    # ------------------------------------------------------------------
+    if (
+        dewpoint is not None
+        and temperature is not None
+        and not np.isnan(dewpoint)
+        and not np.isnan(temperature)
+        and temperature > 0
+        and (temperature - dewpoint) > MAX_DEWPOINT_DEPRESSION_FOR_STORM
+    ):
+        max_level = 0
+
+    if max_level == 0:
+        return (None, None) if mode == "both" else None
+
+    # ------------------------------------------------------------------
+    # 4. Vertical velocity enhancement
+    # ------------------------------------------------------------------
+    if (
+        max_level == 1
+        and vertical_velocity is not None
+        and not np.isnan(vertical_velocity)
+        and vertical_velocity <= VV_THRESHOLDS["strong_upward"]
+    ):
+        max_level = 2
+
+    # ------------------------------------------------------------------
+    # Global PoP Check:
+    # If any indicator suggests a full thunderstorm, but the chance
+    # of precipitation is too low, downgrade it to a possible-thunderstorm.
+    # ------------------------------------------------------------------
+    if max_level == 2 and pop < PRECIP_PROB_THRESHOLD:
+        max_level = 1
+
+    # ------------------------------------------------------------------
+    # 5. Map level to text and icon
+    # ------------------------------------------------------------------
+    if max_level == 2:
+        thuText = "thunderstorm"
+    elif max_level == 1:
         thuText = "possible-thunderstorm"
-    elif cape >= CAPE_THRESHOLDS["high"]:
-        if pop < PRECIP_PROB_THRESHOLD:
-            thuText = "possible-thunderstorm"
-        else:
-            thuText = "thunderstorm"
 
     if thuText == "thunderstorm":
         thuIcon = "thunderstorm"

@@ -40,6 +40,10 @@ DATA_CURRENT = {
     "so2": 31,
     "co": 32,
     "aqi": 33,
+    "lifted_index": 34,
+    "vertical_velocity": 35,
+    "convective_inhibition": 36,
+    "k_index": 37,
 }
 
 # Minutely comumn indexes
@@ -97,6 +101,10 @@ DATA_HOURLY = {
     "so2": 36,
     "co": 37,
     "aqi": 38,
+    "lifted_index": 39,
+    "vertical_velocity": 40,
+    "convective_inhibition": 41,
+    "k_index": 42,
 }
 
 # Daily column indexes
@@ -134,7 +142,17 @@ DATA_DAY = {
     "snow_intensity": 30,
     "ice_intensity": 31,
     # Air quality slots (version >= 2 only)
-    "aqi": 32,
+    "pm25": 32,
+    "pm10": 33,
+    "o3": 34,
+    "no2": 35,
+    "so2": 36,
+    "co": 37,
+    "aqi": 38,
+    "lifted_index": 39,
+    "vertical_velocity": 40,
+    "convective_inhibition": 41,
+    "k_index": 42,
 }
 
 DATA_TIMEMACHINE = {

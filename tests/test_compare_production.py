@@ -113,14 +113,14 @@ def _diff_nested(a: object, b: object, path: str = "", tolerance: float = 0.0) -
 @pytest.mark.parametrize(
     "lat,lon",
     [
-        (45.0, -75.0),
-        (10.0, 10.0),
-        (47.28, -53.13),
-        (28.64, 77.09),
-        (-34.92, 138.60),
-        (32.73, -117.192),
-        (-15.83, -47.90),
-        (-33.91, 18.32),
+        (45.0, -75.0),  # Stormont, ON
+        (10.0, 10.0),  # Africa
+        (47.28, -53.13),  # Newfloundland
+        (28.64, 77.09),  # Delhi, IN
+        (-34.92, 138.60),  # Adelaide, AU
+        (32.73, -117.192),  # San Diego, CA
+        (-15.83, -47.90),  # Brasília, Brazil
+        (-33.91, 18.32),  # Cape Town, South Africa
         (61.21, -149.90),  # Anchorage, AK
         (45.4215, -75.6972),  # Ottawa, ON
     ],

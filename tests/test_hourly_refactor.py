@@ -60,6 +60,10 @@ def test_build_hourly_block_structure():
     solar_inputs = np.zeros((num_hours, 1))
     cape_inputs = np.zeros((num_hours, 1))
     error_inputs = np.zeros((num_hours, 1))
+    lifted_index_inputs = np.zeros((num_hours, 1))
+    vertical_velocity_inputs = np.zeros((num_hours, 1))
+    convective_inhibition_inputs = np.zeros((num_hours, 1))
+    k_index_inputs = np.zeros((num_hours, 1))
 
     kwargs = {
         "source_list": ["nbm"],
@@ -110,6 +114,10 @@ def test_build_hourly_block_structure():
         "solar_inputs": solar_inputs,
         "cape_inputs": cape_inputs,
         "error_inputs": error_inputs,
+        "lifted_index_inputs": lifted_index_inputs,
+        "vertical_velocity_inputs": vertical_velocity_inputs,
+        "convective_inhibition_inputs": convective_inhibition_inputs,
+        "k_index_inputs": k_index_inputs,
         "version": 2,
     }
 
@@ -215,6 +223,10 @@ def test_build_hourly_block_outputs_era5_precip_probability():
         solar_inputs=inputs["solar_inputs"],
         cape_inputs=inputs["cape_inputs"],
         error_inputs=inputs["error_inputs"],
+        lifted_index_inputs=inputs["lifted_index_inputs"],
+        vertical_velocity_inputs=inputs["vertical_velocity_inputs"],
+        convective_inhibition_inputs=inputs["convective_inhibition_inputs"],
+        k_index_inputs=inputs["k_index_inputs"],
         version=2,
     )
 
