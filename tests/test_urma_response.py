@@ -64,30 +64,30 @@ def test_urma_merge_adds_source_flag_only_for_valid_requested_hours():
     base = datetime.datetime(2026, 9, 20, tzinfo=datetime.UTC).timestamp()
     raw, _ = _model_data(1)
     raw[0, 0] = base
-    args = dict(
-        metadata=SourceMetadata([], {}, {}),
-        num_hours=2,
-        base_day_utc_grib=base,
-        data_hrrrh=None,
-        data_h2=None,
-        data_nbm=None,
-        data_nbm_fire=None,
-        data_gfs=None,
-        data_ecmwf=None,
-        data_gefs=None,
-        data_hrdps=None,
-        data_gdps=None,
-        data_geps=None,
-        data_reps=None,
-        data_dwd_mosmix=None,
-        data_aigfs=None,
-        data_aigefs=None,
-        data_aifs=None,
-        data_urma=raw,
-        urma_min_timestamp=base - 3600,
-        logger=logging.getLogger(__name__),
-        loc_tag="test",
-    )
+    args = {
+        "metadata": SourceMetadata([], {}, {}),
+        "num_hours": 2,
+        "base_day_utc_grib": base,
+        "data_hrrrh": None,
+        "data_h2": None,
+        "data_nbm": None,
+        "data_nbm_fire": None,
+        "data_gfs": None,
+        "data_ecmwf": None,
+        "data_gefs": None,
+        "data_hrdps": None,
+        "data_gdps": None,
+        "data_geps": None,
+        "data_reps": None,
+        "data_dwd_mosmix": None,
+        "data_aigfs": None,
+        "data_aigefs": None,
+        "data_aifs": None,
+        "data_urma": raw,
+        "urma_min_timestamp": base - 3600,
+        "logger": logging.getLogger(__name__),
+        "loc_tag": "test",
+    }
     result = merge_hourly_models(**args)
     assert "urma" in result.metadata.source_list
     assert result.metadata.source_times["urma"] == "2026-09-20 00Z"

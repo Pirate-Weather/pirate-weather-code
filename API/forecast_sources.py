@@ -363,7 +363,7 @@ def _merge_urma_source(
         timestamp = float(row[0])
         if not np.isfinite(timestamp):
             continue
-        hour = int(round((timestamp - base_timestamp) / 3600))
+        hour = round((timestamp - base_timestamp) / 3600)
         aligned_time = base_timestamp + hour * 3600
         if (
             not 0 <= hour < num_hours

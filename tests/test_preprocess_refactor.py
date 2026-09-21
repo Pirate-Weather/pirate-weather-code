@@ -168,14 +168,14 @@ def test_parse_parameters_ai_models_include_and_exclude_priority():
 
 def test_parse_parameters_excludes_urma_independently_of_gfs():
     now_time = datetime.datetime(2026, 1, 1, 12, 0, 0)
-    kwargs = dict(
-        include=None,
-        extraVars=None,
-        now_time=now_time,
-        utc_time=now_time - datetime.timedelta(days=2),
-        time_machine=True,
-        tm_extra=False,
-    )
+    kwargs = {
+        "include": None,
+        "extraVars": None,
+        "now_time": now_time,
+        "utc_time": now_time - datetime.timedelta(days=2),
+        "time_machine": True,
+        "tm_extra": False,
+    }
     exclude_urma = _parse_parameters(exclude="urma", **kwargs)
     exclude_gfs = _parse_parameters(exclude="gfs", **kwargs)
 
