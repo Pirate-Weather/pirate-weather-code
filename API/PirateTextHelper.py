@@ -11,13 +11,13 @@ from API.constants.text_const import (
     CLOUD_COVER_THRESHOLDS,
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    DEWPOINT_DEPRESSION_FOR_STORM,
     FOG_THRESHOLD_METERS,
     HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM,
     KI_THRESHOLDS,
     LI_THRESHOLDS,
     LIQUID_DENSITY_CONVERSION,
-    MAX_DEWPOINT_DEPRESSION_FOR_STORM,
     MIST_THRESHOLD_METERS,
     PRECIP_INTENSITY_THRESHOLDS,
     PRECIP_PROB_THRESHOLD,
@@ -658,20 +658,27 @@ def calculate_sky_text(cloudCover, isDayTime, icon="darksky", mode="both"):
         return skyText, skyIcon
 
 
+def clamp(val: float, min_val: float = 0.0, max_val: float = 1.0) -> float:
+    return max(min_val, min(val, max_val))
+
+
 def calculate_thunderstorm_text(
-    cape,
-    pop=None,
-    mode="both",
-    icon="darksky",
-    is_day=True,
-    lifted_index=None,
-    cin=None,
-    vertical_velocity=None,
-    k_index=None,
-    dewpoint=None,
-    temperature=None,
-):
+    cape: float,
+    pop: float | None = None,
+    mode: str = "both",
+    icon: str = "darksky",
+    is_day: bool = True,
+    lifted_index: float | None = None,
+    cin: float | None = None,
+    vertical_velocity: float | None = None,
+    k_index: float | None = None,
+    dewpoint: float | None = None,
+    temperature: float | None = None,
+) -> tuple[str | None, str | None] | str | None:
     """Calculates thunderstorm text and icon using atmospheric stability indices and PoP.
+
+    Uses dynamic parameter weighting, continuous feature scaling, and physical
+    suppressors to reduce false positives.
 
     Args:
         cape (float): Convective Available Potential Energy in J/kg.
@@ -689,112 +696,100 @@ def calculate_thunderstorm_text(
     Returns:
         tuple[str | None, str | None] | str | None: Thunderstorm text, icon, or both depending on mode.
     """
-    thuText = None
-    thuIcon = None
 
-    # Handle PoP defaulting
-    try:
-        if pop is None or np.isnan(pop):
-            pop = 1.0
-    except TypeError:
-        pop = 1.0
+    def valid(v: float | None) -> bool:
+        return v is not None and not np.isnan(v)
 
-    # ------------------------------------------------------------------
-    # 1. Primary instability indicators
-    # ------------------------------------------------------------------
-    cape_level = 0
-    if not np.isnan(cape):
-        if cape >= CAPE_THRESHOLDS["high"]:
-            cape_level = 2
-        elif cape >= CAPE_THRESHOLDS["low"]:
-            cape_level = 1
+    # 1. Parameter Weights (Total = 100)
+    WEIGHTS = {
+        "cape": 35.0,
+        "li": 25.0,
+        "ki": 20.0,
+        "vv": 20.0,
+    }
+    SCORE = {
+        "thunderstorm": 60.0,
+        "possible": 30.0,
+    }
 
-    li_level = 0
-    if lifted_index is not None and not np.isnan(lifted_index):
-        if lifted_index <= LI_THRESHOLDS["thunderstorm"]:
-            li_level = 2
-        elif lifted_index <= LI_THRESHOLDS["possible"]:
-            li_level = 1
+    earned_score = 0.0
+    total_possible_weight = 0.0
 
-    ki_level = 0
-    if k_index is not None and not np.isnan(k_index):
-        if k_index >= KI_THRESHOLDS["thunderstorm"]:
-            ki_level = 2
-        elif k_index >= KI_THRESHOLDS["possible"]:
-            ki_level = 1
+    # Inside your function, calculate the spans cleanly:
+    CAPE_SPAN = CAPE_THRESHOLDS["high"] - CAPE_THRESHOLDS["low"]  # 2000
+    LI_SPAN = abs(LI_THRESHOLDS["high"] - LI_THRESHOLDS["low"])    # 6
+    KI_SPAN = KI_THRESHOLDS["high"] - KI_THRESHOLDS["low"]        # 20
 
-    max_level = max(cape_level, li_level, ki_level)
-    if max_level == 0:
-        return (None, None) if mode == "both" else None
+    # Continuous Feature Scaling
+    if valid(cape):
+        total_possible_weight += WEIGHTS["cape"]
+        earned_score += WEIGHTS["cape"] * clamp((cape - CAPE_THRESHOLDS["low"]) / CAPE_SPAN)
 
-    # ------------------------------------------------------------------
-    # 2. CIN suppression
-    # ------------------------------------------------------------------
-    if cin is not None and not np.isnan(cin):
-        if cin <= CIN_THRESHOLDS["suppressed"]:
-            max_level = 0
-        elif cin <= CIN_THRESHOLDS["moderate"]:
-            max_level = max(0, max_level - 1)
+    if valid(lifted_index):
+        total_possible_weight += WEIGHTS["li"]
+        earned_score += WEIGHTS["li"] * clamp((LI_THRESHOLDS["low"] - lifted_index) / LI_SPAN)
 
-    if max_level == 0:
-        return (None, None) if mode == "both" else None
+    if valid(k_index):
+        total_possible_weight += WEIGHTS["ki"]
+        earned_score += WEIGHTS["ki"] * clamp((k_index - KI_THRESHOLDS["low"]) / KI_SPAN)
 
-    # ------------------------------------------------------------------
-    # 3. Moisture check (above-freezing only)
-    # ------------------------------------------------------------------
-    if (
-        dewpoint is not None
-        and temperature is not None
-        and not np.isnan(dewpoint)
-        and not np.isnan(temperature)
-        and temperature > 0
-        and (temperature - dewpoint) > MAX_DEWPOINT_DEPRESSION_FOR_STORM
-    ):
-        max_level = 0
+    if valid(vertical_velocity):
+        total_possible_weight += WEIGHTS["vv"]
+        earned_score += WEIGHTS["vv"] * clamp(-vertical_velocity / VV_THRESHOLDS["strong_upward"])
 
-    if max_level == 0:
-        return (None, None) if mode == "both" else None
+    # Prevent false positives if payload lacks enough core parameters
+    if total_possible_weight < 35.0:
+        base_confidence = 0.0
+    else:
+        base_confidence = (earned_score / total_possible_weight) * 100.0
 
-    # ------------------------------------------------------------------
-    # 4. Vertical velocity enhancement
-    # ------------------------------------------------------------------
-    if (
-        max_level == 1
-        and vertical_velocity is not None
-        and not np.isnan(vertical_velocity)
-        and vertical_velocity <= VV_THRESHOLDS["strong_upward"]
-    ):
-        max_level = 2
+    # 2. Suppressors & Modifiers
+    suppressor = 1.0
 
-    # ------------------------------------------------------------------
-    # Global PoP Check:
-    # If any indicator suggests a full thunderstorm, but the chance
-    # of precipitation is too low, downgrade it to a possible-thunderstorm.
-    # ------------------------------------------------------------------
-    if max_level == 2 and pop < PRECIP_PROB_THRESHOLD:
-        max_level = 1
+    # CIN Penalty
+    if valid(cin):
+        if cin <= CIN_THRESHOLDS["high"]:
+            suppressor *= 0.10
+        elif cin <= CIN_THRESHOLDS["low"]:
+            cin_penalty = (cin - (CIN_THRESHOLDS["low"])) / (CIN_THRESHOLDS["high"] - (CIN_THRESHOLDS["low"]))
+            suppressor *= 1.0 - (0.70 * cin_penalty)
 
-    # ------------------------------------------------------------------
-    # 5. Map level to text and icon
-    # ------------------------------------------------------------------
-    if max_level == 2:
-        thuText = "thunderstorm"
-    elif max_level == 1:
-        thuText = "possible-thunderstorm"
+    # Dewpoint Depression Penalty (Applied globally)
+    if valid(temperature) and valid(dewpoint):
+        depression = temperature - dewpoint
+        if depression >= DEWPOINT_DEPRESSION_FOR_STORM["high"]:
+            suppressor *= 0.0
+        elif depression > DEWPOINT_DEPRESSION_FOR_STORM["low"]:
+            dep_penalty = (depression - DEWPOINT_DEPRESSION_FOR_STORM["low"]) / (DEWPOINT_DEPRESSION_FOR_STORM["high"] - DEWPOINT_DEPRESSION_FOR_STORM["low"])
+            suppressor *= 1.0 - (0.80 * dep_penalty)
 
-    if thuText == "thunderstorm":
-        thuIcon = "thunderstorm"
-    elif thuText == "possible-thunderstorm" and icon == "pirate":
-        thuIcon = (
-            "possible-thunderstorm-day" if is_day else "possible-thunderstorm-night"
-        )
+    # Apply Precipitation Probability
+    pop_val = 1.0 if (pop is None or np.isnan(pop)) else pop
+    final_score = base_confidence * suppressor * pop_val
+
+    # 3. Output State Decision
+    thu_text = None
+    thu_icon = None
+
+    if final_score >= SCORE["thunderstorm"]:
+        thu_text = "thunderstorm"
+        thu_icon = "thunderstorm"
+    elif final_score >= SCORE["possible"]:
+        thu_text = "possible-thunderstorm"
+        if icon == "pirate":
+            thu_icon = (
+                "possible-thunderstorm-day"
+                if is_day
+                else "possible-thunderstorm-night"
+            )
+        else:
+            thu_icon = "thunderstorm"
 
     if mode == "summary":
-        return thuText
+        return thu_text
     elif mode == "icon":
-        return thuIcon
-    else:
-        return thuText, thuIcon
+        return thu_icon
+    return thu_text, thu_icon
 
 
 def kelvin_from_celsius(celsius):

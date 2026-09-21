@@ -62,38 +62,39 @@ PRECIP_PROB_THRESHOLD = 0.25
 
 # CAPE thresholds (J/kg)
 CAPE_THRESHOLDS = {
-    "low": 1250,
+    "low": 500,
     "high": 2500,
 }
 
 # Lifted Index thresholds (K) — more negative = more unstable
 LI_THRESHOLDS = {
-    "possible": -3,  # Marginally unstable; isolated thunderstorms possible
-    "thunderstorm": -6,  # Very unstable; thunderstorms likely
+    "low": 0,  # Marginally unstable; isolated thunderstorms possible
+    "high": -6,  # Very unstable; thunderstorms likely
 }
 
 # Convective Inhibition thresholds (J/kg, negative by convention)
 CIN_THRESHOLDS = {
-    "moderate": -50,  # Moderate cap; reduces but does not prevent convection
-    "suppressed": -200,  # Strong cap; suppresses convection
+    "low": -50,  # Moderate cap; reduces but does not prevent convection
+    "high": -200,  # Strong cap; suppresses convection
 }
 
 # Vertical velocity (omega) thresholds (Pa/s) — negative = upward motion
 VV_THRESHOLDS = {
-    "strong_upward": -0.5,  # Forced ascent that can confirm a marginal storm signal
+    "strong_upward": 0.5,  # Forced ascent that can confirm a marginal storm signal
 }
 
-# K Index thresholds (°C / K equivalent)
-# K = (T850 − T500) + Td850 − (T700 − Td700)
+# K Index thresholds
 KI_THRESHOLDS = {
-    "possible": 20,  # Isolated thunderstorms possible
-    "thunderstorm": 35,  # Numerous thunderstorms likely
+    "low": 15,  # Isolated thunderstorms possible
+    "high": 35,  # Numerous thunderstorms likely
 }
 
-# Maximum temperature–dewpoint spread (°C) above which the atmosphere is
-# considered too dry for thunderstorms. Only applied when temperature > 0 °C
-# so that thundersnow can still be detected at sub-zero temperatures.
-MAX_DEWPOINT_DEPRESSION_FOR_STORM = 20
+# Temperature–dewpoint spread (°C) above which the atmosphere is
+# considered too dry for thunderstorms.
+DEWPOINT_DEPRESSION_FOR_STORM = {
+    "low": 12,
+    "high": 20,
+}
 
 # Lifted Index threshold
 LIFTED_INDEX_THRESHOLD = -4
