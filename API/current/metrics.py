@@ -53,6 +53,7 @@ from API.constants.model_const import (
     HRRR_SUBH,
     NBM,
     RTMA_RU,
+    URMA,
 )
 from API.constants.shared_const import MISSING_DATA
 from API.legacy.current import get_legacy_current_summary
@@ -100,6 +101,37 @@ def _select_value(strategies, default=MISSING_DATA):
             if val is not None and not np.isnan(val):
                 return val
     return default
+
+
+def _urma_with_gfs_fallback(
+    urma: np.ndarray | None, gfs: np.ndarray | None
+) -> np.ndarray | None:
+    """Fill missing URMA observations per hour for current-time interpolation."""
+    if urma is None or gfs is None:
+        return urma
+    combined = urma.copy()
+    fields = {
+        "temp": "temp",
+        "dew": "dew",
+        "gust": "gust",
+        "vis": "vis",
+        "cloud": "cloud",
+        "pressure": "station_pressure",
+    }
+    for urma_field, gfs_field in fields.items():
+        col = URMA[urma_field]
+        missing = ~np.isfinite(combined[:, col])
+        combined[missing, col] = gfs[missing, GFS[gfs_field]]
+    missing_wind = ~np.isfinite(combined[:, URMA["wind_u"]]) | ~np.isfinite(
+        combined[:, URMA["wind_v"]]
+    )
+    for field in ("wind_u", "wind_v"):
+        combined[missing_wind, URMA[field]] = gfs[missing_wind, GFS[field]]
+    missing_humidity = ~np.isfinite(combined[:, URMA["humidity"]])
+    combined[missing_humidity, URMA["humidity"]] = (
+        gfs[missing_humidity, GFS["humidity"]] * 0.01
+    )
+    return combined
 
 
 # Pre-define priority orders for currently block.
@@ -219,6 +251,9 @@ def _build_source_strategies(
         else:
             # Rest of world
             order = _CURRENTLY_ORDER_ROW
+
+    if "urma" in source_map:
+        order = ("urma", *order)
 
     # Build strategies in priority order
     strategies = []
@@ -363,6 +398,10 @@ def _get_temp(
         Current temperature.
     """
     source_map = {
+        "urma": (
+            lambda: "urma" in sourceList,
+            lambda: _interp_scalar(model_data["URMA_Merged"], URMA["temp"], state),
+        ),
         "rtma_ru": (
             lambda: "rtma_ru" in sourceList,
             lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["temp"]],
@@ -437,6 +476,10 @@ def _get_dew(
     """
     # Use same source priority logic as temperature (DWD-aware)
     source_map = {
+        "urma": (
+            lambda: "urma" in sourceList,
+            lambda: _interp_scalar(model_data["URMA_Merged"], URMA["dew"], state),
+        ),
         "rtma_ru": (
             lambda: "rtma_ru" in sourceList,
             lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["dew"]],
@@ -512,6 +555,10 @@ def _get_humidity(
         Current humidity.
     """
     source_map = {
+        "urma": (
+            lambda: "urma" in sourceList,
+            lambda: _interp_scalar(model_data["URMA_Merged"], URMA["humidity"], state),
+        ),
         "rtma_ru": (
             lambda: "rtma_ru" in sourceList,
             lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["humidity"]],
@@ -673,6 +720,12 @@ def _get_wind(
         Current wind speed.
     """
     source_map = {
+        "urma": (
+            lambda: "urma" in sourceList,
+            lambda: _interp_uv_magnitude(
+                model_data["URMA_Merged"], URMA["wind_u"], URMA["wind_v"], state
+            ),
+        ),
         "rtma_ru": (
             lambda: "rtma_ru" in sourceList,
             lambda: math.sqrt(
@@ -765,6 +818,10 @@ def _get_gust(
         Current wind gust.
     """
     source_map = {
+        "urma": (
+            lambda: "urma" in sourceList,
+            lambda: _interp_scalar(model_data["URMA_Merged"], URMA["gust"], state),
+        ),
         "rtma_ru": (
             lambda: "rtma_ru" in sourceList,
             lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["gust"]],
@@ -926,6 +983,13 @@ def _get_bearing(
         Current wind bearing.
     """
     source_map = {
+        "urma": (
+            lambda: "urma" in sourceList,
+            lambda: _bearing_from_components(
+                model_data["URMA_Merged"][state.idx2, URMA["wind_u"]],
+                model_data["URMA_Merged"][state.idx2, URMA["wind_v"]],
+            ),
+        ),
         "rtma_ru": (
             lambda: "rtma_ru" in sourceList,
             lambda: _bearing_from_components(
@@ -1014,6 +1078,12 @@ def _get_cloud(
         Current cloud cover.
     """
     source_map = {
+        "urma": (
+            lambda: "urma" in sourceList,
+            lambda: (
+                _interp_scalar(model_data["URMA_Merged"], URMA["cloud"], state) * 0.01
+            ),
+        ),
         "rtma_ru": (
             lambda: "rtma_ru" in sourceList,
             lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["cloud"]] * 0.01,
@@ -1162,7 +1232,13 @@ def _get_station_pressure(sourceList, model_data, state: InterpolationState):
         Current station pressure.
     """
     val = MISSING_DATA
-    if "rtma_ru" in sourceList:
+    if "urma" in sourceList:
+        val = _interp_scalar(model_data["URMA_Merged"], URMA["pressure"], state)
+        if not np.isfinite(val) and "gfs" in sourceList:
+            val = _interp_scalar(
+                model_data["GFS_Merged"], GFS["station_pressure"], state
+            )
+    elif "rtma_ru" in sourceList:
         val = model_data["dataOut_rtma_ru"][0, RTMA_RU["pressure"]]
     elif "gfs" in sourceList:
         val = (
@@ -1204,6 +1280,10 @@ def _get_vis(
         Current visibility.
     """
     source_map = {
+        "urma": (
+            lambda: "urma" in sourceList,
+            lambda: _interp_scalar(model_data["URMA_Merged"], URMA["vis"], state),
+        ),
         "rtma_ru": (
             lambda: "rtma_ru" in sourceList,
             lambda: (
@@ -1513,6 +1593,10 @@ def _get_feels_like(
     val = _select_value(
         [
             (
+                lambda: timeMachine and model_data.get("urma_active_current", False),
+                lambda: apparent,
+            ),
+            (
                 lambda: "nbm" in sourceList,
                 lambda: _interp_scalar(
                     model_data["NBM_Merged"], NBM["apparent"], state
@@ -1614,6 +1698,7 @@ def build_current_section(
     inc_airqualitydetails: int = 0,
     HRDPS_Merged=None,
     GDPS_Merged=None,
+    URMA_Merged=None,
 ) -> CurrentSection:
     """
     Calculate the currently block and return it alongside the raw array.
@@ -1701,6 +1786,13 @@ def build_current_section(
         "DWD_MOSMIX_Merged": DWD_MOSMIX_Merged,
         "ECMWF_Merged": ECMWF_Merged,
         "GFS_Merged": GFS_Merged,
+        "URMA_Merged": _urma_with_gfs_fallback(URMA_Merged, GFS_Merged),
+        "urma_active_current": isinstance(URMA_Merged, np.ndarray)
+        and np.isfinite(
+            URMA_Merged[[idx1, idx2]][
+                :, [URMA["temp"], URMA["humidity"], URMA["wind_u"], URMA["wind_v"]]
+            ]
+        ).any(),
         "ERA5_MERGED": ERA5_MERGED,
         "NBM_Fire_Merged": NBM_Fire_Merged,
         "HRDPS_Merged": HRDPS_Merged,

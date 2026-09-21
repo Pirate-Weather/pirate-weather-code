@@ -16,10 +16,13 @@ from API.constants.model_const import (
     GFS,
     HRDPS,
     REPS,
+    URMA,
 )
 from API.constants.shared_const import MISSING_DATA
 from API.request.grid_indexing import GridIndexingResult
 from API.utils.geo import rounder
+
+URMA_TIME_TOLERANCE_SECONDS = 300
 
 
 @dataclass
@@ -66,6 +69,7 @@ class MergeResult:
     aigefs: np.ndarray | None
     aifs: np.ndarray | None
     metadata: SourceMetadata
+    urma: np.ndarray | None = None
 
 
 def nearest_index(a, v) -> int:
@@ -349,6 +353,32 @@ def _merge_simple_source(
     return merged
 
 
+def _merge_urma_source(
+    data: np.ndarray, base_timestamp: float, num_hours: int, min_timestamp: float
+) -> tuple[np.ndarray | None, float | None]:
+    """Align hourly analyses by their valid time without filling missing observations."""
+    merged = np.full((num_hours, max(URMA.values()) + 1), MISSING_DATA)
+    latest_time = None
+    for row in data:
+        timestamp = float(row[0])
+        if not np.isfinite(timestamp):
+            continue
+        hour = int(round((timestamp - base_timestamp) / 3600))
+        aligned_time = base_timestamp + hour * 3600
+        if (
+            not 0 <= hour < num_hours
+            or abs(timestamp - aligned_time) > URMA_TIME_TOLERANCE_SECONDS
+            or aligned_time < min_timestamp
+        ):
+            continue
+        if not np.isfinite(row[1:]).any():
+            continue
+        merged[hour] = row[: merged.shape[1]]
+        merged[hour, 0] = aligned_time
+        latest_time = max(latest_time or aligned_time, aligned_time)
+    return (merged, latest_time) if latest_time is not None else (None, None)
+
+
 def merge_hourly_models(
     *,
     metadata: SourceMetadata,
@@ -371,6 +401,8 @@ def merge_hourly_models(
     data_aifs: np.ndarray | None,
     logger: logging.Logger,
     loc_tag: str,
+    data_urma: np.ndarray | None = None,
+    urma_min_timestamp: float | None = None,
 ) -> MergeResult:
     hrrr_merged = None
     nbm_merged = None
@@ -386,6 +418,14 @@ def merge_hourly_models(
     aigfs_merged = None
     aigefs_merged = None
     aifs_merged = None
+    urma_merged = None
+
+    if isinstance(data_urma, np.ndarray) and urma_min_timestamp is not None:
+        urma_merged, latest_urma_time = _merge_urma_source(
+            data_urma, base_day_utc_grib, num_hours, urma_min_timestamp
+        )
+        if urma_merged is not None:
+            metadata.add("urma", time_value=_format_run_time(latest_urma_time))
 
     try:
         if (
@@ -566,4 +606,5 @@ def merge_hourly_models(
         aigefs=aigefs_merged,
         aifs=aifs_merged,
         metadata=metadata,
+        urma=urma_merged,
     )

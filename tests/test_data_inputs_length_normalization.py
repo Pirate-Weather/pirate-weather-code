@@ -2,9 +2,17 @@ import numpy as np
 import pytest
 
 from API.api_utils import map_ensemble_precip_rates_to_ptype
-from API.constants.model_const import ERA5, GDPS, GEPS, HRDPS, REPS
+from API.constants.model_const import ERA5, GDPS, GEPS, HRDPS, REPS, URMA
 from API.data_inputs import _normalize_length, prepare_data_inputs
 from API.responseLocal import convert_data_to_celsius
+
+
+def test_convert_data_to_celsius_includes_urma_temperature_and_dew_point():
+    urma = np.full((1, max(URMA.values()) + 1), np.nan)
+    urma[0, URMA["temp"]] = 288.15
+    urma[0, URMA["dew"]] = 283.15
+    convert_data_to_celsius(*([None] * 13), dataOut_urma=urma)
+    np.testing.assert_allclose(urma[0, [URMA["temp"], URMA["dew"]]], [15, 10])
 
 
 @pytest.mark.parametrize(

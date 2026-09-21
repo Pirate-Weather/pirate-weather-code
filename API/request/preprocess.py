@@ -128,6 +128,7 @@ class InitialRequestContext:
     ex_hrrr: int
     ex_gefs: int
     ex_gfs: int
+    ex_urma: int
     ex_rtma_ru: int
     ex_ecmwf: int
     ex_dwd_mosmix: int
@@ -443,6 +444,7 @@ def _parse_parameters(
     ex_hrrr = int("hrrr" in exclude_params)
     ex_gefs = int("gefs" in exclude_params)
     ex_gfs = int("gfs" in exclude_params)
+    ex_urma = int("urma" in excluded)
     ex_rtma_ru = int("rtma_ru" in exclude_params)
     ex_ecmwf = int("ecmwf_ifs" in exclude_params)
     ex_dwd_mosmix = int("dwd_mosmix" in exclude_params)
@@ -515,6 +517,7 @@ def _parse_parameters(
         ex_gdps,
         ex_geps,
         ex_reps,
+        ex_urma,
     )
 
 
@@ -712,6 +715,7 @@ async def prepare_initial_request(
         ex_gdps,
         ex_geps,
         ex_reps,
+        ex_urma,
     ) = _parse_parameters(
         exclude,
         include,
@@ -858,6 +862,7 @@ async def prepare_initial_request(
         ex_hrrr=ex_hrrr,
         ex_gefs=ex_gefs,
         ex_gfs=ex_gfs,
+        ex_urma=ex_urma,
         ex_rtma_ru=ex_rtma_ru,
         ex_ecmwf=ex_ecmwf,
         ex_dwd_mosmix=ex_dwd_mosmix,

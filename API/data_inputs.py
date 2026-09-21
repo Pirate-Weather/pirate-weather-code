@@ -24,6 +24,7 @@ from API.constants.model_const import (
     RAQDPS,
     REPS,
     SILAM,
+    URMA,
 )
 from API.utils.geo import is_in_canada
 from API.utils.source_priority import should_gfs_precede_dwd
@@ -329,6 +330,8 @@ def _stack_with_priority(
             # Rest of world: ... > DWD > ECMWF > GFS > ERA5
             order = _PRIORITY_ORDER_ROW
 
+    if source_data.get("urma") is not None:
+        order = ("urma", *order)
     return _stack_in_order(num_hours, order, source_data)
 
 
@@ -352,6 +355,7 @@ def prepare_data_inputs(
     reps_merged=None,
     gdps_merged=None,
     geps_merged=None,
+    urma_merged=None,
 ):
     """
     Prepare data inputs for the hourly block.
@@ -378,6 +382,7 @@ def prepare_data_inputs(
     # Helper to check if ERA5 is valid (it uses isinstance check in original code)
     era5_valid = isinstance(era5_merged, np.ndarray)
     dwd_valid = isinstance(dwd_mosmix_merged, np.ndarray)
+    urma_valid = isinstance(urma_merged, np.ndarray) and "urma" in source_list
 
     # --- InterThour_inputs ---
     inter_thour_inputs = {}
@@ -639,6 +644,7 @@ def prepare_data_inputs(
         lat,
         lon,
         source_data={
+            "urma": urma_merged[:, URMA["temp"]] if urma_valid else None,
             "nbm": nbm_merged[:, NBM["temp"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["temp"]] if hrrr_merged is not None else None,
             "hrdps": hrdps_merged[:, HRDPS["temp"]]
@@ -663,6 +669,7 @@ def prepare_data_inputs(
         lat,
         lon,
         source_data={
+            "urma": urma_merged[:, URMA["dew"]] if urma_valid else None,
             "nbm": nbm_merged[:, NBM["dew"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["dew"]] if hrrr_merged is not None else None,
             "hrdps": hrdps_merged[:, HRDPS["dew"]]
@@ -702,6 +709,7 @@ def prepare_data_inputs(
         lat,
         lon,
         source_data={
+            "urma": urma_merged[:, URMA["humidity"]] * 100 if urma_valid else None,
             "nbm": nbm_merged[:, NBM["humidity"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["humidity"]]
             if hrrr_merged is not None
@@ -752,6 +760,11 @@ def prepare_data_inputs(
         lat,
         lon,
         source_data={
+            "urma": _wind_speed(
+                urma_merged[:, URMA["wind_u"]], urma_merged[:, URMA["wind_v"]]
+            )
+            if urma_valid
+            else None,
             "nbm": nbm_merged[:, NBM["wind"]] if nbm_merged is not None else None,
             "hrrr": _wind_speed(
                 hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]]
@@ -794,6 +807,7 @@ def prepare_data_inputs(
         lat,
         lon,
         source_data={
+            "urma": urma_merged[:, URMA["gust"]] if urma_valid else None,
             "nbm": nbm_merged[:, NBM["gust"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["gust"]] if hrrr_merged is not None else None,
             "hrdps": hrdps_merged[:, HRDPS["gust"]]
@@ -817,6 +831,11 @@ def prepare_data_inputs(
         lat,
         lon,
         source_data={
+            "urma": _bearing(
+                urma_merged[:, URMA["wind_u"]], urma_merged[:, URMA["wind_v"]]
+            )
+            if urma_valid
+            else None,
             "nbm": nbm_merged[:, NBM["bearing"]] if nbm_merged is not None else None,
             "hrrr": _bearing(
                 hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]]
@@ -859,6 +878,7 @@ def prepare_data_inputs(
         lat,
         lon,
         source_data={
+            "urma": urma_merged[:, URMA["cloud"]] * 0.01 if urma_valid else None,
             "nbm": nbm_merged[:, NBM["cloud"]] * 0.01
             if nbm_merged is not None
             else None,
@@ -914,6 +934,7 @@ def prepare_data_inputs(
         lat,
         lon,
         source_data={
+            "urma": urma_merged[:, URMA["vis"]] if urma_valid else None,
             "nbm": nbm_merged[:, NBM["vis"]] if nbm_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["vis"]] if hrrr_merged is not None else None,
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["vis"]]
@@ -998,6 +1019,7 @@ def prepare_data_inputs(
     if "stationPressure" in extra_vars:
         station_pressure_inputs = _stack_fields(
             num_hours,
+            urma_merged[:, URMA["pressure"]] if urma_valid else None,
             gfs_merged[:, GFS["station_pressure"]] if gfs_merged is not None else None,
             era5_merged[:, ERA5["surface_pressure"]] if era5_valid else None,
             hrdps_merged[:, HRDPS["station_pressure"]]

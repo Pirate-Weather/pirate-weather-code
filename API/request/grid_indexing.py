@@ -296,6 +296,7 @@ class ZarrSources:
     gfs: Any
     ecmwf: Any
     gefs: Any
+    urma: Any = None
     hrdps: Any = None
     gdps: Any = None
     geps: Any = None
@@ -392,6 +393,12 @@ class GridIndexingResult:
     y_silam: float | None = None
     silam_lat: float | None = None
     silam_lon: float | None = None
+    dataOut_urma: np.ndarray | bool = False
+    urmaRunTime: float | None = None
+    x_urma: float | None = None
+    y_urma: float | None = None
+    urma_lat: float | None = None
+    urma_lon: float | None = None
 
 
 def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours: int):
@@ -494,6 +501,7 @@ async def calculate_grid_indexing(
     ex_hrrr: int,
     ex_nbm: int,
     ex_gfs: int,
+    ex_urma: int = 0,
     ex_ecmwf: int,
     ex_gefs: int,
     ex_rtma_ru: int,
@@ -523,6 +531,7 @@ async def calculate_grid_indexing(
     readRTMA_RU = False
     readNBM = False
     readGFS = False
+    readURMA = False
     readECMWF = False
     readGEFS = False
     readHRDPS = False
@@ -614,6 +623,36 @@ async def calculate_grid_indexing(
         sourceIDX["hrrr"]["lon"] = round(((hrrr_lon + 180) % 360) - 180, 2)
 
     timer.log("### RTMA_RU Start ###")
+
+    dataOut_urma = False
+    x_urma = y_urma = urma_lat = urma_lon = None
+    if (
+        time_machine
+        and ex_urma != 1
+        and zarr_sources.urma is not None
+        and utc_time < now_time
+        and utc_time + datetime.timedelta(hours=num_hours)
+        > now_time - datetime.timedelta(days=10)
+    ):
+        urma_lat, urma_lon, x_urma, y_urma, urma_in_bounds = _get_grid_coords(
+            lat,
+            lon,
+            RTMA_RU_CENTRAL_LONG,
+            RTMA_RU_CENTRAL_LAT,
+            RTMA_RU_PARALLEL,
+            RTMA_RU_AXIS,
+            RTMA_RU_MIN_X,
+            RTMA_RU_MIN_Y,
+            RTMA_RU_DELTA,
+            RTMA_RU_X_MIN,
+            RTMA_RU_Y_MIN,
+            RTMA_RU_X_MAX,
+            RTMA_RU_Y_MAX,
+        )
+        if urma_in_bounds:
+            readURMA = True
+        else:
+            x_urma = y_urma = urma_lat = urma_lon = None
 
     if (
         az_lon < -138.3
@@ -718,7 +757,7 @@ async def calculate_grid_indexing(
         readERA5 = True
         readGFS = False
         ex_gfs = 1
-    elif ex_gfs:
+    elif ex_gfs or zarr_sources.gfs is None:
         dataOut_gfs = False
         readGFS = False
     else:
@@ -985,6 +1024,8 @@ async def calculate_grid_indexing(
         zarrTasks["NBM"] = weather.zarr_read("NBM", zarr_sources.nbm, x_nbm, y_nbm)
     if readGFS:
         zarrTasks["GFS"] = weather.zarr_read("GFS", zarr_sources.gfs, x_p, y_p)
+    if readURMA:
+        zarrTasks["URMA"] = weather.zarr_read("URMA", zarr_sources.urma, x_urma, y_urma)
     if readECMWF:
         zarrTasks["ECMWF"] = weather.zarr_read(
             "ECMWF", zarr_sources.ecmwf, x_p_eur, y_p_eur
@@ -1047,6 +1088,7 @@ async def calculate_grid_indexing(
     nbmRunTime = None
     nbmFireRunTime = None
     gfsRunTime = None
+    urmaRunTime = None
     ecmwfRunTime = None
     gefsRunTime = None
     hrdpsRunTime = None
@@ -1145,6 +1187,15 @@ async def calculate_grid_indexing(
                     logger.warning("OLD GFS")
             except (ValueError, TypeError, AttributeError):
                 logger.debug("Failed to parse GFS runtime for freshness check")
+
+    if readURMA:
+        dataOut_urma = zarr_results["URMA"]
+        if (
+            isinstance(dataOut_urma, np.ndarray)
+            and dataOut_urma.size
+            and np.isfinite(dataOut_urma[:, 0]).any()
+        ):
+            urmaRunTime = float(np.nanmax(dataOut_urma[:, 0]))
 
     if readECMWF:
         dataOut_ecmwf = zarr_results["ECMWF"]
@@ -1469,6 +1520,7 @@ async def calculate_grid_indexing(
         dataOut_nbm=dataOut_nbm,
         dataOut_nbmFire=dataOut_nbmFire,
         dataOut_gfs=dataOut_gfs,
+        dataOut_urma=dataOut_urma,
         dataOut_ecmwf=dataOut_ecmwf,
         dataOut_gefs=dataOut_gefs,
         dataOut_hrdps=dataOut_hrdps,
@@ -1487,6 +1539,7 @@ async def calculate_grid_indexing(
         nbmRunTime=nbmRunTime,
         nbmFireRunTime=nbmFireRunTime,
         gfsRunTime=gfsRunTime,
+        urmaRunTime=urmaRunTime,
         ecmwfRunTime=ecmwfRunTime,
         gefsRunTime=gefsRunTime,
         hrdpsRunTime=hrdpsRunTime,
@@ -1501,6 +1554,10 @@ async def calculate_grid_indexing(
         y_rtma=y_rtma,
         rtma_lat=rtma_lat,
         rtma_lon=rtma_lon,
+        x_urma=x_urma,
+        y_urma=y_urma,
+        urma_lat=urma_lat,
+        urma_lon=urma_lon,
         x_nbm=x_nbm,
         y_nbm=y_nbm,
         nbm_lat=nbm_lat,
