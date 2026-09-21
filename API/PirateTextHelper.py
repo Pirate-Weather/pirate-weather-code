@@ -780,9 +780,9 @@ def calculate_thunderstorm_text(
 
     # PoP Threshold Scaling (Replaces raw linear pop_val)
     if valid(pop):
-        if pop <= POP_THRESHOLDS["low"]:
+        if pop <= PRECIP_PROB_THRESHOLD:
             suppressor *= 0.2  # Heavy penalty for low PoP environments
-        elif pop < POP_THRESHOLDS["high"]:
+        elif pop < HIGH_PRECIP_PROB_THRESHOLD:
             pop_penalty = (pop - PRECIP_PROB_THRESHOLD) / POP_SPAN
             suppressor *= 0.2 + (0.8 * pop_penalty)  # Smooth ramp-up from 0.2 to 1.0
 
