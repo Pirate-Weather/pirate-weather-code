@@ -711,6 +711,7 @@ def calculate_thunderstorm_text(
         "thunderstorm": 60.0,
         "possible": 30.0,
     }
+    HIGH_PRECIP_PROB_THRESHOLD = 0.7
 
     earned_score = 0.0
     total_possible_weight = 0.0
@@ -719,6 +720,7 @@ def calculate_thunderstorm_text(
     CAPE_SPAN = CAPE_THRESHOLDS["high"] - CAPE_THRESHOLDS["low"]  # 2000
     LI_SPAN = abs(LI_THRESHOLDS["high"] - LI_THRESHOLDS["low"])  # 6
     KI_SPAN = KI_THRESHOLDS["high"] - KI_THRESHOLDS["low"]  # 20
+    POP_SPAN = HIGH_PRECIP_PROB_THRESHOLD - PRECIP_PROB_THRESHOLD  # 0.25 to 0.7
 
     # Continuous Feature Scaling
     if valid(cape):
@@ -776,9 +778,15 @@ def calculate_thunderstorm_text(
             )
             suppressor *= 1.0 - (0.80 * dep_penalty)
 
-    # Apply Precipitation Probability
-    pop_val = 1.0 if (pop is None or np.isnan(pop)) else pop
-    final_score = base_confidence * suppressor * pop_val
+    # PoP Threshold Scaling (Replaces raw linear pop_val)
+    if valid(pop):
+        if pop <= POP_THRESHOLDS["low"]:
+            suppressor *= 0.2  # Heavy penalty for low PoP environments
+        elif pop < POP_THRESHOLDS["high"]:
+            pop_penalty = (pop - PRECIP_PROB_THRESHOLD) / POP_SPAN
+            suppressor *= 0.2 + (0.8 * pop_penalty)  # Smooth ramp-up from 0.2 to 1.0
+
+    final_score = base_confidence * suppressor
 
     # 3. Output State Decision
     thu_text = None
