@@ -717,25 +717,33 @@ def calculate_thunderstorm_text(
 
     # Inside your function, calculate the spans cleanly:
     CAPE_SPAN = CAPE_THRESHOLDS["high"] - CAPE_THRESHOLDS["low"]  # 2000
-    LI_SPAN = abs(LI_THRESHOLDS["high"] - LI_THRESHOLDS["low"])    # 6
-    KI_SPAN = KI_THRESHOLDS["high"] - KI_THRESHOLDS["low"]        # 20
+    LI_SPAN = abs(LI_THRESHOLDS["high"] - LI_THRESHOLDS["low"])  # 6
+    KI_SPAN = KI_THRESHOLDS["high"] - KI_THRESHOLDS["low"]  # 20
 
     # Continuous Feature Scaling
     if valid(cape):
         total_possible_weight += WEIGHTS["cape"]
-        earned_score += WEIGHTS["cape"] * clamp((cape - CAPE_THRESHOLDS["low"]) / CAPE_SPAN)
+        earned_score += WEIGHTS["cape"] * clamp(
+            (cape - CAPE_THRESHOLDS["low"]) / CAPE_SPAN
+        )
 
     if valid(lifted_index):
         total_possible_weight += WEIGHTS["li"]
-        earned_score += WEIGHTS["li"] * clamp((LI_THRESHOLDS["low"] - lifted_index) / LI_SPAN)
+        earned_score += WEIGHTS["li"] * clamp(
+            (LI_THRESHOLDS["low"] - lifted_index) / LI_SPAN
+        )
 
     if valid(k_index):
         total_possible_weight += WEIGHTS["ki"]
-        earned_score += WEIGHTS["ki"] * clamp((k_index - KI_THRESHOLDS["low"]) / KI_SPAN)
+        earned_score += WEIGHTS["ki"] * clamp(
+            (k_index - KI_THRESHOLDS["low"]) / KI_SPAN
+        )
 
     if valid(vertical_velocity):
         total_possible_weight += WEIGHTS["vv"]
-        earned_score += WEIGHTS["vv"] * clamp(-vertical_velocity / VV_THRESHOLDS["strong_upward"])
+        earned_score += WEIGHTS["vv"] * clamp(
+            -vertical_velocity / VV_THRESHOLDS["strong_upward"]
+        )
 
     # Prevent false positives if payload lacks enough core parameters
     if total_possible_weight < 35.0:
@@ -751,7 +759,9 @@ def calculate_thunderstorm_text(
         if cin <= CIN_THRESHOLDS["high"]:
             suppressor *= 0.10
         elif cin <= CIN_THRESHOLDS["low"]:
-            cin_penalty = (cin - (CIN_THRESHOLDS["low"])) / (CIN_THRESHOLDS["high"] - (CIN_THRESHOLDS["low"]))
+            cin_penalty = (cin - (CIN_THRESHOLDS["low"])) / (
+                CIN_THRESHOLDS["high"] - (CIN_THRESHOLDS["low"])
+            )
             suppressor *= 1.0 - (0.70 * cin_penalty)
 
     # Dewpoint Depression Penalty (Applied globally)
@@ -760,7 +770,10 @@ def calculate_thunderstorm_text(
         if depression >= DEWPOINT_DEPRESSION_FOR_STORM["high"]:
             suppressor *= 0.0
         elif depression > DEWPOINT_DEPRESSION_FOR_STORM["low"]:
-            dep_penalty = (depression - DEWPOINT_DEPRESSION_FOR_STORM["low"]) / (DEWPOINT_DEPRESSION_FOR_STORM["high"] - DEWPOINT_DEPRESSION_FOR_STORM["low"])
+            dep_penalty = (depression - DEWPOINT_DEPRESSION_FOR_STORM["low"]) / (
+                DEWPOINT_DEPRESSION_FOR_STORM["high"]
+                - DEWPOINT_DEPRESSION_FOR_STORM["low"]
+            )
             suppressor *= 1.0 - (0.80 * dep_penalty)
 
     # Apply Precipitation Probability
@@ -778,9 +791,7 @@ def calculate_thunderstorm_text(
         thu_text = "possible-thunderstorm"
         if icon == "pirate":
             thu_icon = (
-                "possible-thunderstorm-day"
-                if is_day
-                else "possible-thunderstorm-night"
+                "possible-thunderstorm-day" if is_day else "possible-thunderstorm-night"
             )
         else:
             thu_icon = "thunderstorm"
