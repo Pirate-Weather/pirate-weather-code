@@ -338,7 +338,6 @@ def _stack_with_priority(
 def prepare_data_inputs(
     source_list,
     nbm_merged,
-    nbm_fire_merged,
     hrrr_merged,
     dwd_mosmix_merged,
     ecmwf_merged,
@@ -363,7 +362,6 @@ def prepare_data_inputs(
     Args:
         source_list: List of available data sources.
         nbm_merged: NBM merged data array.
-        nbm_fire_merged: NBM fire merged data array.
         hrrr_merged: HRRR merged data array.
         dwd_mosmix_merged: DWD MOSMIX merged data array.
         ecmwf_merged: ECMWF merged data array.

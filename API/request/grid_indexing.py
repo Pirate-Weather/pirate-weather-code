@@ -292,7 +292,6 @@ class ZarrSources:
     hrrr_6h: Any
     hrrr: Any
     nbm: Any
-    nbm_fire: Any
     gfs: Any
     ecmwf: Any
     gefs: Any
@@ -319,7 +318,6 @@ class GridIndexingResult:
     dataOut_h2: np.ndarray | bool
     dataOut_hrrrh: np.ndarray | bool
     dataOut_nbm: np.ndarray | bool
-    dataOut_nbmFire: np.ndarray | bool
     dataOut_gfs: np.ndarray | bool
     dataOut_ecmwf: np.ndarray | bool
     dataOut_gefs: np.ndarray | bool
@@ -337,7 +335,6 @@ class GridIndexingResult:
     hrrrhRunTime: float | None
     h2RunTime: float | None
     nbmRunTime: float | None
-    nbmFireRunTime: float | None
     gfsRunTime: float | None
     ecmwfRunTime: float | None
     gefsRunTime: float | None
@@ -701,7 +698,6 @@ async def calculate_grid_indexing(
         or time_machine
     ):
         dataOut_nbm = False
-        dataOut_nbmFire = False
         x_nbm = None
         y_nbm = None
         nbm_lat = None
@@ -725,12 +721,10 @@ async def calculate_grid_indexing(
 
         if not nbm_in_bounds:
             dataOut_nbm = False
-            dataOut_nbmFire = False
         else:
             timer.log("### NBM Detail Start ###")
             readNBM = True
             dataOut_nbm = None
-            dataOut_nbmFire = None
 
     timer.log("### GFS/GEFS Start ###")
 
@@ -1086,7 +1080,6 @@ async def calculate_grid_indexing(
     hrrrhRunTime = None
     h2RunTime = None
     nbmRunTime = None
-    nbmFireRunTime = None
     gfsRunTime = None
     urmaRunTime = None
     ecmwfRunTime = None
@@ -1148,7 +1141,6 @@ async def calculate_grid_indexing(
 
     if readNBM:
         dataOut_nbm = zarr_results["NBM"]
-        dataOut_nbmFire = False
         if dataOut_nbm is not False:
             nbmRunTime = dataOut_nbm[HISTORY_PERIODS["NBM"], 0]
             try:
@@ -1518,7 +1510,6 @@ async def calculate_grid_indexing(
         dataOut_h2=dataOut_h2,
         dataOut_hrrrh=dataOut_hrrrh,
         dataOut_nbm=dataOut_nbm,
-        dataOut_nbmFire=dataOut_nbmFire,
         dataOut_gfs=dataOut_gfs,
         dataOut_urma=dataOut_urma,
         dataOut_ecmwf=dataOut_ecmwf,
@@ -1537,7 +1528,6 @@ async def calculate_grid_indexing(
         hrrrhRunTime=hrrrhRunTime,
         h2RunTime=h2RunTime,
         nbmRunTime=nbmRunTime,
-        nbmFireRunTime=nbmFireRunTime,
         gfsRunTime=gfsRunTime,
         urmaRunTime=urmaRunTime,
         ecmwfRunTime=ecmwfRunTime,

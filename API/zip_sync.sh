@@ -40,7 +40,6 @@ MODELS="
   HRRR
   HRRR_6H
   NBM
-  NBM_Fire
   NWS_Alerts
   RAQDPS
   REPS

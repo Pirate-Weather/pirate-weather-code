@@ -65,7 +65,6 @@ def test_prepare_data_inputs_normalizes_short_era5_series_to_num_hours():
     inputs = prepare_data_inputs(
         source_list=["era5"],
         nbm_merged=None,
-        nbm_fire_merged=None,
         hrrr_merged=None,
         dwd_mosmix_merged=None,
         ecmwf_merged=None,
@@ -153,7 +152,6 @@ def test_prepare_data_inputs_includes_canadian_model_fields():
     inputs = prepare_data_inputs(
         source_list=["hrdps", "gdps", "geps", "reps"],
         nbm_merged=None,
-        nbm_fire_merged=None,
         hrdps_merged=hrdps_merged,
         reps_merged=reps_merged,
         hrrr_merged=None,
@@ -238,7 +236,6 @@ def test_prepare_data_inputs_keeps_canadian_uv_index_direct():
     inputs = prepare_data_inputs(
         source_list=["hrdps", "gdps"],
         nbm_merged=None,
-        nbm_fire_merged=None,
         hrdps_merged=hrdps_merged,
         reps_merged=None,
         hrrr_merged=None,

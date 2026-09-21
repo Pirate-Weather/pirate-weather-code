@@ -138,7 +138,6 @@ GFS_Zarr = None
 URMA_Zarr = None
 ECMWF_Zarr = None
 NBM_Zarr = None
-NBM_Fire_Zarr = None
 GEFS_Zarr = None
 HRDPS_Zarr = None
 GDPS_Zarr = None
@@ -194,7 +193,6 @@ GFS_Zarr = zarr_stores.GFS_Zarr
 URMA_Zarr = zarr_stores.URMA_Zarr
 ECMWF_Zarr = zarr_stores.ECMWF_Zarr
 NBM_Zarr = zarr_stores.NBM_Zarr
-NBM_Fire_Zarr = zarr_stores.NBM_Fire_Zarr
 GEFS_Zarr = zarr_stores.GEFS_Zarr
 HRDPS_Zarr = zarr_stores.HRDPS_Zarr
 GDPS_Zarr = zarr_stores.GDPS_Zarr
@@ -548,7 +546,6 @@ async def PW_Forecast(
 
     HRRR_Merged = None
     NBM_Merged = None
-    NBM_Fire_Merged = None
     GFS_Merged = None
     ECMWF_Merged = None
     GEFS_Merged = None
@@ -566,7 +563,6 @@ async def PW_Forecast(
         hrrr_6h=HRRR_6H_Zarr,
         hrrr=HRRR_Zarr,
         nbm=NBM_Zarr,
-        nbm_fire=NBM_Fire_Zarr,
         gfs=GFS_Zarr,
         urma=URMA_Zarr,
         ecmwf=ECMWF_Zarr,
@@ -629,7 +625,6 @@ async def PW_Forecast(
     dataOut_h2 = grid_result.dataOut_h2
     dataOut_hrrrh = grid_result.dataOut_hrrrh
     dataOut_nbm = grid_result.dataOut_nbm
-    dataOut_nbmFire = grid_result.dataOut_nbmFire
     dataOut_gfs = grid_result.dataOut_gfs
     dataOut_urma = grid_result.dataOut_urma
     dataOut_ecmwf = grid_result.dataOut_ecmwf
@@ -728,9 +723,6 @@ async def PW_Forecast(
         data_hrrrh=dataOut_hrrrh if isinstance(dataOut_hrrrh, np.ndarray) else None,
         data_h2=dataOut_h2 if isinstance(dataOut_h2, np.ndarray) else None,
         data_nbm=dataOut_nbm if isinstance(dataOut_nbm, np.ndarray) else None,
-        data_nbm_fire=dataOut_nbmFire
-        if isinstance(dataOut_nbmFire, np.ndarray)
-        else None,
         data_gfs=dataOut_gfs if isinstance(dataOut_gfs, np.ndarray) else None,
         data_urma=dataOut_urma if isinstance(dataOut_urma, np.ndarray) else None,
         urma_min_timestamp=(nowTime - datetime.timedelta(days=10))
@@ -754,7 +746,6 @@ async def PW_Forecast(
 
     HRRR_Merged = merge_result.hrrr
     NBM_Merged = merge_result.nbm
-    NBM_Fire_Merged = merge_result.nbm_fire
     GFS_Merged = merge_result.gfs
     URMA_Merged = merge_result.urma
     if URMA_Merged is not None:
@@ -942,7 +933,6 @@ async def PW_Forecast(
     inputs = prepare_data_inputs(
         source_list=sourceList,
         nbm_merged=NBM_Merged,
-        nbm_fire_merged=NBM_Fire_Merged,
         hrrr_merged=HRRR_Merged,
         dwd_mosmix_merged=DWD_MOSMIX_Merged,
         ecmwf_merged=ECMWF_Merged,
@@ -1210,7 +1200,6 @@ async def PW_Forecast(
             GFS_Merged=GFS_Merged,
             URMA_Merged=URMA_Merged,
             ERA5_MERGED=ERA5_MERGED,
-            NBM_Fire_Merged=NBM_Fire_Merged,
             HRDPS_Merged=HRDPS_Merged,
             GDPS_Merged=GDPS_Merged,
             logger=logger,

@@ -1688,7 +1688,6 @@ def build_current_section(
     ECMWF_Merged,
     GFS_Merged,
     ERA5_MERGED,
-    NBM_Fire_Merged,
     logger,
     loc_tag: str,
     log_timing: Callable[[str], None] | None = None,
@@ -1744,7 +1743,6 @@ def build_current_section(
         ECMWF_Merged: ECMWF merged data.
         GFS_Merged: GFS merged data.
         ERA5_MERGED: ERA5 merged data.
-        NBM_Fire_Merged: NBM fire merged data.
         logger: Logger instance.
         loc_tag: Location tag.
         log_timing: Optional timing logger.
@@ -1794,7 +1792,6 @@ def build_current_section(
             ]
         ).any(),
         "ERA5_MERGED": ERA5_MERGED,
-        "NBM_Fire_Merged": NBM_Fire_Merged,
         "HRDPS_Merged": HRDPS_Merged,
         "GDPS_Merged": GDPS_Merged,
         "has_hrrr_merged": (
