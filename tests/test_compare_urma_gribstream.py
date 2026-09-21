@@ -2,6 +2,7 @@
 
 import datetime
 import importlib.util
+import itertools
 import json
 import math
 import os
@@ -133,7 +134,8 @@ def test_local_urma_day_matches_gribstream(monkeypatch):
         == local_day
     )
     assert all(
-        second - first == SECONDS_PER_HOUR for first, second in zip(hours, hours[1:])
+        second - first == SECONDS_PER_HOUR
+        for first, second in itertools.pairwise(hours)
     )
 
     try:
