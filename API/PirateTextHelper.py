@@ -801,8 +801,6 @@ def calculate_thunderstorm_text(
             thu_icon = (
                 "possible-thunderstorm-day" if is_day else "possible-thunderstorm-night"
             )
-        else:
-            thu_icon = "thunderstorm"
 
     if mode == "summary":
         return thu_text
