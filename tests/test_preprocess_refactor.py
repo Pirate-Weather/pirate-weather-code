@@ -166,6 +166,25 @@ def test_parse_parameters_ai_models_include_and_exclude_priority():
     assert result[26:30] == (1, 1, 1, 1)  # CMC models are excluded for AI mode
 
 
+def test_parse_parameters_excludes_urma_independently_of_gfs():
+    now_time = datetime.datetime(2026, 1, 1, 12, 0, 0)
+    kwargs = {
+        "include": None,
+        "extraVars": None,
+        "now_time": now_time,
+        "utc_time": now_time - datetime.timedelta(days=2),
+        "time_machine": True,
+        "tm_extra": False,
+    }
+    exclude_urma = _parse_parameters(exclude="urma", **kwargs)
+    exclude_gfs = _parse_parameters(exclude="gfs", **kwargs)
+
+    assert exclude_urma[12] == 0
+    assert exclude_urma[-1] == 1
+    assert exclude_gfs[12] == 1
+    assert exclude_gfs[-1] == 0
+
+
 @pytest.mark.parametrize("group_name", ["cmc", "cmcmodels"])
 def test_parse_parameters_excludes_cmc_group(group_name):
     now_time = datetime.datetime(2026, 1, 1, 12, 0, 0)

@@ -305,9 +305,8 @@ GEPS = {
     "snow": 7,
 }
 
-# Source names that provide forecast data (i.e. not current-conditions-only or elevation).
-# Used to validate that at least one forecast model is available for a request.
-# "hrrr" is the time-machine key for HRRR; "era5" covers historical time-machine requests.
+# Sources that can satisfy a forecast or Time Machine request, excluding
+# current-conditions-only and elevation data. URMA and ERA5 serve history.
 FORECAST_SOURCES = frozenset(
     {
         "hrrr_0-18",
@@ -315,6 +314,7 @@ FORECAST_SOURCES = frozenset(
         "hrrr",
         "nbm",
         "gfs",
+        "urma",
         "ecmwf_ifs",
         "gefs",
         "hrdps",

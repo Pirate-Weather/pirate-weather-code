@@ -56,6 +56,7 @@ from API.constants.model_const import (
     HRRR_SUBH,
     NBM,
     RTMA_RU,
+    URMA,
 )
 
 # Project imports
@@ -134,6 +135,7 @@ ETOPO_f = None
 SubH_Zarr = None
 HRRR_6H_Zarr = None
 GFS_Zarr = None
+URMA_Zarr = None
 ECMWF_Zarr = None
 NBM_Zarr = None
 NBM_Fire_Zarr = None
@@ -189,6 +191,7 @@ ETOPO_f = zarr_stores.ETOPO_f
 SubH_Zarr = zarr_stores.SubH_Zarr
 HRRR_6H_Zarr = zarr_stores.HRRR_6H_Zarr
 GFS_Zarr = zarr_stores.GFS_Zarr
+URMA_Zarr = zarr_stores.URMA_Zarr
 ECMWF_Zarr = zarr_stores.ECMWF_Zarr
 NBM_Zarr = zarr_stores.NBM_Zarr
 NBM_Fire_Zarr = zarr_stores.NBM_Fire_Zarr
@@ -291,6 +294,7 @@ def convert_data_to_celsius(
     dataOut_aifs,
     dataOut_hrdps,
     dataOut_gdps,
+    dataOut_urma=None,
 ):
     """
     Converts temperature, dew point, and apparent temperature from Kelvin to Celsius
@@ -323,6 +327,7 @@ def convert_data_to_celsius(
         (dataOut_aifs, ECMWF_AIFS, ["temp", "dew"]),
         (dataOut_hrdps, HRDPS, ["temp", "dew"]),
         (dataOut_gdps, GDPS, ["temp", "dew"]),
+        (dataOut_urma, URMA, ["temp", "dew"]),
     ]
 
     for data_array, indices_dict, keys in model_mappings:
@@ -495,6 +500,7 @@ async def PW_Forecast(
     exHRRR = initial.ex_hrrr
     exGEFS = initial.ex_gefs
     exGFS = initial.ex_gfs
+    exURMA = initial.ex_urma
     exRTMA_RU = initial.ex_rtma_ru
     exECMWF = initial.ex_ecmwf
     exDWD_MOSMIX = initial.ex_dwd_mosmix
@@ -562,6 +568,7 @@ async def PW_Forecast(
         nbm=NBM_Zarr,
         nbm_fire=NBM_Fire_Zarr,
         gfs=GFS_Zarr,
+        urma=URMA_Zarr,
         ecmwf=ECMWF_Zarr,
         gefs=GEFS_Zarr,
         hrdps=HRDPS_Zarr,
@@ -593,6 +600,7 @@ async def PW_Forecast(
         ex_hrrr=exHRRR,
         ex_nbm=exNBM,
         ex_gfs=exGFS,
+        ex_urma=exURMA,
         ex_ecmwf=exECMWF,
         ex_gefs=exGEFS,
         ex_rtma_ru=exRTMA_RU,
@@ -623,6 +631,7 @@ async def PW_Forecast(
     dataOut_nbm = grid_result.dataOut_nbm
     dataOut_nbmFire = grid_result.dataOut_nbmFire
     dataOut_gfs = grid_result.dataOut_gfs
+    dataOut_urma = grid_result.dataOut_urma
     dataOut_ecmwf = grid_result.dataOut_ecmwf
     dataOut_gefs = grid_result.dataOut_gefs
     dataOut_hrdps = grid_result.dataOut_hrdps
@@ -657,6 +666,7 @@ async def PW_Forecast(
         dataOut_aifs,
         dataOut_hrdps,
         dataOut_gdps,
+        dataOut_urma,
     )
 
     # 5. Build metadata about the data sources used for this forecast
@@ -722,6 +732,10 @@ async def PW_Forecast(
         if isinstance(dataOut_nbmFire, np.ndarray)
         else None,
         data_gfs=dataOut_gfs if isinstance(dataOut_gfs, np.ndarray) else None,
+        data_urma=dataOut_urma if isinstance(dataOut_urma, np.ndarray) else None,
+        urma_min_timestamp=(nowTime - datetime.timedelta(days=10))
+        .replace(tzinfo=datetime.UTC)
+        .timestamp(),
         data_ecmwf=dataOut_ecmwf if isinstance(dataOut_ecmwf, np.ndarray) else None,
         data_gefs=dataOut_gefs if isinstance(dataOut_gefs, np.ndarray) else None,
         data_hrdps=dataOut_hrdps if isinstance(dataOut_hrdps, np.ndarray) else None,
@@ -742,6 +756,14 @@ async def PW_Forecast(
     NBM_Merged = merge_result.nbm
     NBM_Fire_Merged = merge_result.nbm_fire
     GFS_Merged = merge_result.gfs
+    URMA_Merged = merge_result.urma
+    if URMA_Merged is not None:
+        source_metadata.source_idx["urma"] = {
+            "x": int(grid_result.x_urma),
+            "y": int(grid_result.y_urma),
+            "lat": round(float(grid_result.urma_lat), 2),
+            "lon": round(((float(grid_result.urma_lon) + 180) % 360) - 180, 2),
+        }
     ECMWF_Merged = merge_result.ecmwf
     GEFS_Merged = merge_result.gefs
     HRDPS_Merged = merge_result.hrdps
@@ -926,6 +948,7 @@ async def PW_Forecast(
         ecmwf_merged=ECMWF_Merged,
         gefs_merged=GEFS_Merged,
         gfs_merged=GFS_Merged,
+        urma_merged=URMA_Merged,
         era5_merged=ERA5_MERGED,
         extra_vars=extraVars,
         num_hours=numHours,
@@ -1046,6 +1069,14 @@ async def PW_Forecast(
             aq_inputs=aq_inputs,
             inc_airqualitydetails=incAirQualityDetails,
             minute_presence=minute_presence,
+            urma_hour_mask=(
+                np.isfinite(URMA_Merged[:, URMA["temp"]])
+                | np.isfinite(URMA_Merged[:, URMA["humidity"]])
+                | np.isfinite(URMA_Merged[:, URMA["wind_u"]])
+                | np.isfinite(URMA_Merged[:, URMA["wind_v"]])
+            )
+            if URMA_Merged is not None
+            else None,
             version=version,
         )
 
@@ -1177,6 +1208,7 @@ async def PW_Forecast(
             DWD_MOSMIX_Merged=DWD_MOSMIX_Merged,
             ECMWF_Merged=ECMWF_Merged,
             GFS_Merged=GFS_Merged,
+            URMA_Merged=URMA_Merged,
             ERA5_MERGED=ERA5_MERGED,
             NBM_Fire_Merged=NBM_Fire_Merged,
             HRDPS_Merged=HRDPS_Merged,
