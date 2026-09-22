@@ -22,9 +22,6 @@ services:
       ofelia.job-run.nbm-ingest.schedule: "0 30 0,2,4,6,8,10,12,14,16,18,20,22 * * *"
       ofelia.job-run.nbm-ingest.container: "pirate-ingest-nbm"
       ofelia.job-run.nbm-ingest.no-overlap: "true"
-      ofelia.job-run.nbm-fire-ingest.schedule: "0 40 5,11,17,23 * * *"
-      ofelia.job-run.nbm-fire-ingest.container: "pirate-ingest-nbm-fire"
-      ofelia.job-run.nbm-fire-ingest.no-overlap: "true"
       ofelia.job-run.subh-ingest.schedule: "0 45 * * * *"
       ofelia.job-run.subh-ingest.container: "pirate-ingest-subh"
       ofelia.job-run.subh-ingest.no-overlap: "true"
@@ -50,8 +47,6 @@ services:
       gfs_ingest:
         condition: service_completed_successfully
       nbm_ingest:
-        condition: service_completed_successfully
-      nbm_fire_ingest:
         condition: service_completed_successfully
       subh_ingest:
         condition: service_completed_successfully
@@ -114,29 +109,6 @@ services:
       gfs_ingest:
         condition: service_completed_successfully    
 
-  # NBM Fire Ingest
-  nbm_fire_ingest:
-    <<: *dns_defaults
-    container_name: pirate-ingest-nbm-fire
-    image: pirateingest:latest
-    volumes:
-      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
-      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
-    environment:
-      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
-      forecast_process_dir: "/tmp/Process/NBM_Fire"
-      forecast_path: "/data/Prod/NBM_Fire"
-      historic_path: "/data/Hist/NBM_Fire"
-      save_type: "Download"
-      zarr_store_workers: "1"
-      zarr_async_concurrency: "1"
-    command: ["API/NBM_Fire_Local_Ingest.py"]
-    depends_on:
-      gfs_ingest:
-        condition: service_completed_successfully
-      nbm_ingest:
-        condition: service_completed_successfully  
-
   # SubH Ingest
   subh_ingest:
     <<: *dns_defaults
@@ -183,9 +155,7 @@ services:
       nbm_ingest:
         condition: service_completed_successfully      
       subh_ingest:
-        condition: service_completed_successfully
-      nbm_fire_ingest:
-        condition: service_completed_successfully        
+        condition: service_completed_successfully  
 
   # HRRR Ingest
   hrrr_ingest:
@@ -211,8 +181,6 @@ services:
         condition: service_completed_successfully      
       subh_ingest:
         condition: service_completed_successfully
-      nbm_fire_ingest:
-        condition: service_completed_successfully 
       gefs_ingest:
         condition: service_completed_successfully                  
       
@@ -240,8 +208,6 @@ services:
         condition: service_completed_successfully      
       subh_ingest:
         condition: service_completed_successfully
-      nbm_fire_ingest:
-        condition: service_completed_successfully 
       gefs_ingest:
         condition: service_completed_successfully       
 
@@ -269,8 +235,6 @@ services:
         condition: service_completed_successfully      
       subh_ingest:
         condition: service_completed_successfully
-      nbm_fire_ingest:
-        condition: service_completed_successfully 
       gefs_ingest:
         condition: service_completed_successfully
 
@@ -297,8 +261,6 @@ services:
       nbm_ingest:
         condition: service_completed_successfully
       subh_ingest:
-        condition: service_completed_successfully
-      nbm_fire_ingest:
         condition: service_completed_successfully
       gefs_ingest:
         condition: service_completed_successfully
@@ -327,8 +289,6 @@ services:
         condition: service_completed_successfully
       subh_ingest:
         condition: service_completed_successfully
-      nbm_fire_ingest:
-        condition: service_completed_successfully
       gefs_ingest:
         condition: service_completed_successfully
 
@@ -355,8 +315,6 @@ services:
 #      gfs_ingest:
 #        condition: service_completed_successfully
 #      nbm_ingest:
-#        condition: service_completed_successfully
-#      nbm_fire_ingest:
 #        condition: service_completed_successfully
 #      subh_ingest:
 #        condition: service_completed_successfully
