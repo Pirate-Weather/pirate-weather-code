@@ -105,6 +105,7 @@ RUN git clone https://github.com/NOAA-EMC/NCEPLIBS-g2c.git
 RUN cmake \
     -DCMAKE_INSTALL_PREFIX=/build/NCEPLIBS_build \
     -DCMAKE_PREFIX_PATH="/usr/local;/build/NCEPLIBS_build" \
+    -DUSE_AEC=ON \
     -DUSE_Jasper=OFF \
     -DUSE_OpenJPEG=ON \
     -S NCEPLIBS-g2c \
@@ -136,7 +137,8 @@ RUN cmake --fresh \
     -DUSE_G2CLIB_LOW=ON
 
 RUN cmake --build . --parallel 4
-RUN cmake --install .
+RUN cmake --install . && \
+    /build/wgrib2_build/bin/wgrib2 -config | grep -q "Supported decoding:.*CCSDS AEC"
 
 # ----------------------------------------------------------------------
 # Python environment
