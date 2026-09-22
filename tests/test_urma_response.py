@@ -71,7 +71,6 @@ def test_urma_merge_adds_source_flag_only_for_valid_requested_hours():
         "data_hrrrh": None,
         "data_h2": None,
         "data_nbm": None,
-        "data_nbm_fire": None,
         "data_gfs": None,
         "data_ecmwf": None,
         "data_gefs": None,
@@ -107,7 +106,6 @@ def test_hourly_inputs_prefer_urma_and_preserve_pressure_meaning():
     inputs = prepare_data_inputs(
         source_list=["urma", "gfs"],
         nbm_merged=None,
-        nbm_fire_merged=None,
         hrrr_merged=None,
         dwd_mosmix_merged=None,
         ecmwf_merged=None,
@@ -224,7 +222,6 @@ async def test_urma_grid_read_requires_recent_history_inside_domain(
         hrrr_6h=None,
         hrrr=None,
         nbm=None,
-        nbm_fire=None,
         gfs=None,
         ecmwf=None,
         gefs=None,

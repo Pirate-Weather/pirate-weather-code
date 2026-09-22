@@ -121,8 +121,6 @@ NBM = {
     "cape": 19,
 }
 
-NBM_FIRE_INDEX = 1
-
 RTMA_RU = {
     "vis": 1,
     "gust": 2,

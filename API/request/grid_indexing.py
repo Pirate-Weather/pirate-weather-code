@@ -35,7 +35,7 @@ from API.constants.grid_const import (
     RTMA_RU_Y_MAX,
     RTMA_RU_Y_MIN,
 )
-from API.constants.model_const import ERA5, ERA5_SOURCE_VARS
+from API.constants.model_const import ERA5, ERA5_SOURCE_VARS, RAQDPS, SILAM
 from API.constants.shared_const import HISTORY_PERIODS
 from API.utils.geo import is_in_north_america, lambertGridMatch
 from API.utils.timing import StepTimer
@@ -46,6 +46,10 @@ SILAM_LON_START = -179.8
 SILAM_GRID_DELTA = 0.2
 SILAM_LAT_COUNT = 897
 SILAM_LON_COUNT = 1800
+RAQDPS_VALUE_COLUMNS = tuple(index for name, index in RAQDPS.items() if name != "time")
+SILAM_VALUE_COLUMNS = tuple(
+    index for name, index in SILAM.items() if name not in {"time", "blh"}
+)
 
 
 @dataclass(frozen=True)
@@ -286,13 +290,39 @@ def _silam_grid_coords(lat: float, az_lon: float) -> tuple[int, int, float, floa
     return x_silam, y_silam, silam_lat, silam_lon
 
 
+def _aq_source_covers_request(
+    data: np.ndarray,
+    base_day_utc: datetime.datetime,
+    num_hours: int,
+    value_columns: tuple[int, ...],
+) -> bool:
+    """Return whether an AQ store has values aligned with the requested hours."""
+    if (
+        data.ndim != 2
+        or not value_columns
+        or data.shape[1] <= max(value_columns)
+        or num_hours <= 0
+    ):
+        return False
+
+    # AQ matching allows up to one hour for float32 timestamp rounding and
+    # locations with fractional UTC offsets (see prepare_aq_inputs).
+    request_times = base_day_utc.timestamp() + np.arange(num_hours) * 3600
+    valid_rows = np.isfinite(data[:, 0]) & np.isfinite(
+        data[:, list(value_columns)]
+    ).any(axis=1)
+    model_times = data[valid_rows, 0]
+    return bool(
+        model_times.size and np.any(np.abs(model_times[:, None] - request_times) < 3600)
+    )
+
+
 @dataclass
 class ZarrSources:
     subh: Any
     hrrr_6h: Any
     hrrr: Any
     nbm: Any
-    nbm_fire: Any
     gfs: Any
     ecmwf: Any
     gefs: Any
@@ -319,7 +349,6 @@ class GridIndexingResult:
     dataOut_h2: np.ndarray | bool
     dataOut_hrrrh: np.ndarray | bool
     dataOut_nbm: np.ndarray | bool
-    dataOut_nbmFire: np.ndarray | bool
     dataOut_gfs: np.ndarray | bool
     dataOut_ecmwf: np.ndarray | bool
     dataOut_gefs: np.ndarray | bool
@@ -337,7 +366,6 @@ class GridIndexingResult:
     hrrrhRunTime: float | None
     h2RunTime: float | None
     nbmRunTime: float | None
-    nbmFireRunTime: float | None
     gfsRunTime: float | None
     ecmwfRunTime: float | None
     gefsRunTime: float | None
@@ -701,7 +729,6 @@ async def calculate_grid_indexing(
         or time_machine
     ):
         dataOut_nbm = False
-        dataOut_nbmFire = False
         x_nbm = None
         y_nbm = None
         nbm_lat = None
@@ -725,12 +752,10 @@ async def calculate_grid_indexing(
 
         if not nbm_in_bounds:
             dataOut_nbm = False
-            dataOut_nbmFire = False
         else:
             timer.log("### NBM Detail Start ###")
             readNBM = True
             dataOut_nbm = None
-            dataOut_nbmFire = None
 
     timer.log("### GFS/GEFS Start ###")
 
@@ -1086,7 +1111,6 @@ async def calculate_grid_indexing(
     hrrrhRunTime = None
     h2RunTime = None
     nbmRunTime = None
-    nbmFireRunTime = None
     gfsRunTime = None
     urmaRunTime = None
     ecmwfRunTime = None
@@ -1148,7 +1172,6 @@ async def calculate_grid_indexing(
 
     if readNBM:
         dataOut_nbm = zarr_results["NBM"]
-        dataOut_nbmFire = False
         if dataOut_nbm is not False:
             nbmRunTime = dataOut_nbm[HISTORY_PERIODS["NBM"], 0]
             try:
@@ -1481,6 +1504,17 @@ async def calculate_grid_indexing(
 
     if "RAQDPS" in zarr_results:
         dataOut_raqdps = zarr_results["RAQDPS"]
+        if (
+            base_day_utc is not None
+            and isinstance(dataOut_raqdps, np.ndarray)
+            and not _aq_source_covers_request(
+                dataOut_raqdps,
+                base_day_utc,
+                num_hours,
+                RAQDPS_VALUE_COLUMNS,
+            )
+        ):
+            dataOut_raqdps = False
         if isinstance(dataOut_raqdps, np.ndarray):
             try:
                 raqdpsRunTime = float(dataOut_raqdps[HISTORY_PERIODS["RAQDPS"], 0])
@@ -1498,6 +1532,17 @@ async def calculate_grid_indexing(
 
     if "SILAM" in zarr_results:
         dataOut_silam = zarr_results["SILAM"]
+        if (
+            base_day_utc is not None
+            and isinstance(dataOut_silam, np.ndarray)
+            and not _aq_source_covers_request(
+                dataOut_silam,
+                base_day_utc,
+                num_hours,
+                SILAM_VALUE_COLUMNS,
+            )
+        ):
+            dataOut_silam = False
         if isinstance(dataOut_silam, np.ndarray):
             try:
                 silamRunTime = float(dataOut_silam[HISTORY_PERIODS["SILAM"] - 1, 0])
@@ -1518,7 +1563,6 @@ async def calculate_grid_indexing(
         dataOut_h2=dataOut_h2,
         dataOut_hrrrh=dataOut_hrrrh,
         dataOut_nbm=dataOut_nbm,
-        dataOut_nbmFire=dataOut_nbmFire,
         dataOut_gfs=dataOut_gfs,
         dataOut_urma=dataOut_urma,
         dataOut_ecmwf=dataOut_ecmwf,
@@ -1537,7 +1581,6 @@ async def calculate_grid_indexing(
         hrrrhRunTime=hrrrhRunTime,
         h2RunTime=h2RunTime,
         nbmRunTime=nbmRunTime,
-        nbmFireRunTime=nbmFireRunTime,
         gfsRunTime=gfsRunTime,
         urmaRunTime=urmaRunTime,
         ecmwfRunTime=ecmwfRunTime,

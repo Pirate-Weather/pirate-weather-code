@@ -99,7 +99,6 @@ def test_hourly_us_uses_gdps_geps_after_gfs_gefs():
     inputs = prepare_data_inputs(
         source_list=["gfs", "gefs", "gdps", "geps"],
         nbm_merged=None,
-        nbm_fire_merged=None,
         hrrr_merged=None,
         dwd_mosmix_merged=None,
         ecmwf_merged=None,
@@ -134,7 +133,6 @@ def test_hourly_canada_prioritizes_canadian_uv_and_ozone_over_gfs():
     inputs = prepare_data_inputs(
         source_list=["gfs", "hrdps", "gdps"],
         nbm_merged=None,
-        nbm_fire_merged=None,
         hrrr_merged=None,
         dwd_mosmix_merged=None,
         ecmwf_merged=None,
@@ -273,7 +271,6 @@ def test_ecmwf_priority_in_north_america():
     inputs = prepare_data_inputs(
         source_list=["dwd_mosmix", "ecmwf_ifs"],
         nbm_merged=None,
-        nbm_fire_merged=None,
         hrrr_merged=None,
         dwd_mosmix_merged=dwd_merged,
         ecmwf_merged=ecmwf_merged,
@@ -314,7 +311,6 @@ def test_dwd_priority_outside_north_america():
     inputs = prepare_data_inputs(
         source_list=["dwd_mosmix", "ecmwf_ifs"],
         nbm_merged=None,
-        nbm_fire_merged=None,
         hrrr_merged=None,
         dwd_mosmix_merged=dwd_merged,
         ecmwf_merged=ecmwf_merged,
@@ -377,7 +373,6 @@ def test_priority_with_all_models_north_america():
             "gfs",
         ],
         nbm_merged=nbm_merged,
-        nbm_fire_merged=None,
         hrrr_merged=hrrr_merged,
         dwd_mosmix_merged=dwd_merged,
         ecmwf_merged=ecmwf_merged,
@@ -437,7 +432,6 @@ def test_priority_with_all_models_europe():
     inputs = prepare_data_inputs(
         source_list=["dwd_mosmix", "ecmwf_ifs", "gfs"],
         nbm_merged=None,
-        nbm_fire_merged=None,
         hrrr_merged=None,
         dwd_mosmix_merged=dwd_merged,
         ecmwf_merged=ecmwf_merged,
@@ -481,7 +475,6 @@ def test_nbm_remains_prioritized_over_gfs_in_north_america():
     inputs = prepare_data_inputs(
         source_list=["nbm", "gfs"],
         nbm_merged=nbm_merged,
-        nbm_fire_merged=None,
         hrrr_merged=None,
         dwd_mosmix_merged=None,
         ecmwf_merged=None,
@@ -512,7 +505,6 @@ def test_precip_intensity_priority_matches_north_america_stack_order():
     inputs = prepare_data_inputs(
         source_list=["dwd_mosmix", "ecmwf_ifs"],
         nbm_merged=None,
-        nbm_fire_merged=None,
         hrrr_merged=None,
         dwd_mosmix_merged=dwd_merged,
         ecmwf_merged=ecmwf_merged,
@@ -545,7 +537,6 @@ def test_precip_probability_priority_prefers_gefs_for_ai_models_in_north_america
     inputs = prepare_data_inputs(
         source_list=["nbm", "ecmwf_ifs", "gefs"],
         nbm_merged=nbm_merged,
-        nbm_fire_merged=None,
         hrrr_merged=None,
         dwd_mosmix_merged=None,
         ecmwf_merged=ecmwf_merged,

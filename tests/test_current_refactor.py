@@ -122,7 +122,6 @@ def test_build_current_section_structure():
         "ECMWF_Merged": None,
         "GFS_Merged": None,
         "ERA5_MERGED": None,
-        "NBM_Fire_Merged": None,
         "logger": MagicMock(),
         "loc_tag": "test_loc",
     }
@@ -202,7 +201,6 @@ def test_build_current_section_interpolates_current_aq_inputs():
         ECMWF_Merged=None,
         GFS_Merged=None,
         ERA5_MERGED=None,
-        NBM_Fire_Merged=None,
         logger=MagicMock(),
         loc_tag="test_loc",
         aq_inputs=aq_inputs,

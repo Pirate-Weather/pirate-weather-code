@@ -56,7 +56,6 @@ class SourceMetadata:
 class MergeResult:
     hrrr: np.ndarray | None
     nbm: np.ndarray | None
-    nbm_fire: np.ndarray | None
     gfs: np.ndarray | None
     ecmwf: np.ndarray | None
     gefs: np.ndarray | None
@@ -158,11 +157,6 @@ def build_source_metadata(
             metadata.add("nbm", time_value=_format_run_time(grid_result.nbmRunTime))
         else:
             metadata.add("nbm")
-
-    if isinstance(grid_result.dataOut_nbmFire, np.ndarray) and not time_machine:
-        metadata.add(
-            "nbm_fire", time_value=_format_run_time(grid_result.nbmFireRunTime)
-        )
 
     if isinstance(grid_result.dataOut_dwd_mosmix, np.ndarray) and not time_machine:
         metadata.add(
@@ -387,7 +381,6 @@ def merge_hourly_models(
     data_hrrrh: np.ndarray | None,
     data_h2: np.ndarray | None,
     data_nbm: np.ndarray | None,
-    data_nbm_fire: np.ndarray | None,
     data_gfs: np.ndarray | None,
     data_ecmwf: np.ndarray | None,
     data_gefs: np.ndarray | None,
@@ -406,7 +399,6 @@ def merge_hourly_models(
 ) -> MergeResult:
     hrrr_merged = None
     nbm_merged = None
-    nbm_fire_merged = None
     gfs_merged = None
     ecmwf_merged = None
     gefs_merged = None
@@ -455,24 +447,11 @@ def merge_hourly_models(
                     data_nbm, nbm_start_idx, num_hours, data_nbm.shape[1]
                 )
 
-        if "nbm_fire" in metadata.source_list and isinstance(data_nbm_fire, np.ndarray):
-            nbm_fire_start_idx = nearest_index(data_nbm_fire[:, 0], base_day_utc_grib)
-            if nbm_fire_start_idx < 1:
-                metadata.drop("nbm_fire")
-                logger.error(
-                    "NBM Fire data not available for the requested time range."
-                )
-            else:
-                nbm_fire_merged = _merge_simple_source(
-                    data_nbm_fire, nbm_fire_start_idx, num_hours, data_nbm_fire.shape[1]
-                )
-
     except Exception:
         logger.exception(
             "HRRR or NBM data not available, falling back to GFS %s", loc_tag
         )
         metadata.drop("hrrr_18-48")
-        metadata.drop("nbm_fire")
         metadata.drop("nbm")
         metadata.drop("hrrr_0-18")
         metadata.drop("hrrrsubh", time_key="hrrr_subh")
@@ -593,7 +572,6 @@ def merge_hourly_models(
     return MergeResult(
         hrrr=hrrr_merged,
         nbm=nbm_merged,
-        nbm_fire=nbm_fire_merged,
         gfs=gfs_merged,
         ecmwf=ecmwf_merged,
         gefs=gefs_merged,

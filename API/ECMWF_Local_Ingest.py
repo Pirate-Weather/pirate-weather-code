@@ -22,9 +22,10 @@ import s3fs
 import xarray as xr
 import zarr.storage
 from dask.diagnostics import ProgressBar
-from herbie import FastHerbie, HerbieLatest, Path
+from herbie import HerbieLatest
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
+from API.ingest_grib_utils import download_and_validate_gfs_subset
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -38,9 +39,7 @@ from API.ingest_utils import (
     interp_time_take_blend,
     pad_to_chunk_size,
     positive_int_env,
-    run_command,
     tune_nofile_limit,
-    validate_grib_stats,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -49,9 +48,10 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-ECMWF_PRIMARY_PRIORITY = ["aws", "ecmwf"]
-ECMWF_LATEST_PRIORITY = ["aws", "azure", "ecmwf"]
-ECMWF_AZURE_FALLBACK_PRIORITY = ["azure", "ecmwf"]
+ECMWF_SOURCE_PRIORITY = ["google", "ecmwf", "aws", "azure"]
+ECMWF_MAX_THREADS = positive_int_env("ecmwf_download_threads", 4)
+ECMWF_DOWNLOAD_RETRIES = positive_int_env("herbie_download_retries", 3)
+ECMWF_RETRY_SLEEP_SECONDS = positive_int_env("herbie_retry_sleep_seconds", 10)
 
 
 # %% Setup paths and parameters
@@ -109,48 +109,28 @@ if save_type == "Download":
         os.makedirs(historic_path)
 
 
-def download_ecmwf_with_azure_fallback(dates, fxx, product, search):
-    """Download ECMWF GRIB subsets from AWS first, then retry from Azure on failure."""
-
-    def _attempt_download(priority, overwrite=False):
-        fh = FastHerbie(
-            dates,
-            model="ifs",
-            fxx=fxx,
-            product=product,
-            verbose=False,
-            priority=priority,
-            save_dir=tmp_dir,
-        )
-        paths = fh.download(search, verbose=False, overwrite=overwrite, max_threads=6)
-        if len(fh.file_exists) != len(fxx) or len(paths) != len(fxx):
-            raise RuntimeError(
-                f"expected {len(fxx)} {product} files, "
-                f"found {len(fh.file_exists)} and downloaded {len(paths)}"
-            )
-
-        grib_list = [
-            str(Path(x.get_localFilePath(search)).expand()) for x in fh.file_exists
-        ]
-        cmd = "cat " + " ".join(grib_list) + f" | {wgrib2_path.rstrip()} - -s -stats"
-        grib_check = run_command(cmd)
-        validate_grib_stats(grib_check)
-        return fh, paths, grib_list
-
-    try:
-        return _attempt_download(ECMWF_PRIMARY_PRIORITY)
-    except Exception:
-        logger.exception(
-            "ECMWF %s download from AWS/ECMWF failed; retrying from Azure",
-            product,
-        )
-
-    fh, paths, grib_list = _attempt_download(
-        ECMWF_AZURE_FALLBACK_PRIORITY,
-        overwrite=True,
+def download_ecmwf_subset(
+    dates: pd.DatetimeIndex,
+    fxx: list[int] | range,
+    product: str,
+    search: str,
+) -> list[str]:
+    """Download and validate an IFS GRIB subset with bounded concurrency."""
+    return download_and_validate_gfs_subset(
+        model="ifs",
+        product=product,
+        search=search,
+        dataset_name=f"ECMWF IFS {product}",
+        base_time=dates[0],
+        forecast_hours=list(fxx),
+        wgrib2_exe=wgrib2_path.rstrip(),
+        herbie_save_dir=tmp_dir,
+        herbie_download_retries=ECMWF_DOWNLOAD_RETRIES,
+        herbie_retry_sleep_seconds=ECMWF_RETRY_SLEEP_SECONDS,
+        priority=ECMWF_SOURCE_PRIORITY,
+        herbie_kwargs={"max_threads": ECMWF_MAX_THREADS},
+        download_max_threads=ECMWF_MAX_THREADS,
     )
-    logger.info("ECMWF %s download succeeded from Azure fallback", product)
-    return fh, paths, grib_list
 
 
 # %% Define base time from the most recent run
@@ -163,7 +143,7 @@ latest_run = HerbieLatest(
     fxx=240,
     product="oper",
     verbose=True,
-    priority=ECMWF_LATEST_PRIORITY,
+    priority=ECMWF_SOURCE_PRIORITY,
     save_dir=tmp_dir,
 )
 
@@ -231,7 +211,7 @@ ifs_range2 = FORECAST_LEAD_RANGES["ECMWF_IFS_2"]
 ifsFileRange = [*ifs_range1, *ifs_range2]
 
 match_string_enfo = r":(tp:sfc:\d+):"
-_, ens_paths, _ = download_ecmwf_with_azure_fallback(
+ens_paths = download_ecmwf_subset(
     pd.date_range(start=base_time, periods=1, freq="12h"),
     ifsFileRange,
     "enfo",
@@ -319,7 +299,7 @@ match_strings = (
 )
 
 
-_, ifs_paths, _ = download_ecmwf_with_azure_fallback(
+ifs_paths = download_ecmwf_subset(
     pd.date_range(start=base_time, periods=1, freq="12h"),
     ifsFileRange,
     "oper",
@@ -518,7 +498,7 @@ for i in range(his_period, 1, -12):
     fxx = range(3, 13, 3)
 
     # Create FastHerbie Object.
-    _, ifs_hisgribs, _ = download_ecmwf_with_azure_fallback(
+    ifs_hisgribs = download_ecmwf_subset(
         DATES,
         fxx,
         "oper",
@@ -603,7 +583,7 @@ for i in range(his_period, 1, -12):
     ########################################################################
     ### Download the enfo data
     # Create FastHerbie Object.
-    _, ens_his_paths, _ = download_ecmwf_with_azure_fallback(
+    ens_his_paths = download_ecmwf_subset(
         DATES,
         fxx,
         "enfo",

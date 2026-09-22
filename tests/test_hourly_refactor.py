@@ -153,7 +153,6 @@ def test_build_hourly_block_outputs_era5_precip_probability():
     inputs = prepare_data_inputs(
         source_list=["era5"],
         nbm_merged=None,
-        nbm_fire_merged=None,
         hrrr_merged=None,
         dwd_mosmix_merged=None,
         ecmwf_merged=None,
