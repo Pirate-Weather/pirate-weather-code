@@ -81,6 +81,7 @@ FINAL_CHUNK_SIZES = {
 FORECAST_LEAD_RANGES = {
     "GFS_1": list(range(1, 121)),
     "GFS_2": list(range(123, 241, 3)),
+    "GEFS": list(range(3, 241, 3)),
     "GDPS_1": list(range(1, 84, 1)),
     "GDPS_2": list(range(84, 241, 3)),
     "NBM_FIRE": list(range(6, 192, 6)),
