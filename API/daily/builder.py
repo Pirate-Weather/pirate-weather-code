@@ -557,7 +557,7 @@ def _apply_rounding(
         daily_display_max[:, DATA_DAY["apparent"]], app_dec
     )
     daily_display_max[:, DATA_DAY["k_index"]] = np.round(
-        daily_display_max[:, DATA_DAY["k_index"]], 2
+        daily_display_max[:, DATA_DAY["k_index"]], 0
     )
     daily_display_min[:, DATA_DAY["lifted_index"]] = np.round(
         daily_display_min[:, DATA_DAY["lifted_index"]], 0
@@ -1268,20 +1268,20 @@ def build_daily_section(
             "solarMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["solar"]]),
             "capeMax": InterPdayMax[idx, DATA_DAY["cape"]],
             "capeMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["cape"]]),
-            "liftedIndexMax": InterPdayMin[
+            "liftedIndexMax": daily_display_min[
                 idx, DATA_DAY["lifted_index"]
             ],  # Note: Lifted index uses negative values for highest instability, so we take the minimum value for "max" instability.
             "liftedIndexMaxTime": int(InterPdayMinTime[idx, DATA_DAY["lifted_index"]]),
             "verticalVelocity": daily_display_mean[
                 idx, DATA_DAY["vertical_velocity"]
             ],  # Note: Vertical velocity can be positive or negative, so we take the mean value for the day.
-            "convectiveInhibitionMax": InterPdayMin[
+            "convectiveInhibitionMax": daily_display_min[
                 idx, DATA_DAY["convective_inhibition"]
             ],  # Note: Convective inhibition uses negative values, so we take the minimum value for "max" inhibition.
             "convectiveInhibitionMaxTime": int(
                 InterPdayMinTime[idx, DATA_DAY["convective_inhibition"]]
             ),
-            "kIndexMax": InterPdayMax[idx, DATA_DAY["k_index"]],
+            "kIndexMax": daily_display_max[idx, DATA_DAY["k_index"]],
             "kIndexMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["k_index"]]),
         }
 
