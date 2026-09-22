@@ -423,6 +423,7 @@ def _download_full_herbie_files(
     overwrite: bool,
     max_threads: int,
     request_timeout_s: int,
+    verbose: bool,
 ) -> list[str]:
     """Download full-file Herbie refs without relying on Herbie's no-timeout downloader."""
     refs = list(herbie_obj.file_exists)
@@ -431,12 +432,13 @@ def _download_full_herbie_files(
     if threads < 1:
         return downloaded_paths
 
-    logger.info(
-        "Downloading %d full Herbie files with %d threads and %ss read timeout.",
-        len(refs),
-        threads,
-        request_timeout_s,
-    )
+    if verbose:
+        logger.info(
+            "Downloading %d full Herbie files with %d threads and %ss read timeout.",
+            len(refs),
+            threads,
+            request_timeout_s,
+        )
     with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = [
             executor.submit(
@@ -483,6 +485,7 @@ def download_herbie_with_retry(
                     request_timeout_s=positive_int_env(
                         "herbie_request_timeout_seconds", 120
                     ),
+                    verbose=verbose,
                 )
             else:
                 downloaded = herbie_obj.download(search, **download_kwargs)

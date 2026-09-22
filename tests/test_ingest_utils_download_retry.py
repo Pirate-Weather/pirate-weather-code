@@ -1,3 +1,4 @@
+import logging
 from typing import ClassVar
 
 import pytest
@@ -97,7 +98,10 @@ def test_configure_herbie_request_timeouts_patches_availability_heads(monkeypatc
     assert calls == [("https://example.test/file.grib2", (10, 7))]
 
 
-def test_download_retry_full_file_downloads_use_request_timeout(tmp_path, monkeypatch):
+def test_download_retry_full_file_downloads_respect_timeout_and_verbosity(
+    tmp_path, monkeypatch, caplog
+):
+    caplog.set_level(logging.INFO, logger=ingest_utils.logger.name)
     grib_path = tmp_path / "f1.grib2"
     ref = _FakeRef(str(grib_path))
     herbie = _FakeHerbie([ref])
@@ -135,10 +139,12 @@ def test_download_retry_full_file_downloads_use_request_timeout(tmp_path, monkey
         dataset_name="test",
         retries=1,
         retry_sleep_s=1,
+        verbose=False,
     )
 
     assert grib_path.read_bytes() == b"gribdata"
     assert herbie.download_calls == 0
+    assert "Downloading 1 full Herbie files" not in caplog.text
 
 
 def test_download_retry_raises_after_exhausting_attempts(tmp_path, monkeypatch):
