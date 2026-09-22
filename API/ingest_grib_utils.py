@@ -131,6 +131,7 @@ def download_and_validate_gfs_subset(
     excluded_stats_variables: list[str] | None = None,
     skip_wgrib2_validation: bool = False,
     herbie_kwargs: dict[str, Any] | None = None,
+    download_max_threads: int | None = None,
 ) -> list[str]:
     """Download a model GRIB subset, validate file count, and run wgrib2 checks.
 
@@ -158,6 +159,7 @@ def download_and_validate_gfs_subset(
             min/max stats validation.
         skip_wgrib2_validation: Skip the ``wgrib2 -s -stats`` validation step.
         herbie_kwargs: Additional model-specific ``FastHerbie`` keyword arguments.
+        download_max_threads: Maximum concurrent subset downloads.
 
     Returns:
         List of downloaded GRIB file paths
@@ -209,6 +211,8 @@ def download_and_validate_gfs_subset(
                 dataset_name=dataset_name,
                 retries=1,
                 retry_sleep_s=herbie_retry_sleep_seconds,
+                max_threads=download_max_threads,
+                overwrite_first_attempt=attempt > 1,
             )
             break
         except Exception as exc:

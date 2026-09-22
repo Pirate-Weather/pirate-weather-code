@@ -460,13 +460,20 @@ def download_herbie_with_retry(
     retries: int,
     retry_sleep_s: int,
     search: Any = None,
+    max_threads: int | None = None,
+    overwrite_first_attempt: bool = False,
 ) -> None:
     """Retry transient Herbie download failures and enforce expected file count."""
     attempts = max(1, retries)
     for attempt in range(1, attempts + 1):
         try:
             # Overwrite on retries to avoid keeping partial/corrupt files.
-            download_kwargs = {"verbose": True, "overwrite": attempt > 1}
+            download_kwargs = {
+                "verbose": True,
+                "overwrite": overwrite_first_attempt or attempt > 1,
+            }
+            if max_threads is not None:
+                download_kwargs["max_threads"] = max_threads
             if search is None:
                 downloaded = _download_full_herbie_files(
                     herbie_obj,

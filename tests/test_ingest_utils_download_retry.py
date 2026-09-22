@@ -201,3 +201,32 @@ def test_download_retry_uses_download_results_not_stale_file_exists(
         )
 
     assert herbie.download_calls == 2
+
+
+def test_download_retry_recovers_from_503_with_limited_threads(tmp_path, monkeypatch):
+    grib_path = tmp_path / "aifs.grib2"
+    herbie = _FakeHerbie([_FakeRef(str(grib_path))])
+    calls = []
+
+    def _fake_download(_search, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise ingest_utils.requests.HTTPError("503 Slow Down")
+        grib_path.write_bytes(b"grib")
+        return [str(grib_path)]
+
+    herbie.download = _fake_download
+    monkeypatch.setattr(ingest_utils.time, "sleep", lambda _seconds: None)
+
+    ingest_utils.download_herbie_with_retry(
+        herbie_obj=herbie,
+        search=":TP:",
+        expected_count=1,
+        dataset_name="AIFS",
+        retries=2,
+        retry_sleep_s=1,
+        max_threads=4,
+    )
+
+    assert [call["max_threads"] for call in calls] == [4, 4]
+    assert [call["overwrite"] for call in calls] == [False, True]
