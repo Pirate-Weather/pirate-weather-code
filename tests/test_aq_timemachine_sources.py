@@ -12,7 +12,13 @@ from API.forecast_sources import build_source_metadata
 from API.request.grid_indexing import (
     ZarrSources,
     _aq_source_covers_request,
+    _mask_old_aq_values,
     calculate_grid_indexing,
+)
+
+NOW = datetime.datetime(2026, 9, 22, 12)
+REPORTED_TIME = datetime.datetime.fromtimestamp(1789665910, datetime.UTC).replace(
+    tzinfo=None
 )
 
 
@@ -26,25 +32,29 @@ class _AQWeather:
 
 @pytest.mark.parametrize(
     (
-        "age_days",
+        "requested",
         "time_machine",
         "model_shift_days",
+        "num_hours",
         "missing_source",
         "expected_sources",
     ),
     [
-        (30, True, 0, None, set()),
-        (1, True, 0, None, {"raqdps", "silam"}),
-        (0, False, 0, None, {"raqdps", "silam"}),
-        (0, False, 10, None, set()),
-        (0, False, 0, "raqdps", {"silam"}),
-        (0, False, 0, "silam", {"raqdps"}),
+        (NOW - datetime.timedelta(days=30), True, 0, 24, None, set()),
+        (REPORTED_TIME, True, -3, 24, None, set()),
+        (NOW - datetime.timedelta(days=3), True, -3, 96, None, {"raqdps", "silam"}),
+        (NOW - datetime.timedelta(days=1), True, 0, 24, None, {"raqdps", "silam"}),
+        (NOW, False, 0, 24, None, {"raqdps", "silam"}),
+        (NOW, False, 10, 24, None, set()),
+        (NOW, False, 0, 24, "raqdps", {"silam"}),
+        (NOW, False, 0, 24, "silam", {"raqdps"}),
     ],
 )
 def test_aq_sources_reported_only_when_request_has_coverage(
-    age_days,
+    requested,
     time_machine,
     model_shift_days,
+    num_hours,
     missing_source,
     expected_sources,
     monkeypatch,
@@ -52,7 +62,7 @@ def test_aq_sources_reported_only_when_request_has_coverage(
     monkeypatch.setattr(
         "API.request.grid_indexing._load_era5_slice", lambda *args, **kwargs: False
     )
-    now = datetime.datetime(2026, 9, 22, 12)
+    now = NOW
     model_times = (now + datetime.timedelta(days=model_shift_days)).replace(
         tzinfo=datetime.UTC
     ).timestamp() + (np.arange(120) - 48) * 3600
@@ -77,16 +87,16 @@ def test_aq_sources_reported_only_when_request_has_coverage(
         raqdps=object(),
         silam=object(),
         raqdps_lat_lon={
-            "latitude": np.array([[0.0]]),
-            "longitude": np.array([[0.0]]),
+            "latitude": np.array([[45.0]]),
+            "longitude": np.array([[-75.0]]),
         },
     )
-    requested = now - datetime.timedelta(days=age_days)
+    weather = _AQWeather({"RAQDPS": raqdps, "SILAM": silam})
     result = asyncio.run(
         calculate_grid_indexing(
-            lat=0.0,
-            lon=0.0,
-            az_lon=0.0,
+            lat=45.0,
+            lon=285.0,
+            az_lon=-75.0,
             utc_time=requested,
             now_time=now,
             time_machine=time_machine,
@@ -102,9 +112,9 @@ def test_aq_sources_reported_only_when_request_has_coverage(
             ex_aifs=1,
             read_wmo_alerts=False,
             base_day_utc=requested.replace(tzinfo=datetime.UTC),
-            num_hours=24,
+            num_hours=num_hours,
             zarr_sources=sources,
-            weather=_AQWeather({"RAQDPS": raqdps, "SILAM": silam}),
+            weather=weather,
             logger=logging.getLogger(__name__),
         )
     )
@@ -122,6 +132,23 @@ def test_aq_sources_reported_only_when_request_has_coverage(
         "raqdps" in expected_sources
     )
     assert isinstance(result.dataOut_silam, np.ndarray) is ("silam" in expected_sources)
+    if num_hours > 24:
+        assert np.isnan(result.dataOut_silam[0, SILAM["pm25"]])
+        assert np.isfinite(result.dataOut_silam[-1, SILAM["pm25"]])
+
+
+def test_mask_old_aq_values_preserves_boundary_and_input():
+    now = NOW.replace(tzinfo=datetime.UTC)
+    times = [
+        (now - datetime.timedelta(hours=hours)).timestamp() for hours in (49, 48, 47)
+    ]
+    data = np.column_stack([times, [10.0, 20.0, 30.0]])
+
+    masked = _mask_old_aq_values(data, NOW, 48)
+
+    assert np.isnan(masked[0, 1])
+    np.testing.assert_array_equal(masked[1:, 1], [20.0, 30.0])
+    np.testing.assert_array_equal(data[:, 1], [10.0, 20.0, 30.0])
 
 
 def test_aq_source_coverage_matches_float32_times_at_half_hour_offset():

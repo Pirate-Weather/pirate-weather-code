@@ -1775,6 +1775,8 @@ def build_current_section(
 
     InterPcurrent = np.zeros(shape=max(DATA_CURRENT.values()) + 1)
     InterPcurrent[DATA_CURRENT["time"]] = int(minute_array_grib[0])
+    for field in ("pm25", "pm10", "o3", "no2", "so2", "co", "aqi"):
+        InterPcurrent[DATA_CURRENT[field]] = np.nan
 
     model_data = {
         "dataOut_rtma_ru": dataOut_rtma_ru,
