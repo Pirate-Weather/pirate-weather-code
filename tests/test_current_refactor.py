@@ -122,9 +122,13 @@ def test_build_current_section_structure():
         "ECMWF_Merged": None,
         "GFS_Merged": None,
         "ERA5_MERGED": None,
-        "NBM_Fire_Merged": None,
         "logger": MagicMock(),
         "loc_tag": "test_loc",
+        "aq_inputs": {
+            field: np.full(3, np.nan)
+            for field in ("pm25", "pm10", "o3", "no2", "so2", "co")
+        },
+        "inc_airqualitydetails": 1,
     }
 
     result = build_current_section(**kwargs)
@@ -137,6 +141,9 @@ def test_build_current_section_structure():
     # In this case, 150 is exactly between 100 and 200.
     # The logic in build_current_section handles this.
     assert result.currently["time"] == 150
+    assert np.isnan(result.interp_current[DATA_CURRENT["aqi"]])
+    assert np.isnan(result.currently["airQualityIndex"])
+    assert np.isnan(result.currently["pm25"])
 
 
 def test_build_current_section_interpolates_current_aq_inputs():
@@ -202,7 +209,6 @@ def test_build_current_section_interpolates_current_aq_inputs():
         ECMWF_Merged=None,
         GFS_Merged=None,
         ERA5_MERGED=None,
-        NBM_Fire_Merged=None,
         logger=MagicMock(),
         loc_tag="test_loc",
         aq_inputs=aq_inputs,

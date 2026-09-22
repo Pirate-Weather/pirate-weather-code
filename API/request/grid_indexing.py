@@ -35,7 +35,7 @@ from API.constants.grid_const import (
     RTMA_RU_Y_MAX,
     RTMA_RU_Y_MIN,
 )
-from API.constants.model_const import ERA5, ERA5_SOURCE_VARS
+from API.constants.model_const import ERA5, ERA5_SOURCE_VARS, RAQDPS, SILAM
 from API.constants.shared_const import HISTORY_PERIODS
 from API.utils.geo import is_in_north_america, lambertGridMatch
 from API.utils.timing import StepTimer
@@ -46,6 +46,10 @@ SILAM_LON_START = -179.8
 SILAM_GRID_DELTA = 0.2
 SILAM_LAT_COUNT = 897
 SILAM_LON_COUNT = 1800
+RAQDPS_VALUE_COLUMNS = tuple(index for name, index in RAQDPS.items() if name != "time")
+SILAM_VALUE_COLUMNS = tuple(
+    index for name, index in SILAM.items() if name not in {"time", "blh"}
+)
 
 
 @dataclass(frozen=True)
@@ -286,16 +290,60 @@ def _silam_grid_coords(lat: float, az_lon: float) -> tuple[int, int, float, floa
     return x_silam, y_silam, silam_lat, silam_lon
 
 
+def _aq_source_covers_request(
+    data: np.ndarray,
+    base_day_utc: datetime.datetime,
+    num_hours: int,
+    value_columns: tuple[int, ...],
+) -> bool:
+    """Return whether an AQ store has values aligned with the requested hours."""
+    if (
+        data.ndim != 2
+        or not value_columns
+        or data.shape[1] <= max(value_columns)
+        or num_hours <= 0
+    ):
+        return False
+
+    # AQ matching allows up to one hour for float32 timestamp rounding and
+    # locations with fractional UTC offsets (see prepare_aq_inputs).
+    request_times = base_day_utc.timestamp() + np.arange(num_hours) * 3600
+    valid_rows = np.isfinite(data[:, 0]) & np.isfinite(
+        data[:, list(value_columns)]
+    ).any(axis=1)
+    model_times = data[valid_rows, 0]
+    return bool(
+        model_times.size and np.any(np.abs(model_times[:, None] - request_times) < 3600)
+    )
+
+
+def _mask_old_aq_values(
+    data: np.ndarray, now_time: datetime.datetime, history_hours: int
+) -> np.ndarray:
+    """Keep a rolling AQ store from extending history when its run is stale."""
+    if data.ndim != 2 or data.shape[1] < 2:
+        return data
+    if now_time.tzinfo is None:
+        now_time = now_time.replace(tzinfo=datetime.UTC)
+    cutoff = now_time.timestamp() - history_hours * 3600
+    old_rows = data[:, 0] < cutoff
+    if not old_rows.any():
+        return data
+    data = data.copy()
+    data[old_rows, 1:] = np.nan
+    return data
+
+
 @dataclass
 class ZarrSources:
     subh: Any
     hrrr_6h: Any
     hrrr: Any
     nbm: Any
-    nbm_fire: Any
     gfs: Any
     ecmwf: Any
     gefs: Any
+    urma: Any = None
     hrdps: Any = None
     gdps: Any = None
     geps: Any = None
@@ -318,7 +366,6 @@ class GridIndexingResult:
     dataOut_h2: np.ndarray | bool
     dataOut_hrrrh: np.ndarray | bool
     dataOut_nbm: np.ndarray | bool
-    dataOut_nbmFire: np.ndarray | bool
     dataOut_gfs: np.ndarray | bool
     dataOut_ecmwf: np.ndarray | bool
     dataOut_gefs: np.ndarray | bool
@@ -336,7 +383,6 @@ class GridIndexingResult:
     hrrrhRunTime: float | None
     h2RunTime: float | None
     nbmRunTime: float | None
-    nbmFireRunTime: float | None
     gfsRunTime: float | None
     ecmwfRunTime: float | None
     gefsRunTime: float | None
@@ -392,6 +438,12 @@ class GridIndexingResult:
     y_silam: float | None = None
     silam_lat: float | None = None
     silam_lon: float | None = None
+    dataOut_urma: np.ndarray | bool = False
+    urmaRunTime: float | None = None
+    x_urma: float | None = None
+    y_urma: float | None = None
+    urma_lat: float | None = None
+    urma_lon: float | None = None
 
 
 def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours: int):
@@ -494,6 +546,7 @@ async def calculate_grid_indexing(
     ex_hrrr: int,
     ex_nbm: int,
     ex_gfs: int,
+    ex_urma: int = 0,
     ex_ecmwf: int,
     ex_gefs: int,
     ex_rtma_ru: int,
@@ -523,6 +576,7 @@ async def calculate_grid_indexing(
     readRTMA_RU = False
     readNBM = False
     readGFS = False
+    readURMA = False
     readECMWF = False
     readGEFS = False
     readHRDPS = False
@@ -615,6 +669,36 @@ async def calculate_grid_indexing(
 
     timer.log("### RTMA_RU Start ###")
 
+    dataOut_urma = False
+    x_urma = y_urma = urma_lat = urma_lon = None
+    if (
+        time_machine
+        and ex_urma != 1
+        and zarr_sources.urma is not None
+        and utc_time < now_time
+        and utc_time + datetime.timedelta(hours=num_hours)
+        > now_time - datetime.timedelta(days=10)
+    ):
+        urma_lat, urma_lon, x_urma, y_urma, urma_in_bounds = _get_grid_coords(
+            lat,
+            lon,
+            RTMA_RU_CENTRAL_LONG,
+            RTMA_RU_CENTRAL_LAT,
+            RTMA_RU_PARALLEL,
+            RTMA_RU_AXIS,
+            RTMA_RU_MIN_X,
+            RTMA_RU_MIN_Y,
+            RTMA_RU_DELTA,
+            RTMA_RU_X_MIN,
+            RTMA_RU_Y_MIN,
+            RTMA_RU_X_MAX,
+            RTMA_RU_Y_MAX,
+        )
+        if urma_in_bounds:
+            readURMA = True
+        else:
+            x_urma = y_urma = urma_lat = urma_lon = None
+
     if (
         az_lon < -138.3
         or az_lon > -59
@@ -662,7 +746,6 @@ async def calculate_grid_indexing(
         or time_machine
     ):
         dataOut_nbm = False
-        dataOut_nbmFire = False
         x_nbm = None
         y_nbm = None
         nbm_lat = None
@@ -686,12 +769,10 @@ async def calculate_grid_indexing(
 
         if not nbm_in_bounds:
             dataOut_nbm = False
-            dataOut_nbmFire = False
         else:
             timer.log("### NBM Detail Start ###")
             readNBM = True
             dataOut_nbm = None
-            dataOut_nbmFire = None
 
     timer.log("### GFS/GEFS Start ###")
 
@@ -718,7 +799,7 @@ async def calculate_grid_indexing(
         readERA5 = True
         readGFS = False
         ex_gfs = 1
-    elif ex_gfs:
+    elif ex_gfs or zarr_sources.gfs is None:
         dataOut_gfs = False
         readGFS = False
     else:
@@ -985,6 +1066,8 @@ async def calculate_grid_indexing(
         zarrTasks["NBM"] = weather.zarr_read("NBM", zarr_sources.nbm, x_nbm, y_nbm)
     if readGFS:
         zarrTasks["GFS"] = weather.zarr_read("GFS", zarr_sources.gfs, x_p, y_p)
+    if readURMA:
+        zarrTasks["URMA"] = weather.zarr_read("URMA", zarr_sources.urma, x_urma, y_urma)
     if readECMWF:
         zarrTasks["ECMWF"] = weather.zarr_read(
             "ECMWF", zarr_sources.ecmwf, x_p_eur, y_p_eur
@@ -1045,8 +1128,8 @@ async def calculate_grid_indexing(
     hrrrhRunTime = None
     h2RunTime = None
     nbmRunTime = None
-    nbmFireRunTime = None
     gfsRunTime = None
+    urmaRunTime = None
     ecmwfRunTime = None
     gefsRunTime = None
     hrdpsRunTime = None
@@ -1106,7 +1189,6 @@ async def calculate_grid_indexing(
 
     if readNBM:
         dataOut_nbm = zarr_results["NBM"]
-        dataOut_nbmFire = False
         if dataOut_nbm is not False:
             nbmRunTime = dataOut_nbm[HISTORY_PERIODS["NBM"], 0]
             try:
@@ -1145,6 +1227,15 @@ async def calculate_grid_indexing(
                     logger.warning("OLD GFS")
             except (ValueError, TypeError, AttributeError):
                 logger.debug("Failed to parse GFS runtime for freshness check")
+
+    if readURMA:
+        dataOut_urma = zarr_results["URMA"]
+        if (
+            isinstance(dataOut_urma, np.ndarray)
+            and dataOut_urma.size
+            and np.isfinite(dataOut_urma[:, 0]).any()
+        ):
+            urmaRunTime = float(np.nanmax(dataOut_urma[:, 0]))
 
     if readECMWF:
         dataOut_ecmwf = zarr_results["ECMWF"]
@@ -1431,6 +1522,21 @@ async def calculate_grid_indexing(
     if "RAQDPS" in zarr_results:
         dataOut_raqdps = zarr_results["RAQDPS"]
         if isinstance(dataOut_raqdps, np.ndarray):
+            dataOut_raqdps = _mask_old_aq_values(
+                dataOut_raqdps, now_time, HISTORY_PERIODS["RAQDPS"]
+            )
+        if (
+            base_day_utc is not None
+            and isinstance(dataOut_raqdps, np.ndarray)
+            and not _aq_source_covers_request(
+                dataOut_raqdps,
+                base_day_utc,
+                num_hours,
+                RAQDPS_VALUE_COLUMNS,
+            )
+        ):
+            dataOut_raqdps = False
+        if isinstance(dataOut_raqdps, np.ndarray):
             try:
                 raqdpsRunTime = float(dataOut_raqdps[HISTORY_PERIODS["RAQDPS"], 0])
                 timestamp_dt = datetime.datetime.fromtimestamp(
@@ -1447,6 +1553,21 @@ async def calculate_grid_indexing(
 
     if "SILAM" in zarr_results:
         dataOut_silam = zarr_results["SILAM"]
+        if isinstance(dataOut_silam, np.ndarray):
+            dataOut_silam = _mask_old_aq_values(
+                dataOut_silam, now_time, HISTORY_PERIODS["SILAM"]
+            )
+        if (
+            base_day_utc is not None
+            and isinstance(dataOut_silam, np.ndarray)
+            and not _aq_source_covers_request(
+                dataOut_silam,
+                base_day_utc,
+                num_hours,
+                SILAM_VALUE_COLUMNS,
+            )
+        ):
+            dataOut_silam = False
         if isinstance(dataOut_silam, np.ndarray):
             try:
                 silamRunTime = float(dataOut_silam[HISTORY_PERIODS["SILAM"] - 1, 0])
@@ -1467,8 +1588,8 @@ async def calculate_grid_indexing(
         dataOut_h2=dataOut_h2,
         dataOut_hrrrh=dataOut_hrrrh,
         dataOut_nbm=dataOut_nbm,
-        dataOut_nbmFire=dataOut_nbmFire,
         dataOut_gfs=dataOut_gfs,
+        dataOut_urma=dataOut_urma,
         dataOut_ecmwf=dataOut_ecmwf,
         dataOut_gefs=dataOut_gefs,
         dataOut_hrdps=dataOut_hrdps,
@@ -1485,8 +1606,8 @@ async def calculate_grid_indexing(
         hrrrhRunTime=hrrrhRunTime,
         h2RunTime=h2RunTime,
         nbmRunTime=nbmRunTime,
-        nbmFireRunTime=nbmFireRunTime,
         gfsRunTime=gfsRunTime,
+        urmaRunTime=urmaRunTime,
         ecmwfRunTime=ecmwfRunTime,
         gefsRunTime=gefsRunTime,
         hrdpsRunTime=hrdpsRunTime,
@@ -1501,6 +1622,10 @@ async def calculate_grid_indexing(
         y_rtma=y_rtma,
         rtma_lat=rtma_lat,
         rtma_lon=rtma_lon,
+        x_urma=x_urma,
+        y_urma=y_urma,
+        urma_lat=urma_lat,
+        urma_lon=urma_lon,
         x_nbm=x_nbm,
         y_nbm=y_nbm,
         nbm_lat=nbm_lat,

@@ -19,12 +19,6 @@ services:
       ofelia.job-run.nbm-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/NBM", "forecast_path=/data/Prod/NBM", "historic_path=/data/Hist/NBM", "save_type=Download"]'
       ofelia.job-run.nbm-ingest.command: "NBM_Local_Ingest.py" 
       ofelia.job-run.nbm-ingest.no-overlap: "true"
-      ofelia.job-run.nbm-fire-ingest.schedule: "0 40 5,11,17,23 * * *"
-      ofelia.job-run.nbm-fire-ingest.image: "pirateingest:latest" 
-      ofelia.job-run.nbm-fire-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
-      ofelia.job-run.nbm-fire-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/NBM_Fire", "forecast_path=/data/Prod/NBM_Fire", "historic_path=/data/Hist/NBM_Fire", "save_type=Download"]'
-      ofelia.job-run.nbm-fire-ingest.command: "NBM_Fire_Local_Ingest.py" 
-      ofelia.job-run.nbm-fire-ingest.no-overlap: "true"
       ofelia.job-run.subh-ingest.schedule: "0 45 * * * *"
       ofelia.job-run.subh-ingest.image: "pirateingest:latest" 
       ofelia.job-run.subh-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
@@ -71,8 +65,6 @@ services:
       gfs_ingest:
         condition: service_completed_successfully
       nbm_ingest:
-        condition: service_completed_successfully
-      nbm_fire_ingest:
         condition: service_completed_successfully
       subh_ingest:
         condition: service_completed_successfully
@@ -121,25 +113,6 @@ services:
       gfs_ingest:
         condition: service_completed_successfully    
 
-  # NBM Fire Ingest
-  nbm_fire_ingest:
-    image: pirateingest:latest
-    volumes:
-      - /home/ubuntu/Weather:/data
-      - /mnt/block:/tmp
-    environment:
-      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
-      forecast_process_dir: "/tmp/Process/NBM_Fire"
-      forecast_path: "/data/Prod/NBM_Fire"
-      historic_path: "/data/Hist/NBM_Fire"
-      save_type: "Download"
-    command: ["NBM_Fire_Local_Ingest.py"]
-    depends_on:
-      gfs_ingest:
-        condition: service_completed_successfully
-      nbm_ingest:
-        condition: service_completed_successfully  
-
   # SubH Ingest
   subh_ingest:
     image: pirateingest:latest
@@ -178,9 +151,7 @@ services:
       nbm_ingest:
         condition: service_completed_successfully      
       subh_ingest:
-        condition: service_completed_successfully
-      nbm_fire_ingest:
-        condition: service_completed_successfully        
+        condition: service_completed_successfully      
 
   # HRRR Ingest
   hrrr_ingest:
@@ -202,8 +173,6 @@ services:
         condition: service_completed_successfully      
       subh_ingest:
         condition: service_completed_successfully
-      nbm_fire_ingest:
-        condition: service_completed_successfully 
       gefs_ingest:
         condition: service_completed_successfully                  
       
@@ -227,8 +196,6 @@ services:
         condition: service_completed_successfully      
       subh_ingest:
         condition: service_completed_successfully
-      nbm_fire_ingest:
-        condition: service_completed_successfully 
       gefs_ingest:
         condition: service_completed_successfully       
 
@@ -252,8 +219,6 @@ services:
         condition: service_completed_successfully      
       subh_ingest:
         condition: service_completed_successfully
-      nbm_fire_ingest:
-        condition: service_completed_successfully 
       gefs_ingest:
         condition: service_completed_successfully
 
@@ -277,8 +242,6 @@ services:
         condition: service_completed_successfully
       subh_ingest:
         condition: service_completed_successfully
-      nbm_fire_ingest:
-        condition: service_completed_successfully
       gefs_ingest:
         condition: service_completed_successfully
 
@@ -301,8 +264,6 @@ services:
       nbm_ingest:
         condition: service_completed_successfully
       subh_ingest:
-        condition: service_completed_successfully
-      nbm_fire_ingest:
         condition: service_completed_successfully
       gefs_ingest:
         condition: service_completed_successfully
@@ -330,8 +291,6 @@ services:
 #      gfs_ingest:
 #        condition: service_completed_successfully
 #      nbm_ingest:
-#        condition: service_completed_successfully
-#      nbm_fire_ingest:
 #        condition: service_completed_successfully
 #      subh_ingest:
 #        condition: service_completed_successfully

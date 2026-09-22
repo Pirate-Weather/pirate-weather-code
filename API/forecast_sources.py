@@ -16,10 +16,13 @@ from API.constants.model_const import (
     GFS,
     HRDPS,
     REPS,
+    URMA,
 )
 from API.constants.shared_const import MISSING_DATA
 from API.request.grid_indexing import GridIndexingResult
 from API.utils.geo import rounder
+
+URMA_TIME_TOLERANCE_SECONDS = 300
 
 
 @dataclass
@@ -53,7 +56,6 @@ class SourceMetadata:
 class MergeResult:
     hrrr: np.ndarray | None
     nbm: np.ndarray | None
-    nbm_fire: np.ndarray | None
     gfs: np.ndarray | None
     ecmwf: np.ndarray | None
     gefs: np.ndarray | None
@@ -66,6 +68,7 @@ class MergeResult:
     aigefs: np.ndarray | None
     aifs: np.ndarray | None
     metadata: SourceMetadata
+    urma: np.ndarray | None = None
 
 
 def nearest_index(a, v) -> int:
@@ -154,11 +157,6 @@ def build_source_metadata(
             metadata.add("nbm", time_value=_format_run_time(grid_result.nbmRunTime))
         else:
             metadata.add("nbm")
-
-    if isinstance(grid_result.dataOut_nbmFire, np.ndarray) and not time_machine:
-        metadata.add(
-            "nbm_fire", time_value=_format_run_time(grid_result.nbmFireRunTime)
-        )
 
     if isinstance(grid_result.dataOut_dwd_mosmix, np.ndarray) and not time_machine:
         metadata.add(
@@ -349,6 +347,32 @@ def _merge_simple_source(
     return merged
 
 
+def _merge_urma_source(
+    data: np.ndarray, base_timestamp: float, num_hours: int, min_timestamp: float
+) -> tuple[np.ndarray | None, float | None]:
+    """Align hourly analyses by their valid time without filling missing observations."""
+    merged = np.full((num_hours, max(URMA.values()) + 1), MISSING_DATA)
+    latest_time = None
+    for row in data:
+        timestamp = float(row[0])
+        if not np.isfinite(timestamp):
+            continue
+        hour = round((timestamp - base_timestamp) / 3600)
+        aligned_time = base_timestamp + hour * 3600
+        if (
+            not 0 <= hour < num_hours
+            or abs(timestamp - aligned_time) > URMA_TIME_TOLERANCE_SECONDS
+            or aligned_time < min_timestamp
+        ):
+            continue
+        if not np.isfinite(row[1:]).any():
+            continue
+        merged[hour] = row[: merged.shape[1]]
+        merged[hour, 0] = aligned_time
+        latest_time = max(latest_time or aligned_time, aligned_time)
+    return (merged, latest_time) if latest_time is not None else (None, None)
+
+
 def merge_hourly_models(
     *,
     metadata: SourceMetadata,
@@ -357,7 +381,6 @@ def merge_hourly_models(
     data_hrrrh: np.ndarray | None,
     data_h2: np.ndarray | None,
     data_nbm: np.ndarray | None,
-    data_nbm_fire: np.ndarray | None,
     data_gfs: np.ndarray | None,
     data_ecmwf: np.ndarray | None,
     data_gefs: np.ndarray | None,
@@ -371,10 +394,11 @@ def merge_hourly_models(
     data_aifs: np.ndarray | None,
     logger: logging.Logger,
     loc_tag: str,
+    data_urma: np.ndarray | None = None,
+    urma_min_timestamp: float | None = None,
 ) -> MergeResult:
     hrrr_merged = None
     nbm_merged = None
-    nbm_fire_merged = None
     gfs_merged = None
     ecmwf_merged = None
     gefs_merged = None
@@ -386,6 +410,14 @@ def merge_hourly_models(
     aigfs_merged = None
     aigefs_merged = None
     aifs_merged = None
+    urma_merged = None
+
+    if isinstance(data_urma, np.ndarray) and urma_min_timestamp is not None:
+        urma_merged, latest_urma_time = _merge_urma_source(
+            data_urma, base_day_utc_grib, num_hours, urma_min_timestamp
+        )
+        if urma_merged is not None:
+            metadata.add("urma", time_value=_format_run_time(latest_urma_time))
 
     try:
         if (
@@ -415,24 +447,11 @@ def merge_hourly_models(
                     data_nbm, nbm_start_idx, num_hours, data_nbm.shape[1]
                 )
 
-        if "nbm_fire" in metadata.source_list and isinstance(data_nbm_fire, np.ndarray):
-            nbm_fire_start_idx = nearest_index(data_nbm_fire[:, 0], base_day_utc_grib)
-            if nbm_fire_start_idx < 1:
-                metadata.drop("nbm_fire")
-                logger.error(
-                    "NBM Fire data not available for the requested time range."
-                )
-            else:
-                nbm_fire_merged = _merge_simple_source(
-                    data_nbm_fire, nbm_fire_start_idx, num_hours, data_nbm_fire.shape[1]
-                )
-
     except Exception:
         logger.exception(
             "HRRR or NBM data not available, falling back to GFS %s", loc_tag
         )
         metadata.drop("hrrr_18-48")
-        metadata.drop("nbm_fire")
         metadata.drop("nbm")
         metadata.drop("hrrr_0-18")
         metadata.drop("hrrrsubh", time_key="hrrr_subh")
@@ -553,7 +572,6 @@ def merge_hourly_models(
     return MergeResult(
         hrrr=hrrr_merged,
         nbm=nbm_merged,
-        nbm_fire=nbm_fire_merged,
         gfs=gfs_merged,
         ecmwf=ecmwf_merged,
         gefs=gefs_merged,
@@ -566,4 +584,5 @@ def merge_hourly_models(
         aigefs=aigefs_merged,
         aifs=aifs_merged,
         metadata=metadata,
+        urma=urma_merged,
     )

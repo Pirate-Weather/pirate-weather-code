@@ -2,9 +2,17 @@ import numpy as np
 import pytest
 
 from API.api_utils import map_ensemble_precip_rates_to_ptype
-from API.constants.model_const import ERA5, GDPS, GEPS, HRDPS, REPS
+from API.constants.model_const import ERA5, GDPS, GEPS, HRDPS, REPS, URMA
 from API.data_inputs import _normalize_length, prepare_data_inputs
 from API.responseLocal import convert_data_to_celsius
+
+
+def test_convert_data_to_celsius_includes_urma_temperature_and_dew_point():
+    urma = np.full((1, max(URMA.values()) + 1), np.nan)
+    urma[0, URMA["temp"]] = 288.15
+    urma[0, URMA["dew"]] = 283.15
+    convert_data_to_celsius(*([None] * 13), dataOut_urma=urma)
+    np.testing.assert_allclose(urma[0, [URMA["temp"], URMA["dew"]]], [15, 10])
 
 
 @pytest.mark.parametrize(
@@ -57,7 +65,6 @@ def test_prepare_data_inputs_normalizes_short_era5_series_to_num_hours():
     inputs = prepare_data_inputs(
         source_list=["era5"],
         nbm_merged=None,
-        nbm_fire_merged=None,
         hrrr_merged=None,
         dwd_mosmix_merged=None,
         ecmwf_merged=None,
@@ -145,7 +152,6 @@ def test_prepare_data_inputs_includes_canadian_model_fields():
     inputs = prepare_data_inputs(
         source_list=["hrdps", "gdps", "geps", "reps"],
         nbm_merged=None,
-        nbm_fire_merged=None,
         hrdps_merged=hrdps_merged,
         reps_merged=reps_merged,
         hrrr_merged=None,
@@ -230,7 +236,6 @@ def test_prepare_data_inputs_keeps_canadian_uv_index_direct():
     inputs = prepare_data_inputs(
         source_list=["hrdps", "gdps"],
         nbm_merged=None,
-        nbm_fire_merged=None,
         hrdps_merged=hrdps_merged,
         reps_merged=None,
         hrrr_merged=None,

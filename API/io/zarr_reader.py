@@ -33,9 +33,9 @@ class ZarrStores:
     SubH_Zarr: Any | None = None
     HRRR_6H_Zarr: Any | None = None
     GFS_Zarr: Any | None = None
+    URMA_Zarr: Any | None = None
     ECMWF_Zarr: Any | None = None
     NBM_Zarr: Any | None = None
-    NBM_Fire_Zarr: Any | None = None
     GEFS_Zarr: Any | None = None
     HRDPS_Zarr: Any | None = None
     GDPS_Zarr: Any | None = None
@@ -130,13 +130,9 @@ class WeatherParallel:
 
                 has_missing_data, missing_row = has_interior_nan_holes(data_out.T)
                 if has_missing_data:
-                    if model == "DWD_MOSMIX":
-                        # DWD MOSMIX station data may have gaps (e.g. missing station
-                        # reports or the 6-hourly period beyond 240 h). Linearly
-                        # interpolating those gaps flattens the diurnal cycle (e.g.
-                        # temperatures in tropical locations like Rio de Janeiro appear
-                        # averaged/flat). Leave the NaN values intact so the merge
-                        # logic falls back to GFS/ECMWF for those hours instead.
+                    if model in {"DWD_MOSMIX", "URMA"}:
+                        # Preserve missing observations so downstream source selection
+                        # can use another model for those hours.
                         self.logger.debug(
                             "### %s Has missing data (row %s), leaving NaN for merge fallback",
                             model,
@@ -246,23 +242,26 @@ def update_zarr_store(
     elif stage in ("DEV", "TIMEMACHINE"):
         logger.info("Skipping ERA5 initialization because SKIP_ERA5 is enabled")
 
-    # If TimeMachine, load GFS
+    # If TimeMachine, load the local historical stores.
     if stage == "TIMEMACHINE":
         gfs_path = os.path.join(save_dir, "GFS.zarr")
         if os.path.exists(gfs_path):
             stores.GFS_Zarr = zarr.open(zarr.storage.LocalStore(gfs_path), mode="r")
             logger.info("Loaded GFS from: %s", gfs_path)
+        _load_local_store(
+            stores, "URMA_Zarr", save_dir, "URMA_Hist.zarr", logger=logger
+        )
 
     # Use local stores for Dev and Prod
     if stage in ("DEV", "PROD"):
         local_stores = [
             ("GFS_Zarr", "GFS.zarr"),
+            ("URMA_Zarr", "URMA_Hist.zarr"),
             ("NWS_Alerts_Zarr", "NWS_Alerts.zarr"),
             ("SubH_Zarr", "SubH.zarr"),
             ("HRRR_6H_Zarr", "HRRR_6H.zarr"),
             ("ECMWF_Zarr", "ECMWF.zarr"),
             ("NBM_Zarr", "NBM.zarr"),
-            ("NBM_Fire_Zarr", "NBM_Fire.zarr"),
             ("GEFS_Zarr", "GEFS.zarr"),
             ("HRDPS_Zarr", "HRDPS.zarr"),
             ("GDPS_Zarr", "GDPS.zarr"),
@@ -314,6 +313,12 @@ def update_zarr_store(
         )
         stores.GFS_Zarr = zarr.open(gfs_store, mode="r")
         logger.info("GFS Read")
+        try:
+            stores.URMA_Zarr = _testing_store(
+                s3, s3_bucket, ingest_version, save_type, "URMA_Hist", logger=logger
+            )
+        except (OSError, ValueError, zarr.errors.ZarrError) as exc:
+            logger.info("URMA_Hist not available: %s", exc)
         if skip_era5:
             logger.info("Skipping ERA5 initialization because SKIP_ERA5 is enabled")
         else:
@@ -334,7 +339,6 @@ def update_zarr_store(
                 ("GEPS_Zarr", "GEPS"),
                 ("REPS_Zarr", "REPS"),
                 ("NBM_Zarr", "NBM"),
-                ("NBM_Fire_Zarr", "NBM_Fire"),
                 ("HRRR_Zarr", "HRRR"),
                 ("WMO_Alerts_Zarr", "WMO_Alerts"),
                 ("RTMA_RU_Zarr", "RTMA_RU"),

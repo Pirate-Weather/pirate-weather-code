@@ -328,6 +328,7 @@ def _calculate_derived_metrics(
     hourlyDayIndex,
     baseTimeOffset,
     timeMachine,
+    urma_hour_mask=None,
 ):
     """
     Calculate derived metrics like apparent temperature and accumulation.
@@ -347,6 +348,11 @@ def _calculate_derived_metrics(
         InterPhour[:, DATA_HOURLY["wind"]],
         solar=InterPhour[:, DATA_HOURLY["solar"]],
     )
+    if timeMachine and urma_hour_mask is not None:
+        use_urma = urma_hour_mask & np.isfinite(InterPhour[:, DATA_HOURLY["apparent"]])
+        InterPhour[use_urma, DATA_HOURLY["feels_like"]] = InterPhour[
+            use_urma, DATA_HOURLY["apparent"]
+        ]
     InterPhour[:, DATA_HOURLY["fire"]] = calculate_fosberg_fire_index(
         InterPhour[:, DATA_HOURLY["temp"]],
         InterPhour[:, DATA_HOURLY["humidity"]],
@@ -679,6 +685,7 @@ def build_hourly_block(
     aq_inputs=None,
     inc_airqualitydetails: int = 0,
     minute_presence: dict | None = None,
+    urma_hour_mask: np.ndarray | None = None,
 ):
     """
     Build hourly output objects and summary text/icon lists.
@@ -823,6 +830,7 @@ def build_hourly_block(
         hourlyDayIndex,
         baseTimeOffset,
         timeMachine,
+        urma_hour_mask,
     )
 
     # Mark hours as mixed when all component types are present for that hour.

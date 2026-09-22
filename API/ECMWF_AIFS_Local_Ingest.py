@@ -10,7 +10,6 @@ import os
 # )
 import pickle
 import shutil
-import subprocess
 import sys
 import time
 import warnings
@@ -23,9 +22,10 @@ import s3fs
 import xarray as xr
 import zarr.storage
 from dask.diagnostics import ProgressBar
-from herbie import FastHerbie, HerbieLatest, Path
+from herbie import HerbieLatest
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
+from API.ingest_grib_utils import download_and_validate_gfs_subset
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -40,13 +40,17 @@ from API.ingest_utils import (
     pad_to_chunk_size,
     positive_int_env,
     tune_nofile_limit,
-    validate_grib_stats,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+AIFS_SOURCE_PRIORITY = ["google", "ecmwf", "aws"]
+AIFS_MAX_THREADS = positive_int_env("aifs_download_threads", 4)
+AIFS_DOWNLOAD_RETRIES = positive_int_env("herbie_download_retries", 3)
+AIFS_RETRY_SLEEP_SECONDS = positive_int_env("herbie_retry_sleep_seconds", 10)
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -106,6 +110,32 @@ if save_type == "Download":
     if not os.path.exists(historic_path):
         os.makedirs(historic_path)
 
+
+def download_aifs_subset(
+    product: str,
+    search: str,
+    dataset_name: str,
+    run_date: pd.Timestamp,
+    forecast_hours: list[int],
+) -> list[str]:
+    """Download and validate an AIFS GRIB subset with bounded concurrency."""
+    return download_and_validate_gfs_subset(
+        model="aifs",
+        product=product,
+        search=search,
+        dataset_name=dataset_name,
+        base_time=run_date,
+        forecast_hours=forecast_hours,
+        wgrib2_exe=wgrib2_path.rstrip(),
+        herbie_save_dir=tmp_dir,
+        herbie_download_retries=AIFS_DOWNLOAD_RETRIES,
+        herbie_retry_sleep_seconds=AIFS_RETRY_SLEEP_SECONDS,
+        priority=AIFS_SOURCE_PRIORITY,
+        herbie_kwargs={"max_threads": AIFS_MAX_THREADS},
+        download_max_threads=AIFS_MAX_THREADS,
+    )
+
+
 # %% Define base time from the most recent run
 T0 = time.time()
 
@@ -116,7 +146,7 @@ latest_run = HerbieLatest(
     fxx=240,
     product="oper",
     verbose=True,
-    priority=["aws", "ecmwf"],
+    priority=AIFS_SOURCE_PRIORITY,
     save_dir=tmp_dir,
 )
 
@@ -179,33 +209,14 @@ zarr_vars = (
 # Create a range of forecast lead times
 aifs_range = FORECAST_LEAD_RANGES["ECMWF_AIFS"]
 
-# Create FastHerbie object
-FH_forecastsub = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="6h"),
-    model="aifs",
-    fxx=aifs_range,
-    product="enfo",
-    verbose=True,
-    priority=["aws", "ecmwf"],
-    save_dir=tmp_dir,
-)
-
 match_string_enfo = r":((tp|sf):sfc:\d+):"
-ens_paths = FH_forecastsub.download(match_string_enfo, verbose=False)
-
-grib_list = [
-    str(Path(x.get_localFilePath(match_string_enfo)).expand())
-    for x in FH_forecastsub.file_exists
-]
-
-# Perform a check if any data seems to be invalid
-cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
-
-grib_check = subprocess.run(
-    cmd, shell=True, capture_output=True, encoding="utf-8", check=False
+ens_paths = download_aifs_subset(
+    product="enfo",
+    search=match_string_enfo,
+    dataset_name="AIFS ensemble forecast",
+    run_date=base_time,
+    forecast_hours=aifs_range,
 )
-validate_grib_stats(grib_check)
-logger.info("Grib files passed validation, proceeding with processing")
 
 
 ens_mf = xr.open_mfdataset(
@@ -302,33 +313,13 @@ match_strings = (
 )
 
 
-# Create FastHerbie object
-FH_forecastsub = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="6h"),
-    model="aifs",
-    fxx=aifs_range,
+aifs_paths = download_aifs_subset(
     product="oper",
-    verbose=False,
-    priority=["aws", "ecmwf"],
-    save_dir=tmp_dir,
+    search=match_strings,
+    dataset_name="AIFS deterministic forecast",
+    run_date=base_time,
+    forecast_hours=aifs_range,
 )
-
-# Download the subsets
-aifs_paths = FH_forecastsub.download(match_strings, verbose=False)
-
-grib_list = [
-    str(Path(x.get_localFilePath(match_strings)).expand())
-    for x in FH_forecastsub.file_exists
-]
-
-# Perform a check if any data seems to be invalid
-cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
-
-grib_check = subprocess.run(
-    cmd, shell=True, capture_output=True, encoding="utf-8", check=False
-)
-validate_grib_stats(grib_check)
-logger.info("Grib files passed validation, proceeding with processing")
 
 
 aifs_mf_2 = xr.open_mfdataset(
@@ -508,33 +499,14 @@ for i in range(his_period, -1, -6):
     fxx = [6]
 
     ## Ensemble
-    # Create FastHerbie object
-    FH_histsub_ens = FastHerbie(
-        DATES,
-        model="aifs",
-        fxx=fxx,
-        product="enfo",
-        verbose=True,
-        priority=["aws", "ecmwf"],
-        save_dir=tmp_dir,
-    )
-
     match_string_enfo = r":((tp|sf):sfc:\d+):"
-    ens_paths_his = FH_histsub_ens.download(match_string_enfo, verbose=False)
-
-    grib_list = [
-        str(Path(x.get_localFilePath(match_string_enfo)).expand())
-        for x in FH_histsub_ens.file_exists
-    ]
-
-    # Perform a check if any data seems to be invalid
-    cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
-
-    grib_check = subprocess.run(
-        cmd, shell=True, capture_output=True, encoding="utf-8", check=False
+    ens_paths_his = download_aifs_subset(
+        product="enfo",
+        search=match_string_enfo,
+        dataset_name="AIFS ensemble history",
+        run_date=DATES[0],
+        forecast_hours=fxx,
     )
-    validate_grib_stats(grib_check)
-    logger.info("Grib files passed validation, proceeding with processing")
 
     ens_mf_his = xr.open_mfdataset(
         ens_paths_his,
@@ -592,44 +564,13 @@ for i in range(his_period, -1, -6):
     )
 
     ## Deterministic
-    # Create FastHerbie Object.
-    FH_histsub = FastHerbie(
-        DATES,
-        model="aifs",
-        fxx=fxx,
+    aifs_hisgribs = download_aifs_subset(
         product="oper",
-        verbose=False,
-        priority=["aws", "ecmwf"],
-        save_dir=tmp_dir,
+        search=match_strings,
+        dataset_name="AIFS deterministic history",
+        run_date=DATES[0],
+        forecast_hours=fxx,
     )
-
-    # Download the subsets
-    # Start with oper
-    aifs_hisgribs = FH_histsub.download(match_strings, verbose=False)
-
-    # Check for download length
-    if len(FH_histsub.file_exists) != len(fxx):
-        logger.error(
-            "Download failed, expected %d files but got %d",
-            len(fxx),
-            len(FH_histsub.file_exists),
-        )
-        sys.exit(1)
-
-    # Create list of downloaded grib files
-    grib_list = [
-        str(Path(x.get_localFilePath(match_strings)).expand())
-        for x in FH_histsub.file_exists
-    ]
-
-    # Perform a check if any data seems to be invalid
-    cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + " - " + " -s -stats"
-
-    grib_check = subprocess.run(
-        cmd, shell=True, capture_output=True, encoding="utf-8", check=False
-    )
-    validate_grib_stats(grib_check)
-    logger.info("Grib files passed validation, proceeding with processing")
 
     # Created merged xarray object for the ifs data
     aifs_his_mf_10 = xr.open_mfdataset(
