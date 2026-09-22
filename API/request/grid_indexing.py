@@ -317,6 +317,23 @@ def _aq_source_covers_request(
     )
 
 
+def _mask_old_aq_values(
+    data: np.ndarray, now_time: datetime.datetime, history_hours: int
+) -> np.ndarray:
+    """Keep a rolling AQ store from extending history when its run is stale."""
+    if data.ndim != 2 or data.shape[1] < 2:
+        return data
+    if now_time.tzinfo is None:
+        now_time = now_time.replace(tzinfo=datetime.UTC)
+    cutoff = now_time.timestamp() - history_hours * 3600
+    old_rows = data[:, 0] < cutoff
+    if not old_rows.any():
+        return data
+    data = data.copy()
+    data[old_rows, 1:] = np.nan
+    return data
+
+
 @dataclass
 class ZarrSources:
     subh: Any
@@ -1504,6 +1521,10 @@ async def calculate_grid_indexing(
 
     if "RAQDPS" in zarr_results:
         dataOut_raqdps = zarr_results["RAQDPS"]
+        if isinstance(dataOut_raqdps, np.ndarray):
+            dataOut_raqdps = _mask_old_aq_values(
+                dataOut_raqdps, now_time, HISTORY_PERIODS["RAQDPS"]
+            )
         if (
             base_day_utc is not None
             and isinstance(dataOut_raqdps, np.ndarray)
@@ -1532,6 +1553,10 @@ async def calculate_grid_indexing(
 
     if "SILAM" in zarr_results:
         dataOut_silam = zarr_results["SILAM"]
+        if isinstance(dataOut_silam, np.ndarray):
+            dataOut_silam = _mask_old_aq_values(
+                dataOut_silam, now_time, HISTORY_PERIODS["SILAM"]
+            )
         if (
             base_day_utc is not None
             and isinstance(dataOut_silam, np.ndarray)
