@@ -226,7 +226,9 @@ def test_download_retry_recovers_from_503_with_limited_threads(tmp_path, monkeyp
         retries=2,
         retry_sleep_s=1,
         max_threads=4,
+        verbose=False,
     )
 
     assert [call["max_threads"] for call in calls] == [4, 4]
     assert [call["overwrite"] for call in calls] == [False, True]
+    assert [call["verbose"] for call in calls] == [False, False]
