@@ -174,7 +174,9 @@ zarr_vars = (
 # Define the subset of variables to download as a list of strings
 matchstring_2m = ":((DPT|TMP|APTMP|RH):2 m above ground:)"
 matchstring_8m = ":(MASSDEN:8 m above ground:)"
-matchstring_su = ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|VIS|GUST|DSWRF):surface:.*hour fcst)"
+matchstring_su = (
+    ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|VIS|GUST|DSWRF|CAPE):surface:.*hour fcst)"
+)
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
 matchstring_cl = "(:TCDC:entire atmosphere:.*hour fcst)"
 matchstring_ap = "(:APCP:surface:0-[1-9]*)"
