@@ -104,8 +104,10 @@ def test_download_subset_retries_503_with_limited_threads_and_overwrite(
         herbie_retry_sleep_seconds=1,
         herbie_kwargs={"max_threads": 4},
         download_max_threads=4,
+        download_verbose=False,
     )
 
     assert paths == [str(grib_path)]
     assert [attempt["max_threads"] for attempt in attempts] == [4, 4]
     assert [attempt["overwrite_first_attempt"] for attempt in attempts] == [False, True]
+    assert [attempt["verbose"] for attempt in attempts] == [False, False]

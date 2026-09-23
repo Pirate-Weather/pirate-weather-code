@@ -18,7 +18,7 @@ ECCODES_VERSION="2.47.0"
 ECCODES_TARBALL_URL="https://confluence.ecmwf.int/download/attachments/45757960/eccodes-${ECCODES_VERSION}-Source.tar.gz"
 WGRIB2_VERSION="3.8.0"
 WGRIB2_TARBALL_URL="https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v${WGRIB2_VERSION}.tar.gz"
-HERBIE_URL="git+https://github.com/blaylockbk/Herbie.git"
+HERBIE_VERSION="2026.9.1"
 CFGRIB_VERSION="0.9.15.1"
 PGEOCODE_COUNTRIES="${PW_INGEST_PGEOCODE_COUNTRIES:-ad ar as at au ax az bd be bg bm br by ca ch cl co cr cy cz de dk do dz ee es fi fm fo fr gb gf gg gl gp gt gu hr ht hu ie im in is it je jp kr li lk lt lu lv mc md mh mk mp mq mt mw mx my nc nl no nz pe ph pk pl pm pr pt pw re ro rs ru se sg si sj sk sm th tr ua us uy va vi wf yt za}"
 
@@ -251,11 +251,11 @@ setup_venv() {
 
     log "Installing Python dependencies"
     python -m pip install --upgrade pip
-    grep -v -E '^(cfgrib==|eccodes==|git\+https://github.com/blaylockbk/Herbie.git$)' "${ROOT_DIR}/Docker/requirements-ingest.txt" > "${core_requirements}"
+    grep -v -E '^(cfgrib==|eccodes==|herbie-data==)' "${ROOT_DIR}/Docker/requirements-ingest.txt" > "${core_requirements}"
     python -m pip install -r "${core_requirements}"
     python -m pip install -r "${api_requirements}"
     python -m pip install pytest
-    python -m pip install --no-deps "${HERBIE_URL}"
+    python -m pip install --no-deps "herbie-data==${HERBIE_VERSION}"
     python -m pip install --no-deps "cfgrib==${CFGRIB_VERSION}"
     python -m pip install cffi findlibs
     python -m pip uninstall -y eccodes eccodeslib eckitlib || true
