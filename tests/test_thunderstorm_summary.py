@@ -124,7 +124,7 @@ def test_currently_hourly_thunderstorm_with_precipitation_low_cin():
         dewPoint=20.0,
         cape=2600,  # Above high threshold for icon
         liftedIndex=-5.0,  # Low lifted index
-        cin=-200.0,  # High CIN value to suppress thunderstorms
+        convectiveInhibition=-200.0,  # High CIN value to suppress thunderstorms
         verticalVelocity=0.0,  # Neutral vertical velocity
         kIndex=30.0,  # Low K-index
     )

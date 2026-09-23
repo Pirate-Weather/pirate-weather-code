@@ -1162,8 +1162,8 @@ def calculate_day_text(
             overall_max_cape_with_precip = max(
                 overall_max_cape_with_precip, p_data["max_cape_with_precip"]
             )
-            overall_temp_at_max_instability = p_data["temp_at_max_instability"]
-            overall_dewpoint_at_max_instability = p_data["dewpoint_at_max_instability"]
+            overall_temp_at_max_instability = p_data["temp_at_max_depression"]
+            overall_dewpoint_at_max_instability = p_data["dewpoint_at_max_depression"]
 
             if p_data["min_li_with_precip"] is not None and (
                 overall_min_li_with_precip is None
