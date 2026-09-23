@@ -105,6 +105,7 @@ RUN git clone https://github.com/NOAA-EMC/NCEPLIBS-g2c.git
 RUN cmake \
     -DCMAKE_INSTALL_PREFIX=/build/NCEPLIBS_build \
     -DCMAKE_PREFIX_PATH="/usr/local;/build/NCEPLIBS_build" \
+    -DUSE_AEC=ON \
     -DUSE_Jasper=OFF \
     -DUSE_OpenJPEG=ON \
     -S NCEPLIBS-g2c \
@@ -136,7 +137,8 @@ RUN cmake --fresh \
     -DUSE_G2CLIB_LOW=ON
 
 RUN cmake --build . --parallel 4
-RUN cmake --install .
+RUN cmake --install . && \
+    /build/wgrib2_build/bin/wgrib2 -config | grep -q "Supported decoding:.*CCSDS AEC"
 
 # ----------------------------------------------------------------------
 # Python environment
@@ -146,9 +148,9 @@ WORKDIR /app
 COPY Docker/requirements-ingest.txt requirements-ingest.txt
 
 RUN python3 -m pip install --upgrade pip && \
-    grep -v -E '^(cfgrib==|eccodes==|git\+https://github.com/blaylockbk/Herbie.git$)' requirements-ingest.txt > requirements-ingest-core.txt && \
+    grep -v -E '^(cfgrib==|eccodes==|herbie-data==)' requirements-ingest.txt > requirements-ingest-core.txt && \
     python3 -m pip install -r requirements-ingest-core.txt && \
-    python3 -m pip install --no-deps git+https://github.com/blaylockbk/Herbie.git && \
+    python3 -m pip install --no-deps herbie-data==2026.9.1 && \
     python3 -m pip install --no-deps cfgrib==0.9.15.1 && \
     python3 -m pip install cffi findlibs && \
     python3 -m pip uninstall -y eccodes eccodeslib eckitlib && \

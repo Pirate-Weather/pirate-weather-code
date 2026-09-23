@@ -13,6 +13,7 @@ import shutil
 import sys
 import time
 import warnings
+from contextlib import nullcontext
 
 import dask
 import dask.array as da
@@ -51,6 +52,12 @@ AIFS_SOURCE_PRIORITY = ["google", "ecmwf", "aws"]
 AIFS_MAX_THREADS = positive_int_env("aifs_download_threads", 4)
 AIFS_DOWNLOAD_RETRIES = positive_int_env("herbie_download_retries", 3)
 AIFS_RETRY_SLEEP_SECONDS = positive_int_env("herbie_retry_sleep_seconds", 10)
+AIFS_VERBOSE_LOGS = os.getenv("aifs_verbose_logs", "").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -133,7 +140,13 @@ def download_aifs_subset(
         priority=AIFS_SOURCE_PRIORITY,
         herbie_kwargs={"max_threads": AIFS_MAX_THREADS},
         download_max_threads=AIFS_MAX_THREADS,
+        download_verbose=AIFS_VERBOSE_LOGS,
     )
+
+
+def aifs_progress_bar():
+    """Show Dask progress only when verbose AIFS logging is enabled."""
+    return ProgressBar() if AIFS_VERBOSE_LOGS else nullcontext()
 
 
 # %% Define base time from the most recent run
@@ -145,7 +158,7 @@ latest_run = HerbieLatest(
     freq="6h",
     fxx=240,
     product="oper",
-    verbose=True,
+    verbose=AIFS_VERBOSE_LOGS,
     priority=AIFS_SOURCE_PRIORITY,
     save_dir=tmp_dir,
 )
@@ -424,7 +437,7 @@ xarray_forecast_merged = xarray_forecast_merged.chunk(
     }
 )
 
-with ProgressBar():
+with aifs_progress_bar():
     xarray_forecast_merged.to_zarr(
         forecast_process_path + "_merged.zarr",
         mode="w",
@@ -668,7 +681,7 @@ for i in range(his_period, -1, -6):
         chunks={"time": 1, "latitude": process_chunk, "longitude": process_chunk}
     )
 
-    with ProgressBar():
+    with aifs_progress_bar():
         xarray_hist_merged.to_zarr(
             hist_tmp_zarr_path,
             mode="w",
@@ -787,7 +800,7 @@ ds_chunk = ds_stack.chunk(
 )
 
 # Interim zarr save of the stacked array. Not necessary for local, but speeds things up on S3
-with ProgressBar():
+with aifs_progress_bar():
     ds_chunk.to_zarr(forecast_process_path + "_stack.zarr", mode="w")
 
 # Read in stacked 4D array back in
@@ -816,7 +829,7 @@ int_var_indices = [i for i, v in enumerate(zarr_vars) if v in int_vars]
 # 4. Rechunk it to match the final array
 # 5. Write it out to the zarr array
 
-with ProgressBar(), dask.config.set(scheduler="threads", num_workers=4):
+with aifs_progress_bar(), dask.config.set(scheduler="threads", num_workers=4):
     # 1. Interpolate the stacked array to be hourly along the time axis
     daskVarArrayStackDiskInterp = interp_time_take_blend(
         daskVarArrayStackDisk,
