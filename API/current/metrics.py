@@ -19,10 +19,13 @@ from API.constants.aqi_const import compute_aqi_array
 from API.constants.clip_const import (
     CLIP_AQI,
     CLIP_CAPE,
+    CLIP_CIN,
     CLIP_CLOUD,
     CLIP_CO_PPB,
     CLIP_HUMIDITY,
     CLIP_IL_AQI,
+    CLIP_K_INDEX,
+    CLIP_LIFTED_INDEX,
     CLIP_NO2_PPB,
     CLIP_O3_PPB,
     CLIP_OZONE,
@@ -34,6 +37,7 @@ from API.constants.clip_const import (
     CLIP_SOLAR,
     CLIP_TEMP,
     CLIP_UV,
+    CLIP_VERTICAL_VELOCITY,
     CLIP_VIS,
     CLIP_WIND,
 )
@@ -1684,7 +1688,9 @@ def _get_lifted_index(
         prioritize_ai_models=prioritize_ai_models,
     )
     val = _select_value(strategies)
-    return val
+    return clipLog(
+        val, CLIP_LIFTED_INDEX["min"], CLIP_LIFTED_INDEX["max"], "Lifted Index Current"
+    )
 
 
 def _get_vertical_velocity(
@@ -1732,7 +1738,12 @@ def _get_vertical_velocity(
         prioritize_ai_models=prioritize_ai_models,
     )
     val = _select_value(strategies)
-    return val
+    return clipLog(
+        val,
+        CLIP_VERTICAL_VELOCITY["min"],
+        CLIP_VERTICAL_VELOCITY["max"],
+        "Vertical Velocity Current",
+    )
 
 
 def _get_convective_inhibition(
@@ -1772,7 +1783,9 @@ def _get_convective_inhibition(
         prioritize_ai_models=prioritize_ai_models,
     )
     val = _select_value(strategies)
-    return val
+    return clipLog(
+        val, CLIP_CIN["min"], CLIP_CIN["max"], "Convective Inhibition Current"
+    )
 
 
 def _get_k_index(
@@ -1812,7 +1825,7 @@ def _get_k_index(
         prioritize_ai_models=prioritize_ai_models,
     )
     val = _select_value(strategies)
-    return val
+    return clipLog(val, CLIP_K_INDEX["min"], CLIP_K_INDEX["max"], "K Index Current")
 
 
 def build_current_section(

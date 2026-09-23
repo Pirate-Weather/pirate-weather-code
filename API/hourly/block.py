@@ -26,12 +26,15 @@ from API.constants.aqi_const import compute_aqi_array
 from API.constants.clip_const import (
     CLIP_AQI,
     CLIP_CAPE,
+    CLIP_CIN,
     CLIP_CLOUD,
     CLIP_CO_PPB,
     CLIP_FEELS_LIKE,
     CLIP_FIRE,
     CLIP_HUMIDITY,
     CLIP_IL_AQI,
+    CLIP_K_INDEX,
+    CLIP_LIFTED_INDEX,
     CLIP_NO2_PPB,
     CLIP_O3_PPB,
     CLIP_OZONE,
@@ -43,6 +46,7 @@ from API.constants.clip_const import (
     CLIP_SOLAR,
     CLIP_TEMP,
     CLIP_UV,
+    CLIP_VERTICAL_VELOCITY,
     CLIP_VIS,
     CLIP_WIND,
 )
@@ -332,10 +336,22 @@ def _process_input_vars(
             lifted_index_inputs.T,
         )
 
+        InterPhour[:, DATA_HOURLY["lifted_index"]] = np.clip(
+            InterPhour[:, DATA_HOURLY["lifted_index"]],
+            CLIP_LIFTED_INDEX["min"],
+            CLIP_LIFTED_INDEX["max"],
+        )
+
     if vertical_velocity_inputs is not None:
         InterPhour[:, DATA_HOURLY["vertical_velocity"]] = np.choose(
             np.argmin(np.isnan(vertical_velocity_inputs), axis=1),
             vertical_velocity_inputs.T,
+        )
+
+        InterPhour[:, DATA_HOURLY["vertical_velocity"]] = np.clip(
+            InterPhour[:, DATA_HOURLY["vertical_velocity"]],
+            CLIP_VERTICAL_VELOCITY["min"],
+            CLIP_VERTICAL_VELOCITY["max"],
         )
 
     if convective_inhibition_inputs is not None:
@@ -344,10 +360,22 @@ def _process_input_vars(
             convective_inhibition_inputs.T,
         )
 
+        InterPhour[:, DATA_HOURLY["convective_inhibition"]] = np.clip(
+            InterPhour[:, DATA_HOURLY["convective_inhibition"]],
+            CLIP_CIN["min"],
+            CLIP_CIN["max"],
+        )
+
     if k_index_inputs is not None:
         InterPhour[:, DATA_HOURLY["k_index"]] = np.choose(
             np.argmin(np.isnan(k_index_inputs), axis=1),
             k_index_inputs.T,
+        )
+
+        InterPhour[:, DATA_HOURLY["k_index"]] = np.clip(
+            InterPhour[:, DATA_HOURLY["k_index"]],
+            CLIP_K_INDEX["min"],
+            CLIP_K_INDEX["max"],
         )
 
 

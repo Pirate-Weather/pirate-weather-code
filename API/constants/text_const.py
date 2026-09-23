@@ -85,8 +85,8 @@ VV_THRESHOLDS = {
 
 # K Index thresholds
 KI_THRESHOLDS = {
-    "low": 15,  # Isolated thunderstorms possible
-    "high": 35,  # Numerous thunderstorms likely
+    "low": 20,  # Isolated thunderstorms possible
+    "high": 30,  # Numerous thunderstorms likely
 }
 
 # Temperature–dewpoint spread (°C) above which the atmosphere is

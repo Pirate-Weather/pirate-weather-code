@@ -196,7 +196,6 @@ zarr_vars = (
     "Precipitation_Prob",
     "APCP_Mean",
     "APCP_StdDev",
-    "mucape",
 )
 
 
