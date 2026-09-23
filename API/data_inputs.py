@@ -1095,15 +1095,6 @@ def prepare_data_inputs(
         gdps_merged[:, GDPS["cin"]] if gdps_merged is not None else None,
     )
 
-    # --- vertical_velocity_inputs ---
-    vertical_velocity_inputs = _stack_fields(
-        num_hours,
-        hrdps_merged[:, HRDPS["vertical_velocity"]]
-        if hrdps_merged is not None
-        else None,
-        gdps_merged[:, GDPS["vertical_velocity"]] if gdps_merged is not None else None,
-    )
-
     # --- k_index_inputs ---
     k_index_inputs = _stack_fields(
         num_hours,
