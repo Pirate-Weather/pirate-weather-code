@@ -13,7 +13,7 @@ git+https://github.com/blaylockbk/Herbie.git@0e27359f2426e0ed4e2c24351ab834636f1
 metpy==1.7.1
 netCDF4==1.7.4
 numba==0.67.0
-numpy==2.3.3
+numpy==2.5.3
 nwswx==0.1.2
 pandas==3.0.6
 pyarrow==25.0.1
