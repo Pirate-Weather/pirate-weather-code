@@ -95,7 +95,7 @@ def calculate_summary_text(
                 dewpointAtMaxInstability = day[2].get("dewPoint")
 
         # Most-unstable (minimum) Lifted Index across precipitation days
-        day_li = day[2].get("liftedIndexMin")
+        day_li = day[2].get("liftedIndexMax")
         if (
             day_li is not None
             and not np.isnan(day_li)

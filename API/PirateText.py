@@ -87,7 +87,7 @@ def calculate_text(
 
     # Additional stability/moisture indices for thunderstorm detection
     liftedIndex = hourObject.get("liftedIndex", None)
-    cin = hourObject.get("cin", None)
+    cin = hourObject.get("convectiveInhibition", None)
     verticalVelocity = hourObject.get("verticalVelocity", None)
     kIndex = hourObject.get("kIndex", None)
 

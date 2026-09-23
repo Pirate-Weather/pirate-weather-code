@@ -433,10 +433,12 @@ def calculate_half_day_text(
                 "max_smoke": 0.0,  # Initialize for smoke
                 "max_cape_with_precip": 0.0,  # Initialize for thunderstorms
                 "min_li_with_precip": None,  # Most-unstable (minimum) Lifted Index during precip
+                "max_vert_vel_with_precip": None,  # Maximum vertical velocity during precip
                 "max_cin_with_precip": None,  # Least-inhibiting (maximum) CIN during precip
                 "max_ki_with_precip": None,  # Maximum K Index during precip
-                "temp_at_max_instability": None,  # Temperature at hour of peak CAPE
-                "dewpoint_at_max_instability": None,  # Dewpoint at hour of peak CAPE
+                "max_dewpoint_depression": None,  # Maximum dewpoint depression
+                "temp_at_max_depression": None,  # Temperature at max depression
+                "dewpoint_at_max_depression": None,  # Dewpoint at max depression
             }
 
         # Stop generating period names if we have enough for a full 24-hour cycle (e.g., 5 periods)
@@ -570,7 +572,8 @@ def calculate_half_day_text(
                 hour_cape = hour.get("cape", MISSING_DATA)
                 hour_pop = hour.get("precipProbability", DEFAULT_POP)
                 hour_li = hour.get("liftedIndex", None)
-                hour_cin = hour.get("cin", None)
+                hour_cin = hour.get("convectiveInhibition", None)
+                hour_vert_vel = hour.get("verticalVelocity", None)
                 hour_ki = hour.get("kIndex", None)
                 hour_temp = hour.get("temperature", None)
                 hour_dew = hour.get("dewPoint", None)
@@ -578,9 +581,23 @@ def calculate_half_day_text(
                 if hour_cape != MISSING_DATA and hour_pop >= PRECIP_PROB_THRESHOLD:
                     period_data["max_cape_with_precip"] = max(
                         period_data["max_cape_with_precip"], hour_cape
-                    )  # Record conditions at peak instability for the moisture check
-                    period_data["temp_at_max_instability"] = hour_temp
-                    period_data["dewpoint_at_max_instability"] = hour_dew
+                    )
+                    # Record highest dewpoint depression
+                    if (
+                        hour_temp is not None
+                        and not np.isnan(hour_temp)
+                        and hour_dew is not None
+                        and not np.isnan(hour_dew)
+                    ):
+                        hour_dep = hour_temp - hour_dew
+
+                        if (
+                            period_data["max_dewpoint_depression"] is None
+                            or hour_dep > period_data["max_dewpoint_depression"]
+                        ):
+                            period_data["max_dewpoint_depression"] = hour_dep
+                            period_data["temp_at_max_depression"] = hour_temp
+                            period_data["dewpoint_at_max_depression"] = hour_dew
 
                     # Most-unstable (minimum) Lifted Index
                     if (
@@ -592,6 +609,17 @@ def calculate_half_day_text(
                         )
                     ):
                         period_data["min_li_with_precip"] = hour_li
+
+                    # Maximum vertical velocity
+                    if (
+                        hour_vert_vel is not None
+                        and not np.isnan(hour_vert_vel)
+                        and (
+                            period_data["max_vert_vel_with_precip"] is None
+                            or hour_vert_vel < period_data["max_vert_vel_with_precip"]
+                        )
+                    ):
+                        period_data["max_vert_vel_with_precip"] = hour_vert_vel
 
                     # Least-inhibiting (maximum/least-negative) CIN
                     if (
@@ -622,6 +650,7 @@ def calculate_half_day_text(
                         pop=hour_pop,
                         lifted_index=hour_li,
                         cin=hour_cin,
+                        vertical_velocity=hour_vert_vel,
                         k_index=hour_ki,
                         dewpoint=hour_dew,
                         temperature=hour_temp,

@@ -355,7 +355,7 @@ def _build_display_data(
     half_day_display_mean[:, DATA_HOURLY["ice"]] = (
         interp_half_day_mean[:, DATA_HOURLY["ice"]] * prepIntensityUnit
     )
-    half_day_display_mean[:, DATA_HOURLY["vertical_velocity"]] = InterPday[
+    half_day_display_mean[:, DATA_HOURLY["vertical_velocity"]] = interp_half_day_mean[
         :, DATA_HOURLY["vertical_velocity"]
     ]
 
@@ -1376,6 +1376,11 @@ def build_daily_section(
             "windSpeed": InterPday[idx, DATA_DAY["wind"]],
             "cloudCover": InterPday[idx, DATA_DAY["cloud"]],
             "visibility": InterPday[idx, DATA_DAY["vis"]],
+            "liftedIndexMax": InterPdayMin[idx, DATA_DAY["lifted_index"]],
+            "convectiveInhibitionMax": InterPdayMin[
+                idx, DATA_DAY["convective_inhibition"]
+            ],
+            "kIndexMax": InterPdayMax[idx, DATA_DAY["k_index"]],
         }
         dayList_si.append(dayObject_si)
 

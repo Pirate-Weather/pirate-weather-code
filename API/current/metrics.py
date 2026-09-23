@@ -2227,7 +2227,7 @@ def build_current_section(
         else np.nan
     )
     curr_vertical_velocity_display = (
-        int(np.round(InterPcurrent[DATA_CURRENT["vertical_velocity"]], 2))
+        np.round(InterPcurrent[DATA_CURRENT["vertical_velocity"]], 2)
         if not np.isnan(InterPcurrent[DATA_CURRENT["vertical_velocity"]])
         else np.nan
     )
