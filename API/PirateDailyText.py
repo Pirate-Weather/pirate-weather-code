@@ -849,6 +849,7 @@ def calculate_day_text(
                 "min_li_with_precip": None,  # Most-unstable (minimum) Lifted Index during precip
                 "max_cin_with_precip": None,  # Least-inhibiting (maximum) CIN during precip
                 "max_ki_with_precip": None,  # Maximum K Index during precip
+                "max_vert_vel_with_precip": None,  # Maximum vertical velocity
                 "max_dewpoint_depression": None,  # Maximum dewpoint depression
                 "temp_at_max_depression": None,  # Temperature at max depression
                 "dewpoint_at_max_depression": None,  # Dewpoint at max depression
@@ -1024,6 +1025,17 @@ def calculate_day_text(
                     ):
                         period_data["min_li_with_precip"] = hour_li
 
+                    # Lowest Vertical Velocity
+                    if (
+                        hour_vert_vel is not None
+                        and not np.isnan(hour_li)
+                        and (
+                            period_data["max_vert_vel_with_precip"] is None
+                            or hour_vert_vel < period_data["max_vert_vel_with_precip"]
+                        )
+                    ):
+                        period_data["max_vert_vel_with_precip"] = hour_vert_vel
+
                     # Least-inhibiting (maximum/least-negative) CIN
                     if (
                         hour_cin is not None
@@ -1113,6 +1125,7 @@ def calculate_day_text(
     overall_min_li_with_precip = None
     overall_max_cin_with_precip = None
     overall_max_ki_with_precip = None
+    overall_max_vert_vel_with_precip = None
     overall_temp_at_max_instability = None
     overall_dewpoint_at_max_instability = None
 
@@ -1176,6 +1189,12 @@ def calculate_day_text(
                 or p_data["max_cin_with_precip"] > overall_max_cin_with_precip
             ):
                 overall_max_cin_with_precip = p_data["max_cin_with_precip"]
+
+            if p_data["max_vert_vel_with_precip"] is not None and (
+                overall_max_cin_with_precip is None
+                or p_data["max_vert_vel_with_precip"] < overall_max_cin_with_precip
+            ):
+                overall_max_cin_with_precip = p_data["max_vert_vel_with_precip"]
 
             if p_data["max_ki_with_precip"] is not None and (
                 overall_max_ki_with_precip is None
@@ -1559,6 +1578,7 @@ def calculate_day_text(
             pop=overall_avg_pop,
             lifted_index=overall_min_li_with_precip,
             cin=overall_max_cin_with_precip,
+            vertical_velocity=overall_max_vert_vel_with_precip,
             k_index=overall_max_ki_with_precip,
             dewpoint=overall_dewpoint_at_max_instability,
             temperature=overall_temp_at_max_instability,
