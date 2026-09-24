@@ -792,7 +792,6 @@ def calculate_half_day_text(
             ):
                 overall_max_cin_with_precip = p_data["max_vert_vel_with_precip"]
 
-
             if p_data["max_ki_with_precip"] is not None and (
                 overall_max_ki_with_precip is None
                 or p_data["max_ki_with_precip"] > overall_max_ki_with_precip
