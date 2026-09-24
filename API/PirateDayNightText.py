@@ -436,7 +436,6 @@ def calculate_half_day_text(
                 "max_vert_vel_with_precip": None,  # Maximum vertical velocity during precip
                 "max_cin_with_precip": None,  # Least-inhibiting (maximum) CIN during precip
                 "max_ki_with_precip": None,  # Maximum K Index during precip
-                "max_vert_vel_with_precip": None,  # Maximum vertical velocity
                 "max_dewpoint_depression": None,  # Maximum dewpoint depression
                 "temp_at_max_depression": None,  # Temperature at max depression
                 "dewpoint_at_max_depression": None,  # Dewpoint at max depression
