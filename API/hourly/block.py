@@ -336,10 +336,11 @@ def _process_input_vars(
             lifted_index_inputs.T,
         )
 
-        InterPhour[:, DATA_HOURLY["lifted_index"]] = np.clip(
+        InterPhour[:, DATA_HOURLY["lifted_index"]] = clipLog(
             InterPhour[:, DATA_HOURLY["lifted_index"]],
             CLIP_LIFTED_INDEX["min"],
             CLIP_LIFTED_INDEX["max"],
+            "Lifted Index Hour",
         )
 
     if vertical_velocity_inputs is not None:
@@ -348,10 +349,11 @@ def _process_input_vars(
             vertical_velocity_inputs.T,
         )
 
-        InterPhour[:, DATA_HOURLY["vertical_velocity"]] = np.clip(
+        InterPhour[:, DATA_HOURLY["vertical_velocity"]] = clipLog(
             InterPhour[:, DATA_HOURLY["vertical_velocity"]],
             CLIP_VERTICAL_VELOCITY["min"],
             CLIP_VERTICAL_VELOCITY["max"],
+            "Vertical Velocity Hour"
         )
 
     if convective_inhibition_inputs is not None:
@@ -360,10 +362,11 @@ def _process_input_vars(
             convective_inhibition_inputs.T,
         )
 
-        InterPhour[:, DATA_HOURLY["convective_inhibition"]] = np.clip(
+        InterPhour[:, DATA_HOURLY["convective_inhibition"]] = clipLog(
             InterPhour[:, DATA_HOURLY["convective_inhibition"]],
             CLIP_CIN["min"],
             CLIP_CIN["max"],
+            "Convective Inhibition Hour"
         )
 
     if k_index_inputs is not None:
@@ -372,10 +375,11 @@ def _process_input_vars(
             k_index_inputs.T,
         )
 
-        InterPhour[:, DATA_HOURLY["k_index"]] = np.clip(
+        InterPhour[:, DATA_HOURLY["k_index"]] = clipLog(
             InterPhour[:, DATA_HOURLY["k_index"]],
             CLIP_K_INDEX["min"],
             CLIP_K_INDEX["max"],
+            "K-Index Hour"
         )
 
 

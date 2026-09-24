@@ -18,13 +18,13 @@ CLIP_FEELS_LIKE = {"min": -60, "max": 60}
 CLIP_GLOBAL = {"min": -1000, "max": 500000}
 CLIP_SOLAR = {"min": 0, "max": 10000}
 CLIP_CAPE = {"min": 0, "max": 10000}
-CLIP_LIFTED_INDEX = {"min": -20, "max": 20}  # Celsius (°C)
+CLIP_LIFTED_INDEX = {"min": -50, "max": 50}  # Celsius (°C)
 CLIP_VERTICAL_VELOCITY = {
-    "min": -20,
-    "max": 20,
+    "min": -30,
+    "max": 30,
 }  # Pa/s (Omega coordinate; negative = upward)
-CLIP_CIN = {"min": -500, "max": 0}  # J/kg (Convective Inhibition magnitude)
-CLIP_K_INDEX = {"min": 0, "max": 50}  # Atmospheric stability index
+CLIP_CIN = {"min": -1000, "max": 0}  # J/kg (Convective Inhibition magnitude)
+CLIP_K_INDEX = {"min": -100, "max": 100}  # Atmospheric stability index
 
 # Air quality concentration clip bounds
 # PM2.5 and PM10 in µg/m³
