@@ -353,7 +353,7 @@ def _process_input_vars(
             InterPhour[:, DATA_HOURLY["vertical_velocity"]],
             CLIP_VERTICAL_VELOCITY["min"],
             CLIP_VERTICAL_VELOCITY["max"],
-            "Vertical Velocity Hour"
+            "Vertical Velocity Hour",
         )
 
     if convective_inhibition_inputs is not None:
@@ -366,7 +366,7 @@ def _process_input_vars(
             InterPhour[:, DATA_HOURLY["convective_inhibition"]],
             CLIP_CIN["min"],
             CLIP_CIN["max"],
-            "Convective Inhibition Hour"
+            "Convective Inhibition Hour",
         )
 
     if k_index_inputs is not None:
@@ -379,7 +379,7 @@ def _process_input_vars(
             InterPhour[:, DATA_HOURLY["k_index"]],
             CLIP_K_INDEX["min"],
             CLIP_K_INDEX["max"],
-            "K-Index Hour"
+            "K-Index Hour",
         )
 
 
