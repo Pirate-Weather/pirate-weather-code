@@ -362,11 +362,11 @@ def _process_input_vars(
             convective_inhibition_inputs.T,
         )
 
-        InterPhour[:, DATA_HOURLY["convective_inhibition"]] = clipLog(
+        # Use np.clip instead of clipLog to prevent -999 for values above 0
+        InterPhour[:, DATA_HOURLY["convective_inhibition"]] = np.clip(
             InterPhour[:, DATA_HOURLY["convective_inhibition"]],
             CLIP_CIN["min"],
             CLIP_CIN["max"],
-            "Convective Inhibition Hour",
         )
 
     if k_index_inputs is not None:

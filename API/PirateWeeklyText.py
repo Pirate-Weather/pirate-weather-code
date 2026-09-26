@@ -104,7 +104,7 @@ def calculate_summary_text(
             minLi = day_li
 
         # Least-inhibiting (maximum/least-negative) CIN across precipitation days
-        day_cin = day[2].get("cinMax")
+        day_cin = day[2].get("convectiveInhibitionMax")
         if (
             day_cin is not None
             and not np.isnan(day_cin)

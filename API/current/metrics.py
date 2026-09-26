@@ -1782,10 +1782,9 @@ def _get_convective_inhibition(
         has_ecmwf=False,
         prioritize_ai_models=prioritize_ai_models,
     )
+    # Use np.clip instead of clipLog to prevent -999 for values above 0
     val = _select_value(strategies)
-    return clipLog(
-        val, CLIP_CIN["min"], CLIP_CIN["max"], "Convective Inhibition Current"
-    )
+    return np.clip(val, CLIP_CIN["min"], CLIP_CIN["max"])
 
 
 def _get_k_index(

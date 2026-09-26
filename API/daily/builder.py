@@ -261,9 +261,6 @@ def _build_display_data(
     daily_display_mean[:, DATA_DAY["ice_intensity"]] = (
         InterPday[:, DATA_DAY["ice_intensity"]] * prepIntensityUnit
     )
-    daily_display_mean[:, DATA_DAY["vertical_velocity"]] = InterPday[
-        :, DATA_DAY["vertical_velocity"]
-    ]
 
     daily_display_high = InterPdayHigh.copy()
     daily_display_high[:, DATA_DAY["temp"]] = _conv_temp(
@@ -291,8 +288,8 @@ def _build_display_data(
     daily_display_min[:, DATA_DAY["lifted_index"]] = InterPdayMin[
         :, DATA_DAY["lifted_index"]
     ]
-    daily_display_min[:, DATA_DAY["convective_inhibition"]] = InterPdayMin[
-        :, DATA_DAY["convective_inhibition"]
+    daily_display_min[:, DATA_DAY["vertical_velocity"]] = InterPday[
+        :, DATA_DAY["vertical_velocity"]
     ]
 
     daily_display_max = InterPdayMax.copy()
@@ -314,6 +311,9 @@ def _build_display_data(
     daily_display_max[:, DATA_DAY["ice_intensity"]] = (
         InterPdayMax[:, DATA_DAY["ice_intensity"]] * prepIntensityUnit
     )
+    daily_display_max[:, DATA_DAY["convective_inhibition"]] = InterPdayMin[
+        :, DATA_DAY["convective_inhibition"]
+    ]
     daily_display_max[:, DATA_DAY["k_index"]] = InterPdayMax[:, DATA_DAY["k_index"]]
 
     daily_display_sum = InterPdaySum.copy()
@@ -1268,16 +1268,17 @@ def build_daily_section(
             "solarMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["solar"]]),
             "capeMax": InterPdayMax[idx, DATA_DAY["cape"]],
             "capeMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["cape"]]),
-            "liftedIndexMax": daily_display_min[
-                idx, DATA_DAY["lifted_index"]
-            ],  # Note: Lifted index uses negative values for highest instability, so we take the minimum value for "max" instability.
-            "liftedIndexMaxTime": int(InterPdayMinTime[idx, DATA_DAY["lifted_index"]]),
-            "verticalVelocity": daily_display_mean[
+            "liftedIndexMin": daily_display_min[idx, DATA_DAY["lifted_index"]],
+            "liftedIndexMinTime": int(InterPdayMinTime[idx, DATA_DAY["lifted_index"]]),
+            "verticalVelocityMin": daily_display_min[
                 idx, DATA_DAY["vertical_velocity"]
-            ],  # Note: Vertical velocity can be positive or negative, so we take the mean value for the day.
-            "convectiveInhibitionMax": daily_display_min[
+            ],
+            "verticalVelocityMinTime": int(
+                InterPdayMinTime[idx, DATA_DAY["vertical_velocity"]]
+            ),
+            "convectiveInhibitionMax": daily_display_max[
                 idx, DATA_DAY["convective_inhibition"]
-            ],  # Note: Convective inhibition uses negative values, so we take the minimum value for "max" inhibition.
+            ],
             "convectiveInhibitionMaxTime": int(
                 InterPdayMinTime[idx, DATA_DAY["convective_inhibition"]]
             ),
@@ -1376,8 +1377,8 @@ def build_daily_section(
             "windSpeed": InterPday[idx, DATA_DAY["wind"]],
             "cloudCover": InterPday[idx, DATA_DAY["cloud"]],
             "visibility": InterPday[idx, DATA_DAY["vis"]],
-            "liftedIndexMax": InterPdayMin[idx, DATA_DAY["lifted_index"]],
-            "convectiveInhibitionMax": InterPdayMin[
+            "liftedIndexMin": InterPdayMin[idx, DATA_DAY["lifted_index"]],
+            "convectiveInhibitionMin": InterPdayMin[
                 idx, DATA_DAY["convective_inhibition"]
             ],
             "kIndexMax": InterPdayMax[idx, DATA_DAY["k_index"]],
