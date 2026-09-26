@@ -517,7 +517,6 @@ def _apply_rounding(
         DATA_DAY["cape"]: ROUNDING_RULES.get("cape", 0),
         DATA_DAY["bearing"]: ROUNDING_RULES.get("windBearing", 0),
         DATA_DAY["moon_phase"]: ROUNDING_RULES.get("moonPhase", 2),
-        DATA_DAY["vertical_velocity"]: ROUNDING_RULES.get("verticalVelocity", 2),
     }
 
     for idx_field, decimals in daily_mean_rounding_map.items():
@@ -562,8 +561,11 @@ def _apply_rounding(
     daily_display_min[:, DATA_DAY["lifted_index"]] = np.round(
         daily_display_min[:, DATA_DAY["lifted_index"]], 0
     )
-    daily_display_min[:, DATA_DAY["convective_inhibition"]] = np.round(
-        daily_display_min[:, DATA_DAY["convective_inhibition"]], 0
+    daily_display_max[:, DATA_DAY["convective_inhibition"]] = np.round(
+        daily_display_max[:, DATA_DAY["convective_inhibition"]], 0
+    )
+    daily_display_min[:, DATA_DAY["vertical_velocity"]] = np.round(
+        daily_display_min[:, DATA_DAY["vertical_velocity"]], 0
     )
 
     for idx_field in (
