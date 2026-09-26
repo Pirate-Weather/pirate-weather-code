@@ -66,6 +66,7 @@ def calculate_summary_text(
     minLi = None
     maxCin = None
     maxKi = None
+    max_vvel = None
     dewpointAtMaxInstability = None
     tempAtMaxInstability = None
     numThunderstormDays = 0
@@ -95,7 +96,7 @@ def calculate_summary_text(
                 dewpointAtMaxInstability = day[2].get("dewPoint")
 
         # Most-unstable (minimum) Lifted Index across precipitation days
-        day_li = day[2].get("liftedIndexMax")
+        day_li = day[2].get("liftedIndexMin")
         if (
             day_li is not None
             and not np.isnan(day_li)
@@ -111,6 +112,15 @@ def calculate_summary_text(
             and (maxCin is None or day_cin > maxCin)
         ):
             maxCin = day_cin
+
+        # Higest vertical velocity for the week
+        day_vvel = day[2].get("verticalVelocityMin")
+        if (
+            day_vvel is not None
+            and not np.isnan(day_vvel)
+            and (maxCin is None or day_cin > day_vvel)
+        ):
+            max_vvel = day_vvel
 
         # Maximum K Index across precipitation days
         day_ki = day[2].get("kIndexMax")
@@ -155,6 +165,7 @@ def calculate_summary_text(
             mode="summary",
             lifted_index=minLi,
             cin=maxCin,
+            vertical_velocity=max_vvel,
             k_index=maxKi,
             dewpoint=dewpointAtMaxInstability,
             temperature=tempAtMaxInstability,
