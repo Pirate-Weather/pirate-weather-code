@@ -77,6 +77,172 @@ def test_currently_hourly_thunderstorm_with_precipitation():
     assert icon == "thunderstorm"
 
 
+def test_currently_hourly_thunderstorm_with_precipitation_low_pop():
+    """
+    Test that low precipitation probability suppresses thunderstorm text in hourly summaries.
+    When precipitation proability is low it should suppress the thunderstorm test even with high CAPE.
+    """
+    hour_object = create_base_hour(
+        precipType="rain",
+        cloudCover=0.8,
+        temperature=25.0,
+        humidity=0.7,
+        precipProbability=0.2,  # Below minimum probabilty threshold for thunderstorm text
+        rainIntensity=5.0,
+        liquidAccumulation=5.0,
+        dewPoint=20.0,
+        cape=2600,  # Above high threshold for icon
+    )
+
+    text, icon = calculate_text(
+        hourObject=hour_object,
+        isDayTime=True,
+        type="hour",
+        icon="darksky",
+    )
+
+    # Thunderstorm text should be suppressed due to low precipitation probability
+    # Check exact structure: ['possible-medium-rain']
+    assert text == "possible-medium-rain"
+    # Icon should not be thunderstorm when CAPE >= 2500 but low precipitation probability
+    assert icon == "partly-cloudy-day"
+
+
+def test_currently_hourly_thunderstorm_with_precipitation_low_cin():
+    """
+    Test that low CIN suppresses thunderstorm text in hourly/currently summaries.
+    When CIN is low it should suppress the thunderstorm test even with high CAPE.
+    """
+    hour_object = create_base_hour(
+        precipType="rain",
+        cloudCover=0.8,
+        temperature=25.0,
+        humidity=0.7,
+        precipProbability=0.7,
+        rainIntensity=5.0,
+        liquidAccumulation=5.0,
+        dewPoint=20.0,
+        cape=2600,  # Above high threshold for icon
+        liftedIndex=-5.0,  # Low lifted index
+        convectiveInhibition=-200.0,  # High CIN value to suppress thunderstorms
+        verticalVelocity=0.0,  # Neutral vertical velocity
+        kIndex=30.0,  # Low K-index
+    )
+
+    text, icon = calculate_text(
+        hourObject=hour_object,
+        isDayTime=True,
+        type="hour",
+        icon="darksky",
+    )
+
+    # Thunderstorm text should be suppressed due to low convective inhibition (CIN)
+    # Check exact structure: ['medium-rain']
+    assert text == "medium-rain"
+    # Icon should not be thunderstorm when CAPE >= 2500 but low CIN
+    assert icon == "rain"
+
+
+def test_currently_hourly_thunderstorm_with_precipitation_favorable_conditions():
+    """
+    Test that thunderstorms appear in hourly/currently summaries when conditions are favorable.
+    Favorable conditions include high CAPE, low CIN, upward motion, and high K-index
+    """
+    hour_object = create_base_hour(
+        precipType="rain",
+        cloudCover=0.8,
+        temperature=25.0,
+        humidity=0.7,
+        precipProbability=0.65,
+        rainIntensity=5.0,
+        liquidAccumulation=5.0,
+        dewPoint=20.0,
+        cape=1500,
+        liftedIndex=-5.0,  # Low lifted index
+        cin=-30,  # Low CIN value to allow thunderstorms
+        verticalVelocity=-0.5,  # Upward motion
+        kIndex=35.0,  # High K-index
+    )
+
+    text, icon = calculate_text(
+        hourObject=hour_object,
+        isDayTime=True,
+        type="hour",
+        icon="darksky",
+    )
+
+    # Thunderstorm text should appear due to favorable conditions (CAPE, low CIN, upward motion, high K-index)
+    # Check exact structure: ['thunderstorm']
+    assert text == "thunderstorm"
+    # Icon should be thunderstorm with favorable conditions
+    assert icon == "thunderstorm"
+
+
+def test_currently_hourly_thunderstorm_with_precipitation_possible_thunderstorm():
+    """
+    Test that possible thunderstorms appear in hourly/currently summaries when conditions are somewhat favorable.
+    Favorable conditions include moderate CAPE, low CIN, upward motion, and high K-index
+    """
+    hour_object = create_base_hour(
+        precipType="rain",
+        cloudCover=0.8,
+        temperature=25.0,
+        humidity=0.7,
+        precipProbability=0.65,
+        rainIntensity=5.0,
+        liquidAccumulation=5.0,
+        dewPoint=20.0,
+        cape=1500,  # Above low threshold for icon but below high threshold
+        liftedIndex=-3.0,  # Low lifted index
+        cin=-30,  # Low CIN value to allow thunderstorms
+        verticalVelocity=-0.3,  # Upward motion
+        kIndex=35.0,  # High K-index
+    )
+
+    text, icon = calculate_text(
+        hourObject=hour_object,
+        isDayTime=True,
+        type="hour",
+        icon="darksky",
+    )
+
+    # Possible thunderstorm text should appear due to somewhat favorable conditions (CAPE, low CIN, upward motion, high K-index)
+    # Check exact structure: ['possible-thunderstorm']
+    assert text == "possible-thunderstorm"
+    # Icon should be rain when conditions are not fully favorable for thunderstorms
+    assert icon == "rain"
+
+
+def test_currently_hourly_thunderstorm_with_precipitation_missing_data():
+    """
+    Test that thunderstorms are suppressed in hourly/currently summaries when key data is missing.
+    Missing data includes missing CAPE, CIN, or K-index values.
+    """
+    hour_object = create_base_hour(
+        precipType="rain",
+        cloudCover=0.8,
+        temperature=25.0,
+        humidity=0.7,
+        precipProbability=0.65,
+        rainIntensity=5.0,
+        liquidAccumulation=5.0,
+        dewPoint=20.0,
+    )
+
+    text, icon = calculate_text(
+        hourObject=hour_object,
+        isDayTime=True,
+        type="hour",
+        icon="darksky",
+    )
+
+    # Thunderstorm text should be suppressed due to missing key data (CAPE, CIN, K-index)
+    # Check exact structure: ['medium-rain']
+    assert text == "medium-rain"
+    # Icon should be rain when key data is missing
+    assert icon == "rain"
+
+
 def test_currently_possible_thunderstorm_with_precipitation():
     """
     Test that thunderstorms are combined with precipitation in currently/hourly summaries.
@@ -281,7 +447,7 @@ def test_daily_thunderstorms_not_joined_with_precipitation():
                 "precipType": "rain",
                 "rainIntensity": 3.0,
                 "liquidAccumulation": 3.0,
-                "precipProbability": 0.7,
+                "precipProbability": 0.4,
                 "cloudCover": 0.8,
                 "windSpeed": 5.0,
                 "temperature": 20.0,
@@ -306,7 +472,7 @@ def test_daily_thunderstorms_not_joined_with_precipitation():
                 "precipType": "rain",
                 "rainIntensity": 6.0,
                 "liquidAccumulation": 6.0,
-                "precipProbability": 0.9,
+                "precipProbability": 0.4,
                 "cloudCover": 0.95,
                 "windSpeed": 10.0,
                 "temperature": 24.0,

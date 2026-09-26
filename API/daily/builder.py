@@ -285,6 +285,12 @@ def _build_display_data(
     daily_display_min[:, DATA_DAY["apparent"]] = _conv_temp(
         InterPdayMin[:, DATA_DAY["apparent"]], tempUnits
     )
+    daily_display_min[:, DATA_DAY["lifted_index"]] = InterPdayMin[
+        :, DATA_DAY["lifted_index"]
+    ]
+    daily_display_min[:, DATA_DAY["vertical_velocity"]] = InterPday[
+        :, DATA_DAY["vertical_velocity"]
+    ]
 
     daily_display_max = InterPdayMax.copy()
     daily_display_max[:, DATA_DAY["temp"]] = _conv_temp(
@@ -305,6 +311,10 @@ def _build_display_data(
     daily_display_max[:, DATA_DAY["ice_intensity"]] = (
         InterPdayMax[:, DATA_DAY["ice_intensity"]] * prepIntensityUnit
     )
+    daily_display_max[:, DATA_DAY["convective_inhibition"]] = InterPdayMin[
+        :, DATA_DAY["convective_inhibition"]
+    ]
+    daily_display_max[:, DATA_DAY["k_index"]] = InterPdayMax[:, DATA_DAY["k_index"]]
 
     daily_display_sum = InterPdaySum.copy()
     daily_display_sum[:, DATA_DAY["rain"]] = (
@@ -345,6 +355,9 @@ def _build_display_data(
     half_day_display_mean[:, DATA_HOURLY["ice"]] = (
         interp_half_day_mean[:, DATA_HOURLY["ice"]] * prepIntensityUnit
     )
+    half_day_display_mean[:, DATA_HOURLY["vertical_velocity"]] = interp_half_day_mean[
+        :, DATA_HOURLY["vertical_velocity"]
+    ]
 
     half_day_display_max = interp_half_day_max.copy()
     half_day_display_max[:, DATA_HOURLY["intensity"]] = (
@@ -542,6 +555,18 @@ def _apply_rounding(
     daily_display_max[:, DATA_DAY["apparent"]] = np.round(
         daily_display_max[:, DATA_DAY["apparent"]], app_dec
     )
+    daily_display_max[:, DATA_DAY["k_index"]] = np.round(
+        daily_display_max[:, DATA_DAY["k_index"]], 0
+    )
+    daily_display_min[:, DATA_DAY["lifted_index"]] = np.round(
+        daily_display_min[:, DATA_DAY["lifted_index"]], 0
+    )
+    daily_display_max[:, DATA_DAY["convective_inhibition"]] = np.round(
+        daily_display_max[:, DATA_DAY["convective_inhibition"]], 0
+    )
+    daily_display_min[:, DATA_DAY["vertical_velocity"]] = np.round(
+        daily_display_min[:, DATA_DAY["vertical_velocity"]], 0
+    )
 
     for idx_field in (
         DATA_DAY["intensity"],
@@ -591,6 +616,12 @@ def _apply_rounding(
         DATA_HOURLY["station_pressure"]: ROUNDING_RULES.get("pressure", 2),
         DATA_HOURLY["cape"]: ROUNDING_RULES.get("cape", 0),
         DATA_HOURLY["bearing"]: ROUNDING_RULES.get("windBearing", 0),
+        DATA_HOURLY["vertical_velocity"]: ROUNDING_RULES.get("verticalVelocity", 2),
+        DATA_HOURLY["lifted_index"]: ROUNDING_RULES.get("liftedIndex", 0),
+        DATA_HOURLY["convective_inhibition"]: ROUNDING_RULES.get(
+            "convectiveInhibition", 0
+        ),
+        DATA_HOURLY["k_index"]: ROUNDING_RULES.get("kIndex", 0),
     }
 
     def _apply_rounding_to(arr, rounding_map):
@@ -703,6 +734,10 @@ def _build_half_day_item(
         "fireIndex": display_mean[idx, DATA_HOURLY["fire"]],
         "solar": display_mean[idx, DATA_HOURLY["solar"]],
         "cape": cape_int,
+        "liftedIndex": display_mean[idx, DATA_HOURLY["lifted_index"]],
+        "verticalVelocity": display_mean[idx, DATA_HOURLY["vertical_velocity"]],
+        "convectiveInhibition": display_mean[idx, DATA_HOURLY["convective_inhibition"]],
+        "kIndex": display_mean[idx, DATA_HOURLY["k_index"]],
     }
 
     if "stationPressure" in extraVars:
@@ -1235,6 +1270,22 @@ def build_daily_section(
             "solarMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["solar"]]),
             "capeMax": InterPdayMax[idx, DATA_DAY["cape"]],
             "capeMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["cape"]]),
+            "liftedIndexMin": daily_display_min[idx, DATA_DAY["lifted_index"]],
+            "liftedIndexMinTime": int(InterPdayMinTime[idx, DATA_DAY["lifted_index"]]),
+            "verticalVelocityMin": daily_display_min[
+                idx, DATA_DAY["vertical_velocity"]
+            ],
+            "verticalVelocityMinTime": int(
+                InterPdayMinTime[idx, DATA_DAY["vertical_velocity"]]
+            ),
+            "convectiveInhibitionMax": daily_display_max[
+                idx, DATA_DAY["convective_inhibition"]
+            ],
+            "convectiveInhibitionMaxTime": int(
+                InterPdayMinTime[idx, DATA_DAY["convective_inhibition"]]
+            ),
+            "kIndexMax": daily_display_max[idx, DATA_DAY["k_index"]],
+            "kIndexMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["k_index"]]),
         }
 
         if version >= 2:
@@ -1328,6 +1379,11 @@ def build_daily_section(
             "windSpeed": InterPday[idx, DATA_DAY["wind"]],
             "cloudCover": InterPday[idx, DATA_DAY["cloud"]],
             "visibility": InterPday[idx, DATA_DAY["vis"]],
+            "liftedIndexMin": InterPdayMin[idx, DATA_DAY["lifted_index"]],
+            "convectiveInhibitionMin": InterPdayMin[
+                idx, DATA_DAY["convective_inhibition"]
+            ],
+            "kIndexMax": InterPdayMax[idx, DATA_DAY["k_index"]],
         }
         dayList_si.append(dayObject_si)
 

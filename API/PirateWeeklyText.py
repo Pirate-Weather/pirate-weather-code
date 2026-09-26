@@ -63,6 +63,12 @@ def calculate_summary_text(
     dayIndexes = []
     days = []
     maxCape = MISSING_DATA
+    minLi = None
+    maxCin = None
+    maxKi = None
+    max_vvel = None
+    dewpointAtMaxInstability = None
+    tempAtMaxInstability = None
     numThunderstormDays = 0
 
     # Loop through each index in the precipitation array
@@ -78,11 +84,52 @@ def calculate_summary_text(
 
         if "cape" in day[2]:
             # Calculate the maximum cape for the week
+            # Track maximum CAPE across precipitation days
             if np.isnan(maxCape):
                 if not np.isnan(day[2]["cape"]):
                     maxCape = day[2]["cape"]
+                    tempAtMaxInstability = day[2].get("temperatureHigh")
+                    dewpointAtMaxInstability = day[2].get("dewPoint")
             elif not np.isnan(day[2]["cape"]) and day[2]["cape"] > maxCape:
                 maxCape = day[2]["cape"]
+                tempAtMaxInstability = day[2].get("temperatureHigh")
+                dewpointAtMaxInstability = day[2].get("dewPoint")
+
+        # Most-unstable (minimum) Lifted Index across precipitation days
+        day_li = day[2].get("liftedIndexMin")
+        if (
+            day_li is not None
+            and not np.isnan(day_li)
+            and (minLi is None or day_li < minLi)
+        ):
+            minLi = day_li
+
+        # Least-inhibiting (maximum/least-negative) CIN across precipitation days
+        day_cin = day[2].get("convectiveInhibitionMax")
+        if (
+            day_cin is not None
+            and not np.isnan(day_cin)
+            and (maxCin is None or day_cin > maxCin)
+        ):
+            maxCin = day_cin
+
+        # Higest vertical velocity for the week
+        day_vvel = day[2].get("verticalVelocityMin")
+        if (
+            day_vvel is not None
+            and not np.isnan(day_vvel)
+            and (maxCin is None or day_cin > day_vvel)
+        ):
+            max_vvel = day_vvel
+
+        # Maximum K Index across precipitation days
+        day_ki = day[2].get("kIndexMax")
+        if (
+            day_ki is not None
+            and not np.isnan(day_ki)
+            and (maxKi is None or day_ki > maxKi)
+        ):
+            maxKi = day_ki
 
         # Calculate the number of days with thunderstorms forecasted
         if day[2]["icon"] == "thunderstorm":
@@ -113,7 +160,16 @@ def calculate_summary_text(
 
     # If there are any days with thunderstorms occurring then calculate the text
     if numThunderstormDays > 0:
-        thuText = calculate_thunderstorm_text(maxCape, "summary")
+        thuText = calculate_thunderstorm_text(
+            maxCape,
+            mode="summary",
+            lifted_index=minLi,
+            cin=maxCin,
+            vertical_velocity=max_vvel,
+            k_index=maxKi,
+            dewpoint=dewpointAtMaxInstability,
+            temperature=tempAtMaxInstability,
+        )
 
     # If more than half the days with precipitation show thurnderstorms then set the icon to thunderstorm and add it in front of the precipitation text
     if thuText is not None and numThunderstormDays >= (
