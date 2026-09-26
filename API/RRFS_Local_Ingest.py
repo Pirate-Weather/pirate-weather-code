@@ -178,7 +178,9 @@ zarr_vars = (
 
 # Define the subset of variables to download as a list of strings
 matchstring_2m = ":((DPT|TMP|APTMP|RH|LTNGSD):2 m above ground:)"
-matchstring_8m = ":(MASSDEN:8 m above ground:*hour fcst:aerosol=Particulate organic matter dry:)"
+matchstring_8m = (
+    ":(MASSDEN:8 m above ground:*hour fcst:aerosol=Particulate organic matter dry:)"
+)
 matchstring_su = (
     ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|VIS|GUST|DSWRF|CAPE|CIN):surface:.*hour fcst)"
 )
