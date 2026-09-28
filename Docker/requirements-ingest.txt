@@ -20,7 +20,7 @@ pyarrow==25.0.1
 python-dotenv==1.2.3
 pykml==0.2.0
 rioxarray==0.23.0
-s3fs==2026.7.0
+s3fs==2026.9.0
 scikit-learn==1.9.1
 tqdm==4.70.1
 xarray==2026.7.0
