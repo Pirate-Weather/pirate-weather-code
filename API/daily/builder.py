@@ -288,7 +288,7 @@ def _build_display_data(
     daily_display_min[:, DATA_DAY["lifted_index"]] = InterPdayMin[
         :, DATA_DAY["lifted_index"]
     ]
-    daily_display_min[:, DATA_DAY["vertical_velocity"]] = InterPday[
+    daily_display_min[:, DATA_DAY["vertical_velocity"]] = InterPdayMin[
         :, DATA_DAY["vertical_velocity"]
     ]
 
@@ -311,7 +311,7 @@ def _build_display_data(
     daily_display_max[:, DATA_DAY["ice_intensity"]] = (
         InterPdayMax[:, DATA_DAY["ice_intensity"]] * prepIntensityUnit
     )
-    daily_display_max[:, DATA_DAY["convective_inhibition"]] = InterPdayMin[
+    daily_display_max[:, DATA_DAY["convective_inhibition"]] = InterPdayMax[
         :, DATA_DAY["convective_inhibition"]
     ]
     daily_display_max[:, DATA_DAY["k_index"]] = InterPdayMax[:, DATA_DAY["k_index"]]
@@ -565,7 +565,7 @@ def _apply_rounding(
         daily_display_max[:, DATA_DAY["convective_inhibition"]], 0
     )
     daily_display_min[:, DATA_DAY["vertical_velocity"]] = np.round(
-        daily_display_min[:, DATA_DAY["vertical_velocity"]], 0
+        daily_display_min[:, DATA_DAY["vertical_velocity"]], 2
     )
 
     for idx_field in (
