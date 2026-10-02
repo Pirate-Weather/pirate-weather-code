@@ -7,12 +7,16 @@ from API.constants.api_const import PRECIP_TYPES
 from API.constants.shared_const import KELVIN_TO_CELSIUS
 from API.constants.text_const import (
     CAPE_THRESHOLDS,
+    CIN_THRESHOLDS,
     CLOUD_COVER_THRESHOLDS,
     DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    DEWPOINT_DEPRESSION_FOR_STORM,
     FOG_THRESHOLD_METERS,
     HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM,
+    KI_THRESHOLDS,
+    LI_THRESHOLDS,
     LIQUID_DENSITY_CONVERSION,
     MIST_THRESHOLD_METERS,
     PRECIP_INTENSITY_THRESHOLDS,
@@ -22,6 +26,7 @@ from API.constants.text_const import (
     SNOW_INTENSITY_THRESHOLDS,
     TEMP_DEWPOINT_SPREAD_FOR_FOG,
     TEMP_DEWPOINT_SPREAD_FOR_MIST,
+    VV_THRESHOLDS,
     WIND_THRESHOLDS,
 )
 
@@ -653,53 +658,155 @@ def calculate_sky_text(cloudCover, isDayTime, icon="darksky", mode="both"):
         return skyText, skyIcon
 
 
-def calculate_thunderstorm_text(
-    cape, mode="both", icon="darksky", is_day=True, pop=1.0
-):
-    """
-    Calculates the thunderstorm text based on CAPE values.
+def clamp(val: float, min_val: float = 0.0, max_val: float = 1.0) -> float:
+    return max(min_val, min(val, max_val))
 
-    Parameters:
-    - cape (float) -  The CAPE (Convective available potential energy)
-    - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the thunderstorm will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
-    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
-    - is_day (bool): Whether it is day or night time
-    - pop (float) - The precipitation probability (0.0 to 1.0)
+
+def calculate_thunderstorm_text(
+    cape: float,
+    pop: float | None = None,
+    mode: str = "both",
+    icon: str = "darksky",
+    is_day: bool = True,
+    lifted_index: float | None = None,
+    cin: float | None = None,
+    vertical_velocity: float | None = None,
+    k_index: float | None = None,
+    dewpoint: float | None = None,
+    temperature: float | None = None,
+) -> tuple[str | None, str | None] | str | None:
+    """Calculates thunderstorm text and icon using atmospheric stability indices and PoP.
+
+    Uses dynamic parameter weighting, continuous feature scaling, and physical
+    suppressors to reduce false positives.
+
+    Args:
+        cape (float): Convective Available Potential Energy in J/kg.
+        pop (float | None): Probability of Precipitation (0.0 to 1.0). Defaults to 1.0 if None.
+        mode (str): Return mode. "both" returns (text, icon); "summary" returns text; "icon" returns icon.
+        icon (str): Icon set to use — "darksky" or "pirate".
+        is_day (bool): Whether it is currently daytime (controls pirate icon variants).
+        lifted_index (float | None): Lifted Index in K. Pass None when unavailable.
+        cin (float | None): Convective Inhibition in J/kg (negative by convention). Pass None when unavailable.
+        vertical_velocity (float | None): Vertical velocity (omega) in Pa/s. Pass None when unavailable.
+        k_index (float | None): K Index in K (°C equivalent). Pass None when unavailable.
+        dewpoint (float | None): 2 m dewpoint temperature in °C. Pass None when unavailable.
+        temperature (float | None): 2 m air temperature in °C. Pass None when unavailable.
 
     Returns:
-    - str | None: The textual representation of the thunderstorm
-    - str | None: The icon representation of the thunderstorm
+        tuple[str | None, str | None] | str | None: Thunderstorm text, icon, or both depending on mode.
     """
-    thuText = None
-    thuIcon = None
 
-    try:
-        if pop is None or np.isnan(pop):
-            pop = 1.0
-    except TypeError:
-        pop = 1.0
+    def valid(v: float | None) -> bool:
+        return v is not None and not np.isnan(v)
 
-    if CAPE_THRESHOLDS["low"] <= cape < CAPE_THRESHOLDS["high"]:
-        thuText = "possible-thunderstorm"
-    elif cape >= CAPE_THRESHOLDS["high"]:
-        if pop < PRECIP_PROB_THRESHOLD:
-            thuText = "possible-thunderstorm"
-        else:
-            thuText = "thunderstorm"
+    # 1. Parameter Weights (Total = 100)
+    WEIGHTS = {
+        "cape": 35.0,
+        "li": 25.0,
+        "ki": 20.0,
+        "vv": 20.0,
+    }
+    SCORE = {
+        "thunderstorm": 60.0,
+        "possible": 30.0,
+    }
+    HIGH_PRECIP_PROB_THRESHOLD = 0.7
 
-    if thuText == "thunderstorm":
-        thuIcon = "thunderstorm"
-    elif thuText == "possible-thunderstorm" and icon == "pirate":
-        thuIcon = (
-            "possible-thunderstorm-day" if is_day else "possible-thunderstorm-night"
+    earned_score = 0.0
+    total_possible_weight = 0.0
+
+    # Inside your function, calculate the spans cleanly:
+    CAPE_SPAN = CAPE_THRESHOLDS["high"] - CAPE_THRESHOLDS["low"]  # 2000
+    LI_SPAN = abs(LI_THRESHOLDS["high"] - LI_THRESHOLDS["low"])  # 6
+    KI_SPAN = KI_THRESHOLDS["high"] - KI_THRESHOLDS["low"]  # 20
+    POP_SPAN = HIGH_PRECIP_PROB_THRESHOLD - PRECIP_PROB_THRESHOLD  # 0.25 to 0.7
+
+    # Continuous Feature Scaling
+    if valid(cape):
+        total_possible_weight += WEIGHTS["cape"]
+        earned_score += WEIGHTS["cape"] * clamp(
+            (cape - CAPE_THRESHOLDS["low"]) / CAPE_SPAN
         )
 
-    if mode == "summary":
-        return thuText
-    elif mode == "icon":
-        return thuIcon
+    if valid(lifted_index):
+        total_possible_weight += WEIGHTS["li"]
+        earned_score += WEIGHTS["li"] * clamp(
+            (LI_THRESHOLDS["low"] - lifted_index) / LI_SPAN
+        )
+
+    if valid(k_index):
+        total_possible_weight += WEIGHTS["ki"]
+        earned_score += WEIGHTS["ki"] * clamp(
+            (k_index - KI_THRESHOLDS["low"]) / KI_SPAN
+        )
+
+    if valid(vertical_velocity):
+        total_possible_weight += WEIGHTS["vv"]
+        earned_score += WEIGHTS["vv"] * clamp(
+            -vertical_velocity / VV_THRESHOLDS["strong_upward"]
+        )
+
+    # Prevent false positives if payload lacks enough core parameters
+    if total_possible_weight < 35.0:
+        base_confidence = 0.0
     else:
-        return thuText, thuIcon
+        base_confidence = (earned_score / total_possible_weight) * 100.0
+
+    # 2. Suppressors & Modifiers
+    suppressor = 1.0
+
+    # CIN Penalty
+    if valid(cin):
+        if cin <= CIN_THRESHOLDS["high"]:
+            suppressor *= 0.10
+        elif cin <= CIN_THRESHOLDS["low"]:
+            cin_penalty = (cin - (CIN_THRESHOLDS["low"])) / (
+                CIN_THRESHOLDS["high"] - (CIN_THRESHOLDS["low"])
+            )
+            suppressor *= 1.0 - (0.70 * cin_penalty)
+
+    # Dewpoint Depression Penalty (Applied globally)
+    if valid(temperature) and valid(dewpoint):
+        depression = temperature - dewpoint
+        if depression >= DEWPOINT_DEPRESSION_FOR_STORM["high"]:
+            suppressor *= 0.0
+        elif depression > DEWPOINT_DEPRESSION_FOR_STORM["low"]:
+            dep_penalty = (depression - DEWPOINT_DEPRESSION_FOR_STORM["low"]) / (
+                DEWPOINT_DEPRESSION_FOR_STORM["high"]
+                - DEWPOINT_DEPRESSION_FOR_STORM["low"]
+            )
+            suppressor *= 1.0 - (0.80 * dep_penalty)
+
+    # PoP Threshold Scaling (Replaces raw linear pop_val)
+    if valid(pop):
+        if pop <= PRECIP_PROB_THRESHOLD:
+            suppressor *= 0.2  # Heavy penalty for low PoP environments
+        elif pop < HIGH_PRECIP_PROB_THRESHOLD:
+            pop_penalty = (pop - PRECIP_PROB_THRESHOLD) / POP_SPAN
+            suppressor *= 0.2 + (0.8 * pop_penalty)  # Smooth ramp-up from 0.2 to 1.0
+
+    final_score = base_confidence * suppressor
+
+    # 3. Output State Decision
+    thu_text = None
+    thu_icon = None
+
+    if final_score >= SCORE["thunderstorm"]:
+        thu_text = "thunderstorm"
+        thu_icon = "thunderstorm"
+    elif final_score >= SCORE["possible"]:
+        thu_text = "possible-thunderstorm"
+        if icon == "pirate":
+            thu_icon = (
+                "possible-thunderstorm-day" if is_day else "possible-thunderstorm-night"
+            )
+
+    if mode == "summary":
+        return thu_text
+    elif mode == "icon":
+        return thu_icon
+    return thu_text, thu_icon
 
 
 def kelvin_from_celsius(celsius):

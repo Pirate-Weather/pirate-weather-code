@@ -675,6 +675,18 @@ _FIELDS_V_LT_2 = (
     "solar",
     "solarMax",
     "solarMaxTime",
+    "liftedIndex",
+    "liftedIndexMin",
+    "liftedIndexMinTime",
+    "convectiveInhibition",
+    "convectiveInhibitionMax",
+    "convectiveInhibitionMaxTime",
+    "verticalVelocity",
+    "verticalVelocityMin",
+    "verticalVelocityMinTime",
+    "kIndex",
+    "kIndexMax",
+    "kIndexMaxTime",
 )
 
 # AQ detail fields are only included when inc_airqualitydetails=1

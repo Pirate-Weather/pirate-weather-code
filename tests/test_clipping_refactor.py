@@ -61,6 +61,10 @@ def mock_inputs():
         "solar_inputs": np.zeros((num_hours, 1)),
         "cape_inputs": np.zeros((num_hours, 1)),
         "error_inputs": np.zeros((num_hours, 1)),
+        "lifted_index_inputs": np.zeros((num_hours, 1)),
+        "vertical_velocity_inputs": np.zeros((num_hours, 1)),
+        "convective_inhibition_inputs": np.zeros((num_hours, 1)),
+        "k_index_inputs": np.zeros((num_hours, 1)),
         "version": 2,
     }
 
