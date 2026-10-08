@@ -118,7 +118,7 @@ def calculate_summary_text(
         if (
             day_vvel is not None
             and not np.isnan(day_vvel)
-            and (max_vvel is None or day_vvel > max_vvel)
+            and (max_vvel is None or day_vvel < max_vvel)
         ):
             max_vvel = day_vvel
 
