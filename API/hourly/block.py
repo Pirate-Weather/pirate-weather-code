@@ -1075,9 +1075,6 @@ def build_hourly_objects(
     hourIconList = []
     hourTextList = []
 
-    def _nan_to_int_or_nan(value):
-        return int(value) if not np.isnan(value) else np.nan
-
     for idx in range(len(hour_array_grib)):
         if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]:
             isDay = False
@@ -1116,12 +1113,12 @@ def build_hourly_objects(
             "iceIntensity": InterPhour[idx, DATA_HOURLY["ice_intensity"]],
             "precipIntensity": InterPhour[idx, DATA_HOURLY["intensity"]],
             "precipIntensityError": InterPhour[idx, DATA_HOURLY["error"]],
-            "liftedIndex": _safe_int(InterPhour[idx, DATA_HOURLY["lifted_index"]]),
+            "liftedIndex": InterPhour[idx, DATA_HOURLY["lifted_index"]],
             "verticalVelocity": InterPhour[idx, DATA_HOURLY["vertical_velocity"]],
-            "convectiveInhibition": _safe_int(
+            "convectiveInhibition": (
                 InterPhour[idx, DATA_HOURLY["convective_inhibition"]]
             ),
-            "kIndex": _safe_int(InterPhour[idx, DATA_HOURLY["k_index"]]),
+            "kIndex": InterPhour[idx, DATA_HOURLY["k_index"]],
         }
 
         if summaryText:
@@ -1154,7 +1151,7 @@ def build_hourly_objects(
             "pressure": hourly_display[idx, DATA_HOURLY["pressure"]],
             "windSpeed": hourly_display[idx, DATA_HOURLY["wind"]],
             "windGust": hourly_display[idx, DATA_HOURLY["gust"]],
-            "windBearing": _nan_to_int_or_nan(
+            "windBearing": _safe_int(
                 hourly_display[idx, DATA_HOURLY["bearing"]]
             ),
             "cloudCover": hourly_display[idx, DATA_HOURLY["cloud"]],
@@ -1166,19 +1163,19 @@ def build_hourly_objects(
             "snowAccumulation": hourly_display[idx, DATA_HOURLY["snow"]],
             "iceAccumulation": hourly_display[idx, DATA_HOURLY["ice"]],
             "nearestStormDistance": hourly_display[idx, DATA_HOURLY["storm_dist"]],
-            "nearestStormBearing": _nan_to_int_or_nan(
+            "nearestStormBearing": _safe_int(
                 hourly_display[idx, DATA_HOURLY["storm_dir"]]
             ),
             "fireIndex": hourly_display[idx, DATA_HOURLY["fire"]],
             "feelsLike": hourly_display[idx, DATA_HOURLY["feels_like"]],
             "solar": hourly_display[idx, DATA_HOURLY["solar"]],
-            "cape": _nan_to_int_or_nan(hourly_display[idx, DATA_HOURLY["cape"]]),
-            "liftedIndex": hourly_display[idx, DATA_HOURLY["lifted_index"]],
+            "cape": _safe_int(hourly_display[idx, DATA_HOURLY["cape"]]),
+            "liftedIndex": _safe_int(hourly_display[idx, DATA_HOURLY["lifted_index"]]),
             "verticalVelocity": hourly_display[idx, DATA_HOURLY["vertical_velocity"]],
-            "convectiveInhibition": hourly_display[
-                idx, DATA_HOURLY["convective_inhibition"]
-            ],
-            "kIndex": hourly_display[idx, DATA_HOURLY["k_index"]],
+            "convectiveInhibition": _safe_int(
+                hourly_display[idx, DATA_HOURLY["convective_inhibition"]]
+            ),
+            "kIndex": _safe_int(hourly_display[idx, DATA_HOURLY["k_index"]]),
         }
 
         if "stationPressure" in extraVars:

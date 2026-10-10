@@ -808,5 +808,5 @@ def remove_conditional_fields(
 
 
 def _safe_int(val):
-    """Safely convert a value to int, returning None for NaN."""
-    return int(val) if not np.isnan(val) else MISSING_DATA  # or None / np.nan
+    """Safely convert a value to int, returning np.nan for NaN."""
+    return int(val) if not np.isnan(val) else np.nan  # or None / np.nan
