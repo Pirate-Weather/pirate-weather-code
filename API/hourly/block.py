@@ -1151,9 +1151,7 @@ def build_hourly_objects(
             "pressure": hourly_display[idx, DATA_HOURLY["pressure"]],
             "windSpeed": hourly_display[idx, DATA_HOURLY["wind"]],
             "windGust": hourly_display[idx, DATA_HOURLY["gust"]],
-            "windBearing": _safe_int(
-                hourly_display[idx, DATA_HOURLY["bearing"]]
-            ),
+            "windBearing": _safe_int(hourly_display[idx, DATA_HOURLY["bearing"]]),
             "cloudCover": hourly_display[idx, DATA_HOURLY["cloud"]],
             "uvIndex": hourly_display[idx, DATA_HOURLY["uv"]],
             "visibility": hourly_display[idx, DATA_HOURLY["vis"]],
