@@ -675,6 +675,18 @@ _FIELDS_V_LT_2 = (
     "solar",
     "solarMax",
     "solarMaxTime",
+    "liftedIndex",
+    "liftedIndexMin",
+    "liftedIndexMinTime",
+    "convectiveInhibition",
+    "convectiveInhibitionMax",
+    "convectiveInhibitionMaxTime",
+    "verticalVelocity",
+    "verticalVelocityMin",
+    "verticalVelocityMinTime",
+    "kIndex",
+    "kIndexMax",
+    "kIndexMaxTime",
 )
 
 # AQ detail fields are only included when inc_airqualitydetails=1
@@ -793,3 +805,8 @@ def remove_conditional_fields(
         _downgrade_precip(data)
 
     return data
+
+
+def _safe_int(val):
+    """Safely convert a value to int, returning np.nan for NaN."""
+    return int(val) if not np.isnan(val) else np.nan  # or None / np.nan

@@ -7,6 +7,7 @@ import logging
 import numpy as np
 
 from API.api_utils import (
+    _safe_int,
     calculate_apparent_temperature,
     clipLog,
     zero_small_values,
@@ -26,12 +27,15 @@ from API.constants.aqi_const import compute_aqi_array
 from API.constants.clip_const import (
     CLIP_AQI,
     CLIP_CAPE,
+    CLIP_CIN,
     CLIP_CLOUD,
     CLIP_CO_PPB,
     CLIP_FEELS_LIKE,
     CLIP_FIRE,
     CLIP_HUMIDITY,
     CLIP_IL_AQI,
+    CLIP_K_INDEX,
+    CLIP_LIFTED_INDEX,
     CLIP_NO2_PPB,
     CLIP_O3_PPB,
     CLIP_OZONE,
@@ -43,6 +47,7 @@ from API.constants.clip_const import (
     CLIP_SOLAR,
     CLIP_TEMP,
     CLIP_UV,
+    CLIP_VERTICAL_VELOCITY,
     CLIP_VIS,
     CLIP_WIND,
 )
@@ -121,6 +126,10 @@ def _process_input_vars(
     feels_like_inputs,
     station_pressure_inputs,
     humidUnit,
+    lifted_index_inputs,
+    vertical_velocity_inputs,
+    convective_inhibition_inputs,
+    k_index_inputs,
 ):
     """
     Process input variables and populate InterPhour.
@@ -320,6 +329,58 @@ def _process_input_vars(
         InterPhour[:, DATA_HOURLY["station_pressure"]] = np.choose(
             np.argmin(np.isnan(station_pressure_inputs), axis=1),
             station_pressure_inputs.T,
+        )
+
+    if lifted_index_inputs is not None:
+        InterPhour[:, DATA_HOURLY["lifted_index"]] = np.choose(
+            np.argmin(np.isnan(lifted_index_inputs), axis=1),
+            lifted_index_inputs.T,
+        )
+
+        InterPhour[:, DATA_HOURLY["lifted_index"]] = clipLog(
+            InterPhour[:, DATA_HOURLY["lifted_index"]],
+            CLIP_LIFTED_INDEX["min"],
+            CLIP_LIFTED_INDEX["max"],
+            "Lifted Index Hour",
+        )
+
+    if vertical_velocity_inputs is not None:
+        InterPhour[:, DATA_HOURLY["vertical_velocity"]] = np.choose(
+            np.argmin(np.isnan(vertical_velocity_inputs), axis=1),
+            vertical_velocity_inputs.T,
+        )
+
+        InterPhour[:, DATA_HOURLY["vertical_velocity"]] = clipLog(
+            InterPhour[:, DATA_HOURLY["vertical_velocity"]],
+            CLIP_VERTICAL_VELOCITY["min"],
+            CLIP_VERTICAL_VELOCITY["max"],
+            "Vertical Velocity Hour",
+        )
+
+    if convective_inhibition_inputs is not None:
+        InterPhour[:, DATA_HOURLY["convective_inhibition"]] = np.choose(
+            np.argmin(np.isnan(convective_inhibition_inputs), axis=1),
+            convective_inhibition_inputs.T,
+        )
+
+        # Use np.clip instead of clipLog to prevent -999 for values above 0
+        InterPhour[:, DATA_HOURLY["convective_inhibition"]] = np.clip(
+            InterPhour[:, DATA_HOURLY["convective_inhibition"]],
+            CLIP_CIN["min"],
+            CLIP_CIN["max"],
+        )
+
+    if k_index_inputs is not None:
+        InterPhour[:, DATA_HOURLY["k_index"]] = np.choose(
+            np.argmin(np.isnan(k_index_inputs), axis=1),
+            k_index_inputs.T,
+        )
+
+        InterPhour[:, DATA_HOURLY["k_index"]] = clipLog(
+            InterPhour[:, DATA_HOURLY["k_index"]],
+            CLIP_K_INDEX["min"],
+            CLIP_K_INDEX["max"],
+            "K-Index Hour",
         )
 
 
@@ -588,6 +649,16 @@ def _build_hourly_display(
         hourly_display[:, DATA_HOURLY["station_pressure"]] = (
             InterPhour[:, DATA_HOURLY["station_pressure"]] / 100
         )
+    hourly_display[:, DATA_HOURLY["lifted_index"]] = InterPhour[
+        :, DATA_HOURLY["lifted_index"]
+    ]
+    hourly_display[:, DATA_HOURLY["vertical_velocity"]] = InterPhour[
+        :, DATA_HOURLY["vertical_velocity"]
+    ]
+    hourly_display[:, DATA_HOURLY["convective_inhibition"]] = InterPhour[
+        :, DATA_HOURLY["convective_inhibition"]
+    ]
+    hourly_display[:, DATA_HOURLY["k_index"]] = InterPhour[:, DATA_HOURLY["k_index"]]
 
     hourly_rounding_map = {
         DATA_HOURLY["temp"]: ROUNDING_RULES.get("temperature", 2),
@@ -617,6 +688,13 @@ def _build_hourly_display(
         DATA_HOURLY["solar"]: ROUNDING_RULES.get("solar", 2),
         DATA_HOURLY["cape"]: ROUNDING_RULES.get("cape", 0),
         DATA_HOURLY["bearing"]: ROUNDING_RULES.get("windBearing", 0),
+        DATA_HOURLY["lifted_index"]: ROUNDING_RULES.get("liftedIndex", 0),
+        DATA_HOURLY["vertical_velocity"]: ROUNDING_RULES.get("verticalVelocity", 2),
+        DATA_HOURLY["convective_inhibition"]: ROUNDING_RULES.get(
+            "convectiveInhibition", 0
+        ),
+        DATA_HOURLY["k_index"]: ROUNDING_RULES.get("kIndex", 0),
+        DATA_HOURLY["station_pressure"]: ROUNDING_RULES.get("stationPressure", 0),
     }
 
     for idx_field, decimals in hourly_rounding_map.items():
@@ -681,6 +759,10 @@ def build_hourly_block(
     solar_inputs,
     cape_inputs,
     error_inputs,
+    lifted_index_inputs,
+    vertical_velocity_inputs,
+    convective_inhibition_inputs,
+    k_index_inputs,
     version,
     aq_inputs=None,
     inc_airqualitydetails: int = 0,
@@ -779,6 +861,10 @@ def build_hourly_block(
         feels_like_inputs,
         station_pressure_inputs,
         humidUnit,
+        lifted_index_inputs,
+        vertical_velocity_inputs,
+        convective_inhibition_inputs,
+        k_index_inputs,
     )
 
     # Populate AQ columns from aq_inputs (version >= 2 only)
@@ -989,9 +1075,6 @@ def build_hourly_objects(
     hourIconList = []
     hourTextList = []
 
-    def _nan_to_int_or_nan(value):
-        return int(value) if not np.isnan(value) else np.nan
-
     for idx in range(len(hour_array_grib)):
         if hour_array_grib[idx] < InterSday[hourlyDayIndex[idx], DATA_DAY["sunrise"]]:
             isDay = False
@@ -1030,6 +1113,12 @@ def build_hourly_objects(
             "iceIntensity": InterPhour[idx, DATA_HOURLY["ice_intensity"]],
             "precipIntensity": InterPhour[idx, DATA_HOURLY["intensity"]],
             "precipIntensityError": InterPhour[idx, DATA_HOURLY["error"]],
+            "liftedIndex": InterPhour[idx, DATA_HOURLY["lifted_index"]],
+            "verticalVelocity": InterPhour[idx, DATA_HOURLY["vertical_velocity"]],
+            "convectiveInhibition": (
+                InterPhour[idx, DATA_HOURLY["convective_inhibition"]]
+            ),
+            "kIndex": InterPhour[idx, DATA_HOURLY["k_index"]],
         }
 
         if summaryText:
@@ -1062,9 +1151,7 @@ def build_hourly_objects(
             "pressure": hourly_display[idx, DATA_HOURLY["pressure"]],
             "windSpeed": hourly_display[idx, DATA_HOURLY["wind"]],
             "windGust": hourly_display[idx, DATA_HOURLY["gust"]],
-            "windBearing": _nan_to_int_or_nan(
-                hourly_display[idx, DATA_HOURLY["bearing"]]
-            ),
+            "windBearing": _safe_int(hourly_display[idx, DATA_HOURLY["bearing"]]),
             "cloudCover": hourly_display[idx, DATA_HOURLY["cloud"]],
             "uvIndex": hourly_display[idx, DATA_HOURLY["uv"]],
             "visibility": hourly_display[idx, DATA_HOURLY["vis"]],
@@ -1074,13 +1161,19 @@ def build_hourly_objects(
             "snowAccumulation": hourly_display[idx, DATA_HOURLY["snow"]],
             "iceAccumulation": hourly_display[idx, DATA_HOURLY["ice"]],
             "nearestStormDistance": hourly_display[idx, DATA_HOURLY["storm_dist"]],
-            "nearestStormBearing": _nan_to_int_or_nan(
+            "nearestStormBearing": _safe_int(
                 hourly_display[idx, DATA_HOURLY["storm_dir"]]
             ),
             "fireIndex": hourly_display[idx, DATA_HOURLY["fire"]],
             "feelsLike": hourly_display[idx, DATA_HOURLY["feels_like"]],
             "solar": hourly_display[idx, DATA_HOURLY["solar"]],
-            "cape": _nan_to_int_or_nan(hourly_display[idx, DATA_HOURLY["cape"]]),
+            "cape": _safe_int(hourly_display[idx, DATA_HOURLY["cape"]]),
+            "liftedIndex": _safe_int(hourly_display[idx, DATA_HOURLY["lifted_index"]]),
+            "verticalVelocity": hourly_display[idx, DATA_HOURLY["vertical_velocity"]],
+            "convectiveInhibition": _safe_int(
+                hourly_display[idx, DATA_HOURLY["convective_inhibition"]]
+            ),
+            "kIndex": _safe_int(hourly_display[idx, DATA_HOURLY["k_index"]]),
         }
 
         if "stationPressure" in extraVars:
