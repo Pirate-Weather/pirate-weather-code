@@ -1384,7 +1384,10 @@ def build_daily_section(
             "cloudCover": InterPday[idx, DATA_DAY["cloud"]],
             "visibility": InterPday[idx, DATA_DAY["vis"]],
             "liftedIndexMin": InterPdayMin[idx, DATA_DAY["lifted_index"]],
-            "convectiveInhibitionMin": InterPdayMin[
+            "verticalVelocityMin": daily_display_min[
+                idx, DATA_DAY["vertical_velocity"]
+            ],
+            "convectiveInhibitionMax": InterPdayMax[
                 idx, DATA_DAY["convective_inhibition"]
             ],
             "kIndexMax": InterPdayMax[idx, DATA_DAY["k_index"]],
