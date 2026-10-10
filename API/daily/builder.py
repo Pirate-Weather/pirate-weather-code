@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from API.api_utils import select_daily_precip_type
+from API.api_utils import _safe_int, select_daily_precip_type
 from API.constants.api_const import (
     PRECIP_IDX,
     PRECIP_TYPE_DISPLAY,
@@ -734,10 +734,12 @@ def _build_half_day_item(
         "fireIndex": display_mean[idx, DATA_HOURLY["fire"]],
         "solar": display_mean[idx, DATA_HOURLY["solar"]],
         "cape": cape_int,
-        "liftedIndex": display_mean[idx, DATA_HOURLY["lifted_index"]],
+        "liftedIndex": _safe_int(display_mean[idx, DATA_HOURLY["lifted_index"]]),
         "verticalVelocity": display_mean[idx, DATA_HOURLY["vertical_velocity"]],
-        "convectiveInhibition": display_mean[idx, DATA_HOURLY["convective_inhibition"]],
-        "kIndex": display_mean[idx, DATA_HOURLY["k_index"]],
+        "convectiveInhibition": _safe_int(
+            display_mean[idx, DATA_HOURLY["convective_inhibition"]]
+        ),
+        "kIndex": _safe_int(display_mean[idx, DATA_HOURLY["k_index"]]),
     }
 
     if "stationPressure" in extraVars:
@@ -1270,7 +1272,9 @@ def build_daily_section(
             "solarMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["solar"]]),
             "capeMax": InterPdayMax[idx, DATA_DAY["cape"]],
             "capeMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["cape"]]),
-            "liftedIndexMin": daily_display_min[idx, DATA_DAY["lifted_index"]],
+            "liftedIndexMin": _safe_int(
+                daily_display_min[idx, DATA_DAY["lifted_index"]]
+            ),
             "liftedIndexMinTime": int(InterPdayMinTime[idx, DATA_DAY["lifted_index"]]),
             "verticalVelocityMin": daily_display_min[
                 idx, DATA_DAY["vertical_velocity"]
@@ -1278,13 +1282,13 @@ def build_daily_section(
             "verticalVelocityMinTime": int(
                 InterPdayMinTime[idx, DATA_DAY["vertical_velocity"]]
             ),
-            "convectiveInhibitionMax": daily_display_max[
-                idx, DATA_DAY["convective_inhibition"]
-            ],
+            "convectiveInhibitionMax": _safe_int(
+                daily_display_max[idx, DATA_DAY["convective_inhibition"]]
+            ),
             "convectiveInhibitionMaxTime": int(
                 InterPdayMinTime[idx, DATA_DAY["convective_inhibition"]]
             ),
-            "kIndexMax": daily_display_max[idx, DATA_DAY["k_index"]],
+            "kIndexMax": _safe_int(daily_display_max[idx, DATA_DAY["k_index"]]),
             "kIndexMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["k_index"]]),
         }
 

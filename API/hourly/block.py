@@ -7,6 +7,7 @@ import logging
 import numpy as np
 
 from API.api_utils import (
+    _safe_int,
     calculate_apparent_temperature,
     clipLog,
     zero_small_values,
@@ -1115,12 +1116,12 @@ def build_hourly_objects(
             "iceIntensity": InterPhour[idx, DATA_HOURLY["ice_intensity"]],
             "precipIntensity": InterPhour[idx, DATA_HOURLY["intensity"]],
             "precipIntensityError": InterPhour[idx, DATA_HOURLY["error"]],
-            "liftedIndex": InterPhour[idx, DATA_HOURLY["lifted_index"]],
+            "liftedIndex": _safe_int(InterPhour[idx, DATA_HOURLY["lifted_index"]]),
             "verticalVelocity": InterPhour[idx, DATA_HOURLY["vertical_velocity"]],
-            "convectiveInhibition": InterPhour[
-                idx, DATA_HOURLY["convective_inhibition"]
-            ],
-            "kIndex": InterPhour[idx, DATA_HOURLY["k_index"]],
+            "convectiveInhibition": _safe_int(
+                InterPhour[idx, DATA_HOURLY["convective_inhibition"]]
+            ),
+            "kIndex": _safe_int(InterPhour[idx, DATA_HOURLY["k_index"]]),
         }
 
         if summaryText:

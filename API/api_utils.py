@@ -805,3 +805,8 @@ def remove_conditional_fields(
         _downgrade_precip(data)
 
     return data
+
+
+def _safe_int(val):
+    """Safely convert a value to int, returning None for NaN."""
+    return int(val) if not np.isnan(val) else None  # or None / np.nan
