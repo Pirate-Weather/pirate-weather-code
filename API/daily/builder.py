@@ -1286,7 +1286,7 @@ def build_daily_section(
                 daily_display_max[idx, DATA_DAY["convective_inhibition"]]
             ),
             "convectiveInhibitionMaxTime": int(
-                InterPdayMinTime[idx, DATA_DAY["convective_inhibition"]]
+                InterPdayMaxTime[idx, DATA_DAY["convective_inhibition"]]
             ),
             "kIndexMax": _safe_int(daily_display_max[idx, DATA_DAY["k_index"]]),
             "kIndexMaxTime": int(InterPdayMaxTime[idx, DATA_DAY["k_index"]]),
