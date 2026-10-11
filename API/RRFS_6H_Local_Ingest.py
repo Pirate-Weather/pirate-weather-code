@@ -165,7 +165,6 @@ zarr_vars = (
     "CAPE_surface",
     "CIN_surface",
     "LFTX_500-1000mb",
-    "LTNGSD_2maboveground",
 )
 
 
