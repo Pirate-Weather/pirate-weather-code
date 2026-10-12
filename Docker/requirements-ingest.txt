@@ -16,7 +16,7 @@ numba==0.68.0
 numpy==2.5.3
 nwswx==0.1.2
 pandas==3.0.6
-pyarrow==25.0.1
+pyarrow==26.0.0
 python-dotenv==1.2.4
 pykml==0.2.0
 rioxarray==0.23.0
