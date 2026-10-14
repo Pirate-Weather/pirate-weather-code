@@ -450,7 +450,14 @@ def _download_full_herbie_file(
 
     try:
         if _is_remote_url(grib_source):
-            with requests.get(
+            request_client = requests
+            if (
+                urlparse(str(grib_source)).hostname or ""
+            ).lower() == "nomads.ncep.noaa.gov":
+                from herbie import core
+
+                request_client = core.requests
+            with request_client.get(
                 str(grib_source),
                 stream=True,
                 timeout=(10, request_timeout_s),
@@ -543,7 +550,9 @@ def download_herbie_with_retry(
                 downloaded = _download_full_herbie_files(
                     herbie_obj,
                     overwrite=download_kwargs["overwrite"],
-                    max_threads=positive_int_env("herbie_download_threads", 20),
+                    max_threads=max_threads
+                    if max_threads is not None
+                    else positive_int_env("herbie_download_threads", 20),
                     request_timeout_s=positive_int_env(
                         "herbie_request_timeout_seconds", 120
                     ),

@@ -304,3 +304,66 @@ def test_nomads_rate_limit_redirect_is_an_error(monkeypatch):
     ):
         client.get("https://nomads.ncep.noaa.gov/pub/data/nbm.grib2")
     assert closed == [True]
+
+
+def test_full_file_download_honors_explicit_threads(tmp_path, monkeypatch):
+    executor = ingest_utils.ThreadPoolExecutor
+    threads = []
+    refs = [_FakeRef(str(tmp_path / f"f{i}.grib2")) for i in range(5)]
+
+    def pool(*, max_workers):
+        threads.append(max_workers)
+        return executor(max_workers=max_workers)
+
+    def download(ref, **kwargs):
+        path = ref.get_localFilePath(None)
+        from pathlib import Path
+
+        Path(path).write_bytes(b"GRIB data")
+        return path
+
+    monkeypatch.setattr(ingest_utils, "ThreadPoolExecutor", pool)
+    monkeypatch.setattr(ingest_utils, "_download_full_herbie_file", download)
+    ingest_utils.download_herbie_with_retry(
+        herbie_obj=_FakeHerbie(refs),
+        expected_count=5,
+        dataset_name="AIGEFS",
+        retries=1,
+        retry_sleep_s=1,
+        max_threads=2,
+    )
+    assert threads == [2]
+
+
+def test_full_file_nomads_download_uses_pacing_and_rejects_redirect(
+    tmp_path, monkeypatch
+):
+    from herbie import core
+
+    response = ingest_utils.requests.Response()
+    response.status_code = 302
+    closed = []
+    monkeypatch.setattr(response, "close", lambda: closed.append(True))
+
+    def get(url, **kwargs):
+        assert kwargs["allow_redirects"] is False
+        return response
+
+    monkeypatch.setattr(ingest_utils.requests, "get", get)
+    monkeypatch.setattr(core, "requests", ingest_utils._HerbieRequests(5, 120))
+    path = tmp_path / "aigefs.grib2"
+    with pytest.raises(
+        ingest_utils.requests.HTTPError, match="NOMADS returned HTTP 302"
+    ):
+        ingest_utils.download_herbie_with_retry(
+            herbie_obj=_FakeHerbie(
+                [_FakeRef(str(path), grib="https://nomads.ncep.noaa.gov/aigefs.grib2")]
+            ),
+            expected_count=1,
+            dataset_name="AIGEFS",
+            retries=1,
+            retry_sleep_s=1,
+        )
+    assert closed == [True]
+    assert not path.exists()
+    assert not list(tmp_path.glob("*.tmp.*"))
