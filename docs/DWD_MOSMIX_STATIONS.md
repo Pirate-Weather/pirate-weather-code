@@ -109,7 +109,7 @@ curl "https://api.pirateweather.net/forecast/YOUR_API_KEY/52.52,13.405?version=2
 
 Run the station mapping tests with:
 ```bash
-pytest tests/test_dwd_station_mapping.py -v
+pytest tests/ingest/test_dwd_station_mapping.py -v
 ```
 
 Tests cover:

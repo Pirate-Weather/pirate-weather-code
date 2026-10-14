@@ -230,8 +230,8 @@ This phase involves modifying the API's core logic to load the new model's data 
   * Add new tests in the `tests/` directory to verify that your model's data is correctly ingested, loaded, and contributes accurately to the API responses.
   
   * Existing test files that can serve as templates:
-    * `tests/test_s3_live.py` - Integration tests with live data
-    * `tests/test_compare_production.py` - Production comparison tests
+    * `tests/api/test_s3_live.py` - Integration tests with live data
+    * `tests/api/test_compare_production.py` - Production comparison tests
   
   * Run linting and formatting:
     ```bash

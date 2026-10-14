@@ -3,9 +3,6 @@
 from API.constants.api_const import CONVERSION_FACTORS
 from API.utils.geo import haversine_distance
 
-# Reuse the sample station data helper from the DWD station mapping tests.
-from tests.test_dwd_station_mapping import sample_station_data
-
 
 def _compute_nearest_distance_km(user, stations):
     distances = [
@@ -14,10 +11,9 @@ def _compute_nearest_distance_km(user, stations):
     return min(distances)
 
 
-def test_nearest_station_conversion_us_with_sample_data():
+def test_nearest_station_conversion_us_with_sample_data(sample_station_data):
     """Use `sample_station_data` to check km -> miles conversion for 'us'."""
-    # `sample_station_data` is a pytest fixture; call the wrapped function to get the raw DataFrame
-    df = sample_station_data.__wrapped__()
+    df = sample_station_data
     # Build stations list from DataFrame
     stations = [
         {"id": str(r.station_id), "lat": float(r.latitude), "lon": float(r.longitude)}
@@ -34,10 +30,9 @@ def test_nearest_station_conversion_us_with_sample_data():
     assert miles_out == 132.52
 
 
-def test_nearest_station_conversion_uk2_with_sample_data():
+def test_nearest_station_conversion_uk2_with_sample_data(sample_station_data):
     """Use `sample_station_data` to check km -> miles conversion for 'uk2'."""
-    # `sample_station_data` is a pytest fixture; call the wrapped function to get the raw DataFrame
-    df = sample_station_data.__wrapped__()
+    df = sample_station_data
     stations = [
         {"id": str(r.station_id), "lat": float(r.latitude), "lon": float(r.longitude)}
         for _, r in df.iterrows()

@@ -8,7 +8,7 @@ import pandas as pd
 import xarray as xr
 
 # Add the parent directory to the path so we can import the module
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 
 class TestDWDHistoricLoop(unittest.TestCase):

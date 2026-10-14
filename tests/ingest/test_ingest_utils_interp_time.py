@@ -5,7 +5,7 @@ import unittest
 import dask.array as da
 import numpy as np
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from API.ingest_utils import interp_time_map_blocks_nan
 

@@ -9,7 +9,7 @@ import pytest
 
 from API import ingest_grib_utils, ingest_utils
 
-AIGEFS_SCRIPT = Path(__file__).resolve().parents[1] / "API" / "AIGEFS_Local_Ingest.py"
+AIGEFS_SCRIPT = Path(__file__).resolve().parents[2] / "API" / "AIGEFS_Local_Ingest.py"
 
 
 @pytest.mark.parametrize("recover", [False, True])

@@ -29,7 +29,7 @@ def _assert_uses_inc_ai_models(tree, function_name):
 
 def test_response_local_passes_ai_models_flag_to_prepare_data_inputs():
     response_local_path = (
-        Path(__file__).resolve().parents[1] / "API" / "responseLocal.py"
+        Path(__file__).resolve().parents[2] / "API" / "responseLocal.py"
     )
     tree = ast.parse(response_local_path.read_text())
 
@@ -38,7 +38,7 @@ def test_response_local_passes_ai_models_flag_to_prepare_data_inputs():
 
 def test_response_local_passes_ai_models_flag_to_build_minutely_block():
     response_local_path = (
-        Path(__file__).resolve().parents[1] / "API" / "responseLocal.py"
+        Path(__file__).resolve().parents[2] / "API" / "responseLocal.py"
     )
     tree = ast.parse(response_local_path.read_text())
 
@@ -47,7 +47,7 @@ def test_response_local_passes_ai_models_flag_to_build_minutely_block():
 
 def test_response_local_passes_ai_models_flag_to_build_current_section():
     response_local_path = (
-        Path(__file__).resolve().parents[1] / "API" / "responseLocal.py"
+        Path(__file__).resolve().parents[2] / "API" / "responseLocal.py"
     )
     tree = ast.parse(response_local_path.read_text())
 
@@ -56,7 +56,7 @@ def test_response_local_passes_ai_models_flag_to_build_current_section():
 
 def test_current_metrics_uses_explicit_ai_models_flag_not_sentinel():
     metrics_path = (
-        Path(__file__).resolve().parents[1] / "API" / "current" / "metrics.py"
+        Path(__file__).resolve().parents[2] / "API" / "current" / "metrics.py"
     )
     source = metrics_path.read_text()
 

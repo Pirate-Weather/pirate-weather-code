@@ -29,7 +29,7 @@ from API.constants.model_const import RTMA_RU
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.utils.geo import lambertGridMatch
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "API" / "RTMA-RU_Local_Ingest.py"
 EXPECTED_VAR_COUNT = 10
 GRIBSTREAM_API_KEY_ENV_VAR = "GRIBSTREAM_API_KEY"
@@ -226,7 +226,7 @@ def test_gribstream_request_pins_rtma_ru_run(monkeypatch):
         captured["timeout"] = timeout
         return FakeResponse()
 
-    monkeypatch.setattr("tests.test_rtma_ingest.urlopen", fake_urlopen)
+    monkeypatch.setattr(f"{__name__}.urlopen", fake_urlopen)
     run_time = datetime.datetime(2026, 9, 9, 13, 30, tzinfo=datetime.UTC)
 
     rows = _fetch_gribstream_rtma_ru_run("test-token", run_time, 40.0, -105.0)

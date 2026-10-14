@@ -4,7 +4,7 @@ import re
 import subprocess
 from pathlib import Path
 
-ZIP_SYNC_PATH = Path(__file__).resolve().parents[1] / "API" / "zip_sync.sh"
+ZIP_SYNC_PATH = Path(__file__).resolve().parents[2] / "API" / "zip_sync.sh"
 CMC_MODELS = {"GDPS", "GEPS", "HRDPS", "RAQDPS", "REPS"}
 
 

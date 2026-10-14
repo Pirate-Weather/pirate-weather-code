@@ -30,7 +30,7 @@ def _get_client():
     os.environ["save_type"] = "S3"
     os.environ.setdefault("useETOPO", "FALSE")
 
-    api_path = Path(__file__).resolve().parents[1] / "API"
+    api_path = Path(__file__).resolve().parents[2] / "API"
     sys.path.insert(0, str(api_path))
     response_path = api_path / "responseLocal.py"
     spec = importlib.util.spec_from_file_location("responseLocal", response_path)

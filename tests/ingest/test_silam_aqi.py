@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-SILAM_SCRIPT = Path(__file__).resolve().parents[1] / "API" / "FMI_Silam_Local_Ingest.py"
+SILAM_SCRIPT = Path(__file__).resolve().parents[2] / "API" / "FMI_Silam_Local_Ingest.py"
 
 
 def _script_source() -> str:

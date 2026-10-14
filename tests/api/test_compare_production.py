@@ -8,7 +8,7 @@ from urllib.request import urlopen
 import pytest
 
 from tests import DiffWarning
-from tests.test_s3_live import _get_client
+from tests.api.test_s3_live import _get_client
 
 PW_API = os.environ.get("PW_API")
 PROD_BASE = "https://api.pirateweather.net/forecast"

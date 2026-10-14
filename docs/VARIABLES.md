@@ -162,7 +162,7 @@ This phase involves making the new variable available in the API's forecasting l
 Thorough testing is paramount when adding new variables to ensure data integrity and API stability.
 
 * **Unit Tests**: If applicable, add unit tests for any new helper functions or complex logic introduced for the variable. Tests are located in the `tests/` directory.
-* **Integration Tests**: Modify existing integration tests (e.g., in `tests/test_s3_live.py`) to assert that the new variable appears in the API response and has expected values.
+* **Integration Tests**: Modify existing integration tests (e.g., in `tests/api/test_s3_live.py`) to assert that the new variable appears in the API response and has expected values.
 * **Comparison Tests**: If you have `test_compare_production.py` set up, ensure your changes don't cause unexpected differences for existing fields. You might need to temporarily disable this for the new field until production is updated.
 * **Manual Testing**: Issue cURL requests to your local API with and without the `version=2` (or relevant version) query string to confirm the variable's presence/absence as expected. Check different locations and forecast times.
 * **Linting and Formatting**: Run the linting and formatting tools before submitting:

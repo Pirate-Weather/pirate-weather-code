@@ -11,7 +11,7 @@ from herbie import FastHerbie
 
 from API import ingest_grib_utils
 
-NBM_SCRIPT = Path(__file__).resolve().parents[1] / "API" / "NBM_Local_Ingest.py"
+NBM_SCRIPT = Path(__file__).resolve().parents[2] / "API" / "NBM_Local_Ingest.py"
 
 
 def _nbm_download(namespace):
