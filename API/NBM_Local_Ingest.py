@@ -30,9 +30,9 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     archive_tmp_zarr_and_upload,
+    configure_herbie_request_timeouts,
     configure_zarr_limits,
     download_extract_historic_archive,
-    getGribList,
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
@@ -47,8 +47,12 @@ from API.ingest_utils import (
 dotenv_path = find_dotenv(usecwd=True)
 loaded = load_dotenv(dotenv_path, override=True)
 
-from herbie import FastHerbie  # noqa: E402
 from herbie.fast import Herbie_latest  # noqa: E402
+
+from API.ingest_grib_utils import (  # noqa: E402
+    download_and_validate_gfs_subset,
+    run_checked,
+)
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
@@ -127,6 +131,31 @@ def _acquire_single_run_lock(lock_path: str):
     return lock_file
 
 
+def _download_nbm_subset(
+    forecast_hours, search: str, dataset_name: str, run_date=None
+) -> list[str]:
+    """Use the shared retry and local-file checks before NBM processing."""
+    return download_and_validate_gfs_subset(
+        model="nbm",
+        product="co",
+        search=search,
+        dataset_name=dataset_name,
+        base_time=base_time,
+        run_date=run_date,
+        forecast_hours=list(forecast_hours),
+        priority=["aws", "nomads"],
+        herbie_save_dir=tmp_dir,
+        herbie_download_retries=herbie_download_retries,
+        herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
+        herbie_kwargs={"max_threads": herbie_max_threads},
+        download_max_threads=herbie_max_threads,
+        download_verbose=False,
+        wgrib2_exe=wgrib2_path.strip(),
+        # Combined probability and accumulation subsets are validated below.
+        skip_wgrib2_validation=True,
+    )
+
+
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
 
@@ -152,6 +181,11 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 zarr_store_workers = positive_int_env("zarr_store_workers", 2)
 zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 herbie_max_threads = positive_int_env("herbie_max_threads", 1)
+herbie_download_retries = positive_int_env("herbie_download_retries", 3)
+herbie_retry_sleep_seconds = positive_int_env("herbie_retry_sleep_seconds", 20)
+configure_herbie_request_timeouts(
+    nomads_request_interval_s=positive_int_env("nomads_request_interval_seconds", 5)
+)
 
 s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
@@ -313,49 +347,22 @@ match_strings = (
 )
 
 
-# Create a range of forecast lead times
-# Go from 1 to 7 to account for the weird prate approach
-# Create FastHerbieFastHerbie object
-FH_forecastsub = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="1h"),
-    model="nbm",
-    fxx=nbm_range,
-    product="co",
-    verbose=False,
-    priority=["aws", "nomads"],
-    max_threads=herbie_max_threads,
-    save_dir=tmp_dir,
-)
-
 # Download the subsets
 stage_start = time.perf_counter()
-FH_forecastsub.download(match_strings, verbose=False)
+grib_list = _download_nbm_subset(nbm_range, match_strings, "NBM main forecast")
 _timing_log(
     f"NBM_FORECAST stage=download_main elapsed={time.perf_counter() - stage_start:.2f}s"
 )
 
 
-# Check for download length
-if len(FH_forecastsub.file_exists) != len(nbm_range):
-    logger.error(
-        "Download failed, expected "
-        + str(len(nbm_range))
-        + " files, but got "
-        + str(len(FH_forecastsub.file_exists))
-    )
-    sys.exit(1)
-
-
-# Create list of downloaded grib files
-grib_list = getGribList(FH_forecastsub, match_strings)
-
 # Perform a check if any data seems to be invalid
 stage_start = time.perf_counter()
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-grib_check = run_command(cmd)
+grib_check = run_checked(cmd, "NBM GRIB validation")
 
-validate_grib_stats(grib_check)
+if not validate_grib_stats(grib_check):
+    raise RuntimeError("NBM GRIB validation failed")
 print("Grib files passed validation, proceeding with processing")
 _timing_log(
     f"NBM_FORECAST stage=validate_main elapsed={time.perf_counter() - stage_start:.2f}s"
@@ -379,7 +386,7 @@ substage_start = time.perf_counter()
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
     logger.error(sp_out.stderr)
-    sys.exit()
+    sys.exit(1)
 _timing_log(
     f"NBM_FORECAST stage=main_merge_grib elapsed={time.perf_counter() - substage_start:.2f}s"
 )
@@ -399,7 +406,7 @@ cmd2 = (
 spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
     logger.error(spOUT2.stderr)
-    sys.exit()
+    sys.exit(1)
 _timing_log(
     f"NBM_FORECAST stage=main_reorder_grib elapsed={time.perf_counter() - substage_start:.2f}s"
 )
@@ -421,7 +428,7 @@ substage_start = time.perf_counter()
 spOUT4 = run_command(cmd4)
 if spOUT4.returncode != 0:
     logger.error(spOUT4.stderr)
-    sys.exit()
+    sys.exit(1)
 os.remove(forecast_process_path + "_wgrib2_merged_order.grib")
 _timing_log(
     f"NBM_FORECAST stage=main_write_netcdf elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -453,78 +460,33 @@ elif base_time.hour % 6 == 5:
     nbm_range2 = range(37, 188, 6)
 
 # Download PPROB as 1-Hour Prob
-# Create FastHerbie object
-FH_forecastsub = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="1h"),
-    model="nbm",
-    fxx=nbm_range1,
-    product="co",
-    verbose=False,
-    priority=["aws", "nomads"],
-    max_threads=herbie_max_threads,
-    save_dir=tmp_dir,
-)
-
 matchstring_po = r"(:APCP:surface:(0-1|1-2|2-3|3-4|4-5|5-6|6-7|7-8|8-9|9-10|[0-9]*0-[0-9]{1,2}1|[0-9]*1-[0-9]{1,2}2|[0-9]*2-[0-9]{1,2}3|[0-9]*3-[0-9]{1,2}4|[0-9]*4-[0-9]{1,2}5|[0-9]*5-[0-9]{1,2}6|[0-9]*6-[0-9]{1,2}7|[0-9]*7-[0-9]{1,2}8|[0-9]*8-[0-9]{1,2}9|[0-9]*9-[0-9]{1,2}0).*fcst:prob.*)"
 # Download the subsets
 stage_start = time.perf_counter()
-FH_forecastsub.download(matchstring_po, verbose=False)
+gribList1 = _download_nbm_subset(
+    nbm_range1, matchstring_po, "NBM hourly precipitation probability"
+)
 _timing_log(
     "NBM_FORECAST "
     f"stage=download_pprob_hourly elapsed={time.perf_counter() - stage_start:.2f}s"
 )
 
-# Check for download length
-if len(FH_forecastsub.file_exists) != len(nbm_range1):
-    logger.error(
-        "Download failed, expected "
-        + str(len(nbm_range1))
-        + " files, but got "
-        + str(len(FH_forecastsub.file_exists))
-    )
-    sys.exit(1)
-
-
-# Create list of downloaded grib files
-gribList1 = getGribList(FH_forecastsub, matchstring_po)
 
 #####
 # Download PPROB as 6-Hour Accum for hours 036-190
-
-# Create FastHerbie object
-FH_forecastsub2 = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="1h"),
-    model="nbm",
-    fxx=nbm_range2,
-    product="co",
-    verbose=False,
-    priority=["aws", "nomads"],
-    max_threads=herbie_max_threads,
-    save_dir=tmp_dir,
-)
 
 # Match 6-hour probs
 matchstring_po2 = r":APCP:surface:(0-6|[0-9]*0-[0-9]{1,2}6|[0-9]*1-[0-9]{1,2}7|[0-9]*2-[0-9]{1,2}8|[0-9]*3-[0-9]{1,2}9|[0-9]*4-[0-9]{1,2}0|[0-9]*5-[0-9]{1,2}1|[0-9]*6-[0-9]{1,2}2|[0-9]*7-[0-9]{1,2}3|[0-9]*8-[0-9]{1,2}4|[0-9]*9-[0-9]{1,2}5).*fcst:prob"
 # Download the subsets
 stage_start = time.perf_counter()
-FH_forecastsub2.download(matchstring_po2, verbose=False)
+gribList2 = _download_nbm_subset(
+    nbm_range2, matchstring_po2, "NBM six-hour precipitation probability"
+)
 _timing_log(
     "NBM_FORECAST "
     f"stage=download_pprob_6hour elapsed={time.perf_counter() - stage_start:.2f}s"
 )
 
-# Check for download length
-if len(FH_forecastsub2.file_exists) != len(nbm_range2):
-    logger.error(
-        "Download failed, expected "
-        + str(len(nbm_range2))
-        + " files, but got "
-        + str(len(FH_forecastsub2.file_exists))
-    )
-    sys.exit(1)
-
-# Create list of downloaded grib files
-gribList2 = getGribList(FH_forecastsub2, matchstring_po2)
 
 grib_list = gribList1 + gribList2
 
@@ -532,9 +494,10 @@ grib_list = gribList1 + gribList2
 stage_start = time.perf_counter()
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-grib_check = run_command(cmd)
+grib_check = run_checked(cmd, "NBM GRIB validation")
 
-validate_grib_stats(grib_check)
+if not validate_grib_stats(grib_check):
+    raise RuntimeError("NBM GRIB validation failed")
 print("Grib files passed validation, proceeding with processing")
 _timing_log(
     f"NBM_FORECAST stage=validate_pprob elapsed={time.perf_counter() - stage_start:.2f}s"
@@ -558,7 +521,7 @@ substage_start = time.perf_counter()
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
     logger.error(sp_out.stderr)
-    sys.exit()
+    sys.exit(1)
 _timing_log(
     f"NBM_FORECAST stage=pprob_merge_grib elapsed={time.perf_counter() - substage_start:.2f}s"
 )
@@ -579,7 +542,7 @@ cmd2 = (
 spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
     logger.error(spOUT2.stderr)
-    sys.exit()
+    sys.exit(1)
 _timing_log(
     f"NBM_FORECAST stage=pprob_reorder_grib elapsed={time.perf_counter() - substage_start:.2f}s"
 )
@@ -601,7 +564,7 @@ substage_start = time.perf_counter()
 spOUT4 = run_command(cmd4)
 if spOUT4.returncode != 0:
     logger.error(spOUT4.stderr)
-    sys.exit()
+    sys.exit(1)
 os.remove(forecast_process_path + "_prob_wgrib2_merged_order.grib")
 _timing_log(
     f"NBM_FORECAST stage=pprob_write_netcdf elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -612,77 +575,33 @@ _timing_log(
 
 
 # Download PACCUM as 1-Hour and 6-hour Accum
-# Create FastHerbie object
-FH_forecastsub = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="1h"),
-    model="nbm",
-    fxx=nbm_range1,
-    product="co",
-    verbose=False,
-    priority=["aws", "nomads"],
-    max_threads=herbie_max_threads,
-    save_dir=tmp_dir,
-)
-
 matchstring_pa = r"(:APCP:surface:(0-1|1-2|2-3|3-4|4-5|5-6|6-7|7-8|8-9|9-10|\d*0-\d{1,2}1|\d*1-\d{1,2}2|\d*2-\d{1,2}3|\d*3-\d{1,2}4|\d*4-\d{1,2}5|\d*5-\d{1,2}6|\d*6-\d{1,2}7|\d*7-\d{1,2}8|\d*8-\d{1,2}9|\d*9-\d{1,2}0).*fcst:$)"
 # Download the subsets
 stage_start = time.perf_counter()
-FH_forecastsub.download(matchstring_pa, verbose=False)
+gribList1 = _download_nbm_subset(
+    nbm_range1, matchstring_pa, "NBM hourly precipitation accumulation"
+)
 _timing_log(
     "NBM_FORECAST "
     f"stage=download_paccum_hourly elapsed={time.perf_counter() - stage_start:.2f}s"
 )
 
-# Check for download length
-if len(FH_forecastsub.file_exists) != len(nbm_range1):
-    logger.error(
-        "Download failed, expected "
-        + str(len(nbm_range1))
-        + " files, but got "
-        + str(len(FH_forecastsub.file_exists))
-    )
-    sys.exit(1)
-
-# Create list of downloaded grib files
-gribList1 = getGribList(FH_forecastsub, matchstring_pa)
 
 #####
 # Download 6-Hour Accum for hours 036-190
-
-# Create FastHerbie object
-FH_forecastsub2 = FastHerbie(
-    pd.date_range(start=base_time, periods=1, freq="1h"),
-    model="nbm",
-    fxx=nbm_range2,
-    product="co",
-    verbose=False,
-    priority=["aws", "nomads"],
-    max_threads=herbie_max_threads,
-    save_dir=tmp_dir,
-)
 
 # Match 6-hour accumulation
 matchstring_pa2 = r"(:APCP:surface:(0-6|\d*0-\d{1,2}6|\d*1-\d{1,2}7|\d*2-\d{1,2}8|\d*3-\d{1,2}9|\d*4-\d{1,2}0|\d*5-\d{1,2}1|\d*6-\d{1,2}2|\d*7-\d{1,2}3|\d*8-\d{1,2}4|\d*9-\d{1,2}5).*fcst:$)"
 # Download the subsets
 stage_start = time.perf_counter()
-FH_forecastsub2.download(matchstring_pa2, verbose=False)
+gribList2 = _download_nbm_subset(
+    nbm_range2, matchstring_pa2, "NBM six-hour precipitation accumulation"
+)
 _timing_log(
     "NBM_FORECAST "
     f"stage=download_paccum_6hour elapsed={time.perf_counter() - stage_start:.2f}s"
 )
 
-# Check for download length
-if len(FH_forecastsub2.file_exists) != len(nbm_range2):
-    logger.error(
-        "Download failed, expected "
-        + str(len(nbm_range2))
-        + " files, but got "
-        + str(len(FH_forecastsub2.file_exists))
-    )
-    sys.exit(1)
-
-# Create list of downloaded grib files
-gribList2 = getGribList(FH_forecastsub2, matchstring_pa2)
 grib_list = gribList1 + gribList2
 
 
@@ -690,9 +609,10 @@ grib_list = gribList1 + gribList2
 stage_start = time.perf_counter()
 cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
-grib_check = run_command(cmd)
+grib_check = run_checked(cmd, "NBM GRIB validation")
 
-validate_grib_stats(grib_check)
+if not validate_grib_stats(grib_check):
+    raise RuntimeError("NBM GRIB validation failed")
 print("Grib files passed validation, proceeding with processing")
 _timing_log(
     f"NBM_FORECAST stage=validate_paccum elapsed={time.perf_counter() - stage_start:.2f}s"
@@ -716,7 +636,7 @@ substage_start = time.perf_counter()
 sp_out = run_command(cmd)
 if sp_out.returncode != 0:
     logger.error(sp_out.stderr)
-    sys.exit()
+    sys.exit(1)
 _timing_log(
     f"NBM_FORECAST stage=paccum_merge_grib elapsed={time.perf_counter() - substage_start:.2f}s"
 )
@@ -736,7 +656,7 @@ cmd2 = (
 spOUT2 = run_command(cmd2)
 if spOUT2.returncode != 0:
     logger.error(spOUT2.stderr)
-    sys.exit()
+    sys.exit(1)
 _timing_log(
     f"NBM_FORECAST stage=paccum_reorder_grib elapsed={time.perf_counter() - substage_start:.2f}s"
 )
@@ -758,7 +678,7 @@ substage_start = time.perf_counter()
 spOUT4 = run_command(cmd4)
 if spOUT4.returncode != 0:
     logger.error(spOUT4.stderr)
-    sys.exit()
+    sys.exit(1)
 os.remove(forecast_process_path + "_accum_wgrib2_merged_order.grib")
 _timing_log(
     f"NBM_FORECAST stage=paccum_write_netcdf elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -973,42 +893,25 @@ for i in range(his_period, -1, -1):
 
     logger.info(DATES)
 
-    # Create FastHerbie Object.
-    FH_histsub = FastHerbie(
-        DATES,
-        model="nbm",
-        fxx=fxx,
-        product="co",
-        verbose=False,
-        priority=["aws", "nomads"],
-        max_threads=herbie_max_threads,
-        save_dir=tmp_dir,
-    )
-
-    # Main Vars + Accum
-    # Download the subsets
     stage_start = time.perf_counter()
-    FH_histsub.download(match_strings + "|" + matchstring_po, verbose=False)
+    historic_grib_list = _download_nbm_subset(
+        fxx,
+        match_strings + "|" + matchstring_po,
+        f"NBM history {hist_target}",
+        run_date=DATES[0],
+    )
     _timing_log(
         f"NBM_HIST {hist_target} stage=download_subsets elapsed={time.perf_counter() - stage_start:.2f}s"
     )
 
     # Perform a check if any data seems to be invalid
     stage_start = time.perf_counter()
-    cmd = (
-        f"{wgrib2_path}"
-        + "  "
-        + str(
-            FH_histsub.file_exists[0].get_localFilePath(
-                match_strings + "|" + matchstring_po
-            )
-        )
-        + " -s -stats"
-    )
+    cmd = f"{wgrib2_path}" + "  " + historic_grib_list[0] + " -s -stats"
 
-    grib_check = run_command(cmd)
+    grib_check = run_checked(cmd, "NBM GRIB validation")
 
-    validate_grib_stats(grib_check)
+    if not validate_grib_stats(grib_check):
+        raise RuntimeError("NBM GRIB validation failed")
     print("Grib files passed validation, proceeding with processing")
     _timing_log(
         f"NBM_HIST {hist_target} stage=validate_grib elapsed={time.perf_counter() - stage_start:.2f}s"
@@ -1019,11 +922,7 @@ for i in range(his_period, -1, -1):
     cmd1 = (
         f"{wgrib2_path}"
         + "  "
-        + str(
-            FH_histsub.file_exists[0].get_localFilePath(
-                match_strings + "|" + matchstring_po
-            )
-        )
+        + historic_grib_list[0]
         + " -ijsmall_grib "
         + " 1:2345 1:1597 "
         + hist_process_path
@@ -1032,7 +931,7 @@ for i in range(his_period, -1, -1):
     spOUT1 = run_command(cmd1)
     if spOUT1.returncode != 0:
         logger.error(spOUT1.stderr)
-        sys.exit()
+        sys.exit(1)
 
     # Convert to NetCDF
     cmd3 = (
@@ -1047,7 +946,7 @@ for i in range(his_period, -1, -1):
     spOUT3 = run_command(cmd3)
     if spOUT3.returncode != 0:
         logger.error(spOUT3.stderr)
-        sys.exit()
+        sys.exit(1)
     _timing_log(
         f"NBM_HIST {hist_target} stage=wgrib_to_netcdf elapsed={time.perf_counter() - stage_start:.2f}s"
     )
