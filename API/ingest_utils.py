@@ -14,6 +14,7 @@ import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from threading import Lock
 from typing import Any
 from urllib.parse import urlparse
 
@@ -301,19 +302,76 @@ def make_herbie_save_dir(tmp_dir: str, prefix: str = "herbie") -> str:
     return save_dir
 
 
-def configure_herbie_request_timeouts(request_timeout_s: int | None = None) -> None:
-    """Patch Herbie's availability probes so stalled sockets cannot hang ingest."""
+class _HerbieRequests:
+    """Pace NOMADS probes, index reads, and GRIB byte-range requests together."""
+
+    RequestException = requests.RequestException
+
+    def __init__(self, interval_s: float, timeout_s: int) -> None:
+        self.interval_s = interval_s
+        self.timeout_s = timeout_s
+        self._lock = Lock()
+        self._last_request: float | None = None
+
+    def _request(self, method: str, url: str, **kwargs) -> requests.Response:
+        kwargs.setdefault("timeout", (10, self.timeout_s))
+        request = getattr(requests, method)
+        if (urlparse(str(url)).hostname or "").lower() != "nomads.ncep.noaa.gov":
+            return request(url, **kwargs)
+
+        # A NOMADS rate-limit redirect must not become a successful HTML download.
+        kwargs["allow_redirects"] = False
+        with self._lock:
+            if self._last_request is not None:
+                delay = self.interval_s - (time.monotonic() - self._last_request)
+                if delay > 0:
+                    time.sleep(delay)
+            self._last_request = time.monotonic()
+            response = request(url, **kwargs)
+        if 300 <= response.status_code < 400:
+            response.close()
+            raise requests.HTTPError(
+                f"NOMADS returned HTTP {response.status_code} for {url}",
+                response=response,
+            )
+        return response
+
+    def get(self, url: str, **kwargs) -> requests.Response:
+        return self._request("get", url, **kwargs)
+
+    def head(self, url: str, **kwargs) -> requests.Response:
+        return self._request("head", url, **kwargs)
+
+
+def configure_herbie_request_timeouts(
+    request_timeout_s: int | None = None,
+    *,
+    nomads_request_interval_s: float | None = None,
+) -> None:
+    """Bound Herbie requests and optionally pace requests to NOMADS."""
     if request_timeout_s is None:
         request_timeout_s = positive_int_env("herbie_request_timeout_seconds", 120)
 
-    from herbie.core import Herbie
+    from herbie import core
+
+    Herbie = core.Herbie
+    if nomads_request_interval_s is not None:
+        if nomads_request_interval_s <= 0:
+            raise ValueError("NOMADS request interval must be positive")
+        if isinstance(core.requests, _HerbieRequests):
+            core.requests.interval_s = nomads_request_interval_s
+            core.requests.timeout_s = request_timeout_s
+        else:
+            core.requests = _HerbieRequests(
+                nomads_request_interval_s, request_timeout_s
+            )
 
     if getattr(Herbie, "_pirate_weather_request_timeout_s", None) == request_timeout_s:
         return
 
     def _check_grib_with_timeout(self, url: str, min_content_length: int = 10) -> bool:
         try:
-            head = requests.head(url, timeout=(10, request_timeout_s))
+            head = core.requests.head(url, timeout=(10, request_timeout_s))
         except requests.RequestException:
             return False
 
@@ -340,9 +398,13 @@ def configure_herbie_request_timeouts(request_timeout_s: int | None = None) -> N
                         "https://planetarycomputer.microsoft.com/api/sas/v1/sign?href="
                         + idx_url
                     )
-                    response = requests.get(dl_url, timeout=(10, request_timeout_s))
+                    response = core.requests.get(
+                        dl_url, timeout=(10, request_timeout_s)
+                    )
                     idx_url = response.json()["href"]
-                idx_exists = requests.head(idx_url, timeout=(10, request_timeout_s)).ok
+                idx_exists = core.requests.head(
+                    idx_url, timeout=(10, request_timeout_s)
+                ).ok
             except requests.RequestException as exc:
                 idx_exists = False
                 if verbose:
@@ -388,7 +450,14 @@ def _download_full_herbie_file(
 
     try:
         if _is_remote_url(grib_source):
-            with requests.get(
+            request_client = requests
+            if (
+                urlparse(str(grib_source)).hostname or ""
+            ).lower() == "nomads.ncep.noaa.gov":
+                from herbie import core
+
+                request_client = core.requests
+            with request_client.get(
                 str(grib_source),
                 stream=True,
                 timeout=(10, request_timeout_s),
@@ -481,7 +550,9 @@ def download_herbie_with_retry(
                 downloaded = _download_full_herbie_files(
                     herbie_obj,
                     overwrite=download_kwargs["overwrite"],
-                    max_threads=positive_int_env("herbie_download_threads", 20),
+                    max_threads=max_threads
+                    if max_threads is not None
+                    else positive_int_env("herbie_download_threads", 20),
                     request_timeout_s=positive_int_env(
                         "herbie_request_timeout_seconds", 120
                     ),

@@ -295,9 +295,10 @@ for i in range(his_period, -1, -1):
     ds_out.to_zarr(
         zarr_store,
         mode="w",
+        zarr_format=3,
         encoding={
             var: {
-                "compressor": zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+                "compressors": zarr.codecs.BloscCodec(cname="zstd", clevel=3),
                 "dtype": "float32",
             }
             for var in vars_in

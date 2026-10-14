@@ -19,8 +19,8 @@ from API.constants.model_const import HRRR
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.utils.geo import lambertGridMatch
 
-SCRIPT_PATH = Path(__file__).resolve().parents[1] / "API" / "HRRR_6H_Local_Ingest.py"
-REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_PATH = Path(__file__).resolve().parents[2] / "API" / "HRRR_6H_Local_Ingest.py"
+REPO_ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_VAR_COUNT = 20
 LOCAL_TEST_ENV_VAR = "PW_RUN_LOCAL_INGEST_TESTS"
 GRIBSTREAM_API_KEY_ENV_VAR = "GRIBSTREAM_API_KEY"
@@ -135,7 +135,7 @@ def test_gribstream_request_pins_hrrr_run_and_lead_time(monkeypatch):
         captured["timeout"] = timeout
         return FakeResponse()
 
-    monkeypatch.setattr("tests.test_hrrr_6h_ingest.urlopen", fake_urlopen)
+    monkeypatch.setattr(f"{__name__}.urlopen", fake_urlopen)
     run_time = datetime.datetime(2026, 9, 9, 6, tzinfo=datetime.UTC)
 
     rows = _fetch_gribstream_hrrr_run("test-token", run_time, 40.0, -105.0)

@@ -13,8 +13,8 @@ This convenience function automates the entire workflow:
    identifiers are currently operational.
 2. Load MeteoAlarm geocodes bundled with the project for
    improved EMMA_ID to polygon mapping.
-3. For each ``sourceId``, fetch the corresponding RSS feed located
-   at ``https://severeweather.wmo.int/v2/cap-alerts/{sourceId}/rss.xml``.
+3. For each active ``sourceId``, fetch the RSS or Atom feed advertised
+   by its ``capAlertFeed`` entry in the WMO source catalog.
 4. Parse each feed for item links and download every CAP XML
    document referenced.
 5. Extract all polygons and geocodes defined in the CAP documents.
@@ -82,6 +82,19 @@ SUPPORTED_GEOCODES = {
     "CISORP",
 }
 
+ALERT_COLUMNS = [
+    "source_id",
+    "event",
+    "description",
+    "severity",
+    "effective",
+    "expires",
+    "area_desc",
+    "URL",
+    "geocode_name",
+    "geocode_value",
+]
+
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 METEOALARM_ALIASES_PATH = os.path.join(DATA_DIR, "meteoalarm_aliases.csv")
 METEOALARM_GEOJSON_PATH = os.path.join(DATA_DIR, "meteoalarm_geocodes.json")
@@ -102,23 +115,6 @@ historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/WMO_A
 save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
-
-s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-
-
-# Create new directory for processing if it does not exist
-if not os.path.exists(forecast_process_dir):
-    os.makedirs(forecast_process_dir)
-else:
-    # If it does exist, remove it
-    shutil.rmtree(forecast_process_dir)
-    os.makedirs(forecast_process_dir)
-
-if save_type == "Download":
-    if not os.path.exists(forecast_path + "/" + ingest_version):
-        os.makedirs(forecast_path + "/" + ingest_version)
-    if not os.path.exists(historic_path):
-        os.makedirs(historic_path)
 
 # Configure a basic logger for debug output.  Consumers of this module
 # can override or extend the logging configuration as needed.
@@ -148,7 +144,7 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
     ns = {"cap": root.tag.split("}")[0].strip("{")} if root.tag.startswith("{") else {}
 
     # --- Skip duplicate languages ---
-    seen_languages = set()
+    selected_language = None
 
     for info in root.findall(".//cap:info" if ns else ".//info", ns):
         lang_elem = info.find("cap:language" if ns else "language", ns)
@@ -159,10 +155,9 @@ def _extract_polygons_from_cap(cap_xml: str, source_id: str, cap_link: str):
         )
 
         # Use only whatever language is first seen
-        if not seen_languages:
-            seen_languages.add(lang)
-        elif lang not in seen_languages:
-            seen_languages.add(lang)
+        if selected_language is None:
+            selected_language = lang
+        elif lang != selected_language:
             continue  # Skip additional languages
 
         urgency = _cap_text(info, "urgency", ns)
@@ -368,6 +363,7 @@ def _find_feed_namespaces(feed_bytes: bytes) -> dict[str, str]:
 
 
 def _rss_item_links_and_guids(feed_content: bytes) -> list[tuple[str, str | None]]:
+    """Read CAP links and identifiers from RSS and Atom alert feeds."""
     try:
         root = ET.fromstring(feed_content)
     except ET.ParseError:
@@ -378,6 +374,43 @@ def _rss_item_links_and_guids(feed_content: bytes) -> list[tuple[str, str | None
         guid = (item.findtext("guid") or "").strip() or None
         if link:
             out.append((link, guid))
+
+    atom_ns = "{http://www.w3.org/2005/Atom}"
+    for entry in root.findall(f".//{atom_ns}entry"):
+        links = entry.findall(f"{atom_ns}link")
+        cap_link = next(
+            (link for link in links if link.get("type") == "application/cap+xml"),
+            None,
+        )
+        if cap_link is None:
+            cap_link = next(
+                (
+                    link
+                    for link in links
+                    if link.get("rel", "alternate") == "alternate"
+                    and link.get("type") != "text/html"
+                ),
+                None,
+            )
+        if cap_link is None or not cap_link.get("href"):
+            continue
+
+        # MeteoAlarm's Atom id identifies an area; cap:identifier identifies the alert.
+        identifier = next(
+            (
+                child.text
+                for child in entry
+                if child.tag.startswith("{urn:oasis:names:tc:emergency:cap:")
+                and child.tag.endswith("}identifier")
+                and child.text
+            ),
+            entry.findtext(f"{atom_ns}id"),
+        )
+        identifier = (identifier or "").strip() or None
+        # Canadian Atom ids wrap the CAP identifier in a tag URI.
+        if identifier and identifier.startswith("tag:") and "/" in identifier:
+            identifier = identifier.rsplit("/", 1)[-1]
+        out.append((cap_link.get("href").strip(), identifier))
     return out
 
 
@@ -627,7 +660,7 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
             "mo-smg-xx",
         }
 
-        source_ids: list[str] = []
+        source_feeds: dict[str, list[str]] = {}
         for entry in sources:
             src = entry.get("source", {})
             sid = src.get("sourceId")
@@ -637,20 +670,31 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
             if sid in excluded_ids:
                 continue
             if sid in current_agencies:
-                source_ids.append(sid)
+                feed_url = src.get("capAlertFeed")
+                if feed_url:
+                    # Some agencies advertise a separate feed for each language.
+                    source_feeds[sid] = [
+                        url.strip() for url in feed_url.split(",") if url.strip()
+                    ]
+                else:
+                    logger.warning("No CAP feed URL advertised for %s", sid)
 
         rows: list[dict[str, str | None]] = []
         geometries: list[Polygon] = []
 
-        async def process_feed(sid: str):
-            feed_url = f"{base_url}/v2/cap-alerts/{sid}/rss.xml"
-            async with sem:
-                feed_text = await _fetch_text(session, feed_url, timeout)
-            if not feed_text:
-                return
+        async def process_feed(sid: str, feed_urls: list[str]):
+            items = []
+            for feed_url in feed_urls:
+                async with sem:
+                    feed_text = await _fetch_text(session, feed_url, timeout)
+                if not feed_text:
+                    logger.warning(
+                        "Could not download CAP feed for %s: %s", sid, feed_url
+                    )
+                    continue
 
-            feed_bytes = feed_text.encode("utf-8", "ignore")
-            items = _rss_item_links_and_guids(feed_bytes)
+                feed_bytes = feed_text.encode("utf-8", "ignore")
+                items.extend(_rss_item_links_and_guids(feed_bytes))
 
             # Filter to items that correspond to "current" WMO ids (guid exact match is fastest; fallback loose contains)
             filtered = []
@@ -671,7 +715,10 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
                     return []
                 return _extract_polygons_from_cap(cap_xml, sid, cap_link)
 
-            tasks = [asyncio.create_task(fetch_and_extract(link)) for link in filtered]
+            tasks = [
+                asyncio.create_task(fetch_and_extract(link))
+                for link in dict.fromkeys(filtered)
+            ]
             for coro in asyncio.as_completed(tasks):
                 try:
                     poly_entries = await coro
@@ -725,132 +772,149 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
 
         # Kick off all feed tasks
 
-        # Use only "cz-chmi-cs" for testing
-        # source_ids = ["cz-chmi-cs"]
+        await asyncio.gather(
+            *(process_feed(sid, feed_urls) for sid, feed_urls in source_feeds.items())
+        )
 
-        await asyncio.gather(*(process_feed(sid) for sid in source_ids))
-
-        return gpd.GeoDataFrame(rows, geometry=geometries, crs="EPSG:4326")
-
-
-# %% Main script starts here
-
-logging.basicConfig(
-    level=logging.INFO, stream=sys.stdout, format="%(levelname)s: %(message)s"
-)
-wmo_gdf = asyncio.run(gather_cap_polygons_async(timeout=30.0))
-logger.info(
-    "Built GeoDataFrame with %d polygons from %d sources.",
-    len(wmo_gdf),
-    wmo_gdf["source_id"].nunique(),
-)
-
-# Then save a zarr zip the same way NWS alerts does
-
-# Create a grid of points, using a 0.125 degree spacing
-ys = np.arange(-60, 85, 0.0625)
-xs = np.arange(-180, 180, 0.0625)
-
-lons, lats = np.meshgrid(xs, ys)
-
-# Create GeoSeries of Points
-gridPointsSeries = gpd.GeoDataFrame(
-    geometry=gpd.points_from_xy(lons.flatten(), lats.flatten()), crs="EPSG:4326"
-)
-gridPointsSeries["INDEX"] = gridPointsSeries.index
-points_in_polygons = gpd.sjoin(
-    gridPointsSeries, wmo_gdf, predicate="within", how="inner"
-)
-
-# Create a formatted string ton save all the relevant in the zarr array
-points_in_polygons["string"] = (
-    points_in_polygons["event"].astype(str) + "}"
-    "{"
-    + points_in_polygons["description"].astype(str)
-    + "}"
-    + "{"
-    + points_in_polygons["area_desc"].astype(str)
-    + "}"
-    + "{"
-    + points_in_polygons["effective"].astype(str)
-    + "}"
-    + "{"
-    + points_in_polygons["expires"].astype(str)
-    + "}"
-    + "{"
-    + points_in_polygons["severity"].astype(str)
-    + "}"
-    + "{"
-    + points_in_polygons["URL"].astype(str)
-    + "}"
-    + "{"
-    + points_in_polygons["geocode_name"].astype(str)
-    + "}"
-    + "{"
-    + points_in_polygons["geocode_value"].astype(str)
-)
-
-# Combine the formatted strings using "~" as a spacer, since it doesn't seem to be used in CAP messages
-df = points_in_polygons.groupby("INDEX").agg({"string": "~".join}).reset_index()
+        return gpd.GeoDataFrame(
+            rows, columns=ALERT_COLUMNS, geometry=geometries, crs="EPSG:4326"
+        )
 
 
-# Merge back into primary geodataframe
-gridPointsSeries = gridPointsSeries.merge(df, on="INDEX", how="left")
+def main() -> None:
+    """Download WMO alerts and publish the gridded Zarr store."""
+    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
-# Set empty data as blank
-gridPointsSeries["string"] = gridPointsSeries["string"].fillna("")
+    # Create new directory for processing if it does not exist
+    if not os.path.exists(forecast_process_dir):
+        os.makedirs(forecast_process_dir)
+    else:
+        # If it does exist, remove it
+        shutil.rmtree(forecast_process_dir)
+        os.makedirs(forecast_process_dir)
 
-# Concert to string
-gridPointsSeries["string"] = gridPointsSeries["string"].astype(str)
+    if save_type == "Download":
+        if not os.path.exists(forecast_path + "/" + ingest_version):
+            os.makedirs(forecast_path + "/" + ingest_version)
+        if not os.path.exists(historic_path):
+            os.makedirs(historic_path)
 
-# %% XR approach
-gridPoints_XR = gridPointsSeries["string"].to_xarray()
-
-# Reshape to 2D
-gridPoints_XR2 = gridPoints_XR.values.astype(VariableLengthUTF8).reshape(lons.shape)
-
-
-# Write to zarr
-# Save as zarr
-if save_type == "S3":
-    zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/WMO_Alerts.zarr.zip", mode="w", compression=0
+    logging.basicConfig(
+        level=logging.INFO, stream=sys.stdout, format="%(levelname)s: %(message)s"
+    )
+    wmo_gdf = asyncio.run(gather_cap_polygons_async(timeout=30.0))
+    logger.info(
+        "Built GeoDataFrame with %d polygons from %d sources.",
+        len(wmo_gdf),
+        wmo_gdf["source_id"].nunique(),
     )
 
-else:
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/WMO_Alerts.zarr")
+    # Then save a zarr zip the same way NWS alerts does
 
+    # Create a grid of points, using a 0.125 degree spacing
+    ys = np.arange(-60, 85, 0.0625)
+    xs = np.arange(-180, 180, 0.0625)
 
-# Create a Zarr array in the store with zstd compression
-zarr_array = zarr.create_array(
-    store=zarr_store,
-    shape=gridPoints_XR2.shape,
-    dtype=zarr.dtype.VariableLengthUTF8(),
-    chunks=(10, 10),
-    overwrite=True,
-)
+    lons, lats = np.meshgrid(xs, ys)
 
-# Save the data
-zarr_array[:] = gridPoints_XR2
+    # Create GeoSeries of Points
+    gridPointsSeries = gpd.GeoDataFrame(
+        geometry=gpd.points_from_xy(lons.flatten(), lats.flatten()), crs="EPSG:4326"
+    )
+    gridPointsSeries["INDEX"] = gridPointsSeries.index
+    points_in_polygons = gpd.sjoin(
+        gridPointsSeries, wmo_gdf, predicate="within", how="inner"
+    )
 
+    # Create a formatted string ton save all the relevant in the zarr array
+    points_in_polygons["string"] = (
+        points_in_polygons["event"].astype(str) + "}"
+        "{"
+        + points_in_polygons["description"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["area_desc"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["effective"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["expires"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["severity"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["URL"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["geocode_name"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["geocode_value"].astype(str)
+    )
 
-if save_type == "S3":
-    zarr_store.close()
+    # Combine the formatted strings using "~" as a spacer, since it doesn't seem to be used in CAP messages
+    df = points_in_polygons.groupby("INDEX").agg({"string": "~".join}).reset_index()
 
-# Upload to S3
-if save_type == "S3":
+    # Merge back into primary geodataframe
+    gridPointsSeries = gridPointsSeries.merge(df, on="INDEX", how="left")
+
+    # Set empty data as blank
+    gridPointsSeries["string"] = gridPointsSeries["string"].fillna("")
+
+    # Concert to string
+    gridPointsSeries["string"] = gridPointsSeries["string"].astype(str)
+
+    # %% XR approach
+    gridPoints_XR = gridPointsSeries["string"].to_xarray()
+
+    # Reshape to 2D
+    gridPoints_XR2 = gridPoints_XR.values.astype(VariableLengthUTF8).reshape(lons.shape)
+
+    # Write to zarr
+    # Save as zarr
+    if save_type == "S3":
+        zarr_store = zarr.storage.ZipStore(
+            forecast_process_dir + "/WMO_Alerts.zarr.zip", mode="w", compression=0
+        )
+
+    else:
+        zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/WMO_Alerts.zarr")
+
+    # Create a Zarr array in the store with zstd compression
+    zarr_array = zarr.create_array(
+        store=zarr_store,
+        shape=gridPoints_XR2.shape,
+        dtype=zarr.dtype.VariableLengthUTF8(),
+        chunks=(10, 10),
+        overwrite=True,
+    )
+
+    # Save the data
+    zarr_array[:] = gridPoints_XR2
+
+    if save_type == "S3":
+        zarr_store.close()
+
     # Upload to S3
-    s3.put_file(
-        forecast_process_dir + "/WMO_Alerts.zarr.zip",
-        forecast_path + "/" + ingest_version + "/WMO_Alerts.zarr.zip",
-    )
-else:
-    # Copy the zarr file to the final location
-    shutil.copytree(
-        forecast_process_dir + "/WMO_Alerts.zarr",
-        forecast_path + "/" + ingest_version + "/WMO_Alerts.zarr",
-        dirs_exist_ok=True,
-    )
+    if save_type == "S3":
+        # Upload to S3
+        s3.put_file(
+            forecast_process_dir + "/WMO_Alerts.zarr.zip",
+            forecast_path + "/" + ingest_version + "/WMO_Alerts.zarr.zip",
+        )
+    else:
+        # Copy the zarr file to the final location
+        shutil.copytree(
+            forecast_process_dir + "/WMO_Alerts.zarr",
+            forecast_path + "/" + ingest_version + "/WMO_Alerts.zarr",
+            dirs_exist_ok=True,
+        )
 
-# Clean up
-shutil.rmtree(forecast_process_dir)
+    # Clean up
+    shutil.rmtree(forecast_process_dir)
+
+
+if __name__ == "__main__":
+    main()

@@ -238,3 +238,132 @@ def test_download_retry_recovers_from_503_with_limited_threads(tmp_path, monkeyp
     assert [call["max_threads"] for call in calls] == [4, 4]
     assert [call["overwrite"] for call in calls] == [False, True]
     assert [call["verbose"] for call in calls] == [False, False]
+
+
+def test_herbie_nomads_pacing_covers_probes_indexes_and_byte_ranges(monkeypatch):
+    from herbie import core
+
+    clock = [0.0]
+    calls = []
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    def request(url, **kwargs):
+        calls.append((url, clock[0], kwargs))
+        response = ingest_utils.requests.Response()
+        response.status_code = 200
+        response.headers["Content-Length"] = "11"
+        return response
+
+    monkeypatch.setattr(ingest_utils.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(ingest_utils.time, "sleep", sleep)
+    monkeypatch.setattr(ingest_utils.requests, "head", request)
+    monkeypatch.setattr(ingest_utils.requests, "get", request)
+    monkeypatch.setattr(core, "requests", ingest_utils.requests)
+    monkeypatch.setattr(core.Herbie, "_check_grib", core.Herbie._check_grib)
+    monkeypatch.setattr(core.Herbie, "_check_idx", core.Herbie._check_idx)
+    monkeypatch.setattr(
+        core.Herbie, "_pirate_weather_request_timeout_s", None, raising=False
+    )
+    ingest_utils.configure_herbie_request_timeouts(7, nomads_request_interval_s=5)
+    client = core.requests
+    # The shared download helper calls configuration again; pacing must survive it.
+    ingest_utils.configure_herbie_request_timeouts(7)
+    assert core.requests is client
+
+    nomads_url = "https://nomads.ncep.noaa.gov/pub/data/nbm.grib2"
+    assert core.Herbie._check_grib(object(), nomads_url)
+    core.requests.get(nomads_url + ".idx")
+    core.requests.get(nomads_url, headers={"Range": "bytes=0-99"})
+    core.requests.get("https://noaa-nbm-grib2-pds.s3.amazonaws.com/nbm.grib2")
+
+    assert sleeps == [5, 5]
+    assert [start for _, start, _ in calls] == [0, 5, 10, 10]
+    assert all(kwargs["allow_redirects"] is False for _, _, kwargs in calls[:3])
+    assert "allow_redirects" not in calls[3][2]
+    assert calls[1][2]["timeout"] == (10, 7)
+
+
+def test_nomads_rate_limit_redirect_is_an_error(monkeypatch):
+    response = ingest_utils.requests.Response()
+    response.status_code = 302
+    closed = []
+    monkeypatch.setattr(response, "close", lambda: closed.append(True))
+
+    def request(url, **kwargs):
+        assert kwargs["allow_redirects"] is False
+        return response
+
+    monkeypatch.setattr(ingest_utils.requests, "get", request)
+    client = ingest_utils._HerbieRequests(interval_s=5, timeout_s=7)
+    with pytest.raises(
+        ingest_utils.requests.HTTPError, match="NOMADS returned HTTP 302"
+    ):
+        client.get("https://nomads.ncep.noaa.gov/pub/data/nbm.grib2")
+    assert closed == [True]
+
+
+def test_full_file_download_honors_explicit_threads(tmp_path, monkeypatch):
+    executor = ingest_utils.ThreadPoolExecutor
+    threads = []
+    refs = [_FakeRef(str(tmp_path / f"f{i}.grib2")) for i in range(5)]
+
+    def pool(*, max_workers):
+        threads.append(max_workers)
+        return executor(max_workers=max_workers)
+
+    def download(ref, **kwargs):
+        path = ref.get_localFilePath(None)
+        from pathlib import Path
+
+        Path(path).write_bytes(b"GRIB data")
+        return path
+
+    monkeypatch.setattr(ingest_utils, "ThreadPoolExecutor", pool)
+    monkeypatch.setattr(ingest_utils, "_download_full_herbie_file", download)
+    ingest_utils.download_herbie_with_retry(
+        herbie_obj=_FakeHerbie(refs),
+        expected_count=5,
+        dataset_name="AIGEFS",
+        retries=1,
+        retry_sleep_s=1,
+        max_threads=2,
+    )
+    assert threads == [2]
+
+
+def test_full_file_nomads_download_uses_pacing_and_rejects_redirect(
+    tmp_path, monkeypatch
+):
+    from herbie import core
+
+    response = ingest_utils.requests.Response()
+    response.status_code = 302
+    closed = []
+    monkeypatch.setattr(response, "close", lambda: closed.append(True))
+
+    def get(url, **kwargs):
+        assert kwargs["allow_redirects"] is False
+        return response
+
+    monkeypatch.setattr(ingest_utils.requests, "get", get)
+    monkeypatch.setattr(core, "requests", ingest_utils._HerbieRequests(5, 120))
+    path = tmp_path / "aigefs.grib2"
+    with pytest.raises(
+        ingest_utils.requests.HTTPError, match="NOMADS returned HTTP 302"
+    ):
+        ingest_utils.download_herbie_with_retry(
+            herbie_obj=_FakeHerbie(
+                [_FakeRef(str(path), grib="https://nomads.ncep.noaa.gov/aigefs.grib2")]
+            ),
+            expected_count=1,
+            dataset_name="AIGEFS",
+            retries=1,
+            retry_sleep_s=1,
+        )
+    assert closed == [True]
+    assert not path.exists()
+    assert not list(tmp_path.glob("*.tmp.*"))

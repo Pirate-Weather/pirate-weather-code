@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from API.constants.api_const import CONVERSION_FACTORS
 from API.constants.shared_const import KELVIN_TO_CELSIUS
-from tests.test_urma_ingest import (
+from tests.helpers.urma import (
     GRIBSTREAM_URMA_RUNS_URL,
     GRIBSTREAM_VARIABLES,
     _format_utc,
@@ -45,7 +45,7 @@ def _fetch_local_day(
     monkeypatch.setenv("SKIP_ERA5", "1")
     monkeypatch.setenv("use_etopo", "False")
 
-    api_path = Path(__file__).resolve().parents[1] / "API"
+    api_path = Path(__file__).resolve().parents[2] / "API"
     monkeypatch.syspath_prepend(str(api_path))
     spec = importlib.util.spec_from_file_location(
         "urma_comparison_response", api_path / "responseLocal.py"

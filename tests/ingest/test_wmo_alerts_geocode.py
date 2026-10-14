@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 # Conditional import for shapely - only needed for test functions that use it
 try:
@@ -19,7 +19,7 @@ except ImportError:
 
 
 # Path to local data files
-DATA_DIR = Path(__file__).resolve().parent.parent / "API" / "data"
+DATA_DIR = Path(__file__).resolve().parents[2] / "API" / "data"
 METEOALARM_ALIASES_PATH = DATA_DIR / "meteoalarm_aliases.csv"
 METEOALARM_GEOJSON_PATH = DATA_DIR / "meteoalarm_geocodes.json"
 

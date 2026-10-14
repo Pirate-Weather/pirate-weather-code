@@ -19,7 +19,7 @@ import pytest
 import pytz
 
 from API.utils.time_indexing import calculate_time_indexing
-from tests.test_s3_live import _get_client
+from tests.api.test_s3_live import _get_client
 
 PW_API = os.environ.get("PW_API")
 
