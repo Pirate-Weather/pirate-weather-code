@@ -435,6 +435,7 @@ for i in range(his_period, -1, -1):
         model="rrfs",
         fxx=fxx,
         product="2dfld",
+        domain="na",
         verbose=False,
         priority=["aws", "nomads"],
         save_dir=tmp_dir,
