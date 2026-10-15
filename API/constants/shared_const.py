@@ -22,6 +22,8 @@ HISTORY_PERIODS = {
     "HRRR_6H": 48,
     "RRFS": 48,
     "RRFS_6H": 48,
+    "RRFS_NA": 48,
+    "RRFS_NA_6H": 48,
     # GFS has a 12-day history, allowing 10 days of local retrievals.
     # Beyond that is Google ERA5.
     "GFS": 288,
