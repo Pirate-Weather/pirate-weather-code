@@ -281,19 +281,15 @@ if sp_out.returncode != 0:
     sys.exit()
 
 # Use wgrib2 to rotate the wind vectors
-# From https://github.com/blaylockbk/pyBKB_v2/blob/master/demos/RRFS_NA_earthRelative_vs_gridRelative_winds.ipynb
-lambertRotation = "lambert:262.500000:38.500000:38.500000:38.500000 237.280472:1799:3000.000000 21.138123:1059:3000.000000"
-
 cmd2 = (
     f"{wgrib2_path}"
-    + "  "
-    + forecast_process_path
-    + "_wgrib2_merged.grib2 "
-    + "-new_grid_winds earth -new_grid "
-    + lambertRotation
     + " "
     + forecast_process_path
-    + "_wgrib2_merged.regrid"
+    + " -new_grid_winds earth "
+    + forecast_process_path
+    + " "
+    + forecast_process_path
+    + "_wgrib_merge.regrid"
 )
 
 # Run wgrib2 to rotate winds and save as NetCDF
@@ -462,16 +458,12 @@ for i in range(his_period, -1, -1):
     logger.info("Grib files passed validation, proceeding with processing")
 
     # Use wgrib2 to rotate the wind vectors
-    # From https://github.com/blaylockbk/pyBKB_v2/blob/master/demos/RRFS_NA_earthRelative_vs_gridRelative_winds.ipynb
-    lambertRotation = "lambert:262.500000:38.500000:38.500000:38.500000 237.280472:1799:3000.000000 21.138123:1059:3000.000000"
-
     cmd2 = (
         f"{wgrib2_path}"
         + " "
         + str(FH_histsub.file_exists[0].get_localFilePath(match_strings))
-        + " "
-        + "-new_grid_winds earth -new_grid "
-        + lambertRotation
+        + " -new_grid_winds earth "
+        + str(FH_histsub.file_exists[0].get_localFilePath(match_strings))  # or output to file directly
         + " "
         + hist_process_path
         + "_wgrib_merge.regrid"
@@ -503,6 +495,9 @@ for i in range(his_period, -1, -1):
     # Merge the  xarrays
     # Read the netcdf file using xarray
     xarray_his_wgrib = xr.open_dataset(hist_process_path + "_wgrib_merge.nc")
+
+    ny = len(xarray_his_wgrib.rlat)  # or len(xarray_forecast_merged.y) depending on grid type
+    nx = len(xarray_his_wgrib.rlon)  # or len(xarray_forecast_merged.x)
 
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         xarray_his_wgrib.to_zarr(
@@ -597,7 +592,7 @@ for dask_var in zarr_vars:
         daskArrayOut = da.from_array(
             np.tile(
                 np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
-                (1, 1059, 1799),
+                (1, ny, nx),
             )
         ).rechunk((len(npCatTimes), process_chunk, process_chunk))
 

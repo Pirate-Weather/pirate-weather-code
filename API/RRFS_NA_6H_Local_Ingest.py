@@ -278,19 +278,15 @@ if sp_out.returncode != 0:
     sys.exit()
 
 # Use wgrib2 to rotate the wind vectors
-# From https://github.com/blaylockbk/pyBKB_v2/blob/master/demos/RRFS_NA_earthRelative_vs_gridRelative_winds.ipynb
-lambertRotation = "lambert:262.500000:38.500000:38.500000:38.500000 237.280472:1799:3000.000000 21.138123:1059:3000.000000"
-
 cmd2 = (
     f"{wgrib2_path}"
     + " "
     + forecast_process_path
-    + "_wgrib2_merged.grib2 "
-    + "-new_grid_winds earth -new_grid "
-    + lambertRotation
+    + " -new_grid_winds earth "
+    + forecast_process_path
     + " "
     + forecast_process_path
-    + "_wgrib2_merged.regrid"
+    + "_wgrib_merge.regrid"
 )
 
 # Run wgrib2 to rotate winds and save as NetCDF
