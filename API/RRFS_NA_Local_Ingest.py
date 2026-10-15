@@ -463,7 +463,9 @@ for i in range(his_period, -1, -1):
         + " "
         + str(FH_histsub.file_exists[0].get_localFilePath(match_strings))
         + " -new_grid_winds earth "
-        + str(FH_histsub.file_exists[0].get_localFilePath(match_strings))  # or output to file directly
+        + str(
+            FH_histsub.file_exists[0].get_localFilePath(match_strings)
+        )  # or output to file directly
         + " "
         + hist_process_path
         + "_wgrib_merge.regrid"
@@ -496,7 +498,9 @@ for i in range(his_period, -1, -1):
     # Read the netcdf file using xarray
     xarray_his_wgrib = xr.open_dataset(hist_process_path + "_wgrib_merge.nc")
 
-    ny = len(xarray_his_wgrib.rlat)  # or len(xarray_forecast_merged.y) depending on grid type
+    ny = len(
+        xarray_his_wgrib.rlat
+    )  # or len(xarray_forecast_merged.y) depending on grid type
     nx = len(xarray_his_wgrib.rlon)  # or len(xarray_forecast_merged.x)
 
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
