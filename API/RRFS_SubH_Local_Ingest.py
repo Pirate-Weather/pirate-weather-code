@@ -47,13 +47,17 @@ wgrib2_path = os.getenv(
 )
 
 forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/home/ubuntu/Weather/SubH"
+    "forecast_process_dir", default="/home/ubuntu/Weather/RRFS_SubH"
 )
-forecast_process_path = forecast_process_dir + "/SubH_Process"
+forecast_process_path = forecast_process_dir + "/RRFS_SubH_Process"
 tmp_dir = forecast_process_dir + "/Downloads"
 
-forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/SubH")
-historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/History/SubH")
+forecast_path = os.getenv(
+    "forecast_path", default="/home/ubuntu/Weather/Prod/RRFS_SubH"
+)
+historic_path = os.getenv(
+    "historic_path", default="/home/ubuntu/Weather/History/RRFS_SubH"
+)
 
 
 # Define the processing and history chunk size
@@ -110,29 +114,29 @@ logger.info(base_time)
 # Check if this is newer than the current file
 if save_type == "S3":
     # Check if the file exists and load it
-    if s3.exists(forecast_path + "/" + ingest_version + "/SubH_v2.time.pickle"):
+    if s3.exists(forecast_path + "/" + ingest_version + "/RRFS_SubH.time.pickle"):
         with s3.open(
-            forecast_path + "/" + ingest_version + "/SubH_v2.time.pickle", "rb"
+            forecast_path + "/" + ingest_version + "/RRFS_SubH.time.pickle", "rb"
         ) as f:
             previous_base_time = pickle.load(f)
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            logger.info("No Update to SubH, ending")
+            logger.info("No Update to RRFS_SubH, ending")
             sys.exit()
 
 else:
-    if os.path.exists(forecast_path + "/" + ingest_version + "/SubH_v2.time.pickle"):
+    if os.path.exists(forecast_path + "/" + ingest_version + "/RRFS_SubH.time.pickle"):
         # Open the file in binary mode
         with open(
-            forecast_path + "/" + ingest_version + "/SubH_v2.time.pickle", "rb"
+            forecast_path + "/" + ingest_version + "/RRFS_SubH.time.pickle", "rb"
         ) as file:
             # Deserialize and retrieve the variable from the file
             previous_base_time = pickle.load(file)
 
         # Compare timestamps and download if the S3 object is more recent
         if previous_base_time >= base_time:
-            logger.info("No Update to SubH, ending")
+            logger.info("No Update to RRFS_SubH, ending")
             sys.exit()
 
 
@@ -225,7 +229,9 @@ cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 grib_check = run_command(cmd)
 
-validate_grib_stats(grib_check)
+if grib_check.returncode != 0 or not validate_grib_stats(grib_check):
+    logger.error("GRIB validation failed: %s", grib_check.stderr)
+    sys.exit(10)
 logger.info("Grib files passed validation, proceeding with processing")
 
 
@@ -395,10 +401,10 @@ daskVarArrayStackDisk_main = pad_to_chunk_size(daskVarArrayStackDisk, final_chun
 # Create a zarr backed dask array
 if save_type == "S3":
     zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/SubH.zarr.zip", mode="a", compression=0
+        forecast_process_dir + "/RRFS_SubH.zarr.zip", mode="a", compression=0
     )
 else:
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/SubH.zarr")
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/RRFS_SubH.zarr")
 
 
 zarr_array = zarr.create_array(
@@ -429,34 +435,34 @@ if save_type == "S3":
 if save_type == "S3":
     # Upload to S3
     s3.put_file(
-        forecast_process_dir + "/SubH.zarr.zip",
-        forecast_path + "/" + ingest_version + "/SubH.zarr.zip",
+        forecast_process_dir + "/RRFS_SubH.zarr.zip",
+        forecast_path + "/" + ingest_version + "/RRFS_SubH.zarr.zip",
     )
 
     # Write most recent forecast time
-    with open(forecast_process_dir + "/SubH.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/RRFS_SubH.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     s3.put_file(
-        forecast_process_dir + "/SubH.time.pickle",
-        forecast_path + "/" + ingest_version + "/SubH.time.pickle",
+        forecast_process_dir + "/RRFS_SubH.time.pickle",
+        forecast_path + "/" + ingest_version + "/RRFS_SubH.time.pickle",
     )
 else:
     # Write most recent forecast time
-    with open(forecast_process_dir + "/SubH.time.pickle", "wb") as file:
+    with open(forecast_process_dir + "/RRFS_SubH.time.pickle", "wb") as file:
         # Serialize and write the variable to the file
         pickle.dump(base_time, file)
 
     shutil.move(
-        forecast_process_dir + "/SubH.time.pickle",
-        forecast_path + "/" + ingest_version + "/SubH.time.pickle",
+        forecast_process_dir + "/RRFS_SubH.time.pickle",
+        forecast_path + "/" + ingest_version + "/RRFS_SubH.time.pickle",
     )
 
     # Copy the zarr file to the final location
     shutil.copytree(
-        forecast_process_dir + "/SubH.zarr",
-        forecast_path + "/" + ingest_version + "/SubH.zarr",
+        forecast_process_dir + "/RRFS_SubH.zarr",
+        forecast_path + "/" + ingest_version + "/RRFS_SubH.zarr",
         dirs_exist_ok=True,
     )
 

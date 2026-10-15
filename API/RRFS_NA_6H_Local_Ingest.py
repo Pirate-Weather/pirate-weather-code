@@ -106,7 +106,7 @@ latest_run = Herbie_latest(
     model="rrfs",
     n=3,
     freq="6h",
-    fxx=[48],
+    fxx=[FORECAST_LEAD_RANGES["RRFS_NA_6H"][-1]],
     product="2dfld",
     domain="na",
     verbose=False,
@@ -182,7 +182,7 @@ matchstring_8m = (
     ":(MASSDEN:8 m above ground:*hour fcst:aerosol=Particulate organic matter dry:)"
 )
 matchstring_su = (
-    ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|VIS|GUST|DSWRF|CAPE):surface:.*hour fcst)"
+    ":((CRAIN|CICEP|CSNOW|CFRZR|PRATE|VIS|GUST|DSWRF|CAPE|CIN):surface:.*hour fcst)"
 )
 matchstring_10m = "(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
 matchstring_cl = "(:TCDC:entire atmosphere:.*hour fcst)"
@@ -254,7 +254,9 @@ cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 grib_check = run_command(cmd)
 
-validate_grib_stats(grib_check)
+if grib_check.returncode != 0 or not validate_grib_stats(grib_check):
+    logger.error("GRIB validation failed: %s", grib_check.stderr)
+    sys.exit(10)
 logger.info("Grib files passed validation, proceeding with processing")
 
 # Create a string to pass to wgrib2 to merge all gribs into one netcdf

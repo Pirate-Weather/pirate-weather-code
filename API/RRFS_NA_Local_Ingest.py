@@ -256,7 +256,9 @@ cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
 
 grib_check = run_command(cmd)
 
-validate_grib_stats(grib_check)
+if grib_check.returncode != 0 or not validate_grib_stats(grib_check):
+    logger.error("GRIB validation failed: %s", grib_check.stderr)
+    sys.exit(10)
 logger.info("Grib files passed validation, proceeding with processing")
 
 
@@ -454,7 +456,9 @@ for i in range(his_period, -1, -1):
 
     grib_check = run_command(cmd)
 
-    validate_grib_stats(grib_check)
+    if grib_check.returncode != 0 or not validate_grib_stats(grib_check):
+        logger.error("GRIB validation failed: %s", grib_check.stderr)
+        sys.exit(10)
     logger.info("Grib files passed validation, proceeding with processing")
 
     # Use wgrib2 to rotate the wind vectors
