@@ -6,7 +6,6 @@ from operator import itemgetter
 import numpy as np
 
 from API.constants.api_const import PRECIP_TYPES
-from API.constants.text_const import CAPE_THRESHOLDS
 from API.PirateTextHelper import calculate_precip_text
 
 # Number of minutes in an hour
