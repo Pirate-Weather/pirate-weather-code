@@ -6,7 +6,6 @@ from operator import itemgetter
 import numpy as np
 
 from API.constants.api_const import PRECIP_TYPES
-from API.constants.text_const import CAPE_THRESHOLDS
 from API.PirateTextHelper import calculate_precip_text
 
 # Number of minutes in an hour
@@ -90,7 +89,7 @@ def calcaulate_consecutive_indexes(prepIndex):
     return consecutiveIndex
 
 
-def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0):
+def calculate_minutely_text(minuteArr, currentText, currentIcon, icon):
     """
     Calculates the minutely summary given an array of minutes.
     All inputs are expected in SI units (mm/h for precipitation intensity).
@@ -100,7 +99,6 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
     - currentText (str/arr): The current conditions in translations format
     - currentIcon (str): The icon representing the current conditions
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
-    - maxCAPE (float): The maximum CAPE value for the next hour (default: 0)
 
     Returns:
     - c_text (arr): The precipitation summary for the hour.
@@ -427,27 +425,5 @@ def calculate_minutely_text(minuteArr, currentText, currentIcon, icon, maxCAPE=0
     # If we have no icon fallback to the current icon
     if c_icon is None:
         c_icon = currentIcon
-
-    # Check for thunderstorms: if CAPE > 2500 and there's precipitation, replace summary with thunderstorm
-    if maxCAPE >= CAPE_THRESHOLDS["high"] and precipIndex:
-        # Replace precipitation summary with thunderstorm summary
-        # Keep the same timing structure but replace the precipitation type with "thunderstorm"
-        if (
-            c_text
-            and isinstance(c_text, list)
-            and len(c_text) >= 2
-            and c_text[0]
-            in (
-                "stopping-in",
-                "for-hour",
-                "stopping-then-starting-later",
-                "starting-in",
-                "starting-then-stopping-later",
-            )
-        ):
-            # Extract the timing part and replace precipitation text with thunderstorm
-            # Replace the precipitation text (second element) with "thunderstorm"
-            c_text[1] = "thunderstorm"
-        c_icon = "thunderstorm"
 
     return c_text, c_icon

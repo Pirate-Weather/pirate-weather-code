@@ -29,9 +29,8 @@ def build_minutely_summary(
     """Compute minutely summary/icon text."""
     if summary_text:
         try:
-            max_cape = max(inter_p_current, inter_p_hour)
             minute_text, minute_icon = calculate_minutely_text(
-                minute_items_si, current_text, current_icon, icon, max_cape
+                minute_items_si, current_text, current_icon, icon
             )
             minute_translate = translation.translate(["sentence", minute_text])
         except Exception:
