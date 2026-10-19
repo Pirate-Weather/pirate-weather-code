@@ -3,11 +3,11 @@ astral==3.2
 crc32c==2.9.post0
 dask==2026.8.0
 diskcache==5.6.3
-fastapi[standard]==0.143.0
+fastapi[standard]==0.143.3
 fastapi-utils==0.8.0
 fastmcp==4.1.0
 fastparquet==2026.9.0
-gcsfs==2026.10.0
+gcsfs==2026.10.1
 metpy==1.7.1
 orjson==3.13.0
 pandas==3.0.6
