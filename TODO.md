@@ -86,6 +86,23 @@ xarray's `max_gap` semantics (leave long gaps alone). Used by the DWD ingest wit
 `max_gap_hours=3`; `fill_station_gaps` runs first and already blanks whole series
 with long gaps, so the impact is limited to gaps it doesn't catch.
 
+## Improvements
+
+### Improve the Canada vs US model selection
+Canadian-first source priority (HRDPS → REPS → GDPS → GEPS ahead of NBM/HRRR) is
+chosen by `is_in_canada` (`API/utils/geo.py`), a bounding box (lat 41.7-83,
+lon -141 to -52) rather than the border. Large parts of the northern US fall inside
+it and get Canadian-first priority instead of NBM/HRRR, e.g. Seattle, Chicago,
+Detroit, Boston and Minneapolis. Every US priority test uses New York (40.7°N),
+just south of the box, so this is untested. Options:
+- a real border check, such as a precomputed country mask on the model grid;
+- choosing by which model domain covers the point best.
+
+Keep it cheap on the read path: no per-request polygon tests against large
+geometries. Update `docs/forecast-source-selection/README.md` and
+`tests/api/test_regional_source_priority.py` with points on both sides of the border.
+Related: the `is_in_north_america` boundary issue above.
+
 ## Docs
 
 ### Source-selection docs predate #734 and the AI ordering

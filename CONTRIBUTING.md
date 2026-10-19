@@ -24,7 +24,7 @@ While pull requests are welcome, we ask that you keep your pull request focused 
 
 ## Running tests
 
-Put forecast response tests in `tests/api/` and model download or processing tests in `tests/ingest/`. Both must run offline and deterministically; CI discovers all tests in each directory, so new tests do not need individual workflow entries. See section 27 of `AGENTS.md` for what makes a test worth adding.
+[`tests/README_TESTS.md`](tests/README_TESTS.md) describes what each test file covers. Put forecast response tests in `tests/api/` and model download or processing tests in `tests/ingest/`. Both must run offline and deterministically; CI discovers all tests in each directory, so new tests do not need individual workflow entries. See section 27 of `AGENTS.md` for what makes a test worth adding.
 
 Run each suite in a separate Python 3.14 environment with its corresponding dependencies:
 
