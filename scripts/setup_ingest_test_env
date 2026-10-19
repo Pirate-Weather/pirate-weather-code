@@ -10,6 +10,7 @@ WGRIB2_PREFIX="${PW_INGEST_WGRIB2_PREFIX:-${BUILD_ROOT}/wgrib2_build}"
 PGEOCODE_DATA_DIR="${PW_INGEST_PGEOCODE_DATA_DIR:-${BUILD_ROOT}/pgeocode_data}"
 VENV_DIR="${PW_INGEST_VENV:-${1:-${ROOT_DIR}/.venvs/ingest-test}}"
 FORCE_REBUILD="${PW_INGEST_FORCE:-0}"
+SKIP_SYSTEM_PACKAGES="${PW_INGEST_SKIP_SYSTEM_PACKAGES:-0}"
 PYTHON_BIN="${PW_INGEST_PYTHON_BIN:-python3.14}"
 
 LIBAEC_REPO="https://github.com/Deutsches-Klimarechenzentrum/libaec.git"
@@ -37,6 +38,65 @@ require_command() {
         printf 'Missing required command: %s\n' "$1" >&2
         exit 1
     fi
+}
+
+install_system_packages() {
+    local python_pkg
+    local pkg
+    local -a packages
+    local -a missing=()
+    local -a sudo_cmd=()
+
+    if [[ "${SKIP_SYSTEM_PACKAGES}" == "1" ]]; then
+        log "Skipping system package installation"
+        return
+    fi
+
+    if ! command -v apt-get >/dev/null 2>&1 || ! command -v dpkg-query >/dev/null 2>&1; then
+        log "apt-get not found; install the build toolchain, BLAS/LAPACK, NetCDF, OpenJPEG, libpng, and zlib development packages manually"
+        return
+    fi
+
+    # Debian/Ubuntu ship venv/ensurepip and the C headers as separate per-version packages.
+    python_pkg="$(basename "${PYTHON_BIN}")"
+    packages=(
+        build-essential
+        cmake
+        gfortran
+        git
+        tar
+        wget
+        "${python_pkg}"
+        "${python_pkg}-dev"
+        "${python_pkg}-venv"
+        # NCEPLIBS-ip requires LAPACK/BLAS; wgrib2 and NCEPLIBS-g2c link against these.
+        libblas-dev
+        liblapack-dev
+        libnetcdf-dev
+        libopenjp2-7-dev
+        libpng-dev
+        zlib1g-dev
+    )
+
+    for pkg in "${packages[@]}"; do
+        if ! dpkg-query -W -f='${Status}' "${pkg}" 2>/dev/null | grep -q "install ok installed"; then
+            missing+=("${pkg}")
+        fi
+    done
+
+    if [[ "${#missing[@]}" -eq 0 ]]; then
+        log "System packages already installed"
+        return
+    fi
+
+    if [[ "${EUID}" -ne 0 ]]; then
+        require_command sudo
+        sudo_cmd=(sudo)
+    fi
+
+    log "Installing system packages: ${missing[*]}"
+    "${sudo_cmd[@]}" apt-get update
+    "${sudo_cmd[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
 }
 
 require_python_314() {
@@ -319,6 +379,7 @@ run_final_checks() {
 }
 
 main() {
+    install_system_packages
     require_command cmake
     require_command ctest
     require_command git

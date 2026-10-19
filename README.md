@@ -213,7 +213,7 @@ In either case, the dockerfiles to build the underlying images are [available](h
 This setup disables all the file updating processes within the response script and reads the data directly from the Zarr zip stores, focusing on the response. 
 
 #### VirtualEnv
-The other alternative is to setup a Python environment following the same process the dockerfile does. There's now a [handy script for this](https://github.com/Pirate-Weather/pirate-weather-code/blob/dev/scripts/setup_ingest_test_env) in the repository, which runs assuming that `python3.14`, `python3.14-dev`, and `build-essentials` are installed on the system. It's been tested on Ubuntu, but should work on other distributions. 
+The other alternative is to setup a Python environment following the same process the dockerfile does. There's now a [handy script for this](https://github.com/Pirate-Weather/pirate-weather-code/blob/dev/scripts/setup_ingest_test_env) in the repository. On Debian/Ubuntu it installs any missing system packages via `apt-get` (using `sudo` when not run as root), including `python3.14-dev`, `python3.14-venv`, `build-essential`, `cmake`, `gfortran`, BLAS/LAPACK, NetCDF, and OpenJPEG; set `PW_INGEST_SKIP_SYSTEM_PACKAGES=1` to skip this step and manage them yourself. It's been tested on Ubuntu, but should work on other distributions. 
 
 **Notes:**
 - The `force_now` environmental variable tells the script to pretend that it is currently this time in order to avoid switching to historic mode;
