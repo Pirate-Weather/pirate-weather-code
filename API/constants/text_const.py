@@ -60,10 +60,40 @@ DEFAULT_POP = 1
 DEFAULT_HUMIDITY = 0.5
 PRECIP_PROB_THRESHOLD = 0.25
 
-# CAPE thresholds
+# CAPE thresholds (J/kg)
 CAPE_THRESHOLDS = {
-    "low": 1250,
+    "low": 500,
     "high": 2500,
+}
+
+# Lifted Index thresholds (K) — more negative = more unstable
+LI_THRESHOLDS = {
+    "low": 0,  # Marginally unstable; isolated thunderstorms possible
+    "high": -6,  # Very unstable; thunderstorms likely
+}
+
+# Convective Inhibition thresholds (J/kg, negative by convention)
+CIN_THRESHOLDS = {
+    "low": -50,  # Moderate cap; reduces but does not prevent convection
+    "high": -200,  # Strong cap; suppresses convection
+}
+
+# Vertical velocity (omega) thresholds (Pa/s) — negative = upward motion
+VV_THRESHOLDS = {
+    "strong_upward": 0.5,  # Forced ascent that can confirm a marginal storm signal
+}
+
+# K Index thresholds
+KI_THRESHOLDS = {
+    "low": 20,  # Isolated thunderstorms possible
+    "high": 35,  # Numerous thunderstorms likely
+}
+
+# Temperature–dewpoint spread (°C) above which the atmosphere is
+# considered too dry for thunderstorms.
+DEWPOINT_DEPRESSION_FOR_STORM = {
+    "low": 12,
+    "high": 20,
 }
 
 # Lifted Index threshold

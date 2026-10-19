@@ -19,20 +19,22 @@ import xarray as xr
 import zarr
 import zarr.storage
 from dask.diagnostics import ProgressBar
-from herbie import FastHerbie, HerbieLatest, Path
+from herbie import HerbieLatest
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
 from API.herbie_custom_templates import register_aws_aigfs_aigefs_templates
+from API.ingest_grib_utils import download_and_validate_gfs_subset, run_checked
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
     archive_tmp_zarr_and_upload,
+    configure_herbie_request_timeouts,
     download_extract_historic_archive,
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
-    validate_grib_stats,
+    positive_int_env,
     validate_stacked_time_alignment,
 )
 
@@ -41,6 +43,38 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 # Logging setup
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+# The AWS EAGLE ensemble is experimental; operational AIGEFS is on NOMADS.
+AIGEFS_SOURCE_PRIORITY = ["nomads"]
+AIGEFS_MAX_THREADS = positive_int_env("aigefs_download_threads", 4)
+AIGEFS_DOWNLOAD_RETRIES = positive_int_env("herbie_download_retries", 5)
+AIGEFS_RETRY_SLEEP_SECONDS = positive_int_env("herbie_retry_sleep_seconds", 20)
+
+
+def download_aigefs_member(
+    run_date: pd.Timestamp,
+    forecast_hours: list[int],
+    member: int,
+    dataset_name: str,
+) -> list[str]:
+    """Download and validate a complete member with bounded retries and threads."""
+    return download_and_validate_gfs_subset(
+        model="aigefs",
+        product="sfc",
+        search=None,
+        dataset_name=dataset_name,
+        base_time=run_date,
+        forecast_hours=forecast_hours,
+        priority=AIGEFS_SOURCE_PRIORITY,
+        herbie_save_dir=tmp_dir,
+        herbie_download_retries=AIGEFS_DOWNLOAD_RETRIES,
+        herbie_retry_sleep_seconds=AIGEFS_RETRY_SLEEP_SECONDS,
+        herbie_kwargs={"member": f"mem{member:03d}", "max_threads": AIGEFS_MAX_THREADS},
+        download_max_threads=AIGEFS_MAX_THREADS,
+        download_verbose=False,
+        wgrib2_exe=wgrib2_path.strip(),
+    )
+
 
 # %% Setup paths and parameters
 ingest_version = INGEST_VERSION_STR
@@ -99,6 +133,9 @@ if save_type == "Download":
 T0 = time.time()
 
 register_aws_aigfs_aigefs_templates()
+configure_herbie_request_timeouts(
+    nomads_request_interval_s=positive_int_env("nomads_request_interval_seconds", 5)
+)
 
 latest_run = HerbieLatest(
     model="aigefs",
@@ -108,7 +145,7 @@ latest_run = HerbieLatest(
     product="sfc",
     verbose=False,
     member="mem000",
-    priority=["aws", "nomads"],
+    priority=AIGEFS_SOURCE_PRIORITY,
     save_dir=tmp_dir,
 )
 
@@ -167,58 +204,10 @@ match_strings = ":APCP:surface:"
 aigefs_range = FORECAST_LEAD_RANGES["AIGEFS"]
 
 
-# Create FastHerbie object for all 30 members
-mem = 1
-failCount = 0
-while mem <= AIGEFS_MEMBER_COUNT:
-    FH_IN = FastHerbie(
-        pd.date_range(start=base_time, periods=1, freq="6h"),
-        model="aigefs",
-        fxx=aigefs_range,
-        member="mem" + str(mem).zfill(3),
-        product="sfc",
-        verbose=False,
-        priority=["aws", "nomads"],
-        save_dir=tmp_dir,
+for mem in range(1, AIGEFS_MEMBER_COUNT + 1):
+    grib_list = download_aigefs_member(
+        base_time, list(aigefs_range), mem, f"AIGEFS member {mem} forecast"
     )
-
-    # Check for download length
-    if len(FH_IN.file_exists) != 40:
-        logger.error("Member %d has not downloaded all files, trying again", mem)
-        failCount += 1
-
-        # Break after 10 failed attempts
-        if failCount > 20:
-            break
-
-        continue
-
-    # Download and process the subsets
-    FH_IN.download(verbose=False, overwrite=True)
-
-    # Create list of downloaded grib files
-    grib_list = [str(Path(x.get_localFilePath()).expand()) for x in FH_IN.file_exists]
-
-    # Perform a check if any data seems to be invalid
-    cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
-
-    grib_check = subprocess.run(
-        cmd, shell=True, capture_output=True, encoding="utf-8", check=False
-    )
-
-    val_check = validate_grib_stats(grib_check)
-
-    if not val_check:
-        logger.error("Member %d failed validation, trying again", mem)
-        failCount += 1
-
-        # Break after 10 failed attempts
-        if failCount > 20:
-            break
-
-        continue
-    else:
-        logger.info("Grib files passed validation, proceeding with processing")
 
     # Create a string to pass to wgrib2 to merge all gribs into one grib
     cmd = (
@@ -235,13 +224,7 @@ while mem <= AIGEFS_MEMBER_COUNT:
         + ".nc"
     )
 
-    # Run wgrib2 to megre all the grib files
-    sp_out = subprocess.run(
-        cmd, shell=True, capture_output=True, encoding="utf-8", check=False
-    )
-    if sp_out.returncode != 0:
-        logger.error(sp_out.stderr)
-        sys.exit()
+    run_checked(cmd, f"AIGEFS member {mem} forecast GRIB conversion")
 
     # Fix precip and chunk each member
     xarray_wgrib = xr.open_dataset(
@@ -259,21 +242,18 @@ while mem <= AIGEFS_MEMBER_COUNT:
     # Keep only APCP_surface, dropping all other variables to save space and speed up processing
     # xarray_wgrib = xarray_wgrib[["time", "APCP_surface"]]
 
-    # Check that there are 40 timesteps in the array
-    if xarray_wgrib.dims["time"] != 40:
-        logger.warning("Member %d does not have 40 timesteps, trying again", mem)
-        # Print the number of timesteps for debugging
-        logger.warning("Member %d has %d timesteps", mem, xarray_wgrib.dims["time"])
-        failCount += 1
-
-        # Break after 10 failed attempts
-        if failCount > 10:
-            break
-
-        continue
+    if xarray_wgrib.sizes["time"] != len(aigefs_range):
+        raise RuntimeError(
+            f"AIGEFS member {mem} has {xarray_wgrib.sizes['time']} forecast timesteps; "
+            f"expected {len(aigefs_range)}"
+        )
 
     xarray_wgrib = xarray_wgrib.chunk(
-        chunks={"time": 40, "latitude": process_chunk, "longitude": process_chunk}
+        chunks={
+            "time": len(aigefs_range),
+            "latitude": process_chunk,
+            "longitude": process_chunk,
+        }
     )
 
     xarray_wgrib.to_zarr(
@@ -290,8 +270,6 @@ while mem <= AIGEFS_MEMBER_COUNT:
         encoding="utf-8",
         check=False,
     )
-
-    mem += 1
 
 
 # Create a new time series
@@ -368,7 +346,9 @@ for dask_var in probVars:
             compute=True,
         )
     else:
-        daskOutput[dask_var].rechunk((40, process_chunk, process_chunk)).to_zarr(
+        daskOutput[dask_var].rechunk(
+            (len(aigefs_range), process_chunk, process_chunk)
+        ).to_zarr(
             forecast_process_path + "_" + dask_var + ".zarr",
             compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
             dtype="float32",
@@ -444,60 +424,10 @@ for i in range(his_period, -1, -6):
         freq="6h",
     )
 
-    ### Find all the model runs
-    FH_forecastsubMembers = []
     for mem in range(1, AIGEFS_MEMBER_COUNT + 1):
-        FH_forecastsubMembers.append(
-            FastHerbie(
-                DATES,
-                model="aigefs",
-                fxx=[6],
-                member="mem" + str(mem).zfill(3),
-                product="sfc",
-                verbose=False,
-                priority=["aws", "nomads"],
-                save_dir=tmp_dir,
-            )
+        grib_list = download_aigefs_member(
+            DATES[0], [6], mem, f"AIGEFS member {mem} history {DATES[0]}"
         )
-
-    ### Download the members and merge
-    mem = 1
-    failCount = 0
-    while mem <= AIGEFS_MEMBER_COUNT:
-        # Download the subsets
-        FH_forecastsubMembers[mem - 1].download(verbose=False)
-        # Create list of downloaded grib files
-        grib_list = [
-            str(Path(x.get_localFilePath()).expand())
-            for x in FH_forecastsubMembers[mem - 1].file_exists
-        ]
-
-        # Perform a check if any data seems to be invalid
-        cmd = (
-            "cat "
-            + " ".join(grib_list)
-            + " | "
-            + f"{wgrib2_path}"
-            + " - "
-            + " -s -stats"
-        )
-
-        grib_check = subprocess.run(
-            cmd, shell=True, capture_output=True, encoding="utf-8", check=False
-        )
-
-        val_check = validate_grib_stats(grib_check)
-        if not val_check:
-            logger.warning("Member %d has not downloaded all files, trying again", mem)
-            failCount += 1
-
-            # Break after 10 failed attempts
-            if failCount > 10:
-                break
-
-            continue
-        else:
-            logger.info("Grib files passed validation, proceeding with processing")
 
         # Create a string to pass to wgrib2 to merge all gribs into one grib
         cmd = (
@@ -516,24 +446,18 @@ for i in range(his_period, -1, -6):
             + ".nc"
         )
 
-        # Run wgrib2 to merge all the grib files
-        sp_out = subprocess.run(
-            cmd, shell=True, capture_output=True, encoding="utf-8", check=False
-        )
-        if sp_out.returncode != 0:
-            logger.error(sp_out.stderr)
-            failCount += 1
-
-            # Break after 10 failed attempts
-            if failCount > 10:
-                break
-
-            continue
+        run_checked(cmd, f"AIGEFS member {mem} historic GRIB conversion")
 
         # Open the NetCDF file with xarray to process and compress
         xarray_hist_wgrib = xr.open_dataset(
             hist_process_path + "_wgrib2_merged_" + str(i) + "_m" + str(mem) + ".nc"
         )
+
+        if xarray_hist_wgrib.sizes["time"] != 1:
+            raise RuntimeError(
+                f"AIGEFS member {mem} history has {xarray_hist_wgrib.sizes['time']} "
+                "timesteps; expected 1"
+            )
 
         # Sometimes there will be weird negative values, set them to zero
         xarray_hist_wgrib["APCP_surface"] = np.maximum(
@@ -546,11 +470,11 @@ for i in range(his_period, -1, -6):
         # Get a list of all variables in the dataset
         wgribVars = list(xarray_hist_wgrib.data_vars)
 
-        xarray_wgrib = xarray_hist_wgrib.chunk(
+        xarray_hist_wgrib = xarray_hist_wgrib.chunk(
             chunks={"time": 1, "latitude": process_chunk, "longitude": process_chunk}
         )
 
-        xarray_wgrib.to_zarr(
+        xarray_hist_wgrib.to_zarr(
             hist_process_path + "_xr_merged_" + str(i) + "_m" + str(mem) + ".zarr",
             consolidated=False,
             mode="w",
@@ -563,8 +487,6 @@ for i in range(his_period, -1, -6):
         #     capture_output=True,
         #     encoding="utf-8",
         # )
-
-        mem += 1
 
     ### Merge all the members together and calculate probabilities and standard deviation
     # Read the merged netcdf files into xarray using the preprocess function, concatenating along the member dimension

@@ -1074,6 +1074,33 @@ def prepare_data_inputs(
         else None,
     )
 
+    # --- lifted_index_inputs ---
+    lifted_index_inputs = _stack_fields(
+        num_hours,
+        hrdps_merged[:, HRDPS["lifted_index"]] if hrdps_merged is not None else None,
+    )
+
+    # --- vertical_velocity_inputs ---
+    vertical_velocity_inputs = _stack_fields(
+        num_hours,
+        hrdps_merged[:, HRDPS["vertical_velocity"]]
+        if hrdps_merged is not None
+        else None,
+        gdps_merged[:, GDPS["vertical_velocity"]] if gdps_merged is not None else None,
+    )
+
+    # --- convective_inhibition_inputs ---
+    convective_inhibition_inputs = _stack_fields(
+        num_hours,
+        gdps_merged[:, GDPS["cin"]] if gdps_merged is not None else None,
+    )
+
+    # --- k_index_inputs ---
+    k_index_inputs = _stack_fields(
+        num_hours,
+        gdps_merged[:, GDPS["k_index"]] if gdps_merged is not None else None,
+    )
+
     # --- error_inputs ---
     error_inputs = _stack_fields(
         num_hours,
@@ -1112,6 +1139,10 @@ def prepare_data_inputs(
         "solar_inputs": solar_inputs,
         "cape_inputs": cape_inputs,
         "error_inputs": error_inputs,
+        "lifted_index_inputs": lifted_index_inputs,
+        "vertical_velocity_inputs": vertical_velocity_inputs,
+        "convective_inhibition_inputs": convective_inhibition_inputs,
+        "k_index_inputs": k_index_inputs,
     }
 
 
