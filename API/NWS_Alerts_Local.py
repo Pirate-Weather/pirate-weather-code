@@ -48,238 +48,243 @@ historic_path = os.getenv(
 saveType = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
-zarr_store_workers = positive_int_env("zarr_store_workers", 2)
-zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
-
-s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-tune_nofile_limit()
-zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
-    zarr_store_workers, zarr_async_concurrency
-)
 
 # Logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 
-# Create new directory for processing if it does not exist
-if not os.path.exists(forecast_process_dir):
-    os.makedirs(forecast_process_dir)
-else:
-    # If it does exist, remove it
-    shutil.rmtree(forecast_process_dir)
-    os.makedirs(forecast_process_dir)
+def main() -> None:
+    """Download NWS alerts and write the alerts zarr grid."""
+    zarr_store_workers = positive_int_env("zarr_store_workers", 2)
+    zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 
-if not os.path.exists(tmpDIR):
-    os.makedirs(tmpDIR)
+    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+    tune_nofile_limit()
+    zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
+        zarr_store_workers, zarr_async_concurrency
+    )
+    logging.basicConfig(level=logging.INFO)
 
-if saveType == "Download":
-    if not os.path.exists(forecast_path + "/" + ingestVersion):
-        os.makedirs(forecast_path + "/" + ingestVersion)
-    if not os.path.exists(historic_path):
-        os.makedirs(historic_path)
+    # Create new directory for processing if it does not exist
+    if not os.path.exists(forecast_process_dir):
+        os.makedirs(forecast_process_dir)
+    else:
+        # If it does exist, remove it
+        shutil.rmtree(forecast_process_dir)
+        os.makedirs(forecast_process_dir)
 
-# %% Download watch warning kml
-warningURL = (
-    "https://tgftp.nws.noaa.gov/SL.us008001/DF.sha/DC.cap/DS.WWA/current_all.tar.gz"
-)
+    if not os.path.exists(tmpDIR):
+        os.makedirs(tmpDIR)
 
-r = requests.get(warningURL, allow_redirects=True)
+    if saveType == "Download":
+        if not os.path.exists(forecast_path + "/" + ingestVersion):
+            os.makedirs(forecast_path + "/" + ingestVersion)
+        if not os.path.exists(historic_path):
+            os.makedirs(historic_path)
 
-# Save to file in tmpDIR
-savePath = os.path.join(forecast_process_dir, "current_all.tar.gz")
-with open(savePath, "wb") as f:
-    f.write(r.content)
+    # %% Download watch warning kml
+    warningURL = (
+        "https://tgftp.nws.noaa.gov/SL.us008001/DF.sha/DC.cap/DS.WWA/current_all.tar.gz"
+    )
 
-with tarfile.open(savePath, "r:gz") as tar:
-    # Python 3.14 changes default extract behavior; be explicit and keep compatibility.
-    try:
-        tar.extractall(path=forecast_process_dir, filter="data")
-    except TypeError:
-        tar.extractall(path=forecast_process_dir)
+    r = requests.get(warningURL, allow_redirects=True)
 
-# %% Read in KMZ using geopandas
-nws_alert_gdf = gp.read_file(os.path.join(forecast_process_dir, "current_all.shp"))
+    # Save to file in tmpDIR
+    savePath = os.path.join(forecast_process_dir, "current_all.tar.gz")
+    with open(savePath, "wb") as f:
+        f.write(r.content)
 
-# %% Setup NWS ID
-nws = nwswx.WxAPI("api@alexanderrey.ca")
-
-# Active alerts
-alertsIN = nws.active_alerts(return_format=nwswx.formats.JSONLD)
-
-nws_alerts = alertsIN["@graph"]
-
-# If more than one page of alerts, loop through an append
-while "pagination" in alertsIN:
-    # Get the next page of alerts
-    result = requests.get(alertsIN["pagination"]["next"])
-
-    # Convert to JSON
-    alertsIN = result.json()
-    nws_alerts.extend(alertsIN["features"])
-
-    logger.info("AWS Alerts: %d", len(nws_alerts))
-nws_alert_df = pd.DataFrame.from_records(nws_alerts)
-
-nws_alert_df["CAP_ID"] = nws_alert_df["id"]
-
-# Merge where available
-nws_alert_merged = nws_alert_gdf.merge(
-    nws_alert_df.drop_duplicates(subset="CAP_ID"), how="left", on="CAP_ID"
-)
-
-ns = {"ns": "urn:oasis:names:tc:emergency:cap:1.2"}
-
-# print(list(nws_alert_merged.columns.values))
-
-# Call the NWS API for any missing alerts
-for row in range(len(nws_alert_merged)):
-    if pd.isna(nws_alert_merged.loc[row, "headline"]):
+    with tarfile.open(savePath, "r:gz") as tar:
+        # Python 3.14 changes default extract behavior; be explicit and keep compatibility.
         try:
-            response = requests.get(
-                "https://api.weather.gov/alerts/"
-                + nws_alert_merged.loc[row, "CAP_ID"]
-                + ".cap"
-            )
-            root = ET.fromstring(response.content)
+            tar.extractall(path=forecast_process_dir, filter="data")
+        except TypeError:
+            tar.extractall(path=forecast_process_dir)
 
-            nws_alert_merged.loc[row, "headline"] = root.find(
-                ".//ns:info/ns:headline", namespaces=ns
-            ).text
-            nws_alert_merged.loc[row, "event"] = root.find(
-                ".//ns:info/ns:event", namespaces=ns
-            ).text
-            nws_alert_merged.loc[row, "description"] = root.find(
-                ".//ns:info/ns:description", namespaces=ns
-            ).text
-            nws_alert_merged.loc[row, "areaDesc"] = root.find(
-                ".//ns:area/ns:areaDesc", namespaces=ns
-            ).text
-            nws_alert_merged.loc[row, "severity"] = root.find(
-                ".//ns:info/ns:severity", namespaces=ns
-            ).text
+    # %% Read in KMZ using geopandas
+    nws_alert_gdf = gp.read_file(os.path.join(forecast_process_dir, "current_all.shp"))
 
-        except (requests.RequestException, ET.ParseError, AttributeError):
-            nws_alert_merged.loc[row, "headline"] = nws_alert_merged.loc[
-                row, "PROD_TYPE"
-            ]
-            nws_alert_merged.loc[row, "event"] = nws_alert_merged.loc[row, "PROD_TYPE"]
-            nws_alert_merged.loc[row, "description"] = nws_alert_merged.loc[
-                row, "PROD_TYPE"
-            ]
-            nws_alert_merged.loc[row, "areaDesc"] = nws_alert_merged.loc[row, "WFO"]
-            nws_alert_merged.loc[row, "severity"] = nws_alert_merged.loc[row, "SIG"]
+    # %% Setup NWS ID
+    nws = nwswx.WxAPI("api@alexanderrey.ca")
 
+    # Active alerts
+    alertsIN = nws.active_alerts(return_format=nwswx.formats.JSONLD)
 
-# Convert to geodataframe
-nws_alert_merged_gdf = gp.GeoDataFrame(nws_alert_merged, geometry="geometry_x")
+    nws_alerts = alertsIN["@graph"]
 
-# %% Create grid of points
-xs = np.arange(-127, -65, 0.025)
-ys = np.arange(24, 50, 0.025)
+    # If more than one page of alerts, loop through an append
+    while "pagination" in alertsIN:
+        # Get the next page of alerts
+        result = requests.get(alertsIN["pagination"]["next"])
 
-lons, lats = np.meshgrid(xs, ys)
+        # Convert to JSON
+        alertsIN = result.json()
+        nws_alerts.extend(alertsIN["features"])
 
-# Create GeoSeries of Points
-gridPointsSeries = gp.GeoDataFrame(
-    geometry=gp.points_from_xy(lons.flatten(), lats.flatten()), crs="EPSG:4326"
-)
-gridPointsSeries["INDEX"] = gridPointsSeries.index
-points_in_polygons = gp.sjoin(
-    gridPointsSeries, nws_alert_merged_gdf, predicate="within", how="inner"
-)
+        logger.info("AWS Alerts: %d", len(nws_alerts))
+    nws_alert_df = pd.DataFrame.from_records(nws_alerts)
 
-# Create a formatted string to save all relevant fields in the zarr array.
-points_in_polygons["string"] = (
-    points_in_polygons["event"].astype(str) + "}"
-    "{"
-    + points_in_polygons["description"].astype(str)
-    + "}"
-    + "{"
-    + points_in_polygons["areaDesc"].astype(str)
-    + "}"
-    + "{"
-    + points_in_polygons["effective"].astype(str)
-    + "}"
-    + "{"
-    + points_in_polygons["EXPIRATION"].astype(str)
-    + "}"
-    + "{"
-    + points_in_polygons["severity"].astype(str)
-    + "}"
-    + "{"
-    + points_in_polygons["URL"].astype(str)
-)
+    nws_alert_df["CAP_ID"] = nws_alert_df["id"]
 
-# Normalize possible null/non-string values before joining grouped strings.
-points_in_polygons["string"] = points_in_polygons["string"].fillna("").astype(str)
-points_in_polygons = points_in_polygons[points_in_polygons["string"] != ""]
-
-# Combine formatted strings using "|" as a separator.
-df = points_in_polygons.groupby("INDEX", as_index=False)["string"].agg(
-    lambda values: "|".join(v for v in values if v)
-)
-
-
-# Merge back into primary geodataframe
-gridPointsSeries = gridPointsSeries.merge(df, on="INDEX", how="left")
-
-# Set empty data as blank
-gridPointsSeries["string"] = gridPointsSeries["string"].fillna("")
-
-# Concert to string
-gridPointsSeries["string"] = gridPointsSeries["string"].astype(str)
-
-# %% XR approach
-gridPoints_XR = gridPointsSeries["string"].to_xarray()
-
-# Reshape to 2D
-gridPoints_XR2 = gridPoints_XR.values.astype(VariableLengthUTF8).reshape(lons.shape)
-
-# Write to zarr
-# Save as zarr
-if saveType == "S3":
-    zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/NWS_Alerts.zarr.zip", mode="a", compression=0
+    # Merge where available
+    nws_alert_merged = nws_alert_gdf.merge(
+        nws_alert_df.drop_duplicates(subset="CAP_ID"), how="left", on="CAP_ID"
     )
-else:
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/NWS_Alerts.zarr")
 
+    ns = {"ns": "urn:oasis:names:tc:emergency:cap:1.2"}
 
-# Create a Zarr array in the store with zstd compression
-zarr_array = zarr.create_array(
-    store=zarr_store,
-    shape=gridPoints_XR2.shape,
-    dtype=zarr.dtype.VariableLengthUTF8(),
-    chunks=(10, 10),
-)
+    # print(list(nws_alert_merged.columns.values))
 
-# Save the data
-zarr_array[:] = gridPoints_XR2
-close_store(zarr_store)
+    # Call the NWS API for any missing alerts
+    for row in range(len(nws_alert_merged)):
+        if pd.isna(nws_alert_merged.loc[row, "headline"]):
+            try:
+                response = requests.get(
+                    "https://api.weather.gov/alerts/"
+                    + nws_alert_merged.loc[row, "CAP_ID"]
+                    + ".cap"
+                )
+                root = ET.fromstring(response.content)
 
-# Test Read
-# zip_store_read = zarr.storage.ZipStore(
-#     merge_process_dir + "/NWS_Alerts.zarr.zip", compression=0, mode="r"
-# )
-# alertsReadTest = zarr.open_array(zip_store_read)
-# print(alertsReadTest[600, 1500:])
+                nws_alert_merged.loc[row, "headline"] = root.find(
+                    ".//ns:info/ns:headline", namespaces=ns
+                ).text
+                nws_alert_merged.loc[row, "event"] = root.find(
+                    ".//ns:info/ns:event", namespaces=ns
+                ).text
+                nws_alert_merged.loc[row, "description"] = root.find(
+                    ".//ns:info/ns:description", namespaces=ns
+                ).text
+                nws_alert_merged.loc[row, "areaDesc"] = root.find(
+                    ".//ns:area/ns:areaDesc", namespaces=ns
+                ).text
+                nws_alert_merged.loc[row, "severity"] = root.find(
+                    ".//ns:info/ns:severity", namespaces=ns
+                ).text
 
+            except (requests.RequestException, ET.ParseError, AttributeError):
+                nws_alert_merged.loc[row, "headline"] = nws_alert_merged.loc[
+                    row, "PROD_TYPE"
+                ]
+                nws_alert_merged.loc[row, "event"] = nws_alert_merged.loc[
+                    row, "PROD_TYPE"
+                ]
+                nws_alert_merged.loc[row, "description"] = nws_alert_merged.loc[
+                    row, "PROD_TYPE"
+                ]
+                nws_alert_merged.loc[row, "areaDesc"] = nws_alert_merged.loc[row, "WFO"]
+                nws_alert_merged.loc[row, "severity"] = nws_alert_merged.loc[row, "SIG"]
 
-# Upload to S3
-if saveType == "S3":
+    # Convert to geodataframe
+    nws_alert_merged_gdf = gp.GeoDataFrame(nws_alert_merged, geometry="geometry_x")
+
+    # %% Create grid of points
+    xs = np.arange(-127, -65, 0.025)
+    ys = np.arange(24, 50, 0.025)
+
+    lons, lats = np.meshgrid(xs, ys)
+
+    # Create GeoSeries of Points
+    gridPointsSeries = gp.GeoDataFrame(
+        geometry=gp.points_from_xy(lons.flatten(), lats.flatten()), crs="EPSG:4326"
+    )
+    gridPointsSeries["INDEX"] = gridPointsSeries.index
+    points_in_polygons = gp.sjoin(
+        gridPointsSeries, nws_alert_merged_gdf, predicate="within", how="inner"
+    )
+
+    # Create a formatted string to save all relevant fields in the zarr array.
+    points_in_polygons["string"] = (
+        points_in_polygons["event"].astype(str) + "}"
+        "{"
+        + points_in_polygons["description"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["areaDesc"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["effective"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["EXPIRATION"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["severity"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["URL"].astype(str)
+    )
+
+    # Normalize possible null/non-string values before joining grouped strings.
+    points_in_polygons["string"] = points_in_polygons["string"].fillna("").astype(str)
+    points_in_polygons = points_in_polygons[points_in_polygons["string"] != ""]
+
+    # Combine formatted strings using "|" as a separator.
+    df = points_in_polygons.groupby("INDEX", as_index=False)["string"].agg(
+        lambda values: "|".join(v for v in values if v)
+    )
+
+    # Merge back into primary geodataframe
+    gridPointsSeries = gridPointsSeries.merge(df, on="INDEX", how="left")
+
+    # Set empty data as blank
+    gridPointsSeries["string"] = gridPointsSeries["string"].fillna("")
+
+    # Concert to string
+    gridPointsSeries["string"] = gridPointsSeries["string"].astype(str)
+
+    # %% XR approach
+    gridPoints_XR = gridPointsSeries["string"].to_xarray()
+
+    # Reshape to 2D
+    gridPoints_XR2 = gridPoints_XR.values.astype(VariableLengthUTF8).reshape(lons.shape)
+
+    # Write to zarr
+    # Save as zarr
+    if saveType == "S3":
+        zarr_store = zarr.storage.ZipStore(
+            forecast_process_dir + "/NWS_Alerts.zarr.zip", mode="a", compression=0
+        )
+    else:
+        zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/NWS_Alerts.zarr")
+
+    # Create a Zarr array in the store with zstd compression
+    zarr_array = zarr.create_array(
+        store=zarr_store,
+        shape=gridPoints_XR2.shape,
+        dtype=zarr.dtype.VariableLengthUTF8(),
+        chunks=(10, 10),
+    )
+
+    # Save the data
+    zarr_array[:] = gridPoints_XR2
+    close_store(zarr_store)
+
+    # Test Read
+    # zip_store_read = zarr.storage.ZipStore(
+    #     merge_process_dir + "/NWS_Alerts.zarr.zip", compression=0, mode="r"
+    # )
+    # alertsReadTest = zarr.open_array(zip_store_read)
+    # print(alertsReadTest[600, 1500:])
+
     # Upload to S3
-    s3.put_file(
-        forecast_process_dir + "/NWS_Alerts.zarr.zip",
-        forecast_path + "/" + ingestVersion + "/NWS_Alerts.zarr.zip",
-    )
-else:
-    # Copy the zarr file to the final location
-    shutil.copytree(
-        forecast_process_dir + "/NWS_Alerts.zarr",
-        forecast_path + "/" + ingestVersion + "/NWS_Alerts.zarr",
-        dirs_exist_ok=True,
-    )
+    if saveType == "S3":
+        # Upload to S3
+        s3.put_file(
+            forecast_process_dir + "/NWS_Alerts.zarr.zip",
+            forecast_path + "/" + ingestVersion + "/NWS_Alerts.zarr.zip",
+        )
+    else:
+        # Copy the zarr file to the final location
+        shutil.copytree(
+            forecast_process_dir + "/NWS_Alerts.zarr",
+            forecast_path + "/" + ingestVersion + "/NWS_Alerts.zarr",
+            dirs_exist_ok=True,
+        )
 
-# Clean up
-shutil.rmtree(forecast_process_dir)
+    # Clean up
+    shutil.rmtree(forecast_process_dir)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,3 +1,5 @@
+"""Historic archive download/extract guard tests."""
+
 import shutil
 import tarfile
 from pathlib import Path
@@ -5,12 +7,12 @@ from pathlib import Path
 import pytest
 import zarr
 
-pytest.importorskip("herbie")
-
 from API.ingest_utils import download_extract_historic_archive
 
 
 class FakeS3:
+    """Local-filesystem stand-in for s3fs, so archives live under tmp_path."""
+
     def exists(self, path):
         return Path(path).exists()
 
@@ -49,6 +51,9 @@ def _write_archive(historic_path, final_zarr_name, member_name, variables):
 
 
 def test_download_extract_historic_archive_validates_expected_vars(tmp_path):
+    """A complete historic archive must be extracted to local_temp_dir under
+    the final zarr name the ingest merges from (#644).
+    """
     historic_path = tmp_path / "historic"
     historic_path.mkdir()
     local_temp_dir = tmp_path / "downloads"
@@ -74,6 +79,10 @@ def test_download_extract_historic_archive_validates_expected_vars(tmp_path):
 
 
 def test_download_extract_historic_archive_deletes_s3_archive_on_missing_vars(tmp_path):
+    """An archive missing expected variables (e.g. written by an older ingest
+    version) must be rejected and its S3 archive and .done marker deleted, so
+    the next run rebuilds it instead of merging stale history forever (#644).
+    """
     historic_path = tmp_path / "historic"
     historic_path.mkdir()
     local_temp_dir = tmp_path / "downloads"
@@ -101,6 +110,9 @@ def test_download_extract_historic_archive_deletes_s3_archive_on_missing_vars(tm
 
 
 def test_download_extract_historic_archive_rejects_remote_local_temp_dir(tmp_path):
+    """local_temp_dir is extracted with tarfile/os calls, so an s3:// path would
+    silently create a local directory named "s3:" instead of failing (#742).
+    """
     historic_path = tmp_path / "historic"
     historic_path.mkdir()
 

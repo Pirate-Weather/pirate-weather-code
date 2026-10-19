@@ -40,14 +40,47 @@ class _AQWeather:
         "expected_sources",
     ),
     [
-        (NOW - datetime.timedelta(days=30), True, 0, 24, None, set()),
-        (REPORTED_TIME, True, -3, 24, None, set()),
-        (NOW - datetime.timedelta(days=3), True, -3, 96, None, {"raqdps", "silam"}),
-        (NOW - datetime.timedelta(days=1), True, 0, 24, None, {"raqdps", "silam"}),
-        (NOW, False, 0, 24, None, {"raqdps", "silam"}),
-        (NOW, False, 10, 24, None, set()),
-        (NOW, False, 0, 24, "raqdps", {"silam"}),
-        (NOW, False, 0, 24, "silam", {"raqdps"}),
+        # Time machine request far older than any stored AQ row.
+        pytest.param(
+            NOW - datetime.timedelta(days=30),
+            True,
+            0,
+            24,
+            None,
+            set(),
+            id="timemachine_before_store",
+        ),
+        # The reported request (#751/#752): a 3-day-stale run still carries rows
+        # for this time, but they are older than the 48 h history and masked.
+        pytest.param(
+            REPORTED_TIME, True, -3, 24, None, set(), id="stale_run_history_masked"
+        ),
+        # Request window straddles the 48 h history cutoff: sources are reported,
+        # rows before the cutoff are masked and later rows kept.
+        pytest.param(
+            NOW - datetime.timedelta(days=3),
+            True,
+            -3,
+            96,
+            None,
+            {"raqdps", "silam"},
+            id="window_straddles_history_cutoff",
+        ),
+        pytest.param(
+            NOW - datetime.timedelta(days=1),
+            True,
+            0,
+            24,
+            None,
+            {"raqdps", "silam"},
+            id="timemachine_within_history",
+        ),
+        pytest.param(NOW, False, 0, 24, None, {"raqdps", "silam"}, id="forecast"),
+        # Store only has rows days after the request window.
+        pytest.param(NOW, False, 10, 24, None, set(), id="store_starts_after_request"),
+        # A source whose value columns are all NaN is not reported.
+        pytest.param(NOW, False, 0, 24, "raqdps", {"silam"}, id="raqdps_values_nan"),
+        pytest.param(NOW, False, 0, 24, "silam", {"raqdps"}, id="silam_values_nan"),
     ],
 )
 def test_aq_sources_reported_only_when_request_has_coverage(
@@ -59,6 +92,9 @@ def test_aq_sources_reported_only_when_request_has_coverage(
     expected_sources,
     monkeypatch,
 ):
+    """Regression for #751/#752: RAQDPS/SILAM must only be listed in sources (and
+    passed on as data) when they hold values for the requested hours, so time
+    machine requests never report or use AQ data from a stale or unrelated run."""
     monkeypatch.setattr(
         "API.request.grid_indexing._load_era5_slice", lambda *args, **kwargs: False
     )
@@ -138,6 +174,8 @@ def test_aq_sources_reported_only_when_request_has_coverage(
 
 
 def test_mask_old_aq_values_preserves_boundary_and_input():
+    """Rows exactly at the history cutoff must survive, and masking must not
+    modify the array it was given."""
     now = NOW.replace(tzinfo=datetime.UTC)
     times = [
         (now - datetime.timedelta(hours=hours)).timestamp() for hours in (49, 48, 47)
@@ -152,6 +190,8 @@ def test_mask_old_aq_values_preserves_boundary_and_input():
 
 
 def test_aq_source_coverage_matches_float32_times_at_half_hour_offset():
+    """The coverage check must use the same < 1 h tolerance as prepare_aq_inputs
+    (#684), or half-hour-offset locations would lose AQ sources entirely."""
     request_time = datetime.datetime(2026, 9, 22, 11, 30, tzinfo=datetime.UTC)
     model_time = np.float32(
         datetime.datetime(2026, 9, 22, 12, tzinfo=datetime.UTC).timestamp()

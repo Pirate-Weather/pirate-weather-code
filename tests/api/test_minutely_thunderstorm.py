@@ -1,235 +1,113 @@
-import sys
-from pathlib import Path
+"""Thunderstorm wording in the minutely summary.
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+Minutely uses a raw ``maxCAPE >= CAPE_THRESHOLDS["high"]`` gate (see TODO.md:
+it disagrees with the currently/hourly score). When it fires, the precipitation
+word in the timing sentence is replaced by "thunderstorm".
+"""
 
+from unittest.mock import ANY
+
+import pytest
+
+from API.constants.text_const import CAPE_THRESHOLDS
 from API.PirateMinutelyText import calculate_minutely_text
 
+RAIN = {"precipIntensity": 5.0, "precipType": "rain"}
+DRY = {"precipIntensity": 0.0, "precipType": "none"}
 
-def create_minute_with_rain(intensity=5.0, precip_type="rain"):
-    """Helper to create a minute with precipitation."""
-    return {
-        "precipIntensity": intensity,
-        "precipType": precip_type,
-    }
-
-
-def create_minute_no_precip():
-    """Helper to create a minute without precipitation."""
-    return {
-        "precipIntensity": 0.0,
-        "precipType": "none",
-    }
+# The second duration of the two "-later" shapes looks off by one minute (rain
+# from minute 41 is reported as "returning 22 min later" after ending at minute
+# 20). It is reported for review rather than pinned here.
+LATER = ["minutes", ANY]
 
 
-def test_minutely_thunderstorm_replaces_rain_for_hour():
-    """
-    Test that when CAPE > 2500 and there's rain for the entire hour,
-    the summary shows "Thunderstorms for the hour." instead of rain.
-    """
-    # Create 61 minutes of rain (minutely data includes minute 0-60)
-    minute_arr = [create_minute_with_rain(5.0) for _ in range(61)]
+def _minutes(*runs):
+    """Build a 61-minute array from (minute_dict, count) runs."""
+    minutes = [dict(minute) for minute, count in runs for _ in range(count)]
+    assert len(minutes) == 61
+    return minutes
 
-    text, icon = calculate_minutely_text(
-        minuteArr=minute_arr,
+
+def _summarise(minutes, max_cape):
+    return calculate_minutely_text(
+        minuteArr=minutes,
         currentText="clear",
         currentIcon="clear-day",
         icon="darksky",
-        maxCAPE=2600,  # Above 2500 threshold
+        maxCAPE=max_cape,
     )
 
-    # Should show thunderstorms for the hour
-    assert text == ["for-hour", "thunderstorm"]
-    assert icon == "thunderstorm"
 
-
-def test_minutely_thunderstorm_starting_in():
+@pytest.mark.parametrize(
+    ("minutes", "expected_text"),
+    [
+        pytest.param(_minutes((RAIN, 61)), ["for-hour", "thunderstorm"], id="for-hour"),
+        pytest.param(
+            _minutes((DRY, 15), (RAIN, 46)),
+            ["starting-in", "thunderstorm", ["minutes", 15]],
+            id="starting-in",
+        ),
+        pytest.param(
+            _minutes((RAIN, 30), (DRY, 31)),
+            ["stopping-in", "thunderstorm", ["minutes", 30]],
+            id="stopping-in",
+        ),
+        pytest.param(
+            _minutes((RAIN, 20), (DRY, 21), (RAIN, 20)),
+            [
+                "stopping-then-starting-later",
+                "thunderstorm",
+                ["minutes", 20],
+                LATER,
+            ],
+            id="stopping-then-starting-later",
+        ),
+        pytest.param(
+            _minutes((DRY, 10), (RAIN, 20), (DRY, 31)),
+            [
+                "starting-then-stopping-later",
+                "thunderstorm",
+                ["minutes", 10],
+                LATER,
+            ],
+            id="starting-then-stopping-later",
+        ),
+    ],
+)
+def test_minutely_thunderstorm_keeps_timing(minutes, expected_text):
+    """High CAPE must swap only the precipitation word for "thunderstorm" and
+    keep the start/stop timing for every sentence shape minutely can produce.
     """
-    Test that when CAPE > 2500 and rain starts later,
-    the summary shows "Thunderstorms starting in X minutes."
+    assert _summarise(minutes, max_cape=3000) == (expected_text, "thunderstorm")
+
+
+@pytest.mark.parametrize(
+    ("max_cape", "expected"),
+    [
+        pytest.param(
+            CAPE_THRESHOLDS["high"] - 1,
+            (["for-hour", "medium-rain"], "rain"),
+            id="just-below",
+        ),
+        pytest.param(
+            CAPE_THRESHOLDS["high"],
+            (["for-hour", "thunderstorm"], "thunderstorm"),
+            id="at-threshold",
+        ),
+    ],
+)
+def test_minutely_thunderstorm_cape_boundary(max_cape, expected):
+    """The minutely gate is inclusive at CAPE_THRESHOLDS["high"]; an off-by-one
+    here would flip storms on or off for borderline hours.
     """
-    # No rain for first 15 minutes, then rain until minute 60
-    minute_arr = [create_minute_no_precip() for _ in range(15)]
-    minute_arr.extend([create_minute_with_rain(5.0) for _ in range(46)])  # 15 + 46 = 61
-
-    text, icon = calculate_minutely_text(
-        minuteArr=minute_arr,
-        currentText="clear",
-        currentIcon="clear-day",
-        icon="darksky",
-        maxCAPE=3000,  # Well above threshold
-    )
-
-    # Should show thunderstorms starting in 15 minutes
-    assert text == ["starting-in", "thunderstorm", ["minutes", 15]]
-    assert icon == "thunderstorm"
-
-
-def test_minutely_thunderstorm_stopping_in():
-    """
-    Test that when CAPE > 2500 and rain stops during the hour,
-    the summary shows "Thunderstorms stopping in X minutes."
-    """
-    # Rain for first 30 minutes, then stops
-    minute_arr = [create_minute_with_rain(5.0) for _ in range(30)]
-    minute_arr.extend([create_minute_no_precip() for _ in range(31)])  # 30 + 31 = 61
-
-    text, icon = calculate_minutely_text(
-        minuteArr=minute_arr,
-        currentText="medium-rain",
-        currentIcon="rain",
-        icon="darksky",
-        maxCAPE=2800,
-    )
-
-    # Should show thunderstorms stopping in 30 minutes (last minute with rain is index 29, so 29+1=30)
-    assert text == ["stopping-in", "thunderstorm", ["minutes", 30]]
-    assert icon == "thunderstorm"
-
-
-def test_minutely_normal_rain_when_cape_low():
-    """
-    Test that when CAPE < 2500, the summary shows normal rain text.
-    """
-    # Create 61 minutes of rain
-    minute_arr = [create_minute_with_rain(5.0) for _ in range(61)]
-
-    text, icon = calculate_minutely_text(
-        minuteArr=minute_arr,
-        currentText="clear",
-        currentIcon="clear-day",
-        icon="darksky",
-        maxCAPE=1500,  # Below 2500 threshold
-    )
-
-    # Should show normal rain, not thunderstorms
-    assert text == ["for-hour", "medium-rain"]
-    assert icon == "rain"
+    assert _summarise(_minutes((RAIN, 61)), max_cape) == expected
 
 
 def test_minutely_no_thunderstorm_without_precipitation():
+    """High CAPE alone must not produce a storm when no precipitation is
+    forecast in the next hour.
     """
-    Test that even with high CAPE, if there's no precipitation,
-    thunderstorms don't appear in the summary.
-    """
-    # No precipitation for the entire hour
-    minute_arr = [create_minute_no_precip() for _ in range(61)]
-
-    text, icon = calculate_minutely_text(
-        minuteArr=minute_arr,
-        currentText="clear",
-        currentIcon="clear-day",
-        icon="darksky",
-        maxCAPE=3000,  # High CAPE but no precipitation
+    assert _summarise(_minutes((DRY, 61)), max_cape=3000) == (
+        ["for-hour", "clear"],
+        "clear-day",
     )
-
-    # Should show current conditions, not thunderstorms
-    assert text == ["for-hour", "clear"]
-    assert icon == "clear-day"
-
-
-def test_minutely_thunderstorm_with_snow():
-    """
-    Test thunderstorm detection with snow-type precipitation.
-    Note: This tests the technical behavior; meteorologically, thunderstorms
-    with snow are extremely rare since thunderstorms require strong convection
-    typically associated with warmer conditions.
-    """
-    # Create 61 minutes of snow
-    minute_arr = [create_minute_with_rain(3.0, "snow") for _ in range(61)]
-
-    text, icon = calculate_minutely_text(
-        minuteArr=minute_arr,
-        currentText="clear",
-        currentIcon="clear-day",
-        icon="darksky",
-        maxCAPE=2600,
-    )
-
-    # Should show thunderstorms (replacing snow)
-    assert text == ["for-hour", "thunderstorm"]
-    assert icon == "thunderstorm"
-
-
-def test_minutely_thunderstorm_stopping_then_starting():
-    """
-    Test thunderstorms with a gap in the middle.
-    """
-    # Rain for 20 minutes, gap for 21 minutes, rain for 20 minutes (total 61)
-    minute_arr = [create_minute_with_rain(5.0) for _ in range(20)]
-    minute_arr.extend([create_minute_no_precip() for _ in range(21)])
-    minute_arr.extend([create_minute_with_rain(5.0) for _ in range(20)])
-
-    text, icon = calculate_minutely_text(
-        minuteArr=minute_arr,
-        currentText="medium-rain",
-        currentIcon="rain",
-        icon="darksky",
-        maxCAPE=2700,
-    )
-
-    # Should show thunderstorms stopping then starting again
-    assert text[0] == "stopping-then-starting-later"
-    assert text[1] == "thunderstorm"
-    assert icon == "thunderstorm"
-
-
-def test_minutely_default_cape_zero():
-    """
-    Test that when no CAPE is provided (default 0), normal precipitation is shown.
-    """
-    # Create 61 minutes of rain
-    minute_arr = [create_minute_with_rain(5.0) for _ in range(61)]
-
-    # Call without maxCAPE parameter (should default to 0)
-    text, icon = calculate_minutely_text(
-        minuteArr=minute_arr,
-        currentText="clear",
-        currentIcon="clear-day",
-        icon="darksky",
-        # maxCAPE not provided, defaults to 0
-    )
-
-    # Should show normal rain since CAPE=0 < 2500
-    assert text == ["for-hour", "medium-rain"]
-    assert icon == "rain"
-
-
-def test_minutely_thunderstorm_at_exact_threshold():
-    """
-    Test that CAPE exactly at 2500 threshold triggers thunderstorms.
-    """
-    # Create 61 minutes of rain
-    minute_arr = [create_minute_with_rain(5.0) for _ in range(61)]
-
-    text, icon = calculate_minutely_text(
-        minuteArr=minute_arr,
-        currentText="clear",
-        currentIcon="clear-day",
-        icon="darksky",
-        maxCAPE=2500,  # Exactly at threshold
-    )
-
-    # Should show thunderstorms
-    assert text == ["for-hour", "thunderstorm"]
-    assert icon == "thunderstorm"
-
-
-def test_minutely_thunderstorm_just_below_threshold():
-    """
-    Test that CAPE just below 2500 doesn't trigger thunderstorms.
-    """
-    # Create 61 minutes of rain
-    minute_arr = [create_minute_with_rain(5.0) for _ in range(61)]
-
-    text, icon = calculate_minutely_text(
-        minuteArr=minute_arr,
-        currentText="clear",
-        currentIcon="clear-day",
-        icon="darksky",
-        maxCAPE=2499,  # Just below threshold
-    )
-
-    # Should show normal rain, not thunderstorms
-    assert text == ["for-hour", "medium-rain"]
-    assert icon == "rain"

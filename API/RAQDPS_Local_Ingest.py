@@ -66,9 +66,6 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 warnings.filterwarnings("ignore", "In a future version")
 
 # %% Setup logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
 
 # Register the repo-local Herbie template without modifying the installed package.
@@ -90,15 +87,6 @@ save_type = os.getenv("save_type", default="Download")
 
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
-zarr_store_workers = positive_int_env("zarr_store_workers", 2)
-zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
-
-s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-tune_nofile_limit()
-zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
-    zarr_store_workers, zarr_async_concurrency
-)
-
 process_chunk = CHUNK_SIZES["RAQDPS"]
 final_chunk = FINAL_CHUNK_SIZES["RAQDPS"]
 history_period = HISTORY_PERIODS["RAQDPS"]
@@ -288,7 +276,7 @@ def build_variable_arrays(time_slices, valid_times, reference_shape):
     return variable_arrays
 
 
-def write_variable_zarrs(variable_arrays, root_path, time_chunks):
+def write_variable_zarrs(variable_arrays, root_path, time_chunks, zarr_store_workers):
     """Write separate intermediate Zarr arrays for each RAQDPS variable."""
     shutil.rmtree(root_path, ignore_errors=True)
     os.makedirs(root_path, exist_ok=True)
@@ -376,7 +364,7 @@ def download_extract_historic_zip(s3_filesystem, s3_zip_path, local_temp_dir):
         shutil.rmtree(extract_dir, ignore_errors=True)
 
 
-def prepare_directories():
+def prepare_directories(s3):
     """Reset processing directories and ensure output roots exist."""
     if os.path.exists(forecast_process_dir):
         shutil.rmtree(forecast_process_dir, ignore_errors=True)
@@ -390,7 +378,7 @@ def prepare_directories():
         os.makedirs(os.path.join(forecast_path, ingest_version), exist_ok=True)
 
 
-def already_processed(base_time):
+def already_processed(base_time, s3):
     """Return True if the published RAQDPS store is already current."""
     time_pickle_path = published_path(RAQDPS_TIME_PICKLE)
     lat_lon_pickle_path = published_path(RAQDPS_LAT_LON_PICKLE)
@@ -416,7 +404,7 @@ def already_processed(base_time):
     return False
 
 
-def process_forecast(base_time):
+def process_forecast(base_time, zarr_store_workers):
     """Download and write f000-f072 RAQDPS forecast data."""
     logger.info("Processing RAQDPS forecast from base time: %s", base_time)
     time_slices = []
@@ -466,11 +454,13 @@ def process_forecast(base_time):
 
     forecast_arrays = build_variable_arrays(time_slices, valid_times, reference_shape)
     forecast_zarr_path = forecast_process_path + "_forecast.zarr"
-    write_variable_zarrs(forecast_arrays, forecast_zarr_path, len(valid_times))
+    write_variable_zarrs(
+        forecast_arrays, forecast_zarr_path, len(valid_times), zarr_store_workers
+    )
     return forecast_zarr_path, reference_shape, lat_lon_lookup
 
 
-def process_historic_hour(valid_time, reference_shape):
+def process_historic_hour(valid_time, reference_shape, s3, zarr_store_workers):
     """Process one cached historic valid hour and return its zarr path."""
     timestamp_str = valid_time.strftime("%Y%m%dT%H%M%SZ")
 
@@ -518,7 +508,7 @@ def process_historic_hour(valid_time, reference_shape):
     hist_tmp_path = os.path.join(
         forecast_process_dir, f"RAQDPS_Hist_{timestamp_str}_TMP.zarr"
     )
-    write_variable_zarrs(hist_arrays, hist_tmp_path, 1)
+    write_variable_zarrs(hist_arrays, hist_tmp_path, 1, zarr_store_workers)
 
     if save_type == "S3":
         zip_export_path = hist_tmp_path.replace("_TMP.zarr", "")
@@ -540,18 +530,26 @@ def process_historic_hour(valid_time, reference_shape):
     return final_local_path
 
 
-def process_historic(base_time, reference_shape):
+def process_historic(base_time, reference_shape, s3, zarr_store_workers):
     """Process/cache the 48 historical RAQDPS valid hours."""
     historic_zarr_paths = []
     for valid_time in history_valid_times(base_time, history_period):
-        historic_path_processed = process_historic_hour(valid_time, reference_shape)
+        historic_path_processed = process_historic_hour(
+            valid_time, reference_shape, s3, zarr_store_workers
+        )
         if historic_path_processed is not None:
             historic_zarr_paths.append(historic_path_processed)
     return historic_zarr_paths
 
 
 def merge_and_publish(
-    base_time, historic_zarr_paths, forecast_zarr_path, reference_shape, lat_lon_lookup
+    base_time,
+    historic_zarr_paths,
+    forecast_zarr_path,
+    reference_shape,
+    lat_lon_lookup,
+    s3,
+    zarr_store_workers,
 ):
     """Merge historic and forecast arrays and publish the final RAQDPS store."""
     logger.info("Merging historic and forecast RAQDPS datasets.")
@@ -675,7 +673,20 @@ def merge_and_publish(
 
 def main():
     """Run the RAQDPS ingest."""
-    prepare_directories()
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    )
+
+    zarr_store_workers = positive_int_env("zarr_store_workers", 2)
+    zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
+
+    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+    tune_nofile_limit()
+    zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
+        zarr_store_workers, zarr_async_concurrency
+    )
+
+    prepare_directories(s3)
     start_time = time.time()
 
     try:
@@ -685,21 +696,25 @@ def main():
         sys.exit(1)
 
     logger.info("RAQDPS base time: %s", base_time)
-    if already_processed(base_time):
+    if already_processed(base_time, s3):
         logger.info("RAQDPS store is already up to date. Exiting.")
         sys.exit()
 
     try:
         forecast_zarr_path, reference_shape, lat_lon_lookup = process_forecast(
-            base_time
+            base_time, zarr_store_workers
         )
-        historic_zarr_paths = process_historic(base_time, reference_shape)
+        historic_zarr_paths = process_historic(
+            base_time, reference_shape, s3, zarr_store_workers
+        )
         merge_and_publish(
             base_time,
             historic_zarr_paths,
             forecast_zarr_path,
             reference_shape,
             lat_lon_lookup,
+            s3,
+            zarr_store_workers,
         )
     finally:
         try:

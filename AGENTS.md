@@ -664,6 +664,12 @@ Do not add tests solely to increase test count or coverage percentage.
 
 A test should earn its place by protecting important behaviour.
 
+### Offline and live tests
+
+- `tests/api` and `tests/ingest` must run offline and deterministically. They run by default (`python -m pytest`) and in CI.
+- Anything that depends on external data (live S3 stores, the production API, NOAA/Herbie downloads, GribStream, local production archives) belongs in `tests/live`. Those tests are skipped unless `PW_RUN_LIVE_TESTS=1` is set and never run in CI.
+- **Agents must not run `tests/live` as part of routine verification.** It takes minutes, needs ~10 GB of memory and credentials, and its results depend on upstream data. Run it only when the user asks or when a change specifically targets live data access.
+
 ---
 
 ## 28. Avoid Unrelated Refactors

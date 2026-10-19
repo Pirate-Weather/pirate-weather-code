@@ -54,10 +54,6 @@ from API.ingest_utils import (
 # Distance to interpolate stations to grid (km)
 radius_km = DWD_RADIUS
 
-# Set up basic logging configuration
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
 
 logger = logging.getLogger(__name__)
 
@@ -862,9 +858,9 @@ def build_grid_to_stations_map(
 
 
 # --- Main Ingest Execution Block ---
-# This script follows the same top-level script style as other ingest scripts in
-# the repository (no `main()` wrapper). It expects environment variables to be
-# set for paths and S3 options when run as a script.
+# The ingest runs from main() when executed as a script; importing the module has
+# no side effects. It expects environment variables to be set for paths and S3
+# options when run as a script.
 
 # --- Configuration ---
 # URL for the DWD MOSMIX-S latest 240-hour forecast KMZ file
@@ -889,11 +885,6 @@ save_type = os.getenv("save_type", "Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
-# Initialize S3 filesystem object if saving to S3.
-s3 = None
-if save_type == "S3":
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-
 
 # --- Directory Setup and Cleanup ---
 # Create the main processing directory; clear its contents if it already exists to avoid
@@ -910,22 +901,6 @@ def _clear_directory(path):
                 os.remove(entry.path)
         except (OSError, PermissionError):
             logger.warning(f"Could not remove {entry.path} during clear_directory.")
-
-
-if os.path.exists(forecast_process_dir):
-    _clear_directory(forecast_process_dir)
-else:
-    os.makedirs(forecast_process_dir, exist_ok=True)
-
-# Create the temporary download directory.
-os.makedirs(tmp_dir, exist_ok=True)
-
-# Create the final forecast output directory if saving locally (versioned by ingest).
-if save_type == "Download":
-    os.makedirs(os.path.join(forecast_path, ingest_version), exist_ok=True)
-    os.makedirs(historic_path, exist_ok=True)
-
-start_time = time.time()  # Start timer for script execution
 
 
 # --- Step 1: Download and Parse DWD MOSMIX-S KML/KMZ Data ---
@@ -948,60 +923,6 @@ def download_mosmix_file(url, local_path):
     except (requests.RequestException, OSError) as e:
         logger.warning(f"Error downloading {url}: {e}")
         return False
-
-
-# --- Step 1: Download and Parse DWD MOSMIX-S KML/KMZ Data ---
-logger.info(f"\n--- Attempting to download DWD MOSMIX data from: {dwd_mosmix_url} ---")
-if not download_mosmix_file(dwd_mosmix_url, os.path.join(tmp_dir, downloaded_kmz_file)):
-    logger.critical("Error downloading latest DWD data. Exiting.")
-    sys.exit(1)
-
-logger.info(
-    f"\n--- Reading and Parsing KML from {os.path.join(tmp_dir, downloaded_kmz_file)} ---"
-)
-df_data, global_metadata = parse_mosmix_kml(os.path.join(tmp_dir, downloaded_kmz_file))
-if df_data.empty:
-    logger.critical("No data extracted from KML/KMZ. Exiting.")
-    sys.exit(1)
-
-# Convert longitudes from [-180, 180] to [0, 360] for consistency with GFS grid
-df_data["longitude"] = df_data["longitude"] % 360
-
-# Extract the base time from the KML metadata (IssueTime) for update checks.
-base_time = global_metadata.get("IssueTime", datetime.now(UTC))
-logger.info(f"Base time for this ingest run (from KML metadata): {base_time}")
-
-# --- Check for Updates (Skip if no new data) ---
-if save_type == "S3":
-    # Check if the file exists and load it
-    if s3.exists(forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle"):
-        with s3.open(
-            forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle", "rb"
-        ) as f:
-            previous_base_time = pickle.load(f)
-
-        # Compare timestamps and download if the S3 object is more recent
-        if previous_base_time >= base_time:
-            logger.info("No Update to DWD_MOSMIX, ending")
-            sys.exit()
-
-else:
-    if os.path.exists(forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle"):
-        # Open the file in binary mode
-        with open(
-            forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle", "rb"
-        ) as file:
-            # Deserialize and retrieve the variable from the file
-            previous_base_time = pickle.load(file)
-
-        # Compare timestamps and download if the S3 object is more recent
-        if previous_base_time >= base_time:
-            logger.info("No Update to DWD_MOSMIX, ending")
-            sys.exit()
-
-
-# --- Step 2: Process Pandas DataFrame ---
-logger.info("\n--- Converting DataFrame to xarray Dataset (point-based) ---")
 
 
 def process_and_interpolate_df(df_input):
@@ -1032,40 +953,188 @@ def process_and_interpolate_df(df_input):
     return gridded_ds
 
 
-# Process the latest forecast
-gridded_dwd_ds_forecast = process_and_interpolate_df(df_data)
+def main() -> None:
+    """Run the DWD MOSMIX ingest."""
+    # Set up basic logging configuration
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    )
 
-# Chunk
-gridded_dwd_ds_forecast = gridded_dwd_ds_forecast.chunk(
-    chunks={"time": 240, "lat": CHUNK_SIZES["DWD"], "lon": CHUNK_SIZES["DWD"]}
-)
-
-# --- Step 3: Historic Data ---
-# Logic to download and process previous runs
-history_period = HISTORY_PERIODS["DWD_MOSMIX"]
-historic_datasets = []
-
-# Loop back through history
-for i in range(history_period, 0, -1):
-    # Calculate target time
-    target_time = base_time - pd.Timedelta(hours=i)
-
-    time_str = target_time.strftime("%Y%m%d%H")
-
-    # Path for cached Zarr file
-    hist_zarr_filename = f"DWD_Hist_{time_str}.zarr"
-
-    # Check if cached file exists
+    # Initialize S3 filesystem object if saving to S3.
+    s3 = None
     if save_type == "S3":
-        hist_zarr_path = f"{historic_path}/{hist_zarr_filename}"
-        cached_exists = s3.exists(hist_zarr_path.replace(".zarr", ".done"))
-    else:
-        hist_zarr_path = os.path.join(historic_path, hist_zarr_filename)
-        cached_exists = os.path.exists(hist_zarr_path.replace(".zarr", ".done"))
+        s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
-    if cached_exists:
-        logger.info(f"Loading cached historic run: {time_str}")
+    if os.path.exists(forecast_process_dir):
+        _clear_directory(forecast_process_dir)
+    else:
+        os.makedirs(forecast_process_dir, exist_ok=True)
+
+    # Create the temporary download directory.
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    # Create the final forecast output directory if saving locally (versioned by ingest).
+    if save_type == "Download":
+        os.makedirs(os.path.join(forecast_path, ingest_version), exist_ok=True)
+        os.makedirs(historic_path, exist_ok=True)
+
+    start_time = time.time()  # Start timer for script execution
+
+    # --- Step 1: Download and Parse DWD MOSMIX-S KML/KMZ Data ---
+    logger.info(
+        f"\n--- Attempting to download DWD MOSMIX data from: {dwd_mosmix_url} ---"
+    )
+    if not download_mosmix_file(
+        dwd_mosmix_url, os.path.join(tmp_dir, downloaded_kmz_file)
+    ):
+        logger.critical("Error downloading latest DWD data. Exiting.")
+        sys.exit(1)
+
+    logger.info(
+        f"\n--- Reading and Parsing KML from {os.path.join(tmp_dir, downloaded_kmz_file)} ---"
+    )
+    df_data, global_metadata = parse_mosmix_kml(
+        os.path.join(tmp_dir, downloaded_kmz_file)
+    )
+    if df_data.empty:
+        logger.critical("No data extracted from KML/KMZ. Exiting.")
+        sys.exit(1)
+
+    # Convert longitudes from [-180, 180] to [0, 360] for consistency with GFS grid
+    df_data["longitude"] = df_data["longitude"] % 360
+
+    # Extract the base time from the KML metadata (IssueTime) for update checks.
+    base_time = global_metadata.get("IssueTime", datetime.now(UTC))
+    logger.info(f"Base time for this ingest run (from KML metadata): {base_time}")
+
+    # --- Check for Updates (Skip if no new data) ---
+    if save_type == "S3":
+        # Check if the file exists and load it
+        if s3.exists(forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle"):
+            with s3.open(
+                forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle", "rb"
+            ) as f:
+                previous_base_time = pickle.load(f)
+
+            # Compare timestamps and download if the S3 object is more recent
+            if previous_base_time >= base_time:
+                logger.info("No Update to DWD_MOSMIX, ending")
+                sys.exit()
+
+    else:
+        if os.path.exists(
+            forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle"
+        ):
+            # Open the file in binary mode
+            with open(
+                forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle", "rb"
+            ) as file:
+                # Deserialize and retrieve the variable from the file
+                previous_base_time = pickle.load(file)
+
+            # Compare timestamps and download if the S3 object is more recent
+            if previous_base_time >= base_time:
+                logger.info("No Update to DWD_MOSMIX, ending")
+                sys.exit()
+
+    # --- Step 2: Process Pandas DataFrame ---
+    logger.info("\n--- Converting DataFrame to xarray Dataset (point-based) ---")
+
+    # Process the latest forecast
+    gridded_dwd_ds_forecast = process_and_interpolate_df(df_data)
+
+    # Chunk
+    gridded_dwd_ds_forecast = gridded_dwd_ds_forecast.chunk(
+        chunks={"time": 240, "lat": CHUNK_SIZES["DWD"], "lon": CHUNK_SIZES["DWD"]}
+    )
+
+    # --- Step 3: Historic Data ---
+    # Logic to download and process previous runs
+    history_period = HISTORY_PERIODS["DWD_MOSMIX"]
+    historic_datasets = []
+
+    # Loop back through history
+    for i in range(history_period, 0, -1):
+        # Calculate target time
+        target_time = base_time - pd.Timedelta(hours=i)
+
+        time_str = target_time.strftime("%Y%m%d%H")
+
+        # Path for cached Zarr file
+        hist_zarr_filename = f"DWD_Hist_{time_str}.zarr"
+
+        # Check if cached file exists
+        if save_type == "S3":
+            hist_zarr_path = f"{historic_path}/{hist_zarr_filename}"
+            cached_exists = s3.exists(hist_zarr_path.replace(".zarr", ".done"))
+        else:
+            hist_zarr_path = os.path.join(historic_path, hist_zarr_filename)
+            cached_exists = os.path.exists(hist_zarr_path.replace(".zarr", ".done"))
+
+        if cached_exists:
+            logger.info(f"Loading cached historic run: {time_str}")
+            try:
+                if save_type == "S3":
+                    store = zarr.storage.FsspecStore.from_url(
+                        hist_zarr_path,
+                        storage_options={
+                            "key": aws_access_key_id,
+                            "secret": aws_secret_access_key,
+                        },
+                    )
+                else:
+                    store = zarr.storage.LocalStore(hist_zarr_path)
+
+                ds_hist = xr.open_dataset(store, engine="zarr", chunks="auto")
+                historic_datasets.append(ds_hist)
+                continue
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Error loading cached {hist_zarr_path}: {e}")
+                # Fallback to re-download if load fails? Or just skip?
+                # Let's try to re-process.
+
+        # If not cached, download and process
+        logger.info(f"Processing historic run: {time_str}")
+
+        # Construct URL for historical file
+        # Pattern: MOSMIX_S_2025121018_240.kmz
+        hist_filename = f"MOSMIX_S_{time_str}_240.kmz"
+        hist_url = f"https://opendata.dwd.de/weather/local_forecasts/mos/MOSMIX_S/all_stations/kml/{hist_filename}"
+        local_hist_path = os.path.join(tmp_dir, hist_filename)
+
+        # Check if download is needed
+        if not os.path.exists(local_hist_path) and not download_mosmix_file(
+            hist_url, local_hist_path
+        ):
+            continue
+
+        # Parse the file
         try:
+            df_hist, _ = parse_mosmix_kml(local_hist_path)
+            if df_hist.empty:
+                continue
+
+            # Standardize longitudes
+            df_hist["longitude"] = df_hist["longitude"] % 360
+
+            # Files are offset by 1 hour (so T21 forecast is in the T20 file)
+            target_time = target_time.tz_localize(None)
+            target_time = target_time + pd.Timedelta(hours=1)
+
+            # Filter dataframe to this specific time
+            df_hist_filtered = df_hist[df_hist["time"] == target_time].copy()
+
+            if df_hist_filtered.empty:
+                logger.warning(
+                    f"No data found for target time {target_time} in {hist_filename}"
+                )
+                continue
+
+            # Process this single timestep (no temporal interp needed for single step)
+            ds_hist = process_and_interpolate_df(df_hist_filtered)
+
+            # Cache the processed dataset
+            logger.info(f"Caching processed run to {hist_zarr_path}")
             if save_type == "S3":
                 store = zarr.storage.FsspecStore.from_url(
                     hist_zarr_path,
@@ -1077,318 +1146,260 @@ for i in range(history_period, 0, -1):
             else:
                 store = zarr.storage.LocalStore(hist_zarr_path)
 
-            ds_hist = xr.open_dataset(store, engine="zarr", chunks="auto")
-            historic_datasets.append(ds_hist)
-            continue
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Error loading cached {hist_zarr_path}: {e}")
-            # Fallback to re-download if load fails? Or just skip?
-            # Let's try to re-process.
-
-    # If not cached, download and process
-    logger.info(f"Processing historic run: {time_str}")
-
-    # Construct URL for historical file
-    # Pattern: MOSMIX_S_2025121018_240.kmz
-    hist_filename = f"MOSMIX_S_{time_str}_240.kmz"
-    hist_url = f"https://opendata.dwd.de/weather/local_forecasts/mos/MOSMIX_S/all_stations/kml/{hist_filename}"
-    local_hist_path = os.path.join(tmp_dir, hist_filename)
-
-    # Check if download is needed
-    if not os.path.exists(local_hist_path) and not download_mosmix_file(
-        hist_url, local_hist_path
-    ):
-        continue
-
-    # Parse the file
-    try:
-        df_hist, _ = parse_mosmix_kml(local_hist_path)
-        if df_hist.empty:
-            continue
-
-        # Standardize longitudes
-        df_hist["longitude"] = df_hist["longitude"] % 360
-
-        # Files are offset by 1 hour (so T21 forecast is in the T20 file)
-        target_time = target_time.tz_localize(None)
-        target_time = target_time + pd.Timedelta(hours=1)
-
-        # Filter dataframe to this specific time
-        df_hist_filtered = df_hist[df_hist["time"] == target_time].copy()
-
-        if df_hist_filtered.empty:
-            logger.warning(
-                f"No data found for target time {target_time} in {hist_filename}"
+            # Rechunk to process chunks
+            ds_hist_chunk = ds_hist.chunk(
+                chunks={"time": 1, "lat": CHUNK_SIZES["DWD"], "lon": CHUNK_SIZES["DWD"]}
             )
-            continue
 
-        # Process this single timestep (no temporal interp needed for single step)
-        ds_hist = process_and_interpolate_df(df_hist_filtered)
+            ds_hist_chunk.to_zarr(store, mode="w", consolidated=False)
 
-        # Cache the processed dataset
-        logger.info(f"Caching processed run to {hist_zarr_path}")
-        if save_type == "S3":
-            store = zarr.storage.FsspecStore.from_url(
-                hist_zarr_path,
-                storage_options={
-                    "key": aws_access_key_id,
-                    "secret": aws_secret_access_key,
-                },
-            )
-        else:
-            store = zarr.storage.LocalStore(hist_zarr_path)
+            # Create .done file
+            if save_type == "S3":
+                s3.touch(hist_zarr_path.replace(".zarr", ".done"))
+            else:
+                with open(hist_zarr_path.replace(".zarr", ".done"), "w") as f:
+                    f.write("Done")
 
-        # Rechunk to process chunks
-        ds_hist_chunk = ds_hist.chunk(
-            chunks={"time": 1, "lat": CHUNK_SIZES["DWD"], "lon": CHUNK_SIZES["DWD"]}
+            # Re-open lazily to use in current run (avoids memory hogging)
+            ds_hist_lazy = xr.open_dataset(store, engine="zarr", chunks="auto")
+            historic_datasets.append(ds_hist_lazy)
+
+            # Cleanup
+            os.remove(local_hist_path)
+
+        except (
+            # KML / Parsing / Dataframe errors
+            KeyError,
+            ValueError,
+            TypeError,
+            # Zarr, S3 & OS I/O errors
+            OSError,
+            zarr.errors.ZarrError,
+        ) as e:
+            logger.warning(f"Error processing {hist_filename}: {e}")
+
+    # Combine datasets
+    if historic_datasets:
+        logger.info(
+            f"Combining {len(historic_datasets)} historic datasets with forecast"
         )
+        # Concatenate historic datasets along time dimension
+        ds_history = xr.concat(historic_datasets, dim="time")
 
-        ds_hist_chunk.to_zarr(store, mode="w", consolidated=False)
+        # Concatenate history and forecast
+        gridded_dwd_ds = xr.concat([ds_history, gridded_dwd_ds_forecast], dim="time")
 
-        # Create .done file
-        if save_type == "S3":
-            s3.touch(hist_zarr_path.replace(".zarr", ".done"))
-        else:
-            with open(hist_zarr_path.replace(".zarr", ".done"), "w") as f:
-                f.write("Done")
+        # Sort by time just in case
+        gridded_dwd_ds = gridded_dwd_ds.sortby("time")
+    else:
+        gridded_dwd_ds = gridded_dwd_ds_forecast
 
-        # Re-open lazily to use in current run (avoids memory hogging)
-        ds_hist_lazy = xr.open_dataset(store, engine="zarr", chunks="auto")
-        historic_datasets.append(ds_hist_lazy)
-
-        # Cleanup
-        os.remove(local_hist_path)
-
-    except (
-        # KML / Parsing / Dataframe errors
-        KeyError,
-        ValueError,
-        TypeError,
-        # Zarr, S3 & OS I/O errors
-        OSError,
-        zarr.errors.ZarrError,
-    ) as e:
-        logger.warning(f"Error processing {hist_filename}: {e}")
-
-# Combine datasets
-if historic_datasets:
-    logger.info(f"Combining {len(historic_datasets)} historic datasets with forecast")
-    # Concatenate historic datasets along time dimension
-    ds_history = xr.concat(historic_datasets, dim="time")
-
-    # Concatenate history and forecast
-    gridded_dwd_ds = xr.concat([ds_history, gridded_dwd_ds_forecast], dim="time")
-
-    # Sort by time just in case
-    gridded_dwd_ds = gridded_dwd_ds.sortby("time")
-else:
-    gridded_dwd_ds = gridded_dwd_ds_forecast
-
-# --- Step 4.5: Build Grid-to-Stations Mapping ---
-logger.info("\n--- Building grid-to-stations mapping ---")
-grid_to_stations_map = build_grid_to_stations_map(
-    df_data,  # Use original df_data which has station_name
-    radius_km=radius_km,
-    lat_col="latitude",
-    lon_col="longitude",
-    station_col="station_id",
-    station_name_col="station_name",
-    log="tqdm",
-)
-
-# Save the station map to a pickle file
-station_map_file = os.path.join(forecast_process_dir, "DWD_MOSMIX_stations.pickle")
-with open(station_map_file, "wb") as f:
-    pickle.dump(grid_to_stations_map, f)
-logger.info(f"Station map saved to {station_map_file}")
-
-# --- Step 5: Temporal Interpolation and Saving ---
-# Rechunk the data to be more manageable for processing
-gridded_dwd_ds_chunk = gridded_dwd_ds.chunk(
-    {
-        "time": len(gridded_dwd_ds.time),
-        "lat": CHUNK_SIZES["DWD"],
-        "lon": CHUNK_SIZES["DWD"],
-    }
-)
-
-# Strip existing encoding so Zarr writes the new chunks we specified
-for var in gridded_dwd_ds_chunk.variables:
-    if "chunks" in gridded_dwd_ds_chunk[var].encoding:
-        del gridded_dwd_ds_chunk[var].encoding["chunks"]
-    if "preferred_chunks" in gridded_dwd_ds_chunk[var].encoding:
-        del gridded_dwd_ds_chunk[var].encoding["preferred_chunks"]
-
-# Write chunked to disk as interim step
-with ProgressBar():
-    gridded_dwd_ds_chunk.to_zarr(forecast_process_path + "_chunk.zarr", mode="w")
-
-# Get the range from combined dataset
-min_time = gridded_dwd_ds.time.min().values
-max_time = gridded_dwd_ds.time.max().values
-
-# Delete from memory
-del gridded_dwd_ds_chunk
-del gridded_dwd_ds
-del historic_datasets
-try:
-    del ds_history
-except NameError:
-    pass
-
-# Read back in as xarray
-ds_chunk_disk = xr.open_zarr(forecast_process_path + "_chunk.zarr", chunks="auto")
-
-# Interpolate max 3 hour gaps
-# Define variables that shouldn't be smoothed linearly (e.g. codes, types)
-nearest_neighbor_vars = ["PTYPE_surface"]
-
-logger.info("Interpolating gaps and extrapolating edges...")
-
-# Apply efficient interpolation
-ds_chunk_disk_interp = interpolate_temporal_gaps_efficiently(
-    ds_chunk_disk, nearest_vars=nearest_neighbor_vars, max_gap_hours=3, time_dim="time"
-)
-
-# 1. Prepare Target Time Grid (Hourly)
-
-# Create continuous hourly range
-hourly_times = pd.date_range(start=min_time, end=max_time, freq="1h")
-
-# Convert timestamps to Unix seconds for interpolation function
-unix_epoch = np.datetime64(0, "s")
-one_second = np.timedelta64(1, "s")
-
-stacked_times = ds_chunk_disk_interp.time.values
-stacked_timesUnix = (stacked_times - unix_epoch) / one_second
-hourly_timesUnix = (hourly_times.values - unix_epoch) / one_second
-
-ds_rename = ds_chunk_disk_interp.rename({"time": "stacked_time"})
-
-# Add a 3D time array
-time3d = (
-    ((ds_rename["stacked_time"] - unix_epoch) / np.timedelta64(1, "s"))
-    .astype("float32")  # 1D ('time',)
-    .expand_dims(
-        lat=ds_rename.lat,  # add ('latitude',)
-        lon=ds_rename.lon,
-    )  # add ('longitude',)
-    .transpose("stacked_time", "lat", "lon")  # order dims
-)
-
-
-# Add the time array to the dataset
-ds_rename["time"] = time3d
-
-# Set time to nan where TMP_2maboveground is nan
-ds_rename["time"] = ds_rename["time"].where(
-    ~np.isnan(ds_rename["TMP_2maboveground"]), other=np.nan
-)
-
-# Set the order correctly
-vars_in = [
-    v for v in zarr_vars if v in ds_rename.data_vars
-]  # keep only those that exist
-ds_stack = ds_rename[vars_in].to_array(dim="var", name="var")
-
-# Rechunk the data to be more manageable for processing
-ds_chunk = ds_stack.chunk(
-    {
-        "var": -1,
-        "stacked_time": len(stacked_timesUnix),
-        "lat": FINAL_CHUNK_SIZES["DWD"],
-        "lon": FINAL_CHUNK_SIZES["DWD"],
-    }
-)
-
-
-# Create a zarr backed dask array
-if save_type == "S3":
-    zarr_store = zarr.storage.ZipStore(
-        forecast_process_dir + "/DWD_MOSMIX.zarr.zip", mode="a"
+    # --- Step 4.5: Build Grid-to-Stations Mapping ---
+    logger.info("\n--- Building grid-to-stations mapping ---")
+    grid_to_stations_map = build_grid_to_stations_map(
+        df_data,  # Use original df_data which has station_name
+        radius_km=radius_km,
+        lat_col="latitude",
+        lon_col="longitude",
+        station_col="station_id",
+        station_name_col="station_name",
+        log="tqdm",
     )
-else:
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/DWD_MOSMIX.zarr")
 
+    # Save the station map to a pickle file
+    station_map_file = os.path.join(forecast_process_dir, "DWD_MOSMIX_stations.pickle")
+    with open(station_map_file, "wb") as f:
+        pickle.dump(grid_to_stations_map, f)
+    logger.info(f"Station map saved to {station_map_file}")
 
-# 1. Interpolate the stacked array to be hourly along the time axis
-# 2. Pad to chunk size
-# 3. Create the zarr array
-# 4. Rechunk it to match the final array
-# 5. Write it out to the zarr array
+    # --- Step 5: Temporal Interpolation and Saving ---
+    # Rechunk the data to be more manageable for processing
+    gridded_dwd_ds_chunk = gridded_dwd_ds.chunk(
+        {
+            "time": len(gridded_dwd_ds.time),
+            "lat": CHUNK_SIZES["DWD"],
+            "lon": CHUNK_SIZES["DWD"],
+        }
+    )
 
-with ProgressBar():
+    # Strip existing encoding so Zarr writes the new chunks we specified
+    for var in gridded_dwd_ds_chunk.variables:
+        if "chunks" in gridded_dwd_ds_chunk[var].encoding:
+            del gridded_dwd_ds_chunk[var].encoding["chunks"]
+        if "preferred_chunks" in gridded_dwd_ds_chunk[var].encoding:
+            del gridded_dwd_ds_chunk[var].encoding["preferred_chunks"]
+
+    # Write chunked to disk as interim step
+    with ProgressBar():
+        gridded_dwd_ds_chunk.to_zarr(forecast_process_path + "_chunk.zarr", mode="w")
+
+    # Get the range from combined dataset
+    min_time = gridded_dwd_ds.time.min().values
+    max_time = gridded_dwd_ds.time.max().values
+
+    # Delete from memory
+    del gridded_dwd_ds_chunk
+    del gridded_dwd_ds
+    del historic_datasets
+    try:
+        del ds_history
+    except NameError:
+        pass
+
+    # Read back in as xarray
+    ds_chunk_disk = xr.open_zarr(forecast_process_path + "_chunk.zarr", chunks="auto")
+
+    # Interpolate max 3 hour gaps
+    # Define variables that shouldn't be smoothed linearly (e.g. codes, types)
+    nearest_neighbor_vars = ["PTYPE_surface"]
+
+    logger.info("Interpolating gaps and extrapolating edges...")
+
+    # Apply efficient interpolation
+    ds_chunk_disk_interp = interpolate_temporal_gaps_efficiently(
+        ds_chunk_disk,
+        nearest_vars=nearest_neighbor_vars,
+        max_gap_hours=3,
+        time_dim="time",
+    )
+
+    # 1. Prepare Target Time Grid (Hourly)
+
+    # Create continuous hourly range
+    hourly_times = pd.date_range(start=min_time, end=max_time, freq="1h")
+
+    # Convert timestamps to Unix seconds for interpolation function
+    unix_epoch = np.datetime64(0, "s")
+    one_second = np.timedelta64(1, "s")
+
+    stacked_times = ds_chunk_disk_interp.time.values
+    stacked_timesUnix = (stacked_times - unix_epoch) / one_second
+    # Unused; kept as-is from the original top-level script.
+    hourly_timesUnix = (hourly_times.values - unix_epoch) / one_second  # noqa: F841
+
+    ds_rename = ds_chunk_disk_interp.rename({"time": "stacked_time"})
+
+    # Add a 3D time array
+    time3d = (
+        ((ds_rename["stacked_time"] - unix_epoch) / np.timedelta64(1, "s"))
+        .astype("float32")  # 1D ('time',)
+        .expand_dims(
+            lat=ds_rename.lat,  # add ('latitude',)
+            lon=ds_rename.lon,
+        )  # add ('longitude',)
+        .transpose("stacked_time", "lat", "lon")  # order dims
+    )
+
+    # Add the time array to the dataset
+    ds_rename["time"] = time3d
+
+    # Set time to nan where TMP_2maboveground is nan
+    ds_rename["time"] = ds_rename["time"].where(
+        ~np.isnan(ds_rename["TMP_2maboveground"]), other=np.nan
+    )
+
+    # Set the order correctly
+    vars_in = [
+        v for v in zarr_vars if v in ds_rename.data_vars
+    ]  # keep only those that exist
+    ds_stack = ds_rename[vars_in].to_array(dim="var", name="var")
+
+    # Rechunk the data to be more manageable for processing
+    ds_chunk = ds_stack.chunk(
+        {
+            "var": -1,
+            "stacked_time": len(stacked_timesUnix),
+            "lat": FINAL_CHUNK_SIZES["DWD"],
+            "lon": FINAL_CHUNK_SIZES["DWD"],
+        }
+    )
+
+    # Create a zarr backed dask array
+    if save_type == "S3":
+        zarr_store = zarr.storage.ZipStore(
+            forecast_process_dir + "/DWD_MOSMIX.zarr.zip", mode="a"
+        )
+    else:
+        zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/DWD_MOSMIX.zarr")
+
+    # 1. Interpolate the stacked array to be hourly along the time axis
+    # 2. Pad to chunk size
+    # 3. Create the zarr array
     # 4. Rechunk it to match the final array
     # 5. Write it out to the zarr array
-    # Note that this uses xarray to write instead of dask, which is different than the other files.
-    # Long term, I don't mind the idea of using xarray for writing zarr files as it handles a lot of the metadata.
-    ds_chunk.to_zarr(zarr_store, mode="w")
+
+    with ProgressBar():
+        # 4. Rechunk it to match the final array
+        # 5. Write it out to the zarr array
+        # Note that this uses xarray to write instead of dask, which is different than the other files.
+        # Long term, I don't mind the idea of using xarray for writing zarr files as it handles a lot of the metadata.
+        ds_chunk.to_zarr(zarr_store, mode="w")
+
+    if save_type == "S3":
+        zarr_store.close()
+
+    ### Test read back
+    # localTest = zarr.open(
+    #     forecast_process_dir + "/DWD_MOSMIX.zarr",
+    #     mode="r",
+    # )
+    # --- Step 6: Upload to S3 or Move to Final Location ---
+
+    # %% Upload to S3
+    if save_type == "S3":
+        # Upload to S3
+        s3.put_file(
+            forecast_process_dir + "/DWD_MOSMIX.zarr.zip",
+            forecast_path + "/" + ingest_version + "/DWD_MOSMIX.zarr.zip",
+        )
+
+        # Upload station map
+        s3.put_file(
+            forecast_process_dir + "/DWD_MOSMIX_stations.pickle",
+            forecast_path + "/" + ingest_version + "/DWD_MOSMIX_stations.pickle",
+        )
+
+        # Write most recent forecast time
+        with open(forecast_process_dir + "/DWD_MOSMIX.time.pickle", "wb") as file:
+            # Serialize and write the variable to the file
+            pickle.dump(base_time, file)
+
+        s3.put_file(
+            forecast_process_dir + "/DWD_MOSMIX.time.pickle",
+            forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle",
+        )
+
+    else:
+        # Write most recent forecast time
+        with open(forecast_process_dir + "/DWD_MOSMIX.time.pickle", "wb") as file:
+            # Serialize and write the variable to the file
+            pickle.dump(base_time, file)
+
+        shutil.move(
+            forecast_process_dir + "/DWD_MOSMIX.time.pickle",
+            forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle",
+        )
+
+        # Copy station map to final location
+        shutil.copy(
+            forecast_process_dir + "/DWD_MOSMIX_stations.pickle",
+            forecast_path + "/" + ingest_version + "/DWD_MOSMIX_stations.pickle",
+        )
+
+        # Copy the zarr file to the final location
+        shutil.copytree(
+            forecast_process_dir + "/DWD_MOSMIX.zarr",
+            forecast_path + "/" + ingest_version + "/DWD_MOSMIX.zarr",
+            dirs_exist_ok=True,
+        )
+
+    # --- Final Cleanup ---
+    _clear_directory(forecast_process_dir)
+    _clear_directory(tmp_dir)
+
+    end_time = time.time()  # End timer
+    logger.info(f"\nTotal script execution time: {end_time - start_time:.2f} seconds")
 
 
-if save_type == "S3":
-    zarr_store.close()
-
-
-### Test read back
-# localTest = zarr.open(
-#     forecast_process_dir + "/DWD_MOSMIX.zarr",
-#     mode="r",
-# )
-# --- Step 6: Upload to S3 or Move to Final Location ---
-
-# %% Upload to S3
-if save_type == "S3":
-    # Upload to S3
-    s3.put_file(
-        forecast_process_dir + "/DWD_MOSMIX.zarr.zip",
-        forecast_path + "/" + ingest_version + "/DWD_MOSMIX.zarr.zip",
-    )
-
-    # Upload station map
-    s3.put_file(
-        forecast_process_dir + "/DWD_MOSMIX_stations.pickle",
-        forecast_path + "/" + ingest_version + "/DWD_MOSMIX_stations.pickle",
-    )
-
-    # Write most recent forecast time
-    with open(forecast_process_dir + "/DWD_MOSMIX.time.pickle", "wb") as file:
-        # Serialize and write the variable to the file
-        pickle.dump(base_time, file)
-
-    s3.put_file(
-        forecast_process_dir + "/DWD_MOSMIX.time.pickle",
-        forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle",
-    )
-
-
-else:
-    # Write most recent forecast time
-    with open(forecast_process_dir + "/DWD_MOSMIX.time.pickle", "wb") as file:
-        # Serialize and write the variable to the file
-        pickle.dump(base_time, file)
-
-    shutil.move(
-        forecast_process_dir + "/DWD_MOSMIX.time.pickle",
-        forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle",
-    )
-
-    # Copy station map to final location
-    shutil.copy(
-        forecast_process_dir + "/DWD_MOSMIX_stations.pickle",
-        forecast_path + "/" + ingest_version + "/DWD_MOSMIX_stations.pickle",
-    )
-
-    # Copy the zarr file to the final location
-    shutil.copytree(
-        forecast_process_dir + "/DWD_MOSMIX.zarr",
-        forecast_path + "/" + ingest_version + "/DWD_MOSMIX.zarr",
-        dirs_exist_ok=True,
-    )
-
-
-# --- Final Cleanup ---
-_clear_directory(forecast_process_dir)
-_clear_directory(tmp_dir)
-
-end_time = time.time()  # End timer
-logger.info(f"\nTotal script execution time: {end_time - start_time:.2f} seconds")
+if __name__ == "__main__":
+    main()

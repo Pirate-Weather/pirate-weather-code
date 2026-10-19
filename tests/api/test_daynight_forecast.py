@@ -1,168 +1,107 @@
+"""Day/night (half-day) summary text from ``calculate_half_day_text``."""
+
 import datetime
 
-from dateutil import tz
+import pytest
 
-from API.PirateDayNightText import calculate_half_day_text
+from API.PirateDayNightText import MAX_HOURS, calculate_half_day_text
+from tests.helpers.text import make_hour, make_hours
 
 
-def make_hour(dt, **overrides):
-    """Creates a default hourly data structure for tests.
+def _utc(hour):
+    """Unix time for ``hour``:00 UTC on 2025-11-10."""
+    return int(
+        datetime.datetime(2025, 11, 10, hour, tzinfo=datetime.timezone.utc).timestamp()
+    )
 
-    Parameters:
-        - dt (datetime.datetime): The datetime object for the hour.
-        - **overrides: Keyword arguments to override any of the default values.
 
-    Returns:
-        - dict: A dictionary representing an hour of weather data.
+def _half_day(hours, is_day=True, icon_set="darksky"):
+    return calculate_half_day_text(hours, is_day, "UTC", mode="hour", icon_set=icon_set)
+
+
+@pytest.mark.parametrize(
+    ("start_hour", "count"),
+    [
+        pytest.param(12, 3, id="short-afternoon"),
+        pytest.param(4, 13, id="full-half-day"),
+    ],
+)
+def test_clear_half_day(start_hour, count):
+    """A clear half-day must be a bare "clear" sentence: no "for-day" wrapper
+    (removed in #385) however many hours the window spans.
     """
-    defaults = {
-        "time": int(dt.timestamp()),
-        "cloudCover": 0.0,
-        "windSpeed": 0.0,
-        "rainIntensity": 0.0,
-        "snowIntensity": 0.0,
-        "iceIntensity": 0.0,
-        "visibility": 16090,
-        "humidity": 0.5,
-        "precipIntensityError": float("nan"),
-        "precipProbability": 0.0,
-        "smoke": 0.0,
-        "temperature": 10.0,
-        "dewPoint": 10.0,
-        "liquidAccumulation": 0.0,
-        "snowAccumulation": 0.0,
-        "iceAccumulation": 0.0,
-        "precipType": "none",
-        "cape": -999,
-    }
-    defaults.update(overrides)
-    return defaults
+    hours = make_hours(count, _utc(start_hour), cloudCover=0.1)
+
+    assert _half_day(hours) == ("clear-day", ["sentence", "clear"])
 
 
-def test_half_day_clear_day_icon_and_summary():
-    """Tests that a clear day scenario produces the correct icon and summary."""
-    zone = tz.gettz("UTC")
-    base = datetime.datetime(2025, 11, 10, 12, 0, tzinfo=zone)
+def test_cloudy_night():
+    """Overcast nights must use the cloudy icon and "heavy-clouds" text."""
+    hours = make_hours(3, _utc(23), cloudCover=0.9)
+
+    assert _half_day(hours, is_day=False) == ("cloudy", ["sentence", "heavy-clouds"])
+
+
+@pytest.mark.parametrize(
+    ("hour", "is_day", "expected_icon"),
+    [
+        pytest.param(13, True, "possible-rain-day", id="day"),
+        pytest.param(23, False, "possible-rain-night", id="night"),
+    ],
+)
+def test_pirate_possible_rain_icon(hour, is_day, expected_icon):
+    """Low-PoP rain must use the pirate set's day/night "possible" icons and
+    "possible" wording, not a definite rain icon.
+    """
     hours = [
-        make_hour(base + datetime.timedelta(hours=i), cloudCover=0.1) for i in range(3)
-    ]
-
-    icon, summary = calculate_half_day_text(
-        hours, True, "UTC", mode="hour", icon_set="darksky"
-    )
-
-    assert icon == "clear-day"
-    # summary should include the word 'clear' in its nested structure
-    assert "clear" in str(summary)
-
-
-def test_all_day_half_day_clear_day_icon_and_summary():
-    """Tests that a full day clear day scenario produces the correct icon and summary."""
-    zone = tz.gettz("UTC")
-    base = datetime.datetime(2025, 11, 10, 4, 0, tzinfo=zone)
-    hours = [
-        make_hour(base + datetime.timedelta(hours=i), cloudCover=0.1) for i in range(13)
-    ]
-
-    icon, summary = calculate_half_day_text(
-        hours, True, "UTC", mode="hour", icon_set="darksky"
-    )
-
-    assert icon == "clear-day"
-    # summary should include the word 'clear' in its nested structure
-    assert "clear" in str(summary)
-
-
-def test_half_day_cloudy_night_icon_and_summary():
-    """Tests that a cloudy night scenario produces the correct icon and summary."""
-    zone = tz.gettz("UTC")
-    base = datetime.datetime(2025, 11, 10, 23, 0, tzinfo=zone)
-    hours = [
-        make_hour(base + datetime.timedelta(hours=i), cloudCover=0.9) for i in range(3)
-    ]
-
-    icon, summary = calculate_half_day_text(
-        hours, False, "UTC", mode="hour", icon_set="darksky"
-    )
-
-    assert icon == "cloudy"
-    # summary should mention heavy-clouds (cloudy -> heavy-clouds text)
-    assert "heavy-clouds" in str(summary)
-
-
-def test_precipitation_pirate_possible_day_and_night_icons():
-    """Tests a light rain scenario with low POP using the pirate icon set."""
-    zone = tz.gettz("UTC")
-    base_day = datetime.datetime(2025, 11, 10, 13, 0, tzinfo=zone)
-    hour_day = make_hour(
-        base_day,
-        cloudCover=0.5,
-        rainIntensity=0.01,
-        liquidAccumulation=1.0,
-        precipProbability=0.1,
-        precipType="rain",
-    )
-
-    icon_day, _ = calculate_half_day_text(
-        [hour_day], True, "UTC", mode="hour", icon_set="pirate"
-    )
-    assert icon_day == "possible-rain-day"
-
-    base_night = datetime.datetime(2025, 11, 10, 23, 0, tzinfo=zone)
-    hour_night = make_hour(
-        base_night,
-        cloudCover=0.5,
-        rainIntensity=0.01,
-        liquidAccumulation=1.0,
-        precipProbability=0.1,
-        precipType="rain",
-    )
-
-    icon_night, _ = calculate_half_day_text(
-        [hour_night], False, "UTC", mode="hour", icon_set="pirate"
-    )
-    assert icon_night == "possible-rain-night"
-
-
-def test_too_many_hours_returns_unavailable():
-    """Tests that providing more than MAX_HOURS returns 'unavailable'."""
-    # MAX_HOURS is 15, so we use 16 hours
-    zone = tz.gettz("UTC")
-    base = datetime.datetime(2025, 11, 10, 12, 0, tzinfo=zone)
-    hours = [make_hour(base + datetime.timedelta(hours=i)) for i in range(16)]
-
-    icon, summary = calculate_half_day_text(
-        hours, True, "UTC", mode="hour", icon_set="darksky"
-    )
-
-    assert icon == "none"
-    assert summary == "unavailable"
-
-
-def test_half_day_three_period_precip_summary_stays_valid():
-    """A stray three-period condition should still produce a usable summary."""
-    zone = tz.gettz("UTC")
-    base = datetime.datetime(2025, 11, 10, 3, 0, tzinfo=zone)
-    hours = [make_hour(base)]
-
-    for hour_offset in range(1, 15):
-        hours.append(
-            make_hour(
-                base + datetime.timedelta(hours=hour_offset),
-                rainIntensity=1.0,
-                liquidAccumulation=1.0,
-                precipProbability=0.8,
-                precipType="rain",
-                cloudCover=0.8,
-            )
+        make_hour(
+            _utc(hour),
+            precipType="rain",
+            rainIntensity=0.01,
+            liquidAccumulation=1.0,
+            precipProbability=0.1,
         )
+    ]
 
-    icon, summary = calculate_half_day_text(
-        hours, True, "UTC", mode="hour", icon_set="darksky"
+    assert _half_day(hours, is_day=is_day, icon_set="pirate") == (
+        expected_icon,
+        ["sentence", "possible-very-light-rain"],
     )
 
-    assert icon == "rain"
-    assert summary != "unavailable"
-    assert "light-rain" in str(summary)
-    assert "morning" in str(summary)
-    assert "evening" in str(summary)
+
+def test_more_than_max_hours_is_unavailable():
+    """Slices longer than a half-day window must return the plain
+    "unavailable" text (#385) instead of a misleading summary; a slice of
+    exactly MAX_HOURS is still summarised.
+    """
+    assert _half_day(make_hours(MAX_HOURS + 1, _utc(12))) == ("none", "unavailable")
+    assert _half_day(make_hours(MAX_HOURS, _utc(12))) == (
+        "partly-cloudy-day",
+        ["sentence", "light-clouds"],
+    )
+
+
+def test_three_period_precip_summary_stays_valid():
+    """A slice spanning three periods (e.g. DST-shifted) must join them into
+    one "during" phrase instead of returning None (#624).
+    """
+    rain = {
+        "precipType": "rain",
+        "rainIntensity": 1.0,
+        "liquidAccumulation": 1.0,
+        "precipProbability": 0.8,
+        "cloudCover": 0.8,
+    }
+    hours = [make_hour(_utc(3))] + make_hours(14, _utc(4), **rain)
+
+    assert _half_day(hours) == (
+        "rain",
+        [
+            "sentence",
+            [
+                "during",
+                "light-rain",
+                ["and", "today-morning", ["and", "today-afternoon", "today-evening"]],
+            ],
+        ],
+    )
