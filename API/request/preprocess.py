@@ -728,7 +728,7 @@ async def prepare_initial_request(
 
     unit_system, unit_config = _setup_units(units, loc_name)
 
-    # Parse aqiunits override: ca → AQHI, us → EPA, eu → CAQI, uk → DAQI, hk → HK_AQHI, ie → AQIH, il → Israel AQI, id → ISPU, cn → China AQI, my → API, tw → Taiwan AQI, vn → VN_AQI.
+    # Parse aqiunits override: ca → AQHI, us → EPA, eu → CAQI, uk → DAQI, hk → HK_AQHI, ie → AQIH, il → Israel AQI, id → ISPU, cn → China AQI, my → API, vn → VN_AQI.
     # Falls back to the unit-based AQI system when the value is absent or invalid.
     _VALID_AQI_UNITS = {
         "ca",
