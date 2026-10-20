@@ -1,7 +1,8 @@
 """GFS Local Data Ingestion Script
 
-Downloads, processes, and stores GFS forecast and historic data using wgrib2,
-Herbie, and xarray. Generates hourly interpolated datasets with multiple variables.
+Downloads GFS forecast and historic GRIB subsets with Herbie and reads them
+directly with xarray/cfgrib (no wgrib2 conversion); de-accumulation happens in
+xarray/dask. Generates hourly interpolated datasets with multiple variables.
 
 Author: Alexander Rey
 Date: September 2023
@@ -37,13 +38,7 @@ from tqdm import tqdm
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
 from API.ingest_grib_utils import (
-    awk_path,
-    cat_gribs,
     download_and_validate_gfs_subset,
-    has_records,
-    output_path,
-    quote_path,
-    run_checked,
 )
 from API.ingest_utils import (
     CHUNK_SIZES,
@@ -52,6 +47,7 @@ from API.ingest_utils import (
     archive_tmp_zarr_and_upload,
     close_store,
     configure_zarr_limits,
+    deaccumulate_to_hourly_rate,
     download_extract_historic_archive,
     interp_time_take_blend,
     make_herbie_save_dir,
@@ -122,6 +118,143 @@ force_update = _parse_bool_env(os.getenv("force_update", ""))
 # AWS/S3 settings
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+
+
+# GFS DSWRF and DUVB are averages since the most recent 6-hourly bucket reset
+# (6-7 h, 6-12 h, ..., 114-120 h, then 120-123 h, 120-126 h on the 3-hourly leads).
+# APCP is downloaded as the run total (0-N h), so it only needs differencing.
+GFS_AVERAGE_BUCKET_HOURS = 6
+
+# cfgrib can only open GRIB messages that share a level type (and, for the surface
+# fields, a step type) as one dataset, so each group is opened across all
+# forecast hours and the groups are merged.
+GFS_CFGRIB_GROUPS = (
+    {"typeOfLevel": "heightAboveGround", "level": 2},
+    {"typeOfLevel": "heightAboveGround", "level": 10},
+    {"typeOfLevel": "surface", "stepType": "instant"},
+    {"typeOfLevel": "surface", "stepType": "accum"},
+    {"typeOfLevel": "surface", "stepType": "avg"},
+    {"typeOfLevel": "meanSea"},
+    {"typeOfLevel": "atmosphere"},
+    {"typeOfLevel": "atmosphereSingleLayer"},
+)
+
+# cfgrib short names -> the wgrib2-style names the GFS store has always used.
+CFGRIB_TO_GFS_NAMES = {
+    "t2m": "TMP_2maboveground",
+    "d2m": "DPT_2maboveground",
+    "r2": "RH_2maboveground",
+    "aptmp": "APTMP_2maboveground",
+    "u10": "UGRD_10maboveground",
+    "v10": "VGRD_10maboveground",
+    "vis": "VIS_surface",
+    "gust": "GUST_surface",
+    "sp": "PRES_surface",
+    "prate": "PRATE_surface",
+    "csnow": "CSNOW_surface",
+    "cicep": "CICEP_surface",
+    "cfrzr": "CFRZR_surface",
+    "crain": "CRAIN_surface",
+    "cape": "CAPE_surface",
+    "tp": "APCP_surface",
+    "sdswrf": "DSWRF_surface",
+    "prmsl": "PRMSL_meansealevel",
+    "tcc": "TCDC_entireatmosphere",
+    "refc": "REFC_entireatmosphere",
+    "tozne": "TOZNE_entireatmosphere_consideredasasinglelayer_",
+    "duvb": "DUVB_surface",
+}
+
+
+def _open_cfgrib_group(grib_files: list[str], filter_by_keys: dict) -> xr.Dataset:
+    """Open one cfgrib message group across all forecast hours, indexed by valid time."""
+    ds = xr.open_mfdataset(
+        grib_files,
+        engine="cfgrib",
+        combine="nested",
+        concat_dim="step",
+        # ecCodes' definition parser is not thread-safe, so files are opened
+        # serially; dask still reads the data in parallel later.
+        parallel=False,
+        decode_timedelta=True,
+        coords="minimal",
+        compat="override",
+        backend_kwargs={"filter_by_keys": filter_by_keys},
+    )
+    # Only "step" is concatenated across files; valid time is run time + step.
+    run_time = ds["time"].values
+    ds = ds.reset_coords(drop=True)
+    return ds.assign_coords(step=run_time + ds["step"].values).rename({"step": "time"})
+
+
+def open_gfs_gribs(pgrb2_files: list[str], duvb_files: list[str]) -> xr.Dataset:
+    """Open the Herbie pgrb2 and pgrb2b subsets as one lazy dataset.
+
+    cfgrib returns latitude north to south; the GFS store has always been written
+    south to north (wgrib2's NetCDF order), so flip it to keep the API's grid lookup.
+    """
+    datasets = [_open_cfgrib_group(pgrb2_files, keys) for keys in GFS_CFGRIB_GROUPS]
+    datasets.append(_open_cfgrib_group(duvb_files, {"typeOfLevel": "surface"}))
+    ds = xr.merge(datasets, compat="override", join="exact")
+    missing = set(CFGRIB_TO_GFS_NAMES) - set(ds.data_vars)
+    if missing:
+        raise ValueError(f"GFS GRIB files are missing fields: {sorted(missing)}")
+    ds = ds[list(CFGRIB_TO_GFS_NAMES)].rename(CFGRIB_TO_GFS_NAMES)
+    # The merge step reads the raw "time" array back from zarr as unix seconds
+    # (wgrib2's NetCDF encoding), so store it the same way.
+    ds["time"].encoding = {
+        "units": "seconds since 1970-01-01 00:00:00",
+        "dtype": "float64",
+    }
+    return ds.isel(latitude=slice(None, None, -1))
+
+
+def bucket_average_to_interval_mean(
+    average: xr.DataArray, forecast_hours: np.ndarray
+) -> xr.DataArray:
+    """Convert GFS bucket averages to the mean over each output interval.
+
+    The value at lead h is the mean since the bucket reset s, so the mean over
+    (prev, h] is (ave_h * (h - s) - ave_prev * (prev - s)) / (h - prev). At a reset
+    prev == s and the value is used as-is.
+    """
+    hours = np.asarray(forecast_hours, dtype="float64")
+    previous_hours = np.insert(hours[:-1], 0, 0.0)
+    bucket_start = (
+        np.floor((hours - 1) / GFS_AVERAGE_BUCKET_HOURS) * GFS_AVERAGE_BUCKET_HOURS
+    )
+    # Each step must start inside its own bucket (or exactly at its reset);
+    # otherwise part of the interval was averaged into an earlier bucket.
+    if np.any(previous_hours < bucket_start):
+        raise ValueError("GFS forecast hours skip a bucket reset.")
+
+    weight_now = xr.DataArray(hours - bucket_start, dims="time")
+    weight_previous = xr.DataArray(previous_hours - bucket_start, dims="time")
+    interval_hours = xr.DataArray(hours - previous_hours, dims="time")
+    previous = average.shift(time=1, fill_value=0.0)
+    interval_mean = (average * weight_now - previous * weight_previous) / interval_hours
+    return interval_mean.clip(min=0)
+
+
+def deaccumulate_gfs_fields(
+    ds: xr.Dataset, run_time: pd.Timestamp, expected_forecast_hours
+) -> None:
+    """Turn GFS run-total APCP into mm/h and bucket averages into interval means."""
+    forecast_hours = (
+        ds["time"].values - pd.Timestamp(run_time).to_datetime64()
+    ) / np.timedelta64(1, "h")
+    if not np.array_equal(forecast_hours, np.asarray(expected_forecast_hours)):
+        raise ValueError(
+            f"GFS NetCDF lead hours {forecast_hours.tolist()} do not match the "
+            f"requested hours {list(expected_forecast_hours)}."
+        )
+
+    ds["APCP_surface"] = (
+        ds["APCP_surface"].dims,
+        deaccumulate_to_hourly_rate(ds["APCP_surface"].data, forecast_hours),
+    )
+    for var_name in ("DSWRF_surface", "DUVB_surface"):
+        ds[var_name] = bucket_average_to_interval_mean(ds[var_name], forecast_hours)
 
 
 def main() -> None:
@@ -307,179 +440,7 @@ def main() -> None:
         herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
     )
 
-    # %% File names
-
-    pgrb2_merged_grib = output_path(forecast_process_path, "pgrb2_0p25_merged.grib")
-
-    apcp_norm_grib = output_path(forecast_process_path, "apcp_norm.grib")
-    apcp_rate_grib = output_path(forecast_process_path, "apcp_rate_mmhr.grib")
-    apcp_rate_nc4 = output_path(forecast_process_path, "apcp_rate_mmhr.nc4")
-
-    apcp_dt1_inv = output_path(forecast_process_path, "apcp_dt1.inv")
-    apcp_dt3_inv = output_path(forecast_process_path, "apcp_dt3.inv")
-    apcp_dt_other_inv = output_path(forecast_process_path, "apcp_dt_other.inv")
-
-    dswrf_norm_grib = output_path(forecast_process_path, "dswrf_norm.grib")
-    dswrf_norm_nc4 = output_path(forecast_process_path, "dswrf_norm.nc4")
-
-    other_fields_nc4 = output_path(forecast_process_path, "other_fields.nc4")
-
-    duvb_merged_grib = output_path(forecast_process_path, "duvb_merged.grib")
-    duvb_merged_nc4 = output_path(forecast_process_path, "duvb_merged.nc4")
-    duvb_norm_grib = output_path(forecast_process_path, "duvb_norm.grib")
-
-    # Clean old intermediate/output files that may be appended to or regenerated.
-    for path in [
-        pgrb2_merged_grib,
-        apcp_norm_grib,
-        apcp_rate_grib,
-        apcp_rate_nc4,
-        apcp_dt1_inv,
-        apcp_dt3_inv,
-        apcp_dt_other_inv,
-        dswrf_norm_grib,
-        dswrf_norm_nc4,
-        other_fields_nc4,
-        duvb_merged_grib,
-        duvb_merged_nc4,
-        duvb_norm_grib,
-    ]:
-        if os.path.exists(path):
-            os.remove(path)
-
-    # %% Merge pgrb2.0p25 GRIBs
-
-    cmd_merge_pgrb2 = (
-        f"{cat_gribs(pgrb2_grib_files)} | "
-        f"{quote_path(wgrib2_exe)} - "
-        f"-grib {quote_path(pgrb2_merged_grib)}"
-    )
-
-    run_checked(cmd_merge_pgrb2, "Merge GFS pgrb2.0p25 GRIB files")
-
-    # %% Normalize APCP, convert accumulated precipitation to mm/hr, and write NetCDF
-
-    cmd_norm_apcp = (
-        f"{quote_path(wgrib2_exe)} {quote_path(pgrb2_merged_grib)} "
-        "-match ':APCP:surface:' "
-        "-set_grib_type c1 "
-        f"-ncep_norm {quote_path(apcp_norm_grib)}"
-    )
-
-    run_checked(cmd_norm_apcp, "Normalize APCP")
-
-    # Split normalized APCP inventory by accumulation interval length.
-    awk_prog = (
-        "{ "
-        "ftime = $6; "
-        'split(ftime, p, " "); '
-        'split(p[1], h, "-"); '
-        'if (p[3] != "acc" || p[4] != "fcst") next; '
-        "dt = h[2] - h[1]; "
-        'if (p[2] == "day") dt = dt * 24; '
-        f'if (dt == 1) print > "{awk_path(apcp_dt1_inv)}"; '
-        f'else if (dt == 3) print > "{awk_path(apcp_dt3_inv)}"; '
-        f'else print > "{awk_path(apcp_dt_other_inv)}"; '
-        "}"
-    )
-
-    cmd_split_apcp_intervals = (
-        f"{quote_path(wgrib2_exe)} {quote_path(apcp_norm_grib)} "
-        "-s "
-        "-match ':APCP:surface:' "
-        "| "
-        f"awk -F: {quote_path(awk_prog)}"
-    )
-
-    run_checked(
-        cmd_split_apcp_intervals, "Split APCP inventory by accumulation interval"
-    )
-
-    if has_records(apcp_dt_other_inv):
-        logger.warning(
-            "Found APCP records with accumulation intervals other than 1 or 3 hours: %s",
-            apcp_dt_other_inv,
-        )
-
-    apcp_rate_written = False
-
-    for interval_hours, inventory_file in [
-        (1, apcp_dt1_inv),
-        (3, apcp_dt3_inv),
-    ]:
-        if not has_records(inventory_file):
-            logger.warning(
-                "No %s-hour APCP accumulation records found in %s.",
-                interval_hours,
-                inventory_file,
-            )
-            continue
-
-        append_arg = " -append" if apcp_rate_written else ""
-
-        cmd_apcp_to_rate = (
-            f"cat {quote_path(inventory_file)} | "
-            f"{quote_path(wgrib2_exe)} {quote_path(apcp_norm_grib)} "
-            "-i "
-            f"-rpn '{interval_hours}:/' "
-            "-set_grib_type c1 "
-            f"{append_arg} "
-            f"-grib_out {quote_path(apcp_rate_grib)}"
-        )
-
-        run_checked(
-            cmd_apcp_to_rate,
-            f"Convert {interval_hours}-hour APCP accumulations to mm/hr",
-        )
-
-        apcp_rate_written = True
-
-    if not apcp_rate_written:
-        logger.error("No APCP records were converted to precipitation rate.")
-        sys.exit(1)
-
-    cmd_apcp_rate_to_nc4 = (
-        f"{quote_path(wgrib2_exe)} {quote_path(apcp_rate_grib)} "
-        "-nc4 "
-        f"-netcdf {quote_path(apcp_rate_nc4)}"
-    )
-
-    run_checked(cmd_apcp_rate_to_nc4, "Convert APCP rate GRIB to NetCDF")
-
-    # %% Normalize DSWRF and write NetCDF
-
-    cmd_norm_dswrf = (
-        f"{quote_path(wgrib2_exe)} {quote_path(pgrb2_merged_grib)} "
-        "-match ':DSWRF:' "
-        "-set_grib_type c1 "
-        f"-ncep_norm {quote_path(dswrf_norm_grib)}"
-    )
-
-    run_checked(cmd_norm_dswrf, "Normalize DSWRF")
-
-    cmd_dswrf_to_nc4 = (
-        f"{quote_path(wgrib2_exe)} {quote_path(dswrf_norm_grib)} "
-        "-nc4 "
-        f"-netcdf {quote_path(dswrf_norm_nc4)}"
-    )
-
-    run_checked(cmd_dswrf_to_nc4, "Convert DSWRF normalized GRIB to NetCDF")
-
-    # %% Convert remaining pgrb2.0p25 fields to NetCDF
-
-    cmd_other_fields_to_nc4 = (
-        f"{quote_path(wgrib2_exe)} {quote_path(pgrb2_merged_grib)} "
-        "-not ':APCP:surface:' "
-        "-not ':DSWRF:' "
-        "-nc4 "
-        f"-netcdf {quote_path(other_fields_nc4)}"
-    )
-
-    run_checked(
-        cmd_other_fields_to_nc4, "Convert remaining pgrb2.0p25 fields to NetCDF"
-    )
-
-    # %% Download, validate, and process UV data from pgrb2b.0p25
+    # %% Download UV data from pgrb2b.0p25
 
     duvb_match_string = ":DUVB:surface:"
 
@@ -495,50 +456,15 @@ def main() -> None:
         herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
     )
 
-    cmd_merge_duvb = (
-        f"{cat_gribs(duvb_grib_files)} | "
-        f"{quote_path(wgrib2_exe)} - "
-        f"-grib {quote_path(duvb_merged_grib)}"
-    )
+    # %% Read the GRIB subsets with xarray/cfgrib, then de-accumulate in xarray
 
-    run_checked(cmd_merge_duvb, "Merge DUVB GRIB files")
-
-    cmd_norm_duvb = (
-        f"{quote_path(wgrib2_exe)} {quote_path(duvb_merged_grib)} "
-        "-set_grib_type c1 "
-        f"-ncep_norm {quote_path(duvb_norm_grib)}"
-    )
-
-    run_checked(cmd_norm_duvb, "Normalize DUVB")
-
-    cmd_duvb_to_nc4 = (
-        f"{quote_path(wgrib2_exe)} {quote_path(duvb_norm_grib)} "
-        "-nc4 "
-        f"-netcdf {quote_path(duvb_merged_nc4)}"
-    )
-
-    run_checked(cmd_duvb_to_nc4, "Convert DUVB normalized GRIB to NetCDF")
-
-    # %% Merge NetCDF datasets with xarray
-
-    ds_other_fields = xr.open_mfdataset(other_fields_nc4, parallel=True)
-    ds_apcp_rate = xr.open_mfdataset(apcp_rate_nc4, parallel=True)
-    ds_duvb = xr.open_mfdataset(duvb_merged_nc4, parallel=True)
-    ds_dswrf = xr.open_mfdataset(dswrf_norm_nc4, parallel=True)
-
-    xarray_forecast_merged = xr.merge(
-        [
-            ds_dswrf,
-            ds_other_fields,
-            ds_apcp_rate,
-            ds_duvb,
-        ],
-        compat="override",
-    )
+    xarray_forecast_merged = open_gfs_gribs(pgrb2_grib_files, duvb_grib_files)
 
     assert len(xarray_forecast_merged.time) == len(gfs_forecast_hours), (
         "Incorrect number of timesteps! Exiting"
     )
+
+    deaccumulate_gfs_fields(xarray_forecast_merged, base_time, gfs_forecast_hours)
 
     # Create a new time series
     start = xarray_forecast_merged.time.min().values  # Adjust as necessary
@@ -628,10 +554,6 @@ def main() -> None:
 
     # %% Delete to free memory
     del (
-        ds_other_fields,
-        ds_apcp_rate,
-        ds_duvb,
-        ds_dswrf,
         directions_chunked,
         distanced_chunked,
         distanced_stacked,
@@ -641,25 +563,6 @@ def main() -> None:
     T1 = time.time()
 
     logger.info(T1 - T0)
-
-    # Remove forecast intermediate GRIB/NetCDF/inventory artifacts.
-    for path in [
-        pgrb2_merged_grib,
-        apcp_norm_grib,
-        apcp_rate_grib,
-        apcp_rate_nc4,
-        apcp_dt1_inv,
-        apcp_dt3_inv,
-        apcp_dt_other_inv,
-        dswrf_norm_grib,
-        dswrf_norm_nc4,
-        other_fields_nc4,
-        duvb_merged_grib,
-        duvb_merged_nc4,
-        duvb_norm_grib,
-    ]:
-        if os.path.exists(path):
-            os.remove(path)
 
     ################################################################################################
     # Historic Data Processing
@@ -694,19 +597,8 @@ def main() -> None:
         hist_run_date = base_time - pd.Timedelta(hours=hours_offset)
         hist_forecast_hours = HISTORICAL_FORECAST_HOURS
 
-        hist_pgrb2_merged_grib = hist_process_path + "_wgrib2_merged.grib"
-        hist_apcp_norm_grib = hist_process_path + "_apcp_norm.grib"
-        hist_apcp_rate_nc4 = hist_process_path + "_apcp_rate_mmhr.nc4"
-        hist_dswrf_norm_grib = hist_process_path + "_dswrf_norm.grib"
-        hist_dswrf_norm_nc4 = hist_process_path + "_dswrf_norm.nc4"
-        hist_other_fields_nc4 = hist_process_path + "_other_fields.nc4"
-        hist_pgrb2_uv_merged_grib = hist_process_path + "_wgrib2_merged_UV.grib"
-        hist_duvb_norm_grib = hist_process_path + "_duvb_norm.grib"
-        hist_pgrb2_uv_merged_nc4 = hist_process_path + "_wgrib2_merged_UV.nc4"
-
         logger.info("Downloading historic data: %s", timestamp)
 
-        # Create a range of dates for historic data going back 48 hours
         grib_list = download_and_validate_gfs_subset(
             product="pgrb2.0p25",
             search=match_strings,
@@ -719,65 +611,6 @@ def main() -> None:
             herbie_save_dir=herbie_save_dir,
             herbie_download_retries=herbie_download_retries,
             herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
-        )
-
-        cmd_merge_hist_pgrb2 = (
-            f"{cat_gribs(grib_list)} | "
-            f"{quote_path(wgrib2_exe)} - "
-            f"-grib {quote_path(hist_pgrb2_merged_grib)}"
-        )
-
-        run_checked(cmd_merge_hist_pgrb2, "Merge historic GFS pgrb2.0p25 GRIB files")
-
-        cmd_norm_hist_apcp = (
-            f"{quote_path(wgrib2_exe)} {quote_path(hist_pgrb2_merged_grib)} "
-            "-match ':APCP:surface:' "
-            "-set_grib_type c1 "
-            f"-ncep_norm {quote_path(hist_apcp_norm_grib)}"
-        )
-
-        run_checked(cmd_norm_hist_apcp, "Normalize historic APCP")
-
-        cmd_hist_apcp_rate_to_nc4 = (
-            f"{quote_path(wgrib2_exe)} {quote_path(hist_apcp_norm_grib)} "
-            "-nc4 "
-            f"-netcdf {quote_path(hist_apcp_rate_nc4)}"
-        )
-
-        run_checked(
-            cmd_hist_apcp_rate_to_nc4, "Convert historic APCP rate GRIB to NetCDF"
-        )
-
-        cmd_norm_hist_dswrf = (
-            f"{quote_path(wgrib2_exe)} {quote_path(hist_pgrb2_merged_grib)} "
-            "-match ':DSWRF:' "
-            "-set_grib_type c1 "
-            f"-ncep_norm {quote_path(hist_dswrf_norm_grib)}"
-        )
-
-        run_checked(cmd_norm_hist_dswrf, "Normalize historic DSWRF")
-
-        cmd_hist_dswrf_to_nc4 = (
-            f"{quote_path(wgrib2_exe)} {quote_path(hist_dswrf_norm_grib)} "
-            "-nc4 "
-            f"-netcdf {quote_path(hist_dswrf_norm_nc4)}"
-        )
-
-        run_checked(
-            cmd_hist_dswrf_to_nc4, "Convert historic DSWRF normalized GRIB to NetCDF"
-        )
-
-        cmd_hist_other_fields_to_nc4 = (
-            f"{quote_path(wgrib2_exe)} {quote_path(hist_pgrb2_merged_grib)} "
-            "-not ':APCP:surface:' "
-            "-not ':DSWRF:' "
-            "-nc4 "
-            f"-netcdf {quote_path(hist_other_fields_nc4)}"
-        )
-
-        run_checked(
-            cmd_hist_other_fields_to_nc4,
-            "Convert historic non-APCP fields to NetCDF",
         )
 
         # Download and add UV data from the pgrb2b product
@@ -796,57 +629,9 @@ def main() -> None:
             herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
         )
 
-        cmd_merge_hist_pgrb2_uv = (
-            f"{cat_gribs(grib_list_uv)} | "
-            f"{quote_path(wgrib2_exe)} - "
-            f"-grib {quote_path(hist_pgrb2_uv_merged_grib)}"
-        )
-
-        run_checked(
-            cmd_merge_hist_pgrb2_uv,
-            "Merge historic GFS pgrb2b.0p25 DUVB GRIB files",
-        )
-
-        cmd_norm_hist_duvb = (
-            f"{quote_path(wgrib2_exe)} {quote_path(hist_pgrb2_uv_merged_grib)} "
-            "-set_grib_type c1 "
-            f"-ncep_norm {quote_path(hist_duvb_norm_grib)}"
-        )
-
-        run_checked(cmd_norm_hist_duvb, "Normalize historic DUVB")
-
-        cmd_hist_duvb_to_nc4 = (
-            f"{quote_path(wgrib2_exe)} {quote_path(hist_duvb_norm_grib)} "
-            "-nc4 "
-            f"-netcdf {quote_path(hist_pgrb2_uv_merged_nc4)}"
-        )
-
-        run_checked(
-            cmd_hist_duvb_to_nc4,
-            "Convert historic DUVB normalized GRIB to NetCDF",
-        )
-
-        # Merge the UV data and xarrays
-        # Read the netcdf file using xarray
-        ds_other_fields = xr.open_mfdataset(hist_other_fields_nc4, parallel=True)
-        ds_apcp_rate = xr.open_mfdataset(hist_apcp_rate_nc4, parallel=True)
-        ds_historic_duvb = xr.open_mfdataset(hist_pgrb2_uv_merged_nc4, parallel=True)
-        ds_historic_dswrf = xr.open_mfdataset(hist_dswrf_norm_nc4, parallel=True)
-
-        xarray_hist_merged = xr.merge(
-            [
-                ds_historic_dswrf,
-                ds_other_fields,
-                ds_apcp_rate,
-                ds_historic_duvb,
-            ],
-            compat="override",
-        )
-
-        # Fix things
-        # Historic APCP has already been deaccumulated by wgrib2.
-        xarray_hist_merged["APCP_surface"] = xarray_hist_merged["APCP_surface"].clip(
-            min=0
+        xarray_hist_merged = open_gfs_gribs(grib_list, grib_list_uv)
+        deaccumulate_gfs_fields(
+            xarray_hist_merged, hist_run_date, list(hist_forecast_hours)
         )
 
         # Storm distance and direction
@@ -883,14 +668,6 @@ def main() -> None:
             }
         )
 
-        # Clear memory
-        del (
-            ds_other_fields,
-            ds_apcp_rate,
-            ds_historic_dswrf,
-            ds_historic_duvb,
-        )
-
         # Rename PRES_surface to PRES_station for clarity
         # From here on out, it'll be referred to as PRES_station
         xarray_hist_merged = xarray_hist_merged.rename({"PRES_surface": "PRES_station"})
@@ -918,17 +695,6 @@ def main() -> None:
 
         # Clear the xarray dataset from memory
         del xarray_hist_merged
-
-        # Remove temp file created by wgrib2
-        os.remove(hist_pgrb2_merged_grib)
-        os.remove(hist_apcp_norm_grib)
-        os.remove(hist_apcp_rate_nc4)
-        os.remove(hist_dswrf_norm_grib)
-        os.remove(hist_dswrf_norm_nc4)
-        os.remove(hist_other_fields_nc4)
-        os.remove(hist_pgrb2_uv_merged_grib)
-        os.remove(hist_duvb_norm_grib)
-        os.remove(hist_pgrb2_uv_merged_nc4)
 
         # Save a done file to s3 to indicate that the historic data has been processed
         if save_type == "S3":

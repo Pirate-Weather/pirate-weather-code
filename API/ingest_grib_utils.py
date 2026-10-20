@@ -7,7 +7,6 @@ Author: Alexander Rey
 """
 
 import logging
-import os
 import shlex
 import sys
 import time
@@ -53,19 +52,6 @@ def cat_gribs(grib_files: list[str]) -> str:
     return "cat " + " ".join(quote_path(path) for path in grib_files)
 
 
-def output_path(forecast_process_path: str, suffix: str) -> str:
-    """Create output file path with consistent naming convention.
-
-    Args:
-        forecast_process_path: Base path for forecast processing
-        suffix: File suffix to append (e.g., 'pgrb2_0p25_merged.grib')
-
-    Returns:
-        Full output path: {forecast_process_path}_{suffix}
-    """
-    return f"{forecast_process_path}_{suffix}"
-
-
 def run_checked(cmd: str, description: str):
     """Execute shell command and exit on failure.
 
@@ -82,30 +68,6 @@ def run_checked(cmd: str, description: str):
         logger.error(sp_out.stderr)
         sys.exit(1)
     return sp_out
-
-
-def has_records(path: str) -> bool:
-    """Check if inventory file exists and contains records.
-
-    Args:
-        path: Path to inventory file
-
-    Returns:
-        True if file exists and is non-empty
-    """
-    return os.path.exists(path) and os.path.getsize(path) > 0
-
-
-def awk_path(path: str) -> str:
-    """Escape a path for safe use inside double-quoted awk strings.
-
-    Args:
-        path: Path to escape
-
-    Returns:
-        Escaped path string
-    """
-    return path.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def download_and_validate_gfs_subset(
