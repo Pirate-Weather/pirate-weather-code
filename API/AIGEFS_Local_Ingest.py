@@ -119,9 +119,7 @@ def main() -> None:
     T0 = time.time()
 
     register_aws_aigfs_aigefs_templates()
-    configure_herbie_request_timeouts(
-        nomads_request_interval_s=positive_int_env("nomads_request_interval_seconds", 5)
-    )
+    configure_herbie_request_timeouts()
 
     latest_run = HerbieLatest(
         model="aigefs",

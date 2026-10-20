@@ -44,6 +44,7 @@ from API.ingest_utils import (
     FORECAST_LEAD_RANGES,
     archive_tmp_zarr_and_upload,
     close_store,
+    configure_herbie_request_timeouts,
     configure_zarr_writes,
     deaccumulate_to_hourly_rate,
     download_extract_historic_archive,
@@ -260,6 +261,8 @@ def deaccumulate_gfs_fields(
 def main() -> None:
     """Run the ingest."""
     logging.basicConfig(level=logging.INFO)
+    # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
+    configure_herbie_request_timeouts()
     herbie_download_retries = positive_int_env(
         "herbie_download_retries", DEFAULT_HERBIE_RETRIES
     )

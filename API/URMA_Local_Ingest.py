@@ -34,6 +34,7 @@ from API.ingest_utils import (
     archive_tmp_zarr_and_upload,
     broadcast_times_to_grid,
     close_store,
+    configure_herbie_request_timeouts,
     configure_zarr_writes,
     download_extract_historic_archive,
     earth_relative_wind_components,
@@ -90,6 +91,8 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
+    # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
+    configure_herbie_request_timeouts()
 
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     # URMA writes its stores with plain zarr/xarray calls, so only the open-file
@@ -117,7 +120,7 @@ def main() -> None:
         n=12,
         product="anl",
         verbose=True,
-        priority=["aws", "nomdas"],
+        priority=["aws", "nomads"],
         save_dir=herbie_save_dir,
     )
 
@@ -170,7 +173,7 @@ def main() -> None:
             model="urma",
             product="anl",
             verbose=False,
-            priority=["aws", "nomdas"],
+            priority=["aws", "nomads"],
             save_dir=herbie_save_dir,
         )
 

@@ -148,9 +148,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     nbm_staged_path: str | None = None
     nbm_maps_staged_path: str | None = None
-    configure_herbie_request_timeouts(
-        nomads_request_interval_s=positive_int_env("nomads_request_interval_seconds", 5)
-    )
+    configure_herbie_request_timeouts()
 
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 

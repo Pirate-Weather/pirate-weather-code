@@ -26,6 +26,7 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    configure_herbie_request_timeouts,
     configure_zarr_writes,
     mask_invalid_data,
     mask_invalid_refc,
@@ -94,6 +95,8 @@ zarr_vars = (
 def main() -> None:
     """Run the 6-hourly HRRR ingest."""
     logging.basicConfig(level=logging.INFO)
+    # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
+    configure_herbie_request_timeouts()
 
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     zarr_store_workers = configure_zarr_writes()

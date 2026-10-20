@@ -25,6 +25,7 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    configure_herbie_request_timeouts,
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
@@ -61,6 +62,8 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 def main() -> None:
     """Run the ingest."""
     logging.basicConfig(level=logging.INFO)
+    # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
+    configure_herbie_request_timeouts()
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
     # Define the processing chunk size

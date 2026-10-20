@@ -24,6 +24,7 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    configure_herbie_request_timeouts,
     configure_zarr_writes,
     download_herbie_with_retry,
     interp_time_take_blend,
@@ -67,6 +68,8 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 def main() -> None:
     """Run the ingest."""
     logging.basicConfig(level=logging.INFO)
+    # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
+    configure_herbie_request_timeouts()
     herbie_download_retries = positive_int_env(
         "herbie_download_retries", DEFAULT_HERBIE_RETRIES
     )

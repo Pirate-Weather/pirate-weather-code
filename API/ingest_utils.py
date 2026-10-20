@@ -367,23 +367,32 @@ def configure_herbie_request_timeouts(
     *,
     nomads_request_interval_s: float | None = None,
 ) -> None:
-    """Bound Herbie requests and optionally pace requests to NOMADS."""
+    """Bound Herbie request times and pace every Herbie request to NOMADS.
+
+    NOMADS rate-limits by client IP across all ingests, answering aggressive
+    clients with redirects to an HTML page (#772), so pacing is always on. The
+    interval comes from ``nomads_request_interval_seconds`` (default 5 s) unless
+    given; calling again without an interval keeps the pacing already set up.
+    Requests to other sources (AWS, Google, MSC, ECMWF) are not slowed down.
+    """
     if request_timeout_s is None:
         request_timeout_s = positive_int_env("herbie_request_timeout_seconds", 120)
 
     from herbie import core
 
     Herbie = core.Herbie
-    if nomads_request_interval_s is not None:
-        if nomads_request_interval_s <= 0:
-            raise ValueError("NOMADS request interval must be positive")
-        if isinstance(core.requests, _HerbieRequests):
+    if nomads_request_interval_s is not None and nomads_request_interval_s <= 0:
+        raise ValueError("NOMADS request interval must be positive")
+    if isinstance(core.requests, _HerbieRequests):
+        if nomads_request_interval_s is not None:
             core.requests.interval_s = nomads_request_interval_s
-            core.requests.timeout_s = request_timeout_s
-        else:
-            core.requests = _HerbieRequests(
-                nomads_request_interval_s, request_timeout_s
+        core.requests.timeout_s = request_timeout_s
+    else:
+        if nomads_request_interval_s is None:
+            nomads_request_interval_s = positive_int_env(
+                "nomads_request_interval_seconds", 5
             )
+        core.requests = _HerbieRequests(nomads_request_interval_s, request_timeout_s)
 
     if getattr(Herbie, "_pirate_weather_request_timeout_s", None) == request_timeout_s:
         return

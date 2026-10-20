@@ -31,6 +31,7 @@ from API.ingest_utils import (
     VALID_DATA_MAX,
     VALID_DATA_MIN,
     close_store,
+    configure_herbie_request_timeouts,
     configure_zarr_writes,
     earth_relative_wind_components,
     make_herbie_save_dir,
@@ -84,6 +85,8 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
+    # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
+    configure_herbie_request_timeouts()
 
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     zarr_store_workers = configure_zarr_writes()
@@ -107,7 +110,7 @@ def main() -> None:
         freq="15min",
         product="anl",
         verbose=True,
-        priority=["aws", "nomdas"],
+        priority=["aws", "nomads"],
         save_dir=herbie_save_dir,
     )
 
@@ -137,7 +140,7 @@ def main() -> None:
         model="rtma_ru",
         product="anl",
         verbose=False,
-        priority=["aws", "nomdas"],
+        priority=["aws", "nomads"],
         save_dir=herbie_save_dir,
     )
 
