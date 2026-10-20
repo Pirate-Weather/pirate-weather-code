@@ -3,6 +3,7 @@
 
 import logging
 import os
+import pickle
 import re
 import resource
 import shlex
@@ -31,7 +32,6 @@ from API.constants.shared_const import (
 
 # Logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 # Shared ingest constants
 CHUNK_SIZES = {
@@ -234,9 +234,9 @@ def tune_nofile_limit(target: int = 65535) -> None:
             new_soft = min(max(soft, target), hard)
         if new_soft > soft:
             resource.setrlimit(resource.RLIMIT_NOFILE, (new_soft, hard))
-            print(f"Raised nofile soft limit from {soft} to {new_soft}")
+            logger.info("Raised nofile soft limit from %s to %s", soft, new_soft)
     except (ValueError, OSError) as exc:
-        print(f"Warning: unable to tune nofile limit: {exc}")
+        logger.warning("Unable to tune nofile limit: %s", exc)
 
 
 def positive_int_env(name: str, default: int) -> int:
@@ -245,10 +245,10 @@ def positive_int_env(name: str, default: int) -> int:
     try:
         value = int(raw)
     except ValueError:
-        print(f"Warning: invalid {name}={raw!r}; using {default}")
+        logger.warning("Invalid %s=%r; using %s", name, raw, default)
         return default
     if value < 1:
-        print(f"Warning: {name}={value} must be >= 1; using {default}")
+        logger.warning("%s=%s must be >= 1; using %s", name, value, default)
         return default
     return value
 
@@ -269,29 +269,49 @@ def configure_zarr_limits(
             workers = min(workers, worker_cap)
             async_concurrency = min(async_concurrency, async_cap)
     except (ValueError, OSError) as exc:
-        print(f"Warning: unable to read nofile limit for zarr tuning: {exc}")
+        logger.warning("Unable to read nofile limit for zarr tuning: %s", exc)
 
     async_concurrency = min(async_concurrency, workers)
     if workers < requested_workers:
-        print(
-            "Clamped zarr_store_workers from "
-            f"{requested_workers} to {workers} based on nofile limits"
+        logger.info(
+            "Clamped zarr_store_workers from %s to %s based on nofile limits",
+            requested_workers,
+            workers,
         )
     if async_concurrency < requested_async_concurrency:
-        print(
-            "Clamped zarr_async_concurrency from "
-            f"{requested_async_concurrency} to {async_concurrency} based on nofile limits"
+        logger.info(
+            "Clamped zarr_async_concurrency from %s to %s based on nofile limits",
+            requested_async_concurrency,
+            async_concurrency,
         )
 
     # Local import keeps helper lightweight for non-zarr callers.
     import zarr
 
     zarr.config.set({"async.concurrency": async_concurrency})
-    print(
-        f"Configured zarr write parallelism: workers={workers}, "
-        f"async_concurrency={async_concurrency}"
+    logger.info(
+        "Configured zarr write parallelism: workers=%s, async_concurrency=%s",
+        workers,
+        async_concurrency,
     )
     return workers, async_concurrency
+
+
+def configure_zarr_writes(
+    default_workers: int = 2, default_async_concurrency: int = 2
+) -> int:
+    """Set up zarr write parallelism for an ingest run and return the worker count.
+
+    Reads ``zarr_store_workers`` / ``zarr_async_concurrency`` from the environment,
+    raises the open-file limit, and clamps both so large local stores do not run
+    out of file descriptors.
+    """
+    tune_nofile_limit()
+    zarr_store_workers, _ = configure_zarr_limits(
+        positive_int_env("zarr_store_workers", default_workers),
+        positive_int_env("zarr_async_concurrency", default_async_concurrency),
+    )
+    return zarr_store_workers
 
 
 def make_herbie_save_dir(tmp_dir: str, prefix: str = "herbie") -> str:
@@ -640,7 +660,9 @@ def safe_herbie_local_file_path(
         except FileExistsError as exc:
             conflict_path = getattr(exc, "filename", None)
             if conflict_path and os.path.isfile(conflict_path):
-                print(f"Repairing Herbie cache path collision at: {conflict_path}")
+                logger.info(
+                    "Repairing Herbie cache path collision at: %s", conflict_path
+                )
                 os.remove(conflict_path)
                 os.makedirs(conflict_path, exist_ok=True)
             elif conflict_path and not os.path.exists(conflict_path):
@@ -668,6 +690,138 @@ def close_store(store: object) -> None:
     close_fn = getattr(store, "close", None)
     if callable(close_fn):
         close_fn()
+
+
+def clear_directory(path: str, keep: str | None = None) -> None:
+    """Empty ``path`` (creating it if needed), optionally keeping one entry.
+
+    The CMC ingests keep their Herbie download cache (``keep``) between runs so
+    unchanged GRIB files are not downloaded again.
+    """
+    os.makedirs(path, exist_ok=True)
+    keep_path = os.path.abspath(keep) if keep else None
+    for entry in os.scandir(path):
+        if os.path.abspath(entry.path) == keep_path:
+            continue
+        if entry.is_dir(follow_symlinks=False):
+            shutil.rmtree(entry.path)
+        else:
+            os.remove(entry.path)
+
+
+def read_published_run_time(pickle_path: str, save_type: str, s3) -> Any | None:
+    """Return the run time recorded by the last published ingest, or None.
+
+    Every ingest publishes ``<MODEL>.time.pickle`` next to its store; comparing it
+    with the newest available run is how a scheduled ingest decides whether there
+    is anything new to process.
+    """
+    if save_type == "S3":
+        if not s3.exists(pickle_path):
+            return None
+        with s3.open(pickle_path, "rb") as f:
+            return pickle.load(f)
+
+    if not os.path.exists(pickle_path):
+        return None
+    with open(pickle_path, "rb") as f:
+        return pickle.load(f)
+
+
+def promote_staged_dir(staged_path: str, final_path: str) -> None:
+    """Swap a fully written store directory into place.
+
+    The API may open the store at any moment, so the previous store is renamed
+    aside and the staged one renamed in (both within one directory) instead of
+    copying over the old store, which would also leave stale chunks behind.
+    """
+    backup_path = final_path + ".prev"
+    shutil.rmtree(backup_path, ignore_errors=True)
+    if os.path.exists(final_path):
+        os.replace(final_path, backup_path)
+    os.replace(staged_path, final_path)
+    shutil.rmtree(backup_path, ignore_errors=True)
+
+
+def _publish_file_or_store(
+    name: str, process_dir: str, publish_dir: str, save_type: str, s3
+) -> None:
+    """Upload one output to S3, or copy it locally (store directories are swapped in)."""
+    source_path = os.path.join(process_dir, name)
+    target_path = f"{publish_dir}/{name}"
+    if save_type == "S3":
+        s3.put_file(source_path, target_path)
+    elif os.path.isdir(source_path):
+        staged_path = target_path + ".partial"
+        shutil.rmtree(staged_path, ignore_errors=True)
+        shutil.copytree(source_path, staged_path)
+        promote_staged_dir(staged_path, target_path)
+    else:
+        shutil.copy2(source_path, target_path)
+    logger.info("Published %s to %s", name, target_path)
+
+
+def publish_ingest_run(
+    output_names: Iterable[str],
+    run_time: Any,
+    time_pickle_name: str,
+    *,
+    process_dir: str,
+    publish_dir: str,
+    save_type: str,
+    s3,
+) -> None:
+    """Publish a finished run: its outputs first, then ``<MODEL>.time.pickle``.
+
+    ``output_names`` are entries in ``process_dir`` such as ``GEFS.zarr.zip`` (S3)
+    or ``GEFS.zarr`` (local), plus any side files the API reads. S3 outputs are
+    uploaded; local store directories are staged next to the destination and
+    swapped in. The run-time pickle is how the API and the next scheduled ingest
+    see that a new run exists, so it is only written once every output is in place.
+    """
+    for name in output_names:
+        _publish_file_or_store(name, process_dir, publish_dir, save_type, s3)
+
+    with open(os.path.join(process_dir, time_pickle_name), "wb") as f:
+        pickle.dump(run_time, f)
+    _publish_file_or_store(time_pickle_name, process_dir, publish_dir, save_type, s3)
+
+
+def write_final_zarr(
+    stacked: da.Array,
+    store_path: str,
+    final_chunk: int,
+    zarr_store_workers: int,
+) -> None:
+    """Write the final ``(variable, time, y, x)`` array the API reads.
+
+    One chunk holds every variable and time step for a ``final_chunk`` square of
+    grid cells, so a point forecast is a single chunk read. ``stacked`` must
+    already be padded to a multiple of ``final_chunk``. ``store_path`` ending in
+    ``.zip`` writes an uncompressed ZipStore for S3 upload, otherwise a local
+    directory store. Values are rounded to 5 decimals to help compression.
+    """
+    import dask
+    import zarr
+
+    if store_path.endswith(".zip"):
+        store = zarr.storage.ZipStore(store_path, mode="a", compression=0)
+    else:
+        store = zarr.storage.LocalStore(store_path)
+
+    final_chunks = (stacked.shape[0], stacked.shape[1], final_chunk, final_chunk)
+    zarr_array = zarr.create_array(
+        store=store,
+        shape=stacked.shape,
+        chunks=final_chunks,
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32",
+    )
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+        stacked.round(5).rechunk(final_chunks).to_zarr(
+            zarr_array, overwrite=True, compute=True
+        )
+    close_store(store)
 
 
 def archive_tmp_zarr_and_upload(

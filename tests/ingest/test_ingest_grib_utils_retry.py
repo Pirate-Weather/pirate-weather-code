@@ -47,7 +47,7 @@ def test_download_subset_rebuilds_fast_herbie_between_retries(tmp_path, monkeypa
     )
     monkeypatch.setattr(ingest_grib_utils.time, "sleep", lambda _seconds: None)
 
-    paths = ingest_grib_utils.download_and_validate_gfs_subset(
+    paths = ingest_grib_utils.download_and_validate_subset(
         model="gdps",
         product="15km",
         search=None,

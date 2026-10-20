@@ -40,11 +40,12 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     close_store,
-    configure_zarr_limits,
+    configure_zarr_writes,
     mask_invalid_data,
     pad_to_chunk_size,
-    positive_int_env,
-    tune_nofile_limit,
+    publish_ingest_run,
+    read_published_run_time,
+    write_final_zarr,
 )
 from API.raqdps_herbie_template import raqdps
 from API.raqdps_utils import (
@@ -325,8 +326,7 @@ def expand_time_array(time_array, reference_shape):
 
 def prepare_directories():
     """Reset processing directories and ensure output roots exist."""
-    if os.path.exists(forecast_process_dir):
-        shutil.rmtree(forecast_process_dir, ignore_errors=True)
+    shutil.rmtree(forecast_process_dir, ignore_errors=True)
     os.makedirs(tmp_dir, exist_ok=True)
 
     if save_type != "S3":
@@ -335,28 +335,25 @@ def prepare_directories():
 
 def already_processed(base_time, s3):
     """Return True if the published RAQDPS store is already current."""
-    time_pickle_path = published_path(RAQDPS_TIME_PICKLE)
-    lat_lon_pickle_path = published_path(RAQDPS_LAT_LON_PICKLE)
-    base_time = normalize_utc(base_time)
-
-    if save_type == "S3":
-        if s3.exists(time_pickle_path):
-            with s3.open(time_pickle_path, "rb") as f:
-                is_current = normalize_utc(pickle.load(f)) >= base_time
-            if is_current and not s3.exists(lat_lon_pickle_path):
-                logger.info("RAQDPS time is current, but lat/lon pickle is missing.")
-                return False
-            return is_current
+    previous_base_time = read_published_run_time(
+        published_path(RAQDPS_TIME_PICKLE), save_type, s3
+    )
+    if previous_base_time is None:
+        return False
+    if normalize_utc(previous_base_time) < normalize_utc(base_time):
         return False
 
-    if os.path.exists(time_pickle_path):
-        with open(time_pickle_path, "rb") as f:
-            is_current = normalize_utc(pickle.load(f)) >= base_time
-        if is_current and not os.path.exists(lat_lon_pickle_path):
-            logger.info("RAQDPS time is current, but lat/lon pickle is missing.")
-            return False
-        return is_current
-    return False
+    # The API needs the lat/lon pickle to locate grid cells, so a current run
+    # without it must be reprocessed.
+    lat_lon_pickle_path = published_path(RAQDPS_LAT_LON_PICKLE)
+    if save_type == "S3":
+        lat_lon_exists = s3.exists(lat_lon_pickle_path)
+    else:
+        lat_lon_exists = os.path.exists(lat_lon_pickle_path)
+    if not lat_lon_exists:
+        logger.info("RAQDPS time is current, but lat/lon pickle is missing.")
+        return False
+    return True
 
 
 def process_forecast(base_time, zarr_store_workers):
@@ -457,78 +454,28 @@ def merge_and_publish(
     stacked_array_disk = da.from_zarr(stack_path)
     stacked_array_padded = pad_to_chunk_size(stacked_array_disk, final_chunk)
 
-    if save_type == "S3":
-        final_zarr_path = os.path.join(forecast_process_dir, "RAQDPS.zarr.zip")
-        zarr_store = zarr.storage.ZipStore(final_zarr_path, mode="a", compression=0)
-    else:
-        final_zarr_path = os.path.join(forecast_process_dir, "RAQDPS.zarr")
-        zarr_store = zarr.storage.LocalStore(final_zarr_path)
-
-    zarr_array = zarr.create_array(
-        store=zarr_store,
-        shape=stacked_array_padded.shape,
-        chunks=(
-            len(RAQDPS_OUTPUT_VARS),
-            stacked_array_padded.shape[1],
-            final_chunk,
-            final_chunk,
-        ),
-        dtype=np.float32,
-        overwrite=True,
+    raqdps_store_name = "RAQDPS.zarr.zip" if save_type == "S3" else "RAQDPS.zarr"
+    write_final_zarr(
+        stacked_array_padded,
+        os.path.join(forecast_process_dir, raqdps_store_name),
+        final_chunk,
+        zarr_store_workers,
     )
 
-    with (
-        ProgressBar(),
-        dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
-    ):
-        stacked_array_padded.round(5).rechunk(
-            (
-                len(RAQDPS_OUTPUT_VARS),
-                stacked_array_padded.shape[1],
-                final_chunk,
-                final_chunk,
-            )
-        ).to_zarr(zarr_array, overwrite=True, compute=True)
-
-    close_store(zarr_store)
-
-    time_pickle_file_path = os.path.join(tmp_dir, RAQDPS_TIME_PICKLE)
-    with open(time_pickle_file_path, "wb") as f:
-        pickle.dump(base_time, f)
-
-    lat_lon_pickle_file_path = os.path.join(tmp_dir, RAQDPS_LAT_LON_PICKLE)
+    lat_lon_pickle_file_path = os.path.join(forecast_process_dir, RAQDPS_LAT_LON_PICKLE)
     with open(lat_lon_pickle_file_path, "wb") as f:
         pickle.dump(lat_lon_lookup, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-    if save_type == "S3":
-        s3.put_file(
-            final_zarr_path,
-            os.path.join(forecast_path, ingest_version, "RAQDPS.zarr.zip"),
-        )
-        s3.put_file(
-            time_pickle_file_path,
-            published_path(RAQDPS_TIME_PICKLE),
-        )
-        s3.put_file(
-            lat_lon_pickle_file_path,
-            published_path(RAQDPS_LAT_LON_PICKLE),
-        )
-        logger.info("RAQDPS S3 target deployment complete.")
-    else:
-        shutil.move(
-            time_pickle_file_path,
-            published_path(RAQDPS_TIME_PICKLE),
-        )
-        shutil.move(
-            lat_lon_pickle_file_path,
-            published_path(RAQDPS_LAT_LON_PICKLE),
-        )
-        shutil.copytree(
-            final_zarr_path,
-            os.path.join(forecast_path, ingest_version, "RAQDPS.zarr"),
-            dirs_exist_ok=True,
-        )
-        logger.info("Saved RAQDPS datasets to local environment.")
+    # Publish the store and lat/lon grid, then the run time the API uses to detect them
+    publish_ingest_run(
+        [raqdps_store_name, RAQDPS_LAT_LON_PICKLE],
+        base_time,
+        RAQDPS_TIME_PICKLE,
+        process_dir=forecast_process_dir,
+        publish_dir=os.path.join(forecast_path, ingest_version),
+        save_type=save_type,
+        s3=s3,
+    )
 
 
 def main():
@@ -537,14 +484,8 @@ def main():
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    zarr_store_workers = positive_int_env("zarr_store_workers", 2)
-    zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
-
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-    tune_nofile_limit()
-    zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
-        zarr_store_workers, zarr_async_concurrency
-    )
+    zarr_store_workers = configure_zarr_writes()
 
     prepare_directories()
     start_time = time.time()
@@ -558,7 +499,7 @@ def main():
     logger.info("RAQDPS base time: %s", base_time)
     if already_processed(base_time, s3):
         logger.info("RAQDPS store is already up to date. Exiting.")
-        sys.exit()
+        return
 
     try:
         forecast_zarr_path, reference_shape, lat_lon_lookup = process_forecast(

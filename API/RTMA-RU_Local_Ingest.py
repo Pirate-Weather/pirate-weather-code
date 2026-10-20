@@ -4,9 +4,7 @@
 # %% Import modules
 import logging
 import os
-import pickle
 import shutil
-import sys
 import time
 import warnings
 
@@ -33,13 +31,13 @@ from API.ingest_utils import (
     VALID_DATA_MAX,
     VALID_DATA_MIN,
     close_store,
-    configure_zarr_limits,
+    configure_zarr_writes,
     earth_relative_wind_components,
     make_herbie_save_dir,
     mask_invalid_data,
     pad_to_chunk_size,
-    positive_int_env,
-    tune_nofile_limit,
+    publish_ingest_run,
+    read_published_run_time,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -86,30 +84,17 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
-    zarr_store_workers = positive_int_env("zarr_store_workers", 2)
-    zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-    tune_nofile_limit()
-    zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
-        zarr_store_workers, zarr_async_concurrency
-    )
+    zarr_store_workers = configure_zarr_writes()
 
-    # Create new directory for processing if it does not exist
-    if not os.path.exists(forecast_process_dir):
-        os.makedirs(forecast_process_dir)
-    else:
-        # If it does exist, remove it
-        shutil.rmtree(forecast_process_dir)
-        os.makedirs(forecast_process_dir)
+    # Start each run from an empty processing directory
+    shutil.rmtree(forecast_process_dir, ignore_errors=True)
+    os.makedirs(tmp_dir, exist_ok=True)
 
-    if not os.path.exists(tmp_dir):
-        os.makedirs(tmp_dir)
-
-    if save_type == "Download" and not os.path.exists(
-        forecast_path + "/" + ingest_version
-    ):
-        os.makedirs(forecast_path + "/" + ingest_version)
+    publish_dir = forecast_path + "/" + ingest_version
+    if save_type == "Download":
+        os.makedirs(publish_dir, exist_ok=True)
 
     herbie_save_dir = make_herbie_save_dir(tmp_dir)
 
@@ -129,28 +114,13 @@ def main() -> None:
     base_time = latest_run.date
     logger.info(f"Checking for new RTMA_RU data for base time: {base_time}")
 
-    # Check if this is newer than the current file
-    if save_type == "S3":
-        if s3.exists(forecast_path + "/" + ingest_version + "/RTMA_RU.time.pickle"):
-            with s3.open(
-                forecast_path + "/" + ingest_version + "/RTMA_RU.time.pickle", "rb"
-            ) as f:
-                previous_base_time = pickle.load(f)
-            if previous_base_time >= base_time:
-                logger.info("No Update to RTMA_RU, ending")
-                sys.exit()
-
-    else:
-        if os.path.exists(
-            forecast_path + "/" + ingest_version + "/RTMA_RU.time.pickle"
-        ):
-            with open(
-                forecast_path + "/" + ingest_version + "/RTMA_RU.time.pickle", "rb"
-            ) as file:
-                previous_base_time = pickle.load(file)
-            if previous_base_time >= base_time:
-                logger.info("No Update to RTMA_RU, ending")
-                sys.exit()
+    # Skip the run if this cycle has already been published
+    previous_base_time = read_published_run_time(
+        publish_dir + "/RTMA_RU.time.pickle", save_type, s3
+    )
+    if previous_base_time is not None and previous_base_time >= base_time:
+        logger.info("No Update to RTMA_RU, ending")
+        return
 
     # %% Download RTMA analysis data using Herbie Latest
     match_strings = (
@@ -253,12 +223,15 @@ def main() -> None:
     dask_var_array = pad_to_chunk_size(dask_var_array, final_chunk)
 
     # Create a zarr backed dask array
+    rtma_ru_store_name = "RTMA_RU.zarr.zip" if save_type == "S3" else "RTMA_RU.zarr"
     if save_type == "S3":
         zarr_store = zarr.storage.ZipStore(
-            forecast_process_dir + "/RTMA_RU.zarr.zip", mode="a", compression=0
+            forecast_process_dir + "/" + rtma_ru_store_name, mode="a", compression=0
         )
     else:
-        zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/RTMA_RU.zarr")
+        zarr_store = zarr.storage.LocalStore(
+            forecast_process_dir + "/" + rtma_ru_store_name
+        )
 
     # Create zarr array
     zarr_array = zarr.create_array(
@@ -281,37 +254,16 @@ def main() -> None:
     if save_type == "S3":
         logger.info("Zarr zip store closed.")
 
-    # %% Upload to S3 or move to final location
-
-    # Save to Production Path (Existing Logic)
-    if save_type == "S3":
-        s3.put_file(
-            forecast_process_dir + "/RTMA_RU.zarr.zip",
-            forecast_path + "/" + ingest_version + "/RTMA_RU.zarr.zip",
-        )
-        logger.info("Final Zarr zip file uploaded to S3.")
-
-        with open(forecast_process_dir + "/RTMA_RU.time.pickle", "wb") as file:
-            pickle.dump(base_time, file)
-        s3.put_file(
-            forecast_process_dir + "/RTMA_RU.time.pickle",
-            forecast_path + "/" + ingest_version + "/RTMA_RU.time.pickle",
-        )
-        logger.info("Time pickle file uploaded to S3.")
-
-    else:
-        with open(forecast_process_dir + "/RTMA_RU.time.pickle", "wb") as file:
-            pickle.dump(base_time, file)
-        shutil.move(
-            forecast_process_dir + "/RTMA_RU.time.pickle",
-            forecast_path + "/" + ingest_version + "/RTMA_RU.time.pickle",
-        )
-        shutil.copytree(
-            forecast_process_dir + "/RTMA_RU.zarr",
-            forecast_path + "/" + ingest_version + "/RTMA_RU.zarr",
-            dirs_exist_ok=True,
-        )
-        logger.info("Final Zarr and time pickle files moved to local storage.")
+    # %% Publish the store, then the run time the API uses to detect it
+    publish_ingest_run(
+        [rtma_ru_store_name],
+        base_time,
+        "RTMA_RU.time.pickle",
+        process_dir=forecast_process_dir,
+        publish_dir=publish_dir,
+        save_type=save_type,
+        s3=s3,
+    )
 
     # Clean up
     shutil.rmtree(forecast_process_dir)

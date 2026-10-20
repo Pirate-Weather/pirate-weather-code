@@ -8,9 +8,7 @@ import os
 # os.environ["ECCODES_DEFINITION_PATH"] = (
 #    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
 # )
-import pickle
 import shutil
-import sys
 import time
 import warnings
 
@@ -20,12 +18,12 @@ import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
-import zarr.storage
+import zarr
 from dask.diagnostics import ProgressBar
 from herbie import HerbieLatest
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
-from API.ingest_grib_utils import download_and_validate_gfs_subset
+from API.ingest_grib_utils import download_and_validate_subset
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -34,12 +32,14 @@ from API.ingest_utils import (
     VALID_DATA_MIN,
     archive_tmp_zarr_and_upload,
     close_store,
-    configure_zarr_limits,
+    configure_zarr_writes,
     download_extract_historic_archive,
     interp_time_take_blend,
     pad_to_chunk_size,
     positive_int_env,
-    tune_nofile_limit,
+    publish_ingest_run,
+    read_published_run_time,
+    write_final_zarr,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -90,7 +90,7 @@ def download_ecmwf_subset(
     search: str,
 ) -> list[str]:
     """Download and validate an IFS GRIB subset with bounded concurrency."""
-    return download_and_validate_gfs_subset(
+    return download_and_validate_subset(
         model="ifs",
         product=product,
         search=search,
@@ -110,31 +110,18 @@ def download_ecmwf_subset(
 def main() -> None:
     """Run the ECMWF IFS forecast and history ingest."""
     logging.basicConfig(level=logging.INFO)
-    zarr_store_workers = positive_int_env("zarr_store_workers", 2)
-    zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-    tune_nofile_limit()
-    zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
-        zarr_store_workers, zarr_async_concurrency
-    )
+    zarr_store_workers = configure_zarr_writes()
 
-    # Create new directory for processing if it does not exist
-    if not os.path.exists(forecast_process_dir):
-        os.makedirs(forecast_process_dir)
-    else:
-        # If it does exist, remove it
-        shutil.rmtree(forecast_process_dir)
-        os.makedirs(forecast_process_dir)
+    # Start each run from an empty processing directory
+    shutil.rmtree(forecast_process_dir, ignore_errors=True)
+    os.makedirs(tmp_dir, exist_ok=True)
 
-    if not os.path.exists(tmp_dir):
-        os.makedirs(tmp_dir)
-
+    publish_dir = forecast_path + "/" + ingest_version
     if save_type == "Download":
-        if not os.path.exists(forecast_path + "/" + ingest_version):
-            os.makedirs(forecast_path + "/" + ingest_version)
-        if not os.path.exists(historic_path):
-            os.makedirs(historic_path)
+        os.makedirs(publish_dir, exist_ok=True)
+        os.makedirs(historic_path, exist_ok=True)
 
     # %% Define base time from the most recent run
     T0 = time.time()
@@ -151,38 +138,16 @@ def main() -> None:
     )
 
     base_time = latest_run.date
-    # Base date for testing
-    # base_time = pd.Timestamp("2025-11-05 00:00:00")
 
     logger.info(base_time)
 
-    # Check if this is newer than the current file
-    if save_type == "S3":
-        # Check if the file exists and load it
-        if s3.exists(forecast_path + "/" + ingest_version + "/ECMWF.time.pickle"):
-            with s3.open(
-                forecast_path + "/" + ingest_version + "/ECMWF.time.pickle", "rb"
-            ) as f:
-                previous_base_time = pickle.load(f)
-
-            # Compare timestamps and download if the S3 object is more recent
-            if previous_base_time >= base_time:
-                logger.info("No Update to ECMWF, ending")
-                sys.exit()
-
-    else:
-        if os.path.exists(forecast_path + "/" + ingest_version + "/ECMWF.time.pickle"):
-            # Open the file in binary mode
-            with open(
-                forecast_path + "/" + ingest_version + "/ECMWF.time.pickle", "rb"
-            ) as file:
-                # Deserialize and retrieve the variable from the file
-                previous_base_time = pickle.load(file)
-
-            # Compare timestamps and download if the S3 object is more recent
-            if previous_base_time >= base_time:
-                logger.info("No Update to IFS, ending")
-                sys.exit()
+    # Skip the run if this cycle has already been published
+    previous_base_time = read_published_run_time(
+        publish_dir + "/ECMWF.time.pickle", save_type, s3
+    )
+    if previous_base_time is not None and previous_base_time >= base_time:
+        logger.info("No Update to ECMWF, ending")
+        return
 
     zarr_vars = (
         "time",
@@ -808,69 +773,35 @@ def main() -> None:
         forecast_process_path + "_stack.zarr", component="__xarray_dataarray_variable__"
     )
 
-    # Create a zarr backed dask array
-    if save_type == "S3":
-        zarr_store = zarr.storage.ZipStore(
-            forecast_process_dir + "/ECMWF.zarr.zip", mode="a"
-        )
-    else:
-        zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/ECMWF.zarr")
-
     # Define which variables are integers and need special handling
     int_vars = ["ptype"]
     # Find the index of these variables in the zarr_vars list
     int_var_indices = [i for i, v in enumerate(zarr_vars) if v in int_vars]
 
     # 1. Interpolate the stacked array to be hourly along the time axis
+    daskVarArrayStackDiskInterp = interp_time_take_blend(
+        daskVarArrayStackDisk,
+        stacked_timesUnix=stacked_timesUnix,
+        hourly_timesUnix=hourly_timesUnix,
+        nearest_vars=int_var_indices,
+        dtype="float32",
+        fill_value=np.nan,
+    )
+
     # 2. Pad to chunk size
-    # 3. Create the zarr array
-    # 4. Rechunk it to match the final array
-    # 5. Write it out to the zarr array
+    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+        daskVarArrayStackDiskInterp, final_chunk
+    )
 
-    with (
-        ProgressBar(),
-        dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
-    ):
-        # 1. Interpolate the stacked array to be hourly along the time axis
-        daskVarArrayStackDiskInterp = interp_time_take_blend(
-            daskVarArrayStackDisk,
-            stacked_timesUnix=stacked_timesUnix,
-            hourly_timesUnix=hourly_timesUnix,
-            nearest_vars=int_var_indices,
-            dtype="float32",
-            fill_value=np.nan,
+    # 3. Write the final store
+    ecmwf_store_name = "ECMWF.zarr.zip" if save_type == "S3" else "ECMWF.zarr"
+    with ProgressBar():
+        write_final_zarr(
+            daskVarArrayStackDiskInterpPad,
+            forecast_process_dir + "/" + ecmwf_store_name,
+            final_chunk,
+            zarr_store_workers,
         )
-
-        # 2. Pad to chunk size
-        daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
-            daskVarArrayStackDiskInterp, final_chunk
-        )
-
-        # 3. Create the zarr array
-        zarr_array = zarr.create_array(
-            store=zarr_store,
-            shape=(
-                len(zarr_vars),
-                len(hourly_timesUnix),
-                daskVarArrayStackDiskInterpPad.shape[2],
-                daskVarArrayStackDiskInterpPad.shape[3],
-            ),
-            chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
-
-        # 4. Rechunk it to match the final array
-        # 5. Write it out to the zarr array
-        daskVarArrayStackDiskInterpPad.round(5).rechunk(
-            (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
-        ).to_zarr(zarr_array, overwrite=True, compute=True)
-
-    close_store(zarr_store)
-
-    # TEST READ
-    # Z = zarr.storage.LocalStore(forecast_process_dir + "/ECMWF.zarr", read_only='r')
-    # Z2 = zarr.open(Z)
 
     # Rechunk subset of data for maps!
     # Want variables:
@@ -889,13 +820,16 @@ def main() -> None:
     # Add padding for map chunking (100x100)
     daskVarArrayStackDisk_maps = pad_to_chunk_size(daskVarArrayStackDisk, 100)
 
+    ecmwf_maps_store_name = (
+        "ECMWF_Maps.zarr.zip" if save_type == "S3" else "ECMWF_Maps.zarr"
+    )
     if save_type == "S3":
         zarr_store_maps = zarr.storage.ZipStore(
-            forecast_process_dir + "/ECMWF_Maps.zarr.zip", mode="a", compression=0
+            forecast_process_dir + "/" + ecmwf_maps_store_name, mode="a", compression=0
         )
     else:
         zarr_store_maps = zarr.storage.LocalStore(
-            forecast_process_dir + "/ECMWF_Maps.zarr"
+            forecast_process_dir + "/" + ecmwf_maps_store_name
         )
 
     for z in [0, 3, 5, 6, 7, 8, 9]:
@@ -926,51 +860,16 @@ def main() -> None:
 
     close_store(zarr_store_maps)
 
-    # %% Upload to S3
-    if save_type == "S3":
-        # Upload to S3
-        s3.put_file(
-            forecast_process_dir + "/ECMWF.zarr.zip",
-            forecast_path + "/" + ingest_version + "/ECMWF.zarr.zip",
-        )
-        s3.put_file(
-            forecast_process_dir + "/ECMWF_Maps.zarr.zip",
-            forecast_path + "/" + ingest_version + "/ECMWF_Maps.zarr.zip",
-        )
-
-        # Write most recent forecast time
-        with open(forecast_process_dir + "/ECMWF.time.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(base_time, file)
-
-        s3.put_file(
-            forecast_process_dir + "/ECMWF.time.pickle",
-            forecast_path + "/" + ingest_version + "/ECMWF.time.pickle",
-        )
-    else:
-        # Write most recent forecast time
-        with open(forecast_process_dir + "/ECMWF.time.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(base_time, file)
-
-        shutil.move(
-            forecast_process_dir + "/ECMWF.time.pickle",
-            forecast_path + "/" + ingest_version + "/ECMWF.time.pickle",
-        )
-
-        # Copy the zarr file to the final location
-        shutil.copytree(
-            forecast_process_dir + "/ECMWF.zarr",
-            forecast_path + "/" + ingest_version + "/ECMWF.zarr",
-            dirs_exist_ok=True,
-        )
-
-        # Copy the zarr file to the final location
-        shutil.copytree(
-            forecast_process_dir + "/ECMWF_Maps.zarr",
-            forecast_path + "/" + ingest_version + "/ECMWF_Maps.zarr",
-            dirs_exist_ok=True,
-        )
+    # %% Publish the stores, then the run time the API uses to detect them
+    publish_ingest_run(
+        [ecmwf_store_name, ecmwf_maps_store_name],
+        base_time,
+        "ECMWF.time.pickle",
+        process_dir=forecast_process_dir,
+        publish_dir=publish_dir,
+        save_type=save_type,
+        s3=s3,
+    )
 
     # Clean up
     shutil.rmtree(forecast_process_dir)

@@ -5,7 +5,6 @@
 # %% Import modules
 import logging
 import os
-import pickle
 import shutil
 import sys
 import time
@@ -17,20 +16,19 @@ import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
-import zarr
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
 from API.constants.shared_const import INGEST_VERSION_STR
+from API.ingest_grib_utils import check_grib_stats, run_checked
 from API.ingest_utils import (
-    configure_zarr_limits,
+    configure_zarr_writes,
     mask_invalid_data,
     mask_invalid_refc,
     pad_to_chunk_size,
-    positive_int_env,
-    run_command,
-    tune_nofile_limit,
-    validate_grib_stats,
+    publish_ingest_run,
+    read_published_run_time,
+    write_final_zarr,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -89,33 +87,19 @@ zarr_vars = (
 def main() -> None:
     """Run the HRRR sub-hourly ingest."""
     logging.basicConfig(level=logging.INFO)
-    zarr_store_workers = positive_int_env("zarr_store_workers", 2)
-    zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-    tune_nofile_limit()
-    zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
-        zarr_store_workers, zarr_async_concurrency
-    )
+    zarr_store_workers = configure_zarr_writes()
 
-    # Create new directory for processing if it does not exist
-    if not os.path.exists(forecast_process_dir):
-        os.makedirs(forecast_process_dir)
-    else:
-        # If it does exist, remove it
-        shutil.rmtree(forecast_process_dir)
-        os.makedirs(forecast_process_dir)
+    # Start each run from an empty processing directory
+    shutil.rmtree(forecast_process_dir, ignore_errors=True)
+    os.makedirs(tmp_dir, exist_ok=True)
 
-    if not os.path.exists(tmp_dir):
-        os.makedirs(tmp_dir)
-
-    if save_type == "Download" and not os.path.exists(
-        forecast_path + "/" + ingest_version
-    ):
-        os.makedirs(forecast_path + "/" + ingest_version)
+    publish_dir = forecast_path + "/" + ingest_version
+    if save_type == "Download":
+        os.makedirs(publish_dir, exist_ok=True)
 
     # %% Define base time from the most recent run
-    # base_time = pd.Timestamp("2023-07-01 00:00")
     T0 = time.time()
 
     latest_run = Herbie_latest(
@@ -133,35 +117,13 @@ def main() -> None:
 
     logger.info(base_time)
 
-    # Check if this is newer than the current file
-    if save_type == "S3":
-        # Check if the file exists and load it
-        if s3.exists(forecast_path + "/" + ingest_version + "/SubH_v2.time.pickle"):
-            with s3.open(
-                forecast_path + "/" + ingest_version + "/SubH_v2.time.pickle", "rb"
-            ) as f:
-                previous_base_time = pickle.load(f)
-
-            # Compare timestamps and download if the S3 object is more recent
-            if previous_base_time >= base_time:
-                logger.info("No Update to SubH, ending")
-                sys.exit()
-
-    else:
-        if os.path.exists(
-            forecast_path + "/" + ingest_version + "/SubH_v2.time.pickle"
-        ):
-            # Open the file in binary mode
-            with open(
-                forecast_path + "/" + ingest_version + "/SubH_v2.time.pickle", "rb"
-            ) as file:
-                # Deserialize and retrieve the variable from the file
-                previous_base_time = pickle.load(file)
-
-            # Compare timestamps and download if the S3 object is more recent
-            if previous_base_time >= base_time:
-                logger.info("No Update to SubH, ending")
-                sys.exit()
+    # Skip the run if this cycle has already been published
+    previous_base_time = read_published_run_time(
+        publish_dir + "/SubH.time.pickle", save_type, s3
+    )
+    if previous_base_time is not None and previous_base_time >= base_time:
+        logger.info("No Update to SubH, ending")
+        return
 
     #####################################################################################################
     # %% Download forecast data using Herbie Latest
@@ -226,12 +188,7 @@ def main() -> None:
     ]
 
     # Perform a check if any data seems to be invalid
-    cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
-
-    grib_check = run_command(cmd)
-
-    validate_grib_stats(grib_check)
-    logger.info("Grib files passed validation, proceeding with processing")
+    check_grib_stats(grib_list, wgrib2_path, "HRRR sub-hourly")
 
     # Create a string to pass to wgrib2 to merge all gribs into one netcdf
     cmd = (
@@ -246,10 +203,7 @@ def main() -> None:
     )
 
     # Run wgrib2
-    sp_out = run_command(cmd)
-    if sp_out.returncode != 0:
-        logger.error(sp_out.stderr)
-        sys.exit()
+    run_checked(cmd, "HRRR sub-hourly wgrib2 GRIB merge")
 
     # Use wgrib2 to rotate the wind vectors
     # From https://github.com/blaylockbk/pyBKB_v2/blob/master/demos/HRRR_earthRelative_vs_gridRelative_winds.ipynb
@@ -268,10 +222,7 @@ def main() -> None:
     )
 
     # Run wgrib2 to rotate winds and save as NetCDF
-    spOUT2 = run_command(cmd2)
-    if spOUT2.returncode != 0:
-        logger.error(spOUT2.stderr)
-        sys.exit()
+    run_checked(cmd2, "HRRR sub-hourly wgrib2 wind rotation")
 
     # Convert to NetCDF
     cmd3 = (
@@ -285,10 +236,7 @@ def main() -> None:
     )
 
     # Run wgrib2 to rotate winds and save as NetCDF
-    spOUT3 = run_command(cmd3)
-    if spOUT3.returncode != 0:
-        logger.error(spOUT3.stderr)
-        sys.exit()
+    run_checked(cmd3, "HRRR sub-hourly wgrib2 NetCDF conversion")
 
     # %% Create XArray
     # Read the netcdf file using xarray
@@ -392,76 +340,25 @@ def main() -> None:
     # Add padding to the zarr store for main forecast chunking
     daskVarArrayStackDisk_main = pad_to_chunk_size(daskVarArrayStackDisk, final_chunk)
 
-    # Create a zarr backed dask array
-    if save_type == "S3":
-        zarr_store = zarr.storage.ZipStore(
-            forecast_process_dir + "/SubH.zarr.zip", mode="a", compression=0
-        )
-    else:
-        zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/SubH.zarr")
-
-    zarr_array = zarr.create_array(
-        store=zarr_store,
-        shape=daskVarArrayStackDisk_main.shape,
-        chunks=(
-            len(zarr_vars),
-            daskVarArrayStackDisk_main.shape[1],
-            final_chunk,
-            final_chunk,
-        ),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
+    # Write the final store
+    subh_store_name = "SubH.zarr.zip" if save_type == "S3" else "SubH.zarr"
+    write_final_zarr(
+        daskVarArrayStackDisk_main,
+        forecast_process_dir + "/" + subh_store_name,
+        final_chunk,
+        zarr_store_workers,
     )
 
-    # with ProgressBar():
-    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        da.rechunk(
-            daskVarArrayStackDisk_main.round(5),
-            (
-                len(zarr_vars),
-                daskVarArrayStackDisk_main.shape[1],
-                final_chunk,
-                final_chunk,
-            ),
-        ).to_zarr(zarr_array, compute=True)
-
-    if save_type == "S3":
-        zarr_store.close()
-
-    # %% Upload to S3
-    if save_type == "S3":
-        # Upload to S3
-        s3.put_file(
-            forecast_process_dir + "/SubH.zarr.zip",
-            forecast_path + "/" + ingest_version + "/SubH.zarr.zip",
-        )
-
-        # Write most recent forecast time
-        with open(forecast_process_dir + "/SubH.time.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(base_time, file)
-
-        s3.put_file(
-            forecast_process_dir + "/SubH.time.pickle",
-            forecast_path + "/" + ingest_version + "/SubH.time.pickle",
-        )
-    else:
-        # Write most recent forecast time
-        with open(forecast_process_dir + "/SubH.time.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(base_time, file)
-
-        shutil.move(
-            forecast_process_dir + "/SubH.time.pickle",
-            forecast_path + "/" + ingest_version + "/SubH.time.pickle",
-        )
-
-        # Copy the zarr file to the final location
-        shutil.copytree(
-            forecast_process_dir + "/SubH.zarr",
-            forecast_path + "/" + ingest_version + "/SubH.zarr",
-            dirs_exist_ok=True,
-        )
+    # %% Publish the store, then the run time the API uses to detect it
+    publish_ingest_run(
+        [subh_store_name],
+        base_time,
+        "SubH.time.pickle",
+        process_dir=forecast_process_dir,
+        publish_dir=publish_dir,
+        save_type=save_type,
+        s3=s3,
+    )
 
     # Clean up
     shutil.rmtree(forecast_process_dir)

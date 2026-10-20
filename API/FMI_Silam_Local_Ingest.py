@@ -14,7 +14,6 @@
 import gc
 import logging
 import os
-import pickle
 import re
 import shutil
 import sys
@@ -39,12 +38,13 @@ from API.ingest_utils import (
     FINAL_CHUNK_SIZES,
     archive_tmp_zarr_and_upload,
     close_store,
-    configure_zarr_limits,
+    configure_zarr_writes,
     download_extract_historic_archive,
     mask_invalid_data,
     pad_to_chunk_size,
-    positive_int_env,
-    tune_nofile_limit,
+    publish_ingest_run,
+    read_published_run_time,
+    write_final_zarr,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -412,19 +412,11 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    zarr_store_workers = positive_int_env("zarr_store_workers", 2)
-    zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
-
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-    tune_nofile_limit()
-    zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
-        zarr_store_workers, zarr_async_concurrency
-    )
+    zarr_store_workers = configure_zarr_writes()
 
-    # Create new directory for processing if it does not exist
+    # Start each run from an empty processing directory
     shutil.rmtree(forecast_process_dir, ignore_errors=True)
-    os.makedirs(forecast_process_dir, exist_ok=True)
-
     os.makedirs(tmpDIR, exist_ok=True)
     os.makedirs(hist_process_path, exist_ok=True)
     if saveType == "S3":
@@ -432,8 +424,9 @@ def main() -> None:
     else:
         os.makedirs(historic_path, exist_ok=True)
 
+    publish_dir = forecast_path + "/" + ingestVersion
     if saveType == "Download":
-        os.makedirs(os.path.join(forecast_path, ingestVersion), exist_ok=True)
+        os.makedirs(publish_dir, exist_ok=True)
 
     start_time = time.time()
 
@@ -445,25 +438,13 @@ def main() -> None:
     logger.info(f"Attempting to download SILAM data from: {download_url}")
     logger.info(f"Model run time: {origintime}")
 
-    # Check if this is newer than the current file
-    if saveType == "S3":
-        if s3.exists(forecast_path + "/" + ingestVersion + "/SILAM.time.pickle"):
-            with s3.open(
-                forecast_path + "/" + ingestVersion + "/SILAM.time.pickle", "rb"
-            ) as f:
-                previous_base_time = pickle.load(f)
-            if previous_base_time >= origintime:
-                logger.info("No Update to SILAM, ending")
-                sys.exit()
-    else:
-        if os.path.exists(forecast_path + "/" + ingestVersion + "/SILAM.time.pickle"):
-            with open(
-                forecast_path + "/" + ingestVersion + "/SILAM.time.pickle", "rb"
-            ) as file:
-                previous_base_time = pickle.load(file)
-            if previous_base_time >= origintime:
-                logger.info("No Update to SILAM, ending")
-                sys.exit()
+    # Skip the run if this cycle has already been published
+    previous_base_time = read_published_run_time(
+        publish_dir + "/SILAM.time.pickle", saveType, s3
+    )
+    if previous_base_time is not None and previous_base_time >= origintime:
+        logger.info("No Update to SILAM, ending")
+        return
 
     # %% Download and process the latest SILAM NetCDF file
     if not download_silam_file(download_url, local_nc_path):
@@ -649,40 +630,14 @@ def main() -> None:
     stacked_array_disk = da.from_zarr(forecast_process_path + "_stack.zarr")
     stacked_array_padded = pad_to_chunk_size(stacked_array_disk, finalChunk)
 
-    if saveType == "S3":
-        zarr_store = zarr.storage.ZipStore(
-            forecast_process_dir + "/SILAM.zarr.zip", mode="a", compression=0
+    silam_store_name = "SILAM.zarr.zip" if saveType == "S3" else "SILAM.zarr"
+    with ProgressBar():
+        write_final_zarr(
+            stacked_array_padded,
+            forecast_process_dir + "/" + silam_store_name,
+            finalChunk,
+            zarr_store_workers,
         )
-    else:
-        zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/SILAM.zarr")
-
-    zarr_array = zarr.create_array(
-        store=zarr_store,
-        shape=stacked_array_padded.shape,
-        chunks=(
-            len(zarr_vars),
-            stacked_array_padded.shape[1],
-            finalChunk,
-            finalChunk,
-        ),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
-    )
-
-    with (
-        ProgressBar(),
-        dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
-    ):
-        stacked_array_padded.round(5).rechunk(
-            (
-                len(zarr_vars),
-                stacked_array_padded.shape[1],
-                finalChunk,
-                finalChunk,
-            )
-        ).to_zarr(zarr_array, overwrite=True, compute=True)
-
-    close_store(zarr_store)
 
     # Rechunk map data for faster web access.
     # Mirrors the GFS map zarr layout: one named array per variable, with all map
@@ -690,13 +645,16 @@ def main() -> None:
     # Map extent: -12 to +24 hours around the forecast origin (36 hours total).
     stacked_array_maps = pad_to_chunk_size(stacked_array_disk, MAP_CHUNK_SIZE)
 
+    silam_maps_store_name = (
+        "SILAM_Maps.zarr.zip" if saveType == "S3" else "SILAM_Maps.zarr"
+    )
     if saveType == "S3":
         zarr_store_maps = zarr.storage.ZipStore(
-            forecast_process_dir + "/SILAM_Maps.zarr.zip", mode="a"
+            forecast_process_dir + "/" + silam_maps_store_name, mode="a"
         )
     else:
         zarr_store_maps = zarr.storage.LocalStore(
-            forecast_process_dir + "/SILAM_Maps.zarr"
+            forecast_process_dir + "/" + silam_maps_store_name
         )
 
     for var_idx in MAP_VAR_INDICES:
@@ -726,49 +684,16 @@ def main() -> None:
 
     close_store(zarr_store_maps)
 
-    # %% Final output handling and cleanup
-    pickle_file_path = os.path.join(forecast_process_dir, "SILAM.time.pickle")
-    with open(pickle_file_path, "wb") as file:
-        pickle.dump(origintime, file)
-
-    if saveType == "S3":
-        s3.put_file(
-            forecast_process_dir + "/SILAM.zarr.zip",
-            os.path.join(forecast_path, ingestVersion, "SILAM.zarr.zip"),
-        )
-
-        s3.put_file(
-            forecast_process_dir + "/SILAM_Maps.zarr.zip",
-            os.path.join(forecast_path, ingestVersion, "SILAM_Maps.zarr.zip"),
-        )
-
-        s3.put_file(
-            pickle_file_path,
-            os.path.join(forecast_path, ingestVersion, "SILAM.time.pickle"),
-        )
-
-        logger.info("Uploaded SILAM zarrs and time pickle to S3.")
-    else:
-        shutil.move(
-            pickle_file_path,
-            os.path.join(forecast_path, ingestVersion, "SILAM.time.pickle"),
-        )
-
-        shutil.copytree(
-            forecast_process_dir + "/SILAM.zarr",
-            forecast_path + "/" + ingestVersion + "/SILAM.zarr",
-            dirs_exist_ok=True,
-        )
-
-        shutil.copytree(
-            forecast_process_dir + "/SILAM_Maps.zarr",
-            forecast_path + "/" + ingestVersion + "/SILAM_Maps.zarr",
-            dirs_exist_ok=True,
-        )
-        logger.info(
-            f"Saved SILAM data locally to {forecast_path}/{ingestVersion}/SILAM.zarr "
-            f"and {forecast_path}/{ingestVersion}/SILAM_Maps.zarr"
-        )
+    # %% Publish the stores, then the run time the API uses to detect them
+    publish_ingest_run(
+        [silam_store_name, silam_maps_store_name],
+        origintime,
+        "SILAM.time.pickle",
+        process_dir=forecast_process_dir,
+        publish_dir=publish_dir,
+        save_type=saveType,
+        s3=s3,
+    )
 
     # Clean up temporary files and directories
     try:

@@ -4,9 +4,7 @@
 # %% Import modules
 import logging
 import os
-import pickle
 import shutil
-import sys
 import time
 import warnings
 
@@ -36,14 +34,14 @@ from API.ingest_utils import (
     archive_tmp_zarr_and_upload,
     broadcast_times_to_grid,
     close_store,
-    configure_zarr_limits,
+    configure_zarr_writes,
     download_extract_historic_archive,
     earth_relative_wind_components,
     make_herbie_save_dir,
     mask_invalid_data,
     pad_to_chunk_size,
-    positive_int_env,
-    tune_nofile_limit,
+    publish_ingest_run,
+    read_published_run_time,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -92,29 +90,20 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
-    zarr_store_workers = positive_int_env("zarr_store_workers", 2)
-    zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-    tune_nofile_limit()
-    zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
-        zarr_store_workers, zarr_async_concurrency
-    )
+    # URMA writes its stores with plain zarr/xarray calls, so only the open-file
+    # and concurrency limits matter here; the worker count is not used.
+    configure_zarr_writes()
 
-    # Create new directory for processing if it does not exist
-    if not os.path.exists(historic_process_dir):
-        os.makedirs(historic_process_dir)
-    else:
-        # If it does exist, remove it
-        shutil.rmtree(historic_process_dir)
-        os.makedirs(historic_process_dir)
+    # Start each run from an empty processing directory
+    shutil.rmtree(historic_process_dir, ignore_errors=True)
+    os.makedirs(tmp_dir, exist_ok=True)
 
-    if not os.path.exists(tmp_dir):
-        os.makedirs(tmp_dir)
-
+    publish_dir = forecast_path + "/" + ingest_version
     if save_type == "Download":
         os.makedirs(historic_path, exist_ok=True)
-        os.makedirs(forecast_path + "/" + ingest_version, exist_ok=True)
+        os.makedirs(publish_dir, exist_ok=True)
 
     herbie_save_dir = make_herbie_save_dir(tmp_dir)
 
@@ -135,28 +124,13 @@ def main() -> None:
     base_time = latest_run.date
     logger.info(f"Checking for new URMA data for base time: {base_time}")
 
-    # Check if this is newer than the current file
-    if save_type == "S3":
-        if s3.exists(forecast_path + "/" + ingest_version + "/URMA_Hist.time.pickle"):
-            with s3.open(
-                forecast_path + "/" + ingest_version + "/URMA_Hist.time.pickle", "rb"
-            ) as f:
-                previous_base_time = pickle.load(f)
-            if previous_base_time >= base_time:
-                logger.info("No Update to URMA, ending")
-                sys.exit()
-
-    else:
-        if os.path.exists(
-            forecast_path + "/" + ingest_version + "/URMA_Hist.time.pickle"
-        ):
-            with open(
-                forecast_path + "/" + ingest_version + "/URMA_Hist.time.pickle", "rb"
-            ) as file:
-                previous_base_time = pickle.load(file)
-            if previous_base_time >= base_time:
-                logger.info("No Update to URMA, ending")
-                sys.exit()
+    # Skip the run if this cycle has already been published
+    previous_base_time = read_published_run_time(
+        publish_dir + "/URMA_Hist.time.pickle", save_type, s3
+    )
+    if previous_base_time is not None and previous_base_time >= base_time:
+        logger.info("No Update to URMA, ending")
+        return
 
     # %% Download URMA analysis data using Herbie Latest
     match_strings = (
@@ -445,36 +419,23 @@ def main() -> None:
     close_store(final_zarr.store)
     logger.info("Final URMA merge completed: %s", final_zarr_path)
 
-    # Save to Production Path
+    # Save to Production Path. S3 serves a single zip of the directory store.
     if save_type == "S3":
         shutil.make_archive(final_zarr_path, "zip", final_zarr_path)
-        s3.put_file(
-            final_zarr_path + ".zip",
-            forecast_path + "/" + ingest_version + "/URMA_Hist.zarr.zip",
-        )
-        logger.info("Final Zarr zip file uploaded to S3.")
-
-        with open(historic_process_dir + "/URMA_Hist.time.pickle", "wb") as file:
-            pickle.dump(base_time, file)
-        s3.put_file(
-            historic_process_dir + "/URMA_Hist.time.pickle",
-            forecast_path + "/" + ingest_version + "/URMA_Hist.time.pickle",
-        )
-        logger.info("Time pickle file uploaded to S3.")
-
+        urma_store_name = "URMA_Hist.zarr.zip"
     else:
-        with open(historic_process_dir + "/URMA_Hist.time.pickle", "wb") as file:
-            pickle.dump(base_time, file)
-        shutil.move(
-            historic_process_dir + "/URMA_Hist.time.pickle",
-            forecast_path + "/" + ingest_version + "/URMA_Hist.time.pickle",
-        )
-        shutil.copytree(
-            final_zarr_path,
-            forecast_path + "/" + ingest_version + "/URMA_Hist.zarr",
-            dirs_exist_ok=True,
-        )
-        logger.info("Final Zarr and time pickle files moved to local storage.")
+        urma_store_name = "URMA_Hist.zarr"
+
+    # Publish the store, then the run time the API uses to detect it
+    publish_ingest_run(
+        [urma_store_name],
+        base_time,
+        "URMA_Hist.time.pickle",
+        process_dir=historic_process_dir,
+        publish_dir=publish_dir,
+        save_type=save_type,
+        s3=s3,
+    )
 
     # Clean up
     shutil.rmtree(historic_process_dir)

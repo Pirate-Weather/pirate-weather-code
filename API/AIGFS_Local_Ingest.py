@@ -4,9 +4,7 @@
 # %% Import modules
 import logging
 import os
-import pickle
 import shutil
-import subprocess
 import sys
 import time
 import warnings
@@ -22,6 +20,7 @@ from herbie import FastHerbie, HerbieLatest, Path
 
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.herbie_custom_templates import register_aws_aigfs_aigefs_templates
+from API.ingest_grib_utils import check_grib_stats, run_checked
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -29,7 +28,8 @@ from API.ingest_utils import (
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
-    validate_grib_stats,
+    publish_ingest_run,
+    read_published_run_time,
     validate_stacked_time_alignment,
 )
 
@@ -69,21 +69,13 @@ def main() -> None:
     # Define the final x/y chunksize
     final_chunk = FINAL_CHUNK_SIZES["GFS"]
 
-    # Create new directory for processing if it does not exist
-    if not os.path.exists(forecast_process_dir):
-        os.makedirs(forecast_process_dir)
-    else:
-        # If it does exist, remove it
-        shutil.rmtree(forecast_process_dir)
-        os.makedirs(forecast_process_dir)
+    # Start each run from an empty processing directory
+    shutil.rmtree(forecast_process_dir, ignore_errors=True)
+    os.makedirs(tmp_dir, exist_ok=True)
 
-    if not os.path.exists(tmp_dir):
-        os.makedirs(tmp_dir)
-
-    if save_type == "Download" and not os.path.exists(
-        forecast_path + "/" + ingest_version
-    ):
-        os.makedirs(forecast_path + "/" + ingest_version)
+    publish_dir = forecast_path + "/" + ingest_version
+    if save_type == "Download":
+        os.makedirs(publish_dir, exist_ok=True)
 
     T0 = time.time()
 
@@ -101,37 +93,16 @@ def main() -> None:
     )
 
     base_time = latest_run.date
-    # base_time = pd.Timestamp("2026-02-04 00:00:00")
 
     logger.info(base_time)
 
-    # Check if this is newer than the current file
-    if save_type == "S3":
-        # Check if the file exists and load it
-        if s3.exists(forecast_path + "/" + ingest_version + "/AIGFS.time.pickle"):
-            with s3.open(
-                forecast_path + "/" + ingest_version + "/AIGFS.time.pickle", "rb"
-            ) as f:
-                previous_base_time = pickle.load(f)
-
-            # Compare timestamps and download if the S3 object is more recent
-            if previous_base_time >= base_time:
-                logger.info("No Update to AIGFS, ending")
-                sys.exit()
-
-    else:
-        if os.path.exists(forecast_path + "/" + ingest_version + "/AIGFS.time.pickle"):
-            # Open the file in binary mode
-            with open(
-                forecast_path + "/" + ingest_version + "/AIGFS.time.pickle", "rb"
-            ) as file:
-                # Deserialize and retrieve the variable from the file
-                previous_base_time = pickle.load(file)
-
-            # Compare timestamps and download if the S3 object is more recent
-            if previous_base_time >= base_time:
-                logger.info("No Update to AIGFS, ending")
-                sys.exit()
+    # Skip the run if this cycle has already been published
+    previous_base_time = read_published_run_time(
+        publish_dir + "/AIGFS.time.pickle", save_type, s3
+    )
+    if previous_base_time is not None and previous_base_time >= base_time:
+        logger.info("No Update to AIGFS, ending")
+        return
 
     zarr_vars = (
         "time",
@@ -198,15 +169,7 @@ def main() -> None:
     ]
 
     # Perform a check if any data seems to be invalid
-    cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
-
-    grib_check = subprocess.run(
-        cmd, shell=True, capture_output=True, encoding="utf-8", check=False
-    )
-
-    # Validate the grib files
-    validate_grib_stats(grib_check)
-    logger.info("Grib validation complete, no errors found.")
+    check_grib_stats(grib_list, wgrib2_path, "AIGFS forecast")
 
     # Create a string to pass to wgrib2 to merge all gribs into one netcdf
     cmd = (
@@ -221,12 +184,7 @@ def main() -> None:
     )
 
     # Run wgrib2
-    sp_out = subprocess.run(
-        cmd, shell=True, capture_output=True, encoding="utf-8", check=False
-    )
-    if sp_out.returncode != 0:
-        logger.error(sp_out.stderr)
-        sys.exit()
+    run_checked(cmd, "AIGFS wgrib2 NetCDF conversion")
 
     # Read the netcdf file using xarray (no UV product for Graphcast)
     xarray_wgrib_merged = xr.open_mfdataset(forecast_process_path + "_wgrib2_merged.nc")
@@ -344,12 +302,15 @@ def main() -> None:
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
     # Create a zarr backed dask array
+    aigfs_store_name = "AIGFS.zarr.zip" if save_type == "S3" else "AIGFS.zarr"
     if save_type == "S3":
         zarr_store = zarr.storage.ZipStore(
-            forecast_process_dir + "/AIGFS.zarr.zip", mode="a", compression=0
+            forecast_process_dir + "/" + aigfs_store_name, mode="a", compression=0
         )
     else:
-        zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/AIGFS.zarr")
+        zarr_store = zarr.storage.LocalStore(
+            forecast_process_dir + "/" + aigfs_store_name
+        )
 
     #
     # 1. Interpolate the stacked array to be hourly along the time axis
@@ -402,42 +363,17 @@ def main() -> None:
 
     # Maps generation removed for Graphcast ingest (not required)
 
-    # %% Upload to S3
-    if save_type == "S3":
-        # Upload to S3
-        s3.put_file(
-            forecast_process_dir + "/AIGFS.zarr.zip",
-            forecast_path + "/" + ingest_version + "/AIGFS.zarr.zip",
-        )
+    # %% Publish the store, then the run time the API uses to detect it
+    publish_ingest_run(
+        [aigfs_store_name],
+        base_time,
+        "AIGFS.time.pickle",
+        process_dir=forecast_process_dir,
+        publish_dir=publish_dir,
+        save_type=save_type,
+        s3=s3,
+    )
 
-        # Write most recent forecast time
-        with open(forecast_process_dir + "/AIGFS.time.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(base_time, file)
-
-        s3.put_file(
-            forecast_process_dir + "/AIGFS.time.pickle",
-            forecast_path + "/" + ingest_version + "/AIGFS.time.pickle",
-        )
-    else:
-        # Write most recent forecast time
-        with open(forecast_process_dir + "/AIGFS.time.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(base_time, file)
-
-        shutil.move(
-            forecast_process_dir + "/AIGFS.time.pickle",
-            forecast_path + "/" + ingest_version + "/AIGFS.time.pickle",
-        )
-
-        # Copy the zarr file to the final location
-        shutil.copytree(
-            forecast_process_dir + "/AIGFS.zarr",
-            forecast_path + "/" + ingest_version + "/AIGFS.zarr",
-            dirs_exist_ok=True,
-        )
-
-        # Maps not generated for Graphcast ingest
     # Clean up
     shutil.rmtree(forecast_process_dir)
 

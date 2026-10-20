@@ -4,9 +4,7 @@
 # %% Import modules
 import logging
 import os
-import pickle
 import re
-import shutil
 import sys
 import time
 import warnings
@@ -25,24 +23,26 @@ from tqdm import tqdm
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_grib_utils import (
     cat_gribs,
-    download_and_validate_gfs_subset,
+    download_and_validate_subset,
     quote_path,
+    run_checked,
 )
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    clear_directory,
     close_store,
     configure_herbie_request_timeouts,
-    configure_zarr_limits,
+    configure_zarr_writes,
     deaccumulate_to_hourly_rate,
     interp_time_map_blocks_nan,
     make_herbie_save_dir,
     mask_invalid_data,
     pad_to_chunk_size,
     positive_int_env,
-    run_command,
-    tune_nofile_limit,
+    publish_ingest_run,
+    read_published_run_time,
 )
 
 dotenv_path = find_dotenv(usecwd=True)
@@ -78,24 +78,6 @@ herbie_retry_sleep_seconds = positive_int_env("herbie_retry_sleep_seconds", 20)
 skip_geps_wgrib2_validation = os.getenv(
     "skip_geps_wgrib2_validation", "false"
 ).lower() in {"1", "true", "yes", "on"}
-
-
-def clean_process_dir_preserving_downloads(
-    process_dir: str, downloads_dir: str
-) -> None:
-    """Clean GEPS process artifacts while preserving the Herbie download cache."""
-    os.makedirs(process_dir, exist_ok=True)
-    downloads_path = os.path.abspath(downloads_dir)
-
-    for entry in os.scandir(process_dir):
-        if os.path.abspath(entry.path) == downloads_path:
-            continue
-        if entry.is_dir(follow_symlinks=False):
-            shutil.rmtree(entry.path)
-        else:
-            os.remove(entry.path)
-
-    os.makedirs(downloads_dir, exist_ok=True)
 
 
 def forecast_hour_sort_key(path: str) -> tuple[int, str]:
@@ -179,17 +161,16 @@ def main() -> None:
     """Run the GEPS forecast ingest."""
     configure_herbie_request_timeouts()
     logging.basicConfig(level=logging.INFO)
-    zarr_store_workers = positive_int_env("zarr_store_workers", 2)
-    zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-    tune_nofile_limit()
-    zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
-        zarr_store_workers, zarr_async_concurrency
-    )
-    clean_process_dir_preserving_downloads(forecast_process_dir, tmp_dir)
+    zarr_store_workers = configure_zarr_writes()
 
+    # Empty the processing directory but keep the Herbie download cache
+    clear_directory(forecast_process_dir, keep=tmp_dir)
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    publish_dir = forecast_path + "/" + ingest_version
     if save_type == "Download":
-        os.makedirs(forecast_path + "/" + ingest_version, exist_ok=True)
+        os.makedirs(publish_dir, exist_ok=True)
 
     herbie_save_dir = make_herbie_save_dir(tmp_dir)
 
@@ -209,33 +190,13 @@ def main() -> None:
 
     base_time = latest_run.date
 
-    # Check if this is newer than the current file
-    if save_type == "S3":
-        # Check if the file exists and load it
-        if s3.exists(forecast_path + "/" + ingest_version + "/GEPS.time.pickle"):
-            with s3.open(
-                forecast_path + "/" + ingest_version + "/GEPS.time.pickle", "rb"
-            ) as f:
-                previous_base_time = pickle.load(f)
-
-            # Compare timestamps and download if the S3 object is more recent
-            if previous_base_time >= base_time:
-                logger.info("No Update to GEPS, ending")
-                sys.exit(0)
-
-    else:
-        if os.path.exists(forecast_path + "/" + ingest_version + "/GEPS.time.pickle"):
-            # Open the file in binary mode
-            with open(
-                forecast_path + "/" + ingest_version + "/GEPS.time.pickle", "rb"
-            ) as file:
-                # Deserialize and retrieve the variable from the file
-                previous_base_time = pickle.load(file)
-
-            # Compare timestamps and download if the S3 object is more recent
-            if previous_base_time >= base_time:
-                logger.info("No Update to GEPS, ending")
-                sys.exit(0)
+    # Skip the run if this cycle has already been published
+    previous_base_time = read_published_run_time(
+        publish_dir + "/GEPS.time.pickle", save_type, s3
+    )
+    if previous_base_time is not None and previous_base_time >= base_time:
+        logger.info("No Update to GEPS, ending")
+        return
     #####################################################################################################
     # %% Download forecast data using Herbie Latest
     # Find the latest run with 240 hours
@@ -255,7 +216,7 @@ def main() -> None:
     all_files = []
     expected_total = 0
     for g in match_strings:
-        grib_files = download_and_validate_gfs_subset(
+        grib_files = download_and_validate_subset(
             model="geps",
             product="geps-raw",
             search=None,
@@ -302,10 +263,7 @@ def main() -> None:
     )
 
     # Run wgrib2
-    sp_out = run_command(cmd)
-    if sp_out.returncode != 0:
-        logger.error(sp_out.stderr)
-        sys.exit(1)
+    run_checked(cmd, "GEPS wgrib2 NetCDF conversion")
 
     # Read the merged netcdf file using xarray (single combined file)
     xarray_forecast_merged = xr.open_dataset(
@@ -483,12 +441,15 @@ def main() -> None:
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
     # Create a zarr backed dask array
+    geps_store_name = "GEPS.zarr.zip" if save_type == "S3" else "GEPS.zarr"
     if save_type == "S3":
         zarr_store = zarr.storage.ZipStore(
-            forecast_process_dir + "/GEPS.zarr.zip", mode="a", compression=0
+            forecast_process_dir + "/" + geps_store_name, mode="a", compression=0
         )
     else:
-        zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/GEPS.zarr")
+        zarr_store = zarr.storage.LocalStore(
+            forecast_process_dir + "/" + geps_store_name
+        )
 
     #
     # 1. Interpolate the stacked array to be hourly along the time axis
@@ -574,44 +535,21 @@ def main() -> None:
 
     close_store(zarr_store)
 
-    # %% Upload to S3
-    if save_type == "S3":
-        # Upload to S3
-        s3.put_file(
-            forecast_process_dir + "/GEPS.zarr.zip",
-            forecast_path + "/" + ingest_version + "/GEPS.zarr.zip",
-        )
-
-        # Write most recent forecast time
-        with open(forecast_process_dir + "/GEPS.time.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(base_time, file)
-
-        s3.put_file(
-            forecast_process_dir + "/GEPS.time.pickle",
-            forecast_path + "/" + ingest_version + "/GEPS.time.pickle",
-        )
-    else:
-        # Write most recent forecast time
-        with open(forecast_process_dir + "/GEPS.time.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(base_time, file)
-
-        shutil.move(
-            forecast_process_dir + "/GEPS.time.pickle",
-            forecast_path + "/" + ingest_version + "/GEPS.time.pickle",
-        )
-
-        # Copy the zarr file to the final location
-        shutil.copytree(
-            forecast_process_dir + "/GEPS.zarr",
-            forecast_path + "/" + ingest_version + "/GEPS.zarr",
-            dirs_exist_ok=True,
-        )
+    # %% Publish the store, then the run time the API uses to detect it
+    publish_ingest_run(
+        [geps_store_name],
+        base_time,
+        "GEPS.time.pickle",
+        process_dir=forecast_process_dir,
+        publish_dir=publish_dir,
+        save_type=save_type,
+        s3=s3,
+    )
 
     # Clean up
     # shutil.rmtree(forecast_process_dir)
-    clean_process_dir_preserving_downloads(forecast_process_dir, tmp_dir)
+    clear_directory(forecast_process_dir, keep=tmp_dir)
+    os.makedirs(tmp_dir, exist_ok=True)
 
     # Timing
     T1 = time.time()

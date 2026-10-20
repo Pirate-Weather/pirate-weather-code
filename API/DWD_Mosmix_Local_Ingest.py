@@ -22,7 +22,6 @@ import io
 import logging
 import os
 import pickle
-import shutil
 import sys
 import time
 import zipfile
@@ -48,7 +47,10 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     DWD_RADIUS,
     FINAL_CHUNK_SIZES,
+    clear_directory,
     interpolate_temporal_gaps_efficiently,
+    publish_ingest_run,
+    read_published_run_time,
 )
 
 # Distance to interpolate stations to grid (km)
@@ -885,23 +887,6 @@ aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 
-# --- Directory Setup and Cleanup ---
-# Create the main processing directory; clear its contents if it already exists to avoid
-# deleting the directory itself (safer for processes that depend on the parent dir).
-def _clear_directory(path):
-    """Remove all contents of a directory but keep the directory itself."""
-    if not os.path.exists(path):
-        return
-    for entry in os.scandir(path):
-        try:
-            if entry.is_dir(follow_symlinks=False):
-                shutil.rmtree(entry.path)
-            else:
-                os.remove(entry.path)
-        except (OSError, PermissionError):
-            logger.warning(f"Could not remove {entry.path} during clear_directory.")
-
-
 # --- Step 1: Download and Parse DWD MOSMIX-S KML/KMZ Data ---
 def download_mosmix_file(url, local_path):
     """
@@ -964,17 +949,17 @@ def main() -> None:
     if save_type == "S3":
         s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
-    if os.path.exists(forecast_process_dir):
-        _clear_directory(forecast_process_dir)
-    else:
-        os.makedirs(forecast_process_dir, exist_ok=True)
+    # Empty the processing directory but keep the directory itself, which is
+    # safer for processes that depend on the parent dir.
+    clear_directory(forecast_process_dir)
 
     # Create the temporary download directory.
     os.makedirs(tmp_dir, exist_ok=True)
 
     # Create the final forecast output directory if saving locally (versioned by ingest).
+    publish_dir = forecast_path + "/" + ingest_version
     if save_type == "Download":
-        os.makedirs(os.path.join(forecast_path, ingest_version), exist_ok=True)
+        os.makedirs(publish_dir, exist_ok=True)
 
     start_time = time.time()  # Start timer for script execution
 
@@ -1006,34 +991,12 @@ def main() -> None:
     logger.info(f"Base time for this ingest run (from KML metadata): {base_time}")
 
     # --- Check for Updates (Skip if no new data) ---
-    if save_type == "S3":
-        # Check if the file exists and load it
-        if s3.exists(forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle"):
-            with s3.open(
-                forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle", "rb"
-            ) as f:
-                previous_base_time = pickle.load(f)
-
-            # Compare timestamps and download if the S3 object is more recent
-            if previous_base_time >= base_time:
-                logger.info("No Update to DWD_MOSMIX, ending")
-                sys.exit()
-
-    else:
-        if os.path.exists(
-            forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle"
-        ):
-            # Open the file in binary mode
-            with open(
-                forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle", "rb"
-            ) as file:
-                # Deserialize and retrieve the variable from the file
-                previous_base_time = pickle.load(file)
-
-            # Compare timestamps and download if the S3 object is more recent
-            if previous_base_time >= base_time:
-                logger.info("No Update to DWD_MOSMIX, ending")
-                sys.exit()
+    previous_base_time = read_published_run_time(
+        publish_dir + "/DWD_MOSMIX.time.pickle", save_type, s3
+    )
+    if previous_base_time is not None and previous_base_time >= base_time:
+        logger.info("No Update to DWD_MOSMIX, ending")
+        return
 
     # --- Step 2: Process Pandas DataFrame ---
     logger.info("\n--- Converting DataFrame to xarray Dataset (point-based) ---")
@@ -1166,12 +1129,15 @@ def main() -> None:
     )
 
     # Create a zarr backed dask array
+    dwd_store_name = "DWD_MOSMIX.zarr.zip" if save_type == "S3" else "DWD_MOSMIX.zarr"
     if save_type == "S3":
         zarr_store = zarr.storage.ZipStore(
-            forecast_process_dir + "/DWD_MOSMIX.zarr.zip", mode="a"
+            forecast_process_dir + "/" + dwd_store_name, mode="a"
         )
     else:
-        zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/DWD_MOSMIX.zarr")
+        zarr_store = zarr.storage.LocalStore(
+            forecast_process_dir + "/" + dwd_store_name
+        )
 
     # 1. Interpolate the stacked array to be hourly along the time axis
     # 2. Pad to chunk size
@@ -1196,57 +1162,20 @@ def main() -> None:
     # )
     # --- Step 6: Upload to S3 or Move to Final Location ---
 
-    # %% Upload to S3
-    if save_type == "S3":
-        # Upload to S3
-        s3.put_file(
-            forecast_process_dir + "/DWD_MOSMIX.zarr.zip",
-            forecast_path + "/" + ingest_version + "/DWD_MOSMIX.zarr.zip",
-        )
-
-        # Upload station map
-        s3.put_file(
-            forecast_process_dir + "/DWD_MOSMIX_stations.pickle",
-            forecast_path + "/" + ingest_version + "/DWD_MOSMIX_stations.pickle",
-        )
-
-        # Write most recent forecast time
-        with open(forecast_process_dir + "/DWD_MOSMIX.time.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(base_time, file)
-
-        s3.put_file(
-            forecast_process_dir + "/DWD_MOSMIX.time.pickle",
-            forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle",
-        )
-
-    else:
-        # Write most recent forecast time
-        with open(forecast_process_dir + "/DWD_MOSMIX.time.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(base_time, file)
-
-        shutil.move(
-            forecast_process_dir + "/DWD_MOSMIX.time.pickle",
-            forecast_path + "/" + ingest_version + "/DWD_MOSMIX.time.pickle",
-        )
-
-        # Copy station map to final location
-        shutil.copy(
-            forecast_process_dir + "/DWD_MOSMIX_stations.pickle",
-            forecast_path + "/" + ingest_version + "/DWD_MOSMIX_stations.pickle",
-        )
-
-        # Copy the zarr file to the final location
-        shutil.copytree(
-            forecast_process_dir + "/DWD_MOSMIX.zarr",
-            forecast_path + "/" + ingest_version + "/DWD_MOSMIX.zarr",
-            dirs_exist_ok=True,
-        )
+    # Publish the store and station map, then the run time the API uses to detect them
+    publish_ingest_run(
+        [dwd_store_name, "DWD_MOSMIX_stations.pickle"],
+        base_time,
+        "DWD_MOSMIX.time.pickle",
+        process_dir=forecast_process_dir,
+        publish_dir=publish_dir,
+        save_type=save_type,
+        s3=s3,
+    )
 
     # --- Final Cleanup ---
-    _clear_directory(forecast_process_dir)
-    _clear_directory(tmp_dir)
+    clear_directory(forecast_process_dir)
+    clear_directory(tmp_dir)
 
     end_time = time.time()  # End timer
     logger.info(f"\nTotal script execution time: {end_time - start_time:.2f} seconds")

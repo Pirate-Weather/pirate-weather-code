@@ -5,9 +5,7 @@
 import fcntl
 import logging
 import os
-import pickle
 import shutil
-import subprocess
 import sys
 import time
 import warnings
@@ -21,7 +19,6 @@ import pandas as pd
 import s3fs
 import xarray as xr
 import zarr
-import zarr.storage
 from dask.diagnostics import ProgressBar
 from dotenv import find_dotenv, load_dotenv
 
@@ -29,15 +26,16 @@ from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    close_store,
     configure_herbie_request_timeouts,
-    configure_zarr_limits,
+    configure_zarr_writes,
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
     positive_int_env,
-    run_command,
-    tune_nofile_limit,
-    validate_grib_stats,
+    promote_staged_dir,
+    publish_ingest_run,
+    read_published_run_time,
     validate_stacked_time_alignment,
 )
 
@@ -48,7 +46,8 @@ loaded = load_dotenv(dotenv_path, override=True)
 from herbie.fast import Herbie_latest  # noqa: E402
 
 from API.ingest_grib_utils import (  # noqa: E402
-    download_and_validate_gfs_subset,
+    check_grib_stats,
+    download_and_validate_subset,
     run_checked,
 )
 
@@ -61,50 +60,6 @@ logger = logging.getLogger(__name__)
 def _timing_log(message: str) -> None:
     ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     print(f"[TIMING] {ts} {message}")
-
-
-def _close_store(store: object) -> None:
-    """Close a zarr store if it exposes a close method."""
-    close_fn = getattr(store, "close", None)
-    if callable(close_fn):
-        close_fn()
-
-
-def _copytree_for_publish(src: str, dst: str) -> None:
-    """Copy a directory tree for publish in a low-FD child process."""
-    os.makedirs(dst, exist_ok=True)
-    try:
-        subprocess.run(["cp", "-a", os.path.join(src, "."), dst], check=True)
-    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
-        print(
-            f"Warning: cp -a publish copy failed ({exc}); falling back to shutil.copytree"
-        )
-        shutil.copytree(src, dst, dirs_exist_ok=True)
-
-
-def _publish_staged_dir(staged_path: str, final_path: str) -> None:
-    """Promote a staged directory to final path with a same-dir rename when possible."""
-    parent = os.path.dirname(final_path)
-    backup_path = final_path + ".prev"
-    os.makedirs(parent, exist_ok=True)
-
-    if os.path.exists(backup_path):
-        shutil.rmtree(backup_path, ignore_errors=True)
-
-    try:
-        if os.path.exists(final_path):
-            os.replace(final_path, backup_path)
-        os.replace(staged_path, final_path)
-        if os.path.exists(backup_path):
-            shutil.rmtree(backup_path, ignore_errors=True)
-    except OSError as exc:
-        print(f"Warning: atomic promote failed ({exc}); falling back to copy")
-        if os.path.exists(final_path):
-            shutil.rmtree(final_path, ignore_errors=True)
-        _copytree_for_publish(staged_path, final_path)
-        shutil.rmtree(staged_path, ignore_errors=True)
-        if os.path.exists(backup_path):
-            shutil.rmtree(backup_path, ignore_errors=True)
 
 
 def _acquire_single_run_lock(lock_path: str):
@@ -137,7 +92,7 @@ def _download_nbm_subset(
     base_time: pd.Timestamp,
 ) -> list[str]:
     """Use the shared retry and local-file checks before NBM processing."""
-    return download_and_validate_gfs_subset(
+    return download_and_validate_subset(
         model="nbm",
         product="co",
         search=search,
@@ -193,30 +148,18 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     nbm_staged_path: str | None = None
     nbm_maps_staged_path: str | None = None
-    zarr_store_workers = positive_int_env("zarr_store_workers", 2)
-    zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
     configure_herbie_request_timeouts(
         nomads_request_interval_s=positive_int_env("nomads_request_interval_seconds", 5)
     )
 
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
-    tune_nofile_limit()
-    zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
-        zarr_store_workers, zarr_async_concurrency
-    )
+    configure_zarr_writes()
     _ingest_lock_handle = _acquire_single_run_lock(forecast_process_dir + ".lock")
 
-    # Create new directory for processing if it does not exist
-    if not os.path.exists(forecast_process_dir):
-        os.makedirs(forecast_process_dir)
-    else:
-        # If it does exist, remove it
-        shutil.rmtree(forecast_process_dir)
-        os.makedirs(forecast_process_dir)
-
-    if not os.path.exists(tmp_dir):
-        os.makedirs(tmp_dir)
+    # Start each run from an empty processing directory
+    shutil.rmtree(forecast_process_dir, ignore_errors=True)
+    os.makedirs(tmp_dir, exist_ok=True)
 
     if save_type == "Download":
         os.makedirs(local_forecast_version_dir, exist_ok=True)
@@ -236,38 +179,15 @@ def main() -> None:
     )
 
     base_time = latest_run.date
-    # base_time = pd.Timestamp("2026-07-08 09:00:00")
 
-    # Check if this is newer than the current file
-    if save_type == "S3":
-        # Check if the file exists and load it
-        if s3.exists(forecast_path + "/" + ingest_version + "/NBM.time.pickle"):
-            with s3.open(
-                forecast_path + "/" + ingest_version + "/NBM.time.pickle", "rb"
-            ) as f:
-                previous_base_time = pickle.load(f)
+    # Skip the run if this cycle has already been published
+    previous_base_time = read_published_run_time(
+        local_forecast_version_dir + "/NBM.time.pickle", save_type, s3
+    )
+    if previous_base_time is not None and previous_base_time >= base_time:
+        logger.info("No Update to NBM, ending")
+        return
 
-            # Compare timestamps and download if the S3 object is more recent
-            if previous_base_time >= base_time:
-                logger.info("No Update to NBM, ending")
-                sys.exit()
-
-    else:
-        if os.path.exists(forecast_path + "/" + ingest_version + "/NBM.time.pickle"):
-            # Open the file in binary mode
-            with open(
-                forecast_path + "/" + ingest_version + "/NBM.time.pickle", "rb"
-            ) as file:
-                # Deserialize and retrieve the variable from the file
-                previous_base_time = pickle.load(file)
-
-            # Compare timestamps and download if the S3 object is more recent
-            if previous_base_time >= base_time:
-                logger.info("No Update to NBM, ending")
-                sys.exit()
-
-    # base_time = pd.Timestamp("2024-03-05 16:00")
-    # base_time = base_time - pd.Timedelta(hours=1)
     print(base_time)
     _timing_log(f"NBM_FORECAST run_start base_time={base_time}")
 
@@ -354,13 +274,7 @@ def main() -> None:
 
     # Perform a check if any data seems to be invalid
     stage_start = time.perf_counter()
-    cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
-
-    grib_check = run_checked(cmd, "NBM GRIB validation")
-
-    if not validate_grib_stats(grib_check):
-        raise RuntimeError("NBM GRIB validation failed")
-    print("Grib files passed validation, proceeding with processing")
+    check_grib_stats(grib_list, wgrib2_path, "NBM main forecast")
     _timing_log(
         f"NBM_FORECAST stage=validate_main elapsed={time.perf_counter() - stage_start:.2f}s"
     )
@@ -379,10 +293,7 @@ def main() -> None:
     # Run wgrib2
     stage_start = time.perf_counter()
     substage_start = time.perf_counter()
-    sp_out = run_command(cmd)
-    if sp_out.returncode != 0:
-        logger.error(sp_out.stderr)
-        sys.exit(1)
+    run_checked(cmd, "NBM main wgrib2 GRIB merge")
     _timing_log(
         f"NBM_FORECAST stage=main_merge_grib elapsed={time.perf_counter() - substage_start:.2f}s"
     )
@@ -399,10 +310,7 @@ def main() -> None:
         + forecast_process_path
         + "_wgrib2_merged_order.grib"
     )
-    spOUT2 = run_command(cmd2)
-    if spOUT2.returncode != 0:
-        logger.error(spOUT2.stderr)
-        sys.exit(1)
+    run_checked(cmd2, "NBM main wgrib2 grid reorder")
     _timing_log(
         f"NBM_FORECAST stage=main_reorder_grib elapsed={time.perf_counter() - substage_start:.2f}s"
     )
@@ -421,10 +329,7 @@ def main() -> None:
 
     # Run wgrib2 to rotate winds and save as NetCDF
     substage_start = time.perf_counter()
-    spOUT4 = run_command(cmd4)
-    if spOUT4.returncode != 0:
-        logger.error(spOUT4.stderr)
-        sys.exit(1)
+    run_checked(cmd4, "NBM main wgrib2 NetCDF conversion")
     os.remove(forecast_process_path + "_wgrib2_merged_order.grib")
     _timing_log(
         f"NBM_FORECAST stage=main_write_netcdf elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -491,13 +396,7 @@ def main() -> None:
 
     # Perform a check if any data seems to be invalid
     stage_start = time.perf_counter()
-    cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
-
-    grib_check = run_checked(cmd, "NBM GRIB validation")
-
-    if not validate_grib_stats(grib_check):
-        raise RuntimeError("NBM GRIB validation failed")
-    print("Grib files passed validation, proceeding with processing")
+    check_grib_stats(grib_list, wgrib2_path, "NBM PPROB")
     _timing_log(
         f"NBM_FORECAST stage=validate_pprob elapsed={time.perf_counter() - stage_start:.2f}s"
     )
@@ -516,10 +415,7 @@ def main() -> None:
     # Run wgrib2
     stage_start = time.perf_counter()
     substage_start = time.perf_counter()
-    sp_out = run_command(cmd)
-    if sp_out.returncode != 0:
-        logger.error(sp_out.stderr)
-        sys.exit(1)
+    run_checked(cmd, "NBM PPROB wgrib2 GRIB merge")
     _timing_log(
         f"NBM_FORECAST stage=pprob_merge_grib elapsed={time.perf_counter() - substage_start:.2f}s"
     )
@@ -536,10 +432,7 @@ def main() -> None:
         + forecast_process_path
         + "_prob_wgrib2_merged_order.grib"
     )
-    spOUT2 = run_command(cmd2)
-    if spOUT2.returncode != 0:
-        logger.error(spOUT2.stderr)
-        sys.exit(1)
+    run_checked(cmd2, "NBM PPROB wgrib2 grid reorder")
     _timing_log(
         f"NBM_FORECAST stage=pprob_reorder_grib elapsed={time.perf_counter() - substage_start:.2f}s"
     )
@@ -558,10 +451,7 @@ def main() -> None:
 
     # Run wgrib2 to save as  NetCDF
     substage_start = time.perf_counter()
-    spOUT4 = run_command(cmd4)
-    if spOUT4.returncode != 0:
-        logger.error(spOUT4.stderr)
-        sys.exit(1)
+    run_checked(cmd4, "NBM PPROB wgrib2 NetCDF conversion")
     os.remove(forecast_process_path + "_prob_wgrib2_merged_order.grib")
     _timing_log(
         f"NBM_FORECAST stage=pprob_write_netcdf elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -607,13 +497,7 @@ def main() -> None:
 
     # Perform a check if any data seems to be invalid
     stage_start = time.perf_counter()
-    cmd = "cat " + " ".join(grib_list) + " | " + f"{wgrib2_path}" + "- -s -stats"
-
-    grib_check = run_checked(cmd, "NBM GRIB validation")
-
-    if not validate_grib_stats(grib_check):
-        raise RuntimeError("NBM GRIB validation failed")
-    print("Grib files passed validation, proceeding with processing")
+    check_grib_stats(grib_list, wgrib2_path, "NBM PACCUM")
     _timing_log(
         f"NBM_FORECAST stage=validate_paccum elapsed={time.perf_counter() - stage_start:.2f}s"
     )
@@ -632,10 +516,7 @@ def main() -> None:
     # Run wgrib2
     stage_start = time.perf_counter()
     substage_start = time.perf_counter()
-    sp_out = run_command(cmd)
-    if sp_out.returncode != 0:
-        logger.error(sp_out.stderr)
-        sys.exit(1)
+    run_checked(cmd, "NBM PACCUM wgrib2 GRIB merge")
     _timing_log(
         f"NBM_FORECAST stage=paccum_merge_grib elapsed={time.perf_counter() - substage_start:.2f}s"
     )
@@ -652,10 +533,7 @@ def main() -> None:
         + forecast_process_path
         + "_accum_wgrib2_merged_order.grib"
     )
-    spOUT2 = run_command(cmd2)
-    if spOUT2.returncode != 0:
-        logger.error(spOUT2.stderr)
-        sys.exit(1)
+    run_checked(cmd2, "NBM PACCUM wgrib2 grid reorder")
     _timing_log(
         f"NBM_FORECAST stage=paccum_reorder_grib elapsed={time.perf_counter() - substage_start:.2f}s"
     )
@@ -674,10 +552,7 @@ def main() -> None:
 
     # Run wgrib2 to save as NetCDF
     substage_start = time.perf_counter()
-    spOUT4 = run_command(cmd4)
-    if spOUT4.returncode != 0:
-        logger.error(spOUT4.stderr)
-        sys.exit(1)
+    run_checked(cmd4, "NBM PACCUM wgrib2 NetCDF conversion")
     os.remove(forecast_process_path + "_accum_wgrib2_merged_order.grib")
     _timing_log(
         f"NBM_FORECAST stage=paccum_write_netcdf elapsed={time.perf_counter() - substage_start:.2f}s"
@@ -953,7 +828,7 @@ def main() -> None:
 
     logger.info("Interpolate complete")
 
-    _close_store(zarr_store)
+    close_store(zarr_store)
 
     # Rechunk subset of data for maps!
     # Want variables:
@@ -1006,54 +881,45 @@ def main() -> None:
 
         logger.info(zarr_vars[z])
 
-    _close_store(zarr_store_maps)
+    close_store(zarr_store_maps)
     _timing_log(
         f"NBM_FORECAST stage=maps_write elapsed={time.perf_counter() - stage_start:.2f}s"
     )
 
     logger.info("Map complete")
 
-    # %% Upload to S3
+    # %% Publish the stores, then the run time the API uses to detect them
     stage_start = time.perf_counter()
     if save_type == "S3":
-        # Upload to S3
-        s3.put_file(
-            forecast_process_dir + "/NBM.zarr.zip",
-            forecast_path + "/" + ingest_version + "/NBM.zarr.zip",
-        )
-        s3.put_file(
-            forecast_process_dir + "/NBM_Maps.zarr.zip",
-            forecast_path + "/" + ingest_version + "/NBM_Maps.zarr.zip",
-        )
-
-        # Write most recent forecast time
-        with open(forecast_process_dir + "/NBM.time.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(base_time, file)
-
-        s3.put_file(
-            forecast_process_dir + "/NBM.time.pickle",
-            forecast_path + "/" + ingest_version + "/NBM.time.pickle",
+        publish_ingest_run(
+            ["NBM.zarr.zip", "NBM_Maps.zarr.zip"],
+            base_time,
+            "NBM.time.pickle",
+            process_dir=forecast_process_dir,
+            publish_dir=local_forecast_version_dir,
+            save_type=save_type,
+            s3=s3,
         )
     else:
-        # Write most recent forecast time
-        with open(local_forecast_version_dir + "/NBM.time.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(base_time, file)
-
         if nbm_staged_path is None or nbm_maps_staged_path is None:
             raise RuntimeError(
                 "Expected staged local zarr paths for Download publish, but they were not set"
             )
 
-        _publish_staged_dir(
-            nbm_staged_path,
-            local_forecast_version_dir + "/NBM.zarr",
+        # Local stores were written straight into "<publish dir>/*.partial" to avoid
+        # copying a large store, so only the rename and the run time remain.
+        promote_staged_dir(nbm_staged_path, local_forecast_version_dir + "/NBM.zarr")
+        promote_staged_dir(
+            nbm_maps_staged_path, local_forecast_version_dir + "/NBM_Maps.zarr"
         )
-
-        _publish_staged_dir(
-            nbm_maps_staged_path,
-            local_forecast_version_dir + "/NBM_Maps.zarr",
+        publish_ingest_run(
+            [],
+            base_time,
+            "NBM.time.pickle",
+            process_dir=forecast_process_dir,
+            publish_dir=local_forecast_version_dir,
+            save_type=save_type,
+            s3=s3,
         )
     _timing_log(
         f"NBM_FORECAST stage=publish_output elapsed={time.perf_counter() - stage_start:.2f}s"

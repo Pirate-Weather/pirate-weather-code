@@ -4,10 +4,8 @@
 # %% Import modules
 import logging
 import os
-import pickle
 import shutil
 import subprocess
-import sys
 import time
 import warnings
 
@@ -23,7 +21,7 @@ from herbie import HerbieLatest
 
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.herbie_custom_templates import register_aws_aigfs_aigefs_templates
-from API.ingest_grib_utils import download_and_validate_gfs_subset, run_checked
+from API.ingest_grib_utils import download_and_validate_subset, run_checked
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -33,6 +31,8 @@ from API.ingest_utils import (
     mask_invalid_data,
     pad_to_chunk_size,
     positive_int_env,
+    publish_ingest_run,
+    read_published_run_time,
     validate_stacked_time_alignment,
 )
 
@@ -55,7 +55,7 @@ def download_aigefs_member(
     dataset_name: str,
 ) -> list[str]:
     """Download and validate a complete member with bounded retries and threads."""
-    return download_and_validate_gfs_subset(
+    return download_and_validate_subset(
         model="aigefs",
         product="sfc",
         search=None,
@@ -108,21 +108,13 @@ def main() -> None:
 
     AIGEFS_MEMBER_COUNT = 30
 
-    # Create new directory for processing if it does not exist
-    if not os.path.exists(forecast_process_dir):
-        os.makedirs(forecast_process_dir)
-    else:
-        # If it does exist, remove it
-        shutil.rmtree(forecast_process_dir)
-        os.makedirs(forecast_process_dir)
+    # Start each run from an empty processing directory
+    shutil.rmtree(forecast_process_dir, ignore_errors=True)
+    os.makedirs(tmp_dir, exist_ok=True)
 
-    if not os.path.exists(tmp_dir):
-        os.makedirs(tmp_dir)
-
-    if save_type == "Download" and not os.path.exists(
-        forecast_path + "/" + ingest_version
-    ):
-        os.makedirs(forecast_path + "/" + ingest_version)
+    publish_dir = forecast_path + "/" + ingest_version
+    if save_type == "Download":
+        os.makedirs(publish_dir, exist_ok=True)
 
     T0 = time.time()
 
@@ -147,33 +139,13 @@ def main() -> None:
 
     logger.info(base_time)
 
-    # Check if this is newer than the current file
-    if save_type == "S3":
-        # Check if the file exists and load it
-        if s3.exists(forecast_path + "/" + ingest_version + "/AIGEFS.time.pickle"):
-            with s3.open(
-                forecast_path + "/" + ingest_version + "/AIGEFS.time.pickle", "rb"
-            ) as f:
-                previous_base_time = pickle.load(f)
-
-            # Compare timestamps and download if the S3 object is more recent
-            if previous_base_time >= base_time:
-                logger.info("No Update to AIGEFS, ending")
-                sys.exit()
-
-    else:
-        if os.path.exists(forecast_path + "/" + ingest_version + "/AIGEFS.time.pickle"):
-            # Open the file in binary mode
-            with open(
-                forecast_path + "/" + ingest_version + "/AIGEFS.time.pickle", "rb"
-            ) as file:
-                # Deserialize and retrieve the variable from the file
-                previous_base_time = pickle.load(file)
-
-            # Compare timestamps and download if the S3 object is more recent
-            if previous_base_time >= base_time:
-                logger.info("No Update to AIGEFS, ending")
-                sys.exit()
+    # Skip the run if this cycle has already been published
+    previous_base_time = read_published_run_time(
+        publish_dir + "/AIGEFS.time.pickle", save_type, s3
+    )
+    if previous_base_time is not None and previous_base_time >= base_time:
+        logger.info("No Update to AIGEFS, ending")
+        return
 
     zarr_vars = (
         "time",
@@ -387,12 +359,15 @@ def main() -> None:
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
     # Create a zarr backed dask array
+    aigefs_store_name = "AIGEFS.zarr.zip" if save_type == "S3" else "AIGEFS.zarr"
     if save_type == "S3":
         zarr_store = zarr.storage.ZipStore(
-            forecast_process_dir + "/AIGEFS.zarr.zip", mode="a", compression=0
+            forecast_process_dir + "/" + aigefs_store_name, mode="a", compression=0
         )
     else:
-        zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/AIGEFS.zarr")
+        zarr_store = zarr.storage.LocalStore(
+            forecast_process_dir + "/" + aigefs_store_name
+        )
 
     #
     # 1. Interpolate the stacked array to be hourly along the time axis
@@ -439,42 +414,17 @@ def main() -> None:
     if save_type == "S3":
         zarr_store.close()
 
-    # %% Upload to S3
-    if save_type == "S3":
-        # Upload to S3
-        s3.put_file(
-            forecast_process_dir + "/AIGEFS.zarr.zip",
-            forecast_path + "/" + ingest_version + "/AIGEFS.zarr.zip",
-        )
+    # %% Publish the store, then the run time the API uses to detect it
+    publish_ingest_run(
+        [aigefs_store_name],
+        base_time,
+        "AIGEFS.time.pickle",
+        process_dir=forecast_process_dir,
+        publish_dir=publish_dir,
+        save_type=save_type,
+        s3=s3,
+    )
 
-        # Write most recent forecast time
-        with open(forecast_process_dir + "/AIGEFS.time.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(base_time, file)
-
-        s3.put_file(
-            forecast_process_dir + "/AIGEFS.time.pickle",
-            forecast_path + "/" + ingest_version + "/AIGEFS.time.pickle",
-        )
-    else:
-        # Write most recent forecast time
-        with open(forecast_process_dir + "/AIGEFS.time.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(base_time, file)
-
-        shutil.move(
-            forecast_process_dir + "/AIGEFS.time.pickle",
-            forecast_path + "/" + ingest_version + "/AIGEFS.time.pickle",
-        )
-
-        # Copy the zarr file to the final location
-        shutil.copytree(
-            forecast_process_dir + "/AIGEFS.zarr",
-            forecast_path + "/" + ingest_version + "/AIGEFS.zarr",
-            dirs_exist_ok=True,
-        )
-
-        # Maps not generated for Graphcast ingest
     # Clean up
     shutil.rmtree(forecast_process_dir)
 

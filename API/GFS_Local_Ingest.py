@@ -11,9 +11,7 @@ Date: September 2023
 
 import logging
 import os
-import pickle
 import shutil
-import sys
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
@@ -38,7 +36,7 @@ from tqdm import tqdm
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
 from API.ingest_grib_utils import (
-    download_and_validate_gfs_subset,
+    download_and_validate_subset,
 )
 from API.ingest_utils import (
     CHUNK_SIZES,
@@ -46,7 +44,7 @@ from API.ingest_utils import (
     FORECAST_LEAD_RANGES,
     archive_tmp_zarr_and_upload,
     close_store,
-    configure_zarr_limits,
+    configure_zarr_writes,
     deaccumulate_to_hourly_rate,
     download_extract_historic_archive,
     interp_time_take_blend,
@@ -55,8 +53,10 @@ from API.ingest_utils import (
     mask_invalid_refc,
     pad_to_chunk_size,
     positive_int_env,
-    tune_nofile_limit,
+    publish_ingest_run,
+    read_published_run_time,
     validate_stacked_time_alignment,
+    write_final_zarr,
 )
 from API.utils.storm_proc import compute_storm_fields_from_apcp_dataarray
 
@@ -260,10 +260,6 @@ def deaccumulate_gfs_fields(
 def main() -> None:
     """Run the ingest."""
     logging.basicConfig(level=logging.INFO)
-    zarr_store_workers = positive_int_env("zarr_store_workers", DEFAULT_ZARR_WORKERS)
-    zarr_async_concurrency = positive_int_env(
-        "zarr_async_concurrency", DEFAULT_ZARR_CONCURRENCY
-    )
     herbie_download_retries = positive_int_env(
         "herbie_download_retries", DEFAULT_HERBIE_RETRIES
     )
@@ -272,9 +268,8 @@ def main() -> None:
     )
 
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-    tune_nofile_limit()
-    zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
-        zarr_store_workers, zarr_async_concurrency
+    zarr_store_workers = configure_zarr_writes(
+        DEFAULT_ZARR_WORKERS, DEFAULT_ZARR_CONCURRENCY
     )
 
     # Define the processing and history chunk size
@@ -285,20 +280,13 @@ def main() -> None:
 
     his_period = HISTORY_PERIODS["GFS"]
 
-    # Create new directory for processing if it does not exist
-    if not os.path.exists(forecast_process_dir):
-        os.makedirs(forecast_process_dir)
-    else:
-        # If it does exist, remove it
-        shutil.rmtree(forecast_process_dir)
-        os.makedirs(forecast_process_dir)
+    # Start each run from an empty processing directory
+    shutil.rmtree(forecast_process_dir, ignore_errors=True)
+    os.makedirs(tmp_dir, exist_ok=True)
 
-    if not os.path.exists(tmp_dir):
-        os.makedirs(tmp_dir)
-
+    publish_dir = forecast_path + "/" + ingest_version
     if save_type == "Download":
-        if not os.path.exists(forecast_path + "/" + ingest_version):
-            os.makedirs(forecast_path + "/" + ingest_version)
+        os.makedirs(publish_dir, exist_ok=True)
         if not os.path.exists(historic_path):
             os.makedirs(historic_path)
 
@@ -322,37 +310,20 @@ def main() -> None:
     )
 
     base_time = latest_run.date
-    # base_time = pd.Timestamp("2024-03-24 06:00:00Z")
 
     logger.info(base_time)
 
-    # Check if this is newer than the current file
-    if save_type == "S3":
-        # Check if the file exists and load it
-        if s3.exists(forecast_path + "/" + ingest_version + "/GFS.time.pickle"):
-            with s3.open(
-                forecast_path + "/" + ingest_version + "/GFS.time.pickle", "rb"
-            ) as f:
-                previous_base_time = pickle.load(f)
-
-            # Compare timestamps and download if the S3 object is more recent
-            if not force_update and previous_base_time >= base_time:
-                logger.info("No Update to GFS, ending")
-                sys.exit()
-
-    else:
-        if os.path.exists(forecast_path + "/" + ingest_version + "/GFS.time.pickle"):
-            # Open the file in binary mode
-            with open(
-                forecast_path + "/" + ingest_version + "/GFS.time.pickle", "rb"
-            ) as file:
-                # Deserialize and retrieve the variable from the file
-                previous_base_time = pickle.load(file)
-
-            # Compare timestamps and download if the S3 object is more recent
-            if not force_update and previous_base_time >= base_time:
-                logger.info("No Update to GFS, ending")
-                sys.exit()
+    # Skip the run if this cycle has already been published
+    previous_base_time = read_published_run_time(
+        publish_dir + "/GFS.time.pickle", save_type, s3
+    )
+    if (
+        not force_update
+        and previous_base_time is not None
+        and previous_base_time >= base_time
+    ):
+        logger.info("No Update to GFS, ending")
+        return
 
     if force_update:
         logger.info("force_update enabled, bypassing No Update check")
@@ -428,13 +399,13 @@ def main() -> None:
 
     wgrib2_exe = wgrib2_path.strip()
 
-    pgrb2_grib_files = download_and_validate_gfs_subset(
+    pgrb2_grib_files = download_and_validate_subset(
         product="pgrb2.0p25",
         search=match_strings,
         dataset_name="GFS forecast pgrb2.0p25",
         base_time=base_time,
         wgrib2_exe=wgrib2_exe,
-        gfs_forecast_hours=gfs_forecast_hours,
+        forecast_hours=gfs_forecast_hours,
         herbie_save_dir=herbie_save_dir,
         herbie_download_retries=herbie_download_retries,
         herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
@@ -444,13 +415,13 @@ def main() -> None:
 
     duvb_match_string = ":DUVB:surface:"
 
-    duvb_grib_files = download_and_validate_gfs_subset(
+    duvb_grib_files = download_and_validate_subset(
         product="pgrb2b.0p25",
         search=duvb_match_string,
         dataset_name="GFS forecast pgrb2b.0p25 DUVB",
         base_time=base_time,
         wgrib2_exe=wgrib2_exe,
-        gfs_forecast_hours=gfs_forecast_hours,
+        forecast_hours=gfs_forecast_hours,
         herbie_save_dir=herbie_save_dir,
         herbie_download_retries=herbie_download_retries,
         herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
@@ -599,7 +570,7 @@ def main() -> None:
 
         logger.info("Downloading historic data: %s", timestamp)
 
-        grib_list = download_and_validate_gfs_subset(
+        grib_list = download_and_validate_subset(
             product="pgrb2.0p25",
             search=match_strings,
             dataset_name="GFS historic pgrb2.0p25",
@@ -607,7 +578,6 @@ def main() -> None:
             forecast_hours=hist_forecast_hours,
             base_time=base_time,
             wgrib2_exe=wgrib2_exe,
-            gfs_forecast_hours=gfs_forecast_hours,
             herbie_save_dir=herbie_save_dir,
             herbie_download_retries=herbie_download_retries,
             herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
@@ -615,7 +585,7 @@ def main() -> None:
 
         # Download and add UV data from the pgrb2b product
         duvb_match_string = ":DUVB:surface:"
-        grib_list_uv = download_and_validate_gfs_subset(
+        grib_list_uv = download_and_validate_subset(
             product="pgrb2b.0p25",
             search=duvb_match_string,
             dataset_name="GFS historic pgrb2b.0p25 DUVB",
@@ -623,7 +593,6 @@ def main() -> None:
             forecast_hours=hist_forecast_hours,
             base_time=base_time,
             wgrib2_exe=wgrib2_exe,
-            gfs_forecast_hours=gfs_forecast_hours,
             herbie_save_dir=herbie_save_dir,
             herbie_download_retries=herbie_download_retries,
             herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
@@ -885,58 +854,28 @@ def main() -> None:
     # Read in stacked 4D array back in
     stacked_array_disk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
-    # Create a zarr backed dask array
-    if save_type == "S3":
-        zarr_store = zarr.storage.ZipStore(
-            forecast_process_dir + "/GFS.zarr.zip", mode="a", compression=0
-        )
-    else:
-        zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/GFS.zarr")
-
-    #
     # 1. Interpolate the stacked array to be hourly along the time axis
+    stacked_array_interp = interp_time_take_blend(
+        stacked_array_disk,
+        stacked_timesUnix=stacked_timesUnix,
+        hourly_timesUnix=hourly_timesUnix,
+        dtype="float32",
+        fill_value=np.nan,
+    )
+
     # 2. Pad to chunk size
-    # 3. Create the zarr array
-    # 4. Rechunk it to match the final array
-    # 5. Write it out to the zarr array
+    stacked_array_padded = pad_to_chunk_size(stacked_array_interp, final_chunk)
 
-    with (
-        ProgressBar(),
-        dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
-    ):
-        # 1. Interpolate the stacked array to be hourly along the time axis
-        stacked_array_interp = interp_time_take_blend(
-            stacked_array_disk,
-            stacked_timesUnix=stacked_timesUnix,
-            hourly_timesUnix=hourly_timesUnix,
-            dtype="float32",
-            fill_value=np.nan,
+    # 3. Write the final store
+    gfs_store_name = "GFS.zarr.zip" if save_type == "S3" else "GFS.zarr"
+    gfs_maps_store_name = "GFS_Maps.zarr.zip" if save_type == "S3" else "GFS_Maps.zarr"
+    with ProgressBar():
+        write_final_zarr(
+            stacked_array_padded,
+            forecast_process_dir + "/" + gfs_store_name,
+            final_chunk,
+            zarr_store_workers,
         )
-
-        # 2. Pad to chunk size
-        stacked_array_padded = pad_to_chunk_size(stacked_array_interp, final_chunk)
-
-        # 3. Create the zarr array
-        zarr_array = zarr.create_array(
-            store=zarr_store,
-            shape=(
-                len(zarr_vars),
-                len(hourly_timesUnix),
-                stacked_array_padded.shape[2],
-                stacked_array_padded.shape[3],
-            ),
-            chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
-
-        # 4. Rechunk it to match the final array
-        # 5. Write it out to the zarr array
-        stacked_array_padded.round(5).rechunk(
-            (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
-        ).to_zarr(zarr_array, overwrite=True, compute=True)
-
-    close_store(zarr_store)
 
     # Rechunk map data for faster web access
     # Variables included: time(0), TMP(4), UGRD(8), VGRD(9), PRATE(10), PACCUM(11),
@@ -951,11 +890,11 @@ def main() -> None:
 
     if save_type == "S3":
         zarr_store_maps = zarr.storage.ZipStore(
-            forecast_process_dir + "/GFS_Maps.zarr.zip", mode="a"
+            forecast_process_dir + "/" + gfs_maps_store_name, mode="a"
         )
     else:
         zarr_store_maps = zarr.storage.LocalStore(
-            forecast_process_dir + "/GFS_Maps.zarr"
+            forecast_process_dir + "/" + gfs_maps_store_name
         )
 
     for var_idx in MAP_VAR_INDICES:
@@ -986,53 +925,20 @@ def main() -> None:
 
     close_store(zarr_store_maps)
 
-    # %% Upload to S3
-    if save_type == "S3":
-        # Write most recent forecast time
-        with open(forecast_process_dir + "/GFS.time.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(base_time, file)
-        if no_upload:
-            logger.info("NO_UPLOAD enabled, skipping forecast S3 publish")
-        else:
-            # Upload to S3
-            s3.put_file(
-                forecast_process_dir + "/GFS.zarr.zip",
-                forecast_path + "/" + ingest_version + "/GFS.zarr.zip",
-            )
-            s3.put_file(
-                forecast_process_dir + "/GFS_Maps.zarr.zip",
-                forecast_path + "/" + ingest_version + "/GFS_Maps.zarr.zip",
-            )
-
-            s3.put_file(
-                forecast_process_dir + "/GFS.time.pickle",
-                forecast_path + "/" + ingest_version + "/GFS.time.pickle",
-            )
+    # %% Publish the stores, then the run time the API uses to detect them
+    if save_type == "S3" and no_upload:
+        logger.info("NO_UPLOAD enabled, skipping forecast S3 publish")
     else:
-        # Write most recent forecast time
-        with open(forecast_process_dir + "/GFS.time.pickle", "wb") as file:
-            # Serialize and write the variable to the file
-            pickle.dump(base_time, file)
-
-        shutil.move(
-            forecast_process_dir + "/GFS.time.pickle",
-            forecast_path + "/" + ingest_version + "/GFS.time.pickle",
+        publish_ingest_run(
+            [gfs_store_name, gfs_maps_store_name],
+            base_time,
+            "GFS.time.pickle",
+            process_dir=forecast_process_dir,
+            publish_dir=publish_dir,
+            save_type=save_type,
+            s3=s3,
         )
 
-        # Copy the zarr file to the final location
-        shutil.copytree(
-            forecast_process_dir + "/GFS.zarr",
-            forecast_path + "/" + ingest_version + "/GFS.zarr",
-            dirs_exist_ok=True,
-        )
-
-        # Copy the zarr file to the final location
-        shutil.copytree(
-            forecast_process_dir + "/GFS_Maps.zarr",
-            forecast_path + "/" + ingest_version + "/GFS_Maps.zarr",
-            dirs_exist_ok=True,
-        )
     # Clean up
     if no_upload:
         logger.info("NO_UPLOAD enabled, skipping cleanup of %s", forecast_process_dir)
