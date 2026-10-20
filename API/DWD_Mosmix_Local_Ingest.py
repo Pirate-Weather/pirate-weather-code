@@ -1,31 +1,29 @@
-# %% DWD MOSMIX-S Hourly Processing script - Gridded Interpolation
-# This script downloads the latest DWD MOSMIX-S KML/KMZ data,
-# parses the point-based station forecasts, cleans and standardizes the data,
-# interpolates it onto a specified GFS reference grid, and then saves the
-# resulting gridded (4D) data to a Zarr store for API consumption.
-# It also stores original station metadata for lookup purposes.
-#
-# Author: Alexander Rey
-# Date: June 2025
+"""DWD MOSMIX-S station forecast ingest.
 
+Downloads the latest DWD MOSMIX-S KMZ (point forecasts for ~5400 stations
+worldwide, issued hourly, hourly steps to 240 h), parses the station forecasts,
+standardizes them to the API's GRIB-style variable names, fills short per-station
+gaps and grids each station onto the nearest cells of the global 0.25 degree GFS
+grid. Publishes ``DWD_MOSMIX.zarr``, the grid-cell-to-station map
+``DWD_MOSMIX_stations.pickle`` and ``DWD_MOSMIX.time.pickle`` (the KML IssueTime).
+The store starts at the first MOSMIX-S time step (IssueTime + 1 h).
 
-# NOTE: You may ask yourself, why does it require 20 GB of RAM to process a 40 MB KMZ?
-# The issue is that Zarr doesn't nicely support sparse arrays, and the DWD MOSMIX-S is mostly empty
-# As soon as this issue is resolved in Zarr, this script can be optimized further.
-# https://github.com/zarr-developers/zarr-specs/issues/245
+Why does it need ~20 GB of RAM to process a 40 MB KMZ? Zarr does not support
+sparse arrays and the gridded MOSMIX-S data is mostly empty; see
+https://github.com/zarr-developers/zarr-specs/issues/245.
 
-# NOTE 2: Multiple stations can map to the same grid cell (e.g., OSAKA station ID 47772 and
-# OSAKA AIRPORT station ID 47771 are ~10km apart). This function uses the closest station for interpolation.
+Multiple stations can map to the same grid cell (e.g. OSAKA 47772 and OSAKA
+AIRPORT 47771 are ~10 km apart); the closest station wins.
 
-# %% Import modules
+Alexander Rey, June 2025
+"""
+
 import io
 import logging
 import os
 import pickle
-import sys
 import time
 import zipfile
-from datetime import UTC, datetime
 
 import dask.array as da
 import numpy as np
@@ -49,26 +47,44 @@ from API.ingest_utils import (
     FINAL_CHUNK_SIZES,
     clear_directory,
     interpolate_temporal_gaps_efficiently,
+    positive_int_env,
     publish_ingest_run,
     read_published_run_time,
 )
 
-# Distance to interpolate stations to grid (km)
-radius_km = DWD_RADIUS
-
-
 logger = logging.getLogger(__name__)
 
+# %% Model constants
+# DWD publishes the newest MOSMIX-S run under a fixed "LATEST" name
+DWD_MOSMIX_URL = "https://opendata.dwd.de/weather/local_forecasts/mos/MOSMIX_S/all_stations/kml/MOSMIX_S_LATEST_240.kmz"
+DOWNLOADED_KMZ_FILE = "MOSMIX_S_LATEST_240.kmz"
 
-# Define KML and DWD namespaces for easier parsing of the XML structure.
-# These namespaces are crucial for correctly locating elements within the KML file.
+# KML and DWD namespaces used to locate elements within the KML file
 KML_NAMESPACE = "{http://www.opengis.net/kml/2.2}"
 DWD_NAMESPACE = (
     "{https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd}"
 )
 
-# Define the comprehensive list of variables to be saved in the final Zarr dataset.
-# during the interpolation process to maintain a consistent schema.
+# Stations are gridded onto the global 0.25 degree GFS grid so the API can look
+# them up with the same indices as GFS. Longitudes are in [0, 360).
+GFS_GRID_LATS = np.arange(-90, 90, 0.25)
+GFS_GRID_LONS = np.arange(0, 360, 0.25)
+EARTH_RADIUS_KM = 6371.0
+# Distance to interpolate stations to grid (km)
+radius_km = DWD_RADIUS
+
+# Rad1h is an hourly sum in kJ/m^2; dividing by 3.6 gives the mean flux in W/m^2
+# ((kJ/m^2 * 1000 J/kJ) / 3600 s).
+KJ_PER_M2_PER_HOUR_TO_W_PER_M2 = 3.6
+# Longest run of missing hourly rows filled within one station's series before
+# gridding; longer gaps null the series so the API falls back to GFS/ECMWF.
+STATION_MAX_GAP_HOURS = 6
+# Longest run of missing time steps filled per grid cell after gridding
+GRID_MAX_GAP_HOURS = 3
+# Precipitation type (WW codes) is categorical, so its gaps take the nearest value
+nearest_neighbor_vars = ["PTYPE_surface"]
+
+# Variables in the published store; the order is the API's DWD_MOSMIX index map
 zarr_vars = (
     "time",
     "TMP_2maboveground",
@@ -85,28 +101,66 @@ zarr_vars = (
     "DSWRF_surface",
 )
 
-# Define the subset of standardized variables that are directly sourced from
-# MOSMIX-S (or calculated from it) and will be actively interpolated onto the grid.
-api_target_numerical_variables = [
-    "TMP_2maboveground",
-    "DPT_2maboveground",
-    "RH_2maboveground",  # Relative Humidity is calculated
-    "PRES_meansealevel",
-    "UGRD_10maboveground",
-    "VGRD_10maboveground",
-    "GUST_surface",
-    "APCP_surface",  # Now in cm
-    "PTYPE_surface",
-    "TCDC_entireatmosphere",
-    "VIS_surface",
-    "DSWRF_surface",  # New: calculated from Rad1h
-]
+# %% Paths and configuration
+ingest_version = INGEST_VERSION_STR
+
+# Base directory for all processing and output files
+forecast_process_dir = os.getenv("forecast_process_dir", "/mnt/nvme/data/DWD_MOSMIX")
+forecast_process_path = forecast_process_dir + "/DWD_Process"
+# Temporary directory for downloaded files
+tmp_dir = os.getenv("tmp_dir", os.path.join(forecast_process_dir, "Downloads"))
+# Final destination directory for processed Zarr files
+forecast_path = os.getenv("forecast_path", "/mnt/nvme/data/Prod/DWD")
+
+# "Download" (local) or "S3"
+save_type = os.getenv("save_type", "Download")
+aws_access_key_id = os.environ.get("AWS_KEY", "")
+aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+
+DWD_DOWNLOAD_RETRIES = positive_int_env("dwd_download_retries", 3)
+DWD_RETRY_SLEEP_SECONDS = positive_int_env("dwd_retry_sleep_seconds", 30)
+# (connect, read) timeouts for the KMZ request
+DWD_REQUEST_TIMEOUT_SECONDS = (10, 300)
 
 
-# --- Core Helper Functions ---
-# Relative humidity is calculated using MetPy's `relative_humidity_from_dewpoint`.
-# This removes the need for custom vapor-pressure approximations and leverages
-# a tested implementation that supports pint units.
+def build_gfs_grid_tree() -> BallTree:
+    """Build a haversine BallTree over the cell centres of the 0.25 degree GFS grid."""
+    lon_grid, lat_grid = np.meshgrid(GFS_GRID_LONS, GFS_GRID_LATS)
+    grid_coords_deg = np.column_stack([lat_grid.ravel(), lon_grid.ravel()])
+    return BallTree(np.radians(grid_coords_deg), metric="haversine")
+
+
+def download_mosmix_file(url: str, local_path: str) -> None:
+    """Download the MOSMIX KMZ with request timeouts and bounded retries.
+
+    Raises the last error after ``DWD_DOWNLOAD_RETRIES`` attempts; a missing
+    KMZ means there is nothing valid to publish.
+    """
+    for attempt in range(1, DWD_DOWNLOAD_RETRIES + 1):
+        try:
+            with requests.get(
+                url, stream=True, timeout=DWD_REQUEST_TIMEOUT_SECONDS
+            ) as response:
+                response.raise_for_status()
+                with open(local_path, "wb") as f:
+                    f.writelines(response.iter_content(chunk_size=8192))
+            logger.info("DWD MOSMIX KMZ downloaded to %s", local_path)
+            return
+        except (requests.RequestException, OSError) as exc:
+            if attempt == DWD_DOWNLOAD_RETRIES:
+                raise RuntimeError(
+                    f"DWD MOSMIX download from {url} failed after "
+                    f"{DWD_DOWNLOAD_RETRIES} attempts"
+                ) from exc
+            sleep_s = DWD_RETRY_SLEEP_SECONDS * attempt
+            logger.warning(
+                "DWD MOSMIX download attempt %d/%d failed (%s). Retrying in %ss",
+                attempt,
+                DWD_DOWNLOAD_RETRIES,
+                exc,
+                sleep_s,
+            )
+            time.sleep(sleep_s)
 
 
 def parse_mosmix_kml(kml_filepath: str):
@@ -135,8 +189,7 @@ def parse_mosmix_kml(kml_filepath: str):
                 None,
             )
             if kml_content is None:
-                logger.error(f"Error: No KML file found inside {kml_filepath}.")
-                raise ValueError(f"Error: No KML file found inside {kml_filepath}.")
+                raise ValueError(f"No KML file found inside {kml_filepath}.")
             root = parser.parse(io.BytesIO(kml_content)).getroot()
     else:
         # Parse directly from KML file
@@ -175,7 +228,7 @@ def parse_mosmix_kml(kml_filepath: str):
         .sort_values()
         .tolist()
     )
-    logger.info(f"Found {len(global_forecast_times)} global forecast time steps.")
+    logger.info("Found %d global forecast time steps.", len(global_forecast_times))
 
     # Iterate through Placemarks to extract station-specific data
     for placemark in root.findall(f".//{KML_NAMESPACE}Placemark"):
@@ -204,14 +257,16 @@ def parse_mosmix_kml(kml_filepath: str):
                 alt = float(coords[2]) if len(coords) > 2 else 0.0
             except ValueError:
                 logger.warning(
-                    f"Warning: Could not parse coordinates for station ID {station_id}: {coordinates_elem.text}. Setting to NaN."
+                    "Could not parse coordinates for station ID %s: %s. Setting to NaN.",
+                    station_id,
+                    coordinates_elem.text,
                 )
                 lon, lat, alt = np.nan, np.nan, np.nan
 
         extended_data_pm = placemark.find(f"{KML_NAMESPACE}ExtendedData")
         if extended_data_pm is None:
             logger.warning(
-                f"Warning: No ExtendedData found for station ID {station_id}. Skipping."
+                "No ExtendedData found for station ID %s. Skipping.", station_id
             )
             continue
 
@@ -233,7 +288,10 @@ def parse_mosmix_kml(kml_filepath: str):
                     station_forecast_data[element_name] = param_values
                 else:
                     logger.warning(
-                        f"Warning: Mismatch in number of values for '{element_name}' for station {station_id}. Skipping parameter."
+                        "Mismatch in number of values for '%s' for station %s. "
+                        "Skipping parameter.",
+                        element_name,
+                        station_id,
                     )
 
         # Create a record for each (time, station) pair
@@ -319,10 +377,8 @@ def process_dwd_df(df, global_metadata=None):
     # From: https://www.nodc.noaa.gov/archive/arc0021/0002199/1.1/data/0-data/HTML/WMO-CODE/WMO4677.HTM
     df["PTYPE_surface"] = df["ww"]
 
-    # Downward Short-Wave Radiation Flux (DSWRF_surface) from Rad1h
-    # Rad1h unit is kJ/m^2 (hourly sum). Convert to W/m^2 (Joules per second per square meter).
-    # Conversion: (kJ/m^2 * 1000 J/kJ) / 3600 s/hour = J/m^2/s = W/m^2. So, divide by 3.6.
-    df["DSWRF_surface"] = df["Rad1h"] / 3.6
+    # Downward Short-Wave Radiation Flux (DSWRF_surface) from the hourly Rad1h sum
+    df["DSWRF_surface"] = df["Rad1h"] / KJ_PER_M2_PER_HOUR_TO_W_PER_M2
 
     return df
 
@@ -331,7 +387,7 @@ def fill_station_gaps(
     df,
     station_col="station_id",
     time_col="time",
-    max_gap_hours=6,
+    max_gap_hours=STATION_MAX_GAP_HOURS,
 ):
     """
     Fill NaN gaps in each station's time series before spatial gridding.
@@ -488,6 +544,7 @@ def interpolate_dwd_to_grid_knearest_dask(
     df,
     var_cols,
     radius_km,
+    grid_tree,
     k_max=4,
     time_col="time",
     lat_col="latitude",
@@ -518,6 +575,8 @@ def interpolate_dwd_to_grid_knearest_dask(
         Variables to interpolate.
     radius_km : float
         Max radius in km for a station to influence a grid cell.
+    grid_tree : sklearn.neighbors.BallTree
+        Haversine tree over the GFS grid cells, from ``build_gfs_grid_tree``.
     k_max : int
         Maximum number of grid cells to which each station can contribute.
     time_col, lat_col, lon_col, station_col : str
@@ -543,28 +602,19 @@ def interpolate_dwd_to_grid_knearest_dask(
 
     def _log(msg):
         if log == "print":
-            print(msg)
+            logger.info(msg)
 
-    # -------------------------------------------------
-    # 0) Define global 0.25° GFS grid
-    # -------------------------------------------------
-    _log("Building 0.25° GFS grid…")
-
-    gfs_lats = np.arange(-90, 90, 0.25)
-    gfs_lons = np.arange(0, 360, 0.25)
+    gfs_lats = GFS_GRID_LATS
+    gfs_lons = GFS_GRID_LONS
     ny = gfs_lats.size
     nx = gfs_lons.size
-
-    lon_grid, lat_grid = np.meshgrid(gfs_lons, gfs_lats)
-    grid_coords_deg = np.column_stack([lat_grid.ravel(), lon_grid.ravel()])
-    grid_coords_rad = np.radians(grid_coords_deg)
 
     # -------------------------------------------------
     # 1) Station → k-nearest neighbours on grid
     # -------------------------------------------------
     _log("Querying k-nearest neighbours for stations…")
 
-    tree = BallTree(grid_coords_rad, metric="haversine")
+    tree = grid_tree
 
     station_meta = df.drop_duplicates(subset=station_col)[
         [station_col, lat_col, lon_col]
@@ -575,7 +625,7 @@ def interpolate_dwd_to_grid_knearest_dask(
     # k_max nearest neighbours per station (in radians)
     dist_rad, inds_flat = tree.query(pts_rad, k=k_max)  # (n_stations, k_max)
 
-    radius_rad = radius_km / 6371.0
+    radius_rad = radius_km / EARTH_RADIUS_KM
     mask_nn = dist_rad <= radius_rad
     inds_flat = np.where(
         mask_nn, inds_flat, -1
@@ -742,6 +792,7 @@ def interpolate_dwd_to_grid_knearest_dask(
 
 def build_grid_to_stations_map(
     df,
+    grid_tree,
     radius_km=DWD_RADIUS,
     lat_col="latitude",
     lon_col="longitude",
@@ -759,6 +810,8 @@ def build_grid_to_stations_map(
     ----------
     df : pandas.DataFrame
         Columns: station_col, station_name_col, lat_col, lon_col
+    grid_tree : sklearn.neighbors.BallTree
+        Haversine tree over the GFS grid cells, from ``build_gfs_grid_tree``.
     radius_km : float
         Max radius in km for stations to be associated with a grid cell
     lat_col, lon_col, station_col, station_name_col : str
@@ -775,22 +828,13 @@ def build_grid_to_stations_map(
 
     def _log(msg):
         if log == "print":
-            print(msg)
+            logger.info(msg)
 
     _log("Building grid-to-stations mapping...")
 
-    # Define global 0.25° GFS grid
-    gfs_lats = np.arange(-90, 90, 0.25)
-    gfs_lons = np.arange(0, 360, 0.25)
-    ny = gfs_lats.size
-    nx = gfs_lons.size
-
-    lon_grid, lat_grid = np.meshgrid(gfs_lons, gfs_lats)
-    grid_coords_deg = np.column_stack([lat_grid.ravel(), lon_grid.ravel()])
-    grid_coords_rad = np.radians(grid_coords_deg)
-
-    # Build BallTree for grid cells
-    tree = BallTree(grid_coords_rad, metric="haversine")
+    ny = GFS_GRID_LATS.size
+    nx = GFS_GRID_LONS.size
+    tree = grid_tree
 
     # Get unique stations with metadata
     station_meta = df.drop_duplicates(subset=station_col)[
@@ -798,7 +842,7 @@ def build_grid_to_stations_map(
     ]
 
     # For each station, find all grid cells within radius
-    radius_rad = radius_km / 6371.0
+    radius_rad = radius_km / EARTH_RADIUS_KM
 
     # Query all grid cells within radius for each station
     # Store closest station: key=(y, x), value=(distance, station_dict)
@@ -859,79 +903,25 @@ def build_grid_to_stations_map(
     return grid_to_stations
 
 
-# --- Main Ingest Execution Block ---
-# The ingest runs from main() when executed as a script; importing the module has
-# no side effects. It expects environment variables to be set for paths and S3
-# options when run as a script.
-
-# --- Configuration ---
-# URL for the DWD MOSMIX-S latest 240-hour forecast KMZ file
-dwd_mosmix_url = "https://opendata.dwd.de/weather/local_forecasts/mos/MOSMIX_S/all_stations/kml/MOSMIX_S_LATEST_240.kmz"
-downloaded_kmz_file = "MOSMIX_S_LATEST_240.kmz"
-
-# Script ingest version string
-ingest_version = INGEST_VERSION_STR
-
-# Base directory for all processing and output files.
-forecast_process_dir = os.getenv("forecast_process_dir", "/mnt/nvme/data/DWD_MOSMIX")
-forecast_process_path = forecast_process_dir + "/DWD_Process"
-# Temporary directory for downloaded files.
-tmp_dir = os.getenv("tmp_dir", os.path.join(forecast_process_dir, "Downloads"))
-# Final destination directory for processed Zarr files.
-forecast_path = os.getenv("forecast_path", "/mnt/nvme/data/Prod/DWD")
-
-# Defines where the final Zarr file should be saved: "Download" (local) or "S3" (AWS S3).
-save_type = os.getenv("save_type", "Download")
-# AWS Credentials for S3 operations (should be set as environment variables).
-aws_access_key_id = os.environ.get("AWS_KEY", "")
-aws_secret_access_key = os.environ.get("AWS_SECRET", "")
-
-
-# --- Step 1: Download and Parse DWD MOSMIX-S KML/KMZ Data ---
-def download_mosmix_file(url, local_path):
-    """
-    Downloads a MOSMIX file from a URL to a local path.
-    """
-    try:
-        response = requests.get(url, stream=True)
-        # Check if the file exists (404 handling)
-        if response.status_code == 404:
-            logger.warning(f"File not found: {url}")
-            return False
-
-        response.raise_for_status()
-        with open(local_path, "wb") as f:
-            f.writelines(response.iter_content(chunk_size=8192))
-        logger.info(f"File downloaded successfully to: {local_path}")
-        return True
-    except (requests.RequestException, OSError) as e:
-        logger.warning(f"Error downloading {url}: {e}")
-        return False
-
-
-def process_and_interpolate_df(df_input):
-    """
-    Wrapper to process DWD DataFrame, optionally temporally interpolate,
-    and then spatially interpolate to grid.
-    """
-    # 1. Process units and variables
+def process_and_interpolate_df(df_input, grid_tree):
+    """Standardize the station DataFrame, fill per-station gaps and grid it."""
     df_processed = process_dwd_df(df_input)
 
-    # 2. Fill per-station NaN gaps before gridding so that nearest-station-wins
-    #    always finds a valid value and never leaves a grid cell NaN due to a
-    #    single missing report (e.g. RR1c 5–6 h gaps, DD 3–4 h gaps).
+    # Fill per-station NaN gaps before gridding so that nearest-station-wins
+    # always finds a valid value and never leaves a grid cell NaN due to a
+    # single missing report (e.g. RR1c 5–6 h gaps, DD 3–4 h gaps).
     df_processed = fill_station_gaps(df_processed)
 
-    # 3. Interpolate to Grid
     gridded_ds = interpolate_dwd_to_grid_knearest_dask(
         df_processed,
         var_cols=zarr_vars,
         radius_km=radius_km,
+        grid_tree=grid_tree,
         time_col="time",
         lat_col="latitude",
         lon_col="longitude",
         station_col="station_id",
-        log="none",  # Reduce noise
+        log="none",
     )
 
     return gridded_ds
@@ -939,12 +929,10 @@ def process_and_interpolate_df(df_input):
 
 def main() -> None:
     """Run the DWD MOSMIX ingest."""
-    # Set up basic logging configuration
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    # Initialize S3 filesystem object if saving to S3.
     s3 = None
     if save_type == "S3":
         s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
@@ -952,71 +940,56 @@ def main() -> None:
     # Empty the processing directory but keep the directory itself, which is
     # safer for processes that depend on the parent dir.
     clear_directory(forecast_process_dir)
-
-    # Create the temporary download directory.
     os.makedirs(tmp_dir, exist_ok=True)
 
-    # Create the final forecast output directory if saving locally (versioned by ingest).
     publish_dir = forecast_path + "/" + ingest_version
     if save_type == "Download":
         os.makedirs(publish_dir, exist_ok=True)
 
-    start_time = time.time()  # Start timer for script execution
+    T0 = time.time()
 
-    # --- Step 1: Download and Parse DWD MOSMIX-S KML/KMZ Data ---
-    logger.info(
-        f"\n--- Attempting to download DWD MOSMIX data from: {dwd_mosmix_url} ---"
-    )
-    if not download_mosmix_file(
-        dwd_mosmix_url, os.path.join(tmp_dir, downloaded_kmz_file)
-    ):
-        logger.critical("Error downloading latest DWD data. Exiting.")
-        sys.exit(1)
+    # %% Download and parse the latest MOSMIX-S KMZ
+    kmz_path = os.path.join(tmp_dir, DOWNLOADED_KMZ_FILE)
+    logger.info("Downloading DWD MOSMIX data from %s", DWD_MOSMIX_URL)
+    download_mosmix_file(DWD_MOSMIX_URL, kmz_path)
 
-    logger.info(
-        f"\n--- Reading and Parsing KML from {os.path.join(tmp_dir, downloaded_kmz_file)} ---"
-    )
-    df_data, global_metadata = parse_mosmix_kml(
-        os.path.join(tmp_dir, downloaded_kmz_file)
-    )
+    logger.info("Reading and parsing KML from %s", kmz_path)
+    df_data, global_metadata = parse_mosmix_kml(kmz_path)
     if df_data.empty:
-        logger.critical("No data extracted from KML/KMZ. Exiting.")
-        sys.exit(1)
+        raise RuntimeError(f"No station data extracted from DWD MOSMIX {kmz_path}")
 
     # Convert longitudes from [-180, 180] to [0, 360] for consistency with GFS grid
     df_data["longitude"] = df_data["longitude"] % 360
 
-    # Extract the base time from the KML metadata (IssueTime) for update checks.
-    base_time = global_metadata.get("IssueTime", datetime.now(UTC))
-    logger.info(f"Base time for this ingest run (from KML metadata): {base_time}")
+    # %% Determine the model run from the KML IssueTime
+    # The run time is what the API and the update check compare, so a KML
+    # without one cannot be published.
+    base_time = global_metadata.get("IssueTime", pd.NaT)
+    if pd.isna(base_time):
+        raise RuntimeError(f"DWD MOSMIX {kmz_path} has no IssueTime")
 
-    # --- Check for Updates (Skip if no new data) ---
+    # %% Skip the run if this issue has already been published
     previous_base_time = read_published_run_time(
         publish_dir + "/DWD_MOSMIX.time.pickle", save_type, s3
     )
     if previous_base_time is not None and previous_base_time >= base_time:
         logger.info("No Update to DWD_MOSMIX, ending")
         return
+    logger.info("Processing DWD_MOSMIX run %s", base_time)
 
-    # --- Step 2: Process Pandas DataFrame ---
-    logger.info("\n--- Converting DataFrame to xarray Dataset (point-based) ---")
-
-    # Process the latest forecast
-    gridded_dwd_ds_forecast = process_and_interpolate_df(df_data)
-
-    # Chunk
-    gridded_dwd_ds_forecast = gridded_dwd_ds_forecast.chunk(
-        chunks={"time": 240, "lat": CHUNK_SIZES["DWD"], "lon": CHUNK_SIZES["DWD"]}
-    )
+    # %% Standardize, fill station gaps and grid onto the GFS grid
+    # One tree serves both the gridding and the station map
+    grid_tree = build_gfs_grid_tree()
 
     # The store holds the latest forecast only; its first row is the first
     # MOSMIX-S forecast time step (one hour after IssueTime).
-    gridded_dwd_ds = gridded_dwd_ds_forecast
+    gridded_dwd_ds = process_and_interpolate_df(df_data, grid_tree)
 
-    # --- Step 4.5: Build Grid-to-Stations Mapping ---
-    logger.info("\n--- Building grid-to-stations mapping ---")
+    # %% Build the grid-cell-to-station map the API uses for station metadata
+    logger.info("Building grid-to-stations mapping")
     grid_to_stations_map = build_grid_to_stations_map(
         df_data,  # Use original df_data which has station_name
+        grid_tree,
         radius_km=radius_km,
         lat_col="latitude",
         lon_col="longitude",
@@ -1025,14 +998,12 @@ def main() -> None:
         log="tqdm",
     )
 
-    # Save the station map to a pickle file
     station_map_file = os.path.join(forecast_process_dir, "DWD_MOSMIX_stations.pickle")
     with open(station_map_file, "wb") as f:
         pickle.dump(grid_to_stations_map, f)
-    logger.info(f"Station map saved to {station_map_file}")
+    logger.info("Station map saved to %s", station_map_file)
 
-    # --- Step 5: Temporal Interpolation and Saving ---
-    # Rechunk the data to be more manageable for processing
+    # %% Write the gridded data to disk, then fill short time gaps per cell
     gridded_dwd_ds_chunk = gridded_dwd_ds.chunk(
         {
             "time": len(gridded_dwd_ds.time),
@@ -1048,77 +1019,48 @@ def main() -> None:
         if "preferred_chunks" in gridded_dwd_ds_chunk[var].encoding:
             del gridded_dwd_ds_chunk[var].encoding["preferred_chunks"]
 
-    # Write chunked to disk as interim step
+    # Writing the dense gridded arrays to disk first keeps the gap filling below
+    # from holding them all in memory
     with ProgressBar():
         gridded_dwd_ds_chunk.to_zarr(forecast_process_path + "_chunk.zarr", mode="w")
-
-    # Get the time range of the forecast dataset
-    min_time = gridded_dwd_ds.time.min().values
-    max_time = gridded_dwd_ds.time.max().values
-
-    # Delete from memory
     del gridded_dwd_ds_chunk
     del gridded_dwd_ds
 
-    # Read back in as xarray
     ds_chunk_disk = xr.open_zarr(forecast_process_path + "_chunk.zarr", chunks="auto")
 
-    # Interpolate max 3 hour gaps
-    # Define variables that shouldn't be smoothed linearly (e.g. codes, types)
-    nearest_neighbor_vars = ["PTYPE_surface"]
-
-    logger.info("Interpolating gaps and extrapolating edges...")
-
-    # Apply efficient interpolation
+    logger.info("Interpolating gaps and extrapolating edges")
     ds_chunk_disk_interp = interpolate_temporal_gaps_efficiently(
         ds_chunk_disk,
         nearest_vars=nearest_neighbor_vars,
-        max_gap_hours=3,
+        max_gap_hours=GRID_MAX_GAP_HOURS,
         time_dim="time",
     )
 
-    # 1. Prepare Target Time Grid (Hourly)
-
-    # Create continuous hourly range
-    hourly_times = pd.date_range(start=min_time, end=max_time, freq="1h")
-
-    # Convert timestamps to Unix seconds for interpolation function
+    # %% Stack into the (variable, time, y, x) layout the API reads
     unix_epoch = np.datetime64(0, "s")
     one_second = np.timedelta64(1, "s")
-
     stacked_times = ds_chunk_disk_interp.time.values
     stacked_timesUnix = (stacked_times - unix_epoch) / one_second
-    # Unused; kept as-is from the original top-level script.
-    hourly_timesUnix = (hourly_times.values - unix_epoch) / one_second  # noqa: F841
 
     ds_rename = ds_chunk_disk_interp.rename({"time": "stacked_time"})
 
-    # Add a 3D time array
+    # The API reads time from the store like any other variable
     time3d = (
-        ((ds_rename["stacked_time"] - unix_epoch) / np.timedelta64(1, "s"))
-        .astype("float32")  # 1D ('time',)
-        .expand_dims(
-            lat=ds_rename.lat,  # add ('latitude',)
-            lon=ds_rename.lon,
-        )  # add ('longitude',)
-        .transpose("stacked_time", "lat", "lon")  # order dims
+        ((ds_rename["stacked_time"] - unix_epoch) / one_second)
+        .astype("float32")
+        .expand_dims(lat=ds_rename.lat, lon=ds_rename.lon)
+        .transpose("stacked_time", "lat", "lon")
     )
-
-    # Add the time array to the dataset
     ds_rename["time"] = time3d
 
-    # Set time to nan where TMP_2maboveground is nan
+    # Cells with no station have no temperature; mark their time missing too
     ds_rename["time"] = ds_rename["time"].where(
         ~np.isnan(ds_rename["TMP_2maboveground"]), other=np.nan
     )
 
-    # Set the order correctly
-    vars_in = [
-        v for v in zarr_vars if v in ds_rename.data_vars
-    ]  # keep only those that exist
+    vars_in = [v for v in zarr_vars if v in ds_rename.data_vars]
     ds_stack = ds_rename[vars_in].to_array(dim="var", name="var")
 
-    # Rechunk the data to be more manageable for processing
     ds_chunk = ds_stack.chunk(
         {
             "var": -1,
@@ -1128,7 +1070,7 @@ def main() -> None:
         }
     )
 
-    # Create a zarr backed dask array
+    # %% Write the final store
     dwd_store_name = "DWD_MOSMIX.zarr.zip" if save_type == "S3" else "DWD_MOSMIX.zarr"
     if save_type == "S3":
         zarr_store = zarr.storage.ZipStore(
@@ -1139,30 +1081,15 @@ def main() -> None:
             forecast_process_dir + "/" + dwd_store_name
         )
 
-    # 1. Interpolate the stacked array to be hourly along the time axis
-    # 2. Pad to chunk size
-    # 3. Create the zarr array
-    # 4. Rechunk it to match the final array
-    # 5. Write it out to the zarr array
-
+    # Unlike the GRIB ingests this writes with xarray rather than dask, which
+    # also stores the coordinate metadata.
     with ProgressBar():
-        # 4. Rechunk it to match the final array
-        # 5. Write it out to the zarr array
-        # Note that this uses xarray to write instead of dask, which is different than the other files.
-        # Long term, I don't mind the idea of using xarray for writing zarr files as it handles a lot of the metadata.
         ds_chunk.to_zarr(zarr_store, mode="w")
 
     if save_type == "S3":
         zarr_store.close()
 
-    ### Test read back
-    # localTest = zarr.open(
-    #     forecast_process_dir + "/DWD_MOSMIX.zarr",
-    #     mode="r",
-    # )
-    # --- Step 6: Upload to S3 or Move to Final Location ---
-
-    # Publish the store and station map, then the run time the API uses to detect them
+    # %% Publish the store and station map, then the run time the API uses to detect them
     publish_ingest_run(
         [dwd_store_name, "DWD_MOSMIX_stations.pickle"],
         base_time,
@@ -1173,12 +1100,10 @@ def main() -> None:
         s3=s3,
     )
 
-    # --- Final Cleanup ---
+    # %% Clean up
     clear_directory(forecast_process_dir)
     clear_directory(tmp_dir)
-
-    end_time = time.time()  # End timer
-    logger.info(f"\nTotal script execution time: {end_time - start_time:.2f} seconds")
+    logger.info("DWD_MOSMIX run %s published in %.1f s", base_time, time.time() - T0)
 
 
 if __name__ == "__main__":

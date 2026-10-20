@@ -1,7 +1,18 @@
-# %% URMA Processing script using Dask, FastHerbie, and MetPy
-# Alexander Rey, August 2026
+"""URMA analysis ingest with short-term history.
 
-# %% Import modules
+Downloads hourly URMA analyses (2.5 km CONUS Lambert conformal grid, one analysis
+per hour, published several hours after its valid time) for 2 m temperature,
+dew point and specific humidity, 10 m wind and gust, surface pressure,
+visibility and total cloud cover. Each hour is transformed like RTMA-RU
+(derived 2 m relative humidity, earth-relative winds) and archived as its own
+``URMA_Hist_<time>.zarr``; the last ``HISTORY_PERIODS["URMA"]`` hours are then
+merged into ``URMA_Hist.zarr`` and published with ``URMA_Hist.time.pickle``. The
+store runs from the newest analysis minus the history period up to the newest
+analysis.
+
+Alexander Rey, August 2026
+"""
+
 import logging
 import os
 import shutil
@@ -9,12 +20,6 @@ import time
 import warnings
 
 import dask.array as da
-
-# Define ECCODES_DEFINITION_PATH env variable for eccodes
-# This is needed in my testing instance- should not be required for the docker image
-# os.environ["ECCODES_DEFINITION_PATH"] = (
-#    "/home/ubuntu/eccodes-2.40.0-Source/definitions/"
-# )
 import numpy as np
 import pandas as pd
 import s3fs
@@ -26,6 +31,7 @@ from metpy.calc import relative_humidity_from_specific_humidity
 from metpy.units import units
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
+from API.ingest_grib_utils import download_and_validate_subset
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -41,6 +47,7 @@ from API.ingest_utils import (
     make_herbie_save_dir,
     mask_invalid_data,
     pad_to_chunk_size,
+    positive_int_env,
     publish_ingest_run,
     read_published_run_time,
 )
@@ -49,29 +56,28 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
-# Setup logging
 logger = logging.getLogger(__name__)
 
-# %% Setup paths and parameters
-ingest_version = INGEST_VERSION_STR
-
-historic_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/URMA")
-tmp_dir = historic_process_dir + "/Downloads"
-hist_process_path = historic_process_dir + "/URMA_Historic"
-
-forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/URMA")
-historic_path = os.getenv("historic_path", default="/mnt/nvme/data/Prod/URMA")
-
-# Define the processing and final chunk size
-process_chunk = CHUNK_SIZES["URMA"]
-final_chunk = FINAL_CHUNK_SIZES["URMA"]
+# %% Model constants
+URMA_SOURCE_PRIORITY = ["aws", "nomads"]
+# URMA is typically published several hours after its valid time. Search far
+# enough back (hourly cycles) to cover that delay instead of assuming a recent file.
+URMA_LATEST_SEARCH_CYCLES = 12
+# Specific humidity (SPFH) is only downloaded to derive relative humidity.
+URMA_MATCH_STRINGS = (
+    ":((DPT|TMP|SPFH):2 m above ground:)"
+    "|:(GUST:10 m above ground:)"
+    "|:(UGRD:10 m above ground:)"
+    "|:(VGRD:10 m above ground:)"
+    "|:((VIS|PRES):surface:)"
+    "|:TCDC:entire atmosphere"
+)
+# Hours of history before the newest analysis kept in the published store
 his_period = HISTORY_PERIODS["URMA"]
+HOURLY_STORE_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 
-save_type = os.getenv("save_type", default="Download")
-aws_access_key_id = os.environ.get("AWS_KEY", "")
-aws_secret_access_key = os.environ.get("AWS_SECRET", "")
-
-
+# Variables in the published store (cfgrib short names); the order is the API's
+# URMA index map
 zarr_vars = (
     "time",
     "vis",
@@ -85,6 +91,46 @@ zarr_vars = (
     "v10",
 )
 
+# %% Paths and configuration
+ingest_version = INGEST_VERSION_STR
+
+historic_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/URMA")
+tmp_dir = historic_process_dir + "/Downloads"
+hist_process_path = historic_process_dir + "/URMA_Historic"
+
+forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/URMA")
+historic_path = os.getenv("historic_path", default="/mnt/nvme/data/Prod/URMA")
+
+save_type = os.getenv("save_type", default="Download")
+aws_access_key_id = os.environ.get("AWS_KEY", "")
+aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+
+URMA_DOWNLOAD_RETRIES = positive_int_env("herbie_download_retries", 3)
+URMA_RETRY_SLEEP_SECONDS = positive_int_env("herbie_retry_sleep_seconds", 10)
+
+
+def download_urma_analysis(valid_time: pd.Timestamp, herbie_save_dir: str) -> None:
+    """Download one hourly analysis GRIB subset with bounded retries and a count check.
+
+    The wgrib2 stats gate is skipped: URMA never needed wgrib2, and the
+    transform below already masks out-of-range values to NaN, which is the
+    behaviour the API relies on for partially missing analysis fields.
+    """
+    download_and_validate_subset(
+        model="urma",
+        product="anl",
+        search=URMA_MATCH_STRINGS,
+        dataset_name=f"URMA analysis {valid_time}",
+        base_time=valid_time,
+        forecast_hours=[0],
+        priority=URMA_SOURCE_PRIORITY,
+        herbie_save_dir=herbie_save_dir,
+        herbie_download_retries=URMA_DOWNLOAD_RETRIES,
+        herbie_retry_sleep_seconds=URMA_RETRY_SLEEP_SECONDS,
+        skip_wgrib2_validation=True,
+        wgrib2_exe="",
+    )
+
 
 def main() -> None:
     """Run the URMA ingest."""
@@ -93,11 +139,13 @@ def main() -> None:
     )
     # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
     configure_herbie_request_timeouts()
-
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     # URMA writes its stores with plain zarr/xarray calls, so only the open-file
     # and concurrency limits matter here; the worker count is not used.
     configure_zarr_writes()
+
+    process_chunk = CHUNK_SIZES["URMA"]
+    final_chunk = FINAL_CHUNK_SIZES["URMA"]
 
     # Start each run from an empty processing directory
     shutil.rmtree(historic_process_dir, ignore_errors=True)
@@ -110,44 +158,34 @@ def main() -> None:
 
     herbie_save_dir = make_herbie_save_dir(tmp_dir)
 
-    # %% Define base time from the most recent run
-    t0 = time.time()
+    T0 = time.time()
 
+    # %% Determine the model run: the newest available hourly analysis
     latest_run = Herbie_latest(
         model="urma",
-        # URMA is typically published several hours after its valid time. Search
-        # far enough back to cover that delay instead of assuming a recent file.
-        n=12,
+        n=URMA_LATEST_SEARCH_CYCLES,
         product="anl",
         verbose=True,
-        priority=["aws", "nomads"],
+        priority=URMA_SOURCE_PRIORITY,
         save_dir=herbie_save_dir,
     )
-
     base_time = latest_run.date
-    logger.info(f"Checking for new URMA data for base time: {base_time}")
 
-    # Skip the run if this cycle has already been published
+    # %% Skip the run if this cycle has already been published
     previous_base_time = read_published_run_time(
         publish_dir + "/URMA_Hist.time.pickle", save_type, s3
     )
     if previous_base_time is not None and previous_base_time >= base_time:
         logger.info("No Update to URMA, ending")
         return
+    logger.info("Processing URMA run %s", base_time)
 
-    # %% Download URMA analysis data using Herbie Latest
-    match_strings = (
-        ":((DPT|TMP|SPFH):2 m above ground:)"
-        "|:(GUST:10 m above ground:)"
-        "|:(UGRD:10 m above ground:)"
-        "|:(VGRD:10 m above ground:)"
-        "|:((VIS|PRES):surface:)"
-        "|:TCDC:entire atmosphere"
-    )
-    # Historical loop to download the last his_period hours of URMA data, starting from base_time
+    # %% Download, transform and archive every history hour not archived yet
     for i in range(his_period, -1, -1):
-        timestamp_str = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+        analysis_time = pd.Timestamp(base_time - pd.Timedelta(hours=i))
+        timestamp_str = analysis_time.strftime(HOURLY_STORE_TIMESTAMP_FORMAT)
 
+        # A .done marker is written only after an hourly store is complete
         if save_type == "S3":
             s3_path = f"{historic_path}/URMA_Hist_{timestamp_str}.zarr.tar.gz"
             if s3.exists(s3_path.replace(".tar.gz", ".done")):
@@ -160,92 +198,86 @@ def main() -> None:
                 continue
 
         logger.info("Downloading URMA historic timestep: %s", timestamp_str)
+        download_urma_analysis(analysis_time, herbie_save_dir)
 
-        # Directly target the historic hour without the -1 hour shift
-        DATES = pd.date_range(
-            start=base_time - pd.Timedelta(hours=i),
-            periods=1,
-            freq="1h",
-        )
-
+        # Herbie reuses the subset file downloaded above instead of fetching it again
         fh_analysis = Herbie(
-            DATES[0],
+            analysis_time,
             model="urma",
             product="anl",
             verbose=False,
-            priority=["aws", "nomads"],
+            priority=URMA_SOURCE_PRIORITY,
             save_dir=herbie_save_dir,
         )
+        xarray_herbie_list = fh_analysis.xarray(URMA_MATCH_STRINGS)
 
-        fh_analysis.download(match_strings, verbose=True)
-
-        logger.info("URMA GRIB file downloaded successfully.")
-
-        xarray_herbie_list = fh_analysis.xarray(match_strings)
-
-        # Merge the three datasets into one
+        # cfgrib returns one dataset per level type; merge them into one
         xarray_analysis_merged = xr.merge(xarray_herbie_list, compat="override")
-
-        # Assign coordinates from one of the datasets to the merged dataset
         xarray_analysis_merged = xarray_analysis_merged.assign_coords(
             xarray_herbie_list[0].metpy.parse_cf().coords
         )
 
-        # Convert RH from specific humidity and pressure and add it to the dataset
+        # Validate the analysis time against the requested hour
+        grib_analysis_time = pd.Timestamp(xarray_analysis_merged.time.values)
+        if grib_analysis_time != analysis_time:
+            raise RuntimeError(
+                f"URMA analysis time {grib_analysis_time} does not match the "
+                f"requested hour {analysis_time}"
+            )
+
+        # Derive relative humidity and earth-relative winds
         # relative_humidity_from_specific_humidity returns a dimensionless fraction (0-1)
         rh_2m = relative_humidity_from_specific_humidity(
             pressure=xarray_analysis_merged["sp"] * units.Pa,
             temperature=xarray_analysis_merged["t2m"] * units.degK,
             specific_humidity=xarray_analysis_merged["sh2"] * units("kg/kg"),
         )
-
         xarray_analysis_merged["rh"] = rh_2m.metpy.dequantify()
 
-        # Convert winds from grid relative to earth relative
+        # The Lambert conformal grid stores grid-relative winds
         u_earth, v_earth = earth_relative_wind_components(
             xarray_analysis_merged["u10"], xarray_analysis_merged["v10"]
         )
-
-        # Put U and V back into the dataset, replacing the grid relative versions
         xarray_analysis_merged["u10"].data = u_earth
         xarray_analysis_merged["v10"].data = v_earth
 
-        # Drop time as a coordinate
+        # Replace the time coordinate with a gridded UNIX-time variable
+        # The API reads time from the store like any other variable
         model_UNIX_time = xarray_analysis_merged.time.data.astype(
             "datetime64[s]"
         ).astype(int)
         xarray_analysis_merged = xarray_analysis_merged.reset_coords("time", drop=True)
-
-        # Add a new data variables for time
-        # Same X Y shape as the rest, identical values
-        # UNIX time
         xarray_analysis_merged["time"] = (
             ("y", "x"),
             np.full(
-                (xarray_analysis_merged.dims["y"], xarray_analysis_merged.dims["x"]),
+                (xarray_analysis_merged.sizes["y"], xarray_analysis_merged.sizes["x"]),
                 model_UNIX_time,
             ),
         )
 
-        # Clip to valid data ranges
-        for var in zarr_vars:
-            if var == "time":
-                continue
-            elif var in xarray_analysis_merged.data_vars:
-                ds_clip = xarray_analysis_merged[var]
-                if np.issubdtype(ds_clip.dtype, np.number):
-                    mask = (ds_clip >= VALID_DATA_MIN) & (ds_clip <= VALID_DATA_MAX)
-                    xarray_analysis_merged[var] = ds_clip.where(
-                        mask
-                    )  # out-of-range → NaN
-
-        # Drop the sh2 variable as we no longer need it
+        # Specific humidity was only needed for relative humidity
         xarray_analysis_merged = xarray_analysis_merged.drop_vars("sh2")
 
-        # Set the order correctly
-        vars_in = [v for v in zarr_vars if v in xarray_analysis_merged.data_vars]
+        # A missing field would shift every later variable in the API's index map
+        missing_vars = [
+            v for v in zarr_vars if v not in xarray_analysis_merged.data_vars
+        ]
+        if missing_vars:
+            raise RuntimeError(
+                f"URMA analysis {analysis_time} is missing variables {missing_vars}"
+            )
+        vars_in = list(zarr_vars)
 
-        # Merge the arrays into a single 3D array with the correct order, add a 1 length time dimension, and rechunk
+        # Out-of-range values become NaN
+        for var in vars_in:
+            if var == "time":
+                continue
+            ds_clip = xarray_analysis_merged[var]
+            if np.issubdtype(ds_clip.dtype, np.number):
+                mask = (ds_clip >= VALID_DATA_MIN) & (ds_clip <= VALID_DATA_MAX)
+                xarray_analysis_merged[var] = ds_clip.where(mask)
+
+        # Stack into the (variable, time, y, x) layout
         xarray_analysis_stack = (
             xarray_analysis_merged[vars_in]
             .to_stacked_array(new_dim="var", sample_dims=["y", "x"])
@@ -255,8 +287,6 @@ def main() -> None:
             )
             .transpose("var", "time", "y", "x")
         )
-
-        # Apply invalid data masking to the stacked (var, time, y, x) Dask array
         dask_var_array = mask_invalid_data(xarray_analysis_stack.data)
 
         # Preserve the final-grid padding while avoiding tens of thousands of tiny
@@ -265,20 +295,16 @@ def main() -> None:
             (len(vars_in), 1, process_chunk, process_chunk)
         )
 
-        # Historic archives contain a directory-backed Zarr group.
+        # Write the hour as a directory-backed Zarr group with one named array
+        # per variable; the history merge below reads each variable by name.
         hourly_tmp_zarr_path = hist_process_path + "_URMA_Hist_TMP.zarr"
         zarr_store = zarr.storage.LocalStore(hourly_tmp_zarr_path)
-
-        # Preserve the named variables used by the history merge while publishing
-        # the masked and padded Dask data.
         ds_out = xr.Dataset(
             {
                 var: (("step", "y", "x"), dask_var_array[var_index])
                 for var_index, var in enumerate(vars_in)
             }
         )
-
-        # Xarray natively writes a Zarr GROUP with named variable keys (e.g., store/t2m)
         ds_out.to_zarr(
             zarr_store,
             mode="w",
@@ -291,8 +317,9 @@ def main() -> None:
                 for var in vars_in
             },
         )
-
         close_store(zarr_store)
+
+        # Archive the hour, then mark it done so later runs skip it
         if save_type == "S3":
             archive_tmp_zarr_and_upload(
                 tmp_zarr_path=hourly_tmp_zarr_path,
@@ -308,15 +335,15 @@ def main() -> None:
             with open(done_file, "w") as f:
                 f.write("Done")
 
-    # %% Upload to S3 or move to final location
-
-    # Save to Historic Path
+    # %% Collect the hourly stores for the history merge
     if save_type == "S3":
         local_temp_dir = hist_process_path + "_s3_temp_downloads"
         os.makedirs(local_temp_dir, exist_ok=True)
         ncHistWorking_paths = []
         for i in range(his_period, -1, -1):
-            timestamp = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+            timestamp = (base_time - pd.Timedelta(hours=i)).strftime(
+                HOURLY_STORE_TIMESTAMP_FORMAT
+            )
             final_zarr_name = f"URMA_Hist_{timestamp}.zarr"
             extracted_path = download_extract_historic_archive(
                 s3=s3,
@@ -332,7 +359,9 @@ def main() -> None:
         ncHistWorking_paths = [
             historic_path
             + "/URMA_Hist_"
-            + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
+            + (base_time - pd.Timedelta(hours=i)).strftime(
+                HOURLY_STORE_TIMESTAMP_FORMAT
+            )
             + ".zarr"
             for i in range(his_period, -1, -1)
         ]
@@ -344,6 +373,7 @@ def main() -> None:
     if not ncHistWorking_paths:
         raise RuntimeError("No hourly URMA stores are available for the final merge")
 
+    # %% Merge the hourly stores into the final store
     first_hour = zarr.open_array(
         ncHistWorking_paths[0],
         path=zarr_vars[0],
@@ -352,7 +382,7 @@ def main() -> None:
     ny, nx = first_hour.shape[-2:]
 
     # Create the final array before building the per-variable graphs. Writing one
-    # variable at a time bounds scheduler memory for the full 283-hour merge.
+    # variable at a time bounds scheduler memory for the full history merge.
     final_zarr_path = historic_process_dir + "/URMA_Hist.zarr"
     final_zarr = zarr.open_array(
         final_zarr_path,
@@ -422,14 +452,14 @@ def main() -> None:
     close_store(final_zarr.store)
     logger.info("Final URMA merge completed: %s", final_zarr_path)
 
-    # Save to Production Path. S3 serves a single zip of the directory store.
+    # S3 serves a single zip of the directory store
     if save_type == "S3":
         shutil.make_archive(final_zarr_path, "zip", final_zarr_path)
         urma_store_name = "URMA_Hist.zarr.zip"
     else:
         urma_store_name = "URMA_Hist.zarr"
 
-    # Publish the store, then the run time the API uses to detect it
+    # %% Publish the store, then the run time the API uses to detect it
     publish_ingest_run(
         [urma_store_name],
         base_time,
@@ -440,13 +470,9 @@ def main() -> None:
         s3=s3,
     )
 
-    # Clean up
+    # %% Clean up
     shutil.rmtree(historic_process_dir)
-    logger.info("Cleaning up temporary processing directories.")
-
-    # Test Read
-    t1 = time.time()
-    logger.info(f"Total script execution time: {t1 - t0:.2f} seconds.")
+    logger.info("URMA run %s published in %.1f s", base_time, time.time() - T0)
 
 
 if __name__ == "__main__":
