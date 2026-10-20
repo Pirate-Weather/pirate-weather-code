@@ -9,7 +9,7 @@ wrong if the test is removed. The standard for adding tests is section 27 of
 | Folder | Tests | Network | Runs by default | Runs in CI |
 |---|---|---|---|---|
 | `tests/api` | 164 | no | yes | yes (`Tests` workflow, API requirements) |
-| `tests/ingest` | 52 | no | yes | yes (`Ingest Test` workflow, ingest requirements) |
+| `tests/ingest` | 53 | no | yes | yes (`Ingest Test` workflow, ingest requirements) |
 | `tests/live` | 25 | **yes** | no, opt-in with `PW_RUN_LIVE_TESTS=1` | no; manual `Live tests` workflow only |
 | `tests/helpers` | (shared builders) | | | |
 
@@ -135,6 +135,7 @@ runs a whole ingest end to end; only the live RTMA-RU and HRRR_6H tests do that.
 | `test_urma_zarr_encoding.py` | URMA's hourly store is written in the format the historic merge reads back (Zarr v3, float32, chunking, names). |
 | `test_historic_archive_extract.py` | Historic archives are validated on extract; incomplete ones are deleted so the next run rebuilds them (#644); `s3://` temp dirs are rejected (#742). |
 | `test_ingest_publish.py` | Publishing a newer run locally fully replaces the previous store (no stale chunks) and the time pickle, written last, carries the new run time that both the API and the next ingest rely on. |
+| `test_write_final_zarr.py` | The shared final-store writer reproduces the stacked array exactly (rounded to 5 decimals, NaN padding) when source chunks are not a multiple of the final chunk, and writes each zarr chunk to the S3 zip store exactly once. |
 | `test_ingest_utils_download_retry.py` | Herbie downloads retry a bounded number of times, ignore stale files from earlier runs, pace NOMADS requests and reject NOMADS 302 rate-limit redirects (#772). |
 | `test_ingest_grib_utils_retry.py` | FastHerbie is rebuilt between retries so late-published hours are seen. |
 | `test_nbm_download.py` | NBM downloads fail loudly when FastHerbie swallows worker errors (302, missing or empty file), and recover on retry. |

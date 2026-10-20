@@ -809,6 +809,13 @@ def write_final_zarr(
     already be padded to a multiple of ``final_chunk``. ``store_path`` ending in
     ``.zip`` writes an uncompressed ZipStore for S3 upload, otherwise a local
     directory store. Values are rounded to 5 decimals to help compression.
+
+    Dask writes tiles about the size of a source chunk and zarr splits each one
+    into the small final chunks. Rechunking dask all the way down to 3x3 or 5x5
+    chunks builds a very large task graph: on a GFS-sized array this write took
+    102 s / 7.1 GB peak versus 153 s / 7.9 GB (GEFS-sized: 86 s / 3.3 GB versus
+    135 s / 4.3 GB), with identical output. Tiles are a multiple of
+    ``final_chunk`` so every zarr chunk is written exactly once.
     """
     import dask
     import zarr
@@ -818,16 +825,19 @@ def write_final_zarr(
     else:
         store = zarr.storage.LocalStore(store_path)
 
-    final_chunks = (stacked.shape[0], stacked.shape[1], final_chunk, final_chunk)
     zarr_array = zarr.create_array(
         store=store,
         shape=stacked.shape,
-        chunks=final_chunks,
+        chunks=(stacked.shape[0], stacked.shape[1], final_chunk, final_chunk),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
         dtype="float32",
     )
+
+    tile_y = final_chunk * max(1, round(stacked.chunks[2][0] / final_chunk))
+    tile_x = final_chunk * max(1, round(stacked.chunks[3][0] / final_chunk))
+    tiles = (stacked.shape[0], stacked.shape[1], tile_y, tile_x)
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        stacked.round(5).rechunk(final_chunks).to_zarr(
+        stacked.round(5).rechunk(tiles).to_zarr(
             zarr_array, overwrite=True, compute=True
         )
     close_store(store)

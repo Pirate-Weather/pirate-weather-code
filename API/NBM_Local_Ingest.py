@@ -37,6 +37,7 @@ from API.ingest_utils import (
     publish_ingest_run,
     read_published_run_time,
     validate_stacked_time_alignment,
+    write_final_zarr,
 )
 
 # Env setup required before importing Herbie for ECCodes paths
@@ -152,7 +153,8 @@ def main() -> None:
 
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
-    configure_zarr_writes()
+    # The final write used dask's default thread pool (one thread per CPU).
+    zarr_store_workers = configure_zarr_writes(default_workers=os.cpu_count() or 2)
     _ingest_lock_handle = _acquire_single_run_lock(forecast_process_dir + ".lock")
 
     # Start each run from an empty processing directory
@@ -774,16 +776,13 @@ def main() -> None:
     # Read in stacked 4D array back in
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
-    # Create a zarr backed dask array
     if save_type == "S3":
-        zarr_store = zarr.storage.ZipStore(
-            forecast_process_dir + "/NBM.zarr.zip", mode="a", compression=0
-        )
+        nbm_store_path = forecast_process_dir + "/NBM.zarr.zip"
     else:
         nbm_staged_path = local_forecast_version_dir + "/NBM.zarr.partial"
         if os.path.exists(nbm_staged_path):
             shutil.rmtree(nbm_staged_path)
-        zarr_store = zarr.storage.LocalStore(nbm_staged_path)
+        nbm_store_path = nbm_staged_path
 
     with ProgressBar():
         stage_start = time.perf_counter()
@@ -801,32 +800,18 @@ def main() -> None:
             daskVarArrayStackDiskInterp, final_chunk
         )
 
-        # 3. Create the zarr array
-        zarr_array = zarr.create_array(
-            store=zarr_store,
-            shape=(
-                len(zarr_vars),
-                len(hourly_timesUnix),
-                daskVarArrayStackDiskInterpPad.shape[2],
-                daskVarArrayStackDiskInterpPad.shape[3],
-            ),
-            chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
+        # 3. Write the final store in source-aligned tiles
+        write_final_zarr(
+            daskVarArrayStackDiskInterpPad,
+            nbm_store_path,
+            final_chunk,
+            zarr_store_workers,
         )
-
-        # 4. Rechunk it to match the final array
-        # 5. Write it out to the zarr array
-        daskVarArrayStackDiskInterpPad.round(5).rechunk(
-            (len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk)
-        ).to_zarr(zarr_array, overwrite=True, compute=True)
         _timing_log(
             f"NBM_FORECAST stage=interpolate_and_write elapsed={time.perf_counter() - stage_start:.2f}s"
         )
 
     logger.info("Interpolate complete")
-
-    close_store(zarr_store)
 
     # Rechunk subset of data for maps!
     # Want variables:

@@ -14,10 +14,8 @@ import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
-import zarr.storage
 from dask.diagnostics import ProgressBar
 from dotenv import find_dotenv, load_dotenv
-from tqdm import tqdm
 
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_grib_utils import (
@@ -31,7 +29,6 @@ from API.ingest_utils import (
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
     clear_directory,
-    close_store,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
     deaccumulate_energy_to_flux,
@@ -42,6 +39,7 @@ from API.ingest_utils import (
     positive_int_env,
     publish_ingest_run,
     read_published_run_time,
+    write_final_zarr,
 )
 
 dotenv_path = find_dotenv(usecwd=True)
@@ -337,23 +335,7 @@ def main() -> None:
     # Read in stacked 4D array back in
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
-    # Create a zarr backed dask array
     hrdps_store_name = "HRDPS.zarr.zip" if save_type == "S3" else "HRDPS.zarr"
-    if save_type == "S3":
-        zarr_store = zarr.storage.ZipStore(
-            forecast_process_dir + "/" + hrdps_store_name, mode="a", compression=0
-        )
-    else:
-        zarr_store = zarr.storage.LocalStore(
-            forecast_process_dir + "/" + hrdps_store_name
-        )
-
-    #
-    # 1. Interpolate the stacked array to be hourly along the time axis
-    # 2. Pad to chunk size
-    # 3. Create the zarr array
-    # 4. Rechunk it to match the final array
-    # 5. Write it out to the zarr array
 
     with ProgressBar():
         with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
@@ -372,71 +354,13 @@ def main() -> None:
             daskVarArrayStackDiskInterp, final_chunk
         )
 
-        # 3. Create the zarr array
-        zarr_array = zarr.create_array(
-            store=zarr_store,
-            shape=(
-                len(zarr_vars),
-                len(hourly_timesUnix),
-                daskVarArrayStackDiskInterpPad.shape[2],
-                daskVarArrayStackDiskInterpPad.shape[3],
-            ),
-            chunks=(len(zarr_vars), len(hourly_timesUnix), final_chunk, final_chunk),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-            overwrite=True,
+        # 3. Write the final store in source-aligned tiles
+        write_final_zarr(
+            daskVarArrayStackDiskInterpPad,
+            forecast_process_dir + "/" + hrdps_store_name,
+            final_chunk,
+            zarr_store_workers,
         )
-        logger.info(
-            "Final HRDPS Zarr created with shape=%s chunks=%s dtype=%s",
-            zarr_array.shape,
-            zarr_array.chunks,
-            zarr_array.dtype,
-        )
-
-        # 4. Write source-aligned tiles to avoid the large graph created by an
-        # all-at-once rechunk to final spatial chunks.
-        source_y = daskVarArrayStackDiskInterp.shape[2]
-        source_x = daskVarArrayStackDiskInterp.shape[3]
-        target_y = zarr_array.shape[2]
-        target_x = zarr_array.shape[3]
-        y_starts = range(0, target_y, process_chunk)
-        x_starts = range(0, target_x, process_chunk)
-
-        for y_start in tqdm(y_starts, desc="Writing HRDPS.zarr rows"):
-            y_stop = min(y_start + process_chunk, target_y)
-            y_source_stop = min(y_stop, source_y)
-            for x_start in x_starts:
-                x_stop = min(x_start + process_chunk, target_x)
-                x_source_stop = min(x_stop, source_x)
-
-                with dask.config.set(
-                    scheduler="threads", num_workers=zarr_store_workers
-                ):
-                    tile = daskVarArrayStackDiskInterp[
-                        :, :, y_start:y_source_stop, x_start:x_source_stop
-                    ].compute()
-
-                tile = np.round(tile, 5).astype("float32", copy=False)
-                if (
-                    tile.shape[2] != y_stop - y_start
-                    or tile.shape[3] != x_stop - x_start
-                ):
-                    padded_tile = np.full(
-                        (
-                            tile.shape[0],
-                            tile.shape[1],
-                            y_stop - y_start,
-                            x_stop - x_start,
-                        ),
-                        np.nan,
-                        dtype="float32",
-                    )
-                    padded_tile[:, :, : tile.shape[2], : tile.shape[3]] = tile
-                    tile = padded_tile
-
-                zarr_array[:, :, y_start:y_stop, x_start:x_stop] = tile
-
-    close_store(zarr_store)
 
     # %% Publish the store, then the run time the API uses to detect it
     publish_ingest_run(

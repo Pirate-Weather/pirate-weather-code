@@ -8,8 +8,6 @@ import shutil
 import time
 import warnings
 
-import dask
-
 # Define ECCODES_DEFINITION_PATH env variable for eccodes
 # This is needed in my testing instance- should not be required for the docker image
 # os.environ["ECCODES_DEFINITION_PATH"] = (
@@ -18,7 +16,6 @@ import dask
 import numpy as np
 import s3fs
 import xarray as xr
-import zarr
 from herbie import Herbie
 from herbie.fast import Herbie_latest
 from metpy.calc import relative_humidity_from_specific_humidity
@@ -30,7 +27,6 @@ from API.ingest_utils import (
     FINAL_CHUNK_SIZES,
     VALID_DATA_MAX,
     VALID_DATA_MIN,
-    close_store,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
     earth_relative_wind_components,
@@ -39,6 +35,7 @@ from API.ingest_utils import (
     pad_to_chunk_size,
     publish_ingest_run,
     read_published_run_time,
+    write_final_zarr,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -225,37 +222,13 @@ def main() -> None:
     # Add padding to the zarr store
     dask_var_array = pad_to_chunk_size(dask_var_array, final_chunk)
 
-    # Create a zarr backed dask array
     rtma_ru_store_name = "RTMA_RU.zarr.zip" if save_type == "S3" else "RTMA_RU.zarr"
-    if save_type == "S3":
-        zarr_store = zarr.storage.ZipStore(
-            forecast_process_dir + "/" + rtma_ru_store_name, mode="a", compression=0
-        )
-    else:
-        zarr_store = zarr.storage.LocalStore(
-            forecast_process_dir + "/" + rtma_ru_store_name
-        )
-
-    # Create zarr array
-    zarr_array = zarr.create_array(
-        store=zarr_store,
-        shape=(
-            len(zarr_vars),
-            1,
-            dask_var_array.shape[2],
-            dask_var_array.shape[3],
-        ),
-        chunks=(len(zarr_vars), 1, final_chunk, final_chunk),
-        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-        dtype="float32",
+    write_final_zarr(
+        dask_var_array,
+        forecast_process_dir + "/" + rtma_ru_store_name,
+        final_chunk,
+        zarr_store_workers,
     )
-
-    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        dask_var_array.to_zarr(zarr_array, overwrite=True, compute=True)
-
-    close_store(zarr_store)
-    if save_type == "S3":
-        logger.info("Zarr zip store closed.")
 
     # %% Publish the store, then the run time the API uses to detect it
     publish_ingest_run(

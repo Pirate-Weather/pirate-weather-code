@@ -27,6 +27,7 @@ from API.ingest_utils import (
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
     configure_herbie_request_timeouts,
+    configure_zarr_writes,
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
@@ -34,6 +35,7 @@ from API.ingest_utils import (
     publish_ingest_run,
     read_published_run_time,
     validate_stacked_time_alignment,
+    write_final_zarr,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -99,6 +101,8 @@ def main() -> None:
     """Run the ingest."""
     logging.basicConfig(level=logging.INFO)
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+    # The final write used dask's default thread pool (one thread per CPU).
+    zarr_store_workers = configure_zarr_writes(default_workers=os.cpu_count() or 2)
 
     # Define the processing chunk size
     process_chunk = CHUNK_SIZES["GEFS"]
@@ -356,23 +360,7 @@ def main() -> None:
     # Read in stacked 4D array back in
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
-    # Create a zarr backed dask array
     aigefs_store_name = "AIGEFS.zarr.zip" if save_type == "S3" else "AIGEFS.zarr"
-    if save_type == "S3":
-        zarr_store = zarr.storage.ZipStore(
-            forecast_process_dir + "/" + aigefs_store_name, mode="a", compression=0
-        )
-    else:
-        zarr_store = zarr.storage.LocalStore(
-            forecast_process_dir + "/" + aigefs_store_name
-        )
-
-    #
-    # 1. Interpolate the stacked array to be hourly along the time axis
-    # 2. Pad to chunk size
-    # 3. Create the zarr array
-    # 4. Rechunk it to match the final array
-    # 5. Write it out to the zarr array
 
     with ProgressBar():
         # 1. Interpolate the stacked array to be hourly along the time axis
@@ -389,28 +377,13 @@ def main() -> None:
             daskVarArrayStackDiskInterp, final_chunk
         )
 
-        # 3. Create the zarr array
-        zarr_array = zarr.create_array(
-            store=zarr_store,
-            shape=(
-                len(probVars),
-                len(hourly_timesUnix),
-                daskVarArrayStackDiskInterpPad.shape[2],
-                daskVarArrayStackDiskInterpPad.shape[3],
-            ),
-            chunks=(len(probVars), len(hourly_timesUnix), final_chunk, final_chunk),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
+        # 3. Write the final store in source-aligned tiles
+        write_final_zarr(
+            daskVarArrayStackDiskInterpPad,
+            forecast_process_dir + "/" + aigefs_store_name,
+            final_chunk,
+            zarr_store_workers,
         )
-
-        # 4. Rechunk it to match the final array
-        # 5. Write it out to the zarr array
-        daskVarArrayStackDiskInterpPad.round(5).rechunk(
-            (len(probVars), len(hourly_timesUnix), final_chunk, final_chunk)
-        ).to_zarr(zarr_array, overwrite=True, compute=True)
-
-    if save_type == "S3":
-        zarr_store.close()
 
     # %% Publish the store, then the run time the API uses to detect it
     publish_ingest_run(
