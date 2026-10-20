@@ -5,7 +5,7 @@ set -eu
 apk add --no-cache libarchive-tools
 
 BASE_DIR="${BASE_DIR:-/mnt/nvme/data/ProdTest3}"
-REMOTE_BASE="${REMOTE_BASE:-s3:piratezarr2/ForecastTar_v2/v30}"
+REMOTE_BASE="${REMOTE_BASE:-s3:piratezarr2/ForecastTar_v2/v31}"
 READY_FILE="${BASE_DIR}/models_ready"
 
 # Station metadata file (download on first run)

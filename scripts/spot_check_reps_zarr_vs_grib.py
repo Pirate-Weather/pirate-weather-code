@@ -21,9 +21,9 @@ import pandas as pd
 import xarray as xr
 import zarr
 
-DEFAULT_ZARR_PATH = Path("/mnt/nvme/data/Prod/v30/REPS.zarr")
+DEFAULT_ZARR_PATH = Path("/mnt/nvme/data/Prod/v31/REPS.zarr")
 DEFAULT_GRIB_ROOT = Path("/mnt/nvme/data/Process/REPS/Downloads/herbie/reps")
-DEFAULT_BASE_TIME_PICKLE = Path("/mnt/nvme/data/Prod/v30/REPS.time.pickle")
+DEFAULT_BASE_TIME_PICKLE = Path("/mnt/nvme/data/Prod/v31/REPS.time.pickle")
 
 ZARR_VARS = (
     "time",

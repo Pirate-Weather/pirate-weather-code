@@ -27,7 +27,7 @@ import zarr  # noqa: E402
 
 from API.raqdps_utils import RAQDPS_OUTPUT_VARS, build_raqdps_url  # noqa: E402
 
-DEFAULT_ZARR = "/home/reya/Weather/Prod/v30/RAQDPS.zarr"
+DEFAULT_ZARR = "/home/reya/Weather/Prod/v31/RAQDPS.zarr"
 DEFAULT_LAT = 45.4766681
 DEFAULT_LON = -73.5550823
 GRID_RUN = datetime(2026, 7, 6, 12, tzinfo=timezone.utc)

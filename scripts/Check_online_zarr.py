@@ -6,7 +6,7 @@
 # s3://<bucket>/ForecastTar_v2/<ingest_version>/<model>.zarr.zip
 #
 # Example:
-# s3://my-bucket/ForecastTar_v2/v30/GFS.zarr.zip
+# s3://my-bucket/ForecastTar_v2/v31/GFS.zarr.zip
 
 # Open a Pirate Weather zipped Zarr from S3 using repo helpers + .env
 
@@ -36,7 +36,7 @@ AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET"]
 S3_BUCKET = os.environ["s3_bucket"]
 
 # Use .env value if supplied; otherwise fall back to repo constant.
-INGEST_VERSION = "v30"
+INGEST_VERSION = "v31"
 
 SAVE_TYPE = "S3Zarr"
 

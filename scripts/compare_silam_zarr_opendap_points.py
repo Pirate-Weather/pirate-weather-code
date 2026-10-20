@@ -32,7 +32,7 @@ MOL_MOL_TO_PPB = 1e9
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
 
-DEFAULT_ZARR_PATH = "/home/reya/Weather/Prod/v30/SILAM.zarr"
+DEFAULT_ZARR_PATH = "/home/reya/Weather/Prod/v31/SILAM.zarr"
 DEFAULT_OPENDAP_URL = (
     "https://thredds.silam.fmi.fi/thredds/dodsC/"
     "silam_glob_v6_1_sfc/silam_glob_v6_1_sfc_best.ncd.html"

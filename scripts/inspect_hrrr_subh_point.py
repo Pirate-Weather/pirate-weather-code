@@ -29,7 +29,7 @@ from API.constants.api_const import (  # noqa: E402
 from API.constants.shared_const import KELVIN_TO_CELSIUS  # noqa: E402
 from API.utils.precip import dbz_to_rate  # noqa: E402
 
-DEFAULT_DOWNLOAD_DIR = "/mnt/nvme/data/Prod/SubH/v30"
+DEFAULT_DOWNLOAD_DIR = "/mnt/nvme/data/Prod/SubH/v31"
 DEFAULT_X_INDEX = 907
 DEFAULT_Y_INDEX = 545
 SUBH_INTERVAL_SECONDS = 15 * 60
