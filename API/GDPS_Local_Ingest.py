@@ -1,12 +1,20 @@
-# %% Script to test FastHerbie.py to download GDPS data
-# Alexander Rey, April 2026
+"""GDPS deterministic forecast ingest.
 
-# %% Import modules
+Downloads the surface fields of the newest MSC Global Deterministic Prediction
+System run that reaches 240 h (15 km / 0.15 degree global latitude/longitude
+grid; hourly leads to 83 h, then 3-hourly to 240 h) from the MSC Datamart,
+converts them to NetCDF with wgrib2, de-accumulates precipitation and solar
+radiation, interpolates every field to an hourly axis and publishes
+``GDPS.zarr`` plus ``GDPS.time.pickle``. The store starts at the first forecast
+lead (run + 1 h).
+
+Alexander Rey, April 2026
+"""
+
 import logging
 import os
 import re
 import shutil
-import sys
 import time
 import warnings
 
@@ -16,7 +24,6 @@ import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
-from dask.diagnostics import ProgressBar
 from dotenv import find_dotenv, load_dotenv
 
 from API.constants.shared_const import INGEST_VERSION_STR
@@ -30,10 +37,12 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
+    broadcast_times_to_grid,
     clear_directory,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
     deaccumulate_energy_to_flux,
+    deaccumulate_to_hourly_rate,
     interp_time_map_blocks_nan,
     make_herbie_save_dir,
     mask_invalid_data,
@@ -41,9 +50,12 @@ from API.ingest_utils import (
     positive_int_env,
     publish_ingest_run,
     read_published_run_time,
+    validate_stacked_time_alignment,
     write_final_zarr,
 )
 
+# Load .env before importing Herbie, which reads its configuration from the
+# environment at import time
 dotenv_path = find_dotenv(usecwd=True)
 loaded = load_dotenv(dotenv_path, override=True)
 
@@ -51,13 +63,99 @@ from herbie import HerbieLatest  # noqa: E402
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
-# Logging setup
 logger = logging.getLogger(__name__)
 
-# %% Setup paths and parameters
+# %% Model constants
+# Hourly leads through 83 h, then 3-hourly through 240 h
+GDPS_FORECAST_HOURS = [*FORECAST_LEAD_RANGES["GDPS_1"], *FORECAST_LEAD_RANGES["GDPS_2"]]
+# Herbie's 15 km global latitude/longitude product ("15km/grib2/lat_lon" is an
+# alias for it)
+GDPS_PRODUCT = "15km"
+# HerbieLatest steps back 6 hours per period; 7 periods covers the last
+# 42 hours, enough to always reach a run with a 240 h lead.
+GDPS_LATEST_RUN_SEARCH_PERIODS = 7
+# The run is complete once the last lead of 2 m temperature is on the Datamart
+GDPS_LATEST_RUN_PROBE = {"variable": "AirTemp", "level": "AGL-2m"}
+
+# MSC publishes one GRIB file per variable, level and lead. Each entry is the
+# (Datamart variable, level) pair of one downloaded field.
+GDPS_MATCH_STRINGS = [
+    ("AirTemp", "AGL-2m"),
+    ("DewPoint", "AGL-2m"),
+    ("RelativeHumidity", "AGL-2m"),
+    ("WindSpeed", "AGL-10m"),
+    ("WindDir", "AGL-10m"),
+    ("WindGust", "AGL-10m"),
+    ("PrecipRate", "Sfc"),
+    ("Precip-Accum", "Sfc"),
+    ("PrecipType-Instant", "Sfc"),
+    ("UVIndex", "Sfc"),
+    ("DownwardShortwaveRadiationFlux-Accum", "Sfc"),
+    ("CAPE", "Sfc"),
+    ("Pressure", "Sfc"),
+    ("TotalCloudCover", "Sfc"),
+    ("CIN", "Sfc"),
+    ("Pressure", "MSL"),
+    ("VerticalVelocity", "IsbL-0500"),
+    ("KIndex", "Sfc"),
+    ("O3", "EAtm"),
+]
+
+# Some fields are only published on a subset of the leads. They are requested
+# for every lead, but only these are expected to exist; wgrib2 leaves the
+# missing steps as NaN and the NaN-aware time interpolation fills them.
+# Precipitation type and the instability indices are 3-hourly through 168 h,
+# then 6-hourly; 500 hPa vertical velocity is 3-hourly throughout.
+GDPS_REDUCED_FORECAST_HOURS = [
+    hour
+    for hour in GDPS_FORECAST_HOURS
+    if hour % 3 == 0 and (hour <= 168 or hour % 6 == 0)
+]
+GDPS_3_HOURLY_FORECAST_HOURS = [hour for hour in GDPS_FORECAST_HOURS if hour % 3 == 0]
+GDPS_EXPECTED_FORECAST_HOURS = {
+    ("PrecipType-Instant", "Sfc"): GDPS_REDUCED_FORECAST_HOURS,
+    ("CAPE", "Sfc"): GDPS_REDUCED_FORECAST_HOURS,
+    ("CIN", "Sfc"): GDPS_REDUCED_FORECAST_HOURS,
+    ("KIndex", "Sfc"): GDPS_REDUCED_FORECAST_HOURS,
+    ("VerticalVelocity", "IsbL-0500"): GDPS_3_HOURLY_FORECAST_HOURS,
+}
+
+# GRIB variables outside the generic wgrib2 stats range for valid reasons:
+# DSWRF is accumulated energy (J/m^2, far above the range maximum) and CIN is
+# routinely below the range minimum.
+GDPS_EXCLUDED_STATS_VARIABLES = {
+    ("DownwardShortwaveRadiationFlux-Accum", "Sfc"): ["DSWRF"],
+    ("CIN", "Sfc"): ["CIN"],
+}
+
+# Variables in the published store; the order is the API's GDPS index map
+zarr_vars = (
+    "time",
+    "TMP_2maboveground",
+    "DPT_2maboveground",
+    "RH_2maboveground",
+    "WIND_10maboveground",
+    "WDIR_10maboveground",
+    "GUST_10maboveground",
+    "PRATE_surface",
+    "APCP_surface",
+    "UVI_surface",
+    "DSWRF_surface",
+    "PRES_surface",
+    "TCDC_surface",
+    "PRMSL_meansealevel",
+    "TCIOZ_surface",
+    "PTYPE_surface",
+    "CAPE_surface",
+    "CIN_surface",
+    "VVEL_500mb",
+    "KX_surface",
+)
+
+# %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
 
-# Note that when running the docker container, this should be: "/build/wgrib2_build/bin/wgrib2 "
+# When running the docker container, this should be "/build/wgrib2_build/bin/wgrib2 "
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
@@ -68,252 +166,143 @@ tmp_dir = forecast_process_dir + "/Downloads"
 
 forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/GDPS")
 
-
 save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
-herbie_download_retries = positive_int_env("herbie_download_retries", 5)
-herbie_retry_sleep_seconds = positive_int_env("herbie_retry_sleep_seconds", 20)
+
+GDPS_DOWNLOAD_RETRIES = positive_int_env("herbie_download_retries", 5)
+GDPS_RETRY_SLEEP_SECONDS = positive_int_env("herbie_retry_sleep_seconds", 20)
+# The wgrib2 stats check is on by default; set this only to bypass it
 skip_gdps_wgrib2_validation = os.getenv(
-    "skip_gdps_wgrib2_validation", "true"
+    "skip_gdps_wgrib2_validation", "false"
 ).lower() in {"1", "true", "yes", "on"}
 
 
-def deaccumulate_accumulated_field(dataset: xr.Dataset, variable_name: str) -> da.Array:
-    """Convert a total accumulated field into nonnegative per-hour increments."""
-    variable = dataset[variable_name]
-    time_axis = variable.get_axis_num("time")
-    field_data = da.asarray(variable.data)
-    deaccumulated = da.diff(field_data, axis=time_axis, prepend=0)
-
-    time_steps = (dataset.time.diff("time") / np.timedelta64(1, "h")).values.astype(
-        "float32"
+def download_gdps_variable(
+    base_time: pd.Timestamp, variable: str, level: str, herbie_save_dir: str
+) -> list[str]:
+    """Download and validate every lead of one GDPS field with bounded retries."""
+    return download_and_validate_subset(
+        model="gdps",
+        product=GDPS_PRODUCT,
+        search=None,
+        dataset_name=f"GDPS forecast {variable}:{level}",
+        base_time=base_time,
+        forecast_hours=GDPS_FORECAST_HOURS,
+        expected_forecast_hours=GDPS_EXPECTED_FORECAST_HOURS.get(
+            (variable, level), GDPS_FORECAST_HOURS
+        ),
+        excluded_stats_variables=GDPS_EXCLUDED_STATS_VARIABLES.get((variable, level)),
+        skip_wgrib2_validation=skip_gdps_wgrib2_validation,
+        herbie_save_dir=herbie_save_dir,
+        herbie_download_retries=GDPS_DOWNLOAD_RETRIES,
+        herbie_retry_sleep_seconds=GDPS_RETRY_SLEEP_SECONDS,
+        herbie_kwargs={"variable": variable, "level": level},
+        wgrib2_exe=wgrib2_path.strip(),
     )
-    time_steps = np.insert(time_steps, 0, time_steps[0])
-    broadcast_shape = [1] * variable.ndim
-    broadcast_shape[time_axis] = len(time_steps)
-    deaccumulated = deaccumulated / time_steps.reshape(broadcast_shape)
-
-    return da.clip(deaccumulated, 0, None)
 
 
-# Define the processing chunk size
-process_chunk = CHUNK_SIZES["GDPS"]
-
-# Define the final x/y chunksize
-final_chunk = FINAL_CHUNK_SIZES["GDPS"]
+def grib_lead_hour(path: str) -> int:
+    """Return the forecast lead of an MSC GDPS file (``..._PT003H.grib2``)."""
+    match = re.search(r"_PT(\d+)H\.grib2$", os.path.basename(path))
+    if match is None:
+        raise ValueError(f"No forecast lead in GDPS GRIB file name {path}")
+    return int(match.group(1))
 
 
 def main() -> None:
-    """Run the GDPS forecast ingest."""
-    configure_herbie_request_timeouts()
+    """Run the GDPS ingest."""
     logging.basicConfig(level=logging.INFO)
+    # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
+    configure_herbie_request_timeouts()
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     zarr_store_workers = configure_zarr_writes()
+
+    process_chunk = CHUNK_SIZES["GDPS"]
+    final_chunk = FINAL_CHUNK_SIZES["GDPS"]
 
     # Empty the processing directory but keep the Herbie download cache
     clear_directory(forecast_process_dir, keep=tmp_dir)
     os.makedirs(tmp_dir, exist_ok=True)
+    herbie_save_dir = make_herbie_save_dir(tmp_dir)
 
     publish_dir = forecast_path + "/" + ingest_version
     if save_type == "Download":
         os.makedirs(publish_dir, exist_ok=True)
 
-    herbie_save_dir = make_herbie_save_dir(tmp_dir)
-
     T0 = time.time()
 
+    # %% Determine the model run: the newest cycle whose 240 h lead exists
     latest_run = HerbieLatest(
         model="gdps",
         priority=["msc"],
-        periods=7,
-        fxx=240,
-        product="15km/grib2/lat_lon",
-        verbose=True,
-        variable="AirTemp",
-        level="AGL-2m",
+        periods=GDPS_LATEST_RUN_SEARCH_PERIODS,
+        fxx=GDPS_FORECAST_HOURS[-1],
+        product=GDPS_PRODUCT,
+        verbose=False,
         save_dir=herbie_save_dir,
+        **GDPS_LATEST_RUN_PROBE,
     )
-
     base_time = latest_run.date
 
-    # Skip the run if this cycle has already been published
+    # %% Skip the run if this cycle has already been published
     previous_base_time = read_published_run_time(
         publish_dir + "/GDPS.time.pickle", save_type, s3
     )
     if previous_base_time is not None and previous_base_time >= base_time:
         logger.info("No Update to GDPS, ending")
         return
+    logger.info("Processing GDPS run %s", base_time)
 
-    zarr_vars = (
-        "time",
-        "TMP_2maboveground",
-        "DPT_2maboveground",
-        "RH_2maboveground",
-        "WIND_10maboveground",
-        "WDIR_10maboveground",
-        "GUST_10maboveground",
-        "PRATE_surface",
-        "APCP_surface",
-        "UVI_surface",
-        "DSWRF_surface",
-        "PRES_surface",
-        "TCDC_surface",
-        "PRMSL_meansealevel",
-        "TCIOZ_surface",
-        "PTYPE_surface",
-        "CAPE_surface",
-        "CIN_surface",
-        "VVEL_500mb",
-        "KX_surface",
-    )
+    # %% Forecast hours: hourly then 3-hourly leads, stored at their valid times
+    forecast_valid_times = (
+        pd.Timestamp(base_time) + pd.to_timedelta(GDPS_FORECAST_HOURS, unit="h")
+    ).values
 
-    #####################################################################################################
-    # %% Download forecast data using Herbie Latest
-    # Find the latest run with 240 hours
-
-    # Define the variables to download as a dictionary of variable and level pairs to match in the grib files
-    match_strings = [
-        {"variable": "AirTemp", "level": "AGL-2m"},
-        {"variable": "DewPoint", "level": "AGL-2m"},
-        {"variable": "RelativeHumidity", "level": "AGL-2m"},
-        {"variable": "WindSpeed", "level": "AGL-10m"},
-        {"variable": "WindDir", "level": "AGL-10m"},
-        {"variable": "WindGust", "level": "AGL-10m"},
-        {"variable": "PrecipRate", "level": "Sfc"},
-        {"variable": "Precip-Accum", "level": "Sfc"},
-        {"variable": "PrecipType-Instant", "level": "Sfc"},
-        {"variable": "UVIndex", "level": "Sfc"},
-        {"variable": "DownwardShortwaveRadiationFlux-Accum", "level": "Sfc"},
-        {"variable": "CAPE", "level": "Sfc"},
-        {"variable": "Pressure", "level": "Sfc"},
-        {"variable": "TotalCloudCover", "level": "Sfc"},
-        {"variable": "CIN", "level": "Sfc"},
-        {"variable": "Pressure", "level": "MSL"},
-        {"variable": "VerticalVelocity", "level": "IsbL-0500"},
-        {"variable": "KIndex", "level": "Sfc"},
-        {"variable": "O3", "level": "EAtm"},
-    ]
-    # Range should be 1 hour through hour 83, then 3 hourly through hour 240.
-    gdps_range_1 = FORECAST_LEAD_RANGES["GDPS_1"]
-    gdps_range_2 = FORECAST_LEAD_RANGES["GDPS_2"]
-    gdps_file_range = [*gdps_range_1, *gdps_range_2]
-    gdps_reduced_file_range = [
-        hour
-        for hour in gdps_file_range
-        if hour % 3 == 0 and (hour <= 168 or hour % 6 == 0)
-    ]
-    gdps_3_hour_file_range = [hour for hour in gdps_file_range if hour % 3 == 0]
-    gdps_expected_forecast_hours = {
-        ("PrecipType-Instant", "Sfc"): gdps_reduced_file_range,
-        ("CAPE", "Sfc"): gdps_reduced_file_range,
-        ("CIN", "Sfc"): gdps_reduced_file_range,
-        ("KIndex", "Sfc"): gdps_reduced_file_range,
-        ("VerticalVelocity", "IsbL-0500"): gdps_3_hour_file_range,
-    }
-    gdps_excluded_stats_variables = {
-        ("DownwardShortwaveRadiationFlux-Accum", "Sfc"): ["DSWRF"],
-        ("CIN", "Sfc"): ["CIN"],
-    }
-
-    # MSC models have each variable in a separate file, so we loop through the variables and levels to download each one and then merge them later
-    all_files = []
-    expected_total = 0
-    for g in match_strings:
-        expected_forecast_hours = gdps_expected_forecast_hours.get(
-            (g["variable"], g["level"]), gdps_file_range
-        )
-        excluded_stats_variables = gdps_excluded_stats_variables.get(
-            (g["variable"], g["level"])
-        )
-        grib_files = download_and_validate_subset(
-            model="gdps",
-            product="15km",
-            search=None,
-            dataset_name=f"GDPS forecast {g['variable']}:{g['level']}",
-            base_time=base_time,
-            wgrib2_exe=wgrib2_path.strip(),
-            forecast_hours=gdps_file_range,
-            expected_forecast_hours=expected_forecast_hours,
-            excluded_stats_variables=excluded_stats_variables,
-            skip_wgrib2_validation=skip_gdps_wgrib2_validation,
-            herbie_save_dir=herbie_save_dir,
-            herbie_download_retries=herbie_download_retries,
-            herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
-            herbie_kwargs={
-                "variable": g["variable"],
-                "level": g["level"],
-                "verbose": True,
-            },
-        )
-
-        all_files += grib_files
-        expected_total += len(expected_forecast_hours)
-
-        # Log that the download was completed for this variable and level
+    # %% Download each field, then convert all of them to one NetCDF
+    grib_list = []
+    for variable, level in GDPS_MATCH_STRINGS:
+        grib_files = download_gdps_variable(base_time, variable, level, herbie_save_dir)
+        grib_list += grib_files
         logger.info(
-            f"Download completed for GDPS forecast {g['variable']}:{g['level']}, "
-            f"{len(grib_files)} files downloaded."
+            "Download completed for GDPS forecast %s:%s, %s files downloaded.",
+            variable,
+            level,
+            len(grib_files),
         )
 
-    # Deduplicate and sanity-check total files
-    all_files = sorted(set(all_files))
-    if len(all_files) < expected_total:
-        logger.error(
-            f"Download incomplete, expected at least {expected_total} files but got {len(all_files)}"
-        )
-        sys.exit(1)
+    # Feed wgrib2 the files in lead order so every message arrives in valid-time
+    # order; the path breaks ties so the merge is deterministic.
+    grib_list = sorted(grib_list, key=lambda path: (grib_lead_hour(path), path))
 
-    # Create ordered list of downloaded grib files from collected paths
-    grib_list = all_files
-
-    # Sort the list
-    grib_list_sort = sorted(
-        grib_list,
-        key=lambda f: int(re.search(r"_PT(\d+)H", str(f)).group(1)),
-    )
-
-    # Create a string to pass to wgrib2 to merge all gribs into one netcdf
-    cmd = (
-        f"{cat_gribs(grib_list_sort)} | "
+    merged_nc_path = forecast_process_path + "_wgrib2_merged.nc"
+    run_checked(
+        f"{cat_gribs(grib_list)} | "
         f"{quote_path(wgrib2_path.strip())} - "
-        f"-netcdf {quote_path(forecast_process_path + '_wgrib2_merged.nc')}"
+        f"-netcdf {quote_path(merged_nc_path)}",
+        "GDPS wgrib2 NetCDF conversion",
     )
+    xarray_forecast_merged = xr.open_dataset(merged_nc_path)
 
-    # Run wgrib2
-    run_checked(cmd, "GDPS wgrib2 NetCDF conversion")
+    if not np.array_equal(xarray_forecast_merged["time"].values, forecast_valid_times):
+        raise RuntimeError(
+            f"GDPS run {base_time} times {xarray_forecast_merged['time'].values} "
+            f"do not match the expected forecast leads {GDPS_FORECAST_HOURS}"
+        )
 
-    # %% Read the merged netcdf file using xarray (single combined file)
-    xarray_forecast_merged = xr.open_dataset(
-        forecast_process_path + "_wgrib2_merged.nc"
-    )
+    # GDPS is on a regular latitude/longitude grid, so the spatial dimensions
+    # are (latitude, longitude); read them from a field like HRDPS does.
+    spatial_dims = xarray_forecast_merged["TMP_2maboveground"].dims[-2:]
+    NY, NX = (xarray_forecast_merged.sizes[dim] for dim in spatial_dims)
 
-    if len(xarray_forecast_merged.time) != len(gdps_file_range):
-        raise ValueError("Incorrect number of timesteps! Exiting")
-
-    # Determine grid size from merged dataset (supports rotated grids)
-    NY = xarray_forecast_merged.dims.get(
-        "latitude", xarray_forecast_merged["latitude"].size
-    )
-    NX = xarray_forecast_merged.dims.get(
-        "longitude", xarray_forecast_merged["longitude"].size
-    )
-
-    # Create a new hourly time series from the first to the last forecast valid
-    # time; the 3-hourly steps after hour 84 are interpolated onto it below.
-    start = xarray_forecast_merged.time.min().values
-    end = xarray_forecast_merged.time.max().values
-    new_hourly_time = pd.date_range(start=start, end=end, freq="h")
-
-    stacked_times = xarray_forecast_merged.time.values
-    unix_epoch = np.datetime64(0, "s")
-    one_second = np.timedelta64(1, "s")
-    stacked_timesUnix = (stacked_times - unix_epoch) / one_second
-    hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
-
-    # Convert precipitation totals to nonnegative hourly amounts.
-    xarray_forecast_merged["APCP_surface"].data = deaccumulate_accumulated_field(
-        xarray_forecast_merged, "APCP_surface"
+    # %% Correct the accumulated fields
+    # APCP is a total since the run start. Difference consecutive leads and
+    # divide by each lead interval (1 h through 83 h, then 3 h) to get a
+    # nonnegative hourly rate.
+    xarray_forecast_merged["APCP_surface"].data = deaccumulate_to_hourly_rate(
+        xarray_forecast_merged["APCP_surface"].data,
+        GDPS_FORECAST_HOURS,
+        time_axis=xarray_forecast_merged["APCP_surface"].get_axis_num("time"),
     )
 
     # DSWRF is accumulated energy in J/m^2. Convert each interval to its average
@@ -324,9 +313,12 @@ def main() -> None:
         time_axis=xarray_forecast_merged["DSWRF_surface"].get_axis_num("time"),
     )
 
-    # Save the dataset with compression and filters for all variables
     xarray_forecast_merged = xarray_forecast_merged.chunk(
-        chunks={"time": 136, "latitude": process_chunk, "longitude": process_chunk}
+        chunks={
+            "time": len(GDPS_FORECAST_HOURS),
+            spatial_dims[0]: process_chunk,
+            spatial_dims[1]: process_chunk,
+        }
     )
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         xarray_forecast_merged.to_zarr(
@@ -336,92 +328,75 @@ def main() -> None:
             compute=True,
             chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
         )
+    xarray_forecast_merged.close()
 
-    # %% Delete to free memory
-    del (xarray_forecast_merged,)
-    T1 = time.time()
+    # The merged NetCDF is large and no longer needed
+    os.remove(merged_nc_path)
 
-    logger.info(T1 - T0)
-    os.remove(forecast_process_path + "_wgrib2_merged.nc")
+    # %% Stack the variables into the (variable, time, y, x) layout the API reads
+    unix_epoch = np.datetime64(0, "s")
+    one_second = np.timedelta64(1, "s")
+    stacked_timesUnix = (forecast_valid_times - unix_epoch) / one_second
+    # Hourly target axis from the first lead (run + 1 h) to the last; the
+    # 3-hourly steps after 83 h are interpolated onto it below.
+    new_hourly_time = pd.date_range(
+        start=forecast_valid_times[0], end=forecast_valid_times[-1], freq="h"
+    )
+    hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
-    # %% Stack the forecast variables into a single 4D array using dask
     daskVarArrayList = []
-
     for dask_var in zarr_vars:
         daskForecastArray = da.from_zarr(
             forecast_process_path + "_.zarr", component=dask_var, inline_array=True
         )
 
         if dask_var == "time":
-            # Broadcast the 1D time axis over the grid so it is stored like a variable
             npForecastTimes = daskForecastArray.astype("float32").compute()
-
-            daskArrayOut = da.from_array(
-                np.tile(
-                    np.expand_dims(np.expand_dims(npForecastTimes, axis=1), axis=1),
-                    (1, NY, NX),
-                )
-            ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
-
-            daskVarArrayList.append(daskArrayOut)
-
+            # Check that the stored times are aligned with the expected forecast times
+            validate_stacked_time_alignment(stacked_timesUnix, npForecastTimes)
+            # The API reads time from the store like any other variable
+            daskVarArrayList.append(
+                broadcast_times_to_grid(npForecastTimes, NY, NX, process_chunk)
+            )
         else:
             daskVarArrayList.append(
-                daskForecastArray[:, :, :]
-                .rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
-                .astype("float32")
+                daskForecastArray.rechunk(
+                    (len(stacked_timesUnix), process_chunk, process_chunk)
+                ).astype("float32")
             )
 
-        logger.info(dask_var)
+    daskVarArrayListMergeNaN = mask_invalid_data(da.stack(daskVarArrayList, axis=0))
 
-    # Merge the arrays into a single 4D array
-    daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
-
-    # Mask out invalid data
-    # Ignore storm distance, since it can reach very high values that are still correct
-    daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
-
-    # Write out to disk
-    # This intermediate step is necessary to avoid memory overflow
-    with (
-        ProgressBar(),
-        dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
-    ):
+    # Write the stacked array to disk before interpolating; doing both in one
+    # graph overflows memory
+    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         daskVarArrayListMergeNaN.to_zarr(
-            forecast_process_path + "_stack.zarr",
-            overwrite=True,
-            compute=True,
+            forecast_process_path + "_stack.zarr", overwrite=True, compute=True
         )
-
-    # Read in stacked 4D array back in
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
+    # %% Interpolate to hourly and write the final store
+    # Precipitation type is categorical, so it takes the nearest step instead of
+    # a linear blend.
+    daskVarArrayStackDiskInterp = interp_time_map_blocks_nan(
+        daskVarArrayStackDisk,
+        stacked_timesUnix=stacked_timesUnix,
+        hourly_timesUnix=hourly_timesUnix,
+        dtype="float32",
+        fill_value=np.nan,
+        nearest_vars=[zarr_vars.index("PTYPE_surface")],
+    )
+    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+        daskVarArrayStackDiskInterp, final_chunk
+    )
+
     gdps_store_name = "GDPS.zarr.zip" if save_type == "S3" else "GDPS.zarr"
-
-    with ProgressBar():
-        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-            # 1. Interpolate the stacked array to be hourly along the time axis
-            daskVarArrayStackDiskInterp = interp_time_map_blocks_nan(
-                daskVarArrayStackDisk,
-                stacked_timesUnix=stacked_timesUnix,
-                hourly_timesUnix=hourly_timesUnix,
-                dtype="float32",
-                fill_value=np.nan,
-                nearest_vars=[zarr_vars.index("PTYPE_surface")],
-            )
-
-        # 2. Pad to chunk size
-        daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
-            daskVarArrayStackDiskInterp, final_chunk
-        )
-
-        # 3. Write the final store in source-aligned tiles
-        write_final_zarr(
-            daskVarArrayStackDiskInterpPad,
-            forecast_process_dir + "/" + gdps_store_name,
-            final_chunk,
-            zarr_store_workers,
-        )
+    write_final_zarr(
+        daskVarArrayStackDiskInterpPad,
+        forecast_process_dir + "/" + gdps_store_name,
+        final_chunk,
+        zarr_store_workers,
+    )
 
     # %% Publish the store, then the run time the API uses to detect it
     publish_ingest_run(
@@ -434,12 +409,11 @@ def main() -> None:
         s3=s3,
     )
 
-    # Clean up
+    # %% Clean up
+    # Unlike the other MSC ingests, GDPS also drops its Herbie download cache
+    # here; it is only reused when the same run is retried.
     shutil.rmtree(forecast_process_dir)
-
-    # Timing
-    T1 = time.time()
-    logger.info(T1 - T0)
+    logger.info("GDPS run %s published in %.1f s", base_time, time.time() - T0)
 
 
 if __name__ == "__main__":

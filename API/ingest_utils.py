@@ -104,6 +104,10 @@ DWD_RADIUS = 50
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
 
+# Cached CMC GRIB downloads older than this are pruned at the start of a run.
+# REPS history reuses files from cycles up to ~48 h old, so keep a margin.
+DOWNLOAD_CACHE_MAX_AGE_HOURS = 72
+
 
 def deaccumulate_to_hourly_rate(
     values: da.Array | np.ndarray,
@@ -716,6 +720,34 @@ def clear_directory(path: str, keep: str | None = None) -> None:
             shutil.rmtree(entry.path)
         else:
             os.remove(entry.path)
+
+
+def prune_old_files(path: str, max_age_hours: float) -> None:
+    """Delete files under ``path`` last modified more than ``max_age_hours`` ago.
+
+    The CMC ingests keep their Herbie download cache between runs so unchanged
+    GRIB files are not downloaded again; without pruning, one directory per
+    run date accumulates forever. Directories left empty are removed too.
+    """
+    cutoff = time.time() - max_age_hours * 3600
+    removed = 0
+    for root, dirs, files in os.walk(path, topdown=False):
+        for name in files:
+            file_path = os.path.join(root, name)
+            if os.path.getmtime(file_path) < cutoff:
+                os.remove(file_path)
+                removed += 1
+        for name in dirs:
+            dir_path = os.path.join(root, name)
+            if not os.listdir(dir_path):
+                os.rmdir(dir_path)
+    if removed:
+        logger.info(
+            "Pruned %d cached files older than %s h from %s",
+            removed,
+            max_age_hours,
+            path,
+        )
 
 
 def read_published_run_time(pickle_path: str, save_type: str, s3) -> Any | None:

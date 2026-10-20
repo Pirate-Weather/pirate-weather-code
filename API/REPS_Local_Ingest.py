@@ -1,11 +1,24 @@
-# %% Script to test FastHerbie.py to download REPS data
-# Alexander Rey, April 2026
+"""REPS ensemble precipitation ingest.
 
-# %% Import modules
+Downloads the precipitation fields of every member of the newest MSC Regional
+Ensemble Prediction System run that reaches 72 h (10 km rotated
+latitude/longitude grid over North America; 3-hourly leads to 72 h, 6-hourly
+cycles) from the MSC Datamart, reduces them to ensemble statistics
+(precipitation probability, mean and standard deviation, and the mean of each
+precipitation type), interpolates them to an hourly axis and publishes
+``REPS.zarr`` plus ``REPS.time.pickle``.
+
+REPS keeps a short-term history: the 3 and 6 h leads of each of the previous
+48 hours of cycles are reduced the same way, archived once per cycle, and
+stacked ahead of the forecast. The store starts 45 hours before the run
+(the 3 h lead of the cycle 48 hours earlier).
+
+Alexander Rey, April 2026
+"""
+
 import logging
 import os
 import re
-import sys
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
@@ -16,11 +29,14 @@ import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
-from dask.diagnostics import ProgressBar
 from dotenv import find_dotenv, load_dotenv
-from tqdm import tqdm
 
-from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
+from API.constants.shared_const import (
+    ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H,
+    HISTORY_PERIODS,
+    INGEST_VERSION_STR,
+    MISSING_DATA,
+)
 from API.ingest_grib_utils import (
     cat_gribs,
     download_and_validate_subset,
@@ -29,9 +45,11 @@ from API.ingest_grib_utils import (
 )
 from API.ingest_utils import (
     CHUNK_SIZES,
+    DOWNLOAD_CACHE_MAX_AGE_HOURS,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
     archive_tmp_zarr_and_upload,
+    broadcast_times_to_grid,
     clear_directory,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
@@ -41,12 +59,15 @@ from API.ingest_utils import (
     mask_invalid_data,
     pad_to_chunk_size,
     positive_int_env,
+    prune_old_files,
     publish_ingest_run,
     read_published_run_time,
-    run_command,
+    validate_stacked_time_alignment,
     write_final_zarr,
 )
 
+# Load .env before importing Herbie, which reads its configuration from the
+# environment at import time
 dotenv_path = find_dotenv(usecwd=True)
 loaded = load_dotenv(dotenv_path, override=True)
 
@@ -54,13 +75,65 @@ from herbie import HerbieLatest  # noqa: E402
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
-# Logging setup
 logger = logging.getLogger(__name__)
 
-# %% Setup paths and parameters
+# %% Model constants
+# 3-hourly leads 3-72 h
+REPS_FORECAST_HOURS = FORECAST_LEAD_RANGES["REPS"]
+REPS_LEAD_STEP_HOURS = 3
+REPS_PRODUCT = "10km/grib2"
+# HerbieLatest steps back 6 hours per period; 7 periods covers the last
+# 42 hours.
+REPS_LATEST_RUN_SEARCH_PERIODS = 7
+# The run is complete once the last lead of precipitation is on the Datamart
+REPS_LATEST_RUN_PROBE = {"variable": "APCP", "level": "SFC"}
+
+# Short-term history: REPS runs every 6 hours, so the 3 and 6 h leads of each
+# earlier cycle cover the gap until the next one.
+REPS_HISTORY_HOURS = HISTORY_PERIODS["REPS"]
+REPS_CYCLE_HOURS = 6
+REPS_HISTORIC_FORECAST_HOURS = [3, 6]
+REPS_HISTORIC_STORE_PREFIX = "REPS_Hist_v3"
+# Parallel S3 downloads of the archived history stores
+REPS_HISTORIC_DOWNLOAD_WORKERS = 12
+
+# MSC publishes one GRIB file per variable and lead holding every member. Each
+# entry is the (Datamart variable, level) pair of one downloaded field: total
+# precipitation and the freezing rain, ice pellet, rain and snow accumulations.
+REPS_MATCH_STRINGS = [
+    ("AFRAIN", "SFC"),
+    ("AICEP", "SFC"),
+    ("APCP", "SFC"),
+    ("ARAIN", "SFC"),
+    ("ASNOW", "SFC"),
+]
+
+# wgrib2 variable names for each field. Some wgrib2 builds use ECCC's
+# FPRATE/IPRATE/RPRATE/SPRATE parameter names for the precipitation types.
+base_var_name_aliases = {
+    "APCP": ["APCP_SFC"],
+    "AFRAIN": ["AFRAIN_SFC", "FPRATE_surface"],
+    "AICEP": ["AICEP_SFC", "IPRATE_surface"],
+    "ARAIN": ["ARAIN_SFC", "RPRATE_surface"],
+    "ASNOW": ["ASNOW_SFC", "SPRATE_surface"],
+}
+
+# Variables in the published store; the order is the API's REPS index map
+probVars = (
+    "time",
+    "Precipitation_Prob",
+    "APCP_Mean",
+    "APCP_StdDev",
+    "AFRAIN_Mean",
+    "AICEP_Mean",
+    "ARAIN_Mean",
+    "ASNOW_Mean",
+)
+
+# %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
 
-# Note that when running the docker container, this should be: "/build/wgrib2_build/bin/wgrib2 "
+# When running the docker container, this should be "/build/wgrib2_build/bin/wgrib2 "
 wgrib2_path = os.getenv(
     "wgrib2_path", default="/home/ubuntu/wgrib2/wgrib2-3.6.0/build/wgrib2/wgrib2 "
 )
@@ -73,50 +146,49 @@ tmp_dir = forecast_process_dir + "/Downloads"
 forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/REPS")
 historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/REPS")
 
-
 save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
-herbie_download_retries = positive_int_env("herbie_download_retries", 5)
-herbie_retry_sleep_seconds = positive_int_env("herbie_retry_sleep_seconds", 20)
+
+REPS_DOWNLOAD_RETRIES = positive_int_env("herbie_download_retries", 5)
+REPS_RETRY_SLEEP_SECONDS = positive_int_env("herbie_retry_sleep_seconds", 20)
+# The wgrib2 stats check is on by default; set this only to bypass it
 skip_reps_wgrib2_validation = os.getenv(
-    "skip_reps_wgrib2_validation", "true"
+    "skip_reps_wgrib2_validation", "false"
 ).lower() in {"1", "true", "yes", "on"}
 
 
-# Define the processing and history chunk size
-process_chunk = CHUNK_SIZES["REPS"]
+def download_reps_variable(
+    run_time: pd.Timestamp,
+    variable: str,
+    level: str,
+    forecast_hours: list[int],
+    dataset_label: str,
+    herbie_save_dir: str,
+) -> list[str]:
+    """Download and validate the given leads of one REPS field with bounded retries."""
+    return download_and_validate_subset(
+        model="reps",
+        product=REPS_PRODUCT,
+        search=None,
+        dataset_name=f"REPS {dataset_label} {variable}:{level}",
+        base_time=run_time,
+        forecast_hours=forecast_hours,
+        skip_wgrib2_validation=skip_reps_wgrib2_validation,
+        herbie_save_dir=herbie_save_dir,
+        herbie_download_retries=REPS_DOWNLOAD_RETRIES,
+        herbie_retry_sleep_seconds=REPS_RETRY_SLEEP_SECONDS,
+        herbie_kwargs={"variable": variable, "level": level},
+        wgrib2_exe=wgrib2_path.strip(),
+    )
 
-# Define the final x/y chunksize
-final_chunk = FINAL_CHUNK_SIZES["REPS"]
 
-his_period = HISTORY_PERIODS["REPS"]
-
-
-# Ensemble statistics output variables (written to zarr, read by the API)
-probVars = (
-    "time",
-    "Precipitation_Prob",
-    "APCP_Mean",
-    "APCP_StdDev",
-    "AFRAIN_Mean",
-    "AICEP_Mean",
-    "ARAIN_Mean",
-    "ASNOW_Mean",
-)
-
-# Minimum precipitation rate (mm/h) used for the precipitation probability calculation
-PRECIP_THRESHOLD = 0.1
-
-# Base variable names as produced by wgrib2 for REPS GRIB2 files. The rate
-# fields use ECCC's FPRATE/IPRATE/RPRATE/SPRATE parameter names in some builds.
-base_var_name_aliases = {
-    "APCP": ["APCP_SFC"],
-    "AFRAIN": ["AFRAIN_SFC", "FPRATE_surface"],
-    "AICEP": ["AICEP_SFC", "IPRATE_surface"],
-    "ARAIN": ["ARAIN_SFC", "RPRATE_surface"],
-    "ASNOW": ["ASNOW_SFC", "SPRATE_surface"],
-}
+def grib_lead_hour(path: str) -> int:
+    """Return the forecast lead of an MSC REPS file (``..._PT003H.grib2``)."""
+    match = re.search(r"_PT(\d+)H\.grib2$", os.path.basename(path))
+    if match is None:
+        raise ValueError(f"No forecast lead in REPS GRIB file name {path}")
+    return int(match.group(1))
 
 
 def find_member_variables(ds, base_name):
@@ -154,609 +226,422 @@ def find_member_variables(ds, base_name):
     )
 
 
-def main() -> None:
-    """Run the REPS forecast and historic ingest."""
-    configure_herbie_request_timeouts()
-    logging.basicConfig(level=logging.INFO)
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-    zarr_store_workers = configure_zarr_writes()
+def write_ensemble_stats(
+    xarray_merged: xr.Dataset,
+    forecast_hours: list[int],
+    zarr_path: str,
+    process_chunk: int,
+    zarr_store_workers: int,
+) -> None:
+    """Reduce the converted members to the ensemble statistics and write them.
 
-    # Empty the processing directory but keep the Herbie download cache
-    clear_directory(forecast_process_dir, keep=tmp_dir)
-    os.makedirs(tmp_dir, exist_ok=True)
-
-    publish_dir = forecast_path + "/" + ingest_version
-    if save_type == "Download":
-        os.makedirs(publish_dir, exist_ok=True)
-        if not os.path.exists(historic_path):
-            os.makedirs(historic_path)
-
-    herbie_save_dir = make_herbie_save_dir(tmp_dir)
-
-    T0 = time.time()
-
-    latest_run = HerbieLatest(
-        model="reps",
-        priority=["msc"],
-        periods=7,
-        fxx=72,
-        product="10km/grib2",
-        variable="APCP",
-        level="SFC",
-        verbose=False,
-        save_dir=herbie_save_dir,
-    )
-
-    base_time = latest_run.date
-
-    # Skip the run if this cycle has already been published
-    previous_base_time = read_published_run_time(
-        publish_dir + "/REPS.time.pickle", save_type, s3
-    )
-    if previous_base_time is not None and previous_base_time >= base_time:
-        logger.info("No Update to REPS, ending")
-        return
-    #####################################################################################################
-    # %% Download forecast data using Herbie Latest
-    # Find the latest run with 72 hours
-
-    # Define the variables to download as a dictionary of variable and level pairs to match in the grib files
-    match_strings = [
-        {"variable": "AFRAIN", "level": "SFC"},
-        {"variable": "AICEP", "level": "SFC"},
-        {"variable": "APCP", "level": "SFC"},
-        {"variable": "ARAIN", "level": "SFC"},
-        {"variable": "ASNOW", "level": "SFC"},
-    ]
-
-    reps_file_range = FORECAST_LEAD_RANGES["REPS"]
-
-    # MSC models have each variable in a separate file, so we loop through the variables and levels to download each one and then merge them later
-    all_files = []
-    expected_total = 0
-    for g in match_strings:
-        grib_files = download_and_validate_subset(
-            model="reps",
-            product="10km/grib2",
-            search=None,
-            dataset_name=f"REPS forecast {g['variable']}:{g['level']}",
-            base_time=base_time,
-            wgrib2_exe=wgrib2_path.strip(),
-            forecast_hours=reps_file_range,
-            expected_forecast_hours=reps_file_range,
-            skip_wgrib2_validation=skip_reps_wgrib2_validation,
-            herbie_save_dir=herbie_save_dir,
-            herbie_download_retries=herbie_download_retries,
-            herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
-            herbie_kwargs={
-                "variable": g["variable"],
-                "level": g["level"],
-                "verbose": True,
-            },
-        )
-        all_files += grib_files
-        expected_total += len(reps_file_range)
-
-        logger.info(
-            "Download completed for REPS forecast %s:%s, %s files downloaded.",
-            g["variable"],
-            g["level"],
-            len(grib_files),
-        )
-
-    # Deduplicate and sanity-check total files
-    all_files = sorted(set(all_files))
-    if len(all_files) < expected_total:
-        logger.error(
-            f"Download incomplete, expected at least {expected_total} files but got {len(all_files)}"
-        )
-        sys.exit(1)
-
-    # Create ordered list of downloaded GRIB files from collected paths.
-    grib_list = all_files
-
-    # Create a string to pass to wgrib2 to merge all gribs into one netcdf
-    cmd = (
-        f"{cat_gribs(grib_list)} | "
-        f"{quote_path(wgrib2_path.strip())} - "
-        f"-set_ext_name 1 -netcdf {quote_path(forecast_process_path + '_wgrib2_merged.nc')}"
-    )
-
-    # Run wgrib2
-    run_checked(cmd, "REPS wgrib2 NetCDF conversion")
-
-    # Note: UV (DUVB) is included in the main product for REPS; no separate UV download required
-
-    # %% Merge the UV data and xarrays
-    # Read the merged netcdf file using xarray (single combined file)
-    xarray_forecast_merged = xr.open_dataset(
-        forecast_process_path + "_wgrib2_merged.nc"
-    )
-
-    if len(xarray_forecast_merged.time) != len(reps_file_range):
-        raise ValueError("Incorrect number of timesteps! Exiting")
-
-    # REPS latitude and longitude are 2-D coordinates over the rotated y/x grid.
-    spatial_dims = next(iter(xarray_forecast_merged.data_vars.values())).dims[-2:]
-    NY, NX = (xarray_forecast_merged.sizes[dim] for dim in spatial_dims)
-
-    # Create a new time series
-    start = xarray_forecast_merged.time.min().values  # Adjust as necessary
-    end = xarray_forecast_merged.time.max().values  # Adjust as necessary
-    new_hourly_time = pd.date_range(
-        start=start - pd.Timedelta(his_period, "h"), end=end, freq="h"
-    )
-
-    stacked_times = pd.date_range(
-        start=start - pd.Timedelta(his_period, "h"),
-        end=end,
-        freq="3h",
-    )
-    unix_epoch = np.datetime64(0, "s")
-    one_second = np.timedelta64(1, "s")
-    stacked_timesUnix = (stacked_times - unix_epoch) / one_second
-    hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
-
-    # Chunk the merged dataset for efficient ensemble processing
-    xarray_forecast_merged = xarray_forecast_merged.chunk(
+    Used for the forecast run and for each history cycle.
+    """
+    spatial_dims = next(iter(xarray_merged.data_vars.values())).dims[-2:]
+    xarray_merged = xarray_merged.chunk(
         chunks={
-            "time": len(reps_file_range),
+            "time": len(forecast_hours),
             spatial_dims[0]: process_chunk,
             spatial_dims[1]: process_chunk,
         }
     )
 
-    # Calculate ensemble statistics for every accumulation variable.
-    # REPS stores all members in a single file; wgrib2 outputs them as
-    # VARNAME_SFC (control), VARNAME_SFC.1, VARNAME_SFC.2, … per time step.
     stats_vars = {}
+    member_count = None
     for var_prefix, base_var_candidates in base_var_name_aliases.items():
         member_vars = []
         found_base_var = None
         for base_var in base_var_candidates:
-            member_vars = find_member_variables(xarray_forecast_merged, base_var)
+            member_vars = find_member_variables(xarray_merged, base_var)
             if member_vars:
                 found_base_var = base_var
                 break
 
         if not member_vars:
-            logger.warning("No member variables found for %s, skipping", var_prefix)
-            continue
-
-        n_members = len(member_vars)
+            raise RuntimeError(
+                f"No ensemble member variables found for required REPS variable "
+                f"{var_prefix}; tried aliases: {', '.join(base_var_candidates)}"
+            )
+        # Every field comes from the same members; a shorter list means a member
+        # is missing from the downloaded files.
+        if member_count is not None and len(member_vars) != member_count:
+            raise RuntimeError(
+                f"REPS {found_base_var} has {len(member_vars)} members, "
+                f"expected {member_count} like the other fields"
+            )
+        member_count = len(member_vars)
         logger.info(
-            "Processing %s: found %s ensemble members", found_base_var, n_members
+            "Processing %s: found %s ensemble members", found_base_var, member_count
         )
 
-        # Stack all members → shape (n_members, n_times, ny, nx)
-        raw_stacked = da.stack(
-            [xarray_forecast_merged[v].data for v in member_vars],
-            axis=0,
-        )
+        # Stack all members -> (member, time, y, x)
+        raw_stacked = da.stack([xarray_merged[v].data for v in member_vars], axis=0)
 
-        # REPS stores totals since run start; diff converts to per-step accumulation.
-        # Prepend zeros so the first step equals its own 3-hour accumulation.
+        # REPS stores totals since the run start and every lead (forecast and
+        # history) is 3 h after the previous one, starting at 3 h. Difference
+        # consecutive leads and divide by 3 h to get nonnegative hourly rates.
+        # This equals deaccumulate_to_hourly_rate, but stays in float32: the
+        # helper works in float64, which changes the ensemble mean and spread
+        # in the last bit.
         stacked = da.diff(
             raw_stacked, axis=1, prepend=da.zeros_like(raw_stacked[:, :1, :, :])
         )
+        stacked = da.maximum(stacked / REPS_LEAD_STEP_HOURS, 0)
 
-        # Divide by 3 to convert 3-hourly accumulation to mm/h
-        stacked = stacked / 3
-
-        # Clamp negatives that can arise from the diff at boundaries
-        stacked = da.maximum(stacked, 0)
-
-        # Mean across all members for every accumulation variable
         stats_vars[f"{var_prefix}_Mean"] = stacked.mean(axis=0)
 
-        # APCP only: standard deviation and precipitation probability
+        # Spread and probability only for total precipitation
         if var_prefix == "APCP":
             stats_vars["APCP_StdDev"] = stacked.std(axis=0)
-            stats_vars["Precipitation_Prob"] = (stacked > PRECIP_THRESHOLD).sum(
-                axis=0
-            ) / n_members
+            stats_vars["Precipitation_Prob"] = (
+                stacked > ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H
+            ).sum(axis=0) / member_count
 
-    # Build an xarray Dataset from the ensemble statistics
     stats_ds = xr.Dataset(
         {
             key: xr.DataArray(val, dims=("time", *spatial_dims))
             for key, val in stats_vars.items()
         },
-        coords=xarray_forecast_merged.coords,
-    )
-
-    stats_ds = stats_ds.chunk(
+        coords=xarray_merged.coords,
+    ).chunk(
         chunks={
-            "time": len(reps_file_range),
+            "time": len(forecast_hours),
             spatial_dims[0]: process_chunk,
             spatial_dims[1]: process_chunk,
         }
     )
-
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         stats_ds.to_zarr(
-            forecast_process_path + "_.zarr",
+            zarr_path,
             mode="w",
             consolidated=False,
             compute=True,
             chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
         )
 
-    # %% Delete to free memory
-    del xarray_forecast_merged, stats_vars, stats_ds
-    T1 = time.time()
 
-    logger.info(T1 - T0)
-    os.remove(forecast_process_path + "_wgrib2_merged.nc")
+def convert_reps_run(
+    run_time: pd.Timestamp,
+    forecast_hours: list[int],
+    dataset_label: str,
+    process_path: str,
+    herbie_save_dir: str,
+) -> tuple[xr.Dataset, str]:
+    """Download one REPS run's leads and convert them to a validated NetCDF.
 
-    ################################################################################################
-    # %% Historic data
-    # Loop through the runs and check if they have already been processed to s3
+    Returns the opened dataset and the NetCDF path, which the caller removes.
+    """
+    grib_list = []
+    for variable, level in REPS_MATCH_STRINGS:
+        grib_files = download_reps_variable(
+            run_time, variable, level, forecast_hours, dataset_label, herbie_save_dir
+        )
+        grib_list += grib_files
+        logger.info(
+            "Download completed for REPS %s %s:%s, %s files downloaded.",
+            dataset_label,
+            variable,
+            level,
+            len(grib_files),
+        )
 
-    # 6 hour runs
-    for i in range(his_period, 0, -6):
+    # Feed wgrib2 the files in lead order so every message arrives in valid-time
+    # order; the path breaks ties so the merge is deterministic.
+    grib_list = sorted(grib_list, key=lambda path: (grib_lead_hour(path), path))
+
+    # -set_ext_name gives each member its own variable name (see
+    # find_member_variables) instead of overwriting one another
+    merged_nc_path = process_path + "_wgrib2_merged.nc"
+    run_checked(
+        f"{cat_gribs(grib_list)} | "
+        f"{quote_path(wgrib2_path.strip())} - "
+        f"-set_ext_name 1 -netcdf {quote_path(merged_nc_path)}",
+        f"REPS {dataset_label} run {run_time} wgrib2 NetCDF conversion",
+    )
+    xarray_merged = xr.open_dataset(merged_nc_path)
+
+    expected_valid_times = (
+        pd.Timestamp(run_time) + pd.to_timedelta(forecast_hours, unit="h")
+    ).values
+    if not np.array_equal(xarray_merged["time"].values, expected_valid_times):
+        raise RuntimeError(
+            f"REPS {dataset_label} run {run_time} times "
+            f"{xarray_merged['time'].values} do not match the expected leads "
+            f"{forecast_hours}"
+        )
+    return xarray_merged, merged_nc_path
+
+
+def main() -> None:
+    """Run the REPS ingest, including its short-term history."""
+    logging.basicConfig(level=logging.INFO)
+    # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
+    configure_herbie_request_timeouts()
+    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+    zarr_store_workers = configure_zarr_writes()
+
+    process_chunk = CHUNK_SIZES["REPS"]
+    final_chunk = FINAL_CHUNK_SIZES["REPS"]
+
+    # Empty the processing directory but keep the Herbie download cache
+    clear_directory(forecast_process_dir, keep=tmp_dir)
+    os.makedirs(tmp_dir, exist_ok=True)
+    herbie_save_dir = make_herbie_save_dir(tmp_dir)
+    prune_old_files(herbie_save_dir, DOWNLOAD_CACHE_MAX_AGE_HOURS)
+
+    publish_dir = forecast_path + "/" + ingest_version
+    if save_type == "Download":
+        os.makedirs(publish_dir, exist_ok=True)
+        os.makedirs(historic_path, exist_ok=True)
+
+    T0 = time.time()
+
+    # %% Determine the model run: the newest cycle whose 72 h lead exists
+    latest_run = HerbieLatest(
+        model="reps",
+        priority=["msc"],
+        periods=REPS_LATEST_RUN_SEARCH_PERIODS,
+        fxx=REPS_FORECAST_HOURS[-1],
+        product=REPS_PRODUCT,
+        verbose=False,
+        save_dir=herbie_save_dir,
+        **REPS_LATEST_RUN_PROBE,
+    )
+    base_time = latest_run.date
+
+    # %% Skip the run if this cycle has already been published
+    previous_base_time = read_published_run_time(
+        publish_dir + "/REPS.time.pickle", save_type, s3
+    )
+    if previous_base_time is not None and previous_base_time >= base_time:
+        logger.info("No Update to REPS, ending")
+        return
+    logger.info("Processing REPS run %s", base_time)
+
+    # %% Forecast hours: 3-hourly leads, stored at their valid times, preceded by
+    # the 3 and 6 h leads of each history cycle
+    forecast_valid_times = (
+        pd.Timestamp(base_time) + pd.to_timedelta(REPS_FORECAST_HOURS, unit="h")
+    ).values
+    history_run_times = [
+        base_time - pd.Timedelta(hours=hours_before)
+        for hours_before in range(REPS_HISTORY_HOURS, 0, -REPS_CYCLE_HOURS)
+    ]
+    history_valid_times = [
+        (
+            pd.Timestamp(run_time)
+            + pd.to_timedelta(REPS_HISTORIC_FORECAST_HOURS, unit="h")
+        ).values
+        for run_time in history_run_times
+    ]
+    history_store_names = [
+        REPS_HISTORIC_STORE_PREFIX + run_time.strftime("%Y%m%dT%H%M%SZ")
+        for run_time in history_run_times
+    ]
+
+    # %% Download, convert and reduce the forecast run
+    xarray_forecast_merged, merged_nc_path = convert_reps_run(
+        base_time,
+        REPS_FORECAST_HOURS,
+        "forecast",
+        forecast_process_path,
+        herbie_save_dir,
+    )
+
+    # REPS is on a rotated latitude/longitude grid: latitude and longitude are
+    # 2-D coordinates over the y/x dimensions, so the grid size comes from a
+    # field's dimensions (either coordinate's size would be NY * NX).
+    spatial_dims = next(iter(xarray_forecast_merged.data_vars.values())).dims[-2:]
+    NY, NX = (xarray_forecast_merged.sizes[dim] for dim in spatial_dims)
+
+    write_ensemble_stats(
+        xarray_forecast_merged,
+        REPS_FORECAST_HOURS,
+        forecast_process_path + "_.zarr",
+        process_chunk,
+        zarr_store_workers,
+    )
+    xarray_forecast_merged.close()
+
+    # The merged NetCDF is large and no longer needed
+    os.remove(merged_nc_path)
+
+    # %% Reduce and archive each history cycle that has not been archived yet
+    for run_time, store_name in zip(history_run_times, history_store_names):
         if save_type == "S3":
-            s3_path = (
-                historic_path
-                + "/REPS_Hist_v3"
-                + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-                + ".zarr.tar.gz"
-            )
-
-            # Check for a done file in S3
+            s3_path = historic_path + "/" + store_name + ".zarr.tar.gz"
             if s3.exists(s3_path.replace(".tar.gz", ".done")):
-                logger.info(
-                    "File already exists in S3, skipping download for: %s", s3_path
-                )
+                logger.info("REPS history %s already archived in S3", store_name)
                 continue
         else:
-            # Local Path Setup
-            local_path = (
-                historic_path
-                + "/REPS_Hist_v3"
-                + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-                + ".zarr"
-            )
-
-            # Check for a local done file
+            local_path = historic_path + "/" + store_name + ".zarr"
             if os.path.exists(local_path.replace(".zarr", ".done")):
-                logger.info(
-                    "File already exists locally, skipping download for: %s", local_path
-                )
+                logger.info("REPS history %s already archived locally", store_name)
                 continue
 
-        logger.info(
-            "Downloading: %s",
-            (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"),
+        logger.info("Processing REPS history run %s", run_time)
+        xarray_hist_merged, hist_nc_path = convert_reps_run(
+            run_time,
+            REPS_HISTORIC_FORECAST_HOURS,
+            "historic",
+            hist_process_path,
+            herbie_save_dir,
         )
-
-        hist_run_date = base_time - pd.Timedelta(hours=i)
-        historic_forecast_hours = [3, 6]
-        all_files = []
-        expected_total = 0
-
-        for g in match_strings:
-            grib_files = download_and_validate_subset(
-                model="reps",
-                product="10km/grib2",
-                search=None,
-                dataset_name=f"REPS historic {g['variable']}:{g['level']}",
-                base_time=hist_run_date,
-                wgrib2_exe=wgrib2_path.strip(),
-                forecast_hours=historic_forecast_hours,
-                expected_forecast_hours=historic_forecast_hours,
-                skip_wgrib2_validation=skip_reps_wgrib2_validation,
-                herbie_save_dir=herbie_save_dir,
-                herbie_download_retries=herbie_download_retries,
-                herbie_retry_sleep_seconds=herbie_retry_sleep_seconds,
-                herbie_kwargs={
-                    "variable": g["variable"],
-                    "level": g["level"],
-                    "verbose": True,
-                },
-            )
-            all_files += grib_files
-            expected_total += len(historic_forecast_hours)
-
-            logger.info(
-                "Download completed for REPS historic %s:%s, %s files downloaded.",
-                g["variable"],
-                g["level"],
-                len(grib_files),
-            )
-
-        grib_list = sorted(set(all_files))
-        if len(grib_list) < expected_total:
-            logger.error(
-                "Historic download incomplete, expected at least %s files but got %s",
-                expected_total,
-                len(grib_list),
-            )
-            sys.exit(1)
-
-        # Create a string to pass to wgrib2 to merge all gribs into one netcdf
-        cmd = (
-            f"{cat_gribs(grib_list)} | "
-            f"{quote_path(wgrib2_path.strip())} - "
-            f"-set_ext_name 1 -netcdf {quote_path(hist_process_path + '_wgrib2_merged.nc')}"
+        hist_tmp_zarr_path = hist_process_path + "_REPS_Hist_TMP.zarr"
+        write_ensemble_stats(
+            xarray_hist_merged,
+            REPS_HISTORIC_FORECAST_HOURS,
+            hist_tmp_zarr_path,
+            process_chunk,
+            zarr_store_workers,
         )
+        xarray_hist_merged.close()
+        os.remove(hist_nc_path)
 
-        # Run wgrib2
-        sp_out = run_command(cmd)
-        if sp_out.returncode != 0:
-            logger.error(sp_out.stderr)
-            sys.exit(1)
-
-        # Read the merged netcdf file using xarray (single combined file)
-        xarray_hist_merged = xr.open_dataset(hist_process_path + "_wgrib2_merged.nc")
-        hist_spatial_dims = next(iter(xarray_hist_merged.data_vars.values())).dims[-2:]
-
-        # Chunk for efficient ensemble processing
-        xarray_hist_merged = xarray_hist_merged.chunk(
-            chunks={
-                "time": 6,
-                hist_spatial_dims[0]: process_chunk,
-                hist_spatial_dims[1]: process_chunk,
-            }
-        )
-
-        # Calculate ensemble statistics for historic data (same approach as forecast)
-        hist_stats_vars = {}
-        for var_prefix, base_var_candidates in base_var_name_aliases.items():
-            member_vars = []
-            for base_var in base_var_candidates:
-                member_vars = find_member_variables(xarray_hist_merged, base_var)
-                if member_vars:
-                    break
-
-            if not member_vars:
-                continue
-
-            n_members = len(member_vars)
-
-            raw_stacked = da.stack(
-                [xarray_hist_merged[v].data for v in member_vars],
-                axis=0,
-            )
-
-            stacked = da.diff(
-                raw_stacked, axis=1, prepend=da.zeros_like(raw_stacked[:, :1, :, :])
-            )
-            stacked = stacked / 3
-            stacked = da.maximum(stacked, 0)
-
-            hist_stats_vars[f"{var_prefix}_Mean"] = stacked.mean(axis=0)
-
-            if var_prefix == "APCP":
-                hist_stats_vars["APCP_StdDev"] = stacked.std(axis=0)
-                hist_stats_vars["Precipitation_Prob"] = (
-                    stacked > PRECIP_THRESHOLD
-                ).sum(axis=0) / n_members
-
-        hist_stats_ds = xr.Dataset(
-            {
-                key: xr.DataArray(val, dims=("time", *hist_spatial_dims))
-                for key, val in hist_stats_vars.items()
-            },
-            coords=xarray_hist_merged.coords,
-        )
-
-        hist_stats_ds = hist_stats_ds.chunk(
-            chunks={
-                "time": 6,
-                hist_spatial_dims[0]: process_chunk,
-                hist_spatial_dims[1]: process_chunk,
-            }
-        )
-
-        encoding = {
-            vname: {"chunks": (6, process_chunk, process_chunk)}
-            for vname in probVars[1:]
-        }
-
-        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-            hist_stats_ds.to_zarr(
-                hist_process_path + "_REPS_Hist_TMP.zarr",
-                mode="w",
-                consolidated=False,
-                encoding=encoding,
-                compute=True,
-                chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
-            )
-
-        # Clear the xarray dataset from memory
-        del xarray_hist_merged, hist_stats_vars, hist_stats_ds
-
-        # Remove temp file created by wgrib2
-        os.remove(hist_process_path + "_wgrib2_merged.nc")
-
-        # Save a done file to s3 to indicate that the historic data has been processed
+        # The done marker tells later runs this cycle is archived
         if save_type == "S3":
             archive_tmp_zarr_and_upload(
-                tmp_zarr_path=hist_process_path + "_REPS_Hist_TMP.zarr",
+                tmp_zarr_path=hist_tmp_zarr_path,
                 s3_path=s3_path,
                 archive_member_name="REPS_Hist.zarr",
                 s3=s3,
             )
         else:
-            # Move to Local Path
-            os.rename(hist_process_path + "_REPS_Hist_TMP.zarr", local_path)
-
-            done_file = local_path.replace(".zarr", ".done")
-            with open(done_file, "w") as f:
+            os.rename(hist_tmp_zarr_path, local_path)
+            with open(local_path.replace(".zarr", ".done"), "w") as f:
                 f.write("Done")
 
-        logger.info((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
-
-    # %% Merge the historic and forecast datasets and then squash using dask
-    # Get the s3 paths to the historic data
+    # %% Locate the archived history stores
     if save_type == "S3":
         local_temp_dir = forecast_process_path + "_s3_temp_downloads"
         os.makedirs(local_temp_dir, exist_ok=True)
 
-        # The function that downloads and extracts a single timestamp
-        def download_and_extract(timestamp):
-            # Names expected locally
-            final_zarr_name = f"REPS_Hist_v3{timestamp}.zarr"
-            extracted_path = download_extract_historic_archive(
+        def download_and_extract(store_name: str) -> str | None:
+            return download_extract_historic_archive(
                 s3=s3,
                 historic_path=historic_path,
-                final_zarr_name=final_zarr_name,
+                final_zarr_name=store_name + ".zarr",
                 extracted_store_name="REPS_Hist.zarr",
                 local_temp_dir=local_temp_dir,
             )
-            if extracted_path is None:
-                tqdm.write(
-                    f"Error: REPS_Hist.zarr not found inside archive for {timestamp}"
-                )
-            return extracted_path
-
-        # Generate target timestamps
-        timestamps = [
-            (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            for i in range(his_period, 1, -6)
-        ]
 
         logger.info(
-            "Phase 1: Downloading and extracting %s archives...", len(timestamps)
+            "Downloading and extracting %s REPS history archives",
+            len(history_store_names),
         )
-
-        # Execute downloads in parallel
-        with ThreadPoolExecutor(max_workers=12) as executor:
-            results = list(
-                tqdm(
-                    executor.map(download_and_extract, timestamps),
-                    total=len(timestamps),
-                    desc="S3 Archive Sync",
-                )
+        # executor.map keeps the cycle order; a missing archive stays as None
+        with ThreadPoolExecutor(max_workers=REPS_HISTORIC_DOWNLOAD_WORKERS) as executor:
+            historic_zarr_paths = list(
+                executor.map(download_and_extract, history_store_names)
             )
-
-        # Filter out the missing files (None values) and keep the valid paths
-        ncLocalWorking_paths = [path for path in results if path is not None]
     else:
-        ncLocalWorking_paths = [
-            historic_path
-            + "/REPS_Hist_v3"
-            + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr"
-            for i in range(his_period, 1, -6)
+        historic_zarr_paths = [
+            historic_path + "/" + store_name + ".zarr"
+            for store_name in history_store_names
         ]
 
-    # Dask Setup
-    daskVarArrays = []
+    # %% Stack history and forecast into the (variable, time, y, x) layout the API reads
+    unix_epoch = np.datetime64(0, "s")
+    one_second = np.timedelta64(1, "s")
+    stacked_valid_times = np.concatenate([*history_valid_times, forecast_valid_times])
+    stacked_timesUnix = (stacked_valid_times - unix_epoch) / one_second
+    # Hourly target axis from the first history step to the last forecast lead
+    new_hourly_time = pd.date_range(
+        start=stacked_valid_times[0], end=stacked_valid_times[-1], freq="h"
+    )
+    hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
+
     daskVarArrayList = []
-
-    for daskVarIDX, dask_var in enumerate(probVars[:]):
-        for local_ncpath in ncLocalWorking_paths:
-            # If not found in array, use MISSING_DATA to show missing
-            try:
-                daskVarArrays.append(
-                    da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
-                )
-            # Add a fallback in case of a FileNotFoundError
-            except FileNotFoundError:
-                logger.warning("File not found, adding NaN array for: %s", local_ncpath)
-                daskVarArrays.append(
-                    da.full((6, NY, NX), MISSING_DATA).rechunk(
-                        (6, process_chunk, process_chunk)
+    for dask_var in probVars:
+        historic_arrays = []
+        for store_name, historic_zarr_path, valid_times in zip(
+            history_store_names, historic_zarr_paths, history_valid_times
+        ):
+            historic_array = None
+            if historic_zarr_path is not None:
+                try:
+                    historic_array = da.from_zarr(
+                        historic_zarr_path, component=dask_var, inline_array=True
                     )
-                )
+                except FileNotFoundError:
+                    historic_array = None
 
-        daskVarArraysStack = da.stack(daskVarArrays, allow_unknown_chunksizes=True)
+            if historic_array is None:
+                # A missing history cycle should not stop the forecast. Its two
+                # steps keep their valid times and hold NaN; the NaN-aware
+                # interpolation bridges the gap from the neighbouring cycles
+                # (or leaves NaN at the start of the record).
+                logger.warning(
+                    "REPS history %s has no %s; filling it with NaN",
+                    store_name,
+                    dask_var,
+                )
+                if dask_var == "time":
+                    historic_array = da.from_array(
+                        (valid_times - unix_epoch) / one_second
+                    )
+                else:
+                    historic_array = da.full(
+                        (len(REPS_HISTORIC_FORECAST_HOURS), NY, NX),
+                        MISSING_DATA,
+                        dtype="float32",
+                        chunks=(
+                            len(REPS_HISTORIC_FORECAST_HOURS),
+                            process_chunk,
+                            process_chunk,
+                        ),
+                    )
+            historic_arrays.append(historic_array)
 
         daskForecastArray = da.from_zarr(
             forecast_process_path + "_.zarr", component=dask_var, inline_array=True
         )
+        daskCatArray = da.concatenate([*historic_arrays, daskForecastArray], axis=0)
 
         if dask_var == "time":
-            # Create a time array with the same shape
-            # This is because multiple steps are stored in each file
-            daskVarArraysShape = da.reshape(
-                daskVarArraysStack,
-                (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], 1),
-                merge_chunks=False,
-            )
-            daskCatTimes = da.concatenate(
-                (da.squeeze(daskVarArraysShape), daskForecastArray), axis=0
-            ).astype("float32")
-
-            # Get times as numpy
-            npCatTimes = daskCatTimes.compute()
-
-            daskArrayOut = da.from_array(
-                np.tile(
-                    np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
-                    (1, NY, NX),
-                )
-            ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
-
-            daskVarArrayList.append(daskArrayOut)
-
-        else:
-            daskVarArraysShape = da.reshape(
-                daskVarArraysStack,
-                (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], NY, NX),
-                merge_chunks=False,
-            )
-            daskArrayOut = da.concatenate(
-                (daskVarArraysShape, daskForecastArray), axis=0
-            )
-
+            npCatTimes = daskCatArray.astype("float32").compute()
+            # Check that the stored times are aligned with the expected times
+            validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
+            # The API reads time from the store like any other variable
             daskVarArrayList.append(
-                daskArrayOut[:, :, :]
-                .rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
-                .astype("float32")
+                broadcast_times_to_grid(npCatTimes, NY, NX, process_chunk)
+            )
+        else:
+            daskVarArrayList.append(
+                daskCatArray.rechunk(
+                    (len(stacked_timesUnix), process_chunk, process_chunk)
+                ).astype("float32")
             )
 
-        daskVarArrays = []
+    daskVarArrayListMergeNaN = mask_invalid_data(da.stack(daskVarArrayList, axis=0))
 
-        logger.info(dask_var)
-
-    # Merge the arrays into a single 4D array
-    daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
-
-    # Mask out invalid data
-    # Ignore storm distance, since it can reach very high values that are still correct
-    daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
-
-    # Write out to disk
-    # This intermediate step is necessary to avoid memory overflow
-    # with ProgressBar():
+    # Write the stacked array to disk before interpolating; doing both in one
+    # graph overflows memory
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         daskVarArrayListMergeNaN.to_zarr(
-            forecast_process_path + "_stack.zarr",
-            overwrite=True,
-            compute=True,
+            forecast_process_path + "_stack.zarr", overwrite=True, compute=True
         )
-
-    # Read in stacked 4D array back in
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
+    # %% Interpolate to hourly and write the final store
+    daskVarArrayStackDiskInterp = interp_time_map_blocks_nan(
+        daskVarArrayStackDisk,
+        stacked_timesUnix=stacked_timesUnix,
+        hourly_timesUnix=hourly_timesUnix,
+        dtype="float32",
+        fill_value=np.nan,
+    )
+    daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
+        daskVarArrayStackDiskInterp, final_chunk
+    )
+
     reps_store_name = "REPS.zarr.zip" if save_type == "S3" else "REPS.zarr"
-
-    with ProgressBar():
-        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-            # 1. Interpolate the stacked array to be hourly along the time axis
-            daskVarArrayStackDiskInterp = interp_time_map_blocks_nan(
-                daskVarArrayStackDisk,
-                stacked_timesUnix=stacked_timesUnix,
-                hourly_timesUnix=hourly_timesUnix,
-                dtype="float32",
-                fill_value=np.nan,
-            )
-
-        # 2. Pad to chunk size
-        daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
-            daskVarArrayStackDiskInterp, final_chunk
-        )
-
-        # 3. Write the final store in source-aligned tiles
-        write_final_zarr(
-            daskVarArrayStackDiskInterpPad,
-            forecast_process_dir + "/" + reps_store_name,
-            final_chunk,
-            zarr_store_workers,
-        )
+    write_final_zarr(
+        daskVarArrayStackDiskInterpPad,
+        forecast_process_dir + "/" + reps_store_name,
+        final_chunk,
+        zarr_store_workers,
+    )
 
     # %% Publish the store, then the run time the API uses to detect it
     publish_ingest_run(
@@ -769,13 +654,9 @@ def main() -> None:
         s3=s3,
     )
 
-    # Clean up
+    # %% Clean up, keeping the Herbie download cache
     clear_directory(forecast_process_dir, keep=tmp_dir)
-    os.makedirs(tmp_dir, exist_ok=True)
-
-    # Timing
-    T1 = time.time()
-    logger.info(T1 - T0)
+    logger.info("REPS run %s published in %.1f s", base_time, time.time() - T0)
 
 
 if __name__ == "__main__":
