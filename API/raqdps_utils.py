@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
+from API.constants.unit_const import KG_M3_TO_UG_M3, MOL_MOL_TO_PPB
+
 RAQDPS_BASE_URL = "https://dd.weather.gc.ca"
 RAQDPS_MODEL_NAME = "RAQDPS"
 RAQDPS_PRODUCT = "10km/grib2"
@@ -14,9 +16,6 @@ RAQDPS_LEVEL = "Sfc"
 RAQDPS_VARIABLES = ("PM2.5", "PM10", "NO2", "O3", "SO2")
 RAQDPS_OUTPUT_VARS = ("time",) + RAQDPS_VARIABLES
 RAQDPS_FORECAST_HOURS = tuple(range(73))
-
-KG_M3_TO_UG_M3 = 1e9
-MOL_MOL_TO_PPB = 1e9
 
 
 def normalize_utc(dt: datetime) -> datetime:

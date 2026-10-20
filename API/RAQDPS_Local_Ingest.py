@@ -1,14 +1,19 @@
-# %% Regional Air Quality Deterministic Prediction System (RAQDPS) Ingest Script
 # ruff: noqa: E402
-# Downloads ECCC RAQDPS forecasts with Herbie, normalizes pollutant output units, and
-# publishes the f000-f072 forecast as a Zarr store.
+"""ECCC RAQDPS air quality ingest.
 
-# %% Import modules
+Downloads the newest 00/12 UTC run of Environment and Climate Change Canada's
+Regional Air Quality Deterministic Prediction System (10 km rotated lat/lon
+grid, hourly leads f000-f072) from the MSC Datamart with Herbie, one GRIB2 file
+per variable and lead. Converts PM2.5/PM10 to ug/m3 and NO2/O3/SO2 to ppb and
+publishes ``RAQDPS.zarr`` plus ``RAQDPS.lat_lon.pickle`` (the grid the API uses
+to locate cells) and ``RAQDPS.time.pickle``. The store starts at f000 (the run
+time) and holds the native hourly leads; nothing is interpolated.
+"""
+
 import logging
 import os
 import pickle
 import shutil
-import sys
 import time
 import urllib.error
 import warnings
@@ -29,6 +34,7 @@ import dask
 import dask.array as da
 import herbie.models as herbie_model_templates
 import numpy as np
+import requests
 import s3fs
 import xarray as xr
 import zarr.storage
@@ -40,9 +46,11 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     close_store,
+    configure_herbie_request_timeouts,
     configure_zarr_writes,
     mask_invalid_data,
     pad_to_chunk_size,
+    positive_int_env,
     publish_ingest_run,
     read_published_run_time,
     write_final_zarr,
@@ -63,22 +71,34 @@ from API.raqdps_utils import (
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 warnings.filterwarnings("ignore", "In a future version")
 
-# %% Setup logging
 logger = logging.getLogger(__name__)
 
 # Register the repo-local Herbie template without modifying the installed package.
 herbie_model_templates.raqdps = raqdps
 
-# %% Setup paths and parameters
+# %% Model constants
+# Variables, output order (time first) and leads f000-f072 live in
+# API/raqdps_utils.py, shared with the Herbie template and diagnostics scripts.
+# A run is only used once its last lead (f072 O3) is on the Datamart.
+RAQDPS_PROBE_VARIABLE = "O3"
+RAQDPS_RUN_CANDIDATES = 10
+RAQDPS_TIME_PICKLE = "RAQDPS.time.pickle"
+RAQDPS_LAT_LON_PICKLE = "RAQDPS.lat_lon.pickle"
+
+# Download failures that are retried: network/HTTP errors, file I/O, and the
+# ValueError Herbie raises with errors="raise" when the file is not found
+RAQDPS_DOWNLOAD_ERRORS = (OSError, ValueError, requests.RequestException)
+
+# %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
 
 forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/home/reya/Weather/Process/RAQDPS"
+    "forecast_process_dir", default="/mnt/nvme/data/RAQDPS"
 )
 forecast_process_path = os.path.join(forecast_process_dir, "RAQDPS_Process")
 tmp_dir = os.path.join(forecast_process_dir, "Downloads")
 
-forecast_path = os.getenv("forecast_path", default="/home/reya/Weather/Prod")
+forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/RAQDPS")
 save_type = os.getenv("save_type", default="Download")
 
 aws_access_key_id = os.environ.get("AWS_KEY", "")
@@ -86,8 +106,9 @@ aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 process_chunk = CHUNK_SIZES["RAQDPS"]
 final_chunk = FINAL_CHUNK_SIZES["RAQDPS"]
 process_chunk_bytes = process_chunk * process_chunk * np.dtype(np.float32).itemsize
-RAQDPS_TIME_PICKLE = "RAQDPS.time.pickle"
-RAQDPS_LAT_LON_PICKLE = "RAQDPS.lat_lon.pickle"
+
+RAQDPS_DOWNLOAD_RETRIES = positive_int_env("herbie_download_retries", 3)
+RAQDPS_RETRY_SLEEP_SECONDS = positive_int_env("herbie_retry_sleep_seconds", 10)
 
 
 def published_path(filename):
@@ -111,10 +132,12 @@ def build_herbie(run_time, variable, forecast_hour, *, verbose=False):
 
 
 def get_latest_raqdps_run():
-    """Find the newest RAQDPS 00/12 UTC run with a f072 ozone file available."""
-    for candidate in candidate_raqdps_runs(count=10):
+    """Find the newest RAQDPS 00/12 UTC run whose last lead is available."""
+    for candidate in candidate_raqdps_runs(count=RAQDPS_RUN_CANDIDATES):
         try:
-            h = build_herbie(candidate, "O3", 72)
+            h = build_herbie(
+                candidate, RAQDPS_PROBE_VARIABLE, RAQDPS_FORECAST_HOURS[-1]
+            )
         except (FileNotFoundError, urllib.error.URLError, urllib.error.HTTPError) as e:
             logger.warning("Unable to probe RAQDPS run %s: %s", candidate, e)
             continue
@@ -123,31 +146,48 @@ def get_latest_raqdps_run():
             logger.info("Found latest valid RAQDPS runtime at: %s", candidate)
             return candidate
 
-    raise RuntimeError("No recent RAQDPS run with f072 O3 data was found")
+    raise RuntimeError(
+        f"No recent RAQDPS run with f{RAQDPS_FORECAST_HOURS[-1]:03d} "
+        f"{RAQDPS_PROBE_VARIABLE} data was found"
+    )
 
 
 def download_raqdps_file(run_time, variable, forecast_hour):
-    """Download one RAQDPS GRIB2 file with Herbie."""
-    try:
-        h = build_herbie(run_time, variable, forecast_hour)
-        if h.grib is None:
+    """Download one RAQDPS GRIB2 file with Herbie, with bounded retries.
+
+    RAQDPS uses a repo-local Herbie template with one full file per variable and
+    lead, so the FastHerbie subset helper does not apply. Raises if the file is
+    still missing after the last attempt: a gap must not be published.
+    """
+    for attempt in range(1, RAQDPS_DOWNLOAD_RETRIES + 1):
+        try:
+            h = build_herbie(run_time, variable, forecast_hour)
+            if h.grib is None:
+                raise FileNotFoundError(
+                    f"RAQDPS file not on the Datamart: run={run_time} "
+                    f"variable={variable} f{forecast_hour:03d}"
+                )
+            # Overwrite on retries so a partial file is not reused
+            return h.download(verbose=False, errors="raise", overwrite=attempt > 1)
+        except RAQDPS_DOWNLOAD_ERRORS as e:
+            if attempt == RAQDPS_DOWNLOAD_RETRIES:
+                raise RuntimeError(
+                    f"RAQDPS download failed after {attempt} attempts: run={run_time} "
+                    f"variable={variable} f{forecast_hour:03d}"
+                ) from e
+            sleep_s = RAQDPS_RETRY_SLEEP_SECONDS * attempt
             logger.warning(
-                "Missing RAQDPS file for run=%s variable=%s f%03d",
+                "RAQDPS download attempt %d/%d failed for run=%s variable=%s "
+                "f%03d (%s). Retrying in %ss",
+                attempt,
+                RAQDPS_DOWNLOAD_RETRIES,
                 run_time,
                 variable,
                 forecast_hour,
+                e,
+                sleep_s,
             )
-            return None
-        return h.download(verbose=False, errors="raise")
-    except (FileNotFoundError, urllib.error.URLError, urllib.error.HTTPError) as e:
-        logger.warning(
-            "Failed RAQDPS download for run=%s variable=%s f%03d: %s",
-            run_time,
-            variable,
-            forecast_hour,
-            e,
-        )
-        return None
+            time.sleep(sleep_s)
 
 
 def read_raqdps_grib(local_grib_path, variable):
@@ -194,50 +234,29 @@ def read_raqdps_lat_lon(local_grib_path, expected_shape):
 
 
 def load_raqdps_time_slice(run_time, forecast_hour, *, include_lat_lon=False):
-    """Download/read all configured variables for one valid RAQDPS hour."""
+    """Download and read every configured variable for one RAQDPS lead.
+
+    Returns the fields by variable and, with ``include_lat_lon``, the grid
+    latitude/longitude read from the first file.
+    """
     fields = {}
-    reference_shape = None
     lat_lon_lookup = None
 
     for variable in RAQDPS_VARIABLES:
         local_grib_path = download_raqdps_file(run_time, variable, forecast_hour)
-        if local_grib_path is None:
-            continue
+        values = read_raqdps_grib(local_grib_path, variable)
 
-        try:
-            values = read_raqdps_grib(local_grib_path, variable)
-        except (OSError, ValueError, KeyError) as e:
-            logger.error(
-                "Error reading RAQDPS variable=%s run=%s f%03d: %s",
-                variable,
-                run_time,
-                forecast_hour,
-                e,
+        if fields and values.shape != next(iter(fields.values())).shape:
+            raise RuntimeError(
+                f"RAQDPS run {run_time} f{forecast_hour:03d} {variable} grid "
+                f"{values.shape} differs from {next(iter(fields.values())).shape}"
             )
-            continue
-
         fields[variable] = values
-        if reference_shape is None:
-            reference_shape = values.shape
 
         if include_lat_lon and lat_lon_lookup is None:
-            try:
-                lat_lon_lookup = read_raqdps_lat_lon(local_grib_path, values.shape)
-            except (OSError, ValueError, KeyError) as e:
-                logger.warning(
-                    "Unable to read RAQDPS lat/lon from %s: %s",
-                    local_grib_path,
-                    e,
-                )
+            lat_lon_lookup = read_raqdps_lat_lon(local_grib_path, values.shape)
 
-    if reference_shape is None:
-        if include_lat_lon:
-            return None, None, None
-        return None, None
-
-    if include_lat_lon:
-        return fields, reference_shape, lat_lon_lookup
-    return fields, reference_shape
+    return fields, lat_lon_lookup
 
 
 def variable_store_name(variable):
@@ -258,13 +277,10 @@ def build_variable_arrays(time_slices, valid_times, reference_shape):
     }
 
     for variable in RAQDPS_VARIABLES:
-        arrays = []
-        for fields in time_slices:
-            if variable in fields:
-                values = fields[variable]
-            else:
-                values = np.full(reference_shape, np.nan, dtype=np.float32)
-            arrays.append(da.from_array(values, chunks=(process_chunk, process_chunk)))
+        arrays = [
+            da.from_array(fields[variable], chunks=(process_chunk, process_chunk))
+            for fields in time_slices
+        ]
 
         variable_arrays[variable] = da.stack(arrays, axis=0).astype("float32")
 
@@ -357,7 +373,13 @@ def already_processed(base_time, s3):
 
 
 def process_forecast(base_time, zarr_store_workers):
-    """Download and write f000-f072 RAQDPS forecast data."""
+    """Download and write the f000-f072 RAQDPS forecast.
+
+    Every lead and variable must be present: the store is not interpolated, so
+    a skipped lead would be a silent gap, and the API recovers the run time from
+    the first stored valid time (f000, see FIRST_FORECAST_LEAD_HOURS), so a
+    missing f000 would make it derive a wrong run time.
+    """
     logger.info("Processing RAQDPS forecast from base time: %s", base_time)
     time_slices = []
     valid_times = []
@@ -365,44 +387,23 @@ def process_forecast(base_time, zarr_store_workers):
     lat_lon_lookup = None
 
     for forecast_hour in RAQDPS_FORECAST_HOURS:
-        slice_lat_lon = None
-        if lat_lon_lookup is None:
-            fields, slice_shape, slice_lat_lon = load_raqdps_time_slice(
-                base_time,
-                forecast_hour,
-                include_lat_lon=True,
-            )
-        else:
-            fields, slice_shape = load_raqdps_time_slice(base_time, forecast_hour)
-        valid_time = base_time + timedelta(hours=forecast_hour)
-
-        if fields is None:
-            logger.warning(
-                "Skipping missing RAQDPS forecast hour: f%03d", forecast_hour
-            )
-            continue
+        # The grid coordinates are read once, from the first lead
+        fields, slice_lat_lon = load_raqdps_time_slice(
+            base_time, forecast_hour, include_lat_lon=lat_lon_lookup is None
+        )
+        slice_shape = next(iter(fields.values())).shape
 
         if reference_shape is None:
             reference_shape = slice_shape
-        elif slice_shape != reference_shape:
-            logger.warning(
-                "Skipping RAQDPS f%03d due to shape mismatch %s != %s",
-                forecast_hour,
-                slice_shape,
-                reference_shape,
-            )
-            continue
-
-        if lat_lon_lookup is None and slice_lat_lon is not None:
             lat_lon_lookup = slice_lat_lon
+        elif slice_shape != reference_shape:
+            raise RuntimeError(
+                f"RAQDPS run {base_time} f{forecast_hour:03d} grid {slice_shape} "
+                f"differs from {reference_shape}"
+            )
 
         time_slices.append(fields)
-        valid_times.append(valid_time)
-
-    if not time_slices or reference_shape is None:
-        raise RuntimeError("No valid RAQDPS forecast hours were processed")
-    if lat_lon_lookup is None:
-        raise RuntimeError("No valid RAQDPS lat/lon grid was read")
+        valid_times.append(base_time + timedelta(hours=forecast_hour))
 
     forecast_arrays = build_variable_arrays(time_slices, valid_times, reference_shape)
     forecast_zarr_path = forecast_process_path + "_forecast.zarr"
@@ -483,28 +484,30 @@ def main():
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
+    # Bound Herbie request times
+    configure_herbie_request_timeouts()
 
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     zarr_store_workers = configure_zarr_writes()
 
     prepare_directories()
-    start_time = time.time()
+    T0 = time.time()
 
-    try:
-        base_time = get_latest_raqdps_run()
-    except RuntimeError as e:
-        logger.critical("%s. Exiting.", e)
-        sys.exit(1)
+    # %% Determine the model run: the newest run whose last lead is posted
+    base_time = get_latest_raqdps_run()
 
-    logger.info("RAQDPS base time: %s", base_time)
+    # %% Skip the run if this cycle (and its lat/lon grid) is already published
     if already_processed(base_time, s3):
         logger.info("RAQDPS store is already up to date. Exiting.")
         return
+    logger.info("Processing RAQDPS run %s", base_time)
 
     try:
+        # %% Download, convert and write each lead
         forecast_zarr_path, reference_shape, lat_lon_lookup = process_forecast(
             base_time, zarr_store_workers
         )
+        # %% Stack, write the final store and publish
         merge_and_publish(
             base_time,
             forecast_zarr_path,
@@ -514,18 +517,10 @@ def main():
             zarr_store_workers,
         )
     finally:
-        try:
-            shutil.rmtree(forecast_process_dir)
-        except OSError as e:
-            logger.warning(
-                "Failed to clean up temporary directory %s: %s",
-                forecast_process_dir,
-                e,
-            )
+        # %% Clean up
+        shutil.rmtree(forecast_process_dir, ignore_errors=True)
 
-    end_time = time.time()
-    logger.info("Total processing time: %.2f seconds", end_time - start_time)
-    logger.info("RAQDPS ingest script finished successfully.")
+    logger.info("RAQDPS run %s published in %.1f s", base_time, time.time() - T0)
 
 
 if __name__ == "__main__":

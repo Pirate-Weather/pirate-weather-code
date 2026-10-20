@@ -1,22 +1,25 @@
-# %% FMI SILAM Global Air Quality Processing script
-# This script downloads the latest FMI SILAM global air quality forecast data
-# from the THREDDS server, processes it, and saves to a Zarr store for API consumption.
-#
-# SILAM (System for Integrated modeLling of Atmospheric coMposition) provides
-# global air quality forecasts including PM2.5, PM10, O3, NO2, SO2, and CO.
-#
-# Data source: https://thredds.silam.fmi.fi/thredds/catalog/catalog.html
-#
-# Author: Alexander Rey
-# Date: December 2025
+"""FMI SILAM global air quality ingest.
 
-# %% Import modules
+Downloads the newest daily FMI SILAM global surface air quality forecast
+(SILAM v6.1, 0.2 degree global grid, hourly leads starting at run + 1 h) from
+the THREDDS server, converts PM2.5, PM10, fire PM column, boundary layer height
+and the O3, NO2, SO2 and CO mixing ratios to the stored units, and merges it
+with the first 24 h of each run in the previous 48 h (short-term history,
+archived per run for AQI lookbacks). Publishes ``SILAM.zarr`` and
+``SILAM_Maps.zarr`` plus ``SILAM.time.pickle``. The store is not interpolated:
+it holds the native hourly steps from run - 47 h onwards.
+
+SILAM (System for Integrated modeLling of Atmospheric coMposition):
+https://thredds.silam.fmi.fi/thredds/catalog/catalog.html
+
+Alexander Rey, December 2025
+"""
+
 import gc
 import logging
 import os
 import re
 import shutil
-import sys
 import time
 import warnings
 from datetime import datetime, timedelta, timezone
@@ -33,6 +36,7 @@ import zarr
 from dask.diagnostics import ProgressBar
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
+from API.constants.unit_const import KG_M2_TO_UG_M2, KG_M3_TO_UG_M3, MOL_MOL_TO_PPB
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -49,38 +53,23 @@ from API.ingest_utils import (
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
-# %% Setup logging
 logger = logging.getLogger(__name__)
 
-# %% Setup paths and parameters
-ingestVersion = INGEST_VERSION_STR
-
-forecast_process_dir = os.getenv(
-    "forecast_process_dir", default="/home/reya/Weather/Process/SILAM"
-)
-forecast_process_path = os.path.join(forecast_process_dir, "SILAM_Process")
-hist_process_path = os.path.join(forecast_process_dir, "SILAM_Historic")
-tmpDIR = os.path.join(forecast_process_dir, "Downloads")
-
-forecast_path = os.getenv("forecast_path", default="/home/reya/Weather/Prod")
-historic_path = os.getenv("historic_path", default="/home/reya/Weather/History/SILAM")
-
-saveType = os.getenv("save_type", default="Download")
-aws_access_key_id = os.environ.get("AWS_KEY", "")
-aws_secret_access_key = os.environ.get("AWS_SECRET", "")
-
-# Define the processing chunk size - use GFS-style chunks as SILAM is global data
-processChunk = CHUNK_SIZES["SILAM"]
-finalChunk = FINAL_CHUNK_SIZES["SILAM"]
-hisPeriod = HISTORY_PERIODS["SILAM"]
-MAP_TIME_STEPS = 36
-MAP_CHUNK_SIZE = 100
-
+# %% Model constants
+# SILAM steps are hourly means stamped at the end of the hour, so the first
+# valid time of a run is run + 1 h.
+SILAM_FIRST_LEAD_HOURS = 1
+SILAM_STEP_SECONDS = 3600
+# SILAM runs once a day; each history run contributes its first 24 h
 HISTORIC_STEP_HOURS = 24
-KG_M3_TO_UG_M3 = 1e9
-KG_M2_TO_UG_M2 = 1e9
-MOL_MOL_TO_PPB = 1e9
+HISTORY_PERIOD_HOURS = HISTORY_PERIODS["SILAM"]
 
+SILAM_DOWNLOAD_RETRIES = 3
+SILAM_RETRY_SLEEP_SECONDS = 5
+SILAM_DOWNLOAD_TIMEOUT_SECONDS = 120
+SILAM_CATALOG_TIMEOUT_SECONDS = 30
+
+# Variables in the published store; the order is the API's SILAM index map
 zarr_vars = (
     "time",
     "cnc_PM2_5",
@@ -92,8 +81,12 @@ zarr_vars = (
     "cnc_SO2",
     "cnc_CO",
 )
-MAP_VAR_INDICES = list(range(len(zarr_vars)))
 
+# SILAM source variables and units:
+# - cnc_PM2_5, cnc_PM10: particulate matter in kg/m3 (stored in ug/m3)
+# - PM_FRP_column: fire PM column in kg/m2 (stored in ug/m2)
+# - BLH: boundary layer height in m
+# - vmr_*_gas: gas volume mixing ratios in mol/mol (stored in ppb)
 silam_source_vars = (
     "cnc_PM2_5",
     "cnc_PM10",
@@ -104,40 +97,58 @@ silam_source_vars = (
     "vmr_SO2_gas",
     "vmr_CO_gas",
 )
-
-silam_open_chunks = {
-    "time": HISTORIC_STEP_HOURS + 1,
-    "lat": processChunk,
-    "lon": processChunk,
+# SILAM gas mixing ratio -> stored variable name, description
+SILAM_GAS_VARIABLES = {
+    "vmr_O3_gas": ("cnc_O3", "Ozone"),
+    "vmr_NO2_gas": ("cnc_NO2", "Nitrogen dioxide"),
+    "vmr_SO2_gas": ("cnc_SO2", "Sulfur dioxide"),
+    "vmr_CO_gas": ("cnc_CO", "Carbon monoxide"),
 }
 
-# SILAM variable names and units:
-# - cnc_PM2_5, cnc_PM10: Particulate matter in kg/m³ (need conversion to µg/m³)
-# - PM_FRP_column: Fire PM column in kg/m² (need conversion to µg/m²)
-# - BLH: Boundary layer height in m
-# - vmr_*_gas: Gas species as volume mixing ratios in mole/mole
-#   (need conversion to ppb)
+# Map store: every variable, valid times from run - 11 h to run + 24 h (the
+# 36 hourly steps after run - 12 h), 100x100 spatial chunks
+MAP_VAR_INDICES = list(range(len(zarr_vars)))
+MAP_LEAD_HOURS = tuple(range(-11, 25))
+MAP_TIME_STEPS = len(MAP_LEAD_HOURS)
+MAP_CHUNK_SIZE = 100
 
 base_fileserver_url = "https://thredds.silam.fmi.fi/thredds/fileServer"
 base_catalog_url = "https://thredds.silam.fmi.fi/thredds/catalog"
 silam_dataset_path = "silam_glob_v6_1_sfc/files"
 silam_filename_pattern = re.compile(r"SILAM-AQ-sfc-glob_v6_1_(\d{10})\.nc4$")
 
+# %% Paths and configuration
+ingest_version = INGEST_VERSION_STR
 
-def convert_vmr_to_ppb(vmr):
-    """Convert volume mixing ratio in mole/mole to ppb."""
-    return vmr * MOL_MOL_TO_PPB
+forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/SILAM")
+forecast_process_path = os.path.join(forecast_process_dir, "SILAM_Process")
+hist_process_path = os.path.join(forecast_process_dir, "SILAM_Historic")
+tmp_dir = os.path.join(forecast_process_dir, "Downloads")
+
+forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/SILAM")
+historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/SILAM")
+
+save_type = os.getenv("save_type", default="Download")
+aws_access_key_id = os.environ.get("AWS_KEY", "")
+aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+
+process_chunk = CHUNK_SIZES["SILAM"]
+final_chunk = FINAL_CHUNK_SIZES["SILAM"]
+
+# Open one history run (25 steps) per time chunk
+silam_open_chunks = {
+    "time": HISTORIC_STEP_HOURS + 1,
+    "lat": process_chunk,
+    "lon": process_chunk,
+}
 
 
-def get_latest_silam_run():
-    """Determines the latest available SILAM model run time from THREDDS.
+def get_latest_silam_run() -> datetime:
+    """Return the newest SILAM run listed in the THREDDS catalog.
 
-    SILAM availability can lag behind wall-clock time, so inspect the server
-    catalog and choose the newest listed SILAM forecast file rather than
-    assuming a fixed delay.
-
-    Returns:
-        datetime: The latest model run time.
+    SILAM availability lags wall-clock time by a variable amount, so the run is
+    read from the server catalog. If no catalog can be read the ingest stops:
+    a guessed run time could name a file that does not exist or is incomplete.
     """
     catalog_urls = (
         f"{base_catalog_url}/{silam_dataset_path}/catalog.xml",
@@ -146,11 +157,11 @@ def get_latest_silam_run():
 
     for catalog_url in catalog_urls:
         try:
-            response = requests.get(catalog_url, timeout=30)
+            response = requests.get(catalog_url, timeout=SILAM_CATALOG_TIMEOUT_SECONDS)
             response.raise_for_status()
             catalog = ElementTree.fromstring(response.content)
         except (ElementTree.ParseError, requests.RequestException) as e:
-            logger.warning(f"Unable to read SILAM catalog {catalog_url}: {e}")
+            logger.warning("Unable to read SILAM catalog %s: %s", catalog_url, e)
             continue
 
         run_times = []
@@ -167,20 +178,15 @@ def get_latest_silam_run():
         if run_times:
             latest_origintime = max(run_times)
             logger.info(
-                f"Latest SILAM run from server catalog {catalog_url}: "
-                f"{latest_origintime}"
+                "Latest SILAM run from catalog %s: %s", catalog_url, latest_origintime
             )
             return latest_origintime
 
-        logger.warning(f"No SILAM run files found in catalog {catalog_url}")
+        logger.warning("No SILAM run files found in catalog %s", catalog_url)
 
-    # Fall back to the previous fixed-delay behavior if the catalog is unavailable.
-    latest_origintime = (datetime.now(timezone.utc) - timedelta(days=1)).replace(
-        hour=0, minute=0, second=0, microsecond=0
+    raise RuntimeError(
+        f"Could not determine the latest SILAM run from {list(catalog_urls)}"
     )
-    logger.warning(f"Falling back to estimated SILAM run time: {latest_origintime}")
-
-    return latest_origintime
 
 
 def build_silam_download_url(run_time: datetime) -> str:
@@ -189,41 +195,41 @@ def build_silam_download_url(run_time: datetime) -> str:
     return f"{base_fileserver_url}/{silam_dataset_path}/{run_filename}"
 
 
-def download_silam_file(url: str, local_path: str, max_retries: int = 3) -> bool:
-    """Downloads the SILAM NetCDF file from THREDDS to a local path.
-
-    Args:
-        url: The fileServer URL of the NetCDF file to download.
-        local_path: The local filesystem path to save the file to.
-        max_retries: Number of attempts before giving up.
+def download_silam_file(url: str, local_path: str) -> bool:
+    """Download one SILAM NetCDF file with bounded retries.
 
     Returns:
-        True if the download succeeded, False otherwise.
+        True if the download succeeded, False if the file does not exist (404)
+        or every attempt failed.
     """
-    for attempt in range(1, max_retries + 1):
+    for attempt in range(1, SILAM_DOWNLOAD_RETRIES + 1):
         try:
-            with requests.get(url, stream=True, timeout=120) as response:
+            with requests.get(
+                url, stream=True, timeout=SILAM_DOWNLOAD_TIMEOUT_SECONDS
+            ) as response:
                 if response.status_code == 404:
-                    logger.warning(f"File not found: {url}")
+                    logger.warning("SILAM file not found: %s", url)
                     return False
                 response.raise_for_status()
                 with open(local_path, "wb") as f:
                     for chunk in response.iter_content(chunk_size=1024 * 1024):
                         if chunk:
                             f.write(chunk)
-            logger.info(f"Downloaded SILAM file to: {local_path}")
+            logger.info("Downloaded SILAM file to: %s", local_path)
             return True
         except (requests.RequestException, OSError) as e:
             logger.warning(
-                f"Attempt {attempt}/{max_retries} failed downloading {url}: {e}"
+                "Attempt %d/%d failed downloading %s: %s",
+                attempt,
+                SILAM_DOWNLOAD_RETRIES,
+                url,
+                e,
             )
+            # Do not leave a partial file behind
             if os.path.exists(local_path):
-                try:
-                    os.remove(local_path)
-                except OSError:
-                    pass
-            if attempt < max_retries:
-                time.sleep(5)
+                os.remove(local_path)
+            if attempt < SILAM_DOWNLOAD_RETRIES:
+                time.sleep(SILAM_RETRY_SLEEP_SECONDS)
 
     return False
 
@@ -244,39 +250,32 @@ def process_silam_file(
     local_nc_path: str,
     time_slice: slice | None = None,
 ) -> xr.Dataset:
-    """Open and convert a SILAM NetCDF file to the standard processed dataset."""
-    try:
-        # Open the downloaded NetCDF file from local disk
-        # SILAM data has dimensions: time, height (usually surface level), lat, lon
-        with xr.open_dataset(local_nc_path, engine="netcdf4", decode_cf=False) as meta:
-            drop_variables = [
-                var_name
-                for var_name in meta.data_vars
-                if var_name not in silam_source_vars
-            ]
+    """Open a SILAM NetCDF file and convert it to the stored variables and units."""
+    # Only read the variables the store needs
+    with xr.open_dataset(local_nc_path, engine="netcdf4", decode_cf=False) as meta:
+        drop_variables = [
+            var_name for var_name in meta.data_vars if var_name not in silam_source_vars
+        ]
 
-        xarray_silam_data = xr.open_dataset(
-            local_nc_path,
-            engine="netcdf4",
-            chunks=silam_open_chunks,
-            drop_variables=drop_variables,
-        )
+    xarray_silam_data = xr.open_dataset(
+        local_nc_path,
+        engine="netcdf4",
+        chunks=silam_open_chunks,
+        drop_variables=drop_variables,
+    )
+    logger.info(
+        "Opened SILAM file %s: dims %s, variables %s",
+        local_nc_path,
+        dict(xarray_silam_data.sizes),
+        list(xarray_silam_data.data_vars),
+    )
 
-        logger.info("Successfully opened SILAM dataset from local file")
-        logger.info(f"Dataset dimensions: {xarray_silam_data.dims}")
-        logger.info(f"Available variables: {list(xarray_silam_data.data_vars.keys())}")
-
-    except (OSError, ValueError) as e:
-        logger.error(f"Error opening local SILAM NetCDF file: {e}")
-        raise
-
-    # Select surface level if height dimension exists
+    # Select the surface level if a vertical dimension exists
     if "height" in xarray_silam_data.dims:
         xarray_silam_data = xarray_silam_data.isel(height=0)
     elif "level" in xarray_silam_data.dims:
         xarray_silam_data = xarray_silam_data.isel(level=0)
 
-    # Rename coordinates if needed to standardize
     if "lat" in xarray_silam_data.coords:
         xarray_silam_data = xarray_silam_data.rename({"lat": "latitude"})
     if "lon" in xarray_silam_data.coords:
@@ -285,7 +284,6 @@ def process_silam_file(
     if time_slice is not None:
         xarray_silam_data = xarray_silam_data.sel(time=time_slice)
 
-    # Create processed dataset
     xarray_processed = xr.Dataset(
         coords={
             "time": xarray_silam_data["time"],
@@ -294,84 +292,62 @@ def process_silam_file(
         }
     )
 
-    def _process_pm(var_in_name, var_out_name):
-        """Process particulate mass variables (kg/m3 -> µg/m3) or create NaN array."""
-        if var_in_name in xarray_silam_data:
-            xarray_processed[var_out_name] = (
-                xarray_silam_data[var_in_name] * KG_M3_TO_UG_M3
+    def _nan_field():
+        return _make_nan_dataarray(
+            xarray_processed.time,
+            xarray_processed.latitude,
+            xarray_processed.longitude,
+        )
+
+    # Particulate matter: kg/m3 -> ug/m3
+    for pm_var, long_name in (
+        ("cnc_PM2_5", "PM2.5 concentration"),
+        ("cnc_PM10", "PM10 concentration"),
+    ):
+        if pm_var in xarray_silam_data:
+            xarray_processed[pm_var] = (
+                xarray_silam_data[pm_var] * KG_M3_TO_UG_M3
             ).astype(np.float32)
-            xarray_processed[var_out_name].attrs["units"] = "µg/m³"
-            xarray_processed[var_out_name].attrs["long_name"] = (
-                "PM2.5 concentration" if "2_5" in var_out_name else "PM10 concentration"
-            )
-            logger.info(f"Loaded and converted {var_in_name} from kg/m³ to µg/m³")
+            xarray_processed[pm_var].attrs["units"] = "µg/m³"
+            xarray_processed[pm_var].attrs["long_name"] = long_name
         else:
-            logger.warning(f"{var_in_name} not found in dataset")
-            xarray_processed[var_out_name] = _make_nan_dataarray(
-                xarray_processed.time,
-                xarray_processed.latitude,
-                xarray_processed.longitude,
-            )
+            logger.warning("%s not found in SILAM file, storing NaN", pm_var)
+            xarray_processed[pm_var] = _nan_field()
 
-    # Process PM variables
-    _process_pm("cnc_PM2_5", "cnc_PM2_5")
-    _process_pm("cnc_PM10", "cnc_PM10")
-
+    # Fire PM column: kg/m2 -> ug/m2
     if "PM_FRP_column" in xarray_silam_data:
         xarray_processed["PM_FRP_column"] = (
             xarray_silam_data["PM_FRP_column"] * KG_M2_TO_UG_M2
         ).astype(np.float32)
         xarray_processed["PM_FRP_column"].attrs["units"] = "µg/m²"
         xarray_processed["PM_FRP_column"].attrs["long_name"] = "Total PM_FRP column"
-        logger.info("Loaded and converted PM_FRP_column from kg/m² to µg/m²")
     else:
-        logger.warning("PM_FRP_column not found in dataset")
-        xarray_processed["PM_FRP_column"] = _make_nan_dataarray(
-            xarray_processed.time,
-            xarray_processed.latitude,
-            xarray_processed.longitude,
-        )
+        logger.warning("PM_FRP_column not found in SILAM file, storing NaN")
+        xarray_processed["PM_FRP_column"] = _nan_field()
 
     if "BLH" in xarray_silam_data:
         xarray_processed["BLH"] = xarray_silam_data["BLH"].astype(np.float32)
         xarray_processed["BLH"].attrs["units"] = "m"
         xarray_processed["BLH"].attrs["long_name"] = "Boundary layer height"
-        logger.info("Loaded BLH in m")
     else:
-        logger.warning("BLH not found in dataset")
-        xarray_processed["BLH"] = _make_nan_dataarray(
-            xarray_processed.time,
-            xarray_processed.latitude,
-            xarray_processed.longitude,
-        )
+        logger.warning("BLH not found in SILAM file, storing NaN")
+        xarray_processed["BLH"] = _nan_field()
 
-    # Process gas volume mixing ratio variables (convert to ppb)
-    gas_variables = {
-        "vmr_O3_gas": ("cnc_O3", "Ozone"),
-        "vmr_NO2_gas": ("cnc_NO2", "Nitrogen dioxide"),
-        "vmr_SO2_gas": ("cnc_SO2", "Sulfur dioxide"),
-        "vmr_CO_gas": ("cnc_CO", "Carbon monoxide"),
-    }
-
-    for silam_var, (output_var, long_name) in gas_variables.items():
+    # Gas volume mixing ratios: mol/mol -> ppb
+    for silam_var, (output_var, long_name) in SILAM_GAS_VARIABLES.items():
         if silam_var in xarray_silam_data:
-            xarray_processed[output_var] = convert_vmr_to_ppb(
-                xarray_silam_data[silam_var]
+            xarray_processed[output_var] = (
+                xarray_silam_data[silam_var] * MOL_MOL_TO_PPB
             ).astype(np.float32)
             xarray_processed[output_var].attrs["units"] = "ppb"
             xarray_processed[output_var].attrs["long_name"] = (
                 f"{long_name} volume mixing ratio"
             )
-            logger.info(f"Loaded and converted {silam_var} to {output_var} in ppb")
         else:
             logger.warning(
-                f"{silam_var} not found in dataset, {output_var} will be NaN"
+                "%s not found in SILAM file, storing NaN for %s", silam_var, output_var
             )
-            xarray_processed[output_var] = _make_nan_dataarray(
-                xarray_processed.time,
-                xarray_processed.latitude,
-                xarray_processed.longitude,
-            )
+            xarray_processed[output_var] = _nan_field()
 
     return xarray_processed
 
@@ -391,8 +367,8 @@ def save_processed_zarr(
     xarray_processed = xarray_processed.chunk(
         chunks={
             "time": xarray_processed.time.size,
-            "latitude": processChunk,
-            "longitude": processChunk,
+            "latitude": process_chunk,
+            "longitude": process_chunk,
         }
     )
 
@@ -417,47 +393,55 @@ def main() -> None:
 
     # Start each run from an empty processing directory
     shutil.rmtree(forecast_process_dir, ignore_errors=True)
-    os.makedirs(tmpDIR, exist_ok=True)
+    os.makedirs(tmp_dir, exist_ok=True)
     os.makedirs(hist_process_path, exist_ok=True)
-    if saveType == "S3":
+    if save_type == "S3":
         s3.mkdirs(historic_path, exist_ok=True)
     else:
         os.makedirs(historic_path, exist_ok=True)
 
-    publish_dir = forecast_path + "/" + ingestVersion
-    if saveType == "Download":
+    publish_dir = forecast_path + "/" + ingest_version
+    if save_type == "Download":
         os.makedirs(publish_dir, exist_ok=True)
 
-    start_time = time.time()
+    T0 = time.time()
 
-    # Get the latest model run time
+    # %% Determine the model run from the THREDDS catalog
     origintime = get_latest_silam_run()
-    download_url = build_silam_download_url(origintime)
-    local_nc_path = os.path.join(tmpDIR, "SILAM_latest.nc")
 
-    logger.info(f"Attempting to download SILAM data from: {download_url}")
-    logger.info(f"Model run time: {origintime}")
-
-    # Skip the run if this cycle has already been published
+    # %% Skip the run if this cycle has already been published
     previous_base_time = read_published_run_time(
-        publish_dir + "/SILAM.time.pickle", saveType, s3
+        publish_dir + "/SILAM.time.pickle", save_type, s3
     )
     if previous_base_time is not None and previous_base_time >= origintime:
         logger.info("No Update to SILAM, ending")
         return
+    logger.info("Processing SILAM run %s", origintime)
 
-    # %% Download and process the latest SILAM NetCDF file
+    # %% Download and convert the forecast
+    download_url = build_silam_download_url(origintime)
+    local_nc_path = os.path.join(tmp_dir, "SILAM_latest.nc")
     if not download_silam_file(download_url, local_nc_path):
-        logger.critical(f"Failed to download SILAM data from {download_url}. Exiting.")
-        sys.exit(1)
+        raise RuntimeError(
+            f"Failed to download SILAM run {origintime} from {download_url}"
+        )
 
-    try:
-        xarray_processed = process_silam_file(local_nc_path)
-    except (OSError, ValueError):
-        logger.critical("Failed to access SILAM data. Exiting.")
-        sys.exit(1)
+    xarray_processed = process_silam_file(local_nc_path)
 
-    logger.info(f"Saving processed forecast data to: {forecast_process_path}_.zarr")
+    # The forecast must be hourly from run + 1 h, or the history/forecast join
+    # and the map window would be misaligned
+    forecast_times = pd.to_datetime(xarray_processed.time.values)
+    expected_first_time = pd.Timestamp(origintime.replace(tzinfo=None)) + pd.Timedelta(
+        hours=SILAM_FIRST_LEAD_HOURS
+    )
+    if forecast_times[0] != expected_first_time or not np.all(
+        np.diff(forecast_times.values) == np.timedelta64(SILAM_STEP_SECONDS, "s")
+    ):
+        raise RuntimeError(
+            f"SILAM run {origintime} times {forecast_times.values} are not hourly "
+            f"from {expected_first_time}"
+        )
+
     xarray_forecast_processed = convert_time_coord_to_unix(xarray_processed)
     save_processed_zarr(
         xarray_forecast_processed, forecast_process_path + "_.zarr", zarr_store_workers
@@ -468,18 +452,18 @@ def main() -> None:
     xarray_processed.close()
     del xarray_forecast_processed, xarray_processed
     gc.collect()
-    logger.info("Saved forecast Zarr data to disk.")
+    logger.info("Saved SILAM forecast zarr to %s_.zarr", forecast_process_path)
 
-    # %% Historic data
-    # Store prior daily SILAM slices separately, then merge them with the current forecast
-    # using the same dask stacking approach used by GFS/HRRR.
-    for hours_offset in range(hisPeriod, 0, -HISTORIC_STEP_HOURS):
+    # %% History: archive the first 24 h of each earlier run not yet processed.
+    # A missing or unreadable history run is skipped; the API then has a gap in
+    # its AQI lookback rather than no SILAM data at all.
+    history_offsets = range(HISTORY_PERIOD_HOURS, 0, -HISTORIC_STEP_HOURS)
+    for hours_offset in history_offsets:
         hist_start = origintime - timedelta(hours=hours_offset)
         hist_end = hist_start + timedelta(hours=HISTORIC_STEP_HOURS + 1)
-
         timestamp = hist_start.strftime("%Y%m%dT%H%M%SZ")
 
-        if saveType == "S3":
+        if save_type == "S3":
             s3_path = f"{historic_path}/SILAM_Hist_v3{timestamp}.zarr.tar.gz"
             if s3.exists(s3_path.replace(".tar.gz", ".done")):
                 logger.info("Historic SILAM file already exists in S3: %s", s3_path)
@@ -493,23 +477,26 @@ def main() -> None:
                 continue
 
         hist_url = build_silam_download_url(hist_start)
-        hist_nc_path = os.path.join(tmpDIR, f"SILAM_hist_{timestamp}.nc")
+        hist_nc_path = os.path.join(tmp_dir, f"SILAM_hist_{timestamp}.nc")
         logger.info("Downloading historic SILAM run: %s", timestamp)
 
         if not download_silam_file(hist_url, hist_nc_path):
             logger.warning("Skipping missing historic SILAM run: %s", timestamp)
             continue
 
+        # Keep run + 1 h to run + 24 h (the end bound is inclusive)
+        slice_end = hist_end - timedelta(seconds=1)
         try:
-            slice_end = hist_end - timedelta(seconds=1)
             xarray_hist_processed = process_silam_file(
                 hist_nc_path,
                 time_slice=slice(
                     hist_start.replace(tzinfo=None), slice_end.replace(tzinfo=None)
                 ),
             )
-        except (OSError, ValueError):
-            logger.warning("Skipping unreadable historic SILAM run: %s", timestamp)
+        except (OSError, ValueError) as e:
+            logger.warning(
+                "Skipping unreadable historic SILAM run %s: %s", timestamp, e
+            )
             continue
 
         if xarray_hist_processed.sizes.get("time", 0) == 0:
@@ -522,7 +509,7 @@ def main() -> None:
             xarray_hist_processed, hist_tmp_zarr_path, zarr_store_workers
         )
 
-        if saveType == "S3":
+        if save_type == "S3":
             archive_tmp_zarr_and_upload(
                 tmp_zarr_path=hist_tmp_zarr_path,
                 s3_path=s3_path,
@@ -531,18 +518,17 @@ def main() -> None:
             )
         else:
             os.rename(hist_tmp_zarr_path, local_path)
-            done_file = local_path.replace(".zarr", ".done")
-            with open(done_file, "w") as f:
+            with open(local_path.replace(".zarr", ".done"), "w") as f:
                 f.write("Done")
 
         logger.info("Saved historic SILAM slice: %s", timestamp)
 
-    # %% Merge historic and forecast datasets into final stacked zarr
-    if saveType == "S3":
+    # %% Merge the history and forecast datasets
+    if save_type == "S3":
         local_temp_dir = forecast_process_path + "_s3_temp_downloads"
         os.makedirs(local_temp_dir, exist_ok=True)
         historic_zarr_paths = []
-        for hours_offset in range(hisPeriod, 0, -HISTORIC_STEP_HOURS):
+        for hours_offset in history_offsets:
             timestamp = (origintime - timedelta(hours=hours_offset)).strftime(
                 "%Y%m%dT%H%M%SZ"
             )
@@ -557,22 +543,18 @@ def main() -> None:
             if extracted_path is not None:
                 historic_zarr_paths.append(extracted_path)
     else:
-        historic_zarr_paths = [
-            f"{historic_path}/SILAM_Hist_v3"
-            f"{(origintime - timedelta(hours=hours_offset)).strftime('%Y%m%dT%H%M%SZ')}"
-            ".zarr"
-            for hours_offset in range(hisPeriod, 0, -HISTORIC_STEP_HOURS)
-            if os.path.exists(
-                f"{historic_path}/SILAM_Hist_v3"
-                f"{(origintime - timedelta(hours=hours_offset)).strftime('%Y%m%dT%H%M%SZ')}"
-                ".zarr"
+        historic_zarr_paths = []
+        for hours_offset in history_offsets:
+            timestamp = (origintime - timedelta(hours=hours_offset)).strftime(
+                "%Y%m%dT%H%M%SZ"
             )
-        ]
+            local_path = f"{historic_path}/SILAM_Hist_v3{timestamp}.zarr"
+            if os.path.exists(local_path):
+                historic_zarr_paths.append(local_path)
 
-    dask_var_arrays_list = []
     dask_interp_arrays = []
-
     for dask_var in zarr_vars:
+        dask_var_arrays_list = []
         for historic_zarr_path in historic_zarr_paths:
             try:
                 dask_var_arrays_list.append(
@@ -592,28 +574,36 @@ def main() -> None:
         if dask_var == "time":
             dask_time_arrays = [da.squeeze(array) for array in dask_var_arrays_list]
             dask_time_arrays.append(dask_forecast_array)
-            dask_times_concatenated = da.concatenate(dask_time_arrays, axis=0).astype(
-                "float32"
+            # Integer Unix seconds of every stacked step, used to place the maps
+            stacked_times_unix = da.concatenate(dask_time_arrays, axis=0).compute()
+            if np.any(np.diff(stacked_times_unix) <= 0):
+                raise RuntimeError(
+                    f"SILAM run {origintime} stacked times are not increasing: "
+                    f"{stacked_times_unix}"
+                )
+            dask_times_concatenated = da.from_array(
+                stacked_times_unix.astype("float32")
             )
 
+            # The API reads time from the store like any other variable
             output_array = da.broadcast_to(
                 dask_times_concatenated[:, None, None],
                 (dask_times_concatenated.shape[0], lat_count, lon_count),
-            ).rechunk((dask_times_concatenated.shape[0], processChunk, processChunk))
+            ).rechunk((dask_times_concatenated.shape[0], process_chunk, process_chunk))
             dask_interp_arrays.append(output_array)
         else:
-            dask_data_arrays = dask_var_arrays_list + [dask_forecast_array]
-            output_array = da.concatenate(dask_data_arrays, axis=0)
+            output_array = da.concatenate(
+                dask_var_arrays_list + [dask_forecast_array], axis=0
+            )
             dask_interp_arrays.append(
-                output_array[:, :, :]
-                .rechunk((output_array.shape[0], processChunk, processChunk))
-                .astype("float32")
+                output_array.rechunk(
+                    (output_array.shape[0], process_chunk, process_chunk)
+                ).astype("float32")
             )
 
-        dask_var_arrays_list = []
         logger.info("Processed variable: %s", dask_var)
 
-    # Merge the arrays into a single 4D array
+    # %% Stack into the (variable, time, y, x) layout the API reads
     merged_arrays = da.stack(dask_interp_arrays, axis=0)
     merged_arrays_masked = mask_invalid_data(
         merged_arrays, ignoreAxis=[zarr_vars.index("PM_FRP_column")]
@@ -627,30 +617,44 @@ def main() -> None:
             compute=True,
         )
 
+    # %% Write the final store (SILAM is already hourly; no interpolation)
     stacked_array_disk = da.from_zarr(forecast_process_path + "_stack.zarr")
-    stacked_array_padded = pad_to_chunk_size(stacked_array_disk, finalChunk)
+    stacked_array_padded = pad_to_chunk_size(stacked_array_disk, final_chunk)
 
-    silam_store_name = "SILAM.zarr.zip" if saveType == "S3" else "SILAM.zarr"
+    silam_store_name = "SILAM.zarr.zip" if save_type == "S3" else "SILAM.zarr"
     with ProgressBar():
         write_final_zarr(
             stacked_array_padded,
             forecast_process_dir + "/" + silam_store_name,
-            finalChunk,
+            final_chunk,
             zarr_store_workers,
         )
 
-    # Rechunk map data for faster web access.
-    # Mirrors the GFS map zarr layout: one named array per variable, with all map
-    # times in a single time chunk and 100x100 spatial chunks for fast tile reads.
-    # Map extent: -12 to +24 hours around the forecast origin (36 hours total).
+    # %% Map store: one named array per variable, all map times in one chunk and
+    # 100x100 spatial chunks for fast tile reads. Steps are chosen by valid time
+    # so a missing history run cannot shift the window; missing hours are NaN.
+    origin_unix = int(origintime.timestamp())
+    map_valid_times_unix = origin_unix + SILAM_STEP_SECONDS * np.asarray(MAP_LEAD_HOURS)
+    map_positions = np.minimum(
+        np.searchsorted(stacked_times_unix, map_valid_times_unix),
+        len(stacked_times_unix) - 1,
+    )
+    map_time_found = stacked_times_unix[map_positions] == map_valid_times_unix
+    if not map_time_found.all():
+        logger.warning(
+            "SILAM map valid times missing from the stacked data (stored as NaN): %s",
+            map_valid_times_unix[~map_time_found],
+        )
+
     stacked_array_maps = pad_to_chunk_size(stacked_array_disk, MAP_CHUNK_SIZE)
 
     silam_maps_store_name = (
-        "SILAM_Maps.zarr.zip" if saveType == "S3" else "SILAM_Maps.zarr"
+        "SILAM_Maps.zarr.zip" if save_type == "S3" else "SILAM_Maps.zarr"
     )
-    if saveType == "S3":
+    if save_type == "S3":
+        # Uncompressed zip like the main store; the arrays are Blosc-compressed
         zarr_store_maps = zarr.storage.ZipStore(
-            forecast_process_dir + "/" + silam_maps_store_name, mode="a"
+            forecast_process_dir + "/" + silam_maps_store_name, mode="a", compression=0
         )
     else:
         zarr_store_maps = zarr.storage.LocalStore(
@@ -671,13 +675,16 @@ def main() -> None:
             dtype="float32",
         )
 
+        map_array = stacked_array_maps[var_idx][map_positions]
+        if not map_time_found.all():
+            map_array = da.where(map_time_found[:, None, None], map_array, np.nan)
+
         with (
             ProgressBar(),
             dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
         ):
             da.rechunk(
-                stacked_array_maps[var_idx, hisPeriod - 12 : hisPeriod + 24, :, :],
-                (MAP_TIME_STEPS, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE),
+                map_array, (MAP_TIME_STEPS, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE)
             ).to_zarr(zarr_array, overwrite=True, compute=True)
 
         logger.info("Created SILAM map data for %s", zarr_vars[var_idx])
@@ -691,25 +698,13 @@ def main() -> None:
         "SILAM.time.pickle",
         process_dir=forecast_process_dir,
         publish_dir=publish_dir,
-        save_type=saveType,
+        save_type=save_type,
         s3=s3,
     )
 
-    # Clean up temporary files and directories
-    try:
-        shutil.rmtree(forecast_process_dir)
-    except FileNotFoundError:
-        logger.debug(
-            f"Cleanup directory {forecast_process_dir} not found; nothing to remove."
-        )
-    except PermissionError as e:
-        logger.warning(f"Permission denied removing {forecast_process_dir}: {e}")
-    except OSError as e:
-        logger.warning(f"OS error while removing {forecast_process_dir}: {e}")
-
-    end_time = time.time()
-    logger.info(f"Total processing time: {end_time - start_time:.2f} seconds")
-    logger.info("SILAM ingest script finished successfully.")
+    # %% Clean up
+    shutil.rmtree(forecast_process_dir)
+    logger.info("SILAM run %s published in %.1f s", origintime, time.time() - T0)
 
 
 if __name__ == "__main__":
