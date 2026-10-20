@@ -8,8 +8,8 @@ wrong if the test is removed. The standard for adding tests is section 27 of
 
 | Folder | Tests | Network | Runs by default | Runs in CI |
 |---|---|---|---|---|
-| `tests/api` | 163 | no | yes | yes (`Tests` workflow, API requirements) |
-| `tests/ingest` | 55 | no | yes | yes (`Ingest Test` workflow, ingest requirements) |
+| `tests/api` | 164 | no | yes | yes (`Tests` workflow, API requirements) |
+| `tests/ingest` | 51 | no | yes | yes (`Ingest Test` workflow, ingest requirements) |
 | `tests/live` | 25 | **yes** | no, opt-in with `PW_RUN_LIVE_TESTS=1` | no; manual `Live tests` workflow only |
 | `tests/helpers` | (shared builders) | | | |
 
@@ -97,7 +97,8 @@ against real stores.
 | `test_data_inputs.py` | Short ERA5 series padded to `num_hours` (#624); Canadian model fields stacked in priority with unit handling; Kelvin to Celsius for every model ingested in Kelvin. |
 | `test_dwd_mosmix_hourly.py` | DWD cloud % becomes a fraction, visibility stays in metres, and present-weather codes map to a precip type. |
 | `test_urma_response.py` | URMA as the recent Time Machine source: alignment by timestamp, per-hour GFS fallback, station versus sea-level pressure, recomputed feels-like on URMA hours, gaps kept for GFS to fill, read only when recent and in-domain (#746). |
-| `test_aq_timemachine_sources.py` | RAQDPS/SILAM are listed and used only when they cover the requested hours (#751/#752), including at half-hour UTC offsets (#684). |
+| `test_forecast_merge_alignment.py` | Forecast-only model stores (no short-term history) are placed at their valid hours, HRRR/NBM are kept when they start after local midnight, and GFS fills the earlier hours. |
+| `test_aq_timemachine_sources.py` | RAQDPS/SILAM are listed and used only when they cover the requested hours (#751/#752); RAQDPS is forecast-only, so recent Time Machine AQ comes from SILAM, including at half-hour UTC offsets (#684). |
 
 **Building the response blocks**
 
@@ -141,7 +142,7 @@ runs a whole ingest end to end; only the live RTMA-RU and HRRR_6H tests do that.
 | `test_ingest_utils_deaccumulate.py` | GEPS deaccumulation with uneven 3 h/6 h steps; GDPS/HRDPS energy-to-flux with negatives clipped. |
 | `test_ingest_utils_interp_time.py` | Step-to-hourly interpolation in column batches (GEPS/GDPS/HRDPS/REPS), with nearest-neighbour for categorical variables. |
 | `test_dwd_ingest.py` | DWD station gap rules: long gaps are nulled so the API falls back to global models; precip and precip type are filled; gridded gap fill uses nearest for precip type (#463). |
-| `test_raqdps_ingest.py` | ECCC Datamart URL format, shortest-lead history mapping, and the Herbie template. |
+| `test_raqdps_ingest.py` | ECCC Datamart URL format and the Herbie template. |
 | `test_wmo_alerts_ingest.py` | WMO alert catalog feeds (RSS, MeteoAlarm Atom, Canadian Atom) fetch each current CAP once; the empty-alert schema; the `WMO_Alerts.zarr` grid string contract; first-language-only CAP parsing. |
 | `test_wmo_alerts_geocode.py` | Canadian many-geocode alerts are not duplicated (#439); geocode-only CAPs give one row per area; MeteoAlarm codes (including aliases) resolve to bundled polygons. |
 

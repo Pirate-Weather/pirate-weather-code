@@ -283,9 +283,13 @@ def validate_root_array(root: zarr.Array) -> None:
 
 
 def infer_forecast_offset(final_time_len: int) -> int:
-    """Infer the final-array index where forecast hour zero would sit."""
+    """Infer the final-array index where forecast hour zero would sit.
+
+    Forecast-only stores start at the first forecast hour, so the offset is
+    negative (hour zero sits before index 0).
+    """
     offset = final_time_len - max(HRDPS_SOURCE_HOURS) - 1
-    if offset < 0:
+    if offset < -min(HRDPS_SOURCE_HOURS):
         raise ValueError(
             f"Final time length {final_time_len} is too short for HRDPS hour 48."
         )

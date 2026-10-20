@@ -22,7 +22,7 @@ import zarr
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
-from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
+from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -63,13 +63,11 @@ aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 
-# Define the processing and history chunk size
+# Define the processing chunk size
 process_chunk = CHUNK_SIZES["HRRR_6H"]
 
 # Define the final x/y chunksize
 final_chunk = FINAL_CHUNK_SIZES["HRRR_6H"]
-
-his_period = HISTORY_PERIODS["HRRR_6H"]
 
 
 zarr_vars = (

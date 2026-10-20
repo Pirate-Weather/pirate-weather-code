@@ -20,15 +20,13 @@ import zarr.storage
 from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
-from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
+from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
-    archive_tmp_zarr_and_upload,
     close_store,
     configure_zarr_limits,
-    download_extract_historic_archive,
     mask_invalid_data,
     mask_invalid_refc,
     pad_to_chunk_size,
@@ -52,11 +50,9 @@ wgrib2_path = os.getenv(
 
 forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/HRRR")
 forecast_process_path = forecast_process_dir + "/HRRR_Process"
-hist_process_path = forecast_process_dir + "/HRRR_Historic"
 tmp_dir = forecast_process_dir + "/Downloads"
 
 forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/HRRR")
-historic_path = os.getenv("historic_path", default="/mnt/nvme/data/HRRR")
 
 
 save_type = os.getenv("save_type", default="Download")
@@ -64,13 +60,11 @@ aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
 
-# Define the processing and history chunk size
+# Define the processing chunk size
 process_chunk = CHUNK_SIZES["HRRR"]
 
 # Define the final x/y chunksize
 final_chunk = FINAL_CHUNK_SIZES["HRRR"]
-
-his_period = HISTORY_PERIODS["HRRR"]
 
 
 zarr_vars = (
@@ -121,10 +115,7 @@ def main() -> None:
         os.makedirs(tmp_dir)
 
     if save_type == "Download":
-        if not os.path.exists(forecast_path + "/" + ingest_version):
-            os.makedirs(forecast_path + "/" + ingest_version)
-        if not os.path.exists(historic_path):
-            os.makedirs(historic_path)
+        os.makedirs(forecast_path + "/" + ingest_version, exist_ok=True)
 
     # %% Define base time from the most recent run
     # base_time = pd.Timestamp("2025-11-05 11:00")
@@ -368,202 +359,14 @@ def main() -> None:
     os.remove(forecast_process_path + "_wgrib2_merged.nc")
 
     logger.info("FORECAST COMPLETE")
-    ################################################################################################
-    # %%Historic data
-    # Create a range of dates for historic data going back 48 hours, which should be enough for the daily forecast
-    # Create the S3 filesystem
 
-    # Saving hourly forecasts means that time machine can grab 24 of them to make a daily forecast
-    # SubH and 48H forecasts will not be required for time machine then!
-
-    # Hourly Runs- hisperiod to 1, since the 0th hour run is needed (ends up being basetime -1H since using the 1h forecast)
-    for i in range(his_period, -1, -1):
-        if save_type == "S3":
-            s3_path = (
-                historic_path
-                + "/HRRR_Hist_v3"
-                + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-                + ".zarr.tar.gz"
-            )
-
-            if s3.exists(s3_path.replace(".tar.gz", ".done")):
-                print("File already exists in S3, skipping download for: " + s3_path)
-                continue
-        else:
-            local_path = (
-                historic_path
-                + "/HRRR_Hist_v3"
-                + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-                + ".zarr"
-            )
-            if os.path.exists(local_path.replace(".zarr", ".done")):
-                print(
-                    "File already exists locally, skipping download for: " + local_path
-                )
-                continue
-
-        logger.info(
-            "Downloading: %s",
-            (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"),
-        )
-
-        # Create a range of dates for historic data going back 48 hours
-        # Since the first hour forecast is used, then the time is an hour behind
-        # So data for 18:00 would be the 1st hour of the 17:00 forecast.
-        DATES = pd.date_range(
-            start=base_time - pd.Timedelta(hours=i + 1),
-            periods=1,
-            freq="1h",
-        )
-
-        # Create a range of forecast lead times
-        # Only want forecast at hour 1- SLightly less accurate than initializing at hour 0 but much avoids precipitation accumulation issues
-        fxx = range(1, 2)
-
-        # Create FastHerbie Object.
-        # Fallback to NOMADS if missing on AWS
-        FH_histsub = FastHerbie(
-            DATES,
-            model="hrrr",
-            fxx=fxx,
-            product="sfc",
-            verbose=False,
-            priority=["aws", "google", "nomads"],
-            save_dir=tmp_dir,
-        )
-
-        # Download the subsets
-        FH_histsub.download(match_strings, verbose=False)
-
-        # Perform a check if any data seems to be invalid
-        cmd = (
-            f"{wgrib2_path}"
-            + " "
-            + str(FH_histsub.file_exists[0].get_localFilePath(match_strings))
-            + " -s -stats"
-        )
-
-        grib_check = run_command(cmd)
-
-        validate_grib_stats(grib_check)
-        logger.info("Grib files passed validation, proceeding with processing")
-
-        # Use wgrib2 to rotate the wind vectors
-        # From https://github.com/blaylockbk/pyBKB_v2/blob/master/demos/HRRR_earthRelative_vs_gridRelative_winds.ipynb
-        lambertRotation = "lambert:262.500000:38.500000:38.500000:38.500000 237.280472:1799:3000.000000 21.138123:1059:3000.000000"
-
-        cmd2 = (
-            f"{wgrib2_path}"
-            + " "
-            + str(FH_histsub.file_exists[0].get_localFilePath(match_strings))
-            + " "
-            + "-new_grid_winds earth -new_grid "
-            + lambertRotation
-            + " "
-            + hist_process_path
-            + "_wgrib_merge.regrid"
-        )
-
-        # Run wgrib2 to rotate winds and save as NetCDF
-        spOUT2 = run_command(cmd2)
-        if spOUT2.returncode != 0:
-            logger.error(spOUT2.stderr)
-            sys.exit()
-
-        # Convert to NetCDF
-        cmd3 = (
-            f"{wgrib2_path}"
-            + " "
-            + hist_process_path
-            + "_wgrib_merge.regrid "
-            + " -netcdf "
-            + hist_process_path
-            + "_wgrib_merge.nc"
-        )
-
-        # Run wgrib2 to rotate winds and save as NetCDF
-        spOUT3 = run_command(cmd3)
-        if spOUT3.returncode != 0:
-            logger.error(spOUT3.stderr)
-            sys.exit()
-
-        # Merge the  xarrays
-        # Read the netcdf file using xarray
-        xarray_his_wgrib = xr.open_dataset(hist_process_path + "_wgrib_merge.nc")
-
-        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-            xarray_his_wgrib.to_zarr(
-                hist_process_path + "_HRRR_Hist_TMP.zarr",
-                mode="w",
-                consolidated=False,
-                compute=True,
-                chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
-            )
-
-        # Clear the xarray dataset from memory
-        del xarray_his_wgrib
-
-        # Remove temp file created by wgrib2
-        os.remove(hist_process_path + "_wgrib_merge.regrid")
-        os.remove(hist_process_path + "_wgrib_merge.nc")
-
-        # Save a done file to s3 to indicate that the historic data has been processed
-        if save_type == "S3":
-            archive_tmp_zarr_and_upload(
-                tmp_zarr_path=hist_process_path + "_HRRR_Hist_TMP.zarr",
-                s3_path=s3_path,
-                archive_member_name="HRRR_Hist.zarr",
-                s3=s3,
-            )
-        else:
-            os.rename(hist_process_path + "_HRRR_Hist_TMP.zarr", local_path)
-            done_file = local_path.replace(".zarr", ".done")
-            with open(done_file, "w") as f:
-                f.write("Done")
-
-        logger.info((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
-
-    # %% Merge the historic and forecast datasets and then squash using dask
+    # %% Squash the forecast variables into a single 4D array using dask
     #####################################################################################################
-    # Get the s3 paths to the historic data
-    if save_type == "S3":
-        local_temp_dir = forecast_process_path + "_s3_temp_downloads"
-        os.makedirs(local_temp_dir, exist_ok=True)
-        ncHistWorking_paths = []
-        for i in range(his_period, -1, -1):
-            timestamp = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            final_zarr_name = f"HRRR_Hist_v3{timestamp}.zarr"
-            extracted_path = download_extract_historic_archive(
-                s3=s3,
-                historic_path=historic_path,
-                final_zarr_name=final_zarr_name,
-                extracted_store_name="HRRR_Hist.zarr",
-                local_temp_dir=local_temp_dir,
-                expected_vars=zarr_vars,
-            )
-            if extracted_path is not None:
-                ncHistWorking_paths.append(extracted_path)
-    else:
-        ncHistWorking_paths = [
-            historic_path
-            + "/HRRR_Hist_v3"
-            + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr"
-            for i in range(his_period, -1, -1)
-        ]
-
-    # Dask Setup
-    daskVarArrays = []
+    # The store holds forecast hours only, so the time axis starts at
+    # base_time + 1 h (the first lead in FORECAST_LEAD_RANGES["HRRR_1H"]).
     daskVarArrayList = []
 
     for dask_var in zarr_vars:
-        for local_ncpath in ncHistWorking_paths:
-            daskVarArrays.append(
-                da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
-            )
-        # Stack historic
-        daskVarArraysStack = da.stack(daskVarArrays)
-
         # Add zarr Forecast
         daskForecastArray = da.from_zarr(
             forecast_process_path + "merged_zarr.zarr",
@@ -572,13 +375,8 @@ def main() -> None:
         )
 
         if dask_var == "time":
-            # Create a time array with the same shape
-            daskCatTimes = da.concatenate(
-                (da.squeeze(daskVarArraysStack), daskForecastArray), axis=0
-            ).astype("float32")
-
             # Get times as numpy
-            npCatTimes = daskCatTimes.compute()
+            npCatTimes = daskForecastArray.astype("float32").compute()
 
             daskArrayOut = da.from_array(
                 np.tile(
@@ -590,17 +388,11 @@ def main() -> None:
             daskVarArrayList.append(daskArrayOut)
 
         else:
-            daskArrayOut = da.concatenate(
-                (daskVarArraysStack.squeeze(), daskForecastArray), axis=0
-            )
-
             daskVarArrayList.append(
-                daskArrayOut[:, :, :]
-                .rechunk((len(npCatTimes), process_chunk, process_chunk))
-                .astype("float32")
+                daskForecastArray.rechunk(
+                    (len(npCatTimes), process_chunk, process_chunk)
+                ).astype("float32")
             )
-
-        daskVarArrays = []
 
         logger.info(dask_var)
 
@@ -675,8 +467,12 @@ def main() -> None:
     # Add padding for map chunking (100x100)
     daskVarArrayStackDisk_maps = pad_to_chunk_size(daskVarArrayStackDisk, 100)
 
-    # Loop through variables, creating a new one with a name and 30 x 100 x 100 chunks
-    # Save -12:18 hours, aka steps 36:66
+    # Loop through variables, creating a new one with a name and time x 100 x 100 chunks.
+    # The maps store used to hold 30 steps (base-12 h to base+18 h) when history
+    # was stacked in front of the forecast. With forecast rows only, the hourly
+    # HRRR run has just 18 steps (base+1 h to base+18 h), so the maps store keeps
+    # the first min(30, available) forecast steps.
+    map_steps = min(30, daskVarArrayStackDisk_maps.shape[1])
     # Create a Zarr array in the store with zstd compression
     if save_type == "S3":
         zarr_store_maps = zarr.storage.ZipStore(
@@ -693,18 +489,18 @@ def main() -> None:
             store=zarr_store_maps,
             name=zarr_vars[z],
             shape=(
-                30,
+                map_steps,
                 daskVarArrayStackDisk_maps.shape[2],
                 daskVarArrayStackDisk_maps.shape[3],
             ),
-            chunks=(30, 100, 100),
+            chunks=(map_steps, 100, 100),
             compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
             dtype="float32",
         )
 
         with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
             da.rechunk(
-                daskVarArrayStackDisk_maps[z, 36:66, :, :], (30, 100, 100)
+                daskVarArrayStackDisk_maps[z, :map_steps, :, :], (map_steps, 100, 100)
             ).to_zarr(
                 zarr_array,
                 overwrite=True,

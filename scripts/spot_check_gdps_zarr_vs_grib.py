@@ -343,12 +343,16 @@ def validate_root_array(root: zarr.Array) -> None:
 
 
 def infer_forecast_offset(final_time_len: int, source_hours: list[int]) -> int:
-    """Infer the final-array index offset where forecast hour zero would sit."""
+    """Infer the final-array index offset where forecast hour zero would sit.
+
+    Forecast-only stores start at the first forecast hour, so the offset is
+    negative (hour zero sits before index 0).
+    """
     if not source_hours:
         raise ValueError("Cannot infer offset without source hours.")
     max_hour = max(source_hours)
     offset = final_time_len - max_hour - 1
-    if offset < 0:
+    if offset < -min(source_hours):
         raise ValueError(
             f"Final time length {final_time_len} is too short for max forecast hour {max_hour}."
         )

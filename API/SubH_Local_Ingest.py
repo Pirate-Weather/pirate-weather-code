@@ -52,10 +52,9 @@ forecast_process_path = forecast_process_dir + "/SubH_Process"
 tmp_dir = forecast_process_dir + "/Downloads"
 
 forecast_path = os.getenv("forecast_path", default="/home/ubuntu/Weather/Prod/SubH")
-historic_path = os.getenv("historic_path", default="/home/ubuntu/Weather/History/SubH")
 
 
-# Define the processing and history chunk size
+# Define the processing chunk size
 process_chunk = 100
 
 # Define the final x/y chunksize

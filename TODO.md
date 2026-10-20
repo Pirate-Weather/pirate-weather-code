@@ -29,15 +29,6 @@ or `translation.translate` raises, the `except` block only logs, then
 `return minute_translate, minute_icon` references names that were never assigned.
 The intended "log and continue" fallback never happens; the request errors instead.
 
-### DWD MOSMIX hourly data can be shifted in time
-`API/forecast_sources.py:459-491`: `nearest_index` clamps to 0 when the DWD series
-starts after `base_day_utc_grib`, and `_merge_simple_source` then writes row 0 into
-hour 0, shifting every DWD value earlier by the gap. In normal operation the DWD
-historic cache covers the base time, so this bites when history is missing or short.
-`_merge_simple_source` should place data by timestamp, not by index. The old test
-(`tests/api/test_dwd_mosmix_hourly.py`) asserted the shifted behaviour after #463.
-The `np.full` at `forecast_sources.py:486-488` is dead (immediately overwritten).
-
 ### `aqiunits=tw` is silently ignored
 `API/request/preprocess.py:731` documents `tw → Taiwan AQI`, but `tw` is missing from
 `_VALID_AQI_UNITS` and `_AQI_UNITS_MAP`, so the parameter falls back to the unit

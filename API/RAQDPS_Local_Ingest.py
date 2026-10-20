@@ -1,7 +1,7 @@
 # %% Regional Air Quality Deterministic Prediction System (RAQDPS) Ingest Script
 # ruff: noqa: E402
 # Downloads ECCC RAQDPS forecasts with Herbie, normalizes pollutant output units, and
-# publishes a 48-hour history plus 72-hour forecast Zarr store.
+# publishes the f000-f072 forecast as a Zarr store.
 
 # %% Import modules
 import logging
@@ -12,7 +12,6 @@ import sys
 import time
 import urllib.error
 import warnings
-import zipfile
 from datetime import timedelta
 from pathlib import Path
 
@@ -36,7 +35,7 @@ import zarr.storage
 from dask.diagnostics import ProgressBar
 from herbie import Herbie
 
-from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
+from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -57,8 +56,6 @@ from API.raqdps_utils import (
     candidate_raqdps_runs,
     convert_to_output_units,
     herbie_naive_utc,
-    history_run_for_valid_time,
-    history_valid_times,
     normalize_utc,
 )
 
@@ -79,17 +76,14 @@ forecast_process_dir = os.getenv(
 )
 forecast_process_path = os.path.join(forecast_process_dir, "RAQDPS_Process")
 tmp_dir = os.path.join(forecast_process_dir, "Downloads")
-local_temp_historic_dir = os.path.join(forecast_process_dir, "Historic_Downloads")
 
 forecast_path = os.getenv("forecast_path", default="/home/reya/Weather/Prod")
-historic_path = os.getenv("historic_path", default="/home/reya/Weather/History/RAQDPS")
 save_type = os.getenv("save_type", default="Download")
 
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 process_chunk = CHUNK_SIZES["RAQDPS"]
 final_chunk = FINAL_CHUNK_SIZES["RAQDPS"]
-history_period = HISTORY_PERIODS["RAQDPS"]
 process_chunk_bytes = process_chunk * process_chunk * np.dtype(np.float32).itemsize
 RAQDPS_TIME_PICKLE = "RAQDPS.time.pickle"
 RAQDPS_LAT_LON_PICKLE = "RAQDPS.lat_lon.pickle"
@@ -329,52 +323,13 @@ def expand_time_array(time_array, reference_shape):
     )
 
 
-def download_extract_historic_zip(s3_filesystem, s3_zip_path, local_temp_dir):
-    """Download and extract an existing RAQDPS historic zip archive."""
-    os.makedirs(local_temp_dir, exist_ok=True)
-    local_zarr_path = os.path.join(
-        local_temp_dir, os.path.basename(s3_zip_path).removesuffix(".zip")
-    )
-
-    if os.path.exists(local_zarr_path):
-        return local_zarr_path
-
-    if not s3_filesystem.exists(s3_zip_path):
-        logger.warning(
-            "Historic marker exists, but archive is missing: %s", s3_zip_path
-        )
-        return None
-
-    local_zip_path = os.path.join(local_temp_dir, os.path.basename(s3_zip_path))
-    extract_dir = local_zarr_path + "_extract"
-
-    try:
-        s3_filesystem.get_file(s3_zip_path, local_zip_path)
-        shutil.rmtree(extract_dir, ignore_errors=True)
-        os.makedirs(extract_dir, exist_ok=True)
-
-        with zipfile.ZipFile(local_zip_path) as zip_file:
-            zip_file.extractall(extract_dir)
-
-        shutil.move(extract_dir, local_zarr_path)
-        return local_zarr_path
-    finally:
-        if os.path.exists(local_zip_path):
-            os.remove(local_zip_path)
-        shutil.rmtree(extract_dir, ignore_errors=True)
-
-
-def prepare_directories(s3):
+def prepare_directories():
     """Reset processing directories and ensure output roots exist."""
     if os.path.exists(forecast_process_dir):
         shutil.rmtree(forecast_process_dir, ignore_errors=True)
     os.makedirs(tmp_dir, exist_ok=True)
-    os.makedirs(local_temp_historic_dir, exist_ok=True)
 
-    if save_type == "S3":
-        s3.mkdirs(historic_path, exist_ok=True)
-    else:
-        os.makedirs(historic_path, exist_ok=True)
+    if save_type != "S3":
         os.makedirs(os.path.join(forecast_path, ingest_version), exist_ok=True)
 
 
@@ -460,121 +415,26 @@ def process_forecast(base_time, zarr_store_workers):
     return forecast_zarr_path, reference_shape, lat_lon_lookup
 
 
-def process_historic_hour(valid_time, reference_shape, s3, zarr_store_workers):
-    """Process one cached historic valid hour and return its zarr path."""
-    timestamp_str = valid_time.strftime("%Y%m%dT%H%M%SZ")
-
-    if save_type == "S3":
-        s3_path = os.path.join(historic_path, f"RAQDPS_Hist_{timestamp_str}.zarr.zip")
-        s3_done_path = s3_path.replace(".zarr.zip", ".done")
-        if s3.exists(s3_done_path):
-            logger.info("Historic RAQDPS file already exists in S3: %s", timestamp_str)
-            return download_extract_historic_zip(s3, s3_path, local_temp_historic_dir)
-    else:
-        local_path = os.path.join(historic_path, f"RAQDPS_Hist_{timestamp_str}.zarr")
-        if os.path.exists(local_path + ".done"):
-            logger.info(
-                "Historic RAQDPS file already exists locally: %s", timestamp_str
-            )
-            if os.path.exists(local_path):
-                return local_path
-            logger.warning(
-                "Historic done marker exists, but zarr is missing: %s", local_path
-            )
-            return None
-
-    run_time, forecast_hour = history_run_for_valid_time(valid_time)
-    logger.info(
-        "Processing RAQDPS historic valid=%s from run=%s f%03d",
-        valid_time,
-        run_time,
-        forecast_hour,
-    )
-
-    fields, slice_shape = load_raqdps_time_slice(run_time, forecast_hour)
-    if fields is None:
-        logger.warning("No valid RAQDPS historic data for %s", timestamp_str)
-        return None
-    if slice_shape != reference_shape:
-        logger.warning(
-            "Skipping RAQDPS historic %s due to shape mismatch %s != %s",
-            timestamp_str,
-            slice_shape,
-            reference_shape,
-        )
-        return None
-
-    hist_arrays = build_variable_arrays([fields], [valid_time], reference_shape)
-    hist_tmp_path = os.path.join(
-        forecast_process_dir, f"RAQDPS_Hist_{timestamp_str}_TMP.zarr"
-    )
-    write_variable_zarrs(hist_arrays, hist_tmp_path, 1, zarr_store_workers)
-
-    if save_type == "S3":
-        zip_export_path = hist_tmp_path.replace("_TMP.zarr", "")
-        shutil.make_archive(zip_export_path, "zip", hist_tmp_path)
-        s3.put_file(zip_export_path + ".zip", s3_path)
-
-        tmp_done = os.path.join(tmp_dir, f"{timestamp_str}.done")
-        with open(tmp_done, "w") as f:
-            f.write("Done")
-        s3.put_file(tmp_done, s3_done_path)
-        os.remove(tmp_done)
-        return hist_tmp_path
-
-    final_local_path = os.path.join(historic_path, f"RAQDPS_Hist_{timestamp_str}.zarr")
-    shutil.copytree(hist_tmp_path, final_local_path, dirs_exist_ok=True)
-    with open(final_local_path + ".done", "w") as f:
-        f.write("Done")
-    shutil.rmtree(hist_tmp_path)
-    return final_local_path
-
-
-def process_historic(base_time, reference_shape, s3, zarr_store_workers):
-    """Process/cache the 48 historical RAQDPS valid hours."""
-    historic_zarr_paths = []
-    for valid_time in history_valid_times(base_time, history_period):
-        historic_path_processed = process_historic_hour(
-            valid_time, reference_shape, s3, zarr_store_workers
-        )
-        if historic_path_processed is not None:
-            historic_zarr_paths.append(historic_path_processed)
-    return historic_zarr_paths
-
-
 def merge_and_publish(
     base_time,
-    historic_zarr_paths,
     forecast_zarr_path,
     reference_shape,
     lat_lon_lookup,
     s3,
     zarr_store_workers,
 ):
-    """Merge historic and forecast arrays and publish the final RAQDPS store."""
-    logger.info("Merging historic and forecast RAQDPS datasets.")
-
-    intermediate_paths = []
-    for historic_zarr_path in historic_zarr_paths:
-        if os.path.exists(historic_zarr_path):
-            intermediate_paths.append(historic_zarr_path)
-        else:
-            logger.info("Missing historic RAQDPS zarr: %s", historic_zarr_path)
-
-    intermediate_paths.append(forecast_zarr_path)
+    """Stack the forecast variables and publish the final RAQDPS store."""
+    logger.info("Stacking RAQDPS forecast variables.")
 
     dask_variable_list = []
     for variable in RAQDPS_OUTPUT_VARS:
-        variable_time_arrays = []
-        for intermediate_path in intermediate_paths:
-            variable_array = read_intermediate_variable(intermediate_path, variable)
-            if variable == "time":
-                variable_array = expand_time_array(variable_array, reference_shape)
-            variable_time_arrays.append(variable_array)
+        variable_array = read_intermediate_variable(forecast_zarr_path, variable)
+        if variable == "time":
+            variable_array = expand_time_array(variable_array, reference_shape)
 
-        merged_variable = da.concatenate(variable_time_arrays, axis=0).reshape(
+        merged_variable = variable_array.reshape(
             1,
-            sum(variable_array.shape[0] for variable_array in variable_time_arrays),
+            variable_array.shape[0],
             reference_shape[0],
             reference_shape[1],
         )
@@ -686,7 +546,7 @@ def main():
         zarr_store_workers, zarr_async_concurrency
     )
 
-    prepare_directories(s3)
+    prepare_directories()
     start_time = time.time()
 
     try:
@@ -704,12 +564,8 @@ def main():
         forecast_zarr_path, reference_shape, lat_lon_lookup = process_forecast(
             base_time, zarr_store_workers
         )
-        historic_zarr_paths = process_historic(
-            base_time, reference_shape, s3, zarr_store_workers
-        )
         merge_and_publish(
             base_time,
-            historic_zarr_paths,
             forecast_zarr_path,
             reference_shape,
             lat_lon_lookup,

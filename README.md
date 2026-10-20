@@ -31,7 +31,6 @@ To run the service, clone this repository to a machine, edit the [docker compose
 Several environmental variables are also used to control the API, including:
 - `wgrib2_path`: Where WGRIB2 is saved. Do not change;
 - `forecast_process_path`: Where forecast data should be saved during processing;
-- `hist_process_path`: Where short term (~36h) historic data should be saved during processing;
 - `merge_process_dir`: Where merged datasets should be saved;
 - `tmp_dir`: Where downloaded data should be saved;
 - `save_type`: If data should be saved to S3 (`S3`) or locally (`Download`).

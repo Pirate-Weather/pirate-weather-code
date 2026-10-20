@@ -81,9 +81,7 @@ This phase focuses on retrieving the raw model data, processing it, and saving i
 		4.  De-average any variables that need it (such as UV) ([Example](https://github.com/Pirate-Weather/pirate-weather-code/blob/aeef857c7c6133ccef2f439efe5c718c75813caf/API/GFS_Local_Ingest.py#L417)) 
 		5.  Save the Zarr archives locally in the `/mnt/nvme/` directory, which is typically mounted from a Docker volume. The `save_path` and `save_type` environment variables control this, compressed and chunked along the time dimension ([Example](https://github.com/Pirate-Weather/pirate-weather-code/blob/aeef857c7c6133ccef2f439efe5c718c75813caf/API/HRRR_Local_Ingest.py#L282)) 
 
-    * Download 1-hourly forecasts to use as an approximation of observed data. Some day a better approach could be more accurate here, but it's a reasonably good proxy.
-
-    * Merge 48 hours worth of "observed" data with the forecast data to create a cohesive time series.  
+    * Most model stores hold forecast hours only, starting at the first forecast lead. Short-term history ("observed" hours before the run) is only kept for GFS, ECMWF, REPS, URMA and FMI SILAM; the API places every store by valid time and fills hours a model doesn't cover from the next source in priority order. A new model should normally be forecast-only and listed in `FIRST_FORECAST_LEAD_HOURS` (`API/constants/shared_const.py`).
 
     * Merge variables together along an axis to create a 4D array (parameter, time, X, Y), chunked so that all variables and all times are stored in the same chunk (-1, -1, 3, 3). This step might have to be done in Dask to reduce memory requirements.
    

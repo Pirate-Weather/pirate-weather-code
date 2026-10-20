@@ -20,18 +20,12 @@ import zarr.storage
 from dask.diagnostics import ProgressBar
 from herbie import FastHerbie, HerbieLatest, Path
 
-from API.constants.shared_const import (
-    HISTORY_PERIODS,
-    INGEST_VERSION_STR,
-    MISSING_DATA,
-)
+from API.constants.shared_const import INGEST_VERSION_STR
 from API.herbie_custom_templates import register_aws_aigfs_aigefs_templates
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
-    archive_tmp_zarr_and_upload,
-    download_extract_historic_archive,
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
@@ -54,11 +48,9 @@ wgrib2_path = os.getenv(
 
 forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/AIGFS")
 forecast_process_path = os.path.join(forecast_process_dir, "AIGFS_Process")
-hist_process_path = os.path.join(forecast_process_dir, "AIGFS_Historic")
 tmp_dir = os.path.join(forecast_process_dir, "Downloads")
 
 forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/AIGFS")
-historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/AIGFS")
 
 
 save_type = os.getenv("save_type", default="Download")
@@ -71,13 +63,11 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
-    # Define the processing and history chunk size
+    # Define the processing chunk size
     process_chunk = CHUNK_SIZES["GFS"]
 
     # Define the final x/y chunksize
     final_chunk = FINAL_CHUNK_SIZES["GFS"]
-
-    his_period = HISTORY_PERIODS["AIGFS"]
 
     # Create new directory for processing if it does not exist
     if not os.path.exists(forecast_process_dir):
@@ -90,11 +80,10 @@ def main() -> None:
     if not os.path.exists(tmp_dir):
         os.makedirs(tmp_dir)
 
-    if save_type == "Download":
-        if not os.path.exists(forecast_path + "/" + ingest_version):
-            os.makedirs(forecast_path + "/" + ingest_version)
-        if not os.path.exists(historic_path):
-            os.makedirs(historic_path)
+    if save_type == "Download" and not os.path.exists(
+        forecast_path + "/" + ingest_version
+    ):
+        os.makedirs(forecast_path + "/" + ingest_version)
 
     T0 = time.time()
 
@@ -249,23 +238,15 @@ def main() -> None:
         "Incorrect number of timesteps! Exiting"
     )
 
-    # Create a new time series
-    start = base_time  # Adjust as necessary
-    end = xarray_forecast_merged.time.max().values  # Adjust as necessary
-    new_hourly_time = pd.date_range(
-        start=start - pd.Timedelta(hours=his_period), end=end, freq="h"
-    )
+    # Hourly target axis runs from the first stored forecast valid time
+    # (base_time + 6 h) to the last one. AIGFS output starts at hour 6, so
+    # hours base_time+1 to +5 are not in this store; the API falls back to
+    # other sources for them.
+    start = xarray_forecast_merged.time.min().values
+    end = xarray_forecast_merged.time.max().values
+    new_hourly_time = pd.date_range(start=start, end=end, freq="h")
 
-    stacked_times = np.concatenate(
-        (
-            pd.date_range(
-                start=start - pd.Timedelta(hours=his_period),
-                end=start,
-                freq="6h",
-            ),
-            xarray_forecast_merged.time.values,
-        )
-    )
+    stacked_times = xarray_forecast_merged.time.values
     unix_epoch = np.datetime64(0, "s")
     one_second = np.timedelta64(1, "s")
     stacked_timesUnix = (stacked_times - unix_epoch) / one_second
@@ -312,226 +293,10 @@ def main() -> None:
     logger.info(T1 - T0)
     os.remove(forecast_process_path + "_wgrib2_merged.nc")
 
-    ################################################################################################
-    # %% Historic data
-    # Loop through the runs and check if they have already been processed to s3
-
-    # 6 hour runs
-    for i in range(his_period, -1, -6):
-        if save_type == "S3":
-            s3_path = (
-                historic_path
-                + "/AIGFS_Hist"
-                + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-                + ".zarr.tar.gz"
-            )
-
-            # Check for a done file in S3
-            if s3.exists(s3_path.replace(".tar.gz", ".done")):
-                logger.info(
-                    "File already exists in S3, skipping download for: %s", s3_path
-                )
-                continue
-        else:
-            # Local Path Setup
-            local_path = (
-                historic_path
-                + "/AIGFS_Hist"
-                + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-                + ".zarr"
-            )
-
-            # Check for a local done file
-            if os.path.exists(local_path.replace(".zarr", ".done")):
-                logger.info(
-                    "File already exists on disk, skipping download for: %s", local_path
-                )
-                continue
-
-        logger.info(
-            "Downloading: %s",
-            (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"),
-        )
-
-        # Create a range of dates for historic data going back 48 hours
-        # Subtract an additional 6 hours to ensure we get the full 48 hours of history, since AIGFS only provides data every 6 hours
-        DATES = pd.date_range(
-            start=base_time - pd.Timedelta(hours=i) - pd.Timedelta(hours=6),
-            periods=1,
-            freq="6h",
-        )
-        # Create a range of forecast lead times
-        # Use the 6 hour for the historic data since it's all 6 hour intervals, and this provides precp accum
-        fxx = [6]
-
-        # Create FastHerbie Object.
-        FH_histsub = FastHerbie(
-            DATES,
-            model="aigfs",
-            fxx=fxx,
-            product="sfc",
-            verbose=False,
-            priority=["aws", "nomads"],
-            save_dir=tmp_dir,
-        )
-
-        # Download the subsets
-        FH_histsub.download(match_strings, verbose=False)
-
-        # Check for download length
-        if len(FH_histsub.file_exists) != len(fxx):
-            logger.error(
-                "Download failed, expected 1 files but got %d",
-                len(FH_histsub.file_exists),
-            )
-            sys.exit(1)
-
-        # Create list of downloaded grib files
-        grib_list = [
-            str(Path(x.get_localFilePath(match_strings)).expand())
-            for x in FH_histsub.file_exists
-        ]
-
-        # Perform a check if any data seems to be invalid
-        cmd = (
-            "cat "
-            + " ".join(grib_list)
-            + " | "
-            + f"{wgrib2_path}"
-            + " - "
-            + " -s -stats"
-        )
-
-        grib_check = subprocess.run(
-            cmd, shell=True, capture_output=True, encoding="utf-8", check=False
-        )
-
-        validate_grib_stats(grib_check)
-        logger.info("Grib files passed validation, proceeding with processing")
-
-        # Create a string to pass to wgrib2 to merge all gribs into one netcdf
-        cmd = (
-            "cat "
-            + " ".join(grib_list)
-            + " | "
-            + f"{wgrib2_path}"
-            + " - "
-            + " -netcdf "
-            + hist_process_path
-            + "_wgrib2_merged.nc"
-        )
-
-        # Run wgrib2
-        sp_out = subprocess.run(
-            cmd, shell=True, capture_output=True, encoding="utf-8", check=False
-        )
-        if sp_out.returncode != 0:
-            logger.error(sp_out.stderr)
-            sys.exit()
-
-        # Read the netcdf file using xarray (no UV product for Graphcast)
-        xarray_his_wgrib_merged = xr.open_dataset(
-            hist_process_path + "_wgrib2_merged.nc"
-        )
-
-        xarray_hist_merged = xarray_his_wgrib_merged
-
-        # Clear memory of temporary inputs
-        del xarray_his_wgrib_merged
-
-        ########################################################################
-        # Save merged and processed xarray dataset to disk using zarr with compression
-        # Define the path to save the zarr dataset with the run time in the filename
-        # format the time following iso8601
-
-        hist_tmp_zarr_path = hist_process_path + "_AIGFS_Hist_TMP.zarr"
-
-        # Save the dataset with compression and filters for all variables
-        # Use the same encoding as last time but with larger chunks to speed up read times
-        # Small fix for pressure variable naming not required for Graphcast
-        encoding = {
-            vname: {"chunks": (6, process_chunk, process_chunk)}
-            for vname in zarr_vars[1:]
-        }
-
-        # with ProgressBar():
-        xarray_hist_merged.to_zarr(
-            hist_tmp_zarr_path, mode="w", consolidated=False, encoding=encoding
-        )
-
-        # Clear the xarray dataset from memory
-        del xarray_hist_merged
-
-        # Remove temp file created by wgrib2
-        os.remove(hist_process_path + "_wgrib2_merged.nc")
-
-        # Save a done file to s3 to indicate that the historic data has been processed
-        if save_type == "S3":
-            archive_tmp_zarr_and_upload(
-                tmp_zarr_path=hist_tmp_zarr_path,
-                s3_path=s3_path,
-                archive_member_name="AIGFS_Hist.zarr",
-                s3=s3,
-            )
-        else:
-            os.rename(hist_tmp_zarr_path, local_path)
-            done_file = local_path.replace(".zarr", ".done")
-            with open(done_file, "w") as f:
-                f.write("Done")
-
-        logger.info((base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ"))
-
-    # %% Merge the historic and forecast datasets and then squash using dask
-    # Get the s3 paths to the historic data
-    if save_type == "S3":
-        local_temp_dir = forecast_process_path + "_s3_temp_downloads"
-        os.makedirs(local_temp_dir, exist_ok=True)
-
-        ncLocalWorking_paths = []
-        for i in range(his_period, -1, -6):
-            timestamp = (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            final_zarr_name = f"AIGFS_Hist{timestamp}.zarr"
-            extracted_path = download_extract_historic_archive(
-                s3=s3,
-                historic_path=historic_path,
-                final_zarr_name=final_zarr_name,
-                extracted_store_name="AIGFS_Hist.zarr",
-                local_temp_dir=local_temp_dir,
-                expected_vars=zarr_vars,
-            )
-            if extracted_path is not None:
-                ncLocalWorking_paths.append(extracted_path)
-    else:
-        ncLocalWorking_paths = [
-            historic_path
-            + "/AIGFS_Hist"
-            + (base_time - pd.Timedelta(hours=i)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr"
-            for i in range(his_period, -1, -6)
-        ]
-
-    # Dask Setup
-    daskVarArrays = []
+    # %% Stack the forecast variables and then squash using dask
     daskVarArrayList = []
 
-    for daskVarIDX, dask_var in enumerate(zarr_vars[:]):
-        for local_ncpath in ncLocalWorking_paths:
-            # If not found in array, use MISSING_DATA to show missing
-            try:
-                daskVarArrays.append(
-                    da.from_zarr(local_ncpath, component=dask_var, inline_array=True)
-                )
-            # Add a fallback in case of a FileNotFoundError
-            except FileNotFoundError:
-                logger.warning("File not found, adding NaN array for: %s", local_ncpath)
-                daskVarArrays.append(
-                    da.full((6, 721, 1440), MISSING_DATA).rechunk(
-                        (6, process_chunk, process_chunk)
-                    )
-                )
-
-        daskVarArraysStack = da.stack(daskVarArrays, allow_unknown_chunksizes=True)
-
+    for dask_var in zarr_vars:
         daskForecastArray = da.from_zarr(
             forecast_process_path + "_forecast.zarr",
             component=dask_var,
@@ -539,19 +304,8 @@ def main() -> None:
         )
 
         if dask_var == "time":
-            # Create a time array with the same shape
-            # This is because multiple steps are stored in each file
-            daskVarArraysShape = da.reshape(
-                daskVarArraysStack,
-                (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], 1),
-                merge_chunks=False,
-            )
-            daskCatTimes = da.concatenate(
-                (da.squeeze(daskVarArraysShape), daskForecastArray), axis=0
-            ).astype("float32")
-
             # Get times as numpy
-            npCatTimes = daskCatTimes.compute()
+            npCatTimes = daskForecastArray.astype("float32").compute()
             validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
 
             daskArrayOut = da.from_array(
@@ -564,22 +318,11 @@ def main() -> None:
             daskVarArrayList.append(daskArrayOut)
 
         else:
-            daskVarArraysShape = da.reshape(
-                daskVarArraysStack,
-                (daskVarArraysStack.shape[0] * daskVarArraysStack.shape[1], 721, 1440),
-                merge_chunks=False,
-            )
-            daskArrayOut = da.concatenate(
-                (daskVarArraysShape, daskForecastArray), axis=0
-            )
-
             daskVarArrayList.append(
-                daskArrayOut[:, :, :]
-                .rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
-                .astype("float32")
+                daskForecastArray.rechunk(
+                    (len(stacked_timesUnix), process_chunk, process_chunk)
+                ).astype("float32")
             )
-
-        daskVarArrays = []
 
         logger.info(dask_var)
 

@@ -51,11 +51,11 @@ class _AQWeather:
             id="timemachine_before_store",
         ),
         # The reported request (#751/#752): a 3-day-stale run still carries rows
-        # for this time, but they are older than the 48 h history and masked.
+        # for this time, but they are older than the 48 h lookback and masked.
         pytest.param(
             REPORTED_TIME, True, -3, 24, None, set(), id="stale_run_history_masked"
         ),
-        # Request window straddles the 48 h history cutoff: sources are reported,
+        # Request window straddles the 48 h lookback cutoff: sources are reported,
         # rows before the cutoff are masked and later rows kept.
         pytest.param(
             NOW - datetime.timedelta(days=3),
@@ -72,8 +72,8 @@ class _AQWeather:
             0,
             24,
             None,
-            {"raqdps", "silam"},
-            id="timemachine_within_history",
+            {"silam"},
+            id="timemachine_within_silam_history",
         ),
         pytest.param(NOW, False, 0, 24, None, {"raqdps", "silam"}, id="forecast"),
         # Store only has rows days after the request window.
@@ -99,13 +99,16 @@ def test_aq_sources_reported_only_when_request_has_coverage(
         "API.request.grid_indexing._load_era5_slice", lambda *args, **kwargs: False
     )
     now = NOW
-    model_times = (now + datetime.timedelta(days=model_shift_days)).replace(
-        tzinfo=datetime.UTC
-    ).timestamp() + (np.arange(120) - 48) * 3600
-    raqdps = np.full((120, max(RAQDPS.values()) + 1), np.nan)
+    run_time = (
+        (now + datetime.timedelta(days=model_shift_days))
+        .replace(tzinfo=datetime.UTC)
+        .timestamp()
+    )
+    # SILAM keeps 48 h of history ahead of its forecast; RAQDPS is forecast-only.
+    raqdps = np.full((73, max(RAQDPS.values()) + 1), np.nan)
     silam = np.full((120, max(SILAM.values()) + 1), np.nan)
-    raqdps[:, RAQDPS["time"]] = model_times
-    silam[:, SILAM["time"]] = model_times
+    raqdps[:, RAQDPS["time"]] = run_time + np.arange(73) * 3600
+    silam[:, SILAM["time"]] = run_time + (np.arange(120) - 48) * 3600
     if missing_source != "raqdps":
         raqdps[:, RAQDPS["pm25"]] = 10.0
     if missing_source != "silam":
