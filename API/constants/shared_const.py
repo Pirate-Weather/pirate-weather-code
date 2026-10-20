@@ -10,6 +10,10 @@ MISSING_DATA = np.nan
 # Minimum reflectivity threshold (dBZ)
 REFC_THRESHOLD = 5.0
 
+# An ensemble member counts towards precipitation probability (GEFS, AIGEFS,
+# GEPS, REPS) when its hourly precipitation rate exceeds this (mm/h).
+ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H = 0.1
+
 # Ingest version
 INGEST_VERSION_STR = "v31"
 

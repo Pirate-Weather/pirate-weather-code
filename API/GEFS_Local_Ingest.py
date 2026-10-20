@@ -1,7 +1,15 @@
-# %% GEFS Processing script using Dask, FastHerbie, and wgrib2
-# Alexander Rey, September 2023
+"""GEFS ensemble precipitation ingest.
 
-# %% Import modules
+Downloads the precipitation and precipitation-type fields of all 30 GEFS members
+(0.25 degree, 3-hourly to 240 h) for the newest 6-hourly cycle, reduces them to
+ensemble statistics (precipitation probability, mean, standard deviation and
+precipitation-type fractions), interpolates them to an hourly axis and publishes
+``GEFS.zarr`` plus ``GEFS.time.pickle``. The store starts at the first forecast
+lead (run + 3 h); the API falls back to other sources for earlier hours.
+
+Alexander Rey, September 2023
+"""
+
 import logging
 import os
 import shutil
@@ -15,18 +23,19 @@ import pandas as pd
 import s3fs
 import xarray as xr
 import zarr
-from herbie import FastHerbie, Path
 from herbie.fast import Herbie_latest
 
-from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_grib_utils import check_grib_stats, run_checked
+from API.constants.shared_const import (
+    ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H,
+    INGEST_VERSION_STR,
+)
+from API.ingest_grib_utils import download_and_validate_subset, run_checked
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
-    download_herbie_with_retry,
     interp_time_take_blend,
     mask_invalid_data,
     pad_to_chunk_size,
@@ -39,14 +48,45 @@ from API.ingest_utils import (
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 
-# Logging setup
 logger = logging.getLogger(__name__)
 
-DEFAULT_HERBIE_RETRIES = 5
-DEFAULT_HERBIE_RETRY_SLEEP = 20
+# %% Model constants
+GEFS_MEMBER_COUNT = 30
+# 0.25 degree global latitude/longitude grid
+GEFS_GRID_SHAPE = (721, 1440)
+GEFS_FORECAST_HOURS = FORECAST_LEAD_RANGES["GEFS"]
+GEFS_SOURCE_PRIORITY = ["aws", "nomads"]
+# Total precipitation plus the four categorical precipitation types
+GEFS_MATCH_STRINGS = "(:(CRAIN|CICEP|CSNOW|CFRZR):)|(:APCP:)"
+# GEFS APCP buckets reset every 6 hours: the first lead of a bucket holds a
+# 0-3 h total and the second a 0-6 h total.
+GEFS_APCP_BUCKET_HOURS = 6
+GEFS_LEAD_STEP_HOURS = 3
+PRECIP_TYPES = ("CRAIN", "CSNOW", "CFRZR", "CICEP")
 
+# Per-member variables, in the order they are read back after conversion
+zarr_vars = (
+    "time",
+    "APCP_surface",
+    "CSNOW_surface",
+    "CICEP_surface",
+    "CFRZR_surface",
+    "CRAIN_surface",
+)
 
-# %% Setup paths and parameters
+# Variables in the published store; the order is the API's GEFS index map
+probVars = (
+    "time",
+    "Precipitation_Prob",
+    "APCP_Mean",
+    "APCP_StdDev",
+    "CSNOW_Prob",
+    "CICEP_Prob",
+    "CFRZR_Prob",
+    "CRAIN_Prob",
+)
+
+# %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
 
 wgrib2_path = os.getenv(
@@ -59,31 +99,42 @@ tmp_dir = forecast_process_dir + "/Downloads"
 
 forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/GEFS")
 
-
 save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
+GEFS_DOWNLOAD_RETRIES = positive_int_env("herbie_download_retries", 5)
+GEFS_RETRY_SLEEP_SECONDS = positive_int_env("herbie_retry_sleep_seconds", 20)
+
+
+def download_gefs_member(base_time: pd.Timestamp, member: int) -> list[str]:
+    """Download and validate one member's forecast GRIB subsets with bounded retries."""
+    return download_and_validate_subset(
+        model="gefs",
+        product="atmos.25",
+        search=GEFS_MATCH_STRINGS,
+        dataset_name=f"GEFS member {member} forecast",
+        base_time=base_time,
+        forecast_hours=list(GEFS_FORECAST_HOURS),
+        priority=GEFS_SOURCE_PRIORITY,
+        herbie_save_dir=tmp_dir,
+        herbie_download_retries=GEFS_DOWNLOAD_RETRIES,
+        herbie_retry_sleep_seconds=GEFS_RETRY_SLEEP_SECONDS,
+        herbie_kwargs={"member": member},
+        download_verbose=False,
+        wgrib2_exe=wgrib2_path.strip(),
+    )
+
 
 def main() -> None:
-    """Run the ingest."""
+    """Run the GEFS ingest."""
     logging.basicConfig(level=logging.INFO)
     # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
     configure_herbie_request_timeouts()
-    herbie_download_retries = positive_int_env(
-        "herbie_download_retries", DEFAULT_HERBIE_RETRIES
-    )
-    herbie_retry_sleep_seconds = positive_int_env(
-        "herbie_retry_sleep_seconds", DEFAULT_HERBIE_RETRY_SLEEP
-    )
-
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     zarr_store_workers = configure_zarr_writes()
 
-    # Define the processing chunk size
     process_chunk = CHUNK_SIZES["GEFS"]
-
-    # Define the final x/y chunksize
     final_chunk = FINAL_CHUNK_SIZES["GEFS"]
 
     # Start each run from an empty processing directory
@@ -94,301 +145,165 @@ def main() -> None:
     if save_type == "Download":
         os.makedirs(publish_dir, exist_ok=True)
 
-    # %% Find the most recent run of the GEFS model
     T0 = time.time()
 
+    # %% Determine the model run: the newest cycle whose 240 h lead exists
     latest_run = Herbie_latest(
         model="gefs",
         n=3,
         freq="6h",
-        fxx=[240],
+        fxx=[GEFS_FORECAST_HOURS[-1]],
         product="atmos.25",
         verbose=True,
         member="avg",
-        priority=["aws", "nomads"],
+        priority=GEFS_SOURCE_PRIORITY,
     )
-
     base_time = latest_run.date
-    # Skip the run if this cycle has already been published
+
+    # %% Skip the run if this cycle has already been published
     previous_base_time = read_published_run_time(
         publish_dir + "/GEFS.time.pickle", save_type, s3
     )
     if previous_base_time is not None and previous_base_time >= base_time:
         logger.info("No Update to GEFS, ending")
         return
+    logger.info("Processing GEFS run %s", base_time)
 
-    logger.info(base_time)
-
-    zarr_vars = (
-        "time",
-        "APCP_surface",
-        "CSNOW_surface",
-        "CICEP_surface",
-        "CFRZR_surface",
-        "CRAIN_surface",
+    # %% Forecast hours: 3-hourly leads, stored at their valid times
+    forecast_valid_times = (
+        pd.Timestamp(base_time) + pd.to_timedelta(GEFS_FORECAST_HOURS, unit="h")
+    ).values
+    second_lead_in_bucket = xr.DataArray(
+        np.asarray(GEFS_FORECAST_HOURS) % GEFS_APCP_BUCKET_HOURS == 0, dims="time"
     )
 
-    probVars = (
-        "time",
-        "Precipitation_Prob",
-        "APCP_Mean",
-        "APCP_StdDev",
-        "CSNOW_Prob",
-        "CICEP_Prob",
-        "CFRZR_Prob",
-        "CRAIN_Prob",
-    )
+    # %% Download, convert and correct each member
+    member_zarr_paths = []
+    for member in range(1, GEFS_MEMBER_COUNT + 1):
+        grib_list = download_gefs_member(base_time, member)
 
-    #####################################################################################################
-    # %% Download forecast data for all 30 members to find percentages
-
-    # Define the subset of variables to download as a list of strings
-    matchstring_su = "(:(CRAIN|CICEP|CSNOW|CFRZR):)"
-    matchstring_ap = "(:APCP:)"
-
-    # Merge matchstrings for download
-    match_strings = matchstring_su + "|" + matchstring_ap
-
-    # Create a range of forecast lead times
-    # Go from 1 to 7 to account for the weird prate approach
-
-    gefs_range = FORECAST_LEAD_RANGES["GEFS"]
-
-    # Create FastHerbie object for all 30 members
-    FH_forecastsubMembers = []
-    mem = 0
-    failCount = 0
-    forecast_time_values = None
-    while mem < 30:
-        FH_IN = FastHerbie(
-            pd.date_range(start=base_time, periods=1, freq="6h"),
-            model="gefs",
-            fxx=gefs_range,
-            member=mem + 1,
-            product="atmos.25",
-            verbose=False,
-            priority=["aws", "nomads"],
-            save_dir=tmp_dir,
-        )
-
-        # Check for download length
-        if len(FH_IN.file_exists) != 80:
-            logger.warning(
-                "Member %d has not downloaded all files, trying again", mem + 1
-            )
-            failCount += 1
-
-            # Break after 10 failed attempts
-            if failCount > 10:
-                break
-
-            continue
-
-        FH_forecastsubMembers.append(FH_IN)
-
-        # Download and process the subsets with retry
-        download_herbie_with_retry(
-            herbie_obj=FH_forecastsubMembers[mem],
-            search=match_strings,
-            expected_count=len(gefs_range),
-            dataset_name=f"GEFS member {mem + 1} forecast",
-            retries=herbie_download_retries,
-            retry_sleep_s=herbie_retry_sleep_seconds,
-        )
-
-        # Create list of downloaded grib files
-        grib_list = [
-            str(Path(x.get_localFilePath(match_strings)).expand())
-            for x in FH_forecastsubMembers[mem].file_exists
-        ]
-
-        # Perform a check if any data seems to be invalid
-        check_grib_stats(grib_list, wgrib2_path, f"GEFS member {mem + 1}")
-
-        # Create a string to pass to wgrib2 to merge all gribs into one grib
-        cmd = (
+        member_nc_path = forecast_process_path + f"_wgrib2_merged_m{member}.nc"
+        run_checked(
             "cat "
             + " ".join(grib_list)
-            + " | "
-            + f"{wgrib2_path}"
-            + " - "
-            + "-netcdf "
-            + forecast_process_path
-            + "_wgrib2_merged_m"
-            + str(mem + 1)
-            + ".nc"
+            + f" | {wgrib2_path} - -netcdf {member_nc_path}",
+            f"GEFS member {member} wgrib2 NetCDF conversion",
         )
+        xarray_wgrib = xr.open_dataset(member_nc_path)
 
-        # Run wgrib2 to megre all the grib files
-        run_checked(cmd, f"GEFS member {mem + 1} wgrib2 NetCDF conversion")
-
-        # Fix precip and chunk each member
-        xarray_wgrib = xr.open_dataset(
-            forecast_process_path + "_wgrib2_merged_m" + str(mem + 1) + ".nc"
-        )
-
-        # Change from 3 and 6 hour accumulation to 3 hour accumulation
-        # Use the difference between 3 and 6 for every other timestep
-        apcp_diff_xr = xarray_wgrib["APCP_surface"].diff(dim="time")
-        xarray_wgrib["APCP_surface"][slice(1, None, 2), :, :] = apcp_diff_xr[
-            slice(0, None, 2), :, :
-        ]
-
-        # Sometimes there will be weird tiny negative values, set them to zero
-        xarray_wgrib["APCP_surface"] = np.maximum(xarray_wgrib["APCP_surface"], 0)
-
-        # Divide by 3 to get hourly accum
-        xarray_wgrib["APCP_surface"] = xarray_wgrib["APCP_surface"] / 3
-
-        # NOTE: Because the cateogical vars are mixed (0-3 and 0-6) intervals, there can be values even when there's no precip
-        for var in ["CRAIN", "CSNOW", "CFRZR", "CICEP"]:
-            xarray_wgrib[var + "_surface"] = xarray_wgrib[var + "_surface"].where(
-                xarray_wgrib["APCP_surface"] != 0, 0
+        if not np.array_equal(xarray_wgrib["time"].values, forecast_valid_times):
+            raise RuntimeError(
+                f"GEFS member {member} times {xarray_wgrib['time'].values} do not "
+                f"match the expected forecast leads {GEFS_FORECAST_HOURS}"
             )
 
-        # Define compression and chunking for each variable
-        # Compress to save space
-        # Save the dataset as a nc file with compression
-        # encoding = {
-        #     vname: {"zlib": True, "complevel": 1, "chunksizes": (80, 60, 60)}
-        #     for vname in wgribVars
-        # }
-        # xarray_wgrib.to_netcdf(
-        #     forecast_process_path + "_xr_m" + str(mem + 1) + ".nc", encoding=encoding
-        # )
+        # Turn the 0-3 h / 0-6 h bucket totals into 3-hour totals by differencing
+        # the second lead of each bucket, then into an hourly rate.
+        apcp = xarray_wgrib["APCP_surface"]
+        apcp_3h = xr.where(second_lead_in_bucket, apcp - apcp.shift(time=1), apcp)
+        # Packing can leave tiny negative differences
+        xarray_wgrib["APCP_surface"] = np.maximum(apcp_3h, 0) / GEFS_LEAD_STEP_HOURS
+
+        # The categorical types are averaged over the same mixed 0-3 h / 0-6 h
+        # intervals, so they can be non-zero in a 3-hour step with no precipitation.
+        for precip_type in PRECIP_TYPES:
+            xarray_wgrib[precip_type + "_surface"] = xarray_wgrib[
+                precip_type + "_surface"
+            ].where(xarray_wgrib["APCP_surface"] != 0, 0)
 
         xarray_wgrib = xarray_wgrib.chunk(
-            chunks={"time": 80, "latitude": process_chunk, "longitude": process_chunk}
+            chunks={
+                "time": len(GEFS_FORECAST_HOURS),
+                "latitude": process_chunk,
+                "longitude": process_chunk,
+            }
         )
-
-        forecast_time_values = xarray_wgrib["time"].values
+        member_zarr_path = forecast_process_path + f"_xr_m{member}.zarr"
         with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
             xarray_wgrib.to_zarr(
-                forecast_process_path + "_xr_m" + str(mem + 1) + ".zarr",
+                member_zarr_path,
                 consolidated=False,
                 mode="w",
                 chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
             )
         xarray_wgrib.close()
+        member_zarr_paths.append(member_zarr_path)
 
-        # Delete the wgrib netcdf to save space
-        forecast_merged_path = (
-            forecast_process_path + "_wgrib2_merged_m" + str(mem + 1) + ".nc"
-        )
-        if os.path.exists(forecast_merged_path):
-            os.remove(forecast_merged_path)
+        # The merged NetCDF is large and no longer needed
+        os.remove(member_nc_path)
 
-        mem += 1
-
-    # Hourly target axis runs from the first stored forecast valid time
-    # (base_time + 3 h) to the last one. GEFS starts at hour 3, so hours
-    # base_time+1 and +2 are not in this store; the API falls back to other
-    # sources for them.
-    if forecast_time_values is None:
-        raise RuntimeError("GEFS forecast processing did not produce any time values.")
-    start = np.min(forecast_time_values)
-    end = np.max(forecast_time_values)
-    new_hourly_time = pd.date_range(start=start, end=end, freq="h")
-
-    stacked_times = forecast_time_values
-
+    # %% Ensemble statistics across members
     unix_epoch = np.datetime64(0, "s")
     one_second = np.timedelta64(1, "s")
-    stacked_timesUnix = (stacked_times - unix_epoch) / one_second
+    stacked_timesUnix = (forecast_valid_times - unix_epoch) / one_second
+    # Hourly target axis from the first lead (run + 3 h) to the last
+    new_hourly_time = pd.date_range(
+        start=forecast_valid_times[0], end=forecast_valid_times[-1], freq="h"
+    )
     hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
-    ncLocalWorking_paths = [
-        forecast_process_path + "_xr_m" + str(i) + ".zarr" for i in range(1, 31, 1)
-    ]
+    # Stack members along a new leading axis, one dask array per variable
+    # (this works much better than xarray's open_mfdataset here)
+    daskArrays = {
+        dask_var: da.stack(
+            [da.from_zarr(path, dask_var) for path in member_zarr_paths], axis=0
+        )
+        for dask_var in zarr_vars
+    }
 
-    # Dask
-    daskArrays = {}
+    daskOutput = {
+        "time": daskArrays["time"][0, :],
+        "Precipitation_Prob": (
+            daskArrays["APCP_surface"] > ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H
+        ).sum(axis=0)
+        / GEFS_MEMBER_COUNT,
+        "APCP_Mean": daskArrays["APCP_surface"].mean(axis=0),
+        "APCP_StdDev": daskArrays["APCP_surface"].std(axis=0),
+    }
+    # Fraction of members forecasting each precipitation type
+    for precip_type in PRECIP_TYPES:
+        daskOutput[precip_type + "_Prob"] = (
+            daskArrays[precip_type + "_surface"].sum(axis=0) / GEFS_MEMBER_COUNT
+        )
 
-    # Combine NetCDF files into a Dask Array, since it works significantly better than the xarray mfdataset appraoach
-    # Note that the chunks
-    for dask_var in zarr_vars:
-        daskVarArrays = []
-        for local_ncpath in ncLocalWorking_paths:
-            daskVarArrays.append(da.from_zarr(local_ncpath, dask_var))
-
-        # Stack times together, keeping variables separate
-        daskArrays[dask_var] = da.stack(daskVarArrays, axis=0)
-
-        daskVarArrays = []
-
-    # Dict to hold output dask arrays
-    daskOutput = {}
-
-    # Find the probability of precipitation greater than 0.1 mm/h  across all members
-    daskOutput["Precipitation_Prob"] = ((daskArrays["APCP_surface"]) > 0.1).sum(
-        axis=0
-    ) / 30
-
-    # Find the average precipitation accumulation and categorical parameters across all members
-    for var in ["CRAIN", "CSNOW", "CFRZR", "CICEP"]:
-        daskOutput[var + "_Prob"] = daskArrays[var + "_surface"].sum(axis=0) / 30
-
-    # Find the standard deviation of precipitation accumulation across all members
-    daskOutput["APCP_StdDev"] = daskArrays["APCP_surface"].std(axis=0)
-
-    # Find the average precipitation accumulation across all members
-    daskOutput["APCP_Mean"] = daskArrays["APCP_surface"].mean(axis=0)
-
-    # Copy time over
-    daskOutput["time"] = daskArrays["time"][1, :]
-
-    # filters = [BitRound(keepbits=12)]  # Only keep ~ 3 significant digits
-    # compressor = Blosc(cname="zstd", clevel=1)  # Use zstd compression
-
+    # Write each statistic to disk; computing them all at once overflows memory
     for dask_var in probVars:
-        # with ProgressBar():
-        if dask_var == "time":
-            with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-                daskOutput[dask_var].to_zarr(
-                    forecast_process_path + "_" + dask_var + ".zarr",
-                    compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-                    overwrite=True,
-                    compute=True,
-                )
-        else:
-            with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-                daskOutput[dask_var].rechunk(
-                    (80, process_chunk, process_chunk)
-                ).to_zarr(
-                    forecast_process_path + "_" + dask_var + ".zarr",
-                    compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-                    dtype="float32",
-                    overwrite=True,
-                    compute=True,
-                )
+        stat_array = daskOutput[dask_var]
+        to_zarr_kwargs = {}
+        if dask_var != "time":
+            stat_array = stat_array.rechunk(
+                (len(GEFS_FORECAST_HOURS), process_chunk, process_chunk)
+            )
+            to_zarr_kwargs["dtype"] = "float32"
+        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+            stat_array.to_zarr(
+                forecast_process_path + "_" + dask_var + ".zarr",
+                compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+                overwrite=True,
+                compute=True,
+                **to_zarr_kwargs,
+            )
+    del daskOutput, daskArrays
 
-    # %% Delete to free memory
-    del xarray_wgrib, FH_forecastsubMembers, daskOutput, daskArrays, apcp_diff_xr
-
-    #####################################################################################################
-    # %% Stack the forecast variables and then squash using dask
+    # %% Stack the statistics into the (variable, time, y, x) layout the API reads
     daskVarArrayList = []
-
     for dask_var in probVars:
         daskForecastArray = da.from_zarr(
             forecast_process_path + "_" + dask_var + ".zarr", inline_array=True
         )
 
         if dask_var == "time":
-            # Get times as numpy
             npCatTimes = daskForecastArray.astype("float32").compute()
             # Check that the stored times are aligned with the expected forecast times
             validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
-
-            daskArrayOut = da.from_array(
-                np.tile(
-                    np.expand_dims(np.expand_dims(npCatTimes, axis=1), axis=1),
-                    (1, 721, 1440),
-                )
-            ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
-
-            daskVarArrayList.append(daskArrayOut)
-
+            # The API reads time from the store like any other variable
+            daskVarArrayList.append(
+                da.from_array(
+                    np.tile(
+                        npCatTimes[:, np.newaxis, np.newaxis], (1, *GEFS_GRID_SHAPE)
+                    )
+                ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
+            )
         else:
             daskVarArrayList.append(
                 daskForecastArray.rechunk(
@@ -396,27 +311,17 @@ def main() -> None:
                 ).astype("float32")
             )
 
-        logger.info(dask_var)
+    daskVarArrayListMergeNaN = mask_invalid_data(da.stack(daskVarArrayList, axis=0))
 
-    # Merge the arrays into a single 4D array
-    daskVarArrayListMerge = da.stack(daskVarArrayList, axis=0)
-
-    # Mask out invalid data
-    daskVarArrayListMergeNaN = mask_invalid_data(daskVarArrayListMerge)
-
-    # Write out to disk
-    # This intermediate step is necessary to avoid memory overflow
-    # with ProgressBar():
-    # Read in stacked 4D array back in
+    # Write the stacked array to disk before interpolating; doing both in one
+    # graph overflows memory
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         daskVarArrayListMergeNaN.to_zarr(
             forecast_process_path + "_stack.zarr", overwrite=True, compute=True
         )
-
-    # Read in stacked 4D array back in
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
-    # 1. Interpolate the stacked array to be hourly along the time axis
+    # %% Interpolate to hourly and write the final store
     daskVarArrayStackDiskInterp = interp_time_take_blend(
         daskVarArrayStackDisk,
         stacked_timesUnix=stacked_timesUnix,
@@ -424,13 +329,10 @@ def main() -> None:
         dtype="float32",
         fill_value=np.nan,
     )
-
-    # 2. Pad to chunk size
     daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
         daskVarArrayStackDiskInterp, final_chunk
     )
 
-    # 3. Write the final store
     gefs_store_name = "GEFS.zarr.zip" if save_type == "S3" else "GEFS.zarr"
     write_final_zarr(
         daskVarArrayStackDiskInterpPad,
@@ -450,12 +352,9 @@ def main() -> None:
         s3=s3,
     )
 
-    # Clean up
+    # %% Clean up
     shutil.rmtree(forecast_process_dir)
-
-    # Test Read
-    T1 = time.time()
-    logger.info(T1 - T0)
+    logger.info("GEFS run %s published in %.1f s", base_time, time.time() - T0)
 
 
 if __name__ == "__main__":
