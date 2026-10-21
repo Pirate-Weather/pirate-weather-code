@@ -455,8 +455,8 @@ def main() -> None:
     logger.info("Saved SILAM forecast zarr to %s_.zarr", forecast_process_path)
 
     # %% History: archive the first 24 h of each earlier run not yet processed.
-    # A missing or unreadable history run is skipped; the API then has a gap in
-    # its AQI lookback rather than no SILAM data at all.
+    # The API reads the hourly rows by position, so a missing history run would
+    # shift every later hour; fail instead of publishing a store with a gap.
     history_offsets = range(HISTORY_PERIOD_HOURS, 0, -HISTORIC_STEP_HOURS)
     for hours_offset in history_offsets:
         hist_start = origintime - timedelta(hours=hours_offset)
@@ -481,8 +481,7 @@ def main() -> None:
         logger.info("Downloading historic SILAM run: %s", timestamp)
 
         if not download_silam_file(hist_url, hist_nc_path):
-            logger.warning("Skipping missing historic SILAM run: %s", timestamp)
-            continue
+            raise RuntimeError(f"Historic SILAM run {timestamp} is missing: {hist_url}")
 
         # Keep run + 1 h to run + 24 h (the end bound is inclusive)
         slice_end = hist_end - timedelta(seconds=1)
@@ -494,14 +493,16 @@ def main() -> None:
                 ),
             )
         except (OSError, ValueError) as e:
-            logger.warning(
-                "Skipping unreadable historic SILAM run %s: %s", timestamp, e
-            )
-            continue
+            raise RuntimeError(
+                f"Historic SILAM run {timestamp} is unreadable: {hist_nc_path}"
+            ) from e
 
-        if xarray_hist_processed.sizes.get("time", 0) == 0:
-            logger.warning("No historic SILAM times found for slice: %s", timestamp)
-            continue
+        hist_steps = xarray_hist_processed.sizes.get("time", 0)
+        if hist_steps != HISTORIC_STEP_HOURS:
+            raise RuntimeError(
+                f"Historic SILAM run {timestamp} has {hist_steps} of "
+                f"{HISTORIC_STEP_HOURS} hours"
+            )
 
         hist_tmp_zarr_path = hist_process_path + "_SILAM_Hist_TMP.zarr"
         xarray_hist_processed = convert_time_coord_to_unix(xarray_hist_processed)
@@ -540,8 +541,12 @@ def main() -> None:
                 local_temp_dir=local_temp_dir,
                 expected_vars=zarr_vars,
             )
-            if extracted_path is not None:
-                historic_zarr_paths.append(extracted_path)
+            if extracted_path is None:
+                raise RuntimeError(
+                    f"Historic SILAM archive SILAM_Hist_v3{timestamp} is missing "
+                    f"from {historic_path}"
+                )
+            historic_zarr_paths.append(extracted_path)
     else:
         historic_zarr_paths = []
         for hours_offset in history_offsets:
@@ -549,8 +554,9 @@ def main() -> None:
                 "%Y%m%dT%H%M%SZ"
             )
             local_path = f"{historic_path}/SILAM_Hist_v3{timestamp}.zarr"
-            if os.path.exists(local_path):
-                historic_zarr_paths.append(local_path)
+            if not os.path.exists(local_path):
+                raise RuntimeError(f"Historic SILAM store {local_path} is missing")
+            historic_zarr_paths.append(local_path)
 
     dask_interp_arrays = []
     for dask_var in zarr_vars:
@@ -562,10 +568,10 @@ def main() -> None:
                         historic_zarr_path, component=dask_var, inline_array=True
                     )
                 )
-            except (FileNotFoundError, KeyError):
-                logger.info(
-                    "Missing %s in historic zarr: %s", dask_var, historic_zarr_path
-                )
+            except (FileNotFoundError, KeyError) as e:
+                raise RuntimeError(
+                    f"Historic SILAM store {historic_zarr_path} is missing {dask_var}"
+                ) from e
 
         dask_forecast_array = da.from_zarr(
             forecast_process_path + "_.zarr", component=dask_var, inline_array=True
@@ -576,9 +582,9 @@ def main() -> None:
             dask_time_arrays.append(dask_forecast_array)
             # Integer Unix seconds of every stacked step, used to place the maps
             stacked_times_unix = da.concatenate(dask_time_arrays, axis=0).compute()
-            if np.any(np.diff(stacked_times_unix) <= 0):
+            if np.any(np.diff(stacked_times_unix) != SILAM_STEP_SECONDS):
                 raise RuntimeError(
-                    f"SILAM run {origintime} stacked times are not increasing: "
+                    f"SILAM run {origintime} stacked times are not hourly: "
                     f"{stacked_times_unix}"
                 )
             dask_times_concatenated = da.from_array(

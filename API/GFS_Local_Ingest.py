@@ -43,7 +43,7 @@ import xarray as xr
 import zarr.storage
 from herbie import HerbieLatest
 
-from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR, MISSING_DATA
+from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
 from API.ingest_grib_utils import download_and_validate_subset
 from API.ingest_utils import (
     CHUNK_SIZES,
@@ -637,8 +637,13 @@ def main() -> None:
                 local_temp_dir=local_temp_dir,
                 expected_vars=zarr_vars,
             )
+            # Every history run was archived above, so a missing one means the
+            # archive was lost; fail rather than publish a store with a gap.
             if extracted_path is None:
-                logger.warning("GFS history archive not found on S3 for %s", timestamp)
+                raise RuntimeError(
+                    f"GFS history archive GFS_Hist_v3{timestamp} is missing from "
+                    f"{historic_path}"
+                )
             return extracted_path
 
         timestamps = [
@@ -653,50 +658,25 @@ def main() -> None:
         ) as executor:
             results = list(executor.map(download_and_extract, timestamps))
 
-        # A missing archive keeps its slot (None) and is filled with NaN below
         historic_zarr_paths = results
     else:
         historic_zarr_paths = [
             f"{historic_path}/GFS_Hist_v3{historic_run_stamp(base_time, hours_offset)}.zarr"
             for hours_offset in historic_offsets
         ]
+        missing_paths = [p for p in historic_zarr_paths if not os.path.exists(p)]
+        if missing_paths:
+            raise RuntimeError(f"GFS history stores are missing: {missing_paths}")
 
     # %% Stack history and forecast into the (variable, time, y, x) layout
     dask_var_arrays_list = []
     dask_interp_arrays = []
 
     for dask_var in zarr_vars:
-        for archive_index, historic_zarr_path in enumerate(historic_zarr_paths):
-            if historic_zarr_path is not None and os.path.exists(historic_zarr_path):
-                dask_var_arrays_list.append(
-                    da.from_zarr(
-                        historic_zarr_path, component=dask_var, inline_array=True
-                    )
-                )
-                continue
-
-            # A missing archive keeps its place on the time axis: its times are
-            # the expected valid times and its data is NaN, which the hourly
-            # interpolation leaves missing so the API falls back to other sources.
-            logger.warning(
-                "GFS history archive for %s missing, filling it with NaN",
-                historic_run_stamp(base_time, historic_offsets[archive_index]),
+        for historic_zarr_path in historic_zarr_paths:
+            dask_var_arrays_list.append(
+                da.from_zarr(historic_zarr_path, component=dask_var, inline_array=True)
             )
-            steps = len(GFS_HISTORIC_FORECAST_HOURS)
-            if dask_var == "time":
-                dask_var_arrays_list.append(
-                    da.from_array(
-                        stacked_timesUnix[
-                            archive_index * steps : (archive_index + 1) * steps
-                        ]
-                    )
-                )
-            else:
-                dask_var_arrays_list.append(
-                    da.full((steps, *GFS_GRID_SHAPE), MISSING_DATA).rechunk(
-                        (steps, process_chunk, process_chunk)
-                    )
-                )
 
         dask_var_arrays_stacked = da.stack(
             dask_var_arrays_list, allow_unknown_chunksizes=True

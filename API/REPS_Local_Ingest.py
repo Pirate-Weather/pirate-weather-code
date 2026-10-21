@@ -35,7 +35,6 @@ from API.constants.shared_const import (
     ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H,
     HISTORY_PERIODS,
     INGEST_VERSION_STR,
-    MISSING_DATA,
 )
 from API.ingest_grib_utils import (
     cat_gribs,
@@ -516,20 +515,27 @@ def main() -> None:
         local_temp_dir = forecast_process_path + "_s3_temp_downloads"
         os.makedirs(local_temp_dir, exist_ok=True)
 
-        def download_and_extract(store_name: str) -> str | None:
-            return download_extract_historic_archive(
+        def download_and_extract(store_name: str) -> str:
+            extracted_path = download_extract_historic_archive(
                 s3=s3,
                 historic_path=historic_path,
                 final_zarr_name=store_name + ".zarr",
                 extracted_store_name="REPS_Hist.zarr",
                 local_temp_dir=local_temp_dir,
             )
+            # Every history cycle was archived above, so a missing one means the
+            # archive was lost; fail rather than publish a store with a gap.
+            if extracted_path is None:
+                raise RuntimeError(
+                    f"REPS history archive {store_name} is missing from {historic_path}"
+                )
+            return extracted_path
 
         logger.info(
             "Downloading and extracting %s REPS history archives",
             len(history_store_names),
         )
-        # executor.map keeps the cycle order; a missing archive stays as None
+        # executor.map keeps the cycle order
         with ThreadPoolExecutor(max_workers=REPS_HISTORIC_DOWNLOAD_WORKERS) as executor:
             historic_zarr_paths = list(
                 executor.map(download_and_extract, history_store_names)
@@ -554,44 +560,17 @@ def main() -> None:
     daskVarArrayList = []
     for dask_var in probVars:
         historic_arrays = []
-        for store_name, historic_zarr_path, valid_times in zip(
-            history_store_names, historic_zarr_paths, history_valid_times
-        ):
-            historic_array = None
-            if historic_zarr_path is not None:
-                try:
-                    historic_array = da.from_zarr(
+        for historic_zarr_path in historic_zarr_paths:
+            try:
+                historic_arrays.append(
+                    da.from_zarr(
                         historic_zarr_path, component=dask_var, inline_array=True
                     )
-                except FileNotFoundError:
-                    historic_array = None
-
-            if historic_array is None:
-                # A missing history cycle should not stop the forecast. Its two
-                # steps keep their valid times and hold NaN; the NaN-aware
-                # interpolation bridges the gap from the neighbouring cycles
-                # (or leaves NaN at the start of the record).
-                logger.warning(
-                    "REPS history %s has no %s; filling it with NaN",
-                    store_name,
-                    dask_var,
                 )
-                if dask_var == "time":
-                    historic_array = da.from_array(
-                        (valid_times - unix_epoch) / one_second
-                    )
-                else:
-                    historic_array = da.full(
-                        (len(REPS_HISTORIC_FORECAST_HOURS), NY, NX),
-                        MISSING_DATA,
-                        dtype="float32",
-                        chunks=(
-                            len(REPS_HISTORIC_FORECAST_HOURS),
-                            process_chunk,
-                            process_chunk,
-                        ),
-                    )
-            historic_arrays.append(historic_array)
+            except FileNotFoundError as e:
+                raise RuntimeError(
+                    f"REPS history store {historic_zarr_path} is missing or has no {dask_var}"
+                ) from e
 
         daskForecastArray = da.from_zarr(
             forecast_process_path + "_.zarr", component=dask_var, inline_array=True

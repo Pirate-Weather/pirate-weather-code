@@ -353,8 +353,15 @@ def main() -> None:
                 local_temp_dir=local_temp_dir,
                 expected_vars=zarr_vars,
             )
-            if extracted_path is not None:
-                ncHistWorking_paths.append(extracted_path)
+            # Every hour was archived above, so a missing one means the archive
+            # was lost. The API reads the hourly rows by position, so skipping it
+            # would shift every later hour.
+            if extracted_path is None:
+                raise RuntimeError(
+                    f"URMA hourly store {final_zarr_name} is missing from "
+                    f"{historic_path}"
+                )
+            ncHistWorking_paths.append(extracted_path)
     else:
         ncHistWorking_paths = [
             historic_path

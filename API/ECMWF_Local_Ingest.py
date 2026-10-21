@@ -432,8 +432,15 @@ def main() -> None:
                 local_temp_dir=local_temp_dir,
                 expected_vars=zarr_vars,
             )
-            if extracted_path is not None:
-                ncLocalWorking_paths.append(extracted_path)
+            # Every history run was archived above, so a missing one means the
+            # archive was lost; dropping it would let the hourly interpolation
+            # bridge the gap with invented values.
+            if extracted_path is None:
+                raise RuntimeError(
+                    f"ECMWF history archive ECMWF_Hist_v3{hist_timestamp} is "
+                    f"missing from {historic_path}"
+                )
+            ncLocalWorking_paths.append(extracted_path)
     else:
         ncLocalWorking_paths = [
             historic_path
