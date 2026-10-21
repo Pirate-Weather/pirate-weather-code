@@ -504,11 +504,16 @@ def expected_nan_aware_value(
     y: int,
     x: int,
 ) -> float:
-    """Mirror interp_time_map_blocks_nan for one variable and grid point."""
+    """Mirror the ingest for one variable and grid point.
+
+    The ingest fills isolated gaps (fill_isolated_time_gaps), blends each lead
+    group to hourly (interp_time_take_blend, whose nearest-step ties take the
+    later step) and holds a group's first lead back to the hours before it.
+    """
     if spec.nearest:
         source_by_distance = sorted(
             spec.source_hours,
-            key=lambda source_hour: (abs(source_hour - hour), source_hour),
+            key=lambda source_hour: (abs(source_hour - hour), -source_hour),
         )
         for source_hour in source_by_distance:
             value = mask_source_value(
@@ -539,8 +544,14 @@ def expected_nan_aware_value(
         x,
     )
 
-    if left is None or right is None:
+    # With a valid value on one side only (hours before the first published
+    # lead, or masked first/last leads), the ingest holds the nearest value.
+    if left is None and right is None:
         return math.nan
+    if left is None:
+        return right[1]
+    if right is None:
+        return left[1]
 
     left_hour, left_value = left
     right_hour, right_value = right

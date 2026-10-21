@@ -17,6 +17,7 @@ import re
 import shutil
 import time
 import warnings
+from collections import Counter
 
 import dask
 import dask.array as da
@@ -43,7 +44,8 @@ from API.ingest_utils import (
     configure_zarr_writes,
     deaccumulate_energy_to_flux,
     deaccumulate_to_hourly_rate,
-    interp_time_map_blocks_nan,
+    fill_isolated_time_gaps,
+    interp_time_take_blend,
     make_herbie_save_dir,
     mask_invalid_data,
     pad_to_chunk_size,
@@ -105,7 +107,7 @@ GDPS_MATCH_STRINGS = [
 
 # Some fields are only published on a subset of the leads. They are requested
 # for every lead, but only these are expected to exist; wgrib2 leaves the
-# missing steps as NaN and the NaN-aware time interpolation fills them.
+# missing steps as NaN, so these fields are interpolated from their own leads.
 # Precipitation type and the instability indices are 3-hourly through 168 h,
 # then 6-hourly; 500 hPa vertical velocity is 3-hourly throughout.
 GDPS_REDUCED_FORECAST_HOURS = [
@@ -157,6 +159,17 @@ zarr_vars = (
     "KX_surface",
     "N4LFTX_500mb",
 )
+
+# Stored fields published on fewer leads than GDPS_FORECAST_HOURS (see
+# GDPS_EXPECTED_FORECAST_HOURS); each is interpolated to hourly from its own leads.
+GDPS_REDUCED_LEAD_VARS = {
+    "PTYPE_surface": GDPS_REDUCED_FORECAST_HOURS,
+    "CAPE_surface": GDPS_REDUCED_FORECAST_HOURS,
+    "CIN_surface": GDPS_REDUCED_FORECAST_HOURS,
+    "KX_surface": GDPS_REDUCED_FORECAST_HOURS,
+    "N4LFTX_500mb": GDPS_REDUCED_FORECAST_HOURS,
+    "VVEL_500mb": GDPS_3_HOURLY_FORECAST_HOURS,
+}
 
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
@@ -391,16 +404,60 @@ def main() -> None:
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
     # %% Interpolate to hourly and write the final store
-    # Precipitation type is categorical, so it takes the nearest step instead of
-    # a linear blend.
-    daskVarArrayStackDiskInterp = interp_time_map_blocks_nan(
-        daskVarArrayStackDisk,
-        stacked_timesUnix=stacked_timesUnix,
-        hourly_timesUnix=hourly_timesUnix,
-        dtype="float32",
-        fill_value=np.nan,
-        nearest_vars=[zarr_vars.index("PTYPE_surface")],
-    )
+    # Mixing hourly, 3-hourly and 6-hourly leads on one axis leaves NaN where a
+    # field was not published, so each group of fields sharing a lead set is
+    # interpolated from its own leads. Precipitation type is categorical, so it
+    # takes the nearest step instead of a linear blend.
+    var_leads = [
+        tuple(GDPS_REDUCED_LEAD_VARS.get(var, GDPS_FORECAST_HOURS)) for var in zarr_vars
+    ]
+    group_gap_counts = []
+    group_arrays = []
+    group_var_indices = []
+    for leads in dict.fromkeys(var_leads):
+        var_indices = [i for i, var_lead in enumerate(var_leads) if var_lead == leads]
+        lead_mask = np.isin(GDPS_FORECAST_HOURS, leads)
+        group_times = stacked_timesUnix[lead_mask]
+        group_nearest = [
+            local
+            for local, var_index in enumerate(var_indices)
+            if zarr_vars[var_index] == "PTYPE_surface"
+        ]
+        gap_counts = Counter()
+        group_gap_counts.append((var_indices, gap_counts))
+        group_stack = fill_isolated_time_gaps(
+            daskVarArrayStackDisk[var_indices][:, lead_mask],
+            group_times,
+            nearest_vars=group_nearest,
+            gap_column_counts=gap_counts,
+        )
+        group_hourly = interp_time_take_blend(
+            group_stack,
+            stacked_timesUnix=group_times,
+            hourly_timesUnix=hourly_timesUnix,
+            nearest_vars=group_nearest or None,
+            dtype="float32",
+            fill_value=np.nan,
+        )
+        # MSC publishes the reduced-lead fields from 3 h onward; hold the first
+        # published lead back to the earlier hours instead of leaving them NaN.
+        first_hour = int(np.searchsorted(hourly_timesUnix, group_times[0]))
+        if first_hour > 0:
+            group_hourly = da.concatenate(
+                [
+                    da.repeat(
+                        group_hourly[:, first_hour : first_hour + 1], first_hour, axis=1
+                    ),
+                    group_hourly[:, first_hour:],
+                ],
+                axis=1,
+            )
+        group_arrays.append(group_hourly)
+        group_var_indices.extend(var_indices)
+    # Restore the zarr_vars order the API's GDPS index map relies on
+    daskVarArrayStackDiskInterp = da.concatenate(group_arrays, axis=0)[
+        np.argsort(group_var_indices)
+    ]
     daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
         daskVarArrayStackDiskInterp, final_chunk
     )
@@ -411,6 +468,15 @@ def main() -> None:
         forecast_process_dir + "/" + gdps_store_name,
         final_chunk,
         zarr_store_workers,
+    )
+    logger.info(
+        "GDPS isolated time gaps filled (grid columns per variable): %s",
+        {
+            zarr_vars[var_indices[local]]: count
+            for var_indices, gap_counts in group_gap_counts
+            for local, count in sorted(gap_counts.items())
+        }
+        or "none",
     )
 
     # %% Publish the store, then the run time the API uses to detect it

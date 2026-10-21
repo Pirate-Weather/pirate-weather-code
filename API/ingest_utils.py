@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import tarfile
 import time
+from collections import Counter
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -1182,123 +1183,80 @@ def earth_relative_wind_components(
     return ut, vt
 
 
-def interp_time_map_blocks_nan(
+def fill_isolated_time_gaps(
     arr: da.Array,
     stacked_timesUnix: np.ndarray,
-    hourly_timesUnix: np.ndarray,
     nearest_vars: int | Iterable[int] | None = None,
-    dtype: str = "float32",
-    fill_value: float = np.nan,
-    time_axis: int = 1,
-    max_columns_per_batch: int = 4096,
+    gap_column_counts: Counter | None = None,
 ) -> da.Array:
-    """Interpolate along time while ignoring NaNs with bounded block memory."""
+    """Fill interior NaN gaps along time from each grid point's valid neighbours.
+
+    Values masked at ingest (out-of-range or fill values, e.g. CAPE -999) leave
+    NaN at scattered points and times. Before the hourly blend, every column
+    with some, but not all, NaN along time is filled with xarray's
+    ``interpolate_na`` (linear, or nearest for categorical variables such as
+    precipitation type). Gaps before the first or after the last valid value
+    hold that nearest valid value, so the published store has no NaN where the
+    point has any data. Columns without gaps, the usual case, are returned
+    untouched, so the per-column fill only runs where it is needed.
+
+    Args:
+        arr: Dask array in (V, T, Y, X) order with time in a single chunk.
+        stacked_timesUnix: Unix seconds of the T stored steps.
+        nearest_vars: Variable indices filled with the nearest valid step.
+        gap_column_counts: Optional ``Counter`` that receives the number of
+            filled columns per variable index once the array is computed.
+
+    Returns:
+        A dask array with the same shape, chunks and dtype as ``arr``.
+    """
     if arr.ndim != 4:
         raise ValueError("Expected arr with dims (V, T, Y, X).")
-    if time_axis != 1:
-        raise NotImplementedError("This helper assumes time_axis == 1 for (V,T,Y,X).")
-    if len(arr.chunks[time_axis]) != 1:
-        raise ValueError("time axis must be a single chunk before interpolating.")
-    if max_columns_per_batch < 1:
-        raise ValueError("max_columns_per_batch must be positive.")
+    if len(arr.chunks[1]) != 1:
+        raise ValueError("time axis must be a single chunk before filling gaps.")
 
-    x_source = np.asarray(stacked_timesUnix, dtype=np.float64).reshape(-1)
-    x_target = np.asarray(hourly_timesUnix, dtype=np.float64).reshape(-1)
-    target_count = len(x_target)
-    if arr.shape[time_axis] != len(x_source):
+    times = np.asarray(stacked_timesUnix, dtype=np.float64).reshape(-1)
+    if arr.shape[1] != len(times):
         raise ValueError(
-            f"arr time length {arr.shape[time_axis]} does not match "
-            f"stacked_timesUnix length {len(x_source)}."
+            f"arr time length {arr.shape[1]} does not match stacked_timesUnix "
+            f"length {len(times)}."
         )
-
     if nearest_vars is None:
-        nearest_vars_set = set()
+        nearest_set = set()
     elif isinstance(nearest_vars, int):
-        nearest_vars_set = {nearest_vars}
+        nearest_set = {nearest_vars}
     else:
-        nearest_vars_set = {int(i) for i in nearest_vars}
+        nearest_set = {int(i) for i in nearest_vars}
+    count_lock = Lock()
 
-    def interp_block(block, block_info=None):
-        var_start = 0
-        if block_info is not None:
-            var_start = block_info[0]["array-location"][0][0]
+    def fill_block(block, block_info=None):
+        var_start = block_info[0]["array-location"][0][0] if block_info else 0
+        missing = np.isnan(block)
+        gap_columns = missing.any(axis=1) & ~missing.all(axis=1)  # (V, Y, X)
+        if not gap_columns.any():
+            return block
 
-        out = np.full(
-            (block.shape[0], target_count, block.shape[2], block.shape[3]),
-            fill_value,
-            dtype=dtype,
-        )
-        n_points = block.shape[2] * block.shape[3]
+        filled = block.copy()
+        for local_var in np.flatnonzero(gap_columns.any(axis=(1, 2))):
+            ys, xs = np.nonzero(gap_columns[local_var])
+            columns = xr.DataArray(
+                block[local_var][:, ys, xs],
+                dims=("time", "point"),
+                coords={"time": times},
+            )
+            method = "nearest" if var_start + local_var in nearest_set else "linear"
+            filled[local_var][:, ys, xs] = (
+                columns.interpolate_na(dim="time", method=method, use_coordinate=True)
+                .bfill("time")
+                .ffill("time")
+                .values
+            )
+            if gap_column_counts is not None:
+                with count_lock:
+                    gap_column_counts[var_start + int(local_var)] += len(ys)
+        return filled
 
-        for local_var_idx in range(block.shape[0]):
-            global_var_idx = var_start + local_var_idx
-            use_nearest = global_var_idx in nearest_vars_set
-            values = block[local_var_idx].reshape(block.shape[1], n_points)
-            var_out = out[local_var_idx].reshape(target_count, n_points)
-
-            for batch_start in range(0, n_points, max_columns_per_batch):
-                batch_stop = min(batch_start + max_columns_per_batch, n_points)
-                batch_values = values[:, batch_start:batch_stop]
-                valid = np.isfinite(batch_values)
-                valid_patterns, pattern_idx = np.unique(
-                    valid.T, axis=0, return_inverse=True
-                )
-                batch_out = var_out[:, batch_start:batch_stop]
-
-                for valid_pattern_idx, valid_pattern in enumerate(valid_patterns):
-                    local_cols = np.flatnonzero(pattern_idx == valid_pattern_idx)
-                    if not valid_pattern.any():
-                        continue
-
-                    valid_times = x_source[valid_pattern]
-                    target_in_range = (x_target >= valid_times[0]) & (
-                        x_target <= valid_times[-1]
-                    )
-                    if not target_in_range.any():
-                        continue
-
-                    target_indices = np.flatnonzero(target_in_range)
-                    valid_values = batch_values[valid_pattern][:, local_cols]
-
-                    if use_nearest or len(valid_times) == 1:
-                        insert_at = np.searchsorted(
-                            valid_times, x_target[target_indices]
-                        )
-                        left_idx = np.clip(insert_at - 1, 0, len(valid_times) - 1)
-                        right_idx = np.clip(insert_at, 0, len(valid_times) - 1)
-                        left_dist = np.abs(
-                            x_target[target_indices] - valid_times[left_idx]
-                        )
-                        right_dist = np.abs(
-                            valid_times[right_idx] - x_target[target_indices]
-                        )
-                        nearest_idx = np.where(
-                            left_dist <= right_dist, left_idx, right_idx
-                        )
-                        batch_out[np.ix_(target_indices, local_cols)] = valid_values[
-                            nearest_idx
-                        ]
-                        continue
-
-                    insert_at = np.searchsorted(
-                        valid_times, x_target[target_indices], side="right"
-                    )
-                    left_idx = np.clip(insert_at - 1, 0, len(valid_times) - 2)
-                    right_idx = left_idx + 1
-                    left_times = valid_times[left_idx]
-                    right_times = valid_times[right_idx]
-                    weights = (x_target[target_indices] - left_times) / (
-                        right_times - left_times
-                    )
-                    interp_values = (1 - weights[:, None]) * valid_values[
-                        left_idx
-                    ] + weights[:, None] * valid_values[right_idx]
-                    batch_out[np.ix_(target_indices, local_cols)] = interp_values
-
-        return out
-
-    chunks = (arr.chunks[0], (len(x_target),), arr.chunks[2], arr.chunks[3])
-    return arr.map_blocks(interp_block, dtype=dtype, chunks=chunks)
+    return arr.map_blocks(fill_block, dtype=arr.dtype)
 
 
 def interp_time_take_blend(

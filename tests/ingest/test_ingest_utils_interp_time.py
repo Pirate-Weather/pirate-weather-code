@@ -1,72 +1,61 @@
 import dask.array as da
 import numpy as np
 
-from API.ingest_utils import interp_time_map_blocks_nan
+from API.ingest_utils import fill_isolated_time_gaps, interp_time_take_blend
 
 
-def test_interp_time_fills_nan_gaps_in_column_batches():
-    """GEPS/GDPS/HRDPS/REPS interpolate model steps to hourly with this helper,
-    processing grid columns in batches to bound memory. Interior NaN gaps must be
-    bridged from each column's valid neighbours without extrapolating past them,
-    all-NaN columns must stay NaN, and nearest-neighbour variables (GDPS/HRDPS
-    precip type) must not be blended into non-existent in-between categories.
+def test_msc_time_interpolation_leaves_no_gaps():
+    """The MSC ingests (GDPS, HRDPS, GEPS, REPS) must publish hourly stores
+    without NaN where data exists: a value masked at ingest is bridged from its
+    valid neighbours (precipitation type from the nearest step, never blended
+    into an in-between category), a value masked at the first lead holds the
+    first valid value, and fields on mixed 3- and 6-hourly leads are
+    interpolated to every hour. Points with no data at all stay NaN rather than
+    being invented.
     """
-    source_times = np.array([0, 3600, 7200, 10800], dtype=np.float64)
-    target_times = np.array(
-        [0, 1800, 3600, 5400, 7200, 9000, 10800],
-        dtype=np.float64,
-    )
+    hour = 3600.0
+    hourly_times = np.arange(1, 7) * hour
     source = np.array(
         [
+            # Linear field with a masked value at 3 h (point 0); point 1 has no data
             [
-                [[0.0, 0.0, np.nan, np.nan, 5.0]],
-                [[10.0, np.nan, 10.0, np.nan, np.nan]],
-                [[20.0, 20.0, 20.0, np.nan, np.nan]],
-                [[30.0, 30.0, np.nan, np.nan, np.nan]],
+                [[10.0, np.nan]],
+                [[20.0, np.nan]],
+                [[np.nan, np.nan]],
+                [[40.0, np.nan]],
+                [[50.0, np.nan]],
+                [[60.0, np.nan]],
             ],
+            # Precipitation type with two masked steps between categories 1 and 3;
+            # point 1 is masked at the first lead
             [
-                [[0.0, np.nan, 1.0, 1.0, 1.0]],
-                [[10.0, 100.0, 2.0, 2.0, 2.0]],
-                [[20.0, np.nan, 3.0, 3.0, 3.0]],
-                [[30.0, 300.0, 4.0, 4.0, 4.0]],
+                [[1.0, np.nan]],
+                [[1.0, 2.0]],
+                [[np.nan, 2.0]],
+                [[np.nan, 2.0]],
+                [[3.0, 2.0]],
+                [[3.0, 2.0]],
             ],
         ],
         dtype=np.float32,
-    )
-    source_dask = da.from_array(source, chunks=(1, -1, 1, 5))
-
-    result = interp_time_map_blocks_nan(
-        source_dask,
-        stacked_timesUnix=source_times,
-        hourly_timesUnix=target_times,
-        nearest_vars=[1],
-        max_columns_per_batch=2,
+    )  # (V, T, Y, X)
+    filled = fill_isolated_time_gaps(
+        da.from_array(source, chunks=(1, -1, 1, 2)), hourly_times, nearest_vars=[1]
     ).compute()
 
-    expected_var_0 = np.array(
-        [
-            [0.0, 0.0, np.nan, np.nan, 5.0],
-            [5.0, 5.0, np.nan, np.nan, np.nan],
-            [10.0, 10.0, 10.0, np.nan, np.nan],
-            [15.0, 15.0, 15.0, np.nan, np.nan],
-            [20.0, 20.0, 20.0, np.nan, np.nan],
-            [25.0, 25.0, np.nan, np.nan, np.nan],
-            [30.0, 30.0, np.nan, np.nan, np.nan],
-        ],
-        dtype=np.float32,
-    )
-    expected_var_1 = np.array(
-        [
-            [0.0, np.nan, 1.0, 1.0, 1.0],
-            [0.0, np.nan, 1.0, 1.0, 1.0],
-            [10.0, 100.0, 2.0, 2.0, 2.0],
-            [10.0, 100.0, 2.0, 2.0, 2.0],
-            [20.0, 100.0, 3.0, 3.0, 3.0],
-            [20.0, 300.0, 3.0, 3.0, 3.0],
-            [30.0, 300.0, 4.0, 4.0, 4.0],
-        ],
-        dtype=np.float32,
-    )
+    np.testing.assert_allclose(filled[0, :, 0, 0], [10, 20, 30, 40, 50, 60])
+    assert np.isnan(filled[0, :, 0, 1]).all()
+    np.testing.assert_array_equal(filled[1, :, 0, 0], [1, 1, 1, 3, 3, 3])
+    np.testing.assert_array_equal(filled[1, :, 0, 1], [2, 2, 2, 2, 2, 2])
 
-    np.testing.assert_allclose(result[0, :, 0, :], expected_var_0)
-    np.testing.assert_allclose(result[1, :, 0, :], expected_var_1)
+    # GDPS-style lead set: 3-hourly, then 6-hourly
+    lead_hours = np.array([3, 6, 9, 15, 21])
+    leads = (lead_hours * 2.0).reshape(1, -1, 1, 1).astype(np.float32)
+    hourly = interp_time_take_blend(
+        da.from_array(leads, chunks=(1, -1, 1, 1)),
+        stacked_timesUnix=lead_hours * hour,
+        hourly_timesUnix=np.arange(3, 22) * hour,
+        fill_value=np.nan,
+    ).compute()
+
+    np.testing.assert_allclose(hourly[0, :, 0, 0], np.arange(3, 22) * 2.0)
