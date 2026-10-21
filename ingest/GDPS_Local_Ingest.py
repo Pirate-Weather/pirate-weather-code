@@ -99,6 +99,8 @@ GDPS_MATCH_STRINGS = [
     ("VerticalVelocity", "IsbL-0500"),
     ("KIndex", "Sfc"),
     ("O3", "EAtm"),
+    # Most-unstable parcel, virtual-temperature lifted index (GRIB 4LFTX)
+    ("LiftedIndex-MU-VT", "IsbL-0500"),
 ]
 
 # Some fields are only published on a subset of the leads. They are requested
@@ -117,6 +119,7 @@ GDPS_EXPECTED_FORECAST_HOURS = {
     ("CAPE", "Sfc"): GDPS_REDUCED_FORECAST_HOURS,
     ("CIN", "Sfc"): GDPS_REDUCED_FORECAST_HOURS,
     ("KIndex", "Sfc"): GDPS_REDUCED_FORECAST_HOURS,
+    ("LiftedIndex-MU-VT", "IsbL-0500"): GDPS_REDUCED_FORECAST_HOURS,
     ("VerticalVelocity", "IsbL-0500"): GDPS_3_HOURLY_FORECAST_HOURS,
 }
 
@@ -152,6 +155,7 @@ zarr_vars = (
     "CIN_surface",
     "VVEL_500mb",
     "KX_surface",
+    "N4LFTX_500mb",
 )
 
 # %% Paths and configuration

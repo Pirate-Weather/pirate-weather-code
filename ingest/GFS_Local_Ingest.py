@@ -7,7 +7,7 @@ directly with xarray/cfgrib (no wgrib2 conversion) and de-accumulated in
 xarray/dask. Storm distance/direction are derived from precipitation.
 
 The first 6 hours of each earlier cycle in the last ``HISTORY_PERIODS["GFS"]``
-hours are archived as ``GFS_Hist_v3<run>.zarr`` stores (tarred on S3). The
+hours are archived as ``GFS_Hist_v4<run>.zarr`` stores (tarred on S3). The
 history and the forecast are stacked, interpolated to an hourly axis and
 published as ``GFS.zarr`` and ``GFS.time.pickle``. The forecast store starts ``HISTORY_PERIODS["GFS"]`` hours
 before the first forecast lead (run + 1 h).
@@ -83,10 +83,13 @@ GFS_LATEST_RUN_PRIORITY = ["aws", "nomads"]
 GFS_DOWNLOAD_PRIORITY = ["aws", "google", "nomads"]
 
 # pgrb2.0p25 fields. APCP is matched as the run total (0-N h) so it only needs
-# differencing; PRMSL/DSWRF/TOZNE are matched on any level.
+# differencing; PRMSL/DSWRF/TOZNE are matched on any level. The thunderstorm
+# indices are the best (4-layer) lifted index (4LFTX), surface-based CIN and
+# 500 hPa vertical velocity (VVEL, Pa/s), matching the GDPS/HRDPS 500 hPa level.
 GFS_MATCH_STRINGS = (
     ":((DPT|TMP|APTMP|RH):2 m above ground:)"
-    "|:((CRAIN|CICEP|CSNOW|CFRZR|PRATE|PRES|VIS|GUST|CAPE):surface:.*hour fcst)"
+    "|:((CRAIN|CICEP|CSNOW|CFRZR|PRATE|PRES|VIS|GUST|CAPE|CIN|4LFTX):surface:.*hour fcst)"
+    "|(:VVEL:500 mb:)"
     "|(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
     "|(:TOZNE:)"
     "|(:(TCDC|REFC):entire atmosphere:.*hour fcst)"
@@ -95,6 +98,14 @@ GFS_MATCH_STRINGS = (
 )
 # UV (DUVB) is only in the secondary pgrb2b product
 GFS_DUVB_MATCH_STRING = ":DUVB:surface:"
+
+# GRIB variables outside the generic wgrib2 stats range for valid reasons: CIN
+# is negative by convention and routinely below the range minimum (-100 J/kg).
+GFS_EXCLUDED_STATS_VARIABLES = ["CIN"]
+
+# Archived history stores. The version changes whenever the stored variables
+# change, so history written with the old variable set is rebuilt, not merged.
+GFS_HISTORIC_STORE_PREFIX = "GFS_Hist_v4"
 
 # Precipitation rate (mm/h) that counts as a storm cell for storm distance/direction
 GFS_STORM_APCP_THRESHOLD_MM_H = 0.2
@@ -116,6 +127,7 @@ GFS_CFGRIB_GROUPS = (
     {"typeOfLevel": "meanSea"},
     {"typeOfLevel": "atmosphere"},
     {"typeOfLevel": "atmosphereSingleLayer"},
+    {"typeOfLevel": "isobaricInhPa", "level": 500},
 )
 
 # cfgrib short names -> the wgrib2-style names the GFS store has always used.
@@ -142,6 +154,9 @@ CFGRIB_TO_GFS_NAMES = {
     "refc": "REFC_entireatmosphere",
     "tozne": "TOZNE_entireatmosphere_consideredasasinglelayer_",
     "duvb": "DUVB_surface",
+    "lftx4": "N4LFTX_surface",
+    "w": "VVEL_500mb",
+    "cin": "CIN_surface",
 }
 
 # Variables in the published store; the order is the API's GFS index map.
@@ -172,6 +187,9 @@ zarr_vars = (
     "DSWRF_surface",
     "CAPE_surface",
     "PRES_station",
+    "N4LFTX_surface",
+    "VVEL_500mb",
+    "CIN_surface",
 )
 
 # %% Paths and configuration
@@ -232,6 +250,7 @@ def download_gfs_subset(
         herbie_download_retries=GFS_DOWNLOAD_RETRIES,
         herbie_retry_sleep_seconds=GFS_RETRY_SLEEP_SECONDS,
         wgrib2_exe=wgrib2_path.strip(),
+        excluded_stats_variables=GFS_EXCLUDED_STATS_VARIABLES,
     )
 
 
@@ -498,12 +517,14 @@ def main() -> None:
     for hours_offset in historic_offsets:
         timestamp = historic_run_stamp(base_time, hours_offset)
         if save_type == "S3":
-            s3_path = f"{historic_path}/GFS_Hist_v3{timestamp}.zarr.tar.gz"
+            s3_path = (
+                f"{historic_path}/{GFS_HISTORIC_STORE_PREFIX}{timestamp}.zarr.tar.gz"
+            )
             if s3.exists(s3_path.replace(".tar.gz", ".done")):
                 logger.info("S3 file exists, skipping: %s", s3_path)
                 continue
         else:
-            local_path = f"{historic_path}/GFS_Hist_v3{timestamp}.zarr"
+            local_path = f"{historic_path}/{GFS_HISTORIC_STORE_PREFIX}{timestamp}.zarr"
             if os.path.exists(local_path.replace(".zarr", ".done")):
                 logger.info("Local file exists, skipping: %s", local_path)
                 continue
@@ -609,7 +630,7 @@ def main() -> None:
             extracted_path = download_extract_historic_archive(
                 s3=s3,
                 historic_path=historic_path,
-                final_zarr_name=f"GFS_Hist_v3{timestamp}.zarr",
+                final_zarr_name=f"{GFS_HISTORIC_STORE_PREFIX}{timestamp}.zarr",
                 extracted_store_name="GFS_Hist.zarr",
                 local_temp_dir=local_temp_dir,
                 expected_vars=zarr_vars,
@@ -618,7 +639,7 @@ def main() -> None:
             # archive was lost; fail rather than publish a store with a gap.
             if extracted_path is None:
                 raise RuntimeError(
-                    f"GFS history archive GFS_Hist_v3{timestamp} is missing from "
+                    f"GFS history archive {GFS_HISTORIC_STORE_PREFIX}{timestamp} is missing from "
                     f"{historic_path}"
                 )
             return extracted_path
@@ -638,7 +659,8 @@ def main() -> None:
         historic_zarr_paths = results
     else:
         historic_zarr_paths = [
-            f"{historic_path}/GFS_Hist_v3{historic_run_stamp(base_time, hours_offset)}.zarr"
+            f"{historic_path}/{GFS_HISTORIC_STORE_PREFIX}"
+            f"{historic_run_stamp(base_time, hours_offset)}.zarr"
             for hours_offset in historic_offsets
         ]
         missing_paths = [p for p in historic_zarr_paths if not os.path.exists(p)]
@@ -716,10 +738,13 @@ def main() -> None:
         dask_var_arrays_list = []
         logger.info("Processed variable: %s", dask_var)
 
-    # Storm distance can reach very high values that are still correct
+    # Storm distance can reach very high values that are still correct. CIN is
+    # negative by convention and routinely below VALID_DATA_MIN (-100 J/kg);
+    # masking it would drop the strong caps the thunderstorm suppressor relies
+    # on, so the API bounds it with CLIP_CIN instead.
     merged_arrays_masked = mask_invalid_data(
         da.stack(dask_interp_arrays, axis=0),
-        ignoreAxis=[zarr_vars.index("Storm_Distance")],
+        ignoreAxis=[zarr_vars.index("Storm_Distance"), zarr_vars.index("CIN_surface")],
     )
 
     # Write the stacked array to disk before interpolating; doing both in one
