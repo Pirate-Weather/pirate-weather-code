@@ -289,7 +289,7 @@ def main() -> None:
         time_axis=xarray_forecast_merged["DSWRF_surface"].get_axis_num("time"),
     )
 
-    xarray_forecast_merged = xarray_forecast_merged.chunk(
+    xarray_forecast_chunked = xarray_forecast_merged.chunk(
         chunks={
             "time": len(HRDPS_FORECAST_HOURS),
             spatial_dims[0]: process_chunk,
@@ -297,13 +297,15 @@ def main() -> None:
         }
     )
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        xarray_forecast_merged.to_zarr(
+        xarray_forecast_chunked.to_zarr(
             forecast_process_path + "_.zarr",
             mode="w",
             consolidated=False,
             compute=True,
             chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
         )
+    # Close the dataset open_dataset returned; closing the chunked copy leaves the
+    # NetCDF open, holding its disk space after the remove below until main() returns.
     xarray_forecast_merged.close()
 
     # The merged NetCDF is large and no longer needed

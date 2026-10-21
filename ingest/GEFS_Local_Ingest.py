@@ -211,7 +211,7 @@ def main() -> None:
                 precip_type + "_surface"
             ].where(xarray_wgrib["APCP_surface"] != 0, 0)
 
-        xarray_wgrib = xarray_wgrib.chunk(
+        xarray_wgrib_chunked = xarray_wgrib.chunk(
             chunks={
                 "time": len(GEFS_FORECAST_HOURS),
                 "latitude": process_chunk,
@@ -220,12 +220,14 @@ def main() -> None:
         )
         member_zarr_path = forecast_process_path + f"_xr_m{member}.zarr"
         with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-            xarray_wgrib.to_zarr(
+            xarray_wgrib_chunked.to_zarr(
                 member_zarr_path,
                 consolidated=False,
                 mode="w",
                 chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
             )
+        # Close the dataset open_dataset returned; closing the chunked copy
+        # leaves the member NetCDF open until the variable is reassigned.
         xarray_wgrib.close()
         member_zarr_paths.append(member_zarr_path)
 
