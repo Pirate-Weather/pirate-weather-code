@@ -11,7 +11,6 @@ import shutil
 import subprocess
 import tarfile
 import time
-from collections import Counter
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -1181,82 +1180,6 @@ def earth_relative_wind_components(
     )
 
     return ut, vt
-
-
-def fill_isolated_time_gaps(
-    arr: da.Array,
-    stacked_timesUnix: np.ndarray,
-    nearest_vars: int | Iterable[int] | None = None,
-    gap_column_counts: Counter | None = None,
-) -> da.Array:
-    """Fill interior NaN gaps along time from each grid point's valid neighbours.
-
-    Values masked at ingest (out-of-range or fill values, e.g. CAPE -999) leave
-    NaN at scattered points and times. Before the hourly blend, every column
-    with some, but not all, NaN along time is filled with xarray's
-    ``interpolate_na`` (linear, or nearest for categorical variables such as
-    precipitation type). Gaps before the first or after the last valid value
-    hold that nearest valid value, so the published store has no NaN where the
-    point has any data. Columns without gaps, the usual case, are returned
-    untouched, so the per-column fill only runs where it is needed.
-
-    Args:
-        arr: Dask array in (V, T, Y, X) order with time in a single chunk.
-        stacked_timesUnix: Unix seconds of the T stored steps.
-        nearest_vars: Variable indices filled with the nearest valid step.
-        gap_column_counts: Optional ``Counter`` that receives the number of
-            filled columns per variable index once the array is computed.
-
-    Returns:
-        A dask array with the same shape, chunks and dtype as ``arr``.
-    """
-    if arr.ndim != 4:
-        raise ValueError("Expected arr with dims (V, T, Y, X).")
-    if len(arr.chunks[1]) != 1:
-        raise ValueError("time axis must be a single chunk before filling gaps.")
-
-    times = np.asarray(stacked_timesUnix, dtype=np.float64).reshape(-1)
-    if arr.shape[1] != len(times):
-        raise ValueError(
-            f"arr time length {arr.shape[1]} does not match stacked_timesUnix "
-            f"length {len(times)}."
-        )
-    if nearest_vars is None:
-        nearest_set = set()
-    elif isinstance(nearest_vars, int):
-        nearest_set = {nearest_vars}
-    else:
-        nearest_set = {int(i) for i in nearest_vars}
-    count_lock = Lock()
-
-    def fill_block(block, block_info=None):
-        var_start = block_info[0]["array-location"][0][0] if block_info else 0
-        missing = np.isnan(block)
-        gap_columns = missing.any(axis=1) & ~missing.all(axis=1)  # (V, Y, X)
-        if not gap_columns.any():
-            return block
-
-        filled = block.copy()
-        for local_var in np.flatnonzero(gap_columns.any(axis=(1, 2))):
-            ys, xs = np.nonzero(gap_columns[local_var])
-            columns = xr.DataArray(
-                block[local_var][:, ys, xs],
-                dims=("time", "point"),
-                coords={"time": times},
-            )
-            method = "nearest" if var_start + local_var in nearest_set else "linear"
-            filled[local_var][:, ys, xs] = (
-                columns.interpolate_na(dim="time", method=method, use_coordinate=True)
-                .bfill("time")
-                .ffill("time")
-                .values
-            )
-            if gap_column_counts is not None:
-                with count_lock:
-                    gap_column_counts[var_start + int(local_var)] += len(ys)
-        return filled
-
-    return arr.map_blocks(fill_block, dtype=arr.dtype)
 
 
 def interp_time_take_blend(

@@ -506,9 +506,9 @@ def expected_nan_aware_value(
 ) -> float:
     """Mirror the ingest for one variable and grid point.
 
-    The ingest fills isolated gaps (fill_isolated_time_gaps), blends each lead
-    group to hourly (interp_time_take_blend, whose nearest-step ties take the
-    later step) and holds a group's first lead back to the hours before it.
+    The ingest blends each lead group to hourly (interp_lead_groups with
+    interp_time_take_blend, whose nearest-step ties take the later step) and
+    holds a group's first lead back to the hours before it.
     """
     if spec.nearest:
         source_by_distance = sorted(
@@ -544,14 +544,11 @@ def expected_nan_aware_value(
         x,
     )
 
-    # With a valid value on one side only (hours before the first published
-    # lead, or masked first/last leads), the ingest holds the nearest value.
-    if left is None and right is None:
-        return math.nan
-    if left is None:
+    # Hours before the field's first published lead hold that lead's value
+    if left is None and right is not None and hour < spec.source_hours[0]:
         return right[1]
-    if right is None:
-        return left[1]
+    if left is None or right is None:
+        return math.nan
 
     left_hour, left_value = left
     right_hour, right_value = right

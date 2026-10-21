@@ -445,8 +445,8 @@ def expected_nan_aware_value(
     y: int,
     x: int,
 ) -> float:
-    """Mirror the ingest (fill_isolated_time_gaps, then interp_time_take_blend)
-    for one GEPS statistic and grid point."""
+    """Mirror the ingest's interp_time_take_blend for one GEPS statistic and
+    grid point."""
     left = nearest_finite_source_statistic(
         run_dir,
         base_time,
@@ -467,14 +467,8 @@ def expected_nan_aware_value(
         y,
         x,
     )
-    # With a valid value on one side only (masked first/last leads), the ingest
-    # holds the nearest value.
-    if left is None and right is None:
+    if left is None or right is None:
         return math.nan
-    if left is None:
-        return right[1]
-    if right is None:
-        return left[1]
 
     left_hour, left_value = left
     right_hour, right_value = right

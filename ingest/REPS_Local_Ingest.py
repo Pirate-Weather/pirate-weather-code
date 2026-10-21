@@ -17,7 +17,6 @@ import os
 import re
 import time
 import warnings
-from collections import Counter
 
 import dask
 import dask.array as da
@@ -46,7 +45,6 @@ from API.ingest_utils import (
     clear_directory,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
-    fill_isolated_time_gaps,
     interp_time_take_blend,
     make_herbie_save_dir,
     mask_invalid_data,
@@ -470,16 +468,8 @@ def main() -> None:
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
     # %% Interpolate to hourly and write the final store
-    # Bridge values masked at ingest from their valid neighbours first, so the
-    # hourly blend does not spread a single missing value to the hours around it.
-    gap_column_counts = Counter()
-    daskVarArrayStackDiskFilled = fill_isolated_time_gaps(
-        daskVarArrayStackDisk,
-        stacked_timesUnix,
-        gap_column_counts=gap_column_counts,
-    )
     daskVarArrayStackDiskInterp = interp_time_take_blend(
-        daskVarArrayStackDiskFilled,
+        daskVarArrayStackDisk,
         stacked_timesUnix=stacked_timesUnix,
         hourly_timesUnix=hourly_timesUnix,
         dtype="float32",
@@ -495,10 +485,6 @@ def main() -> None:
         forecast_process_dir + "/" + reps_store_name,
         final_chunk,
         zarr_store_workers,
-    )
-    logger.info(
-        "REPS isolated time gaps filled (grid columns per variable): %s",
-        {probVars[i]: n for i, n in sorted(gap_column_counts.items())} or "none",
     )
 
     # %% Publish the store, then the run time the API uses to detect it

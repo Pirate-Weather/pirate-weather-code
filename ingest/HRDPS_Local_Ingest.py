@@ -15,7 +15,6 @@ import os
 import re
 import time
 import warnings
-from collections import Counter
 
 import dask
 import dask.array as da
@@ -43,7 +42,6 @@ from API.ingest_utils import (
     configure_zarr_writes,
     deaccumulate_energy_to_flux,
     deaccumulate_to_hourly_rate,
-    fill_isolated_time_gaps,
     make_herbie_save_dir,
     mask_invalid_data,
     pad_to_chunk_size,
@@ -100,7 +98,9 @@ HRDPS_MATCH_STRINGS = [
 
 # GRIB variables outside the generic wgrib2 stats range for valid reasons:
 # DSWRF is accumulated energy (J/m^2, far above the range maximum). CAPE uses
-# -999 for undefined points, which mask_invalid_data later stores as missing.
+# -999 for undefined points, which the ingest stores as 0 (see main).
+HRDPS_CAPE_UNDEFINED = -999
+
 HRDPS_EXCLUDED_STATS_VARIABLES = {
     ("DSWRF", "Sfc"): ["DSWRF"],
     ("CAPE", "Sfc"): ["CAPE"],
@@ -290,6 +290,12 @@ def main() -> None:
         time_axis=xarray_forecast_merged["DSWRF_surface"].get_axis_num("time"),
     )
 
+    # HRDPS writes CAPE = -999 where no parcel is buoyant (CAPE undefined).
+    # Physically that is zero CAPE, as NBM, HRRR and GFS report it, so store 0
+    # rather than a gap.
+    cape = xarray_forecast_merged["CAPE_surface"]
+    xarray_forecast_merged["CAPE_surface"] = cape.where(cape != HRDPS_CAPE_UNDEFINED, 0)
+
     xarray_forecast_chunked = xarray_forecast_merged.chunk(
         chunks={
             "time": len(HRDPS_FORECAST_HOURS),
@@ -348,19 +354,9 @@ def main() -> None:
         )
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
-    # %% Fill isolated gaps and write the final store
-    # HRDPS is already hourly (run + 1 h to + 48 h), so no time interpolation is
-    # needed; only values masked at ingest are bridged from their valid
-    # neighbours. Precipitation type is categorical, so it takes the nearest step.
-    gap_column_counts = Counter()
-    daskVarArrayStackDiskFilled = fill_isolated_time_gaps(
-        daskVarArrayStackDisk,
-        stacked_timesUnix,
-        nearest_vars=[zarr_vars.index("PTYPE_surface")],
-        gap_column_counts=gap_column_counts,
-    )
+    # %% Write the final store (HRDPS is already hourly, run + 1 h to + 48 h)
     daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
-        daskVarArrayStackDiskFilled, final_chunk
+        daskVarArrayStackDisk, final_chunk
     )
 
     hrdps_store_name = "HRDPS.zarr.zip" if save_type == "S3" else "HRDPS.zarr"
@@ -369,10 +365,6 @@ def main() -> None:
         forecast_process_dir + "/" + hrdps_store_name,
         final_chunk,
         zarr_store_workers,
-    )
-    logger.info(
-        "HRDPS isolated time gaps filled (grid columns per variable): %s",
-        {zarr_vars[i]: n for i, n in sorted(gap_column_counts.items())} or "none",
     )
 
     # %% Publish the store, then the run time the API uses to detect it
