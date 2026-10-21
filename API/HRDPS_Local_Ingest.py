@@ -98,9 +98,11 @@ HRDPS_MATCH_STRINGS = [
 ]
 
 # GRIB variables outside the generic wgrib2 stats range for valid reasons:
-# DSWRF is accumulated energy (J/m^2, far above the range maximum).
+# DSWRF is accumulated energy (J/m^2, far above the range maximum). CAPE uses
+# -999 for undefined points, which mask_invalid_data later stores as missing.
 HRDPS_EXCLUDED_STATS_VARIABLES = {
     ("DSWRF", "Sfc"): ["DSWRF"],
+    ("CAPE", "Sfc"): ["CAPE"],
 }
 
 # Variables in the published store; the order is the API's HRDPS index map

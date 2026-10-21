@@ -214,7 +214,7 @@ build_nceplibs_ip() {
 build_nceplibs_g2c() {
     local src_dir="${BUILD_ROOT}/src/NCEPLIBS-g2c"
     local build_dir="${src_dir}/build"
-    local stamp_file="${BUILD_ROOT}/.nceplibs-g2c-built"
+    local stamp_file="${BUILD_ROOT}/.nceplibs-g2c-aec-built"
 
     if [[ -f "${stamp_file}" ]]; then
         log "NCEPLIBS-g2c already built"
@@ -232,6 +232,7 @@ build_nceplibs_g2c() {
     cmake -S "${src_dir}" -B "${build_dir}" \
         -DCMAKE_INSTALL_PREFIX="${NCEPLIBS_PREFIX}" \
         -DCMAKE_PREFIX_PATH="${TOOLCHAIN_PREFIX};${NCEPLIBS_PREFIX}" \
+        -DUSE_AEC=ON \
         -DUSE_Jasper=OFF \
         -DUSE_OpenJPEG=ON
     cmake --build "${build_dir}" --parallel "${JOBS}"
@@ -245,7 +246,7 @@ build_wgrib2() {
     local src_dir="${BUILD_ROOT}/src/wgrib2-${WGRIB2_VERSION}"
     local extract_root="${BUILD_ROOT}/src/wgrib2"
     local extracted_dir="${extract_root}/wgrib2-${WGRIB2_VERSION}"
-    local stamp_file="${BUILD_ROOT}/.wgrib2-${WGRIB2_VERSION}-g2c-built"
+    local stamp_file="${BUILD_ROOT}/.wgrib2-${WGRIB2_VERSION}-g2c-aec-built"
 
     if [[ -f "${stamp_file}" ]]; then
         log "wgrib2 ${WGRIB2_VERSION} already built"
@@ -375,6 +376,15 @@ run_final_checks() {
     set -e
     if [[ "${wgrib2_status}" != "0" && "${wgrib2_status}" != "8" ]]; then
         return "${wgrib2_status}"
+    fi
+
+    # ECMWF open data is CCSDS packed; without AEC in g2c wgrib2 cannot read it.
+    # wgrib2 -config exits 8, so capture its output before checking it.
+    local wgrib2_config
+    wgrib2_config="$("${WGRIB2_PREFIX}/bin/wgrib2" -config || true)"
+    if ! grep -q "Supported decoding:.*CCSDS AEC" <<< "${wgrib2_config}"; then
+        printf 'wgrib2 was built without CCSDS AEC decoding; rerun with PW_INGEST_FORCE=1\n' >&2
+        return 1
     fi
 }
 

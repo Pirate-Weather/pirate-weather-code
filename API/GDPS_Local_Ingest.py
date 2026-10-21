@@ -121,11 +121,13 @@ GDPS_EXPECTED_FORECAST_HOURS = {
 }
 
 # GRIB variables outside the generic wgrib2 stats range for valid reasons:
-# DSWRF is accumulated energy (J/m^2, far above the range maximum) and CIN is
-# routinely below the range minimum.
+# DSWRF is accumulated energy (J/m^2, far above the range maximum), and CIN and
+# the K index (below -170 in cold, dry polar air) are routinely below the range
+# minimum.
 GDPS_EXCLUDED_STATS_VARIABLES = {
     ("DownwardShortwaveRadiationFlux-Accum", "Sfc"): ["DSWRF"],
     ("CIN", "Sfc"): ["CIN"],
+    ("KIndex", "Sfc"): ["KX"],
 }
 
 # Variables in the published store; the order is the API's GDPS index map
