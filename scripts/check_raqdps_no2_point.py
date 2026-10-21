@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.request import urlretrieve
 
@@ -30,9 +30,9 @@ from API.raqdps_utils import RAQDPS_OUTPUT_VARS, build_raqdps_url  # noqa: E402
 DEFAULT_ZARR = "/home/reya/Weather/Prod/v31/RAQDPS.zarr"
 DEFAULT_LAT = 45.4766681
 DEFAULT_LON = -73.5550823
-GRID_RUN = datetime(2026, 7, 6, 12, tzinfo=timezone.utc)
+GRID_RUN = datetime(2026, 7, 6, 12, tzinfo=UTC)
 TARGETS = (
-    ("2026-07-06T12:00Z", datetime(2026, 7, 6, 12, tzinfo=timezone.utc)),
+    ("2026-07-06T12:00Z", datetime(2026, 7, 6, 12, tzinfo=UTC)),
     (
         "2026-07-09 08:00 EDT",
         datetime(2026, 7, 9, 8, tzinfo=timezone(timedelta(hours=-4))),
@@ -103,7 +103,7 @@ def nearest_grid_point(
 def nearest_time_index(
     times: np.ndarray, target: datetime, tolerance_seconds: int
 ) -> tuple[int, float]:
-    target_utc = target.astimezone(timezone.utc)
+    target_utc = target.astimezone(UTC)
     deltas = times.astype(np.float64) - target_utc.timestamp()
     time_idx = int(np.nanargmin(np.abs(deltas)))
     delta_seconds = float(deltas[time_idx])
@@ -136,7 +136,7 @@ def main() -> None:
             times, target, args.time_tolerance_seconds
         )
         value = float(root[no2_index, time_idx, y_idx, x_idx])
-        target_utc = target.astimezone(timezone.utc)
+        target_utc = target.astimezone(UTC)
         print(
             f"NO2 {label} ({target_utc:%Y-%m-%dT%H:%MZ}): "
             f"time_idx={time_idx}, stored_delta={delta_seconds:.0f}s, "

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 
@@ -21,9 +21,9 @@ RAQDPS_FORECAST_HOURS = tuple(range(73))
 def normalize_utc(dt: datetime) -> datetime:
     """Return a timezone-aware UTC datetime with sub-hour fields removed."""
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     else:
-        dt = dt.astimezone(timezone.utc)
+        dt = dt.astimezone(UTC)
     return dt.replace(minute=0, second=0, microsecond=0)
 
 
@@ -66,7 +66,7 @@ def candidate_raqdps_runs(
 ) -> list[datetime]:
     """Return recent 00/12 UTC RAQDPS run candidates, newest first."""
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     now = normalize_utc(now)
     cycle_hour = 12 if now.hour >= 12 else 0
     candidate = now.replace(hour=cycle_hour)

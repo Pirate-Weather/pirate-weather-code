@@ -22,7 +22,7 @@ import re
 import shutil
 import time
 import warnings
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from xml.etree import ElementTree
 
 import dask
@@ -162,7 +162,7 @@ def get_latest_silam_run() -> datetime:
                 if match:
                     run_times.append(
                         datetime.strptime(match.group(1), "%Y%m%d%H").replace(
-                            tzinfo=timezone.utc
+                            tzinfo=UTC
                         )
                     )
 
