@@ -65,6 +65,8 @@ FINAL_CHUNK_SIZES = {
     "ECMWF": 3,
     "NBM_Fire": 5,
     "RTMA": 25,
+    # Hourly RTMA keeps 48 rows; small tiles keep a point read to one small chunk
+    "RTMA_HOURLY": 5,
     "DWD": 5,
     # These divide evenly into the Canadian weather ingests' 200-cell processing tiles.
     "HRDPS": 5,
