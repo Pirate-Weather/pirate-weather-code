@@ -1,8 +1,32 @@
 #!/bin/sh
 set -eu
 
-# Need bsdtar for streaming ZIP extraction, plus pv for throttling
-apk add --no-cache libarchive-tools
+# Pin libarchive/bsdtar to a known-good version for streaming ZIP extraction.
+# The sync relies on: rclone cat ... | bsdtar -xf -
+LIBARCHIVE_VERSION="${LIBARCHIVE_VERSION:-3.8.3-r0}"
+LIBARCHIVE_EXPECTED="${LIBARCHIVE_EXPECTED:-3.8.3}"
+LIBARCHIVE_REPO="${LIBARCHIVE_REPO:-https://dl-cdn.alpinelinux.org/alpine/v3.20/main}"
+
+echo "Installing pinned libarchive ${LIBARCHIVE_VERSION} from ${LIBARCHIVE_REPO}"
+echo "Container architecture: $(apk --print-arch)"
+
+apk add --no-cache --allow-downgrade \
+  --repository="$LIBARCHIVE_REPO" \
+  "libarchive=${LIBARCHIVE_VERSION}" \
+  "libarchive-tools=${LIBARCHIVE_VERSION}"
+
+BSDTAR_VERSION="$(bsdtar --version | head -n 1)"
+echo "Using: ${BSDTAR_VERSION}"
+
+case "$BSDTAR_VERSION" in
+  "bsdtar ${LIBARCHIVE_EXPECTED} - libarchive ${LIBARCHIVE_EXPECTED}"*)
+    ;;
+  *)
+    echo "ERROR: Expected bsdtar/libarchive ${LIBARCHIVE_EXPECTED}, but got:" >&2
+    echo "  ${BSDTAR_VERSION}" >&2
+    exit 1
+    ;;
+esac
 
 BASE_DIR="${BASE_DIR:-/mnt/nvme/data/ProdTest3}"
 REMOTE_BASE="${REMOTE_BASE:-s3:piratezarr2/ForecastTar_v2/v31}"
