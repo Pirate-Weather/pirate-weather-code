@@ -18,14 +18,14 @@ This document outlines the steps to add a new meteorological variable to an exis
 This phase focuses on ensuring the new variable is retrieved and saved alongside the existing data for a specific model.
 
 1.  **Locate the Relevant Ingestion Script**:
-    * Navigate to the `API/` directory and identify the Python script responsible for ingesting data from the specific model you want to modify (e.g., `GFS_Local_Ingest.py`, `HRRR_Local_Ingest.py`).
+    * Navigate to the `ingest/` directory and identify the Python script responsible for ingesting data from the specific model you want to modify (e.g., `GFS_Local_Ingest.py`, `HRRR_Local_Ingest.py`).
 
 2.  **Add the New Variable to Data Retrieval**:
     * Within the ingestion script, locate the section where the meteorological variables are defined for retrieval. This often involves a list or dictionary used by `Herbie` (e.g., `grib_filters` or a similar configuration).
     * Add the GRIB2 name (or the corresponding key) for your new variable to this list. Ensure you understand its unit and expected data type.
     * **Example (Conceptual)**:
         ```
-        # In API/GFS_Local_Ingest.py, find where variables are defined
+        # In ingest/GFS_Local_Ingest.py, find where variables are defined
         variables_to_fetch = [
             'TMP_2maboveground',
             'PRATE_surface',

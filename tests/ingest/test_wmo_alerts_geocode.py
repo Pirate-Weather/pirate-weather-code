@@ -2,7 +2,7 @@
 
 import pytest
 
-from API import WMO_Alerts_Local as wmo
+from ingest import WMO_Alerts_Local as wmo
 
 # Row layout returned by _extract_polygons_from_cap.
 AREA_DESC, POLYGON, GEOCODE_NAME, GEOCODE_VALUE = 6, 7, 9, 10

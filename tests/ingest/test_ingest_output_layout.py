@@ -135,7 +135,7 @@ def test_api_index_map_matches_ingest_variable_order(
         # RAQDPS stacks variables in raqdps_utils.RAQDPS_OUTPUT_VARS order.
         zarr_vars = RAQDPS_OUTPUT_VARS
     else:
-        zarr_vars = importlib.import_module(f"API.{ingest_module}").zarr_vars
+        zarr_vars = importlib.import_module(f"ingest.{ingest_module}").zarr_vars
     index_map = getattr(model_const, const_name)
 
     assert zarr_vars[0] == "time"

@@ -124,7 +124,7 @@ against real stores.
 
 ### `tests/ingest`: ingest helpers and output contracts (offline)
 
-The `API/*_Local_Ingest.py` scripts keep their run-time code in `main()` behind
+The `ingest/*_Local_Ingest.py` scripts keep their run-time code in `main()` behind
 `if __name__ == "__main__"`, so tests import their functions directly. Model
 downloads are replaced with fakes; nothing here downloads data. No offline test
 runs a whole ingest end to end; only the live RTMA-RU and HRRR_6H tests do that.
@@ -188,7 +188,7 @@ runs a whole ingest end to end; only the live RTMA-RU and HRRR_6H tests do that.
   the network or the wall clock. Anything that needs external data goes in
   `tests/live`.
 - **Importing ingest scripts:**
-  - Importing an `API/*_Local_Ingest.py` module has no side effects, but its
+  - Importing an `ingest/*_Local_Ingest.py` module has no side effects, but its
     configuration (paths, `tmp_dir`, `wgrib2_path`, retry counts) is read from the
     environment at import time. Use `monkeypatch.setattr(module, "tmp_dir", ...)`
     rather than setting env vars after import.

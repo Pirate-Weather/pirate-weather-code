@@ -5,8 +5,9 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from API import AIGEFS_Local_Ingest, ingest_grib_utils, ingest_utils
-from API.AIGEFS_Local_Ingest import download_aigefs_member
+from API import ingest_grib_utils, ingest_utils
+from ingest import AIGEFS_Local_Ingest
+from ingest.AIGEFS_Local_Ingest import download_aigefs_member
 
 
 @pytest.mark.parametrize(

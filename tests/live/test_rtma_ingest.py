@@ -29,7 +29,7 @@ from API.constants.shared_const import INGEST_VERSION_STR
 from API.utils.geo import lambertGridMatch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT_PATH = REPO_ROOT / "API" / "RTMA-RU_Local_Ingest.py"
+SCRIPT_PATH = REPO_ROOT / "ingest" / "RTMA-RU_Local_Ingest.py"
 EXPECTED_VAR_COUNT = 10
 GRIBSTREAM_API_KEY_ENV_VAR = "GRIBSTREAM_API_KEY"
 GRIBSTREAM_RTMA_RU_RUNS_URL = "https://gribstream.com/api/v2/rtmaru/runs"

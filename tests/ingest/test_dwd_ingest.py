@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from API.DWD_Mosmix_Local_Ingest import fill_station_gaps
 from API.ingest_utils import interpolate_temporal_gaps_efficiently
+from ingest.DWD_Mosmix_Local_Ingest import fill_station_gaps
 
 
 def _station_frame(station_ids, n_times, **columns):

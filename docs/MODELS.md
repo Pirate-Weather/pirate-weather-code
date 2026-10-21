@@ -63,7 +63,7 @@ This phase focuses on retrieving the raw model data, processing it, and saving i
 
 * **Create a New Ingestion Script**:
 
-  * Working off existing scripts like `API/HRRR_Local_Ingest.py`, create a new Python script (e.g., `API/YOUR_MODEL_Local_Ingest.py`). Every model has its own quirks, but HRRR provides a good starting point with a minimum of weirdness.
+  * Working off existing scripts like `ingest/HRRR_Local_Ingest.py`, create a new Python script (e.g., `ingest/YOUR_MODEL_Local_Ingest.py`). Every model has its own quirks, but HRRR provides a good starting point with a minimum of weirdness.
 
   * This script should, while staying within 16 GB of RAM:
  

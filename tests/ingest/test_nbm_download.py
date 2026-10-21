@@ -7,8 +7,9 @@ import pytest
 import requests
 from herbie import FastHerbie
 
-from API import NBM_Local_Ingest, ingest_grib_utils
-from API.NBM_Local_Ingest import _download_nbm_subset
+from API import ingest_grib_utils
+from ingest import NBM_Local_Ingest
+from ingest.NBM_Local_Ingest import _download_nbm_subset
 
 
 @pytest.mark.parametrize(

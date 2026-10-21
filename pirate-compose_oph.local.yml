@@ -80,7 +80,7 @@ services:
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/GFS_Local_Ingest.py"]
+    command: ["ingest/GFS_Local_Ingest.py"]
 
   # NBM Ingest
   nbm_ingest:
@@ -103,7 +103,7 @@ services:
       herbie_max_threads: "1"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/NBM_Local_Ingest.py"]
+    command: ["ingest/NBM_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully    
@@ -123,7 +123,7 @@ services:
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/SubH_Local_Ingest.py"]
+    command: ["ingest/SubH_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
@@ -145,7 +145,7 @@ services:
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/GEFS_Local_Ingest.py"]
+    command: ["ingest/GEFS_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
@@ -169,7 +169,7 @@ services:
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/HRRR_Local_Ingest.py"]
+    command: ["ingest/HRRR_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
@@ -195,7 +195,7 @@ services:
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/HRRR_6H_Local_Ingest.py"]
+    command: ["ingest/HRRR_6H_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
@@ -222,7 +222,7 @@ services:
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/NWS_Alerts_Local.py"]
+    command: ["ingest/NWS_Alerts_Local.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
@@ -249,7 +249,7 @@ services:
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/ECMWF_Local_Ingest.py"]
+    command: ["ingest/ECMWF_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
@@ -276,7 +276,7 @@ services:
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/RTMA-RU_Local_Ingest.py"]
+    command: ["ingest/RTMA-RU_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully

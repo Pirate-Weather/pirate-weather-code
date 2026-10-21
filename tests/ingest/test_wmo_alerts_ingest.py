@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 import zarr
 
-from API import WMO_Alerts_Local as wmo
+from ingest import WMO_Alerts_Local as wmo
 
 CAP_XML = """
 <alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">

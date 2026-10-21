@@ -8,9 +8,9 @@ import numpy as np
 import xarray as xr
 import zarr
 
-from API.URMA_Local_Ingest import zarr_vars
+from ingest.URMA_Local_Ingest import zarr_vars
 
-URMA_SCRIPT = Path(__file__).resolve().parents[2] / "API" / "URMA_Local_Ingest.py"
+URMA_SCRIPT = Path(__file__).resolve().parents[2] / "ingest" / "URMA_Local_Ingest.py"
 
 
 def test_urma_hourly_zarr_write_preserves_data_and_compression(tmp_path):

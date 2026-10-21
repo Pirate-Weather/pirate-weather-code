@@ -20,7 +20,7 @@ from API.constants.model_const import HRRR
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.utils.geo import lambertGridMatch
 
-SCRIPT_PATH = Path(__file__).resolve().parents[2] / "API" / "HRRR_6H_Local_Ingest.py"
+SCRIPT_PATH = Path(__file__).resolve().parents[2] / "ingest" / "HRRR_6H_Local_Ingest.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_VAR_COUNT = 20
 GRIBSTREAM_API_KEY_ENV_VAR = "GRIBSTREAM_API_KEY"
