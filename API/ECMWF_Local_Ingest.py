@@ -6,7 +6,7 @@ surface fields plus the ``enfo`` ensemble total precipitation, which is reduced
 to precipitation probability, mean and standard deviation. The forecast is
 merged with the first 12 h of the previous 48 h of runs (short-term history,
 archived per run), interpolated to an hourly axis and published as
-``ECMWF.zarr`` and ``ECMWF_Maps.zarr`` plus ``ECMWF.time.pickle``. The store
+``ECMWF.zarr`` plus ``ECMWF.time.pickle``. The store
 starts 48 h before the run time.
 
 Alexander Rey, March 2025
@@ -24,7 +24,6 @@ import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
-import zarr
 from dask.diagnostics import ProgressBar
 from herbie import HerbieLatest
 
@@ -42,7 +41,6 @@ from API.ingest_utils import (
     VALID_DATA_MAX,
     VALID_DATA_MIN,
     archive_tmp_zarr_and_upload,
-    close_store,
     configure_zarr_writes,
     download_extract_historic_archive,
     interp_time_take_blend,
@@ -110,14 +108,6 @@ zarr_vars = (
 )
 # Categorical precipitation type is interpolated with nearest neighbour
 NEAREST_INTERP_VARS = ("ptype",)
-
-# Map store: temperature, wind, precipitation rate/accumulation/type
-MAP_VARS = ("time", "t2m", "u10", "v10", "tprate", "tp", "ptype")
-MAP_VAR_INDICES = [zarr_vars.index(map_var) for map_var in MAP_VARS]
-MAP_TIME_STEPS = 36
-MAP_CHUNK_SIZE = 100
-# Index into the stacked (history + forecast, native 3/6-hourly) time axis
-MAP_FIRST_STEP = 36
 
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
@@ -533,54 +523,9 @@ def main() -> None:
             zarr_store_workers,
         )
 
-    # %% Map store: one named array per map variable, all map times in one chunk
-    # and 100x100 spatial chunks for fast tile reads. Taken from the native
-    # (not interpolated) stacked axis: with the full 16-step history, steps
-    # 36-71 cover run +63 h to +192 h.
-    daskVarArrayStackDisk_maps = pad_to_chunk_size(
-        daskVarArrayStackDisk, MAP_CHUNK_SIZE
-    )
-
-    ecmwf_maps_store_name = (
-        "ECMWF_Maps.zarr.zip" if save_type == "S3" else "ECMWF_Maps.zarr"
-    )
-    if save_type == "S3":
-        # Uncompressed zip like the main store; the arrays are Blosc-compressed
-        zarr_store_maps = zarr.storage.ZipStore(
-            forecast_process_dir + "/" + ecmwf_maps_store_name, mode="a", compression=0
-        )
-    else:
-        zarr_store_maps = zarr.storage.LocalStore(
-            forecast_process_dir + "/" + ecmwf_maps_store_name
-        )
-
-    for var_idx in MAP_VAR_INDICES:
-        zarr_array = zarr.create_array(
-            store=zarr_store_maps,
-            name=zarr_vars[var_idx],
-            shape=(
-                MAP_TIME_STEPS,
-                daskVarArrayStackDisk_maps.shape[2],
-                daskVarArrayStackDisk_maps.shape[3],
-            ),
-            chunks=(MAP_TIME_STEPS, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
-        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-            da.rechunk(
-                daskVarArrayStackDisk_maps[
-                    var_idx, MAP_FIRST_STEP : MAP_FIRST_STEP + MAP_TIME_STEPS, :, :
-                ],
-                (MAP_TIME_STEPS, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE),
-            ).to_zarr(zarr_array, overwrite=True, compute=True)
-        logger.info("Created ECMWF map data for %s", zarr_vars[var_idx])
-
-    close_store(zarr_store_maps)
-
     # %% Publish the stores, then the run time the API uses to detect them
     publish_ingest_run(
-        [ecmwf_store_name, ecmwf_maps_store_name],
+        [ecmwf_store_name],
         base_time,
         "ECMWF.time.pickle",
         process_dir=forecast_process_dir,

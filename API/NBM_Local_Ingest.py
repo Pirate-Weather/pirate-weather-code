@@ -4,8 +4,7 @@ Downloads the newest hourly NBM CONUS cycle (2.5 km Lambert conformal grid,
 2345 x 1597, hourly cycles, hourly leads to 36 h then 3-hourly to 192 h, shifted
 earlier for off-synoptic cycles), plus the 1-hour / 6-hour precipitation
 probability (PPROB) and accumulation (PACCUM) fields, interpolates everything to
-an hourly axis and publishes ``NBM.zarr``, the ``NBM_Maps.zarr`` map tiles and
-``NBM.time.pickle``. The store starts at the first forecast lead (run + 1 h).
+an hourly axis and publishes ``NBM.zarr`` and ``NBM.time.pickle``. The store starts at the first forecast lead (run + 1 h).
 
 Local (Download) runs write the stores straight into ``<publish dir>/*.partial``
 and promote them with a rename, so the large store is never copied.
@@ -34,7 +33,6 @@ from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
-    close_store,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
     interp_time_take_blend,
@@ -135,23 +133,6 @@ zarr_vars = (
     "PTYPE_prob_GE_8_LT_9_prob_fcst_1_1_surface",
     "DSWRF_surface",
     "CAPE_surface",
-)
-
-# Map tiles: the first NBM_MAP_STEPS stored (pre-interpolation) forecast steps
-# of the map variables, in MAP_CHUNK x/y tiles
-NBM_MAP_STEPS = 36
-MAP_CHUNK = 100
-NBM_MAP_VARS = (
-    "time",
-    "TMP_2maboveground",
-    "WIND_10maboveground",
-    "WDIR_10maboveground",
-    "APCP_surface",
-    "PACCUM",
-    "PTYPE_prob_GE_1_LT_2_prob_fcst_1_1_surface",
-    "PTYPE_prob_GE_3_LT_4_prob_fcst_1_1_surface",
-    "PTYPE_prob_GE_5_LT_7_prob_fcst_1_1_surface",
-    "PTYPE_prob_GE_8_LT_9_prob_fcst_1_1_surface",
 )
 
 # %% Paths and configuration
@@ -297,7 +278,6 @@ def main() -> None:
     """Run the NBM forecast ingest."""
     logging.basicConfig(level=logging.INFO)
     nbm_staged_path: str | None = None
-    nbm_maps_staged_path: str | None = None
     # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
     configure_herbie_request_timeouts()
     s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
@@ -661,49 +641,11 @@ def main() -> None:
         f"NBM_FORECAST stage=interpolate_and_write elapsed={time.perf_counter() - stage_start:.2f}s"
     )
 
-    # %% Maps: the first NBM_MAP_STEPS stored forecast steps (run + 1 h onward,
-    # before hourly interpolation) of the map variables
-    daskVarArrayStackDisk_maps = pad_to_chunk_size(daskVarArrayStackDisk, MAP_CHUNK)
-
-    if save_type == "S3":
-        zarr_store_maps = zarr.storage.ZipStore(
-            forecast_process_dir + "/NBM_Maps.zarr.zip", mode="a"
-        )
-    else:
-        nbm_maps_staged_path = local_forecast_version_dir + "/NBM_Maps.zarr.partial"
-        if os.path.exists(nbm_maps_staged_path):
-            shutil.rmtree(nbm_maps_staged_path)
-        zarr_store_maps = zarr.storage.LocalStore(nbm_maps_staged_path)
-
-    stage_start = time.perf_counter()
-    for map_var in NBM_MAP_VARS:
-        zarr_array = zarr.create_array(
-            store=zarr_store_maps,
-            name=map_var,
-            shape=(
-                NBM_MAP_STEPS,
-                daskVarArrayStackDisk_maps.shape[2],
-                daskVarArrayStackDisk_maps.shape[3],
-            ),
-            chunks=(NBM_MAP_STEPS, MAP_CHUNK, MAP_CHUNK),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
-        da.rechunk(
-            daskVarArrayStackDisk_maps[zarr_vars.index(map_var), :NBM_MAP_STEPS],
-            (NBM_MAP_STEPS, MAP_CHUNK, MAP_CHUNK),
-        ).to_zarr(zarr_array, overwrite=True, compute=True)
-
-    close_store(zarr_store_maps)
-    _timing_log(
-        f"NBM_FORECAST stage=maps_write elapsed={time.perf_counter() - stage_start:.2f}s"
-    )
-
     # %% Publish the stores, then the run time the API uses to detect them
     stage_start = time.perf_counter()
     if save_type == "S3":
         publish_ingest_run(
-            ["NBM.zarr.zip", "NBM_Maps.zarr.zip"],
+            ["NBM.zarr.zip"],
             base_time,
             "NBM.time.pickle",
             process_dir=forecast_process_dir,
@@ -712,7 +654,7 @@ def main() -> None:
             s3=s3,
         )
     else:
-        if nbm_staged_path is None or nbm_maps_staged_path is None:
+        if nbm_staged_path is None:
             raise RuntimeError(
                 "Expected staged local zarr paths for Download publish, but they were not set"
             )
@@ -720,9 +662,6 @@ def main() -> None:
         # The local stores already sit in the publish directory, so only the
         # rename and the run time remain.
         promote_staged_dir(nbm_staged_path, local_forecast_version_dir + "/NBM.zarr")
-        promote_staged_dir(
-            nbm_maps_staged_path, local_forecast_version_dir + "/NBM_Maps.zarr"
-        )
         publish_ingest_run(
             [],
             base_time,

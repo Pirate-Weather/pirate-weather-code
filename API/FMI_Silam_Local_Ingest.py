@@ -5,8 +5,8 @@ Downloads the newest daily FMI SILAM global surface air quality forecast
 the THREDDS server, converts PM2.5, PM10, fire PM column, boundary layer height
 and the O3, NO2, SO2 and CO mixing ratios to the stored units, and merges it
 with the first 24 h of each run in the previous 48 h (short-term history,
-archived per run for AQI lookbacks). Publishes ``SILAM.zarr`` and
-``SILAM_Maps.zarr`` plus ``SILAM.time.pickle``. The store is not interpolated:
+archived per run for AQI lookbacks). Publishes ``SILAM.zarr`` plus
+``SILAM.time.pickle``. The store is not interpolated:
 it holds the native hourly steps from run - 47 h onwards.
 
 SILAM (System for Integrated modeLling of Atmospheric coMposition):
@@ -32,7 +32,6 @@ import pandas as pd
 import requests
 import s3fs
 import xarray as xr
-import zarr
 from dask.diagnostics import ProgressBar
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
@@ -41,7 +40,6 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     archive_tmp_zarr_and_upload,
-    close_store,
     configure_zarr_writes,
     download_extract_historic_archive,
     mask_invalid_data,
@@ -104,13 +102,6 @@ SILAM_GAS_VARIABLES = {
     "vmr_SO2_gas": ("cnc_SO2", "Sulfur dioxide"),
     "vmr_CO_gas": ("cnc_CO", "Carbon monoxide"),
 }
-
-# Map store: every variable, valid times from run - 11 h to run + 24 h (the
-# 36 hourly steps after run - 12 h), 100x100 spatial chunks
-MAP_VAR_INDICES = list(range(len(zarr_vars)))
-MAP_LEAD_HOURS = tuple(range(-11, 25))
-MAP_TIME_STEPS = len(MAP_LEAD_HOURS)
-MAP_CHUNK_SIZE = 100
 
 base_fileserver_url = "https://thredds.silam.fmi.fi/thredds/fileServer"
 base_catalog_url = "https://thredds.silam.fmi.fi/thredds/catalog"
@@ -580,7 +571,7 @@ def main() -> None:
         if dask_var == "time":
             dask_time_arrays = [da.squeeze(array) for array in dask_var_arrays_list]
             dask_time_arrays.append(dask_forecast_array)
-            # Integer Unix seconds of every stacked step, used to place the maps
+            # Integer Unix seconds of every stacked step
             stacked_times_unix = da.concatenate(dask_time_arrays, axis=0).compute()
             if np.any(np.diff(stacked_times_unix) != SILAM_STEP_SECONDS):
                 raise RuntimeError(
@@ -636,70 +627,9 @@ def main() -> None:
             zarr_store_workers,
         )
 
-    # %% Map store: one named array per variable, all map times in one chunk and
-    # 100x100 spatial chunks for fast tile reads. Steps are chosen by valid time
-    # so a missing history run cannot shift the window; missing hours are NaN.
-    origin_unix = int(origintime.timestamp())
-    map_valid_times_unix = origin_unix + SILAM_STEP_SECONDS * np.asarray(MAP_LEAD_HOURS)
-    map_positions = np.minimum(
-        np.searchsorted(stacked_times_unix, map_valid_times_unix),
-        len(stacked_times_unix) - 1,
-    )
-    map_time_found = stacked_times_unix[map_positions] == map_valid_times_unix
-    if not map_time_found.all():
-        logger.warning(
-            "SILAM map valid times missing from the stacked data (stored as NaN): %s",
-            map_valid_times_unix[~map_time_found],
-        )
-
-    stacked_array_maps = pad_to_chunk_size(stacked_array_disk, MAP_CHUNK_SIZE)
-
-    silam_maps_store_name = (
-        "SILAM_Maps.zarr.zip" if save_type == "S3" else "SILAM_Maps.zarr"
-    )
-    if save_type == "S3":
-        # Uncompressed zip like the main store; the arrays are Blosc-compressed
-        zarr_store_maps = zarr.storage.ZipStore(
-            forecast_process_dir + "/" + silam_maps_store_name, mode="a", compression=0
-        )
-    else:
-        zarr_store_maps = zarr.storage.LocalStore(
-            forecast_process_dir + "/" + silam_maps_store_name
-        )
-
-    for var_idx in MAP_VAR_INDICES:
-        zarr_array = zarr.create_array(
-            store=zarr_store_maps,
-            name=zarr_vars[var_idx],
-            shape=(
-                MAP_TIME_STEPS,
-                stacked_array_maps.shape[2],
-                stacked_array_maps.shape[3],
-            ),
-            chunks=(MAP_TIME_STEPS, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
-
-        map_array = stacked_array_maps[var_idx][map_positions]
-        if not map_time_found.all():
-            map_array = da.where(map_time_found[:, None, None], map_array, np.nan)
-
-        with (
-            ProgressBar(),
-            dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
-        ):
-            da.rechunk(
-                map_array, (MAP_TIME_STEPS, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE)
-            ).to_zarr(zarr_array, overwrite=True, compute=True)
-
-        logger.info("Created SILAM map data for %s", zarr_vars[var_idx])
-
-    close_store(zarr_store_maps)
-
     # %% Publish the stores, then the run time the API uses to detect them
     publish_ingest_run(
-        [silam_store_name, silam_maps_store_name],
+        [silam_store_name],
         origintime,
         "SILAM.time.pickle",
         process_dir=forecast_process_dir,

@@ -2,8 +2,8 @@
 
 Downloads the surface fields of the newest hourly HRRR cycle (3 km CONUS Lambert
 conformal grid, 1799 x 1059, hourly cycles, hourly leads 1-18 h), rotates the
-winds to earth-relative, de-accumulates precipitation and publishes ``HRRR.zarr``,
-the ``HRRR_maps.zarr`` map tiles and ``HRRR.time.pickle``. The store starts at the
+winds to earth-relative, de-accumulates precipitation and publishes ``HRRR.zarr``
+and ``HRRR.time.pickle``. The store starts at the
 first forecast lead (run + 1 h); hours 18-48 come from the 6-hourly HRRR ingest.
 
 Alexander Rey, November 2023
@@ -21,7 +21,6 @@ import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
-import zarr
 from herbie.fast import Herbie_latest
 
 from API.constants.shared_const import INGEST_VERSION_STR
@@ -30,7 +29,6 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
-    close_store,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
     mask_invalid_data,
@@ -75,22 +73,6 @@ HRRR_MATCH_STRINGS = (
 
 # Smoke (MASSDEN) is in kg/m^3; scale to ug/m^3 so float32 storage keeps precision
 MASSDEN_KG_TO_UG = 1e9
-
-# Map tiles: x/y chunk size and the variables served to the map layer
-MAP_CHUNK = 100
-HRRR_MAP_VARS = (
-    "time",
-    "TMP_2maboveground",
-    "UGRD_10maboveground",
-    "VGRD_10maboveground",
-    "PRATE_surface",
-    "CSNOW_surface",
-    "CICEP_surface",
-    "CFRZR_surface",
-    "CRAIN_surface",
-    "MASSDEN_8maboveground",
-    "REFD_1000maboveground",
-)
 
 # Variables in the published store; the order is the API's HRRR index map
 zarr_vars = (
@@ -322,46 +304,9 @@ def main() -> None:
         zarr_store_workers,
     )
 
-    # %% Maps: every forecast step of the map variables in MAP_CHUNK x/y tiles
-    daskVarArrayStackDisk_maps = pad_to_chunk_size(daskVarArrayStackDisk, MAP_CHUNK)
-    map_steps = daskVarArrayStackDisk_maps.shape[1]
-
-    hrrr_maps_store_name = (
-        "HRRR_maps.zarr.zip" if save_type == "S3" else "HRRR_maps.zarr"
-    )
-    if save_type == "S3":
-        zarr_store_maps = zarr.storage.ZipStore(
-            forecast_process_dir + "/" + hrrr_maps_store_name, mode="a"
-        )
-    else:
-        zarr_store_maps = zarr.storage.LocalStore(
-            forecast_process_dir + "/" + hrrr_maps_store_name
-        )
-
-    for map_var in HRRR_MAP_VARS:
-        zarr_array = zarr.create_array(
-            store=zarr_store_maps,
-            name=map_var,
-            shape=(
-                map_steps,
-                daskVarArrayStackDisk_maps.shape[2],
-                daskVarArrayStackDisk_maps.shape[3],
-            ),
-            chunks=(map_steps, MAP_CHUNK, MAP_CHUNK),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
-        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-            da.rechunk(
-                daskVarArrayStackDisk_maps[zarr_vars.index(map_var)],
-                (map_steps, MAP_CHUNK, MAP_CHUNK),
-            ).to_zarr(zarr_array, overwrite=True, compute=True)
-
-    close_store(zarr_store_maps)
-
     # %% Publish the stores, then the run time the API uses to detect them
     publish_ingest_run(
-        [hrrr_store_name, hrrr_maps_store_name],
+        [hrrr_store_name],
         base_time,
         "HRRR.time.pickle",
         process_dir=forecast_process_dir,

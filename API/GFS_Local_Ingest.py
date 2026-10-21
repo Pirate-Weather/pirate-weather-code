@@ -9,8 +9,7 @@ xarray/dask. Storm distance/direction are derived from precipitation.
 The first 6 hours of each earlier cycle in the last ``HISTORY_PERIODS["GFS"]``
 hours are archived as ``GFS_Hist_v3<run>.zarr`` stores (tarred on S3). The
 history and the forecast are stacked, interpolated to an hourly axis and
-published as ``GFS.zarr``, ``GFS_Maps.zarr`` (map tiles around the run) and
-``GFS.time.pickle``. The forecast store starts ``HISTORY_PERIODS["GFS"]`` hours
+published as ``GFS.zarr`` and ``GFS.time.pickle``. The forecast store starts ``HISTORY_PERIODS["GFS"]`` hours
 before the first forecast lead (run + 1 h).
 
 Set ``force_update`` to reprocess an already published cycle, and ``NO_UPLOAD``
@@ -40,7 +39,6 @@ import numpy as np
 import pandas as pd
 import s3fs
 import xarray as xr
-import zarr.storage
 from herbie import HerbieLatest
 
 from API.constants.shared_const import HISTORY_PERIODS, INGEST_VERSION_STR
@@ -50,7 +48,6 @@ from API.ingest_utils import (
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
     archive_tmp_zarr_and_upload,
-    close_store,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
     deaccumulate_to_hourly_rate,
@@ -176,26 +173,6 @@ zarr_vars = (
     "CAPE_surface",
     "PRES_station",
 )
-
-# Map tiles: the variables the web map shows, from 12 h before the first
-# forecast lead to 24 h after it, in small chunks for fast tiling.
-GFS_MAP_VARS = (
-    "time",
-    "TMP_2maboveground",
-    "UGRD_10maboveground",
-    "VGRD_10maboveground",
-    "PRATE_surface",
-    "APCP_surface",
-    "CSNOW_surface",
-    "CICEP_surface",
-    "CFRZR_surface",
-    "CRAIN_surface",
-    "REFC_entireatmosphere",
-)
-MAP_STEPS_BEFORE_FORECAST = 12
-MAP_STEPS_AFTER_FORECAST = 24
-MAP_TIME_STEPS = MAP_STEPS_BEFORE_FORECAST + MAP_STEPS_AFTER_FORECAST
-MAP_CHUNK_SIZE = 100
 
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
@@ -773,55 +750,12 @@ def main() -> None:
         zarr_store_workers,
     )
 
-    # %% Map tiles: rechunk the map variables around the run for fast web access.
-    # Taken from the stacked (not interpolated) array, whose index his_period is
-    # the first forecast lead.
-    gfs_maps_store_name = "GFS_Maps.zarr.zip" if save_type == "S3" else "GFS_Maps.zarr"
-    stacked_array_maps = pad_to_chunk_size(stacked_array_disk, MAP_CHUNK_SIZE)
-
-    if save_type == "S3":
-        zarr_store_maps = zarr.storage.ZipStore(
-            forecast_process_dir + "/" + gfs_maps_store_name, mode="a"
-        )
-    else:
-        zarr_store_maps = zarr.storage.LocalStore(
-            forecast_process_dir + "/" + gfs_maps_store_name
-        )
-
-    for map_var in GFS_MAP_VARS:
-        zarr_array = zarr.create_array(
-            store=zarr_store_maps,
-            name=map_var,
-            shape=(
-                MAP_TIME_STEPS,
-                stacked_array_maps.shape[2],
-                stacked_array_maps.shape[3],
-            ),
-            chunks=(MAP_TIME_STEPS, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE),
-            compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-            dtype="float32",
-        )
-        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-            da.rechunk(
-                stacked_array_maps[
-                    zarr_vars.index(map_var),
-                    his_period - MAP_STEPS_BEFORE_FORECAST : his_period
-                    + MAP_STEPS_AFTER_FORECAST,
-                    :,
-                    :,
-                ],
-                (MAP_TIME_STEPS, MAP_CHUNK_SIZE, MAP_CHUNK_SIZE),
-            ).to_zarr(zarr_array, overwrite=True, compute=True)
-        logger.info("Created map data for %s", map_var)
-
-    close_store(zarr_store_maps)
-
     # %% Publish the stores, then the run time the API uses to detect them
     if save_type == "S3" and no_upload:
         logger.info("NO_UPLOAD enabled, skipping forecast S3 publish")
     else:
         publish_ingest_run(
-            [gfs_store_name, gfs_maps_store_name],
+            [gfs_store_name],
             base_time,
             "GFS.time.pickle",
             process_dir=forecast_process_dir,
