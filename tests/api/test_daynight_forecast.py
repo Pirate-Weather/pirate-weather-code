@@ -10,9 +10,7 @@ from tests.helpers.text import make_hour, make_hours
 
 def _utc(hour):
     """Unix time for ``hour``:00 UTC on 2025-11-10."""
-    return int(
-        datetime.datetime(2025, 11, 10, hour, tzinfo=datetime.UTC).timestamp()
-    )
+    return int(datetime.datetime(2025, 11, 10, hour, tzinfo=datetime.UTC).timestamp())
 
 
 def _half_day(hours, is_day=True, icon_set="darksky"):
