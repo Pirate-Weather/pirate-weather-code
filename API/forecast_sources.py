@@ -84,7 +84,7 @@ def _aligned_rows(
 ) -> tuple[int, int, int]:
     """Return ``(dest_start, src_start, rows)`` placing source rows at their valid hour.
 
-    Stores that keep a short history (GFS, ECMWF, REPS) start before local midnight
+    Stores that keep a short history (GFS, ECMWF) start before local midnight
     and are sliced from the row nearest midnight. Forecast-only stores start after
     it, so their first row is placed at its own hour and the earlier hours stay
     missing for the next source in the per-variable priority order to fill.

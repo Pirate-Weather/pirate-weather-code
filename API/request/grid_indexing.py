@@ -1370,7 +1370,7 @@ async def calculate_grid_indexing(
         dataOut_reps = zarr_results["REPS"]
         if dataOut_reps is not False:
             try:
-                repsRunTime = dataOut_reps[HISTORY_PERIODS["REPS"] - 3, 0]
+                repsRunTime = _forecast_run_time(dataOut_reps, "REPS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     repsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)

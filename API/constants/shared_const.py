@@ -27,7 +27,6 @@ HISTORY_PERIODS = {
     # Beyond that is Google ERA5.
     "GFS": 288,
     "ECMWF": 48,
-    "REPS": 48,
     "SILAM": 48,  # Store last 48 hours of SILAM data for historic AQI lookbacks
     # URMA has roughly 12 days of history, allowing 10 days of local retrievals.
     # URMA data has a 6 hour delay, so account for that in the history period to keep consistency with GFS.
@@ -43,6 +42,7 @@ FIRST_FORECAST_LEAD_HOURS = {
     "HRDPS": 1,
     "GDPS": 1,
     "GEPS": 3,
+    "REPS": 3,
     "DWD_MOSMIX": 1,
     "AIGFS": 6,
     "AIGEFS": 6,

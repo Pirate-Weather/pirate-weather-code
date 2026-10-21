@@ -6,12 +6,8 @@ latitude/longitude grid over North America; 3-hourly leads to 72 h, 6-hourly
 cycles) from the MSC Datamart, reduces them to ensemble statistics
 (precipitation probability, mean and standard deviation, and the mean of each
 precipitation type), interpolates them to an hourly axis and publishes
-``REPS.zarr`` plus ``REPS.time.pickle``.
-
-REPS keeps a short-term history: the 3 and 6 h leads of each of the previous
-48 hours of cycles are reduced the same way, archived once per cycle, and
-stacked ahead of the forecast. The store starts 45 hours before the run
-(the 3 h lead of the cycle 48 hours earlier).
+``REPS.zarr`` plus ``REPS.time.pickle``. The store starts at the first
+forecast lead (run + 3 h).
 
 Alexander Rey, April 2026
 """
@@ -21,7 +17,6 @@ import os
 import re
 import time
 import warnings
-from concurrent.futures import ThreadPoolExecutor
 
 import dask
 import dask.array as da
@@ -33,7 +28,6 @@ from dotenv import find_dotenv, load_dotenv
 
 from API.constants.shared_const import (
     ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H,
-    HISTORY_PERIODS,
     INGEST_VERSION_STR,
 )
 from API.ingest_grib_utils import (
@@ -47,12 +41,10 @@ from API.ingest_utils import (
     DOWNLOAD_CACHE_MAX_AGE_HOURS,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
-    archive_tmp_zarr_and_upload,
     broadcast_times_to_grid,
     clear_directory,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
-    download_extract_historic_archive,
     interp_time_map_blocks_nan,
     make_herbie_save_dir,
     mask_invalid_data,
@@ -86,15 +78,6 @@ REPS_PRODUCT = "10km/grib2"
 REPS_LATEST_RUN_SEARCH_PERIODS = 7
 # The run is complete once the last lead of precipitation is on the Datamart
 REPS_LATEST_RUN_PROBE = {"variable": "APCP", "level": "SFC"}
-
-# Short-term history: REPS runs every 6 hours, so the 3 and 6 h leads of each
-# earlier cycle cover the gap until the next one.
-REPS_HISTORY_HOURS = HISTORY_PERIODS["REPS"]
-REPS_CYCLE_HOURS = 6
-REPS_HISTORIC_FORECAST_HOURS = [3, 6]
-REPS_HISTORIC_STORE_PREFIX = "REPS_Hist_v3"
-# Parallel S3 downloads of the archived history stores
-REPS_HISTORIC_DOWNLOAD_WORKERS = 12
 
 # MSC publishes one GRIB file per variable and lead holding every member. Each
 # entry is the (Datamart variable, level) pair of one downloaded field: total
@@ -139,11 +122,9 @@ wgrib2_path = os.getenv(
 
 forecast_process_dir = os.getenv("forecast_process_dir", default="/mnt/nvme/data/REPS")
 forecast_process_path = forecast_process_dir + "/REPS_Process"
-hist_process_path = forecast_process_dir + "/REPS_Historic"
 tmp_dir = forecast_process_dir + "/Downloads"
 
 forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/REPS")
-historic_path = os.getenv("historic_path", default="/mnt/nvme/data/History/REPS")
 
 save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
@@ -232,10 +213,7 @@ def write_ensemble_stats(
     process_chunk: int,
     zarr_store_workers: int,
 ) -> None:
-    """Reduce the converted members to the ensemble statistics and write them.
-
-    Used for the forecast run and for each history cycle.
-    """
+    """Reduce the converted members to the ensemble statistics and write them."""
     spatial_dims = next(iter(xarray_merged.data_vars.values())).dims[-2:]
     xarray_merged = xarray_merged.chunk(
         chunks={
@@ -276,8 +254,8 @@ def write_ensemble_stats(
         # Stack all members -> (member, time, y, x)
         raw_stacked = da.stack([xarray_merged[v].data for v in member_vars], axis=0)
 
-        # REPS stores totals since the run start and every lead (forecast and
-        # history) is 3 h after the previous one, starting at 3 h. Difference
+        # REPS stores totals since the run start and every lead is 3 h after
+        # the previous one, starting at 3 h. Difference
         # consecutive leads and divide by 3 h to get nonnegative hourly rates.
         # This equals deaccumulate_to_hourly_rate, but stays in float32: the
         # helper works in float64, which changes the ensemble mean and spread
@@ -372,7 +350,7 @@ def convert_reps_run(
 
 
 def main() -> None:
-    """Run the REPS ingest, including its short-term history."""
+    """Run the REPS ingest."""
     logging.basicConfig(level=logging.INFO)
     # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
     configure_herbie_request_timeouts()
@@ -391,7 +369,6 @@ def main() -> None:
     publish_dir = forecast_path + "/" + ingest_version
     if save_type == "Download":
         os.makedirs(publish_dir, exist_ok=True)
-        os.makedirs(historic_path, exist_ok=True)
 
     T0 = time.time()
 
@@ -417,26 +394,10 @@ def main() -> None:
         return
     logger.info("Processing REPS run %s", base_time)
 
-    # %% Forecast hours: 3-hourly leads, stored at their valid times, preceded by
-    # the 3 and 6 h leads of each history cycle
+    # %% Forecast hours: 3-hourly leads, stored at their valid times
     forecast_valid_times = (
         pd.Timestamp(base_time) + pd.to_timedelta(REPS_FORECAST_HOURS, unit="h")
     ).values
-    history_run_times = [
-        base_time - pd.Timedelta(hours=hours_before)
-        for hours_before in range(REPS_HISTORY_HOURS, 0, -REPS_CYCLE_HOURS)
-    ]
-    history_valid_times = [
-        (
-            pd.Timestamp(run_time)
-            + pd.to_timedelta(REPS_HISTORIC_FORECAST_HOURS, unit="h")
-        ).values
-        for run_time in history_run_times
-    ]
-    history_store_names = [
-        REPS_HISTORIC_STORE_PREFIX + run_time.strftime("%Y%m%dT%H%M%SZ")
-        for run_time in history_run_times
-    ]
 
     # %% Download, convert and reduce the forecast run
     xarray_forecast_merged, merged_nc_path = convert_reps_run(
@@ -465,117 +426,21 @@ def main() -> None:
     # The merged NetCDF is large and no longer needed
     os.remove(merged_nc_path)
 
-    # %% Reduce and archive each history cycle that has not been archived yet
-    for run_time, store_name in zip(history_run_times, history_store_names):
-        if save_type == "S3":
-            s3_path = historic_path + "/" + store_name + ".zarr.tar.gz"
-            if s3.exists(s3_path.replace(".tar.gz", ".done")):
-                logger.info("REPS history %s already archived in S3", store_name)
-                continue
-        else:
-            local_path = historic_path + "/" + store_name + ".zarr"
-            if os.path.exists(local_path.replace(".zarr", ".done")):
-                logger.info("REPS history %s already archived locally", store_name)
-                continue
-
-        logger.info("Processing REPS history run %s", run_time)
-        xarray_hist_merged, hist_nc_path = convert_reps_run(
-            run_time,
-            REPS_HISTORIC_FORECAST_HOURS,
-            "historic",
-            hist_process_path,
-            herbie_save_dir,
-        )
-        hist_tmp_zarr_path = hist_process_path + "_REPS_Hist_TMP.zarr"
-        write_ensemble_stats(
-            xarray_hist_merged,
-            REPS_HISTORIC_FORECAST_HOURS,
-            hist_tmp_zarr_path,
-            process_chunk,
-            zarr_store_workers,
-        )
-        xarray_hist_merged.close()
-        os.remove(hist_nc_path)
-
-        # The done marker tells later runs this cycle is archived
-        if save_type == "S3":
-            archive_tmp_zarr_and_upload(
-                tmp_zarr_path=hist_tmp_zarr_path,
-                s3_path=s3_path,
-                archive_member_name="REPS_Hist.zarr",
-                s3=s3,
-            )
-        else:
-            os.rename(hist_tmp_zarr_path, local_path)
-            with open(local_path.replace(".zarr", ".done"), "w") as f:
-                f.write("Done")
-
-    # %% Locate the archived history stores
-    if save_type == "S3":
-        local_temp_dir = forecast_process_path + "_s3_temp_downloads"
-        os.makedirs(local_temp_dir, exist_ok=True)
-
-        def download_and_extract(store_name: str) -> str:
-            extracted_path = download_extract_historic_archive(
-                s3=s3,
-                historic_path=historic_path,
-                final_zarr_name=store_name + ".zarr",
-                extracted_store_name="REPS_Hist.zarr",
-                local_temp_dir=local_temp_dir,
-            )
-            # Every history cycle was archived above, so a missing one means the
-            # archive was lost; fail rather than publish a store with a gap.
-            if extracted_path is None:
-                raise RuntimeError(
-                    f"REPS history archive {store_name} is missing from {historic_path}"
-                )
-            return extracted_path
-
-        logger.info(
-            "Downloading and extracting %s REPS history archives",
-            len(history_store_names),
-        )
-        # executor.map keeps the cycle order
-        with ThreadPoolExecutor(max_workers=REPS_HISTORIC_DOWNLOAD_WORKERS) as executor:
-            historic_zarr_paths = list(
-                executor.map(download_and_extract, history_store_names)
-            )
-    else:
-        historic_zarr_paths = [
-            historic_path + "/" + store_name + ".zarr"
-            for store_name in history_store_names
-        ]
-
-    # %% Stack history and forecast into the (variable, time, y, x) layout the API reads
+    # %% Stack the forecast into the (variable, time, y, x) layout the API reads
     unix_epoch = np.datetime64(0, "s")
     one_second = np.timedelta64(1, "s")
-    stacked_valid_times = np.concatenate([*history_valid_times, forecast_valid_times])
-    stacked_timesUnix = (stacked_valid_times - unix_epoch) / one_second
-    # Hourly target axis from the first history step to the last forecast lead
+    stacked_timesUnix = (forecast_valid_times - unix_epoch) / one_second
+    # Hourly target axis from the first to the last forecast lead
     new_hourly_time = pd.date_range(
-        start=stacked_valid_times[0], end=stacked_valid_times[-1], freq="h"
+        start=forecast_valid_times[0], end=forecast_valid_times[-1], freq="h"
     )
     hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
     daskVarArrayList = []
     for dask_var in probVars:
-        historic_arrays = []
-        for historic_zarr_path in historic_zarr_paths:
-            try:
-                historic_arrays.append(
-                    da.from_zarr(
-                        historic_zarr_path, component=dask_var, inline_array=True
-                    )
-                )
-            except FileNotFoundError as e:
-                raise RuntimeError(
-                    f"REPS history store {historic_zarr_path} is missing or has no {dask_var}"
-                ) from e
-
-        daskForecastArray = da.from_zarr(
+        daskCatArray = da.from_zarr(
             forecast_process_path + "_.zarr", component=dask_var, inline_array=True
         )
-        daskCatArray = da.concatenate([*historic_arrays, daskForecastArray], axis=0)
 
         if dask_var == "time":
             npCatTimes = daskCatArray.astype("float32").compute()
