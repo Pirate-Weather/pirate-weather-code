@@ -98,9 +98,9 @@ HRDPS_MATCH_STRINGS = [
 
 # GRIB variables outside the generic wgrib2 stats range for valid reasons:
 # DSWRF is accumulated energy (J/m^2, far above the range maximum). CAPE uses
-# -999 for undefined points, which the ingest stores as 0 (see main).
-HRDPS_CAPE_UNDEFINED = -999
-
+# -1 where no parcel is buoyant (the API clips it to 0) and -999 at the rare
+# points where it could not be computed; mask_invalid_data stores those as
+# missing so another model fills them.
 HRDPS_EXCLUDED_STATS_VARIABLES = {
     ("DSWRF", "Sfc"): ["DSWRF"],
     ("CAPE", "Sfc"): ["CAPE"],
@@ -289,12 +289,6 @@ def main() -> None:
         xarray_forecast_merged.time.values,
         time_axis=xarray_forecast_merged["DSWRF_surface"].get_axis_num("time"),
     )
-
-    # HRDPS writes CAPE = -999 where no parcel is buoyant (CAPE undefined).
-    # Physically that is zero CAPE, as NBM, HRRR and GFS report it, so store 0
-    # rather than a gap.
-    cape = xarray_forecast_merged["CAPE_surface"]
-    xarray_forecast_merged["CAPE_surface"] = cape.where(cape != HRDPS_CAPE_UNDEFINED, 0)
 
     xarray_forecast_chunked = xarray_forecast_merged.chunk(
         chunks={

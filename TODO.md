@@ -94,6 +94,21 @@ geometries. Update `docs/forecast-source-selection/README.md` and
 `tests/api/test_regional_source_priority.py` with points on both sides of the border.
 Related: the `is_in_north_america` boundary issue above.
 
+### Read-time interpolation of missing values
+`zarr_read` (`API/io/zarr_reader.py`) linearly fills interior NaN runs along time
+(`has_interior_nan_holes` / `_interp_row`, logged as "Interpolating missing data")
+for every model except DWD MOSMIX and URMA. A value that is genuinely missing in the
+source (e.g. HRDPS CAPE -999, which the ingest stores as NaN) is therefore filled
+from its neighbours at read time instead of falling back to another model, which is
+what the per-hour source priority is for. Decide whether to keep NaN for all models
+(more consistent; changes API output wherever holes exist, e.g. HRRR smoke) or just
+for the MSC models, whose stores now only carry real gaps.
+
+Before deciding, check how often genuine NaN values show up in each model's source
+data and published stores: count NaN per variable over each store's real grid (the
+`time` variable is only set on the model grid, so it masks out chunk padding), and
+read the reader's "Interpolating missing data" warnings in production logs.
+
 ### `interp_time_take_blend`: blend in the data's dtype
 `API/ingest_utils.py` (`interp_time_take_blend`): the blend weights `w` are float64,
 so `(1 - w) * y0 + w * y1` promotes every float32 value to float64 (double the
