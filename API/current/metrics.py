@@ -1678,6 +1678,18 @@ def _get_lifted_index(
                 model_data["HRDPS_Merged"], HRDPS["lifted_index"], state
             ),
         ),
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: _interp_scalar(
+                model_data["GDPS_Merged"], GDPS["lifted_index"], state
+            ),
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(
+                model_data["GFS_Merged"], GFS["lifted_index"], state
+            ),
+        ),
     }
 
     strategies = _build_source_strategies(
@@ -1728,6 +1740,12 @@ def _get_vertical_velocity(
                 model_data["GDPS_Merged"], GDPS["vertical_velocity"], state
             ),
         ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(
+                model_data["GFS_Merged"], GFS["vertical_velocity"], state
+            ),
+        ),
     }
 
     strategies = _build_source_strategies(
@@ -1772,6 +1790,10 @@ def _get_convective_inhibition(
         "gdps": (
             lambda: "gdps" in sourceList,
             lambda: _interp_scalar(model_data["GDPS_Merged"], GDPS["cin"], state),
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(model_data["GFS_Merged"], GFS["cin"], state),
         ),
     }
 

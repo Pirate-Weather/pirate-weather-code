@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from API.constants.api_const import PRECIP_IDX
-from API.constants.model_const import ERA5, GDPS, GEPS, HRDPS, REPS, URMA
+from API.constants.model_const import ERA5, GDPS, GEPS, GFS, HRDPS, REPS, URMA
 from API.data_inputs import prepare_data_inputs
 
 # Importing responseLocal only touches the network when STAGE is TESTING/TM_TESTING.
@@ -164,6 +164,58 @@ def test_prepare_data_inputs_includes_canadian_model_fields():
     # REPS rain is the only component rate above the 0.5 threshold.
     np.testing.assert_array_equal(first_choice("prcipType_inputs"), PRECIP_IDX["rain"])
     np.testing.assert_array_equal(inputs["uv_inputs"], [[2.5, 1.5]] * num_hours)
+
+
+@pytest.mark.parametrize(
+    ("lat", "lon", "expected_source"),
+    [
+        pytest.param(45.42, -75.70, "gdps", id="ottawa_canadian_first"),
+        pytest.param(39.74, -104.99, "gfs", id="denver_gfs_first"),
+    ],
+)
+def test_thunderstorm_indices_use_regional_source_priority(lat, lon, expected_source):
+    """The thunderstorm indices must follow the usual regional priority: the
+    Canadian models first in Canada, GFS ahead of GDPS elsewhere. Wiring a source
+    under the wrong key, or stacking in a fixed order, silently serves another
+    model's (differently defined) lifted index, omega or CIN to the thunderstorm
+    score."""
+    num_hours = 2
+    values = {
+        "gdps": {"lifted_index": -5.0, "vertical_velocity": -0.4, "cin": -150.0},
+        "gfs": {"lifted_index": -2.0, "vertical_velocity": -0.1, "cin": -30.0},
+    }
+    gdps_merged = np.full((num_hours, max(GDPS.values()) + 1), np.nan)
+    gfs_merged = np.full((num_hours, max(GFS.values()) + 1), np.nan)
+    for field in ("lifted_index", "vertical_velocity", "cin"):
+        gdps_merged[:, GDPS[field]] = values["gdps"][field]
+        gfs_merged[:, GFS[field]] = values["gfs"][field]
+
+    inputs = prepare_data_inputs(
+        source_list=["gdps", "gfs"],
+        nbm_merged=None,
+        hrdps_merged=None,
+        reps_merged=None,
+        hrrr_merged=None,
+        dwd_mosmix_merged=None,
+        ecmwf_merged=None,
+        gdps_merged=gdps_merged,
+        geps_merged=None,
+        gefs_merged=None,
+        gfs_merged=gfs_merged,
+        era5_merged=None,
+        extra_vars=[],
+        num_hours=num_hours,
+        lat=lat,
+        lon=lon,
+    )
+
+    expected = values[expected_source]
+    for input_name, field in (
+        ("lifted_index_inputs", "lifted_index"),
+        ("vertical_velocity_inputs", "vertical_velocity"),
+        ("convective_inhibition_inputs", "cin"),
+    ):
+        np.testing.assert_array_equal(inputs[input_name][:, 0], expected[field])
 
 
 @pytest.mark.parametrize(
