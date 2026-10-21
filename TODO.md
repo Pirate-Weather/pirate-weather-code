@@ -94,6 +94,103 @@ geometries. Update `docs/forecast-source-selection/README.md` and
 `tests/api/test_regional_source_priority.py` with points on both sides of the border.
 Related: the `is_in_north_america` boundary issue above.
 
+### `interp_time_take_blend`: blend in the data's dtype
+`API/ingest_utils.py` (`interp_time_take_blend`): the blend weights `w` are float64,
+so `(1 - w) * y0 + w * y1` promotes every float32 value to float64 (double the
+temporary memory) and casts back afterwards. Casting `w` to the array's dtype made a
+GDPS-sized block (21 variables, 136 -> 240 hours, 200 x 200 points) 2.3x faster
+(1.00 s -> 0.43 s, single thread); that is already faster than a hand-written numpy
+loop. Values change only by float32 rounding: after the store's 5-decimal rounding
+about 8% of temperatures (max 3e-5 K) and 14% of pressures (max 0.016 Pa, the float32
+resolution near 1e5 Pa) differ. Every ingest using the helper (10 models) then stops
+being bit-identical to its previous output, so do it on its own, not alongside a
+change that needs an old-vs-new bit comparison.
+
+## v3 goals
+
+From the v3 planning post (pirate-weather-code discussion #773). Goals already done
+there (forecast/historic split, test refactor, ingest standardization) are not listed.
+
+### ECMWF 0.1° open data
+[pirateweather#697](https://github.com/Pirate-Weather/pirateweather/issues/697): ECMWF's
+9 km feeds are on AWS since the 2026-10-20 06Z run. Blocked until AWS holds 10 days of
+0.1° history (not before about 2026-10-30). Keep the ingest's short-term history at
+48 h (`HISTORY_PERIODS["ECMWF"]`). Touches `ingest/ECMWF_Local_Ingest.py` (0.25° now)
+and the API's ECMWF grid lookup; the store grows about 6x, so check chunking against
+the read path.
+
+### Validate wind direction in the regional models
+As done for HRRR, which rotates grid-relative winds with
+`earth_relative_wind_components` (`API/ingest_utils.py`). Check whether HRDPS
+`WIND`/`WDIR` on its rotated lat/lon grid are already earth-relative.
+
+### LibreWXR for maps, radar coverage and minutely precipitation
+Plan in [pirateweather discussion #414](https://github.com/Pirate-Weather/pirateweather/discussions/414#discussioncomment-18934138):
+use LibreWXR's global radar nowcast for minutely precipitation worldwide (likely
+better than HRRR sub-hourly even inside its domain). LibreWXR gets three small hooks
+that run user scripts (plus `zarr` as a dependency):
+- on each finished radar composite: write one global minutely zarr, chunked along
+  time, and upload it to S3 for the Pirate Weather minutely forecast;
+- on each completed full ingest (`state.json` updated): sync everything to S3 for the
+  render nodes;
+- on each lightning update: sync it to S3 for the render nodes.
+
+This decouples ingest from serving: render nodes can run in several regions, and the
+last good data stays available if the ingest pipeline fails. The old `*_Maps.zarr`
+stores were removed from the ingests in v3 (`75a2443`). Pirate Weather side: read the
+minutely zarr in the minutely builder (`API/minutely/`) and decide its priority
+against HRRR sub-hourly.
+
+### Own ERA5 dataset
+Only the needed variables, chunked for point reads, based on the Google ARCO pipeline
+the API reads today (`ar/full_37-1h-0p25deg-chunk-1.zarr-v3`, one whole-globe chunk per
+hour and variable). Design so far: the 18 surface variables the API reads, 1940 to
+present, `(variable, time, y, x)` with 120 h time blocks and 8 x 8 point tiles, one
+shard per 120 h block; about 11-19 TB. Daily ERA5T appends (about 6 days behind) and a
+monthly replacement with final ERA5 (3 months behind). Prototype one month first.
+Replaces `init_ERA5` (`API/io/ZarrHelpers.py`) and `_load_era5_slice`
+(`API/request/grid_indexing.py`), including the 20 GB disk cache.
+
+### Move to OVHCloud
+Including a Terraform setup script.
+
+### Sharded zarr stores on object storage, no zip files
+Shard along y/x so each shard covers a decent part of the grid. Let the
+history-keeping ingests (GFS, URMA, RTMA, ECMWF, SILAM) read history straight from
+object storage instead of the `archive_tmp_zarr_and_upload` /
+`download_extract_historic_archive` tarballs (check this works). Keep the
+copy-on-publish step in `publish_ingest_run`: the process location may differ from
+the final store.
+
+### Response code performance pass
+Profile the request path for room to improve; read performance is the first priority
+(AGENTS.md).
+
+### Daily PoP from ensemble members
+Daily PoP from hourly max/mean understates rain whose timing the models disagree on
+(e.g. hourly 10/10/10/0/10/40/10% gives max 40%, mean 15%). Report instead the share
+of ensemble members above the threshold anywhere in the period, for day, night and
+24 h windows in local time. The ensemble ingests (GEFS, GEPS, REPS, ECMWF ensemble)
+would need to provide windowed member counts, with windows that depend on the time zone.
+
+### Future dates in time machine
+[pirateweather#689](https://github.com/Pirate-Weather/pirateweather/issues/689): Dark
+Sky allowed time-machine requests for future dates; Pirate Weather returns HTTP 400.
+
+### Only list the sources used
+[pirateweather#554](https://github.com/Pirate-Weather/pirateweather/issues/554):
+`sources` lists every model covering the point, not just the ones used in the response.
+
+### Next-update field
+[pirateweather#668](https://github.com/Pirate-Weather/pirateweather/issues/668): report
+when the forecast data will next refresh. The run-time pickles and the ingest
+schedules already hold what is needed.
+
+### Consistent clipping
+[pirate-weather-code#760](https://github.com/Pirate-Weather/pirate-weather-code/issues/760):
+some fields use `clipLog`, others `np.clip`. See also the `clipLog` bug above ("One
+implausible value blanks every above-max value").
+
 ## Docs
 
 ### Source-selection docs predate #734 and the AI ordering
