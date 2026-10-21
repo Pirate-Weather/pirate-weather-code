@@ -367,7 +367,14 @@ def main() -> None:
                 ).astype("float32")
             )
 
-    daskVarArrayListMergeNaN = mask_invalid_data(da.stack(daskVarArrayList, axis=0))
+    # CIN is negative by convention and routinely far below the global
+    # VALID_DATA_MIN (-100 J/kg); real runs reach about -1700 J/kg. Masking it
+    # would drop exactly the strong caps the thunderstorm suppressor relies on,
+    # so it is exempt here and the API bounds it with CLIP_CIN instead.
+    daskVarArrayListMergeNaN = mask_invalid_data(
+        da.stack(daskVarArrayList, axis=0),
+        ignoreAxis=[zarr_vars.index("CIN_surface")],
+    )
 
     # Write the stacked array to disk before interpolating; doing both in one
     # graph overflows memory
