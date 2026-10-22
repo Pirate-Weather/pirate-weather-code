@@ -25,7 +25,6 @@ import warnings
 import dask.array as da
 import numpy as np
 import pandas as pd
-import s3fs
 import xarray as xr
 import zarr
 from herbie import Herbie
@@ -40,16 +39,18 @@ from API.ingest_utils import (
     FINAL_CHUNK_SIZES,
     VALID_DATA_MAX,
     VALID_DATA_MIN,
-    archive_tmp_zarr_and_upload,
     close_store,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
-    download_extract_historic_archive,
     earth_relative_wind_components,
+    history_store_exists,
     make_herbie_save_dir,
     mask_invalid_data,
+    open_history_store,
+    open_remote,
     pad_to_chunk_size,
     positive_int_env,
+    publish_history_store,
     publish_ingest_run,
     read_published_run_time,
     write_final_zarr,
@@ -323,7 +324,6 @@ def main() -> None:
     )
     # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
     configure_herbie_request_timeouts()
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     zarr_store_workers = configure_zarr_writes()
 
     process_chunk = CHUNK_SIZES["RTMA"]
@@ -333,10 +333,15 @@ def main() -> None:
     shutil.rmtree(forecast_process_dir, ignore_errors=True)
     os.makedirs(tmp_dir, exist_ok=True)
 
-    publish_dir = forecast_path + "/" + ingest_version
-    if save_type == "Download":
-        os.makedirs(historic_path, exist_ok=True)
-        os.makedirs(publish_dir, exist_ok=True)
+    forecast_remote = open_remote(
+        forecast_path + "/" + ingest_version,
+        save_type,
+        aws_access_key_id,
+        aws_secret_access_key,
+    )
+    history_remote = open_remote(
+        historic_path, save_type, aws_access_key_id, aws_secret_access_key
+    )
 
     herbie_save_dir = make_herbie_save_dir(tmp_dir)
 
@@ -355,9 +360,7 @@ def main() -> None:
     base_time = pd.Timestamp(latest_run.date)
 
     # %% Skip the run if this hour has already been published
-    previous_base_time = read_published_run_time(
-        publish_dir + "/RTMA.time.pickle", save_type, s3
-    )
+    previous_base_time = read_published_run_time(forecast_remote, "RTMA.time.pickle")
     if previous_base_time is not None and previous_base_time >= base_time:
         logger.info("No Update to RTMA, ending")
         return
@@ -371,16 +374,9 @@ def main() -> None:
     ]
     for analysis_time in row_times:
         timestamp_str = analysis_time.strftime(HOURLY_STORE_TIMESTAMP_FORMAT)
-
-        # A .done marker is written only after an hourly store is complete
-        if save_type == "S3":
-            s3_path = f"{historic_path}/RTMA_Hist_{timestamp_str}.zarr.tar.gz"
-            if s3.exists(s3_path.replace(".tar.gz", ".done")):
-                continue
-        else:
-            local_path = f"{historic_path}/RTMA_Hist_{timestamp_str}.zarr"
-            if os.path.exists(local_path.replace(".zarr", ".done")):
-                continue
+        hourly_store_name = f"RTMA_Hist_{timestamp_str}.zarr"
+        if history_store_exists(history_remote, hourly_store_name):
+            continue
 
         logger.info("Processing hourly RTMA analysis %s", timestamp_str)
         hourly_tmp_zarr_path = hist_process_path + "_RTMA_Hist_TMP.zarr"
@@ -392,68 +388,31 @@ def main() -> None:
             final_chunk,
         )
 
-        # Archive the hour, then mark it done so later runs skip it
-        if save_type == "S3":
-            archive_tmp_zarr_and_upload(
-                tmp_zarr_path=hourly_tmp_zarr_path,
-                s3_path=s3_path,
-                archive_member_name="RTMA_Hist.zarr",
-                s3=s3,
-            )
-        else:
-            if os.path.exists(local_path):
-                shutil.rmtree(local_path)
-            shutil.move(hourly_tmp_zarr_path, local_path)
-            with open(local_path.replace(".zarr", ".done"), "w") as f:
-                f.write("Done")
+        publish_history_store(hourly_tmp_zarr_path, history_remote, hourly_store_name)
 
-    # %% Collect the hourly stores for the merge
-    if save_type == "S3":
-        local_temp_dir = hist_process_path + "_s3_temp_downloads"
-        os.makedirs(local_temp_dir, exist_ok=True)
-        row_store_paths = []
-        for analysis_time in row_times:
-            final_zarr_name = (
-                "RTMA_Hist_"
-                + analysis_time.strftime(HOURLY_STORE_TIMESTAMP_FORMAT)
-                + ".zarr"
-            )
-            extracted_path = download_extract_historic_archive(
-                s3=s3,
-                historic_path=historic_path,
-                final_zarr_name=final_zarr_name,
-                extracted_store_name="RTMA_Hist.zarr",
-                local_temp_dir=local_temp_dir,
-                expected_vars=zarr_vars,
-            )
-            # Every hour was archived above, so a missing one means the archive
-            # was lost; fail rather than publish a store with a gap.
-            if extracted_path is None:
-                raise RuntimeError(
-                    f"RTMA hourly store {final_zarr_name} is missing from "
-                    f"{historic_path}"
-                )
-            row_store_paths.append(extracted_path)
-    else:
-        row_store_paths = [
-            historic_path
-            + "/RTMA_Hist_"
+    # %% Open the hourly stores for the merge
+    # Every hour was stored above, so a missing one means it was lost; fail
+    # rather than publish a store with a gap.
+    row_stores = [
+        open_history_store(
+            history_remote,
+            "RTMA_Hist_"
             + analysis_time.strftime(HOURLY_STORE_TIMESTAMP_FORMAT)
-            + ".zarr"
-            for analysis_time in row_times
-        ]
+            + ".zarr",
+            zarr_vars,
+        )
+        for analysis_time in row_times
+    ]
 
     # %% Validate each stored analysis time against its row
     expected_times_unix = np.asarray(
         [row_time.timestamp() for row_time in row_times], dtype="float32"
     )
-    for store_path, expected_time in zip(
-        row_store_paths, expected_times_unix, strict=True
-    ):
-        stored_time = zarr.open_array(store_path, path="time", mode="r")[0, 0, 0]
+    for row_store, expected_time in zip(row_stores, expected_times_unix, strict=True):
+        stored_time = row_store["time"][0, 0, 0]
         if stored_time != expected_time:
             raise RuntimeError(
-                f"{store_path} holds time {stored_time}, expected {expected_time}"
+                f"{row_store.path} holds time {stored_time}, expected {expected_time}"
             )
 
     # %% Stack the hours into the (variable, time, y, x) layout
@@ -462,8 +421,8 @@ def main() -> None:
         [
             da.concatenate(
                 [
-                    da.from_zarr(store_path, component=var, inline_array=True)
-                    for store_path in row_store_paths
+                    da.from_zarr(row_store[var], inline_array=True)
+                    for row_store in row_stores
                 ],
                 axis=0,
             )
@@ -481,7 +440,7 @@ def main() -> None:
     )
 
     # %% Write the final store
-    rtma_store_name = "RTMA.zarr.zip" if save_type == "S3" else "RTMA.zarr"
+    rtma_store_name = "RTMA.zarr"
     write_final_zarr(
         stacked,
         forecast_process_dir + "/" + rtma_store_name,
@@ -495,9 +454,7 @@ def main() -> None:
         base_time,
         "RTMA.time.pickle",
         process_dir=forecast_process_dir,
-        publish_dir=publish_dir,
-        save_type=save_type,
-        s3=s3,
+        remote=forecast_remote,
     )
 
     # %% Clean up

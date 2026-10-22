@@ -22,7 +22,6 @@ import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
-import s3fs
 import xarray as xr
 from dask.diagnostics import ProgressBar
 from herbie import HerbieLatest
@@ -40,12 +39,14 @@ from API.ingest_utils import (
     FORECAST_LEAD_RANGES,
     VALID_DATA_MAX,
     VALID_DATA_MIN,
-    archive_tmp_zarr_and_upload,
     configure_zarr_writes,
-    download_extract_historic_archive,
+    history_store_exists,
     interp_time_take_blend,
+    open_history_store,
+    open_remote,
     pad_to_chunk_size,
     positive_int_env,
+    publish_history_store,
     publish_ingest_run,
     read_published_run_time,
     write_final_zarr,
@@ -271,7 +272,6 @@ def main() -> None:
     """Run the ECMWF IFS forecast and history ingest."""
     logging.basicConfig(level=logging.INFO)
 
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     zarr_store_workers = configure_zarr_writes()
 
     process_chunk = CHUNK_SIZES["ECMWF"]
@@ -281,10 +281,15 @@ def main() -> None:
     shutil.rmtree(forecast_process_dir, ignore_errors=True)
     os.makedirs(tmp_dir, exist_ok=True)
 
-    publish_dir = forecast_path + "/" + ingest_version
-    if save_type == "Download":
-        os.makedirs(publish_dir, exist_ok=True)
-        os.makedirs(historic_path, exist_ok=True)
+    forecast_remote = open_remote(
+        forecast_path + "/" + ingest_version,
+        save_type,
+        aws_access_key_id,
+        aws_secret_access_key,
+    )
+    history_remote = open_remote(
+        historic_path, save_type, aws_access_key_id, aws_secret_access_key
+    )
 
     T0 = time.time()
 
@@ -302,9 +307,7 @@ def main() -> None:
     base_time = latest_run.date
 
     # %% Skip the run if this cycle has already been published
-    previous_base_time = read_published_run_time(
-        publish_dir + "/ECMWF.time.pickle", save_type, s3
-    )
+    previous_base_time = read_published_run_time(forecast_remote, "ECMWF.time.pickle")
     if previous_base_time is not None and previous_base_time >= base_time:
         logger.info("No Update to ECMWF, ending")
         return
@@ -354,16 +357,10 @@ def main() -> None:
     for hours_back in history_offsets:
         hist_run_time = base_time - pd.Timedelta(hours=hours_back)
         hist_timestamp = hist_run_time.strftime("%Y%m%dT%H%M%SZ")
-        if save_type == "S3":
-            s3_path = historic_path + "/ECMWF_Hist_v3" + hist_timestamp + ".zarr.tar.gz"
-            if s3.exists(s3_path.replace(".tar.gz", ".done")):
-                logger.info("ECMWF history already in S3, skipping %s", s3_path)
-                continue
-        else:
-            local_path = historic_path + "/ECMWF_Hist_v3" + hist_timestamp + ".zarr"
-            if os.path.exists(local_path.replace(".zarr", ".done")):
-                logger.info("ECMWF history already local, skipping %s", local_path)
-                continue
+        hist_store_name = f"ECMWF_Hist_v3{hist_timestamp}.zarr"
+        if history_store_exists(history_remote, hist_store_name):
+            logger.info("ECMWF history already stored, skipping %s", hist_store_name)
+            continue
 
         logger.info("Downloading ECMWF history run %s", hist_timestamp)
 
@@ -390,57 +387,28 @@ def main() -> None:
         write_process_zarr(xarray_hist_merged, hist_tmp_zarr_path, zarr_store_workers)
         del xarray_hist_merged
 
-        # Archive the run and write its done marker
-        if save_type == "S3":
-            archive_tmp_zarr_and_upload(
-                tmp_zarr_path=hist_tmp_zarr_path,
-                s3_path=s3_path,
-                archive_member_name="ECMWF_Hist.zarr",
-                s3=s3,
-            )
-        else:
-            os.rename(hist_tmp_zarr_path, local_path)
-            with open(local_path.replace(".zarr", ".done"), "w") as f:
-                f.write("Done")
+        publish_history_store(hist_tmp_zarr_path, history_remote, hist_store_name)
 
         logger.info("Saved ECMWF history run %s", hist_timestamp)
 
     # %% Merge the history and forecast datasets
-    if save_type == "S3":
-        local_temp_dir = forecast_process_path + "_s3_temp_downloads"
-        os.makedirs(local_temp_dir, exist_ok=True)
-        ncLocalWorking_paths = []
-        for hours_back in history_offsets:
-            hist_timestamp = (base_time - pd.Timedelta(hours=hours_back)).strftime(
-                "%Y%m%dT%H%M%SZ"
-            )
-            extracted_path = download_extract_historic_archive(
-                s3=s3,
-                historic_path=historic_path,
-                final_zarr_name=f"ECMWF_Hist_v3{hist_timestamp}.zarr",
-                extracted_store_name="ECMWF_Hist.zarr",
-                local_temp_dir=local_temp_dir,
-                expected_vars=zarr_vars,
-            )
-            # Every history run was archived above, so a missing one means the
-            # archive was lost; dropping it would let the hourly interpolation
-            # bridge the gap with invented values.
-            if extracted_path is None:
-                raise RuntimeError(
-                    f"ECMWF history archive ECMWF_Hist_v3{hist_timestamp} is "
-                    f"missing from {historic_path}"
-                )
-            ncLocalWorking_paths.append(extracted_path)
-    else:
-        ncLocalWorking_paths = [
-            historic_path
-            + "/ECMWF_Hist_v3"
+    # Every history run was stored above, so a missing one means it was lost;
+    # dropping it would let the hourly interpolation bridge the gap with
+    # invented values, so open_history_store fails instead.
+    hist_stores = [
+        open_history_store(
+            history_remote,
+            "ECMWF_Hist_v3"
             + (base_time - pd.Timedelta(hours=hours_back)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr"
-            for hours_back in history_offsets
-        ]
-
-    hist = [xr.open_zarr(p, consolidated=False) for p in ncLocalWorking_paths]
+            + ".zarr",
+            zarr_vars,
+        )
+        for hours_back in history_offsets
+    ]
+    hist = [
+        xr.open_zarr(store.store, group=store.path, consolidated=False)
+        for store in hist_stores
+    ]
     fcst = xr.open_zarr(f"{forecast_process_path}_merged.zarr", consolidated=False)
     ds = xr.concat(
         [*hist, fcst],
@@ -514,7 +482,7 @@ def main() -> None:
         daskVarArrayStackDiskInterp, final_chunk
     )
 
-    ecmwf_store_name = "ECMWF.zarr.zip" if save_type == "S3" else "ECMWF.zarr"
+    ecmwf_store_name = "ECMWF.zarr"
     with ProgressBar():
         write_final_zarr(
             daskVarArrayStackDiskInterpPad,
@@ -529,9 +497,7 @@ def main() -> None:
         base_time,
         "ECMWF.time.pickle",
         process_dir=forecast_process_dir,
-        publish_dir=publish_dir,
-        save_type=save_type,
-        s3=s3,
+        remote=forecast_remote,
     )
 
     # %% Clean up

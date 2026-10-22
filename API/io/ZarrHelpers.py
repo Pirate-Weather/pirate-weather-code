@@ -9,7 +9,6 @@ from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass
 from typing import Any
 
-import s3fs
 import xarray as xr
 import zarr
 from zarr.abc.store import (
@@ -208,12 +207,6 @@ def _add_custom_header(request, **kwargs):
     request.headers["apikey"] = pw_api_key
 
 
-class S3ZipStore(zarr.storage.ZipStore):
-    def __init__(self, path: s3fs.S3File) -> None:
-        super().__init__(path="", mode="r")
-        self.path = path
-
-
 def _retry_s3_operation(
     operation, max_retries=MAX_S3_RETRIES, base_delay=S3_BASE_DELAY
 ):
@@ -242,81 +235,43 @@ def _retry_s3_operation(
     raise S3MaxRetriesExceededError(f"Failed after {max_retries} attempts")
 
 
-def setup_testing_zipstore(s3, s3_bucket, ingest_version, save_type, model_name):
-    """Sets up a zarr store from a zipped zarr file in S3 or locally.
+def open_testing_zarr(s3, s3_bucket, ingest_version, save_type, model_name):
+    """Open a published model store read-only, from S3 or a local directory.
+
+    Stores are sharded zarr directories (``<model>.zarr``), so on S3 a point read
+    is two ranged GETs (the shard index, then one chunk) with no archive to open.
 
     Parameters:
-        - s3 (s3fs.S3FileSystem): An s3fs filesystem object.
+        - s3 (s3fs.S3FileSystem): An asynchronous s3fs filesystem, or None locally.
         - s3_bucket (str): The S3 bucket name or local path.
         - ingest_version (str): The version string for the data.
-        - save_type (str): The type of storage ("S3", "S3Zarr", or local path).
+        - save_type (str): "S3" (the public files endpoint), "S3Zarr" (a bucket
+          read with AWS keys), or anything else for a local directory.
         - model_name (str): The name of the model.
 
     Returns:
-        - store: A zarr store object.
+        - The opened zarr array or group.
     """
-
     if save_type == "S3":
-        try:
-            f = _retry_s3_operation(
-                lambda: s3.open(
-                    "s3://ForecastTar_v2/"
-                    + ingest_version
-                    + "/"
-                    + model_name
-                    + ".zarr.zip"
-                )
-            )
-            store = S3ZipStore(f)
-        # Try an old ingest version for testing
-        except FileNotFoundError:
-            ingest_version = "v28"
-            print("Using old ingest version: " + ingest_version)
-            f = _retry_s3_operation(
-                lambda: s3.open(
-                    "s3://ForecastTar_v2/"
-                    + ingest_version
-                    + "/"
-                    + model_name
-                    + ".zarr.zip"
-                )
-            )
-            store = S3ZipStore(f)
+        store = FsspecStore(
+            s3,
+            path=f"ForecastTar_v2/{ingest_version}/{model_name}.zarr",
+            read_only=True,
+        )
     elif save_type == "S3Zarr":
-        try:
-            f = _retry_s3_operation(
-                lambda: s3.open(
-                    "s3://"
-                    + s3_bucket
-                    + "/ForecastTar_v2/"
-                    + ingest_version
-                    + "/"
-                    + model_name
-                    + ".zarr.zip"
-                )
-            )
-            store = S3ZipStore(f)
-        except FileNotFoundError:
-            ingest_version = "v28"
-            print("Using old ingest version: " + ingest_version)
-            f = _retry_s3_operation(
-                lambda: s3.open(
-                    "s3://"
-                    + s3_bucket
-                    + "/ForecastTar_v2/"
-                    + ingest_version
-                    + "/"
-                    + model_name
-                    + ".zarr.zip"
-                )
-            )
-            store = S3ZipStore(f)
-
+        store = FsspecStore(
+            s3,
+            path=f"{s3_bucket}/ForecastTar_v2/{ingest_version}/{model_name}.zarr",
+            read_only=True,
+        )
     else:
-        f = s3_bucket + model_name + ".zarr.zip"
-        store = zarr.storage.ZipStore(f, mode="r")
+        store = zarr.storage.LocalStore(
+            s3_bucket + model_name + ".zarr", read_only=True
+        )
 
-    return store
+    # Every published store is zarr v3; naming the format skips the v2 metadata
+    # probes, which on S3 are extra HEAD and list requests at every open.
+    return _retry_s3_operation(lambda: zarr.open(store, mode="r", zarr_format=3))
 
 
 # Function to initialize in ERA5 xarray dataset

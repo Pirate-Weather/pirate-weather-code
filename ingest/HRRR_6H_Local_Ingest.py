@@ -21,7 +21,6 @@ import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
-import s3fs
 import xarray as xr
 from herbie.fast import Herbie_latest
 
@@ -35,6 +34,7 @@ from API.ingest_utils import (
     configure_zarr_writes,
     mask_invalid_data,
     mask_invalid_refc,
+    open_remote,
     pad_to_chunk_size,
     positive_int_env,
     publish_ingest_run,
@@ -148,7 +148,6 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
     configure_herbie_request_timeouts()
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     zarr_store_workers = configure_zarr_writes()
 
     process_chunk = CHUNK_SIZES["HRRR_6H"]
@@ -158,9 +157,12 @@ def main() -> None:
     shutil.rmtree(forecast_process_dir, ignore_errors=True)
     os.makedirs(tmp_dir, exist_ok=True)
 
-    publish_dir = forecast_path + "/" + ingest_version
-    if save_type == "Download":
-        os.makedirs(publish_dir, exist_ok=True)
+    forecast_remote = open_remote(
+        forecast_path + "/" + ingest_version,
+        save_type,
+        aws_access_key_id,
+        aws_secret_access_key,
+    )
 
     T0 = time.time()
 
@@ -177,9 +179,7 @@ def main() -> None:
     base_time = latest_run.date
 
     # %% Skip the run if this cycle has already been published
-    previous_base_time = read_published_run_time(
-        publish_dir + "/HRRR_6H.time.pickle", save_type, s3
-    )
+    previous_base_time = read_published_run_time(forecast_remote, "HRRR_6H.time.pickle")
     if previous_base_time is not None and previous_base_time >= base_time:
         logger.info("No Update to HRRR_6H, ending")
         return
@@ -290,7 +290,7 @@ def main() -> None:
     # %% Write the final store (hourly already, so no time interpolation)
     daskVarArrayStackDisk_main = pad_to_chunk_size(daskVarArrayStackDisk, final_chunk)
 
-    hrrr_6h_store_name = "HRRR_6H.zarr.zip" if save_type == "S3" else "HRRR_6H.zarr"
+    hrrr_6h_store_name = "HRRR_6H.zarr"
     write_final_zarr(
         daskVarArrayStackDisk_main,
         forecast_process_dir + "/" + hrrr_6h_store_name,
@@ -304,9 +304,7 @@ def main() -> None:
         base_time,
         "HRRR_6H.time.pickle",
         process_dir=forecast_process_dir,
-        publish_dir=publish_dir,
-        save_type=save_type,
-        s3=s3,
+        remote=forecast_remote,
     )
 
     # %% Clean up

@@ -18,7 +18,6 @@ import warnings
 
 import numpy as np
 import pandas as pd
-import s3fs
 import xarray as xr
 from herbie import Herbie
 from herbie.fast import Herbie_latest
@@ -37,6 +36,7 @@ from API.ingest_utils import (
     earth_relative_wind_components,
     make_herbie_save_dir,
     mask_invalid_data,
+    open_remote,
     pad_to_chunk_size,
     positive_int_env,
     publish_ingest_run,
@@ -130,7 +130,6 @@ def main() -> None:
     )
     # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
     configure_herbie_request_timeouts()
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     zarr_store_workers = configure_zarr_writes()
 
     process_chunk = CHUNK_SIZES["RTMA"]
@@ -140,9 +139,12 @@ def main() -> None:
     shutil.rmtree(forecast_process_dir, ignore_errors=True)
     os.makedirs(tmp_dir, exist_ok=True)
 
-    publish_dir = forecast_path + "/" + ingest_version
-    if save_type == "Download":
-        os.makedirs(publish_dir, exist_ok=True)
+    forecast_remote = open_remote(
+        forecast_path + "/" + ingest_version,
+        save_type,
+        aws_access_key_id,
+        aws_secret_access_key,
+    )
 
     herbie_save_dir = make_herbie_save_dir(tmp_dir)
 
@@ -161,9 +163,7 @@ def main() -> None:
     base_time = latest_run.date
 
     # %% Skip the run if this cycle has already been published
-    previous_base_time = read_published_run_time(
-        publish_dir + "/RTMA_RU.time.pickle", save_type, s3
-    )
+    previous_base_time = read_published_run_time(forecast_remote, "RTMA_RU.time.pickle")
     if previous_base_time is not None and previous_base_time >= base_time:
         logger.info("No Update to RTMA_RU, ending")
         return
@@ -260,7 +260,7 @@ def main() -> None:
     dask_var_array = pad_to_chunk_size(dask_var_array, final_chunk)
 
     # %% Write the final store
-    rtma_ru_store_name = "RTMA_RU.zarr.zip" if save_type == "S3" else "RTMA_RU.zarr"
+    rtma_ru_store_name = "RTMA_RU.zarr"
     write_final_zarr(
         dask_var_array,
         forecast_process_dir + "/" + rtma_ru_store_name,
@@ -274,9 +274,7 @@ def main() -> None:
         base_time,
         "RTMA_RU.time.pickle",
         process_dir=forecast_process_dir,
-        publish_dir=publish_dir,
-        save_type=save_type,
-        s3=s3,
+        remote=forecast_remote,
     )
 
     # %% Clean up

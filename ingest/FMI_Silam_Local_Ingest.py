@@ -30,7 +30,6 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 import requests
-import s3fs
 import xarray as xr
 from dask.diagnostics import ProgressBar
 
@@ -39,11 +38,13 @@ from API.constants.unit_const import KG_M2_TO_UG_M2, KG_M3_TO_UG_M3, MOL_MOL_TO_
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
-    archive_tmp_zarr_and_upload,
     configure_zarr_writes,
-    download_extract_historic_archive,
+    history_store_exists,
     mask_invalid_data,
+    open_history_store,
+    open_remote,
     pad_to_chunk_size,
+    publish_history_store,
     publish_ingest_run,
     read_published_run_time,
     write_final_zarr,
@@ -379,21 +380,21 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     zarr_store_workers = configure_zarr_writes()
 
     # Start each run from an empty processing directory
     shutil.rmtree(forecast_process_dir, ignore_errors=True)
     os.makedirs(tmp_dir, exist_ok=True)
     os.makedirs(hist_process_path, exist_ok=True)
-    if save_type == "S3":
-        s3.mkdirs(historic_path, exist_ok=True)
-    else:
-        os.makedirs(historic_path, exist_ok=True)
-
-    publish_dir = forecast_path + "/" + ingest_version
-    if save_type == "Download":
-        os.makedirs(publish_dir, exist_ok=True)
+    forecast_remote = open_remote(
+        forecast_path + "/" + ingest_version,
+        save_type,
+        aws_access_key_id,
+        aws_secret_access_key,
+    )
+    history_remote = open_remote(
+        historic_path, save_type, aws_access_key_id, aws_secret_access_key
+    )
 
     T0 = time.time()
 
@@ -401,9 +402,7 @@ def main() -> None:
     origintime = get_latest_silam_run()
 
     # %% Skip the run if this cycle has already been published
-    previous_base_time = read_published_run_time(
-        publish_dir + "/SILAM.time.pickle", save_type, s3
-    )
+    previous_base_time = read_published_run_time(forecast_remote, "SILAM.time.pickle")
     if previous_base_time is not None and previous_base_time >= origintime:
         logger.info("No Update to SILAM, ending")
         return
@@ -454,18 +453,10 @@ def main() -> None:
         hist_end = hist_start + timedelta(hours=HISTORIC_STEP_HOURS + 1)
         timestamp = hist_start.strftime("%Y%m%dT%H%M%SZ")
 
-        if save_type == "S3":
-            s3_path = f"{historic_path}/SILAM_Hist_v3{timestamp}.zarr.tar.gz"
-            if s3.exists(s3_path.replace(".tar.gz", ".done")):
-                logger.info("Historic SILAM file already exists in S3: %s", s3_path)
-                continue
-        else:
-            local_path = f"{historic_path}/SILAM_Hist_v3{timestamp}.zarr"
-            if os.path.exists(local_path.replace(".zarr", ".done")):
-                logger.info(
-                    "Historic SILAM file already exists locally: %s", local_path
-                )
-                continue
+        hist_store_name = f"SILAM_Hist_v3{timestamp}.zarr"
+        if history_store_exists(history_remote, hist_store_name):
+            logger.info("Historic SILAM store already exists: %s", hist_store_name)
+            continue
 
         hist_url = build_silam_download_url(hist_start)
         hist_nc_path = os.path.join(tmp_dir, f"SILAM_hist_{timestamp}.nc")
@@ -501,68 +492,29 @@ def main() -> None:
             xarray_hist_processed, hist_tmp_zarr_path, zarr_store_workers
         )
 
-        if save_type == "S3":
-            archive_tmp_zarr_and_upload(
-                tmp_zarr_path=hist_tmp_zarr_path,
-                s3_path=s3_path,
-                archive_member_name="SILAM_Hist.zarr",
-                s3=s3,
-            )
-        else:
-            os.rename(hist_tmp_zarr_path, local_path)
-            with open(local_path.replace(".zarr", ".done"), "w") as f:
-                f.write("Done")
+        publish_history_store(hist_tmp_zarr_path, history_remote, hist_store_name)
 
         logger.info("Saved historic SILAM slice: %s", timestamp)
 
     # %% Merge the history and forecast datasets
-    if save_type == "S3":
-        local_temp_dir = forecast_process_path + "_s3_temp_downloads"
-        os.makedirs(local_temp_dir, exist_ok=True)
-        historic_zarr_paths = []
-        for hours_offset in history_offsets:
-            timestamp = (origintime - timedelta(hours=hours_offset)).strftime(
-                "%Y%m%dT%H%M%SZ"
-            )
-            extracted_path = download_extract_historic_archive(
-                s3=s3,
-                historic_path=historic_path,
-                final_zarr_name=f"SILAM_Hist_v3{timestamp}.zarr",
-                extracted_store_name="SILAM_Hist.zarr",
-                local_temp_dir=local_temp_dir,
-                expected_vars=zarr_vars,
-            )
-            if extracted_path is None:
-                raise RuntimeError(
-                    f"Historic SILAM archive SILAM_Hist_v3{timestamp} is missing "
-                    f"from {historic_path}"
-                )
-            historic_zarr_paths.append(extracted_path)
-    else:
-        historic_zarr_paths = []
-        for hours_offset in history_offsets:
-            timestamp = (origintime - timedelta(hours=hours_offset)).strftime(
-                "%Y%m%dT%H%M%SZ"
-            )
-            local_path = f"{historic_path}/SILAM_Hist_v3{timestamp}.zarr"
-            if not os.path.exists(local_path):
-                raise RuntimeError(f"Historic SILAM store {local_path} is missing")
-            historic_zarr_paths.append(local_path)
+    historic_stores = [
+        open_history_store(
+            history_remote,
+            "SILAM_Hist_v3"
+            + (origintime - timedelta(hours=hours_offset)).strftime("%Y%m%dT%H%M%SZ")
+            + ".zarr",
+            zarr_vars,
+        )
+        for hours_offset in history_offsets
+    ]
 
     dask_interp_arrays = []
     for dask_var in zarr_vars:
         dask_var_arrays_list = []
-        for historic_zarr_path in historic_zarr_paths:
-            try:
-                dask_var_arrays_list.append(
-                    da.from_zarr(
-                        historic_zarr_path, component=dask_var, inline_array=True
-                    )
-                )
-            except (FileNotFoundError, KeyError) as e:
-                raise RuntimeError(
-                    f"Historic SILAM store {historic_zarr_path} is missing {dask_var}"
-                ) from e
+        for historic_store in historic_stores:
+            dask_var_arrays_list.append(
+                da.from_zarr(historic_store[dask_var], inline_array=True)
+            )
 
         dask_forecast_array = da.from_zarr(
             forecast_process_path + "_.zarr", component=dask_var, inline_array=True
@@ -618,7 +570,7 @@ def main() -> None:
     stacked_array_disk = da.from_zarr(forecast_process_path + "_stack.zarr")
     stacked_array_padded = pad_to_chunk_size(stacked_array_disk, final_chunk)
 
-    silam_store_name = "SILAM.zarr.zip" if save_type == "S3" else "SILAM.zarr"
+    silam_store_name = "SILAM.zarr"
     with ProgressBar():
         write_final_zarr(
             stacked_array_padded,
@@ -633,9 +585,7 @@ def main() -> None:
         origintime,
         "SILAM.time.pickle",
         process_dir=forecast_process_dir,
-        publish_dir=publish_dir,
-        save_type=save_type,
-        s3=s3,
+        remote=forecast_remote,
     )
 
     # %% Clean up

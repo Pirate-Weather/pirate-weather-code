@@ -79,10 +79,8 @@ def test_local_urma_day_matches_gribstream(monkeypatch):
     conversion (K, m, Pa), and the station-pressure/sea-level-pressure distinction.
     """
     data_dir = Path(os.getenv(URMA_DATA_DIR_ENV_VAR, str(DEFAULT_URMA_DATA_DIR)))
-    if not all(
-        (data_dir / name).exists() for name in ("URMA_Hist.zarr.zip", "GFS.zarr.zip")
-    ):
-        pytest.skip(f"Local URMA and GFS archives are missing under {data_dir}")
+    if not all((data_dir / name).exists() for name in ("URMA_Hist.zarr", "GFS.zarr")):
+        pytest.skip(f"Local URMA and GFS stores are missing under {data_dir}")
 
     grid_lat, grid_lon, _, _ = _urma_grid_point(*COMPARISON_LOCATION)
     request_time = datetime.datetime.now(datetime.UTC) - datetime.timedelta(

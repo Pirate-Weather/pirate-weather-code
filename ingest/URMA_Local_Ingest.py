@@ -22,7 +22,6 @@ import warnings
 import dask.array as da
 import numpy as np
 import pandas as pd
-import s3fs
 import xarray as xr
 import zarr
 from herbie import Herbie
@@ -37,17 +36,19 @@ from API.ingest_utils import (
     FINAL_CHUNK_SIZES,
     VALID_DATA_MAX,
     VALID_DATA_MIN,
-    archive_tmp_zarr_and_upload,
     broadcast_times_to_grid,
     close_store,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
-    download_extract_historic_archive,
     earth_relative_wind_components,
+    history_store_exists,
     make_herbie_save_dir,
     mask_invalid_data,
+    open_history_store,
+    open_remote,
     pad_to_chunk_size,
     positive_int_env,
+    publish_history_store,
     publish_ingest_run,
     read_published_run_time,
 )
@@ -139,7 +140,6 @@ def main() -> None:
     )
     # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
     configure_herbie_request_timeouts()
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     # URMA writes its stores with plain zarr/xarray calls, so only the open-file
     # and concurrency limits matter here; the worker count is not used.
     configure_zarr_writes()
@@ -151,10 +151,15 @@ def main() -> None:
     shutil.rmtree(historic_process_dir, ignore_errors=True)
     os.makedirs(tmp_dir, exist_ok=True)
 
-    publish_dir = forecast_path + "/" + ingest_version
-    if save_type == "Download":
-        os.makedirs(historic_path, exist_ok=True)
-        os.makedirs(publish_dir, exist_ok=True)
+    forecast_remote = open_remote(
+        forecast_path + "/" + ingest_version,
+        save_type,
+        aws_access_key_id,
+        aws_secret_access_key,
+    )
+    history_remote = open_remote(
+        historic_path, save_type, aws_access_key_id, aws_secret_access_key
+    )
 
     herbie_save_dir = make_herbie_save_dir(tmp_dir)
 
@@ -173,7 +178,7 @@ def main() -> None:
 
     # %% Skip the run if this cycle has already been published
     previous_base_time = read_published_run_time(
-        publish_dir + "/URMA_Hist.time.pickle", save_type, s3
+        forecast_remote, "URMA_Hist.time.pickle"
     )
     if previous_base_time is not None and previous_base_time >= base_time:
         logger.info("No Update to URMA, ending")
@@ -184,18 +189,10 @@ def main() -> None:
     for i in range(his_period, -1, -1):
         analysis_time = pd.Timestamp(base_time - pd.Timedelta(hours=i))
         timestamp_str = analysis_time.strftime(HOURLY_STORE_TIMESTAMP_FORMAT)
-
-        # A .done marker is written only after an hourly store is complete
-        if save_type == "S3":
-            s3_path = f"{historic_path}/URMA_Hist_{timestamp_str}.zarr.tar.gz"
-            if s3.exists(s3_path.replace(".tar.gz", ".done")):
-                logger.info("File already exists in S3, skipping: %s", s3_path)
-                continue
-        else:
-            local_path = f"{historic_path}/URMA_Hist_{timestamp_str}.zarr"
-            if os.path.exists(local_path.replace(".zarr", ".done")):
-                logger.info("File already exists locally, skipping: %s", local_path)
-                continue
+        hourly_store_name = f"URMA_Hist_{timestamp_str}.zarr"
+        if history_store_exists(history_remote, hourly_store_name):
+            logger.info("Hourly store exists, skipping: %s", hourly_store_name)
+            continue
 
         logger.info("Downloading URMA historic timestep: %s", timestamp_str)
         download_urma_analysis(analysis_time, herbie_save_dir)
@@ -319,84 +316,42 @@ def main() -> None:
         )
         close_store(zarr_store)
 
-        # Archive the hour, then mark it done so later runs skip it
-        if save_type == "S3":
-            archive_tmp_zarr_and_upload(
-                tmp_zarr_path=hourly_tmp_zarr_path,
-                s3_path=s3_path,
-                archive_member_name="URMA_Hist.zarr",
-                s3=s3,
-            )
-        else:
-            if os.path.exists(local_path):
-                shutil.rmtree(local_path)
-            shutil.move(hourly_tmp_zarr_path, local_path)
-            done_file = local_path.replace(".zarr", ".done")
-            with open(done_file, "w") as f:
-                f.write("Done")
+        publish_history_store(hourly_tmp_zarr_path, history_remote, hourly_store_name)
 
-    # %% Collect the hourly stores for the history merge
-    if save_type == "S3":
-        local_temp_dir = hist_process_path + "_s3_temp_downloads"
-        os.makedirs(local_temp_dir, exist_ok=True)
-        ncHistWorking_paths = []
-        for i in range(his_period, -1, -1):
-            timestamp = (base_time - pd.Timedelta(hours=i)).strftime(
-                HOURLY_STORE_TIMESTAMP_FORMAT
-            )
-            final_zarr_name = f"URMA_Hist_{timestamp}.zarr"
-            extracted_path = download_extract_historic_archive(
-                s3=s3,
-                historic_path=historic_path,
-                final_zarr_name=final_zarr_name,
-                extracted_store_name="URMA_Hist.zarr",
-                local_temp_dir=local_temp_dir,
-                expected_vars=zarr_vars,
-            )
-            # Every hour was archived above, so a missing one means the archive
-            # was lost. The API reads the hourly rows by position, so skipping it
-            # would shift every later hour.
-            if extracted_path is None:
-                raise RuntimeError(
-                    f"URMA hourly store {final_zarr_name} is missing from "
-                    f"{historic_path}"
-                )
-            ncHistWorking_paths.append(extracted_path)
-    else:
-        ncHistWorking_paths = [
-            historic_path
-            + "/URMA_Hist_"
+    # %% Open the hourly stores for the history merge
+    # Every hour was stored above, so a missing one means it was lost. The API
+    # reads the hourly rows by position, so skipping it would shift every later
+    # hour; open_history_store fails instead.
+    hourly_stores = [
+        open_history_store(
+            history_remote,
+            "URMA_Hist_"
             + (base_time - pd.Timedelta(hours=i)).strftime(
                 HOURLY_STORE_TIMESTAMP_FORMAT
             )
-            + ".zarr"
-            for i in range(his_period, -1, -1)
-        ]
-
-    logger.info(
-        "Starting final URMA merge from %d hourly stores.", len(ncHistWorking_paths)
-    )
-
-    if not ncHistWorking_paths:
-        raise RuntimeError("No hourly URMA stores are available for the final merge")
+            + ".zarr",
+            zarr_vars,
+        )
+        for i in range(his_period, -1, -1)
+    ]
+    logger.info("Starting final URMA merge from %d hourly stores.", len(hourly_stores))
 
     # %% Merge the hourly stores into the final store
-    first_hour = zarr.open_array(
-        ncHistWorking_paths[0],
-        path=zarr_vars[0],
-        mode="r",
-    )
-    ny, nx = first_hour.shape[-2:]
+    ny, nx = hourly_stores[0][zarr_vars[0]].shape[-2:]
 
     # Create the final array before building the per-variable graphs. Writing one
     # variable at a time bounds scheduler memory for the full history merge.
+    # Each variable has its own final_chunk-square chunks: a point read decodes
+    # one 25 x 25 chunk per variable instead of a whole 200 x 200 x 283 h block
+    # (about 45 MB).
     final_zarr_path = historic_process_dir + "/URMA_Hist.zarr"
-    final_zarr = zarr.open_array(
-        final_zarr_path,
-        mode="w",
-        shape=(len(zarr_vars), len(ncHistWorking_paths), ny, nx),
-        chunks=(1, len(ncHistWorking_paths), process_chunk, process_chunk),
+    final_zarr = zarr.create_array(
+        zarr.storage.LocalStore(final_zarr_path),
+        shape=(len(zarr_vars), len(hourly_stores), ny, nx),
+        chunks=(1, len(hourly_stores), final_chunk, final_chunk),
         dtype="float32",
+        config={"write_empty_chunks": True},
+        overwrite=True,
     )
     logger.info(
         "Writing final URMA merge with shape %s and chunks %s.",
@@ -409,10 +364,7 @@ def main() -> None:
             # Read one scalar from each store instead of constructing spatial Dask
             # graphs merely to extract their timestamps.
             np_cat_times = np.asarray(
-                [
-                    zarr.open_array(local_path, path=dask_var, mode="r")[0, 0, 0]
-                    for local_path in ncHistWorking_paths
-                ],
+                [hourly_store[dask_var][0, 0, 0] for hourly_store in hourly_stores],
                 dtype="float32",
             )
 
@@ -427,14 +379,14 @@ def main() -> None:
             # dimension before writing this variable's final array region.
             dask_var_arrays_stack = da.stack(
                 [
-                    da.from_zarr(local_path, component=dask_var, inline_array=True)
-                    for local_path in ncHistWorking_paths
+                    da.from_zarr(hourly_store[dask_var], inline_array=True)
+                    for hourly_store in hourly_stores
                 ],
                 axis=0,
             )
             dask_array_out = (
                 dask_var_arrays_stack.squeeze(axis=1)
-                .rechunk((len(ncHistWorking_paths), process_chunk, process_chunk))
+                .rechunk((len(hourly_stores), process_chunk, process_chunk))
                 .astype("float32")
             )
 
@@ -459,22 +411,13 @@ def main() -> None:
     close_store(final_zarr.store)
     logger.info("Final URMA merge completed: %s", final_zarr_path)
 
-    # S3 serves a single zip of the directory store
-    if save_type == "S3":
-        shutil.make_archive(final_zarr_path, "zip", final_zarr_path)
-        urma_store_name = "URMA_Hist.zarr.zip"
-    else:
-        urma_store_name = "URMA_Hist.zarr"
-
     # %% Publish the store, then the run time the API uses to detect it
     publish_ingest_run(
-        [urma_store_name],
+        ["URMA_Hist.zarr"],
         base_time,
         "URMA_Hist.time.pickle",
         process_dir=historic_process_dir,
-        publish_dir=publish_dir,
-        save_type=save_type,
-        s3=s3,
+        remote=forecast_remote,
     )
 
     # %% Clean up

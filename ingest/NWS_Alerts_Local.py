@@ -13,7 +13,6 @@ import numpy as np
 import nwswx
 import pandas as pd
 import requests
-import s3fs
 import zarr
 from zarr.core.dtype import VariableLengthUTF8
 
@@ -21,8 +20,10 @@ from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (
     close_store,
     configure_zarr_limits,
+    open_remote,
     positive_int_env,
     tune_nofile_limit,
+    upload_store,
 )
 
 # %% Setup paths and parameters
@@ -58,7 +59,6 @@ def main() -> None:
     zarr_store_workers = positive_int_env("zarr_store_workers", 2)
     zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
 
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     tune_nofile_limit()
     zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
         zarr_store_workers, zarr_async_concurrency
@@ -76,11 +76,8 @@ def main() -> None:
     if not os.path.exists(tmpDIR):
         os.makedirs(tmpDIR)
 
-    if saveType == "Download":
-        if not os.path.exists(forecast_path + "/" + ingestVersion):
-            os.makedirs(forecast_path + "/" + ingestVersion)
-        if not os.path.exists(historic_path):
-            os.makedirs(historic_path)
+    if saveType == "Download" and not os.path.exists(historic_path):
+        os.makedirs(historic_path)
 
     # %% Download watch warning kml
     warningURL = (
@@ -240,47 +237,28 @@ def main() -> None:
     gridPoints_XR2 = gridPoints_XR.values.astype(VariableLengthUTF8).reshape(lons.shape)
 
     # Write to zarr
-    # Save as zarr
-    if saveType == "S3":
-        zarr_store = zarr.storage.ZipStore(
-            forecast_process_dir + "/NWS_Alerts.zarr.zip", mode="a", compression=0
-        )
-    else:
-        zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/NWS_Alerts.zarr")
-
-    # Create a Zarr array in the store with zstd compression
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/NWS_Alerts.zarr")
     zarr_array = zarr.create_array(
         store=zarr_store,
         shape=gridPoints_XR2.shape,
         dtype=zarr.dtype.VariableLengthUTF8(),
         chunks=(10, 10),
+        config={"write_empty_chunks": True},
+        overwrite=True,
     )
-
-    # Save the data
     zarr_array[:] = gridPoints_XR2
     close_store(zarr_store)
 
-    # Test Read
-    # zip_store_read = zarr.storage.ZipStore(
-    #     merge_process_dir + "/NWS_Alerts.zarr.zip", compression=0, mode="r"
-    # )
-    # alertsReadTest = zarr.open_array(zip_store_read)
-    # print(alertsReadTest[600, 1500:])
-
-    # Upload to S3
-    if saveType == "S3":
-        # Upload to S3
-        s3.put_file(
-            forecast_process_dir + "/NWS_Alerts.zarr.zip",
-            forecast_path + "/" + ingestVersion + "/NWS_Alerts.zarr.zip",
-        )
-    else:
-        # Copy the zarr file to the final location
-        shutil.copytree(
-            forecast_process_dir + "/NWS_Alerts.zarr",
-            forecast_path + "/" + ingestVersion + "/NWS_Alerts.zarr",
-            dirs_exist_ok=True,
-        )
+    # Publish to S3 or the local publish directory
+    forecast_remote = open_remote(
+        forecast_path + "/" + ingestVersion,
+        saveType,
+        aws_access_key_id,
+        aws_secret_access_key,
+    )
+    upload_store(
+        forecast_process_dir + "/NWS_Alerts.zarr", forecast_remote, "NWS_Alerts.zarr"
+    )
 
     # Clean up
     shutil.rmtree(forecast_process_dir)

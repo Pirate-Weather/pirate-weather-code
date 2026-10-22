@@ -29,7 +29,6 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 import requests
-import s3fs
 import xarray as xr
 import zarr
 import zarr.storage
@@ -47,6 +46,7 @@ from API.ingest_utils import (
     FINAL_CHUNK_SIZES,
     clear_directory,
     interpolate_temporal_gaps_efficiently,
+    open_remote,
     positive_int_env,
     publish_ingest_run,
     read_published_run_time,
@@ -933,18 +933,17 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    s3 = None
-    if save_type == "S3":
-        s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-
     # Empty the processing directory but keep the directory itself, which is
     # safer for processes that depend on the parent dir.
     clear_directory(forecast_process_dir)
     os.makedirs(tmp_dir, exist_ok=True)
 
-    publish_dir = forecast_path + "/" + ingest_version
-    if save_type == "Download":
-        os.makedirs(publish_dir, exist_ok=True)
+    forecast_remote = open_remote(
+        forecast_path + "/" + ingest_version,
+        save_type,
+        aws_access_key_id,
+        aws_secret_access_key,
+    )
 
     T0 = time.time()
 
@@ -970,7 +969,7 @@ def main() -> None:
 
     # %% Skip the run if this issue has already been published
     previous_base_time = read_published_run_time(
-        publish_dir + "/DWD_MOSMIX.time.pickle", save_type, s3
+        forecast_remote, "DWD_MOSMIX.time.pickle"
     )
     if previous_base_time is not None and previous_base_time >= base_time:
         logger.info("No Update to DWD_MOSMIX, ending")
@@ -1061,33 +1060,40 @@ def main() -> None:
     vars_in = [v for v in zarr_vars if v in ds_rename.data_vars]
     ds_stack = ds_rename[vars_in].to_array(dim="var", name="var")
 
+    # Dask writes CHUNK_SIZES["DWD"]-square tiles, each split into the small
+    # FINAL_CHUNK_SIZES["DWD"]-square zarr chunks (as in write_final_zarr)
     ds_chunk = ds_stack.chunk(
         {
             "var": -1,
             "stacked_time": len(stacked_timesUnix),
-            "lat": FINAL_CHUNK_SIZES["DWD"],
-            "lon": FINAL_CHUNK_SIZES["DWD"],
+            "lat": CHUNK_SIZES["DWD"],
+            "lon": CHUNK_SIZES["DWD"],
         }
     )
+    dwd_encoding = {
+        "chunks": (
+            ds_chunk.sizes["var"],
+            len(stacked_timesUnix),
+            FINAL_CHUNK_SIZES["DWD"],
+            FINAL_CHUNK_SIZES["DWD"],
+        ),
+    }
 
     # %% Write the final store
-    dwd_store_name = "DWD_MOSMIX.zarr.zip" if save_type == "S3" else "DWD_MOSMIX.zarr"
-    if save_type == "S3":
-        zarr_store = zarr.storage.ZipStore(
-            forecast_process_dir + "/" + dwd_store_name, mode="a"
-        )
-    else:
-        zarr_store = zarr.storage.LocalStore(
-            forecast_process_dir + "/" + dwd_store_name
-        )
+    dwd_store_name = "DWD_MOSMIX.zarr"
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/" + dwd_store_name)
 
     # Unlike the GRIB ingests this writes with xarray rather than dask, which
-    # also stores the coordinate metadata.
+    # also stores the coordinate metadata. A DataArray is stored under xarray's
+    # default variable name, which the API reads. All-NaN (ocean) chunks are
+    # still written so a publish replaces every chunk of the previous run.
     with ProgressBar():
-        ds_chunk.to_zarr(zarr_store, mode="w")
-
-    if save_type == "S3":
-        zarr_store.close()
+        ds_chunk.to_zarr(
+            zarr_store,
+            mode="w",
+            encoding={"__xarray_dataarray_variable__": dwd_encoding},
+            write_empty_chunks=True,
+        )
 
     # %% Publish the store and station map, then the run time the API uses to detect them
     publish_ingest_run(
@@ -1095,9 +1101,7 @@ def main() -> None:
         base_time,
         "DWD_MOSMIX.time.pickle",
         process_dir=forecast_process_dir,
-        publish_dir=publish_dir,
-        save_type=save_type,
-        s3=s3,
+        remote=forecast_remote,
     )
 
     # %% Clean up

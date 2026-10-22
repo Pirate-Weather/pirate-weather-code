@@ -63,13 +63,13 @@ import aiohttp
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import s3fs
 import zarr
 from pyogrio.errors import DataSourceError
 from shapely.geometry import Polygon
 from zarr.core.dtype import VariableLengthUTF8
 
 from API.constants.shared_const import INGEST_VERSION_STR
+from API.ingest_utils import close_store, open_remote, upload_store
 
 # List of supported geocodes
 SUPPORTED_GEOCODES = {
@@ -786,8 +786,6 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
 
 def main() -> None:
     """Download WMO alerts and publish the gridded Zarr store."""
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-
     # Create new directory for processing if it does not exist
     if not os.path.exists(forecast_process_dir):
         os.makedirs(forecast_process_dir)
@@ -796,11 +794,8 @@ def main() -> None:
         shutil.rmtree(forecast_process_dir)
         os.makedirs(forecast_process_dir)
 
-    if save_type == "Download":
-        if not os.path.exists(forecast_path + "/" + ingest_version):
-            os.makedirs(forecast_path + "/" + ingest_version)
-        if not os.path.exists(historic_path):
-            os.makedirs(historic_path)
+    if save_type == "Download" and not os.path.exists(historic_path):
+        os.makedirs(historic_path)
 
     logging.basicConfig(
         level=logging.INFO, stream=sys.stdout, format="%(levelname)s: %(message)s"
@@ -812,7 +807,7 @@ def main() -> None:
         wmo_gdf["source_id"].nunique(),
     )
 
-    # Then save a zarr zip the same way NWS alerts does
+    # Then save a zarr store the same way NWS alerts does
 
     # Create a grid of points, using a 0.125 degree spacing
     ys = np.arange(-60, 85, 0.0625)
@@ -876,44 +871,28 @@ def main() -> None:
     gridPoints_XR2 = gridPoints_XR.values.astype(VariableLengthUTF8).reshape(lons.shape)
 
     # Write to zarr
-    # Save as zarr
-    if save_type == "S3":
-        zarr_store = zarr.storage.ZipStore(
-            forecast_process_dir + "/WMO_Alerts.zarr.zip", mode="w", compression=0
-        )
-
-    else:
-        zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/WMO_Alerts.zarr")
-
-    # Create a Zarr array in the store with zstd compression
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/WMO_Alerts.zarr")
     zarr_array = zarr.create_array(
         store=zarr_store,
         shape=gridPoints_XR2.shape,
         dtype=zarr.dtype.VariableLengthUTF8(),
         chunks=(10, 10),
+        config={"write_empty_chunks": True},
         overwrite=True,
     )
-
-    # Save the data
     zarr_array[:] = gridPoints_XR2
+    close_store(zarr_store)
 
-    if save_type == "S3":
-        zarr_store.close()
-
-    # Upload to S3
-    if save_type == "S3":
-        # Upload to S3
-        s3.put_file(
-            forecast_process_dir + "/WMO_Alerts.zarr.zip",
-            forecast_path + "/" + ingest_version + "/WMO_Alerts.zarr.zip",
-        )
-    else:
-        # Copy the zarr file to the final location
-        shutil.copytree(
-            forecast_process_dir + "/WMO_Alerts.zarr",
-            forecast_path + "/" + ingest_version + "/WMO_Alerts.zarr",
-            dirs_exist_ok=True,
-        )
+    # Publish to S3 or the local publish directory
+    forecast_remote = open_remote(
+        forecast_path + "/" + ingest_version,
+        save_type,
+        aws_access_key_id,
+        aws_secret_access_key,
+    )
+    upload_store(
+        forecast_process_dir + "/WMO_Alerts.zarr", forecast_remote, "WMO_Alerts.zarr"
+    )
 
     # Clean up
     shutil.rmtree(forecast_process_dir)

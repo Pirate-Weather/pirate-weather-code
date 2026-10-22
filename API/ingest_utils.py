@@ -9,7 +9,6 @@ import resource
 import shlex
 import shutil
 import subprocess
-import tarfile
 import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -752,56 +751,114 @@ def prune_old_files(path: str, max_age_hours: float) -> None:
         )
 
 
-def read_published_run_time(pickle_path: str, save_type: str, s3) -> Any | None:
+# Published stores are uploaded this many objects at a time. A 9,601-object store
+# (8 KiB chunks) took 43 / 27 / 22 / 32 s to OVH at 64 / 128 / 256 / 512.
+UPLOAD_CONCURRENCY = positive_int_env("upload_concurrency", 256)
+# Optional storage class for every S3 object, e.g. EXPRESS_ONEZONE for OVH High
+# Performance (a default header is not signed, so it is set per upload).
+S3_STORAGE_CLASS = os.getenv("s3_storage_class") or None
+
+
+def open_remote(path: str, save_type: str, key: str = "", secret: str = ""):
+    """Open the place an ingest publishes to as an obstore store.
+
+    With ``save_type`` "S3", ``path`` is ``bucket/prefix``; ``s3_endpoint`` and
+    ``s3_region`` point it at a non-AWS store such as OVH, and empty keys fall
+    back to obstore's ``AWS_*`` environment variables. Anything else is a local
+    directory (created if missing), so publishing and history use one code path
+    whether the remote is a bucket or a disk.
+    """
+    import obstore.store
+
+    if save_type == "S3":
+        bucket, _, prefix = path.strip("/").partition("/")
+        options = {
+            "endpoint": os.getenv("s3_endpoint"),
+            "region": os.getenv("s3_region"),
+            "access_key_id": key,
+            "secret_access_key": secret,
+        }
+        return obstore.store.S3Store(
+            bucket,
+            prefix=prefix or None,
+            **{name: value for name, value in options.items() if value},
+        )
+    os.makedirs(path, exist_ok=True)
+    return obstore.store.LocalStore(path)
+
+
+def _put_attributes(remote) -> dict | None:
+    import obstore.store
+
+    if S3_STORAGE_CLASS and isinstance(remote, obstore.store.S3Store):
+        return {"Storage-Class": S3_STORAGE_CLASS}
+    return None
+
+
+def _put_files(remote, uploads: list[tuple[str, str]]) -> None:
+    """Upload ``(local_file, key)`` pairs, ``UPLOAD_CONCURRENCY`` at a time.
+
+    obstore retries each request itself (bounded by its default retry config).
+    """
+    import asyncio
+
+    import obstore
+
+    attributes = _put_attributes(remote)
+
+    async def put_all() -> None:
+        semaphore = asyncio.Semaphore(UPLOAD_CONCURRENCY)
+
+        async def put(local_file: str, key: str) -> None:
+            async with semaphore:
+                await obstore.put_async(
+                    remote, key, Path(local_file), attributes=attributes
+                )
+
+        await asyncio.gather(*(put(local, key) for local, key in uploads))
+
+    asyncio.run(put_all())
+
+
+def upload_store(local_path: str, remote, name: str) -> None:
+    """Upload a local zarr directory store to ``name`` on the remote.
+
+    Chunks go first, then the arrays' ``zarr.json``, then the store's root
+    ``zarr.json``, so a store whose root metadata exists is complete (the history
+    ingests check that). Chunk keys are the same every run and empty chunks are
+    written, so the upload replaces every object of the previous run. It is not
+    atomic, but a point read is one chunk holding every variable and time step,
+    so a reader during it sees one run or the other at each point.
+    """
+    chunk_files, array_metadata, root_metadata = [], [], []
+    for dirpath, _, filenames in os.walk(local_path):
+        for filename in filenames:
+            local_file = os.path.join(dirpath, filename)
+            relative = Path(local_file).relative_to(local_path).as_posix()
+            if relative == "zarr.json":
+                group = root_metadata
+            elif filename == "zarr.json":
+                group = array_metadata
+            else:
+                group = chunk_files
+            group.append((local_file, f"{name}/{relative}"))
+    for uploads in (chunk_files, array_metadata, root_metadata):
+        _put_files(remote, uploads)
+
+
+def read_published_run_time(remote, time_pickle_name: str) -> Any | None:
     """Return the run time recorded by the last published ingest, or None.
 
     Every ingest publishes ``<MODEL>.time.pickle`` next to its store; comparing it
     with the newest available run is how a scheduled ingest decides whether there
     is anything new to process.
     """
-    if save_type == "S3":
-        if not s3.exists(pickle_path):
-            return None
-        with s3.open(pickle_path, "rb") as f:
-            return pickle.load(f)
+    import obstore
 
-    if not os.path.exists(pickle_path):
+    try:
+        return pickle.loads(obstore.get(remote, time_pickle_name).bytes())
+    except (FileNotFoundError, obstore.exceptions.NotFoundError):
         return None
-    with open(pickle_path, "rb") as f:
-        return pickle.load(f)
-
-
-def promote_staged_dir(staged_path: str, final_path: str) -> None:
-    """Swap a fully written store directory into place.
-
-    The API may open the store at any moment, so the previous store is renamed
-    aside and the staged one renamed in (both within one directory) instead of
-    copying over the old store, which would also leave stale chunks behind.
-    """
-    backup_path = final_path + ".prev"
-    shutil.rmtree(backup_path, ignore_errors=True)
-    if os.path.exists(final_path):
-        os.replace(final_path, backup_path)
-    os.replace(staged_path, final_path)
-    shutil.rmtree(backup_path, ignore_errors=True)
-
-
-def _publish_file_or_store(
-    name: str, process_dir: str, publish_dir: str, save_type: str, s3
-) -> None:
-    """Upload one output to S3, or copy it locally (store directories are swapped in)."""
-    source_path = os.path.join(process_dir, name)
-    target_path = f"{publish_dir}/{name}"
-    if save_type == "S3":
-        s3.put_file(source_path, target_path)
-    elif os.path.isdir(source_path):
-        staged_path = target_path + ".partial"
-        shutil.rmtree(staged_path, ignore_errors=True)
-        shutil.copytree(source_path, staged_path)
-        promote_staged_dir(staged_path, target_path)
-    else:
-        shutil.copy2(source_path, target_path)
-    logger.info("Published %s to %s", name, target_path)
 
 
 def publish_ingest_run(
@@ -810,24 +867,31 @@ def publish_ingest_run(
     time_pickle_name: str,
     *,
     process_dir: str,
-    publish_dir: str,
-    save_type: str,
-    s3,
+    remote,
 ) -> None:
     """Publish a finished run: its outputs first, then ``<MODEL>.time.pickle``.
 
-    ``output_names`` are entries in ``process_dir`` such as ``GEFS.zarr.zip`` (S3)
-    or ``GEFS.zarr`` (local), plus any side files the API reads. S3 outputs are
-    uploaded; local store directories are staged next to the destination and
-    swapped in. The run-time pickle is how the API and the next scheduled ingest
-    see that a new run exists, so it is only written once every output is in place.
+    ``output_names`` are entries in ``process_dir``: zarr directory stores such as
+    ``GEFS.zarr`` (see ``upload_store``) or side files the API reads. The
+    run-time pickle is how the API and the next scheduled ingest see that a new
+    run exists, so it is only written once every output is in place.
     """
-    for name in output_names:
-        _publish_file_or_store(name, process_dir, publish_dir, save_type, s3)
+    import obstore
 
-    with open(os.path.join(process_dir, time_pickle_name), "wb") as f:
-        pickle.dump(run_time, f)
-    _publish_file_or_store(time_pickle_name, process_dir, publish_dir, save_type, s3)
+    for name in output_names:
+        source_path = os.path.join(process_dir, name)
+        if os.path.isdir(source_path):
+            upload_store(source_path, remote, name)
+        else:
+            _put_files(remote, [(source_path, name)])
+        logger.info("Published %s", name)
+
+    obstore.put(
+        remote,
+        time_pickle_name,
+        pickle.dumps(run_time),
+        attributes=_put_attributes(remote),
+    )
 
 
 def write_final_zarr(
@@ -840,9 +904,10 @@ def write_final_zarr(
 
     One chunk holds every variable and time step for a ``final_chunk`` square of
     grid cells, so a point forecast is a single chunk read. ``stacked`` must
-    already be padded to a multiple of ``final_chunk``. ``store_path`` ending in
-    ``.zip`` writes an uncompressed ZipStore for S3 upload, otherwise a local
-    directory store. Values are rounded to 5 decimals to help compression.
+    already be padded to a multiple of ``final_chunk``. ``store_path`` is a local
+    directory store, published with ``publish_ingest_run``. Values are rounded to
+    5 decimals to help compression. Empty (all-NaN) chunks are written too, so a
+    publish over the previous run replaces every chunk.
 
     Dask writes tiles about the size of a source chunk and zarr splits each one
     into the small final chunks. Rechunking dask all the way down to 3x3 or 5x5
@@ -850,21 +915,23 @@ def write_final_zarr(
     102 s / 7.1 GB peak versus 153 s / 7.9 GB (GEFS-sized: 86 s / 3.3 GB versus
     135 s / 4.3 GB), with identical output. Tiles are a multiple of
     ``final_chunk`` so every zarr chunk is written exactly once.
+
+    Stores are not sharded: 200 x 200 shards made every local point read about
+    0.4 ms slower (zarr's sharding codec), and uploading the small chunk files
+    with ``UPLOAD_CONCURRENCY`` parallel requests is fast enough (HRRR's 76k
+    objects in about 4 min to OVH).
     """
     import dask
     import zarr
 
-    if store_path.endswith(".zip"):
-        store = zarr.storage.ZipStore(store_path, mode="a", compression=0)
-    else:
-        store = zarr.storage.LocalStore(store_path)
-
+    store = zarr.storage.LocalStore(store_path)
     zarr_array = zarr.create_array(
         store=store,
         shape=stacked.shape,
         chunks=(stacked.shape[0], stacked.shape[1], final_chunk, final_chunk),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
         dtype="float32",
+        config={"write_empty_chunks": True},
     )
 
     tile_y = final_chunk * max(1, round(stacked.chunks[2][0] / final_chunk))
@@ -877,117 +944,59 @@ def write_final_zarr(
     close_store(store)
 
 
-def archive_tmp_zarr_and_upload(
-    *,
-    tmp_zarr_path: str,
-    s3_path: str,
-    archive_member_name: str,
-    s3,
-) -> None:
-    """Tar/gzip a temporary zarr directory, upload to S3, and write done marker."""
-    tmp_tar_path = f"{tmp_zarr_path}.tar.gz"
-    with tarfile.open(tmp_tar_path, "w:gz") as tar:
-        tar.add(tmp_zarr_path, arcname=archive_member_name)
-
-    s3.put_file(tmp_tar_path, s3_path)
-    if os.path.exists(tmp_tar_path):
-        os.remove(tmp_tar_path)
-    shutil.rmtree(tmp_zarr_path, ignore_errors=True)
-    s3.touch(s3_path.replace(".tar.gz", ".done"))
-
-
-def _delete_historic_archive_from_s3(s3, s3_tar_path: str) -> None:
-    """Delete a historic zarr archive and its completion marker from S3."""
-    s3_zarr_path = s3_tar_path.removesuffix(".tar.gz")
-    for path in (
-        s3_tar_path,
-        s3_zarr_path,
-        s3_tar_path.replace(".tar.gz", ".done"),
-    ):
-        if s3.exists(path):
-            s3.rm(path, recursive=True)
-
-
-def _validate_historic_zarr_variables(
-    zarr_path: str,
-    expected_vars: Iterable[str] | None,
-) -> None:
-    """Validate that a local historic zarr contains every expected variable."""
-    if expected_vars is None:
-        return
-
-    import zarr
-
-    z = zarr.open(zarr_path, mode="r")
-    store_vars = set(z.keys())
-    expected_set = set(expected_vars)
-    missing_vars = sorted(expected_set - store_vars)
-    if missing_vars:
-        raise ValueError(
-            f"Missing variables in extracted historic zarr {zarr_path}: "
-            f"{missing_vars}. Found variables: {sorted(store_vars)}"
-        )
-
-
-def download_extract_historic_archive(
-    *,
-    s3,
-    historic_path: str,
-    final_zarr_name: str,
-    extracted_store_name: str,
-    local_temp_dir: str,
-    expected_vars: Iterable[str] | None = None,
-) -> str | None:
-    """Helper to download and extract a historic archive to a local zarr path."""
-    if "://" in local_temp_dir:
-        raise ValueError(
-            f"local_temp_dir must be a local filesystem path, got {local_temp_dir!r}"
-        )
-
-    os.makedirs(local_temp_dir, exist_ok=True)
-    local_zarr_path = os.path.join(local_temp_dir, final_zarr_name)
-
-    tar_name = f"{final_zarr_name}.tar.gz"
-    s3_tar_path = f"{historic_path}/{tar_name}"
-
-    if os.path.exists(local_zarr_path):
-        try:
-            _validate_historic_zarr_variables(local_zarr_path, expected_vars)
-        except Exception:
-            shutil.rmtree(local_zarr_path, ignore_errors=True)
-            _delete_historic_archive_from_s3(s3, s3_tar_path)
-            raise
-        return local_zarr_path
-
-    if not s3.exists(s3_tar_path):
-        return None
-
-    local_tar_path = os.path.join(local_temp_dir, tar_name)
-    timestamp_tag = final_zarr_name.replace(".zarr", "")
-    extract_dir = os.path.join(local_temp_dir, f"extract_{timestamp_tag}")
+def remote_object_exists(remote, key: str) -> bool:
+    """True if ``key`` exists on the remote (a local remote raises a different error)."""
+    import obstore
 
     try:
-        s3.get_file(s3_tar_path, local_tar_path)
-        os.makedirs(extract_dir, exist_ok=True)
-        with tarfile.open(local_tar_path, "r:gz") as tar:
-            tar.extractall(path=extract_dir, filter="data")
+        obstore.head(remote, key)
+    except (FileNotFoundError, obstore.exceptions.NotFoundError):
+        return False
+    return True
 
-        extracted_source = os.path.join(extract_dir, extracted_store_name)
-        if os.path.exists(extracted_source):
-            shutil.move(extracted_source, local_zarr_path)
 
-        if os.path.exists(local_zarr_path):
-            _validate_historic_zarr_variables(local_zarr_path, expected_vars)
-    except Exception:
-        shutil.rmtree(local_zarr_path, ignore_errors=True)
-        _delete_historic_archive_from_s3(s3, s3_tar_path)
-        raise
-    finally:
-        if os.path.exists(local_tar_path):
-            os.remove(local_tar_path)
-        shutil.rmtree(extract_dir, ignore_errors=True)
+def history_store_exists(remote, name: str) -> bool:
+    """True once history store ``name`` is fully published (root metadata last)."""
+    return remote_object_exists(remote, f"{name}/zarr.json")
 
-    return local_zarr_path if os.path.exists(local_zarr_path) else None
+
+def publish_history_store(local_path: str, remote, name: str) -> None:
+    """Upload one finished history store to the history remote, then drop it."""
+    upload_store(local_path, remote, name)
+    shutil.rmtree(local_path, ignore_errors=True)
+    logger.info("Published history store %s", name)
+
+
+def open_history_store(remote, name: str, expected_vars: Iterable[str]):
+    """Open a published history store read-only, straight from the remote.
+
+    Every history run is published before the merge, so a missing store means it
+    was lost and the run fails rather than publishing a forecast with a gap. A
+    store missing an expected variable (written by an older ingest) is deleted so
+    the next run rebuilds it, and the run fails.
+    """
+    import obstore
+    import zarr
+
+    if not history_store_exists(remote, name):
+        raise RuntimeError(f"History store {name} is missing from {remote}")
+
+    group = zarr.open_group(
+        zarr.storage.ObjectStore(remote, read_only=True), path=name, mode="r"
+    )
+    missing_vars = sorted(set(expected_vars) - set(group.keys()))
+    if missing_vars:
+        stale_keys = [
+            meta["path"]
+            for batch in obstore.list(remote, prefix=f"{name}/")
+            for meta in batch
+        ]
+        obstore.delete(remote, stale_keys)
+        raise ValueError(
+            f"History store {name} is missing variables {missing_vars}; "
+            "deleted it so the next run rebuilds it"
+        )
+    return group
 
 
 def mask_invalid_data(daskArray, ignoreAxis=None):

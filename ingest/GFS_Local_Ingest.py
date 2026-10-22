@@ -24,7 +24,6 @@ import os
 import shutil
 import time
 import warnings
-from concurrent.futures import ThreadPoolExecutor
 
 import dask
 import dask.array as da
@@ -37,7 +36,6 @@ loaded = load_dotenv(dotenv_path, override=True)
 
 import numpy as np
 import pandas as pd
-import s3fs
 import xarray as xr
 from herbie import HerbieLatest
 
@@ -47,17 +45,19 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
     FORECAST_LEAD_RANGES,
-    archive_tmp_zarr_and_upload,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
     deaccumulate_to_hourly_rate,
-    download_extract_historic_archive,
+    history_store_exists,
     interp_time_take_blend,
     make_herbie_save_dir,
     mask_invalid_data,
     mask_invalid_refc,
+    open_history_store,
+    open_remote,
     pad_to_chunk_size,
     positive_int_env,
+    publish_history_store,
     publish_ingest_run,
     read_published_run_time,
     validate_stacked_time_alignment,
@@ -225,8 +225,6 @@ GFS_RETRY_SLEEP_SECONDS = positive_int_env("herbie_retry_sleep_seconds", 20)
 # GFS writes many large variables; these defaults were tuned for the GFS host.
 DEFAULT_ZARR_WORKERS = 12
 DEFAULT_ZARR_CONCURRENCY = 12
-# Concurrent S3 history archive downloads
-HISTORIC_ARCHIVE_DOWNLOAD_WORKERS = 12
 
 
 def download_gfs_subset(
@@ -355,7 +353,6 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
     configure_herbie_request_timeouts()
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     zarr_store_workers = configure_zarr_writes(
         DEFAULT_ZARR_WORKERS, DEFAULT_ZARR_CONCURRENCY
     )
@@ -368,10 +365,15 @@ def main() -> None:
     shutil.rmtree(forecast_process_dir, ignore_errors=True)
     os.makedirs(tmp_dir, exist_ok=True)
 
-    publish_dir = forecast_path + "/" + ingest_version
-    if save_type == "Download":
-        os.makedirs(publish_dir, exist_ok=True)
-        os.makedirs(historic_path, exist_ok=True)
+    forecast_remote = open_remote(
+        forecast_path + "/" + ingest_version,
+        save_type,
+        aws_access_key_id,
+        aws_secret_access_key,
+    )
+    history_remote = open_remote(
+        historic_path, save_type, aws_access_key_id, aws_secret_access_key
+    )
 
     herbie_save_dir = make_herbie_save_dir(tmp_dir)
 
@@ -391,9 +393,7 @@ def main() -> None:
     base_time = latest_run.date
 
     # %% Skip the run if this cycle has already been published
-    previous_base_time = read_published_run_time(
-        publish_dir + "/GFS.time.pickle", save_type, s3
-    )
+    previous_base_time = read_published_run_time(forecast_remote, "GFS.time.pickle")
     if (
         not force_update
         and previous_base_time is not None
@@ -516,18 +516,10 @@ def main() -> None:
     historic_offsets = list(range(his_period, 0, -GFS_CYCLE_HOURS))
     for hours_offset in historic_offsets:
         timestamp = historic_run_stamp(base_time, hours_offset)
-        if save_type == "S3":
-            s3_path = (
-                f"{historic_path}/{GFS_HISTORIC_STORE_PREFIX}{timestamp}.zarr.tar.gz"
-            )
-            if s3.exists(s3_path.replace(".tar.gz", ".done")):
-                logger.info("S3 file exists, skipping: %s", s3_path)
-                continue
-        else:
-            local_path = f"{historic_path}/{GFS_HISTORIC_STORE_PREFIX}{timestamp}.zarr"
-            if os.path.exists(local_path.replace(".zarr", ".done")):
-                logger.info("Local file exists, skipping: %s", local_path)
-                continue
+        hist_store_name = f"{GFS_HISTORIC_STORE_PREFIX}{timestamp}.zarr"
+        if history_store_exists(history_remote, hist_store_name):
+            logger.info("History store exists, skipping: %s", hist_store_name)
+            continue
 
         hist_run_date = base_time - pd.Timedelta(hours=hours_offset)
         logger.info("Downloading historic data: %s", timestamp)
@@ -597,84 +589,41 @@ def main() -> None:
             )
         del xarray_hist_merged
 
-        # Publish the archive, then a done marker so later runs skip this cycle
-        if save_type == "S3":
-            if no_upload:
-                logger.info(
-                    "NO_UPLOAD enabled, skipping historic S3 archive upload: %s",
-                    s3_path,
-                )
-                shutil.rmtree(
-                    hist_process_path + "_GFS_Hist_TMP.zarr", ignore_errors=True
-                )
-            else:
-                archive_tmp_zarr_and_upload(
-                    tmp_zarr_path=hist_process_path + "_GFS_Hist_TMP.zarr",
-                    s3_path=s3_path,
-                    archive_member_name="GFS_Hist.zarr",
-                    s3=s3,
-                )
+        # Publish the store; its root metadata goes last, so later runs skip
+        # this cycle only once it is complete
+        if save_type == "S3" and no_upload:
+            logger.info(
+                "NO_UPLOAD enabled, skipping history upload: %s", hist_store_name
+            )
+            shutil.rmtree(hist_process_path + "_GFS_Hist_TMP.zarr", ignore_errors=True)
         else:
-            os.rename(hist_process_path + "_GFS_Hist_TMP.zarr", local_path)
-            with open(local_path.replace(".zarr", ".done"), "w") as f:
-                f.write("Done")
+            publish_history_store(
+                hist_process_path + "_GFS_Hist_TMP.zarr",
+                history_remote,
+                hist_store_name,
+            )
 
         logger.info("Completed historic data processing: %s", timestamp)
 
-    # %% Locate the history archives to merge ahead of the forecast
-    if save_type == "S3":
-        local_temp_dir = forecast_process_path + "_s3_temp_downloads"
-        os.makedirs(local_temp_dir, exist_ok=True)
-
-        def download_and_extract(timestamp):
-            extracted_path = download_extract_historic_archive(
-                s3=s3,
-                historic_path=historic_path,
-                final_zarr_name=f"{GFS_HISTORIC_STORE_PREFIX}{timestamp}.zarr",
-                extracted_store_name="GFS_Hist.zarr",
-                local_temp_dir=local_temp_dir,
-                expected_vars=zarr_vars,
-            )
-            # Every history run was archived above, so a missing one means the
-            # archive was lost; fail rather than publish a store with a gap.
-            if extracted_path is None:
-                raise RuntimeError(
-                    f"GFS history archive {GFS_HISTORIC_STORE_PREFIX}{timestamp} is missing from "
-                    f"{historic_path}"
-                )
-            return extracted_path
-
-        timestamps = [
-            historic_run_stamp(base_time, hours_offset)
-            for hours_offset in historic_offsets
-        ]
-        logger.info(
-            "Downloading and extracting %d archives from S3...", len(timestamps)
+    # %% Open the history stores to merge ahead of the forecast
+    historic_stores = [
+        open_history_store(
+            history_remote,
+            f"{GFS_HISTORIC_STORE_PREFIX}"
+            f"{historic_run_stamp(base_time, hours_offset)}.zarr",
+            zarr_vars,
         )
-        with ThreadPoolExecutor(
-            max_workers=HISTORIC_ARCHIVE_DOWNLOAD_WORKERS
-        ) as executor:
-            results = list(executor.map(download_and_extract, timestamps))
-
-        historic_zarr_paths = results
-    else:
-        historic_zarr_paths = [
-            f"{historic_path}/{GFS_HISTORIC_STORE_PREFIX}"
-            f"{historic_run_stamp(base_time, hours_offset)}.zarr"
-            for hours_offset in historic_offsets
-        ]
-        missing_paths = [p for p in historic_zarr_paths if not os.path.exists(p)]
-        if missing_paths:
-            raise RuntimeError(f"GFS history stores are missing: {missing_paths}")
+        for hours_offset in historic_offsets
+    ]
 
     # %% Stack history and forecast into the (variable, time, y, x) layout
     dask_var_arrays_list = []
     dask_interp_arrays = []
 
     for dask_var in zarr_vars:
-        for historic_zarr_path in historic_zarr_paths:
+        for historic_store in historic_stores:
             dask_var_arrays_list.append(
-                da.from_zarr(historic_zarr_path, component=dask_var, inline_array=True)
+                da.from_zarr(historic_store[dask_var], inline_array=True)
             )
 
         dask_var_arrays_stacked = da.stack(
@@ -767,7 +716,7 @@ def main() -> None:
     )
     stacked_array_padded = pad_to_chunk_size(stacked_array_interp, final_chunk)
 
-    gfs_store_name = "GFS.zarr.zip" if save_type == "S3" else "GFS.zarr"
+    gfs_store_name = "GFS.zarr"
     write_final_zarr(
         stacked_array_padded,
         forecast_process_dir + "/" + gfs_store_name,
@@ -784,9 +733,7 @@ def main() -> None:
             base_time,
             "GFS.time.pickle",
             process_dir=forecast_process_dir,
-            publish_dir=publish_dir,
-            save_type=save_type,
-            s3=s3,
+            remote=forecast_remote,
         )
 
     # %% Clean up

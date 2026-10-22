@@ -16,7 +16,7 @@ import zarr
 
 from API.constants.api_const import MAX_ZARR_READ_RETRIES
 from API.constants.shared_const import INGEST_VERSION_STR, MISSING_DATA
-from API.io.ZarrHelpers import _add_custom_header, init_ERA5, setup_testing_zipstore
+from API.io.ZarrHelpers import _add_custom_header, init_ERA5, open_testing_zarr
 
 DATA_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"
@@ -294,24 +294,28 @@ def update_zarr_store(
             # client-level hook is active.
             aio_sess = _aio_session.AioSession()
             aio_sess.register("before-send.s3", _add_custom_header)
+            # zarr's FsspecStore drives the filesystem from its own event loop,
+            # so it must be created asynchronous.
             s3 = s3fs.S3FileSystem(
                 anon=True,
-                asynchronous=False,
+                asynchronous=True,
                 endpoint_url="https://api.pirateweather.net/files/",
                 skip_instance_cache=True,
                 session=aio_sess,
             )
         elif save_type == "S3Zarr":
             s3 = s3fs.S3FileSystem(
-                key=aws_access_key_id, secret=aws_secret_access_key, version_aware=True
+                key=aws_access_key_id,
+                secret=aws_secret_access_key,
+                version_aware=True,
+                asynchronous=True,
             )
         else:
             s3 = None
 
-        gfs_store = setup_testing_zipstore(
+        stores.GFS_Zarr = open_testing_zarr(
             s3, s3_bucket, ingest_version, save_type, "GFS"
         )
-        stores.GFS_Zarr = zarr.open(gfs_store, mode="r")
         logger.info("GFS Read")
         try:
             stores.URMA_Zarr = _testing_store(
@@ -427,6 +431,6 @@ def _testing_store(
     *,
     logger: logging.Logger,
 ):
-    store = setup_testing_zipstore(s3, s3_bucket, ingest_version, save_type, name)
+    opened = open_testing_zarr(s3, s3_bucket, ingest_version, save_type, name)
     logger.info("%s Read", name)
-    return zarr.open(store, mode="r")
+    return opened

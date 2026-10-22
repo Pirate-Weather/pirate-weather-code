@@ -24,7 +24,6 @@ import dask.array as da
 import netCDF4 as nc
 import numpy as np
 import pandas as pd
-import s3fs
 import xarray as xr
 import zarr
 from dotenv import find_dotenv, load_dotenv
@@ -37,9 +36,9 @@ from API.ingest_utils import (
     configure_zarr_writes,
     interp_time_take_blend,
     mask_invalid_data,
+    open_remote,
     pad_to_chunk_size,
     positive_int_env,
-    promote_staged_dir,
     publish_ingest_run,
     read_published_run_time,
     validate_stacked_time_alignment,
@@ -147,7 +146,6 @@ forecast_process_path = forecast_process_dir + "/NBM_Process"
 tmp_dir = forecast_process_dir + "/Downloads"
 
 forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/NBM")
-local_forecast_version_dir = forecast_path + "/" + ingest_version
 
 save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
@@ -277,10 +275,8 @@ def _nbm_grib_to_netcdf(
 def main() -> None:
     """Run the NBM forecast ingest."""
     logging.basicConfig(level=logging.INFO)
-    nbm_staged_path: str | None = None
     # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
     configure_herbie_request_timeouts()
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
 
     # The final write used dask's default thread pool (one thread per CPU).
     zarr_store_workers = configure_zarr_writes(default_workers=os.cpu_count() or 2)
@@ -304,8 +300,12 @@ def main() -> None:
     shutil.rmtree(forecast_process_dir, ignore_errors=True)
     os.makedirs(tmp_dir, exist_ok=True)
 
-    if save_type == "Download":
-        os.makedirs(local_forecast_version_dir, exist_ok=True)
+    forecast_remote = open_remote(
+        forecast_path + "/" + ingest_version,
+        save_type,
+        aws_access_key_id,
+        aws_secret_access_key,
+    )
 
     T0 = time.time()
 
@@ -323,9 +323,7 @@ def main() -> None:
     base_time = latest_run.date
 
     # %% Skip the run if this cycle has already been published
-    previous_base_time = read_published_run_time(
-        local_forecast_version_dir + "/NBM.time.pickle", save_type, s3
-    )
+    previous_base_time = read_published_run_time(forecast_remote, "NBM.time.pickle")
     if previous_base_time is not None and previous_base_time >= base_time:
         logger.info("No Update to NBM, ending")
         return
@@ -610,16 +608,6 @@ def main() -> None:
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
     # %% Interpolate to hourly and write the final store
-    # Local runs write straight into "<publish dir>/NBM.zarr.partial" so the large
-    # store is promoted with a rename instead of a copy.
-    if save_type == "S3":
-        nbm_store_path = forecast_process_dir + "/NBM.zarr.zip"
-    else:
-        nbm_staged_path = local_forecast_version_dir + "/NBM.zarr.partial"
-        if os.path.exists(nbm_staged_path):
-            shutil.rmtree(nbm_staged_path)
-        nbm_store_path = nbm_staged_path
-
     stage_start = time.perf_counter()
     daskVarArrayStackDiskInterp = interp_time_take_blend(
         daskVarArrayStackDisk,
@@ -633,7 +621,7 @@ def main() -> None:
     )
     write_final_zarr(
         daskVarArrayStackDiskInterpPad,
-        nbm_store_path,
+        forecast_process_dir + "/NBM.zarr",
         final_chunk,
         zarr_store_workers,
     )
@@ -643,34 +631,13 @@ def main() -> None:
 
     # %% Publish the stores, then the run time the API uses to detect them
     stage_start = time.perf_counter()
-    if save_type == "S3":
-        publish_ingest_run(
-            ["NBM.zarr.zip"],
-            base_time,
-            "NBM.time.pickle",
-            process_dir=forecast_process_dir,
-            publish_dir=local_forecast_version_dir,
-            save_type=save_type,
-            s3=s3,
-        )
-    else:
-        if nbm_staged_path is None:
-            raise RuntimeError(
-                "Expected staged local zarr paths for Download publish, but they were not set"
-            )
-
-        # The local stores already sit in the publish directory, so only the
-        # rename and the run time remain.
-        promote_staged_dir(nbm_staged_path, local_forecast_version_dir + "/NBM.zarr")
-        publish_ingest_run(
-            [],
-            base_time,
-            "NBM.time.pickle",
-            process_dir=forecast_process_dir,
-            publish_dir=local_forecast_version_dir,
-            save_type=save_type,
-            s3=s3,
-        )
+    publish_ingest_run(
+        ["NBM.zarr"],
+        base_time,
+        "NBM.time.pickle",
+        process_dir=forecast_process_dir,
+        remote=forecast_remote,
+    )
     _timing_log(
         f"NBM_FORECAST stage=publish_output elapsed={time.perf_counter() - stage_start:.2f}s"
     )

@@ -20,7 +20,6 @@ import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
-import s3fs
 import xarray as xr
 from dotenv import find_dotenv, load_dotenv
 
@@ -44,6 +43,7 @@ from API.ingest_utils import (
     deaccumulate_to_hourly_rate,
     make_herbie_save_dir,
     mask_invalid_data,
+    open_remote,
     pad_to_chunk_size,
     positive_int_env,
     prune_old_files,
@@ -188,7 +188,6 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
     configure_herbie_request_timeouts()
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     zarr_store_workers = configure_zarr_writes()
 
     process_chunk = CHUNK_SIZES["HRDPS"]
@@ -200,9 +199,12 @@ def main() -> None:
     herbie_save_dir = make_herbie_save_dir(tmp_dir)
     prune_old_files(herbie_save_dir, DOWNLOAD_CACHE_MAX_AGE_HOURS)
 
-    publish_dir = forecast_path + "/" + ingest_version
-    if save_type == "Download":
-        os.makedirs(publish_dir, exist_ok=True)
+    forecast_remote = open_remote(
+        forecast_path + "/" + ingest_version,
+        save_type,
+        aws_access_key_id,
+        aws_secret_access_key,
+    )
 
     T0 = time.time()
 
@@ -220,9 +222,7 @@ def main() -> None:
     base_time = latest_run.date
 
     # %% Skip the run if this cycle has already been published
-    previous_base_time = read_published_run_time(
-        publish_dir + "/HRDPS.time.pickle", save_type, s3
-    )
+    previous_base_time = read_published_run_time(forecast_remote, "HRDPS.time.pickle")
     if previous_base_time is not None and previous_base_time >= base_time:
         logger.info("No Update to HRDPS, ending")
         return
@@ -353,7 +353,7 @@ def main() -> None:
         daskVarArrayStackDisk, final_chunk
     )
 
-    hrdps_store_name = "HRDPS.zarr.zip" if save_type == "S3" else "HRDPS.zarr"
+    hrdps_store_name = "HRDPS.zarr"
     write_final_zarr(
         daskVarArrayStackDiskInterpPad,
         forecast_process_dir + "/" + hrdps_store_name,
@@ -367,9 +367,7 @@ def main() -> None:
         base_time,
         "HRDPS.time.pickle",
         process_dir=forecast_process_dir,
-        publish_dir=publish_dir,
-        save_type=save_type,
-        s3=s3,
+        remote=forecast_remote,
     )
 
     # %% Clean up, keeping the Herbie download cache

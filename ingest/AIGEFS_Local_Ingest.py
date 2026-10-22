@@ -20,7 +20,6 @@ import warnings
 import dask.array as da
 import numpy as np
 import pandas as pd
-import s3fs
 import xarray as xr
 import zarr
 from herbie import HerbieLatest
@@ -39,6 +38,7 @@ from API.ingest_utils import (
     configure_zarr_writes,
     interp_time_take_blend,
     mask_invalid_data,
+    open_remote,
     pad_to_chunk_size,
     positive_int_env,
     publish_ingest_run,
@@ -136,7 +136,6 @@ def main() -> None:
     configure_herbie_request_timeouts()
     # Use the repository Herbie templates for the current AWS/NOMADS paths
     register_aws_aigfs_aigefs_templates()
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     # The final write used dask's default thread pool (one thread per CPU).
     zarr_store_workers = configure_zarr_writes(default_workers=os.cpu_count() or 2)
 
@@ -147,9 +146,12 @@ def main() -> None:
     shutil.rmtree(forecast_process_dir, ignore_errors=True)
     os.makedirs(tmp_dir, exist_ok=True)
 
-    publish_dir = forecast_path + "/" + ingest_version
-    if save_type == "Download":
-        os.makedirs(publish_dir, exist_ok=True)
+    forecast_remote = open_remote(
+        forecast_path + "/" + ingest_version,
+        save_type,
+        aws_access_key_id,
+        aws_secret_access_key,
+    )
 
     T0 = time.time()
 
@@ -168,9 +170,7 @@ def main() -> None:
     base_time = latest_run.date
 
     # %% Skip the run if this cycle has already been published
-    previous_base_time = read_published_run_time(
-        publish_dir + "/AIGEFS.time.pickle", save_type, s3
-    )
+    previous_base_time = read_published_run_time(forecast_remote, "AIGEFS.time.pickle")
     if previous_base_time is not None and previous_base_time >= base_time:
         logger.info("No Update to AIGEFS, ending")
         return
@@ -324,7 +324,7 @@ def main() -> None:
         daskVarArrayStackDiskInterp, final_chunk
     )
 
-    aigefs_store_name = "AIGEFS.zarr.zip" if save_type == "S3" else "AIGEFS.zarr"
+    aigefs_store_name = "AIGEFS.zarr"
     write_final_zarr(
         daskVarArrayStackDiskInterpPad,
         forecast_process_dir + "/" + aigefs_store_name,
@@ -338,9 +338,7 @@ def main() -> None:
         base_time,
         "AIGEFS.time.pickle",
         process_dir=forecast_process_dir,
-        publish_dir=publish_dir,
-        save_type=save_type,
-        s3=s3,
+        remote=forecast_remote,
     )
 
     # %% Clean up

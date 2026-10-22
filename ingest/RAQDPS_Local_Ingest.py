@@ -35,7 +35,6 @@ import dask.array as da
 import herbie.models as herbie_model_templates
 import numpy as np
 import requests
-import s3fs
 import xarray as xr
 import zarr.storage
 from dask.diagnostics import ProgressBar
@@ -49,10 +48,12 @@ from API.ingest_utils import (
     configure_herbie_request_timeouts,
     configure_zarr_writes,
     mask_invalid_data,
+    open_remote,
     pad_to_chunk_size,
     positive_int_env,
     publish_ingest_run,
     read_published_run_time,
+    remote_object_exists,
     write_final_zarr,
 )
 from API.raqdps_herbie_template import raqdps
@@ -109,11 +110,6 @@ process_chunk_bytes = process_chunk * process_chunk * np.dtype(np.float32).items
 
 RAQDPS_DOWNLOAD_RETRIES = positive_int_env("herbie_download_retries", 3)
 RAQDPS_RETRY_SLEEP_SECONDS = positive_int_env("herbie_retry_sleep_seconds", 10)
-
-
-def published_path(filename):
-    """Return the published output path for one RAQDPS sidecar file."""
-    return os.path.join(forecast_path, ingest_version, filename)
 
 
 def build_herbie(run_time, variable, forecast_hour, *, verbose=False):
@@ -345,15 +341,10 @@ def prepare_directories():
     shutil.rmtree(forecast_process_dir, ignore_errors=True)
     os.makedirs(tmp_dir, exist_ok=True)
 
-    if save_type != "S3":
-        os.makedirs(os.path.join(forecast_path, ingest_version), exist_ok=True)
 
-
-def already_processed(base_time, s3):
+def already_processed(base_time, forecast_remote):
     """Return True if the published RAQDPS store is already current."""
-    previous_base_time = read_published_run_time(
-        published_path(RAQDPS_TIME_PICKLE), save_type, s3
-    )
+    previous_base_time = read_published_run_time(forecast_remote, RAQDPS_TIME_PICKLE)
     if previous_base_time is None:
         return False
     if normalize_utc(previous_base_time) < normalize_utc(base_time):
@@ -361,12 +352,7 @@ def already_processed(base_time, s3):
 
     # The API needs the lat/lon pickle to locate grid cells, so a current run
     # without it must be reprocessed.
-    lat_lon_pickle_path = published_path(RAQDPS_LAT_LON_PICKLE)
-    if save_type == "S3":
-        lat_lon_exists = s3.exists(lat_lon_pickle_path)
-    else:
-        lat_lon_exists = os.path.exists(lat_lon_pickle_path)
-    if not lat_lon_exists:
+    if not remote_object_exists(forecast_remote, RAQDPS_LAT_LON_PICKLE):
         logger.info("RAQDPS time is current, but lat/lon pickle is missing.")
         return False
     return True
@@ -418,7 +404,7 @@ def merge_and_publish(
     forecast_zarr_path,
     reference_shape,
     lat_lon_lookup,
-    s3,
+    forecast_remote,
     zarr_store_workers,
 ):
     """Stack the forecast variables and publish the final RAQDPS store."""
@@ -455,7 +441,7 @@ def merge_and_publish(
     stacked_array_disk = da.from_zarr(stack_path)
     stacked_array_padded = pad_to_chunk_size(stacked_array_disk, final_chunk)
 
-    raqdps_store_name = "RAQDPS.zarr.zip" if save_type == "S3" else "RAQDPS.zarr"
+    raqdps_store_name = "RAQDPS.zarr"
     write_final_zarr(
         stacked_array_padded,
         os.path.join(forecast_process_dir, raqdps_store_name),
@@ -473,9 +459,7 @@ def merge_and_publish(
         base_time,
         RAQDPS_TIME_PICKLE,
         process_dir=forecast_process_dir,
-        publish_dir=os.path.join(forecast_path, ingest_version),
-        save_type=save_type,
-        s3=s3,
+        remote=forecast_remote,
     )
 
 
@@ -487,7 +471,12 @@ def main():
     # Bound Herbie request times
     configure_herbie_request_timeouts()
 
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
+    forecast_remote = open_remote(
+        forecast_path + "/" + ingest_version,
+        save_type,
+        aws_access_key_id,
+        aws_secret_access_key,
+    )
     zarr_store_workers = configure_zarr_writes()
 
     prepare_directories()
@@ -497,7 +486,7 @@ def main():
     base_time = get_latest_raqdps_run()
 
     # %% Skip the run if this cycle (and its lat/lon grid) is already published
-    if already_processed(base_time, s3):
+    if already_processed(base_time, forecast_remote):
         logger.info("RAQDPS store is already up to date. Exiting.")
         return
     logger.info("Processing RAQDPS run %s", base_time)
@@ -513,7 +502,7 @@ def main():
             forecast_zarr_path,
             reference_shape,
             lat_lon_lookup,
-            s3,
+            forecast_remote,
             zarr_store_workers,
         )
     finally:

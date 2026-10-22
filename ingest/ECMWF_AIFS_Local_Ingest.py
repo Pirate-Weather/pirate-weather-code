@@ -21,7 +21,6 @@ from contextlib import nullcontext
 import dask.array as da
 import numpy as np
 import pandas as pd
-import s3fs
 import xarray as xr
 from dask.diagnostics import ProgressBar
 from herbie import HerbieLatest
@@ -40,6 +39,7 @@ from API.ingest_utils import (
     VALID_DATA_MIN,
     configure_zarr_writes,
     interp_time_take_blend,
+    open_remote,
     pad_to_chunk_size,
     positive_int_env,
     publish_ingest_run,
@@ -179,7 +179,6 @@ def main() -> None:
     """Run the ECMWF AIFS forecast ingest."""
     logging.basicConfig(level=logging.INFO)
 
-    s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
     # The AIFS final write has always used 4 workers (env can still override).
     zarr_store_workers = configure_zarr_writes(default_workers=4)
 
@@ -190,9 +189,12 @@ def main() -> None:
     shutil.rmtree(forecast_process_dir, ignore_errors=True)
     os.makedirs(tmp_dir, exist_ok=True)
 
-    publish_dir = forecast_path + "/" + ingest_version
-    if save_type == "Download":
-        os.makedirs(publish_dir, exist_ok=True)
+    forecast_remote = open_remote(
+        forecast_path + "/" + ingest_version,
+        save_type,
+        aws_access_key_id,
+        aws_secret_access_key,
+    )
 
     T0 = time.time()
 
@@ -211,7 +213,7 @@ def main() -> None:
 
     # %% Skip the run if this cycle has already been published
     previous_base_time = read_published_run_time(
-        publish_dir + "/ECMWF_AIFS.time.pickle", save_type, s3
+        forecast_remote, "ECMWF_AIFS.time.pickle"
     )
     if previous_base_time is not None and previous_base_time >= base_time:
         logger.info("No Update to ECMWF AIFS, ending")
@@ -397,7 +399,7 @@ def main() -> None:
         daskVarArrayStackDiskInterp, final_chunk
     )
 
-    aifs_store_name = "ECMWF_AIFS.zarr.zip" if save_type == "S3" else "ECMWF_AIFS.zarr"
+    aifs_store_name = "ECMWF_AIFS.zarr"
     with aifs_progress_bar():
         write_final_zarr(
             daskVarArrayStackDiskInterpPad,
@@ -412,9 +414,7 @@ def main() -> None:
         base_time,
         "ECMWF_AIFS.time.pickle",
         process_dir=forecast_process_dir,
-        publish_dir=publish_dir,
-        save_type=save_type,
-        s3=s3,
+        remote=forecast_remote,
     )
 
     # %% Clean up

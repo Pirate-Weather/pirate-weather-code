@@ -169,13 +169,26 @@ Replaces `init_ERA5` (`API/io/ZarrHelpers.py`) and `_load_era5_slice`
 ### Move to OVHCloud
 Including a Terraform setup script.
 
-### Sharded zarr stores on object storage, no zip files
-Shard along y/x so each shard covers a decent part of the grid. Let the
-history-keeping ingests (GFS, URMA, RTMA, ECMWF, SILAM) read history straight from
-object storage instead of the `archive_tmp_zarr_and_upload` /
-`download_extract_historic_archive` tarballs (check this works). Keep the
-copy-on-publish step in `publish_ingest_run`: the process location may differ from
-the final store.
+### Zarr stores on object storage, no zip files
+The served stores are now unsharded `<MODEL>.zarr` directories, published with
+obstore (`publish_ingest_run`, `upload_concurrency` uploads at once);
+short-term history is plain zarr stores on the same kind of remote, merged straight
+from it. Servers pull the stores with `rclone`/`aws s3 sync`. Still to do:
+- Re-publish the static `ETOPO_DA_C` store as a zarr v3 directory; the API's
+  TESTING stage opens `<name>.zarr` and no longer reads zips.
+- Retire `API/zip_sync.sh` and `tests/api/test_zip_sync.py` once the S3 sync
+  replaces it (it still fetches `<MODEL>.zarr.zip`, which is no longer written).
+- NBM is about 417k objects per run (3x3 chunks); check its upload and server sync
+  times, and shard NBM alone if they are too slow.
+- Expire old history stores on the remote (nothing deletes them).
+
+### Optimize variable quantization and compression
+Every variable is stored as float32 rounded to 5 decimals with Blosc zstd level 3 +
+shuffle (`write_final_zarr`). Quantize each variable to its physically meaningful
+precision (e.g. bit rounding or a scale/offset per variable) and pick the compressor
+from measurements, to shrink stores and upload time. In local benchmarks the
+compressor choice moved point reads by ≤0.2 ms, so size is the main gain; keep any
+change that adds read-time decoding cost measured against that.
 
 ### Response code performance pass
 Profile the request path for room to improve; read performance is the first priority

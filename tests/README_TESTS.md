@@ -52,7 +52,7 @@ PW_RUN_LIVE_TESTS=1 python -m pytest tests/live
 |---|---|
 | `PW_API` | everything that uses `live_client` (S3 proxy and production API) |
 | `GRIBSTREAM_API_KEY` | the four GribStream comparisons |
-| `PW_URMA_DATA_DIR` (default `/mnt/nvme/data/ProdSync`) | `test_compare_urma_gribstream.py`: local `URMA_Hist.zarr.zip` + `GFS.zarr.zip` |
+| `PW_URMA_DATA_DIR` (default `/mnt/nvme/data/ProdSync`) | `test_compare_urma_gribstream.py`: local `URMA_Hist.zarr` + `GFS.zarr` |
 | `PW_URMA_OUTPUT_ROOT` (default `/mnt/nvme/data/Prod/URMA`) | `test_urma_output_live.py`: output of a local URMA ingest |
 | `wgrib2_path` or `wgrib2` on `PATH` | `test_hrrr_6h_ingest.py` |
 
@@ -133,9 +133,9 @@ runs a whole ingest end to end; only the live RTMA-RU and HRRR_6H tests do that.
 |---|---|
 | `test_ingest_output_layout.py` | Each ingest's `zarr_vars` order matches the index map the API reads it with in `API/constants/model_const.py` (HRRR, HRRR_6H, SubH, RTMA-RU, URMA, DWD, SILAM, RAQDPS). This is the most important ingest/API contract. |
 | `test_urma_zarr_encoding.py` | URMA's hourly store is written in the format the historic merge reads back (Zarr v3, float32, chunking, names). |
-| `test_historic_archive_extract.py` | Historic archives are validated on extract; incomplete ones are deleted so the next run rebuilds them (#644); `s3://` temp dirs are rejected (#742). |
-| `test_ingest_publish.py` | Publishing a newer run locally fully replaces the previous store (no stale chunks) and the time pickle, written last, carries the new run time that both the API and the next ingest rely on. |
-| `test_write_final_zarr.py` | The shared final-store writer reproduces the stacked array exactly (rounded to 5 decimals, NaN padding) when source chunks are not a multiple of the final chunk, and writes each zarr chunk to the S3 zip store exactly once. |
+| `test_history_stores.py` | Short-term history stores published to the remote are seen as complete and read back; one missing an expected variable fails the merge and is deleted so the next run rebuilds it (#644). |
+| `test_ingest_publish.py` | Publishing a newer run replaces every chunk of the previous store, the time pickle carries the new run time that both the API and the next ingest rely on, and a store's root `zarr.json` is uploaded after its chunks (the completeness marker for history stores). |
+| `test_write_final_zarr.py` | The shared final-store writer reproduces the stacked array exactly (rounded to 5 decimals, NaN padding) when source chunks are not a multiple of the final chunk, and writes every chunk file, all-NaN ones included, so a publish replaces the whole previous run. |
 | `test_ingest_utils_download_retry.py` | Herbie downloads retry a bounded number of times, ignore stale files from earlier runs, pace NOMADS requests and reject NOMADS 302 rate-limit redirects (#772). |
 | `test_ingest_grib_utils_retry.py` | FastHerbie is rebuilt between retries so late-published hours are seen. |
 | `test_nbm_download.py` | NBM downloads fail loudly when FastHerbie swallows worker errors (302, missing or empty file), and recover on retry. |

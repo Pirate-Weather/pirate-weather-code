@@ -1,23 +1,22 @@
-# %% Scratch notebook to view a zip zarr on S3
+# %% Scratch notebook to view a sharded zarr store on S3
 
-# # Open a zipped Zarr store from S3 using s3fs + AWS keys
+# # Open a Zarr store from S3 using s3fs + AWS keys
 #
 # Expected object layout:
-# s3://<bucket>/ForecastTar_v2/<ingest_version>/<model>.zarr.zip
+# s3://<bucket>/ForecastTar_v2/<ingest_version>/<model>.zarr/
 #
 # Example:
-# s3://my-bucket/ForecastTar_v2/v31/GFS.zarr.zip
+# s3://my-bucket/ForecastTar_v2/v31/GFS.zarr/
 
-# Open a Pirate Weather zipped Zarr from S3 using repo helpers + .env
+# Open a Pirate Weather Zarr store from S3 using repo helpers + .env
 
 import os
 
 import pandas as pd
 import s3fs
-import zarr
 from dotenv import load_dotenv
 
-from API.io.ZarrHelpers import setup_testing_zipstore
+from API.io.ZarrHelpers import open_testing_zarr
 
 # %%
 # ---- Load .env ----
@@ -48,13 +47,14 @@ s3 = s3fs.S3FileSystem(
     key=AWS_ACCESS_KEY_ID,
     secret=AWS_SECRET_ACCESS_KEY,
     version_aware=True,
+    asynchronous=True,
 )
 
 
 # %%
-# ---- Build zipped Zarr store using repo helper ----
+# ---- Open the Zarr store using the repo helper ----
 
-store = setup_testing_zipstore(
+opened_zarr = open_testing_zarr(
     s3=s3,
     s3_bucket=S3_BUCKET,
     ingest_version=INGEST_VERSION,
@@ -62,26 +62,10 @@ store = setup_testing_zipstore(
     model_name="SILAM",
 )
 
-# store2 = setup_testing_zipstore(
-#     s3=s3,
-#     s3_bucket=S3_BUCKET,
-#     ingest_version=INGEST_VERSION,
-#     save_type=SAVE_TYPE,
-#     model_name="NBM",
-# )
-# %%
-# ---- Open Zarr ----
-
-opened_zarr = zarr.open(store, mode="r")
-# opened_zarr2 = zarr.open(store2, mode="r")
-
 
 # %% Test read
 data = opened_zarr[1, 24 * 10 : 24 * 11, 500, 500]
 print(data)
-
-# data2 = opened_zarr2[1, :, 500, 500]
-# print(data2)
 
 
 # %% Print unix time as datetimes

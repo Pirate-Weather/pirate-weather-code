@@ -1,53 +1,61 @@
-"""Local publishing of a finished ingest run."""
+"""Publishing a finished ingest run to the remote (a local directory here)."""
 
-import pickle
-
+import numpy as np
 import pandas as pd
+import zarr
 
-from API.ingest_utils import publish_ingest_run, read_published_run_time
-
-
-def _write_run(process_dir, chunk_names):
-    store = process_dir / "GEFS.zarr"
-    store.mkdir(parents=True)
-    for name in chunk_names:
-        (store / name).write_text(name)
+from API import ingest_utils
+from API.ingest_utils import open_remote, publish_ingest_run, read_published_run_time
 
 
-def test_second_local_publish_replaces_store_and_run_time(tmp_path):
-    """Every ingest publishes through this helper, and the API trusts the
-    run-time pickle to describe the store next to it. A newer run must fully
-    replace the previous store (copying over it used to leave the old run's
-    chunks behind when the grid or time axis changed) and the pickle must carry
-    the newer run time, which is also what the next ingest uses to skip a run
-    that is already published.
+def _write_run(process_dir, value):
+    zarr_array = zarr.create_array(
+        zarr.storage.LocalStore(process_dir / "GEFS.zarr"),
+        shape=(2, 4, 4),
+        chunks=(2, 2, 2),
+        dtype="float32",
+        overwrite=True,
+    )
+    zarr_array[:] = value
+
+
+def test_second_publish_replaces_store_and_run_time(tmp_path, monkeypatch):
+    """Every ingest publishes through this helper, and the API and the next
+    scheduled ingest trust the run-time pickle to describe the store next to it.
+    A newer run must replace every chunk of the previous one, the pickle must
+    carry the newer run time, and the store's root ``zarr.json`` must be uploaded
+    after its chunks: the history ingests treat a store with root metadata as
+    complete, so uploading it earlier could make a half-uploaded store look done.
     """
-    publish_dir = tmp_path / "Prod" / "v31"
-    publish_dir.mkdir(parents=True)
+    remote = open_remote(str(tmp_path / "Prod" / "v31"), "Download")
+    upload_groups = []
+    put_files = ingest_utils._put_files
+
+    def recording_put_files(remote, uploads):
+        upload_groups.append([key for _, key in uploads])
+        put_files(remote, uploads)
+
+    monkeypatch.setattr(ingest_utils, "_put_files", recording_put_files)
+
     first_run = pd.Timestamp("2026-10-19 06:00")
     second_run = pd.Timestamp("2026-10-19 12:00")
-
-    for run_time, chunks in ((first_run, ["0.0.0", "0.0.1"]), (second_run, ["0.0.0"])):
+    for run_time, value in ((first_run, 1.0), (second_run, 2.0)):
         process_dir = tmp_path / f"process_{run_time.hour}"
-        _write_run(process_dir, chunks)
+        _write_run(process_dir, value)
         publish_ingest_run(
             ["GEFS.zarr"],
             run_time,
             "GEFS.time.pickle",
             process_dir=str(process_dir),
-            publish_dir=str(publish_dir),
-            save_type="Download",
-            s3=None,
+            remote=remote,
         )
 
-    assert sorted(p.name for p in (publish_dir / "GEFS.zarr").iterdir()) == ["0.0.0"]
-    assert sorted(p.name for p in publish_dir.iterdir()) == [
-        "GEFS.time.pickle",
-        "GEFS.zarr",
-    ]
-    with open(publish_dir / "GEFS.time.pickle", "rb") as f:
-        assert pickle.load(f) == second_run
-    published = read_published_run_time(
-        str(publish_dir / "GEFS.time.pickle"), "Download", None
+    published = zarr.open_array(
+        zarr.storage.LocalStore(tmp_path / "Prod" / "v31" / "GEFS.zarr"), mode="r"
     )
-    assert published == second_run
+    np.testing.assert_array_equal(published[:], np.full((2, 4, 4), 2.0, "float32"))
+    assert read_published_run_time(remote, "GEFS.time.pickle") == second_run
+    chunks, array_metadata, root_metadata = upload_groups[-3:]
+    assert len(chunks) == 4 and all("/c/" in key for key in chunks)
+    assert array_metadata == []
+    assert root_metadata == ["GEFS.zarr/zarr.json"]
