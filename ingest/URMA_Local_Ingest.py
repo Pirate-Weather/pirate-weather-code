@@ -19,6 +19,7 @@ import shutil
 import time
 import warnings
 
+import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
@@ -61,6 +62,12 @@ logger = logging.getLogger(__name__)
 
 # %% Model constants
 URMA_SOURCE_PRIORITY = ["aws", "nomads"]
+# The history merge reads every hourly store straight from the history remote;
+# from S3 that is latency-bound, so it needs many parallel reads. Measured on RTMA's merge
+# (48 stores, ~49k chunks) took 239 s at 64 workers and over 7 min at 2 (73 s
+# from local disk), with peak memory 2.9 GB versus 2.4 GB.
+DEFAULT_ZARR_WORKERS = 64
+DEFAULT_ZARR_CONCURRENCY = 64
 # URMA is typically published several hours after its valid time. Search far
 # enough back (hourly cycles) to cover that delay instead of assuming a recent file.
 URMA_LATEST_SEARCH_CYCLES = 12
@@ -140,9 +147,9 @@ def main() -> None:
     )
     # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
     configure_herbie_request_timeouts()
-    # URMA writes its stores with plain zarr/xarray calls, so only the open-file
-    # and concurrency limits matter here; the worker count is not used.
-    configure_zarr_writes()
+    zarr_store_workers = configure_zarr_writes(
+        DEFAULT_ZARR_WORKERS, DEFAULT_ZARR_CONCURRENCY
+    )
 
     process_chunk = CHUNK_SIZES["URMA"]
     final_chunk = FINAL_CHUNK_SIZES["URMA"]
@@ -390,17 +397,18 @@ def main() -> None:
                 .astype("float32")
             )
 
-        da.store(
-            dask_array_out[np.newaxis, ...],
-            final_zarr,
-            regions=(
-                slice(var_index, var_index + 1),
-                slice(None),
-                slice(None),
-                slice(None),
-            ),
-            compute=True,
-        )
+        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+            da.store(
+                dask_array_out[np.newaxis, ...],
+                final_zarr,
+                regions=(
+                    slice(var_index, var_index + 1),
+                    slice(None),
+                    slice(None),
+                    slice(None),
+                ),
+                compute=True,
+            )
         logger.info(
             "Merged URMA variable %s (%d/%d).",
             dask_var,

@@ -92,6 +92,12 @@ RTMA_PCP_Y_OFFSET = 0
 
 # Hourly rows in the published store: the newest analysis and the 47 h before it
 RTMA_TIME_STEPS = 48
+# The history merge reads every hourly store straight from the history remote;
+# from S3 that is latency-bound, so it needs many parallel reads. RTMA's merge
+# (48 stores, ~49k chunks) took 239 s at 64 workers and over 7 min at 2 (73 s
+# from local disk), with peak memory 2.9 GB versus 2.4 GB.
+DEFAULT_ZARR_WORKERS = 64
+DEFAULT_ZARR_CONCURRENCY = 64
 HOURLY_STORE_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 
 # Variables in the published store (cfgrib short names). tp is the hourly RTMA
@@ -324,7 +330,9 @@ def main() -> None:
     )
     # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
     configure_herbie_request_timeouts()
-    zarr_store_workers = configure_zarr_writes()
+    zarr_store_workers = configure_zarr_writes(
+        DEFAULT_ZARR_WORKERS, DEFAULT_ZARR_CONCURRENCY
+    )
 
     process_chunk = CHUNK_SIZES["RTMA"]
     final_chunk = FINAL_CHUNK_SIZES["RTMA_HOURLY"]
