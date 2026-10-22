@@ -169,6 +169,20 @@ Replaces `init_ERA5` (`API/io/ZarrHelpers.py`) and `_load_era5_slice`
 ### Move to OVHCloud
 Including a Terraform setup script.
 
+### Test an NFS share as the publish target
+Same flow as object storage, with an NFS share (OVH offers up to 16,000 IOPS /
+128 MiB/s) in place of the bucket: ingests publish to the share (`open_remote`
+already treats a mounted path as a local remote) and each API server copies new
+stores to its local disk, into a staging directory renamed into place so the API
+never sees a partial store. The load is file count, not bytes (HRRR: 76k files,
+318 MiB): a small-file write is ~3-5 NFS operations and a copy-down read ~2-3,
+so every reader adds about as much load as the publish. Estimated peak, when NBM,
+URMA and HRRR publish together (~1,000 files/s): ~4-5k IOPS to write plus ~2.5k
+per reader, so ~12k with three readers. Copies must be parallel (rclone with high
+--transfers, or obstore local-to-local); a serial cp/rsync pays a round trip per
+file. Measure on a mounted share: publishing the real HRRR store and copying it
+down to local disk (files/s, IOPS used, wall time), then size IOPS from those.
+
 ### Zarr stores on object storage, no zip files
 The served stores are now unsharded `<MODEL>.zarr` directories, published with
 obstore (`publish_ingest_run`, `upload_concurrency` uploads at once);
