@@ -624,6 +624,7 @@ def main() -> None:
         forecast_process_dir + "/NBM.zarr",
         final_chunk,
         zarr_store_workers,
+        zarr_vars,
     )
     _timing_log(
         f"NBM_FORECAST stage=interpolate_and_write elapsed={time.perf_counter() - stage_start:.2f}s"

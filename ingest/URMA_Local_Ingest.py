@@ -52,6 +52,7 @@ from API.ingest_utils import (
     publish_history_store,
     publish_ingest_run,
     read_published_run_time,
+    write_final_zarr,
 )
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
@@ -83,6 +84,12 @@ URMA_MATCH_STRINGS = (
 # Hours of history before the newest analysis kept in the published store
 his_period = HISTORY_PERIODS["URMA"]
 HOURLY_STORE_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
+# Hourly stores are padded to 25 points (1600 x 2350), as they have been since
+# before the final store moved to 5 x 5 chunks, so stores already on the history
+# remote still stack with new ones.
+URMA_HOURLY_PAD = 25
+# Spatial chunk of the local stack the final store is written from
+URMA_STACK_TILE = 50
 
 # Variables in the published store (cfgrib short names); the order is the API's
 # URMA index map
@@ -293,9 +300,9 @@ def main() -> None:
         )
         dask_var_array = mask_invalid_data(xarray_analysis_stack.data)
 
-        # Preserve the final-grid padding while avoiding tens of thousands of tiny
-        # files in each hourly store. The merged history is also chunked this way.
-        dask_var_array = pad_to_chunk_size(dask_var_array, final_chunk).rechunk(
+        # Pad to URMA_HOURLY_PAD (a multiple of final_chunk) in process_chunk
+        # tiles, avoiding tens of thousands of tiny files in each hourly store.
+        dask_var_array = pad_to_chunk_size(dask_var_array, URMA_HOURLY_PAD).rechunk(
             (len(vars_in), 1, process_chunk, process_chunk)
         )
 
@@ -343,29 +350,21 @@ def main() -> None:
     ]
     logger.info("Starting final URMA merge from %d hourly stores.", len(hourly_stores))
 
-    # %% Merge the hourly stores into the final store
+    # %% Stack the hourly stores into the (variable, time, y, x) layout
     ny, nx = hourly_stores[0][zarr_vars[0]].shape[-2:]
 
-    # Create the final array before building the per-variable graphs. Writing one
-    # variable at a time bounds scheduler memory for the full history merge.
-    # Each variable has its own final_chunk-square chunks: a point read decodes
-    # one 25 x 25 chunk per variable instead of a whole 200 x 200 x 283 h block
-    # (about 45 MB).
-    final_zarr_path = historic_process_dir + "/URMA_Hist.zarr"
-    final_zarr = zarr.create_array(
-        zarr.storage.LocalStore(final_zarr_path),
+    # Stacked one variable at a time into a local store, which reads the history
+    # once, aligned with the hourly stores' process_chunk tiles, and bounds
+    # memory. Its URMA_STACK_TILE chunks keep the final write's dask tiles small:
+    # with ~283 hours a process_chunk tile of every variable is ~450 MB.
+    stack_path = historic_process_dir + "/URMA_stack.zarr"
+    stack = zarr.create_array(
+        zarr.storage.LocalStore(stack_path),
         shape=(len(zarr_vars), len(hourly_stores), ny, nx),
-        chunks=(1, len(hourly_stores), final_chunk, final_chunk),
+        chunks=(1, len(hourly_stores), URMA_STACK_TILE, URMA_STACK_TILE),
         dtype="float32",
-        config={"write_empty_chunks": True},
         overwrite=True,
     )
-    logger.info(
-        "Writing final URMA merge with shape %s and chunks %s.",
-        final_zarr.shape,
-        final_zarr.chunks,
-    )
-
     for var_index, dask_var in enumerate(zarr_vars):
         if dask_var == "time":
             # Read one scalar from each store instead of constructing spatial Dask
@@ -374,7 +373,6 @@ def main() -> None:
                 [hourly_store[dask_var][0, 0, 0] for hourly_store in hourly_stores],
                 dtype="float32",
             )
-
             dask_array_out = broadcast_times_to_grid(
                 np_cat_times,
                 ny,
@@ -383,7 +381,7 @@ def main() -> None:
             )
         else:
             # Stacking produces shape (n_files, 1, y, x); remove the singleton
-            # dimension before writing this variable's final array region.
+            # dimension before writing this variable's stack region.
             dask_var_arrays_stack = da.stack(
                 [
                     da.from_zarr(hourly_store[dask_var], inline_array=True)
@@ -400,7 +398,7 @@ def main() -> None:
         with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
             da.store(
                 dask_array_out[np.newaxis, ...],
-                final_zarr,
+                stack,
                 regions=(
                     slice(var_index, var_index + 1),
                     slice(None),
@@ -410,14 +408,22 @@ def main() -> None:
                 compute=True,
             )
         logger.info(
-            "Merged URMA variable %s (%d/%d).",
+            "Stacked URMA variable %s (%d/%d).",
             dask_var,
             var_index + 1,
             len(zarr_vars),
         )
+    close_store(stack.store)
 
-    close_store(final_zarr.store)
-    logger.info("Final URMA merge completed: %s", final_zarr_path)
+    # %% Write the final store
+    write_final_zarr(
+        da.from_zarr(stack_path),
+        historic_process_dir + "/URMA_Hist.zarr",
+        final_chunk,
+        zarr_store_workers,
+        zarr_vars,
+    )
+    logger.info("Final URMA store written")
 
     # %% Publish the store, then the run time the API uses to detect it
     publish_ingest_run(

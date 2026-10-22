@@ -10,7 +10,7 @@ import shlex
 import shutil
 import subprocess
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
@@ -76,7 +76,136 @@ FINAL_CHUNK_SIZES = {
     "RDAQA": 25,
     "RAQDPS": 25,
     "SILAM": 5,
-    "URMA": 25,
+    # Same layout as the other models; with ~283 hours one chunk is 283 KB
+    "URMA": 5,
+}
+
+# Mantissa bits kept per stored variable (float32 has 23). Bitround's error is at
+# most value * 2^-(bits + 1), so each type keeps the fewest bits that hold the
+# error at its typical maximum within twice its output step (e.g. 0.2 K for
+# temperatures shown to 0.1); wind, gust and humidity are one bit coarser still.
+# On HRRR this made the store 42% smaller than rounding to 5 decimals, with no
+# change in point-read time. Times and coded fields stay exact.
+_TEMPERATURE_BITS = 10  # 0.1 C step, to 330 K
+_PRESSURE_BITS = 12  # 0.1 hPa step, to 1080 hPa
+_WIND_BITS = 7  # 0.1 m/s step, to 60 m/s
+_DIRECTION_BITS = 7  # 1 degree step
+_VISIBILITY_BITS = 7  # 0.1 km step, to 50 km
+_HUMIDITY_BITS = 4  # 1 % step
+_FRACTION_BITS = 5  # cloud cover, probabilities, precipitation-type flags: 1 % step
+_PRECIPITATION_BITS = 11  # 0.01 mm (or mm/h) step, to 50
+_AIR_QUALITY_BITS = 11  # 0.1 ug/m3 step, to 500
+EXACT_BITS = 23
+KEEPBITS = {
+    "time": EXACT_BITS,
+    "PTYPE_surface": EXACT_BITS,
+    "ptype": EXACT_BITS,
+    "PWTHER_surfaceMreserved": EXACT_BITS,
+    **dict.fromkeys(
+        ("TMP_2maboveground", "DPT_2maboveground", "APTMP_2maboveground", "t2m", "d2m"),
+        _TEMPERATURE_BITS,
+    ),
+    **dict.fromkeys(
+        (
+            "MSLMA_meansealevel",
+            "PRMSL_meansealevel",
+            "PRES_meansealevel",
+            "PRES_surface",
+            "PRES_station",
+            "msl",
+            "sp",
+        ),
+        _PRESSURE_BITS,
+    ),
+    **dict.fromkeys(
+        (
+            "UGRD_10maboveground",
+            "VGRD_10maboveground",
+            "WIND_10maboveground",
+            "u10",
+            "v10",
+            "GUST_surface",
+            "GUST_10maboveground",
+            "i10fg",
+        ),
+        _WIND_BITS,
+    ),
+    **dict.fromkeys(("WDIR_10maboveground", "Storm_Direction"), _DIRECTION_BITS),
+    **dict.fromkeys(("VIS_surface", "vis"), _VISIBILITY_BITS),
+    **dict.fromkeys(("RH_2maboveground", "rh"), _HUMIDITY_BITS),
+    "SPFH_2maboveground": 5,  # 2 % relative
+    **dict.fromkeys(
+        (
+            "CSNOW_surface",
+            "CICEP_surface",
+            "CFRZR_surface",
+            "CRAIN_surface",
+            "CSNOW_Prob",
+            "CICEP_Prob",
+            "CFRZR_Prob",
+            "CRAIN_Prob",
+            "TCDC_entireatmosphere",
+            "TCDC_surface",
+            "tcc",
+            "Precipitation_Prob",
+            "PPROB",
+            "PTYPE_prob_GE_1_LT_2_prob_fcst_1_1_surface",
+            "PTYPE_prob_GE_3_LT_4_prob_fcst_1_1_surface",
+            "PTYPE_prob_GE_5_LT_7_prob_fcst_1_1_surface",
+            "PTYPE_prob_GE_8_LT_9_prob_fcst_1_1_surface",
+        ),
+        _FRACTION_BITS,
+    ),
+    **dict.fromkeys(
+        (
+            "PRATE_surface",
+            "APCP_surface",
+            "tprate",
+            "tp",
+            "APCP_Mean",
+            "APCP_StdDev",
+            "PACCUM",
+            "AFRAIN_Mean",
+            "AICEP_Mean",
+            "ARAIN_Mean",
+            "ASNOW_Mean",
+        ),
+        _PRECIPITATION_BITS,
+    ),
+    **dict.fromkeys(
+        (
+            "MASSDEN_8maboveground",
+            "cnc_PM2_5",
+            "cnc_PM10",
+            "cnc_O3",
+            "cnc_NO2",
+            "cnc_SO2",
+            "cnc_CO",
+            "PM_FRP_column",
+            "PM2.5",
+            "PM10",
+            "NO2",
+            "O3",
+            "SO2",
+        ),
+        _AIR_QUALITY_BITS,
+    ),
+    "DSWRF_surface": 9,  # 1 W/m2 step, to 1200
+    "UVI_surface": 6,  # 0.1 step, to 15
+    "DUVB_surface": 6,
+    "TOZNE_entireatmosphere_consideredasasinglelayer_": 7,  # 1 DU step, to 500
+    "TCIOZ_surface": 7,
+    "CAPE_surface": 11,  # 1 J/kg step, to 5000
+    "CIN_surface": 7,  # 1 J/kg step, to 500
+    "N4LFTX_surface": 3,  # lifted index, 1 K step, to 20
+    "N4LFTX_500mb": 3,
+    "LFTX_500mb": 3,
+    "KX_surface": 4,  # 1 K step, to 50
+    "REFD_1000maboveground": 8,  # 0.1 dBZ step, to 75
+    "REFC_entireatmosphere": 8,
+    "BLH": 10,  # 1 m step, to 4000 m
+    "Storm_Distance": 11,  # 1 km step, to 5000 km
+    "VVEL_500mb": 8,  # 0.01 Pa/s step, to 10
 }
 
 FORECAST_LEAD_RANGES = {
@@ -894,20 +1023,55 @@ def publish_ingest_run(
     )
 
 
+def bitround_variables(stacked: da.Array, variables: Sequence[str]) -> da.Array:
+    """Bitround each variable of a ``(variable, ...)`` float32 array to its
+    ``KEEPBITS`` precision (round to nearest, ties to even, as numcodecs BitRound).
+
+    The dropped mantissa bits become zeros, which compress far better; NaN stays
+    NaN. A store chunk holds every variable, so this cannot be a zarr codec (one
+    setting per chunk) and is applied before writing. An unknown variable raises
+    rather than being stored at a guessed precision.
+    """
+    if len(variables) != stacked.shape[0]:
+        raise ValueError(
+            f"{len(variables)} variable names for {stacked.shape[0]} stacked variables"
+        )
+    keepbits = np.array([KEEPBITS[name] for name in variables])
+
+    def round_block(block, block_info=None):
+        start, stop = block_info[0]["array-location"][0]
+        bits = np.ascontiguousarray(block, dtype=np.float32).view(np.uint32).copy()
+        for offset, keep in enumerate(keepbits[start:stop]):
+            if keep >= EXACT_BITS:
+                continue
+            dropped = EXACT_BITS - int(keep)
+            half = np.uint32((1 << (dropped - 1)) - 1)
+            variable_bits = bits[offset]
+            variable_bits += (
+                (variable_bits >> np.uint32(dropped)) & np.uint32(1)
+            ) + half
+            variable_bits &= np.uint32((0xFFFFFFFF >> dropped) << dropped)
+        return bits.view(np.float32)
+
+    return stacked.astype("float32").map_blocks(round_block, dtype="float32")
+
+
 def write_final_zarr(
     stacked: da.Array,
     store_path: str,
     final_chunk: int,
     zarr_store_workers: int,
+    variables: Sequence[str],
 ) -> None:
     """Write the final ``(variable, time, y, x)`` array the API reads.
 
     One chunk holds every variable and time step for a ``final_chunk`` square of
     grid cells, so a point forecast is a single chunk read. ``stacked`` must
-    already be padded to a multiple of ``final_chunk``. ``store_path`` is a local
-    directory store, published with ``publish_ingest_run``. Values are rounded to
-    5 decimals to help compression. Empty (all-NaN) chunks are written too, so a
-    publish over the previous run replaces every chunk.
+    already be padded to a multiple of ``final_chunk``; ``variables`` names its
+    first axis and sets each variable's precision (``bitround_variables``).
+    ``store_path`` is a local directory store, published with
+    ``publish_ingest_run``. Empty (all-NaN) chunks are written too, so a publish
+    over the previous run replaces every chunk.
 
     Dask writes tiles about the size of a source chunk and zarr splits each one
     into the small final chunks. Rechunking dask all the way down to 3x3 or 5x5
@@ -919,7 +1083,9 @@ def write_final_zarr(
     Stores are not sharded: 200 x 200 shards made every local point read about
     0.4 ms slower (zarr's sharding codec), and uploading the small chunk files
     with ``UPLOAD_CONCURRENCY`` parallel requests is fast enough (HRRR's 76k
-    objects in about 4 min to OVH).
+    objects in about 4 min to OVH). Blosc zstd with byte shuffle beat bit shuffle,
+    no shuffle, lz4, zstd 1 and 9 (9 was 7% smaller but wrote 9x slower), a
+    time-innermost chunk order and pcodec on size or read time.
     """
     import dask
     import zarr
@@ -938,7 +1104,7 @@ def write_final_zarr(
     tile_x = final_chunk * max(1, round(stacked.chunks[3][0] / final_chunk))
     tiles = (stacked.shape[0], stacked.shape[1], tile_y, tile_x)
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        stacked.round(5).rechunk(tiles).to_zarr(
+        bitround_variables(stacked.rechunk(tiles), variables).to_zarr(
             zarr_array, overwrite=True, compute=True
         )
     close_store(store)

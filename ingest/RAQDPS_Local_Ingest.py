@@ -447,6 +447,7 @@ def merge_and_publish(
         os.path.join(forecast_process_dir, raqdps_store_name),
         final_chunk,
         zarr_store_workers,
+        RAQDPS_OUTPUT_VARS,
     )
 
     lat_lon_pickle_file_path = os.path.join(forecast_process_dir, RAQDPS_LAT_LON_PICKLE)

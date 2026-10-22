@@ -269,6 +269,7 @@ def main() -> None:
         forecast_process_dir + "/" + aigfs_store_name,
         final_chunk,
         zarr_store_workers,
+        zarr_vars,
     )
 
     # %% Publish the store, then the run time the API uses to detect it

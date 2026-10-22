@@ -454,6 +454,7 @@ def main() -> None:
         forecast_process_dir + "/" + rtma_store_name,
         final_chunk,
         zarr_store_workers,
+        zarr_vars,
     )
 
     # %% Publish the store, then the run time used to detect it

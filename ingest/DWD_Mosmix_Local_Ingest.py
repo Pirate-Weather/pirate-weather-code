@@ -44,6 +44,7 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     DWD_RADIUS,
     FINAL_CHUNK_SIZES,
+    bitround_variables,
     clear_directory,
     interpolate_temporal_gaps_efficiently,
     open_remote,
@@ -1070,6 +1071,8 @@ def main() -> None:
             "lon": CHUNK_SIZES["DWD"],
         }
     )
+    # Each variable keeps only its KEEPBITS precision (see bitround_variables)
+    ds_chunk = ds_chunk.copy(data=bitround_variables(ds_chunk.data, vars_in))
     dwd_encoding = {
         "chunks": (
             ds_chunk.sizes["var"],

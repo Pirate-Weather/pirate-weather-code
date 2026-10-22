@@ -182,13 +182,10 @@ from it. Servers pull the stores with `rclone`/`aws s3 sync`. Still to do:
   times, and shard NBM alone if they are too slow.
 - Expire old history stores on the remote (nothing deletes them).
 
-### Optimize variable quantization and compression
-Every variable is stored as float32 rounded to 5 decimals with Blosc zstd level 3 +
-shuffle (`write_final_zarr`). Quantize each variable to its physically meaningful
-precision (e.g. bit rounding or a scale/offset per variable) and pick the compressor
-from measurements, to shrink stores and upload time. In local benchmarks the
-compressor choice moved point reads by ≤0.2 ms, so size is the main gain; keep any
-change that adds read-time decoding cost measured against that.
+### Confirm the KEEPBITS steps for the less-used variables
+`KEEPBITS` (`API/ingest_utils.py`) bitrounds every stored variable to twice its
+output step. The steps for VVEL, PM_FRP_column, BLH and the Storm_Distance maximum
+were assumed, not checked against how the API uses them.
 
 ### Response code performance pass
 Profile the request path for room to improve; read performance is the first priority
