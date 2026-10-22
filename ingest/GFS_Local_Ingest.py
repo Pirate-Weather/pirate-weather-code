@@ -582,6 +582,7 @@ def main() -> None:
             xarray_hist_merged.to_zarr(
                 hist_process_path + "_GFS_Hist_TMP.zarr",
                 mode="w",
+                write_empty_chunks=True,
                 consolidated=False,
                 encoding=encoding,
                 compute=True,

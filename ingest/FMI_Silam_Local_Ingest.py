@@ -375,6 +375,7 @@ def save_processed_zarr(
         xarray_processed.to_zarr(
             zarr_path,
             mode="w",
+            write_empty_chunks=True,
             consolidated=False,
             compute=True,
             chunkmanager_store_kwargs={"num_workers": zarr_store_workers},

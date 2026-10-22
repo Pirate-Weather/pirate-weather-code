@@ -269,6 +269,7 @@ def write_process_zarr(ds: xr.Dataset, zarr_path: str, zarr_store_workers: int):
         ds.to_zarr(
             zarr_path,
             mode="w",
+            write_empty_chunks=True,
             consolidated=False,
             compute=True,
             chunkmanager_store_kwargs={"num_workers": zarr_store_workers},

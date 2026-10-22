@@ -311,6 +311,7 @@ def write_hourly_store(
     ds_out.to_zarr(
         zarr_store,
         mode="w",
+        write_empty_chunks=True,
         zarr_format=3,
         encoding={
             var: {
