@@ -381,6 +381,12 @@ def main() -> None:
         time_axis=xarray_forecast_merged["DSWRF_surface"].get_axis_num("time"),
     )
 
+    # wgrib2's NetCDF stores GRIB bitmap points with _FillValue 9.999e20, and
+    # da.from_zarr below reads raw values, so drop it to keep those points NaN.
+    # mask_invalid_data would catch 9.999e20, but not in its exempt CIN.
+    for var in xarray_forecast_merged.data_vars:
+        xarray_forecast_merged[var].encoding.pop("_FillValue", None)
+
     xarray_forecast_chunked = xarray_forecast_merged.chunk(
         chunks={
             "time": len(GDPS_FORECAST_HOURS),
