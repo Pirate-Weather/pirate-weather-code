@@ -110,6 +110,13 @@ zarr_vars = (
 # Categorical precipitation type is interpolated with nearest neighbour
 NEAREST_INTERP_VARS = ("ptype",)
 
+# The history merge reads the history stores straight from the history remote,
+# which from S3 needs parallel reads (RTMA: 239 s at 64 workers, over 7 min at
+# 2). The worker count also sets how many final-store tiles are in memory at
+# once, and these tiles span every variable and forecast hour, so 12 (as GFS).
+DEFAULT_ZARR_WORKERS = 12
+DEFAULT_ZARR_CONCURRENCY = 12
+
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
 
@@ -272,7 +279,9 @@ def main() -> None:
     """Run the ECMWF IFS forecast and history ingest."""
     logging.basicConfig(level=logging.INFO)
 
-    zarr_store_workers = configure_zarr_writes()
+    zarr_store_workers = configure_zarr_writes(
+        DEFAULT_ZARR_WORKERS, DEFAULT_ZARR_CONCURRENCY
+    )
 
     process_chunk = CHUNK_SIZES["ECMWF"]
     final_chunk = FINAL_CHUNK_SIZES["ECMWF"]

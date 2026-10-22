@@ -109,6 +109,13 @@ base_catalog_url = "https://thredds.silam.fmi.fi/thredds/catalog"
 silam_dataset_path = "silam_glob_v6_1_sfc/files"
 silam_filename_pattern = re.compile(r"SILAM-AQ-sfc-glob_v6_1_(\d{10})\.nc4$")
 
+# The history merge reads the history stores straight from the history remote,
+# which from S3 needs parallel reads (RTMA: 239 s at 64 workers, over 7 min at
+# 2). The worker count also sets how many final-store tiles are in memory at
+# once, and these tiles span every variable and forecast hour, so 12 (as GFS).
+DEFAULT_ZARR_WORKERS = 12
+DEFAULT_ZARR_CONCURRENCY = 12
+
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
 
@@ -380,7 +387,9 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    zarr_store_workers = configure_zarr_writes()
+    zarr_store_workers = configure_zarr_writes(
+        DEFAULT_ZARR_WORKERS, DEFAULT_ZARR_CONCURRENCY
+    )
 
     # Start each run from an empty processing directory
     shutil.rmtree(forecast_process_dir, ignore_errors=True)
