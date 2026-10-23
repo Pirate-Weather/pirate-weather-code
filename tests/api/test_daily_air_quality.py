@@ -22,9 +22,9 @@ def test_daily_air_quality_index_uses_hourly_aqi_column():
     result = build_daily_section(
         InterPhour=InterPhour,
         hourlyDayIndex=day_index,
-        hourlyDay4amIndex=day_index,
-        hourlyDay4pmIndex=day_index,
-        hourlyNight4amIndex=day_index,
+        hourlyDay6amIndex=day_index,
+        hourlyHalfDayIndex=day_index,
+        hourlyHalfNightIndex=day_index,
         hourlyHighIndex=day_index,
         hourlyLowIndex=day_index,
         daily_days=1,
@@ -45,9 +45,8 @@ def test_daily_air_quality_index_uses_hourly_aqi_column():
         timeMachine=False,
         tmExtra=False,
         day_array_grib=np.array([0]),
-        day_array_4am_grib=np.array([4 * 3600]),
-        day_array_5pm_grib=np.array([17 * 3600]),
         day_array_6am_grib=np.array([6 * 3600, 30 * 3600]),
+        day_array_6pm_grib=np.array([18 * 3600]),
         InterSday=np.zeros((1, max(DATA_DAY.values()) + 1)),
         hourList_si=[
             {"time": i * 3600, "icon": "clear-day", "summary": "Clear"}

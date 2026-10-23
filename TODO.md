@@ -23,12 +23,6 @@ so `exclude=aigfs` also sets `ex_gfs=1` and `exclude=aigefs` also sets `ex_gefs=
 Excluding an AI model silently drops its conventional counterpart. The model flags
 should match whole comma-separated tokens.
 
-### Minutely summary raises `UnboundLocalError` instead of falling back
-`API/legacy/summary.py:30-38` (`build_minutely_summary`): if `calculate_minutely_text`
-or `translation.translate` raises, the `except` block only logs, then
-`return minute_translate, minute_icon` references names that were never assigned.
-The intended "log and continue" fallback never happens; the request errors instead.
-
 ### `aqiunits=tw` is silently ignored
 `API/request/preprocess.py:731` documents `tw → Taiwan AQI`, but `tw` is missing from
 `_VALID_AQI_UNITS` and `_AQI_UNITS_MAP`, so the parameter falls back to the unit
@@ -58,15 +52,6 @@ be replaced; the rest should still be clipped.
 types are present) *before* the "preserve ice/sleet from the hourly data" check runs,
 so that check can never see sleet. Ice-pellet days are always reported as freezing
 rain ("ice").
-
-### Minutely "-later" durations may be off by one
-`API/PirateMinutelyText.py:46-70`: "stopping-then-starting-later" reports the end as
-`precipEnd1 + 1` minutes but the gap as `precipStart2 - precipEnd1`, and
-"starting-then-stopping-later" reports the duration as `precipEnd1 - precipStart1`
-without the `+ 1`. E.g. rain in minutes 0-19 and again from 41 reads "ending in 20
-min, returning 22 min later". Decide whether `precipEnd1` is the last wet minute or
-the first dry one and make all three numbers consistent.
-`tests/api/test_minutely_thunderstorm.py` deliberately doesn't pin the second number.
 
 ### `interpolate_temporal_gaps_efficiently` fills gaps longer than `max_gap_hours`
 `API/ingest_utils.py` (~1400-1458): `interpolate_na(limit=max_gap_hours)` fills the
@@ -120,6 +105,24 @@ about 8% of temperatures (max 3e-5 K) and 14% of pressures (max 0.016 Pa, the fl
 resolution near 1e5 Pa) differ. Every ingest using the helper (10 models) then stops
 being bit-identical to its previous output, so do it on its own, not alongside a
 change that needs an old-vs-new bit comparison.
+
+### Daily summaries: precipitation periods ignore the chance of precipitation
+`API/PirateDailyText.py` (`_add_hour_to_period` / the period loop in
+`calculate_day_text`): a period counts as having precipitation from its
+accumulation alone, and the window's chance of precipitation is the highest hourly
+chance in any of those periods. So when a model (often the Canadian models) has
+light accumulation from 11am to 3am but the chance is only above the 25% threshold
+from 1am to 3am, the whole run is described with the 1-3am chance: "Light rain
+throughout the day." instead of "Light rain overnight."
+
+Options:
+- only count hours at or above `PRECIP_PROB_THRESHOLD` towards a period's
+  precipitation, keeping the current behaviour (a "possible ..." summary) when no
+  hour reaches it;
+- require each precipitation period's own highest chance to reach the threshold;
+- weight each hour's accumulation by its chance before comparing to the thresholds.
+
+Check the effect on the day/night and next 24 hour summaries too, which share the code.
 
 ## v3 goals
 
@@ -309,9 +312,3 @@ but are in ppb, and the module docstring says "three AQI systems" (there are ele
 `API/api_utils.py:541` (`map_ensemble_precip_rates_to_ptype`): the docstring says
 "if more than one channel exceeds the threshold we fall back to mixed precipitation",
 but the code assigns `PRECIP_IDX["sleet"]` (`api_utils.py:606-607`). One of them is wrong.
-
-### Minutely and currently disagree on thunderstorms
-Minutely uses a raw `maxCAPE >= 2500` gate (`API/PirateMinutelyText.py:432`), while
-currently/hourly use the multi-index score with CIN/PoP/dewpoint suppressors
-(`API/PirateTextHelper.py`). Minutely can say "thunderstorm" while currently
-suppresses it. Decide whether minutely should use the same score.

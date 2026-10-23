@@ -19,7 +19,6 @@ MINUTELY_PRECIP_TYPES = (
     PRECIP_TYPES["rain"],
     PRECIP_TYPES["none"],
     PRECIP_TYPES["ice"],
-    PRECIP_TYPES["hail"],
 )
 
 
@@ -28,17 +27,19 @@ def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
     Calculates the textual minutely summary
 
     Parameters:
-    - precipStart1 (int): The time the first precipitation starts
-    - precipEnd1 (int): The time when the first precipitation ends
-    - precipStart2 (int): The time when the precipitation starts again
+    - precipStart1 (int): The minute the first precipitation starts
+    - precipEnd1 (int): The last minute of the first precipitation
+    - precipStart2 (int): The minute the precipitation starts again, or -1
     - text (str): The textual representation of the precipitation
 
     Returns:
     - c_text (arr): The precipitation summary for the hour.
     """
-    # A stop in the first minute is reported as "less than a minute"
+    # Precipitation stops at the first dry minute after it. A stop after the
+    # first minute is reported as "less than a minute".
+    stop_minute = precipEnd1 + 1
     stop_minutes = (
-        ["minutes", precipEnd1 + 1] if precipEnd1 > 0 else ["less-than", ["minutes", 1]]
+        ["minutes", stop_minute] if precipEnd1 > 0 else ["less-than", ["minutes", 1]]
     )
 
     # Precipitation is falling now
@@ -49,12 +50,12 @@ def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
         # It stops before the end of the hour
         if precipStart2 == -1:
             return ["stopping-in", text, stop_minutes]
-        # It stops before the end of the hour but starts again
+        # It stops before the end of the hour but starts again, after the dry gap
         return [
             "stopping-then-starting-later",
             text,
             stop_minutes,
-            ["minutes", precipStart2 - precipEnd1],
+            ["minutes", precipStart2 - stop_minute],
         ]
 
     # Precipitation starts during the hour and lasts until the end of the hour
@@ -65,7 +66,7 @@ def minutely_summary(precipStart1, precipEnd1, precipStart2, text):
         "starting-then-stopping-later",
         text,
         ["minutes", precipStart1],
-        ["minutes", precipEnd1 - precipStart1],
+        ["minutes", stop_minute - precipStart1],
     ]
 
 
@@ -134,19 +135,13 @@ def calculate_minutely_text(minuteArr, currentIcon, icon):
     }
     rain_max_intensity = max_intensity.get(PRECIP_TYPES["rain"], 0)
     snow_max_intensity = max_intensity.get(PRECIP_TYPES["snow"], 0)
-    # Hail, then freezing rain, take precedence over sleet as the ice intensity
+    # Freezing rain takes precedence over sleet as the ice intensity
     ice_max_intensity = max_intensity.get(
-        PRECIP_TYPES["hail"],
-        max_intensity.get(
-            PRECIP_TYPES["ice"], max_intensity.get(PRECIP_TYPES["sleet"], 0)
-        ),
+        PRECIP_TYPES["ice"], max_intensity.get(PRECIP_TYPES["sleet"], 0)
     )
 
-    # Hail always leads the summary, otherwise the type that starts first
-    if PRECIP_TYPES["hail"] in max_intensity:
-        first_precip = PRECIP_TYPES["hail"]
-    else:
-        first_precip = min(max_intensity, key=lambda t: type_minutes[t][0])
+    # The summary is led by the type that starts first
+    first_precip = min(max_intensity, key=lambda t: type_minutes[t][0])
 
     c_icon = None
     num_types = len(max_intensity)
@@ -170,24 +165,6 @@ def calculate_minutely_text(minuteArr, currentIcon, icon):
             eff_snow_intensity=snow_max_intensity,
             eff_ice_intensity=ice_max_intensity,
         )
-        if first_precip == PRECIP_TYPES["hail"] and type_minutes[PRECIP_TYPES["rain"]]:
-            text = [
-                "and",
-                calculate_precip_text(
-                    PRECIP_TYPES["rain"],
-                    "minute",
-                    0,
-                    0,
-                    0,
-                    1,
-                    icon=icon,
-                    mode="summary",
-                    eff_rain_intensity=rain_max_intensity,
-                    eff_snow_intensity=snow_max_intensity,
-                    eff_ice_intensity=ice_max_intensity,
-                ),
-                "hail",
-            ]
     else:
         # A single type. Precipitation with an unknown type is described by
         # its own intensity, as there is no rain intensity for it.

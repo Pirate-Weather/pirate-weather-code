@@ -23,7 +23,7 @@ def _half_day(hours, is_day=True, icon_set="darksky"):
     ("start_hour", "count"),
     [
         pytest.param(12, 3, id="short-afternoon"),
-        pytest.param(4, 13, id="full-half-day"),
+        pytest.param(6, 12, id="full-half-day"),
     ],
 )
 def test_clear_half_day(start_hour, count):
@@ -85,8 +85,8 @@ def test_more_than_max_hours_is_unavailable():
 
 
 def test_three_period_precip_summary_stays_valid():
-    """A slice spanning three periods (e.g. DST-shifted) must join them into
-    one "during" phrase instead of returning None (#624).
+    """A slice spanning three periods (e.g. DST-shifted) must still get a
+    valid time phrase instead of returning None (#624).
     """
     rain = {
         "precipType": "rain",
@@ -95,16 +95,9 @@ def test_three_period_precip_summary_stays_valid():
         "precipProbability": 0.8,
         "cloudCover": 0.8,
     }
-    hours = [make_hour(_utc(3))] + make_hours(14, _utc(4), **rain)
+    hours = [make_hour(_utc(5))] + make_hours(12, _utc(6), **rain)
 
     assert _half_day(hours) == (
         "rain",
-        [
-            "sentence",
-            [
-                "during",
-                "light-rain",
-                ["and", "today-morning", ["and", "today-afternoon", "today-evening"]],
-            ],
-        ],
+        ["sentence", ["starting", "light-rain", "today-morning"]],
     )

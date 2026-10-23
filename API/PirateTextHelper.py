@@ -256,7 +256,7 @@ def calculate_precip_text(
         )
         or matches_precip(
             precipType,
-            ("sleet", "ice", "hail"),
+            ("sleet", "ice"),
             sleetAccum,
             precip_icon_threshold,
             eff_ice_intensity,
@@ -333,10 +333,6 @@ def calculate_precip_text(
                 c_icon = "possible-" + type_text + "-" + day_night
             elif is_pirate_icon and level_icons[level] is not None:
                 c_icon = level_icons[level]
-    elif precipType == PRECIP_TYPES["hail"] and (
-        sleetAccum > 0 or eff_ice_intensity > 0
-    ):
-        c_text = possible_precip + "hail"
     elif precipType == PRECIP_TYPES["none"] and (
         # Treat any accumulation or per-type intensity as a signal of precipitation
         rainAccum > 0
