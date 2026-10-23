@@ -169,6 +169,59 @@ Replaces `init_ERA5` (`API/io/ZarrHelpers.py`) and `_load_era5_slice`
 ### Move to OVHCloud
 Including a Terraform setup script.
 
+### Open the history stores in parallel
+The history ingests open each history store and then each variable's array one
+at a time, and from S3 every open is a sequential round trip. RTMA spent 33 s of
+its 239 s merge opening 48 stores; GFS spends ~13-17 s per variable building the
+merge graph over 48 stores (28 variables, ~7 min at ~4% CPU) before reading any
+data. Open the stores (and their arrays) concurrently, or fetch each store's
+array metadata once, in `open_history_store` / the merge loops.
+
+### Larger chunks for the alert grids
+The NWS and WMO alert grids store one string per point in 10 x 10 chunks, all
+written even when empty, so each publish is mostly tiny objects: WMO 133,633
+objects for 3.2 MiB (upload 331 s of a 563 s run), NWS 25,793 for 2.9 MiB. A point
+read returns one short string, so 100 x 100 chunks (~1,300 and ~260 objects) or
+sharding these two grids should cost little; measure the read time against the
+upload saved before choosing. WMO's gridding also peaks at ~6 GB on one core.
+
+### NBM: interpolate in 100 x 100 tiles
+NBM's interpolate + final write is the fleet's memory peak (24.0 GB). Rechunking
+the `interp_time_take_blend` input to 100 x 100 tiles cut the peak to 19.6 GB for
++24 s (369 vs 345 s) with a byte-identical store (same final 5 x 5 chunks, so
+reads are unchanged). Measured end to end on the 2026-10-23 03Z run; the patch
+used was a one-line rechunk before the blend.
+
+### NBM: release memory before publishing
+NBM holds ~10 GB of RSS through the whole 17 min upload of 416,807 objects. Free
+the interpolated arrays (or publish from a fresh process) before uploading so the
+upload doesn't pin memory another ingest on the host could use.
+
+### NBM: latest-run search waits on missing files
+The latest-run probe checks 36 GRIB files with Herbie; when the newest cycle is
+only partly posted (25/36 missing), the misses took ~4 min before processing
+began. Probe with a short timeout, or check the newest candidate first and stop
+at the first complete run.
+
+### URMA: 5 min idle before the final merge
+In the cold-start run, after the last hourly store was published (3,981 s) nothing
+happened for ~5 min (no CPU, no network) before "Starting final URMA merge from
+283 hourly stores" (4,275 s), then 2.5 min opening the stores one at a time. Find
+the wait; the store opens fall under "Open the history stores in parallel".
+
+### Canadian models: parallel GRIB conversion
+HRDPS, GDPS, REPS and GEPS download one variable at a time (~6 MB/s from the MSC
+datamart), then convert on a single core: GDPS spends 12.6 min downloading and
+11 min converting (writing ~31 GB of intermediates and reading ~87 GB back) of a
+39 min run; HRDPS 4.5 + 4.5 min of 18. Run the downloads and conversions 3-4 at
+a time, and avoid re-reading the intermediate files.
+
+### AIGEFS: download takes ~5 h
+AIGEFS only comes from NOMADS, which rate-limits: ~10.3 min per member, ~5.2 h for
+30 members before the final write starts, using under 1 GB and ~1% CPU. Fetch
+members in parallel within the rate limit, or switch source if AIGEFS appears on
+a cloud mirror.
+
 ### Test an NFS share as the publish target
 Same flow as object storage, with an NFS share (OVH offers up to 16,000 IOPS /
 128 MiB/s) in place of the bucket: ingests publish to the share (`open_remote`
