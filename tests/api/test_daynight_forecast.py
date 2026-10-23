@@ -1,10 +1,10 @@
-"""Day/night (half-day) summary text from ``calculate_half_day_text``."""
+"""Day/night (half-day) summary text from ``calculate_day_text(half_day=True)``."""
 
 import datetime
 
 import pytest
 
-from API.PirateDayNightText import MAX_HOURS, calculate_half_day_text
+from API.PirateDailyText import MAX_HALF_DAY_HOURS, calculate_day_text
 from tests.helpers.text import make_hour, make_hours
 
 
@@ -14,7 +14,9 @@ def _utc(hour):
 
 
 def _half_day(hours, is_day=True, icon_set="darksky"):
-    return calculate_half_day_text(hours, is_day, "UTC", mode="hour", icon_set=icon_set)
+    return calculate_day_text(
+        hours, is_day, "UTC", mode="hour", icon_set=icon_set, half_day=True
+    )
 
 
 @pytest.mark.parametrize(
@@ -70,10 +72,13 @@ def test_pirate_possible_rain_icon(hour, is_day, expected_icon):
 def test_more_than_max_hours_is_unavailable():
     """Slices longer than a half-day window must return the plain
     "unavailable" text (#385) instead of a misleading summary; a slice of
-    exactly MAX_HOURS is still summarised.
+    exactly MAX_HALF_DAY_HOURS is still summarised.
     """
-    assert _half_day(make_hours(MAX_HOURS + 1, _utc(12))) == ("none", "unavailable")
-    assert _half_day(make_hours(MAX_HOURS, _utc(12))) == (
+    assert _half_day(make_hours(MAX_HALF_DAY_HOURS + 1, _utc(12))) == (
+        "none",
+        "unavailable",
+    )
+    assert _half_day(make_hours(MAX_HALF_DAY_HOURS, _utc(12))) == (
         "partly-cloudy-day",
         ["sentence", "light-clouds"],
     )

@@ -17,7 +17,6 @@ def build_minutely_summary(
     inter_p_current,
     inter_p_hour,
     minute_items_si,
-    current_text,
     current_icon,
     icon: str,
     max_p_chance,
@@ -30,7 +29,7 @@ def build_minutely_summary(
     if summary_text:
         try:
             minute_text, minute_icon = calculate_minutely_text(
-                minute_items_si, current_text, current_icon, icon
+                minute_items_si, current_icon, icon
             )
             minute_translate = translation.translate(["sentence", minute_text])
         except Exception:

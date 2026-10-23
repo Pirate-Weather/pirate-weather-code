@@ -777,6 +777,7 @@ def build_daily_section(
     day_array_grib: np.ndarray,
     day_array_4am_grib: np.ndarray,
     day_array_5pm_grib: np.ndarray,
+    day_array_6am_grib: np.ndarray,
     InterSday: np.ndarray,
     hourList_si: list,
     pTypeMap: np.ndarray,
@@ -822,6 +823,7 @@ def build_daily_section(
         day_array_grib: Daily GRIB array.
         day_array_4am_grib: Daily 4am GRIB array.
         day_array_5pm_grib: Daily 5pm GRIB array.
+        day_array_6am_grib: Daily 6am GRIB array (daily summary text window).
         InterSday: Daily source data.
         hourList_si: Hourly list for SI units.
         pTypeMap: Precipitation type map.
@@ -1346,8 +1348,13 @@ def build_daily_section(
 
         try:
             if idx < 8 and summaryText:
+                # The daily summary describes 6am to 6am the next day
                 dayIcon, dayText = calculate_day_text(
-                    hourList_si[((idx) * 24) + 4 : ((idx + 1) * 24) + 4],
+                    select_hour_window(
+                        hourList_si,
+                        start_time=int(day_array_6am_grib[idx]),
+                        end_time=int(day_array_6am_grib[idx + 1]),
+                    ),
                     not is_all_night,
                     str(tz_name),
                     "day",

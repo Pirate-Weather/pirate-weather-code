@@ -114,11 +114,12 @@ def test_daily_thunderstorms_not_joined_with_precipitation():
     """When storms cover only some of the rainy periods, rain keeps its own
     clause and the storm gets a separate "during <period>" clause.
 
-    00:00-03:00 UTC is rain with low CAPE; 04:00-07:00 UTC adds CAPE 2000.
+    00:00-05:00 UTC (the night, which runs until the 6am start of the daily
+    morning) is rain with low CAPE; 06:00-09:00 UTC adds CAPE 2000.
     """
     rain = {**RAIN, "rainIntensity": 3.0, "liquidAccumulation": 3.0}
-    hours = make_hours(4, **rain, cape=500) + make_hours(
-        4, BASE_TIME + 4 * HOUR, **rain, cape=2000
+    hours = make_hours(6, **rain, cape=500) + make_hours(
+        4, BASE_TIME + 6 * HOUR, **rain, cape=2000
     )
 
     _, summary = calculate_day_text(

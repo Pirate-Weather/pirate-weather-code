@@ -2,7 +2,6 @@
 
 import datetime
 from itertools import groupby
-from operator import itemgetter
 
 import numpy as np
 from dateutil import tz
@@ -25,6 +24,23 @@ WEEK_DAYS_MINUS_ONE = 6
 WEEK_DAYS = 7
 WEEK_DAYS_PLUS_ONE = 8
 MIN_THUNDERSTORM_DAYS = 2
+
+
+def _day_run_text(run):
+    """
+    Describes a run of consecutive precipitation days.
+
+    Parameters:
+    - run (arr): Consecutive entries of the precipitation days array ([index, day name, day])
+
+    Returns:
+    - str | arr: The day name, or the first and last days joined with "and" or "through".
+    """
+    if len(run) > 2:
+        return ["through", run[0][1], run[-1][1]]
+    if len(run) == 2:
+        return ["and", run[0][1], run[-1][1]]
+    return run[0][1]
 
 
 def calculate_summary_text(
@@ -136,8 +152,8 @@ def calculate_summary_text(
             numThunderstormDays += 1
 
     # Create a list of consecutive days so we can use the through text instead of multiple ands
-    for k, g in groupby(enumerate(dayIndexes), lambda ix: ix[0] - ix[1]):
-        days.append(list(map(itemgetter(1), g)))
+    for _, g in groupby(enumerate(dayIndexes), lambda ix: ix[0] - ix[1]):
+        days.append([day_index for _, day_index in g])
 
     # If the icon is not mixed precipitation change it to translations format
     if wIcon != "mixed-precipitation":
@@ -205,97 +221,19 @@ def calculate_summary_text(
             precipitation[len(precipitation) - 1][1],
         ]
     else:
-        # Calcuate the start/end of the second day array
-        arr_two_start = len(days[0])
-        arrTwoEnd = len(days[0]) + len(days[1])
-        arr0 = ""
-        arr1 = ""
-        arr2 = ""
-        arr3 = ""
+        # Describe each run of consecutive precipitation days, then join the
+        # runs together with "and" (at most four runs fit in eight days).
+        run_texts = []
+        run_start = 0
+        for run in days:
+            run_texts.append(
+                _day_run_text(precipitation[run_start : run_start + len(run)])
+            )
+            run_start += len(run)
 
-        if len(days[0]) > 2:
-            # If there are more than two indexes in the array use the through text
-            arr0 = ["through", precipitation[0][1], precipitation[arr_two_start - 1][1]]
-        elif len(days[0]) == 2:
-            # Join the days together with an and
-            arr0 = ["and", precipitation[0][1], precipitation[arr_two_start - 1][1]]
-        else:
-            # Otherwise just return the day
-            arr0 = precipitation[0][1]
-
-        if len(days[1]) > 2:
-            # If there are more than two indexes in the array use the through text
-            arr1 = [
-                "through",
-                precipitation[arr_two_start][1],
-                precipitation[arrTwoEnd - 1][1],
-            ]
-        elif len(days[1]) == 2:
-            # Join the days together with an and
-            arr1 = [
-                "and",
-                precipitation[arr_two_start][1],
-                precipitation[arrTwoEnd - 1][1],
-            ]
-        else:
-            # Otherwise just return the day
-            arr1 = precipitation[arr_two_start][1]
-
-        # If there are more than two day indexes then calculate the text for the third index
-        if len(days) >= 3:
-            # Calcuate the start/end of the third day array
-            arrThreeStart = len(days[0]) + len(days[1])
-            arrThreeEnd = len(days[0]) + len(days[1]) + len(days[2])
-
-            if len(days[2]) > 2:
-                # If there are more than two indexes in the array use the through text
-                arr2 = [
-                    "through",
-                    precipitation[arrThreeStart][1],
-                    precipitation[arrThreeEnd - 1][1],
-                ]
-            elif len(days[2]) == 2:
-                # Join the days together with an and
-                arr2 = [
-                    "and",
-                    precipitation[arrThreeStart][1],
-                    precipitation[arrThreeEnd - 1][1],
-                ]
-            else:
-                # Otherwise just return the day
-                arr2 = precipitation[arrThreeStart][1]
-
-        # If there are four day indexes then calculate the text for the fourth index
-        if len(days) == 4:
-            # Calcuate the start/end of the fourth day array
-            arrFourStart = len(days[0]) + len(days[1]) + len(days[2])
-            arrFourEnd = len(days[0]) + len(days[1]) + len(days[2]) + len(days[3])
-
-            if len(days[3]) > 2:
-                # If there are more than two indexes in the array use the through text
-                arr3 = [
-                    "through",
-                    precipitation[arrFourStart][1],
-                    precipitation[arrFourEnd - 1][1],
-                ]
-            elif len(days[3]) == 2:
-                # Join the days together with an and
-                arr3 = [
-                    "and",
-                    precipitation[arrFourStart][1],
-                    precipitation[arrFourEnd - 1][1],
-                ]
-            else:
-                # Otherwise just return the day
-                arr3 = precipitation[arrFourStart][1]
-
-        # Join the day indexes together with an and
-        if len(days) == 2:
-            wText = ["and", arr0, arr1]
-        if len(days) == 3:
-            wText = ["and", arr0, ["and", arr1, arr2]]
-        if len(days) == 4:
-            wText = ["and", arr0, ["and", arr1, ["and", arr2, arr3]]]
+        wText = run_texts[-1]
+        for run_text in reversed(run_texts[:-1]):
+            wText = ["and", run_text, wText]
 
     return wIcon, wText, wWeekend, c_icon
 
@@ -393,15 +331,9 @@ def calculate_precip_summary(
         else:
             precipSummary = [wSummary, wIcon]
     elif len(precipitationDays) == 8:
-        if (
-            precipitationDays[0][2]["precipType"]
-            == precipitationDays[1][2]["precipType"]
-            == precipitationDays[2][2]["precipType"]
-            == precipitationDays[3][2]["precipType"]
-            == precipitationDays[4][2]["precipType"]
-            == precipitationDays[5][2]["precipType"]
-            == precipitationDays[6][2]["precipType"]
-            == precipitationDays[7][2]["precipType"]
+        if all(
+            day[2]["precipType"] == precipitationDays[0][2]["precipType"]
+            for day in precipitationDays
         ):
             # If all days have precipitation then if they all have the same type then use that icon
             text, c_icon = calculate_precip_text(
