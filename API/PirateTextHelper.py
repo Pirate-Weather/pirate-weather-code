@@ -191,7 +191,6 @@ def calculate_precip_text(
     eff_rain_intensity=None,
     eff_snow_intensity=None,
     eff_ice_intensity=None,
-    num_precip_days=1,
 ):
     """
     Calculates the precipitation text and icon.
@@ -210,7 +209,6 @@ def calculate_precip_text(
     - eff_rain_intensity (float | None): The effective rain intensity in mm/h
     - eff_snow_intensity (float | None): The effective snow intensity in mm/h
     - eff_ice_intensity (float | None): The effective ice intensity in mm/h
-    - num_precip_days (int): The number of days with precipitation (used for weekly summaries)
 
     Returns:
     - str | None: The summary text representing the current precipitation
@@ -254,32 +252,36 @@ def calculate_precip_text(
     total_prep = rainAccum + (snowAccum / 10) + sleetAccum
 
     # Add the possible precipitation text if pop is less than 25% or if pop is
-    # greater than 0 but the accumulation or intensity is too small for an icon
-    is_possible_precip = (
-        pop < PRECIP_PROB_THRESHOLD
-        or matches_precip(
-            precipType,
-            ("rain", "none"),
-            rainAccum,
-            precip_icon_threshold,
-            eff_rain_intensity,
-            precip_intensity_icon_threshold,
-        )
-        or matches_precip(
-            precipType,
-            ("snow",),
-            snowAccum,
-            snow_icon_threshold,
-            eff_snow_intensity,
-            snow_intensity_icon_threshold,
-        )
-        or matches_precip(
-            precipType,
-            ("sleet", "ice"),
-            sleetAccum,
-            precip_icon_threshold,
-            eff_ice_intensity,
-            precip_intensity_icon_threshold,
+    # greater than 0 but the accumulation or intensity is too small for an icon.
+    # Weekly summaries only describe days already chosen as having
+    # precipitation, so for them it depends on the chance of precipitation alone.
+    is_possible_precip = pop < PRECIP_PROB_THRESHOLD or (
+        type != "week"
+        and (
+            matches_precip(
+                precipType,
+                ("rain", "none"),
+                rainAccum,
+                precip_icon_threshold,
+                eff_rain_intensity,
+                precip_intensity_icon_threshold,
+            )
+            or matches_precip(
+                precipType,
+                ("snow",),
+                snowAccum,
+                snow_icon_threshold,
+                eff_snow_intensity,
+                snow_intensity_icon_threshold,
+            )
+            or matches_precip(
+                precipType,
+                ("sleet", "ice"),
+                sleetAccum,
+                precip_icon_threshold,
+                eff_ice_intensity,
+                precip_intensity_icon_threshold,
+            )
         )
     )
 

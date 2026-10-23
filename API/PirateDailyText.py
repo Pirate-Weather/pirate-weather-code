@@ -733,7 +733,7 @@ def calculate_day_text(
     overall_max_ice_intensity = 0.0
     overall_max_wind = 0.0
     overall_avg_cloud_cover_sum = 0.0  # Sum of average cloud cover for each period
-    overall_avg_pop = 0.0
+    overall_max_pop = 0.0
     overall_min_visibility = float("inf")
     overall_max_smoke = 0.0
     # Peak instability that occurs with precipitation, and the temperature and
@@ -779,7 +779,7 @@ def calculate_day_text(
         if is_precip_in_period:
             precip_periods.append(i)
             overall_precip_types.extend(p_data["precip_types_in_period"])
-            overall_avg_pop = max(overall_avg_pop, p_data["max_pop"])
+            overall_max_pop = max(overall_max_pop, p_data["max_pop"])
 
             if p_data["max_cape_with_precip"] > overall_max_cape_with_precip:
                 overall_max_cape_with_precip = p_data["max_cape_with_precip"]
@@ -897,7 +897,7 @@ def calculate_day_text(
     # Combined ice accumulation (sleet + freezing rain) used for mixed/threshold checks
     total_ice_accum = total_sleet_accum + total_frzrain_accum
 
-    if overall_avg_pop > 0 and total_precip_accum >= PRECIP_SUMMARY_MIN_ACCUM_MM:
+    if overall_max_pop > 0 and total_precip_accum >= PRECIP_SUMMARY_MIN_ACCUM_MM:
         if total_snow_accum > 0 and total_rain_accum > 0 and total_ice_accum > 0:
             precip_summary_text = "mixed-precipitation"
             most_common_overall_precip_type = (
@@ -981,7 +981,7 @@ def calculate_day_text(
             total_rain_accum,
             total_snow_accum,
             total_ice_accum,
-            overall_avg_pop if overall_avg_pop != -999 else 1,
+            overall_max_pop,
             icon_set,
             "both",
             isDayTime=is_day_time,
@@ -1034,7 +1034,7 @@ def calculate_day_text(
         thunderstorm_summary_text, thunderstorm_icon = calculate_thunderstorm_text(
             overall_max_cape_with_precip,
             mode="both",
-            pop=overall_avg_pop,
+            pop=overall_max_pop,
             lifted_index=overall_min_li_with_precip,
             cin=overall_max_cin_with_precip,
             vertical_velocity=overall_max_vert_vel_with_precip,

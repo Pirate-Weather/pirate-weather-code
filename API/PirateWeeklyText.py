@@ -78,6 +78,7 @@ def calculate_summary_text(
     max_rain_intensity,
     max_snow_intensity,
     max_ice_intensity,
+    max_pop,
 ):
     """
     Calculates the precipitation summary if there are between 1 and 8 days of precipitation.
@@ -92,6 +93,7 @@ def calculate_summary_text(
     - max_rain_intensity (float): The maximum precipitation intensity for the week in mm/h
     - max_snow_intensity (float): The maximum snow intensity for the week in mm/h
     - max_ice_intensity (float): The maximum ice intensity for the week in mm/h
+    - max_pop (float): The highest probability of precipitation on the precipitation days
 
     Returns:
     - precipSummary (arr): A summary of the precipitation for the week.
@@ -185,13 +187,12 @@ def calculate_summary_text(
             rain_accum,
             snow_accum,
             ice_accum,
-            1,
+            max_pop,
             icon,
             "both",
             eff_rain_intensity=max_rain_intensity,
             eff_snow_intensity=max_snow_intensity,
             eff_ice_intensity=max_ice_intensity,
-            num_precip_days=len(precipitation),
         )
     else:
         c_icon = "mixed"
@@ -267,7 +268,7 @@ def calculate_precip_summary(
     rain_accum,
     snow_accum,
     ice_accum,
-    avgPop,
+    max_pop,
     max_rain_intensity,
     max_snow_intensity,
     max_ice_intensity,
@@ -284,7 +285,7 @@ def calculate_precip_summary(
     - rain_accum (float): The total rain accumulation for the week in mm
     - snow_accum (float): The total snow accumulation for the week in mm
     - ice_accum (float): The total ice accumulation for the week in mm
-    - avgPop (float): Average probability of precipitation
+    - max_pop (float): The highest probability of precipitation on the precipitation days
     - max_rain_intensity (float): The maximum rain intensity for the week in mm/h
     - max_snow_intensity (float): The maximum snow intensity for the week in mm/h
     - max_ice_intensity (float): The maximum ice intensity for the week in mm/h
@@ -320,14 +321,13 @@ def calculate_precip_summary(
             rain_accum,
             snow_accum,
             ice_accum,
-            avgPop,
+            max_pop,
             icon,
             "both",
             isDayTime=True,
             eff_rain_intensity=max_rain_intensity,
             eff_snow_intensity=max_snow_intensity,
             eff_ice_intensity=max_ice_intensity,
-            num_precip_days=len(precipitationDays),
         )
         precipSummary = [
             "during",
@@ -345,6 +345,7 @@ def calculate_precip_summary(
             max_rain_intensity,
             max_snow_intensity,
             max_ice_intensity,
+            max_pop,
         )
 
         # Check if the summary has the over-weekend text
@@ -362,14 +363,13 @@ def calculate_precip_summary(
                 rain_accum,
                 snow_accum,
                 ice_accum,
-                avgPop,
+                max_pop,
                 icon,
                 "both",
                 isDayTime=True,
                 eff_rain_intensity=max_rain_intensity,
                 eff_snow_intensity=max_snow_intensity,
                 eff_ice_intensity=max_ice_intensity,
-                num_precip_days=len(precipitationDays),
             )
             # Since precipitation is occuring everyday use the for week text instead of through
             precipSummary = [
@@ -477,7 +477,7 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
     lowTemp = []
     icons = []
     tempSummary = ""
-    avgPop = max_rain_intensity = max_snow_intensity = max_ice_intensity = 0
+    max_pop = max_rain_intensity = max_snow_intensity = max_ice_intensity = 0
     zone = tz.gettz(timeZone)
 
     # Loop through the week array
@@ -529,7 +529,7 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
             # Sets that there has been precipitation during the week
             precipitation = True
             precipitationDays.append([idx, weekday, day])
-            avgPop += day["precipProbability"]
+            max_pop = max(max_pop, day["precipProbability"])
             if max_rain_intensity == 0 or (
                 day.get("rainIntensityMax", day.get("liquidIntensityMax", 0))
                 > max_rain_intensity
@@ -550,9 +550,6 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
         if not lowTemp or day["temperatureHigh"] < lowTemp[2]:
             lowTemp = [idx, weekday, day["temperatureHigh"]]
 
-    if len(precipitationDays) > 0:
-        avgPop = avgPop / len(precipitationDays)
-
     precipSummary, c_icon = calculate_precip_summary(
         precipitation,
         precipitationDays,
@@ -560,7 +557,7 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
         sum(day[2]["liquidAccumulation"] for day in precipitationDays),
         sum(day[2]["snowAccumulation"] for day in precipitationDays),
         sum(day[2]["iceAccumulation"] for day in precipitationDays),
-        avgPop,
+        max_pop,
         max_rain_intensity,
         max_snow_intensity,
         max_ice_intensity,

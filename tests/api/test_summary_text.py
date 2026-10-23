@@ -121,7 +121,8 @@ def test_minutely_summary_falls_back_when_text_fails():
 
 def test_weekly_summary_includes_days_with_a_rain_icon():
     """A day whose daily summary shows rain must appear in the weekly summary,
-    even with less rain (0.8 mm) than the weekly accumulation threshold.
+    even with less rain (0.8 mm) than the weekly accumulation threshold, and
+    with a 60% chance it is not "possible" rain however little falls.
     """
     week = [
         {
@@ -150,5 +151,5 @@ def test_weekly_summary_includes_days_with_a_rain_icon():
     text, icon = calculate_weekly_text(week, "UTC")
 
     # text[2] is the week's temperature trend, which is not under test here.
-    assert text[:2] == ["with", ["during", "possible-light-rain", "sunday"]]
+    assert text[:2] == ["with", ["during", "light-rain", "sunday"]]
     assert icon == "rain"

@@ -334,3 +334,31 @@ but are in ppb, and the module docstring says "three AQI systems" (there are ele
 `API/api_utils.py:541` (`map_ensemble_precip_rates_to_ptype`): the docstring says
 "if more than one channel exceeds the threshold we fall back to mixed precipitation",
 but the code assigns `PRECIP_IDX["sleet"]` (`api_utils.py:606-607`). One of them is wrong.
+
+### Weekly summary: what to say about a dry week
+A week without precipitation always reads "No precipitation throughout the week"
+(plus the temperature trend). Options:
+- mention notable non-precipitation conditions when they occur on at least two days,
+  from the daily icons: fog, smoke, haze, or wind ("Fog Monday through Wednesday,
+  with highs ..."), keeping "no precipitation" otherwise. The day phrasing
+  (`_day_run_text`, "over-weekend") and condition keys already exist, so no new
+  translation keys are needed;
+- replace "no precipitation" with the week's cloud cover ("Partly cloudy throughout
+  the week"). A week-long average of cloud cover is rarely informative and loses the
+  most useful fact about the week, so the first option is the suggested one.
+
+### Daily summary for the current day: past hours
+For today (and the current day/night half), the summary still covers 6am onwards.
+Past hours have their precipitation and chance of precipitation zeroed
+(`API/hourly/block.py`, before `int(baseTimeOffset)`), but fog, cloud and wind are
+kept. So in the evening rain that has fallen all day reads "Rain starting in the
+evening", while morning fog is still in the afternoon's summary. Options:
+- start today's window at the current hour (`build_daily_section` would need the
+  current hour, e.g. `hour_array_grib[int(baseTimeOffset)]`), so past periods are
+  dropped. As past precipitation is unknown, avoid "throughout the day" for a
+  shortened window and list the remaining periods instead ("Rain in the evening and
+  overnight"); the existing time phrases already allow this. Apply the same to the
+  current day/night half, keeping its full-window summary once it is entirely past;
+- keep the full day but use the observed/analysed precipitation for past hours
+  (e.g. the RTMA/URMA history) instead of zeros, which keeps "throughout the day"
+  accurate but adds reads to the request path.
