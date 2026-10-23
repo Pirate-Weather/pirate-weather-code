@@ -61,6 +61,25 @@ PRECIP_LEVEL_TEXT = {
     ),
 }
 
+# Icons that mean precipitation is expected (not just "possible-..."), in
+# either icon set. Freezing rain uses the sleet icon in the Dark Sky set.
+PRECIPITATION_ICONS = frozenset(
+    {
+        PRECIP_TYPES["rain"],
+        PRECIP_TYPES["snow"],
+        PRECIP_TYPES["sleet"],
+        PRECIP_TYPES["mixed"],
+        "precipitation",
+        "thunderstorm",
+    }
+    | {
+        level_icon
+        for _, level_icons in PRECIP_LEVEL_TEXT.values()
+        for level_icon in level_icons
+        if level_icon is not None
+    }
+)
+
 # Thunderstorm scoring: each available index contributes up to its weight
 # (total 100) and the score is normalised by the weight actually available.
 THUNDERSTORM_WEIGHTS = {

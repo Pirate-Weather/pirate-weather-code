@@ -124,6 +124,28 @@ Options:
 
 Check the effect on the day/night and next 24 hour summaries too, which share the code.
 
+### Summaries: lists of three or more days or periods read awkwardly
+Weekly (`API/PirateWeeklyText.py`, `calculate_summary_text`) and next 24 hour
+(`API/PirateDailyText.py`, `_get_time_phrase`) summaries join separate days or
+periods with nested `and`s, e.g. "Rain today and Friday and Sunday and next
+Wednesday." The translations' `and` only uses a comma when its first argument
+already contains one, and no template produces one, so there is no way to say
+"today, Friday, Sunday and next Wednesday" today.
+Needs a translations change first, e.g. a `list` template that takes the items
+as one list and joins them the language's way, then use it for three or more
+items here.
+
+### Weekly summary: steady temperatures
+`calculate_temp_summary` always picks rising, falling, peaking or valleying, even
+for a flat week (Honolulu: highs of 26/26/25/26/26/25/26/26 °C reads as if the
+temperature trends). Needs a translations key, e.g. `temperatures-steady`
+("highs steady around $1"). Then use it when the week's highs span a small range
+(e.g. 2 °C / 4 °F) and give the rounded mean.
+
+New keys raise `ValueError` in translations that don't have them yet; the
+`Translation.is_supported()` method can be used to switch over only once the
+installed translations support a key.
+
 ## v3 goals
 
 From the v3 planning post (pirate-weather-code discussion #773). Goals already done

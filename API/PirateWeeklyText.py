@@ -15,6 +15,7 @@ from API.constants.text_const import (
     PRECIP_PROB_THRESHOLD,
 )
 from API.PirateTextHelper import (
+    PRECIPITATION_ICONS,
     calculate_precip_text,
     calculate_thunderstorm_text,
     most_common,
@@ -24,6 +25,31 @@ WEEK_DAYS_MINUS_ONE = 6
 WEEK_DAYS = 7
 WEEK_DAYS_PLUS_ONE = 8
 MIN_THUNDERSTORM_DAYS = 2
+
+
+def _combined_precip_type(precipitation_days):
+    """
+    The precipitation type for a set of days, or "mixed-precipitation" if they differ.
+
+    Days without a known type ("none") don't make the week mixed; they can be
+    included because their daily icon shows precipitation.
+
+    Parameters:
+    - precipitation_days (arr): Entries of the precipitation days array ([index, day name, day])
+
+    Returns:
+    - str: The shared precipitation type, "none", or "mixed-precipitation".
+    """
+    known_types = {
+        day[2]["precipType"]
+        for day in precipitation_days
+        if day[2]["precipType"] != PRECIP_TYPES["none"]
+    }
+    if not known_types:
+        return PRECIP_TYPES["none"]
+    if len(known_types) == 1:
+        return known_types.pop()
+    return "mixed-precipitation"
 
 
 def _day_run_text(run):
@@ -92,12 +118,6 @@ def calculate_summary_text(
         # Create an array of day indexes
         dayIndexes.append(day[0])
 
-        # If an icon does not exist then set it. Otherwise if already set, check if the icons are the same and if not use the mixed-precipitation text
-        if not wIcon:
-            wIcon = day[2]["precipType"]
-        elif wIcon != day[2]["precipType"] and wIcon != "mixed-precipitation":
-            wIcon = "mixed-precipitation"
-
         if "cape" in day[2]:
             # Calculate the maximum cape for the week
             # Track maximum CAPE across precipitation days
@@ -150,6 +170,8 @@ def calculate_summary_text(
         # Calculate the number of days with thunderstorms forecasted
         if day[2]["icon"] == "thunderstorm":
             numThunderstormDays += 1
+
+    wIcon = _combined_precip_type(precipitation)
 
     # Create a list of consecutive days so we can use the through text instead of multiple ands
     for _, g in groupby(enumerate(dayIndexes), lambda ix: ix[0] - ix[1]):
@@ -331,13 +353,11 @@ def calculate_precip_summary(
         else:
             precipSummary = [wSummary, wIcon]
     elif len(precipitationDays) == 8:
-        if all(
-            day[2]["precipType"] == precipitationDays[0][2]["precipType"]
-            for day in precipitationDays
-        ):
+        week_precip_type = _combined_precip_type(precipitationDays)
+        if week_precip_type != "mixed-precipitation":
             # If all days have precipitation then if they all have the same type then use that icon
             text, c_icon = calculate_precip_text(
-                precipitationDays[0][2]["precipType"],
+                week_precip_type,
                 "week",
                 rain_accum,
                 snow_accum,
@@ -480,31 +500,29 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
         elif idx == len(weekArr) - 1:
             weekday = "next-" + weekday
 
-        # Check if the day has enough precipitation to reach the threshold and record the index in the array, the day it occured on and the type
+        # A day has precipitation if its daily summary chose a precipitation
+        # icon, or if it reaches the daily accumulation thresholds. The daily
+        # summary uses lower, per-period thresholds, so without the icon check a
+        # day showing rain (e.g. 0.8 mm) could be left out of the week.
         # Data is already in SI units (mm for accumulation, mm/h for intensity)
-        if (
-            (
-                day["precipType"] == PRECIP_TYPES["snow"]
-                and day["snowAccumulation"] >= DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM
-                and (
-                    day["precipProbability"] >= PRECIP_PROB_THRESHOLD
-                    or np.isnan(day["precipProbability"])
+        is_likely = day["precipProbability"] >= PRECIP_PROB_THRESHOLD or np.isnan(
+            day["precipProbability"]
+        )
+        if day["icon"] in PRECIPITATION_ICONS or (
+            is_likely
+            and (
+                (
+                    day["precipType"] == PRECIP_TYPES["snow"]
+                    and day["snowAccumulation"] >= DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM
                 )
-            )
-            or (
-                day["precipType"] == PRECIP_TYPES["rain"]
-                and day["liquidAccumulation"] >= DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
-                and (
-                    day["precipProbability"] >= PRECIP_PROB_THRESHOLD
-                    or np.isnan(day["precipProbability"])
+                or (
+                    day["precipType"] == PRECIP_TYPES["rain"]
+                    and day["liquidAccumulation"]
+                    >= DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
                 )
-            )
-            or (
-                day["precipType"] == PRECIP_TYPES["sleet"]
-                and day["iceAccumulation"] >= DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
-                and (
-                    day["precipProbability"] >= PRECIP_PROB_THRESHOLD
-                    or np.isnan(day["precipProbability"])
+                or (
+                    day["precipType"] in (PRECIP_TYPES["sleet"], PRECIP_TYPES["ice"])
+                    and day["iceAccumulation"] >= DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
                 )
             )
         ):

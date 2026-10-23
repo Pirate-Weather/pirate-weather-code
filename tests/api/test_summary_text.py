@@ -7,6 +7,7 @@ import pytest
 from API.legacy.summary import build_minutely_summary
 from API.PirateDailyText import calculate_day_text
 from API.PirateMinutelyText import calculate_minutely_text
+from API.PirateWeeklyText import calculate_weekly_text
 from tests.helpers.text import BASE_TIME, HOUR, make_hours
 
 RAIN = {
@@ -116,3 +117,38 @@ def test_minutely_summary_falls_back_when_text_fails():
         logger=MagicMock(),
         loc_tag="test",
     ) == ("Rain", "rain")
+
+
+def test_weekly_summary_includes_days_with_a_rain_icon():
+    """A day whose daily summary shows rain must appear in the weekly summary,
+    even with less rain (0.8 mm) than the weekly accumulation threshold.
+    """
+    week = [
+        {
+            "time": BASE_TIME + day * 86400,
+            "icon": "partly-cloudy-day",
+            "precipType": "none",
+            "precipProbability": 0.0,
+            "liquidAccumulation": 0.0,
+            "snowAccumulation": 0.0,
+            "iceAccumulation": 0.0,
+            "rainIntensityMax": 0.0,
+            "snowIntensityMax": 0.0,
+            "iceIntensityMax": 0.0,
+            "temperatureHigh": 24.0,
+        }
+        for day in range(8)
+    ]
+    week[2].update(
+        icon="rain",
+        precipType="rain",
+        precipProbability=0.6,
+        liquidAccumulation=0.8,
+        rainIntensityMax=0.8,
+    )
+
+    text, icon = calculate_weekly_text(week, "UTC")
+
+    # text[2] is the week's temperature trend, which is not under test here.
+    assert text[:2] == ["with", ["during", "possible-light-rain", "sunday"]]
+    assert icon == "rain"
