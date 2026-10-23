@@ -1,5 +1,5 @@
 # %% Script to contain the functions that can be used to generate the text summary of the forecast data for Pirate Weather
-import numpy as np
+import math
 
 from API.constants.shared_const import MISSING_DATA
 from API.constants.text_const import (
@@ -92,7 +92,7 @@ def calculate_text(
     kIndex = hourObject.get("kIndex", None)
 
     # If we missing or incomplete data then return clear icon/text instead of calculating
-    if all(np.isnan(v) for v in (temp, wind, vis, cloudCover, humidity, dewPoint)):
+    if all(math.isnan(v) for v in (temp, wind, vis, cloudCover, humidity, dewPoint)):
         return "unavailable", "none"
 
     # Extract liquidAccumulation, snowAccum, sleetAccum from hourObject

@@ -537,7 +537,11 @@ def _setup_time_grids(
         output_days = min(timemachine_days, TIME_MACHINE_CONST["max_days"])
     else:
         daily_days = 8
-        daily_day_hours = 5
+        # Hours past the end of the last day: the last 6am-6am daily summary
+        # and 6pm-6am night run until 6am on the following day, plus one hour
+        # for when the clocks fall back during the forecast (the grid is a
+        # fixed number of UTC hours).
+        daily_day_hours = 7
         output_hours = 168 if extend_flag else 48
         output_days = 8
 

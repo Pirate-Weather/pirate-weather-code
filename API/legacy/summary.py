@@ -14,10 +14,7 @@ def build_minutely_summary(
     *,
     summary_text: bool,
     translation,
-    inter_p_current,
-    inter_p_hour,
     minute_items_si,
-    current_text,
     current_icon,
     icon: str,
     max_p_chance,
@@ -29,18 +26,17 @@ def build_minutely_summary(
     """Compute minutely summary/icon text."""
     if summary_text:
         try:
-            max_cape = max(inter_p_current, inter_p_hour)
             minute_text, minute_icon = calculate_minutely_text(
-                minute_items_si, current_text, current_icon, icon, max_cape
+                minute_items_si, current_icon, icon
             )
-            minute_translate = translation.translate(["sentence", minute_text])
+            return translation.translate(["sentence", minute_text]), minute_icon
         except Exception:
             logger.exception("MINUTELY TEXT GEN ERROR %s", loc_tag)
-        return minute_translate, minute_icon
-    # If not summary_text, return the most common text/icon from the minute items
-    else:
-        dominant = int(Counter(max_p_chance).most_common(1)[0][0])
-        return p_types_text[dominant], p_types_icon[dominant]
+
+    # Without summary text, or if it fails, use the most common precipitation
+    # text/icon from the minute items
+    dominant = int(Counter(max_p_chance).most_common(1)[0][0])
+    return p_types_text[dominant], p_types_icon[dominant]
 
 
 def build_hourly_summary(

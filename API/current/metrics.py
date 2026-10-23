@@ -74,7 +74,6 @@ class CurrentSection:
 
     currently: dict
     interp_current: np.ndarray
-    summary_key: str | None = None
 
 
 @dataclass
@@ -2371,7 +2370,6 @@ def build_current_section(
     currently_si["snowAccumulation"] = 0
     currently_si["iceAccumulation"] = 0
 
-    current_summary_key = None
     try:
         # Always calculate text for translation, even if not used in currently block, to ensure translation keys are generated for all scenarios.
         currentText, currentIcon = calculate_text(
@@ -2379,9 +2377,6 @@ def build_current_section(
             currentDay,
             "current",
             icon,
-        )
-        current_summary_key = (
-            currentText  # current_summary_key is used for minutely text generation.
         )
     except Exception:
         logger.exception("CURRENTLY TEXT GEN ERROR %s", loc_tag)
@@ -2397,5 +2392,4 @@ def build_current_section(
     return CurrentSection(
         currently=currently,
         interp_current=InterPcurrent,
-        summary_key=current_summary_key,
     )

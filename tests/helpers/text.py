@@ -1,6 +1,6 @@
 """Hour-dict builder shared by the text-summary tests.
 
-``calculate_text``, ``calculate_day_text`` and ``calculate_half_day_text`` all read
+``calculate_text`` and ``calculate_day_text`` (including half-day summaries) read
 the same SI-unit hourly keys. This builds one dry, partly cloudy hour that tests
 override only where the scenario differs.
 """

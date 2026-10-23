@@ -39,7 +39,6 @@ from API.constants.api_const import (
     ROUNDING_RULES,
 )
 from API.constants.forecast_const import (
-    DATA_CURRENT,
     DATA_DAY,
     DATA_HOURLY,
     DATA_MINUTELY,
@@ -830,14 +829,14 @@ async def PW_Forecast(
     )
 
     day_array_grib = time_indexing.day_array_grib
-    day_array_4am_grib = time_indexing.day_array_4am_grib
-    day_array_5pm_grib = time_indexing.day_array_5pm_grib
+    day_array_6am_grib = time_indexing.day_array_6am_grib
+    day_array_6pm_grib = time_indexing.day_array_6pm_grib
     hourlyDayIndex = time_indexing.hourly_day_index
-    hourlyDay4amIndex = time_indexing.hourly_day_4am_index
+    hourlyDay6amIndex = time_indexing.hourly_day_6am_index
     hourlyHighIndex = time_indexing.hourly_high_index
     hourlyLowIndex = time_indexing.hourly_low_index
-    hourlyDay4pmIndex = time_indexing.hourly_day_4pm_index
-    hourlyNight4amIndex = time_indexing.hourly_night_4am_index
+    hourlyHalfDayIndex = time_indexing.hourly_half_day_index
+    hourlyHalfNightIndex = time_indexing.hourly_half_night_index
 
     # +1 to account for the extra 4 hours of summary
     InterSday = np.zeros(shape=(daily_days + 1, 21))
@@ -1057,9 +1056,9 @@ async def PW_Forecast(
         daily_section = build_daily_section(
             InterPhour=InterPhour,
             hourlyDayIndex=hourlyDayIndex,
-            hourlyDay4amIndex=hourlyDay4amIndex,
-            hourlyDay4pmIndex=hourlyDay4pmIndex,
-            hourlyNight4amIndex=hourlyNight4amIndex,
+            hourlyDay6amIndex=hourlyDay6amIndex,
+            hourlyHalfDayIndex=hourlyHalfDayIndex,
+            hourlyHalfNightIndex=hourlyHalfNightIndex,
             hourlyHighIndex=hourlyHighIndex,
             hourlyLowIndex=hourlyLowIndex,
             daily_days=daily_days,
@@ -1080,8 +1079,8 @@ async def PW_Forecast(
             timeMachine=timeMachine,
             tmExtra=tmExtra,
             day_array_grib=day_array_grib,
-            day_array_4am_grib=day_array_4am_grib,
-            day_array_5pm_grib=day_array_5pm_grib,
+            day_array_6am_grib=day_array_6am_grib,
+            day_array_6pm_grib=day_array_6pm_grib,
             InterSday=InterSday,
             hourList_si=hourList_si,
             pTypeMap=pTypeMap,
@@ -1194,27 +1193,10 @@ async def PW_Forecast(
 
     if exMinutely != 1:
         returnOBJ["minutely"] = {}
-        current_cape = float(
-            np.nan_to_num(
-                current_section.interp_current[DATA_CURRENT["cape"]],
-                nan=0,
-            )
-        )
-        hourly_cape = 0.0
-        if len(InterPhour) > 0:
-            hourly_cape = float(
-                np.nan_to_num(InterPhour[0, DATA_HOURLY["cape"]], nan=0)
-            )
         minute_summary, minute_icon = build_minutely_summary(
             summary_text=summaryText,
             translation=translation,
-            inter_p_current=current_cape,
-            inter_p_hour=hourly_cape,
             minute_items_si=minuteItems_si,
-            current_text=(
-                current_section.summary_key
-                or current_section.currently.get("summary", "")
-            ),  # This takes the summary from the summary_key variable if available, which has formatted text.
             current_icon=current_section.currently.get("icon", ""),
             icon=icon,
             max_p_chance=maxPchance,

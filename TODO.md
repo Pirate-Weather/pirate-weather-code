@@ -23,12 +23,6 @@ so `exclude=aigfs` also sets `ex_gfs=1` and `exclude=aigefs` also sets `ex_gefs=
 Excluding an AI model silently drops its conventional counterpart. The model flags
 should match whole comma-separated tokens.
 
-### Minutely summary raises `UnboundLocalError` instead of falling back
-`API/legacy/summary.py:30-38` (`build_minutely_summary`): if `calculate_minutely_text`
-or `translation.translate` raises, the `except` block only logs, then
-`return minute_translate, minute_icon` references names that were never assigned.
-The intended "log and continue" fallback never happens; the request errors instead.
-
 ### `aqiunits=tw` is silently ignored
 `API/request/preprocess.py:731` documents `tw → Taiwan AQI`, but `tw` is missing from
 `_VALID_AQI_UNITS` and `_AQI_UNITS_MAP`, so the parameter falls back to the unit
@@ -58,15 +52,6 @@ be replaced; the rest should still be clipped.
 types are present) *before* the "preserve ice/sleet from the hourly data" check runs,
 so that check can never see sleet. Ice-pellet days are always reported as freezing
 rain ("ice").
-
-### Minutely "-later" durations may be off by one
-`API/PirateMinutelyText.py:46-70`: "stopping-then-starting-later" reports the end as
-`precipEnd1 + 1` minutes but the gap as `precipStart2 - precipEnd1`, and
-"starting-then-stopping-later" reports the duration as `precipEnd1 - precipStart1`
-without the `+ 1`. E.g. rain in minutes 0-19 and again from 41 reads "ending in 20
-min, returning 22 min later". Decide whether `precipEnd1` is the last wet minute or
-the first dry one and make all three numbers consistent.
-`tests/api/test_minutely_thunderstorm.py` deliberately doesn't pin the second number.
 
 ### `interpolate_temporal_gaps_efficiently` fills gaps longer than `max_gap_hours`
 `API/ingest_utils.py` (~1400-1458): `interpolate_na(limit=max_gap_hours)` fills the
@@ -120,6 +105,46 @@ about 8% of temperatures (max 3e-5 K) and 14% of pressures (max 0.016 Pa, the fl
 resolution near 1e5 Pa) differ. Every ingest using the helper (10 models) then stops
 being bit-identical to its previous output, so do it on its own, not alongside a
 change that needs an old-vs-new bit comparison.
+
+### Daily summaries: precipitation periods ignore the chance of precipitation
+`API/PirateDailyText.py` (`_add_hour_to_period` / the period loop in
+`calculate_day_text`): a period counts as having precipitation from its
+accumulation alone, and the window's chance of precipitation is the highest hourly
+chance in any of those periods. So when a model (often the Canadian models) has
+light accumulation from 11am to 3am but the chance is only above the 25% threshold
+from 1am to 3am, the whole run is described with the 1-3am chance: "Light rain
+throughout the day." instead of "Light rain overnight."
+
+Options:
+- only count hours at or above `PRECIP_PROB_THRESHOLD` towards a period's
+  precipitation, keeping the current behaviour (a "possible ..." summary) when no
+  hour reaches it;
+- require each precipitation period's own highest chance to reach the threshold;
+- weight each hour's accumulation by its chance before comparing to the thresholds.
+
+Check the effect on the day/night and next 24 hour summaries too, which share the code.
+
+### Summaries: lists of three or more days or periods read awkwardly
+Weekly (`API/PirateWeeklyText.py`, `calculate_summary_text`) and next 24 hour
+(`API/PirateDailyText.py`, `_get_time_phrase`) summaries join separate days or
+periods with nested `and`s, e.g. "Rain today and Friday and Sunday and next
+Wednesday." The translations' `and` only uses a comma when its first argument
+already contains one, and no template produces one, so there is no way to say
+"today, Friday, Sunday and next Wednesday" today.
+Needs a translations change first, e.g. a `list` template that takes the items
+as one list and joins them the language's way, then use it for three or more
+items here.
+
+### Weekly summary: steady temperatures
+`calculate_temp_summary` always picks rising, falling, peaking or valleying, even
+for a flat week (Honolulu: highs of 26/26/25/26/26/25/26/26 °C reads as if the
+temperature trends). Needs a translations key, e.g. `temperatures-steady`
+("highs steady around $1"). Then use it when the week's highs span a small range
+(e.g. 2 °C / 4 °F) and give the rounded mean.
+
+New keys raise `ValueError` in translations that don't have them yet; the
+`Translation.is_supported()` method can be used to switch over only once the
+installed translations support a key.
 
 ## v3 goals
 
@@ -362,8 +387,30 @@ but are in ppb, and the module docstring says "three AQI systems" (there are ele
 "if more than one channel exceeds the threshold we fall back to mixed precipitation",
 but the code assigns `PRECIP_IDX["sleet"]` (`api_utils.py:606-607`). One of them is wrong.
 
-### Minutely and currently disagree on thunderstorms
-Minutely uses a raw `maxCAPE >= 2500` gate (`API/PirateMinutelyText.py:432`), while
-currently/hourly use the multi-index score with CIN/PoP/dewpoint suppressors
-(`API/PirateTextHelper.py`). Minutely can say "thunderstorm" while currently
-suppresses it. Decide whether minutely should use the same score.
+### Weekly summary: what to say about a dry week
+A week without precipitation always reads "No precipitation throughout the week"
+(plus the temperature trend). Options:
+- mention notable non-precipitation conditions when they occur on at least two days,
+  from the daily icons: fog, smoke, haze, or wind ("Fog Monday through Wednesday,
+  with highs ..."), keeping "no precipitation" otherwise. The day phrasing
+  (`_day_run_text`, "over-weekend") and condition keys already exist, so no new
+  translation keys are needed;
+- replace "no precipitation" with the week's cloud cover ("Partly cloudy throughout
+  the week"). A week-long average of cloud cover is rarely informative and loses the
+  most useful fact about the week, so the first option is the suggested one.
+
+### Daily summary for the current day: past hours
+For today (and the current day/night half), the summary still covers 6am onwards.
+Past hours have their precipitation and chance of precipitation zeroed
+(`API/hourly/block.py`, before `int(baseTimeOffset)`), but fog, cloud and wind are
+kept. So in the evening rain that has fallen all day reads "Rain starting in the
+evening", while morning fog is still in the afternoon's summary. Options:
+- start today's window at the current hour (`build_daily_section` would need the
+  current hour, e.g. `hour_array_grib[int(baseTimeOffset)]`), so past periods are
+  dropped. As past precipitation is unknown, avoid "throughout the day" for a
+  shortened window and list the remaining periods instead ("Rain in the evening and
+  overnight"); the existing time phrases already allow this. Apply the same to the
+  current day/night half, keeping its full-window summary once it is entirely past;
+- keep the full day but use the observed/analysed precipitation for past hours
+  (e.g. the RTMA/URMA history) instead of zeros, which keeps "throughout the day"
+  accurate but adds reads to the request path.

@@ -39,6 +39,8 @@ DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0  # (mm liquid)
 
 # Text thresholds for precipitation accumulation (only rain/sleet)
 DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM = 0.2  # (mm rain/sleet)
+# Day/night (half-day) summaries need slightly more rain/sleet before mentioning it
+HALF_DAY_PRECIP_ACCUM_TEXT_THRESHOLD_MM = 0.25  # (mm rain/sleet)
 
 # Visibility thresholds (metres)
 FOG_THRESHOLD_METERS = 1000
