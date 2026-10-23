@@ -194,3 +194,43 @@ def test_full_file_nomads_download_uses_pacing_and_rejects_redirect(
     assert closed == [True]
     assert not path.exists()
     assert not list(tmp_path.glob("*.tmp.*"))
+
+
+def test_nomads_pacing_backs_off_on_rate_limit_and_recovers(monkeypatch):
+    """NOMADS pacing starts fast (1 s) and must slow down when NOMADS pushes
+    back (#772: a redirect to its block page, or 429/503/timeouts), or every
+    retry hits the limit again; it must also ease back to the configured floor
+    afterwards, or one bad minute would leave a run slow for hours.
+    """
+    clock = [0.0]
+    sleeps = []
+    statuses = iter([302, 429, 200] + [200] * 200)
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    def get(url, **kwargs):
+        response = ingest_utils.requests.Response()
+        response.status_code = next(statuses)
+        response.close = lambda: None
+        return response
+
+    monkeypatch.setattr(ingest_utils.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(ingest_utils.time, "sleep", sleep)
+    monkeypatch.setattr(ingest_utils.requests, "get", get)
+    client = ingest_utils._HerbieRequests(1, 120)
+    url = "https://nomads.ncep.noaa.gov/pub/data/aigefs.grib2"
+
+    with pytest.raises(ingest_utils.requests.HTTPError):
+        client.get(url)  # 302: block-page redirect
+    assert client.interval_s == 2
+    client.get(url)  # 429
+    assert client.interval_s == 4
+    client.get(url)
+    assert sleeps == [2, 4]
+    assert client.interval_s < 4
+
+    for _ in range(200):
+        client.get(url)
+    assert client.interval_s == 1

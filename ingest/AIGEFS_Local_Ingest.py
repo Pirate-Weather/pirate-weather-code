@@ -16,10 +16,12 @@ import os
 import shutil
 import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 
 import dask.array as da
 import numpy as np
 import pandas as pd
+import requests
 import xarray as xr
 import zarr
 from herbie import HerbieLatest
@@ -29,7 +31,7 @@ from API.constants.shared_const import (
     INGEST_VERSION_STR,
 )
 from API.herbie_custom_templates import register_aws_aigfs_aigefs_templates
-from API.ingest_grib_utils import download_and_validate_subset, run_checked
+from API.ingest_grib_utils import check_grib_stats, run_checked
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -37,6 +39,7 @@ from API.ingest_utils import (
     FORECAST_LEAD_RANGES,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
+    download_grib_file,
     interp_time_take_blend,
     mask_invalid_data,
     open_remote,
@@ -59,7 +62,10 @@ AIGEFS_FORECAST_HOURS = FORECAST_LEAD_RANGES["AIGEFS"]
 # run total), so it only needs dividing into an hourly rate.
 AIGEFS_LEAD_STEP_HOURS = 6
 # The AWS EAGLE ensemble is experimental; operational AIGEFS is on NOMADS.
+# (On 2026-10-23 the AWS control member's precipitation correlated only 0.78
+# with the operational one: a different model, not a mirror.)
 AIGEFS_SOURCE_PRIORITY = ["nomads"]
+AIGEFS_NOMADS_ROOT = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/aigefs/prod"
 # The full member files are downloaded; wgrib2 keeps only precipitation
 AIGEFS_WGRIB2_MATCH = ":APCP:surface:"
 
@@ -99,10 +105,20 @@ save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
 
-# NOMADS rate-limits per IP, so member downloads use few threads
+# NOMADS rate-limits per IP; requests are paced across threads, so a few
+# threads only overlap the transfers.
 AIGEFS_MAX_THREADS = positive_int_env("aigefs_download_threads", 4)
 AIGEFS_DOWNLOAD_RETRIES = positive_int_env("herbie_download_retries", 5)
 AIGEFS_RETRY_SLEEP_SECONDS = positive_int_env("herbie_retry_sleep_seconds", 20)
+AIGEFS_REQUEST_TIMEOUT_SECONDS = positive_int_env("herbie_request_timeout_seconds", 120)
+
+
+def aigefs_member_url(run_date: pd.Timestamp, member: int, fxx: int) -> str:
+    """NOMADS URL of one member's surface GRIB (the full file is downloaded)."""
+    return (
+        f"{AIGEFS_NOMADS_ROOT}/aigefs.{run_date:%Y%m%d/%H}/mem{member:03d}/model/"
+        f"atmos/grib2/aigefs.t{run_date:%H}z.sfc.f{fxx:03d}.grib2"
+    )
 
 
 def download_aigefs_member(
@@ -111,23 +127,56 @@ def download_aigefs_member(
     member: int,
     dataset_name: str,
 ) -> list[str]:
-    """Download and validate a complete member with bounded retries and threads."""
-    return download_and_validate_subset(
-        model="aigefs",
-        product="sfc",
-        search=None,
-        dataset_name=dataset_name,
-        base_time=run_date,
-        forecast_hours=forecast_hours,
-        priority=AIGEFS_SOURCE_PRIORITY,
-        herbie_save_dir=tmp_dir,
-        herbie_download_retries=AIGEFS_DOWNLOAD_RETRIES,
-        herbie_retry_sleep_seconds=AIGEFS_RETRY_SLEEP_SECONDS,
-        herbie_kwargs={"member": f"mem{member:03d}", "max_threads": AIGEFS_MAX_THREADS},
-        download_max_threads=AIGEFS_MAX_THREADS,
-        download_verbose=False,
-        wgrib2_exe=wgrib2_path.strip(),
+    """Download and validate a complete member with bounded retries.
+
+    Each file is one paced GET. Going through Herbie cost three NOMADS requests
+    per file (a HEAD on the GRIB, a HEAD on its unused .idx, then the GET),
+    about 13 s per file and ~5 h per run at 5 s pacing; the run is already
+    known to exist (HerbieLatest found member 0's last lead), and a file that
+    is not posted yet fails its GET and is retried.
+    """
+    member_dir = os.path.join(
+        tmp_dir, f"aigefs_{run_date:%Y%m%d%H}", f"mem{member:03d}"
     )
+    targets = [
+        (
+            aigefs_member_url(run_date, member, fxx),
+            os.path.join(member_dir, f"aigefs.sfc.f{fxx:03d}.grib2"),
+        )
+        for fxx in forecast_hours
+    ]
+
+    for attempt in range(1, AIGEFS_DOWNLOAD_RETRIES + 1):
+        try:
+            with ThreadPoolExecutor(max_workers=AIGEFS_MAX_THREADS) as executor:
+                grib_files = list(
+                    executor.map(
+                        lambda target: download_grib_file(
+                            target[0],
+                            target[1],
+                            overwrite=False,
+                            request_timeout_s=AIGEFS_REQUEST_TIMEOUT_SECONDS,
+                        ),
+                        targets,
+                    )
+                )
+            break
+        except (requests.RequestException, RuntimeError) as exc:
+            if attempt == AIGEFS_DOWNLOAD_RETRIES:
+                raise
+            sleep_s = AIGEFS_RETRY_SLEEP_SECONDS * attempt
+            logger.warning(
+                "%s download attempt %d/%d failed (%s). Retrying in %ss",
+                dataset_name,
+                attempt,
+                AIGEFS_DOWNLOAD_RETRIES,
+                exc,
+                sleep_s,
+            )
+            time.sleep(sleep_s)
+
+    check_grib_stats(grib_files, wgrib2_path.strip(), dataset_name)
+    return grib_files
 
 
 def main() -> None:

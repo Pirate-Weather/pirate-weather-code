@@ -485,16 +485,37 @@ def make_herbie_save_dir(tmp_dir: str, prefix: str = "herbie") -> str:
     return save_dir
 
 
+# NOMADS pacing adapts: it starts at the configured interval, doubles (up to
+# NOMADS_MAX_INTERVAL_S) whenever NOMADS answers like a rate-limited client
+# (a redirect to its HTML block page, 429, 503, or a timeout), and eases back
+# by NOMADS_INTERVAL_DECAY per normal answer, never below the configured value.
+NOMADS_MAX_INTERVAL_S = 60.0
+NOMADS_INTERVAL_DECAY = 0.95
+NOMADS_THROTTLE_STATUS = {429, 503}
+
+
 class _HerbieRequests:
-    """Pace NOMADS probes, index reads, and GRIB byte-range requests together."""
+    """Pace NOMADS probes, index reads, and GRIB requests together, backing off
+    when NOMADS signals a rate limit."""
 
     RequestException = requests.RequestException
 
     def __init__(self, interval_s: float, timeout_s: int) -> None:
+        self.min_interval_s = interval_s
         self.interval_s = interval_s
         self.timeout_s = timeout_s
         self._lock = Lock()
         self._last_request: float | None = None
+
+    def _back_off(self, reason: str) -> None:
+        previous = self.interval_s
+        self.interval_s = min(NOMADS_MAX_INTERVAL_S, self.interval_s * 2)
+        logger.warning(
+            "NOMADS %s; request interval %.1f s -> %.1f s",
+            reason,
+            previous,
+            self.interval_s,
+        )
 
     def _request(self, method: str, url: str, **kwargs) -> requests.Response:
         kwargs.setdefault("timeout", (10, self.timeout_s))
@@ -510,7 +531,21 @@ class _HerbieRequests:
                 if delay > 0:
                     time.sleep(delay)
             self._last_request = time.monotonic()
-            response = request(url, **kwargs)
+            try:
+                response = request(url, **kwargs)
+            except (requests.Timeout, requests.ConnectionError):
+                self._back_off("timed out or dropped the connection")
+                raise
+            throttled = (
+                300 <= response.status_code < 400
+                or response.status_code in NOMADS_THROTTLE_STATUS
+            )
+            if throttled:
+                self._back_off(f"returned HTTP {response.status_code}")
+            else:
+                self.interval_s = max(
+                    self.min_interval_s, self.interval_s * NOMADS_INTERVAL_DECAY
+                )
         if 300 <= response.status_code < 400:
             response.close()
             raise requests.HTTPError(
@@ -535,8 +570,10 @@ def configure_herbie_request_timeouts(
 
     NOMADS rate-limits by client IP across all ingests, answering aggressive
     clients with redirects to an HTML page (#772), so pacing is always on. The
-    interval comes from ``nomads_request_interval_seconds`` (default 5 s) unless
-    given; calling again without an interval keeps the pacing already set up.
+    starting (and minimum) interval comes from ``nomads_request_interval_seconds``
+    (default 1 s) unless given, and it backs off when NOMADS pushes back (see
+    ``_HerbieRequests``); calling again without an interval keeps the pacing
+    already set up.
     Requests to other sources (AWS, Google, MSC, ECMWF) are not slowed down.
     """
     if request_timeout_s is None:
@@ -549,12 +586,13 @@ def configure_herbie_request_timeouts(
         raise ValueError("NOMADS request interval must be positive")
     if isinstance(core.requests, _HerbieRequests):
         if nomads_request_interval_s is not None:
+            core.requests.min_interval_s = nomads_request_interval_s
             core.requests.interval_s = nomads_request_interval_s
         core.requests.timeout_s = request_timeout_s
     else:
         if nomads_request_interval_s is None:
             nomads_request_interval_s = positive_int_env(
-                "nomads_request_interval_seconds", 5
+                "nomads_request_interval_seconds", 1
             )
         core.requests = _HerbieRequests(nomads_request_interval_s, request_timeout_s)
 
@@ -628,12 +666,34 @@ def _download_full_herbie_file(
 ) -> str:
     """Download a full Herbie GRIB with request timeouts and atomic replacement."""
     out_file = Path(herbie_ref.get_localFilePath(None)).expanduser()
-    if out_file.exists() and out_file.stat().st_size > 0 and not overwrite:
-        return str(out_file)
-
     grib_source = getattr(herbie_ref, "grib", None)
     if grib_source is None:
         raise RuntimeError(f"GRIB2 file not found: {herbie_ref!r}")
+    return download_grib_file(
+        grib_source,
+        out_file,
+        overwrite=overwrite,
+        request_timeout_s=request_timeout_s,
+        chunk_size=chunk_size,
+    )
+
+
+def download_grib_file(
+    source: str | Path,
+    out_file: str | Path,
+    *,
+    overwrite: bool,
+    request_timeout_s: int,
+    chunk_size: int = 1024 * 1024,
+) -> str:
+    """Download one whole GRIB file (or copy a local one) atomically.
+
+    NOMADS URLs go through the paced Herbie client, so direct downloads share
+    the same rate limit as Herbie's own requests.
+    """
+    out_file = Path(out_file).expanduser()
+    if out_file.exists() and out_file.stat().st_size > 0 and not overwrite:
+        return str(out_file)
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
     tmp_file = out_file.with_name(f"{out_file.name}.tmp.{os.getpid()}")
@@ -641,16 +701,14 @@ def _download_full_herbie_file(
         tmp_file.unlink()
 
     try:
-        if _is_remote_url(grib_source):
+        if _is_remote_url(source):
             request_client = requests
-            if (
-                urlparse(str(grib_source)).hostname or ""
-            ).lower() == "nomads.ncep.noaa.gov":
+            if (urlparse(str(source)).hostname or "").lower() == "nomads.ncep.noaa.gov":
                 from herbie import core
 
                 request_client = core.requests
             with request_client.get(
-                str(grib_source),
+                str(source),
                 stream=True,
                 timeout=(10, request_timeout_s),
             ) as response:
@@ -660,7 +718,7 @@ def _download_full_herbie_file(
                         if chunk:
                             file.write(chunk)
         else:
-            source_path = Path(grib_source).expanduser()
+            source_path = Path(source).expanduser()
             if source_path.resolve() == out_file.resolve():
                 if out_file.exists() and out_file.stat().st_size > 0:
                     return str(out_file)

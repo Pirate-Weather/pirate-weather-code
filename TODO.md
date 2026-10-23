@@ -223,12 +223,6 @@ datamart), then convert on a single core: GDPS spends 12.6 min downloading and
 39 min run; HRDPS 4.5 + 4.5 min of 18. Run the downloads and conversions 3-4 at
 a time, and avoid re-reading the intermediate files.
 
-### AIGEFS: download takes ~5 h
-AIGEFS only comes from NOMADS, which rate-limits: ~10.3 min per member, ~5.2 h for
-30 members before the final write starts, using under 1 GB and ~1% CPU. Fetch
-members in parallel within the rate limit, or switch source if AIGEFS appears on
-a cloud mirror.
-
 ### Test an NFS share as the publish target
 Same flow as object storage, with an NFS share (OVH offers up to 16,000 IOPS /
 128 MiB/s) in place of the bucket: ingests publish to the share (`open_remote`
@@ -331,6 +325,15 @@ on HRRR with the benchmark harness, not yet in production:
 - **Not yet measured:** the ingest write peak with whole-shard dask tasks, and
   the new reader inside the full API response (the 16 reads were ~5-8 ms of
   each request before).
+
+### AIGEFS download: one request per file, adaptive NOMADS pacing (2026-10-23)
+AIGEFS fetched each file through Herbie, which sent two HEAD probes before every
+GET; at 5 s pacing that was ~13 s per file and ~5 h per run. It now GETs each
+member file straight from its NOMADS URL, and NOMADS pacing starts at 1 s and
+doubles (to 60 s) on a rate-limit redirect, 429, 503 or timeout, easing back
+afterwards. One member took 41 s live (was ~9-10 min), so ~20 min for all 30.
+The AWS EAGLE ensemble is not a mirror (control-member precipitation r = 0.78
+against NOMADS), so NOMADS stays the only source.
 
 ## Docs
 
