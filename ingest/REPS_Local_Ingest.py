@@ -39,8 +39,8 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     DOWNLOAD_CACHE_MAX_AGE_HOURS,
     FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
     FORECAST_LEAD_RANGES,
-    broadcast_times_to_grid,
     clear_directory,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
@@ -100,9 +100,10 @@ base_var_name_aliases = {
     "ASNOW": ["ASNOW_SFC", "SPRATE_surface"],
 }
 
-# Variables in the published store; the order is the API's REPS index map
+# Variables in the published store. The API reader puts the valid times (the
+# store's time attribute) in column 0, so probVars[i] is column i + 1 of the
+# API's REPS index map.
 probVars = (
-    "time",
     "Precipitation_Prob",
     "APCP_Mean",
     "APCP_StdDev",
@@ -408,12 +409,6 @@ def main() -> None:
         herbie_save_dir,
     )
 
-    # REPS is on a rotated latitude/longitude grid: latitude and longitude are
-    # 2-D coordinates over the y/x dimensions, so the grid size comes from a
-    # field's dimensions (either coordinate's size would be NY * NX).
-    spatial_dims = next(iter(xarray_forecast_merged.data_vars.values())).dims[-2:]
-    NY, NX = (xarray_forecast_merged.sizes[dim] for dim in spatial_dims)
-
     write_ensemble_stats(
         xarray_forecast_merged,
         REPS_FORECAST_HOURS,
@@ -436,26 +431,22 @@ def main() -> None:
     )
     hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
+    # Check that the stored times are aligned with the expected times
+    npCatTimes = da.from_zarr(
+        forecast_process_path + "_.zarr", component="time"
+    ).compute()
+    validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
+
     daskVarArrayList = []
     for dask_var in probVars:
         daskCatArray = da.from_zarr(
             forecast_process_path + "_.zarr", component=dask_var, inline_array=True
         )
-
-        if dask_var == "time":
-            npCatTimes = daskCatArray.astype("float32").compute()
-            # Check that the stored times are aligned with the expected times
-            validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
-            # The API reads time from the store like any other variable
-            daskVarArrayList.append(
-                broadcast_times_to_grid(npCatTimes, NY, NX, process_chunk)
-            )
-        else:
-            daskVarArrayList.append(
-                daskCatArray.rechunk(
-                    (len(stacked_timesUnix), process_chunk, process_chunk)
-                ).astype("float32")
-            )
+        daskVarArrayList.append(
+            daskCatArray.rechunk(
+                (len(stacked_timesUnix), process_chunk, process_chunk)
+            ).astype("float32")
+        )
 
     daskVarArrayListMergeNaN = mask_invalid_data(da.stack(daskVarArrayList, axis=0))
 
@@ -484,8 +475,10 @@ def main() -> None:
         daskVarArrayStackDiskInterpPad,
         forecast_process_dir + "/" + reps_store_name,
         final_chunk,
+        FINAL_SHARD_SIZES["REPS"],
         zarr_store_workers,
         probVars,
+        times=new_hourly_time.values.astype("datetime64[s]").astype("int64"),
     )
 
     # %% Publish the store, then the run time the API uses to detect it

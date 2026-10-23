@@ -9,6 +9,7 @@ temporal interpolation used to create hourly output.
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import pickle
 import random
@@ -27,8 +28,9 @@ DEFAULT_GRIB_ROOT = DEFAULT_PROCESS_DIR / "Downloads" / "herbie" / "gdps"
 DEFAULT_BASE_TIME_PICKLE = DEFAULT_PROCESS_DIR / "GDPS.time.pickle"
 DEFAULT_COORD_ZARR_PATH = DEFAULT_PROCESS_DIR / "GDPS_Process_.zarr"
 
+# Axis 0 of the store (GDPS_Local_Ingest zarr_vars); the valid times are the array's "time"
+# attribute, not a variable.
 ZARR_VARS = (
-    "time",
     "TMP_2maboveground",
     "DPT_2maboveground",
     "RH_2maboveground",
@@ -48,6 +50,7 @@ ZARR_VARS = (
     "CIN_surface",
     "VVEL_500mb",
     "KX_surface",
+    "N4LFTX_500mb",
 )
 
 GDPS_FILE_HOURS = [*range(1, 84), *range(84, 241, 3)]
@@ -330,6 +333,16 @@ def resolve_grib_run_dir(grib_root: Path, base_time: pd.Timestamp) -> Path:
     return candidates[-1]
 
 
+def resolve_current_store(path: Path) -> Path:
+    """Return ``path`` if it is a zarr store, else the version named by the
+    sibling ``<MODEL>.current.json`` pointer (``API.ingest_utils.publish_store``)."""
+    if (path / "zarr.json").exists():
+        return path
+    pointer = path.parent / (path.name.removesuffix(".zarr") + ".current.json")
+    with open(pointer) as fh:
+        return path.parent / json.load(fh)["store"]
+
+
 def validate_root_array(root: zarr.Array) -> None:
     """Validate the final Zarr layout expected by GDPS ingest."""
     if not isinstance(root, zarr.Array):
@@ -338,8 +351,10 @@ def validate_root_array(root: zarr.Array) -> None:
         raise ValueError(
             "Expected final GDPS Zarr shape (variable, time, latitude, longitude)."
         )
-    if root.shape[0] != len(ZARR_VARS):
-        raise ValueError(f"Expected {len(ZARR_VARS)} variables, found {root.shape[0]}.")
+    if tuple(root.attrs.get("variables", ())) != ZARR_VARS:
+        raise ValueError(
+            f"Expected variables {ZARR_VARS}, found {root.attrs.get('variables')}."
+        )
 
 
 def infer_forecast_offset(final_time_len: int, source_hours: list[int]) -> int:
@@ -914,7 +929,7 @@ def check_time_axis(
 ) -> bool:
     """Check that the final time variable follows the expected hourly cadence."""
     expected = expected_unix_seconds(base_time, forecast_offset, root.shape[1])
-    actual = np.asarray(root[ZARR_VARS.index("time"), :, 0, 0], dtype=np.float64)
+    actual = np.asarray(root.attrs["time"], dtype=np.float64)
     diffs = np.abs(actual - expected)
     max_diff = float(np.nanmax(diffs))
     passed = bool(max_diff <= tolerance_seconds)
@@ -1054,7 +1069,8 @@ def main() -> None:
 
     base_time = load_base_time(args.base_time_pickle)
     run_dir = resolve_grib_run_dir(args.grib_root, base_time)
-    root = zarr.open(str(args.zarr_path), mode="r")
+    zarr_path = resolve_current_store(args.zarr_path)
+    root = zarr.open(str(zarr_path), mode="r")
     validate_root_array(root)
 
     forecast_offset = infer_forecast_offset(root.shape[1], GDPS_FILE_HOURS)
@@ -1075,7 +1091,7 @@ def main() -> None:
         *[point for point in random_points if point not in selected_point_tuples],
     ]
 
-    print(f"Final Zarr: {args.zarr_path} shape={root.shape} chunks={root.chunks}")
+    print(f"Final Zarr: {zarr_path} shape={root.shape} chunks={root.chunks}")
     print(f"GRIB run dir: {run_dir}")
     print(f"Base time: {base_time}")
     print(f"Forecast hour offset: {forecast_offset}")

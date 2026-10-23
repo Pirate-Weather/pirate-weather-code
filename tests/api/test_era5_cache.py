@@ -1,12 +1,13 @@
 """ERA5 read-through disk cache (DiskCacheStore) and its startup switch."""
 
+import asyncio
 from unittest.mock import patch
 
 import numpy as np
 import zarr
 from zarr.storage import LocalStore
 
-from API.io import zarr_reader
+from API.io import store_reader
 from API.io.ZarrHelpers import DiskCacheStore
 
 CHUNK = 8192  # float64 elements -> 64 KiB per uncompressed chunk
@@ -68,19 +69,15 @@ def test_update_zarr_store_skips_era5_when_env_enabled(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("SKIP_ERA5", "true")
 
-    with (
-        patch("API.io.zarr_reader.init_ERA5") as init_era5,
-        patch("API.io.zarr_reader._load_local_store"),
-    ):
-        stores = zarr_reader.update_zarr_store(
-            False,
-            stage="DEV",
-            save_dir=str(tmp_path),
-            use_etopo=False,
-            save_type="Local",
-            s3_bucket="",
-            aws_access_key_id="",
-            aws_secret_access_key="",
+    with patch("API.io.store_reader.init_ERA5") as init_era5:
+        stores, _ = asyncio.run(
+            store_reader.load_stores(
+                stage="DEV",
+                save_dir=str(tmp_path),
+                use_etopo=False,
+                save_type="Local",
+                s3_bucket="",
+            )
         )
 
     init_era5.assert_not_called()

@@ -3,14 +3,11 @@
 
 import logging
 import os
-import random
-import time
 from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass
 from typing import Any
 
 import xarray as xr
-import zarr
 from zarr.abc.store import (
     ByteRequest,
     OffsetByteRequest,
@@ -21,11 +18,6 @@ from zarr.abc.store import (
 from zarr.core.buffer import Buffer, BufferPrototype
 from zarr.storage import FsspecStore
 
-from API.constants.api_const import (
-    MAX_S3_RETRIES,
-    S3_BASE_DELAY,
-)
-
 logger = logging.getLogger(__name__)
 
 pw_api_key = os.environ.get("PW_API", "")
@@ -35,11 +27,6 @@ ERA5_DASK_CHUNKS = {"time": 24}
 ERA5_CACHE_VERSION = "cache-store-v1"
 ERA5_CACHE_MAX_SIZE = 20 * 1024**3
 ERA5_CACHE_DIR_DEFAULT = "ERA5_cache"
-
-
-# 1. Define a specific custom exception for exhaustion
-class S3MaxRetriesExceededError(RuntimeError):
-    """Raised when an S3 operation exceeds maximum retry attempts."""
 
 
 @dataclass
@@ -205,73 +192,6 @@ def _get_era5_cache_max_size() -> int:
 
 def _add_custom_header(request, **kwargs):
     request.headers["apikey"] = pw_api_key
-
-
-def _retry_s3_operation(
-    operation, max_retries=MAX_S3_RETRIES, base_delay=S3_BASE_DELAY
-):
-    """Retry S3 operations with exponential backoff for rate limiting."""
-    for attempt in range(max_retries):
-        try:
-            return operation()
-        except (OSError, Exception) as e:
-            # Check if it's a rate limiting error
-            if (
-                "429" in str(e) or "Too Many Requests" in str(e)
-            ) and attempt < max_retries - 1:
-                # Calculate delay with exponential backoff and jitter
-                delay = base_delay * (2**attempt) + random.uniform(0, 1)
-                logger.warning(
-                    "S3 rate limit hit (attempt %d/%d), retrying in %.2fs: %s",
-                    attempt + 1,
-                    max_retries,
-                    delay,
-                    e,
-                )
-                time.sleep(delay)
-                continue
-            # Re-raise the exception if it's not rate limiting or max retries reached
-            raise
-    raise S3MaxRetriesExceededError(f"Failed after {max_retries} attempts")
-
-
-def open_testing_zarr(s3, s3_bucket, ingest_version, save_type, model_name):
-    """Open a published model store read-only, from S3 or a local directory.
-
-    Stores are sharded zarr directories (``<model>.zarr``), so on S3 a point read
-    is two ranged GETs (the shard index, then one chunk) with no archive to open.
-
-    Parameters:
-        - s3 (s3fs.S3FileSystem): An asynchronous s3fs filesystem, or None locally.
-        - s3_bucket (str): The S3 bucket name or local path.
-        - ingest_version (str): The version string for the data.
-        - save_type (str): "S3" (the public files endpoint), "S3Zarr" (a bucket
-          read with AWS keys), or anything else for a local directory.
-        - model_name (str): The name of the model.
-
-    Returns:
-        - The opened zarr array or group.
-    """
-    if save_type == "S3":
-        store = FsspecStore(
-            s3,
-            path=f"ForecastTar_v2/{ingest_version}/{model_name}.zarr",
-            read_only=True,
-        )
-    elif save_type == "S3Zarr":
-        store = FsspecStore(
-            s3,
-            path=f"{s3_bucket}/ForecastTar_v2/{ingest_version}/{model_name}.zarr",
-            read_only=True,
-        )
-    else:
-        store = zarr.storage.LocalStore(
-            s3_bucket + model_name + ".zarr", read_only=True
-        )
-
-    # Every published store is zarr v3; naming the format skips the v2 metadata
-    # probes, which on S3 are extra HEAD and list requests at every open.
-    return _retry_s3_operation(lambda: zarr.open(store, mode="r", zarr_format=3))
 
 
 # Function to initialize in ERA5 xarray dataset

@@ -54,30 +54,61 @@ CHUNK_SIZES = {
     "URMA": 200,
 }
 
+# Inner chunk edge, in grid cells, of each final store. One chunk holds every
+# variable and time step, so a point forecast is a single chunk read.
 FINAL_CHUNK_SIZES = {
     "NBM": 3,
     "HRRR": 5,
     "HRRR_6H": 5,
+    "SubH": 5,
     "GFS": 3,
     "GEFS": 3,
-    "HGEFS": 3,
     "ECMWF": 3,
-    "NBM_Fire": 5,
     "RTMA": 25,
     # Hourly RTMA keeps 48 rows; small tiles keep a point read to one small chunk
     "RTMA_HOURLY": 5,
     "DWD": 5,
     # These divide evenly into the Canadian weather ingests' 200-cell processing tiles.
     "HRDPS": 5,
-    "RDPS": 5,
     "REPS": 5,
     "GDPS": 5,
     "GEPS": 5,
-    "RDAQA": 25,
     "RAQDPS": 25,
     "SILAM": 5,
     # Same layout as the other models; with ~283 hours one chunk is 283 KB
     "URMA": 5,
+    # The alert grids are string arrays of (y, x)
+    "ALERTS": 10,
+}
+
+# Shard edge, in grid cells, of each final store: a multiple of its chunk size.
+# A shard is one file holding many chunks plus an index, so a store is a few
+# hundred files instead of 10^5 (HRRR: 199 instead of 76,321), which makes
+# publishing and syncing take seconds. With tensorstore reading, 100x100 shards
+# served 5-6x the requests of the unsharded zarr-python setup
+# (Notes/STORAGE_AND_READ_BENCHMARKS.md). Dask builds a whole shard in memory
+# per write task, so stores with many variables x times use smaller shards to
+# keep a shard under ~150 MB uncompressed (GFS, 28 x 528 steps, is ~590 MB at
+# 100x100). Sizes in the comments are uncompressed MB per shard.
+FINAL_SHARD_SIZES = {
+    "HRRR": 100,  # 14
+    "HRRR_6H": 100,  # 25
+    "SubH": 100,  # 14
+    "HRDPS": 100,  # 35
+    "REPS": 100,  # 22
+    "GEPS": 100,  # 76
+    "RTMA": 100,  # RTMA-RU, < 1
+    "RTMA_HOURLY": 100,  # 21
+    "RAQDPS": 100,  # 18
+    "DWD": 100,  # 115
+    "SILAM": 100,  # 78
+    "URMA": 100,  # 113
+    "GDPS": 75,  # 113 (202 at 100)
+    "GEFS": 99,  # 75 (also AIGEFS)
+    "ECMWF": 99,  # 146 (also ECMWF_AIFS, 101)
+    "NBM": 99,  # 151
+    "GFS": 48,  # 136 (also AIGFS, which would fit 99 but shares GFS's chunk keys)
+    "ALERTS": 100,
 }
 
 # Mantissa bits kept per stored variable (float32 has 23). Bitround's error is at
@@ -85,7 +116,7 @@ FINAL_CHUNK_SIZES = {
 # error at its typical maximum within twice its output step (e.g. 0.2 K for
 # temperatures shown to 0.1); wind, gust and humidity are one bit coarser still.
 # On HRRR this made the store 42% smaller than rounding to 5 decimals, with no
-# change in point-read time. Times and coded fields stay exact.
+# change in point-read time. Coded fields stay exact.
 _TEMPERATURE_BITS = 10  # 0.1 C step, to 330 K
 _PRESSURE_BITS = 12  # 0.1 hPa step, to 1080 hPa
 _WIND_BITS = 7  # 0.1 m/s step, to 60 m/s
@@ -97,7 +128,6 @@ _PRECIPITATION_BITS = 11  # 0.01 mm (or mm/h) step, to 50
 _AIR_QUALITY_BITS = 11  # 0.1 ug/m3 step, to 500
 EXACT_BITS = 23
 KEEPBITS = {
-    "time": EXACT_BITS,
     "PTYPE_surface": EXACT_BITS,
     "ptype": EXACT_BITS,
     "PWTHER_surfaceMreserved": EXACT_BITS,
@@ -954,10 +984,8 @@ def upload_store(local_path: str, remote, name: str) -> None:
 
     Chunks go first, then the arrays' ``zarr.json``, then the store's root
     ``zarr.json``, so a store whose root metadata exists is complete (the history
-    ingests check that). Chunk keys are the same every run and empty chunks are
-    written, so the upload replaces every object of the previous run. It is not
-    atomic, but a point read is one chunk holding every variable and time step,
-    so a reader during it sees one run or the other at each point.
+    ingests check that). It overwrites in place and is not atomic, which is only
+    safe for the history stores; final stores go through ``publish_store``.
     """
     chunk_files, array_metadata, root_metadata = [], [], []
     for dirpath, _, filenames in os.walk(local_path):
@@ -973,6 +1001,62 @@ def upload_store(local_path: str, remote, name: str) -> None:
             group.append((local_file, f"{name}/{relative}"))
     for uploads in (chunk_files, array_metadata, root_metadata):
         _put_files(remote, uploads)
+
+
+def current_pointer_name(store_name: str) -> str:
+    """The pointer object naming the current version of a final store
+    (``HRRR.zarr`` -> ``HRRR.current.json``)."""
+    return store_name.removesuffix(".zarr") + ".current.json"
+
+
+def publish_store(local_path: str, remote, name: str, run_time: Any = None) -> str:
+    """Publish a final store as a new version, then point readers at it.
+
+    The store is uploaded to ``<MODEL>/<UTC publish stamp>.zarr`` and only then
+    is ``<MODEL>.current.json`` rewritten to name it, so the sync never copies a
+    half-uploaded store or mixes shards (and their ``time`` attribute) from two
+    runs. Versions older than the previous one are deleted afterwards; the
+    previous one is kept so a sync that is copying it when the pointer moves
+    can finish. Returns the published version path.
+    """
+    import json
+
+    import obstore
+
+    model = name.removesuffix(".zarr")
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    version_path = f"{model}/{stamp}.zarr"
+    upload_store(local_path, remote, version_path)
+
+    pointer = {
+        "store": version_path,
+        "run_time": None if run_time is None else str(run_time),
+    }
+    obstore.put(
+        remote,
+        current_pointer_name(name),
+        json.dumps(pointer).encode(),
+        attributes=_put_attributes(remote),
+    )
+
+    versions = sorted(
+        prefix.rstrip("/")
+        for prefix in obstore.list_with_delimiter(remote, prefix=f"{model}/")[
+            "common_prefixes"
+        ]
+        # A local remote keeps the empty directories of deleted versions
+        if prefix.rstrip("/").endswith(".zarr")
+        and remote_object_exists(remote, f"{prefix.rstrip('/')}/zarr.json")
+    )
+    for old_version in versions[:-2]:
+        old_keys = [
+            meta["path"]
+            for batch in obstore.list(remote, prefix=f"{old_version}/")
+            for meta in batch
+        ]
+        obstore.delete(remote, old_keys)
+        logger.info("Deleted old published version %s", old_version)
+    return version_path
 
 
 def read_published_run_time(remote, time_pickle_name: str) -> Any | None:
@@ -1000,17 +1084,18 @@ def publish_ingest_run(
 ) -> None:
     """Publish a finished run: its outputs first, then ``<MODEL>.time.pickle``.
 
-    ``output_names`` are entries in ``process_dir``: zarr directory stores such as
-    ``GEFS.zarr`` (see ``upload_store``) or side files the API reads. The
-    run-time pickle is how the API and the next scheduled ingest see that a new
-    run exists, so it is only written once every output is in place.
+    ``output_names`` are entries in ``process_dir``: final zarr stores such as
+    ``GEFS.zarr`` (published as a new version, see ``publish_store``) or side
+    files the API reads. The run-time pickle is how the next scheduled ingest
+    sees that a new run exists, so it is only written once every output is in
+    place.
     """
     import obstore
 
     for name in output_names:
         source_path = os.path.join(process_dir, name)
         if os.path.isdir(source_path):
-            upload_store(source_path, remote, name)
+            publish_store(source_path, remote, name, run_time)
         else:
             _put_files(remote, [(source_path, name)])
         logger.info("Published %s", name)
@@ -1060,51 +1145,74 @@ def write_final_zarr(
     stacked: da.Array,
     store_path: str,
     final_chunk: int,
+    shard: int,
     zarr_store_workers: int,
     variables: Sequence[str],
+    times: Sequence[float],
 ) -> None:
     """Write the final ``(variable, time, y, x)`` array the API reads.
 
     One chunk holds every variable and time step for a ``final_chunk`` square of
-    grid cells, so a point forecast is a single chunk read. ``stacked`` must
-    already be padded to a multiple of ``final_chunk``; ``variables`` names its
-    first axis and sets each variable's precision (``bitround_variables``).
-    ``store_path`` is a local directory store, published with
-    ``publish_ingest_run``. Empty (all-NaN) chunks are written too, so a publish
-    over the previous run replaces every chunk.
+    grid cells, so a point forecast is a single chunk read, and chunks are
+    grouped into ``shard`` square shard files (``FINAL_SHARD_SIZES``).
+    ``stacked`` must already be padded to a multiple of ``final_chunk``;
+    ``variables`` names its first axis and sets each variable's precision
+    (``bitround_variables``). ``store_path`` is a local directory store,
+    published with ``publish_ingest_run``.
 
-    Dask writes tiles about the size of a source chunk and zarr splits each one
-    into the small final chunks. Rechunking dask all the way down to 3x3 or 5x5
-    chunks builds a very large task graph: on a GFS-sized array this write took
-    102 s / 7.1 GB peak versus 153 s / 7.9 GB (GEFS-sized: 86 s / 3.3 GB versus
-    135 s / 4.3 GB), with identical output. Tiles are a multiple of
-    ``final_chunk`` so every zarr chunk is written exactly once.
+    The valid times are not stored in the array. ``times`` (Unix seconds, one per
+    time step) goes in the array's ``time`` attribute and the API reader puts it
+    back as column 0 of every point read, so a chunk holds only forecast values.
 
-    Stores are not sharded: 200 x 200 shards made every local point read about
-    0.4 ms slower (zarr's sharding codec), and uploading the small chunk files
-    with ``UPLOAD_CONCURRENCY`` parallel requests is fast enough (HRRR's 76k
-    objects in about 4 min to OVH). Blosc zstd with byte shuffle beat bit shuffle,
-    no shuffle, lz4, zstd 1 and 9 (9 was 7% smaller but wrote 9x slower), a
-    time-innermost chunk order and pcodec on size or read time.
+    Sharded and read with tensorstore, a 16-model API request took ~1.3 ms
+    against ~10 ms for the unsharded store through zarr-python, and a store is a
+    few hundred files instead of 10^5 (Notes/STORAGE_AND_READ_BENCHMARKS.md).
+    Chunks that are entirely NaN are left out of their shard; readers return the
+    NaN fill value for them. Each run publishes to a new versioned path, so no
+    chunk of a previous run has to be overwritten.
+
+    Dask writes one shard per task (whatever ``stacked``'s chunks), which is why ``FINAL_SHARD_SIZES`` keeps a
+    shard under ~150 MB uncompressed. Blosc zstd with byte shuffle beat bit
+    shuffle, no shuffle, lz4, zstd 1 and 9 (9 was 7% smaller but wrote 9x
+    slower), a time-innermost chunk order and pcodec on size or read time.
     """
     import dask
     import zarr
+
+    times = np.asarray(times, dtype=np.float64)
+    if times.ndim != 1 or len(times) != stacked.shape[1]:
+        raise ValueError(
+            f"{times.shape} times for an array with {stacked.shape[1]} time steps"
+        )
+    if not np.all(np.isfinite(times)) or np.any(np.diff(times) <= 0):
+        raise ValueError("times must be finite and strictly increasing")
+    if shard % final_chunk:
+        raise ValueError(f"shard {shard} is not a multiple of chunk {final_chunk}")
 
     store = zarr.storage.LocalStore(store_path)
     zarr_array = zarr.create_array(
         store=store,
         shape=stacked.shape,
+        shards=(stacked.shape[0], stacked.shape[1], shard, shard),
         chunks=(stacked.shape[0], stacked.shape[1], final_chunk, final_chunk),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
         dtype="float32",
-        config={"write_empty_chunks": True},
+        attributes={
+            "time": [round(t) for t in times],
+            "variables": list(variables),
+        },
     )
 
-    tile_y = final_chunk * max(1, round(stacked.chunks[2][0] / final_chunk))
-    tile_x = final_chunk * max(1, round(stacked.chunks[3][0] / final_chunk))
-    tiles = (stacked.shape[0], stacked.shape[1], tile_y, tile_x)
-    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        bitround_variables(stacked.rechunk(tiles), variables).to_zarr(
+    # dask rechunks to "auto" blocks made of whole shards before writing to a
+    # sharded array; capping a block at one shard's bytes makes it exactly one
+    # shard, so a task never holds more than one (see FINAL_SHARD_SIZES).
+    shard_bytes = stacked.shape[0] * stacked.shape[1] * shard * shard * 4
+    with dask.config.set(
+        {"array.chunk-size": shard_bytes},
+        scheduler="threads",
+        num_workers=zarr_store_workers,
+    ):
+        bitround_variables(stacked, variables).to_zarr(
             zarr_array, overwrite=True, compute=True
         )
     close_store(store)
@@ -1166,13 +1274,11 @@ def open_history_store(remote, name: str, expected_vars: Iterable[str]):
 
 
 def mask_invalid_data(daskArray, ignoreAxis=None):
-    """Masks invalid data in a dask array, ignoring the time dimension."""
+    """Masks invalid data in a (variable, time, y, x) dask array."""
     # TODO: Update to mask for each variable according to reasonable values, as opposed to this global mask
     valid_mask = (daskArray >= VALID_DATA_MIN) & (daskArray <= VALID_DATA_MAX)
-    # Ignore times by setting first dimension to True
-    valid_mask[0, :, :, :] = True
 
-    # Also ignore the specified axis if provided
+    # Leave the variables in ignoreAxis unmasked
     if ignoreAxis is not None:
         for i in ignoreAxis:
             valid_mask[i, :, :, :] = True
@@ -1288,41 +1394,6 @@ def pad_to_chunk_size(dask_array: da.Array, final_chunk: int) -> da.Array:
             constant_values=np.nan,
         )
     return dask_array
-
-
-def broadcast_times_to_grid(
-    times: np.ndarray, ny: int, nx: int, spatial_chunk: int
-) -> da.Array:
-    """Lazily broadcast one timestamp per timestep across a spatial grid.
-
-    Args:
-        times: One-dimensional array of timestamps.
-        ny: Number of grid rows.
-        nx: Number of grid columns.
-        spatial_chunk: Chunk size for both spatial dimensions.
-
-    Returns:
-        A lazily broadcast Dask array with shape ``(time, y, x)``.
-
-    Raises:
-        ValueError: If the timestamps are not one-dimensional or any output
-            dimension or chunk size is not positive.
-    """
-    times = np.asarray(times)
-    if times.ndim != 1:
-        raise ValueError("times must be one-dimensional")
-    if len(times) < 1 or ny < 1 or nx < 1 or spatial_chunk < 1:
-        raise ValueError("time and spatial dimensions and chunk size must be positive")
-
-    time_column = da.from_array(
-        times[:, np.newaxis, np.newaxis],
-        chunks=(len(times), 1, 1),
-    )
-    return da.broadcast_to(
-        time_column,
-        (len(times), ny, nx),
-        chunks=(len(times), spatial_chunk, spatial_chunk),
-    )
 
 
 def earth_relative_wind_components(

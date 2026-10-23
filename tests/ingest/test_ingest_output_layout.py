@@ -130,17 +130,21 @@ def test_api_index_map_matches_ingest_variable_order(
     If an ingest adds, removes or reorders a variable without updating the
     map, the API silently serves the wrong field (e.g. dew point as
     temperature) with no error. Every key must index the variable it names.
+    Stores no longer hold time (it is the array's time attribute, which the
+    reader puts in column 0), so the store's variable i is column i + 1.
     """
     if ingest_module is None:
-        # RAQDPS stacks variables in raqdps_utils.RAQDPS_OUTPUT_VARS order.
-        zarr_vars = RAQDPS_OUTPUT_VARS
+        # RAQDPS's column order, time first, is raqdps_utils.RAQDPS_OUTPUT_VARS.
+        columns = RAQDPS_OUTPUT_VARS
     else:
         zarr_vars = importlib.import_module(f"ingest.{ingest_module}").zarr_vars
+        assert "time" not in zarr_vars
+        columns = ("time", *zarr_vars)
     index_map = getattr(model_const, const_name)
 
-    assert zarr_vars[0] == "time"
+    assert columns[0] == "time"
     actual = {
-        key: zarr_vars[idx] if idx < len(zarr_vars) else f"<out of range: {idx}>"
+        key: columns[idx] if idx < len(columns) else f"<out of range: {idx}>"
         for key, idx in index_map.items()
     }
     assert actual == expected

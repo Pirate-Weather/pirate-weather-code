@@ -30,8 +30,6 @@ import numpy as np
 import pandas as pd
 import requests
 import xarray as xr
-import zarr
-import zarr.storage
 from dask.diagnostics import ProgressBar
 from metpy.calc import relative_humidity_from_dewpoint
 from metpy.units import units
@@ -44,13 +42,16 @@ from API.ingest_utils import (
     CHUNK_SIZES,
     DWD_RADIUS,
     FINAL_CHUNK_SIZES,
-    bitround_variables,
+    FINAL_SHARD_SIZES,
     clear_directory,
+    configure_zarr_writes,
     interpolate_temporal_gaps_efficiently,
     open_remote,
+    pad_to_chunk_size,
     positive_int_env,
     publish_ingest_run,
     read_published_run_time,
+    write_final_zarr,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,9 +86,10 @@ GRID_MAX_GAP_HOURS = 3
 # Precipitation type (WW codes) is categorical, so its gaps take the nearest value
 nearest_neighbor_vars = ["PTYPE_surface"]
 
-# Variables in the published store; the order is the API's DWD_MOSMIX index map
+# Variables in the published store. The API reader puts the valid times (the
+# store's time attribute) in column 0, so zarr_vars[i] is column i + 1 of the
+# API's DWD_MOSMIX index map.
 zarr_vars = (
-    "time",
     "TMP_2maboveground",
     "DPT_2maboveground",
     "RH_2maboveground",
@@ -933,6 +935,7 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
+    zarr_store_workers = configure_zarr_writes()
 
     # Empty the processing directory but keep the directory itself, which is
     # safer for processes that depend on the parent dir.
@@ -1037,66 +1040,30 @@ def main() -> None:
     )
 
     # %% Stack into the (variable, time, y, x) layout the API reads
-    unix_epoch = np.datetime64(0, "s")
-    one_second = np.timedelta64(1, "s")
-    stacked_times = ds_chunk_disk_interp.time.values
-    stacked_timesUnix = (stacked_times - unix_epoch) / one_second
-
-    ds_rename = ds_chunk_disk_interp.rename({"time": "stacked_time"})
-
-    # The API reads time from the store like any other variable
-    time3d = (
-        ((ds_rename["stacked_time"] - unix_epoch) / one_second)
-        .astype("float32")
-        .expand_dims(lat=ds_rename.lat, lon=ds_rename.lon)
-        .transpose("stacked_time", "lat", "lon")
+    # Cells with no station are NaN in every variable; the API reader sets time
+    # NaN on rows where every variable is NaN, so the store needs no time mask.
+    dwd_times_unix = ds_chunk_disk_interp.time.values.astype("datetime64[s]").astype(
+        "int64"
     )
-    ds_rename["time"] = time3d
-
-    # Cells with no station have no temperature; mark their time missing too
-    ds_rename["time"] = ds_rename["time"].where(
-        ~np.isnan(ds_rename["TMP_2maboveground"]), other=np.nan
+    dwd_stacked = (
+        ds_chunk_disk_interp[list(zarr_vars)]
+        .to_array(dim="var")
+        .transpose("var", "time", "lat", "lon")
+        .data
     )
-
-    vars_in = [v for v in zarr_vars if v in ds_rename.data_vars]
-    ds_stack = ds_rename[vars_in].to_array(dim="var", name="var")
-
-    # Dask writes CHUNK_SIZES["DWD"]-square tiles, each split into the small
-    # FINAL_CHUNK_SIZES["DWD"]-square zarr chunks (as in write_final_zarr)
-    ds_chunk = ds_stack.chunk(
-        {
-            "var": -1,
-            "stacked_time": len(stacked_timesUnix),
-            "lat": CHUNK_SIZES["DWD"],
-            "lon": CHUNK_SIZES["DWD"],
-        }
-    )
-    # Each variable keeps only its KEEPBITS precision (see bitround_variables)
-    ds_chunk = ds_chunk.copy(data=bitround_variables(ds_chunk.data, vars_in))
-    dwd_encoding = {
-        "chunks": (
-            ds_chunk.sizes["var"],
-            len(stacked_timesUnix),
-            FINAL_CHUNK_SIZES["DWD"],
-            FINAL_CHUNK_SIZES["DWD"],
-        ),
-    }
+    dwd_stacked = pad_to_chunk_size(dwd_stacked, FINAL_CHUNK_SIZES["DWD"])
 
     # %% Write the final store
     dwd_store_name = "DWD_MOSMIX.zarr"
-    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/" + dwd_store_name)
-
-    # Unlike the GRIB ingests this writes with xarray rather than dask, which
-    # also stores the coordinate metadata. A DataArray is stored under xarray's
-    # default variable name, which the API reads. All-NaN (ocean) chunks are
-    # still written so a publish replaces every chunk of the previous run.
-    with ProgressBar():
-        ds_chunk.to_zarr(
-            zarr_store,
-            mode="w",
-            encoding={"__xarray_dataarray_variable__": dwd_encoding},
-            write_empty_chunks=True,
-        )
+    write_final_zarr(
+        dwd_stacked,
+        forecast_process_dir + "/" + dwd_store_name,
+        FINAL_CHUNK_SIZES["DWD"],
+        FINAL_SHARD_SIZES["DWD"],
+        zarr_store_workers,
+        zarr_vars,
+        times=dwd_times_unix,
+    )
 
     # %% Publish the store and station map, then the run time the API uses to detect them
     publish_ingest_run(

@@ -37,6 +37,7 @@ from API.ingest_grib_utils import download_and_validate_subset
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
     VALID_DATA_MAX,
     VALID_DATA_MIN,
     close_store,
@@ -101,9 +102,10 @@ DEFAULT_ZARR_CONCURRENCY = 64
 HOURLY_STORE_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 
 # Variables in the published store (cfgrib short names). tp is the hourly RTMA
-# precipitation (kg/m^2 = mm over the hour ending at the row's time).
+# precipitation (kg/m^2 = mm over the hour ending at the row's time). The API
+# reader puts the valid times (the store's time attribute) in column 0, so
+# zarr_vars[i] is column i + 1 of the API's RTMA index map.
 zarr_vars = (
-    "time",
     "vis",
     "i10fg",
     "sp",
@@ -115,6 +117,9 @@ zarr_vars = (
     "v10",
     "tp",
 )
+# The hourly history stores also keep a gridded UNIX-time array, which the merge
+# uses to check each store holds the hour it is named for.
+hourly_store_vars = ("time", *zarr_vars)
 
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
@@ -246,8 +251,8 @@ def write_hourly_store(
     xarray_analysis_merged["u10"].data = u_earth
     xarray_analysis_merged["v10"].data = v_earth
 
-    # Replace the time coordinate with a gridded UNIX-time variable
-    # The API reads time from the store like any other variable
+    # Replace the time coordinate with a gridded UNIX-time variable, which the
+    # merge checks against the hour the store is named for
     model_UNIX_time = xarray_analysis_merged.time.data.astype("datetime64[s]").astype(
         int
     )
@@ -271,12 +276,14 @@ def write_hourly_store(
     )
 
     # A missing field would shift every later variable
-    missing_vars = [v for v in zarr_vars if v not in xarray_analysis_merged.data_vars]
+    missing_vars = [
+        v for v in hourly_store_vars if v not in xarray_analysis_merged.data_vars
+    ]
     if missing_vars:
         raise RuntimeError(
             f"RTMA analysis {analysis_time} is missing variables {missing_vars}"
         )
-    vars_in = list(zarr_vars)
+    vars_in = list(hourly_store_vars)
 
     # Out-of-range values become NaN
     for var in vars_in:
@@ -295,7 +302,8 @@ def write_hourly_store(
         .chunk(chunks={"var": -1, "time": 1, "x": process_chunk, "y": process_chunk})
         .transpose("var", "time", "y", "x")
     )
-    dask_var_array = mask_invalid_data(xarray_analysis_stack.data)
+    # Index 0 is the gridded time, which is outside the valid data range
+    dask_var_array = mask_invalid_data(xarray_analysis_stack.data, ignoreAxis=[0])
     dask_var_array = pad_to_chunk_size(dask_var_array, final_chunk).rechunk(
         (len(vars_in), 1, process_chunk, process_chunk)
     )
@@ -408,24 +416,28 @@ def main() -> None:
             "RTMA_Hist_"
             + analysis_time.strftime(HOURLY_STORE_TIMESTAMP_FORMAT)
             + ".zarr",
-            zarr_vars,
+            hourly_store_vars,
         )
         for analysis_time in row_times
     ]
 
     # %% Validate each stored analysis time against its row
-    expected_times_unix = np.asarray(
-        [row_time.timestamp() for row_time in row_times], dtype="float32"
+    # The stored time is float32 (rounded by up to a minute at current epochs),
+    # so it is compared in float32 and the final store's times are the exact hours.
+    row_times_unix = np.asarray(
+        [row_time.timestamp() for row_time in row_times], dtype="int64"
     )
-    for row_store, expected_time in zip(row_stores, expected_times_unix, strict=True):
+    for row_store, expected_time in zip(row_stores, row_times_unix, strict=True):
         stored_time = row_store["time"][0, 0, 0]
-        if stored_time != expected_time:
+        if stored_time != np.float32(expected_time):
             raise RuntimeError(
                 f"{row_store.path} holds time {stored_time}, expected {expected_time}"
             )
 
     # %% Stack the hours into the (variable, time, y, x) layout
     # Each store holds (1, y, x) per variable; concatenating gives (time, y, x).
+    # The gridded time stays in the hourly stores; the final store's times go in
+    # its time attribute.
     stacked = da.stack(
         [
             da.concatenate(
@@ -454,8 +466,10 @@ def main() -> None:
         stacked,
         forecast_process_dir + "/" + rtma_store_name,
         final_chunk,
+        FINAL_SHARD_SIZES["RTMA_HOURLY"],
         zarr_store_workers,
         zarr_vars,
+        times=row_times_unix,
     )
 
     # %% Publish the store, then the run time used to detect it

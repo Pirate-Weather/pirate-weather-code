@@ -26,6 +26,8 @@ from herbie.fast import Herbie_latest
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_grib_utils import download_and_validate_subset, run_checked
 from API.ingest_utils import (
+    FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
     mask_invalid_data,
@@ -51,8 +53,6 @@ SUBH_STEP_MINUTES = 15
 # Lead used to detect that a cycle's subh product is available
 SUBH_LATEST_CHECK_HOUR = 6
 HRRR_SOURCE_PRIORITY = ["aws", "google", "nomads"]
-# (y, x) shape of the HRRR CONUS Lambert conformal grid
-HRRR_GRID_SHAPE = (1059, 1799)
 # The native HRRR grid, passed to wgrib2 -new_grid so that -new_grid_winds earth
 # rotates the grid-relative U/V to earth-relative without moving any grid point.
 # From https://github.com/blaylockbk/pyBKB_v2/blob/master/demos/HRRR_earthRelative_vs_gridRelative_winds.ipynb
@@ -71,9 +71,10 @@ SUBH_MATCH_STRINGS = (
     "|(:APCP:surface:)"
 )
 
-# Variables in the published store; the order is the API's HRRR_SUBH index map
+# Variables in the published store. The API reader puts the valid times (the
+# store's time attribute) in column 0, so zarr_vars[i] is column i + 1 of the
+# API's HRRR_SUBH index map.
 zarr_vars = (
-    "time",
     "GUST_surface",
     "PRES_surface",
     "TMP_2maboveground",
@@ -92,9 +93,8 @@ zarr_vars = (
     "DSWRF_surface",
 )
 
-# SubH has no entry in the shared CHUNK_SIZES / FINAL_CHUNK_SIZES tables
+# SubH has no entry in the shared CHUNK_SIZES table
 SUBH_PROCESS_CHUNK = 100
-SUBH_FINAL_CHUNK = 5
 
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
@@ -143,7 +143,7 @@ def main() -> None:
     zarr_store_workers = configure_zarr_writes()
 
     process_chunk = SUBH_PROCESS_CHUNK
-    final_chunk = SUBH_FINAL_CHUNK
+    final_chunk = FINAL_CHUNK_SIZES["SubH"]
 
     # Start each run from an empty processing directory
     shutil.rmtree(forecast_process_dir, ignore_errors=True)
@@ -248,23 +248,11 @@ def main() -> None:
             component=dask_var,
             inline_array=True,
         )
-
-        if dask_var == "time":
-            npCatTimes = daskForecastArray.astype("float32").compute()
-            # The API reads time from the store like any other variable
-            daskVarArrayList.append(
-                da.from_array(
-                    np.tile(
-                        npCatTimes[:, np.newaxis, np.newaxis], (1, *HRRR_GRID_SHAPE)
-                    )
-                ).rechunk((len(npCatTimes), process_chunk, process_chunk))
-            )
-        else:
-            daskVarArrayList.append(
-                daskForecastArray.rechunk(
-                    (len(npCatTimes), process_chunk, process_chunk)
-                ).astype("float32")
-            )
+        daskVarArrayList.append(
+            daskForecastArray.rechunk(
+                (subh_step_count, process_chunk, process_chunk)
+            ).astype("float32")
+        )
 
     daskVarArrayListMergeNaN = mask_invalid_data(da.stack(daskVarArrayList, axis=0))
 
@@ -284,8 +272,10 @@ def main() -> None:
         daskVarArrayStackDisk_main,
         forecast_process_dir + "/" + subh_store_name,
         final_chunk,
+        FINAL_SHARD_SIZES["SubH"],
         zarr_store_workers,
         zarr_vars,
+        times=forecast_valid_times.astype("datetime64[s]").astype("int64"),
     )
 
     # %% Publish the store, then the run time the API uses to detect it

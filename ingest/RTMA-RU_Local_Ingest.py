@@ -29,6 +29,7 @@ from API.ingest_grib_utils import download_and_validate_subset
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
     VALID_DATA_MAX,
     VALID_DATA_MIN,
     configure_herbie_request_timeouts,
@@ -66,10 +67,10 @@ RTMA_RU_MATCH_STRINGS = (
     "|:TCDC:entire atmosphere"
 )
 
-# Variables in the published store (cfgrib short names); the order is the API's
-# RTMA_RU index map
+# Variables in the published store (cfgrib short names). The API reader puts the
+# valid times (the store's time attribute) in column 0, so zarr_vars[i] is
+# column i + 1 of the API's RTMA_RU index map.
 zarr_vars = (
-    "time",
     "vis",
     "i10fg",
     "sp",
@@ -214,19 +215,11 @@ def main() -> None:
     xarray_analysis_merged["u10"].data = u_earth
     xarray_analysis_merged["v10"].data = v_earth
 
-    # %% Replace the time coordinate with a gridded UNIX-time variable
-    # The API reads time from the store like any other variable
-    model_UNIX_time = xarray_analysis_merged.time.data.astype("datetime64[s]").astype(
-        int
+    # %% The single analysis time goes in the final store's time attribute
+    model_UNIX_time = np.atleast_1d(
+        xarray_analysis_merged.time.data.astype("datetime64[s]").astype("int64")
     )
     xarray_analysis_merged = xarray_analysis_merged.reset_coords("time", drop=True)
-    xarray_analysis_merged["time"] = (
-        ("y", "x"),
-        np.full(
-            (xarray_analysis_merged.sizes["y"], xarray_analysis_merged.sizes["x"]),
-            model_UNIX_time,
-        ),
-    )
 
     # Specific humidity was only needed for relative humidity
     xarray_analysis_merged = xarray_analysis_merged.drop_vars("sh2")
@@ -241,8 +234,6 @@ def main() -> None:
 
     # Out-of-range values become NaN
     for var in vars_in:
-        if var == "time":
-            continue
         ds_clip = xarray_analysis_merged[var]
         if np.issubdtype(ds_clip.dtype, np.number):
             mask = (ds_clip >= VALID_DATA_MIN) & (ds_clip <= VALID_DATA_MAX)
@@ -265,8 +256,10 @@ def main() -> None:
         dask_var_array,
         forecast_process_dir + "/" + rtma_ru_store_name,
         final_chunk,
+        FINAL_SHARD_SIZES["RTMA"],
         zarr_store_workers,
         zarr_vars,
+        times=model_UNIX_time,
     )
 
     # %% Publish the store, then the run time the API uses to detect it

@@ -38,6 +38,7 @@ from API.constants.unit_const import KG_M2_TO_UG_M2, KG_M3_TO_UG_M3, MOL_MOL_TO_
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
     configure_zarr_writes,
     history_store_exists,
     mask_invalid_data,
@@ -68,9 +69,10 @@ SILAM_RETRY_SLEEP_SECONDS = 5
 SILAM_DOWNLOAD_TIMEOUT_SECONDS = 120
 SILAM_CATALOG_TIMEOUT_SECONDS = 30
 
-# Variables in the published store; the order is the API's SILAM index map
+# Variables in the published store. The API reader puts the valid times (the
+# store's time attribute) in column 0, so zarr_vars[i] is column i + 1 of the
+# API's SILAM index map.
 zarr_vars = (
-    "time",
     "cnc_PM2_5",
     "cnc_PM10",
     "PM_FRP_column",
@@ -446,8 +448,6 @@ def main() -> None:
     save_processed_zarr(
         xarray_forecast_processed, forecast_process_path + "_.zarr", zarr_store_workers
     )
-    lat_count = xarray_forecast_processed.sizes["latitude"]
-    lon_count = xarray_forecast_processed.sizes["longitude"]
     xarray_forecast_processed.close()
     xarray_processed.close()
     del xarray_forecast_processed, xarray_processed
@@ -507,16 +507,28 @@ def main() -> None:
         logger.info("Saved historic SILAM slice: %s", timestamp)
 
     # %% Merge the history and forecast datasets
+    # The history stores keep their own time array, read back below to check the
+    # merged times, so it is expected alongside the published variables.
     historic_stores = [
         open_history_store(
             history_remote,
             "SILAM_Hist_v3"
             + (origintime - timedelta(hours=hours_offset)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr",
-            zarr_vars,
+            ("time", *zarr_vars),
         )
         for hours_offset in history_offsets
     ]
+
+    # Integer Unix seconds of every stacked step
+    stacked_times_unix = np.concatenate(
+        [historic_store["time"][:] for historic_store in historic_stores]
+        + [da.from_zarr(forecast_process_path + "_.zarr", component="time").compute()]
+    )
+    if np.any(np.diff(stacked_times_unix) != SILAM_STEP_SECONDS):
+        raise RuntimeError(
+            f"SILAM run {origintime} stacked times are not hourly: {stacked_times_unix}"
+        )
 
     dask_interp_arrays = []
     for dask_var in zarr_vars:
@@ -530,35 +542,14 @@ def main() -> None:
             forecast_process_path + "_.zarr", component=dask_var, inline_array=True
         )
 
-        if dask_var == "time":
-            dask_time_arrays = [da.squeeze(array) for array in dask_var_arrays_list]
-            dask_time_arrays.append(dask_forecast_array)
-            # Integer Unix seconds of every stacked step
-            stacked_times_unix = da.concatenate(dask_time_arrays, axis=0).compute()
-            if np.any(np.diff(stacked_times_unix) != SILAM_STEP_SECONDS):
-                raise RuntimeError(
-                    f"SILAM run {origintime} stacked times are not hourly: "
-                    f"{stacked_times_unix}"
-                )
-            dask_times_concatenated = da.from_array(
-                stacked_times_unix.astype("float32")
-            )
-
-            # The API reads time from the store like any other variable
-            output_array = da.broadcast_to(
-                dask_times_concatenated[:, None, None],
-                (dask_times_concatenated.shape[0], lat_count, lon_count),
-            ).rechunk((dask_times_concatenated.shape[0], process_chunk, process_chunk))
-            dask_interp_arrays.append(output_array)
-        else:
-            output_array = da.concatenate(
-                dask_var_arrays_list + [dask_forecast_array], axis=0
-            )
-            dask_interp_arrays.append(
-                output_array.rechunk(
-                    (output_array.shape[0], process_chunk, process_chunk)
-                ).astype("float32")
-            )
+        output_array = da.concatenate(
+            dask_var_arrays_list + [dask_forecast_array], axis=0
+        )
+        dask_interp_arrays.append(
+            output_array.rechunk(
+                (output_array.shape[0], process_chunk, process_chunk)
+            ).astype("float32")
+        )
 
         logger.info("Processed variable: %s", dask_var)
 
@@ -586,8 +577,10 @@ def main() -> None:
             stacked_array_padded,
             forecast_process_dir + "/" + silam_store_name,
             final_chunk,
+            FINAL_SHARD_SIZES["SILAM"],
             zarr_store_workers,
             zarr_vars,
+            times=stacked_times_unix,
         )
 
     # %% Publish the stores, then the run time the API uses to detect them

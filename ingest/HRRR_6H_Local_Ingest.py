@@ -29,6 +29,7 @@ from API.ingest_grib_utils import download_and_validate_subset, run_checked
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
     FORECAST_LEAD_RANGES,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
@@ -49,8 +50,6 @@ logger = logging.getLogger(__name__)
 # %% Model constants
 HRRR_FORECAST_HOURS = FORECAST_LEAD_RANGES["HRRR_6H"]
 HRRR_SOURCE_PRIORITY = ["aws", "google", "nomads"]
-# (y, x) shape of the HRRR CONUS Lambert conformal grid
-HRRR_GRID_SHAPE = (1059, 1799)
 # The native HRRR grid, passed to wgrib2 -new_grid so that -new_grid_winds earth
 # rotates the grid-relative U/V to earth-relative without moving any grid point.
 # From https://github.com/blaylockbk/pyBKB_v2/blob/master/demos/HRRR_earthRelative_vs_gridRelative_winds.ipynb
@@ -77,10 +76,11 @@ HRRR_MATCH_STRINGS = (
 # Smoke (MASSDEN) is in kg/m^3; scale to ug/m^3 so float32 storage keeps precision
 MASSDEN_KG_TO_UG = 1e9
 
-# Variables in the published store; the order is the API's HRRR index map,
-# shared with the hourly HRRR store so the API can concatenate the two
+# Variables in the published store. The API reader puts the valid times (the
+# store's time attribute) in column 0, so zarr_vars[i] is column i + 1 of the
+# API's HRRR index map, shared with the hourly HRRR store so the API can
+# concatenate the two.
 zarr_vars = (
-    "time",
     "VIS_surface",
     "GUST_surface",
     "MSLMA_meansealevel",
@@ -259,23 +259,11 @@ def main() -> None:
             component=dask_var,
             inline_array=True,
         )
-
-        if dask_var == "time":
-            npCatTimes = daskForecastArray.astype("float32").compute()
-            # The API reads time from the store like any other variable
-            daskVarArrayList.append(
-                da.from_array(
-                    np.tile(
-                        npCatTimes[:, np.newaxis, np.newaxis], (1, *HRRR_GRID_SHAPE)
-                    )
-                ).rechunk((len(npCatTimes), process_chunk, process_chunk))
-            )
-        else:
-            daskVarArrayList.append(
-                daskForecastArray.rechunk(
-                    (len(npCatTimes), process_chunk, process_chunk)
-                ).astype("float32")
-            )
+        daskVarArrayList.append(
+            daskForecastArray.rechunk(
+                (len(forecast_valid_times), process_chunk, process_chunk)
+            ).astype("float32")
+        )
 
     daskVarArrayListMergeNaN = mask_invalid_data(da.stack(daskVarArrayList, axis=0))
 
@@ -295,8 +283,10 @@ def main() -> None:
         daskVarArrayStackDisk_main,
         forecast_process_dir + "/" + hrrr_6h_store_name,
         final_chunk,
+        FINAL_SHARD_SIZES["HRRR_6H"],
         zarr_store_workers,
         zarr_vars,
+        times=forecast_valid_times.astype("datetime64[s]").astype("int64"),
     )
 
     # %% Publish the store, then the run time the API uses to detect it

@@ -5,6 +5,7 @@ import logging
 
 import numpy as np
 import pytest
+import tensorstore as ts
 
 from API.constants.forecast_const import DATA_HOURLY
 from API.constants.model_const import GFS, URMA
@@ -20,7 +21,7 @@ from API.current.metrics import (
 from API.data_inputs import prepare_data_inputs
 from API.forecast_sources import SourceMetadata, _merge_urma_source, merge_hourly_models
 from API.hourly.block import _calculate_derived_metrics
-from API.io.zarr_reader import WeatherParallel
+from API.io.store_reader import ModelStore, WeatherParallel
 from API.request.grid_indexing import ZarrSources, calculate_grid_indexing
 
 
@@ -190,8 +191,12 @@ async def test_urma_reader_keeps_missing_observations_for_gfs_fallback():
     """The reader must keep URMA gaps as NaN (so GFS can fill them) instead of
     interpolating across them as it does for forecast models.
     """
-    store = np.ones((max(URMA.values()) + 1, 3, 1, 1))
-    store[URMA["temp"], 1, 0, 0] = np.nan
+    # Stores hold no time column: the variable in API column c is store index c - 1
+    values = np.ones((max(URMA.values()), 3, 1, 1))
+    values[URMA["temp"] - 1, 1, 0, 0] = np.nan
+    store = ModelStore(
+        array=ts.array(values), times=1.79e9 + 3600 * np.arange(3), version="test"
+    )
     weather = WeatherParallel()
 
     urma = await weather.zarr_read("URMA", store, 0, 0)

@@ -14,6 +14,7 @@ Or activate the ingest test environment first:
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import random
 import warnings
@@ -38,8 +39,9 @@ DEFAULT_OPENDAP_URL = (
     "silam_glob_v6_1_sfc/silam_glob_v6_1_sfc_best.ncd.html"
 )
 
+# Axis 0 of the store (FMI_Silam_Local_Ingest zarr_vars); the valid times are
+# the array's "time" attribute, not a variable.
 ZARR_VARS = (
-    "time",
     "cnc_PM2_5",
     "cnc_PM10",
     "PM_FRP_column",
@@ -144,15 +146,25 @@ def unix_seconds(values: np.ndarray) -> np.ndarray:
     return (pd.to_datetime(values).astype("int64") // 1_000_000_000).to_numpy()
 
 
+def resolve_current_store(path: Path) -> Path:
+    """Return ``path`` if it is a zarr store, else the version named by the
+    sibling ``<MODEL>.current.json`` pointer (``API.ingest_utils.publish_store``)."""
+    if (path / "zarr.json").exists():
+        return path
+    pointer = path.parent / (path.name.removesuffix(".zarr") + ".current.json")
+    with open(pointer) as fh:
+        return path.parent / json.load(fh)["store"]
+
+
 def open_production_zarr(path: str) -> zarr.Array:
-    zarr_path = Path(path)
+    zarr_path = resolve_current_store(Path(path))
     if not zarr_path.exists():
         raise FileNotFoundError(f"Zarr path does not exist: {zarr_path}")
 
     root = zarr.open(str(zarr_path), mode="r")
     if not isinstance(root, zarr.Array):
         raise TypeError("Expected SILAM production Zarr to be a root zarr.Array")
-    if root.ndim != 4 or root.shape[0] < len(ZARR_VARS):
+    if root.ndim != 4 or tuple(root.attrs.get("variables", ())) != ZARR_VARS:
         raise ValueError(
             "Expected SILAM production Zarr shape "
             "(variable, time, latitude, longitude) with known variables."
@@ -175,7 +187,7 @@ def build_time_matches(
     source_times: np.ndarray,
     max_delta_seconds: float,
 ) -> list[TimeMatch]:
-    zarr_times = np.asarray(zarr_array[0, :, 0, 0], dtype=np.float64)
+    zarr_times = np.asarray(zarr_array.attrs["time"], dtype=np.float64)
     valid_zarr = np.flatnonzero(np.isfinite(zarr_times) & (zarr_times > 0))
     source_seconds = unix_seconds(source_times)
     matches = []

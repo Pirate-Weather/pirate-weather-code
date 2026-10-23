@@ -4,13 +4,17 @@ This utility samples random (variable, time, latitude, longitude) points from tw
 GFS forecast stores and reports value differences.
 
 Supported Zarr layouts:
-1. Root 4D array shaped (variable, time, latitude, longitude)
+1. Root 4D array shaped (variable, time, latitude, longitude), the final store
+   layout: axis-0 names in the ``variables`` attribute, valid times in ``time``.
+   A ``<MODEL>.zarr`` path that is not a store follows the sibling
+   ``<MODEL>.current.json`` pointer to the current published version.
 2. Root group with one 3D array per variable (time, latitude, longitude)
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import random
 from collections.abc import Callable
@@ -19,34 +23,6 @@ from pathlib import Path
 
 import numpy as np
 import zarr
-
-DEFAULT_GFS_VAR_ORDER = [
-    "time",
-    "VIS_surface",
-    "GUST_surface",
-    "PRMSL_meansealevel",
-    "TMP_2maboveground",
-    "DPT_2maboveground",
-    "RH_2maboveground",
-    "APTMP_2maboveground",
-    "UGRD_10maboveground",
-    "VGRD_10maboveground",
-    "PRATE_surface",
-    "APCP_surface",
-    "CSNOW_surface",
-    "CICEP_surface",
-    "CFRZR_surface",
-    "CRAIN_surface",
-    "TOZNE_entireatmosphere_consideredasasinglelayer_",
-    "TCDC_entireatmosphere",
-    "DUVB_surface",
-    "Storm_Distance",
-    "Storm_Direction",
-    "REFC_entireatmosphere",
-    "DSWRF_surface",
-    "CAPE_surface",
-    "PRES_station",
-]
 
 
 @dataclass
@@ -92,11 +68,21 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def resolve_current_store(path: Path) -> Path:
+    """Return ``path`` if it is a zarr store, else the version named by the
+    sibling ``<MODEL>.current.json`` pointer (``API.ingest_utils.publish_store``)."""
+    if (path / "zarr.json").exists():
+        return path
+    pointer = path.parent / (path.name.removesuffix(".zarr") + ".current.json")
+    with open(pointer) as fh:
+        return path.parent / json.load(fh)["store"]
+
+
 def open_store(path: str) -> zarr.Array | zarr.Group:
-    store_path = Path(path)
+    store_path = resolve_current_store(Path(path))
     if not store_path.exists():
-        raise FileNotFoundError(f"Zarr path does not exist: {path}")
-    return zarr.open(path, mode="r")
+        raise FileNotFoundError(f"Zarr path does not exist: {store_path}")
+    return zarr.open(store_path, mode="r")
 
 
 def as_variable_arrays(
@@ -107,15 +93,15 @@ def as_variable_arrays(
             raise ValueError(
                 "Root array format expects shape (variable, time, latitude, longitude)."
             )
-        var_count = root.shape[0]
-        if var_count > len(DEFAULT_GFS_VAR_ORDER):
+        var_names = list(root.attrs["variables"])
+        if len(var_names) != root.shape[0]:
             raise ValueError(
-                f"Root array has {var_count} variables but only "
-                f"{len(DEFAULT_GFS_VAR_ORDER)} default names are known."
+                f"Root array has {root.shape[0]} variables but its variables "
+                f"attribute names {len(var_names)}."
             )
 
         arrays: dict[str, VarPair] = {}
-        for var_index, var_name in enumerate(DEFAULT_GFS_VAR_ORDER[:var_count]):
+        for var_index, var_name in enumerate(var_names):
             arrays[var_name] = VarPair(
                 left_get=lambda t, y, x, vi=var_index: scalar(root[vi, t, y, x]),
                 right_get=lambda t, y, x, vi=var_index: scalar(root[vi, t, y, x]),

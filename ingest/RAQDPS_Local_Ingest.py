@@ -44,6 +44,7 @@ from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
     close_store,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
@@ -60,7 +61,6 @@ from API.raqdps_herbie_template import raqdps
 from API.raqdps_utils import (
     RAQDPS_FORECAST_HOURS,
     RAQDPS_LEVEL,
-    RAQDPS_OUTPUT_VARS,
     RAQDPS_VARIABLES,
     as_float32_array,
     candidate_raqdps_runs,
@@ -78,8 +78,10 @@ logger = logging.getLogger(__name__)
 herbie_model_templates.raqdps = raqdps
 
 # %% Model constants
-# Variables, output order (time first) and leads f000-f072 live in
-# API/raqdps_utils.py, shared with the Herbie template and diagnostics scripts.
+# Variables and leads f000-f072 live in API/raqdps_utils.py, shared with the
+# Herbie template and diagnostics scripts. The store holds RAQDPS_VARIABLES; the
+# API reader puts the valid times (the store's time attribute) in column 0, so
+# RAQDPS_VARIABLES[i] is column i + 1 of the API's RAQDPS index map.
 # A run is only used once its last lead (f072 O3) is on the Datamart.
 RAQDPS_PROBE_VARIABLE = "O3"
 RAQDPS_RUN_CANDIDATES = 10
@@ -265,12 +267,9 @@ def variable_zarr_path(root_path, variable):
     return os.path.join(root_path, variable_store_name(variable))
 
 
-def build_variable_arrays(time_slices, valid_times, reference_shape):
+def build_variable_arrays(time_slices):
     """Convert time-slice dictionaries to separate dask arrays per variable."""
-    unix_times = np.array([int(valid_time.timestamp()) for valid_time in valid_times])
-    variable_arrays = {
-        "time": da.from_array(unix_times.astype(np.float32), chunks=(len(unix_times),))
-    }
+    variable_arrays = {}
 
     for variable in RAQDPS_VARIABLES:
         arrays = [
@@ -298,13 +297,9 @@ def write_variable_zarrs(variable_arrays, root_path, time_chunks, zarr_store_wor
             array__chunk_size=time_chunks * process_chunk_bytes,
         ),
     ):
-        for variable in RAQDPS_OUTPUT_VARS:
+        for variable in RAQDPS_VARIABLES:
             variable_array = variable_arrays[variable]
-            chunks = (
-                (time_chunks,)
-                if variable == "time"
-                else (time_chunks, process_chunk, process_chunk)
-            )
+            chunks = (time_chunks, process_chunk, process_chunk)
             store = zarr.storage.LocalStore(variable_zarr_path(root_path, variable))
             zarr_array = zarr.create_array(
                 store=store,
@@ -322,18 +317,6 @@ def write_variable_zarrs(variable_arrays, root_path, time_chunks, zarr_store_wor
 def read_intermediate_variable(root_path, variable):
     """Read one variable from a variable-separated RAQDPS intermediate store."""
     return da.from_zarr(variable_zarr_path(root_path, variable), inline_array=True)
-
-
-def expand_time_array(time_array, reference_shape):
-    """Expand a 1D intermediate time array to the final 3D grid shape."""
-    if time_array.ndim == 3:
-        return time_array
-
-    lat_count, lon_count = reference_shape
-    return da.broadcast_to(
-        time_array.reshape(time_array.shape[0], 1, 1),
-        (time_array.shape[0], lat_count, lon_count),
-    )
 
 
 def prepare_directories():
@@ -391,17 +374,21 @@ def process_forecast(base_time, zarr_store_workers):
         time_slices.append(fields)
         valid_times.append(base_time + timedelta(hours=forecast_hour))
 
-    forecast_arrays = build_variable_arrays(time_slices, valid_times, reference_shape)
+    forecast_arrays = build_variable_arrays(time_slices)
     forecast_zarr_path = forecast_process_path + "_forecast.zarr"
     write_variable_zarrs(
         forecast_arrays, forecast_zarr_path, len(valid_times), zarr_store_workers
     )
-    return forecast_zarr_path, reference_shape, lat_lon_lookup
+    forecast_times_unix = np.array(
+        [int(valid_time.timestamp()) for valid_time in valid_times], dtype=np.int64
+    )
+    return forecast_zarr_path, forecast_times_unix, reference_shape, lat_lon_lookup
 
 
 def merge_and_publish(
     base_time,
     forecast_zarr_path,
+    forecast_times_unix,
     reference_shape,
     lat_lon_lookup,
     forecast_remote,
@@ -411,10 +398,8 @@ def merge_and_publish(
     logger.info("Stacking RAQDPS forecast variables.")
 
     dask_variable_list = []
-    for variable in RAQDPS_OUTPUT_VARS:
+    for variable in RAQDPS_VARIABLES:
         variable_array = read_intermediate_variable(forecast_zarr_path, variable)
-        if variable == "time":
-            variable_array = expand_time_array(variable_array, reference_shape)
 
         merged_variable = variable_array.reshape(
             1,
@@ -431,7 +416,7 @@ def merge_and_publish(
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
         merged_arrays_masked.rechunk(
             (
-                len(RAQDPS_OUTPUT_VARS),
+                len(RAQDPS_VARIABLES),
                 merged_arrays_masked.shape[1],
                 process_chunk,
                 process_chunk,
@@ -446,8 +431,10 @@ def merge_and_publish(
         stacked_array_padded,
         os.path.join(forecast_process_dir, raqdps_store_name),
         final_chunk,
+        FINAL_SHARD_SIZES["RAQDPS"],
         zarr_store_workers,
-        RAQDPS_OUTPUT_VARS,
+        RAQDPS_VARIABLES,
+        times=forecast_times_unix,
     )
 
     lat_lon_pickle_file_path = os.path.join(forecast_process_dir, RAQDPS_LAT_LON_PICKLE)
@@ -494,13 +481,14 @@ def main():
 
     try:
         # %% Download, convert and write each lead
-        forecast_zarr_path, reference_shape, lat_lon_lookup = process_forecast(
-            base_time, zarr_store_workers
+        forecast_zarr_path, forecast_times_unix, reference_shape, lat_lon_lookup = (
+            process_forecast(base_time, zarr_store_workers)
         )
         # %% Stack, write the final store and publish
         merge_and_publish(
             base_time,
             forecast_zarr_path,
+            forecast_times_unix,
             reference_shape,
             lat_lon_lookup,
             forecast_remote,

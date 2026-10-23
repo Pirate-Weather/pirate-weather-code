@@ -209,6 +209,7 @@ curl 127.0.0.1:8083/forecast/123456/47.1756,27.594,1730869200
 In either case, the dockerfiles to build the underlying images are [available](https://github.com/Pirate-Weather/pirate-weather-code/tree/dev/Docker), allowing the image to be rebuilt as well. This is helpful for adding additional Python packages or updating versions. 
 
 **Note:** 
+- The static snapshot predates the sharded store layout (below); it needs a re-published snapshot before it works with the current reader.
 - Because the model files are a static snapshot, the time parameter (around Wed Nov 06 2024) must be used!
 - The container will initially not do anything, since FastAPI doesn't appear to pass along the logs until it's initialized. It should be up and running within ~5 minutes 
 
@@ -221,6 +222,12 @@ The other alternative is to setup a Python environment following the same proces
 - The `force_now` environmental variable tells the script to pretend that it is currently this time in order to avoid switching to historic mode;
 - The `TIMING=True` environmental variable enables detailed timing outputs;
 - Eagle eyed observes will note that the script has the capacity to read the sharded Zarr stores directly from S3. This is used internally for testing, since it's too slow for the production API.
+
+#### Store layout
+- Every model's final store is one sharded Zarr v3 array of `(variable, time, y, x)`, Blosc zstd, with one inner chunk per small square of grid cells holding every variable and time step, grouped into shard files (`FINAL_CHUNK_SIZES` and `FINAL_SHARD_SIZES` in `API/ingest_utils.py`). The valid times are not in the array: they are its `time` attribute (Unix seconds), and the API reader puts them back as column 0 of each point read.
+- Ingests publish each run as a new version, `<MODEL>/<stamp>.zarr`, and then rewrite `<MODEL>.current.json` to point at it.
+- `API/store_sync.py` copies new versions to the API's local disk in the same layout. API workers (`API/io/store_reader.py`, tensorstore) poll the pointers, swap in new versions while serving, and write heartbeats so the sync only deletes a version once no worker holds it.
+- Serve from local disk: an S3 read takes 100-400 ms. The benchmarks behind this layout are in `Notes/STORAGE_AND_READ_BENCHMARKS.md`.
 Then, a curl query can be made from a new terminal window:
 ```
 curl 127.0.0.1:8080/forecast/123456/47.1756,27.594,1730869200

@@ -32,6 +32,7 @@ from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
     interp_time_take_blend,
@@ -62,8 +63,6 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 logger = logging.getLogger(__name__)
 
 # %% Model constants
-# (y, x) shape of the NBM CONUS grid
-NBM_GRID_SHAPE = (1597, 2345)
 # wgrib2 -ijsmall_grib i and j ranges covering the full NBM CONUS grid. Cutting
 # the full extent rewrites every record on the same grid before the NetCDF export.
 NBM_IJSMALL_GRID = "1:2345 1:1597"
@@ -110,9 +109,10 @@ NBM_PACCUM_6H_MATCH = r"(:APCP:surface:(0-6|\d*0-\d{1,2}6|\d*1-\d{1,2}7|\d*2-\d{
 # Probability of more than 0.254 mm (0.01 in) in the PPROB NetCDF
 NBM_PPROB_VAR = "APCP_prob_GT_0D254_prob_fcst_255_255_surface"
 
-# Variables in the published store; the order is the API's NBM index map
+# Variables in the published store. The API reader puts the valid times (the
+# store's time attribute) in column 0, so zarr_vars[i] is column i + 1 of the
+# API's NBM index map.
 zarr_vars = (
-    "time",
     "GUST_10maboveground",
     "TMP_2maboveground",
     "APTMP_2maboveground",
@@ -469,6 +469,8 @@ def main() -> None:
 
     ncForecast = nc.Dataset(main_nc_path)
     ncForecast.set_auto_mask(False)
+    # Check that the NetCDF times (Unix seconds) are the expected forecast times
+    validate_stacked_time_alignment(stacked_timesUnix, ncForecast["time"][:])
     forecast_var_zarr_dir = forecast_process_path + "_zarrs"
     if os.path.exists(forecast_var_zarr_dir):
         shutil.rmtree(forecast_var_zarr_dir)
@@ -525,14 +527,11 @@ def main() -> None:
             )
 
             forecast_var_zarr_path = forecast_var_zarr_dir + "/" + dask_var + ".zarr"
-            if dask_var == "time":
-                daskArray.to_zarr(forecast_var_zarr_path, overwrite=True)
-            else:
-                daskArray.to_zarr(
-                    forecast_var_zarr_path,
-                    compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
-                    overwrite=True,
-                )
+            daskArray.to_zarr(
+                forecast_var_zarr_path,
+                compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+                overwrite=True,
+            )
             try:
                 zarr.open_array(forecast_var_zarr_path, mode="r")
             except Exception as exc:
@@ -576,23 +575,11 @@ def main() -> None:
                 "run cleared the shared processing directory while this run was active."
             )
         daskForecastArray = da.from_zarr(forecast_var_zarr_path, inline_array=True)
-
-        if dask_var == "time":
-            npCatTimes = daskForecastArray.astype("float32").compute()
-            # Check that the stored times are aligned with the expected forecast times
-            validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
-            # The API reads time from the store like any other variable
-            daskVarArrayList.append(
-                da.from_array(
-                    np.tile(npCatTimes[:, np.newaxis, np.newaxis], (1, *NBM_GRID_SHAPE))
-                ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
-            )
-        else:
-            daskVarArrayList.append(
-                daskForecastArray.rechunk(
-                    (len(stacked_timesUnix), process_chunk, process_chunk)
-                ).astype("float32")
-            )
+        daskVarArrayList.append(
+            daskForecastArray.rechunk(
+                (len(stacked_timesUnix), process_chunk, process_chunk)
+            ).astype("float32")
+        )
 
     daskVarArrayListMergeNaN = mask_invalid_data(da.stack(daskVarArrayList, axis=0))
 
@@ -623,8 +610,10 @@ def main() -> None:
         daskVarArrayStackDiskInterpPad,
         forecast_process_dir + "/NBM.zarr",
         final_chunk,
+        FINAL_SHARD_SIZES["NBM"],
         zarr_store_workers,
         zarr_vars,
+        times=hourly_timesUnix,
     )
     _timing_log(
         f"NBM_FORECAST stage=interpolate_and_write elapsed={time.perf_counter() - stage_start:.2f}s"

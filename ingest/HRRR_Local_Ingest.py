@@ -27,6 +27,7 @@ from API.ingest_grib_utils import download_and_validate_subset, run_checked
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
     FORECAST_LEAD_RANGES,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
@@ -74,9 +75,10 @@ HRRR_MATCH_STRINGS = (
 # Smoke (MASSDEN) is in kg/m^3; scale to ug/m^3 so float32 storage keeps precision
 MASSDEN_KG_TO_UG = 1e9
 
-# Variables in the published store; the order is the API's HRRR index map
+# Variables in the published store. The API reader puts the valid times (the
+# store's time attribute) in column 0, so zarr_vars[i] is column i + 1 of the
+# API's HRRR index map.
 zarr_vars = (
-    "time",
     "VIS_surface",
     "GUST_surface",
     "MSLMA_meansealevel",
@@ -265,23 +267,11 @@ def main() -> None:
             component=dask_var,
             inline_array=True,
         )
-
-        if dask_var == "time":
-            npCatTimes = daskForecastArray.astype("float32").compute()
-            # The API reads time from the store like any other variable
-            daskVarArrayList.append(
-                da.from_array(
-                    np.tile(
-                        npCatTimes[:, np.newaxis, np.newaxis], (1, *HRRR_GRID_SHAPE)
-                    )
-                ).rechunk((len(npCatTimes), process_chunk, process_chunk))
-            )
-        else:
-            daskVarArrayList.append(
-                daskForecastArray.rechunk(
-                    (len(npCatTimes), process_chunk, process_chunk)
-                ).astype("float32")
-            )
+        daskVarArrayList.append(
+            daskForecastArray.rechunk(
+                (len(forecast_valid_times), process_chunk, process_chunk)
+            ).astype("float32")
+        )
 
     daskVarArrayListMergeNaN = mask_invalid_data(da.stack(daskVarArrayList, axis=0))
 
@@ -301,8 +291,10 @@ def main() -> None:
         daskVarArrayStackDisk_main,
         forecast_process_dir + "/" + hrrr_store_name,
         final_chunk,
+        FINAL_SHARD_SIZES["HRRR"],
         zarr_store_workers,
         zarr_vars,
+        times=forecast_valid_times.astype("datetime64[s]").astype("int64"),
     )
 
     # %% Publish the stores, then the run time the API uses to detect them

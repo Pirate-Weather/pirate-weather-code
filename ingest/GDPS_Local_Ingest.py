@@ -35,8 +35,8 @@ from API.ingest_grib_utils import (
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
     FORECAST_LEAD_RANGES,
-    broadcast_times_to_grid,
     clear_directory,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
@@ -133,9 +133,10 @@ GDPS_EXCLUDED_STATS_VARIABLES = {
     ("KIndex", "Sfc"): ["KX"],
 }
 
-# Variables in the published store; the order is the API's GDPS index map
+# Variables in the published store. The API reader puts the valid times (the
+# store's time attribute) in column 0, so zarr_vars[i] is column i + 1 of the
+# API's GDPS index map.
 zarr_vars = (
-    "time",
     "TMP_2maboveground",
     "DPT_2maboveground",
     "RH_2maboveground",
@@ -361,7 +362,6 @@ def main() -> None:
     # GDPS is on a regular latitude/longitude grid, so the spatial dimensions
     # are (latitude, longitude); read them from a field like HRDPS does.
     spatial_dims = xarray_forecast_merged["TMP_2maboveground"].dims[-2:]
-    NY, NX = (xarray_forecast_merged.sizes[dim] for dim in spatial_dims)
 
     # %% Correct the accumulated fields
     # APCP is a total since the run start. Difference consecutive leads and
@@ -420,26 +420,22 @@ def main() -> None:
     )
     hourly_timesUnix = (new_hourly_time - unix_epoch) / one_second
 
+    # Check that the stored times are aligned with the expected forecast times
+    npForecastTimes = da.from_zarr(
+        forecast_process_path + "_.zarr", component="time"
+    ).compute()
+    validate_stacked_time_alignment(stacked_timesUnix, npForecastTimes)
+
     daskVarArrayList = []
     for dask_var in zarr_vars:
         daskForecastArray = da.from_zarr(
             forecast_process_path + "_.zarr", component=dask_var, inline_array=True
         )
-
-        if dask_var == "time":
-            npForecastTimes = daskForecastArray.astype("float32").compute()
-            # Check that the stored times are aligned with the expected forecast times
-            validate_stacked_time_alignment(stacked_timesUnix, npForecastTimes)
-            # The API reads time from the store like any other variable
-            daskVarArrayList.append(
-                broadcast_times_to_grid(npForecastTimes, NY, NX, process_chunk)
-            )
-        else:
-            daskVarArrayList.append(
-                daskForecastArray.rechunk(
-                    (len(stacked_timesUnix), process_chunk, process_chunk)
-                ).astype("float32")
-            )
+        daskVarArrayList.append(
+            daskForecastArray.rechunk(
+                (len(stacked_timesUnix), process_chunk, process_chunk)
+            ).astype("float32")
+        )
 
     # CIN and the K index are valid far below the global VALID_DATA_MIN (-100):
     # CIN reaches about -1700 J/kg and the K index about -175 in cold, dry polar
@@ -472,8 +468,10 @@ def main() -> None:
         daskVarArrayStackDiskInterpPad,
         forecast_process_dir + "/" + gdps_store_name,
         final_chunk,
+        FINAL_SHARD_SIZES["GDPS"],
         zarr_store_workers,
         zarr_vars,
+        times=new_hourly_time.values.astype("datetime64[s]").astype("int64"),
     )
 
     # %% Publish the store, then the run time the API uses to detect it

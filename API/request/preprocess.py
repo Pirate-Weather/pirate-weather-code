@@ -20,7 +20,7 @@ from API.constants.api_const import COORDINATE_CONST, TIME_MACHINE_CONST
 from API.constants.shared_const import KELVIN_TO_CELSIUS
 from API.constants.unit_const import country_units
 from API.hourly.builder import initialize_time_grids
-from API.io.zarr_reader import WeatherParallel
+from API.io.store_reader import WeatherParallel
 from API.utils.geo import get_offset
 from API.utils.offline_geocode import geocode_city_country
 from API.utils.timing import TimingTracker

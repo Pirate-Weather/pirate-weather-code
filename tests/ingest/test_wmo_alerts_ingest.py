@@ -1,6 +1,7 @@
 """WMO alert ingest: catalog feed discovery, CAP parsing and grid output."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import numpy as np
@@ -207,9 +208,9 @@ def test_main_writes_alert_grid(tmp_path, monkeypatch, current, inside_cell):
 
     wmo.main()
 
-    result = zarr.open_array(
-        str(forecast_dir / wmo.ingest_version / "WMO_Alerts.zarr"), mode="r"
-    )
+    published = forecast_dir / wmo.ingest_version
+    version = json.loads((published / "WMO_Alerts.current.json").read_text())["store"]
+    result = zarr.open_array(str(published / version), mode="r")
     # Rows are latitude, columns longitude.
     expected = np.array([[inside_cell, ""], ["", ""]], dtype=object)
     np.testing.assert_array_equal(result[:], expected)

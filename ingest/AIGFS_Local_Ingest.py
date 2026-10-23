@@ -30,6 +30,7 @@ from API.ingest_grib_utils import download_and_validate_subset, run_checked
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
     FORECAST_LEAD_RANGES,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
@@ -50,8 +51,6 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 logger = logging.getLogger(__name__)
 
 # %% Model constants
-# 0.25 degree global latitude/longitude grid
-AIGFS_GRID_SHAPE = (721, 1440)
 AIGFS_FORECAST_HOURS = FORECAST_LEAD_RANGES["AIGFS"]
 # Unlike the experimental AWS EAGLE ensemble (see AIGEFS), the AWS AIGFS bucket
 # mirrors the operational NOMADS product, so it is tried first.
@@ -64,9 +63,10 @@ AIGFS_MATCH_STRINGS = (
     "|(:(PRMSL):)"
 )
 
-# Variables in the published store; the order is the API's AIGFS index map
+# Variables in the published store. The API reader puts the valid times (the
+# store's time attribute) in column 0, so zarr_vars[i] is column i + 1 of the
+# API's AIGFS index map.
 zarr_vars = (
-    "time",
     "PRMSL_meansealevel",
     "TMP_2maboveground",
     "UGRD_10maboveground",
@@ -214,6 +214,14 @@ def main() -> None:
     # The merged NetCDF is large and no longer needed
     os.remove(merged_nc_path)
 
+    # Check that the stored times are aligned with the expected forecast times
+    validate_stacked_time_alignment(
+        stacked_timesUnix,
+        da.from_zarr(forecast_process_path + "_forecast.zarr", component="time")
+        .compute()
+        .astype("float64"),
+    )
+
     # %% Stack the variables into the (variable, time, y, x) layout the API reads
     daskVarArrayList = []
     for dask_var in zarr_vars:
@@ -222,25 +230,11 @@ def main() -> None:
             component=dask_var,
             inline_array=True,
         )
-
-        if dask_var == "time":
-            npCatTimes = daskForecastArray.astype("float32").compute()
-            # Check that the stored times are aligned with the expected forecast times
-            validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
-            # The API reads time from the store like any other variable
-            daskVarArrayList.append(
-                da.from_array(
-                    np.tile(
-                        npCatTimes[:, np.newaxis, np.newaxis], (1, *AIGFS_GRID_SHAPE)
-                    )
-                ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
-            )
-        else:
-            daskVarArrayList.append(
-                daskForecastArray.rechunk(
-                    (len(stacked_timesUnix), process_chunk, process_chunk)
-                ).astype("float32")
-            )
+        daskVarArrayList.append(
+            daskForecastArray.rechunk(
+                (len(stacked_timesUnix), process_chunk, process_chunk)
+            ).astype("float32")
+        )
 
     daskVarArrayListMergeNaN = mask_invalid_data(da.stack(daskVarArrayList, axis=0))
 
@@ -268,8 +262,10 @@ def main() -> None:
         daskVarArrayStackDiskInterpPad,
         forecast_process_dir + "/" + aigfs_store_name,
         final_chunk,
+        FINAL_SHARD_SIZES["GFS"],
         zarr_store_workers,
         zarr_vars,
+        times=hourly_timesUnix,
     )
 
     # %% Publish the store, then the run time the API uses to detect it

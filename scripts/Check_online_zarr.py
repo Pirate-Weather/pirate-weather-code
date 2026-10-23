@@ -1,22 +1,23 @@
-# %% Scratch notebook to view a sharded zarr store on S3
+# %% Scratch notebook to view a published sharded zarr store on S3
 
-# # Open a Zarr store from S3 using s3fs + AWS keys
+# # Open the current version of a published store from S3 using s3fs + AWS keys
 #
-# Expected object layout:
-# s3://<bucket>/ForecastTar_v2/<ingest_version>/<model>.zarr/
+# Expected object layout (API.ingest_utils.publish_store):
+# s3://<bucket>/ForecastTar_v2/<ingest_version>/<MODEL>.current.json
+#     {"store": "<MODEL>/<UTC stamp>.zarr", "run_time": "..."}
+# s3://<bucket>/ForecastTar_v2/<ingest_version>/<MODEL>/<UTC stamp>.zarr/
 #
-# Example:
-# s3://my-bucket/ForecastTar_v2/v31/GFS.zarr/
+# Each store is one (variable, time, y, x) array; the variable names are the
+# "variables" attribute and the valid times (Unix seconds) the "time" attribute.
 
-# Open a Pirate Weather Zarr store from S3 using repo helpers + .env
-
+import json
 import os
 
 import pandas as pd
 import s3fs
+import zarr
 from dotenv import load_dotenv
-
-from API.io.ZarrHelpers import open_testing_zarr
+from zarr.storage import FsspecStore
 
 # %%
 # ---- Load .env ----
@@ -34,42 +35,39 @@ AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET"]
 
 S3_BUCKET = os.environ["s3_bucket"]
 
-# Use .env value if supplied; otherwise fall back to repo constant.
 INGEST_VERSION = "v31"
+MODEL_NAME = "SILAM"
 
-SAVE_TYPE = "S3Zarr"
-
-
-# %%
-# ---- Create S3 filesystem ----
-
-s3 = s3fs.S3FileSystem(
-    key=AWS_ACCESS_KEY_ID,
-    secret=AWS_SECRET_ACCESS_KEY,
-    version_aware=True,
-    asynchronous=True,
-)
+STORE_ROOT = f"{S3_BUCKET}/ForecastTar_v2/{INGEST_VERSION}"
 
 
 # %%
-# ---- Open the Zarr store using the repo helper ----
+# ---- Resolve the current version through the pointer ----
 
-opened_zarr = open_testing_zarr(
-    s3=s3,
-    s3_bucket=S3_BUCKET,
-    ingest_version=INGEST_VERSION,
-    save_type=SAVE_TYPE,
-    model_name="SILAM",
+s3 = s3fs.S3FileSystem(key=AWS_ACCESS_KEY_ID, secret=AWS_SECRET_ACCESS_KEY)
+pointer = json.loads(s3.cat_file(f"{STORE_ROOT}/{MODEL_NAME}.current.json"))
+print(pointer)
+
+
+# %%
+# ---- Open the store read-only ----
+
+store = FsspecStore.from_url(
+    f"s3://{STORE_ROOT}/{pointer['store']}",
+    storage_options={"key": AWS_ACCESS_KEY_ID, "secret": AWS_SECRET_ACCESS_KEY},
+    read_only=True,
 )
+opened_zarr = zarr.open_array(store, mode="r", zarr_format=3)
+variables = opened_zarr.attrs["variables"]
+print(opened_zarr.shape, variables)
 
 
-# %% Test read
-data = opened_zarr[1, 24 * 10 : 24 * 11, 500, 500]
-print(data)
+# %% Test read (axis 0 is variables[i])
+data = opened_zarr[0, 24 * 10 : 24 * 11, 500, 500]
+print(variables[0], data)
 
 
-# %% Print unix time as datetimes
-unixTime = opened_zarr[0, 24 * 10 : 24 * 11, 500, 500]
-unixTime = opened_zarr[0, 24 * 0 : 24 * 1, 500, 500]
+# %% Print the valid times as datetimes
+unixTime = opened_zarr.attrs["time"][24 * 0 : 24 * 1]
 
 print(pd.to_datetime(unixTime, unit="s"))

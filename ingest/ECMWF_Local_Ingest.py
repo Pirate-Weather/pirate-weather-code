@@ -36,6 +36,7 @@ from API.ingest_grib_utils import download_and_validate_subset
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
     FORECAST_LEAD_RANGES,
     VALID_DATA_MAX,
     VALID_DATA_MIN,
@@ -91,9 +92,10 @@ IFS_OPER_CFGRIB_GROUPS = (
 # Time chunk of the intermediate merged zarrs
 PROCESS_TIME_CHUNK = 64
 
-# Variables in the published store; the order is the API's ECMWF index map
+# Variables in the published store. The API reader puts the valid times (the
+# store's time attribute) in column 0, so zarr_vars[i] is column i + 1 of the
+# API's ECMWF index map.
 zarr_vars = (
-    "time",
     "msl",
     "t2m",
     "d2m",
@@ -404,14 +406,15 @@ def main() -> None:
     # %% Merge the history and forecast datasets
     # Every history run was stored above, so a missing one means it was lost;
     # dropping it would let the hourly interpolation bridge the gap with
-    # invented values, so open_history_store fails instead.
+    # invented values, so open_history_store fails instead. The history stores
+    # keep their own time coordinate, which the concatenation below indexes by.
     hist_stores = [
         open_history_store(
             history_remote,
             "ECMWF_Hist_v3"
             + (base_time - pd.Timedelta(hours=hours_back)).strftime("%Y%m%dT%H%M%SZ")
             + ".zarr",
-            zarr_vars,
+            ("time", *zarr_vars),
         )
         for hours_back in history_offsets
     ]
@@ -430,12 +433,12 @@ def main() -> None:
     )
 
     # The API reads variables by position, so a missing one must not shift the rest
-    missing_vars = [v for v in zarr_vars[1:] if v not in ds.data_vars]
+    missing_vars = [v for v in zarr_vars if v not in ds.data_vars]
     if missing_vars:
         raise RuntimeError(f"ECMWF run {base_time} is missing {missing_vars}")
 
     # Out-of-range values become NaN
-    for var in zarr_vars[1:]:
+    for var in zarr_vars:
         ds_clip = ds[var]
         if np.issubdtype(ds_clip.dtype, np.number):
             ds[var] = ds_clip.where(
@@ -446,19 +449,11 @@ def main() -> None:
     stacked_timesUnix = (ds.time.values - unix_epoch) / one_second
 
     # %% Stack into the (variable, time, y, x) layout the API reads
-    ds_rename = ds.rename({"time": "stacked_time"})
-    # The API reads time from the store like any other variable
-    ds_rename["time"] = (
-        ((ds_rename["stacked_time"] - unix_epoch) / one_second)
-        .astype("float32")
-        .expand_dims(latitude=ds_rename.latitude, longitude=ds_rename.longitude)
-        .transpose("stacked_time", "latitude", "longitude")
-    )
-    ds_stack = ds_rename[list(zarr_vars)].to_array(dim="var", name="var")
+    ds_stack = ds[list(zarr_vars)].to_array(dim="var", name="var")
     ds_chunk = ds_stack.chunk(
         {
             "var": 1,
-            "stacked_time": len(stacked_timesUnix),
+            "time": len(stacked_timesUnix),
             "latitude": process_chunk,
             "longitude": process_chunk,
         }
@@ -498,8 +493,10 @@ def main() -> None:
             daskVarArrayStackDiskInterpPad,
             forecast_process_dir + "/" + ecmwf_store_name,
             final_chunk,
+            FINAL_SHARD_SIZES["ECMWF"],
             zarr_store_workers,
             zarr_vars,
+            times=new_hourly_time.values.astype("datetime64[s]").astype("int64"),
         )
 
     # %% Publish the stores, then the run time the API uses to detect them

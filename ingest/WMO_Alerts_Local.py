@@ -69,7 +69,13 @@ from shapely.geometry import Polygon
 from zarr.core.dtype import VariableLengthUTF8
 
 from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_utils import close_store, open_remote, upload_store
+from API.ingest_utils import (
+    FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
+    close_store,
+    open_remote,
+    publish_store,
+)
 
 # List of supported geocodes
 SUPPORTED_GEOCODES = {
@@ -876,7 +882,10 @@ def main() -> None:
         store=zarr_store,
         shape=gridPoints_XR2.shape,
         dtype=zarr.dtype.VariableLengthUTF8(),
-        chunks=(10, 10),
+        # The API reads this with zarr-python: tensorstore cannot read
+        # variable-length strings. The whole grid is written in one call below.
+        chunks=(FINAL_CHUNK_SIZES["ALERTS"],) * 2,
+        shards=(FINAL_SHARD_SIZES["ALERTS"],) * 2,
         config={"write_empty_chunks": True},
         overwrite=True,
     )
@@ -890,7 +899,7 @@ def main() -> None:
         aws_access_key_id,
         aws_secret_access_key,
     )
-    upload_store(
+    publish_store(
         forecast_process_dir + "/WMO_Alerts.zarr", forecast_remote, "WMO_Alerts.zarr"
     )
 

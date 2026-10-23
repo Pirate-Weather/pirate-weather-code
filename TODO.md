@@ -95,7 +95,7 @@ geometries. Update `docs/forecast-source-selection/README.md` and
 Related: the `is_in_north_america` boundary issue above.
 
 ### Read-time interpolation of missing values
-`zarr_read` (`API/io/zarr_reader.py`) linearly fills interior NaN runs along time
+`zarr_read` (`API/io/store_reader.py`) linearly fills interior NaN runs along time
 (`has_interior_nan_holes` / `_interp_row`, logged as "Interpolating missing data")
 for every model except DWD MOSMIX and URMA. A value that is genuinely missing in the
 source (e.g. HRDPS CAPE -999, which the ingest stores as NaN) is therefore filled
@@ -105,8 +105,8 @@ what the per-hour source priority is for. Decide whether to keep NaN for all mod
 for the MSC models, whose stores now only carry real gaps.
 
 Before deciding, check how often genuine NaN values show up in each model's source
-data and published stores: count NaN per variable over each store's real grid (the
-`time` variable is only set on the model grid, so it masks out chunk padding), and
+data and published stores: count NaN per variable over each store's real grid
+(the store's `shape` minus the padding to `FINAL_CHUNK_SIZES`), and
 read the reader's "Interpolating missing data" warnings in production logs.
 
 ### `interp_time_take_blend`: blend in the data's dtype
@@ -177,13 +177,20 @@ merge graph over 48 stores (28 variables, ~7 min at ~4% CPU) before reading any
 data. Open the stores (and their arrays) concurrently, or fetch each store's
 array metadata once, in `open_history_store` / the merge loops.
 
-### Larger chunks for the alert grids
-The NWS and WMO alert grids store one string per point in 10 x 10 chunks, all
-written even when empty, so each publish is mostly tiny objects: WMO 133,633
-objects for 3.2 MiB (upload 331 s of a 563 s run), NWS 25,793 for 2.9 MiB. A point
-read returns one short string, so 100 x 100 chunks (~1,300 and ~260 objects) or
-sharding these two grids should cost little; measure the read time against the
-upload saved before choosing. WMO's gridding also peaks at ~6 GB on one core.
+### Read the alert grids (and maybe DWD) with tensorstore
+The NWS and WMO alert grids are now sharded (10 x 10 chunks in 100 x 100 shards:
+~276 and ~1,400 objects instead of 25,793 and 133,633), but they are
+variable-length string arrays, which tensorstore cannot read, so they are the
+only stores still read with zarr-python: two scalar reads per request, ~0.3-0.5
+ms against ~1.3 ms for the other 16 reads together. Re-encode them for
+tensorstore: an int32 grid of indices into a table of the distinct alert
+strings, published next to the grid (or in its attributes if small enough).
+Update `API/alerts.py` and the WMO read in `API/request/grid_indexing.py`, and
+measure. WMO's gridding also peaks at ~6 GB on one core.
+
+DWD MOSMIX is a 720 x 1440 grid that is NaN except at ~5,000 stations; a
+station-indexed store (or keeping only the shards with stations) may suit it
+better than a mostly-empty grid. Check its size and read time first.
 
 ### NBM: interpolate in 100 x 100 tiles
 NBM's interpolate + final write is the fleet's memory peak (24.0 GB). Rechunking
@@ -227,8 +234,9 @@ Same flow as object storage, with an NFS share (OVH offers up to 16,000 IOPS /
 128 MiB/s) in place of the bucket: ingests publish to the share (`open_remote`
 already treats a mounted path as a local remote) and each API server copies new
 stores to its local disk, into a staging directory renamed into place so the API
-never sees a partial store. The load is file count, not bytes (HRRR: 76k files,
-318 MiB): a small-file write is ~3-5 NFS operations and a copy-down read ~2-3,
+never sees a partial store (`API/store_sync.py` does this from S3 today; with
+sharded stores HRRR is 199 files, so the estimate below is now far lower). The
+load was file count, not bytes (HRRR unsharded: 76k files, 318 MiB): a small-file write is ~3-5 NFS operations and a copy-down read ~2-3,
 so every reader adds about as much load as the publish. Estimated peak, when NBM,
 URMA and HRRR publish together (~1,000 files/s): ~4-5k IOPS to write plus ~2.5k
 per reader, so ~12k with three readers. Copies must be parallel (rclone with high
@@ -236,18 +244,24 @@ per reader, so ~12k with three readers. Copies must be parallel (rclone with hig
 file. Measure on a mounted share: publishing the real HRRR store and copying it
 down to local disk (files/s, IOPS used, wall time), then size IOPS from those.
 
-### Zarr stores on object storage, no zip files
-The served stores are now unsharded `<MODEL>.zarr` directories, published with
-obstore (`publish_ingest_run`, `upload_concurrency` uploads at once);
-short-term history is plain zarr stores on the same kind of remote, merged straight
-from it. Servers pull the stores with `rclone`/`aws s3 sync`. Still to do:
-- Re-publish the static `ETOPO_DA_C` store as a zarr v3 directory; the API's
-  TESTING stage opens `<name>.zarr` and no longer reads zips.
-- Retire `API/zip_sync.sh` and `tests/api/test_zip_sync.py` once the S3 sync
-  replaces it (it still fetches `<MODEL>.zarr.zip`, which is no longer written).
-- NBM is about 417k objects per run (3x3 chunks); check its upload and server sync
-  times, and shard NBM alone if they are too slow.
+### Remaining storage clean-up
+- Re-publish the static `ETOPO_DA_C` store as a zarr v3 directory on the remote
+  (`API/store_sync.py` copies `ETOPO_DA_C.zarr/` once; the API opens it with
+  tensorstore, zarr v3 or v2).
+- Re-publish the static developer snapshot linked from `README.md` in the
+  sharded, versioned layout.
 - Expire old history stores on the remote (nothing deletes them).
+- The DWD station and RAQDPS lat/lon pickles are loaded once at API start; the
+  sync updates the files but a running worker does not reload them.
+- Run the API with several uvicorn workers in production (`--workers`); each
+  worker opens its own tensorstore context and heartbeat.
+
+### Tune the shard and cache sizes from real requests
+`FINAL_SHARD_SIZES` follow a ~150 MB-per-shard write-memory rule and
+`TS_CACHE_BYTES` defaults to 256 MB per worker; both were sized from the HRRR
+benchmarks. Replay a day of real request coordinates against the new reader to
+pick the cache size (the shard indexes alone are ~35 MB), and check the write
+peak of the largest shards (GFS, NBM, ECMWF) in the next end-to-end run.
 
 ### Confirm the KEEPBITS steps for the less-used variables
 `KEEPBITS` (`API/ingest_utils.py`) bitrounds every stored variable to twice its
@@ -282,6 +296,41 @@ schedules already hold what is needed.
 [pirate-weather-code#760](https://github.com/Pirate-Weather/pirate-weather-code/issues/760):
 some fields use `clipLog`, others `np.clip`. See also the `clipLog` bug above ("One
 implausible value blanks every above-max value").
+
+## Done
+
+### Sharded stores, times in attributes, tensorstore reader, new sync (2026-10-23)
+- **Stores:** every final store is a sharded zarr v3 array (`FINAL_SHARD_SIZES`
+  in `API/ingest_utils.py`: 100 x 100 for the regional models, 48-99 for the
+  long global ones), and the alert grids are sharded too. The time variable is
+  gone from the array; its valid times are the `time` attribute, and the reader
+  rebuilds column 0 (NaN where every variable is NaN, as before).
+- **Publish:** each run uploads to `<MODEL>/<stamp>.zarr`, then moves
+  `<MODEL>.current.json`; the version before is kept, older ones are deleted.
+- **Read:** `API/io/store_reader.py` opens every store with tensorstore (one
+  shared context, 256 MB cache, `recheck_cached_data="open"`), polls the
+  pointers every 10 s, swaps in new versions while serving, and writes a
+  heartbeat of the versions it holds. The TESTING stages read S3 through the
+  same code.
+- **Sync:** `API/store_sync.py` (Python + obstore) replaces `zip_sync.sh`. It
+  copies new versions to local disk and deletes an old one only when no live
+  heartbeat lists it.
+- **Legacy:** the old zarr-python reader, `zip_sync.sh`, and the LMDB and
+  container prototypes are in `legacy/io/`.
+
+Expected effect, from `Notes/STORAGE_AND_READ_BENCHMARKS.md`. These were measured
+on HRRR with the benchmark harness, not yet in production:
+- **Requests per host:** 5-6x (4 workers, 16 reads per request): 1,250-1,530
+  requests/s against 225-240 with zarr-python on directory stores.
+- **Read time:** a lone 16-read request drops from 9.8 ms to ~1.3 ms, and p99
+  at 16 concurrent requests from ~90 ms to ~23 ms. Cold-cache requests are
+  ~2-3 ms against 12-25 ms.
+- **File counts:** HRRR goes from 76,321 files to 199. Publishing and syncing a
+  store take seconds instead of minutes (HRRR to OVH S3 took ~4 min unsharded),
+  and the WMO alert upload drops from 331 s to seconds.
+- **Not yet measured:** the ingest write peak with whole-shard dask tasks, and
+  the new reader inside the full API response (the 16 reads were ~5-8 ms of
+  each request before).
 
 ## Docs
 

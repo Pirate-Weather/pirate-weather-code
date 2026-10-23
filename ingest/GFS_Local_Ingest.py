@@ -44,6 +44,7 @@ from API.ingest_grib_utils import download_and_validate_subset
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
     FORECAST_LEAD_RANGES,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
@@ -159,10 +160,11 @@ CFGRIB_TO_GFS_NAMES = {
     "cin": "CIN_surface",
 }
 
-# Variables in the published store; the order is the API's GFS index map.
-# PRES_surface is renamed PRES_station once the fields are corrected.
+# Variables in the published store. The API reader puts the valid times (the
+# store's time attribute) in column 0, so zarr_vars[i] is column i + 1 of the
+# API's GFS index map. PRES_surface is renamed PRES_station once the fields are
+# corrected.
 zarr_vars = (
-    "time",
     "VIS_surface",
     "GUST_surface",
     "PRMSL_meansealevel",
@@ -577,7 +579,7 @@ def main() -> None:
         )
         xarray_hist_merged = xarray_hist_merged.rename({"PRES_surface": "PRES_station"})
 
-        encoding = {vname: {"chunks": hist_chunks} for vname in zarr_vars[1:]}
+        encoding = {vname: {"chunks": hist_chunks} for vname in zarr_vars}
         with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
             xarray_hist_merged.to_zarr(
                 hist_process_path + "_GFS_Hist_TMP.zarr",
@@ -607,15 +609,24 @@ def main() -> None:
         logger.info("Completed historic data processing: %s", timestamp)
 
     # %% Open the history stores to merge ahead of the forecast
+    # The history stores keep their own time array, read back below to check the
+    # merged times, so it is expected alongside the published variables.
     historic_stores = [
         open_history_store(
             history_remote,
             f"{GFS_HISTORIC_STORE_PREFIX}"
             f"{historic_run_stamp(base_time, hours_offset)}.zarr",
-            zarr_vars,
+            ("time", *zarr_vars),
         )
         for hours_offset in historic_offsets
     ]
+
+    # Check that the history and forecast times are aligned with the expected times
+    stored_timesUnix = np.concatenate(
+        [historic_store["time"][:] for historic_store in historic_stores]
+        + [da.from_zarr(forecast_process_path + "_.zarr", component="time").compute()]
+    )
+    validate_stacked_time_alignment(stacked_timesUnix, stored_timesUnix)
 
     # %% Stack history and forecast into the (variable, time, y, x) layout
     dask_var_arrays_list = []
@@ -642,48 +653,22 @@ def main() -> None:
                 forecast_process_path + "_.zarr", component=dask_var, inline_array=True
             )
 
-        if dask_var == "time":
-            # Each archive holds several steps, so flatten (archive, step)
-            dask_var_arrays_reshaped = da.reshape(
-                dask_var_arrays_stacked,
-                (
-                    dask_var_arrays_stacked.shape[0] * dask_var_arrays_stacked.shape[1],
-                    1,
-                ),
-                merge_chunks=False,
-            )
-            dask_times_concatenated = da.concatenate(
-                (da.squeeze(dask_var_arrays_reshaped), dask_forecast_array), axis=0
+        dask_var_arrays_reshaped = da.reshape(
+            dask_var_arrays_stacked,
+            (
+                dask_var_arrays_stacked.shape[0] * dask_var_arrays_stacked.shape[1],
+                *GFS_GRID_SHAPE,
+            ),
+            merge_chunks=False,
+        )
+        output_array = da.concatenate(
+            (dask_var_arrays_reshaped, dask_forecast_array), axis=0
+        )
+        dask_interp_arrays.append(
+            output_array.rechunk(
+                (len(stacked_timesUnix), process_chunk, process_chunk)
             ).astype("float32")
-
-            # Check that the stored times are aligned with the expected times
-            validate_stacked_time_alignment(
-                stacked_timesUnix, dask_times_concatenated.compute()
-            )
-
-            # The API reads time from the store like any other variable
-            output_array = da.broadcast_to(
-                dask_times_concatenated[:, None, None],
-                (dask_times_concatenated.shape[0], *GFS_GRID_SHAPE),
-            ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
-            dask_interp_arrays.append(output_array)
-        else:
-            dask_var_arrays_reshaped = da.reshape(
-                dask_var_arrays_stacked,
-                (
-                    dask_var_arrays_stacked.shape[0] * dask_var_arrays_stacked.shape[1],
-                    *GFS_GRID_SHAPE,
-                ),
-                merge_chunks=False,
-            )
-            output_array = da.concatenate(
-                (dask_var_arrays_reshaped, dask_forecast_array), axis=0
-            )
-            dask_interp_arrays.append(
-                output_array.rechunk(
-                    (len(stacked_timesUnix), process_chunk, process_chunk)
-                ).astype("float32")
-            )
+        )
 
         dask_var_arrays_list = []
         logger.info("Processed variable: %s", dask_var)
@@ -722,8 +707,10 @@ def main() -> None:
         stacked_array_padded,
         forecast_process_dir + "/" + gfs_store_name,
         final_chunk,
+        FINAL_SHARD_SIZES["GFS"],
         zarr_store_workers,
         zarr_vars,
+        times=new_hourly_time.values.astype("datetime64[s]").astype("int64"),
     )
 
     # %% Publish the stores, then the run time the API uses to detect them

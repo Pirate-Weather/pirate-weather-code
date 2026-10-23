@@ -32,6 +32,7 @@ from API.ingest_grib_utils import download_and_validate_subset, run_checked
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
     FORECAST_LEAD_RANGES,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
@@ -52,8 +53,6 @@ logger = logging.getLogger(__name__)
 
 # %% Model constants
 GEFS_MEMBER_COUNT = 30
-# 0.25 degree global latitude/longitude grid
-GEFS_GRID_SHAPE = (721, 1440)
 GEFS_FORECAST_HOURS = FORECAST_LEAD_RANGES["GEFS"]
 GEFS_SOURCE_PRIORITY = ["aws", "nomads"]
 # Total precipitation plus the four categorical precipitation types
@@ -64,7 +63,8 @@ GEFS_APCP_BUCKET_HOURS = 6
 GEFS_LEAD_STEP_HOURS = 3
 PRECIP_TYPES = ("CRAIN", "CSNOW", "CFRZR", "CICEP")
 
-# Per-member variables, in the order they are read back after conversion
+# Per-member variables, in the order they are read back after conversion; the
+# member times are only used to check the time axis before publishing
 zarr_vars = (
     "time",
     "APCP_surface",
@@ -74,9 +74,10 @@ zarr_vars = (
     "CRAIN_surface",
 )
 
-# Variables in the published store; the order is the API's GEFS index map
+# Variables in the published store. The API reader puts the valid times (the
+# store's time attribute) in column 0, so probVars[i] is column i + 1 of the
+# API's GEFS index map.
 probVars = (
-    "time",
     "Precipitation_Prob",
     "APCP_Mean",
     "APCP_StdDev",
@@ -253,8 +254,13 @@ def main() -> None:
         for dask_var in zarr_vars
     }
 
+    # Every member was checked against the expected valid times above; check the
+    # stored (encoded) times too, from member 0
+    validate_stacked_time_alignment(
+        stacked_timesUnix, daskArrays["time"][0, :].compute().astype("float64")
+    )
+
     daskOutput = {
-        "time": daskArrays["time"][0, :],
         "Precipitation_Prob": (
             daskArrays["APCP_surface"] > ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H
         ).sum(axis=0)
@@ -270,20 +276,16 @@ def main() -> None:
 
     # Write each statistic to disk; computing them all at once overflows memory
     for dask_var in probVars:
-        stat_array = daskOutput[dask_var]
-        to_zarr_kwargs = {}
-        if dask_var != "time":
-            stat_array = stat_array.rechunk(
-                (len(GEFS_FORECAST_HOURS), process_chunk, process_chunk)
-            )
-            to_zarr_kwargs["dtype"] = "float32"
+        stat_array = daskOutput[dask_var].rechunk(
+            (len(GEFS_FORECAST_HOURS), process_chunk, process_chunk)
+        )
         with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
             stat_array.to_zarr(
                 forecast_process_path + "_" + dask_var + ".zarr",
                 compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
                 overwrite=True,
                 compute=True,
-                **to_zarr_kwargs,
+                dtype="float32",
             )
     del daskOutput, daskArrays
 
@@ -293,25 +295,11 @@ def main() -> None:
         daskForecastArray = da.from_zarr(
             forecast_process_path + "_" + dask_var + ".zarr", inline_array=True
         )
-
-        if dask_var == "time":
-            npCatTimes = daskForecastArray.astype("float32").compute()
-            # Check that the stored times are aligned with the expected forecast times
-            validate_stacked_time_alignment(stacked_timesUnix, npCatTimes)
-            # The API reads time from the store like any other variable
-            daskVarArrayList.append(
-                da.from_array(
-                    np.tile(
-                        npCatTimes[:, np.newaxis, np.newaxis], (1, *GEFS_GRID_SHAPE)
-                    )
-                ).rechunk((len(stacked_timesUnix), process_chunk, process_chunk))
-            )
-        else:
-            daskVarArrayList.append(
-                daskForecastArray.rechunk(
-                    (len(stacked_timesUnix), process_chunk, process_chunk)
-                ).astype("float32")
-            )
+        daskVarArrayList.append(
+            daskForecastArray.rechunk(
+                (len(stacked_timesUnix), process_chunk, process_chunk)
+            ).astype("float32")
+        )
 
     daskVarArrayListMergeNaN = mask_invalid_data(da.stack(daskVarArrayList, axis=0))
 
@@ -340,8 +328,10 @@ def main() -> None:
         daskVarArrayStackDiskInterpPad,
         forecast_process_dir + "/" + gefs_store_name,
         final_chunk,
+        FINAL_SHARD_SIZES["GEFS"],
         zarr_store_workers,
         probVars,
+        times=hourly_timesUnix,
     )
 
     # %% Publish the store, then the run time the API uses to detect it

@@ -84,9 +84,7 @@ against real stores.
 | File | Protects |
 |---|---|
 | `test_grid_indexing.py` | Point lookup on non-trivial grids: CMC rotated-pole corner and out-of-domain rejection; RAQDPS spherical nearest cell near the antimeridian and poles; ERA5 slice timestamps, precip-type rounding and the 3x3 precip-probability neighbourhood with longitude wrap. |
-| `test_zarr_reader_max_square.py` | The 3x3 max read for air quality shrinks at grid edges instead of wrapping (#682). |
 | `test_era5_cache.py` | The ERA5 read-through disk cache reuses chunks and stays within its size limit (#696); `SKIP_ERA5` disables ERA5 entirely. |
-| `test_zip_sync.py` | Every store the API opens is listed in `API/zip_sync.sh` (#730/#742 bug class), and the script parses. |
 
 **Source selection and merging**
 
@@ -131,11 +129,11 @@ runs a whole ingest end to end; only the live RTMA-RU and HRRR_6H tests do that.
 
 | File | Protects |
 |---|---|
-| `test_ingest_output_layout.py` | Each ingest's `zarr_vars` order matches the index map the API reads it with in `API/constants/model_const.py` (HRRR, HRRR_6H, SubH, RTMA-RU, URMA, DWD, SILAM, RAQDPS). This is the most important ingest/API contract. |
+| `test_ingest_output_layout.py` | Each ingest's `zarr_vars` order (no time: the reader adds it as column 0) matches the index map the API reads it with in `API/constants/model_const.py` (HRRR, HRRR_6H, SubH, RTMA-RU, URMA, DWD, SILAM, RAQDPS). This is the most important ingest/API contract. |
 | `test_urma_zarr_encoding.py` | URMA's hourly store is written in the format the historic merge reads back (Zarr v3, float32, chunking, names). |
 | `test_history_stores.py` | Short-term history stores published to the remote are seen as complete and read back; one missing an expected variable fails the merge and is deleted so the next run rebuilds it (#644). |
-| `test_ingest_publish.py` | Publishing a newer run replaces every chunk of the previous store, the time pickle carries the new run time that both the API and the next ingest rely on, and a store's root `zarr.json` is uploaded after its chunks (the completeness marker for history stores). |
-| `test_write_final_zarr.py` | The shared final-store writer bitrounds each variable to its own `KEEPBITS` precision (matching numcodecs' BitRound, time kept exact, NaN and padding preserved) when source chunks are not a multiple of the final chunk, and writes every chunk file, all-NaN ones included, so a publish replaces the whole previous run. |
+| `test_ingest_publish.py` | Publishing a newer run creates a new version and only then moves the `<MODEL>.current.json` pointer, keeps the previous version, and the time pickle carries the new run time the next ingest relies on; a store's root `zarr.json` is uploaded after its chunks. |
+| `test_final_store_contract.py` | End to end from `write_final_zarr` through `publish_store`, `store_sync` and the tensorstore reader: a point read is the `(time, 1 + variable)` matrix with exact times from the `time` attribute, bitrounded values, NaN time where every variable is NaN (padding, uncovered cells), and an edge-clipped max-square read (#682). A new version is swapped into a running reader, the old one survives the sync's cleanup while a heartbeat lists it, and S3 keeps the previous version. |
 | `test_ingest_utils_download_retry.py` | Herbie downloads retry a bounded number of times, ignore stale files from earlier runs, pace NOMADS requests and reject NOMADS 302 rate-limit redirects (#772). |
 | `test_ingest_grib_utils_retry.py` | FastHerbie is rebuilt between retries so late-published hours are seen. |
 | `test_nbm_download.py` | NBM downloads fail loudly when FastHerbie swallows worker errors (302, missing or empty file), and recover on retry. |

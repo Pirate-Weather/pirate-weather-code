@@ -35,9 +35,9 @@ from API.ingest_grib_utils import download_and_validate_subset
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
     VALID_DATA_MAX,
     VALID_DATA_MIN,
-    broadcast_times_to_grid,
     close_store,
     configure_herbie_request_timeouts,
     configure_zarr_writes,
@@ -91,10 +91,10 @@ URMA_HOURLY_PAD = 25
 # Spatial chunk of the local stack the final store is written from
 URMA_STACK_TILE = 50
 
-# Variables in the published store (cfgrib short names); the order is the API's
-# URMA index map
+# Variables in the published store (cfgrib short names). The API reader puts the
+# valid times (the store's time attribute) in column 0, so zarr_vars[i] is
+# column i + 1 of the API's URMA index map.
 zarr_vars = (
-    "time",
     "vis",
     "i10fg",
     "sp",
@@ -105,6 +105,9 @@ zarr_vars = (
     "u10",
     "v10",
 )
+# The hourly history stores also keep a gridded UNIX-time array, which the merge
+# uses to check each store holds the hour it is named for.
+hourly_store_vars = ("time", *zarr_vars)
 
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
@@ -252,8 +255,8 @@ def main() -> None:
         xarray_analysis_merged["u10"].data = u_earth
         xarray_analysis_merged["v10"].data = v_earth
 
-        # Replace the time coordinate with a gridded UNIX-time variable
-        # The API reads time from the store like any other variable
+        # Replace the time coordinate with a gridded UNIX-time variable, which
+        # the merge checks against the hour the store is named for
         model_UNIX_time = xarray_analysis_merged.time.data.astype(
             "datetime64[s]"
         ).astype(int)
@@ -271,13 +274,13 @@ def main() -> None:
 
         # A missing field would shift every later variable in the API's index map
         missing_vars = [
-            v for v in zarr_vars if v not in xarray_analysis_merged.data_vars
+            v for v in hourly_store_vars if v not in xarray_analysis_merged.data_vars
         ]
         if missing_vars:
             raise RuntimeError(
                 f"URMA analysis {analysis_time} is missing variables {missing_vars}"
             )
-        vars_in = list(zarr_vars)
+        vars_in = list(hourly_store_vars)
 
         # Out-of-range values become NaN
         for var in vars_in:
@@ -298,7 +301,8 @@ def main() -> None:
             )
             .transpose("var", "time", "y", "x")
         )
-        dask_var_array = mask_invalid_data(xarray_analysis_stack.data)
+        # Index 0 is the gridded time, which is outside the valid data range
+        dask_var_array = mask_invalid_data(xarray_analysis_stack.data, ignoreAxis=[0])
 
         # Pad to URMA_HOURLY_PAD (a multiple of final_chunk) in process_chunk
         # tiles, avoiding tens of thousands of tiny files in each hourly store.
@@ -337,19 +341,39 @@ def main() -> None:
     # Every hour was stored above, so a missing one means it was lost. The API
     # reads the hourly rows by position, so skipping it would shift every later
     # hour; open_history_store fails instead.
+    hourly_times = [
+        pd.Timestamp(base_time - pd.Timedelta(hours=i))
+        for i in range(his_period, -1, -1)
+    ]
     hourly_stores = [
         open_history_store(
             history_remote,
             "URMA_Hist_"
-            + (base_time - pd.Timedelta(hours=i)).strftime(
-                HOURLY_STORE_TIMESTAMP_FORMAT
-            )
+            + hourly_time.strftime(HOURLY_STORE_TIMESTAMP_FORMAT)
             + ".zarr",
-            zarr_vars,
+            hourly_store_vars,
         )
-        for i in range(his_period, -1, -1)
+        for hourly_time in hourly_times
     ]
     logger.info("Starting final URMA merge from %d hourly stores.", len(hourly_stores))
+
+    # %% Validate each stored analysis time against its hour
+    # Read one scalar from each store instead of constructing spatial Dask graphs
+    # merely to extract their timestamps. The stored time is float32 (rounded by
+    # up to a minute at current epochs), so it is compared in float32 and the
+    # final store's times are the exact hours.
+    hourly_times_unix = np.asarray(
+        [hourly_time.timestamp() for hourly_time in hourly_times], dtype="int64"
+    )
+    for hourly_store, expected_time in zip(
+        hourly_stores, hourly_times_unix, strict=True
+    ):
+        stored_time = hourly_store["time"][0, 0, 0]
+        if stored_time != np.float32(expected_time):
+            raise RuntimeError(
+                f"{hourly_store.path} holds time {stored_time}, "
+                f"expected {expected_time}"
+            )
 
     # %% Stack the hourly stores into the (variable, time, y, x) layout
     ny, nx = hourly_stores[0][zarr_vars[0]].shape[-2:]
@@ -367,34 +391,20 @@ def main() -> None:
         overwrite=True,
     )
     for var_index, dask_var in enumerate(zarr_vars):
-        if dask_var == "time":
-            # Read one scalar from each store instead of constructing spatial Dask
-            # graphs merely to extract their timestamps.
-            np_cat_times = np.asarray(
-                [hourly_store[dask_var][0, 0, 0] for hourly_store in hourly_stores],
-                dtype="float32",
-            )
-            dask_array_out = broadcast_times_to_grid(
-                np_cat_times,
-                ny,
-                nx,
-                process_chunk,
-            )
-        else:
-            # Stacking produces shape (n_files, 1, y, x); remove the singleton
-            # dimension before writing this variable's stack region.
-            dask_var_arrays_stack = da.stack(
-                [
-                    da.from_zarr(hourly_store[dask_var], inline_array=True)
-                    for hourly_store in hourly_stores
-                ],
-                axis=0,
-            )
-            dask_array_out = (
-                dask_var_arrays_stack.squeeze(axis=1)
-                .rechunk((len(hourly_stores), process_chunk, process_chunk))
-                .astype("float32")
-            )
+        # Stacking produces shape (n_files, 1, y, x); remove the singleton
+        # dimension before writing this variable's stack region.
+        dask_var_arrays_stack = da.stack(
+            [
+                da.from_zarr(hourly_store[dask_var], inline_array=True)
+                for hourly_store in hourly_stores
+            ],
+            axis=0,
+        )
+        dask_array_out = (
+            dask_var_arrays_stack.squeeze(axis=1)
+            .rechunk((len(hourly_stores), process_chunk, process_chunk))
+            .astype("float32")
+        )
 
         with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
             da.store(
@@ -421,8 +431,10 @@ def main() -> None:
         da.from_zarr(stack_path),
         historic_process_dir + "/URMA_Hist.zarr",
         final_chunk,
+        FINAL_SHARD_SIZES["URMA"],
         zarr_store_workers,
         zarr_vars,
+        times=hourly_times_unix,
     )
     logger.info("Final URMA store written")
 
