@@ -52,15 +52,17 @@ from API.ingest_utils import (
     history_store_exists,
     interp_time_take_blend,
     make_herbie_save_dir,
+    map_history_stores,
     mask_invalid_data,
     mask_invalid_refc,
-    open_history_store,
+    open_history_arrays,
     open_remote,
     pad_to_chunk_size,
     positive_int_env,
     publish_history_store,
     publish_ingest_run,
     read_published_run_time,
+    shard_whole_variables,
     validate_stacked_time_alignment,
     write_final_zarr,
 )
@@ -579,7 +581,10 @@ def main() -> None:
         )
         xarray_hist_merged = xarray_hist_merged.rename({"PRES_surface": "PRES_station"})
 
-        encoding = {vname: {"chunks": hist_chunks} for vname in zarr_vars}
+        # One shard per variable, so the merge downloads ~30 objects per store
+        xarray_hist_merged, encoding = shard_whole_variables(
+            xarray_hist_merged, {vname: {"chunks": hist_chunks} for vname in zarr_vars}
+        )
         with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
             xarray_hist_merged.to_zarr(
                 hist_process_path + "_GFS_Hist_TMP.zarr",
@@ -611,19 +616,20 @@ def main() -> None:
     # %% Open the history stores to merge ahead of the forecast
     # The history stores keep their own time array, read back below to check the
     # merged times, so it is expected alongside the published variables.
-    historic_stores = [
-        open_history_store(
-            history_remote,
+    historic_stores = open_history_arrays(
+        history_remote,
+        [
             f"{GFS_HISTORIC_STORE_PREFIX}"
-            f"{historic_run_stamp(base_time, hours_offset)}.zarr",
-            ("time", *zarr_vars),
-        )
-        for hours_offset in historic_offsets
-    ]
+            f"{historic_run_stamp(base_time, hours_offset)}.zarr"
+            for hours_offset in historic_offsets
+        ],
+        ("time", *zarr_vars),
+        os.path.join(forecast_process_dir, "History"),
+    )
 
     # Check that the history and forecast times are aligned with the expected times
     stored_timesUnix = np.concatenate(
-        [historic_store["time"][:] for historic_store in historic_stores]
+        map_history_stores(lambda store: store["time"][:], historic_stores)
         + [da.from_zarr(forecast_process_path + "_.zarr", component="time").compute()]
     )
     validate_stacked_time_alignment(stacked_timesUnix, stored_timesUnix)

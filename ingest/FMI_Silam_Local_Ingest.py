@@ -41,13 +41,15 @@ from API.ingest_utils import (
     FINAL_SHARD_SIZES,
     configure_zarr_writes,
     history_store_exists,
+    map_history_stores,
     mask_invalid_data,
-    open_history_store,
+    open_history_arrays,
     open_remote,
     pad_to_chunk_size,
     publish_history_store,
     publish_ingest_run,
     read_published_run_time,
+    shard_whole_variables,
     write_final_zarr,
 )
 
@@ -362,9 +364,13 @@ def convert_time_coord_to_unix(xarray_processed: xr.Dataset) -> xr.Dataset:
 
 
 def save_processed_zarr(
-    xarray_processed: xr.Dataset, zarr_path: str, zarr_store_workers: int
+    xarray_processed: xr.Dataset,
+    zarr_path: str,
+    zarr_store_workers: int,
+    shard_variables: bool = False,
 ) -> None:
-    """Chunk and save a processed SILAM dataset as a zarr group."""
+    """Chunk and save a processed SILAM dataset as a zarr group; history stores
+    get one shard per variable (``shard_whole_variables``)."""
     xarray_processed = xarray_processed.chunk(
         chunks={
             "time": xarray_processed.time.size,
@@ -372,6 +378,9 @@ def save_processed_zarr(
             "longitude": process_chunk,
         }
     )
+    encoding = None
+    if shard_variables:
+        xarray_processed, encoding = shard_whole_variables(xarray_processed)
 
     with ProgressBar():
         xarray_processed.to_zarr(
@@ -380,6 +389,7 @@ def save_processed_zarr(
             write_empty_chunks=True,
             consolidated=False,
             compute=True,
+            encoding=encoding,
             chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
         )
 
@@ -499,7 +509,10 @@ def main() -> None:
         hist_tmp_zarr_path = hist_process_path + "_SILAM_Hist_TMP.zarr"
         xarray_hist_processed = convert_time_coord_to_unix(xarray_hist_processed)
         save_processed_zarr(
-            xarray_hist_processed, hist_tmp_zarr_path, zarr_store_workers
+            xarray_hist_processed,
+            hist_tmp_zarr_path,
+            zarr_store_workers,
+            shard_variables=True,
         )
 
         publish_history_store(hist_tmp_zarr_path, history_remote, hist_store_name)
@@ -509,20 +522,21 @@ def main() -> None:
     # %% Merge the history and forecast datasets
     # The history stores keep their own time array, read back below to check the
     # merged times, so it is expected alongside the published variables.
-    historic_stores = [
-        open_history_store(
-            history_remote,
+    historic_stores = open_history_arrays(
+        history_remote,
+        [
             "SILAM_Hist_v3"
             + (origintime - timedelta(hours=hours_offset)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr",
-            ("time", *zarr_vars),
-        )
-        for hours_offset in history_offsets
-    ]
+            + ".zarr"
+            for hours_offset in history_offsets
+        ],
+        ("time", *zarr_vars),
+        os.path.join(forecast_process_dir, "History"),
+    )
 
     # Integer Unix seconds of every stacked step
     stacked_times_unix = np.concatenate(
-        [historic_store["time"][:] for historic_store in historic_stores]
+        map_history_stores(lambda store: store["time"][:], historic_stores)
         + [da.from_zarr(forecast_process_path + "_.zarr", component="time").compute()]
     )
     if np.any(np.diff(stacked_times_unix) != SILAM_STEP_SECONDS):

@@ -194,13 +194,35 @@ Replaces `init_ERA5` (`API/io/ZarrHelpers.py`) and `_load_era5_slice`
 ### Move to OVHCloud
 Including a Terraform setup script.
 
-### Open the history stores in parallel
-The history ingests open each history store and then each variable's array one
-at a time, and from S3 every open is a sequential round trip. RTMA spent 33 s of
-its 239 s merge opening 48 stores; GFS spends ~13-17 s per variable building the
-merge graph over 48 stores (28 variables, ~7 min at ~4% CPU) before reading any
-data. Open the stores (and their arrays) concurrently, or fetch each store's
-array metadata once, in `open_history_store` / the merge loops.
+### DWD MOSMIX: cut the 16.4 GB memory peak
+DWD is the only ingest that fits no 2-core instance up to 16 GB (one pod per job
+in Kubernetes): it peaks at 16.4 GB against ~4.4 GB for the rest of the run
+(2026-10-23 end-to-end run). The spike lasts a few seconds, while the gridded
+stations are written to `_chunk.zarr`. `interpolate_dwd_to_grid_knearest_dask`
+fills one dense NumPy array per variable (240 times x 720 x 1440 float32, ~1 GB
+each) and wraps each in `da.from_array`, so all 12 are in memory together when
+`to_zarr` runs, plus its rechunk copies. Fill and write one variable at a time
+(or scatter the nearest-station values straight into a zarr per time chunk:
+only cells within 50 km of a station are ever non-NaN) so the peak is about one
+variable. Check the ~4.4 GB KML/DataFrame plateau too, then size the pod; the
+target is under ~12 GB for a 2c/16 GB instance, or under 6 GB for 2c/8 GB.
+
+### Set write threads explicitly for each job (Kubernetes)
+Each write thread holds about one shard (up to ~150 MB, plus its bitrounded
+copy and compression buffers), so peak memory scales with the thread count.
+The defaults differ by ingest and some follow the machine:
+- `os.cpu_count()`: AIGFS, AIGEFS, NBM. In a pod this is the node's core
+  count, not the pod's CPU limit, so on a 16-core node NBM would write with 16
+  threads and its memory would depend on where the pod lands.
+- 64: RTMA, URMA. 12: GFS, ECMWF, SILAM. 4: ECMWF_AIFS. 2: the rest.
+- Dask work outside `write_final_zarr` that is not wrapped in
+  `dask.config.set(num_workers=...)` also defaults to one thread per node core.
+
+Set `zarr_store_workers` (and `zarr_async_concurrency`) in every job's pod spec,
+sized to its CPU and memory limits, and replace the `os.cpu_count()` defaults
+with a fixed value so a missing setting cannot scale with the node. The
+2026-10-23 peaks were measured on a 4-core VM with these defaults; re-measure
+each job at its chosen thread count before fixing the pod's memory limit.
 
 ### Read the alert grids (and maybe DWD) with tensorstore
 The NWS and WMO alert grids are now sharded (10 x 10 chunks in 100 x 100 shards:
@@ -359,6 +381,33 @@ doubles (to 60 s) on a rate-limit redirect, 429, 503 or timeout, easing back
 afterwards. One member took 41 s live (was ~9-10 min), so ~20 min for all 30.
 The AWS EAGLE ensemble is not a mirror (control-member precipitation r = 0.78
 against NOMADS), so NOMADS stays the only source.
+
+### History stores opened concurrently (2026-10-24)
+The history merges opened each store, each array and each store's time one
+round trip at a time from S3. `open_history_arrays` now opens the stores
+`history_open_concurrency` (32) at a time and fetches each store's array
+metadata in one concurrent call, and the time reads run concurrently too
+(`map_history_stores`). Measured on the e2e history stores: GFS 48 stores
+6.4 s + 0.9 s (was ~13 min across opens, per-variable array opens and time
+reads), RTMA 48 stores 2.2 s + 1.5 s (was ~100 s), URMA 283 stores 5.3 s +
+2.0 s (was ~7 min before its merge started, plus its time reads). Reading the
+history data itself (GFS ~9 GB at ~3 MB/s) is unchanged.
+
+### History stores: one shard per variable, downloaded before the merge (2026-10-24)
+The merges read history straight from S3, one ~60 KB chunk per request with
+~12 in flight, at 3-4 MB/s (OVH answers each GET in 100-400 ms): GFS spent
+~48 min reading 9 GB, URMA ~20 min reading ~17 GB. History stores now give each
+variable a single shard (`shard_whole_variables`; GFS ~30 objects per store
+instead of ~3,600) and `download_history_stores` copies them to local disk with
+`history_download_concurrency` (64) requests in flight before the merge.
+Measured end to end (sharded copies of the e2e history, warm runs):
+- GFS 3,167 -> 1,027 s: 48 stores (2,928 objects, ~9 GB) in 77 s.
+- URMA 1,415 -> 1,097 s: 283 stores (5,943 objects) in 152 s; merge 703 s.
+- RTMA 291 -> 235 s: 48 stores (1,104 objects) in 28 s.
+- ECMWF and SILAM unchanged (few stores).
+Unsharded stores written before this still work (64 in flight got ~14 MB/s
+on them) and are replaced as the window moves on. The local copy adds working
+disk: ~9 GB for GFS and ~17 GB for URMA.
 
 ## Docs
 

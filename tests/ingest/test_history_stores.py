@@ -6,7 +6,7 @@ import zarr
 
 from API.ingest_utils import (
     history_store_exists,
-    open_history_store,
+    open_history_arrays,
     open_remote,
     publish_history_store,
 )
@@ -23,7 +23,10 @@ def test_history_store_round_trip_and_stale_store_rebuild(tmp_path):
     past run and later merge them straight from the remote. A published store
     must be seen as complete and read back. A store missing an expected variable
     (written by an older ingest) must fail the merge and be deleted, so the next
-    run rebuilds it instead of failing forever (#644).
+    run rebuilds it instead of failing forever (#644). Stores are opened
+    concurrently, so the results must come back in the requested order and a
+    stale or missing store among them must still fail the merge. They are
+    downloaded first, so the merge reads local copies.
     """
     remote = open_remote(str(tmp_path / "History"), "Download")
     _write_history(tmp_path / "tmp_full.zarr", ("time", "TMP_2maboveground"))
@@ -35,11 +38,30 @@ def test_history_store_round_trip_and_stale_store_rebuild(tmp_path):
     assert history_store_exists(remote, "Hist_A.zarr")
     assert not history_store_exists(remote, "Hist_C.zarr")
 
-    group = open_history_store(remote, "Hist_A.zarr", ("time", "TMP_2maboveground"))
-    np.testing.assert_array_equal(group["TMP_2maboveground"][:], np.ones((1, 2, 2)))
+    _write_history(tmp_path / "tmp_full.zarr", ("time", "TMP_2maboveground"))
+    publish_history_store(str(tmp_path / "tmp_full.zarr"), remote, "Hist_D.zarr")
+    local_dir = tmp_path / "local"
+    stores = open_history_arrays(
+        remote,
+        ["Hist_D.zarr", "Hist_A.zarr"],
+        ("time", "TMP_2maboveground"),
+        str(local_dir),
+    )
+    assert [store["TMP_2maboveground"].store.root.name for store in stores] == [
+        "Hist_D.zarr",
+        "Hist_A.zarr",
+    ]
+    np.testing.assert_array_equal(stores[1]["TMP_2maboveground"][:], np.ones((1, 2, 2)))
 
     with pytest.raises(ValueError, match="missing variables"):
-        open_history_store(remote, "Hist_B.zarr", ("time", "TMP_2maboveground"))
+        open_history_arrays(
+            remote,
+            ["Hist_A.zarr", "Hist_B.zarr"],
+            ("time", "TMP_2maboveground"),
+            str(local_dir),
+        )
     assert not history_store_exists(remote, "Hist_B.zarr")
     with pytest.raises(RuntimeError, match="missing"):
-        open_history_store(remote, "Hist_C.zarr", ("time",))
+        open_history_arrays(
+            remote, ["Hist_A.zarr", "Hist_C.zarr"], ("time",), str(local_dir)
+        )

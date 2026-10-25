@@ -971,6 +971,9 @@ def prune_old_files(path: str, max_age_hours: float) -> None:
 # Published stores are uploaded this many objects at a time. A 9,601-object store
 # (8 KiB chunks) took 43 / 27 / 22 / 32 s to OVH at 64 / 128 / 256 / 512.
 UPLOAD_CONCURRENCY = positive_int_env("upload_concurrency", 256)
+# ...and at most about this many bytes at a time: 256 multi-MB shards at once
+# (GFS) starved every request until obstore's 180 s retry budget ran out.
+UPLOAD_INFLIGHT_BYTES = positive_int_env("upload_inflight_mib", 512) * 2**20
 # Optional storage class for every S3 object, e.g. EXPRESS_ONEZONE for OVH High
 # Performance (a default header is not signed, so it is set per upload).
 S3_STORAGE_CLASS = os.getenv("s3_storage_class") or None
@@ -1013,7 +1016,8 @@ def _put_attributes(remote) -> dict | None:
 
 
 def _put_files(remote, uploads: list[tuple[str, str]]) -> None:
-    """Upload ``(local_file, key)`` pairs, ``UPLOAD_CONCURRENCY`` at a time.
+    """Upload ``(local_file, key)`` pairs, ``UPLOAD_CONCURRENCY`` at a time, or
+    fewer for large files so about ``UPLOAD_INFLIGHT_BYTES`` are in flight.
 
     obstore retries each request itself (bounded by its default retry config).
     """
@@ -1022,9 +1026,15 @@ def _put_files(remote, uploads: list[tuple[str, str]]) -> None:
     import obstore
 
     attributes = _put_attributes(remote)
+    if not uploads:
+        return
+    mean_size = sum(os.path.getsize(local) for local, _ in uploads) / len(uploads)
+    concurrency = max(
+        1, min(UPLOAD_CONCURRENCY, int(UPLOAD_INFLIGHT_BYTES // max(mean_size, 1)))
+    )
 
     async def put_all() -> None:
-        semaphore = asyncio.Semaphore(UPLOAD_CONCURRENCY)
+        semaphore = asyncio.Semaphore(concurrency)
 
         async def put(local_file: str, key: str) -> None:
             async with semaphore:
@@ -1299,23 +1309,127 @@ def publish_history_store(local_path: str, remote, name: str) -> None:
     logger.info("Published history store %s", name)
 
 
-def open_history_store(remote, name: str, expected_vars: Iterable[str]):
-    """Open a published history store read-only, straight from the remote.
+def shard_whole_variables(ds: "xr.Dataset", encoding: dict | None = None):
+    """Give every data variable of a history store a single shard, so a store is
+    one object per variable instead of one per chunk (GFS: 30 instead of 3,600).
+
+    Inner chunks stay as given (``encoding[var]["chunks"]``, else the dask
+    chunks). Returns the dataset rechunked to one dask chunk per variable, since
+    zarr cannot write parts of one shard from several tasks, and the encoding
+    to pass to ``to_zarr``.
+    """
+    encoding = {name: dict(value) for name, value in (encoding or {}).items()}
+    for name, variable in ds.data_vars.items():
+        inner = encoding.get(name, {}).get("chunks") or tuple(
+            sizes[0] for sizes in (variable.chunks or [(n,) for n in variable.shape])
+        )
+        shards = tuple(
+            -(-size // chunk) * chunk for size, chunk in zip(variable.shape, inner)
+        )
+        encoding.setdefault(name, {}).update(chunks=tuple(inner), shards=shards)
+    return ds.chunk(dict.fromkeys(ds.dims, -1)), encoding
+
+
+# History stores are downloaded with this many requests in flight. OVH answers a
+# GET in 100-400 ms, so the merge's dask threads reading one chunk each (~12 in
+# flight) got 3-4 MB/s: GFS spent ~45 min reading 8.8 GB of history.
+HISTORY_DOWNLOAD_CONCURRENCY = positive_int_env("history_download_concurrency", 64)
+# History stores are opened, and their times read, this many at a time.
+HISTORY_OPEN_CONCURRENCY = positive_int_env("history_open_concurrency", 32)
+
+
+def map_history_stores(func, items: Iterable) -> list:
+    """``[func(item) for item in items]``, ``HISTORY_OPEN_CONCURRENCY`` at a time;
+    for the round trips to many history stores. The first error is raised."""
+    with ThreadPoolExecutor(max_workers=HISTORY_OPEN_CONCURRENCY) as pool:
+        return list(pool.map(func, items))
+
+
+def download_history_stores(remote, names: Iterable[str], local_dir: str) -> list[str]:
+    """Copy published history stores to ``local_dir``; returns their local paths.
 
     Every history run is published before the merge, so a missing store means it
-    was lost and the run fails rather than publishing a forecast with a gap. A
-    store missing an expected variable (written by an older ingest) is deleted so
-    the next run rebuilds it, and the run fails.
+    was lost and the run fails rather than publishing a forecast with a gap.
+    Objects stream to disk ``HISTORY_DOWNLOAD_CONCURRENCY`` at a time; the merge
+    then reads local files instead of one S3 round trip per chunk.
+    """
+    import asyncio
+
+    import obstore
+
+    names = list(names)
+    missing = [
+        name
+        for name, exists in zip(
+            names,
+            map_history_stores(lambda name: history_store_exists(remote, name), names),
+            strict=True,
+        )
+        if not exists
+    ]
+    if missing:
+        raise RuntimeError(f"History stores {missing} are missing from {remote}")
+
+    keys = [
+        meta["path"]
+        for listing in map_history_stores(
+            lambda name: [
+                m for batch in obstore.list(remote, prefix=f"{name}/") for m in batch
+            ],
+            names,
+        )
+        for meta in listing
+    ]
+
+    async def get_all() -> None:
+        semaphore = asyncio.Semaphore(HISTORY_DOWNLOAD_CONCURRENCY)
+
+        async def get(key: str) -> None:
+            local_file = os.path.join(local_dir, key)
+            os.makedirs(os.path.dirname(local_file), exist_ok=True)
+            async with semaphore:
+                result = await obstore.get_async(remote, key)
+                # Streamed straight to local disk, which is fast next to S3, so
+                # memory stays bounded however large the shards are
+                with open(local_file, "wb") as fh:  # noqa: ASYNC230
+                    async for chunk in result.stream():
+                        fh.write(chunk)
+
+        await asyncio.gather(*(get(key) for key in keys))
+
+    started = time.time()
+    asyncio.run(get_all())
+    logger.info(
+        "Downloaded %d history stores (%d objects) in %.1f s",
+        len(names),
+        len(keys),
+        time.time() - started,
+    )
+    return [os.path.join(local_dir, name) for name in names]
+
+
+def open_history_store(
+    remote, name: str, expected_vars: Iterable[str], local_path: str | None = None
+):
+    """Open a published history store read-only: the copy at ``local_path``
+    (see ``download_history_stores``), else straight from the remote.
+
+    A store missing an expected variable (written by an older ingest) is deleted
+    from the remote so the next run rebuilds it, and the run fails.
     """
     import obstore
     import zarr
 
-    if not history_store_exists(remote, name):
-        raise RuntimeError(f"History store {name} is missing from {remote}")
-
-    group = zarr.open_group(
-        zarr.storage.ObjectStore(remote, read_only=True), path=name, mode="r"
-    )
+    if local_path is not None:
+        group = zarr.open_group(
+            zarr.storage.LocalStore(local_path, read_only=True), mode="r"
+        )
+    else:
+        if not history_store_exists(remote, name):
+            raise RuntimeError(f"History store {name} is missing from {remote}")
+        group = zarr.open_group(
+            zarr.storage.ObjectStore(remote, read_only=True), path=name, mode="r"
+        )
     missing_vars = sorted(set(expected_vars) - set(group.keys()))
     if missing_vars:
         stale_keys = [
@@ -1329,6 +1443,24 @@ def open_history_store(remote, name: str, expected_vars: Iterable[str]):
             "deleted it so the next run rebuilds it"
         )
     return group
+
+
+def open_history_arrays(
+    remote, names: Iterable[str], expected_vars: Iterable[str], local_dir: str
+):
+    """Download published history stores and open them, each as ``{name: array}``.
+
+    Same checks as ``download_history_stores`` and ``open_history_store``.
+    """
+    names = list(names)
+    expected_vars = tuple(expected_vars)
+    local_paths = download_history_stores(remote, names, local_dir)
+    return map_history_stores(
+        lambda pair: dict(
+            open_history_store(remote, pair[0], expected_vars, pair[1]).arrays()
+        ),
+        list(zip(names, local_paths, strict=True)),
+    )
 
 
 def mask_invalid_data(daskArray, ignoreAxis=None):

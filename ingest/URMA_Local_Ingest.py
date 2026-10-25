@@ -44,14 +44,16 @@ from API.ingest_utils import (
     earth_relative_wind_components,
     history_store_exists,
     make_herbie_save_dir,
+    map_history_stores,
     mask_invalid_data,
-    open_history_store,
+    open_history_arrays,
     open_remote,
     pad_to_chunk_size,
     positive_int_env,
     publish_history_store,
     publish_ingest_run,
     read_published_run_time,
+    shard_whole_variables,
     write_final_zarr,
 )
 
@@ -320,18 +322,23 @@ def main() -> None:
                 for var_index, var in enumerate(vars_in)
             }
         )
-        ds_out.to_zarr(
-            zarr_store,
-            mode="w",
-            write_empty_chunks=True,
-            zarr_format=3,
-            encoding={
+        # One shard per variable, so the merge downloads one object per variable
+        ds_out, encoding = shard_whole_variables(
+            ds_out,
+            {
                 var: {
                     "compressors": zarr.codecs.BloscCodec(cname="zstd", clevel=3),
                     "dtype": "float32",
                 }
                 for var in vars_in
             },
+        )
+        ds_out.to_zarr(
+            zarr_store,
+            mode="w",
+            write_empty_chunks=True,
+            zarr_format=3,
+            encoding=encoding,
         )
         close_store(zarr_store)
 
@@ -345,16 +352,16 @@ def main() -> None:
         pd.Timestamp(base_time - pd.Timedelta(hours=i))
         for i in range(his_period, -1, -1)
     ]
-    hourly_stores = [
-        open_history_store(
-            history_remote,
-            "URMA_Hist_"
-            + hourly_time.strftime(HOURLY_STORE_TIMESTAMP_FORMAT)
-            + ".zarr",
-            hourly_store_vars,
-        )
+    hourly_store_names = [
+        "URMA_Hist_" + hourly_time.strftime(HOURLY_STORE_TIMESTAMP_FORMAT) + ".zarr"
         for hourly_time in hourly_times
     ]
+    hourly_stores = open_history_arrays(
+        history_remote,
+        hourly_store_names,
+        hourly_store_vars,
+        historic_process_dir + "/History",
+    )
     logger.info("Starting final URMA merge from %d hourly stores.", len(hourly_stores))
 
     # %% Validate each stored analysis time against its hour
@@ -365,14 +372,15 @@ def main() -> None:
     hourly_times_unix = np.asarray(
         [hourly_time.timestamp() for hourly_time in hourly_times], dtype="int64"
     )
-    for hourly_store, expected_time in zip(
-        hourly_stores, hourly_times_unix, strict=True
+    stored_times = map_history_stores(
+        lambda store: store["time"][0, 0, 0], hourly_stores
+    )
+    for name, stored_time, expected_time in zip(
+        hourly_store_names, stored_times, hourly_times_unix, strict=True
     ):
-        stored_time = hourly_store["time"][0, 0, 0]
         if stored_time != np.float32(expected_time):
             raise RuntimeError(
-                f"{hourly_store.path} holds time {stored_time}, "
-                f"expected {expected_time}"
+                f"{name} holds time {stored_time}, expected {expected_time}"
             )
 
     # %% Stack the hourly stores into the (variable, time, y, x) layout

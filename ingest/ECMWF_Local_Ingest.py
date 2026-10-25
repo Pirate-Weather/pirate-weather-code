@@ -41,8 +41,10 @@ from API.ingest_utils import (
     VALID_DATA_MAX,
     VALID_DATA_MIN,
     configure_zarr_writes,
+    download_history_stores,
     history_store_exists,
     interp_time_take_blend,
+    map_history_stores,
     open_history_store,
     open_remote,
     pad_to_chunk_size,
@@ -50,6 +52,7 @@ from API.ingest_utils import (
     publish_history_store,
     publish_ingest_run,
     read_published_run_time,
+    shard_whole_variables,
     write_final_zarr,
 )
 
@@ -255,8 +258,14 @@ def step_to_valid_time(
     )
 
 
-def write_process_zarr(ds: xr.Dataset, zarr_path: str, zarr_store_workers: int):
-    """Chunk and write an intermediate dataset to a local zarr."""
+def write_process_zarr(
+    ds: xr.Dataset,
+    zarr_path: str,
+    zarr_store_workers: int,
+    shard_variables: bool = False,
+):
+    """Chunk and write an intermediate dataset to a local zarr; history stores
+    get one shard per variable (``shard_whole_variables``)."""
     ds = ds.chunk(
         chunks={
             "time": PROCESS_TIME_CHUNK,
@@ -264,6 +273,9 @@ def write_process_zarr(ds: xr.Dataset, zarr_path: str, zarr_store_workers: int):
             "longitude": CHUNK_SIZES["ECMWF"],
         }
     )
+    encoding = None
+    if shard_variables:
+        ds, encoding = shard_whole_variables(ds)
     with (
         ProgressBar(),
         dask.config.set(scheduler="threads", num_workers=zarr_store_workers),
@@ -274,6 +286,7 @@ def write_process_zarr(ds: xr.Dataset, zarr_path: str, zarr_store_workers: int):
             write_empty_chunks=True,
             consolidated=False,
             compute=True,
+            encoding=encoding,
             chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
         )
 
@@ -396,7 +409,12 @@ def main() -> None:
         )
 
         hist_tmp_zarr_path = hist_process_path + "_ECMWF_Hist_TMP.zarr"
-        write_process_zarr(xarray_hist_merged, hist_tmp_zarr_path, zarr_store_workers)
+        write_process_zarr(
+            xarray_hist_merged,
+            hist_tmp_zarr_path,
+            zarr_store_workers,
+            shard_variables=True,
+        )
         del xarray_hist_merged
 
         publish_history_store(hist_tmp_zarr_path, history_remote, hist_store_name)
@@ -408,20 +426,24 @@ def main() -> None:
     # dropping it would let the hourly interpolation bridge the gap with
     # invented values, so open_history_store fails instead. The history stores
     # keep their own time coordinate, which the concatenation below indexes by.
-    hist_stores = [
-        open_history_store(
-            history_remote,
-            "ECMWF_Hist_v3"
-            + (base_time - pd.Timedelta(hours=hours_back)).strftime("%Y%m%dT%H%M%SZ")
-            + ".zarr",
-            ("time", *zarr_vars),
-        )
+    hist_store_names = [
+        "ECMWF_Hist_v3"
+        + (base_time - pd.Timedelta(hours=hours_back)).strftime("%Y%m%dT%H%M%SZ")
+        + ".zarr"
         for hours_back in history_offsets
     ]
-    hist = [
-        xr.open_zarr(store.store, group=store.path, consolidated=False)
-        for store in hist_stores
-    ]
+    hist_local_paths = download_history_stores(
+        history_remote, hist_store_names, forecast_process_dir + "/History"
+    )
+
+    def open_history_dataset(name_and_path):
+        name, local_path = name_and_path
+        open_history_store(history_remote, name, ("time", *zarr_vars), local_path)
+        return xr.open_zarr(local_path, consolidated=False)
+
+    hist = map_history_stores(
+        open_history_dataset, list(zip(hist_store_names, hist_local_paths, strict=True))
+    )
     fcst = xr.open_zarr(f"{forecast_process_path}_merged.zarr", consolidated=False)
     ds = xr.concat(
         [*hist, fcst],
