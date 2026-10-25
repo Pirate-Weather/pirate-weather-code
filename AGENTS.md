@@ -749,6 +749,83 @@ Agents should verify:
 
 ---
 
+# Working in This Repository (Practical Notes)
+
+Notes for agents and contributors picking up work on the `v3` branch. Plans and
+open items live in `TODO.md` (bugs, improvements, a "Done" log with measured
+results); the storage and read-path measurements behind the current design are in
+`Notes/STORAGE_AND_READ_BENCHMARKS.md`.
+
+## Environment and checks
+
+- Use the prepared environment: `source .venvs/ingest-test/bin/pirate-env.sh`
+  (Python 3.14, wgrib2 on `PATH`, all ingest and API dependencies).
+- Routine verification is `ruff check`, `ruff format --check .` (ruff 0.16.10) and
+  `python -m pytest` (offline; about 10 s). Do not run `tests/live` unless asked.
+- `v3` is shared with other contributors: `git fetch` and rebase onto
+  `origin/v3` before pushing, then rerun the checks. Commit or push only when asked.
+
+## Store layout contract (ingest ↔ API)
+
+- **Final stores** are written by `write_final_zarr` (`API/ingest_utils.py`): one
+  sharded zarr v3 array `(variable, time, y, x)`, inner chunks from
+  `FINAL_CHUNK_SIZES`, shards from `FINAL_SHARD_SIZES` (sized to stay under
+  ~150 MB uncompressed per shard, because dask writes one shard per task).
+- **Time is not a stored variable.** Valid times go in the array's `time`
+  attribute; the API reader rebuilds them as column 0 (NaN where every variable
+  is NaN). An ingest's `zarr_vars[i]` is therefore column `i + 1` of its
+  `API/constants/model_const.py` map; `tests/ingest/test_ingest_output_layout.py`
+  pins this. Do not reintroduce a time variable.
+- **Publishing is versioned:** `publish_store` uploads `<MODEL>/<stamp>.zarr`,
+  then rewrites `<MODEL>.current.json`; the previous version is kept, older ones
+  are deleted. `<MODEL>.time.pickle` is still how an ingest decides whether a
+  cycle is new.
+- **API read path:** `API/io/store_reader.py` opens stores with tensorstore,
+  polls the pointers and swaps in new versions while serving, and writes reader
+  heartbeats; `API/store_sync.py` copies new versions from S3 to local disk and
+  deletes old ones only when no live heartbeat lists them. The alert grids are
+  string arrays, which tensorstore cannot read, so they stay on zarr-python.
+  The pre-tensorstore reader and zip sync are kept in `legacy/` for reference only.
+- **Short-term history stores** (GFS, ECMWF, SILAM, RTMA, URMA) give each variable
+  one shard (`shard_whole_variables`) and are downloaded to local disk before the
+  merge (`download_history_stores` / `open_history_arrays`), because OVH answers
+  each GET in 100–400 ms and per-chunk reads ran at 3–4 MB/s.
+
+## Performance lessons from the end-to-end runs
+
+- Object-store latency, not bandwidth, sets the pace: anything that reads or
+  writes many objects needs many requests in flight, or fewer, larger objects.
+- Uploads are bounded by bytes in flight (`upload_inflight_mib`) as well as count;
+  256 multi-MB shards at once timed out against OVH.
+- Peak ingest memory scales with write threads (`zarr_store_workers`). Some
+  ingests default to `os.cpu_count()`, which in a container is the node's core
+  count; set the thread count explicitly per job (see `TODO.md`).
+- Every ingest needs at most ~2 cores (measured); jobs are mostly I/O-bound or run
+  single-threaded steps (wgrib2, DWD parsing). Memory and working disk set the
+  instance size; `TODO.md` lists per-model peaks.
+- NOMADS pacing adapts (starts at 1 s, backs off on rate-limit responses). Avoid
+  Herbie probes per file; AIGEFS downloads each file with a single GET. The AWS
+  "EAGLE" AIGEFS objects are an experimental model, not a mirror of NOMADS.
+
+## Running ingests end to end
+
+- Each ingest is a standalone script (`python ingest/<MODEL>_Local_Ingest.py`)
+  configured by environment: `save_type` (`Download` for a local directory, `S3`
+  for a bucket), `forecast_path`, `historic_path`, `forecast_process_dir`, and for
+  OVH `s3_endpoint` / `s3_region` / `s3_storage_class`, with credentials in
+  `AWS_KEY` / `AWS_SECRET`. Never print or log credentials.
+- Run each ingest in its own process: modules are imported at start, so code
+  edited mid-run only affects ingests started afterwards.
+- An ingest exits early ("No Update") when its newest cycle is already published.
+  To rerun the same cycle for a benchmark, point `forecast_path` at a fresh prefix
+  instead of deleting published data.
+- Record per-stage wall time, peak memory, CPU and working-disk size when
+  benchmarking; compare against `TODO.md`'s measured numbers, and note whether a
+  history model ran warm or cold (cold starts rebuild every history store).
+- Shell monitoring pitfalls seen here: `pgrep -f`/`pkill -f` patterns match the
+  calling shell's own command line, and `grep`/`cut` buffer when piped (use
+  `--line-buffered`, or `awk` with `fflush()`).
+
 # Summary
 
 Pirate Weather should remain a **practical, explicit, performance-first weather processing system**.
