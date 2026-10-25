@@ -98,7 +98,8 @@ def test_hourly_thunderstorm_text(overrides, summary_type, icon_set, expected):
 
 def test_daily_thunderstorms_joined_with_precipitation():
     """When storms cover every rainy period, the storm text replaces the rain
-    text instead of listing both.
+    text instead of listing both. The 40 mm of rain is still given in its own
+    sentence.
     """
     hours = make_hours(8, **RAIN, cape=2600)
 
@@ -106,13 +107,22 @@ def test_daily_thunderstorms_joined_with_precipitation():
         hours=hours, is_day_time=True, time_zone="UTC", mode="daily"
     )
 
-    assert summary == ["sentence", ["for-day", "thunderstorm"]]
+    assert summary == [
+        "multiple-sentences",
+        ["sentence", ["for-day", "thunderstorm"]],
+        [
+            "sentence",
+            ["of-expected", ["less-than", ["millimeters", 40]], "medium-rain"],
+        ],
+    ]
     assert icon == "thunderstorm"
 
 
-def test_daily_thunderstorms_not_joined_with_precipitation():
-    """When storms cover only some of the rainy periods, rain keeps its own
-    clause and the storm gets a separate "during <period>" clause.
+def test_daily_thunderstorms_accompany_precipitation():
+    """When storms cover only some of the rainy periods, they are attached to
+    the rain with "accompanied-by" ("Rain, with thunderstorms in the
+    morning.") instead of a separate clause, which read awkwardly and got very
+    long. All-day rain is the bare condition, and definite storms take the icon.
 
     00:00-05:00 UTC (the night, which runs until the 6am start of the daily
     morning) is rain with low CAPE; 06:00-09:00 UTC adds CAPE 2000.
@@ -122,18 +132,26 @@ def test_daily_thunderstorms_not_joined_with_precipitation():
         4, BASE_TIME + 6 * HOUR, **rain, cape=2000
     )
 
-    _, summary = calculate_day_text(
+    icon, summary = calculate_day_text(
         hours=hours, is_day_time=True, time_zone="UTC", mode="daily"
     )
 
     assert summary == [
-        "sentence",
+        "multiple-sentences",
         [
-            "and",
-            ["for-day", "medium-rain"],
-            ["during", "thunderstorm", "morning"],
+            "sentence",
+            [
+                "accompanied-by",
+                "medium-rain",
+                ["during", "thunderstorm", "morning"],
+            ],
+        ],
+        [
+            "sentence",
+            ["of-expected", ["less-than", ["millimeters", 30]], "medium-rain"],
         ],
     ]
+    assert icon == "thunderstorm"
 
 
 def test_24hour_thunderstorms_starting_later():
@@ -149,7 +167,14 @@ def test_24hour_thunderstorms_starting_later():
         hours=hours, is_day_time=True, time_zone="UTC", mode="hour"
     )
 
-    assert summary == ["sentence", ["during", "thunderstorm", "today-morning"]]
+    assert summary == [
+        "multiple-sentences",
+        ["sentence", ["during", "thunderstorm", "today-morning"]],
+        [
+            "sentence",
+            ["of-expected", ["less-than", ["millimeters", 20]], "medium-rain"],
+        ],
+    ]
     assert icon == "thunderstorm"
 
 
@@ -218,5 +243,12 @@ def test_daily_storm_ignores_cape_from_low_pop_hours():
         hours=hours, is_day_time=True, time_zone="UTC", mode="daily"
     )
 
-    assert summary == ["sentence", ["for-day", "possible-thunderstorm"]]
+    assert summary == [
+        "multiple-sentences",
+        ["sentence", ["for-day", "possible-thunderstorm"]],
+        [
+            "sentence",
+            ["of-expected", ["less-than", ["millimeters", 40]], "medium-rain"],
+        ],
+    ]
     assert icon == "rain"

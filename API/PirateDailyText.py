@@ -19,9 +19,13 @@
 #   4. Build the precipitation/thunderstorm text for the whole window.
 #   5. Describe when each condition happens with a time phrase
 #      (_get_time_phrase), e.g. ["until", "evening"].
-#   6. Keep the one or two most important conditions and join them.
+#   6. Keep the one or two most important conditions and give each its own
+#      sentence, followed by the expected precipitation amount when it is
+#      significant.
 import datetime
+import itertools
 import math
+import statistics
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import numpy as np
@@ -37,6 +41,8 @@ from API.constants.text_const import (
     DEFAULT_POP,
     DEFAULT_VISIBILITY,
     HALF_DAY_PRECIP_ACCUM_TEXT_THRESHOLD_MM,
+    HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
+    HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM,
     LESS_THAN_TOLERANCE,
     PRECIP_INTENSITY_THRESHOLDS,
     PRECIP_PROB_THRESHOLD,
@@ -75,11 +81,57 @@ SIGNIFICANT_THUNDERSTORM_MAX_HOURS = 1
 
 # Minimum total accumulation (mm) before a precipitation summary is generated.
 PRECIP_SUMMARY_MIN_ACCUM_MM = 0.1
-# Snow accumulation (mm) above which the snow total is added to the summary.
-SNOW_SENTENCE_MIN_ACCUM_MM = 10
+
+# Precipitation that reaches every period is only described as lasting
+# "throughout the day" when each period is wet for at least this fraction of
+# its hours. One wet hour per period would otherwise read as all-day rain.
+PERSISTENT_PRECIP_PERIOD_FRACTION = 0.5
+# Below that, precipitation falling in less than this fraction of all hours is
+# "occasional"; otherwise a few long spells are "periods of" precipitation and
+# anything choppier is "intermittent".
+INTERMITTENT_PRECIP_MIN_FRACTION = 1 / 3
+PERIODS_OF_PRECIP_MAX_SPELLS = 3
+PERIODS_OF_PRECIP_MIN_SPELL_HOURS = 3
+# Precipitation that runs from the start of the window is "tapering off" when
+# its amount doesn't rise over its last TAPERING_OFF_HOURS hours and the last
+# hour has at most TAPERING_OFF_END_FRACTION of the spell's peak hourly amount.
+TAPERING_OFF_HOURS = 3
+TAPERING_OFF_END_FRACTION = 0.5
+
+# The "of-expected" sentence names one precipitation type. When several fall,
+# the first of these that is exceeded is shown (mm; snow as depth), otherwise
+# the type with the most liquid-equivalent accumulation.
+EXPECTED_ACCUM_TYPE_ICE_MIN_MM = 1
+EXPECTED_ACCUM_TYPE_SNOW_MIN_MM = 50
+EXPECTED_ACCUM_TYPE_RAIN_MIN_MM = 10
+# The sentence is only added once the shown type reaches these amounts (mm).
+EXPECTED_ACCUM_SENTENCE_MIN_MM = {
+    "rain": 15,
+    "ice": 1,
+    "snow": 10,
+}
 
 MM_PER_INCH = 25.4
 MM_PER_CENTIMETER = 10
+
+# Cloud cover transitions (clearing / increasing / becoming).
+# HRRR, HRDPS and similar models can spike for an hour or two (100 -> 0 -> 14
+# -> 100), so hourly cloud cover is smoothed with a centred rolling median
+# that removes spikes of up to two hours but keeps the edge of a real change.
+CLOUD_SMOOTHING_HOURS = 5
+# A transition needs the cloud level to change by at least this many levels
+# (e.g. partly cloudy to overcast) between the start and end of the window.
+CLOUD_TRANSITION_MIN_LEVELS = 2
+# A change spread over at least this many hours is a trend ("increasing
+# clouds", "clearing"); a quicker step change is "X becoming Y".
+CLOUD_TREND_MIN_HOURS = 6
+# Hour-to-hour movement against the trend (fraction of sky) that is still
+# treated as part of a steady trend.
+CLOUD_TREND_REVERSAL_TOLERANCE = 0.1
+# Periods split between two neighbouring cloud levels are "generally" the more
+# common level when it covers at least this fraction of the hours, otherwise
+# "X to Y".
+GENERALLY_CLOUD_MIN_FRACTION = 0.75
 
 # Representative cloud cover for each cloud level, used for the daily icon.
 CLOUD_LEVEL_TEXT_AND_COVER = (
@@ -101,6 +153,18 @@ def _value_or_default(value, default):
     except TypeError:
         pass
     return value
+
+
+def _median(values):
+    """
+    Median of a short list of values, or NaN if any is missing (as the mean
+    used before). statistics.median is several times faster than np.median on
+    the handful of hourly values in a period, and this runs for every summary.
+    """
+    # A NaN anywhere makes the sum NaN, and is much cheaper to find this way
+    if math.isnan(sum(values)):
+        return math.nan
+    return statistics.median(values)
 
 
 def _get_zone(time_zone):
@@ -196,6 +260,7 @@ def _get_time_phrase(period_indices, all_periods):
         run from the start and a run to    ["until-starting-again", first dry, first wet again]
         the end (dry in between)
         only single, separate periods      ["during", P] / ["during", ["and", P1, P2]]
+                                           / ["during", ["list", P1, P2, P3, ...]]
         otherwise each run is described and the runs are joined with "and":
             run of one period              ["during", P]
             run from the start             ["until", first dry period]
@@ -235,7 +300,11 @@ def _get_time_phrase(period_indices, all_periods):
         ]
 
     if all(len(run) == 1 for run in runs):
-        return ["during", _join_with_and([all_periods[run[0]] for run in runs])]
+        single_periods = [all_periods[run[0]] for run in runs]
+        if len(single_periods) > 2:
+            # "list" avoids nested "and"s: "this morning, evening and tomorrow morning"
+            return ["during", ["list", *single_periods]]
+        return ["during", _join_with_and(single_periods)]
 
     run_phrases = []
     for run in runs:
@@ -281,6 +350,8 @@ def calculate_period_summary_text(
     half_day=False,
     overall_cloud_text=None,
     overall_cloud_idx=None,
+    for_night=False,
+    time_phrase=None,
 ):
     """
     Calculates the textual summary for a specific condition (precip, cloud, wind, vis)
@@ -303,6 +374,10 @@ def calculate_period_summary_text(
     - half_day (bool): Whether this is a day/night (half-day) summary.
     - overall_cloud_text (str, optional): The overall cloud text, for wind to combine with.
     - overall_cloud_idx (list, optional): The indices of periods with the overall cloud cover.
+    - for_night (bool): Describe a condition lasting the whole half-day with
+      "for-night" instead of the bare condition (night half-days).
+    - time_phrase (list, optional): Use this time phrase instead of the one
+      for period_indices (e.g. ["during", P] for precipitation tapering off).
 
     Returns:
     - tuple: A tuple containing:
@@ -329,13 +404,20 @@ def calculate_period_summary_text(
             wind_condition_combined = True
             condition_text = ["and", overall_cloud_text, condition_text]
 
-    time_phrase = _get_time_phrase(period_indices, all_periods)
+    if time_phrase is None:
+        time_phrase = _get_time_phrase(period_indices, all_periods)
 
     if time_phrase is None:
         summary_text = None
     elif time_phrase == ["for-day"]:
         # Half-day summaries describe the whole half-day with the bare condition
-        summary_text = condition_text if half_day else ["for-day", condition_text]
+        # (#385), except a night half-day can say "throughout the night"
+        if for_night:
+            summary_text = ["for-night", condition_text]
+        elif half_day:
+            summary_text = condition_text
+        else:
+            summary_text = ["for-day", condition_text]
     else:
         summary_text = _insert_condition_text(time_phrase, condition_text)
 
@@ -348,21 +430,29 @@ def _new_period_data():
         "num_hours_fog": 0,
         "num_hours_wind": 0,
         "num_hours_thunderstorm": 0,
+        "num_hours_precip": 0,
         "rain_accum": 0.0,
         "snow_accum": 0.0,
+        # Accumulation errors (mm), and whether any hour had error data
+        "rain_error": 0.0,
+        "has_rain_error_data": False,
         "snow_error": 0.0,
-        "has_snow_error_data": False,  # Track if any error data exists
+        "has_snow_error_data": False,
+        "ice_error": 0.0,
+        "has_ice_error_data": False,
         "sleet_accum": 0.0,
         "frzrain_accum": 0.0,
         "max_pop": 0.0,
         "max_rain_intensity": 0.0,
         "max_snow_intensity": 0.0,
         "max_ice_intensity": 0.0,
-        "cloud_cover_sum": 0.0,
+        "cloud_covers": [],
         "max_wind_speed": 0.0,
         "period_length": 0,
         "precip_types_in_period": [],
-        "avg_cloud_cover": 0.0,
+        # Median rather than mean, so a one or two hour model spike doesn't
+        # move the whole period to a different cloud level
+        "median_cloud_cover": 0.0,
         "min_visibility": float("inf"),
         "max_smoke": 0.0,
         "max_cape_with_precip": 0.0,
@@ -404,6 +494,56 @@ def _sanitize_hour(hour):
     return sanitized_hour
 
 
+def _hour_precip_accum(hour):
+    """Liquid-equivalent precipitation for an hour (mm), snow using a 10:1 ratio."""
+    return (
+        hour["liquidAccumulation"]
+        + hour["iceAccumulation"]
+        + hour["snowAccumulation"] / 10
+    )
+
+
+def _is_wet_hour(hour):
+    """
+    Whether an hour has at least enough precipitation for an hourly
+    precipitation icon. Used to tell all-day precipitation from a few showers.
+    """
+    return (
+        hour["liquidAccumulation"] + hour["iceAccumulation"]
+        >= HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM
+        or hour["snowAccumulation"] >= HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM
+    )
+
+
+def _wet_spells(hourly_wet):
+    """Runs of consecutive wet hours, as lists of hour indices."""
+    spells = []
+    for i, is_wet in enumerate(hourly_wet):
+        if not is_wet:
+            continue
+        if spells and spells[-1][-1] == i - 1:
+            spells[-1].append(i)
+        else:
+            spells.append([i])
+    return spells
+
+
+def _is_tapering_off(spell, hourly_precip_accum):
+    """
+    Whether a spell of precipitation is tapering off: its hourly amount
+    doesn't rise over its last TAPERING_OFF_HOURS hours and ends at no more
+    than TAPERING_OFF_END_FRACTION of its peak.
+    """
+    if len(spell) < TAPERING_OFF_HOURS:
+        return False
+    amounts = [hourly_precip_accum[i] for i in spell]
+    last_amounts = amounts[-TAPERING_OFF_HOURS:]
+    return (
+        all(later <= earlier for earlier, later in itertools.pairwise(last_amounts))
+        and last_amounts[-1] <= max(amounts) * TAPERING_OFF_END_FRACTION
+    )
+
+
 def _add_hour_to_period(period_data, hour, icon_set):
     """
     Accumulates one hour of forecast data into its period.
@@ -417,7 +557,7 @@ def _add_hour_to_period(period_data, hour, icon_set):
     - float | None: The temperature-dewpoint spread if the hour is foggy, otherwise None.
     """
     period_data["period_length"] += 1
-    period_data["cloud_cover_sum"] += hour["cloudCover"]
+    period_data["cloud_covers"].append(hour["cloudCover"])
     period_data["max_wind_speed"] = max(
         period_data["max_wind_speed"], hour["windSpeed"]
     )
@@ -460,18 +600,23 @@ def _add_hour_to_period(period_data, hour, icon_set):
 
     period_data["rain_accum"] += hour["liquidAccumulation"]
     period_data["snow_accum"] += hour["snowAccumulation"]
-    # Only accumulate error if it's not nan (missing data), the precipitation
-    # type is snow and there is any accumulation.
-    # precipIntensityError is an intensity error (mm/h). Convert that
-    # to a liquid accumulation error for the hour (mm) then convert
-    # to snow depth (mm) via estimate_snow_height. If temperature is
-    # missing, fall back to using error directly.
+
+    if _is_wet_hour(hour):
+        period_data["num_hours_precip"] += 1
+
+    # Only accumulate error if it's not nan (missing data) and the hour has
+    # accumulation of its precipitation type. precipIntensityError is an
+    # intensity error (mm/h), so over one hour it is a liquid accumulation
+    # error (mm).
+    liquid_error_mm = hour["precipIntensityError"] * 1.0
+    has_error = not math.isnan(liquid_error_mm)
     if (
-        not math.isnan(hour["precipIntensityError"])
-        and hour.get("precipType") == PRECIP_TYPES["snow"]
-        and hour.get("snowAccumulation", 0.0) > 0.0
+        has_error
+        and hour["precipType"] == PRECIP_TYPES["snow"]
+        and hour["snowAccumulation"] > 0.0
     ):
-        liquid_error_mm = hour["precipIntensityError"] * 1.0
+        # Convert to snow depth (mm) via estimate_snow_height. If temperature
+        # is missing, fall back to using error directly.
         temp = hour.get("temperature", MISSING_DATA)
         if temp is None or (isinstance(temp, float) and math.isnan(temp)):
             estimated_snow_error_mm = liquid_error_mm
@@ -481,6 +626,20 @@ def _add_hour_to_period(period_data, hour, icon_set):
             )
         period_data["snow_error"] += estimated_snow_error_mm
         period_data["has_snow_error_data"] = True
+    elif (
+        has_error
+        and hour["precipType"] == PRECIP_TYPES["rain"]
+        and hour["liquidAccumulation"] > 0.0
+    ):
+        period_data["rain_error"] += liquid_error_mm
+        period_data["has_rain_error_data"] = True
+    elif (
+        has_error
+        and hour["precipType"] in (PRECIP_TYPES["sleet"], PRECIP_TYPES["ice"])
+        and hour["iceAccumulation"] > 0.0
+    ):
+        period_data["ice_error"] += liquid_error_mm
+        period_data["has_ice_error_data"] = True
 
     if hour["precipType"] == PRECIP_TYPES["ice"]:
         period_data["frzrain_accum"] += hour["iceAccumulation"]
@@ -596,50 +755,230 @@ def _add_hour_to_period(period_data, hour, icon_set):
     return fog_spread
 
 
-def _snow_accumulation_sentence(
-    total_snow_accum, total_snow_error, has_any_snow_error_data, unit_system
-):
+def _accumulation_amount(total_accum, total_error, has_error_data, unit_str):
     """
-    Builds the snow accumulation (or accumulation range) for the summary.
+    Builds the accumulation (or accumulation range) for the summary.
+
+    The translations only take whole numbers, so amounts are rounded out to
+    whole units ("< 1 in" for a few millimetres of rain in US units).
 
     Parameters:
-    - total_snow_accum (float): Total snow accumulation in mm.
-    - total_snow_error (float): Total snow accumulation error in mm.
-    - has_any_snow_error_data (bool): Whether any hour had error data.
-    - unit_system (str): Unit system for display ("us", "si", "ca", "uk").
+    - total_accum (float): Total accumulation in mm.
+    - total_error (float): Total accumulation error in mm.
+    - has_error_data (bool): Whether any hour had error data.
+    - unit_str (str): "inches", "centimeters" or "millimeters".
 
     Returns:
-    - list | None: The snow accumulation text, or None if there is nothing to show.
+    - list | None: The accumulation text, or None if there is nothing to show.
     """
-    if unit_system == "us":
-        snow_unit_str = "inches"
-        mm_per_unit = MM_PER_INCH
-    else:  # si, ca, uk use centimeters
-        snow_unit_str = "centimeters"
-        mm_per_unit = MM_PER_CENTIMETER
-    snow_accum_display = total_snow_accum / mm_per_unit
-    snow_error_display = total_snow_error / mm_per_unit
+    mm_per_unit = {
+        "inches": MM_PER_INCH,
+        "centimeters": MM_PER_CENTIMETER,
+        "millimeters": 1,
+    }[unit_str]
+    accum_display = total_accum / mm_per_unit
+    error_display = total_error / mm_per_unit
     less_than_tolerance = LESS_THAN_TOLERANCE / mm_per_unit
 
     # If error data is missing (ERA5, etc.), show exact value without range or "<"
-    if not has_any_snow_error_data and snow_accum_display > 0:
-        return [snow_unit_str, math.ceil(snow_accum_display)]
+    if not has_error_data and accum_display > 0:
+        return [unit_str, math.ceil(accum_display)]
 
-    # Error data exists - calculate range. Snow accumulation cannot be negative.
-    snow_low_accum = max(0, math.floor(snow_accum_display - (snow_error_display / 2)))
-    snow_max_accum = math.ceil(snow_accum_display + (snow_error_display / 2))
+    # Error data exists - calculate range. Accumulation cannot be negative.
+    low_accum = max(0, math.floor(accum_display - (error_display / 2)))
+    max_accum = math.ceil(accum_display + (error_display / 2))
 
-    if snow_max_accum >= less_than_tolerance and snow_low_accum == 0:
-        snow_low_accum = 1
+    if max_accum >= less_than_tolerance and low_accum == 0:
+        low_accum = 1
 
-    if snow_max_accum <= 0:
+    if max_accum <= 0:
         return None
-    if snow_accum_display == 0:
-        return ["less-than", [snow_unit_str, 1]]
+    if accum_display == 0:
+        return ["less-than", [unit_str, 1]]
     # If error is very small or lower range is 0, use less-than format
-    if snow_error_display <= 0.01 or snow_low_accum == 0:
-        return ["less-than", [snow_unit_str, snow_max_accum]]
-    return [snow_unit_str, ["range", snow_low_accum, snow_max_accum]]
+    if error_display <= 0.01 or low_accum == 0:
+        return ["less-than", [unit_str, max_accum]]
+    return [unit_str, ["range", low_accum, max_accum]]
+
+
+def _expected_accumulation_sentence(
+    totals, errors, has_error_data, dominant_ice_text, unit_system
+):
+    """
+    Builds the "N of <type> expected" sentence for a significant amount of
+    precipitation, e.g. ["of-expected", ["millimeters", ["range", 7, 16]], "medium-rain"].
+
+    Ice is shown first because even a little freezing rain or sleet is
+    hazardous, then a large amount of snow, then a large amount of rain.
+
+    Parameters:
+    - totals (dict): Accumulation (mm) for "rain", "snow" (depth) and "ice".
+    - errors (dict): Accumulation error (mm) for each type.
+    - has_error_data (dict): Whether each type had any error data.
+    - dominant_ice_text (str): "medium-sleet" or "medium-freezing-rain".
+    - unit_system (str): Unit system for display ("us", "si", "ca", "uk").
+
+    Returns:
+    - list | None: The sentence, or None if no type reaches its threshold.
+    """
+    if totals["ice"] > EXPECTED_ACCUM_TYPE_ICE_MIN_MM:
+        accum_type = "ice"
+    elif totals["snow"] > EXPECTED_ACCUM_TYPE_SNOW_MIN_MM:
+        accum_type = "snow"
+    elif totals["rain"] > EXPECTED_ACCUM_TYPE_RAIN_MIN_MM:
+        accum_type = "rain"
+    else:
+        # Compare snow as a liquid equivalent using a 10:1 ratio
+        accum_type = max(
+            ("rain", "snow", "ice"),
+            key=lambda t: totals[t] / 10 if t == "snow" else totals[t],
+        )
+
+    if totals[accum_type] < EXPECTED_ACCUM_SENTENCE_MIN_MM[accum_type]:
+        return None
+
+    if unit_system == "us":
+        unit_str = "inches"
+    elif accum_type == "snow":  # si, ca, uk
+        unit_str = "centimeters"
+    else:
+        unit_str = "millimeters"
+
+    amount = _accumulation_amount(
+        totals[accum_type],
+        errors[accum_type],
+        has_error_data[accum_type],
+        unit_str,
+    )
+    if amount is None:
+        return None
+
+    type_text = {
+        "rain": "medium-rain",
+        "snow": "medium-snow",
+        "ice": dominant_ice_text,
+    }[accum_type]
+    return ["of-expected", amount, type_text]
+
+
+def _smoothed_cloud_cover(cloud_covers, hour_idx):
+    """
+    Centred rolling median of the hourly cloud cover at one hour
+    (CLOUD_SMOOTHING_HOURS wide, narrower at the ends of the window). Removes
+    the short spikes some models produce without blurring the edge of a real
+    change. The cloud cover must not be missing (NaN).
+    """
+    half_width = CLOUD_SMOOTHING_HOURS // 2
+    return statistics.median(
+        cloud_covers[max(0, hour_idx - half_width) : hour_idx + half_width + 1]
+    )
+
+
+def _cloud_transition(cloud_covers, hour_period_idx):
+    """
+    Describes cloud cover that changes over the window.
+
+    Using the smoothed hourly cloud cover, the cloud level has to change by
+    CLOUD_TRANSITION_MIN_LEVELS from the first hour to the last, staying
+    within one level of the starting level until the change begins and of the
+    new level once it is reached. Then:
+
+        steady change over CLOUD_TREND_MIN_HOURS or more   "increasing" / "clearing"
+        quicker step change                               ["becoming", from, to]
+
+    A change that goes back and forth (beyond CLOUD_TREND_REVERSAL_TOLERANCE)
+    is not described as a transition. For example, 75% for the morning then
+    15%, 13%, 20% from midday is "mostly cloudy becoming mostly clear in the
+    afternoon" rather than "clearing".
+
+    Parameters:
+    - cloud_covers (list): Hourly cloud cover (0.0 to 1.0) for the window.
+    - hour_period_idx (list): The period index of each hour.
+
+    Returns:
+    - tuple | None: The cloud condition text and the indices of the periods
+      the change happens in, or None if the cloud cover doesn't transition.
+    """
+    if len(cloud_covers) < CLOUD_TREND_MIN_HOURS or math.isnan(sum(cloud_covers)):
+        return None
+
+    # Most windows end near the level they start at, so check the ends before
+    # smoothing every hour (this runs for every summary on the request path)
+    num_hours = len(cloud_covers)
+    _, start_level = calculate_cloud_text(_smoothed_cloud_cover(cloud_covers, 0))
+    _, end_level = calculate_cloud_text(
+        _smoothed_cloud_cover(cloud_covers, num_hours - 1)
+    )
+    if abs(end_level - start_level) < CLOUD_TRANSITION_MIN_LEVELS:
+        return None
+
+    smoothed = [_smoothed_cloud_cover(cloud_covers, i) for i in range(num_hours)]
+    levels = [calculate_cloud_text(cover)[1] for cover in smoothed]
+    direction = 1 if end_level > start_level else -1
+
+    # First hour from which the cloud stays near the new level
+    settle_hour = len(levels) - 1
+    while settle_hour > 0 and abs(levels[settle_hour - 1] - end_level) <= 1:
+        settle_hour -= 1
+    while levels[settle_hour] != end_level:
+        settle_hour += 1
+
+    # Last hour still at the starting level before the change
+    leave_hour = max(i for i in range(settle_hour) if levels[i] == start_level)
+
+    if any(abs(level - start_level) > 1 for level in levels[:leave_hour]) or any(
+        direction * (smoothed[i + 1] - smoothed[i]) < -CLOUD_TREND_REVERSAL_TOLERANCE
+        for i in range(leave_hour, settle_hour)
+    ):
+        return None
+
+    if settle_hour - leave_hour >= CLOUD_TREND_MIN_HOURS:
+        trend_text = "increasing" if direction > 0 else "clearing"
+        trend_periods = sorted(set(hour_period_idx[leave_hour + 1 : settle_hour + 1]))
+        return trend_text, trend_periods
+
+    becoming_text = [
+        "becoming",
+        CLOUD_LEVEL_TEXT_AND_COVER[start_level][0],
+        CLOUD_LEVEL_TEXT_AND_COVER[end_level][0],
+    ]
+    return becoming_text, [hour_period_idx[settle_hour]]
+
+
+def _cloud_range(cloud_levels, cloud_covers):
+    """
+    Describes cloud cover whose periods are split between two neighbouring
+    cloud levels: ["generally", level] when one level covers at least
+    GENERALLY_CLOUD_MIN_FRACTION of the hours, otherwise
+    ["to", lower level, higher level] ("partly cloudy to mostly cloudy").
+
+    Parameters:
+    - cloud_levels (list): The cloud level (0-4) of each period.
+    - cloud_covers (list): Hourly cloud cover (0.0 to 1.0) for the window.
+
+    Returns:
+    - list | None: The cloud text, or None if the periods aren't split
+      between two neighbouring levels.
+    """
+    low_level = min(cloud_levels)
+    high_level = max(cloud_levels)
+    if high_level - low_level != 1 or math.isnan(sum(cloud_covers)):
+        return None
+
+    # Raw hours are enough here: a one or two hour spike changes the share by
+    # less than a tenth, and smoothing every hour costs time on every request
+    hourly_levels = [calculate_cloud_text(cover)[1] for cover in cloud_covers]
+    for level in (low_level, high_level):
+        if (
+            hourly_levels.count(level)
+            >= len(hourly_levels) * GENERALLY_CLOUD_MIN_FRACTION
+        ):
+            return ["generally", CLOUD_LEVEL_TEXT_AND_COVER[level][0]]
+    return [
+        "to",
+        CLOUD_LEVEL_TEXT_AND_COVER[low_level][0],
+        CLOUD_LEVEL_TEXT_AND_COVER[high_level][0],
+    ]
 
 
 def calculate_day_text(
@@ -693,6 +1032,13 @@ def calculate_day_text(
 
     # Periods in forecast order (dicts keep insertion order)
     periods_data = {}
+    # Hourly cloud cover, precipitation and the period index of each hour, for
+    # cloud transitions and how the precipitation falls
+    hourly_cloud_covers = []
+    hourly_precip_accum = []
+    hourly_wet = []
+    hour_period_idx = []
+    period_indices = {}
     overall_min_temp_dewpoint_spread = float("inf")
     overall_temp_at_min_spread = 0.0
     overall_dewpoint_at_min_spread = 0.0
@@ -702,6 +1048,11 @@ def calculate_day_text(
         period_name = _get_period_name(local_time, start_time, mode)
         if period_name not in periods_data:
             periods_data[period_name] = _new_period_data()
+            period_indices[period_name] = len(period_indices)
+        hourly_cloud_covers.append(hour["cloudCover"])
+        hourly_precip_accum.append(_hour_precip_accum(hour))
+        hourly_wet.append(_is_wet_hour(hour))
+        hour_period_idx.append(period_indices[period_name])
 
         fog_spread = _add_hour_to_period(periods_data[period_name], hour, icon_set)
         # Keep the temperature and dew point of the foggiest hour for the fog text
@@ -713,7 +1064,7 @@ def calculate_day_text(
     all_period_names = list(periods_data)
     period_stats = list(periods_data.values())
     for p_data in period_stats:
-        p_data["avg_cloud_cover"] = p_data["cloud_cover_sum"] / p_data["period_length"]
+        p_data["median_cloud_cover"] = _median(p_data["cloud_covers"])
 
     # --- 3. Which periods have each condition, and totals for the whole window ---
     precip_periods = []
@@ -726,13 +1077,18 @@ def calculate_day_text(
     total_snow_accum = 0.0
     total_sleet_accum = 0.0
     total_frzrain_accum = 0.0
+    total_rain_error = 0.0
     total_snow_error = 0.0
+    total_ice_error = 0.0
+    has_any_rain_error_data = False
     has_any_snow_error_data = False
+    has_any_ice_error_data = False
+    total_hours_precip = 0
     overall_max_rain_intensity = 0.0
     overall_max_snow_intensity = 0.0
     overall_max_ice_intensity = 0.0
     overall_max_wind = 0.0
-    overall_avg_cloud_cover_sum = 0.0  # Sum of average cloud cover for each period
+    overall_cloud_cover_sum = 0.0  # Sum of the median cloud cover of each period
     overall_max_pop = 0.0
     overall_min_visibility = float("inf")
     overall_max_smoke = 0.0
@@ -752,9 +1108,13 @@ def calculate_day_text(
         total_snow_accum += p_data["snow_accum"]
         total_sleet_accum += p_data["sleet_accum"]
         total_frzrain_accum += p_data["frzrain_accum"]
+        total_rain_error += p_data["rain_error"]
         total_snow_error += p_data["snow_error"]
-        if p_data["has_snow_error_data"]:
-            has_any_snow_error_data = True
+        total_ice_error += p_data["ice_error"]
+        has_any_rain_error_data |= p_data["has_rain_error_data"]
+        has_any_snow_error_data |= p_data["has_snow_error_data"]
+        has_any_ice_error_data |= p_data["has_ice_error_data"]
+        total_hours_precip += p_data["num_hours_precip"]
         overall_max_rain_intensity = max(
             overall_max_rain_intensity, p_data["max_rain_intensity"]
         )
@@ -765,7 +1125,7 @@ def calculate_day_text(
             overall_max_ice_intensity, p_data["max_ice_intensity"]
         )
         overall_max_wind = max(overall_max_wind, p_data["max_wind_speed"])
-        overall_avg_cloud_cover_sum += p_data["avg_cloud_cover"]
+        overall_cloud_cover_sum += p_data["median_cloud_cover"]
         overall_min_visibility = min(overall_min_visibility, p_data["min_visibility"])
         overall_max_smoke = max(overall_max_smoke, p_data["max_smoke"])
 
@@ -833,11 +1193,11 @@ def calculate_day_text(
         ):
             vis_periods.append(i)
 
-        _, cloud_level = calculate_cloud_text(p_data["avg_cloud_cover"])
+        _, cloud_level = calculate_cloud_text(p_data["median_cloud_cover"])
         cloud_levels.append(cloud_level)
 
     overall_avg_cloud_cover = (
-        overall_avg_cloud_cover_sum / len(period_stats) if period_stats else 0
+        overall_cloud_cover_sum / len(period_stats) if period_stats else 0
     )
 
     # --- 3b. Overall cloud cover text and icon ---
@@ -856,12 +1216,12 @@ def calculate_day_text(
 
         if len(cloud_levels) > 1 and len(set(cloud_levels)) == len(cloud_levels):
             # All cloud levels are different: use the period with the highest
-            # average cloud cover (the first one on a tie, skipping missing data)
+            # cloud cover (the first one on a tie, skipping missing data)
             cloudiest_idx = None
             max_avg_cloud_value = -1.0
             for idx, p_data in enumerate(period_stats):
-                if p_data["avg_cloud_cover"] > max_avg_cloud_value:
-                    max_avg_cloud_value = p_data["avg_cloud_cover"]
+                if p_data["median_cloud_cover"] > max_avg_cloud_value:
+                    max_avg_cloud_value = p_data["median_cloud_cover"]
                     cloudiest_idx = idx
 
             if cloudiest_idx is not None:
@@ -878,9 +1238,9 @@ def calculate_day_text(
                 most_common_cloud_level
             ]
 
-    # With a single period use its actual average cloud cover for the icon
+    # With a single period use its actual cloud cover for the icon
     if len(period_stats) == 1:
-        derived_avg_cloud_for_icon = period_stats[0]["avg_cloud_cover"]
+        derived_avg_cloud_for_icon = period_stats[0]["median_cloud_cover"]
 
     # --- 4. Precipitation text and icon for the whole window ---
     most_common_overall_precip_type = (
@@ -902,9 +1262,6 @@ def calculate_day_text(
             precip_summary_text = "mixed-precipitation"
             most_common_overall_precip_type = (
                 PRECIP_TYPES["sleet"] if icon_set != "pirate" else PRECIP_TYPES["mixed"]
-            )
-            secondary_precip_condition = (
-                "medium-snow"  # Indicate snow totals are relevant
             )
         else:
             # Determine dominant ice type (sleet vs freezing rain) and labels for secondary conditions
@@ -997,26 +1354,37 @@ def calculate_day_text(
     if secondary_precip_condition == "medium-ice":
         secondary_precip_condition = "medium-freezing-rain"
 
-    # Add snow accumulation range to precip text if applicable
-    if (
-        total_snow_accum > SNOW_SENTENCE_MIN_ACCUM_MM
-        or secondary_precip_condition == "medium-snow"
-    ) and (
-        most_common_overall_precip_type == PRECIP_TYPES["snow"]
-        or secondary_precip_condition == "medium-snow"
-    ):
-        snow_sentence = _snow_accumulation_sentence(
-            total_snow_accum, total_snow_error, has_any_snow_error_data, unit_system
-        )
-        if snow_sentence is not None:
-            precip_summary_text = ["parenthetical", precip_summary_text, snow_sentence]
-
     # Combine primary and secondary precipitation conditions with "and"
-    if (
-        secondary_precip_condition is not None
-        and secondary_precip_condition != "medium-snow"
-    ):
+    if secondary_precip_condition is not None:
         precip_summary_text = ["and", precip_summary_text, secondary_precip_condition]
+
+    # The expected amount follows the precipitation summary as its own sentence
+    # ("Rain throughout the day. 7–16 mm of rain expected."). It replaces the
+    # snow-only "parenthetical". A "possible" summary doesn't get one, as an
+    # expected amount would contradict it.
+    accumulation_sentence = None
+    if precip_summary_text is not None and overall_max_pop >= PRECIP_PROB_THRESHOLD:
+        accumulation_sentence = _expected_accumulation_sentence(
+            {
+                "rain": total_rain_accum,
+                "snow": total_snow_accum,
+                "ice": total_ice_accum,
+            },
+            {
+                "rain": total_rain_error,
+                "snow": total_snow_error,
+                "ice": total_ice_error,
+            },
+            {
+                "rain": has_any_rain_error_data,
+                "snow": has_any_snow_error_data,
+                "ice": has_any_ice_error_data,
+            },
+            "medium-freezing-rain"
+            if total_frzrain_accum >= total_sleet_accum
+            else "medium-sleet",
+            unit_system,
+        )
 
     # Flags to indicate if a condition is present at all in the forecast block
     has_precip = bool(precip_periods) and precip_summary_text is not None
@@ -1025,6 +1393,7 @@ def calculate_day_text(
     has_vis = bool(vis_periods)
 
     # --- 4b. Thunderstorm text, replacing the precipitation text when they match ---
+    # (otherwise it accompanies the precipitation, see 5b)
     thunderstorm_summary_text = None
     thunderstorm_icon = None
     thunderstorms_match_precip = False
@@ -1051,6 +1420,78 @@ def calculate_day_text(
                     precip_icon = thunderstorm_icon
 
     # --- 5. Time phrase summary for each condition ---
+    num_periods = len(period_stats)
+
+    # 5a. How the precipitation falls. Precipitation reaching every period
+    # only lasts "throughout the day" when each period is wet for at least half
+    # its hours, with at most PERIODS_OF_PRECIP_MAX_SPELLS spells. Otherwise one continuous spell that only clips the first or
+    # last period is described without those periods, and showers through the
+    # day are occasional, periods of, or intermittent precipitation.
+    precip_time_phrase = None
+    wet_spells = _wet_spells(hourly_wet)
+    if has_precip and len(precip_periods) == num_periods and wet_spells:
+
+        def is_persistent(idx):
+            p_data = period_stats[idx]
+            return (
+                p_data["num_hours_precip"]
+                >= p_data["period_length"] * PERSISTENT_PRECIP_PERIOD_FRACTION
+            )
+
+        # Many short breaks also stop it being all-day precipitation, even
+        # when every period is half wet (rain every other hour)
+        if len(wet_spells) > PERIODS_OF_PRECIP_MAX_SPELLS or not all(
+            is_persistent(idx) for idx in precip_periods
+        ):
+            if len(wet_spells) == 1:
+                while len(precip_periods) > 1 and not is_persistent(precip_periods[0]):
+                    precip_periods = precip_periods[1:]
+                while len(precip_periods) > 1 and not is_persistent(precip_periods[-1]):
+                    precip_periods = precip_periods[:-1]
+            elif total_hours_precip < len(hours) * INTERMITTENT_PRECIP_MIN_FRACTION:
+                precip_summary_text = ["occasional", precip_summary_text]
+            elif len(wet_spells) <= PERIODS_OF_PRECIP_MAX_SPELLS and all(
+                len(spell) >= PERIODS_OF_PRECIP_MIN_SPELL_HOURS for spell in wet_spells
+            ):
+                precip_summary_text = ["periods-of", precip_summary_text]
+            else:
+                precip_summary_text = ["intermittent", precip_summary_text]
+
+    # Precipitation from the start of the window that ends by weakening is
+    # "rain tapering off in the afternoon" rather than "rain until evening".
+    # Not when wind or fog shares its periods, which would read "rain tapering
+    # off and windy".
+    if (
+        has_precip
+        and wet_spells
+        and precip_periods == list(range(len(precip_periods)))
+        and precip_periods[-1] < num_periods - 1
+        and precip_periods not in (wind_periods, vis_periods)
+        and _is_tapering_off(wet_spells[-1], hourly_precip_accum)
+    ):
+        precip_summary_text = ["tapering-off", precip_summary_text]
+        precip_time_phrase = ["during", all_period_names[precip_periods[-1]]]
+
+    # Precipitation lasting a whole night half-day is "throughout the night".
+    # The window has to reach the overnight period: a slice of the evening
+    # alone (e.g. the rest of tonight from 11pm) is not the whole night.
+    night_half_day = (
+        half_day
+        and all_period_names[-1].endswith("night")
+        and all(name.endswith(("evening", "night")) for name in all_period_names)
+    )
+
+    # 5b. Thunderstorms in only some of the precipitation periods are attached
+    # to the precipitation: "Rain, with possible thunderstorms starting in the
+    # afternoon." Listing both separately ("Rain throughout the day and
+    # thunderstorms in the afternoon") reads awkwardly and can get very long.
+    storms_accompany_precip = (
+        has_precip
+        and has_thunderstorm
+        and not thunderstorms_match_precip
+        and thunderstorm_summary_text is not None
+    )
+
     precip_only_summary = None
     thunderstorm_only_summary = None
     wind_only_summary = None
@@ -1060,6 +1501,11 @@ def calculate_day_text(
     combined_wind_flag = False
 
     if has_precip:
+        # Alongside thunderstorms, all-day precipitation is the bare condition
+        # ("Rain, with ..."), as in half-day summaries
+        bare_all_day_precip = half_day or (
+            storms_accompany_precip and len(precip_periods) == num_periods
+        )
         (
             precip_only_summary,
             combined_wind_flag,
@@ -1073,12 +1519,39 @@ def calculate_day_text(
             vis_periods,
             overall_max_wind,
             icon_set,
-            half_day,
+            bare_all_day_precip,
+            for_night=night_half_day and not storms_accompany_precip,
+            time_phrase=precip_time_phrase,
         )
 
-    # Thunderstorms that don't match the precipitation periods get their own summary
-    if has_thunderstorm and not thunderstorms_match_precip:
-        thunderstorm_only_summary, _, _ = calculate_period_summary_text(
+    if storms_accompany_precip:
+        thunderstorm_with_precip, _, _ = calculate_period_summary_text(
+            thunderstorm_periods,
+            thunderstorm_summary_text,
+            "precip",
+            all_period_names,
+            [],
+            [],
+            overall_max_wind,
+            icon_set,
+            half_day,
+        )
+        precip_only_summary = [
+            "accompanied-by",
+            precip_only_summary,
+            thunderstorm_with_precip,
+        ]
+        # Definite thunderstorms take the icon; possible ones keep the
+        # precipitation icon
+        if thunderstorm_summary_text == "thunderstorm" and thunderstorm_icon:
+            precip_icon = thunderstorm_icon
+    elif has_thunderstorm and not has_precip and thunderstorm_summary_text:
+        # Without a precipitation summary the thunderstorms stand on their own
+        (
+            thunderstorm_only_summary,
+            combined_wind_flag,
+            combined_vis_flag,
+        ) = calculate_period_summary_text(
             thunderstorm_periods,
             thunderstorm_summary_text,
             "precip",  # Use precip type since thunderstorms have same priority
@@ -1088,6 +1561,7 @@ def calculate_day_text(
             overall_max_wind,
             icon_set,
             half_day,
+            for_night=night_half_day,
         )
 
     if has_wind:
@@ -1132,7 +1606,6 @@ def calculate_day_text(
     # 1: Visibility (Fog)
     # 2: Wind
     # 3: Cloud (fallback)
-    num_periods = len(period_stats)
     candidate_summaries = []
 
     if precip_only_summary:
@@ -1143,6 +1616,7 @@ def calculate_day_text(
                 "start_idx": precip_periods[0],
                 "text": precip_only_summary,
                 "icon": precip_icon,
+                "accumulation": accumulation_sentence,
             }
         )
 
@@ -1191,12 +1665,29 @@ def calculate_day_text(
             }
         )
 
-    # Cloud cover as a fallback if no other condition is present
+    # Cloud cover as a fallback if no other condition is present. Wind and fog
+    # would be candidates themselves, so there is nothing to combine it with.
     if not candidate_summaries:
-        # Cloud full summary, including potential combinations with wind/vis
+        cloud_text = final_cloud_text
+        cloud_idx = overall_cloud_idx
+        # A change over the window ("clearing", "X becoming Y"), otherwise
+        # periods split between two neighbouring levels ("generally overcast",
+        # "partly cloudy to mostly cloudy") throughout the window
+        cloud_transition = _cloud_transition(hourly_cloud_covers, hour_period_idx)
+        cloud_range = (
+            _cloud_range(cloud_levels, hourly_cloud_covers)
+            if cloud_transition is None
+            else None
+        )
+        if cloud_transition is not None:
+            cloud_text, cloud_idx = cloud_transition
+        elif cloud_range is not None:
+            cloud_text = cloud_range
+            cloud_idx = list(range(num_periods))
+
         cloud_full_summary, _, _ = calculate_period_summary_text(
-            overall_cloud_idx,
-            final_cloud_text,
+            cloud_idx,
+            cloud_text,
             "cloud",
             all_period_names,
             wind_periods,
@@ -1208,7 +1699,7 @@ def calculate_day_text(
         candidate_summaries.append(
             {
                 "priority": 3,
-                "all_day": len(overall_cloud_idx) == num_periods,
+                "all_day": len(cloud_idx) == num_periods,
                 "start_idx": 0,  # Cloud is always "present" from the start of the forecast
                 "text": cloud_full_summary,
                 "icon": calculate_sky_icon(
@@ -1223,18 +1714,28 @@ def calculate_day_text(
     )
 
     # Select the top 2 summaries; the icon comes from the first one that has an icon
-    selected_texts = [summary["text"] for summary in candidate_summaries[:2]]
+    selected_summaries = candidate_summaries[:2]
     current_c_icon = next(
-        (summary["icon"] for summary in candidate_summaries[:2] if summary["icon"]),
+        (summary["icon"] for summary in selected_summaries if summary["icon"]),
         None,
     )
 
-    if len(selected_texts) == 1:
-        final_constructed_summary = ["sentence", selected_texts[0]]
-    else:
+    # Each condition gets its own sentence ("Drizzle until tomorrow afternoon.
+    # Breezy from tomorrow morning until tomorrow evening."). Conditions in the
+    # same periods were already joined with "and" above ("Rain and windy until
+    # afternoon."). The expected amount follows the precipitation sentence.
+    sentences = []
+    for summary in selected_summaries:
+        sentences.append(["sentence", summary["text"]])
+        if summary.get("accumulation") is not None:
+            sentences.append(["sentence", summary["accumulation"]])
+
+    final_constructed_summary = sentences[-1]
+    for sentence in reversed(sentences[:-1]):
         final_constructed_summary = [
-            "sentence",
-            ["and", selected_texts[0], selected_texts[1]],
+            "multiple-sentences",
+            sentence,
+            final_constructed_summary,
         ]
 
     # Ensure an icon is always returned, defaulting to overall average cloud cover if none set.

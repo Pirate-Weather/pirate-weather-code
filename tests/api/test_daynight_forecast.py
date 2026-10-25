@@ -101,3 +101,26 @@ def test_three_period_precip_summary_stays_valid():
         "rain",
         ["sentence", ["starting", "light-rain", "today-morning"]],
     )
+
+
+def test_rain_all_night_uses_for_night():
+    """A night half-day with rain from evening through the night must say
+    "throughout the night"; a slice of the evening alone must not, since it
+    isn't the whole night.
+    """
+    drizzle = {
+        "precipType": "rain",
+        "rainIntensity": 0.2,
+        "liquidAccumulation": 0.2,
+        "precipProbability": 0.9,
+        "cloudCover": 0.95,
+    }
+
+    assert _half_day(make_hours(12, _utc(18), **drizzle), is_day=False)[1] == [
+        "sentence",
+        ["for-night", "very-light-rain"],
+    ]
+    assert _half_day(make_hours(4, _utc(18), **drizzle), is_day=False)[1] == [
+        "sentence",
+        "very-light-rain",
+    ]

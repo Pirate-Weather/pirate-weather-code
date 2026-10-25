@@ -25,6 +25,9 @@ WEEK_DAYS_MINUS_ONE = 6
 WEEK_DAYS = 7
 WEEK_DAYS_PLUS_ONE = 8
 MIN_THUNDERSTORM_DAYS = 2
+# Highs that all fall within this range (°C) are "steady around" their mean
+# rather than rising, falling, peaking or valleying.
+STEADY_TEMPERATURE_RANGE_C = 2
 
 
 def _combined_precip_type(precipitation_days):
@@ -52,7 +55,7 @@ def _combined_precip_type(precipitation_days):
     return "mixed-precipitation"
 
 
-def _day_run_text(run):
+def _day_run_items(run):
     """
     Describes a run of consecutive precipitation days.
 
@@ -60,13 +63,12 @@ def _day_run_text(run):
     - run (arr): Consecutive entries of the precipitation days array ([index, day name, day])
 
     Returns:
-    - str | arr: The day name, or the first and last days joined with "and" or "through".
+    - list: ["through", first, last] for three or more days, otherwise the
+      individual day names.
     """
     if len(run) > 2:
-        return ["through", run[0][1], run[-1][1]]
-    if len(run) == 2:
-        return ["and", run[0][1], run[-1][1]]
-    return run[0][1]
+        return [["through", run[0][1], run[-1][1]]]
+    return [day[1] for day in run]
 
 
 def calculate_summary_text(
@@ -244,19 +246,21 @@ def calculate_summary_text(
             precipitation[len(precipitation) - 1][1],
         ]
     else:
-        # Describe each run of consecutive precipitation days, then join the
-        # runs together with "and" (at most four runs fit in eight days).
-        run_texts = []
+        # Describe each run of consecutive precipitation days. Two items are
+        # joined with "and"; three or more use "list" rather than nested "and"s
+        # ("today through Sunday, Tuesday and Thursday").
+        day_items = []
         run_start = 0
         for run in days:
-            run_texts.append(
-                _day_run_text(precipitation[run_start : run_start + len(run)])
+            day_items.extend(
+                _day_run_items(precipitation[run_start : run_start + len(run)])
             )
             run_start += len(run)
 
-        wText = run_texts[-1]
-        for run_text in reversed(run_texts[:-1]):
-            wText = ["and", run_text, wText]
+        if len(day_items) == 2:
+            wText = ["and", day_items[0], day_items[1]]
+        else:
+            wText = ["list", *day_items]
 
     return wIcon, wText, wWeekend, c_icon
 
@@ -410,6 +414,14 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr, unitSystem="si"):
         temp_unit_str = "celsius"
         high_temp_display = round(highTemp[2])
         low_temp_display = round(lowTemp[2])
+
+    # If the highs hardly change over the week, say they are steady around
+    # their mean. highTemp and lowTemp are the warmest and coolest highs.
+    if highTemp[2] - lowTemp[2] <= STEADY_TEMPERATURE_RANGE_C:
+        mean_high = np.nanmean([day["temperatureHigh"] for day in weekArr])
+        if unitSystem == "us":
+            mean_high = mean_high * 9 / 5 + 32
+        return ["temperatures-steady", [temp_unit_str, round(mean_high)]]
 
     # If the temperature is increasing everyday or if the lowest temperatue is at the start of the week and the highest temperature is at the end of the week use the rising text
     if all(
