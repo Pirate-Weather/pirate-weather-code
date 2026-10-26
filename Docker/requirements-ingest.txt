@@ -1,5 +1,5 @@
-aiohttp==3.14.4
-aiobotocore[boto3]==3.9.2
+aiohttp==3.14.5
+aiobotocore[boto3]==3.10.0
 bottleneck==1.6.0
 cartopy==0.26.0
 cfgrib==0.9.15.1
@@ -11,11 +11,11 @@ eccodes==2.47.0
 geopandas==1.2.0
 herbie-data==2026.9.2
 metpy==1.7.1
-netCDF4==1.7.4
+netCDF4==1.7.5.1.post1
 numba==0.68.0
 numpy==2.5.3
 nwswx==0.1.2
-pandas==3.0.6
+pandas==3.1.0
 pyarrow==26.0.0
 python-dotenv==1.2.4
 pykml==0.2.0
