@@ -1,309 +1,89 @@
-import sys
-from pathlib import Path
+"""Snow accumulation wording in the daily summary.
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+The daily text appends a snow amount to the precipitation clause. Its form
+depends on the model's precipitation error: a "low-high" range, "< N", or an
+exact value when the source has no error field (ERA5).
+"""
+
+import numpy as np
+import pytest
 
 from API.PirateDailyText import calculate_day_text
+from tests.helpers.text import make_hours
+
+# 24 hours of light snow at -2 C / 5 m/s. Each hour's precipIntensityError
+# (liquid mm) is turned into snow depth at about 7.2 mm per mm by the density
+# formula, then summed into the daily error.
+SNOW = {
+    "precipType": "snow",
+    "snowIntensity": 1.0,
+    "precipProbability": 0.8,
+    "cloudCover": 0.9,
+    "temperature": -2.0,
+    "dewPoint": -4.0,
+}
 
 
-def create_hour_with_snow(snow_accum, snow_error=0, time_offset=0):
-    """Create an hour object with snow accumulation.
+@pytest.mark.parametrize(
+    ("snow_mm_per_hour", "error_mm_per_hour", "unit_system", "expected_amount"),
+    [
+        # 2.4 cm +/- 0.9 cm
+        pytest.param(1.0, 0.1, "si", ["centimeters", ["range", 1, 4]], id="range-si"),
+        # 2.4 in +/- 0.9 in
+        pytest.param(2.54, 0.25, "us", ["inches", ["range", 1, 4]], id="range-us"),
+        # Models with a zero error field: no lower bound to show.
+        pytest.param(
+            1.0, 0.0, "si", ["less-than", ["centimeters", 3]], id="zero-error"
+        ),
+        # ERA5 has no error field: show the rounded-up amount itself.
+        pytest.param(1.0, np.nan, "si", ["centimeters", 3], id="missing-error"),
+        # 2.4 cm +/- 1.5 cm: range would start at 0 and the top (4 cm) is below
+        # LESS_THAN_TOLERANCE (5 cm), so "< 4 cm".
+        pytest.param(
+            1.0,
+            0.175,
+            "si",
+            ["less-than", ["centimeters", 4]],
+            id="zero-low-below-tolerance",
+        ),
+        # 2.4 cm +/- 3 cm: top reaches the 5 cm tolerance, so the 0 lower bound
+        # is bumped to 1 and a range is kept (#510).
+        pytest.param(
+            1.0,
+            0.35,
+            "si",
+            ["centimeters", ["range", 1, 6]],
+            id="zero-low-bumped-510",
+        ),
+    ],
+)
+def test_daily_snow_accumulation_sentence(
+    snow_mm_per_hour, error_mm_per_hour, unit_system, expected_amount
+):
+    """Pin the exact snow amount phrase for each error regime and unit system.
 
-    Args:
-        snow_accum (float): Snow accumulation in mm
-        snow_error (float): Precipitation intensity error in mm
-        time_offset (int): Time offset in seconds
-
-    Returns:
-        dict: Hour object with snow data
+    Guards the unit conversion, the floor/ceil range rule, the missing-error
+    (ERA5) path, and the #510 rule that large uncertain totals show "1-N"
+    instead of a misleading "< N".
     """
-    return {
-        "time": 1609459200 + time_offset,
-        "precipType": "snow",
-        "rainIntensity": 0.0,
-        "snowIntensity": 1.0,
-        "iceIntensity": 0.0,
-        "liquidAccumulation": 0.0,
-        "snowAccumulation": snow_accum,
-        "iceAccumulation": 0.0,
-        "precipProbability": 0.8,
-        "cloudCover": 0.9,
-        "windSpeed": 5.0,
-        "temperature": -2.0,
-        "humidity": 0.8,
-        "visibility": 5.0,
-        "dewPoint": -4.0,
-        "smoke": 0,
-        "cape": 0,
-        "precipIntensityError": snow_error,
-    }
+    hours = make_hours(
+        24,
+        **SNOW,
+        snowAccumulation=snow_mm_per_hour,
+        precipIntensityError=error_mm_per_hour,
+    )
 
-
-def test_snow_range_with_error_si_units():
-    """Test that snow accumulation shows range when error data is available (SI units - cm)."""
-    # Create 24 hours with 1mm snow each and 0.5mm error each = 24mm total, 12mm total error
-    # This should result in 2.4cm ± 1.2cm = range of 1-4 cm (floor/ceil applied)
-    hours = [create_hour_with_snow(1.0, 0.05, i * 3600) for i in range(24)]
-
-    _, summary = calculate_day_text(
+    icon, summary = calculate_day_text(
         hours,
         is_day_time=True,
         time_zone="UTC",
         mode="daily",
         icon_set="darksky",
-        unit_system="si",
+        unit_system=unit_system,
     )
 
-    # The summary should contain a snow sentence with a range
-    assert summary is not None
-    assert isinstance(summary, list)
-
-    # Recursively search for the snow sentence
-    def find_snow_sentence(obj):
-        if isinstance(obj, list):
-            for item in obj:
-                if (
-                    isinstance(item, list)
-                    and len(item) >= 2
-                    and (
-                        item[0] == "centimeters"
-                        and isinstance(item[1], list)
-                        and item[1][0] == "range"
-                    )
-                ):
-                    return item
-                result = find_snow_sentence(item)
-                if result:
-                    return result
-        return None
-
-    snow_sentence = find_snow_sentence(summary)
-    assert snow_sentence is not None, f"Snow sentence not found in summary: {summary}"
-    assert snow_sentence[0] == "centimeters"
-    assert isinstance(snow_sentence[1], list)
-    assert snow_sentence[1][0] == "range", (
-        f"Expected range format, got: {snow_sentence[1]}"
-    )
-
-    # Check that we have a valid range (low should be >= 0, high should be > low)
-    low = snow_sentence[1][1]
-    high = snow_sentence[1][2]
-    assert low >= 0
-    assert high > low
-    print(f"✓ Snow range with error (SI): {low}-{high} cm")
-
-
-def test_snow_range_without_error_si_units():
-    """Test that snow accumulation shows less-than format when error is 0 (SI units - cm)."""
-    # Create 24 hours with 1mm snow each and 0.0 error (not missing) = 24mm total, 0mm error
-    # With error = 0 (ECMWF/GEFS), should show "< 3 cm" format
-    hours = [create_hour_with_snow(1.0, 0.0, i * 3600) for i in range(24)]
-
-    _, summary = calculate_day_text(
-        hours,
-        is_day_time=True,
-        time_zone="UTC",
-        mode="daily",
-        icon_set="darksky",
-        unit_system="si",
-    )
-
-    assert summary is not None
-    assert isinstance(summary, list)
-
-    # Recursively search for the less-than snow sentence
-    def find_less_than_sentence(obj):
-        if isinstance(obj, list):
-            for i, item in enumerate(obj):
-                if (
-                    item == "less-than"
-                    and i + 1 < len(obj)
-                    and isinstance(obj[i + 1], list)
-                    and len(obj[i + 1]) >= 2
-                    and obj[i + 1][0] == "centimeters"
-                ):
-                    return obj[i:]  # Return from "less-than" onwards
-                result = find_less_than_sentence(item)
-                if result:
-                    return result
-        return None
-
-    snow_sentence = find_less_than_sentence(summary)
-    assert snow_sentence is not None, f"Snow sentence not found in summary: {summary}"
-
-    # Should use less-than format when error is 0
-    assert snow_sentence[0] == "less-than", (
-        f"Expected less-than format, got: {snow_sentence}"
-    )
-    assert isinstance(snow_sentence[1], list)
-    assert snow_sentence[1][0] == "centimeters"
-    assert snow_sentence[1][1] > 0  # Should have a positive upper bound
-    print(f"✓ Snow with error=0 (SI): < {snow_sentence[1][1]} cm")
-
-
-def test_snow_range_with_error_us_units():
-    """Test that snow accumulation shows range when error data is available (US units - inches)."""
-    # Create 24 hours with 2.54mm snow each and 1.27mm error each = 60.96mm total, 30.48mm error
-    # This converts to ~2.4 inches total ± ~1.2 inches error = range with floor/ceil applied
-    hours = [create_hour_with_snow(2.54, 0.127, i * 3600) for i in range(24)]
-
-    _, summary = calculate_day_text(
-        hours,
-        is_day_time=True,
-        time_zone="UTC",
-        mode="daily",
-        icon_set="darksky",
-        unit_system="us",
-    )
-
-    assert summary is not None
-    assert isinstance(summary, list)
-
-    # Recursively search for the snow sentence with inches
-    def find_snow_sentence(obj):
-        if isinstance(obj, list):
-            for item in obj:
-                if (
-                    isinstance(item, list)
-                    and len(item) >= 2
-                    and (
-                        item[0] == "inches"
-                        and isinstance(item[1], list)
-                        and item[1][0] == "range"
-                    )
-                ):
-                    return item
-                result = find_snow_sentence(item)
-                if result:
-                    return result
-        return None
-
-    snow_sentence = find_snow_sentence(summary)
-    assert snow_sentence is not None, f"Snow sentence not found in summary: {summary}"
-    assert snow_sentence[0] == "inches"
-    assert isinstance(snow_sentence[1], list)
-    assert snow_sentence[1][0] == "range", (
-        f"Expected range format, got: {snow_sentence[1]}"
-    )
-
-    low = snow_sentence[1][1]
-    high = snow_sentence[1][2]
-    assert low >= 0
-    assert high > low
-    print(f"✓ Snow range with error (US): {low}-{high} inches")
-
-
-def test_snow_small_accumulation_with_error():
-    """Test that small snow accumulation with error still shows appropriate format."""
-    # Create 24 hours with 0.5mm snow and 0.3mm error = 12mm total, 7.2mm total error
-    # This should result in 1.2cm ± 0.72cm = range of 0-2 cm, which becomes "< 2 cm"
-    hours = [create_hour_with_snow(0.5, 0.3, i * 3600) for i in range(24)]
-
-    _, summary = calculate_day_text(
-        hours,
-        is_day_time=True,
-        time_zone="UTC",
-        mode="daily",
-        icon_set="darksky",
-        unit_system="si",
-    )
-
-    assert summary is not None
-    assert isinstance(summary, list)
-
-    # Recursively search for either less-than or range format
-    def find_snow_sentence(obj):
-        if isinstance(obj, list):
-            for i, item in enumerate(obj):
-                # Check for less-than format
-                if (
-                    item == "less-than"
-                    and i + 1 < len(obj)
-                    and isinstance(obj[i + 1], list)
-                    and len(obj[i + 1]) >= 2
-                    and obj[i + 1][0] == "centimeters"
-                ):
-                    return obj[i:]
-                # Check for range format
-                if (
-                    isinstance(item, list)
-                    and len(item) >= 2
-                    and item[0] == "centimeters"
-                    and isinstance(item[1], list)
-                ):
-                    return item
-                result = find_snow_sentence(item)
-                if result:
-                    return result
-        return None
-
-    snow_sentence = find_snow_sentence(summary)
-    assert snow_sentence is not None, f"Snow sentence not found in summary: {summary}"
-
-    # Should use less-than format when lower range is 0
-    if snow_sentence[0] == "less-than":
-        assert isinstance(snow_sentence[1], list)
-        assert snow_sentence[1][0] == "centimeters"
-        print(f"✓ Small snow accumulation: < {snow_sentence[1][1]} cm")
-    else:
-        # Could also be a range if the calculation gives a non-zero lower bound
-        assert snow_sentence[0] == "centimeters"
-        assert isinstance(snow_sentence[1], list)
-        if snow_sentence[1][0] == "range":
-            print(
-                f"✓ Small snow accumulation: {snow_sentence[1][1]}-{snow_sentence[1][2]} cm"
-            )
-        else:
-            print("✓ Small snow accumulation in correct format")
-
-
-def test_snow_exact_value_when_error_missing():
-    """Test that snow accumulation shows exact value when error is missing (np.nan)."""
-    import numpy as np
-
-    # Create 24 hours with 1mm snow each but error is np.nan (ERA5 data)
-    # With missing error data, should show exact value "3 cm" (not range or <)
-    hours = [create_hour_with_snow(1.0, np.nan, i * 3600) for i in range(24)]
-
-    _, summary = calculate_day_text(
-        hours,
-        is_day_time=True,
-        time_zone="UTC",
-        mode="daily",
-        icon_set="darksky",
-        unit_system="si",
-    )
-
-    assert summary is not None
-    assert isinstance(summary, list)
-
-    # Recursively search for the snow sentence with exact value
-    def find_exact_value_sentence(obj):
-        if isinstance(obj, list):
-            for item in obj:
-                if (
-                    isinstance(item, list)
-                    and len(item) >= 2
-                    and item[0] == "centimeters"
-                    and isinstance(item[1], (int, float))
-                    and not isinstance(item[1], list)
-                ):
-                    return item
-                result = find_exact_value_sentence(item)
-                if result:
-                    return result
-        return None
-
-    snow_sentence = find_exact_value_sentence(summary)
-    assert snow_sentence is not None, f"Snow sentence not found in summary: {summary}"
-
-    # Should use exact value format when error is missing (np.nan)
-    assert snow_sentence[0] == "centimeters", (
-        f"Expected centimeters format, got: {snow_sentence}"
-    )
-    assert isinstance(snow_sentence[1], (int, float))
-    assert not isinstance(snow_sentence[1], list), (
-        f"Expected exact value, not range or less-than: {snow_sentence}"
-    )
-    assert snow_sentence[1] > 0  # Should have a positive value
-    print(f"✓ Snow with missing error (SI): {snow_sentence[1]} cm (exact)")
+    assert summary == [
+        "sentence",
+        ["for-day", ["parenthetical", "very-light-snow", expected_amount]],
+    ]
+    assert icon == "snow"

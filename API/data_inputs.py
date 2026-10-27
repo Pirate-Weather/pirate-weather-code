@@ -1075,24 +1075,58 @@ def prepare_data_inputs(
     )
 
     # --- lifted_index_inputs ---
-    lifted_index_inputs = _stack_fields(
+    # The thunderstorm indices use the usual regional priority: the Canadian
+    # models first in Canada, GFS ahead of GDPS elsewhere. HRDPS stores the
+    # surface-parcel LFTX, while GDPS (MU-VT) and GFS (4LFTX) store a
+    # most-unstable / best-layer lifted index.
+    lifted_index_inputs = _stack_with_priority(
         num_hours,
-        hrdps_merged[:, HRDPS["lifted_index"]] if hrdps_merged is not None else None,
+        lat,
+        lon,
+        source_data={
+            "hrdps": hrdps_merged[:, HRDPS["lifted_index"]]
+            if hrdps_merged is not None
+            else None,
+            "gdps": gdps_merged[:, GDPS["lifted_index"]]
+            if gdps_merged is not None
+            else None,
+            "gfs": gfs_merged[:, GFS["lifted_index"]]
+            if gfs_merged is not None
+            else None,
+        },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- vertical_velocity_inputs ---
-    vertical_velocity_inputs = _stack_fields(
+    # 500 hPa omega (Pa/s) from every source
+    vertical_velocity_inputs = _stack_with_priority(
         num_hours,
-        hrdps_merged[:, HRDPS["vertical_velocity"]]
-        if hrdps_merged is not None
-        else None,
-        gdps_merged[:, GDPS["vertical_velocity"]] if gdps_merged is not None else None,
+        lat,
+        lon,
+        source_data={
+            "hrdps": hrdps_merged[:, HRDPS["vertical_velocity"]]
+            if hrdps_merged is not None
+            else None,
+            "gdps": gdps_merged[:, GDPS["vertical_velocity"]]
+            if gdps_merged is not None
+            else None,
+            "gfs": gfs_merged[:, GFS["vertical_velocity"]]
+            if gfs_merged is not None
+            else None,
+        },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- convective_inhibition_inputs ---
-    convective_inhibition_inputs = _stack_fields(
+    convective_inhibition_inputs = _stack_with_priority(
         num_hours,
-        gdps_merged[:, GDPS["cin"]] if gdps_merged is not None else None,
+        lat,
+        lon,
+        source_data={
+            "gdps": gdps_merged[:, GDPS["cin"]] if gdps_merged is not None else None,
+            "gfs": gfs_merged[:, GFS["cin"]] if gfs_merged is not None else None,
+        },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- k_index_inputs ---

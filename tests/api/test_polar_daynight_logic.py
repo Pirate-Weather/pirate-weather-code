@@ -1,36 +1,49 @@
-from API.utils.geo import _polar_is_all_day
+"""Sunrise/sunset fallback for polar day and polar night."""
+
+import datetime
+
+import numpy as np
+import pytest
+from astral import LocationInfo
+from pytz import timezone
+
+from API.utils.solar import calculate_solar_times
+
+LONGYEARBYEN = LocationInfo(
+    "Longyearbyen", "Svalbard", "Arctic/Longyearbyen", 78.22, 15.65
+)
 
 
-def test_polar_day_night_logic_northern():
-    # High northern latitude in November -> polar night (not polar day)
-    lat = 76.417
-    month = 11
-    assert _polar_is_all_day(lat, month) is False
+@pytest.mark.parametrize(
+    ("month", "all_day", "all_night"),
+    [
+        pytest.param(6, True, False, id="june-polar-day"),
+        pytest.param(12, False, True, id="december-polar-night"),
+    ],
+)
+def test_polar_fallback_flags_and_sun_times(month, all_day, all_night):
+    """astral raises when the sun never rises or sets; the fallback must flag the
+    day correctly and place sunrise/sunset inside it, otherwise daily icons and
+    day/night splits are wrong for every high-Arctic location for months.
+    """
+    base_day = timezone(LONGYEARBYEN.timezone).localize(
+        datetime.datetime(2024, month, 15)
+    )
+    day_start = int(base_day.timestamp())
 
-    # High northern latitude in June -> polar day
-    month = 6
-    assert _polar_is_all_day(lat, month) is True
+    sunrise, sunset, dawn, dusk, is_all_day, is_all_night = calculate_solar_times(
+        day_index=0,
+        base_day=base_day,
+        location=LONGYEARBYEN,
+        day_array_grib=np.array([day_start]),
+        latitude=LONGYEARBYEN.latitude,
+    )
 
-
-def test_polar_day_night_logic_southern():
-    # High southern latitude in December -> polar day (southern summer)
-    lat = -76.0
-    month = 12
-    assert _polar_is_all_day(lat, month) is True
-
-    # High southern latitude in June -> polar night
-    month = 6
-    assert _polar_is_all_day(lat, month) is False
-
-
-def test_polar_day_night_edge_months():
-    # Test boundary months
-    lat = 80.0
-    assert _polar_is_all_day(lat, 4) is True
-    assert _polar_is_all_day(lat, 9) is True
-    assert _polar_is_all_day(lat, 3) is False
-
-    lat = -80.0
-    assert _polar_is_all_day(lat, 10) is True
-    assert _polar_is_all_day(lat, 3) is True
-    assert _polar_is_all_day(lat, 4) is False
+    assert (is_all_day, is_all_night) == (all_day, all_night)
+    if all_day:
+        # Sun "rises" at the first second and "sets" at the last of the day.
+        assert (sunrise, sunset) == (day_start + 1, day_start + 86399)
+    else:
+        # Sunrise and sunset collapse into the final seconds of the day.
+        assert (sunrise, sunset) == (day_start + 86398, day_start + 86399)
+    assert (dawn, dusk) == (sunrise, sunset)

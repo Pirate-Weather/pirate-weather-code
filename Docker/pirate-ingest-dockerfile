@@ -162,5 +162,6 @@ RUN python3 -m pip install --upgrade pip && \
 # App code
 # ----------------------------------------------------------------------
 COPY API /app/API
+COPY ingest /app/ingest
 
 ENTRYPOINT ["python3"]

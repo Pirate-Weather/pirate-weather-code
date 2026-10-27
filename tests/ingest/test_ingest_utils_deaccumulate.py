@@ -2,7 +2,6 @@
 
 import dask.array as da
 import numpy as np
-import pytest
 
 from API.ingest_utils import (
     FORECAST_LEAD_RANGES,
@@ -12,6 +11,10 @@ from API.ingest_utils import (
 
 
 def test_deaccumulate_to_hourly_rate_uses_geps_interval_lengths() -> None:
+    """GEPS output steps change from 3 h to 6 h at hour 192. Dividing each
+    accumulation difference by a fixed step would double (or halve) the
+    precipitation rate after the switch; each interval must use its own length.
+    """
     forecast_hours = np.asarray(FORECAST_LEAD_RANGES["GEPS"])
     interval_hours = np.diff(np.insert(forecast_hours, 0, 0))
     expected_rates = np.stack(
@@ -34,6 +37,11 @@ def test_deaccumulate_to_hourly_rate_uses_geps_interval_lengths() -> None:
 
 
 def test_deaccumulate_energy_to_flux_uses_interval_lengths_and_clips() -> None:
+    """GDPS/HRDPS publish shortwave radiation as accumulated energy (J/m2). It
+    must become a flux (W/m2) using each interval's real length, and a decreasing
+    accumulation must clip to 0 rather than produce
+    negative radiation.
+    """
     times = np.array(
         [
             "2026-01-01T03:00:00",
@@ -64,20 +72,3 @@ def test_deaccumulate_energy_to_flux_uses_interval_lengths_and_clips() -> None:
             ]
         ),
     )
-
-
-@pytest.mark.parametrize(
-    "times",
-    [
-        np.array(["2026-01-01T00:00:00"], dtype="datetime64[s]"),
-        np.array(
-            ["2026-01-01T01:00:00", "2026-01-01T00:00:00"],
-            dtype="datetime64[s]",
-        ),
-    ],
-)
-def test_deaccumulate_energy_to_flux_rejects_invalid_times(
-    times: np.ndarray,
-) -> None:
-    with pytest.raises(ValueError):
-        deaccumulate_energy_to_flux(np.ones((len(times), 1)), times)

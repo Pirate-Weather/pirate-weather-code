@@ -18,7 +18,8 @@ An important high level note: One of the key goals of this API is to be efficien
 **Data Processing:**
 - `API/forecast_sources.py` - Model merging and source priority logic
 - `API/data_inputs.py` - Data preparation and input organization with priority stacking
-- `API/io/zarr_reader.py` - Zarr store management and updates
+- `API/io/store_reader.py` - Opening the stores (tensorstore), swapping in new versions, and point reads
+- `API/store_sync.py` - Copies new store versions from S3 to the API's local disk
 - `API/request/preprocess.py` - Request validation and parameter parsing
 - `API/request/grid_indexing.py` - Grid point calculation for different projections
 
@@ -63,7 +64,7 @@ This phase focuses on retrieving the raw model data, processing it, and saving i
 
 * **Create a New Ingestion Script**:
 
-  * Working off existing scripts like `API/HRRR_Local_Ingest.py`, create a new Python script (e.g., `API/YOUR_MODEL_Local_Ingest.py`). Every model has its own quirks, but HRRR provides a good starting point with a minimum of weirdness.
+  * Working off existing scripts like `ingest/HRRR_Local_Ingest.py`, create a new Python script (e.g., `ingest/YOUR_MODEL_Local_Ingest.py`). Every model has its own quirks, but HRRR provides a good starting point with a minimum of weirdness.
 
   * This script should, while staying within 16 GB of RAM:
  
@@ -81,13 +82,11 @@ This phase focuses on retrieving the raw model data, processing it, and saving i
 		4.  De-average any variables that need it (such as UV) ([Example](https://github.com/Pirate-Weather/pirate-weather-code/blob/aeef857c7c6133ccef2f439efe5c718c75813caf/API/GFS_Local_Ingest.py#L417)) 
 		5.  Save the Zarr archives locally in the `/mnt/nvme/` directory, which is typically mounted from a Docker volume. The `save_path` and `save_type` environment variables control this, compressed and chunked along the time dimension ([Example](https://github.com/Pirate-Weather/pirate-weather-code/blob/aeef857c7c6133ccef2f439efe5c718c75813caf/API/HRRR_Local_Ingest.py#L282)) 
 
-    * Download 1-hourly forecasts to use as an approximation of observed data. Some day a better approach could be more accurate here, but it's a reasonably good proxy.
+    * Most model stores hold forecast hours only, starting at the first forecast lead. Short-term history ("observed" hours before the run) is only kept for GFS, ECMWF, REPS, URMA and FMI SILAM; the API places every store by valid time and fills hours a model doesn't cover from the next source in priority order. A new model should normally be forecast-only and listed in `FIRST_FORECAST_LEAD_HOURS` (`API/constants/shared_const.py`).
 
-    * Merge 48 hours worth of "observed" data with the forecast data to create a cohesive time series.  
-
-    * Merge variables together along an axis to create a 4D array (parameter, time, X, Y), chunked so that all variables and all times are stored in the same chunk (-1, -1, 3, 3). This step might have to be done in Dask to reduce memory requirements.
+    * Merge variables together along an axis to create a 4D array (parameter, time, Y, X) without a time variable, and write it with `write_final_zarr` (`API/ingest_utils.py`): all variables and all times share one small inner chunk (`FINAL_CHUNK_SIZES`), chunks are grouped into shards (`FINAL_SHARD_SIZES`, under ~150 MB uncompressed), and the valid times go in the array's `time` attribute. The API reader rebuilds them as column 0, so `zarr_vars[i]` is column `i + 1` of the model's index map. This step might have to be done in Dask to reduce memory requirements.
    
-    * Save the final Zarr array to disk and upload to S3! 
+    * Publish with `publish_ingest_run`, which uploads a new version (`<MODEL>/<stamp>.zarr`) and then moves the `<MODEL>.current.json` pointer.
 
 * **Update Docker Configuration**:
 
@@ -109,19 +108,11 @@ This phase involves modifying the API's core logic to load the new model's data 
     YOUR_MODEL = "your_model_name"
     ```
 
-* **Declare New Global Zarr Variable**:
+* **Open the New Store**:
 
-  * In `API/responseLocal.py` (or more appropriately in `API/io/zarr_reader.py` if following the modular pattern), declare a new global variable for your model's Zarr store, for example, `YOUR_MODEL_Zarr`.
+  * Add `YOUR_MODEL_Zarr` to the `ZarrStores` dataclass and `("YOUR_MODEL_Zarr", "YOUR_MODEL")` to `FORECAST_STORES` in `API/io/store_reader.py`. Every API worker then opens it with tensorstore at startup and swaps in new versions as `API/store_sync.py` copies them; the sync picks up the same list.
 
-* **Update `update_zarr_store` Function**:
-
-  * Modify the `update_zarr_store(initialRun)` function in `API/io/zarr_reader.py` (or `API/responseLocal.py` depending on code version) to find and open your new model's Zarr file.
-
-  * Add logic to locate the latest version of your model's Zarr store (similar to how existing models are handled).
-
-  * Include `zarr.open` calls for your model's Zarr store, similar to existing models.
-
-  * Add download/sync logic if using S3 or remote storage.
+  * Pass `stores.YOUR_MODEL_Zarr` into `ZarrSources` in `API/responseLocal.py` and read it with `weather.zarr_read` in `API/request/grid_indexing.py`.
 
 * **Integrate into `PW_Forecast` Endpoint**:
 

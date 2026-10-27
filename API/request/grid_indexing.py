@@ -36,7 +36,7 @@ from API.constants.grid_const import (
     RTMA_RU_Y_MIN,
 )
 from API.constants.model_const import ERA5, ERA5_SOURCE_VARS, RAQDPS, SILAM
-from API.constants.shared_const import HISTORY_PERIODS
+from API.constants.shared_const import FIRST_FORECAST_LEAD_HOURS, HISTORY_PERIODS
 from API.utils.geo import is_in_north_america, lambertGridMatch
 from API.utils.timing import StepTimer
 
@@ -315,6 +315,17 @@ def _aq_source_covers_request(
     return bool(
         model_times.size and np.any(np.abs(model_times[:, None] - request_times) < 3600)
     )
+
+
+# RAQDPS keeps no history, but a stale run still holds rows for hours that are
+# now in the past. Never serve rows older than this, so a stale run cannot extend
+# time machine coverage (#751/#752).
+RAQDPS_MAX_LOOKBACK_HOURS = 48
+
+
+def _forecast_run_time(data: np.ndarray, model: str) -> float:
+    """Model run time of a forecast-only store: first valid time minus the first lead."""
+    return data[0, 0] - FIRST_FORECAST_LEAD_HOURS[model] * 3600
 
 
 def _mask_old_aq_values(
@@ -1161,7 +1172,7 @@ async def calculate_grid_indexing(
                 ).replace(tzinfo=None)
             ) > datetime.timedelta(hours=4):
                 dataOut = False
-            hrrrhRunTime = dataOut_hrrrh[HISTORY_PERIODS["HRRR"], 0]
+            hrrrhRunTime = _forecast_run_time(dataOut_hrrrh, "HRRR")
             # Freshness check for HRRR 0-18h
             # The general rule is to exclude models after roughy 70% of their hours has past
             # HRRR has 18 hours of data so exclude if 13 hours stale
@@ -1190,7 +1201,7 @@ async def calculate_grid_indexing(
     if readNBM:
         dataOut_nbm = zarr_results["NBM"]
         if dataOut_nbm is not False:
-            nbmRunTime = dataOut_nbm[HISTORY_PERIODS["NBM"], 0]
+            nbmRunTime = _forecast_run_time(dataOut_nbm, "NBM")
             try:
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     nbmRunTime.astype(int), datetime.UTC
@@ -1265,7 +1276,7 @@ async def calculate_grid_indexing(
         dataOut_gefs = zarr_results["GEFS"]
         if dataOut_gefs is not False:
             try:
-                gefsRunTime = dataOut_gefs[HISTORY_PERIODS["GEFS"] - 3, 0]
+                gefsRunTime = _forecast_run_time(dataOut_gefs, "GEFS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     gefsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1284,7 +1295,7 @@ async def calculate_grid_indexing(
         dataOut_hrdps = zarr_results["HRDPS"]
         if dataOut_hrdps is not False:
             try:
-                hrdpsRunTime = dataOut_hrdps[HISTORY_PERIODS["HRDPS"] - 1, 0]
+                hrdpsRunTime = _forecast_run_time(dataOut_hrdps, "HRDPS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     hrdpsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1309,7 +1320,7 @@ async def calculate_grid_indexing(
         dataOut_gdps = zarr_results["GDPS"]
         if dataOut_gdps is not False:
             try:
-                gdpsRunTime = dataOut_gdps[HISTORY_PERIODS["GDPS"] - 1, 0]
+                gdpsRunTime = _forecast_run_time(dataOut_gdps, "GDPS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     gdpsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1334,7 +1345,7 @@ async def calculate_grid_indexing(
         dataOut_geps = zarr_results["GEPS"]
         if dataOut_geps is not False:
             try:
-                gepsRunTime = dataOut_geps[HISTORY_PERIODS["GEPS"] - 3, 0]
+                gepsRunTime = _forecast_run_time(dataOut_geps, "GEPS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     gepsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1359,7 +1370,7 @@ async def calculate_grid_indexing(
         dataOut_reps = zarr_results["REPS"]
         if dataOut_reps is not False:
             try:
-                repsRunTime = dataOut_reps[HISTORY_PERIODS["REPS"] - 3, 0]
+                repsRunTime = _forecast_run_time(dataOut_reps, "REPS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     repsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1405,17 +1416,11 @@ async def calculate_grid_indexing(
             if np.all(np.isnan(dataOut_dwd_mosmix[:, 1:])):
                 # All data is NaN, treat as no data available
                 dataOut_dwd_mosmix = False
-            elif len(dataOut_dwd_mosmix) > HISTORY_PERIODS["DWD_MOSMIX"]:
-                # Bounds check before accessing the specific index
-                # Negative 1 is because the 19Z forecast contains data starting at hour 1
-                dwdMosmixRunTime = dataOut_dwd_mosmix[
-                    HISTORY_PERIODS["DWD_MOSMIX"] - 1, 0
-                ]
+            else:
+                dwdMosmixRunTime = _forecast_run_time(dataOut_dwd_mosmix, "DWD_MOSMIX")
 
                 # Validate the timestamp is valid (not 0, NaN, or unreasonably old/future)
                 # A timestamp of 0 results in "1970-01-01 00Z" which indicates missing data
-                # Note: DWD MOSMIX may show timestamps up to 48 hours in the future when
-                # historical data is unavailable (uses HISTORY_PERIODS offset on forecast-only data)
                 if np.isnan(dwdMosmixRunTime) or dwdMosmixRunTime <= 0:
                     # Invalid timestamp (NaN or zero), treat as no data available
                     logger.debug(
@@ -1452,15 +1457,12 @@ async def calculate_grid_indexing(
                         sourceIDX["dwd_mosmix"]["lon"] = round(
                             ((dwd_lon + 180) % 360) - 180, 2
                         )
-            else:
-                # Data array too short, treat as no data available
-                dataOut_dwd_mosmix = False
 
     if readAIGFS:
         dataOut_aigfs = zarr_results["AIGFS"]
         if dataOut_aigfs is not False:
             try:
-                aigfsRunTime = dataOut_aigfs[HISTORY_PERIODS["AIGFS"] - 1, 0]
+                aigfsRunTime = _forecast_run_time(dataOut_aigfs, "AIGFS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     aigfsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1479,7 +1481,7 @@ async def calculate_grid_indexing(
         dataOut_aigefs = zarr_results["AIGEFS"]
         if dataOut_aigefs is not False:
             try:
-                aigefsRunTime = dataOut_aigefs[HISTORY_PERIODS["AIGEFS"] - 1, 0]
+                aigefsRunTime = _forecast_run_time(dataOut_aigefs, "AIGEFS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     aigefsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1498,7 +1500,7 @@ async def calculate_grid_indexing(
         dataOut_aifs = zarr_results["ECMWF_AIFS"]
         if dataOut_aifs is not False:
             try:
-                aifsRunTime = dataOut_aifs[HISTORY_PERIODS["ECMWF_AIFS"] - 1, 0]
+                aifsRunTime = _forecast_run_time(dataOut_aifs, "ECMWF_AIFS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     aifsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1523,7 +1525,7 @@ async def calculate_grid_indexing(
         dataOut_raqdps = zarr_results["RAQDPS"]
         if isinstance(dataOut_raqdps, np.ndarray):
             dataOut_raqdps = _mask_old_aq_values(
-                dataOut_raqdps, now_time, HISTORY_PERIODS["RAQDPS"]
+                dataOut_raqdps, now_time, RAQDPS_MAX_LOOKBACK_HOURS
             )
         if (
             base_day_utc is not None
@@ -1538,7 +1540,7 @@ async def calculate_grid_indexing(
             dataOut_raqdps = False
         if isinstance(dataOut_raqdps, np.ndarray):
             try:
-                raqdpsRunTime = float(dataOut_raqdps[HISTORY_PERIODS["RAQDPS"], 0])
+                raqdpsRunTime = float(_forecast_run_time(dataOut_raqdps, "RAQDPS"))
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     int(raqdpsRunTime), datetime.UTC
                 ).replace(tzinfo=None)

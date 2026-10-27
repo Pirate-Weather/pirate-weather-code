@@ -4,9 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.request import urlretrieve
 
@@ -25,14 +26,14 @@ import numpy as np  # noqa: E402
 import xarray as xr  # noqa: E402
 import zarr  # noqa: E402
 
-from API.raqdps_utils import RAQDPS_OUTPUT_VARS, build_raqdps_url  # noqa: E402
+from API.raqdps_utils import RAQDPS_VARIABLES, build_raqdps_url  # noqa: E402
 
-DEFAULT_ZARR = "/home/reya/Weather/Prod/v30/RAQDPS.zarr"
+DEFAULT_ZARR = "/home/reya/Weather/Prod/v31/RAQDPS.zarr"
 DEFAULT_LAT = 45.4766681
 DEFAULT_LON = -73.5550823
-GRID_RUN = datetime(2026, 7, 6, 12, tzinfo=timezone.utc)
+GRID_RUN = datetime(2026, 7, 6, 12, tzinfo=UTC)
 TARGETS = (
-    ("2026-07-06T12:00Z", datetime(2026, 7, 6, 12, tzinfo=timezone.utc)),
+    ("2026-07-06T12:00Z", datetime(2026, 7, 6, 12, tzinfo=UTC)),
     (
         "2026-07-09 08:00 EDT",
         datetime(2026, 7, 9, 8, tzinfo=timezone(timedelta(hours=-4))),
@@ -42,7 +43,11 @@ TARGETS = (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--zarr", default=DEFAULT_ZARR, help="RAQDPS final Zarr path")
+    parser.add_argument(
+        "--zarr",
+        default=DEFAULT_ZARR,
+        help="RAQDPS final Zarr path (a version, or RAQDPS.zarr to follow the pointer)",
+    )
     parser.add_argument("--lat", type=float, default=DEFAULT_LAT)
     parser.add_argument("--lon", type=float, default=DEFAULT_LON)
     parser.add_argument(
@@ -57,6 +62,16 @@ def parse_args() -> argparse.Namespace:
         help="Nearest-time tolerance for float32 epoch storage",
     )
     return parser.parse_args()
+
+
+def resolve_current_store(path: Path) -> Path:
+    """Return ``path`` if it is a zarr store, else the version named by the
+    sibling ``<MODEL>.current.json`` pointer (``API.ingest_utils.publish_store``)."""
+    if (path / "zarr.json").exists():
+        return path
+    pointer = path.parent / (path.name.removesuffix(".zarr") + ".current.json")
+    with open(pointer) as fh:
+        return path.parent / json.load(fh)["store"]
 
 
 def ensure_grid_grib(path: Path) -> Path:
@@ -103,7 +118,7 @@ def nearest_grid_point(
 def nearest_time_index(
     times: np.ndarray, target: datetime, tolerance_seconds: int
 ) -> tuple[int, float]:
-    target_utc = target.astimezone(timezone.utc)
+    target_utc = target.astimezone(UTC)
     deltas = times.astype(np.float64) - target_utc.timestamp()
     time_idx = int(np.nanargmin(np.abs(deltas)))
     delta_seconds = float(deltas[time_idx])
@@ -117,14 +132,17 @@ def nearest_time_index(
 
 def main() -> None:
     args = parse_args()
-    root = zarr.open(args.zarr, mode="r")
-    no2_index = RAQDPS_OUTPUT_VARS.index("NO2")
-    times = root[0, :, 0, 0]
+    store_path = resolve_current_store(Path(args.zarr))
+    root = zarr.open_array(store_path, mode="r")
+    # The store's axis 0 is RAQDPS_VARIABLES (no time column); the valid times
+    # are the array's "time" attribute.
+    no2_index = RAQDPS_VARIABLES.index("NO2")
+    times = np.asarray(root.attrs["time"], dtype=np.float64)
     y_idx, x_idx, grid_lat, grid_lon, distance_km = nearest_grid_point(
         ensure_grid_grib(Path(args.grid_grib)), args.lat, args.lon
     )
 
-    print(f"Zarr: {args.zarr}")
+    print(f"Zarr: {store_path}")
     print(
         f"Requested point: {args.lat:.7f}, {args.lon:.7f}; "
         f"nearest grid y={y_idx}, x={x_idx} at "
@@ -136,7 +154,7 @@ def main() -> None:
             times, target, args.time_tolerance_seconds
         )
         value = float(root[no2_index, time_idx, y_idx, x_idx])
-        target_utc = target.astimezone(timezone.utc)
+        target_utc = target.astimezone(UTC)
         print(
             f"NO2 {label} ({target_utc:%Y-%m-%dT%H:%MZ}): "
             f"time_idx={time_idx}, stored_delta={delta_seconds:.0f}s, "

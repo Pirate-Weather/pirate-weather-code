@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
+
+from API.constants.unit_const import KG_M3_TO_UG_M3, MOL_MOL_TO_PPB
 
 RAQDPS_BASE_URL = "https://dd.weather.gc.ca"
 RAQDPS_MODEL_NAME = "RAQDPS"
@@ -14,18 +16,14 @@ RAQDPS_LEVEL = "Sfc"
 RAQDPS_VARIABLES = ("PM2.5", "PM10", "NO2", "O3", "SO2")
 RAQDPS_OUTPUT_VARS = ("time",) + RAQDPS_VARIABLES
 RAQDPS_FORECAST_HOURS = tuple(range(73))
-RAQDPS_HISTORY_MERGE_HOURS = 12
-
-KG_M3_TO_UG_M3 = 1e9
-MOL_MOL_TO_PPB = 1e9
 
 
 def normalize_utc(dt: datetime) -> datetime:
     """Return a timezone-aware UTC datetime with sub-hour fields removed."""
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     else:
-        dt = dt.astimezone(timezone.utc)
+        dt = dt.astimezone(UTC)
     return dt.replace(minute=0, second=0, microsecond=0)
 
 
@@ -68,28 +66,11 @@ def candidate_raqdps_runs(
 ) -> list[datetime]:
     """Return recent 00/12 UTC RAQDPS run candidates, newest first."""
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     now = normalize_utc(now)
     cycle_hour = 12 if now.hour >= 12 else 0
     candidate = now.replace(hour=cycle_hour)
     return [candidate - timedelta(hours=12 * offset) for offset in range(count)]
-
-
-def history_run_for_valid_time(valid_time: datetime) -> tuple[datetime, int]:
-    """Map a valid time to the newest RAQDPS run with lead 000-012."""
-    valid_time = normalize_utc(valid_time)
-    cycle_hour = 12 if valid_time.hour >= 12 else 0
-    run_time = valid_time.replace(hour=cycle_hour)
-    forecast_hour = int((valid_time - run_time).total_seconds() // 3600)
-    if forecast_hour < 0 or forecast_hour > RAQDPS_HISTORY_MERGE_HOURS:
-        raise ValueError(f"Unable to map valid time to 0-12h RAQDPS lead: {valid_time}")
-    return run_time, forecast_hour
-
-
-def history_valid_times(base_time: datetime, hours: int) -> list[datetime]:
-    """Return historical valid times ending one hour before base_time."""
-    base_time = normalize_utc(base_time)
-    return [base_time - timedelta(hours=offset) for offset in range(hours, 0, -1)]
 
 
 def convert_to_output_units(values, variable: str):

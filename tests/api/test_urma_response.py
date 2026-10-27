@@ -5,6 +5,7 @@ import logging
 
 import numpy as np
 import pytest
+import tensorstore as ts
 
 from API.constants.forecast_const import DATA_HOURLY
 from API.constants.model_const import GFS, URMA
@@ -20,7 +21,7 @@ from API.current.metrics import (
 from API.data_inputs import prepare_data_inputs
 from API.forecast_sources import SourceMetadata, _merge_urma_source, merge_hourly_models
 from API.hourly.block import _calculate_derived_metrics
-from API.io.zarr_reader import WeatherParallel
+from API.io.store_reader import ModelStore, WeatherParallel
 from API.request.grid_indexing import ZarrSources, calculate_grid_indexing
 
 
@@ -42,26 +43,21 @@ def _model_data(hours: int = 3) -> tuple[np.ndarray, np.ndarray]:
     return urma, gfs
 
 
-def test_urma_merge_aligns_actual_hours_and_reports_only_contributing_data():
+def test_urma_merge_aligns_by_timestamp_and_reports_only_contributing_data():
+    """URMA analyses are irregular hourly observations: each must land on its own
+    hour (within the tolerance), and URMA is listed in flags.sources with its
+    latest contributing hour only when it supplied data for the request window.
+    """
     base = datetime.datetime(2026, 9, 20, tzinfo=datetime.UTC).timestamp()
     raw, _ = _model_data(4)
     raw[:, 0] = [base - 3600, base + 60, base + 2 * 3600 + 64, base + 7 * 3600]
     raw[1, URMA["temp"]] = np.nan
     merged, latest = _merge_urma_source(raw, base, 4, base - 1)
 
-    assert merged is not None
     assert latest == base + 2 * 3600
-    assert np.isnan(merged[0, URMA["temp"]])
-    assert np.isnan(merged[1, URMA["temp"]])
-    assert merged[2, URMA["temp"]] == 15
-    assert np.isnan(merged[3, URMA["temp"]])
+    np.testing.assert_array_equal(merged[:, URMA["temp"]], [np.nan, np.nan, 15, np.nan])
+    assert _merge_urma_source(raw, base, 4, base + 3 * 3600) == (None, None)
 
-    empty, empty_time = _merge_urma_source(raw, base, 4, base + 3 * 3600)
-    assert empty is None and empty_time is None
-
-
-def test_urma_merge_adds_source_flag_only_for_valid_requested_hours():
-    base = datetime.datetime(2026, 9, 20, tzinfo=datetime.UTC).timestamp()
     raw, _ = _model_data(1)
     raw[0, 0] = base
     args = {
@@ -99,6 +95,9 @@ def test_urma_merge_adds_source_flag_only_for_valid_requested_hours():
 
 
 def test_hourly_inputs_prefer_urma_and_preserve_pressure_meaning():
+    """URMA must lead hourly inputs with GFS filling gaps, and URMA surface
+    pressure must feed stationPressure, never sea-level pressure.
+    """
     urma, gfs = _model_data()
     urma[1, URMA["temp"]] = np.nan
     urma[2, URMA["pressure"]] = np.nan
@@ -131,6 +130,10 @@ def test_hourly_inputs_prefer_urma_and_preserve_pressure_meaning():
 
 
 def test_current_uses_urma_with_per_hour_gfs_fallback():
+    """Currently interpolates between two hours; a missing URMA hour must fall
+    back to GFS for that hour only, and feels-like uses the computed value only
+    while URMA is the active current source (otherwise GFS apparent temperature).
+    """
     urma, gfs = _model_data(2)
     urma[1, URMA["temp"]] = np.nan
     urma[1, URMA["humidity"]] = np.nan
@@ -153,6 +156,9 @@ def test_current_uses_urma_with_per_hour_gfs_fallback():
 
 
 def test_hourly_feels_like_uses_selected_conditions_on_urma_hours():
+    """On URMA hours feels-like is recomputed from the observed conditions
+    rather than taken from the model's own apparent temperature.
+    """
     hourly = np.zeros((2, max(DATA_HOURLY.values()) + 1))
     hourly[:, DATA_HOURLY["temp"]] = 20
     hourly[:, DATA_HOURLY["humidity"]] = 0.5
@@ -182,8 +188,15 @@ class _Weather:
 
 @pytest.mark.asyncio
 async def test_urma_reader_keeps_missing_observations_for_gfs_fallback():
-    store = np.ones((max(URMA.values()) + 1, 3, 1, 1))
-    store[URMA["temp"], 1, 0, 0] = np.nan
+    """The reader must keep URMA gaps as NaN (so GFS can fill them) instead of
+    interpolating across them as it does for forecast models.
+    """
+    # Stores hold no time column: the variable in API column c is store index c - 1
+    values = np.ones((max(URMA.values()), 3, 1, 1))
+    values[URMA["temp"] - 1, 1, 0, 0] = np.nan
+    store = ModelStore(
+        array=ts.array(values), times=1.79e9 + 3600 * np.arange(3), version="test"
+    )
     weather = WeatherParallel()
 
     urma = await weather.zarr_read("URMA", store, 0, 0)
@@ -197,17 +210,20 @@ async def test_urma_reader_keeps_missing_observations_for_gfs_fallback():
 @pytest.mark.parametrize(
     ("lat", "lon", "time_machine", "excluded", "age_days", "read_urma"),
     [
-        (40, -105, True, 0, 2, True),
-        (40, -105, True, 1, 2, False),
-        (40, -105, False, 0, 2, False),
-        (0, 0, True, 0, 2, False),
-        (40, -105, True, 0, 20, False),
-        (40, -105, True, 0, -2, False),
+        pytest.param(40, -105, True, 0, 2, True, id="recent-timemachine"),
+        pytest.param(40, -105, True, 1, 2, False, id="excluded"),
+        pytest.param(40, -105, False, 0, 2, False, id="forecast-request"),
+        pytest.param(0, 0, True, 0, 2, False, id="outside-domain"),
+        pytest.param(40, -105, True, 0, 20, False, id="too-old"),
+        pytest.param(40, -105, True, 0, -2, False, id="future"),
     ],
 )
 async def test_urma_grid_read_requires_recent_history_inside_domain(
     lat, lon, time_machine, excluded, age_days, read_urma, monkeypatch
 ):
+    """URMA is only read for recent Time Machine requests inside its domain
+    and when not excluded; reading it elsewhere wastes I/O or serves no data.
+    """
     monkeypatch.setattr(
         "API.request.grid_indexing._load_era5_slice", lambda *args, **kwargs: False
     )

@@ -1,4 +1,5 @@
 # %% Script to contain the helper functions that can be used to generate the text summary of the forecast data for Pirate Weather
+import math
 from collections import Counter
 
 import numpy as np
@@ -30,6 +31,75 @@ from API.constants.text_const import (
     WIND_THRESHOLDS,
 )
 
+# Summary types that use hourly (short-period) icon accumulation thresholds,
+# and those that use the daily thresholds.
+HOURLY_SUMMARY_TYPES = ("hour", "current", "minute", "hourly")
+DAILY_SUMMARY_TYPES = ("day", "week")
+
+# Intensity wording, lightest first, used for every precipitation type.
+INTENSITY_LEVELS = ("very-light", "light", "medium", "heavy")
+
+# Per-type wording and Pirate icon set icons for each entry in INTENSITY_LEVELS.
+# Medium precipitation keeps the generic type icon chosen by the accumulation
+# check, which is why it has no dedicated icon.
+PRECIP_LEVEL_TEXT = {
+    PRECIP_TYPES["rain"]: (
+        "rain",
+        ("drizzle", "light-rain", None, "heavy-rain"),
+    ),
+    PRECIP_TYPES["snow"]: (
+        "snow",
+        ("flurries", "light-snow", None, "heavy-snow"),
+    ),
+    PRECIP_TYPES["sleet"]: (
+        "sleet",
+        ("very-light-sleet", "light-sleet", None, "heavy-sleet"),
+    ),
+    PRECIP_TYPES["ice"]: (
+        "freezing-rain",
+        ("freezing-drizzle", "light-freezing-rain", None, "heavy-freezing-rain"),
+    ),
+}
+
+# Icons that mean precipitation is expected (not just "possible-..."), in
+# either icon set. Freezing rain uses the sleet icon in the Dark Sky set.
+PRECIPITATION_ICONS = frozenset(
+    {
+        PRECIP_TYPES["rain"],
+        PRECIP_TYPES["snow"],
+        PRECIP_TYPES["sleet"],
+        PRECIP_TYPES["mixed"],
+        "precipitation",
+        "thunderstorm",
+    }
+    | {
+        level_icon
+        for _, level_icons in PRECIP_LEVEL_TEXT.values()
+        for level_icon in level_icons
+        if level_icon is not None
+    }
+)
+
+# Thunderstorm scoring: each available index contributes up to its weight
+# (total 100) and the score is normalised by the weight actually available.
+THUNDERSTORM_WEIGHTS = {
+    "cape": 35.0,
+    "li": 25.0,
+    "ki": 20.0,
+    "vv": 20.0,
+}
+THUNDERSTORM_SCORE = {
+    "thunderstorm": 60.0,
+    "possible": 30.0,
+}
+# Without at least CAPE's worth of weight there is too little data to score.
+THUNDERSTORM_MIN_WEIGHT = THUNDERSTORM_WEIGHTS["cape"]
+HIGH_PRECIP_PROB_THRESHOLD = 0.7
+CAPE_SPAN = CAPE_THRESHOLDS["high"] - CAPE_THRESHOLDS["low"]
+LI_SPAN = abs(LI_THRESHOLDS["high"] - LI_THRESHOLDS["low"])
+KI_SPAN = KI_THRESHOLDS["high"] - KI_THRESHOLDS["low"]
+POP_SPAN = HIGH_PRECIP_PROB_THRESHOLD - PRECIP_PROB_THRESHOLD
+
 
 def most_common(lst):
     """
@@ -47,7 +117,7 @@ def most_common(lst):
 
 def calculate_sky_icon(cloudCover, isDayTime, icon="darksky"):
     """
-    Calculates the sky cover text
+    Calculates the sky cover icon
 
     Parameters:
     - cloudCover (int): The cloud cover for the period
@@ -57,32 +127,17 @@ def calculate_sky_icon(cloudCover, isDayTime, icon="darksky"):
     Returns:
     - str: The icon representing the current cloud cover
     """
-    sky_icon = None
+    day_night = "day" if isDayTime else "night"
 
     if cloudCover > CLOUD_COVER_THRESHOLDS["cloudy"]:
-        sky_icon = "cloudy"
-    elif cloudCover > CLOUD_COVER_THRESHOLDS["mostly_cloudy"] and icon == "pirate":
-        if isDayTime:
-            sky_icon = "mostly-cloudy-day"
-        else:
-            sky_icon = "mostly-cloudy-night"
-    elif cloudCover > CLOUD_COVER_THRESHOLDS["partly_cloudy"]:
-        if isDayTime:
-            sky_icon = "partly-cloudy-day"
-        else:
-            sky_icon = "partly-cloudy-night"
-    elif cloudCover > CLOUD_COVER_THRESHOLDS["mostly_clear"] and icon == "pirate":
-        if isDayTime:
-            sky_icon = "mostly-clear-day"
-        else:
-            sky_icon = "mostly-clear-night"
-    else:
-        if isDayTime:
-            sky_icon = "clear-day"
-        else:
-            sky_icon = "clear-night"
-
-    return sky_icon
+        return "cloudy"
+    if cloudCover > CLOUD_COVER_THRESHOLDS["mostly_cloudy"] and icon == "pirate":
+        return "mostly-cloudy-" + day_night
+    if cloudCover > CLOUD_COVER_THRESHOLDS["partly_cloudy"]:
+        return "partly-cloudy-" + day_night
+    if cloudCover > CLOUD_COVER_THRESHOLDS["mostly_clear"] and icon == "pirate":
+        return "mostly-clear-" + day_night
+    return "clear-" + day_night
 
 
 def matches_precip(
@@ -107,6 +162,21 @@ def matches_precip(
     )
 
 
+def _intensity_level(intensity, light_thresh, mid_thresh, heavy_thresh):
+    """Return the INTENSITY_LEVELS index for an intensity (mm/h).
+
+    A NaN intensity fails every comparison and so lands in "heavy", which is
+    what the original if/elif ladders did.
+    """
+    if intensity < light_thresh:
+        return 0
+    if intensity < mid_thresh:
+        return 1
+    if intensity < heavy_thresh:
+        return 2
+    return 3
+
+
 def calculate_precip_text(
     precipType,
     type,
@@ -121,7 +191,6 @@ def calculate_precip_text(
     eff_rain_intensity=None,
     eff_snow_intensity=None,
     eff_ice_intensity=None,
-    num_precip_days=1,
 ):
     """
     Calculates the precipitation text and icon.
@@ -140,7 +209,6 @@ def calculate_precip_text(
     - eff_rain_intensity (float | None): The effective rain intensity in mm/h
     - eff_snow_intensity (float | None): The effective snow intensity in mm/h
     - eff_ice_intensity (float | None): The effective ice intensity in mm/h
-    - num_precip_days (int): The number of days with precipitation (used for weekly summaries)
 
     Returns:
     - str | None: The summary text representing the current precipitation
@@ -148,7 +216,7 @@ def calculate_precip_text(
     """
 
     # If any precipitation is missing, return None appropriately for the mode.
-    if any(np.isnan(x) for x in (rainAccum, snowAccum, sleetAccum)):
+    if math.isnan(rainAccum) or math.isnan(snowAccum) or math.isnan(sleetAccum):
         return (None, None) if mode == "both" else None
 
     # If any effective intensity is missing, set it to 0.
@@ -160,103 +228,91 @@ def calculate_precip_text(
         eff_ice_intensity = 0
 
     # If pop is missing set it to 1 so we can calculate the precipitation text
-    if np.isnan(pop):
+    if math.isnan(pop):
         pop = 1
 
-    # Thresholds in mm/h for intensity
-    light_precip_thresh = PRECIP_INTENSITY_THRESHOLDS["light"]
-    mid_precip_thresh = PRECIP_INTENSITY_THRESHOLDS["mid"]
-    heavy_precip_thresh = PRECIP_INTENSITY_THRESHOLDS["heavy"]
-    light_snow_thresh = SNOW_INTENSITY_THRESHOLDS["light"]
-    mid_snow_thresh = SNOW_INTENSITY_THRESHOLDS["mid"]
-    heavy_snow_thresh = SNOW_INTENSITY_THRESHOLDS["heavy"]
+    # Use daily or hourly accumulation thresholds (mm) depending on the summary
+    if type in HOURLY_SUMMARY_TYPES:
+        snow_icon_threshold = HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM
+        precip_icon_threshold = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM
+    elif type in DAILY_SUMMARY_TYPES:
+        snow_icon_threshold = DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM
+        precip_icon_threshold = DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
+    else:
+        raise ValueError(f"Unknown precipitation summary type: {type}")
 
-    # Thresholds in mm for accumulation
-    snow_icon_threshold_hour = HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM
-    precip_icon_threshold_hour = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM
+    # Intensity checks always use the hourly thresholds (mm/h)
+    snow_intensity_icon_threshold = HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM
+    precip_intensity_icon_threshold = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM
 
-    snow_icon_threshold_day = DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM
-    precip_icon_threshold_day = DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM
-    num_types = 0
-
-    # Use daily or hourly thresholds depending on the situation
-    if type in ("hour", "current", "minute", "hourly"):
-        snow_icon_threshold = snow_icon_threshold_hour
-        precip_icon_threshold = precip_icon_threshold_hour
-    elif type in ("day", "week"):
-        snow_icon_threshold = snow_icon_threshold_day
-        precip_icon_threshold = precip_icon_threshold_day
-    possible_precip = ""
+    is_pirate_icon = icon == "pirate"
     c_icon = None
     c_text = None
+    # Snow is compared as a liquid equivalent using a 10:1 ratio
     total_prep = rainAccum + (snowAccum / 10) + sleetAccum
 
-    # Pre-compute commonly used conditions for performance
-    is_pirate_icon = icon == "pirate"
-    is_possible_precip = possible_precip == "possible-"
-
-    rain_condition = matches_precip(
-        precipType,
-        ("rain", "none"),
-        rainAccum,
-        precip_icon_threshold,
-        eff_rain_intensity,
-        precip_icon_threshold_hour,
+    # Add the possible precipitation text if pop is less than 25% or if pop is
+    # greater than 0 but the accumulation or intensity is too small for an icon.
+    # Weekly summaries only describe days already chosen as having
+    # precipitation, so for them it depends on the chance of precipitation alone.
+    is_possible_precip = pop < PRECIP_PROB_THRESHOLD or (
+        type != "week"
+        and (
+            matches_precip(
+                precipType,
+                ("rain", "none"),
+                rainAccum,
+                precip_icon_threshold,
+                eff_rain_intensity,
+                precip_intensity_icon_threshold,
+            )
+            or matches_precip(
+                precipType,
+                ("snow",),
+                snowAccum,
+                snow_icon_threshold,
+                eff_snow_intensity,
+                snow_intensity_icon_threshold,
+            )
+            or matches_precip(
+                precipType,
+                ("sleet", "ice"),
+                sleetAccum,
+                precip_icon_threshold,
+                eff_ice_intensity,
+                precip_intensity_icon_threshold,
+            )
+        )
     )
 
-    snow_condition = matches_precip(
-        precipType,
-        ("snow",),
-        snowAccum,
-        snow_icon_threshold,
-        eff_snow_intensity,
-        snow_icon_threshold_hour,
-    )
+    # Determine the number of precipitation types for the period
+    num_types = (snowAccum > 0) + (rainAccum > 0) + (sleetAccum > 0)
 
-    ice_condition = matches_precip(
-        precipType,
-        ("sleet", "ice", "hail"),
-        sleetAccum,
-        precip_icon_threshold,
-        eff_ice_intensity,
-        precip_icon_threshold_hour,
-    )
-
-    # Add the possible precipitation text if pop is less than 25% or if pop is greater than 0 but precipIntensity is between 0-0.02 mm/h
-    if pop < PRECIP_PROB_THRESHOLD or rain_condition or snow_condition or ice_condition:
-        possible_precip = "possible-"
-        is_possible_precip = True
-
-    # Determine the number of precipitation types for the day
-    if snowAccum > 0:
-        num_types += 1
-    if rainAccum > 0:
-        num_types += 1
-    if sleetAccum > 0:
-        num_types += 1
-
+    # Several small accumulations of different types can add up to a definite
+    # (not "possible") precipitation event.
     if (
         total_prep >= precip_icon_threshold
         and is_possible_precip
         and pop >= PRECIP_PROB_THRESHOLD
         and num_types > 1
     ):
-        possible_precip = ""
         is_possible_precip = False
+
+    possible_precip = "possible-" if is_possible_precip else ""
 
     # Decide on an icon if either accumulation or intensity thresholds are met
     if pop >= PRECIP_PROB_THRESHOLD and (
         (
             rainAccum > precip_icon_threshold
-            or eff_rain_intensity > precip_icon_threshold_hour
+            or eff_rain_intensity > precip_intensity_icon_threshold
         )
         or (
             snowAccum >= snow_icon_threshold
-            or eff_snow_intensity > snow_icon_threshold_hour
+            or eff_snow_intensity > snow_intensity_icon_threshold
         )
         or (
             sleetAccum >= precip_icon_threshold
-            or eff_ice_intensity > precip_icon_threshold_hour
+            or eff_ice_intensity > precip_intensity_icon_threshold
         )
         or (total_prep >= precip_icon_threshold and num_types > 1)
     ):
@@ -269,212 +325,57 @@ def calculate_precip_text(
         else:
             c_icon = precipType
 
+    day_night = "day" if isDayTime else "night"
+
     if (num_types > 2 and total_prep > 0) or precipType == PRECIP_TYPES["mixed"]:
         c_text = "mixed-precipitation"
-    elif (rainAccum > 0 or eff_rain_intensity > 0) and precipType == PRECIP_TYPES[
-        "rain"
-    ]:
-        if eff_rain_intensity < light_precip_thresh:
-            c_text = possible_precip + "very-light-rain"
-            if is_pirate_icon and is_possible_precip and isDayTime:
-                c_icon = "possible-rain-day"
-            elif is_pirate_icon and is_possible_precip and not isDayTime:
-                c_icon = "possible-rain-night"
-            elif icon == "pirate":
-                c_icon = "drizzle"
-        elif (
-            eff_rain_intensity >= light_precip_thresh
-            and eff_rain_intensity < mid_precip_thresh
-        ):
-            c_text = possible_precip + "light-rain"
-            if is_pirate_icon and is_possible_precip and isDayTime:
-                c_icon = "possible-rain-day"
-            elif is_pirate_icon and is_possible_precip and not isDayTime:
-                c_icon = "possible-rain-night"
-            elif icon == "pirate":
-                c_icon = "light-rain"
-        elif (
-            eff_rain_intensity >= mid_precip_thresh
-            and eff_rain_intensity < heavy_precip_thresh
-        ):
-            c_text = possible_precip + "medium-rain"
-            if is_pirate_icon and is_possible_precip and isDayTime:
-                c_icon = "possible-rain-day"
-            elif is_pirate_icon and is_possible_precip and not isDayTime:
-                c_icon = "possible-rain-night"
+    elif precipType in PRECIP_LEVEL_TEXT:
+        if precipType == PRECIP_TYPES["rain"]:
+            accum = rainAccum
+            intensity = eff_rain_intensity
+            thresholds = PRECIP_INTENSITY_THRESHOLDS
+        elif precipType == PRECIP_TYPES["snow"]:
+            accum = snowAccum
+            intensity = eff_snow_intensity
+            thresholds = SNOW_INTENSITY_THRESHOLDS
         else:
-            c_text = possible_precip + "heavy-rain"
-            if is_pirate_icon and is_possible_precip and isDayTime:
-                c_icon = "possible-rain-day"
-            elif is_pirate_icon and is_possible_precip and not isDayTime:
-                c_icon = "possible-rain-night"
-            elif icon == "pirate":
-                c_icon = "heavy-rain"
-    elif (snowAccum > 0 or eff_snow_intensity > 0) and precipType == PRECIP_TYPES[
-        "snow"
-    ]:
-        if eff_snow_intensity < light_snow_thresh:
-            c_text = possible_precip + "very-light-snow"
-            if is_pirate_icon and is_possible_precip and isDayTime:
-                c_icon = "possible-snow-day"
-            elif is_pirate_icon and is_possible_precip and not isDayTime:
-                c_icon = "possible-snow-night"
-            elif icon == "pirate":
-                c_icon = "flurries"
-        elif (
-            eff_snow_intensity >= light_snow_thresh
-            and eff_snow_intensity < mid_snow_thresh
-        ):
-            c_text = possible_precip + "light-snow"
-            if is_pirate_icon and is_possible_precip and isDayTime:
-                c_icon = "possible-snow-day"
-            elif is_pirate_icon and is_possible_precip and not isDayTime:
-                c_icon = "possible-snow-night"
-            elif icon == "pirate":
-                c_icon = "light-snow"
-        elif (
-            eff_snow_intensity >= mid_snow_thresh
-            and eff_snow_intensity < heavy_snow_thresh
-        ):
-            c_text = possible_precip + "medium-snow"
-            if is_pirate_icon and is_possible_precip and isDayTime:
-                c_icon = "possible-snow-day"
-            elif is_pirate_icon and is_possible_precip and not isDayTime:
-                c_icon = "possible-snow-night"
-        else:
-            c_text = possible_precip + "heavy-snow"
-            if is_pirate_icon and is_possible_precip and isDayTime:
-                c_icon = "possible-snow-day"
-            elif is_pirate_icon and is_possible_precip and not isDayTime:
-                c_icon = "possible-snow-night"
-            elif icon == "pirate":
-                c_icon = "heavy-snow"
-    elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == PRECIP_TYPES[
-        "sleet"
-    ]:
-        if eff_ice_intensity < light_precip_thresh:
-            c_text = possible_precip + "very-light-sleet"
-            if is_pirate_icon and is_possible_precip and isDayTime:
-                c_icon = "possible-sleet-day"
-            elif is_pirate_icon and is_possible_precip and not isDayTime:
-                c_icon = "possible-sleet-night"
-            elif icon == "pirate":
-                c_icon = "very-light-sleet"
-        elif (
-            eff_ice_intensity >= light_precip_thresh
-            and eff_ice_intensity < mid_precip_thresh
-        ):
-            c_text = possible_precip + "light-sleet"
-            if is_pirate_icon and is_possible_precip and isDayTime:
-                c_icon = "possible-sleet-day"
-            elif is_pirate_icon and is_possible_precip and not isDayTime:
-                c_icon = "possible-sleet-night"
-            elif icon == "pirate":
-                c_icon = "light-sleet"
-        elif (
-            eff_ice_intensity >= mid_precip_thresh
-            and eff_ice_intensity < heavy_precip_thresh
-        ):
-            c_text = possible_precip + "medium-sleet"
-            if is_pirate_icon and is_possible_precip and isDayTime:
-                c_icon = "possible-sleet-day"
-            elif is_pirate_icon and is_possible_precip and not isDayTime:
-                c_icon = "possible-sleet-night"
-        else:
-            c_text = possible_precip + "heavy-sleet"
-            if is_pirate_icon and is_possible_precip and isDayTime:
-                c_icon = "possible-sleet-day"
-            elif is_pirate_icon and is_possible_precip and not isDayTime:
-                c_icon = "possible-sleet-night"
-            elif icon == "pirate":
-                c_icon = "heavy-sleet"
+            # Sleet and freezing rain share the ice accumulation and intensity
+            accum = sleetAccum
+            intensity = eff_ice_intensity
+            thresholds = PRECIP_INTENSITY_THRESHOLDS
 
-    elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == PRECIP_TYPES[
-        "ice"
-    ]:
-        if eff_ice_intensity < light_precip_thresh:
-            c_text = possible_precip + "very-light-freezing-rain"
-            if is_pirate_icon and is_possible_precip and isDayTime:
-                c_icon = "possible-freezing-rain-day"
-            elif is_pirate_icon and is_possible_precip and not isDayTime:
-                c_icon = "possible-freezing-rain-night"
-            elif icon == "pirate":
-                c_icon = "freezing-drizzle"
-        elif (
-            eff_ice_intensity >= light_precip_thresh
-            and eff_ice_intensity < mid_precip_thresh
-        ):
-            c_text = possible_precip + "light-freezing-rain"
-            if is_pirate_icon and is_possible_precip and isDayTime:
-                c_icon = "possible-freezing-rain-day"
-            elif is_pirate_icon and is_possible_precip and not isDayTime:
-                c_icon = "possible-freezing-rain-night"
-            elif icon == "pirate":
-                c_icon = "light-freezing-rain"
-        elif (
-            eff_ice_intensity >= mid_precip_thresh
-            and eff_ice_intensity < heavy_precip_thresh
-        ):
-            c_text = possible_precip + "medium-freezing-rain"
-            if is_pirate_icon and is_possible_precip and isDayTime:
-                c_icon = "possible-freezing-rain-day"
-            elif is_pirate_icon and is_possible_precip and not isDayTime:
-                c_icon = "possible-freezing-rain-night"
-        else:
-            c_text = possible_precip + "heavy-freezing-rain"
-            if is_pirate_icon and is_possible_precip and isDayTime:
-                c_icon = "possible-freezing-rain-day"
-            elif is_pirate_icon and is_possible_precip and not isDayTime:
-                c_icon = "possible-freezing-rain-night"
-            elif icon == "pirate":
-                c_icon = "heavy-freezing-rain"
-    elif (sleetAccum > 0 or eff_ice_intensity > 0) and precipType == PRECIP_TYPES[
-        "hail"
-    ]:
-        c_text = possible_precip + "hail"
-    elif (
+        if accum > 0 or intensity > 0:
+            type_text, level_icons = PRECIP_LEVEL_TEXT[precipType]
+            level = _intensity_level(
+                intensity, thresholds["light"], thresholds["mid"], thresholds["heavy"]
+            )
+            c_text = possible_precip + INTENSITY_LEVELS[level] + "-" + type_text
+            if is_pirate_icon and is_possible_precip:
+                c_icon = "possible-" + type_text + "-" + day_night
+            elif is_pirate_icon and level_icons[level] is not None:
+                c_icon = level_icons[level]
+    elif precipType == PRECIP_TYPES["none"] and (
+        # Treat any accumulation or per-type intensity as a signal of precipitation
         rainAccum > 0
         or snowAccum > 0
         or sleetAccum > 0
-        or (
-            # Treat any available per-type intensity as a signal of precip when type is none
-            (eff_rain_intensity is not None and eff_rain_intensity > 0)
-            or (eff_snow_intensity is not None and eff_snow_intensity > 0)
-            or (eff_ice_intensity is not None and eff_ice_intensity > 0)
+        or eff_rain_intensity > 0
+        or eff_snow_intensity > 0
+        or eff_ice_intensity > 0
+    ):
+        # For an unknown precipitation type use the largest per-type intensity
+        none_intensity = max(eff_rain_intensity, eff_snow_intensity, eff_ice_intensity)
+        level = _intensity_level(
+            none_intensity,
+            PRECIP_INTENSITY_THRESHOLDS["light"],
+            PRECIP_INTENSITY_THRESHOLDS["mid"],
+            PRECIP_INTENSITY_THRESHOLDS["heavy"],
         )
-    ) and precipType == PRECIP_TYPES["none"]:
-        # For unknown precip type, use the maximum of provided per-type intensities if available
-        _none_intensity = max(
-            [
-                v
-                for v in (
-                    eff_rain_intensity,
-                    eff_snow_intensity,
-                    eff_ice_intensity,
-                )
-                if v is not None
-            ]
-        )
-        if _none_intensity < light_precip_thresh:
-            c_text = possible_precip + "very-light-precipitation"
-        elif (
-            _none_intensity >= light_precip_thresh
-            and _none_intensity < mid_precip_thresh
-        ):
-            c_text = possible_precip + "light-precipitation"
-        elif (
-            _none_intensity >= mid_precip_thresh
-            and _none_intensity < heavy_precip_thresh
-        ):
-            c_text = possible_precip + "medium-precipitation"
-        else:
-            c_text = possible_precip + "heavy-precipitation"
+        c_text = possible_precip + INTENSITY_LEVELS[level] + "-precipitation"
 
-        if is_pirate_icon and is_possible_precip and isDayTime:
-            c_icon = "possible-precipitation-day"
-        elif is_pirate_icon and is_possible_precip and not isDayTime:
-            c_icon = "possible-precipitation-night"
-        elif icon == "pirate":
+        if is_pirate_icon and is_possible_precip:
+            c_icon = "possible-precipitation-" + day_night
+        elif is_pirate_icon:
             c_icon = "precipitation"
 
     if mode == "summary":
@@ -503,29 +404,18 @@ def calculate_wind_text(wind, icon="darksky", mode="both"):
     windIcon = None
 
     # If wind is missing, return None appropriately for the mode.
-    if np.isnan(wind):
+    if math.isnan(wind):
         return (None, None) if mode == "both" else None
 
-    # Thresholds in m/s
-    lightWindThresh = WIND_THRESHOLDS["light"]
-    midWindThresh = WIND_THRESHOLDS["mid"]
-    heavyWindThresh = WIND_THRESHOLDS["heavy"]
-
-    if wind >= lightWindThresh and wind < midWindThresh:
-        windText = "light-wind"
-        if icon == "pirate":
-            windIcon = "breezy"
-        else:
-            windIcon = "wind"
-    elif wind >= midWindThresh and wind < heavyWindThresh:
+    if wind >= WIND_THRESHOLDS["heavy"]:
+        windText = "heavy-wind"
+        windIcon = "dangerous-wind" if icon == "pirate" else "wind"
+    elif wind >= WIND_THRESHOLDS["mid"]:
         windText = "medium-wind"
         windIcon = "wind"
-    elif wind >= heavyWindThresh:
-        windText = "heavy-wind"
-        if icon == "pirate":
-            windIcon = "dangerous-wind"
-        else:
-            windIcon = "wind"
+    elif wind >= WIND_THRESHOLDS["light"]:
+        windText = "light-wind"
+        windIcon = "breezy" if icon == "pirate" else "wind"
 
     if mode == "summary":
         return windText
@@ -556,20 +446,19 @@ def calculate_vis_text(
     """
     visText = None
     visIcon = None
-    # Thresholds in meters
-    fogThresh = FOG_THRESHOLD_METERS
-    mistThresh = MIST_THRESHOLD_METERS
-    # If we have strong winds.
-    wind_too_strong = False
-    # Set smoke to 0 to fix smoke comparisons when smoke is NaN
-    smoke = np.nan_to_num(smoke, nan=0)
 
     # If temp, dewPoint or vis are missing, return None appropriately for the mode.
-    if any(np.isnan(x) for x in (temp, dewPoint, vis)):
+    if math.isnan(temp) or math.isnan(dewPoint) or math.isnan(vis):
         return (None, None) if mode == "both" else None
 
-    if not np.isnan(wind_speed):
-        wind_too_strong = wind_speed >= WIND_THRESHOLDS["light"]
+    # Treat missing smoke as no smoke so the smoke comparisons stay valid
+    if math.isnan(smoke):
+        smoke = 0
+
+    # Strong winds mix out fog and mist
+    wind_too_strong = (
+        not math.isnan(wind_speed) and wind_speed >= WIND_THRESHOLDS["light"]
+    )
 
     # Calculate the temperature dew point spread (already in Celsius)
     tempDewSpread = temp - dewPoint
@@ -577,19 +466,19 @@ def calculate_vis_text(
     # Fog
     if (
         not wind_too_strong
-        and vis < fogThresh
+        and vis < FOG_THRESHOLD_METERS
         and tempDewSpread <= TEMP_DEWPOINT_SPREAD_FOR_FOG
     ):
         visText = "fog"
         visIcon = "fog"
     # Smoke
-    elif smoke >= SMOKE_CONCENTRATION_THRESHOLD_UGM3 and vis < mistThresh:
+    elif smoke >= SMOKE_CONCENTRATION_THRESHOLD_UGM3 and vis < MIST_THRESHOLD_METERS:
         visText = "smoke"
         visIcon = "smoke" if icon == "pirate" else "fog"
     # Mist
     elif (
         not wind_too_strong
-        and vis < mistThresh
+        and vis < MIST_THRESHOLD_METERS
         and tempDewSpread <= TEMP_DEWPOINT_SPREAD_FOR_MIST
     ):
         visText = "mist"
@@ -597,7 +486,7 @@ def calculate_vis_text(
     # Haze
     elif (
         smoke < SMOKE_CONCENTRATION_THRESHOLD_UGM3
-        and vis < mistThresh
+        and vis < MIST_THRESHOLD_METERS
         and tempDewSpread > TEMP_DEWPOINT_SPREAD_FOR_MIST
     ):
         visText = "haze"
@@ -625,41 +514,36 @@ def calculate_sky_text(cloudCover, isDayTime, icon="darksky", mode="both"):
     - str | None: The text representing the current cloud cover
     - str | None: The icon representing the current cloud cover
     """
-    skyText = None
-    skyIcon = None
-
     # If cloud cover is missing, return None appropriately for the mode.
-    if np.isnan(cloudCover):
+    if math.isnan(cloudCover):
         return (None, None) if mode == "both" else None
 
     if cloudCover > CLOUD_COVER_THRESHOLDS["cloudy"]:
         skyText = "heavy-clouds"
-        skyIcon = calculate_sky_icon(cloudCover, isDayTime, icon)
-
+    elif cloudCover > CLOUD_COVER_THRESHOLDS["mostly_cloudy"]:
+        skyText = "medium-clouds"
     elif cloudCover > CLOUD_COVER_THRESHOLDS["partly_cloudy"]:
-        skyIcon = calculate_sky_icon(cloudCover, isDayTime, icon)
-        if cloudCover > CLOUD_COVER_THRESHOLDS["mostly_cloudy"]:
-            skyText = "medium-clouds"
-
-        else:
-            skyText = "light-clouds"
+        skyText = "light-clouds"
+    elif cloudCover > CLOUD_COVER_THRESHOLDS["mostly_clear"]:
+        skyText = "very-light-clouds"
     else:
-        skyIcon = calculate_sky_icon(cloudCover, isDayTime, icon)
-        if cloudCover > CLOUD_COVER_THRESHOLDS["mostly_clear"]:
-            skyText = "very-light-clouds"
-        else:
-            skyText = "clear"
+        skyText = "clear"
 
     if mode == "summary":
         return skyText
-    elif mode == "icon":
+
+    skyIcon = calculate_sky_icon(cloudCover, isDayTime, icon)
+    if mode == "icon":
         return skyIcon
-    else:
-        return skyText, skyIcon
+    return skyText, skyIcon
 
 
 def clamp(val: float, min_val: float = 0.0, max_val: float = 1.0) -> float:
     return max(min_val, min(val, max_val))
+
+
+def _valid(v: float | None) -> bool:
+    return v is not None and not math.isnan(v)
 
 
 def calculate_thunderstorm_text(
@@ -696,59 +580,36 @@ def calculate_thunderstorm_text(
     Returns:
         tuple[str | None, str | None] | str | None: Thunderstorm text, icon, or both depending on mode.
     """
-
-    def valid(v: float | None) -> bool:
-        return v is not None and not np.isnan(v)
-
-    # 1. Parameter Weights (Total = 100)
-    WEIGHTS = {
-        "cape": 35.0,
-        "li": 25.0,
-        "ki": 20.0,
-        "vv": 20.0,
-    }
-    SCORE = {
-        "thunderstorm": 60.0,
-        "possible": 30.0,
-    }
-    HIGH_PRECIP_PROB_THRESHOLD = 0.7
-
     earned_score = 0.0
     total_possible_weight = 0.0
 
-    # Inside your function, calculate the spans cleanly:
-    CAPE_SPAN = CAPE_THRESHOLDS["high"] - CAPE_THRESHOLDS["low"]  # 2000
-    LI_SPAN = abs(LI_THRESHOLDS["high"] - LI_THRESHOLDS["low"])  # 6
-    KI_SPAN = KI_THRESHOLDS["high"] - KI_THRESHOLDS["low"]  # 20
-    POP_SPAN = HIGH_PRECIP_PROB_THRESHOLD - PRECIP_PROB_THRESHOLD  # 0.25 to 0.7
-
-    # Continuous Feature Scaling
-    if valid(cape):
-        total_possible_weight += WEIGHTS["cape"]
-        earned_score += WEIGHTS["cape"] * clamp(
+    # 1. Continuous feature scaling of each available index
+    if _valid(cape):
+        total_possible_weight += THUNDERSTORM_WEIGHTS["cape"]
+        earned_score += THUNDERSTORM_WEIGHTS["cape"] * clamp(
             (cape - CAPE_THRESHOLDS["low"]) / CAPE_SPAN
         )
 
-    if valid(lifted_index):
-        total_possible_weight += WEIGHTS["li"]
-        earned_score += WEIGHTS["li"] * clamp(
+    if _valid(lifted_index):
+        total_possible_weight += THUNDERSTORM_WEIGHTS["li"]
+        earned_score += THUNDERSTORM_WEIGHTS["li"] * clamp(
             (LI_THRESHOLDS["low"] - lifted_index) / LI_SPAN
         )
 
-    if valid(k_index):
-        total_possible_weight += WEIGHTS["ki"]
-        earned_score += WEIGHTS["ki"] * clamp(
+    if _valid(k_index):
+        total_possible_weight += THUNDERSTORM_WEIGHTS["ki"]
+        earned_score += THUNDERSTORM_WEIGHTS["ki"] * clamp(
             (k_index - KI_THRESHOLDS["low"]) / KI_SPAN
         )
 
-    if valid(vertical_velocity):
-        total_possible_weight += WEIGHTS["vv"]
-        earned_score += WEIGHTS["vv"] * clamp(
+    if _valid(vertical_velocity):
+        total_possible_weight += THUNDERSTORM_WEIGHTS["vv"]
+        earned_score += THUNDERSTORM_WEIGHTS["vv"] * clamp(
             -vertical_velocity / VV_THRESHOLDS["strong_upward"]
         )
 
     # Prevent false positives if payload lacks enough core parameters
-    if total_possible_weight < 35.0:
+    if total_possible_weight < THUNDERSTORM_MIN_WEIGHT:
         base_confidence = 0.0
     else:
         base_confidence = (earned_score / total_possible_weight) * 100.0
@@ -757,17 +618,17 @@ def calculate_thunderstorm_text(
     suppressor = 1.0
 
     # CIN Penalty
-    if valid(cin):
+    if _valid(cin):
         if cin <= CIN_THRESHOLDS["high"]:
             suppressor *= 0.10
         elif cin <= CIN_THRESHOLDS["low"]:
-            cin_penalty = (cin - (CIN_THRESHOLDS["low"])) / (
-                CIN_THRESHOLDS["high"] - (CIN_THRESHOLDS["low"])
+            cin_penalty = (cin - CIN_THRESHOLDS["low"]) / (
+                CIN_THRESHOLDS["high"] - CIN_THRESHOLDS["low"]
             )
             suppressor *= 1.0 - (0.70 * cin_penalty)
 
     # Dewpoint Depression Penalty (Applied globally)
-    if valid(temperature) and valid(dewpoint):
+    if _valid(temperature) and _valid(dewpoint):
         depression = temperature - dewpoint
         if depression >= DEWPOINT_DEPRESSION_FOR_STORM["high"]:
             suppressor *= 0.0
@@ -778,8 +639,8 @@ def calculate_thunderstorm_text(
             )
             suppressor *= 1.0 - (0.80 * dep_penalty)
 
-    # PoP Threshold Scaling (Replaces raw linear pop_val)
-    if valid(pop):
+    # PoP Threshold Scaling
+    if _valid(pop):
         if pop <= PRECIP_PROB_THRESHOLD:
             suppressor *= 0.2  # Heavy penalty for low PoP environments
         elif pop < HIGH_PRECIP_PROB_THRESHOLD:
@@ -792,10 +653,10 @@ def calculate_thunderstorm_text(
     thu_text = None
     thu_icon = None
 
-    if final_score >= SCORE["thunderstorm"]:
+    if final_score >= THUNDERSTORM_SCORE["thunderstorm"]:
         thu_text = "thunderstorm"
         thu_icon = "thunderstorm"
-    elif final_score >= SCORE["possible"]:
+    elif final_score >= THUNDERSTORM_SCORE["possible"]:
         thu_text = "possible-thunderstorm"
         if icon == "pirate":
             thu_icon = (

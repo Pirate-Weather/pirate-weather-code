@@ -1,0 +1,273 @@
+# %% Read and Process NWS Alerts
+# Created on: 2023-01-17
+
+# Import Modules
+import logging
+import os
+import shutil
+import tarfile
+import xml.etree.ElementTree as ET
+
+import geopandas as gp
+import numpy as np
+import nwswx
+import pandas as pd
+import requests
+import zarr
+from zarr.core.dtype import VariableLengthUTF8
+
+from API.constants.shared_const import INGEST_VERSION_STR
+from API.ingest_utils import (
+    FINAL_CHUNK_SIZES,
+    FINAL_SHARD_SIZES,
+    close_store,
+    configure_zarr_limits,
+    open_remote,
+    positive_int_env,
+    publish_store,
+    tune_nofile_limit,
+)
+
+# %% Setup paths and parameters
+ingestVersion = INGEST_VERSION_STR
+
+wgrib2_path = os.getenv("wgrib2_path", default="/home/ubuntu/wgrib2_build/bin/wgrib2 ")
+
+forecast_process_dir = os.getenv(
+    "forecast_process_dir", default="/home/ubuntu/Weather/NWS_Alerts"
+)
+forecast_process_path = forecast_process_dir + "/NWS_Alerts_Process"
+hist_process_path = forecast_process_dir + "/NWS_Alerts_Historic"
+tmpDIR = forecast_process_dir + "/Downloads"
+
+forecast_path = os.getenv(
+    "forecast_path", default="/home/ubuntu/Weather/Prod/NWS_Alerts"
+)
+historic_path = os.getenv(
+    "historic_path", default="/home/ubuntu/Weather/History/NWS_Alerts"
+)
+
+
+saveType = os.getenv("save_type", default="Download")
+aws_access_key_id = os.environ.get("AWS_KEY", "")
+aws_secret_access_key = os.environ.get("AWS_SECRET", "")
+
+# Logging
+logger = logging.getLogger(__name__)
+
+
+def main() -> None:
+    """Download NWS alerts and write the alerts zarr grid."""
+    zarr_store_workers = positive_int_env("zarr_store_workers", 2)
+    zarr_async_concurrency = positive_int_env("zarr_async_concurrency", 2)
+
+    tune_nofile_limit()
+    zarr_store_workers, zarr_async_concurrency = configure_zarr_limits(
+        zarr_store_workers, zarr_async_concurrency
+    )
+    logging.basicConfig(level=logging.INFO)
+
+    # Create new directory for processing if it does not exist
+    if not os.path.exists(forecast_process_dir):
+        os.makedirs(forecast_process_dir)
+    else:
+        # If it does exist, remove it
+        shutil.rmtree(forecast_process_dir)
+        os.makedirs(forecast_process_dir)
+
+    if not os.path.exists(tmpDIR):
+        os.makedirs(tmpDIR)
+
+    if saveType == "Download" and not os.path.exists(historic_path):
+        os.makedirs(historic_path)
+
+    # %% Download watch warning kml
+    warningURL = (
+        "https://tgftp.nws.noaa.gov/SL.us008001/DF.sha/DC.cap/DS.WWA/current_all.tar.gz"
+    )
+
+    r = requests.get(warningURL, allow_redirects=True)
+
+    # Save to file in tmpDIR
+    savePath = os.path.join(forecast_process_dir, "current_all.tar.gz")
+    with open(savePath, "wb") as f:
+        f.write(r.content)
+
+    with tarfile.open(savePath, "r:gz") as tar:
+        # Python 3.14 changes default extract behavior; be explicit and keep compatibility.
+        try:
+            tar.extractall(path=forecast_process_dir, filter="data")
+        except TypeError:
+            tar.extractall(path=forecast_process_dir)
+
+    # %% Read in KMZ using geopandas
+    nws_alert_gdf = gp.read_file(os.path.join(forecast_process_dir, "current_all.shp"))
+
+    # %% Setup NWS ID
+    nws = nwswx.WxAPI("api@alexanderrey.ca")
+
+    # Active alerts
+    alertsIN = nws.active_alerts(return_format=nwswx.formats.JSONLD)
+
+    nws_alerts = alertsIN["@graph"]
+
+    # If more than one page of alerts, loop through an append
+    while "pagination" in alertsIN:
+        # Get the next page of alerts
+        result = requests.get(alertsIN["pagination"]["next"])
+
+        # Convert to JSON
+        alertsIN = result.json()
+        nws_alerts.extend(alertsIN["features"])
+
+        logger.info("AWS Alerts: %d", len(nws_alerts))
+    nws_alert_df = pd.DataFrame.from_records(nws_alerts)
+
+    nws_alert_df["CAP_ID"] = nws_alert_df["id"]
+
+    # Merge where available
+    nws_alert_merged = nws_alert_gdf.merge(
+        nws_alert_df.drop_duplicates(subset="CAP_ID"), how="left", on="CAP_ID"
+    )
+
+    ns = {"ns": "urn:oasis:names:tc:emergency:cap:1.2"}
+
+    # print(list(nws_alert_merged.columns.values))
+
+    # Call the NWS API for any missing alerts
+    for row in range(len(nws_alert_merged)):
+        if pd.isna(nws_alert_merged.loc[row, "headline"]):
+            try:
+                response = requests.get(
+                    "https://api.weather.gov/alerts/"
+                    + nws_alert_merged.loc[row, "CAP_ID"]
+                    + ".cap"
+                )
+                root = ET.fromstring(response.content)
+
+                nws_alert_merged.loc[row, "headline"] = root.find(
+                    ".//ns:info/ns:headline", namespaces=ns
+                ).text
+                nws_alert_merged.loc[row, "event"] = root.find(
+                    ".//ns:info/ns:event", namespaces=ns
+                ).text
+                nws_alert_merged.loc[row, "description"] = root.find(
+                    ".//ns:info/ns:description", namespaces=ns
+                ).text
+                nws_alert_merged.loc[row, "areaDesc"] = root.find(
+                    ".//ns:area/ns:areaDesc", namespaces=ns
+                ).text
+                nws_alert_merged.loc[row, "severity"] = root.find(
+                    ".//ns:info/ns:severity", namespaces=ns
+                ).text
+
+            except (requests.RequestException, ET.ParseError, AttributeError):
+                nws_alert_merged.loc[row, "headline"] = nws_alert_merged.loc[
+                    row, "PROD_TYPE"
+                ]
+                nws_alert_merged.loc[row, "event"] = nws_alert_merged.loc[
+                    row, "PROD_TYPE"
+                ]
+                nws_alert_merged.loc[row, "description"] = nws_alert_merged.loc[
+                    row, "PROD_TYPE"
+                ]
+                nws_alert_merged.loc[row, "areaDesc"] = nws_alert_merged.loc[row, "WFO"]
+                nws_alert_merged.loc[row, "severity"] = nws_alert_merged.loc[row, "SIG"]
+
+    # Convert to geodataframe
+    nws_alert_merged_gdf = gp.GeoDataFrame(nws_alert_merged, geometry="geometry_x")
+
+    # %% Create grid of points
+    xs = np.arange(-127, -65, 0.025)
+    ys = np.arange(24, 50, 0.025)
+
+    lons, lats = np.meshgrid(xs, ys)
+
+    # Create GeoSeries of Points
+    gridPointsSeries = gp.GeoDataFrame(
+        geometry=gp.points_from_xy(lons.flatten(), lats.flatten()), crs="EPSG:4326"
+    )
+    gridPointsSeries["INDEX"] = gridPointsSeries.index
+    points_in_polygons = gp.sjoin(
+        gridPointsSeries, nws_alert_merged_gdf, predicate="within", how="inner"
+    )
+
+    # Create a formatted string to save all relevant fields in the zarr array.
+    points_in_polygons["string"] = (
+        points_in_polygons["event"].astype(str) + "}"
+        "{"
+        + points_in_polygons["description"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["areaDesc"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["effective"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["EXPIRATION"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["severity"].astype(str)
+        + "}"
+        + "{"
+        + points_in_polygons["URL"].astype(str)
+    )
+
+    # Normalize possible null/non-string values before joining grouped strings.
+    points_in_polygons["string"] = points_in_polygons["string"].fillna("").astype(str)
+    points_in_polygons = points_in_polygons[points_in_polygons["string"] != ""]
+
+    # Combine formatted strings using "|" as a separator.
+    df = points_in_polygons.groupby("INDEX", as_index=False)["string"].agg(
+        lambda values: "|".join(v for v in values if v)
+    )
+
+    # Merge back into primary geodataframe
+    gridPointsSeries = gridPointsSeries.merge(df, on="INDEX", how="left")
+
+    # Set empty data as blank
+    gridPointsSeries["string"] = gridPointsSeries["string"].fillna("")
+
+    # Concert to string
+    gridPointsSeries["string"] = gridPointsSeries["string"].astype(str)
+
+    # %% XR approach
+    gridPoints_XR = gridPointsSeries["string"].to_xarray()
+
+    # Reshape to 2D
+    gridPoints_XR2 = gridPoints_XR.values.astype(VariableLengthUTF8).reshape(lons.shape)
+
+    # Write to zarr
+    zarr_store = zarr.storage.LocalStore(forecast_process_dir + "/NWS_Alerts.zarr")
+    zarr_array = zarr.create_array(
+        store=zarr_store,
+        shape=gridPoints_XR2.shape,
+        dtype=zarr.dtype.VariableLengthUTF8(),
+        # The API reads this with zarr-python: tensorstore cannot read
+        # variable-length strings. The whole grid is written in one call below.
+        chunks=(FINAL_CHUNK_SIZES["ALERTS"],) * 2,
+        shards=(FINAL_SHARD_SIZES["ALERTS"],) * 2,
+        config={"write_empty_chunks": True},
+        overwrite=True,
+    )
+    zarr_array[:] = gridPoints_XR2
+    close_store(zarr_store)
+
+    # Publish to S3 or the local publish directory
+    forecast_remote = open_remote(
+        forecast_path + "/" + ingestVersion,
+        saveType,
+        aws_access_key_id,
+        aws_secret_access_key,
+    )
+    publish_store(
+        forecast_process_dir + "/NWS_Alerts.zarr", forecast_remote, "NWS_Alerts.zarr"
+    )
+
+    # Clean up
+    shutil.rmtree(forecast_process_dir)
+
+
+if __name__ == "__main__":
+    main()

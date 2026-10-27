@@ -31,10 +31,12 @@ To run the service, clone this repository to a machine, edit the [docker compose
 Several environmental variables are also used to control the API, including:
 - `wgrib2_path`: Where WGRIB2 is saved. Do not change;
 - `forecast_process_path`: Where forecast data should be saved during processing;
-- `hist_process_path`: Where short term (~36h) historic data should be saved during processing;
 - `merge_process_dir`: Where merged datasets should be saved;
 - `tmp_dir`: Where downloaded data should be saved;
 - `save_type`: If data should be saved to S3 (`S3`) or locally (`Download`).
+- `forecast_path` / `historic_path`: Where published stores and short-term history go: a local directory, or `bucket/prefix` when `save_type` is `S3`.
+- `s3_endpoint`, `s3_region`, `s3_storage_class`: Optional settings for a non-AWS object store (for OVH, e.g. `https://s3.bhs.io.cloud.ovh.net`, `bhs` and `EXPRESS_ONEZONE` for High Performance).
+- `upload_concurrency`: How many objects are uploaded at once when publishing (default 256).
 - `save_path`: Where the ingested data should be saved.
 
 The initial `docker compose up` command will take some time (~1 hour), as the initial batch of models is downloaded, processed and saved. From there, [Ofelia](https://github.com/mcuadros/ofelia) is used to schedule additional data ingest runs, while the `api_server` container responds to requests (Ex. `curl 127.0.0.1:8083/forecast/abc123/45,-75`)!
@@ -170,7 +172,7 @@ Running a weather API for the entire planet isn't a trivial task, and accordingl
 However, the response script/container is significantly lighter, requiring only a vanilla Python/ Node environment, minimal memory, and ~50 GB of space.
 
 ### Response Dev Tooling Setup
-The most interesting part of this project is the response script, which takes the raw model data and generates the API response. While spinning up the entire API is one way to work on this, it's much easier to simply run either the docker container or a virtual Python environment and use the existing zip files!
+The most interesting part of this project is the response script, which takes the raw model data and generates the API response. While spinning up the entire API is one way to work on this, it's much easier to simply run either the docker container or a virtual Python environment and use the existing Zarr stores!
 
 ##### Docker
 Two options are available to do this via Docker- either download a static copy of the forecast files and reference those, or access the live Zarr files directly. Live access is much easier, but does require an API key since the files are hosted on Pirate Weather's AWS instance.
@@ -207,18 +209,25 @@ curl 127.0.0.1:8083/forecast/123456/47.1756,27.594,1730869200
 In either case, the dockerfiles to build the underlying images are [available](https://github.com/Pirate-Weather/pirate-weather-code/tree/dev/Docker), allowing the image to be rebuilt as well. This is helpful for adding additional Python packages or updating versions. 
 
 **Note:** 
+- The static snapshot predates the sharded store layout (below); it needs a re-published snapshot before it works with the current reader.
 - Because the model files are a static snapshot, the time parameter (around Wed Nov 06 2024) must be used!
 - The container will initially not do anything, since FastAPI doesn't appear to pass along the logs until it's initialized. It should be up and running within ~5 minutes 
 
-This setup disables all the file updating processes within the response script and reads the data directly from the Zarr zip stores, focusing on the response. 
+This setup disables all the file updating processes within the response script and reads the data directly from the Zarr stores, focusing on the response. 
 
 #### VirtualEnv
-The other alternative is to setup a Python environment following the same process the dockerfile does. There's now a [handy script for this](https://github.com/Pirate-Weather/pirate-weather-code/blob/dev/scripts/setup_ingest_test_env) in the repository, which runs assuming that `python3.14`, `python3.14-dev`, and `build-essentials` are installed on the system. It's been tested on Ubuntu, but should work on other distributions. 
+The other alternative is to setup a Python environment following the same process the dockerfile does. There's now a [handy script for this](https://github.com/Pirate-Weather/pirate-weather-code/blob/dev/scripts/setup_ingest_test_env) in the repository. On Debian/Ubuntu it installs any missing system packages via `apt-get` (using `sudo` when not run as root), including `python3.14-dev`, `python3.14-venv`, `build-essential`, `cmake`, `gfortran`, BLAS/LAPACK, NetCDF, and OpenJPEG; set `PW_INGEST_SKIP_SYSTEM_PACKAGES=1` to skip this step and manage them yourself. It's been tested on Ubuntu, but should work on other distributions. 
 
 **Notes:**
 - The `force_now` environmental variable tells the script to pretend that it is currently this time in order to avoid switching to historic mode;
 - The `TIMING=True` environmental variable enables detailed timing outputs;
-- Eagle eyed observes will note that the script has the capacity to read the zip files directly from S3. This is used internally for testing, since it's too slow for the production API.
+- Eagle eyed observes will note that the script has the capacity to read the sharded Zarr stores directly from S3. This is used internally for testing, since it's too slow for the production API.
+
+#### Store layout
+- Every model's final store is one sharded Zarr v3 array of `(variable, time, y, x)`, Blosc zstd, with one inner chunk per small square of grid cells holding every variable and time step, grouped into shard files (`FINAL_CHUNK_SIZES` and `FINAL_SHARD_SIZES` in `API/ingest_utils.py`). The valid times are not in the array: they are its `time` attribute (Unix seconds), and the API reader puts them back as column 0 of each point read.
+- Ingests publish each run as a new version, `<MODEL>/<stamp>.zarr`, and then rewrite `<MODEL>.current.json` to point at it.
+- `API/store_sync.py` copies new versions to the API's local disk in the same layout. API workers (`API/io/store_reader.py`, tensorstore) poll the pointers, swap in new versions while serving, and write heartbeats so the sync only deletes a version once no worker holds it.
+- Serve from local disk: an S3 read takes 100-400 ms. The benchmarks behind this layout are in `Notes/STORAGE_AND_READ_BENCHMARKS.md`.
 Then, a curl query can be made from a new terminal window:
 ```
 curl 127.0.0.1:8080/forecast/123456/47.1756,27.594,1730869200

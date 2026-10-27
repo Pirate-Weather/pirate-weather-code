@@ -9,6 +9,7 @@ Example:
 """
 
 import argparse
+import json
 import os
 import sys
 from datetime import UTC, datetime
@@ -29,14 +30,15 @@ from API.constants.api_const import (  # noqa: E402
 from API.constants.shared_const import KELVIN_TO_CELSIUS  # noqa: E402
 from API.utils.precip import dbz_to_rate  # noqa: E402
 
-DEFAULT_DOWNLOAD_DIR = "/mnt/nvme/data/Prod/SubH/v30"
+DEFAULT_DOWNLOAD_DIR = "/mnt/nvme/data/Prod/SubH/v31"
 DEFAULT_X_INDEX = 907
 DEFAULT_Y_INDEX = 545
 SUBH_INTERVAL_SECONDS = 15 * 60
 REFLECTIVITY_VARIABLE = "REFD_1000maboveground"
 
+# Axis 0 of the store (SubH_Local_Ingest zarr_vars); the valid times are the
+# array's "time" attribute, not a variable.
 VARIABLES = (
-    "time",
     "GUST_surface",
     "PRES_surface",
     "TMP_2maboveground",
@@ -61,9 +63,14 @@ def default_download_dir() -> Path:
 
 
 def find_zarr_store(download_dir: Path) -> Path:
-    if download_dir.name.endswith(".zarr"):
+    """Return the store to open: a ``.zarr`` store path itself, else the version
+    named by ``SubH.current.json`` (``API.ingest_utils.publish_store``)."""
+    if (download_dir / "zarr.json").exists():
         return download_dir
-    return download_dir / "SubH.zarr"
+    if download_dir.name.endswith(".zarr"):
+        download_dir = download_dir.parent
+    with open(download_dir / "SubH.current.json") as fh:
+        return download_dir / json.load(fh)["store"]
 
 
 def format_value(value: np.float32 | np.float64) -> str:
@@ -137,12 +144,12 @@ def parse_args() -> argparse.Namespace:
         nargs="?",
         type=Path,
         default=default_download_dir(),
-        help="directory containing SubH.zarr, or the SubH.zarr path itself",
+        help="directory holding SubH.current.json, or a SubH store path itself",
     )
     parser.add_argument(
         "--variable",
         required=True,
-        choices=VARIABLES[1:],
+        choices=VARIABLES,
         help="weather variable to print",
     )
     parser.add_argument("--x", type=int, default=DEFAULT_X_INDEX, help="x grid index")
@@ -159,8 +166,10 @@ def main() -> int:
     array = zarr.open(zarr.storage.LocalStore(store_path), mode="r")
     if array.ndim != 4:
         raise SystemExit(f"Expected a 4D SubH array, found shape {array.shape}")
-    if array.shape[0] != len(VARIABLES):
-        raise SystemExit(f"Expected {len(VARIABLES)} variables, found {array.shape[0]}")
+    if tuple(array.attrs.get("variables", ())) != VARIABLES:
+        raise SystemExit(
+            f"Expected variables {VARIABLES}, found {array.attrs.get('variables')}"
+        )
 
     _, _, y_size, x_size = array.shape
     if not 0 <= args.x < x_size or not 0 <= args.y < y_size:
@@ -169,7 +178,7 @@ def main() -> int:
             f"x=0..{x_size - 1}, y=0..{y_size - 1}"
         )
 
-    times = read_point_variable(array, "time", args.x, args.y)
+    times = np.asarray(array.attrs["time"], dtype=np.float64)
     values = read_point_variable(array, args.variable, args.x, args.y)
 
     rates = None

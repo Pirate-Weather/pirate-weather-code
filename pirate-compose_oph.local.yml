@@ -80,7 +80,7 @@ services:
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/GFS_Local_Ingest.py"]
+    command: ["ingest/GFS_Local_Ingest.py"]
 
   # NBM Ingest
   nbm_ingest:
@@ -94,7 +94,6 @@ services:
       wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
       forecast_process_dir: "/tmp/Process/NBM"
       forecast_path: "/data/Prod/NBM"
-      historic_path: "/data/Hist/NBM"
       save_type: "Download"
       OMP_NUM_THREADS: "12"
       OMP_PROC_BIND: "spread"
@@ -104,7 +103,7 @@ services:
       herbie_max_threads: "1"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/NBM_Local_Ingest.py"]
+    command: ["ingest/NBM_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully    
@@ -121,11 +120,10 @@ services:
       wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
       forecast_process_dir: "/tmp/Process/SubH"
       forecast_path: "/data/Prod/SubH"
-      historic_path: "/data/Hist/SubH"
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/SubH_Local_Ingest.py"]
+    command: ["ingest/SubH_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
@@ -144,11 +142,10 @@ services:
       wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
       forecast_process_dir: "/tmp/Process/GEFS"
       forecast_path: "/data/Prod/GEFS"
-      historic_path: "/data/Hist/GEFS"
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/GEFS_Local_Ingest.py"]
+    command: ["ingest/GEFS_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
@@ -169,11 +166,10 @@ services:
       wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
       forecast_process_dir: "/tmp/Process/HRRR"
       forecast_path: "/data/Prod/HRRR"
-      historic_path: "/data/Hist/HRRR"
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/HRRR_Local_Ingest.py"]
+    command: ["ingest/HRRR_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
@@ -196,11 +192,10 @@ services:
       wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
       forecast_process_dir: "/tmp/Process/HRRR_6H"
       forecast_path: "/data/Prod/HRRR_6H"
-      historic_path: "/data/Hist/HRRR_6H"
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/HRRR_6H_Local_Ingest.py"]
+    command: ["ingest/HRRR_6H_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
@@ -227,7 +222,7 @@ services:
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/NWS_Alerts_Local.py"]
+    command: ["ingest/NWS_Alerts_Local.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
@@ -254,7 +249,7 @@ services:
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/ECMWF_Local_Ingest.py"]
+    command: ["ingest/ECMWF_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
@@ -281,7 +276,7 @@ services:
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/RTMA-RU_Local_Ingest.py"]
+    command: ["ingest/RTMA-RU_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully

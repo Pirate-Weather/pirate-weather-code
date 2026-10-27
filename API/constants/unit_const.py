@@ -1,7 +1,23 @@
-# Mapping between country codes and their preferred measurement systems.
-# Only used for units='auto'
+# Unit constants: ingest unit conversion factors and the mapping between country
+# codes and their preferred measurement systems.
 # Alexander Rey, October 2025
 
+# %% Ingest unit conversion factors
+# Shared by the ingests that convert source units to the units stored in the
+# zarr stores (FMI SILAM, ECCC RAQDPS, ECMWF IFS/AIFS precipitation).
+
+# Mass concentration: 1 kg/m^3 = 1e9 ug/m^3 (1 kg = 1e9 ug). Particulate matter
+# is stored in ug/m^3.
+KG_M3_TO_UG_M3 = 1e9
+# Column mass loading: 1 kg/m^2 = 1e9 ug/m^2.
+KG_M2_TO_UG_M2 = 1e9
+# Volume mixing ratio: 1 mol/mol = 1e9 ppb (parts per billion by volume). Gases
+# are stored in ppb.
+MOL_MOL_TO_PPB = 1e9
+# Length: millimetres per metre (ECMWF precipitation is in m, thresholds in mm).
+MM_PER_M = 1000
+
+# %% Country measurement systems, only used for units='auto'
 country_units = {
     # US customary units
     "US": "US",

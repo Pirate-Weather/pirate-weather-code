@@ -36,16 +36,16 @@ class DailySection:
 
 
 def _get_night_window_end(
-    day_array_4am_grib: np.ndarray, idx: int, start_time: int
+    day_array_6am_grib: np.ndarray, idx: int, start_time: int
 ) -> int:
-    """Return the closing 4am boundary for a night window.
+    """Return the closing 6am boundary for a night window.
 
     Test fixtures may only provide `daily_days` boundaries rather than the
-    next-day 4am marker required by the legacy night summary window.
+    next-day 6am marker required by the night summary window.
     """
-    if idx + 1 < len(day_array_4am_grib):
-        return int(day_array_4am_grib[idx + 1])
-    return start_time + (11 * 3600)
+    if idx + 1 < len(day_array_6am_grib):
+        return int(day_array_6am_grib[idx + 1])
+    return start_time + (12 * 3600)
 
 
 def _aggregate_stats(
@@ -752,9 +752,9 @@ def build_daily_section(
     *,
     InterPhour: np.ndarray,
     hourlyDayIndex: np.ndarray,
-    hourlyDay4amIndex: np.ndarray,
-    hourlyDay4pmIndex: np.ndarray,
-    hourlyNight4amIndex: np.ndarray,
+    hourlyDay6amIndex: np.ndarray,
+    hourlyHalfDayIndex: np.ndarray,
+    hourlyHalfNightIndex: np.ndarray,
     hourlyHighIndex: np.ndarray,
     hourlyLowIndex: np.ndarray,
     daily_days: int,
@@ -775,8 +775,8 @@ def build_daily_section(
     timeMachine: bool,
     tmExtra: bool,
     day_array_grib: np.ndarray,
-    day_array_4am_grib: np.ndarray,
-    day_array_5pm_grib: np.ndarray,
+    day_array_6am_grib: np.ndarray,
+    day_array_6pm_grib: np.ndarray,
     InterSday: np.ndarray,
     hourList_si: list,
     pTypeMap: np.ndarray,
@@ -797,9 +797,9 @@ def build_daily_section(
     Args:
         InterPhour: Hourly interpolated data.
         hourlyDayIndex: Indices for daily aggregation.
-        hourlyDay4amIndex: Indices for 4am-to-4am aggregation.
-        hourlyDay4pmIndex: Indices for day aggregation.
-        hourlyNight4amIndex: Indices for night aggregation.
+        hourlyDay6amIndex: Indices for 6am-to-6am aggregation (daily icon and precipitation type).
+        hourlyHalfDayIndex: Indices for the 6am-to-6pm day half.
+        hourlyHalfNightIndex: Indices for the 6pm-to-6am night half.
         hourlyHighIndex: Indices for daily high calculation.
         hourlyLowIndex: Indices for daily low calculation.
         daily_days: Number of days.
@@ -820,8 +820,8 @@ def build_daily_section(
         timeMachine: Whether this is a time machine request.
         tmExtra: Extra time machine parameters.
         day_array_grib: Daily GRIB array.
-        day_array_4am_grib: Daily 4am GRIB array.
-        day_array_5pm_grib: Daily 5pm GRIB array.
+        day_array_6am_grib: Daily 6am GRIB array (daily summary and day half start).
+        day_array_6pm_grib: Daily 6pm GRIB array (night half start).
         InterSday: Daily source data.
         hourList_si: Hourly list for SI units.
         pTypeMap: Precipitation type map.
@@ -857,16 +857,16 @@ def build_daily_section(
     )
 
     (
-        mean_4am_results,
-        sum_4am_results,
-        max_4am_results,
+        mean_6am_results,
+        sum_6am_results,
+        max_6am_results,
         _,
         _,
         _,
         maxPchanceDay,
     ) = _aggregate_stats(
         InterPhour,
-        hourlyDay4amIndex,
+        hourlyDay6amIndex,
         daily_days,
         calc_mean=True,
         calc_sum=True,
@@ -884,7 +884,7 @@ def build_daily_section(
         max_precip_chance_day,
     ) = _aggregate_stats(
         InterPhour,
-        hourlyDay4pmIndex,
+        hourlyHalfDayIndex,
         daily_days,
         calc_mean=True,
         calc_sum=True,
@@ -902,7 +902,7 @@ def build_daily_section(
         max_precip_chance_night,
     ) = _aggregate_stats(
         InterPhour,
-        hourlyNight4amIndex,
+        hourlyHalfNightIndex,
         daily_days,
         calc_mean=True,
         calc_sum=True,
@@ -952,9 +952,9 @@ def build_daily_section(
     InterPdayLow = np.array(low_results)
     InterPdayHighTime = np.array(arghigh_results)
     InterPdayLowTime = np.array(arglow_results)
-    InterPday4am = np.array(mean_4am_results)
-    InterPdaySum4am = np.array(sum_4am_results)
-    InterPdayMax4am = np.array(max_4am_results)
+    InterPday6am = np.array(mean_6am_results)
+    InterPdaySum6am = np.array(sum_6am_results)
+    InterPdayMax6am = np.array(max_6am_results)
     interp_half_day_sum = np.array(sum_day_results)
     interp_half_day_mean = np.array(mean_day_results)
     interp_half_day_max = np.array(max_day_results)
@@ -1062,7 +1062,7 @@ def build_daily_section(
 
         day_item = _build_half_day_item(
             idx,
-            day_array_4am_grib[idx],
+            day_array_6am_grib[idx],
             day_icon,
             day_text,
             precip_type_half_day[idx],
@@ -1081,8 +1081,8 @@ def build_daily_section(
                 translation=translation,
                 hour_list_slice=select_hour_window(
                     hourList_si,
-                    start_time=int(day_array_4am_grib[idx]),
-                    end_time=int(day_array_5pm_grib[idx]),
+                    start_time=int(day_array_6am_grib[idx]),
+                    end_time=int(day_array_6pm_grib[idx]),
                 ),
                 is_day=not is_all_night,
                 tz_name=tz_name,
@@ -1115,7 +1115,7 @@ def build_daily_section(
 
         day_item = _build_half_day_item(
             idx,
-            day_array_5pm_grib[idx],
+            day_array_6pm_grib[idx],
             day_icon,
             day_text,
             precip_type_half_night[idx],
@@ -1129,7 +1129,7 @@ def build_daily_section(
         )
 
         if idx < 8:
-            night_start_time = int(day_array_5pm_grib[idx])
+            night_start_time = int(day_array_6pm_grib[idx])
             day_text, day_icon = apply_legacy_half_day_text(
                 summary_text=summaryText,
                 translation=translation,
@@ -1137,7 +1137,7 @@ def build_daily_section(
                     hourList_si,
                     start_time=night_start_time,
                     end_time=_get_night_window_end(
-                        day_array_4am_grib, idx, night_start_time
+                        day_array_6am_grib, idx, night_start_time
                     ),
                 ),
                 is_day=is_all_day,
@@ -1156,9 +1156,9 @@ def build_daily_section(
         day_night_list.append(day_item)
 
         dayIcon, dayText = pick_day_icon_and_summary(
-            max_arr=InterPdayMax4am,
-            mean_arr=InterPday4am,
-            sum_arr=InterPdaySum4am,
+            max_arr=InterPdayMax6am,
+            mean_arr=InterPday6am,
+            sum_arr=InterPdaySum6am,
             precip_type_arr=PTypeDay,
             precip_text_arr=PTextDay,
             idx=idx,
@@ -1346,8 +1346,13 @@ def build_daily_section(
 
         try:
             if idx < 8 and summaryText:
+                # The daily summary describes 6am to 6am the next day
                 dayIcon, dayText = calculate_day_text(
-                    hourList_si[((idx) * 24) + 4 : ((idx + 1) * 24) + 4],
+                    select_hour_window(
+                        hourList_si,
+                        start_time=int(day_array_6am_grib[idx]),
+                        end_time=int(day_array_6am_grib[idx + 1]),
+                    ),
                     not is_all_night,
                     str(tz_name),
                     "day",

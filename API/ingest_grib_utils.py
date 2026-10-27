@@ -1,15 +1,13 @@
-"""GFS Ingest GRIB Processing Utilities
+"""Ingest GRIB download and wgrib2 utilities.
 
-Helper functions for GRIB file processing, validation, and data transformations
-used in the GFS Local Data Ingestion Script.
+Shared helpers for downloading model GRIB subsets with Herbie, checking them with
+``wgrib2 -stats``, and running wgrib2 commands with checked exit status.
 
 Author: Alexander Rey
 """
 
 import logging
-import os
 import shlex
-import sys
 import time
 from datetime import datetime
 from typing import Any, cast
@@ -53,62 +51,47 @@ def cat_gribs(grib_files: list[str]) -> str:
     return "cat " + " ".join(quote_path(path) for path in grib_files)
 
 
-def output_path(forecast_process_path: str, suffix: str) -> str:
-    """Create output file path with consistent naming convention.
-
-    Args:
-        forecast_process_path: Base path for forecast processing
-        suffix: File suffix to append (e.g., 'pgrb2_0p25_merged.grib')
-
-    Returns:
-        Full output path: {forecast_process_path}_{suffix}
-    """
-    return f"{forecast_process_path}_{suffix}"
-
-
 def run_checked(cmd: str, description: str):
-    """Execute shell command and exit on failure.
+    """Run a command (optionally with one pipe) and raise if it fails.
 
     Args:
-        cmd: Shell command to execute
-        description: Human-readable description for logging
+        cmd: Command to execute, e.g. ``cat a b | wgrib2 - -netcdf out.nc``
+        description: What the command does, including the model, for the error
 
     Raises:
-        SystemExit: If command returns non-zero exit code
+        RuntimeError: If the command returns a non-zero exit code, so a failed
+            conversion stops the ingest instead of surfacing later as an
+            unrelated array error.
     """
     sp_out = run_command(cmd)
     if sp_out.returncode != 0:
-        logger.error("%s failed.", description)
-        logger.error(sp_out.stderr)
-        sys.exit(1)
+        raise RuntimeError(
+            f"{description} failed with exit code {sp_out.returncode}.\n"
+            f"Command: {cmd}\n{sp_out.stderr}"
+        )
     return sp_out
 
 
-def has_records(path: str) -> bool:
-    """Check if inventory file exists and contains records.
+def check_grib_stats(
+    grib_files: list[str],
+    wgrib2_exe: str,
+    dataset_name: str,
+    excluded_variables: list[str] | None = None,
+) -> None:
+    """Run ``wgrib2 -s -stats`` over GRIB files and raise if any record is out of range.
 
-    Args:
-        path: Path to inventory file
-
-    Returns:
-        True if file exists and is non-empty
+    This is the gate that keeps corrupt upstream GRIB data from being published.
     """
-    return os.path.exists(path) and os.path.getsize(path) > 0
+    cmd_stats = (
+        f"{cat_gribs(grib_files)} | {quote_path(wgrib2_exe.strip())} - -s -stats"
+    )
+    grib_check = run_checked(cmd_stats, f"{dataset_name} GRIB validation")
+    if not validate_grib_stats(grib_check, excluded_variables=excluded_variables):
+        raise RuntimeError(f"{dataset_name} failed GRIB validation.")
+    logger.info("%s passed GRIB validation.", dataset_name)
 
 
-def awk_path(path: str) -> str:
-    """Escape a path for safe use inside double-quoted awk strings.
-
-    Args:
-        path: Path to escape
-
-    Returns:
-        Escaped path string
-    """
-    return path.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def download_and_validate_gfs_subset(
+def download_and_validate_subset(
     *,
     product: str,
     dataset_name: str,
@@ -119,10 +102,8 @@ def download_and_validate_gfs_subset(
     herbie_retry_sleep_seconds: int,
     model: str = "gfs",
     search=None,
-    gfs_forecast_hours: list[int] | None = None,
-    default_forecast_hours: list[int] | None = None,
+    forecast_hours: list[int],
     run_date=None,
-    forecast_hours: list[int] | None = None,
     priority=None,
     save_dir=None,
     path_search=None,
@@ -143,13 +124,11 @@ def download_and_validate_gfs_subset(
         dataset_name: Human-readable name for dataset
         base_time: Base forecast time
         wgrib2_exe: Path to wgrib2 executable
-        gfs_forecast_hours: Backward-compatible default forecast hours for GFS callers.
+        forecast_hours: Forecast lead hours to download.
         herbie_save_dir: Directory to save Herbie downloads
         herbie_download_retries: Number of retries for Herbie downloads
         herbie_retry_sleep_seconds: Sleep time between retries
-        default_forecast_hours: Model-agnostic default forecast hours.
         run_date: Override base_time with specific date
-        forecast_hours: Override default forecast hours
         priority: Source priority for Herbie downloads
         save_dir: Override default save directory
         path_search: Optional search pattern used to resolve local Herbie paths.
@@ -168,10 +147,6 @@ def download_and_validate_gfs_subset(
     """
     if run_date is None:
         run_date = base_time
-    if forecast_hours is None:
-        forecast_hours = default_forecast_hours or gfs_forecast_hours
-    if forecast_hours is None:
-        raise ValueError("forecast_hours or default_forecast_hours must be provided.")
     if priority is None:
         priority = ["aws", "google", "nomads"] if model == "gfs" else None
     if save_dir is None:
@@ -244,13 +219,10 @@ def download_and_validate_gfs_subset(
     downloaded_count = len(herbie_obj.file_exists)
 
     if downloaded_count != expected_count:
-        logger.error(
-            "Download failed for %s: expected %s files but got %s.",
-            dataset_name,
-            expected_count,
-            downloaded_count,
+        raise RuntimeError(
+            f"Download failed for {dataset_name}: expected {expected_count} files "
+            f"but got {downloaded_count}."
         )
-        sys.exit(1)
 
     grib_files = build_herbie_grib_list(herbie_obj.file_exists, path_search)
 
@@ -258,12 +230,5 @@ def download_and_validate_gfs_subset(
         logger.info("%s skipped GRIB validation.", dataset_name)
         return grib_files
 
-    cmd_stats = f"{cat_gribs(grib_files)} | {quote_path(wgrib2_exe)} - -s -stats"
-
-    grib_check = run_checked(cmd_stats, f"{dataset_name} GRIB validation")
-    if not validate_grib_stats(grib_check, excluded_variables=excluded_stats_variables):
-        raise RuntimeError(f"{dataset_name} failed GRIB validation.")
-
-    logger.info("%s passed GRIB validation.", dataset_name)
-
+    check_grib_stats(grib_files, wgrib2_exe, dataset_name, excluded_stats_variables)
     return grib_files

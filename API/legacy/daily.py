@@ -14,7 +14,7 @@ from API.constants.text_const import (
     PRECIP_PROB_THRESHOLD,
     WIND_THRESHOLDS,
 )
-from API.PirateDayNightText import calculate_half_day_text
+from API.PirateDailyText import calculate_day_text
 
 
 def select_hour_window(hour_list, *, start_time: int, end_time: int) -> list:
@@ -115,18 +115,19 @@ def apply_legacy_half_day_text(
     loc_tag: str,
     phase: str,
 ) -> tuple[str, str]:
-    """Apply PirateDayNightText for a half-day period when enabled."""
+    """Apply the half-day summary text from PirateDailyText when enabled."""
     # This has been supplemented by pick_day_icon_and_summary, but is kept because I'm afraid to remove it
     if not summary_text:
         return fallback_text, fallback_icon
 
     try:
-        day_icon, day_text = calculate_half_day_text(
+        day_icon, day_text = calculate_day_text(
             hour_list_slice,
             is_day,
             str(tz_name),
             icon_set=icon_set,
             unit_system=unit_system,
+            half_day=True,
         )
         return translation.translate(["sentence", day_text]), day_icon
     except Exception:

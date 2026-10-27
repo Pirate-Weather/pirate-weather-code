@@ -66,6 +66,9 @@ GFS = {
     "solar": 22,
     "cape": 23,
     "station_pressure": 24,
+    "lifted_index": 25,
+    "vertical_velocity": 26,
+    "cin": 27,
 }
 
 GEFS = {
@@ -280,6 +283,7 @@ GDPS = {
     "cin": 17,
     "vertical_velocity": 18,
     "k_index": 19,
+    "lifted_index": 20,
 }
 
 # Ensamble variable indices

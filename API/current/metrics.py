@@ -74,7 +74,6 @@ class CurrentSection:
 
     currently: dict
     interp_current: np.ndarray
-    summary_key: str | None = None
 
 
 @dataclass
@@ -1678,6 +1677,18 @@ def _get_lifted_index(
                 model_data["HRDPS_Merged"], HRDPS["lifted_index"], state
             ),
         ),
+        "gdps": (
+            lambda: "gdps" in sourceList,
+            lambda: _interp_scalar(
+                model_data["GDPS_Merged"], GDPS["lifted_index"], state
+            ),
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(
+                model_data["GFS_Merged"], GFS["lifted_index"], state
+            ),
+        ),
     }
 
     strategies = _build_source_strategies(
@@ -1728,6 +1739,12 @@ def _get_vertical_velocity(
                 model_data["GDPS_Merged"], GDPS["vertical_velocity"], state
             ),
         ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(
+                model_data["GFS_Merged"], GFS["vertical_velocity"], state
+            ),
+        ),
     }
 
     strategies = _build_source_strategies(
@@ -1772,6 +1789,10 @@ def _get_convective_inhibition(
         "gdps": (
             lambda: "gdps" in sourceList,
             lambda: _interp_scalar(model_data["GDPS_Merged"], GDPS["cin"], state),
+        ),
+        "gfs": (
+            lambda: "gfs" in sourceList,
+            lambda: _interp_scalar(model_data["GFS_Merged"], GFS["cin"], state),
         ),
     }
 
@@ -2349,7 +2370,6 @@ def build_current_section(
     currently_si["snowAccumulation"] = 0
     currently_si["iceAccumulation"] = 0
 
-    current_summary_key = None
     try:
         # Always calculate text for translation, even if not used in currently block, to ensure translation keys are generated for all scenarios.
         currentText, currentIcon = calculate_text(
@@ -2357,9 +2377,6 @@ def build_current_section(
             currentDay,
             "current",
             icon,
-        )
-        current_summary_key = (
-            currentText  # current_summary_key is used for minutely text generation.
         )
     except Exception:
         logger.exception("CURRENTLY TEXT GEN ERROR %s", loc_tag)
@@ -2375,5 +2392,4 @@ def build_current_section(
     return CurrentSection(
         currently=currently,
         interp_current=InterPcurrent,
-        summary_key=current_summary_key,
     )

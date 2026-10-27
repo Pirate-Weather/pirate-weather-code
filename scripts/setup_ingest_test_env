@@ -10,6 +10,7 @@ WGRIB2_PREFIX="${PW_INGEST_WGRIB2_PREFIX:-${BUILD_ROOT}/wgrib2_build}"
 PGEOCODE_DATA_DIR="${PW_INGEST_PGEOCODE_DATA_DIR:-${BUILD_ROOT}/pgeocode_data}"
 VENV_DIR="${PW_INGEST_VENV:-${1:-${ROOT_DIR}/.venvs/ingest-test}}"
 FORCE_REBUILD="${PW_INGEST_FORCE:-0}"
+SKIP_SYSTEM_PACKAGES="${PW_INGEST_SKIP_SYSTEM_PACKAGES:-0}"
 PYTHON_BIN="${PW_INGEST_PYTHON_BIN:-python3.14}"
 
 LIBAEC_REPO="https://github.com/Deutsches-Klimarechenzentrum/libaec.git"
@@ -37,6 +38,65 @@ require_command() {
         printf 'Missing required command: %s\n' "$1" >&2
         exit 1
     fi
+}
+
+install_system_packages() {
+    local python_pkg
+    local pkg
+    local -a packages
+    local -a missing=()
+    local -a sudo_cmd=()
+
+    if [[ "${SKIP_SYSTEM_PACKAGES}" == "1" ]]; then
+        log "Skipping system package installation"
+        return
+    fi
+
+    if ! command -v apt-get >/dev/null 2>&1 || ! command -v dpkg-query >/dev/null 2>&1; then
+        log "apt-get not found; install the build toolchain, BLAS/LAPACK, NetCDF, OpenJPEG, libpng, and zlib development packages manually"
+        return
+    fi
+
+    # Debian/Ubuntu ship venv/ensurepip and the C headers as separate per-version packages.
+    python_pkg="$(basename "${PYTHON_BIN}")"
+    packages=(
+        build-essential
+        cmake
+        gfortran
+        git
+        tar
+        wget
+        "${python_pkg}"
+        "${python_pkg}-dev"
+        "${python_pkg}-venv"
+        # NCEPLIBS-ip requires LAPACK/BLAS; wgrib2 and NCEPLIBS-g2c link against these.
+        libblas-dev
+        liblapack-dev
+        libnetcdf-dev
+        libopenjp2-7-dev
+        libpng-dev
+        zlib1g-dev
+    )
+
+    for pkg in "${packages[@]}"; do
+        if ! dpkg-query -W -f='${Status}' "${pkg}" 2>/dev/null | grep -q "install ok installed"; then
+            missing+=("${pkg}")
+        fi
+    done
+
+    if [[ "${#missing[@]}" -eq 0 ]]; then
+        log "System packages already installed"
+        return
+    fi
+
+    if [[ "${EUID}" -ne 0 ]]; then
+        require_command sudo
+        sudo_cmd=(sudo)
+    fi
+
+    log "Installing system packages: ${missing[*]}"
+    "${sudo_cmd[@]}" apt-get update
+    "${sudo_cmd[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
 }
 
 require_python_314() {
@@ -154,7 +214,7 @@ build_nceplibs_ip() {
 build_nceplibs_g2c() {
     local src_dir="${BUILD_ROOT}/src/NCEPLIBS-g2c"
     local build_dir="${src_dir}/build"
-    local stamp_file="${BUILD_ROOT}/.nceplibs-g2c-built"
+    local stamp_file="${BUILD_ROOT}/.nceplibs-g2c-aec-built"
 
     if [[ -f "${stamp_file}" ]]; then
         log "NCEPLIBS-g2c already built"
@@ -172,6 +232,7 @@ build_nceplibs_g2c() {
     cmake -S "${src_dir}" -B "${build_dir}" \
         -DCMAKE_INSTALL_PREFIX="${NCEPLIBS_PREFIX}" \
         -DCMAKE_PREFIX_PATH="${TOOLCHAIN_PREFIX};${NCEPLIBS_PREFIX}" \
+        -DUSE_AEC=ON \
         -DUSE_Jasper=OFF \
         -DUSE_OpenJPEG=ON
     cmake --build "${build_dir}" --parallel "${JOBS}"
@@ -185,7 +246,7 @@ build_wgrib2() {
     local src_dir="${BUILD_ROOT}/src/wgrib2-${WGRIB2_VERSION}"
     local extract_root="${BUILD_ROOT}/src/wgrib2"
     local extracted_dir="${extract_root}/wgrib2-${WGRIB2_VERSION}"
-    local stamp_file="${BUILD_ROOT}/.wgrib2-${WGRIB2_VERSION}-g2c-built"
+    local stamp_file="${BUILD_ROOT}/.wgrib2-${WGRIB2_VERSION}-g2c-aec-built"
 
     if [[ -f "${stamp_file}" ]]; then
         log "wgrib2 ${WGRIB2_VERSION} already built"
@@ -316,9 +377,19 @@ run_final_checks() {
     if [[ "${wgrib2_status}" != "0" && "${wgrib2_status}" != "8" ]]; then
         return "${wgrib2_status}"
     fi
+
+    # ECMWF open data is CCSDS packed; without AEC in g2c wgrib2 cannot read it.
+    # wgrib2 -config exits 8, so capture its output before checking it.
+    local wgrib2_config
+    wgrib2_config="$("${WGRIB2_PREFIX}/bin/wgrib2" -config || true)"
+    if ! grep -q "Supported decoding:.*CCSDS AEC" <<< "${wgrib2_config}"; then
+        printf 'wgrib2 was built without CCSDS AEC decoding; rerun with PW_INGEST_FORCE=1\n' >&2
+        return 1
+    fi
 }
 
 main() {
+    install_system_packages
     require_command cmake
     require_command ctest
     require_command git

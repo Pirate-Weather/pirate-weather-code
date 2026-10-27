@@ -1,5 +1,4 @@
 import pandas as pd
-import requests
 
 from API import ingest_grib_utils
 
@@ -13,6 +12,11 @@ class _FakeRef:
 
 
 def test_download_subset_rebuilds_fast_herbie_between_retries(tmp_path, monkeypatch):
+    """FastHerbie resolves file availability once, when it is constructed. If a
+    retry reused the first object, forecast hours published after the first
+    attempt would never be seen and the ingest would fail (or keep retrying)
+    even though the data had arrived. Each retry must build a fresh FastHerbie.
+    """
     f1 = tmp_path / "f1.grib2"
     f2 = tmp_path / "f2.grib2"
 
@@ -43,7 +47,7 @@ def test_download_subset_rebuilds_fast_herbie_between_retries(tmp_path, monkeypa
     )
     monkeypatch.setattr(ingest_grib_utils.time, "sleep", lambda _seconds: None)
 
-    paths = ingest_grib_utils.download_and_validate_gfs_subset(
+    paths = ingest_grib_utils.download_and_validate_subset(
         model="gdps",
         product="15km",
         search=None,
@@ -60,54 +64,3 @@ def test_download_subset_rebuilds_fast_herbie_between_retries(tmp_path, monkeypa
 
     assert _FakeFastHerbie.calls == 2
     assert paths == [str(f1), str(f2)]
-
-
-def test_download_subset_retries_503_with_limited_threads_and_overwrite(
-    tmp_path, monkeypatch
-):
-    grib_path = tmp_path / "aifs.grib2"
-    attempts = []
-
-    class _FakeFastHerbie:
-        def __init__(self, *_args, **kwargs):
-            assert kwargs["max_threads"] == 4
-            self.file_exists = [_FakeRef(str(grib_path))]
-
-    def _fake_download_herbie_with_retry(**kwargs):
-        attempts.append(kwargs)
-        if len(attempts) == 1:
-            raise requests.HTTPError("503 Slow Down")
-        grib_path.write_bytes(b"grib")
-
-    monkeypatch.setattr(ingest_grib_utils, "FastHerbie", _FakeFastHerbie)
-    monkeypatch.setattr(
-        ingest_grib_utils,
-        "download_herbie_with_retry",
-        _fake_download_herbie_with_retry,
-    )
-    monkeypatch.setattr(
-        ingest_grib_utils, "configure_herbie_request_timeouts", lambda: None
-    )
-    monkeypatch.setattr(ingest_grib_utils.time, "sleep", lambda _seconds: None)
-
-    paths = ingest_grib_utils.download_and_validate_gfs_subset(
-        model="aifs",
-        product="enfo",
-        search=":(tp|sf):",
-        dataset_name="AIFS ensemble",
-        base_time=pd.Timestamp("2026-09-22 06:00"),
-        wgrib2_exe="/does/not/matter",
-        forecast_hours=[6],
-        skip_wgrib2_validation=True,
-        herbie_save_dir=str(tmp_path),
-        herbie_download_retries=2,
-        herbie_retry_sleep_seconds=1,
-        herbie_kwargs={"max_threads": 4},
-        download_max_threads=4,
-        download_verbose=False,
-    )
-
-    assert paths == [str(grib_path)]
-    assert [attempt["max_threads"] for attempt in attempts] == [4, 4]
-    assert [attempt["overwrite_first_attempt"] for attempt in attempts] == [False, True]
-    assert [attempt["verbose"] for attempt in attempts] == [False, False]

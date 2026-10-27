@@ -6,6 +6,7 @@ It includes functions for reading weather data from zarr files, processing
 weather forecasts, and generating API responses.
 """
 
+import asyncio
 import datetime
 import logging
 import os
@@ -13,6 +14,7 @@ import pickle
 import platform
 import sys
 import threading
+from contextlib import asynccontextmanager
 
 import aiobotocore.session as _aio_session
 import numpy as np
@@ -37,7 +39,6 @@ from API.constants.api_const import (
     ROUNDING_RULES,
 )
 from API.constants.forecast_const import (
-    DATA_CURRENT,
     DATA_DAY,
     DATA_HOURLY,
     DATA_MINUTELY,
@@ -74,7 +75,7 @@ from API.forecast_sources import (
     merge_hourly_models,
 )
 from API.hourly.block import build_hourly_block
-from API.io.zarr_reader import update_zarr_store
+from API.io.store_reader import load_stores, watch_stores
 from API.io.ZarrHelpers import _add_custom_header
 from API.legacy.summary import (
     build_daily_summary,
@@ -130,86 +131,38 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
-# Initialize Zarr stores via helper module
-ETOPO_f = None
-SubH_Zarr = None
-HRRR_6H_Zarr = None
-GFS_Zarr = None
-URMA_Zarr = None
-ECMWF_Zarr = None
-NBM_Zarr = None
-GEFS_Zarr = None
-HRDPS_Zarr = None
-GDPS_Zarr = None
-GEPS_Zarr = None
-REPS_Zarr = None
-HRRR_Zarr = None
-NWS_Alerts_Zarr = None
-WMO_Alerts_Zarr = None
-RTMA_RU_Zarr = None
-ERA5_Data = None
-DWD_MOSMIX_Zarr = None
 DWD_MOSMIX_Stations = None
-AIGFS_Zarr = None
-AIGEFS_Zarr = None
-ECMWF_AIFS_Zarr = None
-RAQDPS_Zarr = None
-SILAM_Zarr = None
-RAQDPS_LatLon = None
-
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
-app.add_middleware(TimingMiddleware)
-
 STAGE = os.environ.get("STAGE", "PROD")
 logger.info("OS: %s Stage: %s", platform.system(), STAGE)
 
-"""Load zarr stores on startup.
 
-File syncing is now handled by a separate container.
-This just loads the zarr stores from their expected paths.
-"""
-zarr_stores = update_zarr_store(
-    True,
-    stage=STAGE,
-    save_dir=save_dir,
-    use_etopo=use_etopo,
-    save_type=save_type,
-    s3_bucket=s3_bucket,
-    aws_access_key_id=aws_access_key_id,
-    aws_secret_access_key=aws_secret_access_key,
-    logger=logger,
-)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Open the model stores when a worker starts, then keep swapping in new
+    versions as the sync (API/store_sync.py) publishes them."""
+    stores, store_root = await load_stores(
+        stage=STAGE,
+        save_dir=save_dir,
+        use_etopo=use_etopo,
+        save_type=save_type,
+        s3_bucket=s3_bucket,
+        logger=logger,
+    )
+    app.state.stores = stores
+    logger.info("Initial data load complete")
+    watcher = asyncio.create_task(
+        watch_stores(stores, store_root, STAGE, logger=logger)
+    )
+    yield
+    watcher.cancel()
 
-logger.info("Initial data load complete")
 
-ETOPO_f = zarr_stores.ETOPO_f
-SubH_Zarr = zarr_stores.SubH_Zarr
-HRRR_6H_Zarr = zarr_stores.HRRR_6H_Zarr
-GFS_Zarr = zarr_stores.GFS_Zarr
-URMA_Zarr = zarr_stores.URMA_Zarr
-ECMWF_Zarr = zarr_stores.ECMWF_Zarr
-NBM_Zarr = zarr_stores.NBM_Zarr
-GEFS_Zarr = zarr_stores.GEFS_Zarr
-HRDPS_Zarr = zarr_stores.HRDPS_Zarr
-GDPS_Zarr = zarr_stores.GDPS_Zarr
-GEPS_Zarr = zarr_stores.GEPS_Zarr
-REPS_Zarr = zarr_stores.REPS_Zarr
-HRRR_Zarr = zarr_stores.HRRR_Zarr
-NWS_Alerts_Zarr = zarr_stores.NWS_Alerts_Zarr
-WMO_Alerts_Zarr = zarr_stores.WMO_Alerts_Zarr
-RTMA_RU_Zarr = zarr_stores.RTMA_RU_Zarr
-ERA5_Data = zarr_stores.ERA5_Data
-DWD_MOSMIX_Zarr = zarr_stores.DWD_MOSMIX_Zarr
-AIGFS_Zarr = zarr_stores.AIGFS_Zarr
-AIGEFS_Zarr = zarr_stores.AIGEFS_Zarr
-ECMWF_AIFS_Zarr = zarr_stores.ECMWF_AIFS_Zarr
-RAQDPS_Zarr = zarr_stores.RAQDPS_Zarr
-SILAM_Zarr = zarr_stores.SILAM_Zarr
-RAQDPS_LatLon = zarr_stores.RAQDPS_LatLon
+app = FastAPI(lifespan=lifespan)
+app.add_middleware(TimingMiddleware)
 
 # Load DWD MOSMIX station mapping
 try:
@@ -260,9 +213,6 @@ try:
         logger.debug(f"DWD MOSMIX station map not found at: {station_map_file}")
 except (OSError, pickle.UnpicklingError) as e:
     logger.debug(f"Error loading DWD MOSMIX station map: {e}")
-
-logger.info("Initial data load complete")
-
 
 lats_etopo = np.arange(
     COORDINATE_CONST["latitude_min"],
@@ -470,7 +420,6 @@ async def PW_Forecast(
         start_time=T_Start,
     )
 
-    STAGE = initial.stage
     lat = initial.lat
     lon_IN = initial.lon_in
     lon = initial.lon
@@ -558,29 +507,31 @@ async def PW_Forecast(
     timer.log("### HRRR Start ###")
 
     # 2. Initialize Zarr sources
+    # The stores held now; a version swapped in mid-request is used from the next one
+    stores = request.app.state.stores
     zarr_sources = ZarrSources(
-        subh=SubH_Zarr,
-        hrrr_6h=HRRR_6H_Zarr,
-        hrrr=HRRR_Zarr,
-        nbm=NBM_Zarr,
-        gfs=GFS_Zarr,
-        urma=URMA_Zarr,
-        ecmwf=ECMWF_Zarr,
-        gefs=GEFS_Zarr,
-        hrdps=HRDPS_Zarr,
-        gdps=GDPS_Zarr,
-        geps=GEPS_Zarr,
-        reps=REPS_Zarr,
-        rtma_ru=RTMA_RU_Zarr,
-        wmo_alerts=WMO_Alerts_Zarr,
-        era5_data=ERA5_Data,
-        dwd_mosmix=DWD_MOSMIX_Zarr,
-        aigfs=AIGFS_Zarr,
-        aigefs=AIGEFS_Zarr,
-        ecmwf_aifs=ECMWF_AIFS_Zarr,
-        raqdps=RAQDPS_Zarr,
-        silam=SILAM_Zarr,
-        raqdps_lat_lon=RAQDPS_LatLon,
+        subh=stores.SubH_Zarr,
+        hrrr_6h=stores.HRRR_6H_Zarr,
+        hrrr=stores.HRRR_Zarr,
+        nbm=stores.NBM_Zarr,
+        gfs=stores.GFS_Zarr,
+        urma=stores.URMA_Zarr,
+        ecmwf=stores.ECMWF_Zarr,
+        gefs=stores.GEFS_Zarr,
+        hrdps=stores.HRDPS_Zarr,
+        gdps=stores.GDPS_Zarr,
+        geps=stores.GEPS_Zarr,
+        reps=stores.REPS_Zarr,
+        rtma_ru=stores.RTMA_RU_Zarr,
+        wmo_alerts=stores.WMO_Alerts_Zarr,
+        era5_data=stores.ERA5_Data,
+        dwd_mosmix=stores.DWD_MOSMIX_Zarr,
+        aigfs=stores.AIGFS_Zarr,
+        aigefs=stores.AIGEFS_Zarr,
+        ecmwf_aifs=stores.ECMWF_AIFS_Zarr,
+        raqdps=stores.RAQDPS_Zarr,
+        silam=stores.SILAM_Zarr,
+        raqdps_lat_lon=stores.RAQDPS_LatLon,
     )
 
     # 3. Calculate grid indices for the requested location to retrieve data from Zarr stores
@@ -686,8 +637,8 @@ async def PW_Forecast(
     y_p_etopo = np.argmin(abslat)
     x_p_etopo = np.argmin(abslon)
 
-    if (use_etopo) and ((STAGE == "PROD") or (STAGE == "DEV")):
-        ETOPO = int(ETOPO_f[y_p_etopo, x_p_etopo])
+    if use_etopo and stores.ETOPO_f is not None:
+        ETOPO = int(await stores.ETOPO_f[y_p_etopo, x_p_etopo].read())
     else:
         ETOPO = 0
 
@@ -878,14 +829,14 @@ async def PW_Forecast(
     )
 
     day_array_grib = time_indexing.day_array_grib
-    day_array_4am_grib = time_indexing.day_array_4am_grib
-    day_array_5pm_grib = time_indexing.day_array_5pm_grib
+    day_array_6am_grib = time_indexing.day_array_6am_grib
+    day_array_6pm_grib = time_indexing.day_array_6pm_grib
     hourlyDayIndex = time_indexing.hourly_day_index
-    hourlyDay4amIndex = time_indexing.hourly_day_4am_index
+    hourlyDay6amIndex = time_indexing.hourly_day_6am_index
     hourlyHighIndex = time_indexing.hourly_high_index
     hourlyLowIndex = time_indexing.hourly_low_index
-    hourlyDay4pmIndex = time_indexing.hourly_day_4pm_index
-    hourlyNight4amIndex = time_indexing.hourly_night_4am_index
+    hourlyHalfDayIndex = time_indexing.hourly_half_day_index
+    hourlyHalfNightIndex = time_indexing.hourly_half_night_index
 
     # +1 to account for the extra 4 hours of summary
     InterSday = np.zeros(shape=(daily_days + 1, 21))
@@ -1105,9 +1056,9 @@ async def PW_Forecast(
         daily_section = build_daily_section(
             InterPhour=InterPhour,
             hourlyDayIndex=hourlyDayIndex,
-            hourlyDay4amIndex=hourlyDay4amIndex,
-            hourlyDay4pmIndex=hourlyDay4pmIndex,
-            hourlyNight4amIndex=hourlyNight4amIndex,
+            hourlyDay6amIndex=hourlyDay6amIndex,
+            hourlyHalfDayIndex=hourlyHalfDayIndex,
+            hourlyHalfNightIndex=hourlyHalfNightIndex,
             hourlyHighIndex=hourlyHighIndex,
             hourlyLowIndex=hourlyLowIndex,
             daily_days=daily_days,
@@ -1128,8 +1079,8 @@ async def PW_Forecast(
             timeMachine=timeMachine,
             tmExtra=tmExtra,
             day_array_grib=day_array_grib,
-            day_array_4am_grib=day_array_4am_grib,
-            day_array_5pm_grib=day_array_5pm_grib,
+            day_array_6am_grib=day_array_6am_grib,
+            day_array_6pm_grib=day_array_6pm_grib,
             InterSday=InterSday,
             hourList_si=hourList_si,
             pTypeMap=pTypeMap,
@@ -1155,7 +1106,7 @@ async def PW_Forecast(
         ex_alerts=exAlerts,
         lat=lat,
         az_lon=az_Lon,
-        nws_alerts_zarr=NWS_Alerts_Zarr,
+        nws_alerts_zarr=stores.NWS_Alerts_Zarr,
         wmo_alert_data=WMO_alertDat,
         read_wmo_alerts=readWMOAlerts,
         logger=logger,
@@ -1242,27 +1193,10 @@ async def PW_Forecast(
 
     if exMinutely != 1:
         returnOBJ["minutely"] = {}
-        current_cape = float(
-            np.nan_to_num(
-                current_section.interp_current[DATA_CURRENT["cape"]],
-                nan=0,
-            )
-        )
-        hourly_cape = 0.0
-        if len(InterPhour) > 0:
-            hourly_cape = float(
-                np.nan_to_num(InterPhour[0, DATA_HOURLY["cape"]], nan=0)
-            )
         minute_summary, minute_icon = build_minutely_summary(
             summary_text=summaryText,
             translation=translation,
-            inter_p_current=current_cape,
-            inter_p_hour=hourly_cape,
             minute_items_si=minuteItems_si,
-            current_text=(
-                current_section.summary_key
-                or current_section.currently.get("summary", "")
-            ),  # This takes the summary from the summary_key variable if available, which has formatted text.
             current_icon=current_section.currently.get("icon", ""),
             icon=icon,
             max_p_chance=maxPchance,
