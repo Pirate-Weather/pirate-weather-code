@@ -66,6 +66,7 @@ FINAL_CHUNK_SIZES = {
     "RRFS_NA": 25,
     "RRFS_NA_6H": 25,
     "SubH": 5,
+    "RRFS_SubH": 5,
     "GFS": 3,
     "GEFS": 3,
     "ECMWF": 3,
@@ -99,6 +100,11 @@ FINAL_SHARD_SIZES = {
     "HRRR": 100,  # 14
     "HRRR_6H": 100,  # 25
     "SubH": 100,  # 14
+    "RRFS": 100,  # 15
+    "RRFS_6H": 100,  # 55
+    "RRFS_NA": 100,  # 15
+    "RRFS_NA_6H": 100,  # 55
+    "RRFS_SubH": 100,  # 13
     "HRDPS": 100,  # 35
     "REPS": 100,  # 22
     "GEPS": 100,  # 76
@@ -235,6 +241,7 @@ KEEPBITS = {
     "N4LFTX_surface": 3,  # lifted index, 1 K step, to 20
     "N4LFTX_500mb": 3,
     "LFTX_500mb": 3,
+    "LFTX_500M1000mb": 3,
     "KX_surface": 4,  # 1 K step, to 50
     "REFD_1000maboveground": 8,  # 0.1 dBZ step, to 75
     "REFC_entireatmosphere": 8,
