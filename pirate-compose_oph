@@ -76,7 +76,7 @@ services:
       ofelia.job-run.dwd-mosmix-ingest.image: "pirateingest:latest" 
       ofelia.job-run.dwd-mosmix-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
       ofelia.job-run.dwd-mosmix-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/DWD_MOSMIX", "forecast_path=/data/Prod/DWD_MOSMIX", "historic_path=/data/Hist/DWD_MOSMIX", "save_type=Download"]'
-      ofelia.job-run.dwd-mosmix-ingest.command: "DWD_MOSMIX_Local_Ingest.py" 
+      ofelia.job-run.dwd-mosmix-ingest.command: "DWD_Mosmix_Local_Ingest.py" 
       ofelia.job-run.dwd-mosmix-ingest.no-overlap: "true"
       ofelia.job-run.ecmwf-aifs-ingest.schedule: "0 0 8,16,20,2 * * *"
       ofelia.job-run.ecmwf-aifs-ingest.image: "pirateingest:latest" 
@@ -130,7 +130,7 @@ services:
       ofelia.job-run.silam-ingest.image: "pirateingest:latest" 
       ofelia.job-run.silam-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
       ofelia.job-run.silam-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/SILAM", "forecast_path=/data/Prod/SILAM", "historic_path=/data/Hist/SILAM", "save_type=Download"]'
-      ofelia.job-run.silam-ingest.command: "API/FMI_SILAM_Local_Ingest.py" 
+      ofelia.job-run.silam-ingest.command: "API/FMI_Silam_Local_Ingest.py" 
       ofelia.job-run.silam-ingest.no-overlap: "true"
     depends_on:
       gfs_ingest:
@@ -413,7 +413,7 @@ services:
       forecast_path: "/data/Prod/DWD_MOSMIX"
       historic_path: "/data/Hist/DWD_MOSMIX"
       save_type: "Download"
-    command: ["API/DWD_MOSMIX_Local_Ingest.py"]
+    command: ["API/DWD_Mosmix_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
@@ -611,7 +611,7 @@ services:
       forecast_path: "/data/Prod/SILAM"
       historic_path: "/data/Hist/SILAM"
       save_type: "Download"
-    command: ["API/SILAM_Local_Ingest.py"]
+    command: ["API/FMI_Silam_Local_Ingest.py"]
     depends_on:
       raqdps-ingest:
         condition: service_completed_successfully

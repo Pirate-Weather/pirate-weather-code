@@ -413,7 +413,7 @@ services:
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/DWD_MOSMIX_Local_Ingest.py"]
+    command: ["API/DWD_Mosmix_Local_Ingest.py"]
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
@@ -647,7 +647,7 @@ services:
       save_type: "Download"
       zarr_store_workers: "1"
       zarr_async_concurrency: "1"
-    command: ["API/FMI_SILAM_Local_Ingest.py"]
+    command: ["API/FMI_Silam_Local_Ingest.py"]
     depends_on:
       raqdps-ingest:
         condition: service_completed_successfully
