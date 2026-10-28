@@ -1110,7 +1110,7 @@ async def calculate_grid_indexing(
         )
 
     WMO_alertDat = None
-    if read_wmo_alerts:
+    if read_wmo_alerts and zarr_sources.wmo_alerts is not None:
         wmo_alerts_lats = np.arange(-60, 85, 0.0625)
         wmo_alerts_lons = np.arange(-180, 180, 0.0625)
         wmo_abslat = np.abs(wmo_alerts_lats - lat)
