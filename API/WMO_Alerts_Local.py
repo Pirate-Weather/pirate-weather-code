@@ -329,7 +329,7 @@ async def _fetch_json(
                     if resp.status != 200:
                         raise HttpError(f"{url} -> {resp.status}")
                     return await resp.json()
-        except (aiohttp.ClientError, asyncio.TimeoutError, HttpError):
+        except (TimeoutError, aiohttp.ClientError, HttpError):
             if attempt == MAX_RETRIES:
                 raise
             await asyncio.sleep(BACKOFF_BASE * attempt)
@@ -345,7 +345,7 @@ async def _fetch_text(
                     if resp.status != 200:
                         raise HttpError(f"{url} -> {resp.status}")
                     return await resp.text()
-        except (aiohttp.ClientError, asyncio.TimeoutError, HttpError):
+        except (TimeoutError, aiohttp.ClientError, HttpError):
             if attempt == MAX_RETRIES:
                 return None
             await asyncio.sleep(BACKOFF_BASE * attempt)
@@ -722,12 +722,7 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
             for coro in asyncio.as_completed(tasks):
                 try:
                     poly_entries = await coro
-                except (
-                    aiohttp.ClientError,
-                    asyncio.TimeoutError,
-                    ET.ParseError,
-                    HttpError,
-                ) as e:
+                except (TimeoutError, aiohttp.ClientError, ET.ParseError, HttpError) as e:
                     logger.warning("Failed extracting CAP polygons from task: %s", e)
                     continue
                 for (

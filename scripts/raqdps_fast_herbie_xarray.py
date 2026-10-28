@@ -15,7 +15,7 @@ import argparse
 import os
 import sys
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
