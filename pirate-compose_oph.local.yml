@@ -49,7 +49,6 @@ services:
       ofelia.job-run.urma-ingest.schedule: "15 * * * *"
       ofelia.job-run.urma-ingest.container: "pirate-ingest-urma"
       ofelia.job-run.urma-ingest.no-overlap: "true"
-      ofelia.job-run.rtma-ru-ingest.no-overlap: "true"
       ofelia.job-run.dwd-mosmix-ingest.schedule: "0 * * * *"
       ofelia.job-run.dwd-mosmix-ingest.container: "pirate-ingest-dwd-mosmix"
       ofelia.job-run.dwd-mosmix-ingest.no-overlap: "true"
@@ -111,7 +110,7 @@ services:
         condition: service_completed_successfully
       aigefs-ingest:
         condition: service_completed_successfully
-      hrpds-ingest:
+      hrdps-ingest:
         condition: service_completed_successfully
       reps-ingest:
         condition: service_completed_successfully

@@ -7,7 +7,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     command: daemon --docker 
     labels:
-      ofelia.job-run.gfs-ingest.schedule: "10 5,11,17,23 * * *"
+      ofelia.job-run.gfs-ingest.schedule: "0 10 5,11,17,23 * * *"
       ofelia.job-run.gfs-ingest.image: "pirateingest:latest" 
       ofelia.job-run.gfs-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
       ofelia.job-run.gfs-ingest.environment: '["wgrib2_path=/home/ubuntu/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/GFS", "forecast_path=/data/Prod/GFS", "historic_path=/data/Hist/GFS", "save_type=Download"]'
@@ -153,27 +153,27 @@ services:
         condition: service_completed_successfully
       rtma-ru_ingest:
         condition: service_completed_successfully
-      urma_ingest:
+      urma-ingest:
         condition: service_completed_successfully
-      dwd-mosmix_ingest:
+      dwd-mosmix-ingest:
         condition: service_completed_successfully
-      ecmwf-aifs_ingest:
+      ecmwf-aifs-ingest:
         condition: service_completed_successfully
-      aigfs_ingest:
+      aigfs-ingest:
         condition: service_completed_successfully
-      aigefs_ingest:
+      aigefs-ingest:
         condition: service_completed_successfully
-      hrpds_ingest:
+      hrdps-ingest:
         condition: service_completed_successfully
-      reps_ingest:
+      reps-ingest:
         condition: service_completed_successfully
-      gdps_ingest:
+      gdps-ingest:
         condition: service_completed_successfully
-      geps_ingest:
+      geps-ingest:
         condition: service_completed_successfully
-      raqdps_ingest:
+      raqdps-ingest:
         condition: service_completed_successfully
-      silam_ingest:
+      silam-ingest:
         condition: service_completed_successfully
                                                                                                             
 
