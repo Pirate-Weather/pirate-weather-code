@@ -16,33 +16,70 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     command: daemon --docker 
     labels:
-      ofelia.job-run.gfs-ingest.schedule: "0 10 5,11,17,23 * * *"
+      ofelia.job-run.gfs-ingest.schedule: "10 5,11,17,23 * * *"
       ofelia.job-run.gfs-ingest.container: "pirate-ingest-gfs"
       ofelia.job-run.gfs-ingest.no-overlap: "true"             
-      ofelia.job-run.nbm-ingest.schedule: "0 30 0,2,4,6,8,10,12,14,16,18,20,22 * * *"
+      ofelia.job-run.nbm-ingest.schedule: "30 0,2,4,6,8,10,12,14,16,18,20,22 * * *"
       ofelia.job-run.nbm-ingest.container: "pirate-ingest-nbm"
       ofelia.job-run.nbm-ingest.no-overlap: "true"
-      ofelia.job-run.subh-ingest.schedule: "0 45 * * * *"
+      ofelia.job-run.subh-ingest.schedule: "45 * * * *"
       ofelia.job-run.subh-ingest.container: "pirate-ingest-subh"
       ofelia.job-run.subh-ingest.no-overlap: "true"
-      ofelia.job-run.gefs-ingest.schedule: "0 0 1,7,13,19 * * *"
+      ofelia.job-run.gefs-ingest.schedule: "0 1,7,13,19 * * *"
       ofelia.job-run.gefs-ingest.container: "pirate-ingest-gefs"
       ofelia.job-run.gefs-ingest.no-overlap: "true"
-      ofelia.job-run.hrrr-ingest.schedule: "0 40 1,3,5,7,9,11,13,15,17,19,21,23 * * *"
+      ofelia.job-run.hrrr-ingest.schedule: "40 1,3,5,7,9,11,13,15,17,19,21,23 * * *"
       ofelia.job-run.hrrr-ingest.container: "pirate-ingest-hrrr"
       ofelia.job-run.hrrr-ingest.no-overlap: "true"
-      ofelia.job-run.hrrr6h-ingest.schedule: "0 10 3,9,15,21 * * *"
+      ofelia.job-run.hrrr6h-ingest.schedule: "10 3,9,15,21 * * *"
       ofelia.job-run.hrrr6h-ingest.container: "pirate-ingest-hrrr6h"
       ofelia.job-run.hrrr6h-ingest.no-overlap: "true"
       ofelia.job-run.nws-alerts-ingest.schedule: "0 0,30 * * * *"
       ofelia.job-run.nws-alerts-ingest.container: "pirate-ingest-nws-alerts"
       ofelia.job-run.nws-alerts-ingest.no-overlap: "true"
+      ofelia.job-run.wmo-alerts-ingest.schedule: "0 0,30 * * * *"
+      ofelia.job-run.wmo-alerts-ingest.container: "pirate-ingest-wmo-alerts"
+      ofelia.job-run.wmo-alerts-ingest.no-overlap: "true"
       ofelia.job-run.ecmwf-ingest.schedule: "0 0 8,20 * * *"
       ofelia.job-run.ecmwf-ingest.container: "pirate-ingest-ecmwf"
       ofelia.job-run.ecmwf-ingest.no-overlap: "true"
-      ofelia.job-run.rtma-ru-ingest.schedule: "0 10,25,40,55 * * * *"
+      ofelia.job-run.rtma-ru-ingest.schedule: "10,25,40,55 * * * *"
       ofelia.job-run.rtma-ru-ingest.container: "pirate-ingest-rtma-ru"
       ofelia.job-run.rtma-ru-ingest.no-overlap: "true"
+      ofelia.job-run.urma-ingest.schedule: "15 * * * *"
+      ofelia.job-run.urma-ingest.container: "pirate-ingest-urma"
+      ofelia.job-run.urma-ingest.no-overlap: "true"
+      ofelia.job-run.rtma-ru-ingest.no-overlap: "true"
+      ofelia.job-run.dwd-mosmix-ingest.schedule: "0 * * * *"
+      ofelia.job-run.dwd-mosmix-ingest.container: "pirate-ingest-dwd-mosmix"
+      ofelia.job-run.dwd-mosmix-ingest.no-overlap: "true"
+      ofelia.job-run.ecmwf-aifs-ingest.schedule: "0 8,16,20,2 * * *"
+      ofelia.job-run.ecmwf-aifs-ingest.container: "pirate-ingest-ecmwf-aifs"
+      ofelia.job-run.ecmwf-aifs-ingest.no-overlap: "true"
+      ofelia.job-run.aigfs-ingest.schedule: "0 5,11,17,23 * * *"
+      ofelia.job-run.aigfs-ingest.container: "pirate-ingest-aigfs"
+      ofelia.job-run.aigfs-ingest.no-overlap: "true"
+      ofelia.job-run.aigefs-ingest.schedule: "0 1,7,13,19 * * *"
+      ofelia.job-run.aigefs-ingest.container: "pirate-ingest-aigefs"
+      ofelia.job-run.aigefs-ingest.no-overlap: "true"
+      ofelia.job-run.hrdps-ingest.schedule: "0 4,10,16,22 * * *"
+      ofelia.job-run.hrdps-ingest.container: "pirate-ingest-hrdps"
+      ofelia.job-run.hrdps-ingest.no-overlap: "true"
+      ofelia.job-run.reps-ingest.schedule: "0 4,10,16,22 * * *"
+      ofelia.job-run.reps-ingest.container: "pirate-ingest-reps"
+      ofelia.job-run.reps-ingest.no-overlap: "true"
+      ofelia.job-run.gdps-ingest.schedule: "0 5,17 * * *"
+      ofelia.job-run.gdps-ingest.container: "pirate-ingest-gdps"
+      ofelia.job-run.gdps-ingest.no-overlap: "true"
+      ofelia.job-run.geps-ingest.schedule: "0 7,19 * * *"
+      ofelia.job-run.geps-ingest.container: "pirate-ingest-geps"
+      ofelia.job-run.geps-ingest.no-overlap: "true"
+      ofelia.job-run.raqdps-ingest.schedule: "15 4,16 * * *"
+      ofelia.job-run.raqdps-ingest.container: "pirate-ingest-raqdps"
+      ofelia.job-run.raqdps-ingest.no-overlap: "true"
+      ofelia.job-run.silam-ingest.schedule: "0 7 * * *"
+      ofelia.job-run.silam-ingest.container: "pirate-ingest-silam"
+      ofelia.job-run.silam-ingest.no-overlap: "true"
     depends_on:
       gfs_ingest:
         condition: service_completed_successfully
@@ -58,9 +95,33 @@ services:
         condition: service_completed_successfully
       nws_alerts_ingest:
         condition: service_completed_successfully
+      wmo_alerts_ingest:
+        condition: service_completed_successfully
       ecmwf_ingest:
         condition: service_completed_successfully
       rtma-ru-ingest:
+        condition: service_completed_successfully
+      urma-ingest:
+        condition: service_completed_successfully
+      dwd-mosmix-ingest:
+        condition: service_completed_successfully
+      ecmwf-aifs-ingest:
+        condition: service_completed_successfully
+      aigfs-ingest:
+        condition: service_completed_successfully
+      aigefs-ingest:
+        condition: service_completed_successfully
+      hrpds-ingest:
+        condition: service_completed_successfully
+      reps-ingest:
+        condition: service_completed_successfully
+      gdps-ingest:
+        condition: service_completed_successfully
+      geps-ingest:
+        condition: service_completed_successfully
+      raqdps-ingest:
+        condition: service_completed_successfully
+      silam-ingest:
         condition: service_completed_successfully
                                                                                                             
 
@@ -236,6 +297,33 @@ services:
       subh_ingest:
         condition: service_completed_successfully
       gefs_ingest:
+        condition: service_completed_successfully 
+
+  # WMO Alerts Ingest
+  wmo_alerts_ingest:
+    <<: *dns_defaults
+    container_name: pirate-ingest-wmo-alerts
+    image: pirateingest:latest
+    volumes:
+      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
+      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+    environment:
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/WMO_Alerts"
+      forecast_path: "/data/Prod/WMO_Alerts"
+      historic_path: "/data/Hist/WMO_Alerts"
+      save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
+    command: ["API/WMO_Alerts_Local.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully      
+      subh_ingest:
+        condition: service_completed_successfully
+      gefs_ingest:
         condition: service_completed_successfully
 
   # ECMWF Ingest
@@ -290,6 +378,279 @@ services:
       subh_ingest:
         condition: service_completed_successfully
       gefs_ingest:
+        condition: service_completed_successfully
+
+  # URMA Ingest
+  urma-ingest:
+    <<: *dns_defaults
+    container_name: pirate-ingest-urma
+    image: pirateingest:latest
+    volumes:
+      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
+      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+    environment:
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/URMA"
+      forecast_path: "/data/Prod/URMA"
+      historic_path: "/data/Hist/URMA"
+      save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
+    command: ["API/URMA_Local_Ingest.py"]
+
+  # DWD_MOSMIX Ingest
+  dwd-mosmix-ingest:
+    <<: *dns_defaults
+    container_name: pirate-ingest-dwd-mosmix
+    image: pirateingest:latest
+    volumes:
+      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
+      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+    environment:
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/DWD_MOSMIX"
+      forecast_path: "/data/Prod/DWD_MOSMIX"
+      historic_path: "/data/Hist/DWD_MOSMIX"
+      save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
+    command: ["API/DWD_MOSMIX_Local_Ingest.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully
+      subh_ingest:
+        condition: service_completed_successfully
+      gefs_ingest:
+        condition: service_completed_successfully
+
+  # ECMWF AIFS Ingest
+  ecmwf-aifs-ingest:
+    <<: *dns_defaults
+    container_name: pirate-ingest-ecmwf-aifs
+    image: pirateingest:latest
+    volumes:
+      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
+      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+    environment:
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/ECMWF_AIFS"
+      forecast_path: "/data/Prod/ECMWF_AIFS"
+      historic_path: "/data/Hist/ECMWF_AIFS"
+      save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
+    command: ["API/ECMWF_AIFS_Local_Ingest.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully
+      subh_ingest:
+        condition: service_completed_successfully
+      gefs_ingest:
+        condition: service_completed_successfully
+
+  # AIGFS Ingest
+  aigfs-ingest:
+    <<: *dns_defaults
+    container_name: pirate-ingest-aigfs
+    image: pirateingest:latest
+    volumes:
+      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
+      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+    environment:
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/AIGFS"
+      forecast_path: "/data/Prod/AIGFS"
+      historic_path: "/data/Hist/AIGFS"
+      save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
+    command: ["API/AIGFS_Local_Ingest.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully
+      subh_ingest:
+        condition: service_completed_successfully
+      gefs_ingest:
+        condition: service_completed_successfully
+
+  # AIGEFS Ingest
+  aigefs-ingest:
+    <<: *dns_defaults
+    container_name: pirate-ingest-aigefs
+    image: pirateingest:latest
+    volumes:
+      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
+      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+    environment:
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/AIGEFS"
+      forecast_path: "/data/Prod/AIGEFS"
+      historic_path: "/data/Hist/AIGEFS"
+      save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
+    command: ["API/AIGEFS_Local_Ingest.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully
+      subh_ingest:
+        condition: service_completed_successfully
+      gefs_ingest:
+        condition: service_completed_successfully
+
+  # HRDPS Ingest
+  hrdps-ingest:
+    <<: *dns_defaults
+    container_name: pirate-ingest-hrdps
+    image: pirateingest:latest
+    volumes:
+      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
+      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+    environment:
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/HRDPS"
+      forecast_path: "/data/Prod/HRDPS"
+      historic_path: "/data/Hist/HRDPS"
+      save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
+    command: ["API/HRDPS_Local_Ingest.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully
+      subh_ingest:
+        condition: service_completed_successfully
+      gefs_ingest:
+        condition: service_completed_successfully
+
+  # REPS Ingest
+  reps-ingest:
+    <<: *dns_defaults
+    container_name: pirate-ingest-reps
+    image: pirateingest:latest
+    volumes:
+      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
+      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+    environment:
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/REPS"
+      forecast_path: "/data/Prod/REPS"
+      historic_path: "/data/Hist/REPS"
+      save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
+    command: ["API/REPS_Local_Ingest.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully
+      subh_ingest:
+        condition: service_completed_successfully
+      gefs_ingest:
+        condition: service_completed_successfully
+
+  # GDPS Ingest
+  gdps-ingest:
+    <<: *dns_defaults
+    container_name: pirate-ingest-gdps
+    image: pirateingest:latest
+    volumes:
+      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
+      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+    environment:
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/GDPS"
+      forecast_path: "/data/Prod/GDPS"
+      historic_path: "/data/Hist/GDPS"
+      save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
+    command: ["API/GDPS_Local_Ingest.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully
+      subh_ingest:
+        condition: service_completed_successfully
+      gefs_ingest:
+        condition: service_completed_successfully
+
+  # GEPS Ingest
+  geps-ingest:
+    <<: *dns_defaults
+    container_name: pirate-ingest-geps
+    image: pirateingest:latest
+    volumes:
+      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
+      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+    environment:
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/GEPS"
+      forecast_path: "/data/Prod/GEPS"
+      historic_path: "/data/Hist/GEPS"
+      save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
+    command: ["API/GEPS_Local_Ingest.py"]
+    depends_on:
+      gfs_ingest:
+        condition: service_completed_successfully
+      nbm_ingest:
+        condition: service_completed_successfully
+      subh_ingest:
+        condition: service_completed_successfully
+      gefs_ingest:
+        condition: service_completed_successfully
+
+  # RAQDPS Ingest
+  raqdps-ingest:
+    <<: *dns_defaults
+    container_name: pirate-ingest-raqdps
+    image: pirateingest:latest
+    volumes:
+      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
+      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+    environment:
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/RAQDPS"
+      forecast_path: "/data/Prod/RAQDPS"
+      historic_path: "/data/Hist/RAQDPS"
+      save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
+    command: ["API/RAQDPS_Local_Ingest.py"]
+
+  # SILAM Ingest
+  silam-ingest:
+    <<: *dns_defaults
+    container_name: pirate-ingest-silam
+    image: pirateingest:latest
+    volumes:
+      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
+      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+    environment:
+      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
+      forecast_process_dir: "/tmp/Process/SILAM"
+      forecast_path: "/data/Prod/SILAM"
+      historic_path: "/data/Hist/SILAM"
+      save_type: "Download"
+      zarr_store_workers: "1"
+      zarr_async_concurrency: "1"
+    command: ["API/FMI_SILAM_Local_Ingest.py"]
+    depends_on:
+      raqdps-ingest:
         condition: service_completed_successfully
 
   # Consistently running API server
