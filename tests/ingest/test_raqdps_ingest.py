@@ -1,7 +1,7 @@
 """Tests for RAQDPS ingest helpers and Herbie template wiring."""
 
 import ast
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -34,7 +34,7 @@ def test_raqdps_script_exists_and_is_valid_python():
 
 def test_build_raqdps_filename():
     """RAQDPS filenames should match ECCC Datamart nomenclature."""
-    run_time = datetime(2026, 7, 6, 0, tzinfo=timezone.utc)
+    run_time = datetime(2026, 7, 6, 0, tzinfo=UTC)
     assert (
         build_raqdps_filename(run_time, "NO2", 3)
         == "20260706T00Z_MSC_RAQDPS_NO2_Sfc_RLatLon0.09_PT003H.grib2"
@@ -43,7 +43,7 @@ def test_build_raqdps_filename():
 
 def test_build_raqdps_url():
     """RAQDPS URLs should include date, run hour, forecast hour, and filename."""
-    run_time = datetime(2026, 7, 6, 12, tzinfo=timezone.utc)
+    run_time = datetime(2026, 7, 6, 12, tzinfo=UTC)
     url = build_raqdps_url(run_time, "PM2.5", 72)
     assert url == (
         "https://dd.weather.gc.ca/20260706/WXO-DD/model_raqdps/10km/grib2/"
@@ -53,21 +53,21 @@ def test_build_raqdps_url():
 
 def test_candidate_raqdps_runs_are_recent_cycles():
     """Candidate run probing should walk backward through 00/12 UTC cycles."""
-    now = datetime(2026, 7, 6, 18, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 6, 18, 30, tzinfo=UTC)
     assert candidate_raqdps_runs(now, count=4) == [
-        datetime(2026, 7, 6, 12, tzinfo=timezone.utc),
-        datetime(2026, 7, 6, 0, tzinfo=timezone.utc),
-        datetime(2026, 7, 5, 12, tzinfo=timezone.utc),
-        datetime(2026, 7, 5, 0, tzinfo=timezone.utc),
+        datetime(2026, 7, 6, 12, tzinfo=UTC),
+        datetime(2026, 7, 6, 0, tzinfo=UTC),
+        datetime(2026, 7, 5, 12, tzinfo=UTC),
+        datetime(2026, 7, 5, 0, tzinfo=UTC),
     ]
 
 
 def test_raqdps_time_helpers_normalize_aware_and_naive_utc():
     """Herbie gets naive UTC while ingest logic keeps aware UTC datetimes."""
-    aware_time = datetime(2026, 7, 6, 8, 30, tzinfo=timezone.utc)
+    aware_time = datetime(2026, 7, 6, 8, 30, tzinfo=UTC)
     naive_time = datetime(2026, 7, 6, 8, 30)
 
-    assert normalize_utc(naive_time) == datetime(2026, 7, 6, 8, tzinfo=timezone.utc)
+    assert normalize_utc(naive_time) == datetime(2026, 7, 6, 8, tzinfo=UTC)
     assert herbie_naive_utc(aware_time) == datetime(2026, 7, 6, 8)
     assert herbie_naive_utc(naive_time) == datetime(2026, 7, 6, 8)
 
@@ -75,25 +75,25 @@ def test_raqdps_time_helpers_normalize_aware_and_naive_utc():
 def test_history_run_for_valid_time_prefers_smallest_0_to_12h_lead():
     """Historic valid times should map to the current 00/12 cycle."""
     run_time, forecast_hour = history_run_for_valid_time(
-        datetime(2026, 7, 6, 11, tzinfo=timezone.utc)
+        datetime(2026, 7, 6, 11, tzinfo=UTC)
     )
-    assert run_time == datetime(2026, 7, 6, 0, tzinfo=timezone.utc)
+    assert run_time == datetime(2026, 7, 6, 0, tzinfo=UTC)
     assert forecast_hour == 11
 
     run_time, forecast_hour = history_run_for_valid_time(
-        datetime(2026, 7, 6, 18, tzinfo=timezone.utc)
+        datetime(2026, 7, 6, 18, tzinfo=UTC)
     )
-    assert run_time == datetime(2026, 7, 6, 12, tzinfo=timezone.utc)
+    assert run_time == datetime(2026, 7, 6, 12, tzinfo=UTC)
     assert forecast_hour == 6
 
 
 def test_history_valid_times_exclude_base_time():
     """History should end one hour before the forecast base time."""
-    base_time = datetime(2026, 7, 6, 12, tzinfo=timezone.utc)
+    base_time = datetime(2026, 7, 6, 12, tzinfo=UTC)
     assert history_valid_times(base_time, 3) == [
-        datetime(2026, 7, 6, 9, tzinfo=timezone.utc),
-        datetime(2026, 7, 6, 10, tzinfo=timezone.utc),
-        datetime(2026, 7, 6, 11, tzinfo=timezone.utc),
+        datetime(2026, 7, 6, 9, tzinfo=UTC),
+        datetime(2026, 7, 6, 10, tzinfo=UTC),
+        datetime(2026, 7, 6, 11, tzinfo=UTC),
     ]
 
 
@@ -120,7 +120,7 @@ def test_herbie_template_sets_raqdps_source():
     """The repo-local Herbie template should set an MSC RAQDPS source URL."""
 
     class DummyHerbie:
-        date = datetime(2026, 7, 6, 0, tzinfo=timezone.utc)
+        date = datetime(2026, 7, 6, 0, tzinfo=UTC)
         product = None
         variable = "O3"
         level = "Sfc"
