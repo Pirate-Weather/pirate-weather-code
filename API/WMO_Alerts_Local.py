@@ -722,7 +722,12 @@ async def gather_cap_polygons_async(timeout: float = 30.0) -> gpd.GeoDataFrame:
             for coro in asyncio.as_completed(tasks):
                 try:
                     poly_entries = await coro
-                except (TimeoutError, aiohttp.ClientError, ET.ParseError, HttpError) as e:
+                except (
+                    TimeoutError,
+                    aiohttp.ClientError,
+                    ET.ParseError,
+                    HttpError,
+                ) as e:
                     logger.warning("Failed extracting CAP polygons from task: %s", e)
                     continue
                 for (

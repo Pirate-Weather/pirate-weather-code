@@ -25,9 +25,7 @@ def test_snow_tolerance_above_5cm_sets_lower_bound_to_one():
     """
 
     # Use a fixed UTC start time
-    start = int(
-        datetime.datetime(2025, 1, 1, 0, tzinfo=datetime.UTC).timestamp()
-    )
+    start = int(datetime.datetime(2025, 1, 1, 0, tzinfo=datetime.UTC).timestamp())
 
     hours = []
     # First hour: large snow accumulation with very large error
