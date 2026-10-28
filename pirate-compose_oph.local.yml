@@ -49,7 +49,7 @@ services:
       ofelia.job-run.urma-ingest.schedule: "0 15 * * * *"
       ofelia.job-run.urma-ingest.container: "pirate-ingest-urma"
       ofelia.job-run.urma-ingest.no-overlap: "true"
-      ofelia.job-run.dwd-mosmix-ingest.schedule: "0 0 1/1 * * *"
+      ofelia.job-run.dwd-mosmix-ingest.schedule: "0 0 * * * *"
       ofelia.job-run.dwd-mosmix-ingest.container: "pirate-ingest-dwd-mosmix"
       ofelia.job-run.dwd-mosmix-ingest.no-overlap: "true"
       ofelia.job-run.ecmwf-aifs-ingest.schedule: "0 0 8/12 * * *"
