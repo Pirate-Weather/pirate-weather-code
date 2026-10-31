@@ -600,7 +600,9 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
         precipSummary = ["for-week", "unavailable"]
 
     # Only calculate the temperature summary if we have eight days to prevent issues with the time machine
-    if len(weekArr) == WEEK_DAYS_PLUS_ONE:
+    if len(weekArr) == WEEK_DAYS_PLUS_ONE and all(
+        not np.isnan(day["temperatureHigh"]) for day in weekArr
+    ):
         tempSummary = calculate_temp_summary(highTemp, lowTemp, weekArr, unitSystem)
         # Combine the two texts together using with
         c_text = ["with", precipSummary, tempSummary]
