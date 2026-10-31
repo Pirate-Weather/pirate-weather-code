@@ -1424,9 +1424,10 @@ def calculate_day_text(
 
     # 5a. How the precipitation falls. Precipitation reaching every period
     # only lasts "throughout the day" when each period is wet for at least half
-    # its hours, with at most PERIODS_OF_PRECIP_MAX_SPELLS spells. Otherwise one continuous spell that only clips the first or
-    # last period is described without those periods, and showers through the
-    # day are occasional, periods of, or intermittent precipitation.
+    # its hours, with at most PERIODS_OF_PRECIP_MAX_SPELLS spells. Otherwise
+    # one continuous spell that only clips the first or last period is
+    # described without those periods, and showers through the day are
+    # occasional, periods of, or intermittent precipitation.
     precip_time_phrase = None
     wet_spells = _wet_spells(hourly_wet)
     if has_precip and len(precip_periods) == num_periods and wet_spells:
@@ -1438,15 +1439,25 @@ def calculate_day_text(
                 >= p_data["period_length"] * PERSISTENT_PRECIP_PERIOD_FRACTION
             )
 
+        def can_trim(idx):
+            # Keep a period with thunderstorms that accompany the precipitation,
+            # or they would be described in a period the precipitation isn't
+            # ("rain from afternoon until night, with thunderstorms in the
+            # morning"). Storms that replace the precipitation text are
+            # trimmed along with it.
+            return not is_persistent(idx) and (
+                thunderstorms_match_precip or idx not in thunderstorm_periods
+            )
+
         # Many short breaks also stop it being all-day precipitation, even
         # when every period is half wet (rain every other hour)
         if len(wet_spells) > PERIODS_OF_PRECIP_MAX_SPELLS or not all(
             is_persistent(idx) for idx in precip_periods
         ):
             if len(wet_spells) == 1:
-                while len(precip_periods) > 1 and not is_persistent(precip_periods[0]):
+                while len(precip_periods) > 1 and can_trim(precip_periods[0]):
                     precip_periods = precip_periods[1:]
-                while len(precip_periods) > 1 and not is_persistent(precip_periods[-1]):
+                while len(precip_periods) > 1 and can_trim(precip_periods[-1]):
                     precip_periods = precip_periods[:-1]
             elif total_hours_precip < len(hours) * INTERMITTENT_PRECIP_MIN_FRACTION:
                 precip_summary_text = ["occasional", precip_summary_text]
@@ -1460,14 +1471,24 @@ def calculate_day_text(
     # Precipitation from the start of the window that ends by weakening is
     # "rain tapering off in the afternoon" rather than "rain until evening".
     # Not when wind or fog shares its periods, which would read "rain tapering
-    # off and windy".
+    # off and windy". The spell judged is the last one starting by the end of
+    # the precipitation periods, not a later shower too light to be reported.
+    ending_spell = None
+    if has_precip:
+        ending_spell = next(
+            (
+                spell
+                for spell in reversed(wet_spells)
+                if hour_period_idx[spell[0]] <= precip_periods[-1]
+            ),
+            None,
+        )
     if (
-        has_precip
-        and wet_spells
+        ending_spell is not None
         and precip_periods == list(range(len(precip_periods)))
         and precip_periods[-1] < num_periods - 1
         and precip_periods not in (wind_periods, vis_periods)
-        and _is_tapering_off(wet_spells[-1], hourly_precip_accum)
+        and _is_tapering_off(ending_spell, hourly_precip_accum)
     ):
         precip_summary_text = ["tapering-off", precip_summary_text]
         precip_time_phrase = ["during", all_period_names[precip_periods[-1]]]

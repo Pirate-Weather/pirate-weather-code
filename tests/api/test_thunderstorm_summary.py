@@ -154,6 +154,34 @@ def test_daily_thunderstorms_accompany_precipitation():
     assert icon == "thunderstorm"
 
 
+def test_daily_storms_keep_their_rain_period():
+    """A single spell of rain that only clips the morning drops the morning
+    from its time phrase, but not when the storms it is accompanied by are in
+    the morning: "rain from afternoon until night, with thunderstorms in the
+    morning" would put the storms where the summary says there is no rain.
+
+    Rain from 11:00 to 01:00 UTC with a storm at 11:00.
+    """
+    rain = {**RAIN, "rainIntensity": 1.0, "liquidAccumulation": 1.0}
+    hours = make_hours(24, BASE_TIME + 6 * HOUR, cloudCover=0.95)
+    for hour in hours[5:20]:
+        hour.update(rain)
+    hours[5].update(cape=3000, liftedIndex=-6.0, kIndex=38.0)
+
+    _, summary = calculate_day_text(
+        hours=hours, is_day_time=True, time_zone="UTC", mode="daily"
+    )
+
+    assert summary[1] == [
+        "sentence",
+        [
+            "accompanied-by",
+            ["until", "light-rain", "night"],
+            ["during", "thunderstorm", "morning"],
+        ],
+    ]
+
+
 def test_24hour_thunderstorms_starting_later():
     """The 24-hour ("hour" mode) summary must name the later period where storms
     occur rather than describing the whole window.

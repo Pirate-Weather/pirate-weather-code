@@ -238,6 +238,14 @@ def test_daily_conditions_split_into_sentences(wind_hours, expected):
             ["during", ["tapering-off", "medium-rain"], "afternoon"],
             id="tapering-off",
         ),
+        # Rain that stops abruptly isn't tapering off just because a later
+        # shower, too light to be reported, weakens.
+        pytest.param(
+            [*range(6), 14, 15, 16],
+            [3, 3, 3, 3, 3, 3, 0.08, 0.05, 0.03],
+            ["during", "medium-rain", "morning"],
+            id="abrupt-stop-then-light-shower",
+        ),
     ],
 )
 def test_daily_precipitation_pattern(wet_hours, amounts, expected):
