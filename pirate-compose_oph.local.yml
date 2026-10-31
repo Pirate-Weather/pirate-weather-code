@@ -1,4 +1,33 @@
-x-dns-defaults: &dns_defaults
+# Single-server Pirate Weather v3 stack: every ingest on a schedule, writing local
+# stores (save_type=Download), and the API serving them.
+#
+# Storage (set in .env, see .env.example):
+#   PW_PROD_ROOT  published stores, read by the API. Put it on the fastest disk.
+#                 Every ingest publishes into the same /data/Prod/v31 folder,
+#                 because the API reads all <MODEL>.current.json pointers from
+#                 one directory. publish_store writes the root zarr.json last,
+#                 then the pointer, and keeps the newest two versions.
+#   PW_WORK_ROOT  scratch space, one <MODEL> folder per ingest (each ingest wipes
+#                 its own folder at start and end, so they must not be shared).
+#                 Put it on a fast local disk: GDPS re-reads its ~31 GB merged
+#                 NetCDF many times while writing its store, and on a network
+#                 block volume that took 90 min instead of 40. Peak use is
+#                 tens of GB per heavy model (GDPS ~40 GB).
+#   PW_HIST_ROOT  short-term history stores, Hist/<MODEL>; a larger, slower disk
+#                 is fine because each ingest copies the stores it needs into
+#                 its work folder before merging.
+#
+# Start-up:
+#   docker compose -f pirate-compose_oph.local.yml --profile ingest create
+#   docker compose -f pirate-compose_oph.local.yml up -d
+# The ingest services are in the "ingest" profile so a plain `up` does not start
+# all 22 at once (their combined peak memory is far above one server's).
+# `create` makes their containers; Ofelia starts them on the schedule below.
+# After rebuilding pirateingest:latest, run the `create` again to recreate them.
+
+x-ingest: &ingest
+  image: pirateingest:latest
+  profiles: ["ingest"]
   dns:
     - 1.1.1.1
     - 8.8.8.8
@@ -6,320 +35,382 @@ x-dns-defaults: &dns_defaults
     nofile:
       soft: 65535
       hard: 65535
+  volumes:
+    - ${PW_PROD_ROOT:?set PW_PROD_ROOT in .env}:/data/Prod
+    - ${PW_HIST_ROOT:?set PW_HIST_ROOT in .env}:/data/Hist
+    - ${PW_WORK_ROOT:?set PW_WORK_ROOT in .env}:/work
+
+x-ingest-env: &ingest_env
+  save_type: "Download"
+  forecast_path: "/data/Prod"
+  wgrib2_path: "/build/wgrib2_build/bin/wgrib2"
+  nomads_request_interval_seconds: "${nomads_request_interval_seconds:-1}"
+  herbie_download_retries: "${herbie_download_retries:-3}"
+  herbie_retry_sleep_seconds: "${herbie_retry_sleep_seconds:-20}"
 
 services:
-  # Ofelia for scheduling tasks
+  # Read-only forecast API. It writes reader heartbeats to /data/v31/.readers,
+  # so the mount must be writable. ETOPO_DA_C.zarr is not produced by any
+  # ingest; without it elevation is reported as 0.
+  api:
+    image: pirateapi:latest
+    container_name: pirate-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ${PW_PROD_ROOT}:/data
+    environment:
+      STAGE: "PROD"
+      save_dir: "/data/v31"
+      use_etopo: "${use_etopo:-false}"
+    command: ["API.responseLocal:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+
+  # Scheduler. Schedules are UTC with a leading seconds field. Times follow the
+  # production pipeline table (docs.pirateweather.net, DataSources "Data
+  # Pipeline"): each model's run time plus the delay until its data is posted.
+  # RTMA, AIGEFS and the two alert jobs are not in that table. Every ingest exits
+  # early ("No Update") when its newest cycle is already published.
+  # On one server the heavy jobs can overlap (e.g. at 05:00 GFS, AIGFS, GDPS and
+  # DWD start while the 04:45 NBM is still running); the mem_limit on each ingest
+  # keeps one job's peak from taking the whole host.
   ofelia:
-    image: mcuadros/ofelia:latest
+    image: mcuadros/ofelia:0.3.22
     container_name: ofelia
+    restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    command: daemon --docker 
+    command: daemon --docker
     labels:
-      ofelia.job-run.gfs-ingest.schedule: "0 10 5,11,17,23 * * *"
-      ofelia.job-run.gfs-ingest.container: "pirate-ingest-gfs"
-      ofelia.job-run.gfs-ingest.no-overlap: "true"             
-      ofelia.job-run.nbm-ingest.schedule: "0 30 0,2,4,6,8,10,12,14,16,18,20,22 * * *"
-      ofelia.job-run.nbm-ingest.container: "pirate-ingest-nbm"
-      ofelia.job-run.nbm-ingest.no-overlap: "true"
-      ofelia.job-run.subh-ingest.schedule: "0 45 * * * *"
-      ofelia.job-run.subh-ingest.container: "pirate-ingest-subh"
-      ofelia.job-run.subh-ingest.no-overlap: "true"
-      ofelia.job-run.gefs-ingest.schedule: "0 0 1,7,13,19 * * *"
-      ofelia.job-run.gefs-ingest.container: "pirate-ingest-gefs"
-      ofelia.job-run.gefs-ingest.no-overlap: "true"
-      ofelia.job-run.hrrr-ingest.schedule: "0 40 1,3,5,7,9,11,13,15,17,19,21,23 * * *"
-      ofelia.job-run.hrrr-ingest.container: "pirate-ingest-hrrr"
-      ofelia.job-run.hrrr-ingest.no-overlap: "true"
-      ofelia.job-run.hrrr6h-ingest.schedule: "0 10 3,9,15,21 * * *"
-      ofelia.job-run.hrrr6h-ingest.container: "pirate-ingest-hrrr6h"
-      ofelia.job-run.hrrr6h-ingest.no-overlap: "true"
-      ofelia.job-run.nws-alerts-ingest.schedule: "0 0,30 * * * *"
-      ofelia.job-run.nws-alerts-ingest.container: "pirate-ingest-nws-alerts"
-      ofelia.job-run.nws-alerts-ingest.no-overlap: "true"
-      ofelia.job-run.ecmwf-ingest.schedule: "0 0 8,20 * * *"
-      ofelia.job-run.ecmwf-ingest.container: "pirate-ingest-ecmwf"
-      ofelia.job-run.ecmwf-ingest.no-overlap: "true"
-      ofelia.job-run.rtma-ru-ingest.schedule: "0 10,25,40,55 * * * *"
-      ofelia.job-run.rtma-ru-ingest.container: "pirate-ingest-rtma-ru"
-      ofelia.job-run.rtma-ru-ingest.no-overlap: "true"
-    depends_on:
-      gfs_ingest:
-        condition: service_completed_successfully
-      nbm_ingest:
-        condition: service_completed_successfully
-      subh_ingest:
-        condition: service_completed_successfully
-      gefs_ingest:
-        condition: service_completed_successfully
-      hrrr_ingest:
-        condition: service_completed_successfully
-      hrrr_6h_ingest:
-        condition: service_completed_successfully
-      nws_alerts_ingest:
-        condition: service_completed_successfully
-      ecmwf_ingest:
-        condition: service_completed_successfully
-      rtma-ru-ingest:
-        condition: service_completed_successfully
-                                                                                                            
+      ofelia.enabled: "true"
+      # NOAA
+      ofelia.job-run.gfs.schedule: "0 0 5,11,17,23 * * *"
+      ofelia.job-run.gfs.container: "pirate-ingest-gfs"
+      ofelia.job-run.gfs.no-overlap: "true"
+      ofelia.job-run.gefs.schedule: "0 0 1,7,13,19 * * *"
+      ofelia.job-run.gefs.container: "pirate-ingest-gefs"
+      ofelia.job-run.gefs.no-overlap: "true"
+      ofelia.job-run.aigfs.schedule: "0 0 5,11,17,23 * * *"
+      ofelia.job-run.aigfs.container: "pirate-ingest-aigfs"
+      ofelia.job-run.aigfs.no-overlap: "true"
+      ofelia.job-run.aigefs.schedule: "0 20 2,8,14,20 * * *"
+      ofelia.job-run.aigefs.container: "pirate-ingest-aigefs"
+      ofelia.job-run.aigefs.no-overlap: "true"
+      ofelia.job-run.nbm.schedule: "0 45 * * * *"
+      ofelia.job-run.nbm.container: "pirate-ingest-nbm"
+      ofelia.job-run.nbm.no-overlap: "true"
+      ofelia.job-run.hrrr.schedule: "0 45 * * * *"
+      ofelia.job-run.hrrr.container: "pirate-ingest-hrrr"
+      ofelia.job-run.hrrr.no-overlap: "true"
+      ofelia.job-run.hrrr6h.schedule: "0 30 2,8,14,20 * * *"
+      ofelia.job-run.hrrr6h.container: "pirate-ingest-hrrr6h"
+      ofelia.job-run.hrrr6h.no-overlap: "true"
+      ofelia.job-run.subh.schedule: "0 45 * * * *"
+      ofelia.job-run.subh.container: "pirate-ingest-subh"
+      ofelia.job-run.subh.no-overlap: "true"
+      ofelia.job-run.rtma-ru.schedule: "0 10,25,40,55 * * * *"
+      ofelia.job-run.rtma-ru.container: "pirate-ingest-rtma-ru"
+      ofelia.job-run.rtma-ru.no-overlap: "true"
+      # RTMA analyses are posted about 50 min after valid time; URMA several hours.
+      ofelia.job-run.rtma.schedule: "0 55 * * * *"
+      ofelia.job-run.rtma.container: "pirate-ingest-rtma"
+      ofelia.job-run.rtma.no-overlap: "true"
+      ofelia.job-run.urma.schedule: "0 15 * * * *"
+      ofelia.job-run.urma.container: "pirate-ingest-urma"
+      ofelia.job-run.urma.no-overlap: "true"
+      ofelia.job-run.nws-alerts.schedule: "0 0,30 * * * *"
+      ofelia.job-run.nws-alerts.container: "pirate-ingest-nws-alerts"
+      ofelia.job-run.nws-alerts.no-overlap: "true"
+      # ECMWF open data
+      ofelia.job-run.ecmwf.schedule: "0 0 8,20 * * *"
+      ofelia.job-run.ecmwf.container: "pirate-ingest-ecmwf"
+      ofelia.job-run.ecmwf.no-overlap: "true"
+      ofelia.job-run.ecmwf-aifs.schedule: "0 0 2,8,14,20 * * *"
+      ofelia.job-run.ecmwf-aifs.container: "pirate-ingest-ecmwf-aifs"
+      ofelia.job-run.ecmwf-aifs.no-overlap: "true"
+      # MSC Datamart: each ingest looks for the newest run that is complete.
+      ofelia.job-run.gdps.schedule: "0 0 5,17 * * *"
+      ofelia.job-run.gdps.container: "pirate-ingest-gdps"
+      ofelia.job-run.gdps.no-overlap: "true"
+      ofelia.job-run.geps.schedule: "0 0 7,19 * * *"
+      ofelia.job-run.geps.container: "pirate-ingest-geps"
+      ofelia.job-run.geps.no-overlap: "true"
+      ofelia.job-run.hrdps.schedule: "0 0 4,10,16,22 * * *"
+      ofelia.job-run.hrdps.container: "pirate-ingest-hrdps"
+      ofelia.job-run.hrdps.no-overlap: "true"
+      ofelia.job-run.reps.schedule: "0 0 4,10,16,22 * * *"
+      ofelia.job-run.reps.container: "pirate-ingest-reps"
+      ofelia.job-run.reps.no-overlap: "true"
+      ofelia.job-run.raqdps.schedule: "0 15 4,16 * * *"
+      ofelia.job-run.raqdps.container: "pirate-ingest-raqdps"
+      ofelia.job-run.raqdps.no-overlap: "true"
+      # Other sources
+      ofelia.job-run.dwd-mosmix.schedule: "0 0 * * * *"
+      ofelia.job-run.dwd-mosmix.container: "pirate-ingest-dwd-mosmix"
+      ofelia.job-run.dwd-mosmix.no-overlap: "true"
+      ofelia.job-run.silam.schedule: "0 0 7 * * *"
+      ofelia.job-run.silam.container: "pirate-ingest-silam"
+      ofelia.job-run.silam.no-overlap: "true"
+      ofelia.job-run.wmo-alerts.schedule: "0 15 * * * *"
+      ofelia.job-run.wmo-alerts.container: "pirate-ingest-wmo-alerts"
+      ofelia.job-run.wmo-alerts.no-overlap: "true"
+      # Nothing else deletes old history stores. Each ingest only reads the
+      # stores inside its HISTORY_PERIODS window (API/constants/shared_const.py),
+      # so anything older than the window plus a 2-day margin is unused:
+      # GFS 288 h + 48 h = 20160 min, URMA 282 h + 48 h = 19800 min,
+      # RTMA / ECMWF / SILAM 48 h + 48 h = 5760 min.
+      ofelia.job-run.prune-history.schedule: "0 50 0 * * *"
+      ofelia.job-run.prune-history.image: "busybox:1.37"
+      ofelia.job-run.prune-history.volume: '["${PW_HIST_ROOT}:/hist:rw"]'
+      ofelia.job-run.prune-history.command: >-
+        sh -c 'find /hist/GFS -maxdepth 1 -name "GFS_Hist_*.zarr" -mmin +20160 -exec rm -rf {} + ;
+        find /hist/URMA -maxdepth 1 -name "URMA_Hist_*.zarr" -mmin +19800 -exec rm -rf {} + ;
+        find /hist/RTMA -maxdepth 1 -name "RTMA_Hist_*.zarr" -mmin +5760 -exec rm -rf {} + ;
+        find /hist/ECMWF -maxdepth 1 -name "ECMWF_Hist_*.zarr" -mmin +5760 -exec rm -rf {} + ;
+        find /hist/SILAM -maxdepth 1 -name "SILAM_Hist_*.zarr" -mmin +5760 -exec rm -rf {} + ;
+        true'
+      ofelia.job-run.prune-history.no-overlap: "true"
 
-  # GFS Ingest
+  # ------------------------------------------------------------------------
+  # Ingests. zarr_store_workers is set explicitly: peak memory scales with
+  # write threads (about one shard each), and several scripts default to
+  # os.cpu_count() or 64. mem_limit is the measured peak plus headroom
+  # (Notes/STORAGE_AND_READ_BENCHMARKS.md).
+  # ------------------------------------------------------------------------
+
+  # NOAA
   gfs_ingest:
-    <<: *dns_defaults
+    <<: *ingest
     container_name: pirate-ingest-gfs
-    image: pirateingest:latest
-    volumes:
-      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
-      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+    mem_limit: 28g
     environment:
-      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
-      forecast_process_dir: "/tmp/Process/GFS"
-      forecast_path: "/data/Prod/GFS"
+      <<: *ingest_env
+      forecast_process_dir: "/work/GFS"
       historic_path: "/data/Hist/GFS"
-      save_type: "Download"
-      zarr_store_workers: "1"
-      zarr_async_concurrency: "1"
+      zarr_store_workers: "4"
     command: ["ingest/GFS_Local_Ingest.py"]
 
-  # NBM Ingest
-  nbm_ingest:
-    <<: *dns_defaults
-    container_name: pirate-ingest-nbm
-    image: pirateingest:latest
-    volumes:
-      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
-      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+  gefs_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-gefs
+    mem_limit: 12g
     environment:
-      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
-      forecast_process_dir: "/tmp/Process/NBM"
-      forecast_path: "/data/Prod/NBM"
-      save_type: "Download"
-      OMP_NUM_THREADS: "12"
+      <<: *ingest_env
+      forecast_process_dir: "/work/GEFS"
+      zarr_store_workers: "2"
+    command: ["ingest/GEFS_Local_Ingest.py"]
+
+  aigfs_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-aigfs
+    mem_limit: 8g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/AIGFS"
+      zarr_store_workers: "2"
+    command: ["ingest/AIGFS_Local_Ingest.py"]
+
+  aigefs_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-aigefs
+    mem_limit: 6g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/AIGEFS"
+      zarr_store_workers: "2"
+    command: ["ingest/AIGEFS_Local_Ingest.py"]
+
+  nbm_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-nbm
+    mem_limit: 28g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/NBM"
+      zarr_store_workers: "2"
+      # wgrib2 interpolation uses OpenMP; keep BLAS single-threaded alongside it.
+      OMP_NUM_THREADS: "8"
       OMP_PROC_BIND: "spread"
       OMP_PLACES: "cores"
       OPENBLAS_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
       herbie_max_threads: "1"
-      zarr_store_workers: "1"
-      zarr_async_concurrency: "1"
     command: ["ingest/NBM_Local_Ingest.py"]
-    depends_on:
-      gfs_ingest:
-        condition: service_completed_successfully    
 
-  # SubH Ingest
-  subh_ingest:
-    <<: *dns_defaults
-    container_name: pirate-ingest-subh
-    image: pirateingest:latest
-    volumes:
-      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
-      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
-    environment:
-      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
-      forecast_process_dir: "/tmp/Process/SubH"
-      forecast_path: "/data/Prod/SubH"
-      save_type: "Download"
-      zarr_store_workers: "1"
-      zarr_async_concurrency: "1"
-    command: ["ingest/SubH_Local_Ingest.py"]
-    depends_on:
-      gfs_ingest:
-        condition: service_completed_successfully
-      nbm_ingest:
-        condition: service_completed_successfully      
-
-  # GEFS Ingest
-  gefs_ingest:
-    <<: *dns_defaults
-    container_name: pirate-ingest-gefs
-    image: pirateingest:latest
-    volumes:
-      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
-      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
-    environment:
-      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
-      forecast_process_dir: "/tmp/Process/GEFS"
-      forecast_path: "/data/Prod/GEFS"
-      save_type: "Download"
-      zarr_store_workers: "1"
-      zarr_async_concurrency: "1"
-    command: ["ingest/GEFS_Local_Ingest.py"]
-    depends_on:
-      gfs_ingest:
-        condition: service_completed_successfully
-      nbm_ingest:
-        condition: service_completed_successfully      
-      subh_ingest:
-        condition: service_completed_successfully  
-
-  # HRRR Ingest
   hrrr_ingest:
-    <<: *dns_defaults
+    <<: *ingest
     container_name: pirate-ingest-hrrr
-    image: pirateingest:latest
-    volumes:
-      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
-      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+    mem_limit: 8g
     environment:
-      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
-      forecast_process_dir: "/tmp/Process/HRRR"
-      forecast_path: "/data/Prod/HRRR"
-      save_type: "Download"
-      zarr_store_workers: "1"
-      zarr_async_concurrency: "1"
+      <<: *ingest_env
+      forecast_process_dir: "/work/HRRR"
+      zarr_store_workers: "2"
     command: ["ingest/HRRR_Local_Ingest.py"]
-    depends_on:
-      gfs_ingest:
-        condition: service_completed_successfully
-      nbm_ingest:
-        condition: service_completed_successfully      
-      subh_ingest:
-        condition: service_completed_successfully
-      gefs_ingest:
-        condition: service_completed_successfully                  
-      
-  # HRRR 6H Ingest
+
   hrrr_6h_ingest:
-    <<: *dns_defaults
+    <<: *ingest
     container_name: pirate-ingest-hrrr6h
-    image: pirateingest:latest
-    volumes:
-      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
-      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+    mem_limit: 8g
     environment:
-      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
-      forecast_process_dir: "/tmp/Process/HRRR_6H"
-      forecast_path: "/data/Prod/HRRR_6H"
-      save_type: "Download"
-      zarr_store_workers: "1"
-      zarr_async_concurrency: "1"
+      <<: *ingest_env
+      forecast_process_dir: "/work/HRRR_6H"
+      zarr_store_workers: "2"
     command: ["ingest/HRRR_6H_Local_Ingest.py"]
-    depends_on:
-      gfs_ingest:
-        condition: service_completed_successfully
-      nbm_ingest:
-        condition: service_completed_successfully      
-      subh_ingest:
-        condition: service_completed_successfully
-      gefs_ingest:
-        condition: service_completed_successfully       
 
-  # NWS Alerts Ingest
-  nws_alerts_ingest:
-    <<: *dns_defaults
-    container_name: pirate-ingest-nws-alerts
-    image: pirateingest:latest
-    volumes:
-      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
-      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+  subh_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-subh
+    mem_limit: 8g
     environment:
-      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
-      forecast_process_dir: "/tmp/Process/NWS_Alerts"
-      forecast_path: "/data/Prod/NWS_Alerts"
-      historic_path: "/data/Hist/NWS_Alerts"
-      save_type: "Download"
-      zarr_store_workers: "1"
-      zarr_async_concurrency: "1"
-    command: ["ingest/NWS_Alerts_Local.py"]
-    depends_on:
-      gfs_ingest:
-        condition: service_completed_successfully
-      nbm_ingest:
-        condition: service_completed_successfully      
-      subh_ingest:
-        condition: service_completed_successfully
-      gefs_ingest:
-        condition: service_completed_successfully
+      <<: *ingest_env
+      forecast_process_dir: "/work/SubH"
+      zarr_store_workers: "2"
+    command: ["ingest/SubH_Local_Ingest.py"]
 
-  # ECMWF Ingest
-  ecmwf_ingest:
-    <<: *dns_defaults
-    container_name: pirate-ingest-ecmwf
-    image: pirateingest:latest
-    volumes:
-      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
-      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
-    environment:
-      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
-      forecast_process_dir: "/tmp/Process/ECMWF"
-      forecast_path: "/data/Prod/ECMWF"
-      historic_path: "/data/Hist/ECMWF"
-      save_type: "Download"
-      zarr_store_workers: "1"
-      zarr_async_concurrency: "1"
-    command: ["ingest/ECMWF_Local_Ingest.py"]
-    depends_on:
-      gfs_ingest:
-        condition: service_completed_successfully
-      nbm_ingest:
-        condition: service_completed_successfully
-      subh_ingest:
-        condition: service_completed_successfully
-      gefs_ingest:
-        condition: service_completed_successfully
-
-  # RTMA-RU Ingest
-  rtma-ru-ingest:
-    <<: *dns_defaults
+  rtma_ru_ingest:
+    <<: *ingest
     container_name: pirate-ingest-rtma-ru
-    image: pirateingest:latest
-    volumes:
-      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data
-      - ${PW_WORK_ROOT:-/mnt/pirate-weather/Work}:/tmp
+    mem_limit: 6g
     environment:
-      wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
-      forecast_process_dir: "/tmp/Process/RTMA-RU"
-      forecast_path: "/data/Prod/RTMA-RU"
-      historic_path: "/data/Hist/RTMA-RU"
-      save_type: "Download"
-      zarr_store_workers: "1"
-      zarr_async_concurrency: "1"
+      <<: *ingest_env
+      forecast_process_dir: "/work/RTMA_RU"
+      zarr_store_workers: "2"
     command: ["ingest/RTMA-RU_Local_Ingest.py"]
-    depends_on:
-      gfs_ingest:
-        condition: service_completed_successfully
-      nbm_ingest:
-        condition: service_completed_successfully
-      subh_ingest:
-        condition: service_completed_successfully
-      gefs_ingest:
-        condition: service_completed_successfully
 
-  # Consistently running API server
-#  api_server:
-#    image: public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:latest
-#    ports:
-#      - "8083:8083"
-#    volumes:
-#      - efs/scripts:/efs:ro
-#      - nvme/Prod:/tmp
-#      - nvme/Temp:/ebs
-#      - nvme/Data:/data:ro
-#    environment:
-#      STAGE: "PROD"
-#      useETOPO: "False"
-#      s3_bucket: "/data"
-#      TIMING: "TRUE"
-#      save_type: "Download"
-#    entrypoint: "uvicorn"  
-#    working_dir: "/efs"
-#    command: ["responseLocal:app", "--host", "0.0.0.0", "--port", "8083"]
-#    depends_on:
-#      gfs_ingest:
-#        condition: service_completed_successfully
-#      nbm_ingest:
-#        condition: service_completed_successfully
-#      subh_ingest:
-#        condition: service_completed_successfully
-#      gefs_ingest:
-#        condition: service_completed_successfully
-#      hrrr_ingest:
-#        condition: service_completed_successfully
-#      hrrr_6h_ingest:
-#        condition: service_completed_successfully
-#      nws_alerts_ingest:
-#        condition: service_completed_successfully    
-#      ecmwf_ingest:
-#        condition: service_completed_successfully  
+  rtma_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-rtma
+    mem_limit: 8g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/RTMA"
+      historic_path: "/data/Hist/RTMA"
+      zarr_store_workers: "8"
+    command: ["ingest/RTMA_Local_Ingest.py"]
+
+  # URMA publishes its merged history as URMA_Hist into /data/Prod/v31.
+  urma_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-urma
+    mem_limit: 12g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/URMA"
+      historic_path: "/data/Hist/URMA"
+      zarr_store_workers: "8"
+    command: ["ingest/URMA_Local_Ingest.py"]
+
+  nws_alerts_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-nws-alerts
+    mem_limit: 6g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/NWS_Alerts"
+      historic_path: "/data/Hist/NWS_Alerts"
+    command: ["ingest/NWS_Alerts_Local.py"]
+
+  # ECMWF open data
+  ecmwf_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-ecmwf
+    mem_limit: 18g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/ECMWF"
+      historic_path: "/data/Hist/ECMWF"
+      zarr_store_workers: "4"
+    command: ["ingest/ECMWF_Local_Ingest.py"]
+
+  ecmwf_aifs_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-ecmwf-aifs
+    mem_limit: 10g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/ECMWF_AIFS"
+      zarr_store_workers: "2"
+    command: ["ingest/ECMWF_AIFS_Local_Ingest.py"]
+
+  # MSC Datamart
+  gdps_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-gdps
+    mem_limit: 10g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/GDPS"
+      zarr_store_workers: "2"
+    command: ["ingest/GDPS_Local_Ingest.py"]
+
+  geps_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-geps
+    mem_limit: 6g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/GEPS"
+      zarr_store_workers: "2"
+    command: ["ingest/GEPS_Local_Ingest.py"]
+
+  hrdps_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-hrdps
+    mem_limit: 8g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/HRDPS"
+      zarr_store_workers: "2"
+    command: ["ingest/HRDPS_Local_Ingest.py"]
+
+  reps_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-reps
+    mem_limit: 6g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/REPS"
+      zarr_store_workers: "2"
+    command: ["ingest/REPS_Local_Ingest.py"]
+
+  raqdps_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-raqdps
+    mem_limit: 6g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/RAQDPS"
+      zarr_store_workers: "2"
+    command: ["ingest/RAQDPS_Local_Ingest.py"]
+
+  # Other sources
+  dwd_mosmix_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-dwd-mosmix
+    mem_limit: 20g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/DWD_MOSMIX"
+      zarr_store_workers: "2"
+    command: ["ingest/DWD_Mosmix_Local_Ingest.py"]
+
+  silam_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-silam
+    mem_limit: 10g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/SILAM"
+      historic_path: "/data/Hist/SILAM"
+      zarr_store_workers: "4"
+    command: ["ingest/FMI_Silam_Local_Ingest.py"]
+
+  wmo_alerts_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-wmo-alerts
+    mem_limit: 8g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/WMO_Alerts"
+      historic_path: "/data/Hist/WMO_Alerts"
+    command: ["ingest/WMO_Alerts_Local.py"]
