@@ -1,6 +1,8 @@
 """Point lookup on model grids that are not a simple regular lat/lon index."""
 
+import asyncio
 import datetime
+import logging
 
 import numpy as np
 import pytest
@@ -10,9 +12,11 @@ from API.constants.model_const import ERA5
 from API.request.grid_indexing import (
     HRDPS_ROTATED_GRID,
     REPS_ROTATED_GRID,
+    ZarrSources,
     _load_era5_slice,
     _nearest_2d_grid_coords,
     _nearest_rotated_grid_coords,
+    calculate_grid_indexing,
 )
 
 ERA5_BASE_DAY = datetime.datetime(2024, 1, 1)
@@ -152,3 +156,44 @@ def test_era5_precip_probability_from_neighbourhood_wraps_longitude():
     )
 
     np.testing.assert_allclose(result[:, ERA5["prob"]], [100.0, 60.0, 0.0])
+
+
+def test_forecast_grid_read_without_published_wmo_alert_store():
+    """A new deployment serves requests before every ingest has published, and
+    the alert stores are optional: a missing WMO alert store must mean no WMO
+    alerts, not a TypeError that turns every forecast request into HTTP 500.
+    """
+    now = datetime.datetime(2026, 10, 30, 19)
+    sources = ZarrSources(
+        subh=None, hrrr_6h=None, hrrr=None, nbm=None, gfs=None, ecmwf=None, gefs=None
+    )
+
+    result = asyncio.run(
+        calculate_grid_indexing(
+            lat=52.52,
+            lon=13.40,
+            az_lon=13.40,
+            utc_time=now,
+            now_time=now,
+            time_machine=False,
+            ex_hrrr=1,
+            ex_nbm=1,
+            ex_gfs=1,
+            ex_urma=1,
+            ex_ecmwf=1,
+            ex_gefs=1,
+            ex_rtma_ru=1,
+            ex_dwd_mosmix=1,
+            ex_aigfs=1,
+            ex_aigefs=1,
+            ex_aifs=1,
+            read_wmo_alerts=True,
+            base_day_utc=now,
+            num_hours=24,
+            zarr_sources=sources,
+            weather=None,
+            logger=logging.getLogger(__name__),
+        )
+    )
+
+    assert result.WMO_alertDat is None

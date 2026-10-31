@@ -1121,7 +1121,9 @@ async def calculate_grid_indexing(
         )
 
     WMO_alertDat = None
-    if read_wmo_alerts:
+    # The WMO alert store is optional: until its ingest has published (e.g. a
+    # fresh deployment), serve the forecast without WMO alerts.
+    if read_wmo_alerts and zarr_sources.wmo_alerts is not None:
         wmo_alerts_lats = np.arange(-60, 85, 0.0625)
         wmo_alerts_lons = np.arange(-180, 180, 0.0625)
         wmo_abslat = np.abs(wmo_alerts_lats - lat)
