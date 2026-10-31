@@ -155,16 +155,22 @@ def _value_or_default(value, default):
     return value
 
 
-def _median(values):
+def _period_cloud_cover(cloud_covers):
     """
-    Median of a short list of values, or NaN if any is missing (as the mean
-    used before). statistics.median is several times faster than np.median on
-    the handful of hourly values in a period, and this runs for every summary.
+    Median cloud cover of a period's hours, skipping missing (NaN) hours.
+
+    A period missing most of its hours is treated as clear (0.0), rather than
+    letting one or two hours stand for it. statistics.median is several times
+    faster than np.median on the handful of hourly values in a period, and
+    this runs for every summary.
+
+    Returns:
+    - tuple: The cloud cover (0.0 to 1.0) and whether most hours were missing.
     """
-    # A NaN anywhere makes the sum NaN, and is much cheaper to find this way
-    if math.isnan(sum(values)):
-        return math.nan
-    return statistics.median(values)
+    valid_covers = [cover for cover in cloud_covers if not math.isnan(cover)]
+    if len(valid_covers) * 2 < len(cloud_covers):
+        return 0.0, True
+    return statistics.median(valid_covers), False
 
 
 def _get_zone(time_zone):
@@ -759,6 +765,16 @@ def _accumulation_amount(total_accum, total_error, has_error_data, unit_str):
     """
     Builds the accumulation (or accumulation range) for the summary.
 
+    The error is the summed hourly ensemble standard deviation, and the range
+    spans half of it either side. Precipitation totals are skewed (they can't
+    fall below zero but can run well above the mean), so only the top of the
+    range adds the spread; the bottom divides by the same factor instead:
+
+        low = amount * amount / (amount + spread)
+
+    For a small spread this is the usual amount - spread (19 +/- 2 -> 17-21),
+    but a spread as large as the amount gives 9-39 rather than reaching 0.
+
     The translations only take whole numbers, so amounts are rounded out to
     whole units ("< 1 in" for a few millimetres of rain in US units).
 
@@ -777,27 +793,27 @@ def _accumulation_amount(total_accum, total_error, has_error_data, unit_str):
         "millimeters": 1,
     }[unit_str]
     accum_display = total_accum / mm_per_unit
-    error_display = total_error / mm_per_unit
+    spread_display = total_error / mm_per_unit / 2
     less_than_tolerance = LESS_THAN_TOLERANCE / mm_per_unit
 
-    # If error data is missing (ERA5, etc.), show exact value without range or "<"
-    if not has_error_data and accum_display > 0:
+    if accum_display <= 0:
+        return None
+
+    # Without error data (ERA5, etc.) or with a zero spread there is no range
+    if not has_error_data or spread_display <= 0.01:
         return [unit_str, math.ceil(accum_display)]
 
-    # Error data exists - calculate range. Accumulation cannot be negative.
-    low_accum = max(0, math.floor(accum_display - (error_display / 2)))
-    max_accum = math.ceil(accum_display + (error_display / 2))
+    low_accum = math.floor(accum_display**2 / (accum_display + spread_display))
+    max_accum = math.ceil(accum_display + spread_display)
 
-    if max_accum >= less_than_tolerance and low_accum == 0:
+    # Too small to have a whole-unit lower bound: a range from 1 once the top
+    # is large enough to be worth it (#510), otherwise "< N"
+    if low_accum == 0:
+        if max_accum < less_than_tolerance:
+            return ["less-than", [unit_str, max_accum]]
         low_accum = 1
-
-    if max_accum <= 0:
-        return None
-    if accum_display == 0:
-        return ["less-than", [unit_str, 1]]
-    # If error is very small or lower range is 0, use less-than format
-    if error_display <= 0.01 or low_accum == 0:
-        return ["less-than", [unit_str, max_accum]]
+    if low_accum == max_accum:
+        return [unit_str, max_accum]
     return [unit_str, ["range", low_accum, max_accum]]
 
 
@@ -1064,7 +1080,9 @@ def calculate_day_text(
     all_period_names = list(periods_data)
     period_stats = list(periods_data.values())
     for p_data in period_stats:
-        p_data["median_cloud_cover"] = _median(p_data["cloud_covers"])
+        p_data["median_cloud_cover"], p_data["cloud_cover_missing"] = (
+            _period_cloud_cover(p_data["cloud_covers"])
+        )
 
     # --- 3. Which periods have each condition, and totals for the whole window ---
     precip_periods = []
@@ -1694,12 +1712,20 @@ def calculate_day_text(
         # A change over the window ("clearing", "X becoming Y"), otherwise
         # periods split between two neighbouring levels ("generally overcast",
         # "partly cloudy to mostly cloudy") throughout the window
-        cloud_transition = _cloud_transition(hourly_cloud_covers, hour_period_idx)
-        cloud_range = (
-            _cloud_range(cloud_levels, hourly_cloud_covers)
-            if cloud_transition is None
-            else None
-        )
+        # Missing hours take their period's cloud cover. A period missing most
+        # of its hours is only assumed clear, so it can't show a change.
+        cloud_transition = None
+        cloud_range = None
+        if not any(p_data["cloud_cover_missing"] for p_data in period_stats):
+            filled_cloud_covers = [
+                period_stats[hour_period_idx[i]]["median_cloud_cover"]
+                if math.isnan(cover)
+                else cover
+                for i, cover in enumerate(hourly_cloud_covers)
+            ]
+            cloud_transition = _cloud_transition(filled_cloud_covers, hour_period_idx)
+            if cloud_transition is None:
+                cloud_range = _cloud_range(cloud_levels, filled_cloud_covers)
         if cloud_transition is not None:
             cloud_text, cloud_idx = cloud_transition
         elif cloud_range is not None:

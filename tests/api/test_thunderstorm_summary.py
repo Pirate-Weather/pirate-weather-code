@@ -112,7 +112,7 @@ def test_daily_thunderstorms_joined_with_precipitation():
         ["sentence", ["for-day", "thunderstorm"]],
         [
             "sentence",
-            ["of-expected", ["less-than", ["millimeters", 40]], "medium-rain"],
+            ["of-expected", ["millimeters", 40], "medium-rain"],
         ],
     ]
     assert icon == "thunderstorm"
@@ -148,7 +148,7 @@ def test_daily_thunderstorms_accompany_precipitation():
         ],
         [
             "sentence",
-            ["of-expected", ["less-than", ["millimeters", 30]], "medium-rain"],
+            ["of-expected", ["millimeters", 30], "medium-rain"],
         ],
     ]
     assert icon == "thunderstorm"
@@ -200,7 +200,7 @@ def test_24hour_thunderstorms_starting_later():
         ["sentence", ["during", "thunderstorm", "today-morning"]],
         [
             "sentence",
-            ["of-expected", ["less-than", ["millimeters", 20]], "medium-rain"],
+            ["of-expected", ["millimeters", 20], "medium-rain"],
         ],
     ]
     assert icon == "thunderstorm"
@@ -276,7 +276,7 @@ def test_daily_storm_ignores_cape_from_low_pop_hours():
         ["sentence", ["for-day", "possible-thunderstorm"]],
         [
             "sentence",
-            ["of-expected", ["less-than", ["millimeters", 40]], "medium-rain"],
+            ["of-expected", ["millimeters", 40], "medium-rain"],
         ],
     ]
     assert icon == "rain"

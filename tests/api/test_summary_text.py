@@ -1,5 +1,6 @@
 """Summary text windows, period names and fallbacks."""
 
+import math
 from unittest.mock import MagicMock
 
 import pytest
@@ -304,6 +305,15 @@ def test_daily_precipitation_pattern(wet_hours, amounts, expected):
             ["for-day", ["to", "light-clouds", "medium-clouds"]],
             id="to",
         ),
+        # One missing hour must not turn its whole period clear; the period
+        # uses the hours it has.
+        pytest.param(
+            [math.nan] + [70] * 23,
+            ["for-day", "medium-clouds"],
+            id="one-hour-missing",
+        ),
+        # With no cloud cover at all the day is described as clear.
+        pytest.param([math.nan] * 24, ["for-day", "clear"], id="all-missing"),
     ],
 )
 def test_daily_cloud_cover_wording(cloud_cover, expected):
