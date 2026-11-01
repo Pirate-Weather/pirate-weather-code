@@ -160,6 +160,48 @@ New keys raise `ValueError` in translations that don't have them yet; the
 `Translation.is_supported()` method can be used to switch over only once the
 installed translations support a key.
 
+### Switch from pytz to `zoneinfo`
+pytz still gets tz database updates, but its `localize()` / `normalize()` model
+predates the standard library's and is easy to misuse: the "Local midnight is off
+by an hour on DST transition days" bug above is a pytz `replace()` on an aware
+datetime, which `zoneinfo` gets right. `zoneinfo` is also faster (200k
+localize-and-convert calls: 0.16 s against 1.5 s), though that is negligible next
+to the store reads. Used in `API/alerts.py`, `API/hourly/builder.py`,
+`API/processing/utils.py`, `API/request/preprocess.py`, `API/responseLocal.py`,
+`API/utils/geo.py`, `API/utils/solar.py`, `API/utils/time_indexing.py`,
+`dst_test.py` and two tests. timezonefinder stays: it maps a point to a zone name,
+which `zoneinfo` cannot do.
+
+Things to watch:
+- **Ambiguous times** (the repeated hour when clocks fall back): pytz `localize()`
+  defaults to standard time (01:30 on 2026-11-01 in New York is -05:00), while
+  `zoneinfo` takes the first occurrence (-04:00) unless `fold=1` is set. Decide
+  this wherever a local wall-clock time is built and converted to UTC.
+- **Nonexistent times** (the skipped hour when clocks spring forward): neither
+  library raises, but the offsets they pick differ. The hour and day arrays only
+  use whole hours and midnights, so this mostly affects test fixtures.
+- **API changes:** `tz.localize(dt)` becomes `dt.replace(tzinfo=tz)`, `pytz.utc`
+  becomes `datetime.UTC`, and `.normalize()` is no longer needed. The
+  `timezone_localizer` argument passed to `API/hourly/builder.py` and
+  `API/utils/time_indexing.py` needs reworking.
+- **tz data source:** `zoneinfo` reads the OS tz database, which slim Docker images
+  often lack. Add `tzdata` to `Docker/requirements-api.txt` in place of the pytz pin
+  so updates stay a pinned dependency.
+- **Tests:** port `tests/api/test_dst_time_indexing.py` and
+  `tests/api/test_polar_daynight_logic.py`, and first add regression tests for
+  DST-day midnight and the fall-back hour, so any output change on transition
+  days is deliberate. The production comparison won't show it unless it runs on
+  a transition day.
+
+Fix in the same change:
+- `get_offset` (`API/utils/geo.py`) localizes `utc_time`'s wall-clock time as if
+  it were local, so the reported `offset` can be an hour off for a few hours
+  around each DST transition. With `zoneinfo`:
+  `utc_time.replace(tzinfo=datetime.UTC).astimezone(tz).utcoffset()`.
+- `API/request/preprocess.py:681` calls `tf.timezone_at()` again with the same
+  point `get_offset()` just looked up; reuse the zone it returns to save one
+  point-in-polygon lookup per request.
+
 ## v3 goals
 
 From the v3 planning post (pirate-weather-code discussion #773). Goals already done
