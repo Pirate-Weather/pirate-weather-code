@@ -279,3 +279,32 @@ def test_update_zarr_store_skips_era5_for_testing_when_env_enabled(
     init_era5.assert_not_called()
     assert stores.GFS_Zarr == "gfs"
     assert stores.ERA5_Data is None
+
+
+def test_update_zarr_store_testing_skips_missing_optional_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("SKIP_ERA5", "1")
+
+    def fake_setup(s3, s3_bucket, ingest_version, save_type, model_name):
+        if model_name == "AIGEFS":
+            raise FileNotFoundError("The specified key does not exist.")
+        return model_name
+
+    with (
+        patch("API.io.zarr_reader.setup_testing_zipstore", side_effect=fake_setup),
+        patch("API.io.zarr_reader.zarr.open", side_effect=lambda store, mode: store),
+    ):
+        stores = zarr_reader.update_zarr_store(
+            False,
+            stage="TESTING",
+            save_dir=str(tmp_path),
+            use_etopo=False,
+            save_type="Local",
+            s3_bucket="",
+            aws_access_key_id="",
+            aws_secret_access_key="",
+        )
+
+    assert stores.AIGEFS_Zarr is None
+    assert stores.AIGFS_Zarr == "AIGFS"
+    assert stores.ECMWF_AIFS_Zarr == "ECMWF_AIFS"
+    assert stores.GFS_Zarr == "GFS"

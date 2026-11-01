@@ -193,7 +193,13 @@ class WeatherParallel:
                     self.logger.debug("### %s Done! %s", model, self.loc_tag)
                 return data_out
 
-            except (OSError, IndexError, ValueError, TypeError, zarr.errors.ZarrError):
+            except (
+                OSError,
+                IndexError,
+                ValueError,
+                TypeError,
+                zarr.errors.BaseZarrError,
+            ):
                 self.logger.exception("### %s Failure! %s", model, self.loc_tag)
                 err_count += 1
 
@@ -317,7 +323,7 @@ def update_zarr_store(
             stores.URMA_Zarr = _testing_store(
                 s3, s3_bucket, ingest_version, save_type, "URMA_Hist", logger=logger
             )
-        except (OSError, ValueError, zarr.errors.ZarrError) as exc:
+        except (OSError, ValueError, zarr.errors.BaseZarrError) as exc:
             logger.info("URMA_Hist not available: %s", exc)
         if skip_era5:
             logger.info("Skipping ERA5 initialization because SKIP_ERA5 is enabled")
@@ -350,14 +356,25 @@ def update_zarr_store(
                 ("RAQDPS_Zarr", "RAQDPS"),
                 ("SILAM_Zarr", "SILAM"),
             ]
+            # A missing optional store leaves its attribute as None (as with
+            # local stores) instead of aborting startup for every model.
             for attr, name in testing_stores:
-                setattr(
-                    stores,
-                    attr,
-                    _testing_store(
-                        s3, s3_bucket, ingest_version, save_type, name, logger=logger
-                    ),
-                )
+                try:
+                    setattr(
+                        stores,
+                        attr,
+                        _testing_store(
+                            s3,
+                            s3_bucket,
+                            ingest_version,
+                            save_type,
+                            name,
+                            logger=logger,
+                        ),
+                    )
+                except (OSError, ValueError, zarr.errors.BaseZarrError) as exc:
+                    logger.info("%s not available: %s", name, exc)
+                    setattr(stores, attr, None)
             if use_etopo:
                 stores.ETOPO_f = _testing_store(
                     s3,
@@ -409,7 +426,7 @@ def _load_local_store(
             )
             logger.info("Loaded %s from: %s", attr_name, path)
         except (
-            zarr.errors.ZarrError,
+            zarr.errors.BaseZarrError,
             OSError,
         ) as exc:  # keep compatibility with ECMWF failure handling
             logger.info("%s not available: %s", attr_name, exc)
