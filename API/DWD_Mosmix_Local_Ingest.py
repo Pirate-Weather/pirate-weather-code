@@ -1166,7 +1166,7 @@ for i in range(history_period, 0, -1):
         TypeError,
         # Zarr, S3 & OS I/O errors
         OSError,
-        zarr.errors.ZarrError,
+        zarr.errors.BaseZarrError,
     ) as e:
         logger.warning(f"Error processing {hist_filename}: {e}")
 
