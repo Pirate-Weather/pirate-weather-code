@@ -20,7 +20,7 @@ import shutil
 import sys
 import time
 import warnings
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from xml.etree import ElementTree
 
 import dask
@@ -171,7 +171,7 @@ def get_latest_silam_run():
                 if match:
                     run_times.append(
                         datetime.strptime(match.group(1), "%Y%m%d%H").replace(
-                            tzinfo=timezone.utc
+                            tzinfo=UTC
                         )
                     )
 
@@ -186,7 +186,7 @@ def get_latest_silam_run():
         logger.warning(f"No SILAM run files found in catalog {catalog_url}")
 
     # Fall back to the previous fixed-delay behavior if the catalog is unavailable.
-    latest_origintime = (datetime.now(timezone.utc) - timedelta(days=1)).replace(
+    latest_origintime = (datetime.now(UTC) - timedelta(days=1)).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
     logger.warning(f"Falling back to estimated SILAM run time: {latest_origintime}")

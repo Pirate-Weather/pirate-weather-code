@@ -15,7 +15,7 @@ import argparse
 import os
 import sys
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -196,7 +196,7 @@ def parse_run_time(value: str | None) -> datetime | None:
     """Parse an optional ISO-like UTC run time string."""
     if value is None:
         return None
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    return datetime.fromisoformat(value).astimezone(UTC)
 
 
 def main() -> None:

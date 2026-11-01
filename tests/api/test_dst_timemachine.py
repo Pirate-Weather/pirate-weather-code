@@ -37,10 +37,10 @@ FALL_BACK_DATE = datetime.datetime(2024, 11, 3)
 
 # Timemachine timestamps: noon UTC on each DST transition day (well in the past)
 SPRING_FORWARD_TIMESTAMP = int(
-    datetime.datetime(2024, 3, 10, 12, 0, 0, tzinfo=datetime.timezone.utc).timestamp()
+    datetime.datetime(2024, 3, 10, 12, 0, 0, tzinfo=datetime.UTC).timestamp()
 )
 FALL_BACK_TIMESTAMP = int(
-    datetime.datetime(2024, 11, 3, 12, 0, 0, tzinfo=datetime.timezone.utc).timestamp()
+    datetime.datetime(2024, 11, 3, 12, 0, 0, tzinfo=datetime.UTC).timestamp()
 )
 
 
