@@ -36,7 +36,16 @@ from API.constants.grid_const import (
     RTMA_RU_Y_MIN,
 )
 from API.constants.model_const import ERA5, ERA5_SOURCE_VARS, RAQDPS, SILAM
-from API.constants.shared_const import FIRST_FORECAST_LEAD_HOURS, HISTORY_PERIODS
+from API.constants.shared_const import (
+    FIRST_FORECAST_LEAD_HOURS,
+    HISTORY_PERIODS,
+    LIBREWXR_GRID_HEIGHT,
+    LIBREWXR_GRID_NORTH,
+    LIBREWXR_GRID_RESOLUTION_DEG,
+    LIBREWXR_GRID_WEST,
+    LIBREWXR_GRID_WIDTH,
+    LIBREWXR_MAX_NOWCAST_AGE_SECONDS,
+)
 from API.utils.geo import is_in_north_america, lambertGridMatch
 from API.utils.timing import StepTimer
 
@@ -46,6 +55,10 @@ SILAM_LON_START = -179.8
 SILAM_GRID_DELTA = 0.2
 SILAM_LAT_COUNT = 897
 SILAM_LON_COUNT = 1800
+# LibreWXR composite cell centres: half a cell in from the grid edge, rows
+# north to south (negative latitude step), columns west to east
+LIBREWXR_LAT_START = LIBREWXR_GRID_NORTH - LIBREWXR_GRID_RESOLUTION_DEG / 2
+LIBREWXR_LON_START = LIBREWXR_GRID_WEST + LIBREWXR_GRID_RESOLUTION_DEG / 2
 RAQDPS_VALUE_COLUMNS = tuple(index for name, index in RAQDPS.items() if name != "time")
 SILAM_VALUE_COLUMNS = tuple(
     index for name, index in SILAM.items() if name not in {"time", "blh"}
@@ -369,6 +382,7 @@ class ZarrSources:
     raqdps: Any = None
     silam: Any = None
     raqdps_lat_lon: Any = None
+    librewxr: Any = None
 
 
 @dataclass
@@ -449,6 +463,8 @@ class GridIndexingResult:
     y_silam: float | None = None
     silam_lat: float | None = None
     silam_lon: float | None = None
+    dataOut_librewxr: np.ndarray | bool = False
+    librewxrRunTime: float | None = None
     dataOut_urma: np.ndarray | bool = False
     urmaRunTime: float | None = None
     x_urma: float | None = None
@@ -586,6 +602,7 @@ async def calculate_grid_indexing(
     ex_reps: int = 0,
     ex_raqdps: int = 0,
     ex_silam: int = 0,
+    ex_librewxr: int = 0,
     inc_aimodels: int = 0,
     read_wmo_alerts: bool = True,
     base_day_utc: datetime.datetime | None = None,
@@ -615,6 +632,7 @@ async def calculate_grid_indexing(
     readAIGFS = False
     readAIGEFS = False
     readAIFS = False
+    readLibreWXR = False
 
     def _get_grid_coords(
         lat,
@@ -1079,6 +1097,22 @@ async def calculate_grid_indexing(
     else:
         ERA5_MERGED = False
 
+    # LibreWXR radar composite for the minutely block: a global regular lat/lon
+    # grid, so only the current forecast (never Time Machine) reads it.
+    dataOut_librewxr = False
+    librewxrRunTime = None
+    if not time_machine and ex_librewxr != 1 and zarr_sources.librewxr is not None:
+        readLibreWXR = True
+        y_librewxr = _nearest_regular_grid_index(
+            lat, LIBREWXR_LAT_START, -LIBREWXR_GRID_RESOLUTION_DEG, LIBREWXR_GRID_HEIGHT
+        )
+        x_librewxr = _nearest_regular_grid_index(
+            az_lon,
+            LIBREWXR_LON_START,
+            LIBREWXR_GRID_RESOLUTION_DEG,
+            LIBREWXR_GRID_WIDTH,
+        )
+
     zarrTasks = {}
     if readHRRR:
         zarrTasks["SubH"] = weather.zarr_read("SubH", zarr_sources.subh, x_hrrr, y_hrrr)
@@ -1086,6 +1120,10 @@ async def calculate_grid_indexing(
             "HRRR_6H", zarr_sources.hrrr_6h, x_hrrr, y_hrrr
         )
         zarrTasks["HRRR"] = weather.zarr_read("HRRR", zarr_sources.hrrr, x_hrrr, y_hrrr)
+    if readLibreWXR:
+        zarrTasks["LibreWXR"] = weather.zarr_read(
+            "LibreWXR", zarr_sources.librewxr, x_librewxr, y_librewxr
+        )
     if readNBM:
         zarrTasks["NBM"] = weather.zarr_read("NBM", zarr_sources.nbm, x_nbm, y_nbm)
     if readGFS:
@@ -1164,6 +1202,24 @@ async def calculate_grid_indexing(
     aigfsRunTime = None
     aigefsRunTime = None
     aifsRunTime = None
+
+    if readLibreWXR:
+        dataOut_librewxr = zarr_results["LibreWXR"]
+        # The reader blanks the time column where every variable is NaN, so a
+        # cell outside radar coverage reads as all NaN: not a source here. The
+        # run time is the radar frame the nowcast starts from (the store's
+        # first time), not the data column.
+        if dataOut_librewxr is not False and np.all(np.isnan(dataOut_librewxr[:, 1:])):
+            dataOut_librewxr = False
+        if dataOut_librewxr is not False:
+            librewxrRunTime = float(zarr_sources.librewxr.times[0])
+            nowcast_age = utc_time - datetime.datetime.fromtimestamp(
+                int(librewxrRunTime), datetime.UTC
+            ).replace(tzinfo=None)
+            if nowcast_age > datetime.timedelta(
+                seconds=LIBREWXR_MAX_NOWCAST_AGE_SECONDS
+            ):
+                dataOut_librewxr = False
 
     if readHRRR:
         dataOut = zarr_results["SubH"]
@@ -1633,6 +1689,8 @@ async def calculate_grid_indexing(
         aigfsRunTime=aigfsRunTime,
         aigefsRunTime=aigefsRunTime,
         aifsRunTime=aifsRunTime,
+        dataOut_librewxr=dataOut_librewxr,
+        librewxrRunTime=librewxrRunTime,
         x_rtma=x_rtma,
         y_rtma=y_rtma,
         rtma_lat=rtma_lat,

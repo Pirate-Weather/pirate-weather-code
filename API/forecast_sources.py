@@ -153,6 +153,14 @@ def build_source_metadata(
             time_key="hrrr_subh",
         )
 
+    if isinstance(grid_result.dataOut_librewxr, np.ndarray):
+        metadata.add(
+            "librewxr",
+            time_value=_format_run_time(
+                grid_result.librewxrRunTime, round_to=10, fmt="%Y-%m-%d %H:%MZ"
+            ),
+        )
+
     if isinstance(grid_result.dataOut_rtma_ru, np.ndarray) and not time_machine:
         metadata.add(
             "rtma_ru", time_value=_format_rtma_time(grid_result.dataOut_rtma_ru)

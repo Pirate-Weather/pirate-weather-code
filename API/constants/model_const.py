@@ -330,3 +330,9 @@ FORECAST_SOURCES = frozenset(
         "era5",
     }
 )
+# LibreWXR global radar composite (ingest/LibreWXR_Local_Ingest.py): composite
+# reflectivity in dBZ at T+0 and each 10-minute nowcast step, NaN outside radar
+# coverage.
+LIBREWXR = {
+    "refc": 1,
+}

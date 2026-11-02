@@ -1,0 +1,37 @@
+# ======================================================================
+# LibreWXR sidecar: ingest/LibreWXR_Local_Ingest.py next to a LibreWXR
+# data pipeline, sharing its cache volume (LIBREWXR_CACHE_DIR).
+#
+# Built on the LibreWXR image so the sidecar imports the same librewxr
+# package (region definitions, projections, coverage masks) as the
+# pipeline it reads from, plus the store writer's dependencies. The GRIB
+# stack of the ingest image is not needed here.
+#
+#   docker build -f Docker/pirate-librewxr-sidecar-dockerfile -t pirate-librewxr-sidecar .
+# ======================================================================
+
+ARG LIBREWXR_IMAGE_TAG=latest
+FROM ghcr.io/joshuakimsey/librewxr:${LIBREWXR_IMAGE_TAG}
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+WORKDIR /app
+
+# Only what API/ingest_utils.py and the sidecar import: the zarr writer and
+# publisher (dask, zarr, obstore), cartopy/xarray/requests for ingest_utils'
+# module-level imports, pandas for timestamps.
+RUN pip install --no-cache-dir \
+    "cartopy>=0.24" \
+    "dask>=2026.1" \
+    "obstore>=0.12" \
+    "pandas>=2.2" \
+    "requests>=2.32" \
+    "xarray>=2024.1" \
+    "zarr>=3.1"
+
+COPY API /app/API
+COPY ingest /app/ingest
+
+ENTRYPOINT ["python3", "ingest/LibreWXR_Local_Ingest.py"]

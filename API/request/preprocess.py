@@ -141,6 +141,7 @@ class InitialRequestContext:
     ex_aifs: int
     ex_raqdps: int
     ex_silam: int
+    ex_librewxr: int
     ex_hrdps: int
     ex_gdps: int
     ex_geps: int
@@ -457,6 +458,7 @@ def _parse_parameters(
     ex_aifs = int("ecmwf_aifs" in exclude_params)
     ex_raqdps = int("raqdps" in exclude_params)
     ex_silam = int("silam" in exclude_params)
+    ex_librewxr = int("librewxr" in exclude_params)
     exclude_cmc = bool({"cmc", "cmcmodels"} & excluded)
     ex_hrdps = int(exclude_cmc or "hrdps" in excluded)
     ex_gdps = int(exclude_cmc or "gdps" in excluded)
@@ -481,6 +483,7 @@ def _parse_parameters(
         ex_rtma_ru = 1
         ex_ecmwf = 1
         ex_dwd_mosmix = 1
+        ex_librewxr = 1
 
     read_wmo_alerts = not (time_machine or ex_alerts == 1)
 
@@ -489,6 +492,7 @@ def _parse_parameters(
     if time_machine:
         ex_alerts = 1
         ex_dwd_mosmix = 1
+        ex_librewxr = 1
 
     return (
         exclude_params,
@@ -522,6 +526,7 @@ def _parse_parameters(
         ex_geps,
         ex_reps,
         ex_urma,
+        ex_librewxr,
     )
 
 
@@ -724,6 +729,7 @@ async def prepare_initial_request(
         ex_geps,
         ex_reps,
         ex_urma,
+        ex_librewxr,
     ) = _parse_parameters(
         exclude,
         include,
@@ -883,6 +889,7 @@ async def prepare_initial_request(
         ex_gdps=ex_gdps,
         ex_geps=ex_geps,
         ex_reps=ex_reps,
+        ex_librewxr=ex_librewxr,
         inc_day_night=inc_day_night,
         inc_aimodels=inc_aimodels,
         inc_airqualitydetails=inc_airqualitydetails,

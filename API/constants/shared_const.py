@@ -10,6 +10,18 @@ MISSING_DATA = np.nan
 # Minimum reflectivity threshold (dBZ)
 REFC_THRESHOLD = 5.0
 
+# LibreWXR radar composite grid (ingest/LibreWXR_Local_Ingest.py): a global
+# regular lat/lon grid at the RRQPE native-downsampled resolution, rows from
+# north to south and columns from west to east, cell centres half a cell in.
+LIBREWXR_GRID_RESOLUTION_DEG = 0.04
+LIBREWXR_GRID_NORTH = 90.0
+LIBREWXR_GRID_WEST = -180.0
+LIBREWXR_GRID_HEIGHT = 4500
+LIBREWXR_GRID_WIDTH = 9000
+# A nowcast whose radar frame is older than this is not published or served:
+# the pipeline has stalled, so the minutely block falls back to the models.
+LIBREWXR_MAX_NOWCAST_AGE_SECONDS = 3600
+
 # An ensemble member counts towards precipitation probability (GEFS, AIGEFS,
 # GEPS, REPS) when its hourly precipitation rate exceeds this (mm/h).
 ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H = 0.1
