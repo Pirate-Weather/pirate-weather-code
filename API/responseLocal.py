@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 
 import aiobotocore.session as _aio_session
 import numpy as np
+import orjson
 from astral import LocationInfo, moon
 from fastapi import FastAPI, HTTPException, Request, Response
 from pirateweather_translations.dynamic_loader import load_all_translations
@@ -315,7 +316,6 @@ def _prefer_ai_with_fallback(ai_data, base_data):
 @app.get("/forecast/{apikey}/{location}")
 async def PW_Forecast(
     request: Request,
-    response: Response,
     location: str,
     units: str | None = None,
     extend: str | None = None,
@@ -331,7 +331,7 @@ async def PW_Forecast(
     daily_indices: str | None = None,
     hourly_indices: str | None = None,
     day_night_indices: str | None = None,
-) -> dict:
+) -> Response:
     """
     Main entry point for the Pirate Weather API forecast.
 
@@ -375,7 +375,7 @@ async def PW_Forecast(
         day_night_indices: CSV of non-negative integers selecting items from day_night.data.
 
     Returns:
-        dict: The complete weather forecast JSON object.
+        Response: The complete weather forecast as JSON.
     """
 
     # Timing Check
@@ -947,6 +947,18 @@ async def PW_Forecast(
     if silam_smoke_frp is not None and not np.all(np.isnan(silam_smoke_frp)):
         smoke_inputs = np.column_stack([smoke_inputs, silam_smoke_frp.reshape(-1, 1)])
 
+    # The hourly response objects and their text are only needed for the hours
+    # returned. Time Machine and the legacy summaries (no summary text) take the
+    # most common text over every hour, so those build them all.
+    if timeMachine or not summaryText:
+        hourly_display_hours = None
+    elif exHourly == 1:
+        hourly_display_hours = range(0)
+    else:
+        hourly_display_hours = range(
+            int(baseTimeOffset), int(baseTimeOffset) + ouputHours
+        )
+
     # This constructs the hourly forecast objects, applying unit conversions and formatting
     with timing_tracker.track("Hourly block"):
         (
@@ -1027,6 +1039,7 @@ async def PW_Forecast(
             if URMA_Merged is not None
             else None,
             version=version,
+            display_hours=hourly_display_hours,
         )
 
     pTypeMap = np.array(
@@ -1089,6 +1102,7 @@ async def PW_Forecast(
             loc_tag=loc_tag,
             aq_inputs=aq_inputs,
             inc_airqualitydetails=incAirQualityDetails,
+            include_day_night=inc_day_night == 1 and not timeMachine,
         )
     dayList = daily_section.day_list
     dayList_si = daily_section.day_list_si
@@ -1236,22 +1250,21 @@ async def PW_Forecast(
             logger=logger,
             loc_tag=loc_tag,
         )
-        filtered_hourList = remove_conditional_fields(
-            hourList,
+        if timeMachine:
+            output_hourList = hourList[0:ouputHours]
+        else:
+            output_hourList = hourList[
+                base_time_offset_int : base_time_offset_int + ouputHours
+            ]
+        returnOBJ["hourly"]["summary"] = hour_summary
+        returnOBJ["hourly"]["icon"] = hour_icon
+        returnOBJ["hourly"]["data"] = remove_conditional_fields(
+            output_hourList,
             version,
             timeMachine,
             tmExtra,
             inc_airqualitydetails=incAirQualityDetails,
         )
-        returnOBJ["hourly"]["summary"] = hour_summary
-        returnOBJ["hourly"]["icon"] = hour_icon
-
-        if timeMachine:
-            returnOBJ["hourly"]["data"] = filtered_hourList[0:ouputHours]
-        else:
-            returnOBJ["hourly"]["data"] = filtered_hourList[
-                base_time_offset_int : base_time_offset_int + ouputHours
-            ]
 
     if inc_day_night == 1 and not timeMachine:
         returnOBJ["day_night"] = {}
@@ -1380,21 +1393,24 @@ async def PW_Forecast(
 
     timer.log("Replace NaN Time")
 
+    # orjson writes the same JSON as FastAPI's default (pydantic) serializer at
+    # about a third of the cost; OPT_SERIALIZE_NUMPY covers any numpy scalars.
+    body = orjson.dumps(returnOBJ, option=orjson.OPT_SERIALIZE_NUMPY)
+
     handler_ms = (
         datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
     ).total_seconds() * 1000
 
-    response.headers["X-Node-ID"] = platform.node()
-    response.headers["X-Handler-Time"] = f"{handler_ms:.1f}"
-    response.headers["X-Response-Time"] = str(
-        (
-            datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
-        ).total_seconds()
-        * 1000
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={
+            "X-Node-ID": platform.node(),
+            "X-Handler-Time": f"{handler_ms:.1f}",
+            "X-Response-Time": str(handler_ms),
+            "Cache-Control": "max-age=900, must-revalidate",
+        },
     )
-    response.headers["Cache-Control"] = "max-age=900, must-revalidate"
-
-    return returnOBJ
 
 
 if __name__ == "__main__":

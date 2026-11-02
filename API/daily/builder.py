@@ -786,6 +786,7 @@ def build_daily_section(
     log_timing: Callable[[str], None] | None = None,
     aq_inputs=None,
     inc_airqualitydetails: int = 0,
+    include_day_night: bool = True,
 ) -> DailySection:
     """
     Build all daily- and half-day-level objects.
@@ -829,6 +830,8 @@ def build_daily_section(
         logger: Logger instance.
         loc_tag: Location tag.
         log_timing: Optional timing logger.
+        include_day_night: Build the day/night (half-day) items; when False
+            ``day_night_list`` is empty.
 
     Returns:
         DailySection object containing the daily forecast.
@@ -1045,115 +1048,123 @@ def build_daily_section(
         half_night_display_sum,
     )
 
+    # The hourly SI times are sorted, so each text window is found by bisection
+    hour_times_si = [hour["time"] for hour in hourList_si]
+
     for idx in range(daily_days):
-        day_icon, day_text = pick_day_icon_and_summary(
-            max_arr=interp_half_day_max,
-            mean_arr=interp_half_day_mean,
-            sum_arr=interp_half_day_sum,
-            precip_type_arr=precip_type_half_day,
-            precip_text_arr=precip_text_half_day,
-            idx=idx,
-            is_night=is_all_night,
-            mode="hourly",
-            prep_accum_unit=prepAccumUnit,
-            vis_units=visUnits,
-            wind_unit=windUnit,
-        )
-
-        day_item = _build_half_day_item(
-            idx,
-            day_array_6am_grib[idx],
-            day_icon,
-            day_text,
-            precip_type_half_day[idx],
-            daily_display_high[idx, DATA_DAY["temp"]],
-            daily_display_high[idx, DATA_DAY["apparent"]],
-            half_day_display_mean,
-            half_day_display_max,
-            half_day_display_sum,
-            interp_half_day_mean,
-            extraVars,
-        )
-
-        if idx < 8:
-            day_text, day_icon = apply_legacy_half_day_text(
-                summary_text=summaryText,
-                translation=translation,
-                hour_list_slice=select_hour_window(
-                    hourList_si,
-                    start_time=int(day_array_6am_grib[idx]),
-                    end_time=int(day_array_6pm_grib[idx]),
-                ),
-                is_day=not is_all_night,
-                tz_name=tz_name,
-                icon_set=icon,
-                unit_system=unitSystem,
-                fallback_text=day_item["summary"],
-                fallback_icon=day_item["icon"],
-                logger=logger,
-                loc_tag=loc_tag,
-                phase="DAY HALF DAY",
+        # The half-day text costs as much as the daily text; skip it when the
+        # day_night block isn't returned.
+        if include_day_night:
+            day_icon, day_text = pick_day_icon_and_summary(
+                max_arr=interp_half_day_max,
+                mean_arr=interp_half_day_mean,
+                sum_arr=interp_half_day_sum,
+                precip_type_arr=precip_type_half_day,
+                precip_text_arr=precip_text_half_day,
+                idx=idx,
+                is_night=is_all_night,
+                mode="hourly",
+                prep_accum_unit=prepAccumUnit,
+                vis_units=visUnits,
+                wind_unit=windUnit,
             )
-            day_item["summary"] = day_text
-            day_item["icon"] = day_icon
 
-        day_night_list.append(day_item)
+            day_item = _build_half_day_item(
+                idx,
+                day_array_6am_grib[idx],
+                day_icon,
+                day_text,
+                precip_type_half_day[idx],
+                daily_display_high[idx, DATA_DAY["temp"]],
+                daily_display_high[idx, DATA_DAY["apparent"]],
+                half_day_display_mean,
+                half_day_display_max,
+                half_day_display_sum,
+                interp_half_day_mean,
+                extraVars,
+            )
 
-        day_icon, day_text = pick_day_icon_and_summary(
-            max_arr=interp_half_night_max,
-            mean_arr=interp_half_night_mean,
-            sum_arr=interp_half_night_sum,
-            precip_type_arr=precip_type_half_night,
-            precip_text_arr=precip_text_half_night,
-            idx=idx,
-            is_night=not is_all_day,
-            mode="hourly",
-            prep_accum_unit=prepAccumUnit,
-            vis_units=visUnits,
-            wind_unit=windUnit,
-        )
-
-        day_item = _build_half_day_item(
-            idx,
-            day_array_6pm_grib[idx],
-            day_icon,
-            day_text,
-            precip_type_half_night[idx],
-            daily_display_low[idx, DATA_DAY["temp"]],
-            daily_display_low[idx, DATA_DAY["apparent"]],
-            half_night_display_mean,
-            half_night_display_max,
-            half_night_display_sum,
-            interp_half_night_mean,
-            extraVars,
-        )
-
-        if idx < 8:
-            night_start_time = int(day_array_6pm_grib[idx])
-            day_text, day_icon = apply_legacy_half_day_text(
-                summary_text=summaryText,
-                translation=translation,
-                hour_list_slice=select_hour_window(
-                    hourList_si,
-                    start_time=night_start_time,
-                    end_time=_get_night_window_end(
-                        day_array_6am_grib, idx, night_start_time
+            if idx < 8:
+                day_text, day_icon = apply_legacy_half_day_text(
+                    summary_text=summaryText,
+                    translation=translation,
+                    hour_list_slice=select_hour_window(
+                        hourList_si,
+                        start_time=int(day_array_6am_grib[idx]),
+                        end_time=int(day_array_6pm_grib[idx]),
+                        hour_times=hour_times_si,
                     ),
-                ),
-                is_day=is_all_day,
-                tz_name=tz_name,
-                icon_set=icon,
-                unit_system=unitSystem,
-                fallback_text=day_item["summary"],
-                fallback_icon=day_item["icon"],
-                logger=logger,
-                loc_tag=loc_tag,
-                phase="NIGHT HALF DAY",
-            )
-            day_item["summary"] = day_text
-            day_item["icon"] = day_icon
+                    is_day=not is_all_night,
+                    tz_name=tz_name,
+                    icon_set=icon,
+                    unit_system=unitSystem,
+                    fallback_text=day_item["summary"],
+                    fallback_icon=day_item["icon"],
+                    logger=logger,
+                    loc_tag=loc_tag,
+                    phase="DAY HALF DAY",
+                )
+                day_item["summary"] = day_text
+                day_item["icon"] = day_icon
 
-        day_night_list.append(day_item)
+            day_night_list.append(day_item)
+
+            day_icon, day_text = pick_day_icon_and_summary(
+                max_arr=interp_half_night_max,
+                mean_arr=interp_half_night_mean,
+                sum_arr=interp_half_night_sum,
+                precip_type_arr=precip_type_half_night,
+                precip_text_arr=precip_text_half_night,
+                idx=idx,
+                is_night=not is_all_day,
+                mode="hourly",
+                prep_accum_unit=prepAccumUnit,
+                vis_units=visUnits,
+                wind_unit=windUnit,
+            )
+
+            day_item = _build_half_day_item(
+                idx,
+                day_array_6pm_grib[idx],
+                day_icon,
+                day_text,
+                precip_type_half_night[idx],
+                daily_display_low[idx, DATA_DAY["temp"]],
+                daily_display_low[idx, DATA_DAY["apparent"]],
+                half_night_display_mean,
+                half_night_display_max,
+                half_night_display_sum,
+                interp_half_night_mean,
+                extraVars,
+            )
+
+            if idx < 8:
+                night_start_time = int(day_array_6pm_grib[idx])
+                day_text, day_icon = apply_legacy_half_day_text(
+                    summary_text=summaryText,
+                    translation=translation,
+                    hour_list_slice=select_hour_window(
+                        hourList_si,
+                        start_time=night_start_time,
+                        end_time=_get_night_window_end(
+                            day_array_6am_grib, idx, night_start_time
+                        ),
+                        hour_times=hour_times_si,
+                    ),
+                    is_day=is_all_day,
+                    tz_name=tz_name,
+                    icon_set=icon,
+                    unit_system=unitSystem,
+                    fallback_text=day_item["summary"],
+                    fallback_icon=day_item["icon"],
+                    logger=logger,
+                    loc_tag=loc_tag,
+                    phase="NIGHT HALF DAY",
+                )
+                day_item["summary"] = day_text
+                day_item["icon"] = day_icon
+
+            day_night_list.append(day_item)
 
         dayIcon, dayText = pick_day_icon_and_summary(
             max_arr=InterPdayMax6am,
@@ -1352,6 +1363,7 @@ def build_daily_section(
                         hourList_si,
                         start_time=int(day_array_6am_grib[idx]),
                         end_time=int(day_array_6am_grib[idx + 1]),
+                        hour_times=hour_times_si,
                     ),
                     not is_all_night,
                     str(tz_name),

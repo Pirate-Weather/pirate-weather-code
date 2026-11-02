@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import logging
 
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
@@ -17,8 +18,18 @@ from API.constants.text_const import (
 from API.PirateDailyText import calculate_day_text
 
 
-def select_hour_window(hour_list, *, start_time: int, end_time: int) -> list:
-    """Return hourly entries in the half-open interval [start_time, end_time)."""
+def select_hour_window(
+    hour_list, *, start_time: int, end_time: int, hour_times: list | None = None
+) -> list:
+    """Return hourly entries in the half-open interval [start_time, end_time).
+
+    ``hour_times`` (the sorted ``time`` of every entry) lets the window be found
+    by bisection instead of scanning every hour.
+    """
+    if hour_times is not None:
+        start = bisect.bisect_left(hour_times, start_time)
+        end = bisect.bisect_left(hour_times, end_time)
+        return hour_list[start:end]
     return [
         hour
         for hour in hour_list

@@ -1,6 +1,7 @@
 # %% Script to contain the helper functions as part of the API for Pirate Weather
 # Alexander Rey. October 2025
 import logging
+import math
 from collections.abc import MutableMapping
 
 import metpy as mp
@@ -49,15 +50,36 @@ def fast_nearest_interp(xi, x, y):
 
 
 def replace_nan(obj, replacement=MISSING_DATA):
-    """Recursively replace np.nan with a given value in a dict/list."""
+    """Recursively replace np.nan with a given value in a dict/list.
+
+    Returns new containers; the inputs are not modified (the response holds
+    shared objects such as the DWD station map entries).
+    """
+    # Leaf values are checked inline rather than by a call each: a response
+    # holds ~5,000 of them.
     if isinstance(obj, dict):
-        return {k: replace_nan(v, replacement) for k, v in obj.items()}
+        return {
+            k: (
+                (replacement if math.isnan(v) else v)
+                if isinstance(v, float)
+                else replace_nan(v, replacement)
+                if isinstance(v, (dict, list))
+                else v
+            )
+            for k, v in obj.items()
+        }
     elif isinstance(obj, list):
-        return [replace_nan(v, replacement) for v in obj]
-    elif isinstance(obj, float) and np.isnan(obj):
+        return [
+            (replacement if math.isnan(v) else v)
+            if isinstance(v, float)
+            else replace_nan(v, replacement)
+            if isinstance(v, (dict, list))
+            else v
+            for v in obj
+        ]
+    elif isinstance(obj, float) and math.isnan(obj):
         return replacement
-    else:
-        return obj
+    return obj
 
 
 def calculate_apparent_temperature(air_temp_c, humidity, wind, solar=None):
@@ -787,20 +809,16 @@ def remove_conditional_fields(
 
         def _downgrade_precip(obj):
             if isinstance(obj, dict):
-                for key, value in obj.items():
-                    if (
-                        key == "precipType"
-                        and isinstance(value, str)
-                        and value in ("ice", "mixed")
-                    ):
-                        obj[key] = PRECIP_TYPES["sleet"]
-                    elif isinstance(
-                        value, (dict, list)
-                    ):  # Only recurse if it's a dict or list
+                precip_type = obj.get("precipType")
+                if isinstance(precip_type, str) and precip_type in ("ice", "mixed"):
+                    obj["precipType"] = PRECIP_TYPES["sleet"]
+                for value in obj.values():
+                    if isinstance(value, (dict, list)):
                         _downgrade_precip(value)
             elif isinstance(obj, list):
                 for item in obj:
-                    _downgrade_precip(item)
+                    if isinstance(item, (dict, list)):
+                        _downgrade_precip(item)
 
         _downgrade_precip(data)
 
@@ -809,4 +827,5 @@ def remove_conditional_fields(
 
 def _safe_int(val):
     """Safely convert a value to int, returning np.nan for NaN."""
-    return int(val) if not np.isnan(val) else np.nan  # or None / np.nan
+    # math.isnan is several times cheaper than np.isnan on the per-hour path
+    return int(val) if not math.isnan(val) else np.nan

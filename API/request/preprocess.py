@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import datetime
 import logging
 import math
@@ -26,6 +25,11 @@ from API.utils.offline_geocode import geocode_city_country
 from API.utils.timing import TimingTracker
 
 RELATIVE_TIME_UNITS = {"s": 1, "h": 3600, "d": 86400}
+
+# reverse_geocode builds its city KD-tree on the first lookup (~0.4 s). Build it
+# when the worker starts so requests can call it directly: a lookup then takes
+# ~20 us, less than handing it to a thread (~120 us).
+reverse_geocode.get((0.0, 0.0))
 
 
 def parse_request_time(
@@ -679,7 +683,7 @@ async def prepare_initial_request(
     tz_offset_loc = {"lat": lat, "lng": az_lon, "utc_time": utc_time, "tf": tf}
     tz_offset, tz_name = get_offset(**tz_offset_loc)
     tz_req = tf.timezone_at(lat=lat, lng=az_lon)
-    loc_name = await asyncio.to_thread(reverse_geocode.get, (lat, az_lon))
+    loc_name = reverse_geocode.get((lat, az_lon))
     timemachine_days, timemachine_hours, timemachine_grid_days = (
         _parse_timemachine_range(request, time_machine)
     )
