@@ -84,11 +84,8 @@ def test_published_store_reads_back_with_time_column(tmp_path):
     np.testing.assert_array_equal(point[:, 0], TIMES)
     for index, name in enumerate(VARIABLES):
         bitround = numcodecs.BitRound(keepbits=KEEPBITS[name])
+        # The NaN at time 1 stays NaN: the reader does not fill gaps
         expected = np.asarray(bitround.encode(values[index, :, 5, 7])).view("float32")
-        # The NaN at time 1 is an interior hole the reader interpolates
-        expected = expected.copy()
-        if index == 0:
-            expected[1] = (expected[0] + expected[2]) / 2
         np.testing.assert_allclose(point[:, 1 + index], expected, rtol=1e-6)
 
     uncovered = asyncio.run(weather.zarr_read("HRRR", stores.HRRR_Zarr, 0, 0))

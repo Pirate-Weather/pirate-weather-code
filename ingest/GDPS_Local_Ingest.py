@@ -159,14 +159,8 @@ zarr_vars = (
     "N4LFTX_500mb",
 )
 
-# MSC publishes CAPE and CIN with a GRIB bitmap: grid points without a
-# buoyant parcel (40-50% of the globe at any lead) are undefined rather than
-# zero, and wgrib2/xarray deliver them as NaN. They mean "no CAPE" (HRDPS
-# encodes the same points as -1, which the API clips to 0), so the ingest
-# stores 0 for both. Left as NaN, a masked 3-hourly lead blends into a
-# 3-12 hour hole when the leads are interpolated to hourly, and the API filled
-# those holes linearly at read time on almost every request.
-GDPS_BITMAP_ZERO_VARS = ("CAPE_surface", "CIN_surface")
+# wgrib2 low:high range (K) covering MSC's 99.99 "not computed" lifted index
+GDPS_LFTX_UNDEFINED_RANGE = "99:100"
 
 # Stored fields published on fewer leads than GDPS_FORECAST_HOURS (see
 # GDPS_EXPECTED_FORECAST_HOURS); each is interpolated to hourly from its own leads.
@@ -235,14 +229,6 @@ def grib_lead_hour(path: str) -> int:
     if match is None:
         raise ValueError(f"No forecast lead in GDPS GRIB file name {path}")
     return int(match.group(1))
-
-
-def zero_bitmap_points(dask_var: str, array: da.Array) -> da.Array:
-    """Store 0 where a bitmap-masked field (see GDPS_BITMAP_ZERO_VARS) is NaN;
-    every other field keeps its NaN."""
-    if dask_var not in GDPS_BITMAP_ZERO_VARS:
-        return array
-    return da.where(da.isnan(array), 0.0, array)
 
 
 def interp_lead_groups(
@@ -361,10 +347,13 @@ def main() -> None:
     # order; the path breaks ties so the merge is deterministic.
     grib_list = sorted(grib_list, key=lambda path: (grib_lead_hour(path), path))
 
+    # The MU-VT lifted index (4LFTX) is 99.99 where MSC could not compute it
+    # (no real values between ~20 and 99), so wgrib2 marks those points undefined.
     merged_nc_path = forecast_process_path + "_wgrib2_merged.nc"
     run_checked(
         f"{cat_gribs(grib_list)} | "
         f"{quote_path(wgrib2_path.strip())} - "
+        f'-if ":4LFTX:" -undefine_val {GDPS_LFTX_UNDEFINED_RANGE} -fi '
         f"-netcdf {quote_path(merged_nc_path)}",
         "GDPS wgrib2 NetCDF conversion",
     )
@@ -400,6 +389,8 @@ def main() -> None:
 
     # wgrib2's NetCDF stores GRIB bitmap points with _FillValue 9.999e20, and
     # da.from_zarr below reads raw values, so drop it to keep those points NaN.
+    # CAPE and CIN are bitmap-masked wherever no parcel is buoyant (40-50% of the
+    # globe); they stay NaN, as the model gives no value there.
     # mask_invalid_data would catch 9.999e20, but not in its exempt CIN.
     for var in xarray_forecast_merged.data_vars:
         xarray_forecast_merged[var].encoding.pop("_FillValue", None)
@@ -448,7 +439,6 @@ def main() -> None:
         daskForecastArray = da.from_zarr(
             forecast_process_path + "_.zarr", component=dask_var, inline_array=True
         )
-        daskForecastArray = zero_bitmap_points(dask_var, daskForecastArray)
         daskVarArrayList.append(
             daskForecastArray.rechunk(
                 (len(stacked_timesUnix), process_chunk, process_chunk)
