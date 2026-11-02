@@ -186,19 +186,19 @@ As done for HRRR, which rotates grid-relative winds with
 ### LibreWXR for maps, radar coverage and minutely precipitation
 Plan in [pirateweather discussion #414](https://github.com/Pirate-Weather/pirateweather/discussions/414#discussioncomment-18934138):
 use LibreWXR's global radar nowcast for minutely precipitation worldwide (likely
-better than HRRR sub-hourly even inside its domain). LibreWXR gets three small hooks
-that run user scripts (plus `zarr` as a dependency):
-- on each finished radar composite: write one global minutely zarr, chunked along
-  time, and upload it to S3 for the Pirate Weather minutely forecast;
-- on each completed full ingest (`state.json` updated): sync everything to S3 for the
-  render nodes;
-- on each lightning update: sync it to S3 for the render nodes.
-
-This decouples ingest from serving: render nodes can run in several regions, and the
-last good data stays available if the ingest pipeline fails. The old `*_Maps.zarr`
-stores were removed from the ingests in v3 (`75a2443`). Pirate Weather side: read the
-minutely zarr in the minutely builder (`API/minutely/`) and decide its priority
-against HRRR sub-hourly.
+better than HRRR sub-hourly even inside its domain), and mirror its cache to S3 so
+render nodes can run in several regions with the last good data if the pipeline fails.
+- [x] Minutely store: `ingest/LibreWXR_Local_Ingest.py`, a sidecar polling the
+  pipeline's `state.json` (no LibreWXR changes needed: every handoff is already an
+  atomically replaced file), publishes `LibreWXR.zarr` (see Done, 2026-11-02).
+- [ ] Mirror the LibreWXR cache (`state.json`, radar/NWP/nowcast memmaps, lightning
+  artifact) file by file to S3 after each cycle, and a pull side for render nodes
+  that writes `state.json` last and rewrites the pipeline's absolute `memmap_dir`
+  paths. Exclude the per-node caches (`coord/`, `tiles_shared/`, `workers/`).
+  About 1 GB per 10-minute cycle, mostly the nowcast memmaps (measured; accepted).
+  Joshua's roadmap has the same idea as "network split mode" (LibreWXR issue #51).
+- [ ] Run the sidecar as a compose service (`Docker/pirate-librewxr-sidecar-dockerfile`,
+  built on the LibreWXR image) next to LibreWXR's own pipeline + renderer services.
 
 ### Own ERA5 dataset
 Only the needed variables, chunked for point reads, based on the Google ARCO pipeline
@@ -366,6 +366,26 @@ some fields use `clipLog`, others `np.clip`. See also the `clipLog` bug above ("
 implausible value blanks every above-max value").
 
 ## Done
+
+### LibreWXR radar nowcast for the minutely block (2026-11-02)
+`ingest/LibreWXR_Local_Ingest.py` composites LibreWXR's latest radar frame (T+0) and
+its nine 10-minute nowcast steps onto one global 0.04 degree grid as composite
+reflectivity (`REFC_composite`, dBZ; NaN outside radar coverage, 0 below
+`REFC_THRESHOLD`) and publishes `LibreWXR.zarr` with `write_final_zarr` /
+`publish_ingest_run`, local disk or S3 like every other ingest. The API reads it
+like any model (`FORECAST_STORES`, `exclude=librewxr`) and the minutely builder
+lets it override every model's intensity minute by minute wherever it is finite;
+precipitation type still comes from the models (HRRR sub-hourly temperature for
+untyped echoes, else rain). `currently` follows minute 0.
+- LibreWXR trial on this host: `/home/ubuntu/LibreWXR` (v0.8.0), run from
+  `/home/ubuntu/librewxr-run` with the cache on `/mnt/disk/data/librewxr/cache`,
+  9 nowcast frames; pipeline ~7 GB RSS, one cycle 60 s, cache ~5 GB.
+- Export: composite 11 s (one thread), peak 3.5 GB; the write dominated at 5-cell
+  chunks (1.6 M chunks, 530 s) and takes 36 s at 25-cell chunks, still one sub-KB
+  chunk per point read. Store ~60 MB per cycle, old versions pruned by `publish_store`.
+- Only the radar extrapolation is exported, never LibreWXR's NWP blend; the
+  blend weight is not stored. RRQPE's display offset is undone; a saturated pixel
+  (95.5 dBZ) becomes NaN.
 
 ### No read-time interpolation of missing values (2026-11-02)
 `zarr_read` no longer fills interior NaN runs along time (`has_interior_nan_holes` /

@@ -514,6 +514,7 @@ async def PW_Forecast(
     incAIModels = initial.inc_aimodels
     exRAQDPS = initial.ex_raqdps
     exSILAM = initial.ex_silam
+    exLIBREWXR = initial.ex_librewxr
     exHRDPS = initial.ex_hrdps
     exGDPS = initial.ex_gdps
     exGEPS = initial.ex_geps
@@ -583,6 +584,7 @@ async def PW_Forecast(
         wmo_alerts=stores.WMO_Alerts_Zarr,
         era5_data=stores.ERA5_Data,
         dwd_mosmix=stores.DWD_MOSMIX_Zarr,
+        librewxr=stores.LibreWXR_Zarr,
         aigfs=stores.AIGFS_Zarr,
         aigefs=stores.AIGEFS_Zarr,
         ecmwf_aifs=stores.ECMWF_AIFS_Zarr,
@@ -618,6 +620,7 @@ async def PW_Forecast(
         ex_reps=exREPS,
         ex_raqdps=exRAQDPS,
         ex_silam=exSILAM,
+        ex_librewxr=exLIBREWXR,
         inc_aimodels=incAIModels,
         read_wmo_alerts=readWMOAlerts,
         base_day_utc=baseDayUTC,
@@ -805,7 +808,7 @@ async def PW_Forecast(
     sourceIDX = merge_result.metadata.source_idx
 
     # Validate that at least one forecast model source is available.
-    # RTMA-RU, hrrrsubh, and etopo provide only current/elevation data, not forecasts.
+    # RTMA-RU, hrrrsubh, librewxr and etopo provide only current/elevation data, not forecasts.
     # If all forecast sources are excluded or unavailable, return a 400 error.
     if not any(src in sourceList for src in FORECAST_SOURCES):
         raise HTTPException(
@@ -832,6 +835,9 @@ async def PW_Forecast(
             minute_array_grib=minute_array_grib,
             source_list=sourceList,
             hrrr_subh_data=dataOut if isinstance(dataOut, np.ndarray) else None,
+            librewxr_data=grid_result.dataOut_librewxr
+            if isinstance(grid_result.dataOut_librewxr, np.ndarray)
+            else None,
             hrrr_merged=HRRR_Merged
             if ("hrrr_0-18" in sourceList and "hrrr_18-48" in sourceList)
             else None,

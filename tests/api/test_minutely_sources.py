@@ -6,6 +6,7 @@ that decide which model a user's minutely forecast actually comes from.
 """
 
 import numpy as np
+import pytest
 
 from API.constants.forecast_const import DATA_MINUTELY
 from API.constants.model_const import (
@@ -14,10 +15,12 @@ from API.constants.model_const import (
     GEFS,
     GFS,
     HRRR_SUBH,
+    LIBREWXR,
     NBM,
     REPS,
 )
 from API.minutely.builder import build_minutely_block
+from API.utils.precip import dbz_to_rate
 
 MINUTES = np.arange(0, 61 * 60, 60, dtype=float)
 
@@ -154,3 +157,49 @@ def test_aigefs_precip_type_falls_back_to_temperature():
 
     np.testing.assert_allclose(_column(minutely, "snow_intensity"), 0.4 * SNOW_RATIO)
     np.testing.assert_allclose(_column(minutely, "rain_intensity"), 0.0)
+
+
+def test_librewxr_radar_takes_precedence_inside_coverage():
+    """The LibreWXR radar composite must drive minutely intensity wherever it
+    has coverage and hand back to the models (here HRRR sub-hourly) where it is
+    NaN. A precedence slip would silently replace observed radar with a model
+    forecast, or blank the minutely block outside radar coverage.
+    """
+    hrrr_subh = _source_array(HRRR_SUBH, temp=10.0, rain=1.0, refc=20.0)
+    librewxr = _source_array(LIBREWXR, refc=np.nan)
+    librewxr[:31, LIBREWXR["refc"]] = 40.0
+
+    minutely = _build(
+        ["hrrrsubh", "librewxr"],
+        lat=40.7,
+        lon=-74.0,
+        hrrr_subh_data=hrrr_subh,
+        librewxr_data=librewxr,
+    )[0]
+
+    rain = np.full(61, "rain")
+    radar_rate = dbz_to_rate(np.full(61, 40.0), rain)[0]
+    hrrr_rate = dbz_to_rate(np.full(61, 20.0), rain)[0]
+    intensity = _column(minutely, "intensity")
+    assert intensity[:31] == pytest.approx(radar_rate)
+    assert intensity[31:] == pytest.approx(hrrr_rate)
+
+
+def test_librewxr_echo_without_model_precip_is_typed_rain():
+    """Radar echoes the models did not forecast must still appear as
+    precipitation, typed from the HRRR sub-hourly temperature; dropping them
+    would hide observed rain from the minutely block and ``currently``.
+    """
+    dry_hrrr = _source_array(HRRR_SUBH, temp=10.0)
+    librewxr = _source_array(LIBREWXR, refc=35.0)
+
+    minute_items = _build(
+        ["hrrrsubh", "librewxr"],
+        lat=40.7,
+        lon=-74.0,
+        hrrr_subh_data=dry_hrrr,
+        librewxr_data=librewxr,
+    )[2]
+
+    assert minute_items[0]["precipType"] == "rain"
+    assert minute_items[0]["precipIntensity"] > 0

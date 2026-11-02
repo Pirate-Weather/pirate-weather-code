@@ -89,6 +89,7 @@ FORECAST_STORES = (
     ("ECMWF_AIFS_Zarr", "ECMWF_AIFS"),
     ("RAQDPS_Zarr", "RAQDPS"),
     ("SILAM_Zarr", "SILAM"),
+    ("LibreWXR_Zarr", "LibreWXR"),
 )
 ALERT_STORES = (
     ("NWS_Alerts_Zarr", "NWS_Alerts"),
@@ -276,6 +277,7 @@ class ZarrStores:
     ECMWF_AIFS_Zarr: ModelStore | None = None
     RAQDPS_Zarr: ModelStore | None = None
     SILAM_Zarr: ModelStore | None = None
+    LibreWXR_Zarr: ModelStore | None = None
     RAQDPS_LatLon: Any | None = None
 
 
