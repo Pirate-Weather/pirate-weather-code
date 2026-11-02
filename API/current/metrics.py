@@ -337,14 +337,11 @@ def _calculate_ecmwf_relative_humidity(
     Returns:
         Interpolated relative humidity.
     """
-    humid_fac1 = relative_humidity_from_dewpoint(
-        ECMWF_Merged[state.idx1, ECMWF["temp"]] * mp.units.units.degC,
-        ECMWF_Merged[state.idx1, ECMWF["dew"]] * mp.units.units.degC,
-        phase="auto",
-    ).magnitude
-    humid_fac2 = relative_humidity_from_dewpoint(
-        ECMWF_Merged[state.idx2, ECMWF["temp"]] * mp.units.units.degC,
-        ECMWF_Merged[state.idx2, ECMWF["dew"]] * mp.units.units.degC,
+    # Both hours in one call: each metpy call carries ~0.3 ms of unit handling
+    hours = [state.idx1, state.idx2]
+    humid_fac1, humid_fac2 = relative_humidity_from_dewpoint(
+        ECMWF_Merged[hours, ECMWF["temp"]] * mp.units.units.degC,
+        ECMWF_Merged[hours, ECMWF["dew"]] * mp.units.units.degC,
         phase="auto",
     ).magnitude
 
@@ -365,14 +362,11 @@ def _calculate_era5_relative_humidity(
     Returns:
         Interpolated relative humidity.
     """
-    humid_fac1 = relative_humidity_from_dewpoint(
-        ERA5_MERGED[state.idx1, ERA5["2m_temperature"]] * mp.units.units.degC,
-        ERA5_MERGED[state.idx1, ERA5["2m_dewpoint_temperature"]] * mp.units.units.degC,
-        phase="auto",
-    ).magnitude
-    humid_fac2 = relative_humidity_from_dewpoint(
-        ERA5_MERGED[state.idx2, ERA5["2m_temperature"]] * mp.units.units.degC,
-        ERA5_MERGED[state.idx2, ERA5["2m_dewpoint_temperature"]] * mp.units.units.degC,
+    # Both hours in one call: each metpy call carries ~0.3 ms of unit handling
+    hours = [state.idx1, state.idx2]
+    humid_fac1, humid_fac2 = relative_humidity_from_dewpoint(
+        ERA5_MERGED[hours, ERA5["2m_temperature"]] * mp.units.units.degC,
+        ERA5_MERGED[hours, ERA5["2m_dewpoint_temperature"]] * mp.units.units.degC,
         phase="auto",
     ).magnitude
 
@@ -2143,14 +2137,21 @@ def build_current_section(
             # Compute AQI using the same averaged approach as the hourly block
             # (NowCast for EPA PM2.5/PM10, rolling means for O3/CO, etc.) so
             # that the currently AQI is consistent with the hourly AQI values.
+            # Every average looks backwards only, so the hours after the two
+            # interpolated ones can't change them; skip computing those.
+            current_hours = max(idx1, idx2) + 1
+
+            def _through_current(arr):
+                return arr[:current_hours] if arr is not None else None
+
             aqi_arr = compute_aqi_array(
                 unit_system=aqiSystem if aqiSystem is not None else unitSystem,
-                pm25=aq_inputs.get("pm25"),
-                pm10=aq_inputs.get("pm10"),
-                o3=aq_inputs.get("o3"),
-                no2=aq_inputs.get("no2"),
-                so2=aq_inputs.get("so2"),
-                co=aq_inputs.get("co"),
+                pm25=_through_current(aq_inputs.get("pm25")),
+                pm10=_through_current(aq_inputs.get("pm10")),
+                o3=_through_current(aq_inputs.get("o3")),
+                no2=_through_current(aq_inputs.get("no2")),
+                so2=_through_current(aq_inputs.get("so2")),
+                co=_through_current(aq_inputs.get("co")),
             )
             if len(aqi_arr) > 0:
                 aqi_idx1 = min(idx1, len(aqi_arr) - 1)

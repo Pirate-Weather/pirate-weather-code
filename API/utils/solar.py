@@ -8,7 +8,7 @@ import datetime
 
 import numpy as np
 from astral import LocationInfo
-from astral.sun import sun
+from astral import sun as astral_sun
 from pytz import utc
 
 from API.utils.geo import _polar_is_all_day
@@ -42,7 +42,15 @@ def calculate_solar_times(
     try:
         solar_date = base_day + datetime.timedelta(days=day_index)
 
-        solar_times = sun(location.observer, date=solar_date)
+        # The four events used, called directly: astral's sun() also computes
+        # solar noon, which isn't needed.
+        observer = location.observer
+        solar_times = {
+            "dawn": astral_sun.dawn(observer, solar_date),
+            "sunrise": astral_sun.sunrise(observer, solar_date),
+            "sunset": astral_sun.sunset(observer, solar_date),
+            "dusk": astral_sun.dusk(observer, solar_date),
+        }
 
         # If polar/edge-case ordering is weird, clamp twilight bounds to the day.
         if solar_times["dawn"] > solar_times["sunrise"]:
