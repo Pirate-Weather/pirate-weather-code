@@ -13,6 +13,10 @@
 #                 NetCDF many times while writing its store, and on a network
 #                 block volume that took 90 min instead of 40. Peak use is
 #                 tens of GB per heavy model (GDPS ~40 GB).
+#   PW_BULK_WORK_ROOT  scratch for GFS and URMA, which need ~40 GB and ~21 GB but
+#                 do not re-read it like GDPS. On one server, GFS, GDPS and URMA
+#                 overlapping on the same disk as PW_PROD_ROOT filled it, so put
+#                 this on a larger disk; it defaults to PW_WORK_ROOT.
 #   PW_HIST_ROOT  short-term history stores, Hist/<MODEL>; a larger, slower disk
 #                 is fine because each ingest copies the stores it needs into
 #                 its work folder before merging.
@@ -39,6 +43,7 @@ x-ingest: &ingest
     - ${PW_PROD_ROOT:?set PW_PROD_ROOT in .env}:/data/Prod
     - ${PW_HIST_ROOT:?set PW_HIST_ROOT in .env}:/data/Hist
     - ${PW_WORK_ROOT:?set PW_WORK_ROOT in .env}:/work
+    - ${PW_BULK_WORK_ROOT:-${PW_WORK_ROOT}}:/work-bulk
 
 x-ingest-env: &ingest_env
   save_type: "Download"
@@ -185,7 +190,7 @@ services:
     mem_limit: 28g
     environment:
       <<: *ingest_env
-      forecast_process_dir: "/work/GFS"
+      forecast_process_dir: "/work-bulk/GFS"
       historic_path: "/data/Hist/GFS"
       zarr_store_workers: "4"
     command: ["ingest/GFS_Local_Ingest.py"]
@@ -295,7 +300,7 @@ services:
     mem_limit: 12g
     environment:
       <<: *ingest_env
-      forecast_process_dir: "/work/URMA"
+      forecast_process_dir: "/work-bulk/URMA"
       historic_path: "/data/Hist/URMA"
       zarr_store_workers: "8"
     command: ["ingest/URMA_Local_Ingest.py"]

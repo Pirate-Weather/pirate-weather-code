@@ -143,6 +143,7 @@ pirate-compose_oph.local.yml
 Host paths come from `.env`, so the compose file works across machines without edits:
 - `PW_PROD_ROOT`: the published stores the API reads (~81 GiB). Put it on the fastest disk.
 - `PW_WORK_ROOT`: ingest scratch space (tens of GB per heavy model). Use a fast local disk.
+- `PW_BULK_WORK_ROOT`: scratch for GFS and URMA (~40 GB and ~21 GB at peak). A larger, slower disk is fine; keep it off the disk holding `PW_PROD_ROOT` if that disk is small.
 - `PW_HIST_ROOT`: short-term history stores (~30 GB). A larger, slower disk is fine.
 
 1. Copy the template env file and adjust paths for your machine:
@@ -152,7 +153,7 @@ cp .env.example .env
 
 2. Create the storage folders:
 ```
-mkdir -p /mnt/pirate-weather/Prod /mnt/pirate-weather/Work /mnt/pirate-weather/Hist
+mkdir -p /mnt/pirate-weather/Prod /mnt/pirate-weather/Work /mnt/pirate-weather/WorkBulk /mnt/pirate-weather/Hist
 ```
 
 3. Build both images, create the ingest containers, and start the API and scheduler:
