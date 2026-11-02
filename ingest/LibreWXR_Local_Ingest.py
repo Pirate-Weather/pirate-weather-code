@@ -169,15 +169,21 @@ def read_nowcast_snapshot(
 
     latest = max(frame_store["frames"], key=lambda f: f["timestamp"])
     latest_ts = int(latest["timestamp"])
+    nowcast_frames = sorted(nowcast["frames"], key=lambda f: f["timestamp"])
+    # The pipeline also dumps state.json mid-cycle (on radar frame merges), when
+    # the new radar frame is in but the nowcast still belongs to the previous
+    # one. Exporting that would publish a stale nowcast under the new run time
+    # and then skip the real one as "No Update", so wait for the dump that
+    # follows the nowcast: every step must be later than the latest frame.
+    if int(nowcast_frames[0]["timestamp"]) <= latest_ts:
+        raise LookupError(
+            f"nowcast starts at {nowcast_frames[0]['timestamp']}, not after the "
+            f"latest radar frame {latest_ts}; waiting for this cycle's nowcast"
+        )
     steps = [(latest_ts, region_files(frame_store["memmap_dir"], latest["regions"]))]
-    for frame in sorted(nowcast["frames"], key=lambda f: f["timestamp"]):
+    for frame in nowcast_frames:
         ts = int(frame["timestamp"])
-        if ts <= latest_ts:
-            # A nowcast left over from an older radar frame; the next cycle replaces it
-            continue
         steps.append((ts, region_files(nowcast["memmap_dir"], frame["regions"])))
-    if len(steps) < 2:
-        raise LookupError(f"nowcast in state.json is not newer than radar {latest_ts}")
     return latest_ts, steps
 
 
@@ -395,7 +401,9 @@ def main(argv: list[str] | None = None) -> int:
         "--once", action="store_true", help="do one pass instead of polling for ever"
     )
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
 
     if not librewxr_cache_dir:
         logger.error("LIBREWXR_CACHE_DIR is not set")
