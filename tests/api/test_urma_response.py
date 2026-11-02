@@ -188,8 +188,9 @@ class _Weather:
 
 @pytest.mark.asyncio
 async def test_urma_reader_keeps_missing_observations_for_gfs_fallback():
-    """The reader must keep URMA gaps as NaN (so GFS can fill them) instead of
-    interpolating across them as it does for forecast models.
+    """The reader must keep gaps as NaN for every model, so the merge takes
+    another model for those hours instead of interpolating values the source
+    never gave (URMA observations, GDPS CAPE where no parcel is buoyant).
     """
     # Stores hold no time column: the variable in API column c is store index c - 1
     values = np.ones((max(URMA.values()), 3, 1, 1))
@@ -203,7 +204,7 @@ async def test_urma_reader_keeps_missing_observations_for_gfs_fallback():
     assert np.isnan(urma[1, URMA["temp"]])
 
     gfs = await weather.zarr_read("GFS", store, 0, 0)
-    assert np.isfinite(gfs[1, URMA["temp"]])
+    assert np.isnan(gfs[1, URMA["temp"]])
 
 
 @pytest.mark.asyncio

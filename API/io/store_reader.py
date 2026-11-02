@@ -34,7 +34,7 @@ import zarr
 from numcodecs.zstd import Zstd
 
 from API.constants.api_const import MAX_ZARR_READ_RETRIES
-from API.constants.shared_const import INGEST_VERSION_STR, MISSING_DATA
+from API.constants.shared_const import INGEST_VERSION_STR
 from API.io.ZarrHelpers import init_ERA5
 
 DATA_DIR = os.path.join(
@@ -557,40 +557,7 @@ def _load_aq_lat_lon_pickles(stores: ZarrStores, *, logger: logging.Logger) -> N
                 logger.warning("Could not load %s: %s", attr, exc)
 
 
-def has_interior_nan_holes(
-    arr: np.ndarray, mask: np.ndarray | None = None
-) -> tuple[bool, int | None]:
-    """Detect an interior block of NaNs in a 2D array: the first row where a
-    NaN run starts after the first column and one ends before the last.
-    ``mask`` is ``np.isnan(arr)`` when the caller already has it."""
-    if mask is None:
-        mask = np.isnan(arr)
-    if not mask.any():
-        return False, None
-    run_starts = mask[:, 1:] & ~mask[:, :-1]
-    run_ends = ~mask[:, 1:] & mask[:, :-1]
-    matching_rows = np.flatnonzero(run_starts.any(axis=1) & run_ends.any(axis=1))
-    if matching_rows.size:
-        return True, int(matching_rows[0])
-    return False, None
-
-
-def _interp_row(row: np.ndarray) -> np.ndarray:
-    """Fill only strictly interior NaN-runs in a 1D array."""
-    n = row.size
-    x = np.arange(n)
-    mask = np.isnan(row)
-    if mask.any() and not mask.all():
-        good = ~mask
-        row[mask] = np.interp(
-            x[mask], x[good], row[good], left=MISSING_DATA, right=MISSING_DATA
-        )
-    return row
-
-
-def with_time_column(
-    values: np.ndarray, times: np.ndarray, missing: np.ndarray | None = None
-) -> np.ndarray:
+def with_time_column(values: np.ndarray, times: np.ndarray) -> np.ndarray:
     """Turn a ``(variable, time)`` read into the ``(time, 1 + variable)``
     matrix the API works with, valid times in column 0.
 
@@ -598,13 +565,9 @@ def with_time_column(
     variable it was NaN exactly there: chunk padding, times outside an
     interpolated model's range, and DWD cells without a station. The API's
     coverage checks (``np.isfinite(data[:, 0])``) depend on that.
-
-    ``missing`` is ``np.isnan(values)`` when the caller already has it.
     """
-    if missing is None:
-        missing = np.isnan(values)
     out = np.empty((values.shape[1], values.shape[0] + 1))
-    out[:, 0] = np.where(missing.all(axis=0), np.nan, times)
+    out[:, 0] = np.where(np.isnan(values).all(axis=0), np.nan, times)
     out[:, 1:] = values.T
     return out
 
@@ -690,29 +653,9 @@ class WeatherParallel:
             except (ValueError, OSError, IndexError):
                 self.logger.exception("### %s Failure! %s", model, self.loc_tag)
                 continue
-            # One NaN mask serves the time column and the hole check: the time
-            # row of the matrix is NaN exactly where every variable is
-            missing = np.isnan(values)
-            data_out = with_time_column(values, store.times, missing)
-            has_missing_data, missing_row = has_interior_nan_holes(
-                data_out.T, np.vstack((missing.all(axis=0)[np.newaxis, :], missing))
-            )
-            if has_missing_data:
-                if model in {"DWD_MOSMIX", "URMA"}:
-                    # Preserve missing observations so downstream source selection
-                    # can use another model for those hours.
-                    self.logger.debug(
-                        "### %s Has missing data (row %s), leaving NaN for merge fallback",
-                        model,
-                        missing_row,
-                    )
-                else:
-                    self.logger.warning(
-                        "### %s Interpolating missing data (row %s)!",
-                        model,
-                        missing_row,
-                    )
-                    data_out = np.apply_along_axis(_interp_row, 0, data_out)
+            # Missing values stay NaN so the merge takes another model for
+            # those hours instead of interpolating values the model never gave.
+            data_out = with_time_column(values, store.times)
 
             if self.timing_enabled:
                 self.logger.debug("### %s Done! %s", model, self.loc_tag)
@@ -747,15 +690,6 @@ class WeatherParallel:
             with np.errstate(all="ignore"):
                 values = np.nanmax(square, axis=(-2, -1))
             data_out = with_time_column(values, store.times)
-
-            has_missing_data, missing_row = has_interior_nan_holes(data_out.T)
-            if has_missing_data:
-                self.logger.warning(
-                    "### %s Interpolating missing data (row %s)!",
-                    model,
-                    missing_row,
-                )
-                data_out = np.apply_along_axis(_interp_row, 0, data_out)
 
             if self.timing_enabled:
                 self.logger.debug("### %s Done! %s", model, self.loc_tag)
