@@ -6,14 +6,13 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
-import metpy as mp
 import numpy as np
-from metpy.calc import relative_humidity_from_dewpoint
 
 from API.api_utils import (
     calculate_apparent_temperature,
     clipLog,
     estimate_visibility_gultepe_rh_pr_numpy,
+    relative_humidity_from_dewpoint_c,
 )
 from API.constants.aqi_const import compute_aqi_array
 from API.constants.clip_const import (
@@ -337,13 +336,10 @@ def _calculate_ecmwf_relative_humidity(
     Returns:
         Interpolated relative humidity.
     """
-    # Both hours in one call: each metpy call carries ~0.3 ms of unit handling
     hours = [state.idx1, state.idx2]
-    humid_fac1, humid_fac2 = relative_humidity_from_dewpoint(
-        ECMWF_Merged[hours, ECMWF["temp"]] * mp.units.units.degC,
-        ECMWF_Merged[hours, ECMWF["dew"]] * mp.units.units.degC,
-        phase="auto",
-    ).magnitude
+    humid_fac1, humid_fac2 = relative_humidity_from_dewpoint_c(
+        ECMWF_Merged[hours, ECMWF["temp"]], ECMWF_Merged[hours, ECMWF["dew"]]
+    )
 
     return (humid_fac1 * state.fac1 + humid_fac2 * state.fac2) * 100 * humidUnit
 
@@ -362,13 +358,11 @@ def _calculate_era5_relative_humidity(
     Returns:
         Interpolated relative humidity.
     """
-    # Both hours in one call: each metpy call carries ~0.3 ms of unit handling
     hours = [state.idx1, state.idx2]
-    humid_fac1, humid_fac2 = relative_humidity_from_dewpoint(
-        ERA5_MERGED[hours, ERA5["2m_temperature"]] * mp.units.units.degC,
-        ERA5_MERGED[hours, ERA5["2m_dewpoint_temperature"]] * mp.units.units.degC,
-        phase="auto",
-    ).magnitude
+    humid_fac1, humid_fac2 = relative_humidity_from_dewpoint_c(
+        ERA5_MERGED[hours, ERA5["2m_temperature"]],
+        ERA5_MERGED[hours, ERA5["2m_dewpoint_temperature"]],
+    )
 
     return (humid_fac1 * state.fac1 + humid_fac2 * state.fac2) * 100 * humidUnit
 

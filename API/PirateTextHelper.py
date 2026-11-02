@@ -241,6 +241,20 @@ def calculate_precip_text(
     else:
         raise ValueError(f"Unknown precipitation summary type: {type}")
 
+    # Most hours are dry: without any accumulation or intensity there is no
+    # precipitation text or icon, except that a "mixed" type is always
+    # described as mixed precipitation
+    if (
+        precipType != PRECIP_TYPES["mixed"]
+        and rainAccum == 0
+        and snowAccum == 0
+        and sleetAccum == 0
+        and eff_rain_intensity == 0
+        and eff_snow_intensity == 0
+        and eff_ice_intensity == 0
+    ):
+        return (None, None) if mode == "both" else None
+
     # Intensity checks always use the hourly thresholds (mm/h)
     snow_intensity_icon_threshold = HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM
     precip_intensity_icon_threshold = HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM

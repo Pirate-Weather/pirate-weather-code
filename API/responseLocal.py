@@ -8,6 +8,7 @@ weather forecasts, and generating API responses.
 
 import asyncio
 import datetime
+import functools
 import logging
 import os
 import pickle
@@ -310,6 +311,61 @@ def _prefer_ai_with_fallback(ai_data, base_data):
     out_data = out[:, 1:]
     np.putmask(out_data, out_data == MISSING_DATA, np.nan)
     return out
+
+
+# Distinct (location, day) pairs remembered per worker; a table is ~2 KB
+SOLAR_TABLE_CACHE_SIZE = 4096
+
+
+@functools.lru_cache(maxsize=SOLAR_TABLE_CACHE_SIZE)
+def _solar_day_table(lat, az_lon, tz_name, base_day, daily_days, day_array_grib):
+    """Sunrise, sunset, dawn, dusk and moon phase for each forecast day, in
+    the ``InterSday`` layout, plus the polar day/night flags.
+
+    The table depends only on the location and the day, so it is memoised:
+    clients poll the same coordinates all day, and astral costs ~1 ms per
+    request. The cached array is read-only; the sections only read it.
+
+    Returns (InterSday, is_all_day, is_all_night).
+    """
+    # +1 to account for the extra 4 hours of summary
+    InterSday = np.zeros(shape=(daily_days + 1, 21))
+    loc = LocationInfo("name", "region", tz_name, lat, az_lon)
+    day_array_grib = np.asarray(day_array_grib)
+
+    is_all_day = False
+    is_all_night = False
+
+    for i in range(daily_days + 1):
+        (
+            sunrise_value,
+            sunset_value,
+            dawn_value,
+            dusk_value,
+            saw_all_day,
+            saw_all_night,
+        ) = calculate_solar_times(
+            day_index=i,
+            base_day=base_day,
+            location=loc,
+            day_array_grib=day_array_grib,
+            latitude=lat,
+        )
+        InterSday[i, DATA_DAY["sunrise"]] = sunrise_value
+        InterSday[i, DATA_DAY["sunset"]] = sunset_value
+        InterSday[i, DATA_DAY["dawn"]] = dawn_value
+        InterSday[i, DATA_DAY["dusk"]] = dusk_value
+        is_all_day = is_all_day or saw_all_day
+        is_all_night = is_all_night or saw_all_night
+
+        m = moon.phase(base_day + datetime.timedelta(days=i))
+        moon_phase_value = np.clip(m / 27.99, 0.0, 1.0)
+        InterSday[i, DATA_DAY["moon_phase"]] = np.round(
+            moon_phase_value, ROUNDING_RULES.get("moonPhase", 2)
+        )
+
+    InterSday.flags.writeable = False
+    return InterSday, is_all_day, is_all_night
 
 
 @app.get("/timemachine/{apikey}/{location}")
@@ -838,46 +894,20 @@ async def PW_Forecast(
     hourlyHalfDayIndex = time_indexing.hourly_half_day_index
     hourlyHalfNightIndex = time_indexing.hourly_half_night_index
 
-    # +1 to account for the extra 4 hours of summary
-    InterSday = np.zeros(shape=(daily_days + 1, 21))
-
     # Timing Check
     timer.log("Sunrise start")
 
-    loc = LocationInfo("name", "region", tz_name, lat, az_Lon)
-
-    is_all_day = False
-    is_all_night = False
-
-    # 10. Calculate Sunrise, Sunset, Moon Phase for each day in the forecast
-    # This information is used to determine day/night cycles and moon phases
-    for i in range(daily_days + 1):
-        (
-            sunrise_value,
-            sunset_value,
-            dawn_value,
-            dusk_value,
-            saw_all_day,
-            saw_all_night,
-        ) = calculate_solar_times(
-            day_index=i,
-            base_day=baseDay,
-            location=loc,
-            day_array_grib=day_array_grib,
-            latitude=lat,
-        )
-        InterSday[i, DATA_DAY["sunrise"]] = sunrise_value
-        InterSday[i, DATA_DAY["sunset"]] = sunset_value
-        InterSday[i, DATA_DAY["dawn"]] = dawn_value
-        InterSday[i, DATA_DAY["dusk"]] = dusk_value
-        is_all_day = is_all_day or saw_all_day
-        is_all_night = is_all_night or saw_all_night
-
-        m = moon.phase(baseDay + datetime.timedelta(days=i))
-        moon_phase_value = np.clip(m / 27.99, 0.0, 1.0)
-        InterSday[i, DATA_DAY["moon_phase"]] = np.round(
-            moon_phase_value, ROUNDING_RULES.get("moonPhase", 2)
-        )
+    # 10. Sunrise, sunset, dawn, dusk and moon phase for each day in the
+    # forecast (day/night cycles of the icons and text), memoised per
+    # location and day. The polar fallback only looks at the forecast days.
+    InterSday, is_all_day, is_all_night = _solar_day_table(
+        lat,
+        az_Lon,
+        tz_name,
+        baseDay,
+        daily_days,
+        tuple(day_array_grib[: daily_days + 1].tolist()),
+    )
 
     # 11. Extract and prepare specific weather variables (temperature, wind, etc.) from the merged model data
     # This step pulls out the relevant data arrays for each weather variable from the merged dataset

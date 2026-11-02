@@ -1,14 +1,15 @@
 import logging
 
-import metpy as mp
 import numpy as np
-from metpy.calc import relative_humidity_from_dewpoint
 
 from API.api_utils import (
+    _lookup_precip_codes,
+    _precip_code_table,
     estimate_visibility_gultepe_rh_pr_numpy,
     map_canadian_precip_type_to_ptype,
     map_ensemble_precip_rates_to_ptype,
     map_wmo4677_to_ptype,
+    relative_humidity_from_dewpoint_c,
 )
 from API.constants.model_const import (
     DWD_MOSMIX,
@@ -257,6 +258,13 @@ def _component_precip_type(snow, ice, freezing_rain, rain):
     return component_ptype
 
 
+# GRIB categorical precipitation type (NCEP table 4.201) to the internal
+# category: 1 snow, 2 ice pellets, 3 freezing rain, 4 rain
+GRIB_PTYPE_TABLE = _precip_code_table(
+    {1: [5, 6, 9], 2: [4, 8, 10], 3: [3, 12], 4: [1, 2, 7, 11]}, 13
+)
+
+
 def _map_grib_precip_type(ptype_values):
     if ptype_values is None:
         return None
@@ -265,14 +273,7 @@ def _map_grib_precip_type(ptype_values):
     ptype_nan_mask = np.isnan(ptype_vals)
     ptype_hour = np.zeros_like(ptype_vals, dtype=int)
     ptype_hour[~ptype_nan_mask] = ptype_vals[~ptype_nan_mask].astype(int)
-    conditions = [
-        np.isin(ptype_hour, [5, 6, 9]),
-        np.isin(ptype_hour, [4, 8, 10]),
-        np.isin(ptype_hour, [3, 12]),
-        np.isin(ptype_hour, [1, 2, 7, 11]),
-    ]
-    choices = [1, 2, 3, 4]
-    mapped_ptype = np.select(conditions, choices, default=0).astype(float)
+    mapped_ptype = _lookup_precip_codes(ptype_hour, GRIB_PTYPE_TABLE)
     mapped_ptype[ptype_nan_mask] = np.nan
     return mapped_ptype
 
@@ -694,11 +695,10 @@ def prepare_data_inputs(
     era5_humidity = None
     if era5_valid:
         era5_humidity = (
-            relative_humidity_from_dewpoint(
-                era5_merged[:, ERA5["2m_temperature"]] * mp.units.units.degC,
-                era5_merged[:, ERA5["2m_dewpoint_temperature"]] * mp.units.units.degC,
-                phase="auto",
-            ).magnitude
+            relative_humidity_from_dewpoint_c(
+                era5_merged[:, ERA5["2m_temperature"]],
+                era5_merged[:, ERA5["2m_dewpoint_temperature"]],
+            )
             * 100
         )
 

@@ -6,6 +6,11 @@ from collections.abc import MutableMapping
 
 import metpy as mp
 import numpy as np
+from metpy.calc.thermo import (
+    _saturation_vapor_pressure_liquid,
+    _saturation_vapor_pressure_solid,
+)
+from metpy.constants import nounit as metpy_nounit
 
 from API.constants.api_const import (
     APPARENT_TEMP_CONSTS,
@@ -18,6 +23,33 @@ from API.constants.api_const import (
 from API.constants.shared_const import MISSING_DATA
 
 logger = logging.getLogger(__name__)
+
+# metpy's degC -> kelvin conversion, exactly (see relative_humidity_from_dewpoint_c)
+KELVIN_OFFSET = 273.15
+
+
+def relative_humidity_from_dewpoint_c(temperature_c, dewpoint_c):
+    """Relative humidity (0-1) from air and dew point temperatures in Celsius.
+
+    This is metpy's ``relative_humidity_from_dewpoint(..., phase="auto")``
+    (Ambaum 2020 saturation vapour pressure over water above the triple point,
+    over ice below) called through its unit-free internals: wrapping two
+    scalars in pint quantities costs ~0.3 ms per call on the current-conditions
+    path, the arithmetic ~0.03 ms, and the results are bit-identical.
+    """
+    temperature_k = np.asarray(temperature_c, dtype=float) + KELVIN_OFFSET
+    dewpoint_k = np.asarray(dewpoint_c, dtype=float) + KELVIN_OFFSET
+
+    def saturation_vapor_pressure(kelvin):
+        return np.where(
+            kelvin > metpy_nounit.T0,
+            _saturation_vapor_pressure_liquid._nounit(kelvin),
+            _saturation_vapor_pressure_solid._nounit(kelvin),
+        )
+
+    return saturation_vapor_pressure(dewpoint_k) / saturation_vapor_pressure(
+        temperature_k
+    )
 
 
 def fast_nearest_interp(xi, x, y):
@@ -417,6 +449,52 @@ def select_daily_precip_type(
     return maxPchanceDay
 
 
+def _precip_code_table(groups: dict[float, list[int]], size: int) -> np.ndarray:
+    """A lookup table from a source's precipitation code to the internal
+    precipitation category (0 for codes in no group)."""
+    table = np.zeros(size, dtype=float)
+    for category, codes in groups.items():
+        table[codes] = category
+    return table
+
+
+def _lookup_precip_codes(codes: np.ndarray, table: np.ndarray) -> np.ndarray:
+    """Categories for integer codes through a lookup table; codes outside the
+    table are category 0. One array index instead of an np.isin per group,
+    which cost ~0.1 ms per source and request."""
+    in_table = (codes >= 0) & (codes < table.size)
+    return np.where(in_table, table[np.clip(codes, 0, table.size - 1)], 0.0)
+
+
+# WMO 4677 present-weather codes (50-99) grouped as documented in
+# map_wmo4677_to_ptype: 1 snow, 2 ice, 3 freezing, 4 rain.
+WMO4677_PTYPE_TABLE = _precip_code_table(
+    {
+        1: list(range(70, 76)) + [83, 84, 85, 86, 93, 94],
+        2: list(range(76, 80)) + [87, 88, 89, 90, 96, 99],
+        3: [56, 57, 66, 67],
+        4: (
+            list(range(50, 56))
+            + list(range(58, 65))
+            + [68, 69]
+            + list(range(80, 83))
+            + [91, 92, 95, 97, 98]
+        ),
+    },
+    100,
+)
+# Canadian (HRDPS/GDPS) precipitation type codes, see map_canadian_precip_type_to_ptype
+CANADIAN_PTYPE_TABLE = _precip_code_table(
+    {
+        PRECIP_IDX["snow"]: [5],
+        PRECIP_IDX["sleet"]: [4, 9],
+        PRECIP_IDX["ice"]: [3, 8],
+        PRECIP_IDX["rain"]: [1, 2, 7],
+    },
+    10,
+)
+
+
 def map_wmo4677_to_ptype(
     ptype_codes: np.ndarray, temperature_c: np.ndarray | None = None
 ) -> np.ndarray:
@@ -457,28 +535,10 @@ def map_wmo4677_to_ptype(
 
     nan_mask = np.isnan(codes)
 
-    # Define code groups (inclusive ranges/lists)
-    freezing_codes = [56, 57, 66, 67]
-    ice_codes = list(range(76, 80)) + [87, 88, 89, 90, 96, 99]
-    snow_codes = list(range(70, 76)) + [83, 84, 85, 86, 93, 94]
-    rain_codes = (
-        list(range(50, 56))
-        + list(range(58, 65))
-        + [68, 69]
-        + list(range(80, 83))
-        + [91, 92, 95, 97, 98]
-    )
-
-    # Assign categories; order does not matter because groups are disjoint in our choice
     if codes.size > 0:
         vals = codes.copy()
         vals[nan_mask] = -999
-        vals = vals.astype(int)
-
-        out[np.isin(vals, snow_codes)] = 1
-        out[np.isin(vals, ice_codes)] = 2
-        out[np.isin(vals, freezing_codes)] = 3
-        out[np.isin(vals, rain_codes)] = 4
+        out[:] = _lookup_precip_codes(vals.astype(int), WMO4677_PTYPE_TABLE)
 
         # Temperature validation: Override snow/ice/freezing codes to rain when too warm
         # Use TEMP_THRESHOLD_WMO_FROZEN_C as threshold - well above freezing to account for observation errors
@@ -538,21 +598,10 @@ def map_canadian_precip_type_to_ptype(
 
     nan_mask = np.isnan(codes)
 
-    freezing_codes = [3, 8]
-    ice_codes = [4, 9]
-    snow_codes = [5]
-    rain_codes = [1, 2, 7]
-
-    # Assign categories; order does not matter because groups are disjoint in our choice
     if codes.size > 0:
         vals = codes.copy()
         vals[nan_mask] = -999
-        vals = vals.astype(int)
-
-        out[np.isin(vals, snow_codes)] = PRECIP_IDX["snow"]
-        out[np.isin(vals, ice_codes)] = PRECIP_IDX["sleet"]
-        out[np.isin(vals, freezing_codes)] = PRECIP_IDX["ice"]
-        out[np.isin(vals, rain_codes)] = PRECIP_IDX["rain"]
+        out[:] = _lookup_precip_codes(vals.astype(int), CANADIAN_PTYPE_TABLE)
 
     # Use MISSING_DATA for NaNs
     out[nan_mask] = MISSING_DATA

@@ -23,12 +23,15 @@ import logging
 import os
 import pickle
 import socket
+import struct
 from dataclasses import dataclass
 from typing import Any
 
+import google_crc32c
 import numpy as np
 import tensorstore as ts
 import zarr
+from numcodecs.zstd import Zstd
 
 from API.constants.api_const import MAX_ZARR_READ_RETRIES
 from API.constants.shared_const import INGEST_VERSION_STR, MISSING_DATA
@@ -114,14 +117,137 @@ class ModelStore:
         return tuple(self.array.shape)
 
 
+# A shard index entry of all ones marks an inner chunk that was never written.
+_SHARD_EMPTY_CHUNK = (2**64 - 1, 2**64 - 1)
+_ZSTD = Zstd()
+
+
+@dataclass(frozen=True)
+class AlertShardReader:
+    """Reads single cells of a sharded zarr v3 string array straight from its
+    shard files on local disk.
+
+    zarr-python spends ~1 ms per cell in its codec pipeline under the GIL; the
+    same cell read directly (shard index, one inner chunk, zstd, vlen-utf8)
+    takes ~0.03 ms. The reader handles exactly what the alert ingests write
+    (``zarr.create_array`` with a string dtype, ``FINAL_CHUNK_SIZES["ALERTS"]``
+    inner chunks inside ``FINAL_SHARD_SIZES["ALERTS"]`` shards): a 2-D array,
+    ``sharding_indexed`` with the index at the end, ``vlen-utf8`` then ``zstd``
+    inner codecs, ``bytes`` + ``crc32c`` index codecs and ``c/<i>/<j>`` chunk
+    keys. ``from_metadata`` returns None for any other layout, and the store
+    then stays on zarr-python.
+    """
+
+    path: str
+    shard_shape: tuple[int, int]
+    chunk_shape: tuple[int, int]
+    fill_value: str
+
+    @classmethod
+    def from_metadata(cls, path: str, metadata: dict) -> AlertShardReader | None:
+        if (
+            metadata.get("zarr_format") != 3
+            or metadata.get("data_type") != "string"
+            or len(metadata.get("shape", ())) != 2
+            or metadata.get("chunk_grid", {}).get("name") != "regular"
+            or metadata.get("chunk_key_encoding", {}).get("name") != "default"
+            or metadata["chunk_key_encoding"]
+            .get("configuration", {})
+            .get("separator", "/")
+            != "/"
+            or len(metadata.get("codecs", ())) != 1
+            or metadata["codecs"][0].get("name") != "sharding_indexed"
+        ):
+            return None
+        sharding = metadata["codecs"][0]["configuration"]
+        inner_codecs = [codec.get("name") for codec in sharding.get("codecs", ())]
+        index_codecs = [codec.get("name") for codec in sharding.get("index_codecs", ())]
+        if (
+            inner_codecs != ["vlen-utf8", "zstd"]
+            or index_codecs != ["bytes", "crc32c"]
+            or sharding["index_codecs"][0].get("configuration", {}).get("endian")
+            != "little"
+            or sharding.get("index_location") != "end"
+        ):
+            return None
+        shard_shape = tuple(metadata["chunk_grid"]["configuration"]["chunk_shape"])
+        chunk_shape = tuple(sharding["chunk_shape"])
+        if len(shard_shape) != 2 or len(chunk_shape) != 2:
+            return None
+        if any(s % c for s, c in zip(shard_shape, chunk_shape)):
+            return None
+        fill_value = metadata.get("fill_value", "")
+        if not isinstance(fill_value, str):
+            return None
+        return cls(path, shard_shape, chunk_shape, fill_value)
+
+    def read_cell(self, y: int, x: int) -> str:
+        """The string at (y, x); the fill value where nothing was written."""
+        shard_y, shard_x = self.shard_shape
+        chunk_y, chunk_x = self.chunk_shape
+        in_shard_y, in_shard_x = y % shard_y, x % shard_x
+        chunks_per_row = shard_x // chunk_x
+        chunk_index = (in_shard_y // chunk_y) * chunks_per_row + in_shard_x // chunk_x
+        cell_index = (in_shard_y % chunk_y) * chunk_x + in_shard_x % chunk_x
+        # The index holds (offset, nbytes) per inner chunk, then its crc32c.
+        index_nbytes = (shard_y // chunk_y) * chunks_per_row * 16 + 4
+        shard_file = os.path.join(self.path, "c", str(y // shard_y), str(x // shard_x))
+        try:
+            with open(shard_file, "rb") as handle:
+                handle.seek(-index_nbytes, os.SEEK_END)
+                index = handle.read(index_nbytes)
+                if len(index) != index_nbytes:
+                    raise ValueError(f"{shard_file}: truncated shard index")
+                if google_crc32c.value(index[:-4]) != int.from_bytes(
+                    index[-4:], "little"
+                ):
+                    raise ValueError(f"{shard_file}: shard index checksum mismatch")
+                offset, nbytes = struct.unpack_from("<QQ", index, chunk_index * 16)
+                if (offset, nbytes) == _SHARD_EMPTY_CHUNK:
+                    return self.fill_value
+                handle.seek(offset)
+                compressed = handle.read(nbytes)
+        except FileNotFoundError:
+            return self.fill_value
+        if len(compressed) != nbytes:
+            raise ValueError(f"{shard_file}: truncated chunk {chunk_index}")
+        # vlen-utf8: a little-endian uint32 item count, then each string as a
+        # uint32 byte length followed by its UTF-8 bytes.
+        data = bytes(_ZSTD.decode(compressed))
+        (count,) = struct.unpack_from("<I", data, 0)
+        if cell_index >= count:
+            raise ValueError(f"{shard_file}: chunk {chunk_index} holds {count} items")
+        position = 4
+        for item in range(count):
+            (length,) = struct.unpack_from("<I", data, position)
+            position += 4
+            if item == cell_index:
+                return data[position : position + length].decode("utf-8")
+            position += length
+        raise ValueError(f"{shard_file}: chunk {chunk_index} ended early")
+
+
 @dataclass(frozen=True)
 class AlertStore:
-    """One opened version of an alert grid (a zarr-python string array)."""
+    """One opened version of an alert grid (a zarr-python string array), read
+    cell by cell through ``AlertShardReader`` when it is on local disk."""
 
     array: Any
     version: str
+    reader: AlertShardReader | None = None
 
     def __getitem__(self, key):
+        if self.reader is not None:
+            try:
+                return self.reader.read_cell(int(key[0]), int(key[1]))
+            except (OSError, ValueError, struct.error) as exc:
+                # A damaged shard: let zarr-python read (or report) it.
+                _default_logger().warning(
+                    "Direct alert read failed for %s%s, using zarr-python: %s",
+                    self.version,
+                    tuple(key),
+                    exc,
+                )
         return self.array[key]
 
 
@@ -252,19 +378,32 @@ async def open_etopo(root: StoreRoot):
     raise ValueError(f"{ETOPO_STORE_NAME}.zarr is not a zarr array")
 
 
-def open_alert_store(root: StoreRoot, version: str) -> AlertStore:
-    """Open one version of an alert grid with zarr-python (string data)."""
+def open_alert_store(
+    root: StoreRoot, version: str, *, logger: logging.Logger | None = None
+) -> AlertStore:
+    """Open one version of an alert grid with zarr-python (string data). On
+    local disk the cells are then read directly from the shard files."""
+    logger = logger or _default_logger()
+    reader = None
     if root.local_dir is not None:
-        store = zarr.storage.LocalStore(
-            os.path.join(root.local_dir, version), read_only=True
-        )
+        path = os.path.join(root.local_dir, version)
+        store = zarr.storage.LocalStore(path, read_only=True)
+        with open(os.path.join(path, "zarr.json"), "rb") as handle:
+            metadata = json.load(handle)
+        reader = AlertShardReader.from_metadata(path, metadata)
+        if reader is None:
+            logger.warning(
+                "%s is not in the sharded string layout the direct reader "
+                "handles; reading it with zarr-python (~1 ms per cell)",
+                version,
+            )
     else:
         store = zarr.storage.FsspecStore.from_url(
             root.alert_url + version,
             storage_options=root.alert_storage_options,
             read_only=True,
         )
-    return AlertStore(zarr.open_array(store, mode="r", zarr_format=3), version)
+    return AlertStore(zarr.open_array(store, mode="r", zarr_format=3), version, reader)
 
 
 def _store_names(stage: str) -> tuple[tuple, tuple]:
@@ -302,10 +441,12 @@ async def refresh_stores(
             if current is not None and current.version == version:
                 return
             if is_alert:
-                opened = await asyncio.to_thread(open_alert_store, root, version)
+                opened = await asyncio.to_thread(
+                    open_alert_store, root, version, logger=logger
+                )
             else:
                 opened = await open_model_store(root, version)
-        except (ValueError, OSError, KeyError, zarr.errors.ZarrError) as exc:
+        except (ValueError, OSError, KeyError, zarr.errors.BaseZarrError) as exc:
             logger.warning("Could not open %s, keeping the held version: %s", name, exc)
             return
         setattr(stores, attr, opened)
@@ -417,17 +558,14 @@ def _load_aq_lat_lon_pickles(stores: ZarrStores, *, logger: logging.Logger) -> N
 
 
 def has_interior_nan_holes(arr: np.ndarray) -> tuple[bool, int | None]:
-    """Detect an interior block of NaNs in a 2D array."""
+    """Detect an interior block of NaNs in a 2D array: the first row where a
+    NaN run starts after the first column and one ends before the last."""
     mask = np.isnan(arr)
-    padded = np.pad(mask, ((0, 0), (1, 1)), constant_values=False)
-    diff = padded[:, 1:].astype(int) - padded[:, :-1].astype(int)
-    starts = diff == 1
-    ends = diff == -1
-    interior_starts = starts[:, 1:-1]
-    interior_ends = ends[:, 1:-1]
-    row_has_start = interior_starts.any(axis=1)
-    row_has_end = interior_ends.any(axis=1)
-    matching_rows = np.flatnonzero(row_has_start & row_has_end)
+    if not mask.any():
+        return False, None
+    run_starts = mask[:, 1:] & ~mask[:, :-1]
+    run_ends = ~mask[:, 1:] & mask[:, :-1]
+    matching_rows = np.flatnonzero(run_starts.any(axis=1) & run_ends.any(axis=1))
     if matching_rows.size:
         return True, int(matching_rows[0])
     return False, None
@@ -473,6 +611,59 @@ class WeatherParallel:
         self.loc_tag = loc_tag
         self.logger = logger or _default_logger()
         self.timing_enabled = timing_enabled
+        # Tensorstore futures issued since the last loop iteration, each with
+        # the asyncio future its reader awaits (see _await_read)
+        self._read_batch: list[tuple[Any, asyncio.Future]] | None = None
+
+    def _await_read(self, future) -> asyncio.Future:
+        """Await a tensorstore read future.
+
+        Awaiting a tensorstore future directly costs ~120 us of event-loop
+        plumbing each: a 19-store request spent 1.7 ms awaiting 0.5 ms of
+        reads. The futures issued in one loop iteration (the request's gather
+        issues all of its reads in one) are instead waited on together in a
+        worker thread, which wakes the loop once when every read is done. The
+        loop stays free for other requests meanwhile, which matters when the
+        stores are remote.
+        """
+        loop = asyncio.get_running_loop()
+        waiter = loop.create_future()
+        if self._read_batch is None:
+            self._read_batch = []
+            # Runs after the callbacks already queued for this iteration, i.e.
+            # after every reader started by the same gather has issued its read
+            loop.call_soon(self._wait_for_batch, loop)
+        self._read_batch.append((future, waiter))
+        return waiter
+
+    def _wait_for_batch(self, loop: asyncio.AbstractEventLoop) -> None:
+        batch, self._read_batch = self._read_batch, None
+
+        def wait_all():
+            # Each outcome is handed to its own reader, which handles it there;
+            # nothing is swallowed here.
+            outcomes = []
+            for future, _ in batch:
+                try:
+                    outcomes.append((future.result(), None))
+                except Exception as exc:  # noqa: BLE001 - forwarded to the reader
+                    outcomes.append((None, exc))
+            return outcomes
+
+        def deliver(done: asyncio.Future) -> None:
+            try:
+                outcomes = done.result()
+            except Exception as exc:  # noqa: BLE001 - the executor itself failed
+                outcomes = [(None, exc)] * len(batch)
+            for (_, waiter), (value, exc) in zip(batch, outcomes):
+                if waiter.done():
+                    continue
+                if exc is None:
+                    waiter.set_result(value)
+                else:
+                    waiter.set_exception(exc)
+
+        loop.run_in_executor(None, wait_all).add_done_callback(deliver)
 
     async def zarr_read(self, model, store: ModelStore | None, x, y):
         """Every variable and time at grid cell (y, x) as a (time, 1 + variable)
@@ -484,7 +675,7 @@ class WeatherParallel:
             self.logger.debug("### %s Reading! %s", model, self.loc_tag)
         for _ in range(MAX_ZARR_READ_RETRIES):
             try:
-                values = await store.array[:, :, y, x].read()
+                values = await self._await_read(store.array[:, :, y, x].read())
             except (ValueError, OSError, IndexError):
                 self.logger.exception("### %s Failure! %s", model, self.loc_tag)
                 continue
@@ -532,7 +723,9 @@ class WeatherParallel:
         x_end = min(store.shape[-1], x + radius + 1)
         for _ in range(MAX_ZARR_READ_RETRIES):
             try:
-                square = await store.array[:, :, y_start:y_end, x_start:x_end].read()
+                square = await self._await_read(
+                    store.array[:, :, y_start:y_end, x_start:x_end].read()
+                )
             except (ValueError, OSError, IndexError):
                 self.logger.exception("### %s Failure! %s", model, self.loc_tag)
                 continue
